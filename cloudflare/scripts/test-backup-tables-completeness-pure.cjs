@@ -26,6 +26,7 @@ const EXCLUDED = {
   permission_extras_0270_fix: 'migration 0270 audit ledger: read once by its own POST checks, never restored',
   user_sessions: 'auth ephemera',
   trusted_devices: 'auth ephemera',
+  shop_devices: '0304 device-approval state beside trusted_devices; a restore falls back to per-account approval, never to open access',
   verification_codes: 'auth ephemera',
   login_lockouts: 'auth ephemera',
   rate_limit_events: 'auth ephemera / throwaway rate-limit telemetry',

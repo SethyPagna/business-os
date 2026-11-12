@@ -89,6 +89,7 @@ export async function pinDeviceCookie<E extends { Bindings: Env }>(c: Context<E>
 // checkDeviceTrust on the returned id.
 export async function resolveAndPinDevice<E extends { Bindings: Env }>(c: Context<E>, userId: number, bodyId: unknown): Promise<string | null> {
   const cookieId = await verifyDeviceCookieValue(c.env, getCookie(c, DEVICE_COOKIE_NAME))
+  cookieVerifiedIds.delete(c)
   const body = isValidDeviceId(bodyId) ? bodyId : null
   let chosen = cookieId || body
   if (cookieId && body && cookieId !== body) {
@@ -102,7 +103,17 @@ export async function resolveAndPinDevice<E extends { Bindings: Env }>(c: Contex
       || cookieId
   }
   if (chosen) await pinDeviceCookie(c, chosen)
+  if (chosen && chosen === cookieId) cookieVerifiedIds.set(c, chosen)
   return chosen
+}
+
+// The id resolveAndPinDevice chose for this request, remembered only when it
+// came from a cookie whose signature verified. The shop-device path trusts
+// nothing else: the body id is client-chosen.
+const cookieVerifiedIds = new WeakMap<object, string>()
+
+export function isCookieVerifiedDevice(c: object, deviceId: unknown): boolean {
+  return typeof deviceId === 'string' && cookieVerifiedIds.get(c) === deviceId
 }
 
 // A short-lived proof that THIS browser just sent a correct password (or Google

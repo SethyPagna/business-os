@@ -21,7 +21,7 @@ import { requireJsonSameOriginCredentialPost } from '../lib/requestBodyGuard'
 import { issueOtpChallenge, isLiveOtpChallenge, consumeOtpChallenge } from '../lib/otpChallenge'
 import { recordFailedLogin, getLoginLockoutState, clearLoginLockout, userIdLockoutKey, worstLockoutState, perNetworkLockoutKey } from '../lib/loginLockout'
 import { requiresDeviceApproval, checkDeviceTrust } from '../lib/deviceTrust'
-import { issueDeviceTicket, readDeviceTicket, resolveAndPinDevice } from '../lib/deviceCookie'
+import { isCookieVerifiedDevice, issueDeviceTicket, readDeviceTicket, resolveAndPinDevice } from '../lib/deviceCookie'
 import {
   buildGoogleOauthStartUrl,
   exchangeGoogleOauthCode,
@@ -409,6 +409,7 @@ app.post('/login', async (c) => {
   // cookie's id when there is one, else the body's (see lib/deviceCookie.ts).
   let deviceId = body.deviceId
   let echoedDeviceId: string | undefined
+  let shopDeviceId: number | undefined
   if (requiresDeviceApproval(user)) {
     deviceId = (await resolveAndPinDevice(c, user.id, body.deviceId)) || body.deviceId
     echoedDeviceId = deviceId
@@ -417,7 +418,9 @@ app.post('/login', async (c) => {
       userAgent: c.req.header('user-agent'),
       ip,
       country: c.req.header('cf-ipcountry'),
+      cookieVerified: isCookieVerifiedDevice(c, deviceId),
     })
+    if (trustCheck.status === 'approved') shopDeviceId = trustCheck.shopDeviceId
     if (trustCheck.status !== 'approved') {
       if (trustCheck.status === 'rejected') {
         await audit(c.env, user.id, user.username, 'login_device_rejected', 'user', user.id, { deviceId })
@@ -463,6 +466,7 @@ app.post('/login', async (c) => {
     sessionDuration: body.sessionDuration,
     deviceName: body.deviceName,
     deviceId,
+    shopDeviceId,
     // deviceTz was sent by the frontend on every /login call but silently
     // dropped here -- /refresh and /session-duration already capture it
     // the same way, so login was the one place a device's timezone never
@@ -871,6 +875,7 @@ app.post('/otp/verify', async (c) => {
   // nothing forced the two to match. Same responses as /login's gate.
   let deviceId = body.deviceId
   let echoedDeviceId: string | undefined
+  let shopDeviceId: number | undefined
   if (requiresDeviceApproval(user)) {
     deviceId = (await resolveAndPinDevice(c, user.id, body.deviceId)) || body.deviceId
     echoedDeviceId = deviceId
@@ -879,7 +884,9 @@ app.post('/otp/verify', async (c) => {
       userAgent: c.req.header('user-agent'),
       ip,
       country: c.req.header('cf-ipcountry'),
+      cookieVerified: isCookieVerifiedDevice(c, deviceId),
     })
+    if (trustCheck.status === 'approved') shopDeviceId = trustCheck.shopDeviceId
     if (trustCheck.status !== 'approved') {
       if (trustCheck.status === 'rejected') {
         await audit(c.env, user.id, user.username, 'login_device_rejected', 'user', user.id, { deviceId, via: 'otp_verify' })
@@ -906,6 +913,7 @@ app.post('/otp/verify', async (c) => {
     sessionDuration: body.sessionDuration,
     deviceName: body.deviceName,
     deviceId,
+    shopDeviceId,
     deviceTz: body.deviceTz,
     userAgent: c.req.header('user-agent'),
     ip: c.req.header('cf-connecting-ip') || undefined,
@@ -1499,6 +1507,7 @@ app.get('/oauth/callback', async (c) => {
       // Google returns, so it can't be spoofed via the OAuth redirect.
       let oauthDeviceId = statePayload.deviceId
       let deviceGate: { blocked: false } | { blocked: true; payload: Record<string, unknown> } = { blocked: false }
+      let oauthShopDeviceId: number | undefined
       if (localUser && requiresDeviceApproval(localUser)) {
         oauthDeviceId = (await resolveAndPinDevice(c, localUser.id, statePayload.deviceId)) || statePayload.deviceId
         const trustCheck = await checkDeviceTrust(c.env, localUser.id, oauthDeviceId, {
@@ -1506,7 +1515,9 @@ app.get('/oauth/callback', async (c) => {
           userAgent: c.req.header('user-agent'),
           ip: c.req.header('cf-connecting-ip') || undefined,
           country: c.req.header('cf-ipcountry'),
+          cookieVerified: isCookieVerifiedDevice(c, oauthDeviceId),
         })
+        if (trustCheck.status === 'approved') oauthShopDeviceId = trustCheck.shopDeviceId
         if (trustCheck.status === 'rejected') {
           await audit(c.env, localUser.id, localUser.username, 'login_device_rejected', 'user', localUser.id, { deviceId: oauthDeviceId, method: 'google' })
           deviceGate = { blocked: true, payload: {
@@ -1563,7 +1574,7 @@ app.get('/oauth/callback', async (c) => {
       } else {
         const synced = await updateLocalUserGoogleIdentity(c.env, localUser.id, googleUser)
         await audit(c.env, synced.id, synced.username, 'login', 'user', synced.id, { method: 'google', email: googleUser.email, google_subject: googleSubject })
-        const session = await createSession(c.env, synced.id, { deviceName: statePayload.deviceName || 'Google OAuth', deviceId: oauthDeviceId, userAgent: c.req.header('user-agent') || undefined, ip: c.req.header('cf-connecting-ip') || undefined })
+        const session = await createSession(c.env, synced.id, { deviceName: statePayload.deviceName || 'Google OAuth', deviceId: oauthDeviceId, shopDeviceId: oauthShopDeviceId, userAgent: c.req.header('user-agent') || undefined, ip: c.req.header('cf-connecting-ip') || undefined })
         setSessionCookie(c, session.token, session.expiresAt)
         callbackPayload = { success: true, provider: 'google', user: { ...buildUserPayload(synced), must_change_password: (await accountMustChangePassword(c.env, synced.id)) ? 1 : 0 }, sessionExpiresAt: session.expiresAt, authMode: 'cookie', ...(requiresDeviceApproval(localUser) ? { deviceId: oauthDeviceId } : {}) }
       }

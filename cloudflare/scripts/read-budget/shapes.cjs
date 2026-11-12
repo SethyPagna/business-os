@@ -12,7 +12,7 @@ function getEntries(ctx) {
   return [
     // auth / bootstrap
     ['auth/me', '/api/auth/me'], ['auth/bootstrap', '/api/auth/bootstrap'], ['auth/verification-capabilities', '/api/auth/verification-capabilities'],
-    ['auth/otp/status/:id', '/api/auth/otp/status/x'], ['auth/devices/sessions', '/api/auth/devices/sessions'], ['auth/devices/pending', '/api/auth/devices/pending'], ['auth/devices', '/api/auth/devices'],
+    ['auth/otp/status/:id', '/api/auth/otp/status/x'], ['auth/devices/sessions', '/api/auth/devices/sessions'], ['auth/devices/pending', '/api/auth/devices/pending'], ['auth/devices/shop', '/api/auth/devices/shop'], ['auth/devices', '/api/auth/devices'],
     ['organizations/bootstrap', '/api/organizations/bootstrap'], ['organizations/search', '/api/organizations/search?q=budget'], ['organizations/current', '/api/organizations/current'],
     ['system/bootstrap', '/api/system/bootstrap'], ['system/config', '/api/system/config'], ['runtime/version', '/api/runtime/version'], ['runtime/cron-health', '/api/runtime/cron-health'], ['runtime/read-switches', '/api/runtime/read-switches'],
     ['runtime/catalog-integrity (catalog stock diagnostics)', '/api/runtime/catalog-integrity'], ['sync/owner', '/api/sync/owner'],

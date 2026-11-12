@@ -59,8 +59,8 @@ export async function checkDeviceTrust(
   env: Env,
   userId: number,
   deviceId: string | null | undefined,
-  meta: { deviceName?: string | null; userAgent?: string | null; ip?: string | null; country?: string | null },
-): Promise<{ status: 'approved' } | { status: 'pending'; created: boolean } | { status: 'rejected' | 'missing_device_id' }> {
+  meta: { deviceName?: string | null; userAgent?: string | null; ip?: string | null; country?: string | null; cookieVerified?: boolean },
+): Promise<{ status: 'approved'; shopDeviceId?: number } | { status: 'pending'; created: boolean } | { status: 'rejected' | 'missing_device_id' }> {
   if (!isValidDeviceId(deviceId)) {
     // A client that doesn't send a usable device id (missing, over-long or
     // outside [A-Za-z0-9_-]; e.g. an old cached
@@ -72,9 +72,26 @@ export async function checkDeviceTrust(
   }
 
   const db = getDb(env)
-  const existing = await db.prepare(`
-    SELECT * FROM trusted_devices WHERE user_id = @user_id AND device_id = @device_id LIMIT 1
-  `).get<TrustedDeviceRow>({ user_id: userId, device_id: deviceId })
+  // One statement answers both questions: this account's own row for the
+  // device, and whether an administrator has marked the device as a shop
+  // device. The base row keeps the shop answer when the account has no row.
+  // The shop join only matches when the id came from the verified device
+  // cookie, so a client-chosen body id can never claim a shop device.
+  const found = await db.prepare(`
+    SELECT td.*, s.id AS shop_device_row_id
+    FROM (SELECT 1 AS one) base
+    LEFT JOIN trusted_devices td ON td.user_id = @user_id AND td.device_id = @device_id
+    LEFT JOIN shop_devices s ON @shop_ok = 1 AND s.device_id = @device_id AND s.unmarked_at IS NULL
+  `).get<(Partial<TrustedDeviceRow> & { shop_device_row_id: number | null }) | undefined>({ user_id: userId, device_id: deviceId, shop_ok: meta.cookieVerified ? 1 : 0 })
+  const existing = found && found.id != null ? (found as TrustedDeviceRow) : null
+  const shopDeviceId = found?.shop_device_row_id ?? null
+
+  // An administrator's explicit refusal of this account on this device
+  // outranks the shop marking; an approved row of its own is a personal
+  // approval and is used as such.
+  if (shopDeviceId && existing?.status !== 'rejected' && existing?.status !== 'approved') {
+    return { status: 'approved', shopDeviceId }
+  }
 
   if (!existing) {
     // This function is only reached for non-admin accounts. Every new

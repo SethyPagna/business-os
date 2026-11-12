@@ -142,6 +142,8 @@ const ROWS = [
   ['user', 'device_revoked', PURGED],
   ['user', 'device_reapproval_reset', PURGED],
   ['user', 'device_login_new_country', PURGED],
+  ['user', 'shop_device_marked', PURGED],
+  ['user', 'shop_device_unmarked', PURGED],
   ['system', 'step_up_refused', PURGED],
   ['system', 'factory_reset', KEPT],
   ['system', 'reset_data', KEPT],

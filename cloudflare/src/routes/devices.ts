@@ -478,4 +478,104 @@ app.post('/:id/revoke', async (c) => {
   return c.json({ success: true, revokedSessions })
 })
 
+// ---- Shop devices (owner 12 Nov 2026) --------------------------------------
+// An administrator marks a till once; every active employee then signs in
+// there without a separate approval and without using one of their own device
+// slots (lib/deviceTrust.ts checkDeviceTrust). The shop path only ever matches
+// an id that arrived in the verified device cookie. Unmarking revokes the
+// sessions that came in through the shop path, never an administrator's own.
+const SHOP_LABEL_MAX = 60
+
+type ShopDeviceRow = {
+  id: number
+  device_id: string
+  label: string
+  marked_by_user_id: number | null
+  marked_by_name: string | null
+  marked_at: string
+  unmarked_at: string | null
+  device_name: string | null
+}
+
+// GET /api/auth/devices/shop -- the devices currently marked as shop devices.
+app.get('/shop', async (c) => {
+  const rows = await getDb(c.env).prepare(`
+    SELECT s.id, s.device_id, s.label, s.marked_by_user_id, s.marked_by_name, s.marked_at,
+      (SELECT t.device_name FROM trusted_devices t WHERE t.device_id = s.device_id AND t.device_name IS NOT NULL LIMIT 1) AS device_name
+    FROM shop_devices s
+    WHERE s.unmarked_at IS NULL
+    ORDER BY s.marked_at DESC
+    LIMIT 100
+  `).all<ShopDeviceRow>()
+  return c.json({ shopDevices: rows || [] })
+})
+
+// POST /api/auth/devices/:id/mark-shop { label } -- :id is an APPROVED
+// trusted_devices row; its device id becomes a shop device.
+app.post('/:id/mark-shop', async (c) => {
+  const id = Number(c.req.param('id'))
+  const admin = c.get('user')
+  const body = await c.req.json<{ label?: unknown }>().catch(() => ({} as { label?: unknown }))
+  const label = typeof body.label === 'string' ? body.label.trim().replace(/\s+/g, ' ') : ''
+  if (!Number.isInteger(id) || id <= 0) return c.json({ error: 'Device request not found' }, 404)
+  if (!label || label.length > SHOP_LABEL_MAX) {
+    return c.json({ error: `Give the shop device a name of 1 to ${SHOP_LABEL_MAX} characters.`, code: 'shop_label_invalid' }, 400)
+  }
+  const db = getDb(c.env)
+  const device = await db.prepare('SELECT * FROM trusted_devices WHERE id = @id LIMIT 1').get<TrustedDeviceRow>({ id })
+  if (!device) return c.json({ error: 'Device request not found' }, 404)
+  if (device.status !== 'approved') return c.json({ error: 'Only an approved device can be marked as a shop device.', code: 'shop_device_not_approved' }, 409)
+  let inserted: { changes?: number } | undefined
+  try {
+    inserted = await db.prepare(`
+      INSERT INTO shop_devices (device_id, label, marked_by_user_id, marked_by_name)
+      SELECT @device_id, @label, @admin_id, @admin_name
+      WHERE EXISTS (SELECT 1 FROM trusted_devices WHERE id = @id AND status = 'approved')
+    `).run({ id, device_id: device.device_id, label, admin_id: admin.id, admin_name: admin.name })
+  } catch (error) {
+    if (error instanceof Error && /UNIQUE/i.test(error.message)) {
+      return c.json({ error: 'This device is already marked as a shop device.', code: 'shop_device_exists' }, 409)
+    }
+    throw error
+  }
+  if (!inserted?.changes) return c.json({ error: 'The device changed while you were deciding. Reload and try again.', code: 'shop_device_conflict' }, 409)
+  await audit(c.env, admin.id, admin.username, 'shop_device_marked', 'user', device.user_id, {
+    deviceId: device.device_id, deviceName: device.device_name, label, targetTrustedDeviceRowId: device.id,
+  })
+  return c.json({ success: true })
+})
+
+// POST /api/auth/devices/shop/:shopId/unmark -- one batch (one transaction)
+// ends the marking and revokes the sessions the shop path issued (and the
+// sessions re-issued from them), so the next sign-in there needs an approval.
+app.post('/shop/:shopId/unmark', async (c) => {
+  const shopId = Number(c.req.param('shopId'))
+  const admin = c.get('user')
+  if (!Number.isInteger(shopId) || shopId <= 0) return c.json({ error: 'Shop device not found' }, 404)
+  const db = getDb(c.env)
+  const shop = await db.prepare('SELECT id, device_id, label, unmarked_at FROM shop_devices WHERE id = @id LIMIT 1')
+    .get<{ id: number; device_id: string; label: string; unmarked_at: string | null }>({ id: shopId })
+  if (!shop) return c.json({ error: 'Shop device not found' }, 404)
+  if (shop.unmarked_at) return c.json({ success: true, idempotent: true, revokedSessions: 0 })
+  const params = { id: shopId, admin_id: admin.id, admin_name: admin.name }
+  const results = await db.batch([
+    {
+      sql: `UPDATE shop_devices SET unmarked_at = CURRENT_TIMESTAMP, unmarked_by_user_id = @admin_id, unmarked_by_name = @admin_name
+        WHERE id = @id AND unmarked_at IS NULL`,
+      params,
+    },
+    {
+      sql: `UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP
+        WHERE revoked_at IS NULL
+          AND (shop_device_id = @id OR limit_family_id IN (SELECT id FROM user_sessions WHERE shop_device_id = @id))`,
+      params: { id: shopId },
+    },
+  ])
+  const revokedSessions = Number(results[1]?.meta?.changes || 0)
+  await audit(c.env, admin.id, admin.username, 'shop_device_unmarked', 'user', admin.id, {
+    deviceId: shop.device_id, label: shop.label, shopDeviceRowId: shop.id, revokedSessions,
+  })
+  return c.json({ success: true, revokedSessions })
+})
+
 export default app

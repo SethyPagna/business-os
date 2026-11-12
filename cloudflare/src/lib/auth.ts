@@ -197,6 +197,7 @@ type NewSessionOptions = {
   ip?: string
   deviceId?: string | null
   limitFamilyId?: number | null
+  shopDeviceId?: number | null
 }
 
 async function prepareSession(userId: number, options: NewSessionOptions) {
@@ -241,7 +242,15 @@ export async function createSession(
 ): Promise<{ token: string; expiresAt: string; sessionDuration: string }> {
   const { session, limitFamilyId, params } = await prepareSession(userId, options)
   const db = getDb(env)
-  if (limitFamilyId) {
+  const shopDeviceId = Number(options.shopDeviceId || 0)
+  if (!limitFamilyId && Number.isSafeInteger(shopDeviceId) && shopDeviceId > 0) {
+    // Only a sign-in let in by a shop device names shop_device_id (migration
+    // 0304); unmarking the device revokes exactly these rows and their re-issues.
+    await db.prepare(`
+      INSERT INTO user_sessions (user_id, token_hash, device_name, device_tz, user_agent, last_ip, device_id, expires_at, shop_device_id)
+      VALUES (@user_id, @token_hash, @device_name, @device_tz, @user_agent, @ip, @device_id, @expires_at, @shop_device_id)
+    `).run({ ...params, shop_device_id: shopDeviceId })
+  } else if (limitFamilyId) {
     // Only the re-issue path names limit_family_id (migration 0201), so the
     // sign-in INSERT below never depends on it.
     await db.prepare(`
