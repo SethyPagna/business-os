@@ -39,6 +39,7 @@ function load(relative, dependencies = {}, rewrite = (source) => source) {
 
 const settingsSensitive = load('lib/settingsSensitive.ts')
 const settingsVisibility = load('lib/settingsVisibility.ts', { './permissions': load('lib/permissions.ts'), './settingsSensitive': settingsSensitive })
+const deviceTrust = load('lib/deviceTrust.ts', { './permissions': load('lib/permissions.ts') })
 
 const ROWS = {
   telegram_chat_id: '-1001234567890',
@@ -83,6 +84,10 @@ function bootstrapRoute(rewrite) {
     '../lib/settingsSensitive': settingsSensitive,
     '../lib/settingsVisibility': settingsVisibility,
     '../lib/planTier': { resolvePlanTier: () => 'paid' },
+    // The device lane gates employees' /bootstrap through these two. The real requiresDeviceApproval runs (it only asks isAdminControlUser);
+    // adoptSessionDeviceCookie is stubbed because its first line returns when the env has no APP_ENCRYPTION_KEY, which is this harness's env, so it reads nothing.
+    '../lib/deviceTrust': deviceTrust,
+    '../lib/deviceCookie': { adoptSessionDeviceCookie: async () => {} },
   }, rewrite).default
   return async (user) => {
     sessionUser = user

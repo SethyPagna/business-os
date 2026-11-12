@@ -45,6 +45,7 @@ function load(relative, dependencies = {}) {
 
 const settingsSensitive = load('lib/settingsSensitive.ts')
 const settingsVisibility = load('lib/settingsVisibility.ts', { './permissions': load('lib/permissions.ts'), './settingsSensitive': settingsSensitive })
+const deviceTrust = load('lib/deviceTrust.ts', { './permissions': load('lib/permissions.ts') })
 const SETTINGS_ROWS = [
   { key: 'business_name', value: 'Leang', updated_at: '2026-09-01 00:00:00' },
   { key: 'google_drive_refresh_token', value: 'secret-token', updated_at: '2026-09-02 00:00:00' },
@@ -119,6 +120,10 @@ const authRoute = load('routes/auth.ts', {
   '../lib/auth': authLib,
   '../lib/settingsVisibility': settingsVisibility,
   '../lib/planTier': { resolvePlanTier: () => 'paid' },
+  // The device lane gates employees' /bootstrap through these two. The real requiresDeviceApproval runs (it only asks isAdminControlUser);
+  // adoptSessionDeviceCookie is stubbed because its first line returns when the env has no APP_ENCRYPTION_KEY, which is this harness's env, so it reads nothing.
+  '../lib/deviceTrust': deviceTrust,
+  '../lib/deviceCookie': { adoptSessionDeviceCookie: async () => {} },
 }).default
 
 const settingsRoute = load('routes/settings.ts', {
