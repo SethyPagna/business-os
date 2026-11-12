@@ -1,4 +1,4 @@
-import { getClientDeviceInfo, getOrCreatePersistentDeviceId } from '../utils/deviceInfo.ts'
+import { adoptDeviceIdFromResponse, deviceIdentityReady, getClientDeviceInfo, getOrCreatePersistentDeviceId } from '../utils/deviceInfo.ts'
 import { apiFetch, route } from './http.ts'
 
 type AuthPayload = Record<string, unknown>
@@ -13,7 +13,7 @@ export type LoginPayload = AuthPayload & {
   deviceName?: string
 }
 
-export function login({
+export async function login({
   username,
   password,
   organization,
@@ -23,7 +23,8 @@ export function login({
   deviceName,
 }: LoginPayload): Promise<unknown> {
   const device = getClientDeviceInfo()
-  return apiFetch('POST', '/api/auth/login', {
+  await deviceIdentityReady()
+  const result = await apiFetch('POST', '/api/auth/login', {
     username,
     password,
     organization,
@@ -38,6 +39,8 @@ export function login({
     // into pending rather than skipping the check).
     deviceId: getOrCreatePersistentDeviceId(),
   })
+  adoptDeviceIdFromResponse(result)
+  return result
 }
 
 export function logout(): Promise<unknown> {
@@ -96,19 +99,23 @@ export function otpRecoveryReset(payload: AuthPayload = {}): Promise<unknown> {
   return apiFetch('POST', '/api/auth/otp/recover', payload || {})
 }
 
-export function otpVerify(payload: AuthPayload = {}): Promise<unknown> {
+export async function otpVerify(payload: AuthPayload = {}): Promise<unknown> {
   // deviceId rides along like it does on /login: the server re-runs the
   // device-approval gate at the OTP step now, and the persistent id is what
   // lets an approved device stay approved across both steps.
-  return apiFetch('POST', '/api/auth/otp/verify', { deviceId: getOrCreatePersistentDeviceId(), ...(payload || {}) })
+  await deviceIdentityReady()
+  const result = await apiFetch('POST', '/api/auth/otp/verify', { deviceId: getOrCreatePersistentDeviceId(), ...(payload || {}) })
+  adoptDeviceIdFromResponse(result)
+  return result
 }
 
 export function otpStatus(userId: string | number): Promise<unknown> {
   return apiFetch('GET', `/api/auth/otp/status/${encodeURIComponent(String(userId))}`)
 }
 
-export function startGoogleOauth(payload: AuthPayload = {}): Promise<unknown> {
+export async function startGoogleOauth(payload: AuthPayload = {}): Promise<unknown> {
   const device = getClientDeviceInfo()
+  await deviceIdentityReady()
   return apiFetch('POST', '/api/auth/oauth/start', {
     ...(payload || {}),
     // Carried through the OAuth redirect (server signs it into `state`) so
