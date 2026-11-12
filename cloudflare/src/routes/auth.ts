@@ -528,10 +528,19 @@ app.post('/login', async (c) => {
 // POST /api/auth/device-status { ticket } -- has the admin decided on the device this
 // ticket names? One indexed read, no session, no cookie: it answers a status and
 // nothing else, so the waiting sign-in screen can continue by itself.
+const DEVICE_STATUS_LIMIT_MAX = 20
+const DEVICE_STATUS_LIMIT_WINDOW_MS = 60 * 1000
+
 app.post('/device-status', async (c) => {
   const body = await c.req.json<{ ticket?: unknown }>().catch(() => ({} as { ticket?: unknown }))
   const ticket = await readDeviceTicket(c.env, body.ticket)
   if (!ticket) return c.json({ status: 'expired' })
+  // The waiting screen asks every 10 s (6 a minute); only a valid ticket reaches the limiter, so a bad one still costs no D1 call.
+  const limit = await checkRateLimit(c.env, 'auth:device_status', `${ticket.userId}:${ticket.deviceId}`, DEVICE_STATUS_LIMIT_MAX, DEVICE_STATUS_LIMIT_WINDOW_MS)
+  if (!limit.allowed) {
+    c.header('Retry-After', String(limit.retryAfterSeconds))
+    return c.json({ error: 'Too many status checks. Please wait a moment.', code: 'device_status_rate_limited', retryAfterSeconds: limit.retryAfterSeconds }, 429)
+  }
   const row = await getDb(c.env).prepare('SELECT status FROM trusted_devices WHERE user_id = @user_id AND device_id = @device_id LIMIT 1')
     .get<{ status: string }>({ user_id: ticket.userId, device_id: ticket.deviceId })
   return c.json({ status: row?.status || 'missing' })

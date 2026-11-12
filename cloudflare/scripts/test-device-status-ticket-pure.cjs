@@ -140,7 +140,7 @@ async function main() {
     assert.match(read('lib/requestBodyGuard.ts'), /'\/api\/auth\/device-status'/, 'body size guard covers it')
   })
 
-  await check('D1 cost: the status endpoint is exactly one read', async () => {
+  await check('D1 cost: the status endpoint is one rate-limit write plus one read (review L3)', async () => {
     const { h } = setup()
     const { body: { deviceTicket } } = await signIn(h, 'cost-device-0006')
     let calls = 0
@@ -150,12 +150,25 @@ async function main() {
       return new Proxy(stmt, { get: (target, key) => (typeof target[key] === 'function' ? (...args) => { calls += 1; return target[key](...args) } : target[key]) })
     }
     try { await status(h, deviceTicket) } finally { h.db.prepare = original }
-    assert.equal(calls, 1)
+    assert.equal(calls, 2, 'one limiter statement and one status read')
     calls = 0
     h.db.prepare = (sql) => { calls += 1; return original(sql) }
     try { await status(h, 'garbage') } finally { h.db.prepare = original }
     assert.equal(calls, 0, 'a bad ticket costs no D1 call')
-    console.log('     /device-status D1 statements: valid ticket 1, bad ticket 0')
+    console.log('     /device-status D1 statements: valid ticket 2 (was 1 before the limiter), bad ticket 0')
+  })
+
+  await check('the status endpoint is limited per ticket: 20 a minute, then 429 with retry-after; another ticket is unaffected (review L3)', async () => {
+    const { h } = setup()
+    const first = (await signIn(h, 'limit-device-0001')).body.deviceTicket
+    const other = (await signIn(h, 'limit-device-0002')).body.deviceTicket
+    for (let n = 0; n < 20; n++) assert.equal((await status(h, first)).status, 200, `call ${n + 1}`)
+    const refused = await status(h, first)
+    assert.equal(refused.status, 429)
+    assert.equal(refused.body.code, 'device_status_rate_limited')
+    assert.ok(refused.body.retryAfterSeconds > 0)
+    assert.equal((await status(h, other)).status, 200, 'a different ticket has its own allowance')
+    assert.equal((await status(h, 'garbage')).body.status, 'expired', 'a bad ticket never reaches the limiter')
   })
 
   await check('only a newly created pending row raises the admin alert, not a retry', async () => {
