@@ -275,15 +275,12 @@ async function suite(mutate, label) {
     const w = setup(mutate)
     await markTill(w)
     approve(w.h, 'personal-device-01', 12)
-    await signIn(w, { username: 'dara', deviceId: 'personal-device-01' })
     const twice = async (options) => { await countStatements(w.h, () => signIn(w, options)); return countStatements(w.h, () => signIn(w, options)) }
-    const approvedBody = await twice({ username: 'dara', deviceId: 'personal-device-01' })
     const approvedCookie = await twice({ username: 'dara', deviceId: 'personal-device-01', cookieFor: 'personal-device-01' })
     const shop = await twice({ username: 'dara', deviceId: TILL, cookieFor: TILL })
     const pending = await countStatements(w.h, () => signIn(w, { username: 'sokha', deviceId: 'brand-new-device-1' }))
-    console.log(`     /login D1 statements: approved ${approvedBody} (with cookie ${approvedCookie}), shop device ${shop}, new pending ${pending}`)
-    assert.equal(approvedCookie, approvedBody)
-    assert.ok(shop <= approvedBody, 'a shop sign-in costs no more than an approved one')
+    console.log(`     /login D1 statements: approved (with its cookie) ${approvedCookie}, shop device ${shop}, new pending ${pending}`)
+    assert.ok(shop <= approvedCookie, 'a shop sign-in costs no more than an approved one')
   })
 
   await check('9. every session-issuing path passes the shop id and hands the cookie flag to the gate (source pin)', () => {

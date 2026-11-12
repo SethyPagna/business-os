@@ -80,28 +80,17 @@ export async function pinDeviceCookie<E extends { Bindings: Env }>(c: Context<E>
   })
 }
 
-// The id this sign-in is for: the verified cookie's id, else the body's. When
-// both exist and differ, one read adopts the id this account has already
-// approved, then a row that already exists (so a retry never adds another
-// pending row), then the cookie. Pins the cookie to the result on every call
+// The id this sign-in is for: the verified cookie's id when there is one, else the
+// body's (a browser that has no cookie yet). The cookie always wins: an id typed
+// into a request body cannot displace it. Pins the cookie to the result on every call
 // (a rolling renewal; no D1 call), so a browser that only had the localStorage
 // id gets the cookie at its first sign-in. Never answers 'approved' by itself: the caller still runs
 // checkDeviceTrust on the returned id.
-export async function resolveAndPinDevice<E extends { Bindings: Env }>(c: Context<E>, userId: number, bodyId: unknown): Promise<string | null> {
+export async function resolveAndPinDevice<E extends { Bindings: Env }>(c: Context<E>, _userId: number, bodyId: unknown): Promise<string | null> {
   const cookieId = await verifyDeviceCookieValue(c.env, getCookie(c, DEVICE_COOKIE_NAME))
   cookieVerifiedIds.delete(c)
   const body = isValidDeviceId(bodyId) ? bodyId : null
-  let chosen = cookieId || body
-  if (cookieId && body && cookieId !== body) {
-    const rows = await getDb(c.env).prepare(
-      'SELECT device_id, status FROM trusted_devices WHERE user_id = @user_id AND device_id IN (@cookie_id, @body_id)',
-    ).all<{ device_id: string; status: string }>({ user_id: userId, cookie_id: cookieId, body_id: body })
-    const known = rows || []
-    chosen = known.find((row) => row.status === 'approved')?.device_id
-      || known.find((row) => row.device_id === cookieId)?.device_id
-      || known.find((row) => row.device_id === body)?.device_id
-      || cookieId
-  }
+  const chosen = cookieId || body
   if (chosen) await pinDeviceCookie(c, chosen)
   if (chosen && chosen === cookieId) cookieVerifiedIds.set(c, chosen)
   return chosen

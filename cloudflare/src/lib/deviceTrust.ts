@@ -28,6 +28,7 @@ export type TrustedDeviceRow = {
   decided_by_name: string | null
   last_seen_at: string
   revoked_at: string | null
+  cookie_bound_at?: string | null
 }
 
 export function requiresDeviceApproval(user: PermissionUser): boolean {
@@ -60,7 +61,7 @@ export async function checkDeviceTrust(
   userId: number,
   deviceId: string | null | undefined,
   meta: { deviceName?: string | null; userAgent?: string | null; ip?: string | null; country?: string | null; cookieVerified?: boolean },
-): Promise<{ status: 'approved'; shopDeviceId?: number } | { status: 'pending'; created: boolean } | { status: 'rejected' | 'missing_device_id' }> {
+): Promise<{ status: 'approved'; shopDeviceId?: number } | { status: 'pending'; created: boolean; replacedDeviceId?: string } | { status: 'rejected' | 'missing_device_id' }> {
   if (!isValidDeviceId(deviceId)) {
     // A client that doesn't send a usable device id (missing, over-long or
     // outside [A-Za-z0-9_-]; e.g. an old cached
@@ -85,6 +86,20 @@ export async function checkDeviceTrust(
   `).get<(Partial<TrustedDeviceRow> & { shop_device_row_id: number | null }) | undefined>({ user_id: userId, device_id: deviceId, shop_ok: meta.cookieVerified ? 1 : 0 })
   const existing = found && found.id != null ? (found as TrustedDeviceRow) : null
   const shopDeviceId = found?.shop_device_row_id ?? null
+  // A device cookie is only ever issued when the signing key exists, so only then is "has had a cookie" a fact about the row.
+  const cookiesOn = Boolean(env.APP_ENCRYPTION_KEY)
+
+  // This browser's cookie was issued for the row, but the id arrived without it (typed into a request body, or the cookie was
+  // cleared): knowing the id is not enough. It becomes a new browser with a fresh pending id; the caller pins that id.
+  if (cookiesOn && existing?.status === 'approved' && existing.cookie_bound_at && !meta.cookieVerified) {
+    const fresh = crypto.randomUUID()
+    const made = await db.prepare(`
+      INSERT INTO trusted_devices (user_id, device_id, device_name, user_agent, first_ip, last_ip, first_country, last_country, status, decided_at, cookie_bound_at)
+      VALUES (@user_id, @device_id, @device_name, @user_agent, @ip, @ip, @country, @country, 'pending', NULL, CURRENT_TIMESTAMP)
+    `).run({ user_id: userId, device_id: fresh, device_name: meta.deviceName || null, user_agent: meta.userAgent || null, ip: meta.ip || null, country: meta.country || null })
+    if (Number(made?.changes || 0) > 0) await broadcast(env, 'notifications', { type: 'device_pending' })
+    return { status: 'pending', created: true, replacedDeviceId: fresh }
+  }
 
   // An administrator's explicit refusal of this account on this device
   // outranks the shop marking; an approved row of its own is a personal
@@ -102,8 +117,8 @@ export async function checkDeviceTrust(
     // Two parallel first sign-ins race this insert; the unique index makes the
     // loser a no-op instead of a 500.
     const inserted = await db.prepare(`
-      INSERT INTO trusted_devices (user_id, device_id, device_name, user_agent, first_ip, last_ip, first_country, last_country, status, decided_at)
-      VALUES (@user_id, @device_id, @device_name, @user_agent, @ip, @ip, @country, @country, @status, @decided_at)
+      INSERT INTO trusted_devices (user_id, device_id, device_name, user_agent, first_ip, last_ip, first_country, last_country, status, decided_at, cookie_bound_at)
+      VALUES (@user_id, @device_id, @device_name, @user_agent, @ip, @ip, @country, @country, @status, @decided_at, CASE WHEN @bind = 1 THEN CURRENT_TIMESTAMP END)
       ON CONFLICT(user_id, device_id) DO NOTHING
     `).run({
       user_id: userId,
@@ -114,6 +129,7 @@ export async function checkDeviceTrust(
       country: meta.country || null,
       status: initialStatus,
       decided_at: null,
+      bind: cookiesOn ? 1 : 0,
     })
     // Only a row this call created raises the alert; a retry or a lost race does not.
     const created = Number(inserted?.changes || 0) > 0
@@ -138,8 +154,10 @@ export async function checkDeviceTrust(
       })
     }
     await db.prepare(`
-      UPDATE trusted_devices SET last_seen_at = CURRENT_TIMESTAMP, last_ip = @ip, last_country = @country WHERE id = @id
-    `).run({ id: existing.id, ip: meta.ip || existing.last_ip, country: meta.country || existing.last_country })
+      UPDATE trusted_devices SET last_seen_at = CURRENT_TIMESTAMP, last_ip = @ip, last_country = @country,
+        cookie_bound_at = COALESCE(cookie_bound_at, CASE WHEN @bind = 1 THEN CURRENT_TIMESTAMP END)
+      WHERE id = @id
+    `).run({ id: existing.id, ip: meta.ip || existing.last_ip, country: meta.country || existing.last_country, bind: cookiesOn ? 1 : 0 })
     return { status: 'approved' }
   }
 

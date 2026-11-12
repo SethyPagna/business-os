@@ -64,6 +64,8 @@ function setup(envPatch = {}) {
 }
 
 const signIn = (h, deviceId, username = 'sokha') => h.request('/login', 'POST', { username, password: 'correct-horse', deviceId, deviceName: 'Phone' }, { ip: '203.0.113.5', headers: { 'User-Agent': 'UA' } })
+// The browser that waited holds the device cookie its pending sign-in issued; an approved id is only honoured with it.
+const signInWithCookie = async (h, lib, deviceId) => h.request('/login', 'POST', { username: 'sokha', password: 'correct-horse', deviceId, deviceName: 'Phone' }, { ip: '203.0.113.5', headers: { 'User-Agent': 'UA', Cookie: `__Host-bos_dev=${await lib.signDeviceCookieValue(h.env, deviceId)}` } })
 const status = (h, ticket) => h.request('/device-status', 'POST', { ticket })
 const rowStatus = (h, deviceId) => h.raw.prepare('SELECT status FROM trusted_devices WHERE user_id = 10 AND device_id = @deviceId').get({ deviceId })?.status
 const decide = (h, deviceId, value) => h.raw.prepare('UPDATE trusted_devices SET status = @value WHERE user_id = 10 AND device_id = @deviceId').run({ value, deviceId })
@@ -103,12 +105,12 @@ async function main() {
   })
 
   await check('a pending sign-in answers with a ticket; an approved one and an administrator do not get one', async () => {
-    const { h } = setup()
+    const { h, lib } = setup()
     const pending = await signIn(h, 'wait-device-0003')
     assert.equal(pending.body.deviceApprovalRequired, true)
     assert.match(pending.body.deviceTicket, /^10\.wait-device-0003\.\d+\.[A-Za-z0-9_-]{43}$/)
     decide(h, 'wait-device-0003', 'approved')
-    const approved = await signIn(h, 'wait-device-0003')
+    const approved = await signInWithCookie(h, lib, 'wait-device-0003')
     assert.equal(approved.body.success, true)
     assert.equal('deviceTicket' in approved.body, false)
     const admin = await signIn(h, 'admin-device-0004', 'owner')
@@ -157,7 +159,7 @@ async function main() {
   })
 
   await check('only a newly created pending row raises the admin alert, not a retry', async () => {
-    const { h, broadcasts } = setup()
+    const { h, lib, broadcasts } = setup()
     await signIn(h, 'alert-device-0007')
     assert.deepEqual(broadcasts, [{ channel: 'notifications', payload: { type: 'device_pending' } }])
     await signIn(h, 'alert-device-0007')
@@ -166,7 +168,7 @@ async function main() {
     await signIn(h, 'alert-device-0008')
     assert.equal(broadcasts.length, 2, 'a second new device is a new alert')
     decide(h, 'alert-device-0007', 'approved')
-    await signIn(h, 'alert-device-0007')
+    await signInWithCookie(h, lib, 'alert-device-0007')
     assert.equal(broadcasts.length, 2, 'an approved sign-in is silent')
   })
 

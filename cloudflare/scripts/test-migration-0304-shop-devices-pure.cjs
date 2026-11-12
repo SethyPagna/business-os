@@ -46,11 +46,14 @@ check('applies on a fresh chain and adds exactly the table and three indexes', (
   const added = objects(pre).filter((o) => !objectsBefore.includes(o))
   assert.deepEqual(added, ['index:idx_shop_devices_active', 'index:idx_trusted_devices_device', 'index:idx_user_sessions_shop_device', 'table:shop_devices'])
   assert.equal(pre.prepare("SELECT COUNT(*) AS n FROM pragma_table_info('user_sessions') WHERE name = 'shop_device_id'").get().n, 1)
+  assert.equal(pre.prepare("SELECT COUNT(*) AS n FROM pragma_table_info('trusted_devices') WHERE name = 'cookie_bound_at'").get().n, 1)
 })
 
 check('no existing row changed (the new column is NULL everywhere) and shop_devices is empty', () => {
+  const boundNull = pre.prepare('SELECT COUNT(*) AS n FROM trusted_devices WHERE cookie_bound_at IS NOT NULL').get().n
+  assert.equal(boundNull, 0, 'no row is bound by the migration')
   const asNew = pre.prepare('SELECT * FROM user_sessions ORDER BY id').all().map(({ shop_device_id, ...rest }) => { assert.equal(shop_device_id, null); return rest })
-  assert.equal(JSON.stringify([pre.prepare('SELECT * FROM trusted_devices ORDER BY id').all(), asNew]), rowsBefore)
+  assert.equal(JSON.stringify([pre.prepare('SELECT * FROM trusted_devices ORDER BY id').all().map(({ cookie_bound_at, ...rest }) => rest), asNew]), rowsBefore)
   assert.equal(pre.prepare('SELECT COUNT(*) AS n FROM shop_devices').get().n, 0)
 })
 

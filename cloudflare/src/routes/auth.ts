@@ -21,7 +21,7 @@ import { requireJsonSameOriginCredentialPost } from '../lib/requestBodyGuard'
 import { issueOtpChallenge, isLiveOtpChallenge, consumeOtpChallenge } from '../lib/otpChallenge'
 import { recordFailedLogin, getLoginLockoutState, clearLoginLockout, userIdLockoutKey, worstLockoutState, perNetworkLockoutKey } from '../lib/loginLockout'
 import { requiresDeviceApproval, checkDeviceTrust } from '../lib/deviceTrust'
-import { isCookieVerifiedDevice, issueDeviceTicket, readDeviceTicket, resolveAndPinDevice } from '../lib/deviceCookie'
+import { isCookieVerifiedDevice, issueDeviceTicket, pinDeviceCookie, readDeviceTicket, resolveAndPinDevice } from '../lib/deviceCookie'
 import {
   buildGoogleOauthStartUrl,
   exchangeGoogleOauthCode,
@@ -421,6 +421,11 @@ app.post('/login', async (c) => {
       cookieVerified: isCookieVerifiedDevice(c, deviceId),
     })
     if (trustCheck.status === 'approved') shopDeviceId = trustCheck.shopDeviceId
+    if (trustCheck.status === 'pending' && trustCheck.replacedDeviceId) {
+      deviceId = trustCheck.replacedDeviceId
+      echoedDeviceId = deviceId
+      await pinDeviceCookie(c, deviceId)
+    }
     if (trustCheck.status !== 'approved') {
       if (trustCheck.status === 'rejected') {
         await audit(c.env, user.id, user.username, 'login_device_rejected', 'user', user.id, { deviceId })
@@ -887,6 +892,11 @@ app.post('/otp/verify', async (c) => {
       cookieVerified: isCookieVerifiedDevice(c, deviceId),
     })
     if (trustCheck.status === 'approved') shopDeviceId = trustCheck.shopDeviceId
+    if (trustCheck.status === 'pending' && trustCheck.replacedDeviceId) {
+      deviceId = trustCheck.replacedDeviceId
+      echoedDeviceId = deviceId
+      await pinDeviceCookie(c, deviceId)
+    }
     if (trustCheck.status !== 'approved') {
       if (trustCheck.status === 'rejected') {
         await audit(c.env, user.id, user.username, 'login_device_rejected', 'user', user.id, { deviceId, via: 'otp_verify' })
@@ -1518,6 +1528,10 @@ app.get('/oauth/callback', async (c) => {
           cookieVerified: isCookieVerifiedDevice(c, oauthDeviceId),
         })
         if (trustCheck.status === 'approved') oauthShopDeviceId = trustCheck.shopDeviceId
+        if (trustCheck.status === 'pending' && trustCheck.replacedDeviceId) {
+          oauthDeviceId = trustCheck.replacedDeviceId
+          await pinDeviceCookie(c, oauthDeviceId)
+        }
         if (trustCheck.status === 'rejected') {
           await audit(c.env, localUser.id, localUser.username, 'login_device_rejected', 'user', localUser.id, { deviceId: oauthDeviceId, method: 'google' })
           deviceGate = { blocked: true, payload: {

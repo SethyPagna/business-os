@@ -97,12 +97,15 @@ async function main() {
     const mac = good.split('.')[1]
     const forgeries = [`forged-device-0001.${mac.slice(0, -2)}AA`, `other-device-0009.${mac}`, 'forged-device-0001', `forged-device-0001.${mac}.x`, '.', '']
     for (const cookie of forgeries) {
+      h.raw.prepare('UPDATE trusted_devices SET cookie_bound_at = NULL').run({}) // a row approved before this release has no cookie yet, so the body id still passes once
       const res = await signIn(h, { deviceId: 'body-device-0001', cookie })
       assert.equal(res.body.success, true, `body id signs in despite cookie ${cookie.slice(0, 24)}`)
       assert.equal(res.body.deviceId, 'body-device-0001')
       assert.equal(cookieIdOf(deviceSetCookie(res)), 'body-device-0001', 'the response pins a fresh valid cookie')
     }
     assert.deepEqual(rows(h).map((r) => r.device_id), ['body-device-0001'], 'no pending row for the forged ids')
+    const bound = await signIn(h, { deviceId: 'body-device-0001', cookie: forgeries[0] })
+    assert.equal(bound.body.deviceApprovalRequired, true, 'once the row has had its cookie, a forged cookie plus the id is a new, unapproved browser')
   })
 
   await check('2. an approved cookie wins over a different, unknown body id', async () => {
@@ -115,14 +118,14 @@ async function main() {
     assert.deepEqual(rows(h).map((r) => r.device_id), ['cookie-device-0001'], 'no new pending row for the stale body id')
   })
 
-  await check('2b. an approved body id wins over a different cookie id that is only pending', async () => {
+  await check('2b. a verified cookie wins over a different approved body id: the body cannot displace it (the id is not a secret)', async () => {
     const { h, cookieLib } = setup()
     approve(h, 'body-device-0002')
     h.raw.prepare(`INSERT INTO trusted_devices (user_id, device_id, status) VALUES (10, 'cookie-pending-0002', 'pending')`).run({})
     const cookie = await cookieLib.signDeviceCookieValue(h.env, 'cookie-pending-0002')
     const res = await signIn(h, { deviceId: 'body-device-0002', cookie })
-    assert.equal(res.body.success, true, 'the approved id is adopted')
-    assert.equal(cookieIdOf(deviceSetCookie(res)), 'body-device-0002', 'the cookie is re-pinned to the approved id')
+    assert.equal(res.body.deviceApprovalRequired, true, 'the cookie id (pending) decides')
+    assert.equal(res.body.deviceId, 'cookie-pending-0002')
     assert.equal(rows(h).length, 2, 'nothing new was inserted')
   })
 
@@ -151,13 +154,14 @@ async function main() {
     assert.equal(rows(h)[0].status, 'pending')
   })
 
-  await check('4b. a pending body id is kept over an unknown cookie id (a retry reuses the existing row)', async () => {
+  await check('4b. a verified cookie id wins over a pending body id: the cookie id gets its own row', async () => {
     const { h, cookieLib } = setup()
     h.raw.prepare(`INSERT INTO trusted_devices (user_id, device_id, status) VALUES (10, 'body-pending-0005', 'pending')`).run({})
     const cookie = await cookieLib.signDeviceCookieValue(h.env, 'cookie-unknown-0005')
     const res = await signIn(h, { deviceId: 'body-pending-0005', cookie })
     assert.equal(res.body.deviceApprovalRequired, true)
-    assert.equal(rows(h).length, 1)
+    assert.equal(res.body.deviceId, 'cookie-unknown-0005')
+    assert.equal(rows(h).length, 2)
   })
 
   await check('5. administrator accounts stay exempt: no row, no device cookie, no deviceId echoed', async () => {
@@ -222,19 +226,20 @@ async function main() {
     const { h } = setup()
     const trust = read('lib/deviceTrust.ts')
     assert.match(trust, /VALUES \(@user_id, @device_id[^)]*\)\s+ON CONFLICT\(user_id, device_id\) DO NOTHING/)
-    const sql = /INSERT INTO trusted_devices[\s\S]*?DO NOTHING/.exec(trust)[0]
-    const params = { user_id: 10, device_id: 'race-device-0009', device_name: null, user_agent: null, ip: null, country: null, status: 'pending', decided_at: null }
+    const sql = /INSERT INTO trusted_devices[^`]*?ON CONFLICT\(user_id, device_id\) DO NOTHING/.exec(trust)[0]
+    const params = { user_id: 10, device_id: 'race-device-0009', device_name: null, user_agent: null, ip: null, country: null, status: 'pending', decided_at: null, bind: 1 }
     h.raw.prepare(sql).run(params)
     assert.doesNotThrow(() => h.raw.prepare(sql).run(params))
     assert.equal(rows(h).length, 1)
   })
 
-  await check('12. D1 calls: the cookie costs nothing when the ids agree, one read when they differ', async () => {
+  await check('12. D1 calls: the cookie costs nothing, whether or not it agrees with the body id', async () => {
     const { h, cookieLib } = setup()
     approve(h, 'calls-device-0010')
     approve(h, 'calls-device-0011')
     const cookieFor = (id) => cookieLib.signDeviceCookieValue(h.env, id)
     const count = async (options) => {
+      h.raw.prepare('UPDATE trusted_devices SET cookie_bound_at = NULL').run({})
       let calls = 0
       const original = h.db.prepare.bind(h.db)
       h.db.prepare = (sql) => {
@@ -251,7 +256,7 @@ async function main() {
     const differing = await count({ deviceId: 'calls-device-0010', cookie: await cookieFor('calls-device-0011') })
     console.log(`     approved /login D1 statements: body only ${bodyOnly}, cookie agrees ${agreeing}, cookie differs ${differing}`)
     assert.equal(agreeing, bodyOnly, 'a matching cookie adds no D1 call')
-    assert.equal(differing, bodyOnly + 1, 'a differing cookie adds exactly one read')
+    assert.equal(differing, bodyOnly, 'the cookie always wins, so a differing cookie needs no extra read')
   })
 
   console.log(`\n${passed} passed, ${failures.length} failed`)
