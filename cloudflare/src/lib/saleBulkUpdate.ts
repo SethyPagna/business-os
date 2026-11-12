@@ -19,7 +19,7 @@ import {
 } from './saleBulkStatus'
 import type { StockStatement } from './saleTransitions'
 import { actorSnapshot } from './actorSnapshot'
-import { contactDisplayAddress } from './contactOptions'
+import { contactDisplayAddress, deliveryDisplayAddress } from './contactOptions'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents'
 import type { SaleRecordChange, SaleRecordKind, SaleRecordValueState } from './saleRecords'
 import { ANONYMOUS_CUSTOMER_MUTATION_ERROR, isAnonymousCustomer } from './anonymousCustomer'
@@ -218,7 +218,7 @@ function driverState(row: Row): SaleRecordValueState {
   const id = row.delivery_contact_id == null ? null : Number(row.delivery_contact_id)
   const name = String(row.delivery_contact_name || '').trim() || null
   const phone = String(row.delivery_contact_phone || '').trim() || null
-  const address = String(row.delivery_contact_address || '').trim() || null
+  const address = deliveryDisplayAddress(row.delivery_contact_address) || null
   return id === null && name === null && phone === null && address === null
     ? { state: 'known_none' }
     : { state: 'known_value', value: { id, name, phone, address } }
@@ -242,6 +242,12 @@ function paymentDetailsState(value: unknown): SaleRecordValueState {
   } catch (_) {
     return { state: 'unknown' }
   }
+}
+
+function comparableState(action: SaleBulkUpdateAction, row: Row): Row {
+  return action.kind === 'delivery_contact'
+    ? { ...row, delivery_contact_address: deliveryDisplayAddress(row.delivery_contact_address) || null }
+    : row
 }
 
 function updateChanges(action: SaleBulkUpdateAction, before: Row, after: Row): SaleRecordChange[] {
@@ -423,6 +429,14 @@ function anonymousReferenceGuard(action: SaleBulkUpdateAction, state: Row): Stoc
   })
 }
 
+// The stored receipt keeps the moved-expense count (it is what the History row was built from); a caller who may not view expenses
+// is not told it, on the fresh write or on either replay of the same request.
+function receiptForCaller<T extends Row>(user: SessionUser, receipt: T): T {
+  if (getActionTier(user, 'fees', 'view') !== 'none' || !('movedExpenseCount' in receipt)) return receipt
+  const { movedExpenseCount: _hidden, ...rest } = receipt
+  return rest as unknown as T
+}
+
 export async function notifySaleBulkUpdate(env: Env, actionKind?: string): Promise<void> {
   if (actionKind === 'customer') {
     await Promise.allSettled([bumpVersion(env, 'sales'), bumpVersion(env, 'returns'), broadcast(env, 'sales', { action: 'update' }), broadcast(env, 'returns', { action: 'update' }), broadcast(env, 'customers', { action: 'update' })])
@@ -445,7 +459,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, rawInput:
   const previous = preview ? null : await db.prepare('SELECT request_json,receipt_json FROM sale_bulk_operations WHERE actor_id=@actor AND request_id=@request').get<Row>({ actor: user.id, request: request.client_request_id })
   if (previous) {
     if (previous.request_json !== canonical) fail('Request id was already used with different data.')
-    return JSON.parse(String(previous.receipt_json))
+    return receiptForCaller(user, JSON.parse(String(previous.receipt_json)))
   }
 
   let expectedPaymentMethodsRaw: string | null = null
@@ -601,7 +615,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, rawInput:
         delivery_contact_id: targetContact?.id ?? null,
         delivery_contact_name: targetContact?.name ?? null,
         delivery_contact_phone: targetContact?.phone ?? null,
-        delivery_contact_address: targetContact ? (targetContact.address || targetContact.area || null) : null,
+        delivery_contact_address: targetContact ? (deliveryDisplayAddress(targetContact.address) || deliveryDisplayAddress(targetContact.area) || null) : null,
       } : { ...before }
     } else {
       sourceMatched = matchedAtRead
@@ -652,7 +666,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, rawInput:
       const anonymousSourceGuard = anonymousReferenceGuard(request.action, before)
       if (sourceMatched && anonymousSourceGuard) guards.push(anonymousSourceGuard)
     }
-    const changed = sourceMatched && JSON.stringify(before) !== JSON.stringify(after)
+    const changed = sourceMatched && JSON.stringify(comparableState(request.action, before)) !== JSON.stringify(comparableState(request.action, after))
     members.push({
       id: expected.id,
       receipt: String(sale.receipt_number || expected.id),
@@ -680,13 +694,16 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, rawInput:
     guards.push(bulkAssertion(`(SELECT COUNT(*) FROM fees WHERE sale_id IN (SELECT CAST(value AS INTEGER) FROM json_each(@sale_ids)) AND delivery_contact_id=@old AND ${DELIVERY_FEE_MATCH})=@n`, { sale_ids: JSON.stringify(changedMemberIds), old: request.action.source_id, n: feeMoves.ids.length }))
   }
   if (preview) {
+    // The expenses move with the driver whoever asks, but naming or counting them is expense detail: only a caller
+    // who may view expenses sees it. An amend-only caller gets an empty list and a zero count.
+    const mayViewExpenses = getActionTier(user, 'fees', 'view') !== 'none'
     return {
       preview: true as const,
       action: request.action,
       changedCount: changedMemberIds.length,
       unchangedCount: members.length - changedMemberIds.length,
-      movedExpenseCount: movedExpenses.length,
-      movedExpenses,
+      movedExpenseCount: mayViewExpenses ? movedExpenses.length : 0,
+      movedExpenses: mayViewExpenses ? movedExpenses : [],
     }
   }
   const changedReference = members.find((member) => member.changed)
@@ -762,10 +779,10 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, rawInput:
   bounded(statements, snapshot, recordEvents?.eventsBytes || 0)
   try {
     const results = await db.batch(statements)
-    return { ...receipt, actionHistoryId: Number(results[historyIndex].meta.last_row_id) }
+    return receiptForCaller(user, { ...receipt, actionHistoryId: Number(results[historyIndex].meta.last_row_id) })
   } catch (error) {
     const retry = await db.prepare('SELECT request_json,receipt_json FROM sale_bulk_operations WHERE actor_id=@actor AND request_id=@request').get<Row>({ actor: user.id, request: request.client_request_id })
-    if (retry?.request_json === canonical) return JSON.parse(String(retry.receipt_json))
+    if (retry?.request_json === canonical) return receiptForCaller(user, JSON.parse(String(retry.receipt_json)))
     if (assignmentPlan && /malformed JSON/i.test(String(error))) fail(LOYALTY_REASSIGNMENT_MESSAGE)
     if (/constraint/i.test(String(error))) {
       await refuseIfCancelledNow(db, ids)

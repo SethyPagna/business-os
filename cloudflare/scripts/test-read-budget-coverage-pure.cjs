@@ -6,6 +6,7 @@
 
 const assert = require('assert')
 const { execFileSync } = require('child_process')
+const fs = require('fs')
 const path = require('path')
 const { registeredRoutes } = require('./read-budget/routes.cjs')
 const { getShapes } = require('./read-budget/shapes.cjs')
@@ -112,13 +113,31 @@ async function main() {
     }
   })
 
-  await check('the read switches the GET shapes are measured with name a known switch and state, and the gate says what that certifies', () => {
-    const KNOWN = { report_atomic: ['on'], report_atomic_long: ['on'], expense_reads: ['on'], dash_overview_5m: ['on'] }
-    const switches = budgets.switches || {}
-    for (const [name, state] of Object.entries(switches)) assert.ok(KNOWN[name] && KNOWN[name].includes(state), `unknown switch or state ${name}=${state}`)
-    for (const s of shapes) assert.ok(!('switches' in s), `${s.id}: switches are stored once for the whole GET pass (budgets.json "switches"), not per shape`)
-    // The ceilings of the GET shapes bind the path those switches choose. A deploy without the stored row runs the old path, whose ceilings are not enforced here.
-    console.log(`read-budget: GET shapes are measured with read switches ${JSON.stringify(switches)} stored (the old path runs until the owner flips them); write shapes with none`)
+  await check('each GET pass is data in budgets.json "passes": a tier and switches that name a known switch and state; the gate says what each certifies', () => {
+    const KNOWN = new Set([...fs.readFileSync(path.join(ROOT, 'cloudflare', 'src', 'lib', 'readSwitches.ts'), 'utf8').matchAll(/KNOWN_READ_SWITCHES = \[([^\]]*)\]/g)][0][1].match(/'[a-z_0-9]+'/g).map((x) => x.slice(1, -1)))
+    assert.ok(KNOWN.has('ic_simple') && KNOWN.has('report_atomic'), 'the known switch list was read')
+    assert.ok(!('switches' in budgets), 'switches live in passes.<name>.switches only, so one flip edits one place')
+    assert.deepStrictEqual(Object.keys(budgets.passes).sort(), ['free', 'live'])
+    for (const [name, pass] of Object.entries(budgets.passes)) {
+      assert.ok(['free', 'paid'].includes(pass.tier), `${name}: tier ${pass.tier}`)
+      for (const [sw, state] of Object.entries(pass.switches)) assert.ok(KNOWN.has(sw) && ['on', 'off'].includes(state), `${name}: unknown switch or state ${sw}=${state}`)
+    }
+    for (const s of shapes) assert.ok(!('switches' in s), `${s.id}: switches are stored once for a whole GET pass (budgets.json "passes"), not per shape`)
+    console.log(`read-budget: free pass (${budgets.passes.free.tier}) ${JSON.stringify(budgets.passes.free.switches)}, ceilings in "shapes"; live pass (${budgets.passes.live.tier}) ${JSON.stringify(budgets.passes.live.switches)}, cold calls <= ${budgets.passes.live.cold_calls_max}; write shapes with call_counting on`)
+  })
+
+  await check('the live pass: a ceiling within the Free limit, and every known failure names a shape, a reason, and a count over the ceiling', () => {
+    const live = budgets.passes.live
+    assert.ok(Number.isInteger(live.cold_calls_max) && live.cold_calls_max <= 45, 'the live ceiling is at most 45 calls (the audit rule)')
+    const ids = new Set(getShapes(seedContext()).map((s) => s.id))
+    const seen = new Set()
+    for (const k of live.known_failures) {
+      assert.ok(ids.has(k.id) && !seen.has(k.id), `${k.id}: not a GET shape, or listed twice`)
+      seen.add(k.id)
+      assert.ok(Number.isInteger(k.cold_calls) && k.cold_calls > live.cold_calls_max, `${k.id}: a known failure is over the ceiling (${k.cold_calls})`)
+      assert.ok(typeof k.reason === 'string' && k.reason.length >= 30, `${k.id}: a known failure says why it is allowed and what fixes it`)
+    }
+    console.log(`read-budget: ${live.known_failures.length} known live-state failures: ${live.known_failures.map((k) => `${k.id} ${k.cold_calls}`).join(', ') || 'none'}`)
   })
 
   await check('from the programme date every shape reads at most 100,000 rows', () => {

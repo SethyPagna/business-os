@@ -85,6 +85,7 @@ const saleCreationSnapshot = compile('saleCreationSnapshot.ts', { './actorSnapsh
 const subject = compile('saleRecords.ts', {
   './saleAmendments': saleAmendments,
   './saleCreationSnapshot': saleCreationSnapshot,
+  './contactOptions': compile('contactOptions.ts'),
 })
 
 const {
@@ -323,6 +324,20 @@ runTest('adding delivery is one truthful record with driver and complete USD/KHR
   assert.strictEqual(record.subject, 'Driver Dara')
   assert.deepStrictEqual(record.before, before)
   assert.deepStrictEqual(record.after, after)
+})
+
+runTest('a driver recorded with Contact Options JSON reads as its address, never as JSON', () => {
+  const optionsJson = JSON.stringify([{ label: 'Default', name: 'ta', phone: '', address: '', area: '' }, { address: 'St 271', area: 'Toul Kork' }])
+  const row = {
+    id: 15, kind: 'delivery_added', product_name: null, quantity_before: null, quantity_after: null,
+    amount_before_usd: 0, amount_after_usd: 0, total_before_usd: 10, total_after_usd: 10,
+    before_json: JSON.stringify({ is_delivery: false, delivery_contact_id: null }),
+    after_json: JSON.stringify({ is_delivery: true, delivery_contact_id: 9, delivery_contact_name: 'ta', delivery_contact_address: optionsJson }),
+    units_moved: 0, stock_skipped: 0, via: 'amend', user_name: 'sokha', created_at: '2026-09-06 11:41:00',
+  }
+  const record = buildSaleRecords({ sale: SALE, ledger: [row] }).find((candidate) => candidate.kind === 'delivery_added')
+  const driver = changed(record, 'driver')
+  assert.deepStrictEqual(known(driver), { id: 9, name: 'ta', phone: null, address: 'St 271' })
 })
 
 runTest('an undo keeps the kind of what it moved and says so through via', () => {

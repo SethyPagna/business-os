@@ -142,7 +142,8 @@ const PAID = {
   stockInLinesPerRequestByCalls: 24,
   callCountingSwitchApplies: false,
   inventoryCheckApprovalTakeoverSeconds: 300,
-  coreInvariantsReverifySeconds: 21600,
+  coreInvariantsReverifySeconds: 86400,
+  sessionTouchIntervalSeconds: 900,
   dashboardStockOverviewCacheSeconds: 30,
   dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 5,
@@ -161,7 +162,9 @@ const PAID = {
   inventoryLastChangeMaxRows: 8,
   inventoryCheckFilterMaxIds: 10000,
   productListCacheSeconds: 60,
+  possibleDuplicatesCacheSeconds: 300,
   catalogListWindowPages: 4,
+  notificationSectionCacheSeconds: 45,
   d1DailyRowsRead: 833000000,
   d1DailyRowsWritten: 1666000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -190,6 +193,7 @@ const FREE = {
   callCountingSwitchApplies: true,
   inventoryCheckApprovalTakeoverSeconds: 900,
   coreInvariantsReverifySeconds: 86400,
+  sessionTouchIntervalSeconds: 900,
   dashboardStockOverviewCacheSeconds: 300,
   dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 15,
@@ -208,7 +212,9 @@ const FREE = {
   inventoryLastChangeMaxRows: 4,
   inventoryCheckFilterMaxIds: 2000,
   productListCacheSeconds: 3600,
+  possibleDuplicatesCacheSeconds: 3600,
   catalogListWindowPages: 3,
+  notificationSectionCacheSeconds: 300,
   d1DailyRowsRead: 5000000,
   d1DailyRowsWritten: 100000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,
@@ -240,20 +246,24 @@ check('both tables carry exactly the same field set, with no extras', async () =
 // is not in the list. Every one differs between the tiers, so none needs an exemption.
 // inventoryCheckApprovalTakeoverSeconds (lib/inventoryCheckApprovals.ts) is a lease: how long a claimed Inventory Check approval may sit idle before another
 // approver takes it over. Free is the longer one (a Free request applies one line, a slow phone is normal there): Paid 5 min, Free 15 min.
-const FREE_IS_LONGER = ['productListCacheSeconds', 'coreInvariantsReverifySeconds', 'dashboardStockOverviewCacheSeconds', 'readSwitchMemoSeconds', 'buildSharePollMs', 'buildShareWaitMs', 'buildShareStaleMs', 'inventoryCheckApprovalTakeoverSeconds']
+const FREE_IS_LONGER = ['productListCacheSeconds', 'possibleDuplicatesCacheSeconds', 'dashboardStockOverviewCacheSeconds', 'readSwitchMemoSeconds', 'buildSharePollMs', 'buildShareWaitMs', 'buildShareStaleMs', 'inventoryCheckApprovalTakeoverSeconds']
 
 // PAGE SIZES (planTier.ts): a page is one D1 call and calls are what Free rations (50 per invocation), so on these Free is
 // deliberately the LARGER number; Paid keeps its old size so its reads do not change. Their own list, one line apart from the
 // lifetimes above, so a lane that names a new lifetime and a lane that names a new page size never edit the same line.
 const FREE_IS_LONGER_PAGE_SIZES = ['paymentMethodScanPageSize']
-const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES]
+// The bell's section lifetime (routes/notifications.ts): owner 11 Nov, up to 5 minutes, so never above 300 on either tier.
+const FREE_IS_LONGER_BELL = ['notificationSectionCacheSeconds']
+const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES, ...FREE_IS_LONGER_BELL]
 
 // Fields that are deliberately the SAME number on both tiers, named so the exemption cannot grow unnoticed. The Expenses export asks for 500 rows a page and the
 // offset path caps at 500, so a smaller Free page only turned an export of up to 500 rows (a month's: one request today) into two pages that each pay the cursor's
 // fixed cost, and made it dearer on exactly the tier that counts reads (E1-F review N2). The Free CPU bound lives in expenseReportFoldMaxRows, which does differ.
 // dashboardOverviewMaxAgeSeconds is the owner's own promise (27 Oct / 1 Nov: the Dashboard stock overview is at most 5 minutes old and says when it was calculated), so it is
 // the same on both tiers; the read switch dash_overview_5m decides whether it is used, and what Free saves is the recompute a sale used to force.
-const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds']
+// coreInvariantsReverifySeconds is 24 h on both tiers since 11 Nov (Paid was 6 h: a run reads ~23k rows, four a day). sessionTouchIntervalSeconds is the
+// 15-minute last-seen touch on both tiers (it only bounds a one-row write; nothing reads it to decide).
+const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //
@@ -413,6 +423,14 @@ check('Inventory Check bounds come from the plan: no numeric literal caps the li
   assert.ok(/LOT_LINES_PER_PRODUCT\s*=\s*\d/.test('const LOT_LINES_PER_PRODUCT = 50') && /ids\.length\s*>\s*\d/.test('ids.length > 100'), 'the control: both patterns match what they forbid')
   const free = limitsFresh({ PLAN_TIER: 'free' }), paid = limitsFresh({ PLAN_TIER: 'paid' })
   assert.deepEqual([free.inventoryCheckLotLinesPerProduct, paid.inventoryCheckLotLinesPerProduct], [50, 100])
+})
+
+check('the bell section lifetime is a plan field, at most the 5 minutes the owner allowed (11 Nov) on both tiers, longer on Free', async () => {
+  for (const tier of ['free', 'paid']) {
+    const seconds = PLAN_LIMITS_BY_TIER[tier].notificationSectionCacheSeconds
+    assert.ok(Number.isInteger(seconds) && seconds > 0 && seconds <= 300, tier + ' lifetime ' + seconds + ' must be 1..300 s')
+  }
+  assert.ok(PLAN_LIMITS_BY_TIER.free.notificationSectionCacheSeconds > PLAN_LIMITS_BY_TIER.paid.notificationSectionCacheSeconds)
 })
 
 check('planTier.ts imports nothing at runtime', async () => {

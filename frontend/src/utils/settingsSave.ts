@@ -125,6 +125,17 @@ export function settingsSaveNormalisedKeys(result: unknown): string[] {
   return Array.isArray(keys) ? keys.filter((key): key is string => typeof key === 'string') : []
 }
 
+export type ManualSaveNotice = 'saved' | 'unchanged'
+
+// What a manual Save press announces. A form that also autosaves has usually
+// already written the edit silently by the time Save is pressed, so the write
+// itself answers 'unchanged'; the person has not yet been told it was kept, so
+// the press says "Saved". Only a press with nothing new to tell reports no change.
+export function manualSaveNotice(outcome: SettingsSaveOutcome, savedSilentlySinceLastNotice: boolean): ManualSaveNotice {
+  if (outcome === 'saved') return 'saved'
+  return savedSilentlySinceLastNotice ? 'saved' : 'unchanged'
+}
+
 export function settingsSaveSucceeded(result: unknown): boolean {
   const outcome = settingsSaveOutcome(result)
   return outcome === 'saved' || outcome === 'unchanged'

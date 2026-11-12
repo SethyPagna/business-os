@@ -30,6 +30,7 @@ function wrapDb() {
 }
 const realLibraries = new Set(['continuousReadWindow', 'movementCostSnapshot', 'operationWriteReadiness', 'db', 'sqlBinding', 'batchCode', 'productBatches', 'branchRoles', 'branchRoleGuards', 'canonicalBranchIdentity', 'transferOperationReceipt', 'transferOperation', 'permissions', 'actorSnapshot', 'undoAppliers', 'failureText'])
 realLibraries.add('moneyPrecision')
+realLibraries.add('schemaObjectProbe')
 realLibraries.add('acquisitionCostAccess')
 realLibraries.add('businessMaintenanceGuard')
 function load(relative) {

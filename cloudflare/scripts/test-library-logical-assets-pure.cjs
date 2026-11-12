@@ -25,8 +25,8 @@ assert.strictEqual(names.logicalLibraryName('../unsafe.png', null), 'unsafe.png'
 
 const route = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'files.ts'), 'utf8')
 const migration = fs.readFileSync(path.join(__dirname, '..', 'migrations', '0055_library_image_reference_indexes.sql'), 'utf8')
-assert.match(route, /UNION\s+SELECT pi\.image_path/, 'cover and gallery references must be de-duplicated into the same logical reference set')
-assert.match(route, /LEFT JOIN product_refs refs ON refs\.public_path = fa\.public_path/, 'unreferenced physical objects must remain visible')
+assert.match(route, /FROM file_assets fa CROSS JOIN products p ON p\.image_path = fa\.public_path\s+WHERE \+p\.is_active = 1 AND fa\.public_path != ''\s+UNION\s+SELECT fa\.\*, p\.id, p\.name\s+FROM file_assets fa CROSS JOIN product_images pi ON pi\.image_path = fa\.public_path CROSS JOIN products p ON p\.id = pi\.product_id\s+WHERE \+p\.is_active = 1 AND fa\.public_path != ''/, 'cover and gallery references must be de-duplicated (UNION) into one logical reference set, each arm an indexed seek from file_assets with +p.is_active kept off the active index')
+assert.match(route, /UNION ALL\s+SELECT fa\.\*, NULL, NULL\s+FROM file_assets fa\s+WHERE NOT EXISTS \(SELECT 1 FROM products p WHERE p\.image_path = fa\.public_path[^\n]*\n\s+AND NOT EXISTS \(SELECT 1 FROM product_images pi CROSS JOIN products p ON p\.id = pi\.product_id WHERE pi\.image_path = fa\.public_path/, 'unreferenced physical objects must remain visible')
 assert.match(route, /SELECT COUNT\(\*\) AS count FROM logical_assets/, 'pagination must count logical rows')
 assert.match(route, /SUM\(CASE WHEN byte_size > 0 THEN byte_size ELSE 0 END\)[\s\S]*AS total_bytes[\s\S]*FROM file_assets/, 'physical bytes must count stored objects directly, not logical product references')
 assert.match(route, /physicalStorage: normalizePhysicalStorageSummary\(physicalStorageRow\)/, 'library response must expose normalized physical bytes and per-type counts')

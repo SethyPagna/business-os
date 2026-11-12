@@ -236,8 +236,13 @@ export type PlanLimits = {
   // after the scan are still checked on every cold isolate (by id watermark),
   // so this only bounds how long coverage lost some OTHER way (a re-activated
   // product, a deleted branch_stock row, a restore) can go unhealed.
-  // Paid 6 h, Free 24 h.
+  // 24 h on both tiers (Paid was 6 h until 11 Nov): a run reads ~23k rows, so the longer lifetime saves ~70k rows a day on Paid.
   coreInvariantsReverifySeconds: number
+
+  // lib/auth.ts requireAuth: how stale user_sessions.last_seen_at may be before a request writes it again (one row write per touch).
+  // Nothing decides on it (expiry slides on expires_at); it feeds the Devices page and the freshest-session fallback for records written
+  // outside a request. Same on both tiers.
+  sessionTouchIntervalSeconds: number
 
   // lib/dashboardStockOverview.ts: lifetime of the shared Dashboard stock /
   // expiry overview. Freshness comes from the 'products' + 'stock' cache
@@ -351,9 +356,19 @@ export type PlanLimits = {
   // what Free rations), Paid for a minute. Replaces the 20 s literal the page payload cache used.
   productListCacheSeconds: number
 
+  // GET /api/products/possible-duplicates: how long the cluster membership (which products look the same) may be served. The entry is keyed on the products version, which every product
+  // create/edit/merge/delete/import/undo and every dismissal advances; what a cluster shows (stock, cost, price) is read live on every hit, so this only bounds what no version moves. Paid keeps
+  // the 300 s the route always had; Free keeps it an hour, because a miss reads every active product.
+  possibleDuplicatesCacheSeconds: number
+
   // The prefetch window of a paged list that reads the shared ranking (the Inventory Check list tells its client): the current page and the pages ahead it may fetch, so a window of
   // pages costs the rows of those pages (the ranking is shared) and no ranking. Free 3 (a page and 2 ahead); Paid 4 (Paid is not rationed).
   catalogListWindowPages: number
+
+  // routes/notifications.ts: how long the bell's heavy sections (inventory, expiry, supplier credit) may be served from the cache, ignoring the data versions. The owner (11 Nov) accepts a bell up to
+  // 5 minutes old with an "as of" time, so a sale or a product edit on another device no longer forces a recompute (the inventory pass reads every active product); the actor's own write asks
+  // for a fresh answer (?fresh=1). Free keeps it the 5 minutes the owner allowed (reads are what Free rations), Paid 45 s (the lifetime the version-keyed entry had). Never above 300 on either tier.
+  notificationSectionCacheSeconds: number
 
   // ---- Documented platform facts (no behavioural reader) -----------------
   //
@@ -434,7 +449,8 @@ const PAID_LIMITS: PlanLimits = {
   stockInLinesPerRequestByCalls: 24,
   callCountingSwitchApplies: false,
   inventoryCheckApprovalTakeoverSeconds: 5 * 60,
-  coreInvariantsReverifySeconds: 6 * 60 * 60,
+  coreInvariantsReverifySeconds: 24 * 60 * 60,
+  sessionTouchIntervalSeconds: 15 * 60,
   dashboardStockOverviewCacheSeconds: 30,
   dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 5,
@@ -453,7 +469,9 @@ const PAID_LIMITS: PlanLimits = {
   inventoryLastChangeMaxRows: 8,
   inventoryCheckFilterMaxIds: 10_000,
   productListCacheSeconds: 60,
+  possibleDuplicatesCacheSeconds: 300,
   catalogListWindowPages: 4,
+  notificationSectionCacheSeconds: 45,
   d1DailyRowsRead: 833_000_000,
   d1DailyRowsWritten: 1_666_000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -483,6 +501,7 @@ const FREE_LIMITS: PlanLimits = {
   callCountingSwitchApplies: true,
   inventoryCheckApprovalTakeoverSeconds: 15 * 60,
   coreInvariantsReverifySeconds: 24 * 60 * 60,
+  sessionTouchIntervalSeconds: 15 * 60,
   dashboardStockOverviewCacheSeconds: 300,
   dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 15,
@@ -501,7 +520,9 @@ const FREE_LIMITS: PlanLimits = {
   inventoryLastChangeMaxRows: 4,
   inventoryCheckFilterMaxIds: 2_000,
   productListCacheSeconds: 3_600,
+  possibleDuplicatesCacheSeconds: 3_600,
   catalogListWindowPages: 3,
+  notificationSectionCacheSeconds: 300,
   d1DailyRowsRead: 5_000_000,
   d1DailyRowsWritten: 100_000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,

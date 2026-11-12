@@ -131,12 +131,13 @@ async function generateMembershipId(env: Env): Promise<string> {
 
 // Does any customer already carry this canonical phone (primary or a secondary
 // Contact Option phone)? Primary is exact against the backfilled
-// phone_normalized column; secondary is a best-effort LIKE prefilter confirmed
+// phone_normalized column (its index is partial, so the lookup repeats the index's own
+// WHERE terms or SQLite scans the table); secondary is a best-effort LIKE prefilter confirmed
 // in JS (same shape as lib/contactDuplicates.ts::findContactDuplicates).
 async function findCustomerByCanonicalPhone(env: Env, canonical: string): Promise<{ id: number; name: string | null } | null> {
   const db = getDb(env)
   const primary = await db.prepare(
-    'SELECT id, name FROM customers WHERE phone_normalized = @p LIMIT 1',
+    "SELECT id, name FROM customers WHERE phone_normalized = @p AND phone_normalized IS NOT NULL AND phone_normalized != '' LIMIT 1",
   ).get<{ id: number; name: string | null }>({ p: canonical })
   if (primary) return primary
   const candidates = await db.prepare(

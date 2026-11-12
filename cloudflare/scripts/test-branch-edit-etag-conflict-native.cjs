@@ -25,7 +25,7 @@ const source = fs.readFileSync(path.join(root, 'cloudflare/src/routes/branches.t
 const ast = ts.createSourceFile('branches.ts', source, ts.ScriptTarget.Latest, true)
 const route = ast.statements.find(n => ts.isExpressionStatement(n) && ts.isCallExpression(n.expression) && n.expression.expression.getText(ast) === 'app.put' && n.expression.arguments[0]?.text === '/:id')
 assert.ok(route)
-const dependencies = Object.assign({}, ...['db', 'branchWrites', 'permissions', 'conflictControl', 'canonicalBranchIdentity', 'reviewGate', 'businessMaintenanceGuard', 'actorSnapshot', 'audit'].map(lib), { broadcast: async env => { env.control.broadcasts++ } })
+const dependencies = Object.assign({}, ...['db', 'branchWrites', 'permissions', 'conflictControl', 'canonicalBranchIdentity', 'reviewGate', 'businessMaintenanceGuard', 'actorSnapshot', 'audit'].map(lib), { broadcast: async env => { env.control.broadcasts++ }, bumpVersion: async () => {} })
 const routeSource = route.expression.arguments[1].getText(ast)
 function makeHandler(text) {
   return new Function(...Object.keys(dependencies), 'exports', `${compile(`const handler=${text}`)}\nreturn handler`)(...Object.values(dependencies), {})

@@ -70,7 +70,7 @@ const adapt = (raw) => ({
 const libDb = { getDb: (env) => adapt(env.DB) }
 const cookie = require('hono/cookie')
 const rateLimit = load('lib/rateLimit.ts', { './db': libDb, '../index': {} })
-const authLib = load('lib/auth.ts', { './db': libDb, 'hono/cookie': cookie, '../index': {} })
+const authLib = load('lib/auth.ts', { './planTier': load('lib/planTier.ts'), './db': libDb, 'hono/cookie': cookie, '../index': {} })
 const isAdminControlUser = (u) => Number(u?.id) === 1
 
 const loadAuthRoute = (authModule) => load('routes/auth.ts', {

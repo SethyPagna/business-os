@@ -32,7 +32,7 @@ const migrationsDir = path.join(__dirname, '..', 'migrations')
 // apply path actually calls into -- the writers, resolver, catalog bridge,
 // and their pure helpers -- plus the same real deps importEngine needs just
 // to finish loading (mirrors test-import-engine-pure.cjs's real set).
-const REAL = new Set(['loyaltyEligibility',
+const REAL = new Set(['schemaObjectProbe', 'loyaltyEligibility',
   'batchCode', 'importNumbers', 'stockActionResolver', 'stockActionImport',
   'stockActionCatalog', 'stockActionCommit', 'sqlBinding', 'productDetailRule',
   // P10-4: applyUnifiedStockAdd calls recomputeCatalogCost after every add

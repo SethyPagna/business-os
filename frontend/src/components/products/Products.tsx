@@ -184,7 +184,7 @@ import { getPossiblySameProducts, dismissProductDuplicateCluster } from '../../a
 import { useMergeStockChoice } from './useMergeStockChoice.tsx'
 import { buildExactDuplicateIndex, extractDuplicateClusters, findRowDuplicateInfo, type ExactDuplicateInfo } from '../../utils/exactDuplicateProducts.ts'
 import DuplicateResolverControl from './DuplicateResolverControl.tsx'
-import { catalogHasBarcode, productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
+import { catalogHasBarcode, isProductSearchTooShort, productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
 // The section chips below are the same chrome HubSectionNav renders, styled
 // from the same stylesheet (see the row's `bos-nav-chrome` class).
 import '../navigation/nav-chrome.css'
@@ -875,6 +875,7 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
     const rowLongPressState = getLongPressState(Number(productId))
     const longPress = createLongPressHandlers(rowLongPressState, {
       disabled: selectionModeActive,
+      reportControlTaps: true,
       onLongPress: () => toggleSelectionScope(rowScopeIds, true),
       onClick: (target) => {
         if (dupInfo) return
@@ -883,6 +884,7 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
           deferCopySurfaceAction(copyTarget, () => setDetailProduct(p))
           return
         }
+        if ((target as Element | null)?.closest?.('button, a[href], input, select, textarea, label, summary')) return
         setDetailProduct(p)
       },
     })
@@ -1062,7 +1064,7 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
             <button
                 type="button"
                 className={`block rounded-lg ${thumbnailState.hasImage ? 'cursor-zoom-in' : 'cursor-default'}`}
-                aria-label={thumbnailState.hasImage ? `${tr('view_image', 'View image')}: ${productName}` : undefined}
+                aria-label={thumbnailState.hasImage ? `${tr('view_image', 'View image')}: ${productName}` : productName}
                 aria-disabled={!thumbnailState.hasImage}
                 onMouseDown={(event) => event.stopPropagation()}
                 onMouseUp={(event) => event.stopPropagation()}
@@ -1213,6 +1215,7 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
     const rowLongPressState = getLongPressState(Number(productId))
     const longPress = createLongPressHandlers(rowLongPressState, {
       disabled: selectionModeActive,
+      reportControlTaps: true,
       onLongPress: () => toggleSelectionScope(rowScopeIds, true),
       onClick: (target) => {
         if (dupInfo) return
@@ -1221,6 +1224,7 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
           deferCopySurfaceAction(copyTarget, () => setDetailProduct(p))
           return
         }
+        if ((target as Element | null)?.closest?.('button, a[href], input, select, textarea, label, summary')) return
         setDetailProduct(p)
       },
     })
@@ -1289,7 +1293,7 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
             <button
               type="button"
               className="relative flex-shrink-0 self-stretch rounded-xl text-left"
-              aria-label={thumbnailState.hasImage ? `${tr('view_image', 'View image')}: ${productName}` : undefined}
+              aria-label={thumbnailState.hasImage ? `${tr('view_image', 'View image')}: ${productName}` : productName}
               aria-disabled={!thumbnailState.hasImage}
               onMouseDown={(event) => event.stopPropagation()}
               onMouseUp={(event) => event.stopPropagation()}
@@ -1995,8 +1999,15 @@ function ProductsFullEditor() {
   const parsedSearch = useMemo(() => parseProductSearchStockToken(debouncedSearch), [debouncedSearch])
   const cleanedSearchQuery = parsedSearch.cleanedQuery
   const searchIndexGeneration = useProductSearchIndex(isActive)
+  const searchTooShort = isProductSearchTooShort(cleanedSearchQuery)
+  const lastSearchParamsKeyRef = useRef('{}')
   const productSearchParamsKey = useMemo(
-    () => JSON.stringify(productSearchRequest(cleanedSearchQuery, { mode: searchMode }).params),
+    () => {
+      if (isProductSearchTooShort(cleanedSearchQuery)) return lastSearchParamsKeyRef.current
+      const key = JSON.stringify(productSearchRequest(cleanedSearchQuery, { mode: searchMode }).params)
+      lastSearchParamsKeyRef.current = key
+      return key
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [cleanedSearchQuery, searchMode, searchIndexGeneration],
   )
@@ -3764,7 +3775,7 @@ function ProductsFullEditor() {
   // settled query -- either from this local re-filter (if the server
   // hasn't responded yet) or from the server payload itself, never both
   // as separate visible steps for the same keystroke.
-  const searchTerms = useMemo(() => buildProductSearchTerms(cleanedSearchQuery), [cleanedSearchQuery])
+  const searchTerms = useMemo(() => (searchTooShort ? [] : buildProductSearchTerms(cleanedSearchQuery)), [cleanedSearchQuery, searchTooShort])
   const filtered = useMemo(() => filterProductsForPage(products, {
     brandFilter,
     branchFilter,
@@ -5337,6 +5348,9 @@ function ProductsFullEditor() {
           forth, items per page and pages ... below the search bar row", never
           between the date range and the search row). The matching compact
           pager stays at the end of the list. */}
+      {searchTooShort ? (
+        <p className="mb-2 text-center text-sm text-gray-500" role="status">{t('search_type_one_more')}</p>
+      ) : (
       <div className="mb-2 flex justify-center px-0.5">
         <PaginationControls
           compact
@@ -5351,6 +5365,7 @@ function ProductsFullEditor() {
           t={t}
         />
       </div>
+      )}
 
         {bulkDeleteJobStatus && (bulkDeleteJobStatus.status === 'pending' || bulkDeleteJobStatus.status === 'processing') && (
           <div className="bulk-toolbar mb-2 flex items-center gap-3 rounded-2xl border px-3 py-2 text-xs sm:rounded-xl">
@@ -5725,7 +5740,7 @@ function ProductsFullEditor() {
           columnChooser={columnChooser}
           loading={loading}
           productSections={productSections}
-          productTotal={productTotal}
+          productTotal={searchTooShort ? 0 : productTotal}
           productTotalLabel={productSummaryLabel}
           refreshingProducts={refreshingProducts}
           scanMiss={scanMiss}
@@ -5767,7 +5782,7 @@ function ProductsFullEditor() {
       {/* Second, non-sticky copy of pagination below the list -- same
           control, same state, just so paging through a long list doesn't
           require scrolling back up to the bar above the search row. */}
-      <div className="mt-2 flex justify-center">
+      <div className={searchTooShort ? 'hidden' : 'mt-2 flex justify-center'}>
         <PaginationControls
           page={productPage}
           pageSize={productSafePageSize}

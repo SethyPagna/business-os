@@ -207,7 +207,7 @@ const lowStockSettings = loadReal('lib/lowStockSettings.ts', { './db': dbModule 
 const shiftReconciliation = loadReal('lib/shiftReconciliation.ts', {
   './db': dbModule, './salesAnalytics': salesAnalytics, './nativeSaleChange': nativeSaleChange, './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts'),
 })
-const telegram = loadReal('lib/telegram.ts', {
+const telegram = loadReal('lib/telegram.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
   './lowStockSettings': lowStockSettings, './db': dbModule, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang,
   './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation,
 })

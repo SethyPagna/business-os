@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { requireAuth, type SessionUser } from '../lib/auth'
+import { requestDeviceColumnSql, requestDeviceParams } from '../lib/audit'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import {
   EMPTY_ADDRESS_PRESETS,
@@ -76,11 +77,11 @@ app.put('/address-presets', async (c) => {
       sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value,device_name,device_tz,created_at)
             SELECT @userId,@userName,'update','pos_address_presets',@revision,@details,
               'settings',@key,@details,
-              (SELECT device_name FROM user_sessions WHERE user_id=@userId AND revoked_at IS NULL ORDER BY last_seen_at DESC,id DESC LIMIT 1),
-              (SELECT device_tz FROM user_sessions WHERE user_id=@userId AND revoked_at IS NULL ORDER BY last_seen_at DESC,id DESC LIMIT 1),
+              ${requestDeviceColumnSql('@userId', 'device_name', '(SELECT device_name FROM user_sessions WHERE user_id=@userId AND revoked_at IS NULL ORDER BY last_seen_at DESC,id DESC LIMIT 1)')},
+              ${requestDeviceColumnSql('@userId', 'device_tz', '(SELECT device_tz FROM user_sessions WHERE user_id=@userId AND revoked_at IS NULL ORDER BY last_seen_at DESC,id DESC LIMIT 1)')},
               @stamp
             WHERE EXISTS(SELECT 1 FROM settings WHERE key=@key AND json_extract(value,'$.revision')=@revision)`,
-      params: { userId: user?.id ?? null, userName: actorSnapshot(user), revision, details, key: POS_ADDRESS_PRESETS_KEY, stamp },
+      params: { userId: user?.id ?? null, userName: actorSnapshot(user), revision, details, key: POS_ADDRESS_PRESETS_KEY, stamp, ...requestDeviceParams() },
     },
   ])
   const result = results[0]

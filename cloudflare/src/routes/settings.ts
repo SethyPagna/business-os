@@ -2,13 +2,13 @@ import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { getPlanLimits } from '../lib/planTier'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { audit, changedFields, auditChangeColumns, isSecretShapedAuditKey } from '../lib/audit'
+import { audit, changedFields, auditChangeColumns, isSecretShapedAuditKey, requestDeviceColumnSql, requestDeviceParams } from '../lib/audit'
 import { getPermissionTier, hasPermission, isAdminControlUser } from '../lib/permissions'
 import { firstChangedAdminOnlySettingKey } from '../lib/settingsAdminKeys'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
-import { isSensitiveSettingKey, isSystemOwnedSettingKey, NOT_SYSTEM_OWNED_SETTING_SQL } from '../lib/settingsSensitive'
+import { isSensitiveSettingKey, isSystemOwnedSettingKey, newestNonSystemOwnedStamp, NOT_SYSTEM_OWNED_SETTING_SQL } from '../lib/settingsSensitive'
 import { canReadSettingKey, settingsVisibleTo } from '../lib/settingsVisibility'
 import { AUDIT_LOG_RETENTION_FLOOR_DAYS, AUDIT_LOG_RETENTION_MAX_DAYS, parseAuditRetentionDays } from '../lib/auditRetentionPolicy'
 // Shared with routes/sales.ts, which folds a method into this list the moment
@@ -114,16 +114,10 @@ async function scopedUpdatedAt(env: Env, stored: Map<string, StoredSettingRow>):
 app.get('/', async (c) => {
   const user = c.get('user')
   const db = getDb(c.env)
-  // One round trip for both reads (perf F5). The second statement is exactly
-  // getSettingsUpdatedAt()'s unscoped branch, including its fallback to now
-  // when the table has no timestamp.
-  const [rowsResult, updatedAtResult] = await db.batch([
-    { sql: 'SELECT key, value FROM settings' },
-    { sql: `SELECT MAX(updated_at) AS updated_at FROM settings WHERE ${NOT_SYSTEM_OWNED_SETTING_SQL}` },
-  ])
-  const rows = (rowsResult?.results ?? []) as Array<{ key: string; value: string }>
-  const updatedAt = (updatedAtResult?.results?.[0] as { updated_at: string | null } | undefined)?.updated_at
-    || new Date().toISOString()
+  // One statement, one pass over the table: the stamp is getSettingsUpdatedAt()'s unscoped answer (the newest updated_at outside the system-owned rows,
+  // falling back to now when the table has none) computed from the same rows by the JS twin of NOT_SYSTEM_OWNED_SETTING_SQL.
+  const rows = await db.prepare('SELECT key, value, updated_at FROM settings').all<{ key: string; value: string; updated_at: string | null }>()
+  const updatedAt = newestNonSystemOwnedStamp(rows) || new Date().toISOString()
   const map: Record<string, string> = {}
   for (const row of rows) map[row.key] = row.value
   // Secret-bearing keys (Drive OAuth tokens etc.) never leave the Worker --
@@ -834,10 +828,10 @@ app.post('/payment-methods/replace', async (c) => {
               json_set(@details,'$.linkedSales',${scope === 'linked' ? `(SELECT COUNT(*) FROM sales s WHERE ${PAYMENT_METHOD_CANDIDATE_WHERE})` : '0'},
                 '$.linkedDetails',${scope === 'linked' ? `(SELECT COUNT(*) FROM sales s,json_each(CASE WHEN json_valid(s.payment_details) AND json_type(s.payment_details)='array' THEN s.payment_details ELSE '[]' END) detail WHERE trim(COALESCE(json_extract(detail.value,'$.method'),'')) IN (SELECT CAST(value AS TEXT) FROM json_each(@sourceVariants)))` : '0'}),
               'payment_method',@operationId,@old_value,@new_value,
-              (SELECT device_name FROM user_sessions WHERE user_id=@userId AND revoked_at IS NULL ORDER BY last_seen_at DESC,id DESC LIMIT 1),
-              (SELECT device_tz FROM user_sessions WHERE user_id=@userId AND revoked_at IS NULL ORDER BY last_seen_at DESC,id DESC LIMIT 1),
+              ${requestDeviceColumnSql('@userId', 'device_name', '(SELECT device_name FROM user_sessions WHERE user_id=@userId AND revoked_at IS NULL ORDER BY last_seen_at DESC,id DESC LIMIT 1)')},
+              ${requestDeviceColumnSql('@userId', 'device_tz', '(SELECT device_tz FROM user_sessions WHERE user_id=@userId AND revoked_at IS NULL ORDER BY last_seen_at DESC,id DESC LIMIT 1)')},
               @stamp`,
-      params: { userId: user?.id ?? null, userName: actorSnapshot(user), operationId, details: JSON.stringify(auditDetails), sourceVariants, identityVariants, stamp, ...paymentMethodChange },
+      params: { userId: user?.id ?? null, userName: actorSnapshot(user), operationId, details: JSON.stringify(auditDetails), sourceVariants, identityVariants, stamp, ...paymentMethodChange, ...requestDeviceParams() },
     },
     {
       sql: `INSERT INTO settings(key,value,updated_at) VALUES('pos_payment_methods',@value,@stamp)

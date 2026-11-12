@@ -11,7 +11,7 @@ import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { collectMergeProductIds, describeMergeFailure } from '../lib/mergeRouteLog'
 import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
-import { pageFamiliesByKeys, paginateProductFamilies, rankProductFamilies, type FamilyPaginationOptions } from '../lib/familyPagination'
+import { pageFamiliesByKeys, paginateProductFamilies, paginateRankedIdFamilies, rankProductFamilies, typedOrderDrivenRead, typedOrderEligible, type FamilyPaginationOptions } from '../lib/familyPagination'
 import { nextPromotionEdge, readPromotionEdge, readRankedScope, type RankedScope } from '../lib/rankedScope'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { ImageOnlyQueryError, parseImageOnlyQuery, pushReceivedWindow, type ImageOnlyGrants, type ImageOnlyReceivedWindow } from '../lib/productImageOnlyQuery'
@@ -28,7 +28,7 @@ import { persistClientImageVariants } from '../lib/imageVariantStore'
 import { sanitizeMediaList } from '../lib/media'
 import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { readStockLedgerKeyset } from '../lib/stockLedgerKeyset'
-import { attachBeforeQty, buildStockLedgerQuery, decodeStockLedgerCursor, loadMovementStockBalances, movementBalanceFields, type MovementStockBalance, type StockLedgerView } from '../lib/stockLedgerQuery'
+import { attachBeforeQty, buildStockLedgerQuery, decodeStockLedgerCursor, ledgerLeanTotals, loadMovementStockBalances, movementBalanceFields, type MovementStockBalance, type StockLedgerView } from '../lib/stockLedgerQuery'
 import { laterOpenSets, type LaterOpenSet } from '../lib/stockRevertEffect'
 import { buildStockInSessionListQuery, parseStockInSessionKey, stockInSessionLineParams, stockInSessionLinesSql, STOCK_RECEIPT_TYPE_SQL } from '../lib/stockInSessionsQuery'
 import { getProductSalesBreakdown, productLedgerGroups } from '../lib/productSalesLedger'
@@ -39,6 +39,7 @@ import { admitRequestBody } from '../lib/requestBodyGuard'
 import { audit, buildAuditStatement, changedFields, isSecretShapedAuditKey } from '../lib/audit'
 import { getPlanLimits } from '../lib/planTier'
 import { countProductDataGaps, findOpenConflictMarkRequest, listProductDataGaps, parseProductConflictMarkInput, parseProductDataGapKind, preflightProductConflictMark, ProductConflictMarkError, readConfirmedValue, setProductConflictMark } from '../lib/productDataGaps'
+import type { PossiblySameProductCluster, PossiblySameProductEntry } from '../lib/productIdentity'
 import { absorbedBarcodes, keeperFollowsBarcode, productIdsInOneCluster } from '../lib/productIdentity'
 import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, findSameIdentityProduct, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeProductClusterKey, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { lotRemainingSql } from '../lib/lotRemaining'
@@ -552,7 +553,7 @@ async function loadProductFilters(env: Env, query: Record<string, string> = {}) 
   const { query: _searchTerm, q: _searchTermAlt, search: _searchTermAlias, ...structuralQuery } = query
   const variants = buildFilterVariants(structuralQuery, await loadLowStockConfig(env))
   const sql = (f: ReturnType<typeof buildSearchFilters>) => `WHERE ${f.where.join(' AND ')}`
-  const joinSql = (f: ReturnType<typeof buildSearchFilters>) => f.joins.join('\n')
+  const joinSql = filterJoinSql
 
   // GROUP BY the case/whitespace-normalized value rather than plain DISTINCT
   // -- DISTINCT on trim(p.brand) still compares byte-for-byte, so imported
@@ -731,7 +732,7 @@ async function loadImageOnlyFacets(
     const filters = buildSearchFilters({ ...withoutSearch, [field]: '' }, lowStock)
     pushReceivedWindow(filters.where, filters.params, imageOnly.received)
     return {
-      sql: `SELECT MIN(trim(p.${field})) AS value FROM products p ${filters.joins.join('\n')} WHERE ${filters.where.join(' AND ')}
+      sql: `SELECT MIN(trim(p.${field})) AS value FROM products p ${filterJoinSql(filters)} WHERE ${filters.where.join(' AND ')}
         AND trim(COALESCE(p.${field}, '')) <> '' GROUP BY lower(trim(p.${field})) ORDER BY lower(value) ASC`,
       params: filters.params,
     }
@@ -1039,7 +1040,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
       : loadActivePromotionRules(db),
   ])
   const filters = buildSearchFilters(query, lowStockConfig, options)
-  const { where, joins, params, matchRankSql, rankCteSql, matchTierSql, hasSearchTerm, familyMemberWhereSql } = filters
+  const { where, joins, params, matchRankSql, rankCteSql, matchTierSql, hasSearchTerm, familyMemberWhereSql, rankedIdDriver } = filters
   // The keyed page fetch pays for itself on catalogue-wide reads and on long ranked-id lists. A by-id read or a short
   // ranked-id hydration (the till's per-keystroke lookup) is already tiny, and the extra CTEs cost it 4-8 ms of SQL
   // time (lab medians: 8 ids 2 -> 7 ms, 60 ids 4 -> 9 ms, 300 ids 13 vs 16 ms, 1,500 ids 130 vs 120 ms), so it keeps
@@ -1075,7 +1076,6 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   // Image-only received window. Deliberately here and not in buildSearchFilters,
   // which every other product reader shares and which must stay all-time.
   if (options.imageOnly) pushReceivedWindow(where, params, options.imageOnly.received)
-  const joinSql = joins.join('\n')
   const whereSql = `WHERE ${where.join(' AND ')}`
 
   // A search term in play takes over the primary sort order (relevance,
@@ -1111,6 +1111,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     ? buildFamilyRelevanceOrderSql(familyOrderSql, familyRelevance)
     : buildFamilyRelevanceOrderSql(familyOrderSql, { ...familyRelevance, promotedFirst: true })
 
+  const joinSql = joinsReadBy(joins, [PRODUCT_SEARCH_SELECT_SQL, ...where, effectiveFamilyOrderSql, intraFamilyOrderSql, matchRankSql, rankCteSql, matchTierSql, promotedRankSql, familyMemberWhereSql]).join('\n')
   const familyOptions: FamilyPaginationOptions = {
     db,
     selectColumns: PRODUCT_SEARCH_SELECT_SQL,
@@ -1139,9 +1140,15 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   }
   // catalog_ranked_scope: the ranking of the page's WINDOW comes from the shared cache (one ranking serves every page of the window and both pages that read this scope), and
   // only the page's rows are read, by key. The same families, order, rows and total as the seek-page statement; a read that is not a seek-page read keeps its own path.
-  const { items, total, totalPages } = options.ranked && seekPageRead
+  // products_typed_order_js: a typed ranked-id read (the till's keystroke, 300 ids or more) orders its families in the Worker (paginateRankedIdFamilies); every other read, and any read whose
+  // order is not the one that function proves, keeps the statement it always ran. A restricted read (Inventory Check) keeps the ranked scope.
+  const typedOrderRead = rankedIdDriver && typedOrderEligible({ restricted: Boolean(options.ranked), seekPageRead, rankedIdCount, imageOnly: Boolean(options.imageOnly), byId: Object.hasOwn(params, 'byId0'), orderSql: effectiveFamilyOrderSql })
+    ? typedOrderDrivenRead(where, rankedIdDriver) : undefined
+  const typedOrdered = typedOrderRead && await readSwitch(env, 'products_typed_order_js')
+    ? await paginateRankedIdFamilies<Record<string, unknown>>(familyOptions, typedOrderRead) : null
+  const { items, total, totalPages } = typedOrdered ?? (options.ranked && seekPageRead
     ? await paginateRankedFamilies(familyOptions, options.ranked)
-    : await paginateProductFamilies<Record<string, unknown>>(familyOptions)
+    : await paginateProductFamilies<Record<string, unknown>>(familyOptions))
 
   // Name-duplicate half of the same fix (see expandSearchResultsToNameSiblings's
   // own comment) -- only when a search term is active, same gating as the
@@ -1199,6 +1206,17 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   }
 }
 
+// A join is kept only when some finished SQL fragment reads its alias. The selected-branch stock join is read by the stock and
+// issue filters alone; every other statement selects products columns, so a plain page or facet read skips it.
+export function joinsReadBy(joins: readonly string[], fragments: ReadonlyArray<string | undefined>): string[] {
+  const text = fragments.filter((fragment): fragment is string => Boolean(fragment)).join('\n')
+  return joins.filter((join) => {
+    const alias = /^\s*LEFT JOIN\s+\w+\s+(\w+)\s+ON\b/i.exec(join)?.[1]
+    return !alias || new RegExp(`\\b${alias}\\.`).test(text)
+  })
+}
+const filterJoinSql = (f: ReturnType<typeof buildSearchFilters>) => joinsReadBy(f.joins, [...f.where, f.matchRankSql, f.rankCteSql, f.matchTierSql, f.familyMemberWhereSql]).join('\n')
+
 // Builds the same WHERE/params shape as backend/src/routes/products.ts's
 // appendProductSearchFilters -- identical SQL, just @param -> our D1 adapter
 // (which itself translates @param to positional ? before binding).
@@ -1216,6 +1234,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
 // with no stock filter actively selected -- fixed client-side; an empty
 // stockState here means no stock-based filtering at all, same as with no
 // branch selected.
+
 function buildSearchFilters(query: Record<string, string>, lowStock: LowStockConfig, options: ProductSearchOptions = {}) {
   const where: string[] = [`${catalogProductSql()}`]
   const params: Record<string, unknown> = {}
@@ -1414,7 +1433,7 @@ function buildSearchFilters(query: Record<string, string>, lowStock: LowStockCon
   if (options.restrictIdsJson !== undefined) { params.icRestrictIds = options.restrictIdsJson; where.push('p.id IN (SELECT value FROM json_each(@icRestrictIds))') }
   if (options.excludeIdsJson !== undefined) { params.icExcludeIds = options.excludeIdsJson; where.push('p.id NOT IN (SELECT value FROM json_each(@icExcludeIds))') }
 
-  return { where, joins, params, stockExpr, matchRankSql, rankCteSql, matchTierSql, titleOnly, hasSearchTerm, familyMemberWhereSql }
+  return { where, joins, params, stockExpr, matchRankSql, rankCteSql, matchTierSql, titleOnly, hasSearchTerm, familyMemberWhereSql, rankedIdDriver: searchQuery.rankedIdDriver }
 }
 
 function isProductSearchIndexUnavailable(error: unknown): boolean {
@@ -1549,6 +1568,10 @@ export type ProductSearchListOptions = {
   lotsAdmitted?: boolean
   taggedLotsAdmitted?: boolean
 }
+// A typed search: text in a search box (a name, a word, a barcode scan) or the list of ids the till ranked itself (rankIds, any length). Its key is unique to the keystroke.
+export function isTypedSearch(query: Record<string, string>): boolean {
+  return String(query.rankIds ?? '').trim() !== '' || String(query.query || query.q || query.search || '').trim() !== ''
+}
 export async function readProductSearchList(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, query: Record<string, string>, options: ProductSearchListOptions = {}) {
   const user = c.get('user')
   const include = options.include ?? productSearchIncludes(query)
@@ -1566,7 +1589,9 @@ export async function readProductSearchList(c: Context<{ Bindings: Env; Variable
   }
   // catalog_ranked_scope ON: no page payload is cached. The ranking of the page's window is (lib/rankedScope.ts) and every row is read live by key, so nothing needs refreshing.
   // A version that cannot be read gives an unsafe token: no key, the ranking is computed for this request and stored nowhere (fail closed, never a stale answer).
-  if (await readSwitch(c.env, 'catalog_ranked_scope')) {
+  // A typed search keeps the page path below: a stored ranking is never read again for a key unique to the keystroke, and the ranked read costs more rows and calls than the page it replaces.
+  // (The Inventory Check lists read the shared ranking and keep it.)
+  if (!(!restricted && isTypedSearch(query)) && await readSwitch(c.env, 'catalog_ranked_scope')) {
     let versions: string, edgeVersions: string
     try {
       const [baseVersion, promotions] = await Promise.all([productSearchCacheVersion(c.env, query), getVersionWithFallback(c.env, 'promotions')])
@@ -2207,6 +2232,8 @@ app.get('/stock-ledger', async (c) => {
   const page = Math.max(1, Number(query.page) || 1)
   // Read switch ledger_keyset: the list pages by cursor (lib/stockLedgerKeyset.ts) and its page cap is the plan's stockLedgerExportPageRows.
   const keyset = await readSwitch(c.env, 'ledger_keyset')
+  // Read switch ledger_summary_lean: the total and the In/Out summary are one scan of the movements, not a scan joined to products and batches per row, and a view chip's count is read from it.
+  const lean = await readSwitch(c.env, 'ledger_summary_lean')
   // 1000-cap (was 100): the Stock Changes CSV export walks pages of this
   // endpoint for a chosen date range -- 10x fewer round trips per export,
   // still bounded. Interactive views keep asking for 25-100.
@@ -2228,7 +2255,13 @@ app.get('/stock-ledger', async (c) => {
   if (keyset) {
     const cursor = query.cursor ? decodeStockLedgerCursor(query.cursor) : null
     if (query.cursor && !cursor) return c.json({ code: 'invalid_cursor', error: 'The cursor is not valid. Start again from the first page.' }, 400)
-    return c.json(await readStockLedgerKeyset(db, ledger, { page, pageSize, cursor, totals: query.totals === '1', view: ['all', 'in', 'out'].includes(String(query.view || '')) ? String(query.view) : 'all' }))
+    return c.json(await readStockLedgerKeyset(db, ledger, { page, pageSize, cursor, totals: query.totals === '1', lean, view: ['all', 'in', 'out'].includes(String(query.view || '')) ? String(query.view) : 'all' }))
+  }
+  const viewName = ['all', 'in', 'out'].includes(String(query.view || '')) ? String(query.view) : 'all'
+  if (lean) {
+    const rowsLean = await db.prepare(ledger.rowsSql).all<Record<string, unknown>>({ ...ledger.params, limit: pageSize, offset: (page - 1) * pageSize })
+    const totals = ledgerLeanTotals(await db.prepare(ledger.leanSummarySql).get<Record<string, number>>(ledger.params), viewName)
+    return c.json({ items: attachBeforeQty(rowsLean || []), total: totals.total, page, pageSize, totalPages: Math.max(1, Math.ceil(totals.total / pageSize)), view: viewName, summary: totals.summary })
   }
   const countRow = await db.prepare(ledger.countSql).get<{ total: number }>(ledger.params)
   const total = Number(countRow?.total || 0)
@@ -3018,6 +3051,8 @@ app.put('/:id', async (c) => {
           if (refusal) return c.json({ error: refusal.message, code: refusal.code }, refusal.status)
           throw error
         }
+        // The identity write is committed whatever the fold below does: announce it, so no refusal after it leaves a stale catalogue.
+        c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
         let foldResult: Awaited<ReturnType<typeof foldDuplicateProductInto>>
         try {
           const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
@@ -3124,6 +3159,8 @@ app.put('/:id', async (c) => {
       summary: `Update product #${id}`,
     })
     if (pendingId != null) {
+      // A group rename carried above is already written: queueing the rest of the edit must not hide it.
+      if (renamedProductIds.length) c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
       return c.json({ success: true, pending: true, pendingActionId: pendingId }, 202)
     }
   }
@@ -3315,6 +3352,8 @@ app.delete('/:id', async (c) => {
     if (replay?.status === 'undo_ready' && replay.product_id === id && replay.reason === reason) {
       let response: Record<string, unknown> = {}
       try { response = replay.response_json ? JSON.parse(replay.response_json) : {} } catch { response = {} }
+      // The removal committed and its acknowledgement was lost: nothing announced it yet.
+      c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
       return c.json({ success: true, ...response, replayed: true })
     }
     return c.json({ success: false, code: 'review_state_conflict', error: 'The product changed before the removal committed.' }, 409)
@@ -6488,13 +6527,47 @@ app.post('/merge-duplicates', async (c) => {
 // items"), and a one-pair merge where the REVIEWER picks the keeper.
 // Same permission as the auto-merge -- it is the same kind of action.
 // ---------------------------------------------------------------------------
+// The cached groups with every member's displayed values read live by primary key. Null when a member no longer is what the group was built from (renamed,
+// re-barcoded, deactivated, now a group parent): the caller recomputes, so a write that never announced itself cannot keep a stale group on screen.
+async function withLiveClusterMembers(env: Env, clusters: PossiblySameProductCluster[]): Promise<PossiblySameProductCluster[] | null> {
+  const ids = [...new Set(clusters.flatMap((cluster) => cluster.products.map((member) => Number(member.id))))]
+  if (!ids.length) return clusters
+  const db = getDb(env)
+  // One statement whatever the number of members, seeking by primary key: the unary + keeps the planner off the is_active index (a walk of every active product).
+  const rows = await db.prepare(`SELECT p.id, p.name, p.barcode, p.cost_price_usd, p.cost_price_khr, p.selling_price_usd, p.image_path,
+      COALESCE((SELECT SUM(bs.quantity) FROM branch_stock bs WHERE bs.product_id = p.id), 0) AS stock_quantity
+    FROM products p WHERE p.id IN (SELECT value FROM json_each(@ids)) AND ${catalogProductSql('p', false)} AND COALESCE(p.is_group, 0) = 0`).all<PossiblySameProductEntry>({ ids: JSON.stringify(ids) })
+  const live = new Map(rows.map((row) => [Number(row.id), row]))
+  for (const cluster of clusters) {
+    for (const member of cluster.products) {
+      const row = live.get(Number(member.id))
+      if (!row || row.name !== member.name || row.barcode !== member.barcode) return null
+    }
+  }
+  return clusters.map((cluster) => ({
+    ...cluster,
+    products: cluster.products.map((member) => {
+      const row = live.get(Number(member.id))!
+      return { ...member, cost_price_usd: row.cost_price_usd, cost_price_khr: row.cost_price_khr, selling_price_usd: row.selling_price_usd, stock_quantity: row.stock_quantity, image_path: row.image_path }
+    }),
+  }))
+}
+
 app.get('/possible-duplicates', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
     return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
   }
-  const clusters = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
-    await catalogReadVersion(c.env, ['products', 'stock']), 300, () => findPossiblySameProductClusters(getDb(c.env)), cacheIdentity(c))
+  // Which products look the same depends on products rows and the dismissals, never on stock, so the groups are keyed on the products version alone and live for
+  // possibleDuplicatesCacheSeconds. A hit re-reads what a group shows (stock, cost, price, image) live, and a group whose member changed identity or left the
+  // catalogue without announcing it is recomputed instead of served.
+  let produced = false
+  const cached = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
+    await catalogReadVersion(c.env, ['products']), getPlanLimits(c.env).possibleDuplicatesCacheSeconds, async () => {
+      produced = true
+      return findPossiblySameProductClusters(getDb(c.env))
+    }, cacheIdentity(c))
+  const clusters = produced ? cached : (await withLiveClusterMembers(c.env, cached)) ?? await findPossiblySameProductClusters(getDb(c.env))
   return c.json({ success: true, clusters })
 })
 
@@ -10144,7 +10217,10 @@ app.post('/possible-duplicates/merge', async (c) => {
     // row exists the batch did commit, and only then is this rethrown.
     let applied: unknown = true
     try { applied = await db.prepare(MERGE_APPLIED_PROBE_SQL).get<{ applied: number }>({ operationId }) } catch { applied = true }
-    if (applied) throw error
+    if (applied) {
+      await bumpVersion(c.env, 'products')
+      throw error
+    }
     const errorId = crypto.randomUUID()
     console.error(describeMergeFailure({ method: c.req.method, path: c.req.path, status: 409, productIds: [keeper.id, dup.id], error, errorId }))
     return c.json(mergeFailedBody(errorId), 409)
@@ -10633,7 +10709,7 @@ app.post('/upload-image', async (c) => {
   const asset = await db.prepare(`SELECT * FROM file_assets WHERE id = @id`).get({ id: insert.lastInsertRowid })
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'upload', 'product_image', insert.lastInsertRowid, { original_name: originalName })
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  // No products version bump: the upload writes R2 and file_assets only. Each route that attaches the path to a product bumps for itself.
 
   return c.json({
     success: true,

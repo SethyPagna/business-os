@@ -31,8 +31,8 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "485944539586",
-   "SELECT COUNT(*) AS ready FROM sqlite_master WHERE (type='table' AND name='fee_operation_receipts') OR (type='t"
+   "f75d32afc326",
+   "SELECT type, name FROM sqlite_master WHERE name IN (SELECT value FROM json_each(?1))"
   ],
   [
    "4855047537f0",

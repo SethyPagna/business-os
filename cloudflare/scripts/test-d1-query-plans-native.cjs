@@ -26,6 +26,7 @@ const OTHERS = 200
 const entry = `
 import { Hono } from 'hono'
 import { getDb, getImportFencedDb } from './src/lib/db.ts'
+import { resetSchemaObjectProbeForTests } from './src/lib/schemaObjectProbe.ts'
 import fees from './src/routes/fees.ts'
 import sales from './src/routes/sales.ts'
 import batches from './src/routes/batches.ts'
@@ -127,6 +128,7 @@ export default { async fetch(request, env) {
     })
     const trigger = await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='transfer_receipts_require_provenance_insert'").first('sql')
     await env.DB.prepare('DROP TRIGGER transfer_receipts_require_provenance_insert').run()
+    resetSchemaObjectProbeForTests()
     out.notReady1 = await feePost()
     out.notReady2 = await feePost()
     await env.DB.prepare(trigger).run()
@@ -240,6 +242,22 @@ async function main() {
       }
     })
 
+    await check('delivery-person delete guard: the usage read and the in-batch guard SEARCH sales by idx_sales_delivery_contact (0300), never SCAN it', async () => {
+      const src = fs.readFileSync(path.join(root, 'src', 'lib', 'contactDeleteGuard.ts'), 'utf8').split(String.fromCharCode(13, 10)).join(String.fromCharCode(10))
+      const between = (from, to) => { const a = src.indexOf(from); return src.slice(a + from.length, src.indexOf(to, a + from.length)) }
+      const named = between('const named = `', '`')
+      const usageSql = between('db.prepare(`', '`)').replace(/@ids/g, '?')
+      const guardSql = ('SELECT CASE WHEN EXISTS (SELECT 1 FROM sales WHERE ' + named + ')' + between('SELECT 1 FROM sales WHERE ${named})', '`')).split('${named}').join(named).split('${DELIVERY_CONTACT_IN_USE_MARKER}').join('x').replace(/@ids/g, '?')
+      const ids = JSON.stringify([1, 2])
+      const { plans } = await call('explain', { items: [{ sql: usageSql, params: [ids, ids] }, { sql: guardSql, params: [ids, ids] }] })
+      assert.equal(plans.length, 2)
+      for (const plan of plans) {
+        const text = plan.join(' | ')
+        assert.ok(/SEARCH sales USING (COVERING )?INDEX idx_sales_delivery_contact/.test(text), text)
+        assert.ok(!/SCAN sales/.test(text), text)
+      }
+    })
+
     await check(`search with ${MATCHES} matches reads under 15,000 rows in 2 statements`, async () => {
       const r = await call('search', { term: 'glow' })
       report('search', r)
@@ -281,11 +299,11 @@ async function main() {
       for (const file of ['routes/fees.ts', 'routes/branches.ts', 'routes/inventory.ts']) {
         const src = read(file)
         assert.ok(src.includes('if (operationWritesAvailable) return true'), file)
-        assert.ok(src.includes('operationWritesAvailable = row?.ready === 2'), file)
+        assert.ok(src.includes('operationWritesAvailable = await schemaObjectsPresent(db, OPERATION_WRITE_SCHEMA)'), file)
         assert.ok(!/^\s+operationWritesAvailable = (true|false)/m.test(src), file + ': assigned only from the probe result')
       }
       const contacts = read('routes/contacts.ts')
-      assert.ok(contacts.includes('if (tablesPresent.has(name)) return true') && contacts.includes('if (row) tablesPresent.add(name)'))
+      assert.ok(contacts.includes('if (tablesPresent.has(name)) return true') && contacts.includes('if (present) tablesPresent.add(name)'))
       assert.ok(!contacts.includes("name='customer_receivables' LIMIT 1"), 'the ledger check goes through hasTable')
       assert.ok(read('lib/stockSession.ts').includes('if (!lotEditTableAvailable) lotEditTableAvailable = Boolean('))
     })

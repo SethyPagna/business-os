@@ -4,7 +4,7 @@ assert.ok(boundary>0)
 const fixtureModule=new Module(file,module);fixtureModule.filename=file;fixtureModule.paths=module.paths
 assert.ok(source.includes("fs.readFileSync(sourcePath, 'utf8')"))
 fixtureModule._compile(source.slice(0,boundary).replace('const overrides = {',"const overrides = { './db': { getDb: env => env.DB },")
- .replace("fs.readFileSync(sourcePath, 'utf8')","(fs.readFileSync(sourcePath, 'utf8')+(rel==='routes/sales.ts'?'\\nexport {capturePrecisionBasket};export const resetHistoricalEditReady=()=>{historicalEditSchemaAvailable=false};':''))")
+ .replace("fs.readFileSync(sourcePath, 'utf8')","(fs.readFileSync(sourcePath, 'utf8')+(rel==='routes/sales.ts'?'\\nexport {capturePrecisionBasket};import {forgetSchemaNames as __forgetSchema} from \"../lib/schemaObjectProbe\";export const resetHistoricalEditReady=()=>{historicalEditSchemaAvailable=false;__forgetSchema([HISTORICAL_EDIT_TRIGGER.name])};':''))")
  +'\nmodule.exports={fixture,request,postSale,app,executionCtx,load,USER,setUser(value){currentUser=value}};',file)
 const h=fixtureModule.exports,helper=h.load('lib/historicalSalePricing.ts')
 const contract=h.load('lib/saleMoneyPrecision.ts')

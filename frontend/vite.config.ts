@@ -678,6 +678,9 @@ function manualChunks(id: string): string | undefined {
       normalized.endsWith('/src/api/http.ts')
       || normalized.endsWith('/src/api/query.ts')
       || normalized.endsWith('/src/api/actorQuery.ts')
+      || normalized.endsWith('/src/api/writeInvalidation.ts')
+      // http.ts's after-mutation hook arms it, so it travels with http.ts (a chunk of its own or app-api-methods would be a cycle).
+      || normalized.endsWith('/src/api/bellFreshness.ts')
     ) {
       return 'api-http-core'
     }

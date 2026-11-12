@@ -135,7 +135,7 @@
 // reports the reversal the COGS floor could not absorb, which is the missing
 // cost snapshot the floor used to swallow silently.
 import { getDb } from './db'
-import { tableColumnSet } from './schemaProbe'
+import { prefetchTableColumns, tableColumnSet } from './schemaProbe'
 import type { Env } from '../index'
 import {
   localRangeClockError,
@@ -266,6 +266,9 @@ export function shiftWindowWhere(
   const params: Record<string, unknown> = {}
   const createdFrom = shiftWindowBound(f.createdFrom)
   if (createdFrom) {
+    // Plain widened bounds beside the exact datetime() terms let the created_at index prune; the datetime() terms decide. A row stored with an offset has a text date
+    // a day either side of its UTC date: -1 day below, +2 days above (+1 drops +07:00 rows). Pinned by test-shift-window-created-bounds-native.cjs.
+    clauses.push(`${alias}.created_at >= date(@createdFrom, '-1 day')`)
     clauses.push(`datetime(${alias}.created_at) >= @createdFrom`)
     params.createdFrom = createdFrom
   }
@@ -274,6 +277,7 @@ export function shiftWindowWhere(
   // next one.
   const createdTo = shiftWindowBound(f.createdTo)
   if (createdTo) {
+    clauses.push(`${alias}.created_at < date(@createdTo, '+2 day')`)
     clauses.push(`datetime(${alias}.created_at) < @createdTo`)
     params.createdTo = createdTo
   }
@@ -809,11 +813,16 @@ function whereRemovalMovements(f: SalesFilters): { sql: string; params: Record<s
   // scoped to -- so a removal made during someone else's shift stays on theirs.
   const createdFrom = shiftWindowBound(f.createdFrom)
   if (createdFrom) {
+    // The plain widened bounds beside the exact datetime() terms (the same pair shiftWindowWhere emits for sales, returns and fees): without them no index on
+    // created_at can narrow this read and a shift close walked every removal the cashier ever made. -1 day below, +2 days above: a row stored with an offset has a
+    // text date a day either side of its UTC date (+1 day above drops +07:00 rows). Pinned by test-shift-removal-window-bounds-native.cjs.
+    clauses.push("m.created_at >= date(@createdFrom, '-1 day')")
     clauses.push('datetime(m.created_at) >= @createdFrom')
     params.createdFrom = createdFrom
   }
   const createdTo = shiftWindowBound(f.createdTo)
   if (createdTo) {
+    clauses.push("m.created_at < date(@createdTo, '+2 day')")
     clauses.push('datetime(m.created_at) < @createdTo')
     params.createdTo = createdTo
   }
@@ -893,7 +902,16 @@ export class SalesReportExportTooLargeError extends RangeError {
 
 /** Only full-export callers opt into this receipt ceiling. The shared scalar
  * row ceiling still bounds every reader, including all child records. */
-export interface SalesReportReadOptions { maxReceipts?: number }
+export interface SalesReportReadOptions {
+  maxReceipts?: number
+  /** INTERNAL to readSalesHeaderTotals: read no sale-line rows. Every public reader refuses it (a snapshot without lines would
+   * show cost 0 and a plausible but WRONG profit). */
+  headerOnly?: true
+}
+
+function refuseHeaderOnly(options: SalesReportReadOptions): void {
+  if (options.headerOnly !== undefined) throw new ReportMoneyPrecisionError('unsupported_row')
+}
 
 export type SalesReportScalarScopeValue = string | number | null
 export type SalesReportScalarScope = (saleAlias: string) => {
@@ -1101,7 +1119,14 @@ function applySalesReportScalarScope<T extends { sql: string; params: Record<str
 // getSalesDayReport/getSalesPeriodSeries call sites below); each column set
 // is memoized per isolate by schemaProbe.ts's shared helper instead of
 // firing a fresh PRAGMA table_info() every time.
+// The tables every report read probes (the legacy and the planned pass, the restore check). A cold isolate asks for all eight in ONE statement instead of
+// eight PRAGMAs; a table the combined probe does not return falls back to its own PRAGMA (schemaProbe.prefetchTableColumns).
+const REPORT_COLUMN_TABLES = ['system_flags', 'sales', 'sale_items', 'returns', 'return_items', 'fees', 'customers', 'delivery_contacts'] as const
+export async function prefetchReportColumns(env: Env): Promise<void> {
+  await prefetchTableColumns(getDb(env), REPORT_COLUMN_TABLES)
+}
 async function reportTableColumns(db: ReturnType<typeof getDb>, table: string): Promise<Set<string>> {
+  if ((REPORT_COLUMN_TABLES as readonly string[]).includes(table)) await prefetchTableColumns(db, REPORT_COLUMN_TABLES)
   return tableColumnSet(db, table)
 }
 
@@ -1355,7 +1380,7 @@ async function buildSalesReportReadPlan(
     FROM sales s WHERE ${voids.sql}`, idExpr: 's.id', params: voids.params, columns: voidSelect.columns })
   const itemFrom = datedDashboard ? 'sales s CROSS JOIN sale_items si ON si.sale_id=s.id'
     : 'sale_items si NOT INDEXED CROSS JOIN sales s ON s.id=si.sale_id'
-  groups.push({ kind: 'items', sql: `SELECT ${itemSelect.sql}
+  if (!options.headerOnly) groups.push({ kind: 'items', sql: `SELECT ${itemSelect.sql}
     FROM ${itemFrom} WHERE ${primary.sql}`,
     idExpr: 'si.id', params: primary.params, columns: itemSelect.columns })
   // The debt half of a refund (0260); absent columns read as a pre-0260 row.
@@ -1867,7 +1892,7 @@ async function readSalesReportPassLegacy(
       s.cashier_id,s.cashier_name,s.customer_id,s.customer_name,s.customer_phone,s.payment_method,
       ${customerAnonymous} AS customer_is_anonymous
     FROM sales s WHERE ${voids.sql}`, 's.id', voids.params, rowBudget)
-  const items = await readReportSaleItems(db, f, primary, rowBudget, `SELECT si.id,si.sale_id,${itemColumn('product_id','NULL')},${itemColumn('product_name',"''")},si.quantity,
+  const items = options.headerOnly ? [] : await readReportSaleItems(db, f, primary, rowBudget, `SELECT si.id,si.sale_id,${itemColumn('product_id','NULL')},${itemColumn('product_name',"''")},si.quantity,
       ${itemColumn('total_usd','0')},si.cost_price_usd,${itemColumn('product_discount_usd','0')},${itemColumn('manual_discount_usd','0')}
     FROM sale_items si NOT INDEXED CROSS JOIN sales s ON s.id=si.sale_id WHERE ${primary.sql}`)
   // The debt half of a refund (0260); absent columns read as a pre-0260 row.
@@ -1978,8 +2003,11 @@ async function readSalesReportSnapshotAtomic(
 ): Promise<SalesReportSnapshot> {
   validateReportReadOptions(options)
   const capturedScope = captureSalesReportScalarScope(scalarScope)
-  const bare = !includeDeliveryFees && capturedScope === null && Object.getPrototypeOf(options) === Object.prototype && Reflect.ownKeys(options).length === 0
-  if (bare && reportPlainFilters(f) && reportAtomicFiltersEligible(f)) return readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, 'full')
+  const unscoped = capturedScope === null && Object.getPrototypeOf(options) === Object.prototype && Reflect.ownKeys(options).length === 0
+  const bare = !includeDeliveryFees && unscoped
+  // The UNDATED window also takes the delivery-fee group: the plan builder already builds it (buildSalesReportReadPlan) and the batch counts it (rows_deliveryFees), so
+  // Reports overview (readSalesReportSnapshot(..., true)) no longer falls to the two-pass reader. Dated windows keep the passes: their fee window rules (fee_date vs created_at) differ.
+  if (unscoped && reportPlainFilters(f) && reportAtomicFiltersEligible(f)) return readSalesReportAtomicTotalsSnapshot(env, f, includeDeliveryFees, null, {}, 'full')
   if (bare && reportDashboardDateFiltersEligible(f)) return readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, 'full', true)
   return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, 'full')
 }
@@ -1991,6 +2019,7 @@ export async function readSalesReportSnapshot(
   scalarScope?: SalesReportScalarScope,
   options: SalesReportReadOptions = {},
 ): Promise<SalesReportSnapshot> {
+  refuseHeaderOnly(options)
   return routeReportRead(env, 'snapshot',
     () => readSalesReportSnapshotLegacy(env, f, includeDeliveryFees, scalarScope, options),
     () => readSalesReportSnapshotAtomic(env, f, includeDeliveryFees, scalarScope, options),
@@ -2011,6 +2040,44 @@ export async function readSalesReportTotals(
   includeDeliveryFees = false,
   scalarScope?: SalesReportScalarScope,
   options: SalesReportReadOptions = {},
+): Promise<SalesReportTotalsResult> {
+  refuseHeaderOnly(options)
+  return readSalesReportTotalsRouted(env, f, includeDeliveryFees, scalarScope, options)
+}
+
+/** The six numbers GET /api/sales/stats shows, read from sale HEADERS and returns only (no sale-line rows).
+ * Deliberately NOT a SalesTotals: there is no cost or profit here to leak, because without lines they would be wrong. */
+export interface SalesHeaderTotals {
+  revenue_usd: number
+  pending_revenue_usd: number
+  revenue_without_not_paid_usd: number
+  not_paid_owed_usd: number
+  sale_count: number
+  cancelled_count: number
+}
+
+export async function readSalesHeaderTotals(
+  env: Env,
+  f: SalesFilters & { contactId?: number | string | null },
+  scalarScope?: SalesReportScalarScope,
+): Promise<SalesHeaderTotals> {
+  const report = await readSalesReportTotalsRouted(env, f, false, scalarScope, { headerOnly: true })
+  return {
+    revenue_usd: report.totals.revenue_usd,
+    pending_revenue_usd: report.totals.pending_revenue_usd,
+    revenue_without_not_paid_usd: report.totals.revenue_without_not_paid_usd,
+    not_paid_owed_usd: report.totals.not_paid_owed_usd,
+    sale_count: report.sale_count,
+    cancelled_count: report.cancelled_count,
+  }
+}
+
+async function readSalesReportTotalsRouted(
+  env: Env,
+  f: SalesFilters & { contactId?: number | string | null },
+  includeDeliveryFees: boolean,
+  scalarScope: SalesReportScalarScope | undefined,
+  options: SalesReportReadOptions,
 ): Promise<SalesReportTotalsResult> {
   return routeReportRead(env, 'totals',
     async () => {
@@ -2791,9 +2858,23 @@ export async function getSalesTotalsWithoutLosses(env: Env, f: SalesFilters): Pr
     })
 }
 
-export async function getSalesTotals(env: Env, f: SalesFilters): Promise<SalesTotals> {
+/**
+ * One PHASE's report snapshot, shared. getSalesTotals and getPaymentMethodBreakdown both read `readSalesReportSnapshot(env, f)` (no delivery fees, no scope), so two
+ * readers of the SAME window in the SAME phase -- the Telegram shift report prints both -- may pass one memo and run the two-pass reader once. The memo holds the
+ * promise, is made per phase by the caller and dropped with it (lib/shiftReconciliation.ts ShiftReadMemo is the same Map); nothing is kept across requests.
+ */
+export type ReportReadMemo = Map<string, Promise<unknown>>
+function readWindowSnapshot(env: Env, f: SalesFilters, memo?: ReportReadMemo): Promise<SalesReportSnapshot> {
+  if (!memo) return readSalesReportSnapshot(env, f)
+  const key = `report-snapshot|${JSON.stringify(f)}`
+  let hit = memo.get(key) as Promise<SalesReportSnapshot> | undefined
+  if (!hit) { hit = readSalesReportSnapshot(env, f); memo.set(key, hit) }
+  return hit
+}
+
+export async function getSalesTotals(env: Env, f: SalesFilters, memo?: ReportReadMemo): Promise<SalesTotals> {
   const [snapshot, loss] = await Promise.all([
-    readSalesReportSnapshot(env, f),
+    readWindowSnapshot(env, f, memo),
     removalLossesFor(env, f),
   ])
   return withRemovalLosses(salesTotalsFromSnapshot(snapshot), loss)
@@ -3176,8 +3257,8 @@ export function paymentMethodBreakdownFromSnapshot(snapshot: SalesReportSnapshot
   })).sort((a, b) => b.collected_usd - a.collected_usd)
 }
 
-export async function getPaymentMethodBreakdown(env: Env, f: SalesFilters): Promise<PaymentMethodBreakdownRow[]> {
-  const snapshot = await readSalesReportSnapshot(env, f)
+export async function getPaymentMethodBreakdown(env: Env, f: SalesFilters, memo?: ReportReadMemo): Promise<PaymentMethodBreakdownRow[]> {
+  const snapshot = await readWindowSnapshot(env, f, memo)
   if (snapshot) return paymentMethodBreakdownFromSnapshot(snapshot)
   const db = getDb(env)
   const { sql: whereSql, params } = whereActiveSales('sales', f)

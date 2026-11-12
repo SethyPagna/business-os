@@ -80,6 +80,9 @@ const sessionsRoute = load(path.join(__dirname, '../src/routes/inventoryChecks.t
 const { resetReadSwitchMemo } = load(path.join(__dirname, '../src/lib/readSwitches.ts'))
 const { __resetPlanTierCacheForTests } = load(path.join(__dirname, '../src/lib/planTier.ts'))
 
+// A Map-backed KV so every write really bumps the inventory_checks version (without a CACHE binding each bump threw and was logged, ~270 stack traces, and no bump was ever exercised).
+const kv = new Map()
+const CACHE = { get: async key => (kv.has(key) ? kv.get(key) : null), put: async (key, value) => { kv.set(key, String(value)) }, delete: async key => { kv.delete(key) } }
 let db, failApprovalRecord = false, beforeBatch = null, beforeBatchWhen = null, planEnv = {}
 // The Telegram alerts the route announces: a spy on the same global hook the Worker installs.
 const alerts = []
@@ -140,7 +143,7 @@ const setSwitches = (simple, fix, lots) => {
 }
 async function send(route, method, url, body, actor = ADMIN) {
   const tasks = []
-  const response = await route.request(`http://local${url}`, { method, headers: { 'Content-Type': 'application/json', ...(actor ? { Cookie: `bos_session=token-${actor}` } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) }, { DB: binding(), ...planEnv }, { waitUntil: task => tasks.push(task) })
+  const response = await route.request(`http://local${url}`, { method, headers: { 'Content-Type': 'application/json', ...(actor ? { Cookie: `bos_session=token-${actor}` } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) }, { DB: binding(), CACHE, ...planEnv }, { waitUntil: task => tasks.push(task) })
   await Promise.allSettled(tasks)
   return { status: response.status, body: await response.json() }
 }

@@ -69,7 +69,7 @@
  */
 import { getDb } from './db'
 import { resolveStoredNativeSaleChange } from './nativeSaleChange'
-import { deliveryActualCostExpr, getSalesTotals, shiftWindowBound, shiftWindowWhere, type SalesFilters } from './salesAnalytics'
+import { deliveryActualCostExpr, getSalesTotals, prefetchReportColumns, shiftWindowBound, shiftWindowWhere, type SalesFilters } from './salesAnalytics'
 import {
   hasConfiguredCashMethod, isCashPaymentMethod, parseConfiguredMethods, parsePaymentMethodKinds,
   PAYMENT_METHOD_KINDS_SETTING, type PaymentMethodKindMap,
@@ -324,7 +324,34 @@ export function shiftFilters(shift: ShiftReconciliationSession, nowMs: number): 
   }
 }
 
-async function readCashConfig(env: Env): Promise<ShiftCashOptions> {
+/**
+ * One PHASE's reads, shared (REFUTE-W2-HEAVY H5). A phase is one stretch of a close that is allowed to see one picture of the books: the figures of ONE attempt
+ * (after the inputs digest), the presentation after the commit, the Telegram report. The memo holds the PROMISE of a read, so two readers of the same phase that
+ * run side by side share one statement. It is exact by construction only inside a phase: a memo made before the digest read, or kept across the retry attempts,
+ * would freeze the inputs the digest guard exists to catch (test-shift-close-phase-memo-native.cjs, the hoisting mutant). Callers make one per phase and drop it.
+ */
+export type ShiftReadMemo = Map<string, Promise<unknown>>
+export function newShiftReadMemo(): ShiftReadMemo { return new Map() }
+/** Warm the report tables' column sets with ONE statement on a cold isolate (schema, not data: safe before the inputs digest). */
+export async function prepareShiftReportReads(env: Env): Promise<void> {
+  // Never fails a close: ending a drawer is not refused for a report's sake, and a failed warm-up only costs the per-table probes it replaces.
+  try { await prefetchReportColumns(env) } catch { /* the per-table probes answer */ }
+}
+function memoWindow(shift: ShiftReconciliationSession, nowMs: number): string {
+  // An open window ends at "now", so its key carries the instant; a closed or cancelled one does not depend on it.
+  return [shift.id ?? '', shift.opened_at, shift.closed_at || shift.cancelled_at || `open@${nowMs}`, shift.scope_mode ?? '', shift.user_id, shift.branch_id ?? ''].join('|')
+}
+function memoized<T>(memo: ShiftReadMemo | undefined, key: string, load: () => Promise<T>): Promise<T> {
+  if (!memo) return load()
+  let hit = memo.get(key) as Promise<T> | undefined
+  if (!hit) { hit = load(); memo.set(key, hit) }
+  return hit
+}
+
+async function readCashConfig(env: Env, memo?: ShiftReadMemo): Promise<ShiftCashOptions> {
+  return memoized(memo, 'cash-config', () => readCashConfigFresh(env))
+}
+async function readCashConfigFresh(env: Env): Promise<ShiftCashOptions> {
   const rows = await getDb(env).prepare(
     `SELECT key, value FROM settings WHERE key IN ('pos_payment_methods', '${PAYMENT_METHOD_KINDS_SETTING}')`,
   ).all<{ key: string; value: string }>()
@@ -391,9 +418,10 @@ export async function shiftExpenses(
   shift: ShiftReconciliationSession,
   nowMs: number,
   options: ExpenseRowOptions = {},
+  memo?: ShiftReadMemo,
 ) {
   const { clauses, params } = shiftFeeWhere(shift, nowMs)
-  return expenseRowsWhere(env, clauses, params, options)
+  return memoized(memo, `expenses|${memoWindow(shift, nowMs)}|${options.overflowLabel ?? ''}|${options.excludeDeliveryFees ? 1 : 0}`, () => expenseRowsWhere(env, clauses, params, options))
 }
 
 export type ExpenseRowOptions = { overflowLabel?: string; excludeDeliveryFees?: boolean }
@@ -607,11 +635,11 @@ export async function courierPayoutsWhere(
 
 /** What couriers were actually paid inside the shift's window. */
 export async function shiftCourierPayouts(
-  env: Env, shift: ShiftReconciliationSession, nowMs: number, options: { formula?: number } = {},
+  env: Env, shift: ShiftReconciliationSession, nowMs: number, options: { formula?: number } = {}, memo?: ShiftReadMemo,
 ): Promise<ShiftMoney> {
   const { clauses, params } = shiftWindowWhere('sales', shiftFilters(shift, nowMs))
   if (shift.branch_id) { clauses.push('sales.branch_id = @branchId'); params.branchId = shift.branch_id }
-  return courierPayoutsWhere(env, clauses, params, options)
+  return memoized(memo, `courier|${memoWindow(shift, nowMs)}|${options.formula ?? 'default'}`, () => courierPayoutsWhere(env, clauses, params, options))
 }
 
 /**
@@ -669,7 +697,10 @@ export function shiftTimeReviewCodes(review: readonly ShiftTimeReview[] | null |
   return (review ?? []).map((entry) => entry.code)
 }
 
-export async function readShiftTimeReview(env: Env, shiftId: number): Promise<ShiftTimeReview[] | null> {
+export async function readShiftTimeReview(env: Env, shiftId: number, memo?: ShiftReadMemo): Promise<ShiftTimeReview[] | null> {
+  return memoized(memo, `time-review|${shiftId}`, () => readShiftTimeReviewFresh(env, shiftId))
+}
+async function readShiftTimeReviewFresh(env: Env, shiftId: number): Promise<ShiftTimeReview[] | null> {
   try {
     const row = await getDb(env).prepare(`SELECT json_extract(after_json, '$.time_review') AS review FROM shift_session_amendments
       WHERE shift_session_id = @id AND json_valid(after_json) AND json_type(after_json, '$.time_review') = 'array'
@@ -700,15 +731,16 @@ export async function loadShiftReconciliation(
   env: Env,
   shift: ShiftReconciliationSession,
   nowMs: number = Date.now(),
-  options: { overflowLabel?: string; extraReviewCodes?: readonly string[] } = {},
+  options: { overflowLabel?: string; extraReviewCodes?: readonly string[]; memo?: ShiftReadMemo } = {},
 ): Promise<ShiftReconciliation> {
-  const cashConfig = await readCashConfig(env)
+  const memo = options.memo
+  const cashConfig = await readCashConfig(env, memo)
   const [cash, expenses, refunds, courier, timeReview] = await Promise.all([
     shiftCashSales(env, shift, nowMs, cashConfig),
-    shiftExpenses(env, shift, nowMs, options),
+    shiftExpenses(env, shift, nowMs, { overflowLabel: options.overflowLabel }, memo),
     shiftRefunds(env, shift, nowMs),
-    shiftCourierPayouts(env, shift, nowMs),
-    shift.id == null ? null : readShiftTimeReview(env, shift.id),
+    shiftCourierPayouts(env, shift, nowMs, {}, memo),
+    shift.id == null ? null : readShiftTimeReview(env, shift.id, memo),
   ])
   return computeShiftReconciliation({
     opening: { usd: shift.opening_float_usd, khr: shift.opening_float_khr },
@@ -896,12 +928,13 @@ export async function loadShiftFigures(
   env: Env,
   shift: ShiftReconciliationSession,
   nowMs: number = Date.now(),
+  memo?: ShiftReadMemo,
 ): Promise<ShiftFigures> {
   const [totals, expenses, deliveryFees, courier] = await Promise.all([
-    getSalesTotals(env, shiftFilters(shift, nowMs)),
-    shiftExpenses(env, shift, nowMs),
+    getSalesTotals(env, shiftFilters(shift, nowMs), memo),
+    shiftExpenses(env, shift, nowMs, {}, memo),
     shiftDeliveryFeeExpenses(env, shift, nowMs),
-    shiftCourierPayouts(env, shift, nowMs),
+    shiftCourierPayouts(env, shift, nowMs, {}, memo),
   ])
   return composeShiftFigures({
     opening: { usd: shift.opening_float_usd, khr: shift.opening_float_khr },
@@ -1056,9 +1089,14 @@ export async function loadShiftCloseFigures(
   nowMs: number = Date.now(),
   options: { extraReviewCodes?: readonly string[] } = {},
 ): Promise<ShiftCloseFigures> {
-  const config = await readCashConfig(env)
+  // ONE memo for this attempt, made here AFTER the caller read the inputs digest and dropped with the attempt (closeWithFigures recomputes on a retry).
+  const memo = newShiftReadMemo()
+  // The report tables' column sets in ONE statement on a cold isolate (instead of eight PRAGMAs spread over the parallel readers here, the response and the
+  // Telegram report that follow). Schema, not data: not a figure input, so it may sit anywhere in the digest-first order.
+  await prepareShiftReportReads(env)
+  const config = await readCashConfig(env, memo)
   const [reconciliation, sales] = await Promise.all([
-    loadShiftReconciliation(env, shift, nowMs, options),
+    loadShiftReconciliation(env, shift, nowMs, { ...options, memo }),
     shiftSaleTenders(env, shift, nowMs, config),
   ])
   return buildShiftCloseFigures({ takenAt: new Date(nowMs).toISOString(), openedAt: shift.opened_at,
@@ -1167,11 +1205,11 @@ export function diffShiftSaleTenders(stored: ShiftSaleTender[], current: ShiftSa
  * (history is immutable), every other shift the live figures. The in-app report shows the stored close the same way.
  */
 export async function loadShiftReconciliationAsClosed(
-  env: Env, shift: ShiftReconciliationSession, nowMs: number, options: { overflowLabel?: string; extraReviewCodes?: readonly string[] } = {},
+  env: Env, shift: ShiftReconciliationSession, nowMs: number, options: { overflowLabel?: string; extraReviewCodes?: readonly string[]; memo?: ShiftReadMemo } = {},
 ): Promise<ShiftReconciliation> {
   const stored = shift.closed_at && shift.id != null ? await loadLegacyStoredReconciliation(env, shift.id) : null
   if (!stored) return loadShiftReconciliation(env, shift, nowMs, options)
-  return applyShiftTimeReview(stored, shift.id == null ? null : await readShiftTimeReview(env, shift.id))
+  return applyShiftTimeReview(stored, shift.id == null ? null : await readShiftTimeReview(env, shift.id, options.memo))
 }
 
 /**
@@ -1180,10 +1218,10 @@ export async function loadShiftReconciliationAsClosed(
  * Only the courier riel line differs between formulas; expected and difference follow it exactly.
  */
 export async function reconciliationUnderFormula(
-  env: Env, shift: ShiftReconciliationSession, computed: ShiftReconciliation, formula: number, nowMs: number,
+  env: Env, shift: ShiftReconciliationSession, computed: ShiftReconciliation, formula: number, nowMs: number, memo?: ShiftReadMemo,
 ): Promise<ShiftReconciliation> {
   if (formula >= SHIFT_FIGURES_FORMULA) return computed
-  const courier = await shiftCourierPayouts(env, shift, nowMs, { formula })
+  const courier = await shiftCourierPayouts(env, shift, nowMs, { formula }, memo)
   const gap = courier.khr - computed.courier.khr
   if (!gap) return { ...computed, courier }
   const expectedKhr = computed.expected.khr == null ? null : roundKhr(computed.expected.khr - gap)
@@ -1222,9 +1260,10 @@ export async function loadShiftCloseDrift(
   stored: ShiftCloseFigures,
   computed: ShiftReconciliation,
   nowMs: number = Date.now(),
+  memo?: ShiftReadMemo,
 ): Promise<ShiftCloseDrift | null> {
-  const current = await reconciliationUnderFormula(env, shift, computed, stored.formula, nowMs)
-  const currentSales = await shiftSaleTenders(env, shift, nowMs)
+  const current = await reconciliationUnderFormula(env, shift, computed, stored.formula, nowMs, memo)
+  const currentSales = await shiftSaleTenders(env, shift, nowMs, memo ? await readCashConfig(env, memo) : undefined)
   const components = compareShiftCloseFigures(stored, current, sumOtherTenders(currentSales))
   const salesUnavailable = !stored.sales || !currentSales
   const drifted = salesUnavailable ? [] : diffShiftSaleTenders(stored.sales!, currentSales!)

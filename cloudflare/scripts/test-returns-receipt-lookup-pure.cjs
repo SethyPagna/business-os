@@ -134,6 +134,8 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/returnExchangeQuote': { priceAndQuoteExchange: async () => { throw new Error('the exchange is covered by test-return-exchange-native.cjs') } },
   '../lib/returnExchangeCreate': { createExchangeReturnV1: async () => { throw new Error('the exchange is covered by test-return-exchange-native.cjs') } },
   '../lib/planTier': loadReal('lib/planTier.ts'),
+  // d1-stale 6.0.1629: returns.ts imports the shared bump list; load the real one so a writer that drops a namespace still fails here.
+  '../lib/returnCacheVersions': loadReal('lib/returnCacheVersions.ts'),
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/returnCostAccess': loadReal('lib/returnCostAccess.ts'),
   '../lib/branchRoles': branchRolesKernel,

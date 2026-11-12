@@ -79,6 +79,17 @@ const sale = (n, offset, { paid = true } = {}) => ({
   run: async (world, send, body) => send('POST', '/api/sales', body),
 })
 
+// A delivery sale: the same sale naming a delivery person, which adds the in-batch driver check (a primary-key probe on delivery_contacts).
+const deliverySale = (n, offset) => ({
+  id: `w-sale-delivery-${n}-lines`, label: `POST /api/sales ${n} line, delivery person named`, method: 'POST', url: '/api/sales',
+  prepare: async (world) => {
+    const body = await saleRequest(world, `dsale${n}`, await lots(world, n, offset))
+    const driver = (await world.all('SELECT id FROM delivery_contacts ORDER BY id LIMIT 1'))[0]
+    return { ...body, is_delivery: true, delivery_contact_id: driver.id }
+  },
+  run: async (world, send, body) => send('POST', '/api/sales', body),
+})
+
 const status = (id, body) => ({ method: 'PATCH', url: `/api/sales/${id}/status`, body })
 
 function stockSession(n, offset) {
@@ -137,7 +148,7 @@ function writeShapes() {
     { id: 'w-login-cold', label: 'POST /api/auth/login (cold isolate)', method: 'POST', url: '/api/auth/login', anon: true,
       prepare: (world) => ({ username: require('./seed.cjs').ADMIN.username, password: require('./seed.cjs').ADMIN.password, organizationId: world.orgId }),
       run: async (world, send, body) => send('POST', '/api/auth/login', body) },
-    sale(1, 0), sale(3, 20), sale(10, 40), sale(30, 80), sale(86, 140), sale(3, 240, { paid: false }),
+    deliverySale(1, 700), sale(1, 0), sale(3, 20), sale(10, 40), sale(30, 80), sale(86, 140), sale(3, 240, { paid: false }),
     { id: 'w-pay-not-paid', label: 'PATCH /api/sales/:id/status Not Paid -> Completed (take payment)', method: 'PATCH', url: '/api/sales/:id/status',
       prepare: async (world) => createSale(world, 'unpaid', await lots(world, 3, 260), { paid: false }),
       run: async (world, send, id) => send('PATCH', `/api/sales/${id}/status`, { sale_status: 'completed', client_request_id: key('pay'), expected_exchange_rate: 4000, payment_details: [{ method: 'Cash', amount_usd: 400, amount_khr: 0 }] }) },
@@ -238,6 +249,18 @@ function writeShapes() {
     approvalStep({ id: 'w-inventory-check-approval-lot-line', label: 'POST /api/inventory-checks/sessions/:id/approval 2 received-date lines (ic_fix_stock, ic_lot_counts, call_counting ON, both lines)', offset: 1200, counting: true, lots: true }),
     { id: 'w-fee', label: 'POST /api/fees', method: 'POST', url: '/api/fees',
       run: async (world, send) => send('POST', '/api/fees', { fee_type: 'other', label: 'Ice', amount_usd: 1, amount_khr: 0, fee_date: world.ctx.today, branch_id: 1, client_request_id: key('fee') }) },
+    // Deleting a delivery person: one atomic batch (guard + delete). A person no sale or fee names is deleted; one a sale names is refused with contact_has_sales and writes nothing.
+    // The sale-to-driver link is set up directly here (the seed has no delivering sale), so the refused request meets a real linked row.
+    { id: 'w-delivery-contact-delete', label: 'DELETE /api/delivery-contacts/:id (no sale or fee names it)', method: 'DELETE', url: '/api/delivery-contacts/:id',
+      prepare: async (world) => (await world.all('SELECT id FROM delivery_contacts ORDER BY id DESC LIMIT 1'))[0].id,
+      run: async (world, send, id) => send('DELETE', `/api/delivery-contacts/${id}`) },
+    { id: 'w-delivery-contact-delete-refused', label: 'DELETE /api/delivery-contacts/:id (a sale names it: refused)', method: 'DELETE', url: '/api/delivery-contacts/:id',
+      prepare: async (world) => {
+        const id = (await world.all('SELECT id FROM delivery_contacts ORDER BY id LIMIT 1'))[0].id
+        await world.db.prepare('UPDATE sales SET delivery_contact_id = ? WHERE id = (SELECT MIN(id) FROM sales)').bind(id).run()
+        return id
+      },
+      run: async (world, send, id) => send('DELETE', `/api/delivery-contacts/${id}`) },
     { id: 'w-customer-create', label: 'POST /api/customers', method: 'POST', url: '/api/customers',
       run: async (world, send) => send('POST', '/api/customers', { name: 'Budget Customer', phone: '0009990001', client_request_id: key('customer') }) },
     { id: 'w-product-price-edit', label: 'PUT /api/products/:id price edit', method: 'PUT', url: '/api/products/1003',

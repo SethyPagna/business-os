@@ -6,16 +6,16 @@ const { bootWorld, runShape, lastStatements, explain } = require('./world.cjs')
 const { getShapes } = require('./shapes.cjs')
 const { writeShapes, measureWrite } = require('./writes.cjs')
 
-const { BUDGETS_FILE, FREE_CALL_LIMIT, loadBudgets, today, roundUp, callsLimit } = require('./budgets.cjs')
+const { BUDGETS_FILE, FREE_CALL_LIMIT, loadBudgets, today, roundUp, callsLimit, passOf, liveProblems } = require('./budgets.cjs')
 
 // READ_BUDGET_ONLY=<regex> narrows a local run to the shape ids it matches (diagnosis only; the gate runs them all).
 const only = (id) => !process.env.READ_BUDGET_ONLY || new RegExp(process.env.READ_BUDGET_ONLY).test(id)
 
-// The GET shapes are measured with the read switches budgets.json lists stored (lib/readSwitches.ts reads them from system_flags), because that is the
+// The GET shapes are measured with the read switches budgets.json passes.free lists stored (lib/readSwitches.ts reads them from system_flags), because that is the
 // state the Free plan is meant to run in; the write shapes are measured with none. READ_BUDGET_SWITCHES=off measures the GET shapes with none (the old
 // paths), for a before/after comparison. One state for the whole pass: flipping it between shapes would restart the isolate and move the rows of the
 // shapes that follow (a cold isolate reads more, a second login adds a session row every request reads).
-const getSwitches = (budgets) => (process.env.READ_BUDGET_SWITCHES === 'off' ? undefined : budgets.switches)
+const getSwitches = (budgets) => (process.env.READ_BUDGET_SWITCHES === 'off' ? undefined : passOf(budgets, 'free').switches)
 
 // A shape's file is fixed by its id, so adding a shape never moves another one.
 const PARTS = 3
@@ -141,7 +141,7 @@ function switchFence() {
 async function runGetPass({ partIndex, analyze = false, analyzeDb = analyze, label, observe }) {
   const budgets = loadBudgets()
   const byId = new Map(budgets.shapes.map((e) => [e.id, e]))
-  const world = await bootWorld({ tier: 'free', switches: getSwitches(budgets) })
+  const world = await bootWorld({ tier: passOf(budgets, 'free').tier, switches: getSwitches(budgets) })
   const reds = []
   const fence = switchFence()
   let n = 0
@@ -156,7 +156,9 @@ async function runGetPass({ partIndex, analyze = false, analyzeDb = analyze, lab
       let m
       try {
         if (analyze) await fence(world, shape)
-        m = await measureGet(world, shape, { cold: !analyze, statements: Boolean(entry.pins) })
+        // Every shape, ANALYZE pass included, is measured warm after one cold request in the same isolate: a single first request lands on
+        // whatever time-boxed cache an earlier shape happened to leave (Dashboard stock overview, import jobs), and the pass reddened at random.
+        m = await measureGet(world, shape, { cold: true, statements: Boolean(entry.pins) })
       } catch (e) { reds.push(`${shape.id}: threw ${String(e.message).slice(0, 160)}`); continue }
       if (observe) observe(shape, m)
       const problems = [...getProblems(entry, m, { analyze }), ...(m.warm.overDeadline || !entry.pins ? [] : await pinProblems(world, entry, m.statements))]
@@ -165,6 +167,40 @@ async function runGetPass({ partIndex, analyze = false, analyzeDb = analyze, lab
     }
   } finally { await world.dispose() }
   console.log(`${label}: ${n} shapes measured, ${reds.length} over budget`)
+  for (const line of reds) console.error('RED ' + line)
+  if (reds.length) process.exitCode = 1
+  return reds
+}
+
+// The live pass: every GET shape once, cold, in the state production runs in (budgets.json passes.live: tier, stored switches). It enforces the calls of one request
+// (the live ceiling and the Free hard limit; a known failure may not get worse and must go once fixed). Rows are not budgeted here: the free pass owns them. A
+// failure of the pass names its shape, its route and the call count measured, so the entry to add or remove is in the message.
+async function runLivePass({ partIndex, label, observe }) {
+  const budgets = loadBudgets()
+  const pass = passOf(budgets, 'live')
+  const byId = new Map(budgets.shapes.map((e) => [e.id, e]))
+  const world = await bootWorld({ tier: pass.tier, seedTier: pass.seedTier, switches: pass.switches })
+  const reds = []
+  let n = 0
+  try {
+    await prepareWorld(world)
+    const shapes = getShapes(world.ctx).filter((s) => (partIndex === undefined || part(s.id) === partIndex) && only(s.id))
+    for (const shape of shapes) {
+      const entry = byId.get(shape.id)
+      if (!entry) { reds.push(`${shape.id}: no budget in budgets.json`); continue }
+      let m
+      try {
+        const url = await resolveUrl(world, shape.url)
+        const probe = { method: 'GET', url, anon: shape.anon, ...(shape.switches ? withSwitches(shape.switches, url) : {}) }
+        m = await runShape(world, probe, { cold: true })
+      } catch (e) { reds.push(`${shape.id}: threw ${String(e.message).slice(0, 160)}`); continue }
+      if (observe) observe(shape, m)
+      n += 1
+      const problems = m.overDeadline ? ['live pass: no answer within the deadline'] : liveProblems(pass, shape.id, m.calls)
+      if (problems.length) reds.push(`${shape.id} (${entry.route}): ${problems.join('; ')}`)
+    }
+  } finally { await world.dispose() }
+  console.log(`${label}: ${n} shapes measured in the live state (${pass.tier}, switches ${JSON.stringify(pass.switches)}), ${reds.length} over`)
   for (const line of reds) console.error('RED ' + line)
   if (reds.length) process.exitCode = 1
   return reds
@@ -209,4 +245,4 @@ async function runWritePass({ label, switches = { call_counting: 'on' } }) {
   return reds
 }
 
-module.exports = { getSwitches, ensureFeeCursor, prepareWorld, writeProblems, runWritePass, loadBudgets, today, roundUp, callsLimit, part, measureGet, getProblems, pinProblems, runGetPass, ensureCheckId, resolveUrl, codeOf, BUDGETS_FILE, FREE_CALL_LIMIT, setSwitches, clearSwitches, switchFence }
+module.exports = { runLivePass, getSwitches, ensureFeeCursor, prepareWorld, writeProblems, runWritePass, loadBudgets, today, roundUp, callsLimit, part, measureGet, getProblems, pinProblems, runGetPass, ensureCheckId, resolveUrl, codeOf, BUDGETS_FILE, FREE_CALL_LIMIT, setSwitches, clearSwitches, switchFence }

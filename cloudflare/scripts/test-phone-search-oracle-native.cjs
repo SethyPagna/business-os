@@ -28,20 +28,22 @@ const subAll = (needle, replacement) => (source) => {
 const MUTANTS = {
   'sales digit words read the phone': ['routes/sales.ts', sub('restricted ? restrictedWordHaystacks(word, RESTRICTED_HAYSTACK) : [flatHaystack]', '[flatHaystack]')],
   'sales digit words guarded only for a raw all-digit search': ['routes/sales.ts', sub('const restricted = !access.fullPhone && hasDigit(word)', `const restricted = !access.fullPhone && ${RAW_DIGITS}.test(raw) && hasDigit(word)`)],
+  'sales customer name closed again without the grant': ['routes/sales.ts', sub("customerNameLookupSql('s.customer_name')", "restrictedColumnSql('s.customer_name')")],
+  'sales customer phone not read without the grant': ['routes/sales.ts', sub("customerPhoneLookupSql('s.customer_phone')", '"\'\'"')],
+  'sales customer phone digits not read stripped': ['routes/sales.ts', sub("customerPhoneLookupSql('s.customer_phone')", '"COALESCE(s.customer_phone, \'\')"')],
+  'returns customer name closed again without the grant': ['routes/returns.ts', sub("concat(customerNameLookupSql('r.customer_name'))", 'concat("\'\'")')],
+  'delivery picker ignores the phone': ['routes/sales.ts', sub("OR lower(COALESCE(phone,'')) LIKE @pattern ESCAPE '\\\\'", 'OR 0')],
+  'contacts digit run dropped (a fragment across separators is lost)': ['lib/contactSearch.ts', sub('if (forms) {', 'if (false) {')],
+  'display: responses are not projected': ['lib/phoneMaskMiddleware.ts', sub('args[0] = projectPhones(args[0], actor) as typeof args[0]', 'args[0] = args[0]')],
+  'display: Contact Option phones inside the address are not masked': ['lib/phoneAccess.ts', sub("if ((trimmed.startsWith('[') || trimmed.startsWith('{')) && ((kind & ENVELOPE) !== 0 || /phone/i.test(trimmed))) {", 'if (false) {')],
   'sales whole number not compared': ['routes/sales.ts', sub("if (probe.kind !== 'full') return searched", 'return searched')],
-  'sales number saved as a name readable': ['routes/sales.ts', sub("'s.cashier_name', 's.customer_name',", `'s.cashier_name', ${RAW('s.customer_name')},`)],
-  'delivery picker matches phone fragments': ['routes/sales.ts', sub("const probe = canSeeFullPhones(user) ? ({ kind: 'none' } as const) : phoneProbeOf(search)", "const probe = ({ kind: 'none' } as const)")],
   'returns digit words read the name': ['routes/returns.ts', sub('restricted ? restrictedWordHaystacks(word, RESTRICTED_HAYSTACK) : [flatHaystack]', '[flatHaystack]')],
-  'contacts only an all-digit word is guarded': ['lib/contactSearch.ts', sub('if (digitWordsAvoidPhones && hasDigit(word))', 'if (digitWordsAvoidPhones && /^[0-9]+$/.test(word))')],
   'returns digit words guarded only for a raw all-digit search': ['routes/returns.ts', sub('const guardDigitWords = !access.fullPhone', `const guardDigitWords = !access.fullPhone && ${RAW_DIGITS}.test(search)`)],
   'audit search reads phone text': ['routes/compat.ts', sub('phoneTextBlocked: !canSeeFullPhones(user),', 'phoneTextBlocked: false,')],
   'sales stats cache shared across grants': ['routes/sales.ts', sub('}, cacheIdentity(c, { scope: phoneCacheVariant(user) }))', '}, cacheIdentity(c))')],
-  'contacts search ignores the grant': ['lib/contactSearch.ts', sub('if (access.fullPhone) {', 'if (true) {')],
-  'contacts digit words guarded only for a raw all-digit search': ['lib/contactSearch.ts', sub('`${paramPrefix}_restricted`, true)', `\`\${paramPrefix}_restricted\`, ${RAW_DIGITS}.test(String(rawSearch ?? '')))`)],
   'reports sales list matches the phone by substring': ['routes/reports.ts', sub('rows = rows.filter(salesReportSearchMatcher(search, phoneSearchAccessOf(user)))', 'rows = rows.filter(salesReportSearchMatcher(search, { fullPhone: true }))')],
   'reports sales export matches the phone by substring': ['routes/reports.ts', sub('const cohort = salesExportCohort(snapshot, search, phoneSearchAccessOf(user))', 'const cohort = salesExportCohort(snapshot, search, { fullPhone: true })')],
   'non-ASCII digits are not folded': ['lib/phoneMask.ts', sub('code > 0x7f && DECIMAL_DIGIT.test(char)', 'false')],
-  'delivery picker reads a numeric courier name': ['routes/sales.ts', sub("const nameColumn = probe.kind === 'none' ? \"lower(COALESCE(name,''))\" : `lower(${nameWithoutPhoneSql('name')})`", "const nameColumn = \"lower(COALESCE(name,''))\"")],
   // P2.8-F: the 0-to-o retry of a word that mixes letters and digits must read the raw non-phone text and nothing else.
   'sales zero-to-o retry reaches the phone column': ['routes/sales.ts', sub('restrictedWordHaystacks(word, RESTRICTED_HAYSTACK)', '[RESTRICTED_HAYSTACK, ...restrictedWordHaystacks(word, flatHaystack).slice(1)]')],
   'returns zero-to-o retry reaches the folded copy': ['routes/returns.ts', sub('restrictedWordHaystacks(word, RESTRICTED_HAYSTACK)', '[RESTRICTED_HAYSTACK, ...restrictedWordHaystacks(word, flatHaystack).slice(1)]')],
@@ -50,21 +52,21 @@ const MUTANTS = {
   'reports returns search reads a numeric name': ['routes/reports.ts', sub('const unrestricted = phoneSearchAccessOf(user).fullPhone', 'const unrestricted = true')],
   // P2.8-F S1: a number saved in a column the response masks (a note, a cashier, a supplier) must read as empty to the search. (A branch is not a
   // person: since the review's B2 it is shown as stored, so it is searched as stored.)
-  'sales note that is a number readable': ['routes/sales.ts', sub("'s.payment_method', 's.notes', 'c.membership_number',", `'s.payment_method', ${RAW('s.notes')}, 'c.membership_number',`)],
-  'sales cashier that is a number readable': ['routes/sales.ts', sub("'s.legacy_receipt_number', 's.cashier_name', 's.customer_name',", `'s.legacy_receipt_number', ${RAW('s.cashier_name')}, 's.customer_name',`)],
+  'sales note that is a number readable': ['routes/sales.ts', sub("'s.payment_method', 's.notes', 'c.membership_number']", `'s.payment_method', ${RAW('s.notes')}, 'c.membership_number']`)],
+  'sales cashier that is a number readable': ['routes/sales.ts', sub("'s.legacy_receipt_number', 's.cashier_name', 's.branch_name'", `'s.legacy_receipt_number', ${RAW('s.cashier_name')}, 's.branch_name'`)],
   'sales cashier filter reads the number': ['routes/sales.ts', subAll("restrictedColumnSql('s.cashier_name')", "'s.cashier_name'")],
   'returns note that is a number readable': ['routes/returns.ts', sub("'r.reason', 'r.notes', 'r.return_type'", `'r.reason', ${RAW('r.notes')}, 'r.return_type'`)],
   'returns supplier saved under a number readable': ['routes/returns.ts', sub("'r.supplier_name', 'r.reason',", `${RAW('r.supplier_name')}, 'r.reason',`)],
 }
 
-const receiptsIn = (text) => [...new Set(String(text).match(/P28-000\d/g) || [])].sort()
+const receiptsIn = (text) => [...new Set(String(text).match(/P28-00\d\d/g) || [])].sort()
 const has = (text, needle) => String(text).includes(needle)
 
 async function main() {
   const mutant = process.env.PHONE_MUTANT ? MUTANTS[process.env.PHONE_MUTANT] : null
   if (process.env.PHONE_MUTANT && !mutant) throw new Error(`unknown PHONE_MUTANT ${process.env.PHONE_MUTANT}`)
   const world = await bootPhoneWorld({ transformSources: mutant ? (file, source) => (file === mutant[0] ? mutant[1](source) : source) : undefined })
-  const { check, finish } = createReporter()
+  const { check, finish } = createReporter({ stopAtFirstMiss: Boolean(mutant) })
   const enc = encodeURIComponent
   const get = (route, as) => world.api('GET', route, undefined, { as })
 
@@ -74,6 +76,9 @@ async function main() {
      VALUES ('P28-RET-2', ?, ?, ?, 'customer', 'completed', 2, 8000, 'P28-0003', 'p28-ret-2 010222333', datetime('now'))`,
     world.ids.customerPhoneName, PHONES.phoneAsName, world.ids.sale2,
   )
+
+  // The sale of the customer saved under a number carries that number only as the customer's name (no phone column), so the name is what a search must read.
+  await world.run("UPDATE sales SET customer_phone = '' WHERE receipt_number = 'P28-0003'")
 
   // A customer whose phone was saved glued to letters (a legacy import): the digits are still a phone.
   await world.run("INSERT INTO customers (id, name, phone, phone_normalized, membership_number) VALUES (9301, 'Fixture Legacy', 'Tel099456789', '099456789', 'LC-P28-9301')")
@@ -91,6 +96,7 @@ async function main() {
   await insertSale('P28-0004', 'No1', 'Walk-in', '', 'p28-0004 n01 walk in main', 4)
   await insertSale('P28-0005', 'Admin', 'Fixture Legacy', 'Tel099456789', 'p28-0005 admin fixture legacy tel099456789 main', 5)
   await insertSale('P28-0006', 'Admin', 'O1988375', '', 'p28-0006 admin 01988375 main', 6)
+  await insertSale('P28-0010', 'Admin', 'Walk-in', '', 'p28-0010 admin walk in tel0771234 main', 3)
   const insertReturn = (number, name, saleReceipt, folded) => world.run(
     `INSERT INTO returns (return_number, customer_id, customer_name, sale_id, return_scope, status, total_refund_usd, total_refund_khr, receipt_number, search_normalized, created_at)
      VALUES (?, ?, ?, (SELECT id FROM sales WHERE receipt_number = ?), 'customer', 'completed', 1, 4000, ?, ?, datetime('now'))`,
@@ -100,18 +106,18 @@ async function main() {
   await insertReturn('P28-RET-4', 'Fixture Sophea', 'P28-0004', 'p28-ret-4 fixture sophea tel010222333')
 
   // P2.8-F S1 (the review's probes 6 and 7): a number saved in a column the response masks. A sale's note, cashier and branch, a return's
-  // note, a supplier return saved under a number. The response shows each as `093 *** 789`; a fragment typed into the search must find nothing.
+  // note, a supplier return saved under a number. The response shows each as `093 *** 589`; a fragment typed into the search must find nothing.
   const insertMaskedSale = (receipt, { cashier = 'Admin', notes = null, branch = 'Main' }, hoursAgo) => world.run(
     `INSERT INTO sales (receipt_number, customer_id, customer_name, customer_phone, total_usd, total_khr, sale_status, payment_method, cashier_name, notes, search_normalized, branch_id, branch_name, created_at)
      VALUES (?, NULL, 'Walk-in', '', 5, 20000, 'completed', 'Cash', ?, ?, ?, ?, ?, datetime('now', ?))`,
     receipt, cashier, notes, `${receipt.toLowerCase()} ${[cashier, notes, branch].filter(Boolean).join(' ').toLowerCase()} walk in`, world.ids.branch, branch, `-${hoursAgo} hour`,
   )
-  await insertMaskedSale('P28-0007', { notes: '093 456 789' }, 7)
+  await insertMaskedSale('P28-0007', { notes: '093 471 589' }, 7)
   await insertMaskedSale('P28-0008', { cashier: '094 555 818' }, 8)
   await insertMaskedSale('P28-0009', { branch: '095 777 626' }, 9)
   await world.run(
     `INSERT INTO returns (return_number, customer_name, return_scope, status, total_refund_usd, total_refund_khr, receipt_number, notes, search_normalized, created_at)
-     VALUES ('P28-RET-5', 'Walk-in', 'customer', 'completed', 1, 4100, 'P28-0004', '093 456 789', 'p28-ret-5 walk in', datetime('now'))`,
+     VALUES ('P28-RET-5', 'Walk-in', 'customer', 'completed', 1, 4100, 'P28-0004', '093 471 589', 'p28-ret-5 walk in', datetime('now'))`,
   )
   await world.run(
     `INSERT INTO returns (return_number, supplier_name, return_scope, status, total_refund_usd, total_refund_khr, search_normalized, created_at)
@@ -132,64 +138,89 @@ async function main() {
     t.ok('audit 222 (the customer saved under a number)', JSON.parse((await get(`/api/system/audit-logs?search=${enc('222')}&pageSize=50`, 'admin')).text).items.length > 0)
   })
 
-  // ---- no grant: no digit fragment of a hidden number finds anything ----------------------------------------------------
-  const FRAGMENTS = ['087', '0876', '654', '654321', '321', '98 111', '111', '222', '111 111 111 111', '654 654 654', '0123 0123 0123', '999', '085', '999 000', '999 999 999']
-  await check('no grant: Contacts search (customers, suppliers, delivery contacts) returns nobody for a digit fragment', async (t) => {
-    for (const [route, name] of [['customers', 'Fixture Dara'], ['suppliers', 'Fixture Supplies'], ['delivery-contacts', 'Fixture Courier']]) {
-      for (const q of [...FRAGMENTS, '333', '444 555', '078', '555', '095', '666 777']) {
+  // ---- owner decision of 10 Nov 2026 ("Allow partial"): without the grant a fragment of a customer's number finds the customer; the reply stays masked ----
+  const CUSTOMER_FRAGMENTS = ['087', '0876', '654', '654321', '321', '4321', '98 111', '111']
+  const SUPPLIER_FRAGMENTS = ['333', '444 555', '078', '444']
+  const COURIER_FRAGMENTS = ['555', '095', '666 777', '666']
+  const NOT_A_PART = ['0123 0123 0123', '345 345 345', '999999999']
+  await check('no grant: Contacts search (customers, suppliers, delivery contacts) finds the contact by a fragment of its number, as the holder does, and the reply is masked', async (t) => {
+    for (const [route, name, fragments] of [['customers', 'Fixture Dara', CUSTOMER_FRAGMENTS], ['suppliers', 'Fixture Supplies', SUPPLIER_FRAGMENTS], ['delivery-contacts', 'Fixture Courier', COURIER_FRAGMENTS]]) {
+      for (const q of fragments) {
         const r = await get(`/api/${route}?search=${enc(q)}&page=1&pageSize=50`, 'manager')
         t.ok(`${route} ${q}: status ${r.status}`, r.status === 200)
-        t.ok(`${route} ${q}: ${name} must not be found`, !has(r.text, name), snippetOf(r.text))
+        t.ok(`${route} ${q}: ${name} is found`, has(r.text, name), snippetOf(r.text))
         t.eq(`${route} ${q}: no number leaks`, leaksIn(r.text), [])
+        t.ok(`${route} ${q}: the holder finds ${name} too`, has((await get(`/api/${route}?search=${enc(q)}&page=1&pageSize=50`, 'manager_granted')).text, name))
+      }
+      for (const q of NOT_A_PART) {
+        const r = await get(`/api/${route}?search=${enc(q)}&page=1&pageSize=50`, 'manager')
+        t.ok(`${route} ${q}: a number that is no part of a stored number finds nobody`, r.status === 200 && !has(r.text, name), snippetOf(r.text))
       }
     }
-    t.ok('the customer saved under a number is not found by a fragment of it', !has((await get(`/api/customers?search=${enc('222')}&page=1&pageSize=50`, 'manager')).text, 'P28-3'))
+    const masked = await get(`/api/customers?search=${enc('654')}&page=1&pageSize=50`, 'manager')
+    t.ok('the number shows masked to this account', has(masked.text, '087 *** 321'))
+    t.ok('the customer saved under a number is found by a fragment of it', has((await get(`/api/customers?search=${enc('222')}&page=1&pageSize=50`, 'manager')).text, 'P28-3'))
   })
-  await check('no grant: the POS customer picker returns nobody for a digit fragment', async (t) => {
-    for (const q of FRAGMENTS) {
+  await check('no grant: the POS customer picker finds the customer by a fragment of its number, and the reply is masked', async (t) => {
+    for (const q of CUSTOMER_FRAGMENTS) {
       const r = await get(`/api/customers?fields=sales_picker&search=${enc(q)}`, 'manager')
-      t.ok(`picker ${q}`, !has(r.text, 'Fixture Dara') && !has(r.text, 'Fixture Sophea'), snippetOf(r.text))
+      t.ok(`picker ${q}`, has(r.text, 'Fixture Dara'), snippetOf(r.text))
       t.eq(`picker ${q} leaks`, leaksIn(r.text), [])
     }
-  })
-  await check('no grant: Sales search returns no sale for a digit fragment of the customer number', async (t) => {
-    for (const q of ['654', '654321', '0876', '999', '999 000', '085', '222', '010', '654 654 654', '999 999 999']) {
-      const r = await get(`/api/sales?search=${enc(q)}`, 'sales_only')
-      t.ok(`sales ${q}: status ${r.status}`, r.status === 200)
-      t.eq(`sales ${q}`, receiptsIn(r.text), [])
-      t.eq(`sales ${q} leaks`, leaksIn(r.text), [])
+    for (const q of NOT_A_PART) {
+      const r = await get(`/api/customers?fields=sales_picker&search=${enc(q)}`, 'manager')
+      t.ok(`picker ${q}`, !has(r.text, 'Fixture Dara') && !has(r.text, 'Fixture Sophea'), snippetOf(r.text))
     }
   })
-  await check('no grant: the cached Sales totals do not say how many sales a number fragment matches (holder warms first, then the other way)', async (t) => {
+  await check('no grant: Sales search finds the sale of a customer by a fragment of the customer number, and the reply is masked', async (t) => {
+    for (const [q, receipt] of [['654', 'P28-0001'], ['654321', 'P28-0001'], ['0876', 'P28-0001'], ['4321', 'P28-0001'], ['999', 'P28-0002'], ['999 000', 'P28-0002'], ['085', 'P28-0002'], ['222', 'P28-0003'], ['010', 'P28-0003']]) {
+      const r = await get(`/api/sales?search=${enc(q)}`, 'sales_only')
+      t.ok(`sales ${q}: status ${r.status}`, r.status === 200)
+      t.ok(`sales ${q}: ${receipt} is found`, receiptsIn(r.text).includes(receipt), snippetOf(r.text))
+      t.eq(`sales ${q} leaks`, leaksIn(r.text), [])
+      t.eq(`sales ${q}: the same sales as the holder`, receiptsIn(r.text), receiptsIn((await get(`/api/sales?search=${enc(q)}`, 'admin')).text))
+      t.ok(`sales totals ${q} count it`, Number((await get(`/api/sales/stats?search=${enc(q)}`, 'sales_only')).json?.total_count) >= 1)
+    }
+    for (const q of NOT_A_PART) t.eq(`sales ${q}`, receiptsIn((await get(`/api/sales?search=${enc(q)}`, 'sales_only')).text), [])
+  })
+  await check('no grant: the cached Sales totals do not say how many sales a number saved in a note or cashier matches (holder warms first, then the other way)', async (t) => {
     // The holder must share the other account's organisation: the organisation is part of the cache key, so a holder in another one (the bootstrap admin) could never share an entry with it,
     // and a key that forgot the grant would still be told apart (6.0.1259: the mutant below was equivalent in that world).
     const count = (response) => (response.json && response.json.total_count)
-    const holderFirst = await get(`/api/sales/stats?search=${enc('654321')}`, 'manager_granted')
-    t.ok('positive control: the holder counts the sale by a fragment of its number', count(holderFirst) >= 1, holderFirst.text.slice(0, 200))
-    const denied = await get(`/api/sales/stats?search=${enc('654321')}`, 'sales_only')
+    const holderFirst = await get(`/api/sales/stats?search=${enc('471')}`, 'manager_granted')
+    t.ok('positive control: the holder counts the sale by a fragment of the number in its note', count(holderFirst) >= 1, holderFirst.text.slice(0, 200))
+    const denied = await get(`/api/sales/stats?search=${enc('471')}`, 'sales_only')
     t.eq('the account without the grant counts nothing for the same URL', count(denied), 0)
-    const deniedFirst = await get(`/api/sales/stats?search=${enc('999000')}`, 'sales_only')
+    const deniedFirst = await get(`/api/sales/stats?search=${enc('555')}`, 'sales_only')
     t.eq('warmed by the account without the grant: nothing', count(deniedFirst), 0)
-    const holderAfter = await get(`/api/sales/stats?search=${enc('999000')}`, 'manager_granted')
+    const holderAfter = await get(`/api/sales/stats?search=${enc('555')}`, 'manager_granted')
     t.ok('and the holder still counts the sale (its own entry)', count(holderAfter) >= 1, holderAfter.text.slice(0, 200))
+    const customerFirst = await get(`/api/sales/stats?search=${enc('654321')}`, 'sales_only')
+    t.ok('a fragment of the customer number is counted for the account without the grant', count(customerFirst) >= 1, customerFirst.text.slice(0, 200))
+    t.eq('and for the holder the same', count(await get(`/api/sales/stats?search=${enc('654321')}`, 'manager_granted')), count(customerFirst))
   })
-  await check('no grant: Returns search does not read a customer name that is a number', async (t) => {
+  await check('no grant: Returns search finds a return whose customer was saved under a number by a fragment of it, and the reply is masked', async (t) => {
     for (const q of ['222', '010', '010222333', '222 333']) {
       const r = await get(`/api/returns?search=${enc(q)}`, 'sales_only')
       t.ok(`returns ${q}: status ${r.status}`, r.status === 200)
-      t.ok(`returns ${q}: P28-RET-2 must not be found`, !has(r.text, 'P28-RET-2'), snippetOf(r.text))
+      t.ok(`returns ${q}: P28-RET-2 is found`, has(r.text, 'P28-RET-2'), snippetOf(r.text))
       t.eq(`returns ${q} leaks`, leaksIn(r.text), [])
     }
   })
-  await check('no grant: delivery-contact picker matches no phone fragment', async (t) => {
+  await check('no grant: the delivery-contact picker finds the courier by a fragment of its number, and the reply is masked', async (t) => {
     const holder = await get(`/api/sales/delivery-options?search=${enc('555')}`, 'manager_granted')
     t.ok(`positive control: the holder finds the courier by 555 (status ${holder.status})`, holder.status === 200 && has(holder.text, 'Fixture Courier'), holder.text.slice(0, 200))
     const numeric = await get(`/api/sales/delivery-options?search=${enc('333')}`, 'manager_granted')
     t.ok('positive control: the holder finds the courier saved under a number by a fragment of it', numeric.status === 200 && has(numeric.text, 'South Zone'), numeric.text.slice(0, 200))
-    for (const q of ['555', '096', '666 777', '095', '333', '014', '777', 'o14 333', `333${String.fromCharCode(0x301)}`, `555${String.fromCharCode(0x301)}`]) {
+    for (const q of ['555', '096', '666 777', '095']) {
       const r = await get(`/api/sales/delivery-options?search=${enc(q)}`, 'manager')
       t.ok(`delivery-options ${q}: status ${r.status}`, r.status === 200)
-      t.ok(`delivery-options ${q}: no courier`, !has(r.text, 'Fixture Courier') && !has(r.text, 'South Zone'), snippetOf(r.text) || r.text.slice(0, 160))
+      t.ok(`delivery-options ${q}: the courier is found`, has(r.text, 'Fixture Courier'), snippetOf(r.text) || r.text.slice(0, 160))
+      t.eq(`delivery-options ${q} leaks`, leaksIn(r.text), [])
+    }
+    for (const q of ['333', '014', '777']) {
+      const r = await get(`/api/sales/delivery-options?search=${enc(q)}`, 'manager')
+      t.ok(`delivery-options ${q}: the courier saved under a number is found`, r.status === 200 && has(r.text, 'South Zone'), r.text.slice(0, 160))
       t.eq(`delivery-options ${q} leaks`, leaksIn(r.text), [])
     }
   })
@@ -205,16 +236,16 @@ async function main() {
 
   // ---- P2.8-F S1: a number saved in a note, a cashier, a branch or a supplier is hidden from the search as it is from the screen ----------
   await check('positive control: the holder finds a sale, a return and a supplier return by a fragment of a number saved in a note, cashier or branch', async (t) => {
-    t.ok('sales 456 (note)', receiptsIn((await get(`/api/sales?search=${enc('456')}`, 'admin')).text).includes('P28-0007'))
+    t.ok('sales 471 (note)', receiptsIn((await get(`/api/sales?search=${enc('471')}`, 'admin')).text).includes('P28-0007'))
     t.ok('sales 555 (cashier)', receiptsIn((await get(`/api/sales?search=${enc('555')}`, 'admin')).text).includes('P28-0008'))
     t.ok('sales 777 (branch)', receiptsIn((await get(`/api/sales?search=${enc('777')}`, 'admin')).text).includes('P28-0009'))
     t.ok('sales ?cashier=555', receiptsIn((await get(`/api/sales?cashier=${enc('555')}`, 'admin')).text).includes('P28-0008'))
-    t.ok('returns 456 (note)', has((await get(`/api/returns?search=${enc('456')}`, 'admin')).text, 'P28-RET-5'))
+    t.ok('returns 471 (note)', has((await get(`/api/returns?search=${enc('471')}`, 'admin')).text, 'P28-RET-5'))
     t.ok('supplier returns 555', has((await get(`/api/returns?scope=supplier&search=${enc('555')}`, 'admin')).text, 'P28-RET-6'))
-    t.ok('sales totals 456', Number((await get(`/api/sales/stats?search=${enc('456')}`, 'admin')).json?.total_count) >= 1)
+    t.ok('sales totals 471', Number((await get(`/api/sales/stats?search=${enc('471')}`, 'admin')).json?.total_count) >= 1)
   })
   await check('no grant: a sale whose note or cashier is a number is not found by a fragment of it (list, totals, cashier filter, digit by digit)', async (t) => {
-    for (const [receipt, queries] of [['P28-0007', ['456', '45', '4567', '093 4', '789']], ['P28-0008', ['555', '094 555', '818']]]) {
+    for (const [receipt, queries] of [['P28-0007', ['471', '47', '4715', '093 4', '589']], ['P28-0008', ['555', '094 555', '818']]]) {
       for (const q of queries) {
         const r = await get(`/api/sales?search=${enc(q)}`, 'sales_only')
         t.ok(`sales ${q}: status ${r.status}`, r.status === 200)
@@ -225,15 +256,15 @@ async function main() {
     // The reviewer's bisection: the digit after a known prefix, ten requests per digit.
     const hits = []
     for (let digit = 0; digit <= 9; digit += 1) {
-      if (receiptsIn((await get(`/api/sales?search=${enc(`45${digit}`)}`, 'sales_only')).text).includes('P28-0007')) hits.push(digit)
+      if (receiptsIn((await get(`/api/sales?search=${enc(`47${digit}`)}`, 'sales_only')).text).includes('P28-0007')) hits.push(digit)
     }
-    t.eq('digit by digit: no digit after "45" is told apart', hits, [])
+    t.eq('digit by digit: no digit after "47" is told apart', hits, [])
     for (const q of ['555', '094', '818']) {
       const list = await get(`/api/sales?cashier=${enc(q)}`, 'sales_only')
       t.ok(`?cashier=${q}: P28-0008 must not be found`, !receiptsIn(list.text).includes('P28-0008'), snippetOf(list.text))
       t.eq(`?cashier=${q}: totals`, (await get(`/api/sales/stats?cashier=${enc(q)}`, 'sales_only')).json?.total_count, 0)
     }
-    t.ok('the note shows masked to this account', has((await get(`/api/sales?search=${enc('P28-0007')}`, 'sales_only')).text, '093 *** 789'))
+    t.ok('the note shows masked to this account', has((await get(`/api/sales?search=${enc('P28-0007')}`, 'sales_only')).text, '093 *** 589'))
   })
   await check('no grant: a branch named by a number is shown as stored (review B2), so the search finds it by a fragment, as the holder does', async (t) => {
     const r = await get(`/api/sales?search=${enc('777')}`, 'sales_only')
@@ -241,7 +272,7 @@ async function main() {
     t.ok('and the branch shows in full', has(r.text, '095 777 626'), r.text.slice(0, 200))
   })
   await check('no grant: a return whose note is a number, and a supplier return saved under a number, are not found by a fragment of it', async (t) => {
-    for (const q of ['456', '45', '093 4', '789']) {
+    for (const q of ['471', '47', '093 4', '589']) {
       const r = await get(`/api/returns?search=${enc(q)}`, 'sales_only')
       t.ok(`returns ${q}: P28-RET-5 must not be found`, r.status === 200 && !has(r.text, 'P28-RET-5'), snippetOf(r.text))
     }
@@ -319,22 +350,24 @@ async function main() {
     t.eq('sales o8765', receiptsIn((await get(`/api/sales?search=${enc('o8765')}`, 'admin')).text), ['P28-0001'])
     t.eq('sales 999 + accent', receiptsIn((await get(`/api/sales?search=${enc('999́')}`, 'admin')).text), ['P28-0002'])
   })
-  await check('no grant: a disguised digit fragment finds nothing through Contacts, the picker, Sales, Returns and the totals', async (t) => {
+  await check('no grant: a disguised digit fragment finds what it finds for the holder, and the reply stays masked (Contacts, the picker, Sales, Returns and the totals)', async (t) => {
     for (const q of DISGUISED) {
       for (const [route, name] of [['customers', 'Fixture Dara'], ['suppliers', 'Fixture Supplies'], ['delivery-contacts', 'Fixture Courier']]) {
         const r = await get(`/api/${route}?search=${enc(q)}&page=1&pageSize=50`, 'manager')
-        t.ok(`${route} ${JSON.stringify(q)}: ${name} must not be found`, r.status === 200 && !has(r.text, name), snippetOf(r.text))
+        const holder = await get(`/api/${route}?search=${enc(q)}&page=1&pageSize=50`, 'manager_granted')
+        t.eq(`${route} ${JSON.stringify(q)}: ${name} found as for the holder`, has(r.text, name), has(holder.text, name))
         t.eq(`${route} ${JSON.stringify(q)} leaks`, leaksIn(r.text), [])
       }
       const picker = await get(`/api/customers?fields=sales_picker&search=${enc(q)}`, 'manager')
-      t.ok(`picker ${JSON.stringify(q)}`, !has(picker.text, 'Fixture Dara') && !has(picker.text, 'Fixture Sophea'), snippetOf(picker.text))
+      const pickerHolder = await get(`/api/customers?fields=sales_picker&search=${enc(q)}`, 'manager_granted')
+      t.eq(`picker ${JSON.stringify(q)} as for the holder`, has(picker.text, 'Fixture Dara'), has(pickerHolder.text, 'Fixture Dara'))
       const sales = await get(`/api/sales?search=${enc(q)}`, 'sales_only')
-      t.eq(`sales ${JSON.stringify(q)}`, receiptsIn(sales.text), [])
+      t.eq(`sales ${JSON.stringify(q)} as for the holder`, receiptsIn(sales.text), receiptsIn((await get(`/api/sales?search=${enc(q)}`, 'admin')).text))
       t.eq(`sales ${JSON.stringify(q)} leaks`, leaksIn(sales.text), [])
       const stats = await get(`/api/sales/stats?search=${enc(q)}`, 'sales_only')
-      t.eq(`sales totals ${JSON.stringify(q)}`, stats.json && stats.json.total_count, 0)
+      t.eq(`sales totals ${JSON.stringify(q)} as for the holder`, stats.json && stats.json.total_count, (await get(`/api/sales/stats?search=${enc(q)}`, 'manager_granted')).json?.total_count)
       const returns = await get(`/api/returns?search=${enc(q)}`, 'sales_only')
-      t.ok(`returns ${JSON.stringify(q)}: P28-RET-2 must not be found`, !has(returns.text, 'P28-RET-2'), snippetOf(returns.text))
+      t.eq(`returns ${JSON.stringify(q)}: P28-RET-2 as for the holder`, has(returns.text, 'P28-RET-2'), has((await get(`/api/returns?search=${enc(q)}`, 'admin')).text, 'P28-RET-2'))
     }
   })
 
@@ -364,38 +397,41 @@ async function main() {
     t.ok('customers tel0994 (a phone saved as Tel099456789)', has((await get(`/api/customers?search=${enc('tel0994')}&page=1&pageSize=50`, 'manager_granted')).text, 'Fixture Legacy'))
     t.ok('picker tel0994', has((await get(`/api/customers?fields=sales_picker&search=${enc('tel0994')}`, 'manager_granted')).text, 'Fixture Legacy'))
   })
-  await check('no grant: a digit fragment glued to a combining mark, a variation selector or an enclosing mark finds nothing on Customers, the picker, Suppliers and Delivery contacts', async (t) => {
+  await check('no grant: a digit fragment glued to a combining mark, a variation selector or an enclosing mark finds what it finds for the holder on Customers, the picker, Suppliers and Delivery contacts', async (t) => {
     for (const mark of MARKS) {
       const label = 'U+' + mark.codePointAt(0).toString(16)
       for (const frag of ['654', '0876', '6' + mark + '54']) {
         const q = frag.includes(mark) ? frag : frag + mark
         const list = await get(`/api/customers?search=${enc(q)}&page=1&pageSize=50`, 'manager')
-        t.ok(`customers ${label} ${frag}`, list.status === 200 && !has(list.text, 'Fixture Dara'), snippetOf(list.text))
+        t.eq(`customers ${label} ${frag}`, has(list.text, 'Fixture Dara'), has((await get(`/api/customers?search=${enc(q)}&page=1&pageSize=50`, 'manager_granted')).text, 'Fixture Dara'))
+        t.eq(`customers ${label} ${frag} leaks`, leaksIn(list.text), [])
         const picker = await get(`/api/customers?fields=sales_picker&search=${enc(q)}`, 'manager')
-        t.ok(`picker ${label} ${frag}`, !has(picker.text, 'Fixture Dara'), snippetOf(picker.text))
+        t.eq(`picker ${label} ${frag}`, has(picker.text, 'Fixture Dara'), has((await get(`/api/customers?fields=sales_picker&search=${enc(q)}`, 'manager_granted')).text, 'Fixture Dara'))
       }
-      const supplier = await get(`/api/suppliers?search=${enc('333' + mark)}&page=1&pageSize=50`, 'manager')
-      t.ok(`suppliers ${label}`, supplier.status === 200 && !has(supplier.text, 'Fixture Supplies'), snippetOf(supplier.text))
-      const delivery = await get(`/api/delivery-contacts?search=${enc('555' + mark)}&page=1&pageSize=50`, 'manager')
-      t.ok(`delivery contacts ${label}`, delivery.status === 200 && !has(delivery.text, 'Fixture Courier'), snippetOf(delivery.text))
-      t.eq(`delivery picker ${label}`, has((await get(`/api/sales/delivery-options?search=${enc('555' + mark)}`, 'manager')).text, 'Fixture Courier'), false)
+      for (const [route, frag, name] of [['suppliers', '333', 'Fixture Supplies'], ['delivery-contacts', '555', 'Fixture Courier']]) {
+        const q = frag + mark
+        const list = await get(`/api/${route}?search=${enc(q)}&page=1&pageSize=50`, 'manager')
+        t.eq(`${route} ${label}`, has(list.text, name), has((await get(`/api/${route}?search=${enc(q)}&page=1&pageSize=50`, 'manager_granted')).text, name))
+      }
     }
   })
-  await check('no grant: a mark glued to a digit fragment finds nothing in Sales, Returns and the totals either', async (t) => {
+  await check('no grant: a mark glued to a digit fragment finds what it finds for the holder in Sales, Returns and the totals either', async (t) => {
     for (const mark of MARKS) {
       const label = 'U+' + mark.codePointAt(0).toString(16)
-      t.eq(`sales ${label}`, receiptsIn((await get(`/api/sales?search=${enc('654' + mark)}`, 'sales_only')).text), [])
-      t.eq(`sales totals ${label}`, (await get(`/api/sales/stats?search=${enc('654' + mark)}`, 'sales_only')).json?.total_count, 0)
-      t.ok(`returns ${label}`, !has((await get(`/api/returns?search=${enc('222' + mark)}`, 'sales_only')).text, 'P28-RET-2'))
+      t.eq(`sales ${label}`, receiptsIn((await get(`/api/sales?search=${enc('654' + mark)}`, 'sales_only')).text), receiptsIn((await get(`/api/sales?search=${enc('654' + mark)}`, 'admin')).text))
+      t.eq(`sales totals ${label}`, (await get(`/api/sales/stats?search=${enc('654' + mark)}`, 'sales_only')).json?.total_count, (await get(`/api/sales/stats?search=${enc('654' + mark)}`, 'manager_granted')).json?.total_count)
+      t.eq(`returns ${label}`, has((await get(`/api/returns?search=${enc('222' + mark)}`, 'sales_only')).text, 'P28-RET-2'), has((await get(`/api/returns?search=${enc('222' + mark)}`, 'admin')).text, 'P28-RET-2'))
     }
   })
-  await check('no grant: a legacy phone saved glued to letters is not found by a fragment of its digits', async (t) => {
-    for (const q of ['tel0994', 'tel09945', 'tel099456789', 'TEL0994', 'dara tel0994']) {
+  await check('no grant: a legacy phone saved glued to letters is found by its digits, as for the holder', async (t) => {
+    for (const q of ['tel0994', 'tel09945', 'tel099456789', 'TEL0994']) {
       const list = await get(`/api/customers?search=${enc(q)}&page=1&pageSize=50`, 'manager')
-      t.ok(`customers ${q}`, list.status === 200 && !has(list.text, 'Fixture Legacy'), list.text.slice(0, 160))
+      t.ok(`customers ${q}`, list.status === 200 && has(list.text, 'Fixture Legacy'), list.text.slice(0, 160))
+      t.eq(`customers ${q} leaks`, leaksIn(list.text), [])
       const picker = await get(`/api/customers?fields=sales_picker&search=${enc(q)}`, 'manager')
-      t.ok(`picker ${q}`, !has(picker.text, 'Fixture Legacy'), picker.text.slice(0, 160))
+      t.ok(`picker ${q}`, has(picker.text, 'Fixture Legacy'), picker.text.slice(0, 160))
     }
+    t.ok('another word in front of it narrows the search', !has((await get(`/api/customers?search=${enc('dara tel0994')}&page=1&pageSize=50`, 'manager')).text, 'Fixture Legacy'))
   })
 
   // ---- review B2: Reports > Sales and Reports > Returns search ---------------------------------------------------------------
@@ -407,18 +443,24 @@ async function main() {
     t.ok('reports returns 222 (a customer saved under a number)', has((await report('returns', '222', 'admin')).text, 'P28-RET-2'))
     t.ok('reports sales export 654', receiptsIn((await report('sales', '654', 'admin', '&intent=export')).text).includes('P28-0001'))
   })
-  await check('no grant: Reports > Sales and Reports > Returns search never match a number by a fragment of it', async (t) => {
+  await check('no grant: Reports > Sales finds a sale by a fragment of the customer number, as the holder does; a number saved as a cashier, or quoted in a return reason, stays closed', async (t) => {
     for (const q of ['654', '65', '8765', '0876', '321', '999', '085', '222', '010', '9 000', ...DISGUISED]) {
       const list = await report('sales', q, 'sales_only')
       t.ok(`reports sales ${JSON.stringify(q)}: status ${list.status}`, list.status === 200, list.text.slice(0, 160))
-      t.eq(`reports sales ${JSON.stringify(q)}`, receiptsIn(list.text), [])
+      t.eq(`reports sales ${JSON.stringify(q)} as for the holder`, receiptsIn(list.text), receiptsIn((await report('sales', q, 'admin')).text))
       t.eq(`reports sales ${JSON.stringify(q)} leaks`, leaksIn(list.text), [])
       const exported = await report('sales', q, 'sales_only', '&intent=export')
-      t.eq(`reports sales export ${JSON.stringify(q)}`, receiptsIn(exported.text), [])
+      t.eq(`reports sales export ${JSON.stringify(q)} as for the holder`, receiptsIn(exported.text), receiptsIn((await report('sales', q, 'admin', '&intent=export')).text))
       t.eq(`reports sales export ${JSON.stringify(q)} leaks`, leaksIn(exported.text), [])
       const returns = await report('returns', q, 'sales_only')
-      t.ok(`reports returns ${JSON.stringify(q)}: P28-RET-2 must not be found`, !has(returns.text, 'P28-RET-2'), snippetOf(returns.text))
+      t.eq(`reports returns ${JSON.stringify(q)}: P28-RET-2 as for the holder`, has(returns.text, 'P28-RET-2'), has((await report('returns', q, 'admin')).text, 'P28-RET-2'))
     }
+    t.eq('the customer phone fragment finds the sale', receiptsIn((await report('sales', '654', 'sales_only')).text), ['P28-0001'])
+    t.ok('positive control: the holder finds the sale saved under a cashier that is a number', receiptsIn((await report('sales', '555', 'admin')).text).includes('P28-0008'))
+    t.ok('no grant: it is not found by a fragment of that cashier', !receiptsIn((await report('sales', '555', 'sales_only')).text).includes('P28-0008'))
+    t.ok('no grant: nor in the export', !receiptsIn((await report('sales', '555', 'sales_only', '&intent=export')).text).includes('P28-0008'))
+    t.ok('positive control: the holder finds the return by the number quoted in its reason', has((await report('returns', '243', 'admin')).text, 'P28-RET-7'))
+    t.ok('no grant: a return is not found by the number quoted in its reason', !has((await report('returns', '243', 'sales_only')).text, 'P28-RET-7'))
   })
   await check('no grant: Reports > Sales finds a sale by the whole number, masked, and by receipt, name and cashier as before', async (t) => {
     const whole = await report('sales', '087 654 321', 'sales_only')
@@ -447,39 +489,38 @@ async function main() {
     for (const q of ['sokha2', 'Sokha2']) t.ok(`returns ${q}`, has((await get(`/api/returns?search=${enc(q)}`, 'sales_only')).text, 'P28-RET-3'))
     t.eq('reports > sales No1 (a raw match, as before)', receiptsIn((await get(`/api/reports/business-summary/sales?startDate=2000-01-01&endDate=2100-01-01&q=${enc('No1')}`, 'sales_only')).text), ['P28-0004'])
   })
-  await check('no grant: the retry never reaches a phone, the folded copy, or a digit fragment', async (t) => {
+  await check('no grant: the retry never reaches the folded copy; a legacy customer phone glued to letters is found by its digits; a number typed with a letter O stays unreadable', async (t) => {
     for (const q of ['tel0994', 'tel09945', 'TEL0994', 'tel099456789']) {
       const r = await get(`/api/sales?search=${enc(q)}`, 'sales_only')
-      t.eq(`sales ${q}`, receiptsIn(r.text), [])
+      t.eq(`sales ${q}`, receiptsIn(r.text), ['P28-0005'])
       t.eq(`sales ${q} leaks`, leaksIn(r.text), [])
-      t.eq(`sales totals ${q}`, (await get(`/api/sales/stats?search=${enc(q)}`, 'sales_only')).json?.total_count, 0)
+      t.eq(`sales totals ${q}`, (await get(`/api/sales/stats?search=${enc(q)}`, 'sales_only')).json?.total_count, 1)
     }
     for (const q of ['tel0102', 'tel010222333', 'TEL0102']) {
       const r = await get(`/api/returns?search=${enc(q)}`, 'sales_only')
       t.ok(`returns ${q}: P28-RET-4 must not be found`, !has(r.text, 'P28-RET-4'), snippetOf(r.text))
     }
+    for (const q of ['tel0771', 'TEL0771', 'tel0771234']) {
+      t.eq(`sales ${q}: the folded copy is not searched`, receiptsIn((await get(`/api/sales?search=${enc(q)}`, 'sales_only')).text), [])
+      t.eq(`sales ${q}: the holder reads it`, receiptsIn((await get(`/api/sales?search=${enc(q)}`, 'admin')).text), ['P28-0010'])
+    }
     for (const q of ['01988', 'o1988', 'O1988']) t.eq(`sales ${q}: a number typed with a letter O stays unreadable by its digits`, receiptsIn((await get(`/api/sales?search=${enc(q)}`, 'sales_only')).text), [])
     t.eq('positive control: the holder reads it', receiptsIn((await get(`/api/sales?search=${enc('01988')}`, 'admin')).text), ['P28-0006'])
   })
 
-  // The security review's 42 spellings of a fragment (harness/phone_disguises.cjs) on the search surfaces, without the grant.
-  await check('no grant: the reviewer\'s 42 spellings of a digit fragment find nothing on every surface (the holder finds the plain fragment)', async (t) => {
+  // The security review's 42 spellings of a fragment (harness/phone_disguises.cjs). A number in a column that is not the customer's own stays closed in every spelling;
+  // a fragment of a customer's number finds what it finds for the holder in every spelling, with the reply masked.
+  await check('no grant: the reviewer\'s 42 spellings of a fragment of a hidden number find nothing, and of a customer number find what the holder finds', async (t) => {
     const range = 'startDate=2026-01-01&endDate=2027-12-31'
-    const SURFACES = [
-      { name: 'customers list', frag: '654', as: 'manager', holder: 'manager_granted', url: (q) => `/api/customers?search=${enc(q)}&page=1&pageSize=50`, hit: (r) => has(r.text, 'Fixture Dara') },
-      { name: 'POS picker', frag: '654', as: 'manager', holder: 'manager_granted', url: (q) => `/api/customers?fields=sales_picker&search=${enc(q)}`, hit: (r) => has(r.text, 'Fixture Dara') },
-      { name: 'suppliers list', frag: '333', as: 'manager', holder: 'manager_granted', url: (q) => `/api/suppliers?search=${enc(q)}&page=1&pageSize=50`, hit: (r) => has(r.text, 'Fixture Supplies') },
-      { name: 'delivery contacts list', frag: '555', as: 'manager', holder: 'manager_granted', url: (q) => `/api/delivery-contacts?search=${enc(q)}&page=1&pageSize=50`, hit: (r) => has(r.text, 'Fixture Courier') },
-      { name: 'delivery picker', frag: '555', as: 'manager', holder: 'manager_granted', url: (q) => `/api/sales/delivery-options?search=${enc(q)}`, hit: (r) => has(r.text, 'Fixture Courier') },
-      { name: 'sales list', frag: '654', as: 'sales_only', holder: 'admin', url: (q) => `/api/sales?search=${enc(q)}`, hit: (r) => receiptsIn(r.text).includes('P28-0001') },
-      { name: 'sales totals', frag: '654', as: 'sales_only', holder: 'admin', url: (q) => `/api/sales/stats?search=${enc(q)}`, hit: (r) => Number(r.json && r.json.total_count) > 0 },
-      { name: 'returns list', frag: '222', as: 'sales_only', holder: 'admin', url: (q) => `/api/returns?search=${enc(q)}`, hit: (r) => has(r.text, 'P28-RET-2') },
-      { name: 'reports sales', frag: '654', as: 'cashier', holder: 'cashier_granted', url: (q) => `/api/reports/business-summary/sales?${range}&q=${enc(q)}`, hit: (r) => receiptsIn(r.text).includes('P28-0001') },
-      { name: 'reports sales export', frag: '654', as: 'sales_only', holder: 'admin', url: (q) => `/api/reports/business-summary/sales?${range}&q=${enc(q)}&intent=export`, hit: (r) => receiptsIn(r.text).includes('P28-0001') },
-      { name: 'reports returns', frag: '222', as: 'sales_only', holder: 'admin', url: (q) => `/api/reports/business-summary/returns?${range}&q=${enc(q)}`, hit: (r) => has(r.text, 'P28-RET-2') },
+    const HIDDEN = [
+      { name: 'sales list (a note)', frag: '471', as: 'sales_only', holder: 'admin', url: (q) => `/api/sales?search=${enc(q)}`, hit: (r) => receiptsIn(r.text).includes('P28-0007') },
+      { name: 'sales totals (a note)', frag: '471', as: 'sales_only', holder: 'admin', url: (q) => `/api/sales/stats?search=${enc(q)}`, hit: (r) => Number(r.json && r.json.total_count) > 0 },
+      { name: 'returns list (a note)', frag: '471', as: 'sales_only', holder: 'admin', url: (q) => `/api/returns?search=${enc(q)}`, hit: (r) => has(r.text, 'P28-RET-5') },
+      { name: 'reports sales (a cashier)', frag: '555', as: 'cashier', holder: 'cashier_granted', url: (q) => `/api/reports/business-summary/sales?${range}&q=${enc(q)}`, hit: (r) => receiptsIn(r.text).includes('P28-0008') },
+      { name: 'reports returns (a reason)', frag: '243', as: 'sales_only', holder: 'admin', url: (q) => `/api/reports/business-summary/returns?${range}&q=${enc(q)}`, hit: (r) => has(r.text, 'P28-RET-7') },
       { name: 'audit log', frag: '222', as: 'sales_only', holder: 'admin', url: (q) => `/api/system/audit-logs?search=${enc(q)}&pageSize=50`, hit: (r) => ((r.json && r.json.items) || []).length > 0 },
     ]
-    for (const surface of SURFACES) {
+    for (const surface of HIDDEN) {
       t.ok(`${surface.name}: positive control, the holder (${surface.holder}) finds the plain fragment ${surface.frag}`, surface.hit(await get(surface.url(surface.frag), surface.holder)))
       let tried = 0
       for (const [label, q] of disguises(surface.frag)) {
@@ -491,18 +532,40 @@ async function main() {
       }
       t.ok(`${surface.name}: tried the reviewer's 42 spellings`, tried >= 42, String(tried))
     }
+    const CUSTOMER = [
+      { name: 'customers list', frag: '654', as: 'manager', holder: 'manager_granted', url: (q) => `/api/customers?search=${enc(q)}&page=1&pageSize=50`, hit: (r) => has(r.text, 'Fixture Dara') },
+      { name: 'POS picker', frag: '654', as: 'manager', holder: 'manager_granted', url: (q) => `/api/customers?fields=sales_picker&search=${enc(q)}`, hit: (r) => has(r.text, 'Fixture Dara') },
+      { name: 'suppliers list', frag: '333', as: 'manager', holder: 'manager_granted', url: (q) => `/api/suppliers?search=${enc(q)}&page=1&pageSize=50`, hit: (r) => has(r.text, 'Fixture Supplies') },
+      { name: 'delivery contacts list', frag: '555', as: 'manager', holder: 'manager_granted', url: (q) => `/api/delivery-contacts?search=${enc(q)}&page=1&pageSize=50`, hit: (r) => has(r.text, 'Fixture Courier') },
+      { name: 'delivery picker', frag: '555', as: 'manager', holder: 'manager_granted', url: (q) => `/api/sales/delivery-options?search=${enc(q)}`, hit: (r) => has(r.text, 'Fixture Courier') },
+      { name: 'sales list', frag: '654', as: 'sales_only', holder: 'admin', url: (q) => `/api/sales?search=${enc(q)}`, hit: (r) => receiptsIn(r.text).includes('P28-0001') },
+      { name: 'sales totals', frag: '654', as: 'sales_only', holder: 'admin', url: (q) => `/api/sales/stats?search=${enc(q)}`, hit: (r) => Number(r.json && r.json.total_count) > 0 },
+      { name: 'returns list', frag: '222', as: 'sales_only', holder: 'admin', url: (q) => `/api/returns?search=${enc(q)}`, hit: (r) => has(r.text, 'P28-RET-2') },
+      { name: 'reports sales', frag: '654', as: 'cashier', holder: 'cashier_granted', url: (q) => `/api/reports/business-summary/sales?${range}&q=${enc(q)}`, hit: (r) => receiptsIn(r.text).includes('P28-0001') },
+      { name: 'reports returns', frag: '222', as: 'sales_only', holder: 'admin', url: (q) => `/api/reports/business-summary/returns?${range}&q=${enc(q)}`, hit: (r) => has(r.text, 'P28-RET-2') },
+    ]
+    for (const surface of CUSTOMER) {
+      t.ok(`${surface.name}: positive control, the plain fragment ${surface.frag} finds it without the grant`, surface.hit(await get(surface.url(surface.frag), surface.as)))
+      for (const [label, q] of disguises(surface.frag)) {
+        const r = await get(surface.url(q), surface.as)
+        t.ok(`${surface.name} ${label}: status ${r.status}`, r.status === 200, r.text.slice(0, 120))
+        t.eq(`${surface.name} ${label}: found as for the holder`, surface.hit(r), surface.hit(await get(surface.url(q), surface.holder)))
+        t.eq(`${surface.name} ${label} leaks`, leaksIn(r.text), [])
+      }
+    }
   })
 
   // ---- source guard: no search call site can forget the access argument -----------------------------------------------------
-  await check('source guard: every contact, sales and returns search call site names the access', async (t) => {
+  await check('source guard: the contact searches take no account, and every sales and returns search call site still names the access', async (t) => {
     const fs = require('node:fs')
     const path = require('node:path')
     const src = path.join(__dirname, '..', 'src')
     const read = (file) => fs.readFileSync(path.join(src, file), 'utf8')
     const callsOf = (file, name) => (read(file).match(new RegExp(`${name}\\(`, 'g')) || []).length - (new RegExp(`function ${name}\\(`).test(read(file)) ? 1 : 0)
     const argued = (file, re) => (read(file).match(re) || []).length
-    t.eq('contacts.ts buildContactMatchClause calls carry the access', argued('routes/contacts.ts', /buildContactMatchClause\([^)]*phoneSearchAccessOf\(/g), callsOf('routes/contacts.ts', 'buildContactMatchClause'))
-    t.eq('contacts.ts buildSalesCustomerMatchClause calls carry the access', argued('routes/contacts.ts', /buildSalesCustomerMatchClause\([^)]*phoneSearchAccessOf\(/g), callsOf('routes/contacts.ts', 'buildSalesCustomerMatchClause'))
+    t.eq('contacts.ts passes no access to buildContactMatchClause', argued('routes/contacts.ts', /buildContactMatchClause\([^)]*phoneSearchAccessOf\(/g), 0)
+    t.eq('contacts.ts passes no access to buildSalesCustomerMatchClause', argued('routes/contacts.ts', /buildSalesCustomerMatchClause\([^)]*phoneSearchAccessOf\(/g), 0)
+    t.ok('contacts.ts has the calls', callsOf('routes/contacts.ts', 'buildContactMatchClause') >= 2 && callsOf('routes/contacts.ts', 'buildSalesCustomerMatchClause') >= 1)
     t.eq('sales.ts buildSalesSearchWhere calls carry the access', argued('routes/sales.ts', /buildSalesSearchWhere\(query, params, phoneSearchAccessOf\(/g), callsOf('routes/sales.ts', 'buildSalesSearchWhere'))
     t.eq('returns.ts returnsFilter calls carry the access', argued('routes/returns.ts', /returnsFilter\([\s\S]*?phoneSearchAccessOf\(/g), callsOf('routes/returns.ts', 'returnsFilter'))
   })

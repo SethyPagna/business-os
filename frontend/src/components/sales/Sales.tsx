@@ -29,6 +29,8 @@ import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { createLongPressState, type LongPressState } from '../../utils/longPress.ts'
 import { buildTimeActionSections, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
+import { isProductSearchTooShort } from '../../api/productSearchIndex.ts'
+import { SALES_PAGE_SYNC_SOURCE, createSalesReloadCoalescer, type SalesReloadPlan } from './salesReloadCoalescer.ts'
 import { buildBulkSaleCancelInput, getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, SALES_LIST_REQUEST_TIMEOUT_MS, previewSalesBulkField, updateSalesBulkField, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload, type BulkSaleUpdatePayload, type PreparedSaleStatusRequest, type SaleAmendmentRequest } from '../../api/salesTransport.ts'
 import { getSalesCustomerPicker, getDeliveryContacts } from '../../api/contactReadTransport.ts'
 import { customerRequestIsCurrent, saleCustomerMode } from '../../utils/saleCustomerMode.ts'
@@ -236,7 +238,12 @@ interface SyncContextValue {
   syncChannel?: {
     channel?: string | null
     ts?: string | number | null
+    source?: string | null
   } | null
+}
+
+function emitOwnSalesSync(channel: string): void {
+  window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel, source: SALES_PAGE_SYNC_SOURCE } }))
 }
 
 interface SaleItemAddition {
@@ -686,6 +693,13 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // actually replaced it landed on a completely different, longer cadence.
   // One debounced value for both call sites closes that gap here too.
   const debouncedSearch = useDebouncedValue(search, 180)
+  const salesSearchTooShort = isProductSearchTooShort(debouncedSearch)
+  const lastSalesSearchRef = useRef('')
+  const effectiveSalesSearch = useMemo(() => {
+    if (isProductSearchTooShort(debouncedSearch)) return lastSalesSearchRef.current
+    lastSalesSearchRef.current = debouncedSearch
+    return debouncedSearch
+  }, [debouncedSearch])
   // Sales organize by DAY always (user, Aug 30: "for date in sales …
   // do date by year month and day") — the day label is the full
   // dd/mm/yyyy, so year+month+day all read off every section header
@@ -742,12 +756,13 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const salesStatsParams = useMemo(() => ({
     ...(isAdmin && userFilter !== 'all' ? { userId: userFilter } : {}),
     ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
-    ...(debouncedSearch ? { search: debouncedSearch } : {}),
+    ...(effectiveSalesSearch ? { search: effectiveSalesSearch } : {}),
     ...salesDateRange,
-  }), [isAdmin, userFilter, statusFilter, debouncedSearch, salesDateRange])
+  }), [isAdmin, userFilter, statusFilter, effectiveSalesSearch, salesDateRange])
   const salesReadAuthority = captureActorReadScope('sales').authority
   const salesStatsScope = JSON.stringify([statusSecurityScope, salesReadAuthority, salesStatsParams])
   const salesStatsScopeRef = useRef(salesStatsScope)
+  const salesStatsAbortRef = useRef<AbortController | null>(null)
   salesStatsScopeRef.current = salesStatsScope
   const salesPageParams = useMemo(() => ({
     ...salesStatsParams, page: salesPage, limit: salesPageSize,
@@ -916,11 +931,14 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     if (!isActive || !authReady || !canViewSales || requestSecurity !== statusSecurityRef.current || requestScope !== salesStatsScopeRef.current) return
     const readScope = captureActorReadScope('sales:stats')
     const requestId = beginTrackedRequest(salesStatsRequestRef)
+    salesStatsAbortRef.current?.abort()
+    const controller = new AbortController()
+    salesStatsAbortRef.current = controller
     setSalesStatsRead({ scope: requestScope, readScope, status: 'loading', value: null })
     const isCurrentRequest = () => aliveRef.current && requestSecurity === statusSecurityRef.current
       && requestScope === salesStatsScopeRef.current && isTrackedRequestCurrent(salesStatsRequestRef, requestId)
     try {
-      const result = await fetchSalesStats(salesStatsParams)
+      const result = await fetchSalesStats(salesStatsParams, { signal: controller.signal })
       if (!isCurrentRequest()) return
       assertActorReadScope(readScope)
       const value = requireSalesStatsResult(result)
@@ -928,6 +946,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     } catch {
       if (!isCurrentRequest() || !isActorReadScopeCurrent(readScope, false)) return
       setSalesStatsRead({ scope: requestScope, readScope: captureActorReadScope('sales:stats'), status: 'error', value: null })
+    } finally {
+      if (salesStatsAbortRef.current === controller) salesStatsAbortRef.current = null
     }
   }, [authReady, canViewSales, statusSecurityScope, salesStatsScope, salesStatsParams, isActive])
 
@@ -1027,6 +1047,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       loadAbortRef.current = null
       invalidateTrackedRequest(loadRequestRef)
       invalidateTrackedRequest(salesStatsRequestRef)
+      salesStatsAbortRef.current?.abort()
+      salesStatsAbortRef.current = null
       loadPromiseRef.current = null
       pendingLoadRef.current = null
       setLoading(false)
@@ -1049,6 +1071,25 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     return undefined
   }, [isActive, loading])
 
+  const runSalesReloadRef = useRef<(plan: SalesReloadPlan) => void>(() => {})
+  runSalesReloadRef.current = (plan) => {
+    if (!isActive) return
+    if (plan.userOptions) setUserOptionsLoaded(false)
+    if (plan.rowsAndTotals) {
+      void loadSales(true)
+      void loadSalesStats() // Z3a: the header totals reload in lockstep with the rows
+    }
+    if (plan.strip) void loadStatsStrip()
+  }
+  const salesReloadRef = useRef<ReturnType<typeof createSalesReloadCoalescer> | null>(null)
+  useEffect(() => {
+    const coalescer = createSalesReloadCoalescer(
+      { setTimeout: (callback, ms) => window.setTimeout(callback, ms), clearTimeout: (timer) => window.clearTimeout(timer), now: () => Date.now() },
+      (plan) => runSalesReloadRef.current(plan),
+    )
+    salesReloadRef.current = coalescer
+    return () => { coalescer.dispose(); salesReloadRef.current = null }
+  }, [])
   useEffect(() => {
     // React to each sync event once. This effect also re-runs whenever loadSales changes (every filter, date, sort or
     // page change); without this guard each of those re-sent the LAST event as a second, silent read right behind the
@@ -1061,13 +1102,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     // product metadata in addition to immutable receipt snapshots. Those
     // reference routes broadcast their own channels, so refresh on the full
     // dependency set instead of waiting for the next sale mutation.
-    if (['sales', 'returns', 'fees', 'customers', 'deliveryContacts', 'users', 'products', 'settings'].includes(syncChannel.channel)) {
-      if (syncChannel.channel === 'users') setUserOptionsLoaded(false)
-      loadSales(true)
-      void loadSalesStats() // Z3a: keep the summary aggregate in lockstep with the rows
-      void loadStatsStrip() // the range strip counts the same events
-    }
-  }, [isActive, loadSales, loadSalesStats, loadStatsStrip, syncChannel?.channel, syncChannel?.ts])
+    salesReloadRef.current?.note({ channel: syncChannel.channel, source: syncChannel.source })
+  }, [isActive, syncChannel?.channel, syncChannel?.ts, syncChannel?.source])
   useEffect(() => {
     if (!isActive || !isAdmin || !salesFiltersOpen || userOptionsLoaded) return
     let cancelled = false
@@ -1170,9 +1206,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     }
     void loadSalesStats()
     actionHistory.refreshServerItems()
-    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
-    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
-    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
+    emitOwnSalesSync('inventory')
+    emitOwnSalesSync('products')
+    emitOwnSalesSync('sales')
     return true
   }, [actionHistory, loadSales, loadSalesStats, readAuthoritativeSale])
 
@@ -1202,8 +1238,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         savePendingDirectStatus(pending.entityId, null)
         void loadSalesStats()
         void actionHistory.refreshServerItems()
-        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
-        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
+        emitOwnSalesSync('sales')
+        emitOwnSalesSync('inventory')
       }
       return result
     }).finally(() => {
@@ -1360,10 +1396,10 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       savePendingDirectStatus(saleId, null)
       notify(`${t('status_updated') || 'Status updated'}: ${getStatusLabel(newStatus, t)}`)
       void loadSalesStats() // Z3a: refresh the summary aggregate immediately, not only via the sync round-trip
-      window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
-      window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
-      window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
-      window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
+      emitOwnSalesSync('inventory')
+      emitOwnSalesSync('products')
+      emitOwnSalesSync('sales')
+      emitOwnSalesSync('returns')
       if (hasServerSettlementHistory) {
         await actionHistory.refreshServerItems()
       } else if (recordHistory && previousSale && previousStatus !== newStatus) {
@@ -1553,9 +1589,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       if (!isCurrent()) return false
       void loadSalesStats()
       actionHistory.refreshServerItems()
-      window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
-      window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
-      window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
+      emitOwnSalesSync('inventory')
+      emitOwnSalesSync('products')
+      emitOwnSalesSync('sales')
       return { committed: true, response: result }
     } catch (error) {
       if (!isCurrent()) return false
@@ -1591,9 +1627,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           }
           void loadSalesStats()
           actionHistory.refreshServerItems()
-          window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
-          window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
-          window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
+          emitOwnSalesSync('inventory')
+          emitOwnSalesSync('products')
+          emitOwnSalesSync('sales')
           notify(translateOr('sale_items_added', 'Items were added to the sale.'))
           return { committed: true, response: committedSale || receipt }
         }
@@ -1646,9 +1682,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       if (!isCurrent()) return false
       void loadSalesStats()
       actionHistory.refreshServerItems()
-      window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
-      window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
-      window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
+      emitOwnSalesSync('inventory')
+      emitOwnSalesSync('products')
+      emitOwnSalesSync('sales')
       return { committed: true, response: result }
     } catch (error) {
       if (!isCurrent()) return false
@@ -2521,7 +2557,8 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
         items: [{ id: Number(sale.id), expected_updated_at: sale.updated_at == null ? null : String(sale.updated_at) }],
         action: { kind: 'delivery_contact', source_id: source.id ?? null, target_id: target?.id ?? null },
       })
-      return { expenseCount: Number(result.movedExpenseCount) || 0 }
+      // Expense detail is for people who may view expenses; the Worker already sends an amend-only caller a zero count.
+      return { expenseCount: canViewFees ? Number(result.movedExpenseCount) || 0 : 0 }
     } catch (error) {
       const code = (error as { code?: string } | null)?.code
       const cancelled = saleCancelledRefusal(error)
@@ -2893,6 +2930,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
             mobileIconOnly
           />
         </div>
+        {salesSearchTooShort ? <p className="mt-1 text-xs text-gray-500" role="status">{t('search_type_one_more')}</p> : null}
 
       </div>
 
@@ -3187,9 +3225,9 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
               setReturnForSale(null)
               await loadSales(true)
               void loadSalesStats()
-              window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
-              window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
-              window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
+              emitOwnSalesSync('returns')
+              emitOwnSalesSync('sales')
+              emitOwnSalesSync('inventory')
             }}
             fmtUSD={fmtUSD}
             notify={notify as (message: string, kind?: string) => void}

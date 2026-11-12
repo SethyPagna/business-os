@@ -8,6 +8,7 @@ import { hasPermission, isAdminControlUser } from './permissions'
 import { stockVisibleProductSql } from './productStockGuard'
 import { actorSnapshot } from './actorSnapshot'
 import { localDateExpr } from './businessDateWindow'
+import { schemaObjectsPresent, type SchemaObject } from './schemaObjectProbe'
 
 export type InventoryCheckPrincipal = { id: number; tokenHash: string }
 export type InventoryCheckReceipt = { requestId: string; eventId: number; action: string; sessionId: string; sessionRevision: number; itemRevision?: number; replayed: boolean }
@@ -50,13 +51,15 @@ export async function currentInventoryCheckActor(db: D1Compat, principal: Invent
 // Positive-only per-isolate memos: a miss re-probes, so a migration that lands later is seen on the next request.
 let checkSchemaReady = false
 let physicalSignature: string | undefined
+const anyObjects = (names: readonly string[]): SchemaObject[] => names.map((name) => ({ kind: 'any', name }))
+const CHECK_SCHEMA = anyObjects(['inventory_check_sessions', 'inventory_check_items', 'inventory_check_events', 'inventory_check_events_no_update',
+  'inventory_check_events_no_delete', 'inventory_check_sessions_identity', 'inventory_check_sessions_no_delete',
+  'inventory_check_items_baseline', 'inventory_check_items_no_delete'])
+const APPROVALS_SCHEMA = anyObjects(['inventory_check_approvals', 'inventory_check_approvals_identity',
+  'inventory_check_approvals_decided', 'inventory_check_approvals_claim', 'inventory_check_approvals_no_delete'])
 export async function schemaReady(db: D1Compat): Promise<void> {
   if (checkSchemaReady) return
-  const ready = await db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN (
-    'inventory_check_sessions','inventory_check_items','inventory_check_events','inventory_check_events_no_update',
-    'inventory_check_events_no_delete','inventory_check_sessions_identity','inventory_check_sessions_no_delete',
-    'inventory_check_items_baseline','inventory_check_items_no_delete')`).get<{ n: number }>()
-  if (ready?.n !== 9) fail(503, 'inventory_check_schema_unavailable')
+  if (!await schemaObjectsPresent(db, CHECK_SCHEMA)) fail(503, 'inventory_check_schema_unavailable')
   checkSchemaReady = true
 }
 export const guard = (expression: string, code: string, params: Record<string, unknown>): Statement => ({ sql: `SELECT CASE WHEN ${expression} THEN 1 ELSE json_extract('[]','$[${code}]') END`, params })
@@ -148,9 +151,7 @@ let approvalsSchemaReady = false
 export async function approvalsAvailable(db: D1Compat): Promise<boolean> {
   if (approvalsSchemaReady) return true
   try {
-    const ready = await db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN ('inventory_check_approvals','inventory_check_approvals_identity',
-      'inventory_check_approvals_decided','inventory_check_approvals_claim','inventory_check_approvals_no_delete')`).get<{ n: number }>()
-    approvalsSchemaReady = ready?.n === 5
+    approvalsSchemaReady = await schemaObjectsPresent(db, APPROVALS_SCHEMA)
   } catch { approvalsSchemaReady = false }
   return approvalsSchemaReady
 }

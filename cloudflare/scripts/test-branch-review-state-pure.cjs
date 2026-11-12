@@ -83,7 +83,7 @@ function routeHandler(method, routePath, dependencies = {}) {
   const callback = statement.expression.arguments[1].getText(tree)
   return evaluate(`const handler = ${callback}`, {
     ...writes, ...load('permissions'), ...load('conflictControl'), ...load('canonicalBranchIdentity'), ...load('reviewGate'),
-    ...load('businessMaintenanceGuard'), ...load('audit'), getDb: () => adapter(currentDb), broadcast: async () => {}, actorSnapshot: () => 'User', ...dependencies,
+    ...load('businessMaintenanceGuard'), ...load('audit'), getDb: () => adapter(currentDb), broadcast: async () => {}, bumpVersion: async () => {}, actorSnapshot: () => 'User', ...dependencies,
   }, 'handler')
 }
 function context(body, user = { id: 7, permissions: JSON.stringify({ branches: true }) }) {
@@ -478,7 +478,7 @@ function world(old = false) {
 const writes = lib('branchWrites')
 const permissions = lib('permissions')
 const broadcast = load('cloudflare/src/durable-objects/broadcastHub').broadcast
-const branchDeps = { ...lib('db'), ...writes, ...permissions, ...lib('conflictControl'), ...lib('canonicalBranchIdentity'), ...lib('reviewGate'), ...lib('businessMaintenanceGuard'), ...lib('actorSnapshot'), ...lib('audit'), broadcast }
+const branchDeps = { bumpVersion: async () => {}, ...lib('db'), ...writes, ...permissions, ...lib('conflictControl'), ...lib('canonicalBranchIdentity'), ...lib('reviewGate'), ...lib('businessMaintenanceGuard'), ...lib('actorSnapshot'), ...lib('audit'), broadcast }
 function branchRoute(method, route, overrides = {}) {
   return evaluate(`const handler=${selectRoute('cloudflare/src/routes/branches.ts', method, route)}`, { ...branchDeps, ...overrides }, 'handler')
 }

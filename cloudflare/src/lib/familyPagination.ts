@@ -175,6 +175,16 @@ export interface FamilyPaginationOptions {
   parentSeek?: boolean
 }
 
+// Typed-search order in JS (read switch products_typed_order_js), see paginateRankedIdFamilies.
+export interface RankedIdDrivenRead {
+  // The JSON id-list parameter the read starts from (replaces the `p.id IN listed` term, which whereSql here no longer carries).
+  listParam: string
+  // The caller's WHERE with the listed-ids term replaced by 1 = 1.
+  drivenWhereSql: string
+  // The member filter spelled against the list's CSV (buildRankedIdSearchQuery's csvMemberWhereSql).
+  csvMemberWhereSql: string
+}
+
 export interface FamilyPaginationResult<T> {
   items: T[]
   total: number
@@ -183,7 +193,7 @@ export interface FamilyPaginationResult<T> {
   totalPages: number
 }
 
-function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSql' | 'whereSql' | 'matchRankSql' | 'rankCteSql' | 'matchTierSql' | 'familyMemberBaseWhereSql' | 'promotedRankSql' | 'familySortValueSql' | 'familyNumericSortSql'> & { inlineFamilies?: boolean }) {
+function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSql' | 'whereSql' | 'matchRankSql' | 'rankCteSql' | 'matchTierSql' | 'familyMemberBaseWhereSql' | 'promotedRankSql' | 'familySortValueSql' | 'familyNumericSortSql'> & { inlineFamilies?: boolean; drivenByListParam?: string }) {
   const matchRankSelect = opts.matchRankSql ? `, (${opts.matchRankSql}) AS __match_rank` : ''
   // __fts_rank is productSearchQuery's FTS_RANK_CTE_NAME (not imported: keeps
   // this helper dependency-free). When matchRankSql reads its rank column,
@@ -223,7 +233,9 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
              ${FAMILY_ROOT_KEY_SQL} AS __family_root_id,
              lower(trim(COALESCE(parent.name, p.name))) AS __family_name,
              p.created_at AS __created_at${matchRankSelect}${matchTierSelect}${promotedSelect}${sortValueSelect}${numericSortSelect}
-      FROM products p
+      ${opts.drivenByListParam
+        ? `FROM json_each(@${opts.drivenByListParam}) __rank_j CROSS JOIN products p ON p.id = CAST(__rank_j.value AS INTEGER)`
+        : 'FROM products p'}
       LEFT JOIN products parent ON parent.id = p.parent_id
       ${opts.joinSql}
       ${rankJoin}
@@ -292,15 +304,15 @@ function buildSeekPageSql(opts: FamilyPaginationOptions, familyOrderSql: string,
 // The ids a page reads: the rows of its families' name keys, their children, and for a blank-named root 'id:N' the root and its children. Two spellings of the same four sets.
 // The IN (SELECT ...) spelling leaves the child lookup to the planner, which scans the whole parent_id index (once per lookup) as soon as ANALYZE statistics exist: every product has a NULL
 // parent_id, so the statistics say every key matches every row. The join spelling pins the order (CROSS JOIN) and the index (INDEXED BY idx_products_parent_pg), so the lookup is a seek.
-function pageCandidatesSql(parentSeek: boolean): string {
-  if (!parentSeek) return `SELECT id FROM products WHERE name_key IN (SELECT family_root_id FROM page_families)
-      UNION SELECT id FROM products WHERE parent_id IN (SELECT id FROM products WHERE name_key IN (SELECT family_root_id FROM page_families))
-      UNION SELECT CAST(substr(family_root_id, 4) AS INTEGER) FROM page_families WHERE substr(family_root_id, 1, 3) = 'id:'
-      UNION SELECT id FROM products WHERE parent_id IN (SELECT CAST(substr(family_root_id, 4) AS INTEGER) FROM page_families WHERE substr(family_root_id, 1, 3) = 'id:')`
-  return `SELECT p.id FROM page_families pf CROSS JOIN products p ON p.name_key = pf.family_root_id
-      UNION SELECT c.id FROM page_families pf CROSS JOIN products r ON r.name_key = pf.family_root_id CROSS JOIN products c INDEXED BY idx_products_parent_pg ON c.parent_id = r.id
-      UNION SELECT CAST(substr(family_root_id, 4) AS INTEGER) FROM page_families WHERE substr(family_root_id, 1, 3) = 'id:'
-      UNION SELECT c.id FROM page_families pf CROSS JOIN products c INDEXED BY idx_products_parent_pg ON c.parent_id = CAST(substr(pf.family_root_id, 4) AS INTEGER) WHERE substr(pf.family_root_id, 1, 3) = 'id:'`
+export function pageCandidatesSql(parentSeek: boolean, familiesTable = 'page_families'): string {
+  if (!parentSeek) return `SELECT id FROM products WHERE name_key IN (SELECT family_root_id FROM ${familiesTable})
+      UNION SELECT id FROM products WHERE parent_id IN (SELECT id FROM products WHERE name_key IN (SELECT family_root_id FROM ${familiesTable}))
+      UNION SELECT CAST(substr(family_root_id, 4) AS INTEGER) FROM ${familiesTable} WHERE substr(family_root_id, 1, 3) = 'id:'
+      UNION SELECT id FROM products WHERE parent_id IN (SELECT CAST(substr(family_root_id, 4) AS INTEGER) FROM ${familiesTable} WHERE substr(family_root_id, 1, 3) = 'id:')`
+  return `SELECT p.id FROM ${familiesTable} pf CROSS JOIN products p ON p.name_key = pf.family_root_id
+      UNION SELECT c.id FROM ${familiesTable} pf CROSS JOIN products r ON r.name_key = pf.family_root_id CROSS JOIN products c INDEXED BY idx_products_parent_pg ON c.parent_id = r.id
+      UNION SELECT CAST(substr(family_root_id, 4) AS INTEGER) FROM ${familiesTable} WHERE substr(family_root_id, 1, 3) = 'id:'
+      UNION SELECT c.id FROM ${familiesTable} pf CROSS JOIN products c INDEXED BY idx_products_parent_pg ON c.parent_id = CAST(substr(pf.family_root_id, 4) AS INTEGER) WHERE substr(pf.family_root_id, 1, 3) = 'id:'`
 }
 
 export async function paginateProductFamilies<T = Record<string, unknown>>(
@@ -446,4 +458,59 @@ export async function pageFamiliesByKeys<T = Record<string, unknown>>(opts: Fami
     const { __family_root_id, ...rest } = row
     return rest as unknown as T
   })
+}
+
+// ---- Typed search order in JS (read switch products_typed_order_js) ----------------------------------------------------------------------------------------------------
+//
+// A till's typed search sends up to 1,500 ranked ids. The seek-page statement groups every listed id into families in SQL (GROUP BY, COUNT(*) OVER (), ORDER BY: about 9 rows read per listed id) and
+// then walks the whole id list three times to pick the page's member rows. The order of such a read is  match_tier ASC, family_promoted DESC, match_rank ASC, <sort tail>, family_root_id  and
+// match_rank is the id's position in the list's deduplicated CSV (parseRankedIds), so MIN(match_rank) is unique per family: (tier, promoted, rank) is already a total order and the tail never
+// decides. So: ONE lean read of the matched rows driven by the list (family key, tier, promoted, rank), the families grouped and ordered here, then only the page's families read by key.
+
+export interface RankedIdFamilyRow { k: unknown; r: unknown; t: unknown; pr: unknown }
+
+/** The family keys of the matched rows in page order (tier ASC, promoted DESC, best rank ASC), or null when the order is not provably the SQL order: a rank that is not a positive integer, or two
+ * families tied on all three keys (impossible while positions are unique; if it ever happened the SQL tail would decide, so the caller must run the SQL path). Keys group by exact string, like
+ * the SQL GROUP BY (BINARY collation). */
+export function orderRankedIdFamilies(rows: readonly RankedIdFamilyRow[]): string[] | null {
+  const families = new Map<string, { k: string; r: number; t: number; pr: number }>()
+  for (const row of rows) {
+    const k = String(row.k), r = Number(row.r), t = Number(row.t), pr = Number(row.pr) || 0
+    if (!Number.isInteger(r) || r <= 0 || !Number.isFinite(t)) return null
+    const f = families.get(k)
+    if (!f) families.set(k, { k, r, t, pr })
+    else { if (r < f.r) f.r = r; if (t < f.t) f.t = t; if (pr > f.pr) f.pr = pr }
+  }
+  const ordered = [...families.values()].sort((a, b) => (a.t - b.t) || (b.pr - a.pr) || (a.r - b.r))
+  for (let i = 1; i < ordered.length; i += 1) {
+    const a = ordered[i - 1], b = ordered[i]
+    if (a.t === b.t && a.pr === b.pr && a.r === b.r) return null
+  }
+  return ordered.map((f) => f.k)
+}
+
+/** The family order paginateRankedIdFamilies reproduces. A read whose order does not start with exactly these keys never takes that path. */
+export const TYPED_ORDER_PREFIX = 'match_tier ASC, family_promoted DESC, match_rank ASC'
+
+/** Whether a read may take the typed-order path: a ranked-id hydrate on the seek-page path (300 ids or more: shorter lists keep the one-batch statements, which are faster for them), not a restricted
+ * read (Inventory Check keeps the ranked scope), not an image-only or by-id read, and an order that starts with exactly TYPED_ORDER_PREFIX. */
+export function typedOrderEligible(read: { restricted: boolean; seekPageRead: boolean; rankedIdCount: number; imageOnly: boolean; byId: boolean; orderSql: string }): boolean {
+  return !read.restricted && read.seekPageRead && read.rankedIdCount > 0 && !read.imageOnly && !read.byId && read.orderSql.startsWith(TYPED_ORDER_PREFIX)
+}
+
+/** The driven read's WHERE: the term that lists the ids replaced by 1 = 1. Not exactly one such term means the read is not the shape the driving join is exact for: undefined, and the statement it always ran is used. */
+export function typedOrderDrivenRead(where: readonly string[], driver: { listParam: string; listedWhereSql: string; csvMemberWhereSql: string }): RankedIdDrivenRead | undefined {
+  if (where.filter((term) => term === driver.listedWhereSql).length !== 1) return undefined
+  return { listParam: driver.listParam, drivenWhereSql: `WHERE ${where.map((term) => (term === driver.listedWhereSql ? '1 = 1' : term)).join(' AND ')}`, csvMemberWhereSql: driver.csvMemberWhereSql }
+}
+
+/** A ranked-id hydrate read in two statements instead of one (see the section comment). Returns null when the order could not be proved exact; the caller then runs the SQL path. */
+export async function paginateRankedIdFamilies<T = Record<string, unknown>>(opts: FamilyPaginationOptions, driven: RankedIdDrivenRead): Promise<FamilyPaginationResult<T> | null> {
+  const { db, params, page, pageSize } = opts
+  const ctes = buildCtes({ ...opts, whereSql: driven.drivenWhereSql, familyMemberBaseWhereSql: undefined, inlineFamilies: true, drivenByListParam: driven.listParam })
+  const rows = await db.prepare(`${ctes} SELECT __family_root_id AS k, __match_rank AS r, __match_tier AS t, ${opts.promotedRankSql ? '__promoted' : '0'} AS pr FROM matched`).all<RankedIdFamilyRow>(params)
+  const keys = orderRankedIdFamilies(rows)
+  if (!keys) return null
+  const items = await pageFamiliesByKeys<T>({ ...opts, familyMemberBaseWhereSql: driven.csvMemberWhereSql }, keys.slice((page - 1) * pageSize, page * pageSize))
+  return { items, total: keys.length, page, pageSize, totalPages: Math.max(1, Math.ceil(keys.length / pageSize)) }
 }

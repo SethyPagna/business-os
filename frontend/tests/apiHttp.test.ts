@@ -24,6 +24,7 @@ import {
   cacheInvalidateWithDerived,
   cacheSet,
   createApiVersionMismatchError,
+  dispatchGlobalDataRefresh,
   isTransientGatewayError,
   isCloudflareAccessRedirectResponse,
   isReachableServerResponseStatus,
@@ -869,6 +870,24 @@ await runTest('local mirror helper returns server data while mirroring asynchron
   assert.equal(mirrored, result)
 })
 
+// B5 G1: the Expenses page no longer reloads on a 'sales' push, so a reconnect or a new data epoch (restore, cutover, maintenance clear,
+// reset) has to name 'fees' itself. 'sales' stays as the control that the list was not replaced.
+await runTest('the global data refresh (reconnect, new data epoch) reaches the Expenses page', () => {
+  const originalWindow = globalThis.window
+  const originalCustomEvent = globalThis.CustomEvent
+  const channels: string[] = []
+  globalThis.CustomEvent = class { detail: unknown; constructor(_type: string, init: { detail?: unknown } = {}) { this.detail = init.detail } } as unknown as typeof CustomEvent
+  globalThis.window = { dispatchEvent: (event: Event) => channels.push((event as CustomEvent).detail.channel) } as unknown as Window & typeof globalThis
+  try {
+    dispatchGlobalDataRefresh()
+    assert.ok(channels.includes('fees'), 'fees is refreshed on reconnect / epoch change')
+    assert.ok(channels.includes('sales'), 'control: sales is still refreshed')
+  } finally {
+    globalThis.window = originalWindow
+    globalThis.CustomEvent = originalCustomEvent
+  }
+})
+
 await runTest('sync runtime helpers emit compact window events with timestamps', () => {
   const originalWindow = globalThis.window
   const originalCustomEvent = globalThis.CustomEvent
@@ -947,7 +966,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   const scopedKey = buildQueryCacheStorageKey(' products:search:x ')
   assert.match(scopedKey, /^read_cache:v2:/)
   assert.ok(scopedKey.endsWith(':products:search:x'))
-  assert.equal(scopedKey, buildQueryCacheStorageKey('products:search:x'), 'same runtime authority reuses the same key')
+  assert.equal(scopedKey, buildQueryCacheStorageKey(' products:search:x '), 'same runtime authority reuses the same key')
   resetActorReadSession()
   assert.notEqual(scopedKey, buildQueryCacheStorageKey('products:search:x'), 'new authenticated session cannot reuse prior persisted data')
   assert.doesNotMatch(source, /from '\.\/actorQuery\.ts'/)
@@ -1573,7 +1592,10 @@ await runTest('G4: a sales change also clears the Expenses read, and an open Exp
   assert.deepEqual(cacheGet('sales:get:'), [1])
   cacheInvalidate('sales')
   const feesPage = fs.readFileSync(new URL('../src/components/fees/FeesPage.tsx', import.meta.url), 'utf8')
-  assert.ok(feesPage.includes("if (syncChannel.channel === 'fees' || syncChannel.channel === 'sales') void load(true)"), 'FeesPage reloads on a sales push too')
+  // B5 follow-up 1: every POS sale pushes 'sales' and an open Expenses page would re-read ~1.5K rows per sale. It reloads on
+  // 'fees' only; the Worker's courier-row writers broadcast 'fees' (pinned by test-sale-courier-rows-broadcast-fees-pure.cjs).
+  assert.ok(feesPage.includes("if (syncChannel.channel === 'fees') void load(true)"), 'FeesPage reloads on a fees push')
+  assert.ok(!/syncChannel.channel === 'sales'/.test(feesPage), 'FeesPage must not reload on a sales push')
   const reportModal = fs.readFileSync(new URL('../src/components/contacts/DeliveryContactReportModal.tsx', import.meta.url), 'utf8')
   assert.ok(reportModal.includes("syncChannel?.channel === 'sales' || syncChannel?.channel === 'deliveryContacts') void load()"), 'an open Deliveries report reloads on a sale or driver change (G8)')
 })

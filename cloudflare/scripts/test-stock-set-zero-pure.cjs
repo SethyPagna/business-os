@@ -88,7 +88,7 @@ function loadReal(relPath, requireOverrides = {}) {
 const batchCode = loadReal('lib/batchCode.ts')
 const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
 const stockTransaction = loadReal('lib/stockTransaction.ts')
-const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts',{'./stockTransaction':stockTransaction})
+const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs'),'./stockTransaction':stockTransaction})
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
 const reportMoneyPrecision = loadReal('lib/reportMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
@@ -140,7 +140,7 @@ const damagedLotActions = loadReal('lib/damagedLotActions.ts', {
   // require resolves against scripts/ and the whole loader dies.
   './sqlBinding': sqlBinding,
 })
-const inventoryRoute = loadReal('routes/inventory.ts', {
+const inventoryRoute = loadReal('routes/inventory.ts', { '../lib/schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
   '../lib/receivingBranch': loadReal('lib/receivingBranch.ts'),
   '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),

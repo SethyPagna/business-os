@@ -41,16 +41,12 @@
    "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
+   "ba6c9bdbac80",
+   "SELECT id, name, stock_quantity, CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) "
   ],
   [
    "b8a0cd59d831",
    "SELECT id, name, expiry_date, CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry "
-  ],
-  [
-   "ba6c9bdbac80",
-   "SELECT id, name, stock_quantity, CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) "
   ],
   [
    "ae4cfa1f4b39",

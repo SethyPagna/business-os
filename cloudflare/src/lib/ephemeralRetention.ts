@@ -233,9 +233,14 @@ export function actionHistoryReferenceExclusion(references: ForeignReference[]):
   }).join('') + SNAPSHOT_HISTORY_EXCLUSION
 }
 
+// The same cutoff value feeds the pre-check and the delete: with no row older than it, the delete would remove nothing, so the schema
+// discovery and the foreign-key lookups behind it are skipped (one indexed seek on created_at instead of a schema scan).
+export const ACTION_HISTORY_DUE_SQL = 'SELECT 1 AS due FROM action_history WHERE created_at < @cutoff LIMIT 1'
 async function pruneActionHistory(env: Env, db: Db, budget: Budget): Promise<number> {
+  const params = { cutoff: daysAgo(ACTION_HISTORY_TTL_DAYS) }
+  if (!await db.prepare(ACTION_HISTORY_DUE_SQL).get<{ due: number }>(params)) return 0
   const references = await discoverActionHistoryReferences(db)
-  return batchDeleteById(env, db, 'action_history', `created_at < @cutoff${actionHistoryReferenceExclusion(references)}`, { cutoff: daysAgo(ACTION_HISTORY_TTL_DAYS) }, budget)
+  return batchDeleteById(env, db, 'action_history', `created_at < @cutoff${actionHistoryReferenceExclusion(references)}`, params, budget)
 }
 
 // Collect the R2 keys a set of submission rows points at. Only keys under

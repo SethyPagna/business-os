@@ -152,7 +152,7 @@ const shiftReconciliation = loadReal('lib/shiftReconciliation.ts', {
   './db': dbShim, './salesAnalytics': analytics, './nativeSaleChange': nativeSaleChange,
   './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts'),
 })
-const telegram = loadReal('lib/telegram.ts', {
+const telegram = loadReal('lib/telegram.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
   './db': dbShim,
   './lowStockSettings': { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG },
   './businessDateWindow': businessDateWindow, './telegramLang': lang, './saleTotals': saleTotals,

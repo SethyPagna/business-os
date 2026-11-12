@@ -9,6 +9,8 @@ import * as http from '../src/api/http.ts'
 import { getSalesStats } from '../src/api/salesTransport.ts'
 import { buildQueryString } from '../src/api/query.ts'
 import { clampPageNumber } from '../src/utils/pagerState.ts'
+import { isProductSearchTooShort } from '../src/api/productSearchIndex.ts'
+import { createSalesReloadCoalescer } from '../src/components/sales/salesReloadCoalescer.ts'
 import { saleSecurityFingerprint } from '../src/components/sales/saleSettlementConfig.ts'
 
 const read = (rel: string) => readFileSync(new URL('../src/' + rel, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -56,7 +58,8 @@ const pageReadEffects = statements.filter(n => ts.isExpressionStatement(n)
   && n.getText(ast).includes('if (!isActive)') && n.getText(ast).includes('clearLoadWatchdog'))
 assert.equal(statsReadEffects.length, 1, 'actual Stats callback dependency effect')
 assert.equal(pageReadEffects.length, 1, 'actual list callback dependency effect')
-const projections = ['salesStatsParams', 'salesReadAuthority', 'salesStatsScope', 'salesStatsScopeRef', 'salesPageParams', 'salesPageScope',
+// d1-client C3 (6.0.1623): the search the stats and list reads use is the last search long enough to query (effectiveSalesSearch), held in a ref.
+const projections = ['lastSalesSearchRef', 'effectiveSalesSearch', 'salesStatsParams', 'salesReadAuthority', 'salesStatsScope', 'salesStatsScopeRef', 'salesPageParams', 'salesPageScope',
   'salesPageRowsRef', 'salesStatsRead', 'currentSalesStatsRead', 'salesStats', 'salesStatsError', 'salesReadError',
   'loadSales', 'loadSalesStats', 'retrySalesReads', 'totalSalesCount', 'currentSalesPageItems', 'revenue', 'revenueCount', 'creditUsd', 'paidOnlyUsd']
 const code = `${pending.getText(ast)}\n${projections.map(declaration).join('\n')}\n${statsScopeAssignment.getText(ast)}\n${clampEffect.getText(ast)}\n${syncEffect.getText(ast)}\n`
@@ -101,8 +104,21 @@ function harness(statsApi?: (params: any) => Promise<unknown>, options: { autoRe
   const model: any = { sales: [], loadError: null, loading: false, stripCalls: 0 }, pageChanges: number[] = []
   const ref = (current: any) => ({ current })
   const refs: any = { statusSecurityRef: ref(props.statusSecurityScope), loadSecurityRef: ref(props.statusSecurityScope), latestLoadRef: ref(null), loadAbortRef: ref(null),
-    loadRequestRef: ref(0), loadPromiseRef: ref(null), pendingLoadRef: ref(null), latestQueryKeyRef: ref(''), loadKeyRef: ref(''), aliveRef: ref(true), salesRef: ref([]), loadedOnceRef: ref(false), loadWatchdogRef: ref(undefined), salesStatsRequestRef: ref(0), handledSyncRef: ref('') }
-  const helpers = { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, requireSalesStatsResult,
+    loadRequestRef: ref(0), loadPromiseRef: ref(null), pendingLoadRef: ref(null), latestQueryKeyRef: ref(''), loadKeyRef: ref(''), aliveRef: ref(true), salesRef: ref([]), loadedOnceRef: ref(false), loadWatchdogRef: ref(undefined), salesStatsRequestRef: ref(0), salesStatsAbortRef: ref(null), handledSyncRef: ref('') }
+  // d1-client C3 (6.0.1623): a sync event no longer reads inside the effect; it is noted by the Sales reload coalescer, which reloads once when its quiet
+  // window ends. The REAL coalescer runs here with a manual clock (fireReload = the window elapsing); its run body is Sales.tsx runSalesReloadRef.
+  const reloadTimers = new Map<number, () => void>()
+  let nextReloadTimer = 1
+  refs.salesReloadRef = ref(createSalesReloadCoalescer(
+    { setTimeout: (callback: () => void) => { const id = nextReloadTimer++; reloadTimers.set(id, callback); return id }, clearTimeout: (id: number) => { reloadTimers.delete(id) }, now: () => 0 },
+    (plan) => {
+      if (!props.isActive) return
+      if (plan.rowsAndTotals) { void view.loadSales(true); void view.loadSalesStats() }
+      if (plan.strip) void model.stripCalls++
+    },
+  ))
+  const fireReload = () => { for (const [id, callback] of [...reloadTimers]) { reloadTimers.delete(id); callback() } }
+  const helpers = { isProductSearchTooShort, beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, requireSalesStatsResult,
     captureActorReadScope: scopes.captureActorReadScope, isActorReadScopeCurrent: scopes.isActorReadScopeCurrent, assertActorReadScope: scopes.assertActorReadScope,
     clampPage: clampPageNumber, clearLoadWatchdog() {}, withLoaderTimeout: (fn: () => unknown) => fn(), SALES_LIST_REQUEST_TIMEOUT_MS: 8000,
     normalizeSaleRows: (value: unknown) => Array.isArray(value) ? value : [], getErrorMessage: (e: any) => e.message,
@@ -119,7 +135,7 @@ function harness(statsApi?: (params: any) => Promise<unknown>, options: { autoRe
   const commit = () => { refs.latestLoadRef.current = view.loadSales; h.commit(); return render() }
   const flush = async () => { for (let i = 0; i < 16; i++) await Promise.resolve(); return render() }
   render()
-  return { props, model, refs, rows, stats, pageChanges, render, commit, flush, get view() { return view } }
+  return { props, model, refs, rows, stats, pageChanges, render, commit, flush, fireReload, get view() { return view } }
 }
 function bounded<T>(promise: Promise<T>, label: string, ms = 5000): Promise<T> {
   let timer: ReturnType<typeof setTimeout>
@@ -216,7 +232,7 @@ try {
     assert.deepEqual(await bounded(getSalesStats({ search: 'recovery-witness' }), 'recovered read'), valid(), 'the recovered read returns the server answer, not a zero')
     const event = browserEvents.slice(since).find(e => e.type === 'sync:update' && (e as CustomEvent).detail?.channel === 'sales') as CustomEvent
     assert.ok(event, 'actual http recovery dispatches sales refresh'); assert.ok(browserEvents.slice(since).some(e => e.type === 'sync:reconnected'))
-    h.props.syncChannel = event.detail; h.render(); h.commit()
+    h.props.syncChannel = event.detail; h.render(); h.commit(); h.fireReload()
     assert.equal(h.rows.length, 1); assert.equal(h.stats.length, 2); assert.equal(h.model.stripCalls, 1, 'actual Sales effect refreshes all existing read surfaces')
     h.stats[0].resolve(valid(999)); await old; await h.flush(); unknown(h.view)
     h.rows[0].resolve(page()); h.stats[1].resolve(valid(77)); await h.flush()

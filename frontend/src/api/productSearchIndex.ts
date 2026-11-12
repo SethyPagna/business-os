@@ -311,6 +311,21 @@ export function productSearchIndexStatus(): Status {
 }
 
 /**
+ * One typed character that is not a digit is never sent to the server: no
+ * product is found by a single letter, and each such request reads a whole
+ * page. Digits always search (barcodes). Counted in code points.
+ */
+export function isProductSearchTooShort(query: string): boolean {
+  const characters = [...String(query || '').trim()]
+  return characters.length === 1 && !/\p{Nd}/u.test(characters[0])
+}
+
+/** Typed text a picker may send: not empty, and not a lone non-digit character. */
+export function canSearchProductText(query: string): boolean {
+  return String(query || '').trim().length > 0 && !isProductSearchTooShort(query)
+}
+
+/**
  * What a picker sends for typed text: the ranked ids when the index is ready
  * and found something, otherwise the text itself for the server search (an
  * index that is still loading, or a product created elsewhere seconds ago

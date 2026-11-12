@@ -141,7 +141,7 @@ const reconciliationFor = (getDb, salesAnalytics) => loadReal('lib/shiftReconcil
   './paymentMethodRegistry': paymentMethodRegistry,
 })
 const shiftReconciliation = reconciliationFor(() => { throw new Error('no DB in this test') }, analytics)
-const telegram = loadReal('lib/telegram.ts', {
+const telegram = loadReal('lib/telegram.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
   './lowStockSettings': lowStockStub,
   './db': { getDb: () => { throw new Error('no DB in this test') } },
   './businessDateWindow': businessDateWindow,
@@ -740,7 +740,7 @@ const analyticsForShift = {
   async getPaymentMethodBreakdown(env, filters) { breakdownCalls.payments += 1; return stubAnalytics.getPaymentMethodBreakdown(env, filters) },
   async getDeliveryContactTotals(env, filters) { breakdownCalls.couriers += 1; return stubAnalytics.getDeliveryContactTotals(env, filters) },
 }
-const wired = loadReal('lib/telegram.ts', {
+const wired = loadReal('lib/telegram.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
   './lowStockSettings': lowStockStub,
   './db': { getDb: () => stubDb },
   './businessDateWindow': businessDateWindow,
@@ -794,7 +794,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   // An unknown day answers, rather than rendering an empty skeleton.
   statements.length = 0
   const emptyDb = { prepare: (sql) => ({ async all() { return [] }, async get() { return {} } }) }
-  const wiredEmpty = loadReal('lib/telegram.ts', {
+  const wiredEmpty = loadReal('lib/telegram.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
     './lowStockSettings': lowStockStub,
     './db': { getDb: () => emptyDb },
     './businessDateWindow': businessDateWindow,
@@ -889,7 +889,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     ...mappingAnalyticsReal,
     getSalesTotals: async () => { mappingTotalsCalls += 1; return { ...kernelRow } },
   }
-  const wiredMapping = loadReal('lib/telegram.ts', {
+  const wiredMapping = loadReal('lib/telegram.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
     './lowStockSettings': lowStockStub,
     './db': { getDb: () => mappingDb },
     './businessDateWindow': businessDateWindow,
@@ -947,7 +947,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   console.log('PASS sources: every figure reads the kernel column it claims, proved with distinct values end to end')
   console.log('OK test-shift-report-pure')
 }).then(async () => {
-  const sender = loadReal('lib/telegram.ts', {
+  const sender = loadReal('lib/telegram.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
     './db': { getDb: () => ({prepare:()=>({all:async()=>[
       {key:'telegram_chat_id',value:'123'}, {key:'telegram_automation_enabled',value:'1'},
     ]})}) },

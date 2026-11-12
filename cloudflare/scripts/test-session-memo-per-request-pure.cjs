@@ -49,7 +49,7 @@ const fakeDb = {
   },
 }
 
-const auth = load('lib/auth.ts', {
+const auth = load('lib/auth.ts', { './planTier': load('lib/planTier.ts'),
   'hono/cookie': {
     getCookie: (c, name) => c.cookies[name],
     setCookie: () => {},

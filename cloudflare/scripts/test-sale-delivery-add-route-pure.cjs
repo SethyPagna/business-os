@@ -377,6 +377,20 @@ async function assertRefused(fixtureOptions, expectedCode, label) {
     assert.equal(get(db, 'SELECT is_delivery FROM sales WHERE id=101').is_delivery, 0)
   }
 
+  for (const [label, addressJson, area, expected] of [
+    ['blank Contact Options JSON falls back to the area column', JSON.stringify([{ label: 'Default', name: 'ta', phone: '', address: '', area: '' }]), 'Toul Kork', 'Toul Kork'],
+    ['Contact Options JSON resolves to its address', JSON.stringify([{ label: 'Default', address: 'St 271', area: '' }]), 'Toul Kork', 'St 271'],
+    ['a plain typed address is stored as typed', 'Street 7', 'Central', 'Street 7'],
+    ['an all-blank contact stores nothing', JSON.stringify([{ label: 'Default', address: '', area: '' }]), '', null],
+  ]) {
+    const { db, stamp } = createFixture()
+    run(db, 'UPDATE delivery_contacts SET address=@addressJson, area=@area WHERE id=7', { addressJson, area })
+    const body = await reviewed(db, addDeliveryBody(stamp, `snapshot-${expected}`))
+    const written = await request(db, '/101/amendments', 'POST', body)
+    assert.equal(written.status, 200, `${label}: ${JSON.stringify(written.body)}`)
+    assert.equal(get(db, 'SELECT delivery_contact_address a FROM sales WHERE id=101').a, expected, label)
+  }
+
   console.log('sale delivery-add route: permission, validation, guards, atomic history, and retry PASS')
 })().catch((error) => {
   console.error(error)

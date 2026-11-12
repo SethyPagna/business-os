@@ -137,6 +137,15 @@ export function parseRankedIds(rawIds: unknown, rawTiers?: unknown): RankedIds |
   return { ids, tiers }
 }
 
+// The family-member predicate of a ranked-id read, asked per candidate row against the list's CSV (the same deduplicated ids as the JSON list) instead of as three IN-lists over the whole
+// list: the row is listed, or its parent is, or it is the parent of a listed row. Same set as familyMemberWhereSql, so a page of a few families reads its own rows (typed-search order in JS,
+// products_typed_order_js). The text after the visibility term must stay the three terms of familyMemberWhereSql; the parity test pins it.
+function rankedIdCsvMemberWhereSql(csvParam: string, catalogOnly: boolean): string {
+  const csv = `@${csvParam}`
+  const visible = catalogOnly ? catalogProductSql('p', false) : stockVisibleProductSql('p', false)
+  return `${visible} AND (instr(${csv}, ',' || p.id || ',') > 0 OR (p.parent_id IS NOT NULL AND instr(${csv}, ',' || p.parent_id || ',') > 0) OR EXISTS (SELECT 1 FROM products listed WHERE listed.parent_id = p.id AND instr(${csv}, ',' || listed.id || ',') > 0))`
+}
+
 function buildRankedIdSearchQuery(ranked: RankedIds, params: Record<string, unknown>, prefix: string, titleOnly: boolean, catalogOnly = false): ProductSearchQuery {
   // Present but unusable resolves to no rows, never to the whole catalog.
   if (!ranked.ids.length) return { hasSearchTerm: true, titleOnly, whereClause: '1 = 0' }
@@ -163,6 +172,11 @@ function buildRankedIdSearchQuery(ranked: RankedIds, params: Record<string, unkn
     whereClause: `p.id IN ${listed}`,
     activeWhereSql: catalogOnly ? catalogProductSql('p', false) : stockVisibleProductSql('p', false),
     familyMemberWhereSql: `${catalogOnly ? catalogProductSql('p', false) : stockVisibleProductSql('p', false)} AND (p.id IN ${listed} OR p.parent_id IN ${listed} OR p.id IN (SELECT listed.parent_id FROM products listed WHERE listed.id IN ${listed}))`,
+    rankedIdDriver: {
+      listParam: `${prefix}rankIdList`,
+      listedWhereSql: `p.id IN ${listed}`,
+      csvMemberWhereSql: rankedIdCsvMemberWhereSql(`${prefix}rankCsv`, catalogOnly),
+    },
     matchRankSql: position,
     matchTierSql: `(CASE WHEN ${position} < @${prefix}rankTierCut1 THEN 0 WHEN ${position} < @${prefix}rankTierCut2 THEN 1 WHEN ${position} < @${prefix}rankTierCut3 THEN 2 WHEN ${position} < @${prefix}rankTierCut4 THEN 3 ELSE 4 END)`,
   }
@@ -199,6 +213,9 @@ export interface ProductSearchQuery {
   // parent/child links, instead of every active product (a full scan per
   // page). Same-name siblings still arrive through the name_key expansion.
   familyMemberWhereSql?: string
+  // Ranked-id path only. What the typed-search order in JS needs (products_typed_order_js): the name of the JSON id-list parameter, the exact WHERE term that lists the ids (so a driving
+  // read can replace it by 1 = 1 and start from the list), and the CSV spelling of familyMemberWhereSql.
+  rankedIdDriver?: { listParam: string; listedWhereSql: string; csvMemberWhereSql: string }
 }
 
 // Relevance tier constants, exported so tests can assert the contract by

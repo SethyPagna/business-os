@@ -376,6 +376,7 @@ export async function applyHistoricalSaleImport(
     batch_refs_json: batchRefsJson,
     branch_id: saleHeaderBranchId,
     customer_id: effectiveImportedCustomerId,
+    delivery_contact_id: d.delivery_contact_id ?? null,
     customer_match_basis: customerMatchBasis,
     customer_match_key: customerMatchKey,
     customer_match_name_snapshot: d.customer_match_name_snapshot ?? null,
@@ -404,7 +405,9 @@ export async function applyHistoricalSaleImport(
         )=1
         ELSE 0
       END`
-  const currentHistoricalReferencesGuard = `(${currentImportReferencesGuard}) AND (${currentCustomerReferenceGuard})${redirected ? ` AND (${branchEffectGuardPredicate('@branch_redirect_guards_json')})` : ''}`
+  // The driver the row matched at preview must still exist when the batch commits (a delete in between would leave the sale pointing at a missing id).
+  const currentDeliveryContactGuard = d.delivery_contact_id == null ? '1=1' : 'EXISTS(SELECT 1 FROM delivery_contacts WHERE id=@delivery_contact_id)'
+  const currentHistoricalReferencesGuard = `(${currentImportReferencesGuard}) AND (${currentCustomerReferenceGuard}) AND (${currentDeliveryContactGuard})${redirected ? ` AND (${branchEffectGuardPredicate('@branch_redirect_guards_json')})` : ''}`
   const writeGuard = `(${pendingGuard}) AND (${currentHistoricalReferencesGuard})`
   // In-transaction receipt uniqueness, on the FIRST statement so every
   // attempt evaluates it -- even over a pre-existing 'pending' row that the
@@ -608,6 +611,10 @@ export async function applyHistoricalSaleImport(
   const committed = await db.prepare(`
     SELECT status FROM import_sales_commits WHERE job_id = @job_id AND group_key = @group_key
   `).get<{ status: string }>({ job_id: jobId, group_key: groupKey })
+  if (committed?.status !== 'applied' && d.delivery_contact_id != null
+    && !(await db.prepare('SELECT 1 AS hit FROM delivery_contacts WHERE id = @id').get({ id: d.delivery_contact_id }))) {
+    throw new Error(`Sale on row ${rowNumber} names a delivery person who no longer exists; nothing was written for this row. Preview the import again and apply it.`)
+  }
   if (committed?.status !== 'applied') throw new Error('Historical sale did not commit because its Shop branch or received-date reference changed before the atomic write')
   return { alreadyApplied: false, clientRequestId }
 }

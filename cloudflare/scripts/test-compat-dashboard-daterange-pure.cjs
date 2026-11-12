@@ -265,9 +265,10 @@ const NEW_TODAY = `date(created_at, '+7 hours') = date('now', '+7 hours') AND cr
     check('the overview expiry queries filter on the active catalog only -- no sales/date scope',
       /^p\.is_active = 1 AND \$\{EXPIRY_DATE_WHERE_SQL\}/.test(expiryWhere)
       && expiryQueries.every((chunk) => !/sale_items|localDateRangeClause|@startDate|@branchId/.test(chunk.slice(0, chunk.indexOf('`)')))))
-    const overviewFn = familySrc.slice(familySrc.indexOf('export async function getFamilyStockOverview'))
+    // the statement text is in familyStockOverviewSql, which precedes getFamilyStockOverview
+    const overviewFn = familySrc.slice(familySrc.indexOf('export function familyStockOverviewSql'))
     check('the overview family stock stats are catalog-wide too, so the card badges match their lists',
-      /FROM products p\s+LEFT JOIN products parent ON parent\.id = p\.parent_id\s+WHERE \$\{stockVisibleProductSql\(\)\}\s+\)/.test(overviewFn)
+      /FROM products p\s+LEFT JOIN products parent ON parent\.id = p\.parent_id\s+WHERE \$\{stockVisibleProductSql\(\)\}\s+GROUP BY 1/.test(overviewFn)
       && !/@startDate|@branchId|sale_items/.test(overviewFn))
     check('the overview pages the low/out drill lists by the same family-aware rule (one pass, both states)',
       /CASE WHEN has_low = 1 THEN 'low' ELSE 'out' END AS alert_state/.test(overviewFn)
@@ -310,8 +311,17 @@ const NEW_TODAY = `date(created_at, '+7 hours') = date('now', '+7 hours') AND cr
     check('the audit_logs retention delete is sargable -- no date() around created_at',
       /DELETE FROM audit_logs/.test(retention) && !/date\(created_at\)/.test(retention)
       && /created_at < @cutoff/.test(retention))
+    // Since 11 Nov (d1-queries S13, 6.0.1621, migration 0303) the kept-forever exclusion is no longer written inside the delete
+    // builder: it lives in the exported AUDIT_RETENTION_DELETABLE_SQL, which the delete embeds and which idx_audit_logs_retention_deletable
+    // repeats verbatim so the planner can use it. The policy is unchanged (the same NOT kept-forever, same undo/redo scoping), only where
+    // it is spelled moved, so this pins the behaviour at its new home: the delete must embed the deletable predicate, and that predicate
+    // must still be NOT (kept forever) -- otherwise the sweep would delete rows the owner said to keep.
+    const deletableStart = auditSrc.indexOf('export const AUDIT_RETENTION_DELETABLE_SQL')
+    const deletable = deletableStart >= 0 ? auditSrc.slice(deletableStart, auditSrc.indexOf('export function buildAuditLogRetentionDeleteSql')) : ''
     check('the shared retention scopes undo and redo rows to the entities whose changes are kept',
-      /AUDIT_RETENTION_KEPT_FOREVER_SQL/.test(retention) && /LIKE '%\\\\_undo' ESCAPE/.test(auditSrc) && /LIKE '%\\\\_redo' ESCAPE/.test(auditSrc))
+      /\$\{AUDIT_RETENTION_DELETABLE_SQL\}/.test(retention)
+      && /NOT \(\$\{AUDIT_RETENTION_KEPT_FOREVER_SQL\}\)/.test(deletable)
+      && /LIKE '%\\\\_undo' ESCAPE/.test(auditSrc) && /LIKE '%\\\\_redo' ESCAPE/.test(auditSrc))
     check('and it is batched, so a large backlog cannot exhaust the D1 statement budget',
       /LIMIT 5000/.test(retention))
   }

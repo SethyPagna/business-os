@@ -47,6 +47,12 @@ async function main() {
       const errors = [];
       const env = { ...bindings };
       if (input.mode === 'discover') return Response.json({ refs: await discoverActionHistoryReferences(getDb(env)) });
+      if (input.mode === 'calls') {
+        const calls = [];
+        const wrapped = { ...bindings, DB: { prepare: (sql) => { calls.push(sql); return bindings.DB.prepare(sql) }, batch: (list) => bindings.DB.batch(list), exec: (sql) => bindings.DB.exec(sql) } };
+        const result = await maybeRunScheduledEphemeralRetention(wrapped, 'history');
+        return Response.json({ result, calls });
+      }
       const original = console.error;
       console.error = (...args) => { errors.push(args.map(String).join(' ')) };
       try {
@@ -165,6 +171,25 @@ async function main() {
     // --- throttle unchanged
     assert.deepEqual((await run({})).result, { skipped: true, reason: 'ran-recently' })
     console.log('PASS throttle unchanged')
+
+    // --- S14: nothing older than the cutoff means no schema discovery and no delete; the pre-check is one indexed seek
+    const stamp = async () => db.prepare("DELETE FROM settings WHERE key LIKE 'ephemeral_retention_last_run%'").run()
+    const plan = (await db.prepare("EXPLAIN QUERY PLAN SELECT 1 AS due FROM action_history WHERE created_at < '2000-01-01' LIMIT 1").all()).results.map((row) => row.detail).join(' | ')
+    assert.match(plan, /idx_action_history_created_pg/, 'the pre-check seeks the created_at index: ' + plan)
+    await db.prepare("UPDATE action_history SET created_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP").run()
+    await stamp()
+    const idle = await run({ mode: 'calls' })
+    assert.equal(idle.result.deleted.action_history, 0)
+    assert.equal(idle.calls.filter((sql) => /sqlite_master/.test(sql)).length, 0, 'no candidate: the foreign-key discovery is skipped')
+    assert.equal(idle.calls.filter((sql) => /DELETE FROM action_history/.test(sql)).length, 0, 'no candidate: no delete statement is sent')
+    assert.equal(idle.calls.filter((sql) => /SELECT 1 AS due FROM action_history/.test(sql)).length, 1, 'the pre-check ran once')
+    await db.prepare("INSERT INTO action_history (id, label, created_at, updated_at) VALUES (9001, 'aged', ?, ?)").bind(OLD, OLD).run()
+    await stamp()
+    const due = await run({ mode: 'calls' })
+    assert.equal(due.result.deleted.action_history, 1, 'one old unreferenced row is pruned once it exists')
+    assert.equal(due.calls.filter((sql) => /sqlite_master/.test(sql)).length, 1, 'a candidate: discovery runs')
+    assert.ok(!(await ids()).includes(9001))
+    console.log('PASS pre-check skips discovery and delete with no candidate, runs both when one exists')
   } finally {
     await mf.dispose()
   }

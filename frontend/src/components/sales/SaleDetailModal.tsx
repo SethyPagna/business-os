@@ -9,6 +9,7 @@ import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import UserX from 'lucide-react/dist/esm/icons/user-x.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import { searchProducts } from '../../api/methods.ts'
+import { canSearchProductText } from '../../api/productSearchIndex.ts'
 import { getSaleDeliveryOptions, getSaleLineReceipt } from '../../api/salesTransport.ts'
 import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
 import { getSyncServerUrl } from '../../api/httpState.ts'
@@ -68,7 +69,6 @@ import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import ProductCard from '../pos/ProductCard.tsx'
 import { branchStockQuantity } from '../pos/productSheetState.ts'
 import { useApp, useLowStockConfig } from '../../AppContext'
-import { getTrackedBatchProductIds } from '../../api/batchesTransport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import SaleStatusWorkflow from './SaleStatusWorkflow.tsx'
 import { claimSyncProblemPresentation, type SyncProblemPresentationOwner } from '../../utils/syncProblemLifecycle.ts'
@@ -88,7 +88,7 @@ import {
   type SettlementRow,
 } from './saleSettlement.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
-import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
+import { contactDisplayAddress, deliveryOptionHint } from '../contacts/contactOptionUtils.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { saleRecordsCount } from '../../utils/saleRecords.ts'
 import { parsePaymentMethodKinds } from '../../utils/paymentMethodKind.ts'
@@ -581,14 +581,6 @@ export default function SaleDetailModal({
   // stages the line directly, and quantity/price are edited on the staged row
   // the same way a POS cart line is edited.
   const [addSheetGroup, setAddSheetGroup] = useState<AddProductCandidate | null>(null)
-  // Which product ids carry active batch/lot tracking at this sale's branch
-  // -- the same lookup the POS runs (api/batchesTransport.ts). Without it the
-  // sheet's own received-date step can never engage, which is precisely why a
-  // second modal had to ask the lot question with a list of its own.
-  const [trackedBatchProductIds, setTrackedBatchProductIds] = useState<Set<number>>(new Set())
-  const [trackedBatchLookupState, setTrackedBatchLookupState] = useState<'loading' | 'ready' | 'failed'>('loading')
-  const [trackedBatchLookupError, setTrackedBatchLookupError] = useState('')
-  const [trackedBatchReloadKey, setTrackedBatchReloadKey] = useState(0)
   // Replace used to be a flat list that committed the swap on the first tap,
   // with no branch quantity and no way to say WHICH option or received date.
   // It now opens the same option sheet every other picker opens.
@@ -833,29 +825,10 @@ export default function SaleDetailModal({
   // move stock with no lot recorded -- so the last known set is kept and the
   // failure is logged, exactly as POS.tsx and TransferModal.tsx do.
   const canLoadSaleProducts = !!onAddItems || !!onAmend
-  useEffect(() => {
-    if (!canLoadSaleProducts) return undefined
-    let cancelled = false
-    setTrackedBatchLookupState('loading')
-    setTrackedBatchLookupError('')
-    getTrackedBatchProductIds(stockBranchId)
-      .then((res) => {
-        if (cancelled) return
-        setTrackedBatchProductIds(new Set((res?.productIds || []).map((id) => Number(id))))
-        setTrackedBatchLookupState('ready')
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        console.error('[SaleDetailModal] batch tracking lookup failed:', error)
-        setTrackedBatchLookupState('failed')
-        setTrackedBatchLookupError(error instanceof Error && error.message ? error.message : 'Could not verify received-date tracking.')
-      })
-    return () => { cancelled = true }
-  }, [canLoadSaleProducts, detailScope, stockBranchId, trackedBatchReloadKey])
 
   const loadAddProductSearchPage = async (text: string, page: number, append: boolean): Promise<void> => {
     const query = text.trim()
-    if (!canLoadSaleProducts || query.length < 2) return
+    if (!canLoadSaleProducts || !canSearchProductText(query)) return
     const seq = ++addSearchSeqRef.current
     const requestScope = detailScope
     if (append) setAddLoadingMore(true)
@@ -898,7 +871,7 @@ export default function SaleDetailModal({
     setAddSearchError('')
     setAddSearchFailedPage(1)
     setAddSearchPage({ page: 1, pageSize: SALE_DETAIL_PRODUCT_PAGE_SIZE, total: 0, totalPages: 1 })
-    if (!canLoadSaleProducts || text.length < 2) {
+    if (!canLoadSaleProducts || !canSearchProductText(text)) {
       setAddCandidates([])
       setAddSearching(false)
       setAddLoadingMore(false)
@@ -929,25 +902,6 @@ export default function SaleDetailModal({
     if (!addLines.length) addDraftRef.current = captureLineDraft()
     setAddLines((current) => mergeStagedAddLine(current, line))
   }
-  // If the tracking-index lookup is unavailable, treat every row currently in
-  // the picker as tracked. The sheet then asks for a concrete lot or explicit
-  // unrecorded stock instead of silently taking the no-lot path.
-  const trackedIdsForAddSheet = useMemo(() => {
-    if (trackedBatchLookupState === 'ready') return trackedBatchProductIds
-    const conservative = new Set(trackedBatchProductIds)
-    const rows = [
-      ...addCandidates,
-      ...(addSheetGroup?.__groupChoices || []),
-      ...(replacePicking?.__groupChoices || []),
-      ...(addSheetGroup ? [addSheetGroup] : []),
-      ...(replacePicking ? [replacePicking] : []),
-    ]
-    for (const row of rows) {
-      const id = Number(row?.id)
-      if (Number.isFinite(id) && id > 0) conservative.add(id)
-    }
-    return conservative
-  }, [trackedBatchLookupState, trackedBatchProductIds, addCandidates, addSheetGroup, replacePicking])
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const translateOr = (key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const value = t(key)
@@ -1607,7 +1561,7 @@ export default function SaleDetailModal({
               className={`flex w-full items-start justify-between gap-2 rounded border px-2 py-1.5 text-left text-xs ${deliveryContact?.id === option.id ? 'border-blue-500 bg-blue-100 dark:bg-blue-900/40' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'}`}
             >
               <span className="font-medium text-gray-800 dark:text-gray-100">{option.name || `#${option.id}`}</span>
-              <span className="text-gray-400">{option.phone || option.address || option.area || ''}</span>
+              <span className="text-gray-400">{deliveryOptionHint(option)}</span>
             </button>
           ))}
           {deliveryOptions.length === 0 ? <div className="text-[11px] text-gray-400">{t('no_data')}</div> : null}
@@ -1672,12 +1626,12 @@ export default function SaleDetailModal({
     && !hasRecordedReturns
   const retryAddProductSearch = (): void => {
     const text = addQuery.trim()
-    if (text.length < 2) return
+    if (!canSearchProductText(text)) return
     void loadAddProductSearchPage(text, addSearchFailedPage, addSearchFailedPage > 1)
   }
   const loadMoreAddProducts = (): void => {
     const text = addQuery.trim()
-    if (text.length < 2 || !addSearchCanLoadMore || addSearching || addLoadingMore) return
+    if (!canSearchProductText(text) || !addSearchCanLoadMore || addSearching || addLoadingMore) return
     void loadAddProductSearchPage(text, addSearchPage.page + 1, true)
   }
   const searchProgressLabel = `${t('showing') || 'Showing'} ${addSearchVisible} ${t('of') || 'of'} ${addSearchTotal} ${t('products') || 'products'}`
@@ -2425,7 +2379,7 @@ export default function SaleDetailModal({
                                       />
                                     ))}
                                   </div>
-                                ) : !addSearching && !addSearchError && addQuery.trim().length >= 2 ? (
+                                ) : !addSearching && !addSearchError && canSearchProductText(addQuery) ? (
                                   <div className="mt-1 text-[11px] text-gray-400">{translateOr('add_items_no_matches', 'No products matched.', 'រកមិនឃើញផលិតផលទេ។')}</div>
                                 ) : null}
                                 {addCandidates.length ? <div data-sale-product-search-progress="" className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-gray-500 dark:text-gray-400">
@@ -2725,20 +2679,6 @@ export default function SaleDetailModal({
                   {translateOr('branch_redirect_to', 'Redirect to')}: <span className="font-semibold text-gray-700 dark:text-gray-200">{branchRows?.find((row) => Number(row.id) === stockRedirect)?.name || `#${stockRedirect}`}</span>
                 </p>
               ) : null}
-              {trackedBatchLookupState === 'loading' ? (
-                <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">
-                  {translateOr('loading', 'Checking received dates…', 'កំពុងពិនិត្យថ្ងៃចូល…')}
-                </p>
-              ) : trackedBatchLookupState === 'failed' ? (
-                <div role="alert" className="mt-1.5 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200">
-                  <span className="min-w-0 flex-1 truncate" title={trackedBatchLookupError}>
-                    {translateOr('received_dates_load_failed', 'Could not verify received dates. A stock source will be required.', 'មិនអាចពិនិត្យថ្ងៃចូលបានទេ។ ត្រូវជ្រើសប្រភពស្តុក។')}
-                  </span>
-                  <button type="button" className="shrink-0 rounded px-2 py-1 font-semibold underline underline-offset-2" onClick={() => setTrackedBatchReloadKey((key) => key + 1)}>
-                    {t('retry') || translateOr('retry', 'Retry', 'ព្យាយាមម្ដងទៀត')}
-                  </button>
-                </div>
-              ) : null}
               {addSearching && addCandidates.length === 0 ? (
                 <p className="mt-2 text-xs text-gray-400">{t('loading') || 'Loading'}</p>
               ) : null}
@@ -2748,7 +2688,7 @@ export default function SaleDetailModal({
                   <button type="button" disabled={addSearching || addLoadingMore} onClick={retryAddProductSearch} className="min-h-8 shrink-0 rounded px-2 font-semibold underline underline-offset-2">{t('retry') || 'Retry'}</button>
                 </div>
               ) : null}
-              {!addSearching && !addSearchError && addQuery.trim().length >= 2 && addCandidates.length === 0 ? (
+              {!addSearching && !addSearchError && canSearchProductText(addQuery) && addCandidates.length === 0 ? (
                 <p className="mt-2 text-xs text-gray-400">
                   {translateOr('add_items_no_matches', 'No products matched.', 'រកមិនឃើញផលិតផលទេ។')}
                 </p>
@@ -2788,9 +2728,8 @@ export default function SaleDetailModal({
                   // and refuses the pick, exactly as it does in the POS.
                   intent="sell"
                   activeBranchId={stockBranchId}
-                  // The lot question belongs to THIS sheet -- the POS's own
-                  // received-date step -- not to a second modal of our own.
-                  trackedBatchProductIds={trackedIdsForAddSheet}
+                  // The lot question belongs to THIS sheet, which reads the picked
+                  // product's own lots; there is no tracked-products list here.
                   pickLabel={t('add') || 'Add'}
                   onClose={closeAddPicker}
                   onPick={(picked, selection) => {

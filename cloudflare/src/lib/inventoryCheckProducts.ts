@@ -195,6 +195,12 @@ const NEXT_EXPIRY_SQL = `(SELECT MIN(pb.expiry_date) FROM product_batches pb JOI
 const STOCK_ROW_COLUMNS = ['invalid_quantity', 'negative_quantity', 'lot_exceeds_ordinary', 'cache_mismatch', 'invalid_allocation', 'unallocated_damaged',
   'missing_branch_allocation', 'recorded_ordinary_quantity', 'recorded_lot_quantity', 'recorded_damaged_quantity', 'recorded_cache_quantity'] as const
 const PAGE_STOCK_PREFIX = '__page_stock_'
+const VERIFICATION_KEYS = ['stock_consistent', 'stock_diagnostics', 'recorded_ordinary_quantity', 'recorded_lot_quantity', 'recorded_damaged_quantity', 'recorded_cache_quantity'] as const
+// The page rows' stock for a session, with no verification: the branch's ordinary units and its held units (a missing branch row is 0, as the ledger counts it).
+const PLAIN_SESSION_STOCK_SQL = `SELECT __page.id AS product_id,
+    COALESCE((SELECT SUM(s.quantity) FROM branch_stock s WHERE s.product_id=__page.id AND (@branchId IS NULL OR s.branch_id=@branchId)),0) AS ordinary,
+    COALESCE((SELECT SUM(d.quantity_remaining) FROM damaged_stock_lots d WHERE d.product_id=__page.id AND (@branchId IS NULL OR d.branch_id=@branchId)),0) AS held
+  FROM __page`
 const stockColumnsSql = (source: string | null, prefix = '') => [['quantity', '__quantity'], ...STOCK_ROW_COLUMNS.map(column => [column, column]), ['consistent', 'stock_consistent']]
   .map(([from, to]) => `${source ? `${source}.${from}` : 'NULL'} AS ${prefix}${to}`).join(',')
 
@@ -401,7 +407,10 @@ export async function readInventoryCheckProductsSimple(db: Pick<D1Compat, 'batch
   const inSession = !!check.sessionId
   const wantFacets = plan.query.summary !== '0'
   const wantCounts = wantFacets && !inSession
-  const pageStock = access.fields.stock && !rankWithStock ? buildInventoryCheckStockQuery({ branchId: plan.branchId }, 'SELECT id FROM __page') : null
+  // A session's rows show the stock Products shows: the branch's units plus its held units, read plainly for the page rows. The stock-verification ledger (every lot, the cache, the diagnostics) is not built for
+  // them: the owner retired that check on 4 Nov ("no stock reread or system verification"). Drift stays the health pack's and Conflicts' job; the write-side guards are untouched.
+  const plainSessionStock = inSession && access.fields.stock && !rankWithStock
+  const pageStock = access.fields.stock && !rankWithStock && !inSession ? buildInventoryCheckStockQuery({ branchId: plan.branchId }, 'SELECT id FROM __page') : null
   const showNextExpiry = access.fields.received && access.fields.stock
   const facets = (field: 'brand' | 'category') => access.fields[field] ? `(SELECT json_group_array(value) FROM (SELECT DISTINCT trim(choice.value) AS value
     FROM cohort c,json_each(replace(json_array(COALESCE(c.${field},'')||'||'||COALESCE(c.${field === 'brand' ? 'brands' : 'categories'},'')),'||','","')) choice
@@ -423,9 +432,9 @@ export async function readInventoryCheckProductsSimple(db: Pick<D1Compat, 'batch
   const paged = await paginateProductFamilies<Record<string, unknown>>({
     db: { batch: async statements => {
       const pageSql = `${statements[1].sql}\nLIMIT 501`
-      const wrappedPageSql = `WITH __page AS MATERIALIZED (${pageSql})${pageStock ? `, stock AS (${pageStock.rowsSql})` : ''}${inSession ? '' : `, ${PAGE_CHECK_CTES}`}
-        SELECT __page.*${pageStock ? `,${stockColumnsSql('stock', PAGE_STOCK_PREFIX)}` : ''}${showNextExpiry ? `,${NEXT_EXPIRY_SQL} AS next_expiry_date` : ''}${access.fields.received ? ',(SELECT MAX(received_at) FROM product_batches rb WHERE rb.variant_product_id=__page.id) AS latest_received_at' : ''}${inSession ? '' : `,${PAGE_CHECK_COLUMNS}`}
-        FROM __page${pageStock ? ' LEFT JOIN stock ON stock.product_id=__page.id' : ''}${inSession ? '' : ' LEFT JOIN latest ON latest.product_id=__page.id'}
+      const wrappedPageSql = `WITH __page AS MATERIALIZED (${pageSql})${pageStock ? `, stock AS (${pageStock.rowsSql})` : plainSessionStock ? `, stock AS (${PLAIN_SESSION_STOCK_SQL})` : ''}${inSession ? '' : `, ${PAGE_CHECK_CTES}`}
+        SELECT __page.*${pageStock ? `,${stockColumnsSql('stock', PAGE_STOCK_PREFIX)}` : plainSessionStock ? ',stock.ordinary+stock.held AS __quantity,stock.held AS recorded_damaged_quantity' : ''}${showNextExpiry ? `,${NEXT_EXPIRY_SQL} AS next_expiry_date` : ''}${access.fields.received ? ',(SELECT MAX(received_at) FROM product_batches rb WHERE rb.variant_product_id=__page.id) AS latest_received_at' : ''}${inSession ? '' : `,${PAGE_CHECK_COLUMNS}`}
+        FROM __page${pageStock || plainSessionStock ? ' LEFT JOIN stock ON stock.product_id=__page.id' : ''}${inSession ? '' : ' LEFT JOIN latest ON latest.product_id=__page.id'}
         WINDOW family AS (PARTITION BY __page.__family_root_id)
         ORDER BY ${familyOrder('MIN(__page.__family_name) OVER family', 'MAX(__page.__family_num) OVER family')},__page.__family_root_id ASC,__page.id ASC`
       const result = await schemaBatch(db, [statements[0], { ...statements[1], sql: wrappedPageSql }, { sql: branchesSql, params: { branchId: plan.branchId ?? null } },
@@ -463,9 +472,11 @@ export async function readInventoryCheckProductsSimple(db: Pick<D1Compat, 'batch
       ...(row.__check_count != null && (access.fields.stock || Number(row.__check_creator) === check.viewerId) ? { check_counted_quantity: Number(row.__check_count) } : {}),
       ...(byId !== null && row.__check_by_name != null && check.canSeeStaffIdentity(byId) ? { check_by: String(row.__check_by_name) } : {}) }
     const projected = projectInventoryCheckProduct({ ...row, ...facts, quantity: row.__quantity, display_quantity: row.__quantity,
-      damaged_quantity: row.recorded_damaged_quantity, stock_consistent: Number(row.stock_consistent) === 1, stock_diagnostics: flags.join(',') }, access, true)
+      damaged_quantity: row.recorded_damaged_quantity, ...inSession ? {} : { stock_consistent: Number(row.stock_consistent) === 1, stock_diagnostics: flags.join(',') } }, access, true)
+    // The cohort carries these as NULL placeholders; a session row must not announce a verification it did not run.
+    if (inSession) for (const key of VERIFICATION_KEYS) delete projected[key]
     items.push({ ...projected, checkable: true, matches_filters: true })
-    if (access.fields.stock) diagnostics.push({ product_id: row.id, stock_diagnostics: flags.join(',') })
+    if (access.fields.stock && !inSession) diagnostics.push({ product_id: row.id, stock_diagnostics: flags.join(',') })
   }
   if (items.length > 500) throw new InventoryCheckProductsLimitError()
   const known = (key: string) => Number(summary[key]) || 0
@@ -477,5 +488,5 @@ export async function readInventoryCheckProductsSimple(db: Pick<D1Compat, 'batch
     ...(checkCounts ? { summary: { ...checkCounts, not_checked: Math.max(0, total - checkCounts.in_check - checkCounts.ok - checkCounts.issue), total } } : {}),
     ...(wantFacets ? { facets: { ...(access.fields.brand ? { brands: brands.slice(0, 200) } : {}), ...(access.fields.category ? { categories: categories.slice(0, 200) } : {}) },
       facetsLimited: { brands: brands.length > 200, categories: categories.length > 200 } } : {}),
-    ...(access.fields.stock ? { stockDiagnostics: diagnostics } : {}) }
+    ...(access.fields.stock && !inSession ? { stockDiagnostics: diagnostics } : {}) }
 }

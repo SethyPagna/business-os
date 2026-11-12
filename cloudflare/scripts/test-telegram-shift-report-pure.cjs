@@ -107,7 +107,7 @@ const shiftReconciliation = loadReal('lib/shiftReconciliation.ts', {
   './db': noDb, './salesAnalytics': salesAnalytics, './nativeSaleChange': nativeSaleChange,
   './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts'),
 })
-const telegram = loadReal('lib/telegram.ts', {
+const telegram = loadReal('lib/telegram.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
   './lowStockSettings': lowStockStub, './db': noDb, './businessDateWindow': businessDateWindow,
   './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals,
   './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation,
@@ -835,7 +835,7 @@ check(`every section title, in all three modes and both families, keeps to one r
 // from 1 to 40 can: the same sectionHeader, over a language table that names
 // a probe key after itself, so an odd spare character, a name exactly the
 // row's width and a name longer than it are all judged too.
-const probeTelegram = loadReal('lib/telegram.ts', {
+const probeTelegram = loadReal('lib/telegram.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
   './lowStockSettings': lowStockStub, './db': noDb, './businessDateWindow': businessDateWindow,
   './telegramLang': { ...telegramLang, label: (key) => (/^n+$/.test(key) ? key : telegramLang.label(key)) },
   './salesAnalytics': salesAnalytics, './saleTotals': saleTotals,
@@ -917,7 +917,7 @@ check('the Difference line is still the shared reconciliation, not a private for
 // Reinstated Sep 21 2026: the two breakdowns are read from the SAME kernel
 // entry points routes/reports.ts uses, never re-derived here.
 check('the two breakdown sections read the kernel, not a private query',
-  /getPaymentMethodBreakdown\(env, filters\)/.test(source) && /getDeliveryContactTotals\(env, filters\)/.test(source)
+  /getPaymentMethodBreakdown\(env, filters(, memo)?\)/.test(source) && /getDeliveryContactTotals\(env, filters\)/.test(source)
   && !/SELECT[^;]*GROUP BY[^;]*payment_method/i.test(source))
 // The language mode is applied at COMPOSITION. A post-hoc split on ' / ' would
 // cut a value in half -- a note, a courier name or a fold label can contain it.

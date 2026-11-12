@@ -20,16 +20,21 @@ const FUTURE = '2036-01-01T00:00:00.000Z'
 const PAST = '2020-01-01T00:00:00.000Z'
 const PURGED_SIGN_IN_ID = 99
 
-function realRevokeSessionsForDevice(db) {
-  const sourcePath = path.join(ROOT, 'cloudflare', 'src', 'lib', 'auth.ts')
+function transpileLib(name, overrides) {
+  const sourcePath = path.join(ROOT, 'cloudflare', 'src', 'lib', name)
   const output = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
     fileName: sourcePath,
   }).outputText
-  const overrides = { './db': { getDb: () => db }, 'hono/cookie': {} }
   const mod = { exports: {} }
   new Function('require', 'module', 'exports', output)((request) => overrides[request] ?? require(request), mod, mod.exports)
-  return mod.exports.revokeSessionsForDevice
+  return mod.exports
+}
+
+function realRevokeSessionsForDevice(db) {
+  // auth.ts imports the real planTier (session touch interval) since d1-queries; load it rather than stubbing the limits.
+  const overrides = { './db': { getDb: () => db }, 'hono/cookie': {}, './planTier': transpileLib('planTier.ts', {}) }
+  return transpileLib('auth.ts', overrides).revokeSessionsForDevice
 }
 
 ;(async () => {

@@ -1646,6 +1646,17 @@ body[data-density='spacious'] th, body[data-density='spacious'] td { padding-top
   mask-image: linear-gradient(to right, transparent 0, #000 var(--chip-rail-fade), #000 calc(100% - var(--chip-rail-fade)), transparent 100%);
 }
 @media (pointer: coarse) { :where(.chip-rail) { --chip-rail-h: 2.5rem; } }
+/* Small icon buttons (h-5..h-7) keep their visible size and gain an invisible hit area on touch screens: 36px tall and
+   4px wider, so neighbours and labels stay clear. A button in a tight cluster narrows it with --hit-x / --hit-y. */
+@media (pointer: coarse) {
+  button:is(.h-5, .h-6, .h-7):is(.w-5, .w-6, .w-7, .w-9):not(.absolute, .fixed, .sticky) { position: relative; }
+  button:is(.h-5, .h-6, .h-7):is(.w-5, .w-6, .w-7, .w-9)::after {
+    content: '';
+    position: absolute;
+    inset-block: var(--hit-y, min(0px, calc((100% - 2.25rem) / 2)));
+    inset-inline: var(--hit-x, -0.125rem);
+  }
+}
 /* Section switchers keep the 44px phone touch target the hub chips always had. */
 @media (max-width: 767.98px) { .chip-rail.chip-rail-tall { --chip-rail-h: 2.75rem; } }
 

@@ -31,8 +31,8 @@ import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, Writ
 import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { cacheIdentity } from '../lib/cache'
 import { cachedPhoneJson, phoneCacheVariant } from '../lib/phoneCache'
-import { canSeeFullPhones, phoneSearchAccessOf } from '../lib/phoneAccess'
-import { fullContactPhoneClause, fullPhoneColumnClause, hasDigit, nameWithoutPhoneSql, phoneProbeOf, RESTRICTED_HAYSTACK, restrictedColumnSql, restrictedHaystackParts, restrictedSearchScope, restrictedWordHaystacks, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
+import { phoneSearchAccessOf } from '../lib/phoneAccess'
+import { customerNameLookupSql, customerPhoneLookupSql, fullPhoneColumnClause, hasDigit, phoneProbeOf, RESTRICTED_HAYSTACK, restrictedColumnSql, restrictedHaystackParts, restrictedSearchScope, restrictedWordHaystacks, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
 import { isMaskedPhoneInputError, resolvePhoneInput, storedPhonesOf } from '../lib/phoneWriteGuard'
 // The POS payment-method field is free text (a datalist, not a select), so a
 // sale can introduce a method Settings has never heard of. See
@@ -62,7 +62,7 @@ import {
 } from '../lib/saleSettlementAction'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert, SALE_STATUS_BATCH_MAX_STATEMENTS } from '../lib/saleRecordEvents'
 import { getCustomerSalesTotals, getDeliveryContactTotals, getSalesDayReport, getSalesPeriodSeries, saleStatusExpr, whereActiveSales } from '../lib/salesAnalytics'
-import { exportProductSplitFromSnapshot, exportStatusSplitFromSnapshot, readSalesReportSnapshot, readSalesReportTotals, salesListFilterReportScope, salesTotalsFromSnapshot, paymentMethodBreakdownFromSnapshot, removalLossesFor, withRemovalLosses } from '../lib/salesAnalytics'
+import { exportProductSplitFromSnapshot, exportStatusSplitFromSnapshot, readSalesReportSnapshot, readSalesHeaderTotals, salesListFilterReportScope, salesTotalsFromSnapshot, paymentMethodBreakdownFromSnapshot, removalLossesFor, withRemovalLosses } from '../lib/salesAnalytics'
 import { ReportExactDecimal, ReportMoneyPrecisionError, REPORT_MONEY_MAX_ROWS, REPORT_MONEY_PAGE_SIZE } from '../lib/reportMoneyPrecision'
 import { allocateAcrossLots, decrementBatchStockStrictStatement, readFifoLotAvailabilityForCart, type FifoLotTake } from '../lib/productBatches'
 // S4-24b: adding lines to an EXISTING sale. The rules (which statuses accept
@@ -117,6 +117,7 @@ import {
   type TaxSettings,
 } from '../lib/saleAmendments'
 import { DELIVERY_AMOUNT_ERROR_MESSAGES, deliveryAmountChanged, parseDeliveryAmountUsd } from '../lib/deliveryAmounts'
+import { buildDeliveryContactExistsGuard, DELIVERY_CONTACT_MISSING_CODE, isDeliveryContactMissingError } from '../lib/contactDeleteGuard'
 import { applySaleBulkStatus, bulkAssertion, notifyBulkStatus, SaleBulkError, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { applySaleBulkUpdate, notifySaleBulkUpdate } from '../lib/saleBulkUpdate'
 import { prepareCustomerAssignments, preparePointsRedemption, isLoyaltyAssignmentError, LOYALTY_REASSIGNMENT_CODE, LOYALTY_REASSIGNMENT_MESSAGE } from '../lib/saleCustomerAssignmentGuard'
@@ -168,7 +169,7 @@ import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAf
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { formatSaleStatusTelegramLines, formatSaleTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import { recordStockCrossings, type StockSaleLine } from '../lib/stockCrossingAlert'
-import { CONTACT_OPTION_LIMIT, contactDisplayAddress } from '../lib/contactOptions'
+import { contactDisplayAddress, deliveryDisplayAddress } from '../lib/contactOptions'
 import { buildSaleCreationSnapshot, SaleCreationSnapshotError } from '../lib/saleCreationSnapshot'
 import type { Env } from '../index'
 import { COURIER_COST_KEYS, costViewProfit } from '../lib/reportProfitView'
@@ -176,6 +177,7 @@ import { canViewCourierCost, courierCostResponses, redactAmendmentEntries, redac
 import { actorId, actorSnapshot } from '../lib/actorSnapshot'
 import { ANONYMOUS_CUSTOMER_ERROR_CODE, ANONYMOUS_CUSTOMER_MUTATION_ERROR, isAnonymousCustomer } from '../lib/anonymousCustomer'
 import { authoredFailureMessage, unexpectedFailureBody } from '../lib/failureText'
+import { schemaObjectPresent, type SchemaObject } from '../lib/schemaObjectProbe'
 
 // Historical label (owner rule: old records are never relabelled): the row's own branch-name snapshot
 // when it has a non-blank one, else the live directory name. The SAME expression as
@@ -526,10 +528,11 @@ app.get('/money-precision-capability', async (c) => {
 })
 
 // Positive answer only (see operationWritesReady in routes/fees.ts).
+const HISTORICAL_EDIT_TRIGGER: SchemaObject = { kind: 'trigger', name: 'sales_money_precision_update_0161' }
 let historicalEditSchemaAvailable = false
 async function historicalEditSchemaReady(db:ReturnType<typeof getDb>):Promise<boolean>{
   if (historicalEditSchemaAvailable) return true
-  historicalEditSchemaAvailable = !!await db.prepare("SELECT 1 AS ready FROM sqlite_master WHERE type='trigger' AND name='sales_money_precision_update_0161'").get()
+  historicalEditSchemaAvailable = await schemaObjectPresent(db, HISTORICAL_EDIT_TRIGGER)
   return historicalEditSchemaAvailable
 }
 
@@ -770,7 +773,7 @@ app.post('/', async (c) => {
     )]
     // reservedParams = 1 for the `branch_id = ?` bound alongside the list.
     const stockRows = await selectInChunks(productIdsForBranch, 1, (chunk) => db
-      .prepare(`SELECT product_id, quantity FROM branch_stock WHERE branch_id = ? AND product_id IN (${chunk.map(() => '?').join(',')})`)
+      .prepare(`SELECT product_id, quantity FROM branch_stock WHERE +branch_id = CAST(? AS INTEGER) AND product_id IN (${chunk.map(() => '?').join(',')})`)
       .all<{ product_id: number; quantity: number }>([branchId, ...chunk]))
     return [branchId, new Map(stockRows.map((row) => [row.product_id, row.quantity]))] as const
   })))
@@ -1336,6 +1339,10 @@ app.post('/', async (c) => {
   // of the sale total. Only the contact lookup (real I/O) stays here.
   let deliveryContact: { id: number; name: string | null; phone: string | null; area: string | null; address: string | null } | null = null
   if (deliveryContactRead) deliveryContact = await deliveryContactRead || null
+  // A driver deleted before this request is refused like one deleted during it (409), never saved as a sale with no driver.
+  if (deliveryContactRead && !deliveryContact) {
+    return c.json({ error: 'That delivery driver no longer exists. Choose another driver.', code: DELIVERY_CONTACT_MISSING_CODE }, 409)
+  }
 
   // ---- 4. Insert the sale header (single statement -- see lib/db.ts's
   // batch() docs for why this can't be the same atomic unit as step 5) ----
@@ -1518,7 +1525,7 @@ app.post('/', async (c) => {
       delivery_contact_id: deliveryContact?.id || null,
       delivery_contact_name: deliveryContact?.name || null,
       delivery_contact_phone: deliveryContact?.phone || null,
-      delivery_contact_address: deliveryContact?.address || deliveryContact?.area || null,
+      delivery_contact_address: deliveryDisplayAddress(deliveryContact?.address) || deliveryDisplayAddress(deliveryContact?.area) || null,
       delivery_fee_usd: isDelivery ? deliveryFeeUsd : 0,
       delivery_fee_khr: isDelivery ? deliveryFeeKhr : 0,
       // Same resolved value the total was computed from -- re-deriving it
@@ -1592,6 +1599,7 @@ app.post('/', async (c) => {
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
       capturedSourceGuard,
       receiptNumberGuard,
+      ...(deliveryContact ? [buildDeliveryContactExistsGuard(deliveryContact.id)] : []),
       ...(redemptionGuard ? [redemptionGuard] : []),
       saleInsertStatement,
       {
@@ -1970,6 +1978,9 @@ app.post('/', async (c) => {
         if (sourceConflict === 'pricing') return c.json({error:'Pricing changed before the sale was saved. Review the current quote.',code:'sale_pricing_quote_conflict'},409)
         if (sourceConflict === 'stock') return c.json({error:SALE_STOCK_CHANGED_ERROR,code:SALE_STOCK_CHANGED_CODE},409)
       }
+      if (deliveryContact && isDeliveryContactMissingError(error)) {
+        return c.json({ error: 'That delivery driver no longer exists. Choose another driver.', code: DELIVERY_CONTACT_MISSING_CODE }, 409)
+      }
       if (redemptionGuard && /malformed JSON/i.test(message)) {
         return c.json({ error: 'Membership points or checkout state changed before the sale was recorded. Refresh and try again.', code: 'loyalty_redemption_conflict' }, 409)
       }
@@ -2006,6 +2017,8 @@ app.post('/', async (c) => {
   c.executionCtx.waitUntil(Promise.all([
     bumpVersion(c.env, 'stock'),
     bumpVersion(c.env, 'sales'),
+    // A sale that carries a courier cost adds a row to the Expenses list, which no longer reloads on a sales push.
+    ...(deliveryActualCostUsd != null ? [broadcast(c.env, 'fees', { action: 'update' })] : []),
   ]))
   // Owner, 6 Oct 2026: a low or out-of-stock alert fires when THIS sale crosses the threshold, once per crossing.
   // recordStockCrossings reads the branch quantity AFTER the commit, inside this waitUntil (never before the
@@ -3121,7 +3134,9 @@ app.patch('/:id/status', async (c) => {
     // I2-1: a sale moves stock only -- 'stock', not the catalog version.
     bumpVersion(c.env, 'stock'),
     bumpVersion(c.env, 'sales'),
-    ...((sale.cancel_fee_id || (saleStatus === 'cancelled' && (cancelFeeUsd > 0 || cancelFeeKhr > 0)))
+    // The cancel fee is an expense row; a sale entering or leaving 'cancelled' also adds or drops its courier row on
+    // the Expenses list (cancelled sales are not listed). That page no longer reloads on a sales push, so say so here.
+    ...((sale.cancel_fee_id || (saleStatus === 'cancelled' && (cancelFeeUsd > 0 || cancelFeeKhr > 0)) || (oldStatus === 'cancelled') !== (saleStatus === 'cancelled'))
       ? [broadcast(c.env, 'fees', { action: 'update' })]
       : []),
   ]))
@@ -3769,7 +3784,7 @@ app.post('/:id/items', async (c) => {
     for (const branchId of branchIds) {
       const idsForBranch = [...new Set(plan.deductions.filter((entry) => entry.branch_id === branchId).map((entry) => entry.product_id))]
       const rows = await selectInChunks(idsForBranch, 1, (chunk) => db
-        .prepare(`SELECT product_id, quantity FROM branch_stock WHERE branch_id = ? AND product_id IN (${chunk.map(() => '?').join(',')})`)
+        .prepare(`SELECT product_id, quantity FROM branch_stock WHERE +branch_id = CAST(? AS INTEGER) AND product_id IN (${chunk.map(() => '?').join(',')})`)
         .all<{ product_id: number; quantity: number }>([branchId, ...chunk]))
       const available = new Map(rows.map((row) => [row.product_id, row.quantity]))
       for (const entry of plan.deductions.filter((item) => item.branch_id === branchId)) {
@@ -4101,27 +4116,17 @@ app.get('/delivery-options', async (c) => {
   }
   const search = String(c.req.query('search') || '').trim().toLowerCase()
   const pattern = `%${search.replace(/[%_]/g, '\\$&')}%`
-  // Without the full-phone permission a number fragment matches neither the phone nor the address (which can hold
-  // Contact Option phones); a whole number finds the contact whose phone is that number (lib/phoneSearchGuard.ts).
-  const probe = canSeeFullPhones(user) ? ({ kind: 'none' } as const) : phoneProbeOf(search)
-  const whole = probe.kind === 'full' ? fullContactPhoneClause(probe, 'deliveryPhoneDigits', CONTACT_OPTION_LIMIT) : null
-  // A courier saved under its number has that number as its name: a digit word does not read such a name either.
-  const nameColumn = probe.kind === 'none' ? "lower(COALESCE(name,''))" : `lower(${nameWithoutPhoneSql('name')})`
-  const phoneBearingMatches = probe.kind === 'none'
-    ? `
-      OR lower(COALESCE(phone,'')) LIKE @pattern ESCAPE '\\'
-      OR lower(COALESCE(address,'')) LIKE @pattern ESCAPE '\\'`
-    : whole ? `
-      OR ${whole.sql}` : ''
   const rows = await getDb(c.env).prepare(`
     SELECT id,name,phone,area,address
     FROM delivery_contacts
     WHERE @search=''
-      OR ${nameColumn} LIKE @pattern ESCAPE '\\'
-      OR lower(COALESCE(area,'')) LIKE @pattern ESCAPE '\\'${phoneBearingMatches}
+      OR lower(COALESCE(name,'')) LIKE @pattern ESCAPE '\\'
+      OR lower(COALESCE(area,'')) LIKE @pattern ESCAPE '\\'
+      OR lower(COALESCE(phone,'')) LIKE @pattern ESCAPE '\\'
+      OR lower(COALESCE(address,'')) LIKE @pattern ESCAPE '\\'
     ORDER BY lower(COALESCE(name,'')) ASC, id ASC
     LIMIT 25
-  `).all<Record<string, unknown>>({ search, pattern, ...(whole?.params ?? {}) })
+  `).all<Record<string, unknown>>({ search, pattern })
   return c.json({ items: rows })
 })
 
@@ -4525,10 +4530,11 @@ app.post('/:id/amendments', async (c) => {
       return c.json({ error: 'Choose a delivery driver for this sale.' }, 400)
     }
     const contactRow = await db.prepare(`
-      SELECT id,name,phone,COALESCE(NULLIF(TRIM(address),''),area) AS delivery_address
+      SELECT id,name,phone,address,area,COALESCE(NULLIF(TRIM(address),''),area) AS delivery_address
       FROM delivery_contacts WHERE id=?
-    `).get<{ id: number; name: string | null; phone: string | null; delivery_address: string | null }>([contactId])
-    if (!contactRow) return c.json({ error: 'That delivery driver no longer exists. Choose another driver.' }, 409)
+    `).get<{ id: number; name: string | null; phone: string | null; address: string | null; area: string | null; delivery_address: string | null }>([contactId])
+    if (!contactRow) return c.json({ error: 'That delivery driver no longer exists. Choose another driver.', code: DELIVERY_CONTACT_MISSING_CODE }, 409)
+    const snapshotAddress = deliveryDisplayAddress(contactRow.address) || deliveryDisplayAddress(contactRow.area) || null
 
     const feeRaw = body.delivery_fee_usd
     if (typeof feeRaw !== 'number' && typeof feeRaw !== 'string') {
@@ -4553,7 +4559,7 @@ app.post('/:id/amendments', async (c) => {
         id: Number(contactRow.id),
         name: contactRow.name ?? null,
         phone: contactRow.phone ?? null,
-        address: contactRow.delivery_address ?? null,
+        address: snapshotAddress,
       },
       feeUsd: feeParsed.usd,
       actualCostUsd,
@@ -4599,7 +4605,7 @@ app.post('/:id/amendments', async (c) => {
       deliveryContactId: contactRow.id,
       deliveryContactName: contactRow.name ?? null,
       deliveryContactPhone: contactRow.phone ?? null,
-      deliveryContactAddress: contactRow.delivery_address ?? null,
+      deliveryContactAddress: snapshotAddress,
       deliveryFeeUsd: feeParsed.usd,
       deliveryFeeKhr: receiptKhrFromUsd(feeParsed.usd, exchangeRate),
       deliveryFeePaidBy: 'customer',
@@ -5819,6 +5825,8 @@ function planAmendedTax(input: {
  * is asking what a given user did last Tuesday. Both are wanted, and the same
  * pairing already exists for POST /:id/items.
  */
+const AMENDMENT_KINDS_THAT_MOVE_COURIER_ROWS = new Set(['delivery_added', 'delivery_actual_cost_changed'])
+
 async function auditAmendment(
   c: AmendmentContext,
   user: SessionUser | undefined,
@@ -5841,6 +5849,9 @@ async function auditAmendment(
     // I2-1: a sale moves stock only -- 'stock', not the catalog version.
     bumpVersion(c.env, 'stock'),
     bumpVersion(c.env, 'sales'),
+    // These amendments set or change the courier cost the Expenses list shows through the sale; that page no
+    // longer reloads on a sales push, so it hears about them on the fees channel.
+    ...(AMENDMENT_KINDS_THAT_MOVE_COURIER_ROWS.has(String(details.kind)) ? [broadcast(c.env, 'fees', { action: 'update' })] : []),
   ]))
 }
 
@@ -5973,8 +5984,7 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
   const raw = query.search || query.q || ''
   const groups = tokenizeSearchTermGroups(raw)
   if (!groups.length) return undefined
-  // Without the full-phone permission a digit-only word (as the matcher reads it: accents folded, a letter o beside a digit read
-  // as zero) never matches the customer's number (lib/phoneSearchGuard.ts); a whole number, in any form, matches by equality.
+  // A whole number, in any form, also matches the customer's phone by equality (lib/phoneSearchGuard.ts).
   const probe = phoneProbeOf(raw)
   const mode = String(query.searchMode || query.search_mode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
 
@@ -5999,13 +6009,13 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
     "COALESCE(s.branch_name, '')", "COALESCE(s.payment_method, '')", "COALESCE(s.notes, '')",
     "COALESCE(c.membership_number, '')",
   ])
-  // A digit word of an account without the grant reads these columns through the projection's own rule (restrictedColumnSql): a
-  // note, cashier, branch or customer name that is itself a number shows masked, so it reads as empty here. The haystack is computed
-  // once per row (restrictedSearchScope) and the words read it as RESTRICTED_HAYSTACK.
-  const flatHaystackWithoutPhones = concatBalanced(restrictedHaystackParts([
-    's.receipt_number', 's.legacy_receipt_number', 's.cashier_name', 's.customer_name',
-    's.branch_name', 's.payment_method', 's.notes', 'c.membership_number',
-  ]))
+  // A digit word of an account without the grant reads the customer's name and phone as stored (a customer is found by part of their number)
+  // and every other column through the projection's own rule (restrictedColumnSql): a note, cashier or branch that is itself a number
+  // shows masked, so it reads as empty here. The haystack is computed once per row (restrictedSearchScope) and the words read it as RESTRICTED_HAYSTACK.
+  const flatHaystackWithoutPhones = concatBalanced([
+    ...restrictedHaystackParts(['s.receipt_number', 's.legacy_receipt_number', 's.cashier_name', 's.branch_name', 's.payment_method', 's.notes', 'c.membership_number']),
+    customerNameLookupSql('s.customer_name'), customerPhoneLookupSql('s.customer_phone'),
+  ])
   let usesRestrictedHaystack = false
   const itemHaystack = concatBalanced([
     "COALESCE(sis.product_name, '')", "COALESCE(sis.sku, '')", "COALESCE(sip.barcode, '')",
@@ -6392,6 +6402,13 @@ app.get('/stats', async (c) => {
   if (query.startDate) { where.push(localDateAtOrAfter('s.created_at')); params.startDate = query.startDate }
   if (query.endDate) { where.push(localDateAtOrBefore('s.created_at')); params.endDate = query.endDate }
   appendLocalTimeRange(query, where, params, 's.created_at')
+  // The clauses above are the report window. The reader applies the identical predicates from the same query values (windowFilter below), so
+  // while they are the ONLY clauses the list scope would merely repeat them: `s.id IN (SELECT ... WHERE <same window>)` is the identity.
+  // Counted from what the helpers pushed (not by matching SQL text); any other clause (cashier, user, status, branch, search) keeps the scope.
+  const windowClauseCount = where.length - 1
+  // Measured exception: with a start date and no end date the unscoped kernel walk reads MORE rows (64,689 vs 37,463 on the lab seed: no upper
+  // bound for the date index), so that one shape keeps the scope; everything else with only the window drops it.
+  const openEndedStart = Boolean(query.startDate) && !query.endDate
   // A cashier saved under a number shows masked, so an account without the grant filters on it as empty (restrictedColumnSql).
   if (query.cashier) { where.push(`${phoneSearchAccessOf(user).fullPhone ? 's.cashier_name' : restrictedColumnSql('s.cashier_name')} LIKE @cashier`); params.cashier = `%${query.cashier}%` }
   if (query.userId) {
@@ -6432,13 +6449,14 @@ app.get('/stats', async (c) => {
     // scope still carries every list predicate, so the cohort is unchanged. Branch, cashier, status and
     // search stay scope-only (the list's branch rule also matches item branches).
     const windowFilter={startDate:query.startDate||null,endDate:query.endDate||null,startTime:query.startTime||null,endTime:query.endTime||null}
-    const report=await readSalesReportTotals(c.env,windowFilter,false,salesListFilterReportScope(where,params))
-    const totals=report.totals
-    const totalCount=report.sale_count+report.cancelled_count
+    const scope = where.length - 1 === windowClauseCount && !openEndedStart ? undefined : salesListFilterReportScope(where, params)
+    // Header-only reader: every number below is sale header + returns (no sale lines are read, and no cost or profit exists on the type).
+    const totals = await readSalesHeaderTotals(c.env, windowFilter, scope)
+    const totalCount=totals.sale_count+totals.cancelled_count
     const listLimit = Math.max(1, Math.min(Number.parseInt(String(query.limit || '100'), 10) || 100, 200))
     return {
       total_count: totalCount,
-      revenue_count: report.sale_count,
+      revenue_count: totals.sale_count,
       revenue_usd: totals.revenue_usd,
       pending_revenue_usd: totals.pending_revenue_usd,
       revenue_without_not_paid_usd: totals.revenue_without_not_paid_usd,
@@ -6958,7 +6976,7 @@ app.get('/export', async (c) => {
       membership_discount_usd: index === 0 ? sale.membership_discount_usd : '', membership_discount_khr: index === 0 ? sale.membership_discount_khr : '',
       membership_points_redeemed: index === 0 ? sale.membership_points_redeemed : '',
       is_delivery: index === 0 ? sale.is_delivery : '', delivery_contact_name: index === 0 ? sale.delivery_contact_name : '',
-      delivery_contact_phone: index === 0 ? sale.delivery_contact_phone : '', delivery_contact_address: index === 0 ? sale.delivery_contact_address : '',
+      delivery_contact_phone: index === 0 ? sale.delivery_contact_phone : '', delivery_contact_address: index === 0 ? deliveryDisplayAddress(sale.delivery_contact_address) : '',
       delivery_fee_usd: index === 0 ? sale.delivery_fee_usd : '', delivery_fee_khr: index === 0 ? sale.delivery_fee_khr : '',
       delivery_fee_paid_by: index === 0 ? sale.delivery_fee_paid_by : '', notes: index === 0 ? sale.notes : '',
     }))

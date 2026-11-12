@@ -4,7 +4,7 @@ import { currentPasswordHashPrefix, describePasswordHash, hashPassword, isCurren
 import { getDb } from '../lib/db'
 import { buildUserRenameStatements } from '../lib/userIdentity'
 import { requireAuth, revokeUserSessions, type SessionUser } from '../lib/auth'
-import { audit, changedFields, auditChangeColumns } from '../lib/audit'
+import { audit, changedFields, auditChangeColumns, requestDeviceColumnSql, requestDeviceParams } from '../lib/audit'
 import { isAdminControlUser } from '../lib/permissions'
 import { DEFAULT_ROLE_PERMISSIONS } from '../lib/roleDefaults'
 import { isAdminControlGuardAbort, lastAdminRequiredBody, planAdminControlWrite } from '../lib/adminControlGuard'
@@ -1114,10 +1114,10 @@ app.put('/roles/:id', async (c) => {
             SELECT @user_id,
               COALESCE((SELECT NULLIF(trim(username), '') FROM users WHERE id = @user_id), @user_name),
               'update', 'role', @id, @details, 'role', @id, @old_value, @new_value,
-              (SELECT device_name FROM user_sessions WHERE user_id = @user_id AND revoked_at IS NULL ORDER BY last_seen_at DESC, id DESC LIMIT 1),
-              (SELECT device_tz FROM user_sessions WHERE user_id = @user_id AND revoked_at IS NULL ORDER BY last_seen_at DESC, id DESC LIMIT 1)
+              ${requestDeviceColumnSql('@user_id', 'device_name', '(SELECT device_name FROM user_sessions WHERE user_id = @user_id AND revoked_at IS NULL ORDER BY last_seen_at DESC, id DESC LIMIT 1)')},
+              ${requestDeviceColumnSql('@user_id', 'device_tz', '(SELECT device_tz FROM user_sessions WHERE user_id = @user_id AND revoked_at IS NULL ORDER BY last_seen_at DESC, id DESC LIMIT 1)')}
             WHERE changes() = 1`,
-      params: { user_id: actor?.id ?? null, user_name: actorSnapshot(actor), id, details, ...roleChangeColumns },
+      params: { user_id: actor?.id ?? null, user_name: actorSnapshot(actor), id, details, ...roleChangeColumns, ...requestDeviceParams() },
     }, adminGuard.guard])
     const firstResult = results[0] as { changes?: number; meta?: { changes?: number } } | undefined
     const updatedRows = Number(firstResult?.meta?.changes ?? firstResult?.changes ?? 0)

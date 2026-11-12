@@ -286,6 +286,47 @@ export function classifyContactDuplicates(
   return matches.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
 }
 
+// The longest number the digits index is asked for (lib/phoneSearchGuard.ts FULL_NUMBER_MAX_DIGITS) and the shortest fragment a trigram can hold.
+const NARROWING_MAX_DIGITS = 15
+const NARROWING_MIN_FRAGMENT = 3
+
+// Narrows a customers phone lookup with customers_phone_digits_fts. A stored number whose canonical key is P has the digits P (as typed) or 855 + P without its
+// leading 0 (folded), and both hold P without its leading 0, so that fragment is searched in the digits column and "=P=" in the cached-key column; the
+// cached key is also read by an index seek (phone_normalized), so a key the digits do not show still counts. The index is the wider set (it also strips tab, line
+// feed, carriage return, no-break space and reads Khmer digits), and the caller's exact comparison removes what the rule does not accept, so a partial number
+// never becomes a match: the narrowing only chooses which rows are looked at.
+// Falls back to null (today's full comparison) for a number the index cannot be proven to hold: longer than 15 digits, or whose fragment is under 3 characters.
+// The rule also strips "/", which the view does not, so two numbers saved in one field ("012 345 678 / 098 765 432", canonical 18 digits) are found only
+// through that fallback. A slashed field of 15 digits or fewer ("023 216 666/7", written by a customer CSV import and by the API create/update path) is found by
+// extra phrases: a stored value the rule accepts holds only digits and "/" (and separators the view strips), so a "/" inside the typed fragment sits between two
+// of its adjacent digits a,b and the view shows "a/b", or "a//" when the slashes repeat; every such pair is added to the digits OR (the exact comparison still decides).
+// One shape stays unseen and is pinned in the differential: an option phone stored as a JSON number (the view reads text only).
+export function customerPhoneNarrowing(phones: readonly string[]): ContactDuplicateGuardStatement | null {
+  if (!phones.length) return null
+  const fragments: string[] = []
+  for (const phone of phones) {
+    if (!/^[0-9]+$/.test(phone) || phone.length > NARROWING_MAX_DIGITS) return null
+    const fragment = phone.replace(/^0/, '')
+    if (fragment.length < NARROWING_MIN_FRAGMENT) return null
+    fragments.push(fragment)
+  }
+  const phrases = new Set<string>()
+  for (const fragment of fragments) {
+    phrases.add(fragment)
+    for (let i = 0; i + 1 < fragment.length; i += 1) {
+      phrases.add(`${fragment[i]}/${fragment[i + 1]}`)
+      phrases.add(`${fragment[i]}//`)
+    }
+  }
+  const params: Record<string, unknown> = {
+    phoneRuns: `{digits} : (${[...phrases].map((phrase) => `"${phrase}"`).join(' OR ')}) OR {key} : (${phones.map((phone) => `"=${phone}="`).join(' OR ')})`,
+  }
+  // One IN is the only driver (an OR beside it makes SQLite scan customers); the key seek is its own UNION arm.
+  const arms = [`SELECT rowid FROM customers_phone_digits_fts WHERE customers_phone_digits_fts MATCH @phoneRuns`]
+  phones.forEach((_, index) => arms.push(`SELECT id FROM customers WHERE phone_normalized = @phone${index} AND phone_normalized <> ''`))
+  return { sql: `id IN (${arms.join(' UNION ')})`, params }
+}
+
 // DB-backed lookup for a single record being created/edited. Phone identity
 // is queried separately and without a row limit: a common name can have more
 // than 50 legitimate records, and those name matches must never crowd a hard
@@ -295,6 +336,8 @@ export async function findContactDuplicateState(
   table: ContactDuplicateTable,
   subject: { id?: number | string | null; name: string; phones: string[] },
   mode: ContactOptionMode = 'address',
+  // fullScan: run today's complete phone statement (no digits-index narrowing). Used only after a write guard has refused, so a number the index cannot show still names its owner.
+  options: { fullScan?: boolean } = {},
 ): Promise<{ matches: ContactDuplicateMatch[]; review: ContactDuplicateReview; snapshots: ContactDuplicateCandidateSnapshot[] }> {
   const nameKey = normalizeContactName(subject.name)
   const phones = [...new Set(subject.phones.map(normalizePhone).filter((p): p is string => !!p))]
@@ -322,9 +365,13 @@ export async function findContactDuplicateState(
   const excludeSql = subject.id != null && subject.id !== '' ? 'AND id != @excludeId' : ''
   if (excludeSql) params.excludeId = subject.id
 
+  // customers: the digits index (migration 0302) narrows the table to the rows that can hold a typed number, and the unchanged exact comparison above then runs only
+  // on those, so the rows that leave the answer are exactly the rows today's statement returns (see customerPhoneNarrowing for the one place it falls back).
+  const narrowing = table === 'customers' && !options.fullScan ? customerPhoneNarrowing(phones) : null
+  if (narrowing) Object.assign(params, narrowing.params)
   const phoneRows = phoneConditions.length
     ? await db
-      .prepare(`SELECT ${candidateColumns(table)} FROM ${table} WHERE (${phoneConditions.join(' OR ')}) ${excludeSql}`)
+      .prepare(`SELECT ${candidateColumns(table)} FROM ${table} WHERE ${narrowing ? `${narrowing.sql} AND ` : ''}(${phoneConditions.join(' OR ')}) ${excludeSql}`)
       .all<ContactDuplicateCandidateRow>(params)
     : []
   const nameRows = nameKey
@@ -414,7 +461,7 @@ export function contactDuplicateWriteGuardStatement(
     ? `candidate.id IN (
       SELECT named.id FROM ${table} AS named
       WHERE named.id != COALESCE(@excludeId, -1)
-        AND lower(trim(COALESCE(named.name, ''))) = @nameKey
+        AND ${table === 'customers' ? 'lower(trim(named.name))' : "lower(trim(COALESCE(named.name, '')))"} = @nameKey
       ORDER BY named.id ASC
       LIMIT 50
     ) OR`

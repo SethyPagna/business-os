@@ -10,10 +10,14 @@ import { appendQuery, buildQueryString, type QueryParams } from '../src/api/quer
 // request again with branchId -- a sequential waterfall, both at full cost (about 2.5M rows each on the live list). Pinned for ic_simple OFF and ON; a shop with two branches
 // has no waterfall. A tab that has not yet seen the switch asks GET /list first, gets a 404 and carries on exactly as above (one probe per tab, then remembered).
 //
+// D1 wave 2 (11 Nov, lane d1-inventory): the older list no longer waterfalls. The page reads the branch list (a few rows) BEFORE the first list read, so a shop with one active branch opens
+// with ONE list request that already names the branch. EXPECTED_REQUESTS_ONE_BRANCH_OFF was 2 (332k rows each on the live list) and is 1 now. The Issues tab never falls back to the older
+// list while ic_wired is ON and the shop has one branch (a deep link to it used to ask /products first).
+//
 // ic_wired ON (INV-B S4b): ONE list request. The sole branch is read from the rows' branch_stock, the overlay (the users' counts) is the only other request, and the remount that
 // follows takes the open request's answer with it instead of asking again. EXPECTED_REQUESTS_ONE_BRANCH was 2 before S4b and is 1 now.
 const EXPECTED_REQUESTS_ONE_BRANCH = 1
-const EXPECTED_REQUESTS_ONE_BRANCH_OFF = 2
+const EXPECTED_REQUESTS_ONE_BRANCH_OFF = 1
 
 const COUNT_FIELDS = { inventory_check_show_price: true, inventory_check_show_barcode: true, inventory_check_show_category: true, inventory_check_show_brand: true, inventory_check_show_stock: true, inventory_check_show_received: true }
 const harness = await createHarness({ observe: ['api/actorReadScope.ts', 'utils/dirtyWork.ts'] })
@@ -42,6 +46,8 @@ const listCalls: Call[] = []
 const overlayCalls: Array<{ query: URLSearchParams; listsAnswered: number }> = []
 let listsAnswered = 0
 const probes: string[] = []
+let branchListCalls = 0
+let branchListFails = false
 const heldByProducts = new Map<string, unknown>()
 const answer = (query: URLSearchParams) => {
   const base = { items: [{ id: 12, name: 'Sequence product', quantity: 8, unit: 'pcs' }], total: 45, page: Number(query.get('page') ?? 1), pageSize: 20, branches }
@@ -70,6 +76,14 @@ const doubles = {
     getProductFilters: async () => ({ brands: [], categories: [] }),
   },
   'utils/dirtyWork.ts': dirtyWork,
+  'api/branchTransport.ts': {
+    // The branch list holds every branch, retired ones included: only the active ones count as the shop's branches.
+    getBranches: async () => {
+      branchListCalls += 1
+      if (branchListFails) throw Object.assign(new Error('Forbidden'), { status: 403 })
+      return [...branches.map(branch => ({ ...branch, is_active: 1 })), { id: 99, name: 'Old Shop', is_active: 0 }]
+    },
+  },
   'api/actorReadScope.ts': {
     captureActorReadScope: () => ({ authority: 'test', channel: 'inventoryChecks', revision: '1' }),
     captureActorWriteIdentity: () => ({ owner: 'test', epoch: 1 }),
@@ -112,11 +126,11 @@ const doubles = {
   },
 }
 
-async function openPage(shopBranches: Array<{ id: number; name: string }>, icSimple: boolean, wired = false) {
-  calls.length = 0; listCalls.length = 0; overlayCalls.length = 0; probes.length = 0; heldByProducts.clear()
+async function openPage(shopBranches: Array<{ id: number; name: string }>, icSimple: boolean, wired = false, tab = 'products') {
+  calls.length = 0; listCalls.length = 0; overlayCalls.length = 0; probes.length = 0; heldByProducts.clear(); branchListCalls = 0
   inFlight = 0; answered = 0; listsAnswered = 0
   branches = shopBranches; simple = icSimple; wiredOn = wired
-  open('hub:inventory:products')
+  open(`hub:inventory:${tab}`)
   const surface = await harness.mount({ component: 'components/inventory/InventoryChecksPage.tsx', app, doubles, props: {} })
   return surface
 }
@@ -157,29 +171,51 @@ try {
   assert.equal(listCalls.length, 1, 'ic_wired ON, two branches: one list request'); assert.equal(overlayCalls.length, 0, 'counts are per branch: no overlay for all branches')
   await wiredTwo.unmount()
 
+  // ---- ic_wired ON, one branch, the Issues tab opened directly: the wired list with the branch, never the older list ----
+  const issues = await openPage([{ id: 1, name: 'Only branch' }], true, true, 'issues')
+  assert.ok(issues.text().includes('Sequence product'), 'ic_wired ON, Issues deep link: the list is drawn')
+  assert.equal(calls.length, 0, 'ic_wired ON, Issues deep link: the older /products read is never made (it read every product three times)')
+  assert.equal(listCalls.length, 1, 'ic_wired ON, Issues deep link: one wired list request')
+  assert.equal(listCalls[0].query.get('checkState'), 'issue'); assert.equal(listCalls[0].query.get('branchId'), '1', 'a check state needs a branch: it is resolved before the request')
+  assert.equal(branchListCalls, 1, 'the branch list (a few rows) is the only extra read')
+  await issues.unmount()
+
+  // ---- ic_wired ON, two branches, the Issues tab: the all-branches Issues view stays on the older list (the wired list needs a branch for a check state) ----
+  const issuesTwo = await openPage([{ id: 1, name: 'Branch one' }, { id: 2, name: 'Branch two' }], true, true, 'issues')
+  assert.equal(listCalls.length, 0, 'ic_wired ON, two branches, Issues: no wired list without a branch'); assert.equal(calls.length, 1, 'and exactly one read of the older list')
+  await issuesTwo.unmount()
+
   // ---- ic_wired OFF: today's behaviour, exactly ----
   let probed = 0
   for (const icSimple of [false, true]) {
     const server = icSimple ? 'ic_simple ON' : 'ic_simple OFF'
 
-    // ---- one branch: the waterfall (today: 2, one after the other) ----
+    // ---- one branch: ONE list request, already naming the branch (the base waterfall was 2: all branches, then the sole one) ----
     const one = await openPage([{ id: 1, name: 'Only branch' }], icSimple)
     probed += probes.length
     assert.ok(one.text().includes('Sequence product'), `${server}, one branch: the list is drawn`)
     assert.ok(!one.text().includes('unavailable'), `${server}, one branch: no load error`)
-    assert.equal(calls.length, EXPECTED_REQUESTS_ONE_BRANCH_OFF, `${server}, one branch: list requests on open (the waterfall is 2)`)
+    assert.equal(calls.length, EXPECTED_REQUESTS_ONE_BRANCH_OFF, `${server}, one branch: list requests on open (one read; the waterfall was 2)`)
+    assert.equal(branchListCalls, 1, `${server}, one branch: the branch list (a few rows) is read once, before the list`)
     assert.equal(listCalls.length, 0); assert.equal(overlayCalls.length, 0, 'ic_wired OFF: no wired answer is ever used')
-    assert.equal(calls[0].query.has('branchId'), false, `${server}, one branch: the first request names no branch`)
+    assert.equal(calls[0].query.get('branchId'), '1', `${server}, one branch: the only request already names the sole active branch (the retired branch is not counted)`)
     for (const call of calls) {
       assert.equal(call.query.get('page'), '1'); assert.equal(call.query.get('pageSize'), '20')
       assert.equal(call.query.get('sortBy'), 'name'); assert.equal(call.query.get('sortDirection'), 'asc')
       assert.equal(call.query.has('summary'), false, `${server}: the first page asks for its summary`)
-      assert.deepEqual([...call.query.keys()].sort(), ['page', 'pageSize', 'sortBy', 'sortDirection', ...(call.query.has('branchId') ? ['branchId'] : [])].sort(), `${server}: the request carries exactly today keys`)
+      assert.deepEqual([...call.query.keys()].sort(), ['branchId', 'page', 'pageSize', 'sortBy', 'sortDirection'], `${server}: the request carries exactly today keys`)
     }
-    assert.equal(calls[1].query.get('branchId'), '1', `${server}, one branch: the second request carries the sole branch`)
-    assert.equal(calls[1].answersBefore, 1, `${server}, one branch: the second request starts only after the first was answered (sequential)`)
-    assert.deepEqual(calls.map(call => call.overlapped), [false, false], `${server}, one branch: the two requests never overlap`)
     await one.unmount()
+
+    // ---- the branch list is refused (an account without branch access): the page asks as it always did, the waterfall stays the fallback ----
+    branchListFails = true
+    const refused = await openPage([{ id: 1, name: 'Only branch' }], icSimple)
+    branchListFails = false
+    assert.ok(refused.text().includes('Sequence product'), `${server}, branch list refused: the list is still drawn`)
+    assert.equal(branchListCalls, 1, `${server}, branch list refused: asked once, not on every step`)
+    assert.equal(calls.length, 2, `${server}, branch list refused: the older two-step open is the fallback`)
+    assert.equal(calls[0].query.has('branchId'), false); assert.equal(calls[1].query.get('branchId'), '1')
+    await refused.unmount()
 
     // ---- control: two branches, no waterfall ----
     const two = await openPage([{ id: 1, name: 'Branch one' }, { id: 2, name: 'Branch two' }], icSimple)
@@ -187,10 +223,11 @@ try {
     assert.ok(two.text().includes('Sequence product'), `${server}, two branches: the list is drawn`)
     assert.equal(calls.length, 1, `${server}, two branches: one request (positive control: only a single-branch shop waterfalls)`)
     assert.equal(calls[0].query.has('branchId'), false, `${server}, two branches: the open request names no branch`)
+    assert.equal(branchListCalls, 1, `${server}, two branches: the branch list was read once and found no sole branch`)
     await two.unmount()
   }
   assert.equal(probed, 1, 'ic_wired OFF: the tab asks /list once, gets a 404 and remembers it')
-  console.log('inventoryChecksOpenSequence passed: ic_wired ON opens with 1 list request (0 when Products holds the rows); OFF keeps the 2-request waterfall; two branches send 1')
+  console.log('inventoryChecksOpenSequence passed: ic_wired ON opens with 1 list request (0 when Products holds the rows); OFF opens with 1 request naming the sole branch (2 only when the branch list is refused); two branches send 1')
 } finally {
   await harness.close()
 }

@@ -110,14 +110,18 @@ ${Object.entries(AUDIT_RETENTION_KEPT_ENTITY_ACTIONS).map(([entity, actions]) =>
         OR (${AUDIT_ENTITY_KEY_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_UNDO_ENTITIES)})
           AND (${AUDIT_ACTION_SQL} LIKE '%\\_undo' ESCAPE '\\' OR ${AUDIT_ACTION_SQL} LIKE '%\\_redo' ESCAPE '\\'))`
 
+// The rows the sweep may delete, as one predicate. migrations/0303 indexes audit_logs(created_at) WHERE this exact text, which is the only way the
+// planner can answer the sweep without reading every kept-forever row older than the cutoff; test-audit-retention-pure.cjs fails when the two drift.
+export const AUDIT_RETENTION_DELETABLE_SQL = `NOT (${AUDIT_RETENTION_KEPT_FOREVER_SQL})
+      AND NOT (COALESCE(entity, '') = 'pending_action'
+        AND (${AUDIT_REVIEW_SECTION_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_REVIEW_SECTIONS)})
+          OR (${AUDIT_ACTION_SQL} = 'approve' AND ${AUDIT_REVIEW_SECTION_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_APPROVED_REVIEW_SECTIONS)}))))`
+
 export function buildAuditLogRetentionDeleteSql(): string {
   return `DELETE FROM audit_logs WHERE id IN (
     SELECT id FROM audit_logs
     WHERE created_at < @cutoff
-      AND NOT (${AUDIT_RETENTION_KEPT_FOREVER_SQL})
-      AND NOT (COALESCE(entity, '') = 'pending_action'
-        AND (${AUDIT_REVIEW_SECTION_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_REVIEW_SECTIONS)})
-          OR (${AUDIT_ACTION_SQL} = 'approve' AND ${AUDIT_REVIEW_SECTION_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_APPROVED_REVIEW_SECTIONS)}))))
+      AND ${AUDIT_RETENTION_DELETABLE_SQL}
     LIMIT 5000
   )`
 }
@@ -291,6 +295,24 @@ export function currentRequestDevice(): RequestDevice | null {
   }
 }
 
+// For a raw INSERT ... SELECT that writes an audit row itself (not through buildAuditStatement): the device column is the request's own device
+// when the actor is the user being served, and only otherwise the actor's most recently seen session. The seen-session guess names the wrong
+// device for a person signed in on two (phone + till) whenever the other one touched last, and a longer touch interval widens that window.
+export function requestDeviceColumnSql(actorSql: string, column: 'device_name' | 'device_tz', fallbackSql: string): string {
+  const param = column === 'device_name' ? '@req_dev_name' : '@req_dev_tz'
+  return `CASE WHEN @req_dev_user_id IS NOT NULL AND @req_dev_user_id = ${actorSql} THEN ${param} ELSE ${fallbackSql} END`
+}
+// Decided in JS so the SQL carries the freshest-session join ONLY when it can matter: when the actor is the user being served, the request's own
+// device is the answer and the join (a user_sessions scan) would be read for nothing.
+export function requestDeviceIsActor(actorId: number | null | undefined): RequestDevice | null {
+  const device = currentRequestDevice()
+  return device && actorId != null && Number(actorId) === device.userId ? device : null
+}
+export function requestDeviceParams(): { req_dev_user_id: number | null; req_dev_name: string | null; req_dev_tz: string | null } {
+  const device = currentRequestDevice()
+  return { req_dev_user_id: device ? device.userId : null, req_dev_name: device ? device.deviceName : null, req_dev_tz: device ? device.deviceTz : null }
+}
+
 // Ported from backend/src/helpers.ts's audit(). Deliberately swallows its
 // own errors (matching the original's comment: "Audit failures must never
 // crash the main request") -- an audit log write failing should never be
@@ -409,7 +431,7 @@ export function buildAuditStatement(
   // entityIdSubquery: the entity's id is looked up inside the batch (a row an earlier statement of it may have just registered). Its SQL is a
   // constant written in code; the values travel as parameters.
   const idSql = options.entityIdSubquery ? options.entityIdSubquery.sql : options.entityIdFromLastInsert ? 'last_insert_rowid()' : '@entity_id'
-  const requestDevice = currentRequestDevice()
+  const ownDevice = requestDeviceIsActor(userId)
   return {
     sql: `
       INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, old_value, new_value, device_name, device_tz)
@@ -417,17 +439,17 @@ export function buildAuditStatement(
         @user_id,
         COALESCE(NULLIF(TRIM(u.username), ''), NULLIF(TRIM(@user_name), '')),
         @action, @entity, ${idSql}, @details, @table_name, ${idSql}, @old_value, @new_value,
-        CASE WHEN @request_user_id IS NOT NULL AND @request_user_id = @user_id THEN @request_device_name ELSE s.device_name END,
-        CASE WHEN @request_user_id IS NOT NULL AND @request_user_id = @user_id THEN @request_device_tz ELSE s.device_tz END
+        ${ownDevice ? '@request_device_name' : 's.device_name'},
+        ${ownDevice ? '@request_device_tz' : 's.device_tz'}
       FROM (SELECT 1 AS one) AS _dummy
       LEFT JOIN users u ON u.id = @user_id
-      LEFT JOIN (
+      ${ownDevice ? '' : `LEFT JOIN (
         SELECT device_name, device_tz
         FROM user_sessions
         WHERE user_id = @user_id AND revoked_at IS NULL
         ORDER BY last_seen_at DESC, id DESC
         LIMIT 1
-      ) AS s ON 1 = 1
+      ) AS s ON 1 = 1`}
     `,
     params: {
       user_id: userId,
@@ -440,9 +462,7 @@ export function buildAuditStatement(
       table_name: entity,
       old_value: changeColumns.old_value,
       new_value: change === undefined ? detailsStr : changeColumns.new_value,
-      request_user_id: requestDevice ? requestDevice.userId : null,
-      request_device_name: requestDevice ? requestDevice.deviceName : null,
-      request_device_tz: requestDevice ? requestDevice.deviceTz : null,
+      ...(ownDevice ? { request_device_name: ownDevice.deviceName, request_device_tz: ownDevice.deviceTz } : {}),
     },
   }
 }

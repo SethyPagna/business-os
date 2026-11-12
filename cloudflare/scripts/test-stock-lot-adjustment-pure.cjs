@@ -470,7 +470,10 @@ async function main() {
     const f = seeded()
     const prepared = []
     const real = f.env.DB.prepare
-    f.env.DB.prepare = (text) => { prepared.push(String(text)); return real.call(f.env.DB, text) }
+    // The read-switch row (lib/readSwitches.ts) is re-read whenever its per-isolate memo (readSwitchMemoSeconds) lapses, which a slow runner
+    // hits mid-test; that is an isolate cost, not the refusal's, so it is left out of the count.
+    const switchRead = /FROM\s+system_flags\s+WHERE key IN/
+    f.env.DB.prepare = (text) => { if (!switchRead.test(String(text))) prepared.push(String(text)); return real.call(f.env.DB, text) }
     const reads = (pattern) => prepared.filter((text) => pattern.test(text))
     const stale = await send(f, 'POST', '/api/inventory/adjust', setLot('s2-stale-lot-0001', 4, { expectedLotQuantity: 9 }))
     assert.equal(stale.status, 409); assert.equal(stale.json.code, 'stock_conflict')

@@ -1,5 +1,5 @@
 import { phoneSearchAccessOf } from '../lib/phoneAccess'
-import { hasDigit, RESTRICTED_HAYSTACK, restrictedHaystackParts, restrictedSearchScope, restrictedWordHaystacks, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
+import { customerNameLookupSql, hasDigit, RESTRICTED_HAYSTACK, restrictedHaystackParts, restrictedSearchScope, restrictedWordHaystacks, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
 import { loyaltyAccrualSql } from '../lib/loyaltyEligibility'
 import { productStockGuardError } from '../lib/productStockGuard'
 import { Hono, type Context } from 'hono'
@@ -20,6 +20,7 @@ import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion, bumpVersions } from '../lib/cache'
+import { RETURN_WRITE_CACHE_NAMESPACES } from '../lib/returnCacheVersions'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
 import { planReceiveBatchStock, planRemoveStockFromBatch, readFifoLotAvailabilityForCart, allocateAcrossLots, decrementBatchStockStrictStatement } from '../lib/productBatches'
 import {
@@ -712,14 +713,14 @@ function returnsFilter(query: Record<string, string>, range: { sql: string; para
       COALESCE(rip.name_normalized, '') || ' ' || COALESCE(rip.brand_compact, '')
     )`
     // A return carries no phone column, but a customer, a supplier, a cashier or a note can be a phone number (saved by it), and the
-    // projection masks that. Without the full-phone permission a digit word reads those columns through the projection's own rule
-    // (restrictedColumnSql) and never the folded copy (lib/phoneSearchGuard.ts); the haystack is computed once per row
-    // (restrictedSearchScope) and the words read it as RESTRICTED_HAYSTACK.
+    // projection masks that. Without the full-phone permission a digit word reads the customer as stored (a customer is found by part of
+    // their number) and the other columns through the projection's own rule (restrictedColumnSql), never the folded copy
+    // (lib/phoneSearchGuard.ts); the haystack is computed once per row (restrictedSearchScope) and the words read it as RESTRICTED_HAYSTACK.
     const guardDigitWords = !access.fullPhone
     const digitWordHaystack = `(${restrictedHaystackParts([
-      'r.return_number', { sql: 'CAST(r.id AS TEXT)', key: 'id' }, 'r.receipt_number', 'r.cashier_name', 'r.customer_name',
+      'r.return_number', { sql: 'CAST(r.id AS TEXT)', key: 'id' }, 'r.receipt_number', 'r.cashier_name',
       'r.supplier_name', 'r.reason', 'r.notes', 'r.return_type', 'r.supplier_settlement',
-    ]).join(" || ' ' || ")})`
+    ]).concat(customerNameLookupSql('r.customer_name')).join(" || ' ' || ")})`
     let usesRestrictedHaystack = false
     let groupIndex = 0
     const groupClauses = searchGroups.map((words) => {
@@ -2656,7 +2657,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   const response = JSON.parse(committed.response_json) as ReturnCreateResponse
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return', id: response.id }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(bumpVersions(c.env, ['products', 'returns', 'sales']))
+  c.executionCtx.waitUntil(bumpVersions(c.env, RETURN_WRITE_CACHE_NAMESPACES))
   // A replacement the customer takes away deducts stock like a sale does (owner ruling 6 Oct 2026: alert on crossing).
   if (replacementLines.length) c.executionCtx.waitUntil(recordStockCrossings(c.env, { saleId: null, lines: replacementLines.map((line) => ({ productId: line.productId, branchId: line.branchId, quantity: line.quantity })) }))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'create', id: response.id }))
@@ -2810,7 +2811,7 @@ app.post('/supplier', async (c) => {
   // A server key also covers legacy callers without an idempotency key, so
   // every child can resolve the header within one atomic D1 batch.
   const supplierWriteKey = clientRequestId || `supplier-return:${crypto.randomUUID()}`
-  const returnIdExpression = '(SELECT id FROM returns WHERE client_request_id=@supplier_write_key)'
+  const returnIdExpression = "(SELECT id FROM returns WHERE client_request_id=@supplier_write_key AND client_request_id<>'')"
   const returnHeaderStatement = { sql: `
     INSERT INTO returns (
       return_number, client_request_id, cashier_id, cashier_name, branch_id, branch_name,
@@ -3012,7 +3013,7 @@ app.post('/supplier', async (c) => {
     }
     if (touchedProductIds.size) await executeStockTransaction(db, statements, 'retry')
     else await db.batch([...statements, ordinaryBusinessMaintenanceGuard])
-    const committed = await db.prepare('SELECT id FROM returns WHERE client_request_id=@supplier_write_key')
+    const committed = await db.prepare("SELECT id FROM returns WHERE client_request_id=@supplier_write_key AND client_request_id<>''")
       .get<{ id: number }>({ supplier_write_key: supplierWriteKey })
     if (!committed?.id) throw new Error('supplier_return_identity_missing')
     returnId = Number(committed.id)
@@ -3040,7 +3041,7 @@ app.post('/supplier', async (c) => {
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', 'supplier_return', returnId, { returnNumber, settlement, supplierName: body.supplier_name || null, supplierLossUsd })
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'supplier_return', id: returnId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(bumpVersions(c.env, ['products', 'returns', 'sales']))
+  c.executionCtx.waitUntil(bumpVersions(c.env, RETURN_WRITE_CACHE_NAMESPACES))
   // Telegram: supplier return = stock out with the settlement money.
   c.executionCtx.waitUntil(sendReturnTelegramEvent(c.env, returnId, {
     kind: 'supplier', returnNumber, party: body.supplier_name || null,
@@ -3916,7 +3917,7 @@ app.patch('/:id', async (c) => {
   }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return_edit', id: Number(id) }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(bumpVersions(c.env, ['products', 'returns', 'sales']))
+  c.executionCtx.waitUntil(bumpVersions(c.env, RETURN_WRITE_CACHE_NAMESPACES))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'update', id: Number(id) }))
   if (existing.sale_id) {
     c.executionCtx.waitUntil(broadcast(c.env, 'sales', { action: 'update', id: existing.sale_id }))

@@ -5,6 +5,10 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
+   "5f13c00d023d",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+  ],
+  [
    "49b0f78f4d8b",
    "SELECT * FROM categories ORDER BY lower(name) ASC"
   ],

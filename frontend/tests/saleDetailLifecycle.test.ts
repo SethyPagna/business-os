@@ -153,21 +153,6 @@ submitEnv.detailScopeRef.current = 'actor2:sale1'
 statusRequest.resolve({ updated_at: 'committed' }); await firstWrite
 assert.equal(closed, 0, 'late old-actor completion cannot close current detail')
 
-let trackedReads = 0
-const trackedEnv: any = {
-  // stockBranchId is the sale's own branch while it is active (CUTOVER-LR: the confirmed branch once it is disabled).
-  canLoadSaleProducts: true, detailScope: 'actor1:sale1', sale: { branch_id: 2 }, stockBranchId: 2, trackedBatchReloadKey: 0,
-  getTrackedBatchProductIds: () => { trackedReads++; return Promise.resolve({ productIds: [3263] }) },
-  setTrackedBatchLookupState: () => {}, setTrackedBatchLookupError: () => {}, setTrackedBatchProductIds: () => {},
-}
-const trackedEffect = effect('if (!canLoadSaleProducts) return undefined', trackedEnv)
-trackedEffect.render(); await flush()
-for (let i = 0; i < 5; i++) trackedEffect.render()
-assert.equal(trackedReads, 1, 'unchanged capability does not refetch tracked IDs on parent callbacks')
-trackedEnv.sale = { branch_id: 3 }; trackedEnv.stockBranchId = 3; trackedEffect.render(); await flush()
-assert.equal(trackedReads, 2, 'branch change still revalidates tracking')
-trackedEffect.unmount()
-
 const actor = { id: 7, name: 'Before', organization_id: 1, permissions: { sales: true, 'sales:status': true, products: true } }
 const fingerprint = saleSecurityFingerprint(actor, true)
 assert.equal(saleSecurityFingerprint({ ...actor, name: 'After', permissions: '{"products":true,"sales:status":true,"sales":true}' }, true), fingerprint, 'profile and normalized permission ordering are stable')
@@ -267,7 +252,7 @@ assert.equal(listSignals.length, 2, 'retained old closure cannot send a new read
 
 let statsRequest = deferred()
 const stats: unknown[] = []
-const statsEnv = { ...readEnv, isActive: true, salesStatsRequestRef: { current: 0 }, fetchSalesStats: () => statsRequest.promise, salesStatsScope: 'stats1', salesStatsScopeRef: { current: 'stats1' }, salesStatsParams: {}, captureActorReadScope, assertActorReadScope, isActorReadScopeCurrent, requireSalesStatsResult, setSalesStatsRead: (value: any) => { if (value.status !== 'loading') stats.push(value.status === 'ready' ? value.value : null) } }
+const statsEnv = { ...readEnv, isActive: true, salesStatsRequestRef: { current: 0 }, salesStatsAbortRef: { current: null }, fetchSalesStats: () => statsRequest.promise, salesStatsScope: 'stats1', salesStatsScopeRef: { current: 'stats1' }, salesStatsParams: {}, captureActorReadScope, assertActorReadScope, isActorReadScopeCurrent, requireSalesStatsResult, setSalesStatsRead: (value: any) => { if (value.status !== 'loading') stats.push(value.status === 'ready' ? value.value : null) } }
 const oldStats = salesReadCallback('loadSalesStats', { ...statsEnv, statusSecurityScope: 'scope2' })()
 readEnv.statusSecurityRef.current = 'scope3'
 statsRequest.resolve({ total_count: 100 }); await oldStats

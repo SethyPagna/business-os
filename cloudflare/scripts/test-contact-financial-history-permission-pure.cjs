@@ -103,7 +103,7 @@ const posContactsApp = load('routes/contacts.ts', {
   '../lib/contactIds': load('lib/contactIds.ts'),
   '../lib/contactSearch': { buildContactMatchClause: () => undefined },
   '../lib/salesCustomerSearch': load('lib/salesCustomerSearch.ts', {
-    './contactSearch': load('lib/contactSearch.ts', { './searchMatch': load('lib/searchMatch.ts'), './contactOptions': load('lib/contactOptions.ts'), './phoneSearchGuard': phoneSearchGuardModule }),
+    './contactSearch': load('lib/contactSearch.ts', { './searchMatch': load('lib/searchMatch.ts'), './contactOptions': load('lib/contactOptions.ts'), './membershipNumber': load('lib/membershipNumber.ts'), './phoneSearchGuard': phoneSearchGuardModule }),
     './phone': load('lib/phone.ts'),
     './phoneMask': phoneMaskModule,
     './phoneSearchGuard': phoneSearchGuardModule,

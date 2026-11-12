@@ -1,4 +1,7 @@
 import { getDb, type BindParams, type D1Compat } from './db'
+import { schemaObjectPresent, type SchemaObject } from './schemaObjectProbe'
+
+const FLAG_TABLE: SchemaObject = { kind: 'table', name: 'system_flags' }
 
 type Statement = { sql: string; params?: BindParams }
 
@@ -35,9 +38,7 @@ let flagTableAvailable = false
 export async function getImportFencedDb(env: { DB: D1Database; IMPORT_DB?: D1Database }): Promise<D1Compat> {
   const db = getDb(env)
   if (!flagTableAvailable) {
-    const capability = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'system_flags'")
-    const table = await (capability.getOnce ?? capability.get).call(capability) as { name: string } | undefined
-    flagTableAvailable = Boolean(table)
+    flagTableAvailable = await schemaObjectPresent(db, FLAG_TABLE, { once: true })
   }
   if (!flagTableAvailable) {
     Object.defineProperty(db, 'importWriteFenceStatements', { value: 0, configurable: true })

@@ -337,7 +337,8 @@ async function main() {
     const src = fs.readFileSync(path.join(SRC, 'lib/coreInvariantsGate.ts'), 'utf8')
     assert.match(src, /reverifyAfterMs: getPlanLimits\(env\)\.coreInvariantsReverifySeconds \* 1000/)
     const tiers = load('lib/planTier.ts').PLAN_LIMITS_BY_TIER
-    assert.ok(tiers.free.coreInvariantsReverifySeconds > tiers.paid.coreInvariantsReverifySeconds, 'Free re-verifies less often')
+    assert.equal(tiers.paid.coreInvariantsReverifySeconds, 24 * 60 * 60, 'Paid re-verifies once a day (was every 6 h: ~23k rows a run)')
+    assert.ok(tiers.free.coreInvariantsReverifySeconds >= tiers.paid.coreInvariantsReverifySeconds, 'Free never re-verifies more often than Paid')
   })
 
   await check('index.ts runs the invariants on /api/* only, never on /uploads, /ws, /health', async () => {

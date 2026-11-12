@@ -16,6 +16,8 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 
 const root = path.join(__dirname, '..', 'src')
 const productionDependencies = new Map()
+// undoAppliers loads ./cache lazily (await import) after loadTs has restored Module._load, so the lazy require must resolve here: the cache layer needs KV, a no-op bump stands in.
+const runtimeRequire = request => request === './cache' ? { bumpVersion: async () => {} } : require(request)
 function loadTs(rel, stubs = {}) {
   const file = path.join(root, rel)
   const { outputText } = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
@@ -35,7 +37,7 @@ function loadTs(rel, stubs = {}) {
     return original.call(Module, request, parent, main)
   }
   const mod = { exports: {} }
-  try { new Function('exports', 'require', 'module', outputText)(mod.exports, require, mod) }
+  try { new Function('exports', 'require', 'module', outputText)(mod.exports, runtimeRequire, mod) }
   finally { Module._load = original }
   return mod.exports
 }

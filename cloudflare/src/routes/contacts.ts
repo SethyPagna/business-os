@@ -2,6 +2,7 @@ import { LOYALTY_DISABLED_CODE, LOYALTY_DISABLED_MESSAGE } from '../lib/loyaltyE
 import { Hono, type Context, type Next } from 'hono'
 import { acquisitionCostResponses } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
+import { schemaObjectPresent } from '../lib/schemaObjectProbe'
 import { customerPointsReturnSql, loyaltySaleAccrualSql, loyaltySaleSinceSql, loyaltySubmissionSinceSql, loyaltyAdjustmentSinceSql } from '../lib/customerPointsReturn'
 import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
 import { applyCustomerGenderRestoration, previewCustomerGenderRestoration, customerGenderRestorationStatus, notifyCustomerGenderRestoration, canRestoreCustomerGender, GENDER_RESTORATION_MAX_BYTES } from '../lib/customerGenderRestoration'
@@ -10,7 +11,7 @@ import { netSaleExpr, recognizedExpr } from '../lib/salesAnalytics'
 import { chunkForBinding } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { PRODUCT_SUPPLIER_REFUSAL, supplierContactChangeReachesProducts } from '../lib/productSupplierGate'
-import { audit, buildAuditStatement, changedFields } from '../lib/audit'
+import { audit, buildAuditStatement, changedFields, currentRequestDevice, requestDeviceColumnSql, requestDeviceParams } from '../lib/audit'
 import { getPermissionTier, getActionTier, hasPermission, isAdminControlUser } from '../lib/permissions'
 import { broadcast, type BroadcastChannel } from '../durable-objects/broadcastHub'
 import { lotRemainingSql } from '../lib/lotRemaining'
@@ -44,12 +45,12 @@ import { hashPassword } from '../lib/passwordHash'
 import { buildContactMatchClause } from '../lib/contactSearch'
 import { buildSalesCustomerMatchClause } from '../lib/salesCustomerSearch'
 import { buildContactIdClause, parseContactIdFilter, CONTACT_ID_FILTER_MAX } from '../lib/contactIds'
-import { buildContactPickerSql, buildSalesCustomerPickerSql, CONTACT_PICKER_DEFAULT_LIMIT, CONTACT_PICKER_MAX_LIMIT } from '../lib/contactPicker'
+import { buildContactPickerSql, buildSalesCustomerPickerSql, CONTACT_PICKER_DEFAULT_LIMIT, CONTACT_PICKER_MAX_LIMIT, SALES_PICKER_RANK_PARAM, salesPickerRankKey } from '../lib/contactPicker'
+import { deleteDeliveryContactUnlessUsed } from '../lib/contactDeleteGuard'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs, type BulkDeleteEntityType } from '../lib/bulkDeleteEngine'
 import { bumpVersion, bumpVersions, getVersionWithFallback } from '../lib/cache'
 import { cacheIdentity } from '../lib/cache'
 import { cachedPhoneJson } from '../lib/phoneCache'
-import { phoneSearchAccessOf } from '../lib/phoneAccess'
 import { bodyHasMaskedPhone, isMaskedPhoneInputError, MASKED_PHONE_CODE, MASKED_PHONE_MESSAGE, resolveAddressInput, resolvePhoneInput, storedPhonesOf } from '../lib/phoneWriteGuard'
 import { isMaskedPhone } from '../lib/phoneMask'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr, localDateOf } from '../lib/businessDateWindow'
@@ -559,8 +560,13 @@ async function duplicateBlockAfterGuardFailure(
   const { matches, review } = await excludeAnonymousCustomerDuplicateState(
     db,
     config,
-    await findContactDuplicateState(db, config.table, subject, config.optionMode),
+    // This runs only after a write guard refused, so it reads today's FULL statement (no digits-index narrowing): a number the index cannot show
+    // must still name its owner here, or the refusal has no explanation and surfaces as a 500.
+    await findContactDuplicateState(db, config.table, subject, config.optionMode, { fullScan: true }),
   )
+  // A hard phone owner is the reason the guard refused: answer with it before the decision check, so a stale reviewed set can never hide it.
+  const phoneOwner = matches.find((match) => match.severity === 'phone_conflict')
+  if (phoneOwner) return duplicateErrorResponse(config.entity, phoneOwner, matches, review)
   if (decision && !contactDuplicateDecisionMatches(review, decision)) {
     const top = matches[0]
     return top
@@ -585,11 +591,9 @@ function conflictResult(error: unknown) {
 const tablesPresent = new Set<string>()
 async function hasTable(db: ReturnType<typeof getDb>, name: string): Promise<boolean> {
   if (tablesPresent.has(name)) return true
-  const row = await db
-    .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name = @name LIMIT 1")
-    .get<{ ok: number }>({ name })
-  if (row) tablesPresent.add(name)
-  return Boolean(row)
+  const present = await schemaObjectPresent(db, { kind: 'table', name })
+  if (present) tablesPresent.add(name)
+  return present
 }
 
 const CONTACT_MERGE_STALE_ERROR = 'One of these contacts changed while the merge was being saved. Refresh the review and try again.'
@@ -1085,7 +1089,7 @@ function registerContactRoutes(config: ContactConfig) {
       const limit = clampInt(query.pageSize ?? query.limit, 50, 1, 100)
       const predicates: string[] = []
       const params: Record<string, unknown> = { limit }
-      const contactMatch = buildSalesCustomerMatchClause(query.search || query.q || '', phoneSearchAccessOf(c.get('user')))
+      const contactMatch = buildSalesCustomerMatchClause(query.search || query.q || '')
       if (contactMatch) {
         predicates.push(contactMatch.sql)
         Object.assign(params, contactMatch.params)
@@ -1094,7 +1098,9 @@ function registerContactRoutes(config: ContactConfig) {
       if (idFilter.tooMany) return c.json({ error: `ids: at most ${CONTACT_ID_FILTER_MAX} ids per request` }, 400)
       const idClause = buildContactIdClause(idFilter)
       if (idClause) predicates.push(idClause)
-      const items = await db.prepare(buildSalesCustomerPickerSql(predicates)).all<Record<string, unknown>>(params)
+      const rankKey = contactMatch ? salesPickerRankKey(query.search || query.q || '') : ''
+      if (rankKey) params[SALES_PICKER_RANK_PARAM] = rankKey
+      const items = await db.prepare(buildSalesCustomerPickerSql(predicates, !!rankKey)).all<Record<string, unknown>>(params)
       return c.json({ items, limit })
     }
     const hasPaging = Object.prototype.hasOwnProperty.call(query, 'page') || Object.prototype.hasOwnProperty.call(query, 'pageSize')
@@ -1116,7 +1122,7 @@ function registerContactRoutes(config: ContactConfig) {
     // lib/contactSearch.ts for why this is a plain MATCH combine rather
     // than the products-side per-group hybrid (contacts search has never
     // had a comma-groups AND/OR UI, just one free-text phrase).
-    const contactMatch = buildContactMatchClause(config.table, search, 'search', phoneSearchAccessOf(c.get('user')))
+    const contactMatch = buildContactMatchClause(config.table, search, 'search')
     if (contactMatch) {
       baseWhere.push(contactMatch.sql)
       Object.assign(params, contactMatch.params)
@@ -1217,6 +1223,23 @@ function registerContactRoutes(config: ContactConfig) {
     const offset = (page - 1) * pageSize
     const version = await getContactReadCacheVersion(c.env, config.table)
     const payload = await cachedPhoneJson(c.req.raw, c.executionCtx, c.get('user'), version, CONTACT_READ_CACHE_TTL_SECONDS, async () => {
+      if (contactMatch?.scansRows) {
+        // A digit search reads every row of the table whichever way it is asked, so it asks once: the matching ids in list order with
+        // their year and whether they pass the date filter. The count, the year facet and the page all come from that one scan, and
+        // only the page's own rows are read afterwards.
+        const dateFilter = where.slice(baseWhere.length)
+        const matches = await db.prepare(`SELECT id, substr(${localDateExpr('created_at')}, 1, 4) AS year, ${dateFilter.length ? `CASE WHEN ${dateFilter.join(' AND ')} THEN 1 ELSE 0 END` : '1'} AS in_range FROM ${config.table} ${facetWhereSql} ${orderSql}`).all<{ id: number; year: string | null; in_range: number }>(params)
+        const listed = (matches || []).filter((row) => Number(row.in_range) === 1)
+        const pageIds = listed.slice(offset, offset + pageSize).map((row) => Number(row.id))
+        const rows = pageIds.length
+          ? await db.prepare(`SELECT * FROM ${config.table} WHERE id IN (SELECT CAST(value AS INTEGER) FROM json_each(@ids))`).all<Record<string, unknown>>({ ids: JSON.stringify(pageIds) })
+          : []
+        const byId = new Map((rows || []).map((row) => [Number(row.id), row]))
+        const pageItems = pageIds.map((id) => byId.get(id)).filter((row): row is Record<string, unknown> => !!row)
+        const availableYears = [...new Set((matches || []).map((row) => String(row.year || '')).filter((value) => /^\d{4}$/.test(value)))].sort((left, right) => Number(right) - Number(left))
+        const total = listed.length
+        return { items: (await withPoints(pageItems)), total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)), availableYears }
+      }
       const [totalRow, items, yearRows] = await Promise.all([
         db.prepare(`SELECT COUNT(*) AS count FROM ${config.table} ${whereSql}`).get<{ count: number }>(params),
         db.prepare(`SELECT * FROM ${config.table} ${whereSql} ${orderSql} LIMIT @pageSize OFFSET @offset`).all<Record<string, unknown>>({ ...params, pageSize, offset }),
@@ -1492,7 +1515,10 @@ function registerContactRoutes(config: ContactConfig) {
       config.table === 'suppliers' ? hasTable(db, 'supplier_invoices') : Promise.resolve(false),
     ])
     let auditDevice: { deviceName: string | null; deviceTz: string | null } = { deviceName: null, deviceTz: null }
-    if (user?.id) {
+    const requestDevice = currentRequestDevice()
+    if (user?.id && requestDevice && requestDevice.userId === Number(user.id)) {
+      auditDevice = { deviceName: requestDevice.deviceName, deviceTz: requestDevice.deviceTz }
+    } else if (user?.id) {
       try {
         const device = await db.prepare(`
           SELECT device_name, device_tz FROM user_sessions
@@ -1592,6 +1618,8 @@ function registerContactRoutes(config: ContactConfig) {
     // Promise.allSettled did to keep a cache-bump failure from surfacing.
     await bumpVersions(c.env, [...new Set(mergeVersions)]).catch(() => {})
     c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'merge', id: keepId, mergedIds: plan.mergedIds }).catch(() => {}))
+    // A merged driver moves its sales and expenses to the keeper: the Expenses list shows the driver's name.
+    if (config.table === 'delivery_contacts') c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'update' }).catch(() => {}))
     try {
       committedKeeper = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: keepId }) || committedKeeper
     } catch (_) {
@@ -2139,6 +2167,8 @@ function registerContactRoutes(config: ContactConfig) {
     }
     await Promise.all([...new Set(updateVersions)].map((namespace) => bumpVersion(c.env, namespace)))
     c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'update', id }))
+    // A driver's new name is carried onto its sales (the courier rows the Expenses list shows), which no longer reload on a sales push.
+    if (config.table === 'delivery_contacts' && nameChanged && snapshotCarry) c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'update' }))
     const item = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get({ id })
     // `partial`/`partialFields` are additive -- every existing caller reads
     // specific known fields off this response (id, name, etc.) or just
@@ -2191,13 +2221,20 @@ function registerContactRoutes(config: ContactConfig) {
       throw error
     }
 
+    // A delivery person still named by a sale or delivery fee is never hard-deleted: the rows would point at a missing id.
+    if (config.table === 'delivery_contacts') {
+      const outcome = await deleteDeliveryContactUnlessUsed(db, Number(id), current.name)
+      if (!outcome.deleted) return c.json(outcome.body, 409)
+    }
+
     try {
       if (config.table === 'customers') {
         await db.batch([
           anonymousCustomerGuardStatement(id),
           { sql: 'DELETE FROM customers WHERE id = @customerId', params: { customerId: id } },
         ])
-      } else {
+      } else if (config.table !== 'delivery_contacts') {
+        // delivery_contacts were deleted above, behind the sales/fees guard
         await db.prepare(`DELETE FROM ${config.table} WHERE id = @id`).run({ id })
       }
     } catch (error) {
@@ -3362,6 +3399,21 @@ app.post('/customers/:id/points', async (c) => {
   // rename cascade rewrites it to the account USERNAME. Stamping the full name
   // here would make this row change shape the first time anyone is renamed.
   const ledgerParams = { customerId, points: awardedPoints, note, actorId: actor.id, actorName: actorSnapshot(actor), requestId }
+  // The freshest-session fallback is read only when the actor is not the user being served: the request's own device answers the same question with no
+  // read (requestDeviceColumnSql applies the same rule in SQL; here the branch is decided in JS so the unused join is never emitted).
+  const awardOwnDevice = currentRequestDevice()?.userId === Number(actor.id)
+  const awardDeviceSql = awardOwnDevice
+    ? { name: '@req_dev_name', tz: '@req_dev_tz', join: '' }
+    : {
+      name: requestDeviceColumnSql('@actorId', 'device_name', 's.device_name'),
+      tz: requestDeviceColumnSql('@actorId', 'device_tz', 's.device_tz'),
+      join: `
+          LEFT JOIN (
+            SELECT device_name, device_tz FROM user_sessions
+            WHERE user_id = @actorId AND revoked_at IS NULL
+            ORDER BY last_seen_at DESC, id DESC LIMIT 1
+          ) AS s ON 1 = 1`,
+    }
   let result
   try {
     const results = await db.batch(requestId ? [
@@ -3382,16 +3434,11 @@ app.post('/customers/:id/points', async (c) => {
             'award_points', 'customer', @customerId,
             json_set(@details, '$.adjustmentId', last_insert_rowid()), 'customer', @customerId,
             json_set(@details, '$.adjustmentId', last_insert_rowid()),
-            s.device_name, s.device_tz
+            ${awardDeviceSql.name}, ${awardDeviceSql.tz}
           FROM (SELECT 1 AS one) AS _receipt
-          LEFT JOIN users u ON u.id = @actorId
-          LEFT JOIN (
-            SELECT device_name, device_tz FROM user_sessions
-            WHERE user_id = @actorId AND revoked_at IS NULL
-            ORDER BY last_seen_at DESC, id DESC LIMIT 1
-          ) AS s ON 1 = 1
+          LEFT JOIN users u ON u.id = @actorId${awardDeviceSql.join}
           WHERE changes() = 1`,
-        params: { ...ledgerParams, details: JSON.stringify({ ...auditDetails, request: { id: requestId, canonical } }) },
+        params: { ...ledgerParams, ...requestDeviceParams(), details: JSON.stringify({ ...auditDetails, request: { id: requestId, canonical } }) },
       },
     ] : [
       anonymousCustomerGuardStatement(customerId),
@@ -3457,7 +3504,7 @@ app.get('/customers/points-summary', async (c) => {
   // This endpoint is currently unreachable from the frontend (see the
   // comment above this handler), but kept correct rather than left on the
   // old LIKE scan now that customers_fts/customers_fts_phone exist anyway.
-  const contactMatch = buildContactMatchClause('customers', search, 'search', phoneSearchAccessOf(c.get('user')))
+  const contactMatch = buildContactMatchClause('customers', search, 'search')
   if (contactMatch) {
     where.push(contactMatch.sql)
     Object.assign(params, contactMatch.params)

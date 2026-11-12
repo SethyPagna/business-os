@@ -143,21 +143,20 @@ export function parseContactOptionsFromImportRow(row: PlainRecord = {}, { mode =
 // module) and the copies are compared character by character by
 // frontend/tests/contactDisplayAddress.test.ts. Edit both or neither.
 export function contactDisplayAddress(raw: unknown, mode: 'address' | 'area' = 'address'): string {
-  const text = String(raw ?? '').trim()
+  const plain = (field: unknown) => (typeof field === 'string' ? field.trim() : typeof field === 'number' && Number.isFinite(field) ? String(field) : '')
+  const text = plain(raw)
   if (!text) return ''
   const key = mode === 'area' ? 'area' : 'address'
-  const looksStructured = text.startsWith('[') || text.startsWith('{')
+  const truncatedMachineText = text.startsWith('{') || /^\[\s*(?:[{"\]]|$)/.test(text)
   let parsed: unknown
   try {
     parsed = JSON.parse(text)
   } catch (_) {
-    return looksStructured ? '' : text
+    return truncatedMachineText ? '' : text
   }
   if (Array.isArray(parsed)) {
     for (const entry of parsed) {
-      const value = entry && typeof entry === 'object'
-        ? String((entry as Record<string, unknown>)[key] ?? '').trim()
-        : String(entry ?? '').trim()
+      const value = entry && typeof entry === 'object' ? plain((entry as Record<string, unknown>)[key]) : plain(entry)
       if (value) return value
     }
     return ''
@@ -166,6 +165,15 @@ export function contactDisplayAddress(raw: unknown, mode: 'address' | 'area' = '
   // a number and is still an address); anything object-shaped is machine text.
   if (parsed === null || typeof parsed === 'object') return ''
   return text
+}
+
+export function deliveryDisplayAddress(raw: unknown): string {
+  return contactDisplayAddress(raw, 'address') || contactDisplayAddress(raw, 'area')
+}
+
+export function deliveryOptionHint(option: { phone?: unknown; address?: unknown; area?: unknown }): string {
+  const phone = typeof option.phone === 'string' ? option.phone.trim() : ''
+  return phone || deliveryDisplayAddress(option.address) || deliveryDisplayAddress(option.area)
 }
 
 export function getPrimaryContactOption(options: readonly unknown[] = [], { fallback = {} }: { fallback?: Partial<ContactOption> } = {}): ContactOption {

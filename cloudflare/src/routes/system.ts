@@ -2,6 +2,7 @@ import { executeStockTransaction } from '../lib/stockTransaction'
 import { Hono } from 'hono'
 import type { Env } from '../index'
 import { requireAuth } from '../lib/auth'
+import { RESET_UNUSED_DELIVERY_CONTACTS_SQL } from '../lib/contactDeleteGuard'
 import { hasPermission } from '../lib/permissions'
 import { getDb } from '../lib/db'
 import { audit } from '../lib/audit'
@@ -552,7 +553,8 @@ app.post('/reset-data', async (c) => {
         { sql: 'DELETE FROM branch_stock' },
         { sql: 'DELETE FROM customers' },
         { sql: 'DELETE FROM suppliers' },
-        { sql: 'DELETE FROM delivery_contacts' },
+        // Fees survive both modes, so a driver an expense still names stays (same rule as the Delivery contacts section reset).
+        { sql: RESET_UNUSED_DELIVERY_CONTACTS_SQL },
         { sql: 'DELETE FROM custom_fields' },
         // Import bookkeeping added after the original reset route. Clear
         // every job-scoped ledger before deleting import_jobs so a genuine
@@ -653,10 +655,14 @@ app.post('/reset-data', async (c) => {
       }
     }
 
+    // What remains of the table after a full reset is exactly the drivers a surviving expense names.
+    const keptDrivers = mode === 'all'
+      ? Number((await db.prepare('SELECT COUNT(*) AS n FROM delivery_contacts').get<{ n: number }>())?.n || 0)
+      : 0
     const label = mode === 'all'
       ? 'Full data reset - sales, returns, products, and contacts cleared'
       : 'Sales reset - sales, returns, and stock cleared'
-    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'reset_data', 'system', null, { label, mode, r2Errors: resetSweepErrors.length || undefined })
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'reset_data', 'system', null, { label, mode, r2Errors: resetSweepErrors.length || undefined, kept_referenced: keptDrivers || undefined })
 
     // Notify every connected page/device (Dashboard, Products, Inventory,
     // Sales, POS, Branches, Returns) that their data just changed out from
@@ -678,8 +684,9 @@ app.post('/reset-data', async (c) => {
     return c.json({
       success: true,
       message: mode === 'all'
-        ? 'Reset complete - sales, returns, products, and contacts deleted. Settings, users, and branches kept.'
+        ? `Reset complete - sales, returns, products, and contacts deleted${keptDrivers ? ` (${keptDrivers} delivery contact(s) kept because expenses still name them)` : ''}. Settings, users, and branches kept.`
         : 'Sales reset - sales, returns, and stock cleared. Products and contacts kept.',
+      keptCount: keptDrivers,
     })
   } catch (error) {
     return c.json({ success: false, error: (error as Error).message || 'Reset failed' }, 500)
@@ -695,10 +702,11 @@ app.post('/reset-data', async (c) => {
 // uses for a product's own batches/branch-stock rows). None of these four
 // ever needs a cascade: every table that references them (sales, returns,
 // loyalty_point_adjustments) already stores its own denormalized name/
-// phone/address snapshot at time of transaction, confirmed by reading
-// their real column lists (see Part 262's scoping entry in progress.md,
-// not re-derived here), so a dangling *_id on an old transaction row is
-// harmless and stays readable.
+// phone/address snapshot at time of transaction (Part 262), so a dangling
+// customer/supplier *_id stays readable. Delivery contacts are the exception:
+// sales and fees also LINK to them by id (Deliveries report, fee list, a sale's
+// driver edit), so that section deletes only drivers no sale or fee names and
+// reports how many were kept (lib/contactDeleteGuard.ts).
 //
 // Deliberately a SEPARATE endpoint from /reset-data above rather than a
 // 4th/5th/6th/7th value folded into that route's `mode` union -- these are
@@ -768,12 +776,19 @@ app.post('/reset-section', async (c) => {
 
   try {
     await db.batch([
-      ...config.tables.map((table) => ({ sql: `DELETE FROM "${table}"` })),
+      ...config.tables.map((table) => (section === 'delivery_contacts'
+        ? { sql: RESET_UNUSED_DELIVERY_CONTACTS_SQL }
+        : { sql: `DELETE FROM "${table}"` })),
     ])
+    // Whatever remains of the table is exactly the drivers a sale or fee still names.
+    const keptCount = section === 'delivery_contacts'
+      ? Number((await db.prepare('SELECT COUNT(*) AS n FROM delivery_contacts').get<{ n: number }>())?.n || 0)
+      : 0
 
     await audit(c.env, user?.id ?? null, actorSnapshot(user), 'reset_data', 'system', null, {
       label: `${config.label} reset - ${config.tables.join(', ')} cleared`,
       mode: `section:${section}`,
+      ...(keptCount ? { kept_referenced: keptCount } : {}),
     })
 
     await rotateEpochAfterReset(c.env, 'reset-section')
@@ -784,7 +799,10 @@ app.post('/reset-section', async (c) => {
 
     return c.json({
       success: true,
-      message: `${config.label} reset complete - all ${config.label.toLowerCase()} records deleted. Everything else kept. A fresh backup was taken first.`,
+      message: keptCount
+        ? `${config.label} reset complete - ${keptCount} kept because sales or fees still name them. Everything else kept. A fresh backup was taken first.`
+        : `${config.label} reset complete - all ${config.label.toLowerCase()} records deleted. Everything else kept. A fresh backup was taken first.`,
+      keptCount,
     })
   } catch (error) {
     return c.json({ success: false, error: (error as Error).message || 'Reset failed' }, 500)

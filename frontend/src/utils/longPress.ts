@@ -97,9 +97,15 @@ export function tapLandsOnControl(target: EventTarget | null, surface: EventTarg
   return !owner || typeof owner.contains !== 'function' || owner.contains(control)
 }
 
+// A copy field is plain text that happens to carry role=button: its tap still belongs to the row (hold or Enter copies).
+function tapLandsOnCopyField(target: EventTarget | null): boolean {
+  const start = target as Element | null
+  return Boolean(start && typeof start.closest === 'function' && start.closest('[data-copy-value]'))
+}
+
 export interface LongPressHandlers {
   onMouseDown: (event: React.MouseEvent) => void
-  onMouseUp: () => void
+  onMouseUp: (event?: React.MouseEvent) => void
   onMouseLeave: () => void
   onMouseMove: (event: React.MouseEvent) => void
   onTouchStart: (event: React.TouchEvent) => void
@@ -120,6 +126,10 @@ interface LongPressOptions {
   // going through this at all (see Products.tsx's row click handler,
   // which bypasses these handlers entirely once selectionModeActive).
   disabled?: boolean
+  // A press that begins and ends on a button or link inside the surface belongs to that control, never to the
+  // surface's tap (a print icon on a card must not also open the card). Off by default; a surface that reads the
+  // target itself (Products' copy fields) turns it on.
+  reportControlTaps?: boolean
 }
 
 // Behavior: press-and-hold past `thresholdMs` without releasing or
@@ -141,7 +151,7 @@ interface LongPressOptions {
 // same, while giving an ordinary tap enough slack to register.
 export function createLongPressHandlers(
   state: LongPressState,
-  { onLongPress, onClick, thresholdMs = LONG_PRESS_THRESHOLD_MS, moveTolerancePx = LONG_PRESS_MOVE_TOLERANCE_PX, disabled = false }: LongPressOptions,
+  { onLongPress, onClick, thresholdMs = LONG_PRESS_THRESHOLD_MS, moveTolerancePx = LONG_PRESS_MOVE_TOLERANCE_PX, disabled = false, reportControlTaps = false }: LongPressOptions,
 ): LongPressHandlers {
   const clearTimer = () => {
     if (state.timerId != null) {
@@ -165,7 +175,7 @@ export function createLongPressHandlers(
   }
 
   // `claimTap` runs only when this release IS the tap -- see onTouchEnd.
-  const end = (claimTap?: () => void) => {
+  const end = (claimTap?: () => void, surface?: EventTarget | null) => {
     clearTimer()
     const target = state.target
     state.target = null
@@ -182,6 +192,7 @@ export function createLongPressHandlers(
       return
     }
     if (!disabled && onClick) {
+      if (!reportControlTaps && tapLandsOnControl(target, surface ?? null) && !tapLandsOnCopyField(target)) return
       claimTap?.()
       onClick(target)
     }
@@ -201,7 +212,7 @@ export function createLongPressHandlers(
 
   return {
     onMouseDown: (event) => start(event.clientX, event.clientY, event.target),
-    onMouseUp: () => end(),
+    onMouseUp: (event) => end(undefined, event?.currentTarget),
     onMouseLeave: () => cancel(),
     // A mouse press that travels is a drag (a chip being scrolled sideways,
     // runtime/horizontalDragScroll.ts), not a tap -- the same rule touchmove
@@ -230,7 +241,7 @@ export function createLongPressHandlers(
     onTouchEnd: (event) => end(() => {
       if (!event?.cancelable || tapLandsOnControl(event.target, event.currentTarget)) return
       event.preventDefault()
-    }),
+    }, event?.currentTarget),
     onTouchMove: (event) => {
       const touch = event.touches[0]
       if (touch) checkMove(touch.clientX, touch.clientY)

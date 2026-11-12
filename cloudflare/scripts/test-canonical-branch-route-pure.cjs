@@ -157,6 +157,9 @@ const branchRoute = loadModule('routes/branches.ts', (id) => {
   if (id === '../lib/canonicalBranchIdentity') return identity
   if (id === '../lib/branchRoleGuards') return branchGuards
   if (id === '../lib/productSearchQuery') return { buildFamilyRelevanceOrderSql: noop, buildProductSearchQuery: noop }
+  // REAL probe (6.0.1650 lane d1-probes): it is pure, and the route's fail-closed 'operation writes ready' gate
+  // is decided by what it finds in the test database's sqlite_master, so a stub that answers true would hide a missing table.
+  if (id === '../lib/schemaObjectProbe') return loadModule('lib/schemaObjectProbe.ts', (request) => { throw new Error('unexpected probe import '+request) })
   if (id === '../lib/actorSnapshot') return { actorSnapshot: (user) => user?.name || null }
   if (id === '../index') return {}
   // REAL guard statement: it is appended to every branch write batch and its

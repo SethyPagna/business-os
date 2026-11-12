@@ -27,7 +27,7 @@ function loadModule(relPath) {
   const moduleObj = { exports: {} }
   const req = (spec) => {
     if (spec === './searchMatch') return loadModule('lib/searchMatch.ts')
-    if (['./contactOptions', './phoneSearchGuard', './phoneAccess', './permissions', './phoneMask', './phone'].includes(spec)) return loadModule(`lib/${spec.slice(2)}.ts`)
+    if (['./contactOptions', './phoneSearchGuard', './phoneAccess', './permissions', './phoneMask', './phone', './membershipNumber'].includes(spec)) return loadModule(`lib/${spec.slice(2)}.ts`)
     throw new Error(`unexpected require in test harness: ${spec}`)
   }
   new Function('exports', 'require', outputText)(moduleObj.exports, req)
@@ -49,7 +49,7 @@ function freshDb() {
   const db = new Database(':memory:')
   db.exec(`CREATE TABLE customers (
     id INTEGER PRIMARY KEY, name TEXT, phone TEXT, email TEXT, address TEXT,
-    company TEXT, notes TEXT, membership_number TEXT, gender TEXT,
+    company TEXT, notes TEXT, membership_number TEXT, gender TEXT, phone_normalized TEXT,
     created_at TEXT, updated_at TEXT
   )`)
   db.exec(`CREATE TABLE suppliers (
@@ -62,6 +62,7 @@ function freshDb() {
   )`)
   const migration = fs.readFileSync(path.join(__dirname, '..', 'migrations', '0020_contacts_fts.sql'), 'utf8')
   db.exec(migration)
+  db.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', '0302_customers_phone_digits_fts.sql'), 'utf8'))
   return db
 }
 
@@ -90,7 +91,7 @@ function insertDelivery(db, row) {
 }
 
 function searchIds(db, table, rawSearch) {
-  const clause = buildContactMatchClause(table, rawSearch, 'search', { fullPhone: true })
+  const clause = buildContactMatchClause(table, rawSearch, 'search')
   if (!clause) return null
   const rows = db.prepare(`SELECT id FROM ${table} WHERE ${clause.sql} ORDER BY id`).all(clause.params)
   return rows.map((r) => r.id)

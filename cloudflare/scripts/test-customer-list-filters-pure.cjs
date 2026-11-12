@@ -297,7 +297,7 @@ check('routes/contacts.ts wires the narrow Sales/POS picker without a full custo
   const start = routeSource.indexOf(marker)
   const end = routeSource.indexOf('const hasPaging', start)
   const branch = routeSource.slice(start, end)
-  assert.match(branch, /buildSalesCustomerPickerSql\(predicates\)/)
+  assert.match(branch, /buildSalesCustomerPickerSql\(predicates, /)
   assert.match(branch, /clampInt\(query\.pageSize \?\? query\.limit, 50, 1, 100\)/)
   assert.match(branch, /parseContactIdFilter/)
   assert.match(branch, /buildSalesCustomerMatchClause/)

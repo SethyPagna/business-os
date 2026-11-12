@@ -81,6 +81,7 @@ const app = withStepUp(loadReal, 'routes/system.ts', {
   '../lib/actorSnapshot': { actorSnapshot: (u) => u?.username || null },
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', actor); return next() } },
+  '../lib/contactDeleteGuard': loadReal('lib/contactDeleteGuard.ts'),
   '../lib/audit': { audit: async (...args) => { log.push(`audit:${args[3]}`) } },
   '../lib/permissions': permissions,
   '../lib/dataIntegrity': { runDataIntegrityCheck: async () => ({}) },

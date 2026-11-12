@@ -12,6 +12,7 @@ import type { ReviewAlertEvent, ReviewAlertHook } from '../lib/reviewAlert'
 import type { InventoryContext } from './inventory'
 import type { StockInCommitLine } from './stockInCommit'
 import { bumpVersion } from '../lib/cache'
+import { stockVisibleProductSql } from '../lib/productStockGuard'
 import { canApproveInventoryCounts, getInventoryCheckAccess, InventoryCheckQueryError } from '../lib/inventoryCheckAccess'
 import { canonicalProductsRequest, checkStateRestriction, inventoryChecksVersion, planInventoryList, projectInventoryList, readCheckStateSets, type CheckStateSets } from '../lib/inventoryCheckList'
 import { parseOverlayIds, readInventoryOverlay } from '../lib/inventoryCheckOverlay'
@@ -31,6 +32,9 @@ const announceCount = (env: Env, user: SessionUser, event: Pick<ReviewAlertEvent
     row: { section: 'inventory_checks', action_type: 'approve', entity_type: 'count', entity_id: event.sessionId, payload_json: '{}', requested_by_name: event.kind === 'created' ? actorSnapshot(user) : null },
   }))
 
+// The write committed but the cache version that keeps the check-state sets honest could not be advanced. The answer says so (the page shows 'saved, refresh'), and keeps outcome 'unknown'
+// so the page keeps its frozen request: a retry replays the stored receipt and tries the bump again.
+const SAVED_REFRESH_CODE = 'inventory_check_saved_refresh'
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
 app.use('*', async (c, next) => { c.header('Cache-Control','private, no-store'); await next() })
@@ -38,7 +42,7 @@ app.onError((error,c) => {
   const status = error instanceof InventoryCheckSessionError ? error.status : 'status' in error && typeof error.status === 'number' && [400,403,409,503].includes(error.status) ? error.status as 400|403|409|503 : 503
   const code = 'code' in error && typeof error.code === 'string' ? error.code : 'inventory_check_unavailable'
   const details = error instanceof InventoryCheckSessionError && error.details ? error.details : error instanceof InventoryCheckQueryError ? { parameter: error.parameter } : {}
-  return c.json({ ...details, error: code, code, ...(code === 'inventory_check_outcome_unknown' ? { outcome: 'unknown' } : {}) }, status)
+  return c.json({ ...details, error: code, code, ...(code === 'inventory_check_outcome_unknown' || code === SAVED_REFRESH_CODE ? { outcome: 'unknown' } : {}) }, status)
 })
 /** ic_fix_stock counts as ON only once migration 0286 is applied: with the switch on and the table missing every count would fail, so it answers exactly as OFF. */
 const fixStockOn = async (c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>): Promise<boolean> => await readSwitch(c.env, 'ic_fix_stock') && await approvalsAvailable(getDb(c.env))
@@ -63,8 +67,10 @@ app.use('*', async (c, next) => {
   // anyway (the version is also moved by every later writer).
   const wired = await readSwitch(c.env, 'ic_wired')
   try { await bumpVersion(c.env, 'inventory_checks') } catch (error) {
-    if (wired) throw error
-    console.error('[inventory_checks] version not advanced while ic_wired is OFF', error)
+    // Only an answer that said the write was made (below 400) becomes 'saved, refresh'. A writer that itself answered 5xx may not have committed anything: it keeps its own answer
+    // (a D1 failure, outcome unknown) and the bump failure is only logged, so 'Saved' is never claimed over a failed write.
+    if (wired && status < 400) throw new InventoryCheckSessionError(503, SAVED_REFRESH_CODE)
+    console.error(`[inventory_checks] version not advanced (ic_wired ${wired ? 'ON' : 'OFF'}, writer answered ${status})`, error)
   }
 })
 
@@ -96,7 +102,8 @@ app.get('/list', async c => {
   const productsQuery = { ...plan.productsQuery }
   if (plan.codeLookup) {
     // A viewer without the barcode field finds a product by its WHOLE code only: an exact hit is read by id, anything else is searched by name.
-    const hit = await db.prepare('SELECT id FROM products WHERE barcode = @code OR sku = @code LIMIT 2').all<{ id: number }>({ code: plan.codeLookup })
+    // Only a product the list itself may show (active, or still holding stock): a retired product that happens to share the code must not capture the search.
+    const hit = await db.prepare(`SELECT p.id FROM products p WHERE (p.barcode = @code OR p.sku = @code) AND ${stockVisibleProductSql('p', false)} LIMIT 2`).all<{ id: number }>({ code: plan.codeLookup })
     if (hit.length === 1) { delete productsQuery.query; delete productsQuery.searchFields; productsQuery.ids = String(hit[0].id); productsQuery.page = '1'; productsQuery.pageSize = '1' }
   }
   let sets: CheckStateSets | null = null

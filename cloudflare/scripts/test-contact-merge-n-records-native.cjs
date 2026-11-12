@@ -57,7 +57,7 @@ const planTier = load('lib/planTier.ts')
 // Administrator control comes from the role, not the name (FX-sec).
 const ADMIN = { id: 7, username: 'admin', name: 'Fixture Admin', role_code: 'admin', permissions: '{}' }
 const state = { db: null, batches: [], broadcasts: [], hook: null, lost: false, user: ADMIN }
-const contacts = load('routes/contacts.ts', {
+const contacts = load('routes/contacts.ts', { '../lib/schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
   '../lib/db': { getDb: () => state.db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', state.user); return next() } },
   '../lib/permissions': permissions,

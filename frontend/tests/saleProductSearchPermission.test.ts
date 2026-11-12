@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { effectivePermissions } from '../src/utils/permissions.ts'
+import { canSearchProductText } from '../src/api/productSearchIndex.ts'
 import {
   mergeSaleProductSearchCandidates,
   normalizeSaleProductSearchPage,
@@ -15,9 +16,6 @@ const gateName = gate[1]
 const searchStart = source.indexOf('  const loadAddProductSearchPage = ')
 const searchEnd = source.indexOf('\n  useEffect(', searchStart)
 const searchCode = stripTypeScriptTypes(source.slice(searchStart, searchEnd))
-const trackingStart = source.indexOf('  useEffect(', source.indexOf(gate[0]))
-const trackingEnd = source.indexOf('\n\n  const loadAddProductSearchPage', trackingStart)
-const trackingCode = stripTypeScriptTypes(source.slice(trackingStart, trackingEnd))
 const effectStart = searchEnd
 const effectEnd = source.indexOf('\n  const ', source.indexOf('}, [addQuery,', effectStart))
 const effectCode = stripTypeScriptTypes(source.slice(effectStart, effectEnd))
@@ -41,23 +39,19 @@ for (const [name, addAllowed, amendAllowed] of [
 
   const reads: Record<string, unknown>[] = []
   let candidates: { id: number }[] = []
-  let trackingReads = 0
   let scheduledSearches = 0
   const env: Record<string, unknown> = {
     [gateName]: allowed, detailScope: 'disposable-actor:sale1', detailScopeRef: { current: 'disposable-actor:sale1' },
     detailAliveRef: { current: true }, addSearchSeqRef: { current: 0 }, sale: { branch_id: 2 }, stockBranchId: 2, addQuery: 'powder',
     trackedBatchReloadKey: 0, SALE_DETAIL_PRODUCT_PAGE_SIZE,
     searchProducts: async (params: Record<string, unknown>) => { reads.push(params); return { items: [{ id: 7 }], page: params.page, pageSize: 8, total: 9, totalPages: 2 } },
-    normalizeSaleProductSearchPage, mergeSaleProductSearchCandidates,
+    normalizeSaleProductSearchPage, mergeSaleProductSearchCandidates, canSearchProductText,
     setAddCandidates: (value: unknown) => { candidates = typeof value === 'function' ? value(candidates) : value as typeof candidates },
     setAddLoadingMore: () => {}, setAddSearching: () => {}, setAddSearchError: () => {}, setAddSearchPage: () => {}, setAddSearchFailedPage: () => {},
-    getTrackedBatchProductIds: async () => { trackingReads++; return { productIds: [7] } },
-    setTrackedBatchLookupState: () => {}, setTrackedBatchLookupError: () => {}, setTrackedBatchProductIds: () => {},
     useEffect: (effect: () => unknown) => effect(),
     window: { setTimeout: () => { scheduledSearches++; return 1 }, clearTimeout: () => {} },
   }
-  new Function('env', `with(env) { ${trackingCode} }`)(env)
-  assert.equal(trackingReads, allowed ? 1 : 0, `${name}: replacements verify tracked batches too`)
+  assert.doesNotMatch(source, /getTrackedBatchProductIds/, `${name}: the receipt add flow reads no tracked-products list`)
   const load = new Function('env', `with(env) { ${searchCode}; return loadAddProductSearchPage }`)(env)
   await load('powder', 1, false)
   await load('powder', 2, true)

@@ -69,6 +69,7 @@ import { productStockGuardStatement, productStockGuardError } from './productSto
 // advances the generation in the same batch so a stale history row can never
 // apply twice.
 import type { D1Compat } from './db'
+import { forgetSchemaNames, schemaObjectPresent, type SchemaObject } from './schemaObjectProbe'
 import { getDb } from './db'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
@@ -202,14 +203,14 @@ function supplierKey(id: number | null, name: string | null): string {
   return id != null ? `id:${id}` : `name:${String(name || '').trim().toLowerCase()}`
 }
 
+const OPERATIONS_TABLE: SchemaObject = { kind: 'table', name: 'stock_lot_adjustment_operations' }
 let operationsReady = false
 /** Test-only: forget the memoised 0193 probe. */
-export function resetStockInLineEditSchemaProbe(): void { operationsReady = false }
+export function resetStockInLineEditSchemaProbe(): void { operationsReady = false; forgetSchemaNames([OPERATIONS_TABLE.name]) }
 async function operationsAvailable(db: D1Compat): Promise<boolean> {
   if (operationsReady) return true
   try {
-    const row = await db.prepare("SELECT COUNT(*) AS ready FROM sqlite_master WHERE type='table' AND name='stock_lot_adjustment_operations'").get<{ ready: number }>()
-    operationsReady = Number(row?.ready ?? 0) > 0
+    operationsReady = await schemaObjectPresent(db, OPERATIONS_TABLE)
   } catch { operationsReady = false }
   return operationsReady
 }

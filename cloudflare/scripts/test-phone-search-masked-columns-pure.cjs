@@ -4,6 +4,7 @@
 // The hole: the masking rule (lib/phoneAccess.ts) hides any phone-shaped value under a key that names a person or a label (notes, cashier_name,
 // branch_name, supplier_name, customer_name ...), and a note that is only a phone shows "093 *** 789". The Sales and Returns searches read those
 // same columns raw, so a digit fragment typed into the search box found the row ("456" found it, "457" did not): a number readable by bisection.
+// (Since 10 Nov 2026 the customer's own name and phone are the exception: every account finds a customer by part of their number.)
 // Only customer_name had been wrapped. The searches now ask the masking rule itself (keyMaskOf / restrictedColumnSql), so a column the response
 // masks reads as empty to a digit word, whatever the column is called.
 //
@@ -34,7 +35,12 @@ const SALES_HIDDEN = [
   ['note with brackets and a dash', 'P28-0118', '357', { notes: '(099) 111-357' }],
   ['note spaced with narrow no-break spaces', 'P28-0119', '927', { notes: '010 927 468' }],
   ['note spaced with ideographic spaces', 'P28-0120', '583', { notes: '011　583　106' }],
+]
+// The customer's own name, saved as a number: the owner lets every account find a customer by part of it (10 Nov 2026), the response masks it.
+const SALES_CUSTOMER = [
   ['customer name that is a number', 'P28-0121', '389', { name: '012 389 666' }],
+  ['customer phone', 'P28-0122', '771', { phone: '098 771 220' }],
+  ['customer phone across its separators', 'P28-0123', '8771', { phone: '098 771 220' }],
 ]
 const SALES_VISIBLE = [
   ['deliver at 12 Street 271', 'P28-0111', { notes: 'deliver at 12 Street 271' }],
@@ -43,22 +49,24 @@ const SALES_VISIBLE = [
   // Review B2: a branch is not a person. One named by a number is shown to everybody as stored, so the search reads it as stored.
   ['a branch named by a number', 'P28-0110', { branch: '095 777 626' }],
 ]
+const RETURNS_CUSTOMER = [
+  ['return customer that is a number', 'P28-RET-EF', '333', 'customer', { name: '012 333 787' }],
+]
 const RETURNS_HIDDEN = [
   ['return note that is a number', 'P28-RET-EA', '456', 'customer', { notes: '093 456 789' }],
   ['supplier return saved under a number', 'P28-RET-EB', '555', 'supplier', { supplier: '094 555 818', scope: 'supplier' }],
   ['return cashier that is a number', 'P28-RET-EC', '222', 'customer', { cashier: '011 222 345' }],
   ['reason quoting a number', 'P28-RET-ED', '424', 'customer', { reason: 'refund to "093 111 424" requested' }],
-  ['return customer that is a number', 'P28-RET-EF', '333', 'customer', { name: '012 333 787' }],
   ['return note spaced with em spaces', 'P28-RET-EH', '642', 'customer', { notes: '097 642 813' }],
 ]
 
 function freshDb(normalize) {
   return freshWorld(normalize, ({ addSale, addReturn }) => {
     let id = 0
-    for (const [, receipt, , opts] of SALES_HIDDEN) addSale(id += 1, receipt, opts)
+    for (const [, receipt, , opts] of [...SALES_HIDDEN, ...SALES_CUSTOMER]) addSale(id += 1, receipt, opts)
     for (const [, receipt, opts] of SALES_VISIBLE) addSale(id += 1, receipt, opts)
     id = 0
-    for (const [, number, , , opts] of RETURNS_HIDDEN) addReturn(id += 1, number, opts)
+    for (const [, number, , , opts] of [...RETURNS_HIDDEN, ...RETURNS_CUSTOMER]) addReturn(id += 1, number, opts)
     addReturn(id += 1, 'P28-RET-EE', { reason: 'broken seal batch 4471' })
     addReturn(id += 1, 'P28-RET-EG', { supplier: 'Lux Supply 2024', scope: 'supplier' })
   })
@@ -111,9 +119,15 @@ function run(world) {
       assert.ok(sales(fragment, OPEN).includes(receipt), `positive control, the holder finds ${label}`)
     }
   })
-  check('no grant: a sale whose cashier or customer is a number is not found by a fragment of it; the holder finds it', () => {
-    for (const [label, receipt, fragment] of SALES_HIDDEN.filter(([label]) => label.startsWith('cashier') || label.startsWith('customer'))) {
+  check('no grant: a sale whose cashier is a number is not found by a fragment of it; the holder finds it', () => {
+    for (const [label, receipt, fragment] of SALES_HIDDEN.filter(([label]) => label.startsWith('cashier'))) {
       assert.deepEqual(sales(fragment, CLOSED), [], `${label}: ${fragment}`)
+      assert.ok(sales(fragment, OPEN).includes(receipt), `positive control, the holder finds ${label}`)
+    }
+  })
+  check('no grant: a sale whose customer is a number is found by a fragment of it, like for a holder (owner decision of 10 Nov 2026)', () => {
+    for (const [label, receipt, fragment] of SALES_CUSTOMER) {
+      assert.ok(sales(fragment, CLOSED).includes(receipt), `${label}: ${fragment}`)
       assert.ok(sales(fragment, OPEN).includes(receipt), `positive control, the holder finds ${label}`)
     }
   })
@@ -147,9 +161,15 @@ function run(world) {
     assert.deepEqual(sales('street', OPEN), ['P28-0111'])
   })
 
-  check('no grant: a return whose note, cashier, customer or quoted reason is a number is not found by a fragment of it; the holder finds it', () => {
+  check('no grant: a return whose note, cashier or quoted reason is a number is not found by a fragment of it; the holder finds it', () => {
     for (const [label, number, fragment, scope] of RETURNS_HIDDEN.filter(([, , , scope]) => scope === 'customer')) {
       assert.deepEqual(returns(fragment, CLOSED, scope), [], `${label}: ${fragment}`)
+      assert.ok(returns(fragment, OPEN, scope).includes(number), `positive control, the holder finds ${label}`)
+    }
+  })
+  check('no grant: a return whose customer is a number is found by a fragment of it, like for a holder (owner decision of 10 Nov 2026)', () => {
+    for (const [label, number, fragment, scope] of RETURNS_CUSTOMER) {
+      assert.ok(returns(fragment, CLOSED, scope).includes(number), `${label}: ${fragment}`)
       assert.ok(returns(fragment, OPEN, scope).includes(number), `positive control, the holder finds ${label}`)
     }
   })
@@ -221,14 +241,16 @@ function run(world) {
 // ---- 4. mutants -----------------------------------------------------------------------------------------------------------------------
 const RAW = (column, key = 'raw') => `{ sql: "COALESCE(${column},'')", key: '${key}' }`
 const MUTANTS = [
-  ['sales: the note is read raw', { sales: replaceOnce("'s.payment_method', 's.notes', 'c.membership_number',", `'s.payment_method', ${RAW('s.notes')}, 'c.membership_number',`) }],
-  ['sales: the cashier is read raw', { sales: replaceOnce("'s.legacy_receipt_number', 's.cashier_name', 's.customer_name',", `'s.legacy_receipt_number', ${RAW('s.cashier_name')}, 's.customer_name',`) }],
-  ['sales: the customer name is read raw', { sales: replaceOnce("'s.cashier_name', 's.customer_name',\n", `'s.cashier_name', ${RAW('s.customer_name')},\n`) }],
+  ['sales: the note is read raw', { sales: replaceOnce("'s.payment_method', 's.notes', 'c.membership_number'", `'s.payment_method', ${RAW('s.notes')}, 'c.membership_number'`) }],
+  ['sales: the cashier is read raw', { sales: replaceOnce("'s.legacy_receipt_number', 's.cashier_name', 's.branch_name'", `'s.legacy_receipt_number', ${RAW('s.cashier_name')}, 's.branch_name'`) }],
+  ['sales: the customer name is closed again without the grant', { sales: replaceOnce("customerNameLookupSql('s.customer_name')", "restrictedColumnSql('s.customer_name')") }],
+  ['sales: the customer phone is not read without the grant', { sales: replaceOnce("customerPhoneLookupSql('s.customer_phone')", '"\'\'"') }],
+  ['sales: the customer phone is not read as bare digits without the grant', { sales: replaceOnce("customerPhoneLookupSql('s.customer_phone')", "customerLookupColumnSql('s.customer_phone')") }],
   ['returns: the note is read raw', { returns: replaceOnce("'r.supplier_name', 'r.reason', 'r.notes', 'r.return_type'", `'r.supplier_name', 'r.reason', ${RAW('r.notes')}, 'r.return_type'`) }],
   ['returns: the supplier is read raw', { returns: replaceOnce("'r.supplier_name', 'r.reason', 'r.notes', 'r.return_type'", `${RAW('r.supplier_name')}, 'r.reason', 'r.notes', 'r.return_type'`) }],
-  ['returns: the cashier is read raw', { returns: replaceOnce("'r.receipt_number', 'r.cashier_name', 'r.customer_name',", `'r.receipt_number', ${RAW('r.cashier_name')}, 'r.customer_name',`) }],
+  ['returns: the cashier is read raw', { returns: replaceOnce("'r.receipt_number', 'r.cashier_name',\n", `'r.receipt_number', ${RAW('r.cashier_name')},\n`) }],
   ['returns: the reason is read raw', { returns: replaceOnce("'r.supplier_name', 'r.reason', 'r.notes', 'r.return_type'", `'r.supplier_name', ${RAW('r.reason')}, 'r.notes', 'r.return_type'`) }],
-  ['returns: the customer name is read raw', { returns: replaceOnce("'r.cashier_name', 'r.customer_name',\n", `'r.cashier_name', ${RAW('r.customer_name')},\n`) }],
+  ['returns: the customer name is closed again without the grant', { returns: replaceOnce("customerNameLookupSql('r.customer_name')", '"\'\'"') }],
   ['rule: a name or note that is a number is not masked in search (name class treated as plain)', { lib: { phoneAccess: replaceOnce("if (kind & NAME) return 'name'", "if (kind & NAME) return 'none'") } }],
   ['rule: the people named under keys that do not end in name are not names', { lib: { phoneAccess: replaceOnce('summary|person|cashier', 'summary|xperson|xcashier') } }],
   ['rule: a product, branch or category name is masked like a person', { lib: { phoneAccess: replaceOnce('if (NAME_KEY.test(normalized)) kind |= CATALOG_KEY.test(normalized) ? CATALOG : NAME', 'if (NAME_KEY.test(normalized)) kind |= NAME') } }],

@@ -49,7 +49,7 @@ const db = openDb(loadAll())
 const dbKernel = { getDb: () => db }
 const permissions = loadReal('lib/permissions.ts')
 const actorSnapshot = loadReal('lib/actorSnapshot.ts')
-const auth = loadReal('lib/auth.ts', { './db': dbKernel })
+const auth = loadReal('lib/auth.ts', { './planTier': loadReal('lib/planTier.ts'), './db': dbKernel })
 const requestBodyGuard = loadReal('lib/requestBodyGuard.ts')
 
 let cacheVersion = 10
@@ -117,6 +117,7 @@ const systemRoute = withStepUp(loadReal, 'routes/system.ts', {
   '../lib/permissions': permissions,
   '../lib/db': dbKernel,
   '../lib/actorSnapshot': actorSnapshot,
+  '../lib/contactDeleteGuard': loadReal('lib/contactDeleteGuard.ts'),
   '../lib/audit': { audit: async () => { throw new Error('General repair route must not call the generic audit helper') } },
   '../lib/dataIntegrity': { runDataIntegrityCheck: async () => ({}) },
   '../lib/errorReporting': { reportError: async () => false },

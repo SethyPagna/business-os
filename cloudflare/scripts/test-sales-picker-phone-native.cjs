@@ -14,8 +14,8 @@ async function main(){
   try{
     const db=await mf.getD1Database('DB')
     await db.prepare(schema.prepare("SELECT sql FROM sqlite_master WHERE name='customers'").get().sql).run()
-    for(const name of ['customers_fts','customers_fts_phone'])await db.prepare(schema.prepare('SELECT sql FROM sqlite_master WHERE name=?').get(name).sql).run()
-    for(const row of schema.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND tbl_name='customers' AND sql LIKE '%customers_fts%'").all())await db.prepare(row.sql).run()
+    for(const name of ['customers_fts','customers_fts_phone','customers_phone_digits_fts','customers_phone_digits_v'])await db.prepare(schema.prepare('SELECT sql FROM sqlite_master WHERE name=?').get(name).sql).run()
+    for(const row of schema.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND tbl_name='customers' AND (sql LIKE '%customers_fts%' OR sql LIKE '%customers_phone_digits_fts%')").all())await db.prepare(row.sql).run()
     const fixtures=[
       [1,'Dara','012 345 678','012345678',0],
       [2,'Sok','+855 (12) 345-679',null,0],
@@ -31,10 +31,10 @@ async function main(){
       return {status:r.status,body:await r.json()}
     }
     for(const [search,expected]of [['012 345 678',[1]],['012345678',[1]],['+85512345678',[1]],['855 12 345 678',[1]],['012345679',[2]],['+85512345679',[2]],['012345680',[5]],['Dara',[1]],['099888777',[3]],['345678',[1]]]){
-      // P2.8 (6.0.1046): a fragment of a number (the last six digits) finds the customer only for an account that may read full numbers (contacts_full_phone, or the all-permissions wildcard);
-      // without contacts_full_phone it would spell a hidden number out one probe at a time (lib/phoneSearchGuard.ts). A whole number finds it for everyone.
+      // Owner decision of 10 Nov 2026 ("Allow partial"): a fragment of a number (the last six digits) finds the customer for every account, with or without contacts_full_phone;
+      // the response masks the phone for an account without it (the projection is not part of this fixture).
       for(const permissions of [{pos:true},{sales:true},{all:true},{pos:true,contacts_full_phone:true}]){
-        const result=await call(search,permissions);assert.equal(result.status,200,JSON.stringify(result));assert.deepEqual(result.body.items.map(r=>r.id),search==='345678'&&!permissions.contacts_full_phone&&!permissions.all?[]:expected,search)
+        const result=await call(search,permissions);assert.equal(result.status,200,JSON.stringify(result));assert.deepEqual(result.body.items.map(r=>r.id),expected,search)
         for(const item of result.body.items)assert.deepEqual(Object.keys(item).sort(),['id','name','phone','email','address','membership_number','updated_at','is_anonymous'].sort())
       }
     }

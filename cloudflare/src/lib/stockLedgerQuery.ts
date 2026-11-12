@@ -83,6 +83,9 @@ export type StockLedgerQuery = {
   countSql: string
   rowsSql: string
   summarySql: string
+  // The same summary for the read switch `ledger_summary_lean`: it joins products / batches only when a base filter reads them (search, supplier), and it also
+  // counts the rows that have a movement type, so the In/Out view's count comes out of it (ledgerLeanTotals) instead of a second scan.
+  leanSummarySql: string
   // The row statement with extra clauses and the cursor-paged forms (see planStockLedgerKeyset); rowsSql is rowsSqlWith('', 'offset', false).
   rowsSqlWith(extraClause: string, paging: 'offset' | 'keyset', cursorColumns: boolean): string
 }
@@ -551,7 +554,36 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
     ${baseWhereSql}
   `
 
-  return { whereSql, baseWhereSql, params, countSql, rowsSql, summarySql, rowsSqlWith }
+  // A LEFT JOIN on the other table's primary key never changes the rows, but SQLite still looks the row up for every movement (measured: 3 reads per movement,
+  // 100,542 for 33,514 movements); when no base filter names p. or b. the joins are dead weight and the scan reads the movement alone.
+  const joined = /(?<![\w.])[pb]\.\w/.test(baseWhereSql)
+  const MOVEMENT_ONLY_FROM = `
+    FROM inventory_movements m`
+  const leanSummarySql = `
+    SELECT
+      SUM(CASE WHEN m.movement_type IN (${OUT_LIST}) THEN 0 ELSE 1 END) AS in_count,
+      SUM(CASE WHEN m.movement_type IN (${OUT_LIST}) THEN 1 ELSE 0 END) AS out_count,
+      SUM(CASE WHEN m.movement_type IN (${OUT_LIST}) THEN 0 ELSE ABS(COALESCE(m.quantity, 0)) END) AS in_qty,
+      SUM(CASE WHEN m.movement_type IN (${OUT_LIST}) THEN ABS(COALESCE(m.quantity, 0)) ELSE 0 END) AS out_qty,
+      COUNT(m.movement_type) AS typed,
+      COUNT(*) AS total${joined ? LEDGER_FROM : MOVEMENT_ONLY_FROM}
+    ${baseWhereSql}
+  `
+
+  return { whereSql, baseWhereSql, params, countSql, rowsSql, summarySql, leanSummarySql, rowsSqlWith }
+}
+
+export type LedgerLeanRow = { in_count?: number | null; out_count?: number | null; in_qty?: number | null; out_qty?: number | null; typed?: number | null; total?: number | null }
+
+// The total the In/Out view's COUNT statement would answer, from the lean summary of the same base scope. 'all' is the summary's own total; 'out' rows are
+// those whose type is IN the outflow list (so it is typed), which is out_count; 'in' is the type NOT IN that list, which leaves out a NULL type -- the
+// summary's CASE counts a NULL type as In, so those rows (total - typed) come off.
+export function ledgerLeanTotals(row: LedgerLeanRow | null | undefined, view: string): { total: number; summary: { inCount: number; outCount: number; inQty: number; outQty: number; total: number } } {
+  const n = (value: unknown) => Number(value || 0)
+  const summary = { inCount: n(row?.in_count), outCount: n(row?.out_count), inQty: n(row?.in_qty), outQty: n(row?.out_qty), total: n(row?.total) }
+  const untyped = summary.total - n(row?.typed)
+  const total = view === 'in' ? summary.inCount - untyped : view === 'out' ? summary.outCount : summary.total
+  return { total, summary }
 }
 // ---- Keyset paging (read switch ledger_keyset) ----------------------------------------------------------------------------------------------------
 //

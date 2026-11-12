@@ -30,8 +30,9 @@ function freshDb(normalize) {
     addSale(5, 'P28-0105', { name: 'O1988375' })
     addSale(6, 'P28-0106', { branch: 'Room1' })
     addSale(7, 'P28-0107', { name: '010 222 333', phone: '010 222 333' })
+    addSale(8, 'P28-0108', { folded: 'p28-0108 admin tel088123456 walk in main' })
     addReturn(1, 'P28-RET-AA', { name: 'sokha2' })
-    addReturn(2, 'P28-RET-BB', { name: 'Fixture Sophea', folded: 'p28-ret-bb tel010222333' })
+    addReturn(2, 'P28-RET-BB', { name: 'Fixture Sophea', folded: 'p28-ret-bb tel088123456' })
     addReturn(3, 'P28-RET-CC', { name: '010 222 333' })
     addReturn(4, 'P28-RET-DD', { name: 'MIMO10' })
   })
@@ -77,34 +78,42 @@ function run(world) {
   })
 
   // ---- 2. the security cases: still nothing through a phone, the folded copy, or a digit fragment ---------------------------------
-  check('no grant: a legacy phone glued to letters is not found by a fragment of its digits (the retry cannot read the phone column)', () => {
-    for (const q of ['tel0994', 'tel09945', 'tel099456789', 'TEL0994']) assert.deepEqual(sales(q, CLOSED), [], q)
+  check('no grant: a legacy customer phone glued to letters is found by a fragment of its digits, as for a holder (owner decision of 10 Nov 2026)', () => {
+    for (const q of ['tel0994', 'tel09945', 'tel099456789', 'TEL0994']) assert.deepEqual(sales(q, CLOSED), ['P28-0104'], q)
     assert.deepEqual(sales('tel0994', OPEN), ['P28-0104'], 'positive control: the holder finds it')
   })
+  check('no grant: a sale whose folded copy holds a phone glued to letters is not found by its digits (the retry cannot read search_normalized)', () => {
+    for (const q of ['tel0881', 'tel088123456', 'TEL0881']) assert.ok(!sales(q, CLOSED).includes('P28-0108'), q)
+    assert.ok(sales('tel0881', OPEN).includes('P28-0108'), 'positive control: the holder finds it')
+  })
   check('no grant: a return whose folded copy holds a phone glued to letters is not found by its digits (the retry cannot read search_normalized)', () => {
-    for (const q of ['tel0102', 'tel010222333', 'TEL0102']) assert.deepEqual(returns(q, CLOSED), [], q)
-    assert.deepEqual(returns('tel0102', OPEN), ['P28-RET-BB'], 'positive control: the holder finds it')
+    for (const q of ['tel0881', 'tel088123456', 'TEL0881']) assert.deepEqual(returns(q, CLOSED), [], q)
+    assert.deepEqual(returns('tel0881', OPEN), ['P28-RET-BB'], 'positive control: the holder finds it')
   })
   check('no grant: a digit-only word never gets the retry (a number typed with a letter O in a name stays unreadable by its digits)', () => {
     for (const q of ['01988', '0198', 'o1988', 'O1988', '01988375']) assert.deepEqual(sales(q, CLOSED), [], q)
     assert.deepEqual(sales('01988', OPEN), ['P28-0105'], 'positive control: the holder reads the folded copy')
   })
-  check('no grant: a fragment of a number typed on a sale or saved as a name finds nothing; the whole number still finds its sale', () => {
-    for (const q of ['087', '0876', '654', '654321', '222', '2 333', '0994', '09945']) {
-      assert.deepEqual(sales(q, CLOSED), [], `sales ${q}`)
-      assert.deepEqual(returns(q, CLOSED), [], `returns ${q}`)
+  check('no grant: a fragment of the customer number, typed on a sale or saved as a name, finds the sale, as for a holder (owner decision of 10 Nov 2026)', () => {
+    for (const q of ['087', '0876', '654', '4321', '222', '2 333', '0994', '09945']) {
+      assert.deepEqual(sales(q, CLOSED), sales(q, OPEN), `sales ${q}`)
     }
+    assert.deepEqual(sales('087', CLOSED), ['P28-0101'])
+    assert.deepEqual(sales('4321', CLOSED), ['P28-0101'], 'the last four digits, across the separators')
+    assert.deepEqual(sales('222', CLOSED), ['P28-0107'])
+    assert.deepEqual(returns('222', CLOSED), ['P28-RET-CC'], 'a return has no phone column: only its customer name is read, never its folded copy')
+    assert.deepEqual(sales('0994', CLOSED), ['P28-0104'])
     assert.deepEqual(sales('087 654 321', CLOSED), ['P28-0101'])
     assert.deepEqual(sales('010222333', CLOSED), ['P28-0107'])
-    assert.deepEqual(returns('010222333', CLOSED), [], 'a return has no phone column: a whole number finds nothing there')
+    assert.deepEqual(returns('010222333', CLOSED), ['P28-RET-CC'], 'a return has no phone column: the customer name saved as a number is found by its whole number, never the folded copy')
   })
   check('no grant: the reviewer\'s 42 spellings of a fragment find no sale and no return', () => {
-    // Each fragment is searched where a fixture row holds it (0102 is also the receipt of one fixture sale, so it is a returns-only fragment).
-    for (const [frag, surfaces] of [['654', ['sales']], ['0876', ['sales']], ['222', ['sales', 'returns']], ['0102', ['returns']]]) {
+    // A number held only by a folded copy (123 on a sale, 8812 on a return) is hidden: the customer's own number is not (it is found, see above).
+    for (const [frag, surfaces] of [['123', ['sales']], ['8812', ['returns']]]) {
       const spellings = disguises(frag)
       assert.ok(spellings.length >= 42, `at least the reviewer's 42 spellings of ${frag} (${spellings.length})`)
       for (const [label, q] of spellings) {
-        if (surfaces.includes('sales')) assert.deepEqual(sales(q, CLOSED), [], `sales ${frag} ${label}`)
+        if (surfaces.includes('sales')) assert.ok(!sales(q, CLOSED).includes('P28-0108'), `sales ${frag} ${label}`)
         if (surfaces.includes('returns')) assert.deepEqual(returns(q, CLOSED), [], `returns ${frag} ${label}`)
       }
       for (const surface of surfaces) assert.ok((surface === 'sales' ? sales(frag, OPEN) : returns(frag, OPEN)).length > 0, `positive control: the holder finds ${frag} in ${surface}`)
@@ -149,8 +158,8 @@ function run(world) {
           const salesOf = (sql, params) => (sql ? db.prepare(`SELECT s.id FROM sales s LEFT JOIN customers c ON c.id = s.customer_id WHERE ${sql}`).all(params).map((row) => row.id) : [])
           const returnsOf = (filter) => db.prepare(`SELECT r.id FROM returns r WHERE ${filter.where.join(' AND ')}`).all(filter.params).map((row) => row.id)
           for (const [label, laneRows, baseRows] of [['sales', salesOf(lane.sql, lane.params), salesOf(before.sql, before.params)], ['returns', returnsOf(laneReturns), returnsOf(baseReturns)]]) {
-            if (mixedWord(q)) assert.ok(baseRows.every((id) => laneRows.includes(id)), `${label} ${JSON.stringify(q)}: the retry only adds rows`)
-            else assert.deepEqual(laneRows, baseRows, `${label} ${JSON.stringify(q)}: same rows as the base commit`)
+            assert.ok(baseRows.every((id) => laneRows.includes(id)), `${label} ${JSON.stringify(q)}: nothing the base found is lost`)
+            if (!(mixedWord(q) || match.tokenizeSearchWords(q).some(guard.hasDigit))) assert.deepEqual(laneRows, baseRows, `${label} ${JSON.stringify(q)}: same rows as the base commit`)
           }
         }
       }

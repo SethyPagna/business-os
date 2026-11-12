@@ -27,7 +27,7 @@ export function fixStockCountOf(requestId: unknown): { sessionId: string; produc
 }
 
 export const FIX_STOCK_COUNT_PENDING = {
-  error: 'This count is waiting for approval. Approve or reject it first.',
+  error: 'Set is blocked while a count of this product is waiting for approval. Approve or reject that count first.',
   code: 'inventory_check_count_pending',
 } as const
 

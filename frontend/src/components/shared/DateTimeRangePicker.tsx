@@ -614,7 +614,7 @@ export default function DateTimeRangePicker({
                   // "pick a day, pick another, nothing changes" bug).
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => pickDay(cell.iso)}
-                  className={`mx-auto my-px flex h-7 w-7 items-center justify-center rounded-md transition ${isEdge(cell.iso)
+                  className={`mx-auto my-px flex h-7 w-7 [--hit-y:-1px] items-center justify-center rounded-md transition ${isEdge(cell.iso)
                     ? 'bg-slate-800 font-semibold text-white dark:bg-slate-200 dark:text-slate-900'
                     : inRange(cell.iso)
                       ? 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100'
