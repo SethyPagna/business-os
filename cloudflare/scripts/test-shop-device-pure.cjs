@@ -468,6 +468,8 @@ async function suite(mutate, label) {
     assert.equal(alerts[0].details.previousCountry, 'KH')
     assert.equal(alerts[0].details.newCountry, 'US')
     assert.equal(alerts[0].details.shopDevice, true)
+    assert.equal(alerts[0].details.deviceName, 'Till 1', "the bell (routes/notifications.ts reads details.deviceName) shows the till's label, not 'Device for user #12' (L-3)")
+    assert.match(fs.readFileSync(path.join(SRC, 'routes/notifications.ts'), 'utf8'), /label: parsed.deviceName ||/, 'and the bell still reads that field')
     assert.equal(shop().last_country, 'US', 'the till is now seen from the new country')
     const listed = (await w.call('/shop', 'GET')).body.shopDevices[0]
     assert.equal(listed.last_country, 'US')
@@ -600,6 +602,7 @@ const mutants = [
   ['a pending row forgets which approved device it claimed', inFile('lib/deviceTrust.ts', "claimed: existing?.status === 'approved' ? existing.id : null", 'claimed: null'), ['17.']],
   ['marking does not tag the sessions it orphans (L-1)', inFile('routes/devices.ts', 'const approvedUserIds = [...new Set(', 'const approvedUserIds: number[] = [] || [...new Set('), ['19.', '14.']],
   ['a verified cookie on a retired id is still reported as a claim (L-2)', inFile('lib/deviceTrust.ts', "existing?.status === 'approved' && !meta.cookieVerified ? existing : null", "existing?.status === 'approved' ? existing : null"), ['20.']],
+  ['the shop new-country alert carries no device name (L-3)', inFile('lib/deviceTrust.ts', 'deviceName: shop.shop_label || null, ', ''), ['15.']],
   ['marking from a pending request is refused', inFile('routes/devices.ts', "device.status !== 'approved' && device.status !== 'pending'", "device.status !== 'approved'"), ['13.']],
 ]
 

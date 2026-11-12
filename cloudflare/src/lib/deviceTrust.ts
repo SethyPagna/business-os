@@ -82,13 +82,13 @@ export async function checkDeviceTrust(
   // without its cookie must not create a pending row on it (review M-1).
   const found = await db.prepare(`
     SELECT td.*, s.id AS shop_device_row_id, s.marked_at AS shop_marked_at,
-      s.last_seen_at AS shop_last_seen_at, s.last_ip AS shop_last_ip, s.last_country AS shop_last_country,
+      s.label AS shop_label, s.last_seen_at AS shop_last_seen_at, s.last_ip AS shop_last_ip, s.last_country AS shop_last_country,
       (SELECT 1 FROM shop_devices r WHERE r.device_id = @device_id AND r.unmarked_at IS NOT NULL LIMIT 1) AS shop_retired,
       (SELECT 1 FROM trusted_devices o WHERE o.device_id = @device_id AND o.user_id != @user_id LIMIT 1) AS held_by_other
     FROM (SELECT 1 AS one) base
     LEFT JOIN trusted_devices td ON td.user_id = @user_id AND td.device_id = @device_id
     LEFT JOIN shop_devices s ON s.device_id = @device_id AND s.unmarked_at IS NULL
-  `).get<(Partial<TrustedDeviceRow> & { shop_device_row_id: number | null; shop_marked_at: string | null; shop_last_seen_at: string | null; shop_last_ip: string | null; shop_last_country: string | null; shop_retired: number | null; held_by_other: number | null }) | undefined>({ user_id: userId, device_id: deviceId })
+  `).get<(Partial<TrustedDeviceRow> & { shop_device_row_id: number | null; shop_marked_at: string | null; shop_label: string | null; shop_last_seen_at: string | null; shop_last_ip: string | null; shop_last_country: string | null; shop_retired: number | null; held_by_other: number | null }) | undefined>({ user_id: userId, device_id: deviceId })
   const existing = found && found.id != null ? (found as TrustedDeviceRow) : null
   const markedShopId = found?.shop_device_row_id ?? null
   const shopDeviceId = meta.cookieVerified ? markedShopId : null
@@ -202,14 +202,15 @@ async function recordShopSignIn(
   userId: number,
   deviceId: string,
   shopDeviceId: number,
-  shop: { shop_last_seen_at: string | null; shop_last_ip: string | null; shop_last_country: string | null },
+  shop: { shop_label: string | null; shop_last_seen_at: string | null; shop_last_ip: string | null; shop_last_country: string | null },
   meta: { ip?: string | null; country?: string | null },
 ): Promise<void> {
   const country = meta.country || null
   const priorCountry = shop.shop_last_country || null
   if (country && priorCountry && country !== priorCountry) {
     await audit(env, userId, null, 'device_login_new_country', 'user', userId, {
-      deviceId, shopDeviceId, shopDevice: true, previousCountry: priorCountry, newCountry: country, ip: meta.ip || null,
+      // deviceName is what the bell shows (routes/notifications.ts): the till's label, not 'Device for user #12'.
+      deviceId, deviceName: shop.shop_label || null, shopDeviceId, shopDevice: true, previousCountry: priorCountry, newCountry: country, ip: meta.ip || null,
     })
   }
   const ip = meta.ip || shop.shop_last_ip || null
