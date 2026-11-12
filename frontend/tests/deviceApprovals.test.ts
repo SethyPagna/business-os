@@ -30,4 +30,35 @@ for (const key of ['device_reapproval_reset', 'device_reapproval_reset_confirm',
 assert.match(en.device_reapproval_reset_confirm, /does not approve/i, 'confirmation tells the admin reset is not approval')
 assert.match(en.device_reapproval_reset_confirm, /sign in again/i, 'confirmation tells the admin the device must sign in again')
 
+// Cap: the panel shows the Worker's `limit` and never a number of its own; the refusal is translated by its code.
+assert.match(transport, /export type DeviceListResponse = \{ devices: TrustedDeviceRecord\[\]; limit\?: number \}/, 'device list responses type the Worker limit')
+assert.match(panel, /limit: readLimit\(allRes, pendingRes\)/, 'the snapshot takes the limit from the API responses')
+assert.match(panel, /deviceLimit \? `\$\{group\.devices\.length\} \/ \$\{deviceLimit\}`/, 'each account shows n / limit from the response')
+assert.doesNotMatch(panel, /\/ 5\b|MAX_APPROVED|limit = 5|=== 5\b/, 'the panel never hard-codes the cap')
+assert.match(panel, /code === 'device_limit_reached'[\s\S]*?tr\(t, 'device_limit_reached'/, 'the cap refusal is translated by its machine code')
+assert.doesNotMatch(panel, /notify\(err instanceof Error \? err\.message/, 'no raw English Worker message reaches the toast')
+for (const key of ['device_limit_reached', 'device_approvals_intro', 'device_approval_pending_desc']) {
+  assert.ok(en[key] && km[key], `both packs carry ${key}`)
+}
+assert.notEqual(km.device_limit_reached, en.device_limit_reached, 'Khmer cap text is not the English copied')
+assert.doesNotMatch(en.device_approval_pending_desc + en.device_approvals_intro, /for an admin account|admin account must/i, 'approval copy no longer claims the gate is for admin accounts')
+
+// Replace flow: at the cap Approve opens a chooser (least recently seen pre-selected) and the swap is one online call.
+assert.match(transport, /approve-replacing`, \{ revokeId: Number\(revokeId\) \}/, 'replace uses the one atomic Worker route')
+const replaceTransport = transport.slice(transport.indexOf('export function approveDeviceReplacing'), transport.indexOf('export function rejectDevice'))
+assert.doesNotMatch(replaceTransport, /route\(|queue|outbox/i, 'replace stays outside offline replay')
+assert.match(panel, /deviceLimit && choices\.length >= deviceLimit\) \{\s*setReplacing\(\{ device, choices, selectedId: choices\[0\]\.id \}\)/, 'an account at the cap opens the chooser instead of a refused approve')
+assert.match(panel, /\.sort\(\(a, b\) => String\(a\.last_seen_at \|\| ''\)\.localeCompare\(String\(b\.last_seen_at \|\| ''\)\)\)/, 'choices are ordered least recently seen first, so the first is pre-selected')
+assert.match(panel, /approveDeviceReplacing\(device\.id, selectedId\)/, 'confirming sends the chosen device')
+assert.doesNotMatch(panel, /window\.confirm\(/)
+for (const key of ['device_replace_title', 'device_replace_intro', 'device_replace_new', 'device_replace_remove', 'device_replace_least_recent', 'device_replace_confirm', 'device_replace_done', 'device_replace_conflict', 'device_replace_invalid']) {
+  assert.ok(en[key] && km[key], `both packs carry ${key}`)
+  assert.notEqual(en[key], km[key], `Khmer ${key} is not the English copied`)
+}
+
+// L2 (review, 12 Nov 2026): a plain approve refused with device_limit_reached (stale page) reads that account's devices fresh and opens the chooser.
+assert.match(panel, /code !== 'device_limit_reached'\) return false\s*const fresh = await getAllDevices\(device\.user_id\)/, 'the cap refusal triggers a fresh read of that account')
+assert.match(panel, /setReplacing\(\{ device, choices: accountChoices, selectedId: accountChoices\[0\]\.id \}\)\s*return true/, 'and opens the replace chooser')
+assert.match(panel, /const handled = onError \? await onError\(err\)\.catch\(\(\) => false\) : false\s*if \(!handled/, 'a handled refusal shows no error toast')
+
 console.log('PASS device re-approval reset transport, history placement, confirmation, and bilingual copy')

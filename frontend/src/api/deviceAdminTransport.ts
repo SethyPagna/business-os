@@ -21,17 +21,25 @@ export type TrustedDeviceRecord = {
   user_name: string
 }
 
-export function getPendingDevices(): Promise<{ devices: TrustedDeviceRecord[] }> {
-  return apiFetch('GET', '/api/auth/devices/pending') as Promise<{ devices: TrustedDeviceRecord[] }>
+// `limit` is the per-account approved-device cap the Worker enforces; the panel shows it instead of a number of its own.
+export type DeviceListResponse = { devices: TrustedDeviceRecord[]; limit?: number }
+
+export function getPendingDevices(): Promise<DeviceListResponse> {
+  return apiFetch('GET', '/api/auth/devices/pending') as Promise<DeviceListResponse>
 }
 
-export function getAllDevices(userId?: string | number): Promise<{ devices: TrustedDeviceRecord[] }> {
+export function getAllDevices(userId?: string | number): Promise<DeviceListResponse> {
   const query = userId != null ? `?userId=${encodeURIComponent(String(userId))}` : ''
-  return apiFetch('GET', `/api/auth/devices${query}`) as Promise<{ devices: TrustedDeviceRecord[] }>
+  return apiFetch('GET', `/api/auth/devices${query}`) as Promise<DeviceListResponse>
 }
 
 export function approveDevice(id: number | string): Promise<unknown> {
   return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/approve`, {})
+}
+
+// At the cap: approve this pending device and revoke one approved device of the same account in one atomic step.
+export function approveDeviceReplacing(id: number | string, revokeId: number | string): Promise<{ success?: boolean; revokedSessions?: number }> {
+  return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/approve-replacing`, { revokeId: Number(revokeId) }) as Promise<{ success?: boolean; revokedSessions?: number }>
 }
 
 export function rejectDevice(id: number | string): Promise<unknown> {
@@ -40,6 +48,30 @@ export function rejectDevice(id: number | string): Promise<unknown> {
 
 export function revokeDevice(id: number | string): Promise<unknown> {
   return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/revoke`, {})
+}
+
+// Shop devices: a till an administrator marks once, so any active employee signs in there without a separate approval.
+export type ShopDeviceRecord = {
+  id: number
+  device_id: string
+  label: string
+  marked_by_name: string | null
+  marked_at: string
+  device_name: string | null
+}
+
+export function getShopDevices(): Promise<{ shopDevices: ShopDeviceRecord[] }> {
+  return apiFetch('GET', '/api/auth/devices/shop') as Promise<{ shopDevices: ShopDeviceRecord[] }>
+}
+
+// :id is the approved device row; the Worker refuses anything else.
+export function markShopDevice(id: number | string, label: string): Promise<{ success?: boolean }> {
+  return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/mark-shop`, { label }) as Promise<{ success?: boolean }>
+}
+
+// Ends the marking and signs out the sessions that came in through it.
+export function unmarkShopDevice(shopId: number | string): Promise<{ success?: boolean; revokedSessions?: number }> {
+  return apiFetch('POST', `/api/auth/devices/shop/${encodeURIComponent(String(shopId))}/unmark`, {}) as Promise<{ success?: boolean; revokedSessions?: number }>
 }
 
 // Reset only removes a rejected trust request. The next authenticated login

@@ -3,22 +3,29 @@ import { useApp } from '../../AppContext.tsx'
 import { captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from '../../api/actorReadScope.ts'
 import { isAdminControlUser, type PermissionUser } from '../../utils/permissions.ts'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
+import Modal from '../shared/Modal.tsx'
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import ShieldX from 'lucide-react/dist/esm/icons/shield-x.js'
 import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert.js'
+import Store from 'lucide-react/dist/esm/icons/store.js'
 import MonitorSmartphone from 'lucide-react/dist/esm/icons/monitor-smartphone.js'
 import { fmtDate } from '../../utils/formatters'
 import {
   approveDevice,
+  approveDeviceReplacing,
   getAllDevices,
   getLiveSessions,
   getPendingDevices,
+  getShopDevices,
+  markShopDevice,
   rejectDevice,
   resetDeviceForReapproval,
   revokeAllUserSessions,
   revokeDevice,
   revokeLiveSession,
+  unmarkShopDevice,
   type LiveSessionRecord,
+  type ShopDeviceRecord,
   type TrustedDeviceRecord,
 } from '../../api/deviceAdminTransport.ts'
 
@@ -34,6 +41,8 @@ type DeviceSnapshot = {
   approvedDevices: TrustedDeviceRecord[]
   rejectedHistory: TrustedDeviceRecord[]
   sessions: LiveSessionRecord[]
+  shopDevices: ShopDeviceRecord[]
+  limit: number | null
 }
 
 interface DeviceApprovalsProps {
@@ -41,8 +50,42 @@ interface DeviceApprovalsProps {
   notify: NotifyFn
 }
 
+const SHOP_LABEL_MAX = 60
+
 function tr(t: TranslateFn, key: string, fallback: string): string {
   return t(key) || fallback
+}
+
+function readLimit(...responses: Array<{ limit?: unknown } | null | undefined>): number | null {
+  for (const response of responses) {
+    const limit = Number(response?.limit)
+    if (Number.isInteger(limit) && limit > 0) return limit
+  }
+  return null
+}
+
+// The Worker's English refusal is a fallback; the panel speaks both languages by the machine code.
+function deviceActionMessage(t: TranslateFn, err: unknown): string {
+  const code = (err as { code?: unknown } | null)?.code
+  if (code === 'device_limit_reached') {
+    return tr(t, 'device_limit_reached', 'This account already has the maximum number of approved devices. Remove one of its devices first, then approve this one.')
+  }
+  if (code === 'device_replace_conflict') {
+    return tr(t, 'device_replace_conflict', 'The devices changed while you were deciding. Reload and try again.')
+  }
+  if (code === 'shop_device_exists') {
+    return tr(t, 'shop_device_exists', 'This device is already a shop device.')
+  }
+  if (code === 'shop_device_not_approved' || code === 'shop_device_conflict') {
+    return tr(t, 'shop_device_conflict', 'The device changed while you were deciding. Reload and try again.')
+  }
+  if (code === 'shop_label_invalid') {
+    return tr(t, 'shop_label_invalid', 'Give the shop device a name of 1 to 60 characters.')
+  }
+  if (code === 'device_replace_invalid') {
+    return tr(t, 'device_replace_invalid', 'Choose an approved device of the same account to replace.')
+  }
+  return err instanceof Error ? err.message : tr(t, 'device_action_failed', 'Action failed. Please try again.')
 }
 
 // Admin device/session panel (J3) -- Settings/Users > Devices. Three layers:
@@ -70,6 +113,9 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
   const approvedDevices = currentSnapshot?.approvedDevices || []
   const rejectedHistory = currentSnapshot?.rejectedHistory || []
   const sessions = currentSnapshot?.sessions || []
+  const shopDevices = currentSnapshot?.shopDevices || []
+  const shopDeviceIds = useMemo(() => new Set(shopDevices.map((shop) => shop.device_id)), [shopDevices])
+  const deviceLimit = currentSnapshot?.limit ?? null
   const [readState, setReadState] = useState({ ownerKey, loading: true, error: '' })
   const loading = !currentSnapshot && (readState.ownerKey !== ownerKey || readState.loading)
   const error = readState.ownerKey === ownerKey ? readState.error : ''
@@ -78,6 +124,10 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
   // so a session action can't disable an unrelated device button.
   const [busySessionId, setBusySessionId] = useState<number | null>(null)
   const [busyUserId, setBusyUserId] = useState<number | null>(null)
+  // An account already at its cap: the pending device waits for the admin to pick which approved device to replace.
+  // The approved device an administrator is naming as a shop device.
+  const [markingShop, setMarkingShop] = useState<{ device: TrustedDeviceRecord; label: string } | null>(null)
+  const [replacing, setReplacing] = useState<{ device: TrustedDeviceRecord; choices: TrustedDeviceRecord[]; selectedId: number } | null>(null)
 
   const ownsScope = useCallback((scope: ActorReadScope, owner = ownerKey) => mounted.current
     && currentOwner.current.canManage && currentOwner.current.ownerKey === owner
@@ -91,14 +141,15 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
     const current = () => sequence === requestSequence.current && ownsScope(scope)
     setReadState({ ownerKey, loading: true, error: '' })
     try {
-      const [pendingRes, allRes, sessionsRes] = await Promise.all([
+      const [pendingRes, allRes, sessionsRes, shopRes] = await Promise.all([
         getPendingDevices(),
         getAllDevices(),
         getLiveSessions(),
+        getShopDevices(),
       ])
       if (!current()) return
       const nonPending = (allRes?.devices || []).filter((device) => device.status !== 'pending')
-      setSnapshot({ ownerKey, pending: pendingRes?.devices || [], approvedDevices: nonPending.filter((device) => device.status === 'approved'), rejectedHistory: nonPending.filter((device) => device.status !== 'approved'), sessions: sessionsRes?.sessions || [] })
+      setSnapshot({ ownerKey, pending: pendingRes?.devices || [], approvedDevices: nonPending.filter((device) => device.status === 'approved'), rejectedHistory: nonPending.filter((device) => device.status !== 'approved'), sessions: sessionsRes?.sessions || [], shopDevices: shopRes?.shopDevices || [], limit: readLimit(allRes, pendingRes) })
     } catch (err) {
       if (current()) setReadState({ ownerKey, loading: false, error: err instanceof Error ? err.message : tr(t, 'device_load_failed', 'Could not load device requests.') })
     } finally {
@@ -117,7 +168,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
     setBusyUserId(null)
   }, [ownerKey])
 
-  const runOnlineAction = async (kind: 'device' | 'session' | 'user', id: number, write: () => Promise<unknown>, successMessage: (result: unknown) => string, authority = { scope: captureActorReadScope('devices'), ownerKey }) => {
+  const runOnlineAction = async (kind: 'device' | 'session' | 'user', id: number, write: () => Promise<unknown>, successMessage: (result: unknown) => string, authority = { scope: captureActorReadScope('devices'), ownerKey }, onError?: (err: unknown) => Promise<boolean>) => {
     if (!ownsScope(authority.scope, authority.ownerKey)) return
     const actionKey = `${authority.ownerKey}:${kind}:${id}`
     if (actions.current.has(actionKey)) return
@@ -131,7 +182,8 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
       notify(successMessage(result), 'success')
       await load()
     } catch (err) {
-      if (ownsScope(authority.scope, authority.ownerKey)) notify(err instanceof Error ? err.message : tr(t, 'device_action_failed', 'Action failed. Please try again.'), 'error')
+      const handled = onError ? await onError(err).catch(() => false) : false
+      if (!handled && ownsScope(authority.scope, authority.ownerKey)) notify(deviceActionMessage(t, err), 'error')
     } finally {
       actions.current.delete(actionKey)
       if (ownsScope(authority.scope, authority.ownerKey)) setBusy((current) => current === id ? null : current)
@@ -159,6 +211,66 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
     })
     if (!confirmed) return
     void runAction(device.id, 'reset', tr(t, 'device_reapproval_reset_done', 'Rejected device request removed. It must sign in again for a new approval request.'), authority)
+  }
+
+  const startApprove = (device: TrustedDeviceRecord) => {
+    const choices = approvedDevices
+      .filter((approved) => approved.user_id === device.user_id)
+      .sort((a, b) => String(a.last_seen_at || '').localeCompare(String(b.last_seen_at || '')))
+    if (deviceLimit && choices.length >= deviceLimit) {
+      setReplacing({ device, choices, selectedId: choices[0].id })
+      return
+    }
+    // The page's own copy of the list can be stale: the account may have reached its cap since it loaded. The Worker's
+    // refusal then opens the same chooser, from a fresh read of that account's devices, instead of a dead-end message.
+    void runOnlineAction('device', device.id, () => approveDevice(device.id), () => tr(t, 'device_approved', 'Device approved.'), undefined, async (err) => {
+      if ((err as { code?: unknown } | null)?.code !== 'device_limit_reached') return false
+      const fresh = await getAllDevices(device.user_id)
+      const accountChoices = (fresh?.devices || [])
+        .filter((row) => row.status === 'approved' && row.user_id === device.user_id)
+        .sort((a, b) => String(a.last_seen_at || '').localeCompare(String(b.last_seen_at || '')))
+      if (!accountChoices.length) return false
+      setReplacing({ device, choices: accountChoices, selectedId: accountChoices[0].id })
+      return true
+    })
+  }
+
+  const confirmReplace = () => {
+    if (!replacing) return
+    const { device, selectedId } = replacing
+    setReplacing(null)
+    void runOnlineAction('device', device.id, () => approveDeviceReplacing(device.id, selectedId), () => tr(t, 'device_replace_done', 'Device replaced and approved.'))
+  }
+
+  const reviewMarkShop = async () => {
+    if (!markingShop) return
+    const label = markingShop.label.trim().replace(/\s+/g, ' ')
+    if (!label) return
+    const { device } = markingShop
+    setMarkingShop(null)
+    const confirmed = await askToConfirm({
+      title: tr(t, 'shop_device_mark_title', 'Mark as a shop device?'),
+      message: tr(t, 'shop_device_mark_confirm', 'Every active employee will be able to sign in on this device without a separate approval. Mark only a device that stays in the shop.'),
+      items: [
+        { label: tr(t, 'shop_device_name', 'Shop device name'), value: label },
+        { label: tr(t, 'device', 'Device'), value: device.device_name || tr(t, 'unknown_device', 'Unknown device') },
+      ],
+      confirmLabel: tr(t, 'shop_device_mark', 'Mark as shop device'),
+    })
+    if (!confirmed) return
+    void runOnlineAction('device', device.id, () => markShopDevice(device.id, label), () => tr(t, 'shop_device_marked_done', 'Marked as a shop device.'))
+  }
+
+  const unmarkShop = async (shop: ShopDeviceRecord) => {
+    const confirmed = await askToConfirm({
+      title: tr(t, 'shop_device_unmark_title', 'Remove shop device?'),
+      message: tr(t, 'shop_device_unmark_confirm', 'Employees who signed in here through the shop device are signed out now, and each employee needs an approval again to sign in on this device.'),
+      items: [{ label: tr(t, 'shop_device_name', 'Shop device name'), value: shop.label }],
+      confirmLabel: tr(t, 'shop_device_unmark', 'Remove shop device'),
+      danger: true,
+    })
+    if (!confirmed) return
+    void runOnlineAction('device', -shop.id, () => unmarkShopDevice(shop.id), () => tr(t, 'shop_device_unmarked_done', 'Shop device removed. Employees were signed out of it.'))
   }
 
   const runSessionRevoke = (sessionId: number) => runOnlineAction('session', sessionId, () => revokeLiveSession(sessionId), () => tr(t, 'session_revoked_notice', 'Session ended. That device is signed out.'))
@@ -258,7 +370,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                     type="button"
                     disabled={busyId === device.id}
                     className="btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
-                    onClick={() => runAction(device.id, 'approve', tr(t, 'device_approved', 'Device approved.'))}
+                    onClick={() => startApprove(device)}
                   >
                     <ShieldCheck className="h-3.5 w-3.5" />
                     {tr(t, 'approve', 'Approve')}
@@ -298,7 +410,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                   <div className="min-w-0">
                     <span className="text-sm font-semibold text-gray-900 dark:text-white">{group.label}</span>
                     <span className="ml-2 text-xs text-gray-400">
-                      {group.devices.length} {tr(t, 'devices_word', 'devices')} · {group.sessions.length} {tr(t, 'live_sessions_word', 'live sessions')}
+                      {deviceLimit ? `${group.devices.length} / ${deviceLimit}` : group.devices.length} {tr(t, 'devices_word', 'devices')} · {group.sessions.length} {tr(t, 'live_sessions_word', 'live sessions')}
                     </span>
                   </div>
                   {group.sessions.length ? (
@@ -325,6 +437,22 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                           <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700 dark:bg-green-900/30 dark:text-green-300">
                             {tr(t, 'approved', 'Approved')}
                           </span>
+                          {shopDeviceIds.has(device.device_id) ? (
+                            <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">
+                              {tr(t, 'shop_device', 'Shop device')}
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={busyId === device.id}
+                              className="btn-secondary px-2 py-1 text-xs"
+                              title={tr(t, 'shop_device_mark', 'Mark as shop device')}
+                              aria-label={tr(t, 'shop_device_mark', 'Mark as shop device')}
+                              onClick={() => setMarkingShop({ device, label: '' })}
+                            >
+                              <Store className="h-3.5 w-3.5" />
+                            </button>
+                          )}
                           <button
                             type="button"
                             disabled={busyId === device.id}
@@ -384,6 +512,42 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
       </div>
 
       <div>
+        <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
+          <Store className="h-4 w-4 text-violet-500" />
+          {tr(t, 'shop_devices', 'Shop devices')}
+        </h3>
+        <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
+          {tr(t, 'shop_devices_intro', 'A shop device is a till you mark once. Every active employee signs in there without a separate approval and without using one of their own device slots. To mark one, use the shop button on its approved device above.')}
+        </p>
+        {loading ? null : !shopDevices.length ? (
+          <div className="text-sm text-gray-500 dark:text-gray-400">{tr(t, 'no_shop_devices', 'No shop devices yet.')}</div>
+        ) : (
+          <div className="space-y-2">
+            {shopDevices.map((shop) => (
+              <div key={shop.id} className="flex flex-col gap-2 rounded-xl border border-violet-100 p-3 dark:border-violet-900/40 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <div className="detail-scroll-text text-sm font-semibold text-gray-900 dark:text-white">{shop.label}</div>
+                  <div className="mt-0.5 detail-scroll-text text-xs text-gray-500 dark:text-gray-400">
+                    {shop.device_name || tr(t, 'unknown_device', 'Unknown device')}
+                    {shop.marked_by_name ? ` \u00b7 ${tr(t, 'shop_device_marked_by', 'Marked by')} ${shop.marked_by_name}` : ''}
+                    {` \u00b7 ${fmtDate(shop.marked_at)}`}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={busyId === -shop.id}
+                  className="btn-secondary shrink-0 px-2.5 py-1 text-xs text-red-600"
+                  onClick={() => void unmarkShop(shop)}
+                >
+                  {tr(t, 'shop_device_unmark', 'Remove shop device')}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
         <h3 className="mb-2 text-sm font-semibold text-gray-900 dark:text-white">
           {/* Deliberately NOT the existing `device_history` key -- that pack
               entry says "Device history", and this section no longer shows
@@ -418,6 +582,73 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
           </div>
         )}
       </div>
+      {replacing ? (
+        <Modal title={tr(t, 'device_replace_title', 'Replace a device')} onClose={() => setReplacing(null)} size="sm" layer="nested" keyboard unsavedChanges={{ dirty: false }}>
+          <div className="space-y-3">
+            <p className="text-sm text-gray-600 dark:text-gray-300">
+              {tr(t, 'device_replace_intro', 'This account has reached its device limit. Choose one approved device to remove; it is signed out right away and the new device is approved.')}
+            </p>
+            <div>
+              <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">{tr(t, 'device_replace_new', 'New device')}</div>
+              {renderDeviceMeta(replacing.device)}
+            </div>
+            <fieldset className="space-y-2">
+              <legend className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">{tr(t, 'device_replace_remove', 'Device to remove')}</legend>
+              {replacing.choices.map((choice, index) => (
+                <label
+                  key={choice.id}
+                  className={`flex cursor-pointer items-start gap-2 rounded-lg border p-2.5 ${replacing.selectedId === choice.id ? 'border-blue-400 bg-blue-50 dark:border-blue-500 dark:bg-blue-950/20' : 'border-gray-200 dark:border-gray-700'}`}
+                >
+                  <input
+                    type="radio"
+                    name="device-to-replace"
+                    className="mt-1"
+                    checked={replacing.selectedId === choice.id}
+                    onChange={() => setReplacing({ ...replacing, selectedId: choice.id })}
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-gray-900 dark:text-white">{choice.device_name || tr(t, 'unknown_device', 'Unknown device')}</span>
+                    <span className="block detail-scroll-text text-xs text-gray-500 dark:text-gray-400">
+                      {tr(t, 'last_seen', 'Last seen')} {fmtDate(choice.last_seen_at)}{choice.last_ip || choice.first_ip ? ` \u00b7 ${choice.last_ip || choice.first_ip}` : ''}
+                    </span>
+                    {index === 0 ? <span className="block text-xs text-amber-700 dark:text-amber-300">{tr(t, 'device_replace_least_recent', 'Not used for the longest')}</span> : null}
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={() => setReplacing(null)}>{tr(t, 'cancel', 'Cancel')}</button>
+              <button type="button" className="btn-primary px-3 py-1.5 text-xs" onClick={confirmReplace}>{tr(t, 'device_replace_confirm', 'Replace and approve')}</button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+      {markingShop ? (
+        <Modal title={tr(t, 'shop_device_mark_title', 'Mark as a shop device?')} onClose={() => setMarkingShop(null)} size="sm" layer="nested" keyboard unsavedChanges={{ dirty: Boolean(markingShop.label.trim()) }}>
+          <form
+            className="space-y-3"
+            onSubmit={(event) => { event.preventDefault(); void reviewMarkShop() }}
+          >
+            {renderDeviceMeta(markingShop.device)}
+            <label className="block text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
+              {tr(t, 'shop_device_name', 'Shop device name')}
+              <input
+                type="text"
+                autoFocus
+                maxLength={SHOP_LABEL_MAX}
+                className="input mt-1 w-full text-sm normal-case"
+                placeholder={tr(t, 'shop_device_name_placeholder', 'For example: Till 1')}
+                value={markingShop.label}
+                onChange={(event) => setMarkingShop({ ...markingShop, label: event.target.value })}
+              />
+            </label>
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={() => setMarkingShop(null)}>{tr(t, 'cancel', 'Cancel')}</button>
+              <button type="submit" disabled={!markingShop.label.trim()} className="btn-primary px-3 py-1.5 text-xs">{tr(t, 'shop_device_continue', 'Review')}</button>
+            </div>
+          </form>
+        </Modal>
+      ) : null}
       {confirmDialog}
     </div>
   )

@@ -148,7 +148,7 @@ function createAuthHarness(options = {}) {
     }, env, { waitUntil() {}, passThroughOnException() {} })
     let json = null
     try { json = await response.json() } catch (_) {}
-    return { status: response.status, body: json }
+    return { status: response.status, body: json, headers: response.headers }
   }
 
   // Current six-digit code for a base32 secret at an explicit step offset.

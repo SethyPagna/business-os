@@ -258,6 +258,16 @@ const SECTION_SUMMARY_COPY: Record<string, LocalizedCopy> = {
     en: ({ count }) => `${count} pending customer submission${count === 1 ? '' : 's'}`,
     km: ({ count }) => `${count} សំណើអតិថិជនកំពុងរង់ចាំ`,
   },
+  notification_security_summary: {
+    en: ({ deviceCount, countryCount }) => [
+      Number(deviceCount) ? `${deviceCount} device${Number(deviceCount) === 1 ? '' : 's'} waiting for approval` : null,
+      Number(countryCount) ? `${countryCount} sign-in${Number(countryCount) === 1 ? '' : 's'} from a new country` : null,
+    ].filter(Boolean).join(', '),
+    km: ({ deviceCount, countryCount }) => [
+      Number(deviceCount) ? `ឧបករណ៍ ${deviceCount} កំពុងរង់ចាំការអនុម័ត` : null,
+      Number(countryCount) ? `ការចូលពីប្រទេសថ្មី ${countryCount}` : null,
+    ].filter(Boolean).join(', '),
+  },
   notification_system_drive_sync_summary: {
     en: () => 'Google Drive sync needs attention',
     km: () => 'Google Drive sync ត្រូវការការយកចិត្តទុកដាក់',
@@ -301,6 +311,14 @@ const ITEM_META_COPY: Record<string, LocalizedCopy> = {
   notification_portal_pending_review_platform: {
     en: ({ platform }) => `Pending review • ${platform}`,
     km: ({ platform }) => `កំពុងរង់ចាំពិនិត្យ • ${platform}`,
+  },
+  notification_device_pending: {
+    en: ({ username }) => `Sign-in for ${username} • awaiting admin approval`,
+    km: ({ username }) => `ការចូលរបស់ ${username} • កំពុងរង់ចាំអ្នកគ្រប់គ្រងអនុម័ត`,
+  },
+  notification_device_new_country: {
+    en: ({ previousCountry, newCountry }) => `Sign-in moved from ${previousCountry || 'an unknown country'} to ${newCountry || 'an unknown country'} • already-approved device`,
+    km: ({ previousCountry, newCountry }) => `ការចូលបានផ្លាស់ពី ${previousCountry || 'ប្រទេសមិនស្គាល់'} ទៅ ${newCountry || 'ប្រទេសមិនស្គាល់'} • ឧបករណ៍ដែលបានអនុម័តរួច`,
   },
   notification_system_drive_sync_reconnect: {
     en: () => 'Reconnect Google Drive to resume sync',

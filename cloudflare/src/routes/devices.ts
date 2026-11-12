@@ -131,7 +131,7 @@ app.get('/pending', async (c) => {
     WHERE td.status = 'pending'
     ORDER BY td.requested_at ASC
   `).all<TrustedDeviceRow & { username: string; user_name: string }>()
-  return c.json({ devices: rows || [] })
+  return c.json({ devices: rows || [], limit: MAX_APPROVED_DEVICES_PER_USER })
 })
 
 // GET /api/auth/devices -- full history (approved/rejected/pending),
@@ -154,7 +154,7 @@ app.get('/', async (c) => {
         ORDER BY td.requested_at DESC
         LIMIT 200
       `).all<TrustedDeviceRow & { username: string; user_name: string }>()
-  return c.json({ devices: rows || [] })
+  return c.json({ devices: rows || [], limit: MAX_APPROVED_DEVICES_PER_USER })
 })
 
 app.post('/:id/approve', async (c) => {
@@ -178,8 +178,8 @@ app.post('/:id/approve', async (c) => {
   // stay idempotent even if the account is now at the approved-device cap.
   if (device.status === 'approved') return c.json({ success: true, idempotent: true })
 
-  // At most MAX_APPROVED_DEVICES_PER_USER approved devices per account (the
-  // Aug-28 rule). Excluding this row keeps re-approving an already-approved
+  // At most MAX_APPROVED_DEVICES_PER_USER approved devices per account (owner
+  // rule, 5 since 12 Nov 2026). Excluding this row keeps re-approving an already-approved
   // device idempotent instead of tripping its own limit.
   const approvedCount = await countApprovedDevices(c.env, device.user_id, device.id)
   if (approvedCount >= MAX_APPROVED_DEVICES_PER_USER) {
@@ -241,6 +241,111 @@ app.post('/:id/approve', async (c) => {
   c.executionCtx.waitUntil(broadcast(c.env, 'notifications', { type: 'device_decision' }))
 
   return c.json({ success: true })
+})
+
+// POST /api/auth/devices/:id/approve-replacing { revokeId } -- approve a
+// pending device for an account that is at the cap by revoking one of that
+// account's approved devices in the same step. One db.batch (one SQLite
+// transaction): the guard throws, rolling everything back, unless both rows are
+// still in the state this request read; the new row's UPDATE repeats the cap
+// count after the revoke; and a closing guard throws if the approval did not
+// land, so the cap can never be exceeded and a half-done swap cannot persist.
+app.post('/:id/approve-replacing', async (c) => {
+  const id = Number(c.req.param('id'))
+  const admin = c.get('user')
+  const body = await c.req.json<{ revokeId?: unknown }>().catch(() => ({} as { revokeId?: unknown }))
+  const revokeId = Number(body.revokeId)
+  if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(revokeId) || revokeId <= 0 || id === revokeId) {
+    return c.json({ error: 'A pending device and a different approved device are required.', code: 'device_replace_invalid' }, 400)
+  }
+  const db = getDb(c.env)
+  const rows = await db.prepare('SELECT * FROM trusted_devices WHERE id IN (@id, @revoke_id)')
+    .all<TrustedDeviceRow>({ id, revoke_id: revokeId })
+  const device = (rows || []).find((row) => row.id === id)
+  const old = (rows || []).find((row) => row.id === revokeId)
+  if (!device) return c.json({ error: 'Device request not found' }, 404)
+  if (device.status === 'rejected') {
+    return c.json({
+      error: 'This rejected device must be reset before it can request approval again.',
+      code: 'device_reapproval_reset_required',
+    }, 409)
+  }
+  if (device.status === 'approved') return c.json({ success: true, idempotent: true })
+  if (!old || old.user_id !== device.user_id || old.status !== 'approved') {
+    return c.json({ error: 'Choose an approved device of the same account to replace.', code: 'device_replace_invalid' }, 400)
+  }
+
+  const params = {
+    id: device.id,
+    revoke_id: old.id,
+    user_id: device.user_id,
+    old_device_id: old.device_id,
+    admin_id: admin.id,
+    admin_name: admin.name,
+    approved_device_limit: MAX_APPROVED_DEVICES_PER_USER,
+    replace_guard_error: '{',
+  }
+  let results: Array<{ meta?: { changes?: number } }>
+  try {
+    results = await db.batch([
+      {
+        sql: `SELECT CASE WHEN EXISTS (SELECT 1 FROM trusted_devices WHERE id = @id AND user_id = @user_id AND status = 'pending')
+          AND EXISTS (SELECT 1 FROM trusted_devices WHERE id = @revoke_id AND user_id = @user_id AND status = 'approved')
+          THEN 1 ELSE json_extract(@replace_guard_error, '$') END AS device_replace_guard`,
+        params,
+      },
+      {
+        sql: `UPDATE trusted_devices
+          SET status = 'rejected', revoked_at = CURRENT_TIMESTAMP, decided_at = CURRENT_TIMESTAMP, decided_by_user_id = @admin_id, decided_by_name = @admin_name
+          WHERE id = @revoke_id AND user_id = @user_id AND status = 'approved'`,
+        params,
+      },
+      {
+        sql: `UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP
+          WHERE user_id = @user_id AND revoked_at IS NULL
+            AND (
+              device_id = @old_device_id
+              OR limit_family_id IN (SELECT id FROM user_sessions WHERE user_id = @user_id AND device_id = @old_device_id)
+            )`,
+        params,
+      },
+      {
+        sql: `UPDATE trusted_devices
+          SET status = 'approved', decided_at = CURRENT_TIMESTAMP, decided_by_user_id = @admin_id, decided_by_name = @admin_name, revoked_at = NULL
+          WHERE id = @id AND user_id = @user_id AND status = 'pending'
+            AND (SELECT COUNT(*) FROM trusted_devices
+                 WHERE user_id = @user_id AND status = 'approved' AND id != @id) < @approved_device_limit`,
+        params,
+      },
+      {
+        sql: `SELECT CASE WHEN EXISTS (SELECT 1 FROM trusted_devices WHERE id = @id AND user_id = @user_id AND status = 'approved')
+          THEN 1 ELSE json_extract(@replace_guard_error, '$') END AS device_replace_landed`,
+        params,
+      },
+    ])
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('malformed JSON')) {
+      return c.json({ error: 'The devices changed while you were deciding. Reload and try again.', code: 'device_replace_conflict' }, 409)
+    }
+    throw error
+  }
+  const revokedSessions = Number(results[2]?.meta?.changes || 0)
+
+  await audit(c.env, admin.id, admin.username, 'device_revoked', 'user', old.user_id, {
+    deviceId: old.device_id, deviceName: old.device_name, userAgent: old.user_agent,
+    firstIp: old.first_ip, lastIp: old.last_ip, firstCountry: old.first_country,
+    lastCountry: old.last_country, targetTrustedDeviceRowId: old.id, revokedSessions,
+    replacedByTrustedDeviceRowId: device.id,
+  })
+  await audit(c.env, admin.id, admin.username, 'device_approved', 'user', device.user_id, {
+    deviceId: device.device_id, deviceName: device.device_name, userAgent: device.user_agent,
+    firstIp: device.first_ip, lastIp: device.last_ip, firstCountry: device.first_country,
+    lastCountry: device.last_country, targetTrustedDeviceRowId: device.id,
+    replacedTrustedDeviceRowId: old.id,
+  })
+  c.executionCtx.waitUntil(broadcast(c.env, 'notifications', { type: 'device_decision' }))
+
+  return c.json({ success: true, revokedSessions })
 })
 
 // POST /api/auth/devices/:id/reset -- remove one rejected trust row so the
@@ -370,6 +475,106 @@ app.post('/:id/revoke', async (c) => {
   })
   c.executionCtx.waitUntil(broadcast(c.env, 'notifications', { type: 'device_decision' }))
 
+  return c.json({ success: true, revokedSessions })
+})
+
+// ---- Shop devices (owner 12 Nov 2026) --------------------------------------
+// An administrator marks a till once; every active employee then signs in
+// there without a separate approval and without using one of their own device
+// slots (lib/deviceTrust.ts checkDeviceTrust). The shop path only ever matches
+// an id that arrived in the verified device cookie. Unmarking revokes the
+// sessions that came in through the shop path, never an administrator's own.
+const SHOP_LABEL_MAX = 60
+
+type ShopDeviceRow = {
+  id: number
+  device_id: string
+  label: string
+  marked_by_user_id: number | null
+  marked_by_name: string | null
+  marked_at: string
+  unmarked_at: string | null
+  device_name: string | null
+}
+
+// GET /api/auth/devices/shop -- the devices currently marked as shop devices.
+app.get('/shop', async (c) => {
+  const rows = await getDb(c.env).prepare(`
+    SELECT s.id, s.device_id, s.label, s.marked_by_user_id, s.marked_by_name, s.marked_at,
+      (SELECT t.device_name FROM trusted_devices t WHERE t.device_id = s.device_id AND t.device_name IS NOT NULL LIMIT 1) AS device_name
+    FROM shop_devices s
+    WHERE s.unmarked_at IS NULL
+    ORDER BY s.marked_at DESC
+    LIMIT 100
+  `).all<ShopDeviceRow>()
+  return c.json({ shopDevices: rows || [] })
+})
+
+// POST /api/auth/devices/:id/mark-shop { label } -- :id is an APPROVED
+// trusted_devices row; its device id becomes a shop device.
+app.post('/:id/mark-shop', async (c) => {
+  const id = Number(c.req.param('id'))
+  const admin = c.get('user')
+  const body = await c.req.json<{ label?: unknown }>().catch(() => ({} as { label?: unknown }))
+  const label = typeof body.label === 'string' ? body.label.trim().replace(/\s+/g, ' ') : ''
+  if (!Number.isInteger(id) || id <= 0) return c.json({ error: 'Device request not found' }, 404)
+  if (!label || label.length > SHOP_LABEL_MAX) {
+    return c.json({ error: `Give the shop device a name of 1 to ${SHOP_LABEL_MAX} characters.`, code: 'shop_label_invalid' }, 400)
+  }
+  const db = getDb(c.env)
+  const device = await db.prepare('SELECT * FROM trusted_devices WHERE id = @id LIMIT 1').get<TrustedDeviceRow>({ id })
+  if (!device) return c.json({ error: 'Device request not found' }, 404)
+  if (device.status !== 'approved') return c.json({ error: 'Only an approved device can be marked as a shop device.', code: 'shop_device_not_approved' }, 409)
+  let inserted: { changes?: number } | undefined
+  try {
+    inserted = await db.prepare(`
+      INSERT INTO shop_devices (device_id, label, marked_by_user_id, marked_by_name)
+      SELECT @device_id, @label, @admin_id, @admin_name
+      WHERE EXISTS (SELECT 1 FROM trusted_devices WHERE id = @id AND status = 'approved')
+    `).run({ id, device_id: device.device_id, label, admin_id: admin.id, admin_name: admin.name })
+  } catch (error) {
+    if (error instanceof Error && /UNIQUE/i.test(error.message)) {
+      return c.json({ error: 'This device is already marked as a shop device.', code: 'shop_device_exists' }, 409)
+    }
+    throw error
+  }
+  if (!inserted?.changes) return c.json({ error: 'The device changed while you were deciding. Reload and try again.', code: 'shop_device_conflict' }, 409)
+  await audit(c.env, admin.id, admin.username, 'shop_device_marked', 'user', device.user_id, {
+    deviceId: device.device_id, deviceName: device.device_name, label, targetTrustedDeviceRowId: device.id,
+  })
+  return c.json({ success: true })
+})
+
+// POST /api/auth/devices/shop/:shopId/unmark -- one batch (one transaction)
+// ends the marking and revokes the sessions the shop path issued (and the
+// sessions re-issued from them), so the next sign-in there needs an approval.
+app.post('/shop/:shopId/unmark', async (c) => {
+  const shopId = Number(c.req.param('shopId'))
+  const admin = c.get('user')
+  if (!Number.isInteger(shopId) || shopId <= 0) return c.json({ error: 'Shop device not found' }, 404)
+  const db = getDb(c.env)
+  const shop = await db.prepare('SELECT id, device_id, label, unmarked_at FROM shop_devices WHERE id = @id LIMIT 1')
+    .get<{ id: number; device_id: string; label: string; unmarked_at: string | null }>({ id: shopId })
+  if (!shop) return c.json({ error: 'Shop device not found' }, 404)
+  if (shop.unmarked_at) return c.json({ success: true, idempotent: true, revokedSessions: 0 })
+  const params = { id: shopId, admin_id: admin.id, admin_name: admin.name }
+  const results = await db.batch([
+    {
+      sql: `UPDATE shop_devices SET unmarked_at = CURRENT_TIMESTAMP, unmarked_by_user_id = @admin_id, unmarked_by_name = @admin_name
+        WHERE id = @id AND unmarked_at IS NULL`,
+      params,
+    },
+    {
+      sql: `UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP
+        WHERE revoked_at IS NULL
+          AND (shop_device_id = @id OR limit_family_id IN (SELECT id FROM user_sessions WHERE shop_device_id = @id))`,
+      params: { id: shopId },
+    },
+  ])
+  const revokedSessions = Number(results[1]?.meta?.changes || 0)
+  await audit(c.env, admin.id, admin.username, 'shop_device_unmarked', 'user', admin.id, {
+    deviceId: shop.device_id, label: shop.label, shopDeviceRowId: shop.id, revokedSessions,
+  })
   return c.json({ success: true, revokedSessions })
 })
 

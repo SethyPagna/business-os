@@ -103,12 +103,12 @@ async function passwordSignIn(h, username, password, deviceId) {
   return h.request('/login', 'POST', { username, password, deviceId, deviceName: 'Laptop' }, { ip: '203.0.113.5' })
 }
 
-async function googleSignIn(h, google, subject, deviceId) {
+async function googleSignIn(h, google, subject, deviceId, cookie) {
   google.subject = subject
   google.deviceId = deviceId
   const res = await h.app.request('/oauth/callback?code=auth-code&state=signed-state', {
     method: 'GET',
-    headers: { 'CF-Connecting-IP': '203.0.113.5' },
+    headers: { 'CF-Connecting-IP': '203.0.113.5', ...(cookie ? { Cookie: cookie } : {}) },
   }, h.env, { waitUntil() {}, passThroughOnException() {} })
   const html = await res.text()
   const match = /const payload = (.*);\n/.exec(html)
@@ -164,7 +164,9 @@ async function main() {
     const password = await passwordSignIn(h, 'dara', 'dara-pass', 'dev-till')
     assert.equal(password.status, 200)
     assert.equal(password.body.user.role_permissions, '{"pos":true,"sales":true}', 'control: the password answer carries the role grants')
-    const signedIn = await googleSignIn(h, google, 'g-dara', 'dev-till')
+    // The same browser: the password sign-in issued its device cookie, which an approved id needs.
+    const deviceCookie = password.headers.getSetCookie().find((line) => line.startsWith('__Host-bos_dev=')).split(';')[0]
+    const signedIn = await googleSignIn(h, google, 'g-dara', 'dev-till', deviceCookie)
     assert.equal(signedIn.payload.status, 'success', JSON.stringify(signedIn.payload))
     assert.deepEqual(signedIn.payload.user, password.body.user)
   })

@@ -2,6 +2,8 @@ import { getDb } from './db'
 import type { Env } from '../index'
 import { isAdminControlUser, type PermissionUser } from './permissions'
 import { audit } from './audit'
+import { isValidDeviceId } from './deviceCookie'
+import { broadcast } from '../durable-objects/broadcastHub'
 
 // Device-approval gate. See migrations/0005_trusted_devices.sql for the
 // schema. Non-administrator accounts are enrolled: a device stays trusted
@@ -26,19 +28,20 @@ export type TrustedDeviceRow = {
   decided_by_name: string | null
   last_seen_at: string
   revoked_at: string | null
+  cookie_bound_at?: string | null
 }
 
 export function requiresDeviceApproval(user: PermissionUser): boolean {
   return Boolean(user) && !isAdminControlUser(user)
 }
 
-// Each account may hold at most this many APPROVED devices at once — the
-// user's rule (Aug 28): an employee can be signed in on at most 3 devices
-// at the same time. Enforced at the admin approve endpoint, which is the
-// ONLY path a device takes to 'approved'; a 4th device stays pending until
-// an existing one is revoked. Admin-control accounts bypass the device gate
-// entirely (see requiresDeviceApproval), so the cap governs employees.
-export const MAX_APPROVED_DEVICES_PER_USER = 3
+// Each account may hold at most this many APPROVED devices at once (owner
+// 12 Nov 2026: 5, raised from 3). Enforced at the admin approve endpoints,
+// the ONLY paths a device takes to 'approved'; one more stays pending until
+// an existing one is revoked or replaced. Admin-control accounts bypass the
+// device gate entirely (see requiresDeviceApproval), so the cap governs
+// employees. The API returns it as `limit`; the UI never hard-codes it.
+export const MAX_APPROVED_DEVICES_PER_USER = 5
 
 export async function countApprovedDevices(env: Env, userId: number, excludeRowId?: number): Promise<number> {
   const db = getDb(env)
@@ -57,10 +60,11 @@ export async function checkDeviceTrust(
   env: Env,
   userId: number,
   deviceId: string | null | undefined,
-  meta: { deviceName?: string | null; userAgent?: string | null; ip?: string | null; country?: string | null },
-): Promise<{ status: 'approved' } | { status: 'pending' | 'rejected' | 'missing_device_id' }> {
-  if (!deviceId || !deviceId.trim()) {
-    // A client that doesn't send a device id at all (e.g. an old cached
+  meta: { deviceName?: string | null; userAgent?: string | null; ip?: string | null; country?: string | null; cookieVerified?: boolean },
+): Promise<{ status: 'approved'; shopDeviceId?: number } | { status: 'pending'; created: boolean; replacedDeviceId?: string } | { status: 'rejected' | 'missing_device_id' }> {
+  if (!isValidDeviceId(deviceId)) {
+    // A client that doesn't send a usable device id (missing, over-long or
+    // outside [A-Za-z0-9_-]; e.g. an old cached
     // frontend build, or a direct API call) can't be recognized or
     // remembered -- fail closed into `pending` rather than silently
     // skipping the check, which would make the feature bypassable just by
@@ -69,9 +73,40 @@ export async function checkDeviceTrust(
   }
 
   const db = getDb(env)
-  const existing = await db.prepare(`
-    SELECT * FROM trusted_devices WHERE user_id = @user_id AND device_id = @device_id LIMIT 1
-  `).get<TrustedDeviceRow>({ user_id: userId, device_id: deviceId })
+  // One statement answers both questions: this account's own row for the
+  // device, and whether an administrator has marked the device as a shop
+  // device. The base row keeps the shop answer when the account has no row.
+  // The shop join only matches when the id came from the verified device
+  // cookie, so a client-chosen body id can never claim a shop device.
+  const found = await db.prepare(`
+    SELECT td.*, s.id AS shop_device_row_id
+    FROM (SELECT 1 AS one) base
+    LEFT JOIN trusted_devices td ON td.user_id = @user_id AND td.device_id = @device_id
+    LEFT JOIN shop_devices s ON @shop_ok = 1 AND s.device_id = @device_id AND s.unmarked_at IS NULL
+  `).get<(Partial<TrustedDeviceRow> & { shop_device_row_id: number | null }) | undefined>({ user_id: userId, device_id: deviceId, shop_ok: meta.cookieVerified ? 1 : 0 })
+  const existing = found && found.id != null ? (found as TrustedDeviceRow) : null
+  const shopDeviceId = found?.shop_device_row_id ?? null
+  // A device cookie is only ever issued when the signing key exists, so only then is "has had a cookie" a fact about the row.
+  const cookiesOn = Boolean(env.APP_ENCRYPTION_KEY)
+
+  // This browser's cookie was issued for the row, but the id arrived without it (typed into a request body, or the cookie was
+  // cleared): knowing the id is not enough. It becomes a new browser with a fresh pending id; the caller pins that id.
+  if (cookiesOn && existing?.status === 'approved' && existing.cookie_bound_at && !meta.cookieVerified) {
+    const fresh = crypto.randomUUID()
+    const made = await db.prepare(`
+      INSERT INTO trusted_devices (user_id, device_id, device_name, user_agent, first_ip, last_ip, first_country, last_country, status, decided_at, cookie_bound_at)
+      VALUES (@user_id, @device_id, @device_name, @user_agent, @ip, @ip, @country, @country, 'pending', NULL, CURRENT_TIMESTAMP)
+    `).run({ user_id: userId, device_id: fresh, device_name: meta.deviceName || null, user_agent: meta.userAgent || null, ip: meta.ip || null, country: meta.country || null })
+    if (Number(made?.changes || 0) > 0) await broadcast(env, 'notifications', { type: 'device_pending' })
+    return { status: 'pending', created: true, replacedDeviceId: fresh }
+  }
+
+  // An administrator's explicit refusal of this account on this device
+  // outranks the shop marking; an approved row of its own is a personal
+  // approval and is used as such.
+  if (shopDeviceId && existing?.status !== 'rejected' && existing?.status !== 'approved') {
+    return { status: 'approved', shopDeviceId }
+  }
 
   if (!existing) {
     // This function is only reached for non-admin accounts. Every new
@@ -79,9 +114,12 @@ export async function checkDeviceTrust(
     // to bypass an administrator's device-approval policy.
     const initialStatus = 'pending'
 
-    await db.prepare(`
-      INSERT INTO trusted_devices (user_id, device_id, device_name, user_agent, first_ip, last_ip, first_country, last_country, status, decided_at)
-      VALUES (@user_id, @device_id, @device_name, @user_agent, @ip, @ip, @country, @country, @status, @decided_at)
+    // Two parallel first sign-ins race this insert; the unique index makes the
+    // loser a no-op instead of a 500.
+    const inserted = await db.prepare(`
+      INSERT INTO trusted_devices (user_id, device_id, device_name, user_agent, first_ip, last_ip, first_country, last_country, status, decided_at, cookie_bound_at)
+      VALUES (@user_id, @device_id, @device_name, @user_agent, @ip, @ip, @country, @country, @status, @decided_at, CASE WHEN @bind = 1 THEN CURRENT_TIMESTAMP END)
+      ON CONFLICT(user_id, device_id) DO NOTHING
     `).run({
       user_id: userId,
       device_id: deviceId,
@@ -91,8 +129,12 @@ export async function checkDeviceTrust(
       country: meta.country || null,
       status: initialStatus,
       decided_at: null,
+      bind: cookiesOn ? 1 : 0,
     })
-    return { status: initialStatus }
+    // Only a row this call created raises the alert; a retry or a lost race does not.
+    const created = Number(inserted?.changes || 0) > 0
+    if (created) await broadcast(env, 'notifications', { type: 'device_pending' })
+    return { status: initialStatus, created }
   }
 
   if (existing.status === 'approved') {
@@ -112,8 +154,10 @@ export async function checkDeviceTrust(
       })
     }
     await db.prepare(`
-      UPDATE trusted_devices SET last_seen_at = CURRENT_TIMESTAMP, last_ip = @ip, last_country = @country WHERE id = @id
-    `).run({ id: existing.id, ip: meta.ip || existing.last_ip, country: meta.country || existing.last_country })
+      UPDATE trusted_devices SET last_seen_at = CURRENT_TIMESTAMP, last_ip = @ip, last_country = @country,
+        cookie_bound_at = COALESCE(cookie_bound_at, CASE WHEN @bind = 1 THEN CURRENT_TIMESTAMP END)
+      WHERE id = @id
+    `).run({ id: existing.id, ip: meta.ip || existing.last_ip, country: meta.country || existing.last_country, bind: cookiesOn ? 1 : 0 })
     return { status: 'approved' }
   }
 
@@ -126,7 +170,7 @@ export async function checkDeviceTrust(
   await db.prepare(`
     UPDATE trusted_devices SET last_seen_at = CURRENT_TIMESTAMP, last_ip = @ip, last_country = @country WHERE id = @id
   `).run({ id: existing.id, ip: meta.ip || existing.last_ip, country: meta.country || existing.last_country })
-  return { status: 'pending' }
+  return { status: 'pending', created: false }
 }
 
 export async function countPendingDevices(env: Env): Promise<number> {

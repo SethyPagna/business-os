@@ -377,6 +377,7 @@ const staticApi = {
   otpRecoveryReset: getAuthTransportMethod('otpRecoveryReset'),
   otpVerify: getAuthTransportMethod('otpVerify'),
   otpStatus: getAuthTransportMethod('otpStatus'),
+  getDeviceApprovalStatus: getAuthTransportMethod('getDeviceApprovalStatus'),
   startGoogleOauth: getAuthTransportMethod('startGoogleOauth'),
   completeGoogleOauth: getAuthTransportMethod('completeGoogleOauth'),
   unlinkGoogleOauth: getAuthTransportMethod('unlinkGoogleOauth'),

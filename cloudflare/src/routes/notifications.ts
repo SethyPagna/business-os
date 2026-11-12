@@ -757,13 +757,16 @@ function buildSystemSection(driveSyncEnabled: boolean, driveSyncConnected: boole
 
 async function buildDeviceApprovalSection(env: Env): Promise<NotificationSection | null> {
   const db = getDb(env)
-  // Pending-device rows are no longer produced by anything: the login gate
-  // that used to create them (requiresDeviceApproval in lib/deviceTrust.ts)
-  // is permanently off, so `status = 'pending'` rows left in this table are
-  // stale/legacy -- surfacing them as "awaiting admin approval" is
-  // misleading (there is no login actually waiting on that decision, for
-  // admin or anyone else). Intentionally not querying for them here.
-  const rows: Array<{ id: number; device_name: string | null; user_agent: string | null; requested_at: string; username: string; user_name: string }> = []
+  // The gate is live (requiresDeviceApproval in lib/deviceTrust.ts): every new
+  // employee device creates a pending row and someone is waiting on it. Newest
+  // first, capped; idx_trusted_devices_status serves the filter.
+  const rows = await db.prepare(`
+    SELECT td.id, td.device_name, td.user_agent, td.requested_at, u.username, u.name AS user_name
+    FROM trusted_devices td
+    JOIN users u ON u.id = td.user_id
+    WHERE td.status = 'pending'
+    ORDER BY td.requested_at DESC LIMIT 20
+  `).all<{ id: number; device_name: string | null; user_agent: string | null; requested_at: string; username: string; user_name: string }>()
 
   // Devices that are already approved don't need another approval decision,
   // but a login from a country that doesn't match this device's history is
@@ -791,6 +794,8 @@ async function buildDeviceApprovalSection(env: Env): Promise<NotificationSection
       tone: 'warning' as const,
       label: parsed.deviceName || `Device for user #${entry.user_id ?? '?'}`,
       meta: `Sign-in moved from ${parsed.previousCountry || 'an unknown country'} to ${parsed.newCountry || 'an unknown country'}${SUMMARY_SEPARATOR}already-approved device`,
+      metaKey: 'notification_device_new_country',
+      metaParams: { previousCountry: parsed.previousCountry || '', newCountry: parsed.newCountry || '' },
       kind: 'security_device_new_country',
       // Device history lives on the Users > Devices tab (DeviceApprovals.tsx),
       // not Settings -- there is nothing about devices on the Settings page.
@@ -805,6 +810,8 @@ async function buildDeviceApprovalSection(env: Env): Promise<NotificationSection
       tone: 'warning' as const,
       label: entry.device_name || `New device for ${entry.user_name || entry.username}`,
       meta: `Sign-in for ${entry.username}${SUMMARY_SEPARATOR}awaiting admin approval`,
+      metaKey: 'notification_device_pending',
+      metaParams: { username: entry.username },
       kind: 'security_device_pending',
       // Same reasoning as countryItems above: the approve/decline controls
       // are on Users > Devices (DeviceApprovals.tsx), not Settings.
@@ -826,6 +833,8 @@ async function buildDeviceApprovalSection(env: Env): Promise<NotificationSection
       : rows.length
         ? `${rows.length} device${rows.length === 1 ? '' : 's'} waiting for approval`
         : `${countryItems.length} sign-in${countryItems.length === 1 ? '' : 's'} from a new country`,
+    summaryKey: 'notification_security_summary',
+    summaryParams: { deviceCount: rows.length, countryCount: countryItems.length },
     items,
   }
 }

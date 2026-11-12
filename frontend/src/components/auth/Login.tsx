@@ -14,7 +14,7 @@ import QuickPreferenceToggles from '../shared/QuickPreferenceToggles'
 import InfoHint from '../shared/InfoHint.tsx'
 import GoogleSignInButton from '../shared/GoogleSignInButton.tsx'
 import { STORAGE_KEYS } from '../../constants'
-import { getClientDeviceInfo } from '../../utils/deviceInfo.ts'
+import { adoptDeviceIdFromResponse, getClientDeviceInfo } from '../../utils/deviceInfo.ts'
 import { localizeAuthError } from '../../utils/authErrorText.ts'
 import { requestPasswordSaveAfterSignIn } from '../../utils/passwordManager.ts'
 import { newPasswordProblem, newPasswordRefusalMessage, passwordProblemMessage } from '../../utils/passwordRules.ts'
@@ -22,6 +22,7 @@ import { getPortalConfig } from '../../api/portalPublicTransport.ts'
 import { requestPasswordResetAdminApproval } from '../../api/authTransport.ts'
 import NewPasswordFields from './password/NewPasswordFields.tsx'
 import { takePasswordRecoveryAfterSignOut } from './passwordRecoveryHandoff.ts'
+import { startDeviceApprovalWait, type DeviceWaitStatus } from './deviceApprovalWait.ts'
 import { finishActorOauthCookieRedirect, isActorCookieMutationPending } from '../../api/actorReadScope.ts'
 import {
   beginTrackedRequest,
@@ -77,6 +78,8 @@ interface LoginResult {
   sessionExpiresAt?: string
   deviceApprovalRequired?: boolean
   deviceStatus?: 'pending' | 'rejected'
+  deviceId?: string
+  deviceTicket?: string
   sharedDevice?: boolean
 }
 
@@ -143,6 +146,7 @@ interface StartOauthResult extends PasswordResetResult {
 interface AuthApi {
   getVerificationCapabilities?: () => Promise<VerificationCapabilities>
   getOrganizationBootstrap?: () => Promise<OrganizationBootstrap>
+  getDeviceApprovalStatus?: (ticket: string) => Promise<{ status?: DeviceWaitStatus } | null>
   searchOrganizations?: (query: string) => Promise<OrganizationSearchResult>
   completeGoogleOauth: (payload: {
     accessToken: string
@@ -268,6 +272,12 @@ export default function Login() {
   const [pendingUserId, setPendingUserId] = useState<IdValue | null>(null)
   const [pendingOtpChallenge, setPendingOtpChallenge] = useState<string>('')
   const [deviceApprovalPending, setDeviceApprovalPending] = useState(false)
+  // The waiting screen's proof for the status check; approved = the admin said yes and only the person's own sign-in is left.
+  const [deviceTicket, setDeviceTicket] = useState('')
+  const [deviceApproved, setDeviceApproved] = useState(false)
+  const [deviceWaitStopped, setDeviceWaitStopped] = useState(false)
+  const handleLoginRef = useRef<(event: FormEvent<HTMLFormElement>) => Promise<void>>(async () => {})
+  const passwordRef = useRef('')
   const [error, setError] = useState('')
   const [signInNotice, setSignInNotice] = useState('')
   const [loading, setLoading] = useState(false)
@@ -574,8 +584,9 @@ export default function Login() {
           setError(callbackResult.error || tr('oauth_signin_failed', 'Sign-in with provider failed.'))
           return
         }
+        adoptDeviceIdFromResponse(callbackResult)
         if (callbackResult.deviceApprovalRequired) {
-          setDeviceApprovalPending(true)
+          startDeviceWait(callbackResult.deviceTicket)
           setError(callbackResult.deviceStatus === 'rejected'
             ? tr('device_rejected', callbackResult.error || 'This device was denied access by an administrator.')
             : '')
@@ -635,7 +646,7 @@ export default function Login() {
         if (!isTrackedRequestCurrent(oauthCallbackRequestRef, requestId)) return
 
         if (result?.deviceApprovalRequired) {
-          setDeviceApprovalPending(true)
+          startDeviceWait(result.deviceTicket)
           setError(result.deviceStatus === 'rejected'
             ? tr('device_rejected', result.error || 'This device was denied access by an administrator.')
             : '')
@@ -668,6 +679,73 @@ export default function Login() {
     return () => { invalidateTrackedRequest(oauthCallbackRequestRef) }
   }, [authApi, persistAuthenticatedUser, sessionDuration, t])
 
+  const startDeviceWait = (ticket?: string) => {
+    setDeviceTicket(ticket || '')
+    setDeviceApproved(false)
+    setDeviceWaitStopped(false)
+    setDeviceApprovalPending(true)
+  }
+
+  const leaveDeviceWait = () => {
+    setDeviceApprovalPending(false)
+    setDeviceTicket('')
+    setDeviceApproved(false)
+    setDeviceWaitStopped(false)
+    setError('')
+  }
+
+  // The admin approved this device. A password sign-in finishes by itself with the password this screen still holds
+  // in memory; a Google sign-in cannot (nothing to resend), so the person is sent back to tap Google again.
+  const onDeviceApproved = () => {
+    if (passwordRef.current) {
+      setDeviceApprovalPending(false)
+      setDeviceTicket('')
+      void handleLoginRef.current({ preventDefault: () => {} } as FormEvent<HTMLFormElement>)
+      return
+    }
+    setDeviceApproved(true)
+    setDeviceTicket('')
+  }
+
+  const checkDeviceNow = async () => {
+    if (deviceTicket && authApi.getDeviceApprovalStatus) {
+      setLoading(true)
+      setError('')
+      try {
+        const answer = await authApi.getDeviceApprovalStatus(deviceTicket)
+        if (answer?.status === 'approved') onDeviceApproved()
+        else if (answer?.status === 'rejected') setError(tr('device_rejected', 'This device was denied access by an administrator.'))
+        else if (answer?.status === 'pending') setError(tr('device_still_waiting', 'Still waiting for an administrator to approve this device.'))
+        else { setDeviceTicket(''); setDeviceWaitStopped(true) }
+      } catch (checkError) {
+        setError(getErrorMessage(checkError, tr('login_failed_try_again', 'Login failed. Please try again.')))
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
+    if (passwordRef.current) {
+      await handleLoginRef.current({ preventDefault: () => {} } as FormEvent<HTMLFormElement>)
+      return
+    }
+    leaveDeviceWait()
+  }
+
+  useEffect(() => {
+    if (!deviceApprovalPending || !deviceTicket || !authApi.getDeviceApprovalStatus) return undefined
+    const stop = startDeviceApprovalWait({
+      fetchStatus: async () => (await authApi.getDeviceApprovalStatus?.(deviceTicket))?.status,
+      onApproved: onDeviceApproved,
+      onStopped: (reason) => {
+        if (reason === 'rejected') setError(tr('device_rejected', 'This device was denied access by an administrator.'))
+        else { setDeviceTicket(''); setDeviceWaitStopped(true) }
+      },
+    })
+    return stop
+    // The wait belongs to one ticket; the handlers it calls are read through refs and current state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceApprovalPending, deviceTicket])
+
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (loginSubmitInFlightRef.current) return
@@ -686,7 +764,7 @@ export default function Login() {
         'Login',
       )
       if (result?.deviceApprovalRequired) {
-        setDeviceApprovalPending(true)
+        startDeviceWait(result.deviceTicket)
         setError(result.deviceStatus === 'rejected'
           ? tr('device_rejected', result.error || 'This device was denied access by an administrator.')
           : '')
@@ -712,6 +790,9 @@ export default function Login() {
       setLoading(false)
     }
   }
+
+  handleLoginRef.current = handleLogin
+  passwordRef.current = password
 
   const handleOtp = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -740,7 +821,7 @@ export default function Login() {
       if (verifyResult?.deviceApprovalRequired) {
         // The server re-runs the device gate at the OTP step now -- same
         // pending-approval screen as the password step's answer.
-        setDeviceApprovalPending(true)
+        startDeviceWait(verifyResult.deviceTicket)
         setError(verifyResult.deviceStatus === 'rejected'
           ? tr('device_rejected', verifyResult.error || 'This device was denied access by an administrator.')
           : '')
@@ -1436,18 +1517,33 @@ export default function Login() {
             </div>
 
             {error ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">{error}</div> : null}
+            {deviceApproved ? (
+              <div className="rounded-xl bg-green-50 p-3 text-sm text-green-700 dark:bg-green-900/20 dark:text-green-400">
+                {tr('device_approved_sign_in_again', 'This device was approved. Sign in again to continue.')}
+              </div>
+            ) : deviceWaitStopped ? (
+              <div className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
+                {tr('device_wait_stopped', 'We stopped checking automatically. Tap Check again, or ask an administrator to approve this device.')}
+              </div>
+            ) : deviceTicket ? (
+              <p className="text-center text-xs text-gray-500 dark:text-gray-400">
+                {tr('device_wait_auto', 'This page checks for approval by itself every few seconds.')}
+              </p>
+            ) : null}
 
             <button
               className="btn-primary w-full py-3 text-base"
               type="button"
               disabled={loading}
-              onClick={() => handleLogin({ preventDefault: () => {} } as FormEvent<HTMLFormElement>)}
+              onClick={() => (deviceApproved ? leaveDeviceWait() : void checkDeviceNow())}
             >
               {loading ? (
                 <span className="inline-flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   <span>{tr('checking_approval_status', 'Checking approval status...')}</span>
                 </span>
+              ) : deviceApproved ? (
+                tr('sign_in', 'Sign in')
               ) : (
                 tr('check_again', 'Check again')
               )}
@@ -1456,10 +1552,7 @@ export default function Login() {
             <button
               type="button"
               className="w-full text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400"
-              onClick={() => {
-                setDeviceApprovalPending(false)
-                setError('')
-              }}
+              onClick={leaveDeviceWait}
             >
               {tr('back', 'Back')}
             </button>
