@@ -70,7 +70,9 @@ async function signIn(h, { username = 'sokha', deviceId, cookie } = {}) {
 }
 
 function deviceSetCookie(res) {
-  return res.headers.getSetCookie().find((line) => line.startsWith(`${COOKIE}=`)) || null
+  const lines = res.headers.getSetCookie().filter((line) => line.startsWith(`${COOKIE}=`))
+  assert.ok(lines.length <= 1, `a response carries at most one device cookie, got ${lines.length}`)
+  return lines[0] || null
 }
 
 let passed = 0
@@ -194,14 +196,16 @@ async function main() {
 
   await check('8. the cookie is set only by the sign-in endpoints, never by a helper any route can call', async () => {
     const all = fs.readdirSync(path.join(SRC, 'routes')).concat(fs.readdirSync(path.join(SRC, 'lib')).map((f) => `../lib/${f}`))
-    const users = all.filter((rel) => /pinDeviceCookie|resolveAndPinDevice|DEVICE_COOKIE_NAME/.test(read(rel.startsWith('../lib/') ? rel.slice(3) : `routes/${rel}`)))
+    const users = all.filter((rel) => /pinDeviceCookie|pinDeviceAfterGate|resolveDeviceId|DEVICE_COOKIE_NAME/.test(read(rel.startsWith('../lib/') ? rel.slice(3) : `routes/${rel}`)))
     assert.deepEqual(users.sort(), ['../lib/deviceCookie.ts', 'auth.ts'].sort())
     const auth = read('routes/auth.ts')
     for (const [start, end] of [["app.post('/login'", "app.post('/logout'"], ["app.post('/otp/verify'", '// POST /api/auth/session-duration'], ["app.get('/oauth/callback'", 'app.post(\'/oauth/complete\'']]) {
       const block = auth.slice(auth.indexOf(start), auth.indexOf(end, auth.indexOf(start)))
-      assert.ok(block.includes('resolveAndPinDevice('), `${start} resolves the device through the cookie`)
-      assert.ok(block.indexOf('resolveAndPinDevice(') < block.indexOf('checkDeviceTrust('), `${start} resolves before the gate`)
-      assert.ok(block.indexOf('requiresDeviceApproval(') < block.indexOf('resolveAndPinDevice('), `${start} resolves only for accounts the gate applies to`)
+      assert.ok(block.includes('resolveDeviceId('), `${start} resolves the device through the cookie`)
+      assert.ok(block.indexOf('resolveDeviceId(') < block.indexOf('checkDeviceTrust('), `${start} resolves before the gate`)
+      assert.ok(block.indexOf('requiresDeviceApproval(') < block.indexOf('resolveDeviceId('), `${start} resolves only for accounts the gate applies to`)
+      assert.ok(block.indexOf('checkDeviceTrust(') < block.indexOf('pinDeviceAfterGate('), `${start} sets the cookie only after the gate answered (review H1)`)
+      assert.ok(!block.includes('pinDeviceCookie('), `${start} never pins a cookie by hand`)
     }
   })
 

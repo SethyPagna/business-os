@@ -62,7 +62,7 @@ export async function checkDeviceTrust(
   userId: number,
   deviceId: string | null | undefined,
   meta: { deviceName?: string | null; userAgent?: string | null; ip?: string | null; country?: string | null; cookieVerified?: boolean },
-): Promise<{ status: 'approved'; shopDeviceId?: number } | { status: 'pending'; created: boolean; replacedDeviceId?: string; claimedRowId?: number } | { status: 'rejected' | 'missing_device_id' }> {
+): Promise<{ status: 'approved'; shopDeviceId?: number } | { status: 'pending'; created: boolean; replacedDeviceId?: string; claimedRowId?: number; heldByOther?: boolean } | { status: 'rejected' | 'missing_device_id' }> {
   if (!isValidDeviceId(deviceId)) {
     // A client that doesn't send a usable device id (missing, over-long or
     // outside [A-Za-z0-9_-]; e.g. an old cached
@@ -82,11 +82,12 @@ export async function checkDeviceTrust(
   const found = await db.prepare(`
     SELECT td.*, s.id AS shop_device_row_id, s.marked_at AS shop_marked_at,
       s.last_seen_at AS shop_last_seen_at, s.last_ip AS shop_last_ip, s.last_country AS shop_last_country,
-      (SELECT 1 FROM shop_devices r WHERE r.device_id = @device_id AND r.unmarked_at IS NOT NULL LIMIT 1) AS shop_retired
+      (SELECT 1 FROM shop_devices r WHERE r.device_id = @device_id AND r.unmarked_at IS NOT NULL LIMIT 1) AS shop_retired,
+      (SELECT 1 FROM trusted_devices o WHERE o.device_id = @device_id AND o.user_id != @user_id LIMIT 1) AS held_by_other
     FROM (SELECT 1 AS one) base
     LEFT JOIN trusted_devices td ON td.user_id = @user_id AND td.device_id = @device_id
     LEFT JOIN shop_devices s ON @shop_ok = 1 AND s.device_id = @device_id AND s.unmarked_at IS NULL
-  `).get<(Partial<TrustedDeviceRow> & { shop_device_row_id: number | null; shop_marked_at: string | null; shop_last_seen_at: string | null; shop_last_ip: string | null; shop_last_country: string | null; shop_retired: number | null }) | undefined>({ user_id: userId, device_id: deviceId, shop_ok: meta.cookieVerified ? 1 : 0 })
+  `).get<(Partial<TrustedDeviceRow> & { shop_device_row_id: number | null; shop_marked_at: string | null; shop_last_seen_at: string | null; shop_last_ip: string | null; shop_last_country: string | null; shop_retired: number | null; held_by_other: number | null }) | undefined>({ user_id: userId, device_id: deviceId, shop_ok: meta.cookieVerified ? 1 : 0 })
   const existing = found && found.id != null ? (found as TrustedDeviceRow) : null
   const shopDeviceId = found?.shop_device_row_id ?? null
   // A device cookie is only ever issued when the signing key exists, so only then is "has had a cookie" a fact about the row.
@@ -145,7 +146,7 @@ export async function checkDeviceTrust(
     // Only a row this call created raises the alert; a retry or a lost race does not.
     const created = Number(inserted?.changes || 0) > 0
     if (created) await broadcast(env, 'notifications', { type: 'device_pending' })
-    return { status: initialStatus, created }
+    return { status: initialStatus, created, ...(found?.held_by_other ? { heldByOther: true } : {}) }
   }
 
   if (existing.status === 'approved') {
