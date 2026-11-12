@@ -103,13 +103,15 @@ export async function checkDeviceTrust(
   const retiredShopId = Boolean(found?.shop_retired) && !markedShopId
   const markedWithoutCookie = Boolean(markedShopId) && !meta.cookieVerified
   if (cookiesOn && (retiredShopId || markedWithoutCookie || (existing?.status === 'approved' && existing.cookie_bound_at && !meta.cookieVerified))) {
+    // A claim is only a claim when the id came without its cookie: the genuine device, cookie in hand, on a retired id is not claiming anything (L-2).
+    const claimed = existing?.status === 'approved' && !meta.cookieVerified ? existing : null
     const fresh = crypto.randomUUID()
     const made = await db.prepare(`
       INSERT INTO trusted_devices (user_id, device_id, device_name, user_agent, first_ip, last_ip, first_country, last_country, status, decided_at, cookie_bound_at, claimed_approval_ref)
       VALUES (@user_id, @device_id, @device_name, @user_agent, @ip, @ip, @country, @country, 'pending', NULL, CURRENT_TIMESTAMP, @claimed)
-    `).run({ claimed: existing?.status === 'approved' ? existing.id : null, user_id: userId, device_id: fresh, device_name: meta.deviceName || null, user_agent: meta.userAgent || null, ip: meta.ip || null, country: meta.country || null })
+    `).run({ claimed: claimed ? claimed.id : null, user_id: userId, device_id: fresh, device_name: meta.deviceName || null, user_agent: meta.userAgent || null, ip: meta.ip || null, country: meta.country || null })
     if (Number(made?.changes || 0) > 0) await broadcast(env, 'notifications', { type: 'device_pending' })
-    return { status: 'pending', created: true, replacedDeviceId: fresh, ...(existing?.status === 'approved' ? { claimedRowId: existing.id } : {}) }
+    return { status: 'pending', created: true, replacedDeviceId: fresh, ...(claimed ? { claimedRowId: claimed.id } : {}) }
   }
 
   // Only a refusal an administrator made after marking the device outranks the

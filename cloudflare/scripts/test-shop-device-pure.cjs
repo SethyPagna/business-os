@@ -544,6 +544,21 @@ async function suite(mutate, label) {
     assert.deepEqual(live(w.h), [203, 204, 205], 'the tagged sessions are revoked, nothing else')
   })
 
+  await check('20. L-2: the claimed-id warning is only for an id that arrived without its cookie; the genuine device with its cookie on a retired id claims nothing', async () => {
+    const w = setup(mutate)
+    await markTill(w)
+    await w.call(`/shop/${shopIdOf(w.h)}/unmark`)
+    approve(w.h, TILL, 12) // an approved row that still names the retired id
+    const claimedOf = (deviceId) => w.h.raw.prepare('SELECT claimed_approval_ref AS c FROM trusted_devices WHERE device_id = @d').get({ d: deviceId }).c
+    const genuine = await signIn(w, { username: 'dara', deviceId: TILL, cookieFor: TILL })
+    assert.equal(genuine.body.deviceApprovalRequired, true)
+    assert.equal(claimedOf(genuine.body.deviceId), null, 'cookie in hand: nothing claimed')
+    assert.equal(w.trustAudits.some((a) => a.details && a.details.claimedTrustedDeviceRowId), false)
+    const bodyOnly = await signIn(w, { username: 'dara', deviceId: TILL })
+    assert.equal(bodyOnly.body.deviceApprovalRequired, true)
+    assert.equal(claimedOf(bodyOnly.body.deviceId), rowId(w.h, 12, TILL), 'no cookie: the claim is recorded')
+  })
+
   await check('17. the pending list tells the administrator which approved device a request claimed (L4); a plain new device claims nothing', async () => {
     const w = setup(mutate)
     approve(w.h, 'claimed-phone-0001', 12)
@@ -584,6 +599,7 @@ const mutants = [
   ['a retired id can be marked again', inFile('routes/devices.ts', 'if (device.shop_retired) {', 'if (false) {'), ['16.']],
   ['a pending row forgets which approved device it claimed', inFile('lib/deviceTrust.ts', "claimed: existing?.status === 'approved' ? existing.id : null", 'claimed: null'), ['17.']],
   ['marking does not tag the sessions it orphans (L-1)', inFile('routes/devices.ts', 'const approvedUserIds = [...new Set(', 'const approvedUserIds: number[] = [] || [...new Set('), ['19.', '14.']],
+  ['a verified cookie on a retired id is still reported as a claim (L-2)', inFile('lib/deviceTrust.ts', "existing?.status === 'approved' && !meta.cookieVerified ? existing : null", "existing?.status === 'approved' ? existing : null"), ['20.']],
   ['marking from a pending request is refused', inFile('routes/devices.ts', "device.status !== 'approved' && device.status !== 'pending'", "device.status !== 'approved'"), ['13.']],
 ]
 
