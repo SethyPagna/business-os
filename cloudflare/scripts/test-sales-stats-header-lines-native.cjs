@@ -59,6 +59,12 @@ async function createSale(world, rows, paid, partUsd = 0) {
   return r.json.id || r.json.sale_id || r.json.sale?.id
 }
 
+// The sales these flows create are stamped by the real clock, so a fixed calendar window stops containing them the day after it was written
+// (the report then answers 200 for an empty range and the refusal assertions below fail). The window is the Cambodia business day (UTC+7)
+// the sale falls on, padded by one day each side so a run across midnight still contains it.
+const dayOf = (offsetDays) => new Date(Date.now() + 7 * 3600e3 + offsetDays * 86400e3).toISOString().slice(0, 10)
+const WINDOW = `startDate=${dayOf(-1)}&endDate=${dayOf(1)}`
+
 const stats = async (world, qs = '') => { const r = await world.send('GET', '/api/sales/stats' + qs, undefined, { miss: true }); return r.status + ' ' + r.text }
 
 // Not Paid sale (part paid at creation) + a line added later; returns the stats bodies after each step.
@@ -71,7 +77,7 @@ async function addedLaterFlow(world) {
   let r = await postWithQuotes(world, 'POST', `/api/sales/${id}/items`, add)
   if (r.status >= 300) throw new Error('add line answered ' + r.status + ' ' + r.text.slice(0, 400))
   seen.added = await stats(world)
-  seen.window = await stats(world, '?startDate=2026-11-11&endDate=2026-11-12')
+  seen.window = await stats(world, `?${WINDOW}`)
   return seen
 }
 
@@ -106,10 +112,10 @@ const withWorld = async (opts, fn) => { const w = await bootWorld({ tier: 'free'
     const line = (await world.all('SELECT id FROM sale_items WHERE sale_id = ? ORDER BY id LIMIT 1', id))[0]
     await world.db.prepare('UPDATE sale_items SET total_usd = 1.23456 WHERE id = ?').bind(line.id).run()
     assert.equal(await stats(world), before, '/stats must answer with the numbers it gave before the corruption')
-    const report = await world.send('GET', '/api/reports/overview?startDate=2026-11-11&endDate=2026-11-12', undefined, { miss: true })
+    const report = await world.send('GET', `/api/reports/overview?${WINDOW}`, undefined, { miss: true })
     assert.ok(report.status >= 400 && /unsupported money|invalid_saved_money|unsupported_row/i.test(report.text), `the full report must still refuse the corrupt line (got ${report.status} ${report.text.slice(0, 160)})`)
     // review M4: the Dashboard reads the same lines through the full kernel, so it must refuse the corrupt line as well (never answer with stale-looking figures)
-    for (const url of ['/api/dashboard/startup?startDate=2026-11-11&endDate=2026-11-12&granularity=day', '/api/analytics?startDate=2026-11-11&endDate=2026-11-12']) {
+    for (const url of [`/api/dashboard/startup?${WINDOW}&granularity=day`, `/api/analytics?${WINDOW}`]) {
       const dash = await world.send('GET', url, undefined, { miss: true })
       assert.ok(dash.status >= 400 && /unsupported money|invalid_saved_money|unsupported_row/i.test(dash.text), `${url} must refuse the corrupt line (got ${dash.status} ${dash.text.slice(0, 160)})`)
     }
