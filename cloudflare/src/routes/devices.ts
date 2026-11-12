@@ -4,6 +4,7 @@ import { requireAuth, revokeSessionsForDevice, revokeUserSessions, type SessionU
 import { audit } from '../lib/audit'
 import { isAdminControlUser } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
+import { buildInClause, chunkForBinding } from '../lib/sqlBinding'
 import type { Env } from '../index'
 import { maxApprovedDevicesPerUser, countApprovedDevices, type TrustedDeviceRow } from '../lib/deviceTrust'
 
@@ -591,8 +592,17 @@ app.post('/:id/mark-shop', async (c) => {
   // new marking in the same batch, so unmarking revokes them like any other shop sign-in (otherwise they outlive the unmark with no approval behind
   // them and no device row an administrator could revoke). Only the accounts whose approved row is deleted: an administrator's session is never touched.
   const approvedUserIds = [...new Set((waiting || []).filter((row) => row.status === 'approved').map((row) => row.user_id))]
-  const sessionParams: Record<string, string | number> = { device_id: device.device_id }
-  approvedUserIds.forEach((userId, index) => { sessionParams[`u${index}`] = userId })
+  // One UPDATE per chunk of accounts: D1 refuses more than 100 bound parameters and @device_id is bound three times in each statement.
+  const tagStatements = chunkForBinding(approvedUserIds, 3).map((chunk) => {
+    const list = buildInClause('u', chunk)
+    return {
+      sql: `UPDATE user_sessions SET shop_device_id = (SELECT id FROM shop_devices WHERE device_id = @device_id AND unmarked_at IS NULL)
+        WHERE device_id = @device_id AND revoked_at IS NULL AND shop_device_id IS NULL
+          AND user_id IN (${list.sql})
+          AND EXISTS (SELECT 1 FROM shop_devices WHERE device_id = @device_id AND unmarked_at IS NULL)`,
+      params: { device_id: device.device_id, ...list.params } as Record<string, string | number>,
+    }
+  })
   // A pending request whose id another account already holds an approved device for is a browser that learned that id (it is not secret): marking it
   // would delete the other account's approval and open that device to every employee. Refuse; the administrator declines it, or marks the approved device.
   if (device.status === 'pending' && (waiting || []).some((row) => row.status === 'approved' && row.user_id !== device.user_id)) {
@@ -615,17 +625,11 @@ app.post('/:id/mark-shop', async (c) => {
         sql: `DELETE FROM trusted_devices WHERE device_id = @device_id AND status IN ('pending', 'approved') AND changes() = 1`,
         params: { device_id: device.device_id },
       },
-      ...(approvedUserIds.length ? [{
-        sql: `UPDATE user_sessions SET shop_device_id = (SELECT id FROM shop_devices WHERE device_id = @device_id AND unmarked_at IS NULL)
-          WHERE device_id = @device_id AND revoked_at IS NULL AND shop_device_id IS NULL
-            AND user_id IN (${approvedUserIds.map((_, index) => `@u${index}`).join(', ')})
-            AND EXISTS (SELECT 1 FROM shop_devices WHERE device_id = @device_id AND unmarked_at IS NULL)`,
-        params: sessionParams,
-      }] : []),
+      ...tagStatements,
     ])
     inserted = { changes: Number(results[0]?.meta?.changes || 0) }
     closed = Number(results[1]?.meta?.changes || 0)
-    tagged = approvedUserIds.length ? Number(results[2]?.meta?.changes || 0) : 0
+    tagged = results.slice(2).reduce((sum, result) => sum + Number(result?.meta?.changes || 0), 0)
   } catch (error) {
     if (error instanceof Error && /UNIQUE/i.test(error.message)) {
       return c.json({ error: 'This device is already marked as a shop device.', code: 'shop_device_exists' }, 409)
