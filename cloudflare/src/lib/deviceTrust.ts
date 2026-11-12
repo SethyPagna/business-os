@@ -77,8 +77,9 @@ export async function checkDeviceTrust(
   // One statement answers both questions: this account's own row for the
   // device, and whether an administrator has marked the device as a shop
   // device. The base row keeps the shop answer when the account has no row.
-  // The shop join only matches when the id came from the verified device
-  // cookie, so a client-chosen body id can never claim a shop device.
+  // The marking is read whether or not the cookie verified, and only USED when it did:
+  // a client-chosen body id can never claim a shop device, and the till's own id arriving
+  // without its cookie must not create a pending row on it (review M-1).
   const found = await db.prepare(`
     SELECT td.*, s.id AS shop_device_row_id, s.marked_at AS shop_marked_at,
       s.last_seen_at AS shop_last_seen_at, s.last_ip AS shop_last_ip, s.last_country AS shop_last_country,
@@ -86,19 +87,22 @@ export async function checkDeviceTrust(
       (SELECT 1 FROM trusted_devices o WHERE o.device_id = @device_id AND o.user_id != @user_id LIMIT 1) AS held_by_other
     FROM (SELECT 1 AS one) base
     LEFT JOIN trusted_devices td ON td.user_id = @user_id AND td.device_id = @device_id
-    LEFT JOIN shop_devices s ON @shop_ok = 1 AND s.device_id = @device_id AND s.unmarked_at IS NULL
-  `).get<(Partial<TrustedDeviceRow> & { shop_device_row_id: number | null; shop_marked_at: string | null; shop_last_seen_at: string | null; shop_last_ip: string | null; shop_last_country: string | null; shop_retired: number | null; held_by_other: number | null }) | undefined>({ user_id: userId, device_id: deviceId, shop_ok: meta.cookieVerified ? 1 : 0 })
+    LEFT JOIN shop_devices s ON s.device_id = @device_id AND s.unmarked_at IS NULL
+  `).get<(Partial<TrustedDeviceRow> & { shop_device_row_id: number | null; shop_marked_at: string | null; shop_last_seen_at: string | null; shop_last_ip: string | null; shop_last_country: string | null; shop_retired: number | null; held_by_other: number | null }) | undefined>({ user_id: userId, device_id: deviceId })
   const existing = found && found.id != null ? (found as TrustedDeviceRow) : null
-  const shopDeviceId = found?.shop_device_row_id ?? null
+  const markedShopId = found?.shop_device_row_id ?? null
+  const shopDeviceId = meta.cookieVerified ? markedShopId : null
   // A device cookie is only ever issued when the signing key exists, so only then is "has had a cookie" a fact about the row.
   const cookiesOn = Boolean(env.APP_ENCRYPTION_KEY)
 
-  // Two cases where the presented id is no longer enough and the browser becomes a new one with a fresh pending id (the caller pins it):
+  // Three cases where the presented id is no longer enough and the browser becomes a new one with a fresh pending id (the caller pins it):
   //  - this browser's cookie was issued for the approved row, but the id arrived without it (typed into a request body, or the cookie was cleared);
   //  - the id belonged to a shop device that an administrator has since unmarked. The id is retired: whoever still holds a copy of its cookie
   //    gets nothing from it, and the till itself continues under its new id, which the administrator marks from its pending request.
-  const retiredShopId = Boolean(found?.shop_retired) && !shopDeviceId
-  if (cookiesOn && (retiredShopId || (existing?.status === 'approved' && existing.cookie_bound_at && !meta.cookieVerified))) {
+  //  - the id is the one of a marked till and arrived without its cookie: the till's own id is never given a pending row, so no stale request can be declined or approved on it.
+  const retiredShopId = Boolean(found?.shop_retired) && !markedShopId
+  const markedWithoutCookie = Boolean(markedShopId) && !meta.cookieVerified
+  if (cookiesOn && (retiredShopId || markedWithoutCookie || (existing?.status === 'approved' && existing.cookie_bound_at && !meta.cookieVerified))) {
     const fresh = crypto.randomUUID()
     const made = await db.prepare(`
       INSERT INTO trusted_devices (user_id, device_id, device_name, user_agent, first_ip, last_ip, first_country, last_country, status, decided_at, cookie_bound_at, claimed_approval_ref)

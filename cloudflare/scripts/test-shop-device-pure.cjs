@@ -97,6 +97,8 @@ const approve = (h, deviceId, userId = 10) => h.raw.prepare(`INSERT INTO trusted
   VALUES (@userId, @deviceId, 'Till tablet', 'approved', CURRENT_TIMESTAMP)`).run({ userId, deviceId })
 const rowId = (h, userId, deviceId) => h.raw.prepare('SELECT id FROM trusted_devices WHERE user_id = @userId AND device_id = @deviceId').get({ userId, deviceId }).id
 const sessionsOf = (h) => h.raw.prepare('SELECT id, user_id, device_id, shop_device_id, revoked_at FROM user_sessions ORDER BY id').all({}).map((r) => ({ ...r }))
+const deviceCookies = (res) => res.headers.getSetCookie().filter((l) => l.startsWith(`${COOKIE}=`)).map((l) => l.split(';')[0].slice(COOKIE.length + 1))
+const cookieIdOf = (value) => decodeURIComponent(value).split('.')[0]
 const live = (h) => sessionsOf(h).filter((s) => !s.revoked_at).map((s) => s.id)
 
 async function markTill(world, deviceId = TILL, label = 'Till 1') {
@@ -186,6 +188,38 @@ async function suite(mutate, label) {
     assert.equal(otherCookie.body.deviceApprovalRequired, true)
     assert.equal(sessionsOf(w.h).length, 0, 'no session was issued')
     assert.ok(trusted(w.h, 12).length >= 1 && trusted(w.h, 12).every((r) => r.status === 'pending'), 'only pending rows, for an admin to decide')
+    assert.ok(trusted(w.h, 12).every((r) => r.device_id !== TILL), "none of them on the till's own id (M-1): each is a fresh id")
+    for (const res of [noCookie, forged, otherCookie]) assert.ok(deviceCookies(res).every((v) => cookieIdOf(v) !== TILL), 'no cookie for the till id is emitted (H1)')
+  })
+
+  await check('2a. H1 on a marked till: a body-only sign-in emits at most one device cookie, never the till id, and replaying each signs nobody in', async () => {
+    const w = setup(mutate)
+    await markTill(w)
+    const attempt = await signIn(w, { deviceId: TILL })
+    assert.equal(attempt.body.deviceApprovalRequired, true)
+    const values = deviceCookies(attempt)
+    assert.deepEqual(values.map(cookieIdOf), [attempt.body.deviceId], 'one cookie, for the fresh id')
+    assert.notEqual(attempt.body.deviceId, TILL)
+    for (const value of values) for (const body of [TILL, attempt.body.deviceId, undefined]) {
+      const again = await signIn(w, { deviceId: body, cookie: value })
+      assert.equal(again.body.success, undefined, 'the emitted cookie is no key to the till')
+      assert.equal(again.body.deviceApprovalRequired, true)
+    }
+    assert.equal(sessionsOf(w.h).length, 0)
+  })
+
+  await check('2c. M-1: a cookie-less sign-in on a marked till never creates a row on the till id, so no stale request can be declined onto the till or survive an unmark', async () => {
+    const w = setup(mutate)
+    await markTill(w)
+    const lost = await signIn(w, { deviceId: TILL })
+    assert.equal(w.h.raw.prepare('SELECT COUNT(*) AS n FROM trusted_devices WHERE device_id = @d').get({ d: TILL }).n, 0, 'no row on the till id')
+    const queue = (await w.call('/pending', 'GET')).body.devices
+    assert.deepEqual(queue.map((d) => d.device_id), [lost.body.deviceId], 'the queue holds only the fresh id')
+    assert.equal((await w.call(`/${queue[0].id}/reject`)).status, 200, 'declining it')
+    const genuine = await signIn(w, { username: 'dara', deviceId: TILL, cookieFor: TILL })
+    assert.equal(genuine.body.success, true, 'the till with its real cookie is not locked out by that decline')
+    await w.call(`/shop/${shopIdOf(w.h)}/unmark`)
+    assert.equal(w.h.raw.prepare('SELECT COUNT(*) AS n FROM trusted_devices WHERE device_id = @d').get({ d: TILL }).n, 0, 'nothing is left on the retired id')
   })
 
   await check('2b. with no signing key configured no cookie is trusted, so a marked device falls back to per-account approval', async () => {
@@ -457,6 +491,26 @@ async function suite(mutate, label) {
     assert.equal(stale.body.deviceApprovalRequired, true, 'the copied cookie of the old id still gets nothing')
   })
 
+  await check('18. M-1: an approval on a retired till id is refused with 409 shop_device_retired, by /approve and /approve-replacing, and the row stays pending', async () => {
+    const w = setup(mutate)
+    await markTill(w)
+    await w.call(`/shop/${shopIdOf(w.h)}/unmark`)
+    w.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status) VALUES (12, @d, 'pending')").run({ d: TILL })
+    const id = rowId(w.h, 12, TILL)
+    const plain = await w.call(`/${id}/approve`)
+    assert.equal(plain.status, 409)
+    assert.equal(plain.body.code, 'shop_device_retired')
+    approve(w.h, 'old-phone-0001', 12)
+    const replacing = await w.call(`/${id}/approve-replacing`, 'POST', { revokeId: rowId(w.h, 12, 'old-phone-0001') })
+    assert.equal(replacing.status, 409)
+    assert.equal(replacing.body.code, 'shop_device_retired')
+    assert.equal(trusted(w.h, 12).find((r) => r.device_id === TILL).status, 'pending')
+    assert.equal(trusted(w.h, 12).find((r) => r.device_id === 'old-phone-0001').status, 'approved', 'the old device was not revoked either')
+    approve(w.h, 'ordinary-phone-01', 10)
+    w.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status) VALUES (10, 'other-new-phone-1', 'pending')").run({})
+    assert.equal((await w.call(`/${rowId(w.h, 10, 'other-new-phone-1')}/approve`)).status, 200, 'an ordinary request is approved as before')
+  })
+
   await check('17. the pending list tells the administrator which approved device a request claimed (L4); a plain new device claims nothing', async () => {
     const w = setup(mutate)
     approve(w.h, 'claimed-phone-0001', 12)
@@ -479,7 +533,10 @@ async function suite(mutate, label) {
 const shopIdOf = (h) => h.raw.prepare('SELECT id FROM shop_devices WHERE unmarked_at IS NULL').get({}).id
 const inFile = (file, from, to) => (text, rel) => (rel === file ? text.replace(from, to) : text)
 const mutants = [
-  ['body id may claim a shop device (cookie gate removed)', inFile('lib/deviceTrust.ts', '@shop_ok = 1 AND', '1 = 1 AND'), ['2.']],
+  ['body id may claim a shop device (both cookie gates removed: the shop path and the fresh-id guard for a marked id)', (text, rel) => (rel === 'lib/deviceTrust.ts' ? text.replace('const shopDeviceId = meta.cookieVerified ? markedShopId : null', 'const shopDeviceId = markedShopId').replace('const markedWithoutCookie = Boolean(markedShopId) && !meta.cookieVerified', 'const markedWithoutCookie = false') : text), ['2.', '2a.']],
+  ['a marked till id without its cookie gets a pending row again (M-1)', inFile('lib/deviceTrust.ts', 'const markedWithoutCookie = Boolean(markedShopId) && !meta.cookieVerified', 'const markedWithoutCookie = false'), ['2.', '2a.', '2c.']],
+  ['/approve ignores a retired id', inFile('routes/devices.ts', 'if (await isRetiredShopId(db, device.device_id)) return c.json(RETIRED_SHOP_ID_ANSWER, 409)\n\n', ''), ['18.']],
+  ['/approve-replacing ignores a retired id', (text, rel) => { if (rel !== 'routes/devices.ts') return text; const s = 'if (await isRetiredShopId(db, device.device_id)) return c.json(RETIRED_SHOP_ID_ANSWER, 409)\n\n  const params'; return text.replace(s, '\n  const params') }, ['18.']],
   ['shop path removed (pre-slice behaviour)', inFile('lib/deviceTrust.ts', 'if (shopDeviceId && !refusedAfterMarking', 'if (false && !refusedAfterMarking'), ['1.', '1b.', '3.']],
   ['unmark does not revoke sessions', inFile('routes/devices.ts', 'WHERE revoked_at IS NULL\n          AND (shop_device_id', 'WHERE 0 AND revoked_at IS NULL\n          AND (shop_device_id'), ['3.']],
   ['unmark revokes by device id (kills the admin session too)', inFile('routes/devices.ts', 'AND (shop_device_id = @id OR', 'AND (device_id = (SELECT device_id FROM shop_devices WHERE id = @id) OR'), ['3.']],

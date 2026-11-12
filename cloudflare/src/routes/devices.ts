@@ -158,6 +158,15 @@ app.get('/', async (c) => {
   return c.json({ devices: rows || [], limit: MAX_APPROVED_DEVICES_PER_USER })
 })
 
+// A request on the id of a till that was marked and then unmarked is dead: the id is retired and the browser
+// continues under a fresh one, so approving it would be an approval nobody can use (review M-1).
+async function isRetiredShopId(db: ReturnType<typeof getDb>, deviceId: string): Promise<boolean> {
+  const row = await db.prepare('SELECT 1 AS n FROM shop_devices WHERE device_id = @device_id AND unmarked_at IS NOT NULL LIMIT 1').get<{ n: number }>({ device_id: deviceId })
+  return Boolean(row)
+}
+
+const RETIRED_SHOP_ID_ANSWER = { error: 'This request is on the id of a shop device that was unmarked, so an approval would not work. Ask the employee to sign in again.', code: 'shop_device_retired' } as const
+
 app.post('/:id/approve', async (c) => {
   const id = c.req.param('id')
   const admin = c.get('user')
@@ -178,6 +187,8 @@ app.post('/:id/approve', async (c) => {
   // Repeating an approval after a successful decision is harmless and must
   // stay idempotent even if the account is now at the approved-device cap.
   if (device.status === 'approved') return c.json({ success: true, idempotent: true })
+
+  if (await isRetiredShopId(db, device.device_id)) return c.json(RETIRED_SHOP_ID_ANSWER, 409)
 
   // At most MAX_APPROVED_DEVICES_PER_USER approved devices per account (owner
   // rule, 5 since 12 Nov 2026). Excluding this row keeps re-approving an already-approved
@@ -275,6 +286,7 @@ app.post('/:id/approve-replacing', async (c) => {
   if (!old || old.user_id !== device.user_id || old.status !== 'approved') {
     return c.json({ error: 'Choose an approved device of the same account to replace.', code: 'device_replace_invalid' }, 400)
   }
+  if (await isRetiredShopId(db, device.device_id)) return c.json(RETIRED_SHOP_ID_ANSWER, 409)
 
   const params = {
     id: device.id,
