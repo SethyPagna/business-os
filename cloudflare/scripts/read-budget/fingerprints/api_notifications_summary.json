@@ -29,16 +29,20 @@
    "SELECT id, type, status, warning_count, created_at, finished_at FROM import_jobs WHERE warning_count > 0 AND s"
   ],
   [
+   "8bb1146dc3c5",
+   "SELECT td.id, td.device_name, td.user_agent, td.requested_at, u.username, u.name AS user_name FROM trusted_dev"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
    "bc1cb7fe10f3",
    "SELECT id, user_id, user_name, details, created_at FROM audit_logs WHERE action = 'device_login_new_country' A"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
    "ba6c9bdbac80",
