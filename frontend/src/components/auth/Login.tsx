@@ -716,7 +716,7 @@ export default function Login() {
         if (answer?.status === 'approved') onDeviceApproved()
         else if (answer?.status === 'rejected') setError(tr('device_rejected', 'This device was denied access by an administrator.'))
         else if (answer?.status === 'pending') setError(tr('device_still_waiting', 'Still waiting for an administrator to approve this device.'))
-        else setDeviceWaitStopped(true)
+        else { setDeviceTicket(''); setDeviceWaitStopped(true) }
       } catch (checkError) {
         setError(getErrorMessage(checkError, tr('login_failed_try_again', 'Login failed. Please try again.')))
       } finally {
@@ -738,7 +738,7 @@ export default function Login() {
       onApproved: onDeviceApproved,
       onStopped: (reason) => {
         if (reason === 'rejected') setError(tr('device_rejected', 'This device was denied access by an administrator.'))
-        else setDeviceWaitStopped(true)
+        else { setDeviceTicket(''); setDeviceWaitStopped(true) }
       },
     })
     return stop
