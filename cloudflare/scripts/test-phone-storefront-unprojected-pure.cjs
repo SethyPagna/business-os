@@ -12,8 +12,8 @@ const ts = require('typescript')
 const { Hono } = require('hono')
 
 const LIB = path.join(__dirname, '..', 'src', 'lib')
-const NUMBER = '097 211 822'
-const MASKED = '097 *** 822'
+const NUMBER = '012 345 678'
+const MASKED = '012 *** 678'
 const STAFF = { id: 7, role_code: 'employee', permissions: '{}', role_permissions: '{}' }
 
 function load(mutateMiddleware) {
