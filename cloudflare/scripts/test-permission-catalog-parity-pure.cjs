@@ -413,7 +413,9 @@ const PENDING_OWNER = {
 }
 const MASTER_KEY = { all: 'The administrator override, evaluated by isAdminControlUser in lib/permissions.ts.' }
 // Keys the Worker checks that the editor has no key for.
-const WORKER_ONLY_KEYS = {}
+const WORKER_ONLY_KEYS = {
+  contacts_full_phone: 'Every signed-in staff session reads full numbers (owner, 12 Nov 2026); lib/phoneAccess.ts keeps the grant check as holdsFullPhoneGrant, the switch-back, so there is no editor row.',
+}
 // Rows that show Review as blocked although a gate on the same action only stops 'none': the route first
 // refuses a Review caller outright, then honours the switch for a Full Access one.
 const REFUSED_AT_PARTIAL = {

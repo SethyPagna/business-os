@@ -16,6 +16,8 @@ const path = require('node:path')
 
 const RUNS = [
   ['crawl', 'no-egress-projection', {}],
+  ['crawl', 'live rule: the grant is required again', {}],
+  ['crawl', 'live rule: a request with no session reads in full', {}],
   ['crawl', 'one-route-bypasses-c-json', { PHONE_CRAWL_FILTER: 'api/sales/delivery-options' }],
   ['crawl', 'duplicate pair value kept', { PHONE_CRAWL_FILTER: 'duplicates' }],
   ['crawl', 'people: contact_person is not a name', { PHONE_CRAWL_FILTER: 'api/suppliers?page=1' }],
@@ -36,7 +38,7 @@ const RUNS = [
     'merge accepts a masked custom phone', 'mask matched against any stored number, first hit wins', 'option mask resolved against all stored options',
     'asterisk phone that is not a mask saved as typed', 'position match trusted without a uniqueness check',
     'duplicate dismissal accepts a mask'].map((name) => ['write', name, {}]),
-  ...['write: the masked values are not taken out of the request', 'write: the masked values are also taken out of an account that holds the grant', 'write: any text that contains *** is taken for a mask', 'catalog: a product or branch name is masked like a person', 'people: contact_person and cashier are not names',
+  ...['write: the masked values are not taken out of the request', 'write: the scrub skips an account that holds the grant', 'write: any text that contains *** is taken for a mask', 'catalog: a product or branch name is masked like a person', 'people: contact_person and cashier are not names',
     'people: username is not a name', 'people: the cashiers list key is shown',
     'search: the legacy deleted reason is read raw', 'search: the legacy deleted cashier filter reads the number'].map((name) => ['text', name, {}]),
 ]

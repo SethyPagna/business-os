@@ -1,7 +1,8 @@
 'use strict'
 // P2.8 (6.0.1046): "no lost function" evidence. Compares what the accounts that HOLD contacts_full_phone read on the lane with
 // what the same accounts read on the base commit, route by route (PHONE_DUMP written by test-phone-leak-crawl-native.cjs, run once
-// on each commit against the same seeded world). A holder must read today's output.
+// on each commit against the same seeded world; take the lane dump with PHONE_RULE=grant, the switch-back, where the holders are the four
+// accounts that hold the grant). A holder must read today's output.
 //
 // Four kinds of difference are explained, everything else fails the run:
 //   - the new permission key itself: the catalog now knows contacts_full_phone, so role and profile JSON list it;

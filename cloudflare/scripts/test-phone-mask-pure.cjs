@@ -2,11 +2,14 @@
 // P2.8 (6.0.1046): the one phone mask (lib/phoneMask.ts) and the projection that applies it (lib/phoneAccess.ts).
 //
 // Real transpiled sources. Part 1 pins the format (Khmer digits, +855 forms, short numbers, idempotence). Part 2 pins
-// who holds the grant (admin implicit, role and user overrides, nothing implies it). Part 3 pins the projection over
+// who sees full numbers (every signed-in session, owner 12 Nov 2026; no session stays masked) and who holds the old
+// grant, kept as the switch-back (holdsFullPhoneGrant: admin implicit, role and user overrides, nothing implies it). Part 3 pins the projection over
 // every shape a phone travels in (picker row, sale row, Contact Options JSON, serialized envelopes, phone-shaped
 // names, arrays, nested records) and that it is a pure function (input untouched, same reference when nothing to
-// hide, same reference for a holder). Part 4 runs MUTANTS of the same sources through the same assertions: each one
-// must fail, so a green run cannot be a test that checks nothing.
+// hide, same reference for a holder). Part 3 runs against the switch-back copy of the source (canSeeFullPhones swapped
+// for holdsFullPhoneGrant), because under the live rule only a null actor is masked and the machinery would go
+// unexercised. Part 4 runs MUTANTS of the same sources through the same assertions: each one must fail, so a green
+// run cannot be a test that checks nothing.
 //
 // Run (from cloudflare/): node scripts/test-phone-mask-pure.cjs
 const assert = require('node:assert/strict')
@@ -17,7 +20,15 @@ const ts = require('typescript')
 const LIB = path.join(__dirname, '..', 'src', 'lib')
 const read = (name) => fs.readFileSync(path.join(LIB, name), 'utf8').split('\r\n').join('\n')
 
-function load(mutate = {}) {
+// The switch-back: the live rule replaced by the grant check, so a signed-in account without the grant is masked again.
+const SWITCH_BACK = (source) => {
+  const head = 'export function canSeeFullPhones(user: PhoneActor): boolean {'
+  const at = source.indexOf(head)
+  assert.ok(at >= 0, 'switch-back anchor missing')
+  return source.slice(0, at) + head + ' return holdsFullPhoneGrant(user) ' + source.slice(source.indexOf('}', at))
+}
+
+function load(mutate = {}, switchBack = false) {
   const cache = new Map()
   const load1 = (name) => {
     if (cache.has(name)) return cache.get(name).exports
@@ -25,6 +36,7 @@ function load(mutate = {}) {
     cache.set(name, module)
     let source = read(`${name}.ts`)
     if (mutate[name]) source = mutate[name](source)
+    if (switchBack && name === 'phoneAccess') source = SWITCH_BACK(source)
     const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText
     new Function('require', 'module', 'exports', output)((id) => {
       if (id.startsWith('./')) return load1(id.slice(2))
@@ -44,10 +56,10 @@ const admin = user({}, {}, 'admin', 1)
 const cashier = user({ pos: true, contacts: true, sales: true })
 const granted = user({ pos: true, contacts_full_phone: true })
 
-function run(modules) {
+function run(modules, part) {
   const { mask, access } = modules
   const failures = []
-  const check = (name, fn) => { try { fn() } catch (error) { failures.push(`${name}: ${String(error && error.message || error).split('\n')[0]}`) } }
+  const check = (name, fn) => { if (name.startsWith('grant') !== (part === 'policy')) return; try { fn() } catch (error) { failures.push(`${name}: ${String(error && error.message || error).split('\n')[0]}`) } }
 
   // ---- 1. the format -------------------------------------------------------------------------------------------
   check('format table', () => {
@@ -141,21 +153,28 @@ function run(modules) {
   })
 
   // ---- 2. who holds the grant ---------------------------------------------------------------------------------
-  check('grant: administrator implicit, others off until granted, nothing else implies it', () => {
-    assert.equal(access.canSeeFullPhones(admin), true)
-    assert.equal(access.canSeeFullPhones(user({ all: true }, {}, 'manager')), true)
-    assert.equal(access.canSeeFullPhones(cashier), false)
+  check('grant: every signed-in session sees full numbers, no session does not', () => {
+    for (const [who, account] of Object.entries({ admin, cashier, granted, manager: user({ all: true }, {}, 'manager'), bare: user({}), revoked: user({ contacts_full_phone: false }, { contacts_full_phone: false }), 'a stray value': user({ contacts_full_phone: 'true' }) })) {
+      assert.equal(access.canSeeFullPhones(account), true, who)
+    }
     assert.equal(access.canSeeFullPhones(null), false)
     assert.equal(access.canSeeFullPhones(undefined), false)
-    assert.equal(access.canSeeFullPhones(granted), true)
-    assert.equal(access.canSeeFullPhones(user({}, { contacts_full_phone: true })), true, 'granted through the role')
-    assert.equal(access.canSeeFullPhones(user({ contacts_full_phone: false }, { contacts_full_phone: true })), false, 'a person override beats the role')
-    assert.equal(access.canSeeFullPhones(user({ contacts_full_phone: true }, { contacts_full_phone: false })), true, 'a person grant beats the role')
+  })
+  check('grant: the switch-back keeps the old rule (administrator implicit, others off until granted, nothing else implies it)', () => {
+    assert.equal(access.holdsFullPhoneGrant(admin), true)
+    assert.equal(access.holdsFullPhoneGrant(user({ all: true }, {}, 'manager')), true)
+    assert.equal(access.holdsFullPhoneGrant(cashier), false)
+    assert.equal(access.holdsFullPhoneGrant(null), false)
+    assert.equal(access.holdsFullPhoneGrant(undefined), false)
+    assert.equal(access.holdsFullPhoneGrant(granted), true)
+    assert.equal(access.holdsFullPhoneGrant(user({}, { contacts_full_phone: true })), true, 'granted through the role')
+    assert.equal(access.holdsFullPhoneGrant(user({ contacts_full_phone: false }, { contacts_full_phone: true })), false, 'a person override beats the role')
+    assert.equal(access.holdsFullPhoneGrant(user({ contacts_full_phone: true }, { contacts_full_phone: false })), true, 'a person grant beats the role')
     for (const key of ['contacts', 'sales', 'settings', 'pos', 'returns', 'dashboard', 'audit_log', 'review']) {
-      assert.equal(access.canSeeFullPhones(user({ [key]: true })), false, `${key}: true must not imply the grant`)
+      assert.equal(access.holdsFullPhoneGrant(user({ [key]: true })), false, `${key}: true must not imply the grant`)
     }
-    assert.equal(access.canSeeFullPhones(user({ contacts: 'review', contacts_full_phone: 'review' })), false, 'a non-boolean value is not a grant')
-    assert.equal(access.canSeeFullPhones(user({ contacts_full_phone: 'true' })), false)
+    assert.equal(access.holdsFullPhoneGrant(user({ contacts: 'review', contacts_full_phone: 'review' })), false, 'a non-boolean value is not a grant')
+    assert.equal(access.holdsFullPhoneGrant(user({ contacts_full_phone: 'true' })), false)
   })
 
   // ---- 3. the projection ---------------------------------------------------------------------------------------
@@ -283,6 +302,11 @@ function run(modules) {
     const once = access.projectPhones(sale(), cashier)
     assert.deepEqual(access.projectPhones(once, cashier), once)
   })
+  check('grant: under the live rule a signed-in account gets the same object back, no session is masked', () => {
+    const row = customer()
+    for (const account of [cashier, admin, granted]) assert.equal(access.projectPhones(row, account), row)
+    assert.equal(access.projectPhones({ phone: FULL }, null).phone, MASKED)
+  })
   check('no actor is masked, never open', () => {
     assert.equal(access.projectPhones({ phone: FULL }, null).phone, MASKED)
     assert.equal(access.projectPhones({ phone: FULL }, undefined).phone, MASKED)
@@ -337,11 +361,13 @@ function run(modules) {
   return failures
 }
 
-const real = run(load())
+const runAll = (mutate = {}) => [...run(load(mutate), 'policy'), ...run(load(mutate, true), 'projection')]
+const real = runAll()
 assert.deepEqual(real, [], `real sources must pass every check:\n${real.join('\n')}`)
 console.log('PASS phone mask + projection: every check on the real sources')
 
 // ---- 4. mutants: the same assertions must fail on each defective copy ---------------------------------------------
+const LIVE_RULE = ['export function canSeeFullPhones(user: PhoneActor): boolean {', '  return !!user', '}'].join(String.fromCharCode(10))
 const mutants = {
   'masks nothing': { phoneMask: replaceOnce("  if (isMaskedPhone(value)) return value\n  const digits", "  return value\n  const digits") },
   'keeps the middle digits': { phoneMask: replaceOnce('Math.min(3, Math.floor((length - 3) / 2))', 'Math.min(3, Math.floor((length - 1) / 2))') },
@@ -374,12 +400,14 @@ const mutants = {
   'always copies': { phoneAccess: replaceOnce('return out ?? node\n}\n\n// The quoted sentences', 'return { ...source, ...(out ?? {}) }\n}\n\n// The quoted sentences') },
   'quoted number in a message kept': { phoneAccess: replaceOnce('  if (kind & MESSAGE) return maskQuotedPhones(text)\n', '') },
   'message arrays kept': { phoneAccess: replaceOnce('if ((kind & MESSAGE) && !exempt && Array.isArray(value))', 'if (false && Array.isArray(value))') },
+  'live rule needs the grant': { phoneAccess: replaceOnce(LIVE_RULE, 'export function canSeeFullPhones(user: PhoneActor): boolean { return holdsFullPhoneGrant(user) }') },
+  'live rule opens to no session': { phoneAccess: replaceOnce(LIVE_RULE, 'export function canSeeFullPhones(user: PhoneActor): boolean { return true }') },
   'no actor sees full': { phoneAccess: replaceOnce('return !!user && hasPermission', 'return !user || hasPermission') },
 }
 let missed = 0
 for (const [name, mutate] of Object.entries(mutants)) {
   let result
-  try { result = run(load(mutate)) } catch (error) { if (/mutation anchor missing/.test(error.message)) { missed += 1; console.error(`STALE ANCHOR in ${name}: ${error.message}`); continue } result = [`threw: ${error.message}`] }
+  try { result = runAll(mutate) } catch (error) { if (/mutation anchor missing/.test(error.message)) { missed += 1; console.error(`STALE ANCHOR in ${name}: ${error.message}`); continue } result = [`threw: ${error.message}`] }
   if (result.length === 0) { missed += 1; console.error(`MUTANT SURVIVED: ${name}`) } else console.log(`killed  ${name} (${result.length} failing check${result.length === 1 ? '' : 's'})`)
 }
 assert.equal(missed, 0, `${missed} mutant(s) survived`)

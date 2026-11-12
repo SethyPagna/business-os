@@ -19,6 +19,16 @@ const ts = require('typescript')
 const LIB = path.join(__dirname, '..', 'src', 'lib')
 const read = (name) => fs.readFileSync(path.join(LIB, name), 'utf8').split('\r\n').join('\n')
 
+// Every signed-in session reads full numbers now (owner, 12 Nov 2026), so the projection and the scrub are exercised on the
+// switch-back copy: canSeeFullPhones swapped for holdsFullPhoneGrant, which makes the cashier fixture a masked account again.
+// The live rule itself is pinned in test-phone-mask-pure.cjs.
+const SWITCH_BACK = (source) => {
+  const head = 'export function canSeeFullPhones(user: PhoneActor): boolean {'
+  const at = source.indexOf(head)
+  assert.ok(at >= 0, 'switch-back anchor missing')
+  return source.slice(0, at) + head + ' return holdsFullPhoneGrant(user) ' + source.slice(source.indexOf('}', at))
+}
+
 function load(mutate = {}) {
   const cache = new Map()
   const load1 = (name) => {
@@ -27,6 +37,7 @@ function load(mutate = {}) {
     cache.set(name, module)
     let source = read(`${name}.ts`)
     if (mutate[name]) source = mutate[name](source)
+    if (name === 'phoneAccess') source = SWITCH_BACK(source)
     const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText
     new Function('require', 'module', 'exports', output)((id) => {
       if (id.startsWith('./')) return load1(id.slice(2))

@@ -564,7 +564,7 @@ app.use('/api/*', async (c, next) => {
 
 app.get('/health', (c) => c.json({ status: 'ok', version: 'cloudflare-portal-bootstrap-20260728', time: new Date().toISOString() }))
 
-// A full phone number leaves the Worker only for an account holding contacts_full_phone (lib/phoneAccess.ts). Last of
+// A full phone number leaves the Worker only for a signed-in staff session (lib/phoneAccess.ts canSeeFullPhones). Last of
 // the /api/* middleware and ahead of every route, so each c.json below is projected, cache hits and errors included.
 app.use('/api/*', phoneMaskResponses)
 
