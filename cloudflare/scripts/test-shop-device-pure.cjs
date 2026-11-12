@@ -627,7 +627,7 @@ const mutants = [
   ['the shop sign-in writes on every request (no throttle)', inFile('lib/deviceTrust.ts', 'if (recent && ip ===', 'if (false && ip ==='), ['15.']],
   ['an unmarked till id keeps working (no retirement)', inFile('lib/deviceTrust.ts', 'if (cookiesOn && (retiredShopId ||', 'if (cookiesOn && (false ||'), ['3.', '16.']],
   ['a retired id can be marked again', inFile('routes/devices.ts', 'if (device.shop_retired) {', 'if (false) {'), ['16.']],
-  ['a pending row forgets which approved device it claimed', inFile('lib/deviceTrust.ts', "claimed: existing?.status === 'approved' ? existing.id : null", 'claimed: null'), ['17.']],
+  ['a pending row forgets which approved device it claimed', inFile('lib/deviceTrust.ts', 'claimed: claimed ? claimed.id : null', 'claimed: null'), ['17.']],
   ['marking does not tag the sessions it orphans (L-1)', inFile('routes/devices.ts', 'const approvedUserIds = [...new Set(', 'const approvedUserIds: number[] = [] || [...new Set('), ['19.', '14.']],
   ['a verified cookie on a retired id is still reported as a claim (L-2)', inFile('lib/deviceTrust.ts', "existing?.status === 'approved' && !meta.cookieVerified ? existing : null", "existing?.status === 'approved' ? existing : null"), ['20.']],
   ['the shop new-country alert carries no device name (L-3)', inFile('lib/deviceTrust.ts', 'deviceName: shop.shop_label || null, ', ''), ['15.']],
