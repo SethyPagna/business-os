@@ -168,7 +168,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
     setBusyUserId(null)
   }, [ownerKey])
 
-  const runOnlineAction = async (kind: 'device' | 'session' | 'user', id: number, write: () => Promise<unknown>, successMessage: (result: unknown) => string, authority = { scope: captureActorReadScope('devices'), ownerKey }) => {
+  const runOnlineAction = async (kind: 'device' | 'session' | 'user', id: number, write: () => Promise<unknown>, successMessage: (result: unknown) => string, authority = { scope: captureActorReadScope('devices'), ownerKey }, onError?: (err: unknown) => Promise<boolean>) => {
     if (!ownsScope(authority.scope, authority.ownerKey)) return
     const actionKey = `${authority.ownerKey}:${kind}:${id}`
     if (actions.current.has(actionKey)) return
@@ -182,7 +182,8 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
       notify(successMessage(result), 'success')
       await load()
     } catch (err) {
-      if (ownsScope(authority.scope, authority.ownerKey)) notify(deviceActionMessage(t, err), 'error')
+      const handled = onError ? await onError(err).catch(() => false) : false
+      if (!handled && ownsScope(authority.scope, authority.ownerKey)) notify(deviceActionMessage(t, err), 'error')
     } finally {
       actions.current.delete(actionKey)
       if (ownsScope(authority.scope, authority.ownerKey)) setBusy((current) => current === id ? null : current)
@@ -220,7 +221,18 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
       setReplacing({ device, choices, selectedId: choices[0].id })
       return
     }
-    void runAction(device.id, 'approve', tr(t, 'device_approved', 'Device approved.'))
+    // The page's own copy of the list can be stale: the account may have reached its cap since it loaded. The Worker's
+    // refusal then opens the same chooser, from a fresh read of that account's devices, instead of a dead-end message.
+    void runOnlineAction('device', device.id, () => approveDevice(device.id), () => tr(t, 'device_approved', 'Device approved.'), undefined, async (err) => {
+      if ((err as { code?: unknown } | null)?.code !== 'device_limit_reached') return false
+      const fresh = await getAllDevices(device.user_id)
+      const accountChoices = (fresh?.devices || [])
+        .filter((row) => row.status === 'approved' && row.user_id === device.user_id)
+        .sort((a, b) => String(a.last_seen_at || '').localeCompare(String(b.last_seen_at || '')))
+      if (!accountChoices.length) return false
+      setReplacing({ device, choices: accountChoices, selectedId: accountChoices[0].id })
+      return true
+    })
   }
 
   const confirmReplace = () => {

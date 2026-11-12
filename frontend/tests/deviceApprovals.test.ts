@@ -56,4 +56,9 @@ for (const key of ['device_replace_title', 'device_replace_intro', 'device_repla
   assert.notEqual(en[key], km[key], `Khmer ${key} is not the English copied`)
 }
 
+// L2 (review, 12 Nov 2026): a plain approve refused with device_limit_reached (stale page) reads that account's devices fresh and opens the chooser.
+assert.match(panel, /code !== 'device_limit_reached'\) return false\s*const fresh = await getAllDevices\(device\.user_id\)/, 'the cap refusal triggers a fresh read of that account')
+assert.match(panel, /setReplacing\(\{ device, choices: accountChoices, selectedId: accountChoices\[0\]\.id \}\)\s*return true/, 'and opens the replace chooser')
+assert.match(panel, /const handled = onError \? await onError\(err\)\.catch\(\(\) => false\) : false\s*if \(!handled/, 'a handled refusal shows no error toast')
+
 console.log('PASS device re-approval reset transport, history placement, confirmation, and bilingual copy')
