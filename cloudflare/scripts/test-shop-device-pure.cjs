@@ -43,10 +43,11 @@ const CASHIER = { id: 12, username: 'dara', name: 'Dara', role_code: 'cashier', 
 function setup(mutate = (text) => text) {
   let deviceTrust = null
   let authLib = null
+  const tokens = []
   const h = createAuthHarness({
     overrides: {
       '../lib/auth': {
-        createSession: (...args) => authLib.createSession(...args),
+        createSession: async (...args) => { const made = await authLib.createSession(...args); tokens.push(made.token); return made },
         setSessionCookie: () => {},
         clearSessionCookie: () => {},
         getSessionUser: async () => null,
@@ -87,7 +88,7 @@ function setup(mutate = (text) => text) {
     const res = await devices.request(pathname, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }, h.env, ctx)
     return { status: res.status, body: await res.json() }
   }
-  return { h, cookieLib, audits, as, call }
+  return { h, cookieLib, audits, as, call, authLib, tokens }
 }
 
 const trusted = (h, userId) => h.raw.prepare('SELECT device_id, status FROM trusted_devices WHERE user_id = @userId ORDER BY id').all({ userId }).map((r) => ({ ...r }))
@@ -108,6 +109,16 @@ async function signIn(world, { username = 'dara', deviceId, cookieFor, cookie } 
   const value = cookie || (cookieFor ? await world.cookieLib.signDeviceCookieValue(world.h.env, cookieFor) : null)
   if (value) headers.Cookie = `${COOKIE}=${value}`
   return world.h.request('/login', 'POST', { username, password: 'correct-horse', deviceId, deviceName: 'Tablet' }, { ip: '203.0.113.5', headers })
+}
+
+// What POST /session-duration does with a session cookie: lib/auth.ts reads the source row, then re-issues in one batch.
+async function reissueFrom(world, token, userId = 12) {
+  const c = { env: world.h.env, req: { raw: new Request('http://localhost/session-duration', { headers: { Cookie: `bos_session=${token}` } }), header: () => undefined } }
+  const source = await world.authLib.currentSessionReissueSource(c)
+  assert.ok(source, 'the session row is found')
+  const made = await world.authLib.reissueSession(c, userId, { sessionDuration: 'always', deviceId: source.deviceId, shopDeviceId: source.shopDeviceId, limitFamilyId: source.limitFamilyId })
+  assert.ok(made, 'a new session was issued')
+  return made.token
 }
 
 let passed = 0
@@ -286,14 +297,32 @@ async function suite(mutate, label) {
   await check('9. every session-issuing path passes the shop id and hands the cookie flag to the gate (source pin)', () => {
     const text = fs.readFileSync(path.join(SRC, 'routes/auth.ts'), 'utf8').replace(/\r\n/g, '\n')
     assert.equal(text.split('cookieVerified: isCookieVerifiedDevice(c,').length - 1, 3, 'login, otp verify, google callback')
-    assert.equal(text.split(/\bshopDeviceId,|shopDeviceId: oauthShopDeviceId,/).length - 1, 3, 'three createSession calls carry it')
+    assert.equal(text.split(/(?<![.\w])shopDeviceId,|shopDeviceId: oauthShopDeviceId,/).length - 1, 3, 'three createSession calls carry it')
     assert.equal(text.split('= trustCheck.shopDeviceId').length - 1, 3, 'three gates record it')
+    assert.ok(text.includes('shopDeviceId: source.shopDeviceId,'), '/session-duration passes the source session tag on')
+  })
+
+  await check('10. a shop session re-issued by /session-duration is still revoked by unmark after retention purged every revoked row (M1)', async () => {
+    const w = setup(mutate)
+    await markTill(w)
+    assert.equal((await signIn(w, { username: 'dara', deviceId: TILL, cookieFor: TILL })).body.success, true)
+    const second = await reissueFrom(w, w.tokens[0])
+    await reissueFrom(w, second)
+    w.h.raw.prepare('DELETE FROM user_sessions WHERE revoked_at IS NOT NULL').run({})
+    const rows = sessionsOf(w.h)
+    assert.equal(rows.length, 1, 'only the newest re-issue is left')
+    const shopId = shopIdOf(w.h)
+    assert.equal(rows[0].shop_device_id, shopId, 'the tag travelled through both re-issues')
+    const res = await w.call(`/shop/${shopId}/unmark`)
+    assert.equal(res.body.revokedSessions, 1)
+    assert.deepEqual(live(w.h), [])
   })
 
   console.log(`   ${passed} passed, ${failures.length} failed`)
   return [...failures]
 }
 
+const shopIdOf = (h) => h.raw.prepare('SELECT id FROM shop_devices WHERE unmarked_at IS NULL').get({}).id
 const inFile = (file, from, to) => (text, rel) => (rel === file ? text.replace(from, to) : text)
 const mutants = [
   ['body id may claim a shop device (cookie gate removed)', inFile('lib/deviceTrust.ts', '@shop_ok = 1 AND', '1 = 1 AND'), ['2.']],
@@ -301,6 +330,7 @@ const mutants = [
   ['unmark does not revoke sessions', inFile('routes/devices.ts', 'WHERE revoked_at IS NULL\n          AND (shop_device_id', 'WHERE 0 AND revoked_at IS NULL\n          AND (shop_device_id'), ['3.']],
   ['unmark revokes by device id (kills the admin session too)', inFile('routes/devices.ts', 'AND (shop_device_id = @id OR', 'AND (device_id = (SELECT device_id FROM shop_devices WHERE id = @id) OR'), ['3.']],
   ['admin guard removed from the devices router', inFile('routes/devices.ts', "if (!isAdminControlUser(c.get('user')))", 'if (false)'), ['4.']],
+  ['re-issue drops the shop tag', inFile('lib/auth.ts', 'shop_device_id: shopDeviceId > 0 ? shopDeviceId : null', 'shop_device_id: null'), ['10.']],
   ['a rejected account no longer outranks the shop marking', inFile('lib/deviceTrust.ts', "existing?.status !== 'rejected' && existing?.status !== 'approved'", 'true'), ['7.']],
 ]
 

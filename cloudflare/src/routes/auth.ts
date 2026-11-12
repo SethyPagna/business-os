@@ -1016,6 +1016,7 @@ app.post('/session-duration', requireAuth, async (c) => {
     sessionDuration: body.sessionDuration,
     deviceName: source.deviceName || undefined,
     deviceId: source.deviceId,
+    shopDeviceId: source.shopDeviceId,
     deviceTz: body.deviceTz,
     userAgent: c.req.header('user-agent'),
     ip: c.req.header('cf-connecting-ip') || undefined,

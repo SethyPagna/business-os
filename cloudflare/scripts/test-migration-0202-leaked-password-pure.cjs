@@ -87,7 +87,7 @@ const SCHEMA = `
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, token_hash TEXT NOT NULL,
     device_name TEXT, device_tz TEXT, client_time TEXT, user_agent TEXT, last_ip TEXT,
     last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP, expires_at TEXT NOT NULL, revoked_at TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP, device_id TEXT, limit_family_id INTEGER
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP, device_id TEXT, limit_family_id INTEGER, shop_device_id INTEGER
   );
   CREATE UNIQUE INDEX idx_user_sessions_token_hash_unique_pg ON user_sessions (token_hash);
   CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);

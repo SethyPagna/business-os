@@ -286,6 +286,8 @@ export async function reissueSession<E extends { Bindings: Env } = { Bindings: E
   if (!sourceToken) return null
   const { session, limitFamilyId, params } = await prepareSession(userId, options)
   if (!limitFamilyId) throw new Error('A re-issued session needs the sign-in family it descends from')
+  // A session let in by a shop device keeps that tag, so unmarking the till still reaches it after retention purges its revoked ancestors.
+  const shopDeviceId = Number(options.shopDeviceId || 0)
   sessionLookupMemo.delete(c)
   const db = getDb(c.env)
   const [claim, insert] = await db.batch([
@@ -295,11 +297,11 @@ export async function reissueSession<E extends { Bindings: Env } = { Bindings: E
     },
     {
       sql: `
-        INSERT INTO user_sessions (user_id, token_hash, device_name, device_tz, user_agent, last_ip, device_id, expires_at, limit_family_id)
-        SELECT @user_id, @token_hash, @device_name, @device_tz, @user_agent, @ip, @device_id, @expires_at, @limit_family_id
+        INSERT INTO user_sessions (user_id, token_hash, device_name, device_tz, user_agent, last_ip, device_id, expires_at, limit_family_id, shop_device_id)
+        SELECT @user_id, @token_hash, @device_name, @device_tz, @user_agent, @ip, @device_id, @expires_at, @limit_family_id, @shop_device_id
         WHERE changes() = 1
       `,
-      params: { ...params, limit_family_id: limitFamilyId },
+      params: { ...params, limit_family_id: limitFamilyId, shop_device_id: shopDeviceId > 0 ? shopDeviceId : null },
     },
   ])
   if (claim?.meta?.changes === 1 && insert?.meta?.changes === 1) return session
@@ -587,6 +589,7 @@ export type SessionReissueSource = {
   limitFamilyId: number
   deviceId: string | null
   deviceName: string | null
+  shopDeviceId: number | null
   duration: { key: string | null; ms: number } | null
 }
 
@@ -595,8 +598,8 @@ export async function currentSessionReissueSource<E extends { Bindings: Env } = 
   if (!token) return null
   const tokenHash = await hashToken(token)
   const row = await getDb(c.env).prepare(
-    'SELECT COALESCE(limit_family_id, id) AS family, device_id, device_name, created_at, expires_at FROM user_sessions WHERE token_hash = @token_hash LIMIT 1',
-  ).get<{ family: number | null; device_id: string | null; device_name: string | null; created_at: string | null; expires_at: string | null }>({ token_hash: tokenHash })
+    'SELECT COALESCE(limit_family_id, id) AS family, device_id, device_name, shop_device_id, created_at, expires_at FROM user_sessions WHERE token_hash = @token_hash LIMIT 1',
+  ).get<{ family: number | null; device_id: string | null; device_name: string | null; shop_device_id: number | null; created_at: string | null; expires_at: string | null }>({ token_hash: tokenHash })
   const family = Number(row?.family || 0)
   if (!row || !Number.isSafeInteger(family) || family <= 0) return null
   const ms = sessionDurationMs(token, row.created_at, row.expires_at)
@@ -604,6 +607,7 @@ export async function currentSessionReissueSource<E extends { Bindings: Env } = 
     limitFamilyId: family,
     deviceId: row.device_id || null,
     deviceName: row.device_name || null,
+    shopDeviceId: Number(row.shop_device_id) > 0 ? Number(row.shop_device_id) : null,
     duration: ms === null ? null : { key: durationOfToken(token), ms },
   }
 }
