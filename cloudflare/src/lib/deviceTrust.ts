@@ -84,11 +84,12 @@ export async function checkDeviceTrust(
     SELECT td.*, s.id AS shop_device_row_id, s.marked_at AS shop_marked_at,
       s.label AS shop_label, s.last_seen_at AS shop_last_seen_at, s.last_ip AS shop_last_ip, s.last_country AS shop_last_country,
       (SELECT 1 FROM shop_devices r WHERE r.device_id = @device_id AND r.unmarked_at IS NOT NULL LIMIT 1) AS shop_retired,
-      (SELECT 1 FROM trusted_devices o WHERE o.device_id = @device_id AND o.user_id != @user_id LIMIT 1) AS held_by_other
+      (SELECT 1 FROM trusted_devices o WHERE o.device_id = @device_id AND o.user_id != @user_id LIMIT 1) AS held_by_other,
+      (SELECT 1 FROM trusted_devices o WHERE o.device_id = @device_id AND o.user_id != @user_id AND o.cookie_bound_at IS NOT NULL LIMIT 1) AS held_bound_by_other
     FROM (SELECT 1 AS one) base
     LEFT JOIN trusted_devices td ON td.user_id = @user_id AND td.device_id = @device_id
     LEFT JOIN shop_devices s ON s.device_id = @device_id AND s.unmarked_at IS NULL
-  `).get<(Partial<TrustedDeviceRow> & { shop_device_row_id: number | null; shop_marked_at: string | null; shop_label: string | null; shop_last_seen_at: string | null; shop_last_ip: string | null; shop_last_country: string | null; shop_retired: number | null; held_by_other: number | null }) | undefined>({ user_id: userId, device_id: deviceId })
+  `).get<(Partial<TrustedDeviceRow> & { shop_device_row_id: number | null; shop_marked_at: string | null; shop_label: string | null; shop_last_seen_at: string | null; shop_last_ip: string | null; shop_last_country: string | null; shop_retired: number | null; held_by_other: number | null; held_bound_by_other: number | null }) | undefined>({ user_id: userId, device_id: deviceId })
   const existing = found && found.id != null ? (found as TrustedDeviceRow) : null
   const markedShopId = found?.shop_device_row_id ?? null
   const shopDeviceId = meta.cookieVerified ? markedShopId : null
@@ -131,6 +132,10 @@ export async function checkDeviceTrust(
     // device begins pending: possession of a password alone is not enough
     // to bypass an administrator's device-approval policy.
     const initialStatus = 'pending'
+    // Bound only when a cookie really exists for this id: this response sets one (the cookie already verified, or no other account holds the id,
+    // see the post-gate cookie helper in deviceCookie.ts), or another account's row on it is already bound. Otherwise the browser has no cookie to prove, and marking the row
+    // bound would re-ask the whole shared browser after the approval (review N-1).
+    const willBind = cookiesOn && (Boolean(meta.cookieVerified) || !found?.held_by_other || Boolean(found?.held_bound_by_other))
 
     // Two parallel first sign-ins race this insert; the unique index makes the
     // loser a no-op instead of a 500.
@@ -147,7 +152,7 @@ export async function checkDeviceTrust(
       country: meta.country || null,
       status: initialStatus,
       decided_at: null,
-      bind: cookiesOn ? 1 : 0,
+      bind: willBind ? 1 : 0,
     })
     // Only a row this call created raises the alert; a retry or a lost race does not.
     const created = Number(inserted?.changes || 0) > 0

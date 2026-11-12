@@ -58,7 +58,25 @@ function setup(mutate = (t) => t, envPatch = {}) {
   h.addUser({ id: 10, username: 'sokha', name: 'Sokha', roleCode: 'cashier' })
   h.addUser({ id: 11, username: 'owner', name: 'Owner', roleCode: 'admin' })
   h.addUser({ id: 12, username: 'vanna', name: 'Vanna', roleCode: 'cashier', otpSecret: OTP_SECRET })
-  return { h, cookieLib }
+  h.addUser({ id: 13, username: 'dara', name: 'Dara', roleCode: 'cashier' })
+  h.addUser({ id: 14, username: 'mia', name: 'Mia', roleCode: 'cashier' })
+  // The real admin approve route, so approval is what an administrator's click does and not a hand-written UPDATE.
+  const permissions = loadTs('lib/permissions.ts', {}, mutate, cache)
+  const admin = { id: 11, username: 'owner', name: 'Owner', role_code: 'admin', role_permissions: '{"all":true}', permissions: '{}' }
+  const devices = loadTs('routes/devices.ts', {
+    '../lib/db': { getDb: () => h.db },
+    '../lib/auth': { requireAuth: async (c, next) => { c.set('user', admin); return next() }, revokeSessionsForDevice: async () => 0, revokeUserSessions: async () => {} },
+    '../lib/audit': { audit: async () => {} },
+    '../lib/permissions': permissions,
+    '../durable-objects/broadcastHub': { broadcast: async () => {} },
+    '../lib/deviceTrust': deviceTrust,
+    '../index': {},
+  }, mutate, cache).default
+  const adminCall = async (pathname, body = {}) => {
+    const res = await devices.request(pathname, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, h.env, { waitUntil() {}, passThroughOnException() {} })
+    return { status: res.status, body: await res.json() }
+  }
+  return { h, cookieLib, adminCall }
 }
 
 const rows = (h) => h.raw.prepare('SELECT device_id, status, cookie_bound_at FROM trusted_devices WHERE user_id = 10 ORDER BY id').all({}).map((r) => ({ ...r }))
@@ -80,6 +98,26 @@ const lastCookieId = (res) => {
 }
 // Replay a raw cookie value (what a person copying the header gets) against /login with the given body id.
 const replay = (w, value, deviceId) => w.h.request('/login', 'POST', { username: 'sokha', password: 'correct-horse', deviceId, deviceName: 'Phone' }, { ip: '203.0.113.5', headers: { 'User-Agent': UA, Cookie: `${COOKIE}=${value}` } })
+
+// One browser: it keeps the device cookie the server last set and the device id its page last stored (what Login.tsx does), and signs in as any account.
+function browser(w, storedId) {
+  const b = { jar: null, stored: storedId, last: null }
+  b.go = async (username) => {
+    const headers = { 'User-Agent': UA }
+    if (b.jar) headers.Cookie = `${COOKIE}=${b.jar}`
+    const res = await w.h.request('/login', 'POST', { username, password: 'correct-horse', deviceId: b.stored, deviceName: 'Phone' }, { ip: '203.0.113.5', headers })
+    const values = cookieValues(res)
+    assert.ok(values.length <= 1, 'at most one device cookie')
+    if (values.length) b.jar = values[0]
+    if (res.body.deviceId) b.stored = res.body.deviceId
+    b.last = res
+    return res
+  }
+  return b
+}
+const userRows = (h, userId) => h.raw.prepare('SELECT id, device_id, status, cookie_bound_at IS NOT NULL AS bound, claimed_approval_ref FROM trusted_devices WHERE user_id = @userId ORDER BY id').all({ userId }).map((r) => ({ ...r }))
+const approveRow = async (w, userId) => { const r = await w.adminCall(`/${userRows(w.h, userId)[0].id}/approve`); assert.equal(r.status, 200, JSON.stringify(r.body)) }
+const legacyApproved = (h, userId, deviceId) => h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status, decided_at) VALUES (@userId, @deviceId, 'approved', CURRENT_TIMESTAMP)").run({ userId, deviceId })
 
 const SESSION = 'live-session-token-0001'
 const addSession = (h, userId, deviceId, { revoked = false } = {}) => h.raw.prepare(`INSERT INTO user_sessions (user_id, token_hash, device_id, expires_at, revoked_at)
@@ -297,6 +335,61 @@ async function suite(mutate, label) {
     assert.ok(!callback.includes('pinDeviceCookie('))
   })
 
+  await check('m. N-1: a shared browser with no cookie yet (deploy day): the new employee is approved once and then signs in; nobody on the browser is asked again', async () => {
+    const w = setup(mutate)
+    const SHARED = 'shared-till-device-01'
+    legacyApproved(w.h, 10, SHARED)
+    const b = browser(w, SHARED)
+    const first = await b.go('dara')
+    assert.equal(first.body.deviceApprovalRequired, true, 'a new employee on the shared browser is pending')
+    assert.equal(b.jar, null, 'no cookie is set for an id another account holds')
+    assert.equal(userRows(w.h, 13)[0].bound, 0, 'so her row is not marked as cookie-bound: there is no cookie to prove')
+    await approveRow(w, 13)
+    const second = await b.go('dara')
+    assert.equal(second.body.success, true, JSON.stringify(second.body))
+    assert.equal(userRows(w.h, 13).length, 1, 'no second pending row for dara')
+    assert.equal(userRows(w.h, 13)[0].claimed_approval_ref, null, 'and no false "could not prove it" claim')
+    const sokha = await b.go('sokha')
+    assert.equal(sokha.body.success, true, 'sokha is not asked again')
+    assert.equal(userRows(w.h, 10).length, 1)
+    assert.equal(w.h.raw.prepare('SELECT COUNT(*) AS n FROM trusted_devices WHERE claimed_approval_ref IS NOT NULL').get({}).n, 0)
+  })
+
+  await check('n. N-1 (deploy day, three employees): two new employees both wait on the cookie-less shared browser; approving both signs everybody in, with no cascade of re-asks', async () => {
+    const w = setup(mutate)
+    const SHARED = 'shared-till-device-02'
+    legacyApproved(w.h, 10, SHARED)
+    const b = browser(w, SHARED)
+    assert.equal((await b.go('dara')).body.deviceApprovalRequired, true)
+    assert.equal((await b.go('mia')).body.deviceApprovalRequired, true)
+    await approveRow(w, 13)
+    await approveRow(w, 14)
+    for (const who of ['dara', 'mia', 'sokha', 'dara', 'mia']) {
+      const res = await b.go(who)
+      assert.equal(res.body.success, true, `${who}: ${JSON.stringify(res.body)}`)
+    }
+    assert.equal(w.h.raw.prepare('SELECT COUNT(*) AS n FROM trusted_devices').get({}).n, 3, 'one row per employee, no extra pending rows')
+    // positive control: once a cookie really exists for the id, a cookie-less body id from another browser is still refused.
+    const attacker = browser(w, SHARED)
+    const refused = await attacker.go('dara')
+    assert.equal(refused.body.success, undefined, 'a body-only sign-in on a bound id is still refused')
+  })
+
+  await check('o. N-4: another non-admin account sending the victim id with no cookie gets pending, no cookie for it, and a replay signs nobody in', async () => {
+    const w = setup(mutate)
+    w.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status, decided_at, cookie_bound_at) VALUES (10, @d, 'approved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").run({ d: VICTIM })
+    const attacker = browser(w, VICTIM)
+    const res = await attacker.go('dara')
+    assert.equal(res.body.deviceApprovalRequired, true)
+    assert.equal(attacker.jar, null, 'no cookie is minted for the id sokha holds')
+    const sessionsBefore = w.h.raw.prepare('SELECT COUNT(*) AS n FROM user_sessions').get({}).n
+    for (const user of ['dara', 'sokha']) {
+      const again = await attacker.go(user)
+      assert.equal(again.body.success, undefined, `${user} is not signed in with the attacker's browser state`)
+    }
+    assert.equal(w.h.raw.prepare('SELECT COUNT(*) AS n FROM user_sessions').get({}).n, sessionsBefore, 'no session issued')
+  })
+
   await check('i. the session cookie name used by the helper is the one lib/auth.ts sets', () => {
     const auth = fs.readFileSync(path.join(SRC, 'lib/auth.ts'), 'utf8')
     const cookie = fs.readFileSync(path.join(SRC, 'lib/deviceCookie.ts'), 'utf8')
@@ -317,6 +410,8 @@ const mutants = [
   ['a session binds the row of another account (user_id predicate dropped)', inFile('lib/deviceCookie.ts', "WHERE user_id = @user_id AND status = 'approved' AND cookie_bound_at IS NULL", "WHERE status = 'approved' AND cookie_bound_at IS NULL"), ['h.']],
   ['a bound row is re-issued its cookie by a session', inFile('lib/deviceCookie.ts', ' AND cookie_bound_at IS NULL', ''), ['h.']],
   ['binding never happens', inFile('lib/deviceTrust.ts', "cookie_bound_at = COALESCE(cookie_bound_at, CASE WHEN @bind = 1 THEN CURRENT_TIMESTAMP END)", 'cookie_bound_at = cookie_bound_at'), ['a.']],
+  ['a new pending row is marked cookie-bound even when no cookie was set (N-1)', inFile('lib/deviceTrust.ts', 'bind: willBind ? 1 : 0,', 'bind: cookiesOn ? 1 : 0,'), ['m.', 'n.']],
+  ['the held-by-another-account answer is dropped (N-4)', inFile('lib/deviceTrust.ts', '...(found?.held_by_other ? { heldByOther: true } : {})', ''), ['o.']],
 ]
 
 async function main() {

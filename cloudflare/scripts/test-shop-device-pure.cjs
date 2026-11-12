@@ -589,6 +589,25 @@ async function suite(mutate, label) {
     assert.equal(fromApproved.body.removedRows, 2)
   })
 
+  await check('22. N-3: a pending request that claims an approved device cannot be marked (409 shop_device_claimed) even when called directly; a plain pending request can', async () => {
+    const w = setup(mutate)
+    approve(w.h, 'claimed-phone-0002', 12)
+    w.h.raw.prepare('UPDATE trusted_devices SET cookie_bound_at = CURRENT_TIMESTAMP').run({})
+    const claim = await signIn(w, { deviceId: 'claimed-phone-0002' })
+    assert.equal(claim.body.deviceApprovalRequired, true)
+    const claimingId = rowId(w.h, 12, claim.body.deviceId)
+    const before = w.h.raw.prepare('SELECT user_id, device_id, status FROM trusted_devices ORDER BY id').all({}).map((r) => ({ ...r }))
+    const refused = await w.call(`/${claimingId}/mark-shop`, 'POST', { label: 'Till 1' })
+    assert.equal(refused.status, 409, JSON.stringify(refused.body))
+    assert.equal(refused.body.code, 'shop_device_claimed')
+    assert.deepEqual(w.h.raw.prepare('SELECT user_id, device_id, status FROM trusted_devices ORDER BY id').all({}).map((r) => ({ ...r })), before, 'nothing was removed')
+    assert.equal(w.h.raw.prepare('SELECT COUNT(*) AS n FROM shop_devices').get({}).n, 0)
+    const plain = await signIn(w, { username: 'sokha', deviceId: 'brand-new-device-7' })
+    assert.equal(plain.body.deviceApprovalRequired, true)
+    const ok = await w.call(`/${rowId(w.h, 10, 'brand-new-device-7')}/mark-shop`, 'POST', { label: 'Till 2' })
+    assert.equal(ok.status, 200, 'a request that claims nothing is still markable')
+  })
+
   await check('17. the pending list tells the administrator which approved device a request claimed (L4); a plain new device claims nothing', async () => {
     const w = setup(mutate)
     approve(w.h, 'claimed-phone-0001', 12)
@@ -632,6 +651,7 @@ const mutants = [
   ['a verified cookie on a retired id is still reported as a claim (L-2)', inFile('lib/deviceTrust.ts', "existing?.status === 'approved' && !meta.cookieVerified ? existing : null", "existing?.status === 'approved' ? existing : null"), ['20.']],
   ['the shop new-country alert carries no device name (L-3)', inFile('lib/deviceTrust.ts', 'deviceName: shop.shop_label || null, ', ''), ['15.']],
   ['a pending request on an id another account holds approved can be marked (L-4)', inFile('routes/devices.ts', "device.status === 'pending' && (waiting || []).some(", "false && (waiting || []).some("), ['21.']],
+  ['a request that claims an approved device can be marked as a shop device (N-3)', inFile('routes/devices.ts', "device.status === 'pending' && device.claimed_approval_ref", 'false'), ['22.']],
   ['the /session-duration route forgets the shop tag when it re-issues (L-5)', (text, rel) => (rel === 'routes/auth.ts' ? text.replace('shopDeviceId: source.shopDeviceId,', '') : text), ['10.']],
   ['marking from a pending request is refused', inFile('routes/devices.ts', "device.status !== 'approved' && device.status !== 'pending'", "device.status !== 'approved'"), ['13.']],
 ]

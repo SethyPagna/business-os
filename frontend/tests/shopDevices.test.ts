@@ -38,7 +38,7 @@ assert.match(panel, /shop[.]last_seen_at [?] [(]/, 'the list shows where and whe
 const keys = [
   'shop_device', 'shop_devices', 'shop_devices_intro', 'no_shop_devices', 'shop_device_mark', 'shop_device_mark_title', 'shop_device_mark_confirm',
   'shop_device_name', 'shop_device_name_placeholder', 'shop_device_continue', 'shop_device_marked_done', 'shop_device_marked_by', 'shop_device_unmark',
-  'shop_device_unmark_title', 'shop_device_unmark_confirm', 'shop_device_unmarked_done', 'shop_device_exists', 'shop_device_conflict', 'shop_device_retired', 'shop_device_held', 'shop_label_invalid',
+  'shop_device_unmark_title', 'shop_device_unmark_confirm', 'shop_device_unmarked_done', 'shop_device_exists', 'shop_device_conflict', 'shop_device_retired', 'shop_device_held', 'shop_device_claimed', 'shop_label_invalid',
 ]
 for (const key of keys) {
   assert.ok(en[key] && km[key], `both packs carry ${key}`)
