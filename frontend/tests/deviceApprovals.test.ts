@@ -67,4 +67,13 @@ assert.ok(transport.includes('claimed_approval_ref?: number | null'), 'the recor
 assert.ok(en.device_claimed_id && km.device_claimed_id && en.device_claimed_id !== km.device_claimed_id, 'both packs carry device_claimed_id, Khmer not copied')
 assert.match(km.device_claimed_id, /[ក-៿]/, 'in Khmer script')
 
+// L-4 (review round 3, 13 Nov 2026): a request that claims another device's id cannot be marked as a shop device from the panel, and the warning has no jargon.
+assert.ok(panel.includes('{device.claimed_approval_ref ? null : ('), 'the shop button is hidden on a request flagged as claiming an approved device')
+assert.ok(!/(id|cookie)/i.test(en.device_claimed_id), 'the English warning says no "id" or "cookie"')
+assert.ok(!/ខូគី|ID/i.test(km.device_claimed_id), 'nor the Khmer one')
+for (const key of ['shop_device_held']) {
+  assert.ok(en[key] && km[key] && en[key] !== km[key] && /[ក-៿]/.test(km[key]), `both packs carry ${key}, Khmer in Khmer script`)
+}
+assert.ok(panel.includes("code === 'shop_device_held'"), 'the server refusal to mark a copied id is explained, not shown as a bare error')
+
 console.log('PASS device re-approval reset transport, history placement, confirmation, and bilingual copy')

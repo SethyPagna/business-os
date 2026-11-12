@@ -561,6 +561,22 @@ async function suite(mutate, label) {
     assert.equal(claimedOf(bodyOnly.body.deviceId), rowId(w.h, 12, TILL), 'no cookie: the claim is recorded')
   })
 
+  await check('21. L-4: a pending request on an id another account holds an approved device for cannot be marked (409 shop_device_held); the approved device itself can', async () => {
+    const w = setup(mutate)
+    approve(w.h, TILL, 10)
+    w.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status) VALUES (12, @d, 'pending')").run({ d: TILL })
+    const before = w.h.raw.prepare('SELECT user_id, status FROM trusted_devices ORDER BY id').all({}).map((r) => ({ ...r }))
+    const refused = await w.call(`/${rowId(w.h, 12, TILL)}/mark-shop`, 'POST', { label: 'Till 1' })
+    assert.equal(refused.status, 409)
+    assert.equal(refused.body.code, 'shop_device_held')
+    assert.deepEqual(w.h.raw.prepare('SELECT user_id, status FROM trusted_devices ORDER BY id').all({}).map((r) => ({ ...r })), before, 'her approved row and the request are untouched')
+    assert.equal(w.h.raw.prepare('SELECT COUNT(*) AS n FROM shop_devices').get({}).n, 0)
+    assert.equal(w.audits.length, 0, 'nothing audited as removed')
+    const fromApproved = await w.call(`/${rowId(w.h, 10, TILL)}/mark-shop`, 'POST', { label: 'Till 1' })
+    assert.equal(fromApproved.status, 200, 'marking from the approved device is the intended way, and it still closes the request')
+    assert.equal(fromApproved.body.removedRows, 2)
+  })
+
   await check('17. the pending list tells the administrator which approved device a request claimed (L4); a plain new device claims nothing', async () => {
     const w = setup(mutate)
     approve(w.h, 'claimed-phone-0001', 12)
@@ -603,6 +619,7 @@ const mutants = [
   ['marking does not tag the sessions it orphans (L-1)', inFile('routes/devices.ts', 'const approvedUserIds = [...new Set(', 'const approvedUserIds: number[] = [] || [...new Set('), ['19.', '14.']],
   ['a verified cookie on a retired id is still reported as a claim (L-2)', inFile('lib/deviceTrust.ts', "existing?.status === 'approved' && !meta.cookieVerified ? existing : null", "existing?.status === 'approved' ? existing : null"), ['20.']],
   ['the shop new-country alert carries no device name (L-3)', inFile('lib/deviceTrust.ts', 'deviceName: shop.shop_label || null, ', ''), ['15.']],
+  ['a pending request on an id another account holds approved can be marked (L-4)', inFile('routes/devices.ts', "device.status === 'pending' && (waiting || []).some(", "false && (waiting || []).some("), ['21.']],
   ['marking from a pending request is refused', inFile('routes/devices.ts', "device.status !== 'approved' && device.status !== 'pending'", "device.status !== 'approved'"), ['13.']],
 ]
 

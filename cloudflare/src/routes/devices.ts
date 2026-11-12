@@ -559,6 +559,11 @@ app.post('/:id/mark-shop', async (c) => {
   const approvedUserIds = [...new Set((waiting || []).filter((row) => row.status === 'approved').map((row) => row.user_id))]
   const sessionParams: Record<string, string | number> = { device_id: device.device_id }
   approvedUserIds.forEach((userId, index) => { sessionParams[`u${index}`] = userId })
+  // A pending request whose id another account already holds an approved device for is a browser that learned that id (it is not secret): marking it
+  // would delete the other account's approval and open that device to every employee. Refuse; the administrator declines it, or marks the approved device.
+  if (device.status === 'pending' && (waiting || []).some((row) => row.status === 'approved' && row.user_id !== device.user_id)) {
+    return c.json({ error: 'Another account already has an approved device with this id, so this request may be a copy of it. Decline the request, or mark the approved device instead.', code: 'shop_device_held' }, 409)
+  }
   let inserted: { changes?: number } | undefined
   let closed = 0
   let tagged = 0
