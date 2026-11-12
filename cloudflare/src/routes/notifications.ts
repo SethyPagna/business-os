@@ -794,6 +794,8 @@ async function buildDeviceApprovalSection(env: Env): Promise<NotificationSection
       tone: 'warning' as const,
       label: parsed.deviceName || `Device for user #${entry.user_id ?? '?'}`,
       meta: `Sign-in moved from ${parsed.previousCountry || 'an unknown country'} to ${parsed.newCountry || 'an unknown country'}${SUMMARY_SEPARATOR}already-approved device`,
+      metaKey: 'notification_device_new_country',
+      metaParams: { previousCountry: parsed.previousCountry || '', newCountry: parsed.newCountry || '' },
       kind: 'security_device_new_country',
       // Device history lives on the Users > Devices tab (DeviceApprovals.tsx),
       // not Settings -- there is nothing about devices on the Settings page.
@@ -808,6 +810,8 @@ async function buildDeviceApprovalSection(env: Env): Promise<NotificationSection
       tone: 'warning' as const,
       label: entry.device_name || `New device for ${entry.user_name || entry.username}`,
       meta: `Sign-in for ${entry.username}${SUMMARY_SEPARATOR}awaiting admin approval`,
+      metaKey: 'notification_device_pending',
+      metaParams: { username: entry.username },
       kind: 'security_device_pending',
       // Same reasoning as countryItems above: the approve/decline controls
       // are on Users > Devices (DeviceApprovals.tsx), not Settings.
@@ -829,6 +833,8 @@ async function buildDeviceApprovalSection(env: Env): Promise<NotificationSection
       : rows.length
         ? `${rows.length} device${rows.length === 1 ? '' : 's'} waiting for approval`
         : `${countryItems.length} sign-in${countryItems.length === 1 ? '' : 's'} from a new country`,
+    summaryKey: 'notification_security_summary',
+    summaryParams: { deviceCount: rows.length, countryCount: countryItems.length },
     items,
   }
 }
