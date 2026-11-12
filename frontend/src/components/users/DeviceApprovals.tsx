@@ -85,6 +85,9 @@ function deviceActionMessage(t: TranslateFn, err: unknown): string {
   if (code === 'shop_device_held') {
     return tr(t, 'shop_device_held', 'Another account already has this device approved, so this request may be a copy. Decline it, or mark the approved device instead.')
   }
+  if (code === 'device_shared_confirm') {
+    return tr(t, 'device_shared_confirm', 'Another account already uses this device. Approve only if the two people really share it; otherwise decline this request.')
+  }
   if (code === 'shop_device_claimed') {
     return tr(t, 'shop_device_claimed', 'This request says it comes from an approved device but could not show it. Decline it, or mark the approved device instead.')
   }
@@ -136,7 +139,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
   // An account already at its cap: the pending device waits for the admin to pick which approved device to replace.
   // The pending or approved device row an administrator is naming as a shop device.
   const [markingShop, setMarkingShop] = useState<{ device: TrustedDeviceRecord; label: string } | null>(null)
-  const [replacing, setReplacing] = useState<{ device: TrustedDeviceRecord; choices: TrustedDeviceRecord[]; selectedId: number } | null>(null)
+  const [replacing, setReplacing] = useState<{ device: TrustedDeviceRecord; choices: TrustedDeviceRecord[]; selectedId: number; confirmShared?: boolean } | null>(null)
 
   const ownsScope = useCallback((scope: ActorReadScope, owner = ownerKey) => mounted.current
     && currentOwner.current.canManage && currentOwner.current.ownerKey === owner
@@ -222,33 +225,53 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
     void runAction(device.id, 'reset', tr(t, 'device_reapproval_reset_done', 'Rejected device request removed. It must sign in again for a new approval request.'), authority)
   }
 
-  const startApprove = (device: TrustedDeviceRecord) => {
+  // Another account already has this device: the administrator says so explicitly before approving or marking it (the Worker refuses otherwise).
+  const confirmSharedDevice = (names: string, marking: boolean) => askToConfirm({
+    title: tr(t, 'device_shared_title', 'Several accounts on this device'),
+    message: marking
+      ? tr(t, 'shop_device_shared_confirm', 'More than one account has this device. Marking it as a shop device opens it to every employee and removes all of their requests and approvals for it.')
+      : tr(t, 'device_shared_confirm', 'Another account already uses this device. Approve only if the two people really share it; otherwise decline this request.'),
+    items: names ? [{ label: tr(t, 'device_also_here', 'Also on this device'), value: names }] : undefined,
+    confirmLabel: marking ? tr(t, 'shop_device_mark', 'Mark as shop device') : tr(t, 'approve', 'Approve'),
+    danger: true,
+  })
+  const sharedNames = (device: TrustedDeviceRecord) => (device.shared_with || []).map((other) => other.name).join(', ')
+
+  const startApprove = async (device: TrustedDeviceRecord) => {
+    const knownShared = Boolean(device.shared_with && device.shared_with.length > 0)
+    if (knownShared && !(await confirmSharedDevice(sharedNames(device), false))) return
     const choices = approvedDevices
       .filter((approved) => approved.user_id === device.user_id)
       .sort((a, b) => String(a.last_seen_at || '').localeCompare(String(b.last_seen_at || '')))
     if (deviceLimit && choices.length >= deviceLimit) {
-      setReplacing({ device, choices, selectedId: choices[0].id })
+      setReplacing({ device, choices, selectedId: choices[0].id, confirmShared: knownShared })
       return
     }
     // The page's own copy of the list can be stale: the account may have reached its cap since it loaded. The Worker's
     // refusal then opens the same chooser, from a fresh read of that account's devices, instead of a dead-end message.
-    void runOnlineAction('device', device.id, () => approveDevice(device.id), () => tr(t, 'device_approved', 'Device approved.'), undefined, async (err) => {
-      if ((err as { code?: unknown } | null)?.code !== 'device_limit_reached') return false
+    void runOnlineAction('device', device.id, () => approveDevice(device.id, knownShared), () => tr(t, 'device_approved', 'Device approved.'), undefined, async (err) => {
+      const code = (err as { code?: unknown } | null)?.code
+      // The list was stale: another account got this device after it loaded. Ask now, then approve.
+      if (code === 'device_shared_confirm') {
+        if (await confirmSharedDevice('', false)) void runOnlineAction('device', device.id, () => approveDevice(device.id, true), () => tr(t, 'device_approved', 'Device approved.'))
+        return true
+      }
+      if (code !== 'device_limit_reached') return false
       const fresh = await getAllDevices(device.user_id)
       const accountChoices = (fresh?.devices || [])
         .filter((row) => row.status === 'approved' && row.user_id === device.user_id)
         .sort((a, b) => String(a.last_seen_at || '').localeCompare(String(b.last_seen_at || '')))
       if (!accountChoices.length) return false
-      setReplacing({ device, choices: accountChoices, selectedId: accountChoices[0].id })
+      setReplacing({ device, choices: accountChoices, selectedId: accountChoices[0].id, confirmShared: knownShared })
       return true
     })
   }
 
   const confirmReplace = () => {
     if (!replacing) return
-    const { device, selectedId } = replacing
+    const { device, selectedId, confirmShared } = replacing
     setReplacing(null)
-    void runOnlineAction('device', device.id, () => approveDeviceReplacing(device.id, selectedId), () => tr(t, 'device_replace_done', 'Device replaced and approved.'))
+    void runOnlineAction('device', device.id, () => approveDeviceReplacing(device.id, selectedId, confirmShared === true), () => tr(t, 'device_replace_done', 'Device replaced and approved.'))
   }
 
   const reviewMarkShop = async () => {
@@ -267,7 +290,11 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
       confirmLabel: tr(t, 'shop_device_mark', 'Mark as shop device'),
     })
     if (!confirmed) return
-    void runOnlineAction('device', device.id, () => markShopDevice(device.id, label), () => tr(t, 'shop_device_marked_done', 'Marked as a shop device.'))
+    void runOnlineAction('device', device.id, () => markShopDevice(device.id, label), () => tr(t, 'shop_device_marked_done', 'Marked as a shop device.'), undefined, async (err) => {
+      if ((err as { code?: unknown } | null)?.code !== 'device_shared_confirm') return false
+      if (await confirmSharedDevice('', true)) void runOnlineAction('device', device.id, () => markShopDevice(device.id, label, true), () => tr(t, 'shop_device_marked_done', 'Marked as a shop device.'))
+      return true
+    })
   }
 
   const unmarkShop = async (shop: ShopDeviceRecord) => {
@@ -389,7 +416,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                     type="button"
                     disabled={busyId === device.id}
                     className="btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
-                    onClick={() => startApprove(device)}
+                    onClick={() => { void startApprove(device) }}
                   >
                     <ShieldCheck className="h-3.5 w-3.5" />
                     {tr(t, 'approve', 'Approve')}

@@ -37,13 +37,14 @@ export function getAllDevices(userId?: string | number): Promise<DeviceListRespo
   return apiFetch('GET', `/api/auth/devices${query}`) as Promise<DeviceListResponse>
 }
 
-export function approveDevice(id: number | string): Promise<unknown> {
-  return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/approve`, {})
+// `confirmShared` is true only after the administrator saw that another account already has the device; the Worker refuses without it (device_shared_confirm).
+export function approveDevice(id: number | string, confirmShared = false): Promise<unknown> {
+  return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/approve`, confirmShared ? { confirmShared: true } : {})
 }
 
 // At the cap: approve this pending device and revoke one approved device of the same account in one atomic step.
-export function approveDeviceReplacing(id: number | string, revokeId: number | string): Promise<{ success?: boolean; revokedSessions?: number }> {
-  return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/approve-replacing`, { revokeId: Number(revokeId) }) as Promise<{ success?: boolean; revokedSessions?: number }>
+export function approveDeviceReplacing(id: number | string, revokeId: number | string, confirmShared = false): Promise<{ success?: boolean; revokedSessions?: number }> {
+  return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/approve-replacing`, { revokeId: Number(revokeId), ...(confirmShared ? { confirmShared: true } : {}) }) as Promise<{ success?: boolean; revokedSessions?: number }>
 }
 
 export function rejectDevice(id: number | string): Promise<unknown> {
@@ -72,8 +73,8 @@ export function getShopDevices(): Promise<{ shopDevices: ShopDeviceRecord[] }> {
 }
 
 // :id is a pending or approved device row; the Worker refuses anything else and removes that browser's rows.
-export function markShopDevice(id: number | string, label: string): Promise<{ success?: boolean; removedRows?: number }> {
-  return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/mark-shop`, { label }) as Promise<{ success?: boolean; removedRows?: number }>
+export function markShopDevice(id: number | string, label: string, confirmShared = false): Promise<{ success?: boolean; removedRows?: number }> {
+  return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/mark-shop`, { label, ...(confirmShared ? { confirmShared: true } : {}) }) as Promise<{ success?: boolean; removedRows?: number }>
 }
 
 // Ends the marking and signs out the sessions that came in through it.
