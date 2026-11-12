@@ -144,6 +144,7 @@ const PAID = {
   inventoryCheckApprovalTakeoverSeconds: 300,
   coreInvariantsReverifySeconds: 86400,
   sessionTouchIntervalSeconds: 900,
+  maxApprovedDevicesPerUser: 5,
   dashboardStockOverviewCacheSeconds: 30,
   dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 5,
@@ -194,6 +195,7 @@ const FREE = {
   inventoryCheckApprovalTakeoverSeconds: 900,
   coreInvariantsReverifySeconds: 86400,
   sessionTouchIntervalSeconds: 900,
+  maxApprovedDevicesPerUser: 5,
   dashboardStockOverviewCacheSeconds: 300,
   dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 15,
@@ -263,7 +265,7 @@ const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES, ...
 // the same on both tiers; the read switch dash_overview_5m decides whether it is used, and what Free saves is the recompute a sale used to force.
 // coreInvariantsReverifySeconds is 24 h on both tiers since 11 Nov (Paid was 6 h: a run reads ~23k rows, four a day). sessionTouchIntervalSeconds is the
 // 15-minute last-seen touch on both tiers (it only bounds a one-row write; nothing reads it to decide).
-const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds']
+const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //

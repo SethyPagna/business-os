@@ -691,6 +691,26 @@ async function suite(mutate, label) {
     assert.equal(copy.body.success, undefined, 'the same id typed in elsewhere, with no cookie, still gets nothing')
   })
 
+  await check('27. M-B: the device cap and the limit the panel receives come from getPlanLimits(env).maxApprovedDevicesPerUser, not from a literal in the routes', async () => {
+    const plan2 = (text, rel) => mutate(rel === 'lib/planTier.ts' ? text.split('maxApprovedDevicesPerUser: 5,').join('maxApprovedDevicesPerUser: 2,') : text, rel)
+    const w = setup(plan2)
+    approve(w.h, 'cap-phone-000001', 12)
+    approve(w.h, 'cap-phone-000002', 12)
+    w.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status) VALUES (12, 'cap-phone-000003', 'pending')").run({})
+    const pending = await w.call('/pending', 'GET')
+    assert.equal(pending.body.limit, 2, 'the limit the panel receives is the plan value')
+    const refused = await w.call(`/${rowId(w.h, 12, 'cap-phone-000003')}/approve`)
+    assert.equal(refused.status, 409, JSON.stringify(refused.body))
+    assert.equal(refused.body.code, 'device_limit_reached')
+    assert.equal(refused.body.limit, 2)
+    const normal = setup(mutate)
+    approve(normal.h, 'cap-phone-000001', 12)
+    approve(normal.h, 'cap-phone-000002', 12)
+    normal.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status) VALUES (12, 'cap-phone-000003', 'pending')").run({})
+    assert.equal((await normal.call('/pending', 'GET')).body.limit, 5)
+    assert.equal((await normal.call(`/${rowId(normal.h, 12, 'cap-phone-000003')}/approve`)).status, 200, 'with the real plan value of 5 the third device is approved')
+  })
+
   await check('17. the pending list tells the administrator which approved device a request claimed (L4); a plain new device claims nothing', async () => {
     const w = setup(mutate)
     approve(w.h, 'claimed-phone-0001', 12)
@@ -740,6 +760,7 @@ const mutants = [
   ['approve-replacing on a shared device needs no confirmation (P-1 HA)', inFile('routes/devices.ts', 'if (facts.others > 0 && !confirmedShared(body))', 'if (false && !confirmedShared(body))'), ['24.']],
   ['marking a device that several accounts have needs no confirmation (P-1 HC)', inFile('routes/devices.ts', '.size > 1 && !confirmedShared(body)', '.size > 1 && false'), ['25.']],
   ['a device with no cookie issued yet can be marked (M-A)', inFile('routes/devices.ts', 'if (!(waiting || []).some((row) => row.bound)) {', 'if (false) {'), ['26.']],
+  ['the device cap is a literal again, not the plan value (M-B)', inFile('lib/deviceTrust.ts', 'getPlanLimits(env).maxApprovedDevicesPerUser', '5'), ['27.']],
   ['the /session-duration route forgets the shop tag when it re-issues (L-5)', (text, rel) => (rel === 'routes/auth.ts' ? text.replace('shopDeviceId: source.shopDeviceId,', '') : text), ['10.']],
   ['marking from a pending request is refused', inFile('routes/devices.ts', "device.status !== 'approved' && device.status !== 'pending'", "device.status !== 'approved'"), ['13.']],
 ]

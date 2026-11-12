@@ -5,7 +5,7 @@ import { audit } from '../lib/audit'
 import { isAdminControlUser } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import type { Env } from '../index'
-import { MAX_APPROVED_DEVICES_PER_USER, countApprovedDevices, type TrustedDeviceRow } from '../lib/deviceTrust'
+import { maxApprovedDevicesPerUser, countApprovedDevices, type TrustedDeviceRow } from '../lib/deviceTrust'
 
 // Admin device-approval management -- mounted at /api/auth/devices.
 // Everything here requires an authenticated admin-control session (see
@@ -143,7 +143,7 @@ app.get('/pending', async (c) => {
   `).all<TrustedDeviceRow & { username: string; user_name: string; claimed_device_name: string | null; shared_with_json?: string | null }>()
   // Other accounts that already have a row on the same device: the administrator sees them before approving (review P-1).
   const devices = (rows || []).map(({ shared_with_json, ...row }) => ({ ...row, shared_with: parseSharedWith(shared_with_json) }))
-  return c.json({ devices, limit: MAX_APPROVED_DEVICES_PER_USER })
+  return c.json({ devices, limit: maxApprovedDevicesPerUser(c.env) })
 })
 
 // GET /api/auth/devices -- full history (approved/rejected/pending),
@@ -166,7 +166,7 @@ app.get('/', async (c) => {
         ORDER BY td.requested_at DESC
         LIMIT 200
       `).all<TrustedDeviceRow & { username: string; user_name: string }>()
-  return c.json({ devices: rows || [], limit: MAX_APPROVED_DEVICES_PER_USER })
+  return c.json({ devices: rows || [], limit: maxApprovedDevicesPerUser(c.env) })
 })
 
 // A request on the id of a till that was marked and then unmarked is dead: the id is retired and the browser
@@ -210,15 +210,15 @@ app.post('/:id/approve', async (c) => {
   if (facts.retired) return c.json(RETIRED_SHOP_ID_ANSWER, 409)
   if (facts.others > 0 && !confirmedShared(await c.req.json<{ confirmShared?: unknown }>().catch(() => null))) return c.json(SHARED_CONFIRM_ANSWER, 409)
 
-  // At most MAX_APPROVED_DEVICES_PER_USER approved devices per account (owner
+  // At most maxApprovedDevicesPerUser(c.env) approved devices per account (owner
   // rule, 5 since 12 Nov 2026). Excluding this row keeps re-approving an already-approved
   // device idempotent instead of tripping its own limit.
   const approvedCount = await countApprovedDevices(c.env, device.user_id, device.id)
-  if (approvedCount >= MAX_APPROVED_DEVICES_PER_USER) {
+  if (approvedCount >= maxApprovedDevicesPerUser(c.env)) {
     return c.json({
-      error: `This account already has ${approvedCount} approved devices (limit ${MAX_APPROVED_DEVICES_PER_USER}). Revoke one of its devices first, then approve this one.`,
+      error: `This account already has ${approvedCount} approved devices (limit ${maxApprovedDevicesPerUser(c.env)}). Revoke one of its devices first, then approve this one.`,
       code: 'device_limit_reached',
-      limit: MAX_APPROVED_DEVICES_PER_USER,
+      limit: maxApprovedDevicesPerUser(c.env),
     }, 409)
   }
 
@@ -236,7 +236,7 @@ app.post('/:id/approve', async (c) => {
     user_id: device.user_id,
     admin_id: admin.id,
     admin_name: admin.name,
-    approved_device_limit: MAX_APPROVED_DEVICES_PER_USER,
+    approved_device_limit: maxApprovedDevicesPerUser(c.env),
   })
 
   // A concurrent reject/reset must never be overwritten by this stale
@@ -254,11 +254,11 @@ app.post('/:id/approve', async (c) => {
     }
     if (current?.status === 'pending') {
       const currentApprovedCount = await countApprovedDevices(c.env, device.user_id, device.id)
-      if (currentApprovedCount >= MAX_APPROVED_DEVICES_PER_USER) {
+      if (currentApprovedCount >= maxApprovedDevicesPerUser(c.env)) {
         return c.json({
-          error: `This account already has ${currentApprovedCount} approved devices (limit ${MAX_APPROVED_DEVICES_PER_USER}). Revoke one of its devices first, then approve this one.`,
+          error: `This account already has ${currentApprovedCount} approved devices (limit ${maxApprovedDevicesPerUser(c.env)}). Revoke one of its devices first, then approve this one.`,
           code: 'device_limit_reached',
-          limit: MAX_APPROVED_DEVICES_PER_USER,
+          limit: maxApprovedDevicesPerUser(c.env),
         }, 409)
       }
     }
@@ -317,7 +317,7 @@ app.post('/:id/approve-replacing', async (c) => {
     old_device_id: old.device_id,
     admin_id: admin.id,
     admin_name: admin.name,
-    approved_device_limit: MAX_APPROVED_DEVICES_PER_USER,
+    approved_device_limit: maxApprovedDevicesPerUser(c.env),
     replace_guard_error: '{',
   }
   let results: Array<{ meta?: { changes?: number } }>

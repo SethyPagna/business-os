@@ -34,15 +34,16 @@ const excludeSql = countMatch[1].replace(/@(\w+)/g, (_, name) => ({ user_id: '5'
 assert.equal(sqlite.prepare(excludeSql).get().n, 4, 'excluding a row id works (idempotent re-approval)')
 
 // ---- 2. The constant and the enforcing gate ----
-assert.match(trust, /export const MAX_APPROVED_DEVICES_PER_USER = 5/, 'the limit is 5, defined once in deviceTrust')
+assert.match(trust, /export const maxApprovedDevicesPerUser = \(env: Env\): number => getPlanLimits\(env\)\.maxApprovedDevicesPerUser/, 'the limit is read from the plan, defined once in deviceTrust')
+assert.ok(!/MAX_APPROVED_DEVICES_PER_USER/.test(trust + read(path.join('routes', 'devices.ts'))), 'no module constant is left')
 const devices = read(path.join('routes', 'devices.ts'))
-const limitReturns = devices.match(/limit: MAX_APPROVED_DEVICES_PER_USER \}\)/g) || []
+const limitReturns = devices.match(/limit: maxApprovedDevicesPerUser\(c\.env\) \}\)/g) || []
 assert.ok(limitReturns.length >= 2, 'GET /pending and GET / both return the limit so the UI never hard-codes it')
 assert.match(devices, /countApprovedDevices\(c\.env, device\.user_id, device\.id\)/, 'approve endpoint counts the OTHER approved devices')
-assert.match(devices, /approvedCount >= MAX_APPROVED_DEVICES_PER_USER/, 'approve endpoint refuses past the cap')
+assert.match(devices, /approvedCount >= maxApprovedDevicesPerUser\(c\.env\)/, 'approve endpoint refuses past the cap')
 assert.match(devices, /device_limit_reached/, 'the refusal carries a machine-readable code')
 assert.match(devices, /WHERE id = @id AND user_id = @user_id AND status = 'pending'[\s\S]*?status = 'approved' AND id != @id\) < @approved_device_limit/, 'the pending-to-approved write enforces the cap atomically for its own user')
-assert.match(devices, /currentApprovedCount >= MAX_APPROVED_DEVICES_PER_USER/, 'a zero-row stale approval rechecks the current cap before responding')
+assert.match(devices, /currentApprovedCount >= maxApprovedDevicesPerUser\(c\.env\)/, 'a zero-row stale approval rechecks the current cap before responding')
 // The refusal must come BEFORE the status flip to approved.
 const refusalAt = devices.indexOf('device_limit_reached')
 const approveAt = devices.indexOf(`SET status = 'approved'`)

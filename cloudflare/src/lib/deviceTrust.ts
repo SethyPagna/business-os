@@ -4,6 +4,7 @@ import { isAdminControlUser, type PermissionUser } from './permissions'
 import { audit } from './audit'
 import { isValidDeviceId } from './deviceCookie'
 import { broadcast } from '../durable-objects/broadcastHub'
+import { getPlanLimits } from './planTier'
 
 // Device-approval gate. See migrations/0005_trusted_devices.sql for the
 // schema. Non-administrator accounts are enrolled: a device stays trusted
@@ -36,13 +37,13 @@ export function requiresDeviceApproval(user: PermissionUser): boolean {
   return Boolean(user) && !isAdminControlUser(user)
 }
 
-// Each account may hold at most this many APPROVED devices at once (owner
+// Each account may hold at most the plan value maxApprovedDevicesPerUser APPROVED devices at once (owner
 // 12 Nov 2026: 5, raised from 3). Enforced at the admin approve endpoints,
 // the ONLY paths a device takes to 'approved'; one more stays pending until
 // an existing one is revoked or replaced. Admin-control accounts bypass the
 // device gate entirely (see requiresDeviceApproval), so the cap governs
 // employees. The API returns it as `limit`; the UI never hard-codes it.
-export const MAX_APPROVED_DEVICES_PER_USER = 5
+export const maxApprovedDevicesPerUser = (env: Env): number => getPlanLimits(env).maxApprovedDevicesPerUser
 
 export async function countApprovedDevices(env: Env, userId: number, excludeRowId?: number): Promise<number> {
   const db = getDb(env)

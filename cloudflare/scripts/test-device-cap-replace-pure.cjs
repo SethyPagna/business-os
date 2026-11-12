@@ -60,7 +60,7 @@ function setup(mutate) {
     const res = await app.request(`/${id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }, h.env, { waitUntil() {}, passThroughOnException() {} })
     return { status: res.status, body: await res.json() }
   }
-  return { h, audits, post, postApprove, limit: trust.MAX_APPROVED_DEVICES_PER_USER }
+  return { h, audits, post, postApprove, limit: trust.maxApprovedDevicesPerUser(h.env) }
 }
 
 const addDevice = (h, userId, deviceId, status) => h.raw.prepare(`INSERT INTO trusted_devices (user_id, device_id, device_name, status, decided_at)
