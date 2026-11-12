@@ -165,7 +165,7 @@ async function isRetiredShopId(db: ReturnType<typeof getDb>, deviceId: string): 
   return Boolean(row)
 }
 
-const RETIRED_SHOP_ID_ANSWER = { error: 'This request is on the id of a shop device that was unmarked, so an approval would not work. Ask the employee to sign in again.', code: 'shop_device_retired' } as const
+const RETIRED_SHOP_ID_ANSWER = { error: 'This request is on a shop device that was unmarked, so an approval would not work. Ask the employee to sign in again.', code: 'shop_device_retired' } as const
 
 app.post('/:id/approve', async (c) => {
   const id = c.req.param('id')
