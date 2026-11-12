@@ -172,8 +172,17 @@ async function writeBackupId(id: string): Promise<void> {
 // Sign-in calls await this first: when localStorage was emptied but the
 // IndexedDB copy survived, the old id is restored before any request carries a
 // new one. It never mints an id.
+// A hung indexedDB.open (some private modes and low-storage phones never answer) must not block sign-in:
+// the restore gets this long, then sign-in goes on with the id it has.
+const RESTORE_TIMEOUT_MS = 1000
+
 export function deviceIdentityReady(): Promise<void> {
-  identityReady ??= (async () => {
+  identityReady ??= Promise.race([restoreIdentity(), new Promise<void>((resolve) => { setTimeout(resolve, RESTORE_TIMEOUT_MS) })]).catch(() => undefined)
+  return identityReady
+}
+
+function restoreIdentity(): Promise<void> {
+  return (async () => {
     const stored = readStoredId()
     const backup = await readBackupId()
     if (stored) {
@@ -187,8 +196,7 @@ export function deviceIdentityReady(): Promise<void> {
       return
     }
     if (memoryDeviceId) await writeBackupId(memoryDeviceId)
-  })().catch(() => undefined)
-  return identityReady
+  })()
 }
 
 // One id per page life: if storage refuses the write the id is still kept in

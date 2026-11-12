@@ -191,6 +191,17 @@ await runAsyncTest('no IndexedDB at all does not break the id', async () => {
   assert.equal(getOrCreatePersistentDeviceId(), getOrCreatePersistentDeviceId())
 })
 
+await runAsyncTest('an IndexedDB open that never answers does not block sign-in for more than about a second', async () => {
+  installStorage()
+  Object.defineProperty(globalThis, 'indexedDB', { configurable: true, value: { open: () => ({}) } })
+  const { deviceIdentityReady, getOrCreatePersistentDeviceId } = await freshDeviceInfo()
+  const started = Date.now()
+  await deviceIdentityReady()
+  const waited = Date.now() - started
+  assert.ok(waited >= 900 && waited < 3000, `waited ${waited} ms`)
+  assert.equal(getOrCreatePersistentDeviceId(), getOrCreatePersistentDeviceId(), 'sign-in carries one id')
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }
