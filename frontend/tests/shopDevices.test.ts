@@ -27,6 +27,12 @@ assert.match(panel, /maxLength=\{SHOP_LABEL_MAX\}/, 'the name is capped like the
 assert.match(panel, /const SHOP_LABEL_MAX = 60/, 'cap matches the Worker (60)')
 assert.match(panel, /code === 'shop_device_exists'[\s\S]*?code === 'shop_label_invalid'/, 'Worker refusals are translated by machine code')
 
+assert.equal(panel.split("setMarkingShop({ device, label: '' })").length - 1, 2, 'a pending request and an approved device both offer the shop button')
+assert.match(en.shop_device_mark_confirm, /device slot/i, 'the mark dialog says no slot is used')
+assert.match(en.shop_device_mark_confirm, /waiting for this device are removed/i, 'the mark dialog says waiting requests are removed')
+assert.match(en.shop_device_mark_confirm, /individual employees/i, 'the mark dialog says individual approvals are replaced')
+assert.match(panel, /markShopDevice[(]device[.]id, label[)]/, 'the same call serves both rows')
+
 const keys = [
   'shop_device', 'shop_devices', 'shop_devices_intro', 'no_shop_devices', 'shop_device_mark', 'shop_device_mark_title', 'shop_device_mark_confirm',
   'shop_device_name', 'shop_device_name_placeholder', 'shop_device_continue', 'shop_device_marked_done', 'shop_device_marked_by', 'shop_device_unmark',

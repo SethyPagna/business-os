@@ -125,7 +125,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
   const [busySessionId, setBusySessionId] = useState<number | null>(null)
   const [busyUserId, setBusyUserId] = useState<number | null>(null)
   // An account already at its cap: the pending device waits for the admin to pick which approved device to replace.
-  // The approved device an administrator is naming as a shop device.
+  // The pending or approved device row an administrator is naming as a shop device.
   const [markingShop, setMarkingShop] = useState<{ device: TrustedDeviceRecord; label: string } | null>(null)
   const [replacing, setReplacing] = useState<{ device: TrustedDeviceRecord; choices: TrustedDeviceRecord[]; selectedId: number } | null>(null)
 
@@ -250,7 +250,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
     setMarkingShop(null)
     const confirmed = await askToConfirm({
       title: tr(t, 'shop_device_mark_title', 'Mark as a shop device?'),
-      message: tr(t, 'shop_device_mark_confirm', 'Every active employee will be able to sign in on this device without a separate approval. Mark only a device that stays in the shop.'),
+      message: tr(t, 'shop_device_mark_confirm', 'Every active employee will be able to sign in on this device without a separate approval and without using a device slot. Requests waiting for this device are removed, and approvals that individual employees already have for it are replaced by this one. Mark only a device that stays in the shop.'),
       items: [
         { label: tr(t, 'shop_device_name', 'Shop device name'), value: label },
         { label: tr(t, 'device', 'Device'), value: device.device_name || tr(t, 'unknown_device', 'Unknown device') },
@@ -374,6 +374,16 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                   >
                     <ShieldCheck className="h-3.5 w-3.5" />
                     {tr(t, 'approve', 'Approve')}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busyId === device.id}
+                    className="btn-secondary px-2 py-1.5 text-xs"
+                    title={tr(t, 'shop_device_mark', 'Mark as shop device')}
+                    aria-label={tr(t, 'shop_device_mark', 'Mark as shop device')}
+                    onClick={() => setMarkingShop({ device, label: '' })}
+                  >
+                    <Store className="h-3.5 w-3.5" />
                   </button>
                   <button
                     type="button"
@@ -517,7 +527,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
           {tr(t, 'shop_devices', 'Shop devices')}
         </h3>
         <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
-          {tr(t, 'shop_devices_intro', 'A shop device is a till you mark once. Every active employee signs in there without a separate approval and without using one of their own device slots. To mark one, use the shop button on its approved device above.')}
+          {tr(t, 'shop_devices_intro', 'A shop device is a till you mark once. Every active employee signs in there without a separate approval and without using one of their own device slots. To mark one, use the shop button on its request or approved device above.')}
         </p>
         {loading ? null : !shopDevices.length ? (
           <div className="text-sm text-gray-500 dark:text-gray-400">{tr(t, 'no_shop_devices', 'No shop devices yet.')}</div>

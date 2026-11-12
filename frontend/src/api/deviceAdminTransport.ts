@@ -64,9 +64,9 @@ export function getShopDevices(): Promise<{ shopDevices: ShopDeviceRecord[] }> {
   return apiFetch('GET', '/api/auth/devices/shop') as Promise<{ shopDevices: ShopDeviceRecord[] }>
 }
 
-// :id is the approved device row; the Worker refuses anything else.
-export function markShopDevice(id: number | string, label: string): Promise<{ success?: boolean }> {
-  return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/mark-shop`, { label }) as Promise<{ success?: boolean }>
+// :id is a pending or approved device row; the Worker refuses anything else and removes that browser's rows.
+export function markShopDevice(id: number | string, label: string): Promise<{ success?: boolean; removedRows?: number }> {
+  return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/mark-shop`, { label }) as Promise<{ success?: boolean; removedRows?: number }>
 }
 
 // Ends the marking and signs out the sessions that came in through it.

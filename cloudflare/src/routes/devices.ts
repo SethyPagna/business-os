@@ -510,8 +510,11 @@ app.get('/shop', async (c) => {
   return c.json({ shopDevices: rows || [] })
 })
 
-// POST /api/auth/devices/:id/mark-shop { label } -- :id is an APPROVED
-// trusted_devices row; its device id becomes a shop device.
+// POST /api/auth/devices/:id/mark-shop { label } -- :id is a PENDING or
+// APPROVED trusted_devices row; its device id becomes a shop device. Marking
+// costs no slot: the batch removes every pending or approved row for that
+// browser (any employee's), because the marking replaces them. Unmarking then
+// really does mean "each employee needs an approval again".
 app.post('/:id/mark-shop', async (c) => {
   const id = Number(c.req.param('id'))
   const admin = c.get('user')
@@ -524,13 +527,12 @@ app.post('/:id/mark-shop', async (c) => {
   const db = getDb(c.env)
   const device = await db.prepare('SELECT * FROM trusted_devices WHERE id = @id LIMIT 1').get<TrustedDeviceRow>({ id })
   if (!device) return c.json({ error: 'Device request not found' }, 404)
-  if (device.status !== 'approved') return c.json({ error: 'Only an approved device can be marked as a shop device.', code: 'shop_device_not_approved' }, 409)
-  // Requests still waiting for this browser no longer matter once it is a shop
-  // device (every employee passes there), so the same batch removes them rather
-  // than leave them in the queue and the bell, where Decline would lock that
-  // employee out of the till.
-  const waiting = await db.prepare(`SELECT id, user_id FROM trusted_devices WHERE device_id = @device_id AND status = 'pending' LIMIT 200`)
-    .all<{ id: number; user_id: number }>({ device_id: device.device_id })
+  if (device.status !== 'approved' && device.status !== 'pending') return c.json({ error: 'Only a pending or approved device can be marked as a shop device.', code: 'shop_device_not_approved' }, 409)
+  // Rows for this browser no longer matter once it is a shop device (every
+  // employee passes there): waiting requests would stay in the queue and bell,
+  // and approved rows would hold a slot for nothing. The same batch removes them.
+  const waiting = await db.prepare(`SELECT id, user_id, status FROM trusted_devices WHERE device_id = @device_id AND status IN ('pending', 'approved') LIMIT 200`)
+    .all<{ id: number; user_id: number; status: string }>({ device_id: device.device_id })
   let inserted: { changes?: number } | undefined
   let closed = 0
   try {
@@ -538,11 +540,11 @@ app.post('/:id/mark-shop', async (c) => {
       {
         sql: `INSERT INTO shop_devices (device_id, label, marked_by_user_id, marked_by_name)
           SELECT @device_id, @label, @admin_id, @admin_name
-          WHERE EXISTS (SELECT 1 FROM trusted_devices WHERE id = @id AND status = 'approved')`,
+          WHERE EXISTS (SELECT 1 FROM trusted_devices WHERE id = @id AND status IN ('pending', 'approved'))`,
         params: { id, device_id: device.device_id, label, admin_id: admin.id, admin_name: admin.name },
       },
       {
-        sql: `DELETE FROM trusted_devices WHERE device_id = @device_id AND status = 'pending' AND changes() = 1`,
+        sql: `DELETE FROM trusted_devices WHERE device_id = @device_id AND status IN ('pending', 'approved') AND changes() = 1`,
         params: { device_id: device.device_id },
       },
     ])
@@ -559,11 +561,11 @@ app.post('/:id/mark-shop', async (c) => {
     deviceId: device.device_id, deviceName: device.device_name, label, targetTrustedDeviceRowId: device.id,
   })
   if (closed > 0) {
-    await audit(c.env, admin.id, admin.username, 'shop_device_pending_closed', 'user', admin.id, {
-      deviceId: device.device_id, label, closedRequests: (waiting || []).map((row) => ({ rowId: row.id, userId: row.user_id })), closedCount: closed,
+    await audit(c.env, admin.id, admin.username, 'shop_device_rows_removed', 'user', admin.id, {
+      deviceId: device.device_id, label, closedRows: (waiting || []).map((row) => ({ rowId: row.id, userId: row.user_id, status: row.status })), closedCount: closed,
     })
   }
-  return c.json({ success: true, closedPending: closed })
+  return c.json({ success: true, removedRows: closed })
 })
 
 // POST /api/auth/devices/shop/:shopId/unmark -- one batch (one transaction)

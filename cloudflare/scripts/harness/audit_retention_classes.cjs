@@ -144,7 +144,7 @@ const ROWS = [
   ['user', 'device_login_new_country', PURGED],
   ['user', 'shop_device_marked', PURGED],
   ['user', 'shop_device_unmarked', PURGED],
-  ['user', 'shop_device_pending_closed', PURGED],
+  ['user', 'shop_device_rows_removed', PURGED],
   ['system', 'step_up_refused', PURGED],
   ['system', 'factory_reset', KEPT],
   ['system', 'reset_data', KEPT],
