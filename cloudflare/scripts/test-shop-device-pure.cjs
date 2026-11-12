@@ -241,13 +241,14 @@ async function suite(mutate, label) {
       VALUES (@id, @userId, @token, @device, '2999-01-01', @family)`).run({ id, userId, token: `tok-${id}`, device, family })
     insert(101, 12, TILL, shopSession.id)
     insert(102, 11, TILL, null)
-    insert(103, 10, TILL, null)
+    approve(w.h, 'phone-0003', 10)
+    insert(103, 10, 'phone-0003', null)
     insert(104, 12, 'elsewhere-0001', null)
     const shopId = w.h.raw.prepare('SELECT id FROM shop_devices WHERE unmarked_at IS NULL').get({}).id
     const res = await w.call(`/shop/${shopId}/unmark`)
     assert.equal(res.status, 200)
     assert.equal(res.body.revokedSessions, 2, 'the tagged sign-in and its re-issue')
-    assert.deepEqual(live(w.h), [102, 103, 104], 'administrator, personally approved and other-device sessions survive')
+    assert.deepEqual(live(w.h), [102, 103, 104], 'administrator, personally approved (on another device) and other-device sessions survive')
     const next = await signIn(w, { username: 'dara', deviceId: TILL, cookieFor: TILL })
     assert.equal(next.body.deviceApprovalRequired, true, 'back to per-account approval')
     assert.notEqual(next.body.deviceId, TILL, 'the retired id is replaced by a fresh one')
@@ -419,7 +420,7 @@ async function suite(mutate, label) {
     assert.equal(after.body.deviceApprovalRequired, true, 'the marking employee needs an approval again, as the unmark dialog says')
   })
 
-  await check('14. D1 cost of the admin calls: mark = 2 reads + 1 batch of 2 statements (+ audit writes); unmark = 1 read + 1 batch of 2 (+ audit)', async () => {
+  await check('14. D1 cost of the admin calls: mark = 2 reads + 1 batch of 2 statements, 3 when approved rows exist (+ audit writes); unmark = 1 read + 1 batch of 2 (+ audit)', async () => {
     const w = setup(mutate)
     approve(w.h, TILL, 10)
     const tally = async (run) => {
@@ -436,7 +437,16 @@ async function suite(mutate, label) {
     const mark = await tally(() => w.call(`/${rowId(w.h, 10, TILL)}/mark-shop`, 'POST', { label: 'Till 1' }))
     const unmark = await tally(() => w.call(`/shop/${shopIdOf(w.h)}/unmark`))
     console.log(`     mark: ${JSON.stringify(mark)}  unmark: ${JSON.stringify(unmark)} (audit writes not counted: stubbed)`)
-    assert.deepEqual(mark, { prepared: 2, batches: 1, batched: 2 })
+    assert.deepEqual(mark, { prepared: 2, batches: 1, batched: 3 }, 'an approved row adds the session-tag statement to the batch')
+    const pendingOnly = setup(mutate)
+    pendingOnly.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status) VALUES (10, @d, 'pending')").run({ d: TILL })
+    const prepare2 = pendingOnly.h.db.prepare.bind(pendingOnly.h.db)
+    const batch2 = pendingOnly.h.db.batch.bind(pendingOnly.h.db)
+    let batched2 = 0
+    pendingOnly.h.db.prepare = (sql) => prepare2(sql)
+    pendingOnly.h.db.batch = (items) => { batched2 += items.length; return batch2(items) }
+    await pendingOnly.call(`/${rowId(pendingOnly.h, 10, TILL)}/mark-shop`, 'POST', { label: 'Till 1' })
+    assert.equal(batched2, 2, 'a pending request has no sessions to tag: still 2 statements')
     assert.deepEqual(unmark, { prepared: 1, batches: 1, batched: 2 })
   })
 
@@ -511,6 +521,29 @@ async function suite(mutate, label) {
     assert.equal((await w.call(`/${rowId(w.h, 10, 'other-new-phone-1')}/approve`)).status, 200, 'an ordinary request is approved as before')
   })
 
+  await check('19. L-1: marking tags the live sessions of employees whose personal approval it deletes, so unmark revokes them; administrators and other devices are untouched', async () => {
+    const w = setup(mutate)
+    approve(w.h, TILL, 10)
+    const insert = (id, userId, device, revoked = false) => w.h.raw.prepare(`INSERT INTO user_sessions (id, user_id, token_hash, device_id, expires_at, revoked_at)
+      VALUES (@id, @userId, @token, @device, '2999-01-01', CASE WHEN @revoked = 1 THEN CURRENT_TIMESTAMP END)`).run({ id, userId, token: `tok-${id}`, device, revoked: revoked ? 1 : 0 })
+    insert(201, 10, TILL)
+    insert(202, 10, TILL)
+    insert(203, 10, 'elsewhere-0001')
+    insert(204, 11, TILL)
+    insert(205, 12, TILL)
+    insert(206, 10, TILL, true)
+    const marked = await w.call(`/${rowId(w.h, 10, TILL)}/mark-shop`, 'POST', { label: 'Till 1' })
+    assert.equal(marked.status, 200)
+    const shopId = shopIdOf(w.h)
+    const tags = Object.fromEntries(sessionsOf(w.h).map((s) => [s.id, s.shop_device_id]))
+    assert.deepEqual([tags[201], tags[202]], [shopId, shopId], 'her two live sessions on the till are tagged')
+    assert.deepEqual([tags[203], tags[204], tags[205], tags[206]], [null, null, null, null], 'another device, the administrator, an employee with no approved row here and a revoked session stay untagged')
+    assert.equal(w.audits.find((a) => a[0] === 'shop_device_rows_removed')[3].taggedSessions, 2)
+    const unmarked = await w.call(`/shop/${shopId}/unmark`)
+    assert.equal(unmarked.body.revokedSessions, 2)
+    assert.deepEqual(live(w.h), [203, 204, 205], 'the tagged sessions are revoked, nothing else')
+  })
+
   await check('17. the pending list tells the administrator which approved device a request claimed (L4); a plain new device claims nothing', async () => {
     const w = setup(mutate)
     approve(w.h, 'claimed-phone-0001', 12)
@@ -550,13 +583,17 @@ const mutants = [
   ['an unmarked till id keeps working (no retirement)', inFile('lib/deviceTrust.ts', 'if (cookiesOn && (retiredShopId ||', 'if (cookiesOn && (false ||'), ['3.', '16.']],
   ['a retired id can be marked again', inFile('routes/devices.ts', 'if (device.shop_retired) {', 'if (false) {'), ['16.']],
   ['a pending row forgets which approved device it claimed', inFile('lib/deviceTrust.ts', "claimed: existing?.status === 'approved' ? existing.id : null", 'claimed: null'), ['17.']],
+  ['marking does not tag the sessions it orphans (L-1)', inFile('routes/devices.ts', 'const approvedUserIds = [...new Set(', 'const approvedUserIds: number[] = [] || [...new Set('), ['19.', '14.']],
   ['marking from a pending request is refused', inFile('routes/devices.ts', "device.status !== 'approved' && device.status !== 'pending'", "device.status !== 'approved'"), ['13.']],
 ]
 
 async function main() {
   const base = await suite((t) => t, 'real code')
   let bad = base.length
+  const only = (process.argv.find((a) => a.startsWith('--mutant=')) || '').slice('--mutant='.length)
+  const realOnly = process.argv.includes('--real-only')
   for (const [name, mutate, expectRed] of mutants) {
+    if (realOnly || (only && !name.includes(only))) continue
     const red = await suite(mutate, `mutant: ${name}`)
     const missing = expectRed.filter((prefix) => !red.some((n) => n.startsWith(prefix)))
     if (missing.length) { console.log(`MUTANT SURVIVED: ${name}; checks ${missing.join(', ')} stayed green`); bad += 1 }

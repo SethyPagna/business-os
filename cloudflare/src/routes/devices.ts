@@ -553,8 +553,15 @@ app.post('/:id/mark-shop', async (c) => {
   // and approved rows would hold a slot for nothing. The same batch removes them.
   const waiting = await db.prepare(`SELECT id, user_id, status FROM trusted_devices WHERE device_id = @device_id AND status IN ('pending', 'approved') LIMIT 200`)
     .all<{ id: number; user_id: number; status: string }>({ device_id: device.device_id })
+  // The approved rows the marking deletes were the only thing those employees' live sessions on this browser stood on. Tag the sessions with the
+  // new marking in the same batch, so unmarking revokes them like any other shop sign-in (otherwise they outlive the unmark with no approval behind
+  // them and no device row an administrator could revoke). Only the accounts whose approved row is deleted: an administrator's session is never touched.
+  const approvedUserIds = [...new Set((waiting || []).filter((row) => row.status === 'approved').map((row) => row.user_id))]
+  const sessionParams: Record<string, string | number> = { device_id: device.device_id }
+  approvedUserIds.forEach((userId, index) => { sessionParams[`u${index}`] = userId })
   let inserted: { changes?: number } | undefined
   let closed = 0
+  let tagged = 0
   try {
     const results = await db.batch([
       {
@@ -567,9 +574,17 @@ app.post('/:id/mark-shop', async (c) => {
         sql: `DELETE FROM trusted_devices WHERE device_id = @device_id AND status IN ('pending', 'approved') AND changes() = 1`,
         params: { device_id: device.device_id },
       },
+      ...(approvedUserIds.length ? [{
+        sql: `UPDATE user_sessions SET shop_device_id = (SELECT id FROM shop_devices WHERE device_id = @device_id AND unmarked_at IS NULL)
+          WHERE device_id = @device_id AND revoked_at IS NULL AND shop_device_id IS NULL
+            AND user_id IN (${approvedUserIds.map((_, index) => `@u${index}`).join(', ')})
+            AND EXISTS (SELECT 1 FROM shop_devices WHERE device_id = @device_id AND unmarked_at IS NULL)`,
+        params: sessionParams,
+      }] : []),
     ])
     inserted = { changes: Number(results[0]?.meta?.changes || 0) }
     closed = Number(results[1]?.meta?.changes || 0)
+    tagged = approvedUserIds.length ? Number(results[2]?.meta?.changes || 0) : 0
   } catch (error) {
     if (error instanceof Error && /UNIQUE/i.test(error.message)) {
       return c.json({ error: 'This device is already marked as a shop device.', code: 'shop_device_exists' }, 409)
@@ -582,7 +597,7 @@ app.post('/:id/mark-shop', async (c) => {
   })
   if (closed > 0) {
     await audit(c.env, admin.id, admin.username, 'shop_device_rows_removed', 'user', admin.id, {
-      deviceId: device.device_id, label, closedRows: (waiting || []).map((row) => ({ rowId: row.id, userId: row.user_id, status: row.status })), closedCount: closed,
+      deviceId: device.device_id, label, closedRows: (waiting || []).map((row) => ({ rowId: row.id, userId: row.user_id, status: row.status })), closedCount: closed, taggedSessions: tagged,
     })
   }
   return c.json({ success: true, removedRows: closed })
