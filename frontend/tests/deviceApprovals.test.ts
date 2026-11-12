@@ -77,5 +77,12 @@ for (const key of ['shop_device_held', 'shop_device_claimed']) {
 assert.ok(panel.includes("code === 'shop_device_held'"), 'the server refusal to mark a copied id is explained, not shown as a bare error')
 assert.ok(panel.includes("code === 'shop_device_claimed'"), 'the server refusal to mark a request that claims an approved device is explained too (N-3)')
 
+// N-5 (review round 4): the refusal shown on Approve for a retired id does not steer an administrator who wants a personal approval towards the shop button.
+for (const [lang, pack] of [['en', en], ['km', km]] as const) {
+  const text = pack.shop_device_retired
+  assert.ok(text, `${lang} carries shop_device_retired`)
+  if (lang === 'en') assert.ok(!/\bmark\b|\bid\b|cookie|phone/i.test(text), 'neutral English: no "mark", "id", "cookie" or phone wording')
+  else assert.ok(!text.includes('កំណត់') && !/ខូគី|\bID\b/i.test(text), 'neutral Khmer: no "mark" verb, cookie or ID')
+}
 
 console.log('PASS device re-approval reset transport, history placement, confirmation, and bilingual copy')

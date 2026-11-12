@@ -2006,7 +2006,7 @@
   "shop_device_conflict": "The device changed while you were deciding. Reload and try again.",
   "shop_device_held": "Another account already has this device approved, so this request may be a copy. Decline it, or mark the approved device instead.",
   "shop_device_claimed": "This request says it comes from an approved device but could not show it. Decline it, or mark the approved device instead.",
-  "shop_device_retired": "This device was a shop device before. Sign in on it again to give it a new identity, then mark its new request.",
+  "shop_device_retired": "This device was a shop device before. Sign in on it again to give it a new identity, then decide on its new request.",
   "shop_label_invalid": "Give the shop device a name of 1 to 60 characters.",
   "device_replace_least_recent": "Not used for the longest",
   "device_replace_new": "New device",

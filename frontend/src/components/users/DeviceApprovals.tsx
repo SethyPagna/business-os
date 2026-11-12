@@ -80,7 +80,7 @@ function deviceActionMessage(t: TranslateFn, err: unknown): string {
     return tr(t, 'shop_device_conflict', 'The device changed while you were deciding. Reload and try again.')
   }
   if (code === 'shop_device_retired') {
-    return tr(t, 'shop_device_retired', 'This device was a shop device before. Sign in on it again to give it a new identity, then mark its new request.')
+    return tr(t, 'shop_device_retired', 'This device was a shop device before. Sign in on it again to give it a new identity, then decide on its new request.')
   }
   if (code === 'shop_device_held') {
     return tr(t, 'shop_device_held', 'Another account already has this device approved, so this request may be a copy. Decline it, or mark the approved device instead.')

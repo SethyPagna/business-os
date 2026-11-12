@@ -545,7 +545,7 @@ app.post('/:id/mark-shop', async (c) => {
     FROM trusted_devices t WHERE t.id = @id LIMIT 1`).get<TrustedDeviceRow & { shop_retired: number | null }>({ id })
   if (!device) return c.json({ error: 'Device request not found' }, 404)
   if (device.shop_retired) {
-    return c.json({ error: 'This device was a shop device before and is given a new identity when it signs in again. Mark its new request instead.', code: 'shop_device_retired' }, 409)
+    return c.json({ error: 'This device was a shop device before and is given a new identity when it signs in again. Decide on its new request instead.', code: 'shop_device_retired' }, 409)
   }
   if (device.status !== 'approved' && device.status !== 'pending') return c.json({ error: 'Only a pending or approved device can be marked as a shop device.', code: 'shop_device_not_approved' }, 409)
   // A request that says it comes from an approved device but could not prove it is a browser that learned that id: the panel hides the button, and the server refuses too (review N-3).
