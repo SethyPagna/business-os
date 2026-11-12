@@ -50,6 +50,30 @@ export function revokeDevice(id: number | string): Promise<unknown> {
   return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/revoke`, {})
 }
 
+// Shop devices: a till an administrator marks once, so any active employee signs in there without a separate approval.
+export type ShopDeviceRecord = {
+  id: number
+  device_id: string
+  label: string
+  marked_by_name: string | null
+  marked_at: string
+  device_name: string | null
+}
+
+export function getShopDevices(): Promise<{ shopDevices: ShopDeviceRecord[] }> {
+  return apiFetch('GET', '/api/auth/devices/shop') as Promise<{ shopDevices: ShopDeviceRecord[] }>
+}
+
+// :id is the approved device row; the Worker refuses anything else.
+export function markShopDevice(id: number | string, label: string): Promise<{ success?: boolean }> {
+  return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/mark-shop`, { label }) as Promise<{ success?: boolean }>
+}
+
+// Ends the marking and signs out the sessions that came in through it.
+export function unmarkShopDevice(shopId: number | string): Promise<{ success?: boolean; revokedSessions?: number }> {
+  return apiFetch('POST', `/api/auth/devices/shop/${encodeURIComponent(String(shopId))}/unmark`, {}) as Promise<{ success?: boolean; revokedSessions?: number }>
+}
+
 // Reset only removes a rejected trust request. The next authenticated login
 // with the same persistent device id starts a new pending approval request.
 export function resetDeviceForReapproval(id: number | string): Promise<{ success?: boolean; revokedSessions?: number; nextLoginDeviceStatus?: 'pending' }> {
