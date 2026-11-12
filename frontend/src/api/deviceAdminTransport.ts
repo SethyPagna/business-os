@@ -21,13 +21,16 @@ export type TrustedDeviceRecord = {
   user_name: string
 }
 
-export function getPendingDevices(): Promise<{ devices: TrustedDeviceRecord[] }> {
-  return apiFetch('GET', '/api/auth/devices/pending') as Promise<{ devices: TrustedDeviceRecord[] }>
+// `limit` is the per-account approved-device cap the Worker enforces; the panel shows it instead of a number of its own.
+export type DeviceListResponse = { devices: TrustedDeviceRecord[]; limit?: number }
+
+export function getPendingDevices(): Promise<DeviceListResponse> {
+  return apiFetch('GET', '/api/auth/devices/pending') as Promise<DeviceListResponse>
 }
 
-export function getAllDevices(userId?: string | number): Promise<{ devices: TrustedDeviceRecord[] }> {
+export function getAllDevices(userId?: string | number): Promise<DeviceListResponse> {
   const query = userId != null ? `?userId=${encodeURIComponent(String(userId))}` : ''
-  return apiFetch('GET', `/api/auth/devices${query}`) as Promise<{ devices: TrustedDeviceRecord[] }>
+  return apiFetch('GET', `/api/auth/devices${query}`) as Promise<DeviceListResponse>
 }
 
 export function approveDevice(id: number | string): Promise<unknown> {

@@ -34,6 +34,7 @@ type DeviceSnapshot = {
   approvedDevices: TrustedDeviceRecord[]
   rejectedHistory: TrustedDeviceRecord[]
   sessions: LiveSessionRecord[]
+  limit: number | null
 }
 
 interface DeviceApprovalsProps {
@@ -43,6 +44,22 @@ interface DeviceApprovalsProps {
 
 function tr(t: TranslateFn, key: string, fallback: string): string {
   return t(key) || fallback
+}
+
+function readLimit(...responses: Array<{ limit?: unknown } | null | undefined>): number | null {
+  for (const response of responses) {
+    const limit = Number(response?.limit)
+    if (Number.isInteger(limit) && limit > 0) return limit
+  }
+  return null
+}
+
+// The Worker's English refusal is a fallback; the panel speaks both languages by the machine code.
+function deviceActionMessage(t: TranslateFn, err: unknown): string {
+  if ((err as { code?: unknown } | null)?.code === 'device_limit_reached') {
+    return tr(t, 'device_limit_reached', 'This account already has the maximum number of approved devices. Remove one of its devices first, then approve this one.')
+  }
+  return err instanceof Error ? err.message : tr(t, 'device_action_failed', 'Action failed. Please try again.')
 }
 
 // Admin device/session panel (J3) -- Settings/Users > Devices. Three layers:
@@ -70,6 +87,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
   const approvedDevices = currentSnapshot?.approvedDevices || []
   const rejectedHistory = currentSnapshot?.rejectedHistory || []
   const sessions = currentSnapshot?.sessions || []
+  const deviceLimit = currentSnapshot?.limit ?? null
   const [readState, setReadState] = useState({ ownerKey, loading: true, error: '' })
   const loading = !currentSnapshot && (readState.ownerKey !== ownerKey || readState.loading)
   const error = readState.ownerKey === ownerKey ? readState.error : ''
@@ -98,7 +116,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
       ])
       if (!current()) return
       const nonPending = (allRes?.devices || []).filter((device) => device.status !== 'pending')
-      setSnapshot({ ownerKey, pending: pendingRes?.devices || [], approvedDevices: nonPending.filter((device) => device.status === 'approved'), rejectedHistory: nonPending.filter((device) => device.status !== 'approved'), sessions: sessionsRes?.sessions || [] })
+      setSnapshot({ ownerKey, pending: pendingRes?.devices || [], approvedDevices: nonPending.filter((device) => device.status === 'approved'), rejectedHistory: nonPending.filter((device) => device.status !== 'approved'), sessions: sessionsRes?.sessions || [], limit: readLimit(allRes, pendingRes) })
     } catch (err) {
       if (current()) setReadState({ ownerKey, loading: false, error: err instanceof Error ? err.message : tr(t, 'device_load_failed', 'Could not load device requests.') })
     } finally {
@@ -131,7 +149,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
       notify(successMessage(result), 'success')
       await load()
     } catch (err) {
-      if (ownsScope(authority.scope, authority.ownerKey)) notify(err instanceof Error ? err.message : tr(t, 'device_action_failed', 'Action failed. Please try again.'), 'error')
+      if (ownsScope(authority.scope, authority.ownerKey)) notify(deviceActionMessage(t, err), 'error')
     } finally {
       actions.current.delete(actionKey)
       if (ownsScope(authority.scope, authority.ownerKey)) setBusy((current) => current === id ? null : current)
@@ -298,7 +316,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                   <div className="min-w-0">
                     <span className="text-sm font-semibold text-gray-900 dark:text-white">{group.label}</span>
                     <span className="ml-2 text-xs text-gray-400">
-                      {group.devices.length} {tr(t, 'devices_word', 'devices')} · {group.sessions.length} {tr(t, 'live_sessions_word', 'live sessions')}
+                      {deviceLimit ? `${group.devices.length} / ${deviceLimit}` : group.devices.length} {tr(t, 'devices_word', 'devices')} · {group.sessions.length} {tr(t, 'live_sessions_word', 'live sessions')}
                     </span>
                   </div>
                   {group.sessions.length ? (

@@ -131,7 +131,7 @@ app.get('/pending', async (c) => {
     WHERE td.status = 'pending'
     ORDER BY td.requested_at ASC
   `).all<TrustedDeviceRow & { username: string; user_name: string }>()
-  return c.json({ devices: rows || [] })
+  return c.json({ devices: rows || [], limit: MAX_APPROVED_DEVICES_PER_USER })
 })
 
 // GET /api/auth/devices -- full history (approved/rejected/pending),
@@ -154,7 +154,7 @@ app.get('/', async (c) => {
         ORDER BY td.requested_at DESC
         LIMIT 200
       `).all<TrustedDeviceRow & { username: string; user_name: string }>()
-  return c.json({ devices: rows || [] })
+  return c.json({ devices: rows || [], limit: MAX_APPROVED_DEVICES_PER_USER })
 })
 
 app.post('/:id/approve', async (c) => {
@@ -178,8 +178,8 @@ app.post('/:id/approve', async (c) => {
   // stay idempotent even if the account is now at the approved-device cap.
   if (device.status === 'approved') return c.json({ success: true, idempotent: true })
 
-  // At most MAX_APPROVED_DEVICES_PER_USER approved devices per account (the
-  // Aug-28 rule). Excluding this row keeps re-approving an already-approved
+  // At most MAX_APPROVED_DEVICES_PER_USER approved devices per account (owner
+  // rule, 5 since 12 Nov 2026). Excluding this row keeps re-approving an already-approved
   // device idempotent instead of tripping its own limit.
   const approvedCount = await countApprovedDevices(c.env, device.user_id, device.id)
   if (approvedCount >= MAX_APPROVED_DEVICES_PER_USER) {
