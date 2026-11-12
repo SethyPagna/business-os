@@ -542,6 +542,11 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                     {shop.marked_by_name ? ` \u00b7 ${tr(t, 'shop_device_marked_by', 'Marked by')} ${shop.marked_by_name}` : ''}
                     {` \u00b7 ${fmtDate(shop.marked_at)}`}
                   </div>
+                  {shop.last_seen_at ? (
+                    <div className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
+                      {tr(t, 'last_seen', 'Last seen')} {fmtDate(shop.last_seen_at)}{shop.last_country ? ` \u00b7 ${shop.last_country}` : ''}{shop.last_ip ? ` \u00b7 ${shop.last_ip}` : ''}
+                    </div>
+                  ) : null}
                 </div>
                 <button
                   type="button"

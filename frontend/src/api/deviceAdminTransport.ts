@@ -57,6 +57,9 @@ export type ShopDeviceRecord = {
   label: string
   marked_by_name: string | null
   marked_at: string
+  last_seen_at?: string | null
+  last_ip?: string | null
+  last_country?: string | null
   device_name: string | null
 }
 

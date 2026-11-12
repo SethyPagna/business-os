@@ -493,6 +493,9 @@ type ShopDeviceRow = {
   marked_by_user_id: number | null
   marked_by_name: string | null
   marked_at: string
+  last_seen_at: string | null
+  last_ip: string | null
+  last_country: string | null
   unmarked_at: string | null
   device_name: string | null
 }
@@ -500,7 +503,7 @@ type ShopDeviceRow = {
 // GET /api/auth/devices/shop -- the devices currently marked as shop devices.
 app.get('/shop', async (c) => {
   const rows = await getDb(c.env).prepare(`
-    SELECT s.id, s.device_id, s.label, s.marked_by_user_id, s.marked_by_name, s.marked_at,
+    SELECT s.id, s.device_id, s.label, s.marked_by_user_id, s.marked_by_name, s.marked_at, s.last_seen_at, s.last_ip, s.last_country,
       (SELECT t.device_name FROM trusted_devices t WHERE t.device_id = s.device_id AND t.device_name IS NOT NULL LIMIT 1) AS device_name
     FROM shop_devices s
     WHERE s.unmarked_at IS NULL

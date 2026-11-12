@@ -79,11 +79,12 @@ export async function checkDeviceTrust(
   // The shop join only matches when the id came from the verified device
   // cookie, so a client-chosen body id can never claim a shop device.
   const found = await db.prepare(`
-    SELECT td.*, s.id AS shop_device_row_id, s.marked_at AS shop_marked_at
+    SELECT td.*, s.id AS shop_device_row_id, s.marked_at AS shop_marked_at,
+      s.last_seen_at AS shop_last_seen_at, s.last_ip AS shop_last_ip, s.last_country AS shop_last_country
     FROM (SELECT 1 AS one) base
     LEFT JOIN trusted_devices td ON td.user_id = @user_id AND td.device_id = @device_id
     LEFT JOIN shop_devices s ON @shop_ok = 1 AND s.device_id = @device_id AND s.unmarked_at IS NULL
-  `).get<(Partial<TrustedDeviceRow> & { shop_device_row_id: number | null; shop_marked_at: string | null }) | undefined>({ user_id: userId, device_id: deviceId, shop_ok: meta.cookieVerified ? 1 : 0 })
+  `).get<(Partial<TrustedDeviceRow> & { shop_device_row_id: number | null; shop_marked_at: string | null; shop_last_seen_at: string | null; shop_last_ip: string | null; shop_last_country: string | null }) | undefined>({ user_id: userId, device_id: deviceId, shop_ok: meta.cookieVerified ? 1 : 0 })
   const existing = found && found.id != null ? (found as TrustedDeviceRow) : null
   const shopDeviceId = found?.shop_device_row_id ?? null
   // A device cookie is only ever issued when the signing key exists, so only then is "has had a cookie" a fact about the row.
@@ -109,6 +110,7 @@ export async function checkDeviceTrust(
   const refusedAfterMarking = existing?.status === 'rejected' && !existing.revoked_at
     && (!existing.decided_at || !found?.shop_marked_at || existing.decided_at >= found.shop_marked_at)
   if (shopDeviceId && !refusedAfterMarking && existing?.status !== 'approved') {
+    await recordShopSignIn(env, userId, deviceId, shopDeviceId, found as NonNullable<typeof found>, meta)
     return { status: 'approved', shopDeviceId }
   }
 
@@ -175,6 +177,36 @@ export async function checkDeviceTrust(
     UPDATE trusted_devices SET last_seen_at = CURRENT_TIMESTAMP, last_ip = @ip, last_country = @country WHERE id = @id
   `).run({ id: existing.id, ip: meta.ip || existing.last_ip, country: meta.country || existing.last_country })
   return { status: 'pending', created: false }
+}
+
+// A till rarely changes address or country, so a sign-in from a new country on a
+// shop device is the signal that a copied cookie is in use elsewhere: raise the
+// same alert a personal device raises. The last-seen write is skipped (no D1
+// call) unless the address or country changed or the last write is old.
+const SHOP_SEEN_WRITE_EVERY_MS = 5 * 60 * 1000
+
+async function recordShopSignIn(
+  env: Env,
+  userId: number,
+  deviceId: string,
+  shopDeviceId: number,
+  shop: { shop_last_seen_at: string | null; shop_last_ip: string | null; shop_last_country: string | null },
+  meta: { ip?: string | null; country?: string | null },
+): Promise<void> {
+  const country = meta.country || null
+  const priorCountry = shop.shop_last_country || null
+  if (country && priorCountry && country !== priorCountry) {
+    await audit(env, userId, null, 'device_login_new_country', 'user', userId, {
+      deviceId, shopDeviceId, shopDevice: true, previousCountry: priorCountry, newCountry: country, ip: meta.ip || null,
+    })
+  }
+  const ip = meta.ip || shop.shop_last_ip || null
+  const seenAt = shop.shop_last_seen_at ? Date.parse(`${shop.shop_last_seen_at.replace(' ', 'T')}Z`) : NaN
+  const recent = Number.isFinite(seenAt) && Date.now() - seenAt < SHOP_SEEN_WRITE_EVERY_MS
+  if (recent && ip === (shop.shop_last_ip || null) && (country || priorCountry) === priorCountry) return
+  await getDb(env).prepare(`
+    UPDATE shop_devices SET last_seen_at = CURRENT_TIMESTAMP, last_ip = @ip, last_country = @country WHERE id = @id
+  `).run({ id: shopDeviceId, ip, country: country || priorCountry })
 }
 
 export async function countPendingDevices(env: Env): Promise<number> {

@@ -33,6 +33,8 @@ assert.match(en.shop_device_mark_confirm, /waiting for this device are removed/i
 assert.match(en.shop_device_mark_confirm, /individual employees/i, 'the mark dialog says individual approvals are replaced')
 assert.match(panel, /markShopDevice[(]device[.]id, label[)]/, 'the same call serves both rows')
 
+assert.match(panel, /shop[.]last_seen_at [?] [(]/, 'the list shows where and when a shop device was last used')
+
 const keys = [
   'shop_device', 'shop_devices', 'shop_devices_intro', 'no_shop_devices', 'shop_device_mark', 'shop_device_mark_title', 'shop_device_mark_confirm',
   'shop_device_name', 'shop_device_name_placeholder', 'shop_device_continue', 'shop_device_marked_done', 'shop_device_marked_by', 'shop_device_unmark',

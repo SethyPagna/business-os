@@ -61,7 +61,8 @@ function setup(mutate = (text) => text) {
       },
     },
   })
-  const stubs = { './db': { getDb: () => h.db }, './audit': { audit: async () => {} }, '../durable-objects/broadcastHub': { broadcast: async () => {} } }
+  const trustAudits = []
+  const stubs = { './db': { getDb: () => h.db }, './audit': { audit: async (...args) => { trustAudits.push({ action: args[3], details: args[6] }) } }, '../durable-objects/broadcastHub': { broadcast: async () => {} } }
   authLib = loadTs('lib/auth.ts', { './planTier': loadTs('lib/planTier.ts', {}), './db': { getDb: () => h.db }, '../index': {} }, mutate)
   deviceTrust = loadTs('lib/deviceTrust.ts', stubs, mutate)
   const cookieLib = loadTs('lib/deviceCookie.ts', stubs)
@@ -88,7 +89,7 @@ function setup(mutate = (text) => text) {
     const res = await devices.request(pathname, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }, h.env, ctx)
     return { status: res.status, body: await res.json() }
   }
-  return { h, cookieLib, audits, as, call, authLib, tokens }
+  return { h, cookieLib, audits, trustAudits, as, call, authLib, tokens }
 }
 
 const trusted = (h, userId) => h.raw.prepare('SELECT device_id, status FROM trusted_devices WHERE user_id = @userId ORDER BY id').all({ userId }).map((r) => ({ ...r }))
@@ -104,11 +105,12 @@ async function markTill(world, deviceId = TILL, label = 'Till 1') {
   assert.equal(res.status, 200, JSON.stringify(res.body))
 }
 
-async function signIn(world, { username = 'dara', deviceId, cookieFor, cookie } = {}) {
+async function signIn(world, { username = 'dara', deviceId, cookieFor, cookie, country, ip = '203.0.113.5' } = {}) {
   const headers = { 'User-Agent': UA }
+  if (country) headers['cf-ipcountry'] = country
   const value = cookie || (cookieFor ? await world.cookieLib.signDeviceCookieValue(world.h.env, cookieFor) : null)
   if (value) headers.Cookie = `${COOKIE}=${value}`
-  return world.h.request('/login', 'POST', { username, password: 'correct-horse', deviceId, deviceName: 'Tablet' }, { ip: '203.0.113.5', headers })
+  return world.h.request('/login', 'POST', { username, password: 'correct-horse', deviceId, deviceName: 'Tablet' }, { ip, headers })
 }
 
 // What POST /session-duration does with a session cookie: lib/auth.ts reads the source row, then re-issues in one batch.
@@ -403,6 +405,32 @@ async function suite(mutate, label) {
     assert.deepEqual(unmark, { prepared: 1, batches: 1, batched: 2 })
   })
 
+  await check('15. a shop sign-in records where the till was last used and raises the new-country alert a personal device raises (L2)', async () => {
+    const w = setup(mutate)
+    await markTill(w)
+    const shop = () => w.h.raw.prepare('SELECT last_seen_at, last_ip, last_country FROM shop_devices WHERE unmarked_at IS NULL').get({})
+    assert.equal((await signIn(w, { deviceId: TILL, cookieFor: TILL, country: 'KH' })).body.success, true)
+    assert.equal(shop().last_country, 'KH')
+    assert.equal(shop().last_ip, '203.0.113.5')
+    assert.ok(shop().last_seen_at, 'the time is recorded')
+    assert.equal(w.trustAudits.filter((a) => a.action === 'device_login_new_country').length, 0, 'no alert for the first country')
+    let abroad
+    const wrote = async (run) => { const seen = []; const prepare = w.h.db.prepare.bind(w.h.db); w.h.db.prepare = (sql) => { seen.push(sql); return prepare(sql) }; try { await run() } finally { w.h.db.prepare = prepare } return seen.some((sql) => /UPDATE shop_devices SET last_seen_at/.test(sql)) }
+    const changedWrote = await wrote(async () => { abroad = await signIn(w, { deviceId: TILL, cookieFor: TILL, country: 'US' }) })
+    assert.equal(abroad.body.success, true, 'the alert does not block the employee')
+    const alerts = w.trustAudits.filter((a) => a.action === 'device_login_new_country')
+    assert.equal(alerts.length, 1)
+    assert.equal(alerts[0].details.previousCountry, 'KH')
+    assert.equal(alerts[0].details.newCountry, 'US')
+    assert.equal(alerts[0].details.shopDevice, true)
+    assert.equal(shop().last_country, 'US', 'the till is now seen from the new country')
+    const listed = (await w.call('/shop', 'GET')).body.shopDevices[0]
+    assert.equal(listed.last_country, 'US')
+    const repeatWrote = await wrote(() => signIn(w, { deviceId: TILL, cookieFor: TILL, country: 'US' }))
+    assert.equal(changedWrote, true, 'a change of country is written')
+    assert.equal(repeatWrote, false, 'a repeat from the same place and time adds no write (no extra D1 call on an ordinary shop sign-in)')
+  })
+
   console.log(`   ${passed} passed, ${failures.length} failed`)
   return [...failures]
 }
@@ -419,6 +447,8 @@ const mutants = [
   ['a rejected account no longer outranks the shop marking', inFile('lib/deviceTrust.ts', "const refusedAfterMarking = existing?.status === 'rejected'", "const refusedAfterMarking = false && existing?.status === 'rejected'"), ['7.', '11.']],
   ['an earlier decline or a revoke locks an employee out of the till (old rule)', (text, rel) => (rel === 'lib/deviceTrust.ts' ? text.replace(' && !existing.revoked_at', '').replace('existing.decided_at >= found.shop_marked_at', 'true').replace('(!existing.decided_at ||', '(true ||') : text), ['11.', '11b.']],
   ['mark leaves the waiting requests in the queue', inFile('routes/devices.ts', "DELETE FROM trusted_devices WHERE device_id = @device_id AND status IN ('pending', 'approved') AND changes() = 1", 'DELETE FROM trusted_devices WHERE 0'), ['12.', '13.']],
+  ['the shop sign-in records nothing and raises no alert', inFile('lib/deviceTrust.ts', 'await recordShopSignIn(env, userId, deviceId, shopDeviceId, found as NonNullable<typeof found>, meta)', ''), ['15.']],
+  ['the shop sign-in writes on every request (no throttle)', inFile('lib/deviceTrust.ts', 'if (recent && ip ===', 'if (false && ip ==='), ['15.']],
   ['marking from a pending request is refused', inFile('routes/devices.ts', "device.status !== 'approved' && device.status !== 'pending'", "device.status !== 'approved'"), ['13.']],
 ]
 
