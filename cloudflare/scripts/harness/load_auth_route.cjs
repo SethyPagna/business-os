@@ -95,7 +95,9 @@ function createAuthHarness(options = {}) {
   function load(rel) {
     if (cache.has(rel)) return cache.get(rel).exports
     const sourcePath = path.join(__dirname, '..', '..', 'src', rel)
-    const output = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
+    // options.mutate(text, rel) lets a test break one line of any module the harness loads (a mutant), as the tests' own loadTs helpers do.
+    const sourceText = fs.readFileSync(sourcePath, 'utf8')
+    const output = ts.transpileModule(options.mutate ? options.mutate(sourceText, rel) : sourceText, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
       fileName: sourcePath,
     }).outputText

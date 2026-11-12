@@ -216,7 +216,15 @@ async function suite(mutate, label) {
     addSession(w3.h, 11, VICTIM)
     const admin = await me(w3, { actorId: 11 })
     assert.equal(admin.statements.length, 0, 'administrators have no device gate and cost nothing')
-    assert.equal(rows(w3.h)[0].cookie_bound_at, null, "another account's row is never bound")
+    assert.equal(rows(w3.h)[0].cookie_bound_at, null, "an administrator's session never binds a row")
+    // L-5: the discriminating case is a NON-admin second account. Her session names the id, the row belongs to Sokha: the UPDATE runs (she has no cookie) and must match nothing.
+    const w4 = setup(mutate)
+    approve(w4.h, VICTIM)
+    addSession(w4.h, 12, VICTIM)
+    const other = await me(w4, { actorId: 12 })
+    assert.equal(other.statements.length, 1, 'a non-admin without the cookie reaches the UPDATE')
+    assert.equal(rows(w4.h)[0].cookie_bound_at, null, "another account's row is never bound by her session")
+    assert.equal(lastCookieId(other.res), null, 'and she is not given a cookie for it')
   })
 
   await check('j. H1 (/login): a refused body-only sign-in emits no cookie for the refused id: every Set-Cookie is the one fresh id, and replaying each of them signs nobody in', async () => {
@@ -306,6 +314,7 @@ const mutants = [
   ['the post-gate pin accepts every answer', inFile('lib/deviceCookie.ts', "const accept = trust.status === 'approved'", "const accept = true || trust.status === 'approved'"), ['l.']],
   ['the body id wins over the cookie again', inFile('lib/deviceCookie.ts', 'const chosen = cookieId || body', 'const chosen = body || cookieId'), ['c.']],
   ['the session never binds an unbound row', inFile('lib/deviceCookie.ts', 'const token = getCookie(c, SESSION_COOKIE_NAME)', 'const token = null as string | null'), ['g.', 'h.']],
+  ['a session binds the row of another account (user_id predicate dropped)', inFile('lib/deviceCookie.ts', "WHERE user_id = @user_id AND status = 'approved' AND cookie_bound_at IS NULL", "WHERE status = 'approved' AND cookie_bound_at IS NULL"), ['h.']],
   ['a bound row is re-issued its cookie by a session', inFile('lib/deviceCookie.ts', ' AND cookie_bound_at IS NULL', ''), ['h.']],
   ['binding never happens', inFile('lib/deviceTrust.ts', "cookie_bound_at = COALESCE(cookie_bound_at, CASE WHEN @bind = 1 THEN CURRENT_TIMESTAMP END)", 'cookie_bound_at = cookie_bound_at'), ['a.']],
 ]

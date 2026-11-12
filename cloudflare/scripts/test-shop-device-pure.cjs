@@ -44,16 +44,24 @@ function setup(mutate = (text) => text) {
   let deviceTrust = null
   let authLib = null
   const tokens = []
+  let routeActor = null
   const h = createAuthHarness({
+    mutate,
     overrides: {
       '../lib/auth': {
         createSession: async (...args) => { const made = await authLib.createSession(...args); tokens.push(made.token); return made },
+        // /session-duration runs for real (check 10): the lib/auth functions it calls are the real ones, the actor is whoever routeActor names.
+        currentSessionReissueSource: (...args) => authLib.currentSessionReissueSource(...args),
+        reissueSession: async (...args) => { const made = await authLib.reissueSession(...args); if (made) tokens.push(made.token); return made },
+        lengthensSession: (...args) => authLib.lengthensSession(...args),
+        resolveSessionDuration: (...args) => authLib.resolveSessionDuration(...args),
+        hasSessionCookie: () => false,
         setSessionCookie: () => {},
         clearSessionCookie: () => {},
         getSessionUser: async () => null,
         revokeSession: async () => {},
         revokeUserSessions: async () => {},
-        requireAuth: async (c, next) => next(),
+        requireAuth: async (c, next) => { if (routeActor) c.set('user', { id: routeActor, username: 'dara', name: 'Dara', role_code: 'cashier', role_permissions: '{"pos":true}', permissions: '{}' }); return next() },
       },
       '../lib/deviceTrust': {
         requiresDeviceApproval: (...args) => deviceTrust.requiresDeviceApproval(...args),
@@ -89,7 +97,7 @@ function setup(mutate = (text) => text) {
     const res = await devices.request(pathname, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }, h.env, ctx)
     return { status: res.status, body: await res.json() }
   }
-  return { h, cookieLib, audits, trustAudits, as, call, authLib, tokens }
+  return { h, cookieLib, audits, trustAudits, as, call, authLib, tokens, actAs: (id) => { routeActor = id } }
 }
 
 const trusted = (h, userId) => h.raw.prepare('SELECT device_id, status FROM trusted_devices WHERE user_id = @userId ORDER BY id').all({ userId }).map((r) => ({ ...r }))
@@ -346,7 +354,11 @@ async function suite(mutate, label) {
     const w = setup(mutate)
     await markTill(w)
     assert.equal((await signIn(w, { username: 'dara', deviceId: TILL, cookieFor: TILL })).body.success, true)
-    const second = await reissueFrom(w, w.tokens[0])
+    w.actAs(12)
+    const viaRoute = await w.h.request('/session-duration', 'POST', { sessionDuration: 'standard' }, { headers: { 'User-Agent': UA, Cookie: `bos_session=${w.tokens[0]}` } })
+    assert.equal(viaRoute.status, 200, JSON.stringify(viaRoute.body))
+    const second = w.tokens[w.tokens.length - 1]
+    assert.notEqual(second, w.tokens[0], 'the route issued a new session (the route line that passes the shop tag is exercised for real, not by source text)')
     await reissueFrom(w, second)
     w.h.raw.prepare('DELETE FROM user_sessions WHERE revoked_at IS NOT NULL').run({})
     const rows = sessionsOf(w.h)
@@ -620,6 +632,7 @@ const mutants = [
   ['a verified cookie on a retired id is still reported as a claim (L-2)', inFile('lib/deviceTrust.ts', "existing?.status === 'approved' && !meta.cookieVerified ? existing : null", "existing?.status === 'approved' ? existing : null"), ['20.']],
   ['the shop new-country alert carries no device name (L-3)', inFile('lib/deviceTrust.ts', 'deviceName: shop.shop_label || null, ', ''), ['15.']],
   ['a pending request on an id another account holds approved can be marked (L-4)', inFile('routes/devices.ts', "device.status === 'pending' && (waiting || []).some(", "false && (waiting || []).some("), ['21.']],
+  ['the /session-duration route forgets the shop tag when it re-issues (L-5)', (text, rel) => (rel === 'routes/auth.ts' ? text.replace('shopDeviceId: source.shopDeviceId,', '') : text), ['10.']],
   ['marking from a pending request is refused', inFile('routes/devices.ts', "device.status !== 'approved' && device.status !== 'pending'", "device.status !== 'approved'"), ['13.']],
 ]
 
