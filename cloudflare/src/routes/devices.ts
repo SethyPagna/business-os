@@ -577,8 +577,13 @@ app.post('/:id/mark-shop', async (c) => {
   // Rows for this browser no longer matter once it is a shop device (every
   // employee passes there): waiting requests would stay in the queue and bell,
   // and approved rows would hold a slot for nothing. The same batch removes them.
-  const waiting = await db.prepare(`SELECT id, user_id, status FROM trusted_devices WHERE device_id = @device_id AND status IN ('pending', 'approved') LIMIT 200`)
-    .all<{ id: number; user_id: number; status: string }>({ device_id: device.device_id })
+  const waiting = await db.prepare(`SELECT id, user_id, status, cookie_bound_at IS NOT NULL AS bound FROM trusted_devices WHERE device_id = @device_id AND status IN ('pending', 'approved') LIMIT 200`)
+    .all<{ id: number; user_id: number; status: string; bound: number }>({ device_id: device.device_id })
+  // A marking only works for a browser that holds the device cookie (the marked id is used only with a verified cookie), and the marking removes the rows
+  // through which that cookie would otherwise be issued. So the device must have had its cookie issued first: some row on it is bound (review M-A).
+  if (!(waiting || []).some((row) => row.bound)) {
+    return c.json({ error: 'Sign in on this device once, then mark it as a shop device.', code: 'shop_device_unbound' }, 409)
+  }
   // The approved rows the marking deletes were the only thing those employees' live sessions on this browser stood on. Tag the sessions with the
   // new marking in the same batch, so unmarking revokes them like any other shop sign-in (otherwise they outlive the unmark with no approval behind
   // them and no device row an administrator could revoke). Only the accounts whose approved row is deleted: an administrator's session is never touched.

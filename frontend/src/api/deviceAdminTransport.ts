@@ -20,6 +20,8 @@ export type TrustedDeviceRecord = {
   username: string
   user_name: string
   claimed_approval_ref?: number | null
+  // Set once a browser was given the device cookie for this row; a device can only be marked as a shop device after that.
+  cookie_bound_at?: string | null
   claimed_device_name?: string | null
   // Other accounts with a pending or approved row on the same device (pending list only).
   shared_with?: Array<{ user_id: number; name: string; status: 'pending' | 'approved' }>

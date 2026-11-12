@@ -88,6 +88,9 @@ function deviceActionMessage(t: TranslateFn, err: unknown): string {
   if (code === 'device_shared_confirm') {
     return tr(t, 'device_shared_confirm', 'Another account already uses this device. Approve only if the two people really share it; otherwise decline this request.')
   }
+  if (code === 'shop_device_unbound') {
+    return tr(t, 'shop_device_unbound', 'Sign in on this device once, then mark it as a shop device.')
+  }
   if (code === 'shop_device_claimed') {
     return tr(t, 'shop_device_claimed', 'This request says it comes from an approved device but could not show it. Decline it, or mark the approved device instead.')
   }
@@ -424,9 +427,9 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                   {device.claimed_approval_ref ? null : (
                     <button
                       type="button"
-                      disabled={busyId === device.id}
+                      disabled={busyId === device.id || !device.cookie_bound_at}
                       className="btn-secondary px-2 py-1.5 text-xs"
-                      title={tr(t, 'shop_device_mark', 'Mark as shop device')}
+                      title={device.cookie_bound_at ? tr(t, 'shop_device_mark', 'Mark as shop device') : tr(t, 'shop_device_unbound', 'Sign in on this device once, then mark it as a shop device.')}
                       aria-label={tr(t, 'shop_device_mark', 'Mark as shop device')}
                       onClick={() => setMarkingShop({ device, label: '' })}
                     >
@@ -502,9 +505,9 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                           ) : (
                             <button
                               type="button"
-                              disabled={busyId === device.id}
+                              disabled={busyId === device.id || !device.cookie_bound_at}
                               className="btn-secondary px-2 py-1 text-xs"
-                              title={tr(t, 'shop_device_mark', 'Mark as shop device')}
+                              title={device.cookie_bound_at ? tr(t, 'shop_device_mark', 'Mark as shop device') : tr(t, 'shop_device_unbound', 'Sign in on this device once, then mark it as a shop device.')}
                               aria-label={tr(t, 'shop_device_mark', 'Mark as shop device')}
                               onClick={() => setMarkingShop({ device, label: '' })}
                             >
