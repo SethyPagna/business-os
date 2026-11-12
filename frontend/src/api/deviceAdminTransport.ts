@@ -19,6 +19,8 @@ export type TrustedDeviceRecord = {
   last_seen_at: string
   username: string
   user_name: string
+  claimed_approval_ref?: number | null
+  claimed_device_name?: string | null
 }
 
 // `limit` is the per-account approved-device cap the Worker enforces; the panel shows it instead of a number of its own.
@@ -57,6 +59,9 @@ export type ShopDeviceRecord = {
   label: string
   marked_by_name: string | null
   marked_at: string
+  last_seen_at?: string | null
+  last_ip?: string | null
+  last_country?: string | null
   device_name: string | null
 }
 
@@ -64,9 +69,9 @@ export function getShopDevices(): Promise<{ shopDevices: ShopDeviceRecord[] }> {
   return apiFetch('GET', '/api/auth/devices/shop') as Promise<{ shopDevices: ShopDeviceRecord[] }>
 }
 
-// :id is the approved device row; the Worker refuses anything else.
-export function markShopDevice(id: number | string, label: string): Promise<{ success?: boolean }> {
-  return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/mark-shop`, { label }) as Promise<{ success?: boolean }>
+// :id is a pending or approved device row; the Worker refuses anything else and removes that browser's rows.
+export function markShopDevice(id: number | string, label: string): Promise<{ success?: boolean; removedRows?: number }> {
+  return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/mark-shop`, { label }) as Promise<{ success?: boolean; removedRows?: number }>
 }
 
 // Ends the marking and signs out the sessions that came in through it.

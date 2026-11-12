@@ -96,6 +96,34 @@ export async function resolveAndPinDevice<E extends { Bindings: Env }>(c: Contex
   return chosen
 }
 
+// A device approved before the cookie existed, signed in on a long session, never passes
+// /login again, so its row would stay unbound and claimable by anyone who knows its id.
+// On an authenticated request from a browser that has no valid device cookie, the row
+// that session's device id names is bound once and the cookie is set. No D1 call when
+// the cookie is already there (the ordinary request), one UPDATE when it is not, and
+// nothing once the row is bound (the WHERE clause), so a lost cookie of a bound row
+// is not re-issued from a session.
+const SESSION_COOKIE_NAME = 'bos_session' // lib/auth.ts SESSION_COOKIE_NAME; pinned by test-device-cookie-bound-pure
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(value))
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+export async function adoptSessionDeviceCookie<E extends { Bindings: Env }>(c: Context<E>, userId: number): Promise<void> {
+  if (!c.env.APP_ENCRYPTION_KEY) return
+  if (await verifyDeviceCookieValue(c.env, getCookie(c, DEVICE_COOKIE_NAME))) return
+  const token = getCookie(c, SESSION_COOKIE_NAME)
+  if (!token) return
+  const bound = await getDb(c.env).prepare(`
+    UPDATE trusted_devices SET cookie_bound_at = CURRENT_TIMESTAMP
+    WHERE user_id = @user_id AND status = 'approved' AND cookie_bound_at IS NULL
+      AND device_id = (SELECT device_id FROM user_sessions WHERE token_hash = @token_hash AND user_id = @user_id AND revoked_at IS NULL)
+    RETURNING device_id
+  `).get<{ device_id: string }>({ user_id: userId, token_hash: await sha256Hex(token) })
+  if (bound?.device_id && isValidDeviceId(bound.device_id)) await pinDeviceCookie(c, bound.device_id)
+}
+
 // The id resolveAndPinDevice chose for this request, remembered only when it
 // came from a cookie whose signature verified. The shop-device path trusts
 // nothing else: the body id is client-chosen.

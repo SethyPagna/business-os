@@ -61,4 +61,10 @@ assert.match(panel, /code !== 'device_limit_reached'\) return false\s*const fres
 assert.match(panel, /setReplacing\(\{ device, choices: accountChoices, selectedId: accountChoices\[0\]\.id \}\)\s*return true/, 'and opens the replace chooser')
 assert.match(panel, /const handled = onError \? await onError\(err\)\.catch\(\(\) => false\) : false\s*if \(!handled/, 'a handled refusal shows no error toast')
 
+// L4 (review, 13 Nov 2026): a pending request that claimed an approved device's id says so, in both packs.
+assert.ok(panel.includes('device.claimed_approval_ref ? ('), 'the panel warns when a request claimed an approved device')
+assert.ok(transport.includes('claimed_approval_ref?: number | null'), 'the record carries the claimed row id')
+assert.ok(en.device_claimed_id && km.device_claimed_id && en.device_claimed_id !== km.device_claimed_id, 'both packs carry device_claimed_id, Khmer not copied')
+assert.match(km.device_claimed_id, /[ក-៿]/, 'in Khmer script')
+
 console.log('PASS device re-approval reset transport, history placement, confirmation, and bilingual copy')

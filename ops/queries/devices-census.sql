@@ -1,14 +1,15 @@
 -- devices-census: counts only, no names, ids or IPs. Run before and after the device-approval release (cap 5, device cookie, shop devices).
+-- APPLY MIGRATION 0304 FIRST: the last column reads shop_devices, which does not exist before it, so the whole query fails with 'no such table' until the migration has run.
 --   approved_total            approved trusted_devices rows
 --   approved_bad_shape        approved rows whose device_id is outside [A-Za-z0-9_-]{8,100}, the shape the Worker now accepts; such a row can never
 --                             match again, so its owner starts a new pending request at the next sign-in
 --   pending_now               rows waiting for an administrator
 --   accounts_at_or_over_5     accounts holding 5 or more approved devices (the cap; a sixth waits for a replace)
 --   pending_prompts_14d       login_device_pending audit rows in the last 14 days (audit rows older than the retention window are gone)
---   shop_devices_active       devices currently marked as shop devices (0 before migration 0304 is applied is an error: the table must exist)
+--   shop_devices_active       devices currently marked as shop devices (0 on a fresh install of 0304; before 0304 the query errors, see above)
 -- ops:min-rows 1
 -- ops:max-rows 1
--- ops:max-rows-read 1000
+-- ops:max-rows-read 20000
 SELECT
   (SELECT COUNT(*) FROM trusted_devices WHERE status = 'approved') AS approved_total,
   (SELECT COUNT(*) FROM trusted_devices WHERE status = 'approved'

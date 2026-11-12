@@ -43,10 +43,11 @@ const CASHIER = { id: 12, username: 'dara', name: 'Dara', role_code: 'cashier', 
 function setup(mutate = (text) => text) {
   let deviceTrust = null
   let authLib = null
+  const tokens = []
   const h = createAuthHarness({
     overrides: {
       '../lib/auth': {
-        createSession: (...args) => authLib.createSession(...args),
+        createSession: async (...args) => { const made = await authLib.createSession(...args); tokens.push(made.token); return made },
         setSessionCookie: () => {},
         clearSessionCookie: () => {},
         getSessionUser: async () => null,
@@ -60,7 +61,8 @@ function setup(mutate = (text) => text) {
       },
     },
   })
-  const stubs = { './db': { getDb: () => h.db }, './audit': { audit: async () => {} }, '../durable-objects/broadcastHub': { broadcast: async () => {} } }
+  const trustAudits = []
+  const stubs = { './db': { getDb: () => h.db }, './audit': { audit: async (...args) => { trustAudits.push({ action: args[3], details: args[6] }) } }, '../durable-objects/broadcastHub': { broadcast: async () => {} } }
   authLib = loadTs('lib/auth.ts', { './planTier': loadTs('lib/planTier.ts', {}), './db': { getDb: () => h.db }, '../index': {} }, mutate)
   deviceTrust = loadTs('lib/deviceTrust.ts', stubs, mutate)
   const cookieLib = loadTs('lib/deviceCookie.ts', stubs)
@@ -87,7 +89,7 @@ function setup(mutate = (text) => text) {
     const res = await devices.request(pathname, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }, h.env, ctx)
     return { status: res.status, body: await res.json() }
   }
-  return { h, cookieLib, audits, as, call }
+  return { h, cookieLib, audits, trustAudits, as, call, authLib, tokens }
 }
 
 const trusted = (h, userId) => h.raw.prepare('SELECT device_id, status FROM trusted_devices WHERE user_id = @userId ORDER BY id').all({ userId }).map((r) => ({ ...r }))
@@ -103,11 +105,22 @@ async function markTill(world, deviceId = TILL, label = 'Till 1') {
   assert.equal(res.status, 200, JSON.stringify(res.body))
 }
 
-async function signIn(world, { username = 'dara', deviceId, cookieFor, cookie } = {}) {
+async function signIn(world, { username = 'dara', deviceId, cookieFor, cookie, country, ip = '203.0.113.5' } = {}) {
   const headers = { 'User-Agent': UA }
+  if (country) headers['cf-ipcountry'] = country
   const value = cookie || (cookieFor ? await world.cookieLib.signDeviceCookieValue(world.h.env, cookieFor) : null)
   if (value) headers.Cookie = `${COOKIE}=${value}`
-  return world.h.request('/login', 'POST', { username, password: 'correct-horse', deviceId, deviceName: 'Tablet' }, { ip: '203.0.113.5', headers })
+  return world.h.request('/login', 'POST', { username, password: 'correct-horse', deviceId, deviceName: 'Tablet' }, { ip, headers })
+}
+
+// What POST /session-duration does with a session cookie: lib/auth.ts reads the source row, then re-issues in one batch.
+async function reissueFrom(world, token, userId = 12) {
+  const c = { env: world.h.env, req: { raw: new Request('http://localhost/session-duration', { headers: { Cookie: `bos_session=${token}` } }), header: () => undefined } }
+  const source = await world.authLib.currentSessionReissueSource(c)
+  assert.ok(source, 'the session row is found')
+  const made = await world.authLib.reissueSession(c, userId, { sessionDuration: 'always', deviceId: source.deviceId, shopDeviceId: source.shopDeviceId, limitFamilyId: source.limitFamilyId })
+  assert.ok(made, 'a new session was issued')
+  return made.token
 }
 
 let passed = 0
@@ -203,7 +216,8 @@ async function suite(mutate, label) {
     assert.deepEqual(live(w.h), [102, 103, 104], 'administrator, personally approved and other-device sessions survive')
     const next = await signIn(w, { username: 'dara', deviceId: TILL, cookieFor: TILL })
     assert.equal(next.body.deviceApprovalRequired, true, 'back to per-account approval')
-    assert.deepEqual(trusted(w.h, 12), [{ device_id: TILL, status: 'pending' }])
+    assert.notEqual(next.body.deviceId, TILL, 'the retired id is replaced by a fresh one')
+    assert.deepEqual(trusted(w.h, 12), [{ device_id: next.body.deviceId, status: 'pending' }])
     assert.equal((await w.call(`/shop/${shopId}/unmark`)).body.idempotent, true, 'unmark twice is harmless')
   })
 
@@ -227,21 +241,23 @@ async function suite(mutate, label) {
   await check('5. mark validates: label required, row must be approved, one active marking; list shows it; audit rows written for mark and unmark', async () => {
     const w = setup(mutate)
     approve(w.h, TILL, 10)
-    w.h.raw.prepare(`INSERT INTO trusted_devices (user_id, device_id, status) VALUES (10, 'pending-dev-0001', 'pending')`).run({})
+    w.h.raw.prepare(`INSERT INTO trusted_devices (user_id, device_id, status) VALUES (10, 'pending-dev-0001', 'rejected')`).run({})
     const id = rowId(w.h, 10, TILL)
     assert.equal((await w.call(`/${id}/mark-shop`, 'POST', { label: '   ' })).status, 400)
     assert.equal((await w.call(`/${id}/mark-shop`, 'POST', { label: 'x'.repeat(61) })).status, 400)
     assert.equal((await w.call(`/${rowId(w.h, 10, 'pending-dev-0001')}/mark-shop`, 'POST', { label: 'Till' })).status, 409)
     assert.equal((await w.call('/99999/mark-shop', 'POST', { label: 'Till' })).status, 404)
     assert.equal((await w.call(`/${id}/mark-shop`, 'POST', { label: '  Till   1 ' })).status, 200)
-    assert.equal((await w.call(`/${id}/mark-shop`, 'POST', { label: 'Till 1' })).body.code, 'shop_device_exists')
+    assert.equal((await w.call(`/${id}/mark-shop`, 'POST', { label: 'Till 1' })).status, 404, 'the row the marking replaced is gone')
+    w.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status) VALUES (12, @d, 'pending')").run({ d: TILL })
+    assert.equal((await w.call(`/${rowId(w.h, 12, TILL)}/mark-shop`, 'POST', { label: 'Till 1' })).body.code, 'shop_device_exists')
     const list = await w.call('/shop', 'GET')
     assert.equal(list.body.shopDevices.length, 1)
     assert.equal(list.body.shopDevices[0].label, 'Till 1')
     assert.equal(list.body.shopDevices[0].device_id, TILL)
     assert.equal(list.body.shopDevices[0].marked_by_name, 'Owner')
     await w.call(`/shop/${list.body.shopDevices[0].id}/unmark`)
-    assert.deepEqual(w.audits.map((a) => a[0]), ['shop_device_marked', 'shop_device_unmarked'])
+    assert.deepEqual(w.audits.map((a) => a[0]), ['shop_device_marked', 'shop_device_rows_removed', 'shop_device_unmarked'])
     assert.equal((await w.call('/shop', 'GET')).body.shopDevices.length, 0)
   })
 
@@ -286,22 +302,198 @@ async function suite(mutate, label) {
   await check('9. every session-issuing path passes the shop id and hands the cookie flag to the gate (source pin)', () => {
     const text = fs.readFileSync(path.join(SRC, 'routes/auth.ts'), 'utf8').replace(/\r\n/g, '\n')
     assert.equal(text.split('cookieVerified: isCookieVerifiedDevice(c,').length - 1, 3, 'login, otp verify, google callback')
-    assert.equal(text.split(/\bshopDeviceId,|shopDeviceId: oauthShopDeviceId,/).length - 1, 3, 'three createSession calls carry it')
+    assert.equal(text.split(/(?<![.\w])shopDeviceId,|shopDeviceId: oauthShopDeviceId,/).length - 1, 3, 'three createSession calls carry it')
     assert.equal(text.split('= trustCheck.shopDeviceId').length - 1, 3, 'three gates record it')
+    assert.ok(text.includes('shopDeviceId: source.shopDeviceId,'), '/session-duration passes the source session tag on')
+  })
+
+  await check('10. a shop session re-issued by /session-duration is still revoked by unmark after retention purged every revoked row (M1)', async () => {
+    const w = setup(mutate)
+    await markTill(w)
+    assert.equal((await signIn(w, { username: 'dara', deviceId: TILL, cookieFor: TILL })).body.success, true)
+    const second = await reissueFrom(w, w.tokens[0])
+    await reissueFrom(w, second)
+    w.h.raw.prepare('DELETE FROM user_sessions WHERE revoked_at IS NOT NULL').run({})
+    const rows = sessionsOf(w.h)
+    assert.equal(rows.length, 1, 'only the newest re-issue is left')
+    const shopId = shopIdOf(w.h)
+    assert.equal(rows[0].shop_device_id, shopId, 'the tag travelled through both re-issues')
+    const res = await w.call(`/shop/${shopId}/unmark`)
+    assert.equal(res.body.revokedSessions, 1)
+    assert.deepEqual(live(w.h), [])
+  })
+
+  await check('11. only a decline made after the marking locks an employee out of the till; an earlier decline, a revoke and a replace never do (M2)', async () => {
+    const w = setup(mutate)
+    assert.equal((await signIn(w, { username: 'dara', deviceId: TILL, cookieFor: TILL })).body.deviceApprovalRequired, true)
+    assert.equal((await w.call(`/${rowId(w.h, 12, TILL)}/reject`)).status, 200, 'declined before the till is marked')
+    w.h.raw.prepare("UPDATE trusted_devices SET decided_at = datetime('now', '-1 minute') WHERE user_id = 12").run({})
+    await markTill(w)
+    assert.equal((await signIn(w, { username: 'dara', deviceId: TILL, cookieFor: TILL })).body.success, true, 'the earlier decline does not lock her out')
+    w.h.raw.prepare("UPDATE trusted_devices SET status = 'rejected', revoked_at = CURRENT_TIMESTAMP, decided_at = datetime('now', '+1 minute') WHERE user_id = 12").run({})
+    assert.equal((await signIn(w, { username: 'dara', deviceId: TILL, cookieFor: TILL })).body.success, true, 'a revoked or replaced row never does, however late')
+    w.h.raw.prepare("UPDATE trusted_devices SET revoked_at = NULL WHERE user_id = 12").run({})
+    const after = await signIn(w, { username: 'dara', deviceId: TILL, cookieFor: TILL })
+    assert.equal(after.status, 403, 'a decline made after the marking still outranks it')
+    assert.equal(after.body.code, 'device_rejected')
+  })
+
+  await check('11b. an employee replaced at the device cap on the till still signs in there (replace marks the row rejected)', async () => {
+    const w = setup(mutate)
+    await markTill(w)
+    for (let n = 1; n <= 4; n++) approve(w.h, `own-device-000${n}`, 10)
+    approve(w.h, TILL, 10)
+    w.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status) VALUES (10, 'new-phone-0001', 'pending')").run({})
+    const replaced = await w.call(`/${rowId(w.h, 10, 'new-phone-0001')}/approve-replacing`, 'POST', { revokeId: rowId(w.h, 10, TILL) })
+    assert.equal(replaced.status, 200, JSON.stringify(replaced.body))
+    assert.equal((await signIn(w, { username: 'sokha', deviceId: TILL, cookieFor: TILL })).body.success, true)
+  })
+
+  await check('12. marking removes the pending and approved rows of that browser (any employee), audits them, and leaves other devices alone (M2)', async () => {
+    const w = setup(mutate)
+    assert.equal((await signIn(w, { username: 'dara', deviceId: TILL, cookieFor: TILL })).body.deviceApprovalRequired, true)
+    w.h.addUser({ id: 13, username: 'vanna', name: 'Vanna', roleCode: 'cashier' })
+    w.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status) VALUES (13, @d, 'pending'), (12, 'other-phone-0001', 'pending')").run({ d: TILL })
+    approve(w.h, TILL, 10)
+    const approvedRow = rowId(w.h, 10, TILL)
+    const marked = await w.call(`/${approvedRow}/mark-shop`, 'POST', { label: 'Till 1' })
+    assert.equal(marked.status, 200)
+    assert.equal(marked.body.removedRows, 3, 'both waiting requests and the approved row the marking replaces')
+    const pending = (await w.call('/pending', 'GET')).body.devices || []
+    assert.deepEqual(pending.map((d) => d.device_id), ['other-phone-0001'])
+    const closed = w.audits.find((a) => a[0] === 'shop_device_rows_removed')
+    assert.ok(closed, 'an audit row names what was closed')
+    assert.deepEqual(closed[3].closedRows.map((r) => r.userId).sort(), [10, 12, 13])
+    assert.equal(trusted(w.h, 10).length, 0, 'the marking employee keeps no row (no slot used, nothing left to outlive an unmark)')
+    w.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status) VALUES (13, @d, 'pending')").run({ d: TILL })
+    const dup = await w.call(`/${rowId(w.h, 13, TILL)}/mark-shop`, 'POST', { label: 'Again' })
+    assert.equal(dup.body.code, 'shop_device_exists')
+  })
+
+  await check('13. a till can be marked from its pending request: no slot used, the request disappears, and after unmark that employee needs approval like everyone (L1)', async () => {
+    const w = setup(mutate)
+    for (let n = 1; n <= 5; n++) approve(w.h, `own-device-000${n}`, 10)
+    assert.equal((await signIn(w, { username: 'sokha', deviceId: TILL, cookieFor: TILL })).body.deviceApprovalRequired, true)
+    const pendingRow = rowId(w.h, 10, TILL)
+    assert.equal((await w.call(`/${pendingRow}/mark-shop`, 'POST', { label: 'Till 1' })).status, 200)
+    assert.equal(trusted(w.h, 10).filter((r) => r.status === 'approved').length, 5, 'her five personal approvals are untouched')
+    assert.equal(trusted(w.h, 10).length, 5, 'the pending request is gone, and no sixth row')
+    assert.equal((await signIn(w, { username: 'sokha', deviceId: TILL, cookieFor: TILL })).body.success, true)
+    assert.equal((await signIn(w, { username: 'dara', deviceId: TILL, cookieFor: TILL })).body.success, true)
+    await w.call(`/shop/${shopIdOf(w.h)}/unmark`)
+    const after = await signIn(w, { username: 'sokha', deviceId: TILL, cookieFor: TILL })
+    assert.equal(after.body.deviceApprovalRequired, true, 'the marking employee needs an approval again, as the unmark dialog says')
+  })
+
+  await check('14. D1 cost of the admin calls: mark = 2 reads + 1 batch of 2 statements (+ audit writes); unmark = 1 read + 1 batch of 2 (+ audit)', async () => {
+    const w = setup(mutate)
+    approve(w.h, TILL, 10)
+    const tally = async (run) => {
+      let reads = 0
+      let batches = 0
+      let batched = 0
+      const prepare = w.h.db.prepare.bind(w.h.db)
+      const batch = w.h.db.batch.bind(w.h.db)
+      w.h.db.prepare = (sql) => { reads += 1; return prepare(sql) }
+      w.h.db.batch = (items) => { batches += 1; batched += items.length; return batch(items) }
+      try { await run() } finally { w.h.db.prepare = prepare; w.h.db.batch = batch }
+      return { prepared: reads, batches, batched }
+    }
+    const mark = await tally(() => w.call(`/${rowId(w.h, 10, TILL)}/mark-shop`, 'POST', { label: 'Till 1' }))
+    const unmark = await tally(() => w.call(`/shop/${shopIdOf(w.h)}/unmark`))
+    console.log(`     mark: ${JSON.stringify(mark)}  unmark: ${JSON.stringify(unmark)} (audit writes not counted: stubbed)`)
+    assert.deepEqual(mark, { prepared: 2, batches: 1, batched: 2 })
+    assert.deepEqual(unmark, { prepared: 1, batches: 1, batched: 2 })
+  })
+
+  await check('15. a shop sign-in records where the till was last used and raises the new-country alert a personal device raises (L2)', async () => {
+    const w = setup(mutate)
+    await markTill(w)
+    const shop = () => w.h.raw.prepare('SELECT last_seen_at, last_ip, last_country FROM shop_devices WHERE unmarked_at IS NULL').get({})
+    assert.equal((await signIn(w, { deviceId: TILL, cookieFor: TILL, country: 'KH' })).body.success, true)
+    assert.equal(shop().last_country, 'KH')
+    assert.equal(shop().last_ip, '203.0.113.5')
+    assert.ok(shop().last_seen_at, 'the time is recorded')
+    assert.equal(w.trustAudits.filter((a) => a.action === 'device_login_new_country').length, 0, 'no alert for the first country')
+    let abroad
+    const wrote = async (run) => { const seen = []; const prepare = w.h.db.prepare.bind(w.h.db); w.h.db.prepare = (sql) => { seen.push(sql); return prepare(sql) }; try { await run() } finally { w.h.db.prepare = prepare } return seen.some((sql) => /UPDATE shop_devices SET last_seen_at/.test(sql)) }
+    const changedWrote = await wrote(async () => { abroad = await signIn(w, { deviceId: TILL, cookieFor: TILL, country: 'US' }) })
+    assert.equal(abroad.body.success, true, 'the alert does not block the employee')
+    const alerts = w.trustAudits.filter((a) => a.action === 'device_login_new_country')
+    assert.equal(alerts.length, 1)
+    assert.equal(alerts[0].details.previousCountry, 'KH')
+    assert.equal(alerts[0].details.newCountry, 'US')
+    assert.equal(alerts[0].details.shopDevice, true)
+    assert.equal(shop().last_country, 'US', 'the till is now seen from the new country')
+    const listed = (await w.call('/shop', 'GET')).body.shopDevices[0]
+    assert.equal(listed.last_country, 'US')
+    const repeatWrote = await wrote(() => signIn(w, { deviceId: TILL, cookieFor: TILL, country: 'US' }))
+    assert.equal(changedWrote, true, 'a change of country is written')
+    assert.equal(repeatWrote, false, 'a repeat from the same place and time adds no write (no extra D1 call on an ordinary shop sign-in)')
+  })
+
+  await check('16. unmarking retires the till id: a copied cookie of it stops working, the till continues under a fresh id that is marked from its pending request (L2)', async () => {
+    const w = setup(mutate)
+    await markTill(w)
+    assert.equal((await signIn(w, { deviceId: TILL, cookieFor: TILL })).body.success, true)
+    await w.call(`/shop/${shopIdOf(w.h)}/unmark`)
+    const tillNext = await signIn(w, { username: 'dara', deviceId: TILL, cookieFor: TILL })
+    assert.equal(tillNext.body.deviceApprovalRequired, true)
+    const fresh = tillNext.body.deviceId
+    assert.notEqual(fresh, TILL)
+    const thief = await signIn(w, { username: 'sokha', deviceId: TILL, cookieFor: TILL })
+    assert.equal(thief.body.deviceApprovalRequired, true, 'the copy gets no access')
+    assert.notEqual(thief.body.deviceId, TILL, 'and no row is ever created for the retired id again')
+    const bodyOnly = await signIn(w, { username: 'sokha', deviceId: TILL })
+    assert.notEqual(bodyOnly.body.deviceId, TILL, 'also for a body-only id')
+    assert.equal(w.h.raw.prepare('SELECT COUNT(*) AS n FROM trusted_devices WHERE device_id = @d').get({ d: TILL }).n, 0)
+    w.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status) VALUES (12, @d, 'pending')").run({ d: TILL })
+    const refused = await w.call(`/${rowId(w.h, 12, TILL)}/mark-shop`, 'POST', { label: 'Till 1' })
+    assert.equal(refused.status, 409)
+    assert.equal(refused.body.code, 'shop_device_retired')
+    assert.equal((await w.call(`/${rowId(w.h, 12, fresh)}/mark-shop`, 'POST', { label: 'Till 1' })).status, 200, 'the till is marked again from its new pending request')
+    assert.equal((await signIn(w, { username: 'sokha', deviceId: fresh, cookieFor: fresh })).body.success, true, 'the till works under its new id')
+    const stale = await signIn(w, { username: 'sokha', deviceId: TILL, cookieFor: TILL })
+    assert.equal(stale.body.deviceApprovalRequired, true, 'the copied cookie of the old id still gets nothing')
+  })
+
+  await check('17. the pending list tells the administrator which approved device a request claimed (L4); a plain new device claims nothing', async () => {
+    const w = setup(mutate)
+    approve(w.h, 'claimed-phone-0001', 12)
+    w.h.raw.prepare("UPDATE trusted_devices SET cookie_bound_at = CURRENT_TIMESTAMP, device_name = 'Dara phone'").run({})
+    const claim = await signIn(w, { deviceId: 'claimed-phone-0001' })
+    assert.equal(claim.body.deviceApprovalRequired, true)
+    const plain = await signIn(w, { username: 'sokha', deviceId: 'brand-new-device-9' })
+    assert.equal(plain.body.deviceApprovalRequired, true)
+    const pending = (await w.call('/pending', 'GET')).body.devices
+    const claimed = pending.find((d) => d.user_id === 12)
+    assert.equal(claimed.claimed_approval_ref, rowId(w.h, 12, 'claimed-phone-0001'))
+    assert.equal(claimed.claimed_device_name, 'Dara phone')
+    assert.equal(pending.find((d) => d.user_id === 10).claimed_approval_ref, null)
   })
 
   console.log(`   ${passed} passed, ${failures.length} failed`)
   return [...failures]
 }
 
+const shopIdOf = (h) => h.raw.prepare('SELECT id FROM shop_devices WHERE unmarked_at IS NULL').get({}).id
 const inFile = (file, from, to) => (text, rel) => (rel === file ? text.replace(from, to) : text)
 const mutants = [
   ['body id may claim a shop device (cookie gate removed)', inFile('lib/deviceTrust.ts', '@shop_ok = 1 AND', '1 = 1 AND'), ['2.']],
-  ['shop path removed (pre-slice behaviour)', inFile('lib/deviceTrust.ts', 'if (shopDeviceId && existing', 'if (false && existing'), ['1.', '1b.', '3.']],
+  ['shop path removed (pre-slice behaviour)', inFile('lib/deviceTrust.ts', 'if (shopDeviceId && !refusedAfterMarking', 'if (false && !refusedAfterMarking'), ['1.', '1b.', '3.']],
   ['unmark does not revoke sessions', inFile('routes/devices.ts', 'WHERE revoked_at IS NULL\n          AND (shop_device_id', 'WHERE 0 AND revoked_at IS NULL\n          AND (shop_device_id'), ['3.']],
   ['unmark revokes by device id (kills the admin session too)', inFile('routes/devices.ts', 'AND (shop_device_id = @id OR', 'AND (device_id = (SELECT device_id FROM shop_devices WHERE id = @id) OR'), ['3.']],
   ['admin guard removed from the devices router', inFile('routes/devices.ts', "if (!isAdminControlUser(c.get('user')))", 'if (false)'), ['4.']],
-  ['a rejected account no longer outranks the shop marking', inFile('lib/deviceTrust.ts', "existing?.status !== 'rejected' && existing?.status !== 'approved'", 'true'), ['7.']],
+  ['re-issue drops the shop tag', inFile('lib/auth.ts', 'shop_device_id: shopDeviceId > 0 ? shopDeviceId : null', 'shop_device_id: null'), ['10.']],
+  ['a rejected account no longer outranks the shop marking', inFile('lib/deviceTrust.ts', "const refusedAfterMarking = existing?.status === 'rejected'", "const refusedAfterMarking = false && existing?.status === 'rejected'"), ['7.', '11.']],
+  ['an earlier decline or a revoke locks an employee out of the till (old rule)', (text, rel) => (rel === 'lib/deviceTrust.ts' ? text.replace(' && !existing.revoked_at', '').replace('existing.decided_at >= found.shop_marked_at', 'true').replace('(!existing.decided_at ||', '(true ||') : text), ['11.', '11b.']],
+  ['mark leaves the waiting requests in the queue', inFile('routes/devices.ts', "DELETE FROM trusted_devices WHERE device_id = @device_id AND status IN ('pending', 'approved') AND changes() = 1", 'DELETE FROM trusted_devices WHERE 0'), ['12.', '13.']],
+  ['the shop sign-in records nothing and raises no alert', inFile('lib/deviceTrust.ts', 'await recordShopSignIn(env, userId, deviceId, shopDeviceId, found as NonNullable<typeof found>, meta)', ''), ['15.']],
+  ['the shop sign-in writes on every request (no throttle)', inFile('lib/deviceTrust.ts', 'if (recent && ip ===', 'if (false && ip ==='), ['15.']],
+  ['an unmarked till id keeps working (no retirement)', inFile('lib/deviceTrust.ts', 'if (cookiesOn && (retiredShopId ||', 'if (cookiesOn && (false ||'), ['3.', '16.']],
+  ['a retired id can be marked again', inFile('routes/devices.ts', 'if (device.shop_retired) {', 'if (false) {'), ['16.']],
+  ['a pending row forgets which approved device it claimed', inFile('lib/deviceTrust.ts', "claimed: existing?.status === 'approved' ? existing.id : null", 'claimed: null'), ['17.']],
+  ['marking from a pending request is refused', inFile('routes/devices.ts', "device.status !== 'approved' && device.status !== 'pending'", "device.status !== 'approved'"), ['13.']],
 ]
 
 async function main() {

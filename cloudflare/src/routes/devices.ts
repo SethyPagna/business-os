@@ -125,12 +125,13 @@ app.post('/sessions/revoke-user', async (c) => {
 app.get('/pending', async (c) => {
   const db = getDb(c.env)
   const rows = await db.prepare(`
-    SELECT td.*, u.username, u.name AS user_name
+    SELECT td.*, u.username, u.name AS user_name,
+      (SELECT c.device_name FROM trusted_devices c WHERE c.id = td.claimed_approval_ref) AS claimed_device_name
     FROM trusted_devices td
     JOIN users u ON u.id = td.user_id
     WHERE td.status = 'pending'
     ORDER BY td.requested_at ASC
-  `).all<TrustedDeviceRow & { username: string; user_name: string }>()
+  `).all<TrustedDeviceRow & { username: string; user_name: string; claimed_device_name: string | null }>()
   return c.json({ devices: rows || [], limit: MAX_APPROVED_DEVICES_PER_USER })
 })
 
@@ -493,6 +494,9 @@ type ShopDeviceRow = {
   marked_by_user_id: number | null
   marked_by_name: string | null
   marked_at: string
+  last_seen_at: string | null
+  last_ip: string | null
+  last_country: string | null
   unmarked_at: string | null
   device_name: string | null
 }
@@ -500,7 +504,7 @@ type ShopDeviceRow = {
 // GET /api/auth/devices/shop -- the devices currently marked as shop devices.
 app.get('/shop', async (c) => {
   const rows = await getDb(c.env).prepare(`
-    SELECT s.id, s.device_id, s.label, s.marked_by_user_id, s.marked_by_name, s.marked_at,
+    SELECT s.id, s.device_id, s.label, s.marked_by_user_id, s.marked_by_name, s.marked_at, s.last_seen_at, s.last_ip, s.last_country,
       (SELECT t.device_name FROM trusted_devices t WHERE t.device_id = s.device_id AND t.device_name IS NOT NULL LIMIT 1) AS device_name
     FROM shop_devices s
     WHERE s.unmarked_at IS NULL
@@ -510,8 +514,11 @@ app.get('/shop', async (c) => {
   return c.json({ shopDevices: rows || [] })
 })
 
-// POST /api/auth/devices/:id/mark-shop { label } -- :id is an APPROVED
-// trusted_devices row; its device id becomes a shop device.
+// POST /api/auth/devices/:id/mark-shop { label } -- :id is a PENDING or
+// APPROVED trusted_devices row; its device id becomes a shop device. Marking
+// costs no slot: the batch removes every pending or approved row for that
+// browser (any employee's), because the marking replaces them. Unmarking then
+// really does mean "each employee needs an approval again".
 app.post('/:id/mark-shop', async (c) => {
   const id = Number(c.req.param('id'))
   const admin = c.get('user')
@@ -522,16 +529,35 @@ app.post('/:id/mark-shop', async (c) => {
     return c.json({ error: `Give the shop device a name of 1 to ${SHOP_LABEL_MAX} characters.`, code: 'shop_label_invalid' }, 400)
   }
   const db = getDb(c.env)
-  const device = await db.prepare('SELECT * FROM trusted_devices WHERE id = @id LIMIT 1').get<TrustedDeviceRow>({ id })
+  const device = await db.prepare(`SELECT t.*, (SELECT 1 FROM shop_devices s WHERE s.device_id = t.device_id AND s.unmarked_at IS NOT NULL LIMIT 1) AS shop_retired
+    FROM trusted_devices t WHERE t.id = @id LIMIT 1`).get<TrustedDeviceRow & { shop_retired: number | null }>({ id })
   if (!device) return c.json({ error: 'Device request not found' }, 404)
-  if (device.status !== 'approved') return c.json({ error: 'Only an approved device can be marked as a shop device.', code: 'shop_device_not_approved' }, 409)
+  if (device.shop_retired) {
+    return c.json({ error: 'This device was a shop device before and is given a new identity when it signs in again. Mark its new request instead.', code: 'shop_device_retired' }, 409)
+  }
+  if (device.status !== 'approved' && device.status !== 'pending') return c.json({ error: 'Only a pending or approved device can be marked as a shop device.', code: 'shop_device_not_approved' }, 409)
+  // Rows for this browser no longer matter once it is a shop device (every
+  // employee passes there): waiting requests would stay in the queue and bell,
+  // and approved rows would hold a slot for nothing. The same batch removes them.
+  const waiting = await db.prepare(`SELECT id, user_id, status FROM trusted_devices WHERE device_id = @device_id AND status IN ('pending', 'approved') LIMIT 200`)
+    .all<{ id: number; user_id: number; status: string }>({ device_id: device.device_id })
   let inserted: { changes?: number } | undefined
+  let closed = 0
   try {
-    inserted = await db.prepare(`
-      INSERT INTO shop_devices (device_id, label, marked_by_user_id, marked_by_name)
-      SELECT @device_id, @label, @admin_id, @admin_name
-      WHERE EXISTS (SELECT 1 FROM trusted_devices WHERE id = @id AND status = 'approved')
-    `).run({ id, device_id: device.device_id, label, admin_id: admin.id, admin_name: admin.name })
+    const results = await db.batch([
+      {
+        sql: `INSERT INTO shop_devices (device_id, label, marked_by_user_id, marked_by_name)
+          SELECT @device_id, @label, @admin_id, @admin_name
+          WHERE EXISTS (SELECT 1 FROM trusted_devices WHERE id = @id AND status IN ('pending', 'approved'))`,
+        params: { id, device_id: device.device_id, label, admin_id: admin.id, admin_name: admin.name },
+      },
+      {
+        sql: `DELETE FROM trusted_devices WHERE device_id = @device_id AND status IN ('pending', 'approved') AND changes() = 1`,
+        params: { device_id: device.device_id },
+      },
+    ])
+    inserted = { changes: Number(results[0]?.meta?.changes || 0) }
+    closed = Number(results[1]?.meta?.changes || 0)
   } catch (error) {
     if (error instanceof Error && /UNIQUE/i.test(error.message)) {
       return c.json({ error: 'This device is already marked as a shop device.', code: 'shop_device_exists' }, 409)
@@ -542,12 +568,20 @@ app.post('/:id/mark-shop', async (c) => {
   await audit(c.env, admin.id, admin.username, 'shop_device_marked', 'user', device.user_id, {
     deviceId: device.device_id, deviceName: device.device_name, label, targetTrustedDeviceRowId: device.id,
   })
-  return c.json({ success: true })
+  if (closed > 0) {
+    await audit(c.env, admin.id, admin.username, 'shop_device_rows_removed', 'user', admin.id, {
+      deviceId: device.device_id, label, closedRows: (waiting || []).map((row) => ({ rowId: row.id, userId: row.user_id, status: row.status })), closedCount: closed,
+    })
+  }
+  return c.json({ success: true, removedRows: closed })
 })
 
 // POST /api/auth/devices/shop/:shopId/unmark -- one batch (one transaction)
 // ends the marking and revokes the sessions the shop path issued (and the
 // sessions re-issued from them), so the next sign-in there needs an approval.
+// The device id is retired for good: its next sign-in is given a fresh id (see
+// checkDeviceTrust), so a copy of its cookie stops working, and the same id can
+// never be marked again.
 app.post('/shop/:shopId/unmark', async (c) => {
   const shopId = Number(c.req.param('shopId'))
   const admin = c.get('user')

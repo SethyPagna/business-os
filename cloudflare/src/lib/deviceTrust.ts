@@ -29,6 +29,7 @@ export type TrustedDeviceRow = {
   last_seen_at: string
   revoked_at: string | null
   cookie_bound_at?: string | null
+  claimed_approval_ref?: number | null
 }
 
 export function requiresDeviceApproval(user: PermissionUser): boolean {
@@ -61,7 +62,7 @@ export async function checkDeviceTrust(
   userId: number,
   deviceId: string | null | undefined,
   meta: { deviceName?: string | null; userAgent?: string | null; ip?: string | null; country?: string | null; cookieVerified?: boolean },
-): Promise<{ status: 'approved'; shopDeviceId?: number } | { status: 'pending'; created: boolean; replacedDeviceId?: string } | { status: 'rejected' | 'missing_device_id' }> {
+): Promise<{ status: 'approved'; shopDeviceId?: number } | { status: 'pending'; created: boolean; replacedDeviceId?: string; claimedRowId?: number } | { status: 'rejected' | 'missing_device_id' }> {
   if (!isValidDeviceId(deviceId)) {
     // A client that doesn't send a usable device id (missing, over-long or
     // outside [A-Za-z0-9_-]; e.g. an old cached
@@ -79,32 +80,42 @@ export async function checkDeviceTrust(
   // The shop join only matches when the id came from the verified device
   // cookie, so a client-chosen body id can never claim a shop device.
   const found = await db.prepare(`
-    SELECT td.*, s.id AS shop_device_row_id
+    SELECT td.*, s.id AS shop_device_row_id, s.marked_at AS shop_marked_at,
+      s.last_seen_at AS shop_last_seen_at, s.last_ip AS shop_last_ip, s.last_country AS shop_last_country,
+      (SELECT 1 FROM shop_devices r WHERE r.device_id = @device_id AND r.unmarked_at IS NOT NULL LIMIT 1) AS shop_retired
     FROM (SELECT 1 AS one) base
     LEFT JOIN trusted_devices td ON td.user_id = @user_id AND td.device_id = @device_id
     LEFT JOIN shop_devices s ON @shop_ok = 1 AND s.device_id = @device_id AND s.unmarked_at IS NULL
-  `).get<(Partial<TrustedDeviceRow> & { shop_device_row_id: number | null }) | undefined>({ user_id: userId, device_id: deviceId, shop_ok: meta.cookieVerified ? 1 : 0 })
+  `).get<(Partial<TrustedDeviceRow> & { shop_device_row_id: number | null; shop_marked_at: string | null; shop_last_seen_at: string | null; shop_last_ip: string | null; shop_last_country: string | null; shop_retired: number | null }) | undefined>({ user_id: userId, device_id: deviceId, shop_ok: meta.cookieVerified ? 1 : 0 })
   const existing = found && found.id != null ? (found as TrustedDeviceRow) : null
   const shopDeviceId = found?.shop_device_row_id ?? null
   // A device cookie is only ever issued when the signing key exists, so only then is "has had a cookie" a fact about the row.
   const cookiesOn = Boolean(env.APP_ENCRYPTION_KEY)
 
-  // This browser's cookie was issued for the row, but the id arrived without it (typed into a request body, or the cookie was
-  // cleared): knowing the id is not enough. It becomes a new browser with a fresh pending id; the caller pins that id.
-  if (cookiesOn && existing?.status === 'approved' && existing.cookie_bound_at && !meta.cookieVerified) {
+  // Two cases where the presented id is no longer enough and the browser becomes a new one with a fresh pending id (the caller pins it):
+  //  - this browser's cookie was issued for the approved row, but the id arrived without it (typed into a request body, or the cookie was cleared);
+  //  - the id belonged to a shop device that an administrator has since unmarked. The id is retired: whoever still holds a copy of its cookie
+  //    gets nothing from it, and the till itself continues under its new id, which the administrator marks from its pending request.
+  const retiredShopId = Boolean(found?.shop_retired) && !shopDeviceId
+  if (cookiesOn && (retiredShopId || (existing?.status === 'approved' && existing.cookie_bound_at && !meta.cookieVerified))) {
     const fresh = crypto.randomUUID()
     const made = await db.prepare(`
-      INSERT INTO trusted_devices (user_id, device_id, device_name, user_agent, first_ip, last_ip, first_country, last_country, status, decided_at, cookie_bound_at)
-      VALUES (@user_id, @device_id, @device_name, @user_agent, @ip, @ip, @country, @country, 'pending', NULL, CURRENT_TIMESTAMP)
-    `).run({ user_id: userId, device_id: fresh, device_name: meta.deviceName || null, user_agent: meta.userAgent || null, ip: meta.ip || null, country: meta.country || null })
+      INSERT INTO trusted_devices (user_id, device_id, device_name, user_agent, first_ip, last_ip, first_country, last_country, status, decided_at, cookie_bound_at, claimed_approval_ref)
+      VALUES (@user_id, @device_id, @device_name, @user_agent, @ip, @ip, @country, @country, 'pending', NULL, CURRENT_TIMESTAMP, @claimed)
+    `).run({ claimed: existing?.status === 'approved' ? existing.id : null, user_id: userId, device_id: fresh, device_name: meta.deviceName || null, user_agent: meta.userAgent || null, ip: meta.ip || null, country: meta.country || null })
     if (Number(made?.changes || 0) > 0) await broadcast(env, 'notifications', { type: 'device_pending' })
-    return { status: 'pending', created: true, replacedDeviceId: fresh }
+    return { status: 'pending', created: true, replacedDeviceId: fresh, ...(existing?.status === 'approved' ? { claimedRowId: existing.id } : {}) }
   }
 
-  // An administrator's explicit refusal of this account on this device
-  // outranks the shop marking; an approved row of its own is a personal
-  // approval and is used as such.
-  if (shopDeviceId && existing?.status !== 'rejected' && existing?.status !== 'approved') {
+  // Only a refusal an administrator made after marking the device outranks the
+  // shop marking. A decline from before the marking, or a row that a revoke or a
+  // replace at the device cap turned into 'rejected' (revoked_at is set), is
+  // history about a personal approval and never locks an employee out of the till.
+  // An approved row of its own is a personal approval and is used as such.
+  const refusedAfterMarking = existing?.status === 'rejected' && !existing.revoked_at
+    && (!existing.decided_at || !found?.shop_marked_at || existing.decided_at >= found.shop_marked_at)
+  if (shopDeviceId && !refusedAfterMarking && existing?.status !== 'approved') {
+    await recordShopSignIn(env, userId, deviceId, shopDeviceId, found as NonNullable<typeof found>, meta)
     return { status: 'approved', shopDeviceId }
   }
 
@@ -171,6 +182,36 @@ export async function checkDeviceTrust(
     UPDATE trusted_devices SET last_seen_at = CURRENT_TIMESTAMP, last_ip = @ip, last_country = @country WHERE id = @id
   `).run({ id: existing.id, ip: meta.ip || existing.last_ip, country: meta.country || existing.last_country })
   return { status: 'pending', created: false }
+}
+
+// A till rarely changes address or country, so a sign-in from a new country on a
+// shop device is the signal that a copied cookie is in use elsewhere: raise the
+// same alert a personal device raises. The last-seen write is skipped (no D1
+// call) unless the address or country changed or the last write is old.
+const SHOP_SEEN_WRITE_EVERY_MS = 5 * 60 * 1000
+
+async function recordShopSignIn(
+  env: Env,
+  userId: number,
+  deviceId: string,
+  shopDeviceId: number,
+  shop: { shop_last_seen_at: string | null; shop_last_ip: string | null; shop_last_country: string | null },
+  meta: { ip?: string | null; country?: string | null },
+): Promise<void> {
+  const country = meta.country || null
+  const priorCountry = shop.shop_last_country || null
+  if (country && priorCountry && country !== priorCountry) {
+    await audit(env, userId, null, 'device_login_new_country', 'user', userId, {
+      deviceId, shopDeviceId, shopDevice: true, previousCountry: priorCountry, newCountry: country, ip: meta.ip || null,
+    })
+  }
+  const ip = meta.ip || shop.shop_last_ip || null
+  const seenAt = shop.shop_last_seen_at ? Date.parse(`${shop.shop_last_seen_at.replace(' ', 'T')}Z`) : NaN
+  const recent = Number.isFinite(seenAt) && Date.now() - seenAt < SHOP_SEEN_WRITE_EVERY_MS
+  if (recent && ip === (shop.shop_last_ip || null) && (country || priorCountry) === priorCountry) return
+  await getDb(env).prepare(`
+    UPDATE shop_devices SET last_seen_at = CURRENT_TIMESTAMP, last_ip = @ip, last_country = @country WHERE id = @id
+  `).run({ id: shopDeviceId, ip, country: country || priorCountry })
 }
 
 export async function countPendingDevices(env: Env): Promise<number> {

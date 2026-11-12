@@ -95,7 +95,8 @@ const SCHEMA = `
     expires_at TEXT NOT NULL,
     revoked_at TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    device_id TEXT
+    device_id TEXT,
+    shop_device_id INTEGER -- migration 0304; /session-duration copies it onto a re-issue
   );
   CREATE UNIQUE INDEX idx_user_sessions_token_hash_unique_pg ON user_sessions (token_hash);
 `
