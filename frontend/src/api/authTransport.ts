@@ -109,6 +109,11 @@ export async function otpVerify(payload: AuthPayload = {}): Promise<unknown> {
   return result
 }
 
+// Has the admin decided on this waiting device? Answers a status only; it never signs anyone in.
+export function getDeviceApprovalStatus(ticket: string): Promise<unknown> {
+  return apiFetch('POST', '/api/auth/device-status', { ticket })
+}
+
 export function otpStatus(userId: string | number): Promise<unknown> {
   return apiFetch('GET', `/api/auth/otp/status/${encodeURIComponent(String(userId))}`)
 }

@@ -21,7 +21,7 @@ import { requireJsonSameOriginCredentialPost } from '../lib/requestBodyGuard'
 import { issueOtpChallenge, isLiveOtpChallenge, consumeOtpChallenge } from '../lib/otpChallenge'
 import { recordFailedLogin, getLoginLockoutState, clearLoginLockout, userIdLockoutKey, worstLockoutState, perNetworkLockoutKey } from '../lib/loginLockout'
 import { requiresDeviceApproval, checkDeviceTrust } from '../lib/deviceTrust'
-import { resolveAndPinDevice } from '../lib/deviceCookie'
+import { issueDeviceTicket, readDeviceTicket, resolveAndPinDevice } from '../lib/deviceCookie'
 import {
   buildGoogleOauthStartUrl,
   exchangeGoogleOauthCode,
@@ -195,6 +195,7 @@ app.use('/login', requireJsonSameOriginCredentialPost)
 app.use('/otp/verify', requireJsonSameOriginCredentialPost)
 app.use('/password-reset/*', requireJsonSameOriginCredentialPost)
 app.use('/oauth/start', requireJsonSameOriginCredentialPost)
+app.use('/device-status', requireJsonSameOriginCredentialPost)
 
 app.post('/login', async (c) => {
   const body = await c.req.json<{ username: string; password: string; sessionDuration?: string; deviceName?: string; deviceId?: string; deviceTz?: string }>()
@@ -435,6 +436,7 @@ app.post('/login', async (c) => {
         deviceApprovalRequired: true,
         deviceStatus: trustCheck.status === 'missing_device_id' ? 'pending' : trustCheck.status,
         ...(echoedDeviceId ? { deviceId: echoedDeviceId } : {}),
+        ...(await pendingDeviceTicket(c.env, user.id, echoedDeviceId, trustCheck.status)),
         message: 'This device is awaiting administrator approval before you can sign in.',
       }, 200)
     }
@@ -512,6 +514,18 @@ app.post('/login', async (c) => {
     sharedDevice: await deviceUsedByAnotherAccount(c.env, user.id, deviceId),
     ...(echoedDeviceId ? { deviceId: echoedDeviceId } : {}),
   })
+})
+
+// POST /api/auth/device-status { ticket } -- has the admin decided on the device this
+// ticket names? One indexed read, no session, no cookie: it answers a status and
+// nothing else, so the waiting sign-in screen can continue by itself.
+app.post('/device-status', async (c) => {
+  const body = await c.req.json<{ ticket?: unknown }>().catch(() => ({} as { ticket?: unknown }))
+  const ticket = await readDeviceTicket(c.env, body.ticket)
+  if (!ticket) return c.json({ status: 'expired' })
+  const row = await getDb(c.env).prepare('SELECT status FROM trusted_devices WHERE user_id = @user_id AND device_id = @device_id LIMIT 1')
+    .get<{ status: string }>({ user_id: ticket.userId, device_id: ticket.deviceId })
+  return c.json({ status: row?.status || 'missing' })
 })
 
 // Empties the browser's HTTP cache for this origin so no /api body outlives the sign-out on a shared till. Only
@@ -876,6 +890,7 @@ app.post('/otp/verify', async (c) => {
         deviceApprovalRequired: true,
         deviceStatus: trustCheck.status === 'missing_device_id' ? 'pending' : trustCheck.status,
         ...(echoedDeviceId ? { deviceId: echoedDeviceId } : {}),
+        ...(await pendingDeviceTicket(c.env, user.id, echoedDeviceId, trustCheck.status)),
         message: 'This device is awaiting administrator approval before you can sign in.',
       }, 200)
     }
@@ -1197,6 +1212,13 @@ async function accountMustChangePassword(env: Env, userId: number): Promise<bool
 // Administrators have no trusted_devices rows, so any other row means shared.
 // Advisory only: a failed lookup answers "shared" (no save offer) rather than
 // failing a sign-in whose password was already verified.
+// The waiting screen's proof for POST /device-status (see lib/deviceCookie.ts).
+async function pendingDeviceTicket(env: Env, userId: number, deviceId: string | null | undefined, status: string): Promise<{ deviceTicket?: string }> {
+  if (status !== 'pending' || !deviceId) return {}
+  const deviceTicket = await issueDeviceTicket(env, userId, deviceId)
+  return deviceTicket ? { deviceTicket } : {}
+}
+
 async function deviceUsedByAnotherAccount(env: Env, userId: number, deviceId: unknown): Promise<boolean> {
   const device = trim(deviceId)
   if (!device) return false
@@ -1509,6 +1531,7 @@ app.get('/oauth/callback', async (c) => {
             deviceApprovalRequired: true,
             deviceStatus: 'pending',
             deviceId: oauthDeviceId,
+            ...(await pendingDeviceTicket(c.env, localUser.id, oauthDeviceId, trustCheck.status)),
             message: 'This device is awaiting administrator approval before you can sign in.',
           } }
         }

@@ -37,6 +37,8 @@
     {"method":"POST","route":"/api/auth/devices/sessions/revoke-user","class":"N","reason":"write-not-measured"},
     {"method":"GET","route":"/api/auth/oauth/callback","class":"N","reason":"get-not-in-shapes"},
     {"method":"POST","route":"/api/auth/oauth/complete","class":"N","reason":"write-not-measured"},
+    {"method":"ALL","route":"/api/auth/device-status","class":"N","reason":"write-not-measured"},
+    {"method":"POST","route":"/api/auth/device-status","class":"N","reason":"write-not-measured"},
     {"method":"ALL","route":"/api/auth/oauth/start","class":"N","reason":"write-not-measured"},
     {"method":"POST","route":"/api/auth/oauth/start","class":"N","reason":"write-not-measured"},
     {"method":"POST","route":"/api/auth/oauth/unlink","class":"N","reason":"write-not-measured"},

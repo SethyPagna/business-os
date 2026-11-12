@@ -3,6 +3,7 @@ import type { Env } from '../index'
 import { isAdminControlUser, type PermissionUser } from './permissions'
 import { audit } from './audit'
 import { isValidDeviceId } from './deviceCookie'
+import { broadcast } from '../durable-objects/broadcastHub'
 
 // Device-approval gate. See migrations/0005_trusted_devices.sql for the
 // schema. Non-administrator accounts are enrolled: a device stays trusted
@@ -59,7 +60,7 @@ export async function checkDeviceTrust(
   userId: number,
   deviceId: string | null | undefined,
   meta: { deviceName?: string | null; userAgent?: string | null; ip?: string | null; country?: string | null },
-): Promise<{ status: 'approved' } | { status: 'pending' | 'rejected' | 'missing_device_id' }> {
+): Promise<{ status: 'approved' } | { status: 'pending'; created: boolean } | { status: 'rejected' | 'missing_device_id' }> {
   if (!isValidDeviceId(deviceId)) {
     // A client that doesn't send a usable device id (missing, over-long or
     // outside [A-Za-z0-9_-]; e.g. an old cached
@@ -83,7 +84,7 @@ export async function checkDeviceTrust(
 
     // Two parallel first sign-ins race this insert; the unique index makes the
     // loser a no-op instead of a 500.
-    await db.prepare(`
+    const inserted = await db.prepare(`
       INSERT INTO trusted_devices (user_id, device_id, device_name, user_agent, first_ip, last_ip, first_country, last_country, status, decided_at)
       VALUES (@user_id, @device_id, @device_name, @user_agent, @ip, @ip, @country, @country, @status, @decided_at)
       ON CONFLICT(user_id, device_id) DO NOTHING
@@ -97,7 +98,10 @@ export async function checkDeviceTrust(
       status: initialStatus,
       decided_at: null,
     })
-    return { status: initialStatus }
+    // Only a row this call created raises the alert; a retry or a lost race does not.
+    const created = Number(inserted?.changes || 0) > 0
+    if (created) await broadcast(env, 'notifications', { type: 'device_pending' })
+    return { status: initialStatus, created }
   }
 
   if (existing.status === 'approved') {
@@ -131,7 +135,7 @@ export async function checkDeviceTrust(
   await db.prepare(`
     UPDATE trusted_devices SET last_seen_at = CURRENT_TIMESTAMP, last_ip = @ip, last_country = @country WHERE id = @id
   `).run({ id: existing.id, ip: meta.ip || existing.last_ip, country: meta.country || existing.last_country })
-  return { status: 'pending' }
+  return { status: 'pending', created: false }
 }
 
 export async function countPendingDevices(env: Env): Promise<number> {

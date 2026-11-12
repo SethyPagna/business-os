@@ -36,17 +36,20 @@ function fromBase64Url(value: string): Uint8Array | null {
   }
 }
 
+const COOKIE_PURPOSE = 'bos-device-cookie-v1'
+const TICKET_PURPOSE = 'bos-device-ticket-v1'
+
 // Keyed from the existing APP_ENCRYPTION_KEY with a purpose prefix, so no new
-// secret is needed. Without the key no cookie is issued or trusted and the
-// body id alone decides, as before.
-function signingKey(env: Env): Promise<CryptoKey> | null {
+// secret is needed and a cookie can never pass as a ticket. Without the key no
+// cookie or ticket is issued or trusted and the body id alone decides, as before.
+function signingKey(env: Env, purpose: string): Promise<CryptoKey> | null {
   const secret = env.APP_ENCRYPTION_KEY
   if (!secret) return null
-  return crypto.subtle.importKey('raw', encoder.encode(`bos-device-cookie-v1:${secret}`), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify'])
+  return crypto.subtle.importKey('raw', encoder.encode(`${purpose}:${secret}`), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify'])
 }
 
 export async function signDeviceCookieValue(env: Env, deviceId: string): Promise<string | null> {
-  const key = signingKey(env)
+  const key = signingKey(env, COOKIE_PURPOSE)
   if (!key || !isValidDeviceId(deviceId)) return null
   const mac = new Uint8Array(await crypto.subtle.sign('HMAC', await key, encoder.encode(deviceId)))
   return `${deviceId}.${toBase64Url(mac)}`
@@ -54,7 +57,7 @@ export async function signDeviceCookieValue(env: Env, deviceId: string): Promise
 
 // The id inside a cookie value, only when its signature verifies.
 export async function verifyDeviceCookieValue(env: Env, raw: string | null | undefined): Promise<string | null> {
-  const key = signingKey(env)
+  const key = signingKey(env, COOKIE_PURPOSE)
   if (!key || !raw) return null
   const dot = raw.lastIndexOf('.')
   if (dot < 1) return null
@@ -100,4 +103,34 @@ export async function resolveAndPinDevice<E extends { Bindings: Env }>(c: Contex
   }
   if (chosen) await pinDeviceCookie(c, chosen)
   return chosen
+}
+
+// A short-lived proof that THIS browser just sent a correct password (or Google
+// identity) from an unapproved device: the answer to a pending sign-in carries
+// it, and POST /device-status accepts it to say whether the admin has decided
+// yet, so the waiting screen can continue by itself. It names the account and
+// device and nothing else; it opens no session and answers only a status.
+export const DEVICE_TICKET_TTL_SECONDS = 10 * 60
+
+export async function issueDeviceTicket(env: Env, userId: number, deviceId: string): Promise<string | null> {
+  const key = signingKey(env, TICKET_PURPOSE)
+  if (!key || !Number.isInteger(userId) || userId <= 0 || !isValidDeviceId(deviceId)) return null
+  const message = `${userId}.${deviceId}.${Math.floor(Date.now() / 1000) + DEVICE_TICKET_TTL_SECONDS}`
+  const mac = new Uint8Array(await crypto.subtle.sign('HMAC', await key, encoder.encode(message)))
+  return `${message}.${toBase64Url(mac)}`
+}
+
+export async function readDeviceTicket(env: Env, raw: unknown): Promise<{ userId: number; deviceId: string } | null> {
+  const key = signingKey(env, TICKET_PURPOSE)
+  if (!key || typeof raw !== 'string' || raw.length > 300) return null
+  const parts = raw.split('.')
+  if (parts.length !== 4) return null
+  const [userPart, deviceId, expiresPart, macPart] = parts
+  const userId = Number(userPart)
+  const expires = Number(expiresPart)
+  const mac = fromBase64Url(macPart)
+  if (!mac || !Number.isInteger(userId) || userId <= 0 || !Number.isInteger(expires) || !isValidDeviceId(deviceId)) return null
+  const valid = await crypto.subtle.verify('HMAC', await key, mac, encoder.encode(`${userPart}.${deviceId}.${expiresPart}`))
+  if (!valid || expires * 1000 <= Date.now()) return null
+  return { userId, deviceId }
 }
