@@ -1,4 +1,5 @@
-import { adoptDeviceIdFromResponse, deviceIdentityReady, getClientDeviceInfo, getOrCreatePersistentDeviceId } from '../utils/deviceInfo.ts'
+import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
+import { adoptDeviceIdFromResponse, deviceIdentityReady, getOrCreatePersistentDeviceId } from '../utils/deviceIdentity.ts'
 import { apiFetch, route } from './http.ts'
 
 type AuthPayload = Record<string, unknown>

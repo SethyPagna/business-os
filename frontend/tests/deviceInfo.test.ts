@@ -105,7 +105,7 @@ function uninstallBrowserStorage(): void {
 }
 
 let moduleCase = 0
-const freshDeviceInfo = () => import(`../src/utils/deviceInfo.ts?case=${++moduleCase}`) as Promise<typeof import('../src/utils/deviceInfo.ts')>
+const freshDeviceInfo = () => import(`../src/utils/deviceIdentity.ts?case=${++moduleCase}`) as Promise<typeof import('../src/utils/deviceIdentity.ts')>
 
 async function runAsyncTest(name: string, fn: () => Promise<void>): Promise<void> {
   try {

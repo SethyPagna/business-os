@@ -12,7 +12,7 @@ export const STORAGE_KEYS = {
   OAUTH_LOGIN_PENDING: 'businessos_oauth_login_pending',
   OAUTH_LINK_PENDING: 'businessos_oauth_link_pending',
   OAUTH_CALLBACK_RESULT: 'businessos_oauth_callback_result',
-  // The persisted device-approval identifier (utils/deviceInfo.ts's
+  // The persisted device-approval identifier (utils/deviceIdentity.ts's
   // getOrCreatePersistentDeviceId()) -- was a raw literal key that lived
   // outside this map entirely, which meant nothing that clears
   // `businessos_`-prefixed storage keys on logout (see

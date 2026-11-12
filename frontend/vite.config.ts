@@ -745,6 +745,9 @@ function manualChunks(id: string): string | undefined {
       || normalized.endsWith('/src/api/importTransport.ts')
     ) return 'import-jobs-api'
     if (normalized.endsWith('/src/api/userAdminTransport.ts')) return 'user-admin-api'
+    // The device-approval admin transport (pending/approved lists, approve, replace, shop devices) is imported only by the Users > Devices panel; in the /src/api/ catch-all
+    // it rode in app-api-methods, which the storefront loads, and cost the catalog-products closure about 580 bytes of admin-only code.
+    if (normalized.endsWith('/src/api/deviceAdminTransport.ts')) return 'device-admin-api'
     if (normalized.endsWith('/src/api/userReadTransport.ts')) return 'user-read-api'
     if (normalized.endsWith('/src/api/driveSync.ts')) return 'drive-sync-api'
     if (normalized.endsWith('/src/api/dashboardTransport.ts')) return 'dashboard-api'
@@ -792,6 +795,8 @@ function manualChunks(id: string): string | undefined {
     if (
       normalized.endsWith('/src/api/authTransport.ts')
       || normalized.endsWith('/src/AppContext.tsx')
+      // The persistent device id with its IndexedDB copy: sign-in only, split out of deviceInfo.ts (which api-http-core carries) so the storefront never loads it.
+      || normalized.endsWith('/src/utils/deviceIdentity.ts')
       // fmtUSD / fmtKHR's nearest-cent rounding and the export chunks' money text: signed-in app only, never the storefront boot path.
       || normalized.endsWith('/src/utils/displayMoney.ts')
     ) {
