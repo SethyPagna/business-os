@@ -20,7 +20,7 @@ import { requireJsonSameOriginCredentialPost } from '../lib/requestBodyGuard'
 // the Part-77 finding it closes.
 import { issueOtpChallenge, isLiveOtpChallenge, consumeOtpChallenge } from '../lib/otpChallenge'
 import { recordFailedLogin, getLoginLockoutState, clearLoginLockout, userIdLockoutKey, worstLockoutState, perNetworkLockoutKey } from '../lib/loginLockout'
-import { requiresDeviceApproval, checkDeviceTrust } from '../lib/deviceTrust'
+import { requiresDeviceApproval, checkDeviceTrust, type DeviceTrustWaitUntil } from '../lib/deviceTrust'
 import { adoptSessionDeviceCookie, isCookieVerifiedDevice, issueDeviceTicket, pinDeviceAfterGate, readDeviceTicket, resolveDeviceId } from '../lib/deviceCookie'
 import {
   buildGoogleOauthStartUrl,
@@ -37,6 +37,11 @@ import {
 } from '../lib/googleOauth'
 import { epochTag, readDataEpoch } from '../lib/readSwitches'
 import type { Env } from '../index'
+
+// The request's waitUntil for work the response must not wait on; undefined where no ExecutionContext exists (tests).
+function requestWaitUntil(c: { executionCtx: { waitUntil(work: Promise<unknown>): void } }): DeviceTrustWaitUntil | undefined {
+  try { const ctx = c.executionCtx; return (work) => ctx.waitUntil(work) } catch { return undefined }
+}
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -419,7 +424,7 @@ app.post('/login', async (c) => {
       ip,
       country: c.req.header('cf-ipcountry'),
       cookieVerified: isCookieVerifiedDevice(c, deviceId),
-    })
+    }, requestWaitUntil(c))
     if (trustCheck.status === 'approved') shopDeviceId = trustCheck.shopDeviceId
     // The one place the device cookie is set: after the gate has answered, never for a refused id.
     deviceId = await pinDeviceAfterGate(c, deviceId, trustCheck)
@@ -900,7 +905,7 @@ app.post('/otp/verify', async (c) => {
       ip,
       country: c.req.header('cf-ipcountry'),
       cookieVerified: isCookieVerifiedDevice(c, deviceId),
-    })
+    }, requestWaitUntil(c))
     if (trustCheck.status === 'approved') shopDeviceId = trustCheck.shopDeviceId
     // The one place the device cookie is set: after the gate has answered, never for a refused id.
     deviceId = await pinDeviceAfterGate(c, deviceId, trustCheck)
@@ -1535,7 +1540,7 @@ app.get('/oauth/callback', async (c) => {
           ip: c.req.header('cf-connecting-ip') || undefined,
           country: c.req.header('cf-ipcountry'),
           cookieVerified: isCookieVerifiedDevice(c, oauthDeviceId),
-        })
+        }, requestWaitUntil(c))
         if (trustCheck.status === 'approved') oauthShopDeviceId = trustCheck.shopDeviceId
         oauthDeviceId = await pinDeviceAfterGate(c, oauthDeviceId, trustCheck)
         if (trustCheck.status === 'rejected') {

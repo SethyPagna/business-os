@@ -106,6 +106,8 @@ const THREADED = {
   'generalCustomerMembershipRepair.ts': ['refreshGeneralCustomerMembershipRepair'],
   'generalCustomerRepair.ts': ['refreshGeneralCustomerRepair'],
   'createFold.ts': ['foldCreateWithStockInWrite'],
+  // checkDeviceTrust hands the admin bell's device_pending alert to the sign-in request's waitUntil (routes/auth.ts passes it).
+  'deviceTrust.ts': ['notifyDevicePending'],
   'reviewApply.ts': ['notify'],
   'telegramTopicSetting.ts': ['saveTelegramTopicSetting'],
 }

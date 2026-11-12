@@ -54,6 +54,16 @@ export async function countApprovedDevices(env: Env, userId: number, excludeRowI
   return row?.n || 0
 }
 
+export type DeviceTrustWaitUntil = (promise: Promise<unknown>) => void
+
+// The admin bell's "a device is waiting" alert. A request hands in its waitUntil so the sign-in never waits on the broadcast;
+// a caller with no request context (tests) awaits it.
+async function notifyDevicePending(env: Env, waitUntil: DeviceTrustWaitUntil | undefined): Promise<void> {
+  const sent = broadcast(env, 'notifications', { type: 'device_pending' })
+  if (waitUntil) waitUntil(sent)
+  else await sent
+}
+
 // Called after password (and OTP, if enabled) verify but before a session
 // is issued. Returns `null` when the device is approved and login should
 // proceed normally. Returns a status string otherwise, and the caller
@@ -63,6 +73,7 @@ export async function checkDeviceTrust(
   userId: number,
   deviceId: string | null | undefined,
   meta: { deviceName?: string | null; userAgent?: string | null; ip?: string | null; country?: string | null; cookieVerified?: boolean },
+  waitUntil?: DeviceTrustWaitUntil,
 ): Promise<{ status: 'approved'; shopDeviceId?: number } | { status: 'pending'; created: boolean; replacedDeviceId?: string; claimedRowId?: number; heldByOther?: boolean } | { status: 'rejected' | 'missing_device_id' }> {
   if (!isValidDeviceId(deviceId)) {
     // A client that doesn't send a usable device id (missing, over-long or
@@ -112,7 +123,7 @@ export async function checkDeviceTrust(
       INSERT INTO trusted_devices (user_id, device_id, device_name, user_agent, first_ip, last_ip, first_country, last_country, status, decided_at, cookie_bound_at, claimed_approval_ref)
       VALUES (@user_id, @device_id, @device_name, @user_agent, @ip, @ip, @country, @country, 'pending', NULL, CURRENT_TIMESTAMP, @claimed)
     `).run({ claimed: claimed ? claimed.id : null, user_id: userId, device_id: fresh, device_name: meta.deviceName || null, user_agent: meta.userAgent || null, ip: meta.ip || null, country: meta.country || null })
-    if (Number(made?.changes || 0) > 0) await broadcast(env, 'notifications', { type: 'device_pending' })
+    if (Number(made?.changes || 0) > 0) await notifyDevicePending(env, waitUntil)
     return { status: 'pending', created: true, replacedDeviceId: fresh, ...(claimed ? { claimedRowId: claimed.id } : {}) }
   }
 
@@ -157,7 +168,7 @@ export async function checkDeviceTrust(
     })
     // Only a row this call created raises the alert; a retry or a lost race does not.
     const created = Number(inserted?.changes || 0) > 0
-    if (created) await broadcast(env, 'notifications', { type: 'device_pending' })
+    if (created) await notifyDevicePending(env, waitUntil)
     return { status: initialStatus, created, ...(found?.held_by_other ? { heldByOther: true } : {}) }
   }
 
