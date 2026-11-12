@@ -20,7 +20,11 @@ export type TrustedDeviceRecord = {
   username: string
   user_name: string
   claimed_approval_ref?: number | null
+  // Set once a browser was given the device cookie for this row; a device can only be marked as a shop device after that.
+  cookie_bound_at?: string | null
   claimed_device_name?: string | null
+  // Other accounts with a pending or approved row on the same device (pending list only).
+  shared_with?: Array<{ user_id: number; name: string; status: 'pending' | 'approved' }>
 }
 
 // `limit` is the per-account approved-device cap the Worker enforces; the panel shows it instead of a number of its own.
@@ -35,13 +39,14 @@ export function getAllDevices(userId?: string | number): Promise<DeviceListRespo
   return apiFetch('GET', `/api/auth/devices${query}`) as Promise<DeviceListResponse>
 }
 
-export function approveDevice(id: number | string): Promise<unknown> {
-  return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/approve`, {})
+// `confirmShared` is true only after the administrator saw that another account already has the device; the Worker refuses without it (device_shared_confirm).
+export function approveDevice(id: number | string, confirmShared = false): Promise<unknown> {
+  return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/approve`, confirmShared ? { confirmShared: true } : {})
 }
 
 // At the cap: approve this pending device and revoke one approved device of the same account in one atomic step.
-export function approveDeviceReplacing(id: number | string, revokeId: number | string): Promise<{ success?: boolean; revokedSessions?: number }> {
-  return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/approve-replacing`, { revokeId: Number(revokeId) }) as Promise<{ success?: boolean; revokedSessions?: number }>
+export function approveDeviceReplacing(id: number | string, revokeId: number | string, confirmShared = false): Promise<{ success?: boolean; revokedSessions?: number }> {
+  return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/approve-replacing`, { revokeId: Number(revokeId), ...(confirmShared ? { confirmShared: true } : {}) }) as Promise<{ success?: boolean; revokedSessions?: number }>
 }
 
 export function rejectDevice(id: number | string): Promise<unknown> {
@@ -70,8 +75,8 @@ export function getShopDevices(): Promise<{ shopDevices: ShopDeviceRecord[] }> {
 }
 
 // :id is a pending or approved device row; the Worker refuses anything else and removes that browser's rows.
-export function markShopDevice(id: number | string, label: string): Promise<{ success?: boolean; removedRows?: number }> {
-  return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/mark-shop`, { label }) as Promise<{ success?: boolean; removedRows?: number }>
+export function markShopDevice(id: number | string, label: string, confirmShared = false): Promise<{ success?: boolean; removedRows?: number }> {
+  return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/mark-shop`, { label, ...(confirmShared ? { confirmShared: true } : {}) }) as Promise<{ success?: boolean; removedRows?: number }>
 }
 
 // Ends the marking and signs out the sessions that came in through it.

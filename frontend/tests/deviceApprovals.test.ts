@@ -44,12 +44,12 @@ assert.notEqual(km.device_limit_reached, en.device_limit_reached, 'Khmer cap tex
 assert.doesNotMatch(en.device_approval_pending_desc + en.device_approvals_intro, /for an admin account|admin account must/i, 'approval copy no longer claims the gate is for admin accounts')
 
 // Replace flow: at the cap Approve opens a chooser (least recently seen pre-selected) and the swap is one online call.
-assert.match(transport, /approve-replacing`, \{ revokeId: Number\(revokeId\) \}/, 'replace uses the one atomic Worker route')
+assert.match(transport, /approve-replacing`, \{ revokeId: Number\(revokeId\)/, 'replace uses the one atomic Worker route')
 const replaceTransport = transport.slice(transport.indexOf('export function approveDeviceReplacing'), transport.indexOf('export function rejectDevice'))
 assert.doesNotMatch(replaceTransport, /route\(|queue|outbox/i, 'replace stays outside offline replay')
-assert.match(panel, /deviceLimit && choices\.length >= deviceLimit\) \{\s*setReplacing\(\{ device, choices, selectedId: choices\[0\]\.id \}\)/, 'an account at the cap opens the chooser instead of a refused approve')
+assert.match(panel, /deviceLimit && choices\.length >= deviceLimit\) \{\s*setReplacing\(\{ device, choices, selectedId: choices\[0\]\.id, confirmShared: knownShared \}\)/, 'an account at the cap opens the chooser instead of a refused approve')
 assert.match(panel, /\.sort\(\(a, b\) => String\(a\.last_seen_at \|\| ''\)\.localeCompare\(String\(b\.last_seen_at \|\| ''\)\)\)/, 'choices are ordered least recently seen first, so the first is pre-selected')
-assert.match(panel, /approveDeviceReplacing\(device\.id, selectedId\)/, 'confirming sends the chosen device')
+assert.match(panel, /approveDeviceReplacing\(device\.id, selectedId, confirmShared === true\)/, 'confirming sends the chosen device')
 assert.doesNotMatch(panel, /window\.confirm\(/)
 for (const key of ['device_replace_title', 'device_replace_intro', 'device_replace_new', 'device_replace_remove', 'device_replace_least_recent', 'device_replace_confirm', 'device_replace_done', 'device_replace_conflict', 'device_replace_invalid']) {
   assert.ok(en[key] && km[key], `both packs carry ${key}`)
@@ -58,7 +58,7 @@ for (const key of ['device_replace_title', 'device_replace_intro', 'device_repla
 
 // L2 (review, 12 Nov 2026): a plain approve refused with device_limit_reached (stale page) reads that account's devices fresh and opens the chooser.
 assert.match(panel, /code !== 'device_limit_reached'\) return false\s*const fresh = await getAllDevices\(device\.user_id\)/, 'the cap refusal triggers a fresh read of that account')
-assert.match(panel, /setReplacing\(\{ device, choices: accountChoices, selectedId: accountChoices\[0\]\.id \}\)\s*return true/, 'and opens the replace chooser')
+assert.match(panel, /setReplacing\(\{ device, choices: accountChoices, selectedId: accountChoices\[0\]\.id, confirmShared: knownShared \}\)\s*return true/, 'and opens the replace chooser')
 assert.match(panel, /const handled = onError \? await onError\(err\)\.catch\(\(\) => false\) : false\s*if \(!handled/, 'a handled refusal shows no error toast')
 
 // L4 (review, 13 Nov 2026): a pending request that claimed an approved device's id says so, in both packs.
@@ -83,6 +83,21 @@ for (const [lang, pack] of [['en', en], ['km', km]] as const) {
   assert.ok(text, `${lang} carries shop_device_retired`)
   if (lang === 'en') assert.ok(!/\bmark\b|\bid\b|cookie|phone/i.test(text), 'neutral English: no "mark", "id", "cookie" or phone wording')
   else assert.ok(!text.includes('កំណត់') && !/ខូគី|\bID\b/i.test(text), 'neutral Khmer: no "mark" verb, cookie or ID')
+}
+
+// P-1 (review round 5): the card says when another account already has the device.
+assert.ok(panel.includes('device.shared_with && device.shared_with.length > 0'), 'the panel shows the other accounts on the same device')
+assert.ok(transport.includes('shared_with?:'), 'the record carries shared_with')
+for (const key of ['device_also_here']) assert.ok(en[key] && km[key] && en[key] !== km[key] && /[ក-៿]/.test(km[key]), `both packs carry ${key}`)
+
+// P-1 (review round 5): approving, replacing or marking a device another account has goes through the shared confirm dialog and sends confirmShared.
+assert.ok(panel.includes('if (knownShared && !(await confirmSharedDevice(sharedNames(device), false))) return'), 'Approve asks first when the card lists another account')
+assert.ok(panel.includes("code === 'device_shared_confirm'"), 'a stale list is answered by asking, not by a bare error')
+assert.ok(transport.includes('{ confirmShared: true }') && transport.includes('confirmShared = false'), 'the transport sends confirmShared only when confirmed')
+assert.ok(!/(^|[^A-Za-z.])confirm\(/.test(panel), 'never the native confirm()')
+for (const key of ['device_shared_title', 'device_shared_confirm', 'shop_device_shared_confirm']) {
+  assert.ok(en[key] && km[key] && en[key] !== km[key] && /[ក-៿]/.test(km[key]), `both packs carry ${key}`)
+  assert.ok(!/\b(id|cookie)\b|phone/i.test(en[key]), `${key}: no jargon`)
 }
 
 console.log('PASS device re-approval reset transport, history placement, confirmation, and bilingual copy')

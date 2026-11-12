@@ -244,6 +244,10 @@ export type PlanLimits = {
   // outside a request. Same on both tiers.
   sessionTouchIntervalSeconds: number
 
+  // lib/deviceTrust.ts maxApprovedDevicesPerUser(env): how many APPROVED devices one account may hold (the owner's rule, 5 since 12 Nov 2026).
+  // A security policy rather than a plan size, so it is the same on both tiers; it lives here so the number is tuned in one place.
+  maxApprovedDevicesPerUser: number
+
   // lib/dashboardStockOverview.ts: lifetime of the shared Dashboard stock /
   // expiry overview. Freshness comes from the 'products' + 'stock' cache
   // versions in its key (every sale and stock write bumps one), so this is
@@ -451,6 +455,7 @@ const PAID_LIMITS: PlanLimits = {
   inventoryCheckApprovalTakeoverSeconds: 5 * 60,
   coreInvariantsReverifySeconds: 24 * 60 * 60,
   sessionTouchIntervalSeconds: 15 * 60,
+  maxApprovedDevicesPerUser: 5,
   dashboardStockOverviewCacheSeconds: 30,
   dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 5,
@@ -502,6 +507,7 @@ const FREE_LIMITS: PlanLimits = {
   inventoryCheckApprovalTakeoverSeconds: 15 * 60,
   coreInvariantsReverifySeconds: 24 * 60 * 60,
   sessionTouchIntervalSeconds: 15 * 60,
+  maxApprovedDevicesPerUser: 5,
   dashboardStockOverviewCacheSeconds: 300,
   dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 15,

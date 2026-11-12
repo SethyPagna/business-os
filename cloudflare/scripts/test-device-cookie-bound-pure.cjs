@@ -116,7 +116,7 @@ function browser(w, storedId) {
   return b
 }
 const userRows = (h, userId) => h.raw.prepare('SELECT id, device_id, status, cookie_bound_at IS NOT NULL AS bound, claimed_approval_ref FROM trusted_devices WHERE user_id = @userId ORDER BY id').all({ userId }).map((r) => ({ ...r }))
-const approveRow = async (w, userId) => { const r = await w.adminCall(`/${userRows(w.h, userId)[0].id}/approve`); assert.equal(r.status, 200, JSON.stringify(r.body)) }
+const approveRow = async (w, userId) => { const r = await w.adminCall(`/${userRows(w.h, userId)[0].id}/approve`, { confirmShared: true }); assert.equal(r.status, 200, JSON.stringify(r.body)) }
 const legacyApproved = (h, userId, deviceId) => h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status, decided_at) VALUES (@userId, @deviceId, 'approved', CURRENT_TIMESTAMP)").run({ userId, deviceId })
 
 const SESSION = 'live-session-token-0001'
@@ -390,6 +390,24 @@ async function suite(mutate, label) {
     assert.equal(w.h.raw.prepare('SELECT COUNT(*) AS n FROM user_sessions').get({}).n, sessionsBefore, 'no session issued')
   })
 
+  await check('p. P-1 HB: a request created while a colleague\'s id was unbound never mints the colleague\'s cookie once the colleague has bound, even after the administrator approves it', async () => {
+    const w = setup(mutate)
+    const V2 = 'colleague-phone-device-01'
+    legacyApproved(w.h, 13, V2)
+    const attacker = browser(w, V2)
+    assert.equal((await attacker.go('sokha')).body.deviceApprovalRequired, true, 'her own password and the colleague id: pending')
+    assert.equal(userRows(w.h, 10)[0].bound, 0, 'inserted while the id was unbound')
+    const victim = browser(w, V2)
+    assert.equal((await victim.go('dara')).body.success, true, 'the colleague signs in on her phone and binds')
+    assert.equal(userRows(w.h, 13)[0].bound, 1)
+    await approveRow(w, 10)
+    const again = await attacker.go('sokha')
+    assert.equal(again.body.success, undefined, 'approved, but without the cookie of a bound id she is a new browser: ' + JSON.stringify(again.body).slice(0, 120))
+    assert.ok(!attacker.jar || idOfCookie(attacker.jar) !== V2, 'no cookie for the colleague id')
+    const replayAsVictim = await attacker.go('dara')
+    assert.equal(replayAsVictim.body.success, undefined, 'and nothing she holds signs in as the colleague')
+  })
+
   await check('i. the session cookie name used by the helper is the one lib/auth.ts sets', () => {
     const auth = fs.readFileSync(path.join(SRC, 'lib/auth.ts'), 'utf8')
     const cookie = fs.readFileSync(path.join(SRC, 'lib/deviceCookie.ts'), 'utf8')
@@ -402,7 +420,7 @@ async function suite(mutate, label) {
 
 const inFile = (file, from, to) => (text, rel) => (rel === file ? text.replace(from, to) : text)
 const mutants = [
-  ['bound rows no longer refuse a cookie-less id', inFile('lib/deviceTrust.ts', 'existing.cookie_bound_at && !meta.cookieVerified', 'false'), ['b.', 'e.']],
+  ['bound rows no longer refuse a cookie-less id', inFile('lib/deviceTrust.ts', '(existing.cookie_bound_at || found?.held_bound_by_other) && !meta.cookieVerified', 'false'), ['b.', 'e.']],
   ['an id taken from the body is pinned before the gate again (H1)', inFile('lib/deviceCookie.ts', 'if (chosen && chosen === cookieId) cookieVerifiedIds.set(c, chosen)', 'if (chosen) await pinDeviceCookie(c, chosen)\n  if (chosen && chosen === cookieId) cookieVerifiedIds.set(c, chosen)'), ['j.', 'k.']],
   ['the post-gate pin accepts every answer', inFile('lib/deviceCookie.ts', "const accept = trust.status === 'approved'", "const accept = true || trust.status === 'approved'"), ['l.']],
   ['the body id wins over the cookie again', inFile('lib/deviceCookie.ts', 'const chosen = cookieId || body', 'const chosen = body || cookieId'), ['c.']],
@@ -412,6 +430,7 @@ const mutants = [
   ['binding never happens', inFile('lib/deviceTrust.ts', "cookie_bound_at = COALESCE(cookie_bound_at, CASE WHEN @bind = 1 THEN CURRENT_TIMESTAMP END)", 'cookie_bound_at = cookie_bound_at'), ['a.']],
   ['a new pending row is marked cookie-bound even when no cookie was set (N-1)', inFile('lib/deviceTrust.ts', 'bind: willBind ? 1 : 0,', 'bind: cookiesOn ? 1 : 0,'), ['m.', 'n.']],
   ['the held-by-another-account answer is dropped (N-4)', inFile('lib/deviceTrust.ts', '...(found?.held_by_other ? { heldByOther: true } : {})', ''), ['o.']],
+  ['an approved but unbound row skips the fresh id although a colleague has bound the id (P-1 HB)', inFile('lib/deviceTrust.ts', '(existing.cookie_bound_at || found?.held_bound_by_other) && !meta.cookieVerified', 'existing.cookie_bound_at && !meta.cookieVerified'), ['p.']],
 ]
 
 async function main() {

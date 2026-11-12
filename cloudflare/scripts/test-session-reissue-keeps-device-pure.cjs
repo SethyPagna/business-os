@@ -124,7 +124,7 @@ const devicesRoute = load('routes/devices.ts', {
   '../lib/audit': { audit: noop },
   '../lib/permissions': { isAdminControlUser },
   '../durable-objects/broadcastHub': { broadcast: noop },
-  '../lib/deviceTrust': { MAX_APPROVED_DEVICES_PER_USER: 5, countApprovedDevices: async () => 0 },
+  '../lib/deviceTrust': { maxApprovedDevicesPerUser: () => 5, countApprovedDevices: async () => 0 },
   '../index': {},
 }).default
 
