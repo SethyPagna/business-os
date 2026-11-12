@@ -103,7 +103,7 @@ export async function checkDeviceTrust(
   //  - the id is the one of a marked till and arrived without its cookie: the till's own id is never given a pending row, so no stale request can be declined or approved on it.
   const retiredShopId = Boolean(found?.shop_retired) && !markedShopId
   const markedWithoutCookie = Boolean(markedShopId) && !meta.cookieVerified
-  if (cookiesOn && (retiredShopId || markedWithoutCookie || (existing?.status === 'approved' && existing.cookie_bound_at && !meta.cookieVerified))) {
+  if (cookiesOn && (retiredShopId || markedWithoutCookie || (existing?.status === 'approved' && (existing.cookie_bound_at || found?.held_bound_by_other) && !meta.cookieVerified))) {
     // A claim is only a claim when the id came without its cookie: the genuine device, cookie in hand, on a retired id is not claiming anything (L-2).
     const claimed = existing?.status === 'approved' && !meta.cookieVerified ? existing : null
     const fresh = crypto.randomUUID()
