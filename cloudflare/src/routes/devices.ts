@@ -158,6 +158,15 @@ app.get('/', async (c) => {
   return c.json({ devices: rows || [], limit: MAX_APPROVED_DEVICES_PER_USER })
 })
 
+// A request on the id of a till that was marked and then unmarked is dead: the id is retired and the browser
+// continues under a fresh one, so approving it would be an approval nobody can use (review M-1).
+async function isRetiredShopId(db: ReturnType<typeof getDb>, deviceId: string): Promise<boolean> {
+  const row = await db.prepare('SELECT 1 AS n FROM shop_devices WHERE device_id = @device_id AND unmarked_at IS NOT NULL LIMIT 1').get<{ n: number }>({ device_id: deviceId })
+  return Boolean(row)
+}
+
+const RETIRED_SHOP_ID_ANSWER = { error: 'This request is on the id of a shop device that was unmarked, so an approval would not work. Ask the employee to sign in again.', code: 'shop_device_retired' } as const
+
 app.post('/:id/approve', async (c) => {
   const id = c.req.param('id')
   const admin = c.get('user')
@@ -178,6 +187,8 @@ app.post('/:id/approve', async (c) => {
   // Repeating an approval after a successful decision is harmless and must
   // stay idempotent even if the account is now at the approved-device cap.
   if (device.status === 'approved') return c.json({ success: true, idempotent: true })
+
+  if (await isRetiredShopId(db, device.device_id)) return c.json(RETIRED_SHOP_ID_ANSWER, 409)
 
   // At most MAX_APPROVED_DEVICES_PER_USER approved devices per account (owner
   // rule, 5 since 12 Nov 2026). Excluding this row keeps re-approving an already-approved
@@ -275,6 +286,7 @@ app.post('/:id/approve-replacing', async (c) => {
   if (!old || old.user_id !== device.user_id || old.status !== 'approved') {
     return c.json({ error: 'Choose an approved device of the same account to replace.', code: 'device_replace_invalid' }, 400)
   }
+  if (await isRetiredShopId(db, device.device_id)) return c.json(RETIRED_SHOP_ID_ANSWER, 409)
 
   const params = {
     id: device.id,
@@ -541,8 +553,20 @@ app.post('/:id/mark-shop', async (c) => {
   // and approved rows would hold a slot for nothing. The same batch removes them.
   const waiting = await db.prepare(`SELECT id, user_id, status FROM trusted_devices WHERE device_id = @device_id AND status IN ('pending', 'approved') LIMIT 200`)
     .all<{ id: number; user_id: number; status: string }>({ device_id: device.device_id })
+  // The approved rows the marking deletes were the only thing those employees' live sessions on this browser stood on. Tag the sessions with the
+  // new marking in the same batch, so unmarking revokes them like any other shop sign-in (otherwise they outlive the unmark with no approval behind
+  // them and no device row an administrator could revoke). Only the accounts whose approved row is deleted: an administrator's session is never touched.
+  const approvedUserIds = [...new Set((waiting || []).filter((row) => row.status === 'approved').map((row) => row.user_id))]
+  const sessionParams: Record<string, string | number> = { device_id: device.device_id }
+  approvedUserIds.forEach((userId, index) => { sessionParams[`u${index}`] = userId })
+  // A pending request whose id another account already holds an approved device for is a browser that learned that id (it is not secret): marking it
+  // would delete the other account's approval and open that device to every employee. Refuse; the administrator declines it, or marks the approved device.
+  if (device.status === 'pending' && (waiting || []).some((row) => row.status === 'approved' && row.user_id !== device.user_id)) {
+    return c.json({ error: 'Another account already has an approved device with this id, so this request may be a copy of it. Decline the request, or mark the approved device instead.', code: 'shop_device_held' }, 409)
+  }
   let inserted: { changes?: number } | undefined
   let closed = 0
+  let tagged = 0
   try {
     const results = await db.batch([
       {
@@ -555,9 +579,17 @@ app.post('/:id/mark-shop', async (c) => {
         sql: `DELETE FROM trusted_devices WHERE device_id = @device_id AND status IN ('pending', 'approved') AND changes() = 1`,
         params: { device_id: device.device_id },
       },
+      ...(approvedUserIds.length ? [{
+        sql: `UPDATE user_sessions SET shop_device_id = (SELECT id FROM shop_devices WHERE device_id = @device_id AND unmarked_at IS NULL)
+          WHERE device_id = @device_id AND revoked_at IS NULL AND shop_device_id IS NULL
+            AND user_id IN (${approvedUserIds.map((_, index) => `@u${index}`).join(', ')})
+            AND EXISTS (SELECT 1 FROM shop_devices WHERE device_id = @device_id AND unmarked_at IS NULL)`,
+        params: sessionParams,
+      }] : []),
     ])
     inserted = { changes: Number(results[0]?.meta?.changes || 0) }
     closed = Number(results[1]?.meta?.changes || 0)
+    tagged = approvedUserIds.length ? Number(results[2]?.meta?.changes || 0) : 0
   } catch (error) {
     if (error instanceof Error && /UNIQUE/i.test(error.message)) {
       return c.json({ error: 'This device is already marked as a shop device.', code: 'shop_device_exists' }, 409)
@@ -570,7 +602,7 @@ app.post('/:id/mark-shop', async (c) => {
   })
   if (closed > 0) {
     await audit(c.env, admin.id, admin.username, 'shop_device_rows_removed', 'user', admin.id, {
-      deviceId: device.device_id, label, closedRows: (waiting || []).map((row) => ({ rowId: row.id, userId: row.user_id, status: row.status })), closedCount: closed,
+      deviceId: device.device_id, label, closedRows: (waiting || []).map((row) => ({ rowId: row.id, userId: row.user_id, status: row.status })), closedCount: closed, taggedSessions: tagged,
     })
   }
   return c.json({ success: true, removedRows: closed })

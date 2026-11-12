@@ -62,7 +62,7 @@ export async function checkDeviceTrust(
   userId: number,
   deviceId: string | null | undefined,
   meta: { deviceName?: string | null; userAgent?: string | null; ip?: string | null; country?: string | null; cookieVerified?: boolean },
-): Promise<{ status: 'approved'; shopDeviceId?: number } | { status: 'pending'; created: boolean; replacedDeviceId?: string; claimedRowId?: number } | { status: 'rejected' | 'missing_device_id' }> {
+): Promise<{ status: 'approved'; shopDeviceId?: number } | { status: 'pending'; created: boolean; replacedDeviceId?: string; claimedRowId?: number; heldByOther?: boolean } | { status: 'rejected' | 'missing_device_id' }> {
   if (!isValidDeviceId(deviceId)) {
     // A client that doesn't send a usable device id (missing, over-long or
     // outside [A-Za-z0-9_-]; e.g. an old cached
@@ -77,34 +77,41 @@ export async function checkDeviceTrust(
   // One statement answers both questions: this account's own row for the
   // device, and whether an administrator has marked the device as a shop
   // device. The base row keeps the shop answer when the account has no row.
-  // The shop join only matches when the id came from the verified device
-  // cookie, so a client-chosen body id can never claim a shop device.
+  // The marking is read whether or not the cookie verified, and only USED when it did:
+  // a client-chosen body id can never claim a shop device, and the till's own id arriving
+  // without its cookie must not create a pending row on it (review M-1).
   const found = await db.prepare(`
     SELECT td.*, s.id AS shop_device_row_id, s.marked_at AS shop_marked_at,
-      s.last_seen_at AS shop_last_seen_at, s.last_ip AS shop_last_ip, s.last_country AS shop_last_country,
-      (SELECT 1 FROM shop_devices r WHERE r.device_id = @device_id AND r.unmarked_at IS NOT NULL LIMIT 1) AS shop_retired
+      s.label AS shop_label, s.last_seen_at AS shop_last_seen_at, s.last_ip AS shop_last_ip, s.last_country AS shop_last_country,
+      (SELECT 1 FROM shop_devices r WHERE r.device_id = @device_id AND r.unmarked_at IS NOT NULL LIMIT 1) AS shop_retired,
+      (SELECT 1 FROM trusted_devices o WHERE o.device_id = @device_id AND o.user_id != @user_id LIMIT 1) AS held_by_other
     FROM (SELECT 1 AS one) base
     LEFT JOIN trusted_devices td ON td.user_id = @user_id AND td.device_id = @device_id
-    LEFT JOIN shop_devices s ON @shop_ok = 1 AND s.device_id = @device_id AND s.unmarked_at IS NULL
-  `).get<(Partial<TrustedDeviceRow> & { shop_device_row_id: number | null; shop_marked_at: string | null; shop_last_seen_at: string | null; shop_last_ip: string | null; shop_last_country: string | null; shop_retired: number | null }) | undefined>({ user_id: userId, device_id: deviceId, shop_ok: meta.cookieVerified ? 1 : 0 })
+    LEFT JOIN shop_devices s ON s.device_id = @device_id AND s.unmarked_at IS NULL
+  `).get<(Partial<TrustedDeviceRow> & { shop_device_row_id: number | null; shop_marked_at: string | null; shop_label: string | null; shop_last_seen_at: string | null; shop_last_ip: string | null; shop_last_country: string | null; shop_retired: number | null; held_by_other: number | null }) | undefined>({ user_id: userId, device_id: deviceId })
   const existing = found && found.id != null ? (found as TrustedDeviceRow) : null
-  const shopDeviceId = found?.shop_device_row_id ?? null
+  const markedShopId = found?.shop_device_row_id ?? null
+  const shopDeviceId = meta.cookieVerified ? markedShopId : null
   // A device cookie is only ever issued when the signing key exists, so only then is "has had a cookie" a fact about the row.
   const cookiesOn = Boolean(env.APP_ENCRYPTION_KEY)
 
-  // Two cases where the presented id is no longer enough and the browser becomes a new one with a fresh pending id (the caller pins it):
+  // Three cases where the presented id is no longer enough and the browser becomes a new one with a fresh pending id (the caller pins it):
   //  - this browser's cookie was issued for the approved row, but the id arrived without it (typed into a request body, or the cookie was cleared);
   //  - the id belonged to a shop device that an administrator has since unmarked. The id is retired: whoever still holds a copy of its cookie
   //    gets nothing from it, and the till itself continues under its new id, which the administrator marks from its pending request.
-  const retiredShopId = Boolean(found?.shop_retired) && !shopDeviceId
-  if (cookiesOn && (retiredShopId || (existing?.status === 'approved' && existing.cookie_bound_at && !meta.cookieVerified))) {
+  //  - the id is the one of a marked till and arrived without its cookie: the till's own id is never given a pending row, so no stale request can be declined or approved on it.
+  const retiredShopId = Boolean(found?.shop_retired) && !markedShopId
+  const markedWithoutCookie = Boolean(markedShopId) && !meta.cookieVerified
+  if (cookiesOn && (retiredShopId || markedWithoutCookie || (existing?.status === 'approved' && existing.cookie_bound_at && !meta.cookieVerified))) {
+    // A claim is only a claim when the id came without its cookie: the genuine device, cookie in hand, on a retired id is not claiming anything (L-2).
+    const claimed = existing?.status === 'approved' && !meta.cookieVerified ? existing : null
     const fresh = crypto.randomUUID()
     const made = await db.prepare(`
       INSERT INTO trusted_devices (user_id, device_id, device_name, user_agent, first_ip, last_ip, first_country, last_country, status, decided_at, cookie_bound_at, claimed_approval_ref)
       VALUES (@user_id, @device_id, @device_name, @user_agent, @ip, @ip, @country, @country, 'pending', NULL, CURRENT_TIMESTAMP, @claimed)
-    `).run({ claimed: existing?.status === 'approved' ? existing.id : null, user_id: userId, device_id: fresh, device_name: meta.deviceName || null, user_agent: meta.userAgent || null, ip: meta.ip || null, country: meta.country || null })
+    `).run({ claimed: claimed ? claimed.id : null, user_id: userId, device_id: fresh, device_name: meta.deviceName || null, user_agent: meta.userAgent || null, ip: meta.ip || null, country: meta.country || null })
     if (Number(made?.changes || 0) > 0) await broadcast(env, 'notifications', { type: 'device_pending' })
-    return { status: 'pending', created: true, replacedDeviceId: fresh, ...(existing?.status === 'approved' ? { claimedRowId: existing.id } : {}) }
+    return { status: 'pending', created: true, replacedDeviceId: fresh, ...(claimed ? { claimedRowId: claimed.id } : {}) }
   }
 
   // Only a refusal an administrator made after marking the device outranks the
@@ -145,7 +152,7 @@ export async function checkDeviceTrust(
     // Only a row this call created raises the alert; a retry or a lost race does not.
     const created = Number(inserted?.changes || 0) > 0
     if (created) await broadcast(env, 'notifications', { type: 'device_pending' })
-    return { status: initialStatus, created }
+    return { status: initialStatus, created, ...(found?.held_by_other ? { heldByOther: true } : {}) }
   }
 
   if (existing.status === 'approved') {
@@ -195,14 +202,15 @@ async function recordShopSignIn(
   userId: number,
   deviceId: string,
   shopDeviceId: number,
-  shop: { shop_last_seen_at: string | null; shop_last_ip: string | null; shop_last_country: string | null },
+  shop: { shop_label: string | null; shop_last_seen_at: string | null; shop_last_ip: string | null; shop_last_country: string | null },
   meta: { ip?: string | null; country?: string | null },
 ): Promise<void> {
   const country = meta.country || null
   const priorCountry = shop.shop_last_country || null
   if (country && priorCountry && country !== priorCountry) {
     await audit(env, userId, null, 'device_login_new_country', 'user', userId, {
-      deviceId, shopDeviceId, shopDevice: true, previousCountry: priorCountry, newCountry: country, ip: meta.ip || null,
+      // deviceName is what the bell shows (routes/notifications.ts): the till's label, not 'Device for user #12'.
+      deviceId, deviceName: shop.shop_label || null, shopDeviceId, shopDevice: true, previousCountry: priorCountry, newCountry: country, ip: meta.ip || null,
     })
   }
   const ip = meta.ip || shop.shop_last_ip || null

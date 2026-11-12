@@ -11,6 +11,7 @@ const { createHash } = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
+const { Hono } = require('hono')
 const { createAuthHarness } = require('./harness/load_auth_route.cjs')
 
 const SRC = path.join(__dirname, '..', 'src')
@@ -34,6 +35,7 @@ function loadTs(rel, overrides, mutate = (text) => text, cache = new Map()) {
 const UA = 'Mozilla/5.0 (iPhone) Safari'
 const COOKIE = '__Host-bos_dev'
 const VICTIM = 'victim-approved-device-01'
+const OTP_SECRET = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ'
 
 function setup(mutate = (t) => t, envPatch = {}) {
   let deviceTrust = null
@@ -55,6 +57,7 @@ function setup(mutate = (t) => t, envPatch = {}) {
   h.raw.prepare(`INSERT INTO roles (id, code, name, permissions, is_system) VALUES (1, 'admin', 'Administrator', '{"all":true}', 1), (2, 'cashier', 'Cashier', '{"pos":true}', 0)`).run({})
   h.addUser({ id: 10, username: 'sokha', name: 'Sokha', roleCode: 'cashier' })
   h.addUser({ id: 11, username: 'owner', name: 'Owner', roleCode: 'admin' })
+  h.addUser({ id: 12, username: 'vanna', name: 'Vanna', roleCode: 'cashier', otpSecret: OTP_SECRET })
   return { h, cookieLib }
 }
 
@@ -65,10 +68,18 @@ async function signIn(w, { deviceId, cookieFor } = {}) {
   if (cookieFor) headers.Cookie = `${COOKIE}=${await w.cookieLib.signDeviceCookieValue(w.h.env, cookieFor)}`
   return w.h.request('/login', 'POST', { username: 'sokha', password: 'correct-horse', deviceId, deviceName: 'Phone' }, { ip: '203.0.113.5', headers })
 }
+// Every device Set-Cookie line of a response, as the raw cookie value a browser (or a person reading the headers) could replay.
+const cookieValues = (res) => res.headers.getSetCookie().filter((l) => l.startsWith(`${COOKIE}=`)).map((l) => l.split(';')[0].slice(COOKIE.length + 1))
+const idOfCookie = (value) => decodeURIComponent(value).split('.')[0]
+// The device cookie id of a response, or null. A response carries at most one (review H1: the first of two used to be a valid
+// cookie for the refused id and a "last line wins" reader hid it), so more than one is a failure here rather than a quiet pop().
 const lastCookieId = (res) => {
-  const line = res.headers.getSetCookie().filter((l) => l.startsWith(`${COOKIE}=`)).pop()
-  return line ? decodeURIComponent(line.split(';')[0].slice(COOKIE.length + 1)).split('.')[0] : null
+  const values = cookieValues(res)
+  assert.ok(values.length <= 1, `a response carries at most one device cookie, got ${values.map(idOfCookie)}`)
+  return values.length ? idOfCookie(values[0]) : null
 }
+// Replay a raw cookie value (what a person copying the header gets) against /login with the given body id.
+const replay = (w, value, deviceId) => w.h.request('/login', 'POST', { username: 'sokha', password: 'correct-horse', deviceId, deviceName: 'Phone' }, { ip: '203.0.113.5', headers: { 'User-Agent': UA, Cookie: `${COOKIE}=${value}` } })
 
 const SESSION = 'live-session-token-0001'
 const addSession = (h, userId, deviceId, { revoked = false } = {}) => h.raw.prepare(`INSERT INTO user_sessions (user_id, token_hash, device_id, expires_at, revoked_at)
@@ -205,7 +216,85 @@ async function suite(mutate, label) {
     addSession(w3.h, 11, VICTIM)
     const admin = await me(w3, { actorId: 11 })
     assert.equal(admin.statements.length, 0, 'administrators have no device gate and cost nothing')
-    assert.equal(rows(w3.h)[0].cookie_bound_at, null, "another account's row is never bound")
+    assert.equal(rows(w3.h)[0].cookie_bound_at, null, "an administrator's session never binds a row")
+    // L-5: the discriminating case is a NON-admin second account. Her session names the id, the row belongs to Sokha: the UPDATE runs (she has no cookie) and must match nothing.
+    const w4 = setup(mutate)
+    approve(w4.h, VICTIM)
+    addSession(w4.h, 12, VICTIM)
+    const other = await me(w4, { actorId: 12 })
+    assert.equal(other.statements.length, 1, 'a non-admin without the cookie reaches the UPDATE')
+    assert.equal(rows(w4.h)[0].cookie_bound_at, null, "another account's row is never bound by her session")
+    assert.equal(lastCookieId(other.res), null, 'and she is not given a cookie for it')
+  })
+
+  await check('j. H1 (/login): a refused body-only sign-in emits no cookie for the refused id: every Set-Cookie is the one fresh id, and replaying each of them signs nobody in', async () => {
+    const w = setup(mutate)
+    approve(w.h, VICTIM)
+    await signIn(w, { deviceId: VICTIM }) // binds the row
+    const sessionsBefore = w.h.raw.prepare('SELECT COUNT(*) AS n FROM user_sessions').get({}).n
+    const attack = await signIn(w, { deviceId: VICTIM })
+    assert.equal(attack.body.deviceApprovalRequired, true)
+    const values = cookieValues(attack)
+    assert.deepEqual(values.map(idOfCookie), [attack.body.deviceId], 'exactly one device cookie, for the fresh id only')
+    assert.ok(!values.some((v) => idOfCookie(v) === VICTIM), 'no cookie names the refused id')
+    for (const value of values) for (const body of [VICTIM, attack.body.deviceId, undefined]) {
+      const again = await replay(w, value, body)
+      assert.equal(again.body.success, undefined, 'replaying an emitted cookie does not sign in')
+      assert.equal(again.body.deviceApprovalRequired, true)
+    }
+    assert.equal(w.h.raw.prepare('SELECT COUNT(*) AS n FROM user_sessions').get({}).n, sessionsBefore, 'no session was issued to the attacker')
+  })
+
+  await check('k. H1 (/otp/verify): the same on the authenticator step, with a challenge from a genuine first step', async () => {
+    const w = setup(mutate)
+    w.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status, decided_at) VALUES (12, @d, 'approved', CURRENT_TIMESTAMP)").run({ d: VICTIM })
+    const login = (cookieFor) => w.h.request('/login', 'POST', { username: 'vanna', password: 'correct-horse', deviceId: VICTIM, deviceName: 'Phone' }, { ip: '203.0.113.5', headers: { 'User-Agent': UA, ...(cookieFor ? { Cookie: `${COOKIE}=${cookieFor}` } : {}) } })
+    const genuine = await login(null)
+    assert.equal(genuine.body.otpRequired, true, 'the genuine first step passes the gate and binds the row')
+    const own = cookieValues(genuine)[0]
+    assert.equal(idOfCookie(own), VICTIM)
+    const challenge = (await login(own)).body.otpChallenge
+    assert.ok(challenge)
+    const verify = async (value) => w.h.request('/otp/verify', 'POST', { userId: 12, token: await w.h.codeAt(OTP_SECRET), otpChallenge: challenge, deviceId: VICTIM, deviceName: 'Phone' }, { ip: '203.0.113.5', headers: { 'User-Agent': UA, ...(value ? { Cookie: `${COOKIE}=${value}` } : {}) } })
+    const attack = await verify(null)
+    assert.equal(attack.body.deviceApprovalRequired, true, JSON.stringify(attack.body))
+    const values = cookieValues(attack)
+    assert.deepEqual(values.map(idOfCookie), [attack.body.deviceId])
+    assert.notEqual(attack.body.deviceId, VICTIM)
+    for (const value of values) {
+      const second = await login(value)
+      assert.equal(second.body.otpRequired, undefined, 'the emitted cookie does not pass the first step either')
+      assert.equal(second.body.deviceApprovalRequired, true)
+    }
+  })
+
+  await check('l. H1 (every path): the cookie helper sets a cookie only for an accepted or freshly created id; /oauth/callback calls it after the gate, like /login and /otp/verify', async () => {
+    const w = setup(mutate)
+    const answer = async (deviceId, trust, { verified = false } = {}) => {
+      const app = new Hono()
+      app.get('/', async (c) => {
+        await w.cookieLib.resolveDeviceId(c, 10, deviceId)
+        const id = await w.cookieLib.pinDeviceAfterGate(c, deviceId, trust)
+        return c.json({ id })
+      })
+      const headers = verified ? { Cookie: `${COOKIE}=${await w.cookieLib.signDeviceCookieValue(w.h.env, deviceId)}` } : {}
+      const res = await app.request('/', { headers }, w.h.env)
+      return { id: (await res.json()).id, ids: cookieValues(res).map(idOfCookie) }
+    }
+    assert.deepEqual((await answer('refused-id-0001', { status: 'rejected' })).ids, [], 'rejected: nothing')
+    assert.deepEqual((await answer('refused-id-0001', { status: 'rejected' }, { verified: true })).ids, [], 'rejected with its own cookie: nothing')
+    assert.deepEqual((await answer('refused-id-0001', { status: 'missing_device_id' })).ids, [])
+    assert.deepEqual((await answer('refused-id-0001', { status: 'pending', created: false })).ids, [], 'an existing pending row named only by a body id')
+    assert.deepEqual((await answer('refused-id-0001', { status: 'pending', created: true, heldByOther: true })).ids, [], 'an id another account holds, sent without its cookie')
+    assert.deepEqual((await answer('new-pending-0001', { status: 'pending', created: true })).ids, ['new-pending-0001'], 'a pending row this request created')
+    assert.deepEqual((await answer('own-pending-0001', { status: 'pending', created: false }, { verified: true })).ids, ['own-pending-0001'], 'a verified cookie is renewed')
+    assert.deepEqual((await answer('ok-device-0001', { status: 'approved' })).ids, ['ok-device-0001'])
+    const fresh = await answer('victim-id-0001', { status: 'pending', created: true, replacedDeviceId: 'fresh-id-00001' })
+    assert.deepEqual([fresh.id, fresh.ids], ['fresh-id-00001', ['fresh-id-00001']], 'the fresh id, never the refused one')
+    const auth = fs.readFileSync(path.join(SRC, 'routes/auth.ts'), 'utf8').replace(/\r\n/g, '\n')
+    const callback = auth.slice(auth.indexOf("app.get('/oauth/callback'"), auth.indexOf("app.post('/oauth/complete'"))
+    assert.ok(callback.indexOf('checkDeviceTrust(') < callback.indexOf('pinDeviceAfterGate('), '/oauth/callback pins after the gate (the Google redirect cannot be driven through the harness, so this path is pinned by the shared helper above and by this order check)')
+    assert.ok(!callback.includes('pinDeviceCookie('))
   })
 
   await check('i. the session cookie name used by the helper is the one lib/auth.ts sets', () => {
@@ -221,8 +310,11 @@ async function suite(mutate, label) {
 const inFile = (file, from, to) => (text, rel) => (rel === file ? text.replace(from, to) : text)
 const mutants = [
   ['bound rows no longer refuse a cookie-less id', inFile('lib/deviceTrust.ts', 'existing.cookie_bound_at && !meta.cookieVerified', 'false'), ['b.', 'e.']],
+  ['an id taken from the body is pinned before the gate again (H1)', inFile('lib/deviceCookie.ts', 'if (chosen && chosen === cookieId) cookieVerifiedIds.set(c, chosen)', 'if (chosen) await pinDeviceCookie(c, chosen)\n  if (chosen && chosen === cookieId) cookieVerifiedIds.set(c, chosen)'), ['j.', 'k.']],
+  ['the post-gate pin accepts every answer', inFile('lib/deviceCookie.ts', "const accept = trust.status === 'approved'", "const accept = true || trust.status === 'approved'"), ['l.']],
   ['the body id wins over the cookie again', inFile('lib/deviceCookie.ts', 'const chosen = cookieId || body', 'const chosen = body || cookieId'), ['c.']],
   ['the session never binds an unbound row', inFile('lib/deviceCookie.ts', 'const token = getCookie(c, SESSION_COOKIE_NAME)', 'const token = null as string | null'), ['g.', 'h.']],
+  ['a session binds the row of another account (user_id predicate dropped)', inFile('lib/deviceCookie.ts', "WHERE user_id = @user_id AND status = 'approved' AND cookie_bound_at IS NULL", "WHERE status = 'approved' AND cookie_bound_at IS NULL"), ['h.']],
   ['a bound row is re-issued its cookie by a session', inFile('lib/deviceCookie.ts', ' AND cookie_bound_at IS NULL', ''), ['h.']],
   ['binding never happens', inFile('lib/deviceTrust.ts', "cookie_bound_at = COALESCE(cookie_bound_at, CASE WHEN @bind = 1 THEN CURRENT_TIMESTAMP END)", 'cookie_bound_at = cookie_bound_at'), ['a.']],
 ]

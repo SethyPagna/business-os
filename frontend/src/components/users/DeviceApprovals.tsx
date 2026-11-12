@@ -82,6 +82,9 @@ function deviceActionMessage(t: TranslateFn, err: unknown): string {
   if (code === 'shop_device_retired') {
     return tr(t, 'shop_device_retired', 'This device was a shop device before. Sign in on it again to give it a new identity, then mark its new request.')
   }
+  if (code === 'shop_device_held') {
+    return tr(t, 'shop_device_held', 'Another account already has this device approved, so this request may be a copy. Decline it, or mark the approved device instead.')
+  }
   if (code === 'shop_label_invalid') {
     return tr(t, 'shop_label_invalid', 'Give the shop device a name of 1 to 60 characters.')
   }
@@ -325,7 +328,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
       </div>
       {device.claimed_approval_ref ? (
         <div className="mt-1 detail-scroll-text rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
-          {tr(t, 'device_claimed_id', 'This browser claimed the id of an approved device without its cookie')}: {device.claimed_device_name || `#${device.claimed_approval_ref}`}
+          {tr(t, 'device_claimed_id', 'This request says it is an approved device, but could not prove it')}: {device.claimed_device_name || `#${device.claimed_approval_ref}`}
         </div>
       ) : null}
     </div>
@@ -383,16 +386,18 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                     <ShieldCheck className="h-3.5 w-3.5" />
                     {tr(t, 'approve', 'Approve')}
                   </button>
-                  <button
-                    type="button"
-                    disabled={busyId === device.id}
-                    className="btn-secondary px-2 py-1.5 text-xs"
-                    title={tr(t, 'shop_device_mark', 'Mark as shop device')}
-                    aria-label={tr(t, 'shop_device_mark', 'Mark as shop device')}
-                    onClick={() => setMarkingShop({ device, label: '' })}
-                  >
-                    <Store className="h-3.5 w-3.5" />
-                  </button>
+                  {device.claimed_approval_ref ? null : (
+                    <button
+                      type="button"
+                      disabled={busyId === device.id}
+                      className="btn-secondary px-2 py-1.5 text-xs"
+                      title={tr(t, 'shop_device_mark', 'Mark as shop device')}
+                      aria-label={tr(t, 'shop_device_mark', 'Mark as shop device')}
+                      onClick={() => setMarkingShop({ device, label: '' })}
+                    >
+                      <Store className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                   <button
                     type="button"
                     disabled={busyId === device.id}

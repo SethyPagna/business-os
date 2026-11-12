@@ -82,18 +82,41 @@ export async function pinDeviceCookie<E extends { Bindings: Env }>(c: Context<E>
 
 // The id this sign-in is for: the verified cookie's id when there is one, else the
 // body's (a browser that has no cookie yet). The cookie always wins: an id typed
-// into a request body cannot displace it. Pins the cookie to the result on every call
-// (a rolling renewal; no D1 call), so a browser that only had the localStorage
-// id gets the cookie at its first sign-in. Never answers 'approved' by itself: the caller still runs
-// checkDeviceTrust on the returned id.
-export async function resolveAndPinDevice<E extends { Bindings: Env }>(c: Context<E>, _userId: number, bodyId: unknown): Promise<string | null> {
+// into a request body cannot displace it. Sets NO cookie: an id taken from a request
+// body is client-chosen and may be one the gate is about to refuse, and a signed cookie
+// for it would be the proof the gate asks for (review H1, 13 Nov 2026). The caller runs
+// checkDeviceTrust on the returned id and then pinDeviceAfterGate on the answer.
+export async function resolveDeviceId<E extends { Bindings: Env }>(c: Context<E>, _userId: number, bodyId: unknown): Promise<string | null> {
   const cookieId = await verifyDeviceCookieValue(c.env, getCookie(c, DEVICE_COOKIE_NAME))
   cookieVerifiedIds.delete(c)
   const body = isValidDeviceId(bodyId) ? bodyId : null
   const chosen = cookieId || body
-  if (chosen) await pinDeviceCookie(c, chosen)
   if (chosen && chosen === cookieId) cookieVerifiedIds.set(c, chosen)
   return chosen
+}
+
+// The only place a sign-in sets the device cookie, and only after the gate answered, so a
+// refused id never gets one and a response carries at most one device cookie. Returns the id
+// the session and the answer must use. The cookie goes to:
+//  - the fresh id a pending answer issued (the browser adopts it);
+//  - the accepted id of an approved sign-in (a rolling renewal; a pre-cookie row binds here);
+//  - a pending id this very request created, or one whose cookie was already verified.
+// Never to a rejected id, never to an id held by another account that arrived without its
+// cookie, and never to an existing pending row sent only in a body.
+export async function pinDeviceAfterGate<E extends { Bindings: Env }, T extends string | null | undefined>(
+  c: Context<E>,
+  deviceId: T,
+  trust: { status: string; created?: boolean; replacedDeviceId?: string; heldByOther?: boolean },
+): Promise<T | string> {
+  if (trust.status === 'pending' && trust.replacedDeviceId) {
+    await pinDeviceCookie(c, trust.replacedDeviceId)
+    return trust.replacedDeviceId
+  }
+  const verified = isCookieVerifiedDevice(c, deviceId)
+  const accept = trust.status === 'approved'
+    || (trust.status === 'pending' && (verified || (Boolean(trust.created) && !trust.heldByOther)))
+  if (accept && typeof deviceId === 'string') await pinDeviceCookie(c, deviceId)
+  return deviceId
 }
 
 // A device approved before the cookie existed, signed in on a long session, never passes
