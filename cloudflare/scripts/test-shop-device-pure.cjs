@@ -403,7 +403,7 @@ async function suite(mutate, label) {
     w.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status) VALUES (13, @d, 'pending'), (12, 'other-phone-0001', 'pending')").run({ d: TILL })
     approve(w.h, TILL, 10)
     const approvedRow = rowId(w.h, 10, TILL)
-    const marked = await w.call(`/${approvedRow}/mark-shop`, 'POST', { label: 'Till 1' })
+    const marked = await w.call(`/${approvedRow}/mark-shop`, 'POST', { label: 'Till 1', confirmShared: true })
     assert.equal(marked.status, 200)
     assert.equal(marked.body.removedRows, 3, 'both waiting requests and the approved row the marking replaces')
     const pending = (await w.call('/pending', 'GET')).body.devices || []
@@ -584,7 +584,7 @@ async function suite(mutate, label) {
     assert.deepEqual(w.h.raw.prepare('SELECT user_id, status FROM trusted_devices ORDER BY id').all({}).map((r) => ({ ...r })), before, 'her approved row and the request are untouched')
     assert.equal(w.h.raw.prepare('SELECT COUNT(*) AS n FROM shop_devices').get({}).n, 0)
     assert.equal(w.audits.length, 0, 'nothing audited as removed')
-    const fromApproved = await w.call(`/${rowId(w.h, 10, TILL)}/mark-shop`, 'POST', { label: 'Till 1' })
+    const fromApproved = await w.call(`/${rowId(w.h, 10, TILL)}/mark-shop`, 'POST', { label: 'Till 1', confirmShared: true })
     assert.equal(fromApproved.status, 200, 'marking from the approved device is the intended way, and it still closes the request')
     assert.equal(fromApproved.body.removedRows, 2)
   })
@@ -649,6 +649,21 @@ async function suite(mutate, label) {
     assert.equal(rOk.status, 200, JSON.stringify(rOk.body))
   })
 
+  await check('25. P-1 HC: marking a device that more than one account has needs confirmShared (409 device_shared_confirm, nothing removed); a device of one account does not', async () => {
+    const w = setup(mutate)
+    approve(w.h, 'shared-till-0001', 10)
+    approve(w.h, 'shared-till-0001', 12)
+    const count = () => w.h.raw.prepare('SELECT COUNT(*) AS n FROM trusted_devices').get({}).n
+    const refused = await w.call(`/${rowId(w.h, 10, 'shared-till-0001')}/mark-shop`, 'POST', { label: 'Till 1' })
+    assert.equal(refused.status, 409, JSON.stringify(refused.body))
+    assert.equal(refused.body.code, 'device_shared_confirm')
+    assert.equal(count(), 2, 'both approvals are still there')
+    assert.equal(w.h.raw.prepare('SELECT COUNT(*) AS n FROM shop_devices').get({}).n, 0)
+    const ok = await w.call(`/${rowId(w.h, 10, 'shared-till-0001')}/mark-shop`, 'POST', { label: 'Till 1', confirmShared: true })
+    assert.equal(ok.status, 200, JSON.stringify(ok.body))
+    assert.equal(ok.body.removedRows, 2)
+  })
+
   await check('17. the pending list tells the administrator which approved device a request claimed (L4); a plain new device claims nothing', async () => {
     const w = setup(mutate)
     approve(w.h, 'claimed-phone-0001', 12)
@@ -696,6 +711,7 @@ const mutants = [
   ['the pending list forgets who else is on the device (P-1)', inFile('routes/devices.ts', 'shared_with: parseSharedWith(shared_with_json)', 'shared_with: []'), ['23.']],
   ['approving a request on a shared device needs no confirmation (P-1 HA)', inFile('routes/devices.ts', 'if (facts.others > 0 && !confirmedShared(await', 'if (false && !confirmedShared(await'), ['24.']],
   ['approve-replacing on a shared device needs no confirmation (P-1 HA)', inFile('routes/devices.ts', 'if (facts.others > 0 && !confirmedShared(body))', 'if (false && !confirmedShared(body))'), ['24.']],
+  ['marking a device that several accounts have needs no confirmation (P-1 HC)', inFile('routes/devices.ts', '.size > 1 && !confirmedShared(body)', '.size > 1 && false'), ['25.']],
   ['the /session-duration route forgets the shop tag when it re-issues (L-5)', (text, rel) => (rel === 'routes/auth.ts' ? text.replace('shopDeviceId: source.shopDeviceId,', '') : text), ['10.']],
   ['marking from a pending request is refused', inFile('routes/devices.ts', "device.status !== 'approved' && device.status !== 'pending'", "device.status !== 'approved'"), ['13.']],
 ]

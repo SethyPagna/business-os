@@ -556,7 +556,7 @@ app.get('/shop', async (c) => {
 app.post('/:id/mark-shop', async (c) => {
   const id = Number(c.req.param('id'))
   const admin = c.get('user')
-  const body = await c.req.json<{ label?: unknown }>().catch(() => ({} as { label?: unknown }))
+  const body = await c.req.json<{ label?: unknown; confirmShared?: unknown }>().catch(() => ({} as { label?: unknown; confirmShared?: unknown }))
   const label = typeof body.label === 'string' ? body.label.trim().replace(/\s+/g, ' ') : ''
   if (!Number.isInteger(id) || id <= 0) return c.json({ error: 'Device request not found' }, 404)
   if (!label || label.length > SHOP_LABEL_MAX) {
@@ -590,6 +590,8 @@ app.post('/:id/mark-shop', async (c) => {
   if (device.status === 'pending' && (waiting || []).some((row) => row.status === 'approved' && row.user_id !== device.user_id)) {
     return c.json({ error: 'Another account already has an approved device with this id, so this request may be a copy of it. Decline the request, or mark the approved device instead.', code: 'shop_device_held' }, 409)
   }
+  // More than one account on this device: marking it opens it to every employee and removes all of those accounts' rows, so the administrator confirms it (review P-1 HC).
+  if (new Set((waiting || []).map((row) => row.user_id)).size > 1 && !confirmedShared(body)) return c.json(SHARED_CONFIRM_ANSWER, 409)
   let inserted: { changes?: number } | undefined
   let closed = 0
   let tagged = 0
