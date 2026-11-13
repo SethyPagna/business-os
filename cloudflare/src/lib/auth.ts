@@ -160,6 +160,7 @@ type SessionLookupRow = SessionUser & {
   session_last_seen_at: string | null
   session_device_name?: string | null
   session_device_tz?: string | null
+  session_device_adoptable?: number | null
 }
 
 type SessionExpiryMetadata = {
@@ -411,6 +412,20 @@ export async function getSessionUser<E extends { Bindings: Env } = { Bindings: E
   return lookup
 }
 
+// Whether this request can still use the adoption UPDATE in lib/deviceCookie.ts (adoptSessionDeviceCookie): only /me and /bootstrap call it, and only a
+// browser that sent no device cookie needs it. Everywhere else the lookup adds nothing. The answer rides the same statement as the session read, so a row
+// that can never be adopted (already bound, refused because another account bound the id, or no row) costs no UPDATE. Both names are pinned against
+// lib/deviceCookie.ts by test-device-cookie-bound-pure.
+const PROBE_DEVICE_COOKIE = '__Host-bos_dev'
+const ADOPTABLE_CONTEXT_KEY = 'sessionDeviceAdoptable'
+function wantsAdoptionProbe<E extends { Bindings: Env }>(c: Context<E>): boolean {
+  return /\/auth\/(me|bootstrap)$/.test(String(c.req?.path ?? '')) && !getCookie(c, PROBE_DEVICE_COOKIE)
+}
+const ADOPTABLE_COLUMN = `,
+           EXISTS (SELECT 1 FROM trusted_devices td
+                    WHERE td.user_id = s.user_id AND td.status = 'approved' AND td.cookie_bound_at IS NULL AND td.device_id = s.device_id
+                      AND NOT EXISTS (SELECT 1 FROM trusted_devices o WHERE o.device_id = td.device_id AND o.user_id <> td.user_id AND o.cookie_bound_at IS NOT NULL)) AS session_device_adoptable`
+
 // Set once per isolate if users.must_change_password does not exist yet.
 let mustChangeColumnMissing = false
 
@@ -419,13 +434,14 @@ async function lookupSessionUser<E extends { Bindings: Env } = { Bindings: Env }
   const nowIso = new Date().toISOString()
 
   const db = getDb(c.env)
+  const probeAdoption = wantsAdoptionProbe(c)
   const lookupSql = (mustChangeColumn: string) => `
     SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active,
            u.avatar_path, u.updated_at,
            r.code AS role_code, r.permissions AS role_permissions, r.name AS role_name,${mustChangeColumn}
            s.created_at AS session_created_at, s.expires_at AS session_expires_at,
            s.last_seen_at AS session_last_seen_at,
-           s.device_name AS session_device_name, s.device_tz AS session_device_tz
+           s.device_name AS session_device_name, s.device_tz AS session_device_tz${probeAdoption ? ADOPTABLE_COLUMN : ''}
     FROM user_sessions s
     JOIN users u ON u.id = s.user_id
     LEFT JOIN roles r ON r.id = u.role_id
@@ -460,8 +476,10 @@ async function lookupSessionUser<E extends { Bindings: Env } = { Bindings: Env }
     session_last_seen_at: lastSeenAt,
     session_device_name: sessionDeviceName,
     session_device_tz: sessionDeviceTz,
+    session_device_adoptable: sessionDeviceAdoptable,
     ...user
   } = row
+  if (probeAdoption) (c as unknown as { set(key: string, value: unknown): void }).set(ADOPTABLE_CONTEXT_KEY, Number(sessionDeviceAdoptable) === 1)
   sessionDevices.set(user, { deviceName: sessionDeviceName ?? null, deviceTz: sessionDeviceTz ?? null })
 
   const touchSeconds = getPlanLimits(c.env).sessionTouchIntervalSeconds
