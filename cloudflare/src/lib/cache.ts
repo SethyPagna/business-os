@@ -248,7 +248,7 @@ export async function bumpVersion(env: Env, namespace: string): Promise<void> {
 }
 
 // Missing KV versions share one D1 lookup and one set-based upsert. KV quota
-// admission covers all KV candidates once; per-key writes remain sequential.
+// admission covers all KV candidates once; the per-key reads and writes overlap.
 // Every cache version a reader keys on. Leaving maintenance (a finished or force-cleared restore, a
 // completed or aborted branch cutover) moves them all, so nothing cached from before or during it is
 // served afterwards (the storefront stores nothing while maintenance is held; see routes/portal.ts
@@ -285,8 +285,10 @@ async function advanceVersions(env: Env, namespaces: string[]): Promise<void> {
 
   const d1Upserts: Array<{ namespace: string; minimumVersion: number }> = []
 
+  // W3 Slice A round 2: this runs on the response path of the hottest writes, so the per-namespace KV round trips overlap (2 round trips for
+  // N namespaces, not 2N). Each namespace's steps are independent of the others; a fault stays inside its own namespace's step.
   const kvVersions = new Map<string, string | null>()
-  for (const namespace of unique) {
+  await Promise.all(unique.map(async (namespace) => {
     let currentKvRaw: string | null = null
     try {
       currentKvRaw = await env.CACHE.get(cacheVersionKey(namespace))
@@ -294,7 +296,7 @@ async function advanceVersions(env: Env, namespaces: string[]): Promise<void> {
       currentKvRaw = null
     }
     kvVersions.set(namespace, currentKvRaw)
-  }
+  }))
   const d1Unreadable = { value: false }
   const d1Versions = await readD1Versions(env, unique.filter(namespace => kvVersions.get(namespace) == null), false, d1Unreadable)
   const kvCandidates = unique.filter(namespace => kvVersions.get(namespace) != null || !d1Versions.has(namespace))
@@ -302,7 +304,7 @@ async function advanceVersions(env: Env, namespaces: string[]): Promise<void> {
   // Moving all candidates to D1 early preserves invalidation and quota safety.
   const budget = kvCandidates.length ? await consumeQuota(env, 'kv_write', kvCandidates.length) : null
 
-  for (const namespace of unique) {
+  const upserts = await Promise.all(unique.map(async (namespace): Promise<{ namespace: string; minimumVersion: number } | null> => {
     const versionKey = cacheVersionKey(namespace)
     const currentKvRaw = kvVersions.get(namespace) ?? null
 
@@ -311,10 +313,7 @@ async function advanceVersions(env: Env, namespaces: string[]): Promise<void> {
     // recreating the KV key when tomorrow's quota window becomes "ok" again.
     if (currentKvRaw == null) {
       const currentD1 = d1Versions.get(namespace)
-      if (currentD1 != null) {
-        d1Upserts.push({ namespace, minimumVersion: currentD1 + 1 })
-        continue
-      }
+      if (currentD1 != null) return { namespace, minimumVersion: currentD1 + 1 }
     }
 
     // KV holds no counter and D1 could not say whether the namespace already crossed over: starting at 1 could land on a value
@@ -324,25 +323,26 @@ async function advanceVersions(env: Env, namespaces: string[]): Promise<void> {
     const nextKv = currentKvRaw == null && d1Unreadable.value ? Math.max(Date.now(), currentKv + 1) : currentKv + 1
 
     if (budget?.zone === 'critical' || budget?.zone === 'exhausted') {
-      d1Upserts.push({ namespace, minimumVersion: nextKv })
-      // One delete at the handoff. From this point, the D1 row above makes
+      // One delete at the handoff. From this point, the D1 row below makes
       // the switch permanent even after the quota counter rolls into a new
       // day.
       await env.CACHE.delete(versionKey).catch(() => {})
-      continue
+      return { namespace, minimumVersion: nextKv }
     }
 
     try {
       await env.CACHE.put(versionKey, String(nextKv))
+      return null
     } catch {
       // A per-key write collision or other KV error must still invalidate
       // the cache. Seed D1 at least one step beyond the KV value we were
       // replacing, then remove KV so readers cannot observe two competing
       // counters.
-      d1Upserts.push({ namespace, minimumVersion: nextKv })
       await env.CACHE.delete(versionKey).catch(() => {})
+      return { namespace, minimumVersion: nextKv }
     }
-  }
+  }))
+  for (const upsert of upserts) if (upsert) d1Upserts.push(upsert)
 
   if (d1Upserts.length) await bumpVersionsInD1(env, d1Upserts)
   // Again after the writes: a reader that ran while they were in flight may have remembered the old value.
