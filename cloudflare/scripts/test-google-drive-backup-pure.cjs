@@ -40,6 +40,7 @@ const db = {
 
 let listedBackups = 0
 let newerBackupExists = false
+let sectionBackupNewest = false
 const stubs = {
   './db': { getDb: () => db },
   './secretCrypto': {
@@ -51,6 +52,7 @@ const stubs = {
     listCloudflareBackups: async () => {
       listedBackups += 1
       return [
+        ...(sectionBackupNewest ? [{ key: 'backups/cloudflare/section.json', name: 'section.json', finalized: true, scope: 'section' }] : []),
         ...(newerBackupExists ? [{ key: 'backups/cloudflare/newer.json', name: 'newer.json', finalized: true }] : []),
         { key: 'backups/cloudflare/pending.json', name: 'pending.json', finalized: false },
         { key: 'backups/cloudflare/final.json', name: 'final.json', finalized: true },
@@ -227,6 +229,15 @@ async function main() {
     settings.set('drive_sync_folder_id', 'root-folder')
     assert.strictEqual((await driveSyncHasNewBackup(env)).new, true, 'reconnecting to the same folder after a disconnect uploads again')
     settings.set('drive_sync_last_backup_key', '|root-folder|backups/cloudflare/final.json')
+    // R2-A: a section pre-backup newer than the full set is never mirrored, by either selector.
+    sectionBackupNewest = true
+    assert.deepStrictEqual(await driveSyncHasNewBackup(env), { new: false, reason: 'already-synced', backupKey: 'backups/cloudflare/final.json' }, 'a newer section set does not count as new')
+    const beforeUploads = uploadCount
+    const pushed = await pushBackupToDrive(env)
+    assert.strictEqual(pushed.success, true, pushed.error)
+    assert.strictEqual(uploadCount, beforeUploads, 'the upload path also skips the section set (it finds the full set already in Drive)')
+    assert.ok(!/find((item) => item.finalized)/.test(source), 'no selector picks a section set')
+    sectionBackupNewest = false
     newerBackupExists = true
     assert.deepStrictEqual(await driveSyncHasNewBackup(env), { new: true, backupKey: 'backups/cloudflare/newer.json' }, 'the next daily backup is picked up')
     newerBackupExists = false

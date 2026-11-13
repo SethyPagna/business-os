@@ -423,7 +423,7 @@ export async function pushBackupToDrive(env: Env): Promise<{ success: boolean; e
     // createCloudflareBackup() again, doubling backup work/storage and racing
     // R2's own retention. A copying/partial/failed set is never eligible.
     const backups = await listCloudflareBackups(env)
-    const backup = backups.find((item) => item.finalized)
+    const backup = newestMirrorableBackup(backups)
     if (!backup) throw new Error('No finalized R2 backup is available to mirror yet.')
     const fileName = backup.name || `backup-${Date.now()}.json`
     const existingFiles = await listDriveBackups(token, folderId)
@@ -528,6 +528,16 @@ export async function driveSyncScheduleDue(env: Env): Promise<{ due: boolean; re
 }
 
 /**
+ * The backup Drive mirrors: the newest FINALIZED one that is not a section backup. A reset's or repair's pre-backup (a few
+ * tables, no assets) is newer than the nightly full set after any late repair, and mirroring it would leave Drive's off-site
+ * copy partial and use up its 10 slots. Both selectors (the upload and the already-has-it check) share this one predicate,
+ * so the skip marker always names the backup that would be uploaded.
+ */
+export function newestMirrorableBackup<T extends { finalized: boolean; scope?: 'full' | 'section' | null }>(backups: readonly T[]): T | undefined {
+  return backups.find((item) => item.finalized && item.scope !== 'section')
+}
+
+/**
  * What `drive_sync_last_backup_key` holds: the backup Drive was given AND where (connected account + folder id). A different
  * account or folder never matches, so a new destination gets the newest backup at once instead of waiting for the next one.
  * (Disconnect also clears it.)
@@ -545,7 +555,7 @@ export function driveSyncMarker(accountEmail: unknown, folderId: unknown, backup
  * "Sync now" does not consult this and always goes through pushBackupToDrive.
  */
 export async function driveSyncHasNewBackup(env: Env): Promise<{ new: boolean; reason?: 'no-finalized-backup' | 'already-synced'; backupKey?: string }> {
-  const newest = (await listCloudflareBackups(env)).find((item) => item.finalized)
+  const newest = newestMirrorableBackup(await listCloudflareBackups(env))
   // Nothing to upload: record that the check happened (not a sync: the Backup screen's "last synced" stays the last upload).
   const checked = () => setSettings(env, [['drive_sync_last_checked_at', new Date().toISOString()]])
   if (!newest) { await checked(); return { new: false, reason: 'no-finalized-backup' } }
