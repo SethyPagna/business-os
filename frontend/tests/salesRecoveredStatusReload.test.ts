@@ -26,14 +26,19 @@ test('the coalescer never re-reads the list for the page\'s own echoes, so recov
   assert.deepEqual(plans, [{ rowsAndTotals: false, strip: true, userOptions: false }])
 })
 
+// Sales.tsx (a 3,000-line page) cannot be mounted in the test harness, so the recovered branch is checked as source: the
+// text is compared with every run of whitespace removed, so reformatting or re-wrapping a line cannot break it, only
+// removing the reload can.
+const squash = (text: string): string => text.replace(/s+/g, '')
+
 test('the recovered branch of reconcilePendingStatus reloads the list (loadSales(true)) before announcing', () => {
-  const source = read('../src/components/sales/Sales.tsx')
-  const start = source.indexOf("if (result.state === 'recovered') {")
+  const source = squash(read('../src/components/sales/Sales.tsx'))
+  const start = source.indexOf("if(result.state==='recovered'){")
   assert.ok(start > 0, 'the recovered branch exists')
   const block = source.slice(start, source.indexOf("emitOwnSalesSync('inventory')", start))
-  assert.match(block, /void loadSales\(true\)/)
-  assert.ok(block.indexOf('loadSales(true)') < block.indexOf("emitOwnSalesSync('sales')"))
-  assert.match(source, /\}, \[savePendingDirectStatus, loadSales, loadSalesStats, actionHistory\]\)/, 'the callback depends on loadSales')
+  assert.ok(block.includes('voidloadSales(true)'), 'the recovered branch calls loadSales(true)')
+  assert.ok(block.indexOf('loadSales(true)') < block.indexOf("emitOwnSalesSync('sales')"), 'the reload comes before the announcement')
+  assert.ok(source.includes('},[savePendingDirectStatus,loadSales,loadSalesStats,actionHistory])'), 'the callback depends on loadSales')
 })
 
 if (failed > 0) process.exitCode = 1
