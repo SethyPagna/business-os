@@ -123,7 +123,11 @@ export function pickHeavyStepIndex(steps: readonly RotationStep[], state: Rotati
   const exhausted = !!record && record.windowKey === tonight && (record.windowFailures || 0) + pendingKill >= maxAttemptsPerNight
   // The last backup visit only polled a set still copying: a poll is cheap but it used up the whole tick, and a copy that never
   // finishes would keep the image audit off for up to 24 h. Poll again only after copyPollGapMs; the tick in between is the audit's.
+  // The gap only spaces polls WITHIN one business night: a poll from the previous night (19:17) never delays tonight's first try (22:17).
+  // Known and accepted (R3-3): a late FIRST try at 16:17 or 19:17 polls its set, and the next look is 22:17, the next night, so that
+  // night gets one try. Waiving the gap there would make a stuck copy poll on consecutive ticks and starve the image audit for 12 h (R2-C).
   const justPolled = !!record?.pollAt && nowMs - Date.parse(record.pollAt) < copyPollGapMs
+    && scheduledBackupNightOf(Date.parse(record.pollAt), afterHourLocal) === tonight
   if (!exhausted && !justPolled && scheduledBackupGate(nowMs, lastMs, afterHourLocal).due) return backupIndex
   const other = steps.findIndex((step) => step.id !== 'backup')
   return other >= 0 ? other : backupIndex
