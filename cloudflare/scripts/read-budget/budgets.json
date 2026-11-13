@@ -540,7 +540,7 @@
     {"id":"shifts-policy","method":"GET","route":"/api/shifts/policy","params":"","status":200,"cold_calls_max":6,"rows_max":15,"rows_max_analyze":16,"rows_written_max":8,"class":"P","expect":"ok"},
     {"id":"shifts-current","method":"GET","route":"/api/shifts/current","params":"","status":200,"cold_calls_max":7,"rows_max":16,"rows_max_analyze":17,"rows_written_max":8,"class":"P","expect":"ok"},
     {"id":"shifts-list","method":"GET","route":"/api/shifts","params":"page=1&pageSize=20","status":200,"cold_calls_max":7,"rows_max":1418,"rows_max_analyze":1420,"rows_written_max":8,"class":"N","expect":"ok"},
-    {"id":"shifts-id-history","method":"GET","route":"/api/shifts/:id/history","params":"","status":200,"cold_calls_max":48,"rows_max":194389,"rows_max_analyze":188711,"rows_written_max":8,"class":"H","expect":"ok"},
+    {"id":"shifts-id-history","method":"GET","route":"/api/shifts/:id/history","params":"","status":200,"cold_calls_max":39,"rows_max":194389,"rows_max_analyze":188711,"rows_written_max":8,"class":"H","expect":"ok"},
     {"id":"branches","method":"GET","route":"/api/branches","params":"","status":200,"cold_calls_max":6,"rows_max":15,"rows_max_analyze":16,"rows_written_max":8,"class":"N","expect":"ok"},
     {"id":"branches-summary","method":"GET","route":"/api/branches/summary","params":"","status":200,"cold_calls_max":8,"rows_max":25557,"rows_max_analyze":25561,"rows_written_max":8,"class":"N","expect":"ok"},
     {"id":"branches-stock-integrity","method":"GET","route":"/api/branches/stock-integrity","params":"","status":200,"cold_calls_max":7,"rows_max":43250,"rows_max_analyze":43251,"rows_written_max":8,"class":"N","expect":"ok"},
