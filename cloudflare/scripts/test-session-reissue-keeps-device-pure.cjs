@@ -125,6 +125,7 @@ const devicesRoute = load('routes/devices.ts', {
   '../lib/permissions': { isAdminControlUser },
   '../durable-objects/broadcastHub': { broadcast: noop },
   '../lib/deviceTrust': { maxApprovedDevicesPerUser: () => 5, countApprovedDevices: async () => 0 },
+  '../lib/sqlBinding': load('lib/sqlBinding.ts'),
   '../index': {},
 }).default
 
