@@ -128,6 +128,7 @@ export async function pinDeviceAfterGate<E extends { Bindings: Env }, T extends 
 // is not re-issued from a session. An id another account has already bound is never
 // adopted: a cookie proves the id, not the account, so it would sign in as that account.
 const SESSION_COOKIE_NAME = 'bos_session' // lib/auth.ts SESSION_COOKIE_NAME; pinned by test-device-cookie-bound-pure
+const SESSION_ADOPTABLE_CONTEXT_KEY = 'sessionDeviceAdoptable' // lib/auth.ts ADOPTABLE_CONTEXT_KEY; pinned by test-session-adoption-probe-pure (check f)
 
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', encoder.encode(value))
@@ -137,6 +138,9 @@ async function sha256Hex(value: string): Promise<string> {
 export async function adoptSessionDeviceCookie<E extends { Bindings: Env }>(c: Context<E>, userId: number): Promise<void> {
   if (!c.env.APP_ENCRYPTION_KEY) return
   if (await verifyDeviceCookieValue(c.env, getCookie(c, DEVICE_COOKIE_NAME))) return
+  // The session read already answered, in the same statement, whether any row could be adopted (lib/auth.ts wantsAdoptionProbe): when it says no,
+  // the UPDATE below could only write 0 rows. Unanswered (any other caller, or a browser that sent a device cookie) means ask as before.
+  if ((c as unknown as { get(key: string): unknown }).get(SESSION_ADOPTABLE_CONTEXT_KEY) === false) return
   const token = getCookie(c, SESSION_COOKIE_NAME)
   if (!token) return
   const bound = await getDb(c.env).prepare(`

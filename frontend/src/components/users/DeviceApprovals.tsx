@@ -144,6 +144,8 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
   const [busyUserId, setBusyUserId] = useState<number | null>(null)
   // An account already at its cap: the pending device waits for the admin to pick which approved device to replace.
   // The pending or approved device row an administrator is naming as a shop device.
+  // The card whose mark button the administrator pressed while the device cannot be marked yet: only that card explains why (not every phone that will never be a till).
+  const [markHintId, setMarkHintId] = useState<number | null>(null)
   const [markingShop, setMarkingShop] = useState<{ device: TrustedDeviceRecord; label: string } | null>(null)
   const [replacing, setReplacing] = useState<{ device: TrustedDeviceRecord; choices: TrustedDeviceRecord[]; selectedId: number; confirmShared?: boolean } | null>(null)
 
@@ -232,12 +234,12 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
   }
 
   // Another account already has this device: the administrator says so explicitly before approving or marking it (the Worker refuses otherwise).
-  const confirmSharedDevice = (names: string, marking: boolean) => askToConfirm({
+  const confirmSharedDevice = (names: string, marking: boolean, leadingItems: Array<{ label: string; value: string }> = []) => askToConfirm({
     title: tr(t, 'device_shared_title', 'Several accounts on this device'),
     message: marking
       ? tr(t, 'shop_device_shared_confirm', 'More than one account has this device. Marking it as a shop device opens it to every employee and removes all of their requests and approvals for it.')
       : tr(t, 'device_shared_confirm', 'Another account already uses this device. Approve only if the two people really share it; otherwise decline this request.'),
-    items: names ? [{ label: tr(t, 'device_also_here', 'Also on this device'), value: names }] : undefined,
+    items: names || leadingItems.length ? [...leadingItems, ...(names ? [{ label: tr(t, 'device_also_here', 'Also on this device'), value: names }] : [])] : undefined,
     confirmLabel: marking ? tr(t, 'shop_device_mark', 'Mark as shop device') : tr(t, 'approve', 'Approve'),
     danger: true,
   })
@@ -306,29 +308,41 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
     void runOnlineAction('device', device.id, write, () => tr(t, 'device_replace_done', 'Device replaced and approved.'))
   }
 
+  // A device that cannot be marked yet answers the press with the reason under its own card, instead of every card carrying the line all day.
+  const pressMarkShop = (device: TrustedDeviceRecord) => {
+    if (canMarkShop(device)) setMarkingShop({ device, label: '' })
+    else setMarkHintId(device.id)
+  }
+
   const reviewMarkShop = async () => {
     if (!markingShop) return
     const label = markingShop.label.trim().replace(/\s+/g, ' ')
     if (!label) return
     const { device } = markingShop
     setMarkingShop(null)
-    const confirmed = await askToConfirm({
-      title: tr(t, 'shop_device_mark_title', 'Mark as a shop device?'),
-      message: tr(t, 'shop_device_mark_confirm', 'Every active employee will be able to sign in on this device without a separate approval and without using a device slot. Requests waiting for this device are removed, and approvals that individual employees already have for it are replaced by this one. Mark only a device that stays in the shop.'),
-      items: [
-        { label: tr(t, 'shop_device_name', 'Shop device name'), value: label },
-        { label: tr(t, 'device', 'Device'), value: device.device_name || tr(t, 'unknown_device', 'Unknown device') },
-      ],
-      confirmLabel: tr(t, 'shop_device_mark', 'Mark as shop device'),
-    })
+    const nameItems = [
+      { label: tr(t, 'shop_device_name', 'Shop device name'), value: label },
+      { label: tr(t, 'device', 'Device'), value: device.device_name || tr(t, 'unknown_device', 'Unknown device') },
+    ]
+    // The card already lists another account: its one dialog is the confirmation (it names the device, the other accounts and what marking does). Asking the
+    // generic question first and the shared one second made two dialogs for one decision. A stale card still asks the second question when the Worker says so.
+    const knownShared = sharedNames(device) !== ''
+    const confirmed = knownShared
+      ? await confirmSharedDevice(sharedNames(device), true, nameItems)
+      : await askToConfirm({
+        title: tr(t, 'shop_device_mark_title', 'Mark as a shop device?'),
+        message: tr(t, 'shop_device_mark_confirm', 'Every active employee will be able to sign in on this device without a separate approval and without using a device slot. Requests waiting for this device are removed, and approvals that individual employees already have for it are replaced by this one. Mark only a device that stays in the shop.'),
+        items: nameItems,
+        confirmLabel: tr(t, 'shop_device_mark', 'Mark as shop device'),
+      })
     if (!confirmed) return
-    void runOnlineAction('device', device.id, withSharedConfirm(device, true, (confirmShared) => markShopDevice(device.id, label, confirmShared)), () => tr(t, 'shop_device_marked_done', 'Marked as a shop device.'))
+    void runOnlineAction('device', device.id, withSharedConfirm(device, true, (confirmShared) => markShopDevice(device.id, label, confirmShared), { confirmed: knownShared }), () => tr(t, 'shop_device_marked_done', 'Marked as a shop device.'))
   }
 
   const unmarkShop = async (shop: ShopDeviceRecord) => {
     const confirmed = await askToConfirm({
       title: tr(t, 'shop_device_unmark_title', 'Remove shop device?'),
-      message: tr(t, 'shop_device_unmark_confirm', 'Employees who signed in here through the shop device are signed out now, and each employee needs an approval again to sign in on this device. The device gets a new identity at its next sign-in, so a copied login cookie stops working; to make it a shop device again, mark its new request.'),
+      message: tr(t, 'shop_device_unmark_confirm', 'Employees who signed in here through the shop device are signed out now, and each employee needs an approval again to sign in on this device. The device gets a new identity at its next sign-in, so a copy of its sign-in stops working; to make it a shop device again, mark its new request.'),
       items: [{ label: tr(t, 'shop_device_name', 'Shop device name'), value: shop.label }],
       confirmLabel: tr(t, 'shop_device_unmark', 'Remove shop device'),
       danger: true,
@@ -368,7 +382,19 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
     return [...byUser.values()].sort((a, b) => a.label.localeCompare(b.label))
   }, [approvedDevices, sessions])
 
+  // A device can be marked once some row on it has had its cookie issued: this account's own, or another account's on the same device (the Worker checks the device, not the row).
+  // A waiting request on an id another account holds approved may be a copy of that approval: the Worker refuses to mark it (shop_device_held), so the panel does not offer it.
+  const heldByApproved = (device: TrustedDeviceRecord) => device.status === 'pending' && (device.shared_with || []).some((other) => other.status === 'approved')
+  const canMarkShop = (device: TrustedDeviceRecord) => !heldByApproved(device) && (Boolean(device.cookie_bound_at) || (device.shared_with || []).some((other) => other.bound))
   // Why the shop button is grey, in words a touch screen can show: an old waiting request is never bound by signing in, so it is approved first.
+  // One source for the visible line, the button's title and its accessible description, so the three never disagree about the card's state.
+  const markReason = (device: TrustedDeviceRecord) => heldByApproved(device)
+    ? tr(t, 'shop_device_held', 'Another account already has this device approved, so this request may be a copy. Decline it, or mark the approved device instead.')
+    : device.status === 'pending'
+      ? tr(t, 'shop_device_unbound_pending', 'To mark this as a shop device: approve the request, sign in on the device once, then mark it.')
+      : tr(t, 'shop_device_unbound', 'Sign in on this device once, then mark it as a shop device.')
+  const markHintDomId = (device: TrustedDeviceRecord) => `device-mark-hint-${device.id}`
+  const markHintShown = (device: TrustedDeviceRecord, showMarkHint: boolean) => showMarkHint && !canMarkShop(device) && !device.claimed_approval_ref
   const renderDeviceMeta = (device: TrustedDeviceRecord, showMarkHint = false) => (
     <div className="min-w-0">
       <div className="detail-scroll-text text-sm font-semibold text-gray-900 dark:text-white">
@@ -390,11 +416,10 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
           {tr(t, 'device_also_here', 'Also on this device')}: {device.shared_with.map((other) => `${other.name} (${other.status === 'approved' ? tr(t, 'approved', 'Approved') : tr(t, 'pending', 'pending')})`).join(', ')}
         </div>
       ) : null}
-      {showMarkHint && !device.cookie_bound_at && !device.claimed_approval_ref ? (
-        <div className="mt-1 detail-scroll-text text-xs text-gray-500 dark:text-gray-400">
-          {device.status === 'pending'
-            ? tr(t, 'shop_device_unbound_pending', 'To mark this as a shop device: approve the request, sign in on the device once, then mark it.')
-            : tr(t, 'shop_device_unbound', 'Sign in on this device once, then mark it as a shop device.')}
+      {!canMarkShop(device) && !device.claimed_approval_ref ? (
+        // The live region is on the card from first paint (empty), so the line that appears when the button is pressed is announced.
+        <div id={markHintDomId(device)} aria-live="polite" className={markHintShown(device, showMarkHint) ? 'mt-1 detail-scroll-text text-xs text-gray-500 dark:text-gray-400' : undefined}>
+          {markHintShown(device, showMarkHint) ? markReason(device) : null}
         </div>
       ) : null}
       {device.claimed_approval_ref ? (
@@ -446,7 +471,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                 key={device.id}
                 className="flex flex-col gap-2 rounded-xl border border-gray-200 p-3 dark:border-gray-700 sm:flex-row sm:items-center sm:justify-between"
               >
-                {renderDeviceMeta(device, true)}
+                {renderDeviceMeta(device, markHintId === device.id)}
                 <div className="flex shrink-0 gap-2">
                   <button
                     type="button"
@@ -460,11 +485,13 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                   {device.claimed_approval_ref ? null : (
                     <button
                       type="button"
-                      disabled={busyId === device.id || !device.cookie_bound_at}
-                      className="btn-secondary px-2 py-1.5 text-xs"
-                      title={device.cookie_bound_at ? tr(t, 'shop_device_mark', 'Mark as shop device') : tr(t, 'shop_device_unbound', 'Sign in on this device once, then mark it as a shop device.')}
+                      disabled={busyId === device.id}
+                      aria-disabled={!canMarkShop(device)}
+                      className={`btn-secondary px-2 py-1.5 text-xs${canMarkShop(device) ? '' : ' opacity-50'}`}
+                      title={canMarkShop(device) ? tr(t, 'shop_device_mark', 'Mark as shop device') : markReason(device)}
+                      aria-describedby={markHintShown(device, markHintId === device.id) ? markHintDomId(device) : undefined}
                       aria-label={tr(t, 'shop_device_mark', 'Mark as shop device')}
-                      onClick={() => setMarkingShop({ device, label: '' })}
+                      onClick={() => pressMarkShop(device)}
                     >
                       <Store className="h-3.5 w-3.5" />
                     </button>
@@ -526,7 +553,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                         key={`device-${device.id}`}
                         className="flex flex-col gap-2 rounded-lg border border-gray-100 p-2.5 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between"
                       >
-                        {renderDeviceMeta(device, !shopDeviceIds.has(device.device_id))}
+                        {renderDeviceMeta(device, markHintId === device.id)}
                         <div className="flex shrink-0 items-center gap-2">
                           <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700 dark:bg-green-900/30 dark:text-green-300">
                             {tr(t, 'approved', 'Approved')}
@@ -538,11 +565,13 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                           ) : (
                             <button
                               type="button"
-                              disabled={busyId === device.id || !device.cookie_bound_at}
-                              className="btn-secondary px-2 py-1 text-xs"
-                              title={device.cookie_bound_at ? tr(t, 'shop_device_mark', 'Mark as shop device') : tr(t, 'shop_device_unbound', 'Sign in on this device once, then mark it as a shop device.')}
+                              disabled={busyId === device.id}
+                              aria-disabled={!canMarkShop(device)}
+                              className={`btn-secondary px-2 py-1 text-xs${canMarkShop(device) ? '' : ' opacity-50'}`}
+                              title={canMarkShop(device) ? tr(t, 'shop_device_mark', 'Mark as shop device') : markReason(device)}
+                              aria-describedby={markHintShown(device, markHintId === device.id) ? markHintDomId(device) : undefined}
                               aria-label={tr(t, 'shop_device_mark', 'Mark as shop device')}
-                              onClick={() => setMarkingShop({ device, label: '' })}
+                              onClick={() => pressMarkShop(device)}
                             >
                               <Store className="h-3.5 w-3.5" />
                             </button>

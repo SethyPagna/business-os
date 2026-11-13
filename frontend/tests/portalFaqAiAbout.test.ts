@@ -259,7 +259,7 @@ runTest('AI: copy says deleted after 30 days, never "may", never Leang Beauty or
     const stated = language === 'en' ? /outside Cambodia/ : /ក្រៅប្រទេសកម្ពុជា/
     assert.match(consent, stated, 'consent line states outside-Cambodia processing (' + language + ')')
     assert.match(note, stated, 'automated note states outside-Cambodia processing (' + language + ')')
-    assert.doesNotMatch(consent + note, /may/i)
+    assert.doesNotMatch(consent + note, /\bmay\b/i)
   }
   // The per-provider wording is locked in portalAiProviderDisclosure.test.ts; here only that the placeholders are always filled.
   const named = html(aiProps({ assistantDisclosure: { kind: 'named', providers: [{ id: 'acme', displayName: 'Acme AI', policyUrl: 'https://example.test', retention: { en: 'Acme AI keeps nothing.', km: 'Acme AI' } }] } }))

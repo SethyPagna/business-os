@@ -69,14 +69,16 @@ const lastButton = (surface: MountedSurface, label: RegExp) => {
 }
 const dialogOpen = (surface: MountedSurface) => surface.text().includes('Several accounts on this device')
 
+// Name the device and submit the form; returns which question the panel asked first (the generic mark question, or the shared-device one).
 async function startMark(surface: MountedSurface) {
   await surface.click(buttons(surface, /Mark as shop device/)[0])
   await surface.type(surface.find((node) => node.tagName === 'INPUT' && node.getAttribute('placeholder') !== null, 'shop device name field'), 'Till 1')
   await surface.call(surface.find((node) => node.tagName === 'FORM', 'shop device form'), 'onSubmit', [{ preventDefault() {} }])
-  await surface.click(lastButton(surface, /^Mark as shop device$/))
+  const text = surface.text()
+  return { shared: text.includes('Several accounts on this device'), generic: text.includes('Mark as a shop device?') }
 }
 
-type Outcome = { writes: Write[]; notices: Array<[string, string | undefined]>; namesInDialog: boolean; dialogsAfter: boolean }
+type Outcome = { writes: Write[]; notices: Array<[string, string | undefined]>; namesInDialog: boolean; dialogsAfter: boolean; firstDialog?: { shared: boolean; generic: boolean } }
 async function runScenarios(component: string) {
   const out: Record<string, Outcome> = {}
   const finish = async (name: string, panel: Awaited<ReturnType<typeof mountPanel>>, namesInDialog: boolean) => {
@@ -112,18 +114,23 @@ async function runScenarios(component: string) {
   // Mark a device two accounts use (card lists the other one).
   {
     const panel = await mountPanel(component, { listed: [row(8, 10, 'approved', { shared_with: DARA })], serverShared: true })
-    await startMark(panel.surface)
+    const first = await startMark(panel.surface)
     const named = dialogOpen(panel.surface) && panel.surface.text().includes('Dara')
     await panel.surface.click(lastButton(panel.surface, /^Mark as shop device$/))
     await finish('mark-known', panel, named)
+    out['mark-known'].firstDialog = first
   }
   // Mark on a stale list (an approved card without the other account).
   {
     const panel = await mountPanel(component, { listed: [row(8, 10, 'approved')], fresh: [row(8, 10, 'approved', { shared_with: DARA })], serverShared: true })
-    await startMark(panel.surface)
+    const first = await startMark(panel.surface)
+    // The list knew nothing: the generic question comes first and the Worker's refusal then raises the shared one.
+    await panel.surface.click(lastButton(panel.surface, /^Mark as shop device$/))
+    await panel.surface.settle()
     const named = dialogOpen(panel.surface) && panel.surface.text().includes('Dara')
     await panel.surface.click(lastButton(panel.surface, /^Mark as shop device$/))
     await finish('mark-stale', panel, named)
+    out['mark-stale'].firstDialog = first
   }
   return out
 }
@@ -160,6 +167,9 @@ try {
     assert.deepEqual(outcome.notices, [[notice, 'success']], `${name}: one success message`)
     assert.equal(outcome.dialogsAfter, false, `${name}: no dialog stays open`)
   }
+  // B8 L-g: a card that already lists the other account asks ONE question, the shared-device one, before the single confirmed send.
+  assert.deepEqual(real['mark-known'].firstDialog, { shared: true, generic: false }, 'mark-known: the first and only dialog is the shared-device one')
+  assert.deepEqual(real['mark-stale'].firstDialog, { shared: false, generic: true }, 'mark-stale: a list that knew nothing asks the generic question first')
   assert.deepEqual(real['approve-declined'].writes, [['approve', 7, false]], 'declining the dialog sends nothing more')
   assert.deepEqual(real['approve-declined'].notices, [], 'declining the dialog is quiet')
   assert.equal(real['approve-declined'].namesInDialog, true)

@@ -11,7 +11,7 @@ SELECT
   (SELECT COUNT(*) FROM (
      SELECT s.device_id FROM user_sessions s
        JOIN trusted_devices t ON t.device_id = s.device_id AND t.user_id = s.user_id AND t.status = 'approved'
-      WHERE s.revoked_at IS NULL AND s.expires_at > datetime('now')
+      WHERE s.revoked_at IS NULL AND julianday(s.expires_at) > julianday('now')
       GROUP BY s.device_id HAVING COUNT(DISTINCT s.user_id) >= 2)) AS shared_ids_live_session,
   (SELECT COUNT(*) FROM trusted_devices WHERE device_id IN (
      SELECT device_id FROM trusted_devices GROUP BY device_id HAVING COUNT(DISTINCT user_id) >= 2)) AS rows_on_shared_ids;
