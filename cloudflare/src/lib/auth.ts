@@ -434,7 +434,7 @@ async function lookupSessionUser<E extends { Bindings: Env } = { Bindings: Env }
   const nowIso = new Date().toISOString()
 
   const db = getDb(c.env)
-  const probeAdoption = wantsAdoptionProbe(c)
+  let probeAdoption = wantsAdoptionProbe(c)
   const lookupSql = (mustChangeColumn: string) => `
     SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active,
            u.avatar_path, u.updated_at,
@@ -454,21 +454,29 @@ async function lookupSessionUser<E extends { Bindings: Env } = { Bindings: Env }
   `
   const lookupParams = { token_hash: tokenHash, now: nowIso }
   let row: SessionLookupRow | undefined
-  if (mustChangeColumnMissing) {
-    row = await db.prepare(lookupSql('')).get<SessionLookupRow>(lookupParams)
-  } else {
+  // A column that does not exist yet is read around, never guessed at: each missing column is recognised by NAME, so one migration being absent can never
+  // switch off the handling of another (a D1 without 0304 once lost forced password change for the whole isolate through a broad "no such column" match).
+  let adoptionColumnMissing = false
+  for (let attempt = 0; ; attempt += 1) {
     try {
-      row = await db.prepare(lookupSql(' u.must_change_password,')).get<SessionLookupRow>(lookupParams)
+      row = await db.prepare(lookupSql(mustChangeColumnMissing ? '' : ' u.must_change_password,')).get<SessionLookupRow>(lookupParams)
+      break
     } catch (error) {
-      // Worker deployed before migration 0202: every request would 500 on
-      // the missing column. Remember it for this isolate and read without it.
-      if (!/no such column/i.test(String((error as Error)?.message || error))) throw error
-      mustChangeColumnMissing = true
-      row = await db.prepare(lookupSql('')).get<SessionLookupRow>(lookupParams)
+      const message = String((error as Error)?.message || error)
+      if (attempt < 2 && probeAdoption && /no such column:\s*(td|o)\.cookie_bound_at/i.test(message)) {
+        // Worker deployed before migration 0304: read without the adoption question, for this request only. No row can be bound without that column, so
+        // adoption has nothing to do either (it is told so below).
+        probeAdoption = false
+        adoptionColumnMissing = true
+      } else if (attempt < 2 && !mustChangeColumnMissing && /no such column:\s*(u\.)?must_change_password\b/i.test(message)) {
+        // Worker deployed before migration 0202: every request would 500 on the missing column. Remember it for this isolate and read without it.
+        mustChangeColumnMissing = true
+      } else throw error
     }
   }
 
   if (!row) return null
+  if (adoptionColumnMissing) (c as unknown as { set(key: string, value: unknown): void }).set(ADOPTABLE_CONTEXT_KEY, false)
 
   const {
     session_created_at: createdAt,
