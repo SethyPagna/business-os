@@ -749,6 +749,35 @@ async function copyIntoAssetPool(
 }
 
 /**
+ * A set may finalize only when every asset it names is present in the pool NOW. A copied key was counted as copied because
+ * its pool object existed when the pool was listed; a prune running in another invocation can delete it afterwards (it
+ * had not yet seen this set's sidecar). So before finalizing, the pool is listed again and every copied key whose pool
+ * object is gone moves back to pending (copied again from uploads/ by the next slice). A key that keeps vanishing or whose
+ * source is gone too runs out of attempts and lands in failedKeys: the set is then 'failed', never a finalized lie.
+ * Returns how many keys were moved back.
+ */
+async function demoteMissingPoolCopies(
+  env: Env,
+  state: Pick<BackupLifecycleState, 'assets' | 'copiedKeys' | 'pendingKeys' | 'failedKeys' | 'attempts'>,
+): Promise<number> {
+  if (!state.copiedKeys.length) return 0
+  const present = await listAssetPoolKeys(env)
+  const byKey = new Map<string, AssetEntry>(state.assets.map((asset) => [asset.key, asset]))
+  const kept: string[] = []
+  let moved = 0
+  for (const key of state.copiedKeys) {
+    const asset = byKey.get(key)
+    if (asset && present.has(assetPoolKey(asset))) { kept.push(key); continue }
+    moved += 1
+    state.attempts[key] = (state.attempts[key] || 0) + 1
+    if (state.attempts[key] < MAX_ASSET_COPY_ATTEMPTS) state.pendingKeys.push(key)
+    else state.failedKeys.push(key)
+  }
+  if (moved) state.copiedKeys = kept
+  return moved
+}
+
+/**
  * Same interface as R2StreamWriter, but the document is gzip-compressed on its way into the multipart parts. The JSON
  * manifest is the whole database as text (repetitive keys and values), so it compresses several-fold. Streaming:
  * CompressionStream is fed row by row and its output is cut into the equal-size R2 parts by the inner writer, so memory
@@ -986,11 +1015,18 @@ async function writeBackupDocument(
   // Lifecycle lives in a small sidecar. Continuation workers update only
   // this document, never parse/rewrite the potentially huge database
   // manifest. This is also the source of truth for finalized retention.
-  const status: BackupLifecycleState['status'] = !includeAssets || copiedKeys.length === assets.length
+  // Re-verify the pool before the set can be called complete (see demoteMissingPoolCopies). A key moved back is copied again by
+  // the continuation (queue) or leaves the set 'partial' (no queue), never finalized while a named object is gone.
+  const verification = { assets, copiedKeys, pendingKeys, failedKeys, attempts }
+  if (includeAssets && copiedKeys.length) await demoteMissingPoolCopies(env, verification)
+  const status: BackupLifecycleState['status'] = !includeAssets || verification.copiedKeys.length === assets.length
     ? 'finalized'
-    : env.BACKUP_QUEUE
-      ? 'copying'
-      : 'partial'
+    : failedKeys.length && !pendingKeys.length
+      ? 'failed'
+      : env.BACKUP_QUEUE
+        ? 'copying'
+        : 'partial'
+  copiedKeys = verification.copiedKeys
   const lifecycle: BackupLifecycleState = {
     format: BACKUP_LIFECYCLE_FORMAT,
     version: BACKUP_LIFECYCLE_VERSION,
@@ -1082,6 +1118,11 @@ export async function continueCloudflareBackupAssetCopy(env: Env, backupName: st
     return { key, skipped: true, reason: 'not-resumable' as const, status: state.status }
   }
 
+  // A set with nothing pending is about to finalize: confirm its pool objects still exist first (a concurrent prune may have
+  // removed one it had counted as copied). Anything missing goes back to pending and is copied below.
+  if (!state.pendingKeys.length && state.assetLayout === ASSET_LAYOUT_POOL && !state.failedKeys.length) {
+    await demoteMissingPoolCopies(env, state)
+  }
   if (!state.pendingKeys.length) {
     state.status = state.failedKeys.length ? 'failed' : 'finalized'
     if (state.status === 'finalized') state.finalizedAt = new Date().toISOString()
@@ -1123,7 +1164,8 @@ export async function continueCloudflareBackupAssetCopy(env: Env, backupName: st
 
   state.copiedKeys = [...copied]
   state.pendingKeys = remaining
-  const complete = remaining.length === 0
+  if (!remaining.length && state.assetLayout === ASSET_LAYOUT_POOL && !state.failedKeys.length) await demoteMissingPoolCopies(env, state)
+  const complete = state.pendingKeys.length === 0
   if (complete) {
     state.status = state.failedKeys.length ? 'failed' : 'finalized'
     if (state.status === 'finalized') state.finalizedAt = new Date().toISOString()
@@ -1252,7 +1294,7 @@ export async function pruneCloudflareBackups(env: Env, keep = CLOUDFLARE_BACKUP_
  * (never guessed) when a backup that should have a sidecar has none, or a sidecar cannot be read. Never touches
  * uploads/ or anything outside BACKUP_ASSET_POOL_PREFIX.
  */
-async function sweepAssetPool(env: Env): Promise<{ removed: number; skipped?: string }> {
+async function listBackupSetNames(env: Env): Promise<{ manifestNames: Set<string>; names: Set<string> }> {
   const manifestNames = new Set<string>()
   const folderNames = new Set<string>()
   let cursor: string | undefined
@@ -1269,8 +1311,57 @@ async function sweepAssetPool(env: Env): Promise<{ removed: number; skipped?: st
     }
     cursor = page.truncated ? page.cursor : undefined
   } while (cursor)
+  return { manifestNames, names: new Set<string>([...manifestNames, ...folderNames]) }
+}
 
-  const names = new Set<string>([...manifestNames, ...folderNames])
+/**
+ * The sweep read the sidecars first and deletes afterwards, so a backup that started in between (its sidecar was not
+ * visible) may name an object that was just deleted. After the delete, every set that appeared is checked: a deleted
+ * object it names is put back from uploads/ when the source still has that exact version; a version the source no
+ * longer has moves the key back to pending (the set is reopened and copies the current bytes), so no set stays finalized
+ * while naming an object that is gone.
+ */
+async function repairSetsStartedDuringSweep(env: Env, namesSeen: ReadonlySet<string>, doomed: ReadonlySet<string>): Promise<void> {
+  const { names } = await listBackupSetNames(env)
+  for (const name of names) {
+    if (namesSeen.has(name) || `${CLOUDFLARE_BACKUP_PREFIX}${name}`.startsWith(DRIVE_STAGED_BACKUP_PREFIX)) continue
+    const state = await getCloudflareBackupState(env, name)
+    if (!state || state.assetLayout !== ASSET_LAYOUT_POOL) continue
+    const unrecoverable = new Set<string>()
+    for (const asset of state.assets || []) {
+      const poolKey = assetPoolKey(asset)
+      if (!doomed.has(poolKey)) continue
+      let restored = false
+      try {
+        const object = await env.ASSETS.get(asset.key)
+        if (object && assetVersionToken({ key: asset.key, etag: object.etag }) === assetVersionToken(asset)) {
+          const contentType = object.httpMetadata?.contentType
+          await env.ASSETS.put(poolKey, object.body, contentType ? { httpMetadata: { contentType } } : undefined)
+          restored = true
+        } else await object?.body?.cancel().catch(() => {})
+      } catch (_) { /* counted as unrecoverable below */ }
+      if (!restored) unrecoverable.add(asset.key)
+    }
+    if (!unrecoverable.size) continue
+    // Re-read: the set may have moved on while its objects were being put back.
+    const fresh = await getCloudflareBackupState(env, name)
+    if (!fresh) continue
+    const lost = fresh.copiedKeys.filter((key) => unrecoverable.has(key))
+    if (!lost.length) continue
+    fresh.copiedKeys = fresh.copiedKeys.filter((key) => !unrecoverable.has(key))
+    for (const key of lost) {
+      fresh.attempts[key] = Math.min(fresh.attempts[key] || 0, MAX_ASSET_COPY_ATTEMPTS - 1)
+      if (!fresh.pendingKeys.includes(key)) fresh.pendingKeys.push(key)
+    }
+    fresh.status = env.BACKUP_QUEUE ? 'copying' : 'partial'
+    fresh.finalizedAt = undefined
+    await putBackupState(env, fresh)
+    if (env.BACKUP_QUEUE) await env.BACKUP_QUEUE.send({ kind: 'backup-continue', backupName: name, nextIndex: fresh.copiedKeys.length } satisfies BackupQueueMessage)
+  }
+}
+
+async function sweepAssetPool(env: Env): Promise<{ removed: number; skipped?: string }> {
+  const { manifestNames, names } = await listBackupSetNames(env)
   const pinned = new Set<string>()
   for (const name of names) {
     if (`${CLOUDFLARE_BACKUP_PREFIX}${name}`.startsWith(DRIVE_STAGED_BACKUP_PREFIX)) continue
@@ -1288,6 +1379,7 @@ async function sweepAssetPool(env: Env): Promise<{ removed: number; skipped?: st
   const doomed: string[] = []
   for (const poolKey of await listAssetPoolKeys(env)) if (!pinned.has(poolKey)) doomed.push(poolKey)
   for (let offset = 0; offset < doomed.length; offset += 500) await env.ASSETS.delete(doomed.slice(offset, offset + 500))
+  if (doomed.length) await repairSetsStartedDuringSweep(env, names, new Set(doomed))
   return { removed: doomed.length }
 }
 
