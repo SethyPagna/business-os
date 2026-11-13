@@ -382,6 +382,7 @@ check('fallback: an unmapped (production-only) table still gets name-classified 
 // ===========================================================================
 // End to end: real main() against the local migrated DB via a fake runner
 // ===========================================================================
+const SEED_AUDIT_ID = 900001
 function seed(db) {
   db.exec('PRAGMA foreign_keys = OFF')
   const run = (sql, ...args) => db.prepare(sql).run(...args)
@@ -390,7 +391,9 @@ function seed(db) {
   run("INSERT INTO users (id, username, name, password, otp_secret, phone, email) VALUES (5, 'vuthy', 'Chan Vuthy', 'pbkdf2$secret-hash', 'JBSWY3DPEHPK3PXP', '077111222', 'vuthy@example.com')")
   run("INSERT INTO user_sessions (id, user_id, token_hash, device_name, last_ip, expires_at) VALUES (11, 5, 'tokhash-aaaa', 'Vuthy iPhone', '203.0.113.9', '2026-12-31T00:00:00Z')")
   run("INSERT INTO settings (key, value) VALUES ('drive_sync_refresh_token', '1//refresh-secret'), ('exchange_rate', '4100')")
-  run("INSERT INTO audit_logs (id, user_name, action, entity, new_value) VALUES (1, 'Chan Vuthy', 'update', 'customer', ?)",
+  // Not id 1: migration 0251 (loyalty watermark) writes its own 'reset_data' audit row into a freshly migrated database, so id 1 is
+  // taken before the seed runs (UNIQUE constraint failed: audit_logs.id). A fixed id well above any migration-written row cannot collide.
+  run(`INSERT INTO audit_logs (id, user_name, action, entity, new_value) VALUES (${SEED_AUDIT_ID}, 'Chan Vuthy', 'update', 'customer', ?)`,
     JSON.stringify({ name: 'Sok Dara', phone: '012345678' }))
 }
 function fakeProduction() {
@@ -428,7 +431,7 @@ check('end-to-end default run: jsonl AND snapshot.sqlite are redacted, salt neve
   const cust = snap.prepare('SELECT name, phone FROM customers WHERE id = 1').get()
   assert.equal(cust.name, createRedactor({ salt }).mask('Sok Dara'), 'sqlite value equals the same-salt token')
   assert.equal(cust.phone, createRedactor({ salt }).mask('012345678'))
-  assert.equal(snap.prepare('SELECT user_name FROM audit_logs WHERE id = 1').get().user_name, snap.prepare('SELECT name FROM users WHERE id = 5').get().name)
+  assert.equal(snap.prepare('SELECT user_name FROM audit_logs WHERE id = ' + SEED_AUDIT_ID).get().user_name, snap.prepare('SELECT name FROM users WHERE id = 5').get().name)
   assert.equal(snap.prepare('SELECT password FROM users WHERE id = 5').get().password, '[dropped]#1')
   assert.equal(snap.prepare("SELECT value FROM settings WHERE key = 'exchange_rate'").get().value, '4100')
   snap.close()
