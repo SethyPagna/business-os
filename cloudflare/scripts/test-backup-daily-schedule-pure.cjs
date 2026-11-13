@@ -178,7 +178,7 @@ async function simulate(load, { failFirstNightAt = null, loseStateAfterEachTick 
     storeFor: store,
     heavySteps: () => [
       { id: 'backup', attemptWindow: (ms) => schedule.scheduledBackupNightOf(ms, limits.scheduledBackupAfterHourLocal), run: async () => { ran.push({ at: clock, step: 'backup' }); return backupMod.maybeRunScheduledBackup(env, clock, create) } },
-      { id: 'image-audit', minIntervalMs: 5 * HOUR, run: async () => { ran.push({ at: clock, step: 'image-audit' }) } },
+      { id: 'image-audit', minIntervalMs: rot.UNGATED_STEP_MIN_INTERVAL_MS, run: async () => { ran.push({ at: clock, step: 'image-audit' }) } },
     ],
     heavySelect: (steps, state, now) => schedule.pickHeavyStepIndex(steps, state, now, limits.scheduledBackupAfterHourLocal, limits.scheduledBackupMaxAttemptsPerDay),
   })
@@ -234,6 +234,20 @@ const localHour = (c) => sched.businessHourOf(c.at)
   // The other heavy step still runs, on the ticks the backup does not use, held to its own interval.
   const audits = run.ran.filter((r) => r.step === 'image-audit').length
   assert.ok(audits >= 6, 'image audit still gets its turns')
+  // ... but never sooner than its own 5 h minimum (the heavy ticks are 3 h apart, so without the gate it would run on every one).
+  const spacing = (r) => { const t = r.ran.filter((x) => x.step === 'image-audit').map((x) => x.at); return t.slice(1).map((x, i) => x - t[i]) }
+  assert.ok(spacing(run).length > 0 && spacing(run).every((d) => d >= 5 * HOUR), 'consecutive image audits are at least 5 h apart')
+  assert.strictEqual(real('lib/cronRotation.ts').UNGATED_STEP_MIN_INTERVAL_MS, 5 * HOUR)
+  assert.ok(read('index.ts').includes("step('image-audit', () => maybeRunScheduledImageAudit(env), UNGATED_STEP_MIN_INTERVAL_MS)"), 'the real heavy lane gates the audit with it')
+  {
+    // MUTANT: the minimum removed. The same simulation must catch it.
+    const rotKey = path.normalize(path.join(SRC, 'lib/cronRotation.ts'))
+    const rotSrc = fs.readFileSync(rotKey, 'utf8')
+    const target = 'UNGATED_STEP_MIN_INTERVAL_MS = 5 * 60 * 60 * 1000'
+    assert.ok(rotSrc.includes(target), 'the mutation target exists')
+    const bad = await simulate(makeLoader({ [rotKey]: rotSrc.replace(target, 'UNGATED_STEP_MIN_INTERVAL_MS = 0') }))
+    assert.ok(!spacing(bad).every((d) => d >= 5 * HOUR), 'without the 5 h minimum the audit runs on every non-backup tick, which this check sees')
+  }
   ok()
   // Cron state lost after every tick: R2 alone still keeps it to one per date.
   const lost = await simulate(real, { loseStateAfterEachTick: true })
@@ -398,19 +412,22 @@ const localHour = (c) => sched.businessHourOf(c.at)
   assert.ok(caught, 'a schedule without its same-date gate must fail this simulation')
   ok()
 
-  // A second mutant: the gate keyed on the UTC date instead of the Cambodia date.
+  // A second mutant: the gate keyed on the UTC date instead of the Cambodia date. Caught by the SIMULATION alone: with a failed
+  // 22:17 run the catch-up must come at 01:17 local (18:17Z, which is still the 12th in UTC), not 07:17.
   const utcMutant = makeLoader({ [key]: original.replace("new Date(ms + BUSINESS_UTC_OFFSET_MINUTES * MINUTE_MS).toISOString().slice(0, 10)", 'new Date(ms).toISOString().slice(0, 10)') })
-  let caughtUtc = false
-  try {
-    const bad = await simulate(utcMutant)
-    assert.deepStrictEqual(dates(bad.created), ['2026-11-12', '2026-11-13', '2026-11-14'])
-    assert.deepStrictEqual(bad.created.map((c) => new Date(c.at).toISOString()), ['2026-11-12T15:17:00.000Z', '2026-11-13T15:17:00.000Z', '2026-11-14T15:17:00.000Z'])
-    assert.strictEqual(sched.businessDateOf(Z('2026-11-12T17:00:00Z')), '2026-11-13')
-    assert.strictEqual(utcMutant('lib/backupSchedule.ts').businessDateOf(Z('2026-11-12T17:00:00Z')), '2026-11-13')
-  } catch (error) {
-    caughtUtc = error instanceof assert.AssertionError
+  {
+    const expected = ['2026-11-12T18:17:00.000Z', '2026-11-13T15:17:00.000Z', '2026-11-14T15:17:00.000Z']
+    const good = await simulate(real, { failFirstNightAt: Z('2026-11-12T15:17:00Z') })
+    assert.deepStrictEqual(good.created.map((c) => new Date(c.at).toISOString()), expected, 'control: the real schedule retries at 01:17 local')
+    let caughtUtc = false
+    try {
+      const bad = await simulate(utcMutant, { failFirstNightAt: Z('2026-11-12T15:17:00Z') })
+      assert.deepStrictEqual(bad.created.map((c) => new Date(c.at).toISOString()), expected)
+    } catch (error) {
+      caughtUtc = error instanceof assert.AssertionError
+    }
+    assert.ok(caughtUtc, 'a schedule keyed on the UTC date must fail the simulation')
   }
-  assert.ok(caughtUtc, 'a schedule keyed on the UTC date must fail too')
   ok()
 
   console.log(`test-backup-daily-schedule-pure: ${passed} groups passed`)

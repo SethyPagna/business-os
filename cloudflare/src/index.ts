@@ -71,7 +71,9 @@ import { apiCacheHygiene } from './lib/apiCacheHygiene'
 import { readDataEpoch, readSwitchHeader } from './lib/readSwitches'
 import { callCountingMiddleware } from './lib/callCounting'
 import { phoneMaskResponses } from './lib/phoneMaskMiddleware'
+import { UNGATED_STEP_MIN_INTERVAL_MS } from './lib/cronRotation'
 import type { RotationStep } from './lib/cronRotation'
+import { runScheduledDriveSyncStep } from './lib/driveSyncCron'
 import { dispatchCron } from './lib/cronDispatch'
 import { settingsRotationStore } from './lib/cronRotationStore'
 import { runWithRequestDefer } from './lib/requestDefer'
@@ -659,15 +661,6 @@ export { SyncUploadSession } from './durable-objects/syncUploadSession'
 export { BroadcastHub } from './durable-objects/broadcastHub'
 
 /**
- * These four steps have no interval gate of their own (they used to ride the
- * 6-hourly tick, about 4 runs a day). The rotation now comes round every 2.75 h (11 steps x 15 min),
- * so each is held to the old cadence or slower by the rotation's own record
- * of its last OK run (no extra D1 read). 5 h, not 6 h, so jitter between
- * visits cannot make it skip every second round.
- */
-const UNGATED_STEP_MIN_INTERVAL_MS = 5 * 60 * 60 * 1000
-
-/**
  * The rotation, in order. Order matters only where noted: stalled imports are
  * reaped before the import retention that prunes them. Each entry is one
  * bounded job; the heavy ones keep their own interval gates and answer
@@ -677,23 +670,13 @@ const UNGATED_STEP_MIN_INTERVAL_MS = 5 * 60 * 60 * 1000
 export function cronRotationSteps(env: Env, label: (name: string, step: () => Promise<unknown>) => () => Promise<unknown>): RotationStep[] {
   const step = (id: string, run: () => Promise<unknown>, minIntervalMs?: number): RotationStep => ({ id, run: label(id, run), ...(minIntervalMs ? { minIntervalMs } : {}) })
   return [
-    step('drive-sync', async () => {
-      const schedule = await driveSyncScheduleDue(env)
-      if (!schedule.due) return schedule
-      // The backup is daily, the Drive interval is not: when Drive already holds the newest finalized backup there is
-      // nothing to upload, so do not even queue a job (no Drive calls, no job rows).
-      const fresh = await driveSyncHasNewBackup(env)
-      if (!fresh.new) return { skipped: true, reason: fresh.reason }
-      // P1-2: only a destination connected by a user who may still take a
-      // full backup home receives scheduled uploads (re-checked again by
-      // the queue worker at run time).
-      const authority = await checkDriveSyncAuthorizer(env)
-      if (!authority.allowed) {
-        await recordDriveSyncError(env, authority.message)
-        return authority
-      }
-      return enqueueDriveSyncJob(env, 'scheduled')
-    }),
+    step('drive-sync', () => runScheduledDriveSyncStep({
+      scheduleDue: () => driveSyncScheduleDue(env),
+      hasNewBackup: () => driveSyncHasNewBackup(env),
+      authorize: () => checkDriveSyncAuthorizer(env),
+      recordError: (message) => recordDriveSyncError(env, message),
+      enqueue: () => enqueueDriveSyncJob(env, 'scheduled'),
+    })),
     step('audit-log-retention', () => maybeRunScheduledAuditLogRetention(env)),
     step('reap-stalled-imports', () => reapStalledImportJobs(env), UNGATED_STEP_MIN_INTERVAL_MS),
     step('import-retention', () => maybeRunScheduledImportRetention(env)),

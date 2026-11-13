@@ -230,9 +230,8 @@ async function main() {
     newerBackupExists = true
     assert.deepStrictEqual(await driveSyncHasNewBackup(env), { new: true, backupKey: 'backups/cloudflare/newer.json' }, 'the next daily backup is picked up')
     newerBackupExists = false
-    const indexSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'index.ts'), 'utf8').split(String.fromCharCode(13)).join('')
-    const driveStep = indexSrc.slice(indexSrc.indexOf("step('drive-sync'"), indexSrc.indexOf("step('audit-log-retention'"))
-    assert.ok(driveStep.indexOf('driveSyncHasNewBackup(env)') > driveStep.indexOf('driveSyncScheduleDue(env)') && driveStep.indexOf('driveSyncHasNewBackup(env)') < driveStep.indexOf('enqueueDriveSyncJob'), 'the scheduled Drive step checks for a new backup after the interval and before queueing')
+    // The step's order (interval, then new-backup check, then authority, then the queued job) is pinned by behaviour in
+    // test-drive-sync-cron-step-pure.cjs.
     console.log('PASS Drive uses signed expiring one-time PKCE state, mirrors the newest finalized R2 manifest, and prunes only tagged app backups to ten')
   } finally {
     global.fetch = originalFetch

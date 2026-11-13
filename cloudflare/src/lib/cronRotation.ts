@@ -45,6 +45,14 @@ export const MAX_RESUME_STREAK = 2
 /** A step not started for this many full cycles (+ slack) is starved. */
 export const STARVED_CYCLES = 2
 
+/**
+ * Steps with no interval gate of their own (they used to ride the 6-hourly tick, about 4 runs a day) are held to the old
+ * cadence or slower by the rotation's own record of their last OK run (no extra D1 read): the rotation now comes round
+ * every 2.75 h and the heavy trigger every 3 h. 5 h, not 6 h, so jitter between visits cannot make a step skip every second
+ * round. Used by the 15-minute rotation's ungated steps and by the heavy lane's image audit.
+ */
+export const UNGATED_STEP_MIN_INTERVAL_MS = 5 * 60 * 60 * 1000
+
 export interface StepState {
   startedAt: string | null
   finishedAt: string | null
