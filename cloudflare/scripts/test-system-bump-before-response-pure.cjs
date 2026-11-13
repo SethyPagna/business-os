@@ -29,6 +29,8 @@ const events = []
 const bumps = []
 const versions = {}
 let bumpDoesNothing = false
+let unreadableCounters = false
+const cacheKey = load('lib/cacheKey.ts')
 let integrity = async () => ({ errors: [], repairs: 0, summary: '' })
 const cache = {
   bumpVersion: async (_env, namespace) => cache.bumpVersions(_env, [namespace]),
@@ -38,7 +40,8 @@ const cache = {
     if (!bumpDoesNothing) for (const namespace of list) versions[namespace] = (versions[namespace] || 0) + 1
     events.push(`bump-done:${list.join('+')}`)
   },
-  getVersionsWithFallback: async (_env, list) => list.map((namespace) => String(versions[namespace] || 0)),
+  getVersionsWithFallback: async (_env, list) => list.map((namespace) => unreadableCounters ? cacheKey.unsafeVersionToken() : String(versions[namespace] || 0)),
+  isUnsafeVersion: cacheKey.isUnsafeVersion,
   getVersionWithFallback: async (_env, namespace) => String(versions[namespace] || 0),
 }
 const hub = { broadcast: async (_env, channel) => { events.push(`broadcast:${channel}`) } }
@@ -109,6 +112,16 @@ const post = async (url, body) => {
       assert.equal(got.json.cache_invalidated, false)
       assert.equal(got.json.refresh_pending, true)
     } finally { bumpDoesNothing = false }
+  })
+
+  await check('N3: counters unreadable (KV empty, D1 down): the random fallback tokens never count as an invalidation', async () => {
+    unreadableCounters = true
+    try {
+      const got = await post(recoveryUrl, { step: 'apply' })
+      assert.equal(got.status, 200, JSON.stringify(got.json))
+      assert.equal(got.json.cache_invalidated, false)
+      assert.equal(got.json.refresh_pending, true)
+    } finally { unreadableCounters = false }
   })
 
   await check('F5: a repair whose later step throws still bumps products, stock and sales before the 500', async () => {

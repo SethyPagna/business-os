@@ -15,7 +15,7 @@ import { sanitizeMediaList } from '../lib/media'
 import { ensureCoreDataInvariants, dropAllCustomTables, FACTORY_RESET_TABLES, PRODUCTS_RESET_TABLES, presentResetTables, resolveSeedAdminPassword } from '../lib/coreDataInvariants'
 import { createCloudflareBackup, createSectionBackup } from '../lib/backup'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { bumpVersion, bumpVersions, getVersionsWithFallback } from '../lib/cache'
+import { bumpVersion, bumpVersions, getVersionsWithFallback, isUnsafeVersion } from '../lib/cache'
 import { reportError } from '../lib/errorReporting'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -1024,7 +1024,9 @@ app.post('/sale-not-paid-stock-recovery-20260909/apply', async (c) => {
     const tokensBefore = await readTokens()
     await bumpVersions(c.env, cacheNamespaces)
     const tokensAfter = await readTokens()
-    const cacheInvalidated = tokensBefore !== null && tokensAfter !== null && tokensBefore.every((token, index) => token !== tokensAfter[index])
+    // An unreadable counter answers a fresh random token on every read, so it would always "differ": it never proves an invalidation (review N3).
+    const readable = (tokens: string[] | null): tokens is string[] => tokens !== null && !tokens.some(isUnsafeVersion)
+    const cacheInvalidated = readable(tokensBefore) && readable(tokensAfter) && tokensBefore.every((token, index) => token !== tokensAfter[index])
     const refreshPending = !cacheInvalidated
     c.executionCtx.waitUntil(Promise.allSettled([
       broadcast(c.env, 'sales', { action: 'update', recovery: recovery.SALE_NOT_PAID_STOCK_RECOVERY_TARGET }),
