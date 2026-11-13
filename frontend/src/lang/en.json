@@ -2223,6 +2223,7 @@
   "export_backup_desc": "Creates a full Business OS Docker backup with Postgres data, R2 or offline object assets, settings, users, stock, checksums, and restore metadata.",
   "export_backup_success": "Backup exported successfully",
   "export_backup_title": "Export backup",
+  "export_backup_cloudflare_desc": "Creates a full backup of your shop data: settings, users, stock, sales and returns, with what is needed to restore it. Automatic backups run once a day after the shop closes and keep the newest 7 days.",
   "export_branch_performance": "Branch Performance",
   "export_branch_stock": "Export per-branch stock",
   "export_button_hint": "Download products as a customizable XLSX file",
