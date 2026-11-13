@@ -9,7 +9,7 @@ const { Miniflare } = require('miniflare')
 
 const root = path.join(__dirname, '..', 'src')
 // undoAppliers loads ./cache lazily (await import) after loadTs has restored Module._load, so the lazy require must resolve here: the cache layer needs KV, a no-op bump stands in.
-const runtimeRequire = request => request === './cache' ? { bumpVersion: async () => {} } : require(request)
+const runtimeRequire = request => request === './cache' ? { bumpVersion: async () => {}, bumpVersions: async () => {} } : require(request)
 function loadTs(rel, stubs = {}) {
   const file = path.join(root, rel)
   const { outputText } = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
@@ -117,7 +117,7 @@ function loadRoute(nativeDb, realMergeRuntime = false) {
     '../lib/stockTransaction': stockTransaction, '../lib/catalogCostRecompute': catalogCost, '../lib/productCostReview': costReview, '../lib/productMergeCostPreview': costPreview,
     '../lib/productDelete': productDelete,
     ...(realMergeRuntime ? { '../lib/undoAppliers': undo, '../lib/productMergeSnapshot': snapshot, '../lib/actorSnapshot': actor } : {}),
-    '../lib/audit': { audit: async () => {}, changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false }, '../lib/cache': { bumpVersion: async () => {}, cachedJsonResponse: async () => null, getVersionWithFallback: async () => '1' },
+    '../lib/audit': { audit: async () => {}, changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false }, '../lib/cache': { bumpVersion: async () => {}, bumpVersions: async () => {}, cachedJsonResponse: async () => null, getVersionWithFallback: async () => '1' },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
   })
   return { app: FakeHono.instance, controls, db: rawCompat, undo, productDelete }
