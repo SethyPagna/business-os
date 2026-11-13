@@ -63,6 +63,14 @@ export function scheduledBackupGate(nowMs: number, lastMs: number, afterHourLoca
   return { due: false, reason: 'before-close' }
 }
 
+/**
+ * The business night an instant belongs to: the Cambodia date on which the close hour last passed (21:00 on the 12th to
+ * 20:59 on the 13th is night 2026-11-12). The same grouping scheduledBackupGate uses for the date a backup covers.
+ */
+export function scheduledBackupNightOf(ms: number, afterHourLocal: number): string {
+  return businessDateOf(ms - afterHourLocal * 60 * MINUTE_MS)
+}
+
 export type BackupCoverageItem = { uploaded: string | null; finalized: boolean; source?: 'manual' | 'scheduled' | null; scope?: 'full' | 'section' | null }
 
 /**
@@ -98,12 +106,17 @@ export function scheduledBackupCoverageMs(items: readonly BackupCoverageItem[], 
  * gate is due; any other tick runs the other step, which keeps its own minimum
  * interval.
  */
-export function pickHeavyStepIndex(steps: readonly RotationStep[], state: RotationState, nowMs: number, afterHourLocal: number): number | undefined {
+export function pickHeavyStepIndex(steps: readonly RotationStep[], state: RotationState, nowMs: number, afterHourLocal: number, maxAttemptsPerNight: number = Infinity): number | undefined {
   const backupIndex = steps.findIndex((step) => step.id === 'backup')
   if (backupIndex < 0) return undefined
-  const okAt = state.steps.backup?.okAt
+  const record = state.steps.backup
+  const okAt = record?.okAt
   const lastMs = okAt ? Date.parse(okAt) : 0
-  if (scheduledBackupGate(nowMs, lastMs, afterHourLocal).due) return backupIndex
+  // Visits that threw or were killed this night (counted per night by the step's attemptWindow): after maxAttemptsPerNight the night
+  // is given up and the tick goes to the other step, so a backup that keeps failing neither re-reads the whole database every
+  // 3 h nor starves the image audit. The next night starts with a fresh allowance.
+  const exhausted = !!record && record.windowKey === scheduledBackupNightOf(nowMs, afterHourLocal) && (record.windowFailures || 0) >= maxAttemptsPerNight
+  if (!exhausted && scheduledBackupGate(nowMs, lastMs, afterHourLocal).due) return backupIndex
   const other = steps.findIndex((step) => step.id !== 'backup')
   return other >= 0 ? other : backupIndex
 }

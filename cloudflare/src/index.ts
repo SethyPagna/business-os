@@ -48,7 +48,7 @@ import { serveUpload } from './lib/imageVariants'
 import { handleImportQueue, handleImportDeadLetterQueue, handleMediaQueue, handleBackupQueue } from './queue'
 import { deliverTelegramShiftOverview, drainDueTelegramShiftOverviews, isShiftOverviewQueueMessage } from './lib/telegram'
 import { maybeRunScheduledBackup } from './lib/backup'
-import { pickHeavyStepIndex } from './lib/backupSchedule'
+import { pickHeavyStepIndex, scheduledBackupNightOf } from './lib/backupSchedule'
 import { getPlanLimits } from './lib/planTier'
 import { driveSyncHasNewBackup, driveSyncScheduleDue, recordDriveSyncError } from './lib/googleDrive'
 import { checkDriveSyncAuthorizer } from './lib/driveSyncAuthority'
@@ -727,7 +727,7 @@ export function cronHeavySteps(env: Env, label: (name: string, step: () => Promi
     // maybeRunScheduledBackup answers `incomplete: true` while tonight's set is still copying (or ended failed/partial):
     // runRotationTick then keeps the visit healthy but does not record okAt, so the lane re-selects the backup step on the
     // next heavy tick, which retries only if R2 shows no finalized set.
-    step('backup', () => maybeRunScheduledBackup(env)),
+    { ...step('backup', () => maybeRunScheduledBackup(env)), attemptWindow: (nowMs) => scheduledBackupNightOf(nowMs, getPlanLimits(env).scheduledBackupAfterHourLocal) },
     step('image-audit', () => maybeRunScheduledImageAudit(env), UNGATED_STEP_MIN_INTERVAL_MS),
   ]
 }
@@ -811,7 +811,7 @@ export default {
         // path drains too, but only while someone is using the app).
         drainTelegram: label('telegram-shift-overview', () => drainDueTelegramShiftOverviews(env, Date.now(), { limit: 10, sweepStale: true })),
         heavySteps: () => cronHeavySteps(env, label),
-        heavySelect: (steps, state, nowMs) => pickHeavyStepIndex(steps, state, nowMs, getPlanLimits(env).scheduledBackupAfterHourLocal),
+        heavySelect: (steps, state, nowMs) => pickHeavyStepIndex(steps, state, nowMs, getPlanLimits(env).scheduledBackupAfterHourLocal, getPlanLimits(env).scheduledBackupMaxAttemptsPerDay),
         rotationSteps: () => cronRotationSteps(env, label),
         storeFor: (key) => settingsRotationStore(env, key),
       })

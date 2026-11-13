@@ -2,7 +2,7 @@ import { executeRawRestoreStockTransaction, stockTransactionStatementCount } fro
 import { restoreStockAuthority } from './maintenance'
 import type { Env } from '../index'
 import { getPlanLimits } from './planTier'
-import { scheduledBackupCoverageMs, scheduledBackupGate } from './backupSchedule'
+import { scheduledBackupCoverageMs, scheduledBackupGate, scheduledBackupNightOf } from './backupSchedule'
 import { copyObject, listObjects } from './r2'
 import { streamBackupEvents } from './backupRestoreStream'
 import { assertCustomTableName } from './customTableName'
@@ -1184,6 +1184,15 @@ export async function maybeRunScheduledBackup(env: Env, nowMs: number = Date.now
   const gate = scheduledBackupGate(nowMs, scheduledBackupCoverageMs(backups, afterHourLocal), afterHourLocal)
   if (!gate.due) {
     return { skipped: true, reason: gate.reason === 'already-today' ? 'recent-backup-exists' : 'before-close', latest: newestFinalized, retention }
+  }
+  // Sets that already ended failed/partial this business night. Each try is a full D1 read, so after the plan's allowance the
+  // night is given up (a finished visit: the lane stops re-selecting it and the image audit gets the ticks); tomorrow starts fresh.
+  // Visits that threw or were killed leave no set; the lane bounds those from the cron record (pickHeavyStepIndex).
+  const night = scheduledBackupNightOf(nowMs, afterHourLocal)
+  const failedTonight = backups.filter((item) => !item.finalized && item.status !== 'copying' && item.source === 'scheduled' && item.scope !== 'section'
+    && !!item.uploaded && scheduledBackupNightOf(Date.parse(item.uploaded), afterHourLocal) === night).length
+  if (failedTonight >= getPlanLimits(env).scheduledBackupMaxAttemptsPerDay) {
+    return { skipped: true, reason: 'attempts-exhausted', failedTonight, latest: newestFinalized ?? null, retention }
   }
   const backup = await create(env, 'scheduled')
   // Second pass: the backup just written is now the newest, so this is what

@@ -55,6 +55,10 @@ export interface StepState {
   /** Visits that started and never finished (isolate killed mid-step). */
   killed: number
   runs: number
+  /** Only for steps with an attemptWindow: the window the counter below belongs to. */
+  windowKey?: string
+  /** Failed or killed visits within windowKey (a step that keeps failing is bounded per window by its caller). */
+  windowFailures?: number
 }
 
 export interface RotationState {
@@ -83,6 +87,11 @@ export interface RotationStep {
   run(): Promise<unknown>
   /** Skip the visit when this step last finished OK less than this long ago. */
   minIntervalMs?: number
+  /**
+   * Names the window an attempt belongs to (the backup: its business night). The step record then counts failed or
+   * killed visits per window (windowKey / windowFailures), which a lane selector can read without any extra I/O.
+   */
+  attemptWindow?: (nowMs: number) => string
 }
 
 export interface TickResult {
@@ -120,6 +129,7 @@ function sanitize(raw: unknown): RotationState {
         failures: Number(v.failures) > 0 ? Math.floor(Number(v.failures)) : 0,
         killed: Number(v.killed) > 0 ? Math.floor(Number(v.killed)) : 0,
         runs: Number(v.runs) > 0 ? Math.floor(Number(v.runs)) : 0,
+        ...(typeof v.windowKey === 'string' ? { windowKey: v.windowKey, windowFailures: Number(v.windowFailures) > 0 ? Math.floor(Number(v.windowFailures)) : 0 } : {}),
       }
     }
   }
@@ -203,7 +213,12 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
   if (record.startedAt && (!record.finishedAt || record.finishedAt < record.startedAt)) {
     record.killed += 1
     record.failures += 1
+    if (record.windowKey !== undefined) record.windowFailures = (record.windowFailures || 0) + 1 // counts against the window it died in
     record.error = 'killed before finishing (CPU or wall limit)'
+  }
+  if (step.attemptWindow) {
+    const window = step.attemptWindow(nowMs)
+    if (record.windowKey !== window) { record.windowKey = window; record.windowFailures = 0 }
   }
   record.startedAt = nowIso
   current.steps[step.id] = record
@@ -229,7 +244,7 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
 
   record.finishedAt = new Date(nowMs + Math.max(0, Date.now() - realStart)).toISOString()
   record.runs += 1
-  if (ok) { if (!incomplete) record.okAt = record.finishedAt; record.error = null; record.failures = 0 } else { record.error = error ?? 'error'; record.failures += 1 }
+  if (ok) { if (!incomplete) record.okAt = record.finishedAt; record.error = null; record.failures = 0 } else { record.error = error ?? 'error'; record.failures += 1; if (step.attemptWindow) record.windowFailures = (record.windowFailures || 0) + 1 }
   if (ok && more && current.resumeStreak < MAX_RESUME_STREAK) {
     current.cursor = index
     current.resumeStreak += 1

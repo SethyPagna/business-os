@@ -169,6 +169,11 @@ export type PlanLimits = {
   // CLOUDFLARE_BACKUP_KEEP; the two pools never evict each other.
   scheduledBackupKeep: number
 
+  // How many times the scheduled backup is TAKEN per business night (close hour to the next close hour) when attempts keep
+  // failing: a failed or killed set is retried on the next heavy tick, each try is a full D1 read, so after this many the night
+  // is given up and the image audit gets the ticks. Same on both tiers; the next night starts fresh.
+  scheduledBackupMaxAttemptsPerDay: number
+
   // ---- Data reset --------------------------------------------------------
 
   // system.ts MAX_IMAGE_DELETES_PER_RESET -- R2 deletes fired SEQUENTIALLY,
@@ -459,6 +464,7 @@ const PAID_LIMITS: PlanLimits = {
   scheduledBackupEnabled: true,
   scheduledBackupAfterHourLocal: 21,
   scheduledBackupKeep: 7,
+  scheduledBackupMaxAttemptsPerDay: 2,
   maxImageDeletesPerReset: 500,
   importRetentionMaxJobsPerTier: 20,
   ephemeralDeleteBatch: 5000,
@@ -513,6 +519,7 @@ const FREE_LIMITS: PlanLimits = {
   scheduledBackupEnabled: false,
   scheduledBackupAfterHourLocal: 21,
   scheduledBackupKeep: 7,
+  scheduledBackupMaxAttemptsPerDay: 2,
   maxImageDeletesPerReset: 40,
   importRetentionMaxJobsPerTier: 5,
   ephemeralDeleteBatch: 1000,
