@@ -116,16 +116,18 @@ const HANDLERS = {
   // 6.0.958: the one-step exchange create, called from inside POST /api/returns.
   'returnExchangeCreate.ts': ['createExchangeReturnV1'],
 }
+// RECORDERS: W3 Slice A round 2. An applier RECORDS its broadcasts on ctx.effects; routes/actionHistory.ts sends them in waitUntil after its one awaited
+//   bump. The function awaits a broadcast only when no effects collector is given (a unit test calling run() directly).
+const RECORDERS = {
+  'undoAppliers.ts': ['announceChange'],
+}
 const PENDING = {
-  // Undo/redo replays run inside POST /api/action-history/:id/{undo,redo};
-  // UndoApplierContext carries no waitUntil yet.
-  'undoAppliers.ts': ['replayProductMergeGroup', 'replayMergeCostReview', 'replayProductRemove', 'APPLIERS'],
   // The create-fold without a starting quantity (POST /api/products and an approved queued create) awaits its
   // cache bump and broadcast; it moved here from routes/products.ts unchanged. The fold WITH a quantity
   // (foldCreateWithStockInWrite) is threaded.
   'createFold.ts': ['foldCreateIntoExisting'],
 }
-const classes = { QUEUE_ONLY, NOTIFIERS, THREADED, HANDLERS, PENDING }
+const classes = { QUEUE_ONLY, NOTIFIERS, THREADED, HANDLERS, RECORDERS, PENDING }
 const classOf = (file, unit) => Object.keys(classes).find((name) => (classes[name][file] || []).includes(unit))
 
 const libDir = path.join(src, 'lib')
@@ -179,6 +181,15 @@ for (const [file, units] of Object.entries(THREADED)) {
     assert.match(body, /if \(waitUntil\) waitUntil\(\w+\)\s*\n?\s*else await \w+/, `${file}:${unit} defers to waitUntil when one is given`)
   }
 }
+
+for (const [file, units] of Object.entries(RECORDERS)) {
+  const lines = libs.find((lib) => lib.file === file).lines
+  for (const unit of units) {
+    assert.match(unitText(lines, unit), /if \(ctx\.effects\) \{ ctx\.effects\.broadcasts\.push\(/, `${file}:${unit} records onto the route's collector when one is given`)
+  }
+}
+const historyRoute = routes.find((route) => route.file === 'actionHistory.ts').lines.join('\n')
+assert.match(historyRoute, /waitUntil\(\(async \(\) => \{[^\n]*pending\.map\(\(event\) => broadcast\(/, 'the History route sends the recorded broadcasts in waitUntil')
 
 for (const [file, units] of Object.entries(HANDLERS)) {
   const lines = libs.find((lib) => lib.file === file).lines

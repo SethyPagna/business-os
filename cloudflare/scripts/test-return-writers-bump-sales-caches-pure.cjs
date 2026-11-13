@@ -30,6 +30,7 @@ const notify = bulk.slice(bulk.indexOf('export async function bumpReturnBulkActi
 assert(/bumpVersions\(env, RETURN_WRITE_CACHE_NAMESPACES\)/.test(notify.slice(0, notify.indexOf('\n}\n'))), 'a grouped return action bumps the shared list')
 assert(/export async function notifyReturnBulkAction[^}]*bumpReturnBulkAction\(env\)[^}]*announceReturnBulkAction\(env\)/.test(bulk), 'the replay notifier is the bump followed by the announce')
 const history = read('routes/actionHistory.ts')
-assert(/RETURN_BULK_ACTION_KIND\s*\?\s*bumpReturnBulkAction\(c\.env\)/.test(history), 'undo and redo of a grouped return action bump with the same helper')
+const listed = (history.match(/case RETURN_BULK_ACTION_KIND: return \[([^\]]*)\]/) || [])[1] || ''
+assert.deepEqual([...listed.matchAll(/'([a-z_]+)'/g)].map((match) => match[1]).sort(), [...new Set(namespaces)].sort(), "undo and redo of a grouped return action bump the shared list, in the history route's one bump call")
 assert(/RETURN_BULK_ACTION_KIND\s*\?\s*announceReturnBulkAction\(c\.env\)/.test(history), 'undo and redo of a grouped return action announce with the same helper')
 console.log('return writers bump the sales caches: ok')

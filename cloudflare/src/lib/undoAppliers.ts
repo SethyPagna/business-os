@@ -10,7 +10,7 @@ import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedStatement } from 
 import { mergeCostUndoStatements, parseMergeCostOutcome, type MergeCostOutcome } from './productCostReview'
 import { audit } from './audit'
 import { hasRecordedSaleMoneyPrecision } from './saleMoneyPrecision'
-import { broadcast } from '../durable-objects/broadcastHub'
+import { broadcast, type BroadcastChannel } from '../durable-objects/broadcastHub'
 import {
   BRANCH_REPLAY_ROW_SQL,
   otherCanonicalBranchSql,
@@ -90,6 +90,31 @@ export interface UndoApplierContext {
   generation?: unknown
   stockSessionQueryBudget?: StockSessionQueryBudget
   returnBulkQueryBudget?: ReturnBulkQueryBudget
+  /**
+   * W3 Slice A round 2. A caller that hands this in (routes/actionHistory.ts) owns the ORDER: the applier only RECORDS the cache namespaces it
+   * moved and the broadcasts it would send, and the route awaits ONE bumpVersions for all of them before it answers and only then announces,
+   * so no peer is told of a change while the old cache version is still current. Without it (a unit test calling run() directly) the applier
+   * acts at once, as before.
+   */
+  effects?: UndoApplierEffects
+}
+
+export interface UndoApplierEffects {
+  namespaces: string[]
+  broadcasts: Array<{ channel: BroadcastChannel; payload: Record<string, unknown> }>
+}
+
+/** Send a peer broadcast now, or record it for the route to send after its bump. */
+async function announceChange(ctx: UndoApplierContext, channel: BroadcastChannel, payload: Record<string, unknown>): Promise<void> {
+  if (ctx.effects) { ctx.effects.broadcasts.push({ channel, payload }); return }
+  await broadcast(ctx.env, channel, payload)
+}
+
+/** Advance cache versions now (swallowed, as the old inline bump was), or record the namespaces for the route's single bump. */
+async function bumpChange(ctx: UndoApplierContext, namespaces: string[]): Promise<void> {
+  if (ctx.effects) { for (const namespace of namespaces) if (!ctx.effects.namespaces.includes(namespace)) ctx.effects.namespaces.push(namespace); return }
+  const { bumpVersions } = await import('./cache')
+  await bumpVersions(ctx.env, namespaces).catch(() => {})
 }
 
 export interface UndoApplierOutcome {
@@ -3149,8 +3174,8 @@ async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: Un
     }
   }
   const pending = ctx.direction === 'undo' ? targetIndex : children.length - targetIndex - 1
-  await broadcast(ctx.env, 'products', { action: 'update' })
-  await broadcast(ctx.env, 'inventory', { action: 'update' })
+  await announceChange(ctx, 'products', { action: 'update' })
+  await announceChange(ctx, 'inventory', { action: 'update' })
   return {
     complete: final,
     continuation_required: !final,
@@ -3204,9 +3229,9 @@ async function replayProductRemove(payload: Record<string, unknown>, ctx: UndoAp
     throw error
   }
   // Removing or restoring a product changes the product lists; the generic bump after an applier covers only stock (merge appliers are handled by the caller).
-  { const { bumpVersion } = await import('./cache'); await bumpVersion(ctx.env, 'products').catch(() => {}) }
-  await broadcast(ctx.env, 'products', { action: ctx.direction === 'undo' ? 'restore' : 'delete', id: snapshot.plan.product_id })
-  await broadcast(ctx.env, 'inventory', { action: 'update' })
+  await bumpChange(ctx, ['products'])
+  await announceChange(ctx, 'products', { action: ctx.direction === 'undo' ? 'restore' : 'delete', id: snapshot.plan.product_id })
+  await announceChange(ctx, 'inventory', { action: 'update' })
   return { complete: true, continuation_required: false, processed_children: 1, pending_children: 0, generation: expectedGeneration + 1 }
 }
 
@@ -3526,8 +3551,8 @@ async function replayMergeCostReview(payload: Record<string, unknown>, ctx: Undo
     }
     throw error
   }
-  await broadcast(ctx.env, 'products', { action: 'update' })
-  await broadcast(ctx.env, 'inventory', { action: 'update' })
+  await announceChange(ctx, 'products', { action: 'update' })
+  await announceChange(ctx, 'inventory', { action: 'update' })
   return { complete: true, continuation_required: false, processed_children: 1, pending_children: 0, generation: generation + 1 }
 }
 
@@ -3825,9 +3850,9 @@ const APPLIERS: Record<string, UndoApplierDef> = {
           { via: 'undo_applier', applier: SALE_ADD_ITEMS_ACTION_KIND, lines: (reversal.lines || []).length },
         )
       }
-      await broadcast(ctx.env, 'sales', { action: 'update', id: saleId })
-      await broadcast(ctx.env, 'products', { action: 'update' })
-      await broadcast(ctx.env, 'inventory', { action: 'update' })
+      await announceChange(ctx, 'sales', { action: 'update', id: saleId })
+      await announceChange(ctx, 'products', { action: 'update' })
+      await announceChange(ctx, 'inventory', { action: 'update' })
     },
   },
   // Payload shape: { applier: 'branch.update', id, fields: { name, location,
@@ -3890,7 +3915,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         id,
         { via: 'undo_applier', applier: 'branch.update' },
       )
-      await broadcast(ctx.env, 'branches', { action: 'update', id })
+      await announceChange(ctx, 'branches', { action: 'update', id })
     },
   },
   // Payload shape: { applier: 'product.merge', snapshot_id }. Both the undo_
@@ -3968,8 +3993,8 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         'product', reversal.dupId,
         { via: 'undo_applier', applier: 'product.merge', keeperId: reversal.keeperId },
       )
-      await broadcast(ctx.env, 'products', { action: 'update' })
-      await broadcast(ctx.env, 'inventory', { action: 'update' })
+      await announceChange(ctx, 'products', { action: 'update' })
+      await announceChange(ctx, 'inventory', { action: 'update' })
     },
   },
   // Payload shape: { applier: 'product.merge.bulk', snapshot_id }. The snapshot
@@ -4023,8 +4048,8 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         'product', reversals[0]?.keeperId ?? null,
         { via: 'undo_applier', applier: 'product.merge.bulk', count: reversals.length },
       )
-      await broadcast(ctx.env, 'products', { action: 'update' })
-      await broadcast(ctx.env, 'inventory', { action: 'update' })
+      await announceChange(ctx, 'products', { action: 'update' })
+      await announceChange(ctx, 'inventory', { action: 'update' })
     },
   },
   [PRODUCT_MERGE_GROUP_ACTION_KIND]: {
@@ -4052,9 +4077,8 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       const { canEditAcquisitionCosts } = await import('./acquisitionCostAccess')
       const { actorId } = await import('./actorSnapshot')
       const productId = await replayProductConflictMark(getDb(ctx.env), { id: actorId(ctx.user), name: actorSnapshot(ctx.user) }, canEditAcquisitionCosts(ctx.user), ctx.direction, payload)
-      const { bumpVersion } = await import('./cache')
-      await bumpVersion(ctx.env, 'products')
-      await broadcast(ctx.env, 'products', { action: 'update', id: productId })
+      await bumpChange(ctx, ['products'])
+      await announceChange(ctx, 'products', { action: 'update', id: productId })
     },
   },
   // Payload shape: { applier: 'supplier.backfill', snapshot_id }. The snapshot
@@ -4105,8 +4129,8 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         'product', reversal.productId ?? null,
         { via: 'undo_applier', applier: 'supplier.backfill', supplierId: reversal.supplierId, lots: (reversal.lots || []).length },
       )
-      await broadcast(ctx.env, 'products', { action: 'update' })
-      await broadcast(ctx.env, 'inventory', { action: 'update' })
+      await announceChange(ctx, 'products', { action: 'update' })
+      await announceChange(ctx, 'inventory', { action: 'update' })
     },
   },
 }
