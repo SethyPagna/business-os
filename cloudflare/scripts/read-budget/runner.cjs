@@ -126,13 +126,14 @@ async function pinProblems(world, entry, statements) {
 // The Worker keeps the read switches it last read for READ_SWITCH_MEMO_MS (15 s) per isolate, and the ANALYZE pass measures every shape warm on ONE isolate. A shape that names switches
 // (the ic_simple ones: the switch row is set around their request only) would otherwise run on the switch state of the shape before it: right after a switch-OFF shape it was measured on
 // the OFF path (218M rows read under ANALYZE instead of ~0.3M) and a green run proved nothing about the ON path. So whenever the switch state a shape needs differs from the one the
-// isolate last read, a fresh isolate (and a fresh login) is started first; consecutive shapes with the same switches share an isolate as before.
+// isolate last read, a fresh isolate is started first; consecutive shapes with the same switches share an isolate as before. The session cookie survives the restart, so the fence
+// does not log in again: every login adds a session row, and a pass with more switch changes read more rows on every later shape (customers-phone-search, files).
 function switchFence() {
   let read = ''
   return async (world, shape) => {
     const wanted = (shape.switches || []).join(',') + (shape.without ? '-' + shape.without.join(',') : '')
     if (wanted === read) return
-    await world.restart(); await world.login()
+    await world.restart()
     read = wanted
   }
 }
