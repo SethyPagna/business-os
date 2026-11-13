@@ -169,3 +169,16 @@ await (async function dashboardShouldKeepOutOfStockInsideProductTotalsKpi() {
   assert.doesNotMatch(source, /id:\s*'out-of-stock'/)
   console.log('PASS dashboard keeps stock alerts inside total products KPI')
 })()
+
+await (async function driveCopyNoteSaysImagesComeFromTheAppsOwnBackups() {
+  // A Drive copy is manifest-only: images restore only while the app's own backups still keep them (6.0.1951 note, both languages).
+  const page = fs.readFileSync(new URL('../src/components/utils-settings/Backup.tsx', import.meta.url), 'utf8')
+  assert.ok(page.includes("copy('drive_sync_images_note'"), 'the Drive section renders the note')
+  for (const lang of ['en', 'km']) {
+    const pack = JSON.parse(fs.readFileSync(new URL('../src/lang/' + lang + '.json', import.meta.url), 'utf8'))
+    assert.ok(typeof pack.drive_sync_images_note === 'string' && pack.drive_sync_images_note.length > 20, lang + ' pack has the Drive images note')
+  }
+  const en = JSON.parse(fs.readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8'))
+  assert.match(en.drive_sync_images_note, /missing/)
+  console.log('PASS Drive copy note explains images restore only while the app still keeps them')
+})()

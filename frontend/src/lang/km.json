@@ -2101,6 +2101,7 @@
   "drive_sync_folder_name": "ឈ្មោះថត Drive",
   "drive_sync_forget_credentials": "ភ្លេចព័ត៌មានសម្ងាត់កម្មវិធី",
   "drive_sync_forget_credentials_confirm": "ភ្លេចព័ត៌មានសម្ងាត់កម្មវិធី Google Drive ដែលបានរក្សាទុកផងដែរឬទេ? វានឹងលុប client ID, client secret, និង redirect URI លំនាំដើម រហូតដល់អ្នកបញ្ចូលពួកវាម្ដងទៀត។",
+  "drive_sync_images_note": "ច្បាប់ចម្លង Google Drive ស្តារបានតែរូបភាពដែលនៅតែត្រូវបានរក្សាទុកក្នុង backup របស់កម្មវិធីនេះប៉ុណ្ណោះ។ រូបភាពណាដែលលែងត្រូវបានរក្សាទុក នឹងត្រូវរាយជា «បាត់» ពេលស្តារ។",
   "drive_sync_interval": "ចន្លោះពេលធ្វើសមកាលកម្ម (នាទី)",
   "drive_sync_interval_note": "Business OS ពិនិត្យរៀងរាល់ ៦ម៉ោងតាមលំនាំដើម (ជម្រើសរហ័ស ១, ៣, ៦, ១២ ឬ ២៤ ម៉ោង) ប៉ុន្តែ backup ត្រូវបានបង្កើតតែម្ដងក្នុងមួយថ្ងៃ បន្ទាប់ពីបិទហាង ដូច្នេះ Google Drive ជាធម្មតាទទួលបានច្បាប់ចម្លងថ្មីមួយក្នុងមួយថ្ងៃ។ Google Drive រក្សាទុកបានរហូតដល់ ១០ កំណែ backup។",
   "drive_sync_open_setup": "បើកការកំណត់ Google Drive",

@@ -1536,6 +1536,9 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
           <p className="text-sm text-gray-500 dark:text-gray-400">
             {copy('drive_sync_desc', 'Mirror Cloudflare backups to Google Drive on an optional background schedule.')}
           </p>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            {copy('drive_sync_images_note', 'A Google Drive copy restores images only while they are still kept in the app’s own backups. Any image no longer kept is listed as missing when you restore.')}
+          </p>
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
           <SectionChip label={copy('status', 'Status')} value={status?.connected ? copy('connected', 'Connected') : copy('not_connected', 'Not connected')} tone={status?.connected ? 'blue' : 'amber'} />
