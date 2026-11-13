@@ -4,11 +4,12 @@
 --                           only a legacy row, a restore or raw SQL could.
 --   options_beyond_first3   customers with a phone on a raw option at position 3 or later while one of the raw positions 0-2 carries no data: the classifier keeps the
 --                           first 3 options that carry data (lib/contactOptions.ts collectNormalizedContactOptions) and so sees that phone, the view keeps raw positions 0-2 and does not.
--- Expected 0 and 0 today. A non-zero is a writer to find (the POST write guard still refuses such a number, so the customer-create path answers 409 rather than a 500).
+-- Expected 0 and 0 today (ops:expect-zero fails the run on a non-zero, D10). A non-zero is a writer to find (the POST write guard still refuses such a number, so the customer-create path answers 409 rather than a 500).
 -- POST (after a deploy, after a bulk import and after a restore): watch both. RECOVERY if non-zero: rewrite the customer's address JSON (phone as text, empty options removed); the 0302 triggers re-index it.
 -- Cost: one pass over customers with one json_each per customer.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:expect-zero numeric_option_phones,options_beyond_first3
 -- ops:max-rows-read 45444
 SELECT
   (SELECT COUNT(*) FROM customers c WHERE json_valid(c.address) AND json_type(c.address) = 'array'
