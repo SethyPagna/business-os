@@ -464,13 +464,13 @@ app.post('/reset-data', async (c) => {
       })
 
       await rotateEpochAfterReset(c.env, 'reset-data')
+      await bumpVersion(c.env, 'products')
       c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'reset', mode }))
       c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'reset', mode }))
       if (includeMovements || includeSales) {
         c.executionCtx.waitUntil(broadcast(c.env, 'sales', { action: 'reset', mode }))
         c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'reset', mode }))
       }
-      c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
 
       const keptParts = []
       if (!includeSales) keptParts.push('sales, returns')
@@ -671,6 +671,7 @@ app.post('/reset-data', async (c) => {
     // momentarily behind. Previously this route never broadcast or
     // invalidated the products search cache at all.
     await rotateEpochAfterReset(c.env, 'reset-data')
+    await bumpVersion(c.env, 'products')
     c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'reset', mode }))
     c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'reset', mode }))
     c.executionCtx.waitUntil(broadcast(c.env, 'sales', { action: 'reset', mode }))
@@ -679,7 +680,6 @@ app.post('/reset-data', async (c) => {
       c.executionCtx.waitUntil(broadcast(c.env, 'customers', { action: 'reset', mode }))
       c.executionCtx.waitUntil(broadcast(c.env, 'suppliers', { action: 'reset', mode }))
     }
-    c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
 
     return c.json({
       success: true,
@@ -1237,10 +1237,9 @@ app.post('/finalize-migration', async (c) => {
         label: `Migration finalize: zeroed live stock (${affected.branch_stock} branch-stock rows, ${affected.products} products)`,
         step,
       })
+      await bumpVersions(c.env, ['products', 'inventory'])
       c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'reset', step }))
       c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'reset', step }))
-      c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
-      c.executionCtx.waitUntil(bumpVersion(c.env, 'inventory'))
 
       return c.json({
         success: true,
@@ -1262,10 +1261,9 @@ app.post('/finalize-migration', async (c) => {
       label: `Migration finalize: parked ${affected.branch_batch_stock} historical lot rows`,
       step,
     })
+    await bumpVersions(c.env, ['products', 'inventory'])
     c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'reset', step }))
     c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'reset', step }))
-    c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
-    c.executionCtx.waitUntil(bumpVersion(c.env, 'inventory'))
 
     return c.json({
       success: true,

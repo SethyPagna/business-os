@@ -31,8 +31,8 @@ import {
 } from '../lib/returnsStock'
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { computeSaleTotals } from '../lib/saleTotals'
-import { applyReturnBulkActionOutcome, notifyReturnBulkAction, readReplacementOutstanding, ReturnBulkError } from '../lib/returnBulkAction'
-import { applyLegacyReturnConversion, canConvertLegacyReturns, notifyLegacyReturnConversion, planLegacyReturnConversion, ReturnLegacyConvertError } from '../lib/returnLegacyConvert'
+import { announceReturnBulkAction, applyReturnBulkActionOutcome, bumpReturnBulkAction, readReplacementOutstanding, ReturnBulkError } from '../lib/returnBulkAction'
+import { announceLegacyReturnConversion, applyLegacyReturnConversion, bumpLegacyReturnConversion, canConvertLegacyReturns, planLegacyReturnConversion, ReturnLegacyConvertError } from '../lib/returnLegacyConvert'
 import { bulkAssertion, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert, SaleRecordEventError, sha256Hex } from '../lib/saleRecordEvents'
 import { loadReturnRecords } from '../lib/returnRecords'
@@ -1256,7 +1256,10 @@ app.post('/bulk', async (c) => {
     const bulkCallCounting = (await bulkMetrics?.callCounting?.()) === true
     const { receipt: result, wrote } = await applyReturnBulkActionOutcome(c.env, user, body, branchRedirectTarget(c),
       bulkMetrics ? { statementsUsed: () => (bulkCallCounting ? bulkMetrics.invocation.attemptedCalls : bulkMetrics.attemptedStatements) + 1, reserveStatements: 8, callCounting: bulkCallCounting } : undefined)
-    if (!result.dryRun) c.executionCtx.waitUntil(notifyReturnBulkAction(c.env))
+    if (!result.dryRun) {
+      await bumpReturnBulkAction(c.env)
+      c.executionCtx.waitUntil(announceReturnBulkAction(c.env))
+    }
     // Telegram: a return cancelled or restored (owner, 27 Sep 2026). Only the
     // status field, only the rows that actually moved.
     const changedIds = Array.isArray(result.changedIds) ? result.changedIds.map(Number) : []
@@ -1299,7 +1302,10 @@ app.post('/legacy-convert', async (c) => {
   const body: Record<string, unknown> = await c.req.json<Record<string, unknown>>().catch(() => ({}))
   try {
     const result = await applyLegacyReturnConversion(c.env, c.get('user'), body)
-    if (result.converted.length && !result.replayed) c.executionCtx.waitUntil(notifyLegacyReturnConversion(c.env))
+    if (result.converted.length && !result.replayed) {
+      await bumpLegacyReturnConversion(c.env)
+      c.executionCtx.waitUntil(announceLegacyReturnConversion(c.env))
+    }
     return c.json(result)
   } catch (error) { return legacyConvertFailure(c, error) }
 })
@@ -2655,9 +2661,10 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     return c.json({ error: 'The result could not be confirmed. Retry the same request.', code: 'unknown_outcome', action: 'retry_same_request' }, 503)
   }
   const response = JSON.parse(committed.response_json) as ReturnCreateResponse
+  // W3 Slice A: the bump is awaited after the commit and before the response; the broadcasts follow it in waitUntil.
+  await bumpVersions(c.env, RETURN_WRITE_CACHE_NAMESPACES)
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return', id: response.id }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(bumpVersions(c.env, RETURN_WRITE_CACHE_NAMESPACES))
   // A replacement the customer takes away deducts stock like a sale does (owner ruling 6 Oct 2026: alert on crossing).
   if (replacementLines.length) c.executionCtx.waitUntil(recordStockCrossings(c.env, { saleId: null, lines: replacementLines.map((line) => ({ productId: line.productId, branchId: line.branchId, quantity: line.quantity })) }))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'create', id: response.id }))
@@ -3039,9 +3046,9 @@ app.post('/supplier', async (c) => {
   }
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', 'supplier_return', returnId, { returnNumber, settlement, supplierName: body.supplier_name || null, supplierLossUsd })
+  await bumpVersions(c.env, RETURN_WRITE_CACHE_NAMESPACES)
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'supplier_return', id: returnId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(bumpVersions(c.env, RETURN_WRITE_CACHE_NAMESPACES))
   // Telegram: supplier return = stock out with the settlement money.
   c.executionCtx.waitUntil(sendReturnTelegramEvent(c.env, returnId, {
     kind: 'supplier', returnNumber, party: body.supplier_name || null,
@@ -3915,9 +3922,9 @@ app.patch('/:id', async (c) => {
   }, changedFields(existing as unknown as Record<string, unknown>, returnUpdateValues, {
     keys: Object.keys(returnUpdateValues),
   }))
+  await bumpVersions(c.env, RETURN_WRITE_CACHE_NAMESPACES)
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return_edit', id: Number(id) }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(bumpVersions(c.env, RETURN_WRITE_CACHE_NAMESPACES))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'update', id: Number(id) }))
   if (existing.sale_id) {
     c.executionCtx.waitUntil(broadcast(c.env, 'sales', { action: 'update', id: existing.sale_id }))

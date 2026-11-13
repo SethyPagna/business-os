@@ -2076,7 +2076,7 @@ app.post('/:id/suppliers/backfill', async (c) => {
   })
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'supplier_backfill', 'product', productId, { supplierId, lots: ids.length })
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
   return c.json({ success: true, updated: ids.length, actionHistoryId: undoRecord?.actionHistoryId ?? null })
@@ -2407,7 +2407,7 @@ app.post('/bulk-price-adjust', async (c) => {
     try {
       const prior = await findBulkPriceReceipt(db, actorIdForReceipt, requestId)
       if (prior) {
-        c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+        await bumpVersion(c.env, 'products')
         c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'bulk-price-adjust' }))
         return receiptResponse(prior, true)
       }
@@ -2492,7 +2492,7 @@ app.post('/bulk-price-adjust', async (c) => {
   let receipt
   try { receipt = await findBulkPriceReceipt(db, actorIdForReceipt, requestId) } catch { return outcomeUnknown() }
   if (!receipt) return outcomeUnknown()
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'bulk-price-adjust' }))
   return receiptResponse(receipt, uncertain || receipt.nonce !== claimNonce)
 })
@@ -2671,7 +2671,7 @@ app.post('/', async (c) => {
     throw error
   }
   const { item, id } = created
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'create', id }))
   return c.json(normalProductWriteResponse({ item, id, success: true }))
 })
@@ -3052,7 +3052,7 @@ app.put('/:id', async (c) => {
           throw error
         }
         // The identity write is committed whatever the fold below does: announce it, so no refusal after it leaves a stale catalogue.
-        c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+        await bumpVersion(c.env, 'products')
         let foldResult: Awaited<ReturnType<typeof foldDuplicateProductInto>>
         try {
           const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
@@ -3110,7 +3110,7 @@ app.put('/:id', async (c) => {
         const item = await db.prepare('SELECT * FROM products WHERE id = @id').get({ id: duplicate.id })
         // The edit renamed this row onto an existing identity and folded it in: that is a merge, announced as one.
         announceProductAlert(c, user, PRODUCT_MERGE_ALERT_HEADING, formatProductMergeAlertLines({ kept: String(duplicate.name || ''), merged: String(dupRow.name || ''), by: actorSnapshot(user) }))
-        c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+        await bumpVersion(c.env, 'products')
         c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: duplicate.id }))
         return c.json(normalProductWriteResponse({ item, product: item, id: duplicate.id, merged_into: duplicate.id, success: true, foldResult: { quantityMoved: foldResult.quantityMoved, batchesMoved: foldResult.batchesMoved } }))
       }
@@ -3160,7 +3160,7 @@ app.put('/:id', async (c) => {
     })
     if (pendingId != null) {
       // A group rename carried above is already written: queueing the rest of the edit must not hide it.
-      if (renamedProductIds.length) c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+      if (renamedProductIds.length) await bumpVersion(c.env, 'products')
       return c.json({ success: true, pending: true, pendingActionId: pendingId }, 202)
     }
   }
@@ -3353,14 +3353,14 @@ app.delete('/:id', async (c) => {
       let response: Record<string, unknown> = {}
       try { response = replay.response_json ? JSON.parse(replay.response_json) : {} } catch { response = {} }
       // The removal committed and its acknowledgement was lost: nothing announced it yet.
-      c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+      await bumpVersion(c.env, 'products')
       return c.json({ success: true, ...response, replayed: true })
     }
     return c.json({ success: false, code: 'review_state_conflict', error: 'The product changed before the removal committed.' }, 409)
   }
   const committed = await db.prepare(`SELECT operation_id,product_id,status,action_history_id,generation,response_json
     FROM product_remove_operations WHERE operation_id=@operation`).get<ProductRemoveOperationRow>({ operation: operationId })
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'delete', id }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
   return c.json({ success: true, changes: 1, operation_id: operationId, product_id: id, status: committed?.status || 'undo_ready',
@@ -3513,7 +3513,7 @@ app.post('/variant', async (c) => {
     throw error
   }
   const { item, id } = created
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'create', id }))
   return c.json(normalProductWriteResponse({ item, id, success: true }))
 })
@@ -3874,7 +3874,7 @@ app.post('/unwire-images', async (c) => {
     scope: clearAll ? 'all' : 'selection',
     productCount: clearAll ? cleared : productIds.length,
   })
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  await bumpVersion(c.env, 'products')
   return c.json({ success: true, cleared })
 })
 
@@ -10440,7 +10440,7 @@ app.post('/zero-quantity-delete', async (c) => {
       if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
       throw error
     }
-    c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+    await bumpVersion(c.env, 'products')
     c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'delete' }))
   }
 
@@ -10533,8 +10533,7 @@ app.post('/lookups/replace', async (c) => {
     to: normalizedTarget || null,
     updated_count: updatedCount,
   })
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
-  if (type === 'brand') c.executionCtx.waitUntil(bumpVersion(c.env, 'settings'))
+  await bumpVersions(c.env, type === 'brand' ? ['products', 'settings'] : ['products'])
   return c.json({ success: true, updatedCount })
 })
 

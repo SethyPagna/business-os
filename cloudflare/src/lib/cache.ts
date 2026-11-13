@@ -268,7 +268,17 @@ export async function invalidateCachesAfterMaintenance(env: Env, source: string)
   }
 }
 
+// A writer awaits this AFTER its commit and BEFORE its response, so the next read by the same actor already keys on the new version. A fault
+// here is logged and swallowed: the write is committed, and a bump that failed must never turn it into a non-2xx (the caches age out by TTL).
 export async function bumpVersions(env: Env, namespaces: string[]): Promise<void> {
+  try {
+    await advanceVersions(env, namespaces)
+  } catch (error) {
+    console.error('[cache] version bump failed', namespaces, error)
+  }
+}
+
+async function advanceVersions(env: Env, namespaces: string[]): Promise<void> {
   const unique = Array.from(new Set(namespaces.filter(Boolean)))
   if (!unique.length) return
   for (const namespace of unique) versionMemo.delete(namespace)

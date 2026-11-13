@@ -106,7 +106,7 @@ const batchRoute = loadReal('routes/batches.ts', {
   '../lib/audit': { audit: async () => {} },
   '../lib/permissions': { hasPermission: () => true, getActionTier: () => 'full', isActionBlocked: () => false },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
-  '../lib/cache': { bumpVersion: async () => {} },
+  '../lib/cache': { bumpVersion: async () => {}, bumpVersions: async () => {} },
   '../lib/productBatches': { getTrackedProductIds: async () => [], listBatchesForProduct: async () => [], receiveBatchStock: async () => { throw new Error('not used') } },
   '../lib/returnsStock': { listOpenDamagedLots: async () => [] },
   '../lib/batchCode': batchCode,
@@ -142,7 +142,7 @@ const stockLotAdjustment = loadReal('lib/stockLotAdjustment.ts', {
   './damagedLotActions': { planHoldAsTagged: () => { throw new Error('not used') } },
   './stockReason': loadReal('lib/stockReason.ts'),
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
-  './cache': { bumpVersion: async () => {} },
+  './cache': { bumpVersion: async () => {}, bumpVersions: async () => {} },
   // INV S6: the narrow-bump switch (OFF here) and the Issue-closing statements (not under test) the writer now imports.
   './readSwitches': { readSwitch: async () => false },
   './stockSetClosesIssue': { closeIssueStatements: () => [], reopenIssueStatements: () => [] },

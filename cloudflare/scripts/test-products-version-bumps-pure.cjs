@@ -43,7 +43,7 @@ for (const [file, writes] of IMAGE_WRITERS) {
 assert.ok(PRODUCTS_BUMP.test(read('lib/reviewApply.ts')), 'reviewApply (the other caller of the product writer) bumps')
 
 // 2. the in-file paths that wrote without announcing
-assert.ok(/if \(renamedProductIds\.length\) c\.executionCtx\.waitUntil\(bumpVersion\(c\.env, 'products'\)\)\n\s+return c\.json\(\{ success: true, pending: true, pendingActionId: pendingId \}, 202\)/.test(products), 'a group rename carried before the review queue is announced')
+assert.ok(/if \(renamedProductIds\.length\) await bumpVersion\(c\.env, 'products'\)\n\s+return c\.json\(\{ success: true, pending: true, pendingActionId: pendingId \}, 202\)/.test(products), 'a group rename carried before the review queue is announced')
 const identity = between(products, 'const identityRefusal = await identityFoldRefusal', 'let foldResult: Awaited')
 assert.ok(PRODUCTS_BUMP.test(identity), 'the identity write kept before the fold is announced')
 const removeReplay = between(products, "if (replay?.status === 'undo_ready' && replay.product_id === id", "return c.json({ success: false, code: 'review_state_conflict'")

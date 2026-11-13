@@ -269,11 +269,12 @@ export async function foldCreateWithStockInWrite(
       },
     })
     const summary: FoldStockInSummary = { quantity, branch_id: branchId, lot_code: received.lotCode || lotCode, unit_cost_usd: unitCostUsd, batch_id: received.batchId }
+    // W3 Slice A: the bump is awaited before the caller answers; the audit row and the broadcasts follow it.
+    await bumpVersion(env, 'products')
     const announce = Promise.all([
       audit(env, options.actor.id, options.actor.name, 'batch_receive', 'product_batch', received.batchId, {
         product_id: productId, product_name: duplicate.name, branch_id: branchId, quantity, lot_code: summary.lot_code, reason: null, source: options.source,
       }),
-      bumpVersion(env, 'products'),
       broadcast(env, 'inventory', { type: 'batch_received', productId, branchId }),
       broadcast(env, 'products', { action: 'update', id: productId }),
     ]).catch(() => {})

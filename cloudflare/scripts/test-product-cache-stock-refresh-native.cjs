@@ -222,9 +222,9 @@ const version = (namespace) => kv.get(`v2:${namespace}`) ?? null
   const salesSrc = fs.readFileSync(path.join(SRC, 'routes/sales.ts'), 'utf8')
   const bulkSrc = fs.readFileSync(path.join(SRC, 'lib/saleBulkStatus.ts'), 'utf8')
   const portalSrc = fs.readFileSync(path.join(SRC, 'routes/portal.ts'), 'utf8')
-  check("routes/sales.ts bumps 'stock' on its four stock-moving paths", (salesSrc.match(/bumpVersion\(c\.env, 'stock'\)/g) || []).length === 4)
+  check("routes/sales.ts bumps 'stock' on its four stock-moving paths", (salesSrc.match(/await bumpVersions\(c\.env, \['stock', 'sales'\]\)/g) || []).length === 4)
   check("routes/sales.ts bumps 'products' nowhere", !/bumpVersions?\([^)]*'products'/.test(salesSrc))
-  check("lib/saleBulkStatus.ts bumps 'stock', not 'products'", /bumpVersion\(env, 'stock'\)/.test(bulkSrc) && !/bumpVersion\(env, 'products'\)/.test(bulkSrc))
+  check("lib/saleBulkStatus.ts bumps 'stock', not 'products'", /bumpVersions\(env, \['sales', 'stock'\]\)/.test(bulkSrc) && !/bumpVersions?\(env, \[?'products'/.test(bulkSrc))
   // 6.0.896: one batched version read (lib/cache.ts getVersionsWithFallback) keys the stock entry.
   check("portal cache key includes the 'stock' version", /scope\.stock \? \['stock'\][\s\S]{0,300}getVersionsWithFallback\(c\.env, namespaces[\s\S]{0,600}version\('stock'\)/.test(portalSrc))
 

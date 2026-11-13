@@ -1,7 +1,7 @@
 import type { Env } from '../index'
 import { broadcast } from '../durable-objects/broadcastHub'
 import type { SessionUser } from './auth'
-import { bumpVersion } from './cache'
+import { bumpVersions } from './cache'
 import { getDb, type D1Compat } from './db'
 import { getActionTier, isAdminControlUser } from './permissions'
 import { AMENDMENT_WINDOW_SETTING_KEY, guardSaleAmendment, resolveAmendmentWindowMinutes } from './saleAmendments'
@@ -437,14 +437,24 @@ function receiptForCaller<T extends Row>(user: SessionUser, receipt: T): T {
   return rest as unknown as T
 }
 
-export async function notifySaleBulkUpdate(env: Env, actionKind?: string): Promise<void> {
+// W3 Slice A: a route awaits the bump before its response, then hands the announce to waitUntil. notifySaleBulkUpdate keeps both for the History replay.
+export async function bumpSaleBulkUpdate(env: Env, actionKind?: string): Promise<void> {
+  await bumpVersions(env, actionKind === 'customer' ? ['sales', 'returns'] : ['sales'])
+}
+
+export async function announceSaleBulkUpdate(env: Env, actionKind?: string): Promise<void> {
   if (actionKind === 'customer') {
-    await Promise.allSettled([bumpVersion(env, 'sales'), bumpVersion(env, 'returns'), broadcast(env, 'sales', { action: 'update' }), broadcast(env, 'returns', { action: 'update' }), broadcast(env, 'customers', { action: 'update' })])
+    await Promise.allSettled([broadcast(env, 'sales', { action: 'update' }), broadcast(env, 'returns', { action: 'update' }), broadcast(env, 'customers', { action: 'update' })])
   } else if (actionKind === 'delivery_contact') {
-    await Promise.allSettled([bumpVersion(env, 'sales'), broadcast(env, 'sales', { action: 'update' }), broadcast(env, 'deliveryContacts', { action: 'update' }), broadcast(env, 'fees', { action: 'update' })])
+    await Promise.allSettled([broadcast(env, 'sales', { action: 'update' }), broadcast(env, 'deliveryContacts', { action: 'update' }), broadcast(env, 'fees', { action: 'update' })])
   } else {
-    await Promise.allSettled([bumpVersion(env, 'sales'), broadcast(env, 'sales', { action: 'update' })])
+    await Promise.allSettled([broadcast(env, 'sales', { action: 'update' })])
   }
+}
+
+export async function notifySaleBulkUpdate(env: Env, actionKind?: string): Promise<void> {
+  await bumpSaleBulkUpdate(env, actionKind)
+  await announceSaleBulkUpdate(env, actionKind)
 }
 
 export async function applySaleBulkUpdate(env: Env, user: SessionUser, rawInput: Row) {

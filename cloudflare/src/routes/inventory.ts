@@ -40,7 +40,7 @@ import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
 import { stockMutationRequestIdMissing, STOCK_MUTATION_REQUEST_ID_REQUIRED, StockMutationBudgetError, withStockMutationReceipt, executeStockMutationBatch, approvalClaimOf, type StockMutationAtomicMark } from '../lib/stockMutationReceipt'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { bumpVersion } from '../lib/cache'
+import { bumpVersion, bumpVersions } from '../lib/cache'
 import { findIdentityMatch, identityBarcodeKey, type ProductIdentityRow } from '../lib/productIdentity'
 import { buildIssueStateClauses, buildLikeAliasClause, foldNativeDigits, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery, parseRankedIds } from '../lib/productSearchQuery'
@@ -167,7 +167,10 @@ app.post('/sessions', async (c) => {
     const callCounting = (await metrics?.callCounting?.()) === true
     const queryBudget = metrics ? { statementsUsed: () => (callCounting ? metrics.invocation.attemptedCalls : metrics.attemptedStatements) + 1, reserveStatements: 6, callCounting } : undefined
     const receipt = await stockSession.commitStockSession(c.env, c.get('user'), body, () => branchRedirectTarget(c), queryBudget)
-    if (!receipt.replayed) c.executionCtx.waitUntil(stockSession.notifyStockSession(c.env, receipt))
+    if (!receipt.replayed) {
+      await stockSession.bumpStockSession(c.env)
+      c.executionCtx.waitUntil(stockSession.announceStockSession(c.env, receipt))
+    }
     return c.json(receipt)
   } catch (error) {
     const stockGuard = productStockGuardError(error)
@@ -1746,10 +1749,14 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       ...(expectedBranchQuantity === undefined ? {} : { expectedBranchQuantity }),
       ...(variance ? { variance } : {}),
     }, markWritten, () => branchRedirectTarget(c), atomicMark, closeIssue)
-    if (result.status === 200 && result.body.issue_closed === true && !result.body.replayed) c.executionCtx.waitUntil(bumpVersion(c.env, 'inventory_checks'))
-    if (result.status === 200 && Number(result.body.quantity) > 0 && !result.body.replayed) {
-      // A Set that only changed quantities bumps the version a sale bumps (stock_bump_narrow); anything more, or the switch OFF, bumps 'products' as before.
-      const bumped = await scopedSetBump(c.env, result.body)
+    // One awaited bump call for the whole Set (W3 Slice A): one quota upsert on Free, and the next read already keys on the new versions.
+    const setBumps: string[] = []
+    if (result.status === 200 && result.body.issue_closed === true && !result.body.replayed) setBumps.push('inventory_checks')
+    const setMovedStock = result.status === 200 && Number(result.body.quantity) > 0 && !result.body.replayed
+    // A Set that only changed quantities bumps the version a sale bumps (stock_bump_narrow); anything more, or the switch OFF, bumps 'products' as before.
+    if (setMovedStock) setBumps.push(await scopedSetBump(c.env, result.body))
+    if (setBumps.length) await bumpVersions(c.env, setBumps)
+    if (setMovedStock) {
       c.executionCtx.waitUntil(Promise.all([
         audit(c.env, user?.id ?? null, actorSnapshot(user), 'stock_set', 'product', productId, {
           // A variance line names no figure of its own: the figure written is the writer's, from its answer.
@@ -1759,7 +1766,6 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         }),
         broadcast(c.env, 'products', { action: 'update', id: productId }),
         broadcast(c.env, 'inventory', { action: 'adjust', id: productId }),
-        bumpVersion(c.env, bumped),
       ]))
     }
     return c.json(result.body as never, result.status as never)
@@ -2644,13 +2650,13 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // Perf-2: the response below is built entirely from values already in
   // scope (targetProductId/branchId/movementType/...) and reads nothing
   // audit() writes, so the insert can run after the response is sent --
-  // same reasoning as the broadcast/bumpVersion calls it now joins.
+  // same reasoning as the broadcast calls it now joins. The cache bump is awaited first (W3 Slice A).
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(Promise.all([
     audit(c.env, user?.id ?? null, actorSnapshot(user), originalType === 'set' ? 'stock_set' : type === 'remove' ? 'stock_remove' : 'stock_add', 'product', targetProductId, { type: originalType, quantity, reason, branchId, sourceProductId: productId, createdSibling, batchId: batchIdRequested, autoBatchDrainIds, unlockPricing, receivedDate, ...(freeQuantity > 0 ? { freeQuantity, paidQuantity } : {}) }),
     ...(sellingPricePlan ? [audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'product', targetProductId, { source: 'stock_receipt', batchId: resolvedBatchId }, changedFields(sellingPricePlan.before, sellingPricePlan.after))] : []),
     broadcast(c.env, 'products', { action: 'update', id: targetProductId }),
     broadcast(c.env, 'inventory', { action: 'adjust', id: targetProductId }),
-    bumpVersion(c.env, 'products'),
   ]))
   if (delta !== 0) {
     // The alert carries the RESULTING on-hand figures (this branch and all
@@ -2746,9 +2752,9 @@ app.post('/dated-stock-count/resolve', async (c) => {
 
   if (branchesCreated.length) {
     await audit(c.env, user?.id ?? null, actorSnapshot(user), 'dated_stock_count_resolve_branch_create', 'inventory', null, { branchesCreated })
-    c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'update' }))
     // A new branch adds a column to every product row's branch_stock list, so the product lists turn over (branches.ts does the same).
-    c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+    await bumpVersion(c.env, 'products')
+    c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'update' }))
   }
 
   return c.json({ success: true, resolved, unresolved, branchesCreated })
@@ -2779,12 +2785,13 @@ app.post('/dated-stock-count/resolve/apply-decisions', async (c) => {
   const db = getDb(c.env)
   const result = await applyDatedStockCountDecisions(db, resolvedIn as any, unresolvedIn as any, decisionsIn as DatedCountDecision[])
 
+  // New products, and a price decision on an existing one, both change product rows: the product lists turn over now, not at their TTL.
+  // Awaited before any announcement (W3 Slice A).
+  if (result.productsCreated.length || decisionsIn.length) await bumpVersion(c.env, 'products')
   if (result.productsCreated.length) {
     await audit(c.env, user?.id ?? null, actorSnapshot(user), 'dated_stock_count_resolve_products_created', 'inventory', null, { productsCreated: result.productsCreated })
     c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   }
-  // New products, and a price decision on an existing one, both change product rows: the product lists turn over now, not at their TTL.
-  if (result.productsCreated.length || decisionsIn.length) c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
 
   return c.json({ success: true, ...result })
 })
@@ -2855,9 +2862,9 @@ app.post('/dated-stock-count/apply', async (c) => {
     batchTrackedGroups: result.batchTrackedGroups,
     plainGroups: result.plainGroups,
   })
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'dated_stock_count_import' }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
 
   return c.json({ success: true, ...result })
 })
@@ -2986,10 +2993,10 @@ app.post('/transfer', async (c) => {
     if (refusal) return c.json(refusal.body, refusal.status)
     throw error
   }
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'transfer' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: productId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'transfer', id: productId }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   // Telegram: resulting on-hand at both branches, read back after the write
   // (same alert shape as branches.ts /transfer).
   c.executionCtx.waitUntil((async () => {
@@ -3181,9 +3188,9 @@ app.post('/move-row', async (c) => {
   }
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'move', 'stock', sourceProductId, { toProductId: destinationProductId, quantity, branchId, reason })
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'move_row' }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   // See the matching note in /adjust above -- same missing-`success`-field bug.
   return c.json({ success: true, sourceProductId, destinationProductId, branchId, quantity })
 })
@@ -3226,9 +3233,9 @@ app.post('/movements/:id/revert', async (c) => {
     movementId: id, movementType: mv.movement_type, revertType: result.revertType, quantity: result.quantity,
     branchId: Number(mv.branch_id) || null, batchId: mv.batch_id ?? null,
   })
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: productId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'adjust', id: productId }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   return c.json({ success: true, revertType: result.revertType, quantity: result.quantity, productId, movementId: id })
 })
 
@@ -3240,9 +3247,12 @@ app.post('/stock-in-lines/:movementId/edit', async (c) => {
   const movementId = Number.parseInt(String(c.req.param('movementId') || ''), 10)
   const body = await c.req.json<Record<string, unknown>>().catch(() => null)
   if (!body || typeof body !== 'object' || Array.isArray(body)) return c.json({ error: 'A JSON body is required.', code: 'invalid_request' }, 400)
-  const { applyStockInLineEdit, notifyStockInLineEdit } = await import('../lib/stockInLineEdit')
+  const { announceStockInLineEdit, applyStockInLineEdit, bumpStockInLineEdit } = await import('../lib/stockInLineEdit')
   const result = await applyStockInLineEdit(getDb(c.env), c.get('user'), movementId, body, () => branchRedirectTarget(c))
-  if (result.status === 200 && !result.body.unchanged && !result.body.replayed) c.executionCtx.waitUntil(notifyStockInLineEdit(c.env))
+  if (result.status === 200 && !result.body.unchanged && !result.body.replayed) {
+    await bumpStockInLineEdit(c.env)
+    c.executionCtx.waitUntil(announceStockInLineEdit(c.env))
+  }
   return c.json(result.body, result.status as 200)
 })
 
@@ -3401,9 +3411,9 @@ async function runTaggedLotActionKernel(c: InventoryContext, action: 'dispose' |
     branchId: landing.effectBranchId, conditionTag: tagResult.tag, quantity, reason, lotIds: takes.map((take) => take.lotId),
     ...(landing.redirected ? { addressedBranchId: branchId } : {}),
   })
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: productId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'adjust', id: productId }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   return c.json({ success: true, productId, branchId: landing.effectBranchId, conditionTag: tagResult.tag, quantity })
 }
 

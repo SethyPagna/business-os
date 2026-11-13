@@ -662,9 +662,10 @@ export async function createExchangeReturnV1(args: ExchangeCreateArgs): Promise<
     return reply(503, { error: 'The result could not be confirmed. Retry the same request.', code: 'unknown_outcome', action: 'retry_same_request' })
   }
   const response = JSON.parse(committed.response_json) as ReturnCreateResponse
+  // W3 Slice A: the bump is awaited after the commit and before the response; every broadcast follows it and stays in waitUntil.
+  await bumpVersions(c.env, RETURN_WRITE_CACHE_NAMESPACES)
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return', id: response.id }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(bumpVersions(c.env, RETURN_WRITE_CACHE_NAMESPACES))
   // The replacement lines deduct stock like a sale does (owner ruling 6 Oct 2026: alert on crossing).
   c.executionCtx.waitUntil(recordStockCrossings(c.env, { saleId: null, lines: priced.lines.map((line) => ({ productId: line.product_id, branchId: line.branch_id, quantity: line.quantity })) }))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'create', id: response.id }))

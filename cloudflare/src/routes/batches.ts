@@ -8,7 +8,7 @@ import { audit, changedFields } from '../lib/audit'
 import { PRODUCT_SUPPLIER_REFUSAL, lotSupplierChanged } from '../lib/productSupplierGate'
 import { hasPermission, getActionTier, getPermissionTier, isActionBlocked } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { cacheIdentity } from '../lib/cache'
 import { getTrackedProductIds, listBatchesForProduct, parseReceiptSellingPrice, planReceiptSellingPrice, receiveBatchStock, type ReceiptSellingPriceRow } from '../lib/productBatches'
 import { executeStockTransaction } from '../lib/stockTransaction'
@@ -436,7 +436,8 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
   // Catalog cost refresh shares the receipt transaction above.
 
   // P4-4a: the response below does not read the audit row, so it can run
-  // alongside the cache bump/broadcasts instead of its own awaited round trip.
+  // alongside the broadcasts instead of its own awaited round trip. The cache bump is awaited first (W3 Slice A).
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(Promise.all([
     audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_receive', 'product_batch', batchId, {
       product_id: productId,
@@ -449,7 +450,6 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
       ...(freeQuantity > 0 ? { free_quantity: freeQuantity, paid_quantity: paidQuantity } : {}),
     }),
     ...(sellingPricePlan ? [audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'product', productId, { source: 'stock_receipt', batchId }, changedFields(sellingPricePlan.before, sellingPricePlan.after))] : []),
-    bumpVersion(c.env, 'products'),
     broadcast(c.env, 'inventory', { type: 'batch_received', productId, branchId }),
     broadcast(c.env, 'products', { action: 'update', id: productId }),
   ]))
@@ -581,10 +581,10 @@ app.patch('/:id', async (c) => {
     return c.json({ error: activeBatchStockError(await positiveBatchStock(db, id)) }, 400)
   }
   // Perf-2: `{ success: true }` reads nothing audit() writes -- defer it
-  // into the same waitUntil the broadcast already used.
+  // into the same waitUntil the broadcast already used. The bump is awaited first (W3 Slice A).
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(Promise.all([
     audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_update', 'product_batch', id, body),
-    bumpVersion(c.env, 'products'),
     broadcast(c.env, 'products', { action: 'update', id: existing.variant_product_id }),
     broadcast(c.env, 'inventory', { type: 'batch_updated', batchId: id }),
   ]))
@@ -630,17 +630,20 @@ app.patch('/:id/branches/:branchId', async (c) => {
       ? { expectedLotQuantity: body.expectedLotQuantity } : {}),
   }, undefined, () => branchRedirectTarget(c), undefined, closeIssue)
   if (result.status !== 200) return c.json(result.body as never, result.status as never)
-  if (result.body.issue_closed === true && !result.body.replayed) c.executionCtx.waitUntil(bumpVersion(c.env, 'inventory_checks'))
+  // One awaited bump call for the whole write (W3 Slice A): one quota upsert on Free, and the next read already keys on the new versions.
+  const bumpNamespaces: string[] = []
+  if (result.body.issue_closed === true && !result.body.replayed) bumpNamespaces.push('inventory_checks')
+  const stockMoved = Number(result.body.quantity) > 0 && !result.body.replayed
+  // A Set that only changed quantities bumps the version a sale bumps (stock_bump_narrow); anything more, or the switch OFF, bumps 'products' as before.
+  if (stockMoved) bumpNamespaces.push(await scopedSetBump(c.env, result.body))
+  if (bumpNamespaces.length) await bumpVersions(c.env, bumpNamespaces)
 
-  if (Number(result.body.quantity) > 0 && !result.body.replayed) {
-    // A Set that only changed quantities bumps the version a sale bumps (stock_bump_narrow); anything more, or the switch OFF, bumps 'products' as before.
-    const bumped = await scopedSetBump(c.env, result.body)
+  if (stockMoved) {
     c.executionCtx.waitUntil(Promise.all([
       audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_quantity_correction', 'product_batch', batchId, {
         branch_id: branchId, quantity, previous_quantity: (result.body.before as { lotQuantity?: number } | undefined)?.lotQuantity ?? null,
         operation_id: result.body.operation_id ?? null,
       }),
-      bumpVersion(c.env, bumped),
       broadcast(c.env, 'inventory', { type: 'batch_updated', batchId }),
       broadcast(c.env, 'products', { action: 'update', id: batch.productId }),
     ]))
@@ -685,10 +688,10 @@ app.delete('/:id', async (c) => {
     return c.json({ error: activeBatchStockError(await positiveBatchStock(db, id)) }, 400)
   }
   // Perf-2: `{ success: true }` reads nothing audit() writes -- defer it
-  // into the same waitUntil the broadcast already used.
+  // into the same waitUntil the broadcast already used. The bump is awaited first (W3 Slice A).
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(Promise.all([
     audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_deactivate', 'product_batch', id, null),
-    bumpVersion(c.env, 'products'),
     broadcast(c.env, 'products', { action: 'update', id: existing.variant_product_id }),
     broadcast(c.env, 'inventory', { type: 'batch_updated', batchId: id }),
   ]))

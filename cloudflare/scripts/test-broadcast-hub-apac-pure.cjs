@@ -79,7 +79,8 @@ for (const [file, units] of Object.entries(ROUTE_PENDING)) for (const unit of un
 //   fallback in lib/queueDispatch.ts, which runs the whole job in the caller
 //   anyway). No request context exists; awaiting is correct.
 // NOTIFIERS: the whole function is the deferred work; every route caller hands
-//   it to c.executionCtx.waitUntil.
+//   it to c.executionCtx.waitUntil. W3 Slice A split each notify<X> into bump<X> (awaited before the
+//   response, test-bump-before-response-pure.cjs) and announce<X> (the broadcasts, listed here).
 // THREADED: takes an optional waitUntil from the route and awaits only when
 //   none is given (tests, non-request callers).
 // HANDLERS: a request handler split out of a route into lib/ (it takes the Hono context `c`; routes/ holds mounted routers only). Every one of its
@@ -91,16 +92,16 @@ const QUEUE_ONLY = {
   'importEngine.ts': ['applyStockActionsContinuation', 'runImportApply'],
 }
 const NOTIFIERS = {
-  'customerGenderRestoration.ts': ['notifyCustomerGenderRestoration'],
-  'returnBulkAction.ts': ['notifyReturnBulkAction'],
-  'returnLegacyConvert.ts': ['notifyLegacyReturnConversion'],
-  'saleBulkStatus.ts': ['notifyBulkStatus'],
-  'saleBulkUpdate.ts': ['notifySaleBulkUpdate'],
-  'saleSettlementAction.ts': ['notifySaleSettlementAction'],
-  'stockInLineEdit.ts': ['notifyStockInLineEdit'],
-  'stockLotAdjustment.ts': ['notifyStockLotSet'],
-  'stockSession.ts': ['notifyStockSession'],
-  'transferOperation.ts': ['notifyTransferOperation'],
+  'customerGenderRestoration.ts': ['announceCustomerGenderRestoration'],
+  'returnBulkAction.ts': ['announceReturnBulkAction'],
+  'returnLegacyConvert.ts': ['announceLegacyReturnConversion'],
+  'saleBulkStatus.ts': ['announceBulkStatus'],
+  'saleBulkUpdate.ts': ['announceSaleBulkUpdate'],
+  'saleSettlementAction.ts': ['announceSaleSettlementAction'],
+  'stockInLineEdit.ts': ['announceStockInLineEdit'],
+  'stockLotAdjustment.ts': ['announceStockLotSet'],
+  'stockSession.ts': ['announceStockSession'],
+  'transferOperation.ts': ['announceTransferOperation'],
 }
 const THREADED = {
   'generalCustomerMembershipRepair.ts': ['refreshGeneralCustomerMembershipRepair'],

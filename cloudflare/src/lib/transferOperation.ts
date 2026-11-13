@@ -381,6 +381,13 @@ export async function replayTransferOperation(env: Env, user: SessionUser, direc
   }
 }
 
+export async function bumpTransferOperation(env: Env): Promise<void> {
+  await bumpVersion(env, 'products')
+}
+export async function announceTransferOperation(env: Env): Promise<void> {
+  await Promise.all([broadcast(env, 'branches', { action: 'transfer' }), broadcast(env, 'products', { action: 'update' }), broadcast(env, 'inventory', { action: 'transfer' })])
+}
 export async function notifyTransferOperation(env: Env): Promise<void> {
-  await Promise.all([broadcast(env, 'branches', { action: 'transfer' }), broadcast(env, 'products', { action: 'update' }), broadcast(env, 'inventory', { action: 'transfer' }), bumpVersion(env, 'products')])
+  await bumpTransferOperation(env)
+  await announceTransferOperation(env)
 }

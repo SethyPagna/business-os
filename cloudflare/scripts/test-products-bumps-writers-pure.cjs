@@ -27,12 +27,13 @@ check('dated-stock-count/resolve bumps products when it creates a branch, and on
 })
 check('apply-decisions bumps products for created products and for price decisions', () => {
   const handler = slice(inventory, "app.post('/dated-stock-count/resolve/apply-decisions', async", "app.post('/dated-stock-count/preview'")
-  assert.match(handler, /if \(result\.productsCreated\.length \|\| decisionsIn\.length\) c\.executionCtx\.waitUntil\(bumpVersion\(c\.env, 'products'\)\)/)
+  assert.match(handler, /if \(result\.productsCreated\.length \|\| decisionsIn\.length\) await bumpVersion\(c\.env, 'products'\)/)
 })
 check('PUT /api/branches/:id bumps products after a committed edit', () => {
   const branches = read('src/routes/branches.ts')
   const handler = slice(branches, "app.put('/:id', async", "app.delete('/:id', async")
-  assert.match(handler, /broadcast\(c\.env, 'branches', \{ action: 'update', id \}\)\)\n[^\n]*\n\s*c\.executionCtx\.waitUntil\(bumpVersion\(c\.env, 'products'\)\)/)
+  // W3 Slice A: the bump is awaited BEFORE the broadcast, so a peer that refetches on it never keys on the old version.
+  assert.match(handler, /await bumpVersion\(c\.env, 'products'\)\n\s*c\.executionCtx\.waitUntil\(broadcast\(c\.env, 'branches', \{ action: 'update', id \}\)\)/)
 })
 check('the product-removal replay bumps products before it broadcasts', () => {
   const text = read('src/lib/undoAppliers.ts')

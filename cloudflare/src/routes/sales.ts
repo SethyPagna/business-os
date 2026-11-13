@@ -118,8 +118,8 @@ import {
 } from '../lib/saleAmendments'
 import { DELIVERY_AMOUNT_ERROR_MESSAGES, deliveryAmountChanged, parseDeliveryAmountUsd } from '../lib/deliveryAmounts'
 import { buildDeliveryContactExistsGuard, DELIVERY_CONTACT_MISSING_CODE, isDeliveryContactMissingError } from '../lib/contactDeleteGuard'
-import { applySaleBulkStatus, bulkAssertion, notifyBulkStatus, SaleBulkError, saleRevisionGuard } from '../lib/saleBulkStatus'
-import { applySaleBulkUpdate, notifySaleBulkUpdate } from '../lib/saleBulkUpdate'
+import { applySaleBulkStatus, bulkAssertion, announceBulkStatus, bumpBulkStatus, SaleBulkError, saleRevisionGuard } from '../lib/saleBulkStatus'
+import { announceSaleBulkUpdate, applySaleBulkUpdate, bumpSaleBulkUpdate } from '../lib/saleBulkUpdate'
 import { prepareCustomerAssignments, preparePointsRedemption, isLoyaltyAssignmentError, LOYALTY_REASSIGNMENT_CODE, LOYALTY_REASSIGNMENT_MESSAGE } from '../lib/saleCustomerAssignmentGuard'
 import {
   buildSaleRecords,
@@ -2014,12 +2014,11 @@ app.post('/', async (c) => {
   // 'stock' still turns over the pages whose MEMBERSHIP depends on stock
   // (stockState/issueState filters) and the portal. Bumping 'products' here
   // used to discard every cached catalog page on every sale (I2-1).
-  c.executionCtx.waitUntil(Promise.all([
-    bumpVersion(c.env, 'stock'),
-    bumpVersion(c.env, 'sales'),
-    // A sale that carries a courier cost adds a row to the Expenses list, which no longer reloads on a sales push.
-    ...(deliveryActualCostUsd != null ? [broadcast(c.env, 'fees', { action: 'update' })] : []),
-  ]))
+  // W3 Slice A: the bump is awaited here, after the commit and before the response, so the next read by this till (and the bell's
+  // fresh read) already keys on the new version; the broadcast follows it and stays off the response path.
+  await bumpVersions(c.env, ['stock', 'sales'])
+  // A sale that carries a courier cost adds a row to the Expenses list, which no longer reloads on a sales push.
+  if (deliveryActualCostUsd != null) c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'update' }))
   // Owner, 6 Oct 2026: a low or out-of-stock alert fires when THIS sale crosses the threshold, once per crossing.
   // recordStockCrossings reads the branch quantity AFTER the commit, inside this waitUntil (never before the
   // response), so two tills selling at the same moment cannot hide a crossing from each other. It also runs for a
@@ -2151,7 +2150,8 @@ app.post('/bulk-status', async (c) => {
     const result = await applySaleBulkStatus(c.env, c.get('user'), await c.req.json(), branchRedirectTarget(c),
       // Restoring sales in bulk takes their stock back out: one alert message per branch and tier for the whole batch.
       (lines) => c.executionCtx.waitUntil(recordStockCrossings(c.env, { saleId: null, lines })))
-    c.executionCtx.waitUntil(notifyBulkStatus(c.env))
+    await bumpBulkStatus(c.env)
+    c.executionCtx.waitUntil(announceBulkStatus(c.env))
     return c.json(result)
   } catch (error) {
     const stockGuard = productStockGuardError(error)
@@ -2164,7 +2164,10 @@ app.post('/bulk-update', async (c) => {
   try {
     const result = await applySaleBulkUpdate(c.env, c.get('user'), await c.req.json())
     // A preview wrote nothing: no cache bump, no broadcast.
-    if (!('preview' in result)) c.executionCtx.waitUntil(notifySaleBulkUpdate(c.env, result.action?.kind))
+    if (!('preview' in result)) {
+      await bumpSaleBulkUpdate(c.env, result.action?.kind)
+      c.executionCtx.waitUntil(announceSaleBulkUpdate(c.env, result.action?.kind))
+    }
     return c.json(result)
   } catch (error) {
     const stockGuard = productStockGuardError(error)
@@ -3106,8 +3109,9 @@ app.patch('/:id/status', async (c) => {
 
   // P4-4a: the response below (built from settlementResponse/directStatusResponse/
   // the re-read `updated` row) does not read anything audit() writes, so the
-  // audit insert can run after the response is sent -- same reasoning as the
-  // bumpVersion/broadcast calls already deferred into this waitUntil.
+  // audit insert can run after the response is sent. The cache bump does not: it is awaited first (W3 Slice A).
+  // I2-1: a sale moves stock only -- 'stock', not the catalog version.
+  await bumpVersions(c.env, ['stock', 'sales'])
   c.executionCtx.waitUntil(Promise.all([
     audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'sale', id, {
       operationId: settlementOperationId || statusOperationId,
@@ -3131,9 +3135,6 @@ app.patch('/:id/status', async (c) => {
         stockSkipSource: skipStockRequested ? 'requested' : 'sale_already_stock_skipped',
       } : {}),
     }),
-    // I2-1: a sale moves stock only -- 'stock', not the catalog version.
-    bumpVersion(c.env, 'stock'),
-    bumpVersion(c.env, 'sales'),
     // The cancel fee is an expense row; a sale entering or leaving 'cancelled' also adds or drops its courier row on
     // the Expenses list (cancelled sales are not listed). That page no longer reloads on a sales push, so say so here.
     ...((sale.cancel_fee_id || (saleStatus === 'cancelled' && (cancelFeeUsd > 0 || cancelFeeKhr > 0)) || (oldStatus === 'cancelled') !== (saleStatus === 'cancelled'))
@@ -3447,7 +3448,8 @@ app.patch('/:id/customer', async (c) => {
   }
 
   // P4-4a: `response` is already fully built above and does not read the
-  // audit row, so defer it the same way as the bumpVersion calls below.
+  // audit row, so defer it. The cache bump is awaited first (W3 Slice A).
+  await bumpVersions(c.env, ['sales', 'returns'])
   c.executionCtx.waitUntil(Promise.all([
     audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'sale', saleId, {
       record_event: { source_kind: 'sale_customer', source_id: sourceId, generation: 0, sale_id: saleId },
@@ -3456,7 +3458,6 @@ app.patch('/:id/customer', async (c) => {
       membership_number: customer?.membership_number ?? null,
       cleared: shouldClear,
     }),
-    bumpVersions(c.env, ['sales', 'returns']),
   ]))
 
   return c.json(response)
@@ -4068,11 +4069,8 @@ app.post('/:id/items', async (c) => {
     return c.json(unexpectedFailureBody('sales', error, 'Failed to add sale items.', 'sale_add_items_failed'), 500)
   }
 
-  c.executionCtx.waitUntil(Promise.all([
-    // I2-1: a sale moves stock only -- 'stock', not the catalog version.
-    bumpVersion(c.env, 'stock'),
-    bumpVersion(c.env, 'sales'),
-  ]))
+  // I2-1: a sale moves stock only -- 'stock', not the catalog version. Awaited before the response (W3 Slice A).
+  await bumpVersions(c.env, ['stock', 'sales'])
   // Lines added to a sale take stock like the sale did (owner ruling 6 Oct 2026: alert when a deduction crosses the threshold).
   // sale_id stays null: the sale's own create already holds the sale key for these products.
   c.executionCtx.waitUntil(recordStockCrossings(c.env, {
@@ -5838,7 +5836,9 @@ async function auditAmendment(
   // afterward from the mutation's own committed receipt (committedMutationResponse)
   // or from the mutationStamp it already computed in JS -- neither reads this
   // audit row, so it can run alongside the cache bumps below instead of being
-  // its own separate round trip on the request's critical path.
+  // its own separate round trip on the request's critical path. The cache bump is NOT deferred: it is awaited first (W3 Slice A).
+  // I2-1: a sale moves stock only -- 'stock', not the catalog version.
+  await bumpVersions(c.env, ['stock', 'sales'])
   c.executionCtx.waitUntil(Promise.all([
     audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'sale', saleId, {
       action: 'amend',
@@ -5846,9 +5846,6 @@ async function auditAmendment(
       sale_status: sale.sale_status ?? null,
       ...details,
     }),
-    // I2-1: a sale moves stock only -- 'stock', not the catalog version.
-    bumpVersion(c.env, 'stock'),
-    bumpVersion(c.env, 'sales'),
     // These amendments set or change the courier cost the Expenses list shows through the sale; that page no
     // longer reloads on a sales push, so it hears about them on the fees channel.
     ...(AMENDMENT_KINDS_THAT_MOVE_COURIER_ROWS.has(String(details.kind)) ? [broadcast(c.env, 'fees', { action: 'update' })] : []),

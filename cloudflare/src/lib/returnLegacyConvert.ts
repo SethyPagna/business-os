@@ -43,7 +43,7 @@ import { readSalesReportSnapshot, salesTotalsFromSnapshot } from './salesAnalyti
 import { sha256Hex } from './saleRecordEvents'
 import { ordinaryBusinessMaintenanceGuard } from './businessMaintenanceGuard'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { bumpVersion } from './cache'
+import { bumpVersions } from './cache'
 import type { UndoApplierContext, UndoApplierOutcome } from './undoAppliers'
 
 export const RETURN_LEGACY_CONVERT_KIND = 'return.legacy_convert'
@@ -526,7 +526,13 @@ export async function replayLegacyReturnConversion(payload: Record<string, unkno
   return complete(next.generation)
 }
 
+export async function bumpLegacyReturnConversion(env: Env): Promise<void> {
+  await bumpVersions(env, ['returns', 'sales'])
+}
+export async function announceLegacyReturnConversion(env: Env): Promise<void> {
+  await Promise.allSettled([broadcast(env, 'returns', { action: 'update' }), broadcast(env, 'sales', { action: 'update' })])
+}
 export async function notifyLegacyReturnConversion(env: Env): Promise<void> {
-  await Promise.allSettled([bumpVersion(env, 'returns'), bumpVersion(env, 'sales'),
-    broadcast(env, 'returns', { action: 'update' }), broadcast(env, 'sales', { action: 'update' })])
+  await bumpLegacyReturnConversion(env)
+  await announceLegacyReturnConversion(env)
 }

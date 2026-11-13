@@ -26,8 +26,10 @@ assert(!/bumpVersions\(c\.env, \['products', 'returns', 'sales'\]\)/.test(routes
 assert(/bumpVersions\(c\.env, RETURN_WRITE_CACHE_NAMESPACES\)/.test(read('lib/returnExchangeCreate.ts')), 'the exchange writer bumps the shared list')
 
 const bulk = read('lib/returnBulkAction.ts')
-const notify = bulk.slice(bulk.indexOf('export async function notifyReturnBulkAction'))
+const notify = bulk.slice(bulk.indexOf('export async function bumpReturnBulkAction'))
 assert(/bumpVersions\(env, RETURN_WRITE_CACHE_NAMESPACES\)/.test(notify.slice(0, notify.indexOf('\n}\n'))), 'a grouped return action bumps the shared list')
+assert(/export async function notifyReturnBulkAction[^}]*bumpReturnBulkAction\(env\)[^}]*announceReturnBulkAction\(env\)/.test(bulk), 'the replay notifier is the bump followed by the announce')
 const history = read('routes/actionHistory.ts')
-assert(/RETURN_BULK_ACTION_KIND\s*\?\s*notifyReturnBulkAction\(c\.env\)/.test(history), 'undo and redo of a grouped return action use the same notifier')
+assert(/RETURN_BULK_ACTION_KIND\s*\?\s*bumpReturnBulkAction\(c\.env\)/.test(history), 'undo and redo of a grouped return action bump with the same helper')
+assert(/RETURN_BULK_ACTION_KIND\s*\?\s*announceReturnBulkAction\(c\.env\)/.test(history), 'undo and redo of a grouped return action announce with the same helper')
 console.log('return writers bump the sales caches: ok')

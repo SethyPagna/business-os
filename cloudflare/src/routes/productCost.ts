@@ -68,7 +68,7 @@ app.post('/:id/cost-review/confirm', async (c) => {
     if (!current || current.revision !== state.revision || current.cost_review_key !== state.cost_review_key || COST_REVIEW_MONEY_FIELDS.some(field => current[field] !== state[field])) return c.json({ error: 'The product changed. Review its cost again.', code: 'product_cost_review_state_conflict' }, 409)
   }
   if (!saved) return c.json({ error: 'The confirmation is not confirmed. Retry the original request.', code: 'cost_review_outcome_unknown' }, 503)
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'cost-review-confirm' }))
   return respond(saved.details, uncertain || JSON.parse(saved.details).claim_nonce !== nonce)
 })

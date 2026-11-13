@@ -630,9 +630,9 @@ app.post('/:id/rewire', async (c) => {
     rewired,
     settingsSkipped,
   })
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(broadcast(c.env, 'files', { action: 'rewire', id }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   return c.json({ success: true, rewired, settingsSkipped })
 })
 
