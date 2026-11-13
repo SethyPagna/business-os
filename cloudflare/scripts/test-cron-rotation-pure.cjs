@@ -340,15 +340,15 @@ async function main() {
   }
   ok()
 
-  // N: the scheduled-backup gate (backup.ts) is above the 3 h heavy tick and below the 6 h revisit.
-  const backupMod = load(path.join(SRC, 'lib/backup.ts'))
-  const HOUR = 3600 * 1000
-  const nowB = Date.parse('2026-10-26T12:00:00Z')
-  assert.strictEqual(backupMod.scheduledBackupIsRecent(nowB - 3 * HOUR, nowB), true, 'a 3 h old backup blocks the next heavy tick')
-  assert.strictEqual(backupMod.scheduledBackupIsRecent(nowB - 5 * HOUR, nowB), true)
-  assert.strictEqual(backupMod.scheduledBackupIsRecent(nowB - 6 * HOUR, nowB), false, 'a 6 h old backup is due')
-  assert.strictEqual(backupMod.scheduledBackupIsRecent(0, nowB), false, 'no backup at all is due')
-  assert.ok(fs.readFileSync(path.join(SRC, 'lib/backup.ts'), 'utf8').includes('if (scheduledBackupIsRecent(newest, Date.now())) {'), 'maybeRunScheduledBackup uses it')
+  // N: the scheduled backup is daily after close (owner 12 Nov 2026), gated by Cambodia business date in
+  // lib/backupSchedule.ts and applied to what R2 holds by maybeRunScheduledBackup. The full day-by-day
+  // drive is scripts/test-backup-daily-schedule-pure.cjs; here only the wiring into this lane is pinned.
+  const gateMod = load(path.join(SRC, 'lib/backupSchedule.ts'))
+  const nowB = Date.parse('2026-10-26T15:17:00Z') // 22:17 local
+  assert.strictEqual(gateMod.scheduledBackupGate(nowB, nowB - 24 * 3600 * 1000, 21).due, true, 'last night is done: tonight is due')
+  assert.strictEqual(gateMod.scheduledBackupGate(nowB, nowB - 30 * 60 * 1000, 21).due, false, 'a backup taken after close blocks a second one on the same date')
+  assert.strictEqual(gateMod.scheduledBackupGate(nowB, 0, 21).due, true, 'no backup at all is due')
+  assert.ok(fs.readFileSync(path.join(SRC, 'lib/backup.ts'), 'utf8').includes('scheduledBackupGate(nowMs, scheduledBackupCoverageMs(backups, afterHourLocal), afterHourLocal)'), 'maybeRunScheduledBackup uses it')
   ok()
 
   // 7. Telegram timing preserved: dedicated, frequent trigger; rotation excludes it
@@ -385,7 +385,7 @@ async function main() {
   assert.ok(heavyParts && Number(heavyParts[2]) >= 1, 'CRON_HEAVY runs every N >= 1 hours at a fixed minute')
   assert.ok(rot.CRON_HEAVY_TICK_MS >= 3600 * 1000 && Number(heavyParts[2]) * 3600 * 1000 === rot.CRON_HEAVY_TICK_MS)
   assert.strictEqual(rot.CRON_SCHEDULES.length, 3)
-  // Heavy steps alternate on their own cursor, one per tick, each every 2 ticks (6 h).
+  // Without a selector the heavy steps still alternate on their own cursor (the live lane passes heavySelect, see test-backup-daily-schedule-pure.cjs).
   const hbox = { text: null }
   const hstore = { load: async () => (hbox.text ? rot.parseRotationState(hbox.text) : null), save: async (s, e) => casSave(hbox, s, e) }
   const hran = []

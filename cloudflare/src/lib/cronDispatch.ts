@@ -8,12 +8,14 @@
 
 import {
   CRON_HEAVY, CRON_HEAVY_STATE_KEY, CRON_HEAVY_TICK_MS, CRON_ROTATION_TICK_MS, CRON_STATE_KEY, CRON_TELEGRAM,
-  runRotationTick, type RotationStep, type RotationStore, type TickResult,
+  runRotationTick, type RotationStep, type RotationStore, type RotationTickOptions, type TickResult,
 } from './cronRotation'
 
 export interface CronDispatchDeps {
   drainTelegram(): Promise<unknown>
   heavySteps(): RotationStep[]
+  /** Picks the heavy step by schedule (the daily backup) instead of by cursor alternation; see lib/backupSchedule.ts. */
+  heavySelect?: RotationTickOptions['select']
   rotationSteps(): RotationStep[]
   storeFor(key: string): RotationStore
 }
@@ -29,7 +31,7 @@ export async function dispatchCron(cron: string | undefined, scheduledTimeMs: nu
   const at = Number.isFinite(scheduledTimeMs) ? scheduledTimeMs : Date.now()
   if (cron === CRON_HEAVY) {
     const slot = Math.floor(at / CRON_HEAVY_TICK_MS)
-    return { lane: 'heavy', tick: await runRotationTick(deps.heavySteps(), deps.storeFor(CRON_HEAVY_STATE_KEY), Date.now(), { slot }) }
+    return { lane: 'heavy', tick: await runRotationTick(deps.heavySteps(), deps.storeFor(CRON_HEAVY_STATE_KEY), Date.now(), { slot, select: deps.heavySelect }) }
   }
   const slot = Math.floor(at / CRON_ROTATION_TICK_MS)
   return { lane: 'rotation', tick: await runRotationTick(deps.rotationSteps(), deps.storeFor(CRON_STATE_KEY), Date.now(), { slot }) }

@@ -155,7 +155,7 @@ const GLOSSARY: GlossaryRule[] = [
   { concept: 'reason', canonical: 'មូលហេតុ', forbidden: ['ហេតុផល'] },
   // ការត្រឡប់វិញ is "revert" (undo an action), a different concept from a
   // customer bringing goods back.
-  { concept: 'return (noun)', canonical: 'ការប្រគល់មកវិញ', forbidden: [/ការត្រឡប់(?!វិញ)/, 'បងវិល', 'ការបង្វិលត្រឡប់'] },
+  { concept: 'return (noun)', canonical: 'ការប្រគល់មកវិញ', forbidden: [/ការត្រឡប់(?!វិញ)/, 'បងវិល', 'ការបង្វិលត្រឡប់', 'ការបង្វិលទំនិញ'] },
 ]
 
 const violations: string[] = []

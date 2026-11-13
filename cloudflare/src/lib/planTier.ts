@@ -157,6 +157,47 @@ export type PlanLimits = {
   // both plans; only CREATING a scheduled backup is refused.
   scheduledBackupEnabled: boolean
 
+  // The scheduled backup runs once per Cambodia business date (UTC+7), at the
+  // first heavy-cron tick whose local hour is at or after this one (the shop has
+  // closed). 21 puts it on the 22:17 tick of the 3-hourly heavy trigger. Open
+  // shifts never delay it. Same value on both tiers; Free still refuses to
+  // create one (scheduledBackupEnabled).
+  scheduledBackupAfterHourLocal: number
+
+  // How many finalized SCHEDULED (daily) backups retention keeps: 7 = a week of
+  // history (owner 13 Nov 2026). Manual backups keep their own newest
+  // CLOUDFLARE_BACKUP_KEEP; the two pools never evict each other.
+  scheduledBackupKeep: number
+
+  // How many times the scheduled backup is TAKEN per business night (close hour to the next close hour) when attempts keep
+  // failing: a failed or killed set is retried on the next heavy tick, each try is a full D1 read, so after this many the night
+  // is given up and the image audit gets the ticks. Same on both tiers; the next night starts fresh.
+  scheduledBackupMaxAttemptsPerDay: number
+
+  // Gzip the backup manifest (the whole database as JSON) while it streams into R2: several-fold smaller, so the kept backups
+  // fit R2's free storage. Compression is native zlib CPU, which Paid's cpu_ms covers and Free's 10 ms does not: Paid only.
+  // Restore, validate and the Drive stage read plain and gzip manifests alike.
+  backupManifestGzip: boolean
+
+  // A backup-pool object uploaded less than this many hours ago is never deleted by the pool sweep: it may be the copy an
+  // in-flight backup (or a continuation) just made of a re-uploaded image, not yet named by any sidecar. Same on both tiers.
+  backupPoolGraceHours: number
+
+  // Drive skips a newest backup whose manifest lists older image versions than it copied, and holds the newest current one.
+  // When that current set is older than this many hours, the stale one is mirrored instead (the database matters more than
+  // a few image versions). Same on both tiers.
+  driveStaleMirrorHours: number
+
+  // While tonight's set is still copying in the queue, the backup step only POLLS it. After a poll the next heavy tick goes to the
+  // image audit unless this many minutes have passed, so a copy that never finishes (up to 24 h) polls about every other tick
+  // instead of starving the audit. 240 = more than one 3 h heavy tick, less than two.
+  scheduledBackupCopyPollGapMinutes: number
+
+  // The bell tells an admin "Nightly backup missing" once the backup step has had no complete visit for this many hours. A healthy
+  // night finishes within a few hours of the 22:17 try (the copy poll can land up to ~6 h later), so 30 = a full night missed plus slack,
+  // never a flap. Read from the cron record, never from R2. Same on both tiers; Free never takes a scheduled backup, so never shows it.
+  scheduledBackupStaleHours: number
+
   // ---- Data reset --------------------------------------------------------
 
   // system.ts MAX_IMAGE_DELETES_PER_RESET -- R2 deletes fired SEQUENTIALLY,
@@ -445,6 +486,14 @@ const PAID_LIMITS: PlanLimits = {
   paymentMethodScanPageSize: 200,
   maxAssetsPerBackup: 100,
   scheduledBackupEnabled: true,
+  scheduledBackupAfterHourLocal: 21,
+  scheduledBackupKeep: 7,
+  scheduledBackupMaxAttemptsPerDay: 2,
+  backupManifestGzip: true,
+  backupPoolGraceHours: 24,
+  driveStaleMirrorHours: 24,
+  scheduledBackupCopyPollGapMinutes: 240,
+  scheduledBackupStaleHours: 30,
   maxImageDeletesPerReset: 500,
   importRetentionMaxJobsPerTier: 20,
   ephemeralDeleteBatch: 5000,
@@ -497,6 +546,14 @@ const FREE_LIMITS: PlanLimits = {
   paymentMethodScanPageSize: 5000,
   maxAssetsPerBackup: 20,
   scheduledBackupEnabled: false,
+  scheduledBackupAfterHourLocal: 21,
+  scheduledBackupKeep: 7,
+  scheduledBackupMaxAttemptsPerDay: 2,
+  backupManifestGzip: false,
+  backupPoolGraceHours: 24,
+  driveStaleMirrorHours: 24,
+  scheduledBackupCopyPollGapMinutes: 240,
+  scheduledBackupStaleHours: 30,
   maxImageDeletesPerReset: 40,
   importRetentionMaxJobsPerTier: 5,
   ephemeralDeleteBatch: 1000,

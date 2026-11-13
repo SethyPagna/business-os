@@ -45,6 +45,14 @@ export const MAX_RESUME_STREAK = 2
 /** A step not started for this many full cycles (+ slack) is starved. */
 export const STARVED_CYCLES = 2
 
+/**
+ * Steps with no interval gate of their own (they used to ride the 6-hourly tick, about 4 runs a day) are held to the old
+ * cadence or slower by the rotation's own record of their last OK run (no extra D1 read): the rotation now comes round
+ * every 2.75 h and the heavy trigger every 3 h. 5 h, not 6 h, so jitter between visits cannot make a step skip every second
+ * round. Used by the 15-minute rotation's ungated steps and by the heavy lane's image audit.
+ */
+export const UNGATED_STEP_MIN_INTERVAL_MS = 5 * 60 * 60 * 1000
+
 export interface StepState {
   startedAt: string | null
   finishedAt: string | null
@@ -55,6 +63,12 @@ export interface StepState {
   /** Visits that started and never finished (isolate killed mid-step). */
   killed: number
   runs: number
+  /** Only for steps with an attemptWindow: the window the counter below belongs to. */
+  windowKey?: string
+  /** Failed or killed visits within windowKey (a step that keeps failing is bounded per window by its caller). */
+  windowFailures?: number
+  /** When the last visit only polled unfinished work (result.pollOnly); null/absent otherwise. A lane selector can space such polls out. */
+  pollAt?: string | null
 }
 
 export interface RotationState {
@@ -83,6 +97,22 @@ export interface RotationStep {
   run(): Promise<unknown>
   /** Skip the visit when this step last finished OK less than this long ago. */
   minIntervalMs?: number
+  /**
+   * Names the window an attempt belongs to (the backup: its business night). The step record then counts failed or
+   * killed visits per window (windowKey / windowFailures), which a lane selector can read without any extra I/O.
+   */
+  attemptWindow?: (nowMs: number) => string
+  /**
+   * Called after this visit is claimed (and any earlier kill counted) and before run(), with the failed or killed visits already
+   * counted in the current window, so run() can add what only it can see (the backup adds the failed sets in R2).
+   */
+  onClaim?: (info: { windowFailures: number }) => void
+  /**
+   * The step must never run on a record the lane could not read (the backup: its per-night allowance lives in that record, so an
+   * unreadable or lost one would let every tick take a full D1 read). When the state load failed the lane runs the next step that
+   * does not need it, or nothing.
+   */
+  requiresState?: boolean
 }
 
 export interface TickResult {
@@ -91,7 +121,7 @@ export interface TickResult {
   more: boolean
   error?: string
   /** Not run: gated by minIntervalMs, or another tick took this position. */
-  skipped?: 'recent' | 'lost-race' | 'duplicate' | 'claim-failed'
+  skipped?: 'recent' | 'lost-race' | 'duplicate' | 'claim-failed' | 'state-unreadable'
 }
 
 const emptyStep = (): StepState => ({ startedAt: null, finishedAt: null, okAt: null, error: null, failures: 0, killed: 0, runs: 0 })
@@ -120,6 +150,8 @@ function sanitize(raw: unknown): RotationState {
         failures: Number(v.failures) > 0 ? Math.floor(Number(v.failures)) : 0,
         killed: Number(v.killed) > 0 ? Math.floor(Number(v.killed)) : 0,
         runs: Number(v.runs) > 0 ? Math.floor(Number(v.runs)) : 0,
+        ...(typeof v.pollAt === 'string' ? { pollAt: v.pollAt } : {}),
+        ...(typeof v.windowKey === 'string' ? { windowKey: v.windowKey, windowFailures: Number(v.windowFailures) > 0 ? Math.floor(Number(v.windowFailures)) : 0 } : {}),
       }
     }
   }
@@ -138,7 +170,18 @@ const shortError = (error: unknown) => String((error as Error)?.message || error
  * time-derived position (still rotates, only loses resume and health), and a
  * step failure is recorded and swallowed.
  */
-export async function runRotationTick(steps: readonly RotationStep[], store: RotationStore, nowMs: number = Date.now(), options: { slot?: number } = {}): Promise<TickResult> {
+export interface RotationTickOptions {
+  slot?: number
+  /**
+   * Choose the step by something other than the cursor (the heavy lane runs the
+   * backup on its after-close tick, not on every other tick). Only consulted when
+   * the state was read; return undefined, or an index out of range, to keep the
+   * cursor's choice.
+   */
+  select?: (steps: readonly RotationStep[], state: RotationState, nowMs: number) => number | undefined
+}
+
+export async function runRotationTick(steps: readonly RotationStep[], store: RotationStore, nowMs: number = Date.now(), options: RotationTickOptions = {}): Promise<TickResult> {
   if (!steps.length) return { stepId: null, ok: true, more: false }
   const nowIso = new Date(nowMs).toISOString()
   const realStart = Date.now()
@@ -155,8 +198,17 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
   // A second delivery of the SAME firing (Cloudflare may deliver a cron more than once) shares its
   // scheduledTime, hence its slot: it must not take the next step, shifting the alternation.
   if (persisted && slot !== undefined && current.lastSlot === slot) return { stepId: null, ok: true, more: false, skipped: 'duplicate' }
-  const index = persisted ? current.cursor % steps.length : (slot ?? Math.floor(nowMs / CRON_ROTATION_TICK_MS)) % steps.length
-  const step = steps[index]
+  const selected = persisted ? options.select?.(steps, current, nowMs) : undefined
+  const index = selected !== undefined && Number.isInteger(selected) && selected >= 0 && selected < steps.length
+    ? selected
+    : persisted ? current.cursor % steps.length : (slot ?? Math.floor(nowMs / CRON_ROTATION_TICK_MS)) % steps.length
+  let step = steps[index]
+  if (!persisted && step.requiresState) {
+    // No readable record: a step that keeps its allowance there must not run. Take the next one that does not need it.
+    const fallback = steps.find((candidate) => !candidate.requiresState)
+    if (!fallback) return { stepId: null, ok: true, more: false, skipped: 'state-unreadable' }
+    step = fallback
+  }
   const record = current.steps[step.id] ?? emptyStep()
   // Write the state over the version we read. A false answer means another
   // overlapping tick moved the cursor first: this one must neither rewind it
@@ -189,7 +241,12 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
   if (record.startedAt && (!record.finishedAt || record.finishedAt < record.startedAt)) {
     record.killed += 1
     record.failures += 1
+    if (record.windowKey !== undefined) record.windowFailures = (record.windowFailures || 0) + 1 // counts against the window it died in
     record.error = 'killed before finishing (CPU or wall limit)'
+  }
+  if (step.attemptWindow) {
+    const window = step.attemptWindow(nowMs)
+    if (record.windowKey !== window) { record.windowKey = window; record.windowFailures = 0 }
   }
   record.startedAt = nowIso
   current.steps[step.id] = record
@@ -199,11 +256,23 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
   if (!(await commit())) return { stepId: step.id, ok: true, more: false, skipped: 'lost-race' }
 
   let ok = true
+  step.onClaim?.({ windowFailures: record.windowFailures || 0 })
   let more = false
+  // A visit that ran fine but whose work is not finished (a backup whose asset copy is still running in the queue):
+  // it is not an error, but it must not count as done, or the step's okAt would satisfy a lane gate for the whole day.
+  let incomplete = false
+  let pollOnly = false
   let error: string | undefined
   try {
     const result = await step.run()
     more = !!result && typeof result === 'object' && (result as { more?: unknown }).more === true
+    incomplete = !!result && typeof result === 'object' && (result as { incomplete?: unknown }).incomplete === true
+    pollOnly = !!result && typeof result === 'object' && (result as { pollOnly?: unknown }).pollOnly === true
+    // A visit that gave its work up (the backup's attempts-exhausted night) answers { failed: true, reason }: record it as a failure, not as OK.
+    if (!!result && typeof result === 'object' && (result as { failed?: unknown }).failed === true) {
+      ok = false
+      error = shortError(String((result as { reason?: unknown }).reason ?? 'failed'))
+    }
   } catch (caught) {
     ok = false
     error = shortError(caught)
@@ -211,7 +280,10 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
 
   record.finishedAt = new Date(nowMs + Math.max(0, Date.now() - realStart)).toISOString()
   record.runs += 1
-  if (ok) { record.okAt = record.finishedAt; record.error = null; record.failures = 0 } else { record.error = error ?? 'error'; record.failures += 1 }
+  if (ok && pollOnly) record.pollAt = record.finishedAt
+  else if (record.pollAt !== undefined) record.pollAt = null
+  // An OK visit that left its work unfinished (incomplete) is not a recovery: the failure count and error stay visible to cron-health.
+  if (ok) { if (!incomplete) { record.okAt = record.finishedAt; record.error = null; record.failures = 0 } } else { record.error = error ?? 'error'; record.failures += 1; if (step.attemptWindow) record.windowFailures = (record.windowFailures || 0) + 1 }
   if (ok && more && current.resumeStreak < MAX_RESUME_STREAK) {
     current.cursor = index
     current.resumeStreak += 1
@@ -245,13 +317,15 @@ export interface CronHealth {
 }
 
 /** Classify every rotation step; `problems` lists the ids that need a look. */
-export function evaluateCronHealth(state: RotationState, stepIds: readonly string[], nowMs: number = Date.now(), tickMs: number = CRON_ROTATION_TICK_MS, deployedAtMs?: number): CronHealth {
+export function evaluateCronHealth(state: RotationState, stepIds: readonly string[], nowMs: number = Date.now(), tickMs: number = CRON_ROTATION_TICK_MS, deployedAtMs?: number, stepIntervalMs: Readonly<Record<string, number>> = {}): CronHealth {
   const cycleMs = Math.max(1, stepIds.length) * tickMs
   const limit = cycleMs * STARVED_CYCLES + tickMs * (MAX_RESUME_STREAK + 1)
   const updated = state.updatedAt ? Date.parse(state.updatedAt) : NaN
   const stale = !Number.isFinite(updated) || nowMs - updated > limit
   // Never written, and this build is younger than one tick (+30 min slack): the first visit has not had its turn.
   const pending = !state.updatedAt && deployedAtMs !== undefined && Number.isFinite(deployedAtMs) && nowMs - deployedAtMs < tickMs + 30 * 60 * 1000
+  // A step that is only visited once per `stepIntervalMs` (the daily backup) is starved after two missed visits, not after the lane's own short limit.
+  const stepLimit = (id: string) => (stepIntervalMs[id] ? Math.max(limit, stepIntervalMs[id] * STARVED_CYCLES + tickMs * (MAX_RESUME_STREAK + 1)) : limit)
   const rows: CronHealthRow[] = stepIds.map((id) => {
     const s = state.steps[id] ?? emptyStep()
     const started = s.startedAt ? Date.parse(s.startedAt) : NaN
@@ -259,7 +333,7 @@ export function evaluateCronHealth(state: RotationState, stepIds: readonly strin
     if (!s.startedAt) status = 'never'
     else if (s.failures > 0 && String(s.error || '').startsWith('killed')) status = 'killed'
     else if (s.failures > 0) status = 'failing'
-    else if (nowMs - started > limit) status = 'starved'
+    else if (nowMs - started > stepLimit(id)) status = 'starved'
     else status = 'ok'
     return { id, status, lastStartedAt: s.startedAt, lastOkAt: s.okAt, failures: s.failures, killed: s.killed, error: s.error }
   })

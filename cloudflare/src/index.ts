@@ -48,7 +48,9 @@ import { serveUpload } from './lib/imageVariants'
 import { handleImportQueue, handleImportDeadLetterQueue, handleMediaQueue, handleBackupQueue } from './queue'
 import { deliverTelegramShiftOverview, drainDueTelegramShiftOverviews, isShiftOverviewQueueMessage } from './lib/telegram'
 import { maybeRunScheduledBackup } from './lib/backup'
-import { driveSyncScheduleDue, recordDriveSyncError } from './lib/googleDrive'
+import { pickHeavyStepIndex, scheduledBackupNightOf } from './lib/backupSchedule'
+import { getPlanLimits } from './lib/planTier'
+import { driveSyncHasNewBackup, driveSyncScheduleDue, recordDriveSyncError } from './lib/googleDrive'
 import { checkDriveSyncAuthorizer } from './lib/driveSyncAuthority'
 import { enqueueDriveSyncJob } from './lib/driveSyncQueue'
 import { maybeRunScheduledAuditLogRetention } from './lib/audit'
@@ -69,7 +71,9 @@ import { apiCacheHygiene } from './lib/apiCacheHygiene'
 import { readDataEpoch, readSwitchHeader } from './lib/readSwitches'
 import { callCountingMiddleware } from './lib/callCounting'
 import { phoneMaskResponses } from './lib/phoneMaskMiddleware'
+import { UNGATED_STEP_MIN_INTERVAL_MS } from './lib/cronRotation'
 import type { RotationStep } from './lib/cronRotation'
+import { runScheduledDriveSyncStep } from './lib/driveSyncCron'
 import { dispatchCron } from './lib/cronDispatch'
 import { settingsRotationStore } from './lib/cronRotationStore'
 import { runWithRequestDefer } from './lib/requestDefer'
@@ -657,15 +661,6 @@ export { SyncUploadSession } from './durable-objects/syncUploadSession'
 export { BroadcastHub } from './durable-objects/broadcastHub'
 
 /**
- * These four steps have no interval gate of their own (they used to ride the
- * 6-hourly tick, about 4 runs a day). The rotation now comes round every 2.75 h (11 steps x 15 min),
- * so each is held to the old cadence or slower by the rotation's own record
- * of its last OK run (no extra D1 read). 5 h, not 6 h, so jitter between
- * visits cannot make it skip every second round.
- */
-const UNGATED_STEP_MIN_INTERVAL_MS = 5 * 60 * 60 * 1000
-
-/**
  * The rotation, in order. Order matters only where noted: stalled imports are
  * reaped before the import retention that prunes them. Each entry is one
  * bounded job; the heavy ones keep their own interval gates and answer
@@ -675,19 +670,13 @@ const UNGATED_STEP_MIN_INTERVAL_MS = 5 * 60 * 60 * 1000
 export function cronRotationSteps(env: Env, label: (name: string, step: () => Promise<unknown>) => () => Promise<unknown>): RotationStep[] {
   const step = (id: string, run: () => Promise<unknown>, minIntervalMs?: number): RotationStep => ({ id, run: label(id, run), ...(minIntervalMs ? { minIntervalMs } : {}) })
   return [
-    step('drive-sync', async () => {
-      const schedule = await driveSyncScheduleDue(env)
-      if (!schedule.due) return schedule
-      // P1-2: only a destination connected by a user who may still take a
-      // full backup home receives scheduled uploads (re-checked again by
-      // the queue worker at run time).
-      const authority = await checkDriveSyncAuthorizer(env)
-      if (!authority.allowed) {
-        await recordDriveSyncError(env, authority.message)
-        return authority
-      }
-      return enqueueDriveSyncJob(env, 'scheduled')
-    }),
+    step('drive-sync', () => runScheduledDriveSyncStep({
+      scheduleDue: () => driveSyncScheduleDue(env),
+      hasNewBackup: () => driveSyncHasNewBackup(env),
+      authorize: () => checkDriveSyncAuthorizer(env),
+      recordError: (message) => recordDriveSyncError(env, message),
+      enqueue: () => enqueueDriveSyncJob(env, 'scheduled'),
+    })),
     step('audit-log-retention', () => maybeRunScheduledAuditLogRetention(env)),
     step('reap-stalled-imports', () => reapStalledImportJobs(env), UNGATED_STEP_MIN_INTERVAL_MS),
     step('import-retention', () => maybeRunScheduledImportRetention(env)),
@@ -706,14 +695,30 @@ export function cronRotationSteps(env: Env, label: (name: string, step: () => Pr
  * reprocessing must keep the larger budget, so they cannot ride the 15-minute
  * rotation. Same rule as the rotation: ONE step per invocation, cursor in
  * settings under its own key, so on Free (10 ms) they still never share an
- * invocation. 3 h per tick = each step every 6 h, the cadence they had.
- * Image audit last: it is the only one optional to the business.
+ * invocation.
+ *
+ * Which step a tick runs is NOT the cursor's alternation any more: the backup
+ * is daily after close (owner 12 Nov 2026), so lib/backupSchedule.ts's
+ * pickHeavyStepIndex runs it on the first tick at or after the close hour of
+ * each Cambodia business date (22:17 local, with the default close hour 21) and
+ * every other tick runs the image audit, held to its old 6 h cadence by its own
+ * minimum interval. Image audit last: it is the only one optional to the business.
  */
 export function cronHeavySteps(env: Env, label: (name: string, step: () => Promise<unknown>) => () => Promise<unknown>): RotationStep[] {
-  const step = (id: string, run: () => Promise<unknown>): RotationStep => ({ id, run: label(id, run) })
+  const step = (id: string, run: () => Promise<unknown>, minIntervalMs?: number): RotationStep => ({ id, run: label(id, run), ...(minIntervalMs ? { minIntervalMs } : {}) })
+  // Failed or killed visits already counted tonight, handed to the backup so it can add the failed sets it sees in R2.
+  let priorFailuresTonight = 0
   return [
-    step('backup', () => maybeRunScheduledBackup(env)),
-    step('image-audit', () => maybeRunScheduledImageAudit(env)),
+    // maybeRunScheduledBackup answers `incomplete: true` while tonight's set is still copying (or ended failed/partial):
+    // runRotationTick then keeps the visit healthy but does not record okAt, so the lane re-selects the backup step on the
+    // next heavy tick, which retries only if R2 shows no finalized set.
+    {
+      ...step('backup', () => maybeRunScheduledBackup(env, Date.now(), undefined, priorFailuresTonight)),
+      attemptWindow: (nowMs) => scheduledBackupNightOf(nowMs, getPlanLimits(env).scheduledBackupAfterHourLocal),
+      onClaim: (info) => { priorFailuresTonight = info.windowFailures },
+      requiresState: true,
+    },
+    step('image-audit', () => maybeRunScheduledImageAudit(env), UNGATED_STEP_MIN_INTERVAL_MS),
   ]
 }
 
@@ -796,6 +801,7 @@ export default {
         // path drains too, but only while someone is using the app).
         drainTelegram: label('telegram-shift-overview', () => drainDueTelegramShiftOverviews(env, Date.now(), { limit: 10, sweepStale: true })),
         heavySteps: () => cronHeavySteps(env, label),
+        heavySelect: (steps, state, nowMs) => pickHeavyStepIndex(steps, state, nowMs, getPlanLimits(env).scheduledBackupAfterHourLocal, getPlanLimits(env).scheduledBackupMaxAttemptsPerDay, getPlanLimits(env).scheduledBackupCopyPollGapMinutes * 60 * 1000),
         rotationSteps: () => cronRotationSteps(env, label),
         storeFor: (key) => settingsRotationStore(env, key),
       })

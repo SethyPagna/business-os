@@ -19,3 +19,6 @@ export const ROTATION_STEP_IDS: readonly string[] = [
 
 /** The heavy trigger's steps (CRON_HEAVY), in order; see cronHeavySteps() in src/index.ts. */
 export const HEAVY_STEP_IDS: readonly string[] = ['backup', 'image-audit']
+
+/** How often each heavy step is visited, where that is slower than the lane's 3 h tick: the backup is daily (cron-health starved limit). */
+export const HEAVY_STEP_INTERVAL_MS: Readonly<Record<string, number>> = { backup: 24 * 60 * 60 * 1000 }

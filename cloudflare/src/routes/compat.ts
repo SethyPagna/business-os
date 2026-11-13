@@ -9,7 +9,7 @@ import { buildDriveOauthStartUrl, completeDriveOauth, consumeDriveOauthState, di
 import { enqueueDriveRestoreStageJob, enqueueDriveSyncJob } from '../lib/driveSyncQueue'
 import { canAuthorizeDriveSync } from '../lib/driveSyncAuthority'
 import { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, type PermissionUser } from '../lib/permissions'
-import { resolvePlanTier } from '../lib/planTier'
+import { getPlanLimits, resolvePlanTier } from '../lib/planTier'
 import { readAllQuotas } from '../lib/quotaGuard'
 import { audit, buildAuditLogRetentionDeleteSql } from '../lib/audit'
 import { decodeAuditCursor } from '../lib/auditLogQuery'
@@ -800,7 +800,7 @@ async function runIntegrationDoctor(c: any, deep: boolean) {
   let backupCheck: Record<string, unknown> = { ok: true, status: 'ok', message: 'R2 backups are reachable.' }
   try {
     const backups = await listCloudflareBackups(c.env)
-    backupCheck = { ok: true, status: 'ok', message: `${backups.length} backup(s) stored in R2.`, count: backups.length, keep: 2, intervalHours: 6 }
+    backupCheck = { ok: true, status: 'ok', message: `${backups.length} backup(s) stored in R2.`, count: backups.length, keep: 2, keepScheduled: getPlanLimits(c.env).scheduledBackupKeep, intervalHours: 24, cadence: 'daily-after-close' }
   } catch (error) {
     ok = false
     console.error('[integration-doctor] R2 backup listing failed', error)

@@ -23,6 +23,7 @@
 import type { Env } from '../index'
 import { getDb } from './db'
 import { encryptSecret, decryptSecret, upgradeLegacySecret } from './secretCrypto'
+import { getPlanLimits } from './planTier'
 import {
   DRIVE_STAGED_BACKUP_PREFIX,
   inspectCloudflareBackupStream,
@@ -324,6 +325,8 @@ export async function disconnectDrive(env: Env): Promise<void> {
     ['drive_sync_access_token_expires_at', ''],
     ['drive_sync_account_email', ''],
     ['drive_sync_folder_id', ''],
+    ['drive_sync_last_backup_key', ''],
+    ['drive_sync_last_checked_at', ''],
     [DRIVE_SYNC_AUTHORIZED_BY_KEY, ''],
   ])
 }
@@ -410,7 +413,7 @@ export async function pushBackupToDrive(env: Env): Promise<{ success: boolean; e
   if ('error' in tokenResult) return { success: false, error: tokenResult.error }
   const token = tokenResult.token
 
-  const settings = await getSettings(env, ['drive_sync_folder_name', 'drive_sync_folder_id'])
+  const settings = await getSettings(env, ['drive_sync_folder_name', 'drive_sync_folder_id', 'drive_sync_account_email'])
   const folderName = settings.drive_sync_folder_name || DEFAULT_FOLDER_NAME
 
   try {
@@ -421,22 +424,27 @@ export async function pushBackupToDrive(env: Env): Promise<{ success: boolean; e
     // createCloudflareBackup() again, doubling backup work/storage and racing
     // R2's own retention. A copying/partial/failed set is never eligible.
     const backups = await listCloudflareBackups(env)
-    const backup = backups.find((item) => item.finalized)
+    const { backup, skippedStale } = driveMirrorChoice(backups, driveMirrorLimits(env))
     if (!backup) throw new Error('No finalized R2 backup is available to mirror yet.')
     const fileName = backup.name || `backup-${Date.now()}.json`
     const existingFiles = await listDriveBackups(token, folderId)
     const existing = existingFiles.find((file) => file.appProperties?.backupKey === backup.key && file.appProperties?.status === 'finalized')
     if (existing) {
       await pruneDriveBackups(token, existingFiles, DRIVE_BACKUP_KEEP)
-      await setSettings(env, [['drive_sync_last_synced_at', new Date().toISOString()], ['drive_sync_last_error', '']])
+      await setSettings(env, [['drive_sync_last_synced_at', new Date().toISOString()], ['drive_sync_last_backup_key', driveSyncMarker(settings.drive_sync_account_email, folderId, backup.key)], ['drive_sync_last_error', driveStaleSkipMessage(skippedStale, backup)]])
       return { success: true, fileId: existing.id, fileName }
     }
 
     const object = await env.ASSETS.get(backup.key)
     if (!object?.body) throw new Error('The finalized R2 backup could not be streamed.')
+    // A gzip manifest is mirrored as stored (no CPU, a fraction of the Drive quota). Its Drive copy is named and typed for
+    // what it is, so a human downloading it gets a .json.gz that opens as one. Staging accepts both forms.
+    const gzipped = object.customMetadata?.encoding === 'gzip'
+    const driveFileName = gzipped ? driveGzipFileName(fileName) : fileName
+    const driveContentType = gzipped ? DRIVE_GZIP_MIME : DRIVE_JSON_MIME
 
     const metadata = {
-      name: fileName,
+      name: driveFileName,
       parents: [folderId],
       appProperties: {
         businessOsBackup: 'true',
@@ -449,7 +457,7 @@ export async function pushBackupToDrive(env: Env): Promise<{ success: boolean; e
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json; charset=UTF-8',
-        'X-Upload-Content-Type': 'application/json',
+        'X-Upload-Content-Type': driveContentType,
         'X-Upload-Content-Length': String(object.size),
       },
       body: JSON.stringify(metadata),
@@ -462,7 +470,7 @@ export async function pushBackupToDrive(env: Env): Promise<{ success: boolean; e
       method: 'PUT',
       headers: {
         Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
+        'Content-Type': driveContentType,
         'Content-Length': String(object.size),
       },
       body: object.body,
@@ -472,13 +480,29 @@ export async function pushBackupToDrive(env: Env): Promise<{ success: boolean; e
     if (uploaded.size && Number(uploaded.size) !== object.size) throw new Error('Google Drive upload size verification failed.')
 
     await pruneDriveBackups(token, [{ id: uploaded.id, appProperties: metadata.appProperties }, ...existingFiles], DRIVE_BACKUP_KEEP)
-    await setSettings(env, [['drive_sync_last_synced_at', new Date().toISOString()], ['drive_sync_last_error', '']])
-    return { success: true, fileId: uploaded.id, fileName }
+    await setSettings(env, [['drive_sync_last_synced_at', new Date().toISOString()], ['drive_sync_last_backup_key', driveSyncMarker(settings.drive_sync_account_email, folderId, backup.key)], ['drive_sync_last_error', driveStaleSkipMessage(skippedStale, backup)]])
+    return { success: true, fileId: uploaded.id, fileName: driveFileName }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Google Drive sync failed.'
     await setSettings(env, [['drive_sync_last_error', message]])
     return { success: false, error: message }
   }
+}
+
+const DRIVE_JSON_MIME = 'application/json'
+const DRIVE_GZIP_MIME = 'application/gzip'
+// Drive may report either registered name for a gzip file.
+const isGzipMime = (mime: unknown) => mime === DRIVE_GZIP_MIME || mime === 'application/x-gzip'
+
+/** <name>.json -> <name>.json.gz (a name already ending .gz is kept). */
+export function driveGzipFileName(name: string): string {
+  return /\.gz$/i.test(name) ? name : `${name}${/\.json$/i.test(name) ? '' : '.json'}.gz`
+}
+
+/** The two forms a Drive backup copy can take: plain JSON (older copies) and a gzip manifest. */
+export function isDriveBackupFile(file: { name?: string; mimeType?: string }): boolean {
+  const name = String(file.name || '').trim().toLowerCase()
+  return (name.endsWith('.json') && file.mimeType === DRIVE_JSON_MIME) || (name.endsWith('.json.gz') && isGzipMime(file.mimeType))
 }
 
 export function isTrustedDriveUploadSession(value: string): boolean {
@@ -491,7 +515,7 @@ export function isTrustedDriveUploadSession(value: string): boolean {
 }
 
 // Called from index.ts's `scheduled()` cron handler (the 15-minute rotating cron; the backup it pushes comes from the heavy cron,
-// maybeRunScheduledBackup in lib/backup.ts, every 6 h). The legacy Docker
+// maybeRunScheduledBackup in lib/backup.ts, daily after close). The legacy Docker
 // backend ran a real setInterval loop checking every 30s whether
 // `syncIntervalSeconds` had elapsed since the last Drive sync; Workers have
 // no persistent timers, so this checks on each cron tick instead. That's
@@ -506,18 +530,93 @@ export function isTrustedDriveUploadSession(value: string): boolean {
 // work instead of holding the scheduled handler open for the full transfer.
 export async function driveSyncScheduleDue(env: Env): Promise<{ due: boolean; reason?: string }> {
   const settings = await getSettings(env, [
-    'drive_sync_enabled', 'drive_sync_refresh_token', 'drive_sync_last_synced_at', 'drive_sync_interval_seconds',
+    'drive_sync_enabled', 'drive_sync_refresh_token', 'drive_sync_last_synced_at', 'drive_sync_last_checked_at', 'drive_sync_interval_seconds',
   ])
   if (settings.drive_sync_enabled === '0') return { due: false, reason: 'disabled' }
   if (!settings.drive_sync_refresh_token) return { due: false, reason: 'not-connected' }
 
   const intervalSeconds = Math.min(24 * 60 * 60, Math.max(60 * 60, Number(settings.drive_sync_interval_seconds || 21600)))
-  const lastSyncedMs = settings.drive_sync_last_synced_at ? Date.parse(settings.drive_sync_last_synced_at) : 0
+  // A visit that found nothing new (driveSyncHasNewBackup) counts as a check: the interval runs from the newest of the
+  // last upload and the last check, so an already-mirrored backup is not re-listed on every rotation visit.
+  const lastSyncedMs = Math.max(
+    settings.drive_sync_last_synced_at ? Date.parse(settings.drive_sync_last_synced_at) || 0 : 0,
+    settings.drive_sync_last_checked_at ? Date.parse(settings.drive_sync_last_checked_at) || 0 : 0,
+  )
   if (lastSyncedMs && (Date.now() - lastSyncedMs) < intervalSeconds * 1000) {
     return { due: false, reason: 'not-due' }
   }
 
   return { due: true }
+}
+
+/**
+ * The backup Drive mirrors: the newest FINALIZED one that is not a section backup. A reset's or repair's pre-backup (a few
+ * tables, no assets) is newer than the nightly full set after any late repair, and mirroring it would leave Drive's off-site
+ * copy partial and use up its 10 slots. Both selectors (the upload and the already-has-it check) share this one predicate,
+ * so the skip marker always names the backup that would be uploaded.
+ */
+export type DriveMirrorLimits = { staleMirrorHours: number; nowMs: number }
+type MirrorCandidate = { finalized: boolean; scope?: 'full' | 'section' | null; manifestAssetsCurrent?: boolean; uploaded?: string | null }
+
+/**
+ * Which backup Drive should hold, and which newer one it passed over. A set whose manifest lists older versions than it
+ * copied would give a Drive-only restore the wrong images, so it is skipped while a current set is fresh enough. When the
+ * newest current set is older than `staleMirrorHours` (or none exists), the stale set is mirrored instead: a day without
+ * the newest database off-site costs more than a few image versions. Without limits the stale set is always skipped.
+ */
+export function driveMirrorChoice<T extends MirrorCandidate>(backups: readonly T[], limits?: DriveMirrorLimits): { backup?: T; skippedStale?: T } {
+  const candidates = backups.filter((item) => item.finalized && item.scope !== 'section')
+  const head = candidates[0]
+  if (!head) return {}
+  if (head.manifestAssetsCurrent !== false) return { backup: head }
+  const current = candidates.find((item) => item.manifestAssetsCurrent !== false)
+  if (!limits) return current ? { backup: current, skippedStale: head } : {}
+  const uploadedMs = current?.uploaded ? Date.parse(current.uploaded) : NaN
+  const currentIsOld = !current || (Number.isFinite(uploadedMs) && limits.nowMs - uploadedMs > limits.staleMirrorHours * 3600_000)
+  return currentIsOld ? { backup: head } : { backup: current, skippedStale: head }
+}
+
+export function newestMirrorableBackup<T extends MirrorCandidate>(backups: readonly T[], limits?: DriveMirrorLimits): T | undefined {
+  return driveMirrorChoice(backups, limits).backup
+}
+
+const driveMirrorLimits = (env: Env): DriveMirrorLimits => ({ staleMirrorHours: getPlanLimits(env).driveStaleMirrorHours, nowMs: Date.now() })
+
+/** The visible sync status when a newer set was passed over (shown as the Drive "last error" on the Backup page). */
+export function driveStaleSkipMessage(skipped: { name?: string } | undefined, held: { name?: string }): string {
+  return skipped ? `The newest backup (${skipped.name || 'unnamed'}) was not copied to Google Drive because its image list is out of date. Drive keeps ${held.name || 'the previous backup'}.` : ''
+}
+
+/**
+ * What `drive_sync_last_backup_key` holds: the backup Drive was given AND where (connected account + folder id). A different
+ * account or folder never matches, so a new destination gets the newest backup at once instead of waiting for the next one.
+ * (Disconnect also clears it.)
+ */
+export function driveSyncMarker(accountEmail: unknown, folderId: unknown, backupKey: string): string {
+  return `${trim(accountEmail)}|${trim(folderId)}|${backupKey}`
+}
+
+/**
+ * Is there a finalized R2 backup Drive has not been given yet? The scheduled Drive sync runs on its own interval
+ * (6 h by default) but the backup is daily, so most visits would find the same backup already mirrored. pushBackupToDrive
+ * never re-uploads it (it finds the tagged Drive file), but reaching that point still costs a queue job, a token check, a
+ * Drive folder listing and several settings writes. This answers from one settings read and one R2 listing instead.
+ * `drive_sync_last_backup_key` is written by pushBackupToDrive after every successful sync. The Backup screen's manual
+ * "Sync now" does not consult this and always goes through pushBackupToDrive.
+ */
+export async function driveSyncHasNewBackup(env: Env): Promise<{ new: boolean; reason?: 'no-finalized-backup' | 'already-synced' | 'skipped-stale'; backupKey?: string }> {
+  const { backup: newest, skippedStale } = driveMirrorChoice(await listCloudflareBackups(env), driveMirrorLimits(env))
+  // Nothing to upload: record that the check happened (not a sync: the Backup screen's "last synced" stays the last upload).
+  const checked = () => setSettings(env, [['drive_sync_last_checked_at', new Date().toISOString()]])
+  if (!newest) { await checked(); return { new: false, reason: 'no-finalized-backup' } }
+  const settings = await getSettings(env, ['drive_sync_last_backup_key', 'drive_sync_account_email', 'drive_sync_folder_id'])
+  if (settings.drive_sync_last_backup_key === driveSyncMarker(settings.drive_sync_account_email, settings.drive_sync_folder_id, newest.key)) {
+    await checked()
+    // Drive holds an older current set because a newer one was passed over: say so instead of reporting it as up to date.
+    if (skippedStale) { await setSettings(env, [['drive_sync_last_error', driveStaleSkipMessage(skippedStale, newest)]]); return { new: false, reason: 'skipped-stale', backupKey: newest.key } }
+    return { new: false, reason: 'already-synced', backupKey: newest.key }
+  }
+  return { new: true, backupKey: newest.key }
 }
 
 type DriveBackupFile = {
@@ -605,8 +704,7 @@ export async function stageLatestDriveBackupToR2(env: Env): Promise<DriveRestore
       && properties.status === 'finalized'
       && properties.backupKey?.startsWith('backups/cloudflare/')
       && !properties.backupKey?.startsWith(DRIVE_STAGED_BACKUP_PREFIX)
-      && trim(candidate.name).toLowerCase().endsWith('.json')
-      && candidate.mimeType === 'application/json'
+      && isDriveBackupFile(candidate)
   })
   if (!file) throw new Error('No finalized app-owned Google Drive backup is available to stage.')
 
@@ -653,7 +751,9 @@ export async function stageLatestDriveBackupToR2(env: Env): Promise<DriveRestore
     redirect: 'error',
   })
   if (!response.ok || !response.body) throw new Error(`Google Drive backup download failed (${response.status}).`)
-  if ((response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
+  // The download must be the type the app-owned file was listed with (plain JSON or a gzip manifest), nothing else.
+  const downloadType = (response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase()
+  if (downloadType !== file.mimeType && !(isGzipMime(file.mimeType) && isGzipMime(downloadType))) {
     throw new Error('Google Drive returned an unexpected backup content type.')
   }
   const responseLength = response.headers.get('content-length')
@@ -670,7 +770,7 @@ export async function stageLatestDriveBackupToR2(env: Env): Promise<DriveRestore
   }
   const [putResult, inspectionResult] = await Promise.allSettled([
     env.ASSETS.put(backupKey, r2Body, {
-      httpMetadata: { contentType: 'application/json; charset=utf-8' },
+      httpMetadata: { contentType: isGzipMime(file.mimeType) ? DRIVE_GZIP_MIME : 'application/json; charset=utf-8' },
       customMetadata: storedMetadata,
       md5,
     }),

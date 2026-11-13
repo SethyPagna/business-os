@@ -2,8 +2,9 @@ import { executeRawRestoreStockTransaction, stockTransactionStatementCount } fro
 import { restoreStockAuthority } from './maintenance'
 import type { Env } from '../index'
 import { getPlanLimits } from './planTier'
+import { scheduledBackupCoverageMs, scheduledBackupGate, scheduledBackupNightOf } from './backupSchedule'
 import { copyObject, listObjects } from './r2'
-import { streamBackupEvents } from './backupRestoreStream'
+import { streamBackupEvents, gunzipIfCompressed } from './backupRestoreStream'
 import { assertCustomTableName } from './customTableName'
 import { containsEmbeddedMarkup, judgeStoredMedia, otherMediaContentType } from './uploadSecurity'
 
@@ -14,6 +15,30 @@ export const CLOUDFLARE_BACKUP_KEEP = 2
 // retention so a temporary recovery candidate can never evict either of the
 // two locally-created finalized backups.
 export const DRIVE_STAGED_BACKUP_PREFIX = `${CLOUDFLARE_BACKUP_PREFIX}drive-staged-`
+
+// Shared asset pool. Every full backup used to copy ALL of uploads/ into its own folder, so keeping 7 daily + 2 manual
+// backups meant nine copies of every image (~8 GB for ~0.9 GB of uploads). Now an asset is copied ONCE per
+// (source key + etag) into this pool and every backup that references that version points at the same object. The pool
+// is deliberately OUTSIDE CLOUDFLARE_BACKUP_PREFIX ('backups/cloudflare/'): the per-folder orphan sweep and the manifest
+// listing must never see it. It is pruned only by sweepAssetPool, which deletes an object only when no surviving backup
+// sidecar (state.json) references it.
+export const BACKUP_ASSET_POOL_PREFIX = 'backups/asset-pool/'
+export const ASSET_LAYOUT_POOL = 'pool-v1' as const
+
+type AssetEntry = { key: string; size?: number; uploaded?: string | null; etag?: string }
+
+// The version of an upload: its etag; a store that reports none falls back to size + upload time.
+function assetVersionToken(asset: AssetEntry): string {
+  const etag = String(asset.etag || '').replace(/^W\//, '').replace(/"/g, '')
+  if (etag) return etag.replace(/[^A-Za-z0-9._-]/g, '_')
+  const uploadedMs = asset.uploaded ? Date.parse(asset.uploaded) : 0
+  return `v${Number(asset.size) || 0}-${Number.isFinite(uploadedMs) ? uploadedMs : 0}`
+}
+
+/** Pool object name for one version of one upload: backups/asset-pool/<path under uploads/>@<etag>. */
+export function assetPoolKey(asset: AssetEntry): string {
+  return `${BACKUP_ASSET_POOL_PREFIX}${asset.key.replace(/^uploads\//, '')}@${assetVersionToken(asset)}`
+}
 
 // Real R2 object-copy is a get()+put() (see r2.ts's copyObject) -- one
 // subrequest pair per asset. Workers' free-plan subrequest-per-invocation
@@ -277,7 +302,10 @@ type BackupPayload = {
   r2: {
     bucket: string
     // Every uploads/ key that existed at backup time (manifest only).
-    assets: Array<{ key: string; size?: number; uploaded?: string | null }>
+    assets: Array<{ key: string; size?: number; uploaded?: string | null; etag?: string }>
+    // How the copied bytes are stored: 'pool-v1' = the shared asset pool (BACKUP_ASSET_POOL_PREFIX, one object per
+    // source key + etag, shared by every backup that references it); absent = the older per-backup assets/ folder.
+    assetLayout?: 'pool-v1'
     // Subset of the above whose actual bytes were copied into this
     // backup's own assets/ prefix -- these are the ones restore can bring
     // back for real. assetsPrefix is where they live, e.g.
@@ -367,12 +395,18 @@ export type BackupLifecycleState = {
   source: 'manual' | 'scheduled'
   status: 'copying' | 'finalized' | 'partial' | 'failed'
   assetsPrefix: string
+  // 'pool-v1': copied bytes live in the shared pool, named by assetPoolKey(asset); absent: per-backup assets/ folder.
+  assetLayout?: 'pool-v1'
   assets: BackupPayload['r2']['assets']
   copiedKeys: string[]
   pendingKeys: string[]
   failedKeys: string[]
   attempts: Record<string, number>
   systemJobId?: string
+  // Set when a continuation slice found a changed version of an upload AFTER the manifest was written: the sidecar names the
+  // version that was copied, the (immutable) manifest still names the one it listed. A Drive copy is manifest-only, so such a
+  // set is never mirrored to Drive (a Drive-only restore would otherwise get a different version than the set copied).
+  manifestAssetsStale?: boolean
 }
 
 function backupStateKey(backupName: string): string {
@@ -479,7 +513,7 @@ async function listAssets(env: Env) {
   do {
     const page = await env.ASSETS.list({ prefix: 'uploads/', cursor, limit: 1000 })
     for (const object of page.objects || []) {
-      assets.push({ key: object.key, size: object.size, uploaded: object.uploaded?.toISOString?.() || null })
+      assets.push({ key: object.key, size: object.size, uploaded: object.uploaded?.toISOString?.() || null, ...(object.etag ? { etag: object.etag } : {}) })
     }
     cursor = page.truncated ? page.cursor : undefined
   } while (cursor)
@@ -494,11 +528,20 @@ export async function listCloudflareBackups(env: Env) {
     uploaded: string | null
     status: 'copying' | 'finalized' | 'partial' | 'failed'
     finalized: boolean
+    // What took it (manifest customMetadata); null on backups from before the field was stamped.
+    source: 'manual' | 'scheduled' | null
+    // 'full' or 'section' (manifest customMetadata); null on backups from before the field was stamped.
+    scope: 'full' | 'section' | null
+    // false when the manifest's asset list no longer matches what the set copied (see manifestAssetsStale).
+    manifestAssetsCurrent: boolean
   }> = []
   let cursor: string | undefined
   do {
     const page = await env.ASSETS.list({
       prefix: CLOUDFLARE_BACKUP_PREFIX,
+      // Top level only: manifests are <name>.json directly under the prefix, while every copied asset of every retained set
+      // lives below <name>/assets/. Without the delimiter each listing walked all of them (9 sets x uploads/).
+      delimiter: '/',
       cursor,
       limit: 1000,
       include: ['customMetadata'],
@@ -523,6 +566,9 @@ export async function listCloudflareBackups(env: Env) {
         uploaded: object.uploaded?.toISOString?.() || null,
         status,
         finalized: status === 'finalized',
+        source: object.customMetadata?.source === 'scheduled' || object.customMetadata?.source === 'manual' ? object.customMetadata.source : null,
+        scope: object.customMetadata?.scope === 'full' || object.customMetadata?.scope === 'section' ? object.customMetadata.scope : null,
+        manifestAssetsCurrent: !state?.manifestAssetsStale,
       })
     }
     cursor = page.truncated ? page.cursor : undefined
@@ -589,13 +635,16 @@ export class R2StreamWriter {
 
   async write(text: string): Promise<void> {
     if (!text) return
+    await this.writeBytes(this.encoder.encode(text))
+  }
+
+  async writeBytes(bytes: Uint8Array): Promise<void> {
     // Measured in BYTES, not characters -- R2's part size is bytes, and
     // this payload is full of non-ASCII (Khmer product names, currency
     // symbols) where the two differ by up to 3x. Copying into a byte
     // buffer (rather than counting bytes and joining strings) is what lets
     // a part boundary fall in the middle of a string, or even of a
     // multi-byte character, without changing any part's length.
-    const bytes = this.encoder.encode(text)
     let offset = 0
     while (offset < bytes.byteLength) {
       const take = Math.min(R2_PART_BYTES - this.filled, bytes.byteLength - offset)
@@ -649,6 +698,161 @@ export class R2StreamWriter {
   }
 }
 
+/** Pool object key -> upload time in ms (0 when the store reports none). */
+async function listAssetPoolObjects(env: Env): Promise<Map<string, number>> {
+  const objects = new Map<string, number>()
+  let cursor: string | undefined
+  do {
+    const page = await env.ASSETS.list({ prefix: BACKUP_ASSET_POOL_PREFIX, cursor, limit: 1000 })
+    for (const object of page.objects || []) {
+      const uploadedMs = object.uploaded instanceof Date ? object.uploaded.getTime() : Date.parse(String(object.uploaded || ''))
+      objects.set(object.key, Number.isFinite(uploadedMs) ? uploadedMs : 0)
+    }
+    cursor = page.truncated ? page.cursor : undefined
+  } while (cursor)
+  return objects
+}
+
+async function listAssetPoolKeys(env: Env): Promise<Set<string>> {
+  return new Set((await listAssetPoolObjects(env)).keys())
+}
+
+/**
+ * The one asset writer for the pool layout (queue first slice, no-queue fallback, queue continuation all call it).
+ * The pool is listed once; an asset whose pool object already exists costs nothing (no get, no put). Only a missing
+ * object is copied, and at most `copyCap` copies are attempted per call (each is a get + a put, the subrequest
+ * budget the old per-slice cap protected); the walk stops there and the caller keeps the rest pending. Returns one
+ * outcome per key walked, in order. When the source was replaced since it was listed, the pool name follows the bytes
+ * actually read and the entry's etag/size are updated in place, so the sidecar always names what was copied. In that case
+ * `onVersionChange` runs BEFORE the new object is written: the caller persists its sidecar, so the new version is pinned
+ * against retention from the moment it exists, not only when the whole backup finishes.
+ */
+async function copyIntoAssetPool(
+  env: Env,
+  byKey: Map<string, AssetEntry>,
+  keys: readonly string[],
+  copyCap: number,
+  onVersionChange?: () => Promise<void>,
+): Promise<Array<{ key: string; ok: boolean }>> {
+  const present = await listAssetPoolKeys(env)
+  const outcomes: Array<{ key: string; ok: boolean }> = []
+  let copies = 0
+  for (const key of keys) {
+    const asset = byKey.get(key)
+    if (!asset) { outcomes.push({ key, ok: false }); continue }
+    if (present.has(assetPoolKey(asset))) { outcomes.push({ key, ok: true }); continue }
+    if (copies >= copyCap) break
+    copies += 1
+    try {
+      const object = await env.ASSETS.get(key)
+      if (!object) { outcomes.push({ key, ok: false }); continue }
+      if (object.etag && object.etag !== asset.etag) {
+        asset.etag = object.etag
+        if (Number.isFinite(object.size)) asset.size = object.size
+        await onVersionChange?.()
+      }
+      const destKey = assetPoolKey(asset)
+      if (present.has(destKey)) {
+        await object.body?.cancel().catch(() => {})
+      } else {
+        const contentType = object.httpMetadata?.contentType
+        await env.ASSETS.put(destKey, object.body, contentType ? { httpMetadata: { contentType } } : undefined)
+        present.add(destKey)
+      }
+      outcomes.push({ key, ok: true })
+    } catch (_) {
+      outcomes.push({ key, ok: false })
+    }
+  }
+  return outcomes
+}
+
+/**
+ * A set may finalize only when every asset it names is present in the pool NOW. A copied key was counted as copied because
+ * its pool object existed when the pool was listed; a prune running in another invocation can delete it afterwards (it
+ * had not yet seen this set's sidecar). So before finalizing, the pool is listed again and every copied key whose pool
+ * object is gone moves back to pending (copied again from uploads/ by the next slice). A key that keeps vanishing or whose
+ * source is gone too runs out of attempts and lands in failedKeys: the set is then 'failed', never a finalized lie.
+ * Returns how many keys were moved back.
+ */
+async function demoteMissingPoolCopies(
+  env: Env,
+  state: Pick<BackupLifecycleState, 'assets' | 'copiedKeys' | 'pendingKeys' | 'failedKeys' | 'attempts'>,
+): Promise<number> {
+  if (!state.copiedKeys.length) return 0
+  const present = await listAssetPoolKeys(env)
+  const byKey = new Map<string, AssetEntry>(state.assets.map((asset) => [asset.key, asset]))
+  const kept: string[] = []
+  let moved = 0
+  for (const key of state.copiedKeys) {
+    const asset = byKey.get(key)
+    if (asset && present.has(assetPoolKey(asset))) { kept.push(key); continue }
+    moved += 1
+    state.attempts[key] = (state.attempts[key] || 0) + 1
+    if (state.attempts[key] < MAX_ASSET_COPY_ATTEMPTS) state.pendingKeys.push(key)
+    else state.failedKeys.push(key)
+  }
+  if (moved) state.copiedKeys = kept
+  return moved
+}
+
+/**
+ * Same interface as R2StreamWriter, but the document is gzip-compressed on its way into the multipart parts. The JSON
+ * manifest is the whole database as text (repetitive keys and values), so it compresses several-fold. Streaming:
+ * CompressionStream is fed row by row and its output is cut into the equal-size R2 parts by the inner writer, so memory
+ * stays at the inner writer's two parts. If the part upload fails, the failure is surfaced to the next write instead of
+ * leaving the compressor's backpressure waiting forever.
+ */
+export class GzipStreamWriter {
+  private readonly compressor = new CompressionStream('gzip')
+  private readonly input = this.compressor.writable.getWriter()
+  private readonly pump: Promise<void>
+  private pumpFailed = false
+  private readonly encoder = new TextEncoder()
+
+  constructor(private readonly inner: R2StreamWriter) {
+    this.pump = (async () => {
+      const reader = this.compressor.readable.getReader()
+      try {
+        for (;;) {
+          const next = await reader.read()
+          if (next.done) break
+          await this.inner.writeBytes(next.value)
+        }
+      } catch (error) {
+        this.pumpFailed = true
+        await reader.cancel(error).catch(() => {}) // errors the writable side so a blocked write() rejects
+        throw error
+      }
+    })()
+    this.pump.catch(() => {}) // observed by finish()/abort()/write()
+  }
+
+  async write(text: string): Promise<void> {
+    if (!text) return
+    if (this.pumpFailed) await this.pump
+    await this.input.write(this.encoder.encode(text))
+  }
+
+  async finish(): Promise<void> {
+    await this.input.close()
+    await this.pump
+    await this.inner.finish()
+  }
+
+  async abort(): Promise<void> {
+    await this.input.abort().catch(() => {})
+    await this.pump.catch(() => {})
+    await this.inner.abort()
+  }
+}
+
+// Gzip the manifest on the paid tier (getPlanLimits(env).backupManifestGzip) when the runtime has
+// CompressionStream. Restore, validate and the Drive stage read both forms either way (gunzipIfCompressed sniffs the bytes).
+function backupManifestGzip(env: Env): boolean {
+  return getPlanLimits(env).backupManifestGzip && typeof CompressionStream === 'function'
+}
+
 export async function createCloudflareBackup(env: Env, source: 'manual' | 'scheduled' = 'manual') {
   return writeBackupDocument(env, { tables: BACKUP_TABLES, includeAssets: true, source })
 }
@@ -680,13 +884,15 @@ async function writeBackupDocument(
 
   const assets = includeAssets ? await listAssets(env) : []
   const backupName = `business-os-cloudflare-${stamp(new Date(createdAt))}`
-  const assetsPrefix = `${CLOUDFLARE_BACKUP_PREFIX}${backupName}/assets/`
+  const assetsPrefix = BACKUP_ASSET_POOL_PREFIX
+  const key = `${CLOUDFLARE_BACKUP_PREFIX}${backupName}.json`
 
   let copiedKeys: string[] = []
   const pendingKeys: string[] = []
   const failedKeys: string[] = []
   const attempts: Record<string, number> = {}
   let assetCopyProgress: BackupPayload['r2']['assetCopyProgress']
+  let earlyState: BackupLifecycleState | null = null
 
   if (!includeAssets) {
     // A scoped backup lists and copies nothing from R2. Skipping the
@@ -695,6 +901,21 @@ async function writeBackupDocument(
     // backup exists to avoid, and none of the tables a scoped backup
     // covers owns an R2 object that the manifest would need.
     assetCopyProgress = { nextIndex: 0, complete: true }
+  } else {
+    // The sidecar is written BEFORE any byte moves: from this moment the backup's references pin its pool objects
+    // against retention, so a prune running in another invocation cannot delete one we are about to reuse.
+    earlyState = {
+      format: BACKUP_LIFECYCLE_FORMAT, version: BACKUP_LIFECYCLE_VERSION, backupName, manifestKey: key, createdAt, updatedAt: createdAt,
+      source, status: 'copying', assetsPrefix, assetLayout: ASSET_LAYOUT_POOL, assets, copiedKeys: [], pendingKeys: assets.map((asset) => asset.key), failedKeys: [], attempts: {},
+    }
+    await putBackupState(env, earlyState)
+  }
+  // The early sidecar shares the asset entries with the copy helper, so re-writing it pins a version the copy just found.
+  const pinChangedVersion = async () => { if (earlyState) await putBackupState(env, earlyState) }
+  const byKey = new Map<string, AssetEntry>(assets.map((asset) => [asset.key, asset]))
+
+  if (!includeAssets) {
+    // (see above: a scoped backup copies nothing)
   } else if (env.BACKUP_QUEUE) {
     // Queue-driven path (Part 122): copy the first cap's worth against a
     // snapshot of `assets` fixed at the top of THIS run (not the no-queue
@@ -710,20 +931,15 @@ async function writeBackupDocument(
     // 100 (~200 subrequests) has to fall back to 20 (~40) on Free or the
     // continuation dies mid-slice. The module-level export keeps its Paid
     // value; see lib/planTier.ts's maxAssetsPerBackup.
-    const firstSlice = assets.slice(0, getPlanLimits(env).maxAssetsPerBackup)
-    for (const asset of firstSlice) {
-      attempts[asset.key] = 1
-      try {
-        const destKey = `${assetsPrefix}${asset.key.replace(/^uploads\//, '')}`
-        const copied = await copyObject(env.ASSETS, asset.key, destKey)
-        if (copied) copiedKeys.push(asset.key)
-        else pendingKeys.push(asset.key)
-      } catch (_) {
-        pendingKeys.push(asset.key)
-      }
+    // Pool: assets already in the pool cost nothing here; the cap bounds the COPIES (get + put) of this slice.
+    const walked = await copyIntoAssetPool(env, byKey, assets.map((asset) => asset.key), getPlanLimits(env).maxAssetsPerBackup, pinChangedVersion)
+    for (const outcome of walked) {
+      attempts[outcome.key] = 1
+      if (outcome.ok) copiedKeys.push(outcome.key)
+      else pendingKeys.push(outcome.key)
     }
-    pendingKeys.push(...assets.slice(firstSlice.length).map((asset) => asset.key))
-    const nextIndex = firstSlice.length
+    pendingKeys.push(...assets.slice(walked.length).map((asset) => asset.key))
+    const nextIndex = walked.length
     const complete = pendingKeys.length === 0
     assetCopyProgress = { nextIndex, complete }
   } else {
@@ -734,15 +950,9 @@ async function writeBackupDocument(
     // repeatedly copying the same first 40.
     const priorCursor = await getAssetCopyCursor(env)
     const toCopy = selectAssetsToCopy(assets, priorCursor, getPlanLimits(env).maxAssetsPerBackup)
-    for (const asset of toCopy) {
-      try {
-        const destKey = `${assetsPrefix}${asset.key.replace(/^uploads\//, '')}`
-        const copied = await copyObject(env.ASSETS, asset.key, destKey)
-        if (copied) copiedKeys.push(asset.key)
-      } catch (_) {
-        // Best-effort per-asset -- one bad/missing object shouldn't abort
-        // the whole backup.
-      }
+    // Best-effort per asset: one bad/missing object does not abort the backup.
+    for (const outcome of await copyIntoAssetPool(env, byKey, toCopy.map((asset) => asset.key), toCopy.length, pinChangedVersion)) {
+      if (outcome.ok) copiedKeys.push(outcome.key)
     }
     // Advance the cursor to the end of this run's slice regardless of any
     // individual copy failures above -- a permanently-broken object
@@ -751,14 +961,16 @@ async function writeBackupDocument(
     if (toCopy.length) await setAssetCopyCursor(env, toCopy[toCopy.length - 1].key)
   }
 
-  const key = `${CLOUDFLARE_BACKUP_PREFIX}${backupName}.json`
   const format = 'business-os-cloudflare-backup'
 
+  const gzip = backupManifestGzip(env)
   const upload = await env.ASSETS.createMultipartUpload(key, {
     httpMetadata: { contentType: 'application/json; charset=utf-8' },
-    customMetadata: { source, createdAt, format, lifecycle: MANAGED_BACKUP_MARKER },
+    // scope tells a full backup (every table + assets) from a section backup (a reset's or repair's pre-backup: a few tables,
+    // no assets). The daily schedule counts only full ones.
+    customMetadata: { source, scope: includeAssets ? 'full' : 'section', createdAt, format, lifecycle: MANAGED_BACKUP_MARKER, ...(gzip ? { encoding: 'gzip' } : {}) },
   })
-  const writer = new R2StreamWriter(upload)
+  const writer = gzip ? new GzipStreamWriter(new R2StreamWriter(upload)) : new R2StreamWriter(upload)
 
   try {
     // Same document as before, emitted in order rather than assembled.
@@ -806,7 +1018,7 @@ async function writeBackupDocument(
     }
 
     await writer.write('},"r2":')
-    await writer.write(JSON.stringify({ bucket: 'business-os-assets', assets, assetsPrefix, copiedKeys, assetCopyProgress }))
+    await writer.write(JSON.stringify({ bucket: 'business-os-assets', assets, assetsPrefix, ...(includeAssets ? { assetLayout: ASSET_LAYOUT_POOL } : {}), copiedKeys, assetCopyProgress }))
     await writer.write(',"summary":')
     await writer.write(JSON.stringify({
       tableCount,
@@ -826,11 +1038,18 @@ async function writeBackupDocument(
   // Lifecycle lives in a small sidecar. Continuation workers update only
   // this document, never parse/rewrite the potentially huge database
   // manifest. This is also the source of truth for finalized retention.
-  const status: BackupLifecycleState['status'] = !includeAssets || copiedKeys.length === assets.length
+  // Re-verify the pool before the set can be called complete (see demoteMissingPoolCopies). A key moved back is copied again by
+  // the continuation (queue) or leaves the set 'partial' (no queue), never finalized while a named object is gone.
+  const verification = { assets, copiedKeys, pendingKeys, failedKeys, attempts }
+  if (includeAssets && copiedKeys.length) await demoteMissingPoolCopies(env, verification)
+  const status: BackupLifecycleState['status'] = !includeAssets || verification.copiedKeys.length === assets.length
     ? 'finalized'
-    : env.BACKUP_QUEUE
-      ? 'copying'
-      : 'partial'
+    : failedKeys.length && !pendingKeys.length
+      ? 'failed'
+      : env.BACKUP_QUEUE
+        ? 'copying'
+        : 'partial'
+  copiedKeys = verification.copiedKeys
   const lifecycle: BackupLifecycleState = {
     format: BACKUP_LIFECYCLE_FORMAT,
     version: BACKUP_LIFECYCLE_VERSION,
@@ -842,6 +1061,7 @@ async function writeBackupDocument(
     source,
     status,
     assetsPrefix,
+    ...(includeAssets ? { assetLayout: ASSET_LAYOUT_POOL } : {}),
     assets,
     copiedKeys,
     pendingKeys,
@@ -921,8 +1141,12 @@ export async function continueCloudflareBackupAssetCopy(env: Env, backupName: st
     return { key, skipped: true, reason: 'not-resumable' as const, status: state.status }
   }
 
-  const slice = state.pendingKeys.slice(0, getPlanLimits(env).maxAssetsPerBackup)
-  if (!slice.length) {
+  // A set with nothing pending is about to finalize: confirm its pool objects still exist first (a concurrent prune may have
+  // removed one it had counted as copied). Anything missing goes back to pending and is copied below.
+  if (!state.pendingKeys.length && state.assetLayout === ASSET_LAYOUT_POOL && !state.failedKeys.length) {
+    await demoteMissingPoolCopies(env, state)
+  }
+  if (!state.pendingKeys.length) {
     state.status = state.failedKeys.length ? 'failed' : 'finalized'
     if (state.status === 'finalized') state.finalizedAt = new Date().toISOString()
     await putBackupState(env, state)
@@ -932,28 +1156,42 @@ export async function continueCloudflareBackupAssetCopy(env: Env, backupName: st
   }
 
   const copied = new Set(state.copiedKeys)
-  const remaining = state.pendingKeys.slice(slice.length)
-  for (const assetKey of slice) {
-    state.attempts[assetKey] = (state.attempts[assetKey] || 0) + 1
-    try {
-      const destKey = `${state.assetsPrefix}${assetKey.replace(/^uploads\//, '')}`
-      const ok = await copyObject(env.ASSETS, assetKey, destKey)
-      if (ok) {
-        copied.add(assetKey)
-      } else if (state.attempts[assetKey] < MAX_ASSET_COPY_ATTEMPTS) {
-        remaining.push(assetKey)
-      } else {
-        state.failedKeys.push(assetKey)
+  const cap = getPlanLimits(env).maxAssetsPerBackup
+  let walked: Array<{ key: string; ok: boolean }>
+  if (state.assetLayout === ASSET_LAYOUT_POOL) {
+    // Pool layout: assets already pooled are free, so a slice may walk far more than `cap` keys; only copies are capped.
+    walked = await copyIntoAssetPool(env, new Map<string, AssetEntry>(state.assets.map((asset) => [asset.key, asset])), state.pendingKeys, cap, () => {
+      state.manifestAssetsStale = true
+      return putBackupState(env, state)
+    })
+  } else {
+    // A set started before the pool existed finishes in its own per-backup folder.
+    walked = []
+    for (const assetKey of state.pendingKeys.slice(0, cap)) {
+      try {
+        const destKey = `${state.assetsPrefix}${assetKey.replace(/^uploads\//, '')}`
+        walked.push({ key: assetKey, ok: await copyObject(env.ASSETS, assetKey, destKey) })
+      } catch (_) {
+        walked.push({ key: assetKey, ok: false })
       }
-    } catch (_) {
-      if (state.attempts[assetKey] < MAX_ASSET_COPY_ATTEMPTS) remaining.push(assetKey)
-      else state.failedKeys.push(assetKey)
+    }
+  }
+  const remaining = state.pendingKeys.slice(walked.length)
+  for (const { key: assetKey, ok } of walked) {
+    state.attempts[assetKey] = (state.attempts[assetKey] || 0) + 1
+    if (ok) {
+      copied.add(assetKey)
+    } else if (state.attempts[assetKey] < MAX_ASSET_COPY_ATTEMPTS) {
+      remaining.push(assetKey)
+    } else {
+      state.failedKeys.push(assetKey)
     }
   }
 
   state.copiedKeys = [...copied]
   state.pendingKeys = remaining
-  const complete = remaining.length === 0
+  if (!remaining.length && state.assetLayout === ASSET_LAYOUT_POOL && !state.failedKeys.length) await demoteMissingPoolCopies(env, state)
+  const complete = state.pendingKeys.length === 0
   if (complete) {
     state.status = state.failedKeys.length ? 'failed' : 'finalized'
     if (state.status === 'finalized') state.finalizedAt = new Date().toISOString()
@@ -981,9 +1219,15 @@ export async function continueCloudflareBackupAssetCopy(env: Env, backupName: st
   }
 }
 
-export async function pruneCloudflareBackups(env: Env, keep = CLOUDFLARE_BACKUP_KEEP) {
+// `keep` is the newest-N for MANUAL (and unstamped legacy) backups; scheduled backups have their own pool,
+// getPlanLimits(env).scheduledBackupKeep (7 daily, owner 13 Nov 2026), so a manual "Back up now" can never
+// evict the week of daily backups and a daily one can never evict the manual pair.
+export async function pruneCloudflareBackups(env: Env, keep = CLOUDFLARE_BACKUP_KEEP, keepScheduled = getPlanLimits(env).scheduledBackupKeep) {
   const backups = await listCloudflareBackups(env)
   const finalized = backups.filter((item) => item.finalized)
+  const finalizedScheduled = finalized.filter((item) => item.source === 'scheduled')
+  const finalizedManual = finalized.filter((item) => item.source !== 'scheduled')
+  const evicted = [...finalizedManual.slice(Math.max(0, keep)), ...finalizedScheduled.slice(Math.max(0, keepScheduled))]
   const incomplete = backups.filter((item) => !item.finalized)
   const removed: string[] = []
   const staleRemoved: string[] = []
@@ -1018,7 +1262,7 @@ export async function pruneCloudflareBackups(env: Env, keep = CLOUDFLARE_BACKUP_
 
   // Only finalized backups count toward the retention promise. A new
   // copying/partial/failed set cannot evict either known-good backup.
-  for (const item of finalized.slice(Math.max(0, keep))) {
+  for (const item of evicted) {
     await deleteBackupSet(item)
     removed.push(item.key)
   }
@@ -1046,23 +1290,147 @@ export async function pruneCloudflareBackups(env: Env, keep = CLOUDFLARE_BACKUP_
     console.error('[backup] orphan-folder sweep failed', error)
   }
 
+  // Shared asset pool: last, after every set that is going away has taken its sidecar with it.
+  let poolRemoved = 0
+  let poolSweepSkipped: string | undefined
+  try {
+    const swept = await sweepAssetPool(env)
+    poolRemoved = swept.removed
+    poolSweepSkipped = swept.skipped
+  } catch (error) {
+    poolSweepSkipped = 'error'
+    console.error('[backup] asset pool sweep failed', error)
+  }
+
   return {
-    kept: finalized.slice(0, Math.max(0, keep)),
+    kept: finalized.filter((item) => !evicted.includes(item)),
     removed,
     incomplete: incomplete.filter((item) => !staleRemoved.includes(item.key)),
     staleRemoved,
     orphanRemoved,
+    poolRemoved,
+    ...(poolSweepSkipped ? { poolSweepSkipped } : {}),
   }
+}
+
+/**
+ * Deletes pool objects that NO surviving backup references. A reference is any asset entry in the sidecar (state.json)
+ * of any backup folder that still exists, finalized or not: a set still copying, a set whose manifest is not written
+ * yet (its sidecar comes first) and a set whose delete failed all keep pinning what they name. The sweep is skipped
+ * (never guessed) when a backup that should have a sidecar has none, or a sidecar cannot be read. Never touches
+ * uploads/ or anything outside BACKUP_ASSET_POOL_PREFIX.
+ */
+async function listBackupSetNames(env: Env): Promise<{ manifestNames: Set<string>; names: Set<string> }> {
+  const manifestNames = new Set<string>()
+  const folderNames = new Set<string>()
+  let cursor: string | undefined
+  do {
+    const page = await env.ASSETS.list({ prefix: CLOUDFLARE_BACKUP_PREFIX, delimiter: '/', cursor, limit: 1000 })
+    for (const object of page.objects || []) {
+      const rest = object.key.slice(CLOUDFLARE_BACKUP_PREFIX.length)
+      const slash = rest.indexOf('/')
+      if (slash === -1) { if (rest.endsWith('.json')) manifestNames.add(rest.replace(/\.json$/, '')) } else folderNames.add(rest.slice(0, slash))
+    }
+    for (const prefix of (page as { delimitedPrefixes?: string[] }).delimitedPrefixes || []) {
+      const rest = prefix.slice(CLOUDFLARE_BACKUP_PREFIX.length)
+      if (rest.endsWith('/')) folderNames.add(rest.slice(0, -1))
+    }
+    cursor = page.truncated ? page.cursor : undefined
+  } while (cursor)
+  return { manifestNames, names: new Set<string>([...manifestNames, ...folderNames]) }
+}
+
+/**
+ * The sweep read the sidecars first and deletes afterwards, so a backup that started in between (its sidecar was not
+ * visible) may name an object that was just deleted, and a set the sweep did read can rename itself to a doomed object
+ * (a continuation reusing an older version). After the delete, EVERY set is re-checked: a deleted
+ * object it names is put back from uploads/ when the source still has that exact version; a version the source no
+ * longer has moves the key back to pending (the set is reopened and copies the current bytes), so no set stays finalized
+ * while naming an object that is gone.
+ */
+async function repairSetsStartedDuringSweep(env: Env, doomed: ReadonlySet<string>): Promise<void> {
+  const { names } = await listBackupSetNames(env)
+  for (const name of names) {
+    if (`${CLOUDFLARE_BACKUP_PREFIX}${name}`.startsWith(DRIVE_STAGED_BACKUP_PREFIX)) continue
+    const state = await getCloudflareBackupState(env, name)
+    if (!state || state.assetLayout !== ASSET_LAYOUT_POOL) continue
+    const unrecoverable = new Set<string>()
+    for (const asset of state.assets || []) {
+      const poolKey = assetPoolKey(asset)
+      if (!doomed.has(poolKey)) continue
+      let restored = false
+      try {
+        const object = await env.ASSETS.get(asset.key)
+        if (object && assetVersionToken({ key: asset.key, etag: object.etag }) === assetVersionToken(asset)) {
+          const contentType = object.httpMetadata?.contentType
+          await env.ASSETS.put(poolKey, object.body, contentType ? { httpMetadata: { contentType } } : undefined)
+          restored = true
+        } else await object?.body?.cancel().catch(() => {})
+      } catch (_) { /* counted as unrecoverable below */ }
+      if (!restored) unrecoverable.add(asset.key)
+    }
+    if (!unrecoverable.size) continue
+    // Re-read: the set may have moved on while its objects were being put back.
+    const fresh = await getCloudflareBackupState(env, name)
+    if (!fresh) continue
+    const lost = fresh.copiedKeys.filter((key) => unrecoverable.has(key))
+    if (!lost.length) continue
+    fresh.copiedKeys = fresh.copiedKeys.filter((key) => !unrecoverable.has(key))
+    for (const key of lost) {
+      fresh.attempts[key] = Math.min(fresh.attempts[key] || 0, MAX_ASSET_COPY_ATTEMPTS - 1)
+      if (!fresh.pendingKeys.includes(key)) fresh.pendingKeys.push(key)
+    }
+    fresh.status = env.BACKUP_QUEUE ? 'copying' : 'partial'
+    fresh.finalizedAt = undefined
+    await putBackupState(env, fresh)
+    if (env.BACKUP_QUEUE) await env.BACKUP_QUEUE.send({ kind: 'backup-continue', backupName: name, nextIndex: fresh.copiedKeys.length } satisfies BackupQueueMessage)
+  }
+}
+
+async function sweepAssetPool(env: Env): Promise<{ removed: number; skipped?: string }> {
+  const { manifestNames, names } = await listBackupSetNames(env)
+  const pinned = new Set<string>()
+  for (const name of names) {
+    if (`${CLOUDFLARE_BACKUP_PREFIX}${name}`.startsWith(DRIVE_STAGED_BACKUP_PREFIX)) continue
+    const state = await getCloudflareBackupState(env, name)
+    if (!state) {
+      // No readable sidecar. A legacy (pre-lifecycle) backup never used the pool; a managed one should have a sidecar.
+      const manifest = manifestNames.has(name) ? await env.ASSETS.head(`${CLOUDFLARE_BACKUP_PREFIX}${name}.json`) : null
+      if (manifest?.customMetadata?.lifecycle === MANAGED_BACKUP_MARKER) return { removed: 0, skipped: 'sidecar-missing' }
+      continue
+    }
+    if (state.assetLayout !== ASSET_LAYOUT_POOL) continue
+    for (const asset of state.assets || []) pinned.add(assetPoolKey(asset))
+  }
+
+  // An object younger than the grace is never deleted: it may be the copy an in-flight backup just made of a version no
+  // sidecar names yet (an image overwritten in place while the set copies).
+  const graceMs = getPlanLimits(env).backupPoolGraceHours * 60 * 60 * 1000
+  const now = Date.now()
+  const doomed: string[] = []
+  for (const [poolKey, uploadedMs] of await listAssetPoolObjects(env)) {
+    if (pinned.has(poolKey)) continue
+    if (now - uploadedMs < graceMs) continue
+    doomed.push(poolKey)
+  }
+  for (let offset = 0; offset < doomed.length; offset += 500) await env.ASSETS.delete(doomed.slice(offset, offset + 500))
+  if (doomed.length) await repairSetsStartedDuringSweep(env, new Set(doomed))
+  return { removed: doomed.length }
 }
 
 // Deletes backup FOLDERS (backups/cloudflare/<name>/…) that have no
 // corresponding top-level <name>.json manifest. Such a folder cannot be
 // restored (restore needs the manifest) and is unreachable by
 // listCloudflareBackups/pruneCloudflareBackups, so nothing else ever removes
-// it. A real in-progress backup always writes its manifest BEFORE any folder
-// object (see writeBackupDocument), so a manifest-less folder is already an
-// orphan; a short grace window on the folder's newest object guards only
-// against list-ordering races, never against a legitimate live backup.
+// it. That is NOT the order a live backup writes in any more: writeBackupDocument
+// writes the folder's state.json sidecar FIRST (before any byte moves, so the set
+// pins its pool objects), then copies assets, and only then the manifest. A live
+// set therefore has a folder and no manifest for as long as its asset copy and
+// manifest write take (minutes). Correctness rests on the grace window: a folder
+// whose newest object is younger than ORPHAN_FOLDER_GRACE_MS (1 h) is never
+// deleted, which is safe because one invocation (cron wall time 15 min) cannot
+// keep a set manifest-less that long; a folder older than that with no manifest
+// is a dead set.
 async function pruneOrphanedBackupFolders(env: Env): Promise<string[]> {
   const ORPHAN_FOLDER_GRACE_MS = 60 * 60 * 1000 // 1h
   const manifests = new Set<string>()
@@ -1100,20 +1468,16 @@ async function pruneOrphanedBackupFolders(env: Env): Promise<string[]> {
 }
 
 /**
- * A scheduled backup is skipped while the newest finalized one is younger than
- * this. It is also what turns a duplicate delivery of the heavy cron (3 h
- * apart, or the same firing twice) into a no-op: it must stay above the 3 h
- * tick and below the 6 h a backup comes round, so every visit that is due runs.
+ * The scheduled backup runs once per Cambodia business date, at the first heavy
+ * tick at or after the close hour (lib/backupSchedule.ts; the hour is
+ * getPlanLimits(env).scheduledBackupAfterHourLocal). This is the R2 side of that
+ * rule: it looks at what is actually stored, so a duplicate delivery of the heavy
+ * cron, a retry, or a reset cron state can never take a second backup on one
+ * date. `nowMs` and `create` are injectable for the tests only.
  */
-export const SCHEDULED_BACKUP_MIN_INTERVAL_MS = 5.5 * 60 * 60 * 1000
-export function scheduledBackupIsRecent(newestMs: number, nowMs: number): boolean {
-  return !!newestMs && nowMs - newestMs < SCHEDULED_BACKUP_MIN_INTERVAL_MS
-}
-
-export async function maybeRunScheduledBackup(env: Env) {
+export async function maybeRunScheduledBackup(env: Env, nowMs: number = Date.now(), create: typeof createCloudflareBackup = createCloudflareBackup, priorFailuresTonight = 0) {
   const backups = await listCloudflareBackups(env)
   const newestFinalized = backups.find((item) => item.finalized)
-  const newest = newestFinalized?.uploaded ? Date.parse(newestFinalized.uploaded) : 0
   const activeCopy = backups.find((item) => item.status === 'copying')
   const activeCopyMs = activeCopy?.uploaded ? Date.parse(activeCopy.uploaded) : 0
 
@@ -1165,17 +1529,35 @@ export async function maybeRunScheduledBackup(env: Env) {
       retention,
     }
   }
-  if (activeCopyMs && Date.now() - activeCopyMs < STALE_BACKUP_MS) {
-    return { skipped: true, reason: 'backup-in-progress', latest: activeCopy, retention }
+  if (activeCopyMs && nowMs - activeCopyMs < STALE_BACKUP_MS) {
+    // incomplete: the visit is fine but tonight's backup is not finished, so the lane must not count the night as done.
+    return { skipped: true, reason: 'backup-in-progress', incomplete: true, pollOnly: true, latest: activeCopy, retention }
   }
-  if (scheduledBackupIsRecent(newest, Date.now())) {
-    return { skipped: true, reason: 'recent-backup-exists', latest: newestFinalized, retention }
+  const afterHourLocal = getPlanLimits(env).scheduledBackupAfterHourLocal
+  const gate = scheduledBackupGate(nowMs, scheduledBackupCoverageMs(backups, afterHourLocal), afterHourLocal)
+  if (!gate.due) {
+    return { skipped: true, reason: gate.reason === 'already-today' ? 'recent-backup-exists' : 'before-close', latest: newestFinalized, retention }
   }
-  const backup = await createCloudflareBackup(env, 'scheduled')
+  // Sets that already ended failed/partial this business night. Each try is a full D1 read, so after the plan's allowance the
+  // night is given up (a finished visit: the lane stops re-selecting it and the image audit gets the ticks); tomorrow starts fresh.
+  // Visits that threw or were killed leave no set; the lane bounds those from the cron record (pickHeavyStepIndex).
+  const night = scheduledBackupNightOf(nowMs, afterHourLocal)
+  const failedTonight = backups.filter((item) => !item.finalized && item.status !== 'copying' && item.source === 'scheduled' && item.scope !== 'section'
+    && !!item.uploaded && scheduledBackupNightOf(Date.parse(item.uploaded), afterHourLocal) === night).length
+  // priorFailuresTonight: visits tonight that threw or were killed (the cron record's count); failed sets are only visible here.
+  if (failedTonight + priorFailuresTonight >= getPlanLimits(env).scheduledBackupMaxAttemptsPerDay) {
+    // failed: the night is given up, which the lane records as a failure (cron-health, the bell) instead of an OK visit.
+    return { skipped: true, failed: true, reason: 'attempts-exhausted', failedTonight, priorFailuresTonight, latest: newestFinalized ?? null, retention }
+  }
+  const backup = await create(env, 'scheduled')
   // Second pass: the backup just written is now the newest, so this is what
   // drops what has become the (N+1)th.
   const finalRetention = await pruneCloudflareBackups(env, CLOUDFLARE_BACKUP_KEEP)
-  return { skipped: false, backup, retention: finalRetention }
+  // The set is only DONE once it is finalized. The asset copy runs on in the queue after create returns and can still end
+  // failed (an upload deleted mid-copy fails the whole set), so a copying/partial/failed set is reported incomplete: the
+  // lane keeps tonight open, and the next tick re-checks R2 (finalized: nothing to do; failed: take a new one).
+  return { skipped: false, backup, retention: finalRetention, ...(backup.status === 'finalized' ? {} : { incomplete: true }), // a set still copying also spaces the next poll (pollOnly)
+    ...(backup.status === 'copying' ? { pollOnly: true } : {}) }
 }
 
 function resolveBackupKey(source: string): string {
@@ -1787,11 +2169,15 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
     const lifecycle = await getCloudflareBackupState(env, backupName)
     const copiedKeys = lifecycle?.copiedKeys || r2Meta?.copiedKeys || []
     const assetsPrefix = lifecycle?.assetsPrefix || r2Meta?.assetsPrefix
+    // Pool layout: the bytes live in the shared pool under the name of (key + etag) from the asset list; an older backup
+    // keeps its own assets/ folder and is read exactly as before.
+    const pooled = (lifecycle?.assetLayout || r2Meta?.assetLayout) === ASSET_LAYOUT_POOL
+    const assetEntries = new Map<string, AssetEntry>((lifecycle?.assets || r2Meta?.assets || []).map((asset) => [asset.key, asset]))
     let restoredAssets = 0
     const missingAssets: string[] = []
     const withheldAssets: WithheldAsset[] = []
     if (assetsPrefix) {
-      const folderIsBackup = isBackupAssetsFolder(assetsPrefix)
+      const folderIsBackup = pooled ? assetsPrefix === BACKUP_ASSET_POOL_PREFIX : isBackupAssetsFolder(assetsPrefix)
       const quarantinePrefix = `${RESTORE_QUARANTINE_ROOT}${new Date().toISOString().replace(/[:.]/g, '-')}/`
       for (const originalKey of copiedKeys) {
         if (!folderIsBackup || !isUploadsKey(originalKey)) {
@@ -1799,7 +2185,11 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
           continue
         }
         try {
-          const backedUpKey = `${assetsPrefix}${originalKey.replace(/^uploads\//, '')}`
+          const entry = assetEntries.get(originalKey)
+          const backedUpKey = pooled
+            ? (entry ? assetPoolKey(entry) : null)
+            : `${assetsPrefix}${originalKey.replace(/^uploads\//, '')}`
+          if (!backedUpKey) { missingAssets.push(originalKey); continue }
           const outcome = await restoreBackedUpAsset(env, backedUpKey, originalKey, quarantinePrefix)
           if (outcome.kind === 'restored') restoredAssets += 1
           else if (outcome.kind === 'missing') missingAssets.push(originalKey)

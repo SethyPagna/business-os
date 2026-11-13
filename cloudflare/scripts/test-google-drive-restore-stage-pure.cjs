@@ -37,12 +37,15 @@ const stubs = {
     encryptSecret: async (value) => `enc:${value}`,
     upgradeLegacySecret: async () => null,
   },
+  './planTier': { getPlanLimits: () => ({ driveStaleMirrorHours: 24 }) },
   './backup': {
     DRIVE_STAGED_BACKUP_PREFIX: 'backups/cloudflare/drive-staged-',
     listCloudflareBackups: async () => [],
     inspectCloudflareBackupStream: async (stream) => {
       inspected += 1
-      const text = await new Response(stream).text()
+      // the real inspector sniffs gzip (0x1f 0x8b) and reads through it
+      const raw = Buffer.from(await new Response(stream).arrayBuffer())
+      const text = (raw[0] === 0x1f && raw[1] === 0x8b ? require('zlib').gunzipSync(raw) : raw).toString('utf8')
       const payload = JSON.parse(text)
       if (payload.format !== 'business-os-cloudflare-backup' || payload.formatVersion !== 1) throw new Error('Unsupported backup format')
       return { tableCount: Object.keys(payload.tables).length, rowCount: 0, summary: payload.summary }
@@ -95,6 +98,10 @@ const env = {
 
 let downloads = 0
 let corrupt = false
+// 'plain': an older .json copy; 'gzip': a new .json.gz copy typed application/gzip (both must stage).
+let driveForm = 'plain'
+const zlib = require('zlib')
+const gzBytes = zlib.gzipSync(Buffer.from(bytes))
 const originalFetch = global.fetch
 global.fetch = async (url, init = {}) => {
   const value = String(url)
@@ -104,8 +111,12 @@ global.fetch = async (url, init = {}) => {
     assert.match(parsed.searchParams.get('fields') || '', /md5Checksum/)
     return Response.json({ files: [
       { id: 'unfinished', name: 'unfinished.json', size: String(bytes.length), mimeType: 'application/json', md5Checksum: md5, appProperties: { businessOsBackup: 'true', status: 'copying', backupKey: 'backups/cloudflare/unfinished.json' } },
-      { id: corrupt ? 'corrupt-file' : 'drive-file-1', name: 'backup.json', size: String(corrupt ? 7 : bytes.length), mimeType: 'application/json', md5Checksum: md5, appProperties: { businessOsBackup: 'true', status: 'finalized', backupKey: 'backups/cloudflare/final.json' } },
+      { id: corrupt ? 'corrupt-file' : driveForm === 'gzip' ? 'drive-file-gz' : 'drive-file-1', name: driveForm === 'gzip' ? 'backup.json.gz' : 'backup.json', size: String(corrupt ? 7 : driveForm === 'gzip' ? gzBytes.length : bytes.length), mimeType: driveForm === 'gzip' ? 'application/gzip' : 'application/json', md5Checksum: md5, appProperties: { businessOsBackup: 'true', status: 'finalized', backupKey: 'backups/cloudflare/final.json' } },
     ] })
+  }
+  if (value.includes('/drive/v3/files/drive-file-gz?')) {
+    downloads += 1
+    return new Response(gzBytes, { status: 200, headers: { 'content-length': String(gzBytes.length), 'content-type': 'application/gzip' } })
   }
   if (value.includes('/drive/v3/files/drive-file-1?') || value.includes('/drive/v3/files/corrupt-file?')) {
     downloads += 1
@@ -127,6 +138,14 @@ async function main() {
     const repeated = await moduleObj.exports.stageLatestDriveBackupToR2(env)
     assert.strictEqual(repeated.reused, true)
     assert.strictEqual(downloads, 1, 'same Drive revision must reuse the validated R2 stage')
+
+    // F4: a gzip copy (new name + type) stages too, and an older plain .json copy keeps working (above).
+    driveForm = 'gzip'
+    const gz = await moduleObj.exports.stageLatestDriveBackupToR2(env)
+    assert.strictEqual(gz.backupKey, 'backups/cloudflare/drive-staged-drive-file-gz.json')
+    assert.strictEqual(gz.validation.restorable, true, 'the gzip manifest is inspected through its gzip layer')
+    assert.strictEqual(stored.get(gz.backupKey).customMetadata.driveFileId, 'drive-file-gz')
+    driveForm = 'plain'
 
     corrupt = true
     await assert.rejects(() => moduleObj.exports.stageLatestDriveBackupToR2(env), /Unexpected token|Unsupported backup format/)

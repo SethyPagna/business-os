@@ -12,7 +12,7 @@ import { hasSuspiciousCatalogText } from '../lib/catalogText'
 import { getBuildStamp } from '../lib/buildStamp'
 import { getPlanLimits, resolvePlanTier } from '../lib/planTier'
 import { evaluateCronHealth, parseRotationState, CRON_STATE_KEY, CRON_HEAVY_STATE_KEY, CRON_HEAVY_TICK_MS, CRON_ROTATION_TICK_MS } from '../lib/cronRotation'
-import { ROTATION_STEP_IDS, HEAVY_STEP_IDS } from '../lib/cronStepIds'
+import { ROTATION_STEP_IDS, HEAVY_STEP_IDS, HEAVY_STEP_INTERVAL_MS } from '../lib/cronStepIds'
 import type { Env } from '../index'
 
 // Ported from backend/src/routes/runtime.ts. Three endpoints the Settings
@@ -96,7 +96,7 @@ app.get('/cron-health', async (c) => {
     // A state that has never been written is 'pending', not unhealthy, until this build is older than one tick.
     const deployedAt = Date.parse(getBuildStamp().builtAt)
     const rotation = evaluateCronHealth(parseRotationState(await read(CRON_STATE_KEY)), ROTATION_STEP_IDS, now, CRON_ROTATION_TICK_MS, deployedAt)
-    const heavy = evaluateCronHealth(parseRotationState(await read(CRON_HEAVY_STATE_KEY)), HEAVY_STEP_IDS, now, CRON_HEAVY_TICK_MS, deployedAt)
+    const heavy = evaluateCronHealth(parseRotationState(await read(CRON_HEAVY_STATE_KEY)), HEAVY_STEP_IDS, now, CRON_HEAVY_TICK_MS, deployedAt, HEAVY_STEP_INTERVAL_MS)
     return c.json({
       success: true,
       healthy: rotation.healthy && heavy.healthy,

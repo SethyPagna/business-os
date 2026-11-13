@@ -523,6 +523,7 @@ const BACKUP_LOCAL_COPY: BackupLocalCopy = {
   km: {
     backup: 'បម្រុងទុក',
     export_backup_desc: 'បង្កើត backup Cloudflare ពេញលេញទៅ R2 ដែលមានទិន្នន័យ D1 ការកំណត់ អ្នកប្រើ portal និង metadata សម្រាប់ស្ដារ។',
+    export_backup_cloudflare_desc: 'បង្កើតការបម្រុងទុកពេញលេញនៃទិន្នន័យហាង៖ ការកំណត់ អ្នកប្រើ ស្តុក ការលក់ និងការបង្វិលទំនិញ រួមជាមួយអ្វីដែលត្រូវការសម្រាប់ស្ដារឡើងវិញ។ ការបម្រុងទុកស្វ័យប្រវត្តិដំណើរការម្ដងក្នុងមួយថ្ងៃ បន្ទាប់ពីបិទហាង ហើយរក្សាទុក ៧ ថ្ងៃចុងក្រោយ។',
     export_backup_title: 'នាំចេញបម្រុងទុក',
     folder_backup_placeholder: 'ទុកទទេ ដើម្បីប្រើ R2 backups/cloudflare/',
     browse_folder: 'ជ្រើសថត',
@@ -1535,6 +1536,9 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
           <p className="text-sm text-gray-500 dark:text-gray-400">
             {copy('drive_sync_desc', 'Mirror Cloudflare backups to Google Drive on an optional background schedule.')}
           </p>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            {copy('drive_sync_images_note', 'A Google Drive copy restores images only while they are still kept in the app’s own backups. Any image no longer kept is listed as missing when you restore.')}
+          </p>
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
           <SectionChip label={copy('status', 'Status')} value={status?.connected ? copy('connected', 'Connected') : copy('not_connected', 'Not connected')} tone={status?.connected ? 'blue' : 'amber'} />
@@ -1611,7 +1615,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
             ))}
           </div>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            {copy('drive_sync_interval_note', 'Default is 360 minutes (every 6 hours). Quick choices use 1, 3, 6, 12, or 24 hours. Google Drive keeps up to 10 backup versions.')}
+            {copy('drive_sync_interval_note', 'Business OS checks every 6 hours by default (quick choices 1, 3, 6, 12, or 24 hours), but a backup is made only once a day after the shop closes, so Google Drive usually receives one new copy a day. Google Drive keeps up to 10 backup versions.')}
           </p>
         </label>
       </div>
@@ -2105,7 +2109,7 @@ export default function Backup() {
             {copy('export_backup_title', 'Export backup')}
           </h2>
           <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-            {copy('export_backup_desc', 'Create a full Cloudflare backup in R2 with D1 data, settings, users, portal records, inventory, sales, returns, and restore metadata. Automatic Cloudflare backups run every 6 hours and keep the newest 2.')}
+            {copy('export_backup_cloudflare_desc', 'Creates a full backup of your shop data: settings, users, stock, sales and returns, with what is needed to restore it. Automatic backups run once a day after the shop closes and keep the newest 7 days.')}
           </p>
           <div className="mb-3 flex flex-wrap gap-2">
             {QUICK_BACKUP_SECTIONS.map((section) => (

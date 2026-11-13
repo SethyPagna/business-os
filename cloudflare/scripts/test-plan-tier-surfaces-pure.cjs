@@ -234,8 +234,12 @@ check('cron-health judges heavy steps by the heavy interval, and says pending ri
   assert.equal(fine.status, 200)
   assert.equal(fine.body.healthy, true, JSON.stringify(fine.body.problems))
   assert.deepEqual(fine.body.problems, [])
-  // The same 7 h under the 15-minute tick would be 'starved'; 30 h is starved under the heavy interval too.
-  const starved = await get({ [cr.CRON_STATE_KEY]: stateFor(ids.ROTATION_STEP_IDS, 60 * 1000), [cr.CRON_HEAVY_STATE_KEY]: stateFor(ids.HEAVY_STEP_IDS, 30 * H) })
+  // The same 7 h under the 15-minute tick would be 'starved'. At 30 h the image audit (6 h cadence) is starved, but the
+  // backup is daily since 13 Nov (two missed daily cycles = 57 h), so it is not; at 60 h both are.
+  const late = await get({ [cr.CRON_STATE_KEY]: stateFor(ids.ROTATION_STEP_IDS, 60 * 1000), [cr.CRON_HEAVY_STATE_KEY]: stateFor(ids.HEAVY_STEP_IDS, 30 * H) })
+  assert.equal(late.body.healthy, false)
+  assert.deepEqual([...late.body.problems].sort(), ['image-audit'])
+  const starved = await get({ [cr.CRON_STATE_KEY]: stateFor(ids.ROTATION_STEP_IDS, 60 * 1000), [cr.CRON_HEAVY_STATE_KEY]: stateFor(ids.HEAVY_STEP_IDS, 60 * H) })
   assert.equal(starved.body.healthy, false)
   assert.deepEqual([...starved.body.problems].sort(), ['backup', 'image-audit'])
   // Nothing written yet: pending (not unhealthy) while the build is younger than a tick, unhealthy once it is older.

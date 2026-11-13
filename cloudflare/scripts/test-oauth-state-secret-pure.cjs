@@ -41,6 +41,7 @@ const drive = loadTs('googleDrive.ts', {
   '../index': {},
   './db': { getDb: () => ({}) },
   './secretCrypto': { encryptSecret: async () => '', decryptSecret: async () => '', upgradeLegacySecret: async () => null },
+  './planTier': { getPlanLimits: () => ({ driveStaleMirrorHours: 24 }) },
   './backup': {},
 })
 

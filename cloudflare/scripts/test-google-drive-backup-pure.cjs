@@ -39,6 +39,12 @@ const db = {
 }
 
 let listedBackups = 0
+let newerBackupExists = false
+let sectionBackupNewest = false
+let gzipBackupNewest = false
+let staleHeadExists = false
+let finalUploaded = null
+let lastUpload = null
 const stubs = {
   './db': { getDb: () => db },
   './secretCrypto': {
@@ -46,12 +52,17 @@ const stubs = {
     encryptSecret: async (value) => `enc:${value}`,
     upgradeLegacySecret: async () => null,
   },
+  './planTier': { getPlanLimits: () => ({ driveStaleMirrorHours: 24 }) },
   './backup': {
     listCloudflareBackups: async () => {
       listedBackups += 1
       return [
+        ...(sectionBackupNewest ? [{ key: 'backups/cloudflare/section.json', name: 'section.json', finalized: true, scope: 'section' }] : []),
+        ...(gzipBackupNewest ? [{ key: 'backups/cloudflare/gz.json', name: 'gz.json', finalized: true }] : []),
+        ...(newerBackupExists ? [{ key: 'backups/cloudflare/newer.json', name: 'newer.json', finalized: true }] : []),
+        ...(staleHeadExists ? [{ key: 'backups/cloudflare/stale.json', name: 'stale.json', finalized: true, manifestAssetsCurrent: false, uploaded: new Date().toISOString() }] : []),
         { key: 'backups/cloudflare/pending.json', name: 'pending.json', finalized: false },
-        { key: 'backups/cloudflare/final.json', name: 'final.json', finalized: true },
+        { key: 'backups/cloudflare/final.json', name: 'final.json', finalized: true, ...(finalUploaded ? { uploaded: finalUploaded } : {}) },
       ]
     },
     createCloudflareBackup: async () => { throw new Error('Drive sync must never create another R2 backup') },
@@ -80,6 +91,13 @@ const {
   consumeDriveOauthState,
   isTrustedDriveUploadSession,
   pushBackupToDrive,
+  newestMirrorableBackup,
+  driveMirrorChoice,
+  driveGzipFileName,
+  isDriveBackupFile,
+  driveSyncHasNewBackup,
+  driveSyncScheduleDue,
+  disconnectDrive,
 } = moduleObj.exports
 assert.strictEqual(DRIVE_BACKUP_KEEP, 10, 'the user keeps 2 in R2 and 10 in Drive (Part 386)')
 assert.strictEqual(isTrustedDriveUploadSession('https://www.googleapis.com/upload/drive/v3/files?upload_id=ok'), true)
@@ -94,8 +112,8 @@ const env = {
   ASSETS: {
     async get(key) {
       r2Reads += 1
-      assert.strictEqual(key, 'backups/cloudflare/final.json', 'newest unfinished backup must be skipped')
-      return { body: new Blob([bytes]).stream(), size: bytes.byteLength }
+      assert.ok(key === 'backups/cloudflare/final.json' || key === 'backups/cloudflare/gz.json', 'newest unfinished backup must be skipped')
+      return { body: new Blob([bytes]).stream(), size: bytes.byteLength, customMetadata: key.endsWith('gz.json') ? { encoding: 'gzip' } : {} }
     },
   },
   APP_ENCRYPTION_KEY: 'test',
@@ -125,11 +143,13 @@ global.fetch = async (url, init = {}) => {
     assert.strictEqual(init.method, 'POST')
     const metadata = JSON.parse(init.body)
     assert.strictEqual(metadata.appProperties.businessOsBackup, 'true')
-    assert.strictEqual(metadata.appProperties.backupKey, 'backups/cloudflare/final.json')
+    assert.ok(['backups/cloudflare/final.json', 'backups/cloudflare/gz.json'].includes(metadata.appProperties.backupKey))
+    lastUpload = { name: metadata.name, initType: init.headers['X-Upload-Content-Type'] }
     return new Response('', { status: 200, headers: { location: 'https://www.googleapis.com/upload/session-1' } })
   }
   if (value === 'https://www.googleapis.com/upload/session-1') {
     assert.strictEqual(init.method, 'PUT')
+    lastUpload.putType = init.headers['Content-Type']
     assert.ok(init.body && typeof init.body.getReader === 'function', 'R2 body must be streamed, not arrayBuffer()ed')
     uploadCount += 1
     return Response.json({ id: 'drive-file', size: String(bytes.byteLength) })
@@ -152,7 +172,7 @@ global.fetch = async (url, init = {}) => {
       ? { files: files.slice(5) }
       : { files: files.slice(0, 5), nextPageToken: 'page-2' })
   }
-  if (/\/drive\/v3\/files\/owned-(9|10|11)$/.test(value)) {
+  if (/\/drive\/v3\/files\/owned-(8|9|10|11)$/.test(value)) {
     assert.strictEqual(init.method, 'DELETE')
     return new Response(null, { status: 204 })
   }
@@ -179,10 +199,14 @@ async function main() {
     const replay = await consumeDriveOauthState(env, oauthUrl.searchParams.get('state'))
     assert.strictEqual(replay.success, false, 'Drive OAuth state must be one-time')
 
+    // Nothing mirrored yet: the newest finalized backup is new to Drive.
+    assert.deepStrictEqual(await driveSyncHasNewBackup(env), { new: true, backupKey: 'backups/cloudflare/final.json' })
+    listedBackups = 0
     const result = await pushBackupToDrive(env)
     assert.strictEqual(result.success, true, result.error)
     assert.strictEqual(result.fileId, 'drive-file')
     assert.strictEqual(listedBackups, 1)
+    assert.strictEqual(settings.get('drive_sync_last_backup_key'), '|root-folder|backups/cloudflare/final.json', 'a successful sync records which backup Drive now holds, and where (account | folder id)')
     const deleted = calls.filter((call) => call.method === 'DELETE').map((call) => call.url)
     assert.strictEqual(deleted.length, 3, 'the new copy plus twelve finalized app backups must prune to exactly ten')
     assert.ok(deleted.every((url) => !url.includes('unrelated')))
@@ -193,6 +217,85 @@ async function main() {
     assert.strictEqual(r2Reads, 1, 'a duplicate Drive mirror must not even reopen the R2 body')
     assert.doesNotMatch(source, /object\.arrayBuffer\(\)/)
     assert.doesNotMatch(source, /await createCloudflareBackup\(/)
+    // The 6 h Drive interval against a daily backup: the scheduled visit now skips an already-mirrored backup before any Drive call.
+    const callsBefore = calls.length
+    assert.deepStrictEqual(await driveSyncHasNewBackup(env), { new: false, reason: 'already-synced', backupKey: 'backups/cloudflare/final.json' })
+    assert.strictEqual(calls.length, callsBefore, 'the already-synced check makes no Drive request')
+    // F5: that skip is a check. Last upload was long ago, yet the interval now runs from the check, so the next rotation visits
+    // (15 min, 30 min later) do not list the backup prefix again; once the interval has passed since the check it is due again.
+    assert.ok(settings.get('drive_sync_last_checked_at'), 'a skip records the check time')
+    settings.set('drive_sync_last_synced_at', new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString())
+    assert.deepStrictEqual(await driveSyncScheduleDue(env), { due: false, reason: 'not-due' }, 'checked a moment ago: not due again')
+    settings.set('drive_sync_last_checked_at', new Date(Date.now() - 7 * 3600 * 1000).toISOString())
+    assert.deepStrictEqual(await driveSyncScheduleDue(env), { due: true }, 'the interval ran from the check and has passed')
+    // F6: the marker belongs to the destination. A different folder, then a different account, is a destination that holds nothing yet.
+    settings.set('drive_sync_folder_id', 'another-folder')
+    assert.deepStrictEqual(await driveSyncHasNewBackup(env), { new: true, backupKey: 'backups/cloudflare/final.json' }, 'a new folder gets the newest backup')
+    settings.set('drive_sync_folder_id', 'root-folder')
+    assert.strictEqual((await driveSyncHasNewBackup(env)).new, false, 'back on the same destination: nothing new')
+    settings.set('drive_sync_account_email', 'other@example.com')
+    assert.strictEqual((await driveSyncHasNewBackup(env)).new, true, 'a different account gets the newest backup')
+    settings.set('drive_sync_account_email', '')
+    await disconnectDrive(env)
+    assert.strictEqual(settings.get('drive_sync_last_backup_key'), '', 'disconnect forgets what Drive was given')
+    assert.strictEqual(settings.get('drive_sync_folder_id'), '')
+    settings.set('drive_sync_folder_id', 'root-folder')
+    assert.strictEqual((await driveSyncHasNewBackup(env)).new, true, 'reconnecting to the same folder after a disconnect uploads again')
+    settings.set('drive_sync_last_backup_key', '|root-folder|backups/cloudflare/final.json')
+    // R2-A: a section pre-backup newer than the full set is never mirrored, by either selector.
+    sectionBackupNewest = true
+    assert.deepStrictEqual(await driveSyncHasNewBackup(env), { new: false, reason: 'already-synced', backupKey: 'backups/cloudflare/final.json' }, 'a newer section set does not count as new')
+    // (reconnected, same destination, marker intact)
+    for (const [k, v] of [['drive_sync_refresh_token', 'refresh-enc'], ['drive_sync_access_token', 'access-enc'], ['drive_sync_access_token_expires_at', new Date(Date.now() + 3600e3).toISOString()], ['drive_sync_folder_id', 'root-folder']]) settings.set(k, v)
+    const beforeUploads = uploadCount
+    const pushed = await pushBackupToDrive(env)
+    assert.strictEqual(pushed.success, true, pushed.error)
+    assert.strictEqual(uploadCount, beforeUploads, 'the upload path also skips the section set (it finds the full set already in Drive)')
+    assert.ok(!/find((item) => item.finalized)/.test(source), 'no selector picks a section set')
+    sectionBackupNewest = false
+    newerBackupExists = true
+    assert.deepStrictEqual(await driveSyncHasNewBackup(env), { new: true, backupKey: 'backups/cloudflare/newer.json' }, 'the next daily backup is picked up')
+    newerBackupExists = false
+    // F6: a set whose manifest lists older versions than it copied is never the one mirrored (a Drive copy is manifest-only).
+    assert.strictEqual(newestMirrorableBackup([{ key: 'a', finalized: true, manifestAssetsCurrent: false }, { key: 'b', finalized: true, manifestAssetsCurrent: true }]).key, 'b')
+    assert.strictEqual(newestMirrorableBackup([{ key: 'a', finalized: true }]).key, 'a', 'a set without the field (older code, legacy) is eligible')
+    // R6-3: a stale newest set is skipped only while the newest current set is fresh; past the limit it is mirrored, and a skip is visible.
+    const hr = 3600e3, nowMs = Date.now(), limits = { staleMirrorHours: 24, nowMs }
+    const stale = { key: 'stale', finalized: true, manifestAssetsCurrent: false, uploaded: new Date(nowMs).toISOString() }
+    const freshCurrent = { key: 'cur', finalized: true, manifestAssetsCurrent: true, uploaded: new Date(nowMs - 20 * hr).toISOString() }
+    const oldCurrent = { key: 'cur', finalized: true, manifestAssetsCurrent: true, uploaded: new Date(nowMs - 25 * hr).toISOString() }
+    assert.deepStrictEqual(driveMirrorChoice([stale, freshCurrent], limits), { backup: freshCurrent, skippedStale: stale }, 'current set 20 h old: the stale set is skipped')
+    assert.deepStrictEqual(driveMirrorChoice([stale, oldCurrent], limits), { backup: stale }, 'current set 25 h old: the stale set is mirrored')
+    assert.deepStrictEqual(driveMirrorChoice([stale], limits), { backup: stale }, 'no current set at all: the stale set is mirrored')
+    assert.deepStrictEqual(driveMirrorChoice([stale, oldCurrent]), { backup: oldCurrent, skippedStale: stale }, 'no limits given: always skipped (old behaviour)')
+    const marker = '|root-folder|backups/cloudflare/final.json'
+    settings.set('drive_sync_last_backup_key', marker)
+    settings.set('drive_sync_last_error', '')
+    staleHeadExists = true
+    finalUploaded = new Date(Date.now() - 2 * hr).toISOString()
+    assert.deepStrictEqual(await driveSyncHasNewBackup(env), { new: false, reason: 'skipped-stale', backupKey: 'backups/cloudflare/final.json' }, 'a skip is never reported as already-synced')
+    assert.match(settings.get('drive_sync_last_error'), /stale.json.*not copied to Google Drive/, 'the skip is a visible status')
+    finalUploaded = new Date(Date.now() - 30 * hr).toISOString()
+    assert.deepStrictEqual(await driveSyncHasNewBackup(env), { new: true, backupKey: 'backups/cloudflare/stale.json' }, 'the held set is over a day old: the stale newest set is mirrored')
+    staleHeadExists = false
+    finalUploaded = null
+    settings.set('drive_sync_last_error', '')
+    // R6-4: the dots in the name tests are literal.
+    assert.strictEqual(driveGzipFileName('xjson'), 'xjson.json.gz')
+    assert.strictEqual(driveGzipFileName('xgz'), 'xgz.json.gz')
+    assert.strictEqual(driveGzipFileName('a.json'), 'a.json.gz')
+    assert.strictEqual(driveGzipFileName('a.json.gz'), 'a.json.gz')
+    assert.strictEqual(isDriveBackupFile({ name: 'xjson', mimeType: 'application/json' }), false)
+    // F4: a plain copy keeps its .json name and type; a gzip manifest is named .json.gz and typed application/gzip.
+    assert.deepStrictEqual(lastUpload, { name: 'final.json', initType: 'application/json', putType: 'application/json' })
+    gzipBackupNewest = true
+    const gzPush = await pushBackupToDrive(env)
+    assert.strictEqual(gzPush.success, true, gzPush.error)
+    assert.strictEqual(gzPush.fileName, 'gz.json.gz')
+    assert.deepStrictEqual(lastUpload, { name: 'gz.json.gz', initType: 'application/gzip', putType: 'application/gzip' })
+    gzipBackupNewest = false
+    // The step's order (interval, then new-backup check, then authority, then the queued job) is pinned by behaviour in
+    // test-drive-sync-cron-step-pure.cjs.
     console.log('PASS Drive uses signed expiring one-time PKCE state, mirrors the newest finalized R2 manifest, and prunes only tagged app backups to ten')
   } finally {
     global.fetch = originalFetch

@@ -52,6 +52,8 @@ type LocalizedCopy = {
 type NotificationItem = {
   id: string
   label?: string
+  // A language-pack key for the label; the English `label` is the fallback for a client or row that has none.
+  labelKey?: string
   meta?: string
   metaKey?: string
   metaParams?: CopyParams
@@ -69,6 +71,7 @@ type NotificationItem = {
 
 type DecoratedNotificationItem = NotificationItem & {
   displayMeta: string
+  displayLabel: string
 }
 
 const ImportReportModal = lazyRetry(() => import('./ImportReportModal'), 'NotificationCenter-ImportReportModal')
@@ -268,6 +271,10 @@ const SECTION_SUMMARY_COPY: Record<string, LocalizedCopy> = {
       Number(countryCount) ? `ការចូលពីប្រទេសថ្មី ${countryCount}` : null,
     ].filter(Boolean).join(', '),
   },
+  notification_system_backup_summary: {
+    en: () => 'Backup needs attention',
+    km: () => 'ការបម្រុងទុកត្រូវការការយកចិត្តទុកដាក់',
+  },
   notification_system_drive_sync_summary: {
     en: () => 'Google Drive sync needs attention',
     km: () => 'Google Drive sync ត្រូវការការយកចិត្តទុកដាក់',
@@ -319,6 +326,10 @@ const ITEM_META_COPY: Record<string, LocalizedCopy> = {
   notification_device_new_country: {
     en: ({ previousCountry, newCountry }) => `Sign-in moved from ${previousCountry || 'an unknown country'} to ${newCountry || 'an unknown country'} • already-approved device`,
     km: ({ previousCountry, newCountry }) => `ការចូលបានផ្លាស់ពី ${previousCountry || 'ប្រទេសមិនស្គាល់'} ទៅ ${newCountry || 'ប្រទេសមិនស្គាល់'} • ឧបករណ៍ដែលបានអនុម័តរួច`,
+  },
+  notification_backup_missing_meta: {
+    en: ({ hours }) => `No new backup for ${hours} h`,
+    km: ({ hours }) => `គ្មានការបម្រុងទុកថ្មី ${hours} ម៉ោង`,
   },
   notification_system_drive_sync_reconnect: {
     en: () => 'Reconnect Google Drive to resume sync',
@@ -801,6 +812,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
       const decoratedItems: DecoratedNotificationItem[] = Array.isArray(sectionItems)
         ? sectionItems.map((item) => ({
           ...item,
+          displayLabel: item.labelKey ? tr(item.labelKey, item.label || '') : (item.label || ''),
           displayMeta: item.metaKey
             ? renderStructuredCopy(item.metaKey, item.metaParams, item.meta || '')
             : (item.meta || ''),
@@ -816,6 +828,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
           section.label,
           section.summary,
           item.label,
+          item.displayLabel,
           item.displayMeta,
           item.meta,
           item.kind,
@@ -1239,7 +1252,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
                                 )
                               })()}
                               <span className="min-w-0 flex-1">
-                                <span className="block truncate text-sm font-medium text-slate-800 dark:text-slate-100">{item.label}</span>
+                                <span className="block truncate text-sm font-medium text-slate-800 dark:text-slate-100">{item.displayLabel}</span>
                                 <span className="block text-xs text-slate-500 dark:text-slate-400">{item.displayMeta}</span>
                               </span>
                               <ExternalLink className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-slate-300" />

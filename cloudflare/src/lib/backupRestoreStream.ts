@@ -388,6 +388,39 @@ function readValue(s: string, i: number): { raw: string; next: number } | null {
 }
 
 /**
+ * Returns the document bytes whether the stored object is plain JSON or gzip (a new manifest may be compressed). The form
+ * is read from the first two bytes, never from metadata, so a Drive-staged copy (stored without the object's metadata) and
+ * an older plain backup both read. A JSON document starts with "{", gzip with 0x1f 0x8b: no ambiguity. Pull-based, so a
+ * large document is never buffered beyond the two sniffed bytes.
+ */
+export async function gunzipIfCompressed(body: ReadableStream<Uint8Array>): Promise<ReadableStream<Uint8Array>> {
+  const reader = body.getReader()
+  const head: Uint8Array[] = []
+  let have = 0
+  let ended = false
+  while (have < 2) {
+    const next = await reader.read()
+    if (next.done) { ended = true; break }
+    head.push(next.value)
+    have += next.value.byteLength
+  }
+  const first = head.length ? head[0] : new Uint8Array(0)
+  const second = first.byteLength > 1 ? first[1] : (head[1]?.[0] ?? -1)
+  const gzip = first.byteLength > 0 && first[0] === 0x1f && second === 0x8b
+  const replay = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (head.length) { controller.enqueue(head.shift()!); return }
+      if (ended) { controller.close(); return }
+      const next = await reader.read()
+      if (next.done) controller.close()
+      else controller.enqueue(next.value)
+    },
+    cancel(reason) { return reader.cancel(reason) },
+  })
+  return gzip ? replay.pipeThrough(new DecompressionStream('gzip')) : replay
+}
+
+/**
  * Convenience: drive the scanner over a whole ReadableStream of UTF-8 bytes,
  * yielding events. Used by the restore path; the pure scanner above is what
  * the tests exercise directly with adversarial chunkings.
@@ -397,7 +430,7 @@ export async function* streamBackupEvents(
 ): AsyncGenerator<BackupStreamEvent> {
   const scanner = new BackupDocumentScanner()
   const decoder = new TextDecoder('utf-8')
-  const reader = body.getReader()
+  const reader = (await gunzipIfCompressed(body)).getReader()
   try {
     for (;;) {
       const { done, value } = await reader.read()

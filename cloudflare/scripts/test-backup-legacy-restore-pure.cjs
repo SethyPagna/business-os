@@ -4,6 +4,9 @@ const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 const fs = require('node:fs')
 const path = require('node:path')
 const assert = require('node:assert/strict')
+// These fixtures hold R2 bodies as strings and read the manifest back as text, so the writer runs in its plain (non-gzip) form here:
+// the gzip form is covered by test-backup-manifest-gzip-pure.cjs and test-backup-asset-pool-pure.cjs.
+globalThis.CompressionStream = undefined
 function fixturePrefix(name, boundary, expose) {
   const source = fs.readFileSync(path.join(__dirname, name), 'utf8')
   const end = source.indexOf(boundary)
