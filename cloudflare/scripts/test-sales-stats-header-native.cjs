@@ -12,6 +12,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const { bootWorld } = require('./read-budget/world.cjs')
+const { seedContext } = require('./read-budget/seed.cjs')
 
 const SALES = 'src/routes/sales.ts'
 const KERNEL = 'src/lib/salesAnalytics.ts'
@@ -42,35 +43,43 @@ const MUTANTS = {
   dropsReturnsAtomic: [{ name: 'm-ret-a', file: KERNEL, from: "  groups.push({ kind: 'returns', sql:", to: "  if (!options.headerOnly) groups.push({ kind: 'returns', sql:" }],
   dropsReturnsLegacy: [{ name: 'm-ret-l', file: KERNEL, from: 'const returns = await reportKeysetRows(db, `SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope${returnDebt}${returnPrecision}', to: 'const returns = options.headerOnly ? [] : await reportKeysetRows(db, `SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope${returnDebt}${returnPrecision}' }],
 }
-const SHAPES = {
+// Every date is an offset back from the seed's own anchor day (world.ctx.anchorDate = today in the business timezone, from the same seedContext the
+// seed uses), never a calendar literal. The seed hangs its sales off the real clock, so a fixed window stops containing any of them: the 'today' shape
+// was literally 2026-11-10..11 and held no sales from 12 Nov on, which turns "expected fewer rows" into 0 < 0. The offsets are the ones the old
+// literals had on 11 Nov (today = 1 day back .. 0, the 30-day shape = 38..9 days back, and so on), so every shape still narrows or spans what it did.
+const shapesFor = (ctx) => {
+  const d = (back) => new Date(Date.parse(ctx.anchorDate + 'T00:00:00Z') - back * 86400e3).toISOString().slice(0, 10)
+  return {
   'all-time': '',
-  'today': 'startDate=2026-11-10&endDate=2026-11-11',
-  'range-30d': 'startDate=2026-10-04&endDate=2026-11-02',
-  'start-only': 'startDate=2026-10-20',
-  'end-only': 'endDate=2026-01-31',
-  'dates+time': 'startDate=2026-10-04&endDate=2026-11-02&startTime=08:00&endTime=18:00',
+  'today': `startDate=${d(1)}&endDate=${d(0)}`,
+  'range-30d': `startDate=${d(38)}&endDate=${d(9)}`,
+  'start-only': `startDate=${d(22)}`,
+  'end-only': `endDate=${d(284)}`,
+  'dates+time': `startDate=${d(38)}&endDate=${d(9)}&startTime=08:00&endTime=18:00`,
   'time-only': 'startTime=08:00&endTime=18:00',
-  'overnight': 'startDate=2026-10-04&endDate=2026-11-02&startTime=22:00&endTime=02:00',
-  'end-24:00': 'startDate=2026-10-04&endDate=2026-11-02&startTime=00:00&endTime=24:00',
-  'start-time-only': 'startDate=2026-10-04&endDate=2026-11-02&startTime=08:00',
-  'multi-status': 'startDate=2026-10-04&endDate=2026-11-02&status=completed,awaiting_payment',
-  'status-cancelled': 'startDate=2026-10-04&endDate=2026-11-02&status=cancelled',
-  'branch': 'startDate=2026-10-04&endDate=2026-11-02&branchId=1',
-  'cashier': 'startDate=2026-10-04&endDate=2026-11-02&cashier=a',
+  'overnight': `startDate=${d(38)}&endDate=${d(9)}&startTime=22:00&endTime=02:00`,
+  'end-24:00': `startDate=${d(38)}&endDate=${d(9)}&startTime=00:00&endTime=24:00`,
+  'start-time-only': `startDate=${d(38)}&endDate=${d(9)}&startTime=08:00`,
+  'multi-status': `startDate=${d(38)}&endDate=${d(9)}&status=completed,awaiting_payment`,
+  'status-cancelled': `startDate=${d(38)}&endDate=${d(9)}&status=cancelled`,
+  'branch': `startDate=${d(38)}&endDate=${d(9)}&branchId=1`,
+  'cashier': `startDate=${d(38)}&endDate=${d(9)}&cashier=a`,
   // narrowing shapes (review M3): the cohort is a strict subset of the window
-  'branch-2': 'startDate=2026-10-04&endDate=2026-11-02&branchId=2',
-  'cashier-none': 'startDate=2026-10-04&endDate=2026-11-02&cashier=zzzz-nobody',
-  'user-none': 'startDate=2026-10-04&endDate=2026-11-02&userId=999999',
-  'search-subset': 'startDate=2026-10-04&endDate=2026-11-02&search=Customer 1',
+  'branch-2': `startDate=${d(38)}&endDate=${d(9)}&branchId=2`,
+  'cashier-none': `startDate=${d(38)}&endDate=${d(9)}&cashier=zzzz-nobody`,
+  'user-none': `startDate=${d(38)}&endDate=${d(9)}&userId=999999`,
+  'search-subset': `startDate=${d(38)}&endDate=${d(9)}&search=Customer 1`,
   'search-subset-all-time': 'search=Customer 1',
+  }
 }
+const SHAPE_NAMES = Object.keys(shapesFor(seedContext()))
 const ATOMIC = { report_atomic: 'on', report_atomic_long: 'on' }
 
 async function run({ patches = [], switches }) {
   const world = await bootWorld({ tier: 'free', patches, ...(switches ? { switches } : {}) })
   const out = {}
   try {
-    for (const [name, qs] of Object.entries(SHAPES)) {
+    for (const [name, qs] of Object.entries(shapesFor(world.ctx))) {
       const r = await world.send('GET', '/api/sales/stats' + (qs ? '?' + qs : ''), undefined, { miss: true })
       out[name] = { status: r.status, text: r.text, calls: r.calls, rr: r.rr }
     }
@@ -107,7 +116,7 @@ const bodies = (res) => Object.fromEntries(Object.entries(res).map(([k, v]) => [
   for (const [mode, o, n] of [['OFF', oldOff, newOff], ['ON', oldOn, newOn]]) {
     await step(`parity (report_atomic ${mode}): every shape answers byte-identically to the old route`, () => assert.deepEqual(bodies(n), bodies(o)))
     await step(`rows and calls (report_atomic ${mode}): never above the old route; below it for the dated and all-time windows`, () => {
-      for (const name of Object.keys(SHAPES)) {
+      for (const name of SHAPE_NAMES) {
         assert.ok(n[name].rr <= o[name].rr, `${name}: rows ${n[name].rr} > old ${o[name].rr}`)
         assert.ok(n[name].calls <= o[name].calls, `${name}: calls ${n[name].calls} > old ${o[name].calls}`)
       }
@@ -116,7 +125,7 @@ const bodies = (res) => Object.fromEntries(Object.entries(res).map(([k, v]) => [
   }
   await step('the build answers the same on report_atomic OFF and ON', () => assert.deepEqual(bodies(newOn), bodies(newOff)))
   log('rows/calls old -> new:')
-  for (const name of Object.keys(SHAPES)) log(`   ${name.padEnd(18)} OFF ${oldOff[name].rr}/${oldOff[name].calls} -> ${newOff[name].rr}/${newOff[name].calls}   ON ${oldOn[name].rr}/${oldOn[name].calls} -> ${newOn[name].rr}/${newOn[name].calls}`)
+  for (const name of SHAPE_NAMES) log(`   ${name.padEnd(18)} OFF ${oldOff[name].rr}/${oldOff[name].calls} -> ${newOff[name].rr}/${newOff[name].calls}   ON ${oldOn[name].rr}/${oldOn[name].calls} -> ${newOn[name].rr}/${newOn[name].calls}`)
 
   const caught = async (name, patches, switches) => {
     const res = await run({ patches, switches })
