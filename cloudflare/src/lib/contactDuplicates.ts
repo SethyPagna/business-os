@@ -1,5 +1,5 @@
 import type { D1Compat } from './db'
-import { parseStoredContactOptions, serializeContactOptions, type ContactOptionMode } from './contactOptions'
+import { parseAllStoredContactOptions, parseStoredContactOptions, serializeContactOptions, type ContactOptionMode } from './contactOptions'
 import { canonicalizePhone } from './phone'
 import { buildInClause, chunkForBinding } from './sqlBinding'
 
@@ -250,6 +250,18 @@ export function collectContactPhones(row: { phone?: unknown; address?: unknown }
   return [...phones]
 }
 
+// Classifier-only twin of collectContactPhones: reads EVERY stored option (the write guard does), not the first CONTACT_OPTION_LIMIT.
+function collectAllContactPhones(row: { phone?: unknown; address?: unknown }, mode: ContactOptionMode = 'address'): string[] {
+  const phones = new Set<string>()
+  const primary = normalizePhone(row.phone)
+  if (primary) phones.add(primary)
+  for (const option of parseAllStoredContactOptions(row.address, mode)) {
+    const optionPhone = normalizePhone(option.phone)
+    if (optionPhone) phones.add(optionPhone)
+  }
+  return [...phones]
+}
+
 const SEVERITY_RANK: Record<ContactDuplicateSeverity, number> = { phone_conflict: 0, exact_match: 1, name_only: 2 }
 
 // Pure classification -- given the record being saved (name + every phone
@@ -269,7 +281,7 @@ export function classifyContactDuplicates(
   for (const candidate of candidates) {
     const candidateName = normalizeContactName(candidate.name)
     const sameName = !!subjectName && subjectName === candidateName
-    const sharedPhone = collectContactPhones(candidate, mode).find((phone) => subjectPhones.has(phone)) || null
+    const sharedPhone = collectAllContactPhones(candidate, mode).find((phone) => subjectPhones.has(phone)) || null
     if (!sharedPhone && !sameName) continue
     matches.push({
       id: candidate.id,

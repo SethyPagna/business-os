@@ -126,14 +126,17 @@ const check = async (name, body) => { await body(); passed += 1; console.log(`PA
     }
   })
 
-  await check('a 4th DATA-CARRYING option phone is found by the SQL of today only, and the classifier drops it too (a 4th option after an EMPTY one is a pinned gap above)', async () => {
+  await check('a 4th DATA-CARRYING option phone is found by the SQL of today and by the classifier (which reads every stored option), not by the narrowed index (a 4th option after an EMPTY one is a pinned gap above)', async () => {
     for (const p of ['010100103']) {
       const n = await newSql([p])
       const before = run(oldSql([p]), params([p]))
       assert.equal(before.length, 1, 'control: the SQL of today returns the row')
       assert.deepEqual(run(idsOnly(n.sql), n.p), [])
       const row = db.prepare('SELECT * FROM customers WHERE id = ?').get(before[0])
-      assert.deepEqual(lib.classifyContactDuplicates({ name: 'Someone else', phones: [p] }, [row]), [], 'no match is ever reported for it')
+      const hit = lib.classifyContactDuplicates({ name: 'Someone else', phones: [p] }, [row])
+      assert.equal(hit.length, 1, 'the classifier names the 4th-option owner')
+      assert.equal(hit[0].severity, 'phone_conflict')
+      assert.equal(hit[0].id, row.id)
     }
   })
 

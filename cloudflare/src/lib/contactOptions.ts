@@ -125,6 +125,28 @@ export function parseStoredContactOptions(raw: unknown, mode: ContactOptionMode 
   return hasContactOptionData(fallback, mode) ? [fallback] : []
 }
 
+// Every data-carrying stored option, with NO CONTACT_OPTION_LIMIT cut. parseStoredContactOptions is the display/edit read (first 3); duplicate detection
+// must see what the SQL write guard sees (every element of the stored array), or a phone on a 4th+ option refuses the write with no nameable owner.
+export function parseAllStoredContactOptions(raw: unknown, mode: ContactOptionMode = 'address'): NormalizedContactOption[] {
+  if (raw) {
+    try {
+      const parsed: unknown = JSON.parse(String(raw))
+      if (Array.isArray(parsed) && parsed.length && typeof parsed[0] === 'object' && parsed[0] !== null) {
+        const options: NormalizedContactOption[] = []
+        for (const entry of parsed as ContactOptionSource[]) {
+          if (!entry || typeof entry !== 'object') continue
+          const option = normalizeContactOption(entry, mode)
+          if (hasContactOptionData(option, mode)) options.push(option)
+        }
+        return options
+      }
+    } catch (_) {
+      // fall through to the capped reader (plain-string / legacy shapes carry no extra option phones)
+    }
+  }
+  return parseStoredContactOptions(raw, mode)
+}
+
 export function parseImportContactOptions(row: Record<string, unknown> = {}, mode: ContactOptionMode = 'address'): NormalizedContactOption[] {
   const valueField = mode === 'area' ? 'area' : 'address'
   const options: NormalizedContactOption[] = []

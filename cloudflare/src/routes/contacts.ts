@@ -555,6 +555,7 @@ async function duplicateBlockAfterGuardFailure(
   config: ContactConfig,
   subject: { id?: number | string | null; name: string; phones: string[] },
   decision: ContactDuplicateCreateSeparateDecision | null,
+  error?: unknown,
 ): Promise<{ body: Record<string, unknown>; status: number } | null> {
   const db = getDb(env)
   const { matches, review } = await excludeAnonymousCustomerDuplicateState(
@@ -574,7 +575,12 @@ async function duplicateBlockAfterGuardFailure(
       : { status: 409, body: { error: 'The possible duplicate records changed. Review again before saving.', code: 'contact_duplicate_candidates_changed', duplicate: { matches, duplicateReview: review, allowedActions: [] }, matches, duplicateReview: review, allowedActions: [] } }
   }
   const unexpected = matches.find((match) => match.severity === 'phone_conflict' || match.severity === 'exact_match')
-  return unexpected ? duplicateErrorResponse(config.entity, unexpected, matches, review) : null
+  if (unexpected) return duplicateErrorResponse(config.entity, unexpected, matches, review)
+  // The write guard's own refusal (its INSERT ... SELECT collides on the owner's primary key) with no owner nameable: a duplicate must still be a 409, never a 500.
+  if (error != null && /UNIQUE constraint failed: \w+\.id\b/i.test(error instanceof Error ? error.message : String(error))) {
+    return { status: 409, body: { error: `This phone number is already registered to another ${config.entity}. Each phone number can only belong to one ${config.entity}.`, code: 'contact_duplicate_decision_required', duplicate: { matches, duplicateReview: review, allowedActions: [] }, matches, duplicateReview: review, allowedActions: [] } }
+  }
+  return null
 }
 
 function conflictResult(error: unknown) {
@@ -1777,7 +1783,7 @@ function registerContactRoutes(config: ContactConfig) {
           if (existing) return c.json(existing)
         }
       }
-      const duplicateBlock = await duplicateBlockAfterGuardFailure(c.env, config, { name, phones: duplicateDecision.phones }, duplicateDecision.decision)
+      const duplicateBlock = await duplicateBlockAfterGuardFailure(c.env, config, { name, phones: duplicateDecision.phones }, duplicateDecision.decision, error)
       if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
       throw error
     }
@@ -2128,7 +2134,7 @@ function registerContactRoutes(config: ContactConfig) {
       }
     } catch (error) {
       if (config.table === 'customers' && (await anonymousCustomerIds(db, [id])).has(Number(id))) return anonymousCustomerMutationResponse(c)
-      const duplicateBlock = await duplicateBlockAfterGuardFailure(c.env, config, { id, name, phones: duplicateDecision.phones }, duplicateDecision.decision)
+      const duplicateBlock = await duplicateBlockAfterGuardFailure(c.env, config, { id, name, phones: duplicateDecision.phones }, duplicateDecision.decision, error)
       if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
       if (expectedUpdatedAt) {
         const fresh = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id })
@@ -3259,7 +3265,7 @@ app.post('/customers/link-conflicts/resolve-missing', async (c) => {
         return { changes: Number(meta?.changes ?? 0), lastInsertRowid: Number(meta?.last_row_id ?? 0) }
       })
     } catch (error) {
-      const duplicateBlock = await duplicateBlockAfterGuardFailure(c.env, CUSTOMERS, { name: name || storedPhone, phones: duplicateDecision.phones }, null)
+      const duplicateBlock = await duplicateBlockAfterGuardFailure(c.env, CUSTOMERS, { name: name || storedPhone, phones: duplicateDecision.phones }, null, error)
       if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
       throw error
     }

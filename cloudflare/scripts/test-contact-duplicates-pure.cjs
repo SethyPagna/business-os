@@ -77,6 +77,21 @@ async function runTest(name, fn) {
 
 async function main() {
 
+  await runTest('classifyContactDuplicates: a phone on a 4th option names its owner (the write guard reads every option, so must the classifier)', async () => {
+    const options = [1, 2, 3, 4].map((n) => ({ label: 'O' + n, phone: '011 222 30' + n }))
+    const owner = { id: 7, name: 'Owner F', phone: '011 222 399', address: JSON.stringify(options) }
+    const hit = classifyContactDuplicates({ name: 'Newcomer', phones: ['011222304'] }, [owner])
+    assert.strictEqual(hit.length, 1)
+    assert.strictEqual(hit[0].severity, 'phone_conflict')
+    assert.strictEqual(hit[0].id, 7)
+    // <= 3 options: unchanged
+    const three = { ...owner, address: JSON.stringify(options.slice(0, 3)) }
+    assert.strictEqual(classifyContactDuplicates({ name: 'Newcomer', phones: ['011222303'] }, [three])[0].severity, 'phone_conflict')
+    assert.strictEqual(classifyContactDuplicates({ name: 'Newcomer', phones: ['011222304'] }, [three]).length, 0)
+    // display/edit parse and collectContactPhones stay capped at 3
+    assert.ok(!moduleObj.exports.collectContactPhones(owner).includes('011222304'))
+  })
+
   await runTest('classifyContactDuplicates: phone_conflict outranks exact_match outranks name_only', async () => {
   const matches = classifyContactDuplicates(
     { name: 'Sok Dara', phones: ['012345678'] },
