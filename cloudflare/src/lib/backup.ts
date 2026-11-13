@@ -1411,10 +1411,15 @@ async function sweepAssetPool(env: Env): Promise<{ removed: number; skipped?: st
 // corresponding top-level <name>.json manifest. Such a folder cannot be
 // restored (restore needs the manifest) and is unreachable by
 // listCloudflareBackups/pruneCloudflareBackups, so nothing else ever removes
-// it. A real in-progress backup always writes its manifest BEFORE any folder
-// object (see writeBackupDocument), so a manifest-less folder is already an
-// orphan; a short grace window on the folder's newest object guards only
-// against list-ordering races, never against a legitimate live backup.
+// it. That is NOT the order a live backup writes in any more: writeBackupDocument
+// writes the folder's state.json sidecar FIRST (before any byte moves, so the set
+// pins its pool objects), then copies assets, and only then the manifest. A live
+// set therefore has a folder and no manifest for as long as its asset copy and
+// manifest write take (minutes). Correctness rests on the grace window: a folder
+// whose newest object is younger than ORPHAN_FOLDER_GRACE_MS (1 h) is never
+// deleted, which is safe because one invocation (cron wall time 15 min) cannot
+// keep a set manifest-less that long; a folder older than that with no manifest
+// is a dead set.
 async function pruneOrphanedBackupFolders(env: Env): Promise<string[]> {
   const ORPHAN_FOLDER_GRACE_MS = 60 * 60 * 1000 // 1h
   const manifests = new Set<string>()
