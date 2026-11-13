@@ -184,7 +184,12 @@ function writeShapes() {
     { id: 'w-transfer-1-line', label: 'POST /api/inventory/transfer 1 line', method: 'POST', url: '/api/inventory/transfer',
       prepare: async (world) => (await lots(world, 1, 1000))[0],
       run: async (world, send, r) => send('POST', '/api/inventory/transfer', { transfer_provenance_version: 1, productId: r.pid, fromBranchId: 1, toBranchId: 2, quantity: 1, reason: 'budget', client_request_id: key('transfer') }) },
+    // W7: the bulk transfers run on a world whose two branches are both active (canonical shop + warehouse), so they end 200 and measure the transfer itself; w-transfer-1-line above keeps
+    // the refusal on the base world (branch 2 inactive), so one shape still proves a refused transfer writes nothing.
     transferBulk(5, 1020), transferBulk(20, 1040),
+    // Slice C: the shift close with Telegram ON. The close writes the shift and one telegram_shift_report_sends row and queues the report (the report itself is delivered by the queue consumer in an
+    // invocation of its own: test-shift-close-call-ceiling-native.cjs pins that invocation at <= 45 calls; it is not an HTTP route, so it has no read-budget entry).
+    shiftClose(),
     { id: 'w-adjust', label: 'POST /api/inventory/adjust (remove 1)', method: 'POST', url: '/api/inventory/adjust',
       prepare: async (world) => (await lots(world, 1, 900))[0],
       run: async (world, send, r) => send('POST', '/api/inventory/adjust', { productId: r.pid, branchId: 1, quantity: 1, type: 'remove', reason: 'damaged', client_request_id: key('adjust') }) },
@@ -279,11 +284,34 @@ function writeShapes() {
   return shapes.map((s) => ({ kind: 'write', variant: 'base', ...s }))
 }
 
+const BRANCH_2_ACTIVE = "UPDATE branches SET name='Second Store', role='warehouse', canonical_key='warehouse', is_active=1, is_default=0, successor_branch_id=NULL WHERE id=2"
+const BRANCH_2_RETIRED = "UPDATE branches SET name='Old Store', role='warehouse', canonical_key='warehouse', is_active=0, is_default=0, successor_branch_id=1 WHERE id=2"
 function transferBulk(n, offset) {
   return { id: `w-transfer-bulk-${n}-lines`, label: `POST /api/branches/transfer-bulk ${n} lines`, method: 'POST', url: '/api/branches/transfer-bulk',
-    prepare: async (world) => lots(world, n, offset),
-    run: async (world, send, rows) => send('POST', '/api/branches/transfer-bulk', { transfer_provenance_version: 1, fromBranchId: 1, toBranchId: 2, reason: 'budget', client_request_id: key('transfer'),
-      items: rows.map((r) => ({ productId: r.pid, quantity: 1, batchId: r.batch })) }) }
+    prepare: async (world) => { await world.db.prepare(BRANCH_2_ACTIVE).run(); return lots(world, n, offset) },
+    run: async (world, send, rows) => {
+      try {
+        return await send('POST', '/api/branches/transfer-bulk', { transfer_provenance_version: 1, fromBranchId: 1, toBranchId: 2, reason: 'budget', client_request_id: key('transfer'),
+          items: rows.map((r) => ({ productId: r.pid, quantity: 1, batchId: r.batch })) })
+      } finally { await world.db.prepare(BRANCH_2_RETIRED).run() }
+    } }
+}
+
+// The admin opens a shift in branch 1 (setup, before the isolate restarts) and the measured request closes it with Telegram configured (chat id, automation on, the world's bot token).
+function shiftClose() {
+  return { id: 'w-shift-close', label: 'POST /api/shifts/:id/close (Telegram ON, report queued)', method: 'POST', url: '/api/shifts/:id/close',
+    prepare: async (world) => {
+      await world.db.prepare("INSERT OR REPLACE INTO settings(key,value,updated_at) VALUES('telegram_chat_id','-1001','v1'),('telegram_automation_enabled','true','v1'),('shift_admin_exempt','false','v1')").run()
+      const opened = await world.send('POST', '/api/shifts/open', { branch_id: 1, opening_float_usd: 10, opening_float_khr: 0 })
+      if (opened.status >= 300) throw new Error(`shift fixture: open answered ${opened.status} ${opened.text.slice(0, 200)}`)
+      const shift = opened.json.shift || opened.json
+      return { id: shift.id, revision: shift.revision }
+    },
+    // The admin is exempt from shifts by default; the fixture turns that off for the request and puts the settings back so no later shape sees a shift rule.
+    run: async (world, send, shift) => {
+      try { return await send('POST', `/api/shifts/${shift.id}/close`, { client_request_id: key('shift-close'), expected_revision: shift.revision, closing_counted_usd: 100, closing_counted_khr: 41000 }) }
+      finally { await world.db.prepare("DELETE FROM settings WHERE key IN ('telegram_chat_id','telegram_automation_enabled','shift_admin_exempt')").run() }
+    } }
 }
 
 function fastStockIn(rows) {

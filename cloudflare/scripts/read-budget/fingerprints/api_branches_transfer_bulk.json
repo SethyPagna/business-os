@@ -39,6 +39,178 @@
   [
    "e92f77fc884f",
    "SELECT id, name, role, is_active FROM branches WHERE LOWER(TRIM(COALESCE(role, name))) IN ('shop', 'warehouse'"
+  ],
+  [
+   "dbbd496682a8",
+   "SELECT p.id, p.name, p.barcode, p.cost_price_usd, p.cost_price_khr, p.selling_price_usd, p.selling_price_khr, "
+  ],
+  [
+   "4dbc4ab2318b",
+   "SELECT id, variant_product_id, lot_code, received_at, expiry_date, notes FROM product_batches WHERE id IN (SEL"
+  ],
+  [
+   "91d9eaa16b8d",
+   "SELECT batch_id, quantity FROM branch_batch_stock WHERE branch_id = ?1 AND batch_id IN (SELECT value FROM json"
+  ],
+  [
+   "ddd0a6fcd21a",
+   "SELECT id,json_object('id',id,'name',name,'barcode',barcode,'created_at',created_at,'is_active',is_active) AS "
+  ],
+  [
+   "a3cb1e802a68",
+   "SELECT pb.variant_product_id AS product_id, bbs.branch_id AS branch_id, pb.id AS batch_id, pb.lot_code, pb.rec"
+  ],
+  [
+   "806ac2f4d2ea",
+   "SELECT id,json_object('id',id,'variant_product_id',variant_product_id,'batch_key',batch_key,'lot_code',lot_cod"
+  ],
+  [
+   "b45db7d003a6",
+   "B| INSERT INTO system_flags (key,value,updated_at) VALUES ('stock_transaction_permit', CASE WHEN (SELECT value"
+  ],
+  [
+   "4bc490381380",
+   "B| INSERT INTO branches (name) SELECT NULL WHERE NOT ( (SELECT COUNT(*) FROM branches WHERE COALESCE(is_active"
+  ],
+  [
+   "7e8740c24096",
+   "B| INSERT INTO transfer_operation_receipts(actor_id,request_id,request_digest,request_json,status,operation_id"
+  ],
+  [
+   "09a2a3e86322",
+   "B| INSERT INTO audit_logs (user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value) V"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "d0572e450fd3",
+   "B| INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload,created"
+  ],
+  [
+   "64ee2ec118f6",
+   "B| UPDATE transfer_operation_receipts SET action_history_id=last_insert_rowid() WHERE operation_id=?1"
+  ],
+  [
+   "8f6bd80d5065",
+   "B| SELECT CASE WHEN EXISTS(SELECT 1 FROM (SELECT m.*,m.source_product_id AS from_product,m.destination_product"
+  ],
+  [
+   "92d6e3360f75",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((NOT EXISTS(SELECT 1 FROM (SELECT m.*,m.source_produc"
+  ],
+  [
+   "112e3d79c5ef",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((NOT EXISTS(SELECT 1 FROM (SELECT from_product,from_b"
+  ],
+  [
+   "ead2e0f49892",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((NOT EXISTS(SELECT 1 FROM (SELECT from_product,from_b"
+  ],
+  [
+   "76e1a293dafe",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((NOT EXISTS(SELECT 1 FROM (SELECT from_product,from_b"
+  ],
+  [
+   "08dceaa43abd",
+   "B| UPDATE branch_batch_stock SET quantity=quantity-(SELECT quantity FROM (SELECT from_product,from_branch,from"
+  ],
+  [
+   "d43ca039d69d",
+   "B| INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) SELECT to_batch,to_branch,SUM(take_quantity) FR"
+  ],
+  [
+   "3a847b28f511",
+   "B| UPDATE branch_stock SET quantity=quantity-(SELECT quantity FROM (SELECT from_product,from_branch,SUM(quanti"
+  ],
+  [
+   "3e29447855bc",
+   "B| INSERT INTO branch_stock(product_id,branch_id,quantity) SELECT to_product,to_branch,SUM(quantity) FROM (SEL"
+  ],
+  [
+   "71ed3ed1b825",
+   "B| UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=pro"
+  ],
+  [
+   "50c8b582d7de",
+   "B| INSERT INTO stock_transfers(product_id,product_name,from_branch_id,to_branch_id,from_branch_name,to_branch_"
+  ],
+  [
+   "4527846ea413",
+   "B| INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason"
+  ],
+  [
+   "8e3a63687fc7",
+   "B| INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason"
+  ],
+  [
+   "da3450e3f01a",
+   "B| UPDATE transfer_operation_receipts SET status='committed',response_json=json_set(?1,'$.operation_id',operat"
+  ],
+  [
+   "1ed22ef13cc5",
+   "B| SELECT (SELECT COALESCE(quantity, 0) FROM branch_stock WHERE product_id = json_extract(j.value, '$[0]') AND"
+  ],
+  [
+   "5a75c34ccc25",
+   "B| SELECT actor_id,request_id,request_digest,request_json,response_json,status FROM transfer_operation_receipt"
+  ],
+  [
+   "01ddaad3df73",
+   "B| SELECT CASE WHEN NOT EXISTS ( SELECT 1 FROM system_flags WHERE key = 'maintenance' ) THEN 1 ELSE json_extra"
+  ],
+  [
+   "c1308231e30a",
+   "B| DELETE FROM system_flags WHERE key='stock_transaction_permit' AND value='legacy-separate-pool-v1'"
+  ],
+  [
+   "5f13c00d023d",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ],
+  [
+   "e64bb7daf2f1",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
   ]
  ],
  "w-transfer-bulk-20-lines": [
@@ -81,6 +253,294 @@
   [
    "e92f77fc884f",
    "SELECT id, name, role, is_active FROM branches WHERE LOWER(TRIM(COALESCE(role, name))) IN ('shop', 'warehouse'"
+  ],
+  [
+   "a3aff83c207e",
+   "SELECT p.id, p.name, p.barcode, p.cost_price_usd, p.cost_price_khr, p.selling_price_usd, p.selling_price_khr, "
+  ],
+  [
+   "4dbc4ab2318b",
+   "SELECT id, variant_product_id, lot_code, received_at, expiry_date, notes FROM product_batches WHERE id IN (SEL"
+  ],
+  [
+   "91d9eaa16b8d",
+   "SELECT batch_id, quantity FROM branch_batch_stock WHERE branch_id = ?1 AND batch_id IN (SELECT value FROM json"
+  ],
+  [
+   "ddd0a6fcd21a",
+   "SELECT id,json_object('id',id,'name',name,'barcode',barcode,'created_at',created_at,'is_active',is_active) AS "
+  ],
+  [
+   "1b36e03ac5e0",
+   "SELECT pb.variant_product_id AS product_id, bbs.branch_id AS branch_id, pb.id AS batch_id, pb.lot_code, pb.rec"
+  ],
+  [
+   "806ac2f4d2ea",
+   "SELECT id,json_object('id',id,'variant_product_id',variant_product_id,'batch_key',batch_key,'lot_code',lot_cod"
+  ],
+  [
+   "b45db7d003a6",
+   "B| INSERT INTO system_flags (key,value,updated_at) VALUES ('stock_transaction_permit', CASE WHEN (SELECT value"
+  ],
+  [
+   "4bc490381380",
+   "B| INSERT INTO branches (name) SELECT NULL WHERE NOT ( (SELECT COUNT(*) FROM branches WHERE COALESCE(is_active"
+  ],
+  [
+   "7e8740c24096",
+   "B| INSERT INTO transfer_operation_receipts(actor_id,request_id,request_digest,request_json,status,operation_id"
+  ],
+  [
+   "09a2a3e86322",
+   "B| INSERT INTO audit_logs (user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value) V"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "28381f8f457d",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches WHERE id=?1 AND"
+  ],
+  [
+   "0dbabacc8cfc",
+   "B| INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_b"
+  ],
+  [
+   "d0572e450fd3",
+   "B| INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload,created"
+  ],
+  [
+   "64ee2ec118f6",
+   "B| UPDATE transfer_operation_receipts SET action_history_id=last_insert_rowid() WHERE operation_id=?1"
+  ],
+  [
+   "8f6bd80d5065",
+   "B| SELECT CASE WHEN EXISTS(SELECT 1 FROM (SELECT m.*,m.source_product_id AS from_product,m.destination_product"
+  ],
+  [
+   "92d6e3360f75",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((NOT EXISTS(SELECT 1 FROM (SELECT m.*,m.source_produc"
+  ],
+  [
+   "112e3d79c5ef",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((NOT EXISTS(SELECT 1 FROM (SELECT from_product,from_b"
+  ],
+  [
+   "ead2e0f49892",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((NOT EXISTS(SELECT 1 FROM (SELECT from_product,from_b"
+  ],
+  [
+   "76e1a293dafe",
+   "B| INSERT INTO branches(name) SELECT NULL WHERE COALESCE((NOT EXISTS(SELECT 1 FROM (SELECT from_product,from_b"
+  ],
+  [
+   "08dceaa43abd",
+   "B| UPDATE branch_batch_stock SET quantity=quantity-(SELECT quantity FROM (SELECT from_product,from_branch,from"
+  ],
+  [
+   "d43ca039d69d",
+   "B| INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) SELECT to_batch,to_branch,SUM(take_quantity) FR"
+  ],
+  [
+   "3a847b28f511",
+   "B| UPDATE branch_stock SET quantity=quantity-(SELECT quantity FROM (SELECT from_product,from_branch,SUM(quanti"
+  ],
+  [
+   "3e29447855bc",
+   "B| INSERT INTO branch_stock(product_id,branch_id,quantity) SELECT to_product,to_branch,SUM(quantity) FROM (SEL"
+  ],
+  [
+   "71ed3ed1b825",
+   "B| UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=pro"
+  ],
+  [
+   "50c8b582d7de",
+   "B| INSERT INTO stock_transfers(product_id,product_name,from_branch_id,to_branch_id,from_branch_name,to_branch_"
+  ],
+  [
+   "4527846ea413",
+   "B| INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason"
+  ],
+  [
+   "8e3a63687fc7",
+   "B| INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason"
+  ],
+  [
+   "da3450e3f01a",
+   "B| UPDATE transfer_operation_receipts SET status='committed',response_json=json_set(?1,'$.operation_id',operat"
+  ],
+  [
+   "1ed22ef13cc5",
+   "B| SELECT (SELECT COALESCE(quantity, 0) FROM branch_stock WHERE product_id = json_extract(j.value, '$[0]') AND"
+  ],
+  [
+   "5a75c34ccc25",
+   "B| SELECT actor_id,request_id,request_digest,request_json,response_json,status FROM transfer_operation_receipt"
+  ],
+  [
+   "01ddaad3df73",
+   "B| SELECT CASE WHEN NOT EXISTS ( SELECT 1 FROM system_flags WHERE key = 'maintenance' ) THEN 1 ELSE json_extra"
+  ],
+  [
+   "c1308231e30a",
+   "B| DELETE FROM system_flags WHERE key='stock_transaction_permit' AND value='legacy-separate-pool-v1'"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ],
+  [
+   "e64bb7daf2f1",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
   ]
  ]
 }

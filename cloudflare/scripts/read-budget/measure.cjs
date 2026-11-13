@@ -2,6 +2,8 @@
 // Writes budgets.json and fingerprints/ from a fresh measurement: `node scripts/read-budget/measure.cjs --init`.
 // Every ceiling is the measured figure x 1.10, rounded up. A later change to an existing ceiling is made by hand in
 // budgets.json and must carry "raised": { "from": n, "reason": "..." } (the coverage test prints every raise).
+// `--only=<regex>` measures and records ONLY the shapes whose id matches (a new shape, or one whose request changed) and merges them into the existing budgets.json and
+// fingerprints/: every other entry, exemption, pass and note is carried over untouched, so adding a shape never re-baselines the rest.
 // Each measured shape is appended to a cache file as it finishes; `--resume` continues a run that was cut short.
 const fs = require('node:fs')
 const os = require('node:os')
@@ -98,14 +100,16 @@ const pinsOf = (statements) => {
 const slim = (w) => ({ status: w.status, code: codeOf(w), rowsRead: w.rowsRead, rowsWritten: w.rowsWritten, calls: w.calls, fingerprints: (w.fingerprints || []).map((f) => [f.h, f.head]) })
 
 async function main() {
-  if (!process.argv.includes('--init') && !process.argv.includes('--resume')) throw new Error('usage: node scripts/read-budget/measure.cjs --init | --resume')
+  const onlyArg = process.argv.find((a) => a.startsWith('--only='))
+  const ONLY = onlyArg ? new RegExp(onlyArg.slice('--only='.length)) : null
+  if (!process.argv.includes('--init') && !process.argv.includes('--resume') && !ONLY) throw new Error('usage: node scripts/read-budget/measure.cjs --init | --resume | --only=<shape id regex>')
   if (!process.argv.includes('--resume')) fs.rmSync(CACHE, { force: true })
   const done = new Map()
   if (fs.existsSync(CACHE)) for (const line of fs.readFileSync(CACHE, 'utf8').split('\n').filter(Boolean)) { const r = JSON.parse(line); done.set(`${r.phase}:${r.id}`, r.data) }
   const remember = (phase, id, data) => { done.set(`${phase}:${id}`, data); fs.appendFileSync(CACHE, JSON.stringify({ phase, id, data }) + '\n') }
   const routes = await registeredRoutes()
-  const getShapeList = getShapes(require('./seed.cjs').seedContext())
-  const writeShapeList = writeShapes(require('./seed.cjs').seedContext()).filter((s) => s.variant === 'base')
+  const getShapeList = getShapes(require('./seed.cjs').seedContext()).filter((s) => !ONLY || ONLY.test(s.id))
+  const writeShapeList = writeShapes(require('./seed.cjs').seedContext()).filter((s) => s.variant === 'base' && (!ONLY || ONLY.test(s.id)))
 
   if (getShapeList.some((s) => !done.has(`get:${s.id}`))) {
     const world = await bootWorld({ tier: PASSES.free.tier, switches: PASSES.free.switches })
@@ -186,6 +190,21 @@ async function main() {
   const covered = (r) => entries.some((e) => e.route === r.route && (r.method === 'ALL' || e.method === r.method))
   const exemptions = routes.filter((r) => r.method !== 'HEAD' && !covered(r))
     .map((r) => ({ method: r.method, route: r.route, class: ROUTE_NOTES.protected.includes(`${r.method} ${r.route}`) ? 'P' : 'N', reason: ROUTE_NOTES.reason(r) }))
+  if (ONLY) {
+    const old = JSON.parse(fs.readFileSync(BUDGETS_FILE, 'utf8'))
+    const byId = new Map(entries.map((e) => [e.id, e]))
+    const merged = old.shapes.map((e) => byId.get(e.id) || e)
+    for (const e of entries) if (!old.shapes.some((x) => x.id === e.id)) merged.push(e)
+    fs.writeFileSync(BUDGETS_FILE, serialize({ ...old, shapes: merged }))
+    fs.mkdirSync(FINGERPRINTS, { recursive: true })
+    for (const [name, byShape] of Object.entries(prints)) {
+      const f = path.join(FINGERPRINTS, name + '.json')
+      const had = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {}
+      fs.writeFileSync(f, JSON.stringify({ ...had, ...byShape }, null, 1) + '\n')
+    }
+    console.log(`budgets.json: ${entries.length} shape(s) merged (${entries.map((e) => e.id).join(', ')}); ${Object.keys(prints).length} fingerprint file(s) updated; nothing else touched`)
+    return
+  }
   const file = { version: 1, base: '05ef61b73', rule: 'MEASURED at the base x 1.10, rounded up; +8 rows under 80 rows. Ratchet only: a raise needs "raised": { from, reason }.',
     programme: { rows_ceiling: 100000, by: '2026-11-30' }, passes: PASSES, reasons: EXEMPTION_REASONS, exemptions, shapes: entries }
   fs.writeFileSync(BUDGETS_FILE, serialize(file))
