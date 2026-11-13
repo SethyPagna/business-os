@@ -50,7 +50,7 @@ for (const key of used) assert.ok(keys.includes(key), `the panel's ${key} is in 
 // L-4 (release review): the administrator reads no "cookie" or "id" anywhere in the device and shop device copy, in either language.
 for (const [key, text] of [...Object.entries(en), ...Object.entries(km)]) {
   if (!/^(shop_device|device_)/.test(key) || typeof text !== 'string') continue
-  assert.doesNotMatch(text, /cookie|ids?|ខូគី/i, `${key} says cookie or id`)
+  assert.doesNotMatch(text, /cookie|\bids?\b|ខូគី/i, `${key} says cookie or id`)
 }
 assert.match(en.shop_device_unmark_confirm, /signed out/i, 'the unmark warning says employees are signed out')
 assert.match(en.shop_device_unmark_confirm, /new identity[^.]*copy of its sign-in stops working/i, 'the unmark warning says the device gets a new identity and a copied sign-in stops')

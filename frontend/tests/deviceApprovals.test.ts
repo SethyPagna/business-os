@@ -69,8 +69,8 @@ assert.match(km.device_claimed_id, /[ក-៿]/, 'in Khmer script')
 
 // L-4 (review round 3, 13 Nov 2026): a request that claims another device's id cannot be marked as a shop device from the panel, and the warning has no jargon.
 assert.ok(panel.includes('{device.claimed_approval_ref ? null : ('), 'the shop button is hidden on a request flagged as claiming an approved device')
-assert.ok(!/(id|cookie)/i.test(en.device_claimed_id), 'the English warning says no "id" or "cookie"')
-assert.ok(!/ខូគី|ID/i.test(km.device_claimed_id), 'nor the Khmer one')
+assert.ok(!/\b(id|cookie)\b/i.test(en.device_claimed_id), 'the English warning says no "id" or "cookie"')
+assert.ok(!/ខូគី|\bID\b/i.test(km.device_claimed_id), 'nor the Khmer one')
 for (const key of ['shop_device_held', 'shop_device_claimed']) {
   assert.ok(en[key] && km[key] && en[key] !== km[key] && /[ក-៿]/.test(km[key]), `both packs carry ${key}, Khmer in Khmer script`)
 }
