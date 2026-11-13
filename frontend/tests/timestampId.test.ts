@@ -50,8 +50,8 @@ await runTest('client and server generators stay hand-synced and wired in', asyn
   assert.match(serverLib, /7 \* 60 \* 60 \* 1000/)
   const moment = new Date('2026-08-30T17:00:00Z')
   const expected = businessDateTimeId(moment)
-  assert.equal(await uniqueBusinessDateTimeNumber('', async () => false, moment), expected)
-  assert.equal(await uniqueBusinessDateTimeNumber('', async candidate => candidate === expected, moment), `${expected}-2`)
+  assert.equal(await uniqueBusinessDateTimeNumber('', async () => [], moment), expected)
+  assert.equal(await uniqueBusinessDateTimeNumber('', async candidates => candidates.filter(candidate => candidate === expected), moment), `${expected}-2`)
   // New sales require server confirmation: only the server may mint their
   // receipt number. Historical recovery preserves its original identity.
   const saleWrite = readFrontend('src/api/saleWriteTransport.ts')
