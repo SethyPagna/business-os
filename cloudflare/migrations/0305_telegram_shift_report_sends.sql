@@ -6,10 +6,11 @@
 --
 -- send_key   UNIQUE, 'shift-report:<shift id>:r<revision the write produced>:<action>'. A write is one revision, so a retried request, a duplicate queue delivery and the
 --             cron fallback racing the queue all meet this key, and only the one conditional UPDATE pending -> sending that changes a row sends.
--- payload_json  what the route knew and the sender cannot recompute: the clock reading the text prints (nowMs) and the closer / reopener / amender name and id.
+-- payload_json  what the route knew and the sender cannot recompute: the clock reading the text prints (nowMs), the closer / reopener / amender name and id, and the
+--             shift row as the write read it back (so the message says what the write said, not the row as it reads when the queue delivers).
 -- dispatch    'queue' = a queue message carries it; 'fallback' = no queue (or the send threw): the */5 cron drains it, never an API request.
--- Delivery is AT MOST ONCE per claim (a claim whose Worker died mid-send is marked failed by the cron sweep and not re-sent); a Telegram error before acceptance is retried
--- up to 3 times, a minute apart, by the cron.
+-- Delivery is AT MOST ONCE (as the inline send always was): a claim whose Worker died mid-send is marked failed by the cron sweep and not re-sent, and a Telegram error is
+-- recorded failed (last_error) and NOT retried, because a message part may already be in the chat. There are no retries; attempts counts claims (0 or 1).
 --
 -- PRE:  telegram_shift_report_sends and idx_telegram_shift_report_sends_due do not exist. A failed check reads a malformed JSON path and aborts the file.
 -- POST: telegram_shift_report_sends exists with 12 columns and 0 rows; idx_telegram_shift_report_sends_due exists; no other table is read or written.

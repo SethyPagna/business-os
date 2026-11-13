@@ -68,4 +68,15 @@ check('the table is not in the backup (a restore must not replay old reports), a
   assert.equal(db.prepare("SELECT sql FROM sqlite_master WHERE name = 'telegram_scheduled_sends'").get().sql.includes("kind IN ('shift_overview')"), true)
 })
 
+check('the header says what the code does (REVIEW-w3-shift F4): at most once, no retries, and the shift row in the payload', () => {
+  const comments = sql.split('\n').filter((line) => line.startsWith('--')).join('\n')
+  assert.doesNotMatch(comments, /retried up to|a minute apart|up to 3 times/i, 'no retry is promised')
+  assert.match(comments, /NOT retried/); assert.match(comments, /There are no retries/); assert.match(comments, /AT MOST ONCE/)
+  assert.match(comments, /shift\s+row as the write read it back/i)
+  const telegram = fs.readFileSync(path.join(__dirname, '../src/lib/telegram.ts'), 'utf8').replace(/\r\n/g, '\n')
+  const deliver = telegram.slice(telegram.indexOf('export async function deliverTelegramShiftReport'), telegram.indexOf('export async function drainDueTelegramShiftReports'))
+  assert.match(deliver, /settle\('failed', message\)/, 'the delivery records a failure')
+  assert.doesNotMatch(deliver, /retry|attempts < /i, 'and does not retry it')
+})
+
 console.log(`${passed} checks passed.`)
