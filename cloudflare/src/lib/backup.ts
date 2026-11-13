@@ -4,7 +4,7 @@ import type { Env } from '../index'
 import { getPlanLimits } from './planTier'
 import { scheduledBackupCoverageMs, scheduledBackupGate, scheduledBackupNightOf } from './backupSchedule'
 import { copyObject, listObjects } from './r2'
-import { streamBackupEvents, gunzipIfCompressed } from './backupRestoreStream'
+import { streamBackupEvents } from './backupRestoreStream'
 import { assertCustomTableName } from './customTableName'
 import { containsEmbeddedMarkup, judgeStoredMedia, otherMediaContentType } from './uploadSecurity'
 
