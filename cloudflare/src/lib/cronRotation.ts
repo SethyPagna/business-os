@@ -256,6 +256,11 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
     more = !!result && typeof result === 'object' && (result as { more?: unknown }).more === true
     incomplete = !!result && typeof result === 'object' && (result as { incomplete?: unknown }).incomplete === true
     pollOnly = !!result && typeof result === 'object' && (result as { pollOnly?: unknown }).pollOnly === true
+    // A visit that gave its work up (the backup's attempts-exhausted night) answers { failed: true, reason }: record it as a failure, not as OK.
+    if (!!result && typeof result === 'object' && (result as { failed?: unknown }).failed === true) {
+      ok = false
+      error = shortError(String((result as { reason?: unknown }).reason ?? 'failed'))
+    }
   } catch (caught) {
     ok = false
     error = shortError(caught)

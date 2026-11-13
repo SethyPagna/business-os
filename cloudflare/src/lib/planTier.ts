@@ -179,6 +179,11 @@ export type PlanLimits = {
   // instead of starving the audit. 240 = more than one 3 h heavy tick, less than two.
   scheduledBackupCopyPollGapMinutes: number
 
+  // The bell tells an admin "Nightly backup missing" once the backup step has had no complete visit for this many hours. A healthy
+  // night finishes within a few hours of the 22:17 try (the copy poll can land up to ~6 h later), so 30 = a full night missed plus slack,
+  // never a flap. Read from the cron record, never from R2. Same on both tiers; Free never takes a scheduled backup, so never shows it.
+  scheduledBackupStaleHours: number
+
   // ---- Data reset --------------------------------------------------------
 
   // system.ts MAX_IMAGE_DELETES_PER_RESET -- R2 deletes fired SEQUENTIALLY,
@@ -471,6 +476,7 @@ const PAID_LIMITS: PlanLimits = {
   scheduledBackupKeep: 7,
   scheduledBackupMaxAttemptsPerDay: 2,
   scheduledBackupCopyPollGapMinutes: 240,
+  scheduledBackupStaleHours: 30,
   maxImageDeletesPerReset: 500,
   importRetentionMaxJobsPerTier: 20,
   ephemeralDeleteBatch: 5000,
@@ -527,6 +533,7 @@ const FREE_LIMITS: PlanLimits = {
   scheduledBackupKeep: 7,
   scheduledBackupMaxAttemptsPerDay: 2,
   scheduledBackupCopyPollGapMinutes: 240,
+  scheduledBackupStaleHours: 30,
   maxImageDeletesPerReset: 40,
   importRetentionMaxJobsPerTier: 5,
   ephemeralDeleteBatch: 1000,

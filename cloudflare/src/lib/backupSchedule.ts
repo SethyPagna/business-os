@@ -128,3 +128,19 @@ export function pickHeavyStepIndex(steps: readonly RotationStep[], state: Rotati
   const other = steps.findIndex((step) => step.id !== 'backup')
   return other >= 0 ? other : backupIndex
 }
+
+/**
+ * The backup step's last good visit is older than staleHours: the scheduled backup is missing. Read from the cron record only (no R2
+ * listing), so the bell can ask on every poll for free. okAt is stamped only by a complete visit (a finalized set, or one already
+ * there), so a failed or given-up night leaves it where it was. A step that never finished a visit counts from its first try, and
+ * a step with no record at all (a fresh deploy) says nothing.
+ */
+export function scheduledBackupMissing(state: RotationState, nowMs: number, staleHours: number): { hours: number; lastOkAt: string | null } | null {
+  const record = state.steps.backup
+  if (!record || !record.startedAt) return null
+  const sinceMs = Date.parse(record.okAt ?? record.startedAt)
+  if (!Number.isFinite(sinceMs)) return null
+  const ageMs = nowMs - sinceMs
+  if (!(ageMs > staleHours * 3600 * 1000)) return null
+  return { hours: Math.floor(ageMs / (3600 * 1000)), lastOkAt: record.okAt ?? null }
+}

@@ -3206,6 +3206,7 @@
   "notification_active_count": "មានការជូនដំណឹងសកម្ម {count}",
   "notification_all_clear": "មិនមានការជូនដំណឹងសំខាន់នៅពេលនេះទេ",
   "notification_as_of": "ត្រឹម {time}",
+  "notification_backup_missing": "ខ្វះការបម្រុងទុកពេលយប់",
   "notification_expiry_alerts": "ការជូនដំណឹងផុតកំណត់",
   "notification_expiry_alerts_desc": "ផលិតផលជិតផុតកំណត់ ឬបានផុតកំណត់",
   "notification_expiry_days": "ចន្លោះថ្ងៃជូនដំណឹងផុតកំណត់",

@@ -1196,7 +1196,8 @@ export async function maybeRunScheduledBackup(env: Env, nowMs: number = Date.now
     && !!item.uploaded && scheduledBackupNightOf(Date.parse(item.uploaded), afterHourLocal) === night).length
   // priorFailuresTonight: visits tonight that threw or were killed (the cron record's count); failed sets are only visible here.
   if (failedTonight + priorFailuresTonight >= getPlanLimits(env).scheduledBackupMaxAttemptsPerDay) {
-    return { skipped: true, reason: 'attempts-exhausted', failedTonight, priorFailuresTonight, latest: newestFinalized ?? null, retention }
+    // failed: the night is given up, which the lane records as a failure (cron-health, the bell) instead of an OK visit.
+    return { skipped: true, failed: true, reason: 'attempts-exhausted', failedTonight, priorFailuresTonight, latest: newestFinalized ?? null, retention }
   }
   const backup = await create(env, 'scheduled')
   // Second pass: the backup just written is now the newest, so this is what

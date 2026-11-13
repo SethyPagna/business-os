@@ -7,6 +7,8 @@ import { customerPointsReturnSql, loyaltySaleAccrualSql, loyaltySaleSinceSql, lo
 import { productHasStockSql, stockVisibleProductSql } from '../lib/productStockGuard'
 import { buildPortalConfig, createPointsAccumulator, accumulatePoints, summarizePointTotals, type PointsAccumulator, type PointsLedger } from './portal'
 import { getPlanLimits } from '../lib/planTier'
+import { parseRotationState, CRON_HEAVY_STATE_KEY } from '../lib/cronRotation'
+import { scheduledBackupMissing } from '../lib/backupSchedule'
 import { requestMetricsOf } from '../lib/requestMetrics'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
@@ -63,6 +65,9 @@ const NOTIFICATION_SETTING_KEYS = [
   // Presence-only read: loadPreferences reduces this to a boolean and the
   // token value never leaves that function.
   'drive_sync_refresh_token',
+  // The heavy lane's cron record, read in this same statement (no extra call) only to tell an admin the nightly backup is missing
+  // (scheduledBackupMissing); reduced to hours in loadPreferences and never returned.
+  CRON_HEAVY_STATE_KEY,
 ]
 const SUMMARY_SEPARATOR = ' - '
 
@@ -102,6 +107,8 @@ type NotificationItem = {
   id: string
   tone: 'danger' | 'warning' | 'info' | 'success'
   label: string
+  // The panel renders `label` from the language packs when `labelKey` names a pack entry, else the English `label`.
+  labelKey?: string
   meta: string
   // The panel renders `meta` from the language packs when `metaKey` names an
   // entry in NotificationCenter.tsx's ITEM_META_COPY, and falls back to the
@@ -168,6 +175,10 @@ async function loadPreferences(env: Env) {
     driveSyncEnabled: normalizeBoolean(map.drive_sync_enabled, false),
     driveSyncConnected: Boolean(String(map.drive_sync_refresh_token || '').trim()),
     loyaltyPointsEnabled: loyaltyPointsEnabled(map.loyalty_points_enabled),
+    // Paid only: Free never takes a scheduled backup, so a missing one is not a fault there.
+    backupMissing: getPlanLimits(env).scheduledBackupEnabled
+      ? scheduledBackupMissing(parseRotationState(map[CRON_HEAVY_STATE_KEY]), Date.now(), getPlanLimits(env).scheduledBackupStaleHours)
+      : null,
   }
 }
 
@@ -716,7 +727,7 @@ async function buildPortalSection(env: Env): Promise<NotificationSection | null>
   }
 }
 
-function buildSystemSection(driveSyncEnabled: boolean, driveSyncConnected: boolean): NotificationSection | null {
+function buildSystemSection(driveSyncEnabled: boolean, driveSyncConnected: boolean, backupMissing: { hours: number } | null = null): NotificationSection | null {
   // The Drive OAuth flow IS fully implemented (lib/googleDrive.ts +
   // compat.ts's /system/drive-sync/* routes) -- the comment that used to
   // live here claiming it wasn't was STALE, and it hid the exact failure
@@ -726,8 +737,7 @@ function buildSystemSection(driveSyncEnabled: boolean, driveSyncConnected: boole
   // critical, so "not connected" is now a standing warning until the
   // admin either connects Drive or has deliberately disabled sync AND
   // been told what that means once.
-  if (driveSyncConnected && driveSyncEnabled) return null
-  const item = !driveSyncConnected
+  const driveItem = driveSyncConnected && driveSyncEnabled ? null : !driveSyncConnected
     ? {
         id: 'system-drive-sync',
         tone: 'warning' as const,
@@ -744,13 +754,31 @@ function buildSystemSection(driveSyncEnabled: boolean, driveSyncConnected: boole
         kind: 'system_drive_sync_disabled',
         pageId: 'backup',
       }
+  // Admin only (the caller passes null for anyone else) and Paid only: the cron record says the backup step has had no complete
+  // visit for scheduledBackupStaleHours, i.e. a night was missed or given up. Danger tone: a shop with no backup is one bad day from none.
+  const missingItem = backupMissing
+    ? {
+        id: 'system-backup-missing',
+        tone: 'danger' as const,
+        label: 'Nightly backup missing',
+        labelKey: 'notification_backup_missing',
+        meta: `No new backup for ${backupMissing.hours} h`,
+        metaKey: 'notification_backup_missing_meta',
+        metaParams: { hours: backupMissing.hours },
+        kind: 'system_backup_missing',
+        pageId: 'backup',
+      }
+    : null
+  const items = [...(missingItem ? [missingItem] : []), ...(driveItem ? [driveItem] : [])]
+  if (!items.length) return null
   return {
     id: 'system',
     label: 'System',
     pageId: 'backup',
-    count: 1,
-    summary: 'Google Drive backup needs attention',
-    items: [item],
+    count: items.length,
+    summary: missingItem ? 'Backup needs attention' : 'Google Drive backup needs attention',
+    ...(missingItem ? { summaryKey: 'notification_system_backup_summary' } : {}),
+    items,
     enabledKey: 'notifications_system_enabled',
   }
 }
@@ -842,7 +870,7 @@ async function buildDeviceApprovalSection(env: Env): Promise<NotificationSection
 app.get('/summary', async (c) => {
   const user = c.get('user')
   // The loyalty switch is a cache-key input only; it is not part of the public preferences object.
-  const { loyaltyPointsEnabled, ...preferences } = await loadPreferences(c.env)
+  const { loyaltyPointsEnabled, backupMissing, ...preferences } = await loadPreferences(c.env)
   const sections: NotificationSection[] = []
   const cachedSection = sectionCacheFor(c, user)
 
@@ -875,7 +903,7 @@ app.get('/summary', async (c) => {
   // silently suppressed by their own earlier mute choice.
   if (hasPermission(user, 'customer_portal')) tasks.push(buildPortalSection(c.env))
   if (hasAnyPermission(user, ['products', 'contacts', 'inventory', 'sales'])) tasks.push(buildImportsSection(c.env, user))
-  if (preferences.systemEnabled && hasPermission(user, 'backup')) tasks.push(Promise.resolve(buildSystemSection(preferences.driveSyncEnabled, preferences.driveSyncConnected)))
+  if (preferences.systemEnabled && hasPermission(user, 'backup')) tasks.push(Promise.resolve(buildSystemSection(preferences.driveSyncEnabled, preferences.driveSyncConnected, isAdminControlUser(user) ? backupMissing : null)))
   // Supplier credit reminders (0065): money owed to suppliers is cost
   // data, and Part 383's supplier-privacy rule keeps that with the people
   // who can act on it — admin-control users only (was: anyone with
