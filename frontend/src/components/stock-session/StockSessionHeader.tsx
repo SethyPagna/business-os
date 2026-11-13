@@ -22,6 +22,8 @@ type HeaderProps = {
   onModeChange: (next: StockMode) => void
   /** Items holds lines: the session's mode is fixed until it is completed or cleared. */
   modeLocked: boolean
+  /** A host that only ever offers one mode (Fix stock = Set): the mode shows as a plain title, with no other mode to pick. */
+  fixedMode?: StockMode | null
   disabled?: boolean
   tr: Translate
   onMinimize?: () => void
@@ -29,10 +31,15 @@ type HeaderProps = {
 }
 
 /** The mode IS the title (S6): one row of Add | Remove | Set, then minimize and close. */
-export default function StockSessionHeader({ mode, onModeChange, modeLocked, disabled = false, tr, onMinimize, onClose }: HeaderProps) {
+export default function StockSessionHeader({ mode, onModeChange, modeLocked, fixedMode = null, disabled = false, tr, onMinimize, onClose }: HeaderProps) {
   const blockedTitle = tr('stock_session_switch_blocked', 'Complete or clear Items to switch')
   return (
     <div className="flex flex-shrink-0 items-center gap-1 px-3 pt-3 sm:px-4 sm:pt-4">
+      {fixedMode ? (
+        <div role="heading" aria-level={2} className={`flex h-10 min-w-0 flex-1 items-center justify-center truncate rounded-xl px-2 text-sm font-semibold ${MODE_ON[fixedMode]}`} data-stock-session-fixed-mode={fixedMode}>
+          {tr(STOCK_MODE_KEYS[fixedMode].key, STOCK_MODE_KEYS[fixedMode].fallback)}
+        </div>
+      ) : (
       <div role="radiogroup" aria-label={tr('stock_session', 'Session')} className="grid h-10 min-w-0 flex-1 grid-cols-3 gap-0.5 rounded-xl bg-gray-100 p-0.5 dark:bg-gray-900/60" data-stock-session-modes>
         {(['add', 'remove', 'set'] as const).map((option) => {
           const active = option === mode
@@ -53,6 +60,7 @@ export default function StockSessionHeader({ mode, onModeChange, modeLocked, dis
           )
         })}
       </div>
+      )}
       {onMinimize ? <MinimizeButton disabled={disabled} tr={(key, en, km) => tr(key, en, km)} onMinimize={onMinimize} /> : null}
       <button
         type="button"

@@ -1236,6 +1236,10 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         setSales(salesRef.current)
         setDetailSale((row) => String(row?.id) === pending.entityId ? fresh : row)
         savePendingDirectStatus(pending.entityId, null)
+        // The row was patched in place above, which leaves it in a list its new status may no longer belong to. The 'sales'
+        // echo below is tagged as this page's own, and the coalescer reloads only the strip for those, so the list
+        // re-filters here, with the totals, exactly as the unknown-outcome branch above does.
+        void loadSales(true)
         void loadSalesStats()
         void actionHistory.refreshServerItems()
         emitOwnSalesSync('sales')
@@ -1247,7 +1251,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     })
     statusRecoveryRef.current = { key, promise }
     return promise
-  }, [savePendingDirectStatus, loadSalesStats, actionHistory])
+  }, [savePendingDirectStatus, loadSales, loadSalesStats, actionHistory])
 
   // Reopening Sales or a receipt checks the retained operation without sending
   // another write. Missing proof leaves the existing retry card actionable.

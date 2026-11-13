@@ -3,12 +3,14 @@
 // same entry for a change pushed from another device, so no screen in this tab can show the pre-write number.
 // A family is the first path segment after /api/ in camelCase (import-jobs -> importJobs). The notification bell is not
 // listed under any stock reader: it polls on its own cadence and a refetch after every sale would cost more than it shows.
-// Every family a mutating call can reach
-// must be a key here; tests/writeInvalidationMap.test.ts fails on a new /api family nobody classified, and a mutation
-// to an unmapped family clears every cached read rather than leaving one stale.
+// Every family a mutating call can reach must be a key here; tests/writeInvalidation.test.ts fails on a new /api family
+// nobody classified, tests/readChannelCoverage.test.ts fails on a stock or money read channel no write family clears, and a
+// mutation to an unmapped family clears every cached read rather than leaving one stale.
 
+// What a product row shows (stock, price, promotion price): the product reads a stock move or a price rule changes.
+const PRODUCT_READS = ['products:search', 'products:bootstrap', 'products:byIds', 'products:get']
 const STOCK_READS = [
-  'products:search', 'products:bootstrap', 'products:byIds', 'products:get',
+  ...PRODUCT_READS,
   'inventory', 'batches', 'branches:summary', 'transfers', 'inventoryChecks',
 ]
 const MONEY_READS = ['sales', 'returns', 'dashboard', 'analytics', 'fees', 'shifts', 'customers']
@@ -29,8 +31,10 @@ export const WRITE_FAMILY_INVALIDATES: Readonly<Record<string, readonly string[]
   customers: ['sales', 'returns', 'dashboard', 'analytics'],
   fees: ['fees', 'dashboard', 'analytics', 'shifts'],
   shifts: ['shifts', 'dashboard', 'analytics'],
+  // A promotion rule sets the promotion price every product row and the till grid show: clear those reads, not only its own.
+  promotions: ['promotions', ...PRODUCT_READS],
   // Families that change only their own readers (route() already clears the channel family it writes under).
-  auth: [], system: [], settings: [], users: [], roles: [], notes: [], ai: [], telegram: [], promotions: [],
+  auth: [], system: [], settings: [], users: [], roles: [], notes: [], ai: [], telegram: [],
   pos: [], portal: [], files: [], backups: [], runtime: [], sync: [], categories: [], units: [], suppliers: [],
   organizations: [], deliveryContacts: [], reports: [], notifications: [], dashboard: [], analytics: [],
 }
