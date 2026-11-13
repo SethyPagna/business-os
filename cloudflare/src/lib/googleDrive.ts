@@ -428,7 +428,7 @@ export async function pushBackupToDrive(env: Env): Promise<{ success: boolean; e
     const existing = existingFiles.find((file) => file.appProperties?.backupKey === backup.key && file.appProperties?.status === 'finalized')
     if (existing) {
       await pruneDriveBackups(token, existingFiles, DRIVE_BACKUP_KEEP)
-      await setSettings(env, [['drive_sync_last_synced_at', new Date().toISOString()], ['drive_sync_last_error', '']])
+      await setSettings(env, [['drive_sync_last_synced_at', new Date().toISOString()], ['drive_sync_last_backup_key', backup.key], ['drive_sync_last_error', '']])
       return { success: true, fileId: existing.id, fileName }
     }
 
@@ -472,7 +472,7 @@ export async function pushBackupToDrive(env: Env): Promise<{ success: boolean; e
     if (uploaded.size && Number(uploaded.size) !== object.size) throw new Error('Google Drive upload size verification failed.')
 
     await pruneDriveBackups(token, [{ id: uploaded.id, appProperties: metadata.appProperties }, ...existingFiles], DRIVE_BACKUP_KEEP)
-    await setSettings(env, [['drive_sync_last_synced_at', new Date().toISOString()], ['drive_sync_last_error', '']])
+    await setSettings(env, [['drive_sync_last_synced_at', new Date().toISOString()], ['drive_sync_last_backup_key', backup.key], ['drive_sync_last_error', '']])
     return { success: true, fileId: uploaded.id, fileName }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Google Drive sync failed.'
@@ -518,6 +518,22 @@ export async function driveSyncScheduleDue(env: Env): Promise<{ due: boolean; re
   }
 
   return { due: true }
+}
+
+/**
+ * Is there a finalized R2 backup Drive has not been given yet? The scheduled Drive sync runs on its own interval
+ * (6 h by default) but the backup is daily, so most visits would find the same backup already mirrored. pushBackupToDrive
+ * never re-uploads it (it finds the tagged Drive file), but reaching that point still costs a queue job, a token check, a
+ * Drive folder listing and several settings writes. This answers from one settings read and one R2 listing instead.
+ * `drive_sync_last_backup_key` is written by pushBackupToDrive after every successful sync. The Backup screen's manual
+ * "Sync now" does not consult this and always goes through pushBackupToDrive.
+ */
+export async function driveSyncHasNewBackup(env: Env): Promise<{ new: boolean; reason?: 'no-finalized-backup' | 'already-synced'; backupKey?: string }> {
+  const newest = (await listCloudflareBackups(env)).find((item) => item.finalized)
+  if (!newest) return { new: false, reason: 'no-finalized-backup' }
+  const settings = await getSettings(env, ['drive_sync_last_backup_key'])
+  if (settings.drive_sync_last_backup_key === newest.key) return { new: false, reason: 'already-synced', backupKey: newest.key }
+  return { new: true, backupKey: newest.key }
 }
 
 type DriveBackupFile = {

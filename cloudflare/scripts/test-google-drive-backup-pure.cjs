@@ -39,6 +39,7 @@ const db = {
 }
 
 let listedBackups = 0
+let newerBackupExists = false
 const stubs = {
   './db': { getDb: () => db },
   './secretCrypto': {
@@ -50,6 +51,7 @@ const stubs = {
     listCloudflareBackups: async () => {
       listedBackups += 1
       return [
+        ...(newerBackupExists ? [{ key: 'backups/cloudflare/newer.json', name: 'newer.json', finalized: true }] : []),
         { key: 'backups/cloudflare/pending.json', name: 'pending.json', finalized: false },
         { key: 'backups/cloudflare/final.json', name: 'final.json', finalized: true },
       ]
@@ -80,6 +82,7 @@ const {
   consumeDriveOauthState,
   isTrustedDriveUploadSession,
   pushBackupToDrive,
+  driveSyncHasNewBackup,
 } = moduleObj.exports
 assert.strictEqual(DRIVE_BACKUP_KEEP, 10, 'the user keeps 2 in R2 and 10 in Drive (Part 386)')
 assert.strictEqual(isTrustedDriveUploadSession('https://www.googleapis.com/upload/drive/v3/files?upload_id=ok'), true)
@@ -179,10 +182,14 @@ async function main() {
     const replay = await consumeDriveOauthState(env, oauthUrl.searchParams.get('state'))
     assert.strictEqual(replay.success, false, 'Drive OAuth state must be one-time')
 
+    // Nothing mirrored yet: the newest finalized backup is new to Drive.
+    assert.deepStrictEqual(await driveSyncHasNewBackup(env), { new: true, backupKey: 'backups/cloudflare/final.json' })
+    listedBackups = 0
     const result = await pushBackupToDrive(env)
     assert.strictEqual(result.success, true, result.error)
     assert.strictEqual(result.fileId, 'drive-file')
     assert.strictEqual(listedBackups, 1)
+    assert.strictEqual(settings.get('drive_sync_last_backup_key'), 'backups/cloudflare/final.json', 'a successful sync records which backup Drive now holds')
     const deleted = calls.filter((call) => call.method === 'DELETE').map((call) => call.url)
     assert.strictEqual(deleted.length, 3, 'the new copy plus twelve finalized app backups must prune to exactly ten')
     assert.ok(deleted.every((url) => !url.includes('unrelated')))
@@ -193,6 +200,16 @@ async function main() {
     assert.strictEqual(r2Reads, 1, 'a duplicate Drive mirror must not even reopen the R2 body')
     assert.doesNotMatch(source, /object\.arrayBuffer\(\)/)
     assert.doesNotMatch(source, /await createCloudflareBackup\(/)
+    // The 6 h Drive interval against a daily backup: the scheduled visit now skips an already-mirrored backup before any Drive call.
+    const callsBefore = calls.length
+    assert.deepStrictEqual(await driveSyncHasNewBackup(env), { new: false, reason: 'already-synced', backupKey: 'backups/cloudflare/final.json' })
+    assert.strictEqual(calls.length, callsBefore, 'the already-synced check makes no Drive request')
+    newerBackupExists = true
+    assert.deepStrictEqual(await driveSyncHasNewBackup(env), { new: true, backupKey: 'backups/cloudflare/newer.json' }, 'the next daily backup is picked up')
+    newerBackupExists = false
+    const indexSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'index.ts'), 'utf8').split(String.fromCharCode(13)).join('')
+    const driveStep = indexSrc.slice(indexSrc.indexOf("step('drive-sync'"), indexSrc.indexOf("step('audit-log-retention'"))
+    assert.ok(driveStep.indexOf('driveSyncHasNewBackup(env)') > driveStep.indexOf('driveSyncScheduleDue(env)') && driveStep.indexOf('driveSyncHasNewBackup(env)') < driveStep.indexOf('enqueueDriveSyncJob'), 'the scheduled Drive step checks for a new backup after the interval and before queueing')
     console.log('PASS Drive uses signed expiring one-time PKCE state, mirrors the newest finalized R2 manifest, and prunes only tagged app backups to ten')
   } finally {
     global.fetch = originalFetch

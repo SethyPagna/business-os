@@ -50,7 +50,7 @@ import { deliverTelegramShiftOverview, drainDueTelegramShiftOverviews, isShiftOv
 import { maybeRunScheduledBackup } from './lib/backup'
 import { pickHeavyStepIndex } from './lib/backupSchedule'
 import { getPlanLimits } from './lib/planTier'
-import { driveSyncScheduleDue, recordDriveSyncError } from './lib/googleDrive'
+import { driveSyncHasNewBackup, driveSyncScheduleDue, recordDriveSyncError } from './lib/googleDrive'
 import { checkDriveSyncAuthorizer } from './lib/driveSyncAuthority'
 import { enqueueDriveSyncJob } from './lib/driveSyncQueue'
 import { maybeRunScheduledAuditLogRetention } from './lib/audit'
@@ -680,6 +680,10 @@ export function cronRotationSteps(env: Env, label: (name: string, step: () => Pr
     step('drive-sync', async () => {
       const schedule = await driveSyncScheduleDue(env)
       if (!schedule.due) return schedule
+      // The backup is daily, the Drive interval is not: when Drive already holds the newest finalized backup there is
+      // nothing to upload, so do not even queue a job (no Drive calls, no job rows).
+      const fresh = await driveSyncHasNewBackup(env)
+      if (!fresh.new) return { skipped: true, reason: fresh.reason }
       // P1-2: only a destination connected by a user who may still take a
       // full backup home receives scheduled uploads (re-checked again by
       // the queue worker at run time).
