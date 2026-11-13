@@ -88,6 +88,7 @@
   "sale_customer_link_unknown": "The previous assignment has an unknown outcome. New edits are paused so the frozen request cannot be replaced.",
   "sale_customer_choices_load_failed": "Unable to search customers.",
   "sale_customer_conflict": "This sale changed before the customer link could be saved. Refresh and review it.",
+  "phone_belongs_to_other_customer": "This phone number already belongs to another customer.",
   "sale_customer_name_exists": "A customer with this name already exists. Resolve the duplicate in Contacts.",
   "sale_customer_profile_update_failed": "Unable to update the customer.",
   "sale_customer_profile_updated": "Customer updated.",

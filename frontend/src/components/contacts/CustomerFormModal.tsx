@@ -220,7 +220,10 @@ export default function CustomerFormModal({ customer, onSave, onUseExisting, onC
       const untouched = customer ? untouchedPhoneFields({ phone: initial.phone, address: serializeContactOptions(initialOptions) }, payload) : ALL_PHONE_FIELDS_SENT
       const result = await Promise.resolve(onSave(payload, untouched))
       const nextCheck = (result as { duplicateDecisionRequired?: ContactDuplicateCheck } | null)?.duplicateDecisionRequired
-      if (nextCheck) {
+      if (nextCheck && nextCheck.matches.length === 0) {
+        // The server refused a duplicate phone but could name no owner: say so and keep the form editable (no empty review, no silent dead end).
+        setLocalError(tr(t, 'phone_belongs_to_other_customer', 'This phone number already belongs to another customer.'))
+      } else if (nextCheck) {
         setServerDuplicateCheck(nextCheck)
         setLocalError(tr(t, 'contact_duplicate_review_changed', 'Review the current possible duplicate records before saving.'))
       } else if (duplicateDecision && (result as { success?: boolean } | null)?.success === true) {

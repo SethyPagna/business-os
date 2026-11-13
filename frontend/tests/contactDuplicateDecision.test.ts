@@ -180,4 +180,18 @@ test('all duplicate-decision copy is available in both languages', () => {
   }
 })
 
+test('a duplicate-phone 409 with no nameable owner shows a translated notice and never a silent disabled Save', () => {
+  const empty = readContactDuplicateDecisionError({ code: 'contact_duplicate_decision_required', matches: [], duplicateReview: { candidateIds: [], candidateVersions: [], fingerprint: 'f' }, allowedActions: [] })
+  assert.deepEqual(empty?.matches, [])
+  const pos = read('../src/components/pos/POS.tsx')
+  const form = read('../src/components/contacts/CustomerFormModal.tsx')
+  assert.ok(pos.includes("duplicateCheck.matches.length === 0) { notify(t('phone_belongs_to_other_customer'), 'error'); return }"))
+  assert.ok(form.includes('nextCheck.matches.length === 0'))
+  assert.ok(form.includes("tr(t, 'phone_belongs_to_other_customer'"))
+  for (const lang of ['en', 'km']) {
+    const pack = JSON.parse(read(`../src/lang/${lang}.json`)) as Record<string, string>
+    assert.equal(typeof pack.phone_belongs_to_other_customer, 'string', lang)
+  }
+})
+
 if (failed) process.exit(1)

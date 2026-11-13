@@ -2116,6 +2116,7 @@ export default function POS() {
       }
     } catch (e) {
       const duplicateCheck = readContactDuplicateDecisionError(e)
+      if (duplicateCheck && duplicateCheck.matches.length === 0) { notify(t('phone_belongs_to_other_customer'), 'error'); return }
       if (duplicateCheck) { setCustomerDuplicateCheck(duplicateCheck); return }
       notify(getErrorMessage(e), 'error')
     } finally {
