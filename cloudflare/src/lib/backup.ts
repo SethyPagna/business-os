@@ -497,6 +497,8 @@ export async function listCloudflareBackups(env: Env) {
     finalized: boolean
     // What took it (manifest customMetadata); null on backups from before the field was stamped.
     source: 'manual' | 'scheduled' | null
+    // 'full' or 'section' (manifest customMetadata); null on backups from before the field was stamped.
+    scope: 'full' | 'section' | null
   }> = []
   let cursor: string | undefined
   do {
@@ -527,6 +529,7 @@ export async function listCloudflareBackups(env: Env) {
         status,
         finalized: status === 'finalized',
         source: object.customMetadata?.source === 'scheduled' || object.customMetadata?.source === 'manual' ? object.customMetadata.source : null,
+        scope: object.customMetadata?.scope === 'full' || object.customMetadata?.scope === 'section' ? object.customMetadata.scope : null,
       })
     }
     cursor = page.truncated ? page.cursor : undefined
@@ -760,7 +763,9 @@ async function writeBackupDocument(
 
   const upload = await env.ASSETS.createMultipartUpload(key, {
     httpMetadata: { contentType: 'application/json; charset=utf-8' },
-    customMetadata: { source, createdAt, format, lifecycle: MANAGED_BACKUP_MARKER },
+    // scope tells a full backup (every table + assets) from a section backup (a reset's or repair's pre-backup: a few tables,
+    // no assets). The daily schedule counts only full ones.
+    customMetadata: { source, scope: includeAssets ? 'full' : 'section', createdAt, format, lifecycle: MANAGED_BACKUP_MARKER },
   })
   const writer = new R2StreamWriter(upload)
 

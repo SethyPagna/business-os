@@ -63,23 +63,30 @@ export function scheduledBackupGate(nowMs: number, lastMs: number, afterHourLoca
   return { due: false, reason: 'before-close' }
 }
 
-export type BackupCoverageItem = { uploaded: string | null; finalized: boolean; source?: 'manual' | 'scheduled' | null }
+export type BackupCoverageItem = { uploaded: string | null; finalized: boolean; source?: 'manual' | 'scheduled' | null; scope?: 'full' | 'section' | null }
 
 /**
  * The instant the schedule treats as "last backup done": the newest finalized
- * SCHEDULED backup, or a finalized manual one taken after the close hour (a
- * person who backed up after close has already covered that date). A manual
- * backup in the middle of the afternoon covers nothing: the night run still
- * captures the day.
+ * FULL SCHEDULED backup, and nothing else.
+ *
+ * A manual backup never counts, at any hour. A section backup (the pre-backup of
+ * a reset or repair: a few tables, no assets) is not a backup of the shop, and
+ * a full manual "Back up now" after close, although a complete snapshot, sits in
+ * the manual pool (newest 2) where the next manual backups evict it, which would
+ * leave a hole in the 7 daily backups the owner asked for. So the night run still
+ * takes its own. `scope` is stamped on every new manifest; scheduled backups
+ * from before it was stamped are full by construction (only the full writer runs
+ * on a schedule), so a missing scope on a scheduled set counts.
+ * `_afterHourLocal` is kept so callers read the same either way.
  */
-export function scheduledBackupCoverageMs(items: readonly BackupCoverageItem[], afterHourLocal: number): number {
+export function scheduledBackupCoverageMs(items: readonly BackupCoverageItem[], _afterHourLocal: number): number {
   let newest = 0
   for (const item of items) {
     if (!item.finalized || !item.uploaded) continue
     const ms = Date.parse(item.uploaded)
     if (!Number.isFinite(ms)) continue
-    const counts = item.source === 'scheduled' || businessHourOf(ms) >= afterHourLocal
-    if (counts && ms > newest) newest = ms
+    if (item.source !== 'scheduled' || item.scope === 'section') continue
+    if (ms > newest) newest = ms
   }
   return newest
 }

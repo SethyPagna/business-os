@@ -82,13 +82,18 @@ assert.deepStrictEqual(gate('2026-11-12T18:17:00Z', '2026-11-11T15:17:00Z'), { d
 assert.strictEqual(gate('2026-11-12T08:00:00Z', '2026-11-13T15:00:00Z').due, false)
 ok()
 
-// Coverage: scheduled counts; a manual one counts only after close; unfinished never.
-const item = (iso, source, finalized = true) => ({ uploaded: iso, source, finalized })
+// Coverage: only a finalized FULL SCHEDULED backup counts (F2); manual and section backups never do, at any hour.
+const item = (iso, source, finalized = true, scope) => ({ uploaded: iso, source, finalized, scope })
 assert.strictEqual(sched.scheduledBackupCoverageMs([item('2026-11-12T05:00:00Z', 'manual')], AFTER), 0, 'an afternoon manual backup covers nothing')
-assert.strictEqual(sched.scheduledBackupCoverageMs([item('2026-11-12T15:00:00Z', 'manual')], AFTER), Z('2026-11-12T15:00:00Z'), 'a manual backup after close covers the date')
+assert.strictEqual(sched.scheduledBackupCoverageMs([item('2026-11-12T15:00:00Z', 'manual')], AFTER), 0, 'a manual backup after close does not cover the date (it sits in the manual pool and is evicted)')
+assert.strictEqual(sched.scheduledBackupCoverageMs([item('2026-11-12T15:00:00Z', 'manual', true, 'full')], AFTER), 0, 'nor does a full manual one')
+assert.strictEqual(sched.scheduledBackupCoverageMs([item('2026-11-12T15:00:00Z', 'manual', true, 'section')], AFTER), 0, 'nor does a section backup')
+assert.strictEqual(sched.scheduledBackupCoverageMs([item('2026-11-12T15:00:00Z', 'scheduled', true, 'section')], AFTER), 0, 'a section backup never counts, whoever stamped it')
+assert.strictEqual(sched.scheduledBackupCoverageMs([item('2026-11-12T15:00:00Z', 'scheduled', true, 'full')], AFTER), Z('2026-11-12T15:00:00Z'))
 assert.strictEqual(sched.scheduledBackupCoverageMs([item('2026-11-12T05:00:00Z', 'scheduled')], AFTER), Z('2026-11-12T05:00:00Z'))
 assert.strictEqual(sched.scheduledBackupCoverageMs([item('2026-11-12T15:00:00Z', 'scheduled', false)], AFTER), 0, 'an unfinished backup covers nothing')
-assert.strictEqual(sched.scheduledBackupCoverageMs([item('2026-11-12T15:00:00Z', null)], AFTER), Z('2026-11-12T15:00:00Z'), 'unstamped legacy backup: judged by its hour')
+assert.strictEqual(sched.scheduledBackupCoverageMs([item('2026-11-12T15:00:00Z', null)], AFTER), 0, 'an unstamped legacy backup is not known to be a scheduled full one')
+assert.strictEqual(sched.scheduledBackupCoverageMs([item('2026-11-12T15:00:00Z', 'scheduled')], AFTER), Z('2026-11-12T15:00:00Z'), 'a scheduled backup from before scope was stamped is full by construction')
 ok()
 
 // ---- the heavy lane over three Cambodia days -------------------------------
@@ -260,6 +265,24 @@ const localHour = (c) => sched.businessHourOf(c.at)
     assert.ok(polls.includes('2026-11-12T18:17:00.000Z') && polls.includes('2026-11-12T21:17:00.000Z'), 'the lane keeps polling the unfinished night')
     assert.ok(!polls.includes('2026-11-13T00:17:00.000Z'), 'once it finalized the night is done: the next tick runs the other step')
     assert.ok(seed)
+    ok()
+  }
+
+  // F2 by behaviour: after close on the 12th an admin's reset/repair takes a section pre-backup (stamped manual); the night
+  // run must still take the full backup. Same for a full manual one.
+  {
+    const backupMod = real('lib/backup.ts')
+    for (const meta of [{ source: 'manual', scope: 'section' }, { source: 'manual', scope: 'full' }, { source: 'manual' }]) {
+      const env = { PLAN_TIER: 'paid', ASSETS: fakeR2() }
+      env.ASSETS.objects.set('backups/cloudflare/business-os-cloudflare-a.json', { uploaded: new Date('2026-11-11T15:17:00Z'), customMetadata: { source: 'scheduled', scope: 'full', lifecycle: 'none' } })
+      env.ASSETS.objects.set('backups/cloudflare/business-os-cloudflare-b.json', { uploaded: new Date('2026-11-12T14:40:00Z'), customMetadata: { ...meta, lifecycle: 'none' } })
+      let took = 0
+      const result = await backupMod.maybeRunScheduledBackup(env, Z('2026-11-12T15:17:00Z'), async () => { took += 1; return { key: 'x', status: 'finalized' } })
+      assert.strictEqual(took, 1, `a ${JSON.stringify(meta)} backup after close must not satisfy the night's backup`)
+      assert.strictEqual(result.skipped, false)
+    }
+    const sectionSrc = read('lib/backup.ts')
+    assert.ok(sectionSrc.includes("scope: includeAssets ? 'full' : 'section'"), 'every manifest is stamped full or section')
     ok()
   }
 
