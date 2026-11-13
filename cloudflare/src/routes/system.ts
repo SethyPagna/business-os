@@ -794,7 +794,8 @@ app.post('/reset-section', async (c) => {
     await rotateEpochAfterReset(c.env, 'reset-section')
     if (config.broadcastChannel) {
       c.executionCtx.waitUntil(broadcast(c.env, config.broadcastChannel, { action: 'reset', section }))
-      c.executionCtx.waitUntil(bumpVersion(c.env, config.broadcastChannel))
+      // The version namespace is the section key (the table name every reader keys on), NOT the broadcast channel's spelling ('deliveryContacts').
+      c.executionCtx.waitUntil(bumpVersion(c.env, section))
     }
 
     return c.json({

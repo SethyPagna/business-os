@@ -41,7 +41,7 @@ const DEFERRED_NOT_PROTECTED = [
   ['src/routes/sales.ts', "bumpVersion(c.env, 'settings')", 'a payment method typed at the till joins the settings list'],
   ['src/routes/settings.ts', "bumpVersion(c.env, 'settings')", 'settings writers'],
   ['src/routes/settings.ts', "bumpVersion(c.env, 'sales')", 'settings write that also moves the sales list (no stock)'],
-  ['src/routes/system.ts', "bumpVersion(c.env, config.broadcastChannel)", 'section reset of customers / suppliers / delivery contacts'],
+  ['src/routes/system.ts', "bumpVersion(c.env, section)", 'section reset of customers / suppliers / delivery contacts'],
   ['src/routes/system.ts', "bumpVersion(c.env, 'sales')", 'legacy subtotal repair changes sales only'],
   ['src/lib/telegramTopicSetting.ts', "bumpVersion(env, 'settings')", 'Telegram topic setting'],
 ]
