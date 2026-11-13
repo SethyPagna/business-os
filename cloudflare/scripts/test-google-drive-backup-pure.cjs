@@ -232,6 +232,8 @@ async function main() {
     // R2-A: a section pre-backup newer than the full set is never mirrored, by either selector.
     sectionBackupNewest = true
     assert.deepStrictEqual(await driveSyncHasNewBackup(env), { new: false, reason: 'already-synced', backupKey: 'backups/cloudflare/final.json' }, 'a newer section set does not count as new')
+    // (reconnected, same destination, marker intact)
+    for (const [k, v] of [['drive_sync_refresh_token', 'refresh-enc'], ['drive_sync_access_token', 'access-enc'], ['drive_sync_access_token_expires_at', new Date(Date.now() + 3600e3).toISOString()], ['drive_sync_folder_id', 'root-folder']]) settings.set(k, v)
     const beforeUploads = uploadCount
     const pushed = await pushBackupToDrive(env)
     assert.strictEqual(pushed.success, true, pushed.error)
