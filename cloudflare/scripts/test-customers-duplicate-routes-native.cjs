@@ -89,10 +89,24 @@ async function main() {
       assert.equal(r.json.code, 'contact_duplicate_decision_required', `walk-in owner ${what} code`)
       assert.ok(r.json.matches.length === 1 && r.json.matches[0].id === 70 && r.json.matches[0].severity === 'phone_conflict', `walk-in owner ${what} names the owner: ${r.text.slice(0, 200)}`)
       assert.equal(r.json.duplicate.id, 70)
+      assert.deepEqual(r.json.allowedActions, [], `walk-in owner ${what}: no action is offered (a walk-in cannot be opened or edited)`)
+      assert.deepEqual(r.json.duplicate.allowedActions, [])
       assert.ok(JSON.stringify(r.json).includes('Walk-in Owner'))
     }
     passed += 1
     console.log('PASS walk-in (anonymous) owner: 409 naming the owner on all three writers')
+    await db.prepare("INSERT INTO customers (id,name,phone,phone_normalized,membership_number,is_anonymous) VALUES (71,'Dara',NULL,NULL,'LC-71',1)").run()
+    // Walk-in "Dara" exists: a new customer "Dara" (same name and phone as a real Dara) is first reviewed against the real Dara only; the walk-in must not block the approved decision.
+    await db.prepare("INSERT INTO customers (id,name,phone,phone_normalized,membership_number,is_anonymous) VALUES (72,'Dara','012 345 000','012345000','LC-72',0)").run()
+    const first = await send('POST', '/customers', { name: 'Dara', phone: '012 345 000' })
+    assert.equal(first.status, 409, `same-name review: ${first.status} ${first.text.slice(0, 160)}`)
+    assert.ok(first.json.allowedActions.includes('create_separate'))
+    assert.ok(!first.json.matches.some((m) => m.id === 71), 'the walk-in is not offered as a candidate')
+    const separate = await send('POST', '/customers', { name: 'Dara', phone: '012 345 000', duplicateDecision: { action: 'create_separate', ...first.json.duplicateReview } })
+    assert.equal(separate.status, 200, `create-separate with a walk-in of the same name must succeed: ${separate.status} ${separate.text.slice(0, 200)}`)
+    passed += 1
+    console.log('PASS walk-in with the same name does not block an approved create-separate')
+    await db.prepare("DELETE FROM customers WHERE id IN (71, 72) OR phone_normalized = '012345000' AND id > 72").run()
     assert.equal(await count(), before, 'no customer was created by any of the three writers')
     assert.deepEqual(await db.prepare('SELECT name, phone, phone_normalized, address FROM customers WHERE id = 900').first(), moverBefore, 'the refused PUTs changed nothing')
     // Control: the same two writers accept a number nobody owns, so the 409s above are the duplicate guard and not a refusal of the route itself.

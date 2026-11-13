@@ -149,6 +149,15 @@ export function readContactDuplicateDecisionError(error: unknown): ContactDuplic
   const check = normalizeContactDuplicateCheck(input)
     || normalizeContactDuplicateCheck(input?.duplicate)
   if (!check) return null
+  // A refusal that names owners but offers no action (the owner is a walk-in that cannot be opened) is a dead end as a review: report it as "no nameable owner"
+  // so every call site shows its translated notice and keeps the form editable.
+  if (code !== 'contact_duplicate_candidates_changed' && check.matches.length && !check.allowedActions.length) {
+    return withSyncProblem({ ...check, matches: [] }, input)
+  }
+  return withSyncProblem(check, input)
+}
+
+function withSyncProblem(check: ContactDuplicateCheck, input: Record<string, unknown> | null): ContactDuplicateCheck {
   const syncProblem = typeof input?.syncErrorId === 'string'
     ? {
         errorId: input.syncErrorId,

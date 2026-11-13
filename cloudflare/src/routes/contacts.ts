@@ -578,7 +578,14 @@ async function duplicateBlockAfterGuardFailure(
   const message = error instanceof Error ? error.message : String(error ?? '')
   if (message.includes(`UNIQUE constraint failed: ${config.table}.id`)) {
     const hiddenOwner = rawState.matches.find((match) => match.severity === 'phone_conflict')
-    if (hiddenOwner) return duplicateErrorResponse(config.entity, hiddenOwner, [hiddenOwner], buildContactDuplicateReview([hiddenOwner]))
+    if (hiddenOwner) {
+      // The owner is a walk-in: it cannot be loaded or edited, so offering "use existing" would be a dead end. Keep the owner and the 409; offer no action.
+      const response = duplicateErrorResponse(config.entity, hiddenOwner, [hiddenOwner], buildContactDuplicateReview([hiddenOwner]))
+      const body = response.body as { allowedActions: unknown[]; duplicate: { allowedActions: unknown[] } }
+      body.allowedActions = []
+      body.duplicate.allowedActions = []
+      return response
+    }
     return { status: 409, body: { error: `This phone number already belongs to another ${config.entity}.`, code: 'contact_duplicate_decision_required', duplicate: { matches, duplicateReview: review, allowedActions: [] }, matches, duplicateReview: review, allowedActions: [] } }
   }
   return null

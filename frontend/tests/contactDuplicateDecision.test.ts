@@ -216,4 +216,11 @@ test('every duplicate-409 call site handles an empty-matches refusal with a tran
   }
 })
 
+test('a refusal that names a walk-in owner but offers no action is read as no nameable owner (notice, not a dead-end review)', () => {
+  const body = { code: 'contact_duplicate_decision_required', matches: [{ id: 70, name: 'Walk-in', phone: '011 999 777', membershipNumber: null, matchedPhone: '011999777', severity: 'phone_conflict', version: 'sha256:x' }], duplicateReview: { candidateIds: [70], candidateVersions: [{ id: 70, version: 'sha256:x' }], fingerprint: 'f' }, allowedActions: [] }
+  assert.deepEqual(readContactDuplicateDecisionError(body)?.matches, [])
+  const withAction = readContactDuplicateDecisionError({ ...body, allowedActions: ['use_existing'] })
+  assert.equal(withAction?.matches.length, 1)
+})
+
 if (failed) process.exit(1)

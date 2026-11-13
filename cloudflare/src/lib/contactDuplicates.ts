@@ -474,6 +474,8 @@ export function contactDuplicateWriteGuardStatement(
       SELECT named.id FROM ${table} AS named
       WHERE named.id != COALESCE(@excludeId, -1)
         AND ${table === 'customers' ? 'lower(trim(named.name))' : "lower(trim(COALESCE(named.name, '')))"} = @nameKey
+        -- Walk-in (anonymous) customers are never offered as same-name candidates: the route's review drops them (excludeAnonymousCustomerDuplicateState), so the guard must too, or an approved create-separate never matches. Phone ownership (phoneMatch) still includes them.
+        ${table === 'customers' ? 'AND COALESCE(named.is_anonymous, 0) = 0' : ''}
       ORDER BY named.id ASC
       LIMIT 50
     ) OR`
