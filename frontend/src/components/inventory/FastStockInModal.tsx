@@ -128,6 +128,12 @@ interface FastStockInModalProps {
   onMinimize?: (label: string) => void
   initialHeader?: Partial<Pick<StockSessionDraft, 'branchId' | 'receivedDate' | 'supplier' | 'paymentStatus' | 'creditDueDate'>>
   initialMode?: StockMode
+  /**
+   * The host offers one mode only (Fix stock: Set). The session opens in it, never shows or switches to another,
+   * and a stored draft in another mode is not resumed. It exists so Add -- and its cost field -- is unreachable
+   * from a screen whose rule is that Inventory never shows cost.
+   */
+  lockMode?: StockMode
   exchangeRate?: number
   /** Product detail / Branches row: the product already in the entry row. */
   initialProduct?: ProductCandidate | null
@@ -184,7 +190,7 @@ function withoutInlineImages(payload: Record<string, unknown>): Record<string, u
 const priceText = (value: unknown): string => (value == null || String(value).trim() === '' ? '' : String(Number(value)))
 
 export default function FastStockInModal({
-  branchOptions, receivingBranchOptions = branchOptions, defaultBranchId, tr, notify, onClose, onDone, onMinimize, initialHeader, initialMode,
+  branchOptions, receivingBranchOptions = branchOptions, defaultBranchId, tr, notify, onClose, onDone, onMinimize, initialHeader, initialMode, lockMode,
   exchangeRate: exchangeRateOverride, initialProduct, initialLines, onPrepareProduct, brandOptions, canCreateProducts, legacyDraft,
 }: FastStockInModalProps) {
   useVisualViewportInset()
@@ -237,15 +243,17 @@ export default function FastStockInModal({
       storedRaw = raw
       const rawLines = raw && typeof raw === 'object' ? (raw as { lines?: unknown }).lines : null
       stored = normalizeStockSessionDraft(raw, mintLineId)
+      if (lockMode && stored && (stored.mode !== lockMode || stored.lines.some((line) => line.mode !== lockMode))) stored = null
       // Ids minted for an older draft are written back now, not by the debounced autosave.
       rewrite = Array.isArray(rawLines) && rawLines.some((line) => !line || typeof line !== 'object' || !(line as { requestId?: unknown }).requestId)
     }
-    let opened = stored ? openingDraft(stored, initialMode) : seed(resolveOpeningMode(null, initialMode), Date.now())
+    const openingMode = lockMode ?? initialMode
+    let opened = stored ? openingDraft(stored, openingMode) : seed(resolveOpeningMode(null, openingMode), Date.now())
     if (!opened.branchId) opened = { ...opened, branchId: fallbackBranchId }
     let pristine = seed(opened.mode, opened.sessionId)
     if (initialLines?.length && !opened.lines.length) {
       const lines: StockSessionLine[] = initialLines.map((entry, index) => {
-        const mode = entry.mode || opened.mode
+        const mode = lockMode ?? (entry.mode || opened.mode)
         const cost = catalogCostOf(entry.product)
         return {
           key: `${entry.product.id}-${Date.now()}-${index}`, requestId: entry.requestId && /^[A-Za-z0-9_-]{8,120}$/.test(entry.requestId) ? entry.requestId : mintLineId(), product: entry.product,
@@ -700,7 +708,7 @@ export default function FastStockInModal({
   }
 
   const changeMode = (next: StockMode) => {
-    if (saving || modeSwitchBlocked(received) || next === mode) return
+    if (lockMode || saving || modeSwitchBlocked(received) || next === mode) return
     setModeState(next)
     setStep('items')
     setQuantity(next === 'set' ? '' : '1')
@@ -1362,6 +1370,7 @@ export default function FastStockInModal({
           mode={mode}
           onModeChange={changeMode}
           modeLocked={modeSwitchBlocked(received)}
+          fixedMode={lockMode ?? null}
           disabled={busy}
           tr={tr}
           onMinimize={onMinimize ? preserveAndMinimize : undefined}
