@@ -81,6 +81,7 @@ const backup = loadModule(BACKUP_TS, {
   './maintenance': maintenance,
   './r2': loadModule(path.join(SRC, 'r2.ts')),
   './planTier': loadModule(path.join(SRC, 'planTier.ts')),
+  './backupSchedule': loadModule(path.join(SRC, 'backupSchedule.ts')),
   './backupRestoreStream': loadModule(path.join(SRC, 'backupRestoreStream.ts')),
   './customTableName': loadModule(path.join(SRC, 'customTableName.ts')),
   './uploadSecurity': loadModule(path.join(SRC, 'uploadSecurity.ts')),

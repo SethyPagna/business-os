@@ -3,6 +3,7 @@ import type { Env } from '../index'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, auditOrThrow } from '../lib/audit'
 import { hasPermission } from '../lib/permissions'
+import { getPlanLimits } from '../lib/planTier'
 import { canViewAcquisitionCosts, canEditAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { denyUnlessCurrentPassword, denyUnlessDefaultAdmin } from '../lib/destructiveStepUp'
 import {
@@ -61,8 +62,13 @@ app.get('/', async (c) => {
     total: items.length,
     schedule: {
       runtime: 'cloudflare-workers',
-      intervalHours: 6,
+      // Daily after close (owner 12 Nov 2026): once per Cambodia business date, at the first heavy tick
+      // at or after this local hour. intervalHours stays for older readers of this response.
+      intervalHours: 24,
+      cadence: 'daily-after-close',
+      afterHourLocal: getPlanLimits(c.env).scheduledBackupAfterHourLocal,
       keep: CLOUDFLARE_BACKUP_KEEP,
+      keepScheduled: getPlanLimits(c.env).scheduledBackupKeep,
       destination: 'R2 business-os-assets/backups/cloudflare/',
     },
   })

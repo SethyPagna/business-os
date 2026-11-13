@@ -138,7 +138,18 @@ const shortError = (error: unknown) => String((error as Error)?.message || error
  * time-derived position (still rotates, only loses resume and health), and a
  * step failure is recorded and swallowed.
  */
-export async function runRotationTick(steps: readonly RotationStep[], store: RotationStore, nowMs: number = Date.now(), options: { slot?: number } = {}): Promise<TickResult> {
+export interface RotationTickOptions {
+  slot?: number
+  /**
+   * Choose the step by something other than the cursor (the heavy lane runs the
+   * backup on its after-close tick, not on every other tick). Only consulted when
+   * the state was read; return undefined, or an index out of range, to keep the
+   * cursor's choice.
+   */
+  select?: (steps: readonly RotationStep[], state: RotationState, nowMs: number) => number | undefined
+}
+
+export async function runRotationTick(steps: readonly RotationStep[], store: RotationStore, nowMs: number = Date.now(), options: RotationTickOptions = {}): Promise<TickResult> {
   if (!steps.length) return { stepId: null, ok: true, more: false }
   const nowIso = new Date(nowMs).toISOString()
   const realStart = Date.now()
@@ -155,7 +166,10 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
   // A second delivery of the SAME firing (Cloudflare may deliver a cron more than once) shares its
   // scheduledTime, hence its slot: it must not take the next step, shifting the alternation.
   if (persisted && slot !== undefined && current.lastSlot === slot) return { stepId: null, ok: true, more: false, skipped: 'duplicate' }
-  const index = persisted ? current.cursor % steps.length : (slot ?? Math.floor(nowMs / CRON_ROTATION_TICK_MS)) % steps.length
+  const selected = persisted ? options.select?.(steps, current, nowMs) : undefined
+  const index = selected !== undefined && Number.isInteger(selected) && selected >= 0 && selected < steps.length
+    ? selected
+    : persisted ? current.cursor % steps.length : (slot ?? Math.floor(nowMs / CRON_ROTATION_TICK_MS)) % steps.length
   const step = steps[index]
   const record = current.steps[step.id] ?? emptyStep()
   // Write the state over the version we read. A false answer means another
@@ -245,13 +259,15 @@ export interface CronHealth {
 }
 
 /** Classify every rotation step; `problems` lists the ids that need a look. */
-export function evaluateCronHealth(state: RotationState, stepIds: readonly string[], nowMs: number = Date.now(), tickMs: number = CRON_ROTATION_TICK_MS, deployedAtMs?: number): CronHealth {
+export function evaluateCronHealth(state: RotationState, stepIds: readonly string[], nowMs: number = Date.now(), tickMs: number = CRON_ROTATION_TICK_MS, deployedAtMs?: number, stepIntervalMs: Readonly<Record<string, number>> = {}): CronHealth {
   const cycleMs = Math.max(1, stepIds.length) * tickMs
   const limit = cycleMs * STARVED_CYCLES + tickMs * (MAX_RESUME_STREAK + 1)
   const updated = state.updatedAt ? Date.parse(state.updatedAt) : NaN
   const stale = !Number.isFinite(updated) || nowMs - updated > limit
   // Never written, and this build is younger than one tick (+30 min slack): the first visit has not had its turn.
   const pending = !state.updatedAt && deployedAtMs !== undefined && Number.isFinite(deployedAtMs) && nowMs - deployedAtMs < tickMs + 30 * 60 * 1000
+  // A step that is only visited once per `stepIntervalMs` (the daily backup) is starved after two missed visits, not after the lane's own short limit.
+  const stepLimit = (id: string) => (stepIntervalMs[id] ? Math.max(limit, stepIntervalMs[id] * STARVED_CYCLES + tickMs * (MAX_RESUME_STREAK + 1)) : limit)
   const rows: CronHealthRow[] = stepIds.map((id) => {
     const s = state.steps[id] ?? emptyStep()
     const started = s.startedAt ? Date.parse(s.startedAt) : NaN
@@ -259,7 +275,7 @@ export function evaluateCronHealth(state: RotationState, stepIds: readonly strin
     if (!s.startedAt) status = 'never'
     else if (s.failures > 0 && String(s.error || '').startsWith('killed')) status = 'killed'
     else if (s.failures > 0) status = 'failing'
-    else if (nowMs - started > limit) status = 'starved'
+    else if (nowMs - started > stepLimit(id)) status = 'starved'
     else status = 'ok'
     return { id, status, lastStartedAt: s.startedAt, lastOkAt: s.okAt, failures: s.failures, killed: s.killed, error: s.error }
   })

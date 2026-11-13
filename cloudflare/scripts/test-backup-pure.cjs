@@ -31,6 +31,12 @@ function transpile(relPath) {
   return { sourcePath, outputText }
 }
 
+const backupSchedule = transpile('lib/backupSchedule.ts')
+const backupScheduleModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', backupSchedule.outputText)(
+  backupScheduleModuleObj.exports, require, backupScheduleModuleObj, backupSchedule.sourcePath, path.dirname(backupSchedule.sourcePath),
+)
+
 const r2 = transpile('lib/r2.ts')
 const r2ModuleObj = { exports: {} }
 new Function('exports', 'require', 'module', '__filename', '__dirname', r2.outputText)(
@@ -83,6 +89,7 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './stockTransaction') return stockTransaction
   if (request === './maintenance') return maintenance
   if (request === './planTier') return planTierModuleObj.exports // real limit tables
+  if (request === './backupSchedule') return backupScheduleModuleObj.exports // real, pure schedule gate
   if (request === './customTableName') return customTableNameModule.exports
   if (request === './r2') return r2ModuleObj.exports // real module, actually exercised
   if (request === './backupRestoreStream') return restoreStreamModuleObj.exports // real scanner

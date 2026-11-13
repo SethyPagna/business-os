@@ -491,7 +491,7 @@ export function isTrustedDriveUploadSession(value: string): boolean {
 }
 
 // Called from index.ts's `scheduled()` cron handler (the 15-minute rotating cron; the backup it pushes comes from the heavy cron,
-// maybeRunScheduledBackup in lib/backup.ts, every 6 h). The legacy Docker
+// maybeRunScheduledBackup in lib/backup.ts, daily after close). The legacy Docker
 // backend ran a real setInterval loop checking every 30s whether
 // `syncIntervalSeconds` had elapsed since the last Drive sync; Workers have
 // no persistent timers, so this checks on each cron tick instead. That's

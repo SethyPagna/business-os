@@ -157,6 +157,18 @@ export type PlanLimits = {
   // both plans; only CREATING a scheduled backup is refused.
   scheduledBackupEnabled: boolean
 
+  // The scheduled backup runs once per Cambodia business date (UTC+7), at the
+  // first heavy-cron tick whose local hour is at or after this one (the shop has
+  // closed). 21 puts it on the 22:17 tick of the 3-hourly heavy trigger. Open
+  // shifts never delay it. Same value on both tiers; Free still refuses to
+  // create one (scheduledBackupEnabled).
+  scheduledBackupAfterHourLocal: number
+
+  // How many finalized SCHEDULED (daily) backups retention keeps: 7 = a week of
+  // history (owner 13 Nov 2026). Manual backups keep their own newest
+  // CLOUDFLARE_BACKUP_KEEP; the two pools never evict each other.
+  scheduledBackupKeep: number
+
   // ---- Data reset --------------------------------------------------------
 
   // system.ts MAX_IMAGE_DELETES_PER_RESET -- R2 deletes fired SEQUENTIALLY,
@@ -445,6 +457,8 @@ const PAID_LIMITS: PlanLimits = {
   paymentMethodScanPageSize: 200,
   maxAssetsPerBackup: 100,
   scheduledBackupEnabled: true,
+  scheduledBackupAfterHourLocal: 21,
+  scheduledBackupKeep: 7,
   maxImageDeletesPerReset: 500,
   importRetentionMaxJobsPerTier: 20,
   ephemeralDeleteBatch: 5000,
@@ -497,6 +511,8 @@ const FREE_LIMITS: PlanLimits = {
   paymentMethodScanPageSize: 5000,
   maxAssetsPerBackup: 20,
   scheduledBackupEnabled: false,
+  scheduledBackupAfterHourLocal: 21,
+  scheduledBackupKeep: 7,
   maxImageDeletesPerReset: 40,
   importRetentionMaxJobsPerTier: 5,
   ephemeralDeleteBatch: 1000,

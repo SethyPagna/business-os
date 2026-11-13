@@ -48,6 +48,8 @@ import { serveUpload } from './lib/imageVariants'
 import { handleImportQueue, handleImportDeadLetterQueue, handleMediaQueue, handleBackupQueue } from './queue'
 import { deliverTelegramShiftOverview, drainDueTelegramShiftOverviews, isShiftOverviewQueueMessage } from './lib/telegram'
 import { maybeRunScheduledBackup } from './lib/backup'
+import { pickHeavyStepIndex } from './lib/backupSchedule'
+import { getPlanLimits } from './lib/planTier'
 import { driveSyncScheduleDue, recordDriveSyncError } from './lib/googleDrive'
 import { checkDriveSyncAuthorizer } from './lib/driveSyncAuthority'
 import { enqueueDriveSyncJob } from './lib/driveSyncQueue'
@@ -706,14 +708,26 @@ export function cronRotationSteps(env: Env, label: (name: string, step: () => Pr
  * reprocessing must keep the larger budget, so they cannot ride the 15-minute
  * rotation. Same rule as the rotation: ONE step per invocation, cursor in
  * settings under its own key, so on Free (10 ms) they still never share an
- * invocation. 3 h per tick = each step every 6 h, the cadence they had.
- * Image audit last: it is the only one optional to the business.
+ * invocation.
+ *
+ * Which step a tick runs is NOT the cursor's alternation any more: the backup
+ * is daily after close (owner 12 Nov 2026), so lib/backupSchedule.ts's
+ * pickHeavyStepIndex runs it on the first tick at or after the close hour of
+ * each Cambodia business date (22:17 local, with the default close hour 21) and
+ * every other tick runs the image audit, held to its old 6 h cadence by its own
+ * minimum interval. Image audit last: it is the only one optional to the business.
  */
 export function cronHeavySteps(env: Env, label: (name: string, step: () => Promise<unknown>) => () => Promise<unknown>): RotationStep[] {
-  const step = (id: string, run: () => Promise<unknown>): RotationStep => ({ id, run: label(id, run) })
+  const step = (id: string, run: () => Promise<unknown>, minIntervalMs?: number): RotationStep => ({ id, run: label(id, run), ...(minIntervalMs ? { minIntervalMs } : {}) })
   return [
-    step('backup', () => maybeRunScheduledBackup(env)),
-    step('image-audit', () => maybeRunScheduledImageAudit(env)),
+    step('backup', async () => {
+      const result = await maybeRunScheduledBackup(env)
+      // A copy already in progress means today's backup was NOT taken. An OK visit would count as done
+      // until tomorrow, so fail this one and let the next heavy tick try again.
+      if (result && 'reason' in result && result.reason === 'backup-in-progress') throw new Error('backup already in progress; retry on the next heavy tick')
+      return result
+    }),
+    step('image-audit', () => maybeRunScheduledImageAudit(env), UNGATED_STEP_MIN_INTERVAL_MS),
   ]
 }
 
@@ -796,6 +810,7 @@ export default {
         // path drains too, but only while someone is using the app).
         drainTelegram: label('telegram-shift-overview', () => drainDueTelegramShiftOverviews(env, Date.now(), { limit: 10, sweepStale: true })),
         heavySteps: () => cronHeavySteps(env, label),
+        heavySelect: (steps, state, nowMs) => pickHeavyStepIndex(steps, state, nowMs, getPlanLimits(env).scheduledBackupAfterHourLocal),
         rotationSteps: () => cronRotationSteps(env, label),
         storeFor: (key) => settingsRotationStore(env, key),
       })

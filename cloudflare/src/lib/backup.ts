@@ -2,6 +2,7 @@ import { executeRawRestoreStockTransaction, stockTransactionStatementCount } fro
 import { restoreStockAuthority } from './maintenance'
 import type { Env } from '../index'
 import { getPlanLimits } from './planTier'
+import { scheduledBackupCoverageMs, scheduledBackupGate } from './backupSchedule'
 import { copyObject, listObjects } from './r2'
 import { streamBackupEvents } from './backupRestoreStream'
 import { assertCustomTableName } from './customTableName'
@@ -494,6 +495,8 @@ export async function listCloudflareBackups(env: Env) {
     uploaded: string | null
     status: 'copying' | 'finalized' | 'partial' | 'failed'
     finalized: boolean
+    // What took it (manifest customMetadata); null on backups from before the field was stamped.
+    source: 'manual' | 'scheduled' | null
   }> = []
   let cursor: string | undefined
   do {
@@ -523,6 +526,7 @@ export async function listCloudflareBackups(env: Env) {
         uploaded: object.uploaded?.toISOString?.() || null,
         status,
         finalized: status === 'finalized',
+        source: object.customMetadata?.source === 'scheduled' || object.customMetadata?.source === 'manual' ? object.customMetadata.source : null,
       })
     }
     cursor = page.truncated ? page.cursor : undefined
@@ -981,9 +985,15 @@ export async function continueCloudflareBackupAssetCopy(env: Env, backupName: st
   }
 }
 
-export async function pruneCloudflareBackups(env: Env, keep = CLOUDFLARE_BACKUP_KEEP) {
+// `keep` is the newest-N for MANUAL (and unstamped legacy) backups; scheduled backups have their own pool,
+// getPlanLimits(env).scheduledBackupKeep (7 daily, owner 13 Nov 2026), so a manual "Back up now" can never
+// evict the week of daily backups and a daily one can never evict the manual pair.
+export async function pruneCloudflareBackups(env: Env, keep = CLOUDFLARE_BACKUP_KEEP, keepScheduled = getPlanLimits(env).scheduledBackupKeep) {
   const backups = await listCloudflareBackups(env)
   const finalized = backups.filter((item) => item.finalized)
+  const finalizedScheduled = finalized.filter((item) => item.source === 'scheduled')
+  const finalizedManual = finalized.filter((item) => item.source !== 'scheduled')
+  const evicted = [...finalizedManual.slice(Math.max(0, keep)), ...finalizedScheduled.slice(Math.max(0, keepScheduled))]
   const incomplete = backups.filter((item) => !item.finalized)
   const removed: string[] = []
   const staleRemoved: string[] = []
@@ -1018,7 +1028,7 @@ export async function pruneCloudflareBackups(env: Env, keep = CLOUDFLARE_BACKUP_
 
   // Only finalized backups count toward the retention promise. A new
   // copying/partial/failed set cannot evict either known-good backup.
-  for (const item of finalized.slice(Math.max(0, keep))) {
+  for (const item of evicted) {
     await deleteBackupSet(item)
     removed.push(item.key)
   }
@@ -1047,7 +1057,7 @@ export async function pruneCloudflareBackups(env: Env, keep = CLOUDFLARE_BACKUP_
   }
 
   return {
-    kept: finalized.slice(0, Math.max(0, keep)),
+    kept: finalized.filter((item) => !evicted.includes(item)),
     removed,
     incomplete: incomplete.filter((item) => !staleRemoved.includes(item.key)),
     staleRemoved,
@@ -1100,20 +1110,16 @@ async function pruneOrphanedBackupFolders(env: Env): Promise<string[]> {
 }
 
 /**
- * A scheduled backup is skipped while the newest finalized one is younger than
- * this. It is also what turns a duplicate delivery of the heavy cron (3 h
- * apart, or the same firing twice) into a no-op: it must stay above the 3 h
- * tick and below the 6 h a backup comes round, so every visit that is due runs.
+ * The scheduled backup runs once per Cambodia business date, at the first heavy
+ * tick at or after the close hour (lib/backupSchedule.ts; the hour is
+ * getPlanLimits(env).scheduledBackupAfterHourLocal). This is the R2 side of that
+ * rule: it looks at what is actually stored, so a duplicate delivery of the heavy
+ * cron, a retry, or a reset cron state can never take a second backup on one
+ * date. `nowMs` and `create` are injectable for the tests only.
  */
-export const SCHEDULED_BACKUP_MIN_INTERVAL_MS = 5.5 * 60 * 60 * 1000
-export function scheduledBackupIsRecent(newestMs: number, nowMs: number): boolean {
-  return !!newestMs && nowMs - newestMs < SCHEDULED_BACKUP_MIN_INTERVAL_MS
-}
-
-export async function maybeRunScheduledBackup(env: Env) {
+export async function maybeRunScheduledBackup(env: Env, nowMs: number = Date.now(), create: typeof createCloudflareBackup = createCloudflareBackup) {
   const backups = await listCloudflareBackups(env)
   const newestFinalized = backups.find((item) => item.finalized)
-  const newest = newestFinalized?.uploaded ? Date.parse(newestFinalized.uploaded) : 0
   const activeCopy = backups.find((item) => item.status === 'copying')
   const activeCopyMs = activeCopy?.uploaded ? Date.parse(activeCopy.uploaded) : 0
 
@@ -1165,13 +1171,15 @@ export async function maybeRunScheduledBackup(env: Env) {
       retention,
     }
   }
-  if (activeCopyMs && Date.now() - activeCopyMs < STALE_BACKUP_MS) {
+  if (activeCopyMs && nowMs - activeCopyMs < STALE_BACKUP_MS) {
     return { skipped: true, reason: 'backup-in-progress', latest: activeCopy, retention }
   }
-  if (scheduledBackupIsRecent(newest, Date.now())) {
-    return { skipped: true, reason: 'recent-backup-exists', latest: newestFinalized, retention }
+  const afterHourLocal = getPlanLimits(env).scheduledBackupAfterHourLocal
+  const gate = scheduledBackupGate(nowMs, scheduledBackupCoverageMs(backups, afterHourLocal), afterHourLocal)
+  if (!gate.due) {
+    return { skipped: true, reason: gate.reason === 'already-today' ? 'recent-backup-exists' : 'before-close', latest: newestFinalized, retention }
   }
-  const backup = await createCloudflareBackup(env, 'scheduled')
+  const backup = await create(env, 'scheduled')
   // Second pass: the backup just written is now the newest, so this is what
   // drops what has become the (N+1)th.
   const finalRetention = await pruneCloudflareBackups(env, CLOUDFLARE_BACKUP_KEEP)
