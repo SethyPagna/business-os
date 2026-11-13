@@ -343,7 +343,10 @@ async function main() {
     assert.doesNotMatch(summary, /getFamilyStockAlertPage|getFamilyStockStats\(|expiry_alert_days/, 'no second copy of the stock queries left in the summary')
     assert.equal((compat.match(/dashboardSummary\(c\.env, c\.req\.query\(\), dashboardOverviewContext\(c\)\)/g) || []).length, 2, '/dashboard and /dashboard/startup')
     const history = fs.readFileSync(path.join(SRC, 'routes/actionHistory.ts'), 'utf8').replace(/\r\n/g, '\n')
-    assert.match(history, /applied = true\n[\s\S]{0,700}import\('\.\.\/lib\/cache'\)\.then\(\(\{ bumpVersion \}\) => bumpVersion\(c\.env, 'stock'\)\)\.catch\(\(\) => \{\}\)/)
+    // W3 (6.0.1847/1897): the applier only records what it moved; the route awaits ONE bumpVersions (stock included) before it answers.
+    assert.match(history, /await import\('\.\.\/lib\/cache'\)\.then\(\(\{ bumpVersions \}\) => bumpVersions\(c\.env, namespaces\)\)/)
+    assert.match(history, /applied = true\n[\s\S]{0,3500}\[\.\.\.\(applier\.name !== STOCK_SESSION_KIND \? \['stock'\] : \[\]\), \.\.\.replayNamespaces\]/)
+    assert.match(history, /const bumpNamespaces = [\s\S]{0,1200}await bumpThenAnnounce\(\[\.\.\.bumpNamespaces, /)
     const tiers = load('lib/planTier.ts').PLAN_LIMITS_BY_TIER
     assert.equal(tiers.paid.dashboardStockOverviewCacheSeconds, 30)
     assert.equal(tiers.free.dashboardStockOverviewCacheSeconds, 300)
