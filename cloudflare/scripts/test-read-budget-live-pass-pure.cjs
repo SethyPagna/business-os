@@ -45,6 +45,23 @@ async function main() {
     assert.match(liveProblems(pass([dash]), dash.id, 12)[0], /remove it/)
   })
 
+  await check('A1: a status other than the entry records is red whatever the calls; a known failure excuses calls only', () => {
+    assert.deepEqual(liveProblems(pass(), 'x', 12, 200, 200), [])
+    assert.deepEqual(liveProblems(pass(), 'x', 12, 400, 200), ['live status 400, budget has 200'])
+    assert.deepEqual(liveProblems(pass(), 'x', 3, 500, 200), ['live status 500, budget has 200'], 'a route forced to 500 reads few calls and used to be certified')
+    assert.equal(liveProblems(pass(), 'x', 12, 200, 400).length, 1, 'a shape that the budget records as refused must still refuse')
+    assert.deepEqual(liveProblems(pass(), 'x', 12, 403, 403), [], 'a recorded refusal that still refuses is green')
+    assert.match(liveProblems(pass(), 'x', 12, undefined, 200)[0], /status missing/)
+    assert.deepEqual(liveProblems(pass([dash]), dash.id, 65, 500, 200), ['live status 500, budget has 200'], 'a known failure does not excuse a wrong status')
+    assert.deepEqual(liveProblems(pass([dash]), dash.id, 65, 200, 200), [], 'a known failure with the right status is judged on calls as before')
+    assert.equal(liveProblems(pass(), 'x', 46, 200, 200).length, 1, 'calls are still judged when the status matches')
+  })
+
+  await check('A1: the live pass hands the measured status and the entry status to liveProblems', () => {
+    const runner = fs.readFileSync(path.join(__dirname, 'read-budget', 'runner.cjs'), 'utf8')
+    assert.match(runner, /liveProblems\(pass, shape\.id, m\.calls, m\.status, entry\.status\)/)
+  })
+
   await check('a request that gave no call count is red, known or not (a missing header must not read as zero calls)', () => {
     assert.equal(liveProblems(pass(), 'x', NaN).length, 1)
     assert.equal(liveProblems(pass([dash]), dash.id, NaN).length, 1)

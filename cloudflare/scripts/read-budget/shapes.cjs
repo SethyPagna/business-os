@@ -59,11 +59,12 @@ function getEntries(ctx) {
     ['inventory/movements/:id/balance', '/api/inventory/movements/1/balance'], ['inventory/reasons', '/api/inventory/reasons'], ['inventory/reasons/impact', '/api/inventory/reasons/impact?reason=seed'],
     ['inventory/tagged-lots', '/api/inventory/tagged-lots'], ['inventory/rfid/status', '/api/inventory/rfid/status'], ['inventory/rfid/tags/search', '/api/inventory/rfid/tags/search?q=x'],
     ['inventory/rfid/sessions/:id/review', '/api/inventory/rfid/sessions/1/review'], ['transfers', `/api/transfers?${P}`],
-    // inventory checks
+    // inventory checks. A shape with { without: ['ic_simple'] } uses the OLD query words (a date window, customerRanking, state=): ic_simple, which production runs with, refuses them with 400
+    // (lib/inventoryCheckAccess.ts SIMPLE_QUERY_KEYS), so the live pass measures those shapes with ic_simple taken out of the pass's switches (A1) and they answer 200 there.
     ['inventory-checks/products all-time name page (Check default)', `/api/inventory-checks/products?branchId=1&sortBy=name&sortDirection=asc&page=1&pageSize=20`],
-    ['inventory-checks/products 30d name page', `/api/inventory-checks/products?branchId=1&sortBy=name&sortDirection=asc&page=1&pageSize=20&${R(M, T)}`],
+    ['inventory-checks/products 30d name page', `/api/inventory-checks/products?branchId=1&sortBy=name&sortDirection=asc&page=1&pageSize=20&${R(M, T)}`, { without: ['ic_simple'] }],
     ['inventory-checks/products all-time stock sort', `/api/inventory-checks/products?branchId=1&sortBy=stock&sortDirection=desc&page=1&pageSize=20`],
-    ['inventory-checks/products all-time + customer ranking', `/api/inventory-checks/products?branchId=1&sortBy=name&sortDirection=asc&page=1&pageSize=20&customerRanking=1`],
+    ['inventory-checks/products all-time + customer ranking', `/api/inventory-checks/products?branchId=1&sortBy=name&sortDirection=asc&page=1&pageSize=20&customerRanking=1`, { without: ['ic_simple'] }],
     ['inventory-checks/products search', `/api/inventory-checks/products?branchId=1&query=serum&page=1&pageSize=20`],
     ['inventory-checks/products in session', `/api/inventory-checks/products?sessionId={{checkId}}&page=1&pageSize=20`],
     ['inventory-checks/sessions', `/api/inventory-checks/sessions?branchId=1&page=1&pageSize=20`], ['inventory-checks/sessions/:id', `/api/inventory-checks/sessions/{{checkId}}`],
@@ -147,10 +148,10 @@ function getEntries(ctx) {
     ['portal/account/wishlist', '/api/portal/account/wishlist', { anon: true }], ['portal/membership/:n', '/api/portal/membership/1', { anon: true }],
     ['portal/submissions/review', '/api/portal/submissions/review'], ['portal/submissions/:id/screenshot/:i', '/api/portal/submissions/1/screenshot/0'],
     ['inventory-checks/products all-time name page, page 2', `/api/inventory-checks/products?branchId=1&sortBy=name&sortDirection=asc&page=2&pageSize=20`],
-    ['inventory-checks/products Issues all sessions', `/api/inventory-checks/products?branchId=1&state=issue&page=1&pageSize=20`],
+    ['inventory-checks/products Issues all sessions', `/api/inventory-checks/products?branchId=1&state=issue&page=1&pageSize=20`, { without: ['ic_simple'] }],
     ['inventory-checks/products page 2 with summary=0 (ic_simple page, switch off)', `/api/inventory-checks/products?branchId=1&sortBy=name&sortDirection=asc&page=2&pageSize=20&summary=0`],
     ['inventory-checks/products Issues by checkState (ic_simple page, switch off)', `/api/inventory-checks/products?branchId=1&checkState=issue&page=1&pageSize=20`],
-    ['inventory-checks/products Issues in session', `/api/inventory-checks/products?sessionId={{checkId}}&state=issue&page=1&pageSize=20`],
+    ['inventory-checks/products Issues in session', `/api/inventory-checks/products?sessionId={{checkId}}&state=issue&page=1&pageSize=20`, { without: ['ic_simple'] }],
     ['inventory-checks/products stock sort ascending', `/api/inventory-checks/products?branchId=1&sortBy=stock&sortDirection=asc&page=1&pageSize=20`],
     // ic_simple ON (lane 6.0.1044, the owner's list): the switch row is set around the measured request only; the shapes above stay the OFF path.
     ['inventory-checks/products ic_simple name page', `/api/inventory-checks/products?branchId=1&sortBy=name&sortDirection=asc&page=1&pageSize=20`, { switches: ['ic_simple'] }],
@@ -208,7 +209,7 @@ function getShapes(ctx) {
     let id = slug(label)
     if (seen.has(id)) id += '-' + [...seen].filter((x) => x.startsWith(id)).length
     seen.add(id)
-    return { id, kind: 'get', method: 'GET', label, url, anon: Boolean(opt.anon), longRange: LONG_RANGE.test(label), ...(opt.switches ? { switches: opt.switches } : {}) }
+    return { id, kind: 'get', method: 'GET', label, url, anon: Boolean(opt.anon), longRange: LONG_RANGE.test(label), ...(opt.switches ? { switches: opt.switches } : {}), ...(opt.without ? { without: opt.without } : {}) }
   })
 }
 

@@ -81,7 +81,7 @@ async function resolveUrl(world, url) {
 // other shape ever runs with one more on (or with the pass's own switches gone: read-budget/switches.cjs).
 const setSwitches = (world, names) => world.addSwitches(names)
 const clearSwitches = (world) => world.restoreSwitches()
-const withSwitches = (names, url) => ({ prepare: (world) => setSwitches(world, names), run: async (world, send) => { try { return await send('GET', url) } finally { await clearSwitches(world) } } })
+const withSwitches = (names, url, without = []) => ({ prepare: (world) => world.addSwitches(names, { without }), run: async (world, send) => { try { return await send('GET', url) } finally { await clearSwitches(world) } } })
 
 async function measureGet(world, shape, { cold = true, statements = false, fingerprints = false } = {}) {
   const url = await resolveUrl(world, shape.url)
@@ -173,7 +173,7 @@ async function runGetPass({ partIndex, analyze = false, analyzeDb = analyze, lab
 }
 
 // The live pass: every GET shape once, cold, in the state production runs in (budgets.json passes.live: tier, stored switches). It enforces the calls of one request
-// (the live ceiling and the Free hard limit; a known failure may not get worse and must go once fixed). Rows are not budgeted here: the free pass owns them. A
+// (the live ceiling and the Free hard limit; a known failure may not get worse and must go once fixed) and the HTTP status the entry records. Rows are not budgeted here: the free pass owns them. A
 // failure of the pass names its shape, its route and the call count measured, so the entry to add or remove is in the message.
 async function runLivePass({ partIndex, label, observe }) {
   const budgets = loadBudgets()
@@ -191,12 +191,12 @@ async function runLivePass({ partIndex, label, observe }) {
       let m
       try {
         const url = await resolveUrl(world, shape.url)
-        const probe = { method: 'GET', url, anon: shape.anon, ...(shape.switches ? withSwitches(shape.switches, url) : {}) }
+        const probe = { method: 'GET', url, anon: shape.anon, ...(shape.switches || shape.without ? withSwitches(shape.switches || [], url, shape.without || []) : {}) }
         m = await runShape(world, probe, { cold: true })
       } catch (e) { reds.push(`${shape.id}: threw ${String(e.message).slice(0, 160)}`); continue }
       if (observe) observe(shape, m)
       n += 1
-      const problems = m.overDeadline ? ['live pass: no answer within the deadline'] : liveProblems(pass, shape.id, m.calls)
+      const problems = m.overDeadline ? ['live pass: no answer within the deadline'] : liveProblems(pass, shape.id, m.calls, m.status, entry.status)
       if (problems.length) reds.push(`${shape.id} (${entry.route}): ${problems.join('; ')}`)
     }
   } finally { await world.dispose() }
