@@ -38,8 +38,8 @@ check('PUT /api/branches/:id bumps products after a committed edit', () => {
 check('the product-removal replay bumps products before it broadcasts', () => {
   const text = read('src/lib/undoAppliers.ts')
   const fn = slice(text, 'async function replayProductRemove(', '// branch.update records')
-  const bump = fn.indexOf("bumpVersion(ctx.env, 'products')")
-  const cast = fn.indexOf("await broadcast(ctx.env, 'products'")
+  const bump = fn.indexOf("bumpChange(ctx, ['products'])")
+  const cast = fn.indexOf("await announceChange(ctx, 'products'")
   assert.ok(bump > 0 && cast > bump, 'bump precedes the broadcast')
 })
 console.log(`${passed} checks passed.`)

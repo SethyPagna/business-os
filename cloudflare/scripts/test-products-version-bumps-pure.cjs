@@ -14,7 +14,7 @@ const path = require('node:path')
 
 const SRC = path.join(__dirname, '..', 'src')
 const read = (rel) => fs.readFileSync(path.join(SRC, rel), 'utf8').replace(/\r\n/g, '\n')
-const PRODUCTS_BUMP = /bumpVersions?\([^)]*['"]products['"]/
+const PRODUCTS_BUMP = /bumpVersions?\([^)]*['"]products['"]|bumpChange\(ctx, \['products'\]/
 const products = read('routes/products.ts')
 const between = (text, from, to) => { const a = text.indexOf(from); assert.ok(a >= 0, `anchor ${from}`); const b = text.indexOf(to, a + from.length); return text.slice(a, b < 0 ? undefined : b) }
 
