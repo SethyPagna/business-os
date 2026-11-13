@@ -120,13 +120,14 @@ app.post('/sessions/revoke-user', async (c) => {
 })
 
 // The other accounts with a pending or approved row on the same device, as a sub-select of the statement that lists the rows (no extra D1 call).
-const SHARED_WITH_SQL = `(SELECT json_group_array(json_object('user_id', o.user_id, 'name', COALESCE(NULLIF(ou.name, ''), ou.username), 'status', o.status))
+const SHARED_WITH_SQL = `(SELECT json_group_array(json_object('user_id', o.user_id, 'name', COALESCE(NULLIF(ou.name, ''), ou.username), 'status', o.status, 'bound', o.cookie_bound_at IS NOT NULL))
          FROM trusted_devices o JOIN users ou ON ou.id = o.user_id
          WHERE o.device_id = td.device_id AND o.user_id != td.user_id AND o.status IN ('pending', 'approved'))`
-export type SharedWith = { user_id: number; name: string; status: 'pending' | 'approved' }
+// bound: that account's row on the device has had the device cookie issued, which is what makes the device markable as a shop device.
+export type SharedWith = { user_id: number; name: string; status: 'pending' | 'approved'; bound: boolean }
 function parseSharedWith(json: string | null | undefined): SharedWith[] {
   if (!json) return []
-  try { const parsed = JSON.parse(json); return Array.isArray(parsed) ? parsed : [] } catch { return [] }
+  try { const parsed = JSON.parse(json); return Array.isArray(parsed) ? parsed.map((other) => ({ ...other, bound: Boolean(other?.bound) })) : [] } catch { return [] }
 }
 
 // GET /api/auth/devices/pending -- devices awaiting a decision, across all

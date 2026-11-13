@@ -56,11 +56,12 @@ for (const [key, text] of [...Object.entries(en), ...Object.entries(km)]) {
 for (const m of panel.matchAll(/tr\(t, '((?:shop_device|device_)[a-z_]*)', '((?:[^'\\]|\\.)*)'/g)) {
   if (typeof en[m[1]] === 'string') assert.equal(m[2], en[m[1]], `the panel fallback for ${m[1]} is the English pack text`)
 }
-assert.doesNotMatch(panel, /cookie(?!_bound_at)/i, 'the panel source has no user-facing cookie wording')
+assert.doesNotMatch(panel.replace(/^\s*\/\/.*$/gm, ''), /cookie(?!_bound_at)/i, 'the panel source has no user-facing cookie wording')
 assert.match(en.shop_device_unmark_confirm, /signed out/i, 'the unmark warning says employees are signed out')
 assert.match(en.shop_device_unmark_confirm, /new identity[^.]*copy of its sign-in stops working/i, 'the unmark warning says the device gets a new identity and a copied sign-in stops')
 // M-A (release review): a device whose browser never had the cookie cannot be marked; the buttons are disabled with the reason, and the refusal is translated.
-assert.equal((panel.match(/disabled=\{busyId === device\.id \|\| !device\.cookie_bound_at\}/g) || []).length, 2, 'both mark buttons are disabled until the device has had its cookie')
+assert.equal((panel.match(/disabled=\{busyId === device\.id \|\| !canMarkShop\(device\)\}/g) || []).length, 2, 'both mark buttons are disabled until the device has had its cookie (its own row or another account on the device)')
+assert.ok(panel.includes('const canMarkShop = (device: TrustedDeviceRecord) => !heldByApproved(device) && (Boolean(device.cookie_bound_at) || (device.shared_with || []).some((other) => other.bound))'), 'markable means bound through some row on the device and not held by another account approval')
 assert.match(panel, /code === 'shop_device_unbound'/, 'the unbound refusal is translated by machine code')
 assert.match(panel, /code === 'shop_device_retired'/, 'the retired-id refusal is translated by machine code')
 

@@ -368,6 +368,10 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
     return [...byUser.values()].sort((a, b) => a.label.localeCompare(b.label))
   }, [approvedDevices, sessions])
 
+  // A device can be marked once some row on it has had its cookie issued: this account's own, or another account's on the same device (the Worker checks the device, not the row).
+  // A waiting request on an id another account holds approved may be a copy of that approval: the Worker refuses to mark it (shop_device_held), so the panel does not offer it.
+  const heldByApproved = (device: TrustedDeviceRecord) => device.status === 'pending' && (device.shared_with || []).some((other) => other.status === 'approved')
+  const canMarkShop = (device: TrustedDeviceRecord) => !heldByApproved(device) && (Boolean(device.cookie_bound_at) || (device.shared_with || []).some((other) => other.bound))
   // Why the shop button is grey, in words a touch screen can show: an old waiting request is never bound by signing in, so it is approved first.
   const renderDeviceMeta = (device: TrustedDeviceRecord, showMarkHint = false) => (
     <div className="min-w-0">
@@ -390,11 +394,13 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
           {tr(t, 'device_also_here', 'Also on this device')}: {device.shared_with.map((other) => `${other.name} (${other.status === 'approved' ? tr(t, 'approved', 'Approved') : tr(t, 'pending', 'pending')})`).join(', ')}
         </div>
       ) : null}
-      {showMarkHint && !device.cookie_bound_at && !device.claimed_approval_ref ? (
+      {showMarkHint && !canMarkShop(device) && !device.claimed_approval_ref ? (
         <div className="mt-1 detail-scroll-text text-xs text-gray-500 dark:text-gray-400">
-          {device.status === 'pending'
-            ? tr(t, 'shop_device_unbound_pending', 'To mark this as a shop device: approve the request, sign in on the device once, then mark it.')
-            : tr(t, 'shop_device_unbound', 'Sign in on this device once, then mark it as a shop device.')}
+          {heldByApproved(device)
+            ? tr(t, 'shop_device_held', 'Another account already has this device approved, so this request may be a copy. Decline it, or mark the approved device instead.')
+            : device.status === 'pending'
+              ? tr(t, 'shop_device_unbound_pending', 'To mark this as a shop device: approve the request, sign in on the device once, then mark it.')
+              : tr(t, 'shop_device_unbound', 'Sign in on this device once, then mark it as a shop device.')}
         </div>
       ) : null}
       {device.claimed_approval_ref ? (
@@ -460,9 +466,9 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                   {device.claimed_approval_ref ? null : (
                     <button
                       type="button"
-                      disabled={busyId === device.id || !device.cookie_bound_at}
+                      disabled={busyId === device.id || !canMarkShop(device)}
                       className="btn-secondary px-2 py-1.5 text-xs"
-                      title={device.cookie_bound_at ? tr(t, 'shop_device_mark', 'Mark as shop device') : tr(t, 'shop_device_unbound', 'Sign in on this device once, then mark it as a shop device.')}
+                      title={canMarkShop(device) ? tr(t, 'shop_device_mark', 'Mark as shop device') : tr(t, 'shop_device_unbound', 'Sign in on this device once, then mark it as a shop device.')}
                       aria-label={tr(t, 'shop_device_mark', 'Mark as shop device')}
                       onClick={() => setMarkingShop({ device, label: '' })}
                     >
@@ -538,9 +544,9 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                           ) : (
                             <button
                               type="button"
-                              disabled={busyId === device.id || !device.cookie_bound_at}
+                              disabled={busyId === device.id || !canMarkShop(device)}
                               className="btn-secondary px-2 py-1 text-xs"
-                              title={device.cookie_bound_at ? tr(t, 'shop_device_mark', 'Mark as shop device') : tr(t, 'shop_device_unbound', 'Sign in on this device once, then mark it as a shop device.')}
+                              title={canMarkShop(device) ? tr(t, 'shop_device_mark', 'Mark as shop device') : tr(t, 'shop_device_unbound', 'Sign in on this device once, then mark it as a shop device.')}
                               aria-label={tr(t, 'shop_device_mark', 'Mark as shop device')}
                               onClick={() => setMarkingShop({ device, label: '' })}
                             >

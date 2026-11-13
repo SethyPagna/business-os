@@ -619,7 +619,7 @@ async function suite(mutate, label) {
     w.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status, decided_at, revoked_at) VALUES (12, 'own-phone-000001', 'rejected', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").run({})
     const pending = (await w.call('/pending', 'GET')).body.devices
     const shared = pending.find((d) => d.device_id === 'shared-phone-0001')
-    assert.deepEqual(shared.shared_with, [{ user_id: 12, name: 'Dara', status: 'approved' }])
+    assert.deepEqual(shared.shared_with, [{ user_id: 12, name: 'Dara', status: 'approved', bound: true }])
     assert.deepEqual(pending.find((d) => d.device_id === 'own-phone-000001').shared_with, [], 'a rejected row of another account is history, not a sharer')
     assert.equal('shared_with_json' in shared, false, 'the raw column is not leaked')
   })
@@ -631,15 +631,30 @@ async function suite(mutate, label) {
     approve(w.h, 'lone-phone-0000001', 10)
     const named = (devices, userId, deviceId) => devices.find((d) => d.user_id === userId && d.device_id === deviceId)
     const all = (await w.call('/', 'GET')).body.devices
-    assert.deepEqual(named(all, 10, 'shared-phone-0001').shared_with, [{ user_id: 12, name: 'Dara', status: 'approved' }])
+    assert.deepEqual(named(all, 10, 'shared-phone-0001').shared_with, [{ user_id: 12, name: 'Dara', status: 'approved', bound: true }])
     assert.deepEqual(named(all, 12, 'shared-phone-0001').shared_with.map((o) => o.user_id), [10])
     assert.deepEqual(named(all, 10, 'lone-phone-0000001').shared_with, [])
     const one = (await w.call('/?userId=10', 'GET')).body.devices
-    assert.deepEqual(named(one, 10, 'shared-phone-0001').shared_with, [{ user_id: 12, name: 'Dara', status: 'approved' }])
+    assert.deepEqual(named(one, 10, 'shared-phone-0001').shared_with, [{ user_id: 12, name: 'Dara', status: 'approved', bound: true }])
     assert.equal('shared_with_json' in named(one, 10, 'shared-phone-0001'), false, 'the raw column is not leaked')
   })
 
-  await check('24. P-1 HA: approving (and approving-replacing) a request on a device another account already has needs confirmShared: otherwise 409 device_shared_confirm and nothing changes; a request on its own device needs nothing', async () => {
+  await check('23c. B8 L-a: each other account on a device says whether its row has had the device cookie, so the panel can tell an unbound card that is still markable (another account is bound) from one that must wait for a sign-in', async () => {
+    const w = setup(mutate)
+    approveUnbound(w.h, 'mixed-phone-00001', 10)
+    approve(w.h, 'mixed-phone-00001', 12)
+    approveUnbound(w.h, 'unbound-phone-0001', 10)
+    approveUnbound(w.h, 'unbound-phone-0001', 12)
+    const all = (await w.call('/', 'GET')).body.devices
+    const named = (userId, deviceId) => all.find((d) => d.user_id === userId && d.device_id === deviceId)
+    assert.deepEqual(named(10, 'mixed-phone-00001').shared_with.map((o) => [o.user_id, o.bound]), [[12, true]], 'the unbound row sees the bound sharer')
+    assert.deepEqual(named(12, 'mixed-phone-00001').shared_with.map((o) => [o.user_id, o.bound]), [[10, false]], 'the bound row sees the unbound sharer')
+    assert.deepEqual(named(10, 'unbound-phone-0001').shared_with.map((o) => o.bound), [false], 'nobody bound: still not markable')
+    const marked = await w.call(`/${rowId(w.h, 10, 'mixed-phone-00001')}/mark-shop`, 'POST', { label: 'Till', confirmShared: true })
+    assert.equal(marked.status, 200, 'the server marks from the unbound card because the device is bound through the other account (what the panel now offers)')
+  })
+
+  await check('24. P-1 HA:approving (and approving-replacing) a request on a device another account already has needs confirmShared: otherwise 409 device_shared_confirm and nothing changes; a request on its own device needs nothing', async () => {
     const w = setup(mutate)
     approve(w.h, 'shared-phone-0002', 10)
     w.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status) VALUES (12, 'shared-phone-0002', 'pending'), (12, 'own-phone-000002', 'pending')").run({})
@@ -772,6 +787,7 @@ const mutants = [
   ['a request that claims an approved device can be marked as a shop device (N-3)', inFile('routes/devices.ts', "device.status === 'pending' && device.claimed_approval_ref", 'false'), ['22.']],
   ['the pending list forgets who else is on the device (P-1)', inFile('routes/devices.ts', 'shared_with: parseSharedWith(shared_with_json)', 'shared_with: []'), ['23.']],
   ['the full device list forgets who else is on a device (L-2)', (text, rel) => { if (rel !== 'routes/devices.ts') return text; const s = 'shared_with: parseSharedWith(shared_with_json)'; const at = text.indexOf(s, text.indexOf(s) + 1); return at < 0 ? text : text.slice(0, at) + 'shared_with: []' + text.slice(at + s.length) }, ['23b.']],
+  ['the sharers list says nothing about who is bound (B8 L-a)', inFile('routes/devices.ts', "'bound', o.cookie_bound_at IS NOT NULL", "'bound', 0"), ['23c.']],
   ['approving a request on a shared device needs no confirmation (P-1 HA)', inFile('routes/devices.ts', 'if (facts.others > 0 && !confirmedShared(await', 'if (false && !confirmedShared(await'), ['24.']],
   ['approve-replacing on a shared device needs no confirmation (P-1 HA)', inFile('routes/devices.ts', 'if (facts.others > 0 && !confirmedShared(body))', 'if (false && !confirmedShared(body))'), ['24.']],
   ['marking a device that several accounts have needs no confirmation (P-1 HC)', inFile('routes/devices.ts', '.size > 1 && !confirmedShared(body)', '.size > 1 && false'), ['25.']],

@@ -23,8 +23,8 @@ export type TrustedDeviceRecord = {
   // Set once a browser was given the device cookie for this row; a device can only be marked as a shop device after that.
   cookie_bound_at?: string | null
   claimed_device_name?: string | null
-  // Other accounts with a pending or approved row on the same device (pending list only).
-  shared_with?: Array<{ user_id: number; name: string; status: 'pending' | 'approved' }>
+  // Other accounts with a pending or approved row on the same device. bound: that account's row has had the device cookie issued.
+  shared_with?: Array<{ user_id: number; name: string; status: 'pending' | 'approved'; bound?: boolean }>
 }
 
 // `limit` is the per-account approved-device cap the Worker enforces; the panel shows it instead of a number of its own.
