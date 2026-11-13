@@ -10,7 +10,7 @@ GROUP BY d, kind
 UNION ALL
 SELECT 'last-1d', '~summary-devices', COUNT(*)
 FROM user_sessions
-WHERE revoked_at IS NULL AND expires_at > datetime('now')
+WHERE revoked_at IS NULL AND julianday(expires_at) > julianday('now')
   AND last_seen_at > datetime('now', '-1 day')
 UNION ALL
 SELECT 'last-14d', '~summary-inventory-checks', COUNT(*)
