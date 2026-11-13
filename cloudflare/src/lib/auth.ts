@@ -415,7 +415,7 @@ export async function getSessionUser<E extends { Bindings: Env } = { Bindings: E
 // Whether this request can still use the adoption UPDATE in lib/deviceCookie.ts (adoptSessionDeviceCookie): only /me and /bootstrap call it, and only a
 // browser that sent no device cookie needs it. Everywhere else the lookup adds nothing. The answer rides the same statement as the session read, so a row
 // that can never be adopted (already bound, refused because another account bound the id, or no row) costs no UPDATE. Both names are pinned against
-// lib/deviceCookie.ts by test-device-cookie-bound-pure.
+// lib/deviceCookie.ts by test-session-adoption-probe-pure (check f).
 const PROBE_DEVICE_COOKIE = '__Host-bos_dev'
 const ADOPTABLE_CONTEXT_KEY = 'sessionDeviceAdoptable'
 function wantsAdoptionProbe<E extends { Bindings: Env }>(c: Context<E>): boolean {
