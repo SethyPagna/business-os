@@ -377,6 +377,25 @@ const localHour = (c) => sched.businessHourOf(c.at)
     ok()
   }
 
+  // R2-D: an OK visit that left the night incomplete does not clear the failure count or error; a finished one does.
+  {
+    const rot = real('lib/cronRotation.ts')
+    let text = null
+    const store = { load: async () => (text ? rot.parseRotationState(text) : null), save: async (st, expected) => { const cur = text ? rot.parseRotationState(text).version : null; if (cur !== expected) return false; text = JSON.stringify(st); return true } }
+    let mode = 'throw'
+    const steps = [{ id: 'backup', run: async () => { if (mode === 'throw') throw new Error('boom'); return mode === 'incomplete' ? { incomplete: true } : { done: true } } }]
+    const rec = () => rot.parseRotationState(text).steps.backup
+    await rot.runRotationTick(steps, store, Z('2026-11-12T15:17:00Z'))
+    assert.strictEqual(rec().failures, 1)
+    mode = 'incomplete'
+    await rot.runRotationTick(steps, store, Z('2026-11-12T18:17:00Z'))
+    assert.strictEqual(rec().failures, 1, 'an incomplete visit keeps the failure count'); assert.strictEqual(rec().error, 'boom'); assert.strictEqual(rec().okAt, null)
+    mode = 'done'
+    await rot.runRotationTick(steps, store, Z('2026-11-12T21:17:00Z'))
+    assert.strictEqual(rec().failures, 0); assert.strictEqual(rec().error, null); assert.ok(rec().okAt)
+    ok()
+  }
+
   // Retention: 7 daily backups (owner 13 Nov 2026). The 8th removes the oldest SCHEDULED one only; manual backups keep their own
   // newest 2 and are never evicted by a daily run (nor do they evict dailies).
   {

@@ -265,7 +265,8 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
   record.runs += 1
   if (ok && pollOnly) record.pollAt = record.finishedAt
   else if (record.pollAt !== undefined) record.pollAt = null
-  if (ok) { if (!incomplete) record.okAt = record.finishedAt; record.error = null; record.failures = 0 } else { record.error = error ?? 'error'; record.failures += 1; if (step.attemptWindow) record.windowFailures = (record.windowFailures || 0) + 1 }
+  // An OK visit that left its work unfinished (incomplete) is not a recovery: the failure count and error stay visible to cron-health.
+  if (ok) { if (!incomplete) { record.okAt = record.finishedAt; record.error = null; record.failures = 0 } } else { record.error = error ?? 'error'; record.failures += 1; if (step.attemptWindow) record.windowFailures = (record.windowFailures || 0) + 1 }
   if (ok && more && current.resumeStreak < MAX_RESUME_STREAK) {
     current.cursor = index
     current.resumeStreak += 1
