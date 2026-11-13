@@ -131,6 +131,22 @@ await runTest('writes that do not touch stock keep the product and sales caches 
   assert.equal(cacheGet('products:search:q'), null)
 })
 
+await runTest('a promotion write drops the cached product grid, Products bootstrap and its own reads (B2)', async () => {
+  for (const [method, apiPath] of [['POST', '/api/promotions'], ['PUT', '/api/promotions/3'], ['DELETE', '/api/promotions/3']]) {
+    reset()
+    for (const key of ['products:search:q', 'products:bootstrap:q', 'products:byIds:1', 'products:get', 'promotions:get']) cacheSet(key, 'old')
+    cacheSet('sales:get:page=1', 'kept'); cacheSet('settings:get', 'kept')
+    await apiFetch(method, apiPath, {})
+    for (const key of ['products:search:q', 'products:bootstrap:q', 'products:byIds:1', 'products:get', 'promotions:get']) assert.equal(cacheGet(key), null, `${key} survived ${method} ${apiPath}`)
+    assert.equal(cacheGet('sales:get:page=1'), 'kept', 'a promotion write does not touch sales')
+    assert.equal(cacheGet('settings:get'), 'kept')
+  }
+  reset()
+  cacheSet('products:search:q', 'old')
+  window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'promotions' } }))
+  assert.equal(cacheGet('products:search:q'), null, 'a promotion change pushed from another device clears the grid too')
+})
+
 await runTest('a quote or preview POST writes nothing, so it keeps every cached read', async () => {
   reset()
   cacheSet('products:search:q', 'kept'); cacheSet('sales:get:page=1', 'kept')
