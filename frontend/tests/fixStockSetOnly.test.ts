@@ -82,6 +82,26 @@ try {
     await float.unmount()
   })
 
+  await check('Fix stock keeps a parked Add draft that has no Items: supplier, payment status and due date survive (round 2)', async () => {
+    const header = { branchId: '1', supplier: { supplierId: 4, supplierName: 'Fixture supplier' }, paymentStatus: 'credit', creditDueDate: '2026-12-01' }
+    const parked = await mountFloat({ initialMode: 'add', initialHeader: header, initialLines: undefined, onMinimize() {} })
+    await parked.click(parked.find((node) => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'Minimize', 'the minimize button'))
+    const draftOf = (): { paymentStatus?: string; creditDueDate?: string; supplier?: { supplierName?: string }; mode?: string } => {
+      const key = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index) || '').find((name) => name.includes('fast_stockin'))
+      assert.ok(key, 'a parked draft is stored')
+      const stored = JSON.parse(String(localStorage.getItem(key)))
+      return stored.data ?? stored
+    }
+    assert.deepEqual({ status: draftOf().paymentStatus, due: draftOf().creditDueDate, supplier: draftOf().supplier?.supplierName }, { status: 'credit', due: '2026-12-01', supplier: 'Fixture supplier' }, 'the fixture parked the draft')
+    await parked.unmount()
+    const float = await mountFloat({ initialMode: 'set', lockMode: 'set' }, true)
+    const after = draftOf()
+    assert.deepEqual({ status: after.paymentStatus, due: after.creditDueDate, supplier: after.supplier?.supplierName, mode: after.mode }, { status: 'credit', due: '2026-12-01', supplier: 'Fixture supplier', mode: 'set' })
+    assert.equal(modeRadios(float).length, 0)
+    assert.equal(costFields(float).length, 0)
+    await float.unmount()
+  })
+
   await check('the Inventory Check page mounts the session with lockMode="set"', async () => {
     const source = readFileSync(new URL('../src/components/inventory/InventoryChecksPage.tsx', import.meta.url), 'utf8')
     const start = source.indexOf('<FastStockInModal')

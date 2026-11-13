@@ -243,7 +243,9 @@ export default function FastStockInModal({
       storedRaw = raw
       const rawLines = raw && typeof raw === 'object' ? (raw as { lines?: unknown }).lines : null
       stored = normalizeStockSessionDraft(raw, mintLineId)
-      if (lockMode && stored && (stored.mode !== lockMode || stored.lines.some((line) => line.mode !== lockMode))) stored = null
+      // Items in another mode are another session's work and never open here. A draft with no Items is only shared details
+      // (supplier, payment, due date, brand) and an entry row: openingDraft below converts it and keeps the details.
+      if (lockMode && stored && stored.lines.some((line) => line.mode !== lockMode)) stored = null
       // Ids minted for an older draft are written back now, not by the debounced autosave.
       rewrite = Array.isArray(rawLines) && rawLines.some((line) => !line || typeof line !== 'object' || !(line as { requestId?: unknown }).requestId)
     }
