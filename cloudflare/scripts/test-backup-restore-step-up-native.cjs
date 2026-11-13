@@ -134,7 +134,10 @@ async function main() {
     // route, with the hold taken: a document that omits an FK-dependent table is refused after maintenance begins.
     await check('a restore refused before it deletes anything releases the maintenance hold and changes nothing', async (t) => {
       const bucket = await world.mf.getR2Bucket('ASSETS')
-      const document = JSON.parse(await (await bucket.get(`backups/cloudflare/${backupName}`)).text())
+      // The manifest is gzip on the paid tier (the real CompressionStream runs here); read either form, as the restore does.
+      const bytes = new Uint8Array(await (await bucket.get(`backups/cloudflare/${backupName}`)).arrayBuffer())
+      const text = bytes[0] === 0x1f && bytes[1] === 0x8b ? await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text() : new TextDecoder().decode(bytes)
+      const document = JSON.parse(text)
       delete document.tables.user_notes
       document.summary.tableCount = Object.keys(document.tables).length
       document.summary.rowCount = Object.values(document.tables).reduce((n, table) => n + table.rows.length, 0)
