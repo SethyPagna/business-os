@@ -734,12 +734,18 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
   return { status: 200, body: stored ? JSON.parse(stored.response_json) : response }
 }
 
-export async function notifyStockInLineEdit(env: Env): Promise<void> {
+export async function bumpStockInLineEdit(env: Env): Promise<void> {
+  await bumpVersion(env, 'products')
+}
+export async function announceStockInLineEdit(env: Env): Promise<void> {
   await Promise.allSettled([
     broadcast(env, 'products', { action: 'update' }),
     broadcast(env, 'inventory', { action: 'adjust' }),
-    bumpVersion(env, 'products'),
   ])
+}
+export async function notifyStockInLineEdit(env: Env): Promise<void> {
+  await bumpStockInLineEdit(env)
+  await announceStockInLineEdit(env)
 }
 
 export class StockInLineEditReplayError extends Error {

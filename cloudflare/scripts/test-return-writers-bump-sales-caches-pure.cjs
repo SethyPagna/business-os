@@ -21,13 +21,16 @@ for (const namespace of keyed.filter((name) => name !== 'customers')) {
 for (const namespace of ['returns', 'sales', 'stock', 'products']) assert(namespaces.includes(namespace), namespace)
 
 const routes = read('routes/returns.ts')
-assert.equal((routes.match(/bumpVersions\(c\.env, RETURN_WRITE_CACHE_NAMESPACES\)/g) || []).length, 3, 'create, supplier return and edit bump the shared list')
+assert.equal((routes.match(/bumpVersions\(c\.env, RETURN_WRITE_CACHE_NAMESPACES\)/g) || []).length, 7, 'create, supplier return and edit bump the shared list, and so do the four idempotent replays (two creates, two edits; W3 round 2 F8)')
 assert(!/bumpVersions\(c\.env, \['products', 'returns', 'sales'\]\)/.test(routes), 'no return writer keeps its own shorter list')
 assert(/bumpVersions\(c\.env, RETURN_WRITE_CACHE_NAMESPACES\)/.test(read('lib/returnExchangeCreate.ts')), 'the exchange writer bumps the shared list')
 
 const bulk = read('lib/returnBulkAction.ts')
-const notify = bulk.slice(bulk.indexOf('export async function notifyReturnBulkAction'))
+const notify = bulk.slice(bulk.indexOf('export async function bumpReturnBulkAction'))
 assert(/bumpVersions\(env, RETURN_WRITE_CACHE_NAMESPACES\)/.test(notify.slice(0, notify.indexOf('\n}\n'))), 'a grouped return action bumps the shared list')
+assert(/export async function notifyReturnBulkAction[^}]*bumpReturnBulkAction\(env\)[^}]*announceReturnBulkAction\(env\)/.test(bulk), 'the replay notifier is the bump followed by the announce')
 const history = read('routes/actionHistory.ts')
-assert(/RETURN_BULK_ACTION_KIND\s*\?\s*notifyReturnBulkAction\(c\.env\)/.test(history), 'undo and redo of a grouped return action use the same notifier')
+const listed = (history.match(/case RETURN_BULK_ACTION_KIND: return \[([^\]]*)\]/) || [])[1] || ''
+assert.deepEqual([...listed.matchAll(/'([a-z_]+)'/g)].map((match) => match[1]).sort(), [...new Set(namespaces)].sort(), "undo and redo of a grouped return action bump the shared list, in the history route's one bump call")
+assert(/RETURN_BULK_ACTION_KIND\s*\?\s*announceReturnBulkAction\(c\.env\)/.test(history), 'undo and redo of a grouped return action announce with the same helper')
 console.log('return writers bump the sales caches: ok')

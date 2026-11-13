@@ -236,7 +236,7 @@ async function main() {
     // per namespace.
     for (const [relPath, pattern] of [
       ['routes/returns.ts', /bumpVersions\(c\.env, RETURN_WRITE_CACHE_NAMESPACES\)/],
-      ['routes/system.ts', /bumpVersions\(c\.env, \['sales', 'products', 'audit_log'\]\)/],
+      ['routes/system.ts', /const cacheNamespaces = \['sales', 'products', 'stock', 'audit_log'\][\s\S]*await bumpVersions\(c\.env, cacheNamespaces\)/],
       ['routes/sales.ts', /bumpVersions\(c\.env, \['sales', 'returns'\]\)/],
       ['routes/products.ts', /bumpVersions\(c\.env, \['products', 'settings'\]\)/],
     ]) {

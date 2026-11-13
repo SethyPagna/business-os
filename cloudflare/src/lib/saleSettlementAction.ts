@@ -323,11 +323,15 @@ function replayAuditStatement(user: SessionUser, saleId: number, direction: 'und
   }
 }
 
+export async function bumpSaleSettlementAction(env: Env): Promise<void> {
+  await bumpVersion(env, 'sales')
+}
+export async function announceSaleSettlementAction(env: Env): Promise<void> {
+  await Promise.allSettled([broadcast(env, 'sales', { action: 'update' })])
+}
 export async function notifySaleSettlementAction(env: Env): Promise<void> {
-  await Promise.allSettled([
-    bumpVersion(env, 'sales'),
-    broadcast(env, 'sales', { action: 'update' }),
-  ])
+  await bumpSaleSettlementAction(env)
+  await announceSaleSettlementAction(env)
 }
 
 class SaleSettlementReplayConflict extends Error {

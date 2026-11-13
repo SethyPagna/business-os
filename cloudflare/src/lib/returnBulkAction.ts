@@ -1348,11 +1348,16 @@ async function buildMembers(db: D1Compat, sent: BulkRequest,redirectTarget: numb
   return { members, guards, replacement, memberGuards }
 }
 
+// A route awaits the bump before its response and hands the announce to waitUntil afterwards (W3 Slice A); notifyReturnBulkAction keeps both for the History replay.
+export async function bumpReturnBulkAction(env: Env): Promise<void> {
+  await bumpVersions(env, RETURN_WRITE_CACHE_NAMESPACES)
+}
+export async function announceReturnBulkAction(env: Env): Promise<void> {
+  await Promise.allSettled((['returns', 'products', 'inventory', 'sales'] as const).map((channel) => broadcast(env, channel, { action: 'update' })))
+}
 export async function notifyReturnBulkAction(env: Env): Promise<void> {
-  await Promise.allSettled([
-    bumpVersions(env, RETURN_WRITE_CACHE_NAMESPACES),
-    ...(['returns', 'products', 'inventory', 'sales'] as const).map((channel) => broadcast(env, channel, { action: 'update' })),
-  ])
+  await bumpReturnBulkAction(env)
+  await announceReturnBulkAction(env)
 }
 
 /**

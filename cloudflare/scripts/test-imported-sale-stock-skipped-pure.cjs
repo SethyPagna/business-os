@@ -63,7 +63,8 @@ function setup(migrations = loadAll()) {
   seedStockFixture(sqlite, () => sqlite.prepare(`INSERT INTO products (id, name, sku, stock_quantity, cost_price_usd) VALUES (10, 'Widget', 'SKU-1', 5, 3)`).run())
   seedStockFixture(sqlite, () => sqlite.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 5)`).run())
   const db = {
-    prepare(sql) { return { get(params) { return Promise.resolve(sqlite.prepare(sql).get(filterParams(sql, params))) } } },
+    // J7: the receipt mint reads its ten candidates with one `.all([json])` (positional param).
+    prepare(sql) { return { get(params) { return Promise.resolve(sqlite.prepare(sql).get(filterParams(sql, params))) }, all(params) { return Promise.resolve(sqlite.prepare(sql).all(...(Array.isArray(params) ? params : [filterParams(sql, params)]))) } } },
     batch(statements) {
       const run = sqlite.transaction(() => statements.map(({ sql, params }) => sqlite.prepare(sql).run(filterParams(sql, params))))
       return Promise.resolve(run())

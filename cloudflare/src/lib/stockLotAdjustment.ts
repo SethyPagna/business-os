@@ -89,7 +89,7 @@ import type { StockWriteStatement } from './productBatches'
 import type { StockConditionTag } from './stockCondition'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { bumpVersion } from './cache'
+import { bumpVersions } from './cache'
 import { readSwitch } from './readSwitches'
 import { closeIssueStatements, reopenIssueStatements } from './stockSetClosesIssue'
 import { findConsumingBlocker, findLaterChangeBlocker, type StockRefusalDetails } from './stockRefusalBlocker'
@@ -561,16 +561,21 @@ export async function scopedSetBump(env: Env, body: Record<string, unknown>): Pr
 }
 
 /** The product id rides on the broadcast (audit G9) so a client refreshes that product's rows; an unreadable id (a legacy row) still announces the change, id-less. */
-export async function notifyStockLotSet(env: Env, productId?: number | string | null): Promise<void> {
+export async function bumpStockLotSet(env: Env): Promise<void> {
+  // An Undo or Redo may have reopened or closed an Issue: the Issues sets are cached on this version.
+  await bumpVersions(env, ['products', 'inventory_checks'])
+}
+export async function announceStockLotSet(env: Env, productId?: number | string | null): Promise<void> {
   const id = Number(productId)
   const named = Number.isInteger(id) && id > 0 ? { id } : {}
   await Promise.all([
     broadcast(env, 'products', { action: 'update', ...named }),
     broadcast(env, 'inventory', { action: 'adjust', ...named }),
-    bumpVersion(env, 'products'),
-    // An Undo or Redo may have reopened or closed an Issue: the Issues sets are cached on this version.
-    bumpVersion(env, 'inventory_checks'),
   ])
+}
+export async function notifyStockLotSet(env: Env, productId?: number | string | null): Promise<void> {
+  await bumpStockLotSet(env)
+  await announceStockLotSet(env, productId)
 }
 
 export class StockLotSetReplayError extends Error {

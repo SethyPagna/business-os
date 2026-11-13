@@ -267,7 +267,7 @@ app.post('/rules', requireAction('promotions', 'manage'), async (c) => {
   const newId = Number(results[0].meta?.last_row_id ?? 0)
   // Promoted-first ordering lives inside the cached /api/products/search
   // responses -- a rule write reorders them, so it bumps the same version.
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'rule-create', id: newId }))
   const created = await db.prepare('SELECT * FROM promotion_rules WHERE id = ?').get([newId])
   return c.json(created)
@@ -326,7 +326,7 @@ app.put('/rules/:id', requireAction('promotions', 'manage'), async (c) => {
   if (Number(results[0]?.meta?.changes ?? 0) !== 1) {
     return lostWriteResponse(c, db, receipt, 'promotion_rules', 'promotion rule', id, expectedUpdatedAt, respond)
   }
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'rule-update', id }))
   const updated = await db.prepare('SELECT * FROM promotion_rules WHERE id = ?').get([id])
   return c.json(updated)
@@ -368,7 +368,7 @@ app.delete('/rules/:id', requireAction('promotions', 'manage'), async (c) => {
   if (Number(results[0]?.meta?.changes ?? 0) !== 1) {
     return lostWriteResponse(c, db, receipt, 'promotion_rules', 'promotion rule', id, expectedUpdatedAt, respond)
   }
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'rule-delete', id }))
   return c.json({ deleted: true })
 })

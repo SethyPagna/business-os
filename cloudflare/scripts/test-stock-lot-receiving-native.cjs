@@ -20,7 +20,7 @@ function load(relative) {
   new Function('require', 'module', 'exports', compiled)(request => {
     if (request === '../lib/auth' || request === './auth') return { requireAuth: async (c, next) => { c.set('user', actor); await next() } }
     if (request === '../durable-objects/broadcastHub') return { broadcast: async () => {} }
-    if (request === './cache' || request === '../lib/cache') return { bumpVersion: async () => {}, getVersion: async () => 0, cacheKey: (...args) => args.join(':'), cachedJson: async (c, key, ttl, fn) => c.json(await fn()) }
+    if (request === './cache' || request === '../lib/cache') return { bumpVersion: async () => {}, bumpVersions: async () => {}, getVersion: async () => 0, cacheKey: (...args) => args.join(':'), cachedJson: async (c, key, ttl, fn) => c.json(await fn()) }
     if (request === './telegram' || request === '../lib/telegram') return { sendTelegramEvent: async () => {}, formatStockChangeTelegramLines: () => [], formatTransferTelegramLines: () => [] }
     if (request.startsWith('.')) return load(path.posix.normalize(path.posix.join(path.posix.dirname(relative), request)) + '.ts')
     return require(request)

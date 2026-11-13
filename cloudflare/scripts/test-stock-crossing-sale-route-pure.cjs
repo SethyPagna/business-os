@@ -39,7 +39,7 @@ const overrides = {
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', USER); return next() } },
   '../lib/audit': { audit: async () => {} },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
-  '../lib/cache': { bumpVersion: async () => {}, getVersionWithFallback: async () => 0, cachedJsonResponse: async (_r, _c, _k, _t, loader) => loader() },
+  '../lib/cache': { bumpVersion: async () => {}, bumpVersions: async () => {}, getVersionWithFallback: async () => 0, cachedJsonResponse: async (_r, _c, _k, _t, loader) => loader() },
   '../lib/telegram': { formatSaleTelegramLines: () => [], formatSaleStatusTelegramLines: () => [], sendTelegramEvent: async () => {}, telegramMoney: (v) => String(v ?? '') },
   './telegram': { sendTelegramEvent: async (_env, event) => { sent.push(event); return true } },
 }

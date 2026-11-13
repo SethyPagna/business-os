@@ -17,7 +17,7 @@ import { foldBarcodeInput, normalizeMultiValue, planInsertRow, validateProductIm
 import { sanitizeMediaList, sanitizeMediaPath } from './media'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT, MAX_IMAGES_PER_PRODUCT } from './importImageMatch'
 import { buildInClause, chunkForBinding, D1_MAX_BOUND_PARAMS } from './sqlBinding'
-import { bumpVersion, bumpVersions } from './cache'
+import { bumpVersions } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { actorSnapshot } from './actorSnapshot'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
@@ -1287,12 +1287,18 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   return parseStoredReceipt(saved, false)
 }
 
-export async function notifyStockSession(env: Env, receipt: Pick<StockSessionReceipt, 'operationId'>, includeStock = false) {
+export async function bumpStockSession(env: Env, includeStock = false) {
+  await bumpVersions(env, includeStock ? ['products', 'stock'] : ['products'])
+}
+export async function announceStockSession(env: Env, receipt: Pick<StockSessionReceipt, 'operationId'>) {
   await Promise.allSettled([
-    includeStock ? bumpVersions(env, ['products', 'stock']) : bumpVersion(env, 'products'),
     broadcast(env, 'products', { action: 'update' }),
     broadcast(env, 'inventory', { action: 'stock_session', id: receipt.operationId }),
   ])
+}
+export async function notifyStockSession(env: Env, receipt: Pick<StockSessionReceipt, 'operationId'>, includeStock = false) {
+  await bumpStockSession(env, includeStock)
+  await announceStockSession(env, receipt)
 }
 
 // Postimages and retained revisions are captured by ONE statement INSIDE the

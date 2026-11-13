@@ -1,5 +1,6 @@
 import type { RequestMetrics } from '../lib/requestMetrics'
 import { productStockGuardError } from '../lib/productStockGuard'
+import type { UndoApplierEffects } from '../lib/undoAppliers'
 import { stockTransactionRefusal } from '../lib/stockTransaction'
 import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, hasAcquisitionCostInput, projectAcquisitionCosts } from '../lib/acquisitionCostAccess'
@@ -9,21 +10,21 @@ import { audit, buildAuditStatement } from '../lib/audit'
 import { getActionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
 import { SALE_ADD_ITEMS_ACTION_KIND, branchCutoverClosureRefusal, isUndoClosedByMerge, UNDO_CLOSED_BY_MERGE_CODE, UNDO_CLOSED_BY_MERGE_MESSAGE, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_APPLIER_KINDS, isServerReplayable, resolveUndoApplier, applierPermissionTier, applierAlsoActionDenied, mergeReplayPermissionEffects, replayRefusalCode, UNDO_HISTORY_STALE_CODE, UNDO_NEEDS_ORIGINAL_TAB_CODE, type UndoApplierOutcome } from '../lib/undoAppliers'
 import { PRODUCT_SUPPLIER_REFUSAL } from '../lib/productSupplierGate'
-import { CUSTOMER_GENDER_RESTORATION_KIND, canRestoreCustomerGender, notifyCustomerGenderRestoration } from '../lib/customerGenderRestoration'
+import { CUSTOMER_GENDER_RESTORATION_KIND, announceCustomerGenderRestoration, canRestoreCustomerGender } from '../lib/customerGenderRestoration'
 import { PRODUCT_REMOVE_ACTION_KIND } from '../lib/productDelete'
-import { RETURN_LEGACY_CONVERT_KIND, canConvertLegacyReturns, notifyLegacyReturnConversion } from '../lib/returnLegacyConvert'
+import { RETURN_LEGACY_CONVERT_KIND, announceLegacyReturnConversion, canConvertLegacyReturns } from '../lib/returnLegacyConvert'
 import type { Env } from '../index'
-import { BULK_STATUS_KIND, notifyBulkStatus } from '../lib/saleBulkStatus'
-import { notifySaleBulkUpdate, SALE_BULK_UPDATE_KINDS, SINGLE_DELIVERY_UPDATE_KIND } from '../lib/saleBulkUpdate'
+import { BULK_STATUS_KIND, announceBulkStatus } from '../lib/saleBulkStatus'
+import { announceSaleBulkUpdate, SALE_BULK_UPDATE_KINDS, SINGLE_DELIVERY_UPDATE_KIND } from '../lib/saleBulkUpdate'
 import { isLoyaltyAssignmentError, LOYALTY_REASSIGNMENT_CODE } from '../lib/saleCustomerAssignmentGuard'
-import { notifyReturnBulkAction, RETURN_BULK_ACTION_KIND } from '../lib/returnBulkAction'
+import { announceReturnBulkAction, RETURN_BULK_ACTION_KIND } from '../lib/returnBulkAction'
 import { sendReturnStatusTelegramEvents } from '../lib/telegram'
-import { notifySaleSettlementAction, SALE_SETTLEMENT_ACTION_KIND } from '../lib/saleSettlementAction'
-import { STOCK_SESSION_KIND, canReplayStockSessionPayload, notifyStockSession } from '../lib/stockSession'
+import { announceSaleSettlementAction, SALE_SETTLEMENT_ACTION_KIND } from '../lib/saleSettlementAction'
+import { STOCK_SESSION_KIND, announceStockSession, canReplayStockSessionPayload } from '../lib/stockSession'
 import { actorSnapshot } from '../lib/actorSnapshot'
-import { TRANSFER_OPERATION_KIND, canReplayTransferPayload, notifyTransferOperation } from '../lib/transferOperation'
-import { STOCK_LOT_SET_KIND, notifyStockLotSet } from '../lib/stockLotAdjustment'
-import { STOCK_IN_LINE_EDIT_KIND, notifyStockInLineEdit } from '../lib/stockInLineEdit'
+import { TRANSFER_OPERATION_KIND, announceTransferOperation, canReplayTransferPayload } from '../lib/transferOperation'
+import { STOCK_LOT_SET_KIND, announceStockLotSet } from '../lib/stockLotAdjustment'
+import { STOCK_IN_LINE_EDIT_KIND, announceStockInLineEdit } from '../lib/stockInLineEdit'
 import { productMergeGroupPrefixFingerprint } from '../lib/undoAppliers'
 import { parseMergeCostOutcome } from '../lib/productCostReview'
 import { ACTION_REPLAY_FAILED_CODE, authoredFailureMessage } from '../lib/failureText'
@@ -484,6 +485,29 @@ app.patch('/:id', async (c) => {
   }
 })
 
+/** Kinds whose original writer bumps 'products' (branch edit: every product row lists branch name and active flag; supplier backfill: supplier-filtered search). */
+const PRODUCTS_REPLAY_KINDS = new Set(['branch.update', 'supplier.backfill'])
+
+/**
+ * The cache namespaces each server-managed replay moves (the same list its bump helper in lib/<module>.ts passes to bumpVersions; a parity test in
+ * test-undo-redo-one-bump-native.cjs reads each helper and compares). They join the applier's own effects and the route's replay namespaces in
+ * ONE bumpVersions call (W3 Slice A round 2: one quota upsert on Free, and one await before the response).
+ */
+function serverReplayBumpNamespaces(applierName: string, payload: Record<string, unknown>): string[] {
+  switch (applierName) {
+    case CUSTOMER_GENDER_RESTORATION_KIND: return ['customers']
+    case RETURN_LEGACY_CONVERT_KIND: return ['returns', 'sales']
+    case TRANSFER_OPERATION_KIND: return ['products']
+    case STOCK_LOT_SET_KIND: return ['products', 'inventory_checks']
+    case STOCK_IN_LINE_EDIT_KIND: return ['products']
+    case STOCK_SESSION_KIND: return ['products', 'stock']
+    case SALE_SETTLEMENT_ACTION_KIND: return ['sales']
+    case RETURN_BULK_ACTION_KIND: return ['products', 'returns', 'sales', 'stock']
+    case BULK_STATUS_KIND: return ['sales', 'stock']
+    default: return String(payload.action || '') === 'customer' ? ['sales', 'returns'] : ['sales']
+  }
+}
+
 async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, direction: 'undo' | 'redo') {
   const user = c.get('user')
   const db = getDb(c.env)
@@ -567,6 +591,16 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     }
     let applied = false
     let outcome: UndoApplierOutcome | void = undefined
+    // What the applier would announce and which versions it moved: recorded, then ONE awaited bump and only then the broadcasts (F1).
+    const effects: UndoApplierEffects = { namespaces: [], broadcasts: [] }
+    const bumpThenAnnounce = async (extra: string[]) => {
+      const namespaces = [...new Set([...effects.namespaces, ...extra])]
+      if (namespaces.length) await import('../lib/cache').then(({ bumpVersions }) => bumpVersions(c.env, namespaces)).catch(() => {})
+      if (effects.broadcasts.length) {
+        const pending = effects.broadcasts.splice(0)
+        c.executionCtx.waitUntil((async () => { const { broadcast } = await import('../durable-objects/broadcastHub'); await Promise.allSettled(pending.map((event) => broadcast(c.env, event.channel, event.payload))) })().catch(() => {}))
+      }
+    }
     if (applier) {
       try {
         const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
@@ -577,7 +611,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         // A grouped return action is one atomic batch whose size grows with its stock lines (see lib/returnBulkAction.ts).
         const returnBulkQueryBudget = applier.name === RETURN_BULK_ACTION_KIND && metrics
           ? { statementsUsed: () => (callCounting ? metrics.invocation.attemptedCalls : metrics.attemptedStatements) + 1, reserveStatements: 8, callCounting } : undefined
-        outcome = await applier.run(payload, { env: c.env, user, direction, historyId: existing.id, generation: body.expected_generation, stockSessionQueryBudget, returnBulkQueryBudget })
+        outcome = await applier.run(payload, { env: c.env, user, direction, historyId: existing.id, generation: body.expected_generation, stockSessionQueryBudget, returnBulkQueryBudget, effects })
         applied = true
         // Server-applied undo/redo rewrites product and stock rows, but the
         // appliers only BROADCAST; none bumps a cache version. Every reader
@@ -585,18 +619,21 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         // stock-filtered product search pages, the storefront) would keep
         // serving the pre-undo numbers until its TTL. One 'stock' bump here
         // covers every applier. Lazy and fully swallowed: a cache fault must
-        // never turn an applied undo into an error.
-        if (applier.name !== STOCK_SESSION_KIND) {
-          const stockBump = import('../lib/cache').then(({ bumpVersion }) => bumpVersion(c.env, 'stock')).catch(() => {})
-          try { c.executionCtx.waitUntil(stockBump) } catch { void stockBump }
-        }
+        // never turn an applied undo into an error. Awaited, with the replay
+        // namespaces below in ONE call, so the next read already sees it (W3 Slice A).
         // The version the original writer bumps, so the readers keyed on it (the 20 s Dashboard ranking cache, the
         // Sales list cache, the product lists) turn over now and not at their TTL: added lines move 'sales' (an
         // add-items bumps stock and sales); a merge fold moves 'products'. Awaited, so the next read already sees it.
         const replayNamespaces = applier.name === SALE_ADD_ITEMS_ACTION_KIND ? ['sales']
-          : PRODUCT_MERGE_APPLIER_KINDS.has(applier.name) ? ['products'] : []
-        if (replayNamespaces.length) await import('../lib/cache').then(({ bumpVersions }) => bumpVersions(c.env, replayNamespaces)).catch(() => {})
+          : PRODUCT_MERGE_APPLIER_KINDS.has(applier.name) || PRODUCTS_REPLAY_KINDS.has(applier.name) ? ['products'] : []
+        const bumpNamespaces = [...(applier.name !== STOCK_SESSION_KIND ? ['stock'] : []), ...replayNamespaces]
+        // The server-managed kinds' own bump helpers move their namespaces in this same call (the awaited helper block further down no longer bumps).
+        const managedNamespaces = serverManagedReplay && applier.name !== SALE_ADD_ITEMS_ACTION_KIND && applier.name !== PRODUCT_MERGE_GROUP_ACTION_KIND && !mergeCostReplay
+          ? serverReplayBumpNamespaces(applier.name, payload) : []
+        await bumpThenAnnounce([...bumpNamespaces, ...managedNamespaces])
       } catch (error) {
+        // An applier that failed after it recorded a change (a partial replay) still advances what it moved before the refusal is answered.
+        if (!applied && effects.namespaces.length) await bumpThenAnnounce([])
         const transactionRefusal = stockTransactionRefusal(error)
         if (transactionRefusal) return c.json({ success: false, ...transactionRefusal }, 503)
         const stockGuard = productStockGuardError(error)
@@ -626,25 +663,28 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     }
 
     if (serverManagedReplay && applier) {
-      if (applier.name !== SALE_ADD_ITEMS_ACTION_KIND && applier.name !== PRODUCT_MERGE_GROUP_ACTION_KIND && !mergeCostReplay) c.executionCtx.waitUntil(applier.name === CUSTOMER_GENDER_RESTORATION_KIND
-        ? notifyCustomerGenderRestoration(c.env)
-        : applier.name === RETURN_LEGACY_CONVERT_KIND
-        ? notifyLegacyReturnConversion(c.env)
-        : applier.name === TRANSFER_OPERATION_KIND
-        ? notifyTransferOperation(c.env)
-        : applier.name === STOCK_LOT_SET_KIND
-        ? notifyStockLotSet(c.env, existing.entity_id)
-        : applier.name === STOCK_IN_LINE_EDIT_KIND
-        ? notifyStockInLineEdit(c.env)
-        : applier.name === STOCK_SESSION_KIND
-        ? notifyStockSession(c.env, { operationId: String(payload.operation_id) }, true)
-        : applier.name === SALE_SETTLEMENT_ACTION_KIND
-          ? notifySaleSettlementAction(c.env)
-          : applier.name === RETURN_BULK_ACTION_KIND
-            ? notifyReturnBulkAction(c.env)
-            : applier.name === BULK_STATUS_KIND
-              ? notifyBulkStatus(c.env)
-              : notifySaleBulkUpdate(c.env, String(payload.action || '')))
+      // W3 Slice A: the bump (every namespace, one call) was awaited above; this announce (broadcasts) follows in waitUntil.
+      if (applier.name !== SALE_ADD_ITEMS_ACTION_KIND && applier.name !== PRODUCT_MERGE_GROUP_ACTION_KIND && !mergeCostReplay) {
+        c.executionCtx.waitUntil(applier.name === CUSTOMER_GENDER_RESTORATION_KIND
+          ? announceCustomerGenderRestoration(c.env)
+          : applier.name === RETURN_LEGACY_CONVERT_KIND
+          ? announceLegacyReturnConversion(c.env)
+          : applier.name === TRANSFER_OPERATION_KIND
+          ? announceTransferOperation(c.env)
+          : applier.name === STOCK_LOT_SET_KIND
+          ? announceStockLotSet(c.env, existing.entity_id)
+          : applier.name === STOCK_IN_LINE_EDIT_KIND
+          ? announceStockInLineEdit(c.env)
+          : applier.name === STOCK_SESSION_KIND
+          ? announceStockSession(c.env, { operationId: String(payload.operation_id) })
+          : applier.name === SALE_SETTLEMENT_ACTION_KIND
+            ? announceSaleSettlementAction(c.env)
+            : applier.name === RETURN_BULK_ACTION_KIND
+              ? announceReturnBulkAction(c.env)
+              : applier.name === BULK_STATUS_KIND
+                ? announceBulkStatus(c.env)
+                : announceSaleBulkUpdate(c.env, String(payload.action || '')))
+      }
       // Telegram (owner, 27 Sep 2026): undoing or redoing a grouped return
       // STATUS change cancels or restores those returns, so it is announced
       // like the original action. The sender reads each return's status now,

@@ -306,14 +306,20 @@ const returnsRouteOverrides = {
   // Part 519 (session 0b) gave the route a datetime return-number generator;
   // the real one reads the DB for same-second collisions -- a deterministic
   // stub keeps this suite's return numbers stable.
-  '../lib/receiptNumber': { uniqueBusinessDateTimeNumber: async (prefix, exists) => {
+  // J7: the real generator reads its candidates with ONE call (readTaken(candidates) -> the taken ones); this stub keeps the fixed clock and the two-digit suffix ladder.
+  '../lib/receiptNumber': { uniqueBusinessDateTimeNumber: async (prefix, readTaken) => {
     const base = `${prefix ? `${prefix}-` : ''}20260830-120000`
-    if (!await exists(base)) return base
-    for (let suffix = 1; suffix < 100; suffix += 1) {
-      const candidate = `${base}-${String(suffix).padStart(2, '0')}`
-      if (!await exists(candidate)) return candidate
+    const ladder = [base, ...Array.from({ length: 99 }, (_, index) => `${base}-${String(index + 1).padStart(2, '0')}`)]
+    // The frozen stock-bridge fixture route (fixtures/stock-bridge-*/returns.ts.txt) still probes ONE candidate at a time: its callback is a boolean `exists(candidate)`.
+    let taken = null
+    try { const got = await readTaken(ladder); taken = typeof got === 'boolean' ? null : new Set(got) } catch { taken = null }
+    if (taken === null) {
+      for (const candidate of ladder) if (!await readTaken(candidate)) return candidate
+      throw new Error('test receipt space exhausted')
     }
-    throw new Error('test receipt space exhausted')
+    const free = ladder.find((candidate) => !taken.has(candidate))
+    if (!free) throw new Error('test receipt space exhausted')
+    return free
   } },
   // Real money kernel -- the replacement sale derives its totals through the
   // same function routes/sales.ts uses, so it must be the real one here too.

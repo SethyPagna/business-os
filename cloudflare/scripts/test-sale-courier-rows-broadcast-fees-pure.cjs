@@ -28,12 +28,13 @@ const FEES = "broadcast(c.env, 'fees'"
 const sales = read('routes/sales.ts')
 
 test('sale create broadcasts fees only when it carries a courier cost', () => {
-  const block = between(sales, "    bumpVersion(c.env, 'stock'),\n    bumpVersion(c.env, 'sales'),\n    // A sale that carries a courier cost", "// Owner, 6 Oct 2026: a low")
-  assert.ok(block.includes(`deliveryActualCostUsd != null ? [${FEES}`), 'the create broadcast is conditional on a courier cost')
+  // W3 Slice A: the bump is awaited first, then the conditional broadcast follows it in waitUntil.
+  const block = between(sales, "  await bumpVersions(c.env, ['stock', 'sales'])\n  // A sale that carries a courier cost", "// Owner, 6 Oct 2026: a low")
+  assert.ok(block.includes(`if (deliveryActualCostUsd != null) c.executionCtx.waitUntil(${FEES}`), 'the create broadcast is conditional on a courier cost')
 })
 
 test('cancel and restore broadcast fees (the courier row appears or drops with the sale)', () => {
-  const block = between(sales, "bumpVersion(c.env, 'stock'),\n    bumpVersion(c.env, 'sales'),\n    // The cancel fee is an expense row", "recordStockCrossings")
+  const block = between(sales, "    // The cancel fee is an expense row", "recordStockCrossings")
   assert.ok(block.includes("(oldStatus === 'cancelled') !== (saleStatus === 'cancelled')"), 'crossing the cancelled boundary')
   assert.ok(block.includes(FEES))
 })

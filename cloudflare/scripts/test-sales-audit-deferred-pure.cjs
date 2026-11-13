@@ -54,11 +54,10 @@ function assertAuditIsDeferred(src, startMarker, label) {
   const { block, beforeWaitUntil } = sliceThroughWaitUntil(src, startMarker)
   assert.ok(!/\bawait\s+audit\(/.test(beforeWaitUntil), `${label}: audit() must not be awaited before the waitUntil block (would be back on the critical path)`)
   assert.ok(/\baudit\(/.test(block), `${label}: audit() must be inside the waitUntil(Promise.all([...])) block`)
-  // Accepts either the single-namespace bumpVersion() or the multi-namespace
-  // bumpVersions() (both defer through lib/cache.ts's same D1-batched path;
-  // see K1) -- the invariant is "a cache-version bump rides in the same
-  // waitUntil as the deferred audit", not which of the two call shapes.
-  assert.ok(/\bbumpVersions?\(/.test(block), `${label}: expected bumpVersion()/bumpVersions() alongside the deferred audit() call`)
+  // W3 Slice A: the audit stays deferred, but the cache-version bump does NOT ride in the waitUntil any more: it is awaited right
+  // before it (after the commit, before the response), so the actor's next read already keys on the new version.
+  assert.ok(!/\bbumpVersions?\(/.test(block), `${label}: the cache bump must not be inside the deferred block`)
+  assert.ok(/\bawait\s+bumpVersions?\(/.test(beforeWaitUntil.slice(-700)), `${label}: expected an awaited bumpVersion()/bumpVersions() right before the deferred audit() block`)
 }
 
 function main() {

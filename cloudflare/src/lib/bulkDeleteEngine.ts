@@ -239,7 +239,8 @@ async function runProductDeleteChunk(env: Env, db: D1Compat, job: JobRow, allIds
 // ids that were actually deleted so connected clients drop exactly those rows. Safe to repeat.
 async function publishContactsDelete(env: Env, config: EntityConfig, jobId: string, allIds: number[], failedIds: number[]): Promise<void> {
   const failed = new Set(failedIds)
-  await bumpVersion(env, config.cacheKey)
+  // The version namespace is the table name every reader keys on; cacheKey is the BROADCAST channel's spelling ('deliveryContacts').
+  await bumpVersion(env, config.table)
   await broadcast(env, config.cacheKey, { action: 'bulk-delete', ids: allIds.filter((id) => !failed.has(id)), jobId })
 }
 

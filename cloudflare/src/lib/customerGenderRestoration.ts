@@ -311,7 +311,13 @@ export async function replayCustomerGenderRestoration(payload: Record<string, un
   }
   return complete(next.generation)
 }
-export async function notifyCustomerGenderRestoration(env: Env): Promise<void> {
+export async function bumpCustomerGenderRestoration(env: Env): Promise<void> {
   await bumpVersion(env, 'customers')
+}
+export async function announceCustomerGenderRestoration(env: Env): Promise<void> {
   await broadcast(env, 'customers', { action: 'update' })
+}
+export async function notifyCustomerGenderRestoration(env: Env): Promise<void> {
+  await bumpCustomerGenderRestoration(env)
+  await announceCustomerGenderRestoration(env)
 }

@@ -89,6 +89,8 @@ function setup() {
     prepare(sql) {
       return {
         get(params) { return Promise.resolve(sqlite.prepare(sql).get(filterParams(sql, params))) },
+        // J7: the receipt mint reads its ten candidates with one `.all([json])` (positional param).
+        all(params) { return Promise.resolve(sqlite.prepare(sql).all(...(Array.isArray(params) ? params : [filterParams(sql, params)]))) },
       }
     },
     batchOnce(statements) { return this.batch(statements) },

@@ -310,9 +310,9 @@ app.post('/stock-integrity/repair', async (c) => {
     remainingIssues: remaining.length,
     preservedBranchAllocations: true,
   })
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'repair' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
   return c.json({ success: remaining.length === 0, repairedRows, productCount: repairedRows, remainingIssues: remaining.length })
 })
@@ -501,10 +501,10 @@ app.post('/transfer', async (c) => {
     if (refusal) return c.json(refusal.body, refusal.status)
     throw error
   }
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'transfer' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: productId }))
   if (mergeTarget) c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: destProductId }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
   // Telegram: a transfer is a stock change, so the alert carries the
   // resulting on-hand at both branches, read back after the write.
@@ -785,9 +785,9 @@ app.post('/transfer-bulk', async (c) => {
     throw error
   }
 
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'transfer' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
   // Telegram: same resulting-on-hand alert as /transfer, one line per item
   // (the builder caps the list and states the remainder).
@@ -1115,9 +1115,9 @@ app.put('/:id', async (c) => {
     throw error
   }
 
-  c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'update', id }))
   // Every product row lists the branches (name, is_active) beside its stock, so a branch edit turns the product lists over.
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  await bumpVersion(c.env, 'products')
+  c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'update', id }))
   // The edit re-stamps the branch name on the branch's sales (branchNameSnapshotStatements), which the Expenses list shows on its courier rows.
   c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'update' }))
   if (!committedBranch) throw new Error('The committed branch response is unavailable.')

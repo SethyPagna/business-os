@@ -14,7 +14,7 @@ const path = require('node:path')
 
 const SRC = path.join(__dirname, '..', 'src')
 const read = (rel) => fs.readFileSync(path.join(SRC, rel), 'utf8').replace(/\r\n/g, '\n')
-const PRODUCTS_BUMP = /bumpVersions?\([^)]*['"]products['"]/
+const PRODUCTS_BUMP = /bumpVersions?\([^)]*['"]products['"]|bumpChange\(ctx, \['products'\]/
 const products = read('routes/products.ts')
 const between = (text, from, to) => { const a = text.indexOf(from); assert.ok(a >= 0, `anchor ${from}`); const b = text.indexOf(to, a + from.length); return text.slice(a, b < 0 ? undefined : b) }
 
@@ -43,9 +43,11 @@ for (const [file, writes] of IMAGE_WRITERS) {
 assert.ok(PRODUCTS_BUMP.test(read('lib/reviewApply.ts')), 'reviewApply (the other caller of the product writer) bumps')
 
 // 2. the in-file paths that wrote without announcing
-assert.ok(/if \(renamedProductIds\.length\) c\.executionCtx\.waitUntil\(bumpVersion\(c\.env, 'products'\)\)\n\s+return c\.json\(\{ success: true, pending: true, pendingActionId: pendingId \}, 202\)/.test(products), 'a group rename carried before the review queue is announced')
-const identity = between(products, 'const identityRefusal = await identityFoldRefusal', 'let foldResult: Awaited')
-assert.ok(PRODUCTS_BUMP.test(identity), 'the identity write kept before the fold is announced')
+assert.ok(/if \(renamedProductIds\.length\) await bumpVersion\(c\.env, 'products'\)\n\s+return c\.json\(\{ success: true, pending: true, pendingActionId: pendingId \}, 202\)/.test(products), 'a group rename carried before the review queue is announced')
+// W3 round 2: ONE bump for the whole rename-and-fold request, in a finally, so every way out after the identity write advances the version.
+const identity = between(products, 'const identityRefusal = await identityFoldRefusal', 'if (mergedAndFolded) c.executionCtx.waitUntil')
+assert.ok(/finally \{\s*await bumpVersion\(c\.env, 'products'\)/.test(identity), 'the identity write kept before the fold is announced, once, in a finally')
+assert.equal((identity.match(/bumpVersion\(/g) || []).length, 1, 'one bump call in the rename-and-fold block')
 const removeReplay = between(products, "if (replay?.status === 'undo_ready' && replay.product_id === id", "return c.json({ success: false, code: 'review_state_conflict'")
 assert.ok(PRODUCTS_BUMP.test(removeReplay), 'a removal replayed after a lost acknowledgement is announced')
 const mergeThrow = between(products, 'if (applied) {', 'const errorId = crypto.randomUUID()')

@@ -214,13 +214,5 @@ export function parseExchangeContext(rows: ExchangeContextRow | readonly Exchang
   }
 }
 
-/** The first candidate number nobody holds; the last resort mirrors uniqueBusinessDateTimeNumber's random suffix. */
-export function firstFreeNumber(candidates: readonly string[], taken: ReadonlySet<string>, random: () => string = () => Math.random().toString(36).slice(2, 6).toUpperCase()): string {
-  for (const candidate of candidates) if (!taken.has(candidate)) return candidate
-  return `${candidates[0]}-${random()}`
-}
-
-/** `base`, `base-2`, ... `base-10`: the candidates uniqueBusinessDateTimeNumber would probe, in its order. */
-export function numberCandidates(base: string): string[] {
-  return [base, ...Array.from({ length: 9 }, (_, index) => `${base}-${index + 2}`)]
-}
+// Moved to ./receiptNumber (the J7 one-statement read shares them); re-exported so this module's importers keep working.
+export { firstFreeNumber, numberCandidates } from './receiptNumber'

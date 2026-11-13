@@ -7,7 +7,7 @@ import { getActionTier, isAdminControlUser } from './permissions';
 import { D1_MAX_BOUND_PARAMS } from './sqlBinding';
 import { RETURN_STATUSES, SALE_STATE_SET_SQL, VALID_SALE_STATUSES, requestedSaleState, sameSaleState, saleStateParams, saleStatusWord } from './salesStatus';
 import { addImportedReturnedQuantities, allocateReturnedQuantities, guardSaleStatusTransition, heldQuantity, normalizeCancelReason, planSaleStockTransition, type TransitionItem, type StockStatement } from './saleTransitions';
-import { bumpVersion } from './cache';
+import { bumpVersions } from './cache';
 import { broadcast } from '../durable-objects/broadcastHub';
 import { actorSnapshot } from './actorSnapshot';
 import { branchCanSell } from './branchRoles';
@@ -344,8 +344,16 @@ function memberStatements(member: Member, sign: number, user: SessionUser, stamp
 function auditStatement(user: SessionUser, operationId: string, direction: string, count: number): StockStatement {
     return { sql: 'INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value) VALUES(@uid,@name,@action,\'sale\',@id,@details,\'sales\',@id,@details)', params: { uid: user.id, name: actorSnapshot(user), action: direction, id: operationId, details: JSON.stringify({ kind: BULK_STATUS_KIND, count }) } };
 }
+// W3 Slice A: a route awaits the bump before its response and hands the announce to waitUntil, in that order. notifyBulkStatus keeps both for the History replay.
+export async function bumpBulkStatus(env: Env) {
+    await bumpVersions(env, ['sales', 'stock']);
+}
+export async function announceBulkStatus(env: Env) {
+    await Promise.allSettled((['sales', 'products', 'inventory', 'returns', 'fees'] as const).map(channel => broadcast(env, channel, { action: 'update' })));
+}
 export async function notifyBulkStatus(env: Env) {
-    await Promise.allSettled([bumpVersion(env, 'sales'), bumpVersion(env, 'stock'), ...(['sales', 'products', 'inventory', 'returns', 'fees'] as const).map(channel => broadcast(env, channel, { action: 'update' }))]);
+    await bumpBulkStatus(env);
+    await announceBulkStatus(env);
 }
 /** Units a bulk status change TAKES out of branch stock (a restore of cancelled sales), for the low / out-of-stock alert. */
 export type BulkStockTaken = Array<{ productId: number; branchId: number; quantity: number }>;

@@ -15,7 +15,7 @@ import { sanitizeMediaList } from '../lib/media'
 import { ensureCoreDataInvariants, dropAllCustomTables, FACTORY_RESET_TABLES, PRODUCTS_RESET_TABLES, presentResetTables, resolveSeedAdminPassword } from '../lib/coreDataInvariants'
 import { createCloudflareBackup, createSectionBackup } from '../lib/backup'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { bumpVersion, bumpVersions } from '../lib/cache'
+import { bumpVersion, bumpVersions, getVersionsWithFallback, isUnsafeVersion } from '../lib/cache'
 import { reportError } from '../lib/errorReporting'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -464,13 +464,13 @@ app.post('/reset-data', async (c) => {
       })
 
       await rotateEpochAfterReset(c.env, 'reset-data')
+      await bumpVersion(c.env, 'products')
       c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'reset', mode }))
       c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'reset', mode }))
       if (includeMovements || includeSales) {
         c.executionCtx.waitUntil(broadcast(c.env, 'sales', { action: 'reset', mode }))
         c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'reset', mode }))
       }
-      c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
 
       const keptParts = []
       if (!includeSales) keptParts.push('sales, returns')
@@ -671,6 +671,7 @@ app.post('/reset-data', async (c) => {
     // momentarily behind. Previously this route never broadcast or
     // invalidated the products search cache at all.
     await rotateEpochAfterReset(c.env, 'reset-data')
+    await bumpVersion(c.env, 'products')
     c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'reset', mode }))
     c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'reset', mode }))
     c.executionCtx.waitUntil(broadcast(c.env, 'sales', { action: 'reset', mode }))
@@ -679,7 +680,6 @@ app.post('/reset-data', async (c) => {
       c.executionCtx.waitUntil(broadcast(c.env, 'customers', { action: 'reset', mode }))
       c.executionCtx.waitUntil(broadcast(c.env, 'suppliers', { action: 'reset', mode }))
     }
-    c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
 
     return c.json({
       success: true,
@@ -794,7 +794,8 @@ app.post('/reset-section', async (c) => {
     await rotateEpochAfterReset(c.env, 'reset-section')
     if (config.broadcastChannel) {
       c.executionCtx.waitUntil(broadcast(c.env, config.broadcastChannel, { action: 'reset', section }))
-      c.executionCtx.waitUntil(bumpVersion(c.env, config.broadcastChannel))
+      // The version namespace is the section key (the table name every reader keys on), NOT the broadcast channel's spelling ('deliveryContacts').
+      c.executionCtx.waitUntil(bumpVersion(c.env, section))
     }
 
     return c.json({
@@ -1015,13 +1016,22 @@ app.post('/sale-not-paid-stock-recovery-20260909/apply', async (c) => {
 
   try {
     const result = await recovery.applySaleNotPaidStockRecovery(db, plan)
-    const refreshes = await Promise.allSettled([
-      bumpVersions(c.env, ['sales', 'products', 'audit_log']),
+    // W3 Slice A round 2 (F2): the bump (stock too, this moves stock) is awaited BEFORE the response, and the broadcasts follow it in waitUntil,
+    // so a peer is never told while the old version is still current. bumpVersions never rejects, so "did it work" is read from the version
+    // tokens themselves, before and after (as lib/generalCustomerRepair.ts does).
+    const cacheNamespaces = ['sales', 'products', 'stock', 'audit_log']
+    const readTokens = async () => { try { return await getVersionsWithFallback(c.env, cacheNamespaces) } catch { return null } }
+    const tokensBefore = await readTokens()
+    await bumpVersions(c.env, cacheNamespaces)
+    const tokensAfter = await readTokens()
+    // An unreadable counter answers a fresh random token on every read, so it would always "differ": it never proves an invalidation (review N3).
+    const readable = (tokens: string[] | null): tokens is string[] => tokens !== null && !tokens.some(isUnsafeVersion)
+    const cacheInvalidated = readable(tokensBefore) && readable(tokensAfter) && tokensBefore.every((token, index) => token !== tokensAfter[index])
+    const refreshPending = !cacheInvalidated
+    c.executionCtx.waitUntil(Promise.allSettled([
       broadcast(c.env, 'sales', { action: 'update', recovery: recovery.SALE_NOT_PAID_STOCK_RECOVERY_TARGET }),
       broadcast(c.env, 'products', { action: 'update', recovery: recovery.SALE_NOT_PAID_STOCK_RECOVERY_TARGET }),
-    ])
-    const cacheInvalidated = refreshes.slice(0, 1).every((entry) => entry.status === 'fulfilled')
-    const refreshPending = refreshes.some((entry) => entry.status === 'rejected')
+    ]))
     return c.json({
       ...result,
       verification_pending: Boolean(result.verification_pending),
@@ -1237,10 +1247,9 @@ app.post('/finalize-migration', async (c) => {
         label: `Migration finalize: zeroed live stock (${affected.branch_stock} branch-stock rows, ${affected.products} products)`,
         step,
       })
+      await bumpVersions(c.env, ['products', 'inventory'])
       c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'reset', step }))
       c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'reset', step }))
-      c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
-      c.executionCtx.waitUntil(bumpVersion(c.env, 'inventory'))
 
       return c.json({
         success: true,
@@ -1262,10 +1271,9 @@ app.post('/finalize-migration', async (c) => {
       label: `Migration finalize: parked ${affected.branch_batch_stock} historical lot rows`,
       step,
     })
+    await bumpVersions(c.env, ['products', 'inventory'])
     c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'reset', step }))
     c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'reset', step }))
-    c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
-    c.executionCtx.waitUntil(bumpVersion(c.env, 'inventory'))
 
     return c.json({
       success: true,
@@ -1468,9 +1476,15 @@ app.post('/repair-integrity', async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>
   const passwordDenied = await denyUnlessCurrentPassword(c, body, 403)
   if (passwordDenied) return passwordDenied
+  // F5: the stock repair commits in its own step, and a later step may still throw. Whatever the outcome, an attempted repair moves the versions
+  // before the answer: bumped on success when it repaired something, and in the catch below when it did not get that far.
+  let bumped = false
   try {
     const result = await runDataIntegrityCheck(c.env, true)
     if (result.repairs > 0) {
+      // W1: the repair rewrites stock quantities (and sale return states), so the cache versions every list keys on move now, before the answer.
+      bumped = true
+      await bumpVersions(c.env, ['products', 'stock', 'sales'])
       await audit(c.env, user?.id ?? null, actorSnapshot(user), 'repair', 'data-integrity', null, {
         repairs: result.repairs,
         errors: result.errors.length,
@@ -1478,6 +1492,7 @@ app.post('/repair-integrity', async (c) => {
     }
     return c.json({ ...result, success: true })
   } catch (error) {
+    if (!bumped) await bumpVersions(c.env, ['products', 'stock', 'sales'])
     const refusal = productStockGuardError(error)
     if (refusal) return c.json({ success: false, error: refusal.message, code: refusal.code }, 409)
     return c.json({ success: false, error: `Integrity repair failed: ${(error as Error).message}` }, 500)
