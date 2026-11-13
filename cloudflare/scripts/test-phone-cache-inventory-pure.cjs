@@ -22,12 +22,13 @@ const count = (source, needle) => code(source).split(needle).length - 1
 const PHONE_FREE = {
   'routes/batches.ts': { cachedJsonResponse: 1, why: 'tracked product ids' },
   'routes/lookups.ts': { cachedJsonResponse: 1, why: 'category and unit lists (d1-queries S10): SELECT * from categories/units (name, color, updated_at; no contact column) merged with the distinct category/unit strings products carry' },
-  'routes/notifications.ts': { cachedJsonResponse: 1, why: 'inventory / expiry / inventory-full / supplier_credit sections: products and totals (the loyalty section takes the contacts option, below)' },
+  'routes/notifications.ts': { cachedJsonResponse: 1, put: 1, why: 'inventory / expiry / inventory-full / supplier_credit sections: products and totals (the loyalty section takes the contacts option, below). The put is the plan-lifetime ttlOnly entry (store.put): only the inventory, expiry, inventory-full and supplier-credit sections use ttlOnly, and none reads a contact column' },
   'routes/products.ts': { cachedJsonResponse: 6, put: 1, why: 'product search, bootstrap, filters, facets, clusters, counts' },
   'routes/sales.ts': { cachedJsonResponse: 2, why: '/stats and /stats-strip: counts and totals' },
   'lib/inventoryCheckList.ts': { cachedJsonResponse: 1, why: 'Inventory Check state sets (INV-A S4a): product ids per check state at one branch, no contact (the ranked scope, lib/rankedScope.ts, stores family keys and a promotion edge: also no contact)' },
   'lib/dashboardStockOverview.ts': { put: 1, why: 'stock overview figures' },
   'lib/r2.ts': { put: 1, why: 'image bytes' },
+  'lib/rankedScope.ts': { put: 2, why: 'promotion edge date and the ranked window (R3): product family keys and a promotion edge, no contact column' },
   'routes/portal.ts': { put: 1, why: 'public storefront bodies (the shop\'s own contact phone only)' },
 }
 // file -> number of grant-keyed producers there must be.
@@ -39,6 +40,11 @@ const PHONE_KEYED = {
 // Files that define the helpers, or only delete entries.
 const HELPERS = new Set(['lib/cache.ts', 'lib/phoneCache.ts', 'lib/imageVariantStore.ts'])
 
+// R3: every Cache API put, whatever the producer calls it: cache.put, store.put, caches.default.put (receiver "default") or a lower-case name ending in Cache. Route registration
+// (app.put), KV (env.CACHE.put), R2 (ASSETS.put) and storage objects are not the Cache API, so they are not matched.
+const CACHE_API_RECEIVER = /^(?:cache|store|default|[a-z]\w*Cache)$/
+const cachePuts = (source) => [...code(source).matchAll(/([A-Za-z_$][\w$]*)\.put\(/g)].filter((m) => CACHE_API_RECEIVER.test(m[1])).map((m) => m[1])
+
 const files = walk('').filter((file) => !HELPERS.has(file))
 const failures = []
 const fail = (message) => failures.push(message)
@@ -47,7 +53,7 @@ for (const file of files) {
   const source = read(file)
   const json = count(source, 'cachedJsonResponse(')
   const keyed = count(source, 'cachedPhoneJson(')
-  const put = (code(source).match(/\bcache\.put\(/g) || []).length
+  const put = cachePuts(source).length
   const freeJson = PHONE_FREE[file]?.cachedJsonResponse ?? 0
   const freePut = PHONE_FREE[file]?.put ?? 0
   const wantKeyed = PHONE_KEYED[file] ?? 0
@@ -97,4 +103,6 @@ if (failures.length) {
   for (const failure of failures) console.error(`FAIL ${failure}`)
   process.exit(1)
 }
+const sites = files.flatMap((file) => cachePuts(read(file)).map((receiver) => `${file} (${receiver}.put)`))
+console.log(`Cache API put sites (${sites.length}): ${sites.join(', ')}`)
 console.log(`PASS phone cache inventory: ${files.length} source files scanned; every Cache API producer is grant-keyed or judged phone-free`)
