@@ -2381,9 +2381,14 @@ export async function drainDueTelegramShiftOverviews(env: Env, nowMs: number = D
   // table themselves, so a deployment without 0194 fails with "no such
   // table", which is the same answer for free: nothing to send.
   // The shift report has its own table (0305): the cron, and only the cron, sends one due report per tick.
+  // A report is ~35 D1 calls and an overview ~40, and a cron invocation has 50: ONE send per tick. A tick that took a report (sent, skipped or failed: it spent its calls)
+  // returns here, and the overview, still pending and due, is the next tick's first send. (Draining both in one invocation claimed the overview and then ran out of
+  // calls: it was left 'sending' and swept as abandoned, never sent.)
   let reported = 0
   if (options.sweepStale) {
-    try { reported = await drainDueTelegramShiftReports(env, nowMs) } catch (error) { console.error('[telegram] shift report drain failed', error) }
+    let taken: 'none' | ShiftReportDeliveryResult = 'none'
+    try { taken = await drainOneDueShiftReport(env, nowMs) } catch (error) { console.error('[telegram] shift report drain failed', error) }
+    if (taken !== 'none' && taken !== 'taken') return taken === 'sent' ? 1 : 0
   }
   const db = getDb(env)
   const now = new Date(nowMs).toISOString()
@@ -2530,6 +2535,10 @@ export async function deliverTelegramShiftReport(env: Env, key: string, nowMs: n
 
 /** The cron's share: ONE due report per tick (a report is ~40 calls, the cron invocation has its own 50). */
 export async function drainDueTelegramShiftReports(env: Env, nowMs: number = Date.now()): Promise<number> {
+  return (await drainOneDueShiftReport(env, nowMs)) === 'sent' ? 1 : 0
+}
+/** The report drain's one step: what became of the one due report ('none' when nothing was due, 'taken' when another invocation claimed it first). */
+async function drainOneDueShiftReport(env: Env, nowMs: number): Promise<'none' | ShiftReportDeliveryResult> {
   const db = getDb(env)
   const now = new Date(nowMs).toISOString()
   let due: { send_key: string } | null | undefined
@@ -2540,10 +2549,10 @@ export async function drainDueTelegramShiftReports(env: Env, nowMs: number = Dat
       WHERE status = 'pending' AND due_at <= @now AND (dispatch = 'fallback' OR due_at <= @queueGrace)
       ORDER BY due_at LIMIT 1`).get<{ send_key: string }>({ now, queueGrace: new Date(nowMs - SHIFT_REPORT_QUEUE_GRACE_MS).toISOString() })
   } catch (error) {
-    if (/no such table/i.test(String((error as Error)?.message || error))) return 0
+    if (/no such table/i.test(String((error as Error)?.message || error))) return 'none'
     throw error
   }
-  return due && (await deliverTelegramShiftReport(env, due.send_key, nowMs)) === 'sent' ? 1 : 0
+  return due ? deliverTelegramShiftReport(env, due.send_key, nowMs) : 'none'
 }
 
 // ---- Command dispatch (S4-9) ----------------------------------------------

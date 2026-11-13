@@ -378,7 +378,7 @@ async function main() {
     assert.match(index, /!isShiftOverviewQueueMessage\(message\.body\) && !isShiftReportQueueMessage\(message\.body\)/)
     assert.match(index, /runBackground\(c\.env, 'telegram-drain', \(\) => drainDueTelegramShiftOverviews\(c\.env, now\)\)/, 'the request drain passes no sweepStale, so it never reaches the report drain')
     const telegram = fs.readFileSync(path.join(root, 'src', 'lib', 'telegram.ts'), 'utf8').replace(/\r\n/g, '\n')
-    assert.match(telegram, /if \(options\.sweepStale\) \{\n\s+try \{ reported = await drainDueTelegramShiftReports\(env, nowMs\) \}/)
+    assert.match(telegram, /if \(options\.sweepStale\) \{\n\s+let taken[^\n]*\n\s+try \{ taken = await drainOneDueShiftReport\(env, nowMs\) \}[^\n]*\n\s+if \(taken !== 'none' && taken !== 'taken'\) return/, 'a tick that took a report sends nothing else (the overview waits one tick)')
     assert.match(telegram, /ORDER BY due_at LIMIT 1`\)\.get<\{ send_key: string \}>/, 'ONE report per cron tick')
   })
 

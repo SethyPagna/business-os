@@ -12,6 +12,8 @@
 //      the Free-target switches on; the queued report invocation is <= CEILING; no call is refused anywhere.
 //   2. THE CAP: when a write lands between the figures and the commit (the digest guard aborts the batch) the close still commits and answers 200 and never reaches call 51 --
 //      the recompute is skipped, not attempted into the refusal.
+//   3. THE CRON (F2): a tick that carries a fallback report AND a due overview (no queue binding) sends ONE of them per invocation and never leaves the overview stuck 'sending'.
+//
 // REQUIRED RED: run it on the commit before round 2 (a checkout whose close was 48 calls): SHIFT_REAL_ROOT=<that cloudflare dir> node scripts/test-shift-close-real-worker-ceiling-native.cjs
 // Run (from cloudflare/): node scripts/test-shift-close-real-worker-ceiling-native.cjs
 const fs = require('node:fs')
@@ -284,6 +286,35 @@ async function main() {
     assert.equal(raceAlways.stored.n, 0, 'figures that could never be proven are not stored')
     assert.equal(raceOnce.stored.n, 0, 'one race on Free: the recompute does not fit the invocation, so the close commits without stored figures')
     for (const out of [raceOnce, raceAlways]) assert.equal(out.json.shift.figures_pending, true, out.name + ': the answer says the report figures are pending')
+  })
+
+  // F2: no queue binding -> the report AND the overview sit on the cron. ONE of them per invocation, the overview never stuck 'sending'.
+  const cron = await scenario({ name: 'no queue binding, overview due', queue: false, after: async ({ mf, raw, out, counts, sleep: wait, iso: toIso, telegramSent: sent }) => {
+    await raw.prepare('UPDATE telegram_scheduled_sends SET due_at = ?').bind(toIso(Date.now() - 1000)).run()
+    await mf.dispatchFetch(`${ORIGIN}/__counts`, { method: 'DELETE' })
+    const worker = await mf.getWorker()
+    out.ticks = []
+    for (let tick = 0; tick < 3; tick += 1) {
+      await worker.scheduled({ cron: '*/5 * * * *', scheduledTime: Date.now() })
+      await wait(2500)
+      const recs = (await counts()).filter((r) => r.kind === 'scheduled')
+      out.ticks.push({ calls: recs[tick]?.calls, refused: recs[tick]?.refused })
+      // a tick later than the first finds the earlier claim 'sending' only if it was stranded: age nothing, just record
+    }
+    out.telegramAfter = sent.slice()
+    out.reportsAfter = (await raw.prepare('SELECT send_key, status FROM telegram_shift_report_sends').all()).results
+    out.overviewsAfter = (await raw.prepare('SELECT send_key, status, last_error FROM telegram_scheduled_sends').all()).results
+  } })
+  console.log(`       cron ticks with a fallback report and a due overview: ${cron.ticks.map((t) => `${t.calls} calls/${t.refused} refused`).join(', ')}`)
+  await check('THE CRON: a tick sends one report OR one overview, fits the invocation, and the overview is never left stuck sending', () => {
+    for (const [index, tick] of cron.ticks.entries()) {
+      assert.ok(tick.calls <= CEILING && tick.refused === 0, `tick ${index + 1}: ${tick.calls} calls, ${tick.refused} refused`)
+    }
+    assert.ok(cron.reportsAfter.some((r) => /:close$/.test(r.send_key) && r.status === 'sent'), 'the close report was delivered by the cron')
+    const overview = cron.overviewsAfter[0]
+    assert.equal(overview.status, 'sent', `the overview: ${JSON.stringify(overview)}`)
+    assert.ok(!cron.overviewsAfter.some((r) => r.status === 'sending'), 'nothing stuck sending')
+    assert.equal(cron.telegramAfter.length, 2, 'the report and the overview were each sent once')
   })
 
   console.log(`${passed} checks passed.`)
