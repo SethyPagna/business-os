@@ -41,6 +41,8 @@ const db = {
 let listedBackups = 0
 let newerBackupExists = false
 let sectionBackupNewest = false
+let gzipBackupNewest = false
+let lastUpload = null
 const stubs = {
   './db': { getDb: () => db },
   './secretCrypto': {
@@ -53,6 +55,7 @@ const stubs = {
       listedBackups += 1
       return [
         ...(sectionBackupNewest ? [{ key: 'backups/cloudflare/section.json', name: 'section.json', finalized: true, scope: 'section' }] : []),
+        ...(gzipBackupNewest ? [{ key: 'backups/cloudflare/gz.json', name: 'gz.json', finalized: true }] : []),
         ...(newerBackupExists ? [{ key: 'backups/cloudflare/newer.json', name: 'newer.json', finalized: true }] : []),
         { key: 'backups/cloudflare/pending.json', name: 'pending.json', finalized: false },
         { key: 'backups/cloudflare/final.json', name: 'final.json', finalized: true },
@@ -101,8 +104,8 @@ const env = {
   ASSETS: {
     async get(key) {
       r2Reads += 1
-      assert.strictEqual(key, 'backups/cloudflare/final.json', 'newest unfinished backup must be skipped')
-      return { body: new Blob([bytes]).stream(), size: bytes.byteLength }
+      assert.ok(key === 'backups/cloudflare/final.json' || key === 'backups/cloudflare/gz.json', 'newest unfinished backup must be skipped')
+      return { body: new Blob([bytes]).stream(), size: bytes.byteLength, customMetadata: key.endsWith('gz.json') ? { encoding: 'gzip' } : {} }
     },
   },
   APP_ENCRYPTION_KEY: 'test',
@@ -132,11 +135,13 @@ global.fetch = async (url, init = {}) => {
     assert.strictEqual(init.method, 'POST')
     const metadata = JSON.parse(init.body)
     assert.strictEqual(metadata.appProperties.businessOsBackup, 'true')
-    assert.strictEqual(metadata.appProperties.backupKey, 'backups/cloudflare/final.json')
+    assert.ok(['backups/cloudflare/final.json', 'backups/cloudflare/gz.json'].includes(metadata.appProperties.backupKey))
+    lastUpload = { name: metadata.name, initType: init.headers['X-Upload-Content-Type'] }
     return new Response('', { status: 200, headers: { location: 'https://www.googleapis.com/upload/session-1' } })
   }
   if (value === 'https://www.googleapis.com/upload/session-1') {
     assert.strictEqual(init.method, 'PUT')
+    lastUpload.putType = init.headers['Content-Type']
     assert.ok(init.body && typeof init.body.getReader === 'function', 'R2 body must be streamed, not arrayBuffer()ed')
     uploadCount += 1
     return Response.json({ id: 'drive-file', size: String(bytes.byteLength) })
@@ -159,7 +164,7 @@ global.fetch = async (url, init = {}) => {
       ? { files: files.slice(5) }
       : { files: files.slice(0, 5), nextPageToken: 'page-2' })
   }
-  if (/\/drive\/v3\/files\/owned-(9|10|11)$/.test(value)) {
+  if (/\/drive\/v3\/files\/owned-(8|9|10|11)$/.test(value)) {
     assert.strictEqual(init.method, 'DELETE')
     return new Response(null, { status: 204 })
   }
@@ -243,6 +248,14 @@ async function main() {
     newerBackupExists = true
     assert.deepStrictEqual(await driveSyncHasNewBackup(env), { new: true, backupKey: 'backups/cloudflare/newer.json' }, 'the next daily backup is picked up')
     newerBackupExists = false
+    // F4: a plain copy keeps its .json name and type; a gzip manifest is named .json.gz and typed application/gzip.
+    assert.deepStrictEqual(lastUpload, { name: 'final.json', initType: 'application/json', putType: 'application/json' })
+    gzipBackupNewest = true
+    const gzPush = await pushBackupToDrive(env)
+    assert.strictEqual(gzPush.success, true, gzPush.error)
+    assert.strictEqual(gzPush.fileName, 'gz.json.gz')
+    assert.deepStrictEqual(lastUpload, { name: 'gz.json.gz', initType: 'application/gzip', putType: 'application/gzip' })
+    gzipBackupNewest = false
     // The step's order (interval, then new-backup check, then authority, then the queued job) is pinned by behaviour in
     // test-drive-sync-cron-step-pure.cjs.
     console.log('PASS Drive uses signed expiring one-time PKCE state, mirrors the newest finalized R2 manifest, and prunes only tagged app backups to ten')

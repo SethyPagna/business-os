@@ -436,9 +436,14 @@ export async function pushBackupToDrive(env: Env): Promise<{ success: boolean; e
 
     const object = await env.ASSETS.get(backup.key)
     if (!object?.body) throw new Error('The finalized R2 backup could not be streamed.')
+    // A gzip manifest is mirrored as stored (no CPU, a fraction of the Drive quota). Its Drive copy is named and typed for
+    // what it is, so a human downloading it gets a .json.gz that opens as one. Staging accepts both forms.
+    const gzipped = object.customMetadata?.encoding === 'gzip'
+    const driveFileName = gzipped ? driveGzipFileName(fileName) : fileName
+    const driveContentType = gzipped ? DRIVE_GZIP_MIME : DRIVE_JSON_MIME
 
     const metadata = {
-      name: fileName,
+      name: driveFileName,
       parents: [folderId],
       appProperties: {
         businessOsBackup: 'true',
@@ -451,7 +456,7 @@ export async function pushBackupToDrive(env: Env): Promise<{ success: boolean; e
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json; charset=UTF-8',
-        'X-Upload-Content-Type': 'application/json',
+        'X-Upload-Content-Type': driveContentType,
         'X-Upload-Content-Length': String(object.size),
       },
       body: JSON.stringify(metadata),
@@ -464,7 +469,7 @@ export async function pushBackupToDrive(env: Env): Promise<{ success: boolean; e
       method: 'PUT',
       headers: {
         Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
+        'Content-Type': driveContentType,
         'Content-Length': String(object.size),
       },
       body: object.body,
@@ -475,12 +480,28 @@ export async function pushBackupToDrive(env: Env): Promise<{ success: boolean; e
 
     await pruneDriveBackups(token, [{ id: uploaded.id, appProperties: metadata.appProperties }, ...existingFiles], DRIVE_BACKUP_KEEP)
     await setSettings(env, [['drive_sync_last_synced_at', new Date().toISOString()], ['drive_sync_last_backup_key', driveSyncMarker(settings.drive_sync_account_email, folderId, backup.key)], ['drive_sync_last_error', '']])
-    return { success: true, fileId: uploaded.id, fileName }
+    return { success: true, fileId: uploaded.id, fileName: driveFileName }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Google Drive sync failed.'
     await setSettings(env, [['drive_sync_last_error', message]])
     return { success: false, error: message }
   }
+}
+
+const DRIVE_JSON_MIME = 'application/json'
+const DRIVE_GZIP_MIME = 'application/gzip'
+// Drive may report either registered name for a gzip file.
+const isGzipMime = (mime: unknown) => mime === DRIVE_GZIP_MIME || mime === 'application/x-gzip'
+
+/** <name>.json -> <name>.json.gz (a name already ending .gz is kept). */
+export function driveGzipFileName(name: string): string {
+  return /.gz$/i.test(name) ? name : `${name}${/.json$/i.test(name) ? '' : '.json'}.gz`
+}
+
+/** The two forms a Drive backup copy can take: plain JSON (older copies) and a gzip manifest. */
+export function isDriveBackupFile(file: { name?: string; mimeType?: string }): boolean {
+  const name = String(file.name || '').trim().toLowerCase()
+  return (name.endsWith('.json') && file.mimeType === DRIVE_JSON_MIME) || (name.endsWith('.json.gz') && isGzipMime(file.mimeType))
 }
 
 export function isTrustedDriveUploadSession(value: string): boolean {
@@ -649,8 +670,7 @@ export async function stageLatestDriveBackupToR2(env: Env): Promise<DriveRestore
       && properties.status === 'finalized'
       && properties.backupKey?.startsWith('backups/cloudflare/')
       && !properties.backupKey?.startsWith(DRIVE_STAGED_BACKUP_PREFIX)
-      && trim(candidate.name).toLowerCase().endsWith('.json')
-      && candidate.mimeType === 'application/json'
+      && isDriveBackupFile(candidate)
   })
   if (!file) throw new Error('No finalized app-owned Google Drive backup is available to stage.')
 
@@ -697,7 +717,9 @@ export async function stageLatestDriveBackupToR2(env: Env): Promise<DriveRestore
     redirect: 'error',
   })
   if (!response.ok || !response.body) throw new Error(`Google Drive backup download failed (${response.status}).`)
-  if ((response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
+  // The download must be the type the app-owned file was listed with (plain JSON or a gzip manifest), nothing else.
+  const downloadType = (response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase()
+  if (downloadType !== file.mimeType && !(isGzipMime(file.mimeType) && isGzipMime(downloadType))) {
     throw new Error('Google Drive returned an unexpected backup content type.')
   }
   const responseLength = response.headers.get('content-length')
@@ -714,7 +736,7 @@ export async function stageLatestDriveBackupToR2(env: Env): Promise<DriveRestore
   }
   const [putResult, inspectionResult] = await Promise.allSettled([
     env.ASSETS.put(backupKey, r2Body, {
-      httpMetadata: { contentType: 'application/json; charset=utf-8' },
+      httpMetadata: { contentType: isGzipMime(file.mimeType) ? DRIVE_GZIP_MIME : 'application/json; charset=utf-8' },
       customMetadata: storedMetadata,
       md5,
     }),
