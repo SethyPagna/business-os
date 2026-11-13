@@ -53,7 +53,7 @@ function raceHooks(env) {
   const mode = env.RACE || ''
   let fired = 0
   return { afterRead: async (sql, rec) => {
-    if (!mode || rec.batches > 0 || !/^\\s*SELECT json_array\\(\\s*\\(SELECT json_array\\(COUNT\\(\\*\\)/.test(sql)) return
+    if (!mode || (mode === 'once' ? rec.batches > 0 : rec.batches > fired) || !/^\\s*SELECT json_array\\(\\s*\\(SELECT json_array\\(COUNT\\(\\*\\)/.test(sql)) return
     if (mode === 'once' && fired >= 1) return
     fired++
     await env.DB.prepare("UPDATE sales SET updated_at = 'race-' || ? WHERE id = 1").bind(String(fired)).run()
@@ -284,7 +284,8 @@ async function main() {
     }
     // always: every attempt is aborted by the guard, so no figures were stored and the close says so instead of failing
     assert.equal(raceAlways.stored.n, 0, 'figures that could never be proven are not stored')
-    assert.equal(raceOnce.stored.n, 0, 'one race on Free: the recompute does not fit the invocation, so the close commits without stored figures')
+    assert.equal(raceOnce.stored.n, 1, 'one race on Free: the recompute fits (retry + stored drawer), so the figures are stored')
+    assert.ok(closeOf(raceOnce).calls <= 45, 'one race on Free: ' + closeOf(raceOnce).calls + ' calls, at most 45')
     for (const out of [raceOnce, raceAlways]) assert.equal(out.json.shift.figures_pending, true, out.name + ': the answer says the report figures are pending')
   })
 

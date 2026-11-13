@@ -1458,14 +1458,14 @@ async function closeWithFigures(env: Env, db: D1Compat, user: SessionUser, row: 
   input: Omit<Parameters<typeof writeClose>[3], 'figures'>, reviewMemo?: ShiftReadMemo) {
   const { timeReview, ...closeInput } = input
   const extraReviewCodes = timeReview.map((entry) => entry.code)
-  // What the last aborted attempt cost (its figures and its batch). A recompute is attempted only if its own cost and the answer that follows still fit the invocation's calls:
+  // What the last aborted attempt cost (its figures and its batch). A recompute is attempted only if its own cost and the stored drawer that follows still fit the invocation's calls (the report figures are not reserved: if they no longer fit, the answer says figures_pending):
   // on Free a close that raced a write would otherwise spend its way into call 51 and lose the response reads. The close itself always commits -- without stored figures,
   // like a pre-0237 close, which the label says -- and never for the report's sake is the drawer refused (owner: no trapping flows).
   let lastAttemptCalls = 0
   for (let attempt = 0; attempt < CLOSE_FIGURE_ATTEMPTS; attempt += 1) {
     if (attempt > 0) {
       const left = callsLeft(env)
-      if (left != null && left < lastAttemptCalls + CLOSE_STORED_DRAWER_CALLS + CLOSE_FIGURES_CALLS) break
+      if (left != null && left < lastAttemptCalls + CLOSE_STORED_DRAWER_CALLS) break
     }
     const started = invocationCalls(env)?.used
     const figures = await closeFiguresFor(env, closing, extraReviewCodes, reviewMemo)
