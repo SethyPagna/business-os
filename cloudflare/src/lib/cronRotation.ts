@@ -107,6 +107,12 @@ export interface RotationStep {
    * counted in the current window, so run() can add what only it can see (the backup adds the failed sets in R2).
    */
   onClaim?: (info: { windowFailures: number }) => void
+  /**
+   * The step must never run on a record the lane could not read (the backup: its per-night allowance lives in that record, so an
+   * unreadable or lost one would let every tick take a full D1 read). When the state load failed the lane runs the next step that
+   * does not need it, or nothing.
+   */
+  requiresState?: boolean
 }
 
 export interface TickResult {
@@ -115,7 +121,7 @@ export interface TickResult {
   more: boolean
   error?: string
   /** Not run: gated by minIntervalMs, or another tick took this position. */
-  skipped?: 'recent' | 'lost-race' | 'duplicate' | 'claim-failed'
+  skipped?: 'recent' | 'lost-race' | 'duplicate' | 'claim-failed' | 'state-unreadable'
 }
 
 const emptyStep = (): StepState => ({ startedAt: null, finishedAt: null, okAt: null, error: null, failures: 0, killed: 0, runs: 0 })
@@ -196,7 +202,13 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
   const index = selected !== undefined && Number.isInteger(selected) && selected >= 0 && selected < steps.length
     ? selected
     : persisted ? current.cursor % steps.length : (slot ?? Math.floor(nowMs / CRON_ROTATION_TICK_MS)) % steps.length
-  const step = steps[index]
+  let step = steps[index]
+  if (!persisted && step.requiresState) {
+    // No readable record: a step that keeps its allowance there must not run. Take the next one that does not need it.
+    const fallback = steps.find((candidate) => !candidate.requiresState)
+    if (!fallback) return { stepId: null, ok: true, more: false, skipped: 'state-unreadable' }
+    step = fallback
+  }
   const record = current.steps[step.id] ?? emptyStep()
   // Write the state over the version we read. A false answer means another
   // overlapping tick moved the cursor first: this one must neither rewind it

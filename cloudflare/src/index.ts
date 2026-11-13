@@ -716,6 +716,7 @@ export function cronHeavySteps(env: Env, label: (name: string, step: () => Promi
       ...step('backup', () => maybeRunScheduledBackup(env, Date.now(), undefined, priorFailuresTonight)),
       attemptWindow: (nowMs) => scheduledBackupNightOf(nowMs, getPlanLimits(env).scheduledBackupAfterHourLocal),
       onClaim: (info) => { priorFailuresTonight = info.windowFailures },
+      requiresState: true,
     },
     step('image-audit', () => maybeRunScheduledImageAudit(env), UNGATED_STEP_MIN_INTERVAL_MS),
   ]
