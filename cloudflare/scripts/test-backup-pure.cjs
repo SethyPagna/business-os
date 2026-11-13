@@ -131,6 +131,7 @@ const {
   getSystemJob,
   CLOUDFLARE_BACKUP_PREFIX,
   MAX_ASSET_BYTES_PER_BACKUP,
+  assetPoolKey,
 } = backupModuleObj.exports
 
 // A4: fixtures below seed RELATIVE to the real per-run copy cap, so a
@@ -400,7 +401,7 @@ function makeFakeR2(seed = {}) {
       const page = allKeys.slice(start, start + limit)
       const truncated = start + limit < allKeys.length
       return {
-        objects: page.map((key) => ({ key, size: store.get(key).size, uploaded: store.get(key).uploaded, customMetadata: store.get(key).customMetadata })),
+        objects: page.map((key) => ({ key, size: store.get(key).size, etag: store.get(key).etag, uploaded: store.get(key).uploaded, customMetadata: store.get(key).customMetadata })),
         truncated,
         cursor: truncated ? page[page.length - 1] : undefined,
       }
@@ -495,7 +496,8 @@ async function main() {
     assert.strictEqual(payload.r2.copiedKeys.length, 3)
     // Bytes were actually copied into the backup's own assets/ prefix, not
     // just listed -- read one back and confirm it round-trips.
-    const copied = await env.ASSETS.get(`${payload.r2.assetsPrefix}a.png`)
+    // Pool layout: the bytes are in the shared asset pool, named by key + etag from the manifest's own asset list.
+    const copied = await env.ASSETS.get(assetPoolKey(payload.r2.assets.find((asset) => asset.key === 'uploads/a.png')))
     assert.strictEqual(await copied.text(), 'A')
   })
 
@@ -668,19 +670,19 @@ async function main() {
     const after = await listCloudflareBackups(env)
     assert.strictEqual(after.length, 2)
 
-    // Each removed backup's assets/ subfolder should be gone too, not just its manifest.
+    // Each removed backup's whole folder (sidecar) should be gone too, not just its manifest.
     for (const result of [created[0], created[1]]) {
       const backupName = result.name.replace(/\.json$/, '')
-      const assetsPrefix = `${CLOUDFLARE_BACKUP_PREFIX}${backupName}/assets/`
-      const remaining = [...env.ASSETS._store.keys()].filter((key) => key.startsWith(assetsPrefix))
-      assert.strictEqual(remaining.length, 0, `removed backup ${backupName} should have no leftover copied-asset objects`)
+      const folder = `${CLOUDFLARE_BACKUP_PREFIX}${backupName}/`
+      const remaining = [...env.ASSETS._store.keys()].filter((key) => key.startsWith(folder))
+      assert.strictEqual(remaining.length, 0, `removed backup ${backupName} should have no leftover objects`)
     }
-    // The two kept backups' copied assets should still be there.
+    // The four backups share ONE pooled copy of the asset, and the two kept ones still reference it.
+    const pooled = [...env.ASSETS._store.keys()].filter((key) => key.startsWith('backups/asset-pool/'))
+    assert.strictEqual(pooled.length, 1, 'one pooled copy serves every backup of an unchanged asset')
     for (const result of [created[2], created[3]]) {
-      const backupName = result.name.replace(/\.json$/, '')
-      const assetsPrefix = `${CLOUDFLARE_BACKUP_PREFIX}${backupName}/assets/`
-      const remaining = [...env.ASSETS._store.keys()].filter((key) => key.startsWith(assetsPrefix))
-      assert.strictEqual(remaining.length, 1)
+      const state = await getCloudflareBackupState(env, result.name.replace(/\.json$/, ''))
+      assert.deepStrictEqual(state.assets.map(assetPoolKey), pooled)
     }
   })
 
@@ -783,7 +785,8 @@ async function main() {
     // Every asset's bytes should be genuinely readable back from the
     // backup's own assets/ prefix, not just listed in copiedKeys.
     const lastIndex = BIG_ASSET_COUNT - 1
-    const sample = await env.ASSETS.get(`${finalPayload.r2.assetsPrefix}big-${String(lastIndex).padStart(4, '0')}.png`)
+    const sampleEntry = finalState.assets.find((asset) => asset.key === `uploads/big-${String(lastIndex).padStart(4, '0')}.png`)
+    const sample = await env.ASSETS.get(assetPoolKey(sampleEntry))
     assert.strictEqual(await sample.text(), `img${lastIndex}`)
   })
 
