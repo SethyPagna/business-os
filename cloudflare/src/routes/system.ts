@@ -1469,6 +1469,8 @@ app.post('/repair-integrity', async (c) => {
   try {
     const result = await runDataIntegrityCheck(c.env, true)
     if (result.repairs > 0) {
+      // W1: the repair rewrites stock quantities (and sale return states), so the cache versions every list keys on move now, before the answer.
+      await bumpVersions(c.env, ['products', 'stock', 'sales'])
       await audit(c.env, user?.id ?? null, actorSnapshot(user), 'repair', 'data-integrity', null, {
         repairs: result.repairs,
         errors: result.errors.length,

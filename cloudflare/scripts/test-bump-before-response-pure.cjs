@@ -132,6 +132,20 @@ check('no waitUntil argument calls a notify helper that bumps products / stock /
   assert.deepEqual(bad.map((w) => `${w.file}:${w.line}`), [], 'split the helper: await bump...(env), then waitUntil(announce...(env))')
 })
 
+check('W1: POST /api/system/repair-integrity awaits a products + stock bump when it repaired something, and only then', () => {
+  const text = fs.readFileSync(path.join(srcDir, 'routes/system.ts'), 'utf8').split(String.fromCharCode(13)).join('')
+  const start = text.indexOf("app.post('/repair-integrity'")
+  assert.ok(start >= 0, 'the route exists')
+  const handler = text.slice(start, text.indexOf('export default app', start))
+  const repaired = handler.indexOf('if (result.repairs > 0) {')
+  assert.ok(repaired > 0, 'repairs are tested')
+  const bump = /await bumpVersions\(c\.env, \[([^\]]*)\]\)/.exec(handler)
+  assert.ok(bump, 'an awaited bumpVersions call')
+  assert.ok(bump.index > repaired, 'inside the repairs > 0 branch (a clean check bumps nothing)')
+  assert.ok(bump[1].includes("'products'") && bump[1].includes("'stock'"), 'it names products and stock')
+  assert.ok(bump.index < handler.indexOf('return c.json({ ...result, success: true })'), 'before the answer')
+})
+
 check('a broadcast never precedes the awaited bump in the same handler block (source order)', () => {
   // Statement-level: inside one block, a waitUntil(broadcast(...)) that comes BEFORE the awaited bump of that block would
   // let a peer refetch against the old version. Checked per block, per file.
