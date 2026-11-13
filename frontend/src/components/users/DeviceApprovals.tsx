@@ -144,6 +144,8 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
   const [busyUserId, setBusyUserId] = useState<number | null>(null)
   // An account already at its cap: the pending device waits for the admin to pick which approved device to replace.
   // The pending or approved device row an administrator is naming as a shop device.
+  // The card whose mark button the administrator pressed while the device cannot be marked yet: only that card explains why (not every phone that will never be a till).
+  const [markHintId, setMarkHintId] = useState<number | null>(null)
   const [markingShop, setMarkingShop] = useState<{ device: TrustedDeviceRecord; label: string } | null>(null)
   const [replacing, setReplacing] = useState<{ device: TrustedDeviceRecord; choices: TrustedDeviceRecord[]; selectedId: number; confirmShared?: boolean } | null>(null)
 
@@ -306,6 +308,12 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
     void runOnlineAction('device', device.id, write, () => tr(t, 'device_replace_done', 'Device replaced and approved.'))
   }
 
+  // A device that cannot be marked yet answers the press with the reason under its own card, instead of every card carrying the line all day.
+  const pressMarkShop = (device: TrustedDeviceRecord) => {
+    if (canMarkShop(device)) setMarkingShop({ device, label: '' })
+    else setMarkHintId(device.id)
+  }
+
   const reviewMarkShop = async () => {
     if (!markingShop) return
     const label = markingShop.label.trim().replace(/\s+/g, ' ')
@@ -452,7 +460,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                 key={device.id}
                 className="flex flex-col gap-2 rounded-xl border border-gray-200 p-3 dark:border-gray-700 sm:flex-row sm:items-center sm:justify-between"
               >
-                {renderDeviceMeta(device, true)}
+                {renderDeviceMeta(device, markHintId === device.id)}
                 <div className="flex shrink-0 gap-2">
                   <button
                     type="button"
@@ -466,11 +474,12 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                   {device.claimed_approval_ref ? null : (
                     <button
                       type="button"
-                      disabled={busyId === device.id || !canMarkShop(device)}
-                      className="btn-secondary px-2 py-1.5 text-xs"
+                      disabled={busyId === device.id}
+                      aria-disabled={!canMarkShop(device)}
+                      className={`btn-secondary px-2 py-1.5 text-xs${canMarkShop(device) ? '' : ' opacity-50'}`}
                       title={canMarkShop(device) ? tr(t, 'shop_device_mark', 'Mark as shop device') : tr(t, 'shop_device_unbound', 'Sign in on this device once, then mark it as a shop device.')}
                       aria-label={tr(t, 'shop_device_mark', 'Mark as shop device')}
-                      onClick={() => setMarkingShop({ device, label: '' })}
+                      onClick={() => pressMarkShop(device)}
                     >
                       <Store className="h-3.5 w-3.5" />
                     </button>
@@ -532,7 +541,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                         key={`device-${device.id}`}
                         className="flex flex-col gap-2 rounded-lg border border-gray-100 p-2.5 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between"
                       >
-                        {renderDeviceMeta(device, !shopDeviceIds.has(device.device_id))}
+                        {renderDeviceMeta(device, markHintId === device.id)}
                         <div className="flex shrink-0 items-center gap-2">
                           <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700 dark:bg-green-900/30 dark:text-green-300">
                             {tr(t, 'approved', 'Approved')}
@@ -544,11 +553,12 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                           ) : (
                             <button
                               type="button"
-                              disabled={busyId === device.id || !canMarkShop(device)}
-                              className="btn-secondary px-2 py-1 text-xs"
+                              disabled={busyId === device.id}
+                              aria-disabled={!canMarkShop(device)}
+                              className={`btn-secondary px-2 py-1 text-xs${canMarkShop(device) ? '' : ' opacity-50'}`}
                               title={canMarkShop(device) ? tr(t, 'shop_device_mark', 'Mark as shop device') : tr(t, 'shop_device_unbound', 'Sign in on this device once, then mark it as a shop device.')}
                               aria-label={tr(t, 'shop_device_mark', 'Mark as shop device')}
-                              onClick={() => setMarkingShop({ device, label: '' })}
+                              onClick={() => pressMarkShop(device)}
                             >
                               <Store className="h-3.5 w-3.5" />
                             </button>
