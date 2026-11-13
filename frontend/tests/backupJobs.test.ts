@@ -68,6 +68,8 @@ await (async function backupUiShouldPollJobsInsteadOfWaitingSilently() {
   assert.match(source, /DRIVE_SYNC_DEFAULT_INTERVAL_MINUTES\s*=\s*6\s*\*\s*60/)
   assert.match(source, /DRIVE_SYNC_PRESET_HOURS\s*=\s*\[3,\s*6,\s*9,\s*12,\s*24\]/)
   assert.match(source, /checks every 6 hours by default[^']*only once a day after the shop closes/)
+  assert.match(source, /usually receives one new copy a day/)
+  assert.doesNotMatch(source, /at most one new copy a day/, 'manual backups are mirrored too')
   assert.doesNotMatch(source, /Default is 360 minutes \(every 6 hours\)/, 'the Drive note must not imply Drive gets a copy every 6 hours')
   assert.match(source, /DRIVE_SYNC_STATUS_TIMEOUT_MS\s*=\s*5000/)
   assert.match(source, /DRIVE_SYNC_JOB_POLL_MS\s*=\s*2000/)
