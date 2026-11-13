@@ -83,6 +83,7 @@ const {
   isTrustedDriveUploadSession,
   pushBackupToDrive,
   driveSyncHasNewBackup,
+  driveSyncScheduleDue,
 } = moduleObj.exports
 assert.strictEqual(DRIVE_BACKUP_KEEP, 10, 'the user keeps 2 in R2 and 10 in Drive (Part 386)')
 assert.strictEqual(isTrustedDriveUploadSession('https://www.googleapis.com/upload/drive/v3/files?upload_id=ok'), true)
@@ -204,6 +205,13 @@ async function main() {
     const callsBefore = calls.length
     assert.deepStrictEqual(await driveSyncHasNewBackup(env), { new: false, reason: 'already-synced', backupKey: 'backups/cloudflare/final.json' })
     assert.strictEqual(calls.length, callsBefore, 'the already-synced check makes no Drive request')
+    // F5: that skip is a check. Last upload was long ago, yet the interval now runs from the check, so the next rotation visits
+    // (15 min, 30 min later) do not list the backup prefix again; once the interval has passed since the check it is due again.
+    assert.ok(settings.get('drive_sync_last_checked_at'), 'a skip records the check time')
+    settings.set('drive_sync_last_synced_at', new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString())
+    assert.deepStrictEqual(await driveSyncScheduleDue(env), { due: false, reason: 'not-due' }, 'checked a moment ago: not due again')
+    settings.set('drive_sync_last_checked_at', new Date(Date.now() - 7 * 3600 * 1000).toISOString())
+    assert.deepStrictEqual(await driveSyncScheduleDue(env), { due: true }, 'the interval ran from the check and has passed')
     newerBackupExists = true
     assert.deepStrictEqual(await driveSyncHasNewBackup(env), { new: true, backupKey: 'backups/cloudflare/newer.json' }, 'the next daily backup is picked up')
     newerBackupExists = false

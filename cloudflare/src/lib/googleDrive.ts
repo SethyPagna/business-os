@@ -506,13 +506,18 @@ export function isTrustedDriveUploadSession(value: string): boolean {
 // work instead of holding the scheduled handler open for the full transfer.
 export async function driveSyncScheduleDue(env: Env): Promise<{ due: boolean; reason?: string }> {
   const settings = await getSettings(env, [
-    'drive_sync_enabled', 'drive_sync_refresh_token', 'drive_sync_last_synced_at', 'drive_sync_interval_seconds',
+    'drive_sync_enabled', 'drive_sync_refresh_token', 'drive_sync_last_synced_at', 'drive_sync_last_checked_at', 'drive_sync_interval_seconds',
   ])
   if (settings.drive_sync_enabled === '0') return { due: false, reason: 'disabled' }
   if (!settings.drive_sync_refresh_token) return { due: false, reason: 'not-connected' }
 
   const intervalSeconds = Math.min(24 * 60 * 60, Math.max(60 * 60, Number(settings.drive_sync_interval_seconds || 21600)))
-  const lastSyncedMs = settings.drive_sync_last_synced_at ? Date.parse(settings.drive_sync_last_synced_at) : 0
+  // A visit that found nothing new (driveSyncHasNewBackup) counts as a check: the interval runs from the newest of the
+  // last upload and the last check, so an already-mirrored backup is not re-listed on every rotation visit.
+  const lastSyncedMs = Math.max(
+    settings.drive_sync_last_synced_at ? Date.parse(settings.drive_sync_last_synced_at) || 0 : 0,
+    settings.drive_sync_last_checked_at ? Date.parse(settings.drive_sync_last_checked_at) || 0 : 0,
+  )
   if (lastSyncedMs && (Date.now() - lastSyncedMs) < intervalSeconds * 1000) {
     return { due: false, reason: 'not-due' }
   }
@@ -530,9 +535,11 @@ export async function driveSyncScheduleDue(env: Env): Promise<{ due: boolean; re
  */
 export async function driveSyncHasNewBackup(env: Env): Promise<{ new: boolean; reason?: 'no-finalized-backup' | 'already-synced'; backupKey?: string }> {
   const newest = (await listCloudflareBackups(env)).find((item) => item.finalized)
-  if (!newest) return { new: false, reason: 'no-finalized-backup' }
+  // Nothing to upload: record that the check happened (not a sync: the Backup screen's "last synced" stays the last upload).
+  const checked = () => setSettings(env, [['drive_sync_last_checked_at', new Date().toISOString()]])
+  if (!newest) { await checked(); return { new: false, reason: 'no-finalized-backup' } }
   const settings = await getSettings(env, ['drive_sync_last_backup_key'])
-  if (settings.drive_sync_last_backup_key === newest.key) return { new: false, reason: 'already-synced', backupKey: newest.key }
+  if (settings.drive_sync_last_backup_key === newest.key) { await checked(); return { new: false, reason: 'already-synced', backupKey: newest.key } }
   return { new: true, backupKey: newest.key }
 }
 

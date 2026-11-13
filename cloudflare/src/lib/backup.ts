@@ -504,6 +504,9 @@ export async function listCloudflareBackups(env: Env) {
   do {
     const page = await env.ASSETS.list({
       prefix: CLOUDFLARE_BACKUP_PREFIX,
+      // Top level only: manifests are <name>.json directly under the prefix, while every copied asset of every retained set
+      // lives below <name>/assets/. Without the delimiter each listing walked all of them (9 sets x uploads/).
+      delimiter: '/',
       cursor,
       limit: 1000,
       include: ['customMetadata'],

@@ -101,9 +101,12 @@ function fakeR2() {
   const objects = new Map()
   return {
     objects,
-    async list({ prefix, cursor }) {
+    listCalls: [],
+    async list({ prefix, cursor, delimiter }) {
       void cursor
-      const out = [...objects.entries()].filter(([k]) => k.startsWith(prefix)).map(([key, v]) => ({ key, size: 1, uploaded: v.uploaded, customMetadata: v.customMetadata }))
+      this.listCalls.push({ prefix, delimiter })
+      // R2 semantics: with a delimiter only keys with no further '/' after the prefix are objects (the rest roll up to delimitedPrefixes).
+      const out = [...objects.entries()].filter(([k]) => k.startsWith(prefix) && !(delimiter && k.slice(prefix.length).includes(delimiter))).map(([key, v]) => ({ key, size: 1, uploaded: v.uploaded, customMetadata: v.customMetadata }))
       return { objects: out, truncated: false }
     },
     // Only the lifecycle sidecars (state.json) have a body; everything else reads as absent, like a body-less test double.
@@ -320,6 +323,19 @@ const localHour = (c) => sched.businessHourOf(c.at)
     assert.strictEqual(sched.pickHeavyStepIndex(steps, rec('2026-11-12T18:17:00Z', 2), Z('2026-11-13T15:17:00Z'), AFTER, 2), 0, 'next night: backup again')
     assert.ok(read('lib/planTier.ts').includes('scheduledBackupMaxAttemptsPerDay'), 'the allowance is a plan limit')
     assert.ok(read('index.ts').includes('attemptWindow: (nowMs) => scheduledBackupNightOf(nowMs, getPlanLimits(env).scheduledBackupAfterHourLocal)'), 'the real backup step counts failures per night')
+    ok()
+  }
+
+  // F5: listing backups is top level only. A copied asset that happens to be named *.json sits under <set>/assets/ and used to
+  // be listed as a backup of its own (and every asset of every set was walked on each listing).
+  {
+    const backupMod = real('lib/backup.ts')
+    const env = { PLAN_TIER: 'paid', ASSETS: fakeR2() }
+    env.ASSETS.objects.set('backups/cloudflare/business-os-cloudflare-a.json', { uploaded: new Date('2026-11-11T15:17:00Z'), customMetadata: { source: 'scheduled', scope: 'full', lifecycle: 'none' } })
+    env.ASSETS.objects.set('backups/cloudflare/business-os-cloudflare-a/assets/products/x.json', { uploaded: new Date('2026-11-11T15:18:00Z'), customMetadata: {} })
+    const items = await backupMod.listCloudflareBackups(env)
+    assert.deepStrictEqual(items.map((i) => i.name), ['business-os-cloudflare-a.json'], 'only the top-level manifest is a backup')
+    assert.ok(env.ASSETS.listCalls.length === 1 && env.ASSETS.listCalls.every((c) => c.delimiter === '/'), 'one list call, with the delimiter')
     ok()
   }
 
