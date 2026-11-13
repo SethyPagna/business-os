@@ -21,7 +21,7 @@ for (const namespace of keyed.filter((name) => name !== 'customers')) {
 for (const namespace of ['returns', 'sales', 'stock', 'products']) assert(namespaces.includes(namespace), namespace)
 
 const routes = read('routes/returns.ts')
-assert.equal((routes.match(/bumpVersions\(c\.env, RETURN_WRITE_CACHE_NAMESPACES\)/g) || []).length, 3, 'create, supplier return and edit bump the shared list')
+assert.equal((routes.match(/bumpVersions\(c\.env, RETURN_WRITE_CACHE_NAMESPACES\)/g) || []).length, 7, 'create, supplier return and edit bump the shared list, and so do the four idempotent replays (two creates, two edits; W3 round 2 F8)')
 assert(!/bumpVersions\(c\.env, \['products', 'returns', 'sales'\]\)/.test(routes), 'no return writer keeps its own shorter list')
 assert(/bumpVersions\(c\.env, RETURN_WRITE_CACHE_NAMESPACES\)/.test(read('lib/returnExchangeCreate.ts')), 'the exchange writer bumps the shared list')
 

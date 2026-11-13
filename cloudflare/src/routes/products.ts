@@ -3051,68 +3051,73 @@ app.put('/:id', async (c) => {
           if (refusal) return c.json({ error: refusal.message, code: refusal.code }, refusal.status)
           throw error
         }
-        // The identity write is committed whatever the fold below does: announce it, so no refusal after it leaves a stale catalogue.
-        await bumpVersion(c.env, 'products')
-        let foldResult: Awaited<ReturnType<typeof foldDuplicateProductInto>>
+        // The identity write is committed whatever the fold below does, so EVERY way out of here (a refusal, a thrown fault, the merge) advances the
+        // products version ONCE before it answers (W3 Slice A round 2: one bump per request, one quota upsert on Free) and only then announces.
+        let mergedAndFolded = false
         try {
-          const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
-          const branchNameById = new Map<number, string>(branchRows.map((b) => [b.id, b.name]))
-          foldResult = await foldDuplicateProductInto(
-            c.env, db, user,
-            { id: duplicate.id, name: duplicate.name },
-            { id: dupRow.id, name: dupRow.name, image_path: dupRow.image_path },
-            branchNameById,
-            'edit identity fold', 'merge', undefined, { operationId: crypto.randomUUID(), costAuthorityVersion: 3 },
-          )
-        } catch (error) {
-          const stockError = productStockGuardError(error)
-          const stateConflict = /merge_state_conflict|merge_identity_conflict/.test(String(error))
-          const refusal = mergeFoldRefusal(error)
-          if (stateConflict || refusal || stockError) {
-            // The fold wrote nothing, so the identity written above must not stay:
-            // the edit is refused as a whole and can simply be sent again.
-            await db.prepare(`UPDATE products SET name = @name, barcode = @barcode, updated_at = @updatedAt
-              WHERE id = @id AND name = @nextName AND COALESCE(barcode, '') = COALESCE(@nextBarcode, '')`)
-              .run({ name: dupRow.name, barcode: dupRow.barcode, updatedAt: dupRow.updated_at, id: dupRow.id, nextName, nextBarcode })
-          }
-          if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
-          if (stateConflict) {
-            return c.json({ success: false, code: 'merge_state_conflict', error: 'One of these products changed while the edit was being applied. Refresh and try again.' }, 409)
-          }
-          if (refusal) return c.json({ success: false, ...refusal }, 409)
-          throw error
-        }
-        const rest: Record<string, unknown> = { ...body }
-        delete rest.name
-        delete rest.barcode
-        delete rest.__rename_scope
-        delete rest.expected_updated_at
-        for (const field of ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr']) delete rest[field]
-        // The money-write plan (if any) was computed by prepareProductMoneyWrite
-        // above against THIS row's id and its before-image -- it is invalid
-        // once the write is redirected onto the survivor's row. A plain field
-        // update (not a locked-price plan write) applies fine without it.
-        delete rest[PRODUCT_MONEY_PLAN]
-        delete rest[PRODUCT_MONEY_VERSION]
-        if (Object.keys(rest).length) {
-          // A fresh survivor preimage guards the override after the existing
-          // identity fold. Entry, baseline and catalog money commit together.
+          let foldResult: Awaited<ReturnType<typeof foldDuplicateProductInto>>
           try {
-            await prepareProductMoneyWrite(c.env, rest, duplicate.id)
-            await updateRow(c.env, 'products', duplicate.id, rest, { id: actorId(user), name: actorSnapshot(user) })
+            const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
+            const branchNameById = new Map<number, string>(branchRows.map((b) => [b.id, b.name]))
+            foldResult = await foldDuplicateProductInto(
+              c.env, db, user,
+              { id: duplicate.id, name: duplicate.name },
+              { id: dupRow.id, name: dupRow.name, image_path: dupRow.image_path },
+              branchNameById,
+              'edit identity fold', 'merge', undefined, { operationId: crypto.randomUUID(), costAuthorityVersion: 3 },
+            )
           } catch (error) {
-    const stockError = productStockGuardError(error)
-    if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
-            if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
+            const stockError = productStockGuardError(error)
+            const stateConflict = /merge_state_conflict|merge_identity_conflict/.test(String(error))
+            const refusal = mergeFoldRefusal(error)
+            if (stateConflict || refusal || stockError) {
+              // The fold wrote nothing, so the identity written above must not stay:
+              // the edit is refused as a whole and can simply be sent again.
+              await db.prepare(`UPDATE products SET name = @name, barcode = @barcode, updated_at = @updatedAt
+                WHERE id = @id AND name = @nextName AND COALESCE(barcode, '') = COALESCE(@nextBarcode, '')`)
+                .run({ name: dupRow.name, barcode: dupRow.barcode, updatedAt: dupRow.updated_at, id: dupRow.id, nextName, nextBarcode })
+            }
+            if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
+            if (stateConflict) {
+              return c.json({ success: false, code: 'merge_state_conflict', error: 'One of these products changed while the edit was being applied. Refresh and try again.' }, 409)
+            }
+            if (refusal) return c.json({ success: false, ...refusal }, 409)
             throw error
           }
+          const rest: Record<string, unknown> = { ...body }
+          delete rest.name
+          delete rest.barcode
+          delete rest.__rename_scope
+          delete rest.expected_updated_at
+          for (const field of ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr']) delete rest[field]
+          // The money-write plan (if any) was computed by prepareProductMoneyWrite
+          // above against THIS row's id and its before-image -- it is invalid
+          // once the write is redirected onto the survivor's row. A plain field
+          // update (not a locked-price plan write) applies fine without it.
+          delete rest[PRODUCT_MONEY_PLAN]
+          delete rest[PRODUCT_MONEY_VERSION]
+          if (Object.keys(rest).length) {
+            // A fresh survivor preimage guards the override after the existing
+            // identity fold. Entry, baseline and catalog money commit together.
+            try {
+              await prepareProductMoneyWrite(c.env, rest, duplicate.id)
+              await updateRow(c.env, 'products', duplicate.id, rest, { id: actorId(user), name: actorSnapshot(user) })
+            } catch (error) {
+      const stockError = productStockGuardError(error)
+      if (stockError) return c.json({ success: false, code: stockError.code, error: stockError.message }, 409)
+              if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
+              throw error
+            }
+          }
+          const item = await db.prepare('SELECT * FROM products WHERE id = @id').get({ id: duplicate.id })
+          // The edit renamed this row onto an existing identity and folded it in: that is a merge, announced as one.
+          announceProductAlert(c, user, PRODUCT_MERGE_ALERT_HEADING, formatProductMergeAlertLines({ kept: String(duplicate.name || ''), merged: String(dupRow.name || ''), by: actorSnapshot(user) }))
+          mergedAndFolded = true
+          return c.json(normalProductWriteResponse({ item, product: item, id: duplicate.id, merged_into: duplicate.id, success: true, foldResult: { quantityMoved: foldResult.quantityMoved, batchesMoved: foldResult.batchesMoved } }))
+        } finally {
+          await bumpVersion(c.env, 'products')
+          if (mergedAndFolded) c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: duplicate.id }))
         }
-        const item = await db.prepare('SELECT * FROM products WHERE id = @id').get({ id: duplicate.id })
-        // The edit renamed this row onto an existing identity and folded it in: that is a merge, announced as one.
-        announceProductAlert(c, user, PRODUCT_MERGE_ALERT_HEADING, formatProductMergeAlertLines({ kept: String(duplicate.name || ''), merged: String(dupRow.name || ''), by: actorSnapshot(user) }))
-        await bumpVersion(c.env, 'products')
-        c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: duplicate.id }))
-        return c.json(normalProductWriteResponse({ item, product: item, id: duplicate.id, merged_into: duplicate.id, success: true, foldResult: { quantityMoved: foldResult.quantityMoved, batchesMoved: foldResult.batchesMoved } }))
       }
     }
     // D6 / 9.1 ("rename does not regroup"): when the operator chose to

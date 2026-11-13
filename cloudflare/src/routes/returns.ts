@@ -1232,7 +1232,7 @@ app.post('/reasons/replace', async (c) => {
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'replace', 'return_reason', null, {
     from, to, returnScope, scope: replaceScope, linkedChanged,
   })
-  await Promise.all([bumpVersion(c.env, 'settings'), bumpVersion(c.env, 'returns')])
+  await bumpVersions(c.env, ['settings', 'returns'])
   c.executionCtx.waitUntil(broadcast(c.env, 'settings', { action: 'return_reason_replace', returnScope, from, to }))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'reason_replace', returnScope, from, to }))
   return c.json({ success: true, configured: true, presets: nextPresets, scope: replaceScope, linkedChanged })
@@ -1591,6 +1591,8 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     if (priorReceipt.request_digest !== requestDigest || (priorReceipt.sale_id ?? null) !== requestedSaleId) {
       return c.json({ error: 'client_request_id was already used for different return data.', code: 'idempotency_conflict' }, 409)
     }
+    // F8: a replay means an earlier attempt committed and its acknowledgement was lost -- possibly before that attempt's own bump ran. The bump is idempotent, so the replay repeats it before answering.
+    await bumpVersions(c.env, RETURN_WRITE_CACHE_NAMESPACES)
     return c.json(JSON.parse(priorReceipt.response_json) as ReturnCreateResponse)
   }
   admissionEnabled = true
@@ -2640,6 +2642,8 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
       const receipt = await readReceipt()
       if (receipt) {
         if (receipt.request_digest === requestDigest && (receipt.sale_id ?? null) === requestedSaleId) {
+          // F8: a replay means an earlier attempt committed and its acknowledgement was lost -- possibly before that attempt's own bump ran. The bump is idempotent, so the replay repeats it before answering.
+          await bumpVersions(c.env, RETURN_WRITE_CACHE_NAMESPACES)
           return c.json(JSON.parse(receipt.response_json) as ReturnCreateResponse)
         }
         return c.json({ error: 'client_request_id was already used for different return data.', code: 'idempotency_conflict' }, 409)
@@ -3176,6 +3180,8 @@ app.patch('/:id', async (c) => {
     if (Number(previousReceipt.return_id) !== returnId || previousReceipt.request_digest !== requestDigest) {
       return c.json({ error: 'client_request_id was already used with different return edit data.', code: 'idempotency_conflict' }, 409)
     }
+    // F8: a replay means an earlier attempt committed and its acknowledgement was lost -- possibly before that attempt's own bump ran. The bump is idempotent, so the replay repeats it before answering.
+    await bumpVersions(c.env, RETURN_WRITE_CACHE_NAMESPACES)
     return c.json(JSON.parse(previousReceipt.response_json) as { id: number; updated_at: string })
   }
   // An edit never empties a return. Omitting `items` keeps the lines (below);
@@ -3899,6 +3905,8 @@ app.patch('/:id', async (c) => {
       .get<{ return_id: number; request_digest: string; response_json: string }>({ actor: authenticatedActorId, request: requestId })
     if (retry) {
       if (Number(retry.return_id) === returnId && retry.request_digest === requestDigest) {
+        // F8: a replay means an earlier attempt committed and its acknowledgement was lost -- possibly before that attempt's own bump ran. The bump is idempotent, so the replay repeats it before answering.
+        await bumpVersions(c.env, RETURN_WRITE_CACHE_NAMESPACES)
         return c.json(JSON.parse(retry.response_json) as { id: number; updated_at: string })
       }
       return c.json({ error: 'client_request_id was already used with different return edit data.', code: 'idempotency_conflict' }, 409)
