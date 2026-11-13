@@ -18,7 +18,7 @@ assert.match(transport, /\/api\/auth\/devices\/shop\/\$\{encodeURIComponent\(Str
 const shopTransport = transport.slice(transport.indexOf('export type ShopDeviceRecord'), transport.indexOf('// Reset only removes'))
 assert.doesNotMatch(shopTransport, /route\(|queue|outbox/i, 'shop calls stay outside offline replay')
 
-assert.match(panel, /const confirmed = await askToConfirm\(\{[\s\S]*?'shop_device_mark_confirm'[\s\S]*?\}\)\s*if \(!confirmed\) return\s*void runOnlineAction\('device', device\.id, withSharedConfirm\(device, true, \(confirmShared\) => markShopDevice\(device\.id, label, confirmShared\)\)/, 'marking needs the review dialog, then one online call')
+assert.match(panel, /const confirmed = knownShared\s*\? await confirmSharedDevice\(sharedNames\(device\), true, nameItems\)\s*: await askToConfirm\(\{[\s\S]*?'shop_device_mark_confirm'[\s\S]*?\}\)\s*if \(!confirmed\) return\s*void runOnlineAction\('device', device\.id, withSharedConfirm\(device, true, \(confirmShared\) => markShopDevice\(device\.id, label, confirmShared\), \{ confirmed: knownShared \}\)/, 'marking needs ONE review dialog (the shared-device one when the card already lists another account), then one online call')
 assert.match(panel, /const confirmed = await askToConfirm\(\{[\s\S]*?'shop_device_unmark_confirm'[\s\S]*?danger: true,\s*\}\)\s*if \(!confirmed\) return\s*void runOnlineAction\('device', -shop\.id, \(\) => unmarkShopDevice\(shop\.id\)/, 'unmarking is a danger confirmation, then one online call')
 assert.doesNotMatch(panel, /window\.confirm\(/, 'never the native popup')
 assert.match(panel, /shopDeviceIds\.has\(device\.device_id\)/, 'an already marked device shows its badge instead of the mark button')

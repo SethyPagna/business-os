@@ -234,12 +234,12 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
   }
 
   // Another account already has this device: the administrator says so explicitly before approving or marking it (the Worker refuses otherwise).
-  const confirmSharedDevice = (names: string, marking: boolean) => askToConfirm({
+  const confirmSharedDevice = (names: string, marking: boolean, leadingItems: Array<{ label: string; value: string }> = []) => askToConfirm({
     title: tr(t, 'device_shared_title', 'Several accounts on this device'),
     message: marking
       ? tr(t, 'shop_device_shared_confirm', 'More than one account has this device. Marking it as a shop device opens it to every employee and removes all of their requests and approvals for it.')
       : tr(t, 'device_shared_confirm', 'Another account already uses this device. Approve only if the two people really share it; otherwise decline this request.'),
-    items: names ? [{ label: tr(t, 'device_also_here', 'Also on this device'), value: names }] : undefined,
+    items: names || leadingItems.length ? [...leadingItems, ...(names ? [{ label: tr(t, 'device_also_here', 'Also on this device'), value: names }] : [])] : undefined,
     confirmLabel: marking ? tr(t, 'shop_device_mark', 'Mark as shop device') : tr(t, 'approve', 'Approve'),
     danger: true,
   })
@@ -320,17 +320,23 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
     if (!label) return
     const { device } = markingShop
     setMarkingShop(null)
-    const confirmed = await askToConfirm({
-      title: tr(t, 'shop_device_mark_title', 'Mark as a shop device?'),
-      message: tr(t, 'shop_device_mark_confirm', 'Every active employee will be able to sign in on this device without a separate approval and without using a device slot. Requests waiting for this device are removed, and approvals that individual employees already have for it are replaced by this one. Mark only a device that stays in the shop.'),
-      items: [
-        { label: tr(t, 'shop_device_name', 'Shop device name'), value: label },
-        { label: tr(t, 'device', 'Device'), value: device.device_name || tr(t, 'unknown_device', 'Unknown device') },
-      ],
-      confirmLabel: tr(t, 'shop_device_mark', 'Mark as shop device'),
-    })
+    const nameItems = [
+      { label: tr(t, 'shop_device_name', 'Shop device name'), value: label },
+      { label: tr(t, 'device', 'Device'), value: device.device_name || tr(t, 'unknown_device', 'Unknown device') },
+    ]
+    // The card already lists another account: its one dialog is the confirmation (it names the device, the other accounts and what marking does). Asking the
+    // generic question first and the shared one second made two dialogs for one decision. A stale card still asks the second question when the Worker says so.
+    const knownShared = sharedNames(device) !== ''
+    const confirmed = knownShared
+      ? await confirmSharedDevice(sharedNames(device), true, nameItems)
+      : await askToConfirm({
+        title: tr(t, 'shop_device_mark_title', 'Mark as a shop device?'),
+        message: tr(t, 'shop_device_mark_confirm', 'Every active employee will be able to sign in on this device without a separate approval and without using a device slot. Requests waiting for this device are removed, and approvals that individual employees already have for it are replaced by this one. Mark only a device that stays in the shop.'),
+        items: nameItems,
+        confirmLabel: tr(t, 'shop_device_mark', 'Mark as shop device'),
+      })
     if (!confirmed) return
-    void runOnlineAction('device', device.id, withSharedConfirm(device, true, (confirmShared) => markShopDevice(device.id, label, confirmShared)), () => tr(t, 'shop_device_marked_done', 'Marked as a shop device.'))
+    void runOnlineAction('device', device.id, withSharedConfirm(device, true, (confirmShared) => markShopDevice(device.id, label, confirmShared), { confirmed: knownShared }), () => tr(t, 'shop_device_marked_done', 'Marked as a shop device.'))
   }
 
   const unmarkShop = async (shop: ShopDeviceRecord) => {
