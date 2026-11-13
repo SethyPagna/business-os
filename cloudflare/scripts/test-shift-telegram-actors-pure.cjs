@@ -211,7 +211,7 @@ async function main() {
     '../lib/audit': { audit: async () => { throw new Error('shift audit must be in the D1 batch') } },
     '../lib/telegramLang': lang,
     '../lib/telegram': {
-      sendTelegramShiftReport: async (_env, shiftId, nowMs, options) => {
+      scheduleTelegramShiftReport: async () => 'unavailable', loadTelegramConfig: async () => ({}), sendTelegramShiftReport: async (_env, shiftId, nowMs, options) => {
         sends.push({ shiftId, options })
         return telegram.sendTelegramShiftReport(ENV, shiftId, nowMs, options)
       },

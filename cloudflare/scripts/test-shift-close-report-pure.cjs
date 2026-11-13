@@ -166,7 +166,7 @@ const shiftsRoute = loadReal('routes/shifts.ts', {
   '../lib/telegram': {
     // The spy stands where the real sender does. It records and returns; it
     // has no token, no chat id and no fetch, so this file cannot transmit.
-    sendTelegramShiftReport: async (env, shiftId) => { sent.push({ env, shiftId }); return true },
+    scheduleTelegramShiftReport: async () => 'unavailable', loadTelegramConfig: async () => ({}), sendTelegramShiftReport: async (env, shiftId) => { sent.push({ env, shiftId }); return true },
   },
 })
 const app = shiftsRoute.default || shiftsRoute
@@ -330,7 +330,7 @@ async function main() {
       loadShiftReconciliation: async () => { throw new Error('no sales tables in this fixture') },
     },
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
-    '../lib/telegram': { sendTelegramShiftReport: async () => { throw new Error('a shift that does not exist must not be reported') } },
+    '../lib/telegram': { scheduleTelegramShiftReport: async () => 'unavailable', loadTelegramConfig: async () => ({}), sendTelegramShiftReport: async () => { throw new Error('a shift that does not exist must not be reported') } },
   })
   const strangerApp = stranger.default || stranger
   const missing = await strangerApp.fetch(

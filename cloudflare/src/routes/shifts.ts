@@ -7,7 +7,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { BUSINESS_TZ_FORWARD, BUSINESS_UTC_OFFSET_MINUTES, localTodayExpr } from '../lib/businessDateWindow'
 import { parseContinuousReadWindow, continuousReadWindowSql } from '../lib/continuousReadWindow'
 import { hasAnyPermission, isAdminControlUser } from '../lib/permissions'
-import { scheduleTelegramShiftOverview, scheduleTelegramShiftReport, sendTelegramShiftReport, sendTelegramStaleShiftAlert, type ShiftReportAction, type ShiftReportOptions } from '../lib/telegram'
+import { loadTelegramConfig, scheduleTelegramShiftOverview, scheduleTelegramShiftReport, sendTelegramShiftReport, sendTelegramStaleShiftAlert, type ShiftReportAction, type ShiftReportOptions } from '../lib/telegram'
 import { firstCharacters } from '../lib/telegramLang'
 import {
   loadShiftCloseDrift, loadShiftCloseFigures, loadShiftFigures, loadShiftReconciliation, parseShiftCloseFigures,
@@ -18,7 +18,10 @@ import type { Env } from '../index'
 import { RIEL_CASH_NOT_HUNDREDS, rielCashAmountValid } from '../lib/saleStatusResolution'
 import { branchEffectRefusal, branchRedirectGuard, branchRedirectGuardRefusal, branchRedirectTarget, isBranchRedirectGuardError, requestBranchEffect, type BranchEffect } from '../lib/branchRedirectWrite'
 
-const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
+// shiftPre: the shift row and the policy the replay middleware below ALREADY read for this request (wave 3, M9 step 3). The close handlers take them
+// instead of reading both again, which saves two D1 calls of the 50 a Free invocation has. Same request, a few milliseconds apart: the close's own
+// revision guard (UPDATE ... WHERE revision=@revision AND closed_at IS NULL) is what decides a race, never this read.
+const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser; shiftPre?: { shift: ShiftDbRow; policy?: ShiftPolicy } } }>()
 app.use('*', requireAuth)
 
 // The existing immutable audit row is the receipt, committed in the same D1
@@ -52,7 +55,12 @@ app.use('*', async (c, next) => {
   // Visibility comes before the replay lookup: a receipt this account earned while the shift was
   // visible (shop_wide, since switched back) must not hand the row back. Cancel is skipped: only
   // an administrator reaches it here, and an administrator sees every shift.
-  if (action !== 'cancel' && !canSeeShift(user, await readShiftPolicy(db), target)) return c.json({ error: 'Shift not found.' }, 404)
+  let policyRead: ShiftPolicy | undefined
+  if (action !== 'cancel') {
+    policyRead = await readShiftPolicy(db)
+    if (!canSeeShift(user, policyRead, target)) return c.json({ error: 'Shift not found.' }, 404)
+  }
+  c.set('shiftPre', { shift: target, policy: policyRead })
   // The same split the handlers enforce, applied before the replay lookup so
   // a caller who may not act cannot probe a receipt: amend follows
   // canAmendShift (any shifts user), and close, reopen and cancel stay with
@@ -923,10 +931,26 @@ async function storedCloseFigures(env: Env, shiftId: number): Promise<ShiftClose
     return row ? parseShiftCloseFigures(row.figures_json) : null
   } catch { return null }
 }
-async function drawerFor(env: Env, user: SessionUser, shift: ShiftRow, options: { drift: boolean }, memo?: ShiftReadMemo): Promise<ShiftDrawer> {
+async function drawerFor(env: Env, user: SessionUser, shift: ShiftRow, options: { drift: boolean; closedOn?: CloseFigures | null }, memo?: ShiftReadMemo): Promise<ShiftDrawer> {
   const none: ShiftDrawer = { reconciliation: null, reconciliation_source: null, close_figures_taken_at: null, close_drift: null }
   if (!canManageShifts(user)) return none
   const nowMs = Date.now()
+  // The response of a close that has just committed (wave 3, M9 step 2). The close batch proved the inputs digest it stored the figures on, so the drift
+  // against "today's" figures is null exactly when that digest still reads the same: ONE digest read instead of re-computing the drawer and the sale tenders
+  // only to find nothing moved. A digest that moved (a write in the milliseconds since the commit), no stored row, or a failed read all take the full path below.
+  // Every writer of what the digest reads bumps sale_write_revisions (test-shift-close-digest-census-native.cjs).
+  if (options.closedOn && shift.closed_at && shift.id != null) {
+    const closedOn = options.closedOn
+    const [storedNow, digestNow] = await Promise.all([
+      storedCloseFigures(env, shift.id),
+      readShiftCloseInputsDigest(env, closedOn.digest).catch(() => null),
+    ])
+    if (storedNow && digestNow === closedOn.digestValue) {
+      const standing = await readShiftTimeReview(env, shift.id, memo)
+      return { reconciliation: applyShiftTimeReview(storedNow.reconciliation, standing), reconciliation_source: 'stored',
+        close_figures_taken_at: storedNow.taken_at || null, close_drift: null }
+    }
+  }
   const [computed, stored] = await Promise.all([
     reconciliationFor(env, user, shift, memo),
     shift.closed_at ? storedCloseFigures(env, shift.id) : Promise.resolve(null),
@@ -989,13 +1013,13 @@ async function figuresFor(env: Env, user: SessionUser, shift: ShiftRow, memo?: S
 type ReconciledShift = ShiftPresentedRow & ShiftDrawer & {
   figures?: ShiftFigures | null
 }
-async function reconciledShift(env: Env, user: SessionUser, row: ShiftDbRow): Promise<ReconciledShift> {
+async function reconciledShift(env: Env, user: SessionUser, row: ShiftDbRow, options: { closedOn?: CloseFigures | null } = {}): Promise<ReconciledShift> {
   const shift = await presentShift(getDb(env), user, row)
   // The presentation after the commit is ONE phase: the drawer and the figures read the same expenses, courier payouts, cash config and time review side by
   // side, so they share one statement each (lib/shiftReconciliation.ts ShiftReadMemo). Made here, after the commit, so it can never reach the digest.
   const memo: ShiftReadMemo = new Map()
   const [drawer, figures] = await Promise.all([
-    drawerFor(env, user, shift, { drift: true }, memo),
+    drawerFor(env, user, shift, { drift: true, closedOn: options.closedOn }, memo),
     figuresFor(env, user, shift, memo),
   ])
   return { ...shift, ...drawer, figures }
@@ -1209,9 +1233,9 @@ app.get('/:id/history', async (c) => {
  * the way it always did, from this invocation. The clock reading and the actor names ride with the row so the text is the one
  * this route would have sent.
  */
-function announceShiftReport(c: { env: Env; executionCtx: { waitUntil(promise: Promise<unknown>): void } }, shift: { id: number; revision: number }, action: ShiftReportAction, options: ShiftReportOptions = {}): void {
+function announceShiftReport(c: { env: Env; executionCtx: { waitUntil(promise: Promise<unknown>): void } }, shift: { id: number; revision: number }, action: ShiftReportAction, options?: ShiftReportOptions, config?: ReturnType<typeof loadTelegramConfig>): void {
   const nowMs = Date.now()
-  const work = scheduleTelegramShiftReport(c.env, shift.id, shift.revision, action, nowMs, options)
+  const work = scheduleTelegramShiftReport(c.env, shift.id, shift.revision, action, nowMs, options, config)
     .then((outcome) => (outcome === 'unavailable' ? sendTelegramShiftReport(c.env, shift.id, nowMs, options) : undefined))
   try { c.executionCtx.waitUntil(work) } catch { void work }
 }
@@ -1322,7 +1346,7 @@ async function writeClose(db: D1Compat, user: SessionUser, row: ShiftDbRow, inpu
   figures: CloseFigures | null
   /** The time review this close stands on (closeTimeReview), journaled with it. */
   timeReview: ShiftTimeReview[]
-}): Promise<{ changed: boolean; shift: ShiftDbRow | undefined }> {
+}): Promise<{ changed: boolean; shift: ShiftDbRow | undefined; figures: CloseFigures | null }> {
   const shift = storedShift(row)
   const after = { ...shift, closed_at: input.closedAt, closing_counted_usd: input.countedUsd,
     closing_counted_khr: input.countedKhr, additional_cash_usd: input.additionalUsd, additional_cash_khr: input.additionalKhr,
@@ -1369,7 +1393,8 @@ async function writeClose(db: D1Compat, user: SessionUser, row: ShiftDbRow, inpu
           closeGuardClosedAt: input.closedAt, closeGuardCloserId: user.id, closeInputsDigest: input.figures.digestValue } }]),
   ])
   const changed = batchChanges(results[0]) === 1
-  return { changed, shift: await readShiftById(db, shift.id) }
+  // figures: what the batch committed on (null when the close committed without stored figures), so the response can tell, with one digest read, that nothing moved since.
+  return { changed, shift: await readShiftById(db, shift.id), figures: input.figures }
 }
 /**
  * The close, with the figures it is made on (N4). The figures are computed
@@ -1403,9 +1428,10 @@ async function closeWithFigures(env: Env, db: D1Compat, user: SessionUser, row: 
  * the scheduler itself is unavailable. The one-send guarantee and the Free /
  * Paid mechanics live in lib/telegram.ts beside scheduleTelegramShiftOverview.
  */
-function scheduleOverviewAfterClose(c: { env: Env; executionCtx: { waitUntil(promise: Promise<unknown>): void } }, shiftId: number): void {
+function scheduleOverviewAfterClose(c: { env: Env; executionCtx: { waitUntil(promise: Promise<unknown>): void } }, shift: { id: number; revision: number; closed_at: string | null; cancelled_at: string | null }, config?: ReturnType<typeof loadTelegramConfig>): void {
   try {
-    const scheduled = scheduleTelegramShiftOverview(c.env, shiftId)
+    // The row is the one the write just read back: no second read of it, and the report scheduler's settings read is shared.
+    const scheduled = scheduleTelegramShiftOverview(c.env, shift.id, Date.now(), { known: shift, config })
     try { c.executionCtx.waitUntil(scheduled) } catch { void scheduled }
   } catch (error) {
     console.error('[shifts] Reports overview could not be scheduled', error)
@@ -1421,9 +1447,10 @@ app.post('/close', async (c) => {
   // Ending a drawer never requires its branch to still trade (N7): a till
   // whose branch was retired mid-shift must still be able to close.
   if (branchId != null && !(await branchExists(db, branchId))) return c.json({ error: 'Branch not found.' }, 400)
-  const shift = await readShiftById(db, Number(body.shift_id))
+  const pre = c.get('shiftPre')
+  const shift = pre?.shift ?? await readShiftById(db, Number(body.shift_id))
   if (!shift) return c.json({ error: 'Shift not found.' }, 404)
-  if (!canSeeShift(user, await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
+  if (!canSeeShift(user, pre?.policy ?? await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
   if (body.branch_id != null && shift.branch_id !== branchId) return c.json({ error: 'Shift branch does not match the requested branch.' }, 400)
   if (shift.cancelled_at) return c.json({ error: 'This shift was cancelled. Register a replacement opening first.' }, 409)
   if (!canMutateShift(user, shift)) return c.json({ error: 'Only the shift owner or an administrator can close this shift.' }, 403)
@@ -1452,9 +1479,11 @@ app.post('/close', async (c) => {
   if (result.changed) {
     // The report names the closer when it is not the cashier (an administrator closing a till):
     // the stored closer's name and account id, which the close just wrote.
-    announceShiftReport(c, result.shift ?? { id: shift.id, revision: shift.revision + 1 }, 'close', { closedBy: result.shift?.closed_by_user_name ?? displayName(user), closedById: result.shift?.closed_by_user_id ?? user.id })
-    scheduleOverviewAfterClose(c, shift.id)
-    return c.json({ shift: result.shift ? await reconciledShift(c.env, user, result.shift) : null, already_closed: false, is_open: false }, 200)
+    const telegramConfig = loadTelegramConfig(c.env)
+    announceShiftReport(c, result.shift ?? { id: shift.id, revision: shift.revision + 1 }, 'close', { closedBy: result.shift?.closed_by_user_name ?? displayName(user), closedById: result.shift?.closed_by_user_id ?? user.id }, telegramConfig)
+    if (result.shift) scheduleOverviewAfterClose(c, result.shift, telegramConfig)
+    else scheduleOverviewAfterClose(c, { id: shift.id, revision: shift.revision + 1, closed_at: closedAt, cancelled_at: null }, telegramConfig)
+    return c.json({ shift: result.shift ? await reconciledShift(c.env, user, result.shift, { closedOn: result.figures }) : null, already_closed: false, is_open: false }, 200)
   }
   return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
 })
@@ -1478,9 +1507,9 @@ app.post('/:id/close', async (c) => {
   if (!countedUsd.ok || !countedKhr.ok) return c.json({ error: 'Closing counts must be 0 or more, or left blank.' }, 400)
   const additionalUsd = additionalMoney(body.additional_cash_usd); const additionalKhr = additionalMoney(body.additional_cash_khr)
   if (!additionalUsd.ok || !additionalKhr.ok) return c.json({ error: 'Additional change used must be 0 or more, or left blank.' }, 400)
-  const db = getDb(c.env); const shift = await readShiftById(db, id)
+  const db = getDb(c.env); const pre = c.get('shiftPre'); const shift = pre?.shift ?? await readShiftById(db, id)
   if (!shift) return c.json({ error: 'Shift not found.' }, 404)
-  if (!canSeeShift(user, await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
+  if (!canSeeShift(user, pre?.policy ?? await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
   // No branch-activity check: closing is allowed on a retired branch (N7).
   if (!canMutateShift(user, shift)) return c.json({ error: 'Only the shift owner or an administrator can close this shift.' }, 403)
   if (shift.cancelled_at) return c.json({ error: 'A cancelled shift cannot be closed.' }, 409)
@@ -1502,9 +1531,10 @@ app.post('/:id/close', async (c) => {
     note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Historic manual close', request: mutationRequest(body, id),
     timeReview: await closeTimeReview(c.env, shift, timing, reviewerName(user)) })
   if (!result.changed || !result.shift) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
-  announceShiftReport(c, result.shift, 'close', { closedBy: result.shift.closed_by_user_name ?? displayName(user), closedById: result.shift.closed_by_user_id ?? user.id })
-  scheduleOverviewAfterClose(c, shift.id)
-  return c.json({ shift: await reconciledShift(c.env, user, result.shift), already_closed: false, is_open: false }, 200)
+  const telegramConfig = loadTelegramConfig(c.env)
+  announceShiftReport(c, result.shift, 'close', { closedBy: result.shift.closed_by_user_name ?? displayName(user), closedById: result.shift.closed_by_user_id ?? user.id }, telegramConfig)
+  scheduleOverviewAfterClose(c, result.shift, telegramConfig)
+  return c.json({ shift: await reconciledShift(c.env, user, result.shift, { closedOn: result.figures }), already_closed: false, is_open: false }, 200)
 })
 
 app.post('/:id/cancel', async (c) => {
@@ -1731,7 +1761,7 @@ app.patch('/:id', async (c) => {
   announceShiftReport(c, saved, 'amend', { amendedBy: actorName })
   // An amendment that CLOSES an open shift is a close; one that edits an
   // already closed shift is not, and schedules no second overview.
-  if (!before.closed_at && saved.closed_at) scheduleOverviewAfterClose(c, saved.id)
+  if (!before.closed_at && saved.closed_at) scheduleOverviewAfterClose(c, saved)
   return c.json({ shift: await presentShift(db, user, saved) }, 200)
 })
 

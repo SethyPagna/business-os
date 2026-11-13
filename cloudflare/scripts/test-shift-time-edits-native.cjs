@@ -30,7 +30,10 @@ async function main() {
   const telegramSent = []
   const BOT_TOKEN = 'test-token-not-real'
   const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'],
-    d1Databases: ['DB'], kvNamespaces: ['CACHE'], cache: false, bindings: { PLAN_TIER: 'paid', BUSINESS_OS_ADMIN_URL: ORIGIN, TELEGRAM_BOT_TOKEN: BOT_TOKEN },
+    d1Databases: ['DB'], kvNamespaces: ['CACHE'], cache: false,
+    // The shift report is its own queued send (0305): the producer and the consumer are the Worker's own, so the report reaches Telegram through src/index.ts's queue() as in production.
+    queueProducers: { BACKUP_QUEUE: 'business-os-backup-assets' }, queueConsumers: { 'business-os-backup-assets': { maxBatchSize: 1, maxBatchTimeout: 0 } },
+    bindings: { PLAN_TIER: 'paid', BUSINESS_OS_ADMIN_URL: ORIGIN, TELEGRAM_BOT_TOKEN: BOT_TOKEN },
     outboundService: async (request) => {
       if (request.url.startsWith('https://api.telegram.org/')) {
         const body = await request.json().catch(() => ({}))

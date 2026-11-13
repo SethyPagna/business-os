@@ -126,7 +126,7 @@ function harness(sqlite, routeSource = source) {
       loadShiftFigures: async () => ({ marker: 'figures' }),
     },
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
-    '../lib/telegram': { sendTelegramShiftReport: async () => true },
+    '../lib/telegram': { scheduleTelegramShiftReport: async () => 'unavailable', loadTelegramConfig: async () => ({}), sendTelegramShiftReport: async () => true },
   })
   const app = route.default || route
   const json = async (method, url, body) => {

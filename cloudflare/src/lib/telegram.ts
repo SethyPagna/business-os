@@ -274,6 +274,8 @@ function parseChatIds(value: string | undefined): string[] {
   return String(value || '').split(/[,;\s]+/).map((entry) => cleanLine(entry, 40)).filter((entry) => /^-?\d+$/.test(entry))
 }
 
+/** Exported for the shift routes: ONE read of the settings feeds both schedulers a close makes (report and overview). */
+export function loadTelegramConfig(env: Env): Promise<TelegramConfig> { return getTelegramConfig(env) }
 async function getTelegramConfig(env: Env): Promise<TelegramConfig> {
   const rows = await getDb(env).prepare(`SELECT key, value FROM settings WHERE key IN (${SETTING_KEYS.map(() => '?').join(',')})`).all<{ key: string; value: string }>([...SETTING_KEYS])
   const values = Object.fromEntries(rows.map((row) => [row.key, row.value])) as Record<string, string>
@@ -2273,13 +2275,18 @@ export type ShiftOverviewScheduleResult = 'queued' | 'fallback' | 'duplicate' | 
  * Called from the shift close routes once the close has COMMITTED. Never
  * throws: a close must not fail because of a Telegram schedule.
  */
-export async function scheduleTelegramShiftOverview(env: Env, shiftId: number, nowMs: number = Date.now()): Promise<ShiftOverviewScheduleResult> {
+export async function scheduleTelegramShiftOverview(
+  env: Env, shiftId: number, nowMs: number = Date.now(),
+  /** The row the route just wrote and read back (wave 3: saves the re-read), and the settings the report scheduler already read. */
+  known: { known?: { id: number; revision: number; closed_at: string | null; cancelled_at: string | null }; config?: Promise<TelegramConfig> } = {},
+): Promise<ShiftOverviewScheduleResult> {
   try {
-    const config = await getTelegramConfig(env)
+    const config = await (known.config ?? getTelegramConfig(env))
     if (!config.enabled || !config.shiftOverview || configurationProblem(config)) return 'off'
-    if (!(await scheduledSendsAvailable(env))) return 'unavailable'
+    // No sqlite_master probe here (wave 3): the INSERT below names the table, and a deployment without 0194 answers 'unavailable' from its
+    // "no such table" -- the same answer for one call less on every cold isolate.
     const db = getDb(env)
-    const shift = await db.prepare('SELECT id, revision, closed_at, cancelled_at FROM shift_sessions WHERE id = @id').get<{ id: number; revision: number; closed_at: string | null; cancelled_at: string | null }>({ id: shiftId })
+    const shift = known.known ?? await db.prepare('SELECT id, revision, closed_at, cancelled_at FROM shift_sessions WHERE id = @id').get<{ id: number; revision: number; closed_at: string | null; cancelled_at: string | null }>({ id: shiftId })
     if (!shift || !shift.closed_at || shift.cancelled_at) return 'not-closed'
     const key = shiftOverviewKey(shift.id, shift.revision)
     const inserted = await db.prepare(`INSERT OR IGNORE INTO telegram_scheduled_sends (send_key, kind, shift_id, due_at, created_at)
@@ -2299,7 +2306,7 @@ export async function scheduleTelegramShiftOverview(env: Env, shiftId: number, n
     }
     return 'fallback'
   } catch (error) {
-    console.error('[telegram] shift overview could not be scheduled', error)
+    if (!/no such table/i.test(String((error as Error)?.message || error))) console.error('[telegram] shift overview could not be scheduled', error)
     return 'unavailable'
   }
 }
@@ -2444,10 +2451,11 @@ type ShiftReportPayload = { nowMs: number; options: ShiftReportOptions }
  */
 export async function scheduleTelegramShiftReport(
   env: Env, shiftId: number, revision: number, action: ShiftReportAction, nowMs: number = Date.now(), options: ShiftReportOptions = {},
+  sharedConfig?: Promise<TelegramConfig>,
 ): Promise<ShiftReportScheduleResult> {
   let recorded = false
   try {
-    const config = await getTelegramConfig(env)
+    const config = await (sharedConfig ?? getTelegramConfig(env))
     if (!config.enabled || configurationProblem(config)) return 'off'
     const db = getDb(env)
     const key = shiftReportKey(shiftId, revision, action)

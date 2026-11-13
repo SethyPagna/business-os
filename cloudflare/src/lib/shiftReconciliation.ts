@@ -667,18 +667,24 @@ export async function shiftLastActivityMs(
   if (shift.branch_id) { returns.clauses.push('returns.branch_id = @branchId'); returns.params.branchId = shift.branch_id }
   returns.clauses.push("COALESCE(returns.status, 'completed') <> 'cancelled'", "COALESCE(returns.return_scope, 'customer') = 'customer'")
   const fees = shiftFeeWhere(open, horizon)
-  const db = getDb(env)
-  const latest = await Promise.all([
-    db.prepare(`SELECT MAX(datetime(created_at)) AS at FROM sales WHERE ${sales.clauses.join(' AND ')}`).get<{ at: string | null }>(sales.params),
-    db.prepare(`SELECT MAX(datetime(created_at)) AS at FROM returns WHERE ${returns.clauses.join(' AND ')}`).get<{ at: string | null }>(returns.params),
-    db.prepare(`SELECT MAX(datetime(created_at)) AS at FROM fees WHERE ${fees.clauses.join(' AND ')}`).get<{ at: string | null }>(fees.params),
-  ])
   const events = paymentEventWindow(open, horizon)
-  const eventLatest = await db.prepare(`SELECT MAX(e.received_at) AS at FROM sale_payment_events e CROSS JOIN sales ON sales.id = e.sale_id
-      WHERE ${['sales.payments_version = 1', 'e.drawer_effect = 1', "COALESCE(NULLIF(sales.sale_status, ''), 'completed') <> 'cancelled'", ...events.clauses].join(' AND ')}`)
-    .get<{ at: string | null }>(events.params)
-  latest.push(eventLatest)
-  const times = latest.map((row) => (row?.at ? Date.parse(`${row.at.replace(' ', 'T')}Z`) : Number.NaN)).filter(Number.isFinite)
+  // ONE statement for the four tables (wave 3: three D1 calls fewer in every close, reopen and amend). Each table keeps its own filter, so each scalar subquery is the
+  // statement it used to be; their named parameters are prefixed per table because the filters share names ("@createdFrom", "@branchId") whose values need not agree.
+  const part = (prefix: string, select: string, params: Record<string, unknown>) => ({
+    sql: select.replace(/@([A-Za-z_][A-Za-z0-9_]*)/g, `@${prefix}_$1`),
+    params: Object.fromEntries(Object.entries(params).map(([name, value]) => [`${prefix}_${name}`, value])),
+  })
+  const parts = [
+    part('s', `SELECT MAX(datetime(created_at)) FROM sales WHERE ${sales.clauses.join(' AND ')}`, sales.params),
+    part('r', `SELECT MAX(datetime(created_at)) FROM returns WHERE ${returns.clauses.join(' AND ')}`, returns.params),
+    part('f', `SELECT MAX(datetime(created_at)) FROM fees WHERE ${fees.clauses.join(' AND ')}`, fees.params),
+    part('e', `SELECT MAX(e.received_at) FROM sale_payment_events e CROSS JOIN sales ON sales.id = e.sale_id
+      WHERE ${['sales.payments_version = 1', 'e.drawer_effect = 1', "COALESCE(NULLIF(sales.sale_status, ''), 'completed') <> 'cancelled'", ...events.clauses].join(' AND ')}`, events.params),
+  ]
+  const row = await getDb(env).prepare(`SELECT ${parts.map((entry, index) => `(${entry.sql}) AS at${index}`).join(', ')}`)
+    .get<Record<string, string | null>>(Object.assign({}, ...parts.map((entry) => entry.params)))
+  const latest = parts.map((_entry, index) => row?.[`at${index}`] ?? null)
+  const times = latest.map((at) => (at ? Date.parse(`${at.replace(' ', 'T')}Z`) : Number.NaN)).filter(Number.isFinite)
   return times.length ? Math.max(...times) : null
 }
 

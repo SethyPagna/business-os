@@ -48,6 +48,11 @@ function shiftClock() {
         return Response.json({ now: Date.now(), sql: await DB.prepare("SELECT datetime('now') AS now, date('now', '+7 hours') AS business_date").first() });
       }
       return worker.fetch(request, { ...env, DB }, ctx);
+    },
+    // The queue consumer runs on the same advancing clock (the shift report is its own queued send, 0305).
+    async queue(batch, env, ctx) {
+      if (!databases.has(env.DB)) databases.set(env.DB, clockDatabase(env.DB, fixtureClock));
+      return worker.queue(batch, { ...env, DB: databases.get(env.DB) }, ctx);
     }};`
   return {
     ...clock, prelude, entry,
