@@ -458,6 +458,36 @@ async function mainRaces() {
     await withClock(2, () => pruneCloudflareBackups(env))
     assert.ok(!env.ASSETS._store.has(stray), 'older than the grace and unreferenced: swept')
   })
+
+  // F6: a continuation that copies a changed version updates the sidecar's etag; the manifest it cannot rewrite is then
+  // stale, so the set says so (it is never mirrored to Drive, whose copy is manifest-only).
+  await checkAsync('F6: a continuation that finds a changed version marks the manifest assets stale and records the copied etag', async () => {
+    const env = makeEnv(imageSet(150))
+    const created = await withClock(0, () => createCloudflareBackup(env, 'manual'))
+    const name = created.name.replace(/\.json$/, '')
+    const listed = await withClock(0, () => listCloudflareBackups(env))
+    assert.strictEqual(listed.find((x) => x.name === name + '.json').manifestAssetsCurrent, true)
+    const before = (await stateOf(env, name)).assets.find((a) => a.key === 'uploads/img-0120.png').etag
+    env.ASSETS._set('uploads/img-0120.png', Buffer.from(png(9999)), IMG)
+    await withClock(0, () => drain(env))
+    const done = await stateOf(env, name)
+    const entry = done.assets.find((a) => a.key === 'uploads/img-0120.png')
+    assert.notStrictEqual(entry.etag, before, 'the sidecar names the version that was copied')
+    assert.ok(env.ASSETS._store.has(assetPoolKey(entry)))
+    assert.strictEqual(done.manifestAssetsStale, true)
+    const after = await withClock(0, () => listCloudflareBackups(env))
+    assert.strictEqual(after.find((x) => x.name === name + '.json').manifestAssetsCurrent, false)
+  })
+
+  await checkAsync('F6: an unchanged continuation leaves the manifest assets current', async () => {
+    const env = makeEnv(imageSet(150))
+    const created = await withClock(0, () => createCloudflareBackup(env, 'manual'))
+    await withClock(0, () => drain(env))
+    const done = await stateOf(env, created.name.replace(/\.json$/, ''))
+    assert.strictEqual(done.status, 'finalized')
+    assert.ok(!done.manifestAssetsStale)
+  })
+
   console.log(`\n${passed} check(s) passed.`)
 }
 mainRaces().catch((e) => { console.log('FAIL', e.stack || e.message); process.exitCode = 1 })

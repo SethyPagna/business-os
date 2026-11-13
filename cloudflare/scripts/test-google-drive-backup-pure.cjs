@@ -87,6 +87,7 @@ const {
   consumeDriveOauthState,
   isTrustedDriveUploadSession,
   pushBackupToDrive,
+  newestMirrorableBackup,
   driveSyncHasNewBackup,
   driveSyncScheduleDue,
   disconnectDrive,
@@ -248,6 +249,9 @@ async function main() {
     newerBackupExists = true
     assert.deepStrictEqual(await driveSyncHasNewBackup(env), { new: true, backupKey: 'backups/cloudflare/newer.json' }, 'the next daily backup is picked up')
     newerBackupExists = false
+    // F6: a set whose manifest lists older versions than it copied is never the one mirrored (a Drive copy is manifest-only).
+    assert.strictEqual(newestMirrorableBackup([{ key: 'a', finalized: true, manifestAssetsCurrent: false }, { key: 'b', finalized: true, manifestAssetsCurrent: true }]).key, 'b')
+    assert.strictEqual(newestMirrorableBackup([{ key: 'a', finalized: true }]).key, 'a', 'a set without the field (older code, legacy) is eligible')
     // F4: a plain copy keeps its .json name and type; a gzip manifest is named .json.gz and typed application/gzip.
     assert.deepStrictEqual(lastUpload, { name: 'final.json', initType: 'application/json', putType: 'application/json' })
     gzipBackupNewest = true

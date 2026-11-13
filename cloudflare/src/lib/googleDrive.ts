@@ -554,8 +554,9 @@ export async function driveSyncScheduleDue(env: Env): Promise<{ due: boolean; re
  * copy partial and use up its 10 slots. Both selectors (the upload and the already-has-it check) share this one predicate,
  * so the skip marker always names the backup that would be uploaded.
  */
-export function newestMirrorableBackup<T extends { finalized: boolean; scope?: 'full' | 'section' | null }>(backups: readonly T[]): T | undefined {
-  return backups.find((item) => item.finalized && item.scope !== 'section')
+export function newestMirrorableBackup<T extends { finalized: boolean; scope?: 'full' | 'section' | null; manifestAssetsCurrent?: boolean }>(backups: readonly T[]): T | undefined {
+  // A set whose manifest lists older versions than it copied would give a Drive-only restore the wrong images: skip it.
+  return backups.find((item) => item.finalized && item.scope !== 'section' && item.manifestAssetsCurrent !== false)
 }
 
 /**

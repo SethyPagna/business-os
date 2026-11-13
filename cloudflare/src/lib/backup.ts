@@ -403,6 +403,10 @@ export type BackupLifecycleState = {
   failedKeys: string[]
   attempts: Record<string, number>
   systemJobId?: string
+  // Set when a continuation slice found a changed version of an upload AFTER the manifest was written: the sidecar names the
+  // version that was copied, the (immutable) manifest still names the one it listed. A Drive copy is manifest-only, so such a
+  // set is never mirrored to Drive (a Drive-only restore would otherwise get a different version than the set copied).
+  manifestAssetsStale?: boolean
 }
 
 function backupStateKey(backupName: string): string {
@@ -528,6 +532,8 @@ export async function listCloudflareBackups(env: Env) {
     source: 'manual' | 'scheduled' | null
     // 'full' or 'section' (manifest customMetadata); null on backups from before the field was stamped.
     scope: 'full' | 'section' | null
+    // false when the manifest's asset list no longer matches what the set copied (see manifestAssetsStale).
+    manifestAssetsCurrent: boolean
   }> = []
   let cursor: string | undefined
   do {
@@ -562,6 +568,7 @@ export async function listCloudflareBackups(env: Env) {
         finalized: status === 'finalized',
         source: object.customMetadata?.source === 'scheduled' || object.customMetadata?.source === 'manual' ? object.customMetadata.source : null,
         scope: object.customMetadata?.scope === 'full' || object.customMetadata?.scope === 'section' ? object.customMetadata.scope : null,
+        manifestAssetsCurrent: !state?.manifestAssetsStale,
       })
     }
     cursor = page.truncated ? page.cursor : undefined
@@ -1153,7 +1160,10 @@ export async function continueCloudflareBackupAssetCopy(env: Env, backupName: st
   let walked: Array<{ key: string; ok: boolean }>
   if (state.assetLayout === ASSET_LAYOUT_POOL) {
     // Pool layout: assets already pooled are free, so a slice may walk far more than `cap` keys; only copies are capped.
-    walked = await copyIntoAssetPool(env, new Map<string, AssetEntry>(state.assets.map((asset) => [asset.key, asset])), state.pendingKeys, cap, () => putBackupState(env, state))
+    walked = await copyIntoAssetPool(env, new Map<string, AssetEntry>(state.assets.map((asset) => [asset.key, asset])), state.pendingKeys, cap, () => {
+      state.manifestAssetsStale = true
+      return putBackupState(env, state)
+    })
   } else {
     // A set started before the pool existed finishes in its own per-backup folder.
     walked = []
