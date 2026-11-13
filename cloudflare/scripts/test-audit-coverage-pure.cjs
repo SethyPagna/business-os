@@ -172,7 +172,8 @@ ok(/writeContinuation\([\s\S]*auditAction: 'shift\.open_after_cancel'/.test(open
 const closeWithFiguresWriter = section('async function closeWithFigures', "app.post('/close'")
 ok(/db\.batch\(\[[\s\S]*transitionAuditSql\(\)/.test(closeWriter)
   && currentCloseRoute.includes('closeWithFigures(c.env, db') && historicCloseRoute.includes('closeWithFigures(c.env, db')
-  && /return await writeClose\(db, /.test(closeWithFiguresWriter) && /return writeClose\(db, /.test(closeWithFiguresWriter)
+  && (closeWithFiguresWriter.match(/writeClose\(db, /g) || []).length === 2
+  && (closeWithFiguresWriter.match(/return \{ \.\.\.await writeClose\(db, /g) || []).length === 2
   && !/db\.(batch|prepare)\(/.test(closeWithFiguresWriter),
   'shifts.ts current and historic close share the atomic audited writer')
 ok(/db\.batch\(\[[\s\S]*transitionAuditSql\(\)/.test(cancelRoute),
