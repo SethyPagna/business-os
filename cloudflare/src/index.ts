@@ -706,11 +706,17 @@ export function cronRotationSteps(env: Env, label: (name: string, step: () => Pr
  */
 export function cronHeavySteps(env: Env, label: (name: string, step: () => Promise<unknown>) => () => Promise<unknown>): RotationStep[] {
   const step = (id: string, run: () => Promise<unknown>, minIntervalMs?: number): RotationStep => ({ id, run: label(id, run), ...(minIntervalMs ? { minIntervalMs } : {}) })
+  // Failed or killed visits already counted tonight, handed to the backup so it can add the failed sets it sees in R2.
+  let priorFailuresTonight = 0
   return [
     // maybeRunScheduledBackup answers `incomplete: true` while tonight's set is still copying (or ended failed/partial):
     // runRotationTick then keeps the visit healthy but does not record okAt, so the lane re-selects the backup step on the
     // next heavy tick, which retries only if R2 shows no finalized set.
-    { ...step('backup', () => maybeRunScheduledBackup(env)), attemptWindow: (nowMs) => scheduledBackupNightOf(nowMs, getPlanLimits(env).scheduledBackupAfterHourLocal) },
+    {
+      ...step('backup', () => maybeRunScheduledBackup(env, Date.now(), undefined, priorFailuresTonight)),
+      attemptWindow: (nowMs) => scheduledBackupNightOf(nowMs, getPlanLimits(env).scheduledBackupAfterHourLocal),
+      onClaim: (info) => { priorFailuresTonight = info.windowFailures },
+    },
     step('image-audit', () => maybeRunScheduledImageAudit(env), UNGATED_STEP_MIN_INTERVAL_MS),
   ]
 }

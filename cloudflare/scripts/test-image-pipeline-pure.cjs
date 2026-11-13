@@ -219,7 +219,7 @@ check('the audit cannot break the backup chain', async () => {
   // rotation holds neither.
   const rotation = index.slice(index.indexOf('export function cronRotationSteps'), index.indexOf('export function cronHeavySteps'))
   const heavy = index.slice(index.indexOf('export function cronHeavySteps'), index.indexOf('export default {'))
-  const backupAt = heavy.indexOf("step('backup', () => maybeRunScheduledBackup(env))")
+  const backupAt = heavy.indexOf("step('backup', () => maybeRunScheduledBackup(env")
   const auditAt = heavy.indexOf("step('image-audit', () => maybeRunScheduledImageAudit(env)")
   assert.ok(backupAt >= 0, 'the backup must be in the heavy scheduled steps')
   assert.ok(auditAt > backupAt, 'the image audit must run after the backup')

@@ -100,6 +100,11 @@ export interface RotationStep {
    * killed visits per window (windowKey / windowFailures), which a lane selector can read without any extra I/O.
    */
   attemptWindow?: (nowMs: number) => string
+  /**
+   * Called after this visit is claimed (and any earlier kill counted) and before run(), with the failed or killed visits already
+   * counted in the current window, so run() can add what only it can see (the backup adds the failed sets in R2).
+   */
+  onClaim?: (info: { windowFailures: number }) => void
 }
 
 export interface TickResult {
@@ -236,6 +241,7 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
   if (!(await commit())) return { stepId: step.id, ok: true, more: false, skipped: 'lost-race' }
 
   let ok = true
+  step.onClaim?.({ windowFailures: record.windowFailures || 0 })
   let more = false
   // A visit that ran fine but whose work is not finished (a backup whose asset copy is still running in the queue):
   // it is not an error, but it must not count as done, or the step's okAt would satisfy a lane gate for the whole day.

@@ -119,7 +119,7 @@ function fakeR2() {
 // `managed` makes the fake R2 behave like production: createCloudflareBackup returns as soon as the manifest is written
 // ('copying'), and the queue ends the set LATER -- finalized, failed or partial -- between heavy ticks. managed(iso) answers
 // { end: 'finalized' | 'failed' | 'partial', copyMs } for the set created at that instant.
-async function simulate(load, { failFirstNightAt = null, loseStateAfterEachTick = false, managed = null, throwFrom = null } = {}) {
+async function simulate(load, { failFirstNightAt = null, loseStateAfterEachTick = false, managed = null, throwFrom = null, killFrom = null } = {}) {
   const backupMod = load('lib/backup.ts')
   const rot = load('lib/cronRotation.ts')
   const dispatch = load('lib/cronDispatch.ts')
@@ -131,10 +131,13 @@ async function simulate(load, { failFirstNightAt = null, loseStateAfterEachTick 
   Date.now = () => clock
   const created = []
   const attempted = []
+  let prior = 0
+  let killedNow = false
   let failuresLeft = failFirstNightAt ? 1 : 0
   const create = async (e, source) => {
     attempted.push(clock)
     if (throwFrom !== null && clock >= throwFrom) throw new Error('simulated backup failure')
+    if (killFrom !== null && clock >= killFrom) { killedNow = true; throw new Error('killed') } // the isolate dies: its post-run save never happens
     if (failFirstNightAt && clock === failFirstNightAt && failuresLeft > 0) { failuresLeft -= 1; throw new Error('simulated backup failure') }
     created.push({ at: clock, source })
     const name = `business-os-cloudflare-${created.length}`
@@ -169,6 +172,7 @@ async function simulate(load, { failFirstNightAt = null, loseStateAfterEachTick 
     save: async (s, expected) => {
       const stored = table[key] ? rot.parseRotationState(table[key]).version : null
       if (stored !== expected) return false
+      if (killedNow && s.steps.backup && s.steps.backup.finishedAt === s.steps.backup.startedAt) { killedNow = false; return true } // lost with the isolate
       table[key] = JSON.stringify(s); return true
     },
   })
@@ -177,7 +181,7 @@ async function simulate(load, { failFirstNightAt = null, loseStateAfterEachTick 
     rotationSteps: () => [],
     storeFor: store,
     heavySteps: () => [
-      { id: 'backup', attemptWindow: (ms) => schedule.scheduledBackupNightOf(ms, limits.scheduledBackupAfterHourLocal), run: async () => { ran.push({ at: clock, step: 'backup' }); return backupMod.maybeRunScheduledBackup(env, clock, create) } },
+      { id: 'backup', attemptWindow: (ms) => schedule.scheduledBackupNightOf(ms, limits.scheduledBackupAfterHourLocal), onClaim: (info) => { prior = info.windowFailures }, run: async () => { ran.push({ at: clock, step: 'backup' }); return backupMod.maybeRunScheduledBackup(env, clock, create, prior) } },
       { id: 'image-audit', minIntervalMs: rot.UNGATED_STEP_MIN_INTERVAL_MS, run: async () => { ran.push({ at: clock, step: 'image-audit' }) } },
     ],
     heavySelect: (steps, state, now) => schedule.pickHeavyStepIndex(steps, state, now, limits.scheduledBackupAfterHourLocal, limits.scheduledBackupMaxAttemptsPerDay),
@@ -197,7 +201,7 @@ async function simulate(load, { failFirstNightAt = null, loseStateAfterEachTick 
     // 12 Nov 00:17Z (07:17 local) through 14 Nov 17:17Z, every 3 h: the real heavy cron.
     for (let t = Z('2026-11-12T00:17:00Z'); t <= Z('2026-11-14T17:17:00Z'); t += 3 * HOUR) {
       await tick(new Date(t).toISOString())
-      if (t === Z('2026-11-12T15:17:00Z') && !failFirstNightAt && !managed && throwFrom === null) {
+      if (t === Z('2026-11-12T15:17:00Z') && !failFirstNightAt && !managed && throwFrom === null && killFrom === null) {
         // Extra deliveries of the same night: a repeat of that firing, then direct retries well after close.
         await tick('2026-11-12T16:17:00Z') // 23:17 local, same 3 h slot
         afterTick = created.length
@@ -329,14 +333,24 @@ const localHour = (c) => sched.businessHourOf(c.at)
       assert.ok(audits.some((t) => t > Z('2026-11-12T18:17:00Z') && t < Z('2026-11-13T15:17:00Z')), 'the image audit runs after the night is given up')
       assert.ok(audits.length >= 5, 'the audit keeps its own cadence while backups fail: ' + audits.length)
     }
+    // R2-B: killed visits. The kill is only noticed by the NEXT visit, after the lane has already chosen the step, so it used to take
+    // allowance + 1 reads. Every try killed: still at most 2 per night. A failed set followed by kills: still at most 2.
+    const killed = await simulate(real, { killFrom: Z('2026-11-12T00:00:00Z') })
+    assert.ok(Object.values(nights(killed.attempted.slice(1))).every((n) => n <= MAX), 'killed visits: at most the allowance per night: ' + JSON.stringify(nights(killed.attempted.slice(1))))
+    assert.ok(killed.attempted.length - 1 >= 4, 'control: the kills really were retried across nights')
+    const failedThenKilled = await simulate(real, { killFrom: Z('2026-11-12T16:00:00Z'), managed: (at) => (Z(at) >= Z('2026-11-12T00:00:00Z') && Z(at) < Z('2026-11-12T16:00:00Z') ? { end: 'failed', copyMs: 20 * 60 * 1000 } : { end: 'finalized', copyMs: 1 }) })
+    assert.ok(Object.values(nights(failedThenKilled.attempted.slice(1))).every((n) => n <= MAX), 'one failed set then kills: at most the allowance per night: ' + JSON.stringify(nights(failedThenKilled.attempted.slice(1))))
     // The pure lane decision: failures at the allowance in this very night hand the tick to the other step; next night does not.
     const steps = [{ id: 'backup' }, { id: 'image-audit' }]
     const rec = (startedAt, failures) => ({ steps: { backup: { startedAt, finishedAt: startedAt, okAt: null, error: 'x', failures, killed: 0, runs: failures, windowKey: sched.scheduledBackupNightOf(Z(startedAt), AFTER), windowFailures: failures } } })
     assert.strictEqual(sched.pickHeavyStepIndex(steps, rec('2026-11-12T18:17:00Z', 2), Z('2026-11-12T21:17:00Z'), AFTER, 2), 1, 'allowance spent: the other step')
     assert.strictEqual(sched.pickHeavyStepIndex(steps, rec('2026-11-12T18:17:00Z', 1), Z('2026-11-12T21:17:00Z'), AFTER, 2), 0, 'one try left: backup')
+    const killedRec = rec('2026-11-12T18:17:00Z', 1)
+    killedRec.steps.backup.finishedAt = '2026-11-12T15:17:00Z'
+    assert.strictEqual(sched.pickHeavyStepIndex(steps, killedRec, Z('2026-11-12T21:17:00Z'), AFTER, 2), 1, 'a visit started and never finished is a pending kill and counts now')
     assert.strictEqual(sched.pickHeavyStepIndex(steps, rec('2026-11-12T18:17:00Z', 2), Z('2026-11-13T15:17:00Z'), AFTER, 2), 0, 'next night: backup again')
     assert.ok(read('lib/planTier.ts').includes('scheduledBackupMaxAttemptsPerDay'), 'the allowance is a plan limit')
-    assert.ok(read('index.ts').includes('attemptWindow: (nowMs) => scheduledBackupNightOf(nowMs, getPlanLimits(env).scheduledBackupAfterHourLocal)'), 'the real backup step counts failures per night')
+    assert.ok(read('index.ts').includes('attemptWindow: (nowMs) => scheduledBackupNightOf(nowMs, getPlanLimits(env).scheduledBackupAfterHourLocal)') && read('index.ts').includes('onClaim: (info) => { priorFailuresTonight = info.windowFailures }'), 'the real backup step counts failures per night and hands them to the R2 bound')
     ok()
   }
 
@@ -390,7 +404,7 @@ const localHour = (c) => sched.businessHourOf(c.at)
   assert.ok(!/\b(?:2[0-3]|1\d)\s*\)?\s*\*?\s*HOUR/.test(read('lib/backupSchedule.ts')), 'no literal close hour in the schedule module')
   const indexSrc = read('index.ts')
   assert.ok(indexSrc.includes('heavySelect: (steps, state, nowMs) => pickHeavyStepIndex(steps, state, nowMs, getPlanLimits(env).scheduledBackupAfterHourLocal, getPlanLimits(env).scheduledBackupMaxAttemptsPerDay)'))
-  assert.ok(indexSrc.includes("step('backup', () => maybeRunScheduledBackup(env))") && !indexSrc.includes("throw new Error('backup already in progress"), 'an unfinished set is reported incomplete, not thrown')
+  assert.ok(indexSrc.includes("step('backup', () => maybeRunScheduledBackup(env, Date.now(), undefined, priorFailuresTonight))") && !indexSrc.includes("throw new Error('backup already in progress"), 'an unfinished set is reported incomplete, not thrown')
   assert.ok(!/shift/i.test(read('lib/backupSchedule.ts').replace(/\/\/.*$/gm, '')), 'open shifts are never consulted by the schedule')
   assert.ok(read('routes/backups.ts').includes("cadence: 'daily-after-close'") && !read('routes/backups.ts').includes('intervalHours: 6'))
   ok()

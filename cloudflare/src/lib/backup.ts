@@ -1125,7 +1125,7 @@ async function pruneOrphanedBackupFolders(env: Env): Promise<string[]> {
  * cron, a retry, or a reset cron state can never take a second backup on one
  * date. `nowMs` and `create` are injectable for the tests only.
  */
-export async function maybeRunScheduledBackup(env: Env, nowMs: number = Date.now(), create: typeof createCloudflareBackup = createCloudflareBackup) {
+export async function maybeRunScheduledBackup(env: Env, nowMs: number = Date.now(), create: typeof createCloudflareBackup = createCloudflareBackup, priorFailuresTonight = 0) {
   const backups = await listCloudflareBackups(env)
   const newestFinalized = backups.find((item) => item.finalized)
   const activeCopy = backups.find((item) => item.status === 'copying')
@@ -1194,8 +1194,9 @@ export async function maybeRunScheduledBackup(env: Env, nowMs: number = Date.now
   const night = scheduledBackupNightOf(nowMs, afterHourLocal)
   const failedTonight = backups.filter((item) => !item.finalized && item.status !== 'copying' && item.source === 'scheduled' && item.scope !== 'section'
     && !!item.uploaded && scheduledBackupNightOf(Date.parse(item.uploaded), afterHourLocal) === night).length
-  if (failedTonight >= getPlanLimits(env).scheduledBackupMaxAttemptsPerDay) {
-    return { skipped: true, reason: 'attempts-exhausted', failedTonight, latest: newestFinalized ?? null, retention }
+  // priorFailuresTonight: visits tonight that threw or were killed (the cron record's count); failed sets are only visible here.
+  if (failedTonight + priorFailuresTonight >= getPlanLimits(env).scheduledBackupMaxAttemptsPerDay) {
+    return { skipped: true, reason: 'attempts-exhausted', failedTonight, priorFailuresTonight, latest: newestFinalized ?? null, retention }
   }
   const backup = await create(env, 'scheduled')
   // Second pass: the backup just written is now the newest, so this is what

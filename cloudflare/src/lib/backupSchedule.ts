@@ -115,7 +115,12 @@ export function pickHeavyStepIndex(steps: readonly RotationStep[], state: Rotati
   // Visits that threw or were killed this night (counted per night by the step's attemptWindow): after maxAttemptsPerNight the night
   // is given up and the tick goes to the other step, so a backup that keeps failing neither re-reads the whole database every
   // 3 h nor starves the image audit. The next night starts with a fresh allowance.
-  const exhausted = !!record && record.windowKey === scheduledBackupNightOf(nowMs, afterHourLocal) && (record.windowFailures || 0) >= maxAttemptsPerNight
+  // A visit that started and never finished was killed (CPU or wall limit). runRotationTick only counts that when the NEXT visit
+  // begins, i.e. after this selection, so count it here too: the start is already saved before the work runs (the claim), and
+  // without this a night could take allowance + 1 full reads per kill.
+  const tonight = scheduledBackupNightOf(nowMs, afterHourLocal)
+  const pendingKill = !!record && !!record.startedAt && (!record.finishedAt || record.finishedAt < record.startedAt) ? 1 : 0
+  const exhausted = !!record && record.windowKey === tonight && (record.windowFailures || 0) + pendingKill >= maxAttemptsPerNight
   if (!exhausted && scheduledBackupGate(nowMs, lastMs, afterHourLocal).due) return backupIndex
   const other = steps.findIndex((step) => step.id !== 'backup')
   return other >= 0 ? other : backupIndex
