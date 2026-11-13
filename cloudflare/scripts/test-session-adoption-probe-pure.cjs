@@ -145,6 +145,24 @@ async function suite(mutate, label) {
     assert.equal(routes.split('if (requiresDeviceApproval(user)) await adoptSessionDeviceCookie(c, user.id)').length - 1, 2, 'both /me and /bootstrap adopt, which is what the path pattern covers')
     assert.ok(!/session_device_adoptable/.test(authText.slice(authText.indexOf('...user\n  } = row') + 12)), 'the answer is not left on the user object that /me returns')
   })
+  await check('g. unanswered means ask: a browser sending an INVALID or stale device cookie on /me or /bootstrap still adopts (the probe is skipped, so the UPDATE runs)', async () => {
+    for (const route of ['/api/auth/me', '/api/auth/bootstrap']) {
+      const w = setup(mutate)
+      addRow(w, 10, 'phone-device-0004'); addSession(w, 10, 'phone-device-0004')
+      const r = await call(w, route, { deviceCookie: 'not-a-signed-cookie-value' })
+      assert.equal(r.lookupAsksAdoptable, false, `${route}: no question was asked`)
+      assert.equal(r.updates, 1, `${route}: the UPDATE still runs`)
+      assert.ok(r.setCookie.includes(DEVICE_COOKIE), `${route}: a good device cookie replaces the bad one`)
+      assert.notEqual(boundAt(w, 10, 'phone-device-0004'), null, `${route}: the row is bound`)
+    }
+  })
+  await check('h. unanswered means ask: another route (no probe) still adopts when the adoption call is made there', async () => {
+    const w = setup(mutate)
+    addRow(w, 10, 'phone-device-0005'); addSession(w, 10, 'phone-device-0005')
+    const r = await call(w, '/api/other')
+    assert.equal(r.updates, 1)
+    assert.notEqual(boundAt(w, 10, 'phone-device-0005'), null)
+  })
   return failures
 }
 
@@ -155,6 +173,7 @@ const inFile = (file, from, to) => (text, rel) => {
 }
 const mutants = [
   ['adoption ignores the answer and always runs its UPDATE', inFile('lib/deviceCookie.ts', "get(SESSION_ADOPTABLE_CONTEXT_KEY) === false) return", "get(SESSION_ADOPTABLE_CONTEXT_KEY) === 'never') return"), ['b.', 'c.']],
+  ['adoption runs only on an explicit yes: an unanswered read stops it', inFile('lib/deviceCookie.ts', 'get(SESSION_ADOPTABLE_CONTEXT_KEY) === false) return', 'get(SESSION_ADOPTABLE_CONTEXT_KEY) !== true) return'), ['g.', 'h.']],
   ['every route asks the question in its session read', inFile('lib/auth.ts', "return /\\/auth\\/(me|bootstrap)$/.test(String(c.req?.path ?? '')) && !getCookie(c, PROBE_DEVICE_COOKIE)", 'return true'), ['d.', 'e.']],
   ['a browser with a device cookie asks too', inFile('lib/auth.ts', ' && !getCookie(c, PROBE_DEVICE_COOKIE)', ''), ['e.']],
   ['the answer says no for an adoptable row', inFile('lib/auth.ts', 'td.cookie_bound_at IS NULL AND td.device_id = s.device_id', 'td.cookie_bound_at IS NOT NULL AND td.device_id = s.device_id'), ['a.']],
