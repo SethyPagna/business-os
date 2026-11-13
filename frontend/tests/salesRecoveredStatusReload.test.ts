@@ -29,7 +29,7 @@ test('the coalescer never re-reads the list for the page\'s own echoes, so recov
 // Sales.tsx (a 3,000-line page) cannot be mounted in the test harness, so the recovered branch is checked as source: the
 // text is compared with every run of whitespace removed, so reformatting or re-wrapping a line cannot break it, only
 // removing the reload can.
-const squash = (text: string): string => text.replace(/s+/g, '')
+const squash = (text: string): string => text.replace(/\s+/g, '')
 
 test('the recovered branch of reconcilePendingStatus reloads the list (loadSales(true)) before announcing', () => {
   const source = squash(read('../src/components/sales/Sales.tsx'))
