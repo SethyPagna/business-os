@@ -496,7 +496,7 @@ const isGzipMime = (mime: unknown) => mime === DRIVE_GZIP_MIME || mime === 'appl
 
 /** <name>.json -> <name>.json.gz (a name already ending .gz is kept). */
 export function driveGzipFileName(name: string): string {
-  return /.gz$/i.test(name) ? name : `${name}${/.json$/i.test(name) ? '' : '.json'}.gz`
+  return /\.gz$/i.test(name) ? name : `${name}${/\.json$/i.test(name) ? '' : '.json'}.gz`
 }
 
 /** The two forms a Drive backup copy can take: plain JSON (older copies) and a gzip manifest. */

@@ -93,6 +93,8 @@ const {
   pushBackupToDrive,
   newestMirrorableBackup,
   driveMirrorChoice,
+  driveGzipFileName,
+  isDriveBackupFile,
   driveSyncHasNewBackup,
   driveSyncScheduleDue,
   disconnectDrive,
@@ -278,6 +280,12 @@ async function main() {
     staleHeadExists = false
     finalUploaded = null
     settings.set('drive_sync_last_error', '')
+    // R6-4: the dots in the name tests are literal.
+    assert.strictEqual(driveGzipFileName('xjson'), 'xjson.json.gz')
+    assert.strictEqual(driveGzipFileName('xgz'), 'xgz.json.gz')
+    assert.strictEqual(driveGzipFileName('a.json'), 'a.json.gz')
+    assert.strictEqual(driveGzipFileName('a.json.gz'), 'a.json.gz')
+    assert.strictEqual(isDriveBackupFile({ name: 'xjson', mimeType: 'application/json' }), false)
     // F4: a plain copy keeps its .json name and type; a gzip manifest is named .json.gz and typed application/gzip.
     assert.deepStrictEqual(lastUpload, { name: 'final.json', initType: 'application/json', putType: 'application/json' })
     gzipBackupNewest = true
