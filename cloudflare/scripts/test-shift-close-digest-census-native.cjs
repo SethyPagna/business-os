@@ -369,7 +369,7 @@ async function main() {
     assert.equal(scrubbed(lateNew.answer), scrubbed(lateOld.answer), 'late write: byte-identical to the base (drift components, sales and current figures)')
   })
   await check('THE GATE, REQUIRED RED: a response that always answers "no drift" (the mutant) hides that write -- this file is red on it', async () => {
-    const mutant = createLoader({ 'routes/shifts.ts': (text) => text.replace('if (storedNow && digestNow === closedOn.digestValue) {', 'if (storedNow) {') })
+    const mutant = createLoader({ 'routes/shifts.ts': (text) => text.replace('if (digestNow === closedOn.digestValue) {', 'if (true) {') })
     const late = await closeWithLateWrite(mutant, true)
     assert.equal(late.answer.body.shift.close_drift, null, 'the mutant swallows the drift the base reports')
   })

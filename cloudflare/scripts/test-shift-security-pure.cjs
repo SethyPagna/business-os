@@ -75,6 +75,7 @@ async function main() {
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); await next() } }, '../lib/permissions': permissions,
     '../lib/audit': { audit: async () => { throw new Error('shift writes must use the atomic audit batch') } },
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
+    '../lib/planTier': { getPlanLimits: () => ({ d1QueriesPerInvocation: 1000 }) },
     '../lib/telegram': { scheduleTelegramShiftReport: async () => 'unavailable', loadTelegramConfig: async () => ({}), sendTelegramShiftReport: async () => true },
     // This fixture has no sales/fees/returns tables -- it is the permission
     // boundary under test, not the drawer arithmetic (that is

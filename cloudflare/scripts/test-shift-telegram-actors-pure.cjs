@@ -210,6 +210,7 @@ async function main() {
     '../lib/shiftReconciliation': shiftReconciliation,
     '../lib/audit': { audit: async () => { throw new Error('shift audit must be in the D1 batch') } },
     '../lib/telegramLang': lang,
+    '../lib/planTier': { getPlanLimits: () => ({ d1QueriesPerInvocation: 1000 }) },
     '../lib/telegram': {
       scheduleTelegramShiftReport: async () => 'unavailable', loadTelegramConfig: async () => ({}), sendTelegramShiftReport: async (_env, shiftId, nowMs, options) => {
         sends.push({ shiftId, options })

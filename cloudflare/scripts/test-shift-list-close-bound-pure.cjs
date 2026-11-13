@@ -126,6 +126,7 @@ function harness(sqlite, routeSource = source) {
       loadShiftFigures: async () => ({ marker: 'figures' }),
     },
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
+    '../lib/planTier': { getPlanLimits: () => ({ d1QueriesPerInvocation: 1000 }) },
     '../lib/telegram': { scheduleTelegramShiftReport: async () => 'unavailable', loadTelegramConfig: async () => ({}), sendTelegramShiftReport: async () => true },
   })
   const app = route.default || route

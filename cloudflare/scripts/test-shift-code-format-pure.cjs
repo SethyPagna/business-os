@@ -123,6 +123,7 @@ function scenario() {
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', actor); await next() } },
     '../lib/permissions': loadReal('lib/permissions.ts'),
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
+    '../lib/planTier': { getPlanLimits: () => ({ d1QueriesPerInvocation: 1000 }) },
     '../lib/telegram': { scheduleTelegramShiftReport: async () => 'unavailable', loadTelegramConfig: async () => ({}), sendTelegramShiftReport: async () => true },
     // No sales tables here: the ID is under test, not the drawer arithmetic.
     '../lib/shiftReconciliation': { loadShiftReconciliation: async () => null, loadShiftFigures: async () => null, shiftLastActivityMs: async () => null, readShiftTimeReview: async () => null },

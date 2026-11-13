@@ -133,6 +133,7 @@ function harness(sqlite) {
     '../lib/permissions': loadReal('lib/permissions.ts'),
     '../lib/shiftReconciliation': shiftReconciliation,
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
+    '../lib/planTier': { getPlanLimits: () => ({ d1QueriesPerInvocation: 1000 }) },
     '../lib/telegram': { scheduleTelegramShiftReport: async () => 'unavailable', loadTelegramConfig: async () => ({}), sendTelegramShiftReport: async (_env, id) => { state.reports.push(id); return true }, sendTelegramStaleShiftAlert: async () => true },
   })
   const app = route.default || route

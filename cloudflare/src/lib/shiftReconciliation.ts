@@ -703,8 +703,10 @@ export function shiftTimeReviewCodes(review: readonly ShiftTimeReview[] | null |
   return (review ?? []).map((entry) => entry.code)
 }
 
+/** The memo key prefix of the standing time review (readShiftTimeReview): callers that must carry or drop it across phases name it. */
+export const TIME_REVIEW_MEMO_PREFIX = 'time-review|'
 export async function readShiftTimeReview(env: Env, shiftId: number, memo?: ShiftReadMemo): Promise<ShiftTimeReview[] | null> {
-  return memoized(memo, `time-review|${shiftId}`, () => readShiftTimeReviewFresh(env, shiftId))
+  return memoized(memo, `${TIME_REVIEW_MEMO_PREFIX}${shiftId}`, () => readShiftTimeReviewFresh(env, shiftId))
 }
 async function readShiftTimeReviewFresh(env: Env, shiftId: number): Promise<ShiftTimeReview[] | null> {
   try {
@@ -1093,10 +1095,13 @@ export async function loadShiftCloseFigures(
   env: Env,
   shift: ShiftReconciliationSession,
   nowMs: number = Date.now(),
-  options: { extraReviewCodes?: readonly string[] } = {},
+  options: { extraReviewCodes?: readonly string[]; memo?: ShiftReadMemo; timeReviewFrom?: ShiftReadMemo } = {},
 ): Promise<ShiftCloseFigures> {
-  // ONE memo for this attempt, made here AFTER the caller read the inputs digest and dropped with the attempt (closeWithFigures recomputes on a retry).
-  const memo = newShiftReadMemo()
+  // ONE memo for this attempt, made AFTER the caller read the inputs digest (the caller may hand it in, to read it back once the close has committed and the digest
+  // still reads the same) and dropped with the attempt (closeWithFigures recomputes on a retry). The one thing it may start with is the shift's standing time
+  // review, which the close handler already read for the review it journals: that is the amendments table, not an input of the digest, and nothing of this attempt moves it.
+  const memo = options.memo ?? newShiftReadMemo()
+  for (const [key, value] of options.timeReviewFrom ?? []) if (key.startsWith(TIME_REVIEW_MEMO_PREFIX) && !memo.has(key)) memo.set(key, value)
   // The report tables' column sets in ONE statement on a cold isolate (instead of eight PRAGMAs spread over the parallel readers here, the response and the
   // Telegram report that follow). Schema, not data: not a figure input, so it may sit anywhere in the digest-first order.
   await prepareShiftReportReads(env)

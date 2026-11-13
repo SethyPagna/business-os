@@ -7,11 +7,12 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { BUSINESS_TZ_FORWARD, BUSINESS_UTC_OFFSET_MINUTES, localTodayExpr } from '../lib/businessDateWindow'
 import { parseContinuousReadWindow, continuousReadWindowSql } from '../lib/continuousReadWindow'
 import { hasAnyPermission, isAdminControlUser } from '../lib/permissions'
+import { getPlanLimits } from '../lib/planTier'
 import { loadTelegramConfig, scheduleTelegramShiftOverview, scheduleTelegramShiftReport, sendTelegramShiftReport, sendTelegramStaleShiftAlert, type ShiftReportAction, type ShiftReportOptions } from '../lib/telegram'
 import { firstCharacters } from '../lib/telegramLang'
 import {
   loadShiftCloseDrift, loadShiftCloseFigures, loadShiftFigures, loadShiftReconciliation, parseShiftCloseFigures,
-  applyShiftTimeReview, readShiftCloseInputsDigest, readShiftTimeReview, shiftCloseInputsDigestSql, shiftLastActivityMs, SHIFT_REVIEW,
+  applyShiftTimeReview, readShiftCloseInputsDigest, readShiftTimeReview, shiftCloseInputsDigestSql, shiftLastActivityMs, SHIFT_REVIEW, TIME_REVIEW_MEMO_PREFIX, newShiftReadMemo,
   type ShiftReadMemo, type ShiftTimeReview, type ShiftCloseDrift, type ShiftCloseFigures, type ShiftCloseInputsDigest, type ShiftFigures, type ShiftReconciliation,
 } from '../lib/shiftReconciliation'
 import type { Env } from '../index'
@@ -399,8 +400,8 @@ async function closeTimeVerdict(env: Env, user: SessionUser, shift: ShiftRow, re
  * The standing review a close leaves: the flag when an administrator closed at a time a cashier could not have chosen, plus the flag a
  * reopened segment carries from such a close (it stays until the segment is done), an evaluated empty list otherwise.
  */
-async function closeTimeReview(env: Env, shift: ShiftRow, timing: CloseTimeVerdict, actorName: string): Promise<ShiftTimeReview[]> {
-  const carried = ((await readShiftTimeReview(env, shift.id)) ?? []).find((entry) => entry.code === SHIFT_REVIEW.reopenedAfterEarlierClose)
+async function closeTimeReview(env: Env, shift: ShiftRow, timing: CloseTimeVerdict, actorName: string, memo?: ShiftReadMemo): Promise<ShiftTimeReview[]> {
+  const carried = ((await readShiftTimeReview(env, shift.id, memo)) ?? []).find((entry) => entry.code === SHIFT_REVIEW.reopenedAfterEarlierClose)
   return [...(timing.earlier ? [{ code: SHIFT_REVIEW.earlierClose, by: actorName }] : []), ...(carried ? [carried] : [])]
 }
 /** What a segment reopened from `parent` inherits: the review flag of a close made at an earlier time (or one it carried itself). */
@@ -931,21 +932,19 @@ async function storedCloseFigures(env: Env, shiftId: number): Promise<ShiftClose
     return row ? parseShiftCloseFigures(row.figures_json) : null
   } catch { return null }
 }
+const noDrawer = (): ShiftDrawer => ({ reconciliation: null, reconciliation_source: null, close_figures_taken_at: null, close_drift: null })
 async function drawerFor(env: Env, user: SessionUser, shift: ShiftRow, options: { drift: boolean; closedOn?: CloseFigures | null }, memo?: ShiftReadMemo): Promise<ShiftDrawer> {
-  const none: ShiftDrawer = { reconciliation: null, reconciliation_source: null, close_figures_taken_at: null, close_drift: null }
+  const none = noDrawer()
   if (!canManageShifts(user)) return none
   const nowMs = Date.now()
-  // The response of a close that has just committed (wave 3, M9 step 2). The close batch proved the inputs digest it stored the figures on, so the drift
-  // against "today's" figures is null exactly when that digest still reads the same: ONE digest read instead of re-computing the drawer and the sale tenders
-  // only to find nothing moved. A digest that moved (a write in the milliseconds since the commit), no stored row, or a failed read all take the full path below.
+  // The response of a close that has just committed (wave 3, M9 step 2). reconciledShift already read the inputs digest again and found it unchanged (the close batch
+  // proved it at commit), so the drift against "today's" figures is null: no re-computing of the drawer and the sale tenders only to find nothing moved. The stored
+  // row is the one that batch inserted (a shift that has one is closed, and only the close writes it), so it is read from what the close computed, not from D1 again.
+  // A digest that moved (a write in the milliseconds since the commit), or no figures, take the full path below.
   // Every writer of what the digest reads bumps sale_write_revisions (test-shift-close-digest-census-native.cjs).
   if (options.closedOn && shift.closed_at && shift.id != null) {
-    const closedOn = options.closedOn
-    const [storedNow, digestNow] = await Promise.all([
-      storedCloseFigures(env, shift.id),
-      readShiftCloseInputsDigest(env, closedOn.digest).catch(() => null),
-    ])
-    if (storedNow && digestNow === closedOn.digestValue) {
+    const storedNow = parseShiftCloseFigures(options.closedOn.json)
+    if (storedNow) {
       const standing = await readShiftTimeReview(env, shift.id, memo)
       return { reconciliation: applyShiftTimeReview(storedNow.reconciliation, standing), reconciliation_source: 'stored',
         close_figures_taken_at: storedNow.taken_at || null, close_drift: null }
@@ -970,19 +969,22 @@ async function drawerFor(env: Env, user: SessionUser, shift: ShiftRow, options: 
  * cannot be computed: the close must never fail for the report's sake, and a
  * close without stored figures reads exactly like a pre-0237 one ("computed").
  */
-type CloseFigures = { json: string; digest: ShiftCloseInputsDigest; digestValue: string }
-async function closeFiguresFor(env: Env, closing: ShiftRow, extraReviewCodes: readonly string[] = []): Promise<CloseFigures | null> {
+type CloseFigures = { json: string; digest: ShiftCloseInputsDigest; digestValue: string; memo: ShiftReadMemo }
+async function closeFiguresFor(env: Env, closing: ShiftRow, extraReviewCodes: readonly string[] = [], timeReviewFrom?: ShiftReadMemo): Promise<CloseFigures | null> {
   try {
     const nowMs = Date.now()
     // The digest FIRST: whatever moves after this read is caught at commit
     // (writeClose's inputs guard), including a write landing mid-computation.
     const digest = shiftCloseInputsDigestSql(closing, nowMs)
     const digestValue = await readShiftCloseInputsDigest(env, digest)
-    const figures = await loadShiftCloseFigures(env, closing, nowMs, { extraReviewCodes })
+    // This attempt's memo is made here, after the digest, and travels with the figures: once the close has committed and the digest still reads the same, the
+    // response reuses what this attempt read (expenses, courier payouts, cash config) instead of reading the same rows again.
+    const memo = newShiftReadMemo()
+    const figures = await loadShiftCloseFigures(env, closing, nowMs, { extraReviewCodes, memo, timeReviewFrom })
     if (!figures || typeof figures !== 'object' || !digestValue) return null
     const json = JSON.stringify(figures)
     // D1 rows stay well under its size limit: past ~512 KB keep the drawer and drop the fingerprint.
-    return { json: json.length <= 512_000 ? json : JSON.stringify({ ...figures, sales: null }), digest, digestValue }
+    return { json: json.length <= 512_000 ? json : JSON.stringify({ ...figures, sales: null }), digest, digestValue, memo }
   } catch { return null }
 }
 function isCloseInputsChangedError(error: unknown): boolean {
@@ -1012,17 +1014,37 @@ async function figuresFor(env: Env, user: SessionUser, shift: ShiftRow, memo?: S
 }
 type ReconciledShift = ShiftPresentedRow & ShiftDrawer & {
   figures?: ShiftFigures | null
+  /** Set when the invocation had no calls left for the report figures: the shift is closed, the figures are on its history read. */
+  figures_pending?: true
 }
-async function reconciledShift(env: Env, user: SessionUser, row: ShiftDbRow, options: { closedOn?: CloseFigures | null } = {}): Promise<ReconciledShift> {
+async function reconciledShift(env: Env, user: SessionUser, row: ShiftDbRow, options: { closedOn?: CloseFigures | null; timeReview?: ShiftTimeReview[] } = {}): Promise<ReconciledShift> {
   const shift = await presentShift(getDb(env), user, row)
   // The presentation after the commit is ONE phase: the drawer and the figures read the same expenses, courier payouts, cash config and time review side by
   // side, so they share one statement each (lib/shiftReconciliation.ts ShiftReadMemo). Made here, after the commit, so it can never reach the digest.
   const memo: ShiftReadMemo = new Map()
+  let closedOn = options.closedOn ?? null
+  if (closedOn && shift.closed_at && shift.id != null && canManageShifts(user)) {
+    // ONE digest read decides it: the close batch proved this digest at commit, so while it still reads the same nothing the figures stand on has moved since, and what
+    // the closing attempt read (expenses, courier payouts, cash config) is still what D1 holds. The time review is the one thing the close itself changed: it is the
+    // review the close journaled, not the one the attempt read before it. A digest that moved, or a read that failed, drops the shortcut and reads everything fresh.
+    const digestNow = await readShiftCloseInputsDigest(env, closedOn.digest).catch(() => null)
+    if (digestNow === closedOn.digestValue) {
+      for (const [key, value] of closedOn.memo) if (!key.startsWith(TIME_REVIEW_MEMO_PREFIX)) memo.set(key, value)
+      if (options.timeReview) memo.set(`${TIME_REVIEW_MEMO_PREFIX}${shift.id}`, Promise.resolve(options.timeReview))
+    } else closedOn = null
+  }
+  // Calls the answer may still make. A close that raced a write and could not recompute its figures has no stored row, so its drawer is computed and costs more: when the
+  // invocation cannot pay for it, the shift is returned closed with the drawer and the figures PENDING (null, flagged) instead of reading into the refusal and failing a
+  // close that has committed. The report is the shift's history read, and the Telegram report is its own send.
+  const left = closedOn || options.closedOn !== undefined ? callsLeft(env) : null
+  const drawerCost = closedOn ? CLOSE_STORED_DRAWER_CALLS : CLOSE_COMPUTED_DRAWER_CALLS
+  const wantDrawer = left == null || left >= drawerCost
+  const wantFigures = left == null || left >= drawerCost + CLOSE_FIGURES_CALLS
   const [drawer, figures] = await Promise.all([
-    drawerFor(env, user, shift, { drift: true, closedOn: options.closedOn }, memo),
-    figuresFor(env, user, shift, memo),
+    wantDrawer ? drawerFor(env, user, shift, { drift: true, closedOn }, memo) : Promise.resolve(noDrawer()),
+    wantFigures ? figuresFor(env, user, shift, memo) : Promise.resolve(null),
   ])
-  return { ...shift, ...drawer, figures }
+  return { ...shift, ...drawer, figures, ...(wantFigures || !canManageShifts(user) ? {} : { figures_pending: true }) }
 }
 
 function currentResponse(user: SessionUser, shift: ShiftDbRow | undefined, policy: ShiftPolicy, exempt: boolean) {
@@ -1406,17 +1428,53 @@ async function writeClose(db: D1Compat, user: SessionUser, row: ShiftDbRow, inpu
  * (owner: no trapping flows), and the label says the figures were not frozen.
  */
 const CLOSE_FIGURE_ATTEMPTS = 3
+/**
+ * The D1 calls this Worker invocation has used and may use (lib/requestMetrics.ts counts every call the request and its waitUntil work make, the plan says how many
+ * an invocation has). Null where nothing counts them -- a test world without the metrics hook -- and then nothing here ever holds back.
+ */
+function invocationCalls(env: Env): { used: number; limit: number } | null {
+  try {
+    const hook = (globalThis as unknown as Record<symbol, { scope?(): unknown } | undefined>)[Symbol.for('business-os.request-metrics.v1')]
+    const used = (hook?.scope?.() as { invocation?: { attemptedCalls?: unknown } } | undefined)?.invocation?.attemptedCalls
+    return typeof used === 'number' && Number.isFinite(used) ? { used, limit: getPlanLimits(env).d1QueriesPerInvocation } : null
+  } catch { return null }
+}
+// What the close's own answer costs AFTER the commit, in D1 calls, measured on the real Worker (scripts/test-shift-close-real-worker-ceiling-native.cjs prints them):
+// the stored drawer is one digest read; the computed drawer (no stored figures) is the cash config, the sale tenders, the expenses, the refunds, the courier payouts and
+// the time review; the report figures are the removals, the delivery fees, the switch read and the two-pass sales snapshot; the background work (the report and the overview
+// recorded in waitUntil) is the Telegram settings and two inserts, partly spent by the time the answer is built. One call stays unspent.
+const CLOSE_STORED_DRAWER_CALLS = 1
+const CLOSE_COMPUTED_DRAWER_CALLS = 9
+const CLOSE_FIGURES_CALLS = 16
+const CLOSE_BACKGROUND_CALLS = 3
+const CLOSE_SPARE_CALLS = 1
+/** The calls an invocation may still make for the answer, or null when they are not counted. */
+function callsLeft(env: Env): number | null {
+  const calls = invocationCalls(env)
+  return calls ? calls.limit - calls.used - CLOSE_BACKGROUND_CALLS - CLOSE_SPARE_CALLS : null
+}
 async function closeWithFigures(env: Env, db: D1Compat, user: SessionUser, row: ShiftDbRow, closing: ShiftRow,
-  input: Omit<Parameters<typeof writeClose>[3], 'figures'>) {
+  input: Omit<Parameters<typeof writeClose>[3], 'figures'>, reviewMemo?: ShiftReadMemo) {
   const { timeReview, ...closeInput } = input
   const extraReviewCodes = timeReview.map((entry) => entry.code)
+  // What the last aborted attempt cost (its figures and its batch). A recompute is attempted only if its own cost and the answer that follows still fit the invocation's calls:
+  // on Free a close that raced a write would otherwise spend its way into call 51 and lose the response reads. The close itself always commits -- without stored figures,
+  // like a pre-0237 close, which the label says -- and never for the report's sake is the drawer refused (owner: no trapping flows).
+  let lastAttemptCalls = 0
   for (let attempt = 0; attempt < CLOSE_FIGURE_ATTEMPTS; attempt += 1) {
-    const figures = await closeFiguresFor(env, closing, extraReviewCodes)
-    try { return await writeClose(db, user, row, { ...closeInput, timeReview, figures }) } catch (error) {
+    if (attempt > 0) {
+      const left = callsLeft(env)
+      if (left != null && left < lastAttemptCalls + CLOSE_STORED_DRAWER_CALLS + CLOSE_FIGURES_CALLS) break
+    }
+    const started = invocationCalls(env)?.used
+    const figures = await closeFiguresFor(env, closing, extraReviewCodes, reviewMemo)
+    try { return { ...await writeClose(db, user, row, { ...closeInput, timeReview, figures }), timeReview } } catch (error) {
       if (!figures || !isCloseInputsChangedError(error)) throw error
+      const now = invocationCalls(env)?.used
+      lastAttemptCalls = started != null && now != null ? now - started : 0
     }
   }
-  return writeClose(db, user, row, { ...closeInput, timeReview, figures: null })
+  return { ...await writeClose(db, user, row, { ...closeInput, timeReview, figures: null }), timeReview }
 }
 
 /**
@@ -1471,11 +1529,12 @@ app.post('/close', async (c) => {
   const closing = { ...storedShift(shift), closed_at: closedAt,
     closing_counted_usd: countedUsd.value, closing_counted_khr: countedKhr.value,
     additional_cash_usd: additionalUsd.value, additional_cash_khr: additionalKhr.value }
+  const reviewMemo: ShiftReadMemo = new Map() // the standing time review, read once for the journal and handed to the figures attempt
   const result = await closeWithFigures(c.env, db, user, shift, closing, { closedAt, recordedAt: nowIso,
     countedUsd: countedUsd.value, countedKhr: countedKhr.value,
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
     note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Manual shift close', request: mutationRequest(body, shift.id),
-    timeReview: await closeTimeReview(c.env, shift, timing, reviewerName(user)) })
+    timeReview: await closeTimeReview(c.env, shift, timing, reviewerName(user), reviewMemo) }, reviewMemo)
   if (result.changed) {
     // The report names the closer when it is not the cashier (an administrator closing a till):
     // the stored closer's name and account id, which the close just wrote.
@@ -1483,7 +1542,7 @@ app.post('/close', async (c) => {
     announceShiftReport(c, result.shift ?? { id: shift.id, revision: shift.revision + 1 }, 'close', { closedBy: result.shift?.closed_by_user_name ?? displayName(user), closedById: result.shift?.closed_by_user_id ?? user.id }, telegramConfig)
     if (result.shift) scheduleOverviewAfterClose(c, result.shift, telegramConfig)
     else scheduleOverviewAfterClose(c, { id: shift.id, revision: shift.revision + 1, closed_at: closedAt, cancelled_at: null }, telegramConfig)
-    return c.json({ shift: result.shift ? await reconciledShift(c.env, user, result.shift, { closedOn: result.figures }) : null, already_closed: false, is_open: false }, 200)
+    return c.json({ shift: result.shift ? await reconciledShift(c.env, user, result.shift, { closedOn: result.figures, timeReview: result.timeReview }) : null, already_closed: false, is_open: false }, 200)
   }
   return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
 })
@@ -1525,16 +1584,17 @@ app.post('/:id/close', async (c) => {
   const closing = { ...storedShift(shift), closed_at: closedAt,
     closing_counted_usd: countedUsd.value, closing_counted_khr: countedKhr.value,
     additional_cash_usd: additionalUsd.value, additional_cash_khr: additionalKhr.value }
+  const reviewMemo: ShiftReadMemo = new Map() // the standing time review, read once for the journal and handed to the figures attempt
   const result = await closeWithFigures(c.env, db, user, shift, closing, { closedAt, recordedAt: new Date().toISOString(),
     countedUsd: countedUsd.value, countedKhr: countedKhr.value,
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
     note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Historic manual close', request: mutationRequest(body, id),
-    timeReview: await closeTimeReview(c.env, shift, timing, reviewerName(user)) })
+    timeReview: await closeTimeReview(c.env, shift, timing, reviewerName(user), reviewMemo) }, reviewMemo)
   if (!result.changed || !result.shift) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const telegramConfig = loadTelegramConfig(c.env)
   announceShiftReport(c, result.shift, 'close', { closedBy: result.shift.closed_by_user_name ?? displayName(user), closedById: result.shift.closed_by_user_id ?? user.id }, telegramConfig)
   scheduleOverviewAfterClose(c, result.shift, telegramConfig)
-  return c.json({ shift: await reconciledShift(c.env, user, result.shift, { closedOn: result.figures }), already_closed: false, is_open: false }, 200)
+  return c.json({ shift: await reconciledShift(c.env, user, result.shift, { closedOn: result.figures, timeReview: result.timeReview }), already_closed: false, is_open: false }, 200)
 })
 
 app.post('/:id/cancel', async (c) => {

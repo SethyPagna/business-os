@@ -2290,19 +2290,22 @@ export async function scheduleTelegramShiftOverview(
     const shift = known.known ?? await db.prepare('SELECT id, revision, closed_at, cancelled_at FROM shift_sessions WHERE id = @id').get<{ id: number; revision: number; closed_at: string | null; cancelled_at: string | null }>({ id: shiftId })
     if (!shift || !shift.closed_at || shift.cancelled_at) return 'not-closed'
     const key = shiftOverviewKey(shift.id, shift.revision)
-    const inserted = await db.prepare(`INSERT OR IGNORE INTO telegram_scheduled_sends (send_key, kind, shift_id, due_at, created_at)
-      VALUES (@key, 'shift_overview', @shiftId, @dueAt, @now)`).run({
+    // Recorded with the dispatch it will have (the way the shift report is): 'queue' when there is a queue to carry it, demoted to 'fallback' only if the queue refuses it.
+    // That is one write instead of two on the close's invocation; a row that is never demoted (the Worker died between the two) waits out the grace and the cron drains it.
+    const inserted = await db.prepare(`INSERT OR IGNORE INTO telegram_scheduled_sends (send_key, kind, shift_id, due_at, created_at, dispatch)
+      VALUES (@key, 'shift_overview', @shiftId, @dueAt, @now, @dispatch)`).run({
       key, shiftId: shift.id, dueAt: new Date(nowMs + SHIFT_OVERVIEW_DELAY_SECONDS * 1000).toISOString(), now: new Date(nowMs).toISOString(),
+      dispatch: env.BACKUP_QUEUE ? 'queue' : 'fallback',
     })
     if (!inserted.changes) return 'duplicate'
     if (env.BACKUP_QUEUE) {
       try {
         const message: ShiftOverviewQueueMessage = { kind: SHIFT_OVERVIEW_QUEUE_KIND, key }
         await env.BACKUP_QUEUE.send(message, { delaySeconds: SHIFT_OVERVIEW_DELAY_SECONDS })
-        await db.prepare("UPDATE telegram_scheduled_sends SET dispatch = 'queue' WHERE send_key = @key").run({ key })
         return 'queued'
       } catch (error) {
         console.error('[telegram] overview queue send failed; the request/cron drain will send it', error)
+        await db.prepare("UPDATE telegram_scheduled_sends SET dispatch = 'fallback' WHERE send_key = @key").run({ key }).catch(() => undefined)
       }
     }
     return 'fallback'

@@ -304,9 +304,10 @@ async function main() {
     assert.equal(figures.other_tenders.usd, 0)
   })
   await check('N4 RACE, HOISTING MUTANT: figures read BEFORE the digest (what a memo hoisted above the digest does) commit the STALE drawer -- this test goes red on it', async () => {
-    const hoisted = createLoader({ 'routes/shifts.ts': (text) => text.replace(
-      '    const digestValue = await readShiftCloseInputsDigest(env, digest)\n    const figures = await loadShiftCloseFigures(env, closing, nowMs, { extraReviewCodes })',
-      '    const figures = await loadShiftCloseFigures(env, closing, nowMs, { extraReviewCodes })\n    const digestValue = await readShiftCloseInputsDigest(env, digest)') })
+    const hoisted = createLoader({ 'routes/shifts.ts': (text) => text
+      .replace('    const digestValue = await readShiftCloseInputsDigest(env, digest)\n', '')
+      .replace('    const figures = await loadShiftCloseFigures(env, closing, nowMs, { extraReviewCodes, memo, timeReviewFrom })\n',
+        '    const figures = await loadShiftCloseFigures(env, closing, nowMs, { extraReviewCodes, memo, timeReviewFrom })\n    const digestValue = await readShiftCloseInputsDigest(env, digest)\n') })
     const run = await runClose(hoisted, { hook: (f) => {
       let fired = false
       f.afterRead = (text) => {
