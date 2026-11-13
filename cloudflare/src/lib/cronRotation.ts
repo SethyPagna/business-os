@@ -214,10 +214,14 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
 
   let ok = true
   let more = false
+  // A visit that ran fine but whose work is not finished (a backup whose asset copy is still running in the queue):
+  // it is not an error, but it must not count as done, or the step's okAt would satisfy a lane gate for the whole day.
+  let incomplete = false
   let error: string | undefined
   try {
     const result = await step.run()
     more = !!result && typeof result === 'object' && (result as { more?: unknown }).more === true
+    incomplete = !!result && typeof result === 'object' && (result as { incomplete?: unknown }).incomplete === true
   } catch (caught) {
     ok = false
     error = shortError(caught)
@@ -225,7 +229,7 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
 
   record.finishedAt = new Date(nowMs + Math.max(0, Date.now() - realStart)).toISOString()
   record.runs += 1
-  if (ok) { record.okAt = record.finishedAt; record.error = null; record.failures = 0 } else { record.error = error ?? 'error'; record.failures += 1 }
+  if (ok) { if (!incomplete) record.okAt = record.finishedAt; record.error = null; record.failures = 0 } else { record.error = error ?? 'error'; record.failures += 1 }
   if (ok && more && current.resumeStreak < MAX_RESUME_STREAK) {
     current.cursor = index
     current.resumeStreak += 1

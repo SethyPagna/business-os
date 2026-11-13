@@ -724,13 +724,10 @@ export function cronRotationSteps(env: Env, label: (name: string, step: () => Pr
 export function cronHeavySteps(env: Env, label: (name: string, step: () => Promise<unknown>) => () => Promise<unknown>): RotationStep[] {
   const step = (id: string, run: () => Promise<unknown>, minIntervalMs?: number): RotationStep => ({ id, run: label(id, run), ...(minIntervalMs ? { minIntervalMs } : {}) })
   return [
-    step('backup', async () => {
-      const result = await maybeRunScheduledBackup(env)
-      // A copy already in progress means today's backup was NOT taken. An OK visit would count as done
-      // until tomorrow, so fail this one and let the next heavy tick try again.
-      if (result && 'reason' in result && result.reason === 'backup-in-progress') throw new Error('backup already in progress; retry on the next heavy tick')
-      return result
-    }),
+    // maybeRunScheduledBackup answers `incomplete: true` while tonight's set is still copying (or ended failed/partial):
+    // runRotationTick then keeps the visit healthy but does not record okAt, so the lane re-selects the backup step on the
+    // next heavy tick, which retries only if R2 shows no finalized set.
+    step('backup', () => maybeRunScheduledBackup(env)),
     step('image-audit', () => maybeRunScheduledImageAudit(env), UNGATED_STEP_MIN_INTERVAL_MS),
   ]
 }

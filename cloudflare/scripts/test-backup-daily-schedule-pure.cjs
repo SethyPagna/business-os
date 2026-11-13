@@ -101,13 +101,17 @@ function fakeR2() {
       const out = [...objects.entries()].filter(([k]) => k.startsWith(prefix)).map(([key, v]) => ({ key, size: 1, uploaded: v.uploaded, customMetadata: v.customMetadata }))
       return { objects: out, truncated: false }
     },
-    async get() { return null },
+    // Only the lifecycle sidecars (state.json) have a body; everything else reads as absent, like a body-less test double.
+    async get(key) { const v = objects.get(key); return v && v.body !== undefined ? { json: async () => JSON.parse(v.body) } : null },
     async head(key) { return objects.get(key) ? { key } : null },
     async delete(keys) { for (const k of Array.isArray(keys) ? keys : [keys]) objects.delete(k) },
   }
 }
 
-async function simulate(load, { failFirstNightAt = null, loseStateAfterEachTick = false } = {}) {
+// `managed` makes the fake R2 behave like production: createCloudflareBackup returns as soon as the manifest is written
+// ('copying'), and the queue ends the set LATER -- finalized, failed or partial -- between heavy ticks. managed(iso) answers
+// { end: 'finalized' | 'failed' | 'partial', copyMs } for the set created at that instant.
+async function simulate(load, { failFirstNightAt = null, loseStateAfterEachTick = false, managed = null } = {}) {
   const backupMod = load('lib/backup.ts')
   const rot = load('lib/cronRotation.ts')
   const dispatch = load('lib/cronDispatch.ts')
@@ -122,8 +126,30 @@ async function simulate(load, { failFirstNightAt = null, loseStateAfterEachTick 
   const create = async (e, source) => {
     if (failFirstNightAt && clock === failFirstNightAt && failuresLeft > 0) { failuresLeft -= 1; throw new Error('simulated backup failure') }
     created.push({ at: clock, source })
-    e.ASSETS.objects.set(`backups/cloudflare/business-os-cloudflare-${created.length}.json`, { uploaded: new Date(clock), customMetadata: { source, lifecycle: 'none' } })
-    return { key: 'x' }
+    const name = `business-os-cloudflare-${created.length}`
+    if (!managed) {
+      e.ASSETS.objects.set(`backups/cloudflare/${name}.json`, { uploaded: new Date(clock), customMetadata: { source, lifecycle: 'none' } })
+      return { key: 'x', status: 'finalized' }
+    }
+    const outcome = managed(new Date(clock).toISOString())
+    const status = outcome.end === 'partial' ? 'partial' : 'copying'
+    e.ASSETS.objects.set(`backups/cloudflare/${name}.json`, { uploaded: new Date(clock), customMetadata: { source, lifecycle: 'sidecar-v1' } })
+    const state = { format: 'business-os-cloudflare-backup-state', version: 1, backupName: name, status }
+    e.ASSETS.objects.set(`backups/cloudflare/${name}/state.json`, { uploaded: new Date(clock), body: JSON.stringify(state) })
+    if (status === 'copying') settling.push({ name, endsAt: clock + outcome.copyMs, end: outcome.end })
+    return { key: 'x', status }
+  }
+  // The queue consumer finishing a set after create() returned.
+  const settling = []
+  const settle = (e) => {
+    for (const set of [...settling]) {
+      if (set.endsAt > clock) continue
+      settling.splice(settling.indexOf(set), 1)
+      const key = `backups/cloudflare/${set.name}/state.json`
+      const state = JSON.parse(e.ASSETS.objects.get(key).body)
+      state.status = set.end
+      e.ASSETS.objects.set(key, { uploaded: new Date(clock), body: JSON.stringify(state) })
+    }
   }
   const ran = []
   const table = {}
@@ -148,6 +174,7 @@ async function simulate(load, { failFirstNightAt = null, loseStateAfterEachTick 
   try {
     const tick = async (iso) => {
       clock = Z(iso)
+      settle(env)
       await dispatch.dispatchCron(rot.CRON_HEAVY, clock, deps())
       if (loseStateAfterEachTick) delete table[rot.CRON_HEAVY_STATE_KEY]
     }
@@ -159,7 +186,7 @@ async function simulate(load, { failFirstNightAt = null, loseStateAfterEachTick 
     // 12 Nov 00:17Z (07:17 local) through 14 Nov 17:17Z, every 3 h: the real heavy cron.
     for (let t = Z('2026-11-12T00:17:00Z'); t <= Z('2026-11-14T17:17:00Z'); t += 3 * HOUR) {
       await tick(new Date(t).toISOString())
-      if (t === Z('2026-11-12T15:17:00Z') && !failFirstNightAt) {
+      if (t === Z('2026-11-12T15:17:00Z') && !failFirstNightAt && !managed) {
         // Extra deliveries of the same night: a repeat of that firing, then direct retries well after close.
         await tick('2026-11-12T16:17:00Z') // 23:17 local, same 3 h slot
         afterTick = created.length
@@ -168,7 +195,7 @@ async function simulate(load, { failFirstNightAt = null, loseStateAfterEachTick 
         afterDirect = created.length
       }
     }
-    return { created, ran, afterTick, afterDirect, table, rot }
+    return { created, ran, afterTick, afterDirect, table, rot, env }
   } finally {
     Date.now = realNow
   }
@@ -207,6 +234,35 @@ const localHour = (c) => sched.businessHourOf(c.at)
   assert.strictEqual(sched.businessHourOf(failed.created[0].at), 1)
   ok()
 
+  // F1: createCloudflareBackup returns at once and the asset copy ends LATER. A set that ends failed (an upload deleted mid-copy)
+  // or partial must not count as that night's backup: the next heavy tick (same date) takes a new one. 'copying' that
+  // finalizes later is done and is never repeated.
+  {
+    const at = (iso) => new Date(Z(iso)).toISOString()
+    const seed = at('2026-11-11T15:17:00Z')
+    const failedSet = at('2026-11-12T15:17:00Z')
+    const outcomes = (map) => (iso) => map[iso] || { end: 'finalized', copyMs: 20 * 60 * 1000 }
+    const iso = (t) => new Date(t).toISOString()
+    // The 22:17 set ends failed 20 minutes later; the 01:17 retry finalizes.
+    const asyncFail = await simulate(real, { managed: outcomes({ [failedSet]: { end: 'failed', copyMs: 20 * 60 * 1000 } }) })
+    assert.deepStrictEqual(asyncFail.created.map((c) => iso(c.at)), ['2026-11-12T15:17:00.000Z', '2026-11-12T18:17:00.000Z', '2026-11-13T15:17:00.000Z', '2026-11-14T15:17:00.000Z'],
+      'a set that ends failed asynchronously is retried on the next heavy tick, then back to the nightly slot')
+    // A set that finalizes is done: no retry.
+    const asyncOk = await simulate(real, { managed: outcomes({}) })
+    assert.deepStrictEqual(asyncOk.created.map((c) => iso(c.at)), ['2026-11-12T15:17:00.000Z', '2026-11-13T15:17:00.000Z', '2026-11-14T15:17:00.000Z'], 'a finalized set is never repeated')
+    // Created partial (no queue bound): also not done.
+    const partial = await simulate(real, { managed: outcomes({ [failedSet]: { end: 'partial', copyMs: 0 } }) })
+    assert.strictEqual(partial.created.length >= 4 && iso(partial.created[1].at), '2026-11-12T18:17:00.000Z', 'a partial set is retried too')
+    // Still copying at the next tick (3 h later): the visit polls, takes nothing new, and the night completes once it finalizes.
+    const slow = await simulate(real, { managed: outcomes({ [failedSet]: { end: 'finalized', copyMs: 4 * 60 * 60 * 1000 } }) })
+    assert.deepStrictEqual(slow.created.map((c) => iso(c.at)), ['2026-11-12T15:17:00.000Z', '2026-11-13T15:17:00.000Z', '2026-11-14T15:17:00.000Z'], 'a copy still running is not duplicated')
+    const polls = slow.ran.filter((r) => r.step === 'backup').map((r) => iso(r.at))
+    assert.ok(polls.includes('2026-11-12T18:17:00.000Z') && polls.includes('2026-11-12T21:17:00.000Z'), 'the lane keeps polling the unfinished night')
+    assert.ok(!polls.includes('2026-11-13T00:17:00.000Z'), 'once it finalized the night is done: the next tick runs the other step')
+    assert.ok(seed)
+    ok()
+  }
+
   // Retention: 7 daily backups (owner 13 Nov 2026). The 8th removes the oldest SCHEDULED one only; manual backups keep their own
   // newest 2 and are never evicted by a daily run (nor do they evict dailies).
   {
@@ -217,7 +273,7 @@ const localHour = (c) => sched.businessHourOf(c.at)
     const env = { PLAN_TIER: 'paid', ASSETS: fakeR2() }
     const put = (n, iso, source) => env.ASSETS.objects.set(`backups/cloudflare/business-os-cloudflare-${n}.json`, { uploaded: new Date(iso), customMetadata: { source, lifecycle: 'none' } })
     put('m1', '2026-11-01T05:00:00Z', 'manual'); put('m2', '2026-11-02T05:00:00Z', 'manual'); put('m3', '2026-11-03T05:00:00Z', 'manual')
-    const create = async (e, source) => { const at = new Date(clockNow); put(`s${at.toISOString()}`, at.toISOString(), source); return { key: 'x' } }
+    const create = async (e, source) => { const at = new Date(clockNow); put(`s${at.toISOString()}`, at.toISOString(), source); return { key: 'x', status: 'finalized' } }
     let clockNow = 0
     const names = () => [...env.ASSETS.objects.keys()].map((k) => k.replace('backups/cloudflare/business-os-cloudflare-', '').replace('.json', ''))
     const scheduledNames = () => names().filter((n) => n.startsWith('s')).sort()
@@ -244,7 +300,7 @@ const localHour = (c) => sched.businessHourOf(c.at)
   assert.ok(!/\b(?:2[0-3]|1\d)\s*\)?\s*\*?\s*HOUR/.test(read('lib/backupSchedule.ts')), 'no literal close hour in the schedule module')
   const indexSrc = read('index.ts')
   assert.ok(indexSrc.includes('heavySelect: (steps, state, nowMs) => pickHeavyStepIndex(steps, state, nowMs, getPlanLimits(env).scheduledBackupAfterHourLocal)'))
-  assert.ok(indexSrc.includes("result.reason === 'backup-in-progress') throw new Error("), 'an in-progress copy fails the visit so the next tick retries')
+  assert.ok(indexSrc.includes("step('backup', () => maybeRunScheduledBackup(env))") && !indexSrc.includes("throw new Error('backup already in progress"), 'an unfinished set is reported incomplete, not thrown')
   assert.ok(!/shift/i.test(read('lib/backupSchedule.ts').replace(/\/\/.*$/gm, '')), 'open shifts are never consulted by the schedule')
   assert.ok(read('routes/backups.ts').includes("cadence: 'daily-after-close'") && !read('routes/backups.ts').includes('intervalHours: 6'))
   ok()

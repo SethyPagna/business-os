@@ -1172,7 +1172,8 @@ export async function maybeRunScheduledBackup(env: Env, nowMs: number = Date.now
     }
   }
   if (activeCopyMs && nowMs - activeCopyMs < STALE_BACKUP_MS) {
-    return { skipped: true, reason: 'backup-in-progress', latest: activeCopy, retention }
+    // incomplete: the visit is fine but tonight's backup is not finished, so the lane must not count the night as done.
+    return { skipped: true, reason: 'backup-in-progress', incomplete: true, latest: activeCopy, retention }
   }
   const afterHourLocal = getPlanLimits(env).scheduledBackupAfterHourLocal
   const gate = scheduledBackupGate(nowMs, scheduledBackupCoverageMs(backups, afterHourLocal), afterHourLocal)
@@ -1183,7 +1184,10 @@ export async function maybeRunScheduledBackup(env: Env, nowMs: number = Date.now
   // Second pass: the backup just written is now the newest, so this is what
   // drops what has become the (N+1)th.
   const finalRetention = await pruneCloudflareBackups(env, CLOUDFLARE_BACKUP_KEEP)
-  return { skipped: false, backup, retention: finalRetention }
+  // The set is only DONE once it is finalized. The asset copy runs on in the queue after create returns and can still end
+  // failed (an upload deleted mid-copy fails the whole set), so a copying/partial/failed set is reported incomplete: the
+  // lane keeps tonight open, and the next tick re-checks R2 (finalized: nothing to do; failed: take a new one).
+  return { skipped: false, backup, retention: finalRetention, ...(backup.status === 'finalized' ? {} : { incomplete: true }) }
 }
 
 function resolveBackupKey(source: string): string {
