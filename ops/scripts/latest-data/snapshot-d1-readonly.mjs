@@ -254,7 +254,7 @@ export const PII_COLUMNS = Object.freeze({
   sales: [
     'customer_name', 'customer_phone', 'customer_address',
     'delivery_contact_name', 'delivery_contact_phone', 'delivery_contact_address',
-    'cashier_name', 'cancelled_by_name', 'stock_skipped_by_name', 'device_name', 'notes',
+    'cashier_name', 'cancelled_by_name', 'stock_skipped_by_name', 'return_reviewed_by_name', 'device_name', 'notes',
   ],
   returns: ['customer_name', 'cashier_name', 'device_name', 'notes'],
   customer_receivables: ['customer_name'],
@@ -289,11 +289,21 @@ export const PII_COLUMNS = Object.freeze({
   stock_row_moves: ['user_name'],
   stock_transfers: ['user_name'],
   undo_snapshots: ['created_by_name'],
+  // Found by the classifier sweep in the test (6.0.1837): staff names and a device name the name-based fallback already masked at
+  // run time, now mapped explicitly so the map and the sweep agree.
+  fee_labels: ['created_by_name'],
+  fee_types: ['created_by_name'],
+  inventory_check_approvals: ['decided_by_name'],
+  inventory_check_events: ['actor_name'],
+  password_reset_requests: ['device_name'],
+  sale_payment_events: ['cashier_name'],
 })
 
 // ALWAYS dropped, in every mode.
 export const SECRET_COLUMNS = Object.freeze({
-  users: ['password', 'otp_secret', 'otp_pending_secret'],
+  // must_change_password is a 0/1 flag, not a secret. It is listed here only because the name-based classifier reads "password" and
+  // already dropped it at run time; naming it keeps that behaviour explicit. Keeping the flag instead needs an owner decision.
+  users: ['password', 'otp_secret', 'otp_pending_secret', 'must_change_password'],
   portal_accounts: ['password_hash'],
   verification_codes: ['code_hash'],
   user_sessions: ['token_hash'],
