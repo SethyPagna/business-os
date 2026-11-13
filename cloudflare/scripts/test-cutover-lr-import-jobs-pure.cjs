@@ -115,6 +115,13 @@ function makeWorld(oracleSha = null) {
     if (oracleSha && ['lib/stockActionCommit.ts', 'lib/salesImportCommit.ts'].includes(rel)) {
       assert.equal(text.split('await db.batch(').length - 1, rel === 'lib/stockActionCommit.ts' ? 2 : 1)
       text = text.replaceAll('await db.batch(', 'await executeHistoricalStockTransaction(db, ')
+      if (rel === 'lib/salesImportCommit.ts') {
+        // J7 (6.0.1850) changed uniqueBusinessDateTimeNumber to take readTaken(candidates) -> the taken ones. The oracle's file still passes its
+        // one-candidate probe, so adapt it at the call and keep the oracle's own behaviour: probe in order and stop at the first free candidate.
+        const mint = /uniqueBusinessDateTimeNumber\(\s*'',\s*receiptNumberTaken,/
+        assert.equal(text.match(new RegExp(mint.source, 'g')).length, 1)
+        text = text.replace(mint, "uniqueBusinessDateTimeNumber('', async (candidates) => { const held = []; for (const candidate of candidates) { if (!(await receiptNumberTaken(candidate))) break; held.push(candidate) } return held },")
+      }
     }
     if (oracleSha && rel === 'lib/importEngine.ts') {
       // 6.0.910 moved the blank received_date default (and the lot code derived from it) to the Cambodia business
