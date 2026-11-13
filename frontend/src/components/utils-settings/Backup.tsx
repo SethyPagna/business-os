@@ -1612,7 +1612,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
             ))}
           </div>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            {copy('drive_sync_interval_note', 'Default is 360 minutes (every 6 hours). Quick choices use 1, 3, 6, 12, or 24 hours. Google Drive keeps up to 10 backup versions.')}
+            {copy('drive_sync_interval_note', 'Business OS checks every 6 hours by default (quick choices 1, 3, 6, 12, or 24 hours), but a backup is made only once a day after the shop closes, so Google Drive receives at most one new copy a day. Google Drive keeps up to 10 backup versions.')}
           </p>
         </label>
       </div>
