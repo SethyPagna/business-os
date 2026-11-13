@@ -4,7 +4,7 @@
 // must_change_password: forced password change silently off.
 //
 // Drives the REAL lib/auth.ts with real Hono and the real migrations in SQLite, through 0303 (no cookie_bound_at) and through 0304, and through the
-// real adoption call. The mutant (the old broad regex) must turn the pre-0304 checks red.
+// real adoption call. The mutants (the old broad regex, an unanchored path pattern) must turn the pre-0304 checks red.
 //
 // Run: node scripts/test-session-lookup-missing-column-pure.cjs
 'use strict'
@@ -129,6 +129,13 @@ async function suite(mutate) {
     broken.raw.prepare('DROP TABLE roles').run({})
     assert.equal((await broken.call('/api/other')).status, 500, 'a different missing table still fails loudly')
   })
+  await check('the path pattern is anchored (N-6): /api/portal/auth/me does not ask the adoption question, /api/auth/me does', async () => {
+    const w = isolate({}, mutate)
+    const portal = await w.call('/api/portal/auth/me')
+    assert.ok(!/session_device_adoptable/.test(portal.lookups[0]), 'the portal route reads the plain statement')
+    const staff = await w.call('/api/auth/me')
+    assert.ok(/session_device_adoptable/.test(staff.lookups[0]), 'the staff route asks')
+  })
   return results.filter(([, e]) => e).map(([n]) => n)
 }
 
@@ -150,6 +157,13 @@ async function main() {
   const red = await suite(old)
   if (red.some((n) => n.startsWith('pre-0304: /me answers 200'))) console.log('mutant killed: the old broad "no such column" regex')
   else { console.log('MUTANT SURVIVED: the old broad "no such column" regex'); bad += 1 }
+
+  const BS = '\\'
+  const anchored = '/^' + BS + '/api' + BS + '/auth' + BS + '/(me|bootstrap)$/'
+  const loose = '/' + BS + '/auth' + BS + '/(me|bootstrap)$/'
+  const unanchored = await suite((t, rel) => replaceIn(t, rel, anchored, loose))
+  if (unanchored.some((n) => n.startsWith('the path pattern is anchored'))) console.log('mutant killed: the unanchored path pattern')
+  else { console.log('MUTANT SURVIVED: the unanchored path pattern'); bad += 1 }
 
   if (bad) { console.log(`\n${bad} problem(s)`); process.exit(1) }
   console.log('\ntest-session-lookup-missing-column-pure: all checks passed and every mutant was killed')

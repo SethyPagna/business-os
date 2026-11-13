@@ -174,7 +174,7 @@ const inFile = (file, from, to) => (text, rel) => {
 const mutants = [
   ['adoption ignores the answer and always runs its UPDATE', inFile('lib/deviceCookie.ts', "get(SESSION_ADOPTABLE_CONTEXT_KEY) === false) return", "get(SESSION_ADOPTABLE_CONTEXT_KEY) === 'never') return"), ['b.', 'c.']],
   ['adoption runs only on an explicit yes: an unanswered read stops it', inFile('lib/deviceCookie.ts', 'get(SESSION_ADOPTABLE_CONTEXT_KEY) === false) return', 'get(SESSION_ADOPTABLE_CONTEXT_KEY) !== true) return'), ['g.', 'h.']],
-  ['every route asks the question in its session read', inFile('lib/auth.ts', "return /\\/auth\\/(me|bootstrap)$/.test(String(c.req?.path ?? '')) && !getCookie(c, PROBE_DEVICE_COOKIE)", 'return true'), ['d.', 'e.']],
+  ['every route asks the question in its session read', inFile('lib/auth.ts', "return /^\\/api\\/auth\\/(me|bootstrap)$/.test(String(c.req?.path ?? '')) && !getCookie(c, PROBE_DEVICE_COOKIE)", 'return true'), ['d.', 'e.']],
   ['a browser with a device cookie asks too', inFile('lib/auth.ts', ' && !getCookie(c, PROBE_DEVICE_COOKIE)', ''), ['e.']],
   ['the answer says no for an adoptable row', inFile('lib/auth.ts', 'td.cookie_bound_at IS NULL AND td.device_id = s.device_id', 'td.cookie_bound_at IS NOT NULL AND td.device_id = s.device_id'), ['a.']],
   ['the answer forgets that another account bound the id', inFile('lib/auth.ts', 'AND NOT EXISTS (SELECT 1 FROM trusted_devices o WHERE o.device_id = td.device_id AND o.user_id <> td.user_id AND o.cookie_bound_at IS NOT NULL)', ''), ['b.']],

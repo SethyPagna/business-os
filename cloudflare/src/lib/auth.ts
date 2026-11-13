@@ -419,7 +419,7 @@ export async function getSessionUser<E extends { Bindings: Env } = { Bindings: E
 const PROBE_DEVICE_COOKIE = '__Host-bos_dev'
 const ADOPTABLE_CONTEXT_KEY = 'sessionDeviceAdoptable'
 function wantsAdoptionProbe<E extends { Bindings: Env }>(c: Context<E>): boolean {
-  return /\/auth\/(me|bootstrap)$/.test(String(c.req?.path ?? '')) && !getCookie(c, PROBE_DEVICE_COOKIE)
+  return /^\/api\/auth\/(me|bootstrap)$/.test(String(c.req?.path ?? '')) && !getCookie(c, PROBE_DEVICE_COOKIE)
 }
 const ADOPTABLE_COLUMN = `,
            EXISTS (SELECT 1 FROM trusted_devices td
