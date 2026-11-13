@@ -800,7 +800,7 @@ export default {
         // path drains too, but only while someone is using the app).
         drainTelegram: label('telegram-shift-overview', () => drainDueTelegramShiftOverviews(env, Date.now(), { limit: 10, sweepStale: true })),
         heavySteps: () => cronHeavySteps(env, label),
-        heavySelect: (steps, state, nowMs) => pickHeavyStepIndex(steps, state, nowMs, getPlanLimits(env).scheduledBackupAfterHourLocal, getPlanLimits(env).scheduledBackupMaxAttemptsPerDay),
+        heavySelect: (steps, state, nowMs) => pickHeavyStepIndex(steps, state, nowMs, getPlanLimits(env).scheduledBackupAfterHourLocal, getPlanLimits(env).scheduledBackupMaxAttemptsPerDay, getPlanLimits(env).scheduledBackupCopyPollGapMinutes * 60 * 1000),
         rotationSteps: () => cronRotationSteps(env, label),
         storeFor: (key) => settingsRotationStore(env, key),
       })

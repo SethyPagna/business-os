@@ -106,7 +106,7 @@ export function scheduledBackupCoverageMs(items: readonly BackupCoverageItem[], 
  * gate is due; any other tick runs the other step, which keeps its own minimum
  * interval.
  */
-export function pickHeavyStepIndex(steps: readonly RotationStep[], state: RotationState, nowMs: number, afterHourLocal: number, maxAttemptsPerNight: number = Infinity): number | undefined {
+export function pickHeavyStepIndex(steps: readonly RotationStep[], state: RotationState, nowMs: number, afterHourLocal: number, maxAttemptsPerNight: number = Infinity, copyPollGapMs: number = 0): number | undefined {
   const backupIndex = steps.findIndex((step) => step.id === 'backup')
   if (backupIndex < 0) return undefined
   const record = state.steps.backup
@@ -121,7 +121,10 @@ export function pickHeavyStepIndex(steps: readonly RotationStep[], state: Rotati
   const tonight = scheduledBackupNightOf(nowMs, afterHourLocal)
   const pendingKill = !!record && !!record.startedAt && (!record.finishedAt || record.finishedAt < record.startedAt) ? 1 : 0
   const exhausted = !!record && record.windowKey === tonight && (record.windowFailures || 0) + pendingKill >= maxAttemptsPerNight
-  if (!exhausted && scheduledBackupGate(nowMs, lastMs, afterHourLocal).due) return backupIndex
+  // The last backup visit only polled a set still copying: a poll is cheap but it used up the whole tick, and a copy that never
+  // finishes would keep the image audit off for up to 24 h. Poll again only after copyPollGapMs; the tick in between is the audit's.
+  const justPolled = !!record?.pollAt && nowMs - Date.parse(record.pollAt) < copyPollGapMs
+  if (!exhausted && !justPolled && scheduledBackupGate(nowMs, lastMs, afterHourLocal).due) return backupIndex
   const other = steps.findIndex((step) => step.id !== 'backup')
   return other >= 0 ? other : backupIndex
 }

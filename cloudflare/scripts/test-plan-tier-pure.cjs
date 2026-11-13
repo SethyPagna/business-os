@@ -137,6 +137,7 @@ const PAID = {
   scheduledBackupAfterHourLocal: 21,
   scheduledBackupKeep: 7,
   scheduledBackupMaxAttemptsPerDay: 2,
+  scheduledBackupCopyPollGapMinutes: 240,
   maxImageDeletesPerReset: 500,
   importRetentionMaxJobsPerTier: 20,
   ephemeralDeleteBatch: 5000,
@@ -191,6 +192,7 @@ const FREE = {
   scheduledBackupAfterHourLocal: 21,
   scheduledBackupKeep: 7,
   scheduledBackupMaxAttemptsPerDay: 2,
+  scheduledBackupCopyPollGapMinutes: 240,
   maxImageDeletesPerReset: 40,
   importRetentionMaxJobsPerTier: 5,
   ephemeralDeleteBatch: 1000,
@@ -271,7 +273,7 @@ const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES, ...
 // the same on both tiers; the read switch dash_overview_5m decides whether it is used, and what Free saves is the recompute a sale used to force.
 // coreInvariantsReverifySeconds is 24 h on both tiers since 11 Nov (Paid was 6 h: a run reads ~23k rows, four a day). sessionTouchIntervalSeconds is the
 // 15-minute last-seen touch on both tiers (it only bounds a one-row write; nothing reads it to decide).
-const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser', 'scheduledBackupAfterHourLocal', 'scheduledBackupKeep', 'scheduledBackupMaxAttemptsPerDay']
+const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser', 'scheduledBackupAfterHourLocal', 'scheduledBackupKeep', 'scheduledBackupMaxAttemptsPerDay', 'scheduledBackupCopyPollGapMinutes']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //

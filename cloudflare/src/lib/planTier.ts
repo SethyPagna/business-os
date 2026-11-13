@@ -174,6 +174,11 @@ export type PlanLimits = {
   // is given up and the image audit gets the ticks. Same on both tiers; the next night starts fresh.
   scheduledBackupMaxAttemptsPerDay: number
 
+  // While tonight's set is still copying in the queue, the backup step only POLLS it. After a poll the next heavy tick goes to the
+  // image audit unless this many minutes have passed, so a copy that never finishes (up to 24 h) polls about every other tick
+  // instead of starving the audit. 240 = more than one 3 h heavy tick, less than two.
+  scheduledBackupCopyPollGapMinutes: number
+
   // ---- Data reset --------------------------------------------------------
 
   // system.ts MAX_IMAGE_DELETES_PER_RESET -- R2 deletes fired SEQUENTIALLY,
@@ -465,6 +470,7 @@ const PAID_LIMITS: PlanLimits = {
   scheduledBackupAfterHourLocal: 21,
   scheduledBackupKeep: 7,
   scheduledBackupMaxAttemptsPerDay: 2,
+  scheduledBackupCopyPollGapMinutes: 240,
   maxImageDeletesPerReset: 500,
   importRetentionMaxJobsPerTier: 20,
   ephemeralDeleteBatch: 5000,
@@ -520,6 +526,7 @@ const FREE_LIMITS: PlanLimits = {
   scheduledBackupAfterHourLocal: 21,
   scheduledBackupKeep: 7,
   scheduledBackupMaxAttemptsPerDay: 2,
+  scheduledBackupCopyPollGapMinutes: 240,
   maxImageDeletesPerReset: 40,
   importRetentionMaxJobsPerTier: 5,
   ephemeralDeleteBatch: 1000,

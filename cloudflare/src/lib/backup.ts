@@ -1181,7 +1181,7 @@ export async function maybeRunScheduledBackup(env: Env, nowMs: number = Date.now
   }
   if (activeCopyMs && nowMs - activeCopyMs < STALE_BACKUP_MS) {
     // incomplete: the visit is fine but tonight's backup is not finished, so the lane must not count the night as done.
-    return { skipped: true, reason: 'backup-in-progress', incomplete: true, latest: activeCopy, retention }
+    return { skipped: true, reason: 'backup-in-progress', incomplete: true, pollOnly: true, latest: activeCopy, retention }
   }
   const afterHourLocal = getPlanLimits(env).scheduledBackupAfterHourLocal
   const gate = scheduledBackupGate(nowMs, scheduledBackupCoverageMs(backups, afterHourLocal), afterHourLocal)
@@ -1205,7 +1205,8 @@ export async function maybeRunScheduledBackup(env: Env, nowMs: number = Date.now
   // The set is only DONE once it is finalized. The asset copy runs on in the queue after create returns and can still end
   // failed (an upload deleted mid-copy fails the whole set), so a copying/partial/failed set is reported incomplete: the
   // lane keeps tonight open, and the next tick re-checks R2 (finalized: nothing to do; failed: take a new one).
-  return { skipped: false, backup, retention: finalRetention, ...(backup.status === 'finalized' ? {} : { incomplete: true }) }
+  return { skipped: false, backup, retention: finalRetention, ...(backup.status === 'finalized' ? {} : { incomplete: true }), // a set still copying also spaces the next poll (pollOnly)
+    ...(backup.status === 'copying' ? { pollOnly: true } : {}) }
 }
 
 function resolveBackupKey(source: string): string {

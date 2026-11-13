@@ -184,7 +184,7 @@ async function simulate(load, { failFirstNightAt = null, loseStateAfterEachTick 
       { id: 'backup', attemptWindow: (ms) => schedule.scheduledBackupNightOf(ms, limits.scheduledBackupAfterHourLocal), onClaim: (info) => { prior = info.windowFailures }, run: async () => { ran.push({ at: clock, step: 'backup' }); return backupMod.maybeRunScheduledBackup(env, clock, create, prior) } },
       { id: 'image-audit', minIntervalMs: rot.UNGATED_STEP_MIN_INTERVAL_MS, run: async () => { ran.push({ at: clock, step: 'image-audit' }) } },
     ],
-    heavySelect: (steps, state, now) => schedule.pickHeavyStepIndex(steps, state, now, limits.scheduledBackupAfterHourLocal, limits.scheduledBackupMaxAttemptsPerDay),
+    heavySelect: (steps, state, now) => schedule.pickHeavyStepIndex(steps, state, now, limits.scheduledBackupAfterHourLocal, limits.scheduledBackupMaxAttemptsPerDay, limits.scheduledBackupCopyPollGapMinutes * 60 * 1000),
   })
   try {
     const tick = async (iso) => {
@@ -274,7 +274,7 @@ const localHour = (c) => sched.businessHourOf(c.at)
     const iso = (t) => new Date(t).toISOString()
     // The 22:17 set ends failed 20 minutes later; the 01:17 retry finalizes.
     const asyncFail = await simulate(real, { managed: outcomes({ [failedSet]: { end: 'failed', copyMs: 20 * 60 * 1000 } }) })
-    assert.deepStrictEqual(asyncFail.created.map((c) => iso(c.at)), ['2026-11-12T15:17:00.000Z', '2026-11-12T18:17:00.000Z', '2026-11-13T15:17:00.000Z', '2026-11-14T15:17:00.000Z'],
+    assert.deepStrictEqual(asyncFail.created.map((c) => iso(c.at)), ['2026-11-12T15:17:00.000Z', '2026-11-12T21:17:00.000Z', '2026-11-13T15:17:00.000Z', '2026-11-14T15:17:00.000Z'],
       'a set that ends failed asynchronously is retried on the next heavy tick, then back to the nightly slot')
     // A set that finalizes is done: no retry.
     const asyncOk = await simulate(real, { managed: outcomes({}) })
@@ -283,11 +283,12 @@ const localHour = (c) => sched.businessHourOf(c.at)
     const partial = await simulate(real, { managed: outcomes({ [failedSet]: { end: 'partial', copyMs: 0 } }) })
     assert.strictEqual(partial.created.length >= 4 && iso(partial.created[1].at), '2026-11-12T18:17:00.000Z', 'a partial set is retried too')
     // Still copying at the next tick (3 h later): the visit polls, takes nothing new, and the night completes once it finalizes.
-    const slow = await simulate(real, { managed: outcomes({ [failedSet]: { end: 'finalized', copyMs: 4 * 60 * 60 * 1000 } }) })
+    const slow = await simulate(real, { managed: outcomes({ [failedSet]: { end: 'finalized', copyMs: 7 * 60 * 60 * 1000 } }) })
     assert.deepStrictEqual(slow.created.map((c) => iso(c.at)), ['2026-11-12T15:17:00.000Z', '2026-11-13T15:17:00.000Z', '2026-11-14T15:17:00.000Z'], 'a copy still running is not duplicated')
     const polls = slow.ran.filter((r) => r.step === 'backup').map((r) => iso(r.at))
-    assert.ok(polls.includes('2026-11-12T18:17:00.000Z') && polls.includes('2026-11-12T21:17:00.000Z'), 'the lane keeps polling the unfinished night')
-    assert.ok(!polls.includes('2026-11-13T00:17:00.000Z'), 'once it finalized the night is done: the next tick runs the other step')
+    assert.ok(polls.includes('2026-11-12T21:17:00.000Z') && polls.includes('2026-11-13T03:17:00.000Z'), 'the lane keeps polling the unfinished night (every other tick: the tick between belongs to the image audit)')
+    assert.ok(!polls.includes('2026-11-12T18:17:00.000Z') && !polls.includes('2026-11-13T00:17:00.000Z'), 'a poll is not repeated on the very next tick')
+    assert.ok(!polls.includes('2026-11-13T06:17:00.000Z'), 'once it finalized the night is done: the next tick runs the other step')
     assert.ok(seed)
     ok()
   }
@@ -325,7 +326,7 @@ const localHour = (c) => sched.businessHourOf(c.at)
     assert.ok(Object.values(nights(thrown.attempted.slice(1))).every((n) => n <= MAX), 'never more than the allowance per night')
     // Every set ends failed asynchronously.
     const asyncFailed = await simulate(real, { managed: (at) => (Z(at) >= Z('2026-11-12T00:00:00Z') ? { end: 'failed', copyMs: 20 * 60 * 1000 } : { end: 'finalized', copyMs: 1 }) })
-    assert.deepStrictEqual(asyncFailed.created.map((c) => iso(c.at)), ['2026-11-12T15:17:00.000Z', '2026-11-12T18:17:00.000Z', '2026-11-13T15:17:00.000Z', '2026-11-13T18:17:00.000Z', '2026-11-14T15:17:00.000Z'],
+    assert.deepStrictEqual(asyncFailed.created.map((c) => iso(c.at)), ['2026-11-12T15:17:00.000Z', '2026-11-12T21:17:00.000Z', '2026-11-13T15:17:00.000Z', '2026-11-13T21:17:00.000Z', '2026-11-14T15:17:00.000Z'],
       'failed sets are bounded the same way')
     // The audit is not starved: between the retry at 01:17 and the next close it runs, in both failure modes.
     for (const run of [thrown, asyncFailed]) {
@@ -340,6 +341,15 @@ const localHour = (c) => sched.businessHourOf(c.at)
     assert.ok(killed.attempted.length - 1 >= 4, 'control: the kills really were retried across nights')
     const failedThenKilled = await simulate(real, { killFrom: Z('2026-11-12T16:00:00Z'), managed: (at) => (Z(at) >= Z('2026-11-12T00:00:00Z') && Z(at) < Z('2026-11-12T16:00:00Z') ? { end: 'failed', copyMs: 20 * 60 * 1000 } : { end: 'finalized', copyMs: 1 }) })
     assert.ok(Object.values(nights(failedThenKilled.attempted.slice(1))).every((n) => n <= MAX), 'one failed set then kills: at most the allowance per night: ' + JSON.stringify(nights(failedThenKilled.attempted.slice(1))))
+    // R2-C: a set that never finishes copying (queue consumer dead) is polled, not hammered: the audit keeps its cadence.
+    const stuck = await simulate(real, { managed: (at) => (Z(at) >= Z('2026-11-12T00:00:00Z') ? { end: 'finalized', copyMs: 1000 * HOUR } : { end: 'finalized', copyMs: 1 }) })
+    const auditTimes = stuck.ran.filter((r) => r.step === 'image-audit').map((r) => r.at)
+    const gaps = auditTimes.slice(1).map((t, i) => t - auditTimes[i])
+    const healthy = await simulate(real, { managed: () => ({ end: 'finalized', copyMs: 20 * 60 * 1000 }) })
+    const healthyTimes = healthy.ran.filter((r) => r.step === 'image-audit').map((r) => r.at)
+    const healthyMax = Math.max(...healthyTimes.slice(1).map((t, i) => t - healthyTimes[i]))
+    assert.ok(gaps.length >= 6 && Math.max(...gaps) <= healthyMax, 'a stuck copy leaves the image audit no further apart than a healthy run (cadence + the backup tick): ' + Math.max(...gaps) / HOUR + ' h vs ' + healthyMax / HOUR + ' h')
+    assert.ok(stuck.ran.some((r) => r.step === 'backup' && r.at > Z('2026-11-12T16:00:00Z')), 'control: the stuck set is still polled')
     // The pure lane decision: failures at the allowance in this very night hand the tick to the other step; next night does not.
     const steps = [{ id: 'backup' }, { id: 'image-audit' }]
     const rec = (startedAt, failures) => ({ steps: { backup: { startedAt, finishedAt: startedAt, okAt: null, error: 'x', failures, killed: 0, runs: failures, windowKey: sched.scheduledBackupNightOf(Z(startedAt), AFTER), windowFailures: failures } } })
@@ -403,7 +413,7 @@ const localHour = (c) => sched.businessHourOf(c.at)
   assert.ok(!/SCHEDULED_BACKUP_MIN_INTERVAL_MS|scheduledBackupIsRecent/.test(backupSrc), 'the 5.5 h interval gate is gone')
   assert.ok(!/\b(?:2[0-3]|1\d)\s*\)?\s*\*?\s*HOUR/.test(read('lib/backupSchedule.ts')), 'no literal close hour in the schedule module')
   const indexSrc = read('index.ts')
-  assert.ok(indexSrc.includes('heavySelect: (steps, state, nowMs) => pickHeavyStepIndex(steps, state, nowMs, getPlanLimits(env).scheduledBackupAfterHourLocal, getPlanLimits(env).scheduledBackupMaxAttemptsPerDay)'))
+  assert.ok(indexSrc.includes('heavySelect: (steps, state, nowMs) => pickHeavyStepIndex(steps, state, nowMs, getPlanLimits(env).scheduledBackupAfterHourLocal, getPlanLimits(env).scheduledBackupMaxAttemptsPerDay, getPlanLimits(env).scheduledBackupCopyPollGapMinutes * 60 * 1000)'))
   assert.ok(indexSrc.includes("step('backup', () => maybeRunScheduledBackup(env, Date.now(), undefined, priorFailuresTonight))") && !indexSrc.includes("throw new Error('backup already in progress"), 'an unfinished set is reported incomplete, not thrown')
   assert.ok(!/shift/i.test(read('lib/backupSchedule.ts').replace(/\/\/.*$/gm, '')), 'open shifts are never consulted by the schedule')
   assert.ok(read('routes/backups.ts').includes("cadence: 'daily-after-close'") && !read('routes/backups.ts').includes('intervalHours: 6'))

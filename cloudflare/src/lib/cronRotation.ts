@@ -67,6 +67,8 @@ export interface StepState {
   windowKey?: string
   /** Failed or killed visits within windowKey (a step that keeps failing is bounded per window by its caller). */
   windowFailures?: number
+  /** When the last visit only polled unfinished work (result.pollOnly); null/absent otherwise. A lane selector can space such polls out. */
+  pollAt?: string | null
 }
 
 export interface RotationState {
@@ -142,6 +144,7 @@ function sanitize(raw: unknown): RotationState {
         failures: Number(v.failures) > 0 ? Math.floor(Number(v.failures)) : 0,
         killed: Number(v.killed) > 0 ? Math.floor(Number(v.killed)) : 0,
         runs: Number(v.runs) > 0 ? Math.floor(Number(v.runs)) : 0,
+        ...(typeof v.pollAt === 'string' ? { pollAt: v.pollAt } : {}),
         ...(typeof v.windowKey === 'string' ? { windowKey: v.windowKey, windowFailures: Number(v.windowFailures) > 0 ? Math.floor(Number(v.windowFailures)) : 0 } : {}),
       }
     }
@@ -246,11 +249,13 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
   // A visit that ran fine but whose work is not finished (a backup whose asset copy is still running in the queue):
   // it is not an error, but it must not count as done, or the step's okAt would satisfy a lane gate for the whole day.
   let incomplete = false
+  let pollOnly = false
   let error: string | undefined
   try {
     const result = await step.run()
     more = !!result && typeof result === 'object' && (result as { more?: unknown }).more === true
     incomplete = !!result && typeof result === 'object' && (result as { incomplete?: unknown }).incomplete === true
+    pollOnly = !!result && typeof result === 'object' && (result as { pollOnly?: unknown }).pollOnly === true
   } catch (caught) {
     ok = false
     error = shortError(caught)
@@ -258,6 +263,8 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
 
   record.finishedAt = new Date(nowMs + Math.max(0, Date.now() - realStart)).toISOString()
   record.runs += 1
+  if (ok && pollOnly) record.pollAt = record.finishedAt
+  else if (record.pollAt !== undefined) record.pollAt = null
   if (ok) { if (!incomplete) record.okAt = record.finishedAt; record.error = null; record.failures = 0 } else { record.error = error ?? 'error'; record.failures += 1; if (step.attemptWindow) record.windowFailures = (record.windowFailures || 0) + 1 }
   if (ok && more && current.resumeStreak < MAX_RESUME_STREAK) {
     current.cursor = index
