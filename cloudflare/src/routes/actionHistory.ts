@@ -485,6 +485,9 @@ app.patch('/:id', async (c) => {
   }
 })
 
+/** Kinds whose original writer bumps 'products' (branch edit: every product row lists branch name and active flag; supplier backfill: supplier-filtered search). */
+const PRODUCTS_REPLAY_KINDS = new Set(['branch.update', 'supplier.backfill'])
+
 /**
  * The cache namespaces each server-managed replay moves (the same list its bump helper in lib/<module>.ts passes to bumpVersions; a parity test in
  * test-undo-redo-one-bump-native.cjs reads each helper and compares). They join the applier's own effects and the route's replay namespaces in
@@ -622,7 +625,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         // Sales list cache, the product lists) turn over now and not at their TTL: added lines move 'sales' (an
         // add-items bumps stock and sales); a merge fold moves 'products'. Awaited, so the next read already sees it.
         const replayNamespaces = applier.name === SALE_ADD_ITEMS_ACTION_KIND ? ['sales']
-          : PRODUCT_MERGE_APPLIER_KINDS.has(applier.name) ? ['products'] : []
+          : PRODUCT_MERGE_APPLIER_KINDS.has(applier.name) || PRODUCTS_REPLAY_KINDS.has(applier.name) ? ['products'] : []
         const bumpNamespaces = [...(applier.name !== STOCK_SESSION_KIND ? ['stock'] : []), ...replayNamespaces]
         // The server-managed kinds' own bump helpers move their namespaces in this same call (the awaited helper block further down no longer bumps).
         const managedNamespaces = serverManagedReplay && applier.name !== SALE_ADD_ITEMS_ACTION_KIND && applier.name !== PRODUCT_MERGE_GROUP_ACTION_KIND && !mergeCostReplay

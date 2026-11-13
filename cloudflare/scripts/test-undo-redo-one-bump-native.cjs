@@ -68,7 +68,7 @@ async function main() {
   const cost = load('lib/acquisitionCostAccess.ts', { './permissions': permissions })
   const appliers = load('lib/undoAppliers.ts', {
     './stockTransaction': stockTransaction, './permissions': permissions, './actorSnapshot': actor, './db': { getDb: () => db }, './audit': audit,
-    './productDataGaps': gaps, './acquisitionCostAccess': cost, './cache': cache, '../durable-objects/broadcastHub': hub,
+    './productDataGaps': gaps, './acquisitionCostAccess': cost, './cache': cache, './branchWrites': load('lib/branchWrites.ts', { './db': { toDbBool: (v) => (v ? 1 : 0) }, './canonicalBranchIdentity': load('lib/canonicalBranchIdentity.ts', { './db': { toDbBool: (v) => (v ? 1 : 0) }, './branchRoles': load('lib/branchRoles.ts') }) }), '../durable-objects/broadcastHub': hub,
   })
   const history = load('routes/actionHistory.ts', {
     '../lib/stockTransaction': stockTransaction, '../lib/acquisitionCostAccess': cost, '../lib/db': { getDb: () => db },
@@ -83,7 +83,7 @@ async function main() {
   const call = async (id, direction) => {
     events.length = 0; bumps.length = 0
     const res = await app.request(`http://local/api/action-history/${id}/${direction}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }, { DB: native }, executionCtx)
-    events.push('response')
+    events.push('response');
     const json = await res.json().catch(() => null)
     return { status: res.status, json, trace: events.join(' > ') }
   }
@@ -111,7 +111,24 @@ async function main() {
     const recorded = await appliers.recordSupplierBackfillSnapshot({}, ADMIN, reversal)
     assert.ok(recorded && recorded.actionHistoryId > 0)
     await settle('supplier.backfill undo', await call(recorded.actionHistoryId, 'undo'))
+    // The original writer (supplier backfill) bumps 'products'; the replay carries it too (review N1).
+    assert.deepEqual([...bumps[0]].sort(), ['products', 'stock'], 'supplier.backfill undo namespaces')
     await settle('supplier.backfill redo', await call(recorded.actionHistoryId, 'redo'))
+    assert.deepEqual([...bumps[0]].sort(), ['products', 'stock'], 'supplier.backfill redo namespaces')
+  })
+
+  await check('branch.update undo and redo: the products list turns over with stock, in one bump', async () => {
+    raw.prepare("INSERT INTO branches (id, name, location, phone, manager, notes, is_default, is_active) VALUES (50, 'Warehouse', 'Rd', '2', 'Sok', 'n', 0, 1)").run()
+    raw.prepare("INSERT INTO branches (id, name, location, phone, manager, notes, is_default, is_active) VALUES (51, 'Shop', 'Rd', '3', 'Dara', 'n', 1, 1)").run()
+    const form = (phone) => ({ name: 'Warehouse', location: 'Rd', phone, manager: 'Sok', notes: 'n', is_default: 0, is_active: 1 })
+    const id = Number(raw.prepare(`INSERT INTO action_history (scope, entity, entity_id, label, reversible, status, undo_payload, redo_payload, created_by_id, created_by_name)
+      VALUES ('branches', 'branch', '50', 'Edit branch', 1, 'undoable', @u, @r, 7, 'Admin')`).run({
+      u: JSON.stringify({ applier: 'branch.update', id: 50, fields: form('1') }),
+      r: JSON.stringify({ applier: 'branch.update', id: 50, fields: form('2') }) }).lastInsertRowid)
+    await settle('branch.update undo', await call(id, 'undo'))
+    assert.deepEqual([...bumps[0]].sort(), ['products', 'stock'], 'branch.update undo namespaces')
+    await settle('branch.update redo', await call(id, 'redo'))
+    assert.deepEqual([...bumps[0]].sort(), ['products', 'stock'], 'branch.update redo namespaces')
   })
 
   await check('product.conflict_mark undo and redo: ONE bump call (products and stock together)', async () => {
@@ -137,6 +154,12 @@ async function main() {
       ['lib/saleSettlementAction.ts', 'bumpSaleSettlementAction', 'SALE_SETTLEMENT_ACTION_KIND', ['sales']],
       ['lib/saleBulkStatus.ts', 'bumpBulkStatus', 'BULK_STATUS_KIND', ['sales', 'stock']],
     ]
+    // The two kinds the table below cannot cover (review N1): the route adds 'products' for exactly the kinds whose original writer bumps it.
+    const kindsLine = route.split('\n').find((line) => line.startsWith('const PRODUCTS_REPLAY_KINDS')) || ''
+    assert.deepEqual([...kindsLine.matchAll(/'([a-z_.]+)'/g)].map((m) => m[1]).sort(), ['branch.update', 'supplier.backfill'], 'route products replay kinds')
+    const nextLine = (file, needle) => { const lines = text(file).split('\n'); const i = lines.findIndex((line) => line.includes(needle)); return i < 0 ? '' : lines[i + 1] }
+    assert.match(nextLine('routes/branches.ts', 'Every product row lists the branches'), /bumpVersion\(c\.env, 'products'\)/, 'branch writer bumps products')
+    assert.match(nextLine('routes/products.ts', "'supplier_backfill', 'product'"), /bumpVersion\(c\.env, 'products'\)/, 'supplier backfill writer bumps products')
     const quoted = (value) => [...new Set([...value.matchAll(/'([a-z_]+)'/g)].map((match) => match[1]))]
     for (const [file, helperName, kind, expected] of parity) {
       const source = text(file)
