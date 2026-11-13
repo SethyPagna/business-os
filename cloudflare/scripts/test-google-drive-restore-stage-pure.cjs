@@ -37,6 +37,7 @@ const stubs = {
     encryptSecret: async (value) => `enc:${value}`,
     upgradeLegacySecret: async () => null,
   },
+  './planTier': { getPlanLimits: () => ({ driveStaleMirrorHours: 24 }) },
   './backup': {
     DRIVE_STAGED_BACKUP_PREFIX: 'backups/cloudflare/drive-staged-',
     listCloudflareBackups: async () => [],

@@ -23,6 +23,7 @@
 import type { Env } from '../index'
 import { getDb } from './db'
 import { encryptSecret, decryptSecret, upgradeLegacySecret } from './secretCrypto'
+import { getPlanLimits } from './planTier'
 import {
   DRIVE_STAGED_BACKUP_PREFIX,
   inspectCloudflareBackupStream,
@@ -423,14 +424,14 @@ export async function pushBackupToDrive(env: Env): Promise<{ success: boolean; e
     // createCloudflareBackup() again, doubling backup work/storage and racing
     // R2's own retention. A copying/partial/failed set is never eligible.
     const backups = await listCloudflareBackups(env)
-    const backup = newestMirrorableBackup(backups)
+    const { backup, skippedStale } = driveMirrorChoice(backups, driveMirrorLimits(env))
     if (!backup) throw new Error('No finalized R2 backup is available to mirror yet.')
     const fileName = backup.name || `backup-${Date.now()}.json`
     const existingFiles = await listDriveBackups(token, folderId)
     const existing = existingFiles.find((file) => file.appProperties?.backupKey === backup.key && file.appProperties?.status === 'finalized')
     if (existing) {
       await pruneDriveBackups(token, existingFiles, DRIVE_BACKUP_KEEP)
-      await setSettings(env, [['drive_sync_last_synced_at', new Date().toISOString()], ['drive_sync_last_backup_key', driveSyncMarker(settings.drive_sync_account_email, folderId, backup.key)], ['drive_sync_last_error', '']])
+      await setSettings(env, [['drive_sync_last_synced_at', new Date().toISOString()], ['drive_sync_last_backup_key', driveSyncMarker(settings.drive_sync_account_email, folderId, backup.key)], ['drive_sync_last_error', driveStaleSkipMessage(skippedStale, backup)]])
       return { success: true, fileId: existing.id, fileName }
     }
 
@@ -479,7 +480,7 @@ export async function pushBackupToDrive(env: Env): Promise<{ success: boolean; e
     if (uploaded.size && Number(uploaded.size) !== object.size) throw new Error('Google Drive upload size verification failed.')
 
     await pruneDriveBackups(token, [{ id: uploaded.id, appProperties: metadata.appProperties }, ...existingFiles], DRIVE_BACKUP_KEEP)
-    await setSettings(env, [['drive_sync_last_synced_at', new Date().toISOString()], ['drive_sync_last_backup_key', driveSyncMarker(settings.drive_sync_account_email, folderId, backup.key)], ['drive_sync_last_error', '']])
+    await setSettings(env, [['drive_sync_last_synced_at', new Date().toISOString()], ['drive_sync_last_backup_key', driveSyncMarker(settings.drive_sync_account_email, folderId, backup.key)], ['drive_sync_last_error', driveStaleSkipMessage(skippedStale, backup)]])
     return { success: true, fileId: uploaded.id, fileName: driveFileName }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Google Drive sync failed.'
@@ -554,9 +555,36 @@ export async function driveSyncScheduleDue(env: Env): Promise<{ due: boolean; re
  * copy partial and use up its 10 slots. Both selectors (the upload and the already-has-it check) share this one predicate,
  * so the skip marker always names the backup that would be uploaded.
  */
-export function newestMirrorableBackup<T extends { finalized: boolean; scope?: 'full' | 'section' | null; manifestAssetsCurrent?: boolean }>(backups: readonly T[]): T | undefined {
-  // A set whose manifest lists older versions than it copied would give a Drive-only restore the wrong images: skip it.
-  return backups.find((item) => item.finalized && item.scope !== 'section' && item.manifestAssetsCurrent !== false)
+export type DriveMirrorLimits = { staleMirrorHours: number; nowMs: number }
+type MirrorCandidate = { finalized: boolean; scope?: 'full' | 'section' | null; manifestAssetsCurrent?: boolean; uploaded?: string | null }
+
+/**
+ * Which backup Drive should hold, and which newer one it passed over. A set whose manifest lists older versions than it
+ * copied would give a Drive-only restore the wrong images, so it is skipped while a current set is fresh enough. When the
+ * newest current set is older than `staleMirrorHours` (or none exists), the stale set is mirrored instead: a day without
+ * the newest database off-site costs more than a few image versions. Without limits the stale set is always skipped.
+ */
+export function driveMirrorChoice<T extends MirrorCandidate>(backups: readonly T[], limits?: DriveMirrorLimits): { backup?: T; skippedStale?: T } {
+  const candidates = backups.filter((item) => item.finalized && item.scope !== 'section')
+  const head = candidates[0]
+  if (!head) return {}
+  if (head.manifestAssetsCurrent !== false) return { backup: head }
+  const current = candidates.find((item) => item.manifestAssetsCurrent !== false)
+  if (!limits) return current ? { backup: current, skippedStale: head } : {}
+  const uploadedMs = current?.uploaded ? Date.parse(current.uploaded) : NaN
+  const currentIsOld = !current || (Number.isFinite(uploadedMs) && limits.nowMs - uploadedMs > limits.staleMirrorHours * 3600_000)
+  return currentIsOld ? { backup: head } : { backup: current, skippedStale: head }
+}
+
+export function newestMirrorableBackup<T extends MirrorCandidate>(backups: readonly T[], limits?: DriveMirrorLimits): T | undefined {
+  return driveMirrorChoice(backups, limits).backup
+}
+
+const driveMirrorLimits = (env: Env): DriveMirrorLimits => ({ staleMirrorHours: getPlanLimits(env).driveStaleMirrorHours, nowMs: Date.now() })
+
+/** The visible sync status when a newer set was passed over (shown as the Drive "last error" on the Backup page). */
+export function driveStaleSkipMessage(skipped: { name?: string } | undefined, held: { name?: string }): string {
+  return skipped ? `The newest backup (${skipped.name || 'unnamed'}) was not copied to Google Drive because its image list is out of date. Drive keeps ${held.name || 'the previous backup'}.` : ''
 }
 
 /**
@@ -576,13 +604,18 @@ export function driveSyncMarker(accountEmail: unknown, folderId: unknown, backup
  * `drive_sync_last_backup_key` is written by pushBackupToDrive after every successful sync. The Backup screen's manual
  * "Sync now" does not consult this and always goes through pushBackupToDrive.
  */
-export async function driveSyncHasNewBackup(env: Env): Promise<{ new: boolean; reason?: 'no-finalized-backup' | 'already-synced'; backupKey?: string }> {
-  const newest = newestMirrorableBackup(await listCloudflareBackups(env))
+export async function driveSyncHasNewBackup(env: Env): Promise<{ new: boolean; reason?: 'no-finalized-backup' | 'already-synced' | 'skipped-stale'; backupKey?: string }> {
+  const { backup: newest, skippedStale } = driveMirrorChoice(await listCloudflareBackups(env), driveMirrorLimits(env))
   // Nothing to upload: record that the check happened (not a sync: the Backup screen's "last synced" stays the last upload).
   const checked = () => setSettings(env, [['drive_sync_last_checked_at', new Date().toISOString()]])
   if (!newest) { await checked(); return { new: false, reason: 'no-finalized-backup' } }
   const settings = await getSettings(env, ['drive_sync_last_backup_key', 'drive_sync_account_email', 'drive_sync_folder_id'])
-  if (settings.drive_sync_last_backup_key === driveSyncMarker(settings.drive_sync_account_email, settings.drive_sync_folder_id, newest.key)) { await checked(); return { new: false, reason: 'already-synced', backupKey: newest.key } }
+  if (settings.drive_sync_last_backup_key === driveSyncMarker(settings.drive_sync_account_email, settings.drive_sync_folder_id, newest.key)) {
+    await checked()
+    // Drive holds an older current set because a newer one was passed over: say so instead of reporting it as up to date.
+    if (skippedStale) { await setSettings(env, [['drive_sync_last_error', driveStaleSkipMessage(skippedStale, newest)]]); return { new: false, reason: 'skipped-stale', backupKey: newest.key } }
+    return { new: false, reason: 'already-synced', backupKey: newest.key }
+  }
   return { new: true, backupKey: newest.key }
 }
 

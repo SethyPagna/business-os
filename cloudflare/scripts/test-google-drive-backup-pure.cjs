@@ -42,6 +42,8 @@ let listedBackups = 0
 let newerBackupExists = false
 let sectionBackupNewest = false
 let gzipBackupNewest = false
+let staleHeadExists = false
+let finalUploaded = null
 let lastUpload = null
 const stubs = {
   './db': { getDb: () => db },
@@ -50,6 +52,7 @@ const stubs = {
     encryptSecret: async (value) => `enc:${value}`,
     upgradeLegacySecret: async () => null,
   },
+  './planTier': { getPlanLimits: () => ({ driveStaleMirrorHours: 24 }) },
   './backup': {
     listCloudflareBackups: async () => {
       listedBackups += 1
@@ -57,8 +60,9 @@ const stubs = {
         ...(sectionBackupNewest ? [{ key: 'backups/cloudflare/section.json', name: 'section.json', finalized: true, scope: 'section' }] : []),
         ...(gzipBackupNewest ? [{ key: 'backups/cloudflare/gz.json', name: 'gz.json', finalized: true }] : []),
         ...(newerBackupExists ? [{ key: 'backups/cloudflare/newer.json', name: 'newer.json', finalized: true }] : []),
+        ...(staleHeadExists ? [{ key: 'backups/cloudflare/stale.json', name: 'stale.json', finalized: true, manifestAssetsCurrent: false, uploaded: new Date().toISOString() }] : []),
         { key: 'backups/cloudflare/pending.json', name: 'pending.json', finalized: false },
-        { key: 'backups/cloudflare/final.json', name: 'final.json', finalized: true },
+        { key: 'backups/cloudflare/final.json', name: 'final.json', finalized: true, ...(finalUploaded ? { uploaded: finalUploaded } : {}) },
       ]
     },
     createCloudflareBackup: async () => { throw new Error('Drive sync must never create another R2 backup') },
@@ -88,6 +92,7 @@ const {
   isTrustedDriveUploadSession,
   pushBackupToDrive,
   newestMirrorableBackup,
+  driveMirrorChoice,
   driveSyncHasNewBackup,
   driveSyncScheduleDue,
   disconnectDrive,
@@ -252,6 +257,27 @@ async function main() {
     // F6: a set whose manifest lists older versions than it copied is never the one mirrored (a Drive copy is manifest-only).
     assert.strictEqual(newestMirrorableBackup([{ key: 'a', finalized: true, manifestAssetsCurrent: false }, { key: 'b', finalized: true, manifestAssetsCurrent: true }]).key, 'b')
     assert.strictEqual(newestMirrorableBackup([{ key: 'a', finalized: true }]).key, 'a', 'a set without the field (older code, legacy) is eligible')
+    // R6-3: a stale newest set is skipped only while the newest current set is fresh; past the limit it is mirrored, and a skip is visible.
+    const hr = 3600e3, nowMs = Date.now(), limits = { staleMirrorHours: 24, nowMs }
+    const stale = { key: 'stale', finalized: true, manifestAssetsCurrent: false, uploaded: new Date(nowMs).toISOString() }
+    const freshCurrent = { key: 'cur', finalized: true, manifestAssetsCurrent: true, uploaded: new Date(nowMs - 20 * hr).toISOString() }
+    const oldCurrent = { key: 'cur', finalized: true, manifestAssetsCurrent: true, uploaded: new Date(nowMs - 25 * hr).toISOString() }
+    assert.deepStrictEqual(driveMirrorChoice([stale, freshCurrent], limits), { backup: freshCurrent, skippedStale: stale }, 'current set 20 h old: the stale set is skipped')
+    assert.deepStrictEqual(driveMirrorChoice([stale, oldCurrent], limits), { backup: stale }, 'current set 25 h old: the stale set is mirrored')
+    assert.deepStrictEqual(driveMirrorChoice([stale], limits), { backup: stale }, 'no current set at all: the stale set is mirrored')
+    assert.deepStrictEqual(driveMirrorChoice([stale, oldCurrent]), { backup: oldCurrent, skippedStale: stale }, 'no limits given: always skipped (old behaviour)')
+    const marker = '|root-folder|backups/cloudflare/final.json'
+    settings.set('drive_sync_last_backup_key', marker)
+    settings.set('drive_sync_last_error', '')
+    staleHeadExists = true
+    finalUploaded = new Date(Date.now() - 2 * hr).toISOString()
+    assert.deepStrictEqual(await driveSyncHasNewBackup(env), { new: false, reason: 'skipped-stale', backupKey: 'backups/cloudflare/final.json' }, 'a skip is never reported as already-synced')
+    assert.match(settings.get('drive_sync_last_error'), /stale.json.*not copied to Google Drive/, 'the skip is a visible status')
+    finalUploaded = new Date(Date.now() - 30 * hr).toISOString()
+    assert.deepStrictEqual(await driveSyncHasNewBackup(env), { new: true, backupKey: 'backups/cloudflare/stale.json' }, 'the held set is over a day old: the stale newest set is mirrored')
+    staleHeadExists = false
+    finalUploaded = null
+    settings.set('drive_sync_last_error', '')
     // F4: a plain copy keeps its .json name and type; a gzip manifest is named .json.gz and typed application/gzip.
     assert.deepStrictEqual(lastUpload, { name: 'final.json', initType: 'application/json', putType: 'application/json' })
     gzipBackupNewest = true

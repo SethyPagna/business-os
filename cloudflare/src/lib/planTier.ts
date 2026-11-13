@@ -183,6 +183,11 @@ export type PlanLimits = {
   // in-flight backup (or a continuation) just made of a re-uploaded image, not yet named by any sidecar. Same on both tiers.
   backupPoolGraceHours: number
 
+  // Drive skips a newest backup whose manifest lists older image versions than it copied, and holds the newest current one.
+  // When that current set is older than this many hours, the stale one is mirrored instead (the database matters more than
+  // a few image versions). Same on both tiers.
+  driveStaleMirrorHours: number
+
   // While tonight's set is still copying in the queue, the backup step only POLLS it. After a poll the next heavy tick goes to the
   // image audit unless this many minutes have passed, so a copy that never finishes (up to 24 h) polls about every other tick
   // instead of starving the audit. 240 = more than one 3 h heavy tick, less than two.
@@ -486,6 +491,7 @@ const PAID_LIMITS: PlanLimits = {
   scheduledBackupMaxAttemptsPerDay: 2,
   backupManifestGzip: true,
   backupPoolGraceHours: 24,
+  driveStaleMirrorHours: 24,
   scheduledBackupCopyPollGapMinutes: 240,
   scheduledBackupStaleHours: 30,
   maxImageDeletesPerReset: 500,
@@ -545,6 +551,7 @@ const FREE_LIMITS: PlanLimits = {
   scheduledBackupMaxAttemptsPerDay: 2,
   backupManifestGzip: false,
   backupPoolGraceHours: 24,
+  driveStaleMirrorHours: 24,
   scheduledBackupCopyPollGapMinutes: 240,
   scheduledBackupStaleHours: 30,
   maxImageDeletesPerReset: 40,

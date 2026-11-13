@@ -107,6 +107,7 @@ async function main() {
     const drive = loadTs('googleDrive.ts', {
       './db': { getDb: () => db },
       './secretCrypto': crypto,
+      './planTier': { getPlanLimits: () => ({ driveStaleMirrorHours: 24 }) },
       './backup': {
         DRIVE_STAGED_BACKUP_PREFIX: 'backups/cloudflare/drive-staged-',
         listCloudflareBackups: async () => [],
