@@ -89,6 +89,28 @@ const ctx = { waitUntil(promise) { pending.push(promise); promise?.catch?.(() =>
     assert.deepEqual([...bumps[0]].sort(), ['returns', 'settings'])
   })
 
+  await check('F8 (N2): a replayed return EDIT (receipt already stored) bumps again before it answers', async () => {
+    const row = f.raw.prepare('SELECT id, sale_id, updated_at FROM returns ORDER BY id DESC LIMIT 1').get()
+    const absent = { present: false }
+    const intent = { return_id: row.id, expected_updated_at: row.updated_at, items: { present: false, value: [] }, reason: absent, return_type: absent,
+      notes: { present: true, value: 'edited once' }, total_refund_usd: absent, total_refund_khr: absent, branch_id: absent }
+    const requestJson = JSON.stringify(intent)
+    const digest = require('node:crypto').createHash('sha256').update(requestJson).digest('hex')
+    f.raw.prepare("INSERT INTO return_mutation_receipts(id,actor_id,return_id,sale_id,mutation_kind,request_id,request_digest,request_json,response_json,occurred_at) VALUES('00000000-0000-4000-8000-000000000001',@actor,@rid,@sid,'edit','bump-replay-edit-1',@digest,@rj,@resp,'2026-11-13 00:00:00')")
+      .run({ actor: h.USER.id, rid: row.id, sid: row.sale_id, digest, rj: requestJson, resp: JSON.stringify({ id: row.id, updated_at: row.updated_at }) })
+    events.length = 0; bumps.length = 0
+    const r = await returns.request('/' + row.id, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ client_request_id: 'bump-replay-edit-1', expected_updated_at: row.updated_at, notes: 'edited once' }) }, { DB: rdb }, ctx)
+    events.push('response')
+    const json = await r.json().catch(() => null)
+    const trace = events.join(' > ')
+    await Promise.allSettled(pending.splice(0))
+    assert.equal(r.status, 200, JSON.stringify(json).slice(0, 400))
+    assert.equal(bumps.length, 1, 'one bump call on the edit replay (' + trace + ')')
+    for (const namespace of ['products', 'returns', 'sales', 'stock']) assert.ok(bumps[0].includes(namespace), namespace + ' is advanced (' + bumps[0] + ')')
+    const order = trace.split(' > ')
+    assert.ok(order.findIndex((event) => event.startsWith('bump-done:')) < order.indexOf('response'), 'the bump finished before the replay answered (' + trace + ')')
+  })
+
   if (failed) { console.error(`${failed} check(s) failed`); process.exit(1) }
   console.log('PASS test-returns-bump-replay-pure')
   process.exit(0)
