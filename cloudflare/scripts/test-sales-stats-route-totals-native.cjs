@@ -39,6 +39,11 @@ globalThis.__stats1022={
   },
 }
 function harness(routeSource){
+  // J7 (6.0.1850): lib/receiptNumber.ts's uniqueBusinessDateTimeNumber now takes readTaken(candidates) -> the taken ones. The frozen full-reader
+  // baseline (sha-pinned above, untouched) still passes its one-candidate probe, which would receive the candidate ARRAY and bind it as one SQL value.
+  // Adapt only the baseline's two call sites, keeping its own semantics: probe in order, stop at the first free candidate. The candidate source
+  // already passes the batched reader, so this is a no-op for it.
+  routeSource=routeSource.replaceAll("uniqueBusinessDateTimeNumber('', receiptNumberTaken)","uniqueBusinessDateTimeNumber('', async (candidates) => { const held = []; for (const candidate of candidates) { if (!(await receiptNumberTaken(candidate))) break; held.push(candidate) } return held })")
   const file=path.join(root,'scripts/test-sale-create-atomic-pure.cjs'),text=fs.readFileSync(file,'utf8'),boundary=';(async () => {'
   assert.equal(text.split(boundary).length,2,'Existing full-migration Hono prefix')
   let prefix=text.slice(0,text.indexOf(boundary))
