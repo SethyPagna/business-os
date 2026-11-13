@@ -69,7 +69,10 @@ async function main() {
       const retry = meter(f.raw, 50, 10)
       const replay = await request(retry.db, '/', f.body, f.env)
       assert.equal(replay.status, 200)
-      assert.equal(retry.events.length, 1)
+      // 6.0.1897 (F3/F8): a replay reads the stored receipt once, then re-advances the return cache namespaces (the first attempt may have died before its own bump).
+      assert.match(retry.events[0].sql, /return_create_receipts/, "the first statement is the stored-receipt read")
+      assert.ok(retry.events.slice(1).every(event => /cache_versions|quota_usage/.test(event.sql)), "every statement after the receipt read is the cache re-bump, nothing else")
+      assert.ok(retry.events.length <= 4, "the replay stays within the receipt read plus one cache bump")
       assert.equal(f.raw.prepare('SELECT COUNT(*) n FROM returns').get().n, 1)
       assert.equal(f.raw.prepare('SELECT stock_quantity FROM products WHERE id=10').get().stock_quantity, 1)
     }

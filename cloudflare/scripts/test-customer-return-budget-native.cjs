@@ -131,7 +131,11 @@ async function main() {
       const replay = await request(replayMeter.db, '/', f.body, f.env)
       assert.equal(replay.status, 200)
       assert.deepEqual(replay.body, result.body)
-      assert.equal(replayMeter.events.length, 1)
+      // 6.0.1897 (F3/F8): a replay answers from the stored receipt (one read) but first re-advances the return cache namespaces, since the first
+      // attempt may have died before its own bump. Those extra statements are the version read, the Free-plan KV-write quota upsert and one D1 version upsert.
+      assert.match(replayMeter.events[0].sql, /return_create_receipts/, 'the first statement is still the stored-receipt read')
+      assert.ok(replayMeter.events.slice(1).every(event => /cache_versions|quota_usage/.test(event.sql)), 'every statement after the receipt read is the cache re-bump, nothing else')
+      assert.ok(replayMeter.events.length <= 4, 'the replay stays within the receipt read plus one cache bump')
     } else {
       assert.equal(result.status, 400, JSON.stringify(result))
       assert.equal(result.body.code, allocations === 82 ? 'return_too_large' : 'customer_return_over_plan_budget')
@@ -247,9 +251,12 @@ async function main() {
     assert.equal(recovery.raw.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 1)
     const replay = meter(recovery.raw, 50, 10)
     assert.equal((await request(replay.db, '/', recovery.body, recovery.env)).status, 200)
-    assert.equal(replay.events.length, 1)
+    // 6.0.1897 (F3/F8): a replay reads the stored receipt once, then re-advances the return cache namespaces (the first attempt may have died before its own bump).
+    assert.match(replay.events[0].sql, /return_create_receipts/, "the first statement is the stored-receipt read")
+    assert.ok(replay.events.slice(1).every(event => /cache_versions|quota_usage/.test(event.sql)), "every statement after the receipt read is the cache re-bump, nothing else")
+    assert.ok(replay.events.length <= 4, "the replay stays within the receipt read plus one cache bump")
     assert.equal(recovery.raw.prepare('SELECT stock_quantity FROM products WHERE id=10').get().stock_quantity, 1)
-    console.log(`PASS single-attempt ${option}: durable receipt, one-read replay, no duplicate effects`)
+    console.log(`PASS single-attempt ${option}: durable receipt, receipt-read replay with cache re-bump, no duplicate effects`)
   }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })
