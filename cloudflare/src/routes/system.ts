@@ -15,7 +15,7 @@ import { sanitizeMediaList } from '../lib/media'
 import { ensureCoreDataInvariants, dropAllCustomTables, FACTORY_RESET_TABLES, PRODUCTS_RESET_TABLES, presentResetTables, resolveSeedAdminPassword } from '../lib/coreDataInvariants'
 import { createCloudflareBackup, createSectionBackup } from '../lib/backup'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { bumpVersion, bumpVersions } from '../lib/cache'
+import { bumpVersion, bumpVersions, getVersionsWithFallback } from '../lib/cache'
 import { reportError } from '../lib/errorReporting'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -1015,13 +1015,20 @@ app.post('/sale-not-paid-stock-recovery-20260909/apply', async (c) => {
 
   try {
     const result = await recovery.applySaleNotPaidStockRecovery(db, plan)
-    const refreshes = await Promise.allSettled([
-      bumpVersions(c.env, ['sales', 'products', 'audit_log']),
+    // W3 Slice A round 2 (F2): the bump (stock too, this moves stock) is awaited BEFORE the response, and the broadcasts follow it in waitUntil,
+    // so a peer is never told while the old version is still current. bumpVersions never rejects, so "did it work" is read from the version
+    // tokens themselves, before and after (as lib/generalCustomerRepair.ts does).
+    const cacheNamespaces = ['sales', 'products', 'stock', 'audit_log']
+    const readTokens = async () => { try { return await getVersionsWithFallback(c.env, cacheNamespaces) } catch { return null } }
+    const tokensBefore = await readTokens()
+    await bumpVersions(c.env, cacheNamespaces)
+    const tokensAfter = await readTokens()
+    const cacheInvalidated = tokensBefore !== null && tokensAfter !== null && tokensBefore.every((token, index) => token !== tokensAfter[index])
+    const refreshPending = !cacheInvalidated
+    c.executionCtx.waitUntil(Promise.allSettled([
       broadcast(c.env, 'sales', { action: 'update', recovery: recovery.SALE_NOT_PAID_STOCK_RECOVERY_TARGET }),
       broadcast(c.env, 'products', { action: 'update', recovery: recovery.SALE_NOT_PAID_STOCK_RECOVERY_TARGET }),
-    ])
-    const cacheInvalidated = refreshes.slice(0, 1).every((entry) => entry.status === 'fulfilled')
-    const refreshPending = refreshes.some((entry) => entry.status === 'rejected')
+    ]))
     return c.json({
       ...result,
       verification_pending: Boolean(result.verification_pending),
@@ -1466,10 +1473,14 @@ app.post('/repair-integrity', async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>
   const passwordDenied = await denyUnlessCurrentPassword(c, body, 403)
   if (passwordDenied) return passwordDenied
+  // F5: the stock repair commits in its own step, and a later step may still throw. Whatever the outcome, an attempted repair moves the versions
+  // before the answer: bumped on success when it repaired something, and in the catch below when it did not get that far.
+  let bumped = false
   try {
     const result = await runDataIntegrityCheck(c.env, true)
     if (result.repairs > 0) {
       // W1: the repair rewrites stock quantities (and sale return states), so the cache versions every list keys on move now, before the answer.
+      bumped = true
       await bumpVersions(c.env, ['products', 'stock', 'sales'])
       await audit(c.env, user?.id ?? null, actorSnapshot(user), 'repair', 'data-integrity', null, {
         repairs: result.repairs,
@@ -1478,6 +1489,7 @@ app.post('/repair-integrity', async (c) => {
     }
     return c.json({ ...result, success: true })
   } catch (error) {
+    if (!bumped) await bumpVersions(c.env, ['products', 'stock', 'sales'])
     const refusal = productStockGuardError(error)
     if (refusal) return c.json({ success: false, error: refusal.message, code: refusal.code }, 409)
     return c.json({ success: false, error: `Integrity repair failed: ${(error as Error).message}` }, 500)

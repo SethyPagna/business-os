@@ -58,8 +58,8 @@ async function main() {
   const call = ast.statements.find(node => ts.isExpressionStatement(node) && ts.isCallExpression(node.expression)
     && node.expression.arguments[0]?.text === '/repair-integrity').expression
   const callback = call.arguments[1].getText(ast)
-  const route = new Function('hasPermission','denyUnlessRepairPermission','denyUnlessCurrentPassword','runDataIntegrityCheck','productStockGuardError','audit','actorSnapshot', `return ${compile(`const handler = ${callback}`).replace('const handler = ', '').replace(/;\s*$/, '')}`)(
-    () => true, async () => null, async () => null, () => { throw new guard.ProductStockGuardError() }, guard.productStockGuardError, async () => {}, () => null,
+  const route = new Function('hasPermission','denyUnlessRepairPermission','denyUnlessCurrentPassword','runDataIntegrityCheck','productStockGuardError','audit','actorSnapshot','bumpVersions', `return ${compile(`const handler = ${callback}`).replace('const handler = ', '').replace(/;\s*$/, '')}`)(
+    () => true, async () => null, async () => null, () => { throw new guard.ProductStockGuardError() }, guard.productStockGuardError, async () => {}, () => null, async () => {},
   )
   const response = await route({ get: () => ({}), env: {}, req: { json: async () => ({ currentPassword: 'x' }) }, json: (body,status=200) => ({body,status}) })
   assert.equal(response.status,409)
