@@ -1668,17 +1668,18 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number, 
   // 2026: the owner's reference layout has a section for each. They are the
   // SAME kernel entry points routes/reports.ts reads, so the phone message and
   // the Reports hub cannot disagree about a method's takings.
-  // The totals and the payment-method rows read the same window with the same reader: they share one snapshot through the phase memo.
+  // The totals, the payment-method rows and the courier rows read the same window with the same reader: they share ONE snapshot (the one that also carries the
+  // courier-fee rows, which only the courier rows look at) through the phase memo -- the report used to run the two-pass reader twice.
   const [totals, counts, otherExpenses, deliveryFees, reconciliation, payments, couriers] = await Promise.all([
-    getSalesTotals(env, filters, memo),
+    getSalesTotals(env, filters, memo, true),
     shiftInvoiceCounts(env, shift, nowMs),
     // The per-expense rows list only the OTHER fees: the delivery-typed ones
     // are inside the delivery cost row, as composeShiftFigures splits them.
     shiftExpenses(env, shift, nowMs, { overflowLabel, excludeDeliveryFees: true }, memo),
     shiftDeliveryFeeExpenses(env, shift, nowMs),
     loadShiftReconciliationAsClosed(env, shift, nowMs, { overflowLabel, memo }),
-    getPaymentMethodBreakdown(env, filters, memo),
-    getDeliveryContactTotals(env, filters),
+    getPaymentMethodBreakdown(env, filters, memo, true),
+    getDeliveryContactTotals(env, filters, memo),
   ])
   // Every fee and every courier payout, as the drawer was reconciled against
   // them -- the same two inputs loadShiftFigures hands composeShiftFigures.

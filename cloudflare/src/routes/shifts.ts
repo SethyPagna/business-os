@@ -72,7 +72,7 @@ app.use('*', async (c, next) => {
   // allows (N7 -- close and cancel yes, amend and reopen no).
   const replay = async () => {
     const receipt = await db.prepare(`SELECT entity_id, details FROM audit_logs
-      WHERE +user_id=@actor AND action=@action AND json_valid(details)
+      WHERE +user_id = CAST(@actor AS INTEGER) AND action=@action AND json_valid(details)
         AND json_extract(details,'$.request.id')=@requestId ORDER BY id DESC LIMIT 1`)
       .get<{ entity_id: string; details: string }>({ actor: user.id, action: `shift.${action}`, requestId: body.client_request_id })
     if (!receipt) return null

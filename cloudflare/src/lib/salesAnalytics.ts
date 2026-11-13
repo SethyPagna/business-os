@@ -2864,17 +2864,22 @@ export async function getSalesTotalsWithoutLosses(env: Env, f: SalesFilters): Pr
  * promise, is made per phase by the caller and dropped with it (lib/shiftReconciliation.ts ShiftReadMemo is the same Map); nothing is kept across requests.
  */
 export type ReportReadMemo = Map<string, Promise<unknown>>
-function readWindowSnapshot(env: Env, f: SalesFilters, memo?: ReportReadMemo): Promise<SalesReportSnapshot> {
-  if (!memo) return readSalesReportSnapshot(env, f)
-  const key = `report-snapshot|${JSON.stringify(f)}`
+/**
+ * `withDeliveryFees` (wave 3, M9 step 5): the snapshot the delivery-contact breakdown reads is the same two passes plus the window's courier-fee rows, and nothing
+ * that totals or payment methods compute looks at those rows (deliveryFees is consumed only by deliveryContactTotalsFromSnapshot). A phase that prints all three --
+ * the Telegram shift report -- asks for the superset once and the three readers share it, instead of running the two-pass reader twice.
+ */
+function readWindowSnapshot(env: Env, f: SalesFilters & { contactId?: number | string | null }, memo?: ReportReadMemo, withDeliveryFees = false): Promise<SalesReportSnapshot> {
+  if (!memo) return readSalesReportSnapshot(env, f, withDeliveryFees)
+  const key = `report-snapshot|${withDeliveryFees ? 'fees|' : ''}${JSON.stringify(f)}`
   let hit = memo.get(key) as Promise<SalesReportSnapshot> | undefined
-  if (!hit) { hit = readSalesReportSnapshot(env, f); memo.set(key, hit) }
+  if (!hit) { hit = readSalesReportSnapshot(env, f, withDeliveryFees); memo.set(key, hit) }
   return hit
 }
 
-export async function getSalesTotals(env: Env, f: SalesFilters, memo?: ReportReadMemo): Promise<SalesTotals> {
+export async function getSalesTotals(env: Env, f: SalesFilters, memo?: ReportReadMemo, withDeliveryFees = false): Promise<SalesTotals> {
   const [snapshot, loss] = await Promise.all([
-    readWindowSnapshot(env, f, memo),
+    readWindowSnapshot(env, f, memo, withDeliveryFees),
     removalLossesFor(env, f),
   ])
   return withRemovalLosses(salesTotalsFromSnapshot(snapshot), loss)
@@ -3257,8 +3262,8 @@ export function paymentMethodBreakdownFromSnapshot(snapshot: SalesReportSnapshot
   })).sort((a, b) => b.collected_usd - a.collected_usd)
 }
 
-export async function getPaymentMethodBreakdown(env: Env, f: SalesFilters, memo?: ReportReadMemo): Promise<PaymentMethodBreakdownRow[]> {
-  const snapshot = await readWindowSnapshot(env, f, memo)
+export async function getPaymentMethodBreakdown(env: Env, f: SalesFilters, memo?: ReportReadMemo, withDeliveryFees = false): Promise<PaymentMethodBreakdownRow[]> {
+  const snapshot = await readWindowSnapshot(env, f, memo, withDeliveryFees)
   if (snapshot) return paymentMethodBreakdownFromSnapshot(snapshot)
   const db = getDb(env)
   const { sql: whereSql, params } = whereActiveSales('sales', f)
@@ -3378,8 +3383,9 @@ export async function getSalesOverviewBlocks(env: Env, f: SalesFilters): Promise
 export async function getDeliveryContactTotals(
   env: Env,
   f: SalesFilters & { contactId?: number | string | null },
+  memo?: ReportReadMemo,
 ): Promise<DeliveryContactTotalsRow[]> {
-  const snapshot = await readSalesReportSnapshot(env, f, true)
+  const snapshot = await readWindowSnapshot(env, f, memo, true)
   if (snapshot) return deliveryContactTotalsFromSnapshot(snapshot, f)
   const db = getDb(env)
   const { sql: whereSql, params } = whereActiveSales('sales', f)

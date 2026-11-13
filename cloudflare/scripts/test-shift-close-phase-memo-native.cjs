@@ -13,7 +13,7 @@
 //      statement (no PRAGMA table_info for any of the eight); the control without the combined probe issues one PRAGMA per table.
 //   3. N4 RACE: a payment-method re-labelling (settings write) that lands after the figures' first read is caught at commit and the close retries; a mutant that reads
 //      the figures BEFORE the digest (what a memo hoisted above the digest does) commits the STALE figures, and this test goes red on it.
-//   4. RECEIPT: the replay lookup is written `+user_id=@actor`; every stored request id returns the identical receipt as the bare form; the plan is
+//   4. RECEIPT: the replay lookup is written `+user_id = CAST(@actor AS INTEGER)` (M14: the `+` drops the column's integer affinity, the CAST puts the comparison back); every stored request id returns the identical receipt as the bare form; the plan is
 //      idx_audit_logs_action_created (the bare form walks idx_audit_logs_user_created); a request id reused on another shift is still a 409.
 //
 // Run (from cloudflare/): node scripts/test-shift-close-phase-memo-native.cjs
@@ -219,7 +219,7 @@ const normalizeBody = (body) => JSON.stringify(body, (key, value) => (key === 'u
 // ---- the memo-off oracle: the same code, every phase memo made a no-op ---------------------------------------------------------------------------------------
 const MEMO_OFF = {
   'lib/shiftReconciliation.ts': (text) => text.replace('  if (!memo) return load()\n  let hit = memo.get(key)', '  return load()\n  let hit = memo.get(key)'),
-  'lib/salesAnalytics.ts': (text) => text.replace('  if (!memo) return readSalesReportSnapshot(env, f)\n  const key', '  return readSalesReportSnapshot(env, f)\n  const key'),
+  'lib/salesAnalytics.ts': (text) => text.replace('  if (!memo) return readSalesReportSnapshot(env, f, withDeliveryFees)\n  const key', '  return readSalesReportSnapshot(env, f, withDeliveryFees)\n  const key'),
 }
 
 async function main() {
@@ -242,7 +242,7 @@ async function main() {
       assert.ok(a.telegram.length >= 1 && a.telegram.join('').length > 300, `${label}: the report was really sent (${a.telegram.length} message(s))`)
     }
   })
-  await check('PARITY CONTROL: the day is not trivial -- cash, riel, ABA, a later payment, a refund, a removal loss and expenses are all in the figures, and shop-wide differs from per-account', () => {
+  await check('PARITY CONTROL: the day is not trivial -- cash, riel, ABA, a later payment, a refund, a removal loss and expenses are all in the figures, and shop-wide differs from per-account', async () => {
     const per = JSON.parse(results['per-account'].shared.figures)
     const wide = JSON.parse(results['shop-wide'].shared.figures)
     assert.equal(per.reconciliation.cash_sales.usd, 50 + 30 + 7, 'cash $87 = two cash sales + the later payment (the other cashier is not in a per-account drawer)')
@@ -252,8 +252,14 @@ async function main() {
     assert.equal(wide.reconciliation.cash_sales.usd, 87 + 12, 'a shop-wide drawer also holds the other cashier')
     const body = results['per-account'].shared.close.body.shift
     assert.ok(body.figures, 'the administrator close response carries the report figures')
-    assert.ok(Number(body.figures.removal_loss_usd ?? body.figures.removal_loss?.usd ?? 6) >= 0)
-    assert.ok(results['per-account'].shared.telegram.join('\n').includes('6'), 'the removal loss reaches the Telegram text')
+    // M11 (REVIEW-d1-money-2): the control used to read `?? 6 >= 0` and `.includes('6')`, which pass on a close that lost the removal. The seeded removal is 2 x $3 = $6.00:
+    // the figure must BE 6 and the report must carry the Loss row with $6.00 -- and a day without that removal must read 0 and print no Loss row, so both can go red.
+    assert.equal(Number(body.figures.removal_loss_usd), 6, 'the removal loss figure is the seeded $6.00')
+    const lossRow = results['per-account'].shared.telegram.join('\n').split('\n').find((line) => /Loss/.test(line))
+    assert.ok(lossRow && /\$6\.00/.test(lossRow), `the removal loss reaches the Telegram text as a Loss row of $6.00 (${lossRow})`)
+    const without = await runClose(shared, { hook: (f) => f.sql.prepare('DELETE FROM inventory_movements').run() })
+    assert.ok(!Number(without.close.body.shift.figures.removal_loss_usd), 'control: without the removal the figure is 0')
+    assert.ok(!without.telegram.join('\n').split('\n').some((line) => /Loss/.test(line)), 'control: and the report prints no Loss row')
   })
 
   await check('CALLS: the phase memo issues strictly fewer D1 calls on the same close (response + Telegram report in the same invocation); counts are recorded', () => {
@@ -332,9 +338,9 @@ async function main() {
 
   // ---- the replay receipt ------------------------------------------------------------------------------------------------------------------------------------
   const receiptSql = (text) => /json_extract\(details,'\$\.request\.id'\)/.test(text)
-  await check('RECEIPT: the lookup is `+user_id=@actor`; every stored request id returns the identical receipt as the bare form; a request id reused on another shift is a 409', () => withTelegramCaptured(async () => {
+  await check('RECEIPT: the lookup is `+user_id = CAST(@actor AS INTEGER)`; every stored request id returns the identical receipt as the bare form; a request id reused on another shift is a 409', () => withTelegramCaptured(async () => {
     const source = fs.readFileSync(path.join(root, 'src', 'routes', 'shifts.ts'), 'utf8')
-    assert.match(source, /WHERE \+user_id=@actor AND action=@action AND json_valid\(details\)/)
+    assert.match(source, /WHERE \+user_id = CAST\(@actor AS INTEGER\) AND action=@action AND json_valid\(details\)/)
     assert.doesNotMatch(source, /WHERE user_id=@actor AND action=@action/, 'no bare user_id=@actor receipt lookup is left')
     const load = createLoader()
     const shifts = load('routes/shifts.ts').default
@@ -347,8 +353,8 @@ async function main() {
     f.sql.transaction(() => { for (let i = 0; i < 3000; i++) insert.run(i % 7 === 0 ? 'shift.close' : 'sale.update', String(i), JSON.stringify({ request: { id: `rid-${i}`, target: i, canonical: '{}' } })) })()
     const ids = f.sql.prepare("SELECT json_extract(details,'$.request.id') rid FROM audit_logs WHERE action='shift.close'").all().map((r) => r.rid)
     assert.ok(ids.length > 400, `${ids.length} stored request ids`)
-    const plusForm = "SELECT entity_id, details FROM audit_logs WHERE +user_id=@actor AND action=@action AND json_valid(details) AND json_extract(details,'$.request.id')=@requestId ORDER BY id DESC LIMIT 1"
-    const bareForm = plusForm.replace('+user_id', 'user_id')
+    const plusForm = "SELECT entity_id, details FROM audit_logs WHERE +user_id = CAST(@actor AS INTEGER) AND action=@action AND json_valid(details) AND json_extract(details,'$.request.id')=@requestId ORDER BY id DESC LIMIT 1"
+    const bareForm = plusForm.replace('+user_id = CAST(@actor AS INTEGER)', 'user_id=@actor')
     for (const rid of ids) {
       const params = { actor: 1, action: 'shift.close', requestId: rid }
       assert.deepEqual(f.sql.prepare(plusForm).get(params), f.sql.prepare(bareForm).get(params), rid)
@@ -359,7 +365,7 @@ async function main() {
     assert.match(plan(bareForm), /idx_audit_logs_user_created/, `control: the bare form walks the closer's whole trail: ${plan(bareForm)}`)
     // The statement the route really ran is the +user_id form.
     const ran = f.log.find((entry) => receiptSql(entry.sql))
-    assert.ok(ran && /\+user_id=\?\d/.test(ran.sql.replace(/\s+/g, ' ')) || /\+user_id\s*=/.test(ran.sql), 'the route ran the +user_id receipt lookup')
+    assert.ok(ran && /\+user_id = CAST\(\?\d AS INTEGER\)/.test(ran.sql.replace(/\s+/g, ' ')), 'the route ran the +user_id CAST receipt lookup')
     // Replay of the same request: the stored receipt answers, nothing is written twice.
     const replay = await f.call(shifts, `/${id}/close`, { client_request_id: 'req-close-0000000002', expected_revision: revision, closing_counted_usd: 100, closing_counted_khr: 41000 })
     assert.equal(replay.status, 200)
