@@ -182,6 +182,36 @@ function fakeAnalytics(answers) {
     assert.deepStrictEqual(result.shadow.map((r) => [r.route, r.outcome, r.comparisons]), [['periods', 'match', 9]])
   })
 
+  await check('report atomic shadow: one query per whole Cambodia business day, and the flip needs comparisons on every day', async () => {
+    const day = metrics.businessDayWindow({ businessDate: '2026-11-14' })
+    assert.deepStrictEqual([day.start, day.end], ['2026-11-13 17:00:00', '2026-11-14 17:00:00'], 'the whole business day, night hours included')
+    const fake = fakeAnalytics({
+      'report-atomic-shadow': { status: 200, data: [{ day: '2026-11-14 00:00:00', route: 'periods', outcome: 'match', first_diff_path: '', comparisons: '40', served_bytes: '1' }] },
+      'build-revisions': { status: 200, data: [{ revision: 'dev' }] },
+    })
+    const result = await metrics.readMetrics({ fetchImpl: fake.fetchImpl, accountId: ACCOUNT, token: TOKEN, from: '2026-11-14', days: 3 })
+    const shadowCalls = fake.calls.filter((c) => /index1 = 'report_atomic_shadow'/.test(c.init.body))
+    assert.strictEqual(shadowCalls.length, 3, 'one shadow query per day')
+    assert.ok(shadowCalls[0].init.body.includes("timestamp >= toDateTime('2026-11-13 17:00:00') AND timestamp < toDateTime('2026-11-14 17:00:00')"), shadowCalls[0].init.body)
+    assert.deepStrictEqual(result.shadow.map((r) => r.business_date), ['2026-11-14', '2026-11-15', '2026-11-16'])
+    assert.strictEqual(result.shadowSummary.flipReady, true)
+    const w = metrics.tradingWindows('2026-11-14', 3)
+    const row = (date, outcome, n) => ({ business_date: date, outcome, comparisons: String(n) })
+    const clean = [row('2026-11-14', 'match', 50), row('2026-11-15', 'match', 50), row('2026-11-16', 'match', 50)]
+    assert.strictEqual(metrics.summarizeShadow(clean, w).flipReady, true)
+    assert.strictEqual(metrics.summarizeShadow(clean.slice(0, 2), w).flipReady, false, 'a day with no comparisons blocks the flip')
+    assert.strictEqual(metrics.summarizeShadow([], w).flipReady, false, 'no rows is not a pass')
+    assert.strictEqual(metrics.summarizeShadow(clean, w.slice(0, 2)).flipReady, false, 'fewer than 3 days')
+    assert.strictEqual(metrics.summarizeShadow([...clean, row('2026-11-15', 'mismatch', 1)], w).flipReady, false)
+    assert.strictEqual(metrics.summarizeShadow([...clean, row('2026-11-15', 'timeout', 1)], w).error, 1, 'an unknown outcome counts as an error')
+    assert.strictEqual(metrics.summarizeShadow([...clean, row('2026-11-15', 'write_between', 15)], w).flipReady, true, '15 of 165 unjudged is under 10%')
+    assert.strictEqual(metrics.summarizeShadow([...clean, row('2026-11-15', 'refused:too_big', 20)], w).flipReady, false, '20 of 170 unjudged is over 10%')
+    const text = metrics.publicLines({ result }).map(([t, v]) => common.formatPublic(t, v)).join('\n')
+    assert.ok(text.includes('report atomic shadow: 3 of 3 business days compared; comparisons 120, match 120, mismatch 0'), text)
+    assert.ok(text.includes('report atomic flip ready: yes'), text)
+    assert.ok(!text.includes('periods'), 'the public log names no route')
+  })
+
   await check('request-shape and background rows reach the result as numbers and strings; the public log counts them and names nothing', async () => {
     const fake = fakeAnalytics({
       'request-shapes': { status: 200, data: [{ route: '/api/products/search', method: 'GET', shape: 'default', cache: 'miss', requests: '12', rows_read_total: '540000', rows_read_avg: '45000', d1_calls_avg: '11', wall_p95_ms: 'x' }] },
