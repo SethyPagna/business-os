@@ -84,6 +84,7 @@ const {
   pushBackupToDrive,
   driveSyncHasNewBackup,
   driveSyncScheduleDue,
+  disconnectDrive,
 } = moduleObj.exports
 assert.strictEqual(DRIVE_BACKUP_KEEP, 10, 'the user keeps 2 in R2 and 10 in Drive (Part 386)')
 assert.strictEqual(isTrustedDriveUploadSession('https://www.googleapis.com/upload/drive/v3/files?upload_id=ok'), true)
@@ -190,7 +191,7 @@ async function main() {
     assert.strictEqual(result.success, true, result.error)
     assert.strictEqual(result.fileId, 'drive-file')
     assert.strictEqual(listedBackups, 1)
-    assert.strictEqual(settings.get('drive_sync_last_backup_key'), 'backups/cloudflare/final.json', 'a successful sync records which backup Drive now holds')
+    assert.strictEqual(settings.get('drive_sync_last_backup_key'), '|root-folder|backups/cloudflare/final.json', 'a successful sync records which backup Drive now holds, and where (account | folder id)')
     const deleted = calls.filter((call) => call.method === 'DELETE').map((call) => call.url)
     assert.strictEqual(deleted.length, 3, 'the new copy plus twelve finalized app backups must prune to exactly ten')
     assert.ok(deleted.every((url) => !url.includes('unrelated')))
@@ -212,6 +213,20 @@ async function main() {
     assert.deepStrictEqual(await driveSyncScheduleDue(env), { due: false, reason: 'not-due' }, 'checked a moment ago: not due again')
     settings.set('drive_sync_last_checked_at', new Date(Date.now() - 7 * 3600 * 1000).toISOString())
     assert.deepStrictEqual(await driveSyncScheduleDue(env), { due: true }, 'the interval ran from the check and has passed')
+    // F6: the marker belongs to the destination. A different folder, then a different account, is a destination that holds nothing yet.
+    settings.set('drive_sync_folder_id', 'another-folder')
+    assert.deepStrictEqual(await driveSyncHasNewBackup(env), { new: true, backupKey: 'backups/cloudflare/final.json' }, 'a new folder gets the newest backup')
+    settings.set('drive_sync_folder_id', 'root-folder')
+    assert.strictEqual((await driveSyncHasNewBackup(env)).new, false, 'back on the same destination: nothing new')
+    settings.set('drive_sync_account_email', 'other@example.com')
+    assert.strictEqual((await driveSyncHasNewBackup(env)).new, true, 'a different account gets the newest backup')
+    settings.set('drive_sync_account_email', '')
+    await disconnectDrive(env)
+    assert.strictEqual(settings.get('drive_sync_last_backup_key'), '', 'disconnect forgets what Drive was given')
+    assert.strictEqual(settings.get('drive_sync_folder_id'), '')
+    settings.set('drive_sync_folder_id', 'root-folder')
+    assert.strictEqual((await driveSyncHasNewBackup(env)).new, true, 'reconnecting to the same folder after a disconnect uploads again')
+    settings.set('drive_sync_last_backup_key', '|root-folder|backups/cloudflare/final.json')
     newerBackupExists = true
     assert.deepStrictEqual(await driveSyncHasNewBackup(env), { new: true, backupKey: 'backups/cloudflare/newer.json' }, 'the next daily backup is picked up')
     newerBackupExists = false

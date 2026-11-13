@@ -324,6 +324,8 @@ export async function disconnectDrive(env: Env): Promise<void> {
     ['drive_sync_access_token_expires_at', ''],
     ['drive_sync_account_email', ''],
     ['drive_sync_folder_id', ''],
+    ['drive_sync_last_backup_key', ''],
+    ['drive_sync_last_checked_at', ''],
     [DRIVE_SYNC_AUTHORIZED_BY_KEY, ''],
   ])
 }
@@ -410,7 +412,7 @@ export async function pushBackupToDrive(env: Env): Promise<{ success: boolean; e
   if ('error' in tokenResult) return { success: false, error: tokenResult.error }
   const token = tokenResult.token
 
-  const settings = await getSettings(env, ['drive_sync_folder_name', 'drive_sync_folder_id'])
+  const settings = await getSettings(env, ['drive_sync_folder_name', 'drive_sync_folder_id', 'drive_sync_account_email'])
   const folderName = settings.drive_sync_folder_name || DEFAULT_FOLDER_NAME
 
   try {
@@ -428,7 +430,7 @@ export async function pushBackupToDrive(env: Env): Promise<{ success: boolean; e
     const existing = existingFiles.find((file) => file.appProperties?.backupKey === backup.key && file.appProperties?.status === 'finalized')
     if (existing) {
       await pruneDriveBackups(token, existingFiles, DRIVE_BACKUP_KEEP)
-      await setSettings(env, [['drive_sync_last_synced_at', new Date().toISOString()], ['drive_sync_last_backup_key', backup.key], ['drive_sync_last_error', '']])
+      await setSettings(env, [['drive_sync_last_synced_at', new Date().toISOString()], ['drive_sync_last_backup_key', driveSyncMarker(settings.drive_sync_account_email, folderId, backup.key)], ['drive_sync_last_error', '']])
       return { success: true, fileId: existing.id, fileName }
     }
 
@@ -472,7 +474,7 @@ export async function pushBackupToDrive(env: Env): Promise<{ success: boolean; e
     if (uploaded.size && Number(uploaded.size) !== object.size) throw new Error('Google Drive upload size verification failed.')
 
     await pruneDriveBackups(token, [{ id: uploaded.id, appProperties: metadata.appProperties }, ...existingFiles], DRIVE_BACKUP_KEEP)
-    await setSettings(env, [['drive_sync_last_synced_at', new Date().toISOString()], ['drive_sync_last_backup_key', backup.key], ['drive_sync_last_error', '']])
+    await setSettings(env, [['drive_sync_last_synced_at', new Date().toISOString()], ['drive_sync_last_backup_key', driveSyncMarker(settings.drive_sync_account_email, folderId, backup.key)], ['drive_sync_last_error', '']])
     return { success: true, fileId: uploaded.id, fileName }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Google Drive sync failed.'
@@ -526,6 +528,15 @@ export async function driveSyncScheduleDue(env: Env): Promise<{ due: boolean; re
 }
 
 /**
+ * What `drive_sync_last_backup_key` holds: the backup Drive was given AND where (connected account + folder id). A different
+ * account or folder never matches, so a new destination gets the newest backup at once instead of waiting for the next one.
+ * (Disconnect also clears it.)
+ */
+export function driveSyncMarker(accountEmail: unknown, folderId: unknown, backupKey: string): string {
+  return `${trim(accountEmail)}|${trim(folderId)}|${backupKey}`
+}
+
+/**
  * Is there a finalized R2 backup Drive has not been given yet? The scheduled Drive sync runs on its own interval
  * (6 h by default) but the backup is daily, so most visits would find the same backup already mirrored. pushBackupToDrive
  * never re-uploads it (it finds the tagged Drive file), but reaching that point still costs a queue job, a token check, a
@@ -538,8 +549,8 @@ export async function driveSyncHasNewBackup(env: Env): Promise<{ new: boolean; r
   // Nothing to upload: record that the check happened (not a sync: the Backup screen's "last synced" stays the last upload).
   const checked = () => setSettings(env, [['drive_sync_last_checked_at', new Date().toISOString()]])
   if (!newest) { await checked(); return { new: false, reason: 'no-finalized-backup' } }
-  const settings = await getSettings(env, ['drive_sync_last_backup_key'])
-  if (settings.drive_sync_last_backup_key === newest.key) { await checked(); return { new: false, reason: 'already-synced', backupKey: newest.key } }
+  const settings = await getSettings(env, ['drive_sync_last_backup_key', 'drive_sync_account_email', 'drive_sync_folder_id'])
+  if (settings.drive_sync_last_backup_key === driveSyncMarker(settings.drive_sync_account_email, settings.drive_sync_folder_id, newest.key)) { await checked(); return { new: false, reason: 'already-synced', backupKey: newest.key } }
   return { new: true, backupKey: newest.key }
 }
 
