@@ -4,7 +4,7 @@ import type { Env } from '../index'
 import { getPlanLimits } from './planTier'
 import { scheduledBackupCoverageMs, scheduledBackupGate, scheduledBackupNightOf } from './backupSchedule'
 import { copyObject, listObjects } from './r2'
-import { streamBackupEvents } from './backupRestoreStream'
+import { streamBackupEvents, gunzipIfCompressed } from './backupRestoreStream'
 import { assertCustomTableName } from './customTableName'
 import { containsEmbeddedMarkup, judgeStoredMedia, otherMediaContentType } from './uploadSecurity'
 
@@ -628,13 +628,16 @@ export class R2StreamWriter {
 
   async write(text: string): Promise<void> {
     if (!text) return
+    await this.writeBytes(this.encoder.encode(text))
+  }
+
+  async writeBytes(bytes: Uint8Array): Promise<void> {
     // Measured in BYTES, not characters -- R2's part size is bytes, and
     // this payload is full of non-ASCII (Khmer product names, currency
     // symbols) where the two differ by up to 3x. Copying into a byte
     // buffer (rather than counting bytes and joining strings) is what lets
     // a part boundary fall in the middle of a string, or even of a
     // multi-byte character, without changing any part's length.
-    const bytes = this.encoder.encode(text)
     let offset = 0
     while (offset < bytes.byteLength) {
       const take = Math.min(R2_PART_BYTES - this.filled, bytes.byteLength - offset)
@@ -745,6 +748,63 @@ async function copyIntoAssetPool(
   return outcomes
 }
 
+/**
+ * Same interface as R2StreamWriter, but the document is gzip-compressed on its way into the multipart parts. The JSON
+ * manifest is the whole database as text (repetitive keys and values), so it compresses several-fold. Streaming:
+ * CompressionStream is fed row by row and its output is cut into the equal-size R2 parts by the inner writer, so memory
+ * stays at the inner writer's two parts. If the part upload fails, the failure is surfaced to the next write instead of
+ * leaving the compressor's backpressure waiting forever.
+ */
+export class GzipStreamWriter {
+  private readonly compressor = new CompressionStream('gzip')
+  private readonly input = this.compressor.writable.getWriter()
+  private readonly pump: Promise<void>
+  private pumpFailed = false
+  private readonly encoder = new TextEncoder()
+
+  constructor(private readonly inner: R2StreamWriter) {
+    this.pump = (async () => {
+      const reader = this.compressor.readable.getReader()
+      try {
+        for (;;) {
+          const next = await reader.read()
+          if (next.done) break
+          await this.inner.writeBytes(next.value)
+        }
+      } catch (error) {
+        this.pumpFailed = true
+        await reader.cancel(error).catch(() => {}) // errors the writable side so a blocked write() rejects
+        throw error
+      }
+    })()
+    this.pump.catch(() => {}) // observed by finish()/abort()/write()
+  }
+
+  async write(text: string): Promise<void> {
+    if (!text) return
+    if (this.pumpFailed) await this.pump
+    await this.input.write(this.encoder.encode(text))
+  }
+
+  async finish(): Promise<void> {
+    await this.input.close()
+    await this.pump
+    await this.inner.finish()
+  }
+
+  async abort(): Promise<void> {
+    await this.input.abort().catch(() => {})
+    await this.pump.catch(() => {})
+    await this.inner.abort()
+  }
+}
+
+// Gzip the manifest on the paid tier (getPlanLimits(env).backupManifestGzip) when the runtime has
+// CompressionStream. Restore, validate and the Drive stage read both forms either way (gunzipIfCompressed sniffs the bytes).
+function backupManifestGzip(env: Env): boolean {
+  return getPlanLimits(env).backupManifestGzip && typeof CompressionStream === 'function'
+}
+
 export async function createCloudflareBackup(env: Env, source: 'manual' | 'scheduled' = 'manual') {
   return writeBackupDocument(env, { tables: BACKUP_TABLES, includeAssets: true, source })
 }
@@ -851,13 +911,14 @@ async function writeBackupDocument(
 
   const format = 'business-os-cloudflare-backup'
 
+  const gzip = backupManifestGzip(env)
   const upload = await env.ASSETS.createMultipartUpload(key, {
     httpMetadata: { contentType: 'application/json; charset=utf-8' },
     // scope tells a full backup (every table + assets) from a section backup (a reset's or repair's pre-backup: a few tables,
     // no assets). The daily schedule counts only full ones.
-    customMetadata: { source, scope: includeAssets ? 'full' : 'section', createdAt, format, lifecycle: MANAGED_BACKUP_MARKER },
+    customMetadata: { source, scope: includeAssets ? 'full' : 'section', createdAt, format, lifecycle: MANAGED_BACKUP_MARKER, ...(gzip ? { encoding: 'gzip' } : {}) },
   })
-  const writer = new R2StreamWriter(upload)
+  const writer = gzip ? new GzipStreamWriter(new R2StreamWriter(upload)) : new R2StreamWriter(upload)
 
   try {
     // Same document as before, emitted in order rather than assembled.

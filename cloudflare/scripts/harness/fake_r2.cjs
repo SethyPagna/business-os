@@ -45,7 +45,11 @@ function makeFakeR2(seed = {}, { pageLimit = 1000 } = {}) {
     _failGets: failGets,
     _resetOps() { ops.classA = 0; ops.classB = 0; ops.puts = []; ops.gets = []; ops.lists = 0; ops.deletes = 0 },
     _set(key, body, opts) { putObject(key, toBuffer(body), opts) },
-    _text(key) { return store.has(key) ? store.get(key).body.toString('utf8') : null },
+    _text(key) {
+      if (!store.has(key)) return null
+      const body = store.get(key).body
+      return (body[0] === 0x1f && body[1] === 0x8b ? require('node:zlib').gunzipSync(body) : body).toString('utf8')
+    },
     async get(key, options) {
       ops.classB += 1; ops.gets.push(key)
       if (failGets.has(key)) return null

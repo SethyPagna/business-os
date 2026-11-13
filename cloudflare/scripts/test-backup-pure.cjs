@@ -19,6 +19,9 @@
 const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')
+// These fixtures hold R2 bodies as strings and read the manifest back as text, so the writer runs in its plain (non-gzip) form here:
+// the gzip form is covered by test-backup-manifest-gzip-pure.cjs and test-backup-asset-pool-pure.cjs.
+globalThis.CompressionStream = undefined
 const assert = require('assert')
 
 function transpile(relPath) {

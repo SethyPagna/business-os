@@ -174,6 +174,11 @@ export type PlanLimits = {
   // is given up and the image audit gets the ticks. Same on both tiers; the next night starts fresh.
   scheduledBackupMaxAttemptsPerDay: number
 
+  // Gzip the backup manifest (the whole database as JSON) while it streams into R2: several-fold smaller, so the kept backups
+  // fit R2's free storage. Compression is native zlib CPU, which Paid's cpu_ms covers and Free's 10 ms does not: Paid only.
+  // Restore, validate and the Drive stage read plain and gzip manifests alike.
+  backupManifestGzip: boolean
+
   // While tonight's set is still copying in the queue, the backup step only POLLS it. After a poll the next heavy tick goes to the
   // image audit unless this many minutes have passed, so a copy that never finishes (up to 24 h) polls about every other tick
   // instead of starving the audit. 240 = more than one 3 h heavy tick, less than two.
@@ -475,6 +480,7 @@ const PAID_LIMITS: PlanLimits = {
   scheduledBackupAfterHourLocal: 21,
   scheduledBackupKeep: 7,
   scheduledBackupMaxAttemptsPerDay: 2,
+  backupManifestGzip: true,
   scheduledBackupCopyPollGapMinutes: 240,
   scheduledBackupStaleHours: 30,
   maxImageDeletesPerReset: 500,
@@ -532,6 +538,7 @@ const FREE_LIMITS: PlanLimits = {
   scheduledBackupAfterHourLocal: 21,
   scheduledBackupKeep: 7,
   scheduledBackupMaxAttemptsPerDay: 2,
+  backupManifestGzip: false,
   scheduledBackupCopyPollGapMinutes: 240,
   scheduledBackupStaleHours: 30,
   maxImageDeletesPerReset: 40,

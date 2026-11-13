@@ -47,7 +47,10 @@ async function main() {
       const result = input.full
         ? await createCloudflareBackup(env, 'scheduled')
         : await createSectionBackup(env, input.tables || ${JSON.stringify(TABLES)});
-      const text = await (await bindings.ASSETS.get(result.key)).text();
+      // The manifest is gzip on the paid tier (real CompressionStream here); read either form.
+      const bytes = new Uint8Array(await (await bindings.ASSETS.get(result.key)).arrayBuffer());
+      const gzip = bytes[0] === 0x1f && bytes[1] === 0x8b;
+      const text = gzip ? await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text() : new TextDecoder().decode(bytes);
       return Response.json({ text, reads, writes, pages });
     }}
   ` }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'] })

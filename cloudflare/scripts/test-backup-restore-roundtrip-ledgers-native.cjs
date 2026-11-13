@@ -54,7 +54,10 @@ async function main() {
       const env = { ...bindings, BACKUP_QUEUE: undefined };
       if (input.mode === 'backup') {
         const result = await createCloudflareBackup(env, 'manual');
-        return Response.json({ key: result.key, text: await (await bindings.ASSETS.get(result.key)).text() });
+        // gzip on the paid tier (real CompressionStream here); read either form
+        const bytes = new Uint8Array(await (await bindings.ASSETS.get(result.key)).arrayBuffer());
+        const text = bytes[0] === 0x1f && bytes[1] === 0x8b ? await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text() : new TextDecoder().decode(bytes);
+        return Response.json({ key: result.key, text });
       }
       let error = null;
       try { await restoreCloudflareBackup(env, input.key, undefined, input.token) } catch (e) { error = e.message }
