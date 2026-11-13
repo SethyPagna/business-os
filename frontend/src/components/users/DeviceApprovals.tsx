@@ -387,6 +387,14 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
   const heldByApproved = (device: TrustedDeviceRecord) => device.status === 'pending' && (device.shared_with || []).some((other) => other.status === 'approved')
   const canMarkShop = (device: TrustedDeviceRecord) => !heldByApproved(device) && (Boolean(device.cookie_bound_at) || (device.shared_with || []).some((other) => other.bound))
   // Why the shop button is grey, in words a touch screen can show: an old waiting request is never bound by signing in, so it is approved first.
+  // One source for the visible line, the button's title and its accessible description, so the three never disagree about the card's state.
+  const markReason = (device: TrustedDeviceRecord) => heldByApproved(device)
+    ? tr(t, 'shop_device_held', 'Another account already has this device approved, so this request may be a copy. Decline it, or mark the approved device instead.')
+    : device.status === 'pending'
+      ? tr(t, 'shop_device_unbound_pending', 'To mark this as a shop device: approve the request, sign in on the device once, then mark it.')
+      : tr(t, 'shop_device_unbound', 'Sign in on this device once, then mark it as a shop device.')
+  const markHintDomId = (device: TrustedDeviceRecord) => `device-mark-hint-${device.id}`
+  const markHintShown = (device: TrustedDeviceRecord, showMarkHint: boolean) => showMarkHint && !canMarkShop(device) && !device.claimed_approval_ref
   const renderDeviceMeta = (device: TrustedDeviceRecord, showMarkHint = false) => (
     <div className="min-w-0">
       <div className="detail-scroll-text text-sm font-semibold text-gray-900 dark:text-white">
@@ -408,13 +416,10 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
           {tr(t, 'device_also_here', 'Also on this device')}: {device.shared_with.map((other) => `${other.name} (${other.status === 'approved' ? tr(t, 'approved', 'Approved') : tr(t, 'pending', 'pending')})`).join(', ')}
         </div>
       ) : null}
-      {showMarkHint && !canMarkShop(device) && !device.claimed_approval_ref ? (
-        <div className="mt-1 detail-scroll-text text-xs text-gray-500 dark:text-gray-400">
-          {heldByApproved(device)
-            ? tr(t, 'shop_device_held', 'Another account already has this device approved, so this request may be a copy. Decline it, or mark the approved device instead.')
-            : device.status === 'pending'
-              ? tr(t, 'shop_device_unbound_pending', 'To mark this as a shop device: approve the request, sign in on the device once, then mark it.')
-              : tr(t, 'shop_device_unbound', 'Sign in on this device once, then mark it as a shop device.')}
+      {!canMarkShop(device) && !device.claimed_approval_ref ? (
+        // The live region is on the card from first paint (empty), so the line that appears when the button is pressed is announced.
+        <div id={markHintDomId(device)} aria-live="polite" className={markHintShown(device, showMarkHint) ? 'mt-1 detail-scroll-text text-xs text-gray-500 dark:text-gray-400' : undefined}>
+          {markHintShown(device, showMarkHint) ? markReason(device) : null}
         </div>
       ) : null}
       {device.claimed_approval_ref ? (
@@ -483,7 +488,8 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                       disabled={busyId === device.id}
                       aria-disabled={!canMarkShop(device)}
                       className={`btn-secondary px-2 py-1.5 text-xs${canMarkShop(device) ? '' : ' opacity-50'}`}
-                      title={canMarkShop(device) ? tr(t, 'shop_device_mark', 'Mark as shop device') : tr(t, 'shop_device_unbound', 'Sign in on this device once, then mark it as a shop device.')}
+                      title={canMarkShop(device) ? tr(t, 'shop_device_mark', 'Mark as shop device') : markReason(device)}
+                      aria-describedby={markHintShown(device, markHintId === device.id) ? markHintDomId(device) : undefined}
                       aria-label={tr(t, 'shop_device_mark', 'Mark as shop device')}
                       onClick={() => pressMarkShop(device)}
                     >
@@ -562,7 +568,8 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                               disabled={busyId === device.id}
                               aria-disabled={!canMarkShop(device)}
                               className={`btn-secondary px-2 py-1 text-xs${canMarkShop(device) ? '' : ' opacity-50'}`}
-                              title={canMarkShop(device) ? tr(t, 'shop_device_mark', 'Mark as shop device') : tr(t, 'shop_device_unbound', 'Sign in on this device once, then mark it as a shop device.')}
+                              title={canMarkShop(device) ? tr(t, 'shop_device_mark', 'Mark as shop device') : markReason(device)}
+                              aria-describedby={markHintShown(device, markHintId === device.id) ? markHintDomId(device) : undefined}
                               aria-label={tr(t, 'shop_device_mark', 'Mark as shop device')}
                               onClick={() => pressMarkShop(device)}
                             >

@@ -87,5 +87,33 @@ try {
   assert.equal(count(held.text, HELD_HINT), 1, 'a request held by another approval says it may be a copy')
   assert.equal(count(held.text, PENDING_HINT), 0, 'and is not told to approve first')
   assert.equal(held.dialog, false, 'and no dialog opens')
+  // N-3: the dimmed button's title (desktop hover, accessible description) states the reason for THAT card's state, never another state's.
+  const titleOf = (devices: TrustedDeviceRecord[]) => inspect(devices, [], (surface) => String(propsOf(markButtons(surface)[0]).title))
+  assert.ok((await titleOf([row(9, 'pending', dara(true))])).startsWith(HELD_HINT), 'a held request titles itself with the held text')
+  const pendingTitle = await titleOf([row(1, 'pending')])
+  assert.ok(pendingTitle.includes(PENDING_HINT), 'an old waiting request titles itself approve first, then sign in once')
+  assert.ok(!pendingTitle.includes(APPROVED_HINT), 'and not with the approved-device text')
+  assert.equal(await titleOf([row(2, 'approved')]), APPROVED_HINT, 'an unbound approved device titles itself sign in once')
+  assert.equal(await titleOf([row(4, 'approved', { cookie_bound_at: BOUND })]), 'Mark as shop device', 'a device that can be marked says what the button does')
+  for (const word of ['cookie', 'masked', 'hidden']) for (const text of [HELD_HINT, PENDING_HINT, APPROVED_HINT]) assert.ok(!text.toLowerCase().includes(word), `no "${word}" wording`)
+
+  // The line revealed on press is announced (a live region that is on the card from first paint) and linked to the button that was pressed.
+  const live = await inspect([row(1, 'pending'), row(2, 'approved')], [], async (surface) => {
+    const regions = () => surface.findAll((node) => propsOf(node)['aria-live'] === 'polite')
+    const before = { regions: regions().length, described: markButtons(surface).map((b) => propsOf(b)['aria-describedby']) }
+    await surface.click(markButtons(surface)[0])
+    const after = markButtons(surface).map((b) => propsOf(b)['aria-describedby'])
+    const target = regions().find((node) => propsOf(node).id === after[0])
+    return { before, after, targetText: target ? accessibleText(target) : null, ids: regions().map((node) => propsOf(node).id) }
+  })
+  assert.equal(live.before.regions, 2, 'each card that cannot be marked carries its live region from first paint')
+  assert.deepEqual(live.before.described, [undefined, undefined], 'nothing is described before a press')
+  assert.ok(typeof live.after[0] === 'string' && live.after[0].length > 0, 'the pressed button points at its hint')
+  assert.equal(live.after[1], undefined, 'the other button points at nothing')
+  assert.ok(live.ids.includes(live.after[0]), 'and the hint element exists with that id')
+  assert.ok(String(live.targetText).includes(PENDING_HINT), 'the described element holds the hint text')
+  assert.equal(new Set(live.ids).size, live.ids.length, 'the ids are unique per card')
+  // Keyboard reachable: aria-disabled, never the disabled attribute, so it takes focus and Enter/Space reveals the hint.
+  assert.equal(await inspect([row(1, 'pending')], [], (surface) => propsOf(markButtons(surface)[0]).disabled), false, 'the dimmed button stays focusable')
   console.log('PASS mounted DeviceApprovals mark hint: nothing on first paint, the reason under the pressed card, right order per card state')
 } finally { await harness.close() }
