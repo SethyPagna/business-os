@@ -191,4 +191,7 @@ SELECT
     'fee_types', (SELECT COUNT(*) FROM fee_types),
     'fee_labels', (SELECT COUNT(*) FROM fee_labels),
     'shop_devices', (SELECT COUNT(*) FROM shop_devices)
-  ) AS rows_10;
+  ) AS rows_10,
+  json_object(
+    'telegram_shift_report_sends', (SELECT COUNT(*) FROM telegram_shift_report_sends)
+  ) AS rows_11;
