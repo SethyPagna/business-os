@@ -5,6 +5,9 @@
 // {{stockKey}} and {{checkId}} are resolved against the seeded world just before the measured request.
 const slug = (label) => label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 90)
 
+// The ids a till sends as rankIds: n distinct product ids of the seed (1000..8999), spread like a search's hits, with the tier digits the core assigns.
+const rankedQuery = (n) => `rankIds=${Array.from({ length: n }, (_, i) => 1000 + (i * 29) % 8000).join(',')}&rankTiers=${Array.from({ length: n }, (_, i) => i % 4).join('')}`
+
 function getEntries(ctx) {
   const T = ctx.today, M = ctx.month, W = ctx.week, Y = ctx.year
   const R = (s, e) => `startDate=${s}&endDate=${e}`
@@ -197,6 +200,15 @@ function getEntries(ctx) {
     ['products/stock-ledger all time In view page 1 (ledger_keyset ON)', `/api/products/stock-ledger?page=1&pageSize=25&view=in`, { switches: ['ledger_keyset'] }],
     ['products/stock-ledger all time In view page 1 (ledger_keyset and ledger_summary_lean ON)', `/api/products/stock-ledger?page=1&pageSize=25&view=in`, { switches: ['ledger_keyset', 'ledger_summary_lean'] }],
     ['products/stock-ledger month window page 1 (ledger_summary_lean ON)', `/api/products/stock-ledger?${P}&${R(M, T)}`, { switches: ['ledger_summary_lean'] }],
+    // Slice C S1: the till's typed search as the POS sends it (30 a page, rankIds best first). OFF is the statement every read runs today; ON (products_typed_order_js) orders the families in the Worker.
+    // Page 16 of 1,500 ids is the deepest page the till reaches. The five shapes are the numbers the typed-order flip is judged on.
+    ['products/search rankIds 300 ids POS page 1 (typed order OFF)', `/api/products/search?page=1&pageSize=30&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots&${rankedQuery(300)}`],
+    ['products/search rankIds 1500 ids POS page 1 (typed order OFF)', `/api/products/search?page=1&pageSize=30&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots&${rankedQuery(1500)}`],
+    ['products/search rankIds 1500 ids POS page 16 (typed order OFF)', `/api/products/search?page=16&pageSize=30&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots&${rankedQuery(1500)}`],
+    ['products/search rankIds 300 ids POS page 1 (products_typed_order_js ON)', `/api/products/search?page=1&pageSize=30&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots&${rankedQuery(300)}`, { switches: ['products_typed_order_js'] }],
+    ['products/search rankIds 1500 ids POS page 16 (products_typed_order_js ON)', `/api/products/search?page=16&pageSize=30&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots&${rankedQuery(1500)}`, { switches: ['products_typed_order_js'] }],
+    // Slice C S3: a cold dashboard open whose stock overview is COMPUTED in the request (dash_overview_5m taken out of the pass: no cached overview to hit), so the statement that reads the stock is in the fingerprint.
+    ['dashboard/startup today (stock overview computed, dash_overview_5m off)', `/api/dashboard/startup?${R(T, T)}&granularity=day`, { without: ['dash_overview_5m'] }],
   ]
 }
 

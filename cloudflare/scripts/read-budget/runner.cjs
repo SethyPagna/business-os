@@ -85,7 +85,7 @@ const withSwitches = (names, url, without = []) => ({ prepare: (world) => world.
 
 async function measureGet(world, shape, { cold = true, statements = false, fingerprints = false } = {}) {
   const url = await resolveUrl(world, shape.url)
-  const probe = { method: 'GET', url, anon: shape.anon, ...(shape.switches ? withSwitches(shape.switches, url) : {}) }
+  const probe = { method: 'GET', url, anon: shape.anon, ...(shape.switches || shape.without ? withSwitches(shape.switches || [], url, shape.without || []) : {}) }
   const out = { url }
   if (cold) out.cold = await runShape(world, probe, { cold: true })
   out.warm = await runShape(world, probe, { cold: false, fingerprints })
@@ -130,7 +130,7 @@ async function pinProblems(world, entry, statements) {
 function switchFence() {
   let read = ''
   return async (world, shape) => {
-    const wanted = (shape.switches || []).join(',')
+    const wanted = (shape.switches || []).join(',') + (shape.without ? '-' + shape.without.join(',') : '')
     if (wanted === read) return
     await world.restart(); await world.login()
     read = wanted
