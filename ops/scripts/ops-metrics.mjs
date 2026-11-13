@@ -11,7 +11,7 @@ import {
 } from './ops-common.mjs'
 
 export const METRICS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'metrics')
-export const QUERY_NAMES = Object.freeze(['route-latency', 'route-errors', 'build-revisions', 'request-shapes', 'background-runs'])
+export const QUERY_NAMES = Object.freeze(['route-latency', 'route-errors', 'build-revisions', 'request-shapes', 'background-runs', 'report-atomic-shadow'])
 export const MIN_ROWS_FOR_P95 = 100
 export const MAX_DAYS = 7
 // The shop trades 08:00-20:00 in Cambodia (UTC+7); deploys fall outside. The cron runs every 5 and every 15 minutes
@@ -94,7 +94,7 @@ const number = (value) => {
   return Number.isFinite(n) ? n : null
 }
 
-const rowsOf = (list) => list.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, /^(route|method|shape|cache|label|status|day)$/.test(key) ? String(value) : number(value)])))
+const rowsOf = (list) => list.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, /^(route|method|shape|cache|label|status|day|outcome|first_diff_path)$/.test(key) ? String(value) : number(value)])))
 
 const normalizeRoute = (route) => (String(route).length > 1 ? String(route).replace(/\/+$/, '') : String(route))
 
@@ -179,6 +179,7 @@ export async function readMetrics({ fetchImpl, accountId, token, from, days, rev
     builds,
     shapes: rowsOf(rows['request-shapes']),
     background: rowsOf(rows['background-runs']),
+    shadow: rowsOf(rows['report-atomic-shadow']),
     queries,
   }
 }
