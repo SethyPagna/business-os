@@ -4,7 +4,8 @@
 // A family is the first path segment after /api/ in camelCase (import-jobs -> importJobs). The notification bell is not
 // listed under any stock reader: it polls on its own cadence and a refetch after every sale would cost more than it shows.
 // Every family a mutating call can reach must be a key here; tests/writeInvalidation.test.ts fails on a new /api family
-// nobody classified, and a mutation to an unmapped family clears every cached read rather than leaving one stale.
+// nobody classified, tests/readChannelCoverage.test.ts fails on a stock or money read channel no write family clears, and a
+// mutation to an unmapped family clears every cached read rather than leaving one stale.
 
 // What a product row shows (stock, price, promotion price): the product reads a stock move or a price rule changes.
 const PRODUCT_READS = ['products:search', 'products:bootstrap', 'products:byIds', 'products:get']
