@@ -8,7 +8,7 @@ import { BUSINESS_TZ_FORWARD, BUSINESS_UTC_OFFSET_MINUTES, localTodayExpr } from
 import { parseContinuousReadWindow, continuousReadWindowSql } from '../lib/continuousReadWindow'
 import { hasAnyPermission, isAdminControlUser } from '../lib/permissions'
 import { getPlanLimits } from '../lib/planTier'
-import { loadTelegramConfig, scheduleTelegramShiftOverview, scheduleTelegramShiftReport, sendTelegramShiftReport, sendTelegramStaleShiftAlert, type ShiftReportAction, type ShiftReportOptions } from '../lib/telegram'
+import { loadTelegramConfig, scheduleTelegramShiftOverview, scheduleTelegramShiftReport, sendTelegramShiftReport, sendTelegramStaleShiftAlert, type ShiftReportAction, type ShiftReportOptions, type ShiftReportSession } from '../lib/telegram'
 import { firstCharacters } from '../lib/telegramLang'
 import {
   loadShiftCloseDrift, loadShiftCloseFigures, loadShiftFigures, loadShiftReconciliation, parseShiftCloseFigures,
@@ -1255,9 +1255,10 @@ app.get('/:id/history', async (c) => {
  * the way it always did, from this invocation. The clock reading and the actor names ride with the row so the text is the one
  * this route would have sent.
  */
-function announceShiftReport(c: { env: Env; executionCtx: { waitUntil(promise: Promise<unknown>): void } }, shift: { id: number; revision: number }, action: ShiftReportAction, options?: ShiftReportOptions, config?: ReturnType<typeof loadTelegramConfig>): void {
+function announceShiftReport(c: { env: Env; executionCtx: { waitUntil(promise: Promise<unknown>): void } }, shift: { id: number; revision: number } & Partial<ShiftReportSession>, action: ShiftReportAction, options?: ShiftReportOptions, config?: ReturnType<typeof loadTelegramConfig>): void {
   const nowMs = Date.now()
-  const work = scheduleTelegramShiftReport(c.env, shift.id, shift.revision, action, nowMs, options, config)
+  // The row the write read back rides with the report (a bare id and revision, when the write could not read it, rides as nothing): the message is built from THAT row.
+  const work = scheduleTelegramShiftReport(c.env, shift.id, shift.revision, action, nowMs, options, config, shift)
     .then((outcome) => (outcome === 'unavailable' ? sendTelegramShiftReport(c.env, shift.id, nowMs, options) : undefined))
   try { c.executionCtx.waitUntil(work) } catch { void work }
 }

@@ -188,7 +188,7 @@ async function seededDay(shifts, { shopWide = false, hours = 8, telegramOn = tru
   return { f, id, revision: opened.body.shift.revision }
 }
 
-async function runClose(load, { shopWide = false, requestId = 'req-close-0000000001', hook, hours = 8, telegramOn = true, refuse = 0 } = {}) {
+async function runClose(load, { shopWide = false, requestId = 'req-close-0000000001', hook, hours = 8, telegramOn = true, refuse = 0, afterClose } = {}) {
   const shifts = load('routes/shifts.ts').default
   const { f, id, revision } = await seededDay(shifts, { shopWide, hours, telegramOn })
   load('lib/schemaProbe.ts').__resetSchemaProbeCacheForTests()
@@ -204,6 +204,8 @@ async function runClose(load, { shopWide = false, requestId = 'req-close-0000000
       return response
     })
     closeCalls = f.calls
+    // A write that lands between the close and the queue's delivery (seconds on the queue, minutes on the cron): the report must still say what the close said.
+    if (afterClose) { await withFixedClock(async () => { await afterClose(f, shifts, id); await Promise.all(f.background); f.background.length = 0 }); f.sql.exec("UPDATE telegram_shift_report_sends SET status = 'skipped' WHERE send_key NOT LIKE '%:close'") }
     // The queue consumer's invocation: a cold isolate, the recorded row, the shared clock reading.
     const row = f.sql.prepare("SELECT send_key FROM telegram_shift_report_sends WHERE status = 'pending' AND send_key LIKE '%:close'").get()
     if (row) {
@@ -246,6 +248,38 @@ const SCENARIOS = [
   } },
   { name: 'removals in four timestamp formats', hook: (f) => {
     insertMovement(f, isoZ(50)); insertMovement(f, sqlTime(51)); insertMovement(f, isoZ(52).replace('Z', '+07:00')); insertMovement(f, sqlTime(53).slice(0, 10))
+  } },
+  { name: 'R1 riel cash rounded to 100 (sale, change, refund rounded down, riel expense)', hook: (f) => {
+    f.sql.prepare(`INSERT INTO sales(id,receipt_number,sale_status,branch_id,branch_name,cashier_id,cashier_name,payment_method,payment_details,payment_currency,exchange_rate,amount_paid_usd,amount_paid_khr,change_usd,change_khr,total_usd,total_khr,created_at,updated_at,payments_version)
+      VALUES (30,'R-RIEL-RND','completed',1,'Shop',7,'cashier','Cash',?,'KHR',4100,0,50000,0,7500,10.37,42500,?,'v1',0)`).run(JSON.stringify([{ method: 'Cash', amount_usd: 0, amount_khr: 50000 }]), sqlTime(21))
+    f.sql.prepare(`INSERT INTO returns(id,return_number,sale_id,receipt_number,cashier_id,cashier_name,branch_id,branch_name,reason,total_refund_usd,total_refund_khr,exchange_rate,status,created_at,refund_currency)
+      VALUES (3,'RT3',30,'R-RIEL-RND',7,'cashier',1,'Shop','riel',1.99,8100,4100,'completed',?,'KHR')`).run(sqlTime(37))
+    f.sql.prepare("INSERT INTO fees(id, created_at, fee_date, branch_id, fee_type, label, amount_usd, amount_khr, created_by) VALUES (9903, ?, '2026-10-20', 1, 'other', 'Riel', 0, 4100, 7)").run(sqlTime(43))
+  } },
+  { name: 'R2 exchange with riel refund (return + replacement sale)', hook: (f) => {
+    f.sql.prepare(`INSERT INTO returns(id,return_number,sale_id,receipt_number,cashier_id,cashier_name,branch_id,branch_name,reason,total_refund_usd,total_refund_khr,exchange_rate,status,created_at,refund_currency)
+      VALUES (4,'RT4',2,'R-CASH-30',7,'cashier',1,'Shop','exchange',0,4100,4100,'completed',?,'KHR')`).run(sqlTime(38))
+    f.sql.prepare(`INSERT INTO sales(id,receipt_number,sale_status,branch_id,branch_name,cashier_id,cashier_name,payment_method,payment_details,payment_currency,exchange_rate,amount_paid_usd,amount_paid_khr,change_usd,change_khr,total_usd,total_khr,created_at,updated_at,payments_version,source_return_id)
+      VALUES (31,'R-EXCH','completed',1,'Shop',7,'cashier','Cash',?,'USD',4100,4,0,0,0,4,0,?,'v1',0,4)`).run(JSON.stringify([{ method: 'Cash', amount_usd: 4, amount_khr: 0 }]), sqlTime(39))
+  } },
+  { name: 'R3 later payments taken in ANOTHER shift (other cashier in-window; before open)', hook: (f) => {
+    f.sql.prepare(`INSERT INTO sale_payment_events(event_id,sale_id,direction,origin,payment_method,payment_details,amount_paid_usd,exchange_rate,received_at,branch_id,cashier_id,cashier_name,created_at)
+      VALUES ('ev-other-1',1,'in','late_record','Cash',?,3,4100,?,1,8,'other cashier',?)`).run(JSON.stringify([{ method: 'Cash', amount_usd: 3, amount_khr: 0 }]), sqlTime(55), sqlTime(55))
+    const before = new RealDate(OPENED.getTime() - 3600e3).toISOString().replace('T', ' ').slice(0, 19)
+    f.sql.prepare(`INSERT INTO sale_payment_events(event_id,sale_id,direction,origin,payment_method,payment_details,amount_paid_usd,exchange_rate,received_at,branch_id,cashier_id,cashier_name,created_at)
+      VALUES ('ev-prev-2',2,'in','late_record','ABA',?,2,4100,?,1,7,'cashier',?)`).run(JSON.stringify([{ method: 'ABA', amount_usd: 2, amount_khr: 0 }]), before, before)
+  } },
+  { name: 'R3b same, shop-wide', shopWide: true, hook: (f) => {
+    f.sql.prepare(`INSERT INTO sale_payment_events(event_id,sale_id,direction,origin,payment_method,payment_details,amount_paid_usd,exchange_rate,received_at,branch_id,cashier_id,cashier_name,created_at)
+      VALUES ('ev-other-1',1,'in','late_record','Cash',?,3,4100,?,1,8,'other cashier',?)`).run(JSON.stringify([{ method: 'Cash', amount_usd: 3, amount_khr: 0 }]), sqlTime(55), sqlTime(55))
+  } },
+  { name: 'R4 a sale in the window cancelled after the close, before the queue delivers', drawerOnly: true, afterClose: async (f) => {
+    f.sql.prepare("UPDATE sales SET sale_status = 'cancelled' WHERE id = 2").run()
+  } },
+  { name: 'R5 the shift amended (recount) seconds after the close, before the queue delivers', afterClose: async (f, shifts, id) => {
+    const rev = f.sql.prepare('SELECT revision FROM shift_sessions WHERE id = ?').get(id).revision
+    const r = await f.call(shifts, '/' + id, { reason: 'recount', expected_revision: rev, closing_counted_usd: 99 }, 'PATCH')
+    if (r.status !== 200) throw new Error('amend ' + JSON.stringify(r.body))
   } },
 ]
 
@@ -328,7 +362,7 @@ async function main() {
   const head = createLoader()
   const runs = []
   for (const scenario of SCENARIOS) {
-    const options = { shopWide: scenario.shopWide, hours: scenario.hours, telegramOn: scenario.telegramOn, hook: scenario.hook }
+    const options = { shopWide: scenario.shopWide, hours: scenario.hours, telegramOn: scenario.telegramOn, hook: scenario.hook, afterClose: scenario.afterClose }
     const requestId = 'req-close-0000000001'
     const oldRun = await runClose(base, { ...options, requestId })
     const newRun = await runClose(head, { ...options, requestId, refuse: 50 })
@@ -349,9 +383,31 @@ async function main() {
       assert.equal(newRun.close.status, 200, `${scenario.name}: ${JSON.stringify(newRun.close.body)}`)
       assert.equal(normalizeBody(newRun.close.body), normalizeBody(oldRun.close.body), `${scenario.name}: the close response`)
       assert.equal(newRun.figures, oldRun.figures, `${scenario.name}: shift_close_figures.figures_json`)
-      assert.equal(texts(newRun), texts(oldRun), `${scenario.name}: the Telegram report text`)
+      if (scenario.drawerOnly) continue // the sales-side lines of a write that lands after the close are checked below
+      // The base sent the close message AND (where the scenario amends) the amend message inline; the queued path sends the close message, the amend is retired by the harness.
+      if (scenario.afterClose) assert.equal(scrub(newRun.telegram[0]), scrub(oldRun.telegram[0]), `${scenario.name}: the CLOSE message`)
+      else assert.equal(texts(newRun), texts(oldRun), `${scenario.name}: the Telegram report text`)
       assert.equal(newRun.telegram.length > 0, scenario.telegramOn !== false, `${scenario.name}: the report was sent exactly when Telegram is on`)
     }
+  })
+  await check('AS OF THE CLOSE (REVIEW-w3-shift F3): a recount amended before the queue delivers does not change what the close message says it closed on ($100, as the base printed)', () => {
+    const r5 = runs.find(({ scenario }) => scenario.name.startsWith('R5'))
+    assert.match(r5.oldRun.telegram[0], /Closing cash[^\n]*\$100\.00/, 'the base printed the counted $100')
+    assert.doesNotMatch(r5.oldRun.telegram[0], /\$99\.00/)
+    assert.match(r5.newRun.telegram[0], /Closing cash[^\n]*\$100\.00/, 'the queued close message prints the counted $100')
+    assert.doesNotMatch(r5.newRun.telegram[0], /\$99\.00/, 'and not the amended $99')
+    const payload = JSON.parse(r5.newRun.f.sql.prepare("SELECT payload_json FROM telegram_shift_report_sends WHERE send_key LIKE '%:close'").get().payload_json)
+    assert.equal(payload.shift.closing_counted_usd, 100, 'the shift row as the close read it back rides in the payload')
+    assert.ok(payload.shift.closed_at, 'with its closed_at')
+  })
+  await check('AS OF THE CLOSE: a sale cancelled after the close leaves the drawer block (Cash count, Expenses, Delivery) as the base printed it; only the sales-kernel sections (Invoices, Sales, Payment methods) read the later state', () => {
+    const r4 = runs.find(({ scenario }) => scenario.name.startsWith('R4'))
+    const sections = (text) => { const out = {}; let section = ''; for (const line of scrub(text).split('\n')) { if (/^=+[^=]+=+$/.test(line.trim())) { section = line.replace(/=/g, '').trim(); out[section] = [] } else (out[section] ||= []).push(line) } return out }
+    const [was, now] = [sections(r4.oldRun.telegram[0]), sections(r4.newRun.telegram[0])]
+    const drift = Object.keys({ ...was, ...now }).filter((name) => JSON.stringify(was[name]) !== JSON.stringify(now[name]))
+    assert.ok(drift.length > 0, 'CONTROL: the later cancel is visible somewhere (the sales side is not frozen)')
+    for (const name of drift) assert.match(name, /^(Invoices|Sales|Payment methods|Delivery)/, `the drawer section "${name}" differs from what the base printed at the close`)
+    for (const name of Object.keys(was).filter((n) => /^(Cash count|Expenses)/.test(n))) assert.deepEqual(now[name], was[name], `"${name}" is as the close printed it`)
   })
   await check('ORACLE CONTROL: the days are not trivial -- the reports are long, the scenarios differ from each other, and the figures carry the seeded money', () => {
     for (const { scenario, newRun } of runs.filter((r) => r.scenario.telegramOn !== false)) assert.ok(newRun.telegram.join('').length > 300, scenario.name)

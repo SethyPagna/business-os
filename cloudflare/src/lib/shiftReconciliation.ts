@@ -1216,9 +1216,11 @@ export function diffShiftSaleTenders(stored: ShiftSaleTender[], current: ShiftSa
  * (history is immutable), every other shift the live figures. The in-app report shows the stored close the same way.
  */
 export async function loadShiftReconciliationAsClosed(
-  env: Env, shift: ShiftReconciliationSession, nowMs: number, options: { overflowLabel?: string; extraReviewCodes?: readonly string[]; memo?: ShiftReadMemo } = {},
+  env: Env, shift: ShiftReconciliationSession, nowMs: number,
+  /** storedAtClose: print the drawer the close stored whatever its formula (the queued close report, which runs after the close and must say what the close said). */
+  options: { overflowLabel?: string; extraReviewCodes?: readonly string[]; memo?: ShiftReadMemo; storedAtClose?: boolean } = {},
 ): Promise<ShiftReconciliation> {
-  const stored = shift.closed_at && shift.id != null ? await loadLegacyStoredReconciliation(env, shift.id) : null
+  const stored = shift.closed_at && shift.id != null ? await loadLegacyStoredReconciliation(env, shift.id, options.storedAtClose === true) : null
   if (!stored) return loadShiftReconciliation(env, shift, nowMs, options)
   return applyShiftTimeReview(stored, shift.id == null ? null : await readShiftTimeReview(env, shift.id, options.memo))
 }
@@ -1250,12 +1252,12 @@ export async function reconciliationUnderFormula(
  * is no stored row or it is current (the live figures then are the stored ones, give or take a real record).
  * Telegram reads this so /shift prints what the owner closed on, as the report does.
  */
-export async function loadLegacyStoredReconciliation(env: Env, shiftId: number): Promise<ShiftReconciliation | null> {
+export async function loadLegacyStoredReconciliation(env: Env, shiftId: number, anyFormula = false): Promise<ShiftReconciliation | null> {
   try {
     const row = await getDb(env).prepare('SELECT figures_json FROM shift_close_figures WHERE shift_session_id = @id')
       .get<{ figures_json: string }>({ id: shiftId })
     const figures = row ? parseShiftCloseFigures(row.figures_json) : null
-    return figures && figures.formula < SHIFT_FIGURES_FORMULA ? figures.reconciliation : null
+    return figures && (anyFormula || figures.formula < SHIFT_FIGURES_FORMULA) ? figures.reconciliation : null
   } catch { return null }
 }
 

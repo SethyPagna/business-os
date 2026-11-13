@@ -1657,7 +1657,7 @@ async function shiftInvoiceCounts(env: Env, shift: ShiftReportSession, nowMs: nu
   return { invoices: Number(row?.invoices || 0), cancelled: Number(row?.cancelled || 0), edited: Number(row?.edited || 0) }
 }
 
-async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number, language: TelegramLanguage, memo?: ShiftReadMemo): Promise<ShiftReportFigures> {
+async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number, language: TelegramLanguage, memo?: ShiftReadMemo, drawerAtClose = false): Promise<ShiftReportFigures> {
   const filters = shiftFilters(shift, nowMs)
   // The two fold labels are the only text this DATA function produces, so they
   // are composed here, in the shop's language, before the awaits -- everything
@@ -1677,7 +1677,7 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number, 
     // are inside the delivery cost row, as composeShiftFigures splits them.
     shiftExpenses(env, shift, nowMs, { overflowLabel, excludeDeliveryFees: true }, memo),
     shiftDeliveryFeeExpenses(env, shift, nowMs),
-    loadShiftReconciliationAsClosed(env, shift, nowMs, { overflowLabel, memo }),
+    loadShiftReconciliationAsClosed(env, shift, nowMs, { overflowLabel, memo, storedAtClose: drawerAtClose }),
     getPaymentMethodBreakdown(env, filters, memo, true),
     getDeliveryContactTotals(env, filters, memo),
   ])
@@ -1774,12 +1774,12 @@ async function shopName(env: Env): Promise<string> {
   return cleanLine(row?.value || 'Business OS', 80)
 }
 
-async function shiftReportFor(env: Env, shift: ShiftReportSession, nowMs: number, language: TelegramLanguage, options: ShiftReportOptions = {}): Promise<string> {
+async function shiftReportFor(env: Env, shift: ShiftReportSession, nowMs: number, language: TelegramLanguage, options: ShiftReportOptions = {}, drawerAtClose = false): Promise<string> {
   // One memo for this report (one phase): the reconciliation and the report header read the same time review and cash config side by side.
   const memo: ShiftReadMemo = new Map()
   // A cold isolate (the queue consumer is one) probes the report tables' columns in ONE statement here, before the parallel readers below each ask for them.
   await prepareShiftReportReads(env)
-  const [name, figures, timeReview] = await Promise.all([shopName(env), shiftFigures(env, shift, nowMs, language, memo), shift.id == null ? null : readShiftTimeReview(env, shift.id, memo)])
+  const [name, figures, timeReview] = await Promise.all([shopName(env), shiftFigures(env, shift, nowMs, language, memo, drawerAtClose), shift.id == null ? null : readShiftTimeReview(env, shift.id, memo)])
   return withLanguage(language, () => formatShiftReport(name, shift, figures, nowMs, { ...options, timeReview: options.timeReview ?? timeReview }))
 }
 
@@ -2452,7 +2452,21 @@ const SHIFT_REPORT_QUEUE_GRACE_MS = 5 * 60_000
 /** A claim this old never reported back: its Worker died mid-send. */
 const SHIFT_REPORT_STALE_CLAIM_MS = 10 * 60_000
 export type ShiftReportScheduleResult = 'queued' | 'fallback' | 'duplicate' | 'off' | 'unavailable'
-type ShiftReportPayload = { nowMs: number; options: ShiftReportOptions }
+/**
+ * What rides with the row (REVIEW-w3-shift F3): the clock reading, the names, and the shift row AS THE WRITE READ IT BACK. The consumer runs seconds later (minutes on the
+ * cron's fallback): a recount amended in between, or a time edit, must not change what a close message says it closed on.
+ */
+type ShiftReportPayload = { nowMs: number; options: ShiftReportOptions; shift?: ShiftReportSession }
+const SHIFT_REPORT_SNAPSHOT_FIELDS = ['id', 'shift_code', 'scope_mode', 'user_id', 'user_name', 'branch_id', 'branch_name', 'business_date', 'opened_at',
+  'opening_float_usd', 'opening_float_khr', 'additional_cash_usd', 'additional_cash_khr', 'closed_at', 'closing_counted_usd', 'closing_counted_khr',
+  'cancelled_at', 'cancelled_by_user_name', 'cancel_reason'] as const
+/** The shift row a report is built from, cut to the fields the message reads; undefined when the caller has no full row (the consumer then reads it). */
+function shiftReportSnapshot(row: Partial<ShiftReportSession> | null | undefined): ShiftReportSession | undefined {
+  if (!row || typeof row.opened_at !== 'string' || row.id == null) return undefined
+  const snapshot: Record<string, unknown> = {}
+  for (const field of SHIFT_REPORT_SNAPSHOT_FIELDS) snapshot[field] = (row as Record<string, unknown>)[field] ?? null
+  return snapshot as unknown as ShiftReportSession
+}
 
 /**
  * Record the report and hand it to the queue. Never throws. 'unavailable' means NOTHING was recorded (no 0305, or the
@@ -2460,7 +2474,7 @@ type ShiftReportPayload = { nowMs: number; options: ShiftReportOptions }
  */
 export async function scheduleTelegramShiftReport(
   env: Env, shiftId: number, revision: number, action: ShiftReportAction, nowMs: number = Date.now(), options: ShiftReportOptions = {},
-  sharedConfig?: Promise<TelegramConfig>,
+  sharedConfig?: Promise<TelegramConfig>, shiftRow?: Partial<ShiftReportSession> | null,
 ): Promise<ShiftReportScheduleResult> {
   let recorded = false
   try {
@@ -2468,7 +2482,7 @@ export async function scheduleTelegramShiftReport(
     if (!config.enabled || configurationProblem(config)) return 'off'
     const db = getDb(env)
     const key = shiftReportKey(shiftId, revision, action)
-    const payload: ShiftReportPayload = { nowMs, options: { ...options, timeReview: undefined } }
+    const payload: ShiftReportPayload = { nowMs, options: { ...options, timeReview: undefined }, shift: shiftReportSnapshot(shiftRow) }
     const inserted = await db.prepare(`INSERT OR IGNORE INTO telegram_shift_report_sends (send_key, shift_id, payload_json, due_at, dispatch, created_at)
       VALUES (@key, @shiftId, @payload, @now, @dispatch, @now)`).run({
       key, shiftId, payload: JSON.stringify(payload), now: new Date(nowMs).toISOString(), dispatch: env.BACKUP_QUEUE ? 'queue' : 'fallback',
@@ -2516,11 +2530,15 @@ export async function deliverTelegramShiftReport(env: Env, key: string, nowMs: n
     const config = await getTelegramConfig(env)
     // Re-read at send time: a switch turned off since the write wins.
     if (!config.enabled || configurationProblem(config)) { await settle('skipped', null); return 'skipped' }
-    const shift = await db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE id = @id`).get<ShiftReportSession>({ id: claimed.shift_id })
-    if (!shift) { await settle('skipped', null); return 'skipped' }
     let payload: ShiftReportPayload
     try { payload = JSON.parse(claimed.payload_json) as ShiftReportPayload } catch { payload = { nowMs, options: {} } }
-    const text = await shiftReportFor(env, shift, Number.isFinite(Number(payload.nowMs)) ? Number(payload.nowMs) : nowMs, config.language, payload.options ?? {})
+    // The row the write read back, when it rode with the report (every write of this lane): not read again, and not the row as it is now.
+    const snapshot = payload.shift && Number(payload.shift.id) === Number(claimed.shift_id) ? payload.shift : undefined
+    const shift = snapshot ?? await db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE id = @id`).get<ShiftReportSession>({ id: claimed.shift_id })
+    if (!shift) { await settle('skipped', null); return 'skipped' }
+    // A close report prints the drawer the close was made on (shift_close_figures), not the drawer as it reads by the time the queue delivers.
+    const text = await shiftReportFor(env, shift, Number.isFinite(Number(payload.nowMs)) ? Number(payload.nowMs) : nowMs, config.language, payload.options ?? {},
+      snapshot != null && key.endsWith(':close'))
     await postTelegram(config, text, config.chatId, config.topics.telegram_topic_shift, 'telegram_topic_shift')
     await settle('sent', null, ', sent_at = @now')
     return 'sent'
