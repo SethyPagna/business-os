@@ -29,7 +29,17 @@ function frozenSource(file) {
 }
 const frozen = new Hono()
 frozen.route('/inventory', load('routes/inventory.ts', frozenSource('routes/inventory.ts')).default)
-frozen.route('/returns', load('routes/returns.ts', frozenSource('routes/returns.ts')).default)
+// J7 (6.0.1850): lib/receiptNumber.ts's uniqueBusinessDateTimeNumber now takes readTaken(candidates) -> the taken ones. The frozen pre-bridge returns
+// route (blob-pinned above, untouched on disk) still hands it a one-candidate probe, which would receive the candidate ARRAY and bind it as one SQL
+// value. Adapt only its three call sites, keeping its own semantics: probe in order, stop at the first free candidate.
+const frozenReturns = (() => {
+  const text = frozenSource('routes/returns.ts')
+  const calls = text.split('await uniqueBusinessDateTimeNumber(').length - 1
+  assert.equal(calls, 3, 'the frozen returns route mints three numbers')
+  return text.replaceAll('await uniqueBusinessDateTimeNumber(', 'await legacyProbeNumber(')
+    + '\nconst legacyProbeNumber = (prefix: string, probe: (candidate: string) => Promise<boolean>, moment?: Date) => uniqueBusinessDateTimeNumber(prefix, async (candidates) => { const held: string[] = []; for (const candidate of candidates) { if (!(await probe(candidate))) break; held.push(candidate) } return held }, moment)\n'
+})()
+frozen.route('/returns', load('routes/returns.ts', frozenReturns).default)
 const physical = () => JSON.stringify(['products','branch_stock','product_batches','branch_batch_stock','damaged_stock_lots','inventory_movements','action_history'].map(table => sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()))
 const total = () => Number(sql.prepare('SELECT quantity q FROM branch_stock WHERE product_id=1001 AND branch_id=1').get().q)
 const tagged = () => Number(sql.prepare('SELECT COALESCE(SUM(quantity_remaining),0) q FROM damaged_stock_lots WHERE product_id=1001').get().q)
