@@ -370,6 +370,94 @@ async function mainRaces() {
     assert.strictEqual(done.status, 'finalized')
     for (const asset of done.assets) assert.ok(env.ASSETS._store.has(assetPoolKey(asset)))
   })
+
+  await checkAsync('F2: source overwritten between listing and copy, concurrent prune before final sidecar', async () => {
+    const env = makeEnv(imageSet(3))
+    await night(env, 0, 'manual')
+    // Overwrite img-0001 the moment the backup GETs it (after listing): image audit rewriting in place.
+    const realGet = env.ASSETS.get.bind(env.ASSETS)
+    env.ASSETS._set('uploads/img-0001.png', Buffer.from(png(4242)), IMG) // new version that the next backup must copy
+    let swapped = false
+    env.ASSETS.get = async (key, o) => {
+      if (!swapped && key === 'uploads/img-0001.png') { swapped = true; env.ASSETS._set(key, Buffer.from(png(5151)), IMG) }
+      return realGet(key, o)
+    }
+    // A concurrent prune runs when the manifest multipart is created (between the copy and the final sidecar write).
+    const realCreate = env.ASSETS.createMultipartUpload.bind(env.ASSETS)
+    let pruned = false
+    env.ASSETS.createMultipartUpload = async (k, o) => {
+      if (!pruned) { pruned = true; await pruneCloudflareBackups(env) }
+      return realCreate(k, o)
+    }
+    const b = await withClock(1, () => createCloudflareBackup(env, 'manual'))
+    await drain(env)
+    env.ASSETS.get = realGet; env.ASSETS.createMultipartUpload = realCreate
+    const name = b.name.replace(/\.json$/, '')
+    const st = await stateOf(env, name)
+    console.log('  status', st.status, 'pool has new version', env.ASSETS._store.has(assetPoolKey(st.assets.find((a) => a.key === 'uploads/img-0001.png'))))
+    const r = await restoreOwned(env, name + '.json')
+    console.log('  restore: restored', r.restoredAssets, 'missing', JSON.stringify(r.missingAssets))
+    assert.ok(!r.missingAssets, 'RACE 2: changed-source copy unpinned until final sidecar')
+  })
+
+  // F2: a version found while copying (the source was overwritten in place) is pinned by the sidecar as soon as it is copied,
+  // and the sweep never deletes a pool object younger than backupPoolGraceHours.
+  await checkAsync('F2: the sidecar names the new version before the manifest is written (pinned during the copy)', async () => {
+    const env = makeEnv(imageSet(3))
+    await night(env, 0, 'manual')
+    env.ASSETS._set('uploads/img-0001.png', Buffer.from(png(4242)), IMG)
+    const realGet = env.ASSETS.get.bind(env.ASSETS)
+    let swapped = false
+    env.ASSETS.get = async (key, o) => {
+      if (!swapped && key === 'uploads/img-0001.png') { swapped = true; env.ASSETS._set(key, Buffer.from(png(5151)), IMG) }
+      return realGet(key, o)
+    }
+    const realCreate = env.ASSETS.createMultipartUpload.bind(env.ASSETS)
+    let seen = null
+    env.ASSETS.createMultipartUpload = async (k, o) => {
+      const name = k.slice('backups/cloudflare/'.length).replace(/\.json$/, '')
+      seen = await stateOf(env, name)
+      return realCreate(k, o)
+    }
+    await withClock(1, () => createCloudflareBackup(env, 'manual'))
+    env.ASSETS.get = realGet; env.ASSETS.createMultipartUpload = realCreate
+    const entry = seen.assets.find((a) => a.key === 'uploads/img-0001.png')
+    assert.ok(env.ASSETS._store.has(assetPoolKey(entry)), 'the sidecar written before the manifest must name the version that is in the pool')
+  })
+
+  await checkAsync('F2: a continuation slice pins a changed version in the sidecar before the pool object exists', async () => {
+    const env = makeEnv(imageSet(150))
+    const created = await withClock(0, () => createCloudflareBackup(env, 'manual'))
+    const name = created.name.replace(/\.json$/, '')
+    env.ASSETS._set('uploads/img-0120.png', Buffer.from(png(9999)), IMG) // changed after the set listed it
+    const realPut = env.ASSETS.put.bind(env.ASSETS)
+    let checked = false
+    let unpinned = false
+    env.ASSETS.put = async (key, body, o) => {
+      if (key.startsWith(POOL) && key.includes('img-0120.png@')) {
+        const st = await stateOf(env, name)
+        checked = true
+        if (assetPoolKey(st.assets.find((a) => a.key === 'uploads/img-0120.png')) !== key) unpinned = true
+      }
+      return realPut(key, body, o)
+    }
+    await withClock(0, () => drain(env))
+    env.ASSETS.put = realPut
+    assert.ok(checked, 'the changed version was copied by the continuation')
+    assert.ok(!unpinned, 'the sidecar must already name the version being put')
+    assert.strictEqual((await stateOf(env, name)).status, 'finalized')
+  })
+
+  await checkAsync('F2: the sweep keeps an unreferenced pool object younger than the grace, then deletes it', async () => {
+    const env = makeEnv(imageSet(3))
+    await night(env, 0, 'manual')
+    const stray = POOL + 'stray.png@abc123'
+    await withClock(0, async () => { await env.ASSETS.put(stray, Buffer.from('x'), IMG) })
+    await withClock(0, () => pruneCloudflareBackups(env))
+    assert.ok(env.ASSETS._store.has(stray), 'a fresh unreferenced pool object survives (it may be an in-flight copy)')
+    await withClock(2, () => pruneCloudflareBackups(env))
+    assert.ok(!env.ASSETS._store.has(stray), 'older than the grace and unreferenced: swept')
+  })
   console.log(`\n${passed} check(s) passed.`)
 }
 mainRaces().catch((e) => { console.log('FAIL', e.stack || e.message); process.exitCode = 1 })

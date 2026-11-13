@@ -406,7 +406,7 @@ async function mainPool() {
     env.ASSETS._set('private/portal-submissions/s.png', Buffer.from(png(3)))
     await night(env, 0)
     await night(env, 1)
-    await pruneCloudflareBackups(env, 0, 0)
+    await withClock(3, () => pruneCloudflareBackups(env, 0, 0)) // the pool grace (24 h) has passed for every object
     assert.ok(env.ASSETS._store.has('backups/other/keep.bin'))
     assert.ok(env.ASSETS._store.has('private/portal-submissions/s.png'))
     assert.strictEqual([...env.ASSETS._store.keys()].filter((k) => k.startsWith('uploads/')).length, 3)

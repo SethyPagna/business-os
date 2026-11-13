@@ -691,15 +691,23 @@ export class R2StreamWriter {
   }
 }
 
-async function listAssetPoolKeys(env: Env): Promise<Set<string>> {
-  const keys = new Set<string>()
+/** Pool object key -> upload time in ms (0 when the store reports none). */
+async function listAssetPoolObjects(env: Env): Promise<Map<string, number>> {
+  const objects = new Map<string, number>()
   let cursor: string | undefined
   do {
     const page = await env.ASSETS.list({ prefix: BACKUP_ASSET_POOL_PREFIX, cursor, limit: 1000 })
-    for (const object of page.objects || []) keys.add(object.key)
+    for (const object of page.objects || []) {
+      const uploadedMs = object.uploaded instanceof Date ? object.uploaded.getTime() : Date.parse(String(object.uploaded || ''))
+      objects.set(object.key, Number.isFinite(uploadedMs) ? uploadedMs : 0)
+    }
     cursor = page.truncated ? page.cursor : undefined
   } while (cursor)
-  return keys
+  return objects
+}
+
+async function listAssetPoolKeys(env: Env): Promise<Set<string>> {
+  return new Set((await listAssetPoolObjects(env)).keys())
 }
 
 /**
@@ -708,13 +716,16 @@ async function listAssetPoolKeys(env: Env): Promise<Set<string>> {
  * object is copied, and at most `copyCap` copies are attempted per call (each is a get + a put, the subrequest
  * budget the old per-slice cap protected); the walk stops there and the caller keeps the rest pending. Returns one
  * outcome per key walked, in order. When the source was replaced since it was listed, the pool name follows the bytes
- * actually read and the entry's etag/size are updated in place, so the sidecar always names what was copied.
+ * actually read and the entry's etag/size are updated in place, so the sidecar always names what was copied. In that case
+ * `onVersionChange` runs BEFORE the new object is written: the caller persists its sidecar, so the new version is pinned
+ * against retention from the moment it exists, not only when the whole backup finishes.
  */
 async function copyIntoAssetPool(
   env: Env,
   byKey: Map<string, AssetEntry>,
   keys: readonly string[],
   copyCap: number,
+  onVersionChange?: () => Promise<void>,
 ): Promise<Array<{ key: string; ok: boolean }>> {
   const present = await listAssetPoolKeys(env)
   const outcomes: Array<{ key: string; ok: boolean }> = []
@@ -731,6 +742,7 @@ async function copyIntoAssetPool(
       if (object.etag && object.etag !== asset.etag) {
         asset.etag = object.etag
         if (Number.isFinite(object.size)) asset.size = object.size
+        await onVersionChange?.()
       }
       const destKey = assetPoolKey(asset)
       if (present.has(destKey)) {
@@ -873,6 +885,7 @@ async function writeBackupDocument(
   const failedKeys: string[] = []
   const attempts: Record<string, number> = {}
   let assetCopyProgress: BackupPayload['r2']['assetCopyProgress']
+  let earlyState: BackupLifecycleState | null = null
 
   if (!includeAssets) {
     // A scoped backup lists and copies nothing from R2. Skipping the
@@ -884,11 +897,14 @@ async function writeBackupDocument(
   } else {
     // The sidecar is written BEFORE any byte moves: from this moment the backup's references pin its pool objects
     // against retention, so a prune running in another invocation cannot delete one we are about to reuse.
-    await putBackupState(env, {
+    earlyState = {
       format: BACKUP_LIFECYCLE_FORMAT, version: BACKUP_LIFECYCLE_VERSION, backupName, manifestKey: key, createdAt, updatedAt: createdAt,
       source, status: 'copying', assetsPrefix, assetLayout: ASSET_LAYOUT_POOL, assets, copiedKeys: [], pendingKeys: assets.map((asset) => asset.key), failedKeys: [], attempts: {},
-    })
+    }
+    await putBackupState(env, earlyState)
   }
+  // The early sidecar shares the asset entries with the copy helper, so re-writing it pins a version the copy just found.
+  const pinChangedVersion = async () => { if (earlyState) await putBackupState(env, earlyState) }
   const byKey = new Map<string, AssetEntry>(assets.map((asset) => [asset.key, asset]))
 
   if (!includeAssets) {
@@ -909,7 +925,7 @@ async function writeBackupDocument(
     // continuation dies mid-slice. The module-level export keeps its Paid
     // value; see lib/planTier.ts's maxAssetsPerBackup.
     // Pool: assets already in the pool cost nothing here; the cap bounds the COPIES (get + put) of this slice.
-    const walked = await copyIntoAssetPool(env, byKey, assets.map((asset) => asset.key), getPlanLimits(env).maxAssetsPerBackup)
+    const walked = await copyIntoAssetPool(env, byKey, assets.map((asset) => asset.key), getPlanLimits(env).maxAssetsPerBackup, pinChangedVersion)
     for (const outcome of walked) {
       attempts[outcome.key] = 1
       if (outcome.ok) copiedKeys.push(outcome.key)
@@ -928,7 +944,7 @@ async function writeBackupDocument(
     const priorCursor = await getAssetCopyCursor(env)
     const toCopy = selectAssetsToCopy(assets, priorCursor, getPlanLimits(env).maxAssetsPerBackup)
     // Best-effort per asset: one bad/missing object does not abort the backup.
-    for (const outcome of await copyIntoAssetPool(env, byKey, toCopy.map((asset) => asset.key), toCopy.length)) {
+    for (const outcome of await copyIntoAssetPool(env, byKey, toCopy.map((asset) => asset.key), toCopy.length, pinChangedVersion)) {
       if (outcome.ok) copiedKeys.push(outcome.key)
     }
     // Advance the cursor to the end of this run's slice regardless of any
@@ -1137,7 +1153,7 @@ export async function continueCloudflareBackupAssetCopy(env: Env, backupName: st
   let walked: Array<{ key: string; ok: boolean }>
   if (state.assetLayout === ASSET_LAYOUT_POOL) {
     // Pool layout: assets already pooled are free, so a slice may walk far more than `cap` keys; only copies are capped.
-    walked = await copyIntoAssetPool(env, new Map<string, AssetEntry>(state.assets.map((asset) => [asset.key, asset])), state.pendingKeys, cap)
+    walked = await copyIntoAssetPool(env, new Map<string, AssetEntry>(state.assets.map((asset) => [asset.key, asset])), state.pendingKeys, cap, () => putBackupState(env, state))
   } else {
     // A set started before the pool existed finishes in its own per-backup folder.
     walked = []
@@ -1376,8 +1392,16 @@ async function sweepAssetPool(env: Env): Promise<{ removed: number; skipped?: st
     for (const asset of state.assets || []) pinned.add(assetPoolKey(asset))
   }
 
+  // An object younger than the grace is never deleted: it may be the copy an in-flight backup just made of a version no
+  // sidecar names yet (an image overwritten in place while the set copies).
+  const graceMs = getPlanLimits(env).backupPoolGraceHours * 60 * 60 * 1000
+  const now = Date.now()
   const doomed: string[] = []
-  for (const poolKey of await listAssetPoolKeys(env)) if (!pinned.has(poolKey)) doomed.push(poolKey)
+  for (const [poolKey, uploadedMs] of await listAssetPoolObjects(env)) {
+    if (pinned.has(poolKey)) continue
+    if (now - uploadedMs < graceMs) continue
+    doomed.push(poolKey)
+  }
   for (let offset = 0; offset < doomed.length; offset += 500) await env.ASSETS.delete(doomed.slice(offset, offset + 500))
   if (doomed.length) await repairSetsStartedDuringSweep(env, names, new Set(doomed))
   return { removed: doomed.length }

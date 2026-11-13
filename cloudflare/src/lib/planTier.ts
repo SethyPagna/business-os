@@ -179,6 +179,10 @@ export type PlanLimits = {
   // Restore, validate and the Drive stage read plain and gzip manifests alike.
   backupManifestGzip: boolean
 
+  // A backup-pool object uploaded less than this many hours ago is never deleted by the pool sweep: it may be the copy an
+  // in-flight backup (or a continuation) just made of a re-uploaded image, not yet named by any sidecar. Same on both tiers.
+  backupPoolGraceHours: number
+
   // While tonight's set is still copying in the queue, the backup step only POLLS it. After a poll the next heavy tick goes to the
   // image audit unless this many minutes have passed, so a copy that never finishes (up to 24 h) polls about every other tick
   // instead of starving the audit. 240 = more than one 3 h heavy tick, less than two.
@@ -481,6 +485,7 @@ const PAID_LIMITS: PlanLimits = {
   scheduledBackupKeep: 7,
   scheduledBackupMaxAttemptsPerDay: 2,
   backupManifestGzip: true,
+  backupPoolGraceHours: 24,
   scheduledBackupCopyPollGapMinutes: 240,
   scheduledBackupStaleHours: 30,
   maxImageDeletesPerReset: 500,
@@ -539,6 +544,7 @@ const FREE_LIMITS: PlanLimits = {
   scheduledBackupKeep: 7,
   scheduledBackupMaxAttemptsPerDay: 2,
   backupManifestGzip: false,
+  backupPoolGraceHours: 24,
   scheduledBackupCopyPollGapMinutes: 240,
   scheduledBackupStaleHours: 30,
   maxImageDeletesPerReset: 40,
