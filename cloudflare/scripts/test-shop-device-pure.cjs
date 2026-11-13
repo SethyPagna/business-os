@@ -781,20 +781,26 @@ const mutants = [
   ['marking from a pending request is refused', inFile('routes/devices.ts', "device.status !== 'approved' && device.status !== 'pending'", "device.status !== 'approved'"), ['13.']],
 ]
 
+// The mutants run in SHARD_COUNT files so each stays under the release sweep's per-file time limit: this file is shard 1 and
+// test-shop-device-mutants-<k>-pure.cjs are the others. --all runs every mutant here; --mutant=<text> and --real-only keep their meaning.
+const SHARD_COUNT = 4
+
 async function main() {
   const base = await suite((t) => t, 'real code')
   let bad = base.length
   const only = (process.argv.find((a) => a.startsWith('--mutant=')) || '').slice('--mutant='.length)
   const realOnly = process.argv.includes('--real-only')
-  for (const [name, mutate, expectRed] of mutants) {
-    if (realOnly || (only && !name.includes(only))) continue
+  const shardArg = (process.argv.find((a) => a.startsWith('--shard=')) || '').slice('--shard='.length)
+  const [shard, shardCount] = process.argv.includes('--all') || only ? [1, 1] : shardArg ? shardArg.split('/').map(Number) : [1, SHARD_COUNT]
+  for (const [index, [name, mutate, expectRed]] of mutants.entries()) {
+    if (realOnly || (only && !name.includes(only)) || index % shardCount !== shard - 1) continue
     const red = await suite(mutate, `mutant: ${name}`)
     const missing = expectRed.filter((prefix) => !red.some((n) => n.startsWith(prefix)))
     if (missing.length) { console.log(`MUTANT SURVIVED: ${name}; checks ${missing.join(', ')} stayed green`); bad += 1 }
     else console.log(`mutant killed: ${name} (red: ${red.map((n) => n.split('.')[0]).join(', ')})`)
   }
   if (bad) { console.log(`\n${bad} problem(s)`); process.exit(1) }
-  console.log('\ntest-shop-device-pure: all checks passed and every mutant was killed')
+  console.log(`\ntest-shop-device-pure (shard ${shard}/${shardCount}): all checks passed and every mutant in this shard was killed`)
 }
 
 main().catch((error) => { console.error(error); process.exit(1) })
