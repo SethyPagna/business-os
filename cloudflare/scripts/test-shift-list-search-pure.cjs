@@ -102,7 +102,8 @@ function scenario() {
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', actor); await next() } },
     '../lib/permissions': loadReal('lib/permissions.ts'),
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
-    '../lib/telegram': { sendTelegramShiftReport: async () => true },
+    '../lib/planTier': { getPlanLimits: () => ({ d1QueriesPerInvocation: 1000 }) },
+    '../lib/telegram': { scheduleTelegramShiftReport: async () => 'unavailable', loadTelegramConfig: async () => ({}), sendTelegramShiftReport: async () => true },
     '../lib/shiftReconciliation': { loadShiftReconciliation: async () => null, loadShiftFigures: async () => null },
   })
   const app = route.default || route

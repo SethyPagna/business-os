@@ -667,18 +667,24 @@ export async function shiftLastActivityMs(
   if (shift.branch_id) { returns.clauses.push('returns.branch_id = @branchId'); returns.params.branchId = shift.branch_id }
   returns.clauses.push("COALESCE(returns.status, 'completed') <> 'cancelled'", "COALESCE(returns.return_scope, 'customer') = 'customer'")
   const fees = shiftFeeWhere(open, horizon)
-  const db = getDb(env)
-  const latest = await Promise.all([
-    db.prepare(`SELECT MAX(datetime(created_at)) AS at FROM sales WHERE ${sales.clauses.join(' AND ')}`).get<{ at: string | null }>(sales.params),
-    db.prepare(`SELECT MAX(datetime(created_at)) AS at FROM returns WHERE ${returns.clauses.join(' AND ')}`).get<{ at: string | null }>(returns.params),
-    db.prepare(`SELECT MAX(datetime(created_at)) AS at FROM fees WHERE ${fees.clauses.join(' AND ')}`).get<{ at: string | null }>(fees.params),
-  ])
   const events = paymentEventWindow(open, horizon)
-  const eventLatest = await db.prepare(`SELECT MAX(e.received_at) AS at FROM sale_payment_events e CROSS JOIN sales ON sales.id = e.sale_id
-      WHERE ${['sales.payments_version = 1', 'e.drawer_effect = 1', "COALESCE(NULLIF(sales.sale_status, ''), 'completed') <> 'cancelled'", ...events.clauses].join(' AND ')}`)
-    .get<{ at: string | null }>(events.params)
-  latest.push(eventLatest)
-  const times = latest.map((row) => (row?.at ? Date.parse(`${row.at.replace(' ', 'T')}Z`) : Number.NaN)).filter(Number.isFinite)
+  // ONE statement for the four tables (wave 3: three D1 calls fewer in every close, reopen and amend). Each table keeps its own filter, so each scalar subquery is the
+  // statement it used to be; their named parameters are prefixed per table because the filters share names ("@createdFrom", "@branchId") whose values need not agree.
+  const part = (prefix: string, select: string, params: Record<string, unknown>) => ({
+    sql: select.replace(/@([A-Za-z_][A-Za-z0-9_]*)/g, `@${prefix}_$1`),
+    params: Object.fromEntries(Object.entries(params).map(([name, value]) => [`${prefix}_${name}`, value])),
+  })
+  const parts = [
+    part('s', `SELECT MAX(datetime(created_at)) FROM sales WHERE ${sales.clauses.join(' AND ')}`, sales.params),
+    part('r', `SELECT MAX(datetime(created_at)) FROM returns WHERE ${returns.clauses.join(' AND ')}`, returns.params),
+    part('f', `SELECT MAX(datetime(created_at)) FROM fees WHERE ${fees.clauses.join(' AND ')}`, fees.params),
+    part('e', `SELECT MAX(e.received_at) FROM sale_payment_events e CROSS JOIN sales ON sales.id = e.sale_id
+      WHERE ${['sales.payments_version = 1', 'e.drawer_effect = 1', "COALESCE(NULLIF(sales.sale_status, ''), 'completed') <> 'cancelled'", ...events.clauses].join(' AND ')}`, events.params),
+  ]
+  const row = await getDb(env).prepare(`SELECT ${parts.map((entry, index) => `(${entry.sql}) AS at${index}`).join(', ')}`)
+    .get<Record<string, string | null>>(Object.assign({}, ...parts.map((entry) => entry.params)))
+  const latest = parts.map((_entry, index) => row?.[`at${index}`] ?? null)
+  const times = latest.map((at) => (at ? Date.parse(`${at.replace(' ', 'T')}Z`) : Number.NaN)).filter(Number.isFinite)
   return times.length ? Math.max(...times) : null
 }
 
@@ -697,8 +703,10 @@ export function shiftTimeReviewCodes(review: readonly ShiftTimeReview[] | null |
   return (review ?? []).map((entry) => entry.code)
 }
 
+/** The memo key prefix of the standing time review (readShiftTimeReview): callers that must carry or drop it across phases name it. */
+export const TIME_REVIEW_MEMO_PREFIX = 'time-review|'
 export async function readShiftTimeReview(env: Env, shiftId: number, memo?: ShiftReadMemo): Promise<ShiftTimeReview[] | null> {
-  return memoized(memo, `time-review|${shiftId}`, () => readShiftTimeReviewFresh(env, shiftId))
+  return memoized(memo, `${TIME_REVIEW_MEMO_PREFIX}${shiftId}`, () => readShiftTimeReviewFresh(env, shiftId))
 }
 async function readShiftTimeReviewFresh(env: Env, shiftId: number): Promise<ShiftTimeReview[] | null> {
   try {
@@ -1087,10 +1095,13 @@ export async function loadShiftCloseFigures(
   env: Env,
   shift: ShiftReconciliationSession,
   nowMs: number = Date.now(),
-  options: { extraReviewCodes?: readonly string[] } = {},
+  options: { extraReviewCodes?: readonly string[]; memo?: ShiftReadMemo; timeReviewFrom?: ShiftReadMemo } = {},
 ): Promise<ShiftCloseFigures> {
-  // ONE memo for this attempt, made here AFTER the caller read the inputs digest and dropped with the attempt (closeWithFigures recomputes on a retry).
-  const memo = newShiftReadMemo()
+  // ONE memo for this attempt, made AFTER the caller read the inputs digest (the caller may hand it in, to read it back once the close has committed and the digest
+  // still reads the same) and dropped with the attempt (closeWithFigures recomputes on a retry). The one thing it may start with is the shift's standing time
+  // review, which the close handler already read for the review it journals: that is the amendments table, not an input of the digest, and nothing of this attempt moves it.
+  const memo = options.memo ?? newShiftReadMemo()
+  for (const [key, value] of options.timeReviewFrom ?? []) if (key.startsWith(TIME_REVIEW_MEMO_PREFIX) && !memo.has(key)) memo.set(key, value)
   // The report tables' column sets in ONE statement on a cold isolate (instead of eight PRAGMAs spread over the parallel readers here, the response and the
   // Telegram report that follow). Schema, not data: not a figure input, so it may sit anywhere in the digest-first order.
   await prepareShiftReportReads(env)
@@ -1205,9 +1216,11 @@ export function diffShiftSaleTenders(stored: ShiftSaleTender[], current: ShiftSa
  * (history is immutable), every other shift the live figures. The in-app report shows the stored close the same way.
  */
 export async function loadShiftReconciliationAsClosed(
-  env: Env, shift: ShiftReconciliationSession, nowMs: number, options: { overflowLabel?: string; extraReviewCodes?: readonly string[]; memo?: ShiftReadMemo } = {},
+  env: Env, shift: ShiftReconciliationSession, nowMs: number,
+  /** storedAtClose: print the drawer the close stored whatever its formula (the queued close report, which runs after the close and must say what the close said). */
+  options: { overflowLabel?: string; extraReviewCodes?: readonly string[]; memo?: ShiftReadMemo; storedAtClose?: boolean } = {},
 ): Promise<ShiftReconciliation> {
-  const stored = shift.closed_at && shift.id != null ? await loadLegacyStoredReconciliation(env, shift.id) : null
+  const stored = shift.closed_at && shift.id != null ? await loadLegacyStoredReconciliation(env, shift.id, options.storedAtClose === true) : null
   if (!stored) return loadShiftReconciliation(env, shift, nowMs, options)
   return applyShiftTimeReview(stored, shift.id == null ? null : await readShiftTimeReview(env, shift.id, options.memo))
 }
@@ -1239,12 +1252,12 @@ export async function reconciliationUnderFormula(
  * is no stored row or it is current (the live figures then are the stored ones, give or take a real record).
  * Telegram reads this so /shift prints what the owner closed on, as the report does.
  */
-export async function loadLegacyStoredReconciliation(env: Env, shiftId: number): Promise<ShiftReconciliation | null> {
+export async function loadLegacyStoredReconciliation(env: Env, shiftId: number, anyFormula = false): Promise<ShiftReconciliation | null> {
   try {
     const row = await getDb(env).prepare('SELECT figures_json FROM shift_close_figures WHERE shift_session_id = @id')
       .get<{ figures_json: string }>({ id: shiftId })
     const figures = row ? parseShiftCloseFigures(row.figures_json) : null
-    return figures && figures.formula < SHIFT_FIGURES_FORMULA ? figures.reconciliation : null
+    return figures && (anyFormula || figures.formula < SHIFT_FIGURES_FORMULA) ? figures.reconciliation : null
   } catch { return null }
 }
 

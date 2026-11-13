@@ -78,7 +78,8 @@ async function scenario({ retired, mutate }) {
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); await next() } }, '../lib/permissions': loadReal('lib/permissions.ts'),
     '../lib/audit': { audit: async () => { throw new Error('shift writes must use the atomic audit batch') } },
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
-    '../lib/telegram': { sendTelegramShiftReport: async () => true },
+    '../lib/planTier': { getPlanLimits: () => ({ d1QueriesPerInvocation: 1000 }) },
+    '../lib/telegram': { scheduleTelegramShiftReport: async () => 'unavailable', loadTelegramConfig: async () => ({}), sendTelegramShiftReport: async () => true },
     '../lib/shiftReconciliation': { loadShiftReconciliation: async () => { throw new Error('no sales tables in this fixture') }, shiftLastActivityMs: async () => null },
   }, mutate)
   const app = route.default || route

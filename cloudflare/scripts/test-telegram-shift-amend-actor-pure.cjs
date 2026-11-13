@@ -222,7 +222,7 @@ const idLabel = (mode) => (mode === 'en' ? lang.TELEGRAM_LABELS.shift.en : mode 
 
   await section('3. the route passes the amender\'s name only (never a phone or email), and only the amend send passes one', async () => {
     const routes = fs.readFileSync(path.join(root, 'src', 'routes', 'shifts.ts'), 'utf8').replace(/\r\n/g, '\n')
-    const calls = routes.split('\n').filter((line) => /sendTelegramShiftReport\(c\.env, /.test(line))
+    const calls = routes.split('\n').filter((line) => /announceShiftReport\(c, /.test(line)) // every sender goes through announceShiftReport (the queued report, lib/telegram.ts scheduleTelegramShiftReport)
     assert.equal(calls.length, 7, 'open x2, close x2, cancel, reopen, amend')
     const passing = calls.filter((line) => /amendedBy/.test(line))
     assert.equal(passing.length, 1, 'only one send names an amender')

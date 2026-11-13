@@ -103,7 +103,8 @@ function route(sqlite, source, getUser) {
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', getUser()); await next() } },
     '../lib/permissions': loadReal('lib/permissions.ts'),
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
-    '../lib/telegram': { sendTelegramShiftReport: async () => true, sendTelegramStaleShiftAlert: async () => true, scheduleTelegramShiftOverview: async () => true },
+    '../lib/planTier': { getPlanLimits: () => ({ d1QueriesPerInvocation: 1000 }) },
+    '../lib/telegram': { scheduleTelegramShiftReport: async () => 'unavailable', loadTelegramConfig: async () => ({}), sendTelegramShiftReport: async () => true, sendTelegramStaleShiftAlert: async () => true, scheduleTelegramShiftOverview: async () => true },
     // No sales tables here: the branch rule is under test, not the arithmetic.
     '../lib/shiftReconciliation': {
       shiftLastActivityMs: async () => null, readShiftTimeReview: async () => null,

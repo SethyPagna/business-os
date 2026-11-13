@@ -71,6 +71,8 @@ const NAMED_COMPANIONS = {
   302: 'test-migration-0302-customers-phone-digits-fts-native.cjs',
   // 0303 (the 11 Nov D1 audit) adds the customer-picker and audit-retention partial indexes and drops the duplicate idx_settings_key_unique; its companion applies the real chain and pins the EXPLAIN plans, PRE/POST and LF.
   303: 'test-migration-0303-d1-queries-indexes-native.cjs',
+  // 0305 gives the Telegram shift report its own send row (the close no longer sends it from its own invocation); its companion applies the real chain and pins the table, the unique key, the sets and the index.
+  305: 'test-migration-0305-telegram-shift-report-sends-pure.cjs',
   // 0250 stores the multi-lot Revert watermark; its companion applies the real chain and pins the stored value.
   250: 'test-migration-0250-multilot-watermark-sqlite.cjs',
   251: 'test-loyalty-reset-watermark-native.cjs',

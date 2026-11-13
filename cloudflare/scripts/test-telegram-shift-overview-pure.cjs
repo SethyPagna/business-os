@@ -484,7 +484,7 @@ async function main() {
   const idleFrom = preparedSql.length
   check('an idle cron tick sends nothing', (await telegram.drainDueTelegramShiftOverviews(envPaid, T0 + 7_200_000, { limit: 10, sweepStale: true })) === 0)
   const idleSql = preparedSql.slice(idleFrom)
-  check('and reads no sqlite_master, only the telegram_scheduled_sends statements', idleSql.length > 0 && !idleSql.some((sql) => /sqlite_master/i.test(sql)) && idleSql.every((sql) => /telegram_scheduled_sends/.test(sql)), JSON.stringify(idleSql))
+  check('and reads no sqlite_master, only the telegram_scheduled_sends statements', idleSql.length > 0 && !idleSql.some((sql) => /sqlite_master/i.test(sql)) && idleSql.every((sql) => /telegram_(scheduled|shift_report)_sends/.test(sql)), JSON.stringify(idleSql))
   check('the row says sent, once', rowFor(paidKey).status === 'sent' && rowFor(paidKey).attempts === 1)
 
   // A queue message that is delivered early is not sent early.

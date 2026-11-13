@@ -917,7 +917,7 @@ check('the Difference line is still the shared reconciliation, not a private for
 // Reinstated Sep 21 2026: the two breakdowns are read from the SAME kernel
 // entry points routes/reports.ts uses, never re-derived here.
 check('the two breakdown sections read the kernel, not a private query',
-  /getPaymentMethodBreakdown\(env, filters(, memo)?\)/.test(source) && /getDeliveryContactTotals\(env, filters\)/.test(source)
+  /getPaymentMethodBreakdown\(env, filters(, memo(, true)?)?\)/.test(source) && /getDeliveryContactTotals\(env, filters(, memo)?\)/.test(source)
   && !/SELECT[^;]*GROUP BY[^;]*payment_method/i.test(source))
 // The language mode is applied at COMPOSITION. A post-hoc split on ' / ' would
 // cut a value in half -- a note, a courier name or a fold label can contain it.

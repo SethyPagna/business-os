@@ -143,7 +143,8 @@ const route = loadReal('routes/shifts.ts', {
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); await next() } },
   '../lib/permissions': loadReal('lib/permissions.ts'),
   '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
-  '../lib/telegram': { sendTelegramShiftReport: async (_env, id) => { telegramReportsFor.push(id); return true } },
+  '../lib/planTier': { getPlanLimits: () => ({ d1QueriesPerInvocation: 1000 }) },
+  '../lib/telegram': { scheduleTelegramShiftReport: async () => 'unavailable', loadTelegramConfig: async () => ({}), sendTelegramShiftReport: async (_env, id) => { telegramReportsFor.push(id); return true } },
   // REAL, over the same database: the whole point is that the close dialog and
   // the bot are fed by one function, so a stub here would prove nothing.
   '../lib/shiftReconciliation': reconciliation,
