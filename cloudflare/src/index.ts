@@ -46,7 +46,7 @@ import branchCutoverOperatorRoute from './routes/branchCutoverOperator'
 import { reportError } from './lib/errorReporting'
 import { serveUpload } from './lib/imageVariants'
 import { handleImportQueue, handleImportDeadLetterQueue, handleMediaQueue, handleBackupQueue } from './queue'
-import { deliverTelegramShiftOverview, drainDueTelegramShiftOverviews, isShiftOverviewQueueMessage } from './lib/telegram'
+import { deliverTelegramShiftOverview, deliverTelegramShiftReport, drainDueTelegramShiftOverviews, isShiftOverviewQueueMessage, isShiftReportQueueMessage } from './lib/telegram'
 import { maybeRunScheduledBackup } from './lib/backup'
 import { driveSyncScheduleDue, recordDriveSyncError } from './lib/googleDrive'
 import { checkDriveSyncAuthorizer } from './lib/driveSyncAuthority'
@@ -748,10 +748,20 @@ export default {
           message.ack()
         }
       }
-      if (overviews.length === batch.messages.length) return
-      // No overview in the batch: the batch goes through untouched.
-      const backupBatch = overviews.length
-        ? { queue: batch.queue, messages: batch.messages.filter((message) => !isShiftOverviewQueueMessage(message.body)) } as unknown as MessageBatch<unknown>
+      // The shift report (0305) is its own send, taken out the same way: it is delivered here, in an invocation of its own, so
+      // its ~40 reads never spend the 50 calls of the till's request that wrote the shift. Acknowledged whatever the outcome:
+      // the row in D1 is the record, and the cron drain picks up what never got claimed.
+      const reports = batch.messages.filter((message) => isShiftReportQueueMessage(message.body))
+      for (const message of reports) {
+        try { await deliverTelegramShiftReport(env, (message.body as { key: string }).key) } catch (error) {
+          console.error('[telegram] shift report queue delivery failed; the cron drain will pick it up', error)
+        }
+        message.ack()
+      }
+      if (overviews.length + reports.length === batch.messages.length) return
+      // Nothing of ours in the batch: the batch goes through untouched.
+      const backupBatch = overviews.length || reports.length
+        ? { queue: batch.queue, messages: batch.messages.filter((message) => !isShiftOverviewQueueMessage(message.body) && !isShiftReportQueueMessage(message.body)) } as unknown as MessageBatch<unknown>
         : batch
       await handleBackupQueue(backupBatch as MessageBatch<
         | { kind: 'backup-continue'; backupName: string; nextIndex: number }

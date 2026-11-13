@@ -17,7 +17,7 @@ import {
 // owns it, and the close routes, the current/history reads and this message all
 // call the same function -- see the header note there for what changed and why.
 import {
-  composeShiftFigures, computeShiftReconciliation, courierPayoutsWhere, expenseRowsWhere, FEE_SPLIT_COLUMNS, loadShiftReconciliationAsClosed, readShiftTimeReview,
+  composeShiftFigures, computeShiftReconciliation, courierPayoutsWhere, expenseRowsWhere, FEE_SPLIT_COLUMNS, loadShiftReconciliationAsClosed, prepareShiftReportReads, readShiftTimeReview,
   refundDrawerKhrSql, refundDrawerUsdSql, SHIFT_REVIEW, shiftDeliveryFeeExpenses, shiftExpenses, shiftFilters, summarizeShiftCash, tenderWhere,
   type ShiftCashResult, type ShiftReadMemo, type ShiftMoney, type ShiftReconciliation, type ShiftTimeReview,
 } from './shiftReconciliation'
@@ -1774,6 +1774,8 @@ async function shopName(env: Env): Promise<string> {
 async function shiftReportFor(env: Env, shift: ShiftReportSession, nowMs: number, language: TelegramLanguage, options: ShiftReportOptions = {}): Promise<string> {
   // One memo for this report (one phase): the reconciliation and the report header read the same time review and cash config side by side.
   const memo: ShiftReadMemo = new Map()
+  // A cold isolate (the queue consumer is one) probes the report tables' columns in ONE statement here, before the parallel readers below each ask for them.
+  await prepareShiftReportReads(env)
   const [name, figures, timeReview] = await Promise.all([shopName(env), shiftFigures(env, shift, nowMs, language, memo), shift.id == null ? null : readShiftTimeReview(env, shift.id, memo)])
   return withLanguage(language, () => formatShiftReport(name, shift, figures, nowMs, { ...options, timeReview: options.timeReview ?? timeReview }))
 }
@@ -2367,6 +2369,11 @@ export async function drainDueTelegramShiftOverviews(env: Env, nowMs: number = D
   // (up to ~200k rows a day on an idle shop). The statements below name the
   // table themselves, so a deployment without 0194 fails with "no such
   // table", which is the same answer for free: nothing to send.
+  // The shift report has its own table (0305): the cron, and only the cron, sends one due report per tick.
+  let reported = 0
+  if (options.sweepStale) {
+    try { reported = await drainDueTelegramShiftReports(env, nowMs) } catch (error) { console.error('[telegram] shift report drain failed', error) }
+  }
   const db = getDb(env)
   const now = new Date(nowMs).toISOString()
   const limit = options.limit ?? 3
@@ -2381,12 +2388,150 @@ export async function drainDueTelegramShiftOverviews(env: Env, nowMs: number = D
       WHERE status = 'pending' AND due_at <= @now AND (dispatch = 'fallback' OR due_at <= @queueGrace)
       ORDER BY due_at LIMIT @limit`).all<{ send_key: string }>({ now, queueGrace: new Date(nowMs - SHIFT_OVERVIEW_QUEUE_GRACE_MS).toISOString(), limit })
   } catch (error) {
+    if (/no such table/i.test(String((error as Error)?.message || error))) return reported
+    throw error
+  }
+  let sent = reported
+  for (const row of due) if ((await deliverTelegramShiftOverview(env, row.send_key, nowMs)) === 'sent') sent += 1
+  return sent
+}
+
+// ---- the shift report as its own send (0305) -----------------------------
+// WHY. On Free one invocation allows 50 D1 calls. The report's own reads
+// (about 43) used to run in the SAME invocation as the till's close, whose own
+// work is already near the cap, so the report was cut off and silently lost.
+// Owner, 13 Nov 2026: the report may arrive a few seconds after the write, as a
+// separate step -- same Shift topic, same text.
+//
+// HOW. The route writes ONE row (telegram_shift_report_sends, key = shift id +
+// the revision the write produced + the action) and puts ONE message on
+// BACKUP_QUEUE with no delay. The queue consumer (index.ts) is its own
+// invocation: it claims the row (pending -> sending, the one conditional UPDATE
+// that makes a duplicate delivery, a retried request and the cron fallback
+// converge on a single send), builds the text from the clock reading and the
+// actor names the route carried (payload_json) and sends it.
+//
+// NEVER on the request path: a drain there would spend another request's 50. A
+// row the queue did not carry (no binding, or its send threw: dispatch =
+// 'fallback') or did not deliver within SHIFT_REPORT_QUEUE_GRACE_MS is picked
+// up by the every-5-minutes cron (drainDueTelegramShiftOverviews with
+// sweepStale), ONE report per tick: the cron has its own 50.
+//
+// While 0305 has not been applied the INSERT fails with "no such table" and
+// scheduleTelegramShiftReport answers 'unavailable': the route then sends the
+// report the way it always did (waitUntil, same invocation). Either deploy
+// order is safe.
+
+export const SHIFT_REPORT_QUEUE_KIND = 'telegram-shift-report'
+export type ShiftReportQueueMessage = { kind: typeof SHIFT_REPORT_QUEUE_KIND; key: string }
+export function isShiftReportQueueMessage(body: unknown): body is ShiftReportQueueMessage {
+  const value = body as { kind?: unknown; key?: unknown } | null
+  return !!value && typeof value === 'object' && value.kind === SHIFT_REPORT_QUEUE_KIND && typeof value.key === 'string'
+}
+export type ShiftReportAction = 'open' | 'close' | 'cancel' | 'reopen' | 'amend'
+/** One key per write that reports: the shift, the revision that write produced and what it was. */
+export const shiftReportKey = (shiftId: number, revision: number, action: ShiftReportAction): string => `shift-report:${shiftId}:r${revision}:${action}`
+/** A queued row the queue has not delivered this long after it was written is drained by the cron. */
+const SHIFT_REPORT_QUEUE_GRACE_MS = 5 * 60_000
+/** A claim this old never reported back: its Worker died mid-send. */
+const SHIFT_REPORT_STALE_CLAIM_MS = 10 * 60_000
+export type ShiftReportScheduleResult = 'queued' | 'fallback' | 'duplicate' | 'off' | 'unavailable'
+type ShiftReportPayload = { nowMs: number; options: ShiftReportOptions }
+
+/**
+ * Record the report and hand it to the queue. Never throws. 'unavailable' means NOTHING was recorded (no 0305, or the
+ * insert failed): the caller sends inline. Every other answer means the report is owned by the queue or the cron.
+ */
+export async function scheduleTelegramShiftReport(
+  env: Env, shiftId: number, revision: number, action: ShiftReportAction, nowMs: number = Date.now(), options: ShiftReportOptions = {},
+): Promise<ShiftReportScheduleResult> {
+  let recorded = false
+  try {
+    const config = await getTelegramConfig(env)
+    if (!config.enabled || configurationProblem(config)) return 'off'
+    const db = getDb(env)
+    const key = shiftReportKey(shiftId, revision, action)
+    const payload: ShiftReportPayload = { nowMs, options: { ...options, timeReview: undefined } }
+    const inserted = await db.prepare(`INSERT OR IGNORE INTO telegram_shift_report_sends (send_key, shift_id, payload_json, due_at, dispatch, created_at)
+      VALUES (@key, @shiftId, @payload, @now, @dispatch, @now)`).run({
+      key, shiftId, payload: JSON.stringify(payload), now: new Date(nowMs).toISOString(), dispatch: env.BACKUP_QUEUE ? 'queue' : 'fallback',
+    })
+    recorded = true
+    if (!inserted.changes) return 'duplicate'
+    if (env.BACKUP_QUEUE) {
+      try {
+        const message: ShiftReportQueueMessage = { kind: SHIFT_REPORT_QUEUE_KIND, key }
+        await env.BACKUP_QUEUE.send(message)
+        return 'queued'
+      } catch (error) {
+        console.error('[telegram] shift report queue send failed; the cron drain will send it', error)
+        await db.prepare("UPDATE telegram_shift_report_sends SET dispatch = 'fallback' WHERE send_key = @key").run({ key })
+      }
+    }
+    return 'fallback'
+  } catch (error) {
+    if (!recorded) {
+      if (!/no such table/i.test(String((error as Error)?.message || error))) console.error('[telegram] shift report could not be scheduled; sending it inline', error)
+      return 'unavailable'
+    }
+    // Recorded but the follow-up write failed: the row stays 'queue' and the cron picks it up after the grace.
+    console.error('[telegram] shift report was recorded but its dispatch could not be settled', error)
+    return 'queued'
+  }
+}
+
+export type ShiftReportDeliveryResult = 'sent' | 'skipped' | 'taken' | 'failed'
+
+/**
+ * Send one recorded report, at most once. The queue consumer and the cron drain both come through the claim. The text is
+ * built exactly as sendTelegramShiftReport builds it, from the clock reading and names the route recorded.
+ */
+export async function deliverTelegramShiftReport(env: Env, key: string, nowMs: number = Date.now()): Promise<ShiftReportDeliveryResult> {
+  const db = getDb(env)
+  const now = new Date(nowMs).toISOString()
+  const claimed = await db.prepare(`UPDATE telegram_shift_report_sends SET status = 'sending', claimed_at = @now, attempts = attempts + 1
+    WHERE send_key = @key AND status = 'pending' AND due_at <= @now RETURNING shift_id, payload_json`).get<{ shift_id: number; payload_json: string }>({ key, now })
+  if (!claimed) return 'taken'
+  const settle = (status: string, error: string | null, extra = '') => db.prepare(
+    `UPDATE telegram_shift_report_sends SET status = @status, last_error = @error${extra} WHERE send_key = @key AND status = 'sending'`,
+  ).run({ key, status, error, now })
+  try {
+    const config = await getTelegramConfig(env)
+    // Re-read at send time: a switch turned off since the write wins.
+    if (!config.enabled || configurationProblem(config)) { await settle('skipped', null); return 'skipped' }
+    const shift = await db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE id = @id`).get<ShiftReportSession>({ id: claimed.shift_id })
+    if (!shift) { await settle('skipped', null); return 'skipped' }
+    let payload: ShiftReportPayload
+    try { payload = JSON.parse(claimed.payload_json) as ShiftReportPayload } catch { payload = { nowMs, options: {} } }
+    const text = await shiftReportFor(env, shift, Number.isFinite(Number(payload.nowMs)) ? Number(payload.nowMs) : nowMs, config.language, payload.options ?? {})
+    await postTelegram(config, text, config.chatId, config.topics.telegram_topic_shift, 'telegram_topic_shift')
+    await settle('sent', null, ', sent_at = @now')
+    return 'sent'
+  } catch (error) {
+    // Not retried: a message part may already be in the chat and a second send would repeat it (at most once, as before 0305).
+    const message = firstCharacters(String((error as Error)?.message || error), 300)
+    console.error('[telegram] shift report could not be sent', message)
+    await settle('failed', message).catch(() => undefined)
+    return 'failed'
+  }
+}
+
+/** The cron's share: ONE due report per tick (a report is ~40 calls, the cron invocation has its own 50). */
+export async function drainDueTelegramShiftReports(env: Env, nowMs: number = Date.now()): Promise<number> {
+  const db = getDb(env)
+  const now = new Date(nowMs).toISOString()
+  let due: { send_key: string } | null | undefined
+  try {
+    await db.prepare(`UPDATE telegram_shift_report_sends SET status = 'failed', last_error = 'abandoned mid-send; not retried (at most once)'
+      WHERE status = 'sending' AND claimed_at < @stale`).run({ stale: new Date(nowMs - SHIFT_REPORT_STALE_CLAIM_MS).toISOString() })
+    due = await db.prepare(`SELECT send_key FROM telegram_shift_report_sends
+      WHERE status = 'pending' AND due_at <= @now AND (dispatch = 'fallback' OR due_at <= @queueGrace)
+      ORDER BY due_at LIMIT 1`).get<{ send_key: string }>({ now, queueGrace: new Date(nowMs - SHIFT_REPORT_QUEUE_GRACE_MS).toISOString() })
+  } catch (error) {
     if (/no such table/i.test(String((error as Error)?.message || error))) return 0
     throw error
   }
-  let sent = 0
-  for (const row of due) if ((await deliverTelegramShiftOverview(env, row.send_key, nowMs)) === 'sent') sent += 1
-  return sent
+  return due && (await deliverTelegramShiftReport(env, due.send_key, nowMs)) === 'sent' ? 1 : 0
 }
 
 // ---- Command dispatch (S4-9) ----------------------------------------------

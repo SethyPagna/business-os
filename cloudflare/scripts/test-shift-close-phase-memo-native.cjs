@@ -1,4 +1,7 @@
 'use strict'
+// WAVE 3 (shift close <= 45): the Telegram report is no longer sent from the close invocation. The close writes one telegram_shift_report_sends row (0305) and the
+// queue consumer delivers it in its own invocation; runClose below delivers it the way that consumer does (deliverTelegramShiftReport, caches reset = a cold isolate)
+// and counts its calls apart. `calls` stays the sum of both, so the memo-on/off comparison below keeps its meaning; closeCalls / reportCalls are the two invocations.
 // D1 audit wave 2, lane d1-money, item 4 (REFUTE-W2-HEAVY H5): the shift close made 68 D1 calls (161 with the Telegram report that runs in waitUntil in the same
 // invocation; Free allows 50). Several of the repeats are DELIBERATE before/after checks (the N4 inputs digest is read BEFORE the figures and re-evaluated inside the
 // commit batch; the retry loop re-reads; the kernel reads twice; the replay receipt is read before and after the handler). What the refuter allowed is a memo scoped to
@@ -189,7 +192,7 @@ async function runClose(load, { shopWide = false, requestId = 'req-close-0000000
   if (hook) hook(f)
   user = ADMIN
   const telegram = captureTelegram()
-  let close
+  let close, closeCalls = 0, reportCalls = 0, reportLogStart = 0
   try {
     f.log.length = 0; f.calls = 0
     close = await withFixedClock(async () => {
@@ -197,9 +200,19 @@ async function runClose(load, { shopWide = false, requestId = 'req-close-0000000
       await Promise.all(f.background)
       return response
     })
+    closeCalls = f.calls
+    // The queue consumer's invocation: a cold isolate, the recorded row, the shared clock reading.
+    const row = f.sql.prepare("SELECT send_key FROM telegram_shift_report_sends WHERE status = 'pending'").get()
+    if (row) {
+      load('lib/schemaProbe.ts').__resetSchemaProbeCacheForTests()
+      f.calls = 0
+      reportLogStart = f.log.length
+      await withFixedClock(() => load('lib/telegram.ts').deliverTelegramShiftReport(f.env, row.send_key))
+      reportCalls = f.calls
+    }
   } finally { telegram.restore() }
   const stored = f.sql.prepare('SELECT figures_json FROM shift_close_figures WHERE shift_session_id=?').get(id)
-  return { f, id, shifts, close, figures: stored ? stored.figures_json : null, telegram: telegram.sent, log: f.log.slice(), calls: f.calls }
+  return { f, id, shifts, close, figures: stored ? stored.figures_json : null, telegram: telegram.sent, log: f.log.slice(), calls: closeCalls + reportCalls, closeCalls, reportCalls, closeLog: f.log.slice(0, reportLogStart), reportLog: f.log.slice(reportLogStart) }
 }
 const normalizeBody = (body) => JSON.stringify(body, (key, value) => (key === 'updated_at' ? undefined : value))
 
@@ -254,15 +267,17 @@ async function main() {
 
   await check('CALLS: a cold isolate probes the report tables in ONE statement; without the combined probe it is one PRAGMA per table', async () => {
     const run = results['per-account'].shared
-    const probes = run.log.filter((entry) => /pragma_table_info/i.test(entry.sql))
+    // Two invocations now (the close, then the queue consumer's report on a cold isolate): ONE combined probe in each.
+    const probes = run.closeLog.filter((entry) => /pragma_table_info/i.test(entry.sql))
+    assert.equal(run.reportLog.filter((entry) => /pragma_table_info/i.test(entry.sql)).length, 1, 'the report invocation probes once too')
     const pragmas = run.log.filter((entry) => /^\s*PRAGMA table_info/i.test(entry.sql))
     const where = run.log.map((e, i) => (/pragma_table_info/i.test(e.sql) ? i : '')).filter((x) => x !== '').join(',')
     if (probes.length !== 1) console.log(run.log.slice(0, 14).map((e, i) => `${i} ${e.sql.replace(/\s+/g, ' ').slice(0, 110)}`).join('\n'))
-    assert.equal(probes.length, 1, `one combined probe, saw ${probes.length} at ${where} of ${run.log.length}`)
+    assert.equal(probes.length, 1, `one combined probe in the close, saw ${probes.length} at ${where} of ${run.log.length}`)
     assert.equal(pragmas.length, 0, `no per-table PRAGMA, saw ${pragmas.map((p) => p.sql).join(' | ')}`)
     const noPrefetch = createLoader({ 'lib/salesAnalytics.ts': (text) => text.replace("  if ((REPORT_COLUMN_TABLES as readonly string[]).includes(table)) await prefetchTableColumns(db, REPORT_COLUMN_TABLES)\n", '').replace('  await prefetchTableColumns(getDb(env), REPORT_COLUMN_TABLES)\n', '') })
     const control = await runClose(noPrefetch, {})
-    const controlPragmas = control.log.filter((entry) => /^\s*PRAGMA table_info/i.test(entry.sql)).length
+    const controlPragmas = control.closeLog.filter((entry) => /^\s*PRAGMA table_info/i.test(entry.sql)).length
     assert.ok(controlPragmas >= 7, `control: the per-table probes come back (${controlPragmas})`)
     console.log(`     cold-isolate column probes: ${controlPragmas} PRAGMAs -> ${probes.length} statement`)
   })

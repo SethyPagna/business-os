@@ -7,7 +7,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { BUSINESS_TZ_FORWARD, BUSINESS_UTC_OFFSET_MINUTES, localTodayExpr } from '../lib/businessDateWindow'
 import { parseContinuousReadWindow, continuousReadWindowSql } from '../lib/continuousReadWindow'
 import { hasAnyPermission, isAdminControlUser } from '../lib/permissions'
-import { scheduleTelegramShiftOverview, sendTelegramShiftReport, sendTelegramStaleShiftAlert } from '../lib/telegram'
+import { scheduleTelegramShiftOverview, scheduleTelegramShiftReport, sendTelegramShiftReport, sendTelegramStaleShiftAlert, type ShiftReportAction, type ShiftReportOptions } from '../lib/telegram'
 import { firstCharacters } from '../lib/telegramLang'
 import {
   loadShiftCloseDrift, loadShiftCloseFigures, loadShiftFigures, loadShiftReconciliation, parseShiftCloseFigures,
@@ -1202,6 +1202,20 @@ app.get('/:id/history', async (c) => {
   })
 })
 
+/**
+ * The shift report is its own send (migration 0305, lib/telegram.ts scheduleTelegramShiftReport): the write records ONE row and
+ * ONE queue message, and the queue consumer builds and posts the text in its own invocation. Off the response path, and it can
+ * never turn a committed write into a failed request. Only when the table is not there yet (0305 not applied) does the report go
+ * the way it always did, from this invocation. The clock reading and the actor names ride with the row so the text is the one
+ * this route would have sent.
+ */
+function announceShiftReport(c: { env: Env; executionCtx: { waitUntil(promise: Promise<unknown>): void } }, shift: { id: number; revision: number }, action: ShiftReportAction, options: ShiftReportOptions = {}): void {
+  const nowMs = Date.now()
+  const work = scheduleTelegramShiftReport(c.env, shift.id, shift.revision, action, nowMs, options)
+    .then((outcome) => (outcome === 'unavailable' ? sendTelegramShiftReport(c.env, shift.id, nowMs, options) : undefined))
+  try { c.executionCtx.waitUntil(work) } catch { void work }
+}
+
 app.post('/open', async (c) => {
   const user = c.get('user'); const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
   const denied = shiftPermissionError(c, user); if (denied) return denied
@@ -1242,8 +1256,7 @@ app.post('/open', async (c) => {
       if (raced && !raced.cancelled_at) return c.json({ ...currentResponse(user, raced, policy, false), already_registered: true }, 200)
       return c.json({ error: 'Cancelled shift replacement changed concurrently. Reload and try again.' }, 409)
     }
-    const report = sendTelegramShiftReport(c.env, replacement.shift.id)
-    try { c.executionCtx.waitUntil(report) } catch { void report }
+    announceShiftReport(c, replacement.shift, 'open')
     return c.json({ ...currentResponse(user, replacement.shift, policy, false),
       already_registered: false, replaced_cancelled_shift_id: existing.id }, 201)
   }
@@ -1285,8 +1298,7 @@ app.post('/open', async (c) => {
   }
   const shift = await readCurrent(db, policy, user.id, branchId)
   if (!shift) return c.json({ error: 'Shift registration could not be read back.' }, 500)
-  const report = sendTelegramShiftReport(c.env, shift.id)
-  try { c.executionCtx.waitUntil(report) } catch { void report }
+  announceShiftReport(c, shift, 'open')
   // An employee who registers today while an earlier day's drawer is still open leaves it behind the new segment:
   // closing it now overlaps today's, so only an administrator can end it. Said once per drawer, here, when it becomes
   // true: a drawer that an earlier registration already left behind was said at that registration.
@@ -1440,8 +1452,7 @@ app.post('/close', async (c) => {
   if (result.changed) {
     // The report names the closer when it is not the cashier (an administrator closing a till):
     // the stored closer's name and account id, which the close just wrote.
-    const report = sendTelegramShiftReport(c.env, shift.id, Date.now(), { closedBy: result.shift?.closed_by_user_name ?? displayName(user), closedById: result.shift?.closed_by_user_id ?? user.id })
-    try { c.executionCtx.waitUntil(report) } catch { void report }
+    announceShiftReport(c, result.shift ?? { id: shift.id, revision: shift.revision + 1 }, 'close', { closedBy: result.shift?.closed_by_user_name ?? displayName(user), closedById: result.shift?.closed_by_user_id ?? user.id })
     scheduleOverviewAfterClose(c, shift.id)
     return c.json({ shift: result.shift ? await reconciledShift(c.env, user, result.shift) : null, already_closed: false, is_open: false }, 200)
   }
@@ -1491,8 +1502,7 @@ app.post('/:id/close', async (c) => {
     note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Historic manual close', request: mutationRequest(body, id),
     timeReview: await closeTimeReview(c.env, shift, timing, reviewerName(user)) })
   if (!result.changed || !result.shift) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
-  const report = sendTelegramShiftReport(c.env, shift.id, Date.now(), { closedBy: result.shift.closed_by_user_name ?? displayName(user), closedById: result.shift.closed_by_user_id ?? user.id })
-  try { c.executionCtx.waitUntil(report) } catch { void report }
+  announceShiftReport(c, result.shift, 'close', { closedBy: result.shift.closed_by_user_name ?? displayName(user), closedById: result.shift.closed_by_user_id ?? user.id })
   scheduleOverviewAfterClose(c, shift.id)
   return c.json({ shift: await reconciledShift(c.env, user, result.shift), already_closed: false, is_open: false }, 200)
 })
@@ -1532,8 +1542,7 @@ app.post('/:id/cancel', async (c) => {
   if (batchChanges(results[0]) !== 1) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const cancelled = await readShiftById(db, id)
   if (!cancelled) return c.json({ error: 'Cancelled shift could not be read back.' }, 500)
-  const report = sendTelegramShiftReport(c.env, cancelled.id)
-  try { c.executionCtx.waitUntil(report) } catch { void report }
+  announceShiftReport(c, cancelled, 'cancel')
   return c.json({ shift: await presentShift(db, user, cancelled), cancelled: true }, 200)
 })
 
@@ -1579,8 +1588,7 @@ app.post('/:id/reopen', async (c) => {
   // A reopen is posted under the original cashier's name, so it names who reopened it: the
   // stored reopened_by_user_name (what writeContinuation just wrote). The open push that
   // replaces a CANCELLED shift goes through a different route and says nothing of the kind.
-  const report = sendTelegramShiftReport(c.env, reopened.id, Date.now(), { reopenedBy: reopened.reopened_by_user_name ?? displayName(user) })
-  try { c.executionCtx.waitUntil(report) } catch { void report }
+  announceShiftReport(c, reopened, 'reopen', { reopenedBy: reopened.reopened_by_user_name ?? displayName(user) })
   return c.json({ shift: await presentShift(db, user, reopened), reopened_from_shift_id: parent.id }, 201)
 })
 
@@ -1720,8 +1728,7 @@ app.patch('/:id', async (c) => {
   // The re-sent report names the account that amended it: the same name the amendment
   // record and the audit row above carry (displayName: the username), so the chat and
   // the app agree -- never a phone number or an email.
-  const report = sendTelegramShiftReport(c.env, saved.id, Date.now(), { amendedBy: actorName })
-  try { c.executionCtx.waitUntil(report) } catch { void report }
+  announceShiftReport(c, saved, 'amend', { amendedBy: actorName })
   // An amendment that CLOSES an open shift is a close; one that edits an
   // already closed shift is not, and schedules no second overview.
   if (!before.closed_at && saved.closed_at) scheduleOverviewAfterClose(c, saved.id)
