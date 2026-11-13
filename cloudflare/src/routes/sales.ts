@@ -805,8 +805,11 @@ app.post('/', async (c) => {
     : null
   const receiptNumberTaken = async (candidate: string) =>
     !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate]))
+  // J7: the ten candidates a mint considers are read in ONE statement (one bound JSON param), not one probe per candidate.
+  const receiptNumbersTaken = async (candidates: string[]) =>
+    (await db.prepare('SELECT receipt_number AS hit FROM sales WHERE receipt_number IN (SELECT value FROM json_each(?))').all<{ hit: string }>([JSON.stringify(candidates)])).map((row) => row.hit)
   const clientReceiptNumber = normalizeClientReceiptNumber(body.receipt_number)
-  const mintedReceiptNumberRead = clientReceiptNumber ? null : readStarted(uniqueBusinessDateTimeNumber('', receiptNumberTaken))
+  const mintedReceiptNumberRead = clientReceiptNumber ? null : readStarted(uniqueBusinessDateTimeNumber('', receiptNumbersTaken))
   const branchRowRead = body.branch_id ? readStarted(db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([body.branch_id])) : null
 
   // ---- 1b. The selling branch ----
@@ -1930,7 +1933,7 @@ app.post('/', async (c) => {
           receiptNumberRaceLost = true
           throw batchError
         }
-        adoptReceiptNumber(await uniqueBusinessDateTimeNumber('', receiptNumberTaken))
+        adoptReceiptNumber(await uniqueBusinessDateTimeNumber('', receiptNumbersTaken))
       }
     }
     const createdSale = await db.prepare(`SELECT id,receipt_number FROM sales

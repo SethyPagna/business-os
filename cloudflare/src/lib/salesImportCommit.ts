@@ -279,6 +279,9 @@ export async function applyHistoricalSaleImport(
   // fresh id and the supplied one survives as legacy_receipt_number.
   const receiptNumberTaken = async (candidate: string) =>
     !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate]))
+  // J7: a re-mint reads its ten candidates in ONE statement (one bound JSON param).
+  const receiptNumbersTaken = async (candidates: string[]) =>
+    (await db.prepare('SELECT receipt_number AS hit FROM sales WHERE receipt_number IN (SELECT value FROM json_each(?))').all<{ hit: string }>([JSON.stringify(candidates)])).map((row) => row.hit)
   let plannedReceiptNumber = input.plannedReceiptNumber || null
   const mintReceiptNumber = async () => {
     // The planned number is tried once; a lost race re-probes from the current state.
@@ -287,7 +290,7 @@ export async function applyHistoricalSaleImport(
       plannedReceiptNumber = null
       return planned
     }
-    return uniqueBusinessDateTimeNumber('', receiptNumberTaken, historicalSaleMintMoment(createdAt, input.nowIso))
+    return uniqueBusinessDateTimeNumber('', receiptNumbersTaken, historicalSaleMintMoment(createdAt, input.nowIso))
   }
   let receiptNumber = ownReceipt && !(await receiptNumberTaken(ownReceipt)) ? ownReceipt : await mintReceiptNumber()
   let legacyReceiptNumber = receiptNumber === ownReceipt ? null : suppliedReceipt || null

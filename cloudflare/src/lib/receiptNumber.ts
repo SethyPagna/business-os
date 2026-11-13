@@ -23,9 +23,22 @@ export function businessDateTimeId(now: Date = new Date()): string {
     + `-${p(local.getUTCHours())}${p(local.getUTCMinutes())}${p(local.getUTCSeconds())}`
 }
 
+// The candidates a mint considers, in order: `base`, `base-2`, ... `base-10`.
+export function numberCandidates(base: string): string[] {
+  return [base, ...Array.from({ length: 9 }, (_, index) => `${base}-${index + 2}`)]
+}
+
+/** The first candidate nobody holds; past the last one a short random suffix keeps the id unique rather than looping. */
+export function firstFreeNumber(candidates: readonly string[], taken: ReadonlySet<string>, random: () => string = () => Math.random().toString(36).slice(2, 6).toUpperCase()): string {
+  for (const candidate of candidates) if (!taken.has(candidate)) return candidate
+  return `${candidates[0]}-${random()}`
+}
+
 // Same-second writes are real on a busy POS: the first sale keeps the bare
-// timestamp id, later ones probe and take -2, -3, ... The probe cap guards
-// against a pathological burst; past it a short random suffix keeps the id
+// timestamp id, later ones take -2, -3, ... The ten candidates are read in ONE
+// statement (W3 Slice A / J7: one bound JSON param, `... IN (SELECT value FROM json_each(?))`) instead of
+// one probe per candidate; the pick is the same first free candidate the probe loop reached.
+// The cap guards against a pathological burst; past it a short random suffix keeps the id
 // unique rather than looping. The probe only picks a CANDIDATE: two
 // concurrent Workers can race between probe and INSERT (receipt_number
 // carries no UNIQUE constraint), so every sales writer re-asserts the number
@@ -43,18 +56,14 @@ export function businessDateTimeId(now: Date = new Date()): string {
 // planned number is lost to a sale from outside the import.)
 export async function uniqueBusinessDateTimeNumber(
   prefix: string,
-  exists: (candidate: string) => Promise<boolean>,
+  readTaken: (candidates: string[]) => Promise<Iterable<string>>,
   moment: Date = new Date(),
 ): Promise<string> {
   // Empty prefix = the bare timestamp id (sales receipts); no leading dash.
   const stamp = businessDateTimeId(moment)
   const base = prefix ? `${prefix}-${stamp}` : stamp
-  let candidate = base
-  for (let n = 2; await exists(candidate); n++) {
-    if (n > 10) return `${base}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
-    candidate = `${base}-${n}`
-  }
-  return candidate
+  const candidates = numberCandidates(base)
+  return firstFreeNumber(candidates, new Set(await readTaken(candidates)))
 }
 
 // A batch of receipts that share a moment (a historical import of date-only sale dates mints a whole day from one

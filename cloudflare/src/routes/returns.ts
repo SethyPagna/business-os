@@ -1654,8 +1654,9 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     }
   }
 
+  // J7: the candidates are read in ONE statement (one bound JSON param), not one probe per candidate.
   const returnNumber = body.return_number?.trim() || await uniqueBusinessDateTimeNumber(
-    'RET', async (candidate) => !!(await db.prepare('SELECT 1 AS hit FROM returns WHERE return_number=? LIMIT 1').get([candidate])),
+    'RET', async (candidates) => (await db.prepare('SELECT return_number AS hit FROM returns WHERE return_number IN (SELECT value FROM json_each(?))').all<{ hit: string }>([JSON.stringify(candidates)])).map((row) => row.hit),
   )
   type SaleMeta = {
     receipt_number: string | null; customer_id: number | null; customer_name: string | null
@@ -2086,7 +2087,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   const replacementPaymentMethod = replacementUnpaid ? null : String(body.replacement_payment_method || '').trim() || DEFAULT_REPLACEMENT_PAYMENT_METHOD
   const replacementStatus = replacementUnpaid ? 'awaiting_payment' : 'completed'
   if (replacementLines.length) {
-    replacementReceiptNumber = await uniqueBusinessDateTimeNumber('', async (candidate) => !!(await db.prepare('SELECT 1 FROM sales WHERE receipt_number=? LIMIT 1').get([candidate])))
+    replacementReceiptNumber = await uniqueBusinessDateTimeNumber('', async (candidates) => (await db.prepare('SELECT receipt_number AS hit FROM sales WHERE receipt_number IN (SELECT value FROM json_each(?))').all<{ hit: string }>([JSON.stringify(candidates)])).map((row) => row.hit))
     const subtotalUsd = Number(replacementLines.reduce((sum, line) => sum + line.totalUsd, 0).toFixed(2))
     const exchangeRate = returnExchangeRate
     replacementTotals = computeSaleTotals({
@@ -2809,7 +2810,7 @@ app.post('/supplier', async (c) => {
   // SRET-YYYYMMDD-HHMMSS, same convention as the customer-return path above.
   const returnNumber = body.return_number?.trim() || await uniqueBusinessDateTimeNumber(
     'SRET',
-    async (candidate) => !!(await db.prepare('SELECT 1 AS hit FROM returns WHERE return_number = ? LIMIT 1').get([candidate])),
+    async (candidates) => (await db.prepare('SELECT return_number AS hit FROM returns WHERE return_number IN (SELECT value FROM json_each(?))').all<{ hit: string }>([JSON.stringify(candidates)])).map((row) => row.hit),
   )
   const branchName = body.branch_id
     ? (await db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([body.branch_id]))?.name || null
