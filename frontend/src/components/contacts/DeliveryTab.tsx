@@ -386,7 +386,10 @@ function DeliveryForm({ contact, onSave, onUseExisting, onClose, t }: DeliveryFo
       const baseline = { phone: baselinePrimary.phone || init.phone || '', address: serializeDeliveryOptions(initialOptions) }
       const result = await Promise.resolve(onSave(payload, contact ? untouchedPhoneFields(baseline, payload, 'area') : ALL_PHONE_FIELDS_SENT))
       const nextCheck = (result as { duplicateDecisionRequired?: ContactDuplicateCheck } | null)?.duplicateDecisionRequired
-      if (nextCheck) {
+      if (nextCheck && nextCheck.matches.length === 0) {
+        // The server refused a duplicate phone but could name no owner: say so and keep the form editable (no empty review).
+        setLocalError(t('phone_belongs_to_other_contact') || 'This phone number already belongs to another contact.')
+      } else if (nextCheck) {
         setServerDuplicateCheck(nextCheck)
         setLocalError(t('contact_duplicate_review_changed') || 'Review the current possible duplicate records before saving.')
       } else if (duplicateDecision && (result as { success?: boolean } | null)?.success === true) {

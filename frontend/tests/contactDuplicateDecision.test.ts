@@ -194,4 +194,26 @@ test('a duplicate-phone 409 with no nameable owner shows a translated notice and
   }
 })
 
+test('every duplicate-409 call site handles an empty-matches refusal with a translated notice or hands it to a form that does', () => {
+  const sites: Array<[string, string]> = [
+    ['../src/components/pos/POS.tsx', 'phone_belongs_to_other_customer'],
+    ['../src/components/pos/POS.tsx', 'phone_belongs_to_other_contact'],
+    ['../src/components/contacts/CustomerFormModal.tsx', 'phone_belongs_to_other_customer'],
+    ['../src/components/contacts/DeliveryTab.tsx', 'phone_belongs_to_other_contact'],
+    ['../src/components/contacts/SuppliersTab.tsx', 'phone_belongs_to_other_contact'],
+  ]
+  for (const [file, key] of sites) assert.ok(read(file).includes(key), `${file} uses ${key}`)
+  // CustomersTab and CustomerSourceModal return the check to CustomerFormModal, which owns the empty-matches notice.
+  for (const file of ['../src/components/contacts/CustomersTab.tsx', 'CustomerSourceModal.tsx'.replace(/^/, '../src/components/contacts/')]) {
+    assert.ok(read(file).includes('return { duplicateDecisionRequired'), `${file} hands the check to the form`)
+  }
+  const calls = ['pos/POS.tsx', 'contacts/CustomersTab.tsx', 'contacts/CustomerSourceModal.tsx', 'contacts/DeliveryTab.tsx', 'contacts/SuppliersTab.tsx']
+    .reduce((n, f) => n + read('../src/components/' + f).split('readContactDuplicateDecisionError(').length - 1, 0)
+  assert.equal(calls, 6, 'a new readContactDuplicateDecisionError call site must be added to this test')
+  for (const lang of ['en', 'km']) {
+    const pack = JSON.parse(read(`../src/lang/${lang}.json`)) as Record<string, string>
+    assert.equal(typeof pack.phone_belongs_to_other_contact, 'string', lang)
+  }
+})
+
 if (failed) process.exit(1)

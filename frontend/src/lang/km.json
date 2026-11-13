@@ -89,6 +89,7 @@
   "sale_customer_choices_load_failed": "មិនអាចស្វែងរកអតិថិជនបានទេ។",
   "sale_customer_conflict": "ការលក់នេះបានផ្លាស់ប្តូរមុនពេលរក្សាទុកតំណអតិថិជន។ សូមផ្ទុកឡើងវិញ ហើយពិនិត្យម្តងទៀត។",
   "phone_belongs_to_other_customer": "លេខទូរសព្ទនេះជារបស់អតិថិជនផ្សេងរួចហើយ។",
+  "phone_belongs_to_other_contact": "លេខទូរសព្ទនេះជារបស់ទំនាក់ទំនងផ្សេងរួចហើយ។",
   "sale_customer_name_exists": "មានអតិថិជនដែលមានឈ្មោះនេះរួចហើយ។ សូមដោះស្រាយកំណត់ត្រាស្ទួននៅផ្នែកទំនាក់ទំនង។",
   "sale_customer_profile_update_failed": "មិនអាចកែអតិថិជនបានទេ។",
   "sale_customer_profile_updated": "បានកែអតិថិជន។",

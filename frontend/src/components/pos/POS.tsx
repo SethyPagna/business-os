@@ -2220,6 +2220,7 @@ export default function POS() {
       setNewDeliveryForm({ name: '', phone: '', area: '' })
     } catch (e) {
       const duplicateCheck = readContactDuplicateDecisionError(e)
+      if (duplicateCheck && duplicateCheck.matches.length === 0) { notify(t('phone_belongs_to_other_contact'), 'error'); return }
       if (duplicateCheck) { setDeliveryDuplicateCheck(duplicateCheck); return }
       notify(getErrorMessage(e), 'error')
     } finally {
