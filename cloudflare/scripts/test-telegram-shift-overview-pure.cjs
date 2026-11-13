@@ -480,7 +480,6 @@ async function main() {
   check('a duplicate queue delivery sends nothing', (await telegram.deliverTelegramShiftOverview(envPaid, paidKey, T0 + 61_000)) === 'taken' && posts.length === 1)
   check('the cron drain afterwards sends nothing', (await telegram.drainDueTelegramShiftOverviews(envPaid, T0 + 3_600_000, { sweepStale: true })) === 0 && posts.length === 1)
   // 6.0.984: the every-5-minutes cron tick must not scan the schema.
-  telegram.__resetScheduledSendsProbeForTests()
   const idleFrom = preparedSql.length
   check('an idle cron tick sends nothing', (await telegram.drainDueTelegramShiftOverviews(envPaid, T0 + 7_200_000, { limit: 10, sweepStale: true })) === 0)
   const idleSql = preparedSql.slice(idleFrom)
