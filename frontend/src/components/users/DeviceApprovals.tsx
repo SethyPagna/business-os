@@ -328,7 +328,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
   const unmarkShop = async (shop: ShopDeviceRecord) => {
     const confirmed = await askToConfirm({
       title: tr(t, 'shop_device_unmark_title', 'Remove shop device?'),
-      message: tr(t, 'shop_device_unmark_confirm', 'Employees who signed in here through the shop device are signed out now, and each employee needs an approval again to sign in on this device. The device gets a new identity at its next sign-in, so a copied login cookie stops working; to make it a shop device again, mark its new request.'),
+      message: tr(t, 'shop_device_unmark_confirm', 'Employees who signed in here through the shop device are signed out now, and each employee needs an approval again to sign in on this device. The device gets a new identity at its next sign-in, so a copy of its sign-in stops working; to make it a shop device again, mark its new request.'),
       items: [{ label: tr(t, 'shop_device_name', 'Shop device name'), value: shop.label }],
       confirmLabel: tr(t, 'shop_device_unmark', 'Remove shop device'),
       danger: true,

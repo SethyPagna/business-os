@@ -52,6 +52,11 @@ for (const [key, text] of [...Object.entries(en), ...Object.entries(km)]) {
   if (!/^(shop_device|device_)/.test(key) || typeof text !== 'string') continue
   assert.doesNotMatch(text, /cookie|\bids?\b|ខូគី/i, `${key} says cookie or id`)
 }
+// B8 L-d: the panel's fallback text shows if a key is ever missing, so it must be the pack's words, never the old "cookie" wording.
+for (const m of panel.matchAll(/tr\(t, '((?:shop_device|device_)[a-z_]*)', '((?:[^'\\]|\\.)*)'/g)) {
+  if (typeof en[m[1]] === 'string') assert.equal(m[2], en[m[1]], `the panel fallback for ${m[1]} is the English pack text`)
+}
+assert.doesNotMatch(panel, /cookie(?!_bound_at)/i, 'the panel source has no user-facing cookie wording')
 assert.match(en.shop_device_unmark_confirm, /signed out/i, 'the unmark warning says employees are signed out')
 assert.match(en.shop_device_unmark_confirm, /new identity[^.]*copy of its sign-in stops working/i, 'the unmark warning says the device gets a new identity and a copied sign-in stops')
 // M-A (release review): a device whose browser never had the cookie cannot be marked; the buttons are disabled with the reason, and the refusal is translated.
