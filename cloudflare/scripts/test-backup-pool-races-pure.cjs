@@ -488,6 +488,38 @@ async function mainRaces() {
     assert.ok(!done.manifestAssetsStale)
   })
 
+  await checkAsync('R6-1: continuation of a set the sweep already read reuses an old, doomed pool object after a version change', async () => {
+    const assets = imageSet(3)
+    const V = Buffer.from(png(4000)), W = Buffer.from(png(4001)), X = Buffer.from(png(4002))
+    assets['uploads/zz.png'] = { body: V, ...IMG }
+    const env = makeEnv(assets)
+    await night(env, 0, 'manual')                       // M0 names zz@V
+    env.ASSETS._set('uploads/zz.png', W, IMG)
+    await night(env, 1, 'manual')                       // M1 names zz@W; keep 2 keeps both
+    for (let i = 0; i < 120; i++) env.ASSETS._set(`uploads/new-${String(i).padStart(4, '0')}.png`, Buffer.from(png(5000 + i)), IMG)
+    env.ASSETS._set('uploads/zz.png', X, IMG)
+    const b = await withClock(2, () => createCloudflareBackup(env, 'manual'))   // B: 100 copies, zz@X still pending
+    const bName = b.name.replace(/\.json$/, '')
+    env.ASSETS._set('uploads/zz.png', V, IMG)           // reverted to V (bytes of a version pooled on day 0)
+    const realDelete = env.ASSETS.delete.bind(env.ASSETS)
+    let fired = false
+    env.ASSETS.delete = async (keys) => {
+      const list = Array.isArray(keys) ? keys : [keys]
+      if (!fired && list.some((k) => k.startsWith(POOL))) {
+        fired = true
+        await withClock(2, () => drain(env))           // B's continuation slice runs between P's pool list and P's delete
+      }
+      return realDelete(keys)
+    }
+    await withClock(2, () => pruneCloudflareBackups(env, 1)) // P evicts M0: zz@V unpinned (P read B's sidecar naming zz@X)
+    env.ASSETS.delete = realDelete
+    const st = await stateOf(env, bName)
+    const zz = st.assets.find((a) => a.key === 'uploads/zz.png')
+    env.ASSETS._set('uploads/zz.png', Buffer.from('damaged'))
+    const r = await withClock(2, () => restoreOwned(env, bName + '.json'))
+    assert.ok(!(st.status === 'finalized' && r.missingAssets), 'HOLE: finalized set names a pool object that is gone')
+  })
+
   console.log(`\n${passed} check(s) passed.`)
 }
 mainRaces().catch((e) => { console.log('FAIL', e.stack || e.message); process.exitCode = 1 })

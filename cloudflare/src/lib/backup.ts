@@ -1342,15 +1342,16 @@ async function listBackupSetNames(env: Env): Promise<{ manifestNames: Set<string
 
 /**
  * The sweep read the sidecars first and deletes afterwards, so a backup that started in between (its sidecar was not
- * visible) may name an object that was just deleted. After the delete, every set that appeared is checked: a deleted
+ * visible) may name an object that was just deleted, and a set the sweep did read can rename itself to a doomed object
+ * (a continuation reusing an older version). After the delete, EVERY set is re-checked: a deleted
  * object it names is put back from uploads/ when the source still has that exact version; a version the source no
  * longer has moves the key back to pending (the set is reopened and copies the current bytes), so no set stays finalized
  * while naming an object that is gone.
  */
-async function repairSetsStartedDuringSweep(env: Env, namesSeen: ReadonlySet<string>, doomed: ReadonlySet<string>): Promise<void> {
+async function repairSetsStartedDuringSweep(env: Env, doomed: ReadonlySet<string>): Promise<void> {
   const { names } = await listBackupSetNames(env)
   for (const name of names) {
-    if (namesSeen.has(name) || `${CLOUDFLARE_BACKUP_PREFIX}${name}`.startsWith(DRIVE_STAGED_BACKUP_PREFIX)) continue
+    if (`${CLOUDFLARE_BACKUP_PREFIX}${name}`.startsWith(DRIVE_STAGED_BACKUP_PREFIX)) continue
     const state = await getCloudflareBackupState(env, name)
     if (!state || state.assetLayout !== ASSET_LAYOUT_POOL) continue
     const unrecoverable = new Set<string>()
@@ -1413,7 +1414,7 @@ async function sweepAssetPool(env: Env): Promise<{ removed: number; skipped?: st
     doomed.push(poolKey)
   }
   for (let offset = 0; offset < doomed.length; offset += 500) await env.ASSETS.delete(doomed.slice(offset, offset + 500))
-  if (doomed.length) await repairSetsStartedDuringSweep(env, names, new Set(doomed))
+  if (doomed.length) await repairSetsStartedDuringSweep(env, new Set(doomed))
   return { removed: doomed.length }
 }
 
