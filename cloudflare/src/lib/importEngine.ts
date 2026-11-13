@@ -87,7 +87,7 @@ import {
 import { parseImportCost, importCostSource, parseImportNumericValue, normalizeImportMoney, normalizeImportSellingPrice } from './importNumbers'
 import { createMembershipNumberAllocator, membershipGlob } from './membershipNumber'
 import { buildImportedContactState, contactDisplayAddress, deliveryDisplayAddress } from './contactOptions'
-import { collectContactPhones, contactDuplicateWriteGuardStatement, formatContactOptionPhones, formatPhoneP8, normalizeContactName } from './contactDuplicates'
+import { collectAllContactPhones, collectContactPhones, contactDuplicateWriteGuardStatement, formatContactOptionPhones, formatPhoneP8, normalizeContactName } from './contactDuplicates'
 import { canonicalizePhone } from './phone'
 import { MASKED_PHONE_MESSAGE, rowHasMaskedPhone } from './phoneWriteGuard'
 import { scrubMaskedInput } from './phoneAccess'
@@ -2519,7 +2519,8 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
     ? new Map<string, ExistingContact[]>()
     : null
   for (const record of existing) {
-    for (const phoneKey of collectContactPhones(record, contactMode)) {
+    // Every stored option, like the write guard: a phone on a 4th option must resolve to its owner here, or the row reads as a create and the guard aborts the apply.
+    for (const phoneKey of collectAllContactPhones(record, contactMode)) {
       const contacts = byPhone.get(phoneKey) || []
       contacts.push(record)
       byPhone.set(phoneKey, contacts)

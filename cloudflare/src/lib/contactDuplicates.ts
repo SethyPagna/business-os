@@ -251,7 +251,7 @@ export function collectContactPhones(row: { phone?: unknown; address?: unknown }
 }
 
 // Classifier-only twin of collectContactPhones: reads EVERY stored option (the write guard does), not the first CONTACT_OPTION_LIMIT.
-function collectAllContactPhones(row: { phone?: unknown; address?: unknown }, mode: ContactOptionMode = 'address'): string[] {
+export function collectAllContactPhones(row: { phone?: unknown; address?: unknown }, mode: ContactOptionMode = 'address'): string[] {
   const phones = new Set<string>()
   const primary = normalizePhone(row.phone)
   if (primary) phones.add(primary)

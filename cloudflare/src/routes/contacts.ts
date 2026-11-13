@@ -558,13 +558,10 @@ async function duplicateBlockAfterGuardFailure(
   error?: unknown,
 ): Promise<{ body: Record<string, unknown>; status: number } | null> {
   const db = getDb(env)
-  const { matches, review } = await excludeAnonymousCustomerDuplicateState(
-    db,
-    config,
-    // This runs only after a write guard refused, so it reads today's FULL statement (no digits-index narrowing): a number the index cannot show
-    // must still name its owner here, or the refusal has no explanation and surfaces as a 500.
-    await findContactDuplicateState(db, config.table, subject, config.optionMode, { fullScan: true }),
-  )
+  // This runs only after a write guard refused, so it reads today's FULL statement (no digits-index narrowing): a number the index cannot show
+  // must still name its owner here, or the refusal has no explanation and surfaces as a 500.
+  const rawState = await findContactDuplicateState(db, config.table, subject, config.optionMode, { fullScan: true })
+  const { matches, review } = await excludeAnonymousCustomerDuplicateState(db, config, rawState)
   // A hard phone owner is the reason the guard refused: answer with it before the decision check, so a stale reviewed set can never hide it.
   const phoneOwner = matches.find((match) => match.severity === 'phone_conflict')
   if (phoneOwner) return duplicateErrorResponse(config.entity, phoneOwner, matches, review)
@@ -576,9 +573,13 @@ async function duplicateBlockAfterGuardFailure(
   }
   const unexpected = matches.find((match) => match.severity === 'phone_conflict' || match.severity === 'exact_match')
   if (unexpected) return duplicateErrorResponse(config.entity, unexpected, matches, review)
-  // The write guard's own refusal (its INSERT ... SELECT collides on the owner's primary key) with no owner nameable: a duplicate must still be a 409, never a 500.
-  if (error != null && /UNIQUE constraint failed: \w+\.id\b/i.test(error instanceof Error ? error.message : String(error))) {
-    return { status: 409, body: { error: `This phone number is already registered to another ${config.entity}. Each phone number can only belong to one ${config.entity}.`, code: 'contact_duplicate_decision_required', duplicate: { matches, duplicateReview: review, allowedActions: [] }, matches, duplicateReview: review, allowedActions: [] } }
+  // The write guard's own refusal is its INSERT ... SELECT colliding on the owner's primary key, `<table>.id`. The guard does not skip walk-in (anonymous) customers but the
+  // review above does, so such an owner is dropped from `matches`: name it from the unfiltered state with the normal duplicate shape. The refusal is a 409, never a 500.
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  if (message.includes(`UNIQUE constraint failed: ${config.table}.id`)) {
+    const hiddenOwner = rawState.matches.find((match) => match.severity === 'phone_conflict')
+    if (hiddenOwner) return duplicateErrorResponse(config.entity, hiddenOwner, [hiddenOwner], buildContactDuplicateReview([hiddenOwner]))
+    return { status: 409, body: { error: `This phone number already belongs to another ${config.entity}.`, code: 'contact_duplicate_decision_required', duplicate: { matches, duplicateReview: review, allowedActions: [] }, matches, duplicateReview: review, allowedActions: [] } }
   }
   return null
 }

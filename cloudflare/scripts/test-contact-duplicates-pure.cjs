@@ -90,6 +90,7 @@ async function main() {
     assert.strictEqual(classifyContactDuplicates({ name: 'Newcomer', phones: ['011222304'] }, [three]).length, 0)
     // display/edit parse and collectContactPhones stay capped at 3
     assert.ok(!moduleObj.exports.collectContactPhones(owner).includes('011222304'))
+    assert.ok(moduleObj.exports.collectAllContactPhones(owner).includes('011222304'), 'the import classifier reads existing contacts through this collector')
   })
 
   await runTest('classifyContactDuplicates: phone_conflict outranks exact_match outranks name_only', async () => {

@@ -63,6 +63,8 @@ async function main() {
       return { status: r.status, json, text }
     }
     const count = async () => (await db.prepare('SELECT COUNT(*) c FROM customers').first()).c
+    // A walk-in (anonymous) customer owns a number: the guard refuses it, the duplicate review hides walk-ins, so the owner must still be named (was a 500).
+    await db.prepare("INSERT INTO customers (id,name,phone,phone_normalized,membership_number,is_anonymous) VALUES (70,'Walk-in Owner','011 999 777','011999777','LC-70',1)").run()
     const before = await count()
     const moverBefore = await db.prepare('SELECT name, phone, phone_normalized, address FROM customers WHERE id = 900').first()
     let passed = 0
@@ -75,12 +77,22 @@ async function main() {
       assert.equal(put.status, 409, `${label}: PUT /customers/:id must refuse with 409, got ${put.status} ${put.text.slice(0, 160)}`)
       assert.ok(JSON.stringify(put.json).includes(ownerName), `${label}: the PUT refusal names ${ownerName}: ${put.text.slice(0, 160)}`)
 
-      const resolve = await send('POST', '/customers/link-conflicts/resolve-missing', { name: 'Newcomer', phone: typed, phone_key: typed.replace(/D/g, '') })
+      const resolve = await send('POST', '/customers/link-conflicts/resolve-missing', { name: 'Newcomer', phone: typed, phone_key: typed.replace(/\D/g, '') })
       assert.equal(resolve.status, 409, `${label}: resolve-missing must refuse with 409, got ${resolve.status} ${resolve.text.slice(0, 160)}`)
       assert.ok(JSON.stringify(resolve.json).includes(ownerName), `${label}: the resolve-missing refusal names ${ownerName}: ${resolve.text.slice(0, 160)}`)
       passed += 1
       console.log(`PASS ${label}`)
     }
+    for (const [what, r] of [['POST /customers', await send('POST', '/customers', { name: 'Newcomer', phone: '011 999 777' })], ['PUT /customers/:id', await send('PUT', '/customers/900', { name: 'Mover', phone: '011 999 777' })],
+      ['resolve-missing', await send('POST', '/customers/link-conflicts/resolve-missing', { name: 'Newcomer', phone: '011 999 777', phone_key: '011999777' })]]) {
+      assert.equal(r.status, 409, `walk-in owner ${what}: expected 409, got ${r.status} ${r.text.slice(0, 160)}`)
+      assert.equal(r.json.code, 'contact_duplicate_decision_required', `walk-in owner ${what} code`)
+      assert.ok(r.json.matches.length === 1 && r.json.matches[0].id === 70 && r.json.matches[0].severity === 'phone_conflict', `walk-in owner ${what} names the owner: ${r.text.slice(0, 200)}`)
+      assert.equal(r.json.duplicate.id, 70)
+      assert.ok(JSON.stringify(r.json).includes('Walk-in Owner'))
+    }
+    passed += 1
+    console.log('PASS walk-in (anonymous) owner: 409 naming the owner on all three writers')
     assert.equal(await count(), before, 'no customer was created by any of the three writers')
     assert.deepEqual(await db.prepare('SELECT name, phone, phone_normalized, address FROM customers WHERE id = 900').first(), moverBefore, 'the refused PUTs changed nothing')
     // Control: the same two writers accept a number nobody owns, so the 409s above are the duplicate guard and not a refusal of the route itself.
