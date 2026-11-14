@@ -83,7 +83,7 @@ runTest('PaginationControls keeps the item count and the back/next controls', ()
   // X-Y of Z", the compact layouts' "X-Y" chip).
   // Owner 14 Nov: every layout prints one `rangeText` ("21-40 of 1,234") between Back and the page number.
   assert.match(paginationCode, /\{showingLabel\} <\/span>\{rangeText\}/)
-  assert.match(paginationCode, /\$\{start\.toLocaleString\(\)\}-\$\{end\.toLocaleString\(\)\} \$\{ofLabel\} \$\{total\.toLocaleString\(\)\}/)
+  assert.match(paginationCode, /\$\{start\.toLocaleString\(\)\}-\$\{end\.toLocaleString\(\)\} \/ \$\{total\.toLocaleString\(\)\}/)
 })
 
 runTest('onPageSizeChange stays a supported prop for existing callers', () => {

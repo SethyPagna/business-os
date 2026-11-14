@@ -146,11 +146,11 @@ export default function PaginationControls({
   const showingLabel = typeof t === 'function' ? (t('showing') || 'Showing') : 'Showing'
   const backLabel = typeof t === 'function' ? (t('back') || 'Back') : 'Back'
   const nextLabel = typeof t === 'function' ? (t('next') || 'Next') : 'Next'
-  // Owner 14 Nov order: [Back] [item range of total] [page / pages] [Next]. The range is plain
+  // Owner 14 Nov order: [Back] [item range / total] [page / pages] [Next]. The range is plain
   // text; with an unknown total (cursor pagers) it is the range alone, never a made-up total.
   const rangeText = unknownTotal
     ? `${start.toLocaleString()}-${end.toLocaleString()}`
-    : `${start.toLocaleString()}-${end.toLocaleString()} ${ofLabel} ${total.toLocaleString()}`
+    : `${start.toLocaleString()}-${end.toLocaleString()} / ${total.toLocaleString()}`
   const isTop = (position ?? contextPosition) === 'top'
   // One dense row on a 375px phone: below 400px Back/Next keep their icon and carry the label
   // as tooltip + accessible name (button policy); from 400px up the word is shown too.
@@ -394,7 +394,7 @@ export default function PaginationControls({
     const textSize = dense ? 'text-[9px]' : 'text-[11px]'
     return (
       <div className={`max-w-full rounded-xl border border-slate-200 bg-white/80 ${dense ? 'px-0.5' : 'px-1'} py-1.5 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300 ${className}`}>
-        {/* One row, owner 14 Nov order: Back, item range of total, page / pages, Next. */}
+        {/* One row, owner 14 Nov order: Back, item range / total, page / pages, Next. */}
         <div className="mx-auto flex w-fit max-w-full items-center justify-center rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
           <button
             type="button"
@@ -414,8 +414,8 @@ export default function PaginationControls({
                 type="text"
                 inputMode="numeric"
                 aria-label={pageLabel}
-                style={{ width: dense ? `calc(${compactDigits}ch + 0.5rem)` : `max(2.25rem, calc(${compactDigits}ch + 0.5rem))` }}
-                className={`h-7 ${dense ? '' : 'min-w-9'} border-0 bg-transparent px-0 text-center ${textSize} font-semibold text-slate-700 outline-none dark:text-slate-100`}
+                style={{ width: `max(2.25rem, calc(${compactDigits}ch + 0.5rem))` }}
+                className={`h-7 min-w-9 border-0 bg-transparent px-0 text-center ${textSize} font-semibold text-slate-700 outline-none dark:text-slate-100`}
                 value={compactDraft}
                 onChange={(event) => {
                   setPageDraft(boundedDraft(event.target.value))
@@ -451,7 +451,7 @@ export default function PaginationControls({
     <div className={`rounded-xl border border-slate-200 bg-white/80 px-1 py-1.5 text-xs sm:px-3 sm:py-2 text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300 ${className}`}>
       {/* P10-20: no rows-per-page selector. Owner 14 Nov: ONE row, Back, the item range of
           the total, page / pages, Next. The long "Showing ... label" wording is for wider
-          screens; a phone keeps just "21-40 of 1,234" so the row stays one line. */}
+          screens; a phone keeps just "21-40 / 1,234" so the row stays one line. */}
       <div className="mx-auto flex w-fit max-w-full items-center overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
         <button
           type="button"

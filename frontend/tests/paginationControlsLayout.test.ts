@@ -7,7 +7,7 @@ import path from 'node:path'
 import { createServer, transformWithEsbuild } from 'vite'
 import { closeBrowserFixture, closeCdpBrowser, removeBrowserProfile, waitForBrowser } from './browserProfileTeardown.ts'
 
-// Owner 14 Nov: every pager reads [Back] [item range "21-40 of 1,234"] [page / pages] [Next], on ONE row,
+// Owner 14 Nov: every pager reads [Back] [item range "21-40 / 1,234"] [page / pages] [Next], on ONE row,
 // and is mounted twice (<TopPager> above, plain below) from a single element. The REAL PaginationControls
 // runs in headless Chrome in every layout, in English and Khmer, from 320px to desktop, with five-digit
 // totals. PAGER_SCREENSHOT_DIR, when set, receives one screenshot per width and language.
@@ -220,7 +220,7 @@ try {
       const order = m.order as string[]
       const rangeIndex = order.indexOf('range'), pageIndex = order.indexOf('page'), nextIndex = order.length - 1
       assert.ok(rangeIndex > 0 && pageIndex > rangeIndex && nextIndex > pageIndex, `${where}: order is Back, range, page, Next (${JSON.stringify(order)})`)
-      assert.match(m.rangeText as string, /^(Showing |កំពុងបង្ហាញ )?10,001-10,020 (of|នៃ) 123,456/, `${where}: the range reads "a-b of total" (${m.rangeText})`)
+      assert.match(m.rangeText as string, /^(Showing |កំពុងបង្ហាញ )?10,001-10,020 \/ 123,456/, `${where}: the range reads "a-b / total" (${m.rangeText})`)
       assert.equal(m.oneRow, true, `${where}: one row (${JSON.stringify(m)})`)
       assert.equal(m.clipped, false, `${where}: the range and page text are fully visible, never clipped`)
       assert.equal(m.overflow, false, `${where}: nothing runs off the viewport`)
