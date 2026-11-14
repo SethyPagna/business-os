@@ -44,6 +44,7 @@ const EXCLUDED = {
   bulk_delete_jobs: 'transient job state',
   telegram_scheduled_sends: '0194: a send queue, deliberately not backed up (see its migration header)',
   telegram_shift_report_sends: '0305: the shift report send queue, deliberately not backed up (a restore must not replay old reports; see its migration header)',
+  sales_daily_totals: '0308: derived cache of the sales tables (one row per business date), rebuilt by the recompute cron; a restore rotates the data epoch, which makes every stored day unservable until recomputed (see its migration header)',
   stock_crossing_alerts: '0272: an alert log and once-per-crossing claim, deliberately not backed up (see its migration header)',
   // Telemetry and logs.
   rfid_events: 'scan telemetry',
