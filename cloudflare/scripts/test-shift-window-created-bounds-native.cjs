@@ -4,7 +4,7 @@
 // and the datetime() terms still decide. Pinned here:
 //   - DIFFERENTIAL over 300+ windows and rows stored in every shape the app has written or could (SQLite 'YYYY-MM-DD HH:MM:SS', ISO 'T...Z' with milliseconds, and
 //     offset forms +07:00 / -05:00 / +14:00 / -12:00 / +05:30): the new clauses select exactly the rows the datetime()-only clauses select;
-//   - DISCRIMINATING: the plausible wrong bounds (+1 day above, no -1 day below) lose rows in the same windows, so the test goes red on them;
+//   - DISCRIMINATING: the plausible wrong bounds (+1 day above, a date-granular floor, +13 / -11 hours) lose rows in the same windows, so the test goes red on them;
 //   - the planner SEARCHes sales and returns by their created_at index (and SCANs with the datetime()-only form), for the clauses the code really emits;
 //   - what the plain bounds cannot hold (a Julian-day number or a time-only text) and why no writer produces it: the writer census below.
 //
@@ -80,6 +80,7 @@ for (let s = 0; s < 6; s++) {
   const at = new Date(Date.UTC(2026, 10, 4) + s * 5 * 3600 * 1000).toISOString()
   windows.push({ from: at }, { to: at })
 }
+for (const t of ['T11:00:00Z', 'T11:30:00Z', 'T11:59:59Z', 'T05:00:00Z', 'T16:59:00Z', 'T17:00:00Z', 'T23:59:00Z']) for (const d of [3, 4, 7]) for (const hours of [1, 8, 30]) { const from = Date.parse(day(d) + t); windows.push({ from: new Date(from).toISOString(), to: new Date(from + hours * 3600 * 1000).toISOString() }) }
 assert.ok(windows.length >= 288)
 
 const ids = (table, clauses, params) => db.prepare(`SELECT id FROM ${table} AS ${table} WHERE ${clauses.join(' AND ') || '1'} ORDER BY id`).all(params).map((r) => r.id)
@@ -113,26 +114,39 @@ check('DIFFERENTIAL: the emitted clauses select exactly the rows of the datetime
   const cashier = shiftWindowWhere('sales', { createdFrom: windows[3].from, createdTo: windows[3].to, cashierId: 3 })
   assert.deepEqual(ids('sales', cashier.clauses, cashier.params), ids('sales', exactClauses('sales', cashier.params.createdFrom, cashier.params.createdTo).concat('sales.cashier_id = @cashierId'), cashier.params))
 })
-check('the datetime() terms are still there (the plain bounds only prune), with the bounds widened to the day before the Cambodia business date below and two days above', () => {
+check('the datetime() terms are still there (the plain bounds only prune), with the bounds widened to twelve hours below and two days above', () => {
   const { clauses } = shiftWindowWhere('sales', { createdFrom: '2026-11-05T00:00:00Z', createdTo: '2026-11-06T00:00:00Z' })
   assert.deepEqual(clauses, [
-    `sales.created_at >= ${"date(date(@createdFrom, '+7 hours'), '-1 day')"}`, 'datetime(sales.created_at) >= @createdFrom',
+    "sales.created_at >= datetime(@createdFrom, '-12 hours')", 'datetime(sales.created_at) >= @createdFrom',
     "sales.created_at < date(@createdTo, '+2 day')", 'datetime(sales.created_at) < @createdTo',
   ])
   assert.deepEqual(shiftWindowWhere('sales', {}).clauses, [], 'a caller with no shift keys emits nothing')
 })
-check('DISCRIMINATING: an upper bound of +1 day loses +07:00 rows in many windows; a lower bound without -1 day loses -05:00/-12:00 rows; the shipped form loses none', () => {
-  const plusOne = lost((table, p) => ids(table, [`${table}.created_at >= ${"date(date(@createdFrom, '+7 hours'), '-1 day')"}`, `${table}.created_at < date(@createdTo, '+1 day')`, ...exactClauses(table, true, true)], p))
-  const noMinus = lost((table, p) => ids(table, [`${table}.created_at >= date(date(@createdFrom, '+7 hours'))`, `${table}.created_at < date(@createdTo, '+2 day')`, ...exactClauses(table, true, true)], p))
+// The floor expression is read OUT of the emitted clause, and every mutant is that clause with the floor (or the upper bound) swapped, so no copy of the formula is evaluated here.
+const emitted = shiftWindowWhere('sales', { createdFrom: '2026-11-05T00:00:00Z', createdTo: '2026-11-06T00:00:00Z' }).clauses
+const FLOOR_PREFIX = 'sales.created_at >= '
+const floorExpr = emitted[0].slice(FLOOR_PREFIX.length)
+const mutants = {
+  plusOneAbove: (c) => c.replace("date(@createdTo, '+2 day')", "date(@createdTo, '+1 day')"),
+  dateGranular: (c) => c.replace(floorExpr, 'date(@createdFrom)'),
+  plus13: (c) => c.replace(floorExpr, "datetime(@createdFrom, '+13 hours')"),
+  minus11: (c) => c.replace(floorExpr, "datetime(@createdFrom, '-11 hours')"),
+}
+const mutate = (name, table, p) => shiftWindowWhere(table, { createdFrom: p.createdFrom, createdTo: p.createdTo }).clauses.map(mutants[name])
+check('DISCRIMINATING: +1 day above, a date-granular floor, +13 hours and -11 hours each lose rows in the DIFFERENTIAL (clauses mutated from the emitted ones); the shipped clauses lose none', () => {
+  for (const name of Object.keys(mutants)) assert.notDeepEqual(mutate(name, 'sales', { createdFrom: '2026-11-05 00:00:00', createdTo: '2026-11-06 00:00:00' }), emitted, name + ' must change the emitted clauses')
+  const lose = {}
+  for (const name of Object.keys(mutants)) lose[name] = lost((table, p) => ids(table, mutate(name, table, p), p))
   const shipped = lost((table, p) => ids(table, shiftWindowWhere(table, { createdFrom: p.createdFrom, createdTo: p.createdTo }).clauses, p))
-  assert.ok(plusOne >= 50, `+1 day lost rows in ${plusOne} windows`)
-  assert.ok(noMinus >= 20, `no -1 day lost rows in ${noMinus} windows`)
+  assert.ok(lose.plusOneAbove >= 50, '+1 day lost rows in ' + lose.plusOneAbove + ' windows')
+  assert.ok(lose.dateGranular >= 20, 'date(@createdFrom) lost rows in ' + lose.dateGranular + ' windows')
+  assert.ok(lose.plus13 >= 20, '+13 hours lost rows in ' + lose.plus13 + ' windows')
+  assert.ok(lose.minus11 >= 5, '-11 hours lost rows in ' + lose.minus11 + ' windows')
   assert.equal(shipped, 0)
-  console.log(`     +1 day: ${plusOne} windows lose rows; no -1 day: ${noMinus}; shipped: ${shipped}`)
+  console.log('     ' + JSON.stringify(lose) + ' windows lose rows; shipped: ' + shipped)
 })
 
 // ---- lane/shift-close-reads: the lower bound is taken from the CAMBODIA business date, never later than any row of the window ----------------------------------
-const floorOf = (iso) => db.prepare("SELECT date(date(?, '+7 hours'), '-1 day') AS d").get(iso.slice(0, 19).replace('T', ' ')).d
 const stamp = (ms, shape) => {
   const iso = new Date(ms).toISOString(), d = iso.slice(0, 10), h = Number(iso.slice(11, 13)), m = Number(iso.slice(14, 16)), sec = Number(iso.slice(17, 19))
   const offsets = [null, 'Z', '+07:00', '-05:00', '+14:00', '-12:00', '+05:30']
@@ -144,28 +158,30 @@ const stamp = (ms, shape) => {
   void d; void h; void m; void sec
   return local + o
 }
-check('FLOOR: from 17:00Z the Cambodia date is already the next UTC date, so the floor is one UTC day later than before; before 17:00Z it is unchanged', () => {
-  assert.equal(floorOf('2026-11-05T05:00:00Z'), '2026-11-04', '05:00Z, Cambodia 12:00 of the 5th')
-  assert.equal(floorOf('2026-11-05T16:59:59Z'), '2026-11-04', 'the last second of the Cambodia 5th')
-  assert.equal(floorOf('2026-11-05T17:00:00Z'), '2026-11-05', 'Cambodia midnight: the 6th starts')
-  assert.equal(floorOf('2026-11-05T20:00:00Z'), '2026-11-05', '20:00Z (Cambodia 03:00 of the 6th): the old floor was 2026-11-04')
-  assert.equal(floorOf('2026-11-05T23:59:59Z'), '2026-11-05')
-  assert.equal(floorOf('2026-11-06T00:00:00Z'), '2026-11-05', 'UTC midnight, Cambodia 07:00 of the 6th')
-  assert.equal(shiftWindowWhere('sales', { createdFrom: '2026-11-05T20:00:00Z' }).clauses[0], "sales.created_at >= date(date(@createdFrom, '+7 hours'), '-1 day')")
-})
-check('FLOOR SUPERSET: for 144 shift starts around the clock and every stored shape, a row 1 s after the start (and the start itself) passes the plain floor; a sale 1 s before is still excluded exactly', () => {
-  let rows = 0
-  for (let k = 0; k < 144; k++) {
-    const start = Date.UTC(2026, 10, 5) + k * 10 * 60000 + 7000
-    for (let shape = 0; shape < 7; shape++) for (const delta of [0, 1000, 3600000, 86400000]) {
-      const text = stamp(start + delta, shape)
-      const row = db.prepare("SELECT ? AS created_at").get(text)
-      const passesFloor = db.prepare("SELECT ? >= ? AS ok").get(row.created_at, floorOf(new Date(start).toISOString())).ok
-      assert.equal(passesFloor, 1, `start ${new Date(start).toISOString()} shape ${shape} +${delta}: ${text} vs floor ${floorOf(new Date(start).toISOString())}`)
-      rows += 1
-    }
+// The floor is evaluated by SQLite from the clause the code emits (floorExpr, above), never from a re-typed formula.
+const floorAt = (iso) => db.prepare('SELECT ' + floorExpr + ' AS d').get({ createdFrom: iso.slice(0, 19).replace('T', ' ') }).d
+const passesFloor = (expr, text, startIso) => db.prepare('SELECT @text >= ' + expr + ' AS ok').get({ text, createdFrom: startIso.slice(0, 19).replace('T', ' ') }).ok
+const startsAround = []
+for (let k = 0; k < 144; k++) startsAround.push(Date.UTC(2026, 10, 5) + k * 10 * 60000 + 7000)
+for (const t of ['00:00:00', '05:00:00', '11:00:00', '11:30:15', '11:59:59', '12:00:00', '16:59:00', '16:59:59', '17:00:00', '17:00:01', '23:59:00', '23:59:59']) startsAround.push(Date.parse('2026-11-05T' + t + 'Z'))
+const dropped = (expr) => {
+  let n = 0
+  for (const start of startsAround) {
+    const iso = new Date(start).toISOString()
+    for (let shape = 0; shape < 7; shape++) for (const delta of [0, 1000, 3600000, 86400000]) if (passesFloor(expr, stamp(start + delta, shape), iso) !== 1) n += 1
   }
-  assert.equal(rows, 144 * 7 * 4)
+  return n
+}
+check('FLOOR: the emitted floor is exactly twelve hours before the window start, in every minute class (11:xx, 05:00, 16:59, 17:00, 23:59), whatever the Cambodia date is', () => {
+  for (const t of ['2026-11-05T05:00:00Z', '2026-11-05T11:30:15Z', '2026-11-05T16:59:59Z', '2026-11-05T17:00:00Z', '2026-11-05T20:00:00Z', '2026-11-05T23:59:59Z', '2026-11-06T00:00:00Z', '2026-12-31T23:59:59Z']) {
+    assert.equal(floorAt(t), new Date(Date.parse(t) - 12 * 3600000).toISOString().slice(0, 19).replace('T', ' '), t)
+  }
+  assert.equal(emitted[0], "sales.created_at >= datetime(@createdFrom, '-12 hours')")
+})
+check('FLOOR SUPERSET: for 156 shift starts (around the clock plus 11:xx, 05:00, 16:59, 17:00 and 23:59) and every stored shape, a row at the start, 1 s, 1 h and 1 day after passes the EMITTED floor; +13 hours, -11 hours and a date-granular floor each drop rows', () => {
+  assert.equal(startsAround.length, 156)
+  assert.equal(dropped(floorExpr), 0, 'the emitted floor drops a row of the window')
+  for (const [name, expr] of [['+13 hours', "datetime(@createdFrom, '+13 hours')"], ['-11 hours', "datetime(@createdFrom, '-11 hours')"], ['date(@createdFrom)', 'date(@createdFrom)']]) assert.ok(dropped(expr) > 0, name + ' must drop rows in the superset check')
 })
 check('EDGES: a sale 1 s after open, shifts opened just before and just after 17:00Z, and a shift spanning Cambodia midnight select exactly the exact-window rows (plain bounds alone select a superset)', () => {
   const edge = new DatabaseSync(':memory:'); for (const f of fs.readdirSync(directory).filter((n) => n.endsWith('.sql')).sort()) edge.exec(fs.readFileSync(path.join(directory, f), 'utf8'))
@@ -177,6 +193,9 @@ check('EDGES: a sale 1 s after open, shifts opened just before and just after 17
     { name: 'opened 17:00:01Z', from: '2026-11-05T17:00:01Z', to: '2026-11-06T03:00:00Z' },
     { name: 'spans Cambodia midnight (23:00 -> 02:00)', from: '2026-11-05T16:00:00Z', to: '2026-11-05T19:00:00Z' },
     { name: 'opened 20:00:00Z', from: '2026-11-05T20:00:00Z', to: '2026-11-06T02:00:00Z' },
+    { name: 'opened 11:30:00Z', from: '2026-11-05T11:30:00Z', to: '2026-11-05T15:00:00Z' },
+    { name: 'opened 05:00:00Z', from: '2026-11-05T05:00:00Z', to: '2026-11-05T09:00:00Z' },
+    { name: 'opened 23:59:00Z', from: '2026-11-05T23:59:00Z', to: '2026-11-06T04:00:00Z' },
   ]
   let checked = 0
   for (const c of cases) {

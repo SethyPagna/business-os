@@ -63,12 +63,20 @@ for (let s = 0; s < 24; s++) {
   for (const hours of [0.5, 1, 4, 8, 13, 16, 23, 24, 30, 48, 72, 24 * 9]) windows.push({ createdFrom: new Date(start).toISOString(), createdTo: new Date(start + hours * 3600 * 1000).toISOString() })
 }
 for (let s = 0; s < 6; s++) { const at = new Date(Date.UTC(2026, 10, 4) + s * 5 * 3600 * 1000).toISOString(); windows.push({ createdFrom: at }, { createdTo: at }) }
+// starts that straddle the 12-hour floor: 11:xx, 05:00, 16:59, 17:00 and 23:59Z, so a floor that is a little too late (+13 h, -11 h) or date-granular loses rows here
+for (const t of ['T11:00:00Z', 'T11:30:00Z', 'T11:59:59Z', 'T05:00:00Z', 'T16:59:00Z', 'T17:00:00Z', 'T23:59:00Z']) for (const d of [3, 4, 7]) for (const hours of [1, 8, 30]) { const at = Date.parse(`${day(d)}${t}`); windows.push({ createdFrom: new Date(at).toISOString(), createdTo: new Date(at + hours * 3600 * 1000).toISOString() }) }
 assert.ok(windows.length >= 288)
 
 const idsFor = async (w, transform = (sql) => sql) => { rewrite = transform; try { return (await analytics.readRemovalLossRows({}, { ...w, cashierId: 3 })).map((r) => r.id).sort((a, b) => a - b) } finally { rewrite = (sql) => sql } }
-const exactOnly = (sql) => sql.replace(/ AND m\.created_at >= date\(date\(@createdFrom, '\+7 hours'\), '-1 day'\)/, '').replace(/ AND m\.created_at < date\(@createdTo, '\+2 day'\)/, '')
-const plusOne = (sql) => sql.replace("date(@createdTo, '+2 day')", "date(@createdTo, '+1 day')")
-const noMinus = (sql) => sql.replace("date(date(@createdFrom, '+7 hours'), '-1 day')", "date(date(@createdFrom, '+7 hours'))")
+// The exact comparison is the emitted statement with its two plain bounds stripped, found by SHAPE (any plain created_at comparison on the line before the datetime()
+// term), not by the formula under test, so a changed formula cannot also change the reference. The DIFFERENTIAL check asserts the strip changed a full window's SQL.
+const swap = (sql, from, to) => sql.replace(from, to)
+const exactOnly = (sql) => swap(swap(sql, / AND m[.]created_at >= .*?(?= AND datetime[(]m[.]created_at[)] >= @createdFrom)/, ''), / AND m[.]created_at < .*?(?= AND datetime[(]m[.]created_at[)] < @createdTo)/, '')
+const FLOOR = "datetime(@createdFrom, '-12 hours')"
+const plusOne = (sql) => swap(sql, "date(@createdTo, '+2 day')", "date(@createdTo, '+1 day')")
+const noMinus = (sql) => swap(sql, FLOOR, 'date(@createdFrom)')
+const plus13 = (sql) => swap(sql, FLOOR, "datetime(@createdFrom, '+13 hours')")
+const minus11 = (sql) => swap(sql, FLOOR, "datetime(@createdFrom, '-11 hours')")
 const lossIn = async (variant) => { let n = 0; for (const w of windows) if (JSON.stringify(await idsFor(w, variant)) !== JSON.stringify(await idsFor(w, exactOnly))) n += 1; return n }
 
 ;(async () => {
@@ -76,13 +84,17 @@ const lossIn = async (variant) => { let n = 0; for (const w of windows) if (JSON
     let nonEmpty = 0
     for (const w of windows) { const real = await idsFor(w); const exact = await idsFor(w, exactOnly); assert.deepEqual(real, exact, JSON.stringify(w)); if (exact.length) nonEmpty += 1 }
     assert.ok(nonEmpty > 200, `${nonEmpty} windows with rows`)
+    await idsFor(windows[0])
     const sql = captured[captured.length - 1].sql
-    assert.ok(/m\.created_at >= date\(date\(@createdFrom, '\+7 hours'\), '-1 day'\)/.test(sql) || /m\.created_at < date\(@createdTo, '\+2 day'\)/.test(sql), 'the plain bounds are emitted')
+    assert.ok(sql.includes(`m.created_at >= ${FLOOR}`) && sql.includes("m.created_at < date(@createdTo, '+2 day')"), 'the plain bounds are emitted')
+    assert.notEqual(exactOnly(sql), sql, 'the reference strips the emitted plain bounds')
+    assert.ok(!/m[.]created_at [<>]=? (?!@)/.test(exactOnly(sql).replace(/datetime[(]m[.]created_at[)]/g, '')), 'no plain created_at comparison survives in the reference')
+    for (const mutant of [plusOne, noMinus, plus13, minus11]) assert.notEqual(mutant(sql), sql, 'a mutant must change the emitted SQL')
   })
-  await check('DISCRIMINATING: "+1 day" above and "no -1 day" below each lose rows in many windows; the shipped statement loses none', async () => {
-    const a = await lossIn(plusOne), b = await lossIn(noMinus), shipped = await lossIn((s) => s)
-    assert.ok(a >= 50, `+1 day: ${a}`); assert.ok(b >= 20, `no -1 day: ${b}`); assert.equal(shipped, 0)
-    console.log(`     +1 day: ${a} windows lose rows; no -1 day: ${b}; shipped: ${shipped}`)
+  await check('DISCRIMINATING: "+1 day" above, a date-granular floor, "+13 hours" and "-11 hours" each lose rows in the DIFFERENTIAL; the shipped statement loses none', async () => {
+    const a = await lossIn(plusOne), b = await lossIn(noMinus), c = await lossIn(plus13), d = await lossIn(minus11), shipped = await lossIn((s) => s)
+    assert.ok(a >= 50, `+1 day: ${a}`); assert.ok(b >= 20, `date(@createdFrom): ${b}`); assert.ok(c >= 20, `+13 hours: ${c}`); assert.ok(d >= 5, `-11 hours: ${d}`); assert.equal(shipped, 0)
+    console.log(`     +1 day: ${a}; date(@createdFrom): ${b}; +13 h: ${c}; -11 h: ${d}; shipped: ${shipped} windows lose rows`)
   })
   await check('PLAN: the shift statement SEARCHes inventory_movements by created_at; the datetime()-only form does not', async () => {
     const w = { createdFrom: '2026-11-05T00:00:00.000Z', createdTo: '2026-11-06T00:00:00.000Z' }
