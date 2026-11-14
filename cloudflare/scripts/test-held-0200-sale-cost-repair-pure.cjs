@@ -384,8 +384,12 @@ const indexChangesOnly = (text, repairText, earlierText) => {
     && /THEN 1 ELSE json_extract\('\[\]', ?'\$\[\w+\]'\) END$/i.test(statement)
     && !/\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|PRAGMA)\b/i.test(statement.replace(/pragma_index_list|pragma_index_xinfo/gi, ''))
   const droppedIsSafe = (name) => {
-    const created = new RegExp('CREATE (?:UNIQUE )?INDEX (?:IF NOT EXISTS )?' + name + ' ON (\\w+)', 'i').exec(sqlCode(earlierText))
-    return !!created && !namedIn(repairText)(name) && !namedIn(repairText)(created[1]) && !repairWrites(repairText).includes(created[1].toLowerCase())
+    const created = new RegExp('CREATE (UNIQUE )?INDEX (?:IF NOT EXISTS )?' + name + ' ON (\\w+)', 'i').exec(sqlCode(earlierText))
+    if (!created) return false
+    // 0309: a NON-unique index enforces no rule and changes no row, so dropping one (to rebuild it with a new predicate) is independent even on a table the repair
+    // writes (audit_logs: the repair inserts audit rows, which only maintain whichever index exists). A UNIQUE index stays under the stricter rule below.
+    if (!created[1] && !namedIn(repairText)(name)) return true
+    return !namedIn(repairText)(name) && !namedIn(repairText)(created[2]) && !repairWrites(repairText).includes(created[2].toLowerCase())
   }
   const create = /^CREATE (UNIQUE )?INDEX /i
   const drop = /^DROP INDEX (\w+)$/i
@@ -1122,6 +1126,9 @@ ALTER TABLE sale_items ADD COLUMN cost_price_usd REAL;`])
     // A unique index on a table the repair writes is not droppable under this rule, however it is named.
     assert.equal(indexChangesOnly('DROP INDEX zz_sale_items_unique', migrationText, 'CREATE UNIQUE INDEX zz_sale_items_unique ON sale_items (id);'), false, 'control: dropping an index on a table the repair writes is a dependency')
     assert.ok(indexChangesOnly('DROP INDEX zz_settings_unique', migrationText, 'CREATE UNIQUE INDEX zz_settings_unique ON settings (key);'), 'control: dropping an index on a table the repair never names is independent')
+    assert.ok(indexChangesOnly('DROP INDEX zz_sale_items_plain', migrationText, 'CREATE INDEX zz_sale_items_plain ON sale_items (id);'), 'control (0309): dropping a NON-unique index enforces no rule, so it is independent even on a table the repair writes')
+    assert.equal(indexChangesOnly('DROP INDEX zz_sale_items_plain', migrationText, 'CREATE UNIQUE INDEX zz_sale_items_plain ON sale_items (id);'), false, 'control (0309): the same drop of a UNIQUE index is still a dependency')
+    assert.equal(indexChangesOnly('DROP INDEX zz_missing', migrationText, 'CREATE INDEX other ON sale_items (id);'), false, 'control (0309): an index no earlier file created is still a dependency')
   }
   const feeIndexes = '0267_fees_created_dt_and_credit_due_indexes.sql'
   if (chain.includes(feeIndexes)) {
