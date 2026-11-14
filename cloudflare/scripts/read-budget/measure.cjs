@@ -65,6 +65,8 @@ function expectOf(status, code) {
 
 // Why a ceiling is what it is, for the shapes that need a word (written into the entry as "note").
 const ENTRY_NOTES = {
+  'w-shift-close':
+    "6.0.2057 (lane/shift-close-reads): the window prefilters take the Cambodia business date (shiftWindowFloor) and the previous/next shift lookup is a seek on the 0306 indexes, so the close no longer reads one more day from 17:00Z and no longer scans every stored shift (6185 before; 2954 read in the write pass; +1000 stored shifts added 1 row). Measured in the full write pass (the gate's world, after the earlier shapes), not by --only, which runs the shape alone in a fresh world and reads 1827. 2954 x 1.10 = 3250.",
   'fees-list-with-sale-delivery-rows-all-time-branch-source-all':
     'No window, so the expense summary reads every expense once (8,695) plus the 100-row page (234); the sale half is 5,310 with idx_sales_courier_cost leading. 6.0.1053: +f.branch_id keeps the branch index out; it was 29,073 with it.',
   'fees-list-with-sale-delivery-rows-month-branch-source-all':
