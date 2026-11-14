@@ -81,8 +81,10 @@ const FLAG_ALIASES = {
   'use-cert': 'useCert', usecert: 'useCert', 'no-apply': 'noApply', noapply: 'noApply', counts: 'counts',
   target: 'target', db: 'db', bookmark: 'bookmark', 'version-id': 'versionId', versionid: 'versionId',
   'previous-sha': 'previousSha', previoussha: 'previousSha',
+  part: 'part', shard: 'shard',
   help: 'help', h: 'help',
 }
+const GATE_PARTS = ['static', 'build', 'tests']
 const BOOLEAN_FLAGS = new Set(['dryRun', 'ci', 'useCert', 'noApply', 'help'])
 
 // Accepts both PowerShell style (-DryRun, -Plan free) and GNU style
@@ -112,6 +114,11 @@ function parseArgs(argv) {
     throw new Error(`-Plan must be paid or free, not ${out.plan}`)
   }
   if (out.plan) out.plan = String(out.plan).toLowerCase()
+  if (out.part !== undefined) {
+    out.part = String(out.part).toLowerCase()
+    if (!GATE_PARTS.includes(out.part)) throw new Error(`-Part must be one of ${GATE_PARTS.join(', ')}, not ${out.part}`)
+  }
+  if (out.shard !== undefined && !/^[1-9][0-9]*\/[1-9][0-9]*$/.test(String(out.shard))) throw new Error(`-Shard must look like 3/8, not ${out.shard}`)
   if (out.counts !== undefined) {
     out.counts = String(out.counts).toLowerCase()
     if (!COUNTS_REQUESTS.includes(out.counts)) throw new Error(`-Counts must be full (the default) or auto, not ${out.counts}`)
@@ -550,7 +557,7 @@ function todayStamp(d = new Date()) {
 module.exports = {
   GUARD_MIGRATIONS, guardStageConfig, validateGuardFiles, guardStateSql, validateGuardState,
   DEFAULT_REF, DEFAULT_PLAN, DEFAULT_SITE, WORKER_NAME, CERT_DIR_NAME,
-  DATABASES, KEY_TABLES, LIVE_TRAFFIC_TABLES, NPM_SCRIPTS_USED, WRANGLER_SUBCOMMANDS_USED, GATE_RANK, GATE_TEST_FILES,
+  DATABASES, KEY_TABLES, LIVE_TRAFFIC_TABLES, NPM_SCRIPTS_USED, WRANGLER_SUBCOMMANDS_USED, GATE_RANK, GATE_TEST_FILES, GATE_PARTS,
   parseCrons, cronRollbackCheck, ROLLBACK_REDEPLOY_ADVICE,
   parseArgs, commandCatalog, sampleCatalog, countsSql, chooseCountsMode, pendingMigrationCount, COUNTS_REQUESTS, DEFAULT_COUNTS, isProductionSpec, assertApproved,
   classifyResponse, lowerHeaders, parseMigrationNames, validateImportMigrationLedger, firstCommentLine, tablesTouched,

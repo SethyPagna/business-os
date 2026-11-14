@@ -22,6 +22,8 @@
 //   -Site <url>           default https://admin.leangbeauty.com
 //   -Jobs <n>             test files run in parallel (default 3)
 //   -Retries <n>          extra tries for a red test file (default 2)
+//   gates -Part static|build|tests   run one slice of the gate (default: all of it)
+//         -Shard <i>/<n>             with -Part tests: only the test files whose hash falls in shard i of n
 //   rollback: -Target worker|database  -VersionId <id>  -PreviousSha <40-hex sha being returned to (worker)>  -Db <name>  -Bookmark <b>
 //   CI only: -CI -ReleaseDir <checkout> -NoApply
 //   Row counts: -Counts full (default; every table counted) or -Counts auto (opt-in; quick highest-row-id counts when no database update is waiting. A high-water mark does not see deleted rows, see lib.cjs)
@@ -32,6 +34,7 @@ const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 const lib = require('./lib.cjs')
+const gateShards = require('./gate-shards.cjs')
 const ex = require('./exec.cjs')
 
 const { log } = ex
@@ -71,6 +74,8 @@ function buildContext(args) {
     ref: args.ref || '',
     site: String(args.site || lib.DEFAULT_SITE).replace(/\/+$/, ''),
     jobs: Math.max(1, Number(args.jobs) || 3),
+    part: args.part || '',
+    shard: gateShards.parseShard(args.shard || '1/1'),
     retries: Math.max(0, args.retries == null ? 2 : Number(args.retries) || 0),
     records: path.resolve(args.records || process.env.BUSINESS_OS_RECORDS || path.join(home, 'Records')),
     ownerRecords: path.join(home, 'Records'),
@@ -378,10 +383,67 @@ async function runFiles(ctx, label, files, cwd, prefix) {
   return { ok: red.length === 0, red }
 }
 
+async function stepGatePart(ctx) {
+  const cf = path.join(ctx.releaseDir, 'cloudflare')
+  const fe = path.join(ctx.releaseDir, 'frontend')
+  const red = []
+  const step = async (label, fn) => {
+    log.say(`- ${label}`)
+    const r = await fn()
+    if (!r) red.push(label)
+    return r
+  }
+  const build = () => step('frontend: build', async () => (await ex.npmLocal('build', fe, ctx)).code === 0)
+  let built = false
+  let ran = []
+  if (ctx.part === 'build') {
+    built = await build()
+  } else if (ctx.part === 'static') {
+    await step('cloudflare: typecheck (tsc --noEmit)', async () => (await ex.npmLocal('typecheck', cf, ctx)).code === 0)
+    await step('frontend: typecheck', async () => (await ex.npmLocal('typecheck', fe, ctx)).code === 0)
+    await step('frontend: verify:i18n', async () => (await ex.npmLocal('verify:i18n', fe, ctx)).code === 0)
+    built = await build()
+  } else {
+    const { index, count } = ctx.shard
+    const mine = (spec) => listAtCommit(ctx, spec.dir, spec.re).filter((f) => gateShards.shardIndexOf(f, count) === index)
+    const cfSpec = lib.GATE_TEST_FILES.cloudflare
+    const feSpec = lib.GATE_TEST_FILES.frontend
+    const cfMine = mine(cfSpec)
+    const feMine = mine(feSpec)
+    ran = [...cfMine, ...feMine]
+    const cfRun = await runFiles(ctx, `${cfSpec.label} (shard ${index}/${count})`, cfMine, cf, 'cloudflare/')
+    red.push(...cfRun.red.map((f) => `cloudflare/${f}`))
+    built = await step('frontend: build (some tests read dist)', async () => (await ex.npmLocal('build', fe, ctx)).code === 0)
+    const feRun = await runFiles(ctx, `${feSpec.label} (shard ${index}/${count})`, feMine, fe, 'frontend/')
+    red.push(...feRun.red.map((f) => `frontend/${f}`))
+  }
+  if (!(await checkClean(ctx))) red.push('release folder changed while testing')
+  ctx.state.gates = { at: new Date().toISOString(), part: ctx.part, shard: ctx.part === 'tests' ? ctx.shard : undefined, red, dryRun: ctx.dryRun }
+  if (built && !ctx.dryRun) ctx.state.frontendBuiltFor = ctx.sha
+  saveState(ctx)
+  if (ctx.part === 'tests' && !ctx.dryRun) {
+    fs.mkdirSync(ctx.records, { recursive: true })
+    fs.writeFileSync(path.join(ctx.records, gateShards.MANIFEST_NAME), `${JSON.stringify(gateShards.buildManifest({ sha: ctx.sha, shard: ctx.shard, files: ran, red }), null, 2)}
+`)
+  }
+  const what = ctx.part === 'tests' ? `tests, shard ${ctx.shard.index}/${ctx.shard.count}` : ctx.part
+  summary(ctx, red.length ? `### Gate (${what}): RED\n\n${red.map((r) => `- ${r}`).join('\n')}` : `### Gate (${what}): all green`)
+  if (red.length) {
+    log.say('')
+    log.say('STOP: these checks are red, so nothing will be released:')
+    for (const r of red) log.say(`  - ${r}`)
+    log.say('Send the log file to Claude.')
+    return false
+  }
+  done(ctx, `Gate part ${what} is green.`)
+  return true
+}
+
 async function stepGates(ctx) {
   heading('Safety tests at the exact commit')
   if (!needSha(ctx)) return false
   if (!(await checkClean(ctx))) return false
+  if (ctx.part) return await stepGatePart(ctx)
   const certFile = path.join(ctx.records, 'Deploys', lib.CERT_DIR_NAME, lib.certFileName(ctx.sha))
   const certOk = fs.existsSync(certFile) && lib.certMatches(fs.readFileSync(certFile, 'utf8'), ctx.sha)
   if (certOk) {
@@ -1025,7 +1087,7 @@ function checkNode() {
 async function main() {
   const args = lib.parseArgs(process.argv.slice(2))
   if (args.help) {
-    process.stdout.write(fs.readFileSync(__filename, 'utf8').split('\n').slice(2, 29).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'))
+    process.stdout.write(fs.readFileSync(__filename, 'utf8').split('\n').slice(2, 31).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'))
     return 0
   }
   const ctx = buildContext(args)

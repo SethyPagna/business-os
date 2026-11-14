@@ -1,29 +1,43 @@
 # Run the release safety tests on any branch or commit, without deploying.
 #
-# The same `release.cjs gates` step as Deploy, on a clean runner, so a busy
+# The same `release.cjs gates` sweep as Deploy, on clean runners, so a busy
 # laptop cannot turn a green commit red. Runs ONLY when someone presses
 # "Run workflow". No secrets and no environment: it never reaches production.
+#
+# The sweep is split over GATE_SHARDS parallel Windows runners, so a full gate
+# takes about the time of one shard instead of the sum of all of them:
+#   plan     resolves the input ref to ONE full commit id; every other job checks
+#            out that id, so a branch that moves mid-run cannot split the gate;
+#   static   typechecks, i18n check and the production build (release.cjs gates -Part static);
+#   gate     one job per shard (release.cjs gates -Part tests -Shard i/n): the test
+#            files whose stable hash falls in the shard, each file in its own
+#            process and retried on timeout exactly as before;
+#   verdict  fails unless every shard reported, green, at the planned commit, and the
+#            union of the shards is the full test file list; then it writes the
+#            `gate-verdict` artifact that Deploy (input gate_run_id) checks.
+# The run title carries the input ref (run-name), which a job cannot change.
 #
 # A second job, "Browser suite", runs the Playwright app tier (frontend/e2e on
 # the built dist, served by a fixture server on loopback: no Worker, no database,
 # no network beyond 127.0.0.x) for the three projects in parallel, beside the
-# safety job and never ahead of it. It is REPORT-ONLY by default:
+# safety jobs and never ahead of them. It is REPORT-ONLY by default:
 #   - its failure shows as a red job, an annotation and a job summary, but does
 #     not fail this run (job-level continue-on-error, taken from the input
 #     `e2e_blocking`). Step-level continue-on-error would turn the job green.
-#   - deploy.yml never reads this workflow: it re-runs `release.cjs gates`
-#     itself, and that runs only the unit files, so this job cannot block a deploy.
+#   - Deploy reuses a gate run only when EVERY job of it, this suite included,
+#     concluded success, so a report-only red keeps that run from being reused.
 # To make it blocking: dispatch with `-f e2e_blocking=true` for one run, or change
 # the input's `default:` to true for good (and update the pin in
 # cloudflare/scripts/test-gate-e2e-job-pure.cjs, which names this line). The
 # real-Worker tier (frontend/e2e/system) is not run here.
 name: Gate
+run-name: Gate ${{ inputs.ref }}
 
 on:
   workflow_dispatch:
     inputs:
       ref:
-        description: Branch or commit to test
+        description: Branch or commit to test (a full commit id lets Deploy prove which commit this run tested)
         required: true
         default: main
         type: string
@@ -40,11 +54,41 @@ concurrency:
   group: gate-${{ inputs.ref }}
   cancel-in-progress: false
 
+env:
+  GATE_SHARDS: 8
+
 jobs:
-  gate:
-    name: Safety tests
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the commit to test
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          path: release
+          persist-credentials: false
+
+      - name: Resolve the full commit id
+        id: resolve
+        run: |
+          sha=$(git -C release rev-parse HEAD)
+          case "$sha" in *[!0-9a-f]*|"") echo "::error::Could not resolve a commit id."; exit 1;; esac
+          if [ ${#sha} -ne 40 ]; then echo "::error::Expected a full 40-character commit id."; exit 1; fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Testing $sha  $(git -C release log -1 --format=%s)"
+
+  static:
+    name: Static checks
+    needs: plan
     runs-on: windows-latest
-    timeout-minutes: 300
+    timeout-minutes: 60
     defaults:
       run:
         shell: pwsh
@@ -59,17 +103,83 @@ jobs:
       - name: Check out the commit to test
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ needs.plan.outputs.sha }}
+          path: release
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            release/frontend/package-lock.json
+            release/cloudflare/package-lock.json
+
+      - name: Install packages (cloudflare)
+        working-directory: release/cloudflare
+        run: npm ci --no-audit --no-fund
+
+      - name: Install packages (frontend)
+        working-directory: release/frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Record the commit
+        run: node kit/ops/scripts/deploy-kit/release.cjs prepare -CI -ReleaseDir release -Records "${{ runner.temp }}/records"
+
+      - name: Typechecks, i18n check and build
+        run: node kit/ops/scripts/deploy-kit/release.cjs gates -CI -ReleaseDir release -Records "${{ runner.temp }}/records" -Part static
+
+      - name: Keep the test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-records-static-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/records
+          retention-days: 14
+          if-no-files-found: ignore
+
+  gate:
+    name: Safety tests (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
+    needs: plan
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - name: Check out the release kit
+        uses: actions/checkout@v4
+        with:
+          path: kit
+          persist-credentials: false
+          sparse-checkout: ops/scripts/deploy-kit
+
+      - name: Check out the commit to test
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
           path: release
           persist-credentials: false
           fetch-depth: 0
 
       - name: Show the commit
         working-directory: release
+        env:
+          PLANNED_SHA: ${{ needs.plan.outputs.sha }}
         run: |
           $sha = git rev-parse HEAD
           $subject = git log -1 --format=%s
-          Write-Output "Testing $sha  $subject"
+          Write-Output "Testing $sha  $subject (shard ${{ matrix.shard }} of $env:GATE_SHARDS)"
+          if ($sha -ne $env:PLANNED_SHA) {
+            Write-Output "::error::Checked out $sha, the plan resolved $env:PLANNED_SHA."
+            exit 1
+          }
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -95,22 +205,109 @@ jobs:
       - name: Record the commit
         run: node kit/ops/scripts/deploy-kit/release.cjs prepare -CI -ReleaseDir release -Records "${{ runner.temp }}/records"
 
-      - name: Safety tests (every test file on its own, retried on timeout)
-        run: node kit/ops/scripts/deploy-kit/release.cjs gates -CI -ReleaseDir release -Records "${{ runner.temp }}/records" -Jobs 4
+      - name: Safety tests (this shard's files, each on its own, retried on timeout)
+        run: node kit/ops/scripts/deploy-kit/release.cjs gates -CI -ReleaseDir release -Records "${{ runner.temp }}/records" -Jobs 4 -Part tests -Shard "${{ matrix.shard }}/$env:GATE_SHARDS"
+
+      - name: Keep the shard manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/records/gate-shard-manifest.json
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Keep the test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-records-shard-${{ matrix.shard }}-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/records
+          retention-days: 14
+          if-no-files-found: ignore
+
+  verdict:
+    name: Verdict
+    needs: [plan, static, gate]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Every earlier job must have succeeded
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          STATIC_RESULT: ${{ needs.static.result }}
+          SHARD_RESULT: ${{ needs.gate.result }}
+        run: |
+          echo "plan=$PLAN_RESULT static=$STATIC_RESULT shards=$SHARD_RESULT"
+          if [ "$PLAN_RESULT" != success ] || [ "$STATIC_RESULT" != success ] || [ "$SHARD_RESULT" != success ]; then
+            echo "::error::No verdict: a plan, static or shard job did not succeed."
+            exit 1
+          fi
+
+      - name: Check out the release kit
+        uses: actions/checkout@v4
+        with:
+          path: kit
+          persist-credentials: false
+          sparse-checkout: ops/scripts/deploy-kit
+
+      - name: Check out the tested commit (to list its test files)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          path: release
+          persist-credentials: false
+          sparse-checkout: cloudflare/scripts
+
+      - name: Download the shard manifests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gate-shard-*
+          path: manifests
+
+      - name: Prove every test file ran exactly once
+        env:
+          PLANNED_SHA: ${{ needs.plan.outputs.sha }}
+          INPUT_REF: ${{ inputs.ref }}
+        run: |
+          node kit/ops/scripts/deploy-kit/gate-shards.cjs verdict \
+            --release release --manifests manifests --shards "$GATE_SHARDS" \
+            --sha "$PLANNED_SHA" --kit-commit "$(git -C kit rev-parse HEAD)" --input-ref "$INPUT_REF" \
+            --out verdict/gate-verdict.json \
+            --plan-result success --static-result success --shard-result success
+
+      - name: Keep the verdict
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-verdict
+          path: verdict/gate-verdict.json
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Collect the test logs
+        if: always()
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gate-records-*
+          path: records
 
       - name: Keep the test log
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gate-records
-          path: ${{ runner.temp }}/records
+          path: records
           retention-days: 14
           if-no-files-found: ignore
 
   # Browser suite: one runner per Playwright project, in parallel with `gate`
-  # (no `needs`, and nothing needs it). Read-only token, no secrets, loopback only.
+  # (it waits only for `plan`, and nothing waits for it). Read-only token, no secrets, loopback only.
   e2e:
     name: Browser suite (${{ matrix.project }})
+    needs: plan
     runs-on: windows-latest
     timeout-minutes: 90
     # THE switch. false (the default input) = report-only: this job can be red
@@ -148,7 +345,7 @@ jobs:
       - name: Check out the commit to test
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ needs.plan.outputs.sha }}
           path: release
           persist-credentials: false
           fetch-depth: 0

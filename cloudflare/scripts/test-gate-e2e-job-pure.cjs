@@ -5,7 +5,7 @@
 //
 //   A. the summary: counts, verdict, escaping, and that it never prints an
 //      assertion message (the Actions logs of this repository are public);
-//   B. the workflow: the job runs BESIDE the safety job, is report-only through
+//   B. the workflow: the job runs BESIDE the safety jobs (shards, static, verdict), is report-only through
 //      one job-level switch, has a read-only token and no secrets, installs only
 //      its own browser, and uploads where the reporters write;
 //   C. positive controls: the real workflow text is mutated one defect at a time
@@ -177,9 +177,22 @@ function configProjects() {
 // [rule, predicate({code, jobs, e2e, gate})]. Every rule is a sentence about behaviour.
 const BASE = '${{ runner.temp }}/e2e/${{ matrix.project }}'
 const RULES = [
-  ['the workflow has exactly two jobs: gate and e2e', ({ jobs }) => Object.keys(jobs).sort().join() === 'e2e,gate'],
-  ['no job has needs: e2e runs beside the safety job and nothing waits for it', ({ code }) => !/^\s+needs:/m.test(code)],
-  ['the safety job never mentions the browser suite', ({ gate }) => !/e2e|playwright test/i.test(gate)],
+  ['the workflow has exactly five jobs: plan, static, gate, verdict and e2e', ({ jobs }) => Object.keys(jobs).sort().join() === 'e2e,gate,plan,static,verdict'],
+  ['needs: plan waits for nothing; static, gate and e2e wait for plan only; verdict waits for plan, static and gate; nothing waits for e2e', ({ jobs }) => {
+    const needsOf = (job) => {
+      const m = /^ {4}needs: (.+)$/m.exec(job || '')
+      return m ? m[1].replace(/[[\]\s]/g, '').split(',').sort().join() : ''
+    }
+    return needsOf(jobs.plan) === '' && needsOf(jobs.static) === 'plan' && needsOf(jobs.gate) === 'plan' && needsOf(jobs.e2e) === 'plan' && needsOf(jobs.verdict) === 'gate,plan,static'
+  }],
+  ['the safety jobs never mention the browser suite', ({ jobs }) => ['plan', 'static', 'gate', 'verdict'].every((n) => !/e2e|playwright test/i.test(jobs[n] || 'e2e'))],
+  ['the run title carries the input ref, and only the plan job checks out inputs.ref (every other job uses the commit id the plan resolved)', ({ code, jobs }) =>
+    /^run-name: Gate \$\{\{ inputs\.ref \}\}$/m.test(code) && /ref: \$\{\{ inputs\.ref \}\}/.test(jobs.plan || '') &&
+    ['static', 'gate', 'verdict', 'e2e'].every((n) => !/inputs\.ref\b/.test((jobs[n] || '').replace(/INPUT_REF: \$\{\{ inputs\.ref \}\}/, '')) && /ref: \$\{\{ needs\.plan\.outputs\.sha \}\}/.test(jobs[n] || ''))],
+  ['the verdict job runs even when a shard failed (so the logs are kept) but writes the verdict only after the proof step', ({ jobs }) => {
+    const v = jobs.verdict || ''
+    return /^ {4}if: \$\{\{ always\(\) \}\}$/m.test(v) && v.indexOf('gate-shards.cjs verdict') > 0 && v.indexOf('name: gate-verdict') > v.indexOf('gate-shards.cjs verdict')
+  }],
   ['the only continue-on-error is the e2e JOB-level switch, derived from the input', ({ code, e2e }) =>
     (code.match(/continue-on-error:/g) || []).length === 1 && /^ {4}continue-on-error: \$\{\{ inputs\.e2e_blocking != true \}\}$/m.test(e2e)],
   ['input e2e_blocking is a boolean that defaults to report-only (false)', ({ code }) => {
@@ -275,13 +288,17 @@ const MUTANTS = [
   ['the job-level switch is removed', (t) => mutate(t, `    ${SWITCH}\n`, ''), 'the only continue-on-error'],
   ['the switch is hard-coded true, so the input does nothing', (t) => mutate(t, SWITCH, 'continue-on-error: true'), 'the only continue-on-error'],
   ['a step-level continue-on-error is added (the job would read green)', (t) => mutate(t, '        run: npm run build\n', '        continue-on-error: true\n        run: npm run build\n'), 'the only continue-on-error'],
-  ['the safety job is made to wait for the browser suite', (t) => mutate(t, '    name: Safety tests\n', '    name: Safety tests\n    needs: e2e\n'), 'no job has needs'],
-  ['the browser suite is made to wait for the safety job', (t) => mutate(t, '    name: Browser suite (${{ matrix.project }})\n', '    name: Browser suite (${{ matrix.project }})\n    needs: gate\n'), 'no job has needs'],
+  ['a shard job is made to wait for the browser suite', (t) => mutate(t, '    needs: plan\n    runs-on: windows-latest\n    timeout-minutes: 120\n', '    needs: [plan, e2e]\n    runs-on: windows-latest\n    timeout-minutes: 120\n'), 'nothing waits for e2e'],
+  ['the verdict job is made to wait for the browser suite', (t) => mutate(t, '    needs: [plan, static, gate]\n', '    needs: [plan, static, gate, e2e]\n'), 'nothing waits for e2e'],
+  ['the browser suite is made to wait for the shards', (t) => mutate(t, '    name: Browser suite (${{ matrix.project }})\n    needs: plan\n', '    name: Browser suite (${{ matrix.project }})\n    needs: [plan, gate]\n'), 'nothing waits for e2e'],
+  ['the run title no longer carries the input ref', (t) => mutate(t, 'run-name: Gate ${{ inputs.ref }}\n', 'run-name: Gate\n'), 'the run title carries the input ref'],
+  ['the browser suite re-resolves the input ref itself (a moving branch could split the gate)', (t) => mutateLast(t, 'ref: ${{ needs.plan.outputs.sha }}', 'ref: ${{ inputs.ref }}'), 'only the plan job checks out inputs.ref'],
+  ['the verdict job only runs when everything before it succeeded (no logs on a red run)', (t) => mutate(t, '    if: ${{ always() }}\n', ''), 'the verdict job runs even when a shard failed'],
   ['a secret is passed to the browser suite', (t) => mutate(t, '      E2E_BLOCKING: ${{ inputs.e2e_blocking }}\n', '      E2E_BLOCKING: ${{ inputs.e2e_blocking }}\n      TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n'), 'no secret is referenced'],
   ['the job token can write', (t) => mutate(t, '    permissions:\n      contents: read\n', '    permissions:\n      contents: write\n'), 'the tokens are read-only'],
   ['an action floats on a branch', (t) => mutateLast(t, 'actions/setup-node@v4', 'actions/setup-node@main'), 'pinned to a major version'],
   ['a checkout keeps the token in git config', (t) => mutateLast(t, 'persist-credentials: false', 'persist-credentials: true'), 'every checkout drops'],
-  ['fail-fast is switched on', (t) => mutate(t, '      fail-fast: false\n', '      fail-fast: true\n'), 'fail-fast'],
+  ['fail-fast is switched on', (t) => mutateLast(t, '      fail-fast: false\n', '      fail-fast: true\n'), 'fail-fast'],
   ['the iPhone leg is dropped from the matrix', (t) => mutate(t, '          - project: ios-webkit\n            browser: webkit\n', ''), 'one leg per Playwright project'],
   ['the iPhone leg installs Chromium', (t) => mutate(t, 'browser: webkit', 'browser: chromium'), 'one leg per Playwright project'],
   ['every browser is installed for every leg', (t) => mutate(t, 'npx playwright install $env:E2E_BROWSER', 'npx playwright install'), 'only the leg\'s own browser'],
@@ -295,7 +312,7 @@ const MUTANTS = [
   ['a push trigger is added', (t) => mutate(t, 'on:\n  workflow_dispatch:\n', 'on:\n  push:\n  workflow_dispatch:\n'), 'workflow_dispatch only'],
   ['the switch defaults to blocking', (t) => mutate(t, '        default: false\n        type: boolean\n', '        default: true\n        type: boolean\n'), 'defaults to report-only'],
   ['the e2e job may run longer than the safety job', (t) => mutate(t, '    timeout-minutes: 90\n', '    timeout-minutes: 400\n'), 'can never outlive'],
-  ['a third job is added without anyone deciding it belongs in the gate', (t) => `${t.replace(/\n*$/, '\n')}\n  extra:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n`, 'exactly two jobs'],
+  ['a sixth job is added without anyone deciding it belongs in the gate', (t) => `${t.replace(/\n*$/, '\n')}\n  extra:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n`, 'exactly five jobs'],
   ['the worker count is hard-coded, so a 2-CPU runner would be oversubscribed', (t) => mutate(t, '$cpus = [Environment]::ProcessorCount', '$cpus = 4'), 'worker count follows'],
 ]
 for (const [what, apply, rule] of MUTANTS) {
