@@ -1091,6 +1091,9 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   // which every other product reader shares and which must stay all-time.
   if (options.imageOnly) pushReceivedWindow(where, params, options.imageOnly.received)
   const whereSql = `WHERE ${where.join(' AND ')}`
+  // Typed text or ranked ids on a read that fetches its page rows by key: the ranking starts from the ids the search matches (lib/productSearchQuery.ts ProductSearchCandidates) and
+  // carries no row columns, instead of testing the search predicate on every active product and ranking wide rows. The WHERE keeps every other term; the search term is 1 = 1.
+  const candidateRead = seekPageRead && hasSearchTerm ? searchCandidateRead(filters, where) : undefined
 
   // A search term in play takes over the primary sort order (relevance,
   // weighted across the name/sku/barcode columns actually in scope --
@@ -1125,19 +1128,21 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     ? buildFamilyRelevanceOrderSql(familyOrderSql, familyRelevance)
     : buildFamilyRelevanceOrderSql(familyOrderSql, { ...familyRelevance, promotedFirst: true })
 
-  const joinSql = joinsReadBy(joins, [PRODUCT_SEARCH_SELECT_SQL, ...where, effectiveFamilyOrderSql, intraFamilyOrderSql, matchRankSql, rankCteSql, matchTierSql, promotedRankSql, familyMemberWhereSql]).join('\n')
+  const rankedWhere = candidateRead ? candidateRead.where : where
+  const joinSql = joinsReadBy(joins, [PRODUCT_SEARCH_SELECT_SQL, ...rankedWhere, effectiveFamilyOrderSql, intraFamilyOrderSql, candidateRead ? candidateRead.matchRankSql : matchRankSql, candidateRead ? undefined : rankCteSql, matchTierSql, promotedRankSql, familyMemberWhereSql]).join('\n')
   const familyOptions: FamilyPaginationOptions = {
     db,
     selectColumns: PRODUCT_SEARCH_SELECT_SQL,
     joinSql,
-    whereSql,
+    whereSql: candidateRead ? `WHERE ${candidateRead.where.join(' AND ')}` : whereSql,
     params,
     page,
     pageSize,
     familyOrderSql: effectiveFamilyOrderSql,
     intraFamilyOrderSql,
-    matchRankSql,
-    rankCteSql,
+    matchRankSql: candidateRead ? candidateRead.matchRankSql : matchRankSql,
+    rankCteSql: candidateRead ? undefined : rankCteSql,
+    candidateSql: candidateRead?.idsSql,
     matchTierSql,
     promotedRankSql,
     // Only opted in when a search term is actually in play (see
@@ -1447,7 +1452,18 @@ function buildSearchFilters(query: Record<string, string>, lowStock: LowStockCon
   if (options.restrictIdsJson !== undefined) { params.icRestrictIds = options.restrictIdsJson; where.push('p.id IN (SELECT value FROM json_each(@icRestrictIds))') }
   if (options.excludeIdsJson !== undefined) { params.icExcludeIds = options.excludeIdsJson; where.push('p.id NOT IN (SELECT value FROM json_each(@icExcludeIds))') }
 
-  return { where, joins, params, stockExpr, matchRankSql, rankCteSql, matchTierSql, titleOnly, hasSearchTerm, familyMemberWhereSql, rankedIdDriver: searchQuery.rankedIdDriver }
+  return { where, joins, params, stockExpr, matchRankSql, rankCteSql, matchTierSql, titleOnly, hasSearchTerm, familyMemberWhereSql, rankedIdDriver: searchQuery.rankedIdDriver, candidates: searchQuery.candidates, searchWhereClause }
+}
+
+// The candidate form of a search read, or undefined when the statement must keep the predicate form: the search has no candidate list, the WHERE does not carry the search term exactly
+// once (the term is replaced by 1 = 1, so anything else would change the match set), or the rank the list carries is not present exactly when the predicate form's is (the family order is
+// built from that fact).
+export function searchCandidateRead(filters: { candidates?: { idsSql: string; matchRankSql?: string }; searchWhereClause?: string; matchRankSql?: string }, where: readonly string[]): { idsSql: string; matchRankSql?: string; where: string[] } | undefined {
+  const { candidates, searchWhereClause } = filters
+  if (!candidates || !searchWhereClause) return undefined
+  if (where.filter((term) => term === searchWhereClause).length !== 1) return undefined
+  if (Boolean(candidates.matchRankSql) !== Boolean(filters.matchRankSql)) return undefined
+  return { idsSql: candidates.idsSql, matchRankSql: candidates.matchRankSql, where: where.map((term) => (term === searchWhereClause ? '1 = 1' : term)) }
 }
 
 function isProductSearchIndexUnavailable(error: unknown): boolean {

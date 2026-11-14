@@ -74,6 +74,21 @@ const BATTERY = {
   'tie_created_asc_p67': `${SEARCH}?page=67&pageSize=20&sort=created_asc`,
   'include_lots': `${SEARCH}?page=1&pageSize=10&include=tagged_lots`,
   'list': '/api/products',
+  // the vocabulary, the first-load bootstrap and typed searches through a filter, a substring, a barcode fragment and a long ranked list: pinned to the output before this lane (hashes taken at 6e8eed496)
+  'filters': `/api/products/filters`,
+  'filters_pos_branch': `/api/products/filters?branchId=1&surface=pos`,
+  'filters_stock_out': `/api/products/filters?branchId=2&stockState=out&brand=Brand3`,
+  'filters_cat_brand': `/api/products/filters?category=Cat3,Cat5&brand=Brand3`,
+  'filters_grouped': `/api/products/filters?groupState=grouped`,
+  'bootstrap_pos': `/api/products/bootstrap?page=1&pageSize=20&surface=pos&metadata=1&branchId=1`,
+  'q_cream_branch_stock': `${SEARCH}?page=1&pageSize=20&query=cream&branchId=1&stockState=in_stock`,
+  'q_cream_brand_promo': `${SEARCH}?page=1&pageSize=20&query=cream&brand=Brand3,Brand5&promo=discounted`,
+  'q_cream_created_asc_p2': `${SEARCH}?page=2&pageSize=7&query=cream&sort=created_asc`,
+  'q_substring': `${SEARCH}?page=1&pageSize=20&query=ream`,
+  'q_barcode_fragment': `${SEARCH}?page=1&pageSize=20&query=000100`,
+  'q_upc_pair': `${SEARCH}?page=1&pageSize=20&query=042100005264`,
+  'rank_ids_320_p2': `${SEARCH}?page=2&pageSize=30&surface=pos&query=serum&rankIds=${Array.from({ length: 320 }, (_, i) => 1000 + ((i * 7) % 2000)).join(',')}&rankTiers=${'3'.repeat(320)}`,
+  'rank_ids_child_only': `${SEARCH}?page=1&pageSize=30&surface=pos&rankIds=${[1011, 1012].concat(Array.from({ length: 320 }, (_, i) => 1100 + ((i * 3) % 1900))).filter((v, i, arr) => arr.indexOf(v) === i).join(',')}`,
   'index_p0': '/api/products/search-index?page=0',
   'index_p1': '/api/products/search-index?page=1',
 }
@@ -85,13 +100,13 @@ const GOLDEN = {
   created_desc: ['aac7d52bd72061bcc92803a0e581450fbbe24af1d2bb87024ff96523d9156c22', 19294, 10510],
   created_asc: ['c2507d26a11fdf586f13a6a3116858d925e40558536354a24d706d9f5608791c', 18971, 9910],
   name_desc: ['b14e8f59d53bc968dcdcee36dd7c7515a021ac6cbd9445e7b642068049995b19', 19005, 9940],
-  q_serum: ['d5dd98c1e013aa176c12599482b4d4079335231b19da686648c20dd7c0ce91a9', 22331, 13800],
-  q_serum_p2: ['ec517d38e2ea8d2301ebed5e9ee7eaaa6b45fda0758a4e9657e00e22a11ed11d', 22319, 13770],
+  q_serum: ['d5dd98c1e013aa176c12599482b4d4079335231b19da686648c20dd7c0ce91a9', 22331, 9580],
+  q_serum_p2: ['ec517d38e2ea8d2301ebed5e9ee7eaaa6b45fda0758a4e9657e00e22a11ed11d', 22319, 9550],
   q_multiword: ['854c57cf8e8d6f862d6d2ed1381d5676de914bbcf7134ee13afe37832c26f54e', 25361, 11170],
-  q_barcode: ['936de0e211bdd96a5fb257cfa4316098194dc7aa97469caa7a259b5dced633b0', 8384, 2220],
-  q_title_only: ['34718a4fab2177b11857424e1692f112f4c19d793f71c70eadcfb038e153215c', 11206, 4490],
-  q_nothing: ['fe057055e890dbe518aa0da78e08378dcea953539f70223b09ea3d9e6649fdf6', 6309, 2200],
-  q_page_past_end: ['09b09900554807476e90addebb7470a19bb9b31023f4de6b8af6d6f4251a9b6c', 19401, 17610],
+  q_barcode: ['936de0e211bdd96a5fb257cfa4316098194dc7aa97469caa7a259b5dced633b0', 8384, 60],
+  q_title_only: ['34718a4fab2177b11857424e1692f112f4c19d793f71c70eadcfb038e153215c', 11206, 3120],
+  q_nothing: ['fe057055e890dbe518aa0da78e08378dcea953539f70223b09ea3d9e6649fdf6', 6309, 40],
+  q_page_past_end: ['09b09900554807476e90addebb7470a19bb9b31023f4de6b8af6d6f4251a9b6c', 19401, 14420],
   branch1_in_stock: ['07d2d9223c8239d4a317b5b3a317ef5de2d21be8a2fb7e1596ba2c959797b519', 22193, 10730],
   branch2_out: ['87a7ac6269e391f3fe2a0c201da2a131370713db89c1eda7a705d47037d5f36b', 17411, 8710],
   low_stock: ['32cb264a525f209154bd380d002e852283584a0317fa5c4ccbb3b0df5d302433', 34640, 13770],
@@ -107,13 +122,13 @@ const GOLDEN = {
   q_child_sku: ['b1ff8c7441f12b0ad2583d6d8536603ca1904e4180b610d3b4a5d7d3b7347cf5', 16804, 6790],
   q_blank_child: ['a16ae90401a94e4969d40ba64b9b16d448fb255bf0c30553336da4c738acdecb', 16732, 6670],
   browse_p2: ['5112ee1a887a09675668101584deffae8670fe747753db8aab013e45452bceaa', 19023, 9960],
-  q_khmer: ['e00de30a4b91e9c5f8bea30a835763cdb4160d3768afa9380d6c41c85407037d', 8438, 2290],
+  q_khmer: ['e00de30a4b91e9c5f8bea30a835763cdb4160d3768afa9380d6c41c85407037d', 8438, 120],
   q_khmer_serum: ['4d8e3f7297ebd0c0a6e0c5445a76acf9ce7bd23693fae422d7fd5686e9203f08', 12496, 4380],
   q_inactive_member: ['fe057055e890dbe518aa0da78e08378dcea953539f70223b09ea3d9e6649fdf6', 14583, 6550],
   q_inactive_parent_child: ['e0229781b88aa2d106998e6cbb9d960175c2005c2ecf1d37e76e307dff6b0bdb', 16790, 6770],
   by_ids_inactive: ['baa318bdadeea378fcf267bf681a8f57c6a38dc5d18aed55a4c6c417c79458b7', 4204, 110],
-  q_retired: ['fe057055e890dbe518aa0da78e08378dcea953539f70223b09ea3d9e6649fdf6', 6315, 2210],
-  rank_ids_320: ['9c1e6cb6aeb29267ee7cf977d4fedf1aa6b5683f8367b168cb8ababc36d1248f', 9453, 6340],
+  q_retired: ['fe057055e890dbe518aa0da78e08378dcea953539f70223b09ea3d9e6649fdf6', 6315, 40],
+  rank_ids_320: ['9c1e6cb6aeb29267ee7cf977d4fedf1aa6b5683f8367b168cb8ababc36d1248f', 9453, 6000],
   tie_name_asc_p19: ['6bf2a26a310c4d227c88e2d2dd89de92a12f6854e2c086a9b13182373b15a1d6', 18834, 9630],
   tie_name_asc_p20: ['57bdf838bbef156b15a5b987729e00b422f6a4372358864f41ef449e4104c416', 18791, 9560],
   tie_name_asc_p21: ['9a64b38321fa48d149fd5859a0541b78be604f41885915e89fbd4007530790a0', 18791, 9560],
@@ -132,6 +147,20 @@ const GOLDEN = {
   tie_created_asc_p67: ['c6b9f803775967e2d764f57346a6ae795ab7f8aeb888d29f8b026667cffccb01', 18973, 9880],
   include_lots: ['7a959df3c56587a71507840d90dfb9ac9c37f7fafb4a014be951d776ac15108f', 18941, 9700],
   list: ['6ae039ac2de057cc3446b980776c34b95238c729c0f7b355a6a7d2019294c086', 20485, 13200],
+  filters: ['1bb261d5c5f0bcd519344079a4e26511119b07fdc165d1ec7596b3aa5d957223', 20487, 21520],
+  filters_pos_branch: ['1bb261d5c5f0bcd519344079a4e26511119b07fdc165d1ec7596b3aa5d957223', 20484, 21520],
+  filters_stock_out: ['c14c2447c4f1768fbf2b84a1883d3509b045bc566099aae773e72667533a7eba', 14910, 15670],
+  filters_cat_brand: ['d319788e1b5d59010ffc02ac85b2bde95068a634da11e921580c10a3e04345f5', 16245, 17070],
+  filters_grouped: ['d80cc355ca8866e36537be78f281862d0b4cc0f9e5cf8a317c2d4f03ccb9ae13', 15706, 16500],
+  bootstrap_pos: ['0bdcacfc73d801f6402a4ddf7fb3f11e8baff9661a363a8fdb2aa2fd39a319c1', 30047, 31550],
+  q_cream_branch_stock: ['de0b62582fa3d6605fd4d0278a8ecdea4ad950d76626b83d8c7d624b4387cb76', 5505, 3410],
+  q_cream_brand_promo: ['fe057055e890dbe518aa0da78e08378dcea953539f70223b09ea3d9e6649fdf6', 2598, 1090],
+  q_cream_created_asc_p2: ['d84486f74687e37b3a8ef0093768100cc9e0ed711165a315c18dd1431e0f6746', 5057, 2640],
+  q_substring: ['34718a4fab2177b11857424e1692f112f4c19d793f71c70eadcfb038e153215c', 4284, 2340],
+  q_barcode_fragment: ['1363b5e72856c4d64e579ef0e06a31ebd54dac3580c79a6f7a57a77f8167facc', 2884, 870],
+  q_upc_pair: ['fe057055e890dbe518aa0da78e08378dcea953539f70223b09ea3d9e6649fdf6', 2085, 40],
+  rank_ids_320_p2: ['294a2f3a94880670b9a6956c96f779e577fd223b3adde184010095d8e00de3ac', 4961, 4880],
+  rank_ids_child_only: ['ed9a86e9897b6959aef57a1b799caceeb741fccb897e4298f9205047060ba010', 5055, 4900],
   index_p0: ['48e0d34c2f90b1f50497180964d0ec2158232aed3a54d3843ed89ecdbf43850e', 3073, 1070],
   index_p1: ['aa3577679394938407abfc3e78b0f5f61163982b10ffb05d3d4dace2b801964a', 3121, 1120],
 }
@@ -164,7 +193,7 @@ async function main() {
       oldTotal += oldRows
       newTotal += out[label].rows
     }
-    assert.ok(newTotal < oldTotal * 0.55, `battery reads ${newTotal} rows, was ${oldTotal}; expected under 55 per cent`)
+    assert.ok(newTotal < oldTotal * 0.53, `battery reads ${newTotal} rows, was ${oldTotal}; expected under 53 per cent`)
     console.log(`PASS ${Object.keys(BATTERY).length} responses byte-identical to 04ab054cb; rows read ${oldTotal} -> ${newTotal} (${Math.round(100 * newTotal / oldTotal)} per cent)`)
     for (const label of ['browse', 'browse_p3_50', 'created_desc', 'q_serum', 'q_multiword', 'q_child_sku', 'branch1_in_stock', 'low_stock', 'list', 'index_p0'])
       console.log(`MEASURE ${label}: ${GOLDEN[label][1]} -> ${out[label].rows}`)
@@ -183,6 +212,18 @@ async function main() {
     assert.ok(!out.by_ids.log.some(entry => /page_candidates/.test(entry.sql)), 'a by-id read keeps the default statements')
     assert.ok(out.rank_ids_320.log.some(entry => /page_candidates/.test(entry.sql)), 'a 320-id ranked read uses the keyed page fetch')
     console.log('PASS one family statement per page; count only when the page is past the end')
+
+    // 2b. Typed text and long ranked-id lists rank from the ids the search names (__cand), so the catalogue is not walked to test the search predicate on every product: a search that
+    // matches little reads little (before, every typed search read every active product: ~2,000 rows here whatever the text matched). Searches with a hybrid, short-word or partial-word
+    // term (several words, one or two letters) keep the predicate form.
+    const candidateStatements = log => log.filter(entry => /\b__cand\b/.test(entry.sql))
+    for (const label of ['q_serum', 'q_serum_p2', 'q_barcode', 'q_khmer', 'q_nothing', 'q_retired', 'q_title_only', 'q_page_past_end', 'rank_ids_320'])
+      assert.ok(candidateStatements(out[label].log).length >= 1, `${label} ranks from its candidate ids`)
+    for (const label of ['q_multiword', 'q_child_sku', 'q_blank_child', 'q_khmer_serum', 'browse', 'by_ids', 'rank_ids'])
+      assert.equal(candidateStatements(out[label].log).length, 0, `${label} keeps the predicate form`)
+    assert.ok(out.q_nothing.rows < 60 && out.q_barcode.rows < 100 && out.q_khmer.rows < 200, `a search that matches little reads little: ${out.q_nothing.rows}, ${out.q_barcode.rows}, ${out.q_khmer.rows}`)
+    assert.ok(out.q_serum.rows < 0.8 * GOLDEN.q_serum[1], 'a common word reads far less than the 04ab054cb statement')
+    console.log(`PASS typed searches rank from candidate ids; nothing ${out.q_nothing.rows} rows, barcode ${out.q_barcode.rows}, Khmer ${out.q_khmer.rows}, "serum" ${out.q_serum.rows}`)
 
     // 3. A cache hit does not re-run the page query and returns the same bytes.
     assert.equal(hit.text, out.browse.text, 'cache hit is byte-identical to the miss')
@@ -224,8 +265,9 @@ async function main() {
     const products = read('src/routes/products.ts')
     assert.equal((products.match(/seekPage: seekPageRead/g) || []).length, 1, 'only the product search opts in')
     assert.ok(/catalogProductSql\('products', false\)\} ORDER BY id/.test(products), 'search-index pins the primary-key range')
+    assert.equal((products.match(/candidateSql: candidateRead\?\.idsSql/g) || []).length, 1, 'only the product search hands the ranking a candidate list')
     for (const rel of ['src/routes/inventory.ts', 'src/routes/branches.ts', 'src/routes/portal.ts', 'src/lib/inventoryCheckProducts.ts'])
-      assert.ok(!/seekPage/.test(read(rel)), `${rel} keeps the default pagination statements`)
+      assert.ok(!/seekPage|candidateSql/.test(read(rel)), `${rel} keeps the default pagination statements`)
     console.log('PASS source guards')
   } finally { await world.dispose() }
 }

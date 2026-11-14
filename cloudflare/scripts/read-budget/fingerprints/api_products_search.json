@@ -17,8 +17,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "20bc264a747f",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "78e4f83f41e3",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "07831119a65e",
@@ -59,8 +59,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "20bc264a747f",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "78e4f83f41e3",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "07831119a65e",
@@ -105,8 +105,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "edf4710e74d8",
-   "WITH __fts_rank AS MATERIALIZED (SELECT rowid AS id, bm25(products_fts, 10, 10, 10, 4, 3, 1, 1, 1) AS bm25_ran"
+   "7d58eca6fc68",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "afb8f50bbe0e",
@@ -167,7 +167,7 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "a1f6de8e1cfd",
+   "1ba07c3b0d60",
    "WITH __fts_rank AS MATERIALIZED (SELECT rowid AS id, bm25(products_fts, 10, 10, 10, 4, 3, 1, 1, 1) AS bm25_ran"
   ],
   [
@@ -213,8 +213,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "127fd129a597",
-   "WITH __fts_rank AS MATERIALIZED (SELECT rowid AS id, bm25(products_fts, 10, 10, 10, 4, 3, 1, 1, 1) AS bm25_ran"
+   "b3fd1f80a151",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "011117132f73",
@@ -259,8 +259,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "59fbc3776749",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "efe3022dbded",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "07831119a65e",
@@ -301,8 +301,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "c979e733c6ff",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "f555db345255",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "07831119a65e",
@@ -343,8 +343,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "57cda8d71fec",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "79a893d26b04",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "07831119a65e",
@@ -373,12 +373,8 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
+   "5f13c00d023d",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
   ],
   [
    "5ade221b0a2e",
@@ -389,8 +385,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "cecd3bf457e3",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "d63257d5fc54",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "07831119a65e",
@@ -431,8 +427,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "7348907ebb1f",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "89537e7841d2",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "07831119a65e",
@@ -469,8 +465,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "00280046e33f",
-   "WITH __fts_rank AS MATERIALIZED (SELECT rowid AS id, bm25(products_fts, 10, 10, 10, 4, 3, 1, 1, 1) AS bm25_ran"
+   "ce0ec3fd3f43",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "ea085b840321",
@@ -511,8 +507,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "75804d1e47a0",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "27f5469acb63",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ]
  ],
  "products-search-by-ids-after-write-refetch": [
@@ -563,12 +559,8 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
+   "5f13c00d023d",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
   ],
   [
    "5ade221b0a2e",
@@ -579,8 +571,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "7839d1f8dc8c",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "15ce78d5a5e9",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "6e7f527bc73c",
@@ -633,8 +625,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "3d90a9b3bdb0",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "27b9b3a54473",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "07831119a65e",
@@ -675,8 +667,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "20bc264a747f",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "78e4f83f41e3",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "07831119a65e",
@@ -717,8 +709,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "20bc264a747f",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "78e4f83f41e3",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "07831119a65e",
@@ -759,8 +751,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "e2b8e505f29b",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "a603f2985e23",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "a0661fed7e69",
@@ -805,8 +797,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "e2b8e505f29b",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "a603f2985e23",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "a0661fed7e69",
@@ -851,8 +843,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "e2b8e505f29b",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "a603f2985e23",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "a0661fed7e69",
@@ -897,8 +889,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "56bd3dd1bfc5",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "e52788d300a8",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "b3dc801f817c",
@@ -947,8 +939,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "56bd3dd1bfc5",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "e52788d300a8",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "b3dc801f817c",

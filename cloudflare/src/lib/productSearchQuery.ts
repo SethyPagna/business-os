@@ -52,6 +52,8 @@ import {
   buildShortWordFallbackClause,
   buildTrigramMatchExpression,
   normalizeSearchText,
+  normalizedBarcodeDigitsSql,
+  normalizedBarcodeSql,
   PRODUCT_SEARCH_COLUMNS,
   PRODUCTS_FTS_BM25_SQL,
   searchTermBarcodeKey,
@@ -177,6 +179,7 @@ function buildRankedIdSearchQuery(ranked: RankedIds, params: Record<string, unkn
       listedWhereSql: `p.id IN ${listed}`,
       csvMemberWhereSql: rankedIdCsvMemberWhereSql(`${prefix}rankCsv`, catalogOnly),
     },
+    candidates: { idsSql: `SELECT CAST(value AS INTEGER) AS id, NULL AS r FROM json_each(@${prefix}rankIdList)`, matchRankSql: position },
     matchRankSql: position,
     matchTierSql: `(CASE WHEN ${position} < @${prefix}rankTierCut1 THEN 0 WHEN ${position} < @${prefix}rankTierCut2 THEN 1 WHEN ${position} < @${prefix}rankTierCut3 THEN 2 WHEN ${position} < @${prefix}rankTierCut4 THEN 3 ELSE 4 END)`,
   }
@@ -216,7 +219,25 @@ export interface ProductSearchQuery {
   // Ranked-id path only. What the typed-search order in JS needs (products_typed_order_js): the name of the JSON id-list parameter, the exact WHERE term that lists the ids (so a driving
   // read can replace it by 1 = 1 and start from the list), and the CSV spelling of familyMemberWhereSql.
   rankedIdDriver?: { listParam: string; listedWhereSql: string; csvMemberWhereSql: string }
+  // The same match set as whereClause, as a SOURCE of ids instead of a predicate to test on every product (see ProductSearchCandidates). Absent on the paths that have no such
+  // source (the LIKE fallback, a search with nothing to match); the statement then keeps whereClause.
+  candidates?: ProductSearchCandidates
 }
+
+// The match set of a typed search as a list of ids. whereClause is an OR of terms, and one of them (the exact-barcode catch-all over the stored column) can only be tested row by row,
+// which makes the planner read EVERY active product for every typed search whatever the text matches. Each term of that OR names a set of products, so the union of the sets is the
+// same match set found by seeks: the statement starts from this list (CROSS JOIN products p ON p.id = __cand.id) and its WHERE carries the caller's other terms with the search term
+// replaced by 1 = 1 (lib/familyPagination.ts candidateSql).
+//   idsSql         SELECT id, r ... ; r is the FTS bm25 of the row that came from the products_fts term and NULL for every other source. One product can appear more than once (the
+//                  sources overlap); everything the family statement computes from the rows is a MIN or MAX over them, so a repeat changes nothing.
+//   matchRankSql   matchRankSql with the bm25 read from __cand.r instead of the rank CTE. A product reached by several sources takes its FTS row's value: bm25 is never positive (FTS5
+//                  scores a hit as minus a sum of non-negative terms), and the other sources contribute 0, so the family's MIN is the FTS value exactly as the CTE's LEFT JOIN gave it.
+export interface ProductSearchCandidates {
+  idsSql: string
+  matchRankSql?: string
+}
+// The alias the candidate list is given in the statement (lib/familyPagination.ts spells the same name; scripts/test-products-search-candidates-pure.cjs pins both).
+export const PRODUCT_SEARCH_CANDIDATE_ALIAS = '__cand'
 
 // Relevance tier constants, exported so tests can assert the contract by
 // name instead of by magic number.
@@ -296,6 +317,28 @@ function buildMatchTierSql(
   return `(CASE ${branches.join(' ')} ELSE ${MATCH_TIER_OTHER} END)`
 }
 
+// The ids of products whose barcode is the typed code, as seeks: the literal forms the catalog stores (the barcode index), then the normalized catch-all (idx_products_barcode_key,
+// migration 0307; without that index the same statement scans the barcode index, as the old WHERE did). Same set as buildExactBarcodeMatchClause: the guard terms on the pair flag are
+// constants, so only the branch for the typed key's kind runs. The pair branch seeks the NORMALIZED form of its two codes (the leading zeros dropped, which is what the index holds) and
+// then keeps only rows whose zero-preserving form is one of them, so it returns exactly the rows `digits IN (upcA, upcE)` returned.
+function exactBarcodeCandidatesSql(params: Record<string, unknown>, paramName: string, column: string): string {
+  const equalities: string[] = []
+  for (let index = 0; Object.hasOwn(params, `${paramName}Eq${index}`); index += 1) equalities.push(`@${paramName}Eq${index}`)
+  const rawColumn = column.includes('.') ? column.slice(column.lastIndexOf('.') + 1) : column
+  const upcA = `@${paramName}UpcA`, upcE = `@${paramName}UpcE`
+  return `SELECT id AS id, NULL AS r FROM products WHERE ${rawColumn} IN (${equalities.join(', ')})
+    UNION SELECT p.id, NULL FROM products p WHERE @${paramName}Pair = 1 AND ${normalizedBarcodeSql(column)} IN (ltrim(${upcA}, '0'), ltrim(${upcE}, '0')) AND ${normalizedBarcodeDigitsSql(column)} IN (${upcA}, ${upcE})
+    UNION SELECT p.id, NULL FROM products p WHERE @${paramName}Pair = 0 AND ${normalizedBarcodeSql(column)} = @${paramName}`
+}
+
+// D1 refuses a compound SELECT of more than 5 terms: sources beyond four are nested one level, which keeps every compound at or under it.
+function unionAllCandidates(selects: string[]): string {
+  if (selects.length <= 5) return selects.join(' UNION ALL ')
+  const wrapped: string[] = []
+  for (let index = 0; index < selects.length; index += 4) wrapped.push(`SELECT id, r FROM (${selects.slice(index, index + 4).join(' UNION ALL ')})`)
+  return unionAllCandidates(wrapped)
+}
+
 // Builds the product-search WHERE disjunction and both ordering
 // expressions for a typed/scanned search box value. Mutates `params` with
 // every value it binds (same convention the searchMatch.ts builders use).
@@ -327,11 +370,13 @@ function buildProductSearchQueryFromGroups(
   const guardedUpcPair = exactSearchKeys.some((key) => key.startsWith('upca:') || key.startsWith('upce:'))
   if (guardedUpcPair) {
     const exactBarcodeMatch = buildExactBarcodeMatchClause(rawSearchText, params, `${prefix}barcodeKey`, barcodeColumn)
+    const pairRankSql = exactBarcodeMatch ? buildExactBarcodeRankSql(`${prefix}barcodeKey`, barcodeColumn) : undefined
     return {
       hasSearchTerm: true,
       titleOnly,
       whereClause: exactBarcodeMatch,
-      matchRankSql: exactBarcodeMatch ? buildExactBarcodeRankSql(`${prefix}barcodeKey`, barcodeColumn) : undefined,
+      matchRankSql: pairRankSql,
+      candidates: exactBarcodeMatch ? { idsSql: `SELECT id, r FROM (${exactBarcodeCandidatesSql(params, `${prefix}barcodeKey`, barcodeColumn)})`, matchRankSql: pairRankSql } : undefined,
       matchTierSql: buildMatchTierSql(rawSearchText, params, {
         prefix, nameNormalizedColumn, nameColumn, barcodeColumn, includeBarcodeTier: true,
       }),
@@ -367,12 +412,17 @@ function buildProductSearchQueryFromGroups(
   }
 
   const matchClauses: string[] = []
+  // One id source per term of matchClauses that names its set by an index (see ProductSearchCandidates). The hybrid, short-word and partial-word terms combine several lookups with AND / OR and
+  // brand scans (some capped by an unordered LIMIT), so no source reproduces them exactly: a search that carries one keeps its predicate form (unsourced).
+  const sources: string[] = []
+  let unsourced = false
 
   // 1. FTS5 word/prefix match over name (+sku/barcode unless titleOnly).
   const ftsMatch = buildFtsMatchExpression(termGroups, mode, titleOnly ? 'name' : PRODUCT_SEARCH_COLUMNS)
   if (ftsMatch) {
     params[`${prefix}ftsQuery`] = ftsMatch
     matchClauses.push(`p.id IN (SELECT rowid FROM products_fts WHERE products_fts MATCH @${prefix}ftsQuery)`)
+    sources.push(`SELECT rowid AS id, ${titleOnly ? 'NULL' : PRODUCTS_FTS_BM25_SQL} AS r FROM products_fts WHERE products_fts MATCH @${prefix}ftsQuery`)
   }
 
   // 2 + 3. Trigram substring tables. One expression, two tables: barcode/
@@ -381,10 +431,12 @@ function buildProductSearchQueryFromGroups(
   if (trigramMatch && !titleOnly) {
     params[`${prefix}codeQuery`] = trigramMatch
     matchClauses.push(`p.id IN (SELECT rowid FROM products_fts_code WHERE products_fts_code MATCH @${prefix}codeQuery)`)
+    sources.push(`SELECT rowid AS id, NULL AS r FROM products_fts_code WHERE products_fts_code MATCH @${prefix}codeQuery`)
   }
   if (trigramMatch) {
     params[`${prefix}nameCodeQuery`] = trigramMatch
     matchClauses.push(`p.id IN (SELECT rowid FROM products_fts_name_trigram WHERE products_fts_name_trigram MATCH @${prefix}nameCodeQuery)`)
+    sources.push(`SELECT rowid AS id, NULL AS r FROM products_fts_name_trigram WHERE products_fts_name_trigram MATCH @${prefix}nameCodeQuery`)
   }
 
   // 4. Mixed group (one comma-group holding both a word and a code
@@ -394,23 +446,33 @@ function buildProductSearchQueryFromGroups(
   if (hybridMatch) {
     Object.assign(params, hybridMatch.params)
     matchClauses.push(hybridMatch.sql)
+    unsourced = true
   }
 
   // 5. Sub-3-character words (FTS5's trigram tokenizer emits nothing below
   // 3 chars), name only, on the precomputed normalized column.
   const shortWordMatch = buildShortWordFallbackClause(termGroups, mode, [nameNormalizedColumn], params, `${prefix}shortw`, true, visibleProducts)
-  if (shortWordMatch) matchClauses.push(shortWordMatch)
+  if (shortWordMatch) {
+    matchClauses.push(shortWordMatch)
+    unsourced = true
+  }
 
   // 6. Long (4+ word) queries, partial-word, name only.
   const partialMatch = buildPartialWordMatchClause(termGroups, mode, [nameNormalizedColumn], params, `${prefix}partialw`, 4, true, visibleProducts)
-  if (partialMatch) matchClauses.push(partialMatch)
+  if (partialMatch) {
+    matchClauses.push(partialMatch)
+    unsourced = true
+  }
 
   // 7. Exact barcode with leading zeros folded on both sides (the
   // GTIN-14/EAN-13 twin problem), first in the list so it reads first.
   const exactBarcodeMatch = titleOnly
     ? undefined
     : buildExactBarcodeMatchClause(rawSearchText, params, `${prefix}barcodeKey`, barcodeColumn)
-  if (exactBarcodeMatch) matchClauses.unshift(exactBarcodeMatch)
+  if (exactBarcodeMatch) {
+    matchClauses.unshift(exactBarcodeMatch)
+    sources.unshift(`SELECT id, r FROM (${exactBarcodeCandidatesSql(params, `${prefix}barcodeKey`, barcodeColumn)})`)
+  }
 
   if (!matchClauses.length) return { hasSearchTerm: true, titleOnly }
 
@@ -432,11 +494,20 @@ function buildProductSearchQueryFromGroups(
     matchRankSql = matchRankSql ? `(${barcodeRank} + ${matchRankSql})` : barcodeRank
   }
 
+  // The same rank over the candidate list: the bm25 comes from the FTS source's own row.
+  let candidateRankSql: string | undefined
+  if (!titleOnly && ftsMatch) candidateRankSql = `COALESCE(${PRODUCT_SEARCH_CANDIDATE_ALIAS}.r, 0)`
+  if (exactBarcodeMatch) {
+    const barcodeRank = buildExactBarcodeRankSql(`${prefix}barcodeKey`, barcodeColumn)
+    candidateRankSql = candidateRankSql ? `(${barcodeRank} + ${candidateRankSql})` : barcodeRank
+  }
+
   return {
     hasSearchTerm: true,
     titleOnly,
     whereClause: matchClauses.length > 1 ? `(${matchClauses.join(' OR ')})` : matchClauses[0],
     matchRankSql,
+    candidates: unsourced ? undefined : { idsSql: unionAllCandidates(sources), matchRankSql: candidateRankSql },
     rankCteSql,
     matchTierSql: buildMatchTierSql(rawSearchText, params, {
       prefix, nameNormalizedColumn, nameColumn, barcodeColumn, includeBarcodeTier: !titleOnly,

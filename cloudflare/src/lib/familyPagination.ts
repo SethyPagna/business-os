@@ -171,6 +171,12 @@ export interface FamilyPaginationOptions {
   // Result, order, total and totalPages are identical to the default path; callers that do not pass it are
   // untouched. A page past the end returns no rows, so only then does a COUNT statement still run.
   seekPage?: boolean
+  // Narrow ranking from a candidate list (GET /api/products/search with typed text or ranked ids; lib/productSearchQuery.ts ProductSearchCandidates). `SELECT id, r`: the ids the
+  // search matches. The ranking then starts from those ids (CROSS JOIN products p ON p.id = __cand.id), reads only what the family order needs (the family key, name, created date,
+  // rank, tier, promotion), and never walks the catalogue to test a search predicate on every product. The caller passes whereSql with the search term replaced by 1 = 1,
+  // matchRankSql over __cand.r, and no rankCteSql. Honoured only where the page rows are fetched by key (seekPage, or the ranked scope) and the caller names the family members
+  // (familyMemberBaseWhereSql), because the narrow ranking carries no row columns. Same families, order, rows and total as the predicate form.
+  candidateSql?: string
   // products_parent_seek: the seek page's child lookups are written as index seeks (see pageCandidatesSql). Same rows either way; absent, the statement text is the one it always was.
   parentSeek?: boolean
 }
@@ -193,7 +199,15 @@ export interface FamilyPaginationResult<T> {
   totalPages: number
 }
 
-function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSql' | 'whereSql' | 'matchRankSql' | 'rankCteSql' | 'matchTierSql' | 'familyMemberBaseWhereSql' | 'promotedRankSql' | 'familySortValueSql' | 'familyNumericSortSql'> & { inlineFamilies?: boolean; drivenByListParam?: string }) {
+// The alias the candidate list carries in the statement. lib/productSearchQuery.ts PRODUCT_SEARCH_CANDIDATE_ALIAS spells the same name (the rank expression reads `__cand.r`).
+const CANDIDATE_ALIAS = '__cand'
+
+// A candidate list is used only by a read that fetches its page rows by key and names the family members: the narrow ranking has no row columns to return.
+function narrowRead<T extends { candidateSql?: string; familyMemberBaseWhereSql?: string }>(opts: T, keyedPage: boolean): T {
+  return opts.candidateSql && (!keyedPage || !opts.familyMemberBaseWhereSql) ? { ...opts, candidateSql: undefined } : opts
+}
+
+function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSql' | 'whereSql' | 'matchRankSql' | 'rankCteSql' | 'matchTierSql' | 'familyMemberBaseWhereSql' | 'promotedRankSql' | 'familySortValueSql' | 'familyNumericSortSql' | 'candidateSql'> & { inlineFamilies?: boolean; drivenByListParam?: string; narrow?: boolean }) {
   const matchRankSelect = opts.matchRankSql ? `, (${opts.matchRankSql}) AS __match_rank` : ''
   // __fts_rank is productSearchQuery's FTS_RANK_CTE_NAME (not imported: keeps
   // this helper dependency-free). When matchRankSql reads its rank column,
@@ -226,11 +240,32 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
       WHERE ${opts.familyMemberBaseWhereSql}
     )`
     : ''
+  if (opts.candidateSql && !opts.drivenByListParam) {
+    return `
+    WITH matched AS (
+      SELECT ${FAMILY_ROOT_KEY_SQL} AS __family_root_id,
+             lower(trim(COALESCE(parent.name, p.name))) AS __family_name,
+             p.created_at AS __created_at${matchRankSelect}${matchTierSelect}${promotedSelect}${sortValueSelect}${numericSortSelect}
+      FROM (${opts.candidateSql}) ${CANDIDATE_ALIAS}
+      CROSS JOIN products p ON p.id = ${CANDIDATE_ALIAS}.id
+      LEFT JOIN products parent ON parent.id = p.parent_id
+      ${opts.joinSql}
+      ${opts.whereSql}
+    ),
+    families AS ${opts.inlineFamilies ? 'NOT MATERIALIZED ' : ''}(
+      SELECT __family_root_id AS family_root_id,
+             MIN(__family_name) AS family_name,
+             MAX(__created_at) AS latest_created_at${matchRankAgg}${matchTierAgg}${promotedAgg}${sortValueAgg}${numericSortAgg}
+      FROM matched
+      GROUP BY __family_root_id
+    )
+  `
+  }
   return `
     WITH ${opts.rankCteSql ? `${opts.rankCteSql},` : ''}
-    matched AS ${rankJoin ? 'MATERIALIZED ' : ''}(
-      SELECT ${opts.selectColumns},
-             ${FAMILY_ROOT_KEY_SQL} AS __family_root_id,
+    matched AS ${rankJoin && !opts.narrow ? 'MATERIALIZED ' : ''}(
+      SELECT ${opts.narrow ? '' : `${opts.selectColumns},
+             `}${FAMILY_ROOT_KEY_SQL} AS __family_root_id,
              lower(trim(COALESCE(parent.name, p.name))) AS __family_name,
              p.created_at AS __created_at${matchRankSelect}${matchTierSelect}${promotedSelect}${sortValueSelect}${numericSortSelect}
       ${opts.drivenByListParam
@@ -268,7 +303,7 @@ function buildSeekPageSql(opts: FamilyPaginationOptions, familyOrderSql: string,
   const { selectColumns, joinSql, whereSql, matchRankSql, familyMemberBaseWhereSql } = opts
   const rankJoin = matchRankSql?.includes('__fts_rank.') ? 'LEFT JOIN __fts_rank ON __fts_rank.id = p.id' : ''
   // `matched` and `families` exactly as the default statement builds them; family_members is replaced by page_rows.
-  const ctes = buildCtes({ ...opts, familyMemberBaseWhereSql: undefined, inlineFamilies: true })
+  const ctes = buildCtes({ ...opts, familyMemberBaseWhereSql: undefined, inlineFamilies: true, narrow: true })
   const rowsWhere = familyMemberBaseWhereSql
     ? familyMemberBaseWhereSql
     : whereSql.replace(/^\s*WHERE\s+/i, '') || '1 = 1'
@@ -316,8 +351,9 @@ export function pageCandidatesSql(parentSeek: boolean, familiesTable = 'page_fam
 }
 
 export async function paginateProductFamilies<T = Record<string, unknown>>(
-  opts: FamilyPaginationOptions,
+  options: FamilyPaginationOptions,
 ): Promise<FamilyPaginationResult<T>> {
+  const opts = narrowRead(options, options.seekPage === true)
   const { db, params, page, pageSize, familyOrderSql, intraFamilyOrderSql, familyMemberBaseWhereSql } = opts
   const ctes = buildCtes(opts)
   // The COUNT only needs the families, not their ordering keys. SQLite does
@@ -325,7 +361,7 @@ export async function paginateProductFamilies<T = Record<string, unknown>>(
   // tier and promotion expressions in made the count evaluate a correlated
   // lookup per matched row for nothing (G37: 1,500 ranked ids rescanned
   // their own id list per row there, while the page statement indexed it).
-  const countCtes = buildCtes({ ...opts, matchRankSql: undefined, matchTierSql: undefined, promotedRankSql: undefined, familySortValueSql: undefined, familyNumericSortSql: undefined })
+  const countCtes = buildCtes({ ...opts, matchRankSql: undefined, matchTierSql: undefined, promotedRankSql: undefined, familySortValueSql: undefined, familyNumericSortSql: undefined, narrow: opts.seekPage === true })
   const offset = (page - 1) * pageSize
   // See familyMemberBaseWhereSql's own comment: opted-in callers get every
   // active row of a qualifying family (not just the ones that individually
@@ -416,9 +452,10 @@ export async function paginateProductFamilies<T = Record<string, unknown>>(
 // returns for the same options: same families table, same ORDER BY (the caller's familyOrderSql, then family_root_id), same candidate ids, same row filter, same intra-family order.
 
 /** The ordered family keys of the whole scope, and the family total. */
-export async function rankProductFamilies(opts: FamilyPaginationOptions): Promise<{ keys: string[]; total: number }> {
+export async function rankProductFamilies(options: FamilyPaginationOptions): Promise<{ keys: string[]; total: number }> {
+  const opts = narrowRead(options, true)
   const { db, params, familyOrderSql } = opts
-  const ctes = buildCtes({ ...opts, familyMemberBaseWhereSql: undefined, inlineFamilies: true })
+  const ctes = buildCtes({ ...opts, familyMemberBaseWhereSql: undefined, inlineFamilies: true, narrow: true })
   const rows = await db.prepare(`
     ${ctes}
     SELECT family_root_id FROM families ORDER BY ${familyOrderSql}, family_root_id ASC
@@ -507,7 +544,7 @@ export function typedOrderDrivenRead(where: readonly string[], driver: { listPar
 /** A ranked-id hydrate read in two statements instead of one (see the section comment). Returns null when the order could not be proved exact; the caller then runs the SQL path. */
 export async function paginateRankedIdFamilies<T = Record<string, unknown>>(opts: FamilyPaginationOptions, driven: RankedIdDrivenRead): Promise<FamilyPaginationResult<T> | null> {
   const { db, params, page, pageSize } = opts
-  const ctes = buildCtes({ ...opts, whereSql: driven.drivenWhereSql, familyMemberBaseWhereSql: undefined, inlineFamilies: true, drivenByListParam: driven.listParam })
+  const ctes = buildCtes({ ...opts, candidateSql: undefined, whereSql: driven.drivenWhereSql, familyMemberBaseWhereSql: undefined, inlineFamilies: true, drivenByListParam: driven.listParam, narrow: true })
   const rows = await db.prepare(`${ctes} SELECT __family_root_id AS k, __match_rank AS r, __match_tier AS t, ${opts.promotedRankSql ? '__promoted' : '0'} AS pr FROM matched`).all<RankedIdFamilyRow>(params)
   const keys = orderRankedIdFamilies(rows)
   if (!keys) return null

@@ -5,48 +5,36 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
+   "5f13c00d023d",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
   ],
   [
    "603e70996cd2",
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "7bfbcf2ec7d4",
-   "SELECT MIN(trim(p.brand)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.brand, '')) <> ''"
+   "cd20fda2155a",
+   "B| SELECT MIN(trim(p.brand)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.brand, '')) <>"
   ],
   [
-   "3cc77c93e466",
-   "SELECT MIN(trim(p.category)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.category, ''))"
+   "56af9d012519",
+   "B| SELECT MIN(trim(p.category)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.category, '"
   ],
   [
-   "a21288f6d3a9",
-   "SELECT MIN(trim(p.unit)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.unit, '')) <> '' G"
+   "c1148b2ca879",
+   "B| SELECT MIN(trim(p.unit)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.unit, '')) <> '"
   ],
   [
-   "53f8c56ecb15",
-   "SELECT MIN(trim(p.supplier)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.supplier, ''))"
+   "2e16ad5595a8",
+   "B| SELECT MIN(trim(p.supplier)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.supplier, '"
   ],
   [
-   "bc95fe4b2742",
-   "SELECT MIN(trim(p.tag_label)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.tag_label, ''"
+   "d7ab6a8adcfe",
+   "B| SELECT MIN(trim(p.tag_label)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.tag_label,"
   ],
   [
-   "374f95bcb34a",
-   "SELECT upper(substr(trim(p.name), 1, 1)) AS initial, COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p.id"
+   "a2379a72ff68",
+   "B| SELECT upper(substr(trim(p.name), 1, 1)) AS initial, COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p"
   ],
   [
    "5ade221b0a2e",
@@ -59,48 +47,36 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
+   "5f13c00d023d",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
   ],
   [
    "603e70996cd2",
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "7bfbcf2ec7d4",
-   "SELECT MIN(trim(p.brand)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.brand, '')) <> ''"
+   "cd20fda2155a",
+   "B| SELECT MIN(trim(p.brand)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.brand, '')) <>"
   ],
   [
-   "3cc77c93e466",
-   "SELECT MIN(trim(p.category)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.category, ''))"
+   "56af9d012519",
+   "B| SELECT MIN(trim(p.category)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.category, '"
   ],
   [
-   "a21288f6d3a9",
-   "SELECT MIN(trim(p.unit)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.unit, '')) <> '' G"
+   "c1148b2ca879",
+   "B| SELECT MIN(trim(p.unit)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.unit, '')) <> '"
   ],
   [
-   "53f8c56ecb15",
-   "SELECT MIN(trim(p.supplier)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.supplier, ''))"
+   "2e16ad5595a8",
+   "B| SELECT MIN(trim(p.supplier)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.supplier, '"
   ],
   [
-   "bc95fe4b2742",
-   "SELECT MIN(trim(p.tag_label)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.tag_label, ''"
+   "d7ab6a8adcfe",
+   "B| SELECT MIN(trim(p.tag_label)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.tag_label,"
   ],
   [
-   "374f95bcb34a",
-   "SELECT upper(substr(trim(p.name), 1, 1)) AS initial, COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p.id"
+   "a2379a72ff68",
+   "B| SELECT upper(substr(trim(p.name), 1, 1)) AS initial, COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p"
   ],
   [
    "5ade221b0a2e",
