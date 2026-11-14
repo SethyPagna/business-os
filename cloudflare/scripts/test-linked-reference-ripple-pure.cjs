@@ -36,7 +36,10 @@ check('contact rename and merge advance every dependent version namespace', () =
   assert.match(source, /config\.table === 'customers'[\s\S]*Versions\.push\('sales', 'returns'\)/)
   assert.match(source, /config\.table === 'suppliers'[\s\S]*Versions\.push\('products', 'returns'\)/)
   assert.match(source, /config\.table === 'delivery_contacts'[\s\S]*Versions\.push\('sales'\)/)
-  assert.match(source, /await Promise\.all\(\[\.\.\.new Set\([^)]+Versions\)\]\.map\(\(namespace\) => bumpVersion\(c\.env, namespace\)\)\)/)
+  // One bumpVersions([...]) call per commit (B-C10: one quota admission), not one bumpVersion per namespace.
+  assert.match(source, /await bumpVersions\(c\.env, \[\.\.\.new Set\(updateVersions\)\]\)/)
+  assert.match(source, /await bumpVersions\(c\.env, \[\.\.\.new Set\(mergeVersions\)\]\)/)
+  assert.ok(!/bumpVersion\(c\.env, namespace\)/.test(source), 'no per-namespace bumpVersion loop is left in contacts.ts')
 })
 
 check('merge repoints stable ids and refreshes operational display snapshots', () => {
@@ -50,7 +53,7 @@ check('merge repoints stable ids and refreshes operational display snapshots', (
 
 check('user carry invalidates sales/returns and self-service rename emits the same users signal', () => {
   const source = readWorker('src/routes/users.ts')
-  assert.ok((source.match(/Promise\.all\(\[bumpVersion\(c\.env, 'sales'\), bumpVersion\(c\.env, 'returns'\)\]\)/g) || []).length >= 2)
+  assert.ok((source.match(/await bumpVersions\(c\.env, \['sales', 'returns'\]\)/g) || []).length >= 2)
   assert.match(source, /broadcast\(c\.env, 'users', \{ action: 'update', id: targetId \}\)/)
 })
 
@@ -96,7 +99,8 @@ check('payment, reason and label changes have version/live refresh signals', () 
   const inventory = readWorker('src/routes/inventory.ts')
   const returns = readWorker('src/routes/returns.ts')
   const fees = readWorker('src/routes/feesCatalog.ts')
-  assert.match(settings, /bumpVersion\(c\.env, 'sales'\)/)
+  // A-C3 / B-C10: the payment-method replace moves settings and sales in ONE awaited call (the sales caches show the method label).
+  assert.match(settings, /bumpVersions\(c\.env, \['settings', 'sales'\]\)/)
   assert.match(settings, /broadcast\(c\.env, 'settings', \{ action: 'payment_method_replace'/)
   assert.match(inventory, /broadcast\(c\.env, 'inventory', \{ action: 'reasons_replace'/)
   // 6.0.1897 (F8): the reason replace advances settings and returns in ONE awaited call before the response, then broadcasts.

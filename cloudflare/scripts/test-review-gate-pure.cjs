@@ -266,6 +266,7 @@ const feesRoute = loadReal('routes/fees.ts', { '../lib/schemaObjectProbe': requi
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/feeOperationReceipt': feeOperationReceiptKernel,
   '../lib/reviewGate': reviewGate,
+  '../lib/cache': { bumpVersion: async () => {}, bumpVersions: async () => {} },
   '../lib/branchRoles': branchRoles,
   '../lib/branchEffect': loadReal('lib/branchEffect.ts', { './branchRoles': branchRoles, './sqlBinding': loadReal('lib/sqlBinding.ts') }),
   // fee_date is a TYPED date now, read day-first through the shared kernel,

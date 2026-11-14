@@ -35,7 +35,7 @@ function paymentWorld() {
     '../lib/audit': { requestDeviceColumnSql: (actor, column, fallback) => `CASE WHEN @req_dev_user_id IS NOT NULL AND @req_dev_user_id = ${actor} THEN @req_dev_${column === 'device_name' ? 'name' : 'tz'} ELSE ${fallback} END`, requestDeviceParams: () => ({ req_dev_user_id: null, req_dev_name: null, req_dev_tz: null }), changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, audit: async () => {} },
     '../lib/permissions': { hasPermission: () => true, getPermissionTier: () => 'full', isAdminControlUser: () => false },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
-    '../lib/cache': { bumpVersion: async () => {} },
+    '../lib/cache': { bumpVersion: async () => {}, bumpVersions: async () => {} },
     '../lib/destructiveStepUp': { denyUnlessCurrentPassword: async (c, body, status) => (body.currentPassword === PASSWORD ? null : c.json({ code: 'current_password_required' }, status)) },
     // Any page size, so a page edge can be put anywhere; null falls through to the real tier table.
     '../lib/planTier': { getPlanLimits: (e) => (pageSize.value ? { paymentMethodScanPageSize: pageSize.value } : load('lib/planTier.ts').getPlanLimits(e)) },

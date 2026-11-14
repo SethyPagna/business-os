@@ -24,7 +24,7 @@ const overrides = {
   // payments user is not an administrator.
   '../lib/permissions': { hasPermission: () => true, getPermissionTier: () => 'full', isAdminControlUser: () => false },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
-  '../lib/cache': { bumpVersion: async () => {} },
+  '../lib/cache': { bumpVersion: async () => {}, bumpVersions: async () => {} },
   // A linked rename asks for the caller's current password first (the real check is covered by
   // test-payment-method-replace-step-up-native.cjs). This stand-in refuses with the same 403 unless
   // the body carries PASSWORD, so the route test can pin the order: the step-up runs before any read.

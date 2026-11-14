@@ -67,7 +67,7 @@ const contactsWrite = load('routes/contacts.ts', {
   '../lib/contactDuplicates': contactDuplicates,
   '../lib/phone': phone,
   '../lib/audit': { changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, audit: async () => {} },
-  '../lib/cache': { bumpVersion: async () => {} },
+  '../lib/cache': { bumpVersion: async () => {}, bumpVersions: async () => {} },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/actorSnapshot': { actorSnapshot: () => ({}) },
 }).default
@@ -178,8 +178,8 @@ async function main() {
   const code = ts.transpileModule(applyBody, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
   const statements = []
   const guardedGroups = []
-  new Function('job', 'actionable', 'statements', 'guardedGroups', 'nowIso', 'contactDuplicateWriteGuardStatement', 'collectContactPhones', code)(
-    { type: 'customers' }, [{ action: 'update', existingId: 1, expectedUpdatedAt: updated[0].expectedUpdatedAt, data: { name: 'Member updated', phone: '012 345 678', phone_normalized: '012345678', address: null, notes: null, email: null, membership_number: 'REPLACE2', gender: null } }], statements, guardedGroups, '2026-09-05 12:00:00', contactDuplicates.contactDuplicateWriteGuardStatement, contactDuplicates.collectContactPhones,
+  new Function('job', 'actionable', 'statements', 'guardedGroups', 'nowIso', 'contactDuplicateWriteGuardStatement', 'collectContactPhones', 'CONTACT_IMPORT_COLUMNS', code)(
+    { type: 'customers' }, [{ action: 'update', existingId: 1, expectedUpdatedAt: updated[0].expectedUpdatedAt, data: { name: 'Member updated', phone: '012 345 678', phone_normalized: '012345678', address: null, notes: null, email: null, membership_number: 'REPLACE2', gender: null } }], statements, guardedGroups, '2026-09-05 12:00:00', contactDuplicates.contactDuplicateWriteGuardStatement, contactDuplicates.collectContactPhones, imports.CONTACT_IMPORT_COLUMNS,
   )
   for (const statement of statements) await db.prepare(statement.sql).run(statement.params)
   for (const group of guardedGroups) for (const statement of group) await db.prepare(statement.sql).run(statement.params)
@@ -192,8 +192,8 @@ async function main() {
   raw.prepare("INSERT INTO customers (id,name,updated_at) VALUES (9901,'Import Before','2026-09-08 00:00:00')").run()
   const staleImport = await imports.classifyContacts(db, 'customers', [{ name: 'Import Before', notes: 'stale overwrite' }])
   const staleGroups = []
-  new Function('job', 'actionable', 'statements', 'guardedGroups', 'nowIso', 'contactDuplicateWriteGuardStatement', 'collectContactPhones', code)(
-    { type: 'customers' }, staleImport, [], staleGroups, '2026-09-08 00:00:02', contactDuplicates.contactDuplicateWriteGuardStatement, contactDuplicates.collectContactPhones,
+  new Function('job', 'actionable', 'statements', 'guardedGroups', 'nowIso', 'contactDuplicateWriteGuardStatement', 'collectContactPhones', 'CONTACT_IMPORT_COLUMNS', code)(
+    { type: 'customers' }, staleImport, [], staleGroups, '2026-09-08 00:00:02', contactDuplicates.contactDuplicateWriteGuardStatement, contactDuplicates.collectContactPhones, imports.CONTACT_IMPORT_COLUMNS,
   )
   raw.prepare("UPDATE customers SET name='Import Concurrent', updated_at='2026-09-08 00:00:01' WHERE id=9901").run()
   await assert.rejects(() => db.batch(staleGroups[0]), /malformed JSON/, 'a contact import update aborts if its freshly classified row changes before apply')

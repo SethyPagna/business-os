@@ -220,7 +220,7 @@ async function main() {
   await check('the Settings POST invalidates this isolate after a save and still bumps the version', () => {
     const settings = fs.readFileSync(path.join(SRC, 'routes', 'settings.ts'), 'utf8').replace(/\r\n/g, '\n')
     assert.ok(
-      settings.includes("invalidateLowStockConfigMemo()\n  c.executionCtx.waitUntil(bumpVersion(c.env, 'settings'))"),
+      settings.includes("invalidateLowStockConfigMemo()\n  await bumpVersion(c.env, 'settings')"), // A-C3: the bump is awaited before the response and the broadcast
       'invalidate sits next to the settings bump in POST /api/settings',
     )
     assert.match(settings, /import \{ invalidateLowStockConfigMemo, [^}]*\} from '\.\.\/lib\/lowStockSettings'/)
