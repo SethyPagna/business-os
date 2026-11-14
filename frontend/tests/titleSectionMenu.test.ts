@@ -304,6 +304,20 @@ try {
   await evaluate(`document.querySelector('[data-bos-title-menu="sales"]').dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }))`)
   await waitFor(async () => await menuOpen() ? true : null)
   assert.equal(await evaluate<boolean>(`document.activeElement === document.querySelector('[data-bos-title-menu-item="sales"]')`), true, 'keyboard activation moves focus to the open subpage')
+  // Real key events (not synthetic ones): ArrowDown/ArrowUp walk the items and wrap, Home and End jump to the ends.
+  const press = async (key: string, code: number) => {
+    await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key, code: key, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code })
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code })
+  }
+  const focused = () => evaluate<string | null>(`document.activeElement?.getAttribute('data-bos-title-menu-item') ?? null`)
+  const keyWalk: Array<[string, number, string]> = [
+    ['ArrowDown', 40, 'returns'], ['ArrowDown', 40, 'fees'], ['ArrowUp', 38, 'returns'], ['End', 35, 'reports'],
+    ['ArrowDown', 40, 'sales'], ['ArrowUp', 38, 'reports'], ['Home', 36, 'sales'],
+  ]
+  for (const [key, code, expected] of keyWalk) {
+    await press(key, code)
+    assert.equal(await focused(), expected, `title menu: ${key} moves focus to "${expected}"`)
+  }
   await evaluate(`document.querySelector('[data-bos-title-menu-item="reports"]').click()`)
   assert.deepEqual(await evaluate(`window.__sidebarNavigateCalls`), [{ page: 'sales', anchor: 'hub:sales:reports' }], 'choosing a section navigates through the guarded route contract')
   assert.equal(await menuOpen(), false, 'choosing a section collapses the list')

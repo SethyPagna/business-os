@@ -39,6 +39,6 @@ export const oldCompactLayout = () => pagerSource
   // The compact pill is now one row (Back, range of total, page / pages, Next). The negative control
   // restores what hid the Khmer page total at 320px: a width-capped pill whose text is truncated.
   .replace('mx-auto flex w-fit max-w-full items-center justify-center rounded-full border border-slate-200 bg-white', 'inline-flex w-28 min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white')
-  .replace('min-w-0 whitespace-nowrap rounded-full bg-slate-50 px-1.5 py-1 text-[11px]', 'min-w-0 flex-1 truncate rounded-full bg-slate-50 px-1.5 py-1 text-[11px]')
-  .replace('<span data-pager-page className="shrink-0 whitespace-nowrap px-1 text-center text-[11px] font-semibold tabular-nums', '<span data-pager-page className="min-w-0 flex-1 truncate px-1 text-center text-[11px] font-semibold')
+  .replace("<span data-pager-range className={`shrink-0 whitespace-nowrap rounded-full bg-slate-50 ${dense ? 'px-1' : 'px-1.5'} py-1 ${textSize} font-semibold tabular-nums text-slate-700 dark:bg-slate-800 dark:text-slate-100`}>", '<span data-pager-range className="min-w-0 flex-1 truncate rounded-full bg-slate-50 px-1.5 py-1 text-[11px] font-semibold tabular-nums text-slate-700 dark:bg-slate-800 dark:text-slate-100">')
+  .replace("<span data-pager-page className={`shrink-0 whitespace-nowrap ${edgePad} text-center ${textSize} font-semibold tabular-nums text-slate-700 dark:text-slate-100`}>", '<span data-pager-page className="min-w-0 flex-1 truncate px-1 text-center text-[11px] font-semibold">')
   .replace('<span aria-hidden="true">{safePage} / {totalPages}</span>', '<span aria-hidden="true">{pageLabel} {safePage} {ofLabel} {totalPages}</span>')
