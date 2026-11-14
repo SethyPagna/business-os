@@ -241,6 +241,7 @@
     {"method":"POST","route":"/api/system/client-error","class":"N","reason":"write-not-measured"},
     {"method":"DELETE","route":"/api/system/data-path","class":"N","reason":"write-not-measured"},
     {"method":"POST","route":"/api/system/data-path","class":"N","reason":"write-not-measured"},
+    {"method":"POST","route":"/api/system/sales-daily/rebuild","class":"N","reason":"write-not-measured"},
     {"method":"POST","route":"/api/system/drive-sync/disconnect","class":"N","reason":"write-not-measured"},
     {"method":"POST","route":"/api/system/drive-sync/forget-credentials","class":"N","reason":"write-not-measured"},
     {"method":"POST","route":"/api/system/drive-sync/jobs","class":"N","reason":"write-not-measured"},
