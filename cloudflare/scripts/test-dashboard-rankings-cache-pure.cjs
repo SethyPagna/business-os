@@ -61,9 +61,9 @@ function makeEnv({ kv = {}, d1 = {} } = {}) {
     __db: {
       prepare() {
         return {
-          all: async ({ namespaces }) => {
+          all: async (namespaces) => {
             state.statements += 1
-            return JSON.parse(namespaces).filter((namespace) => namespace in state.d1).map((namespace) => ({ namespace, version: state.d1[namespace] }))
+            return namespaces.filter((namespace) => namespace in state.d1).map((namespace) => ({ namespace, version: state.d1[namespace] }))
           },
           get: async ({ namespace }) => (namespace in state.d1 ? { version: state.d1[namespace] } : null),
         }

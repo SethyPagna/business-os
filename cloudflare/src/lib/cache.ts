@@ -215,11 +215,14 @@ export async function versionedKey(kv: KVNamespace, namespace: string, suffix: s
 }
 
 async function readD1Versions(env: Env, namespaces: string[], requireReadable = false, outcome?: { value: boolean }): Promise<Map<string, number>> {
-  if (!namespaces.length) return new Map()
+  // Deduplicated first: one bound placeholder per distinct namespace, so the statement reads exactly those rows. (A json_each() list is metered by D1 as
+  // extra rows read, about 2N per request for N namespaces; bound placeholders are not.) Namespaces are a handful of fixed names, far under the bind limit.
+  const distinct = [...new Set(namespaces)]
+  if (!distinct.length) return new Map()
   try {
     const rows = await getDb(env).prepare(`SELECT namespace, version FROM cache_versions
-      WHERE namespace IN (SELECT value FROM json_each(@namespaces))`)
-      .all<{ namespace: string; version: number }>({ namespaces: JSON.stringify(namespaces) })
+      WHERE namespace IN (${distinct.map(() => '?').join(',')})`)
+      .all<{ namespace: string; version: number }>(distinct)
     return new Map(rows.filter(row => row.version != null).map(row => [row.namespace, Number(row.version)]))
   } catch (error) {
     if (requireReadable) throw error
