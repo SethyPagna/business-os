@@ -17,6 +17,8 @@
 --
 -- The table keeps its rowid (no WITHOUT ROWID): backups and the d1 table census rely on it. LF-only. Derived data: not in backups.
 --
+-- The coverage row names the data epoch AND the kernel version (SALES_DAILY_KERNEL_VERSION, 1 today) the seed covers; the cron re-seeds and re-covers when either moves.
+--
 -- PRE:  sales_daily_totals does not exist (CREATE TABLE aborts otherwise).
 -- POST: every day that has a sale has a row; the four triggers and two indexes exist; the coverage row exists. Asserted at the end.
 -- RECOVERY: DROP the four triggers, then the table and both indexes, then DELETE the 'sales_daily_coverage' and 'sales_daily_quarantine'
@@ -75,7 +77,7 @@ SELECT DISTINCT COALESCE(date(created_at, '+7 hours'), ''), 1 FROM sales WHERE 1
 ON CONFLICT(business_date) DO NOTHING;
 
 INSERT INTO system_flags (key, value, updated_at)
-VALUES ('sales_daily_coverage', json_object('epoch', (SELECT value FROM system_flags WHERE key = 'data_epoch')), CURRENT_TIMESTAMP)
+VALUES ('sales_daily_coverage', json_object('epoch', (SELECT value FROM system_flags WHERE key = 'data_epoch'), 'kernel', 1), CURRENT_TIMESTAMP)
 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;
 
 SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM sales s WHERE NOT EXISTS (SELECT 1 FROM sales_daily_totals t WHERE t.business_date = COALESCE(date(s.created_at, '+7 hours'), '')))

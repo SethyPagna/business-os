@@ -66,7 +66,7 @@ check('applies on the full chain; seeds one DIRTY row per day that has a sale (i
 
 check('the coverage row carries the data epoch; the two indexes and four triggers exist; the partial index holds only unfinished days', () => {
   const epoch = migrated.prepare("SELECT value FROM system_flags WHERE key='data_epoch'").get().value
-  assert.equal(migrated.prepare("SELECT value FROM system_flags WHERE key='sales_daily_coverage'").get().value, JSON.stringify({ epoch }))
+  assert.equal(migrated.prepare("SELECT value FROM system_flags WHERE key='sales_daily_coverage'").get().value, JSON.stringify({ epoch, kernel: 1 }))
   const names = (type) => migrated.prepare('SELECT name FROM sqlite_master WHERE type=? AND name LIKE ? ORDER BY name').all(type, '%sales_daily%').map((r) => r.name)
   assert.deepEqual(names('trigger'), ['sales_daily_mark_revision_insert', 'sales_daily_mark_revision_update', 'sales_daily_mark_sale_delete', 'sales_daily_mark_sale_moved'])
   assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE name='idx_customers_anonymous' AND sql LIKE '%WHERE COALESCE(is_anonymous, 0) <> 0'").get())
