@@ -62,8 +62,15 @@ check(
 )
 check(
   'importEngine.ts actually calls broadcast() for the contacts branch, not just defines the map',
-  /CONTACT_IMPORT_CHANNEL\[job\.type\]\)\s*\{\s*\n\s*await broadcast\(env, CONTACT_IMPORT_CHANNEL\[job\.type\]/.test(importEngineSrc),
+  /CONTACT_IMPORT_CHANNEL\[job\.type\]\)\s*\{[\s\S]*?await broadcast\(env, CONTACT_IMPORT_CHANNEL\[job\.type\]/.test(importEngineSrc),
 )
+
+// A-C1 (14 Nov): a contacts import moved no cache version, so the contact lists (20 s), the Sales caches keyed on customers and the
+// dashboard rankings served pre-import data. The job type IS the table name and the namespace; the bump is awaited BEFORE the push.
+const contactsBranch = importEngineSrc.slice(importEngineSrc.indexOf('} else if (CONTACT_IMPORT_CHANNEL[job.type]) {'))
+const bumpAt = contactsBranch.indexOf('await bumpVersions(env, [job.type])')
+const pushAt = contactsBranch.indexOf('await broadcast(env, CONTACT_IMPORT_CHANNEL[job.type]')
+check('importEngine.ts awaits a bump of the contact table namespace before the contacts broadcast (A-C1)', bumpAt > 0 && pushAt > bumpAt)
 
 const dashboardPath = path.join(__dirname, '..', '..', 'frontend', 'src', 'components', 'dashboard', 'Dashboard.tsx')
 const dashboardSrc = fs.readFileSync(dashboardPath, 'utf8')

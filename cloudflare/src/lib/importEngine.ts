@@ -91,7 +91,7 @@ import { collectAllContactPhones, collectContactPhones, contactDuplicateWriteGua
 import { canonicalizePhone } from './phone'
 import { MASKED_PHONE_MESSAGE, rowHasMaskedPhone } from './phoneWriteGuard'
 import { scrubMaskedInput } from './phoneAccess'
-import { bumpVersion } from './cache'
+import { bumpVersion, bumpVersions } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { VALID_SALE_STATUSES, RETURN_STATUSES, normalizeSaleStatus } from './salesStatus'
 import { dateToBatchCode, normalizeToIsoDate, readBatchDateCell } from './batchCode'
@@ -2502,6 +2502,47 @@ export async function classifyProducts(
   return results
 }
 
+// The columns a contacts import writes, per table. Shared by classifyContacts (is this row already what the file says?) and the apply
+// UPDATE/INSERT in runImportApply, so the two can never disagree about what a row writes. membership_number is written on INSERT only.
+export const CONTACT_IMPORT_COLUMNS: Record<'customers' | 'suppliers' | 'delivery_contacts', readonly string[]> = {
+  customers: ['name', 'phone', 'phone_normalized', 'address', 'notes', 'email', 'membership_number', 'gender'],
+  suppliers: ['name', 'phone', 'address', 'notes', 'email', 'company', 'contact_person', 'gender'],
+  delivery_contacts: ['name', 'phone', 'address', 'notes', 'area', 'gender'],
+}
+// B-C7 (products): the whole-row UPDATE of a matched product (default / override modes and fill_blank) is conditional on at least one
+// written column actually differing from what is stored. A re-import of an unchanged file then writes no product row: no row rewrite,
+// no updated_at move, none of the three FTS triggers and no stock-revision bump (stock_revision_products_update fires per written row).
+// Decided in SQL against the CURRENT row, so a product edited between review and apply is still overwritten exactly as before, and
+// nothing is read to decide it. Stock, batch and cost statements around it are separate statements and still run. `IS NOT` is
+// null-safe, and COLLATE BINARY keeps a case-only change a change should a column ever gain a NOCASE collation.
+const PRODUCT_IMPORT_TEXT_COLUMNS = ['name', 'name_normalized', 'sku', 'barcode', 'category', 'categories', 'unit', 'unit_normalized', 'description', 'brand', 'brands', 'brand_compact', 'supplier', 'discount_type', 'discount_label', 'discount_badge_color', 'discount_starts_at', 'discount_ends_at', 'expiry_date'] as const
+const PRODUCT_IMPORT_NUMERIC_COLUMNS = ['selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr', 'cost_price_usd', 'cost_price_khr', 'low_stock_threshold', 'out_of_stock_threshold', 'discount_enabled', 'discount_percent', 'discount_amount_usd', 'discount_amount_khr', 'expiry_alert_days'] as const
+export function productImportChangedGuardSql(includesImage: boolean): string {
+  const differs = [
+    ...PRODUCT_IMPORT_TEXT_COLUMNS.map((column) => `${column} IS NOT @${column} COLLATE BINARY`),
+    ...PRODUCT_IMPORT_NUMERIC_COLUMNS.map((column) => `${column} IS NOT @${column}`),
+    // The cost's purchase_price twin is written as COALESCE(cost, 0): compared against that exact expression.
+    `purchase_price_usd IS NOT ${costMirrorSql('@cost_price_usd')}`,
+    `purchase_price_khr IS NOT ${costMirrorSql('@cost_price_khr')}`,
+    ...(includesImage ? ['image_path IS NOT @image_path COLLATE BINARY'] : []),
+  ]
+  return ` AND (${differs.join(' OR ')})`
+}
+
+export const CONTACT_IMPORT_UNCHANGED_CODE = 'contact_import_unchanged'
+export const CONTACT_IMPORT_UNCHANGED_MESSAGE = 'No changes: this row already matches the record on file.'
+
+// True when an UPDATE of these merged values would leave every written column exactly as stored (null and blank count as equal, the
+// same rule the review's "changes" column uses). Such an update would still rewrite every column and bump updated_at.
+export function contactImportUpdateIsNoop(table: 'customers' | 'suppliers' | 'delivery_contacts', existing: Record<string, unknown>, merged: Record<string, unknown>): boolean {
+  const incoming: Record<string, unknown> = {}
+  for (const column of CONTACT_IMPORT_COLUMNS[table]) {
+    if (column === 'membership_number') continue
+    incoming[column] = merged[column]
+  }
+  return Object.keys(diffFields(existing, incoming)).length === 0
+}
+
 export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppliers' | 'delivery_contacts', rows: ParsedCsvRow[], policyJson?: string | null): Promise<ImportRowResult[]> {
   const contactMode = table === 'delivery_contacts' ? 'area' : 'address'
   // Full rows (not just id/name/phone) so a matched row can be merged
@@ -2981,6 +3022,24 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
       changes: {},
       data,
     })
+  }
+  // B-C7: a matched row whose merged values equal what is stored writes nothing. Decided once, after the whole file is read, because
+  // later rows of the same file fold into a pending update (so its final values are only known now). The row stays in the review as a
+  // skip with a code the review restates in either language; its match warnings stay on the result, except that a membership_mismatch
+  // row stays an update so its confirmation prompt is not hidden.
+  const existingById = new Map<number, ExistingContact>()
+  for (const record of existing) existingById.set(Number(record.id), record)
+  for (const result of results) {
+    if (result.action !== 'update' || result.existingId == null) continue
+    const record = existingById.get(Number(result.existingId))
+    if (!record || !contactImportUpdateIsNoop(table, record, result.data as Record<string, unknown>)) continue
+    // A membership number that belongs to a differently named record asks the reviewer to confirm it is the same person: that stays visible as an update.
+    if (result.warnings?.some((warning) => warning.kind === 'membership_mismatch')) continue
+    result.action = 'skip'
+    result.code = CONTACT_IMPORT_UNCHANGED_CODE
+    result.params = {}
+    result.message = CONTACT_IMPORT_UNCHANGED_MESSAGE
+    result.changes = {}
   }
   return results
 }
@@ -7364,7 +7423,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // row.
             pushImportedCostEntry(Number(r.existingId), { usd: d.cost_price_usd, khr: d.cost_price_khr })
             rowWriteGroup.push({
-              sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, purchase_price_usd=${costMirrorSql('@cost_price_usd')}, purchase_price_khr=${costMirrorSql('@cost_price_khr')}, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
+              sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, purchase_price_usd=${costMirrorSql('@cost_price_usd')}, purchase_price_khr=${costMirrorSql('@cost_price_khr')}, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id${productImportChangedGuardSql(Boolean(d.image_path))}`,
               params: { ...d, id: r.existingId, updated_at: nowIso },
             })
             finishProductRowWriteGroup()
@@ -7436,7 +7495,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // the cost as typed.
             pushImportedCostEntry(Number(r.existingId), { usd: d.cost_price_usd, khr: d.cost_price_khr })
             rowWriteGroup.push({
-              sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, purchase_price_usd=${costMirrorSql('@cost_price_usd')}, purchase_price_khr=${costMirrorSql('@cost_price_khr')}, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
+              sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, purchase_price_usd=${costMirrorSql('@cost_price_usd')}, purchase_price_khr=${costMirrorSql('@cost_price_khr')}, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id${productImportChangedGuardSql(Boolean(d.image_path))}`,
               params: { ...d, id: r.existingId, updated_at: nowIso },
             })
           }
@@ -7616,8 +7675,11 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // as a later statement in the same D1 batch, so it sees the
             // branch_stock write above -- statements in one batch execute
             // sequentially inside a single SQLite transaction.
+            // B-C7: written only when the aggregate actually moves (drift still self-heals): an unchanged re-import writes no product
+            // row here either, so the stock-revision trigger does not fire for a row whose total did not change.
             rowWriteGroup.push({
-              sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id) WHERE id = @id`,
+              sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id) WHERE id = @id
+                    AND stock_quantity IS NOT (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id)`,
               params: { id: r.existingId },
             })
           }
@@ -7737,11 +7799,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       }
     } else if (job.type === 'customers' || job.type === 'suppliers' || job.type === 'delivery_contacts') {
       const table = job.type
-      const columns = table === 'customers'
-        ? ['name', 'phone', 'phone_normalized', 'address', 'notes', 'email', 'membership_number', 'gender']
-        : table === 'suppliers'
-          ? ['name', 'phone', 'address', 'notes', 'email', 'company', 'contact_person', 'gender']
-          : ['name', 'phone', 'address', 'notes', 'area', 'gender']
+      const columns = CONTACT_IMPORT_COLUMNS[table]
       for (const r of actionable) {
         const d = r.data as Record<string, unknown>
         const group: Array<{ sql: string; params: Record<string, unknown> }> = []
@@ -7945,6 +8003,9 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       // An imported sale can carry a courier cost, which the Expenses list shows (and no longer reloads on 'sales').
       if (job.type === 'sales') await broadcast(env, 'fees', { action: 'import', jobId }).catch(() => {})
     } else if (CONTACT_IMPORT_CHANNEL[job.type]) {
+      // The job type is the table name and the cache namespace (customers / suppliers / delivery_contacts). Await the bump BEFORE the
+      // broadcast so a peer refetching on the push keys on the new version; the Sales caches key on 'customers'.
+      await bumpVersions(env, [job.type])
       await broadcast(env, CONTACT_IMPORT_CHANNEL[job.type], { action: 'import', jobId }).catch(() => {})
     }
     sw.lap('cacheInvalidateMs')

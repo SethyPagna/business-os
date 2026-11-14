@@ -1811,7 +1811,8 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   // import didn't create.
   {
     const db = makeFakeDb([{ id: 5, name: 'Sokha', membership_number: null }])
-    const results = await classifyContacts(db, 'customers', [row({ name: 'Sokha' }, 1)], null)
+    // The file brings a new note: a row that changes nothing is a skip now (B-C7), and this check is about what a real update does to membership_number.
+    const results = await classifyContacts(db, 'customers', [row({ name: 'Sokha', notes: 'new note' }, 1)], null)
     assert.strictEqual(results[0].action, 'update')
     assert.strictEqual(results[0].data.membership_number, null, 'a matched customer with no existing membership_number stays blank on merge -- backfill is creation-only')
   }
@@ -2114,12 +2115,113 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   // list as a second, belt-and-suspenders layer -- not re-derived here).
   {
     const db = makeFakeDb([{ id: 20, name: 'Existing Person', created_at: '2015-01-01T00:00:00.000Z' }])
-    const results = await classifyContacts(db, 'customers', [row({ name: 'Existing Person', created_date: '2024-05-05' }, 1)], null)
+    const results = await classifyContacts(db, 'customers', [row({ name: 'Existing Person', created_date: '2024-05-05', notes: 'new note' }, 1)], null)
+    // (a new note keeps it a real update; a merge that changes nothing is a skip, B-C7)
     assert.strictEqual(results[0].action, 'update')
     assert.strictEqual(results[0].data.created_at, '2015-01-01T00:00:00.000Z', 'a matched customer keeps its real original created_at -- the imported created_date never overwrites it')
   }
 
   console.log('PASS classifyContacts: creation-only membership preservation, canonical phone identity/refusal/options/formatting, name-safe matching, force_create name override, and gender/created_date parsing')
+}
+
+// -- B-C7: a matched contact row whose merged values equal what is stored writes nothing. classifyContacts marks it a skip (code
+// contact_import_unchanged, shown in the review in either language) instead of an update that would rewrite every column and bump
+// updated_at. Real transpiled classifyContacts against the same small fake D1 as above.
+{
+  const { classifyContacts, contactImportUpdateIsNoop, CONTACT_IMPORT_COLUMNS } = moduleObj.exports
+  const makeDb = (existingRows) => ({
+    prepare: (sql) => ({ all: async () => (String(sql).includes('portal_accounts') ? [] : existingRows) }),
+  })
+  const row = (fields, rowNumber) => ({ _rowNumber: rowNumber, ...fields })
+  const STORED = { id: 31, name: 'Sopheap', phone: '012 345 678', phone_normalized: '012345678', address: 'Phnom Penh', notes: 'VIP', email: 'a@b.co', membership_number: 'LC-00031', gender: 'female', updated_at: '2026-10-01 00:00:00' }
+
+  // 1) The same row, twice-imported: nothing changed, so a skip that says so. The pass is on the review's own terms: the row is still there.
+  {
+    const results = await classifyContacts(makeDb([STORED]), 'customers', [row({ name: 'Sopheap', phone: '012 345 678', address: 'Phnom Penh', notes: 'VIP', email: 'a@b.co', gender: 'female' }, 1)], null)
+    assert.strictEqual(results.length, 1, 'the row stays in the review')
+    assert.strictEqual(results[0].action, 'skip')
+    assert.strictEqual(results[0].code, 'contact_import_unchanged')
+    assert.strictEqual(results[0].existingId, 31, 'still names the record it matched')
+    assert.deepStrictEqual(results[0].changes, {})
+    assert.match(results[0].message, /No changes/)
+  }
+  // 2) A blank cell in the file never blanks stored data in the default merge, so it is still a no-op.
+  {
+    const results = await classifyContacts(makeDb([STORED]), 'customers', [row({ name: 'Sopheap', phone: '012 345 678', address: '', notes: '' }, 1)], null)
+    assert.strictEqual(results[0].action, 'skip', 'blank cells keep the stored values under merge_blank_only')
+  }
+  // 3) ANY real difference keeps it an update, and the update still carries the diff (each written column in turn). Overwrite mode, against a
+  // row stored the way a previous import wrote it (address holds the structured phone/address options), so that ONLY the named column differs.
+  const STORED_BY_IMPORT = { ...STORED, address: JSON.stringify([{ label: 'Default', name: null, phone: '012 345 678', email: 'a@b.co', address: 'Phnom Penh', area: null }]) }
+  {
+    const same = await classifyContacts(makeDb([STORED_BY_IMPORT]), 'customers', [row({ name: 'Sopheap', phone: '012 345 678', address: 'Phnom Penh', notes: 'VIP', email: 'a@b.co', gender: 'female' }, 1)], JSON.stringify({ conflictMode: 'overwrite' }))
+    assert.strictEqual(same[0].action, 'skip', 'overwrite of identical values is a no-op too (the control for the loop below)')
+  }
+  for (const [column, value] of [['address', 'Siem Reap'], ['notes', 'Regular'], ['email', 'new@b.co'], ['gender', 'male'], ['phone', '099 111 222']]) {
+    const policy = JSON.stringify({ conflictMode: 'overwrite' })
+    const results = await classifyContacts(makeDb([STORED_BY_IMPORT]), 'customers', [row({ name: 'Sopheap', phone: '012 345 678', address: 'Phnom Penh', notes: 'VIP', email: 'a@b.co', gender: 'female', [column]: value }, 1)], policy)
+    assert.strictEqual(results[0].action, 'update', `${column} changed: a real update`)
+    assert.ok(column in results[0].changes, `${column} is in the diff`)
+  }
+  // 4) A blank stored field filled by the file is a change (merge_blank_only fills blanks).
+  {
+    const results = await classifyContacts(makeDb([{ ...STORED, notes: null }]), 'customers', [row({ name: 'Sopheap', phone: '012 345 678', notes: 'VIP' }, 1)], null)
+    assert.strictEqual(results[0].action, 'update')
+    assert.ok('notes' in results[0].changes)
+  }
+  // 5) A legacy row with no phone_normalized: the update writes it, so it is not a no-op.
+  {
+    const results = await classifyContacts(makeDb([{ ...STORED, phone_normalized: null }]), 'customers', [row({ name: 'Sopheap', phone: '012 345 678', address: 'Phnom Penh', notes: 'VIP', email: 'a@b.co', gender: 'female' }, 1)], null)
+    assert.strictEqual(results[0].action, 'update', 'the canonical phone key would be filled in by the write')
+  }
+  // 6) Two rows of one file that fold into one record: decided on the FINAL merged values (the second row adds the change).
+  {
+    const results = await classifyContacts(makeDb([STORED]), 'customers', [
+      row({ name: 'Sopheap', phone: '012 345 678' }, 1),
+      row({ name: 'Sopheap', phone: '012 345 678', address: '', notes: 'VIP', email: 'a@b.co', gender: 'female', area: '' }, 2),
+    ], null)
+    assert.strictEqual(results[0].action, 'skip', 'row 1 alone changes nothing, and so does the merge of row 2 into it')
+    assert.strictEqual(results[1].action, 'skip')
+    const adds = await classifyContacts(makeDb([{ ...STORED, notes: null }]), 'customers', [
+      row({ name: 'Sopheap', phone: '012 345 678' }, 1),
+      row({ name: 'Sopheap', phone: '012 345 678', notes: 'VIP' }, 2),
+    ], null)
+    assert.strictEqual(adds[0].action, 'update', 'row 2 folds a change into row 1: the pending update stays an update')
+    assert.strictEqual(adds[1].action, 'skip', 'the folded row is a skip, as before')
+  }
+  // 7) The visible-review rule: a membership number that belongs to a differently named record keeps its confirmation prompt.
+  {
+    const results = await classifyContacts(makeDb([STORED]), 'customers', [row({ name: 'Somebody Else', membership_number: 'LC-00031' }, 1)], null)
+    assert.strictEqual(results[0].action, 'update', 'the mismatch row is not collapsed into a quiet skip')
+    assert.ok(results[0].warnings?.some((w) => w.kind === 'membership_mismatch'))
+  }
+  // 8) The name-only match of an unchanged row is a skip that keeps its warning on the result (the report still counts it).
+  {
+    const results = await classifyContacts(makeDb([{ ...STORED, phone: null, phone_normalized: null }]), 'customers', [row({ name: 'Sopheap', address: 'Phnom Penh', notes: 'VIP', email: 'a@b.co', gender: 'female' }, 1)], null)
+    assert.strictEqual(results[0].action, 'skip')
+    assert.ok(results[0].warnings?.some((w) => w.kind === 'name_match'), 'the match note stays on the row for the report')
+  }
+  // 9) Suppliers and delivery contacts take the same rule over their own columns.
+  {
+    const supplier = { id: 4, name: 'Acme Co', phone: '023 111 222', address: 'PP', notes: null, email: null, company: 'Acme', contact_person: 'Dara', gender: null }
+    const same = await classifyContacts(makeDb([supplier]), 'suppliers', [row({ name: 'Acme Co', phone: '023 111 222', address: 'PP', company: 'Acme', contact_person: 'Dara' }, 1)], null)
+    assert.strictEqual(same[0].action, 'skip')
+    const diff = await classifyContacts(makeDb([{ ...supplier, company: null }]), 'suppliers', [row({ name: 'Acme Co', phone: '023 111 222', company: 'Acme' }, 1)], null)
+    assert.strictEqual(diff[0].action, 'update')
+    // A delivery contact stores its phone/area options as JSON in address, exactly as a previous import of this row wrote it.
+    const courierAddress = '[{"label":"Default","name":null,"phone":"077 000 111","email":null,"address":null,"area":"Daun Penh"}]'
+    const courier = { id: 5, name: 'Rider', phone: '077 000 111', address: courierAddress, notes: null, area: 'Daun Penh', gender: null }
+    const courierSame = await classifyContacts(makeDb([courier]), 'delivery_contacts', [row({ name: 'Rider', phone: '077 000 111', area: 'Daun Penh' }, 1)], null)
+    assert.strictEqual(courierSame[0].action, 'skip')
+  }
+  // 10) The helper itself, and the shared column list the apply writer uses.
+  {
+    assert.strictEqual(contactImportUpdateIsNoop('customers', { name: 'A', notes: null }, { name: 'A', notes: '' }), true, 'null and blank are the same value')
+    assert.strictEqual(contactImportUpdateIsNoop('customers', { name: 'A', notes: 'x' }, { name: 'A', notes: 'y' }), false)
+    assert.strictEqual(contactImportUpdateIsNoop('customers', { name: 'A', membership_number: 'LC-1' }, { name: 'A', membership_number: 'LC-2' }), true, 'membership_number is never written on update')
+    assert.deepStrictEqual([...CONTACT_IMPORT_COLUMNS.delivery_contacts], ['name', 'phone', 'address', 'notes', 'area', 'gender'])
+  }
+  console.log('PASS classifyContacts: an update that changes nothing is a visible skip (contact_import_unchanged); any real change, fold, or membership mismatch stays an update')
 }
 
 // The apply writer must materialize the canonical customer key classified
@@ -2129,7 +2231,8 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   const applyStart = source.indexOf("} else if (job.type === 'customers' || job.type === 'suppliers' || job.type === 'delivery_contacts') {")
   const applyEnd = source.indexOf("} else if (job.type === 'inventory')", applyStart)
   const applyBody = source.slice(applyStart, applyEnd)
-  assert.match(applyBody, /\['name', 'phone', 'phone_normalized', 'address'/, 'customer import apply writes phone_normalized beside phone')
+  assert.match(applyBody, /const columns = CONTACT_IMPORT_COLUMNS\[table\]/, 'the apply writer takes its columns from the one shared list classifyContacts also uses to detect a no-op update')
+  assert.match(source, /customers: \['name', 'phone', 'phone_normalized', 'address'/, 'customer import apply writes phone_normalized beside phone')
   assert.match(applyBody, /columns\.filter\(\(c\) => c !== 'membership_number'\)/, 'updates preserve membership identity while still refreshing phone_normalized')
   assert.match(applyBody, /contactDuplicateWriteGuardStatement\(table/, 'every contact create/update gets a canonical phone guard at apply time')
   assert.match(applyBody, /updated_at IS @expectedUpdatedAt/, 'contact updates verify the freshly classified row snapshot in the atomic write group')
