@@ -5,9 +5,8 @@ import Info from 'lucide-react/dist/esm/icons/info.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
-import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
-import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Modal from '../shared/Modal'
+import PaginationControls, { TopPager } from '../shared/PaginationControls'
 import { formatMergeCost, mergeCostReviewMatches } from '../../utils/mergeCostPreview.ts'
 import { useApp } from '../../AppContext'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
@@ -166,6 +165,17 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
   const detailStart = (safeDetailPage - 1) * DETAIL_PAGE_SIZE
   const detailEnd = Math.min(detailStart + DETAIL_PAGE_SIZE, groups.length)
   const visibleGroups = groups.slice(detailStart, detailEnd)
+  // Owner 14 Nov: one pager element from one state, mounted above AND below the 25-group window.
+  const pager = (
+    <PaginationControls
+      compact
+      page={safeDetailPage}
+      pageSize={DETAIL_PAGE_SIZE}
+      totalItems={groups.length}
+      onPageChange={setDetailPage}
+      t={t}
+    />
+  )
   const duplicateProductCount = preview?.duplicateProductCount || 0
   const mergeableDuplicateProductCount = preview?.mergeableDuplicateProductCount ?? duplicateProductCount
   const blockedGroupCount = preview?.blockedGroupCount || 0
@@ -350,6 +360,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
                     .replace('{count}', String(blockedGroupCount))}
                 </p>
               )}
+              <div data-merge-preview-pager="top"><TopPager>{pager}</TopPager></div>
               <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
                 {visibleGroups.map((group) => (
                   <div
@@ -406,39 +417,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
                   </div>
                 ))}
               </div>
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
-                <span role="status" aria-live="polite">
-                  {T('showing', 'Showing')} {detailStart + 1}-{detailEnd} {T('of', 'of')} {groups.length}
-                  {' · '}{T('page', 'Page')} {safeDetailPage} {T('of', 'of')} {detailPageCount}
-                </span>
-                {detailPageCount > 1 && (
-                  <nav
-                    aria-label={`${T('page', 'Page')} ${safeDetailPage} ${T('of', 'of')} ${detailPageCount}`}
-                    className="flex items-center gap-2"
-                  >
-                    <button
-                      type="button"
-                      data-merge-preview-page="back"
-                      disabled={safeDetailPage <= 1}
-                      onClick={() => setDetailPage((current) => Math.max(1, current - 1))}
-                      className="flex min-h-9 items-center gap-1 rounded-lg border border-gray-300 px-2.5 text-gray-600 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
-                    >
-                      <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
-                      {T('back', 'Back')}
-                    </button>
-                    <button
-                      type="button"
-                      data-merge-preview-page="next"
-                      disabled={safeDetailPage >= detailPageCount}
-                      onClick={() => setDetailPage((current) => Math.min(detailPageCount, current + 1))}
-                      className="flex min-h-9 items-center gap-1 rounded-lg border border-gray-300 px-2.5 text-gray-600 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
-                    >
-                      {T('next', 'Next')}
-                      <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button>
-                  </nav>
-                )}
-              </div>
+              <div data-merge-preview-pager="bottom">{pager}</div>
             </div>
           )}
         </section>

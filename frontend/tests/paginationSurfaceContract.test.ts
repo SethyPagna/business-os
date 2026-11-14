@@ -56,6 +56,7 @@ const expectedConsumers = [
   'src/components/inventory/InventoryMovementsSurface.tsx',
   'src/components/inventory/InventoryProductsSurface.tsx',
   'src/components/pos/POS.tsx',
+  'src/components/products/MergeDuplicatesReviewModal.tsx',
   // Conflicts -> unknown cost / no barcode / barcode 0: Previous/Next over a keyset cursor stack (utils/productDataGapsPager.ts).
   'src/components/products/ProductDataGapsSection.tsx',
   'src/components/products/Products.tsx',
@@ -183,16 +184,25 @@ check('the storefront pager offers the same 20/50/100 sizes as the admin pager',
   assert.match(catalogPagination, /onPageSizeChange=\{onPageSizeChange\}/, 'the storefront pager must forward the size handler')
 })
 
-check('no page-local Previous/Next paginator remains', () => {
-  const manualPagerLabel = /(tr|t)\('previous'|>Previous<|>Next<|(tr|t)\('next'/
-  const manualPagerButtons = (source: string): string[] =>
-    (source.match(/<button\b[\s\S]*?<\/button>/g) || []).filter((button) => manualPagerLabel.test(button))
-  const allowed = new Set([
-    'src/components/products/Products.tsx', // image-lightbox navigation, not row pagination
-    'src/components/shared/PaginationControls.tsx',
+// Hand-rolled pagers hid behind spelling: the old detector knew `t('next'` and `>Next<` only, so a modal that wrote
+// `T('back', 'Back')` and a sheet that wrote `posCopy('Next', ...)` both passed as "no page-local paginator". A button whose
+// label is Next/Previous (a pager always has one; a wizard-only "Back" is not a pager) in ANY translator spelling (t, tr, T, posCopy, copy...) or as plain text counts, and so does
+// a hand-built "Page x of y" line.
+const manualPagerLabel = /\b[A-Za-z]*(?:[tT]r?|[cC]opy)\(\s*['"](?:previous|next)['"]|>\s*(?:Previous|Next)\s*<|data-[a-z-]*page=["']?(?:back|next|prev)/i
+const manualPagerButtons = (source: string): string[] =>
+  (source.match(/<button\b[\s\S]*?<\/button>/g) || []).filter((button) => manualPagerLabel.test(button))
+const manualPageNumberLine = (source: string): boolean => /\{\s*[A-Za-z]*\(\s*['"]page['"][^}]*\}\s*\{[^}]*\}\s*\{\s*[A-Za-z]*\(\s*['"]of['"]/.test(source)
+check('no page-local Previous/Next or Page x of y paginator remains', () => {
+  const allowed = new Map<string, string>([
+    ['src/components/products/Products.tsx', 'image-lightbox navigation, not row pagination'],
+    ['src/components/shared/PaginationControls.tsx', 'the shared pager itself'],
+    ['src/components/pos/ProductDetailSheet.tsx', 'PillPager: Back, dots, Next over the branch pills of one product (a picker of a handful of branches, not a list of rows)'],
   ])
   const offenders = componentFiles
-    .filter((file) => manualPagerButtons(fs.readFileSync(file, 'utf8')).length > 0)
+    .filter((file) => {
+      const source = fs.readFileSync(file, 'utf8')
+      return manualPagerButtons(source).length > 0 || manualPageNumberLine(source)
+    })
     .map(relative)
     .filter((file) => !allowed.has(file))
   assert.deepStrictEqual(offenders, [])
@@ -207,6 +217,31 @@ check('no page-local Previous/Next paginator remains', () => {
     1,
     'positive control: a manual Previous button is still detected',
   )
+  // The two spellings that slipped through, plus the data-attribute and page-number forms.
+  assert.equal(manualPagerButtons("<button type=\"button\">{T('next', 'Next')}</button>").length, 1, "positive control: a capital-T translator spelling is detected")
+  assert.equal(manualPagerButtons("<button type=\"button\">{posCopy('Next', 'Next')}</button>").length, 1, 'positive control: posCopy spelling is detected')
+  assert.equal(manualPagerButtons('<button type="button" data-merge-preview-page="next">go</button>').length, 1, 'positive control: a page data attribute is detected')
+  assert.equal(manualPageNumberLine("{T('page', 'Page')} {page} {T('of', 'of')} {pages}"), true, 'positive control: a hand-built Page x of y line is detected')
+  assert.equal(manualPageNumberLine("<p>{t('page_size')} {t('of_total')}</p>"), false, 'negative control: unrelated keys are not a page line')
+})
+
+// Every pager ELEMENT is mounted above too. A file-level "contains <TopPager>" check let a second pager (the lines of an
+// opened invoice) stay bottom-only beside a list that had both; so count elements against top mounts per file.
+check('every <PaginationControls> element has a top mount, or is a documented exception', () => {
+  const unmounted = new Map<string, { elements: number; reason: string }>([
+    ['src/components/contacts/SaleLinkConflictsSection.tsx', { elements: 1, reason: 'two pagers built inside ONE linkPager element, mounted once above and once below' }],
+    ['src/components/inventory/InventoryMovementsSurface.tsx', { elements: 1, reason: 'the 10-row page inside one expanded movement group (shown only past 10 rows, directly under that group); the movements list itself has both' }],
+  ])
+  const offenders: string[] = []
+  for (const file of pagerConsumers) {
+    if (topPagerPending[file]) continue
+    const source = fs.readFileSync(path.join(frontendRoot, file), 'utf8')
+    const elements = (source.match(/<PaginationControls\b/g) || []).length
+    const tops = (source.match(/<TopPager>/g) || []).length
+    const allowance = unmounted.get(file)?.elements || 0
+    if (tops + allowance < elements) offenders.push(`${file}: ${elements} pager element(s), ${tops} top mount(s)`)
+  }
+  assert.deepStrictEqual(offenders, [])
 })
 
 check('server-paged mutable/filterable lists correct an empty former last page', () => {
