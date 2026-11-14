@@ -75,7 +75,9 @@ function main() {
     assert.match(readerHandler, /productSearchCacheVersion\(c\.env, query\)/)
     assert.match(readerHandler, /refreshCachedProductRows\(c\.env,/)
     const versionFn = src.slice(src.indexOf('async function productSearchCacheVersion'), src.indexOf('async function refreshCachedProductRows'))
-    assert.match(versionFn, /getVersionWithFallback\(env, 'products'\)/)
+    // Read together with any further namespace the caller keys on (one D1 read for the namespaces KV does not hold); the 'products' token is the one getVersionWithFallback gave.
+    assert.match(versionFn, /const names = \['products', \.\.\.\(readsStock \? \['stock'\] : \[\]\), \.\.\.extra\]/)
+    assert.match(versionFn, /names\.length === 1 \? \[await getVersionWithFallback\(env, 'products'\)\] : await getVersionsWithFallback\(env, names\)/)
     assert.match(readerHandler, /cachedJsonResponse\(keyRequest, c\.executionCtx, version, PRODUCT_LIST_LEGACY_CACHE_SECONDS,/)
     assert.match(src, /const PRODUCT_LIST_LEGACY_CACHE_SECONDS = 20\b/, 'the OFF path keeps the 20 s lifetime the list always had')
   })

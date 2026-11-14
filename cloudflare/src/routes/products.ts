@@ -561,13 +561,16 @@ async function loadProductFilters(env: Env, query: Record<string, string> = {}) 
   // dropdown rows that render identically but are different filter values
   // (reported as duplicate/near-duplicate options in the Brand filter).
   // MIN() over each normalized group picks one deterministic casing.
-  const [brands, categories, units, suppliers, tags, initials] = await Promise.all([
-    db.prepare(`SELECT MIN(trim(p.brand)) AS value FROM products p ${joinSql(variants.brands)} ${sql(variants.brands)} AND trim(COALESCE(p.brand, '')) <> '' GROUP BY lower(trim(p.brand)) ORDER BY lower(value) ASC`).all<{ value: string }>(variants.brands.params),
-    db.prepare(`SELECT MIN(trim(p.category)) AS value FROM products p ${joinSql(variants.categories)} ${sql(variants.categories)} AND trim(COALESCE(p.category, '')) <> '' GROUP BY lower(trim(p.category)) ORDER BY lower(value) ASC`).all<{ value: string }>(variants.categories.params),
-    db.prepare(`SELECT MIN(trim(p.unit)) AS value FROM products p ${joinSql(variants.units)} ${sql(variants.units)} AND trim(COALESCE(p.unit, '')) <> '' GROUP BY lower(trim(p.unit)) ORDER BY lower(value) ASC`).all<{ value: string }>(variants.units.params),
-    db.prepare(`SELECT MIN(trim(p.supplier)) AS value FROM products p ${joinSql(variants.suppliers)} ${sql(variants.suppliers)} AND trim(COALESCE(p.supplier, '')) <> '' GROUP BY lower(trim(p.supplier)) ORDER BY lower(value) ASC`).all<{ value: string }>(variants.suppliers.params),
-    db.prepare(`SELECT MIN(trim(p.tag_label)) AS value FROM products p ${joinSql(variants.tags)} ${sql(variants.tags)} AND trim(COALESCE(p.tag_label, '')) <> '' GROUP BY lower(trim(p.tag_label)) ORDER BY lower(value) ASC`).all<{ value: string }>(variants.tags.params),
-    db.prepare(`
+  // The six facet reads are independent reads of one table, so they go out as ONE db.batch (one D1 call, not six): the same statements, rows and answers.
+  const facetValues = (field: 'brand' | 'category' | 'unit' | 'supplier' | 'tag_label', variant: ReturnType<typeof buildSearchFilters>) =>
+    ({ sql: `SELECT MIN(trim(p.${field})) AS value FROM products p ${joinSql(variant)} ${sql(variant)} AND trim(COALESCE(p.${field}, '')) <> '' GROUP BY lower(trim(p.${field})) ORDER BY lower(value) ASC`, params: variant.params })
+  const [brandsRead, categoriesRead, unitsRead, suppliersRead, tagsRead, initialsRead] = await db.batch([
+    facetValues('brand', variants.brands),
+    facetValues('category', variants.categories),
+    facetValues('unit', variants.units),
+    facetValues('supplier', variants.suppliers),
+    facetValues('tag_label', variants.tags),
+    { sql: `
       SELECT upper(substr(trim(p.name), 1, 1)) AS initial,
              COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p.id AS TEXT))) AS count
       FROM products p
@@ -576,8 +579,14 @@ async function loadProductFilters(env: Env, query: Record<string, string> = {}) 
         AND trim(COALESCE(p.name, '')) <> ''
       GROUP BY upper(substr(trim(p.name), 1, 1))
       ORDER BY initial ASC
-    `).all<{ initial: string; count: number }>(variants.initials.params),
+    `, params: variants.initials.params },
   ])
+  const brands = (brandsRead?.results ?? []) as Array<{ value: string }>
+  const categories = (categoriesRead?.results ?? []) as Array<{ value: string }>
+  const units = (unitsRead?.results ?? []) as Array<{ value: string }>
+  const suppliers = (suppliersRead?.results ?? []) as Array<{ value: string }>
+  const tags = (tagsRead?.results ?? []) as Array<{ value: string }>
+  const initials = (initialsRead?.results ?? []) as Array<{ initial: string; count: number }>
 
   const values = (rows: Array<{ value: string }> = []) => rows.map((row) => row.value).filter(Boolean)
   // G1's "by promotion" filter needs the live rule list as a facet
@@ -944,13 +953,18 @@ function productSearchMembershipReadsStock(query: Record<string, string>): boole
   )
 }
 
+// The page cache's version token and any further namespaces the caller keys on, read together (getVersionsWithFallback: the same tokens one at a time gave, and at most one D1 read for
+// the namespaces KV does not hold instead of one each). `extra` comes back in order.
+async function productSearchCacheVersions(env: Env, query: Record<string, string>, extra: readonly string[] = []): Promise<{ version: string; extra: string[] }> {
+  const readsStock = productSearchMembershipReadsStock(query)
+  const names = ['products', ...(readsStock ? ['stock'] : []), ...extra]
+  // One namespace is the plain read (a single-row statement); several share one statement.
+  const tokens = names.length === 1 ? [await getVersionWithFallback(env, 'products')] : await getVersionsWithFallback(env, names)
+  return { version: readsStock ? `${tokens[0]}:stock:${tokens[1]}` : tokens[0], extra: tokens.slice(readsStock ? 2 : 1) }
+}
+
 async function productSearchCacheVersion(env: Env, query: Record<string, string>): Promise<string> {
-  if (!productSearchMembershipReadsStock(query)) return getVersionWithFallback(env, 'products')
-  const [productsVersion, stockVersion] = await Promise.all([
-    getVersionWithFallback(env, 'products'),
-    getVersionWithFallback(env, 'stock'),
-  ])
-  return `${productsVersion}:stock:${stockVersion}`
+  return (await productSearchCacheVersions(env, query)).version
 }
 
 // Brings rows served from the page cache up to the database's current state
@@ -1594,7 +1608,7 @@ export async function readProductSearchList(c: Context<{ Bindings: Env; Variable
   if (!(!restricted && isTypedSearch(query)) && await readSwitch(c.env, 'catalog_ranked_scope')) {
     let versions: string, edgeVersions: string
     try {
-      const [baseVersion, promotions] = await Promise.all([productSearchCacheVersion(c.env, query), getVersionWithFallback(c.env, 'promotions')])
+      const { version: baseVersion, extra: [promotions] } = await productSearchCacheVersions(c.env, query, ['promotions'])
       edgeVersions = `${baseVersion}:promo:${promotions}`
       versions = restricted ? `${baseVersion}:ic:${options.setVersion ?? ''}:promo:${promotions}` : edgeVersions
     } catch { versions = edgeVersions = unsafeVersionToken() }
@@ -1818,10 +1832,16 @@ function catalogVocabularyDenialReason(user: SessionUser): string | null {
 // D1 rows until a product, stock, settings or promotion write moves a version. The cached body is actor-neutral;
 // every permission check and per-role projection still runs on each request, after the cache.
 async function catalogReadVersion(env: Env, namespaces: readonly string[]): Promise<string> {
-  const versions = await Promise.all(namespaces.map((namespace) => getVersionWithFallback(env, namespace)))
+  const versions = await getVersionsWithFallback(env, namespaces)
   return versions.map((version, index) => `${namespaces[index]}:${version}`).join('|')
 }
 const PRODUCT_FILTERS_VERSIONS = ['products', 'stock', 'settings', 'promotions'] as const
+// The vocabulary reads stock only through the stock-state and issue filters (buildSearchFilters: stockExpr is referenced by those terms alone; the active test is is_active, never
+// stock). A request without them does not depend on the 'stock' version, which every sale moves, so its entry survives sales. Same predicate the page cache uses.
+const PRODUCT_FILTERS_VERSIONS_WITHOUT_STOCK = ['products', 'settings', 'promotions'] as const
+export function productFiltersVersions(query: Record<string, string>): readonly string[] {
+  return productSearchMembershipReadsStock(query) ? PRODUCT_FILTERS_VERSIONS : PRODUCT_FILTERS_VERSIONS_WITHOUT_STOCK
+}
 // Promotion rules are active by date, which no write announces: the TTL bounds how long a rule that just started
 // (or ended) can be missing from the vocabulary.
 const PRODUCT_FILTERS_TTL_SECONDS = 300
@@ -1837,7 +1857,7 @@ app.get('/filters', async (c) => {
   const filtersUrl = new URL(c.req.url)
   if (imageOnly) filtersUrl.search = ''
   const vocabulary = await cachedJsonResponse(new Request(filtersUrl.toString(), { method: 'GET' }), c.executionCtx,
-    await catalogReadVersion(c.env, PRODUCT_FILTERS_VERSIONS), PRODUCT_FILTERS_TTL_SECONDS, () => loadProductFilters(c.env, filtersQuery), cacheIdentity(c))
+    await catalogReadVersion(c.env, productFiltersVersions(filtersQuery)), PRODUCT_FILTERS_TTL_SECONDS, () => loadProductFilters(c.env, filtersQuery), cacheIdentity(c))
   return c.json(imageOnly ? projectVocabularyForImageOnly(vocabulary, user) : vocabulary)
 })
 
