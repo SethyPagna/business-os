@@ -68,7 +68,7 @@ assert.match(page, /border-blue-600 bg-blue-600 text-white/, 'Add Expense is the
 assert.match(page, /<ExportMenu[\s\S]*?iconOnly/, 'Export is icon-only with its accessible label retained')
 assert.equal((page.match(/<PaginationControls/g) || []).length, 1, 'ONE pager element is built from the one result')
 assert.match(page, /<TopPager>\{pager\}<\/TopPager>/, 'it is mounted above the results (passive top instance)')
-assert.match(page, /\n\s+\{pager\}\n/, 'and again below them, from the same element')
+assert.match(page, /\r?\n\s+\{pager\}\r?\n/, 'and again below them, from the same element')
 assert.equal((page.match(/compactCentered/g) || []).length, 1, 'the one pager element (top and bottom) uses the centered compact geometry')
 const pagerRow = page.slice(page.indexOf('<PagerActionRow'), page.indexOf('</PagerActionRow>'))
 assert.match(pagerRow, /<ShiftHistoryModal[\s\S]*<History[\s\S]*sr-only[\s\S]*tr\('shift_code', 'Shift'\)/, 'Shift moves to the leading track as a compact icon with an accessible name')
