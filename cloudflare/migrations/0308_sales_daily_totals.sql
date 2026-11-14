@@ -6,6 +6,7 @@
 -- 'sales_daily' is on. The switch is OFF by default, so installing this changes nothing a user can see.
 --
 -- state: 0 clean, 1 dirty, 2 being recomputed. claim_gen / kernel_version / data_epoch / refusal / payload are written by the recompute only.
+-- fail_count / retry_after: a day whose payload failed a storage rule is dirty (read raw), counted and put in backoff so it cannot jam the other days.
 -- business_date '' holds sales whose created_at is NULL or unreadable (every dated window excludes them, all-time includes them).
 --
 -- Four triggers only MARK a day dirty (they never compute). Two hang off sale_write_revisions (migration 0120), which already fires for every
@@ -34,7 +35,9 @@ CREATE TABLE sales_daily_totals (
   refusal TEXT,
   payload TEXT NOT NULL DEFAULT '{}',
   source_rows INTEGER NOT NULL DEFAULT 0,
-  computed_at TEXT
+  computed_at TEXT,
+  fail_count INTEGER NOT NULL DEFAULT 0,
+  retry_after TEXT
 );
 
 CREATE INDEX idx_sales_daily_totals_pending ON sales_daily_totals(business_date) WHERE state <> 0;
@@ -87,4 +90,5 @@ SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM sales s WHERE NOT EXISTS (SELECT 1 FR
   AND (SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name IN ('sales_daily_mark_revision_insert', 'sales_daily_mark_revision_update', 'sales_daily_mark_sale_delete', 'sales_daily_mark_sale_moved')) = 4
   AND (SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name IN ('idx_sales_daily_totals_pending', 'idx_customers_anonymous')) = 2
   AND (SELECT COUNT(*) FROM system_flags WHERE key = 'sales_daily_coverage') = 1
+  AND (SELECT COUNT(*) FROM system_flags c WHERE c.key = 'sales_daily_coverage' AND json_extract(c.value, '$.epoch') = (SELECT value FROM system_flags WHERE key = 'data_epoch') AND length(json_extract(c.value, '$.epoch')) = 32) = 1
 THEN 1 ELSE json_extract('[]','$[sales_daily_totals_0308_post]') END;

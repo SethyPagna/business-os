@@ -998,7 +998,7 @@ check('held: outside deploy chain, after dependencies including0195; independent
     sales_daily_mark_sale_moved: ['AFTER UPDATE OF created_at ON sales', 'OLD.created_at IS NOT NEW.created_at AND ' + DERIVED_GUARD, DERIVED_MARK_OLD],
   }
   const DERIVED_STATEMENTS = [
-    /^CREATE TABLE sales_daily_totals \( id INTEGER PRIMARY KEY, business_date TEXT NOT NULL UNIQUE, state INTEGER NOT NULL DEFAULT 1 CHECK \(state IN \(0, 1, 2\)\), claim_gen INTEGER NOT NULL DEFAULT 0, kernel_version INTEGER NOT NULL DEFAULT 0, data_epoch TEXT NOT NULL DEFAULT '', refusal TEXT, payload TEXT NOT NULL DEFAULT '\{\}', source_rows INTEGER NOT NULL DEFAULT 0, computed_at TEXT \)$/,
+    /^CREATE TABLE sales_daily_totals \( id INTEGER PRIMARY KEY, business_date TEXT NOT NULL UNIQUE, state INTEGER NOT NULL DEFAULT 1 CHECK \(state IN \(0, 1, 2\)\), claim_gen INTEGER NOT NULL DEFAULT 0, kernel_version INTEGER NOT NULL DEFAULT 0, data_epoch TEXT NOT NULL DEFAULT '', refusal TEXT, payload TEXT NOT NULL DEFAULT '\{\}', source_rows INTEGER NOT NULL DEFAULT 0, computed_at TEXT, fail_count INTEGER NOT NULL DEFAULT 0, retry_after TEXT \)$/,
     /^CREATE INDEX idx_sales_daily_totals_pending ON sales_daily_totals\(business_date\) WHERE state <> 0$/,
     /^CREATE INDEX idx_customers_anonymous ON customers\(id\) WHERE COALESCE\(is_anonymous, 0\) <> 0$/,
     /^INSERT INTO sales_daily_totals\(business_date, state\) SELECT DISTINCT COALESCE\(date\(created_at, '\+7 hours'\), ''\), 1 FROM sales WHERE 1 ON CONFLICT\(business_date\) DO NOTHING$/,

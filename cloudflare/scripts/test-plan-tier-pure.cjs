@@ -164,6 +164,9 @@ const PAID = {
   salesDailyRebuildMaxDays: 4000,
   salesDailyMaxPayloadBytes: 1000000,
   salesDailyShadowAllowed: true,
+  salesDailyFailBackoffSeconds: 3600,
+  salesDailyFailBackoffMaxSeconds: 86400,
+  salesDailyPoisonAlertAfter: 3,
   salesDailyStepCpuBudgetMs: 5000,
   salesDailyStepWallBudgetMs: 60000,
   salesDailyCpuMsPerSourceRow: 0.025,
@@ -237,6 +240,9 @@ const FREE = {
   salesDailyRebuildMaxDays: 1000,
   salesDailyMaxPayloadBytes: 500000,
   salesDailyShadowAllowed: false,
+  salesDailyFailBackoffSeconds: 3600,
+  salesDailyFailBackoffMaxSeconds: 86400,
+  salesDailyPoisonAlertAfter: 3,
   salesDailyStepCpuBudgetMs: 7,
   salesDailyStepWallBudgetMs: 20000,
   salesDailyCpuMsPerSourceRow: 0.025,
@@ -312,7 +318,7 @@ const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES, ...
 // The stored daily totals' nightly reconcile (lib/salesDailyCron.ts): the last 7 days, once per 20 h, naming up to 3 days in an alert, are rules of the check and not of the plan;
 // only how many days a visit works through (recompute, older reconcile slice, rebuild range) and the CPU, wall and payload budgets are sized by the tier and differ;
 // the per-row CPU estimate, the fixed day cost, the queries a day costs and the reserve are facts of the code, the same on both tiers.
-const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser', 'scheduledBackupAfterHourLocal', 'scheduledBackupKeep', 'scheduledBackupMaxAttemptsPerDay', 'scheduledBackupCopyPollGapMinutes', 'scheduledBackupStaleHours', 'backupPoolGraceHours', 'driveStaleMirrorHours', 'salesDailyReconcileRecentDays', 'salesDailyReconcileMinIntervalSeconds', 'salesDailyAlertListedDays', 'salesDailyCpuMsPerSourceRow', 'salesDailyCpuMsPerDayFixed', 'salesDailyKernelQueriesPerDay', 'salesDailyQueryReserve']
+const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser', 'scheduledBackupAfterHourLocal', 'scheduledBackupKeep', 'scheduledBackupMaxAttemptsPerDay', 'scheduledBackupCopyPollGapMinutes', 'scheduledBackupStaleHours', 'backupPoolGraceHours', 'driveStaleMirrorHours', 'salesDailyReconcileRecentDays', 'salesDailyReconcileMinIntervalSeconds', 'salesDailyAlertListedDays', 'salesDailyCpuMsPerSourceRow', 'salesDailyCpuMsPerDayFixed', 'salesDailyKernelQueriesPerDay', 'salesDailyQueryReserve', 'salesDailyFailBackoffSeconds', 'salesDailyFailBackoffMaxSeconds', 'salesDailyPoisonAlertAfter']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //

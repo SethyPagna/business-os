@@ -28,6 +28,11 @@ export const SALES_DAILY_PAYLOAD_VERSION = 1
 export const SALES_DAILY_COVERAGE_KEY = 'sales_daily_coverage'
 export const SALES_DAILY_QUARANTINE_KEY = 'sales_daily_quarantine'
 export const SALES_DAILY_RECONCILE_CURSOR_KEY = 'sales_daily_reconcile_cursor'
+/** Owner alerts are stored SEPARATELY from the quarantine flag: an alert never confirmed sent is retried on every reconcile visit until it is. One row per kind. */
+export const SALES_DAILY_ALERT_KEYS = Object.freeze({ mismatch: 'sales_daily_alert_mismatch', poison: 'sales_daily_alert_poison' } as const)
+export type SalesDailyAlertKind = keyof typeof SALES_DAILY_ALERT_KEYS
+/** The days an administrator cleared out of quarantine and that a reconcile must still find in agreement before any stored read resumes. */
+export const SALES_DAILY_VERIFY_KEY = 'sales_daily_verify'
 export const SALES_DAILY_DATE = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/
 export const SALES_DAILY_STATE = Object.freeze({ clean: 0, dirty: 1, claimed: 2 } as const)
 /** The refusal codes that are not the kernel's own: such a day is never served from storage and its readers take the raw path. */
@@ -285,10 +290,29 @@ export function parseSalesDailyReconcileState(raw: unknown): SalesDailyReconcile
   return { older: dateOrEmpty(older), cycle: valid ? { recentFrom: c.recentFrom as string, recentLast: dateOrEmpty(c.recentLast), olderLast: dateOrEmpty(c.olderLast), olderCount: c.olderCount as number } : null }
 }
 
-export type SalesDailyFlags = { epoch: string | null; coverage: SalesDailyCoverage | null; quarantined: boolean; maintenance: boolean; reconcile: SalesDailyReconcileState }
+export type SalesDailyAlertState = { sent: boolean; days: string[] }
+export type SalesDailyFlags = {
+  epoch: string | null; coverage: SalesDailyCoverage | null; quarantined: boolean; maintenance: boolean; reconcile: SalesDailyReconcileState
+  /** The quarantine row's own days (every day that caused it), or null when it names none readable. */
+  quarantineDays: string[] | null
+  alerts: Record<SalesDailyAlertKind, SalesDailyAlertState | null>
+  /** Days still to be verified after a cleared quarantine; null when no verification is pending. */
+  verify: string[] | null
+}
+
+const dayList = (value: unknown): string[] | null => (Array.isArray(value) && value.length && value.every((day) => typeof day === 'string' && SALES_DAILY_DATE.test(day)) ? (value as string[]) : null)
+function jsonOf(raw: unknown): Record<string, unknown> | null {
+  if (typeof raw !== 'string') return null
+  try { const parsed = JSON.parse(raw); return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null } catch { return null }
+}
+function alertState(raw: unknown): SalesDailyAlertState | null {
+  if (raw === undefined) return null
+  const parsed = jsonOf(raw)
+  return { sent: parsed?.sent === true, days: dayList(parsed?.days) ?? [] }
+}
 
 /** The one statement that reads everything a reader or a cron visit needs to decide, keyed rows of system_flags. */
-export const SALES_DAILY_FLAGS_SQL = `SELECT key, value FROM system_flags WHERE key IN ('data_epoch', '${SALES_DAILY_COVERAGE_KEY}', '${SALES_DAILY_QUARANTINE_KEY}', '${SALES_DAILY_RECONCILE_CURSOR_KEY}', 'maintenance')`
+export const SALES_DAILY_FLAGS_SQL = `SELECT key, value FROM system_flags WHERE key IN ('data_epoch', '${SALES_DAILY_COVERAGE_KEY}', '${SALES_DAILY_QUARANTINE_KEY}', '${SALES_DAILY_RECONCILE_CURSOR_KEY}', '${SALES_DAILY_ALERT_KEYS.mismatch}', '${SALES_DAILY_ALERT_KEYS.poison}', '${SALES_DAILY_VERIFY_KEY}', 'maintenance')`
 
 export function salesDailyFlagsFromRows(rows: ReadonlyArray<{ key?: unknown; value?: unknown }>): SalesDailyFlags {
   const byKey = new Map<string, unknown>(rows.map((row) => [String(row.key), row.value]))
@@ -299,12 +323,15 @@ export function salesDailyFlagsFromRows(rows: ReadonlyArray<{ key?: unknown; val
     quarantined: byKey.has(SALES_DAILY_QUARANTINE_KEY),
     maintenance: byKey.has('maintenance'),
     reconcile: parseSalesDailyReconcileState(byKey.get(SALES_DAILY_RECONCILE_CURSOR_KEY)),
+    quarantineDays: dayList(jsonOf(byKey.get(SALES_DAILY_QUARANTINE_KEY))?.days),
+    alerts: { mismatch: alertState(byKey.get(SALES_DAILY_ALERT_KEYS.mismatch)), poison: alertState(byKey.get(SALES_DAILY_ALERT_KEYS.poison)) },
+    verify: byKey.has(SALES_DAILY_VERIFY_KEY) ? (dayList(jsonOf(byKey.get(SALES_DAILY_VERIFY_KEY))?.days) ?? []) : null,
   }
 }
 
 /** A reader may use ANY stored day only when this is true: a readable epoch, covered by the seed, no quarantine and no maintenance. */
 export function salesDailyStoredReadAllowed(flags: SalesDailyFlags): boolean {
-  return !flags.quarantined && !flags.maintenance && flags.epoch !== null && flags.coverage !== null && flags.coverage.epoch === flags.epoch
+  return !flags.quarantined && flags.verify === null && !flags.maintenance && flags.epoch !== null && flags.coverage !== null && flags.coverage.epoch === flags.epoch
 }
 
 /** The cron must re-seed and re-cover when the coverage names another epoch or another kernel version than now. */
@@ -399,8 +426,8 @@ export class SalesDailyStepBudget {
 export type SalesDailyStatement = { sql: string; params: Record<string, unknown> }
 
 /** The dirty (or half-done) past days, newest first: the partial index idx_sales_daily_totals_pending holds exactly these. Today is never recomputed. */
-export function pendingDaysStatement(today: string, limit: number): SalesDailyStatement {
-  return { sql: 'SELECT business_date, source_rows FROM sales_daily_totals WHERE state <> 0 AND business_date < @today ORDER BY business_date DESC LIMIT @limit', params: { today, limit } }
+export function pendingDaysStatement(today: string, limit: number, nowIso: string): SalesDailyStatement {
+  return { sql: 'SELECT business_date, source_rows FROM sales_daily_totals WHERE state <> 0 AND business_date < @today AND (retry_after IS NULL OR retry_after <= @nowIso) ORDER BY business_date DESC LIMIT @limit', params: { today, limit, nowIso: `${nowIso.slice(0, 19)}Z` } }
 }
 
 /** One statement claims every named day that is not clean (a still-claimed day is taken over: its older commit will be refused). */
@@ -425,8 +452,9 @@ export function commitStatement(commit: SalesDailyCommit, maxPayloadBytes: numbe
     if (new TextEncoder().encode(payload).length > maxPayloadBytes) { payload = '{}'; refusal = SALES_DAILY_PAYLOAD_TOO_LARGE }
   }
   return {
-    sql: `UPDATE sales_daily_totals SET state = 0, kernel_version = @kernel, data_epoch = @epoch, refusal = @refusal, payload = @payload, source_rows = @sourceRows, computed_at = @nowIso
-      WHERE business_date = @day AND state = 2 AND claim_gen = @claimGen AND (SELECT value FROM system_flags WHERE key = 'data_epoch') = @epoch`,
+    sql: `UPDATE sales_daily_totals SET state = 0, kernel_version = @kernel, data_epoch = @epoch, refusal = @refusal, payload = @payload, source_rows = @sourceRows, computed_at = @nowIso, fail_count = 0, retry_after = NULL
+      WHERE business_date = @day AND state = 2 AND claim_gen = @claimGen AND (SELECT value FROM system_flags WHERE key = 'data_epoch') = @epoch
+        AND COALESCE((SELECT json_extract(value, '$.kernel') FROM system_flags WHERE key = '${SALES_DAILY_COVERAGE_KEY}'), -1) = @kernel`,
     params: { day: commit.day, claimGen: commit.claimGen, kernel: commit.kernel, epoch: commit.epoch, refusal, payload, sourceRows: commit.computed.sourceRows, nowIso: commit.nowIso },
   }
 }
@@ -453,12 +481,59 @@ export function reconcileOlderStatement(cursor: string, before: string, limit: n
  */
 export function quarantineStatements(days: readonly string[], paths: readonly string[], nowIso: string): SalesDailyStatement[] {
   return [
+    // FIRST: the alert row, raised only while no quarantine row exists, so the statement's own change count says whether THIS call newly quarantined. It is a separate
+    // row from the quarantine: a failed send leaves it unsent and every later reconcile visit retries it until it is sent (markAlertSentStatement).
+    {
+      sql: `INSERT INTO system_flags (key, value, updated_at) SELECT '${SALES_DAILY_ALERT_KEYS.mismatch}', @alert, @nowIso WHERE NOT EXISTS (SELECT 1 FROM system_flags WHERE key = '${SALES_DAILY_QUARANTINE_KEY}')
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      params: { alert: JSON.stringify({ sent: false, days, at: nowIso }), nowIso },
+    },
     ...days.map((day) => ({ sql: 'UPDATE sales_daily_totals SET state = 1 WHERE business_date = @day AND state <> 1', params: { day } })),
     {
       sql: `INSERT INTO system_flags (key, value, updated_at) VALUES ('${SALES_DAILY_QUARANTINE_KEY}', @value, @nowIso) ON CONFLICT(key) DO NOTHING`,
-      params: { value: JSON.stringify({ at: nowIso, days: days.slice(0, 6), paths: paths.slice(0, 6) }), nowIso },
+      params: { value: JSON.stringify({ at: nowIso, days, paths: paths.slice(0, 6) }), nowIso },
     },
   ]
+}
+
+export function markAlertSentStatement(kind: SalesDailyAlertKind, nowIso: string): SalesDailyStatement {
+  return { sql: "UPDATE system_flags SET value = json_set(value, '$.sent', json('true')), updated_at = @nowIso WHERE key = @key", params: { key: SALES_DAILY_ALERT_KEYS[kind], nowIso } }
+}
+
+/** The poison alert: raised for a day whose failures passed the plan threshold, only when there is no alert row or the last one was already sent (an unsent one is retried as it is). */
+export function poisonAlertStatement(day: string, nowIso: string): SalesDailyStatement {
+  return {
+    sql: `INSERT INTO system_flags (key, value, updated_at) VALUES ('${SALES_DAILY_ALERT_KEYS.poison}', @value, @nowIso)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at WHERE json_extract(system_flags.value, '$.sent') = 1`,
+    params: { value: JSON.stringify({ sent: false, days: [day], at: nowIso }), nowIso },
+  }
+}
+
+/**
+ * One day whose payload could not be stored (it failed a payload rule): back to dirty (a reader reads it raw), a failure counter and a backoff, so it neither
+ * blocks the other days nor is retried at once. Guarded by the generation (and state) the caller held, so a newer claim or a write is never overwritten.
+ */
+export function failedDayStatement(day: string, claimGen: number, fromState: number, nowMs: number, baseSeconds: number, maxSeconds: number): SalesDailyStatement {
+  // the backoff is computed in SQL from the OLD fail_count (an UPDATE reads the old row): 1st failure waits base, then base x2, x4 ... up to max
+  return {
+    sql: `UPDATE sales_daily_totals SET state = 1, fail_count = fail_count + 1,
+      retry_after = strftime('%Y-%m-%dT%H:%M:%SZ', @nowSec + MIN(@maxSeconds, @baseSeconds * (1 << MIN(fail_count, 29))), 'unixepoch')
+      WHERE business_date = @day AND claim_gen = @claimGen AND state = @fromState RETURNING fail_count`,
+    params: { day, claimGen, fromState, nowSec: Math.floor(nowMs / 1000), baseSeconds, maxSeconds },
+  }
+}
+
+/** An administrator cleared the quarantine: stored reads stay stopped until a reconcile finds these days in agreement. */
+export function verifyStartStatement(days: readonly string[], nowIso: string): SalesDailyStatement {
+  return {
+    sql: `INSERT INTO system_flags (key, value, updated_at) VALUES ('${SALES_DAILY_VERIFY_KEY}', @value, @nowIso) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    params: { value: JSON.stringify({ days, at: nowIso }), nowIso },
+  }
+}
+export function verifyRemainingStatement(remaining: readonly string[], nowIso: string): SalesDailyStatement {
+  return remaining.length
+    ? verifyStartStatement(remaining, nowIso)
+    : { sql: `DELETE FROM system_flags WHERE key = '${SALES_DAILY_VERIFY_KEY}'`, params: {} }
 }
 
 /** The reconcile's place (one row), written after every judged day so a visit that is stopped or killed resumes at the next day. */

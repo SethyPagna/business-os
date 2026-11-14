@@ -335,6 +335,11 @@ export type PlanLimits = {
   // The first day of a visit always runs (progress); a day too heavy for the plan on its own is the known limit, named in the report.
   // A shadow run (the stored path computed beside the raw one and compared) needs spare reads and CPU: Paid only, never on Free (owner: shadow on Paid before 30 Nov).
   salesDailyShadowAllowed: boolean
+  // A day whose payload fails a storage rule is retried after salesDailyFailBackoffSeconds, doubled per failure up to salesDailyFailBackoffMaxSeconds; after salesDailyPoisonAlertAfter
+  // failures the owner is alerted (the same Telegram path as a mismatch). The same on both tiers: rules of the check, not of the plan.
+  salesDailyFailBackoffSeconds: number
+  salesDailyFailBackoffMaxSeconds: number
+  salesDailyPoisonAlertAfter: number
   salesDailyStepCpuBudgetMs: number
   salesDailyStepWallBudgetMs: number
   salesDailyCpuMsPerSourceRow: number
@@ -547,6 +552,9 @@ const PAID_LIMITS: PlanLimits = {
   salesDailyRebuildMaxDays: 4000,
   salesDailyMaxPayloadBytes: 1_000_000,
   salesDailyShadowAllowed: true,
+  salesDailyFailBackoffSeconds: 3600,
+  salesDailyFailBackoffMaxSeconds: 86_400,
+  salesDailyPoisonAlertAfter: 3,
   salesDailyStepCpuBudgetMs: 5000,
   salesDailyStepWallBudgetMs: 60_000,
   salesDailyCpuMsPerSourceRow: 0.025,
@@ -621,6 +629,9 @@ const FREE_LIMITS: PlanLimits = {
   salesDailyRebuildMaxDays: 1000,
   salesDailyMaxPayloadBytes: 500_000,
   salesDailyShadowAllowed: false,
+  salesDailyFailBackoffSeconds: 3600,
+  salesDailyFailBackoffMaxSeconds: 86_400,
+  salesDailyPoisonAlertAfter: 3,
   salesDailyStepCpuBudgetMs: 7,
   salesDailyStepWallBudgetMs: 20_000,
   salesDailyCpuMsPerSourceRow: 0.025,

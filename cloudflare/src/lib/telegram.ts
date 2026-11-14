@@ -1866,7 +1866,15 @@ export async function sendTelegramStaleShiftAlert(env: Env, shiftId: number, now
 // The stored daily sales totals found a day that does not match the records (lib/salesDailyCron.ts, the nightly reconcile): stored reads are stopped and
 // the reports read the live records. The OWNER alert (owner, 14 Nov 2026: a mismatch never heals silently): sent whenever Telegram is on, with no
 // per-category switch to mute it, to the Alerts topic, English and Khmer. Names days only, never a figure.
-export function formatSalesDailyMismatchAlert(shopLabel: string, days: readonly string[]): string {
+export function formatSalesDailyMismatchAlert(shopLabel: string, days: readonly string[], kind: 'mismatch' | 'poison' = 'mismatch'): string {
+  if (kind === 'poison') {
+    return [
+      `⚠️ ${bi('A daily sales total could not be stored', 'មិនអាចរក្សាទុកសរុបការលក់ប្រចាំថ្ងៃមួយបានទេ')}`,
+      labeled('shop', cleanLine(shopLabel || 'Business OS', 80)),
+      ...days.map((day) => labeled('date', day.split('-').reverse().join('/'))),
+      bi('This day keeps failing its storage check. Reports read the live records for it; nothing shown is wrong.', 'ថ្ងៃនេះបរាជ័យក្នុងការត្រួតពិនិត្យការរក្សាទុកជាប់ៗគ្នា។ របាយការណ៍អានពីកំណត់ត្រាផ្ទាល់សម្រាប់ថ្ងៃនេះ ហើយអ្វីដែលបង្ហាញមិនខុសទេ។'),
+    ].join('\n')
+  }
   return [
     `⚠️ ${bi('Stored daily sales totals stopped', 'បានបញ្ឈប់សរុបការលក់ប្រចាំថ្ងៃដែលបានរក្សាទុក')}`,
     labeled('shop', cleanLine(shopLabel || 'Business OS', 80)),
@@ -1875,12 +1883,12 @@ export function formatSalesDailyMismatchAlert(shopLabel: string, days: readonly 
   ].join('\n')
 }
 
-export async function sendTelegramSalesDailyMismatchAlert(env: Env, days: readonly string[]): Promise<boolean> {
+export async function sendTelegramSalesDailyMismatchAlert(env: Env, days: readonly string[], kind: 'mismatch' | 'poison' = 'mismatch'): Promise<boolean> {
   try {
     const config = await getTelegramConfig(env)
     if (!config.enabled || configurationProblem(config)) return false
     const name = await shopName(env)
-    await postTelegram(config, withLanguage(config.language, () => formatSalesDailyMismatchAlert(name, days)), config.chatId, config.topics.telegram_topic_alerts, 'telegram_topic_alerts', { retryOnce: true })
+    await postTelegram(config, withLanguage(config.language, () => formatSalesDailyMismatchAlert(name, days, kind)), config.chatId, config.topics.telegram_topic_alerts, 'telegram_topic_alerts', { retryOnce: true })
     return true
   } catch (error) {
     console.error('[telegram] the sales totals alert could not be sent', error)

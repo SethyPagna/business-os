@@ -131,7 +131,7 @@ async function main() {
 
   // ---- C. which days a reader may serve -------------------------------------------------------------------------------------------------------------------
   const EPOCH = 'a'.repeat(32)
-  const flags = (over = {}) => ({ epoch: EPOCH, coverage: { epoch: EPOCH, kernel: 1 }, quarantined: false, maintenance: false, reconcile: { older: '', cycle: null }, ...over })
+  const flags = (over = {}) => ({ epoch: EPOCH, coverage: { epoch: EPOCH, kernel: 1 }, quarantined: false, maintenance: false, reconcile: { older: '', cycle: null }, quarantineDays: null, alerts: { mismatch: null, poison: null }, verify: null, ...over })
   const day = (over = {}) => ({ business_date: '2026-11-01', state: 0, claim_gen: 1, kernel_version: 1, data_epoch: EPOCH, refusal: null, ...over })
 
   await check('C1 only a clean day of this kernel and this epoch is served; every other state means read it raw; a kernel refusal is raised, an own refusal is read raw', () => {
@@ -450,7 +450,7 @@ async function main() {
     const src = fs.readFileSync(path.join(SRC, 'lib/salesDailyCron.ts'), 'utf8')
     assert.equal((src.match(/import\('\.\/telegram'\)/g) || []).length, 1, 'one lazy import, never a top-level one')
     assert.ok(!/^import .*telegram/m.test(src), 'no static telegram import (the rotation file must not name telegram)')
-    assert.ok(src.includes('if (deps.alert) return await deps.alert(env, days)'))
+    assert.ok(src.includes('if (deps.alert) return await deps.alert(env, days, kind)'))
   })
 
   console.log(`\n${passed} checks passed`)
