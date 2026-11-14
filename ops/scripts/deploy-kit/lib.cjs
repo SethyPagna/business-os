@@ -81,7 +81,7 @@ const FLAG_ALIASES = {
   'use-cert': 'useCert', usecert: 'useCert', 'no-apply': 'noApply', noapply: 'noApply', counts: 'counts',
   target: 'target', db: 'db', bookmark: 'bookmark', 'version-id': 'versionId', versionid: 'versionId',
   'previous-sha': 'previousSha', previoussha: 'previousSha',
-  part: 'part', shard: 'shard',
+  part: 'part', shard: 'shard', 'expect-dist': 'expectDist', expectdist: 'expectDist',
   help: 'help', h: 'help',
 }
 const GATE_PARTS = ['static', 'build', 'tests']

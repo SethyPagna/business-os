@@ -24,6 +24,8 @@
 //   -Retries <n>          extra tries for a red test file (default 2)
 //   gates -Part static|build|tests   run one slice of the gate (default: all of it)
 //         -Shard <i>/<n>             with -Part tests: only the test files whose hash falls in shard i of n
+//   deploy -ExpectDist <verdict>     publish only the build the gate tested: never rebuild, refuse unless frontend/dist has the
+//                                    verdict's dist_sha256 (also read from RELEASE_EXPECT_DIST)
 //   rollback: -Target worker|database  -VersionId <id>  -PreviousSha <40-hex sha being returned to (worker)>  -Db <name>  -Bookmark <b>
 //   CI only: -CI -ReleaseDir <checkout> -NoApply
 //   Row counts: -Counts full (default; every table counted) or -Counts auto (opt-in; quick highest-row-id counts when no database update is waiting. A high-water mark does not see deleted rows, see lib.cjs)
@@ -76,6 +78,7 @@ function buildContext(args) {
     jobs: Math.max(1, Number(args.jobs) || 3),
     part: args.part || '',
     shard: gateShards.parseShard(args.shard || '1/1'),
+    expectDist: args.expectDist || process.env.RELEASE_EXPECT_DIST || '',
     retries: Math.max(0, args.retries == null ? 2 : Number(args.retries) || 0),
     records: path.resolve(args.records || process.env.BUSINESS_OS_RECORDS || path.join(home, 'Records')),
     ownerRecords: path.join(home, 'Records'),
@@ -758,12 +761,38 @@ async function applyGuardStage(ctx, write, read, config, files, expected) {
   }
 }
 
+function testedDistOf(verdictFile) {
+  try {
+    const digest = JSON.parse(fs.readFileSync(verdictFile, 'utf8')).dist_sha256
+    return gateShards.DIGEST.test(String(digest)) ? digest : ''
+  } catch { return '' }
+}
+
+// The last look before the upload: the bytes about to be published must be the bytes the gate's shards tested.
+async function distIsTested(fe, expected) {
+  let digest
+  try { digest = gateShards.distDigest(path.join(fe, 'dist')).digest } catch (err) { log.say(`STOP: frontend/dist cannot be read (${err.message}), so nothing will be published.`); return false }
+  if (digest !== expected) {
+    log.say(`STOP: frontend/dist has digest ${digest}, not the ${expected} the gate tested, so nothing will be published.`)
+    return false
+  }
+  log.say(`  frontend/dist is the app the gate tested (digest ${digest}); publishing it as is`)
+  return true
+}
+
 async function stepDeploy(ctx) {
   heading('Publish the new version (deploy)')
   if (!needSha(ctx)) return false
   if (!(await checkClean(ctx))) return false
   const fe = path.join(ctx.releaseDir, 'frontend')
-  if (ctx.state.frontendBuiltFor !== ctx.sha || !fs.existsSync(path.join(fe, 'dist'))) {
+  const expected = ctx.expectDist ? testedDistOf(ctx.expectDist) : ''
+  if (ctx.expectDist && !expected) { log.say(`STOP: ${ctx.expectDist} carries no digest of the tested app, so nothing will be published.`); return false }
+  const verifiedBuild = ctx.state.frontendBuiltFor === ctx.sha && fs.existsSync(path.join(fe, 'dist'))
+  if (expected && !verifiedBuild) {
+    log.say('STOP: no build of this commit exists here to check against the gate. Run gates -Part build first; the publish step never builds the app itself.')
+    return false
+  }
+  if (!verifiedBuild) {
     log.say('Building the app pages for this commit...')
     const b = await ex.npmLocal('build', fe, ctx)
     if (b.code !== 0) { log.say('STOP: the build failed.'); return false }
@@ -774,6 +803,7 @@ async function stepDeploy(ctx) {
   if (!['paid', 'free'].includes(plan)) { log.say('STOP: type paid or free.'); return false }
   const approval = await ex.confirm(ctx, 'typeYES', `Publish ${ctx.sha.slice(0, 12)} "${ctx.subject}" to PRODUCTION on the ${plan} plan?`)
   if (!approval.ok) { log.say('Stopped. Nothing was published.'); return false }
+  if (expected && !(await distIsTested(fe, expected))) return false
   // tee, not plain: the version id below is parsed from this output, and an
   // uncaptured run returns none, so no release ever recorded what it published.
   const r = await ex.runSpec(lib.commandCatalog.deploy(plan), ctx, approval, { tee: true })
@@ -1103,7 +1133,7 @@ function checkNode() {
 async function main() {
   const args = lib.parseArgs(process.argv.slice(2))
   if (args.help) {
-    process.stdout.write(fs.readFileSync(__filename, 'utf8').split('\n').slice(2, 31).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'))
+    process.stdout.write(fs.readFileSync(__filename, 'utf8').split('\n').slice(2, 33).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'))
     return 0
   }
   const ctx = buildContext(args)

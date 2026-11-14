@@ -243,8 +243,9 @@ repeating it.
      the only part of Deploy with `actions: read` and it holds no secret. Through the
      GitHub API it checks that the run is `gate.yml` of this repository, was started
      manually from this repository, finished with every job `success` (the browser
-     suite included, even when it was report-only), finished at most
-     `MAX_GATE_AGE_HOURS` (24 hours) ago, tested exactly the commit Deploy checked out,
+     suite included, even when it was report-only), started its earliest job at most
+     `MAX_GATE_AGE_HOURS` (24 hours) ago (counted from the jobs' start times, not from
+     when the run was last updated), tested exactly the commit Deploy checked out,
      ran the same test file set that commit has, and ran with a compatible release kit
      (same kit commit, or a gate workflow and `ops/scripts/deploy-kit/` that are
      byte-identical). It downloads the verdict and the gate's test logs and hands them
@@ -254,15 +255,31 @@ repeating it.
      with the gate's), keeps the verdict **and the gate's per-file test logs** in the
      encrypted release records, builds the app (without a Cloudflare secret) and
      refuses unless the build has the digest the gate's shards tested, so the app it
-     publishes is byte for byte the app the tests saw. It then runs the snapshot,
-     migrations, publish and live checks unchanged.
+     publishes is the app the tests saw, byte for byte except the build clock
+     `builtAt` in `business-os-build.json` (the digest ignores that one field). The
+     step `Pin the tested app for the publish step` hands the verdict to the publish
+     step (`RELEASE_EXPECT_DIST`, or `-ExpectDist` on the command line); the publish
+     step checks `frontend/dist` against the verdict's digest once more immediately
+     before the upload, never builds the app itself on this path and refuses if no
+     verified build exists. It then runs the snapshot, migrations, publish and live
+     checks unchanged.
    - Any failed check stops the deploy with the reason; nothing falls back to something
      weaker.
+   - **Re-running Deploy: use Re-run all jobs, or dispatch Deploy again.** The evidence
+     `gate_check` hands to the deploy job is named with the workflow's run attempt
+     (`gate-reuse-evidence-<run>-<attempt>`). **Re-run failed jobs** on the deploy job
+     alone gives it attempt N+1 while `gate_check` (not re-run) uploaded attempt N, so
+     the download fails, before any secret is used. That is safe, but it cannot succeed:
+     the age is counted again anyway, so a fresh `gate_check` is the right start.
 3. Leave `gate_run_id` empty and `gate_check` is skipped; Deploy runs the full sweep
    itself, exactly as it always did.
 
 **Age limit.** `MAX_GATE_AGE_HOURS` in `ops/scripts/deploy-kit/gate-reuse.cjs` is 24
-hours. It is short on purpose: the old Deploy ran the tests on the day of the release,
+hours, counted from the earliest start of any job in the run's latest attempts (the
+jobs API reports it; a gate run cannot write to it). The run's own last-updated time is
+not used, because re-running one browser leg days later would refresh it while the
+safety tests still ran on the first day. A full re-run is a fresh gate. It is short on
+purpose: the old Deploy ran the tests on the day of the release,
 and tests that depend on the date can pass at gate time and fail the next day. Change
 the constant and `cloudflare/scripts/test-deploy-gate-reuse-pure.cjs` together.
 

@@ -260,7 +260,7 @@ function makeRepo(fileCount, redFile, extraFiles = {}) {
   fs.writeFileSync(path.join(dir, 'cloudflare', 'script.cjs'), script)
   fs.writeFileSync(path.join(dir, 'frontend', 'script.cjs'), script)
   fs.writeFileSync(path.join(dir, 'frontend', 'build.cjs'), `${script}${BUILD_SCRIPT}\n`)
-  fs.writeFileSync(path.join(dir, 'cloudflare', 'package.json'), '{"name":"c","scripts":{"typecheck":"node script.cjs"}}\n')
+  fs.writeFileSync(path.join(dir, 'cloudflare', 'package.json'), '{"name":"c","scripts":{"typecheck":"node script.cjs","deploy":"node script.cjs","deploy:full":"node script.cjs"}}\n')
   fs.writeFileSync(path.join(dir, 'frontend', 'package.json'), '{"name":"f","scripts":{"typecheck":"node script.cjs","verify:i18n":"node script.cjs","build":"node build.cjs"}}\n')
   git(dir, 'add', '.')
   git(dir, 'commit', '-q', '-m', 'fixture')
@@ -467,14 +467,25 @@ check('the app digest sees every byte of every file and every path, and ignores 
       ['a different build id', () => put('business-os-build.json', info({ hash: 'h2' }))],
       ['a different revision', () => put('business-os-build.json', info({ revision: 'r2' }))],
       ['an extra field in the build file', () => put('business-os-build.json', info({ more: 1 }))],
+      ['a new dot-file in a dot-directory', () => put('.well-known/security.txt', 'x')],
+      ['a new top-level dot-file', () => put('.htaccess', 'x')],
     ]) {
       change()
       assert.notStrictEqual(shards.distDigest(dir).digest, base.digest, what)
       put('assets/a.js', 'one')
       fs.rmSync(path.join(dir, 'assets', 'c.js'), { force: true })
+      fs.rmSync(path.join(dir, '.well-known'), { recursive: true, force: true })
+      fs.rmSync(path.join(dir, '.htaccess'), { force: true })
       put('business-os-build.json', info())
     }
     assert.strictEqual(shards.distDigest(dir).digest, base.digest, 'restored')
+    put('.well-known/security.txt', 'one')
+    const withDot = shards.distDigest(dir)
+    assert.strictEqual(withDot.fileCount, 5, 'a dot-file is counted')
+    put('.well-known/security.txt', 'two')
+    assert.notStrictEqual(shards.distDigest(dir).digest, withDot.digest, 'a changed byte in a dot-file')
+    fs.rmSync(path.join(dir, '.well-known'), { recursive: true })
+    assert.strictEqual(shards.distDigest(dir).digest, base.digest, 'dot-files removed again')
     fs.renameSync(path.join(dir, 'assets', 'b.js'), path.join(dir, 'assets', 'bb.js'))
     assert.notStrictEqual(shards.distDigest(dir).digest, base.digest, 'a renamed file')
     fs.renameSync(path.join(dir, 'assets', 'bb.js'), path.join(dir, 'assets', 'b.js'))
@@ -488,6 +499,197 @@ check('the app digest sees every byte of every file and every path, and ignores 
     assert.throws(() => shards.distDigest(dir), /has no files/)
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+check('a link inside the app is refused, not skipped: a file link, or a directory link on a machine that cannot make file links', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dist-link-'))
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'dist-outside-'))
+  try {
+    fs.writeFileSync(path.join(dir, 'index.html'), '<html></html>')
+    fs.writeFileSync(path.join(outside, 'secret.txt'), 'outside the app')
+    const plain = shards.distDigest(dir).digest
+    try { fs.symlinkSync(path.join(outside, 'secret.txt'), path.join(dir, 'link.txt'), 'file') } catch { fs.symlinkSync(outside, path.join(dir, 'link'), 'junction') }
+    assert.ok(fs.lstatSync(path.join(dir, fs.readdirSync(dir).find((n) => n.startsWith('link')))).isSymbolicLink(), 'the fixture really made a link')
+    assert.throws(() => shards.distDigest(dir), /is not a regular file/)
+    for (const n of fs.readdirSync(dir).filter((x) => x.startsWith('link'))) fs.rmSync(path.join(dir, n), { recursive: true, force: true })
+    assert.strictEqual(shards.distDigest(dir).digest, plain, 'without the link the digest is back')
+    assert.ok(fs.existsSync(path.join(outside, 'secret.txt')), 'removing the link left its target alone')
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+    fs.rmSync(outside, { recursive: true, force: true })
+  }
+})
+
+check('the pinned build id follows the commit: two commits get two different 16-hex ids, one commit always the same id', () => {
+  const a = 'a'.repeat(40)
+  const b = `${'a'.repeat(39)}b`
+  const idA = shards.gateBuildHash(a)
+  const idB = shards.gateBuildHash(b)
+  assert.match(idA, /^[0-9a-f]{16}$/)
+  assert.match(idB, /^[0-9a-f]{16}$/)
+  assert.notStrictEqual(idA, idB, 'the id must change when the commit changes, or no till is told a new version is waiting')
+  assert.strictEqual(shards.gateBuildHash(a), idA)
+  assert.strictEqual(shards.gateBuildHash(b), idB)
+  assert.notStrictEqual(shards.gateBuildHash('0'.repeat(40)), shards.gateBuildHash('1'.repeat(40)))
+})
+
+check('the app built by the kit differs between two commits and is the same for one: build id, index.html and the digest', () => {
+  const repo = makeRepo(2)
+  const runs = []
+  try {
+    const first = runGates(repo, ['-Part', 'build'])
+    runs.push(first)
+    assert.strictEqual(first.status, 0, first.out.slice(-600))
+    const dist = path.join(repo.dir, 'frontend', 'dist')
+    const snapshot = () => ({ index: fs.readFileSync(path.join(dist, 'index.html'), 'utf8'), hash: JSON.parse(fs.readFileSync(path.join(dist, 'business-os-build.json'), 'utf8')).hash, digest: shards.distDigest(dist).digest })
+    const one = snapshot()
+    const again = runGates(repo, ['-Part', 'build'])
+    runs.push(again)
+    assert.deepStrictEqual(snapshot(), one, 'one commit, one app')
+    git(repo.dir, 'commit', '-q', '--allow-empty', '-m', 'second commit')
+    const secondSha = git(repo.dir, 'rev-parse', 'HEAD')
+    assert.notStrictEqual(secondSha, repo.sha)
+    const second = runGates({ dir: repo.dir }, ['-Part', 'build'])
+    runs.push(second)
+    assert.strictEqual(second.status, 0, second.out.slice(-600))
+    const two = snapshot()
+    assert.strictEqual(one.hash, shards.gateBuildHash(repo.sha))
+    assert.strictEqual(two.hash, shards.gateBuildHash(secondSha))
+    assert.notStrictEqual(two.hash, one.hash, 'business-os-build.json carries a different build id')
+    assert.notStrictEqual(two.index, one.index, 'index.html differs')
+    assert.notStrictEqual(two.digest, one.digest, 'the digest differs')
+  } finally {
+    for (const r of runs) fs.rmSync(r.records, { recursive: true, force: true })
+    fs.rmSync(repo.dir, { recursive: true, force: true })
+  }
+})
+
+// release.cjs <command> on the throwaway repository, all runs sharing one records folder like the steps of one workflow job do.
+// The package scripts leave a trace line, so a test sees which npm scripts a run really executed ('script frontend:build',
+// 'script cloudflare:deploy'). Nothing here touches Cloudflare: the throwaway repo's deploy script only writes the trace.
+function kitRun(command, repo, records, args = [], env = {}) {
+  const trace = path.join(records, 'trace.txt')
+  fs.rmSync(trace, { force: true })
+  const r = spawnSync(process.execPath, [path.join(KIT, 'release.cjs'), command, '-CI', '-ReleaseDir', repo.dir, '-Records', records, '-Jobs', '2', '-Retries', '1', '-Plan', 'paid', ...args], {
+    encoding: 'utf8', env: { ...process.env, SHARD_TRACE: trace, GITHUB_STEP_SUMMARY: '', RELEASE_CONFIRM: 'DEPLOY', RELEASE_EXPECT_DIST: '', ...env },
+  })
+  const lines = fs.existsSync(trace) ? fs.readFileSync(trace, 'utf8').split('\n').filter(Boolean) : []
+  return { status: r.status, out: r.stdout + r.stderr, scripts: lines.filter((l) => l.startsWith('script ')) }
+}
+
+check('deploy with a gate verdict publishes the verified build and never builds: the digest is checked before the upload, a missing, stale or changed build is refused', () => {
+  const repo = makeRepo(2)
+  const records = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-records-'))
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-verdict-'))
+  try {
+    const dist = path.join(repo.dir, 'frontend', 'dist')
+    const verdictFile = path.join(work, 'gate-verdict.json')
+    const verdictWith = (digest) => fs.writeFileSync(verdictFile, JSON.stringify(digest === undefined ? {} : { dist_sha256: digest }))
+    const stateFile = () => path.join(records, 'Deploys', fs.readdirSync(path.join(records, 'Deploys')).find((n) => n.endsWith(repo.sha.slice(0, 12))), 'state.json')
+    const deployVerified = (extra = {}) => kitRun('deploy', repo, records, ['-ExpectDist', verdictFile], extra)
+    const refusedNothingRan = (r, pattern, why) => {
+      assert.notStrictEqual(r.status, 0, `${why}: must refuse`)
+      assert.match(r.out, pattern, why)
+      assert.deepStrictEqual(r.scripts, [], `${why}: neither a build nor the publish ran`)
+    }
+    const build = () => { fs.rmSync(dist, { recursive: true, force: true }); const b = kitRun('gates', repo, records, ['-Part', 'build']); assert.strictEqual(b.status, 0, b.out.slice(-600)); return shards.distDigest(dist).digest }
+
+    verdictWith(DIST)
+    refusedNothingRan(deployVerified(), /no build of this commit exists here/, 'no build was made')
+
+    const digest = build()
+    verdictWith(digest)
+    const ok = deployVerified()
+    assert.strictEqual(ok.status, 0, ok.out.slice(-800))
+    assert.deepStrictEqual(ok.scripts, ['script cloudflare:deploy'], 'the publish runs the plain deploy script and no build at all')
+    assert.match(ok.out, /frontend\/dist is the app the gate tested/)
+    const viaEnv = kitRun('deploy', repo, records, [], { RELEASE_EXPECT_DIST: verdictFile })
+    assert.strictEqual(viaEnv.status, 0, viaEnv.out.slice(-800))
+    assert.deepStrictEqual(viaEnv.scripts, ['script cloudflare:deploy'])
+    assert.match(viaEnv.out, /frontend\/dist is the app the gate tested/, 'the workflow hands the verdict over through RELEASE_EXPECT_DIST')
+
+    fs.appendFileSync(path.join(dist, 'assets', 'app.js'), ' tampered')
+    refusedNothingRan(deployVerified(), /not the [0-9a-f]{64} the gate tested/, 'a byte of a published file changed after the check')
+    refusedNothingRan(kitRun('deploy', repo, records, [], { RELEASE_EXPECT_DIST: verdictFile }), /not the [0-9a-f]{64} the gate tested/, 'the same through the environment')
+    build()
+    assert.strictEqual(deployVerified().status, 0, 'a clean rebuild of the same commit is the tested app again')
+    fs.writeFileSync(path.join(dist, 'extra.js'), 'x')
+    refusedNothingRan(deployVerified(), /the gate tested/, 'a file was added')
+    build()
+
+    const lastChar = digest.endsWith('0') ? `${digest.slice(0, -1)}1` : `${digest.slice(0, -1)}0`
+    const firstChar = (digest.startsWith('0') ? '1' : '0') + digest.slice(1)
+    for (const other of [lastChar, firstChar, DIST]) {
+      verdictWith(other)
+      refusedNothingRan(deployVerified(), /the gate tested/, `a verdict digest that differs (${other.slice(0, 8)}...)`)
+    }
+    for (const bad of [undefined, '', 'abc', digest.toUpperCase()]) {
+      verdictWith(bad)
+      refusedNothingRan(deployVerified(), /carries no digest of the tested app/, `a verdict without a usable digest (${String(bad)})`)
+    }
+    fs.rmSync(verdictFile)
+    refusedNothingRan(deployVerified(), /carries no digest of the tested app/, 'no verdict file')
+    verdictWith(digest)
+    assert.strictEqual(deployVerified().status, 0, 'control: the same verdict and build publish again')
+
+    const state = JSON.parse(fs.readFileSync(stateFile(), 'utf8'))
+    fs.writeFileSync(stateFile(), JSON.stringify({ ...state, frontendBuiltFor: 'f'.repeat(40) }))
+    refusedNothingRan(deployVerified(), /no build of this commit exists here/, 'the recorded build is of another commit')
+    fs.writeFileSync(stateFile(), JSON.stringify({ ...state, frontendBuiltFor: undefined }))
+    refusedNothingRan(deployVerified(), /no build of this commit exists here/, 'no build was recorded')
+    fs.writeFileSync(stateFile(), JSON.stringify(state))
+    fs.rmSync(dist, { recursive: true })
+    refusedNothingRan(deployVerified(), /no build of this commit exists here/, 'the recorded build is gone')
+    assert.strictEqual(build(), digest, 'the same commit builds the same app again')
+    assert.strictEqual(deployVerified().status, 0)
+
+    const sweepRecords = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-sweep-'))
+    try {
+      fs.rmSync(dist, { recursive: true })
+      const sweep = kitRun('deploy', repo, sweepRecords, [])
+      assert.strictEqual(sweep.status, 0, sweep.out.slice(-800))
+      assert.deepStrictEqual(sweep.scripts, ['script frontend:build', 'script cloudflare:deploy'], 'without a verdict the deploy builds what is missing, as it always did')
+    } finally {
+      fs.rmSync(sweepRecords, { recursive: true, force: true })
+    }
+  } finally {
+    fs.rmSync(records, { recursive: true, force: true })
+    fs.rmSync(work, { recursive: true, force: true })
+    fs.rmSync(repo.dir, { recursive: true, force: true })
+  }
+})
+
+check('the verdict command checks the shards against this run\'s attempt: a manifest from a later attempt is refused, the same attempt is accepted', () => {
+  const repo = makeRepo(4)
+  const dirs = [repo.dir]
+  try {
+    const results = [1, 2].map((i) => runShard(repo, i, 2))
+    dirs.push(...results.map((r) => r.records))
+    for (const r of results) assert.strictEqual(r.status, 0, r.out.slice(-600))
+    const manifests = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-attempt-'))
+    dirs.push(manifests)
+    const write = (attemptOfShard2) => results.forEach((r, i) => {
+      fs.mkdirSync(path.join(manifests, `s${i + 1}`), { recursive: true })
+      fs.writeFileSync(path.join(manifests, `s${i + 1}`, shards.MANIFEST_NAME), JSON.stringify({ ...r.manifest, attempt: i === 1 ? attemptOfShard2 : 1 }))
+    })
+    const out = path.join(manifests, 'out', 'gate-verdict.json')
+    const verdict = (runAttempt) => spawnSync(process.execPath, [path.join(KIT, 'gate-shards.cjs'), 'verdict', '--release', repo.dir, '--manifests', manifests, '--shards', '2', '--sha', repo.sha, '--kit-commit', 'c'.repeat(40), '--input-ref', 'main', '--out', out, '--plan-result', 'success', '--static-result', 'success', '--shard-result', 'success'], {
+      encoding: 'utf8', env: { ...process.env, GITHUB_REPOSITORY: 'o/r', GITHUB_RUN_ID: '7', GITHUB_RUN_ATTEMPT: String(runAttempt) },
+    })
+    write(1)
+    const control = verdict(1)
+    assert.strictEqual(control.status, 0, control.stdout)
+    fs.rmSync(out)
+    write(2)
+    const later = verdict(1)
+    assert.strictEqual(later.status, 1, 'a manifest from attempt 2 cannot belong to a run that is at attempt 1')
+    assert.match(later.stdout, /shard 2 is from attempt 2, later than this run's attempt 1/)
+    assert.ok(!fs.existsSync(out))
+    const same = verdict(2)
+    assert.strictEqual(same.status, 0, same.stdout)
+  } finally {
+    for (const d of dirs) fs.rmSync(d, { recursive: true, force: true })
   }
 })
 

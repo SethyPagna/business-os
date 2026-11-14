@@ -9,8 +9,8 @@
 //   (the `gate_check` job runs it, then downloads the artifacts it names in $GITHUB_OUTPUT:
 //   the verdict job's `gate-verdict-a<attempt>` and `gate-records-all-a<attempt>`)
 //   node gate-reuse.cjs decide --collected <file> --verdict <file> [--release <checkout>]
-//   (runs in both jobs: the second time, in the deploy job, it re-reads the age of the run and
-//   checks the deploy job's own checkout)
+//   (runs in both jobs: the second time, in the deploy job, it counts the age again, from the earliest job start,
+//   and checks the deploy job's own checkout)
 //   node gate-reuse.cjs evidence --collected <file> --verdict <file> --out <dir>
 //   (evidence runs after `decide` succeeded: it keeps both files with the release records)
 //   node gate-reuse.cjs verify-dist --dist <dir> --verdict <file>
@@ -47,6 +47,19 @@ function verdictJobOf(jobs) {
   return found.length === 1 && isAttempt(found[0].run_attempt) ? found[0] : null
 }
 
+// The age counts from the earliest start of any job in the run's latest attempts, which the jobs API reports and a gate
+// run cannot write. The run's own updated_at is not used: re-running one browser leg days later would refresh it
+// while the safety tests still ran on the first day.
+function checkAge(jobs, now, maxAge, bad) {
+  const starts = jobs.map((j) => ({ name: j.name, at: Date.parse(j.started_at || '') }))
+  const unknown = starts.filter((s) => !Number.isFinite(s.at))
+  for (const s of unknown) bad(`job "${s.name}" has no start time`)
+  if (unknown.length) return
+  const earliest = Math.min(...starts.map((s) => s.at))
+  if (now - earliest > maxAge) bad(`the gate's tests started ${Math.floor((now - earliest) / 3600000)} hours ago; gate runs older than ${Math.floor(maxAge / 3600000)} hours are not reused`)
+  else if (earliest - now > 5 * 60 * 1000) bad('the gate run started in the future')
+}
+
 function kitCompatible({ kitCommit, gateHeadSha, localEntries, remoteEntries }) {
   if (gateHeadSha === kitCommit) return { ok: true, why: 'same kit commit' }
   const sorted = (entries) => JSON.stringify(entries ? Object.entries(entries).sort(([a], [b]) => (a < b ? -1 : 1)) : null)
@@ -78,11 +91,6 @@ function evaluate(input) {
   if (run.event !== 'workflow_dispatch') bad(`the run was triggered by ${run.event}, not a manual dispatch`)
   if (run.status !== 'completed' || run.conclusion !== 'success') bad(`the run is ${run.status}/${run.conclusion}, not completed/success`)
 
-  const finished = Date.parse(run.updated_at || '')
-  if (!Number.isFinite(finished)) bad('the run has no finish time')
-  else if (now - finished > maxAge) bad(`the run finished ${Math.floor((now - finished) / 3600000)} hours ago; gate runs older than ${Math.floor(maxAge / 3600000)} hours are not reused`)
-  else if (finished - now > 5 * 60 * 1000) bad('the run finish time is in the future')
-
   if (!Array.isArray(jobs) || !jobs.length) bad('the run has no jobs')
   else {
     for (const j of jobs) if (j.conclusion !== 'success') bad(`job "${j.name}" concluded ${j.conclusion || j.status}, not success`)
@@ -96,6 +104,7 @@ function evaluate(input) {
     const legs = names.filter((n) => /^Browser suite \(/.test(n)).length
     if (legs < MIN_BROWSER_LEGS) bad(`only ${legs} browser suite jobs ran, expected at least ${MIN_BROWSER_LEGS}`)
     if (verdict && shardJobs.length && Number(verdict.shards) !== shardJobs.length) bad('the verdict and the run disagree on the shard count')
+    checkAge(jobs, now, maxAge, bad)
   }
 
   const verdictJob = verdictJobOf(jobs)
@@ -208,7 +217,7 @@ async function collect(a) {
     deployRef: a['deploy-ref'],
     localHead,
     run: { id: run.id, run_attempt: run.run_attempt, path: run.path, display_title: run.display_title, event: run.event, status: run.status, conclusion: run.conclusion, head_sha: run.head_sha, repository: run.repository && { full_name: run.repository.full_name }, head_repository: run.head_repository && { full_name: run.head_repository.full_name }, updated_at: run.updated_at },
-    jobs: jobs.map((j) => ({ name: j.name, status: j.status, conclusion: j.conclusion, run_attempt: j.run_attempt })),
+    jobs: jobs.map((j) => ({ name: j.name, status: j.status, conclusion: j.conclusion, run_attempt: j.run_attempt, started_at: j.started_at, completed_at: j.completed_at })),
     artifacts: artifacts.map((x) => ({ name: x.name, expired: x.expired, workflow_run: x.workflow_run && { id: x.workflow_run.id } })),
     kit: { commit: kitCommit, local: localKitEntries(a.kit), remote: null },
     localFiles: { count: files.length, digest: shards.filesDigest(files) },

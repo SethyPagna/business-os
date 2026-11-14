@@ -49,8 +49,8 @@ const artifactsFor = (attempt, runId = 4242) => [
   { name: reuse.recordsArtifactName(attempt), expired: false, workflow_run: { id: runId } },
 ]
 
-function jobsFor(attempts = {}) {
-  const job = (name) => ({ name, status: 'completed', conclusion: 'success', run_attempt: attempts[name] || 1 })
+function jobsFor(attempts = {}, startedAt = NOW - 3 * HOUR) {
+  const job = (name) => ({ name, status: 'completed', conclusion: 'success', run_attempt: attempts[name] || 1, started_at: new Date(startedAt).toISOString(), completed_at: new Date(startedAt + HOUR).toISOString() })
   return [
     job('Plan'),
     job('Static checks'),
@@ -80,6 +80,7 @@ function fixture(over = {}) {
   }
 }
 const withRun = (patch) => { const f = fixture(); return { ...f, run: { ...f.run, ...patch } } }
+const startedAt = (ms) => ({ ...fixture(), jobs: jobsFor({}, ms) })
 const refuses = (input, pattern) => {
   const problems = reuse.evaluate(input)
   assert.ok(problems.length > 0, 'expected a refusal, got an acceptance')
@@ -147,16 +148,43 @@ check('a stripped-down run (missing shard, verdict or browser jobs) is refused e
   refuses({ ...f, verdict: { ...f.verdict, shards: 4 } }, /disagree on the shard count/)
 })
 
-check('the gate age limit is the named constant MAX_GATE_AGE_HOURS = 24: a run 25 hours old is refused, 23 hours is accepted', () => {
+check('the gate age limit is the named constant MAX_GATE_AGE_HOURS = 24, counted from the jobs\' start: a run 25 hours old is refused, 23 hours is accepted', () => {
   assert.strictEqual(reuse.MAX_GATE_AGE_HOURS, 24)
   assert.strictEqual(reuse.MAX_AGE_MS, 24 * HOUR)
-  refuses(withRun({ updated_at: new Date(NOW - 25 * HOUR).toISOString() }), /25 hours ago; gate runs older than 24 hours/)
-  refuses(withRun({ updated_at: new Date(NOW - 24 * HOUR - 1000).toISOString() }), /older than 24 hours/)
-  refuses(withRun({ updated_at: new Date(NOW - 8 * 24 * HOUR).toISOString() }), /192 hours ago/)
-  assert.deepStrictEqual(reuse.evaluate(withRun({ updated_at: new Date(NOW - 23 * HOUR).toISOString() })), [])
-  assert.deepStrictEqual(reuse.evaluate(withRun({ updated_at: new Date(NOW - 24 * HOUR).toISOString() })), [], 'exactly 24 hours is still inside')
-  refuses(withRun({ updated_at: undefined }), /no finish time/)
-  refuses(withRun({ updated_at: new Date(NOW + HOUR).toISOString() }), /in the future/)
+  refuses(startedAt(NOW - 25 * HOUR), /started 25 hours ago; gate runs older than 24 hours/)
+  refuses(startedAt(NOW - 24 * HOUR - 1000), /older than 24 hours/)
+  refuses(startedAt(NOW - 8 * 24 * HOUR), /192 hours ago/)
+  assert.deepStrictEqual(reuse.evaluate(startedAt(NOW - 23 * HOUR)), [])
+  assert.deepStrictEqual(reuse.evaluate(startedAt(NOW - 24 * HOUR)), [], 'exactly 24 hours is still inside')
+  refuses(startedAt(NOW + HOUR), /started in the future/)
+  for (const started_at of [undefined, null, '', 'not a date']) {
+    const f = fixture()
+    refuses({ ...f, jobs: f.jobs.map((j) => (j.name === 'Plan' ? { ...j, started_at } : j)) }, /job "Plan" has no start time/)
+  }
+})
+
+check('the run\'s own updated_at no longer decides the age: a fresh or missing one does not rescue an old gate, an old one does not condemn a new gate', () => {
+  const old = startedAt(NOW - 30 * HOUR)
+  refuses({ ...old, run: { ...old.run, updated_at: new Date(NOW - 60000).toISOString() } }, /30 hours ago/)
+  refuses({ ...old, run: { ...old.run, updated_at: undefined } }, /30 hours ago/)
+  const young = startedAt(NOW - 2 * HOUR)
+  assert.deepStrictEqual(reuse.evaluate({ ...young, run: { ...young.run, updated_at: new Date(NOW - 40 * 24 * HOUR).toISOString() } }), [])
+  assert.deepStrictEqual(reuse.evaluate({ ...young, run: { ...young.run, updated_at: undefined } }), [])
+})
+
+check('a partial re-run days later does not refresh the age: it counts from the earliest job start, so a browser leg re-run on day three leaves a day-one gate refused', () => {
+  const f = fixture()
+  const rerun = 'Browser suite (ios-webkit)'
+  const withLeg = (safetyStart, legStart, planStart = safetyStart) => jobsFor({ [rerun]: 2 }, safetyStart).map((j) => {
+    if (j.name === rerun) return { ...j, started_at: new Date(legStart).toISOString(), completed_at: new Date(legStart + HOUR).toISOString() }
+    return j.name === 'Plan' ? { ...j, started_at: new Date(planStart).toISOString() } : j
+  })
+  const input = (jobs) => ({ ...f, run: { ...f.run, run_attempt: 2, updated_at: new Date(NOW - 30 * 60000).toISOString() }, jobs })
+  refuses(input(withLeg(NOW - 49 * HOUR, NOW - HOUR)), /started 49 hours ago; gate runs older than 24 hours/)
+  assert.deepStrictEqual(reuse.evaluate(input(withLeg(NOW - 10 * HOUR, NOW - HOUR))), [], 'control: the same re-run within a day is reusable')
+  refuses(input(withLeg(NOW - 2 * HOUR, NOW - HOUR, NOW - 30 * HOUR)), /30 hours ago/)
+  const full = jobsFor({ Verdict: 2 }, NOW - HOUR)
+  assert.deepStrictEqual(reuse.evaluate({ ...f, run: { ...f.run, run_attempt: 2 }, jobs: full, verdict: { ...f.verdict, run_attempt: 2 }, artifacts: artifactsFor(2) }), [], 'control: a full re-run today is a fresh gate')
 })
 
 check('missing or expired artifacts are refused; an artifact of another run, or of another attempt, does not count', () => {
@@ -318,7 +346,7 @@ function pipeline(scenario = {}) {
   const runHead = scenario.runHead || kit.sha
   const verdictAttempt = scenario.verdictAttempt || 1
   const run = { ...f.run, id: 4242, run_attempt: scenario.runAttempt || verdictAttempt, head_sha: runHead, display_title: `Gate ${release.sha}`, updated_at: new Date().toISOString() }
-  const jobs = jobsFor(scenario.jobAttempts || { Verdict: verdictAttempt })
+  const jobs = (scenario.mapJobs || ((all) => all))(jobsFor(scenario.jobAttempts || { Verdict: verdictAttempt }, scenario.startedAt === undefined ? Date.now() - HOUR : scenario.startedAt))
   const routes = {
     '/actions/runs/4242': run,
     '/actions/runs/4242/jobs?filter=latest&per_page=100&page=1': { jobs },
@@ -333,7 +361,7 @@ function pipeline(scenario = {}) {
   const collectArgs = ['collect', '--repo', REPO, '--run-id', '4242', '--deploy-ref', release.sha, '--release', release.dir, '--kit', kit.dir, '--out', out]
   const verdictFile = path.join(work, 'verdict.json')
   const verdict = shards.buildVerdict({ sha: release.sha, kitCommit: runHead, repository: REPO, runId: 4242, runAttempt: verdictAttempt, inputRef: release.sha, shards: 8, files, dist: DIST })
-  return { release, kit, work, files, run, env, collectArgs, out, githubOutput, verdictFile, verdict }
+  return { release, kit, work, files, run, jobs, env, collectArgs, out, githubOutput, verdictFile, verdict }
 }
 
 check('collect + decide: the real commands accept a matching run, name the artifacts to download, and refuse a tampered verdict (API stubbed)', () => {
@@ -342,6 +370,10 @@ check('collect + decide: the real commands accept a matching run, name the artif
   assert.strictEqual(first.status, 0, first.out)
   assert.ok(!/fixture-not-a-token/.test(first.out), 'the token is never printed')
   assert.strictEqual(fs.readFileSync(p.githubOutput, 'utf8'), 'verdict_artifact=gate-verdict-a1\nrecords_artifact=gate-records-all-a1\n')
+  const collectedJobs = JSON.parse(fs.readFileSync(p.out, 'utf8')).jobs
+  assert.strictEqual(collectedJobs.length, p.jobs.length)
+  assert.deepStrictEqual(collectedJobs.map((j) => [j.name, j.started_at, j.completed_at]), p.jobs.map((j) => [j.name, j.started_at, j.completed_at]), 'collect keeps every job\'s start and finish time, the facts the age is counted from')
+  assert.ok(collectedJobs.every((j) => Number.isFinite(Date.parse(j.started_at))))
   fs.writeFileSync(p.verdictFile, JSON.stringify(p.verdict))
   const ok = cli(['decide', '--collected', p.out, '--verdict', p.verdictFile])
   assert.strictEqual(ok.status, 0, ok.out)
@@ -386,7 +418,7 @@ check('decide in the deploy job compares the deploy job\'s own checkout, and the
   const fewer = cli(['decide', '--collected', forgedCollected, '--verdict', p.verdictFile, '--release', sameCommitFewerFiles.dir])
   assert.strictEqual(fewer.status, 1)
   assert.match(fewer.out, /ran 3 test files, this commit has 1/)
-  collected.run.updated_at = new Date(Date.now() - 30 * HOUR).toISOString()
+  collected.jobs = collected.jobs.map((j) => ({ ...j, started_at: new Date(Date.now() - 30 * HOUR).toISOString() }))
   collected.deployRef = p.release.sha
   collected.localHead = p.release.sha
   fs.writeFileSync(forgedCollected, JSON.stringify(collected))
@@ -431,6 +463,17 @@ check('collect after a partial re-run names the artifacts of the Verdict job\'s 
   assert.strictEqual(fs.readFileSync(rerunVerdict.githubOutput, 'utf8'), 'verdict_artifact=gate-verdict-a2\nrecords_artifact=gate-records-all-a2\n')
 })
 
+check('collect refuses a partial re-run made days after the safety tests ran, although the run itself was updated a moment ago', () => {
+  const rerun = 'Browser suite (ios-webkit)'
+  const p = pipeline({ runAttempt: 2, verdictAttempt: 1, jobAttempts: { Verdict: 1, [rerun]: 2 }, startedAt: Date.now() - 49 * HOUR, mapJobs: (jobs) => jobs.map((j) => (j.name === rerun ? { ...j, started_at: new Date().toISOString() } : j)) })
+  const r = cli(p.collectArgs, p.env)
+  assert.strictEqual(r.status, 1, r.out)
+  assert.match(r.out, /started 49 hours ago; gate runs older than 24 hours/)
+  assert.strictEqual(fs.readFileSync(p.githubOutput, 'utf8'), '', 'a refused run names no artifact to download')
+  const sameDay = pipeline({ runAttempt: 2, verdictAttempt: 1, jobAttempts: { Verdict: 1, [rerun]: 2 }, startedAt: Date.now() - 5 * HOUR, mapJobs: (jobs) => jobs.map((j) => (j.name === rerun ? { ...j, started_at: new Date().toISOString() } : j)) })
+  assert.strictEqual(cli(sameDay.collectArgs, sameDay.env).status, 0, 'control: the same re-run on the same day is fine')
+})
+
 check('verify-dist: the app built in the deploy job must have exactly the digest the gate tested', () => {
   const dist = tempDir('gate-dist-')
   fs.mkdirSync(path.join(dist, 'assets'))
@@ -452,6 +495,14 @@ check('verify-dist: the app built in the deploy job must have exactly the digest
   fs.writeFileSync(path.join(dist, 'assets', 'app.js'), 'code')
   fs.writeFileSync(path.join(dist, 'business-os-build.json'), JSON.stringify({ revision: 'r', hash: 'h', builtAt: 'later' }))
   assert.strictEqual(cli(['verify-dist', '--dist', dist, '--verdict', verdictFile]).status, 0, 'only the build clock may differ')
+  const flipAt = (i) => `${digest.slice(0, i)}${digest[i] === '0' ? '1' : '0'}${digest.slice(i + 1)}`
+  for (const i of [0, 15, 16, 31, 63]) {
+    verdictWith(flipAt(i))
+    const nearly = cli(['verify-dist', '--dist', dist, '--verdict', verdictFile])
+    assert.strictEqual(nearly.status, 1, `a digest that differs only in hex character ${i} is a different app`)
+    assert.match(nearly.out, /is not the app the gate tested/)
+  }
+  verdictWith(digest)
   for (const bad of [undefined, 'abc', digest.toUpperCase()]) {
     verdictWith(bad)
     const refused = cli(['verify-dist', '--dist', dist, '--verdict', verdictFile])
@@ -552,8 +603,9 @@ check('deploy.yml: the sweep step is untouched and runs only without gate_run_id
     'Keep the gate test logs with the release records',
     'Build the app (the gate run proved its tests)',
     'Check the built app is the app the gate tested',
+    'Pin the tested app for the publish step',
   ])
-  assert.deepStrictEqual(steps.filter((s) => s.text.includes(REUSE_ONLY)).length, 6, 'no other step mentions the reuse condition')
+  assert.deepStrictEqual(steps.filter((s) => s.text.includes(REUSE_ONLY)).length, 7, 'no other step mentions the reuse condition')
 })
 
 check('deploy.yml: the steps that must run on both paths carry no gate_run_id condition (the records precheck, the installs, the record, the snapshot, the publish, the live checks, the export)', () => {
@@ -573,7 +625,7 @@ check('deploy.yml: the steps that must run on both paths carry no gate_run_id co
 
 check('deploy.yml: the gate checks run after Set up Node, the record precheck and the install steps follow them, and the order inside the deploy job is download, check, precheck, record, keep, build, verify, snapshot', () => {
   const at = (needle) => { const i = deployJob.indexOf(`- name: ${needle}`); assert.ok(i >= 0, needle); return i }
-  const order = ['Check out the commit to release', 'Set up Node', 'Download the gate evidence', 'Check the gate verdict at deploy time', 'Verify encrypted record protection', 'Install packages (cloudflare)', 'Record the release', 'Keep the gate verdict with the release records', 'Keep the gate test logs with the release records', 'Build the app (the gate run proved its tests)', 'Check the built app is the app the gate tested', 'Safety snapshot']
+  const order = ['Check out the commit to release', 'Set up Node', 'Download the gate evidence', 'Check the gate verdict at deploy time', 'Verify encrypted record protection', 'Install packages (cloudflare)', 'Record the release', 'Keep the gate verdict with the release records', 'Keep the gate test logs with the release records', 'Build the app (the gate run proved its tests)', 'Check the built app is the app the gate tested', 'Pin the tested app for the publish step', 'Safety snapshot', 'Publish (deploy)']
   order.reduce((prev, name) => { assert.ok(at(name) > at(prev), `${name} must come after ${prev}`); return name })
   assert.ok(at('Safety tests') < at('Safety snapshot'))
 })
@@ -616,6 +668,26 @@ check('deploy.yml: the reuse build step is the kit\'s -Part build, with no secre
   assert.strictEqual(steps[i + 1].name, 'Check the built app is the app the gate tested', 'the digest check comes right after the build')
 })
 
+check('deploy.yml: the publish step is handed the verdict the digest check used, through RELEASE_EXPECT_DIST, is itself unchanged, and no step after the pin builds the app on the reuse path', () => {
+  const steps = stepsOf(deployJob)
+  const verdictPath = '$env:RUNNER_TEMP/gate-check/verdict/gate-verdict.json'
+  const verify = steps.find((s) => s.name === 'Check the built app is the app the gate tested')
+  const pin = steps.find((s) => s.name === 'Pin the tested app for the publish step')
+  const publish = steps.find((s) => s.name === 'Publish (deploy)')
+  assert.ok(verify && pin && publish)
+  assert.ok(runBody(verify).includes(`--verdict "${verdictPath}"`), 'the digest check reads this verdict file')
+  assert.strictEqual(runBody(pin), `"RELEASE_EXPECT_DIST=${verdictPath}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8`, 'the publish step is told to expect the digest of that same file')
+  assert.strictEqual(conditionOf(pin), `\${{ ${REUSE_ONLY} }}`, 'the sweep path, which builds its own app, is not pinned')
+  assert.ok(!/secrets\./.test(pin.text))
+  const publishRun = (/\n {8}run: (.+)\n/.exec(publish.text) || [])[1]
+  assert.strictEqual(publishRun, 'node kit/ops/scripts/deploy-kit/release.cjs deploy -CI -ReleaseDir release -Records "$env:RELEASE_RECORDS_ROOT" -Plan $env:PLAN', 'the publish command is the original one')
+  assert.ok(!/RELEASE_EXPECT_DIST|gate_run_id/.test(publish.text), 'the publish step itself carries no reuse condition')
+  assert.ok(steps.indexOf(pin) < steps.indexOf(publish) && steps.indexOf(verify) < steps.indexOf(pin))
+  for (const s of steps.slice(steps.indexOf(pin) + 1)) {
+    if (/release\.cjs gates|npm run build|build:frontend|deploy:full/.test(s.text)) assert.strictEqual(conditionOf(s), `\${{ ${SWEEP_ONLY} }}`, `${s.name} may build the app only on the full-sweep path`)
+  }
+})
+
 check('deploy.yml: the reuse steps hold no Cloudflare secret and take inputs only through env; the token reaches only the collect step and the cross-run downloads', () => {
   for (const s of [...stepsOf(deployJob).filter((x) => x.text.includes(REUSE_ONLY)), ...stepsOf(gateCheckJob)]) {
     assert.ok(!/secrets\./.test(s.text), `${s.name} sees a secret`)
@@ -644,6 +716,19 @@ check('DEPLOY.md documents the age limit constant, the digest check and the sepa
   assert.match(doc, /MAX_GATE_AGE_HOURS.{0,300}24 hours|24 hours.{0,300}MAX_GATE_AGE_HOURS/s)
   assert.match(doc, /gate_check/)
   assert.match(doc, /digest/)
+})
+
+check('DEPLOY.md tells the owner to re-run all jobs, says what the age counts from, and does not overstate byte-for-byte', () => {
+  const doc = fs.readFileSync(path.join(ROOT, 'DEPLOY.md'), 'utf8').replace(/\s*\r?\n\s*/g, ' ')
+  assert.match(doc, /Re-run all jobs/)
+  assert.match(doc, /dispatch (Deploy )?again/)
+  assert.match(doc, /Re-run failed jobs/)
+  assert.match(doc, /earliest job/i)
+  assert.match(doc, /RELEASE_EXPECT_DIST|-ExpectDist/)
+  for (const m of doc.matchAll(/byte for byte/g)) {
+    const around = doc.slice(Math.max(0, m.index - 400), m.index + 400)
+    if (/tested|digest|app/.test(around) && /publish|gate/.test(around)) assert.ok(/builtAt/.test(around), `"byte for byte" about the tested app must name builtAt nearby: ${around.slice(300, 520)}`)
+  }
 })
 
 for (const dir of cleanups) fs.rmSync(dir, { recursive: true, force: true })

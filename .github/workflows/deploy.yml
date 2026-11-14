@@ -23,9 +23,10 @@
 # pinned by cloudflare/scripts/test-deploy-gate-reuse-pure.cjs). The deploy job then
 # repeats the offline part of that decision at deploy time (the age keeps counting
 # while the reviewer decides), builds the app and refuses unless the build has the
-# digest the gate's shards tested. Any failed check stops the deploy; there is no
-# weaker fallback. With the input empty, `gate_check` is skipped and the full sweep
-# runs here exactly as before.
+# digest the gate's shards tested. The publish step checks that digest once more
+# immediately before the upload and never builds on this path. Any failed check stops
+# the deploy; there is no weaker fallback. With the input empty, `gate_check` is
+# skipped and the full sweep runs here exactly as before.
 name: Deploy
 
 on:
@@ -208,6 +209,13 @@ jobs:
         run: |
           node kit/ops/scripts/deploy-kit/gate-reuse.cjs verify-dist --dist release/frontend/dist --verdict "$env:RUNNER_TEMP/gate-check/verdict/gate-verdict.json"
           exit $LASTEXITCODE
+
+      # From here the publish step (release.cjs deploy) compares frontend/dist with this
+      # verdict immediately before the upload, and refuses to build the app itself.
+      - name: Pin the tested app for the publish step
+        if: ${{ inputs.gate_run_id != '' }}
+        run: |
+          "RELEASE_EXPECT_DIST=$env:RUNNER_TEMP/gate-check/verdict/gate-verdict.json" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       # The tests run the released commit's own code, so no Cloudflare secret
       # is given to this step.
