@@ -15,6 +15,8 @@ export const ROTATION_STEP_IDS: readonly string[] = [
   'ephemeral-retention:logs',
   'ephemeral-retention:history',
   'ephemeral-retention:submissions',
+  'sales-daily-recompute',
+  'sales-daily-reconcile',
 ]
 
 /** The heavy trigger's steps (CRON_HEAVY), in order; see cronHeavySteps() in src/index.ts. */

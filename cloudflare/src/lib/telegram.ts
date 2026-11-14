@@ -1863,6 +1863,31 @@ export async function sendTelegramStaleShiftAlert(env: Env, shiftId: number, now
   }
 }
 
+// The stored daily sales totals found a day that does not match the records (lib/salesDailyCron.ts, the nightly reconcile): stored reads are stopped and
+// the reports read the live records. The OWNER alert (owner, 14 Nov 2026: a mismatch never heals silently): sent whenever Telegram is on, with no
+// per-category switch to mute it, to the Alerts topic, English and Khmer. Names days only, never a figure.
+export function formatSalesDailyMismatchAlert(shopLabel: string, days: readonly string[]): string {
+  return [
+    `⚠️ ${bi('Stored daily sales totals stopped', 'បានបញ្ឈប់សរុបការលក់ប្រចាំថ្ងៃដែលបានរក្សាទុក')}`,
+    labeled('shop', cleanLine(shopLabel || 'Business OS', 80)),
+    ...days.map((day) => labeled('date', day.split('-').reverse().join('/'))),
+    bi('The nightly check found a day that does not match the records. Reports now read the live records.', 'ការត្រួតពិនិត្យពេលយប់រកឃើញថ្ងៃមួយមិនត្រូវនឹងកំណត់ត្រា។ របាយការណ៍ឥឡូវអានពីកំណត់ត្រាផ្ទាល់។'),
+  ].join('\n')
+}
+
+export async function sendTelegramSalesDailyMismatchAlert(env: Env, days: readonly string[]): Promise<boolean> {
+  try {
+    const config = await getTelegramConfig(env)
+    if (!config.enabled || configurationProblem(config)) return false
+    const name = await shopName(env)
+    await postTelegram(config, withLanguage(config.language, () => formatSalesDailyMismatchAlert(name, days)), config.chatId, config.topics.telegram_topic_alerts, 'telegram_topic_alerts', { retryOnce: true })
+    return true
+  } catch (error) {
+    console.error('[telegram] the sales totals alert could not be sent', error)
+    return false
+  }
+}
+
 // ---- T10: the Reports overview, one minute after a shift closes -----------
 // Owner, 23 Sep 2026: "One minute after a shift closes, the Reports overview
 // is sent to Telegram too" -- with a Free-plan path, a Paid path with

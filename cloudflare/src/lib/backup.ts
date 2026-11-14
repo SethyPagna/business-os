@@ -150,6 +150,8 @@ export function selectAssetsToCopy(
 // re-apply safety lives in the separately-kept import_*_commits/guards
 // idempotency ledgers, so dropping it costs a restore neither correctness nor
 // idempotency),
+// sales_daily_totals (0308 -- derived: one cache row per business date that the recompute cron rebuilds from the sales tables; a restore rotates the
+// data epoch, which makes every stored day unservable until it is recomputed, so restoring an old copy of it could only ever be wrong),
 // system_flags (0089 -- the restore MAINTENANCE flag lives there precisely
 // so the restore that sets it cannot delete it; backing it up would restore
 // a stale "maintenance on" state), and the per-custom-table data tables

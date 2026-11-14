@@ -58,6 +58,7 @@ import { maybeRunScheduledImportRetention, cleanOrphanImportStaging } from './li
 import { sweepStaleImportIncomingFiles } from './lib/importIncomingFiles'
 import { maybeRunScheduledImageAudit } from './lib/imageAudit'
 import { maybeRunScheduledEphemeralRetention, EPHEMERAL_RETENTION_GROUPS } from './lib/ephemeralRetention'
+import { runSalesDailyRecompute, runSalesDailyReconcile } from './lib/salesDailyCron'
 import { reapStalledImportJobs } from './routes/importJobs'
 import { ReportMoneyPrecisionError, reportMoneyHttpError } from './lib/reportMoneyPrecision'
 import { productStockGuardError } from './lib/productStockGuard'
@@ -683,6 +684,10 @@ export function cronRotationSteps(env: Env, label: (name: string, step: () => Pr
     step('import-incoming-sweep', () => sweepStaleImportIncomingFiles(env), UNGATED_STEP_MIN_INTERVAL_MS),
     step('orphan-staging-cleanup', () => cleanOrphanImportStaging(env, { apply: true }), UNGATED_STEP_MIN_INTERVAL_MS),
     ...EPHEMERAL_RETENTION_GROUPS.map((group) => step(`ephemeral-retention:${group}`, () => maybeRunScheduledEphemeralRetention(env, group))),
+    // The stored daily sales totals (read switch `sales_daily`; OFF answers { skipped } after one switch read): recompute the dirty past days, then the nightly
+    // reconcile against the raw records, which quarantines and alerts on a mismatch. Last in the rotation: both are optional to the business.
+    step('sales-daily-recompute', () => runSalesDailyRecompute(env)),
+    step('sales-daily-reconcile', () => runSalesDailyReconcile(env), getPlanLimits(env).salesDailyReconcileMinIntervalSeconds * 1000),
   ]
 }
 
