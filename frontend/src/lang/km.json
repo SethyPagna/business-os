@@ -5679,6 +5679,7 @@
   "read_switch_name_stock_bump_narrow": "ស្តុក៖ ធ្វើបច្ចុប្បន្នភាពតែស្តុកបន្ទាប់ពីកំណត់ចំនួន",
   "read_switch_name_ledger_summary_lean": "ការផ្លាស់ប្តូរស្តុក៖ ចំនួនសរុបស្រាលជាងមុន",
   "read_switch_name_products_typed_order_js": "ការស្វែងរកដោយវាយ៖ រៀបលំដាប់នៅម៉ាស៊ីនមេ",
+  "read_switch_name_sales_daily": "សរុបការលក់៖ រក្សាទុកតាមថ្ងៃ",
   "read_switch_stale": "កុងតាក់ត្រូវបានប្ដូរពីកន្លែងផ្សេង។ បង្ហាញថ្មីបំផុត។",
   "read_switch_state_off": "បិទ",
   "read_switch_state_on": "បើក",
