@@ -1162,6 +1162,10 @@ function salesIdsScope(ids: readonly number[], json = JSON.stringify(ids)): Sale
  * Any scope that is not a list scope (none, or already an id list) is returned as it came. `ids` is the resolved set as JSON text (null when nothing was resolved):
  * readSalesReportTotalsPinned resolves it again after the read and refuses a cohort that moved while the money was being read.
  */
+// Only a typed search is worth resolving. A status, cashier, branch or user filter is served by an index inside every statement, so the subquery costs about what one resolve does and
+// the two resolves (before and after the read) were a pure loss: `status=cancelled` over all time read 16,629 rows on the pre-lane route and 18,541 with them. The search text is the one
+// predicate that scans every sale and every line per statement; its clause is the only one that names search_normalized.
+const LIST_SCOPE_TEXT_SEARCH = /matched_sale\.search_normalized/
 const LIST_SCOPE_SUBQUERY = /^s\.id IN \((SELECT matched_sale\.id FROM sales matched_sale LEFT JOIN customers c ON c\.id=matched_sale\.customer_id WHERE [\s\S]+)\)$/
 async function resolveReportScopeIds(env: Env, scope: SalesReportScalarScope | undefined): Promise<{ scope: SalesReportScalarScope | undefined; ids: string | null }> {
   const unresolved = { scope, ids: null }
@@ -1169,6 +1173,7 @@ async function resolveReportScopeIds(env: Env, scope: SalesReportScalarScope | u
   const captured = captureSalesReportScalarScope(scope)
   const subquery = captured ? LIST_SCOPE_SUBQUERY.exec(captured.sql) : null
   if (!captured || !subquery) return unresolved
+  if (!LIST_SCOPE_TEXT_SEARCH.test(subquery[1])) return unresolved
   const rows = await getDb(env).prepare(`${subquery[1]} LIMIT @reportScopeLimit`)
     .all<{ id: unknown }>({ ...captured.params, reportScopeLimit: REPORT_SCOPE_IDS_MAX + 1 })
   if (rows.length > REPORT_SCOPE_IDS_MAX) return unresolved

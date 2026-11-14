@@ -49,6 +49,8 @@ const MUTANTS = {
   // every id page carries the whole list again (page k scans and seeks all N ids: quadratic in the match) / a page's slice that loses an id
   idsNotPaged: [{ name: 'm-unpaged', file: KERNEL, from: 'const REPORT_SALE_ID_ORDER = /^\\+?s\\.id$/', to: 'const REPORT_SALE_ID_ORDER = /^never$/' }],
   sliceDropsAnId: [{ name: 'm-slice-short', file: KERNEL, from: 'JSON.stringify(ids.slice(start, end))', to: 'JSON.stringify(ids.slice(start, end - 1))' }],
+  // every list scope resolved, a status-only filter included (two resolves it cannot repay)
+  resolvesEveryFilter: [{ name: 'm-gate', file: KERNEL, from: 'if (!LIST_SCOPE_TEXT_SEARCH.test(subquery[1])) return unresolved', to: '' }],
   keepsOneId: [{ name: 'm-one-id', file: KERNEL, from: '`${subquery[1]} LIMIT @reportScopeLimit`', to: '`${subquery[1]} LIMIT @reportScopeLimit - @reportScopeLimit + 1`' }],
   emptyMatchIsNoFilter: [{ name: 'm-empty', file: KERNEL, from: '  if (ids.some((id) => !Number.isSafeInteger(id))) return unresolved', to: '  if (ids.some((id) => !Number.isSafeInteger(id))) return unresolved\n  if (!ids.length) return { scope: undefined, ids: null }' }],
   resolverIgnoresTheScope: [{ name: 'm-resolve-none', file: KERNEL, from: RESOLVE, to: 'const pinned = { scope: undefined, ids: null }' }],
@@ -155,6 +157,7 @@ async function idUrls(ctx, world) {
 // 5-7% of a 15K-row read on the seed ("Customer" over 30d: 15,831 -> 16,667; every receipt: 14,115 -> 15,037), and 30% under the pre-lane route. Every other shape, and every unwindowed broad match, must read no more than the oracle.
 const WINDOWED_BROAD = /(customer broad|every receipt|receipt prefix) \| (30d|today)$/
 const WINDOWED_BROAD_PRICE = 1.08
+const NO_TEXT = /^stats (no search|status only)/
 const MUTANT_SHAPES = [
   'stats customer name | all-time', 'stats customer name | 30d', 'stats product name | today', 'stats khmer | all-time', 'stats latin folded | all-time', 'stats no match | all-time',
   'stats no match | 30d', 'stats receipt exact | all-time', 'stats customer broad | all-time', 'stats OR | all-time', 'stats customer + cashier none',
@@ -203,6 +206,7 @@ const pick = (res, names) => Object.fromEntries(names.map((n) => [n, res[n]]))
     for (const res of [newOff, newOn]) {
       for (const name of NAMES) {
         if (name === 'stats window only') assert.ok(!res[name].ids && !res[name].subquery, name + ' must carry no scope')
+        else if (NO_TEXT.test(name)) assert.ok(res[name].subquery && !res[name].ids, name + ' has no typed search: an index serves its filter in every statement, so it keeps the subquery (two resolves would only add rows)')
         else assert.ok(res[name].ids && !res[name].subquery, name + ' must read through the resolved id list')
       }
     }
@@ -261,7 +265,7 @@ const pick = (res, names) => Object.fromEntries(names.map((n) => [n, res[n]]))
   await step('item 2: the id request is cheap (one primary-key seek finds the cohort), on both switch states', () => {
     for (const res of [idsOff, idsOn]) {
       assert.ok(res['stats id'].rr < res['oracle x'].rr / 20, `by id ${res['stats id'].rr} rows vs the receipt as a search ${res['oracle x'].rr}`)
-      assert.ok(res['stats id'].ids && !res['stats id'].subquery, 'the id list is the scope')
+      assert.ok(res['stats id'].rr < 3000, 'the id filter is one primary-key seek per statement (no resolve is needed for it)')
       assert.ok(res['stats id + search of itself'].ids, 'with another filter the cohort is resolved (still an id list)')
     }
     // one primary-key seek finds the cohort; nothing else over the unfiltered totals
@@ -287,6 +291,10 @@ const pick = (res, names) => Object.fromEntries(names.map((n) => [n, res[n]]))
       for (const n of sub) assert.ok(res[n].rr <= oldOff[n].rr * 1.2 + 200000, `${n}: the fallback costs the oracle's rows plus one bounded id read (${res[n].rr} vs ${oldOff[n].rr})`)
     })
   }
+
+  await step('no typed search: a status or cashier filter reads exactly what the oracle reads (no resolve is spent on it)', () => {
+    for (const [n, o] of [[newOff, oldOff], [newOn, oldOn]]) for (const name of ['stats status only', 'stats no search + cashier']) assert.ok(n[name].rr <= o[name].rr + 12, `${name}: rows ${n[name].rr} > oracle ${o[name].rr}`)
+  })
 
   // ---------------------------------------------------------------- near the cap: the broad matches (about 15,800 of 15,800 sales) with the cap just above them
   // A resolved list is paged by its cursor, so a match near the cap reads linearly (one walk over the ids), never more than the subquery it replaces.
@@ -315,6 +323,7 @@ const pick = (res, names) => Object.fromEntries(names.map((n) => [n, res[n]]))
   await caught('the resolver cuts an over-long match silently (cap 40)', MUTANTS.silentTruncation, { against: oldOff, shapes: ['stats customer broad | all-time', 'stats customer broad | 30d', 'stats customer name | all-time', 'stats product name | today'] })
   await caught('every page carries the whole id list again (quadratic reads)', MUTANTS.idsNotPaged, { against: oldOff, shapes: BROAD, rowsOver: newOff })
   await caught('each page slice of the id list drops its last id (sales dropped)', MUTANTS.sliceDropsAnId, { against: oldOff, shapes: BROAD })
+  await caught('the resolver is spent on a filter with no typed search (status only reads more rows)', MUTANTS.resolvesEveryFilter, { against: oldOff, shapes: ['stats status only', 'stats no search + cashier'], rowsOver: newOff })
   await caught('the resolver keeps one id', MUTANTS.keepsOneId, { against: oldOff })
   await caught('a search that matches nothing reads as no filter', MUTANTS.emptyMatchIsNoFilter, { against: oldOff, shapes: ['stats no match | all-time', 'stats no match | 30d', 'stats customer name | all-time'] })
   await caught('the resolver ignores the scope it is given (no filter at all)', MUTANTS.resolverIgnoresTheScope, { against: oldOff, shapes: ['stats no match | all-time', 'stats customer name | all-time', 'stats customer + cashier none'] })
