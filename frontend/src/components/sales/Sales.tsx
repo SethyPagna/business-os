@@ -93,6 +93,7 @@ import { mutationVersionAtLeast, reconcileDirectMutationReceipt, readCommittedMu
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { isAdminControlUser, saleAmendmentWindowAllows } from '../../utils/permissions.ts'
 import { advanceSaleSecurityScope, saleSecurityFingerprint } from './saleSettlementConfig.ts'
+import { activeSalesFocusId, parseSalesFocus, type SalesFocus } from './salesFocus.ts'
 import { recoverSaleStatus, type SaleStatusRecoveryResult } from '../../utils/saleStatusRecovery.ts'
 import { PAID_SALE_STATUSES, salePaymentStatus, statusChangeNeedsPayment } from '../../utils/saleStatusResolution.ts'
 import { saleStatusDisplay, saleStatusWords } from '../../utils/saleStatusDisplay.ts'
@@ -448,6 +449,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // filter. Receipts initially show all time; quick ranges are chosen inside
   // the opened date/time picker rather than silently pre-filtering to Today.
   const [stripRange, setStripRange] = useState<DateTimeRange>(() => todayDateTimeRange())
+  // The exact sale a link named (salesFocus.ts): while the search box still holds its receipt and no dates are set, the list and totals read it by id.
+  const [salesFocus, setSalesFocus] = useState<SalesFocus | null>(null)
   // An EntityLink elsewhere (the shift report's "changed after close" sales)
   // queues a receipt number: search for it across all time, since the sale
   // may be from any day. Consumed once, the same handoff Contacts uses.
@@ -458,10 +461,12 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       try { raw = window.sessionStorage.getItem('bos:sales:focus') } catch { return }
       if (!raw) return
       try {
-        const search = String((JSON.parse(raw) as { search?: unknown })?.search || '').trim()
+        const payload = JSON.parse(raw) as { search?: unknown; saleId?: unknown }
+        const search = String(payload?.search || '').trim()
         if (search) {
           setSearch(search)
           setStripRange({ ...EMPTY_DATE_TIME_RANGE })
+          setSalesFocus(parseSalesFocus(payload))
         }
       } catch {
         // A malformed handoff must not block the Sales page.
@@ -753,12 +758,14 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     return out
   }, [stripRange.endDate, stripRange.endTime, stripRange.startDate, stripRange.startTime])
 
+  // A link to one sale reads it by id (an indexed lookup) instead of running its receipt number as an all-time text search.
+  const focusSaleId = activeSalesFocusId(salesFocus, search, effectiveSalesSearch, salesDateRange)
   const salesStatsParams = useMemo(() => ({
     ...(isAdmin && userFilter !== 'all' ? { userId: userFilter } : {}),
     ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
-    ...(effectiveSalesSearch ? { search: effectiveSalesSearch } : {}),
+    ...(focusSaleId ? { id: focusSaleId } : effectiveSalesSearch ? { search: effectiveSalesSearch } : {}),
     ...salesDateRange,
-  }), [isAdmin, userFilter, statusFilter, effectiveSalesSearch, salesDateRange])
+  }), [isAdmin, userFilter, statusFilter, effectiveSalesSearch, focusSaleId, salesDateRange])
   const salesReadAuthority = captureActorReadScope('sales').authority
   const salesStatsScope = JSON.stringify([statusSecurityScope, salesReadAuthority, salesStatsParams])
   const salesStatsScopeRef = useRef(salesStatsScope)

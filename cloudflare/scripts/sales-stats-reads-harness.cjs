@@ -24,16 +24,23 @@ async function applyFixture(world) {
 const day = (ctx, back) => new Date(Date.parse(ctx.anchorDate + 'T00:00:00Z') - back * 86400e3).toISOString().slice(0, 10)
 
 // One world per (patches, switches); every url answered with the Cache API missing.
-async function runUrls({ urls, patches = [], switches, tier = 'free', fixture = true, analyze = false }) {
+async function runUrls({ urls, patches = [], switches, tier = 'free', fixture = true, analyze = false, regimes = false, prepare }) {
   const world = await bootWorld({ tier, patches, ...(switches ? { switches } : {}) })
   const out = {}
   try {
     if (fixture) await applyFixture(world)
+    if (prepare) await prepare(world)
     if (analyze) { await world.analyze(); await world.restart(); await world.login() }
-    const list = typeof urls === 'function' ? urls(world.ctx) : urls
+    const list = typeof urls === 'function' ? await urls(world.ctx, world) : urls
     for (const [name, url] of Object.entries(list)) {
       const r = await world.send('GET', url, undefined, { miss: true })
       out[name] = { status: r.status, text: r.text, calls: r.calls, rr: r.rr }
+      if (regimes) {
+        // which scope the report statements carried: the id list (json_each) or the subquery that re-runs the filter (matched_sale)
+        const stmts = ((await world.last()).stmts || []).map((s) => String(s.raw))
+        out[name].ids = stmts.some((s) => /\.id IN \(SELECT value FROM json_each\(\?\d+\)\)/.test(s))
+        out[name].subquery = stmts.some((s) => /IN \(SELECT matched_sale\.id FROM sales matched_sale/.test(s))
+      }
     }
   } finally { await world.dispose() }
   return out

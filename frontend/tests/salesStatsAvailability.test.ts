@@ -12,6 +12,7 @@ import { clampPageNumber } from '../src/utils/pagerState.ts'
 import { isProductSearchTooShort } from '../src/api/productSearchIndex.ts'
 import { createSalesReloadCoalescer } from '../src/components/sales/salesReloadCoalescer.ts'
 import { saleSecurityFingerprint } from '../src/components/sales/saleSettlementConfig.ts'
+import { activeSalesFocusId } from '../src/components/sales/salesFocus.ts'
 
 const read = (rel: string) => readFileSync(new URL('../src/' + rel, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const source = read('components/sales/Sales.tsx')
@@ -59,7 +60,7 @@ const pageReadEffects = statements.filter(n => ts.isExpressionStatement(n)
 assert.equal(statsReadEffects.length, 1, 'actual Stats callback dependency effect')
 assert.equal(pageReadEffects.length, 1, 'actual list callback dependency effect')
 // d1-client C3 (6.0.1623): the search the stats and list reads use is the last search long enough to query (effectiveSalesSearch), held in a ref.
-const projections = ['lastSalesSearchRef', 'effectiveSalesSearch', 'salesStatsParams', 'salesReadAuthority', 'salesStatsScope', 'salesStatsScopeRef', 'salesPageParams', 'salesPageScope',
+const projections = ['lastSalesSearchRef', 'effectiveSalesSearch', 'focusSaleId', 'salesStatsParams', 'salesReadAuthority', 'salesStatsScope', 'salesStatsScopeRef', 'salesPageParams', 'salesPageScope',
   'salesPageRowsRef', 'salesStatsRead', 'currentSalesStatsRead', 'salesStats', 'salesStatsError', 'salesReadError',
   'loadSales', 'loadSalesStats', 'retrySalesReads', 'totalSalesCount', 'currentSalesPageItems', 'revenue', 'revenueCount', 'creditUsd', 'paidOnlyUsd']
 const code = `${pending.getText(ast)}\n${projections.map(declaration).join('\n')}\n${statsScopeAssignment.getText(ast)}\n${clampEffect.getText(ast)}\n${syncEffect.getText(ast)}\n`
@@ -100,7 +101,7 @@ function harness(statsApi?: (params: any) => Promise<unknown>, options: { autoRe
   actor()
   const h = hooks(), rows: any[] = [], stats: any[] = []
   const props: any = { isActive: true, authReady: true, canViewSales: true, isAdmin: false, userFilter: 'all', statusFilter: 'all', debouncedSearch: '',
-    salesDateRange: { startDate: '2026-09-01' }, statusSecurityScope: 'security-A', salesPage: 4, salesPageSize: 20, salesSortSpec: { field: 'date', direction: 'desc' }, syncChannel: null, ...options.props }
+    salesDateRange: { startDate: '2026-09-01' }, salesFocus: null, search: '', statusSecurityScope: 'security-A', salesPage: 4, salesPageSize: 20, salesSortSpec: { field: 'date', direction: 'desc' }, syncChannel: null, ...options.props }
   const model: any = { sales: [], loadError: null, loading: false, stripCalls: 0 }, pageChanges: number[] = []
   const ref = (current: any) => ({ current })
   const refs: any = { statusSecurityRef: ref(props.statusSecurityScope), loadSecurityRef: ref(props.statusSecurityScope), latestLoadRef: ref(null), loadAbortRef: ref(null),
@@ -118,7 +119,7 @@ function harness(statsApi?: (params: any) => Promise<unknown>, options: { autoRe
     },
   ))
   const fireReload = () => { for (const [id, callback] of [...reloadTimers]) { reloadTimers.delete(id); callback() } }
-  const helpers = { isProductSearchTooShort, beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, requireSalesStatsResult,
+  const helpers = { activeSalesFocusId, isProductSearchTooShort, beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, requireSalesStatsResult,
     captureActorReadScope: scopes.captureActorReadScope, isActorReadScopeCurrent: scopes.isActorReadScopeCurrent, assertActorReadScope: scopes.assertActorReadScope,
     clampPage: clampPageNumber, clearLoadWatchdog() {}, withLoaderTimeout: (fn: () => unknown) => fn(), SALES_LIST_REQUEST_TIMEOUT_MS: 8000,
     normalizeSaleRows: (value: unknown) => Array.isArray(value) ? value : [], getErrorMessage: (e: any) => e.message,
@@ -177,6 +178,18 @@ try {
     assert.equal(h.rows.length, 1); assert.equal(h.stats.length, 1)
     h.rows[0].resolve(page()); h.stats[0].resolve(valid()); await h.flush()
     assert.equal(h.view.sales.length, 20); assert.equal(h.view.revenue, 120)
+  })
+  await test('a link to one sale reads totals and rows by id, not by its receipt as an all-time search (until the user types or picks dates)', async () => {
+    const focus = { saleId: 42, receipt: 'R0000123' }
+    const h = harness(undefined, { props: { salesFocus: focus, search: 'R0000123', debouncedSearch: 'R0000123', salesDateRange: {} } }); h.commit()
+    assert.deepEqual(h.view.salesStatsParams, { id: 42 }, 'stats read the exact sale; the receipt is not sent as a search')
+    // right after the link the debounced value has not caught up: still by id, never one all-time search for the old text
+    h.props.debouncedSearch = ''; h.render(); assert.deepEqual(h.view.salesStatsParams, { id: 42 })
+    // the user types something else: read as typed
+    h.props.search = 'R000012'; h.props.debouncedSearch = 'R000012'; h.render(); assert.deepEqual(h.view.salesStatsParams, { search: 'R000012' })
+    // picking dates ends the focus even with the receipt still in the box
+    h.props.search = 'R0000123'; h.props.debouncedSearch = 'R0000123'; h.props.salesDateRange = { startDate: '2026-11-01', endDate: '2026-11-02' }; h.render()
+    assert.deepEqual(h.view.salesStatsParams, { search: 'R0000123', startDate: '2026-11-01', endDate: '2026-11-02' })
   })
   await test('render gate hides old ready/error immediately on filter or authority change before effects', async () => {
     for (const ready of [true, false]) {

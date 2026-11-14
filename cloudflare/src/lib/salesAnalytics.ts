@@ -943,6 +943,8 @@ type ReportScopeProvenance = {
 const REPORT_SCOPE_PROVENANCE = new WeakMap<SalesReportScalarScope, ReportScopeProvenance>()
 const REPORT_ATOMIC_PURE_FUNCTIONS = new Set([
   'COALESCE', 'NULLIF', 'TRIM', 'LOWER', 'UPPER', 'REPLACE', 'INSTR', 'CAST', 'CHAR', 'LENGTH',
+  // The id-list scope (resolveReportScopeIds): a table-valued function over one bound JSON text, no table access.
+  'JSON_EACH',
 ])
 const REPORT_ATOMIC_GROUP_KEYWORDS = new Set([
   'AND', 'OR', 'NOT', 'IN', 'EXISTS', 'WHEN', 'THEN', 'ELSE', 'WHERE', 'ON', 'SELECT',
@@ -1078,6 +1080,15 @@ function reportDashboardDateFiltersEligible(f: SalesFilters): boolean {
 // 681 -> 48 ms on the seeded lab DB, identical rows; I4-2).
 export function salesListFilterReportScope(where: string[], params: Record<string, unknown>): SalesReportScalarScope | undefined {
   if (!where.some((clause) => clause !== '1=1')) return undefined
+  const { scopedWhere, scopedParams } = salesListScopedWhere(where, params)
+  const sqlForAlias = (alias: string) => `${alias}.id IN (SELECT matched_sale.id FROM sales matched_sale LEFT JOIN customers c ON c.id=matched_sale.customer_id WHERE ${scopedWhere})`
+  const scope: SalesReportScalarScope = (alias) => ({ sql: sqlForAlias(alias), params: scopedParams })
+  rememberReportScopeProvenance(scope, sqlForAlias('s'), scopedParams)
+  return scope
+}
+
+/** The list's where clauses re-aliased for the matched_sale subquery, with their @params renamed into the reportScope_ namespace (shared by the scope builders below). */
+function salesListScopedWhere(where: string[], params: Record<string, unknown>): { scopedWhere: string; scopedParams: Record<string, SalesReportScalarScopeValue> } {
   const scopedParams: Record<string, SalesReportScalarScopeValue> = {}
   const scopedWhere = where.join(' AND ').replace(/\bs\./g, 'matched_sale.').replace(/@([A-Za-z][A-Za-z0-9_]*)/g, (_match, key: string) => {
     const value = params[key]
@@ -1085,10 +1096,70 @@ export function salesListFilterReportScope(where: string[], params: Record<strin
     scopedParams[`reportScope_${key}`] = value
     return `@reportScope_${key}`
   })
-  const sqlForAlias = (alias: string) => `${alias}.id IN (SELECT matched_sale.id FROM sales matched_sale LEFT JOIN customers c ON c.id=matched_sale.customer_id WHERE ${scopedWhere})`
+  return { scopedWhere, scopedParams }
+}
+
+/**
+ * The most sale ids, and the most bytes of JSON text, a scope carries inline. D1 refuses a bound value over 2,000,000 bytes (lib/saleItemPricing.ts keeps its own well
+ * under that) and every statement of every page, group and pass repeats the text, so a longer list keeps the subquery scope instead: exact, just not cheaper.
+ * 50,000 ids is about 400 KB of text at 7-digit ids, three times the whole sales table of the shop today; 800,000 bytes holds it with room under the cap.
+ */
+export const REPORT_SCOPE_IDS_MAX = 50_000
+export const REPORT_SCOPE_IDS_MAX_BYTES = 800_000
+
+/** A scope that is exactly this id set: `alias.id IN (SELECT value FROM json_each(@reportScope_ids))`, evaluated per statement without re-running a text match. */
+function salesIdsScope(ids: readonly number[], json = JSON.stringify(ids)): SalesReportScalarScope {
+  const scopedParams: Record<string, SalesReportScalarScopeValue> = { reportScope_ids: json }
+  const sqlForAlias = (alias: string) => `${alias}.id IN (SELECT value FROM json_each(@reportScope_ids))`
   const scope: SalesReportScalarScope = (alias) => ({ sql: sqlForAlias(alias), params: scopedParams })
   rememberReportScopeProvenance(scope, sqlForAlias('s'), scopedParams)
   return scope
+}
+
+/**
+ * A list scope with the sales it matches resolved ONCE. The subquery scope (`s.id IN (SELECT matched_sale.id ... WHERE <filter>)`) re-runs the whole filter -- for a typed
+ * search a text match over every sale and every line -- in each page of each group of each of the two passes (about 19 statements). Here ONE bounded statement, the scope's own
+ * subquery with its own where text and params, reads the matching ids (sorted), and the passes test `id IN json_each(ids)` instead. The cohort is the same set (a sale is still
+ * counted only if the reader's own window and status predicates also pass it).
+ * A match of more than REPORT_SCOPE_IDS_MAX sales, or more JSON text than REPORT_SCOPE_IDS_MAX_BYTES, is never cut: the scope is returned unchanged and keeps the subquery.
+ * Any scope that is not a list scope (none, or already an id list) is returned as it came. `ids` is the resolved set as JSON text (null when nothing was resolved):
+ * readSalesReportTotalsPinned resolves it again after the read and refuses a cohort that moved while the money was being read.
+ */
+const LIST_SCOPE_SUBQUERY = /^s\.id IN \((SELECT matched_sale\.id FROM sales matched_sale LEFT JOIN customers c ON c\.id=matched_sale\.customer_id WHERE [\s\S]+)\)$/
+async function resolveReportScopeIds(env: Env, scope: SalesReportScalarScope | undefined): Promise<{ scope: SalesReportScalarScope | undefined; ids: string | null }> {
+  const unresolved = { scope, ids: null }
+  if (!scope) return unresolved
+  const captured = captureSalesReportScalarScope(scope)
+  const subquery = captured ? LIST_SCOPE_SUBQUERY.exec(captured.sql) : null
+  if (!captured || !subquery) return unresolved
+  const rows = await getDb(env).prepare(`${subquery[1]} LIMIT @reportScopeLimit`)
+    .all<{ id: unknown }>({ ...captured.params, reportScopeLimit: REPORT_SCOPE_IDS_MAX + 1 })
+  if (rows.length > REPORT_SCOPE_IDS_MAX) return unresolved
+  const ids = rows.map((row) => Number(row.id))
+  if (ids.some((id) => !Number.isSafeInteger(id))) return unresolved
+  ids.sort((a, b) => a - b)
+  const json = JSON.stringify(ids)
+  if (json.length > REPORT_SCOPE_IDS_MAX_BYTES) return unresolved
+  return { scope: salesIdsScope(ids, json), ids: json }
+}
+
+/**
+ * The header totals through a resolved id list, kept coherent. The ids are read at one moment and the money at a later one, so a sale edited in between (a rename that
+ * moves it in or out of the search) could be counted by a cohort that no longer exists. The ids are therefore resolved again after the read: the same set means the cohort
+ * held for the whole read; a different set means it moved, and the read is repeated once, then refused as snapshot_changed (the refusal the two-pass reader already
+ * gives when its own passes disagree). A scope that resolved to nothing (none, or kept as a subquery) evaluates its filter inside every statement, as before, and needs no check.
+ */
+async function readSalesReportTotalsPinned(
+  env: Env,
+  f: SalesFilters & { contactId?: number | string | null },
+  scalarScope: SalesReportScalarScope | undefined,
+): Promise<SalesReportTotalsResult> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const pinned = await resolveReportScopeIds(env, scalarScope)
+    const report = await readSalesReportTotalsRouted(env, f, false, pinned.scope, { headerOnly: true })
+    if (pinned.ids === null || (await resolveReportScopeIds(env, scalarScope)).ids === pinned.ids) return report
+  }
+  throw new ReportMoneyPrecisionError('snapshot_changed')
 }
 
 function captureSalesReportScalarScope(scope?: SalesReportScalarScope): CapturedSalesReportScalarScope | null {
@@ -2078,7 +2149,7 @@ export async function readSalesHeaderTotals(
   f: SalesFilters & { contactId?: number | string | null },
   scalarScope?: SalesReportScalarScope,
 ): Promise<SalesHeaderTotals> {
-  const report = await readSalesReportTotalsRouted(env, f, false, scalarScope, { headerOnly: true })
+  const report = await readSalesReportTotalsPinned(env, f, scalarScope)
   return {
     revenue_usd: report.totals.revenue_usd,
     pending_revenue_usd: report.totals.pending_revenue_usd,

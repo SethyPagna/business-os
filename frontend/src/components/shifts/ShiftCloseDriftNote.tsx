@@ -72,7 +72,7 @@ export default function ShiftCloseDriftNote({ shift, className = '' }: Props) {
         <ul className="mt-1.5 min-w-0 space-y-0.5 border-t border-amber-100 pt-1.5 dark:border-amber-900/50">
           {view.sales.map((sale) => (
             <li key={sale.saleId} className="flex min-w-0 items-baseline gap-2">
-              <EntityLink page="sales" anchor="hub:sales:sales" search={sale.receipt} navigate={navigateTo}
+              <EntityLink page="sales" anchor="hub:sales:sales" search={sale.receipt} focus={{ saleId: sale.saleId }} navigate={navigateTo}
                 className="shrink-0 font-mono text-amber-900 underline-offset-2 hover:underline dark:text-amber-200" title={tr('open_sale', 'Open sale')}>
                 {sale.receipt}
               </EntityLink>

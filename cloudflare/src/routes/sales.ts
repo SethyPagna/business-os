@@ -5981,6 +5981,25 @@ function concatBalanced(parts: readonly string[]): string {
   return `(${concatBalanced(parts.slice(0, middle))} || ' ' || ${concatBalanced(parts.slice(middle))})`
 }
 
+/** `id=` of GET /api/sales and GET /api/sales/stats: comma-separated, each as a Number, a value that is not a finite number is skipped. */
+function parseSaleIdFilter(raw: unknown): number[] {
+  return String(raw ?? '').split(',').map((v) => v.trim()).filter(Boolean).map((v) => Number(v)).filter((v) => Number.isFinite(v))
+}
+/** The one id filter both endpoints apply (the list and its totals must describe the same sales). */
+function pushSaleIdFilter(where: string[], params: Record<string, unknown>, ids: number[]): void {
+  if (ids.length === 1) {
+    where.push('s.id = @saleId')
+    params.saleId = ids[0]
+  } else if (ids.length > 1) {
+    const keys = ids.map((id, index) => {
+      const key = `saleId${index}`
+      params[key] = id
+      return `@${key}`
+    })
+    where.push(`s.id IN (${keys.join(', ')})`)
+  }
+}
+
 function buildSalesSearchWhere(query: Record<string, string>, params: Record<string, unknown>, access: PhoneSearchAccess): string | undefined {
   const raw = query.search || query.q || ''
   const groups = tokenizeSearchTermGroups(raw)
@@ -6104,20 +6123,7 @@ app.get('/', async (c) => {
   // findable through the free-text `search` clause, which never matched
   // s.id at all. Comma-separated for parity with the other exact-match
   // filters below (userId, status).
-  if (query.id) {
-    const ids = String(query.id).split(',').map((v) => v.trim()).filter(Boolean).map((v) => Number(v)).filter((v) => Number.isFinite(v))
-    if (ids.length === 1) {
-      where.push('s.id = @saleId')
-      params.saleId = ids[0]
-    } else if (ids.length > 1) {
-      const keys = ids.map((id, index) => {
-        const key = `saleId${index}`
-        params[key] = id
-        return `@${key}`
-      })
-      where.push(`s.id IN (${keys.join(', ')})`)
-    }
-  }
+  if (query.id) pushSaleIdFilter(where, params, parseSaleIdFilter(query.id))
   if (query.userId) {
     // The shared administrator rule (lib/permissions.ts): admin role code or
     // an effective all grant. This used to be an inline copy keyed on the
@@ -6410,6 +6416,9 @@ app.get('/stats', async (c) => {
   // Measured exception: with a start date and no end date the unscoped kernel walk reads MORE rows (64,689 vs 37,463 on the lab seed: no upper
   // bound for the date index), so that one shape keeps the scope; everything else with only the window drops it.
   const openEndedStart = Boolean(query.startDate) && !query.endDate
+  // The exact-sale filter the list has: a link to one sale reads its totals by id, never as an all-time text search. The header reader resolves the list scope once.
+  const saleIds = parseSaleIdFilter(query.id)
+  pushSaleIdFilter(where, params, saleIds)
   // A cashier saved under a number shows masked, so an account without the grant filters on it as empty (restrictedColumnSql).
   if (query.cashier) { where.push(`${phoneSearchAccessOf(user).fullPhone ? 's.cashier_name' : restrictedColumnSql('s.cashier_name')} LIKE @cashier`); params.cashier = `%${query.cashier}%` }
   if (query.userId) {

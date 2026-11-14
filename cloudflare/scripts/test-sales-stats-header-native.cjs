@@ -8,6 +8,8 @@
 // and legacy pass), a scope dropped for a multi-status filter. Also the field list of the header type and that the public readers refuse it.
 // Line independence and the added-later line live in test-sales-stats-header-lines-native.cjs.
 'use strict'
+// The old route re-runs the search text match in every statement (2M rows for the all-time search): a parity test, not a timing gate.
+process.env.READ_BUDGET_DEADLINE_MS ||= '240000'
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -118,7 +120,8 @@ const bodies = (res) => Object.fromEntries(Object.entries(res).map(([k, v]) => [
     await step(`rows and calls (report_atomic ${mode}): never above the old route; below it for the dated and all-time windows`, () => {
       for (const name of SHAPE_NAMES) {
         assert.ok(n[name].rr <= o[name].rr, `${name}: rows ${n[name].rr} > old ${o[name].rr}`)
-        assert.ok(n[name].calls <= o[name].calls, `${name}: calls ${n[name].calls} > old ${o[name].calls}`)
+        // +2: a filtered request now spends two bounded statements resolving the matching sales (before and after the read, readSalesReportTotalsPinned) to read far fewer rows
+        assert.ok(n[name].calls <= o[name].calls + 2, `${name}: calls ${n[name].calls} > old ${o[name].calls} + 2`)
       }
       for (const name of ['all-time', 'today', 'range-30d', 'dates+time', 'multi-status', 'status-cancelled']) assert.ok(n[name].rr < o[name].rr, `${name}: expected fewer rows (${n[name].rr} vs ${o[name].rr})`)
     })
