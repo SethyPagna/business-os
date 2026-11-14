@@ -799,17 +799,28 @@ async function readLineage(db: D1Compat, shift: ShiftDbRow): Promise<ShiftDbRow[
 async function readShiftByCode(db: D1Compat, shiftCodeValue: string) {
   return db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE shift_code = @shiftCode LIMIT 1`).get<ShiftDbRow>({ shiftCode: shiftCodeValue })
 }
+/**
+ * The segment before / after `openedAt` in the same scope. Two parts, both so the read does not grow with the history of stored shifts:
+ *  1. the id is picked by a narrow inner SELECT whose WHERE is written for migration 0306's indexes (scope + branch + opened_at for a shop-wide shift,
+ *     scope + user + branch + opened_at for a per-account one): the branch and user tests are chosen here instead of the (@x IS NULL AND ...) OR forms, which no index
+ *     can seek, and the walk stops at the first row (LIMIT 1);
+ *  2. the wide SHIFT_COLUMNS row (its lineage / amendment / branch subselects) is then read for that ONE id. Selected directly with ORDER BY, SQLite computes those
+ *     columns for every candidate before sorting (measured: 8 rows per stored shift).
+ * The rows, their order (opened_at, then id) and the tie-break are exactly the old statement's. Pinned by test-migration-0306-shift-adjacent-indexes-pure.cjs.
+ */
 async function readAdjacentShift(db: D1Compat, shift: ShiftRow, openedAt: string, direction: 'previous' | 'next') {
   const comparison = direction === 'previous' ? '<' : '>='
   const ordering = direction === 'previous' ? 'DESC' : 'ASC'
+  const branchClause = shift.branch_id == null ? 'branch_id IS NULL' : 'branch_id = @branchId'
+  const userClause = shift.scope_mode === 'shop_wide' ? '' : 'AND user_id = @userId'
   return db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions
-    WHERE id != @id AND scope_mode=@scopeMode
-      AND ((@branchId IS NULL AND branch_id IS NULL) OR branch_id=@branchId)
-      AND (@scopeMode='shop_wide' OR user_id=@userId)
-      AND cancelled_at IS NULL
-      AND opened_at ${comparison} @openedAt
-    ORDER BY opened_at ${ordering}, id ${ordering} LIMIT 1`).get<ShiftDbRow>({
-      id: shift.id, scopeMode: shift.scope_mode, branchId: shift.branch_id, userId: shift.user_id, openedAt,
+    WHERE id = (SELECT id FROM shift_sessions
+      WHERE scope_mode = @scopeMode ${userClause} AND ${branchClause}
+        AND id != @id AND cancelled_at IS NULL
+        AND opened_at ${comparison} @openedAt
+      ORDER BY opened_at ${ordering}, id ${ordering} LIMIT 1)`).get<ShiftDbRow>({
+      id: shift.id, scopeMode: shift.scope_mode, ...(shift.branch_id == null ? {} : { branchId: shift.branch_id }),
+      ...(shift.scope_mode === 'shop_wide' ? {} : { userId: shift.user_id }), openedAt,
     })
 }
 async function intervalError(db: D1Compat, shift: ShiftRow, openedAt: string, closedAt: string | null): Promise<string | null> {
