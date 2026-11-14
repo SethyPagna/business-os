@@ -216,6 +216,42 @@ only. With no saved token file, `with-wrangler-auth.cjs` passes the
 environment token through. To undo, use `.github/workflows/deploy-rollback.yml`
 (confirm `ROLLBACK`).
 
+#### Fast path: deploy on a gate run that already passed
+
+The full test sweep is the slow part, so it is run once, in parallel, by
+`.github/workflows/gate.yml`, and Deploy can reuse that result instead of
+repeating it.
+
+1. Run **Gate** with `ref` set to the **full 40-character commit id** you will
+   release (not a branch name). It plans that one commit, runs the typechecks and
+   build in a "Static checks" job, splits every test file over 8 parallel Windows
+   shards by a stable hash (each file in its own process, retried on timeout as
+   before), runs the browser suite, and finishes with a "Verdict" job. The verdict
+   job fails unless every shard reported green at that commit and the shards'
+   union is the full test file list; it then writes the `gate-verdict` artifact.
+   The run title is `Gate <ref>`. The merged log artifact is `gate-records`
+   (one folder per job: `Deploys/<date-sha>/release-*.log` and `state.json`).
+2. Run **Deploy** with the same full commit id as `ref` and the Gate run's number
+   (the digits at the end of its URL) as `gate_run_id`. Deploy then checks, through
+   the GitHub API, that the run is `gate.yml` of this repository, was started
+   manually from this repository, finished with every job `success` (the browser
+   suite included, even when it was report-only), is under 7 days old, tested
+   exactly the commit Deploy checked out, ran the same test file set that commit
+   has, and ran with a compatible release kit (same kit commit, or a gate workflow
+   and `ops/scripts/deploy-kit/` that are byte-identical). Any failed check stops
+   the deploy with the reason; nothing falls back to something weaker. If every
+   check passes, Deploy skips only the repeat sweep: it still builds the app it
+   publishes (without a Cloudflare secret), then runs the snapshot, migrations,
+   publish and live checks unchanged, and keeps the gate evidence with the
+   encrypted release records.
+3. Leave `gate_run_id` empty and Deploy runs the full sweep itself, exactly as it
+   always did.
+
+The release kit is the `kit/` checkout of the ref the workflow is run from
+("Use workflow from"), so changing `ops/scripts/deploy-kit/` or `gate.yml`
+changes every later deploy from that ref. A gate run made from a different kit
+commit is accepted only when both are byte-identical, as above.
+
 ## Free vs paid deploy
 
 This repo ships **two** wrangler configs for the **same** Worker:
