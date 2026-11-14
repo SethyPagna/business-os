@@ -6,10 +6,10 @@ import { getPlanLimits, resolvePlanTier } from './planTier'
 import { readSwitchState } from './readSwitches'
 import { getSalesDailyKernel, type SalesDailyKernel } from './salesDailyKernel'
 import {
-  SALES_DAILY_FLAGS_SQL, SALES_DAILY_KERNEL_VERSION, SALES_DAILY_SWITCH, claimStatement, commitStatement, dayStatesStatement, encodeSalesDailyPayload,
+  SALES_DAILY_FLAGS_SQL, SALES_DAILY_KERNEL_VERSION, SALES_DAILY_SWITCH, SalesDailyStepBudget, claimStatement, commitStatement, dayStatesStatement, encodeSalesDailyPayload,
   pendingDaysStatement, quarantineStatements, reconcileCursorStatement, reconcileOlderStatement, reconcileRecentStatement, recoverStatements,
   salesDailyDifferingPaths, salesDailyFlagsFromRows, salesDailyNeedsRecover,
-  type SalesDailyComputed, type SalesDailyFlags, type SalesDailyStatement, type StoredDayRow,
+  type SalesDailyComputed, type SalesDailyFlags, type SalesDailyStatement, type SalesDailyStop, type StoredDayRow,
 } from './salesDailyTotals'
 
 // The two rotating-cron steps of the stored daily sales totals (steps `sales-daily-recompute` and `sales-daily-reconcile`, src/index.ts). Both sit
@@ -17,17 +17,23 @@ import {
 // never runs on Free, so there is nothing to compare there). Every number comes from getPlanLimits(env). The kernel call is the seam in
 // lib/salesDailyKernel.ts.
 //
-// RECOMPUTE: re-cover when the epoch or kernel version moved, then claim up to salesDailyRecomputeDaysPerRun dirty PAST days (today is never stored),
-// read them through the kernel in one bounded read, commit each. A refused commit (a write or a newer claim landed in between) leaves the day for the
-// next visit. RECONCILE: at most once per salesDailyReconcileMinIntervalSeconds (the step's own interval gate), re-derive the last
-// salesDailyReconcileRecentDays days and a rotating slice of older days from the raw records and compare with what is stored. A day whose row
-// moved between the looks is not judged. A MISMATCH never heals silently: the day goes dirty, every stored read stops (system_flags
-// sales_daily_quarantine), the run is recorded (analytics kind sales_daily_reconcile) and the owner gets ONE Telegram alert.
+// THE UNIT OF WORK IS ONE BUSINESS DAY, and every visit has a budget (SalesDailyStepBudget: estimated CPU, wall time, D1 queries, all from getPlanLimits)
+// that it checks BEFORE starting another day. A Free Worker has 10 ms of CPU and 50 queries per invocation and no CPU clock, so a visit that read several
+// days at once could be killed for CPU after it found a problem and before it acted on it. Instead:
+// RECOMPUTE: re-cover when the epoch or kernel version moved, then take the newest dirty PAST days one at a time (claim, kernel read, commit; today is never
+// stored). The dirty set is its own cursor: a committed day leaves it, a refused one (a write or a newer claim landed in between) stays for the next visit.
+// RECONCILE: at most once per salesDailyReconcileMinIntervalSeconds, a CYCLE re-derives the last salesDailyReconcileRecentDays days and a rotating slice of
+// older days from the raw records and compares with what is stored, one day at a time, with a persisted cursor (system_flags sales_daily_reconcile_cursor)
+// written after every judged day; a cycle that stops at its budget answers { incomplete: true } and the next visit resumes it. A day whose row moved between
+// the looks is not judged. A MISMATCH never heals silently: it is acted on in the visit that finds it, before any further day: the day goes dirty, every
+// stored read stops (system_flags sales_daily_quarantine), the run is recorded (analytics kind sales_daily_reconcile) and the owner gets a Telegram alert.
 export type SalesDailyCronDeps = {
   kernel?: SalesDailyKernel | null
   /** 'on' | 'shadow' | 'off'; the default reads the read switch. */
   mode?: 'on' | 'shadow' | 'off'
   nowMs?: number
+  /** The wall clock the visit budget reads (default Date.now); a test moves it to prove the wall budget. */
+  clock?: () => number
   /** Sends the owner alert; the default is the Telegram send path. Tests always inject one: a real chat is never reached from a test. */
   alert?: (env: Env, days: readonly string[]) => Promise<boolean>
 }
@@ -41,6 +47,8 @@ export type SalesDailyRecomputeResult = {
   committed?: number
   refused?: number
   more?: boolean
+  /** Which budget ended the visit before the pending days did. */
+  stopped?: SalesDailyStop
 }
 export type SalesDailyReconcileResult = {
   skipped?: Skip | 'recovering' | 'quarantined'
@@ -49,6 +57,9 @@ export type SalesDailyReconcileResult = {
   mismatched?: string[]
   unjudged?: number
   alerted?: boolean
+  /** True while a cycle is unfinished: the rotation reads it and does not arm the step's minimum interval, so the next visit resumes. */
+  incomplete?: true
+  stopped?: SalesDailyStop
 }
 
 async function cronMode(env: Env, deps: SalesDailyCronDeps): Promise<'on' | 'shadow' | 'off'> {
@@ -90,23 +101,36 @@ export async function runSalesDailyRecompute(env: Env, deps: SalesDailyCronDeps 
     await db.batch(asBatch(recoverStatements(flags.epoch as string, SALES_DAILY_KERNEL_VERSION, nowIso)))
     return { recovered: true, more: true }
   }
+  const budget = new SalesDailyStepBudget(limits, deps.clock)
+  budget.spendQueries(2) // the flags read and the pending list
   const limit = limits.salesDailyRecomputeDaysPerRun
   const pending = pendingDaysStatement(today, limit)
-  const days = (await db.prepare(pending.sql).all<{ business_date: string }>(pending.params)).map((row) => row.business_date)
+  const days = await db.prepare(pending.sql).all<{ business_date: string; source_rows: number }>(pending.params)
   if (!days.length) return { pending: 0, claimed: 0, committed: 0, refused: 0, more: false }
-  const claim = claimStatement(days)
-  const claimed = await db.prepare(claim.sql).all<{ business_date: string; claim_gen: number }>(claim.params)
-  if (!claimed.length) return { pending: days.length, claimed: 0, committed: 0, refused: 0, more: days.length === limit }
-  const computed = await kernel.computeDays(env, claimed.map((row) => row.business_date))
-  const commits: SalesDailyStatement[] = []
-  for (const row of claimed) {
+  let claimed = 0
+  let committed = 0
+  let stopped: SalesDailyStop | undefined
+  for (const row of days) {
+    if (claimed > 0) {
+      const verdict = budget.allowsAnotherDay(Number(row.source_rows) || 0, 2)
+      if (!verdict.ok) { stopped = verdict.reason; break }
+    }
+    const claim = claimStatement([row.business_date])
+    const taken = await db.prepare(claim.sql).all<{ business_date: string; claim_gen: number }>(claim.params)
+    budget.spendQueries(1)
+    if (!taken.length) continue
+    claimed += 1
+    const computed = await kernel.computeDays(env, [row.business_date])
     const result: SalesDailyComputed | undefined = computed.get(row.business_date)
+    budget.spendQueries(result?.queries ?? limits.salesDailyKernelQueriesPerDay)
+    budget.spendDay(result?.sourceRows ?? 0)
     if (!result) continue
-    commits.push(commitStatement({ day: row.business_date, claimGen: row.claim_gen, computed: result, epoch: flags.epoch as string, kernel: SALES_DAILY_KERNEL_VERSION, nowIso }, limits.salesDailyMaxPayloadBytes))
+    const commit = commitStatement({ day: row.business_date, claimGen: taken[0].claim_gen, computed: result, epoch: flags.epoch as string, kernel: SALES_DAILY_KERNEL_VERSION, nowIso }, limits.salesDailyMaxPayloadBytes)
+    const results = await db.batch(asBatch([commit]))
+    budget.spendQueries(1)
+    if (changesOf(results[0]) > 0) committed += 1
   }
-  const results = commits.length ? await db.batch(asBatch(commits)) : []
-  const committed = results.filter((result) => changesOf(result) > 0).length
-  return { pending: days.length, claimed: claimed.length, committed, refused: claimed.length - committed, more: days.length === limit }
+  return { pending: days.length, claimed, committed, refused: claimed - committed, more: stopped !== undefined || days.length === limit, ...(stopped ? { stopped } : {}) }
 }
 
 async function sendAlert(env: Env, days: readonly string[], deps: SalesDailyCronDeps): Promise<boolean> {
@@ -131,46 +155,63 @@ export async function runSalesDailyReconcile(env: Env, deps: SalesDailyCronDeps 
   if (flags.quarantined) return { skipped: 'quarantined' }
   const db = getDb(env)
   const limits = getPlanLimits(env)
-  const recentFrom = dateBefore(today, limits.salesDailyReconcileRecentDays)
-  const recent = reconcileRecentStatement(recentFrom, today)
-  const older = reconcileOlderStatement(flags.reconcileCursor, recentFrom, limits.salesDailyReconcileOlderDaysPerRun)
+  const budget = new SalesDailyStepBudget(limits, deps.clock)
+  budget.spendQueries(3) // the flags read and the two day lists
+  const cycle = flags.reconcile.cycle ?? { recentFrom: dateBefore(today, limits.salesDailyReconcileRecentDays), recentLast: '', olderLast: flags.reconcile.older, olderCount: 0 }
+  const olderWanted = Math.max(0, limits.salesDailyReconcileOlderDaysPerRun - cycle.olderCount)
+  const recent = reconcileRecentStatement(cycle.recentFrom, today, cycle.recentLast)
+  const older = reconcileOlderStatement(cycle.olderLast, cycle.recentFrom, Math.max(1, olderWanted))
   const [recentRows, olderRows] = await Promise.all([
-    db.prepare(recent.sql).all<{ business_date: string }>(recent.params),
-    db.prepare(older.sql).all<{ business_date: string }>(older.params),
+    db.prepare(recent.sql).all<{ business_date: string; source_rows: number }>(recent.params),
+    olderWanted > 0 ? db.prepare(older.sql).all<{ business_date: string; source_rows: number }>(older.params) : Promise.resolve([] as { business_date: string; source_rows: number }[]),
   ])
-  const days = [...new Set([...olderRows, ...recentRows].map((row) => row.business_date))]
-  // The rotation reaches the end of the history when a slice comes back short: the next night starts over from the oldest day.
-  const nextCursor = olderRows.length < limits.salesDailyReconcileOlderDaysPerRun ? '' : olderRows[olderRows.length - 1].business_date
-  const cursor = reconcileCursorStatement(nextCursor, nowIso)
-  if (!days.length) {
-    await db.prepare(cursor.sql).run(cursor.params)
-    return { compared: 0, matched: 0, mismatched: [], unjudged: 0 }
-  }
-  const beforeStatement = dayStatesStatement(days, true)
-  const before = await db.prepare(beforeStatement.sql).all<StoredDayRow>(beforeStatement.params)
-  const computed = await kernel.computeDays(env, days)
-  const afterStatement = dayStatesStatement(days, false)
-  const after = await db.prepare(afterStatement.sql).all<StoredDayRow>(afterStatement.params)
-  const afterByDay = new Map(after.map((row) => [row.business_date, row]))
+  const queue = [
+    ...recentRows.map((row) => ({ day: row.business_date, rows: Number(row.source_rows) || 0, kind: 'recent' as const })),
+    ...olderRows.map((row) => ({ day: row.business_date, rows: Number(row.source_rows) || 0, kind: 'older' as const })),
+  ]
   const mismatched: string[] = []
   const paths: string[] = []
   let matched = 0
   let unjudged = 0
-  for (const stored of before) {
-    const now = afterByDay.get(stored.business_date)
-    const result = computed.get(stored.business_date)
+  let visited = 0
+  let stopped: SalesDailyStop | undefined
+  for (const item of queue) {
+    if (visited > 0) {
+      const verdict = budget.allowsAnotherDay(item.rows, 3)
+      if (!verdict.ok) { stopped = verdict.reason; break }
+    }
+    visited += 1
+    const beforeStatement = dayStatesStatement([item.day], true)
+    const before = (await db.prepare(beforeStatement.sql).all<StoredDayRow>(beforeStatement.params))[0]
+    const computed = await kernel.computeDays(env, [item.day])
+    const afterStatement = dayStatesStatement([item.day], false)
+    const now = (await db.prepare(afterStatement.sql).all<StoredDayRow>(afterStatement.params))[0]
+    const result = computed.get(item.day)
+    budget.spendQueries(2 + (result?.queries ?? limits.salesDailyKernelQueriesPerDay))
+    budget.spendDay(result?.sourceRows ?? 0)
     // Judged only when the stored row was a finished one for this epoch and kernel, and no write or newer claim touched it while the records were read.
-    const comparable = stored.state === 0 && stored.kernel_version === SALES_DAILY_KERNEL_VERSION && stored.data_epoch === flags.epoch
-      && now && now.state === 0 && now.claim_gen === stored.claim_gen && result
-    if (!comparable) { unjudged += 1; continue }
-    const same = result.refusal || stored.refusal
-      ? (result.refusal ?? null) === (stored.refusal ?? null)
-      : encodeSalesDailyPayload(result.payload) === stored.payload
-    if (same) { matched += 1; continue }
-    mismatched.push(stored.business_date)
-    if (!result.refusal && !stored.refusal) {
-      for (const path of salesDailyDifferingPaths(JSON.parse(String(stored.payload)), result.payload, 3)) paths.push(path)
-    } else paths.push('refusal')
+    const comparable = before && before.state === 0 && before.kernel_version === SALES_DAILY_KERNEL_VERSION && before.data_epoch === flags.epoch
+      && now && now.state === 0 && now.claim_gen === before.claim_gen && result
+    if (!comparable) unjudged += 1
+    else {
+      const same = result.refusal || before.refusal
+        ? (result.refusal ?? null) === (before.refusal ?? null)
+        : encodeSalesDailyPayload(result.payload) === before.payload
+      if (same) matched += 1
+      else {
+        mismatched.push(item.day)
+        if (!result.refusal && !before.refusal) {
+          for (const path of salesDailyDifferingPaths(JSON.parse(String(before.payload)), result.payload, 3)) paths.push(path)
+        } else paths.push('refusal')
+      }
+    }
+    if (item.kind === 'recent') cycle.recentLast = item.day
+    else { cycle.olderLast = item.day; cycle.olderCount += 1 }
+    // A mismatch is acted on BEFORE any further work: this visit quarantines now (every stored read stops) and judges no other day.
+    if (mismatched.length) break
+    const progress = reconcileCursorStatement({ older: flags.reconcile.older, cycle }, nowIso)
+    await db.prepare(progress.sql).run(progress.params)
+    budget.spendQueries(1)
   }
   let alerted = false
   if (mismatched.length) {
@@ -179,12 +220,20 @@ export async function runSalesDailyReconcile(env: Env, deps: SalesDailyCronDeps 
     const newlyQuarantined = changesOf(results[results.length - 1]) > 0
     if (newlyQuarantined) alerted = await sendAlert(env, mismatched.slice(0, limits.salesDailyAlertListedDays), deps)
   }
-  await db.prepare(cursor.sql).run(cursor.params)
-  recordAnalytics(env, {
-    kind: 'sales_daily_reconcile',
-    labels: [mismatched.length ? 'mismatch' : unjudged && !matched ? 'unjudged' : 'match', ...paths.slice(0, 6)],
-    values: [days.length, matched, mismatched.length, unjudged],
-  })
+  const complete = !mismatched.length && stopped === undefined
+  if (complete) {
+    // The older slice came back short: the history ended, so the next cycle starts from the oldest day; otherwise it continues after the last older day taken.
+    const historyEnded = olderWanted > 0 && olderRows.length < olderWanted
+    const done = reconcileCursorStatement({ older: historyEnded ? '' : cycle.olderLast, cycle: null }, nowIso)
+    await db.prepare(done.sql).run(done.params)
+  }
+  if (visited > 0) {
+    recordAnalytics(env, {
+      kind: 'sales_daily_reconcile',
+      labels: [mismatched.length ? 'mismatch' : unjudged && !matched ? 'unjudged' : 'match', ...paths.slice(0, 6)],
+      values: [visited, matched, mismatched.length, unjudged],
+    })
+  }
   if (mismatched.length) console.error(`[sales_daily] reconcile mismatch on ${mismatched.length} day(s): ${paths.slice(0, 6).join(',')}`)
-  return { compared: matched + mismatched.length, matched, mismatched, unjudged, alerted }
+  return { compared: matched + mismatched.length, matched, mismatched, unjudged, alerted, ...(complete ? {} : { incomplete: true as const }), ...(stopped ? { stopped } : {}) }
 }

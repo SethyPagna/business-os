@@ -163,6 +163,12 @@ const PAID = {
   salesDailyAlertListedDays: 3,
   salesDailyRebuildMaxDays: 4000,
   salesDailyMaxPayloadBytes: 1000000,
+  salesDailyStepCpuBudgetMs: 5000,
+  salesDailyStepWallBudgetMs: 60000,
+  salesDailyCpuMsPerSourceRow: 0.025,
+  salesDailyCpuMsPerDayFixed: 0.3,
+  salesDailyKernelQueriesPerDay: 10,
+  salesDailyQueryReserve: 6,
   buildSharePollMs: 50,
   buildShareWaitMs: 1000,
   buildShareStaleMs: 3000,
@@ -229,6 +235,12 @@ const FREE = {
   salesDailyAlertListedDays: 3,
   salesDailyRebuildMaxDays: 1000,
   salesDailyMaxPayloadBytes: 500000,
+  salesDailyStepCpuBudgetMs: 7,
+  salesDailyStepWallBudgetMs: 20000,
+  salesDailyCpuMsPerSourceRow: 0.025,
+  salesDailyCpuMsPerDayFixed: 0.3,
+  salesDailyKernelQueriesPerDay: 10,
+  salesDailyQueryReserve: 6,
   buildSharePollMs: 100,
   buildShareWaitMs: 2000,
   buildShareStaleMs: 5000,
@@ -296,8 +308,9 @@ const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES, ...
 // coreInvariantsReverifySeconds is 24 h on both tiers since 11 Nov (Paid was 6 h: a run reads ~23k rows, four a day). sessionTouchIntervalSeconds is the
 // 15-minute last-seen touch on both tiers (it only bounds a one-row write; nothing reads it to decide).
 // The stored daily totals' nightly reconcile (lib/salesDailyCron.ts): the last 7 days, once per 20 h, naming up to 3 days in an alert, are rules of the check and not of the plan;
-// only how many days a visit works through (recompute, older reconcile slice, rebuild range) is sized by the tier and differs.
-const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser', 'scheduledBackupAfterHourLocal', 'scheduledBackupKeep', 'scheduledBackupMaxAttemptsPerDay', 'scheduledBackupCopyPollGapMinutes', 'scheduledBackupStaleHours', 'backupPoolGraceHours', 'driveStaleMirrorHours', 'salesDailyReconcileRecentDays', 'salesDailyReconcileMinIntervalSeconds', 'salesDailyAlertListedDays']
+// only how many days a visit works through (recompute, older reconcile slice, rebuild range) and the CPU, wall and payload budgets are sized by the tier and differ;
+// the per-row CPU estimate, the fixed day cost, the queries a day costs and the reserve are facts of the code, the same on both tiers.
+const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser', 'scheduledBackupAfterHourLocal', 'scheduledBackupKeep', 'scheduledBackupMaxAttemptsPerDay', 'scheduledBackupCopyPollGapMinutes', 'scheduledBackupStaleHours', 'backupPoolGraceHours', 'driveStaleMirrorHours', 'salesDailyReconcileRecentDays', 'salesDailyReconcileMinIntervalSeconds', 'salesDailyAlertListedDays', 'salesDailyCpuMsPerSourceRow', 'salesDailyCpuMsPerDayFixed', 'salesDailyKernelQueriesPerDay', 'salesDailyQueryReserve']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //

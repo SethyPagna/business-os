@@ -131,7 +131,7 @@ async function main() {
 
   // ---- C. which days a reader may serve -------------------------------------------------------------------------------------------------------------------
   const EPOCH = 'a'.repeat(32)
-  const flags = (over = {}) => ({ epoch: EPOCH, coverage: { epoch: EPOCH, kernel: 1 }, quarantined: false, maintenance: false, reconcileCursor: '', ...over })
+  const flags = (over = {}) => ({ epoch: EPOCH, coverage: { epoch: EPOCH, kernel: 1 }, quarantined: false, maintenance: false, reconcile: { older: '', cycle: null }, ...over })
   const day = (over = {}) => ({ business_date: '2026-11-01', state: 0, claim_gen: 1, kernel_version: 1, data_epoch: EPOCH, refusal: null, ...over })
 
   await check('C1 only a clean day of this kernel and this epoch is served; every other state means read it raw; a kernel refusal is raised, an own refusal is read raw', () => {
@@ -378,8 +378,8 @@ async function main() {
     rawDb.exec("UPDATE sales_daily_totals SET payload = replace(payload, '\"revenue\":\"10\"', '\"revenue\":\"11\"') WHERE business_date IN ('2026-11-10', '2026-11-12')")
     alerts.length = 0
     const first = await cron.runSalesDailyReconcile(env, alertDep())
-    assert.deepEqual(first.mismatched, ['2026-11-10', '2026-11-12'])
-    assert.deepEqual(alerts, [['2026-11-10', '2026-11-12']], 'one alert, both days')
+    assert.deepEqual(first.mismatched, ['2026-11-10'], 'the visit acts on the first mismatch before judging another day')
+    assert.deepEqual(alerts, [['2026-11-10']], 'one alert')
     const again = await cron.runSalesDailyReconcile(env, alertDep())
     assert.deepEqual(again, { skipped: 'quarantined' })
     assert.equal(alerts.length, 1)
@@ -389,7 +389,7 @@ async function main() {
     rawDb.exec("UPDATE sales_daily_totals SET payload = replace(payload, '\"revenue\":\"10\"', '\"revenue\":\"11\"') WHERE business_date = '2026-11-10'")
     alerts.length = 0
     // a concurrent run quarantined between this run's flag read and its own write: the row is already there, so this run does not alert a second time
-    const hooks = { beforeRead: () => rawDb.exec("INSERT INTO system_flags(key,value,updated_at) VALUES('sales_daily_quarantine','{\"at\":\"x\"}',CURRENT_TIMESTAMP)") }
+    const hooks = { beforeRead: () => rawDb.exec("INSERT OR IGNORE INTO system_flags(key,value,updated_at) VALUES('sales_daily_quarantine','{\"at\":\"x\"}',CURRENT_TIMESTAMP)") }
     const racing = await cron.runSalesDailyReconcile(env2, alertDep({ kernel: kernelOf(hooks) }))
     assert.deepEqual([racing.mismatched, racing.alerted], [['2026-11-10'], false])
     assert.equal(stateOf('2026-11-10').state, 1)
@@ -433,15 +433,16 @@ async function main() {
     const recent = tiers.PLAN_LIMITS_BY_TIER.free.salesDailyReconcileRecentDays
     for (let i = 0; i < 4; i += 1) await cron.runSalesDailyRecompute(env, dep())
     const seen = []
-    const spy = kernelOf({ beforeRead: (days) => seen.push([...days]) })
-    for (let i = 0; i < 5; i += 1) await cron.runSalesDailyReconcile(env, alertDep({ kernel: spy }))
+    let night = []
+    const spy = kernelOf({ beforeRead: (days) => { assert.equal(days.length, 1, 'the kernel is asked for ONE day at a time'); night.push(days[0]) } })
+    for (let i = 0; i < 5; i += 1) { night = []; await cron.runSalesDailyReconcile(env, alertDep({ kernel: spy })); seen.push(night) }
     assert.deepEqual(seen[0], many.slice(0, slice), 'the first night checks the oldest slice (all of it is older than the recent window)')
     assert.deepEqual(seen[1], many.slice(slice, 2 * slice))
-    assert.equal(seen.length, 4, 'the fifth night finds nothing older than the cursor, checks nothing and wraps')
+    assert.deepEqual(seen[4], [], 'the fifth night finds nothing older than the cursor, checks nothing and wraps')
     assert.ok(seen.every((days) => days.length <= slice + recent), 'a night never exceeds the plan slice plus the recent window')
     const everything = new Set(seen.flat())
     assert.ok(many.every((d) => everything.has(d)), 'four nights covered all twelve days; the fifth wrapped')
-    assert.equal(rawDb.prepare("SELECT value FROM system_flags WHERE key='sales_daily_reconcile_cursor'").get().value, '', 'the history ended, so the next night starts over')
+    assert.deepEqual(JSON.parse(rawDb.prepare("SELECT value FROM system_flags WHERE key='sales_daily_reconcile_cursor'").get().value), { older: '', cycle: null }, 'the history ended, so the next night starts over')
     delete env.PLAN_TIER; tiers.__resetPlanTierCacheForTests()
   })
 

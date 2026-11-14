@@ -123,6 +123,51 @@ export function exactToText(value: ReportExactDecimal): string {
   return fractionText(reduced(inner.n, inner.d))
 }
 
+/**
+ * The exact running sum of one money key over a day. Numerators are added per DENOMINATOR (an add of the same denominator as one already seen is a single
+ * bigint add), and the denominators are brought to their lcm and the sum reduced ONCE, in text(). The kernel's ReportExactDecimal.add reduces by gcd on
+ * every add (31 keys x every sale), which on a day with a few non-decimal fractions (a riel deposit over its rate, a legacy pro-rata refund) grows its
+ * numbers and its cost with every sale. The VALUE is identical: a sum of rationals does not depend on how it is carried, and the reduced result is
+ * canonical (scripts/test-sales-daily-accumulator-pure.cjs proves it against the kernel's own adds on randomised days). It reads the kernel value's
+ * numerator and denominator the way exactToText does and fails loudly when they are unreadable.
+ */
+export class SalesDailyExactSum {
+  private readonly byDenominator = new Map<bigint, bigint>()
+
+  addFraction(n: bigint, d: bigint): this {
+    if (d <= 0n) throw new RangeError('fraction_zero_denominator')
+    if (n !== 0n) this.byDenominator.set(d, (this.byDenominator.get(d) ?? 0n) + n)
+    return this
+  }
+
+  add(value: ReportExactDecimal): this {
+    const inner = (value as unknown as { value?: { n?: unknown; d?: unknown } }).value
+    if (!inner || typeof inner.n !== 'bigint' || typeof inner.d !== 'bigint' || inner.d <= 0n) throw new RangeError('exact_value_unreadable')
+    return this.addFraction(inner.n, inner.d)
+  }
+
+  /** Canonical fraction text of the sum so far. */
+  text(): string {
+    let n = 0n
+    let d = 1n
+    for (const [part, numerator] of this.byDenominator) {
+      if (part === d) n += numerator
+      else if (d % part === 0n) n += numerator * (d / part)
+      else if (part % d === 0n) { n = n * (part / d) + numerator; d = part }
+      else {
+        const common = gcd(d, part)
+        const scaleOld = part / common
+        n = n * scaleOld + numerator * (d / common)
+        d *= scaleOld
+      }
+    }
+    return fractionText(reduced(n, d))
+  }
+
+  /** The sum as the kernel's exact value (the text codec, so the same bound rules as a stored day). */
+  toExact(): ReportExactDecimal { return textToExact(this.text()) }
+}
+
 // ---- the stored payload ---------------------------------------------------------------------------------------------------------------------------------
 
 export type SalesDailyBucket = { money: Record<string, string>; counts: Record<string, number> }
@@ -130,7 +175,8 @@ export type SalesDailyBranch = { bucket: SalesDailyBucket; [section: string]: un
 /** `branches` is keyed by the sale header's branch id, "0" for a sale with none. The sections beside `bucket` (label, rows, summary, hours, pay, cust, prod, ...) are the kernel's. */
 export type SalesDailyPayload = { v: number; branches: Record<string, SalesDailyBranch> }
 /** What the kernel hands back for one business date. A refusal day carries the kernel's own code and an empty payload. */
-export type SalesDailyComputed = { payload: SalesDailyPayload; sourceRows: number; refusal: string | null }
+/** `queries` (optional) is how many D1 statements the kernel's read of that one date cost, so a visit can charge its query budget with the real number. */
+export type SalesDailyComputed = { payload: SalesDailyPayload; sourceRows: number; refusal: string | null; queries?: number }
 
 const BRANCH_KEY = /^(?:0|[1-9]\d{0,15})$/
 const MONEY_KEY = /^[a-z][a-zA-Z0-9_]{0,63}$/
@@ -217,7 +263,29 @@ export function parseSalesDailyCoverage(raw: unknown): SalesDailyCoverage | null
 
 export const salesDailyCoverageText = (epoch: string, kernel: number = SALES_DAILY_KERNEL_VERSION): string => JSON.stringify({ epoch, kernel })
 
-export type SalesDailyFlags = { epoch: string | null; coverage: SalesDailyCoverage | null; quarantined: boolean; maintenance: boolean; reconcileCursor: string }
+/**
+ * Where the nightly reconcile is. `older` is its place in the history (the last older day a finished cycle reached, '' to start from the oldest). `cycle` exists
+ * only while a cycle is unfinished (its visits are resumable, one day per unit): the recent window it started with, the last recent and older day already judged
+ * and how many older days it has taken, so a visit that stops at its budget (or is killed) continues exactly where the last judged day was.
+ */
+export type SalesDailyReconcileCycle = { recentFrom: string; recentLast: string; olderLast: string; olderCount: number }
+export type SalesDailyReconcileState = { older: string; cycle: SalesDailyReconcileCycle | null }
+const dateOrEmpty = (value: unknown): string => (typeof value === 'string' && (value === '' || SALES_DAILY_DATE.test(value)) ? value : '')
+
+/** Reads the stored cursor row: the JSON above, or the bare date (or '') an older build wrote. Anything unreadable starts over (safe: it only re-checks days). */
+export function parseSalesDailyReconcileState(raw: unknown): SalesDailyReconcileState {
+  if (typeof raw !== 'string') return { older: '', cycle: null }
+  if (raw === '' || SALES_DAILY_DATE.test(raw)) return { older: raw, cycle: null }
+  let parsed: unknown
+  try { parsed = JSON.parse(raw) } catch { return { older: '', cycle: null } }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { older: '', cycle: null }
+  const { older, cycle } = parsed as { older?: unknown; cycle?: unknown }
+  const c = cycle as Partial<SalesDailyReconcileCycle> | null | undefined
+  const valid = c && typeof c === 'object' && typeof c.recentFrom === 'string' && SALES_DAILY_DATE.test(c.recentFrom) && Number.isSafeInteger(c.olderCount) && (c.olderCount as number) >= 0
+  return { older: dateOrEmpty(older), cycle: valid ? { recentFrom: c.recentFrom as string, recentLast: dateOrEmpty(c.recentLast), olderLast: dateOrEmpty(c.olderLast), olderCount: c.olderCount as number } : null }
+}
+
+export type SalesDailyFlags = { epoch: string | null; coverage: SalesDailyCoverage | null; quarantined: boolean; maintenance: boolean; reconcile: SalesDailyReconcileState }
 
 /** The one statement that reads everything a reader or a cron visit needs to decide, keyed rows of system_flags. */
 export const SALES_DAILY_FLAGS_SQL = `SELECT key, value FROM system_flags WHERE key IN ('data_epoch', '${SALES_DAILY_COVERAGE_KEY}', '${SALES_DAILY_QUARANTINE_KEY}', '${SALES_DAILY_RECONCILE_CURSOR_KEY}', 'maintenance')`
@@ -230,7 +298,7 @@ export function salesDailyFlagsFromRows(rows: ReadonlyArray<{ key?: unknown; val
     coverage: parseSalesDailyCoverage(byKey.get(SALES_DAILY_COVERAGE_KEY)),
     quarantined: byKey.has(SALES_DAILY_QUARANTINE_KEY),
     maintenance: byKey.has('maintenance'),
-    reconcileCursor: typeof byKey.get(SALES_DAILY_RECONCILE_CURSOR_KEY) === 'string' && SALES_DAILY_DATE.test(String(byKey.get(SALES_DAILY_RECONCILE_CURSOR_KEY))) ? String(byKey.get(SALES_DAILY_RECONCILE_CURSOR_KEY)) : '',
+    reconcile: parseSalesDailyReconcileState(byKey.get(SALES_DAILY_RECONCILE_CURSOR_KEY)),
   }
 }
 
@@ -283,13 +351,56 @@ export function storedDaysHeldStill(first: ReadonlyArray<StoredDayRow>, second: 
   return first.every((row) => seen.has(key(row)))
 }
 
+// ---- the budget of one cron visit ----------------------------------------------------------------------------------------------------------------------
+
+export type SalesDailyBudgetLimits = {
+  d1QueriesPerInvocation: number
+  salesDailyStepCpuBudgetMs: number
+  salesDailyStepWallBudgetMs: number
+  salesDailyCpuMsPerSourceRow: number
+  salesDailyCpuMsPerDayFixed: number
+  salesDailyKernelQueriesPerDay: number
+  salesDailyQueryReserve: number
+}
+export type SalesDailyStop = 'cpu' | 'wall' | 'queries'
+
+/**
+ * What one visit of a cron step may still do. A Worker has no CPU clock (Date.now() only moves when I/O completes), so CPU is an ESTIMATE charged per day from
+ * the rows the day read; wall time is the real clock; queries are counted. The unit of work is ONE business day: before starting another, the visit asks whether a
+ * day of the expected size still fits every budget, and stops (resumable from its cursor) when it does not. The first day of a visit always runs, so a visit
+ * always makes progress.
+ */
+export class SalesDailyStepBudget {
+  private readonly startedAt: number
+  private cpuMs = 0
+  private queries = 0
+  private lastDayRows = 0
+  constructor(private readonly limits: SalesDailyBudgetLimits, private readonly clock: () => number = Date.now) { this.startedAt = clock() }
+
+  spendQueries(count: number): void { this.queries += count }
+  /** Charges one finished day: the rows it read are the CPU estimate's input and the next day's size guess. */
+  spendDay(sourceRows: number): void {
+    this.cpuMs += this.limits.salesDailyCpuMsPerDayFixed + this.limits.salesDailyCpuMsPerSourceRow * Math.max(0, sourceRows)
+    this.lastDayRows = Math.max(0, sourceRows)
+  }
+  estimateMs(rows: number): number { return this.limits.salesDailyCpuMsPerDayFixed + this.limits.salesDailyCpuMsPerSourceRow * Math.max(0, rows) }
+  /** `knownRows`: what the stored row says the next day read last time (0 when unknown); the larger of that and the previous day of this visit is the guess. */
+  allowsAnotherDay(knownRows: number, ownStatements: number): { ok: true } | { ok: false; reason: SalesDailyStop } {
+    if (this.cpuMs + this.estimateMs(Math.max(knownRows, this.lastDayRows)) > this.limits.salesDailyStepCpuBudgetMs) return { ok: false, reason: 'cpu' }
+    if (this.clock() - this.startedAt >= this.limits.salesDailyStepWallBudgetMs) return { ok: false, reason: 'wall' }
+    if (this.queries + this.limits.salesDailyKernelQueriesPerDay + ownStatements > this.limits.d1QueriesPerInvocation - this.limits.salesDailyQueryReserve) return { ok: false, reason: 'queries' }
+    return { ok: true }
+  }
+  snapshot(): { cpuMs: number; queries: number } { return { cpuMs: this.cpuMs, queries: this.queries } }
+}
+
 // ---- statements (named parameters, as lib/db.ts translates them) ------------------------------------------------------------------------------------
 
 export type SalesDailyStatement = { sql: string; params: Record<string, unknown> }
 
 /** The dirty (or half-done) past days, newest first: the partial index idx_sales_daily_totals_pending holds exactly these. Today is never recomputed. */
 export function pendingDaysStatement(today: string, limit: number): SalesDailyStatement {
-  return { sql: 'SELECT business_date FROM sales_daily_totals WHERE state <> 0 AND business_date < @today ORDER BY business_date DESC LIMIT @limit', params: { today, limit } }
+  return { sql: 'SELECT business_date, source_rows FROM sales_daily_totals WHERE state <> 0 AND business_date < @today ORDER BY business_date DESC LIMIT @limit', params: { today, limit } }
 }
 
 /** One statement claims every named day that is not clean (a still-claimed day is taken over: its older commit will be refused). */
@@ -329,11 +440,11 @@ export function dayStatesStatement(days: readonly string[], withPayload = false)
 }
 
 /** The days between two dates that have a row (the reconcile's recent window) and the older days after a cursor, oldest first. */
-export function reconcileRecentStatement(from: string, today: string): SalesDailyStatement {
-  return { sql: 'SELECT business_date FROM sales_daily_totals WHERE business_date >= @from AND business_date < @today AND state = 0 ORDER BY business_date', params: { from, today } }
+export function reconcileRecentStatement(from: string, today: string, after = ''): SalesDailyStatement {
+  return { sql: 'SELECT business_date, source_rows FROM sales_daily_totals WHERE business_date >= @from AND business_date > @after AND business_date < @today AND state = 0 ORDER BY business_date', params: { from, after, today } }
 }
 export function reconcileOlderStatement(cursor: string, before: string, limit: number): SalesDailyStatement {
-  return { sql: 'SELECT business_date FROM sales_daily_totals WHERE business_date > @cursor AND business_date < @before AND state = 0 ORDER BY business_date LIMIT @limit', params: { cursor, before, limit } }
+  return { sql: 'SELECT business_date, source_rows FROM sales_daily_totals WHERE business_date > @cursor AND business_date < @before AND state = 0 ORDER BY business_date LIMIT @limit', params: { cursor, before, limit } }
 }
 
 /**
@@ -350,8 +461,9 @@ export function quarantineStatements(days: readonly string[], paths: readonly st
   ]
 }
 
-/** The reconcile's place in the older days, written once per run (one row). */
-export function reconcileCursorStatement(cursor: string, nowIso: string): SalesDailyStatement {
+/** The reconcile's place (one row), written after every judged day so a visit that is stopped or killed resumes at the next day. */
+export function reconcileCursorStatement(state: SalesDailyReconcileState, nowIso: string): SalesDailyStatement {
+  const cursor = JSON.stringify(state)
   return {
     sql: `INSERT INTO system_flags (key, value, updated_at) VALUES ('${SALES_DAILY_RECONCILE_CURSOR_KEY}', @cursor, @nowIso) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
     params: { cursor, nowIso },

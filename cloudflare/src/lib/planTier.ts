@@ -326,6 +326,19 @@ export type PlanLimits = {
   // The longest stored payload one day may carry (UTF-8 bytes). A day over it is stored with refusal sales_daily_payload_too_large and read raw. D1 holds 2 MB a row;
   // Free's smaller number also bounds the JSON.parse a Free reader pays per day within its 10 ms of CPU.
   salesDailyMaxPayloadBytes: number
+  // The BUDGET of one cron visit of either step (lib/salesDailyCron.ts), sized from scripts/sales-daily-cpu-floor.cjs (14 Nov 2026, laptop Node, 31 exact money keys per
+  // sale, common-denominator summation: 0.0125 ms per sale, 3.75 ms for a 300-sale day; the kernel's own per-add gcd cost 70 ms the same day). A Worker has no CPU clock
+  // (Date.now only moves at I/O), so a visit charges an ESTIMATE per unit of work, one business day, and stops BEFORE the next day would pass a budget:
+  // salesDailyStepCpuBudgetMs of the isolate's CPU (Free 7 of its 10 ms), salesDailyStepWallBudgetMs of wall time, and the D1 queries left under d1QueriesPerInvocation
+  // after salesDailyQueryReserve. A day's estimate is salesDailyCpuMsPerDayFixed + salesDailyCpuMsPerSourceRow x the rows it read (twice the measured per-sale cost, one sale
+  // per row, to leave room for the per-sale facts, the JSON and the encode that the floor does not time) and salesDailyKernelQueriesPerDay + the step's own statements.
+  // The first day of a visit always runs (progress); a day too heavy for the plan on its own is the known limit, named in the report.
+  salesDailyStepCpuBudgetMs: number
+  salesDailyStepWallBudgetMs: number
+  salesDailyCpuMsPerSourceRow: number
+  salesDailyCpuMsPerDayFixed: number
+  salesDailyKernelQueriesPerDay: number
+  salesDailyQueryReserve: number
 
   // lib/buildShare.ts: how a request that finds costly shared work already being done by another request waits for it instead of doing
   // it again (storefront builds, the Dashboard overview, the core-data check, the stock-session column probe). The first request sets a
@@ -531,6 +544,12 @@ const PAID_LIMITS: PlanLimits = {
   salesDailyAlertListedDays: 3,
   salesDailyRebuildMaxDays: 4000,
   salesDailyMaxPayloadBytes: 1_000_000,
+  salesDailyStepCpuBudgetMs: 5000,
+  salesDailyStepWallBudgetMs: 60_000,
+  salesDailyCpuMsPerSourceRow: 0.025,
+  salesDailyCpuMsPerDayFixed: 0.3,
+  salesDailyKernelQueriesPerDay: 10,
+  salesDailyQueryReserve: 6,
   buildSharePollMs: 50,
   buildShareWaitMs: 1000,
   buildShareStaleMs: 3000,
@@ -598,6 +617,12 @@ const FREE_LIMITS: PlanLimits = {
   salesDailyAlertListedDays: 3,
   salesDailyRebuildMaxDays: 1000,
   salesDailyMaxPayloadBytes: 500_000,
+  salesDailyStepCpuBudgetMs: 7,
+  salesDailyStepWallBudgetMs: 20_000,
+  salesDailyCpuMsPerSourceRow: 0.025,
+  salesDailyCpuMsPerDayFixed: 0.3,
+  salesDailyKernelQueriesPerDay: 10,
+  salesDailyQueryReserve: 6,
   buildSharePollMs: 100,
   buildShareWaitMs: 2000,
   buildShareStaleMs: 5000,
