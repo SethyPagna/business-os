@@ -17,24 +17,20 @@
    "SELECT id, receipt_number, created_at, sale_status, status_before_return, return_state, delivery_pending, bran"
   ],
   [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
    "603e70996cd2",
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
    "5f13c00d023d",
    "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
   ],
   [
-   "3c26374fe4ff",
-   "SELECT m.id AS id, m.created_at AS created_at, m.quantity AS quantity, m.unit_cost_usd AS unit_cost_usd, m.tot"
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
    "30a136f2a95e",
@@ -45,6 +41,10 @@
    "SELECT COUNT(*) AS return_count, COALESCE(SUM(r.supplier_compensation_usd), 0) AS supplier_compensation_usd, C"
   ],
   [
+   "3c26374fe4ff",
+   "SELECT m.id AS id, m.created_at AS created_at, m.quantity AS quantity, m.unit_cost_usd AS unit_cost_usd, m.tot"
+  ],
+  [
    "51360b2bda23",
    "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
   ],
@@ -61,11 +61,11 @@
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
@@ -117,11 +117,11 @@
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
@@ -187,24 +187,20 @@
    "SELECT id, receipt_number, created_at, sale_status, status_before_return, return_state, delivery_pending, bran"
   ],
   [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
    "603e70996cd2",
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
    "5f13c00d023d",
    "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
   ],
   [
-   "3c26374fe4ff",
-   "SELECT m.id AS id, m.created_at AS created_at, m.quantity AS quantity, m.unit_cost_usd AS unit_cost_usd, m.tot"
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
    "30a136f2a95e",
@@ -215,6 +211,10 @@
    "SELECT COUNT(*) AS return_count, COALESCE(SUM(r.supplier_compensation_usd), 0) AS supplier_compensation_usd, C"
   ],
   [
+   "3c26374fe4ff",
+   "SELECT m.id AS id, m.created_at AS created_at, m.quantity AS quantity, m.unit_cost_usd AS unit_cost_usd, m.tot"
+  ],
+  [
    "51360b2bda23",
    "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
   ],
@@ -231,11 +231,11 @@
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
@@ -287,11 +287,11 @@
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
@@ -357,24 +357,20 @@
    "SELECT id, receipt_number, created_at, sale_status, status_before_return, return_state, delivery_pending, bran"
   ],
   [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
    "603e70996cd2",
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
    "5f13c00d023d",
    "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
   ],
   [
-   "3c26374fe4ff",
-   "SELECT m.id AS id, m.created_at AS created_at, m.quantity AS quantity, m.unit_cost_usd AS unit_cost_usd, m.tot"
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
    "30a136f2a95e",
@@ -385,6 +381,10 @@
    "SELECT COUNT(*) AS return_count, COALESCE(SUM(r.supplier_compensation_usd), 0) AS supplier_compensation_usd, C"
   ],
   [
+   "3c26374fe4ff",
+   "SELECT m.id AS id, m.created_at AS created_at, m.quantity AS quantity, m.unit_cost_usd AS unit_cost_usd, m.tot"
+  ],
+  [
    "51360b2bda23",
    "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
   ],
@@ -401,11 +401,11 @@
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
@@ -465,11 +465,11 @@
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
@@ -543,24 +543,20 @@
    "SELECT id, receipt_number, created_at, sale_status, status_before_return, return_state, delivery_pending, bran"
   ],
   [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
    "603e70996cd2",
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
    "5f13c00d023d",
    "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
   ],
   [
-   "3c26374fe4ff",
-   "SELECT m.id AS id, m.created_at AS created_at, m.quantity AS quantity, m.unit_cost_usd AS unit_cost_usd, m.tot"
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
    "30a136f2a95e",
@@ -571,16 +567,16 @@
    "SELECT COUNT(*) AS return_count, COALESCE(SUM(r.supplier_compensation_usd), 0) AS supplier_compensation_usd, C"
   ],
   [
-   "51360b2bda23",
-   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+   "3c26374fe4ff",
+   "SELECT m.id AS id, m.created_at AS created_at, m.quantity AS quantity, m.unit_cost_usd AS unit_cost_usd, m.tot"
   ],
   [
    "51360b2bda23",
    "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
   ],
   [
-   "4d4e8ebbbf06",
-   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
   ],
   [
    "4d4e8ebbbf06",
@@ -591,7 +587,11 @@
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "bb23890c6e57",
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
@@ -639,11 +639,11 @@
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
@@ -787,7 +787,7 @@
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
@@ -929,30 +929,10 @@
    "SELECT COUNT(*) AS return_count, COALESCE(SUM(r.supplier_compensation_usd), 0) AS supplier_compensation_usd, C"
   ],
   [
-   "0655a3775cfb",
-   "SELECT t.value AS table_name, p.name AS name FROM json_each(?1) t JOIN pragma_table_info(t.value) p ORDER BY t"
-  ],
-  [
    "3c26374fe4ff",
    "SELECT m.id AS id, m.created_at AS created_at, m.quantity AS quantity, m.unit_cost_usd AS unit_cost_usd, m.tot"
   ],
   [
-   "0655a3775cfb",
-   "SELECT t.value AS table_name, p.name AS name FROM json_each(?1) t JOIN pragma_table_info(t.value) p ORDER BY t"
-  ],
-  [
-   "39662b623054",
-   "WITH agg AS MATERIALIZED ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESC"
-  ],
-  [
-   "3b1ded9338b0",
-   "SELECT *, CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry FROM ( SELECT id, na"
-  ],
-  [
-   "016569760f77",
-   "SELECT (SELECT COUNT(*) FROM products p WHERE p.is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date"
-  ],
-  [
    "51360b2bda23",
    "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
   ],
@@ -969,11 +949,11 @@
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
@@ -1025,11 +1005,11 @@
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [

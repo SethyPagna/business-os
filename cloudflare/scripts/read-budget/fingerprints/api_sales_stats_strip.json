@@ -5,31 +5,15 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
+   "5f13c00d023d",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "1ea921e14352",
+   "63a4fbc094cd",
    "SELECT id,total_usd,sale_status,money_precision_version FROM sales WHERE date(created_at, '+7 hours') >= ?1 AN"
   ],
   [
-   "df3403cd9b68",
+   "023724f6cc9a",
    "SELECT id,total_refund_usd,money_precision_version FROM returns WHERE date(created_at, '+7 hours') >= ?1 AND c"
   ],
   [
@@ -41,20 +25,20 @@
    "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
   ],
   [
-   "4d4e8ebbbf06",
-   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+   "cc32a10faa5f",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name,s.cashier_id,s.cashier"
   ],
   [
-   "bb23890c6e57",
-   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+   "79b9fa1ad0d0",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name,s.cashier_id,s.cashier_name,s.customer_id,s.c"
   ],
   [
    "1abaf455da13",
    "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
   ],
   [
-   "98f3f1d6544a",
-   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+   "cc0fedc84155",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity,si.total_usd,si.cost_price_usd,si.product_di"
   ],
   [
    "93bb331a8b50",
@@ -69,20 +53,20 @@
    "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
   ],
   [
-   "4d4e8ebbbf06",
-   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+   "cc32a10faa5f",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name,s.cashier_id,s.cashier"
   ],
   [
-   "bb23890c6e57",
-   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+   "79b9fa1ad0d0",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name,s.cashier_id,s.cashier_name,s.customer_id,s.c"
   ],
   [
    "1abaf455da13",
    "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
   ],
   [
-   "98f3f1d6544a",
-   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+   "cc0fedc84155",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity,si.total_usd,si.cost_price_usd,si.product_di"
   ],
   [
    "93bb331a8b50",
@@ -97,11 +81,11 @@
    "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
   ],
   [
-   "1ea921e14352",
+   "63a4fbc094cd",
    "SELECT id,total_usd,sale_status,money_precision_version FROM sales WHERE date(created_at, '+7 hours') >= ?1 AN"
   ],
   [
-   "df3403cd9b68",
+   "023724f6cc9a",
    "SELECT id,total_refund_usd,money_precision_version FROM returns WHERE date(created_at, '+7 hours') >= ?1 AND c"
   ]
  ],
@@ -111,31 +95,15 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
+   "5f13c00d023d",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "1ea921e14352",
+   "63a4fbc094cd",
    "SELECT id,total_usd,sale_status,money_precision_version FROM sales WHERE date(created_at, '+7 hours') >= ?1 AN"
   ],
   [
-   "df3403cd9b68",
+   "023724f6cc9a",
    "SELECT id,total_refund_usd,money_precision_version FROM returns WHERE date(created_at, '+7 hours') >= ?1 AND c"
   ],
   [
@@ -147,24 +115,24 @@
    "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
   ],
   [
-   "4d4e8ebbbf06",
-   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+   "cc32a10faa5f",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name,s.cashier_id,s.cashier"
   ],
   [
-   "bb23890c6e57",
-   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+   "79b9fa1ad0d0",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name,s.cashier_id,s.cashier_name,s.customer_id,s.c"
   ],
   [
    "1abaf455da13",
    "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
   ],
   [
-   "98f3f1d6544a",
-   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+   "cc0fedc84155",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity,si.total_usd,si.cost_price_usd,si.product_di"
   ],
   [
-   "98f3f1d6544a",
-   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+   "cc0fedc84155",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity,si.total_usd,si.cost_price_usd,si.product_di"
   ],
   [
    "93bb331a8b50",
@@ -179,24 +147,24 @@
    "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
   ],
   [
-   "4d4e8ebbbf06",
-   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+   "cc32a10faa5f",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name,s.cashier_id,s.cashier"
   ],
   [
-   "bb23890c6e57",
-   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+   "79b9fa1ad0d0",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name,s.cashier_id,s.cashier_name,s.customer_id,s.c"
   ],
   [
    "1abaf455da13",
    "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
   ],
   [
-   "98f3f1d6544a",
-   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+   "cc0fedc84155",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity,si.total_usd,si.cost_price_usd,si.product_di"
   ],
   [
-   "98f3f1d6544a",
-   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+   "cc0fedc84155",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity,si.total_usd,si.cost_price_usd,si.product_di"
   ],
   [
    "93bb331a8b50",
@@ -211,11 +179,11 @@
    "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
   ],
   [
-   "1ea921e14352",
+   "63a4fbc094cd",
    "SELECT id,total_usd,sale_status,money_precision_version FROM sales WHERE date(created_at, '+7 hours') >= ?1 AN"
   ],
   [
-   "df3403cd9b68",
+   "023724f6cc9a",
    "SELECT id,total_refund_usd,money_precision_version FROM returns WHERE date(created_at, '+7 hours') >= ?1 AND c"
   ]
  ]

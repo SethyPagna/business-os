@@ -13,7 +13,7 @@
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
@@ -45,7 +45,7 @@
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
@@ -71,6 +71,14 @@
   [
    "51360b2bda23",
    "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "ad2ce1a04839",
+   "PRAGMA table_info(products)"
+  ],
+  [
+   "496d2f1b834f",
+   "PRAGMA table_info(categories)"
   ],
   [
    "0fd001fcf8f9",
@@ -91,7 +99,7 @@
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
@@ -123,7 +131,7 @@
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
@@ -197,7 +205,7 @@
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
@@ -325,7 +333,7 @@
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [

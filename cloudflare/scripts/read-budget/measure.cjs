@@ -65,6 +65,18 @@ function expectOf(status, code) {
 
 // Why a ceiling is what it is, for the shapes that need a word (written into the entry as "note").
 const ENTRY_NOTES = {
+  'sales-stats-today':
+    "6.0.2074-6.0.2076 (lane/sales-stats-reads): the cancelled group seeks idx_sales_status_created_pg (s.sale_status='cancelled', paged on +s.id) instead of testing COALESCE(sale_status) over the window's sales, and the five cache versions come in one read (getVersionsWithFallback). Free pass, warm-miss: 375 -> 279 rows, 17 -> 13 calls.",
+  'sales-stats-30d':
+    "6.0.2074-6.0.2076 (lane/sales-stats-reads): same two changes as sales-stats-today (cancelled group on the status index, one version read). Free pass, warm-miss: 8,017 -> 5,527 rows, 17 -> 13 calls.",
+  'sales-stats-all-time':
+    "6.0.2074-6.0.2076 (lane/sales-stats-reads): an undated report no longer walks every sale for its cancelled group (idx_sales_status_created_pg, +s.id paging, plain s.sale_status='cancelled'; ANALYZE keeps the plan) and reads its versions in one call. Free pass, warm-miss: 64,911 -> 36,079 rows, 9 -> 5 calls.",
+  'sales-stats-search':
+    "6.0.2074-6.0.2076 (lane/sales-stats-reads): the sales the search matches are resolved ONCE (one bounded statement, before and after the read) and the report tests id IN json_each(ids) instead of re-running the text match in every page, group and pass; a match over REPORT_SCOPE_IDS_MAX keeps the exact subquery. Free pass, warm-miss: 810,586 -> 245,400 rows, 9 -> 7 calls (two resolver reads of the text match, about 100,000 rows each, are what remains).",
+  'sales-stats-strip-today':
+    "6.0.2074-6.0.2076 (lane/sales-stats-reads): readStripMoneyRows pages on +id, so the strip seeks its window on idx_sales_created_pg instead of walking every sale by primary key (the plan flips on table statistics, hence 38,220 rows without ANALYZE against 3,549 with it before). Free pass, warm-miss: 34,745 -> 3,109 rows, 26 -> 22 calls.",
+  'sales-stats-strip-30d':
+    "6.0.2074-6.0.2076 (lane/sales-stats-reads): readStripMoneyRows pages on +id (date index, not the primary-key walk) and the cancelled group seeks the status index. Free pass, warm-miss: 71,859 -> 42,925 rows, 28 -> 24 calls; the rest is the 30-day window's sales read by both strip images.",
   'w-shift-close':
     "6.0.2062 (lane/shift-close-reads r2): the window prefilters take a floor of twelve hours before the window start (shiftWindowFloor, datetime(@createdFrom, '-12 hours'): timezone-independent, a strict superset of the exact window) and the previous/next shift lookup is a seek on the 0306 indexes, so the close no longer reads one more day below the window and no longer scans every stored shift (6185 before; 2950 with the day-granular Cambodia-date floor; 2332 read in the write pass now; +1000 stored shifts added 1 row). Measured in the full write pass (the gate's world, after the earlier shapes), not by --only, which runs the shape alone in a fresh world and reads about 1827. 2332 x 1.10 = 2566.",
   'fees-list-with-sale-delivery-rows-all-time-branch-source-all':
