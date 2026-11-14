@@ -476,7 +476,7 @@ export default function PaginationControls({
               aria-label={pageLabel}
               className="h-5 w-8 border-0 sm:w-10 bg-transparent p-0 text-center text-xs font-semibold text-slate-700 outline-none dark:text-slate-100"
               value={pageDraft}
-              onChange={(event) => setPageDraft(event.target.value.replace(/[^d]/g, '') || '')}
+              onChange={(event) => setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
               onBlur={(event) => commitPageDraft(event.currentTarget.value)}
               onKeyDown={handlePageInputKeyDown}
             />
