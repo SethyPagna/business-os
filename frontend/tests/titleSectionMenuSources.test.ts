@@ -76,4 +76,11 @@ assert.ok(SECTION_TITLE_MENU_Z > 1200 && SECTION_TITLE_MENU_Z < 1500, 'menu z si
 assert.ok(zValues.every((z) => z < SECTION_TITLE_MENU_Z), 'no nav chrome layer outranks the menu')
 const modalZs = [...read('components/shared/Modal.tsx').matchAll(/z-\[(\d+)\]/g)].map((m) => Number(m[1]))
 assert.ok(modalZs.every((z) => z < SECTION_TITLE_MENU_Z), 'the shared modal stays below the menu layer')
+// The desktop chip row is the Inventory page's own copy of the section labels (role-matrix reads them from hubNavigation), so the
+// two must agree: the first chip is the Inventory subpage's label, never the main Products page's.
+{
+  const page = read('components/inventory/InventoryChecksPage.tsx')
+  assert.ok(page.includes("{ id: 'products', label: t('inventory') }"), "the Inventory page's own first chip uses the same label as the nav menu")
+  assert.ok(!page.includes("{ id: 'products', label: t('products') }"), 'and it is not labelled like the main Products page')
+}
 console.log('PASS title section menu sources')

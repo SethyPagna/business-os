@@ -1121,7 +1121,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
 
   return <div className="flex min-h-0 min-w-0 flex-1 flex-col">
     <HubSectionNav pageId="inventory" active={section} sections={[
-      { id: 'products', label: t('products') }, { id: 'sessions', label: t('inventory_check_sessions') }, { id: 'issues', label: t('issues') },
+      { id: 'products', label: t('inventory') }, { id: 'sessions', label: t('inventory_check_sessions') }, { id: 'issues', label: t('issues') },
     ]} onChange={id => { if (!busy && !createAttempt.current) { setSection(id as Section); setScan(null) } }}>
       <div className="page-scroll min-w-0 space-y-2 px-3 pb-3" data-inventory-check-page>
         {/* Pinned: dates (with the Stats chip), then search / scan / Filters beside the context bar, then the column header. Open stat cards scroll inside the cap. */}
