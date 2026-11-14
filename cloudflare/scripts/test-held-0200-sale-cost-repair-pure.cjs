@@ -987,11 +987,13 @@ check('held: outside deploy chain, after dependencies including0195; independent
   // changes, and the repair reads no table the file writes. The repair must not name the new table or the flag keys, must not write customers, and must
   // not move sales.created_at (the one write a mark trigger would key on differently).
   const DERIVED_GUARD = "NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')"
+  // the revision triggers test 'is the sale's day already dirty?' first, then the restore guard (see the 0308 header): the WHEN text is matched exactly
+  const DERIVED_WHEN_REVISION = "NOT EXISTS (SELECT 1 FROM sales s JOIN sales_daily_totals t ON t.business_date = COALESCE(date(s.created_at, '+7 hours'), '') WHERE s.id = NEW.sale_id AND t.state = 1) AND " + DERIVED_GUARD
   const DERIVED_MARK_REVISION = "INSERT INTO sales_daily_totals(business_date, state) SELECT COALESCE(date(created_at, '+7 hours'), ''), 1 FROM sales WHERE id = NEW.sale_id ON CONFLICT(business_date) DO UPDATE SET state = 1 WHERE state <> 1;"
   const DERIVED_MARK_OLD = "INSERT INTO sales_daily_totals(business_date, state) SELECT COALESCE(date(OLD.created_at, '+7 hours'), ''), 1 WHERE 1 ON CONFLICT(business_date) DO UPDATE SET state = 1 WHERE state <> 1;"
   const DERIVED_TRIGGERS = {
-    sales_daily_mark_revision_insert: ['AFTER INSERT ON sale_write_revisions', DERIVED_GUARD, DERIVED_MARK_REVISION],
-    sales_daily_mark_revision_update: ['AFTER UPDATE ON sale_write_revisions', DERIVED_GUARD, DERIVED_MARK_REVISION],
+    sales_daily_mark_revision_insert: ['AFTER INSERT ON sale_write_revisions', DERIVED_WHEN_REVISION, DERIVED_MARK_REVISION],
+    sales_daily_mark_revision_update: ['AFTER UPDATE ON sale_write_revisions', DERIVED_WHEN_REVISION, DERIVED_MARK_REVISION],
     sales_daily_mark_sale_delete: ['AFTER DELETE ON sales', DERIVED_GUARD, DERIVED_MARK_OLD],
     sales_daily_mark_sale_moved: ['AFTER UPDATE OF created_at ON sales', 'OLD.created_at IS NOT NEW.created_at AND ' + DERIVED_GUARD, DERIVED_MARK_OLD],
   }
@@ -1040,6 +1042,7 @@ check('held: outside deploy chain, after dependencies including0195; independent
       ['a mark that moves a state other than to dirty', text.split('SET state = 1 WHERE state <> 1').join('SET state = 0 WHERE state <> 0')],
       ['a seed read from a table the repair writes', text.replace('SELECT DISTINCT COALESCE(date(created_at, \'+7 hours\'), \'\'), 1 FROM sales WHERE 1', 'SELECT DISTINCT COALESCE(date(created_at, \'+7 hours\'), \'\'), 1 FROM sale_items WHERE 1')],
       ['a second seed', text + "\nINSERT INTO sales_daily_totals(business_date, state) SELECT DISTINCT COALESCE(date(created_at, '+7 hours'), ''), 1 FROM sales WHERE 1 ON CONFLICT(business_date) DO NOTHING;"],
+      ['a revision trigger whose dirty probe asks for another state', text.replace('AND t.state = 1)', 'AND t.state = 0)')],
       ['a missing trigger', text.replace(/CREATE TRIGGER sales_daily_mark_sale_moved[\s\S]*?\nEND;/, '')],
     ]
     for (const [label, wrong] of wrongs) {

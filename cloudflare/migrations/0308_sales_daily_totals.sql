@@ -13,7 +13,8 @@
 -- writer is covered whatever its source (route, import, undo, ops script, migration). Two more cover what a revision row cannot name: a
 -- deleted sale (its row is gone when the revision trigger looks the date up) and a sale whose created_at moved (the OLD day). All four skip
 -- restore mode exactly as 0120 does (a restore rotates the data epoch, which invalidates every stored day). They write only on a state change:
--- the second and later writes of a dirty day add no row. A trigger never raises: COALESCE, a constant state, no NOT NULL risk.
+-- the second and later writes of a dirty day add no row. The two revision triggers ask "is this sale's day already dirty?" FIRST (one sale probe + one day probe)
+-- and only then the restore guard (a system_flags probe): most revision bumps land on today, which is already dirty, so they stop after three reads instead of five. A trigger never raises: COALESCE, a constant state, no NOT NULL risk.
 --
 -- The table keeps its rowid (no WITHOUT ROWID): backups and the d1 table census rely on it. LF-only. Derived data: not in backups.
 --
@@ -41,7 +42,8 @@ CREATE INDEX idx_sales_daily_totals_pending ON sales_daily_totals(business_date)
 CREATE INDEX idx_customers_anonymous ON customers(id) WHERE COALESCE(is_anonymous, 0) <> 0;
 
 CREATE TRIGGER sales_daily_mark_revision_insert AFTER INSERT ON sale_write_revisions
-WHEN NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
+WHEN NOT EXISTS (SELECT 1 FROM sales s JOIN sales_daily_totals t ON t.business_date = COALESCE(date(s.created_at, '+7 hours'), '') WHERE s.id = NEW.sale_id AND t.state = 1)
+  AND NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
 BEGIN
  INSERT INTO sales_daily_totals(business_date, state)
  SELECT COALESCE(date(created_at, '+7 hours'), ''), 1 FROM sales WHERE id = NEW.sale_id
@@ -49,7 +51,8 @@ BEGIN
 END;
 
 CREATE TRIGGER sales_daily_mark_revision_update AFTER UPDATE ON sale_write_revisions
-WHEN NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
+WHEN NOT EXISTS (SELECT 1 FROM sales s JOIN sales_daily_totals t ON t.business_date = COALESCE(date(s.created_at, '+7 hours'), '') WHERE s.id = NEW.sale_id AND t.state = 1)
+  AND NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
 BEGIN
  INSERT INTO sales_daily_totals(business_date, state)
  SELECT COALESCE(date(created_at, '+7 hours'), ''), 1 FROM sales WHERE id = NEW.sale_id
