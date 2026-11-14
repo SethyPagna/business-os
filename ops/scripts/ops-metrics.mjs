@@ -11,7 +11,7 @@ import {
 } from './ops-common.mjs'
 
 export const METRICS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'metrics')
-export const QUERY_NAMES = Object.freeze(['route-latency', 'route-errors', 'build-revisions', 'request-shapes', 'background-runs', 'report-atomic-shadow'])
+export const QUERY_NAMES = Object.freeze(['route-latency', 'route-errors', 'build-revisions', 'request-shapes', 'background-runs', 'report-atomic-shadow', 'sales-daily-shadow'])
 export const MIN_ROWS_FOR_P95 = 100
 export const MAX_DAYS = 7
 // The shop trades 08:00-20:00 in Cambodia (UTC+7); deploys fall outside. The cron runs every 5 and every 15 minutes
@@ -67,7 +67,7 @@ export function tradingWindows(from, days) {
 
 // Shadow comparisons decide a switch flip, so they are read over the whole Cambodia business day (17:00 UTC the day before to 17:00 UTC),
 // one query per day, so each row carries the business date it belongs to and a day with no comparisons is visible.
-export const PER_DAY_QUERIES = Object.freeze(['report-atomic-shadow'])
+export const PER_DAY_QUERIES = Object.freeze(['report-atomic-shadow', 'sales-daily-shadow'])
 export const SHADOW_FLIP = Object.freeze({ minDays: 3, maxUnjudgedShare: 0.1 })
 
 export function businessDayWindow(window) {
@@ -246,6 +246,9 @@ export async function readMetrics({ fetchImpl, accountId, token, from, days, rev
     background: rowsOf(rows['background-runs']),
     shadow: rowsOf(rows['report-atomic-shadow']),
     shadowSummary: summarizeShadow(rows['report-atomic-shadow'], windows),
+    // The stored daily sales totals' own shadow (kind sales_daily_shadow): the same rows, the same flip rule, kept apart so neither flip reads the other's evidence.
+    salesDailyShadow: rowsOf(rows['sales-daily-shadow']),
+    salesDailyShadowSummary: summarizeShadow(rows['sales-daily-shadow'], windows),
     queries,
   }
 }
@@ -259,6 +262,11 @@ export function publicLines({ result, bytes }) {
   if (sh) {
     lines.push(['report atomic shadow: {compared} of {days} business days compared; comparisons {n}, match {match}, mismatch {mismatch}, error {error}, write between {between}, refused {refused}', { compared: sh.daysCompared, days: sh.days, n: sh.comparisons, match: sh.match, mismatch: sh.mismatch, error: sh.error, between: sh.writeBetween, refused: sh.refused }])
     lines.push(['report atomic flip ready: {ready}', { ready: sh.flipReady }])
+  }
+  const sd = result.salesDailyShadowSummary
+  if (sd) {
+    lines.push(['sales daily shadow: {compared} of {days} business days compared; comparisons {n}, match {match}, mismatch {mismatch}, error {error}, write between {between}, refused {refused}', { compared: sd.daysCompared, days: sd.days, n: sd.comparisons, match: sd.match, mismatch: sd.mismatch, error: sd.error, between: sd.writeBetween, refused: sd.refused }])
+    lines.push(['sales daily flip ready: {ready}', { ready: sd.flipReady }])
   }
   for (const name of QUERY_NAMES) {
     const q = result.queries[name]
