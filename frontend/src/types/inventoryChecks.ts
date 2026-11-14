@@ -51,6 +51,8 @@ export type InventoryCheckProduct = {
   lot_rows?: InventoryCheckLotRow[]
   /** The row's dates were cut at the plan's limit: the rest load on request ("More dates"). */
   lots_more?: boolean
+  /** Received dates this branch holds at 0 (the row carries them, nothing is read for them): offered behind "Show empty received dates" for units found on a batch the system says is empty. */
+  empty_lot_rows?: InventoryCheckLotRow[]
   /** Branch units that no received date holds (branch total minus the dates), shown read-only; absent when there are none or the dates are not known. */
   unlotted_quantity?: number
   /** ic_wired rows: what the latest count typed per received date (batch_id 0 = the branch total). */

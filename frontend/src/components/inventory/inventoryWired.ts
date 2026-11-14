@@ -136,6 +136,12 @@ function adaptRow(row: Row, raw: Pick<WiredRaw, 'branchId' | 'overlay' | 'lots'>
     })
     // Always set once the list carried the dates (an empty list means no batch holds stock here): the count popover draws from it at first paint and reads nothing unless lots_more.
     product.lot_rows = held
+    // The dates this branch holds at 0 ride along (read from the same row, no request): a counter who finds units on one needs a way to enter them. Never part of "matches stock".
+    const empty = lots.flatMap(lot => {
+      const at = (lot.branches ?? []).find(candidate => Number(candidate.branch_id) === branchId)
+      return at && Number(lot.id) > 0 && !(Number(at.quantity) > 0) ? [{ batchId: Number(lot.id), receivedAt: lot.received_at ?? null, expiry: lot.expiry_date ?? null, quantity: 0, lotCode: lot.lot_code ? String(lot.lot_code) : null, batchNumber: lot.batch_number ?? null }] : []
+    })
+    if (empty.length) product.empty_lot_rows = empty
     if (lots.more) product.lots_more = true
     // Units no received date holds, read-only: the branch total minus the dates (only when every date is known).
     const unlotted = !lots.more && finite(quantity) ? quantity - held.reduce((sum, row) => sum + row.quantity, 0) : 0

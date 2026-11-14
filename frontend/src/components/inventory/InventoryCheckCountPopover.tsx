@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
-import Save from 'lucide-react/dist/esm/icons/save.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
-import { fmtDateOnly } from '../../utils/formatters.ts'
 import type { InventoryCheckLotRow, InventoryCheckLotsAnswer, InventoryCheckProduct, InventoryCheckTranslator } from '../../types/inventoryChecks.ts'
-import { lotCountOf, lotTotals, rowSetPlan, type LotDraft } from './inventoryCheckLots.ts'
+import { lotTotals, type LotDraft } from './inventoryCheckLots.ts'
+import InventoryCheckLotEntries from './InventoryCheckLotEntries.tsx'
 import { finiteQuantity, parseCount, signedDelta } from './InventoryCheckCountEditor.tsx'
 
 // The count popover of one row (the owner, 14 Nov: "clicking check shows the entries, and you enter there. Make it compact"). It opens from the row's status icon and renders its
@@ -50,6 +49,8 @@ export default function InventoryCheckCountPopover({ product, draft, byBatch, lo
   // batches, reads them (one request, this product).
   const carried = Array.isArray(product.lot_rows) && product.lots_more !== true
   const [lots, setLots] = useState<Lots>(!byBatch || !loadLots ? { state: 'ready', rows: [], more: false } : carried ? { state: 'ready', rows: product.lot_rows!, more: false } : { state: 'loading' })
+  // The dates this branch holds at 0, carried by the row: behind "Show empty received dates", never read here, never part of "matches stock".
+  const [emptied, setEmptied] = useState<InventoryCheckLotRow[]>(() => product.empty_lot_rows ?? [])
   const bodyRef = useRef<HTMLDivElement | null>(null)
   // One request when the popover opens. A late answer after it closed is dropped by the abort.
   useEffect(() => {
@@ -71,7 +72,6 @@ export default function InventoryCheckCountPopover({ product, draft, byBatch, lo
   const baseline = dated.dates > 0 ? dated.seen : stock
   const delta = canViewStock && total.kind === 'valid' && typeof baseline === 'number' ? total.value - baseline : null
   const unlotted = batches && !(lots.state === 'ready' && lots.more) && stock !== null ? stock - rows.reduce((sum, row) => sum + row.quantity, 0) : 0
-  const idText = (row: InventoryCheckLotRow) => [row.lotCode ? String(row.lotCode) : '', row.batchNumber ? `#${row.batchNumber}` : ''].filter(Boolean).join(' ')
 
   function onEnter(event: KeyboardEvent<HTMLInputElement>) {
     if (event.nativeEvent.isComposing || event.key !== 'Enter') return
@@ -102,33 +102,9 @@ export default function InventoryCheckCountPopover({ product, draft, byBatch, lo
     <div ref={bodyRef} data-popover-entries className="mt-1 min-w-0">
       {lots.state === 'loading' ? <p data-popover-loading role="status" className="px-1 py-2 text-gray-500 dark:text-gray-400">{tr('inventory_check_popover_loading', 'Loading received dates…')}</p> : null}
       {lots.state === 'failed' ? <p data-popover-failed role="alert" className="px-1 py-2 text-red-700 dark:text-red-300">{tr('inventory_check_popover_failed', 'Received dates could not be loaded. Close and open again.')}</p> : null}
-      {ready && batches ? <ul className="min-w-0 space-y-1" aria-label={tr('inventory_check_lot_dates', 'Received dates')}>
-        {rows.map(row => {
-          const text = draft?.lots?.[String(row.batchId)]?.count ?? ''
-          const typed = lotCountOf(text)
-          const plan = onLotSet ? rowSetPlan(row, text) : null
-          const received = tr('inventory_check_lot_received', 'Received {date}').replace('{date}', row.receivedAt ? fmtDateOnly(row.receivedAt) : '—')
-          const identity = idText(row)
-          // What the latest count typed on this batch, kept in the session: it is still there after a reload.
-          const recorded = canViewCounts ? product.check_lines?.find(line => line.scope === 'lot' && line.batch_id === row.batchId) : undefined
-          const setLabel = plan ? tr('inventory_check_lot_set', 'Set to {count}').replace('{count}', String(plan.after)) : ''
-          return <li key={row.batchId} data-popover-lot={row.batchId} className="flex min-w-0 items-center gap-x-1.5">
-            <span className="min-w-0 flex-1 leading-relaxed">
-              <span className="block truncate font-semibold" title={received}>{row.receivedAt ? fmtDateOnly(row.receivedAt) : '—'}{identity ? <span className="ml-1 font-normal text-gray-500 dark:text-gray-400">{identity}</span> : null}</span>
-              {row.expiry || recorded ? <span className="flex min-w-0 flex-wrap gap-x-2 text-[11px] text-gray-500 dark:text-gray-400">
-                {row.expiry ? <span className="truncate">{tr('expiry', 'Expiry')} {fmtDateOnly(row.expiry)}</span> : null}
-                {recorded ? <span data-popover-lot-recorded className="tabular-nums">{tr('inventory_check_counted', 'Counted')} <strong>{recorded.counted}</strong></span> : null}
-              </span> : null}
-            </span>
-            <span className="shrink-0 tabular-nums text-gray-500 dark:text-gray-400" title={tr('inventory_check_now', 'Now')}>{row.quantity}</span>
-            <input data-popover-count data-popover-lot-count={row.batchId} type="text" inputMode="decimal" autoComplete="off" value={text} readOnly={locked} placeholder={String(row.quantity)} aria-label={`${received}: ${product.name}`} aria-invalid={typed.kind === 'invalid' ? true : undefined}
-              className={`${input} ${typed.kind === 'invalid' ? 'border-red-500' : typed.kind === 'valid' && typed.value !== row.quantity ? 'border-amber-500' : 'border-gray-300 dark:border-gray-600'}`}
-              onChange={event => onLotCount(product, row, event.target.value)} onFocus={event => event.currentTarget.select()} onKeyDown={onEnter} />
-            {onLotSet ? <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center lg:h-9 lg:w-9">{plan ? <button type="button" data-popover-action="set-lot" disabled={locked} className={tool} aria-label={`${setLabel}: ${product.name}`} title={setLabel}
-              onClick={() => { void onLotSet(product, row, text).then(quantity => { if (typeof quantity === 'number') setLots(previous => previous.state === 'ready' ? { ...previous, rows: previous.rows.map(candidate => candidate.batchId === row.batchId ? { ...candidate, quantity } : candidate) } : previous) }) }}><Save className="h-4 w-4" aria-hidden="true" /></button> : null}</span> : null}
-          </li>
-        })}
-      </ul> : null}
+      {ready && batches ? <InventoryCheckLotEntries product={product} rows={rows} emptyRows={carried ? emptied : []} draftLots={draft?.lots} canViewCounts={canViewCounts} locked={locked} tr={tr} inputClass={input} toolClass={tool}
+        onLotCount={(row, value) => onLotCount(product, row, value)} onEnter={onEnter}
+        onLotSet={onLotSet ? (row, value) => { void onLotSet(product, row, value).then(quantity => { if (typeof quantity === 'number') { const apply = (list: InventoryCheckLotRow[]) => list.map(candidate => candidate.batchId === row.batchId ? { ...candidate, quantity } : candidate); setLots(previous => previous.state === 'ready' ? { ...previous, rows: apply(previous.rows) } : previous); setEmptied(apply) } }) } : undefined} /> : null}
       {ready && batches && unlotted > 0 ? <p data-popover-unlotted className="mt-1 px-1 tabular-nums text-gray-600 dark:text-gray-300">{tr('inventory_check_unlotted', 'No received date')}: <strong>{unlotted}</strong></p> : null}
       {ready && batches && lots.state === 'ready' && lots.more ? <p data-popover-more className="mt-1 px-1 leading-relaxed text-amber-800 dark:text-amber-200">{tr('inventory_check_popover_more', 'This product holds more received dates than one count can carry. Count the ones listed.')}</p> : null}
       {ready && !batches ? <div data-popover-single className="flex min-w-0 items-center gap-x-1.5 px-0.5">

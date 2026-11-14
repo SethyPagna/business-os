@@ -283,6 +283,43 @@ try {
     await refused.unmount()
     lotsAnswer = null
   }
+  // ---- A (14 Nov round 2b): units found on a batch the system says is empty. The empty dates are carried by the row, collapsed by default, reachable with one tap, counted like any entry,
+  // never part of "matches stock", and cost no request. ----
+  {
+    const withEmpty = (row: Row): Row => ({ ...withLots(row), lots: [...(withLots(row).lots as Row[]), { id: 11, received_at: '2026-08-01', branches: [{ branch_id: 1, quantity: 0 }] }] })
+    listAnswer = () => listBody([withEmpty(productRow(12, 'Dated product', 8))], { capabilities, summary: { ok: 0, issue: 0, not_checked: 1, total: 1 } })
+    lotReads.length = 0; submissions.length = 0
+    const surface = await mount()
+    await openCount(surface, '12')
+    const lotIds = () => surface.findAll(node => node.getAttribute('data-popover-lot') !== null).map(node => node.getAttribute('data-popover-lot'))
+    assert.deepEqual(lotIds(), ['7', '9'], 'the empty received date is hidden by default')
+    const toggle = surface.find(node => node.getAttribute('data-popover-action') === 'toggle-empty', 'empty toggle')
+    assert.equal(toggle.getAttribute('aria-label'), 'Show empty received dates (1)'); assert.equal(toggle.getAttribute('title'), 'Show empty received dates (1)'); assert.ok(toggle.textContent.includes('(1)'), 'icon plus the count')
+    assert.deepEqual(lotReads, [], 'collapsed: no extra read')
+    await surface.click(toggle)
+    assert.deepEqual(lotIds(), ['7', '9', '11'], 'one tap reaches it, as a normal count entry')
+    assert.deepEqual(lotReads, [], 'expanding reads nothing: the row carried it')
+    await surface.type(dateInput(surface, 11), '2')
+    assert.equal(rowCount(surface, '12').value, '2', 'counted like any entry')
+    assert.equal(statusButton(surface, '12').getAttribute('data-check-status-kind'), 'draft_issue', '2 found where the system had 0')
+    await closeCount(surface)
+    await surface.click(surface.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit'))
+    await surface.click(exact(surface, 'Submit').at(-1)!)
+    assert.deepEqual((submissions[0].lines as Array<{ lots: unknown }>)[0].lots, [{ batchId: 11, scope: 'lot', counted: 2, seen: 0 }], 'the line is written for the date a person typed on')
+    await surface.unmount()
+    // "matches stock" never writes a line for an empty date, even with it expanded
+    submissions.length = 0
+    const second = await mount()
+    await openCount(second, '12')
+    await second.click(second.find(node => node.getAttribute('data-popover-action') === 'toggle-empty', 'empty toggle'))
+    await second.click(second.find(node => node.getAttribute('data-popover-action') === 'matches', 'matches'))
+    await closeCount(second)
+    await second.click(second.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit'))
+    await second.click(exact(second, 'Submit').at(-1)!)
+    assert.deepEqual((submissions[0].lines as Array<{ lots: Array<{ batchId: number }> }>)[0].lots.map(line => line.batchId), [7, 9], 'matches stock writes the stocked dates only')
+    assert.deepEqual(lotReads, [], 'the whole flow read no batch')
+    await second.unmount()
+  }
   // ---- audit G1b: the switch went OFF under an open tab: one re-read, then the same counts go as plain lines (no second refusal) ----
   {
     submissions.length = 0
