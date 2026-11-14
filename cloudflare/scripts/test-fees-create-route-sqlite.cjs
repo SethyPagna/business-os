@@ -123,6 +123,7 @@ const route = loadReal('routes/fees.ts', { '../lib/schemaObjectProbe': require('
   '../lib/audit': { audit: async () => { throw new Error('POST must use its atomic audit statement') } },
   '../lib/permissions': { getPermissionTier: () => 'full', getActionTier: () => 'full' },
   '../durable-objects/broadcastHub': { broadcast: async (...args) => { broadcasts.push(args) } },
+  '../lib/cache': { bumpVersions: async () => {} },
   '../lib/conflictControl': loadReal('lib/conflictControl.ts'),
   '../lib/contactDeleteGuard': loadReal('lib/contactDeleteGuard.ts'),
   '../lib/reviewGate': { maybeQueueForReview: async () => null },

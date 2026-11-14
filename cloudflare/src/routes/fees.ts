@@ -24,6 +24,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { buildAuditStatement, changedFields } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
+import { bumpVersions } from '../lib/cache'
 import { assertRequiredUpdatedAtMatch, EXPECTED_UPDATED_AT_REQUIRED, getExpectedUpdatedAt, hasExpectedUpdatedAtField, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { businessToday } from '../lib/businessDateWindow'
@@ -785,6 +786,8 @@ app.post('/', async (c) => {
     return c.json({ error: 'Expense commit could not be verified. Retry the exact saved request.', code: 'write_outcome_unknown' }, 503)
   }
   const response = feeOperationReceiptResponse(committedReceipt)
+  // The sales report snapshot (stats strip, cached 20 s under the sales key) reads fees, so a fee write moves the sales version. Awaited before the response and the broadcast.
+  await bumpVersions(c.env, ['sales'])
   c.executionCtx.waitUntil(broadcast(c.env, 'fees', { type: 'created', id: committedReceipt.fee_id }))
   c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
     type: 'fees',
@@ -932,6 +935,8 @@ app.put('/:id', async (c) => {
     throw error
   }
 
+  // The sales report snapshot (stats strip, cached 20 s under the sales key) reads fees, so a fee write moves the sales version. Awaited before the response and the broadcast.
+  await bumpVersions(c.env, ['sales'])
   c.executionCtx.waitUntil(broadcast(c.env, 'fees', { type: 'updated', id }))
   return c.json({ fee })
 })
@@ -1007,6 +1012,8 @@ app.delete('/:id', async (c) => {
     }
     throw error
   }
+  // The sales report snapshot (stats strip, cached 20 s under the sales key) reads fees, so a fee write moves the sales version. Awaited before the response and the broadcast.
+  await bumpVersions(c.env, ['sales'])
   c.executionCtx.waitUntil(broadcast(c.env, 'fees', { type: 'deleted', id }))
   return c.json({ success: true })
 })

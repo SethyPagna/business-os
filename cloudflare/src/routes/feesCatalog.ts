@@ -4,6 +4,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { buildAuditStatement, currentRequestDevice } from '../lib/audit'
 import { getActionTier } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
+import { bumpVersions } from '../lib/cache'
 import { canViewCourierCost } from '../lib/courierCostAccess'
 import { whereActiveSales, type SalesFilters } from '../lib/salesAnalytics'
 import { courierPayoutExpressions } from '../lib/shiftReconciliation'
@@ -266,6 +267,8 @@ app.post('/types/rename', async (c) => {
     if (isUniqueViolation(error)) return fail(c, 409, 'type_exists', 'That type already exists.')
     throw error
   }
+  // Moves fee rows the sales report snapshot reads: bump sales (awaited) before the broadcast. Skipped when no row changed.
+  if (linked > 0) await bumpVersions(c.env, ['sales'])
   c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'type_rename', from: source.name, to }))
   return c.json({ success: true, changed: linked, name: to })
 })
@@ -502,6 +505,8 @@ app.post('/labels/replace', async (c) => {
     if (isUniqueViolation(error)) return fail(c, 409, 'label_exists', 'That label already exists.')
     throw error
   }
+  // Moves fee rows the sales report snapshot reads: bump sales (awaited) before the broadcast. Skipped when no row changed.
+  if (sourceUses > 0) await bumpVersions(c.env, ['sales'])
   c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'label_replace', from: sourceName, to: toName }))
   return c.json({ success: true, changed: sourceUses, merged: merge, label: toName })
 })
@@ -529,6 +534,8 @@ app.post('/labels/classify', async (c) => {
     { sql: 'UPDATE fee_labels SET fee_type = @feeType, updated_at = @now WHERE name_key = @key', params: { feeType, now, key } },
     buildAuditStatement(user.id, user.username || null, 'classify', 'fee_label', null, { label: name, fee_type: feeType, changed: changing }, undefined, labelEntityIn(key)),
   ])
+  // Moves fee rows the sales report snapshot reads: bump sales (awaited) before the broadcast. Skipped when no row changed.
+  if (changing > 0) await bumpVersions(c.env, ['sales'])
   c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'label_classify', label: name, fee_type: feeType }))
   return c.json({ success: true, changed: changing, label: name, fee_type: feeType })
 })
