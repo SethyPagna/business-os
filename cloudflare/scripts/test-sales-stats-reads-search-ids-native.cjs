@@ -46,6 +46,9 @@ const MUTANTS = {
     { name: 'm-trunc-guard', file: KERNEL, from: '  if (rows.length > REPORT_SCOPE_IDS_MAX) return unresolved', to: '  if (false) return unresolved' },
     { name: 'm-trunc-slice', file: KERNEL, from: '  const ids = rows.map((row) => Number(row.id))', to: '  const ids = rows.slice(0, REPORT_SCOPE_IDS_MAX).map((row) => Number(row.id))' },
   ],
+  // every id page carries the whole list again (page k scans and seeks all N ids: quadratic in the match) / a page's slice that loses an id
+  idsNotPaged: [{ name: 'm-unpaged', file: KERNEL, from: 'const REPORT_SALE_ID_ORDER = /^\\+?s\\.id$/', to: 'const REPORT_SALE_ID_ORDER = /^never$/' }],
+  sliceDropsAnId: [{ name: 'm-slice-short', file: KERNEL, from: 'JSON.stringify(ids.slice(start, end))', to: 'JSON.stringify(ids.slice(start, end - 1))' }],
   keepsOneId: [{ name: 'm-one-id', file: KERNEL, from: '`${subquery[1]} LIMIT @reportScopeLimit`', to: '`${subquery[1]} LIMIT @reportScopeLimit - @reportScopeLimit + 1`' }],
   emptyMatchIsNoFilter: [{ name: 'm-empty', file: KERNEL, from: '  if (ids.some((id) => !Number.isSafeInteger(id))) return unresolved', to: '  if (ids.some((id) => !Number.isSafeInteger(id))) return unresolved\n  if (!ids.length) return { scope: undefined, ids: null }' }],
   resolverIgnoresTheScope: [{ name: 'm-resolve-none', file: KERNEL, from: RESOLVE, to: 'const pinned = { scope: undefined, ids: null }' }],
@@ -76,6 +79,7 @@ async function urls(ctx, world) {
     'receipt prefix': recentReceipt.slice(0, 5),
     'customer name': 'Customer 12',
     'customer broad': 'Customer',
+    'every receipt': 'R0',
     'product name': product,
     'product word': product.split(/\s+/)[0],
     'phone full': '0000000012',
@@ -147,7 +151,10 @@ async function idUrls(ctx, world) {
   return out
 }
 
-const SHAPES_HEAVY = (name) => /customer broad|receipt prefix/.test(name)
+// A match that is nearly the whole of a narrow window pays for its two resolves (2R) and saves little (4(R-N) on the sale pages, N ids against a window scan of R ~ 1.6N): the net 2R-4N is
+// 5-7% of a 15K-row read on the seed ("Customer" over 30d: 15,831 -> 16,667; every receipt: 14,115 -> 15,037), and 30% under the pre-lane route. Every other shape, and every unwindowed broad match, must read no more than the oracle.
+const WINDOWED_BROAD = /(customer broad|every receipt|receipt prefix) \| (30d|today)$/
+const WINDOWED_BROAD_PRICE = 1.08
 const MUTANT_SHAPES = [
   'stats customer name | all-time', 'stats customer name | 30d', 'stats product name | today', 'stats khmer | all-time', 'stats latin folded | all-time', 'stats no match | all-time',
   'stats no match | 30d', 'stats receipt exact | all-time', 'stats customer broad | all-time', 'stats OR | all-time', 'stats customer + cashier none',
@@ -203,7 +210,7 @@ const pick = (res, names) => Object.fromEntries(names.map((n) => [n, res[n]]))
 
   await step('rows: every filtered request reads fewer rows than the oracle, and the searches far fewer', () => {
     for (const [o, n] of [[oldOff, newOff], [oldOn, newOn]]) {
-      for (const name of SEARCH_NAMES) assert.ok(n[name].rr <= o[name].rr * (/customer broad|receipt prefix/.test(name) ? 1.15 : 1), `${name}: rows ${n[name].rr} > ${o[name].rr}`)
+      for (const name of SEARCH_NAMES) assert.ok(n[name].rr <= o[name].rr * (WINDOWED_BROAD.test(name) ? WINDOWED_BROAD_PRICE : 1), `${name}: rows ${n[name].rr} > ${o[name].rr}`)
       for (const name of ['stats customer name | all-time', 'stats customer name | 30d', 'stats product name | all-time', 'stats khmer | all-time', 'stats latin folded | all-time', 'stats no match | all-time', 'stats receipt exact | all-time', 'stats phone full | all-time']) {
         assert.ok(n[name].rr < o[name].rr * 0.6, `${name}: expected well under the oracle (${n[name].rr} vs ${o[name].rr})`)
       }
@@ -281,16 +288,33 @@ const pick = (res, names) => Object.fromEntries(names.map((n) => [n, res[n]]))
     })
   }
 
+  // ---------------------------------------------------------------- near the cap: the broad matches (about 15,800 of 15,800 sales) with the cap just above them
+  // A resolved list is paged by its cursor, so a match near the cap reads linearly (one walk over the ids), never more than the subquery it replaces.
+  const NEAR_CAP = { name: 'cap-near', file: KERNEL, from: 'export const REPORT_SCOPE_IDS_MAX = 50_000', to: 'export const REPORT_SCOPE_IDS_MAX = 16_000' }
+  const BROAD = ['stats customer broad | all-time', 'stats customer broad | 30d', 'stats every receipt | all-time', 'stats every receipt | 30d', 'stats receipt prefix | all-time']
+  const nearOff = await runUrls({ urls: subset(BROAD), patches: [NEAR_CAP], regimes: true, prepare })
+  const nearOn = await runUrls({ urls: subset(BROAD), patches: [NEAR_CAP], regimes: true, prepare, switches: ATOMIC })
+  await step('near the cap: a broad match under it reads through the id list, answers like the oracle and reads no more rows than the oracle (OFF and ON)', () => {
+    for (const [res, o] of [[nearOff, oldOff], [nearOn, oldOn]]) {
+      assert.deepEqual(bodies(res), bodies(pick(o, BROAD)))
+      for (const name of BROAD) assert.ok(res[name].ids && !res[name].subquery, name + ' must resolve to an id list under the cap')
+      for (const name of BROAD) assert.ok(res[name].rr <= o[name].rr * (WINDOWED_BROAD.test(name) ? WINDOWED_BROAD_PRICE : 1), `${name}: near-cap rows ${res[name].rr} > oracle ${o[name].rr}`)
+    }
+  })
+
   // ---------------------------------------------------------------- required reds
-  const caught = async (label, patches, { against, shapes = MUTANT_SHAPES, switches, ids = false, calls = false } = {}) => {
+  const caught = async (label, patches, { against, shapes = MUTANT_SHAPES, switches, ids = false, calls = false, rowsOver } = {}) => {
     const res = await runUrls({ urls: ids ? idUrls : subset(shapes), patches, switches, prepare, regimes: true })
     let red = false
     const base = against
     try { assert.deepEqual(bodies(ids ? pickIds(res) : res), bodies(ids ? pickIds(base) : pick(base, shapes))) } catch { red = true }
     if (!red && calls) for (const name of shapes) if (res[name].calls > newOn[name].calls + 1) red = true
+    if (!red && rowsOver) for (const name of shapes) if (res[name].rr > rowsOver[name].rr * 1.02) red = true
     await step(`required red: ${label} is caught`, () => assert.ok(red, 'the mutant passed the parity checks'))
   }
   await caught('the resolver cuts an over-long match silently (cap 40)', MUTANTS.silentTruncation, { against: oldOff, shapes: ['stats customer broad | all-time', 'stats customer broad | 30d', 'stats customer name | all-time', 'stats product name | today'] })
+  await caught('every page carries the whole id list again (quadratic reads)', MUTANTS.idsNotPaged, { against: oldOff, shapes: BROAD, rowsOver: newOff })
+  await caught('each page slice of the id list drops its last id (sales dropped)', MUTANTS.sliceDropsAnId, { against: oldOff, shapes: BROAD })
   await caught('the resolver keeps one id', MUTANTS.keepsOneId, { against: oldOff })
   await caught('a search that matches nothing reads as no filter', MUTANTS.emptyMatchIsNoFilter, { against: oldOff, shapes: ['stats no match | all-time', 'stats no match | 30d', 'stats customer name | all-time'] })
   await caught('the resolver ignores the scope it is given (no filter at all)', MUTANTS.resolverIgnoresTheScope, { against: oldOff, shapes: ['stats no match | all-time', 'stats customer name | all-time', 'stats customer + cashier none'] })

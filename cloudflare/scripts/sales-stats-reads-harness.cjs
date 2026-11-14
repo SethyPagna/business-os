@@ -38,7 +38,7 @@ async function runUrls({ urls, patches = [], switches, tier = 'free', fixture = 
       if (regimes) {
         // which scope the report statements carried: the id list (json_each) or the subquery that re-runs the filter (matched_sale)
         const stmts = ((await world.last()).stmts || []).map((s) => String(s.raw))
-        out[name].ids = stmts.some((s) => /\.id IN \(SELECT value FROM json_each\(\?\d+\)\)/.test(s))
+        out[name].ids = stmts.some((s) => /\.id IN \(SELECT value FROM json_each\(\?\d+\)(?: WHERE value > \?\d+)?\)/.test(s))
         out[name].subquery = stmts.some((s) => /IN \(SELECT matched_sale\.id FROM sales matched_sale/.test(s))
       }
     }

@@ -1106,6 +1106,43 @@ function salesListScopedWhere(where: string[], params: Record<string, unknown>):
  */
 export const REPORT_SCOPE_IDS_MAX = 50_000
 export const REPORT_SCOPE_IDS_MAX_BYTES = 800_000
+/** The bound value that carries a resolved id list (salesIdsScope); reportKeysetRows hands each page only the slice of it that page can return. */
+const REPORT_SCOPE_IDS_PARAM = 'reportScope_ids'
+/** A group pages on a sale id (its order expression is the sale id, plain or unary-plus): the only page cursor that is a position in the scope's id list. */
+const REPORT_SALE_ID_ORDER = /^\+?s\.id$/
+/**
+ * The resolved ids of a keyset read, ascending, or null when the statement does not carry a resolved list (or one that is not strictly ascending safe integers: then the page keeps
+ * the whole list, exact but not cheaper). With the whole list in every page, `s.id IN (SELECT value FROM json_each(@ids)) AND s.id > @after ORDER BY s.id LIMIT 2000` scans the list
+ * (every element is a row read) and seeks every sale in it on EVERY page, so a match of N sales read about N*N/2000 rows: a broad search, or a match near the cap, cost as much as the
+ * subquery the list replaced. Each page after the first carries only the ids it can still return (a slice sized at the density seen so far), so the walk reads each id about once.
+ */
+// The last list parsed: a request reads the same list in every group of both passes, and a parse of a list near the cap is not free on the Free plan's CPU budget.
+let reportScopeIdsParsed: { json: string; ids: number[] | null } | null = null
+function reportScopeIdSlices(selectSql: string, idExpr: string, params: Record<string, unknown>): number[] | null {
+  const json = params[REPORT_SCOPE_IDS_PARAM]
+  if (typeof json !== 'string' || !REPORT_SALE_ID_ORDER.test(idExpr) || !selectSql.includes(`json_each(@${REPORT_SCOPE_IDS_PARAM})`)) return null
+  if (reportScopeIdsParsed?.json === json) return reportScopeIdsParsed.ids
+  let ids: number[] | null = null
+  try {
+    const parsed: unknown = JSON.parse(json)
+    if (Array.isArray(parsed)) {
+      let previous = 0
+      ids = parsed.every((id) => typeof id === 'number' && Number.isSafeInteger(id) && id > previous && ((previous = id), true)) ? parsed as number[] : null
+    }
+  } catch { ids = null }
+  reportScopeIdsParsed = { json, ids }
+  return ids
+}
+/** The index of the first id above `after`, searching `ids` (ascending) from `from`. */
+function reportFirstIdAfter(ids: readonly number[], from: number, after: number): number {
+  let low = from, high = ids.length
+  while (low < high) {
+    const middle = (low + high) >>> 1
+    if (ids[middle] > after) high = middle
+    else low = middle + 1
+  }
+  return low
+}
 
 /** A scope that is exactly this id set: `alias.id IN (SELECT value FROM json_each(@reportScope_ids))`, evaluated per statement without re-running a text match. */
 function salesIdsScope(ids: readonly number[], json = JSON.stringify(ids)): SalesReportScalarScope {
@@ -1247,24 +1284,51 @@ async function reportKeysetRows(
 ): Promise<ReportScalarRow[]> {
   const output: ReportScalarRow[] = []
   let afterId = startAfterId
+  // A resolved id list is handed to each page as a slice (see reportScopeIdSlices). The first page carries the whole list (a match that fits one page, or a window that cuts most of it,
+  // costs one statement exactly as before); after that a slice is the ids a page needs at the density seen so far, so the list is read about once in total, not once per page.
+  const ids = reportScopeIdSlices(selectSql, idExpr, params)
+  let start = ids ? reportFirstIdAfter(ids, 0, afterId) : 0
+  let sliceLength = ids ? ids.length - start : 0
   for (;;) {
     const pageSize = maxReceipts === undefined ? REPORT_MONEY_PAGE_SIZE
       : Math.min(REPORT_MONEY_PAGE_SIZE, maxReceipts - output.length + 1)
+    let pageParams = params
+    let end = 0
+    if (ids) {
+      if (start >= ids.length) break
+      end = Math.min(start + sliceLength, ids.length)
+      pageParams = { ...params, [REPORT_SCOPE_IDS_PARAM]: JSON.stringify(ids.slice(start, end)) }
+    }
     const page = await db.prepare(`${selectSql} AND ${idExpr} > @reportAfterId ORDER BY ${idExpr} LIMIT @reportPageSize`)
-      .all<ReportScalarRow>({ ...params, reportAfterId: afterId, reportPageSize: pageSize })
-    if (!page?.length) break
-    if (maxReceipts !== undefined && output.length + page.length > maxReceipts) throw new SalesReportExportTooLargeError()
-    rowBudget.count += page.length
-    if (page.length > REPORT_MONEY_PAGE_SIZE || rowBudget.count > REPORT_MONEY_MAX_ROWS) {
+      .all<ReportScalarRow>({ ...pageParams, reportAfterId: afterId, reportPageSize: pageSize })
+    if (!page?.length && !ids) break
+    const rows = page ?? []
+    if (maxReceipts !== undefined && output.length + rows.length > maxReceipts) throw new SalesReportExportTooLargeError()
+    rowBudget.count += rows.length
+    if (rows.length > REPORT_MONEY_PAGE_SIZE || rowBudget.count > REPORT_MONEY_MAX_ROWS) {
       throw new ReportMoneyPrecisionError('too_many_rows')
     }
-    for (const row of page) {
+    for (const row of rows) {
       const id = Number(row.id)
       if (!Number.isSafeInteger(id) || id <= afterId) throw new ReportMoneyPrecisionError('unsupported_row')
       afterId = id
       output.push(row)
     }
-    if (page.length < pageSize) break
+    if (!ids) {
+      if (rows.length < pageSize) break
+      continue
+    }
+    const sliceIds = end - start
+    if (rows.length >= pageSize) {
+      // The page stopped at its limit: the ids after the last row it returned are still to be read, and the ids it spent on pageSize rows say how many the next page needs.
+      const next = reportFirstIdAfter(ids, start, afterId)
+      sliceLength = Math.max(REPORT_MONEY_PAGE_SIZE, Math.ceil((next - start) * 1.25))
+      start = next
+    } else {
+      // The whole slice was read and yielded rows.length rows: the next slice is sized for a page of rows at that density (no rows: everything left, in one statement).
+      sliceLength = rows.length ? Math.max(REPORT_MONEY_PAGE_SIZE, Math.ceil(pageSize * sliceIds / rows.length * 1.25)) : ids.length
+      start = end
+    }
   }
   return output
 }
