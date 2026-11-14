@@ -617,6 +617,10 @@ check('deploy with a gate verdict publishes the verified build and never builds:
     fs.writeFileSync(path.join(dist, 'extra.js'), 'x')
     refusedNothingRan(deployVerified(), /the gate tested/, 'a file was added')
     build()
+    fs.rmSync(dist, { recursive: true })
+    fs.mkdirSync(dist)
+    refusedNothingRan(deployVerified(), /frontend\/dist cannot be read/, 'the build folder exists but is empty, so its digest cannot be taken')
+    build()
 
     const lastChar = digest.endsWith('0') ? `${digest.slice(0, -1)}1` : `${digest.slice(0, -1)}0`
     const firstChar = (digest.startsWith('0') ? '1' : '0') + digest.slice(1)
