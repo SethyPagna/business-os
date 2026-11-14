@@ -161,7 +161,7 @@ try {
     assert.equal(lastRead.createdFrom, undefined, `${language}: sessions filter on days, never on time bounds`)
     // The sessions date row is its own: it must not filter the Products tab.
     const productsBefore = productReads.length
-    await list.click(list.button(pack.products))
+    await list.click(list.button(pack.inventory))
     assert.ok(productReads.length > productsBefore && productReads.at(-1)?.startDate === undefined && productReads.at(-1)?.endDate === undefined, `${language}: the Products tab has no sales date range at all`)
     await list.unmount()
 
@@ -204,7 +204,7 @@ try {
     const none = await mount()
     assert.ok(none.text().includes(pack.inventory_check_sessions_empty), `${language}: no sessions yet`)
     await none.click(exact(none, pack.inventory_check_start_page)[0])
-    assert.equal(none.button(pack.products).getAttribute('aria-pressed'), 'true', `${language}: the Sessions empty state's Count action leads to Products`)
+    assert.equal(none.button(pack.inventory).getAttribute('aria-pressed'), 'true', `${language}: the Sessions empty state's Count action leads to Products`)
     await none.unmount()
     goTo('sessions')
     const filteredNone = await mount()

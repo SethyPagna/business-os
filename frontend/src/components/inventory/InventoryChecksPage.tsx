@@ -53,7 +53,7 @@ import InfoHint from '../shared/InfoHint.tsx'
 import SoleBranchLabel from '../shared/SoleBranchLabel.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
-import PaginationControls from '../shared/PaginationControls.tsx'
+import PaginationControls, { TopPager } from '../shared/PaginationControls.tsx'
 import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
@@ -1103,7 +1103,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     </IconAction> : null}
   </div>
   // The page controls, drawn above the list and below it from the SAME state: one request per page step, the true total, no second fetch. Count sessions page exactly like products.
-  const pagerNode = (position: 'top' | 'bottom') => fresh ? <div data-inventory-check-pager={position} className="min-w-0"><fieldset disabled={controlsLocked} className="min-w-0" data-inventory-check-pager-lock><PaginationControls page={page} pageSize={pageSize} totalItems={(section === 'sessions' ? sessions?.total : data?.total) ?? 0} onPageChange={value => { if (!controlsLocked) { setPage(value); setScan(null) } }} onPageSizeChange={value => { if (!controlsLocked) { setPageSize(value); setPage(1); setScan(null) } }} t={t} compact /></fieldset></div> : null
+  const pager = fresh ? <fieldset disabled={controlsLocked} className="min-w-0" data-inventory-check-pager-lock><PaginationControls page={page} pageSize={pageSize} totalItems={(section === 'sessions' ? sessions?.total : data?.total) ?? 0} onPageChange={value => { if (!controlsLocked) { setPage(value); setScan(null) } }} onPageSizeChange={value => { if (!controlsLocked) { setPageSize(value); setPage(1); setScan(null) } }} t={t} compact /></fieldset> : null
+  const pagerNode = (position: 'top' | 'bottom') => pager ? <div data-inventory-check-pager={position} className="min-w-0">{position === 'top' ? <TopPager>{pager}</TopPager> : pager}</div> : null
   // The context bar: where the person is (the one branch, or the open session) and what they can do from here.
   const contextBar = <div className="flex min-w-0 flex-1 items-center gap-1" data-inventory-check-context>
     {sessionId ? sessionBar : <>
@@ -1114,7 +1115,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
 
   return <div className="flex min-h-0 min-w-0 flex-1 flex-col">
     <HubSectionNav pageId="inventory" active={section} sections={[
-      { id: 'products', label: t('products') }, { id: 'sessions', label: t('inventory_check_sessions') }, { id: 'issues', label: t('issues') },
+      { id: 'products', label: t('inventory') }, { id: 'sessions', label: t('inventory_check_sessions') }, { id: 'issues', label: t('issues') },
     ]} onChange={id => { if (!busy && !createAttempt.current) { setSection(id as Section); setScan(null) } }}>
       <div className="page-scroll min-w-0 space-y-2 px-3 pb-3" data-inventory-check-page>
         {/* Pinned: dates (with the Stats chip), then search / scan / Filters beside the context bar, then the column header. Open stat cards scroll inside the cap. */}

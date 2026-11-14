@@ -1,7 +1,7 @@
 import { Fragment, type ReactNode } from 'react'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Modal from '../shared/Modal.tsx'
-import PaginationControls from '../shared/PaginationControls.tsx'
+import PaginationControls, { TopPager } from '../shared/PaginationControls.tsx'
 import type { InventoryCheckHistoryEvent } from '../../api/inventoryChecksTransport.ts'
 import { fmtDateTime24 } from '../../utils/formatters.ts'
 import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
@@ -58,9 +58,9 @@ export default function InventoryCheckHistoryFloat({ page, history, error, onPag
   t: Translator
 }) {
   // Page controls above the events and below them, from the same page state (one request per step, the true total).
-  const pager = (position: 'top' | 'bottom') => history?.page === page ? <div data-inventory-check-history-pager={position}><PaginationControls page={page} pageSize={20} totalItems={history.total} onPageChange={onPage} t={t} compact /></div> : null
+  const pager = history?.page === page ? <PaginationControls page={page} pageSize={20} totalItems={history.total} onPageChange={onPage} t={t} compact /> : null
   return <Modal title={label(t, 'history', 'History')} onClose={onClose} keyboard size="sm" unsavedChanges="read-only">
-    {pager('top')}
+    {pager ? <div data-inventory-check-history-pager="top"><TopPager>{pager}</TopPager></div> : null}
     {error ? <div role="alert" className="flex items-center justify-between gap-2 text-xs text-red-700">
       <span className="min-w-0 break-words">{error}</span>
       <button type="button" className={toolbarIconButtonClassName} aria-label={label(t, 'retry', 'Retry')} title={label(t, 'retry', 'Retry')} onClick={onRetry}><RotateCcw className="h-4 w-4" aria-hidden="true" /></button>
@@ -72,6 +72,6 @@ export default function InventoryCheckHistoryFloat({ page, history, error, onPag
       : history.items.length
         ? <ul className="divide-y">{history.items.map(event => <HistoryRow key={event.id} event={event} t={t} />)}</ul>
         : <p className="py-3 text-xs text-gray-500">{label(t, 'inventory_check_history_empty', 'No history yet.')}</p>}
-    {pager('bottom')}
+    {pager ? <div data-inventory-check-history-pager="bottom">{pager}</div> : null}
   </Modal>
 }

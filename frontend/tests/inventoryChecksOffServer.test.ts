@@ -139,7 +139,7 @@ try {
   neither(wire.slice(issuesFrom), 'Issues and its page 2 (OFF)')
 
   // ---- OFF: back to Products, then inside a session ----
-  await products.click(products.button('products'))
+  await products.click(products.button('inventory'))
   noError(products, 'back to Products'); assert.equal(last().query.has('state'), false, 'Products does not carry the Issues key back')
   await products.click(products.button('sessions'))
   await products.click(products.button(/./, products.find(node => node.getAttribute('data-inventory-check-session') === 'check-1', 'session row')))
