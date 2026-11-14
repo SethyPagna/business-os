@@ -4,6 +4,46 @@ Read `progress.md` before planning or editing. It is the live coordination and d
 
 For substantial work, explicitly read `META-HARNESS.md` and follow its portable harness locator. If the harness is unavailable, report that limit and manually confirm the checkout, governing instructions, workflow, ownership, recoverable checkpoint and verification evidence. A pointer does not install or activate tools, skills or plugins, or grant additional permissions.
 
+## Core Rule
+
+The same text as progress.md → Golden Rules → The Core Rule (test-core-rule-parity-pure.cjs keeps them identical).
+
+### The Core Rule
+
+*Set by the owner on 14 Nov 2026. It never changes and is never relaxed. It binds every person, session and agent, for every change: code, data, tests, workflows and docs. No deadline, convenience or smaller diff outweighs it. Every other rule in this file applies it.*
+
+Every change meets the highest standard on all six points at once:
+
+1. **Quality.** It is correct in every edge case and fixes the root cause, not the symptom. A write either fully succeeds or is reported as failed or partial. The code is readable and maintainable (the Golden Rules priority order in progress.md).
+2. **Quality control.**
+   - The writer never certifies their own work; an independent reviewer does.
+   - A test only counts if it would fail on the wrong implementation.
+   - Every claim is verified on the committed commit, in both packages, and the evidence is recorded.
+   - A deploy needs a green full gate on the exact commit.
+   - "Should work" is never evidence.
+3. **Standards and concepts.** It follows the project's conventions and the owner's recorded decisions (`docs/owner-decisions.md`, the decision hubs). It keeps the established concepts the same on every sibling surface:
+   - the one revenue definition;
+   - product identity by barcode;
+   - batch + branch stock;
+   - the Cambodia business day;
+   - both language packs.
+4. **Requirements.** It delivers exactly what the owner asked, fully, with no dead ends or trapping flows. Anything inferred is flagged, not shipped.
+5. **Efficiency, targeted and scalable.** It is the smallest correct change at the right layer, using the fewest D1 reads, writes, calls and CPU that are still correct:
+   - indexed seeks, not scans;
+   - batched writes;
+   - load on demand, summary first;
+   - a cost that stays flat as data grows;
+   - within Cloudflare Free limits, every number taken from `getPlanLimits(env)`.
+
+   Efficiency never ships wrong data.
+6. **Process efficiency.**
+   - Work never idles: while one task waits (a deploy, a gate), the next proceeds.
+   - Nothing proven is re-done.
+   - Use the fewest round trips.
+   - Finish what is running before starting more.
+
+When two points seem to conflict, correctness wins, then the order above. A change that misses any point is not done.
+
 ## Workflow
 
 - Start rigorous work with the `work-mode` skill: it picks a playbook (bug, feature, lane, refute, checkpoint, recover, forensics, perf, cleanup, council, loop) and routes to the other skills. Index: `agent-team/skills/INDEX.md`.
