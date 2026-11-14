@@ -45,7 +45,10 @@ check('the four mark-only triggers exist with the SQL migration 0308 wrote, each
   assert.equal(triggers.filter((t) => t.name.startsWith('sales_daily_')).length, 4, 'exactly four')
 })
 
+// 'fees' is covered ONLY for a fee that names a sale (sale_id, or a sale's cancel_fee_id): the 0120 fee triggers bump that sale. See FEES_NOT_COVERED below.
 const COVERED = ['sales', 'sale_items', 'sale_item_batch_allocations', 'returns', 'return_items', 'return_item_batch_allocations', 'fees', 'sale_amendments']
+// Fee rows that mark NO day today, listed so nobody reads 'fees covered' as more than it is.
+const FEES_NOT_COVERED = ['a fees row with a delivery contact and no sale (a courier fee), keyed by fee_date, read by the deliveryFees group of the kernel (salesAnalytics.ts) for the per-courier totals', 'a fees row with no sale at all (an ordinary expense), which the kernel does not read as a sale fee']
 const event = (sql) => /\bAFTER\s+(INSERT|UPDATE|DELETE)\b/i.exec(sql)?.[1]?.toUpperCase()
 const revisionTriggers = triggers.filter((t) => /INSERT INTO sale_write_revisions/i.test(t.sql))
 
@@ -112,6 +115,18 @@ check('nothing writes a covered table with REPLACE in src, ops or any migration 
   scan(path.join(ROOT, 'migrations'), ['.sql'], (f) => path.basename(f) >= '0120')
   assert.deepEqual(hits, [], 'REPLACE on a covered table')
   assert.ok(pattern.test('INSERT OR REPLACE INTO sale_items (a) VALUES (1)') && pattern.test('replace into returns(x)'), 'control: the pattern sees the forms it bans')
+})
+
+check('courier fees are explicitly NOT covered, and no courier or delivery-contact total may enter the stored payload without a fee_date trigger', () => {
+  assert.equal(FEES_NOT_COVERED.length, 2)
+  const feeDateTriggers = triggers.filter((t) => t.name.startsWith('sales_daily_') && t.tbl_name === 'fees')
+  const code = (file) => fs.readFileSync(path.join(ROOT, 'src/lib', file), 'utf8').replace(/\r\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  const NAMES = /courier|delivery_?contact|deliveryContact|delivery_contact_id/i
+  const stored = ['salesDailyTotals.ts', 'salesDailyKernel.ts', 'salesDailyCron.ts'].filter((file) => NAMES.test(code(file)))
+  if (stored.length) assert.ok(feeDateTriggers.length > 0 && feeDateTriggers.every((t) => /fee_date/.test(t.sql)), 'the stored-day code names ' + stored.join(', ') + ': a courier or delivery-contact total is stored, so a fees trigger that marks the fee_date day is required first')
+  else assert.equal(feeDateTriggers.length, 0, 'a fees mark trigger exists but nothing stored needs it: classify it')
+  // control: the guard really fires on a payload that names a courier total
+  assert.ok(NAMES.test("money: { courierCostUsd: '1' }") && NAMES.test('deliveryContactTotals'), 'control: the names the guard looks for')
 })
 
 check('the revision table is the one every mark trigger hangs off: it keeps its rowid and its sale_id key', () => {

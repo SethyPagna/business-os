@@ -124,7 +124,9 @@ const MATRIX = [
   ['return_item_batch_allocations update (undo, product merge)', [['return_item_batch_allocations', 'update']], 'returns', () => run(`UPDATE return_item_batch_allocations SET quantity = 2 WHERE id = ${ids.retalloc_a}`), [DAY1]],
   ['return_item_batch_allocations delete (return edit)', [['return_item_batch_allocations', 'delete']], 'returns', () => run(`DELETE FROM return_item_batch_allocations WHERE id = ${ids.retalloc_a}`), [DAY1]],
   ['fees insert linked to a sale (delivery fee, cancel fee, bulk status)', [['fees', 'insert']], 'fees', () => insert('fees', { sale_id: ids.sale_b, fee_type: 'delivery', amount_usd: 2, branch_id: 1, fee_date: '2026-11-14' }), [DAY2]],
-  ['fees insert with NO sale (an ordinary expense): nothing to mark', [['fees', 'insert']], 'fees', () => insert('fees', { fee_type: 'rent', amount_usd: 20, branch_id: 1, fee_date: '2026-11-14' }), []],
+  // NOT COVERED, and honest about it: a fees row with NO sale marks nothing, and that includes a COURIER fee (a delivery contact, keyed by fee_date). Slice 1 stores no courier or
+  // delivery-contact total, so nothing stored goes stale; a slice that stores one needs a fee_date trigger first (test-sales-daily-trigger-coverage-pure.cjs enforces it).
+  ['fees insert with NO sale (an expense, or a courier fee keyed by fee_date): NOT covered, nothing to mark because nothing sale-less is stored', [['fees', 'insert']], 'fees', () => insert('fees', { fee_type: 'rent', amount_usd: 20, branch_id: 1, fee_date: '2026-11-14' }), []],
   ['fees update (edit, type rename, delivery relabel, contact merge)', [['fees', 'update']], 'fees', () => run(`UPDATE fees SET amount_usd = 3 WHERE id = ${ids.fee_c}`), [DAY3]],
   ['fees delete (delete, review apply, bulk status)', [['fees', 'delete']], 'fees', () => run(`DELETE FROM fees WHERE id = ${ids.fee_a}`), [DAY1]],
   ['sale_amendments insert (delivery fee, actual cost, delivery added, tax)', [['sale_amendments', 'insert']], 'edit', () => insert('sale_amendments', { sale_id: ids.sale_b, kind: 'delivery_fee_changed' }), [DAY2]],
