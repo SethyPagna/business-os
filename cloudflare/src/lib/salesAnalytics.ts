@@ -736,7 +736,9 @@ export function whereActiveSales(alias: string, f: SalesFilters) {
   // simply matches nothing.
   const status = typeof f.status === 'string' ? f.status.trim() : ''
   if (status) {
-    clauses.push(`COALESCE(${alias}.sale_status, 'completed') = @status`)
+    // 'cancelled' is the one status no NULL maps to (COALESCE only turns NULL into 'completed'), so for it the plain column is exactly the same set --
+    // and lets idx_sales_status_created_pg answer it; the wrapped column cannot (a full walk of every sale on an undated report, once per pass).
+    clauses.push(status === 'cancelled' ? `${alias}.sale_status = @status` : `COALESCE(${alias}.sale_status, 'completed') = @status`)
     params.status = status
   } else {
     clauses.push(`COALESCE(${alias}.sale_status, 'completed') <> 'cancelled'`)
@@ -1287,6 +1289,9 @@ function reportSelectForPurpose(
 
 type ReportReadGroupKind = 'sales' | 'voidSales' | 'items' | 'returns' | 'returnItems' | 'deliveryFees'
 type ReportReadGroups = Pick<SalesReportSnapshot, ReportReadGroupKind>
+// The cancelled group keys its pages on a non-rowid expression: with `s.id > @after ORDER BY s.id` the planner walks the primary key of every sale (and, with table
+// statistics, still does after the status test is a plain equality); with the unary plus it seeks idx_sales_status_created_pg for the few cancelled rows and sorts them.
+const REPORT_VOID_ID_EXPR = '+s.id'
 type ReportReadGroup = { kind: ReportReadGroupKind; sql: string; idExpr: string; params: Record<string, unknown>; columns: string[] }
 type ReportReadBand = { sql: string; params: Record<string, unknown> }
 type ReportReadPlan = { groups: ReportReadGroup[]; primary: { sql: string; params: Record<string, unknown> }; preciseSales: boolean; preciseReturns: boolean; itemBand?: ReportReadBand }
@@ -1389,7 +1394,7 @@ async function buildSalesReportReadPlan(
   groups.push({ kind: 'sales', sql: `SELECT ${saleSelect.sql}
     FROM sales s WHERE ${primary.sql}`, idExpr: 's.id', params: primary.params, columns: saleSelect.columns })
   if (options.maxReceipts === undefined) groups.push({ kind: 'voidSales', sql: `SELECT ${voidSelect.sql}
-    FROM sales s WHERE ${voids.sql}`, idExpr: 's.id', params: voids.params, columns: voidSelect.columns })
+    FROM sales s WHERE ${voids.sql}`, idExpr: REPORT_VOID_ID_EXPR, params: voids.params, columns: voidSelect.columns })
   const itemFrom = datedDashboard ? 'sales s CROSS JOIN sale_items si ON si.sale_id=s.id'
     : 'sale_items si NOT INDEXED CROSS JOIN sales s ON s.id=si.sale_id'
   if (!options.headerOnly) groups.push({ kind: 'items', sql: `SELECT ${itemSelect.sql}
@@ -1903,7 +1908,7 @@ async function readSalesReportPassLegacy(
   const voidSales = options.maxReceipts !== undefined ? [] : await reportKeysetRows(db, `SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name,
       s.cashier_id,s.cashier_name,s.customer_id,s.customer_name,s.customer_phone,s.payment_method,
       ${customerAnonymous} AS customer_is_anonymous
-    FROM sales s WHERE ${voids.sql}`, 's.id', voids.params, rowBudget)
+    FROM sales s WHERE ${voids.sql}`, REPORT_VOID_ID_EXPR, voids.params, rowBudget)
   const items = options.headerOnly ? [] : await readReportSaleItems(db, f, primary, rowBudget, `SELECT si.id,si.sale_id,${itemColumn('product_id','NULL')},${itemColumn('product_name',"''")},si.quantity,
       ${itemColumn('total_usd','0')},si.cost_price_usd,${itemColumn('product_discount_usd','0')},${itemColumn('manual_discount_usd','0')}
     FROM sale_items si NOT INDEXED CROSS JOIN sales s ON s.id=si.sale_id WHERE ${primary.sql}`)

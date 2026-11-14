@@ -28,7 +28,7 @@ function canReadSales(user: SessionUser): boolean {
   return getActionTier(user, 'sales', 'view') !== 'none'
 }
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
-import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionsWithFallback } from '../lib/cache'
 import { cacheIdentity } from '../lib/cache'
 import { cachedPhoneJson, phoneCacheVariant } from '../lib/phoneCache'
 import { phoneSearchAccessOf } from '../lib/phoneAccess'
@@ -233,8 +233,8 @@ const SALES_READ_CACHE_TTL_SECONDS = 20
  *
  * - It NEVER fails the caller. A sale that is already committed must not be
  *   reported as failed because a settings row would not write, so every error
- *   is swallowed and logged. Callers hand this to `waitUntil`, off the
- *   response path.
+ *   is swallowed and logged. Callers await it before responding, so the
+ *   version bump that follows a real addition lands before the response.
  * - It reads and re-writes the whole array rather than appending, because the
  *   setting IS a JSON array; `mergePaymentMethods` keeps the existing order
  *   and the operator's own capitalisation, so a concurrent Settings edit can
@@ -273,7 +273,8 @@ async function getSalesReadCacheVersion(env: Env): Promise<string> {
   // write to any dependency makes the old response unreachable immediately.
   // 'stock': the stats strip's removal loss and profit after losses read the stock movements a Set writes; a narrow Set (stock_bump_narrow) bumps 'stock', not 'products'.
   const namespaces = ['sales', 'returns', 'customers', 'products', 'stock'] as const
-  const versions = await Promise.all(namespaces.map((namespace) => getVersionWithFallback(env, namespace)))
+  // One KV read per namespace and, for the namespaces KV does not hold, ONE D1 statement for all of them (the same tokens as five single reads, which cost up to five calls).
+  const versions = await getVersionsWithFallback(env, namespaces)
   return versions.map((version, index) => `${namespaces[index]}:${version}`).join('|')
 }
 
@@ -2040,13 +2041,13 @@ app.post('/', async (c) => {
     return c.json({ id: saleId, receiptNumber: resolvedReceiptNumber, duplicate: true, offline_owner: offlineOwner, client_request_id: clientRequestId, sale: await authoritativeSaleSnapshot(db,saleId) })
   }
   // A method typed at the till joins the configured list (user, Sep 4 2026).
-  // Off the response path: the sale is already recorded and must not be held
-  // up, or failed, by a settings write. `settings` is bumped only when the
-  // merge actually added something, so a normal checkout costs no invalidation.
-  c.executionCtx.waitUntil(
-    registerUsedPaymentMethods(c.env, { payment_method: paymentMethod, payment_details: effectivePaymentDetails })
-      .then((added) => (added.length ? bumpVersion(c.env, 'settings') : undefined)),
-  )
+  // `settings` is bumped only when the merge actually added something, so a normal
+  // checkout costs no invalidation. The settings bump is awaited like the sale's own (lib/cache.ts: bump before responding): a peer that refetches Settings on the push must not re-cache the
+  // old payment-method list under the old version. Neither step can fail the sale: registerUsedPaymentMethods swallows its own errors and the bump is guarded here.
+  const addedPaymentMethods = await registerUsedPaymentMethods(c.env, { payment_method: paymentMethod, payment_details: effectivePaymentDetails })
+  if (addedPaymentMethods.length) {
+    try { await bumpVersion(c.env, 'settings') } catch (error) { console.error('[sales] settings cache version bump failed after a new payment method was registered', error) }
+  }
   c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
     type: 'sales',
     // Receipt-summary shape (lib/telegram.ts formatSaleTelegramLines): status,
@@ -6514,7 +6515,9 @@ async function readStripMoneyRows(db:ReturnType<typeof getDb>,table:'sales'|'ret
   const rows:Record<string,unknown>[]=[]
   let after=0
   for(;;){
-    const page=await db.prepare(`SELECT id,${amount},${version} FROM ${table} WHERE ${where} AND id>@stripAfter ORDER BY id LIMIT ${REPORT_MONEY_PAGE_SIZE}`)
+    // `+id` (a unary plus: the same value, no longer a rowid): `id>@stripAfter ORDER BY id` lets the planner walk the primary key of the whole table and test the window on every row
+    // (34,745 rows for one day on the lab seed); with the plus it seeks the window on its date index and sorts the few rows it finds. The pages and their order are unchanged.
+    const page=await db.prepare(`SELECT id,${amount},${version} FROM ${table} WHERE ${where} AND +id>@stripAfter ORDER BY +id LIMIT ${REPORT_MONEY_PAGE_SIZE}`)
       .all<Record<string,unknown>>({...params,stripAfter:after})
     for(const row of page){
       const id=Number(row.id)
