@@ -607,6 +607,15 @@ check('deploy.yml: every call of the reuse kit ends in exit $LASTEXITCODE, so a 
   assert.ok(!/continue-on-error/.test(deployYml))
 })
 
+check('deploy.yml: the reuse build step is the kit\'s -Part build, with no secret, and the digest check directly follows it', () => {
+  const steps = stepsOf(deployJob)
+  const i = steps.findIndex((s) => s.name === 'Build the app (the gate run proved its tests)')
+  assert.ok(i > 0)
+  assert.match(steps[i].text, /\n {8}run: node kit\/ops\/scripts\/deploy-kit\/release\.cjs gates -CI -ReleaseDir release -Records "\$env:RELEASE_RECORDS_ROOT" -Part build\n/)
+  assert.ok(!/secrets\.|env:/.test(steps[i].text.replace(/\$env:/g, '')), 'the build step has no env block and no secret')
+  assert.strictEqual(steps[i + 1].name, 'Check the built app is the app the gate tested', 'the digest check comes right after the build')
+})
+
 check('deploy.yml: the reuse steps hold no Cloudflare secret and take inputs only through env; the token reaches only the collect step and the cross-run downloads', () => {
   for (const s of [...stepsOf(deployJob).filter((x) => x.text.includes(REUSE_ONLY)), ...stepsOf(gateCheckJob)]) {
     assert.ok(!/secrets\./.test(s.text), `${s.name} sees a secret`)
