@@ -32,6 +32,8 @@ const MUTANTS = {
   voidIsCaseInsensitive: [{ name: 'm-void-nocase', file: KERNEL, from: VOID_NEW, to: "status === 'cancelled' ? `lower(trim(${alias}.sale_status)) = @status` : `COALESCE(${alias}.sale_status, 'completed') = @status`" }],
   stripPagesBackwards: [{ name: 'm-strip-desc', file: SALES, from: STRIP_PAGE, to: 'ORDER BY ${stripId} DESC LIMIT' }],
   // an hours window tests datetime(created_at), which no index serves: the plus there turns every 2,000-row page into a full scan and a sort
+  // every dated window on `+id` again: past about 90 days each page re-scans the window (+38% at a year)
+  stripDatedAlwaysPlus: [{ name: 'm-strip-dated-plus', file: SALES, from: 'const STRIP_PLUS_ID_MAX_DAYS=90', to: 'const STRIP_PLUS_ID_MAX_DAYS=100000' }],
   stripContinuousPlus: [{ name: 'm-strip-continuous-plus', file: SALES, from: STRIP_NEW, to: "const stripId='+id'" }],
 }
 const urls = (ctx) => {
@@ -46,6 +48,12 @@ const urls = (ctx) => {
     // continuous (hours) windows, as Inventory sends them: more than one 2,000-row page on the seed
     'strip continuous 30d': `/api/sales/stats-strip?${w(29, 0)}&createdFrom=${encodeURIComponent(day(ctx, 29) + ' 00:00:00')}&createdTo=${encodeURIComponent(day(ctx, -1) + ' 00:00:00')}`,
     'strip continuous 120d': `/api/sales/stats-strip?${w(119, 0)}&createdFrom=${encodeURIComponent(day(ctx, 119) + ' 00:00:00')}&createdTo=${encodeURIComponent(day(ctx, -1) + ' 00:00:00')}`,
+    // windows of more than one 2,000-row page: the paging itself (the cursor) is exercised, and refused (422) if it is wrong
+    // the Sales strip presets (quarter, half year, year): a dated window must never read more than the pre-lane route, whatever its length
+    'strip dated 90d': `/api/sales/stats-strip?${w(89, 0)}`,
+    'strip dated 180d': `/api/sales/stats-strip?${w(179, 0)}`,
+    'strip dated 365d': `/api/sales/stats-strip?${w(364, 0)}`,
+    'strip dated 120d': `/api/sales/stats-strip?${w(119, 0)}`,
     'strip continuous today': `/api/sales/stats-strip?${w(0, 0)}&createdFrom=${encodeURIComponent(day(ctx, 0) + ' 00:00:00')}&createdTo=${encodeURIComponent(day(ctx, -1) + ' 00:00:00')}`,
     'stats all-time': '/api/sales/stats',
     'stats today': `/api/sales/stats?${w(1, 0)}`,
@@ -61,6 +69,8 @@ const NAMES = Object.keys(urls({ anchorDate: '2026-01-01' }))
 // 'strip branch' already seeks idx_sales_branch_created (branch + window) in both builds, so it is compared for parity and never-more-rows only
 const REDUCED = ['strip today', 'strip 30d', 'stats all-time']
 // a continuous window keeps the rowid walk: exactly the oracle's rows, never above (the plus there re-scans the table on every page)
+// dated windows past the plus-id crossover keep the rowid walk: exactly the oracle's rows (the plus there re-scans the window on every page)
+const LONG_DATED = ['strip dated 120d', 'strip dated 180d', 'strip dated 365d']
 const CONTINUOUS = ['strip continuous 30d', 'strip continuous 120d', 'strip continuous today']
 
 ;(async () => {
@@ -94,6 +104,7 @@ const CONTINUOUS = ['strip continuous 30d', 'strip continuous 120d', 'strip cont
       // 'stats cancelled' reads the same few cancelled rows through either index (a handful of rows apart), so it gets a small allowance; nothing else may read more
       for (const name of NAMES) assert.ok(n[name].rr <= o[name].rr + (name === 'stats cancelled' ? 12 : 0), `${name}: rows ${n[name].rr} > oracle ${o[name].rr}`)
       for (const name of CONTINUOUS) assert.ok(n[name].rr <= o[name].rr, `${name}: a continuous window must keep the rowid walk (${n[name].rr} vs oracle ${o[name].rr})`)
+      for (const name of LONG_DATED) assert.ok(n[name].rr <= o[name].rr, `${name}: a dated window past the crossover must not read more than the pre-lane route (${n[name].rr} vs oracle ${o[name].rr})`)
       for (const name of REDUCED) assert.ok(n[name].rr < o[name].rr * 0.9, `${name}: expected clearly fewer rows (${n[name].rr} vs ${o[name].rr})`)
     })
     await step(`calls (report_atomic ${mode}): never above the oracle`, () => { for (const name of NAMES) assert.ok(n[name].calls <= o[name].calls, `${name}: calls ${n[name].calls} > ${o[name].calls}`) })
@@ -117,7 +128,7 @@ const CONTINUOUS = ['strip continuous 30d', 'strip continuous 120d', 'strip cont
     let red = false
     try { assert.deepEqual(bodies(res), bodies(base)) } catch { red = true }
     if (!red) for (const name of REDUCED) if (res[name].rr > good[name].rr * 1.3) red = true
-    if (!red) for (const name of CONTINUOUS) if (res[name].rr > good[name].rr * 1.05) red = true
+    if (!red) for (const name of [...CONTINUOUS, ...LONG_DATED]) if (res[name].rr > good[name].rr * 1.05) red = true
     await step(`required red: ${label} is caught`, () => assert.ok(red, 'the mutant passed the parity and rows checks'))
   }
   await caught('the strip pages on the rowid again', MUTANTS.stripKeepsRowid)
@@ -126,6 +137,7 @@ const CONTINUOUS = ['strip continuous 30d', 'strip continuous 120d', 'strip cont
   await caught('NULL counted as cancelled', MUTANTS.voidNullIsCancelled)
   await caught('cancelled matched case-insensitively', MUTANTS.voidIsCaseInsensitive)
   await caught('the strip pages backwards', MUTANTS.stripPagesBackwards)
+  await caught('every dated window pages on +id again (a year reads +38% rows)', MUTANTS.stripDatedAlwaysPlus)
   await caught('an hours (continuous) window pages on +id again: a full scan per page', MUTANTS.stripContinuousPlus)
 
   // The plan, with and without table statistics (production has them; a fresh database does not).

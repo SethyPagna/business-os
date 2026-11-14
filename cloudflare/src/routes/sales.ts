@@ -6518,6 +6518,13 @@ export function gateSalesCourierMoney(row:Record<string,unknown>,canViewCourier:
   return publicRow
 }
 
+// A dated strip window longer than this walks the rowid like the pre-lane route. `+id` re-scans and sorts the WHOLE window on every 2,000-row page (about W^2/2000
+// rows for W in the window); the rowid walk is one pass over the table. On the lab seed the two cross at about 92 days (a 90-day window reads 0.97x the rowid walk, 100 days
+// 1.05x, 365 days 1.43x), and production holds fewer sales per day than the seed, so its crossover sits later: at or below 90 days `+id` wins, above it the rowid walk does.
+const STRIP_PLUS_ID_MAX_DAYS=90
+function stripWindowDays(startDate:string,endDate:string):number {
+  return (Date.parse(`${endDate}T00:00:00Z`)-Date.parse(`${startDate}T00:00:00Z`))/86400000+1
+}
 async function readStripMoneyRows(db:ReturnType<typeof getDb>,table:'sales'|'returns',where:string,params:Record<string,unknown>,continuous:boolean) {
   const version=await hasColumn(db,table,'money_precision_version')?'money_precision_version':'0 AS money_precision_version'
   const amount=table==='sales'?'total_usd,sale_status':'total_refund_usd'
@@ -6600,9 +6607,11 @@ app.get('/stats-strip', async (c) => {
           AND COALESCE(return_scope, 'customer') = 'customer'
           AND COALESCE(status, 'completed') <> 'cancelled'
           ${query.branchId ? 'AND branch_id = @branchId' : ''}`
+    // a continuous (hours) window or a long dated one pages on the rowid; a short dated one seeks its date index (STRIP_PLUS_ID_MAX_DAYS)
+    const rowidWalk=Boolean(continuousWindow)||!(stripWindowDays(startDate,endDate)<=STRIP_PLUS_ID_MAX_DAYS)
     const readActivity=async()=>{
-      const status=await readStripMoneyRows(db,'sales',statusClauses.join(' AND '),rangeParams,Boolean(continuousWindow))
-      const returns=await readStripMoneyRows(db,'returns',returnWhere,rangeParams,Boolean(continuousWindow))
+      const status=await readStripMoneyRows(db,'sales',statusClauses.join(' AND '),rangeParams,rowidWalk)
+      const returns=await readStripMoneyRows(db,'returns',returnWhere,rangeParams,rowidWalk)
       if(status.length+returns.length>REPORT_MONEY_MAX_ROWS)throw new ReportMoneyPrecisionError('too_many_rows')
       return {status,returns}
     }
