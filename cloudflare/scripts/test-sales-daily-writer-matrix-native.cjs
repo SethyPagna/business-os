@@ -19,33 +19,9 @@ const { DatabaseSync } = require('node:sqlite')
 
 const ROOT = path.join(__dirname, '..')
 const KERNEL_TABLES = ['sales', 'sale_items', 'returns', 'return_items', 'fees', 'sale_amendments', 'sale_payment_events', 'sale_item_batch_allocations', 'return_item_batch_allocations']
-const T = KERNEL_TABLES.join('|')
-const SITE_PATTERNS = [
-  ['insert', new RegExp(`\\bINSERT\\s+(?:OR\\s+\\w+\\s+)?INTO\\s+(${T})\\b`, 'gi')],
-  ['update', new RegExp(`\\bUPDATE\\s+(?:OR\\s+\\w+\\s+)?(${T})(?:\\s+(?:AS\\s+)?\\w+)?\\s+SET\\b`, 'gi')],
-  ['delete', new RegExp(`\\bDELETE\\s+FROM\\s+(${T})\\b`, 'gi')],
-]
-const DYNAMIC = /\b(UPDATE|INSERT\s+(?:OR\s+\w+\s+)?INTO|DELETE\s+FROM)\s+(?:OR\s+\w+\s+)?[$][{]/gi
-// Comments are not write sites: whole-line // comments and block comments are dropped before the scan.
-const strip = (text) => text.replace(/\r\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((line) => !/^\s*\/\//.test(line)).join('\n')
-
-function scanSource() {
-  const found = new Map()
-  const add = (file, table, verb) => found.set(`${file} ${table} ${verb}`, (found.get(`${file} ${table} ${verb}`) || 0) + 1)
-  const walk = (dir) => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name)
-      if (entry.isDirectory()) { walk(full); continue }
-      if (!full.endsWith('.ts')) continue
-      const file = path.relative(ROOT, full).replace(/\\/g, '/')
-      const text = strip(fs.readFileSync(full, 'utf8'))
-      for (const [verb, pattern] of SITE_PATTERNS) for (const m of text.matchAll(pattern)) add(file, m[1].toLowerCase(), verb)
-      for (const m of text.matchAll(DYNAMIC)) add(file, 'DYNAMIC', m[1].trim().split(/\s+/)[0].toLowerCase())
-    }
-  }
-  walk(path.join(ROOT, 'src'))
-  return found
-}
+const scanner = require('./harness/sales-daily-write-scan.cjs')
+// The scanner is a TOKENIZER (harness/sales-daily-write-scan.cjs), not a comment-stripping regex: see the fixtures in test-sales-daily-write-scan-pure.cjs.
+const scanSource = (override) => scanner.scanSource(ROOT, KERNEL_TABLES, override)
 module.exports = { scanSource, KERNEL_TABLES }
 if (require.main !== module) return
 
@@ -65,12 +41,12 @@ check('STATIC: every SQL write site on a kernel table is listed with its design 
   for (const [key, group] of Object.entries(LISTED)) assert.ok(typeof group === 'string' && group.length > 3, `${key}: no design group`)
 })
 
-check('STATIC control: the scanner sees an aliased UPDATE, a dynamic table and an INSERT OR REPLACE (so a quiet scan is not a blind one)', () => {
+check('STATIC control: the scanner sees an aliased UPDATE, a dynamic table, a REPLACE, a concatenated write and a quoted table (so a quiet scan is not a blind one)', () => {
   const sample = 'UPDATE sales AS s SET x = 1; INSERT OR REPLACE INTO sale_items (a) VALUES (1); DELETE FROM returns WHERE id = 1; UPDATE ${table} SET y = 2; UPDATE sale_items si SET z = 1'
-  const seen = []
-  for (const [verb, pattern] of SITE_PATTERNS) for (const m of sample.matchAll(pattern)) seen.push(`${m[1]} ${verb}`)
-  assert.deepEqual(seen.sort(), ['returns delete', 'sale_items insert', 'sale_items update', 'sales update'])
-  assert.equal([...sample.matchAll(DYNAMIC)].length, 1)
+  const seen = scanner.scanText('const q = `' + sample + '`', KERNEL_TABLES).map((site) => `${site.table} ${site.verb}`)
+  assert.deepEqual(seen.sort(), ['DYNAMIC update', 'returns delete', 'sale_items insert', 'sale_items update', 'sales update'])
+  assert.deepEqual(scanner.scanText("const q = 'UPDATE ' + table + ' SET total_usd = 0'", KERNEL_TABLES), [{ table: 'DYNAMIC', verb: 'update' }])
+  assert.deepEqual(scanner.scanText('const q = `UPDATE main."sales" SET total_usd = 0`', KERNEL_TABLES), [{ table: 'sales', verb: 'update' }])
 })
 
 // ---- BEHAVIOUR ------------------------------------------------------------------------------------------------------------------------------------------------

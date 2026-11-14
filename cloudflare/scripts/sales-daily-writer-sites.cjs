@@ -5,6 +5,8 @@
 // seen; the groups that say "no kernel table" were read and never name one.
 // scripts/test-sales-daily-writer-matrix-native.cjs fails when a site exists that is not here, and when one here no longer exists.
 module.exports = {
+  'src/lib/backup.ts DYNAMIC delete': 'wholesale: backup restore clears every table of the backup set (DELETE FROM qid(table)) in RESTORE MODE, so no mark trigger runs -- the data epoch rotates at restore entry (routes/backups.ts) and before release: every stored day is old_epoch until the cron re-covers',
+  'src/lib/backup.ts DYNAMIC insert': 'wholesale: backup restore re-inserts every table of the backup set (INSERT INTO qid(table)) in RESTORE MODE, so no mark trigger runs -- the data epoch rotates at restore entry and before release: every stored day is old_epoch until the cron re-covers',
   'src/lib/branchCutoverCapture.ts DYNAMIC update': 'edit: cutover label fill -- sales update through a dynamic table: revision trigger on the sale',
   'src/lib/branchWrites.ts DYNAMIC update': 'edit: branch rename -- sales update through a dynamic table: revision trigger on the sale',
   'src/lib/bulkDeleteEngine.ts DYNAMIC delete': 'no kernel table: bulk delete covers products and contacts only -- never names a kernel table',
@@ -18,9 +20,13 @@ module.exports = {
   'src/lib/dataIntegrity.ts sales update': 'edit: integrity repair -- revision trigger on the sale',
   'src/lib/datedStockCountApply.ts DYNAMIC update': 'no kernel table: dated stock counts -- never names a kernel table',
   'src/lib/ephemeralRetention.ts DYNAMIC delete': 'no kernel table: retention of logs and sessions -- never names a kernel table',
+  'src/lib/importEngine.ts DYNAMIC insert': 'no kernel table: the contact import writes customers, suppliers and delivery_contacts only (table = job.type) -- never names a kernel table',
+  'src/lib/importEngine.ts DYNAMIC update': 'no kernel table: the contact import writes customers, suppliers and delivery_contacts only (table = job.type) -- never names a kernel table',
   'src/lib/importRetention.ts DYNAMIC delete': 'no kernel table: import staging retention -- never names a kernel table',
   'src/lib/inventoryCheckSessions.ts DYNAMIC update': 'no kernel table: inventory check sessions -- never names a kernel table',
   'src/lib/legacySubtotalRepair.ts sales update': 'edit: legacy subtotal repair -- revision trigger on the sale',
+  'src/lib/productWrites.ts DYNAMIC insert': 'no kernel table: product row writes (every caller passes the products table; checked by grep) -- never names a kernel table',
+  'src/lib/productWrites.ts DYNAMIC update': 'no kernel table: product row writes (every caller passes the products table; checked by grep) -- never names a kernel table',
   'src/lib/returnBulkAction.ts returns update': 'returns: cancel and restore, replacement-sale credit -- revision triggers on the return and the sale',
   'src/lib/returnBulkAction.ts sales update': 'returns: cancel and restore, replacement-sale credit -- revision triggers on the return and the sale',
   'src/lib/returnExchangeCreate.ts returns insert': 'returns: exchange v1 creates the replacement sale and the return -- revision triggers on the sale and the return',
@@ -107,6 +113,7 @@ module.exports = {
   'src/routes/sales.ts sales insert': 'create and edit: POST /api/sales, status, cancel, cancel fee, historical line -- revision triggers on the sale, lines, allocations and fees',
   'src/routes/sales.ts sales update': 'create and edit: POST /api/sales, status, cancel, cancel fee, historical line -- revision triggers on the sale, lines, allocations and fees',
   'src/routes/settings.ts sales update': 'edit: payment-method rename over history -- revision trigger on the sale (aliased UPDATE)',
+  'src/routes/system.ts DYNAMIC delete': 'wholesale: reset-data, reset-section and factory reset delete each table of a configured list, the sale tables among them (DELETE FROM "table") -- delete triggers fire (not restore mode); the data epoch rotates afterwards',
   'src/routes/system.ts return_item_batch_allocations delete': 'wholesale: reset-data and factory reset delete the sale tables -- delete triggers; the data epoch rotates afterwards',
   'src/routes/system.ts return_items delete': 'wholesale: reset-data and factory reset delete the sale tables -- delete triggers; the data epoch rotates afterwards',
   'src/routes/system.ts returns delete': 'wholesale: reset-data and factory reset delete the sale tables -- delete triggers; the data epoch rotates afterwards',
