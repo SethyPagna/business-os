@@ -730,9 +730,11 @@ async function readCurrent(db: D1Compat, policy: ShiftPolicy, userId: number, br
  * end the drawer would be an administrator finding it in Reports.
  */
 async function readPreviousOpen(db: D1Compat, policy: ShiftPolicy, userId: number, branchId: number | null) {
+  // `+scope_mode` (here and in readStaleDrawersToAlert) keeps the planner on the open-shift / business_date indexes: without it migration 0306's (scope_mode, user_id, ...) index
+  // wins on two equalities and walks every shift the account ever opened. Pinned by test-migration-0306-shift-adjacent-indexes-pure.cjs.
   const accountClause = policy.scope_mode === 'per_account' ? 'AND user_id = @userId' : ''
   return db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions
-    WHERE scope_mode = @scopeMode
+    WHERE +scope_mode = @scopeMode
       AND business_date < ${localTodayExpr()}
       AND closed_at IS NULL AND cancelled_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM shift_sessions later WHERE later.parent_shift_id = shift_sessions.id)
@@ -752,7 +754,7 @@ async function readStaleDrawersToAlert(db: D1Compat, policy: ShiftPolicy, userId
     ? 'AND seen.user_id = shift_sessions.user_id'
     : `AND (seen.branch_id IS shift_sessions.branch_id OR (${BRANCH_ACTIVE_SQL}) = 0)`
   return db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions
-    WHERE scope_mode = @scopeMode
+    WHERE +scope_mode = @scopeMode
       AND business_date < ${localTodayExpr()}
       AND closed_at IS NULL AND cancelled_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM shift_sessions later WHERE later.parent_shift_id = shift_sessions.id)
