@@ -12,6 +12,16 @@
 # read production is kept out of the log (release.cjs -CI).
 #
 # Setup, click by click: docs/setup/release-setup-guide.md.
+#
+# Gate reuse (input gate_run_id): the full test sweep is the slow part, and the
+# Gate workflow already runs it, sharded, on the same kind of runner. When a Gate
+# run id is given, this workflow does not repeat the sweep. It first proves, through
+# the GitHub API, that the run is gate.yml of this repository, finished with every
+# job green (browser suite included), tested exactly this full commit id, ran with
+# a compatible release kit and is under 7 days old (ops/scripts/deploy-kit/gate-reuse.cjs,
+# pinned by cloudflare/scripts/test-deploy-gate-reuse-pure.cjs). Any failed check
+# stops the deploy; there is no weaker fallback. With the input empty, the full
+# sweep runs here exactly as before.
 name: Deploy
 
 on:
@@ -35,6 +45,11 @@ on:
         required: true
         default: true
         type: boolean
+      gate_run_id:
+        description: Optional. Id of a finished green Gate run for exactly this full commit id; skips the repeat test sweep (empty = run the full sweep here)
+        required: false
+        default: ''
+        type: string
       confirm:
         description: Type DEPLOY to confirm
         required: true
@@ -42,6 +57,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: production-deploy
@@ -109,6 +125,33 @@ jobs:
           $subject = git log -1 --format=%s
           Write-Output "Releasing $sha  $subject"
 
+      - name: Check the gate run to reuse
+        if: ${{ inputs.gate_run_id != '' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GATE_RUN_ID: ${{ inputs.gate_run_id }}
+          DEPLOY_REF: ${{ inputs.ref }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          node kit/ops/scripts/deploy-kit/gate-reuse.cjs collect --repo "$env:REPOSITORY" --run-id "$env:GATE_RUN_ID" --deploy-ref "$env:DEPLOY_REF" --release release --kit kit --out "$env:RUNNER_TEMP/gate-collected.json"
+          exit $LASTEXITCODE
+
+      - name: Download the gate verdict
+        if: ${{ inputs.gate_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: gate-verdict
+          run-id: ${{ inputs.gate_run_id }}
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/gate-verdict
+
+      - name: Check the gate verdict
+        if: ${{ inputs.gate_run_id != '' }}
+        run: |
+          node kit/ops/scripts/deploy-kit/gate-reuse.cjs decide --collected "$env:RUNNER_TEMP/gate-collected.json" --verdict "$env:RUNNER_TEMP/gate-verdict/gate-verdict.json"
+          exit $LASTEXITCODE
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -139,6 +182,7 @@ jobs:
 
       # The service-worker safety tests drive a real Chromium.
       - name: Install the test browser (frontend)
+        if: ${{ inputs.gate_run_id == '' }}
         working-directory: release/frontend
         run: npx playwright install chromium
 
@@ -146,9 +190,22 @@ jobs:
         id: record_release
         run: node kit/ops/scripts/deploy-kit/release.cjs prepare -CI -ReleaseDir release -Records "$env:RELEASE_RECORDS_ROOT"
 
+      - name: Keep the gate verdict with the release records
+        if: ${{ inputs.gate_run_id != '' }}
+        run: |
+          node kit/ops/scripts/deploy-kit/gate-reuse.cjs evidence --collected "$env:RUNNER_TEMP/gate-collected.json" --verdict "$env:RUNNER_TEMP/gate-verdict/gate-verdict.json" --out "$env:RELEASE_RECORDS_ROOT/gate-reuse"
+          exit $LASTEXITCODE
+
+      # The gate run proved the tests for this exact commit. The build is still
+      # made here, without a Cloudflare secret, because it is what gets published.
+      - name: Build the app (the gate run proved its tests)
+        if: ${{ inputs.gate_run_id != '' }}
+        run: node kit/ops/scripts/deploy-kit/release.cjs gates -CI -ReleaseDir release -Records "$env:RELEASE_RECORDS_ROOT" -Part build
+
       # The tests run the released commit's own code, so no Cloudflare secret
       # is given to this step.
       - name: Safety tests (every test file on its own, retried on timeout)
+        if: ${{ inputs.gate_run_id == '' }}
         run: node kit/ops/scripts/deploy-kit/release.cjs gates -CI -ReleaseDir release -Records "$env:RELEASE_RECORDS_ROOT" -Jobs 2
 
       - name: Safety snapshot (restore point and row counts)

@@ -52,7 +52,7 @@ function check(name, work) { work(); passed++; checks.push(name) }
     assert.match(current, /if: always\(\) && steps.export_records.outcome == 'success'\n\s+uses: actions\/upload-artifact@v4/)
     assert.match(current, /path: \$\{\{ env.RELEASE_RECORDS_OUTPUT \}\}\n\s+if-no-files-found: error\n\s+retention-days: 3/)
     assert.ok(current.includes('Join-Path $env:RUNNER_TEMP "release-records-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.enc.json"'))
-    assert.equal((current.match(/-Records "\$env:RELEASE_RECORDS_ROOT"/g) || []).length, 5)
+    assert.equal((current.match(/-Records "\$env:RELEASE_RECORDS_ROOT"/g) || []).length, 6, "prepare, sweep, reuse build, snapshot, deploy, live (the migrations step passes it as two arguments)")
     assert.ok(current.includes("'-Records', \"$env:RELEASE_RECORDS_ROOT\""))
     assert.ok(current.includes('-Jobs 2') && current.includes('if ($env:RUN_MIGRATIONS -ne \'true\')'))
   })

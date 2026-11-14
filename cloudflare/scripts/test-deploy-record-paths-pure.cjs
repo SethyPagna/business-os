@@ -9,6 +9,13 @@ const workflow = fs.readFileSync(path.join(root, '.github/workflows/deploy.yml')
 const original = cp.execFileSync('git', ['show', 'c22a22e61ddeb4a8ab89d1b8f3ca8864b70d43f3:.github/workflows/deploy.yml'], { cwd: root, encoding: 'utf8' }).replace(/\r\n/g, '\n')
 let passed = 0
 function check(name, action) { action(); passed++; console.log(`PASS ${name}`) }
+// The gate_run_id feature adds steps and `if:` lines but changes no existing step. Taking exactly those
+// back out must give the original steps byte for byte, so the pin on every other step stays as strict as before.
+const GATE_REUSE_STEPS = ['Check the gate run to reuse', 'Download the gate verdict', 'Check the gate verdict', 'Keep the gate verdict with the release records', 'Build the app \\(the gate run proved its tests\\)']
+function withoutGateReuse(source) {
+  const added = new RegExp(`(?:      #.*\\n)*      - name: (?:${GATE_REUSE_STEPS.join('|')})\\n(?:        .*\\n|\\n(?=        ))*\\n?`, 'g')
+  return source.replace(added, '').replace(/^ {8}if: \$\{\{ inputs\.gate_run_id [!=]= '' \}\}\n/gm, '')
+}
 function jobEnvironment(source) { return source.match(/^    env:\n((?:      .*\n)*)/m)?.[1] || '' }
 function initializer(source) {
   const block = source.match(/^      - name: Initialize release record paths\n        run: \|\n((?:          .*\n|\n)*)/m)
@@ -26,7 +33,7 @@ check('confirmation precedes initialization and encryption protects every produc
   assert.ok(workflow.indexOf('Initialize release record paths') < workflow.indexOf('Check out the release kit'))
   assert.ok(workflow.indexOf('Verify encrypted record protection') < workflow.indexOf('Record the release'))
   const originalSteps = original.slice(original.indexOf('      - name: Check out the release kit'))
-  assert.equal(workflow.slice(workflow.indexOf('      - name: Check out the release kit')), originalSteps)
+  assert.equal(withoutGateReuse(workflow.slice(workflow.indexOf('      - name: Check out the release kit'))), originalSteps)
 })
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'business-os-record paths-'))
 const files = []
