@@ -12,8 +12,9 @@ const { ATOMIC, applyFixture, day, runUrls, bodies, step, log, finish } = requir
 
 const SALES = 'src/routes/sales.ts'
 const KERNEL = 'src/lib/salesAnalytics.ts'
-const STRIP_NEW = 'AND +id>@stripAfter ORDER BY +id LIMIT'
-const STRIP_OLD = 'AND id>@stripAfter ORDER BY id LIMIT'
+const STRIP_NEW = "const stripId=continuous?'id':'+id'"
+const STRIP_OLD = "const stripId='id'"
+const STRIP_PAGE = 'ORDER BY ${stripId} LIMIT'
 const VOID_NEW = "status === 'cancelled' ? `${alias}.sale_status = @status` : `COALESCE(${alias}.sale_status, 'completed') = @status`"
 const VOID_OLD = "`COALESCE(${alias}.sale_status, 'completed') = @status`"
 const VOID_ID = "const REPORT_VOID_ID_EXPR = '+s.id'"
@@ -29,7 +30,9 @@ const MUTANTS = {
   voidNullIsCancelled: [{ name: 'm-void-null', file: KERNEL, from: VOID_NEW, to: "status === 'cancelled' ? `COALESCE(${alias}.sale_status, 'cancelled') = @status` : `COALESCE(${alias}.sale_status, 'completed') = @status`" }],
   // the case-insensitive match: ' cancelled' / 'Cancelled' would join the group
   voidIsCaseInsensitive: [{ name: 'm-void-nocase', file: KERNEL, from: VOID_NEW, to: "status === 'cancelled' ? `lower(trim(${alias}.sale_status)) = @status` : `COALESCE(${alias}.sale_status, 'completed') = @status`" }],
-  stripPagesBackwards: [{ name: 'm-strip-desc', file: SALES, from: STRIP_NEW, to: 'AND +id>@stripAfter ORDER BY +id DESC LIMIT' }],
+  stripPagesBackwards: [{ name: 'm-strip-desc', file: SALES, from: STRIP_PAGE, to: 'ORDER BY ${stripId} DESC LIMIT' }],
+  // an hours window tests datetime(created_at), which no index serves: the plus there turns every 2,000-row page into a full scan and a sort
+  stripContinuousPlus: [{ name: 'm-strip-continuous-plus', file: SALES, from: STRIP_NEW, to: "const stripId='+id'" }],
 }
 const urls = (ctx) => {
   const w = (a, b) => `startDate=${day(ctx, a)}&endDate=${day(ctx, b)}`
@@ -40,6 +43,10 @@ const urls = (ctx) => {
     'strip branch': `/api/sales/stats-strip?${w(29, 0)}&branchId=1`,
     'strip branch today': `/api/sales/stats-strip?${w(0, 0)}&branchId=1`,
     'strip time': `/api/sales/stats-strip?${w(1, 0)}&startTime=08:00&endTime=18:00`,
+    // continuous (hours) windows, as Inventory sends them: more than one 2,000-row page on the seed
+    'strip continuous 30d': `/api/sales/stats-strip?${w(29, 0)}&createdFrom=${encodeURIComponent(day(ctx, 29) + ' 00:00:00')}&createdTo=${encodeURIComponent(day(ctx, -1) + ' 00:00:00')}`,
+    'strip continuous 120d': `/api/sales/stats-strip?${w(119, 0)}&createdFrom=${encodeURIComponent(day(ctx, 119) + ' 00:00:00')}&createdTo=${encodeURIComponent(day(ctx, -1) + ' 00:00:00')}`,
+    'strip continuous today': `/api/sales/stats-strip?${w(0, 0)}&createdFrom=${encodeURIComponent(day(ctx, 0) + ' 00:00:00')}&createdTo=${encodeURIComponent(day(ctx, -1) + ' 00:00:00')}`,
     'stats all-time': '/api/sales/stats',
     'stats today': `/api/sales/stats?${w(1, 0)}`,
     'stats 30d': `/api/sales/stats?${w(29, 0)}`,
@@ -53,6 +60,8 @@ const urls = (ctx) => {
 const NAMES = Object.keys(urls({ anchorDate: '2026-01-01' }))
 // 'strip branch' already seeks idx_sales_branch_created (branch + window) in both builds, so it is compared for parity and never-more-rows only
 const REDUCED = ['strip today', 'strip 30d', 'stats all-time']
+// a continuous window keeps the rowid walk: exactly the oracle's rows, never above (the plus there re-scans the table on every page)
+const CONTINUOUS = ['strip continuous 30d', 'strip continuous 120d', 'strip continuous today']
 
 ;(async () => {
   await step('the status fixture is real: the cancelled predicate separates NULL, empty and spaced variants', async () => {
@@ -84,6 +93,7 @@ const REDUCED = ['strip today', 'strip 30d', 'stats all-time']
     await step(`rows (report_atomic ${mode}): never above the oracle, below it for the strip and the undated report`, () => {
       // 'stats cancelled' reads the same few cancelled rows through either index (a handful of rows apart), so it gets a small allowance; nothing else may read more
       for (const name of NAMES) assert.ok(n[name].rr <= o[name].rr + (name === 'stats cancelled' ? 12 : 0), `${name}: rows ${n[name].rr} > oracle ${o[name].rr}`)
+      for (const name of CONTINUOUS) assert.ok(n[name].rr <= o[name].rr, `${name}: a continuous window must keep the rowid walk (${n[name].rr} vs oracle ${o[name].rr})`)
       for (const name of REDUCED) assert.ok(n[name].rr < o[name].rr * 0.9, `${name}: expected clearly fewer rows (${n[name].rr} vs ${o[name].rr})`)
     })
     await step(`calls (report_atomic ${mode}): never above the oracle`, () => { for (const name of NAMES) assert.ok(n[name].calls <= o[name].calls, `${name}: calls ${n[name].calls} > ${o[name].calls}`) })
@@ -107,6 +117,7 @@ const REDUCED = ['strip today', 'strip 30d', 'stats all-time']
     let red = false
     try { assert.deepEqual(bodies(res), bodies(base)) } catch { red = true }
     if (!red) for (const name of REDUCED) if (res[name].rr > good[name].rr * 1.3) red = true
+    if (!red) for (const name of CONTINUOUS) if (res[name].rr > good[name].rr * 1.05) red = true
     await step(`required red: ${label} is caught`, () => assert.ok(red, 'the mutant passed the parity and rows checks'))
   }
   await caught('the strip pages on the rowid again', MUTANTS.stripKeepsRowid)
@@ -115,6 +126,7 @@ const REDUCED = ['strip today', 'strip 30d', 'stats all-time']
   await caught('NULL counted as cancelled', MUTANTS.voidNullIsCancelled)
   await caught('cancelled matched case-insensitively', MUTANTS.voidIsCaseInsensitive)
   await caught('the strip pages backwards', MUTANTS.stripPagesBackwards)
+  await caught('an hours (continuous) window pages on +id again: a full scan per page', MUTANTS.stripContinuousPlus)
 
   // The plan, with and without table statistics (production has them; a fresh database does not).
   for (const analyze of [false, true]) {

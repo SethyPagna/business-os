@@ -6518,15 +6518,17 @@ export function gateSalesCourierMoney(row:Record<string,unknown>,canViewCourier:
   return publicRow
 }
 
-async function readStripMoneyRows(db:ReturnType<typeof getDb>,table:'sales'|'returns',where:string,params:Record<string,unknown>) {
+async function readStripMoneyRows(db:ReturnType<typeof getDb>,table:'sales'|'returns',where:string,params:Record<string,unknown>,continuous:boolean) {
   const version=await hasColumn(db,table,'money_precision_version')?'money_precision_version':'0 AS money_precision_version'
   const amount=table==='sales'?'total_usd,sale_status':'total_refund_usd'
   const rows:Record<string,unknown>[]=[]
   let after=0
+  const stripId=continuous?'id':'+id'
   for(;;){
     // `+id` (a unary plus: the same value, no longer a rowid): `id>@stripAfter ORDER BY id` lets the planner walk the primary key of the whole table and test the window on every row
     // (34,745 rows for one day on the lab seed); with the plus it seeks the window on its date index and sorts the few rows it finds. The pages and their order are unchanged.
-    const page=await db.prepare(`SELECT id,${amount},${version} FROM ${table} WHERE ${where} AND +id>@stripAfter ORDER BY +id LIMIT ${REPORT_MONEY_PAGE_SIZE}`)
+    // A continuous (hours) window tests `datetime(created_at)`, which no index serves (audit #21): there the plus makes EVERY page a full scan plus a sort, so it keeps the rowid walk (one pass over all the pages).
+    const page=await db.prepare(`SELECT id,${amount},${version} FROM ${table} WHERE ${where} AND ${stripId}>@stripAfter ORDER BY ${stripId} LIMIT ${REPORT_MONEY_PAGE_SIZE}`)
       .all<Record<string,unknown>>({...params,stripAfter:after})
     for(const row of page){
       const id=Number(row.id)
@@ -6599,8 +6601,8 @@ app.get('/stats-strip', async (c) => {
           AND COALESCE(status, 'completed') <> 'cancelled'
           ${query.branchId ? 'AND branch_id = @branchId' : ''}`
     const readActivity=async()=>{
-      const status=await readStripMoneyRows(db,'sales',statusClauses.join(' AND '),rangeParams)
-      const returns=await readStripMoneyRows(db,'returns',returnWhere,rangeParams)
+      const status=await readStripMoneyRows(db,'sales',statusClauses.join(' AND '),rangeParams,Boolean(continuousWindow))
+      const returns=await readStripMoneyRows(db,'returns',returnWhere,rangeParams,Boolean(continuousWindow))
       if(status.length+returns.length>REPORT_MONEY_MAX_ROWS)throw new ReportMoneyPrecisionError('too_many_rows')
       return {status,returns}
     }
