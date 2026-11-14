@@ -1,4 +1,5 @@
 import { localDateRangeClause } from './businessDateWindow'
+import { MAX_MONEY_ABS } from './moneyPrecision'
 import { ReportExactDecimal } from './reportMoneyPrecision'
 
 // Stored daily sales totals (migration 0308, read switch `sales_daily`). PURE: no Worker, D1 or analytics imports, so the claim protocol, the
@@ -36,9 +37,13 @@ export const SALES_DAILY_PAYLOAD_TOO_LARGE = 'sales_daily_payload_too_large'
 // ---- exact fractions as canonical text ---------------------------------------------------------------------------------------------------------------------
 
 const FRACTION_TEXT = /^-?(?:0|[1-9]\d*)(?:\/[1-9]\d*)?$/
-// ReportExactDecimal.recorded refuses a value above MAX_MONEY_ABS (1e11): a bigint is rebuilt from digit chunks of at most 10 digits (below that bound),
-// joined with multiply and add, which carry no bound check.
+// ReportExactDecimal.recorded is an INPUT check: it refuses an integer above MAX_MONEY_ABS (1e11). An AGGREGATE is not an input: the numerator and the
+// denominator of a day's exact sum are routinely far above 1e11 (a KHR deposit over its rate, a legacy pro-rata refund, the lcm of several rates) while the
+// VALUE stays far inside the money bound. So a bigint above the input bound is rebuilt from digit chunks of at most 10 digits (each below it), joined with
+// multiply and add, which carry no bound check. The text length cap is a sanity bound for stored data (a day's text also answers to the plan's payload size).
 const CHUNK_DIGITS = 10
+const INPUT_BOUND = BigInt(MAX_MONEY_ABS)
+export const SALES_DAILY_MAX_FRACTION_CHARS = 20_000
 
 type Fraction = { n: bigint; d: bigint }
 const abs = (value: bigint): bigint => (value < 0n ? -value : value)
@@ -56,7 +61,7 @@ const fractionText = (value: Fraction): string => (value.d === 1n ? value.n.toSt
 
 /** True only for the canonical text: reduced, positive denominator, no "+" or leading zeros, no "-0". */
 export function isCanonicalFractionText(text: unknown): text is string {
-  if (typeof text !== 'string' || text.length > 400 || !FRACTION_TEXT.test(text)) return false
+  if (typeof text !== 'string' || text.length > SALES_DAILY_MAX_FRACTION_CHARS || !FRACTION_TEXT.test(text)) return false
   if (text === '-0') return false
   const slash = text.indexOf('/')
   if (slash < 0) return true
@@ -89,7 +94,7 @@ export function sumFractionTexts(texts: Iterable<string>): string {
 }
 
 function exactFromBigint(value: bigint): ReportExactDecimal {
-  if (abs(value) <= BigInt(Number.MAX_SAFE_INTEGER)) return ReportExactDecimal.recorded(Number(value))
+  if (abs(value) <= INPUT_BOUND) return ReportExactDecimal.recorded(Number(value))
   const negative = value < 0n
   const digits = abs(value).toString()
   let result = ReportExactDecimal.zero()
