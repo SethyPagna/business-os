@@ -59,14 +59,14 @@ const list: WiredList = {
 }
 const raw = { list, overlay: new Map(), lots: new Map(), branches: [{ id: 1, name: 'Main' }], branchId: 1, extras: {} }
 const before = wiredResult(raw)
-assert.deepEqual(before.items[0].lot_rows?.map(row => [row.batchId, row.quantity]), [[7, 5], [9, 3], [12, 0]], 'the rows list the dates this branch holds (a date at 0 too: found units are a count), not another branch\'s lot')
+assert.deepEqual(before.items[0].lot_rows?.map(row => [row.batchId, row.quantity]), [[7, 5], [9, 3]], 'the rows list the dates this branch holds STOCK on (the empty date 12 is not listed: owner, 14 Nov), not another branch\'s lot')
 const patched = patchWiredRaw(raw, { productId: 5, branchId: 1, batchId: 7, after: { lotQuantity: 4, branchQuantity: 7 } })
 const after = wiredResult(patched)
 assert.equal(after.items[0].quantity, 7, 'the branch figure takes the answer')
-assert.deepEqual(after.items[0].lot_rows?.map(row => [row.batchId, row.quantity]), [[7, 4], [9, 3], [12, 0]], 'and so does the date')
+assert.deepEqual(after.items[0].lot_rows?.map(row => [row.batchId, row.quantity]), [[7, 4], [9, 3]], 'and so does the date')
 assert.equal(wiredResult(raw).items[0].quantity, 8, 'the earlier raw is untouched')
 const conflicted = patchWiredRaw(raw, { productId: 5, branchId: 1, batchId: 7, current: { lotQuantity: 2, branchQuantity: 5 } })
-assert.deepEqual(wiredResult(conflicted).items[0].lot_rows?.map(row => row.quantity), [2, 3, 0], 'a refusal shows the figures the writer found')
+assert.deepEqual(wiredResult(conflicted).items[0].lot_rows?.map(row => row.quantity), [2, 3], 'a refusal shows the figures the writer found')
 assert.equal(patchWiredRaw(raw, { productId: 99, branchId: 1, batchId: 7, after: { lotQuantity: 0, branchQuantity: 0 } }).list.items[0], raw.list.items[0], 'another product is not touched')
 
 // ---- audit G5, G10, G11, G4b, owner sort: what a row is made of ---------------------------------------------------------------------------------------------------

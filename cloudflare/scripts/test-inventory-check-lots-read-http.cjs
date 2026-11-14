@@ -114,22 +114,33 @@ async function main() {
     }
   })
 
-  await check('ON: one product, one branch, one batch read; active batches of that branch only, stock first, then earliest expiry', async () => {
+  await check('ON: one product, one branch, one batch read; active batches of that branch only, holding stock, earliest expiry first', async () => {
     reset(); on()
     addLot(920001, 910001, { received: '2026-10-25', expiry: '2027-05-01', quantity: 4, code: 'LC-9' })
     addLot(920002, 910001, { received: '2026-10-26', expiry: '2026-12-01', quantity: 2 })
-    addLot(920003, 910001, { received: '2026-10-27', quantity: 0 })                       // holds 0 here: still listed (units found on it are a count), after the ones holding stock
+    addLot(920003, 910001, { received: '2026-10-27', quantity: 0 })                       // holds 0 here: NOT listed (owner, 14 Nov: only batches with stock), so "matches stock" can never write a zero line for it
     addLot(920004, 910001, { received: '2026-10-28', quantity: 0, active: 0 })            // retired batch: never listed
     addLot(920005, 910001, { received: '2026-10-29', quantity: 8, branch: 2 })            // another branch's batch: never listed here
     addLot(920006, 910002, { received: '2026-10-30', quantity: 9 })                       // another product's batch
     const response = await lots('productId=910001&branchId=1')
     assert.equal(response.status, 200, JSON.stringify(response.body))
-    assert.deepEqual(response.body.lots.map(row => row.batchId), [920002, 920001, 910001, 920003], 'stock first; earliest expiry first; undated after dated; empty ones last')
+    assert.deepEqual(response.body.lots.map(row => row.batchId), [920002, 920001, 910001], 'only batches holding stock; earliest expiry first; undated after dated; the empty batch 920003 is absent')
     assert.deepEqual(response.body.lots.find(row => row.batchId === 920001), { batchId: 920001, receivedAt: '2026-10-25', expiry: '2027-05-01', lotCode: 'LC-9', batchNumber: null, quantity: 4 })
     assert.equal(response.body.more, undefined)
     assert.equal(batchReads(response).length, 1, 'exactly one batch read')
     const other = await lots('productId=910001&branchId=2')
     assert.deepEqual(other.body.lots.map(row => row.batchId), [920005], 'the other branch lists its own batch only')
+  })
+
+  await check('ON: a product whose only batches are empty here lists none (it is counted as one total), and an emptied batch drops out of the list', async () => {
+    reset(); on()
+    db.prepare('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=910001').run()
+    addLot(920003, 910001, { received: '2026-10-27', quantity: 0 })
+    const empty = await lots('productId=910001&branchId=1')
+    assert.deepEqual(empty.body.lots, [], 'every batch holds 0: nothing to count date by date')
+    assert.equal(empty.body.more, undefined)
+    db.prepare('UPDATE branch_batch_stock SET quantity=2 WHERE batch_id=920003').run()
+    assert.deepEqual((await lots('productId=910001&branchId=1')).body.lots.map(row => [row.batchId, row.quantity]), [[920003, 2]])
   })
 
   await check('no cost, supplier, price or note exists in the answer, whatever the batch row carries', async () => {

@@ -131,8 +131,8 @@ function adaptRow(row: Row, raw: Pick<WiredRaw, 'branchId' | 'overlay' | 'lots'>
   if (branchId && lots?.length) {
     const held = lots.flatMap(lot => {
       const at = (lot.branches ?? []).find(candidate => Number(candidate.branch_id) === branchId)
-      // A date at 0 is listed too: units found on it are a count (and a Set to more than 0 goes through the writer).
-      return at && Number(lot.id) > 0 ? [{ batchId: Number(lot.id), receivedAt: lot.received_at ?? null, expiry: lot.expiry_date ?? null, quantity: Number(at.quantity) }] : []
+      // Only a date that holds stock here (owner, 14 Nov: lists show only batches with stock): an empty date is never a line, so "matches stock" cannot write a zero for it.
+      return at && Number(lot.id) > 0 && Number(at.quantity) > 0 ? [{ batchId: Number(lot.id), receivedAt: lot.received_at ?? null, expiry: lot.expiry_date ?? null, quantity: Number(at.quantity) }] : []
     })
     if (held.length) product.lot_rows = held
     if (lots.more) product.lots_more = true
