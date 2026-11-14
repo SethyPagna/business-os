@@ -220,7 +220,7 @@ async function runLocal(cmd, args, cwd, ctx, opts = {}) {
   }
   if (!opts.quiet) log.say(`$ ${shown}`)
   else log.quiet(`$ ${shown}`)
-  return spawnTee(cmd, args, { cwd, capture: !!opts.capture, quiet: !!opts.quiet, timeoutMs: opts.timeoutMs || 0, interactive: !!opts.interactive })
+  return spawnTee(cmd, args, { cwd, env: opts.env ? { ...process.env, ...opts.env } : undefined, capture: !!opts.capture, quiet: !!opts.quiet, timeoutMs: opts.timeoutMs || 0, interactive: !!opts.interactive })
 }
 
 function npmLocal(script, cwd, ctx, opts = {}) {

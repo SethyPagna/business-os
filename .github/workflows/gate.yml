@@ -12,9 +12,14 @@
 #   gate     one job per shard (release.cjs gates -Part tests -Shard i/n): the test
 #            files whose stable hash falls in the shard, each file in its own
 #            process and retried on timeout exactly as before;
-#   verdict  fails unless every shard reported, green, at the planned commit, and the
-#            union of the shards is the full test file list; then it writes the
-#            `gate-verdict` artifact that Deploy (input gate_run_id) checks.
+#   verdict  fails unless every shard reported, green, at the planned commit, on the same
+#            build of the app (digest of frontend/dist), and the union of the shards is the
+#            full test file list; then it writes the `gate-verdict-a<attempt>` artifact that
+#            Deploy (input gate_run_id) checks.
+# Artifact names carry the attempt (-a<n>) because upload-artifact refuses a name a run already
+# holds, so a re-run of a job must not reuse the name of its earlier attempt. Deploy reads the
+# artifacts of the attempt the Verdict job ran in, so re-running only a flaky browser leg
+# leaves a good run reusable.
 # The run title carries the input ref (run-name), which a job cannot change.
 #
 # A second job, "Browser suite", runs the Playwright app tier (frontend/e2e on
@@ -211,7 +216,7 @@ jobs:
       - name: Keep the shard manifest
         uses: actions/upload-artifact@v4
         with:
-          name: gate-shard-${{ matrix.shard }}
+          name: gate-shard-${{ matrix.shard }}-a${{ github.run_attempt }}
           path: ${{ runner.temp }}/records/gate-shard-manifest.json
           retention-days: 14
           if-no-files-found: error
@@ -272,17 +277,20 @@ jobs:
         env:
           PLANNED_SHA: ${{ needs.plan.outputs.sha }}
           INPUT_REF: ${{ inputs.ref }}
+          PLAN_RESULT: ${{ needs.plan.result }}
+          STATIC_RESULT: ${{ needs.static.result }}
+          SHARD_RESULT: ${{ needs.gate.result }}
         run: |
           node kit/ops/scripts/deploy-kit/gate-shards.cjs verdict \
             --release release --manifests manifests --shards "$GATE_SHARDS" \
             --sha "$PLANNED_SHA" --kit-commit "$(git -C kit rev-parse HEAD)" --input-ref "$INPUT_REF" \
             --out verdict/gate-verdict.json \
-            --plan-result success --static-result success --shard-result success
+            --plan-result "$PLAN_RESULT" --static-result "$STATIC_RESULT" --shard-result "$SHARD_RESULT"
 
       - name: Keep the verdict
         uses: actions/upload-artifact@v4
         with:
-          name: gate-verdict
+          name: gate-verdict-a${{ github.run_attempt }}
           path: verdict/gate-verdict.json
           retention-days: 14
           if-no-files-found: error
@@ -291,14 +299,14 @@ jobs:
         if: always()
         uses: actions/download-artifact@v4
         with:
-          pattern: gate-records-*
+          pattern: gate-records-s*
           path: records
 
       - name: Keep the test log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gate-records
+          name: gate-records-all-a${{ github.run_attempt }}
           path: records
           retention-days: 14
           if-no-files-found: ignore
@@ -412,7 +420,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-report-${{ matrix.project }}
+          name: e2e-report-${{ matrix.project }}-a${{ github.run_attempt }}
           path: ${{ runner.temp }}/e2e/${{ matrix.project }}
           retention-days: 14
           if-no-files-found: ignore

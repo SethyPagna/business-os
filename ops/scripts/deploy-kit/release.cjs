@@ -393,9 +393,16 @@ async function stepGatePart(ctx) {
     if (!r) red.push(label)
     return r
   }
-  const build = () => step('frontend: build', async () => (await ex.npmLocal('build', fe, ctx)).code === 0)
+  const buildEnv = { BUSINESS_OS_BUILD_HASH: gateShards.gateBuildHash(ctx.sha) }
+  const runBuild = async () => (await ex.npmLocal('build', fe, ctx, { env: buildEnv })).code === 0
+  const build = () => step('frontend: build', runBuild)
+  const distDigest = () => {
+    if (ctx.dryRun) return null
+    try { return gateShards.distDigest(path.join(fe, 'dist')).digest } catch (err) { log.say(`  could not read frontend/dist: ${err.message}`); return undefined }
+  }
   let built = false
   let ran = []
+  let dist = null
   if (ctx.part === 'build') {
     built = await build()
   } else if (ctx.part === 'static') {
@@ -413,9 +420,18 @@ async function stepGatePart(ctx) {
     ran = [...cfMine, ...feMine]
     const cfRun = await runFiles(ctx, `${cfSpec.label} (shard ${index}/${count})`, cfMine, cf, 'cloudflare/')
     red.push(...cfRun.red.map((f) => `cloudflare/${f}`))
-    built = await step('frontend: build (some tests read dist)', async () => (await ex.npmLocal('build', fe, ctx)).code === 0)
+    built = await step('frontend: build (some tests read dist)', runBuild)
+    if (built) {
+      dist = distDigest()
+      log.say(`- frontend: digest of dist before the tests: ${dist}`)
+      if (dist === undefined) red.push('frontend: dist could not be read')
+    }
     const feRun = await runFiles(ctx, `${feSpec.label} (shard ${index}/${count})`, feMine, fe, 'frontend/')
     red.push(...feRun.red.map((f) => `frontend/${f}`))
+    if (built && dist !== undefined && dist !== distDigest()) {
+      red.push('frontend: dist changed while the tests ran')
+      dist = null
+    }
   }
   if (!(await checkClean(ctx))) red.push('release folder changed while testing')
   ctx.state.gates = { at: new Date().toISOString(), part: ctx.part, shard: ctx.part === 'tests' ? ctx.shard : undefined, red, dryRun: ctx.dryRun }
@@ -423,7 +439,7 @@ async function stepGatePart(ctx) {
   saveState(ctx)
   if (ctx.part === 'tests' && !ctx.dryRun) {
     fs.mkdirSync(ctx.records, { recursive: true })
-    fs.writeFileSync(path.join(ctx.records, gateShards.MANIFEST_NAME), `${JSON.stringify(gateShards.buildManifest({ sha: ctx.sha, shard: ctx.shard, files: ran, red }), null, 2)}
+    fs.writeFileSync(path.join(ctx.records, gateShards.MANIFEST_NAME), `${JSON.stringify(gateShards.buildManifest({ sha: ctx.sha, shard: ctx.shard, files: ran, red, attempt: Number(process.env.GITHUB_RUN_ATTEMPT) || 1, dist }), null, 2)}
 `)
   }
   const what = ctx.part === 'tests' ? `tests, shard ${ctx.shard.index}/${ctx.shard.count}` : ctx.part
