@@ -113,22 +113,91 @@ check('DIFFERENTIAL: the emitted clauses select exactly the rows of the datetime
   const cashier = shiftWindowWhere('sales', { createdFrom: windows[3].from, createdTo: windows[3].to, cashierId: 3 })
   assert.deepEqual(ids('sales', cashier.clauses, cashier.params), ids('sales', exactClauses('sales', cashier.params.createdFrom, cashier.params.createdTo).concat('sales.cashier_id = @cashierId'), cashier.params))
 })
-check('the datetime() terms are still there (the plain bounds only prune), with the bounds widened one day below and two days above', () => {
+check('the datetime() terms are still there (the plain bounds only prune), with the bounds widened to the day before the Cambodia business date below and two days above', () => {
   const { clauses } = shiftWindowWhere('sales', { createdFrom: '2026-11-05T00:00:00Z', createdTo: '2026-11-06T00:00:00Z' })
   assert.deepEqual(clauses, [
-    "sales.created_at >= date(@createdFrom, '-1 day')", 'datetime(sales.created_at) >= @createdFrom',
+    `sales.created_at >= ${"date(date(@createdFrom, '+7 hours'), '-1 day')"}`, 'datetime(sales.created_at) >= @createdFrom',
     "sales.created_at < date(@createdTo, '+2 day')", 'datetime(sales.created_at) < @createdTo',
   ])
   assert.deepEqual(shiftWindowWhere('sales', {}).clauses, [], 'a caller with no shift keys emits nothing')
 })
 check('DISCRIMINATING: an upper bound of +1 day loses +07:00 rows in many windows; a lower bound without -1 day loses -05:00/-12:00 rows; the shipped form loses none', () => {
-  const plusOne = lost((table, p) => ids(table, [`${table}.created_at >= date(@createdFrom, '-1 day')`, `${table}.created_at < date(@createdTo, '+1 day')`, ...exactClauses(table, true, true)], p))
-  const noMinus = lost((table, p) => ids(table, [`${table}.created_at >= date(@createdFrom)`, `${table}.created_at < date(@createdTo, '+2 day')`, ...exactClauses(table, true, true)], p))
+  const plusOne = lost((table, p) => ids(table, [`${table}.created_at >= ${"date(date(@createdFrom, '+7 hours'), '-1 day')"}`, `${table}.created_at < date(@createdTo, '+1 day')`, ...exactClauses(table, true, true)], p))
+  const noMinus = lost((table, p) => ids(table, [`${table}.created_at >= date(date(@createdFrom, '+7 hours'))`, `${table}.created_at < date(@createdTo, '+2 day')`, ...exactClauses(table, true, true)], p))
   const shipped = lost((table, p) => ids(table, shiftWindowWhere(table, { createdFrom: p.createdFrom, createdTo: p.createdTo }).clauses, p))
   assert.ok(plusOne >= 50, `+1 day lost rows in ${plusOne} windows`)
   assert.ok(noMinus >= 20, `no -1 day lost rows in ${noMinus} windows`)
   assert.equal(shipped, 0)
   console.log(`     +1 day: ${plusOne} windows lose rows; no -1 day: ${noMinus}; shipped: ${shipped}`)
+})
+
+// ---- lane/shift-close-reads: the lower bound is taken from the CAMBODIA business date, never later than any row of the window ----------------------------------
+const floorOf = (iso) => db.prepare("SELECT date(date(?, '+7 hours'), '-1 day') AS d").get(iso.slice(0, 19).replace('T', ' ')).d
+const stamp = (ms, shape) => {
+  const iso = new Date(ms).toISOString(), d = iso.slice(0, 10), h = Number(iso.slice(11, 13)), m = Number(iso.slice(14, 16)), sec = Number(iso.slice(17, 19))
+  const offsets = [null, 'Z', '+07:00', '-05:00', '+14:00', '-12:00', '+05:30']
+  const o = offsets[shape]
+  if (o === null) return iso.slice(0, 19).replace('T', ' ')
+  if (o === 'Z') return iso
+  const sign = o[0] === '-' ? -1 : 1, [oh, om] = o.slice(1).split(':').map(Number)
+  const local = new Date(ms + sign * (oh * 60 + om) * 60000).toISOString().slice(0, 19)
+  void d; void h; void m; void sec
+  return local + o
+}
+check('FLOOR: from 17:00Z the Cambodia date is already the next UTC date, so the floor is one UTC day later than before; before 17:00Z it is unchanged', () => {
+  assert.equal(floorOf('2026-11-05T05:00:00Z'), '2026-11-04', '05:00Z, Cambodia 12:00 of the 5th')
+  assert.equal(floorOf('2026-11-05T16:59:59Z'), '2026-11-04', 'the last second of the Cambodia 5th')
+  assert.equal(floorOf('2026-11-05T17:00:00Z'), '2026-11-05', 'Cambodia midnight: the 6th starts')
+  assert.equal(floorOf('2026-11-05T20:00:00Z'), '2026-11-05', '20:00Z (Cambodia 03:00 of the 6th): the old floor was 2026-11-04')
+  assert.equal(floorOf('2026-11-05T23:59:59Z'), '2026-11-05')
+  assert.equal(floorOf('2026-11-06T00:00:00Z'), '2026-11-05', 'UTC midnight, Cambodia 07:00 of the 6th')
+  assert.equal(shiftWindowWhere('sales', { createdFrom: '2026-11-05T20:00:00Z' }).clauses[0], "sales.created_at >= date(date(@createdFrom, '+7 hours'), '-1 day')")
+})
+check('FLOOR SUPERSET: for 144 shift starts around the clock and every stored shape, a row 1 s after the start (and the start itself) passes the plain floor; a sale 1 s before is still excluded exactly', () => {
+  let rows = 0
+  for (let k = 0; k < 144; k++) {
+    const start = Date.UTC(2026, 10, 5) + k * 10 * 60000 + 7000
+    for (let shape = 0; shape < 7; shape++) for (const delta of [0, 1000, 3600000, 86400000]) {
+      const text = stamp(start + delta, shape)
+      const row = db.prepare("SELECT ? AS created_at").get(text)
+      const passesFloor = db.prepare("SELECT ? >= ? AS ok").get(row.created_at, floorOf(new Date(start).toISOString())).ok
+      assert.equal(passesFloor, 1, `start ${new Date(start).toISOString()} shape ${shape} +${delta}: ${text} vs floor ${floorOf(new Date(start).toISOString())}`)
+      rows += 1
+    }
+  }
+  assert.equal(rows, 144 * 7 * 4)
+})
+check('EDGES: a sale 1 s after open, shifts opened just before and just after 17:00Z, and a shift spanning Cambodia midnight select exactly the exact-window rows (plain bounds alone select a superset)', () => {
+  const edge = new DatabaseSync(':memory:'); for (const f of fs.readdirSync(directory).filter((n) => n.endsWith('.sql')).sort()) edge.exec(fs.readFileSync(path.join(directory, f), 'utf8'))
+  const insert = edge.prepare('INSERT INTO sales(created_at, cashier_id) VALUES (?, 3)')
+  const cases = [
+    { name: 'opened 03:00:00Z', from: '2026-11-05T03:00:00Z', to: '2026-11-05T09:00:00Z' },
+    { name: 'opened 16:59:59Z, closed after Cambodia midnight', from: '2026-11-05T16:59:59Z', to: '2026-11-05T17:00:01Z' },
+    { name: 'opened 17:00:00Z', from: '2026-11-05T17:00:00Z', to: '2026-11-05T23:00:00Z' },
+    { name: 'opened 17:00:01Z', from: '2026-11-05T17:00:01Z', to: '2026-11-06T03:00:00Z' },
+    { name: 'spans Cambodia midnight (23:00 -> 02:00)', from: '2026-11-05T16:00:00Z', to: '2026-11-05T19:00:00Z' },
+    { name: 'opened 20:00:00Z', from: '2026-11-05T20:00:00Z', to: '2026-11-06T02:00:00Z' },
+  ]
+  let checked = 0
+  for (const c of cases) {
+    edge.exec('DELETE FROM sales')
+    const from = Date.parse(c.from), to = Date.parse(c.to)
+    const wanted = new Set()
+    for (const delta of [-1000, 0, 1000]) for (let shape = 0; shape < 7; shape++) {
+      insert.run(stamp(from + delta, shape)); insert.run(stamp(to + delta, shape))
+    }
+    for (const mid of [60000, (to - from) / 2]) for (let shape = 0; shape < 7; shape++) insert.run(stamp(from + mid, shape))
+    const real = shiftWindowWhere('sales', { createdFrom: c.from, createdTo: c.to })
+    const idsOf = (clauses) => edge.prepare(`SELECT id FROM sales AS sales WHERE ${clauses.join(' AND ')} ORDER BY id`).all(real.params).map((r) => r.id)
+    const exact = idsOf(exactClauses('sales', true, true)), shipped = idsOf(real.clauses), plainOnly = idsOf([real.clauses[0], real.clauses[2]])
+    assert.deepEqual(shipped, exact, c.name)
+    assert.ok(exact.length >= 10, `${c.name}: ${exact.length} rows in the window`)
+    assert.ok(exact.every((id) => plainOnly.includes(id)), `${c.name}: the plain bounds alone keep every window row`)
+    const one = edge.prepare("SELECT id FROM sales WHERE created_at = ?").get(stamp(from + 1000, 1)); assert.ok(one && exact.includes(one.id), `${c.name}: the sale 1 s after open is in`)
+    const before = edge.prepare("SELECT id FROM sales WHERE created_at = ?").get(stamp(from - 1000, 1)); assert.ok(before && !exact.includes(before.id), `${c.name}: the sale 1 s before open is out`)
+    checked += 1
+  }
+  assert.equal(checked, cases.length)
 })
 
 const plan = (statement, params) => db.prepare(`EXPLAIN QUERY PLAN ${statement}`).all(params).map((r) => r.detail).join(' | ')

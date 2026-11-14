@@ -66,9 +66,9 @@ for (let s = 0; s < 6; s++) { const at = new Date(Date.UTC(2026, 10, 4) + s * 5 
 assert.ok(windows.length >= 288)
 
 const idsFor = async (w, transform = (sql) => sql) => { rewrite = transform; try { return (await analytics.readRemovalLossRows({}, { ...w, cashierId: 3 })).map((r) => r.id).sort((a, b) => a - b) } finally { rewrite = (sql) => sql } }
-const exactOnly = (sql) => sql.replace(/ AND m\.created_at >= date\(@createdFrom, '-1 day'\)/, '').replace(/ AND m\.created_at < date\(@createdTo, '\+2 day'\)/, '')
+const exactOnly = (sql) => sql.replace(/ AND m\.created_at >= date\(date\(@createdFrom, '\+7 hours'\), '-1 day'\)/, '').replace(/ AND m\.created_at < date\(@createdTo, '\+2 day'\)/, '')
 const plusOne = (sql) => sql.replace("date(@createdTo, '+2 day')", "date(@createdTo, '+1 day')")
-const noMinus = (sql) => sql.replace("date(@createdFrom, '-1 day')", 'date(@createdFrom)')
+const noMinus = (sql) => sql.replace("date(date(@createdFrom, '+7 hours'), '-1 day')", "date(date(@createdFrom, '+7 hours'))")
 const lossIn = async (variant) => { let n = 0; for (const w of windows) if (JSON.stringify(await idsFor(w, variant)) !== JSON.stringify(await idsFor(w, exactOnly))) n += 1; return n }
 
 ;(async () => {
@@ -77,7 +77,7 @@ const lossIn = async (variant) => { let n = 0; for (const w of windows) if (JSON
     for (const w of windows) { const real = await idsFor(w); const exact = await idsFor(w, exactOnly); assert.deepEqual(real, exact, JSON.stringify(w)); if (exact.length) nonEmpty += 1 }
     assert.ok(nonEmpty > 200, `${nonEmpty} windows with rows`)
     const sql = captured[captured.length - 1].sql
-    assert.ok(/m\.created_at >= date\(@createdFrom, '-1 day'\)/.test(sql) || /m\.created_at < date\(@createdTo, '\+2 day'\)/.test(sql), 'the plain bounds are emitted')
+    assert.ok(/m\.created_at >= date\(date\(@createdFrom, '\+7 hours'\), '-1 day'\)/.test(sql) || /m\.created_at < date\(@createdTo, '\+2 day'\)/.test(sql), 'the plain bounds are emitted')
   })
   await check('DISCRIMINATING: "+1 day" above and "no -1 day" below each lose rows in many windows; the shipped statement loses none', async () => {
     const a = await lossIn(plusOne), b = await lossIn(noMinus), shipped = await lossIn((s) => s)
