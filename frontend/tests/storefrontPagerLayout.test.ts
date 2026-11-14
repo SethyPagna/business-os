@@ -100,6 +100,8 @@ runTest('the centred branch centres the pill and orders it Back / page / total /
   const countAt = branch.indexOf('<span className={countClass}>')
   const nextAt = branch.indexOf('aria-label={nextLabel}')
   assert.ok(backAt > 0 && pageAt > backAt, 'the editable page must follow Back')
+  const rangeAt = branch.indexOf('{rangeText}')
+  assert.ok(rangeAt > backAt && rangeAt < pageAt, 'owner 14 Nov: the item range of total sits between Back and the page number')
   assert.ok(countAt > pageAt, 'total page count must follow the editable page')
   assert.ok(nextAt > countAt, 'Next must close the pill')
 })
@@ -112,8 +114,11 @@ runTest('the storefront wrapper opts into the centred layout', () => {
 })
 
 runTest('the products grid mounts the pager above AND below, on one shared condition', () => {
+  // Owner 14 Nov: ONE element from the one product state, mounted above (TopPager) and below the grid.
   const mounts = catalogProducts.match(/<CatalogPaginationControls\b/g) || []
-  assert.equal(mounts.length, 2, 'exactly one pager above the grid and one below it')
+  assert.equal(mounts.length, 1, 'one pager element')
+  assert.equal((catalogProducts.match(/<TopPager>\{catalogPager\}<\/TopPager>/g) || []).length, 1, 'mounted above the grid')
+  assert.equal((catalogProducts.match(/\{catalogPager\}<\/div>/g) || []).length, 1, 'and once below it')
   const gates = catalogProducts.match(/\{showPager \? \(/g) || []
   assert.equal(gates.length, 2, 'both mounts must share the SAME visibility gate -- the top one used to render unconditionally while the bottom one hid on a single page')
   assert.match(
@@ -193,7 +198,7 @@ runTest('the shared control takes arrow state from the kernel, with no per-page-
 
 runTest('both pager mounts translate Back and Next instead of leaking the raw keys', () => {
   const maps = catalogProducts.match(/t=\{\(key\) => \(\{[\s\S]*?\}\)\[key\] \|\| key\}/g) || []
-  assert.equal(maps.length, 2, 'each mount carries its own translation map')
+  assert.equal(maps.length, 1, 'the one shared pager element carries the translation map')
   for (const map of maps) {
     assert.match(map, /back: copy\('back', 'Back'\)/, "'back' fell through the map and printed itself as the button label")
     assert.match(map, /next: copy\('next', 'Next'\)/, "'next' fell through the map and printed itself as the button label")

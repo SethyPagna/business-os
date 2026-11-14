@@ -483,13 +483,15 @@ runTest('the public pager renders no size selector (P10-20), but the surrounding
     'the retired selector\'s one-page keep-alive exception must not come back either')
 
   // Wired at BOTH pager mounts of the products section...
-  assert.equal((catalogProductsSectionSource.match(/onPageSizeChange=\{updatePageSize\}/g) || []).length, 2,
-    'the pagers above and below the grid must both change the page size')
+  // ...by ONE shared pager element, rendered above (TopPager) and below the grid.
+  assert.equal((catalogProductsSectionSource.match(/onPageSizeChange=\{updatePageSize\}/g) || []).length, 1,
+    'the one pager element above and below the grid changes the page size')
+  assert.match(catalogProductsSectionSource, /<TopPager>\{catalogPager\}<\/TopPager>[\s\S]*\{catalogPager\}/, 'the pager is mounted above and below from the same element')
   // Counted, not matched: with only one mount required, dropping the key from
   // the other left every test AND verify:i18n green while that selector
   // announced the raw key "per_page" to a screen reader.
-  assert.equal((catalogProductsSectionSource.match(/per_page: copy\('perPage', 'Per page'\)/g) || []).length, 2,
-    'BOTH pagers must resolve the accessible name through the portal packs, which already translate perPage')
+  assert.equal((catalogProductsSectionSource.match(/per_page: copy\('perPage', 'Per page'\)/g) || []).length, 1,
+    'the shared pager element (above and below the grid) must resolve the accessible name through the portal packs, which already translate perPage')
   assert.doesNotMatch(catalogProductsSectionSource, /it is a Filters field now/,
     'the size control is on the pager row again, so the Filters-field note must not survive')
 

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import type { KeyboardEvent } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
+import type { KeyboardEvent, ReactNode } from 'react'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import { clampPageNumber, pagerState, unknownTotalPagerState } from '../../utils/pagerState.ts'
@@ -67,10 +67,31 @@ export interface PaginationControlsProps {
   // simply Back, page/total, Next. 'default' stays the default,
   // so every admin consumer of this control renders exactly as before.
   layout?: 'default' | 'centered'
-  /** `centered` layout only: printed on the SAME row as the pill, e.g.
-   * "3,585 result(s)". Omit to leave the row exactly as wide as the pill
-   * (the merge-review modal's own `centered` pager never passes this). */
-  resultsCount?: string
+  /** Owner 14 Nov: every pager is mounted twice from ONE state, above and below the list.
+   * Normally set by wrapping the element in <TopPager>; an explicit value wins. 'top' has no
+   * live region, so a screen reader hears one announcement, from the bottom pager. */
+  position?: 'top' | 'bottom'
+}
+
+const PagerPositionContext = createContext<'top' | 'bottom'>('bottom')
+
+const pendingRepairs = new WeakMap<object, number>()
+
+/** True for the first mount in a commit to ask `onPageChange` to move to `target`; false for any
+ * other mount sharing that callback until the commit's effects are done (a microtask later). */
+function claimPageRepair(onPageChange: unknown, target: number): boolean {
+  if (typeof onPageChange !== 'function') return true
+  if (pendingRepairs.get(onPageChange) === target) return false
+  pendingRepairs.set(onPageChange, target)
+  queueMicrotask(() => { pendingRepairs.delete(onPageChange) })
+  return true
+}
+
+/** Mounts a pager element as the passive TOP instance. A page builds ONE pager element from its
+ * one state and renders it twice -- `<TopPager>{pager}</TopPager>` above the list, `{pager}`
+ * below -- so there is a single set of props, a single request, and no second source of truth. */
+export function TopPager({ children }: { children?: ReactNode }) {
+  return <PagerPositionContext.Provider value="top">{children}</PagerPositionContext.Provider>
 }
 
 export function clampPage(page: NumericInput, totalItems: NumericInput, pageSize: NumericInput): number {
@@ -106,8 +127,9 @@ export default function PaginationControls({
   rangeAsPageSize = false,
   compactCentered = false,
   layout = 'default',
-  resultsCount,
+  position,
 }: PaginationControlsProps) {
+  const contextPosition = useContext(PagerPositionContext)
   // One shared kernel (utils/pagerState.ts) answers all of it: the clamped
   // page, the page count, the item range, whether each arrow is dead, and
   // whether the control renders at all.
@@ -124,6 +146,15 @@ export default function PaginationControls({
   const showingLabel = typeof t === 'function' ? (t('showing') || 'Showing') : 'Showing'
   const backLabel = typeof t === 'function' ? (t('back') || 'Back') : 'Back'
   const nextLabel = typeof t === 'function' ? (t('next') || 'Next') : 'Next'
+  // Owner 14 Nov order: [Back] [item range of total] [page / pages] [Next]. The range is plain
+  // text; with an unknown total (cursor pagers) it is the range alone, never a made-up total.
+  const rangeText = unknownTotal
+    ? `${start.toLocaleString()}-${end.toLocaleString()}`
+    : `${start.toLocaleString()}-${end.toLocaleString()} ${ofLabel} ${total.toLocaleString()}`
+  const isTop = (position ?? contextPosition) === 'top'
+  // One dense row on a 375px phone: below 400px Back/Next keep their icon and carry the label
+  // as tooltip + accessible name (button policy); from 400px up the word is shown too.
+  const edgeTextClass = 'whitespace-nowrap max-[399px]:hidden'
   const [pageDraft, setPageDraft] = useState(String(safePage))
 
   useEffect(() => {
@@ -135,10 +166,15 @@ export default function PaginationControls({
   // look correct but sends the next request with the stale offset, so Back /
   // Next appears unresponsive. Keep the controlled page in sync for every
   // list that uses this shared control.
+  //
+  // The top and bottom mounts share ONE onPageChange (one element, mounted twice), and both
+  // would notice the stale page in the same commit. claimPageRepair lets only the first ask,
+  // so a repair is one parent update -- and one request -- not two. It is not tied to a
+  // position: a page that hides its bottom pager on a single page still gets repaired.
   useEffect(() => {
     if (unknownTotal) return
     const requestedPage = Math.max(1, Number(page || 1))
-    if (Number.isFinite(requestedPage) && requestedPage !== safePage) {
+    if (Number.isFinite(requestedPage) && requestedPage !== safePage && claimPageRepair(onPageChange, safePage)) {
       onPageChange?.(safePage)
     }
   }, [page, safePage, onPageChange, unknownTotal])
@@ -233,10 +269,12 @@ export default function PaginationControls({
             disabled={backDisabled}
             onClick={() => onPageChange?.(safePage - 1)}
             aria-label={backLabel}
+            title={backLabel}
           >
             <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
-            <span className="whitespace-nowrap">{backLabel}</span>
+            <span className={edgeTextClass}>{backLabel}</span>
           </button>
+          <span data-pager-range className={`${countClass} border-x border-slate-200 tabular-nums dark:border-slate-700`}>{rangeText}</span>
           <div className="inline-flex min-w-0 shrink items-center">
             {editablePageInput ? (
               <>
@@ -264,18 +302,13 @@ export default function PaginationControls({
             disabled={nextDisabled}
             onClick={() => onPageChange?.(safePage + 1)}
             aria-label={nextLabel}
+            title={nextLabel}
           >
-            <span className="whitespace-nowrap">{nextLabel}</span>
+            <span className={edgeTextClass}>{nextLabel}</span>
             <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
           </button>
         </div>
-        {/* Same row as the pill, not a separate line above/below it -- the
-            owner's 2026-09-15 ask. Wraps onto its own line only if the pill
-            itself doesn't fit (320px width with a long translated count). */}
-        {resultsCount ? (
-          <span className="shrink-0 whitespace-nowrap text-xs font-semibold text-slate-500 dark:text-slate-400">{resultsCount}</span>
-        ) : null}
-        <span className="sr-only" aria-live="polite">{pageLabel} {safePage} {ofLabel} {totalPages}</span>
+        {isTop ? null : <span className="sr-only" aria-live="polite">{pageLabel} {safePage} {ofLabel} {totalPages}</span>}
       </nav>
     )
   }
@@ -300,14 +333,15 @@ export default function PaginationControls({
           disabled={backDisabled}
           onClick={() => onPageChange?.(safePage - 1)}
           aria-label={backLabel}
+          title={backLabel}
         >
           <ChevronLeft className={arrowIconClass} strokeWidth={2.5} />
-          <span className="whitespace-nowrap">{backLabel}</span>
+          <span className={edgeTextClass}>{backLabel}</span>
         </button>
         <div className={`inline-flex min-w-0 items-center ${compactCentered ? 'gap-0 px-0' : 'gap-0.5 px-0.5'}`}>
           {/* Order per request: the item-range chip FIRST, then the editable
               page number, then the total page count. */}
-          <span className="h-6 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">{start.toLocaleString()}-{end.toLocaleString()}</span>
+          <span data-pager-range className="h-6 whitespace-nowrap rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-xs font-semibold tabular-nums text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">{rangeText}</span>
           {editablePageInput ? (
             <>
               <span className="sr-only">{pageLabel}</span>
@@ -334,8 +368,9 @@ export default function PaginationControls({
           disabled={nextDisabled}
           onClick={() => onPageChange?.(safePage + 1)}
           aria-label={nextLabel}
+          title={nextLabel}
         >
-          <span className="whitespace-nowrap">{nextLabel}</span>
+          <span className={edgeTextClass}>{nextLabel}</span>
           <ChevronRight className={arrowIconClass} strokeWidth={2.5} />
         </button>
       </div>
@@ -353,114 +388,110 @@ export default function PaginationControls({
     const compactDigits = Math.max(1, compactDraft.length)
     return (
       <div className={`max-w-full rounded-xl border border-slate-200 bg-white/80 px-1 py-1.5 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300 ${className}`}>
-        {/* Keep one useful row when it fits. Large counts wrap between the
-            range and navigation rather than ellipsizing either number. */}
-        <div className="flex max-w-full flex-wrap items-center justify-between gap-1">
-          <span className="inline-flex max-w-full flex-wrap items-center justify-center rounded-full bg-slate-50 px-1.5 py-1 font-semibold tabular-nums text-slate-700 dark:bg-slate-800 dark:text-slate-100">
-            <span className="whitespace-nowrap">{start.toLocaleString()}</span>-<span className="whitespace-nowrap">{end.toLocaleString()}</span>
-            <span className="whitespace-nowrap">&nbsp;/ {total.toLocaleString()}</span>
-          </span>
-          <div className="inline-flex max-w-full flex-wrap items-center justify-center rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
-            <button
-              type="button"
-              className="inline-flex h-7 shrink-0 items-center gap-0.5 px-1 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
-              disabled={backDisabled}
-              onClick={() => onPageChange?.(safePage - 1)}
-              aria-label={backLabel}
-            >
-              <ChevronLeft className="h-4 w-4" />
-              <span>{backLabel}</span>
-            </button>
-            {compactPageInput ? (
-              <div className="inline-flex shrink-0 items-center justify-center gap-1 px-1 text-[11px] font-semibold tabular-nums text-slate-700 dark:text-slate-100">
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  aria-label={pageLabel}
-                  style={{ width: `max(2.25rem, calc(${compactDigits}ch + 0.5rem))` }}
-                  className="h-7 min-w-9 border-0 bg-transparent px-0 text-center text-[11px] font-semibold text-slate-700 outline-none dark:text-slate-100"
-                  value={compactDraft}
-                  onChange={(event) => {
-                    setPageDraft(boundedDraft(event.target.value))
-                  }}
-                  onBlur={(event) => commitPageDraft(event.currentTarget.value)}
-                  onKeyDown={handlePageInputKeyDown}
-                />
-                <span className="shrink-0 text-[11px] font-semibold text-slate-500 dark:text-slate-300">/ {totalPages}</span>
-              </div>
-            ) : (
-              <span className="shrink-0 whitespace-nowrap px-1 text-center text-[11px] font-semibold tabular-nums text-slate-700 dark:text-slate-100">
-                <span aria-hidden="true">{safePage} / {totalPages}</span>
-                <span className="sr-only">{pageLabel} {safePage} {ofLabel} {totalPages}</span>
-              </span>
-            )}
-            <button
-              type="button"
-              className="inline-flex h-7 shrink-0 items-center gap-0.5 px-1 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
-              disabled={nextDisabled}
-              onClick={() => onPageChange?.(safePage + 1)}
-              aria-label={nextLabel}
-            >
-              <span>{nextLabel}</span>
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
+        {/* One row, owner 14 Nov order: Back, item range of total, page / pages, Next. */}
+        <div className="mx-auto flex w-fit max-w-full items-center justify-center rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
+          <button
+            type="button"
+            className="inline-flex h-7 shrink-0 items-center gap-0.5 px-1 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+            disabled={backDisabled}
+            onClick={() => onPageChange?.(safePage - 1)}
+            aria-label={backLabel}
+            title={backLabel}
+          >
+            <ChevronLeft className="h-4 w-4" />
+            <span className={edgeTextClass}>{backLabel}</span>
+          </button>
+          <span data-pager-range className="min-w-0 whitespace-nowrap rounded-full bg-slate-50 px-1.5 py-1 text-[11px] font-semibold tabular-nums text-slate-700 dark:bg-slate-800 dark:text-slate-100">{rangeText}</span>
+          {compactPageInput ? (
+            <div className="inline-flex shrink-0 items-center justify-center gap-1 px-1 text-[11px] font-semibold tabular-nums text-slate-700 dark:text-slate-100">
+              <input
+                type="text"
+                inputMode="numeric"
+                aria-label={pageLabel}
+                style={{ width: `max(2.25rem, calc(${compactDigits}ch + 0.5rem))` }}
+                className="h-7 min-w-9 border-0 bg-transparent px-0 text-center text-[11px] font-semibold text-slate-700 outline-none dark:text-slate-100"
+                value={compactDraft}
+                onChange={(event) => {
+                  setPageDraft(boundedDraft(event.target.value))
+                }}
+                onBlur={(event) => commitPageDraft(event.currentTarget.value)}
+                onKeyDown={handlePageInputKeyDown}
+              />
+              <span className="shrink-0 text-[11px] font-semibold text-slate-500 dark:text-slate-300">/ {totalPages}</span>
+            </div>
+          ) : (
+            <span data-pager-page className="shrink-0 whitespace-nowrap px-1 text-center text-[11px] font-semibold tabular-nums text-slate-700 dark:text-slate-100">
+              <span aria-hidden="true">{safePage} / {totalPages}</span>
+              <span className="sr-only">{pageLabel} {safePage} {ofLabel} {totalPages}</span>
+            </span>
+          )}
+          <button
+            type="button"
+            className="inline-flex h-7 shrink-0 items-center gap-0.5 px-1 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+            disabled={nextDisabled}
+            onClick={() => onPageChange?.(safePage + 1)}
+            aria-label={nextLabel}
+            title={nextLabel}
+          >
+            <span className={edgeTextClass}>{nextLabel}</span>
+            <ChevronRight className="h-4 w-4" />
+          </button>
         </div>
       </div>
     )
   }
 
   return (
-    <div className={`flex flex-col gap-2 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between ${className}`}>
-      <div className="font-medium">
-        {showingLabel} {start.toLocaleString()}-{end.toLocaleString()} {ofLabel} {total.toLocaleString()} {label}
-      </div>
-      {/* P10-20: the "per page" label + selector that lived here is gone
-          (owner: "no need to show rows per page options"); only the
-          back/next pill remains next to the count above. */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex items-center overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
-          <button
-            type="button"
-            className="inline-flex h-9 items-center gap-0.5 bg-white px-3 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
-            disabled={backDisabled}
-            onClick={() => onPageChange?.(safePage - 1)}
-            aria-label={backLabel}
-          >
-            <ChevronLeft className="h-4 w-4" />
-            <span>{backLabel}</span>
-          </button>
-          {editablePageInput ? (
-            <div className="inline-flex min-w-28 items-center justify-center gap-1 bg-slate-50 px-3 py-1.5 font-semibold dark:bg-slate-800">
-              <span className="sr-only">{pageLabel}</span>
-              <input
-                type="text"
-                inputMode="numeric"
-                aria-label={pageLabel}
-                className="h-5 w-12 border-0 bg-transparent p-0 text-center text-xs font-semibold text-slate-700 outline-none dark:text-slate-100"
-                value={pageDraft}
-                onChange={(event) => setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
-                onBlur={(event) => commitPageDraft(event.currentTarget.value)}
-                onKeyDown={handlePageInputKeyDown}
-              />
-              <span className="text-slate-500 dark:text-slate-300">/ {totalPages}</span>
-            </div>
-          ) : (
-            <span className="min-w-28 bg-slate-50 px-3 py-2 text-center font-semibold dark:bg-slate-800">
-              {pageLabel} {safePage} {ofLabel} {totalPages}
-            </span>
-          )}
-          <button
-            type="button"
-            className="inline-flex h-9 items-center gap-0.5 bg-white px-3 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
-            disabled={nextDisabled}
-            onClick={() => onPageChange?.(safePage + 1)}
-            aria-label={nextLabel}
-          >
-            <span>{nextLabel}</span>
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
+    <div className={`rounded-xl border border-slate-200 bg-white/80 px-1 py-1.5 text-xs sm:px-3 sm:py-2 text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300 ${className}`}>
+      {/* P10-20: no rows-per-page selector. Owner 14 Nov: ONE row, Back, the item range of
+          the total, page / pages, Next. The long "Showing ... label" wording is for wider
+          screens; a phone keeps just "21-40 of 1,234" so the row stays one line. */}
+      <div className="mx-auto flex w-fit max-w-full items-center overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
+        <button
+          type="button"
+          className="inline-flex h-9 shrink-0 items-center gap-0.5 bg-white px-1.5 text-slate-500 sm:px-3 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
+          disabled={backDisabled}
+          onClick={() => onPageChange?.(safePage - 1)}
+          aria-label={backLabel}
+          title={backLabel}
+        >
+          <ChevronLeft className="h-4 w-4" />
+          <span className={edgeTextClass}>{backLabel}</span>
+        </button>
+        <span data-pager-range className="min-w-0 whitespace-nowrap px-1.5 text-[11px] font-medium tabular-nums sm:px-3 sm:text-xs">
+          <span className="hidden sm:inline">{showingLabel} </span>{rangeText}<span className="hidden sm:inline"> {label}</span>
+        </span>
+        {editablePageInput ? (
+          <div className="inline-flex shrink-0 items-center justify-center gap-0.5 bg-slate-50 px-1 py-1.5 font-semibold sm:gap-1 sm:px-3 dark:bg-slate-800">
+            <span className="sr-only">{pageLabel}</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              aria-label={pageLabel}
+              className="h-5 w-8 border-0 sm:w-10 bg-transparent p-0 text-center text-xs font-semibold text-slate-700 outline-none dark:text-slate-100"
+              value={pageDraft}
+              onChange={(event) => setPageDraft(event.target.value.replace(/[^d]/g, '') || '')}
+              onBlur={(event) => commitPageDraft(event.currentTarget.value)}
+              onKeyDown={handlePageInputKeyDown}
+            />
+            <span className="text-slate-500 dark:text-slate-300">/ {totalPages}</span>
+          </div>
+        ) : (
+          <span className="shrink-0 whitespace-nowrap bg-slate-50 px-2 py-2 sm:px-3 text-center font-semibold dark:bg-slate-800">
+            {pageLabel} {safePage} {ofLabel} {totalPages}
+          </span>
+        )}
+        <button
+          type="button"
+          className="inline-flex h-9 shrink-0 items-center gap-0.5 bg-white px-1.5 text-slate-500 sm:px-3 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
+          disabled={nextDisabled}
+          onClick={() => onPageChange?.(safePage + 1)}
+          aria-label={nextLabel}
+          title={nextLabel}
+        >
+          <span className={edgeTextClass}>{nextLabel}</span>
+          <ChevronRight className="h-4 w-4" />
+        </button>
       </div>
     </div>
   )

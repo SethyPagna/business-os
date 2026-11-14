@@ -27,6 +27,7 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import type { LucideIcon } from 'lucide-react'
 import CatalogProductImage from './catalogImages'
 import CatalogPaginationControls, { CATALOG_DEFAULT_PAGE_SIZE, paginateCatalogItems } from './catalogPagination'
+import { TopPager } from '../shared/PaginationControls'
 import { SectionShell, StatusPill, microLabelProps } from './catalogUi'
 import { usePortalNavSearchSlot } from './portalNavSearchSlot.ts'
 import { safeLinkUrl } from '../../utils/safeLinkUrl.ts'
@@ -788,6 +789,26 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           </div>
         ) : null
 
+  // ONE pager element from the one product state, rendered above and below the grid
+  // (owner 14 Nov). The pager itself prints "1-50 of 3,585", so the old separate count span is gone.
+  const catalogPager = (
+    <CatalogPaginationControls
+      page={effectivePage}
+      pageSize={effectivePageSize}
+      totalItems={totalProducts}
+      label={copy('products', 'products')}
+      t={(key) => ({
+        page: copy('page', 'Page'),
+        of: copy('of', 'of'),
+        back: copy('back', 'Back'),
+        next: copy('next', 'Next'),
+        per_page: copy('perPage', 'Per page'),
+      })[key] || key}
+      onPageChange={updatePage}
+      onPageSizeChange={updatePageSize}
+    />
+  )
+
   return (
     <SectionShell
       // publicView: the top nav already has a "Products" chip/tab naming this
@@ -984,27 +1005,13 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           name would read "per_page". It is NOT a Filters field;
           renderFilterFields above carries none.
 
-          `resultsCount` is the one number that used to live in the border-t
-          hint row above the search field -- owner, 2026-09-15: put the
-          total on the SAME row as Back/Next instead of a second row. */}
+          The total used to be a separate "N result(s)" span beside the pill
+          (owner, 2026-09-15). Owner 14 Nov: the item range and total now sit
+          INSIDE the pill, between Back and the page number ("1-50 of 3,585"),
+          so that span is gone. The one `catalogPager` element is rendered
+          above (as the passive TopPager) and below the grid. */}
       {showPager ? (
-        <CatalogPaginationControls
-          className="mb-4"
-          page={effectivePage}
-          pageSize={effectivePageSize}
-          totalItems={totalProducts}
-          label={copy('products', 'products')}
-          resultsCount={replaceVars(copy('filterSummary', '{count} result(s)'), { count: totalProducts })}
-          t={(key) => ({
-            page: copy('page', 'Page'),
-            of: copy('of', 'of'),
-            back: copy('back', 'Back'),
-            next: copy('next', 'Next'),
-            per_page: copy('perPage', 'Per page'),
-          })[key] || key}
-          onPageChange={updatePage}
-          onPageSizeChange={updatePageSize}
-        />
+        <div className="mb-4"><TopPager>{catalogPager}</TopPager></div>
       ) : null}
 
       {/* Tighter vertical rhythm on phones so more products show per screen
@@ -1288,23 +1295,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
       </div>
 
       {showPager ? (
-        <CatalogPaginationControls
-          className="mt-4"
-          page={effectivePage}
-          pageSize={effectivePageSize}
-          totalItems={totalProducts}
-          label={copy('products', 'products')}
-          resultsCount={replaceVars(copy('filterSummary', '{count} result(s)'), { count: totalProducts })}
-          t={(key) => ({
-            page: copy('page', 'Page'),
-            of: copy('of', 'of'),
-            back: copy('back', 'Back'),
-            next: copy('next', 'Next'),
-            per_page: copy('perPage', 'Per page'),
-          })[key] || key}
-          onPageChange={updatePage}
-          onPageSizeChange={updatePageSize}
-        />
+        <div className="mt-4">{catalogPager}</div>
       ) : null}
 
       {totalProducts === 0 && !refreshingProducts && !loadingProducts ? (

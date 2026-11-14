@@ -11,7 +11,7 @@ export const pagerSource = fs.readFileSync(sourcePath, 'utf8')
 export function compactPager(props: Record<string, unknown>, source = pagerSource, onDraft = (_value: string) => {}) {
   const compiled = buildSync({ stdin: { contents: source, sourcefile: sourcePath, resolveDir: path.dirname(sourcePath), loader: 'tsx' }, bundle: true, platform: 'node', format: 'cjs', jsx: 'automatic', external: ['react', 'react/jsx-runtime'], write: false }).outputFiles[0].text
   const mod: any = { exports: {} }
-  new Function('require', 'module', 'exports', compiled)((id: string) => id === 'react' ? { ...React, useState: (initial: any) => [initial, onDraft], useEffect: () => {} } : require(id), mod, mod.exports)
+  new Function('require', 'module', 'exports', compiled)((id: string) => id === 'react' ? { ...React, useState: (initial: any) => [initial, onDraft], useEffect: () => {}, useContext: (context: any) => context._currentValue } : require(id), mod, mod.exports)
   return mod.exports.default({ compact: true, page: 13, pageSize: 20, totalItems: 245, ...props })
 }
 
@@ -36,8 +36,9 @@ export const language = (lang: string) => JSON.parse(fs.readFileSync(path.resolv
 // The prior constrained tracks and ellipsis are deliberately restored only
 // inside this negative-control fixture, never in application code.
 export const oldCompactLayout = () => pagerSource
-  .replace('flex max-w-full flex-wrap items-center justify-between gap-1', 'grid max-w-full grid-cols-[minmax(5rem,1fr)_minmax(12rem,14rem)] items-center gap-1')
-  .replace('inline-flex max-w-full flex-wrap items-center justify-center rounded-full border border-slate-200 bg-white', 'inline-flex min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white')
-  .replace('shrink-0 whitespace-nowrap px-1 text-center text-[11px] font-semibold tabular-nums', 'min-w-0 flex-1 truncate px-1 text-center text-[11px] font-semibold')
-  .replaceAll('gap-0.5 px-1 text-slate-500', 'gap-0.5 px-2 text-slate-500')
+  // The compact pill is now one row (Back, range of total, page / pages, Next). The negative control
+  // restores what hid the Khmer page total at 320px: a width-capped pill whose text is truncated.
+  .replace('mx-auto flex w-fit max-w-full items-center justify-center rounded-full border border-slate-200 bg-white', 'inline-flex w-28 min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white')
+  .replace('min-w-0 whitespace-nowrap rounded-full bg-slate-50 px-1.5 py-1 text-[11px]', 'min-w-0 flex-1 truncate rounded-full bg-slate-50 px-1.5 py-1 text-[11px]')
+  .replace('<span data-pager-page className="shrink-0 whitespace-nowrap px-1 text-center text-[11px] font-semibold tabular-nums', '<span data-pager-page className="min-w-0 flex-1 truncate px-1 text-center text-[11px] font-semibold')
   .replace('<span aria-hidden="true">{safePage} / {totalPages}</span>', '<span aria-hidden="true">{pageLabel} {safePage} {ofLabel} {totalPages}</span>')
