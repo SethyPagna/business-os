@@ -7,6 +7,8 @@
 //     wide row by id; the old statement SCANs shift_sessions (the control that proves the indexes are what changed);
 //   - HISTORY: the rows an index range holds for one lookup grow with history while the plan stays a LIMIT-1 seek (the lookup stops at its first entry).
 //
+//   - GUARD: the GET /api/shifts/current statements (readCurrent, readOwnOpenOnBranch, readPreviousOpen, readStaleDrawersToAlert) keep their pre-0306 plan; controls prove the guard bites.
+//
 // Run (from cloudflare/): node scripts/test-migration-0306-shift-adjacent-indexes-pure.cjs
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -125,5 +127,52 @@ const plan = (database, text, params) => database.prepare(`EXPLAIN QUERY PLAN ${
     assert.match(seen[0].text, /LIMIT 1\)/, 'the inner SELECT stops at its first entry')
   }
   check(`HISTORY: the index range holds ${a} then ${b} entries as shifts accumulate and the plan stays a LIMIT-1 seek`, () => {})
+  // ---- GUARD: the GET /api/shifts/current statements keep their intended index (read-budget shifts-current: 8 rows became 368 when the first form of 0306 stole them) ----
+  // The statements are the route's own functions, compiled from its source with the stored-shift world of the read-budget (one account, one branch, every shift closed).
+  const stub = { SHIFT_COLUMNS: '*', BRANCH_ACTIVE_SQL: '1', localTodayExpr: () => "date('now', '+7 hours')" }
+  const names = ['readCurrent', 'readOwnOpenOnBranch', 'readPreviousOpen', 'readStaleDrawersToAlert']
+  const from = (fn) => { const s = source.indexOf(`async function ${fn}(`); assert.ok(s > 0, fn); const e = source.indexOf('\nasync function ', s + 10); return source.slice(s, e < 0 ? undefined : e) }
+  const routeFns = () => new Function(...Object.keys(stub), `${names.map((n) => ts.transpileModule(from(n), { compilerOptions: { module: ts.ModuleKind.None, target: ts.ScriptTarget.ES2020 } }).outputText).join('\n')}; return { ${names.join(', ')} }`)(...Object.values(stub))
+  const world = (database) => database.exec(`WITH RECURSIVE n(k) AS (SELECT 1 UNION ALL SELECT k+1 FROM n WHERE k<360)
+    INSERT INTO shift_sessions(shift_code,user_id,user_name,branch_id,branch_name,business_date,opened_at,closed_at,closing_counted_usd,closing_counted_khr)
+    SELECT 'SH'||k,901,'A',1,'M',date('now','-'||(361-k)||' days'),datetime('now','-'||(361-k)||' days'),datetime('now','-'||(361-k)||' days','+8 hours'),100,0 FROM n`)
+  const statements = async (transform = (t) => t) => {
+    const fns = routeFns(), seen = {}
+    const db = (name) => ({ prepare: (text) => { const run = async () => { (seen[name] ||= []).push(transform(text)); return undefined }; return { get: run, all: run } } })
+    for (const scope of ['per_account', 'shop_wide']) {
+      await fns.readCurrent(db(`readCurrent/${scope}`), { scope_mode: scope }, 901, 1)
+      await fns.readPreviousOpen(db(`readPreviousOpen/${scope}`), { scope_mode: scope }, 901, 1)
+      await fns.readStaleDrawersToAlert(db(`readStaleDrawersToAlert/${scope}`), { scope_mode: scope }, 901, 1, 0)
+    }
+    await fns.readOwnOpenOnBranch(db('readOwnOpenOnBranch'), 901, 1)
+    return Object.entries(seen).map(([name, texts]) => ({ name, text: texts[0] }))
+  }
+  const outerPlan = (database, text) => {
+    const params = { scopeMode: 'x', userId: 901, branchId: 1, newShiftId: 0 }
+    const used = Object.fromEntries(Object.entries(params).filter(([k]) => text.includes('@' + k)))
+    return plan(database, text, used)
+  }
+  const newIndex = /idx_shift_sessions_scope_(user_)?branch_opened/
+  const guarded = withIdx, unguardedSql = without, unpartial = chain(false) // plans do not depend on the rows (no ANALYZE): the fixture databases above are reused
+  unpartial.exec('CREATE INDEX idx_shift_sessions_scope_branch_opened ON shift_sessions (scope_mode, branch_id, opened_at); CREATE INDEX idx_shift_sessions_scope_user_branch_opened ON shift_sessions (scope_mode, user_id, branch_id, opened_at)')
+  world(unpartial)
+  const real = await statements()
+  assert.equal(real.length, 7)
+  for (const { name, text } of real) {
+    const p = outerPlan(guarded, text), outer = p.split(' | ')[0]
+    const baseline = outerPlan(unguardedSql, text).split(' | ')[0]
+    assert.doesNotMatch(outer, newIndex, `${name} must not be pulled onto the 0306 indexes: ${p}`)
+    assert.equal(outer, baseline, `${name} keeps the plan it has without 0306: ${p}`)
+    assert.match(outer, /USING INDEX idx_shift_sessions_(business_date|open)/, `${name} uses an intended index: ${p}`)
+  }
+  check('GUARD: readCurrent, readOwnOpenOnBranch, readPreviousOpen and readStaleDrawersToAlert (both scopes) keep exactly the plan they have without 0306, on business_date / the open-shift index', () => {})
+  // Controls: each half of the fix is what holds it. Full-table indexes pull readCurrent (per-account) away; dropping the unary plus pulls readPreviousOpen / readStaleDrawersToAlert.
+  const current = real.find((s) => s.name === 'readCurrent/per_account')
+  assert.match(outerPlan(unpartial, current.text).split(' | ')[0], newIndex, 'control: with non-partial indexes readCurrent is pulled onto the new index')
+  const plusless = await statements((t) => t.replace('+scope_mode', 'scope_mode'))
+  for (const name of ['readPreviousOpen/per_account', 'readStaleDrawersToAlert/per_account']) {
+    assert.match(outerPlan(guarded, plusless.find((s) => s.name === name).text).split(' | ')[0], newIndex, `control: without the unary plus ${name} is pulled onto the new index`)
+  }
+  check('GUARD CONTROLS: non-partial indexes (readCurrent) or a missing unary plus (readPreviousOpen, readStaleDrawersToAlert) DO change the plan, so the guard discriminates', () => {})
   console.log(`${passed} checks passed`)
 })().catch((e) => { console.error(e); process.exit(1) })
