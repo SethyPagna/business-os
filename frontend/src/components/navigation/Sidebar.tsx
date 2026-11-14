@@ -644,7 +644,6 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
               sections={moreOpen ? [] : currentSections.map((section) => ({ id: section.id, label: sectionLabel(section) }))}
               currentId={currentSectionId}
               menuLabel={t('sections') || 'Sections'}
-              top={navLayerTop}
               onSelect={(id) => navigateTo(page, hubAnchor(page, id))}
             />
             {!moreOpen && currentSectionId === 'duplicates' && (page === 'products' || page === 'contacts') ? <span data-section-title-action-host={`${page}:duplicates`} data-section-title-action-location="mobile" className="flex shrink-0 items-center" /> : null}

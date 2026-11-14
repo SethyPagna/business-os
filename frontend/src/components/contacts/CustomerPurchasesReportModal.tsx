@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
-import PaginationControls, { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls.tsx'
+import PaginationControls, { DEFAULT_PAGE_SIZE, TopPager } from '../shared/PaginationControls.tsx'
 import { fmtDateTime24 } from '../../utils/formatters'
 import CopyableId from '../shared/CopyableId.tsx'
 import StatusBadge from '../sales/StatusBadge.tsx'
@@ -120,6 +120,18 @@ export default function CustomerPurchasesReportModal({ customerId, customerName,
   const totals = result?.totals || null
   const sales = Array.isArray(result?.sales) ? result!.sales! : []
 
+  const pager = (
+    <PaginationControls
+      page={Number(result?.page || page)}
+      pageSize={Number(result?.page_size || pageSize)}
+      totalItems={Number(result?.total_sales ?? 0)}
+      onPageChange={setPage}
+      onPageSizeChange={(next) => { setPageSize(next); setPage(1) }}
+      label={trText('sales', 'sales')}
+      t={t}
+      compact
+    />
+  )
   return (
     <Modal title={`${tr(t, 'customer_purchases', 'Purchases')} -- ${customerName}`} onClose={onClose} wide unsavedChanges="read-only">
       {/* P10-16/P10-20 parity: the shared Modal's own body already scrolls the
@@ -179,6 +191,7 @@ export default function CustomerPurchasesReportModal({ customerId, customerName,
             {/* P10-22b: the actual sale records, not only totals. Large
                 screens keep a table; phones get the wrapped card list, the
                 same split SupplierPurchasesModal uses for its lines. */}
+            <div className="shrink-0"><TopPager>{pager}</TopPager></div>
             {sales.length === 0 ? (
               <div className="py-6 text-center text-sm text-gray-400">{tr(t, 'no_sales_in_range', 'No sales in this range.')}</div>
             ) : (
@@ -227,16 +240,7 @@ export default function CustomerPurchasesReportModal({ customerId, customerName,
               </div>
             )}
             <div className="shrink-0">
-              <PaginationControls
-                page={Number(result?.page || page)}
-                pageSize={Number(result?.page_size || pageSize)}
-                totalItems={Number(result?.total_sales ?? 0)}
-                onPageChange={setPage}
-                onPageSizeChange={(next) => { setPageSize(next); setPage(1) }}
-                label={trText('sales', 'sales')}
-                t={t}
-                compact
-              />
+              {pager}
             </div>
           </>
         )}

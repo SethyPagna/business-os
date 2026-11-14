@@ -21,7 +21,7 @@ import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import MinimizeButton from '../shared/MinimizeButton.tsx'
 import SearchInput from '../shared/SearchInput'
 import FilterMenu, { type FilterOption } from '../shared/FilterMenu'
-import PaginationControls, { DEFAULT_PAGE_SIZE, clampPage } from '../shared/PaginationControls'
+import PaginationControls, { DEFAULT_PAGE_SIZE, clampPage, TopPager } from '../shared/PaginationControls'
 import PagerActionRow from '../shared/PagerActionRow.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import PendingReviewSync from '../shared/PendingReviewSync'
@@ -819,6 +819,19 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     }] : []),
   ]), [tr, t, typeFilter, typeFilterValues, branchFilter, branches])
 
+  const pager = (
+    <PaginationControls
+      compact
+      rangeAsPageSize
+      compactCentered
+      page={page}
+      pageSize={pageSize}
+      totalItems={result.total}
+      t={t}
+      onPageChange={setPage}
+      onPageSizeChange={(size) => { setPageSize(size); setPage(1) }}
+    />
+  )
   return (
     <div className={`${embedded ? '' : 'page-scroll '}flex flex-col p-3 sm:p-6`}>
       <PendingReviewSync active={isActive} />
@@ -927,17 +940,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
             </button>
           ) : null}
         >
-          <PaginationControls
-            compact
-            rangeAsPageSize
-            compactCentered
-            page={page}
-            pageSize={pageSize}
-            totalItems={result.total}
-            t={t}
-            onPageChange={setPage}
-            onPageSizeChange={(size) => { setPageSize(size); setPage(1) }}
-          />
+          <TopPager>{pager}</TopPager>
         </PagerActionRow>
       </div>
 
@@ -1056,17 +1059,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
           </div>
 
           <div className="mt-3 flex justify-center">
-            <PaginationControls
-              compact
-              rangeAsPageSize
-              compactCentered
-              page={page}
-              pageSize={pageSize}
-              totalItems={result.total}
-              t={t}
-              onPageChange={setPage}
-              onPageSizeChange={(size) => { setPageSize(size); setPage(1) }}
-            />
+            {pager}
           </div>
         </>
       )}

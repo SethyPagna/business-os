@@ -8,7 +8,7 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import ListChecks from 'lucide-react/dist/esm/icons/list-checks.js'
 import ExportMenu from '../shared/ExportMenu'
 import StatsRangeRow from '../shared/StatsRangeRow'
-import type { PaginationControlsProps } from '../shared/PaginationControls'
+import { TopPager, type PaginationControlsProps } from '../shared/PaginationControls'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import { fmtClock24 } from '../../utils/formatters'
 import { translateMovementRowType } from './movementGroups'
@@ -353,6 +353,19 @@ export default function InventoryMovementsSurface({
     )
   }
 
+  const movementPager = (
+    <PaginationControls
+      compact
+      rangeAsPageSize
+      page={movementMeta.page}
+      pageSize={movementMeta.pageSize}
+      totalItems={movementMeta.total}
+      label={t('movements') || 'movements'}
+      t={t}
+      onPageChange={(page) => setMovementMeta((current) => ({ ...current, page }))}
+      onPageSizeChange={(pageSize) => setMovementMeta((current) => ({ ...current, page: 1, pageSize }))}
+    />
+  )
   return (
         <>
           {/* Compact movement controls. The date range is optional, so the
@@ -439,17 +452,7 @@ export default function InventoryMovementsSurface({
           </div>
 
           <div className="mb-3 flex justify-center">
-          <PaginationControls
-            compact
-            rangeAsPageSize
-            page={movementMeta.page}
-            pageSize={movementMeta.pageSize}
-            totalItems={movementMeta.total}
-            label={t('movements') || 'movements'}
-            t={t}
-            onPageChange={(page) => setMovementMeta((current) => ({ ...current, page }))}
-            onPageSizeChange={(pageSize) => setMovementMeta((current) => ({ ...current, page: 1, pageSize }))}
-          />
+          <TopPager>{movementPager}</TopPager>
           </div>
 
           {/* Mobile: day divider headers (movementSections group by DAY now,
@@ -708,6 +711,7 @@ export default function InventoryMovementsSurface({
               </table>
             </div>
           </div>
+          <div className="mt-3 flex justify-center">{movementPager}</div>
           {confirmDialog}
         </>
   )

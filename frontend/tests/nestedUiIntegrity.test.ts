@@ -75,8 +75,10 @@ assert.match(sectionSwitcher, /section-switcher max-w-full min-w-0/, 'shared sec
 assert.match(sectionSwitcher, /flex min-w-0 flex-wrap/, 'shared section switcher must wrap without horizontal scrolling')
 
 const pagination = read('components/shared/PaginationControls.tsx')
-// Back/Next remain visible at 375px in both centered and compact pagers. The
-// directional icons reinforce the action instead of replacing its label.
+// Owner 14 Nov: one dense pager row on a phone. Back/Next keep their word from 400px up; below
+// that (320-375px phones) they are icon-only, with the translated word as tooltip and accessible
+// name, so the item range and page number still fit on the same row (button policy).
+assert.match(pagination, /const edgeTextClass = .whitespace-nowrap max-\[399px\]:hidden./, 'the word hides only below 400px')
 for (const [name, from, to] of [
   ['compact range-as-page-size', '  if (compact && rangeAsPageSize)', '  if (compact)'],
 ] as const) {
@@ -84,15 +86,15 @@ for (const [name, from, to] of [
   const end = pagination.indexOf(to, start + from.length)
   assert.ok(start > 0 && end > start, `pagination pill branch '${name}' must still be findable`)
   const branch = pagination.slice(start, end)
-  assert.equal((branch.match(/<span(?:\s+className="[^"]*")?>\{(?:back|next)Label\}<\/span>/g) || []).length, 2, `${name} pager must render both Back and Next words`)
-  assert.doesNotMatch(branch, /hidden sm:inline/, `${name} pager labels must not disappear on narrow screens`)
+  assert.equal((branch.match(/<span className=\{edgeTextClass\}>\{(?:back|next)Label\}<\/span>/g) || []).length, 2, `${name} pager must render both Back and Next words`)
+  assert.doesNotMatch(branch, /hidden sm:inline/, `${name} pager labels are never sm:-hidden (only icon-only below 400px via edgeTextClass)`)
   assert.match(branch, /<ChevronLeft[^>]*>[\s\S]*\{backLabel\}[\s\S]*\{nextLabel\}[\s\S]*<ChevronRight/, `${name} pager keeps labels paired with directional icons`)
 }
 const centeredStart = pagination.indexOf("  if (layout === 'centered')")
 const centeredEnd = pagination.indexOf('  if (compact && rangeAsPageSize)', centeredStart)
 const centered = pagination.slice(centeredStart, centeredEnd)
-assert.equal((centered.match(/<span(?:\s+className="[^"]*")?>\{(?:back|next)Label\}<\/span>/g) || []).length, 2,
-  'centered pager keeps Back and Next visible on narrow storefronts')
+assert.equal((centered.match(/<span className=\{edgeTextClass\}>\{(?:back|next)Label\}<\/span>/g) || []).length, 2,
+  'centered pager keeps Back and Next (word from 400px, icon + tooltip below)')
 assert.doesNotMatch(centered, /hidden sm:inline/, 'centered pager labels must not disappear at 375px')
 assert.match(pagination, /onPageChange\?\.\(safePage\)/, 'pager must repair stale out-of-range controlled pages')
 

@@ -222,21 +222,17 @@ check('4 the storefront pager reads Back, page/total, Next', () => {
   )
 })
 
-check('4 the results count renders on the same row as the pill, not a second line', () => {
-  assert.match(paginationControls, /resultsCount\?: string/, 'PaginationControls must accept an opt-in results count')
+check('4 the item range and total sit inside the pill, between Back and the page number', () => {
+  // Owner 14 Nov supersedes the 15 Sep separate "N result(s)" span: the pill itself prints "a-b of total".
+  assert.doesNotMatch(paginationControls, /resultsCount/, 'the separate results span is gone from the shared control')
+  assert.doesNotMatch(catalogPagination, /resultsCount/, 'and from the storefront wrapper')
+  assert.doesNotMatch(catalogProductsSection, /resultsCount/, 'and neither storefront mount passes it')
   const centeredBranch = paginationControls.slice(
     paginationControls.indexOf("if (layout === 'centered') {"),
     paginationControls.indexOf("if (compact && rangeAsPageSize) {"),
   )
-  assert.match(centeredBranch, /<nav className=\{`flex w-full flex-wrap items-center justify-center gap-2/, 'the count must sit in the SAME <nav> row as the pill')
-  assert.match(centeredBranch, /\{resultsCount \? \(/, 'the count must be conditionally rendered beside the pill')
-  assert.match(catalogPagination, /resultsCount\?: string/, 'the storefront wrapper must forward resultsCount')
-  assert.match(catalogPagination, /resultsCount=\{resultsCount\}/, 'the storefront wrapper must actually pass it through')
-  assert.match(
-    catalogProductsSection,
-    /resultsCount=\{replaceVars\(copy\('filterSummary', '\{count\} result\(s\)'\), \{ count: totalProducts \}\)\}/,
-    'both pager mounts must supply the live total',
-  )
+  assert.match(centeredBranch, /<span data-pager-range[^>]*>\{rangeText\}<\/span>/, 'the pill carries the live range and total')
+  assert.ok(centeredBranch.indexOf('aria-label={backLabel}') < centeredBranch.indexOf('{rangeText}') && centeredBranch.indexOf('{rangeText}') < centeredBranch.indexOf('aria-label={pageLabel}', centeredBranch.indexOf('{rangeText}')), 'Back, then the range, then the page number')
 })
 
 check('4 the dead "Use quick filters" hint sentence is gone from source and both packs', () => {

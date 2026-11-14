@@ -6,7 +6,7 @@ import { useApp } from '../../AppContext.tsx'
 import { fmtDateOnly, fmtDateTime24 } from '../../utils/formatters.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import Modal from '../shared/Modal.tsx'
-import PaginationControls, { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls.tsx'
+import PaginationControls, { DEFAULT_PAGE_SIZE, TopPager } from '../shared/PaginationControls.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
 import { DateTimeEntryInput } from '../shared/DateEntryInput.tsx'
 import { SHIFT_BRANCH_CHANGED_EVENT, SHIFT_STATE_CHANGED_EVENT } from '../pos/ShiftGate.tsx'
@@ -569,6 +569,11 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
     setSearch('')
   }
 
+  const pager = (
+    <PaginationControls compact page={pageInfo.page} pageSize={pageSize} totalItems={pageInfo.total} t={t}
+                  onPageChange={(next) => setPaging({ scope: pageScope, page: next, size: pageSize })}
+                  onPageSizeChange={(size) => setPaging({ scope: pageScope, page: 1, size })} />
+  )
   return (
     <>
       <button type="button" className={buttonClassName} onClick={() => setOpen(true)} aria-haspopup="dialog">
@@ -711,14 +716,13 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
               {/* While the pause runs the rows answer the previous search, so
                   they are not offered: a tap would open a shift the box no
                   longer asks for. */}
+              <div className="min-h-11">{!loading && !searchPending && !error && pageInfo.total != null ? <TopPager>{pager}</TopPager> : null}</div>
               {loading || searchPending ? <p role="status" className="py-6 text-center text-sm text-gray-500">{search.trim() ? t('searching') : t('shift_current_loading')}</p>
                 : error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">{error}</p>
                 : rows.length === 0 ? <p className="rounded-lg border border-dashed p-5 text-center text-sm text-gray-500">{query ? t('shift_search_no_match') : t('shift_history_empty')}</p>
                 : <div className="max-h-[min(65vh,38rem)] space-y-2 overflow-y-auto overscroll-contain pr-1 [scrollbar-width:thin]">{rows.map((shift) => <button key={shift.id} type="button" onClick={() => void openDetails(shift)} className="block w-full rounded-xl text-left outline-none ring-blue-500 transition hover:bg-blue-50 focus-visible:ring-2 dark:hover:bg-blue-950/20"><ShiftSummary shift={shift} /></button>)}</div>}
               <div className="min-h-11">
-              {!loading && !searchPending && !error && pageInfo.total != null ? <PaginationControls compact page={pageInfo.page} pageSize={pageSize} totalItems={pageInfo.total} t={t}
-                onPageChange={(next) => setPaging({ scope: pageScope, page: next, size: pageSize })}
-                onPageSizeChange={(size) => setPaging({ scope: pageScope, page: 1, size })} /> : null}
+              {!loading && !searchPending && !error && pageInfo.total != null ? pager : null}
               </div>
             </div>
           )}

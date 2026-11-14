@@ -7,7 +7,7 @@ import { todayStr } from '../../utils/dateHelpers.ts'
 import { continuousRangeParams } from '../../utils/continuousRangeParams.ts'
 import { getLegacyDeletedSales } from '../../api/auditLogTransport.ts'
 import { useApp as useAppHook } from '../../AppContext.tsx'
-import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
+import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE, TopPager } from '../shared/PaginationControls'
 
 // M-audit follow-through: the legacy deleted-sale audit ledger -- every
 // line the old system's cashiers deleted from a cart or bill (618 events /
@@ -140,6 +140,9 @@ export default function LegacyDeletedSalesSection() {
     return parts.length ? parts.join(' · ') : '--'
   }
 
+  const pager = (
+    <PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalLines} label={tr('invoice_lines', 'Lines').toLowerCase()} t={t} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
+  )
   return (
     <div className="page-scroll flex flex-col gap-3 p-3 sm:p-6">
       <div className="flex min-w-0 items-center gap-2">
@@ -202,6 +205,7 @@ export default function LegacyDeletedSalesSection() {
             ))}
           </div>
 
+          <div className="flex justify-center"><TopPager>{pager}</TopPager></div>
           {rows.length === 0 ? (
             <div className="py-6 text-center text-sm text-gray-400">{tr('legacy_deleted_sales_empty', 'No deleted-sale records match these filters.')}</div>
           ) : (
@@ -245,7 +249,7 @@ export default function LegacyDeletedSalesSection() {
           )}
 
           <div className="flex justify-center">
-            <PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalLines} label={tr('invoice_lines', 'Lines').toLowerCase()} t={t} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
+            {pager}
           </div>
         </>
       )}

@@ -24,7 +24,7 @@ export function getHubDestinations(page: string, access: HubAccess): HubDestinat
     ['transfers', 'transfer', 'Transfer', can('branches')],
     ['rfid', 'rfid', 'RFID', can('inventory')],
   ] : page === 'inventory' ? [
-    ['products', 'products', 'Products', inventoryChecks],
+    ['products', 'inventory', 'Inventory', inventoryChecks],
     ['sessions', 'inventory_check_sessions', 'Sessions', inventoryChecks],
     ['issues', 'issues', 'Issues', inventoryChecks],
   ] : page === 'sales' ? [

@@ -236,7 +236,8 @@ await test('Sales uses the shared Previous/Next pager like Returns: same compone
   const returns = read('../src/components/returns/Returns.tsx')
   const shape = (source: string) => (source.match(/<PaginationControls\s+compact\s+rangeAsPageSize\s+compactCentered/g) || []).length
   assert.equal(shape(sales), 2, 'top (in the pager row) and bottom')
-  assert.equal(shape(returns), 2)
+  // Returns builds ONE pager element and mounts it above (TopPager) and below the list (owner 14 Nov).
+  assert.equal(shape(returns), 1)
   assert.match(sales, /<PagerActionRow[\s\S]*?<PaginationControls\s+compact\s+rangeAsPageSize\s+compactCentered\s+page=\{salesPage\}\s+pageSize=\{salesPageSize\}\s+totalItems=\{totalSalesCount\}/)
   assert.match(sales, /<div data-sales-bottom-pager="" className="mt-3 flex justify-center">\s*<PaginationControls compact rangeAsPageSize compactCentered page=\{salesPage\} pageSize=\{salesPageSize\} totalItems=\{totalSalesCount\}/)
   assert.match(sales, /const \[salesPageSize, setSalesPageSize\] = useState\(DEFAULT_PAGE_SIZE\)/)

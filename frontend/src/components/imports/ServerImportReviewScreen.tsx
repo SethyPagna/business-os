@@ -3,7 +3,7 @@ import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import AppSelect from '../shared/AppSelect'
-import PaginationControls from '../shared/PaginationControls'
+import PaginationControls, { TopPager } from '../shared/PaginationControls'
 import { approveImportJob, getImportJob, getImportJobReview } from '../../api/importJobsTransport'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards'
 import { importPollDelayMs } from '../../utils/importPoll'
@@ -225,6 +225,9 @@ export default function ServerImportReviewScreen({ jobId, label, source, t, noti
     )
   }
 
+  const pager = (
+    <PaginationControls compact rangeAsPageSize page={page} pageSize={PAGE_SIZE} totalItems={total} label={tr('records', 'records')} t={t} onPageChange={setPage} />
+  )
   return (
     <div className="space-y-4">
       <div>
@@ -243,6 +246,7 @@ export default function ServerImportReviewScreen({ jobId, label, source, t, noti
           { value: 'row_asc', label: tr('first_to_last', 'First–last') }, { value: 'row_desc', label: tr('last_to_first', 'Last–first') }, { value: 'name_asc', label: tr('sort_name_az', 'Name A–Z') }, { value: 'name_desc', label: tr('sort_name_za', 'Name Z–A') },
         ]} />
       </div>
+      <div className="flex justify-center"><TopPager>{pager}</TopPager></div>
       <div className="max-h-[28rem] overflow-auto rounded-xl border border-slate-200 dark:border-slate-700">
         {loadingRows ? <div className="flex justify-center p-8"><Loader2 className="h-5 w-5 animate-spin" /></div> : rows.length ? (
           <table className="w-full min-w-[38rem] text-left text-xs">
@@ -251,7 +255,7 @@ export default function ServerImportReviewScreen({ jobId, label, source, t, noti
           </table>
         ) : <div className="p-8 text-center text-sm text-slate-500">{tr('no_matching_rows', 'No matching rows.')}</div>}
       </div>
-      <div className="flex justify-center"><PaginationControls compact rangeAsPageSize page={page} pageSize={PAGE_SIZE} totalItems={total} label={tr('records', 'records')} t={t} onPageChange={setPage} /></div>
+      <div className="flex justify-center">{pager}</div>
       {jobError ? <p className="text-xs text-red-600 dark:text-red-400">{jobError}</p> : null}
       <div className="flex justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
         <button type="button" className="btn-secondary" disabled={approving} onClick={() => void onReviewLater()}>{tr('review_later', 'Review later')}</button>

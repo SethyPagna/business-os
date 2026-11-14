@@ -36,7 +36,7 @@ import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import { useSupplierSuggestions, type SupplierChoice } from '../shared/SupplierPickerField.tsx'
 import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import { IconField, InsetNumberField } from '../stock-session/StockSessionSharedDetails.tsx'
-import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls.tsx'
+import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE, TopPager } from '../shared/PaginationControls.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives.tsx'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
@@ -612,11 +612,15 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
     ]
   }
 
+  const pager = (
+    <PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalSessions} label={tr('stock_in_sessions', 'stock-in sessions')} t={t} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
+  )
   return <div className="space-y-3">
     <div className="sticky top-0 z-20 flex gap-2 bg-gray-50 py-1 dark:bg-gray-900">
       <div className="min-w-0 flex-1"><SearchInput id="stock-in-session-search" inputRef={searchInputRef} value={search} onChange={changeSearch} placeholder={tr('search_stock_sessions', 'Search products, suppliers, users…')} /></div>
       <ScanSearchButton onDetected={changeSearch} t={t} />
     </div>
+    <div className="flex justify-center"><TopPager>{pager}</TopPager></div>
     {loading ? <div className="py-10 text-center text-sm text-gray-400">{tr('loading', 'Loading')}…</div> : loadError ? <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-6 text-center text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300"><p>{loadError}</p><button type="button" className="btn-secondary mt-3 h-9 px-3 text-xs" onClick={() => void load()}>{tr('retry', 'Retry')}</button></div> : !sessions.length ? <div className="rounded-xl border border-dashed border-gray-200 py-10 text-center text-sm text-gray-400 dark:border-gray-700">{tr('no_stock_sessions', 'No stock-in sessions found')}</div> : (<>
       <div className="desktop-dense-only dense-data-shell">
         <div className="scroll-x">
@@ -650,7 +654,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
         </button>),
       ])}</div>
     </>)}
-    <div className="flex justify-center"><PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalSessions} label={tr('stock_in_sessions', 'stock-in sessions')} t={t} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} /></div>
+    <div className="flex justify-center">{pager}</div>
 
     {/* S4-14: the id the list row shows is repeated in the title, so the row
         an operator clicked and the receipt they read back are the same thing. */}

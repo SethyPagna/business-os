@@ -136,7 +136,7 @@ const vite = await createServer({
       load(id) {
         if (id === '\0file-picker-app-context') return `export const useApp = () => ({ notify: (message, type) => { (globalThis.__pickerNotes ||= []).push([message, type]) }, user: null, t: (key) => key })`
         if (id === '\0file-picker-transport') return `export const getFiles = async () => ({ items: [], total: 0 }); export const isUploadTooLarge = (error) => error?.code === 'upload_too_large'; export const uploadFileAsset = (payload) => (globalThis.__pickerUploadHook ? globalThis.__pickerUploadHook(payload) : Promise.resolve({})); export const deleteFileAsset = async () => ({})`
-        if (id === '\0file-picker-pagination') return `export const DEFAULT_PAGE_SIZE = 48; export const clampPage = () => 1; export default function PaginationControls() { return null }`
+        if (id === '\0file-picker-pagination') return `export const DEFAULT_PAGE_SIZE = 48; export const clampPage = () => 1; export const TopPager = ({ children }) => children; export default function PaginationControls() { return null }`
         return null
       },
     },

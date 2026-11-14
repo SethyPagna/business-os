@@ -1,7 +1,7 @@
 import ProductNameRail from '../shared/ProductNameRail'
 import { Fragment, useMemo, useState } from 'react'
 import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
-import PaginationControls from '../shared/PaginationControls.tsx'
+import PaginationControls, { TopPager } from '../shared/PaginationControls.tsx'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
 import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
 import PendingReviewSync from '../shared/PendingReviewSync.tsx'
@@ -233,6 +233,9 @@ export default function InventoryProductsSurface({
   }
   const summaryFields = [['total_products', 'products'], ['in_stock', 'in_stock'], ['low_stock', 'low_stock'], ['out_of_stock', 'out_of_stock'], ['stock_value_usd', 'stock_val']] as const
 
+  const pager = (
+    <PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={total} label={t('products') || 'products'} t={t} onPageChange={onPageChange} onPageSizeChange={onPageSizeChange} />
+  )
   return (
     <section aria-label={t('products') || 'Products'} className="min-w-0 max-w-full space-y-2">
       {/* ONE read of the open review requests for this table, shared by every row's tag (renders nothing). */}
@@ -241,6 +244,7 @@ export default function InventoryProductsSurface({
         {summaryFields.map(([field, label]) => <div key={field}>{t(label) || label}: <strong>{statsLoading ? '…' : inventoryMoney(serverStats?.[field]) === null ? '—' : field === 'stock_value_usd' ? fmtUSD(Number(serverStats?.[field])) : Number(serverStats?.[field])}</strong></div>)}
       </div>
       {statsError ? <p role="alert" className="text-xs text-red-600">{statsError}</p> : null}
+      <div className="flex justify-center"><TopPager>{pager}</TopPager></div>
       <div className="card hidden max-w-full overflow-x-auto md:block">
         <table className="w-full border-collapse text-xs" style={{ minWidth: 680 }}>
           {/* Header weight and the red/green column tints match
@@ -330,7 +334,7 @@ export default function InventoryProductsSurface({
       </div>
 
       <div className="flex justify-center">
-        <PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={total} label={t('products') || 'products'} t={t} onPageChange={onPageChange} onPageSizeChange={onPageSizeChange} />
+        {pager}
       </div>
       {canViewCosts && costFloatProduct ? (
         <CostCalculationFloat

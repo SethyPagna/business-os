@@ -99,9 +99,11 @@ const reasonAt = secondaryMeta.indexOf("tr('reason'")
 assert.ok(cashierAt >= 0 && cashierAt < branchAt && branchAt < customerAt && customerAt < reasonAt, 'mobile metadata should stay Cashier, Branch, Customer, Reason')
 
 const pagerMatches = returnsSource.match(/<PaginationControls[\s\S]*?rangeAsPageSize/g) || []
-assert.equal(pagerMatches.length, 2, 'Returns should render the labeled shared pager above and below the list')
-assert.equal((returnsSource.match(/compactCentered/g) || []).length, 2, 'both Returns pagers use the narrow centered contract')
-const topPagerAt = returnsSource.indexOf('<PaginationControls', returnsSource.indexOf('id="returns-search"'))
+assert.equal(pagerMatches.length, 1, 'Returns builds ONE labeled shared pager element')
+assert.equal((returnsSource.match(/<TopPager>\{returnsPager\}<\/TopPager>/g) || []).length, 1, 'mounted above the list')
+assert.equal((returnsSource.match(/\{returnsPager\}/g) || []).length, 2, 'and below it, from the same element')
+assert.equal((returnsSource.match(/compactCentered/g) || []).length, 1, 'the one Returns pager uses the narrow centered contract')
+const topPagerAt = returnsSource.indexOf('<TopPager>{returnsPager}', returnsSource.indexOf('id="returns-search"'))
 const listAt = returnsSource.indexOf('<ReturnsListSurface', topPagerAt)
 assert.ok(topPagerAt >= 0 && topPagerAt < listAt, 'the first pager should sit directly below filters and before the list')
 

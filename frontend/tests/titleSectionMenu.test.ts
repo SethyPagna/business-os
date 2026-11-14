@@ -7,9 +7,9 @@ import path from 'node:path'
 import { createServer, transformWithEsbuild } from 'vite'
 import { closeBrowserFixture, closeCdpBrowser, removeBrowserProfile, waitForBrowser } from './browserProfileTeardown.ts'
 
-// The real Sidebar in headless Chrome at 360x740: the mobile title is a button that expands the page's
-// subpage titles inline, as plain text with no arrow or box, above a sticky row and a floating layer;
-// the open one is marked by weight and colour, a pick navigates and collapses, a second tap on the
+// The real Sidebar in headless Chrome at 360x740: the mobile title is a button that opens a compact dropdown of the page's
+// subpage titles, anchored under the title and floating above sticky rows and floats. The top bar keeps its height, background and
+// divider while it is open; the open subpage is marked by weight and colour, a pick navigates and closes, a second tap on the
 // title, Escape or an outside tap collapses. TITLE_MENU_SCREENSHOT_DIR, when set, receives one screenshot per case.
 
 const root = path.resolve(import.meta.dirname, '..')
@@ -220,6 +220,7 @@ try {
       const barLine = await evaluate<string>(`getComputedStyle(document.querySelector('header')).borderBottomColor`)
       assert.notEqual(barLine, 'rgba(0, 0, 0, 0)', `${theme} ${language} ${page}: the closed bar keeps its divider`)
       const stickyBefore = await evaluate<number>(`document.getElementById('fake-sticky').getBoundingClientRect().top`)
+      const barClosed = await evaluate<any>(`(() => { const h = document.querySelector('header'); const r = h.getBoundingClientRect(); return { height: r.height, bg: getComputedStyle(h).backgroundColor, line: getComputedStyle(h).borderBottomColor } })()`)
       const closed = await evaluate<any>(`(() => { const b = document.querySelector('${trigger}'); return { tag: b.tagName, expanded: b.getAttribute('aria-expanded'), svg: b.querySelector('svg') !== null, list: document.querySelector('[data-bos-title-menu-layer]') !== null } })()`)
       assert.deepEqual(closed, { tag: 'BUTTON', expanded: 'false', svg: false, list: false }, `${language} ${page}: the title is a button with no arrow and the list starts collapsed`)
 
@@ -242,18 +243,16 @@ try {
           zSticky: Number(getComputedStyle(document.getElementById('fake-sticky')).zIndex),
           zFloat: Number(getComputedStyle(document.getElementById('fake-float')).zIndex),
           zHeader: Number(getComputedStyle(document.querySelector('header')).zIndex),
-          plain: items.every((i) => !i.querySelector('svg')) && getComputedStyle(menu).boxShadow === 'none' && getComputedStyle(menu).borderTopWidth === '0px' && getComputedStyle(menu).borderRadius === '0px' && items.every((i) => getComputedStyle(i).backgroundColor === 'rgba(0, 0, 0, 0)'),
           weights: items.map((i) => Number(getComputedStyle(i.querySelector('span')).fontWeight)),
-          flush: Math.abs(rect.top - document.querySelector('header').getBoundingClientRect().bottom) < 1 && rect.left === 0 && rect.right === document.documentElement.clientWidth,
-          barLine: getComputedStyle(document.querySelector('header')).borderBottomColor,
-          barBottom: document.querySelector('header').getBoundingClientRect().bottom,
-          listLine: getComputedStyle(menu).borderBottomWidth + ' ' + getComputedStyle(menu).borderBottomColor,
-          listTopLine: getComputedStyle(menu).borderTopWidth,
-          listShadow: getComputedStyle(menu).boxShadow,
-          listBg: getComputedStyle(menu).backgroundColor,
-          barBg: getComputedStyle(document.querySelector('header')).backgroundColor,
-          titleLeft: document.querySelector('${trigger} span').getBoundingClientRect().left,
-          itemLeft: items[0].querySelector('span').getBoundingClientRect().left,
+          role: menu.getAttribute('role'),
+          itemRoles: items.map((i) => i.getAttribute('role')),
+          trigger: (() => { const t = document.querySelector('${trigger}').getBoundingClientRect(); return { left: t.left, bottom: t.bottom } })(),
+          panel: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+          radius: parseFloat(getComputedStyle(menu).borderTopLeftRadius),
+          shadow: getComputedStyle(menu).boxShadow,
+          border: getComputedStyle(menu).borderTopWidth,
+          bar: (() => { const h = document.querySelector('header'); return { height: h.getBoundingClientRect().height, bg: getComputedStyle(h).backgroundColor, line: getComputedStyle(h).borderBottomColor } })(),
+          menuMarkup: menu.querySelectorAll('[data-bos-title-menu-item]').length,
           pushed: document.getElementById('fake-sticky').getBoundingClientRect().top,
           noOverflow: document.documentElement.scrollWidth === document.documentElement.clientWidth,
         }
@@ -262,19 +261,20 @@ try {
       assert.equal(await evaluate<boolean>(`document.activeElement?.hasAttribute('data-bos-title-menu-item') === true`), false, `${language} ${page}: a tap does not draw a focus ring on an item`)
       assert.deepEqual(open.ids, ids, `${language} ${page}: the menu lists the page's sections in order`)
       assert.deepEqual(open.checked, [anchor.split(':')[2]], `${language} ${page}: only the open section is marked`);
-      assert.equal(open.plain, true, `${language} ${page}: plain text, no icon, box, border, shadow or fill`);
-      assert.equal(open.flush, true, `${language} ${page}: the list continues the bar directly beneath it`);
+      assert.equal(open.role, 'menu', `${language} ${page}: the list is a menu`);
+      assert.ok(open.itemRoles.every((r: string) => r === 'menuitem'), `${language} ${page}: every item is a menuitem`);
+      assert.equal(await evaluate<string>(`document.querySelector('${trigger}').getAttribute('aria-haspopup')`), 'menu');
+      assert.ok(Math.abs(open.panel.top - open.trigger.bottom) <= 6 && Math.abs(open.panel.left - open.trigger.left) <= 1, `${theme} ${language} ${page}: the dropdown is anchored under the title (${JSON.stringify(open.panel)} vs ${JSON.stringify(open.trigger)})`);
+      assert.ok(open.panel.width < 330 && open.panel.width >= 170, `${language} ${page}: the dropdown is sized to its list, not the bar width (${open.panel.width}px)`);
+      assert.ok(open.radius > 0 && open.shadow !== 'none' && open.border === '1px', `${language} ${page}: it is a compact floating box`);
+      assert.deepEqual(open.bar, barClosed, `${theme} ${language} ${page}: the top bar keeps its height, background and divider while open`);
       assert.ok(open.weights.every((w: number, index: number) => index === ids.indexOf(anchor.split(':')[2]) || w < open.weights[ids.indexOf(anchor.split(':')[2])]), `${language} ${page}: the open section differs by weight (${JSON.stringify(open.weights)})`)
       assert.ok(open.labels.every((label: string) => label.length > 0 && !/^[a-z_]+$/.test(label)), `${language} ${page}: labels are translated`)
+      if (page === 'inventory') assert.equal(open.labels[0], language === 'en' ? 'Inventory' : open.labels[0], `${language}: the Inventory page's first subpage is "Inventory", not "Products"`)
+      if (page === 'inventory') assert.notEqual(open.labels[0], await evaluate<string>(`${JSON.stringify(language)} === 'km' ? 'ផលិតផល' : 'Products'`), `${language}: and it no longer reads like the main Products page`)
       assert.equal(open.reachable, true, `${language} ${page}: every item is the topmost element at its centre, over the sticky row and the float`)
       assert.equal(open.inside, true, `${language} ${page}: the list stays inside the viewport`)
       assert.ok(open.zMenu > open.zFloat && open.zMenu > open.zSticky && open.zMenu > open.zHeader, `${language} ${page}: menu z-index ${open.zMenu} is above sticky ${open.zSticky}, float ${open.zFloat}, header ${open.zHeader}`)
-      assert.equal(open.barLine, 'rgba(0, 0, 0, 0)', `${theme} ${language} ${shotName}: no divider between the title row and the list`)
-      assert.match(open.listLine, /^1px rgb/, `${theme} ${language} ${shotName}: the line is the list's bottom edge`)
-      assert.equal(open.listTopLine, '0px')
-      assert.equal(open.listShadow, 'none')
-      assert.equal(open.listBg, open.barBg, `${theme} ${language} ${shotName}: list and bar share one background`)
-      assert.ok(Math.abs(open.titleLeft - open.itemLeft) < 1, `${theme} ${language} ${shotName}: items align with the title text (${open.titleLeft} vs ${open.itemLeft})`)
       assert.equal(open.pushed, stickyBefore, `${theme} ${language} ${shotName}: the list floats and moves no page content`)
       assert.equal(open.noOverflow, true, `${language} ${page}: no horizontal overflow`)
       if (SCREENSHOT_DIR) {

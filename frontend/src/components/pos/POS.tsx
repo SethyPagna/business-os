@@ -42,7 +42,7 @@ import CartItem     from './CartItem'
 import ShiftGate, { EndShiftButton } from './ShiftGate'
 import { SHIFT_BRANCH_CHANGED_EVENT } from './ShiftGate'
 import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
-import PaginationControls, { POS_DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
+import PaginationControls, { POS_DEFAULT_PAGE_SIZE, TopPager } from '../shared/PaginationControls'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import { useScannedQuery } from '../shared/useScannedQuery.ts'
@@ -3623,6 +3623,22 @@ export default function POS() {
 // Render
   const catalogControlsDisabled = catalogRefreshing
 
+  const posPager = (
+    <PaginationControls
+      page={productPage}
+      pageSize={productPageSize}
+      totalItems={productTotal}
+      label={productCountLabel}
+      t={t}
+      compact
+      rangeAsPageSize
+      onPageChange={setProductPage}
+      onPageSizeChange={(size) => {
+        setProductPageSize(size)
+        setProductPage(1)
+      }}
+    />
+  )
   return (
     <div className="flex flex-col h-full overflow-hidden [&_.input]:min-h-9 [&_.input]:py-1.5 [&_.btn-primary]:min-h-9 [&_.btn-primary]:px-2 [&_.btn-primary]:py-1.5 [&_.btn-secondary]:min-h-9 [&_.btn-secondary]:px-2 [&_.btn-secondary]:py-1.5">
 
@@ -3738,20 +3754,7 @@ export default function POS() {
               <p className="mb-3 text-center text-sm text-gray-500" role="status">{t('search_type_one_more')}</p>
             ) : (
             <div className="mb-3 flex justify-center">
-              <PaginationControls
-                page={productPage}
-                pageSize={productPageSize}
-                totalItems={productTotal}
-                label={productCountLabel}
-                t={t}
-                compact
-                rangeAsPageSize
-                onPageChange={setProductPage}
-                onPageSizeChange={(size) => {
-                  setProductPageSize(size)
-                  setProductPage(1)
-                }}
-              />
+              <TopPager>{posPager}</TopPager>
             </div>
             )}
             <div className={searchTooShort ? 'pos-product-grid opacity-50' : 'pos-product-grid'}>
@@ -3819,20 +3822,7 @@ export default function POS() {
                 more than one page so it never clutters a short grid. */}
             {productTotal > productPageSize && !searchTooShort ? (
               <div className="mt-3 flex justify-center">
-                <PaginationControls
-                  page={productPage}
-                  pageSize={productPageSize}
-                  totalItems={productTotal}
-                  label={productCountLabel}
-                  t={t}
-                  compact
-                  rangeAsPageSize
-                  onPageChange={setProductPage}
-                  onPageSizeChange={(size) => {
-                    setProductPageSize(size)
-                    setProductPage(1)
-                  }}
-                />
+                {posPager}
               </div>
             ) : null}
           </div>

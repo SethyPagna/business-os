@@ -6,7 +6,7 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import AppSelect from '../shared/AppSelect.tsx'
 import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
-import PaginationControls, { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
+import PaginationControls, { DEFAULT_PAGE_SIZE, TopPager } from '../shared/PaginationControls'
 import { fmtDateOnly } from '../../utils/formatters'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { useStockInInvoiceReport, groupKeyOf, LINE_PAGE_SIZE, type InvoiceGroup, type InvoiceLine } from './useStockInInvoiceReport.ts'
@@ -95,6 +95,9 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
     return <span className="text-[11px] text-gray-400">--</span>
   }
 
+  const pager = (
+    <PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalInvoices} label={tr('stock_in_invoices_count', 'Invoices').toLowerCase()} t={t} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
+  )
   return (
     <div className="space-y-3 py-3 pl-[calc(0.75rem+env(safe-area-inset-left))] pr-[calc(0.75rem+env(safe-area-inset-right))]">
       {/* The filter + date row pins while the supplier-day groups scroll --
@@ -198,6 +201,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
             </div>
           ) : null}
 
+          <div className="flex justify-center"><TopPager>{pager}</TopPager></div>
           {invoices.length === 0 ? (
             <div className="py-6 text-center text-sm text-gray-400">{tr('stock_in_invoices_empty', 'No stock-in invoices match these filters.')}</div>
           ) : (
@@ -288,7 +292,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
           )}
 
           <div className="flex justify-center">
-            <PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalInvoices} label={tr('stock_in_invoices_count', 'Invoices').toLowerCase()} t={t} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
+            {pager}
           </div>
         </>
       )}

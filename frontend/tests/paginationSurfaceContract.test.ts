@@ -84,6 +84,31 @@ check('every audited paginated consumer is inventoried', () => {
   }
 })
 
+// Owner 14 Nov: every pager is mounted at the top AND the bottom of its list, from ONE element
+// (<TopPager>{pager}</TopPager> above, {pager} below) so there is one set of props and one request.
+// Deliberately NOT yet done, each with its reason:
+const topPagerPending: Record<string, string> = {
+  'src/components/sales/Sales.tsx': 'owned by the sales-stats lane; add the shared top mount after it lands',
+  'src/components/inventory/InventoryCheckHistoryFloat.tsx': 'owned by the Inventory Check lane',
+  'src/components/inventory/InventoryChecksPage.tsx': 'owned by the Inventory Check lane',
+  'src/components/sales/reports/ShiftReport.tsx': 'a shift picker, not a list of rows: one pager row under the search box is already at the top',
+  'src/components/shared/NotificationCenter.tsx': 'per-section pagers inside a compact popover, whose sections hold a handful of rows',
+  'src/components/catalog/catalogPagination.tsx': 'the storefront wrapper; CatalogProductsSection mounts it above and below',
+}
+check('every pager consumer mounts the same pager element above and below its list (or is listed as pending)', () => {
+  for (const file of pagerConsumers) {
+    if (topPagerPending[file]) continue
+    const source = read(`frontend/${file}`)
+    assert.match(source, /<TopPager>/, `${file} must render its pager through <TopPager> above the list`)
+    assert.ok(!/<TopPager>\s*<PaginationControls/.test(source), `${file} must build the pager once and mount that same element twice`)
+  }
+  const catalogSection = read('frontend/src/components/catalog/CatalogProductsSection.tsx')
+  assert.match(catalogSection, /<TopPager>\{catalogPager\}<\/TopPager>/, 'the storefront grid mounts its pager above')
+  assert.match(catalogSection, /\{catalogPager\}<\/div>/, 'and below')
+  // Negative control: a page that mounts its pager once is not considered done.
+  assert.ok(!/<TopPager>/.test('<PaginationControls compact />'), 'negative control: a lone pager has no top mount')
+})
+
 // An inventory is not evidence if it can certify a file nothing renders.
 // ArInvoicesSection.tsx sat in the list above -- paging correctly, clamping
 // correctly, counting correctly -- while the only references to its name in

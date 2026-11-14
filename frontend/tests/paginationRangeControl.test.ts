@@ -66,7 +66,7 @@ runTest('the item range renders as a plain span, not a per-page dropdown trigger
   const branch = pagination.slice(branchStart, branchEnd)
   assert.match(
     branch,
-    /<span className="h-6 rounded-full border[^>]*>\{start\.toLocaleString\(\)\}-\{end\.toLocaleString\(\)\}<\/span>/,
+    /<span data-pager-range className="h-6 [^"]*rounded-full border[^>]*>\{rangeText\}<\/span>/,
     'the range chip must be a plain span rendering the item range, not an interactive size selector',
   )
   assert.doesNotMatch(branch, /<PageSizeSelect\b/, 'P10-20 removed the per-page dropdown from this branch entirely')
@@ -86,8 +86,8 @@ runTest('the merged pager keeps the editable page number and total-page count', 
   assert.ok(branch.includes('h-10'), 'pager controls share the 40px target')
   // P10-20 removed the per-page selector, so the order is now: Back, the
   // static range chip, the editable current page, "/ totalPages", Next.
-  assert.ok(branch.indexOf('{backLabel}</span>') < branch.indexOf('{start.toLocaleString()}-{end.toLocaleString()}'), 'Back precedes the item-range chip')
-  assert.ok(branch.indexOf('{start.toLocaleString()}-{end.toLocaleString()}') < branch.indexOf('aria-label={pageLabel}'), 'the item-range chip precedes the current page')
+  assert.ok(branch.indexOf('{backLabel}</span>') < branch.indexOf('{rangeText}'), 'Back precedes the item-range chip')
+  assert.ok(branch.indexOf('{rangeText}') < branch.indexOf('aria-label={pageLabel}'), 'the item-range chip precedes the current page')
   // "‹ page (1-20) / total ›": an editable current page, then the range, then
   // "/ totalPages", bracketed by the prev/next arrows.
   assert.match(branch, /onKeyDown=\{handlePageInputKeyDown\}/, 'the current page must stay editable')
@@ -109,12 +109,12 @@ runTest('the opt-in centered pager fits its parent without clipping meaningful c
   // a screen reader reads the visible "start-end" text directly. Assert the
   // text is present (in both compact and compactCentered forms, since the
   // markup is shared) and that the old aria-label plumbing is gone.
-  assert.match(branch, /\{start\.toLocaleString\(\)\}-\{end\.toLocaleString\(\)\}/, 'the visible chip text must carry the complete item range')
+  assert.match(branch, /\{rangeText\}/, 'the visible chip text carries the complete item range and, when known, the total ("21-40 of 1,234")')
   assert.doesNotMatch(branch, /rangeAriaLabel/, 'the removed per-page trigger no longer needs its own accessible-name computation')
   assert.match(branch, /style=\{compactCentered \? \{ width: `max\(1\.75rem, calc\(\$\{compactPageDigits\}ch \+ 0\.75rem\)\)` \} : undefined\}/, 'five-digit pages reserve glyph width plus a browser-safe text-caret allowance')
   assert.match(branch, /min-w-7 shrink-0 text-\[10px\]/, 'the page input retains a usable floor and cannot sacrifice entered digits to neighboring flex items')
-  assert.match(branch, /<span className="whitespace-nowrap">\{backLabel\}<\/span>/, 'localized Back text remains visible')
-  assert.match(branch, /<span className="whitespace-nowrap">\{nextLabel\}<\/span>/, 'localized Next text remains visible')
+  assert.match(branch, /<span className=\{edgeTextClass\}>\{backLabel\}<\/span>/, 'localized Back text stays (word from 400px up, icon + tooltip below)')
+  assert.match(branch, /<span className=\{edgeTextClass\}>\{nextLabel\}<\/span>/, 'localized Next text stays (word from 400px up, icon + tooltip below)')
   assert.match(branch, /inline-flex h-10/, 'smaller visuals retain the 40px click target')
   assert.match(branch, /aria-label=\{backLabel\}/)
   assert.match(branch, /aria-label=\{nextLabel\}/)
