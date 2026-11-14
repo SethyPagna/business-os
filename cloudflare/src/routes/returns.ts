@@ -1157,7 +1157,7 @@ app.post('/reason-presets', async (c) => {
     customerCount: presets.customer.length,
     supplierCount: presets.supplier.length,
   })
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'settings'))
+  await bumpVersion(c.env, 'settings')
   c.executionCtx.waitUntil(broadcast(c.env, 'settings', { action: 'return_reason_presets_update' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'reason_presets_update' }))
   return c.json({ success: true, configured: true, presets })

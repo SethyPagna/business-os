@@ -88,6 +88,7 @@ const passwordHash = loadReal('lib/passwordHash.ts', { bcryptjs: countingBcrypt 
 const failedSignInCost = loadReal('lib/failedSignInCost.ts', { './planTier': loadReal('lib/planTier.ts') })
 const { signupPortalAccount, signinPortalAccount } = loadReal('lib/portalAccounts.ts', {
   './db': { getDb: () => db },
+  './cache': { bumpVersions: async () => {} },
   './membershipNumber': loadReal('lib/membershipNumber.ts'),
   './phone': phone,
   './passwordPolicy': loadReal('lib/passwordPolicy.ts'),

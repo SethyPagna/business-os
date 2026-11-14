@@ -255,7 +255,7 @@ export async function bumpVersion(env: Env, namespace: string): Promise<void> {
 // portalMaintenanceHeld).
 export const MAINTENANCE_CACHE_NAMESPACES = [
   'products', 'settings', 'stock', 'promotions', 'sales', 'returns',
-  'customers', 'suppliers', 'delivery_contacts', 'inventory', 'audit_log',
+  'customers', 'suppliers', 'delivery_contacts', 'inventory',
 ]
 
 // Never throws: the hold is already released and the caches age out by TTL regardless. Callers invoke

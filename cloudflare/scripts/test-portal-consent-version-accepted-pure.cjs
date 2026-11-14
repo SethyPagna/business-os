@@ -70,6 +70,7 @@ const sqlBinding = loadReal('lib/sqlBinding.ts')
 const anonymousCustomer = loadReal('lib/anonymousCustomer.ts')
 const accounts = loadReal('lib/portalAccounts.ts', {
   './db': dbModule,
+  './cache': { bumpVersions: async () => {} },
   './membershipNumber': loadReal('lib/membershipNumber.ts'),
   './phone': phone,
   './passwordPolicy': loadReal('lib/passwordPolicy.ts'),

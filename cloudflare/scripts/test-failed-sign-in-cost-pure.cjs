@@ -148,6 +148,7 @@ function portalFixture({ state, planTier }) {
   const floorModule = hasFloorModule ? loadReal('lib/failedSignInCost.ts', { './planTier': loadReal('lib/planTier.ts') }) : {}
   const portal = loadReal('lib/portalAccounts.ts', {
     './db': { getDb: () => db },
+    './cache': { bumpVersions: async () => {} },
     './membershipNumber': loadReal('lib/membershipNumber.ts'),
     './phone': phone,
     './passwordPolicy': loadReal('lib/passwordPolicy.ts'),

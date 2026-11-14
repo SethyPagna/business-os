@@ -2788,7 +2788,7 @@ app.patch('/submissions/:id/review', requireAuth, async (c) => {
   }
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'review', 'portal_submission', id ?? null, { status, rewardPoints })
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'customers'))
+  await bumpVersion(c.env, 'customers')
   c.executionCtx.waitUntil(broadcast(c.env, 'portalSubmissions', { action: 'review', id }))
   return c.json({ success: true })
 })

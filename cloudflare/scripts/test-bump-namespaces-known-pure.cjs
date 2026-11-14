@@ -27,7 +27,7 @@ const files = []
 const rel = (file) => path.relative(root, file).split(path.sep).join('/')
 
 // Every namespace a writer may name, with the reader that proves it is read (a getVersion* / versionedKey call, a reader list, or the maintenance list).
-const KNOWN = ['products', 'sales', 'returns', 'stock', 'settings', 'customers', 'suppliers', 'delivery_contacts', 'promotions', 'inventory', 'inventory_checks', 'audit_log']
+const KNOWN = ['products', 'sales', 'returns', 'stock', 'settings', 'customers', 'suppliers', 'delivery_contacts', 'promotions', 'inventory', 'inventory_checks']
 // Computed arguments, each with the reason it is safe (its members are checked elsewhere in this file or in a named test).
 const COMPUTED = {
   namespace: 'lib/cache.ts bumpVersion(env, namespace) wrapper; routes/contacts.ts loops its updateVersions list (members are table names, checked in 4)',
@@ -40,6 +40,8 @@ const COMPUTED = {
   setBumps: 'routes/inventory.ts: list built from KNOWN literals',
   LOOKUP_CACHE_NAMESPACE: 'routes/lookups.ts: the lookup list namespace its own readers use',
   section: 'routes/system.ts reset-section: the section key IS the table name (checked in 4)',
+  'new Set(updateVersions)': 'routes/contacts.ts update: updateVersions is built from the contact table name plus KNOWN literals (one bumpVersions call, B-C10)',
+  'job.type': 'lib/importEngine.ts finalize: only reached when CONTACT_IMPORT_CHANNEL[job.type] holds, i.e. customers / suppliers / delivery_contacts, the table names',
   cacheNamespaces: 'routes/system.ts recovery list built from KNOWN literals',
 }
 const FORBIDDEN = /broadcastChannel|cacheKey|\.channel\b/

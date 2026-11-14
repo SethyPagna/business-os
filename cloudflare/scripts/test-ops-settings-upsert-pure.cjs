@@ -436,7 +436,7 @@ async function main() {
     const once = (needle, label) => assert.strictEqual(POST_HANDLER.split(needle).length - 1, 1, label)
     once("await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'settings', null, { keys: changedKeys },", 'audit(): update / settings / null entity id / { keys }')
     once('redact: (key) => isSensitiveSettingKey(key) || isSecretShapedAuditKey(key),', 'the redaction the route applies')
-    once("c.executionCtx.waitUntil(bumpVersion(c.env, 'settings'))", 'the settings version bump')
+    once("await bumpVersion(c.env, 'settings')", 'the settings version bump (awaited before the response since 14 Nov, A-C3)')
     const auditTs = read('cloudflare', 'src', 'lib', 'audit.ts')
     assert.ok(auditTs.includes(`INSERT INTO audit_logs (${mod.AUDIT_COLUMNS})`), 'audit() writes another column list')
     const cacheTs = read('cloudflare', 'src', 'lib', 'cache.ts')

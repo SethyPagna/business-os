@@ -48,7 +48,7 @@ import { buildContactIdClause, parseContactIdFilter, CONTACT_ID_FILTER_MAX } fro
 import { buildContactPickerSql, buildSalesCustomerPickerSql, CONTACT_PICKER_DEFAULT_LIMIT, CONTACT_PICKER_MAX_LIMIT, SALES_PICKER_RANK_PARAM, salesPickerRankKey } from '../lib/contactPicker'
 import { deleteDeliveryContactUnlessUsed } from '../lib/contactDeleteGuard'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs, type BulkDeleteEntityType } from '../lib/bulkDeleteEngine'
-import { bumpVersion, bumpVersions, getVersionWithFallback } from '../lib/cache'
+import { bumpVersion, bumpVersions, getVersionWithFallback, getVersionsWithFallback } from '../lib/cache'
 import { cacheIdentity } from '../lib/cache'
 import { cachedPhoneJson } from '../lib/phoneCache'
 import { bodyHasMaskedPhone, isMaskedPhoneInputError, MASKED_PHONE_CODE, MASKED_PHONE_MESSAGE, resolveAddressInput, resolvePhoneInput, storedPhonesOf } from '../lib/phoneWriteGuard'
@@ -230,7 +230,7 @@ async function getContactReadCacheVersion(env: Env, table: ContactTable): Promis
   // Customer rows include a computed loyalty balance derived from sales, so
   // that list must turn over on either a customer edit or a sale mutation.
   const namespaces = table === 'customers' ? ['customers', 'sales'] : [table]
-  const versions = await Promise.all(namespaces.map((namespace) => getVersionWithFallback(env, namespace)))
+  const versions = await getVersionsWithFallback(env, namespaces)
   return versions.map((version, index) => `${namespaces[index]}:${version}`).join('|')
 }
 // Scoped to the three path prefixes this router actually owns, NOT '*'.
@@ -1800,9 +1800,10 @@ function registerContactRoutes(config: ContactConfig) {
     // nothing audit()/bumpVersion() write -- defer both into the same
     // waitUntil the broadcast already used, so the reply only waits on the
     // one SELECT below instead of three sequential round trips.
+    // Bump first and awaited: the response (and a peer refetching on the push) must key on the new version.
+    await bumpVersion(c.env, config.table)
     c.executionCtx.waitUntil(Promise.all([
       createAuditInBatch ? Promise.resolve() : audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', config.entity, id, createAuditDetails),
-      bumpVersion(c.env, config.table),
       broadcast(c.env, config.channel, { action: 'create', id }),
     ]))
     const item = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get({ id })
@@ -2179,7 +2180,7 @@ function registerContactRoutes(config: ContactConfig) {
         updateVersions.push('sales')
       }
     }
-    await Promise.all([...new Set(updateVersions)].map((namespace) => bumpVersion(c.env, namespace)))
+    await bumpVersions(c.env, [...new Set(updateVersions)])
     c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'update', id }))
     // A driver's new name is carried onto its sales (the courier rows the Expenses list shows), which no longer reload on a sales push.
     if (config.table === 'delivery_contacts' && nameChanged && snapshotCarry) c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'update' }))
@@ -3216,8 +3217,8 @@ app.post('/customers/link-conflicts/relink', async (c) => {
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'relink_sales', 'customer', targetId, {
     fromCustomerId: currentId, phoneKey, salesRelinked: changed,
   })
+  await bumpVersion(c.env, 'customers')
   c.executionCtx.waitUntil(broadcast(c.env, 'customers', { action: 'relink', id: targetId }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'customers'))
   return c.json({ ok: true, relinked: changed, target })
 })
 
@@ -3304,8 +3305,8 @@ app.post('/customers/link-conflicts/resolve-missing', async (c) => {
   await audit(c.env, user?.id ?? null, actorSnapshot(user), created ? 'create_and_link_sales' : 'link_sales', 'customer', targetId, {
     name, phone, salesLinked: changed, createdContact: created,
   })
+  await bumpVersion(c.env, 'customers')
   c.executionCtx.waitUntil(broadcast(c.env, 'customers', { action: created ? 'create' : 'update', id: targetId }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'customers'))
   return c.json({ ok: true, customer_id: targetId, created, linked: changed })
 })
 
@@ -3484,8 +3485,8 @@ app.post('/customers/:id/points', async (c) => {
   if (!requestId) {
     await audit(c.env, actor.id, actorSnapshot(actor), 'award_points', 'customer', customerId, { ...auditDetails, adjustmentId })
   }
+  await bumpVersion(c.env, 'customers')
   c.executionCtx.waitUntil(broadcast(c.env, 'customers', { action: 'award_points', id: customerId }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'customers'))
   return c.json({ success: true, id: adjustmentId, customer_id: customerId, points: awardedPoints }, 201)
 })
 

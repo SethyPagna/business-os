@@ -49,7 +49,9 @@ export const saveTelegramTopicSetting: TelegramTopicWriter = async (env: Env, sa
     changedFields(before, after, { keys }))
   // Best effort, like the settings route's waitUntil: the value is saved; a
   // stale cache version expires on its own TTL.
-  const refresh = Promise.allSettled([bumpVersion(env, 'settings'), broadcast(env, 'settings', { action: 'update', keys })])
+  // Bump first and awaited (never throws), so the push cannot be read against the old version; the broadcast is best effort.
+  await bumpVersion(env, 'settings')
+  const refresh = Promise.allSettled([broadcast(env, 'settings', { action: 'update', keys })])
   if (waitUntil) waitUntil(refresh)
   else await refresh
 }

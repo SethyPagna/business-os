@@ -108,6 +108,7 @@ const session = loadReal('lib/portalSession.ts', {
   './db': { getDb: () => db },
   './portalAccounts': loadReal('lib/portalAccounts.ts', {
     './db': { getDb: () => db },
+    './cache': { bumpVersions: async () => {} },
     './membershipNumber': {},
     './phone': {},
     './passwordPolicy': {},

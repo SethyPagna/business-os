@@ -2,6 +2,7 @@ import { hashPassword, spendFailedSignInFloor, upgradePasswordHash, verifySignIn
 import { failedSignInFloor, noteLegacyBcryptSeen, noteLegacyBcryptUpgraded } from './failedSignInCost'
 import { mintMembershipNumber, isMembershipCollision } from './membershipNumber'
 import { getDb } from './db'
+import { bumpVersions } from './cache'
 import { canonicalizePhone } from './phone'
 import { formatPhoneP8, collectContactPhones, contactDuplicateWriteGuardStatement } from './contactDuplicates'
 import { passwordMinLengthError, passwordTooShort } from './passwordPolicy'
@@ -339,6 +340,9 @@ async function claimAccount(
     throw lastError instanceof Error ? lastError : new Error('Could not mint a unique membership id')
   }
 
+  // A brand-new sign-up committed a customers row (the admin Contacts list, the Sales caches that key on customers and the rankings all read it): move the version
+  // before answering so the next staff read cannot be served the list from before the sign-up. A claim of an existing customer wrote no customers row.
+  if (args.createContact) await bumpVersions(env, ['customers'])
   return { ok: true, accountId, membershipId, name: args.name }
 }
 

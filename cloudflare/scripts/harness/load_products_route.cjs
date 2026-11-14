@@ -63,6 +63,7 @@ function createProductsRouteHarness(options = {}) {
       cachedJsonResponse: async (_request, _c, _version, _ttl, producer) => producer(),
       getVersion: async () => '0',
       getVersionWithFallback: async () => 1,
+      getVersionsWithFallback: async (_env, list) => list.map(() => 1),
       bumpVersion: async () => {},
       bumpVersions: async () => {},
       // 6.0.1048: the routes build their cache identity and test a version token through lib/cache.

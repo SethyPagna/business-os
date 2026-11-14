@@ -96,7 +96,7 @@ app.put('/address-presets', async (c) => {
     }, 409)
   }
 
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'settings'))
+  await bumpVersion(c.env, 'settings')
   c.executionCtx.waitUntil(broadcast(c.env, 'settings', { action: 'pos_address_presets_update' }))
   return c.json({ success: true, configured: true, can_manage: true, revision, presets: validated.presets })
 })
