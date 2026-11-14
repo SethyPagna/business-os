@@ -16,7 +16,7 @@ import { fmtDate } from '../../utils/formatters'
 import { getSupplierApInvoices } from '../../api/contactReadTransport.ts'
 import { apInvoiceBranchOptions, apInvoiceRecordedBranchLabel } from '../../utils/apInvoiceBranches.ts'
 import { useBranchRows } from '../../utils/useBranchRows.ts'
-import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
+import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE, TopPager } from '../shared/PaginationControls'
 import InvoiceLedgerSummary from './InvoiceLedgerSummary.tsx'
 import InvoiceDetailFloat from './InvoiceDetailFloat.tsx'
 import CopyableId from '../shared/CopyableId.tsx'
@@ -209,6 +209,9 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
     return <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">{tr('paid', 'Paid')}</span>
   }
 
+  const pager = (
+    <PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalInvoices} label={tr('stock_in_invoices_count', 'Invoices').toLowerCase()} t={t} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
+  )
   return (
     <div className="space-y-3 py-3 pl-[calc(0.75rem+env(safe-area-inset-left))] pr-[calc(0.75rem+env(safe-area-inset-right))]">
       {/* The filter + date row pins while the invoice rows scroll under it --
@@ -310,6 +313,7 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
             total={canViewCosts ? { key: 'total', label: tr('ap_total_billed', 'Total billed'), value: money(totals.total_usd) } : undefined}
           />
 
+          <div className="flex justify-center"><TopPager>{pager}</TopPager></div>
           {invoices.length === 0 ? (
             <div className="py-6 text-center text-sm text-gray-400">{tr('ap_invoices_empty', 'No supplier invoices match these filters.')}</div>
           ) : (
@@ -398,7 +402,7 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
           )}
 
           <div className="flex justify-center">
-            <PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalInvoices} label={tr('stock_in_invoices_count', 'Invoices').toLowerCase()} t={t} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
+            {pager}
           </div>
         </>
       )}

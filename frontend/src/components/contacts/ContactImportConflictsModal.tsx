@@ -10,7 +10,7 @@ import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import Modal from '../shared/Modal'
 import AppSelect from '../shared/AppSelect'
-import PaginationControls from '../shared/PaginationControls'
+import PaginationControls, { TopPager } from '../shared/PaginationControls'
 import { getImportJobReview, updateImportJobDecisions } from '../../api/importJobsTransport'
 import {
   CONTACT_REVIEW_PAGE_SIZE,
@@ -409,6 +409,9 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, total, unresolvedCount, rows.length])
 
+  const pager = (
+    <PaginationControls compact rangeAsPageSize page={page} pageSize={CONTACT_REVIEW_PAGE_SIZE} totalItems={total} label={tr('records', 'records')} t={t} onPageChange={setPage} />
+  )
   return (
     <Modal title={<span className="inline-flex min-w-0 items-center gap-2"><ConflictIcon aria-hidden="true" className={`h-4 w-4 shrink-0 ${CONFLICT_ICON_CLASS}`} /><span className="min-w-0">{tr('contacts_import_conflicts_title', 'Resolve name conflicts').replace('{type}', entityLabel)}</span></span>} onClose={onClose} size="lg" draggable unsavedChanges={{ dirty: hasTypedRenameDraft }}>
       <div className="space-y-4">
@@ -472,6 +475,7 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
               </div>
             </div>
 
+            <div className="flex justify-center"><TopPager>{pager}</TopPager></div>
             {rows.length === 0 ? (
               <div className="rounded-xl border border-dashed border-gray-300 px-4 py-8 text-center text-sm text-gray-500 dark:border-zinc-700 dark:text-gray-400">
                 {tr('contacts_import_conflicts_no_matches', 'No conflicts match this search and filter.')}
@@ -694,7 +698,7 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
               </>
             ) : null}
 
-            <div className="flex justify-center"><PaginationControls compact rangeAsPageSize page={page} pageSize={CONTACT_REVIEW_PAGE_SIZE} totalItems={total} label={tr('records', 'records')} t={t} onPageChange={setPage} /></div>
+            <div className="flex justify-center">{pager}</div>
           </>
         )}
 

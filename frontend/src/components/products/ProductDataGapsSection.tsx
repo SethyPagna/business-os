@@ -3,7 +3,7 @@ import RotateCw from 'lucide-react/dist/esm/icons/rotate-cw.js'
 import { useApp, useSync } from '../../AppContext'
 import { ConflictIcon, CONFLICT_ICON_CLASS } from '../shared/ConflictIcon.ts'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
-import PaginationControls from '../shared/PaginationControls.tsx'
+import PaginationControls, { TopPager } from '../shared/PaginationControls.tsx'
 import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import { canEditAcquisitionCosts, canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import type { PermissionUser } from '../../utils/permissions.ts'
@@ -109,6 +109,18 @@ export default function ProductDataGapsSection({ t, notify, onPreviewProduct, re
   }
 
   const zeroDialog = pending?.mark === 'zero_cost_confirmed'
+  const pager = (
+    <PaginationControls
+      compact
+      editablePageInput={false}
+      page={state.page}
+      pageSize={PRODUCT_DATA_GAP_PAGE_SIZE}
+      totalItems={total}
+      label={t(active.labelKey) || active.labelFallback}
+      t={t}
+      onPageChange={(page) => void pagerRef.current?.goTo(page)}
+    />
+  )
   return (
     <section data-product-data-gaps className="space-y-2 border-t border-gray-100 pt-3 dark:border-zinc-800">
       <div className="flex min-w-0 items-center gap-1.5">
@@ -146,6 +158,7 @@ export default function ProductDataGapsSection({ t, notify, onPreviewProduct, re
         </div>
       ) : (
         <>
+          <div className="flex justify-center"><TopPager>{pager}</TopPager></div>
           <div className={`grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 ${state.status === 'loading' ? 'opacity-60' : ''}`}>
             {state.rows.map((row) => (
               <ProductDataGapRowCard
@@ -160,16 +173,7 @@ export default function ProductDataGapsSection({ t, notify, onPreviewProduct, re
             ))}
           </div>
           <div className="flex justify-center">
-            <PaginationControls
-              compact
-              editablePageInput={false}
-              page={state.page}
-              pageSize={PRODUCT_DATA_GAP_PAGE_SIZE}
-              totalItems={total}
-              label={t(active.labelKey) || active.labelFallback}
-              t={t}
-              onPageChange={(page) => void pagerRef.current?.goTo(page)}
-            />
+            {pager}
           </div>
         </>
       )}

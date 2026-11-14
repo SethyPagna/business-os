@@ -59,7 +59,8 @@ runTest('the purchases panel has exactly one live scroll region -- the list', ()
   // their natural height inside the flex column instead of being squeezed
   // or themselves trying to scroll.
   assert.match(purchasesCode, /grid shrink-0 grid-cols-2/)
-  assert.match(purchasesCode, /<div className="shrink-0">\s*<PaginationControls/)
+  assert.match(purchasesCode, /<div className="shrink-0">\s*\{pager\}/)
+  assert.match(purchasesCode, /<div className="shrink-0"><TopPager>\{pager\}<\/TopPager><\/div>/, 'the same pager element is also mounted above the list')
 })
 
 runTest('PaginationControls renders no rows-per-page selector, in any layout', () => {
@@ -80,8 +81,9 @@ runTest('PaginationControls keeps the item count and the back/next controls', ()
   assert.ok(nextOccurrences >= 4, 'expected a Next control in every layout')
   // The item-range/count text is still printed (default layout's "Showing
   // X-Y of Z", the compact layouts' "X-Y" chip).
-  assert.match(paginationCode, /showingLabel\}[^}]*start\.toLocaleString\(\)/)
-  assert.match(paginationCode, /start\.toLocaleString\(\)\}-\{end\.toLocaleString\(\)/)
+  // Owner 14 Nov: every layout prints one `rangeText` ("21-40 of 1,234") between Back and the page number.
+  assert.match(paginationCode, /\{showingLabel\} <\/span>\{rangeText\}/)
+  assert.match(paginationCode, /\$\{start\.toLocaleString\(\)\}-\$\{end\.toLocaleString\(\)\} \$\{ofLabel\} \$\{total\.toLocaleString\(\)\}/)
 })
 
 runTest('onPageSizeChange stays a supported prop for existing callers', () => {

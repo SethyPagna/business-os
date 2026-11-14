@@ -39,7 +39,10 @@ function harness(componentSource = source) {
     updateBatch: async () => { state.headers++ }, revertStockMovement: async (id: number) => { state.reverts++; return state.revertDispatch(id) },
   }
   const start = componentSource.indexOf('function sessionCost(')
-  const end = componentSource.indexOf('  return <div className="space-y-3">')
+  // The handlers end where the render begins: the JSX pager element (built once, mounted above and below the list) sits just before the return.
+  const pagerAt = componentSource.indexOf('  const pager = (')
+  const returnAt = componentSource.indexOf('  return <div className="space-y-3">')
+  const end = pagerAt > 0 && pagerAt < returnAt ? pagerAt : returnAt
   assert.ok(start > 0 && end > start, 'the real handler region must be located')
   const handlerSource = componentSource.slice(start, end).replace('export default function ', 'function ')
     + `return { open, saveHeader, editHeader, addMoreStock, editing, addMore, removeRow, removeSession, startLineEdit, patchLineDraft, saveLineEdit, lineEdit, selected, busy,

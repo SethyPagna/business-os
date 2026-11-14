@@ -17,7 +17,7 @@ import {
   isUploadTooLarge,
   uploadFileAsset as uploadPickerFileAsset,
 } from '../../api/fileTransport.ts'
-import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
+import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE, TopPager } from '../shared/PaginationControls'
 
 const FILE_PICKER_LOAD_TIMEOUT_MS = 8000
 const FILE_PICKER_DELETE_TIMEOUT_MS = 12000
@@ -316,6 +316,9 @@ export default function FilePickerModal({
   const selectedPathSet = new Set(selectedPaths)
   const selectedAssets = files.filter((asset) => selectedPathSet.has(asset.public_path || ''))
 
+  const pager = (
+    <PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalFiles} label={tr('files', 'files')} t={(key) => tr(key, key)} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
+  )
   return (
     // Library uploads/deletes commit immediately; selectedPaths is only the
     // picker choice that Cancel intentionally discards. Closing cannot lose
@@ -330,6 +333,7 @@ export default function FilePickerModal({
           <input ref={inputRef} type="file" accept={accept} multiple={multiple} className="hidden" onChange={handleUpload} disabled={uploading || deletingAssetId != null} />
         </div>
 
+        {!loading ? <div className="mb-2 flex justify-center"><TopPager>{pager}</TopPager></div> : null}
         {loading ? <div className="py-10 text-center text-sm text-slate-400">{tr('loading', 'Loading...')}</div> : null}
         {!loading && !files.length ? <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-10 text-center text-sm text-slate-500">{tr('no_files_yet', 'No files yet.')}</div> : null}
 
@@ -376,7 +380,7 @@ export default function FilePickerModal({
           </div>
         ) : null}
 
-        {!loading ? <div className="mt-3 flex justify-center"><PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalFiles} label={tr('files', 'files')} t={(key) => tr(key, key)} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} /></div> : null}
+        {!loading ? <div className="mt-3 flex justify-center">{pager}</div> : null}
 
         {multiple ? (
           <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">

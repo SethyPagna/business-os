@@ -4,7 +4,7 @@ import MoreHorizontal from 'lucide-react/dist/esm/icons/more-horizontal.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Modal from '../shared/Modal'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
-import PaginationControls, { paginateItems, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
+import PaginationControls, { paginateItems, DEFAULT_PAGE_SIZE, TopPager } from '../shared/PaginationControls'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
@@ -408,6 +408,23 @@ export function ContactTable<T extends ContactRow>({
     )
   }
 
+  const pager = (
+    <PaginationControls
+      compact
+      rangeAsPageSize
+      page={activePage}
+      pageSize={activePageSize}
+      totalItems={totalItems}
+      label={typeof t === 'function' ? (t('records') || 'records') : 'records'}
+      t={t}
+      onPageChange={usingControlledPagination ? onControlledPageChange : setPage}
+      onPageSizeChange={(size) => {
+        if (usingControlledPagination) { onControlledPageSizeChange?.(size); onControlledPageChange?.(1); return }
+        setPageSize(size)
+        setPage(1)
+      }}
+    />
+  )
   return (
     <>
       {loading ? (
@@ -415,6 +432,7 @@ export function ContactTable<T extends ContactRow>({
           Refreshing...
         </div>
       ) : null}
+      <div className="mb-2 flex justify-center"><TopPager>{pager}</TopPager></div>
       <div className="hidden overflow-x-auto rounded-xl border border-gray-200 dark:border-zinc-700 md:block">
         <table className="w-full border-collapse text-xs">
           <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500 dark:bg-zinc-800 dark:text-slate-400">
@@ -451,21 +469,7 @@ export function ContactTable<T extends ContactRow>({
         {pagedRows.map((row) => renderCard?.(row))}
       </div>
       <div className="mt-3 flex justify-center">
-        <PaginationControls
-          compact
-          rangeAsPageSize
-          page={activePage}
-          pageSize={activePageSize}
-          totalItems={totalItems}
-          label={typeof t === 'function' ? (t('records') || 'records') : 'records'}
-          t={t}
-          onPageChange={usingControlledPagination ? onControlledPageChange : setPage}
-          onPageSizeChange={(size) => {
-            if (usingControlledPagination) { onControlledPageSizeChange?.(size); onControlledPageChange?.(1); return }
-            setPageSize(size)
-            setPage(1)
-          }}
-        />
+        {pager}
       </div>
     </>
   )

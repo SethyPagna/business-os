@@ -4,7 +4,7 @@ import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import Link2 from 'lucide-react/dist/esm/icons/link-2.js'
 import UserPlus from 'lucide-react/dist/esm/icons/user-round-plus.js'
 import { fmtDate } from '../../utils/formatters'
-import PaginationControls, { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
+import PaginationControls, { DEFAULT_PAGE_SIZE, TopPager } from '../shared/PaginationControls'
 import {
   dismissSaleLinkConflict, undismissSaleLinkConflict, getSaleLinkConflicts, relinkConflictSales, resolveMissingContact,
 } from './contactDuplicates'
@@ -180,6 +180,35 @@ export default function SaleLinkConflictsSection({ t, notify, renderToolbar }: {
     return `${row.sale_count} × ${money(row.total_usd)} · ${range}`
   }
 
+  // One pager element per list, built once from the one response: shown above the cards
+  // (passive TopPager instance) and again below them. No second request.
+  const linkPager = data?.pagination ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <PaginationControls
+              page={data.pagination.mismatches.page}
+              pageSize={data.pagination.pageSize}
+              totalItems={data.pagination.mismatches.total}
+              onPageChange={setMismatchPage}
+              onPageSizeChange={(next) => { setPageSize(next); setMismatchPage(1); setMissingPage(1) }}
+              label={tr('link_mismatches', 'link mismatches')}
+              t={t}
+              compact
+              rangeAsPageSize
+            />
+            <PaginationControls
+              page={data.pagination.missing.page}
+              pageSize={data.pagination.pageSize}
+              totalItems={data.pagination.missing.total}
+              onPageChange={setMissingPage}
+              onPageSizeChange={(next) => { setPageSize(next); setMismatchPage(1); setMissingPage(1) }}
+              label={tr('missing_contacts', 'missing contacts')}
+              t={t}
+              compact
+              rangeAsPageSize
+            />
+          </div>
+  ) : null
+
   return (
     <div className="space-y-3">
       {renderToolbar({ loading, refresh: () => void load(showKept), showKept, setShowKept: (value) => {
@@ -188,32 +217,7 @@ export default function SaleLinkConflictsSection({ t, notify, renderToolbar }: {
         setMissingPage(1)
       } })}
 
-      {data?.pagination ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <PaginationControls
-            page={data.pagination.mismatches.page}
-            pageSize={data.pagination.pageSize}
-            totalItems={data.pagination.mismatches.total}
-            onPageChange={setMismatchPage}
-            onPageSizeChange={(next) => { setPageSize(next); setMismatchPage(1); setMissingPage(1) }}
-            label={tr('link_mismatches', 'link mismatches')}
-            t={t}
-            compact
-            rangeAsPageSize
-          />
-          <PaginationControls
-            page={data.pagination.missing.page}
-            pageSize={data.pagination.pageSize}
-            totalItems={data.pagination.missing.total}
-            onPageChange={setMissingPage}
-            onPageSizeChange={(next) => { setPageSize(next); setMismatchPage(1); setMissingPage(1) }}
-            label={tr('missing_contacts', 'missing contacts')}
-            t={t}
-            compact
-            rangeAsPageSize
-          />
-        </div>
-      ) : null}
+      {linkPager ? <TopPager>{linkPager}</TopPager> : null}
 
       {error ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-900/20 dark:text-amber-200">{error}</div>
@@ -375,6 +379,8 @@ export default function SaleLinkConflictsSection({ t, notify, renderToolbar }: {
           })}
         </div>
       )}
+
+      {linkPager}
     </div>
   )
 }

@@ -27,7 +27,7 @@ import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import { loadSortSpec, saveSortSpec, sortRecords, type SortField, type SortSpec } from '../../utils/listSort'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
-import PaginationControls, { paginateItems } from '../shared/PaginationControls'
+import PaginationControls, { paginateItems, TopPager } from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
@@ -1655,6 +1655,9 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     )
   }
 
+  const returnsPager = (
+    <PaginationControls compact rangeAsPageSize compactCentered page={returnPage} pageSize={returnPageSize} totalItems={allVisibleReturns.length} label={tr('returns_count', 'returns')} t={t} onPageChange={setReturnPage} onPageSizeChange={(size) => { setReturnPageSize(size); setReturnPage(1) }} />
+  )
   return (
     <div className={`${embedded ? '' : 'page-scroll '}flex flex-col p-3 sm:p-6`}>
       {activePendingHistoryRequest ? (
@@ -1813,21 +1816,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           </button>
         ) : null}
       >
-        <PaginationControls
-          compact
-          rangeAsPageSize
-          compactCentered
-          page={returnPage}
-          pageSize={returnPageSize}
-          totalItems={allVisibleReturns.length}
-          label={tr('returns_count', 'returns')}
-          t={t}
-          onPageChange={setReturnPage}
-          onPageSizeChange={(size) => {
-            setReturnPageSize(size)
-            setReturnPage(1)
-          }}
-        />
+        <TopPager>{returnsPager}</TopPager>
       </PagerActionRow>
       <ReturnsListSurface
         collapsedReturnSections={collapsedReturnSections}
@@ -1860,7 +1849,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       />
 
       <div className="mt-3 flex justify-center">
-        <PaginationControls compact rangeAsPageSize compactCentered page={returnPage} pageSize={returnPageSize} totalItems={allVisibleReturns.length} label={tr('returns_count', 'returns')} t={t} onPageChange={setReturnPage} onPageSizeChange={(size) => { setReturnPageSize(size); setReturnPage(1) }} />
+        {returnsPager}
       </div>
 
       {canExportReturns && canViewReturns && exportDialog?.scope === exportScope && exportDialog.allowed() ? (

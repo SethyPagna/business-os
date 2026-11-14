@@ -14,7 +14,7 @@ import type { TableColumnDef } from '../shared/columnPreferences.ts'
 // day must be read in the business timezone.
 import { fmtDate } from '../../utils/formatters'
 import { getCustomerReceivables } from '../../api/contactReadTransport.ts'
-import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
+import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE, TopPager } from '../shared/PaginationControls'
 import InvoiceLedgerSummary from './InvoiceLedgerSummary.tsx'
 import InvoiceDetailFloat from './InvoiceDetailFloat.tsx'
 import CopyableId from '../shared/CopyableId.tsx'
@@ -210,6 +210,9 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
     return <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">{tr('paid', 'Paid')}</span>
   }
 
+  const pager = (
+    <PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalInvoices} label={tr('stock_in_invoices_count', 'Invoices').toLowerCase()} t={t} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
+  )
   return (
     <div className="space-y-3 py-3 pl-[calc(0.75rem+env(safe-area-inset-left))] pr-[calc(0.75rem+env(safe-area-inset-right))]">
       {/* Same pinned filter + date row as the AP ledger it mirrors: the
@@ -308,6 +311,7 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
             total={{ key: 'total', label: tr('ar_total_billed', 'Total billed'), value: money(totals.total_usd) }}
           />
 
+          <div className="flex justify-center"><TopPager>{pager}</TopPager></div>
           {invoices.length === 0 ? (
             <div className="py-6 text-center text-sm text-gray-400">{tr('ar_invoices_empty', 'No customer receivables match these filters.')}</div>
           ) : (
@@ -398,7 +402,7 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
           )}
 
           <div className="flex justify-center">
-            <PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalInvoices} label={tr('stock_in_invoices_count', 'Invoices').toLowerCase()} t={t} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
+            {pager}
           </div>
         </>
       )}

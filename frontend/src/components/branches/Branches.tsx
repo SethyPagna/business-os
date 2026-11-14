@@ -28,7 +28,7 @@ import ActionHistoryBar from '../shared/ActionHistoryBar'
 import FilterMenu from '../shared/FilterMenu'
 import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker'
-import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
+import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE, TopPager } from '../shared/PaginationControls'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
@@ -1269,6 +1269,19 @@ export default function Branches({ embedded = false, view, showSectionNavigation
     </button>
   ) : null
 
+  const pager = (
+    <PaginationControls
+      compact
+      rangeAsPageSize
+      page={transferPage}
+      pageSize={transferPageSize}
+      totalItems={transferTotalCount}
+      label={tr('transfers', 'transfers')}
+      t={t}
+      onPageChange={setTransferPage}
+      onPageSizeChange={(size) => { setTransferPageSize(size); setTransferPage(1) }}
+    />
+  )
   return (
     <div className={`flex min-h-0 flex-col ${embedded ? 'flex-1 px-3 pb-3 pt-1 sm:px-6 sm:pb-6 sm:pt-2' : 'page-scroll p-3 sm:p-6'}`}>
       <PendingReviewSync active={isActive} />
@@ -1723,6 +1736,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
 
       {tab === 'transfers' ? (
         <>
+          <div className="mb-3 flex justify-center"><TopPager>{pager}</TopPager></div>
           <div className="space-y-2 sm:hidden">
             {loading && !transfers.length ? (
               <div className="card py-10 text-center text-gray-400">{tr('loading', 'Loading...')}</div>
@@ -1808,17 +1822,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
           </div>
         </div>
         <div className="mt-3 flex justify-center">
-          <PaginationControls
-            compact
-            rangeAsPageSize
-            page={transferPage}
-            pageSize={transferPageSize}
-            totalItems={transferTotalCount}
-            label={tr('transfers', 'transfers')}
-            t={t}
-            onPageChange={setTransferPage}
-            onPageSizeChange={(size) => { setTransferPageSize(size); setTransferPage(1) }}
-          />
+          {pager}
         </div>
         </>
       ) : null}

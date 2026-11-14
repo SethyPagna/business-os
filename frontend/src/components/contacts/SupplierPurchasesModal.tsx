@@ -5,7 +5,7 @@ import { supplierDisplay } from '../../utils/supplierDisplay.ts'
 import Modal from '../shared/Modal'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import { fmtDateOnly } from '../../utils/formatters'
-import PaginationControls, { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls.tsx'
+import PaginationControls, { DEFAULT_PAGE_SIZE, TopPager } from '../shared/PaginationControls.tsx'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import InvoiceDetailFloat from './InvoiceDetailFloat.tsx'
 import CopyableId from '../shared/CopyableId.tsx'
@@ -123,6 +123,18 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
     return <span className="text-[11px] leading-5 text-gray-400">--</span>
   }
 
+  const pager = (
+    <PaginationControls
+      page={Number(data?.page || page)}
+      pageSize={Number(data?.page_size || pageSize)}
+      totalItems={Number(data?.total_batches ?? totals.batches ?? 0)}
+      onPageChange={setPage}
+      onPageSizeChange={(next) => { setPageSize(next); setPage(1) }}
+      label={tr('purchase_batches', 'received dates')}
+      t={t}
+      compact
+    />
+  )
   return (
     <Modal title={`${tr('supplier_purchases', 'Purchases')} -- ${supplierName}`} onClose={onClose} wide unsavedChanges="read-only">
       {/* P10-16: the shared Modal's own body (.modal-scroll, styles/main.css)
@@ -175,6 +187,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
                 {tr('purchase_cost_partial_hint', 'Some received dates have no recorded quantity/cost yet (received before tracking, or cost unknown) -- the totals above only count received dates where both are known:')} {totals.batches_without_cost}
               </div>
             ) : null}
+            <div className="shrink-0"><TopPager>{pager}</TopPager></div>
             {batches.length === 0 ? (
               <div className="py-6 text-center text-sm text-gray-400">{tr('no_purchases_yet', 'No received dates are attributed to this supplier yet.')}</div>
             ) : (
@@ -245,16 +258,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
               </div>
             )}
             <div className="shrink-0">
-            <PaginationControls
-              page={Number(data?.page || page)}
-              pageSize={Number(data?.page_size || pageSize)}
-              totalItems={Number(data?.total_batches ?? totals.batches ?? 0)}
-              onPageChange={setPage}
-              onPageSizeChange={(next) => { setPageSize(next); setPage(1) }}
-              label={tr('purchase_batches', 'received dates')}
-              t={t}
-              compact
-            />
+            {pager}
             </div>
           </>
         )}

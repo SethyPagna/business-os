@@ -32,7 +32,7 @@ import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import FilterMenu, { type FilterSection } from '../shared/FilterMenu'
 import Modal from '../shared/Modal'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
-import PaginationControls from '../shared/PaginationControls'
+import PaginationControls, { TopPager } from '../shared/PaginationControls'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
@@ -1111,6 +1111,18 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       .replace('{action}', String(revertPreview.label || revertPreview.operationId || revertPreview.historyId))
       .replace('{count}', String(revertPreview.lineCount))
 
+  const pager = (
+    <PaginationControls
+      compact
+      rangeAsPageSize
+      page={page}
+      pageSize={PAGE_SIZE}
+      totalItems={total}
+      onPageChange={setPage}
+      editablePageSizeInput={false}
+      t={t}
+    />
+  )
   return (
     <div className="space-y-3">
       {/* Rows 1+2 pin together while the ledger scrolls (user, Aug 31: "the
@@ -1186,6 +1198,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
         {stat('out', summary.outCount, summary.outQty)}
       </div>
 
+      <div className="flex justify-center"><TopPager>{pager}</TopPager></div>
       {loadError ? (
         <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
           {loadError}
@@ -1287,16 +1300,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       )}
 
       <div className="flex justify-center">
-        <PaginationControls
-          compact
-          rangeAsPageSize
-          page={page}
-          pageSize={PAGE_SIZE}
-          totalItems={total}
-          onPageChange={setPage}
-          editablePageSizeInput={false}
-          t={t}
-        />
+        {pager}
       </div>
 
       {detail ? (
