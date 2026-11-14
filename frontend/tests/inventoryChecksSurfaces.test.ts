@@ -138,8 +138,14 @@ try {
     assert.deepEqual(ring[0].querySelectorAll('circle').map(node => node.getAttribute('data-ring-arc')), [null, 'done', 'issue'], `${language}: grey track, then the done arc, then the issue arc`)
 
     // Sessions filters: Open / Closed / Mine / dates go to the server and send the pager back to page 1.
-    await list.click(list.button(pack.next))
-    assert.equal(sessionReads.at(-1)?.page, 2, `${language}: paging reaches page 2`)
+    // Count sessions page like products (owner, 14 Nov): the controls sit above the list AND below it, one state, one request per step, the true total (45).
+    const pagerAt = (position: 'top' | 'bottom') => list.find(node => node.getAttribute('data-inventory-check-pager') === position, `${position} pager`)
+    assert.ok(pagerAt('top') !== pagerAt('bottom') && pagerAt('top').textContent.length > 0 && pagerAt('top').textContent === pagerAt('bottom').textContent, `${language}: the sessions list has the same pager above and below`)
+    const readsBeforeStep = sessionReads.length
+    await list.click(list.button(pack.next, pagerAt('top')))
+    assert.equal(sessionReads.at(-1)?.page, 2, `${language}: paging from the TOP pager reaches page 2`)
+    assert.equal(sessionReads.length, readsBeforeStep + 1, `${language}: one request per page step`)
+    assert.equal(pagerAt('top').textContent, pagerAt('bottom').textContent, `${language}: both pagers moved together`)
     await chooseFilter(list, pack.filters, 'status', pack.shift_status_closed)
     assert.deepEqual([sessionReads.at(-1)?.status, sessionReads.at(-1)?.page], ['closed', 1], `${language}: Closed is a server filter and resets the page`)
     await list.click(list.button(pack.next))
@@ -265,9 +271,15 @@ try {
     const rowOf = (id: number) => counting.find(node => node.getAttribute('data-inventory-check-row') === String(id), `row ${id}`)
     const countOf = (id: number) => counting.find(node => node.getAttribute('data-check-count') !== null && rowOf(id).contains(node), `count of ${id}`)
     const submitButton = () => counting.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit')
+    // No select-all and no check box (14 Nov): a row is picked by answering it. "Does not match" in the status popover picks it and waits for its count.
+    const pickAll = async () => { for (const id of [12, 13]) {
+      await counting.click(counting.find(node => node.getAttribute('data-check-action') === 'status' && rowOf(id).contains(node), `status of ${id}`))
+      await counting.click(counting.find(node => node.getAttribute('data-popover-action') === 'differs', 'does not match'))
+      await counting.click(counting.find(node => node.getAttribute('data-popover-action') === 'close', 'close'))
+    } }
     assert.equal(counting.findAll(node => node.tagName === 'BUTTON' && (node.getAttribute('aria-label') ?? '').startsWith(`${pack.inventory_check_start_page} (`)).length, 0, `${language}: no Count (n) button on the list`)
     assert.equal(counting.findAll(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === pack.refresh).length, 0, `${language}: and no Refresh button`)
-    await counting.call(counting.find(node => node.getAttribute('data-check-select-all') !== null, 'select all'), 'onChange', [{ target: { checked: true } }])
+    await pickAll()
     assert.equal(submitButton().getAttribute('aria-disabled'), 'true', `${language}: Submit waits for a branch`)
     assert.equal(submitButton().getAttribute('title'), pack.inventory_check_count_blocked_branch, `${language}: and its tooltip says why`)
     const before = counting.findAll(node => node.tagName === 'DL').length
@@ -277,7 +289,7 @@ try {
     assert.ok(counting.text().includes(pack.inventory_check_discard_counts_title), `${language}: choosing another branch with picks asks before starting over`)
     await counting.click(exact(counting, pack.discard).at(-1)!)
     assert.equal(counting.find(node => node.getAttribute('data-selected-count') !== null, 'selected count').textContent, '', `${language}: a counted stock belongs to one branch, so confirming starts the picks over`)
-    await counting.call(counting.find(node => node.getAttribute('data-check-select-all') !== null, 'select all'), 'onChange', [{ target: { checked: true } }])
+    await pickAll()
     assert.equal(submitButton().getAttribute('title'), pack.inventory_check_submit_need_counts, `${language}: then it asks for a count in every picked row`)
     await counting.type(countOf(12), '10')
     await counting.type(countOf(13), '7')

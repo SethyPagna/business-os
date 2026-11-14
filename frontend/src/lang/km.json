@@ -8185,5 +8185,20 @@
   "inventory_check_error_self_approval": "អ្នកជាអ្នកដាក់ការរាប់នេះ ដូច្នេះអ្នកអនុម័តម្នាក់ទៀតត្រូវអនុម័តវា។",
   "inventory_check_discard_counts_title": "បោះបង់ការរាប់ដែលមិនទាន់បានដាក់?",
   "inventory_check_discard_counts_message": "ផលិតផលដែលអ្នកបានជ្រើស និងការរាប់ដែលអ្នកបានវាយនឹងត្រូវសម្អាត។",
-  "inventoryCheckCountPending": "មិនអាចកំណត់ចំនួនបានទេ ខណៈការរាប់ផលិតផលនេះកំពុងរង់ចាំការអនុម័ត។ សូមអនុម័ត ឬបដិសេធការរាប់នោះជាមុន។"
+  "inventoryCheckCountPending": "មិនអាចកំណត់ចំនួនបានទេ ខណៈការរាប់ផលិតផលនេះកំពុងរង់ចាំការអនុម័ត។ សូមអនុម័ត ឬបដិសេធការរាប់នោះជាមុន។",
+  "inventory_check_status_draft_ok": "ត្រូវនឹងស្តុក · មិនទាន់បញ្ជូន",
+  "inventory_check_status_draft_issue": "ខុសពីស្តុក · មិនទាន់បញ្ជូន",
+  "inventory_check_status_draft_empty": "បញ្ចូលចំនួនរាប់ · មិនទាន់បញ្ជូន",
+  "inventory_check_status_draft_counted": "បានរាប់ · មិនទាន់បញ្ជូន",
+  "inventory_check_open_count": "ពិនិត្យ និងរាប់៖ {name}",
+  "inventory_check_popover_total": "សរុប",
+  "inventory_check_popover_matches": "ត្រូវនឹងស្តុក",
+  "inventory_check_popover_differs": "មិនត្រូវ៖ បញ្ចូលចំនួនដែលអ្នករាប់បាន",
+  "inventory_check_popover_clear": "សម្អាតការរាប់នេះ",
+  "inventory_check_popover_loading": "កំពុងផ្ទុកថ្ងៃចូល…",
+  "inventory_check_popover_failed": "មិនអាចផ្ទុកថ្ងៃចូលបានទេ។ សូមបិទ ហើយបើកម្តងទៀត។",
+  "inventory_check_popover_more": "ផលិតផលនេះមានថ្ងៃចូលច្រើនជាងដែលការរាប់មួយអាចផ្ទុកបាន។ សូមរាប់តាមថ្ងៃដែលបានបង្ហាញ។",
+  "inventory_check_lot_dates": "ថ្ងៃចូល",
+  "inventory_check_counted_rows": "បានរាប់ {count}",
+  "inventory_check_mark_page_checked": "សម្គាល់ផលិតផលទាំងអស់ក្នុងទំព័រនេះថាត្រូវនឹងស្តុក"
 }

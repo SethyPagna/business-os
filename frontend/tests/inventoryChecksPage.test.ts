@@ -417,7 +417,6 @@ try {
   const beforeShrink = productRequests.length
   // The list is read again after a submission; a total that has shrunk sends it back to the last valid page.
   const shrinkRow = shrinking.find(node => node.getAttribute('data-inventory-check-row') === '12', 'row 12')
-  await shrinking.call(shrinking.find(node => node.getAttribute('data-check-select') !== null && shrinkRow.contains(node), 'row box'), 'onChange', [{ target: { checked: true } }])
   await shrinking.type(shrinking.find(node => node.getAttribute('data-check-count') !== null && shrinkRow.contains(node), 'row count'), '8')
   await shrinking.click(shrinking.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit'))
   await confirmInDialog(shrinking, 'Submit')
@@ -438,6 +437,17 @@ try {
   assert.equal(propsOf(arrow('back')).disabled, true, 'Back is disabled on the first page')
   assert.equal(propsOf(arrow('next')).disabled, false)
   assert.equal(productRequests.at(-1)?.summary, undefined, 'page 1 asks for the check counts and filter options')
+  // The page controls are drawn above the list AND below it (14 Nov), from one state: stepping from either sends ONE request and both show the same page.
+  const pagerAt = (position: 'top' | 'bottom') => paging.find(node => node.getAttribute('data-inventory-check-pager') === position, `${position} pager`)
+  const topPager = pagerAt('top'), bottomPager = pagerAt('bottom')
+  assert.ok(topPager !== bottomPager && topPager.textContent.length > 0 && topPager.textContent === bottomPager.textContent, 'the top and bottom pagers read the same')
+  const beforeBottom = productRequests.length
+  await paging.click(paging.button('next', bottomPager)); assert.equal(lastPage(), 2)
+  assert.equal(productRequests.length, beforeBottom + 1, 'one request per page step, whichever pager was used')
+  assert.ok(pagerAt('top').textContent.includes('page 2 of 3') && pagerAt('bottom').textContent.includes('page 2 of 3'), 'both pagers moved to page 2 with the true total')
+  const beforeTop = productRequests.length
+  await paging.click(paging.button('back', pagerAt('top'))); assert.equal(lastPage(), 1)
+  assert.equal(productRequests.length, beforeTop + 1, 'stepping from the top is one request too')
   await paging.click(arrow('next')); assert.equal(lastPage(), 2)
   assert.equal(productRequests.at(-1)?.summary, 0, 'a page step inside the same scope asks the server to skip them')
   await paging.click(paging.button('Stats'))
@@ -487,9 +497,11 @@ try {
   ]
   const listed = await mount()
   const rowText = (id: number) => listed.find(node => node.getAttribute('data-inventory-check-row') === String(id), `row ${id}`).textContent
-  assert.ok(rowText(12).includes('Checked OK') && rowText(12).includes('Counted 8') && rowText(12).includes(`@amy · ${fmtDateTime24('2026-10-30 08:15:00')}`), 'a checked product reads its status, counted quantity and who checked it when: ' + rowText(12))
-  assert.ok(rowText(13).includes('Issue') && rowText(13).includes('Counted 3') && rowText(13).includes('Two boxes crushed') && rowText(13).includes('@ben'), 'an issue adds its note: ' + rowText(13))
-  assert.ok(rowText(14).includes('Not checked') && !rowText(14).includes('Counted') && !rowText(14).includes('@'), 'a product nobody checked has no count and no checker: ' + rowText(14))
+  // The status is an ICON now (14 Nov): its words are its tooltip, and the date of the count sits beside it.
+  const statusWords = (id: number) => listed.find(node => node.getAttribute('data-check-status-kind') !== null && listed.find(row => row.getAttribute('data-inventory-check-row') === String(id), `row ${id}`).contains(node), `status ${id}`).getAttribute('title') ?? ''
+  assert.ok(statusWords(12).startsWith('Checked OK') && rowText(12).includes('Counted 8') && rowText(12).includes(`@amy · ${fmtDateTime24('2026-10-30 08:15:00')}`), 'a checked product reads its status, counted quantity and who checked it when: ' + rowText(12))
+  assert.ok(statusWords(13).startsWith('Issue') && rowText(13).includes('Counted 3') && rowText(13).includes('Two boxes crushed') && rowText(13).includes('@ben'), 'an issue adds its note: ' + rowText(13))
+  assert.ok(statusWords(14).startsWith('Not checked') && !rowText(14).includes('Counted') && !rowText(14).includes('@'), 'a product nobody checked has no count and no checker: ' + rowText(14))
   assert.ok(listed.text().includes('Last checked') && listed.text().includes('Status'), 'the pinned header names the new columns')
   await listed.unmount()
   productOverride = null
@@ -503,20 +515,26 @@ try {
   const inside = (id: number, attribute: string) => counting.find(node => node.getAttribute(attribute) !== null && rowOf(id).contains(node), `${attribute} of ${id}`)
   const barAction = (name: string) => counting.find(node => node.getAttribute('data-selection-action') === name, name)
   const selectedText = () => counting.find(node => node.getAttribute('data-selected-count') !== null, 'selected count').textContent
-  const pick = (id: number, checked: boolean) => counting.call(inside(id, 'data-check-select'), 'onChange', [{ target: { checked } }])
+  // 14 Nov: no check box. A row is picked by answering it: typing a count, or the status icon's popover (tick = matches stock, x = does not match).
+  const answer = async (id: number, which: 'matches' | 'differs') => {
+    await counting.click(inside(id, 'data-check-action'))
+    await counting.click(counting.find(node => node.getAttribute('data-popover-action') === which, which))
+    await counting.click(counting.find(node => node.getAttribute('data-popover-action') === 'close', 'close'))
+  }
   const noWork = () => dirtyWork.getDirtyWork().filter(entry => entry.pageId === 'inventory').length
   const buttonsLabelled = (label: string) => counting.findAll(node => node.tagName === 'BUTTON' && (node.getAttribute('aria-label') ?? '').startsWith(label))
   assert.equal(buttonsLabelled('Count (').length, 0, 'no Count (n) button: the rows count themselves')
   assert.equal(buttonsLabelled('refresh').length, 0, 'and no refresh button')
-  assert.equal(counting.findAll(node => node.getAttribute('data-check-select') !== null).length, 3, 'a check box before each product')
-  assert.equal(barAction('submit').getAttribute('aria-disabled'), 'true', 'Submit waits for a pick')
-  await counting.call(counting.find(node => node.getAttribute('data-check-select-all') !== null, 'select all'), 'onChange', [{ target: { checked: true } }])
-  assert.equal(selectedText(), '3 selected', 'select-all picks every countable row on the page')
-  assert.equal(barAction('submit').getAttribute('title'), 'Enter a count for every selected product.', 'Submit says why it cannot go yet')
+  assert.equal(counting.findAll(node => node.getAttribute('data-check-select') !== null || node.getAttribute('type') === 'checkbox').length, 0, 'no check box: nothing is ticked by default')
+  assert.equal(counting.findAll(node => node.getAttribute('data-check-action') === 'status').length, 3, 'a status icon on each product')
+  assert.equal(barAction('submit').getAttribute('aria-disabled'), 'true', 'Submit waits for an answer')
   await counting.type(inside(12, 'data-check-count'), '8')
+  await answer(13, 'differs'); await answer(14, 'differs')
+  assert.equal(selectedText(), '3 counted', 'typing a count, or answering does-not-match, picks the row')
+  assert.equal(barAction('submit').getAttribute('title'), 'Enter a count for every selected product.', 'Submit says why it cannot go yet')
   await counting.type(inside(13, 'data-check-count'), '4')
-  await counting.click(counting.button('Mark checked: Third product', rowOf(14)))
-  assert.equal((inside(14, 'data-check-count') as unknown as { value: string }).value, '9', 'the check button fills the stock the person saw')
+  await answer(14, 'matches')
+  assert.equal((inside(14, 'data-check-count') as unknown as { value: string }).value, '9', 'the tick fills the stock the person saw')
   assert.equal(barAction('submit').getAttribute('aria-disabled'), null, 'every picked row has a count: Submit is ready')
   assert.equal(rowOf(12).querySelectorAll('[data-check-draft-note]').length, 0, 'a count that matches asks for no note')
   await counting.type(counting.find(node => node.tagName === 'INPUT' && rowOf(13).contains(node) && node.getAttribute('aria-label') === 'Note (optional): Second product', 'note of 13'), 'Two missing')
@@ -532,7 +550,7 @@ try {
   assert.equal(submissions.length, sentBefore, 'nothing is sent until the review is confirmed')
   await counting.click(counting.button('Cancel', counting.find(node => node.tagName === 'DL', 'review').parentNode!.parentNode!))
   assert.equal(submissions.length, sentBefore, 'Cancel sends nothing')
-  assert.equal(selectedText(), '3 selected', 'and keeps every pick and count')
+  assert.equal(selectedText(), '3 counted', 'and keeps every pick and count')
   await counting.click(barAction('submit'))
   await confirmInDialog(counting, 'Submit')
   assert.equal(submissions.length, sentBefore + 1)
@@ -549,10 +567,10 @@ try {
   assert.equal(selectedText(), '', 'the counts that were sent are cleared')
   assert.equal(noWork(), 0, 'and the guard is released')
 
-  assert.equal(counting.findAll(node => node.getAttribute('data-check-select') !== null && (node as unknown as { checked?: boolean }).checked === true).length, 0)
+  assert.equal(counting.findAll(node => node.getAttribute('data-selected') !== null).length, 0, 'nothing is picked once the counts were sent')
 
   // an answer that never came: the same request is sent again, the same lines, and the rows stay as they were
-  await pick(12, true); await counting.type(inside(12, 'data-check-count'), '6')
+  await counting.type(inside(12, 'data-check-count'), '6')
   submitFailure = 'unknown'
   await counting.click(barAction('submit')); await confirmInDialog(counting, 'Submit')
   assert.ok(counting.text().includes('Save not confirmed'), 'an unconfirmed submit says so')
@@ -565,14 +583,14 @@ try {
   assert.equal(selectedText(), '')
 
   // a product marked checked while stock moved: the server refuses the whole submission, the marks are cleared
-  await pick(14, true); await counting.click(counting.button('Mark checked: Third product', rowOf(14)))
-  await pick(13, true); await counting.type(inside(13, 'data-check-count'), '5')
+  await answer(14, 'matches')
+  await counting.type(inside(13, 'data-check-count'), '5')
   submitFailure = 'stale'
   await counting.click(barAction('submit')); await confirmInDialog(counting, 'Submit')
   assert.ok(counting.text().includes('Stock changed after you counted'), 'the person is told why')
   assert.equal((inside(14, 'data-check-count') as unknown as { value: string }).value, '', 'a checked mark is withdrawn with its count')
   assert.equal((inside(13, 'data-check-count') as unknown as { value: string }).value, '5', 'an ordinary count is kept')
-  assert.equal(selectedText(), '2 selected', 'both rows stay picked')
+  assert.equal(selectedText(), '2 counted', 'both rows stay picked')
   submitFailure = 'known'
   await counting.type(inside(14, 'data-check-count'), '9')
   await counting.click(barAction('submit')); await confirmInDialog(counting, 'Submit')
@@ -591,7 +609,7 @@ try {
   assert.ok(counting.text().includes('Stock changed after you counted'), 'the named stale count is explained')
   assert.equal((inside(13, 'data-check-count') as unknown as { value: string }).value, '', 'the count of the product the server named is withdrawn')
   assert.equal((inside(14, 'data-check-count') as unknown as { value: string }).value, '9', 'a product the server did not name keeps its count')
-  assert.equal(selectedText(), '2 selected', 'both rows stay picked')
+  assert.equal(selectedText(), '2 counted', 'both rows stay picked')
   submitFailure = 'none'
   await counting.click(barAction('clear'))
   assert.equal(selectedText(), '', 'Clear selection drops every draft')
@@ -607,7 +625,6 @@ try {
   await chooseFilter(branchSwitching, 'branchId', 'Test branch')
   assert.ok(!branchSwitching.text().includes('Discard counts not submitted?') && productRequests.at(-1)?.branchId === '1', 'with nothing picked the branch changes at once, without asking')
   const switchRow = () => branchSwitching.find(node => node.getAttribute('data-inventory-check-row') === '12', 'row 12')
-  await branchSwitching.call(branchSwitching.find(node => node.getAttribute('data-check-select') !== null && switchRow().contains(node), 'pick 12'), 'onChange', [{ target: { checked: true } }])
   await branchSwitching.type(branchSwitching.find(node => node.getAttribute('data-check-count') !== null && switchRow().contains(node), 'count 12'), '6')
   const requestsBeforeSwitch = productRequests.length
   await chooseFilter(branchSwitching, 'branchId', 'Second branch')
@@ -626,7 +643,9 @@ try {
   window.history.replaceState(null, '', '/inventory#hub:inventory:products')
   const blindCounting = await mount()
   const blindRow = blindCounting.find(node => node.getAttribute('data-inventory-check-row') === '12', 'blind row 12')
-  assert.equal(blindCounting.findAll(node => node.getAttribute('data-check-action') === 'checked').length, 0, 'blind: no way to say "matches stock"')
+  await blindCounting.click(blindCounting.find(node => node.getAttribute('data-check-action') === 'status' && blindRow.contains(node), 'blind status icon'))
+  assert.equal(blindCounting.findAll(node => node.getAttribute('data-popover-action') === 'matches').length, 0, 'blind: no way to say "matches stock"')
+  await blindCounting.click(blindCounting.find(node => node.getAttribute('data-popover-action') === 'close', 'close'))
   assert.equal(blindCounting.findAll(node => node.getAttribute('data-selection-action') === 'mark').length, 0)
   await blindCounting.type(blindCounting.find(node => node.getAttribute('data-check-count') !== null && blindRow.contains(node), 'blind count'), '5')
   await blindCounting.click(blindCounting.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit'))

@@ -95,17 +95,16 @@ const fixture = String.raw`
     })
     const selectable = listProducts.filter(product => !product.is_group)
     const selectedCount = Object.values(drafts).filter(draft => draft.selected).length
-    const onPage = selectable.filter(product => drafts[String(product.id)]?.selected).length
     return <>
-      {editable ? <ListModule.InventoryCheckSelectionBar pageState={onPage === 0 ? 'none' : onPage === selectable.length ? 'all' : 'some'} selectedCount={selectedCount} blocked="" busy={false} canMarkChecked={showStock}
-        onTogglePage={() => setDrafts(Object.fromEntries(selectable.map(product => [String(product.id), { selected: onPage !== selectable.length, count: '', checked: false, note: '' }])))}
-        onMarkChecked={() => {}} onClear={() => setDrafts({})} onSubmit={() => { window.__submitted = (window.__submitted || 0) + 1 }} t={t} /> : null}
+      {editable ? <ListModule.InventoryCheckSelectionBar selectedCount={selectedCount} blocked="" busy={false} canMarkChecked={showStock}
+        onMarkChecked={() => setDrafts(previous => Object.fromEntries(selectable.map(product => [String(product.id), previous[String(product.id)]?.count ? previous[String(product.id)] : { ...(previous[String(product.id)] ?? { note: '' }), selected: true, count: String(product.quantity), checked: true }])))} onClear={() => setDrafts({})} onSubmit={() => { window.__submitted = (window.__submitted || 0) + 1 }} t={t} /> : null}
       <ListModule.InventoryCheckListHeader selecting={editable} canViewStock={showStock} canViewCounts={showStock} t={t} />
       <ListModule.default products={listProducts} drafts={drafts} selecting={editable} canViewStock={showStock} canViewCounts={showStock} focusRequest={focusRequest} t={t} onOpenProduct={() => {}}
         priceText={usd => '$' + Number(usd).toFixed(2)} promotionRules={[]} exchangeRate={4100}
-        onToggle={(product, selected) => patch(product, () => ({ selected }))}
         onCount={(product, value) => patch(product, current => ({ count: value, checked: false, selected: value.trim() !== '' ? true : current.selected }))}
-        onChecked={product => patch(product, () => ({ count: String(product.quantity), checked: true, selected: true }))}
+        onMatches={product => patch(product, () => ({ count: String(product.quantity), checked: true, selected: true }))}
+        onDiffers={product => patch(product, () => ({ count: '', checked: false, selected: true }))}
+        onClear={product => patch(product, () => ({ count: '', checked: false, selected: false, note: '' }))}
         onNote={(product, value) => patch(product, () => ({ note: value }))} />
     </>
   }
@@ -291,37 +290,39 @@ await browser.run('PASS Inventory count sheet and list: aligned columns, count e
     assert.ok(xs.length >= 10, 'list ' + field + ': drawn on every row, empty cells included (' + xs.length + ')')
     assert.equal(new Set(xs).size, 1, 'list ' + field + ': every row starts the cell at the same x (' + [...new Set(xs)].join(', ') + ')')
   }
-  assert.deepEqual(await browser.evaluate('Array.from(document.querySelector("[data-inventory-check-sheet-header]").children, node => node.textContent)'), ['', '', 'Product', 'Now', 'Status', 'Counted', 'Count', 'Last checked'], 'the owner’s list columns, after the check box and image cells')
-  assert.deepEqual(await browser.evaluate<number[]>('Array.from(document.querySelector("[data-inventory-check-sheet-header]").children, node => Math.round(node.getBoundingClientRect().left * 10) / 10)').then(xs => xs.slice(3)), [listColumns.now[0], listColumns.status[0], listColumns.counted[0], listColumns['count-input'][0], listColumns.last[0]], 'and each title sits over its cells')
+  assert.deepEqual(await browser.evaluate('Array.from(document.querySelector("[data-inventory-check-sheet-header]").children, node => node.textContent)'), ['', 'Product', 'Now', 'Status', 'Counted', 'Count', 'Last checked'], 'the owner’s list columns, after the image cell (there is no check box column any more)')
+  assert.deepEqual(await browser.evaluate<number[]>('Array.from(document.querySelector("[data-inventory-check-sheet-header]").children, node => Math.round(node.getBoundingClientRect().left * 10) / 10)').then(xs => xs.slice(2)), [listColumns.now[0], listColumns.status[0], listColumns.counted[0], listColumns['count-input'][0], listColumns.last[0]], 'and each title sits over its cells')
   const nameLeft = await browser.evaluate<number>('Math.round(document.querySelector("[data-inventory-check-row=\\"1\\"] [data-check-image]").getBoundingClientRect().right)')
-  assert.ok(await browser.evaluate<number>('Math.round(document.querySelector("[data-inventory-check-sheet-header]").children[1].getBoundingClientRect().right)') <= nameLeft + 1, 'the header leaves room for the image')
-  const order = await browser.evaluate<number[]>('(() => { const r = document.querySelector("[data-inventory-check-row=\\"1\\"]"); return [r.querySelector("[data-check-select-box]").getBoundingClientRect().left, r.querySelector("[data-check-image]").getBoundingClientRect().left] })()')
-  assert.ok(order[0] < order[1], 'the check box sits before the product image (' + order.join(' < ') + ')')
-  assert.deepEqual(await browser.evaluate<string[]>("Array.from(document.querySelectorAll('[data-check-status-text]'), node => node.dataset.checkStatusText).slice(0, 4)"), ['ok', 'issue', 'in_check', 'not_checked'])
+  assert.ok(await browser.evaluate<number>('Math.round(document.querySelector("[data-inventory-check-sheet-header]").children[0].getBoundingClientRect().right)') <= nameLeft + 1, 'the header leaves room for the image')
+  assert.equal(await browser.evaluate('document.querySelectorAll("[data-check-select], [data-check-select-box], input[type=checkbox]").length'), 0, 'no check box: nothing is ticked by default')
+  assert.deepEqual(await browser.evaluate<string[]>("Array.from(document.querySelectorAll('[data-check-status-kind]'), node => node.dataset.checkStatusKind).slice(0, 4)"), ['ok', 'issue', 'in_check', 'not_checked'])
   assert.equal(await browser.evaluate("document.querySelector('" + row(1) + " [data-cell=\"last\"]').textContent.includes('@amy') && document.querySelector('" + row(1) + " [data-cell=\"last\"]').textContent.includes(':')"), true, 'who checked it, and the date and time')
   assert.equal(await browser.evaluate("document.querySelector('" + row(2) + " [data-check-note]').textContent"), 'Fell off the shelf', 'an issue shows its note under the row')
   assert.equal(await browser.evaluate("document.querySelectorAll('[data-check-note]').length"), 1, 'and only an issue does')
-  assert.equal(await browser.evaluate("document.querySelectorAll('[data-check-select]').length"), 16, 'a check box on every real product, none on the family header')
-  assert.equal(await browser.evaluate("document.querySelectorAll('" + row(20) + " [data-check-select], " + row(20) + " [data-check-count]').length"), 0)
-  // A count typed in the row picks it; the check button fills the stock; a differing count asks for a note; select-all picks the page.
+  assert.equal(await browser.evaluate("document.querySelectorAll('[data-check-action=\"status\"]').length"), 16, 'a status icon on every real product, none on the family header')
+  assert.equal(await browser.evaluate("document.querySelectorAll('" + row(20) + " [data-check-action], " + row(20) + " [data-check-count]').length"), 0)
+  // A count typed in the row picks it; the status popover's tick fills the stock; a differing count asks for a note; the bar's mark answers the whole page.
   await browser.mouseClick(row(1) + ' [data-check-count]')
   await type('10')
   await waitFor('row 1 picked', 'window.__drafts[1] && window.__drafts[1].selected === true && window.__drafts[1].count === "10"')
-  assert.equal(await browser.evaluate("document.querySelector('[data-selected-count]').textContent"), '1 selected')
-  assert.equal(await browser.evaluate("document.querySelector('" + row(1) + " [data-check-select]').checked"), true, 'typing a count ticks the row’s box')
-  await browser.mouseClick(row(3) + ' [data-check-action="checked"]')
+  assert.equal(await browser.evaluate("document.querySelector('[data-selected-count]').textContent"), '1 counted')
+  assert.equal(await browser.evaluate("document.querySelector('" + row(1) + "').hasAttribute('data-selected')"), true, 'typing a count picks the row')
+  await browser.mouseClick(row(3) + ' [data-check-action="status"]')
+  await waitFor('popover open', "document.querySelector('[data-inventory-check-popover]') !== null")
+  await browser.mouseClick('[data-popover-action="matches"]')
   await waitFor('row 3 checked', 'window.__drafts[3] && window.__drafts[3].checked === true')
-  assert.equal(await browser.evaluate("document.querySelector('" + row(3) + " [data-check-count]').value"), '10', 'the check button fills the stock')
-  assert.equal(await browser.evaluate("document.querySelector('" + row(3) + " [data-check-action=\"checked\"]').getAttribute('aria-pressed')"), 'true')
+  assert.equal(await browser.evaluate("document.querySelector('" + row(3) + " [data-check-count]').value"), '10', 'the tick fills the stock')
+  await browser.mouseClick('[data-popover-action="close"]')
+  await waitFor('popover closed', "document.querySelector('[data-inventory-check-popover]') === null")
   await browser.mouseClick(row(2) + ' [data-check-count]')
   await type('7')
   await waitFor('difference note', "document.querySelector('" + row(2) + " [data-check-draft-note]') !== null")
   assert.equal(await browser.evaluate("document.querySelector('" + row(2) + " [data-check-difference]').textContent"), '−5', 'the difference is shown with its sign')
   await noSidewaysScroll('1280 list with a note open')
-  await browser.mouseClick('[data-check-select-all]')
-  await waitFor('select all', 'document.querySelector("[data-selected-count]").textContent === "16 selected"')
-  assert.equal(await browser.evaluate("document.querySelectorAll('[data-check-select]:checked').length"), 16)
-  assert.equal(await browser.evaluate("document.querySelector('[data-check-select-all]').checked"), true)
+  await browser.mouseClick('[data-selection-action="mark"]')
+  await waitFor('page marked', 'document.querySelector("[data-selected-count]").textContent === "16 counted"')
+  assert.equal(await browser.evaluate("document.querySelectorAll('[data-inventory-check-row][data-selected]').length"), 16, 'every real product on the page is answered')
+  assert.equal(await browser.evaluate("document.querySelector('" + row(2) + " [data-check-count]').value"), '7', 'a count already typed is never overwritten by the page mark')
   await browser.mouseClick('[data-selection-action="submit"]')
   assert.equal(await browser.evaluate('window.__submitted'), 1, 'Submit reaches the page')
   await browser.mouseClick('[data-selection-action="clear"]')
@@ -330,26 +331,26 @@ await browser.run('PASS Inventory count sheet and list: aligned columns, count e
   assert.ok(bar.height <= 48 && bar.overflow <= 0, 'the selection bar is one line (' + JSON.stringify(bar) + ')')
   await browser.open(1024, 'lang=en&sidebar=220&mode=list', ready, 760)
   await noSidewaysScroll('1024 list')
-  assert.deepEqual(await browser.evaluate("Array.from(document.querySelector('[data-inventory-check-sheet-header]').children).filter(" + visible + ").map(node => node.textContent)"), ['', '', 'Product', 'Now', 'Status', 'Counted', 'Count'], 'Last checked waits for 1280px')
+  assert.deepEqual(await browser.evaluate("Array.from(document.querySelector('[data-inventory-check-sheet-header]').children).filter(" + visible + ").map(node => node.textContent)"), ['', 'Product', 'Now', 'Status', 'Counted', 'Count'], 'Last checked waits for 1280px')
   // Stock hidden: no Now, no Counted, no check button; counting stays. A viewer who may not count has no controls at all.
   await browser.open(1280, 'lang=en&sidebar=220&mode=list&stock=0', ready, 760)
   for (const field of ['now', 'counted']) assert.equal(await browser.evaluate("document.querySelectorAll('[data-cell=\"" + field + "\"]').length"), 0, 'blind list: no ' + field + ' cell')
-  assert.equal(await browser.evaluate("document.querySelectorAll('[data-check-action], [data-damaged]').length"), 0, 'blind list: no check button, no damaged chip')
+  assert.equal(await browser.evaluate("document.querySelectorAll('[data-damaged]').length"), 0, 'blind list: no damaged chip')
   assert.ok(await browser.evaluate<number>("document.querySelectorAll('[data-check-count]').length") > 0, 'blind list: the count input stays')
   await browser.open(1280, 'lang=en&sidebar=220&mode=list&check=0', ready, 760)
-  assert.equal(await browser.evaluate("document.querySelectorAll('[data-check-select], [data-check-count], [data-check-action], [data-inventory-check-selection-bar]').length"), 0, 'a viewer who may not count has no controls')
-  // Phone: the image on the left as tall as the facts beside it, the count line full width, every control 44px.
+  assert.equal(await browser.evaluate("document.querySelectorAll('[data-check-count], [data-check-action], [data-inventory-check-selection-bar]').length"), 0, 'a viewer who may not count has no controls')
+  // Phone: a square image on the left, the status icon and the count input beside the name, every control at least 40px.
   await browser.open(360, 'lang=en&mode=list', ready, 740)
   await noSidewaysScroll('en 360 list')
   const phonePrices = await browser.evaluate<string>("Array.from(document.querySelectorAll('" + row(2) + " [data-price]'), node => node.textContent.replace(/\\s+/g, ' ').trim()).join(' | ')")
   assert.equal(phonePrices, packs.en.selling_price + ' $12.50 | ' + packs.en.wholesale_price + ' $10.00 | ' + packs.en.promotion + ' $11.25', 'a phone row (long name) carries selling, wholesale and the live promotion price, labels inside (' + phonePrices + ')')
   const listFacts = await browser.evaluate<string>("document.querySelector('" + row(1) + " [data-inventory-check-meta]').textContent.replace(/\\s+/g, ' ').trim()")
-  assert.ok(listFacts.includes('Checked OK') && listFacts.includes('Counted 10') && listFacts.includes('Last checked @amy'), 'a phone reads the same facts in one line (' + listFacts + ')')
-  const tall = await browser.evaluate<{ image: number[]; info: number[]; box: number[]; count: boolean }>("(() => { const r = document.querySelector('" + row(2) + "'); const box = node => { const b = node.getBoundingClientRect(); return [Math.round(b.top), Math.round(b.bottom), Math.round(b.left), Math.round(b.right)] }; const meta = r.querySelector('[data-inventory-check-meta]'); return { image: box(r.querySelector('[data-check-image]')), info: box(meta.parentElement), box: box(r.querySelector('[data-check-select-box]')), count: r.querySelector('[data-check-count]').getClientRects().length > 0 } })()")
-  assert.ok(tall.image[0] <= tall.info[0] + 1 && tall.image[1] >= tall.info[1] - 1, 'the image runs the full height of the info beside it (' + JSON.stringify(tall) + ')')
-  assert.ok(tall.box[3] <= tall.image[2], 'the check box is left of the image')
+  assert.ok(listFacts.includes('Counted 10') && listFacts.includes('Last checked @amy'), 'a phone reads the same facts in one line (' + listFacts + ')')
+  const tall = await browser.evaluate<{ image: number[]; info: number[]; side: number[]; count: boolean }>("(() => { const r = document.querySelector('" + row(2) + "'); const box = node => { const b = node.getBoundingClientRect(); return [Math.round(b.top), Math.round(b.bottom), Math.round(b.left), Math.round(b.right)] }; const meta = r.querySelector('[data-inventory-check-meta]'); return { image: box(r.querySelector('[data-check-image]')), info: box(meta.parentElement), side: box(r.querySelector('[data-inventory-check-side]')), count: r.querySelector('[data-check-count]').getClientRects().length > 0 } })()")
+  assert.ok(Math.abs((tall.image[1] - tall.image[0]) - (tall.image[3] - tall.image[2])) <= 1, 'the image keeps its square, never stretched to the facts (' + JSON.stringify(tall) + ')')
+  assert.ok(tall.side[2] >= tall.info[3] - 1 || tall.side[0] < tall.image[1], 'the status icon and count input sit beside the text, not under it (' + JSON.stringify(tall) + ')')
   assert.equal(tall.count, true, 'the count input is on the phone row')
-  const small = await browser.evaluate<string[]>("Array.from(document.querySelectorAll('[data-inventory-check-row] button, [data-inventory-check-row] input, [data-check-select-box], [data-inventory-check-selection-bar] button, [data-check-select-all]')).filter(node => !node.closest('[data-cell=\"now\"]')).filter(node => { const r = (node.closest('label') || node).getBoundingClientRect(); return r.width > 0 && (r.width < 40 || r.height < 40) }).map(node => node.getAttribute('aria-label') || node.tagName)")
+  const small = await browser.evaluate<string[]>("Array.from(document.querySelectorAll('[data-inventory-check-row] button, [data-inventory-check-row] input, [data-inventory-check-selection-bar] button')).filter(node => !node.closest('[data-cell=\"now\"]')).filter(node => { const r = (node.closest('label') || node).getBoundingClientRect(); return r.width > 0 && (r.width < 40 || r.height < 40) }).map(node => node.getAttribute('aria-label') || node.tagName)")
   assert.deepEqual(small, [], 'every tap target on the phone list is at least 40px each way')
   const smallButtons = await browser.evaluate<string[]>("Array.from(document.querySelectorAll('[data-inventory-check-row] button, [data-inventory-check-selection-bar] button')).filter(node => !node.closest('[data-cell=\"now\"]')).filter(node => { const r = node.getBoundingClientRect(); return r.width > 0 && (r.width < 44 || r.height < 44) }).map(node => node.getAttribute('aria-label') || node.textContent)")
   assert.deepEqual(smallButtons, [], 'and every button is 44px')

@@ -3,9 +3,9 @@ import { createHarness, propsOf, type MemoryNode, type MountedSurface } from './
 import { fmtDateTime24 } from '../src/utils/formatters.ts'
 import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
 
-// Lane 6.0.1044 (P1.6a): the Inventory Check list counts by itself. A check box before each image, the owner's columns (product, barcode,
+// Lane 6.0.1044 (P1.6a): the Inventory Check list counts by itself. (14 Nov: no check box; a status ICON with its date opens the count popover; the count input sits beside the name.) The owner's columns (product, barcode,
 // stock now, next expiry, check status, counted, note, last checked by and when), the count typed in the row, one check button, a note
-// only where the count differs, and a bar with select-all and Submit. No price, cost, sold or customer figure exists on a row.
+// only where the count differs, and a bar with how many are counted and Submit. No price, cost, sold or customer figure exists on a row.
 
 const at = '2026-10-30T08:15:00.000Z'
 const listed: InventoryCheckProduct[] = [
@@ -61,10 +61,17 @@ const cases: Array<[string, () => Promise<void>]> = [
     await h.unmount()
     for (const word of ['Price', 'Cost', 'Sold', 'Cust', 'Sales', 'Customers']) assert.ok(!titlesOf(await header({})).includes(word), `no ${word} column`)
   }],
-  ['each row shows stock now, next expiry, check status, counted quantity, who and when it was last checked, and an issue’s note', async () => {
+  ['each row shows stock now, next expiry, a status ICON with its date, counted quantity, who and when it was last checked, and an issue’s note', async () => {
     const s = await mount({ selecting: false })
     assert.deepEqual([501, 502, 503, 504, 505, 506].map(id => row(s, id).getAttribute('data-check-list-status')), ['ok', 'issue', 'in_check', 'not_checked', 'ok', 'issue'])
-    assert.deepEqual([501, 502, 503, 504].map(id => inRow(s, id, 'data-check-status-text').textContent), ['Checked OK', 'Issue', 'In check', 'Not checked'])
+    const icon = (id: number) => inRow(s, id, 'data-check-status-kind')
+    assert.deepEqual([501, 502, 503, 504].map(id => icon(id).getAttribute('data-check-status-kind')), ['ok', 'issue', 'in_check', 'not_checked'], 'one icon kind per status')
+    assert.deepEqual([501, 502, 503, 504].map(id => icon(id).getAttribute('aria-label')), ['Checked OK', 'Issue', 'In check', 'Not checked'], 'the name is the aria-label...')
+    assert.ok(icon(501).getAttribute('title')?.startsWith('Checked OK'), '...and the tooltip')
+    for (const id of [501, 502, 503, 504]) assert.equal(icon(id).textContent, '', `status ${id} is an icon: no phrase is written on the row`)
+    for (const id of [501, 502, 503, 504]) assert.ok(icon(id).children.some(child => child.tagName.toLowerCase() === 'svg'), `status ${id} draws an icon`)
+    assert.ok(allInRow(s, 501, 'data-check-date')[0].textContent === '30/10/2026', 'the date of the count the status came from sits beside the icon, dd/mm/yyyy')
+    assert.equal(allInRow(s, 504, 'data-check-date').length, 0, 'a product nobody checked has no date')
     assert.ok(flat(cell(s, 501, 'now')).startsWith('Now 8 pcs'), 'stock now with its unit')
     assert.ok(flat(cell(s, 502, 'now')).includes('Held 2') && !flat(cell(s, 502, 'now')).includes('Damaged'), 'held units (every tag, not only damaged) ride beside Now as a Held chip')
     assert.equal(flat(cell(s, 501, 'counted')), 'Counted 8')
@@ -78,46 +85,35 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.deepEqual(note(506), ['Count differs from stock'], 'the server’s default note reads in the viewer’s language (falls back to English here)')
     assert.ok(row(s, 501).textContent.includes('885000501') && row(s, 501).textContent.includes('Brand A'), 'barcode and brand')
     assert.ok(allInRow(s, 501, 'data-expiry').length === 1 && inRow(s, 501, 'data-expiry').textContent.includes('01/2031'), 'next expiry as month and year')
-    assert.equal(s.findAll(node => node.tagName === 'BUTTON' && node.getAttribute('data-check-action') !== null).length, 0, 'a viewer who cannot count has no check buttons')
-    assert.equal(s.findAll(node => node.getAttribute('data-check-select') !== null || node.getAttribute('data-check-count') !== null).length, 0, 'and no check box or count input')
-    assert.ok(row(s, 501).className.includes('border-l-emerald-500') && row(s, 502).className.includes('border-l-amber-500') && row(s, 503).className.includes('border-l-sky-500') && row(s, 504).className.includes('border-l-transparent'), 'the left edge follows the status')
-    for (const id of [501, 502, 503, 504]) assert.ok(inRow(s, id, 'data-check-status-text').className.includes('rounded-full') && allInRow(s, id, 'data-check-status-text')[0].children.some(child => child.tagName.toLowerCase() === 'svg'), `status ${id} is a chip with an icon, not bare text`)
+    assert.equal(s.findAll(node => node.tagName === 'BUTTON' && node.getAttribute('data-check-action') !== null).length, 0, 'a viewer who cannot count has no status button')
+    assert.equal(s.findAll(node => node.getAttribute('data-check-count') !== null).length, 0, 'and no count input')
+    assert.ok(row(s, 501).className.includes('border-l-emerald-500') && row(s, 502).className.includes('border-l-red-500') && row(s, 503).className.includes('border-l-sky-500') && row(s, 504).className.includes('border-l-transparent'), 'the left edge follows the status')
   }],
   ['a viewer without counts sees no counted figure; one without stock sees no stock, damage or a way to copy it into a count', async () => {
     const s = await mount({ selecting: false, canViewCounts: false })
     assert.ok(!s.text().includes('Counted'), 'no counted figure without the right to see counts')
     await s.render({ ...base, selecting: true, canViewStock: false, canViewCounts: false, products: [{ id: 91, name: 'Synthetic blind row', quantity: 4444, damaged_quantity: 3333, unit: 'pcs' } as InventoryCheckProduct] })
     assert.ok(!s.text().includes('4444') && !s.text().includes('3333') && !s.text().includes('Damaged') && !s.text().includes('Now'), 'blind: no stock, no damage')
-    assert.equal(s.findAll(node => node.getAttribute('data-check-action') === 'checked').length, 0, 'blind: nothing to mark as matching')
     const input = inRow(s, 91, 'data-check-count')
     assert.equal(input.getAttribute('placeholder'), '', 'the count input hints nothing')
     await s.type(input, '3')
     assert.deepEqual(calls.at(-1), ['count', 91, '3'], 'a blind viewer can still count')
     assert.equal(allInRow(s, 91, 'data-check-draft-note').length, 0, 'and is never asked about a difference it cannot see')
   }],
-  ['the check box comes before the image, and a family header or an uncheckable product has none', async () => {
+  ['nothing is ticked by default and there is no check box; a family header or an uncheckable product has no input and no status button', async () => {
     const s = await mount({ products: [listed[0], heading, locked] })
-    const main = inRow(s, 501, 'data-inventory-check-main')
-    const order = main.children.map(child => child.getAttribute('data-check-select-box') !== null ? 'box' : child.getAttribute('data-check-image') !== null ? 'image' : 'other')
-    assert.deepEqual(order.slice(0, 2), ['box', 'image'], 'the box sits before the product image')
-    assert.equal(allInRow(s, 600, 'data-check-select').length, 0, 'a family header cannot be picked')
-    assert.equal(allInRow(s, 601, 'data-check-select').length, 0, 'a product that cannot be checked cannot be picked')
+    assert.equal(s.findAll(node => node.getAttribute('type') === 'checkbox' || node.getAttribute('data-check-select') !== null || node.getAttribute('data-check-select-box') !== null).length, 0, 'no check box exists anywhere on the list')
+    assert.equal(s.findAll(node => node.getAttribute('data-selected') !== null).length, 0, 'with no draft, no row is picked')
+    assert.equal(inRow(s, 501, 'data-check-status-kind').getAttribute('data-check-status-kind'), 'ok', 'the icon is the recorded status, not a tick of the viewer’s')
+    assert.equal(allInRow(s, 600, 'data-check-status-kind').length + allInRow(s, 601, 'data-check-status-kind').length, 0, 'a heading or an uncheckable product has no status to open')
     assert.equal(allInRow(s, 600, 'data-check-count').length + allInRow(s, 601, 'data-check-count').length, 0, 'and has no count input')
-    const label = inRow(s, 501, 'data-check-select').getAttribute('aria-label') || ''
-    assert.equal(label, 'Select: Listed ok', 'the box is named after its product')
+    const main = inRow(s, 501, 'data-inventory-check-main')
+    assert.ok(main.children[0].getAttribute('data-check-image') !== null, 'the product image is the first thing on the row')
   }],
-  ['picking, typing and the check button reach the page; typing a count picks the row (the page decides), Escape clears', async () => {
+  ['typing reaches the page, Escape clears, and the name or image opens the product', async () => {
     const s = await mount({ drafts: { 501: { selected: true, count: '8', checked: false, note: '' } } })
-    const box = inRow(s, 501, 'data-check-select')
-    assert.equal(box.getAttribute('checked') ?? (box as unknown as { checked?: boolean }).checked, true, 'the box shows the draft’s state')
-    await s.call(box, 'onChange', [{ target: { checked: false }, currentTarget: box }])
-    assert.deepEqual(calls.at(-1), ['toggle', 501, false])
-    await s.call(inRow(s, 502, 'data-check-select'), 'onChange', [{ target: { checked: true } }])
-    assert.deepEqual(calls.at(-1), ['toggle', 502, true])
     await s.type(inRow(s, 502, 'data-check-count'), '4')
     assert.deepEqual(calls.at(-1), ['count', 502, '4'])
-    await s.click(s.button('Mark checked: Listed issue', row(s, 502)))
-    assert.deepEqual(calls.at(-1), ['checked', 502])
     await key(s, inRow(s, 501, 'data-check-count'), 'Escape')
     assert.deepEqual(calls.at(-1), ['count', 501, ''], 'Escape clears the count')
     await s.click(s.button('Listed ok', row(s, 501)))
@@ -136,7 +132,8 @@ const cases: Array<[string, () => Promise<void>]> = [
     await s.type(noteInput, 'Two missing')
     assert.deepEqual(calls.at(-1), ['note', 502, 'Two missing'])
     assert.equal(propsOf(noteInput).maxLength, 500, 'the note is limited to what the server keeps')
-    assert.equal(inRow(s, 501, 'data-check-action').getAttribute('aria-pressed'), 'true', 'the check button shows it was used')
+    assert.equal(inRow(s, 501, 'data-check-status-kind').getAttribute('data-check-status-kind'), 'draft_ok', 'a typed count that matches stock wears the matching icon, not yet submitted')
+    assert.equal(inRow(s, 502, 'data-check-status-kind').getAttribute('data-check-status-kind'), 'draft_issue', 'one that differs wears the red x')
   }],
   ['an invalid count is said in words on its row and nothing differs', async () => {
     const s = await mount({ drafts: { 501: { selected: true, count: 'abc', checked: false, note: '' } } })
@@ -146,26 +143,26 @@ const cases: Array<[string, () => Promise<void>]> = [
   }],
   ['while a submission is on its way nothing on the list can change', async () => {
     const s = await mount({ locked: true, drafts: { 501: { selected: true, count: '7', checked: false, note: '' } } })
-    const box = inRow(s, 501, 'data-check-select')
-    assert.equal(box.getAttribute('disabled') !== null || (box as unknown as { disabled?: boolean }).disabled === true, true, 'the box is disabled')
     assert.equal(inRow(s, 501, 'data-check-count').getAttribute('readonly') !== null || (inRow(s, 501, 'data-check-count') as unknown as { readOnly?: boolean }).readOnly === true, true, 'the count is read-only')
-    assert.equal(inRow(s, 501, 'data-check-action').getAttribute('disabled') !== null || (inRow(s, 501, 'data-check-action') as unknown as { disabled?: boolean }).disabled === true, true, 'the check button is disabled')
     const before = calls.length
     await key(s, inRow(s, 501, 'data-check-count'), 'Escape')
     assert.equal(calls.length, before, 'Escape does nothing while locked')
   }],
-  ['on a phone the image is on the left and as tall as the facts beside it, the facts wrap, the count input fills the line', async () => {
+  ['on a phone the image keeps its square, the count input and the status icon sit BESIDE the name (not on a row of their own), the facts wrap under the name', async () => {
     const s = await mount({})
     const main = inRow(s, 501, 'data-inventory-check-main')
-    assert.ok(main.className.includes('items-stretch') && main.className.includes('lg:items-center'), 'phone: the image stretches to the facts; the sheet centres it')
+    assert.ok(main.className.includes('flex') && main.className.includes('items-center') && !main.className.includes('items-stretch'), 'one line: everything is centred on it, nothing stretches')
     const image = inRow(s, 501, 'data-check-image')
-    assert.ok(image.className.includes('self-stretch') && image.className.includes('w-12') && image.className.includes('min-h-12'), 'a stretched image at least as tall as one line of facts')
-    assert.ok(image.className.includes('lg:self-center') && image.className.includes('lg:h-10'), 'and a fixed square on the sheet')
+    for (const word of ['aspect-square', 'h-12', 'w-12', 'shrink-0']) assert.ok(image.className.split(/\s+/).includes(word), `the image is a fixed square (${word})`)
+    assert.ok(!image.className.includes('self-stretch') && !image.className.includes('min-h-'), 'and is never stretched to the height of the facts')
+    assert.ok(image.className.includes('lg:h-10') && image.className.includes('lg:w-10'), 'a smaller square on the sheet')
+    const side = inRow(s, 501, 'data-inventory-check-side')
+    assert.ok(main.children.includes(side) && side.className.includes('shrink-0') && side.className.includes('lg:contents'), 'the status icon and the count input are a cluster beside the text, columns on the sheet')
+    assert.ok(side.contains(cell(s, 501, 'status')) && side.contains(cell(s, 501, 'count-input')), 'both live in that cluster')
+    assert.ok(!cell(s, 501, 'count-input').className.includes('w-full'), 'the count input does not span a row of its own')
     const meta = inRow(s, 501, 'data-inventory-check-meta')
-    assert.ok(meta.className.includes('flex-wrap') && meta.className.includes('lg:contents'), 'facts wrap on a phone and become columns on the sheet')
-    const countCell = cell(s, 501, 'count-input')
-    assert.ok(countCell.className.includes('w-full') && countCell.className.includes('lg:w-auto'), 'the count line spans a phone row')
-    for (const column of ['now', 'status', 'counted', 'last']) assert.ok(/lg:w-/.test(cell(s, 501, column)?.className ?? cell(s, 503, column)?.className ?? 'lg:w-'), `${column} has one fixed width on the sheet`)
+    assert.ok(meta.className.includes('flex-wrap') && meta.className.includes('lg:contents'), 'facts wrap under the name on a phone and become columns on the sheet')
+    for (const column of ['now', 'counted', 'last']) assert.ok(/lg:w-/.test(cell(s, 501, column)?.className ?? cell(s, 503, column)?.className ?? 'lg:w-'), `${column} has one fixed width on the sheet`)
     for (const button of s.findAll(node => node.tagName === 'BUTTON' && row(s, 501).contains(node) && node.getAttribute('data-check-image') === null)) {
       assert.equal(button.textContent.trim(), '', 'a row button is an icon with no visible text')
       assert.ok((button.getAttribute('aria-label') || '').length > 0 && button.getAttribute('title'), 'and carries a name and a tooltip')
@@ -216,24 +213,27 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.ok(row(surface, 502).className.split(/\s+/).includes('relative'), 'the row is the mark’s positioning container')
     assert.ok(row(surface, 502).children.includes(mark), 'the mark is the row’s own child, not part of any cell')
     assert.ok(!cell(surface, 502, 'status').contains(mark), 'it is not inside the status cell')
-    assert.equal(flat(cell(surface, 502, 'status')), 'Issue', 'the status cell reads exactly what it reads without the mark')
-    assert.equal(inRow(surface, 502, 'data-check-status-text').getAttribute('data-check-status-text'), 'issue', 'the status chip is untouched')
+    assert.equal(inRow(surface, 502, 'data-check-status-kind').getAttribute('data-check-status-kind'), 'pending', 'the status icon itself is the pending (hourglass) icon')
+    assert.ok((inRow(surface, 502, 'data-check-status-kind').getAttribute('aria-label') || '').includes('Waiting for approval'), 'the status button’s name says it (and what it opens)')
+    assert.ok((inRow(surface, 502, 'data-check-status-kind').getAttribute('title') || '').startsWith('Waiting for approval'), 'and so does its tooltip')
     assert.equal(flat(row(surface, 502)).replace('Waiting for approval', ''), flat(row(surface, 502)), 'the row’s text never says it')
     await surface.render({ ...base, products: [{ ...waiting, check_pending: false }, listed[0]] })
     assert.equal(tag(502).length, 0, 'once nothing waits (the line was applied), the mark is gone')
+    assert.equal(inRow(surface, 502, 'data-check-status-kind').getAttribute('data-check-status-kind'), 'issue', 'and the icon returns to the recorded status')
   }],
-  ['the selection bar: select-all, how many, mark / clear as icons, and a Submit that says why it cannot go', async () => {
+  ['the selection bar: how many are counted, mark-the-page / clear as icons, and a Submit that says why it cannot go; there is no select-all', async () => {
     const barCalls: string[] = []
-    const props = (extra: Record<string, unknown> = {}) => ({ pageState: 'none', selectedCount: 0, blocked: '', busy: false, canMarkChecked: true, t: base.t,
-      onTogglePage: () => { barCalls.push('page') }, onMarkChecked: () => { barCalls.push('mark') }, onClear: () => { barCalls.push('clear') }, onSubmit: () => { barCalls.push('submit') }, ...extra })
+    const props = (extra: Record<string, unknown> = {}) => ({ selectedCount: 0, blocked: '', busy: false, canMarkChecked: true, t: base.t,
+      onMarkChecked: () => { barCalls.push('mark') }, onClear: () => { barCalls.push('clear') }, onSubmit: () => { barCalls.push('submit') }, ...extra })
     const bar = await mountPart('InventoryCheckSelectionBar', props())
     const submit = () => bar.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit')
-    assert.equal(bar.findAll(node => node.getAttribute('data-selection-action') === 'mark' || node.getAttribute('data-selection-action') === 'clear').length, 0, 'nothing to mark or clear until something is picked')
-    assert.equal(submit().getAttribute('aria-disabled'), 'true', 'Submit waits for a pick')
+    assert.equal(bar.findAll(node => node.getAttribute('data-check-select-all') !== null || node.getAttribute('type') === 'checkbox').length, 0, 'no select-all box')
+    assert.equal(bar.findAll(node => node.getAttribute('data-selection-action') === 'clear').length, 0, 'nothing to clear until something is answered')
+    assert.equal(submit().getAttribute('aria-disabled'), 'true', 'Submit waits for an answer')
     await bar.click(submit())
     assert.deepEqual(barCalls, [], 'a disabled Submit does nothing')
-    await bar.render(props({ pageState: 'some', selectedCount: 3 }))
-    assert.equal(bar.find(node => node.getAttribute('data-selected-count') !== null, 'count').textContent, '3 selected')
+    await bar.render(props({ selectedCount: 3 }))
+    assert.equal(bar.find(node => node.getAttribute('data-selected-count') !== null, 'count').textContent, '3 counted')
     assert.equal(submit().getAttribute('aria-disabled'), null, 'Submit is ready')
     assert.equal(submit().textContent.trim(), 'Submit', 'the main action keeps its word')
     for (const action of ['mark', 'clear']) {
@@ -244,8 +244,7 @@ const cases: Array<[string, () => Promise<void>]> = [
     await bar.click(bar.find(node => node.getAttribute('data-selection-action') === 'mark', 'mark'))
     await bar.click(bar.find(node => node.getAttribute('data-selection-action') === 'clear', 'clear'))
     await bar.click(submit())
-    await bar.call(bar.find(node => node.getAttribute('data-check-select-all') !== null, 'select all'), 'onChange', [{ target: { checked: true } }])
-    assert.deepEqual(barCalls, ['mark', 'clear', 'submit', 'page'])
+    assert.deepEqual(barCalls, ['mark', 'clear', 'submit'])
     await bar.render(props({ selectedCount: 2, blocked: 'Enter a count for every selected product.' }))
     assert.equal(submit().getAttribute('aria-disabled'), 'true', 'a blocked Submit is disabled')
     assert.equal(submit().getAttribute('title'), 'Enter a count for every selected product.', 'and says why')
@@ -257,9 +256,7 @@ const cases: Array<[string, () => Promise<void>]> = [
     await bar.render(props({ selectedCount: 2, submitLabel: 'Retry' }))
     assert.equal(submit().textContent.trim(), 'Retry', 'an unconfirmed attempt offers Retry in the same place')
     await bar.render(props({ selectedCount: 2, canMarkChecked: false }))
-    assert.equal(bar.findAll(node => node.getAttribute('data-selection-action') === 'mark').length, 0, 'no stock figure, nothing to mark as matching')
-    const all = bar.find(node => node.getAttribute('data-check-select-all') !== null, 'select all')
-    assert.equal((all as unknown as { indeterminate?: boolean }).indeterminate ?? false, false)
+    assert.equal(bar.findAll(node => node.getAttribute('data-selection-action') === 'mark').length, 0, 'no stock figure (or a count per received date), no whole-page mark')
   }],
 ]
 

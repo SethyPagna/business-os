@@ -11,7 +11,7 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp, type AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import { claimSyncProblemPresentation } from '../../utils/syncProblemLifecycle.ts'
 import { captureActorReadScope, captureActorWriteIdentity, isActorReadScopeCurrent, isActorWriteIdentityCurrent } from '../../api/actorReadScope.ts'
-import { captureInventoryCheckWriteScope, changeInventoryCheckSession, createInventoryCheckSession, decideInventoryCheckApproval, readInventoryCheckHistory, readInventoryCheckList, readInventoryCheckOverlay, readInventoryCheckProducts, readInventoryCheckSession, readInventoryCheckSessions, saveInventoryCheckObservation, submitInventoryCheckCounts, type InventoryCheckApproval, type InventoryCheckSession, type InventoryCheckSessionItem } from '../../api/inventoryChecksTransport.ts'
+import { captureInventoryCheckWriteScope, changeInventoryCheckSession, createInventoryCheckSession, decideInventoryCheckApproval, readInventoryCheckHistory, readInventoryCheckList, readInventoryCheckLots, readInventoryCheckOverlay, readInventoryCheckProducts, readInventoryCheckSession, readInventoryCheckSessions, saveInventoryCheckObservation, submitInventoryCheckCounts, type InventoryCheckApproval, type InventoryCheckSession, type InventoryCheckSessionItem } from '../../api/inventoryChecksTransport.ts'
 import type { QueryParams } from '../../api/query.ts'
 import { currentDataEpoch } from '../../api/dataEpoch.ts'
 import { peekProductSearch, primeProductSearch, getProductFilters } from '../../api/productReadTransport.ts'
@@ -36,7 +36,6 @@ import InventoryCheckDetailFloat from './InventoryCheckDetailFloat.tsx'
 import { fixStockOpening, fixStockRequestId, type FixStockOpening } from './inventoryCheckFixStock.ts'
 import { countTextFromLots, lotSubmissionLine, lotTotals, rowSetPlan, staleLotFigures, type SubmissionLotLine } from './inventoryCheckLots.ts'
 import { adjustStock } from '../../api/inventoryWriteTransport.ts'
-import { getProductBatches } from '../../api/batchesTransport.ts'
 import { stockConflictFigures, type StockWriteAnswer } from './stockAnswerPatch.ts'
 import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import { oldListDropsStatus, productsServerOf, productsWireParams, type ProductsServer } from './inventoryCheckProductsRequest.ts'
@@ -724,8 +723,6 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const selecting = listMode && access.canCheck
   const selectedIds = Object.keys(drafts).filter(id => drafts[id].selected)
   const selectable = listMode ? visibleProducts.filter(product => !product.is_group && product.checkable !== false) : []
-  const selectedOnPage = selectable.filter(product => drafts[String(product.id)]?.selected).length
-  const pageState: 'all' | 'some' | 'none' = selectedOnPage === 0 ? 'none' : selectedOnPage === selectable.length ? 'all' : 'some'
   function patchDraft(product: InventoryCheckProduct, change: (current: DraftEntry) => Partial<ListDraft>) {
     if (submitAttempt.current) return
     setDrafts(previous => {
@@ -738,9 +735,18 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     })
   }
   const draftHandlers = {
-    onToggle: (product: InventoryCheckProduct, selected: boolean) => patchDraft(product, () => ({ selected })),
     onCount: (product: InventoryCheckProduct, value: string) => patchDraft(product, current => ({ count: value, checked: false, selected: value.trim() !== '' ? true : current.selected })),
-    onChecked: (product: InventoryCheckProduct) => { if (finiteQuantity(product.quantity)) patchDraft(product, () => ({ count: String(product.quantity), checked: true, selected: true })) },
+    // "Matches stock" from the popover: every batch shown is filled with the stock it showed (a product with no batch, its total).
+    onMatches: (product: InventoryCheckProduct, rows?: InventoryCheckLotRow[]) => {
+      if (rows?.length) patchDraft(product, () => {
+        const lots = Object.fromEntries(rows.map(row => [String(row.batchId), { count: String(row.quantity), seen: row.quantity }]))
+        return { lots, count: countTextFromLots(lots), checked: false, selected: true }
+      })
+      else if (finiteQuantity(product.quantity)) patchDraft(product, () => ({ count: String(product.quantity), checked: true, selected: true, lots: undefined }))
+    },
+    // "Does not match": the entries are emptied and the row waits, picked, for the count the person found.
+    onDiffers: (product: InventoryCheckProduct) => patchDraft(product, () => ({ count: '', checked: false, selected: true, lots: undefined })),
+    onClear: (product: InventoryCheckProduct) => patchDraft(product, () => ({ count: '', checked: false, selected: false, note: '', lots: undefined })),
     onNote: (product: InventoryCheckProduct, value: string) => patchDraft(product, () => ({ note: value })),
     // A count typed on one received date (ic_lot_counts): the row's count is the sum of its dates.
     onLotCount: (product: InventoryCheckProduct, row: InventoryCheckLotRow, value: string) => patchDraft(product, current => {
@@ -750,27 +756,18 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       return { lots, count: countTextFromLots(lots), checked: false, selected: Object.keys(lots).length > 0 ? true : current.selected }
     }),
   }
-  function togglePage() {
+  // One tap for the whole page when the count is one total per product: every countable row without a count is answered "matches stock". Nothing is written until Submit.
+  function markPageChecked() {
     if (submitAttempt.current) return
-    const next = pageState !== 'all'
     setDrafts(previous => {
       const result = { ...previous }
       for (const product of selectable) {
-        const id = String(product.id)
-        const seen = finiteQuantity(product.quantity) ? product.quantity : null
-        const entry = result[id] ?? { selected: false, count: '', checked: false, note: '', name: product.name, seen }
-        const updated = { ...entry, selected: next, seen }
-        if (!updated.selected && updated.count === '' && updated.note === '') delete result[id]
-        else result[id] = updated
+        const id = String(product.id), seen = finiteQuantity(product.quantity) ? product.quantity : null
+        const entry = result[id]
+        if (seen !== null && (!entry || entry.count.trim() === '')) result[id] = { ...(entry ?? { note: '', name: product.name }), selected: true, count: String(seen), checked: true, seen, lots: undefined }
       }
       return result
     })
-  }
-  // "Mark checked" fills the stock figure the person looked at into every picked row that has no count yet.
-  function markSelectedChecked() {
-    if (submitAttempt.current) return
-    setDrafts(previous => Object.fromEntries(Object.entries(previous).map(([id, entry]) => [id,
-      entry.selected && entry.count.trim() === '' && entry.seen !== null ? { ...entry, count: String(entry.seen), checked: true } : entry])))
   }
   function clearSelection() {
     if (submitAttempt.current) return
@@ -790,10 +787,10 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   }, [datesOrphaned])
   const directSetOn = lotCountsOn && data?.capabilities?.directSet === true && canWriteToServer && !!branchId
   // Set one received date to the figure typed on it. The person confirms the figure before and after; the row (and nothing else) takes the writer's answer, so no page is read.
-  async function setLotFromRow(product: InventoryCheckProduct, row: InventoryCheckLotRow, text: string) {
+  async function setLotFromRow(product: InventoryCheckProduct, row: InventoryCheckLotRow, text: string): Promise<number | null> {
     const plan = rowSetPlan(row, text)
     const raw = wiredRaw.current
-    if (!plan || !raw || !current() || !directSetOn || inFlight.current || submitAttempt.current) return
+    if (!plan || !raw || !current() || !directSetOn || inFlight.current || submitAttempt.current) return null
     const id = Number(product.id)
     const confirmed = await askToConfirm({
       title: tr('inventory_check_set_title', 'Set stock to this count?'),
@@ -801,12 +798,14 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         { label: tr('inventory_check_set_before_after', 'Stock now → after'), value: `${plan.before} → ${plan.after}` }],
       confirmLabel: tr('inventory_check_set', 'Set'),
     })
-    if (!confirmed || !current() || inFlight.current) return
+    if (!confirmed || !current() || inFlight.current) return null
     inFlight.current = true; setBusy(true); setWriteError('')
+    let result: number | null = null
     try {
       const answer = await adjustStock({ type: 'set', setScope: 'lot', productId: id, branchId: Number(branchId), batchId: plan.batchId, quantity: plan.after, expectedLotQuantity: plan.before,
         reason: tr('inventory_check_fix_stock_reason', 'Inventory check'), client_request_id: fixStockRequestId(product.check_session_id, id) ?? createClientRequestId('inventory_set') }) as Partial<StockWriteAnswer> | null
-      if (!current() || !wiredRaw.current) return
+      if (!current() || !wiredRaw.current) return null
+      result = answer?.after?.lotQuantity ?? plan.after
       const next = patchWiredRaw(wiredRaw.current, { productId: id, branchId: Number(branchId), batchId: plan.batchId, after: answer?.after ?? { lotQuantity: plan.after, branchQuantity: Math.max(0, (product.quantity ?? 0) + plan.after - plan.before) } })
       wiredRaw.current = next
       setData(previous => wiredResult(next, previous))
@@ -823,12 +822,14 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         wiredRaw.current = next
         setData(previous => wiredResult(next, previous))
         setWriteError(`${tr('inventory_check_set_changed', 'Stock changed. Now:')} ${figures.lotQuantity}. ${tr('inventory_check_set_changed_hint', 'Check it and press Set again.')}`)
+        result = figures.lotQuantity
       } else if (current()) {
         // Each refusal says what it is (a waiting count, a disabled branch, maintenance); only an unknown failure is "not saved".
         const refusal = knownRefusal(cause)
         setWriteError(tr(refusal?.key ?? 'inventory_check_save_failed', refusal?.fallback ?? 'Check not saved. Try again.'))
       }
     } finally { inFlight.current = false; if (current()) setBusy(false) }
+    return result
   }
   function markIssueClosed(product: InventoryCheckProduct, quantity: number) {
     if (!current() || !wiredRaw.current) return
@@ -844,22 +845,12 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       return moved.summary && previous?.summary ? { ...moved, summary: { ...moved.summary, issue: Math.max(0, previous.summary.issue - 1), ok: previous.summary.ok + 1 } } : moved
     })
   }
-  // "More dates": the row's dates were cut at the plan's limit; one read of this product's dates at this branch fills them in.
-  async function moreDates(product: InventoryCheckProduct) {
-    const raw = wiredRaw.current
-    if (!raw || !branchId || !current()) return
-    try {
-      const answer = await getProductBatches(product.id, branchId)
-      if (!current() || !wiredRaw.current) return
-      const known = new Set((product.lot_rows ?? []).map(row => row.batchId))
-      // The read lists every active date of the product; one that holds nothing here and was not already on the row belongs to another branch and cannot be counted here.
-      const lots = Object.assign((answer.batches ?? []).filter(batch => (batch.is_active === 1 || (batch.is_active as unknown) === true) && (Number(batch.quantity) > 0 || known.has(Number(batch.id)))).map(batch => ({ id: batch.id, received_at: batch.received_at, expiry_date: batch.expiry_date, branches: [{ branch_id: Number(branchId), quantity: batch.quantity }] })), {})
-      const map = new Map(wiredRaw.current.lots); map.set(Number(product.id), lots)
-      const next = { ...wiredRaw.current, lots: map }
-      wiredRaw.current = next
-      setData(previous => wiredResult(next, previous))
-    } catch { if (current()) setWriteError(tr('inventory_check_load_failed', 'Inventory checks are unavailable. Reload to try again.')) }
-  }
+  // The popover of a row reads that one product's received dates (batches) at this branch when it opens: one request, never the page. A branch that is not chosen has no batches to read.
+  const loadLots = useCallback(async (product: InventoryCheckProduct, signal: AbortSignal) => {
+    const answer = await readInventoryCheckLots({ productId: product.id, branchId }, signal)
+    if (!current()) throw new Error('stale')
+    return answer
+  }, [branchId])
 
   async function submit() {
     if (!current() || !selecting || submitBlocked || inFlight.current || selectedIds.length === 0) return
@@ -1111,6 +1102,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       {lifecycleAttempt.current ? <RotateCcw className="h-5 w-5" aria-hidden="true" /> : session?.status === 'open' ? <Lock className="h-5 w-5" aria-hidden="true" /> : <Unlock className="h-5 w-5" aria-hidden="true" />}
     </IconAction> : null}
   </div>
+  // The page controls, drawn above the list and below it from the SAME state: one request per page step, the true total, no second fetch. Count sessions page exactly like products.
+  const pagerNode = (position: 'top' | 'bottom') => fresh ? <div data-inventory-check-pager={position} className="min-w-0"><fieldset disabled={controlsLocked} className="min-w-0" data-inventory-check-pager-lock><PaginationControls page={page} pageSize={pageSize} totalItems={(section === 'sessions' ? sessions?.total : data?.total) ?? 0} onPageChange={value => { if (!controlsLocked) { setPage(value); setScan(null) } }} onPageSizeChange={value => { if (!controlsLocked) { setPageSize(value); setPage(1); setScan(null) } }} t={t} compact /></fieldset></div> : null
   // The context bar: where the person is (the one branch, or the open session) and what they can do from here.
   const contextBar = <div className="flex min-w-0 flex-1 items-center gap-1" data-inventory-check-context>
     {sessionId ? sessionBar : <>
@@ -1146,11 +1139,12 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
                 </fieldset>
                 {contextBar}
               </div>
-              {selecting ? <InventoryCheckSelectionBar pageState={pageState} selectedCount={selectedIds.length} blocked={submitBlocked} busy={busy} canMarkChecked={access.fields.stock}
-                submitLabel={submitAttempt.current ? t('retry') : undefined} onTogglePage={togglePage} onMarkChecked={markSelectedChecked} onClear={clearSelection} onSubmit={() => { void submit() }} t={t} /> : null}
+              {selecting ? <InventoryCheckSelectionBar selectedCount={selectedIds.length} blocked={submitBlocked} busy={busy} canMarkChecked={access.fields.stock && !lotCountsOn}
+                submitLabel={submitAttempt.current ? t('retry') : undefined} onMarkChecked={markPageChecked} onClear={clearSelection} onSubmit={() => { void submit() }} t={t} /> : null}
               {sheetHeader}
             </>}
         </div>
+        {pagerNode('top')}
         {writeError ? <p role="alert" className="text-xs leading-relaxed text-red-700">{writeError}</p> : null}
         {wiredNow && fresh && changedIds.length ? <div role="status" className="flex items-center justify-between gap-2 text-xs leading-relaxed text-amber-800 dark:text-amber-200" data-inventory-check-changed-elsewhere>
           <span className="min-w-0 break-words">{tr('inventory_check_changed_elsewhere', 'Changed on another device. Tap to refresh.')} ({changedIds.length})</span>
@@ -1169,7 +1163,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
           </div>
           : listMode ? <InventoryCheckListRows products={visibleProducts} drafts={drafts} selecting={selecting} locked={busy || !!submitAttempt.current} canViewStock={access.fields.stock} canViewCounts={canViewCounts}
             {...(access.fields.price ? { priceText, promotionRules: data?.promotionRules, exchangeRate } : {})} adornments={issueChips} focusRequest={focusRequest} onCountEntered={onCommitted} t={t} onOpenProduct={setDetail} {...draftHandlers}
-            {...(lotCountsOn ? { lotCounts: true, onMoreDates: moreDates, onLotSet: directSetOn ? setLotFromRow : undefined } : {})} />
+            {...(lotCountsOn && branchId ? { lotCounts: true, loadLots, onLotSet: directSetOn ? setLotFromRow : undefined } : {})} />
           : <InventoryCheckRows key={scopeKey} products={visibleProducts} observations={observations} errors={rowErrors} adornments={{ ...adornments, ...issueChips }} frozen={frozen} pending={Object.fromEntries(visibleProducts.map(product => [String(product.id), savingId === Number(product.id)]))} locked={busy}
             canCheck={canCheckRows} inSession={!!sessionId} sheetHeader="external" reasonSuggestions={savedReasons.map(reason => reason.label)} focusRequest={focusRequest} onCommitted={onCommitted}
             {...rowProps} onEditingChange={onEditingChange} onSave={save} />}
@@ -1182,7 +1176,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
           {(section === 'sessions' ? sessionFiltersActive : filtersActive) ? <button type="button" className="btn-secondary inline-flex min-h-10 items-center gap-1 px-3 text-xs" disabled={controlsLocked} onClick={clearFilters}><X className="h-4 w-4" aria-hidden="true" />{t('clear')}</button>
             : section === 'sessions' && access.canCheck ? <button type="button" className="btn-primary inline-flex min-h-10 items-center gap-1 px-3 text-xs" title={tr('inventory_check_count_tooltip', 'Count the products listed on this page')} onClick={() => setSection('products')}><Play className="h-4 w-4" aria-hidden="true" />{tr('inventory_check_start_page', 'Count')}</button> : null}
         </div> : null}
-        {fresh ? <fieldset disabled={controlsLocked} className="min-w-0" data-inventory-check-pager-lock><PaginationControls page={page} pageSize={pageSize} totalItems={(section === 'sessions' ? sessions?.total : data?.total) ?? 0} onPageChange={value => { if (!controlsLocked) { setPage(value); setScan(null) } }} onPageSizeChange={value => { if (!controlsLocked) { setPageSize(value); setPage(1); setScan(null) } }} t={t} compact /></fieldset> : null}
+        {pagerNode('bottom')}
         {detail && fresh ? <InventoryCheckDetailFloat product={detail} observation={observations[String(detail.id)]} unavailable={unavailableIds.has(String(detail.id))} fields={access.fields} priceText={priceText} promotionRules={data?.promotionRules} exchangeRate={exchangeRate} t={t} onClose={() => setDetail(null)}
           onFixStock={fixOpening ? () => openFixStock(fixOpening) : undefined}
           onSales={offered && rights.can('sales', 'view') ? () => { queueReportsFocus(productSalesFocus(detail.name)); navigateTo('sales', hubAnchor('sales', 'reports')) } : undefined} /> : null}

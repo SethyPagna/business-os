@@ -58,7 +58,10 @@ export type InventoryCheckProduct = {
 }
 
 /** One received date held at the listed branch (ic_lot_counts): the figure a count per date is typed against. */
-export type InventoryCheckLotRow = { batchId: number; receivedAt: string | null; expiry: string | null; quantity: number }
+export type InventoryCheckLotRow = { batchId: number; receivedAt: string | null; expiry: string | null; quantity: number; /** The identity printed on the batch (read on demand by the count popover). */ lotCode?: string | null; batchNumber?: number | null }
+
+/** The answer of GET /api/inventory-checks/lots: one product's batches at one branch. `more`: the product holds more batches than one count may carry. */
+export type InventoryCheckLotsAnswer = { productId: number; branchId: number; lots: InventoryCheckLotRow[]; more?: true }
 
 export type InventoryCheckListStatus = 'not_checked' | 'in_check' | 'ok' | 'issue'
 

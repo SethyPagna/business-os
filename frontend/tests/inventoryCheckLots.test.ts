@@ -93,66 +93,46 @@ assert.equal(patchWiredRaw(raw, { productId: 99, branchId: 1, batchId: 7, after:
   assert.equal(wiredListParams({ sortBy: 'checked', checkState: 'not_checked' }).sortBy, 'created', 'nor with a status that has no checked list')
 }
 
-// ---- the mounted row ----------------------------------------------------------------------------------------------------------------------------------------------
+// ---- the mounted row: the page never lists received dates by itself; they live in the status popover (read on demand, see inventoryCheckCountPopover.test.ts) -------------------------
 const rowProduct: InventoryCheckProduct = { id: 5, name: 'Serum', quantity: 8, check_status: 'not_checked', lot_rows: product.lot_rows }
-type Call = [string, ...unknown[]]
-const calls2: Call[] = []
-const base = {
-  products: [rowProduct], drafts: { '5': { selected: true, count: '', checked: false, note: '', lots: {} } }, selecting: true, canViewStock: true, canViewCounts: true, t: (key: string) => key,
-  onOpenProduct: () => {}, onToggle: () => {}, onCount: () => {}, onChecked: () => {}, onNote: () => {},
-  lotCounts: true,
-  onLotCount: (p: InventoryCheckProduct, lot: { batchId: number }, value: string) => { calls2.push(['lot', p.id, lot.batchId, value]) },
-  onLotSet: (p: InventoryCheckProduct, lot: { batchId: number }, value: string) => { calls2.push(['set', p.id, lot.batchId, value]) },
-}
 const harness = await createHarness({})
 const live: MountedSurface[] = []
+const loadLots = async () => ({ productId: 5, branchId: 1, lots: [{ batchId: 7, receivedAt: '2026-10-01', expiry: null, quantity: 5 }, { batchId: 9, receivedAt: '2026-10-09', expiry: null, quantity: 3 }] })
+const base = {
+  products: [rowProduct], drafts: { '5': { selected: true, count: '', checked: false, note: '', lots: {} } }, selecting: true, canViewStock: true, canViewCounts: true, t: (key: string) => key,
+  onOpenProduct: () => {}, onCount: () => {}, onNote: () => {}, lotCounts: true, loadLots, onLotCount: () => {}, onMatches: () => {}, onDiffers: () => {}, onClear: () => {},
+}
 const mount = async (props: Record<string, unknown> = {}) => { for (const old of live.splice(0)) await old.unmount(); const s = await harness.mount({ component: 'components/inventory/InventoryCheckListRows.tsx', props: { ...base, ...props }, app: {}, doubles: {} }); live.push(s); return s }
-const lots = (s: MountedSurface) => s.findAll(node => node.getAttribute('data-check-lot') !== null)
-const flat = (node: MemoryNode | undefined) => (node?.textContent ?? '').replace(/\s+/g, ' ').trim()
+const lots = (s: MountedSurface) => s.findAll(node => node.getAttribute('data-check-lot') !== null || node.getAttribute('data-popover-lot') !== null)
 const readOnly = (node: MemoryNode) => ['readOnly', 'readonly'].some(name => { const value = node.getAttribute(name); return value !== null && value !== 'false' })
+const openPopover = async (s: MountedSurface) => { await s.click(s.find(node => node.getAttribute('data-check-action') === 'status', 'status button')) }
 const failures: string[] = []
 const cases: Array<[string, () => Promise<void>]> = [
-  ['a picked row lists its received dates with a count box on each; nothing else is added', async () => {
+  ['a picked row is one line: the received dates it holds (even when the page already carries them) are not drawn until the popover opens', async () => {
     const s = await mount()
-    const dates = lots(s)
-    assert.deepEqual(dates.map(node => node.getAttribute('data-check-lot')), ['7', '9'])
-    assert.ok(flat(dates[0]).includes('inventory_check_lot_received') || flat(dates[0]).includes('Received'), 'the date is named in words')
-    assert.equal(s.findAll(node => node.getAttribute('data-check-action') === 'set-lot').length, 0, 'no Set button until a figure that differs is typed')
-    const unpicked = await mount({ drafts: {} })
-    assert.equal(lots(unpicked).length, 0, 'a row that is not picked stays a single line')
+    assert.equal(lots(s).length, 0, 'no date list on the row')
+    await openPopover(s)
+    assert.deepEqual(lots(s).map(node => node.getAttribute('data-popover-lot')), ['7', '9'], 'the popover lists them, a count box on each')
   }],
-  ['typing on a date reports that date; with dates typed the row count is read only', async () => {
-    const s = await mount()
-    const input = s.find(node => node.getAttribute('data-check-lot-count') !== null && node.parentNode === lots(s)[0], 'date input')
-    await s.call(input, 'onChange', [{ target: { value: '4' } }])
-    assert.deepEqual(calls2.pop(), ['lot', 5, 7, '4'])
-    const typedState = await mount({ drafts: { '5': { selected: true, count: '4', checked: false, note: '', lots: { '7': { count: '4', seen: 5 } } } } })
-    const rowCount = typedState.find(node => node.getAttribute('data-check-count') !== null, 'row count')
-    assert.equal(readOnly(rowCount), true, 'the sum is shown, not typed over')
+  ['after a reload each batch still shows what the latest count typed on it (counted per date comes back from the overlay); a viewer who may not read counts sees none', async () => {
+    const withLines = { ...rowProduct, check_status: 'issue', check_lines: [{ batch_id: 7, scope: 'lot', counted: 4, seen: 5 }, { batch_id: 9, scope: 'lot', counted: 3, seen: 3 }] } as InventoryCheckProduct
+    const s = await mount({ products: [withLines] })
+    await openPopover(s)
+    const recorded = s.findAll(node => node.getAttribute('data-popover-lot-recorded') !== null).map(node => node.textContent.replace(/\s+/g, ' ').trim())
+    assert.equal(recorded.length, 2, 'both batches show their counted figure')
+    assert.deepEqual(recorded.map(text => text.split(' ').pop()), ['4', '3'])
+    const blind = await mount({ products: [withLines], canViewCounts: false })
+    await openPopover(blind)
+    assert.equal(lots(blind).length, 2)
+    assert.equal(blind.findAll(node => node.getAttribute('data-popover-lot-recorded') !== null).length, 0, 'no counted figure without the right to read counts')
   }],
-  ['a differing figure offers Set only to someone allowed (onLotSet); a blind or non-adjusting viewer gets the count box alone', async () => {
-    const draft = { '5': { selected: true, count: '4', checked: false, note: '', lots: { '7': { count: '4', seen: 5 } } } }
-    const withSet = await mount({ drafts: draft })
-    const button = withSet.find(node => node.getAttribute('data-check-action') === 'set-lot', 'Set button')
-    await withSet.click(button)
-    assert.deepEqual(calls2.pop(), ['set', 5, 7, '4'])
-    const without = await mount({ drafts: draft, onLotSet: undefined })
-    assert.equal(without.findAll(node => node.getAttribute('data-check-action') === 'set-lot').length, 0)
-    const blind = await mount({ drafts: draft, canViewStock: false })
-    assert.equal(lots(blind).length, 0, 'a viewer who may not see stock sees no dates')
-  }],
-  ['after a reload the dates still show what the latest count typed on each (counted per date comes back from the overlay)', async () => {
-    const s = await mount({ products: [{ ...rowProduct, check_status: 'issue', check_lines: [{ batch_id: 7, scope: 'lot', counted: 4, seen: 5 }, { batch_id: 9, scope: 'lot', counted: 3, seen: 3 }] }] })
-    const recorded = s.findAll(node => node.getAttribute('data-check-lot-recorded') !== null).map(node => node.textContent.replace(/\s+/g, ' ').trim())
-    assert.deepEqual(recorded, ['inventory_check_counted 4', 'inventory_check_counted 3'].map(text => text.replace('inventory_check_counted', recorded[0].startsWith('Counted') ? 'Counted' : 'inventory_check_counted')), 'both dates show their counted figure')
-    const blind = await mount({ products: [{ ...rowProduct, check_lines: [{ batch_id: 7, scope: 'lot', counted: 4 }] }], canViewCounts: false })
-    assert.equal(blind.findAll(node => node.getAttribute('data-check-lot-recorded') !== null).length, 0, 'a viewer who may not read counts sees none')
-  }],
-  ['with the switch off the row is exactly the older row (no date list, no extra input)', async () => {
-    const off = await mount({ lotCounts: false, onLotCount: undefined, onLotSet: undefined })
-    assert.equal(lots(off).length, 0)
-    const rowCount = off.find(node => node.getAttribute('data-check-count') !== null, 'row count')
-    assert.equal(readOnly(rowCount), false, 'the count box is typed in as before')
+  ['with the dates typed the row count is read only (the sum); with the switch off the row is exactly the older row (no popover batch list, a plain count box)', async () => {
+    const typed = await mount({ drafts: { '5': { selected: true, count: '4', checked: false, note: '', lots: { '7': { count: '4', seen: 5 } } } } })
+    assert.equal(readOnly(typed.find(node => node.getAttribute('data-check-count') !== null, 'row count')), true, 'the sum is shown, not typed over')
+    const off = await mount({ lotCounts: false, loadLots: undefined, onLotCount: undefined, onLotSet: undefined })
+    assert.equal(readOnly(off.find(node => node.getAttribute('data-check-count') !== null, 'row count')), false, 'the count box is typed in as before')
+    await openPopover(off)
+    assert.equal(lots(off).length, 0, 'no batch list')
   }],
 ]
 try {

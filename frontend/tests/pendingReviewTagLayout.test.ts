@@ -267,7 +267,8 @@ function measureInPage(): Measured {
     const r = el.getBoundingClientRect()
     return { left: round(r.left), top: round(r.top), right: round(r.right), bottom: round(r.bottom), width: round(r.width), height: round(r.height) }
   }
-  const isTag = (el: Element) => el.matches('[role="img"][aria-label]')
+  // The Inventory Check row's own status icon (an icon with a name, 14 Nov) is not the mini tag: only the gutter mark is.
+  const isTag = (el: Element) => el.matches('[role="img"][aria-label]:not([data-check-status-kind])')
   const boxes: Array<[string, Box]> = []
   const tags: Measured['tags'] = []
   for (const fixture of Array.from(document.querySelectorAll('[data-fixture]'))) {
@@ -311,7 +312,8 @@ function measureInPage(): Measured {
         })
         continue
       }
-      if (el.closest('[role="img"][aria-label], [data-pending-review-count]')) continue
+      // (the Inventory Check row's status icon is judged by its own box below: a waiting count swaps it for the hourglass, by design, so the glyph inside it is not an element that must match)
+      if (el.closest('[role="img"][aria-label], [data-pending-review-count]') || el.parentElement?.closest('[data-check-status-kind]')) continue
       boxes.push([`${name}#${index++}:${el.tagName.toLowerCase()}`, box(el)])
     }
   }

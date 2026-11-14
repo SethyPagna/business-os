@@ -8185,5 +8185,20 @@
   "inventory_check_error_self_approval": "You submitted this count, so another approver must approve it.",
   "inventory_check_discard_counts_title": "Discard counts not submitted?",
   "inventory_check_discard_counts_message": "The products you picked and the counts you typed will be cleared.",
-  "inventoryCheckCountPending": "Set is blocked while a count of this product is waiting for approval. Approve or reject that count first."
+  "inventoryCheckCountPending": "Set is blocked while a count of this product is waiting for approval. Approve or reject that count first.",
+  "inventory_check_status_draft_ok": "Matches stock · not submitted yet",
+  "inventory_check_status_draft_issue": "Differs from stock · not submitted yet",
+  "inventory_check_status_draft_empty": "Enter the count · not submitted yet",
+  "inventory_check_status_draft_counted": "Counted · not submitted yet",
+  "inventory_check_open_count": "Check and count: {name}",
+  "inventory_check_popover_total": "Total",
+  "inventory_check_popover_matches": "Matches stock",
+  "inventory_check_popover_differs": "Does not match: enter what you counted",
+  "inventory_check_popover_clear": "Clear this count",
+  "inventory_check_popover_loading": "Loading received dates…",
+  "inventory_check_popover_failed": "Received dates could not be loaded. Close and open again.",
+  "inventory_check_popover_more": "This product holds more received dates than one count can carry. Count the ones listed.",
+  "inventory_check_lot_dates": "Received dates",
+  "inventory_check_counted_rows": "{count} counted",
+  "inventory_check_mark_page_checked": "Mark every product on this page as matching stock"
 }

@@ -4,7 +4,7 @@ import {
   assertActorReadScope, assertActorWriteIdentity, captureActorReadScope, captureActorWriteIdentity,
   type ActorReadScope, type ActorWriteIdentity,
 } from './actorReadScope.ts'
-import type { InventoryCheckObservation, InventoryCheckPatch, InventoryCheckProduct } from '../types/inventoryChecks.ts'
+import type { InventoryCheckLotsAnswer, InventoryCheckObservation, InventoryCheckPatch, InventoryCheckProduct } from '../types/inventoryChecks.ts'
 
 /** What approving a line wrote (or, for a line already at its figure, found): ordinary stock before and after, and the target. */
 export type InventoryCheckApprovalLine = { before: number; target: number; after: number; at: string; settled?: true
@@ -168,6 +168,11 @@ export function readInventoryCheckList<T>(params: QueryParams, signal?: AbortSig
 /** ic_wired: the users' count entries and last stock change for the visible ids of one branch (lots=1 also brings the received dates the shared rows lack). */
 export function readInventoryCheckOverlay<T>(params: { branchId: number | string; ids: Array<number | string>; lots?: boolean }, signal?: AbortSignal): Promise<T> {
   return apiFetch('GET', appendQuery(`${base}/overlay`, buildQueryString({ branchId: params.branchId, ids: params.ids.join(','), ...(params.lots ? { lots: 1 } : {}) })), undefined, undefined, { signal })
+}
+
+/** ic_lot_counts: ONE product's batches at ONE branch, read only when its count popover opens (never for a page of rows). Answers 404 while the switch is OFF. */
+export function readInventoryCheckLots(params: { productId: number | string; branchId: number | string }, signal?: AbortSignal): Promise<InventoryCheckLotsAnswer> {
+  return apiFetch('GET', appendQuery(`${base}/lots`, buildQueryString({ productId: params.productId, branchId: params.branchId })), undefined, undefined, { signal })
 }
 
 export function readInventoryCheckSessions(params: InventoryCheckSessionsParams = {}, signal?: AbortSignal): Promise<{ items: InventoryCheckSession[]; total: number; page: number; pageSize: number; approvals?: boolean }> {

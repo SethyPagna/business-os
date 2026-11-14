@@ -5,7 +5,7 @@ import * as dirtyWork from '../src/utils/dirtyWork.ts'
 import { __resetApiHealthForTests, __resetApiWriteDedupeForTests, apiFetch, setSyncServerUrl } from '../src/api/http.ts'
 import { appendQuery, buildQueryString, type QueryParams } from '../src/api/query.ts'
 
-// INV-B S5: the mounted Inventory page with ic_lot_counts: the status choice in one scrolling row, counts typed per received date, and a Set straight from the row
+// INV-B S5 (14 Nov: counted in the status icon's popover, batches read on demand): the mounted Inventory page with ic_lot_counts: the status choice in one scrolling row, counts typed per received date, and a Set straight from the row
 // (confirm with before and after, the row patched from the answer, no page read; a stale figure is shown and nothing is written).
 const FIELDS = { inventory_check_show_price: true, inventory_check_show_barcode: true, inventory_check_show_category: true, inventory_check_show_brand: true, inventory_check_show_stock: true, inventory_check_show_received: true }
 const harness = await createHarness({ observe: ['api/actorReadScope.ts', 'utils/dirtyWork.ts', 'api/dataEpoch.ts', 'api/productSearchIndex.ts'] })
@@ -26,8 +26,9 @@ const productRow = (id: number, name: string, quantity: number | undefined): Row
 let seedOverlay: Map<number, Record<string, unknown>> | null = null
 const adjusts: Array<Record<string, unknown>> = []
 const submissions: Array<Record<string, unknown>> = []
-const batchReads: Array<[number, number]> = []
-let moreBatches: Array<Record<string, unknown>> = []
+/** The on-demand batch reads the count popover made: [productId, branchId]. */
+const lotReads: Array<[number, number]> = []
+let lotsAnswer: ((productId: number) => Record<string, unknown>) | null = null
 let submitAnswer: (input: Record<string, unknown>) => unknown = () => ({ item: { id: 'session-new' }, receipt: {}, created: true })
 /** The error the page really receives for a 400: built by the real apiFetch from a stubbed network answer, not by hand (it carries the code, never the parameter name). */
 async function realRefusal(body: Record<string, unknown>): Promise<Error> {
@@ -72,7 +73,6 @@ const doubles = {
     primeProductSearch: (query: string, payload: unknown) => { held.set(query, payload) },
     getProductFilters: async () => ({ brands: [], categories: [] }),
   },
-  'api/batchesTransport.ts': { getProductBatches: async (productId: number, branchId: number) => { batchReads.push([productId, branchId]); return { batches: moreBatches } } },
   'api/inventoryWriteTransport.ts': { adjustStock: async (payload: Record<string, unknown>) => { adjusts.push(payload); return adjustAnswer(payload) } },
   'api/inventoryChecksTransport.ts': {
     submitInventoryCheckCounts: async (_scope: unknown, input: Record<string, unknown>) => { submissions.push(input); return submitAnswer(input) },
@@ -85,6 +85,13 @@ const doubles = {
     readInventoryCheckOverlay: async (params: { branchId: number | string; ids: Array<number | string>; lots?: boolean }) => {
       overlays.push(new URL(appendQuery('/api/inventory-checks/overlay', buildQueryString({ branchId: params.branchId, ids: params.ids.join(','), ...(params.lots ? { lots: 1 } : {}) })), 'https://admin.example.test').searchParams)
       return { wired: true, branchId: Number(params.branchId), items: params.ids.map(id => overlayEntries.get(Number(id)) ?? { product_id: Number(id), last_change_at: null }) }
+    },
+    // The popover's one request per opened product (GET /api/inventory-checks/lots): the batches the row's list answer carries stand in for what the server would answer.
+    readInventoryCheckLots: async (params: { productId: number | string; branchId: number | string }) => {
+      lotReads.push([Number(params.productId), Number(params.branchId)])
+      if (lotsAnswer) return lotsAnswer(Number(params.productId))
+      const lots = Number(params.productId) === 12 ? [{ batchId: 7, receivedAt: '2026-10-01', expiry: null, quantity: 5 }, { batchId: 9, receivedAt: '2026-10-09', expiry: null, quantity: 3 }] : []
+      return { productId: Number(params.productId), branchId: Number(params.branchId), lots }
     },
     readInventoryCheckProducts: async () => { throw new Error('the older list must not be asked while ic_wired is on') },
     readInventoryCheckSessions: async () => ({ items: [], total: 0, page: 1, pageSize: 20 }),
@@ -105,7 +112,14 @@ const answerOf = (summary = { ok: 2, issue: 1, pending: 1, not_checked: 5, total
 const exact = (surface: Awaited<ReturnType<typeof mount>>, text: string) => surface.findAll(node => node.tagName === 'BUTTON' && node.textContent === text)
 const inside = (surface: Awaited<ReturnType<typeof mount>>, attribute: string) => surface.find(node => node.getAttribute(attribute) !== null, attribute)
 const rowOf = (surface: Awaited<ReturnType<typeof mount>>, id: string) => surface.find(node => node.getAttribute('data-inventory-check-row') === id, 'row ' + id)
-const dateInput = (surface: Awaited<ReturnType<typeof mount>>, batch: number) => surface.find(node => node.getAttribute('data-check-lot-count') !== null && node.parentNode?.getAttribute('data-check-lot') === String(batch), `date ${batch}`)
+// 14 Nov: the status icon of a row opens the count popover, which reads that product's batches (one request) and holds a count box per batch.
+const statusButton = (surface: Awaited<ReturnType<typeof mount>>, id: string) => surface.find(node => node.getAttribute('data-check-action') === 'status' && rowOf(surface, id).contains(node), 'status button ' + id)
+const openCount = async (surface: Awaited<ReturnType<typeof mount>>, id: string) => { await surface.click(statusButton(surface, id)); await new Promise(resolve => setTimeout(resolve, 20)) }
+const closeCount = async (surface: Awaited<ReturnType<typeof mount>>) => { await surface.click(surface.find(node => node.getAttribute('data-popover-action') === 'close', 'popover close')) }
+const dateInput = (surface: Awaited<ReturnType<typeof mount>>, batch: number) => surface.find(node => node.getAttribute('data-popover-lot-count') === String(batch), `date ${batch}`)
+const rowCount = (surface: Awaited<ReturnType<typeof mount>>, id: string) => surface.find(node => node.getAttribute('data-check-count') !== null && rowOf(surface, id).contains(node), 'row count ' + id) as unknown as { value: string; getAttribute: (name: string) => string | null }
+const setButton = (surface: Awaited<ReturnType<typeof mount>>) => surface.find(node => node.getAttribute('data-popover-action') === 'set-lot', 'Set button')
+const lotLine = (surface: Awaited<ReturnType<typeof mount>>, batch: number) => surface.find(node => node.getAttribute('data-popover-lot') === String(batch), `lot ${batch}`)
 
 try {
   // ---- the status choice: one row (the shared chip rail), every status with its count, a tap filters ----
@@ -121,39 +135,56 @@ try {
     assert.ok(lists.length > before && lists.at(-1)!.get('checkState') === 'issue', 'a tap on a status asks the list for it')
     await surface.unmount()
   }
-  // ---- a row picked: its received dates, a count on each; Set from a date confirms before and after, patches the row, reads no page ----
+  // ---- the page reads nothing for batches: drawing the list asks for none; opening a row asks for that one product's, in one request ----
   {
-    listAnswer = () => answerOf(); adjusts.length = 0
+    listAnswer = () => answerOf(); lotReads.length = 0
     const surface = await mount()
-    assert.equal(surface.findAll(node => node.getAttribute('data-check-lot') !== null).length, 0, 'a row not picked is one line')
-    await surface.call(inside(surface, 'data-check-select'), 'onChange', [{ target: { checked: true } }])
-    assert.deepEqual(surface.findAll(node => node.getAttribute('data-check-lot') !== null).map(node => node.getAttribute('data-check-lot')), ['7', '9'], 'the picked row shows the dates it holds')
+    assert.deepEqual(lotReads, [], 'no batch is read for the page')
+    assert.equal(surface.findAll(node => node.getAttribute('data-popover-lot') !== null).length, 0, 'and no batch line is drawn')
+    assert.equal(surface.findAll(node => node.getAttribute('data-selected') !== null).length, 0, 'nothing is ticked by default')
+    await openCount(surface, '12')
+    assert.deepEqual(lotReads, [[12, 1]], 'opening the row reads that product at that branch, once')
+    assert.deepEqual(surface.findAll(node => node.getAttribute('data-popover-lot') !== null).map(node => node.getAttribute('data-popover-lot')), ['7', '9'], 'the popover shows the batches it holds')
+    await surface.unmount()
+  }
+  // ---- a row counted per batch: a count on each, the row total is the sum; Set from a batch confirms before and after, patches the row, reads no page ----
+  {
+    listAnswer = () => answerOf(); adjusts.length = 0; lotReads.length = 0
+    const surface = await mount()
+    await openCount(surface, '12')
     await surface.type(dateInput(surface, 7), '4')
-    assert.equal((inside(surface, 'data-check-count') as unknown as { value: string }).value, '4', 'the row count is the sum of its dates')
+    assert.equal(rowCount(surface, '12').value, '4', 'the row count is the sum of its batches')
+    assert.equal(statusButton(surface, '12').getAttribute('data-check-status-kind'), 'draft_issue', 'the icon shows the draft: one short')
     const lists0 = lists.length, overlays0 = overlays.length
     adjustAnswer = payload => ({ productId: 12, branchId: 1, batchId: payload.batchId, before: { lotQuantity: 5, branchQuantity: 8 }, after: { lotQuantity: 4, branchQuantity: 7 } })
-    await surface.click(inside(surface, 'data-check-action') && surface.find(node => node.getAttribute('data-check-action') === 'set-lot', 'Set button'))
+    await surface.click(setButton(surface))
     assert.equal(adjusts.length, 0, 'nothing is written until it is confirmed')
     const review = surface.find(node => node.tagName === 'DL', 'review').textContent
     assert.ok(review.includes('5 → 4'), 'the review shows the stock before and after: ' + review)
     await surface.click(exact(surface, 'Cancel').at(-1)!)
     assert.equal(adjusts.length, 0, 'Cancel writes nothing')
-    await surface.click(surface.find(node => node.getAttribute('data-check-action') === 'set-lot', 'Set button'))
+    await surface.click(setButton(surface))
     await surface.click(exact(surface, 'Set').at(-1)!)
+    await new Promise(resolve => setTimeout(resolve, 20))
     assert.equal(adjusts.length, 1)
     assert.deepEqual({ ...adjusts[0], client_request_id: String(adjusts[0].client_request_id).startsWith('inventory_set') }, { type: 'set', setScope: 'lot', productId: 12, branchId: 1, batchId: 7, quantity: 4, expectedLotQuantity: 5, reason: 'Inventory check', client_request_id: true })
-    assert.equal(lists.length, lists0, 'a Set reads no list page'); assert.equal(overlays.length, overlays0, 'and no overlay')
-    const dates = surface.findAll(node => node.getAttribute('data-check-lot') === '7')[0].textContent
-    assert.ok(dates.includes('4'), 'the row shows the writer\'s figure')
+    assert.equal(lists.length, lists0, 'a Set reads no list page'); assert.equal(overlays.length, overlays0, 'and no overlay'); assert.equal(lotReads.length, 1, 'and does not read the batches again')
+    assert.ok(lotLine(surface, 7).textContent.includes('4'), 'the batch shows the writer\'s figure')
     assert.equal((dateInput(surface, 7) as unknown as { value: string }).value, '', 'the typed figure is cleared once it is the stock')
-    // a stale figure: the writer refuses with what the stock is now; the row shows it, nothing is written, the person decides again
+    // a stale figure: the writer refuses with what the stock is now; the batch shows it, nothing is written, the person decides again with THAT figure
     await surface.type(dateInput(surface, 9), '1')
     adjustAnswer = () => { throw Object.assign(new Error('conflict'), { status: 409, code: 'stock_conflict', current: { lotQuantity: 6, branchQuantity: 10 } }) }
-    await surface.click(surface.find(node => node.getAttribute('data-check-action') === 'set-lot', 'Set button'))
+    await surface.click(setButton(surface))
     await surface.click(exact(surface, 'Set').at(-1)!)
+    await new Promise(resolve => setTimeout(resolve, 20))
     assert.equal(adjusts.length, 2); assert.equal(adjusts[1].expectedLotQuantity, 3)
     assert.ok(surface.findAll(node => node.getAttribute('role') === 'alert').some(node => node.textContent.includes('Stock changed. Now: 6')), 'the person is told what the stock is now')
-    assert.ok(surface.findAll(node => node.getAttribute('data-check-lot') === '9')[0].textContent.includes('6'), 'the date shows the figure the writer found')
+    assert.ok(lotLine(surface, 9).textContent.includes('6'), 'the batch shows the figure the writer found')
+    adjustAnswer = payload => ({ productId: 12, branchId: 1, batchId: payload.batchId, before: { lotQuantity: 6, branchQuantity: 10 }, after: { lotQuantity: 1, branchQuantity: 5 } })
+    await surface.click(setButton(surface))
+    await surface.click(exact(surface, 'Set').at(-1)!)
+    await new Promise(resolve => setTimeout(resolve, 20))
+    assert.equal(adjusts.length, 3); assert.equal(adjusts[2].expectedLotQuantity, 6, 'the second try is measured from the figure the refusal named, not the stale one (no refusal loop)')
     assert.equal(lists.length, lists0, 'a refusal reads no page either')
     await surface.unmount()
   }
@@ -162,9 +193,13 @@ try {
     adjusts.length = 0; submissions.length = 0
     listAnswer = () => listBody([withLots(productRow(12, 'Dated product', 8)), productRow(13, 'Plain product', 4)], { capabilities, summary: { ok: 0, issue: 0, not_checked: 2, total: 2 } })
     const surface = await mount()
-    for (const id of ['12', '13']) await surface.call(surface.find(node => node.getAttribute('data-check-select') !== null && rowOf(surface, id).contains(node), 'select ' + id), 'onChange', [{ target: { checked: true } }])
+    await openCount(surface, '12')
     await surface.type(dateInput(surface, 7), '4')
-    await surface.type(surface.find(node => node.getAttribute('data-check-count') !== null && node.getAttribute('aria-label') === 'Count: Plain product', 'plain count'), '4')
+    await closeCount(surface)
+    await openCount(surface, '13')
+    assert.equal(surface.findAll(node => node.getAttribute('data-popover-lot') !== null).length, 0, 'a product with no batch counts one total')
+    await surface.type(surface.find(node => node.getAttribute('data-popover-total') !== null && node.tagName === 'INPUT', 'plain total'), '4')
+    await closeCount(surface)
     await surface.click(surface.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit'))
     await surface.click(exact(surface, 'Submit').at(-1)!)
     assert.equal(submissions.length, 1, 'ONE request carries both kinds of row')
@@ -173,13 +208,30 @@ try {
     assert.deepEqual({ ...(submissions[0].lines as Array<Record<string, unknown>>)[1] }, { productId: 13, countedQuantity: 4, seenQuantity: 4, checked: false })
     await surface.unmount()
   }
+  // ---- "matches stock" on a batched product fills every batch with its own stock; one tick, one dated line per batch ----
+  {
+    submissions.length = 0
+    listAnswer = () => answerOf()
+    const surface = await mount()
+    await openCount(surface, '12')
+    await surface.click(surface.find(node => node.getAttribute('data-popover-action') === 'matches', 'matches'))
+    assert.equal((dateInput(surface, 7) as unknown as { value: string }).value, '5'); assert.equal((dateInput(surface, 9) as unknown as { value: string }).value, '3')
+    assert.equal(rowCount(surface, '12').value, '8')
+    assert.equal(statusButton(surface, '12').getAttribute('data-check-status-kind'), 'draft_ok', 'the green check, not submitted yet')
+    await closeCount(surface)
+    await surface.click(surface.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit'))
+    await surface.click(exact(surface, 'Submit').at(-1)!)
+    assert.deepEqual((submissions[0].lines as Array<{ lots: unknown }>)[0].lots, [{ batchId: 7, scope: 'lot', counted: 5, seen: 5 }, { batchId: 9, scope: 'lot', counted: 3, seen: 3 }])
+    await surface.unmount()
+  }
   // ---- audit G1b: the switch went OFF under an open tab: one re-read, then the same counts go as plain lines (no second refusal) ----
   {
     submissions.length = 0
     listAnswer = () => answerOf()
     const surface = await mount()
-    await surface.call(inside(surface, 'data-check-select'), 'onChange', [{ target: { checked: true } }])
+    await openCount(surface, '12')
     await surface.type(dateInput(surface, 7), '4')
+    await closeCount(surface)
     submitAnswer = () => { throw Object.assign(new Error('off'), { status: 409, code: 'inventory_check_lot_counts_off' }) }
     listAnswer = () => listBody([withLots(productRow(12, 'Dated product', 8))], { capabilities: { fixStock: true, approveCounts: false }, summary: { ok: 0, issue: 0, not_checked: 1, total: 1 } })
     const before = lists.length
@@ -187,12 +239,11 @@ try {
     await surface.click(exact(surface, 'Submit').at(-1)!)
     assert.equal(lists.length, before + 1, 'exactly one re-read of the list')
     assert.ok(surface.findAll(node => node.getAttribute('role') === 'alert').some(node => node.textContent.includes('turned off')), 'and the person is told why')
-    assert.equal(surface.findAll(node => node.getAttribute('data-check-lot') !== null).length, 0, 'the dates are gone with the switch')
     submitAnswer = () => ({ item: { id: 'session-new' }, receipt: {}, created: true })
-    const rowCount = () => inside(surface, 'data-check-count') as unknown as { value: string }
-    assert.equal(rowCount().value, '', 'the sum of the typed dates is NOT carried over as the product count (a partly dated product would read as a shortage)')
+    assert.equal(rowCount(surface, '12').value, '', 'the sum of the typed batches is NOT carried over as the product count (a partly dated product would read as a shortage)')
     assert.equal(surface.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit').getAttribute('aria-disabled'), 'true', 'Submit asks for a count first')
-    await surface.type(inside(surface, 'data-check-count'), '8')
+    assert.ok(rowCount(surface, '12').getAttribute('readonly') === null, 'with the switch off the row count is a plain input again')
+    await surface.type(rowCount(surface, '12') as never, '8')
     await surface.click(surface.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit'))
     await surface.click(exact(surface, 'Submit').at(-1)!)
     assert.equal(submissions.length, 2); assert.deepEqual({ ...(submissions[1].lines as Array<Record<string, unknown>>)[0] }, { productId: 12, countedQuantity: 8, seenQuantity: 8, checked: false }, 'the second send is the typed product count, plain: no refusal loop')
@@ -223,20 +274,20 @@ try {
     listAnswer = () => listBody([withLots(productRow(12, 'Dated product', 8)), productRow(13, 'Second product', 3)], { capabilities, summary: { ok: 0, issue: 1, not_checked: 1, total: 2 } })
     seedOverlay = new Map([[12, { product_id: 12, last_change_at: null, check: { state: 'issue', counted_quantity: 4, seen_quantity: 5, note: 'short', at: '2026-11-02T01:00:00.000Z', session_id: 'sess-1', revision: 1 } }]])
     const surface = await mount()
-    await surface.call(surface.find(node => node.getAttribute('data-check-select') !== null && rowOf(surface, '12').contains(node), 'select'), 'onChange', [{ target: { checked: true } }])
+    await openCount(surface, '12')
     await surface.type(dateInput(surface, 7), '4')
     const lists0 = lists.length
     adjustAnswer = () => { throw Object.assign(new Error('held'), { status: 409, code: 'inventory_check_count_pending' }) }
-    await surface.click(surface.find(node => node.getAttribute('data-check-action') === 'set-lot', 'Set'))
+    await surface.click(setButton(surface))
     await surface.click(exact(surface, 'Set').at(-1)!)
     assert.ok(surface.findAll(node => node.getAttribute('role') === 'alert').some(node => node.textContent.includes('waiting for approval')), 'G7: a held Set says a count is waiting, not "not saved"')
     assert.equal(lists.length, lists0)
     adjustAnswer = () => { throw Object.assign(new Error('branch'), { status: 409, code: 'branch_redirect_required' }) }
-    await surface.click(surface.find(node => node.getAttribute('data-check-action') === 'set-lot', 'Set'))
+    await surface.click(setButton(surface))
     await surface.click(exact(surface, 'Set').at(-1)!)
     assert.ok(surface.findAll(node => node.getAttribute('role') === 'alert').some(node => node.textContent.includes('disabled branch')), 'G7: a disabled branch has its own sentence')
     adjustAnswer = payload => ({ productId: 12, branchId: 1, batchId: payload.batchId, before: { lotQuantity: 5, branchQuantity: 8 }, after: { lotQuantity: 4, branchQuantity: 7 } })
-    await surface.click(surface.find(node => node.getAttribute('data-check-action') === 'set-lot', 'Set'))
+    await surface.click(setButton(surface))
     await surface.click(exact(surface, 'Set').at(-1)!)
     await new Promise(resolve => setTimeout(resolve, 40))
     sync({ channel: 'products', payload: { id: 12, action: 'update' } })
@@ -249,41 +300,30 @@ try {
     assert.equal(surface.findAll(node => node.getAttribute('data-check-list-status') === 'issue').length, 1, 'N2: without issue_closed the row stays an Issue (the writer did not close it: a date still differs, or a count waits)')
     await surface.type(dateInput(surface, 9), '2')
     adjustAnswer = payload => ({ productId: 12, branchId: 1, batchId: payload.batchId, before: { lotQuantity: 3, branchQuantity: 7 }, after: { lotQuantity: 2, branchQuantity: 6 }, issue_closed: true })
-    await surface.click(surface.find(node => node.getAttribute('data-check-action') === 'set-lot', 'Set'))
+    await surface.click(setButton(surface))
     await surface.click(exact(surface, 'Set').at(-1)!)
     await new Promise(resolve => setTimeout(resolve, 40))
     assert.equal(submissions.length, 0, 'still no second request')
     assert.equal(surface.findAll(node => node.getAttribute('data-check-list-status') === 'issue').length, 0, 'N2: the row leaves Issues because the writer said issue_closed, with nothing read')
     await surface.unmount()
   }
-  // ---- audit G10: dates cut at the plan limit load on request; units on no date show read-only ----
+  // ---- a product holding more batches than one count may carry says so; units on no received date show read-only ----
   {
-    batchReads.length = 0
-    listAnswer = () => listBody([{ ...withLots(productRow(12, 'Dated product', 11)), lots_more: true }], { capabilities, summary: { ok: 0, issue: 0, not_checked: 1, total: 1 } })
-    moreBatches = [{ id: 7, received_at: '2026-10-01', expiry_date: null, is_active: 1, quantity: 5 }, { id: 9, received_at: '2026-10-09', expiry_date: null, is_active: 1, quantity: 3 }, { id: 21, received_at: '2026-10-20', expiry_date: null, is_active: 1, quantity: 3 }]
+    lotReads.length = 0
+    listAnswer = () => listBody([productRow(12, 'Dated product', 11)], { capabilities, summary: { ok: 0, issue: 0, not_checked: 1, total: 1 } })
+    lotsAnswer = () => ({ productId: 12, branchId: 1, more: true, lots: [{ batchId: 7, receivedAt: '2026-10-01', expiry: null, quantity: 5 }, { batchId: 9, receivedAt: '2026-10-09', expiry: null, quantity: 3 }] })
     const surface = await mount()
-    await surface.call(inside(surface, 'data-check-select'), 'onChange', [{ target: { checked: true } }])
-    assert.equal(surface.findAll(node => node.getAttribute('data-check-lot') !== null).length, 2, 'the cut row shows the dates it has')
-    assert.equal(surface.findAll(node => node.getAttribute('data-check-unlotted') !== null).length, 0, 'and claims no unlotted remainder while it cannot know')
-    const lists0 = lists.length
-    await surface.click(surface.find(node => node.getAttribute('data-check-action') === 'more-dates', 'More dates'))
-    assert.deepEqual(batchReads.map(([product, branch]) => [Number(product), Number(branch)]), [[12, 1]], 'one read of this product at this branch')
-    assert.equal(lists.length, lists0, 'and no list page')
-    assert.deepEqual(surface.findAll(node => node.getAttribute('data-check-lot') !== null).map(node => node.getAttribute('data-check-lot')), ['7', '9', '21'], 'the third date is there to count')
+    await openCount(surface, '12')
+    assert.equal(surface.findAll(node => node.getAttribute('data-popover-more') !== null).length, 1, 'the popover says more received dates exist than one count can carry')
+    assert.equal(surface.findAll(node => node.getAttribute('data-popover-unlotted') !== null).length, 0, 'and claims no unlotted remainder while it cannot know')
+    assert.equal(lotReads.length, 1, 'one request, no "load more" round trip')
     await surface.unmount()
-    // N5: a date this branch never held (the read lists every active date of the product) is not offered
-    moreBatches = [...moreBatches, { id: 33, received_at: '2026-09-01', expiry_date: null, is_active: 1, quantity: 0 }]
-    listAnswer = () => listBody([{ ...withLots(productRow(12, 'Dated product', 11)), lots_more: true }], { capabilities, summary: { ok: 0, issue: 0, not_checked: 1, total: 1 } })
-    const other = await mount()
-    await other.call(inside(other, 'data-check-select'), 'onChange', [{ target: { checked: true } }])
-    await other.click(other.find(node => node.getAttribute('data-check-action') === 'more-dates', 'More dates'))
-    assert.deepEqual(other.findAll(node => node.getAttribute('data-check-lot') !== null).map(node => node.getAttribute('data-check-lot')), ['7', '9', '21'], 'N5: the other-branch date 33 (no stock row here) is not listed')
-    await other.unmount()
-    listAnswer = () => listBody([withLots(productRow(12, 'Dated product', 11))], { capabilities, summary: { ok: 0, issue: 0, not_checked: 1, total: 1 } })
+    lotsAnswer = () => ({ productId: 12, branchId: 1, lots: [{ batchId: 7, receivedAt: '2026-10-01', expiry: null, quantity: 5 }, { batchId: 9, receivedAt: '2026-10-09', expiry: null, quantity: 3 }] })
     const loose = await mount()
-    await loose.call(inside(loose, 'data-check-select'), 'onChange', [{ target: { checked: true } }])
-    assert.ok(inside(loose, 'data-check-unlotted').textContent.includes('3'), 'branch 11, dates 5 + 3: 3 units on no date')
+    await openCount(loose, '12')
+    assert.ok(inside(loose, 'data-popover-unlotted').textContent.includes('3'), 'branch 11, dates 5 + 3: 3 units on no date')
     await loose.unmount()
+    lotsAnswer = null
   }
   // ---- owner 9 Nov: the date order is offered once a status that has a checked list is chosen ----
   {
@@ -305,15 +345,18 @@ try {
     assert.equal(lists.at(-1)!.get('sortBy'), 'checked'); assert.equal(lists.at(-1)!.get('checkState'), 'ok')
     await surface.unmount()
   }
-  // ---- the switch off: the older row, no dates ----
+  // ---- the switch off: one total per product, and no batch is ever read ----
   {
+    lotReads.length = 0
     listAnswer = () => listBody([withLots(productRow(12, 'Dated product', 8))], { capabilities: { fixStock: true, approveCounts: false } })
     const surface = await mount()
-    await surface.call(inside(surface, 'data-check-select'), 'onChange', [{ target: { checked: true } }])
-    assert.equal(surface.findAll(node => node.getAttribute('data-check-lot') !== null).length, 0, 'no date list without lotCounts')
+    await openCount(surface, '12')
+    assert.equal(surface.findAll(node => node.getAttribute('data-popover-lot') !== null).length, 0, 'no batch list without lotCounts')
+    assert.equal(surface.findAll(node => node.getAttribute('data-popover-single') !== null).length, 1, 'one total instead')
+    assert.deepEqual(lotReads, [], 'and the batches were never asked for')
     await surface.unmount()
   }
-  console.log('inventoryChecksLotsPage passed: status rail, dates on a picked row, Set with review and no page read, stale figure, switch off')
+  console.log('inventoryChecksLotsPage passed: status rail, on-demand batches in the count popover, per-batch counts and sum, Set with review and no page read, stale figure, switch off')
 } finally {
   await harness.close()
 }
