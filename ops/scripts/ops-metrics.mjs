@@ -11,7 +11,7 @@ import {
 } from './ops-common.mjs'
 
 export const METRICS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'metrics')
-export const QUERY_NAMES = Object.freeze(['route-latency', 'route-errors', 'build-revisions', 'request-shapes', 'background-runs'])
+export const QUERY_NAMES = Object.freeze(['route-latency', 'route-errors', 'build-revisions', 'request-shapes', 'background-runs', 'report-atomic-shadow'])
 export const MIN_ROWS_FOR_P95 = 100
 export const MAX_DAYS = 7
 // The shop trades 08:00-20:00 in Cambodia (UTC+7); deploys fall outside. The cron runs every 5 and every 15 minutes
@@ -65,6 +65,38 @@ export function tradingWindows(from, days) {
   })
 }
 
+// Shadow comparisons decide a switch flip, so they are read over the whole Cambodia business day (17:00 UTC the day before to 17:00 UTC),
+// one query per day, so each row carries the business date it belongs to and a day with no comparisons is visible.
+export const PER_DAY_QUERIES = Object.freeze(['report-atomic-shadow'])
+export const SHADOW_FLIP = Object.freeze({ minDays: 3, maxUnjudgedShare: 0.1 })
+
+export function businessDayWindow(window) {
+  const midnight = Date.parse(`${window.businessDate}T00:00:00Z`)
+  return { businessDate: window.businessDate, start: utcStamp(new Date(midnight - 7 * 3_600_000)), end: utcStamp(new Date(midnight + 17 * 3_600_000)) }
+}
+
+export function summarizeShadow(rows, windows) {
+  const total = { comparisons: 0, match: 0, mismatch: 0, error: 0, writeBetween: 0, refused: 0 }
+  const compared = new Set()
+  for (const row of rows) {
+    const n = number(row.comparisons) ?? 0
+    const outcome = String(row.outcome)
+    total.comparisons += n
+    if (n > 0) compared.add(String(row.business_date))
+    if (outcome === 'match') total.match += n
+    else if (outcome === 'mismatch') total.mismatch += n
+    else if (outcome === 'write_between') total.writeBetween += n
+    else if (outcome.startsWith('refused')) total.refused += n
+    else total.error += n
+  }
+  const days = windows.length
+  const daysCompared = windows.filter((w) => compared.has(w.businessDate)).length
+  const unjudged = total.writeBetween + total.refused
+  const flipReady = days >= SHADOW_FLIP.minDays && daysCompared === days && total.mismatch === 0 && total.error === 0
+    && total.comparisons > 0 && unjudged <= SHADOW_FLIP.maxUnjudgedShare * total.comparisons
+  return { ...total, days, daysCompared, flipReady }
+}
+
 export function windowClause(windows) {
   return windows.map((w) => `(timestamp >= toDateTime('${w.start}') AND timestamp < toDateTime('${w.end}'))`).join(' OR ')
 }
@@ -94,7 +126,7 @@ const number = (value) => {
   return Number.isFinite(n) ? n : null
 }
 
-const rowsOf = (list) => list.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, /^(route|method|shape|cache|label|status|day)$/.test(key) ? String(value) : number(value)])))
+const rowsOf = (list) => list.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, /^(route|method|shape|cache|label|status|day|business_date|outcome|first_diff_path)$/.test(key) ? String(value) : number(value)])))
 
 const normalizeRoute = (route) => (String(route).length > 1 ? String(route).replace(/\/+$/, '') : String(route))
 
@@ -158,7 +190,21 @@ export async function readMetrics({ fetchImpl, accountId, token, from, days, rev
   const queries = {}
   const rows = {}
   for (const name of QUERY_NAMES) {
-    const sql = buildQuery(loadTemplate(name, dir), { windows, revision })
+    const template = loadTemplate(name, dir)
+    if (PER_DAY_QUERIES.includes(name)) {
+      rows[name] = []
+      queries[name] = { status: 200, ok: true, error: null, sql: [] }
+      for (const window of windows) {
+        const sql = buildQuery(template, { windows: [businessDayWindow(window)], revision })
+        const result = await queryAnalytics({ fetchImpl, accountId, token, sql })
+        queries[name].sql.push(sql)
+        if (!result.ok) Object.assign(queries[name], { status: result.status, ok: false, error: result.error })
+        rows[name].push(...(result.rows || []).map((row) => ({ ...row, business_date: window.businessDate })))
+      }
+      if (!queries[name].ok) problems.push(`metrics-${name}-failed`)
+      continue
+    }
+    const sql = buildQuery(template, { windows, revision })
     const result = await queryAnalytics({ fetchImpl, accountId, token, sql })
     queries[name] = { status: result.status, ok: result.ok, error: result.error, sql }
     rows[name] = result.rows || []
@@ -179,6 +225,8 @@ export async function readMetrics({ fetchImpl, accountId, token, from, days, rev
     builds,
     shapes: rowsOf(rows['request-shapes']),
     background: rowsOf(rows['background-runs']),
+    shadow: rowsOf(rows['report-atomic-shadow']),
+    shadowSummary: summarizeShadow(rows['report-atomic-shadow'], windows),
     queries,
   }
 }
@@ -188,6 +236,11 @@ export function publicLines({ result, bytes }) {
   lines.push(['window: {days} trading days, one build only: {filtered}', { days: result.windows.length, filtered: Boolean(result.revision) }])
   lines.push(['route groups: {groups}', { groups: result.latency.length }])
   lines.push(['request shape groups: {groups}; background labels: {labels}', { groups: result.shapes.length, labels: new Set(result.background.map((row) => row.label)).size }])
+  const sh = result.shadowSummary
+  if (sh) {
+    lines.push(['report atomic shadow: {compared} of {days} business days compared; comparisons {n}, match {match}, mismatch {mismatch}, error {error}, write between {between}, refused {refused}', { compared: sh.daysCompared, days: sh.days, n: sh.comparisons, match: sh.match, mismatch: sh.mismatch, error: sh.error, between: sh.writeBetween, refused: sh.refused }])
+    lines.push(['report atomic flip ready: {ready}', { ready: sh.flipReady }])
+  }
   for (const name of QUERY_NAMES) {
     const q = result.queries[name]
     if (q && !q.ok) lines.push(['query {name}: HTTP {status}', { name: publicToken(name), status: q.status }])

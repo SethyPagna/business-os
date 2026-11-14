@@ -27,10 +27,13 @@ function passOf(budgets, name) {
   return pass
 }
 
-// problems of one shape's cold calls in the live pass; [] when it is within its ceiling or is a known failure that did not get worse
-function liveProblems(pass, id, calls) {
+// problems of one shape's cold calls in the live pass; [] when it is within its ceiling or is a known failure that did not get worse.
+// A1: a shape that answers a different HTTP status than its budget entry records is red whatever its calls (a crashing or refusing route reads few calls and used to be
+// certified); a known failure excuses calls only, never the status. expectedStatus undefined skips the check (the pure call-count callers).
+function liveProblems(pass, id, calls, status, expectedStatus) {
   const limit = Math.min(pass.cold_calls_max, FREE_CALL_LIMIT)
   const known = (pass.known_failures || []).find((k) => k.id === id)
+  if (expectedStatus !== undefined && status !== expectedStatus) return [`live status ${status === undefined ? 'missing' : status}, budget has ${expectedStatus}`]
   if (!Number.isFinite(calls)) return [`no call count for the live pass${known ? ' (known failure)' : ''}`]
   if (!known) return calls > limit ? [`live cold calls ${calls} > ${limit}${calls > FREE_CALL_LIMIT ? ` (over the Free limit of ${FREE_CALL_LIMIT})` : ''}; fix the route or record it in passes.live.known_failures with a reason`] : []
   if (calls > known.cold_calls) return [`known failure got worse: live cold calls ${calls} > recorded ${known.cold_calls}`]

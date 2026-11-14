@@ -81,11 +81,11 @@ async function resolveUrl(world, url) {
 // other shape ever runs with one more on (or with the pass's own switches gone: read-budget/switches.cjs).
 const setSwitches = (world, names) => world.addSwitches(names)
 const clearSwitches = (world) => world.restoreSwitches()
-const withSwitches = (names, url) => ({ prepare: (world) => setSwitches(world, names), run: async (world, send) => { try { return await send('GET', url) } finally { await clearSwitches(world) } } })
+const withSwitches = (names, url, without = []) => ({ prepare: (world) => world.addSwitches(names, { without }), run: async (world, send) => { try { return await send('GET', url) } finally { await clearSwitches(world) } } })
 
 async function measureGet(world, shape, { cold = true, statements = false, fingerprints = false } = {}) {
   const url = await resolveUrl(world, shape.url)
-  const probe = { method: 'GET', url, anon: shape.anon, ...(shape.switches ? withSwitches(shape.switches, url) : {}) }
+  const probe = { method: 'GET', url, anon: shape.anon, ...(shape.switches || shape.without ? withSwitches(shape.switches || [], url, shape.without || []) : {}) }
   const out = { url }
   if (cold) out.cold = await runShape(world, probe, { cold: true })
   out.warm = await runShape(world, probe, { cold: false, fingerprints })
@@ -126,13 +126,14 @@ async function pinProblems(world, entry, statements) {
 // The Worker keeps the read switches it last read for READ_SWITCH_MEMO_MS (15 s) per isolate, and the ANALYZE pass measures every shape warm on ONE isolate. A shape that names switches
 // (the ic_simple ones: the switch row is set around their request only) would otherwise run on the switch state of the shape before it: right after a switch-OFF shape it was measured on
 // the OFF path (218M rows read under ANALYZE instead of ~0.3M) and a green run proved nothing about the ON path. So whenever the switch state a shape needs differs from the one the
-// isolate last read, a fresh isolate (and a fresh login) is started first; consecutive shapes with the same switches share an isolate as before.
+// isolate last read, a fresh isolate is started first; consecutive shapes with the same switches share an isolate as before. The session cookie survives the restart, so the fence
+// does not log in again: every login adds a session row, and a pass with more switch changes read more rows on every later shape (customers-phone-search, files).
 function switchFence() {
   let read = ''
   return async (world, shape) => {
-    const wanted = (shape.switches || []).join(',')
+    const wanted = (shape.switches || []).join(',') + (shape.without ? '-' + shape.without.join(',') : '')
     if (wanted === read) return
-    await world.restart(); await world.login()
+    await world.restart()
     read = wanted
   }
 }
@@ -173,7 +174,7 @@ async function runGetPass({ partIndex, analyze = false, analyzeDb = analyze, lab
 }
 
 // The live pass: every GET shape once, cold, in the state production runs in (budgets.json passes.live: tier, stored switches). It enforces the calls of one request
-// (the live ceiling and the Free hard limit; a known failure may not get worse and must go once fixed). Rows are not budgeted here: the free pass owns them. A
+// (the live ceiling and the Free hard limit; a known failure may not get worse and must go once fixed) and the HTTP status the entry records. Rows are not budgeted here: the free pass owns them. A
 // failure of the pass names its shape, its route and the call count measured, so the entry to add or remove is in the message.
 async function runLivePass({ partIndex, label, observe }) {
   const budgets = loadBudgets()
@@ -191,12 +192,12 @@ async function runLivePass({ partIndex, label, observe }) {
       let m
       try {
         const url = await resolveUrl(world, shape.url)
-        const probe = { method: 'GET', url, anon: shape.anon, ...(shape.switches ? withSwitches(shape.switches, url) : {}) }
+        const probe = { method: 'GET', url, anon: shape.anon, ...(shape.switches || shape.without ? withSwitches(shape.switches || [], url, shape.without || []) : {}) }
         m = await runShape(world, probe, { cold: true })
       } catch (e) { reds.push(`${shape.id}: threw ${String(e.message).slice(0, 160)}`); continue }
       if (observe) observe(shape, m)
       n += 1
-      const problems = m.overDeadline ? ['live pass: no answer within the deadline'] : liveProblems(pass, shape.id, m.calls)
+      const problems = m.overDeadline ? ['live pass: no answer within the deadline'] : liveProblems(pass, shape.id, m.calls, m.status, entry.status)
       if (problems.length) reds.push(`${shape.id} (${entry.route}): ${problems.join('; ')}`)
     }
   } finally { await world.dispose() }

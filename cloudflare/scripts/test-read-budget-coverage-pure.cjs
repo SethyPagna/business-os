@@ -159,7 +159,7 @@ async function main() {
     // A shape that was a refusal and now carries the request is re-measured, not raised: its ceilings are the first real ones, so the
     // ratchet below skips it. The note names the slice and what the request used to be.
     for (const s of shapes.filter((x) => x.lifted)) {
-      assert.ok(/^P\d\.\d/.test(s.lifted.slice) && typeof s.lifted.was === 'string' && s.lifted.was.length > 8, `${s.id}: lifted needs a slice and a "was"`)
+      assert.ok(/^(P\d\.\d|W\d)/.test(s.lifted.slice) && typeof s.lifted.was === 'string' && s.lifted.was.length > 8, `${s.id}: lifted needs a slice and a "was"`)
       console.log(`LIFTED ${s.id} by ${s.lifted.slice}: was ${s.lifted.was}`)
     }
   })

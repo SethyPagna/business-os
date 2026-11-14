@@ -1,13 +1,14 @@
 -- Analytics Engine SQL, not D1. How the routes that carry a shape label (lib/requestMetrics.ts SHAPED_ROUTES) are called:
 -- blob6 starts with 'shape=<label>;'. The label is a constant of a fixed set per route; never a search text or an id.
+-- Nested if() instead of multiIf (A2): insurance in case the Analytics Engine SQL dialect rejects multiIf; same labels, same result.
 -- Weighted by both samplings like route-latency; one cache state per group keeps double6 constant inside it.
 SELECT blob2 AS route, blob3 AS method,
-       multiIf(blob6 LIKE 'shape=default%', 'default', blob6 LIKE 'shape=filter%', 'filter', blob6 LIKE 'shape=text%', 'text',
-               blob6 LIKE 'shape=barcode%', 'barcode', blob6 LIKE 'shape=ids%', 'ids', blob6 LIKE 'shape=rank_le20%', 'rank_le20',
-               blob6 LIKE 'shape=rank_lt300%', 'rank_lt300', blob6 LIKE 'shape=rank_le1500%', 'rank_le1500', blob6 LIKE 'shape=rank_gt1500%', 'rank_gt1500',
-               blob6 LIKE 'shape=search%', 'search', blob6 LIKE 'shape=all%', 'all', blob6 LIKE 'shape=day%', 'day', blob6 LIKE 'shape=range%', 'range',
-               blob6 LIKE 'shape=picker_empty%', 'picker_empty', blob6 LIKE 'shape=picker_text%', 'picker_text', blob6 LIKE 'shape=list%', 'list',
-               'other') AS shape,
+       if(blob6 LIKE 'shape=default%', 'default', if(blob6 LIKE 'shape=filter%', 'filter', if(blob6 LIKE 'shape=text%', 'text',
+             if(blob6 LIKE 'shape=barcode%', 'barcode', if(blob6 LIKE 'shape=ids%', 'ids', if(blob6 LIKE 'shape=rank_le20%', 'rank_le20',
+             if(blob6 LIKE 'shape=rank_lt300%', 'rank_lt300', if(blob6 LIKE 'shape=rank_le1500%', 'rank_le1500', if(blob6 LIKE 'shape=rank_gt1500%', 'rank_gt1500',
+             if(blob6 LIKE 'shape=search%', 'search', if(blob6 LIKE 'shape=all%', 'all', if(blob6 LIKE 'shape=day%', 'day',
+             if(blob6 LIKE 'shape=range%', 'range', if(blob6 LIKE 'shape=picker_empty%', 'picker_empty', if(blob6 LIKE 'shape=picker_text%', 'picker_text',
+             if(blob6 LIKE 'shape=list%', 'list', 'other')))))))))))))))) AS shape,
        blob5 AS cache,
        SUM(_sample_interval * double6) AS requests,
        count() AS stored_rows,
