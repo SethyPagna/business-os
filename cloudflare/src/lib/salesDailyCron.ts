@@ -2,7 +2,7 @@ import type { Env } from '../index'
 import { recordAnalytics } from './analytics'
 import { businessToday } from './businessDateWindow'
 import { getDb } from './db'
-import { getPlanLimits, resolvePlanTier } from './planTier'
+import { getPlanLimits } from './planTier'
 import { readSwitchState } from './readSwitches'
 import { getSalesDailyKernel, type SalesDailyKernel } from './salesDailyKernel'
 import {
@@ -66,7 +66,7 @@ async function cronMode(env: Env, deps: SalesDailyCronDeps): Promise<'on' | 'sha
   if (deps.mode) return deps.mode
   return (await readSwitchState(env, SALES_DAILY_SWITCH)).state
 }
-const runs = (mode: 'on' | 'shadow' | 'off', env: Env): boolean => mode === 'on' || (mode === 'shadow' && resolvePlanTier(env) !== 'free')
+const runs = (mode: 'on' | 'shadow' | 'off', env: Env): boolean => mode === 'on' || (mode === 'shadow' && getPlanLimits(env).salesDailyShadowAllowed)
 
 type Ready = { kernel: SalesDailyKernel; flags: SalesDailyFlags; today: string; nowIso: string }
 

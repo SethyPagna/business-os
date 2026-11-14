@@ -333,6 +333,8 @@ export type PlanLimits = {
   // after salesDailyQueryReserve. A day's estimate is salesDailyCpuMsPerDayFixed + salesDailyCpuMsPerSourceRow x the rows it read (twice the measured per-sale cost, one sale
   // per row, to leave room for the per-sale facts, the JSON and the encode that the floor does not time) and salesDailyKernelQueriesPerDay + the step's own statements.
   // The first day of a visit always runs (progress); a day too heavy for the plan on its own is the known limit, named in the report.
+  // A shadow run (the stored path computed beside the raw one and compared) needs spare reads and CPU: Paid only, never on Free (owner: shadow on Paid before 30 Nov).
+  salesDailyShadowAllowed: boolean
   salesDailyStepCpuBudgetMs: number
   salesDailyStepWallBudgetMs: number
   salesDailyCpuMsPerSourceRow: number
@@ -544,6 +546,7 @@ const PAID_LIMITS: PlanLimits = {
   salesDailyAlertListedDays: 3,
   salesDailyRebuildMaxDays: 4000,
   salesDailyMaxPayloadBytes: 1_000_000,
+  salesDailyShadowAllowed: true,
   salesDailyStepCpuBudgetMs: 5000,
   salesDailyStepWallBudgetMs: 60_000,
   salesDailyCpuMsPerSourceRow: 0.025,
@@ -617,6 +620,7 @@ const FREE_LIMITS: PlanLimits = {
   salesDailyAlertListedDays: 3,
   salesDailyRebuildMaxDays: 1000,
   salesDailyMaxPayloadBytes: 500_000,
+  salesDailyShadowAllowed: false,
   salesDailyStepCpuBudgetMs: 7,
   salesDailyStepWallBudgetMs: 20_000,
   salesDailyCpuMsPerSourceRow: 0.025,
