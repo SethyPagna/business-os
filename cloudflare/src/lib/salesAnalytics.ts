@@ -248,6 +248,18 @@ export function shiftWindowBound(value: unknown): string | null {
 }
 
 /**
+ * The plain (index-narrowing) lower bound for a shift window starting at the bound parameter `param` (the UTC 'YYYY-MM-DD HH:MM:SS' shiftWindowBound makes):
+ * the instant twelve hours before it, as datetime(param, '-12 hours'). Timezone-independent and a strict superset of the exact window: the text of a row stored
+ * with an offset (-12:00 .. +14:00) is its instant shifted by that offset, and the offset is never below -12 hours, so any row at or after param has a stored text
+ * of at least datetime(param, '-12 hours') (a 'T' separator sorts above the space, so the same-instant text is never below it). Formula-exact, not a date
+ * rounded down a day: the day-granular floors read 2950 rows at the gate's close and this reads 2332. Pinned, against the EMITTED clause, by
+ * test-shift-window-created-bounds-native.cjs.
+ */
+export function shiftWindowFloor(param: string): string {
+  return `datetime(${param}, '-12 hours')`
+}
+
+/**
  * The shift window as SQL, so there is exactly ONE definition of it.
  *
  * whereActiveSales() below calls this, and so does any query that needs the
@@ -267,8 +279,8 @@ export function shiftWindowWhere(
   const createdFrom = shiftWindowBound(f.createdFrom)
   if (createdFrom) {
     // Plain widened bounds beside the exact datetime() terms let the created_at index prune; the datetime() terms decide. A row stored with an offset has a text date
-    // a day either side of its UTC date: -1 day below, +2 days above (+1 drops +07:00 rows). Pinned by test-shift-window-created-bounds-native.cjs.
-    clauses.push(`${alias}.created_at >= date(@createdFrom, '-1 day')`)
+    // a day either side of its UTC date: 12 hours below (shiftWindowFloor), +2 days above (+1 drops +07:00 rows). Pinned by test-shift-window-created-bounds-native.cjs.
+    clauses.push(`${alias}.created_at >= ${shiftWindowFloor('@createdFrom')}`)
     clauses.push(`datetime(${alias}.created_at) >= @createdFrom`)
     params.createdFrom = createdFrom
   }
@@ -814,9 +826,9 @@ function whereRemovalMovements(f: SalesFilters): { sql: string; params: Record<s
   const createdFrom = shiftWindowBound(f.createdFrom)
   if (createdFrom) {
     // The plain widened bounds beside the exact datetime() terms (the same pair shiftWindowWhere emits for sales, returns and fees): without them no index on
-    // created_at can narrow this read and a shift close walked every removal the cashier ever made. -1 day below, +2 days above: a row stored with an offset has a
+    // created_at can narrow this read and a shift close walked every removal the cashier ever made. 12 hours below (shiftWindowFloor), +2 days above: a row stored with an offset has a
     // text date a day either side of its UTC date (+1 day above drops +07:00 rows). Pinned by test-shift-removal-window-bounds-native.cjs.
-    clauses.push("m.created_at >= date(@createdFrom, '-1 day')")
+    clauses.push(`m.created_at >= ${shiftWindowFloor('@createdFrom')}`)
     clauses.push('datetime(m.created_at) >= @createdFrom')
     params.createdFrom = createdFrom
   }

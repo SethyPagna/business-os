@@ -29,15 +29,15 @@
    "SELECT entity_id, details FROM audit_logs WHERE +user_id = CAST(?1 AS INTEGER) AND action=?2 AND json_valid(de"
   ],
   [
-   "4c3f37c82257",
-   "SELECT (SELECT MAX(datetime(created_at)) FROM sales WHERE sales.created_at >= date(?1, '-1 day') AND datetime("
+   "821f7ff536ca",
+   "SELECT (SELECT MAX(datetime(created_at)) FROM sales WHERE sales.created_at >= datetime(?1, '-12 hours') AND da"
   ],
   [
-   "d3d38e11836b",
+   "41e2422cef73",
    "SELECT id, shift_code, scope_mode, user_id, user_name, branch_id, branch_name, business_date, opened_at, CASE "
   ],
   [
-   "366ff62eff1f",
+   "727f104a49ba",
    "SELECT id, shift_code, scope_mode, user_id, user_name, branch_id, branch_name, business_date, opened_at, CASE "
   ],
   [
@@ -45,7 +45,7 @@
    "SELECT json_extract(after_json, '$.time_review') AS review FROM shift_session_amendments WHERE shift_session_i"
   ],
   [
-   "cc837260dd6c",
+   "ce07f61b8855",
    "SELECT json_array( (SELECT json_array(COUNT(*), TOTAL(sales.id), TOTAL(COALESCE(close_rev.revision, 0))) FROM "
   ],
   [
@@ -57,23 +57,23 @@
    "SELECT key, value FROM settings WHERE key IN ('pos_payment_methods', 'pos_payment_method_kinds')"
   ],
   [
-   "3dc5a685adfc",
+   "737d77cb58e3",
    "SELECT id, payments_version, payment_method, payment_details, amount_paid_usd, amount_paid_khr, change_usd, ch"
   ],
   [
-   "5403d6066973",
+   "2c2dcb47a598",
    "SELECT payment_method, payment_details, amount_paid_usd, amount_paid_khr, change_usd, change_khr, change_is_ac"
   ],
   [
-   "cfdeabb63655",
+   "0b867e71f68f",
    "SELECT COALESCE(NULLIF(TRIM(label), ''), fee_type, 'Expense') AS label, COALESCE(SUM(amount_usd), 0) AS usd, C"
   ],
   [
-   "fa06174aaa8b",
+   "c1e655d64902",
    "SELECT COALESCE(SUM((CASE WHEN returns.refund_currency = 'KHR' THEN 0 ELSE (COALESCE(returns.total_refund_usd,"
   ],
   [
-   "f6bd2bb9fe31",
+   "0d9a7488daaf",
    "SELECT COALESCE(SUM(CASE WHEN EXISTS ( SELECT 1 FROM fees WHERE fees.sale_id = sales.id AND COALESCE(fees.fee_"
   ],
   [
@@ -101,7 +101,7 @@
    "B| INSERT INTO shift_close_figures (shift_session_id, closed_at, figures_json, created_at) SELECT id, closed_a"
   ],
   [
-   "78f6204b71a7",
+   "9512431528d9",
    "B| SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM shift_sessions WHERE id=?1 AND revision=?2 AND closed_at=?3 AND "
   ],
   [
@@ -113,7 +113,7 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
   ],
   [
-   "cc837260dd6c",
+   "ce07f61b8855",
    "SELECT json_array( (SELECT json_array(COUNT(*), TOTAL(sales.id), TOTAL(COALESCE(close_rev.revision, 0))) FROM "
   ],
   [
@@ -125,11 +125,11 @@
    "INSERT OR IGNORE INTO telegram_scheduled_sends (send_key, kind, shift_id, due_at, created_at, dispatch) VALUES"
   ],
   [
-   "45a94c23f9f3",
+   "4f9b95dae864",
    "SELECT m.id AS id, m.created_at AS created_at, m.quantity AS quantity, m.unit_cost_usd AS unit_cost_usd, m.tot"
   ],
   [
-   "8f628301e476",
+   "633ada71bce6",
    "SELECT COALESCE(SUM(amount_usd), 0) AS usd, COALESCE(SUM(amount_khr), 0) AS khr FROM fees WHERE fees.created_a"
   ],
   [
@@ -141,23 +141,23 @@
    "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
   ],
   [
-   "7538af9a4db0",
+   "62d9eedf1ff3",
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "b2e04fec5baa",
+   "10e9a23d24a3",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
-   "400fdaa4d829",
+   "cfe8fcb21c6f",
    "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
   ],
   [
-   "cbc3b628a004",
+   "7ac512116327",
    "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
   ],
   [
-   "a4647cf76b59",
+   "a221013759ff",
    "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
   ],
   [
@@ -165,23 +165,23 @@
    "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
   ],
   [
-   "7538af9a4db0",
+   "62d9eedf1ff3",
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "b2e04fec5baa",
+   "10e9a23d24a3",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
-   "400fdaa4d829",
+   "cfe8fcb21c6f",
    "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
   ],
   [
-   "cbc3b628a004",
+   "7ac512116327",
    "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
   ],
   [
-   "a4647cf76b59",
+   "a221013759ff",
    "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
   ],
   [

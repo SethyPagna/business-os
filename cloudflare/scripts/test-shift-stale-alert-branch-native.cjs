@@ -72,7 +72,7 @@ async function main() {
         VALUES(?,'shop_wide',?,'cashier_owner',?,'B',date(?, '+7 hours'),?,10,0,1,1)`, code, people.owner.id, branch, at, at)
     }
     const announced = async (mark, code) => {
-      for (let i = 0; i < 30; i += 1) {
+      for (let i = 0; i < 200; i += 1) { // the Telegram send runs after the response (ctx.waitUntil); poll up to 20 s, returning the moment it lands
         if (telegramSent.slice(mark).some((text) => text.includes(code))) return true
         await new Promise((done) => setTimeout(done, 100))
       }
