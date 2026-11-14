@@ -1,10 +1,11 @@
 'use strict'
-// The D1 fallback read of cache versions (lib/cache.ts readD1Versions, behind getVersionsWithFallback) must be ONE statement with one bound
-// placeholder per distinct namespace. It used to filter with `IN (SELECT value FROM json_each(@namespaces))`, and D1 meters the json_each rows as
-// rows read: about 2N extra rows per request for N namespaces when KV misses (3 namespaces cost 9 rows, 4 cost 12). Bound placeholders are not metered.
+// The D1 fallback read of cache versions (lib/cache.ts readD1Versions, behind getVersionsWithFallback) must be ONE batch (one round trip) of one
+// primary-key lookup per distinct namespace. It used to filter with `IN (SELECT value FROM json_each(@namespaces))` (about 2N extra rows read), and
+// the round-2 form `IN (?,?)` still costs one metered row per list entry even when nothing matches (the ephemeral IN table: customers-phone-search
+// read 41 rows against a budget of 39). A lookup per namespace costs only the rows it finds.
 //
-// Pins: no json_each on the version read, placeholder count == deduplicated namespace count, statement count == 1 (0 for no namespaces), the result
-// order and shape unchanged, and the fail-closed behaviour (a D1 failure is an unsafe token, or a throw when requireReadableD1 is set) unchanged.
+// Pins: no json_each and no IN list on the version read, one lookup per DEDUPLICATED namespace in one batch (nothing at all for no namespaces), the
+// result order and shape unchanged, and the fail-closed behaviour (a D1 failure is an unsafe token, or a throw when requireReadableD1 is set) unchanged.
 // Mutation controls patch the source in memory.
 //
 // Run (from cloudflare/): node scripts/test-cache-version-read-sql-pure.cjs
@@ -22,7 +23,7 @@ function loadCache(patch) {
     text = text.replace(patch.from, () => patch.to)
   }
   const { outputText } = ts.transpileModule(text, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: filename })
-  const state = { prepares: [], rows: [], fail: false }
+  const state = { prepares: [], batches: [], rows: [], fail: false }
   const fakeDb = {
     prepare(sql) {
       const entry = { sql, params: undefined }
@@ -32,7 +33,15 @@ function loadCache(patch) {
         get: async () => undefined,
       }
     },
-    batch: async () => [],
+    // One result per statement, holding the rows whose namespace that statement binds.
+    batch: async (statements) => {
+      state.batches.push(statements)
+      if (state.fail) throw new Error('D1 down')
+      return statements.map((statement) => {
+        const bound = Array.isArray(statement.params) ? statement.params[0] : statement.params && statement.params.namespace
+        return { results: state.rows.filter((row) => row.namespace === bound) }
+      })
+    },
   }
   const cacheKey = loadPlain('lib/cacheKey.ts')
   const stubs = {
@@ -64,30 +73,33 @@ async function scenarios(patch) {
     return { result, error, state, cacheKey }
   }
 
-  { // three distinct namespaces: one statement, three placeholders, no json_each
+  const lookups = (state) => state.batches[0].map((statement) => ({ sql: statement.sql.replace(/\s+/g, ' '), bound: Array.isArray(statement.params) ? statement.params[0] : statement.params.namespace }))
+  { // three distinct namespaces: one batch, one primary-key lookup each, no IN list, no json_each
     const { state } = await run(['sales', 'returns', 'customers'])
-    assert.equal(state.prepares.length, 1, 'one statement for every namespace KV does not hold')
-    const sql = state.prepares[0].sql
-    assert.ok(!/json_each/i.test(sql), 'no json_each on the version read (D1 meters its rows)')
-    assert.equal((sql.match(/\?/g) || []).length, 3, 'one placeholder per namespace')
-    assert.ok(/namespace IN \(\?,\?,\?\)/.test(sql.replace(/\s+/g, ' ')), sql)
-    assert.deepEqual(state.prepares[0].params, ['sales', 'returns', 'customers'], 'bound positionally, in the given order')
+    assert.equal(state.batches.length, 1, 'one round trip for every namespace KV does not hold')
+    assert.equal(state.prepares.length, 0, 'no stand-alone statement beside the batch')
+    const found = lookups(state)
+    assert.equal(found.length, 3, 'one lookup per namespace')
+    for (const { sql } of found) {
+      assert.ok(!/json_each/i.test(sql), 'no json_each on the version read (D1 meters its rows)')
+      assert.ok(!/\bIN\b/i.test(sql), 'no IN list: D1 meters its entries as rows read even when nothing matches')
+      assert.ok(/WHERE namespace = [@?]/.test(sql), sql)
+    }
+    assert.deepEqual(found.map((f) => f.bound), ['sales', 'returns', 'customers'], 'in the given order')
   }
-  { // duplicates are removed first: the placeholder count is the DEDUPED count
+  { // duplicates are removed first: the lookup count is the DEDUPED count
     const { state } = await run(['sales', 'returns', 'sales', 'returns', 'sales'])
-    assert.equal(state.prepares.length, 1)
-    assert.equal((state.prepares[0].sql.match(/\?/g) || []).length, 2, 'two distinct namespaces, two placeholders')
-    assert.deepEqual(state.prepares[0].params, ['sales', 'returns'])
+    assert.equal(state.batches.length, 1)
+    assert.deepEqual(lookups(state).map((f) => f.bound), ['sales', 'returns'], 'two distinct namespaces, two lookups')
   }
   { // one namespace
     const { state } = await run(['products'])
-    assert.equal(state.prepares.length, 1)
-    assert.ok(/namespace IN \(\?\)/.test(state.prepares[0].sql.replace(/\s+/g, ' ')))
-    assert.deepEqual(state.prepares[0].params, ['products'])
+    assert.equal(state.batches.length, 1)
+    assert.deepEqual(lookups(state).map((f) => f.bound), ['products'])
   }
   { // none: no statement at all, empty answer
     const { result, state } = await run([])
-    assert.equal(state.prepares.length, 0, 'no namespaces, no D1 read')
+    assert.equal(state.prepares.length + state.batches.length, 0, 'no namespaces, no D1 read')
     assert.deepEqual(result, [])
   }
   { // result order and shape: one token per requested namespace, in request order, D1 rows as d-tokens, a namespace with no row as the zero kv token
@@ -108,13 +120,14 @@ async function scenarios(patch) {
 
 async function main() {
   await scenarios(null)
-  console.log('PASS version fallback read: one statement, bound placeholders (deduped), no json_each, order/shape and fail-closed unchanged')
+  console.log('PASS version fallback read: one batch of per-namespace lookups (deduped), no IN list, no json_each, order/shape and fail-closed unchanged')
 
-  const FROM = "WHERE namespace IN (${distinct.map(() => '?').join(',')})`)\n      .all<{ namespace: string; version: number }>(distinct)"
+  const LOOKUP = "WHERE namespace = @namespace'"
   const mutants = [
-    ['json_each list again', FROM, "WHERE namespace IN (SELECT value FROM json_each(@namespaces))`)\n      .all<{ namespace: string; version: number }>({ namespaces: JSON.stringify(distinct) })"],
-    ['placeholders per requested (not deduped) namespace', "const distinct = [...new Set(namespaces)]", "const distinct = [...namespaces]"],
-    ['one statement per namespace', FROM, "WHERE namespace = ?`)\n      .all<{ namespace: string; version: number }>([distinct[0]])"],
+    ['IN list again (metered per entry)', LOOKUP, "WHERE namespace IN (@namespace)'"],
+    ['json_each list again', LOOKUP, "WHERE namespace IN (SELECT value FROM json_each(@namespace))'"],
+    ['lookups per requested (not deduped) namespace', "const distinct = [...new Set(namespaces)]", "const distinct = [...namespaces]"],
+    ['only the first namespace is read', "distinct.map((namespace) => ({", "distinct.slice(0, 1).map((namespace) => ({"],
     ['read swallowed instead of fail-closed', "if (requireReadable) throw error", "if (false) throw error"],
   ]
   for (const [name, from, to] of mutants) {
