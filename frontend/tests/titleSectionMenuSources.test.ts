@@ -32,6 +32,20 @@ for (const [page, files] of Object.entries(hosts)) {
   }
 }
 
+// Owner 14 Nov: the Inventory page's first subpage is called "Inventory", no longer "Products", so it
+// cannot be confused with the main Products page. Only the label changes: the section id stays "products"
+// (it is a route anchor, hub:inventory:products), and the main Products page keeps its own "Products".
+{
+  const inventoryProducts = getHubDestinations('inventory', everything).find((destination) => destination.id === 'products')
+  assert.ok(inventoryProducts, 'the Inventory page keeps its first subpage id')
+  assert.equal(inventoryProducts.key, 'inventory', 'the subpage label comes from the "inventory" key, not "products"')
+  assert.equal(inventoryProducts.label, 'Inventory')
+  assert.equal((en as unknown as Record<string, string>).inventory, 'Inventory')
+  assert.ok((km as unknown as Record<string, string>).inventory && (km as unknown as Record<string, string>).inventory !== 'Inventory', 'Khmer carries its own label')
+  const mainProducts = getHubDestinations('products', everything).find((destination) => destination.id === 'products')
+  assert.equal(mainProducts?.key, 'products', 'the main Products page keeps "Products"')
+}
+
 const sidebar = read('components/navigation/Sidebar.tsx')
 assert.match(sidebar, /<SectionTitleMenu[\s\S]*sections=\{moreOpen \? \[\] : currentSections\.map/, 'Sidebar feeds the title menu the current page destinations')
 assert.doesNotMatch(sidebar, /<div className="bos-nav-title /, 'Sidebar no longer draws a dead title')

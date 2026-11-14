@@ -270,6 +270,8 @@ try {
       assert.deepEqual(open.bar, barClosed, `${theme} ${language} ${page}: the top bar keeps its height, background and divider while open`);
       assert.ok(open.weights.every((w: number, index: number) => index === ids.indexOf(anchor.split(':')[2]) || w < open.weights[ids.indexOf(anchor.split(':')[2])]), `${language} ${page}: the open section differs by weight (${JSON.stringify(open.weights)})`)
       assert.ok(open.labels.every((label: string) => label.length > 0 && !/^[a-z_]+$/.test(label)), `${language} ${page}: labels are translated`)
+      if (page === 'inventory') assert.equal(open.labels[0], language === 'en' ? 'Inventory' : open.labels[0], `${language}: the Inventory page's first subpage is "Inventory", not "Products"`)
+      if (page === 'inventory') assert.notEqual(open.labels[0], await evaluate<string>(`${JSON.stringify(language)} === 'km' ? 'ផលិតផល' : 'Products'`), `${language}: and it no longer reads like the main Products page`)
       assert.equal(open.reachable, true, `${language} ${page}: every item is the topmost element at its centre, over the sticky row and the float`)
       assert.equal(open.inside, true, `${language} ${page}: the list stays inside the viewport`)
       assert.ok(open.zMenu > open.zFloat && open.zMenu > open.zSticky && open.zMenu > open.zHeader, `${language} ${page}: menu z-index ${open.zMenu} is above sticky ${open.zSticky}, float ${open.zFloat}, header ${open.zHeader}`)
