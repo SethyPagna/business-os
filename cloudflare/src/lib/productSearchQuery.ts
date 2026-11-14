@@ -228,10 +228,10 @@ export interface ProductSearchQuery {
 // which makes the planner read EVERY active product for every typed search whatever the text matches. Each term of that OR names a set of products, so the union of the sets is the
 // same match set found by seeks: the statement starts from this list (CROSS JOIN products p ON p.id = __cand.id) and its WHERE carries the caller's other terms with the search term
 // replaced by 1 = 1 (lib/familyPagination.ts candidateSql).
-//   idsSql         SELECT id, r ... ; r is the FTS bm25 of the row that came from the products_fts term and NULL for every other source. One product can appear more than once (the
-//                  sources overlap); everything the family statement computes from the rows is a MIN or MAX over them, so a repeat changes nothing.
-//   matchRankSql   matchRankSql with the bm25 read from __cand.r instead of the rank CTE. A product reached by several sources takes its FTS row's value: bm25 is never positive (FTS5
-//                  scores a hit as minus a sum of non-negative terms), and the other sources contribute 0, so the family's MIN is the FTS value exactly as the CTE's LEFT JOIN gave it.
+//   idsSql         SELECT id, r ... ; r is the FTS bm25 of the row that came from the products_fts term and NULL for every other source. A product the FTS term matches is listed ONCE, by
+//                  that source (the other sources skip the ids the FTS term matches: skippingFtsIds), so it is probed once and its row carries its bm25 whatever the sign. The rows that
+//                  remain duplicated (two non-FTS sources naming one product) all carry r NULL, which ranks 0 in every one of them.
+//   matchRankSql   matchRankSql with the bm25 read from __cand.r instead of the rank CTE: exactly the CTE's LEFT JOIN value (the product's one FTS row, or 0 without one).
 export interface ProductSearchCandidates {
   idsSql: string
   matchRankSql?: string
@@ -339,6 +339,13 @@ function unionAllCandidates(selects: string[]): string {
   return unionAllCandidates(wrapped)
 }
 
+// The sources overlap (a product named "glow" is in the FTS table AND in the name trigram table), and a repeat is probed twice for nothing. The id list is not folded with a GROUP BY or a
+// UNION: D1 counts every row of that sort as a row read, which costs more than the repeats save on a narrow search (measured on the read-cost world). Instead the non-FTS sources skip the
+// ids the FTS term matches; the FTS subquery is one more read of the FTS index, never a row of the catalogue.
+function skippingFtsIds(idColumn: string, ftsQueryParam: string | undefined): string {
+  return ftsQueryParam ? ` ${idColumn} NOT IN (SELECT rowid FROM products_fts WHERE products_fts MATCH @${ftsQueryParam})` : ''
+}
+
 // Builds the product-search WHERE disjunction and both ordering
 // expressions for a typed/scanned search box value. Mutates `params` with
 // every value it binds (same convention the searchMatch.ts builders use).
@@ -431,12 +438,12 @@ function buildProductSearchQueryFromGroups(
   if (trigramMatch && !titleOnly) {
     params[`${prefix}codeQuery`] = trigramMatch
     matchClauses.push(`p.id IN (SELECT rowid FROM products_fts_code WHERE products_fts_code MATCH @${prefix}codeQuery)`)
-    sources.push(`SELECT rowid AS id, NULL AS r FROM products_fts_code WHERE products_fts_code MATCH @${prefix}codeQuery`)
+    sources.push(`SELECT rowid AS id, NULL AS r FROM products_fts_code WHERE products_fts_code MATCH @${prefix}codeQuery${ftsMatch ? ` AND${skippingFtsIds('rowid', `${prefix}ftsQuery`)}` : ''}`)
   }
   if (trigramMatch) {
     params[`${prefix}nameCodeQuery`] = trigramMatch
     matchClauses.push(`p.id IN (SELECT rowid FROM products_fts_name_trigram WHERE products_fts_name_trigram MATCH @${prefix}nameCodeQuery)`)
-    sources.push(`SELECT rowid AS id, NULL AS r FROM products_fts_name_trigram WHERE products_fts_name_trigram MATCH @${prefix}nameCodeQuery`)
+    sources.push(`SELECT rowid AS id, NULL AS r FROM products_fts_name_trigram WHERE products_fts_name_trigram MATCH @${prefix}nameCodeQuery${ftsMatch ? ` AND${skippingFtsIds('rowid', `${prefix}ftsQuery`)}` : ''}`)
   }
 
   // 4. Mixed group (one comma-group holding both a word and a code
@@ -471,7 +478,7 @@ function buildProductSearchQueryFromGroups(
     : buildExactBarcodeMatchClause(rawSearchText, params, `${prefix}barcodeKey`, barcodeColumn)
   if (exactBarcodeMatch) {
     matchClauses.unshift(exactBarcodeMatch)
-    sources.unshift(`SELECT id, r FROM (${exactBarcodeCandidatesSql(params, `${prefix}barcodeKey`, barcodeColumn)})`)
+    sources.unshift(`SELECT id, r FROM (${exactBarcodeCandidatesSql(params, `${prefix}barcodeKey`, barcodeColumn)})${ftsMatch ? ` WHERE${skippingFtsIds('id', `${prefix}ftsQuery`)}` : ''}`)
   }
 
   if (!matchClauses.length) return { hasSearchTerm: true, titleOnly }
@@ -507,7 +514,8 @@ function buildProductSearchQueryFromGroups(
     titleOnly,
     whereClause: matchClauses.length > 1 ? `(${matchClauses.join(' OR ')})` : matchClauses[0],
     matchRankSql,
-    candidates: unsourced ? undefined : { idsSql: unionAllCandidates(sources), matchRankSql: candidateRankSql },
+    // A title-only search has no catch-all to avoid, and its two sources overlap on nearly every hit: the predicate form already reads each id once (measured: the candidate form read more).
+    candidates: unsourced || titleOnly ? undefined : { idsSql: unionAllCandidates(sources), matchRankSql: candidateRankSql },
     rankCteSql,
     matchTierSql: buildMatchTierSql(rawSearchText, params, {
       prefix, nameNormalizedColumn, nameColumn, barcodeColumn, includeBarcodeTier: !titleOnly,

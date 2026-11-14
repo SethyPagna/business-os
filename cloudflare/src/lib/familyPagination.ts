@@ -204,7 +204,10 @@ const CANDIDATE_ALIAS = '__cand'
 
 // A candidate list is used only by a read that fetches its page rows by key and names the family members: the narrow ranking has no row columns to return.
 function narrowRead<T extends { candidateSql?: string; familyMemberBaseWhereSql?: string }>(opts: T, keyedPage: boolean): T {
-  return opts.candidateSql && (!keyedPage || !opts.familyMemberBaseWhereSql) ? { ...opts, candidateSql: undefined } : opts
+  // The caller has already replaced the search term in whereSql by 1 = 1, so dropping the list here would run the statement WITHOUT the search (every row the other filters allow, or a
+  // missing-column error). Refuse instead of falling back.
+  if (opts.candidateSql && (!keyedPage || !opts.familyMemberBaseWhereSql)) throw new Error('candidateSql needs a keyed page read (seekPage or the ranked scope) and familyMemberBaseWhereSql: the search term is already gone from whereSql')
+  return opts
 }
 
 function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSql' | 'whereSql' | 'matchRankSql' | 'rankCteSql' | 'matchTierSql' | 'familyMemberBaseWhereSql' | 'promotedRankSql' | 'familySortValueSql' | 'familyNumericSortSql' | 'candidateSql'> & { inlineFamilies?: boolean; drivenByListParam?: string; narrow?: boolean }) {

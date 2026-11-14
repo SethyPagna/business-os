@@ -11,7 +11,7 @@
 //      the same rows come back (the control: the index only makes it a seek);
 //   3. SHAPE: every compound SELECT stays within D1's 5-term cap; a search with a hybrid / short-word / partial-word term has no candidate list; ranked ids are driven by json_each;
 //   4. THE ROUTE GLUE (searchCandidateRead) refuses anything but exactly one search term;
-//   5. MUTANTS: each of eleven deliberate breakages (a dropped tie-break, a miscounted total, a dropped source, a dropped catch-all, a lost rank, a dropped filter, a wrong
+//   5. MUTANTS: each of fourteen deliberate breakages (a dropped tie-break, a miscounted total, a dropped source, a dropped catch-all, a lost rank, a dropped filter, a wrong
 //      aggregate, a wrong past-the-end count, ...) turns at least one of the comparisons above red. A green run therefore proves something.
 //
 // Run (from cloudflare/): node scripts/test-products-search-candidates-pure.cjs
@@ -81,11 +81,21 @@ add('Glow Lotion Retired', { barcode: ' 885-000-4001 ', active: 0 })            
 add('Upc Twin A', { barcode: '042100005264' })                                   // UPC-A ...
 add('Upc Twin B', { barcode: '04252614' })
 add('Upc Twin Spaced', { barcode: '0 42100 00526-4' })                             // the UPC-A written with spaces and a hyphen: only the normalized form finds it                                       // ... and its UPC-E: one scan finds both
+add('Upc Short', { barcode: '42100005264' })                                    // the UPC-A without its leading zero: the normalized form equals the twin's, the stored form does not
+add('Upc Ean', { barcode: '0042100005264' })                                     // the UPC-A as an EAN-13: same normalized form, different stored digits. A UPC scan never returned either of these two
 add('zzbarcode', { barcode: 'ZZ-BARCODE' })                                      // matched by its name AND by the catch-all: two sources, one product
 add('No Barcode Item', { barcode: null })
 add('Blank Barcode Item', { barcode: '' })
 const f1 = add('Mega Moisturizer', { barcode: '8850005000001' }); add('Mega Moisturizer', { barcode: '8850005000002' }); add('Mega Moisturizer', { barcode: '8850005000003' })
 const parent = add('Lumi Parent'); add('Lumi Variant Different Name', { parent })  // a family keyed by its parent whose child is named differently
+// created_desc: a family keyed by its PARENT whose child is newer than the parent competes with another family that ties on tier and rank. The family's newest date is the child's own
+// created_at, never the parent's.
+const zorbitParent = add('Zorbit Tonic', { created: '2026-01-01 03:00:00' }); add('Zorbit Tonic', { parent: zorbitParent, created: '2026-12-01 03:00:00' })
+add('Zorbit Tonik', { created: '2026-06-01 03:00:00' })
+// bm25 weights: hits in the name, the sku and the barcode compete (a weight scales every hit of a phrase alike, so one word alone cannot tell the weights apart; an OR of two words can).
+add('Quill', { sku: 'XQ-1' }); add('Quill Lacquer Pen Set Deluxe Edition Gift Box Retail Pack', { sku: 'QUILL-2' }); add('Quill Brush Tip Nib', { sku: 'QUILLX-3' }); add('Quill Plain Ink', { sku: 'XQ-4' })
+add('Quill Pot', { sku: 'QUILL-5' }); add('Quill Plume Silk Feather Stand Large Gift Box Retail Pack Deluxe Edition', { sku: 'XB-1' })   // OR of two words: the weighted term frequencies saturate differently, so the weights change the order
+add('Plume Ink', { sku: 'PLUME-9', barcode: 'PLUME-9' }); add('Plume', { sku: 'XP-1', barcode: '77700001' }); add('Plume Silk Feather Quill Set Large Gift', { sku: 'XP-2', barcode: 'PLUME-2' })
 const zeds = ['Zed Tonic Aa', 'Zed Tonic Ab', 'zed tonic ab', 'Zed Tonic Ac']; zeds.forEach((n) => add(n))   // equal bm25: only name and key decide
 for (let i = 0; i < 12; i += 1) add('', { id: i < 6 ? 9990 + i : 10001 + i, barcode: `88800${i}` })                    // blank-named ties; 'id:10001' sorts before 'id:9990' as text
 add('Dup Family', { barcode: '8851111111111' }); add('Dup Family', { barcode: '8851111111112', active: 0 })
@@ -98,7 +108,7 @@ const PROMOTED = 'CASE WHEN p.discount_enabled = 1 THEN 1 ELSE 0 END'
 const TAILS = { name_asc: ['family_name ASC', 'lower(name) ASC, id ASC'], name_desc: ['family_name DESC', 'lower(name) DESC, id ASC'], created_desc: ['latest_created_at DESC, family_name ASC', 'created_at DESC, id DESC'] }
 const SELECT = 'p.id, p.name, p.brand, p.parent_id, p.barcode, p.created_at'
 
-async function run(mod, form, term, { page = 1, pageSize = 20, sort = 'name_asc', mode, titleOnly = false, extraWhere = [], rankIds, capture } = {}) {
+async function run(mod, form, term, { page = 1, pageSize = 20, sort = 'name_asc', mode, titleOnly = false, extraWhere = [], rankIds, capture, override = {} } = {}) {
   const params = {}
   const q = mod.buildProductSearchQuery(term, params, { mode, titleOnly, catalogOnly: true, rankedIds: rankIds ? mod.parseRankedIds(rankIds.join(','), rankIds.map(() => '3').join('')) : undefined })
   const where = ['p.is_active = 1', ...extraWhere]
@@ -114,7 +124,7 @@ async function run(mod, form, term, { page = 1, pageSize = 20, sort = 'name_asc'
     familyOrderSql: mod.buildFamilyRelevanceOrderSql(tail, { hasTier: Boolean(q.matchTierSql), hasRank: Boolean(rank), promotedFirst: true }), intraFamilyOrderSql: intra,
     matchRankSql: rank, rankCteSql: candidate ? undefined : q.rankCteSql, matchTierSql: q.matchTierSql, promotedRankSql: PROMOTED,
     familyMemberBaseWhereSql: q.hasSearchTerm ? familyMember : undefined,
-    seekPage: true, candidateSql: candidate ? candidate.idsSql : undefined,
+    seekPage: true, candidateSql: candidate ? candidate.idsSql : undefined, ...override,
   }
   return { result: await mod.paginateProductFamilies(opts), q }
 }
@@ -127,7 +137,7 @@ const QUERIES = [
   ['cream', {}], ['cream', { page: 2, pageSize: 6 }], ['serum', { sort: 'created_desc' }], ['robust', {}], ['rosa', { pageSize: 3, page: 2 }], ['item', {}], ['item', { page: 3, pageSize: 9 }],
   ['ream', {}], ['lowx', {}], ['superglowx', {}],                                  // substring hits: the name trigram source
   ['8850004001', {}], ['885-000-4001', {}], ['abc123x', {}], ['ABC-123X', {}], ['885000301', {}], ['0000885000301', {}],   // the catch-all: spaces, hyphens, capitals, zeros
-  ['042100005264', {}], ['04252614', {}], ['42100005264', {}],                      // the UPC twin, from either side
+  ['042100005264', {}], ['04252614', {}], ['42100005264', {}], ['0042100005264', {}], ['00042100005264', {}],                      // the UPC twin, from either side
   ['8850005000002', {}], ['moisturizer', {}], ['variant', {}], ['lumi', {}],         // a family reached through one row
   ['zzbarcode', {}], ['zzbarcode', { titleOnly: true }], ['zz-barcode', {}],         // two sources for one product
   ['zed', {}], ['zed', { pageSize: 1, page: 2 }], ['zed', { pageSize: 2, page: 2 }], ['tonic ab', {}],
@@ -135,6 +145,8 @@ const QUERIES = [
   ['000100', {}], ['0001000', { pageSize: 50 }],                                     // ... and from the middle of a barcode: only the code trigram source finds these
   // twelve blank-named families tie on tier, rank, name and date: only the family key orders them, and the page boundaries cut through the tie
   ['88800', { pageSize: 5 }], ['88800', { pageSize: 5, page: 2 }], ['88800', { pageSize: 5, page: 3 }], ['88800', { pageSize: 5, page: 2, sort: 'name_desc' }], ['88800', { pageSize: 4, page: 3, sort: 'created_desc' }],
+  ['zorbit', { sort: 'created_desc' }], ['zorbit', { sort: 'created_desc', titleOnly: true }], ['zorbit', { sort: 'name_asc' }],     // a parent-keyed family against another, by newest row
+  ['quill', {}], ['quill', { sort: 'created_desc' }], ['plume', {}], ['plume', { page: 2, pageSize: 2 }], ['xq', {}], ['quill plume', {}], ['quill,plume', { mode: 'OR' }], ['quill,plume', { mode: 'OR', pageSize: 3, page: 2 }], ['quill', { pageSize: 2 }],   // weights: hits in the name, the sku and the barcode compete
   ['dup', {}], ['family', {}], ['zzzqqq', {}], ['zzzqqq', { page: 3 }], ['0', {}],
   ['glow lotion', {}], ['rose glow', {}], ['ro', {}], ['g', {}], ['ro ma', { mode: 'OR' }], ['glow rose item serum', {}],  // hybrid / short-word / partial-word: predicate form
   ['', { rankIds: rankIdList(40, 7) }], ['', { rankIds: rankIdList(140, 3), pageSize: 10, page: 4 }], ['', { rankIds: [1011, 1012, 1013].concat(rankIdList(30, 11)), sort: 'name_desc' }],
@@ -228,7 +240,50 @@ const check = async (name, fn) => { await fn(); passed += 1; console.log(`PASS $
     assert.equal(base.buildProductSearchQuery('glow', {}, { catalogOnly: true, useSearchIndex: false }).candidates, undefined, 'the LIKE fallback keeps its predicate')
     const text = base.buildProductSearchQuery('glow', {}, { catalogOnly: true })
     assert.equal(Boolean(text.candidates.matchRankSql), Boolean(text.matchRankSql))
-    assert.equal(Boolean(base.buildProductSearchQuery('glow', {}, { catalogOnly: true, titleOnly: true }).candidates.matchRankSql), false, 'title-only search has no rank in either form')
+    assert.equal(base.buildProductSearchQuery('glow', {}, { catalogOnly: true, titleOnly: true }).candidates, undefined, 'a title-only text search keeps its predicate (the candidate form read more: its two sources overlap on every hit and there is no catch-all to avoid)')
+  })
+
+  // The ids the candidate list names, with their rank column, run on the fixture.
+  const candidateRows = (mod, term) => {
+    const params = {}
+    const q = mod.buildProductSearchQuery(term, params, { catalogOnly: true })
+    const bind = Object.fromEntries([...new Set([...q.candidates.idsSql.matchAll(/@(\w+)/g)].map((m) => m[1]))].map((n) => [n, params[n]]))
+    const ftsIds = q.candidates.idsSql.includes('products_fts WHERE products_fts MATCH @ftsQuery') ? new Set(raw.prepare('SELECT rowid AS id FROM products_fts WHERE products_fts MATCH @ftsQuery').all({ ftsQuery: params.ftsQuery }).map((r) => r.id)) : new Set()
+    return { rows: raw.prepare(q.candidates.idsSql).all(bind), ftsIds }
+  }
+  await check('CANDIDATES: a product the FTS term matches is listed once, with its bm25; every other row has no bm25 (rank exact by construction)', async () => {
+    for (const term of ['glow', 'zzbarcode', 'quill', '88800', 'ream', '885000301', 'lowx']) {
+      const { rows, ftsIds } = candidateRows(base, term)
+      assert.ok(rows.length > 0, `${term}: candidates exist`)
+      for (const id of ftsIds) {
+        const mine = rows.filter((r) => r.id === id)
+        assert.equal(mine.length, 1, `${term}: FTS product ${id} is listed ${mine.length} times`)
+        assert.ok(typeof mine[0].r === 'number', `${term}: FTS product ${id} carries its bm25`)
+      }
+      for (const row of rows) if (!ftsIds.has(row.id)) assert.equal(row.r, null, `${term}: a product the FTS term does not match has no bm25`)
+    }
+    // zzbarcode is in the FTS table, the name trigram table AND the barcode catch-all: one row, the FTS rank
+    const id = raw.prepare("SELECT id FROM products WHERE name = 'zzbarcode'").get().id
+    const mine = candidateRows(base, 'zzbarcode').rows.filter((r) => r.id === id)
+    assert.equal(mine.length, 1)
+    assert.ok(mine[0].r < 0, 'the one row carries the FTS bm25')
+  })
+
+  // The route replaces the search term by 1 = 1 before the helper decides whether to honour the list: dropping the list there would run the statement without the search.
+  const narrowOutcomes = async (mod) => {
+    const attempts = [
+      () => run(mod, 'candidates', 'cream', { override: { seekPage: false } }),
+      () => run(mod, 'candidates', 'cream', { override: { familyMemberBaseWhereSql: undefined } }),
+      () => mod.rankProductFamilies({ ...{ db, selectColumns: SELECT, joinSql: '', whereSql: 'WHERE 1 = 1', params: {}, page: 1, pageSize: 20, familyOrderSql: 'family_name ASC', intraFamilyOrderSql: 'id ASC' }, candidateSql: 'SELECT id, NULL AS r FROM products' }),
+    ]
+    const out = []
+    for (const attempt of attempts) { try { const r = await attempt(); out.push(JSON.stringify(r.result || r).length > 0 ? 'ran' : 'ran') } catch (error) { out.push(/candidateSql needs a keyed page read/.test(String(error.message)) ? 'refused' : `failed: ${error.message}`) } }
+    return out
+  }
+  await check('FAIL CLOSED: a candidate list the read cannot honour (no keyed page, no family members) is refused, never dropped', async () => {
+    assert.deepEqual(await narrowOutcomes(base), ['refused', 'refused', 'refused'])
+    const ok = await run(base, 'candidates', 'cream')
+    assert.ok(ok.result.items.length > 0, 'the honoured form still runs')
   })
 
   // ---- the route glue ---------------------------------------------------------------------------------------------------------------------------------------------------
@@ -271,6 +326,9 @@ const check = async (name, fn) => { await fn(); passed += 1; console.log(`PASS $
     ['dropped the other WHERE terms (active, brand, promo)', [{ file: 'src/lib/familyPagination.ts', from: '${opts.joinSql}\n      ${opts.whereSql}\n    ),', to: '${opts.joinSql}\n      WHERE 1 = 1\n    ),' }]],
     ['family rank takes the worst row instead of the best', [{ file: 'src/lib/familyPagination.ts', from: "', MIN(__match_rank) AS match_rank'", to: "', MAX(__match_rank) AS match_rank'" }]],
     ['ranked-id candidates ignore the list', [{ file: 'src/lib/productSearchQuery.ts', from: "idsSql: `SELECT CAST(value AS INTEGER) AS id, NULL AS r FROM json_each(@${prefix}rankIdList)`", to: 'idsSql: `SELECT id, NULL AS r FROM products`' }]],
+    ['UPC pair drops the zero-preserving digits filter', [{ file: 'src/lib/productSearchQuery.ts', from: ' AND ${normalizedBarcodeDigitsSql(column)} IN (${upcA}, ${upcE})', to: '' }]],
+    ["candidate branch orders by the parent's created date", [{ file: 'src/lib/familyPagination.ts', from: 'p.created_at AS __created_at${matchRankSelect}${matchTierSelect}${promotedSelect}${sortValueSelect}${numericSortSelect}\n      FROM (${opts.candidateSql})', to: 'COALESCE(parent.created_at, p.created_at) AS __created_at${matchRankSelect}${matchTierSelect}${promotedSelect}${sortValueSelect}${numericSortSelect}\n      FROM (${opts.candidateSql})' }]],
+    ['candidate FTS source ranks with the default bm25 weights', [{ file: 'src/lib/productSearchQuery.ts', from: "${titleOnly ? 'NULL' : PRODUCTS_FTS_BM25_SQL} AS r FROM", to: "${titleOnly ? 'NULL' : 'bm25(products_fts)'} AS r FROM" }]],
   ]
   for (const [label, patches] of MUTANTS) {
     await check(`MUTANT is caught: ${label}`, async () => {
@@ -279,6 +337,16 @@ const check = async (name, fn) => { await fn(); passed += 1; console.log(`PASS $
       assert.ok(mutated.some((json, index) => json !== reference[index]), `no comparison noticed the mutant "${label}"`)
     })
   }
+  await check('MUTANT is caught: the non-FTS sources no longer skip the FTS ids', async () => {
+    const patch = [{ file: 'src/lib/productSearchQuery.ts', from: "return ftsQueryParam ? ` ${idColumn} NOT IN (SELECT rowid FROM products_fts WHERE products_fts MATCH @${ftsQueryParam})` : ''", to: "return ' 1 = 1'" }]
+    const { rows, ftsIds } = candidateRows(loadSearch(patch), 'zzbarcode')
+    const id = raw.prepare("SELECT id FROM products WHERE name = 'zzbarcode'").get().id
+    assert.ok(ftsIds.has(id) && rows.filter((r) => r.id === id).length > 1, 'without the skip the product is listed more than once')
+  })
+  await check('MUTANT is caught: narrowRead fails open again', async () => {
+    const patch = [{ file: 'src/lib/familyPagination.ts', from: "if (opts.candidateSql && (!keyedPage || !opts.familyMemberBaseWhereSql)) throw new Error('candidateSql needs a keyed page read (seekPage or the ranked scope) and familyMemberBaseWhereSql: the search term is already gone from whereSql')\n  return opts", to: 'return opts.candidateSql && (!keyedPage || !opts.familyMemberBaseWhereSql) ? { ...opts, candidateSql: undefined } : opts' }]
+    assert.notDeepEqual(await narrowOutcomes(loadSearch(patch)), ['refused', 'refused', 'refused'])
+  })
   await check('MUTANT is caught: searchCandidateRead accepts a doubled search term', async () => {
     assert.notDeepEqual(glueCases(glueFor([{ from: '!== 1) return undefined', to: '< 1) return undefined' }])), glueCases(glueFor()))
   })

@@ -89,9 +89,29 @@ const BATTERY = {
   'q_upc_pair': `${SEARCH}?page=1&pageSize=20&query=042100005264`,
   'rank_ids_320_p2': `${SEARCH}?page=2&pageSize=30&surface=pos&query=serum&rankIds=${Array.from({ length: 320 }, (_, i) => 1000 + ((i * 7) % 2000)).join(',')}&rankTiers=${'3'.repeat(320)}`,
   'rank_ids_child_only': `${SEARCH}?page=1&pageSize=30&surface=pos&rankIds=${[1011, 1012].concat(Array.from({ length: 320 }, (_, i) => 1100 + ((i * 3) % 1900))).filter((v, i, arr) => arr.indexOf(v) === i).join(',')}`,
+  // non-empty promotion, POS, Products-default and ranked-list shapes (hashes taken at 6e8eed496): the empty-body shapes above only pin "no rows"
+  'q_balm_promoted': `${SEARCH}?page=1&pageSize=20&query=balm&promo=promoted`,
+  'q_cream_rules': `${SEARCH}?page=1&pageSize=20&query=cream&promo=rules`,
+  'q_balm_discounted': `${SEARCH}?page=1&pageSize=20&query=balm&promo=discounted`,
+  'pos_text_48': `${SEARCH}?page=1&pageSize=48&query=cream&sort=name_asc&include=branch_stock,images,batches,tagged_lots&surface=pos&branchId=1`,
+  'products_text_default': `${SEARCH}?page=1&pageSize=50&query=serum&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`,
+  'comma_or': `${SEARCH}?page=1&pageSize=20&query=serum,balm&searchMode=OR`,
+  'rank_ids_1500_p16': `${SEARCH}?page=16&pageSize=30&surface=pos&sort=created_desc&rankIds=${Array.from({ length: 1500 }, (_, i) => 1000 + i).join(',')}&rankTiers=${'0123'.repeat(375)}`,
   'index_p0': '/api/products/search-index?page=0',
   'index_p1': '/api/products/search-index?page=1',
 }
+
+// Barcode shapes that need real UPC codes. The fixture has none, so main() writes four barcodes first (UPC_ROWS) and then runs these: the stored UPC-A, its UPC-E, the UPC-A without its
+// leading zero and as an EAN-13. A UPC scan returns the first two only; the plain 11-digit text (not a UPC) finds the stored forms of the UPC-A through the normalized catch-all.
+const UPC_ROWS = { 1020: '042100005264', 1021: '04252614', 1022: '42100005264', 1024: '0042100005264' }
+const UPC_BATTERY = {
+  'q_upc_a': `${SEARCH}?page=1&pageSize=25&query=042100005264`,
+  'q_upc_e': `${SEARCH}?page=1&pageSize=20&query=04252614`,
+  'q_upc_short': `${SEARCH}?page=1&pageSize=20&query=42100005264`,
+  'q_upc_ean': `${SEARCH}?page=1&pageSize=20&query=0042100005264`,
+  'q_upc_a_branch': `${SEARCH}?page=1&pageSize=20&surface=pos&branchId=1&query=042100005264`,
+}
+const ALL_ROUTES = { ...BATTERY, ...UPC_BATTERY }
 
 const GOLDEN = {
   browse: ['bee834f06f373adadca7f6f4c2810876d010aeb0481c5f6ece26eb11225575c1', 19076, 10040],
@@ -104,7 +124,7 @@ const GOLDEN = {
   q_serum_p2: ['ec517d38e2ea8d2301ebed5e9ee7eaaa6b45fda0758a4e9657e00e22a11ed11d', 22319, 9550],
   q_multiword: ['854c57cf8e8d6f862d6d2ed1381d5676de914bbcf7134ee13afe37832c26f54e', 25361, 11170],
   q_barcode: ['936de0e211bdd96a5fb257cfa4316098194dc7aa97469caa7a259b5dced633b0', 8384, 60],
-  q_title_only: ['34718a4fab2177b11857424e1692f112f4c19d793f71c70eadcfb038e153215c', 11206, 3120],
+  q_title_only: ['34718a4fab2177b11857424e1692f112f4c19d793f71c70eadcfb038e153215c', 11206, 4480], // a title-only text search keeps the predicate form (the candidate form read more on a name that matches most of the catalogue: its two sources overlap on every hit); ceiling = the 4,268 rows it reads at 6e8eed496 + 5 per cent. The earlier 3,120 was the candidate form.
   q_nothing: ['fe057055e890dbe518aa0da78e08378dcea953539f70223b09ea3d9e6649fdf6', 6309, 40],
   q_page_past_end: ['09b09900554807476e90addebb7470a19bb9b31023f4de6b8af6d6f4251a9b6c', 19401, 14420],
   branch1_in_stock: ['07d2d9223c8239d4a317b5b3a317ef5de2d21be8a2fb7e1596ba2c959797b519', 22193, 10730],
@@ -156,11 +176,23 @@ const GOLDEN = {
   q_cream_branch_stock: ['de0b62582fa3d6605fd4d0278a8ecdea4ad950d76626b83d8c7d624b4387cb76', 5505, 3410],
   q_cream_brand_promo: ['fe057055e890dbe518aa0da78e08378dcea953539f70223b09ea3d9e6649fdf6', 2598, 1090],
   q_cream_created_asc_p2: ['d84486f74687e37b3a8ef0093768100cc9e0ed711165a315c18dd1431e0f6746', 5057, 2640],
-  q_substring: ['34718a4fab2177b11857424e1692f112f4c19d793f71c70eadcfb038e153215c', 4284, 2340],
-  q_barcode_fragment: ['1363b5e72856c4d64e579ef0e06a31ebd54dac3580c79a6f7a57a77f8167facc', 2884, 870],
+  q_substring: ['34718a4fab2177b11857424e1692f112f4c19d793f71c70eadcfb038e153215c', 4284, 2600], // raised from 2,340 (2,229 rows measured before): the id sources that skip the ids the word index matches (productSearchQuery.ts skippingFtsIds) cost one probe per trigram hit when the word index matches nothing, and save a repeated product probe on every word search. 2,470 rows now, base 4,284.
+  q_barcode_fragment: ['1363b5e72856c4d64e579ef0e06a31ebd54dac3580c79a6f7a57a77f8167facc', 2884, 920], // raised from 870 by 50 for the same reason (871 rows now, base 2,884).
   q_upc_pair: ['fe057055e890dbe518aa0da78e08378dcea953539f70223b09ea3d9e6649fdf6', 2085, 40],
   rank_ids_320_p2: ['294a2f3a94880670b9a6956c96f779e577fd223b3adde184010095d8e00de3ac', 4961, 4880],
   rank_ids_child_only: ['ed9a86e9897b6959aef57a1b799caceeb741fccb897e4298f9205047060ba010', 5055, 4900],
+  q_balm_promoted: ['be5e4d7e8bb21ddb8c8a0132f63f60052eb38b3254025f5b631f49f812515600', 6204, 3720],
+  q_cream_rules: ['1a319309f2ba8ed1b5b37d019300c12486d071f3f89609f6817e4577783f0053', 4356, 2150],
+  q_balm_discounted: ['c94c7507de51995dd9ba370711789ed99e6a4058b14a8bd36050612e8f8338c9', 5036, 2970],
+  pos_text_48: ['3d4b294375da0679b75ae5bef573c253142468980a5d3a5738ee3786659f0f61', 6504, 3880],
+  products_text_default: ['b8b316d65677d7d168c75c50a7b503699d1bea5bb9e428ef0502b12fc8d5d770', 15445, 10910],
+  comma_or: ['5af76fdead187f4c579a30909eb2080e1493a03a878cf0e26af40b1c9f3151dd', 17872, 11880],
+  rank_ids_1500_p16: ['b3c954c8d8013875aa9b559f2f77c7ff041706849f5cc32506158ecb8f32e780', 12283, 11330],
+  q_upc_a: ['2c302633ae5e77d9c11f58a000bfd218e199aaff190350ca774449bf034a8e75', 2149, 110],
+  q_upc_e: ['bdff6586c57519d3794ef5d379786fcad31ac7f124f7f9bffd7b2fd6aa7d84ae', 2149, 110],
+  q_upc_short: ['57391b2ec654c239cc6e43b2d5e40f2708743e95adae09d823dc5d006b015804', 2243, 210],
+  q_upc_ean: ['bdff6586c57519d3794ef5d379786fcad31ac7f124f7f9bffd7b2fd6aa7d84ae', 2149, 110],
+  q_upc_a_branch: ['bdff6586c57519d3794ef5d379786fcad31ac7f124f7f9bffd7b2fd6aa7d84ae', 2149, 110],
   index_p0: ['48e0d34c2f90b1f50497180964d0ec2158232aed3a54d3843ed89ecdbf43850e', 3073, 1070],
   index_p1: ['aa3577679394938407abfc3e78b0f5f61163982b10ffb05d3d4dace2b801964a', 3121, 1120],
 }
@@ -174,7 +206,8 @@ async function main() {
   try {
     const out = {}
     let hit
-    for (const [label, route] of Object.entries(BATTERY)) {
+    for (const [label, route] of Object.entries(ALL_ROUTES)) {
+      if (label === Object.keys(UPC_BATTERY)[0]) for (const [id, barcode] of Object.entries(UPC_ROWS)) await world.db.prepare('UPDATE products SET barcode = ? WHERE id = ?').bind(barcode, Number(id)).run()
       const r = await world.call(route)
       assert.equal(r.status, 200, `${label}: status ${r.status} ${r.text.slice(0, 200)}`)
       out[label] = r
@@ -186,7 +219,7 @@ async function main() {
 
     // 1. Byte-identical to 04ab054cb, and cheaper than the ceiling for every shape.
     let oldTotal = 0, newTotal = 0
-    for (const label of Object.keys(BATTERY)) {
+    for (const label of Object.keys(ALL_ROUTES)) {
       const [hash, oldRows, ceiling] = GOLDEN[label]
       assert.equal(sha(out[label].text), hash, `${label}: response differs from the 04ab054cb output`)
       assert.ok(out[label].rows <= ceiling, `${label}: ${out[label].rows} rows read, ceiling ${ceiling} (was ${oldRows} at 04ab054cb)`)
@@ -194,7 +227,7 @@ async function main() {
       newTotal += out[label].rows
     }
     assert.ok(newTotal < oldTotal * 0.53, `battery reads ${newTotal} rows, was ${oldTotal}; expected under 53 per cent`)
-    console.log(`PASS ${Object.keys(BATTERY).length} responses byte-identical to 04ab054cb; rows read ${oldTotal} -> ${newTotal} (${Math.round(100 * newTotal / oldTotal)} per cent)`)
+    console.log(`PASS ${Object.keys(ALL_ROUTES).length} responses byte-identical to 04ab054cb; rows read ${oldTotal} -> ${newTotal} (${Math.round(100 * newTotal / oldTotal)} per cent)`)
     for (const label of ['browse', 'browse_p3_50', 'created_desc', 'q_serum', 'q_multiword', 'q_child_sku', 'branch1_in_stock', 'low_stock', 'list', 'index_p0'])
       console.log(`MEASURE ${label}: ${GOLDEN[label][1]} -> ${out[label].rows}`)
 
@@ -217,12 +250,20 @@ async function main() {
     // matches little reads little (before, every typed search read every active product: ~2,000 rows here whatever the text matched). Searches with a hybrid, short-word or partial-word
     // term (several words, one or two letters) keep the predicate form.
     const candidateStatements = log => log.filter(entry => /\b__cand\b/.test(entry.sql))
-    for (const label of ['q_serum', 'q_serum_p2', 'q_barcode', 'q_khmer', 'q_nothing', 'q_retired', 'q_title_only', 'q_page_past_end', 'rank_ids_320'])
+    for (const label of ['q_serum', 'q_serum_p2', 'q_barcode', 'q_khmer', 'q_nothing', 'q_retired', 'q_page_past_end', 'rank_ids_320', 'q_substring', 'q_balm_promoted', 'pos_text_48', 'products_text_default', 'rank_ids_1500_p16', 'comma_or', 'q_upc_a', 'q_upc_e', 'q_upc_short'])
       assert.ok(candidateStatements(out[label].log).length >= 1, `${label} ranks from its candidate ids`)
-    for (const label of ['q_multiword', 'q_child_sku', 'q_blank_child', 'q_khmer_serum', 'browse', 'by_ids', 'rank_ids'])
+    for (const label of ['q_title_only', 'q_multiword', 'q_child_sku', 'q_blank_child', 'q_khmer_serum', 'browse', 'by_ids', 'rank_ids'])
       assert.equal(candidateStatements(out[label].log).length, 0, `${label} keeps the predicate form`)
     assert.ok(out.q_nothing.rows < 60 && out.q_barcode.rows < 100 && out.q_khmer.rows < 200, `a search that matches little reads little: ${out.q_nothing.rows}, ${out.q_barcode.rows}, ${out.q_khmer.rows}`)
     assert.ok(out.q_serum.rows < 0.8 * GOLDEN.q_serum[1], 'a common word reads far less than the 04ab054cb statement')
+    // The new shapes return rows (an empty body pins nothing but "no rows"), and a UPC scan returns exactly the UPC-A and UPC-E rows, never the short or EAN-13 spelling of the same digits.
+    for (const label of ['q_balm_promoted', 'q_cream_rules', 'q_balm_discounted', 'pos_text_48', 'products_text_default', 'comma_or', 'rank_ids_1500_p16', 'q_upc_a', 'q_upc_short'])
+      assert.ok(JSON.parse(out[label].text).items.length > 0, `${label} returns rows`)
+    const idsOf = label => JSON.parse(out[label].text).items.map(item => item.id).sort((a, b) => a - b)
+    assert.deepEqual(idsOf('q_upc_a'), [1020, 1021], 'a UPC-A scan finds the UPC-A and its UPC-E, not the short or EAN-13 spelling')
+    assert.deepEqual(idsOf('q_upc_e'), [1020, 1021], 'a UPC-E scan finds the same two rows')
+    assert.deepEqual(idsOf('q_upc_a_branch'), [1020, 1021])
+    assert.ok(idsOf('q_upc_short').includes(1022) && !idsOf('q_upc_short').includes(1021), 'the 11-digit text is not a UPC scan')
     console.log(`PASS typed searches rank from candidate ids; nothing ${out.q_nothing.rows} rows, barcode ${out.q_barcode.rows}, Khmer ${out.q_khmer.rows}, "serum" ${out.q_serum.rows}`)
 
     // 3. A cache hit does not re-run the page query and returns the same bytes.
