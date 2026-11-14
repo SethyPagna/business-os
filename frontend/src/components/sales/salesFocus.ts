@@ -7,6 +7,8 @@
  * the receipt, so the page looks the same; the moment the user edits the search or picks dates, the focus stops applying and the page reads as typed.
  * Once it has stopped applying it is dropped for good (nextSalesFocus), so typing the receipt again later is a fresh search like any other.
  */
+import { useEffect, type Dispatch, type SetStateAction } from 'react'
+
 export type SalesFocus = { saleId: number; receipt: string }
 
 /** The queued handoff (sessionStorage JSON) as a focus, or null when it names no usable sale id. A receipt-only handoff stays a plain search. */
@@ -47,4 +49,34 @@ export function nextSalesFocus(
   range: { startDate?: string; endDate?: string },
 ): SalesFocus | null {
   return activeSalesFocusId(focus, typed, sent, range) === null ? null : focus
+}
+
+/**
+ * The focus after the box or the dates changed, for a state updater. `seen` is the focus the effect's render saw; `current` is what the state holds when the
+ * updater runs. They differ when an earlier effect in the same flush queued a new focus (the link consumed on a cold mount): this render's typed text and dates
+ * predate that focus, so judging it by them would drop it before it ever applied. A focus this render did not see is kept; the next render judges it.
+ */
+export function settleSalesFocus(
+  current: SalesFocus | null,
+  seen: SalesFocus | null,
+  typed: string,
+  sent: string,
+  range: { startDate?: string; endDate?: string },
+): SalesFocus | null {
+  return current === seen ? nextSalesFocus(current, typed, sent, range) : current
+}
+
+/** Ends the focus for good once the search is edited past the debounce lag or dates are picked (see settleSalesFocus for the same-flush case). */
+export function useSettleSalesFocus(
+  focus: SalesFocus | null,
+  setFocus: Dispatch<SetStateAction<SalesFocus | null>>,
+  typed: string,
+  sent: string,
+  range: { startDate?: string; endDate?: string },
+): void {
+  useEffect(() => {
+    setFocus((current) => settleSalesFocus(current, focus, typed, sent, range))
+    // `focus` is read only to tell a stale render from a fresh one; a change of focus itself re-runs this through typed/sent/range on the next render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typed, sent, range])
 }
