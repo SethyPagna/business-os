@@ -1,14 +1,11 @@
 -- Analytics Engine SQL, not D1. How the routes that carry a shape label (lib/requestMetrics.ts SHAPED_ROUTES) are called:
--- blob6 starts with 'shape=<label>;'. The label is a constant of a fixed set per route; never a search text or an id.
--- Nested if() instead of multiIf (A2): insurance in case the Analytics Engine SQL dialect rejects multiIf; same labels, same result.
+-- blob6 is 'shape=<label>', then a semicolon and the flags when the request has flags (flagsWithShape). The label is a constant of a fixed
+-- set per route (12 characters at most); never a search text or an id. The query groups by the 13 characters after shape= and ops-metrics.mjs
+-- mergeShapeRows cuts that at the first semicolon and merges the groups: no label list lives here, because 16 nested if() hit the Analytics
+-- Engine SQL parser recursion limit (HTTP 422, metrics runs 43564080244 and 43584970254), and the query guard refuses any semicolon.
 -- Weighted by both samplings like route-latency; one cache state per group keeps double6 constant inside it.
 SELECT blob2 AS route, blob3 AS method,
-       if(blob6 LIKE 'shape=default%', 'default', if(blob6 LIKE 'shape=filter%', 'filter', if(blob6 LIKE 'shape=text%', 'text',
-             if(blob6 LIKE 'shape=barcode%', 'barcode', if(blob6 LIKE 'shape=ids%', 'ids', if(blob6 LIKE 'shape=rank_le20%', 'rank_le20',
-             if(blob6 LIKE 'shape=rank_lt300%', 'rank_lt300', if(blob6 LIKE 'shape=rank_le1500%', 'rank_le1500', if(blob6 LIKE 'shape=rank_gt1500%', 'rank_gt1500',
-             if(blob6 LIKE 'shape=search%', 'search', if(blob6 LIKE 'shape=all%', 'all', if(blob6 LIKE 'shape=day%', 'day',
-             if(blob6 LIKE 'shape=range%', 'range', if(blob6 LIKE 'shape=picker_empty%', 'picker_empty', if(blob6 LIKE 'shape=picker_text%', 'picker_text',
-             if(blob6 LIKE 'shape=list%', 'list', 'other')))))))))))))))) AS shape,
+       substring(blob6, 7, 13) AS shape,
        blob5 AS cache,
        SUM(_sample_interval * double6) AS requests,
        count() AS stored_rows,

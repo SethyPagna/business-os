@@ -128,6 +128,25 @@ const number = (value) => {
 
 const rowsOf = (list) => list.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, /^(route|method|shape|cache|label|status|day|business_date|outcome|first_diff_path)$/.test(key) ? String(value) : number(value)])))
 
+// request-shapes.sql groups by the 13 characters after 'shape=' (the label, then possibly a semicolon and flags): cut at the first semicolon
+// and merge the groups of one route/method/label/cache. Sums add; averages are re-weighted by requests; p95 cannot be merged, so the
+// largest group p95 is kept (an upper bound, never an understatement).
+export function mergeShapeRows(rows) {
+  const merged = new Map()
+  for (const row of rows) {
+    const shape = String(row.shape).split(';')[0]
+    const key = [row.route, row.method, shape, row.cache].join('\u0000')
+    const into = merged.get(key) || { route: row.route, method: row.method, shape, cache: row.cache, requests: 0, stored_rows: 0, rows_read_total: 0, calls_weight: 0, wall_p95_ms: null }
+    into.requests += row.requests || 0
+    into.stored_rows += row.stored_rows || 0
+    into.rows_read_total += row.rows_read_total || 0
+    into.calls_weight += (row.d1_calls_avg || 0) * (row.requests || 0)
+    if (row.wall_p95_ms !== null && row.wall_p95_ms !== undefined) into.wall_p95_ms = into.wall_p95_ms === null ? row.wall_p95_ms : Math.max(into.wall_p95_ms, row.wall_p95_ms)
+    merged.set(key, into)
+  }
+  return [...merged.values()].map(({ calls_weight, ...row }) => ({ ...row, rows_read_avg: row.requests ? row.rows_read_total / row.requests : null, d1_calls_avg: row.requests ? calls_weight / row.requests : null }))
+}
+
 const normalizeRoute = (route) => (String(route).length > 1 ? String(route).replace(/\/+$/, '') : String(route))
 
 export function flowOf(route, method) {
@@ -223,7 +242,7 @@ export async function readMetrics({ fetchImpl, accountId, token, from, days, rev
     latency: summarizeLatency(rows['route-latency']),
     errors: rows['route-errors'],
     builds,
-    shapes: rowsOf(rows['request-shapes']),
+    shapes: mergeShapeRows(rowsOf(rows['request-shapes'])),
     background: rowsOf(rows['background-runs']),
     shadow: rowsOf(rows['report-atomic-shadow']),
     shadowSummary: summarizeShadow(rows['report-atomic-shadow'], windows),

@@ -145,14 +145,32 @@ function fakeAnalytics(answers) {
     assert.deepStrictEqual([...metrics.QUERY_NAMES], ['route-latency', 'route-errors', 'build-revisions', 'request-shapes', 'background-runs', 'report-atomic-shadow'])
     const rm = requestMetricsModule()
     const shapes = metrics.buildQuery(templates['request-shapes'], { windows })
-    const labels = [...shapes.matchAll(/blob6 LIKE 'shape=([a-z0-9_]+)%', '([a-z0-9_]+)'/g)]
-    assert.ok(labels.length >= 15 && labels.every((m) => m[1] === m[2]), 'every shape constant maps to itself')
+    // The query groups by the 13 characters after 'shape=' (no nested if(): the Analytics Engine parser's recursion limit refused 16 of them, and
+    // the guard refuses a semicolon); ops-metrics.mjs mergeShapeRows cuts at the first semicolon. The same two steps run here on the exact blob6
+    // strings the Worker writes, with and without flags, so every label comes back unchanged and none is longer than the slice keeps whole.
+    assert.ok(shapes.includes('substring(blob6, 7, 13) AS shape'), 'request-shapes.sql groups by the 13 characters after shape=')
+    assert.ok(!/\bif\(blob6 LIKE/.test(shapes) && !/multiIf/.test(shapes), 'no label list of nested if() or multiIf in the SQL')
+    const shapeOf = (blob6) => metrics.mergeShapeRows([{ route: 'r', method: 'GET', shape: blob6.slice(6, 6 + 13), cache: 'miss', requests: 1 }])[0].shape
     const emitted = [...new Set(['default', 'filter', 'text', 'barcode', 'ids', 'rank_le20', 'rank_lt300', 'rank_le1500', 'rank_gt1500',
       rm.salesStatsShape({}), rm.salesStatsShape({ startDate: 'a', endDate: 'a' }), rm.salesStatsShape({ startDate: 'a', endDate: 'b' }), rm.salesStatsShape({ q: 'x' }),
-      rm.customersShape({ fields: 'sales_picker' }), rm.customersShape({ fields: 'sales_picker', q: 'x' }), rm.customersShape({}), rm.customersShape({ q: 'x' })])]
-    for (const label of emitted) assert.ok(labels.some((m) => m[1] === label), `request-shapes.sql names the shape ${label}`)
-    for (const query of [{}, { category: 'x' }, { query: 'x' }, { query: '123456' }, { ids: '1' }, { rankIds: '1' }, { rankIds: Array(21).fill(1).join(',') }, { rankIds: Array(300).fill(1).join(',') }, { rankIds: Array(1501).fill(1).join(',') }]) {
-      assert.ok(labels.some((m) => m[1] === rm.productsSearchShape(query)), `products/search shape ${rm.productsSearchShape(query)} is named in the SQL`)
+      rm.customersShape({ fields: 'sales_picker' }), rm.customersShape({ fields: 'sales_picker', q: 'x' }), rm.customersShape({}), rm.customersShape({ q: 'x' }),
+      ...[{}, { category: 'x' }, { query: 'x' }, { query: '123456' }, { ids: '1' }, { rankIds: '1' }, { rankIds: Array(21).fill(1).join(',') }, { rankIds: Array(300).fill(1).join(',') }, { rankIds: Array(1501).fill(1).join(',') }].map((q) => rm.productsSearchShape(q))])]
+    assert.ok(emitted.length >= 15, 'every shape family is exercised')
+    for (const label of emitted) assert.ok(label.length <= 12, `shape ${label} fits the 13-character slice with its terminator`)
+    const merged = metrics.mergeShapeRows([
+      { route: '/api/sales/stats', method: 'GET', shape: 'day;ic_simple', cache: 'miss', requests: 10, stored_rows: 2, rows_read_total: 1000, rows_read_avg: 100, d1_calls_avg: 10, wall_p95_ms: 50 },
+      { route: '/api/sales/stats', method: 'GET', shape: 'day', cache: 'miss', requests: 30, stored_rows: 3, rows_read_total: 9000, rows_read_avg: 300, d1_calls_avg: 20, wall_p95_ms: 80 },
+      { route: '/api/sales/stats', method: 'GET', shape: 'search;ic_sim', cache: 'miss', requests: 5, stored_rows: 1, rows_read_total: 500000, rows_read_avg: 100000, d1_calls_avg: 19, wall_p95_ms: null },
+      { route: '/api/sales/stats', method: 'GET', shape: 'day', cache: 'hit', requests: 4, stored_rows: 1, rows_read_total: 0, rows_read_avg: 0, d1_calls_avg: 1, wall_p95_ms: 5 }])
+    const day = merged.find((r) => r.shape === 'day' && r.cache === 'miss')
+    assert.deepStrictEqual([merged.length, day.requests, day.stored_rows, day.rows_read_total, day.rows_read_avg, day.d1_calls_avg, day.wall_p95_ms], [3, 40, 5, 10000, 250, 17.5, 80], 'groups with flags merge into their label: sums add, averages re-weighted, p95 kept as the larger')
+    assert.strictEqual(merged.find((r) => r.shape === 'search').wall_p95_ms, null, 'an unknown p95 stays unknown')
+    for (const label of emitted) {
+      for (const flags of ['', 'ic_simple=on', 'ic_simple=on;report_atomic=on']) {
+        const point = { kind: 'api', template: '/api/x', method: 'GET', status: '200', cache: 'miss', flags: rm.flagsWithShape(label, flags), wallMs: 1, weight: 1, acc: rm.createRequestMetrics('api', '', 0) }
+        const blob6 = rm.datapointLabels(point)[5]
+        assert.strictEqual(shapeOf(blob6), label, `shape ${label} comes back from blob6 ${JSON.stringify(blob6)}`)
+      }
     }
     assert.ok(shapes.includes("blob1 = 'api'") && shapes.includes("blob6 LIKE 'shape=%'") && shapes.includes('GROUP BY route, method, shape, cache'), 'api rows with a shape, one cache state per group')
     assert.ok(shapes.includes('SUM(_sample_interval * double6 * double3) AS rows_read_total'), 'rows read, both samplings')
@@ -220,7 +238,7 @@ function fakeAnalytics(answers) {
     })
     const result = await metrics.readMetrics({ fetchImpl: fake.fetchImpl, accountId: ACCOUNT, token: TOKEN, from: '2026-09-29', days: 1 })
     assert.strictEqual(result.ok, true)
-    assert.deepStrictEqual(result.shapes, [{ route: '/api/products/search', method: 'GET', shape: 'default', cache: 'miss', requests: 12, rows_read_total: 540000, rows_read_avg: 45000, d1_calls_avg: 11, wall_p95_ms: null }])
+    assert.deepStrictEqual(result.shapes, [{ route: '/api/products/search', method: 'GET', shape: 'default', cache: 'miss', requests: 12, stored_rows: 0, rows_read_total: 540000, rows_read_avg: 45000, d1_calls_avg: 11, wall_p95_ms: null }])
     assert.deepStrictEqual(result.background.map((r) => [r.label, r.runs, r.rows_read]), [['bg:cron:backup', 2, 800000], ['bg:telegram-drain', 5, 50]])
     const text = metrics.publicLines({ result }).map(([t, v]) => common.formatPublic(t, v)).join('\n')
     assert.ok(text.includes('request shape groups: 1; background labels: 2'), text)
