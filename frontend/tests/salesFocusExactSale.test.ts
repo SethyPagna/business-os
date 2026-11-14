@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
-import { activeSalesFocusId, parseSalesFocus } from '../src/components/sales/salesFocus.ts'
+import { activeSalesFocusId, nextSalesFocus, parseSalesFocus } from '../src/components/sales/salesFocus.ts'
 import { queueEntitySearch } from '../src/components/shared/entityLinkFocus.ts'
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
@@ -33,6 +33,23 @@ assert.equal(activeSalesFocusId(focus, 'R0000123', 'R0000123', { startDate: '202
 assert.equal(activeSalesFocusId(focus, 'R0000123', 'R0000123', { endDate: '2026-11-01' }), null)
 assert.equal(activeSalesFocusId(null, 'R0000123', 'R0000123', none), null, 'no focus queued: never an id')
 assert.equal(activeSalesFocusId({ saleId: 42, receipt: 'R0000123' }, ' R0000123 ', 'R0000123', none), 42, 'surrounding spaces in the box do not break it')
+
+// --- the focus clears for good once it stops applying
+assert.equal(nextSalesFocus(focus, 'R0000123', 'R0000123', none), focus, 'still applies: kept as is')
+assert.equal(nextSalesFocus(focus, 'R00001234', 'R0000123', none), focus, 'inside the debounce lag: kept, so no all-time search fires for the old text')
+assert.equal(nextSalesFocus(focus, 'R00001234', 'R00001234', none), null, 'edited past the lag: dropped')
+assert.equal(nextSalesFocus(focus, 'R0000123', 'R0000123', { startDate: '2026-11-01' }), null, 'a date range drops it')
+assert.equal(nextSalesFocus(null, 'R0000123', 'R0000123', none), null)
+{
+  // a session: link -> edit -> retype the same receipt. The retype must be a fresh typed search (no id), not a return to the focus.
+  let kept: typeof focus | null = focus
+  const step = (typed: string, sent: string, range = {}) => { kept = nextSalesFocus(kept, typed, sent, range); return activeSalesFocusId(kept, typed, sent, range) }
+  assert.equal(step('R0000123', 'R0000123'), 42)
+  assert.equal(step('R000012', 'R0000123'), 42, 'lag')
+  assert.equal(step('R000012', 'R000012'), null, 'edited')
+  assert.equal(step('R0000123', 'R000012'), null, 'retyped the same receipt: still no id')
+  assert.equal(step('R0000123', 'R0000123'), null, 'and after the debounce: a fresh search, never the id')
+}
 
 // --- the wiring
 const sales = read('src/components/sales/Sales.tsx')

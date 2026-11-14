@@ -5,6 +5,7 @@
  * line, about a million rows a click. The link now also queues the sale id; while the search box still holds that receipt and no date range is set,
  * the list and its totals read `id=<sale id>` (an indexed lookup the API already answered for the list, and now for the totals). The box still shows
  * the receipt, so the page looks the same; the moment the user edits the search or picks dates, the focus stops applying and the page reads as typed.
+ * Once it has stopped applying it is dropped for good (nextSalesFocus), so typing the receipt again later is a fresh search like any other.
  */
 export type SalesFocus = { saleId: number; receipt: string }
 
@@ -33,4 +34,17 @@ export function activeSalesFocusId(
   if (range.startDate || range.endDate) return null
   const same = (value: string) => value.trim() === focus.receipt
   return same(typed) || same(sent) ? focus.saleId : null
+}
+
+/**
+ * The focus to keep after the box or the dates changed: the same object while it still applies, null once it has stopped (the user edited the text past the debounce lag
+ * or picked dates). A dropped focus never comes back, so retyping that receipt reads as a typed search, exactly like a fresh one.
+ */
+export function nextSalesFocus(
+  focus: SalesFocus | null,
+  typed: string,
+  sent: string,
+  range: { startDate?: string; endDate?: string },
+): SalesFocus | null {
+  return activeSalesFocusId(focus, typed, sent, range) === null ? null : focus
 }

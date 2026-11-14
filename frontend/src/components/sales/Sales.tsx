@@ -93,7 +93,7 @@ import { mutationVersionAtLeast, reconcileDirectMutationReceipt, readCommittedMu
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { isAdminControlUser, saleAmendmentWindowAllows } from '../../utils/permissions.ts'
 import { advanceSaleSecurityScope, saleSecurityFingerprint } from './saleSettlementConfig.ts'
-import { activeSalesFocusId, parseSalesFocus, type SalesFocus } from './salesFocus.ts'
+import { activeSalesFocusId, nextSalesFocus, parseSalesFocus, type SalesFocus } from './salesFocus.ts'
 import { recoverSaleStatus, type SaleStatusRecoveryResult } from '../../utils/saleStatusRecovery.ts'
 import { PAID_SALE_STATUSES, salePaymentStatus, statusChangeNeedsPayment } from '../../utils/saleStatusResolution.ts'
 import { saleStatusDisplay, saleStatusWords } from '../../utils/saleStatusDisplay.ts'
@@ -760,6 +760,10 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
 
   // A link to one sale reads it by id (an indexed lookup) instead of running its receipt number as an all-time text search.
   const focusSaleId = activeSalesFocusId(salesFocus, search, effectiveSalesSearch, salesDateRange)
+  // Editing the search (past the debounce lag) or picking dates ends the focus for good: typing the same receipt again is then a fresh search.
+  useEffect(() => {
+    setSalesFocus((current) => nextSalesFocus(current, search, effectiveSalesSearch, salesDateRange))
+  }, [search, effectiveSalesSearch, salesDateRange])
   const salesStatsParams = useMemo(() => ({
     ...(isAdmin && userFilter !== 'all' ? { userId: userFilter } : {}),
     ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
