@@ -267,8 +267,8 @@ app.post('/types/rename', async (c) => {
     if (isUniqueViolation(error)) return fail(c, 409, 'type_exists', 'That type already exists.')
     throw error
   }
-  // Moves fee rows the sales report snapshot reads: bump sales (awaited) before the broadcast. Skipped when no row changed.
-  if (linked > 0) await bumpVersions(c.env, ['sales'])
+  // No sales bump: a rename moves fee_type between two CUSTOM types (built-in types, 'delivery' among them, can be neither source nor target), and the
+  // cached sales snapshot reads fee_type only as `= 'delivery'` (lib/feeSalesImpact.ts). Nothing it reads changes.
   c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'type_rename', from: source.name, to }))
   return c.json({ success: true, changed: linked, name: to })
 })
@@ -505,8 +505,7 @@ app.post('/labels/replace', async (c) => {
     if (isUniqueViolation(error)) return fail(c, 409, 'label_exists', 'That label already exists.')
     throw error
   }
-  // Moves fee rows the sales report snapshot reads: bump sales (awaited) before the broadcast. Skipped when no row changed.
-  if (sourceUses > 0) await bumpVersions(c.env, ['sales'])
+  // No sales bump: a replace changes only `label`, which the cached sales snapshot never reads (lib/feeSalesImpact.ts).
   c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'label_replace', from: sourceName, to: toName }))
   return c.json({ success: true, changed: sourceUses, merged: merge, label: toName })
 })
@@ -527,15 +526,19 @@ app.post('/labels/classify', async (c) => {
   const name = row ? row.name : ((await rowsSpelling(db, key)) ?? typed.label)
   const changing = await countRows(db, `SELECT COUNT(*) AS n FROM fees WHERE ${LABEL_KEY_SQL} = @key AND fee_type <> @feeType`, { key, feeType })
   const where = `${LABEL_KEY_SQL_F} = @key AND f.fee_type <> @feeType`
-  await db.batch([
+  const results = await db.batch([
+    // Read INSIDE the write's own transaction (a fee created or edited between a separate read and the UPDATE would be missed): how many rows this
+    // classify moves into or out of 'delivery', the only type the cached sales snapshot reads (lib/feeSalesImpact.ts).
+    { sql: `SELECT COUNT(*) AS n FROM fees WHERE ${LABEL_KEY_SQL} = @key AND fee_type <> @feeType AND (fee_type = 'delivery' OR @feeType = 'delivery')`, params: { key, feeType } },
     ensureLabelStatement(user, name, key, feeType, now),
     feeRowsAuditStatement(user, 'fee_type', 'label_classify', feeType, where, { key, feeType }),
     { sql: `UPDATE fees SET fee_type = @feeType, updated_at = @now WHERE ${LABEL_KEY_SQL} = @key AND fee_type <> @feeType`, params: { key, feeType, now } },
     { sql: 'UPDATE fee_labels SET fee_type = @feeType, updated_at = @now WHERE name_key = @key', params: { feeType, now, key } },
     buildAuditStatement(user.id, user.username || null, 'classify', 'fee_label', null, { label: name, fee_type: feeType, changed: changing }, undefined, labelEntityIn(key)),
   ])
-  // Moves fee rows the sales report snapshot reads: bump sales (awaited) before the broadcast. Skipped when no row changed.
-  if (changing > 0) await bumpVersions(c.env, ['sales'])
+  // Bump sales (awaited, before the broadcast) only when a row entered or left the delivery type.
+  const deliveryMoved = Number((results[0]?.results?.[0] as { n?: number } | undefined)?.n || 0)
+  if (deliveryMoved > 0) await bumpVersions(c.env, ['sales'])
   c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'label_classify', label: name, fee_type: feeType }))
   return c.json({ success: true, changed: changing, label: name, fee_type: feeType })
 })
