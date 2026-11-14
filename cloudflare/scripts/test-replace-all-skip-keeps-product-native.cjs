@@ -170,7 +170,7 @@ function fixture(world, { stockedOmitted = false, stockedKeeper = false } = {}) 
     raw.prepare(`INSERT INTO import_jobs(id,type,status,phase,policy_json,materialize_done,chunk_cursor,chunk_state_json,started_at)
       VALUES(@id,'products','awaiting_review','awaiting_review',@policy,1,0,'{}',@started)`).run({ id, policy: JSON.stringify(stored), started: STARTED })
     rows.forEach((r, sequence) => {
-      const data = { _rowNumber: r.row, name: r.name, barcode: r.barcode, description: 'from file', ...(r.mode ? { _action: r.mode } : {}) }
+      const data = { _rowNumber: r.row, name: r.name, barcode: r.barcode, description: 'from file', ...(r.category ? { category: r.category } : {}), ...(r.mode ? { _action: r.mode } : {}) }
       raw.prepare('INSERT INTO import_job_source_rows(job_id,sequence,row_number,data_json) VALUES(@id,@sequence,@row,@data)')
         .run({ id, sequence, row: r.row, data: JSON.stringify(data) })
     })
@@ -272,6 +272,32 @@ add('keeps', 'unchanged-matched-row-holding-stock-never-refuses', async world =>
   assert.equal(f.stock(4), 5)
 })
 
+// R2-1: a skipped row means "leave this product alone". Group unification is scoped by the
+// UPDATED ids only; the skipped ids still go to the replace-all keep list.
+// Group 'Tint' (ids 11-13, all updated by the file) drifts and must heal; group 'Gloss' (ids 21-23, all
+// skipped, no member updated) drifts too and must stay exactly as it is.
+function seedDriftGroup(f, name, ids, categories) {
+  ids.forEach((id, i) => seedFixture(f.raw, () => f.raw.prepare('INSERT INTO products(id,name,name_normalized,unit_normalized,barcode,category,stock_quantity,is_active,updated_at) VALUES(@id,@name,@norm,@unit,@barcode,@category,0,1,@old)')
+    .run({ id, name, norm: name.toLowerCase(), unit: "pcs", barcode: "88001" + String(id).padStart(4, "0"), category: categories[i], old: OLD })))
+}
+add('keeps', 'skipped-row-in-a-drifted-group-is-not-rewritten-but-updated-group-heals', async world => {
+  const f = fixture(world)
+  seedDriftGroup(f, 'Tint', [11, 12, 13], ['Lips', 'Lips', 'Face'])
+  seedDriftGroup(f, 'Gloss', [21, 22, 23], ['Lips', 'Lips', 'Face'])
+  const tint = [11, 12, 13].map((id, i) => ({ row: 10 + i, name: 'Tint', category: ['Lips', 'Lips', 'Face'][i], barcode: "88001" + String(id).padStart(4, "0") }))
+  const gloss = [21, 22, 23].map((id, i) => ({ row: 20 + i, name: 'Gloss', category: ['Lips', 'Lips', 'Face'][i], barcode: "88001" + String(id).padStart(4, "0") }))
+  const id = f.seedJob({ rows: [MATCHED, ...tint, ...gloss], decisions: Object.fromEntries(gloss.map(r => [r.row, { action: 'skip' }])) })
+  await f.run(id)
+  assert.match(f.job(id).status, /^completed/, f.job(id).last_error)
+  const row = pid => f.raw.prepare('SELECT category c, updated_at u FROM products WHERE id=@pid').get({ pid })
+  assert.deepEqual([21, 22, 23].map(pid => row(pid).c), ['Lips', 'Lips', 'Face'], 'a skipped row keeps its own category')
+  assert.deepEqual([21, 22, 23].map(pid => row(pid).u), [OLD, OLD, OLD], 'a skipped row is not rewritten (updated_at unchanged)')
+  assert.equal(f.raw.prepare("SELECT COUNT(*) n FROM audit_logs WHERE entity='product' AND entity_id IN (21,22,23)").get().n, 0, 'a skipped row leaves no audit row')
+  assert.deepEqual([11, 12, 13].map(pid => row(pid).c), ['Lips', 'Lips', 'Lips'], 'the updated rows group still heals')
+  assert.deepEqual([21, 22, 23, 11, 12, 13].map(pid => f.active(pid)), [1, 1, 1, 1, 1, 1], 'replace-all keeps skipped and updated products alike')
+  assert.equal(f.active(99), 0, 'an unnamed product is still deactivated')
+})
+
 add('keeps', 'two-skipped-rows-on-one-product-count-as-two-skipped-rows', async world => {
   const f = fixture(world)
   const again = { row: 5, name: 'Keeper A', barcode: 'KEEP-A', mode: 'skip_row' }
@@ -356,6 +382,16 @@ const WRONG = [
     // The round-1 regression: only skipped rows are kept, an unchanged (update) row is judged by updated_at alone.
     name: 'keeps-skips-only', fails: c => c.name.startsWith('keeps/unchanged-matched-row'),
     patches: [{ name: 'keeps-skips-only', file: 'lib/importEngine.ts', apply: text => text.replace(/keepProductIds: namedProducts\.named \}/, 'keepProductIds: namedProducts.skipped }') }],
+  },
+  {
+    // R2-1: the full named list (skips included) is handed to group unification.
+    name: 'unify-gets-skips', fails: c => c.name === 'keeps/skipped-row-in-a-drifted-group-is-not-rewritten-but-updated-group-heals',
+    patches: [{ name: 'unify-gets-skips', file: 'lib/importEngine.ts', apply: text => text.replace(/jobRow\.started_at \|\| nowIso, namedProducts\.updated\)/, 'jobRow.started_at || nowIso, namedProducts.named)') }],
+  },
+  {
+    // R2-1: the keep list is narrowed to update ids, so a skipped product would be deactivated.
+    name: 'keeps-updates-only', fails: c => ['keeps/skipped-row-in-a-drifted-group-is-not-rewritten-but-updated-group-heals', 'keeps/reviewer-skip-decision-keeps-the-matched-product', 'keeps/skip-row-mode-keeps-the-matched-product', 'keeps/both-ways-of-skipping-in-one-job', 'keeps/two-skipped-rows-on-one-product-count-as-two-skipped-rows', 'keeps/skipped-product-holding-stock-is-kept-and-never-refuses'].includes(c.name),
+    patches: [{ name: 'keeps-updates-only', file: 'lib/importEngine.ts', apply: text => text.replace(/keepProductIds: namedProducts\.named \}/, 'keepProductIds: namedProducts.updated }') }],
   },
   {
     // Every case that asserts an omitted product goes. Not the merge-mode control (nothing goes by design), the one-product count case (asserts no deactivation) or the refusal (throws before the UPDATE).

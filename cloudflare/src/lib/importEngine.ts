@@ -6810,14 +6810,17 @@ export async function readSkippedProductIds(db: D1Compat, jobId: string): Promis
 // an unchanged row is deliberately not rewritten (its updated_at no longer
 // moves), so "was written by this run" is no longer a proof of "is in the file".
 // `skipped` is the 'skip' subset, one entry per skipped row (the summary count);
-// `named` is the de-duplicated union. Pure read of the staging row log.
-export async function readNamedProductIds(db: D1Compat, jobId: string): Promise<{ named: number[]; skipped: number[] }> {
+// `named` is the de-duplicated union; `updated` is the de-duplicated ids that have
+// at least one 'update' row. Only `updated` may scope group unification: a skipped
+// row means "leave this product alone", so it must not pull its group into a rewrite.
+// Pure read of the staging row log.
+export async function readNamedProductIds(db: D1Compat, jobId: string): Promise<{ named: number[]; skipped: number[]; updated: number[] }> {
   const rows = await db.staging.prepare(`SELECT CAST(json_extract(result_json, '$.existingId') AS INTEGER) AS id, action
       FROM import_job_rows
       WHERE job_id = @id AND phase = 'apply' AND action IN ('update', 'skip') AND json_extract(result_json, '$.existingId') IS NOT NULL`)
     .all<{ id: number | null; action: string }>({ id: jobId })
   const valid = rows.map((row) => ({ id: Number(row.id), action: row.action })).filter((row) => Number.isSafeInteger(row.id) && row.id > 0)
-  return { named: [...new Set(valid.map((row) => row.id))], skipped: valid.filter((row) => row.action === 'skip').map((row) => row.id) }
+  return { named: [...new Set(valid.map((row) => row.id))], updated: [...new Set(valid.filter((row) => row.action === 'update').map((row) => row.id))], skipped: valid.filter((row) => row.action === 'skip').map((row) => row.id) }
 }
 
 export async function finalizeProductReplacement(db: D1Compat, cutoff: string,
@@ -7952,7 +7955,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // by this run is fresh (updated_at >= started_at) and needs no listing.
     // Genuinely unnamed products are deactivated, and refused when they hold
     // stock, exactly as before.
-    const namedProducts = job.type === 'products' ? await readNamedProductIds(db, jobId) : { named: [] as number[], skipped: [] as number[] }
+    const namedProducts = job.type === 'products' ? await readNamedProductIds(db, jobId) : { named: [] as number[], skipped: [] as number[], updated: [] as number[] }
     let deactivatedCount = 0
     let skippedKeptCount = 0
     if (job.type === 'products' && getProductImportMode(job.policy_json) === 'replace_all') {
@@ -7984,7 +7987,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // part of any group and must not vote on its group's category/brand.
     let unifiedGroupCount = 0
     if (job.type === 'products') {
-      unifiedGroupCount = await unifyTouchedProductGroups(productWriteDb, jobRow.started_at || nowIso, namedProducts.named)
+      unifiedGroupCount = await unifyTouchedProductGroups(productWriteDb, jobRow.started_at || nowIso, namedProducts.updated)
     }
 
     // Last chunk: cache invalidation + broadcast, once, now that every
