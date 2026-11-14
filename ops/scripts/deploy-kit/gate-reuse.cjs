@@ -6,10 +6,15 @@
 //
 //   node gate-reuse.cjs collect --repo <owner/name> --run-id <id> --deploy-ref <sha>
 //        --release <checkout> --kit <checkout> --out <file>
-//   (the workflow then downloads the run's `gate-verdict` artifact)
-//   node gate-reuse.cjs decide --collected <file> --verdict <file>
+//   (the `gate_check` job runs it, then downloads the artifacts it names in $GITHUB_OUTPUT:
+//   the verdict job's `gate-verdict-a<attempt>` and `gate-records-all-a<attempt>`)
+//   node gate-reuse.cjs decide --collected <file> --verdict <file> [--release <checkout>]
+//   (runs in both jobs: the second time, in the deploy job, it re-reads the age of the run and
+//   checks the deploy job's own checkout)
 //   node gate-reuse.cjs evidence --collected <file> --verdict <file> --out <dir>
 //   (evidence runs after `decide` succeeded: it keeps both files with the release records)
+//   node gate-reuse.cjs verify-dist --dist <dir> --verdict <file>
+//   (runs after Deploy built the app: the build must have the digest the gate's shards tested)
 //
 // Every fact except the verdict file comes from the GitHub API, which a gate run
 // cannot write to. The verdict only adds what the API does not carry (the tested
@@ -22,18 +27,31 @@ const shards = require('./gate-shards.cjs')
 
 const GATE_WORKFLOW_PATH = '.github/workflows/gate.yml'
 const KIT_DIR = 'ops/scripts/deploy-kit'
-const VERDICT_ARTIFACT = 'gate-verdict'
-const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+const VERDICT_ARTIFACT_PREFIX = 'gate-verdict-a'
+const RECORDS_ARTIFACT_PREFIX = 'gate-records-all-a'
+const MAX_GATE_AGE_HOURS = 24
+const MAX_AGE_MS = MAX_GATE_AGE_HOURS * 60 * 60 * 1000
 const MIN_BROWSER_LEGS = 3
 const SHARD_JOB = /^Safety tests \(shard ([1-9][0-9]*) of ([1-9][0-9]*)\)$/
 const REQUIRED_JOBS = ['Plan', 'Static checks', 'Verdict']
 
 const stripRef = (p) => String(p || '').replace(/@.*$/, '')
+const isAttempt = (n) => Number.isInteger(n) && n >= 1
+const verdictArtifactName = (attempt) => `${VERDICT_ARTIFACT_PREFIX}${attempt}`
+const recordsArtifactName = (attempt) => `${RECORDS_ARTIFACT_PREFIX}${attempt}`
+
+// The artifacts are named after the attempt of the Verdict job that wrote them, which a partial re-run
+// can make older than the run's latest attempt.
+function verdictJobOf(jobs) {
+  const found = (jobs || []).filter((j) => j.name === 'Verdict')
+  return found.length === 1 && isAttempt(found[0].run_attempt) ? found[0] : null
+}
 
 function kitCompatible({ kitCommit, gateHeadSha, localEntries, remoteEntries }) {
   if (gateHeadSha === kitCommit) return { ok: true, why: 'same kit commit' }
-  const local = JSON.stringify(localEntries || null)
-  const remote = JSON.stringify(remoteEntries || null)
+  const sorted = (entries) => JSON.stringify(entries ? Object.entries(entries).sort(([a], [b]) => (a < b ? -1 : 1)) : null)
+  const local = sorted(localEntries)
+  const remote = sorted(remoteEntries)
   if (localEntries && Object.keys(localEntries).length && local === remote) {
     return { ok: true, why: 'the gate workflow and every file under the deploy kit are byte-identical at both commits' }
   }
@@ -54,7 +72,7 @@ function evaluate(input) {
 
   if (!run || typeof run !== 'object') return [...problems, 'the gate run could not be read']
 
-  if (run.repository && run.repository.full_name !== repository) bad(`the run belongs to ${run.repository.full_name}, not ${repository}`)
+  if (!run.repository || run.repository.full_name !== repository) bad(`the run belongs to ${run.repository ? run.repository.full_name : 'an unknown repository'}, not ${repository}`)
   if (!run.head_repository || run.head_repository.full_name !== repository) bad('the run was started from a fork or an unknown repository')
   if (stripRef(run.path) !== GATE_WORKFLOW_PATH) bad(`the run is workflow "${run.path}", not ${GATE_WORKFLOW_PATH}`)
   if (run.event !== 'workflow_dispatch') bad(`the run was triggered by ${run.event}, not a manual dispatch`)
@@ -62,13 +80,14 @@ function evaluate(input) {
 
   const finished = Date.parse(run.updated_at || '')
   if (!Number.isFinite(finished)) bad('the run has no finish time')
-  else if (now - finished > maxAge) bad(`the run finished ${Math.floor((now - finished) / 86400000)} days ago; gate runs older than ${Math.floor(maxAge / 86400000)} days are not reused`)
+  else if (now - finished > maxAge) bad(`the run finished ${Math.floor((now - finished) / 3600000)} hours ago; gate runs older than ${Math.floor(maxAge / 3600000)} hours are not reused`)
   else if (finished - now > 5 * 60 * 1000) bad('the run finish time is in the future')
 
   if (!Array.isArray(jobs) || !jobs.length) bad('the run has no jobs')
   else {
     for (const j of jobs) if (j.conclusion !== 'success') bad(`job "${j.name}" concluded ${j.conclusion || j.status}, not success`)
     const names = jobs.map((j) => j.name)
+    if (names.filter((n) => n === 'Verdict').length > 1) bad('the run has more than one Verdict job')
     for (const need of REQUIRED_JOBS) if (!names.includes(need)) bad(`job "${need}" is missing from the run`)
     const shardJobs = names.map((n) => SHARD_JOB.exec(n)).filter(Boolean)
     const counts = new Set(shardJobs.map((m) => m[2]))
@@ -79,10 +98,17 @@ function evaluate(input) {
     if (verdict && shardJobs.length && Number(verdict.shards) !== shardJobs.length) bad('the verdict and the run disagree on the shard count')
   }
 
-  const art = (artifacts || []).filter((a) => a.name === VERDICT_ARTIFACT)
-  if (!art.length) bad(`the run has no ${VERDICT_ARTIFACT} artifact`)
-  else if (art.every((a) => a.expired)) bad(`the ${VERDICT_ARTIFACT} artifact has expired`)
-  else if (!art.some((a) => !a.expired && a.workflow_run && Number(a.workflow_run.id) === Number(run.id))) bad(`the ${VERDICT_ARTIFACT} artifact does not belong to run ${run.id}`)
+  const verdictJob = verdictJobOf(jobs)
+  if (!verdictJob) bad('the run has no single Verdict job with an attempt number')
+  if (verdictJob && Number(verdictJob.run_attempt) > Number(run.run_attempt)) bad(`the Verdict job ran in attempt ${verdictJob.run_attempt}, later than the run's latest attempt ${run.run_attempt}`)
+  if (verdictJob) {
+    for (const wanted of [verdictArtifactName(verdictJob.run_attempt), recordsArtifactName(verdictJob.run_attempt)]) {
+      const art = (artifacts || []).filter((a) => a.name === wanted)
+      if (!art.length) bad(`the run has no ${wanted} artifact`)
+      else if (art.every((a) => a.expired)) bad(`the ${wanted} artifact has expired`)
+      else if (!art.some((a) => !a.expired && a.workflow_run && Number(a.workflow_run.id) === Number(run.id))) bad(`the ${wanted} artifact does not belong to run ${run.id}`)
+    }
+  }
 
   const compat = kitCompatible({ kitCommit: kit && kit.commit, gateHeadSha: run.head_sha, localEntries: kit && kit.local, remoteEntries: kit && kit.remote })
   if (!compat.ok) bad(compat.why)
@@ -97,7 +123,8 @@ function evaluate(input) {
   if (verdict.sha !== deployRef) bad(`the gate tested ${verdict.sha}, this deploy releases ${deployRef}`)
   if (verdict.repository !== repository) bad(`the verdict is for ${verdict.repository}, not ${repository}`)
   if (String(verdict.run_id) !== String(run.id)) bad(`the verdict is from run ${verdict.run_id}, not ${run.id}`)
-  if (Number(verdict.run_attempt) !== Number(run.run_attempt)) bad(`the verdict is from attempt ${verdict.run_attempt}, the run's latest attempt is ${run.run_attempt}`)
+  if (!verdictJob || Number(verdict.run_attempt) !== Number(verdictJob.run_attempt)) bad(`the verdict is from attempt ${verdict.run_attempt}, the Verdict job's attempt is ${verdictJob ? verdictJob.run_attempt : 'unknown'}`)
+  if (!shards.DIGEST.test(String(verdict.dist_sha256))) bad('the verdict carries no digest of the app the shards tested')
   if (verdict.kit_commit !== run.head_sha) bad('the verdict and the run disagree on the release kit commit')
   if (run.display_title !== `Gate ${verdict.input_ref}`) bad(`the run title "${run.display_title}" does not carry the input ref "${verdict.input_ref}" the verdict claims`)
   if (shards.FULL_SHA.test(String(verdict.input_ref)) && verdict.input_ref !== verdict.sha) bad('the gate was dispatched with one commit id but the verdict names another')
@@ -181,22 +208,41 @@ async function collect(a) {
     deployRef: a['deploy-ref'],
     localHead,
     run: { id: run.id, run_attempt: run.run_attempt, path: run.path, display_title: run.display_title, event: run.event, status: run.status, conclusion: run.conclusion, head_sha: run.head_sha, repository: run.repository && { full_name: run.repository.full_name }, head_repository: run.head_repository && { full_name: run.head_repository.full_name }, updated_at: run.updated_at },
-    jobs: jobs.map((j) => ({ name: j.name, status: j.status, conclusion: j.conclusion })),
+    jobs: jobs.map((j) => ({ name: j.name, status: j.status, conclusion: j.conclusion, run_attempt: j.run_attempt })),
     artifacts: artifacts.map((x) => ({ name: x.name, expired: x.expired, workflow_run: x.workflow_run && { id: x.workflow_run.id } })),
     kit: { commit: kitCommit, local: localKitEntries(a.kit), remote: null },
     localFiles: { count: files.length, digest: shards.filesDigest(files) },
   }
   if (run.head_sha !== kitCommit) collected.kit.remote = await remoteKitEntries(a.repo, run.head_sha, token)
+  fs.mkdirSync(path.dirname(path.resolve(a.out)), { recursive: true })
   fs.writeFileSync(a.out, `${JSON.stringify(collected, null, 2)}\n`)
-  return report(evaluate({ ...collected, now: Date.now(), verdictOptional: true }), `Gate run ${run.id} passes every API check at ${collected.deployRef}; checking its verdict next.`)
+  const code = report(evaluate({ ...collected, now: Date.now(), verdictOptional: true }), `Gate run ${run.id} passes every API check at ${collected.deployRef}; checking its verdict next.`)
+  if (code === 0 && process.env.GITHUB_OUTPUT) {
+    const attempt = verdictJobOf(collected.jobs).run_attempt
+    fs.appendFileSync(process.env.GITHUB_OUTPUT, `verdict_artifact=${verdictArtifactName(attempt)}\nrecords_artifact=${recordsArtifactName(attempt)}\n`)
+  }
+  return code
 }
 
 function decide(a) {
   const collected = JSON.parse(fs.readFileSync(a.collected, 'utf8'))
+  if (a.release) {
+    const files = shards.listGateFiles(a.release, 'HEAD')
+    collected.localHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: a.release, encoding: 'utf8' }).trim()
+    collected.localFiles = { count: files.length, digest: shards.filesDigest(files) }
+  }
   let verdict = null
   if (fs.existsSync(a.verdict)) verdict = JSON.parse(fs.readFileSync(a.verdict, 'utf8'))
   const problems = evaluate({ ...collected, now: Date.now(), verdict })
   return report(problems, `Reusing gate run ${collected.run.id}: it tested exactly ${collected.deployRef}. The full test sweep is skipped.`)
+}
+
+function verifyDist(a) {
+  const verdict = JSON.parse(fs.readFileSync(a.verdict, 'utf8'))
+  if (!shards.DIGEST.test(String(verdict.dist_sha256))) return report(['the verdict carries no digest of the tested app'], '')
+  const { digest, fileCount } = shards.distDigest(a.dist)
+  const problems = digest === verdict.dist_sha256 ? [] : [`the app built here (${fileCount} files, digest ${digest}) is not the app the gate tested (digest ${verdict.dist_sha256}); the published app must be the tested app`]
+  return report(problems, `The app built here is the app the gate tested: ${fileCount} files, digest ${digest}.`)
 }
 
 function evidence(a) {
@@ -211,6 +257,7 @@ function evidence(a) {
     `- Tested commit: \`${verdict.sha}\``,
     `- Gate release kit: \`${verdict.kit_commit}\``,
     `- Full test sweep: skipped, proven by that run (${verdict.file_count} files in ${verdict.shards} shards)`,
+    `- App digest (frontend/dist, every shard agreed): \`${verdict.dist_sha256}\``,
   ]
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`)
   process.stdout.write('Kept the gate verdict with the release records.\n')
@@ -222,11 +269,12 @@ async function main(argv) {
   if (command === 'collect') return collect(cliArgs(rest))
   if (command === 'decide') return decide(cliArgs(rest))
   if (command === 'evidence') return evidence(cliArgs(rest))
-  throw new Error('Usage: gate-reuse.cjs collect|decide|evidence ...')
+  if (command === 'verify-dist') return verifyDist(cliArgs(rest))
+  throw new Error('Usage: gate-reuse.cjs collect|decide|evidence|verify-dist ...')
 }
 
 if (require.main === module) {
   main(process.argv.slice(2)).then((code) => { process.exitCode = code }, (err) => { process.stdout.write(`::error::${err.message}\n`); process.exitCode = 1 })
 }
 
-module.exports = { GATE_WORKFLOW_PATH, KIT_DIR, VERDICT_ARTIFACT, MAX_AGE_MS, MIN_BROWSER_LEGS, evaluate, kitCompatible, localKitEntries }
+module.exports = { GATE_WORKFLOW_PATH, KIT_DIR, MAX_GATE_AGE_HOURS, MAX_AGE_MS, MIN_BROWSER_LEGS, verdictArtifactName, recordsArtifactName, evaluate, kitCompatible, localKitEntries }

@@ -11,10 +11,13 @@ let passed = 0
 function check(name, action) { action(); passed++; console.log(`PASS ${name}`) }
 // The gate_run_id feature adds steps and `if:` lines but changes no existing step. Taking exactly those
 // back out must give the original steps byte for byte, so the pin on every other step stays as strict as before.
-const GATE_REUSE_STEPS = ['Check the gate run to reuse', 'Download the gate verdict', 'Check the gate verdict', 'Keep the gate verdict with the release records', 'Build the app \\(the gate run proved its tests\\)']
+// The reuse checks live in their own job (gate_check), which comes after the deploy job in the file, and the deploy job
+// gained a `needs` and an `if` before its steps; neither is inside the steps compared here.
+const GATE_REUSE_STEPS = ['Download the gate evidence', 'Check the gate verdict at deploy time', 'Keep the gate verdict with the release records', 'Keep the gate test logs with the release records', 'Build the app \\(the gate run proved its tests\\)', 'Check the built app is the app the gate tested']
 function withoutGateReuse(source) {
+  const deployJobOnly = source.slice(0, source.indexOf('\n  # Runs only with gate_run_id'))
   const added = new RegExp(`(?:      #.*\\n)*      - name: (?:${GATE_REUSE_STEPS.join('|')})\\n(?:        .*\\n|\\n(?=        ))*\\n?`, 'g')
-  return source.replace(added, '').replace(/^ {8}if: \$\{\{ inputs\.gate_run_id [!=]= '' \}\}\n/gm, '')
+  return deployJobOnly.replace(added, '').replace(/^ {8}if: \$\{\{ inputs\.gate_run_id [!=]= '' \}\}\n/gm, '').replace(/\n*$/, '\n')
 }
 function jobEnvironment(source) { return source.match(/^    env:\n((?:      .*\n)*)/m)?.[1] || '' }
 function initializer(source) {

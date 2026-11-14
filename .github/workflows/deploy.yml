@@ -15,13 +15,17 @@
 #
 # Gate reuse (input gate_run_id): the full test sweep is the slow part, and the
 # Gate workflow already runs it, sharded, on the same kind of runner. When a Gate
-# run id is given, this workflow does not repeat the sweep. It first proves, through
-# the GitHub API, that the run is gate.yml of this repository, finished with every
-# job green (browser suite included), tested exactly this full commit id, ran with
-# a compatible release kit and is under 7 days old (ops/scripts/deploy-kit/gate-reuse.cjs,
-# pinned by cloudflare/scripts/test-deploy-gate-reuse-pure.cjs). Any failed check
-# stops the deploy; there is no weaker fallback. With the input empty, the full
-# sweep runs here exactly as before.
+# run id is given, this workflow does not repeat the sweep. The separate job
+# `gate_check` (the only one with `actions: read`) proves, through the GitHub API,
+# that the run is gate.yml of this repository, finished with every job green (browser
+# suite included), tested exactly this full commit id, ran with a compatible release
+# kit and is at most MAX_GATE_AGE_HOURS old (ops/scripts/deploy-kit/gate-reuse.cjs,
+# pinned by cloudflare/scripts/test-deploy-gate-reuse-pure.cjs). The deploy job then
+# repeats the offline part of that decision at deploy time (the age keeps counting
+# while the reviewer decides), builds the app and refuses unless the build has the
+# digest the gate's shards tested. Any failed check stops the deploy; there is no
+# weaker fallback. With the input empty, `gate_check` is skipped and the full sweep
+# runs here exactly as before.
 name: Deploy
 
 on:
@@ -57,7 +61,6 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 concurrency:
   group: production-deploy
@@ -66,6 +69,8 @@ concurrency:
 jobs:
   deploy:
     name: Release to production
+    needs: gate_check
+    if: ${{ !cancelled() && (needs.gate_check.result == 'success' || (inputs.gate_run_id == '' && needs.gate_check.result == 'skipped')) }}
     runs-on: windows-latest
     environment: production
     timeout-minutes: 330
@@ -125,33 +130,6 @@ jobs:
           $subject = git log -1 --format=%s
           Write-Output "Releasing $sha  $subject"
 
-      - name: Check the gate run to reuse
-        if: ${{ inputs.gate_run_id != '' }}
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          GATE_RUN_ID: ${{ inputs.gate_run_id }}
-          DEPLOY_REF: ${{ inputs.ref }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          node kit/ops/scripts/deploy-kit/gate-reuse.cjs collect --repo "$env:REPOSITORY" --run-id "$env:GATE_RUN_ID" --deploy-ref "$env:DEPLOY_REF" --release release --kit kit --out "$env:RUNNER_TEMP/gate-collected.json"
-          exit $LASTEXITCODE
-
-      - name: Download the gate verdict
-        if: ${{ inputs.gate_run_id != '' }}
-        uses: actions/download-artifact@v4
-        with:
-          name: gate-verdict
-          run-id: ${{ inputs.gate_run_id }}
-          repository: ${{ github.repository }}
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/gate-verdict
-
-      - name: Check the gate verdict
-        if: ${{ inputs.gate_run_id != '' }}
-        run: |
-          node kit/ops/scripts/deploy-kit/gate-reuse.cjs decide --collected "$env:RUNNER_TEMP/gate-collected.json" --verdict "$env:RUNNER_TEMP/gate-verdict/gate-verdict.json"
-          exit $LASTEXITCODE
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -161,6 +139,21 @@ jobs:
           cache-dependency-path: |
             release/frontend/package-lock.json
             release/cloudflare/package-lock.json
+
+      - name: Download the gate evidence
+        if: ${{ inputs.gate_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: gate-reuse-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/gate-check
+
+      # Offline, so it can run again here: the run's age keeps counting while the
+      # reviewer decides, and this job's own checkout is compared with the gate's.
+      - name: Check the gate verdict at deploy time
+        if: ${{ inputs.gate_run_id != '' }}
+        run: |
+          node kit/ops/scripts/deploy-kit/gate-reuse.cjs decide --collected "$env:RUNNER_TEMP/gate-check/gate-collected.json" --verdict "$env:RUNNER_TEMP/gate-check/verdict/gate-verdict.json" --release release
+          exit $LASTEXITCODE
 
       - name: Verify encrypted record protection
         id: records_precheck
@@ -193,14 +186,28 @@ jobs:
       - name: Keep the gate verdict with the release records
         if: ${{ inputs.gate_run_id != '' }}
         run: |
-          node kit/ops/scripts/deploy-kit/gate-reuse.cjs evidence --collected "$env:RUNNER_TEMP/gate-collected.json" --verdict "$env:RUNNER_TEMP/gate-verdict/gate-verdict.json" --out "$env:RELEASE_RECORDS_ROOT/gate-reuse"
+          node kit/ops/scripts/deploy-kit/gate-reuse.cjs evidence --collected "$env:RUNNER_TEMP/gate-check/gate-collected.json" --verdict "$env:RUNNER_TEMP/gate-check/verdict/gate-verdict.json" --out "$env:RELEASE_RECORDS_ROOT/gate-reuse"
           exit $LASTEXITCODE
+
+      - name: Keep the gate test logs with the release records
+        if: ${{ inputs.gate_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: gate-reuse-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.RELEASE_RECORDS_ROOT }}/gate-reuse/gate-records
 
       # The gate run proved the tests for this exact commit. The build is still
       # made here, without a Cloudflare secret, because it is what gets published.
+      # The kit pins its build id to the commit, so it can match the tested build.
       - name: Build the app (the gate run proved its tests)
         if: ${{ inputs.gate_run_id != '' }}
         run: node kit/ops/scripts/deploy-kit/release.cjs gates -CI -ReleaseDir release -Records "$env:RELEASE_RECORDS_ROOT" -Part build
+
+      - name: Check the built app is the app the gate tested
+        if: ${{ inputs.gate_run_id != '' }}
+        run: |
+          node kit/ops/scripts/deploy-kit/gate-reuse.cjs verify-dist --dist release/frontend/dist --verdict "$env:RUNNER_TEMP/gate-check/verdict/gate-verdict.json"
+          exit $LASTEXITCODE
 
       # The tests run the released commit's own code, so no Cloudflare secret
       # is given to this step.
@@ -270,3 +277,88 @@ jobs:
           path: ${{ env.RELEASE_RECORDS_OUTPUT }}
           if-no-files-found: error
           retention-days: 3
+
+  # Runs only with gate_run_id, before the production reviewer is asked. The only job
+  # that can read Actions data (other runs' jobs and artifacts); it has no secret.
+  gate_check:
+    name: Check the gate run to reuse
+    if: ${{ inputs.gate_run_id != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out the release kit
+        uses: actions/checkout@v4
+        with:
+          path: kit
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /ops/scripts/deploy-kit/
+
+      - name: Check out the commit to release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          path: release
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Check the gate run to reuse
+        id: collect
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GATE_RUN_ID: ${{ inputs.gate_run_id }}
+          DEPLOY_REF: ${{ inputs.ref }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          node kit/ops/scripts/deploy-kit/gate-reuse.cjs collect --repo "$env:REPOSITORY" --run-id "$env:GATE_RUN_ID" --deploy-ref "$env:DEPLOY_REF" --release release --kit kit --out "$env:RUNNER_TEMP/gate-evidence/gate-collected.json"
+          exit $LASTEXITCODE
+
+      - name: Download the gate verdict
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.collect.outputs.verdict_artifact }}
+          run-id: ${{ inputs.gate_run_id }}
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/gate-evidence/verdict
+
+      - name: Download the gate test logs
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.collect.outputs.records_artifact }}
+          run-id: ${{ inputs.gate_run_id }}
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/gate-logs
+
+      - name: Check the gate verdict
+        run: |
+          node kit/ops/scripts/deploy-kit/gate-reuse.cjs decide --collected "$env:RUNNER_TEMP/gate-evidence/gate-collected.json" --verdict "$env:RUNNER_TEMP/gate-evidence/verdict/gate-verdict.json" --release release
+          exit $LASTEXITCODE
+
+      - name: Hand the gate evidence to the deploy job
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-reuse-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/gate-evidence
+          retention-days: 3
+          if-no-files-found: error
+
+      - name: Hand the gate test logs to the deploy job
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-reuse-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/gate-logs
+          retention-days: 3
+          if-no-files-found: error

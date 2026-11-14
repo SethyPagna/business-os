@@ -226,26 +226,53 @@ repeating it.
    release (not a branch name). It plans that one commit, runs the typechecks and
    build in a "Static checks" job, splits every test file over 8 parallel Windows
    shards by a stable hash (each file in its own process, retried on timeout as
-   before), runs the browser suite, and finishes with a "Verdict" job. The verdict
-   job fails unless every shard reported green at that commit and the shards'
-   union is the full test file list; it then writes the `gate-verdict` artifact.
-   The run title is `Gate <ref>`. The merged log artifact is `gate-records`
-   (one folder per job: `Deploys/<date-sha>/release-*.log` and `state.json`).
+   before), runs the browser suite, and finishes with a "Verdict" job. Each shard
+   builds the app (some safety tests read the built files) and records a digest of
+   `frontend/dist`. The verdict job fails unless every shard reported green at that
+   commit, **on the same build of the app (one digest)**, and the shards' union is
+   the full test file list; it then writes the `gate-verdict-a<attempt>` artifact,
+   which carries that digest. The run title is `Gate <ref>`. The merged log artifact
+   is `gate-records-all-a<attempt>` (one folder per job: `Deploys/<date-sha>/release-*.log`
+   and `state.json`). Every artifact name ends in the attempt (`-a1`, `-a2`), because a
+   re-run may not reuse a name its first attempt wrote. Re-running only a failed or
+   flaky job is fine: Deploy reads the artifacts of the attempt the Verdict job ran in,
+   and every job's latest attempt must still be `success`.
 2. Run **Deploy** with the same full commit id as `ref` and the Gate run's number
-   (the digits at the end of its URL) as `gate_run_id`. Deploy then checks, through
-   the GitHub API, that the run is `gate.yml` of this repository, was started
-   manually from this repository, finished with every job `success` (the browser
-   suite included, even when it was report-only), is under 7 days old, tested
-   exactly the commit Deploy checked out, ran the same test file set that commit
-   has, and ran with a compatible release kit (same kit commit, or a gate workflow
-   and `ops/scripts/deploy-kit/` that are byte-identical). Any failed check stops
-   the deploy with the reason; nothing falls back to something weaker. If every
-   check passes, Deploy skips only the repeat sweep: it still builds the app it
-   publishes (without a Cloudflare secret), then runs the snapshot, migrations,
-   publish and live checks unchanged, and keeps the gate evidence with the
-   encrypted release records.
-3. Leave `gate_run_id` empty and Deploy runs the full sweep itself, exactly as it
-   always did.
+   (the digits at the end of its URL) as `gate_run_id`.
+   - The job `gate_check` starts first, before the production reviewer is asked. It is
+     the only part of Deploy with `actions: read` and it holds no secret. Through the
+     GitHub API it checks that the run is `gate.yml` of this repository, was started
+     manually from this repository, finished with every job `success` (the browser
+     suite included, even when it was report-only), finished at most
+     `MAX_GATE_AGE_HOURS` (24 hours) ago, tested exactly the commit Deploy checked out,
+     ran the same test file set that commit has, and ran with a compatible release kit
+     (same kit commit, or a gate workflow and `ops/scripts/deploy-kit/` that are
+     byte-identical). It downloads the verdict and the gate's test logs and hands them
+     to the deploy job.
+   - The deploy job repeats the offline part of the decision after `Set up Node` (the
+     age keeps counting while the reviewer decides, and its own checkout is compared
+     with the gate's), keeps the verdict **and the gate's per-file test logs** in the
+     encrypted release records, builds the app (without a Cloudflare secret) and
+     refuses unless the build has the digest the gate's shards tested, so the app it
+     publishes is byte for byte the app the tests saw. It then runs the snapshot,
+     migrations, publish and live checks unchanged.
+   - Any failed check stops the deploy with the reason; nothing falls back to something
+     weaker.
+3. Leave `gate_run_id` empty and `gate_check` is skipped; Deploy runs the full sweep
+   itself, exactly as it always did.
+
+**Age limit.** `MAX_GATE_AGE_HOURS` in `ops/scripts/deploy-kit/gate-reuse.cjs` is 24
+hours. It is short on purpose: the old Deploy ran the tests on the day of the release,
+and tests that depend on the date can pass at gate time and fail the next day. Change
+the constant and `cloudflare/scripts/test-deploy-gate-reuse-pure.cjs` together.
+
+**Same app.** Builds are not byte-identical by default: `frontend/vite.config.ts` stamps
+each build with a clock value (`Date.now()` in the build id, the time in
+`business-os-build.json`). The gate and the reuse build run through the release kit
+(`-Part static|tests|build`), which pins the build id to the commit
+(`gateBuildHash` in `gate-shards.cjs`), and the digest ignores the one remaining clock
+field (`builtAt`). A normal deploy without `gate_run_id` is unchanged and keeps its
+clock-based build id.
 
 The release kit is the `kit/` checkout of the ref the workflow is run from
 ("Use workflow from"), so changing `ops/scripts/deploy-kit/` or `gate.yml`
