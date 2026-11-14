@@ -4,10 +4,20 @@
 // production-shaped fixture (inactive members and parents, Khmer names, 62 blank-named rows tying across pages): name families, parent-linked variants (one family under a BLANK-name parent), blank
 // names, discounts, a live promotion rule, two branches, lots, galleries.
 //
-// GOLDEN[label] = [sha256 of the response body at 04ab054cb, rows read at 04ab054cb, ceiling for this code].
-// A drift in any hash means rows, order, totals, stock or galleries changed. The ceilings are the measured rows
-// of the new code plus 5 per cent, so a regression to the old three-walk statement (or to the index scan in
-// search-index) fails here. PRINT_GOLDEN=1 prints [sha, rows] for the current code instead of asserting.
+// TWO BASELINES. The response hash of every shape is the output of 04ab054cb (the code before the read-cost lane), and must stay byte-identical. The rows-read column is NOT one
+// baseline: the shapes before q_cream_branch_stock, and index_p0/p1, carry the rows read at 04ab054cb, and the shapes from q_cream_branch_stock
+// through q_upc_a_branch (cream/branch/promo, substring, barcode fragment, UPC, ranked-list, promotion, POS and OR shapes) carry the rows read at 6e8eed496 (their hashes were taken there too, and match). q_title_only runs the 6e8eed496 statement unchanged (title-only keeps the predicate form), so its ceiling is that base figure, 4,268, exactly.
+//
+// GOLDEN[label] = [sha256 of the response body, rows read at the baseline named above, ceiling for this code]. A drift in any hash means rows, order, totals, stock or galleries changed.
+// The ceilings are the measured rows of the new code plus 5 per cent, so a regression to the old three-walk statement (or to the index scan in search-index) fails here. Where a shape
+// runs the base statement unchanged, the ceiling is the base figure with no margin. PRINT_GOLDEN=1 prints [sha, rows] for the current code instead of asserting.
+//
+// KNOWN +2..+8 ROWS, not a regression of the search statements: shapes with no search text that read the stock version (branch1_in_stock, branch2_out, low_stock: +4 rows) or the
+// products-filters vocabulary (the five filters* shapes: +6 to +8) read a few rows MORE than 6e8eed496. The cause is lib/cache.ts getVersionsWithFallback: where one namespace was
+// read by one statement each (SELECT version ... WHERE namespace = ?, 0 rows on this world's empty cache_versions), two to four namespaces now share ONE statement
+// (WHERE namespace IN (SELECT value FROM json_each(?))), whose json_each rows D1 meters: 2N rows for N namespaces here, 3N when cache_versions holds them, against 0 or N before. This
+// world never bumps a version, so KV holds none and every namespace goes to D1; production reads D1 only for the namespaces KV does not hold, normally none. What the change buys is
+// fewer D1 statements per request (9 -> 8 on branch1_in_stock, 12 -> 9 on filters). The ceilings of those shapes carry the margin.
 //
 // Run: node scripts/test-products-search-read-cost-native.cjs   (about two minutes: it migrates a workerd D1)
 const assert = require('node:assert/strict')
@@ -92,7 +102,7 @@ const BATTERY = {
   // non-empty promotion, POS, Products-default and ranked-list shapes (hashes taken at 6e8eed496): the empty-body shapes above only pin "no rows"
   'q_balm_promoted': `${SEARCH}?page=1&pageSize=20&query=balm&promo=promoted`,
   'q_cream_rules': `${SEARCH}?page=1&pageSize=20&query=cream&promo=rules`,
-  'q_balm_discounted': `${SEARCH}?page=1&pageSize=20&query=balm&promo=discounted`,
+  'q_100_discounted': `${SEARCH}?page=1&pageSize=20&query=100&promo=discounted`,
   'pos_text_48': `${SEARCH}?page=1&pageSize=48&query=cream&sort=name_asc&include=branch_stock,images,batches,tagged_lots&surface=pos&branchId=1`,
   'products_text_default': `${SEARCH}?page=1&pageSize=50&query=serum&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`,
   'comma_or': `${SEARCH}?page=1&pageSize=20&query=serum,balm&searchMode=OR`,
@@ -124,7 +134,7 @@ const GOLDEN = {
   q_serum_p2: ['ec517d38e2ea8d2301ebed5e9ee7eaaa6b45fda0758a4e9657e00e22a11ed11d', 22319, 9550],
   q_multiword: ['854c57cf8e8d6f862d6d2ed1381d5676de914bbcf7134ee13afe37832c26f54e', 25361, 11170],
   q_barcode: ['936de0e211bdd96a5fb257cfa4316098194dc7aa97469caa7a259b5dced633b0', 8384, 60],
-  q_title_only: ['34718a4fab2177b11857424e1692f112f4c19d793f71c70eadcfb038e153215c', 11206, 4480], // a title-only text search keeps the predicate form (the candidate form read more on a name that matches most of the catalogue: its two sources overlap on every hit); ceiling = the 4,268 rows it reads at 6e8eed496 + 5 per cent. The earlier 3,120 was the candidate form.
+  q_title_only: ['34718a4fab2177b11857424e1692f112f4c19d793f71c70eadcfb038e153215c', 11206, 4268], // a title-only text search keeps the predicate form (the candidate form read more on a name that matches most of the catalogue: its two sources overlap on every hit); ceiling = the 4,268 rows it reads at 6e8eed496, exactly: this shape runs the base form, so it must not read one row more. The earlier 3,120 was the candidate form.
   q_nothing: ['fe057055e890dbe518aa0da78e08378dcea953539f70223b09ea3d9e6649fdf6', 6309, 40],
   q_page_past_end: ['09b09900554807476e90addebb7470a19bb9b31023f4de6b8af6d6f4251a9b6c', 19401, 14420],
   branch1_in_stock: ['07d2d9223c8239d4a317b5b3a317ef5de2d21be8a2fb7e1596ba2c959797b519', 22193, 10730],
@@ -183,7 +193,7 @@ const GOLDEN = {
   rank_ids_child_only: ['ed9a86e9897b6959aef57a1b799caceeb741fccb897e4298f9205047060ba010', 5055, 4900],
   q_balm_promoted: ['be5e4d7e8bb21ddb8c8a0132f63f60052eb38b3254025f5b631f49f812515600', 6204, 3720],
   q_cream_rules: ['1a319309f2ba8ed1b5b37d019300c12486d071f3f89609f6817e4577783f0053', 4356, 2150],
-  q_balm_discounted: ['c94c7507de51995dd9ba370711789ed99e6a4058b14a8bd36050612e8f8338c9', 5036, 2970],
+  q_100_discounted: ['318fa6d0c8f92fc67d5d759772b034fd37b9572a3915c415f65bcecf77adc5e8', 2281, 340], // hash and rows at 6e8eed496; 317 rows now. Text '100' matches 2 of the 50 discounted families, so (unlike the old 'balm', which matched all 50 and returned the discounted shape's exact bytes) this response differs from the 'discounted' shape's.
   pos_text_48: ['3d4b294375da0679b75ae5bef573c253142468980a5d3a5738ee3786659f0f61', 6504, 3880],
   products_text_default: ['b8b316d65677d7d168c75c50a7b503699d1bea5bb9e428ef0502b12fc8d5d770', 15445, 10910],
   comma_or: ['5af76fdead187f4c579a30909eb2080e1493a03a878cf0e26af40b1c9f3151dd', 17872, 11880],
@@ -250,15 +260,17 @@ async function main() {
     // matches little reads little (before, every typed search read every active product: ~2,000 rows here whatever the text matched). Searches with a hybrid, short-word or partial-word
     // term (several words, one or two letters) keep the predicate form.
     const candidateStatements = log => log.filter(entry => /\b__cand\b/.test(entry.sql))
-    for (const label of ['q_serum', 'q_serum_p2', 'q_barcode', 'q_khmer', 'q_nothing', 'q_retired', 'q_page_past_end', 'rank_ids_320', 'q_substring', 'q_balm_promoted', 'pos_text_48', 'products_text_default', 'rank_ids_1500_p16', 'comma_or', 'q_upc_a', 'q_upc_e', 'q_upc_short'])
+    for (const label of ['q_serum', 'q_serum_p2', 'q_barcode', 'q_khmer', 'q_nothing', 'q_retired', 'q_page_past_end', 'rank_ids_320', 'q_substring', 'q_balm_promoted', 'q_100_discounted', 'pos_text_48', 'products_text_default', 'rank_ids_1500_p16', 'comma_or', 'q_upc_a', 'q_upc_e', 'q_upc_short'])
       assert.ok(candidateStatements(out[label].log).length >= 1, `${label} ranks from its candidate ids`)
     for (const label of ['q_title_only', 'q_multiword', 'q_child_sku', 'q_blank_child', 'q_khmer_serum', 'browse', 'by_ids', 'rank_ids'])
       assert.equal(candidateStatements(out[label].log).length, 0, `${label} keeps the predicate form`)
     assert.ok(out.q_nothing.rows < 60 && out.q_barcode.rows < 100 && out.q_khmer.rows < 200, `a search that matches little reads little: ${out.q_nothing.rows}, ${out.q_barcode.rows}, ${out.q_khmer.rows}`)
     assert.ok(out.q_serum.rows < 0.8 * GOLDEN.q_serum[1], 'a common word reads far less than the 04ab054cb statement')
     // The new shapes return rows (an empty body pins nothing but "no rows"), and a UPC scan returns exactly the UPC-A and UPC-E rows, never the short or EAN-13 spelling of the same digits.
-    for (const label of ['q_balm_promoted', 'q_cream_rules', 'q_balm_discounted', 'pos_text_48', 'products_text_default', 'comma_or', 'rank_ids_1500_p16', 'q_upc_a', 'q_upc_short'])
+    for (const label of ['q_balm_promoted', 'q_cream_rules', 'q_100_discounted', 'pos_text_48', 'products_text_default', 'comma_or', 'rank_ids_1500_p16', 'q_upc_a', 'q_upc_short'])
       assert.ok(JSON.parse(out[label].text).items.length > 0, `${label} returns rows`)
+    assert.notEqual(sha(out.q_100_discounted.text), sha(out.discounted.text), 'a text filter on the discounted set must change the response')
+    assert.ok(JSON.parse(out.q_100_discounted.text).total < JSON.parse(out.discounted.text).total, 'the text matches only part of the discounted set')
     const idsOf = label => JSON.parse(out[label].text).items.map(item => item.id).sort((a, b) => a - b)
     assert.deepEqual(idsOf('q_upc_a'), [1020, 1021], 'a UPC-A scan finds the UPC-A and its UPC-E, not the short or EAN-13 spelling')
     assert.deepEqual(idsOf('q_upc_e'), [1020, 1021], 'a UPC-E scan finds the same two rows')

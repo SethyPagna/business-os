@@ -318,8 +318,8 @@ const check = async (name, fn) => { await fn(); passed += 1; console.log(`PASS $
     ['reversed terminal tie-break of the page ranking', [{ file: 'src/lib/familyPagination.ts', from: 'ORDER BY ${familyOrderSql}, family_root_id ASC\n      LIMIT @__familyPageSize', to: 'ORDER BY ${familyOrderSql}, family_root_id DESC\n      LIMIT @__familyPageSize' }]],
     ['miscounted total', [{ file: 'src/lib/familyPagination.ts', from: 'SELECT *, COUNT(*) OVER () AS family_total', to: 'SELECT *, COUNT(*) OVER () + 1 AS family_total' }]],
     ['wrong count on a page past the end', [{ file: 'src/lib/familyPagination.ts', from: '${countCtes} SELECT COUNT(*) AS count FROM families', to: '${countCtes} SELECT COUNT(*) + 1 AS count FROM families', count: 2 }]],
-    ['dropped code-trigram source', [{ file: 'src/lib/productSearchQuery.ts', from: "sources.push(`SELECT rowid AS id, NULL AS r FROM products_fts_code WHERE products_fts_code MATCH @${prefix}codeQuery`)", to: '' }]],
-    ['dropped name-trigram source', [{ file: 'src/lib/productSearchQuery.ts', from: "sources.push(`SELECT rowid AS id, NULL AS r FROM products_fts_name_trigram WHERE products_fts_name_trigram MATCH @${prefix}nameCodeQuery`)", to: '' }]],
+    ['dropped code-trigram source', [{ file: 'src/lib/productSearchQuery.ts', from: "sources.push(`SELECT rowid AS id, NULL AS r FROM products_fts_code WHERE products_fts_code MATCH @${prefix}codeQuery${ftsMatch ? ` AND${skippingFtsIds('rowid', `${prefix}ftsQuery`)}` : ''}`)", to: '' }]],
+    ['dropped name-trigram source', [{ file: 'src/lib/productSearchQuery.ts', from: "sources.push(`SELECT rowid AS id, NULL AS r FROM products_fts_name_trigram WHERE products_fts_name_trigram MATCH @${prefix}nameCodeQuery${ftsMatch ? ` AND${skippingFtsIds('rowid', `${prefix}ftsQuery`)}` : ''}`)", to: '' }]],
     ['dropped normalized catch-all', [{ file: 'src/lib/productSearchQuery.ts', from: '@${paramName}Pair = 0 AND', to: '@${paramName}Pair = 7 AND' }]],
     ['UPC branch seeks the zero-preserving form', [{ file: 'src/lib/productSearchQuery.ts', from: "IN (ltrim(${upcA}, '0'), ltrim(${upcE}, '0'))", to: 'IN (${upcA}, ${upcE})' }]],
     ['lost bm25 rank', [{ file: 'src/lib/productSearchQuery.ts', from: 'candidateRankSql = `COALESCE(${PRODUCT_SEARCH_CANDIDATE_ALIAS}.r, 0)`', to: 'candidateRankSql = `0`' }]],
@@ -332,8 +332,10 @@ const check = async (name, fn) => { await fn(); passed += 1; console.log(`PASS $
   ]
   for (const [label, patches] of MUTANTS) {
     await check(`MUTANT is caught: ${label}`, async () => {
+      // Load OUTSIDE the try: loadModule asserts every anchor occurs exactly once, so a mutant whose anchor drifted FAILS here instead of passing without mutating anything (round 2 finding 1).
+      const mutant = loadSearch(patches)
       let mutated
-      try { mutated = await battery(loadSearch(patches), 'candidates') } catch (error) { return }   // a statement that no longer runs is also a red test
+      try { mutated = await battery(mutant, 'candidates') } catch (error) { return }   // a mutated statement that no longer runs is also a red test
       assert.ok(mutated.some((json, index) => json !== reference[index]), `no comparison noticed the mutant "${label}"`)
     })
   }
