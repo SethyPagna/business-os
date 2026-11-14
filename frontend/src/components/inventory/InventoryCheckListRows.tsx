@@ -348,7 +348,7 @@ export type InventoryCheckSelectionBarProps = {
   busy: boolean
   /** A word for the main action when it is not Submit (Retry after an unconfirmed attempt). */
   submitLabel?: string
-  /** One tap for the whole page ("matches stock"): offered when the viewer sees stock and the count is one total per product (not per received date, where each product's batches are answered in its own popover). */
+  /** One tap for the whole page ("matches stock"): offered when the viewer sees stock. Per received date it writes one line per stocked batch the rows carry. */
   canMarkChecked: boolean
   onMarkChecked: () => void
   onClear: () => void

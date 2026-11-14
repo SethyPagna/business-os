@@ -256,7 +256,7 @@ const cases: Array<[string, () => Promise<void>]> = [
     await bar.render(props({ selectedCount: 2, submitLabel: 'Retry' }))
     assert.equal(submit().textContent.trim(), 'Retry', 'an unconfirmed attempt offers Retry in the same place')
     await bar.render(props({ selectedCount: 2, canMarkChecked: false }))
-    assert.equal(bar.findAll(node => node.getAttribute('data-selection-action') === 'mark').length, 0, 'no stock figure (or a count per received date), no whole-page mark')
+    assert.equal(bar.findAll(node => node.getAttribute('data-selection-action') === 'mark').length, 0, 'no stock figure, no whole-page mark')
   }],
 ]
 

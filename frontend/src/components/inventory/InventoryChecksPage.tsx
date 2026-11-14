@@ -758,15 +758,25 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       return { lots, count: countTextFromLots(lots), checked: false, selected: Object.keys(lots).length > 0 ? true : current.selected }
     }),
   }
-  // One tap for the whole page when the count is one total per product: every countable row without a count is answered "matches stock". Nothing is written until Submit.
+  // One tap for the whole page: every countable row without a count is answered "matches stock". Nothing is written until Submit.
+  // Counting per received date (ic_lot_counts): a product whose row carries its stocked batches gets one line per stocked batch (each with the figure it showed; empty dates never), exactly what the popover's
+  // tick writes; submit splits those lines within capabilities.lotLinesPerSubmission. A product whose dates the row could not carry in full (lots_more) is left for its own popover: a partial answer would
+  // read as a count of only some of its dates. A product with no stocked date is answered on its total.
   function markPageChecked() {
     if (submitAttempt.current) return
+    const perBatch = lotCountsOn && !!branchId
     setDrafts(previous => {
       const result = { ...previous }
       for (const product of selectable) {
         const id = String(product.id), seen = finiteQuantity(product.quantity) ? product.quantity : null
         const entry = result[id]
-        if (seen !== null && (!entry || entry.count.trim() === '')) result[id] = { ...(entry ?? { note: '', name: product.name }), selected: true, count: String(seen), checked: true, seen, lots: undefined }
+        if (seen === null || (entry && entry.count.trim() !== '')) continue
+        const dates = perBatch ? product.lot_rows ?? [] : []
+        if (perBatch && product.lots_more === true) continue
+        if (dates.length > 0) {
+          const lots = Object.fromEntries(dates.map(row => [String(row.batchId), { count: String(row.quantity), seen: row.quantity }]))
+          result[id] = { ...(entry ?? { note: '', name: product.name }), selected: true, count: countTextFromLots(lots), checked: false, seen, lots }
+        } else result[id] = { ...(entry ?? { note: '', name: product.name }), selected: true, count: String(seen), checked: true, seen, lots: undefined }
       }
       return result
     })
@@ -1146,7 +1156,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
                 </fieldset>
                 {contextBar}
               </div>
-              {selecting ? <InventoryCheckSelectionBar selectedCount={selectedIds.length} blocked={submitBlocked} busy={busy} canMarkChecked={access.fields.stock && !lotCountsOn}
+              {selecting ? <InventoryCheckSelectionBar selectedCount={selectedIds.length} blocked={submitBlocked} busy={busy} canMarkChecked={access.fields.stock}
                 submitLabel={submitAttempt.current ? t('retry') : undefined} onMarkChecked={markPageChecked} onClear={clearSelection} onSubmit={() => { void submit() }} t={t} /> : null}
               {sheetHeader}
             </>}

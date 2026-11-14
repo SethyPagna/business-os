@@ -320,6 +320,30 @@ try {
     assert.deepEqual(lotReads, [], 'the whole flow read no batch')
     await second.unmount()
   }
+  // ---- B (14 Nov round 2b): the whole-page mark is back in per-batch mode. It writes one line per stocked batch the rows carry (never an empty date), a total for a product with no stocked batch, and leaves a
+  // product whose dates the row could not carry in full to its own popover; submit splits the lines by capabilities.lotLinesPerSubmission. ----
+  {
+    listAnswer = () => listBody([withLots(productRow(12, 'Dated one', 8)), productRow(13, 'Plain product', 4), withLots(productRow(14, 'Dated two', 8)), { ...withLots(productRow(17, 'Too many dates', 8)), lots_more: true }],
+      { capabilities: { ...capabilities, lotLinesPerSubmission: 4 }, summary: { ok: 0, issue: 0, not_checked: 4, total: 4 } })
+    submissions.length = 0; lotReads.length = 0
+    const surface = await mount()
+    const markButtons = surface.findAll(node => node.getAttribute('data-selection-action') === 'mark')
+    assert.equal(markButtons.length, 1, 'the whole-page mark is offered in per-batch mode')
+    await surface.click(markButtons[0])
+    assert.deepEqual(surface.findAll(node => node.getAttribute('data-selected') !== null).map(node => node.getAttribute('data-inventory-check-row')), ['12', '13', '14'], 'a product whose dates are only partly carried is left for its popover')
+    assert.equal(rowCount(surface, '12').value, '8'); assert.equal(rowCount(surface, '13').value, '4')
+    assert.equal(statusButton(surface, '12').getAttribute('data-check-status-kind'), 'draft_ok')
+    const submitNow = async () => { await surface.click(surface.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit')); await surface.click(exact(surface, 'Submit').at(-1)!); await new Promise(resolve => setTimeout(resolve, 20)) }
+    await submitNow()
+    const shape = (line: Record<string, unknown>) => 'lots' in line ? [line.productId, (line.lots as Array<{ batchId: number; counted: number; seen: number }>).map(entry => [entry.batchId, entry.counted, entry.seen])] : [line.productId, 'total', line.countedQuantity]
+    assert.equal(submissions.length, 1)
+    assert.deepEqual((submissions[0].lines as Array<Record<string, unknown>>).map(shape), [[12, [[7, 5, 5], [9, 3, 3]]], [13, 'total', 4]], 'cap 4: 2 lines of product 12 and 1 for the plain product fit; the next product (2 more) waits')
+    assert.equal(rowCount(surface, '14').value, '8', 'the product that did not fit is still a draft')
+    await submitNow()
+    assert.deepEqual((submissions[1].lines as Array<Record<string, unknown>>).map(shape), [[14, [[7, 5, 5], [9, 3, 3]]]], 'the next Submit sends the rest')
+    assert.deepEqual(lotReads, [], 'marking the page read no batch')
+    await surface.unmount()
+  }
   // ---- audit G1b: the switch went OFF under an open tab: one re-read, then the same counts go as plain lines (no second refusal) ----
   {
     submissions.length = 0
