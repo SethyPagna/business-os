@@ -66,6 +66,8 @@ export const AUDIT_ACTION_LABELS: Record<string, [string, string]> = {
   return_money_convert: ['return_convert_title', 'Update money details'],
   // 6.0.1041: a read-switch flip (PUT /api/runtime/read-switches) writes this action under the 'read_switch' entity.
   read_switch_set: ['read_switch_changed', 'Switch updated'],
+  // 6.0.2085: an administrator's rebuild of a range of the stored daily sales totals (POST /api/system/sales-daily/rebuild) writes this action under the 'system' entity.
+  sales_daily_rebuild: ['sales_daily_rebuilt', 'Daily sales totals rebuilt'],
 }
 
 /**

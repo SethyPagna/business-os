@@ -5660,6 +5660,7 @@
   "syncSpeedHint": "Lower values refresh faster but create more requests. Internal preview still reacts to sync events immediately.",
   "sync_access_token": "Access Token",
   "read_switch_changed": "Switch updated",
+  "sales_daily_rebuilt": "Daily sales totals rebuilt",
   "read_switch_confirm_note": "Other devices follow within {n} seconds.",
   "read_switch_confirm_off": "Turn off {name}?",
   "read_switch_confirm_on": "Turn on {name}?",

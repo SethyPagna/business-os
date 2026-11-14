@@ -20,6 +20,7 @@ import aiRoute from './routes/ai'
 import importJobsRoute from './routes/importJobs'
 import returnsRoute from './routes/returns'
 import systemRoute from './routes/system'
+import salesDailyRoute from './routes/salesDaily'
 import notificationsRoute from './routes/notifications'
 import organizationsRoute from './routes/organizations'
 import actionHistoryRoute from './routes/actionHistory'
@@ -639,6 +640,8 @@ app.route('/api/inventory/fast-stock-in', stockInCommitRoute)
 app.route('/api/ai', aiRoute)
 app.route('/api/import-jobs', importJobsRoute)
 app.route('/api/returns', returnsRoute)
+// Ahead of systemRoute: the stored daily sales totals rebuild is its own file (routes/salesDaily.ts); every other /api/system path falls through.
+app.route('/api/system/sales-daily', salesDailyRoute)
 app.route('/api/system', systemRoute)
 app.route('/api/notifications', notificationsRoute)
 app.route('/api/organizations', organizationsRoute)

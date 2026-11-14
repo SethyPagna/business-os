@@ -150,6 +150,7 @@ const ROWS = [
   ['system', 'reset_data', KEPT],
   ['system', 'finalize_migration', KEPT],
   ['system', 'import_orphan_staging_clean', PURGED],
+  ['system', 'sales_daily_rebuild', PURGED],
   ['data-integrity', 'repair', KEPT],
   ['settings', 'update', PURGED],
   ['pos_address_presets', 'update', PURGED],
@@ -297,7 +298,7 @@ const OWNER_KEPT = [
 ]
 const OWNER_PRUNED = [
   ['user', 'login'], ['user', 'device_approved'], ['user', 'device_rejected'], ['user', 'session_revoked'],
-  ['system', 'step_up_refused'], ['system', 'import_orphan_staging_clean'], ['settings', 'update'],
+  ['system', 'step_up_refused'], ['system', 'import_orphan_staging_clean'], ['system', 'sales_daily_rebuild'], ['settings', 'update'],
   ['import_job', 'import_job_create'], ['import_job', 'import_job_start'], ['import_job', 'import_job_upload'],
   ['pending_action', 'approve', '{"section":"branches"}'], ['pending_action', 'reject', '{"section":"products"}'],
   ['pending_action', 'resubmit', '{"section":"products"}'],
