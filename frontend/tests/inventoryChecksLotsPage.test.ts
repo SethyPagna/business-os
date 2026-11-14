@@ -144,8 +144,16 @@ try {
     assert.equal(surface.findAll(node => node.getAttribute('data-popover-lot') !== null).length, 0, 'and no batch line is drawn')
     assert.equal(surface.findAll(node => node.getAttribute('data-selected') !== null).length, 0, 'nothing is ticked by default')
     await openCount(surface, '12')
-    assert.deepEqual(lotReads, [[12, 1]], 'opening the row reads that product at that branch, once')
+    assert.deepEqual(lotReads, [], 'F3: a normal open reads nothing: the entries are drawn from the batches the row already carries, at the first paint')
     assert.deepEqual(surface.findAll(node => node.getAttribute('data-popover-lot') !== null).map(node => node.getAttribute('data-popover-lot')), ['7', '9'], 'the popover shows the batches it holds')
+    await surface.unmount()
+  }
+  // ---- F3: a row that says lots_more (more dates than the list carries) reads that one product's batches, once, when opened ----
+  {
+    listAnswer = () => listBody([{ ...withLots(productRow(12, 'Dated product', 8)), lots_more: true }], { capabilities, summary: { ok: 0, issue: 0, not_checked: 1, total: 1 } }); lotReads.length = 0
+    const surface = await mount()
+    await openCount(surface, '12')
+    assert.deepEqual(lotReads, [[12, 1]], 'lots_more: the one request, for that product')
     await surface.unmount()
   }
   // ---- a row counted per batch: a count on each, the row total is the sum; Set from a batch confirms before and after, patches the row, reads no page ----
@@ -169,7 +177,7 @@ try {
     await new Promise(resolve => setTimeout(resolve, 20))
     assert.equal(adjusts.length, 1)
     assert.deepEqual({ ...adjusts[0], client_request_id: String(adjusts[0].client_request_id).startsWith('inventory_set') }, { type: 'set', setScope: 'lot', productId: 12, branchId: 1, batchId: 7, quantity: 4, expectedLotQuantity: 5, reason: 'Inventory check', client_request_id: true })
-    assert.equal(lists.length, lists0, 'a Set reads no list page'); assert.equal(overlays.length, overlays0, 'and no overlay'); assert.equal(lotReads.length, 1, 'and does not read the batches again')
+    assert.equal(lists.length, lists0, 'a Set reads no list page'); assert.equal(overlays.length, overlays0, 'and no overlay'); assert.equal(lotReads.length, 0, 'and reads no batches at all')
     assert.ok(lotLine(surface, 7).textContent.includes('4'), 'the batch shows the writer\'s figure')
     assert.equal((dateInput(surface, 7) as unknown as { value: string }).value, '', 'the typed figure is cleared once it is the stock')
     // a stale figure: the writer refuses with what the stock is now; the batch shows it, nothing is written, the person decides again with THAT figure

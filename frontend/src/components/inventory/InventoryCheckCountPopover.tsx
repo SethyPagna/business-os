@@ -46,11 +46,14 @@ const tool = 'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded
 
 export default function InventoryCheckCountPopover({ product, draft, byBatch, loadLots, canViewStock, canViewCounts = false, locked, t, statusIcon, statusText, onClose, onCount, onLotCount, onMatches, onDiffers, onClear, onLotSet }: InventoryCheckCountPopoverProps) {
   const tr = (key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
-  const [lots, setLots] = useState<Lots>(byBatch && loadLots ? { state: 'loading' } : { state: 'ready', rows: [], more: false })
+  // The row already carries its stocked batches (the list read them): the entries are drawn from them at the first paint, with no request. Only a row that says lots_more, or a list that did not carry
+  // batches, reads them (one request, this product).
+  const carried = Array.isArray(product.lot_rows) && product.lots_more !== true
+  const [lots, setLots] = useState<Lots>(!byBatch || !loadLots ? { state: 'ready', rows: [], more: false } : carried ? { state: 'ready', rows: product.lot_rows!, more: false } : { state: 'loading' })
   const bodyRef = useRef<HTMLDivElement | null>(null)
   // One request when the popover opens. A late answer after it closed is dropped by the abort.
   useEffect(() => {
-    if (!byBatch || !loadLots) return undefined
+    if (!byBatch || !loadLots || carried) return undefined
     const abort = new AbortController()
     loadLots(product, abort.signal).then(answer => { if (!abort.signal.aborted) setLots({ state: 'ready', rows: answer.lots ?? [], more: answer.more === true }) },
       () => { if (!abort.signal.aborted) setLots({ state: 'failed' }) })

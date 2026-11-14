@@ -13,7 +13,7 @@ import { patchProductFromStockAnswer, patchProductFromStockConflict, type StockC
 
 export type Branch = { id: number; name: string }
 type Row = Record<string, unknown> & { lots_more?: boolean; id: number | string; branch_stock?: Array<{ branch_id?: number | string; branch_name?: string | null; quantity?: number | null }>; stock_quantity?: number | null; lots?: Lot[] }
-export type Lot = { id: number | string; received_at?: string | null; expiry_date?: string | null; branches?: Array<{ branch_id: number | string; quantity?: number | null }> }
+export type Lot = { id: number | string; received_at?: string | null; expiry_date?: string | null; lot_code?: string | null; batch_number?: number | null; branches?: Array<{ branch_id: number | string; quantity?: number | null }> }
 type Tagged = { product_id: number | string; branch_id?: number | string | null; condition_tag?: string | null; quantity?: number | null }
 export type OverlayEntry = {
   product_id: number
@@ -132,9 +132,10 @@ function adaptRow(row: Row, raw: Pick<WiredRaw, 'branchId' | 'overlay' | 'lots'>
     const held = lots.flatMap(lot => {
       const at = (lot.branches ?? []).find(candidate => Number(candidate.branch_id) === branchId)
       // Only a date that holds stock here (owner, 14 Nov: lists show only batches with stock): an empty date is never a line, so "matches stock" cannot write a zero for it.
-      return at && Number(lot.id) > 0 && Number(at.quantity) > 0 ? [{ batchId: Number(lot.id), receivedAt: lot.received_at ?? null, expiry: lot.expiry_date ?? null, quantity: Number(at.quantity) }] : []
+      return at && Number(lot.id) > 0 && Number(at.quantity) > 0 ? [{ batchId: Number(lot.id), receivedAt: lot.received_at ?? null, expiry: lot.expiry_date ?? null, quantity: Number(at.quantity), lotCode: lot.lot_code ? String(lot.lot_code) : null, batchNumber: lot.batch_number ?? null }] : []
     })
-    if (held.length) product.lot_rows = held
+    // Always set once the list carried the dates (an empty list means no batch holds stock here): the count popover draws from it at first paint and reads nothing unless lots_more.
+    product.lot_rows = held
     if (lots.more) product.lots_more = true
     // Units no received date holds, read-only: the branch total minus the dates (only when every date is known).
     const unlotted = !lots.more && finite(quantity) ? quantity - held.reduce((sum, row) => sum + row.quantity, 0) : 0
