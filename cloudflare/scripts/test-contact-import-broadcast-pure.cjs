@@ -71,6 +71,8 @@ const contactsBranch = importEngineSrc.slice(importEngineSrc.indexOf('} else if 
 const bumpAt = contactsBranch.indexOf('await bumpVersions(env, [job.type])')
 const pushAt = contactsBranch.indexOf('await broadcast(env, CONTACT_IMPORT_CHANNEL[job.type]')
 check('importEngine.ts awaits a bump of the contact table namespace before the contacts broadcast (A-C1)', bumpAt > 0 && pushAt > bumpAt)
+// Round 2: a job whose every apply row was a skip wrote nothing, so it must not bump (test-import-twice-writes-nothing-native proves it at runtime).
+check('importEngine.ts bumps the contact namespace only when some apply row was not a skip', /action <> 'skip'[\s\S]{0,260}?if \(Number\(wroteRows\?\.n \|\| 0\) > 0\) await bumpVersions\(env, \[job\.type\]\)/.test(contactsBranch))
 
 const dashboardPath = path.join(__dirname, '..', '..', 'frontend', 'src', 'components', 'dashboard', 'Dashboard.tsx')
 const dashboardSrc = fs.readFileSync(dashboardPath, 'utf8')

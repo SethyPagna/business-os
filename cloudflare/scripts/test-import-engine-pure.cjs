@@ -2157,7 +2157,8 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const same = await classifyContacts(makeDb([STORED_BY_IMPORT]), 'customers', [row({ name: 'Sopheap', phone: '012 345 678', address: 'Phnom Penh', notes: 'VIP', email: 'a@b.co', gender: 'female' }, 1)], JSON.stringify({ conflictMode: 'overwrite' }))
     assert.strictEqual(same[0].action, 'skip', 'overwrite of identical values is a no-op too (the control for the loop below)')
   }
-  for (const [column, value] of [['address', 'Siem Reap'], ['notes', 'Regular'], ['email', 'new@b.co'], ['gender', 'male'], ['phone', '099 111 222']]) {
+  // name and email also appear CASE-ONLY ('SOPHEAP', 'A@B.CO'): a case-insensitive "unchanged" check would skip them and lose the corrected spelling.
+  for (const [column, value] of [['address', 'Siem Reap'], ['notes', 'Regular'], ['email', 'new@b.co'], ['gender', 'male'], ['phone', '099 111 222'], ['name', 'SOPHEAP'], ['email', 'A@B.CO'], ['notes', 'vip']]) {
     const policy = JSON.stringify({ conflictMode: 'overwrite' })
     const results = await classifyContacts(makeDb([STORED_BY_IMPORT]), 'customers', [row({ name: 'Sopheap', phone: '012 345 678', address: 'Phnom Penh', notes: 'VIP', email: 'a@b.co', gender: 'female', [column]: value }, 1)], policy)
     assert.strictEqual(results[0].action, 'update', `${column} changed: a real update`)

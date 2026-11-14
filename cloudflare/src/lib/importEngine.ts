@@ -5726,7 +5726,12 @@ export async function markJobFailed(db: D1Compat, jobId: string, message: string
 // carries one value. Runs on the LAST chunk only, so cross-window groups
 // (rows of one name split across chunks) are all present in the table by
 // the time it looks.
-export async function unifyTouchedProductGroups(db: D1Compat, cutoff: string): Promise<number> {
+export async function unifyTouchedProductGroups(db: D1Compat, cutoff: string, namedProductIds: Iterable<number> = []): Promise<number> {
+  // A group is "touched" when a member was written at or after the job start OR
+  // the import named a member (update/skip row). An unchanged row is not
+  // rewritten any more, so only the named ids tell a re-import that a group is
+  // in scope and its drift should still heal.
+  const named = new Set<number>(namedProductIds)
   const products = await db
     .prepare(`SELECT id, name, category, brand, updated_at FROM products WHERE is_active = 1`)
     .all<{ id: number; name: string | null; category: string | null; brand: string | null; updated_at: string | null }>()
@@ -5760,7 +5765,7 @@ export async function unifyTouchedProductGroups(db: D1Compat, cutoff: string): P
   let changedGroups = 0
   for (const members of groups.values()) {
     if (members.length < 2) continue
-    if (!members.some((member) => (member.updated_at || '') >= cutoff)) continue
+    if (!members.some((member) => (member.updated_at || '') >= cutoff || named.has(member.id))) continue
     let groupChanged = false
     for (const field of ['category', 'brand'] as const) {
       const winner = pickWinner(members, field)
@@ -6797,6 +6802,22 @@ export async function readSkippedProductIds(db: D1Compat, jobId: string): Promis
       WHERE job_id = @id AND phase = 'apply' AND action = 'skip' AND json_extract(result_json, '$.existingId') IS NOT NULL`)
     .all<{ id: number | null }>({ id: jobId })
   return rows.map((row) => Number(row.id)).filter((id) => Number.isSafeInteger(id) && id > 0)
+}
+
+// Every product the apply rows NAME: the matched id of each row whose action is
+// 'update' or 'skip'. This -- not updated_at -- is what decides membership in a
+// replace-all file, and which product groups a re-import has to look at again:
+// an unchanged row is deliberately not rewritten (its updated_at no longer
+// moves), so "was written by this run" is no longer a proof of "is in the file".
+// `skipped` is the 'skip' subset, one entry per skipped row (the summary count);
+// `named` is the de-duplicated union. Pure read of the staging row log.
+export async function readNamedProductIds(db: D1Compat, jobId: string): Promise<{ named: number[]; skipped: number[] }> {
+  const rows = await db.staging.prepare(`SELECT CAST(json_extract(result_json, '$.existingId') AS INTEGER) AS id, action
+      FROM import_job_rows
+      WHERE job_id = @id AND phase = 'apply' AND action IN ('update', 'skip') AND json_extract(result_json, '$.existingId') IS NOT NULL`)
+    .all<{ id: number | null; action: string }>({ id: jobId })
+  const valid = rows.map((row) => ({ id: Number(row.id), action: row.action })).filter((row) => Number.isSafeInteger(row.id) && row.id > 0)
+  return { named: [...new Set(valid.map((row) => row.id))], skipped: valid.filter((row) => row.action === 'skip').map((row) => row.id) }
 }
 
 export async function finalizeProductReplacement(db: D1Compat, cutoff: string,
@@ -7913,28 +7934,25 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     }
 
     // Replace-all mode: this import is the complete, current catalog --
-    // every active product this run never touched (its updated_at is
-    // still older than this run's own started_at) gets soft-deactivated,
+    // every active product the file does NOT name gets soft-deactivated,
     // same as products.ts's DELETE /:id (is_active=0, not a hard delete,
     // so any sale/movement/audit row that still references its id stays
     // valid). Runs exactly once, here at the true last chunk, after every
-    // row across every chunk has already been written -- a row matched in
-    // an earlier chunk already got its updated_at refreshed when it was
-    // written, so it's correctly excluded here regardless of which chunk
-    // processed it. Deliberately keyed off updated_at rather than a
-    // separate "touched product ids" list: the existing per-row write
-    // path already refreshes updated_at on every create/update
-    // unconditionally (see the two UPDATE/INSERT statements above), so no
-    // extra bookkeeping is needed to know what this run actually wrote.
-    // A row marked 'skip' never reaches the write path, so its matched
-    // product keeps its old updated_at -- but owner ruling 17 (13 Oct) says
-    // a skipped row is never deactivated: "skip" is the operator's explicit
-    // keep-this-one signal. readSkippedProductIds lists the matched
-    // products of every skipped row (reviewer decision or skip_row mode),
+    // row across every chunk has already been written.
+    //
+    // Membership is decided from the ids the apply rows NAME, not from
+    // updated_at. A matched row whose values already equal the stored product
+    // is deliberately not rewritten (the guarded UPDATE), so its updated_at no
+    // longer moves and "touched by this run" would wrongly read as "not in the
+    // file". readNamedProductIds lists the matched product of every 'update'
+    // AND every 'skip' row (owner ruling 17, 13 Oct: a skipped row is never
+    // deactivated -- "skip" is the operator's explicit keep-this-one signal),
     // and finalizeProductReplacement leaves exactly those out of the
-    // deactivation AND out of the product_has_stock refusal. Genuinely
-    // untouched products are deactivated, and refused when they hold
+    // deactivation AND out of the product_has_stock refusal. A product created
+    // by this run is fresh (updated_at >= started_at) and needs no listing.
+    // Genuinely unnamed products are deactivated, and refused when they hold
     // stock, exactly as before.
+    const namedProducts = job.type === 'products' ? await readNamedProductIds(db, jobId) : { named: [] as number[], skipped: [] as number[] }
     let deactivatedCount = 0
     let skippedKeptCount = 0
     if (job.type === 'products' && getProductImportMode(job.policy_json) === 'replace_all') {
@@ -7945,9 +7963,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       const refusedRows = await db.staging.prepare(`SELECT COUNT(*) AS n FROM import_job_rows
         WHERE job_id=@id AND phase='apply' AND action='error'`).get<{ n: number }>({ id: jobId })
       if (Number(refusedRows?.n || 0) > 0) throw new ProductReplacementIncompleteError()
-      const skippedProductIds = await readSkippedProductIds(db, jobId)
-      deactivatedCount = await finalizeProductReplacement(productWriteDb, jobRow.started_at || nowIso, { jobId, actor: importCostActor, keepProductIds: skippedProductIds })
-      skippedKeptCount = skippedProductIds.length
+      deactivatedCount = await finalizeProductReplacement(productWriteDb, jobRow.started_at || nowIso, { jobId, actor: importCostActor, keepProductIds: namedProducts.named })
+      skippedKeptCount = namedProducts.skipped.length
     }
 
     // Full product snapshots can contain multiple source rows that resolve to
@@ -7967,7 +7984,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // part of any group and must not vote on its group's category/brand.
     let unifiedGroupCount = 0
     if (job.type === 'products') {
-      unifiedGroupCount = await unifyTouchedProductGroups(productWriteDb, jobRow.started_at || nowIso)
+      unifiedGroupCount = await unifyTouchedProductGroups(productWriteDb, jobRow.started_at || nowIso, namedProducts.named)
     }
 
     // Last chunk: cache invalidation + broadcast, once, now that every
@@ -8005,7 +8022,11 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     } else if (CONTACT_IMPORT_CHANNEL[job.type]) {
       // The job type is the table name and the cache namespace (customers / suppliers / delivery_contacts). Await the bump BEFORE the
       // broadcast so a peer refetching on the push keys on the new version; the Sales caches key on 'customers'.
-      await bumpVersions(env, [job.type])
+      // A job whose every row was an unchanged skip wrote no contact row, so no cached list can be stale: no bump (one KV write plus a
+      // quota row saved). The broadcast still goes, because the Recent Imports card shows the job itself.
+      const wroteRows = await db.staging.prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE job_id=@id AND phase='apply' AND action <> 'skip'`)
+        .get<{ n: number }>({ id: jobId })
+      if (Number(wroteRows?.n || 0) > 0) await bumpVersions(env, [job.type])
       await broadcast(env, CONTACT_IMPORT_CHANNEL[job.type], { action: 'import', jobId }).catch(() => {})
     }
     sw.lap('cacheInvalidateMs')

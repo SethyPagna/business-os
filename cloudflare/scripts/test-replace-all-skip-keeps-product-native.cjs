@@ -200,6 +200,10 @@ function add(tag, label, fn) { cases.push({ name: `${tag}/${label}`, tag, fn }) 
 const MATCHED = { row: 2, name: 'Serum', barcode: 'SER-1' }
 const SKIP_A = { row: 3, name: 'Keeper A', barcode: 'KEEP-A' } // skipped by a reviewer decision on row 3
 const SKIP_B_MODE = { row: 4, name: 'Keeper B', barcode: 'KEEP-B', mode: 'skip_row' }
+// The stored row exactly as the writer would leave it for the file's cells, so the guarded UPDATE finds nothing to change.
+function presetAsImported(f, id, normalized) {
+  seedFixture(f.raw, () => f.raw.prepare("UPDATE products SET description='from file',name_normalized=@n,unit_normalized='pcs',brand_compact='',cost_price_usd=NULL,cost_price_khr=NULL WHERE id=@id").run({ id, n: normalized }))
+}
 const SKIP_STOCKED = { row: 3, name: 'Keeper Stocked', barcode: 'KEEP-S' }
 const DECIDE_ROW_3 = { 3: { action: 'skip' } }
 
@@ -238,6 +242,34 @@ add('keeps', 'both-ways-of-skipping-in-one-job', async world => {
   assert.deepEqual([f.active(1), f.active(2), f.active(3), f.active(99)], [1, 1, 1, 0])
   assert.deepEqual(f.deleteAudits(), [99])
   assert.equal(f.summary(id).skippedKept, 2)
+})
+
+// An unchanged matched row is not rewritten (guarded UPDATE), so its updated_at stays
+// older than the job start. Membership must come from the ids the rows name, not from
+// updated_at -- otherwise the product the file lists is deactivated (or refuses the job).
+add('keeps', 'unchanged-matched-row-keeps-its-product-and-is-not-rewritten', async world => {
+  const f = fixture(world)
+  presetAsImported(f, 2, 'keeper a')
+  const UNCHANGED = { row: 3, name: 'Keeper A', barcode: 'KEEP-A' }
+  const id = f.seedJob({ rows: [MATCHED, UNCHANGED] })
+  await f.run(id)
+  assert.match(f.job(id).status, /^completed/, f.job(id).last_error)
+  assert.equal(f.raw.prepare('SELECT updated_at u FROM products WHERE id=2').get().u, OLD, 'the unchanged row really was not rewritten (the premise of the case)')
+  assert.equal(f.active(2), 1, 'an unchanged product the file names stays active')
+  assert.equal(f.active(1), 1, 'the changed one stays active too')
+  assert.deepEqual([f.active(3), f.active(99)], [0, 0], 'products the file never names are still deactivated')
+  assert.deepEqual(f.deleteAudits(), [3, 99])
+  assert.equal(f.summary(id).deactivated, 2)
+})
+
+add('keeps', 'unchanged-matched-row-holding-stock-never-refuses', async world => {
+  const f = fixture(world, { stockedKeeper: true })
+  presetAsImported(f, 4, 'keeper stocked')
+  const id = f.seedJob({ rows: [MATCHED, { row: 3, name: 'Keeper Stocked', barcode: 'KEEP-S' }] })
+  await f.run(id).catch(error => assert.fail('refused although the only stocked product is named by the file: ' + (error.code || error.message)))
+  assert.match(f.job(id).status, /^completed/, `${f.job(id).status}: ${f.job(id).last_error}`)
+  assert.equal(f.active(4), 1)
+  assert.equal(f.stock(4), 5)
 })
 
 add('keeps', 'two-skipped-rows-on-one-product-count-as-two-skipped-rows', async world => {
@@ -316,17 +348,22 @@ const WRONG = [
   {
     name: 'keeps-nothing', fails: c => c.tag === 'keeps',
     patches: [
-      { name: 'keeps-nothing', file: 'lib/importEngine.ts', apply: text => text.replace(/const skippedProductIds = await readSkippedProductIds\(db, jobId\)/, 'const skippedProductIds: number[] = []') },
+      { name: 'keeps-nothing', file: 'lib/importEngine.ts', apply: text => text.replace(/keepProductIds: namedProducts\.named \}/, 'keepProductIds: [] }') },
       { name: 'keeps-nothing-finalizer', file: 'lib/importEngine.ts', apply: text => text.replace(/const keepIds = JSON\.stringify\(\[[^\n]*\)\]\)/, "const keepIds = '[]'") },
     ],
   },
   {
+    // The round-1 regression: only skipped rows are kept, an unchanged (update) row is judged by updated_at alone.
+    name: 'keeps-skips-only', fails: c => c.name.startsWith('keeps/unchanged-matched-row'),
+    patches: [{ name: 'keeps-skips-only', file: 'lib/importEngine.ts', apply: text => text.replace(/keepProductIds: namedProducts\.named \}/, 'keepProductIds: namedProducts.skipped }') }],
+  },
+  {
     // Every case that asserts an omitted product goes. Not the merge-mode control (nothing goes by design), the one-product count case (asserts no deactivation) or the refusal (throws before the UPDATE).
-    name: 'deactivates-nothing', fails: c => !['control/merge-mode-skip-reports-no-kept-count', 'keeps/two-skipped-rows-on-one-product-count-as-two-skipped-rows'].includes(c.name) && c.tag !== 'refuses',
+    name: 'deactivates-nothing', fails: c => !['control/merge-mode-skip-reports-no-kept-count', 'keeps/two-skipped-rows-on-one-product-count-as-two-skipped-rows', 'keeps/unchanged-matched-row-holding-stock-never-refuses'].includes(c.name) && c.tag !== 'refuses',
     patches: [{ name: 'deactivates-nothing', file: 'lib/importEngine.ts', apply: text => text.replace(/WHERE is_active=1 AND \(updated_at IS NULL OR updated_at < @cutoff\) AND id NOT IN/, 'WHERE is_active=2 AND (updated_at IS NULL OR updated_at < @cutoff) AND id NOT IN') }],
   },
   {
-    name: 'guard-ignores-keep', fails: c => c.name === 'keeps/skipped-product-holding-stock-is-kept-and-never-refuses',
+    name: 'guard-ignores-keep', fails: c => ['keeps/skipped-product-holding-stock-is-kept-and-never-refuses', 'keeps/unchanged-matched-row-holding-stock-never-refuses'].includes(c.name),
     patches: [{ name: 'guard-ignores-keep', file: 'lib/importEngine.ts', apply: text => text.replace(/SELECT 1 FROM products p WHERE \$\{candidates\} AND \$\{productHasStockSql\(\)\}/, 'SELECT 1 FROM products p WHERE p.is_active=1 AND (p.updated_at IS NULL OR p.updated_at < @cutoff) AND ${productHasStockSql()}') }],
   },
 ]
