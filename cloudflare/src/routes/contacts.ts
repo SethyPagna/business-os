@@ -1797,10 +1797,10 @@ function registerContactRoutes(config: ContactConfig) {
     }
     const id = result.lastInsertRowid
     // Perf-2: the response is the freshly-inserted row itself, which reads
-    // nothing audit()/bumpVersion() write -- defer both into the same
-    // waitUntil the broadcast already used, so the reply only waits on the
-    // one SELECT below instead of three sequential round trips.
-    // Bump first and awaited: the response (and a peer refetching on the push) must key on the new version.
+    // nothing audit() writes -- the audit row and the broadcast are deferred
+    // into one waitUntil, so the reply only waits on the one SELECT below.
+    // The version bump is NOT deferred: it is awaited first, so the response
+    // and a peer refetching on the push both key on the new version.
     await bumpVersion(c.env, config.table)
     c.executionCtx.waitUntil(Promise.all([
       createAuditInBatch ? Promise.resolve() : audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', config.entity, id, createAuditDetails),

@@ -108,6 +108,13 @@ check('no products / stock / returns bump runs inside waitUntil', () => {
   assert.deepEqual(bad.map((s) => `${s.file}:${s.line} ${s.call}`), [], 'bump before the response: await bumpVersions(...) after the commit, then waitUntil(broadcast(...))')
 })
 
+// Round 2 (review M10b): a bump called and neither awaited nor handed to waitUntil is fire-and-forget -- it can land after the response and the broadcast, and the
+// Worker may drop it at the end of the request. The telegram /settopic save once had this shape and no other check saw it (the order test did, this one did not).
+check('no bump is fire-and-forget: every call is awaited or inside a classified waitUntil', () => {
+  const loose = sites.filter((s) => !s.awaited && !s.deferred)
+  assert.deepEqual(loose.map((s) => `${s.file}:${s.line} ${s.call}`), [], 'await the bump (bumpVersion / bumpVersions never throw), then announce')
+})
+
 check('every classified deferred bump still exists and is not a protected namespace', () => {
   for (const [file, call] of DEFERRED_NOT_PROTECTED) {
     const hit = sites.filter((s) => s.file === file && s.call === call)

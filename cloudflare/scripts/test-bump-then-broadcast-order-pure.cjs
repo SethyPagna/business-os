@@ -4,7 +4,8 @@
 //     pre-write data under the old version): in each listed handler the awaited bump precedes the broadcast;
 //   - one bumpVersions([...]) call per commit, never one bumpVersion per namespace;
 //   - the multi-namespace readers use the batched getVersionsWithFallback;
-//   - portal sign-up (a brand-new customers row) moves the customers version before it answers.
+//   - portal sign-up (a new customers row, or a claim that adds the portal_account badge an existing customer's cached row shows) moves the customers version before it answers;
+//   - a users rename that carries the new name onto history moves BOTH sales and returns (both store the user's name).
 // Static source check on purpose: each handler is a large route over D1; the AST census in test-bump-before-response-pure.cjs covers
 // every other bump site. `check(source)` runs on scratch copies in the mutation controls at the bottom.
 //
@@ -76,13 +77,17 @@ function checkWriters(read) {
   for (const file of ['routes/contacts.ts', 'routes/users.ts', 'routes/settings.ts']) {
     assert.deepEqual(splitBumps(read(file)), [], `${file}: one bumpVersions([...]) call per commit`)
   }
+  // Round 2 (review M12): the two rename-carry sites (admin edit, own profile) must each name sales AND returns; a rename that drops `returns` leaves the cached Returns list showing the old name.
+  const carry = read('routes/users.ts').match(/await bumpVersions\(c\.env, \[([^\]]*)\]\)/g) || []
+  assert.equal(carry.length, 2, 'routes/users.ts: both rename-carry sites bump through one bumpVersions call')
+  for (const call of carry) assert.ok(/'sales'/.test(call) && /'returns'/.test(call), `routes/users.ts: a rename carries the name onto sales AND returns, got ${call}`)
 }
 function checkPortal(read) {
   const text = read('lib/portalAccounts.ts')
   const claim = text.slice(text.indexOf('async function claimAccount('), text.indexOf('export async function signinPortalAccount'))
   const bump = claim.indexOf("await bumpVersions(env, ['customers'])")
   assert.ok(bump > 0, 'claimAccount bumps customers')
-  assert.ok(/if \(args\.createContact\) await bumpVersions/.test(claim), 'only a brand-new customers row bumps')
+  assert.ok(!/if \(args\.createContact\) await bumpVersions/.test(claim), 'a claim of an existing customer bumps too: the cached list shows its new portal_account')
   assert.ok(bump > claim.indexOf('accountId === null') && bump < claim.indexOf("return { ok: true, accountId"), 'after the commit, before the answer')
 }
 function checkReaders(read) {
@@ -93,6 +98,10 @@ function checkReaders(read) {
   const contacts = read('routes/contacts.ts')
   const fn = contacts.slice(contacts.indexOf('async function getContactReadCacheVersion'), contacts.indexOf('async function getContactReadCacheVersion') + 600)
   assert.ok(!/namespaces\.map\(\(namespace\) => getVersionWithFallback/.test(fn), 'getContactReadCacheVersion: no per-namespace reads')
+  // Round 2: the dashboard stock overview key reads products (+ stock) in one batched call too.
+  const overview = read('lib/dashboardStockOverview.ts')
+  assert.ok(/await getVersionsWithFallback\(env, /.test(overview), 'dashboardStockOverview.ts reads its namespaces in one batched call')
+  assert.ok(!/getVersionWithFallback\(/.test(overview), 'dashboardStockOverview.ts: no per-namespace reads')
 }
 function checkAuditLog(read) {
   assert.ok(!/'audit_log'/.test(read('lib/cache.ts')), 'MAINTENANCE_CACHE_NAMESPACES no longer bumps audit_log (nothing reads that version)')
@@ -100,7 +109,7 @@ function checkAuditLog(read) {
 }
 
 check('every listed writer awaits its bump before announcing, and uses one bumpVersions call per commit', () => checkWriters(read))
-check('portal sign-up of a new customer bumps customers before answering (A-C4)', () => checkPortal(read))
+check('portal sign-up (new customer or claim) bumps customers before answering (A-C4)', () => checkPortal(read))
 check('multi-namespace version readers are batched (B-C11)', () => checkReaders(read))
 check('the unread audit_log namespace is no longer bumped', () => checkAuditLog(read))
 
@@ -117,9 +126,11 @@ const mutants = [
   ['telegram topic bumps beside the broadcast', checkWriters, mutate('lib/telegramTopicSetting.ts', "  await bumpVersion(env, 'settings')\n  const refresh = Promise.allSettled([broadcast(env, 'settings', { action: 'update', keys })])", "  const refresh = Promise.allSettled([bumpVersion(env, 'settings'), broadcast(env, 'settings', { action: 'update', keys })])")],
   ['system repair bumps in a deferred group', checkWriters, mutate('routes/system.ts', "      await bumpVersion(c.env, 'sales')\n      c.executionCtx.waitUntil(broadcast(c.env, 'sales', { action: 'update', repair: LEGACY_SUBTOTAL_REPAIR_STEP }))", "      c.executionCtx.waitUntil(Promise.all([\n        bumpVersion(c.env, 'sales'),\n        broadcast(c.env, 'sales', { action: 'update', repair: LEGACY_SUBTOTAL_REPAIR_STEP }),\n      ]))")],
   ['users rename bumps per namespace', checkWriters, mutate('routes/users.ts', "await bumpVersions(c.env, ['sales', 'returns'])\n    }\n    c.executionCtx.waitUntil(broadcast(c.env, 'users', { action: 'update', id }))", "await Promise.all([bumpVersion(c.env, 'sales'), bumpVersion(c.env, 'returns')])\n    }\n    c.executionCtx.waitUntil(broadcast(c.env, 'users', { action: 'update', id }))")],
-  ['portal sign-up never bumps', checkPortal, mutate('lib/portalAccounts.ts', "  if (args.createContact) await bumpVersions(env, ['customers'])\n", '')],
-  ['portal sign-up bumps on a claim too', checkPortal, mutate('lib/portalAccounts.ts', "  if (args.createContact) await bumpVersions(env, ['customers'])\n", "  await bumpVersions(env, ['customers'])\n")],
+  ['portal sign-up never bumps', checkPortal, mutate('lib/portalAccounts.ts', "  await bumpVersions(env, ['customers'])\n", '')],
+  ['portal sign-up bumps only on create (the round-1 shape)', checkPortal, mutate('lib/portalAccounts.ts', "  await bumpVersions(env, ['customers'])\n", "  if (args.createContact) await bumpVersions(env, ['customers'])\n")],
+  ['users rename drops returns from its bump', checkWriters, mutate('routes/users.ts', "    if (usernameChanged && renameScope === 'carry') {\n      await bumpVersions(c.env, ['sales', 'returns'])\n    }\n    c.executionCtx.waitUntil(broadcast(c.env, 'users', { action: 'update', id }))", "    if (usernameChanged && renameScope === 'carry') {\n      await bumpVersions(c.env, ['sales'])\n    }\n    c.executionCtx.waitUntil(broadcast(c.env, 'users', { action: 'update', id }))")],
   ['batches reads per namespace again', checkReaders, mutate('routes/batches.ts', 'await getVersionsWithFallback(c.env, namespaces)', 'await Promise.all(namespaces.map((namespace) => getVersionWithFallback(c.env, namespace)))')],
+  ['dashboard stock overview reads per namespace again', checkReaders, mutate('lib/dashboardStockOverview.ts', "await getVersionsWithFallback(env, fiveMinutes ? ['products'] : ['products', 'stock'])", "await Promise.all((fiveMinutes ? ['products'] : ['products', 'stock']).map((namespace) => getVersionWithFallback(env, namespace)))")],
   ['maintenance list bumps audit_log again', checkAuditLog, mutate('lib/cache.ts', "'inventory',\n]", "'inventory', 'audit_log',\n]")],
 ]
 for (const [name, run, reader] of mutants) {

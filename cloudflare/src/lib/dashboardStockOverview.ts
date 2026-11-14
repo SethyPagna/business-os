@@ -45,7 +45,7 @@
 import type { Env } from '../index'
 import { getDb } from './db'
 import { productHasStockSql } from './productStockGuard'
-import { getVersionWithFallback } from './cache'
+import { getVersionsWithFallback } from './cache'
 import { deploymentId, isUnsafeVersion } from './cacheKey'
 import { BUSINESS_UTC_OFFSET_MINUTES } from './businessDateWindow'
 import { readDataEpoch, readSwitch } from './readSwitches'
@@ -219,7 +219,8 @@ export async function loadDashboardStockOverview(env: Env, ctx: DashboardStockOv
   const fiveMinutes = await readSwitch(env, DASHBOARD_OVERVIEW_SWITCH)
   let versions: string[]
   try {
-    versions = await Promise.all((fiveMinutes ? ['products'] : ['products', 'stock']).map((namespace) => getVersionWithFallback(env, namespace)))
+    // One batched read (the KV reads overlap and D1 is asked once for every namespace KV lacks), not one round trip per namespace.
+    versions = await getVersionsWithFallback(env, fiveMinutes ? ['products'] : ['products', 'stock'])
   } catch {
     // Without the versions there is no safe key: compute, and cache nothing.
     return computeDashboardStockOverview(env, await lowStockPromise, ctx.now)
