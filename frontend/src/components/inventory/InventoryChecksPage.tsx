@@ -34,7 +34,7 @@ import InventoryCheckListRows, { InventoryCheckListHeader, InventoryCheckSelecti
 import { finiteQuantity, parseCount } from './InventoryCheckCountEditor.tsx'
 import InventoryCheckDetailFloat from './InventoryCheckDetailFloat.tsx'
 import { fixStockOpening, fixStockRequestId, type FixStockOpening } from './inventoryCheckFixStock.ts'
-import { countTextFromLots, lotSubmissionLine, lotTotals, rowSetPlan, staleLotFigures, type SubmissionLotLine } from './inventoryCheckLots.ts'
+import { countTextFromLots, lotSubmissionLine, lotTotals, rowSetPlan, splitSubmission, staleLotFigures, type SubmissionLotLine } from './inventoryCheckLots.ts'
 import { adjustStock } from '../../api/inventoryWriteTransport.ts'
 import { stockConflictFigures, type StockWriteAnswer } from './stockAnswerPatch.ts'
 import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
@@ -78,7 +78,7 @@ type ProductsResult = {
   /** The rules behind the rows' promotion prices (wired answers to a viewer with the price grant). */
   promotionRules?: PromotionRule[]
   /** What the server switches on for this answer (ic_fix_stock): Fix stock and the Sales link in the detail float. */
-  capabilities?: { fixStock?: boolean; approveCounts?: boolean; lotCounts?: boolean; directSet?: boolean }
+  capabilities?: { fixStock?: boolean; approveCounts?: boolean; lotCounts?: boolean; directSet?: boolean; lotLinesPerSubmission?: number }
   /** The older list (ic_simple off) answers the all-sessions Issues view with the issues themselves: one per product and session, with the reason, the counted figure and the session. */
   issues?: Array<{ product_id: number; branch_id: number; session_id: string; created_by: number; reason: string | null; revision: number; counted_quantity?: number | null }>
 }
@@ -114,6 +114,7 @@ const REFUSAL_MESSAGES: Record<string, { key: string; fallback: string }> = {
   inventory_check_baseline_missing: { key: 'inventory_check_error_baseline_missing', fallback: 'A product in this count has no recorded starting stock. Reject this count and recount.' },
   inventory_check_approval_in_progress: { key: 'inventory_check_error_approval_in_progress', fallback: 'Another approver is applying this count. If they cannot continue, close the remaining lines.' },
   inventory_check_claim_lost: { key: 'inventory_check_error_claim_lost', fallback: 'Another approver took over or closed this count, so nothing was written for this line. The page was reloaded.' },
+  inventory_check_too_many_lines: { key: 'inventory_check_error_too_many_lines', fallback: 'This count has more received dates than one submission can carry. Submit part of it, then the rest.' },
   inventory_check_no_lot: { key: 'inventory_check_error_no_lot', fallback: 'A product has no received date to add stock to. Receive it first.' },
   inventory_check_stock_write_refused: { key: 'inventory_check_error_write_refused', fallback: 'Stock could not be updated for some products. Try again.' },
   inventory_check_count_pending: { key: 'inventoryCheckCountPending', fallback: 'Set is blocked while a count of this product is waiting for approval. Approve or reject that count first.' },
@@ -354,7 +355,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const [drafts, setDrafts] = useState<Record<string, DraftEntry>>({})
   const draftsRef = useRef(drafts)
   draftsRef.current = drafts
-  const submitAttempt = useRef<{ requestId: string; lines: SubmissionLine[] } | null>(null)
+  // `left`: how many products the cap kept back for the next Submit (they stay on the page as drafts).
+  const submitAttempt = useRef<{ requestId: string; lines: SubmissionLine[]; left: number } | null>(null)
   const [writeScope] = useState(() => captureInventoryCheckWriteScope({ branchId, sessionId, epoch: 0 }, () => mounted.current && isCurrent()))
   const current = () => mounted.current && isCurrent() && isActorReadScopeCurrent(writeScope.readScope, false) && isActorWriteIdentityCurrent(writeScope.writeIdentity)
   const { askToConfirm, confirmDialog } = useConfirmDialog(t)
@@ -855,7 +857,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   async function submit() {
     if (!current() || !selecting || submitBlocked || inFlight.current || selectedIds.length === 0) return
     if (!submitAttempt.current) {
-      const lines: SubmissionLine[] = selectedIds.map(Number).sort((a, b) => a - b).map(productId => {
+      const allLines: SubmissionLine[] = selectedIds.map(Number).sort((a, b) => a - b).map(productId => {
         const entry = drafts[String(productId)], count = parseCount(entry.count), note = entry.note.trim()
         const totals = lotTotals(entry.lots)
         if (lotCountsOn && totals.dates > 0) {
@@ -867,14 +869,18 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         const differs = access.fields.stock && entry.seen !== null && countedQuantity !== entry.seen
         return { productId, countedQuantity, seenQuantity: entry.seen, checked: access.fields.stock && entry.checked && !differs, ...(differs && note ? { note } : {}) }
       })
+      // One submission carries at most the plan's line cap (sent in capabilities): the lines that fit go now, the rest stay as drafts for the next Submit. Nothing is refused for being long.
+      const { send, left } = splitSubmission(allLines, lotCountsOn ? data?.capabilities?.lotLinesPerSubmission : undefined)
+      if (send.length === 0) { setWriteError(tr(REFUSAL_MESSAGES.inventory_check_too_many_lines.key, REFUSAL_MESSAGES.inventory_check_too_many_lines.fallback)); return }
+      const lines = send
       const differing = lines.filter(line => access.fields.stock && ('lots' in line ? line.lots.some(entry => entry.seen !== null && entry.counted !== entry.seen) : line.seenQuantity !== null && line.countedQuantity !== line.seenQuantity)).length
       const confirmed = await askToConfirm({
         title: tr('inventory_check_submit_review_title', 'Submit these counts?'),
-        items: [{ label: t('products'), value: lines.length }, { label: t('branch'), value: branchName ?? '—' }, ...access.fields.stock ? [{ label: tr('inventory_check_differences', 'Differences'), value: differing }] : []],
+        items: [{ label: t('products'), value: lines.length }, ...left.length ? [{ label: tr('inventory_check_submit_left', 'Left for the next submit'), value: left.length }] : [], { label: t('branch'), value: branchName ?? '—' }, ...access.fields.stock ? [{ label: tr('inventory_check_differences', 'Differences'), value: differing }] : []],
         confirmLabel: tr('inventory_check_submit', 'Submit'),
       })
       if (!confirmed || !current() || inFlight.current) return
-      submitAttempt.current = { requestId: createClientRequestId('inventory_check'), lines }
+      submitAttempt.current = { requestId: createClientRequestId('inventory_check'), lines, left: left.length }
     }
     const attempt = submitAttempt.current
     inFlight.current = true; setBusy(true); setWriteError('')
@@ -884,7 +890,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         const sent = new Set(attempt.lines.map(line => String(line.productId)))
         submitAttempt.current = null
         setDrafts(previous => Object.fromEntries(Object.entries(previous).filter(([id]) => !sent.has(id))))
-        notify(tr('inventory_check_submitted', 'Counts submitted'), 'success')
+        notify(attempt.left > 0 ? tr('inventory_check_submitted_part', '{sent} products submitted. {left} more are still on the page: press Submit again.').replace('{sent}', String(sent.size)).replace('{left}', String(attempt.left)) : tr('inventory_check_submitted', 'Counts submitted'), 'success')
         reloadAll()
       }
     } catch (cause) {

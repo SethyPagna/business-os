@@ -52,6 +52,25 @@ export function lotSubmissionLine(productId: number, lots: LotDraft, extra: { ch
   return { productId, lots: entries, checked: extra.checked, ...(extra.note ? { note: extra.note } : {}) }
 }
 
+/** What one line costs against the submission's cap: a line carries one entry per received date, a plain line (one total) counts as one. The server counts the same way. */
+export const submissionLineCost = (line: { lots?: readonly unknown[] }): number => Math.max(1, line.lots?.length ?? 1)
+
+/**
+ * The lines one submission sends, and the ones that wait for the next. A submission is refused above the plan's line cap (capabilities.lotLinesPerSubmission), so the page sends the longest
+ * run of lines, in order, that fits and keeps the rest as drafts: nothing is half-written (each submission is atomic) and nothing is lost. An unknown cap sends everything (the server decides).
+ * `send` is empty only when the first product alone is over the cap, which the page explains instead of sending.
+ */
+export function splitSubmission<T extends { lots?: readonly unknown[] }>(lines: readonly T[], cap: number | undefined): { send: T[]; left: T[] } {
+  if (typeof cap !== 'number' || !Number.isFinite(cap) || cap < 1) return { send: [...lines], left: [] }
+  let used = 0, count = 0
+  for (const line of lines) {
+    const cost = submissionLineCost(line)
+    if (used + cost > cap) break
+    used += cost; count++
+  }
+  return { send: lines.slice(0, count), left: lines.slice(count) }
+}
+
 /** What a direct Set on one received date writes: the typed figure, from the figure the row shows now. Null when nothing valid is typed or nothing would change. */
 export function rowSetPlan(row: Pick<InventoryCheckLotRow, 'batchId' | 'quantity'>, text: string): { batchId: number; before: number; after: number } | null {
   const count = lotCountOf(text)

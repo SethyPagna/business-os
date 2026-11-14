@@ -380,8 +380,10 @@ export type PlanLimits = {
   inventoryOverlayMaxRows: number
 
   // lib/inventoryCheckSessions.ts createInventoryCheckLotSubmission (INV-B S5; behind the read switch `ic_lot_counts`): the most received-date lines ONE count submission
-  // carries across all its products (a branch-total line counts as one). Above it the submission is refused 400, so its insert statements stay bounded by a number the client was
-  // told. A ceiling like the ones above: Paid carries 4 times what Free does.
+  // carries across all its products (a branch-total line counts as one). Above it the submission is refused 400 `inventory_check_too_many_lines`. The number is sent to the page
+  // (capabilities.lotLinesPerSubmission), which sends what fits and keeps the rest as a draft. It does NOT bound statements: the lines are written by one set-based INSERT ... SELECT
+  // over json_each per table, so a submission is the same 17 D1 calls and 33 statements for 20 lines or 200 (measured, 14 Nov); what grows is about 3 rows written and 8 rows read per
+  // line. Free carries what ONE full page needs: a page of 20 products times productListLotsPerRow (20) dates each. Paid carries 4 times what Free does.
   inventoryCheckLotLinesPerSubmission: number
   // The most received dates ONE product carries in a count (a product with more is not counted date by date). Paid carries twice what Free does.
   inventoryCheckLotLinesPerProduct: number
@@ -518,7 +520,7 @@ const PAID_LIMITS: PlanLimits = {
   expenseReportFoldUnboundedWindows: true,
   productListLotsPerRow: 50,
   inventoryOverlayMaxRows: 300,
-  inventoryCheckLotLinesPerSubmission: 240,
+  inventoryCheckLotLinesPerSubmission: 1_600,
   inventoryCheckLotLinesPerProduct: 100,
   inventoryLastChangeMaxRows: 8,
   inventoryCheckFilterMaxIds: 10_000,
@@ -578,7 +580,7 @@ const FREE_LIMITS: PlanLimits = {
   expenseReportFoldUnboundedWindows: false,
   productListLotsPerRow: 20,
   inventoryOverlayMaxRows: 150,
-  inventoryCheckLotLinesPerSubmission: 60,
+  inventoryCheckLotLinesPerSubmission: 400,
   inventoryCheckLotLinesPerProduct: 50,
   inventoryLastChangeMaxRows: 4,
   inventoryCheckFilterMaxIds: 2_000,

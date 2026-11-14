@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHarness, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
-import { countTextFromLots, lotCountOf, lotSubmissionLine, lotTotals, rowSetPlan, staleLotFigures, type LotDraft } from '../src/components/inventory/inventoryCheckLots.ts'
+import { countTextFromLots, lotCountOf, lotSubmissionLine, lotTotals, rowSetPlan, splitSubmission, staleLotFigures, submissionLineCost, type LotDraft } from '../src/components/inventory/inventoryCheckLots.ts'
 import { patchWiredRaw, setToAmount, wiredListParams, wiredResult, type WiredList } from '../src/components/inventory/inventoryWired.ts'
 import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
 
@@ -50,6 +50,17 @@ assert.equal(staleLotFigures({ status: 409, code: 'inventory_check_stock_changed
 assert.equal(staleLotFigures({ body: { current: [{ productId: 77, batchId: 7, scope: 'lot', quantity: 1 }] } }, [product], 1), null, 'a product not on this page is not patched')
 const twoDates = staleLotFigures({ current: [{ productId: 5, batchId: 7, scope: 'lot', quantity: 4 }, { productId: 5, batchId: 9, scope: 'lot', quantity: 6 }] }, [product], 1)
 assert.deepEqual(twoDates?.conflicts.map(entry => entry.current.branchQuantity), [7, 10], 'two dates of one product move the total one after the other')
+
+// ---- F1: one submission carries at most the plan's line cap; the rest waits (the server counts a plain line as 1, a dated line as one per date) ----
+const dated = (productId: number, dates: number) => ({ productId, lots: Array.from({ length: dates }, (_, n) => ({ batchId: n + 1 })) })
+assert.equal(submissionLineCost(dated(1, 3)), 3); assert.equal(submissionLineCost({}), 1, 'a plain line is one'); assert.equal(submissionLineCost({ lots: [] }), 1, 'and never zero')
+const plan = [dated(1, 3), { productId: 2 }, dated(3, 2), dated(4, 1)]
+assert.deepEqual(splitSubmission(plan, 6).send.map(line => line.productId), [1, 2, 3], '3 + 1 + 2 = 6 fits, the next would be 7')
+assert.deepEqual(splitSubmission(plan, 6).left.map(line => line.productId), [4], 'the rest waits, in order')
+assert.deepEqual(splitSubmission(plan, 5).send.map(line => line.productId), [1, 2], 'a whole product or none: 3 + 1 + 2 = 6 is over 5')
+assert.deepEqual(splitSubmission(plan, 100), { send: plan, left: [] }, 'under the cap everything goes')
+assert.deepEqual(splitSubmission(plan, undefined), { send: plan, left: [] }, 'a cap the page was not told sends everything (the server decides)')
+assert.deepEqual(splitSubmission(plan, 2).send.map(line => line.productId), [], 'a first product over the cap alone sends nothing: the page explains instead of sending')
 
 // ---- the wired page: a Set patches the row from the answer (the mounted page test counts the requests: none) ------------------------------------------------------------------------------
 const list: WiredList = {

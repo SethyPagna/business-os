@@ -37,6 +37,7 @@ async function realRefusal(body: Record<string, unknown>): Promise<Error> {
   setSyncServerUrl('https://admin.example.test'); __resetApiHealthForTests(); __resetApiWriteDedupeForTests()
   try { await apiFetch('GET', '/api/inventory-checks/list?x=1'); throw new Error('the stub answered 400 but apiFetch did not throw') } catch (error) { return error as Error } finally { globalThis.fetch = saved }
 }
+let realRefusalSync: Error = new Error('unset')
 const sync = (detail: Record<string, unknown>) => window.dispatchEvent(new CustomEvent('sync:update', { detail }))
 let adjustAnswer: (payload: Record<string, unknown>) => unknown = () => ({})
 let listAnswer: (query: URLSearchParams) => Row | Promise<Row> = () => ({})
@@ -223,6 +224,56 @@ try {
     await surface.click(exact(surface, 'Submit').at(-1)!)
     assert.deepEqual((submissions[0].lines as Array<{ lots: unknown }>)[0].lots, [{ batchId: 7, scope: 'lot', counted: 5, seen: 5 }, { batchId: 9, scope: 'lot', counted: 3, seen: 3 }])
     await surface.unmount()
+  }
+  // ---- F1 (review 14 Nov): a submission over the plan's line cap is never a dead end. The cap comes in capabilities; the page sends the run of products that fits and keeps the rest as drafts;
+  // a server refusal (an older page, a cap that moved) says what to do and keeps every count. ----
+  {
+    const three = () => listBody([withLots(productRow(12, 'Dated one', 8)), withLots(productRow(14, 'Dated two', 8)), withLots(productRow(16, 'Dated three', 8))], { capabilities: { ...capabilities, lotLinesPerSubmission: 4 }, summary: { ok: 0, issue: 0, not_checked: 3, total: 3 } })
+    const matchAll = async (surface: Awaited<ReturnType<typeof mount>>) => {
+      for (const id of ['12', '14', '16']) { await openCount(surface, id); await surface.click(surface.find(node => node.getAttribute('data-popover-action') === 'matches', 'matches')); await closeCount(surface) }
+    }
+    const submitNow = async (surface: Awaited<ReturnType<typeof mount>>) => {
+      await surface.click(surface.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit'))
+      await surface.click(exact(surface, 'Submit').at(-1)!)
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
+    lotsAnswer = productId => ({ productId, branchId: 1, lots: [{ batchId: 7, receivedAt: '2026-10-01', expiry: null, quantity: 5 }, { batchId: 9, receivedAt: '2026-10-09', expiry: null, quantity: 3 }] })
+    submissions.length = 0; listAnswer = three; submitAnswer = () => ({ item: { id: 'session-new' }, receipt: {}, created: true })
+    const surface = await mount()
+    await matchAll(surface)
+    await submitNow(surface)
+    assert.equal(submissions.length, 1, 'three products of two dates each are 6 lines against a cap of 4: the first send carries what fits')
+    assert.deepEqual((submissions[0].lines as Array<{ productId: number }>).map(line => line.productId), [12, 14], 'in order, whole products only')
+    assert.equal(rowCount(surface, '16').value, '8', 'the product that did not fit is still a draft on the page')
+    assert.equal(rowCount(surface, '12').value, '', 'the ones sent are cleared')
+    await submitNow(surface)
+    assert.equal(submissions.length, 2); assert.deepEqual((submissions[1].lines as Array<{ productId: number }>).map(line => line.productId), [16], 'the next Submit sends the rest')
+    await surface.unmount()
+    // a cap smaller than ONE product: nothing is sent, the person is told what to do
+    submissions.length = 0
+    listAnswer = () => listBody([withLots(productRow(12, 'Dated one', 8))], { capabilities: { ...capabilities, lotLinesPerSubmission: 1 }, summary: { ok: 0, issue: 0, not_checked: 1, total: 1 } })
+    const tight = await mount()
+    await openCount(tight, '12'); await tight.click(tight.find(node => node.getAttribute('data-popover-action') === 'matches', 'matches')); await closeCount(tight)
+    await tight.click(tight.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit'))
+    assert.equal(submissions.length, 0, 'nothing is sent that the server would refuse')
+    assert.ok(tight.findAll(node => node.getAttribute('role') === 'alert').some(node => node.textContent.includes('more received dates than one submission can carry')), 'and the person is told in words')
+    assert.equal(rowCount(tight, '12').value, '8', 'the count is kept')
+    await tight.unmount()
+    // the server refuses all the same (no cap known to the page): the code has its own message, the counts are kept and the same Submit is a fresh request
+    submissions.length = 0
+    listAnswer = () => answerOf()
+    const refused = await mount()
+    await openCount(refused, '12'); await refused.click(refused.find(node => node.getAttribute('data-popover-action') === 'matches', 'matches')); await closeCount(refused)
+    submitAnswer = () => { throw realRefusalSync }
+    realRefusalSync = await realRefusal({ error: 'inventory_check_too_many_lines', code: 'inventory_check_too_many_lines' })
+    await submitNow(refused)
+    assert.ok(refused.findAll(node => node.getAttribute('role') === 'alert').some(node => node.textContent.includes('more received dates than one submission can carry')), 'the refusal is explained, not "Check not saved. Try again."')
+    assert.equal(rowCount(refused, '12').value, '8', 'the counts are kept')
+    submitAnswer = () => ({ item: { id: 'session-new' }, receipt: {}, created: true })
+    await submitNow(refused)
+    assert.equal(submissions.length, 2); assert.notEqual(submissions[0].requestId, submissions[1].requestId, 'a refused request is dropped: the next Submit is a new one')
+    await refused.unmount()
+    lotsAnswer = null
   }
   // ---- audit G1b: the switch went OFF under an open tab: one re-read, then the same counts go as plain lines (no second refusal) ----
   {

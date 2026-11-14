@@ -87,9 +87,10 @@ const singleValued = (c: IcContext): void => {
 // inventory_checks version), never a stock read.
 const fixStockCapabilities = (user: SessionUser) => ({ fixStock: true, approveCounts: getActionTier(user, 'inventory', 'adjust') === 'full' && canApproveInventoryCounts(user) })
 // ic_lot_counts: counts are typed per received date; a holder of Full stock-adjust who sees stock may also Set a received date or the branch total straight from the row.
-const capabilitiesOf = (user: SessionUser, fixStock: boolean, lotCounts: boolean, stockField: boolean) => {
+// lotLinesPerSubmission: the most received-date lines one submission may carry (the plan's number); the page sends what fits and keeps the rest, so a normal page is never refused.
+const capabilitiesOf = (user: SessionUser, fixStock: boolean, lotCounts: boolean, stockField: boolean, lotLinesPerSubmission: number) => {
   if (!fixStock && !lotCounts) return null
-  return { ...(fixStock ? fixStockCapabilities(user) : {}), ...(lotCounts ? { lotCounts: true as const, ...(stockField && getActionTier(user, 'inventory', 'adjust') === 'full' ? { directSet: true as const } : {}) } : {}) }
+  return { ...(fixStock ? fixStockCapabilities(user) : {}), ...(lotCounts ? { lotCounts: true as const, lotLinesPerSubmission, ...(stockField && getActionTier(user, 'inventory', 'adjust') === 'full' ? { directSet: true as const } : {}) } : {}) }
 }
 const checkCountsOf = (sets: CheckStateSets, fixStock: boolean) => ({ ok: sets.ok.length, issue: sets.issue.length, ...(fixStock ? { pending: sets.pending.length } : {}) })
 app.get('/list', async c => {
@@ -133,7 +134,7 @@ app.get('/list', async c => {
     body.total = checkedPage.total; body.page = checkedPage.page; body.pageSize = checkedPage.pageSize; body.totalPages = Math.max(1, Math.ceil(checkedPage.total / checkedPage.pageSize))
   }
   const lotCounts = await lotCountsOn(c)
-  const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock)
+  const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock, getPlanLimits(c.env).inventoryCheckLotLinesPerSubmission)
   const productsPage = getActionTier(user, 'products', 'view') !== 'none'
   const { body, projected } = projectInventoryList(payload as Record<string, unknown>, user, access, productsPage)
   const total = Number((payload as { total?: unknown }).total) || 0
@@ -168,7 +169,7 @@ app.get('/overlay', async c => {
     lots: (row.lots ?? []).map((lot) => access.fields.stock ? lot : { ...lot, branches: (lot.branches as Array<Record<string, unknown>>).map(({ quantity: _quantity, ...entry }) => entry) }),
     ...(row.lots_more ? { lots_more: true } : {}) })) : undefined
   const sets = wantSummary ? (await readCheckStateSets(c, branchId, fixStock)).sets : null
-  const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock)
+  const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock, getPlanLimits(c.env).inventoryCheckLotLinesPerSubmission)
   return c.json({ wired: true, branchId, version: await inventoryChecksVersion(c.env), items, ...(lots ? { lots } : {}),
     ...(sets && !sets.tooLarge ? { summary: checkCountsOf(sets, fixStock) } : {}), ...(capabilities ? { capabilities } : {}) })
 })
