@@ -16,6 +16,7 @@ import { stockVisibleProductSql } from '../lib/productStockGuard'
 import { canApproveInventoryCounts, getInventoryCheckAccess, InventoryCheckQueryError } from '../lib/inventoryCheckAccess'
 import { canonicalProductsRequest, checkStateRestriction, inventoryChecksVersion, planInventoryList, projectInventoryList, readCheckStateSets, type CheckStateSets } from '../lib/inventoryCheckList'
 import { parseOverlayIds, readInventoryOverlay } from '../lib/inventoryCheckOverlay'
+import { readInventoryCheckLots } from '../lib/inventoryCheckLots'
 import { getActionTier } from '../lib/permissions'
 import { attachLotRows, readProductSearchList } from './products'
 import { approvalsAvailable, createInventoryCheckLotSubmission, createInventoryCheckSession, createInventoryCheckSubmission, lotLinesAvailable, getInventoryCheckSession, inventoryCheckDigest, inventoryCheckSessionHistory,
@@ -170,6 +171,20 @@ app.get('/overlay', async c => {
   const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock)
   return c.json({ wired: true, branchId, version: await inventoryChecksVersion(c.env), items, ...(lots ? { lots } : {}),
     ...(sets && !sets.tooLarge ? { summary: checkCountsOf(sets, fixStock) } : {}), ...(capabilities ? { capabilities } : {}) })
+})
+// ic_lot_counts: the received dates ("batches") one product holds at one branch, read ON DEMAND when a person opens the count popover of a row (one request, one product; the page never
+// lists batches for its rows). Answers 404 while the switch is OFF (the page then counts one total per product, exactly as before). No cost, supplier or price is ever selected.
+const positiveWord = (word: string | undefined, parameter: string): number => {
+  if (!word || !/^[0-9]+$/.test(word.trim()) || !Number.isSafeInteger(Number(word)) || Number(word) <= 0) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', parameter)
+  return Number(word)
+}
+app.get('/lots', async c => {
+  if (!await lotCountsOn(c)) return notWired(c)
+  singleValued(c)
+  const user = c.get('user')
+  if (!getInventoryCheckAccess(user).canView) throw new InventoryCheckQueryError(403, 'inventory_check_view_required', '')
+  const productId = positiveWord(c.req.query('productId'), 'productId'), branchId = positiveWord(c.req.query('branchId'), 'branchId')
+  return c.json(await readInventoryCheckLots(getDb(c.env), user, { productId, branchId, limit: getPlanLimits(c.env).inventoryCheckLotLinesPerProduct }))
 })
 app.get('/sessions', async c => c.json(await listInventoryCheckSessions(getDb(c.env), await principal(c), c.req.query(), { approvals: await fixStockOn(c) })))
 app.post('/sessions', async c => {
