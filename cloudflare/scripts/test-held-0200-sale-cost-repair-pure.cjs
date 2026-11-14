@@ -974,7 +974,79 @@ check('held: outside deploy chain, after dependencies including0195; independent
       || (/^SELECT CASE WHEN /i.test(statement) && /THEN 1 ELSE json_extract\('\[\]','\$\[\w+\]'\) END$/.test(statement)
         && !/\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|PRAGMA)\b/i.test(statement)))
   }
-  const dependencies = chain.filter((f) => !costReviewDdl.includes(f) && !(f === '0273_conflict_marks_and_indexes.sql' && conflictMarksFile(chainText(f))) && !admissionGuards.includes(f) && !indexOnly(chainText(f)) && !indexWithAssertionsOnly(chainText(f)) && !indexChangesOnly(chainText(f), migrationText, chain.filter((g) => g < f).map(chainText).join('\n')) && !additiveUnread(chainText(f), migrationText) && !schemaOnlyUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && !revisionTriggers.includes(f) && !systemMark.includes(f) && !loyaltyResets.includes(f) && touched.some(namedIn(chainText(f))))
+  // 0308 (lane sales-daily-totals): the stored daily sales totals. A NEW derived table the repair never names, two indexes (one on that table, one a
+  // partial index on customers), four MARK-ONLY triggers (their only statement is an upsert into the new table, and only on a state change), a seed of
+  // that table from the DISTINCT business days of sales, one system_flags coverage row and a read-only assertion. The shape is matched statement by
+  // statement; anything else in the file makes it a dependency. Why both orders agree: the table is a cache, and the file's own seed marks EVERY day
+  // that has a sale dirty. Repair first (a fresh database): nothing to mark, then the seed marks every day. File first (production): the repair's cost
+  // writes fire the 0120 revision triggers, which mark days that the seed already marked. Either way every day with a sale ends dirty, nothing else
+  // changes, and the repair reads no table the file writes. The repair must not name the new table or the flag keys, must not write customers, and must
+  // not move sales.created_at (the one write a mark trigger would key on differently).
+  const DERIVED_GUARD = "NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')"
+  const DERIVED_MARK_REVISION = "INSERT INTO sales_daily_totals(business_date, state) SELECT COALESCE(date(created_at, '+7 hours'), ''), 1 FROM sales WHERE id = NEW.sale_id ON CONFLICT(business_date) DO UPDATE SET state = 1 WHERE state <> 1;"
+  const DERIVED_MARK_OLD = "INSERT INTO sales_daily_totals(business_date, state) SELECT COALESCE(date(OLD.created_at, '+7 hours'), ''), 1 WHERE 1 ON CONFLICT(business_date) DO UPDATE SET state = 1 WHERE state <> 1;"
+  const DERIVED_TRIGGERS = {
+    sales_daily_mark_revision_insert: ['AFTER INSERT ON sale_write_revisions', DERIVED_GUARD, DERIVED_MARK_REVISION],
+    sales_daily_mark_revision_update: ['AFTER UPDATE ON sale_write_revisions', DERIVED_GUARD, DERIVED_MARK_REVISION],
+    sales_daily_mark_sale_delete: ['AFTER DELETE ON sales', DERIVED_GUARD, DERIVED_MARK_OLD],
+    sales_daily_mark_sale_moved: ['AFTER UPDATE OF created_at ON sales', 'OLD.created_at IS NOT NEW.created_at AND ' + DERIVED_GUARD, DERIVED_MARK_OLD],
+  }
+  const DERIVED_STATEMENTS = [
+    /^CREATE TABLE sales_daily_totals \( id INTEGER PRIMARY KEY, business_date TEXT NOT NULL UNIQUE, state INTEGER NOT NULL DEFAULT 1 CHECK \(state IN \(0, 1, 2\)\), claim_gen INTEGER NOT NULL DEFAULT 0, kernel_version INTEGER NOT NULL DEFAULT 0, data_epoch TEXT NOT NULL DEFAULT '', refusal TEXT, payload TEXT NOT NULL DEFAULT '\{\}', source_rows INTEGER NOT NULL DEFAULT 0, computed_at TEXT \)$/,
+    /^CREATE INDEX idx_sales_daily_totals_pending ON sales_daily_totals\(business_date\) WHERE state <> 0$/,
+    /^CREATE INDEX idx_customers_anonymous ON customers\(id\) WHERE COALESCE\(is_anonymous, 0\) <> 0$/,
+    /^INSERT INTO sales_daily_totals\(business_date, state\) SELECT DISTINCT COALESCE\(date\(created_at, '\+7 hours'\), ''\), 1 FROM sales WHERE 1 ON CONFLICT\(business_date\) DO NOTHING$/,
+    /^INSERT INTO system_flags \(key, value, updated_at\) VALUES \('sales_daily_coverage', json_object\('epoch', \(SELECT value FROM system_flags WHERE key = 'data_epoch'\), 'kernel', 1\), CURRENT_TIMESTAMP\) ON CONFLICT\(key\) DO UPDATE SET value = excluded\.value, updated_at = excluded\.updated_at$/,
+  ]
+  const derivedDailyTotalsFile = (text, repairText) => {
+    const code = sqlCode(text)
+    const seen = new Set()
+    let triggersOk = true
+    const rest = code.replace(/CREATE TRIGGER (\w+) ((?:AFTER|BEFORE) [A-Za-z_ ]+? ON \w+)\s+WHEN ([\s\S]*?)\s+BEGIN([\s\S]*?)\bEND\s*;/gi, (_all, name, event, when, body) => {
+      const wanted = DERIVED_TRIGGERS[name]
+      const clean = (value) => value.replace(/\s+/g, ' ').trim()
+      if (!wanted || seen.has(name) || clean(event) !== wanted[0] || clean(when) !== wanted[1] || clean(body) !== wanted[2]) triggersOk = false
+      seen.add(name)
+      return ' '
+    })
+    if (!triggersOk || seen.size !== Object.keys(DERIVED_TRIGGERS).length) return false
+    const statements = rest.split(';').map((v) => v.replace(/\s+/g, ' ').trim()).filter(Boolean)
+    const matched = new Set()
+    for (const statement of statements) {
+      const index = DERIVED_STATEMENTS.findIndex((pattern) => pattern.test(statement))
+      if (index >= 0) { if (matched.has(index)) return false; matched.add(index); continue }
+      if (!(/^SELECT CASE WHEN /i.test(statement) && /THEN 1 ELSE json_extract\('\[\]','\$\[\w+\]'\) END$/.test(statement)
+        && !/\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|PRAGMA)\b/i.test(statement))) return false
+    }
+    if (matched.size !== DERIVED_STATEMENTS.length) return false
+    const named = namedIn(repairText)
+    const repairCode = sqlCode(repairText)
+    return !named('sales_daily_totals') && !/sales_daily_(coverage|quarantine)|data_epoch/i.test(repairCode)
+      && !repairWrites(repairText).includes('customers') && !repairWrites(repairText).includes('sales')
+      && !/\bUPDATE\s+(?:OR\s+\w+\s+)?sales\b[^;]*\bcreated_at\b/i.test(repairCode)
+  }
+  const derivedDaily = chain.filter((file) => file === '0308_sales_daily_totals.sql' && derivedDailyTotalsFile(chainText(file), migrationText))
+  assert.deepEqual(derivedDaily, ['0308_sales_daily_totals.sql'])
+  {
+    const text = chainText(derivedDaily[0])
+    const wrongs = [
+      ['a business write after it', text + '\nUPDATE sale_items SET cost_price_usd = 123;'],
+      ['a trigger body that writes another table', text.replace("SELECT COALESCE(date(OLD.created_at, '+7 hours'), ''), 1 WHERE 1", "SELECT COALESCE(date(OLD.created_at, '+7 hours'), ''), 1 WHERE 1 AND (SELECT 1 FROM sale_items) IS NOT NULL")],
+      ['a mark trigger on a table the repair writes', text.replace('AFTER INSERT ON sale_write_revisions', 'AFTER INSERT ON sale_items')],
+      ['a mark that moves a state other than to dirty', text.split('SET state = 1 WHERE state <> 1').join('SET state = 0 WHERE state <> 0')],
+      ['a seed read from a table the repair writes', text.replace('SELECT DISTINCT COALESCE(date(created_at, \'+7 hours\'), \'\'), 1 FROM sales WHERE 1', 'SELECT DISTINCT COALESCE(date(created_at, \'+7 hours\'), \'\'), 1 FROM sale_items WHERE 1')],
+      ['a second seed', text + "\nINSERT INTO sales_daily_totals(business_date, state) SELECT DISTINCT COALESCE(date(created_at, '+7 hours'), ''), 1 FROM sales WHERE 1 ON CONFLICT(business_date) DO NOTHING;"],
+      ['a missing trigger', text.replace(/CREATE TRIGGER sales_daily_mark_sale_moved[\s\S]*?\nEND;/, '')],
+    ]
+    for (const [label, wrong] of wrongs) {
+      assert.notEqual(wrong, text, label)
+      assert.equal(derivedDailyTotalsFile(wrong, migrationText), false, 'control: still a dependency: ' + label)
+    }
+    assert.equal(derivedDailyTotalsFile(text, migrationText + '\nUPDATE sales SET created_at = created_at;'), false, 'control: a repair that moves created_at is a dependency')
+    assert.equal(derivedDailyTotalsFile(text, migrationText + '\nINSERT INTO sales_daily_totals(business_date) VALUES (\'x\');'), false, 'control: a repair that names the derived table is a dependency')
+    assert.equal(derivedDailyTotalsFile('-- header: UPDATE sale_items SET cost_price_usd = 1;\n' + text, migrationText), true, 'control: a comment header changes nothing')
+  }
+  const dependencies = chain.filter((f) => !costReviewDdl.includes(f) && !(f === '0273_conflict_marks_and_indexes.sql' && conflictMarksFile(chainText(f))) && !admissionGuards.includes(f) && !indexOnly(chainText(f)) && !indexWithAssertionsOnly(chainText(f)) && !indexChangesOnly(chainText(f), migrationText, chain.filter((g) => g < f).map(chainText).join('\n')) && !additiveUnread(chainText(f), migrationText) && !schemaOnlyUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && !revisionTriggers.includes(f) && !systemMark.includes(f) && !loyaltyResets.includes(f) && !derivedDaily.includes(f) && touched.some(namedIn(chainText(f))))
   assert.ok(['sale_items', 'return_items', 'catalog_cost_repair_0195_backup'].every((t) => touched.includes(t)), 'control: the scan sees the two tables it writes and the 0195 backup it reads')
   assert.ok(dependencies.includes('0195_catalog_cost_on_hand.sql'), 'control: the scan finds 0195')
   assert.ok(indexOnly('-- x\nCREATE INDEX IF NOT EXISTS i ON sale_items(id);\nCREATE UNIQUE INDEX j ON sale_items(id);'), 'control: an index-only file is skipped')
