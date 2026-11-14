@@ -386,13 +386,19 @@ export default function PaginationControls({
     }
     const compactDraft = boundedDraft(pageDraft)
     const compactDigits = Math.max(1, compactDraft.length)
+    // One row at any count. A seven-digit total ("2,469,101-2,469,120 of 2,469,120" beside
+    // "123456 / 123456") cannot fit 272px at 11px, and the range must never shrink or clip, so
+    // long strings step down to 9px with tight padding; everyday counts keep the 11px look.
+    const dense = rangeText.length + `${safePage} / ${totalPages}`.length > 40
+    const edgePad = dense ? 'px-0.5' : 'px-1'
+    const textSize = dense ? 'text-[9px]' : 'text-[11px]'
     return (
-      <div className={`max-w-full rounded-xl border border-slate-200 bg-white/80 px-1 py-1.5 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300 ${className}`}>
+      <div className={`max-w-full rounded-xl border border-slate-200 bg-white/80 ${dense ? 'px-0.5' : 'px-1'} py-1.5 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300 ${className}`}>
         {/* One row, owner 14 Nov order: Back, item range of total, page / pages, Next. */}
         <div className="mx-auto flex w-fit max-w-full items-center justify-center rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
           <button
             type="button"
-            className="inline-flex h-7 shrink-0 items-center gap-0.5 px-1 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+            className={`inline-flex h-7 shrink-0 items-center gap-0.5 ${edgePad} text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800`}
             disabled={backDisabled}
             onClick={() => onPageChange?.(safePage - 1)}
             aria-label={backLabel}
@@ -401,15 +407,15 @@ export default function PaginationControls({
             <ChevronLeft className="h-4 w-4" />
             <span className={edgeTextClass}>{backLabel}</span>
           </button>
-          <span data-pager-range className="min-w-0 whitespace-nowrap rounded-full bg-slate-50 px-1.5 py-1 text-[11px] font-semibold tabular-nums text-slate-700 dark:bg-slate-800 dark:text-slate-100">{rangeText}</span>
+          <span data-pager-range className={`shrink-0 whitespace-nowrap rounded-full bg-slate-50 ${dense ? 'px-1' : 'px-1.5'} py-1 ${textSize} font-semibold tabular-nums text-slate-700 dark:bg-slate-800 dark:text-slate-100`}>{rangeText}</span>
           {compactPageInput ? (
-            <div className="inline-flex shrink-0 items-center justify-center gap-1 px-1 text-[11px] font-semibold tabular-nums text-slate-700 dark:text-slate-100">
+            <div className={`inline-flex shrink-0 items-center justify-center ${dense ? 'gap-0.5 px-0.5' : 'gap-1 px-1'} ${textSize} font-semibold tabular-nums text-slate-700 dark:text-slate-100`}>
               <input
                 type="text"
                 inputMode="numeric"
                 aria-label={pageLabel}
-                style={{ width: `max(2.25rem, calc(${compactDigits}ch + 0.5rem))` }}
-                className="h-7 min-w-9 border-0 bg-transparent px-0 text-center text-[11px] font-semibold text-slate-700 outline-none dark:text-slate-100"
+                style={{ width: dense ? `calc(${compactDigits}ch + 0.5rem)` : `max(2.25rem, calc(${compactDigits}ch + 0.5rem))` }}
+                className={`h-7 ${dense ? '' : 'min-w-9'} border-0 bg-transparent px-0 text-center ${textSize} font-semibold text-slate-700 outline-none dark:text-slate-100`}
                 value={compactDraft}
                 onChange={(event) => {
                   setPageDraft(boundedDraft(event.target.value))
@@ -417,17 +423,17 @@ export default function PaginationControls({
                 onBlur={(event) => commitPageDraft(event.currentTarget.value)}
                 onKeyDown={handlePageInputKeyDown}
               />
-              <span className="shrink-0 text-[11px] font-semibold text-slate-500 dark:text-slate-300">/ {totalPages}</span>
+              <span className={`shrink-0 ${textSize} font-semibold text-slate-500 dark:text-slate-300`}>/ {totalPages}</span>
             </div>
           ) : (
-            <span data-pager-page className="shrink-0 whitespace-nowrap px-1 text-center text-[11px] font-semibold tabular-nums text-slate-700 dark:text-slate-100">
+            <span data-pager-page className={`shrink-0 whitespace-nowrap ${edgePad} text-center ${textSize} font-semibold tabular-nums text-slate-700 dark:text-slate-100`}>
               <span aria-hidden="true">{safePage} / {totalPages}</span>
               <span className="sr-only">{pageLabel} {safePage} {ofLabel} {totalPages}</span>
             </span>
           )}
           <button
             type="button"
-            className="inline-flex h-7 shrink-0 items-center gap-0.5 px-1 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+            className={`inline-flex h-7 shrink-0 items-center gap-0.5 ${edgePad} text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800`}
             disabled={nextDisabled}
             onClick={() => onPageChange?.(safePage + 1)}
             aria-label={nextLabel}
