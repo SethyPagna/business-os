@@ -19,7 +19,7 @@ function load(rel) {
   const req = name => {
     if (name==='hono') return require(name)
     if (name.endsWith('/auth')) return { requireAuth: async(c,next)=>{c.set('user',user);return next()} }
-    if (name.endsWith('/cache')) return {bumpVersion:async()=>{},bumpVersions:async()=>{},getVersionWithFallback:async()=>0,cachedJsonResponse:async(_r,_c,_k,_t,loader)=>loader()}
+    if (name.endsWith('/cache')) return {bumpVersion:async()=>{},bumpVersions:async()=>{},getVersionWithFallback:async()=>0, getVersionsWithFallback: async (_e, names) => names.map(() => 0),cachedJsonResponse:async(_r,_c,_k,_t,loader)=>loader()}
     if (name.endsWith('/broadcastHub')) return {broadcast:async()=>{}}
     if (name.endsWith('/audit')) return {audit:async()=>{}}
     if (rel.endsWith('saleRecordEvents.ts') && name === './saleRecords') return { SALE_RECORD_FIELDS: recordContract.fields, SALE_RECORD_KINDS: recordContract.kinds }

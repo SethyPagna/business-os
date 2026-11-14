@@ -48,7 +48,7 @@ function load(rel) {
     if (name === 'hono') return require(name)
     if (name.endsWith('/auth')) return { requireAuth: async (c, next) => { c.set('user', user); return next() } }
     if (/\/phone(Mask|Access|WriteGuard|SearchGuard|Cache)$/.test(name)) return name.endsWith('phoneCache') ? { cachedPhoneJson: async (_r, _c, _u, _v, _t, fn) => fn() } : require('./harness/phone_real_modules.cjs').phoneModule(name)
-    if (name.endsWith('/cache')) return { bumpVersion: async () => {}, bumpVersions: async () => {}, getVersionWithFallback: async () => 0, cachedJsonResponse: async (_e,_k,_t,fn) => fn() }
+    if (name.endsWith('/cache')) return { bumpVersion: async () => {}, bumpVersions: async () => {}, getVersionWithFallback: async () => 0, getVersionsWithFallback: async (_e, names) => names.map(() => 0), cachedJsonResponse: async (_e,_k,_t,fn) => fn() }
     if (name.endsWith('/broadcastHub')) return { broadcast: async () => {} }
     if (name.endsWith('/audit')) return { audit: async () => {}, changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false }
     if (name.endsWith('/telegram')) return { formatSaleTelegramLines: () => [], formatSaleStatusTelegramLines: () => [], sendTelegramEvent: async () => {}, telegramMoney: () => '' }

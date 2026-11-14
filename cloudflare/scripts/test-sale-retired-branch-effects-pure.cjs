@@ -72,7 +72,7 @@ function makeWorld(oracleSha) {
     '../lib/audit': { audit: async () => {} },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
     '../lib/cache': {
-      bumpVersion: async () => {}, bumpVersions: async () => {}, getVersionWithFallback: async () => 0,
+      bumpVersion: async () => {}, bumpVersions: async () => {}, getVersionWithFallback: async () => 0, getVersionsWithFallback: async (_e, names) => names.map(() => 0),
       cachedJsonResponse: async (_request, _context, _key, _ttl, loader) => loader(),
     },
     '../lib/telegram': {

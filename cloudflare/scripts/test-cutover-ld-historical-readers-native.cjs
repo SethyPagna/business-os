@@ -32,7 +32,7 @@ function load(entry, overrides = {}) {
     new Function('require', 'module', 'exports', output)((id) => {
       const name = id.split('/').at(-1)
       if (Object.hasOwn(overrides, name)) return overrides[name]
-      if (name === 'cache') return { cacheIdentity: () => undefined, isUnsafeVersion: () => false, deploymentId: () => 'dev', bumpVersion: async () => {}, getVersionWithFallback: async () => '0', getVersion: async () => '0', versionedKey: async (_kv, ns, suffix) => `${ns}:${suffix}`, getJson: async () => null, setJson: async () => {}, getOrSetJson: async (_kv, _key, _ttl, producer) => producer(), cachedJsonResponse: async (_request, _ctx, _version, _ttl, producer) => producer() }
+      if (name === 'cache') return { cacheIdentity: () => undefined, isUnsafeVersion: () => false, deploymentId: () => 'dev', bumpVersion: async () => {}, getVersionWithFallback: async () => '0', getVersionsWithFallback: async (_e, names) => names.map(() => '0'), getVersion: async () => '0', versionedKey: async (_kv, ns, suffix) => `${ns}:${suffix}`, getJson: async () => null, setJson: async () => {}, getOrSetJson: async (_kv, _key, _ttl, producer) => producer(), cachedJsonResponse: async (_request, _ctx, _version, _ttl, producer) => producer() }
       if (name === 'broadcastHub') return { broadcast: async () => {} }
       return id.startsWith('.') ? read(path.resolve(path.dirname(file), `${id}.ts`)) : require(id)
     }, mod, mod.exports)

@@ -49,6 +49,8 @@ function harness(routeSource){
   let prefix=text.slice(0,text.indexOf(boundary))
   prefix=once(prefix,'const overrides = {',"const overrides = { './db': { getDb: env => env.DB },")
   prefix=once(prefix,'getVersionWithFallback: async () => 0,','getVersionWithFallback: async () => globalThis.__stats1022.version(),')
+  // GET /stats keys its cache on getSalesReadCacheVersion, which reads the five namespaces with ONE getVersionsWithFallback (one version() per namespace, as before).
+  prefix=once(prefix,'getVersionsWithFallback: async (_e, names) => names.map(() => 0)','getVersionsWithFallback: async (_e, names) => names.map(() => globalThis.__stats1022.version())')
   prefix=once(prefix,'cachedJsonResponse: async (_request, _context, _key, _ttl, loader) => loader(),','cachedJsonResponse: async (request, _context, version, _ttl, loader) => globalThis.__stats1022.cache(request,version,loader),')
   prefix=once(prefix,"requireAuth: async (c, next) => { c.set('user', currentUser); return next() }","requireAuth: async (c, next) => { if(!currentUser)return c.json({error:'Unauthenticated'},401);c.set('user',currentUser);return next() }")
   prefix=once(prefix,"const app = load('routes/sales.ts').default",`const analytics=load('lib/salesAnalytics.ts')

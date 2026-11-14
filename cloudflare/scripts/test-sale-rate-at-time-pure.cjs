@@ -25,7 +25,7 @@ const user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', perm
 const stubs = {
   auth: { requireAuth: async (c, next) => { c.set('user', user); return next() } },
   audit: { audit: async () => {}, changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false },
-  cache: { bumpVersion: async () => {}, bumpVersions: async () => {}, getVersionWithFallback: async () => 0, cachedJsonResponse: async (_env, _key, _ttl, fn) => fn() },
+  cache: { bumpVersion: async () => {}, bumpVersions: async () => {}, getVersionWithFallback: async () => 0, getVersionsWithFallback: async (_e, names) => names.map(() => 0), cachedJsonResponse: async (_env, _key, _ttl, fn) => fn() },
   broadcastHub: { broadcast: async () => {} },
   telegram: { formatSaleTelegramLines: () => [], formatSaleStatusTelegramLines: () => [], sendTelegramEvent: async () => false, sendReturnTelegramEvent: async () => false },
   undoAppliers: { recordSaleAddItemsUndoSnapshot: async () => null },
