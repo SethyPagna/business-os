@@ -58,11 +58,24 @@ const sales = [
   [14, '2026-09-11 09:10:00', 'partial_return', 1, 24, 24],
   [15, '2026-09-11 09:20:00', 'awaiting_delivery', 1, 25, 0],
   [16, '2026-09-11 09:30:00', null, 1, 26, 26],
+  // return and delivery tags (return_state, delivery_pending, status_before_return) on days 09-11 and 09-12: a cancelled sale can carry a tag, so it falls inside a returned / partial_return / awaiting_delivery scope
+  [19, '2026-09-11 10:00:00', 'cancelled', 1, 31, 31, null, null, { return_state: 'partial' }],
+  [20, '2026-09-11 10:10:00', 'cancelled', 2, 32, 0, null, null, { delivery_pending: 1 }],
+  [21, '2026-09-11 10:20:00', 'returned', 1, 33, 33, null, null, { status_before_return: 'awaiting_payment' }],
+  [22, '2026-09-11 10:30:00', 'partial_return', 2, 34, 34, null, null, { status_before_return: 'awaiting_delivery' }],
+  [23, '2026-09-11 10:40:00', 'returned', 1, 35, 35, null, null, { status_before_return: 'completed', return_state: 'full' }],
+  [24, '2026-09-11 10:50:00', 'completed', 1, 36, 36, null, null, { return_state: 'full', delivery_pending: 1 }],
+  [25, '2026-09-11 16:59:59', 'cancelled', 1, 37, 37, null, null, { return_state: 'full' }], // local 09-11 23:59:59 -> inside day 09-11
+  [26, '2026-09-11 17:00:00', 'cancelled', 1, 38, 38, null, null, { delivery_pending: 1 }], // local 09-12 00:00 -> day 09-12
+  [27, '2026-09-12 16:59:59', 'returned', 1, 39, 0, null, null, { status_before_return: 'awaiting_payment' }], // local 09-12 23:59:59 -> inside
+  [28, '2026-09-12 17:00:00', 'partial_return', 2, 40, 40, null, null, { status_before_return: 'awaiting_delivery' }], // local 09-13 00:00 -> outside the range
   [17, '2026-09-11 09:40:00', 'awaiting_payment', 2, 27, 5],
   [18, '2026-09-11 09:50:00', 'cancelled', 2, 28, 28],
 ]
-for (const [id, at, status, branch, total, paid, upd, itemBranch] of sales) {
+const setTags = sql.prepare('UPDATE sales SET return_state = @rs, delivery_pending = @dp, status_before_return = @sbr WHERE id = @id')
+for (const [id, at, status, branch, total, paid, upd, itemBranch, tags] of sales) {
   insertSale.run({ id, rn: `R${id}`, at, upd: upd || at, status, branch, total, paid })
+  if (tags) setTags.run({ id, rs: tags.return_state ?? null, dp: tags.delivery_pending ?? 0, sbr: tags.status_before_return ?? null })
   insertItem.run(id, `P${id}`, total, itemBranch || branch)
 }
 insertReturn.run(1, 'RT1', 9, 5, '2026-09-12 03:00:00'); insertReturnItem.run(1, 9, 'P9', 5)
@@ -82,13 +95,20 @@ const lib = load('src/lib/salesAnalytics.ts', {
   './reportMoneyPrecision': load('src/lib/reportMoneyPrecision.ts', { './moneyPrecision': load('src/lib/moneyPrecision.ts') }),
 })
 
+// The route's own saleStatusFilterClause, cut out of src/routes/sales.ts (a non-exported function) and compiled against the real lib/salesStatus.
+const routeSource = fs.readFileSync(path.join(root, 'src/routes/sales.ts'), 'utf8').split('\r').join('')
+const clauseStart = routeSource.indexOf('function saleStatusFilterClause(')
+const clauseEnd = routeSource.indexOf('\n}\n', clauseStart)
+assert.ok(clauseStart > 0 && clauseEnd > clauseStart, 'saleStatusFilterClause found in the route')
+const clauseCode = transformSync(routeSource.slice(clauseStart, clauseEnd + 2), { loader: 'ts', format: 'cjs', target: 'es2022' }).code
+const saleStatusFilterClause = new Function('saleStatusFilterSql', clauseCode + '\nreturn saleStatusFilterClause')(load('src/lib/salesStatus.ts').saleStatusFilterSql)
 // Mirrors the route's where-building for the window and the list filters.
 function build(query) {
   const where = ['1=1'], params = {}
   if (query.startDate) { where.push(bdw.localDateAtOrAfter('s.created_at')); params.startDate = query.startDate }
   if (query.endDate) { where.push(bdw.localDateAtOrBefore('s.created_at')); params.endDate = query.endDate }
   if (query.startTime && query.endTime) { where.push(bdw.localTimeRangeClause('s.created_at')); params.startTime = query.startTime; params.endTime = query.endTime }
-  if (query.status) { where.push("COALESCE(s.sale_status,'completed') = @status"); params.status = query.status }
+  if (query.status) { const clause = saleStatusFilterClause(String(query.status), params); if (clause) where.push(clause) }
   if (query.branchId) {
     where.push('(s.branch_id = @branchId OR EXISTS (SELECT 1 FROM sale_items sif WHERE sif.sale_id = s.id AND sif.branch_id = @branchId))')
     params.branchId = query.branchId
@@ -126,6 +146,15 @@ const cases = {
     [`status ${st} range`, { startDate: '2026-09-05', endDate: '2026-09-12', status: st }],
     [`status ${st} + branch 1`, { status: st, branchId: '1' }],
     [`status ${st} + branch 2 range`, { startDate: '2026-09-05', endDate: '2026-09-12', status: st, branchId: '2' }],
+    [`status ${st} tagged day 09-11`, { startDate: '2026-09-11', endDate: '2026-09-11', status: st }],
+    [`status ${st} edge day 09-12`, { startDate: '2026-09-12', endDate: '2026-09-12', status: st }],
+    [`status ${st} edge hours 09-11`, { startDate: '2026-09-11', endDate: '2026-09-11', startTime: '23:00', endTime: '23:59', status: st }],
+  ])),
+  // status lists: a tagged cancelled sale is inside a scope that names another status
+  ...Object.fromEntries(['returned,partial_return', 'cancelled,returned', 'completed,cancelled', 'awaiting_delivery,awaiting_payment', 'completed,awaiting_payment', 'cancelled,partial_return'].flatMap((st) => [
+    [`status list ${st} all-time`, { status: st }],
+    [`status list ${st} range`, { startDate: '2026-09-05', endDate: '2026-09-12', status: st }],
+    [`status list ${st} day 09-11 + branch 1`, { startDate: '2026-09-11', endDate: '2026-09-11', status: st, branchId: '1' }],
   ])),
 }
 
@@ -155,6 +184,22 @@ const cases = {
     const totals = lib.salesTotalsFromSnapshot(snap)
     assert.ok(totals.pending_revenue_usd > 0 && totals.not_paid_owed_usd > 0, 'Not Paid sale counted as pending')
     assert.notEqual(totals.revenue_usd, totals.revenue_without_not_paid_usd)
+  })
+
+  await check('control: the route status clause puts a tagged cancelled sale inside a returned / awaiting_delivery scope', async () => {
+    const probe = async (status) => {
+      const q = { startDate: '2026-09-11', endDate: '2026-09-11', status }
+      const { where, params } = build(q)
+      const snap = await lib.readSalesReportSnapshot({}, windowOf(q), false, lib.salesListFilterReportScope(where, params))
+      return { sales: snap.sales.map((r) => r.id).sort((a, b) => a - b), voids: snap.voidSales.map((r) => r.id).sort((a, b) => a - b) }
+    }
+    const partial = await probe('partial_return')
+    assert.ok(partial.voids.includes(19), 'cancelled sale 19 (return_state partial) is in the partial_return scope: ' + JSON.stringify(partial))
+    assert.ok(partial.sales.includes(22), 'partial_return sale 22 is in the scope')
+    const pending = await probe('awaiting_delivery')
+    assert.ok(!pending.voids.includes(20), 'a cancelled sale with delivery_pending is not in the delivery queue (route rule): ' + JSON.stringify(pending))
+    const full = await probe('returned')
+    assert.ok(full.voids.includes(25), 'cancelled sale 25 (return_state full) is in the returned scope: ' + JSON.stringify(full))
   })
 
   await check('the window now reaches the report SQL (item band)', async () => {
