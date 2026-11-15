@@ -12,6 +12,7 @@ const { registeredRoutes } = require('./read-budget/routes.cjs')
 const { getShapes } = require('./read-budget/shapes.cjs')
 const { writeShapes } = require('./read-budget/writes.cjs')
 const { seedContext } = require('./read-budget/seed.cjs')
+const { getHistoryShapes } = require('./read-budget/ic-history.cjs')
 const { loadBudgets, today, FREE_CALL_LIMIT } = require('./read-budget/budgets.cjs')
 
 const ROOT = path.resolve(__dirname, '..', '..')
@@ -92,7 +93,8 @@ async function main() {
   })
 
   await check('the shapes the tests run and the shapes budgeted are the same set', () => {
-    const run = [...getShapes(seedContext()), ...writeShapes(seedContext())].map((s) => s.id).sort()
+    // The grouped Inventory Check shapes run on their own world with a check history (read-budget/history-pass.cjs); the id set does not depend on the last page they name.
+    const run = [...getShapes(seedContext()), ...getHistoryShapes(), ...writeShapes(seedContext())].map((s) => s.id).sort()
     assert.deepStrictEqual(shapes.map((s) => s.id).sort(), run)
   })
 
