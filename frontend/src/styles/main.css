@@ -646,6 +646,10 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
   .stock-qty-healthy { @apply bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300; }
   .stock-qty-low     { @apply bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300; }
   .stock-qty-out     { @apply bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300; }
+  /* The state word, for screen readers and text selection only. Not Tailwind's sr-only: that one is position:absolute, which
+     makes it a block and puts a line break between the figure and the word in innerText and in copied text. This one stays
+     inline (white-space:pre keeps its leading space) in a net-zero 1px box, so the pill's width and height do not change. */
+  .stock-qty-word { display: inline-block; width: 1px; height: 1px; margin-right: -1px; overflow: hidden; clip-path: inset(50%); white-space: pre; }
 
   .sidebar-item {
     @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 dark:text-zinc-400

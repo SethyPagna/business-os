@@ -60,10 +60,13 @@ for (const language of ['en', 'km'] as const) {
     assert.ok(word && word !== key, `${language} pack has ${key}`)
     assert.ok(out.includes(`data-stock-state="${state}"`), `${language} ${state}: state attribute`)
     assert.ok(out.includes(`class="stock-qty ${tint}"`), `${language} ${state}: tint class`)
-    // The tooltip sits on an aria-hidden copy of the figure and the sr-only text says figure + word: a screen reader announces the word ONCE.
-    assert.ok(out.includes(`<span aria-hidden="true" title="${word}">${qty}</span>`), `${language} ${state}: the figure carries the tooltip, hidden from screen readers`)
-    assert.ok(out.includes(`<span class="sr-only">${qty} ${word}</span>`), `${language} ${state}: screen-reader text is the figure and the word`)
-    assert.equal(out.split(word).length - 1, 2, `${language} ${state}: the word is in the markup twice (tooltip + sr-only text)`)
+    // The figure is rendered ONCE and the state word follows it in screen-reader-only text: the text is exactly "4 Low Stock" (copy,
+    // Ctrl+F and innerText all see one figure), and the tooltip sits on the whole pill (padding included), not on the digits.
+    assert.equal(out.replace(/<[^>]*>/g, ''), `${qty} ${word}`, `${language} ${state}: the text is the figure once, then the word once`)
+    assert.ok(out.startsWith(`<span data-stock-qty="" data-stock-state="${state}" title="${word}" class=`), `${language} ${state}: the tooltip is on the outer pill`)
+    assert.ok(out.endsWith(`>${qty}<span class="stock-qty-word"> ${word}</span></span>`), `${language} ${state}: figure, then the screen-reader-only word`)
+    assert.ok(!out.includes('aria-hidden'), `${language} ${state}: nothing is hidden from screen readers (no duplicate figure to hide)`)
+    assert.equal(out.split(word).length - 1, 2, `${language} ${state}: the word is in the markup twice (tooltip + screen-reader-only text)`)
     assert.equal((out.match(/title=/g) || []).length, 1, `${language} ${state}: one tooltip`)
     for (const other of cases.filter((c) => c.state !== state)) assert.ok(!out.includes(other.tint), `${language} ${state}: no ${other.tint}`)
   }
@@ -75,7 +78,7 @@ for (const { key } of cases) assert.ok(/[ក-៿]/.test(packs.km[key]), `km ${ke
 assert.ok(html('en', { qty: 4, product, className: 'font-bold' }).includes('class="stock-qty stock-qty-low font-bold"'))
 // null / undefined quantity prints 0 and is "out", like the server's COALESCE(qty, 0).
 assert.ok(html('en', { qty: null, product }).includes('data-stock-state="out"'))
-assert.ok(html('en', { qty: undefined, product }).includes('>0</span>'))
+assert.equal(html('en', { qty: undefined, product }).replace(/<[^>]*>/g, ''), '0 Out of Stock')
 
 // Settings drive the state: alerts off removes "low"; global mode ignores the product's own number.
 const off: LowStockConfig = { enabled: false, mode: 'product', threshold: 10 }
@@ -127,13 +130,22 @@ for (const [state, hue] of Object.entries(palette)) {
 const base = /\.stock-qty\s*\{([^}]*)\}/.exec(css)
 assert.ok(base && /line-height:\s*inherit/.test(base[1]) && !/\bpy-|\bp-\d|padding-(top|bottom)/.test(base[1]), '.stock-qty adds no vertical size')
 
+// The state word is screen-reader/selection text that stays INLINE: position:absolute (Tailwind's sr-only) would blockify it and
+// put a line break between the figure and the word in innerText and in copied text; it must also add no width or height to the pill.
+const word = /\.stock-qty-word\s*\{([^}]*)\}/.exec(css)
+assert.ok(word, 'stylesheet has .stock-qty-word')
+assert.ok(!/position:\s*absolute/.test(word[1]) && /display:\s*inline-block/.test(word[1]) && /white-space:\s*pre/.test(word[1]), '.stock-qty-word stays inline and keeps its leading space')
+assert.ok(/width:\s*1px/.test(word[1]) && /margin-right:\s*-1px/.test(word[1]) && /height:\s*1px/.test(word[1]) && /overflow:\s*hidden/.test(word[1]), '.stock-qty-word is a net-zero 1px clipped box')
+
 // ---- Mutants on the component source: each must break at least one pinned behaviour ----
 const source = readSrc('components/inventory/StockQty.tsx')
 const mutants: Array<{ name: string; from: string; to: string }> = [
   { name: 'members ignored (judges the sum)', from: 'members && members.length > 1 ? stockGroupLevel(members, config) : stockLevelState(qty, product, config)', to: 'stockLevelState(qty, product, config)' },
   { name: 'state word dropped from the tooltip', from: 'title={word}', to: 'title=""' },
-  { name: 'screen-reader word dropped', from: '<span className="sr-only">{figure} {word}</span>', to: '' },
-  { name: 'tooltip no longer hidden from screen readers (word announced twice)', from: 'aria-hidden="true" ', to: '' },
+  { name: 'screen-reader word dropped', from: '<span className="stock-qty-word">{` ${word}`}</span>', to: '' },
+  { name: 'figure rendered twice (reads "55 Low Stock")', from: '<span className="stock-qty-word">{` ${word}`}</span>', to: '<span className="stock-qty-word">{` ${figure} ${word}`}</span>' },
+  { name: 'tooltip off the pill (it would cover the digits only)', from: 'data-stock-state={level} title={word} className=', to: 'data-stock-state={level} className=' },
+  { name: 'duplicate figure hidden from screen readers instead of removed', from: '{figure}<span className="stock-qty-word">', to: '<span aria-hidden="true">{figure}</span>{figure}<span className="stock-qty-word">' },
   { name: 'low state shows the healthy word', from: "low: ['low_stock', 'Low Stock']", to: "low: ['healthy_stock', 'Healthy']" },
   { name: 'tint class not keyed by state', from: '${LEVEL_CLASS[level]}', to: 'stock-qty-healthy' },
 ]
@@ -148,7 +160,7 @@ for (const mutant of mutants) {
     html('en', { qty: 40, product }, mutated),
   ]
   const low = packs.en.low_stock
-  const holds = probes[0].includes('data-stock-state="low"') && probes[1].includes(`title="${low}"`) && probes[1].includes(`<span class="sr-only">4 ${low}</span>`) && probes[1].includes('<span aria-hidden="true" title=')
+  const holds = probes[0].includes('data-stock-state="low"') && probes[1].startsWith(`<span data-stock-qty="" data-stock-state="low" title="${low}" class=`) && probes[1].replace(/<[^>]*>/g, '') === `4 ${low}` && !probes[1].includes('aria-hidden')
     && probes[1].includes('stock-qty-low') && probes[2].includes('data-stock-state="out"') && probes[3].includes('stock-qty-healthy')
   assert.ok(!holds, `mutant survived: ${mutant.name}`)
 }

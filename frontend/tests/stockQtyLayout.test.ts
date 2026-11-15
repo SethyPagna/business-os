@@ -5,8 +5,9 @@ import { launchResolveFixture } from './resolveBrowserFixture.ts'
 // Owner ask 15 Nov 2026: the Inventory list's stock figure is itself tinted by state (green healthy,
 // yellow low, red out) -- not a badge or a column. In a real browser, the REAL InventoryProductsSurface at
 // phone and desktop widths, English and Khmer, light and dark:
-//   - every state shows, with the state word as tooltip (on an aria-hidden copy of the figure) and as screen-reader text
-//     ("4 Low Stock"), so a screen reader announces the word once;
+//   - every state shows, with the state word as tooltip on the WHOLE tinted pill (its padding too, checked by hit-testing
+//     both padding edges) and as screen-reader text, and the figure is rendered once: the pill's textContent and innerText are
+//     exactly "4 Low Stock", never "44 Low Stock";
 //   - the tint costs no height: each row/card is measured with the pill and again with the pill's classes
 //     stripped, and the two heights are equal (a pill with vertical padding fails this);
 //   - the pill stays inside its cell/card and the page never scrolls sideways;
@@ -66,7 +67,7 @@ const fixture = String.raw`
 `
 
 type Measure = {
-  pills: Array<{ state: string; text: string; title: string; hidden: string | null; srWord: string; withPill: number; withoutPill: number; inside: boolean; contrast: number; background: string }>
+  pills: Array<{ state: string; text: string; textContent: string; innerText: string; title: string; hidden: number; padHit: boolean[]; srWord: string; withPill: number; withoutPill: number; inside: boolean; contrast: number; background: string }>
   overflow: number
 }
 
@@ -85,7 +86,10 @@ const measure = String.raw`(() => {
     const bg = effective(el)
     const fg = parse(getComputedStyle(el).color)
     const l1 = lum(over({ ...fg, a: 1 }, bg)) + 0.05, l2 = lum(bg) + 0.05
-    return { state: el.dataset.stockState, text: el.firstChild.textContent, title: el.firstChild.title, hidden: el.firstChild.getAttribute('aria-hidden'), srWord: el.querySelector('.sr-only').textContent.trim(), withPill: c.getBoundingClientRect().height,
+    el.scrollIntoView({ block: 'center', inline: 'nearest' }) // hit-testing only sees the viewport
+    const box = el.getBoundingClientRect()
+    const hit = (x) => { const top = document.elementFromPoint(x, box.top + box.height / 2); return !!top && top.closest('[title]') === el }
+    return { state: el.dataset.stockState, text: el.firstChild.textContent.trim(), textContent: el.textContent, innerText: el.innerText, title: el.title, hidden: el.querySelectorAll('[aria-hidden]').length, padHit: [hit(box.left + 1.5), hit(box.right - 1.5), hit(box.left + box.width / 2)], srWord: el.querySelector('.stock-qty-word').textContent.trim(), withPill: c.getBoundingClientRect().height,
       inside: el.getBoundingClientRect().right <= el.parentElement.getBoundingClientRect().right + 0.5 && el.getBoundingClientRect().left >= el.parentElement.getBoundingClientRect().left - 0.5,
       contrast: Math.max(l1, l2) / Math.min(l1, l2), background: getComputedStyle(el).backgroundColor }
   })
@@ -114,8 +118,11 @@ await browser.run('PASS stock-qty layout: pill adds no row height, readable in b
     for (const pill of result.pills) {
       const word = packs[lang][{ out: 'out_of_stock', low: 'low_stock', healthy: 'healthy_stock' }[pill.state]!]
       assert.equal(pill.title, word, `${label}: tooltip is the ${pill.state} word`)
-      assert.equal(pill.hidden, 'true', `${label}: the tooltip sits on an aria-hidden figure`)
-      assert.equal(pill.srWord, `${pill.text} ${word}`, `${label}: screen-reader text is the figure and the ${pill.state} word`)
+      assert.deepEqual(pill.padHit, [true, true, true], `${label}: the tooltip covers the padding on both sides and the middle`)
+      assert.equal(pill.hidden, 0, `${label}: nothing in the pill is hidden from screen readers`)
+      assert.equal(pill.srWord, word, `${label}: screen-reader text is the ${pill.state} word, once`)
+      assert.equal(pill.textContent, `${pill.text} ${word}`, `${label}: textContent is the figure once, then the word once`)
+      assert.equal(pill.innerText, `${pill.text} ${word}`, `${label}: innerText (what Ctrl+F and copy see) is the figure once, then the word once`)
       assert.ok(Math.abs(pill.withPill - pill.withoutPill) < 0.5, `${label}: ${pill.state} pill changed the row height ${pill.withoutPill} -> ${pill.withPill}`)
       assert.ok(pill.inside, `${label}: ${pill.state} pill stays inside its cell`)
       assert.ok(pill.contrast >= 4.5, `${label}: ${pill.state} contrast ${pill.contrast.toFixed(2)} >= 4.5`)
@@ -135,8 +142,11 @@ await browser.run('PASS stock-qty layout: pill adds no row height, readable in b
     assert.equal(pill.state, 'low', `${label}: state`)
     assert.equal(pill.text, '4', `${label}: the figure`)
     assert.equal(pill.title, word, `${label}: tooltip`)
-    assert.equal(pill.hidden, 'true', `${label}: the tooltip sits on an aria-hidden figure`)
-    assert.equal(pill.srWord, `4 ${word}`, `${label}: screen-reader text`)
+    assert.deepEqual(pill.padHit, [true, true, true], `${label}: the tooltip covers the whole pill`)
+    assert.equal(pill.hidden, 0, `${label}: nothing hidden from screen readers`)
+    assert.equal(pill.srWord, word, `${label}: screen-reader text`)
+    assert.equal(pill.textContent, `4 ${word}`, `${label}: textContent`)
+    assert.equal(pill.innerText, `4 ${word}`, `${label}: innerText`)
     assert.ok(Math.abs(pill.withPill - pill.withoutPill) < 0.5, `${label}: the subtitle changed height ${pill.withoutPill} -> ${pill.withPill}`)
     assert.ok(pill.inside, `${label}: stays inside the subtitle`)
     assert.ok(pill.contrast >= 4.5, `${label}: contrast ${pill.contrast.toFixed(2)} >= 4.5`)
