@@ -196,8 +196,10 @@ export interface StockLevelProduct {
  *   healthy otherwise
  * Sources: lowStockThresholdSql (cloudflare/src/lib/lowStockSettings.ts), familyStockStats.ts
  * has_healthy / has_low, notifications.ts is_out. A parity test runs that SQL in SQLite over a
- * matrix and requires the same answer from this function, so a bell, a Dashboard card and a
- * list can never call one product low and healthy.
+ * matrix and requires the same answer from this function, so the bell, the Dashboard cards and
+ * a single product's own row cannot call that one product low and healthy. A merged / family
+ * row is judged by stockGroupLevel (the Dashboard's family rule: the best member wins), so it
+ * can be healthy while the bell lists one of its members as low.
  */
 export function stockLevelState(
   qty: unknown,
