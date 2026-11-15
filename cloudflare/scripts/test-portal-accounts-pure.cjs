@@ -84,8 +84,13 @@ const contactDuplicates = loadReal('lib/contactDuplicates.ts', {
 const anonymousCustomer = loadReal('lib/anonymousCustomer.ts')
 const { canonicalizePhone } = phone
 const { getPortalLockoutState, recordPortalFailure, clearPortalLockout } = loadReal('lib/portalAuthLockout.ts', { './db': dbModule })
+// A-C4: lib/cache is stubbed to a recorder. Each call notes how many customers rows existed WHEN the bump ran, so a bump that fires before
+// the commit (or never) is distinguishable from the one the sign-up must make after it.
+const cacheBumps = []
+const cacheStub = { bumpVersions: async (_env, namespaces) => { cacheBumps.push({ namespaces: [...namespaces], customers: Number(rawDb.prepare('SELECT COUNT(*) n FROM customers').get().n), portalAccounts: Number(rawDb.prepare('SELECT COUNT(*) n FROM portal_accounts').get().n) }) } }
 const { signupPortalAccount, signinPortalAccount, PORTAL_CONSENT_VERSION } = loadReal('lib/portalAccounts.ts', {
   './db': dbModule,
+  './cache': cacheStub,
   './membershipNumber': membershipNumber,
   './phone': phone,
   './passwordPolicy': passwordPolicy,
@@ -135,6 +140,7 @@ function makeIsolatedPortal(membershipOverride = membershipNumber, hooks = {}) {
   }
   const { signupPortalAccount: signup2 } = loadReal('lib/portalAccounts.ts', {
     './db': { getDb: () => db2 },
+    './cache': { bumpVersions: async () => {} },
     './membershipNumber': membershipOverride,
     './phone': phone,
     './passwordPolicy': passwordPolicy,
@@ -186,6 +192,9 @@ async function run() {
   })
 
   await check('signup (new customer, no membership id) creates account + folded contact + auto id', async () => {
+    const customersBefore = Number(rawDb.prepare('SELECT COUNT(*) n FROM customers').get().n)
+    const accountsBefore = Number(rawDb.prepare('SELECT COUNT(*) n FROM portal_accounts').get().n)
+    cacheBumps.length = 0
     const res = await signupPortalAccount(env, { name: 'Dara', phone: '099 888 777', password: 'secret12345', consent: true, ageConfirmed: true })
     assert.strictEqual(res.ok, true)
     // New IDs use the shared house LC- gap-fill contract -- this is the
@@ -201,13 +210,17 @@ async function run() {
     const contact = rawDb.prepare('SELECT membership_number, phone_normalized FROM customers WHERE id = ?').get([account.contact_id])
     assert.strictEqual(contact.membership_number, res.membershipId)
     assert.strictEqual(contact.phone_normalized, '099888777')
+    // A-C4: the new customers row moves the customers cache version, after the commit (the row was already there when the bump ran), once.
+    assert.deepStrictEqual(cacheBumps, [{ namespaces: ['customers'], customers: customersBefore + 1, portalAccounts: accountsBefore + 1 }], 'one customers bump, after the new row committed')
   })
 
   await check('signup rejects a phone that already exists in ANY format (canonical uniqueness)', async () => {
+    cacheBumps.length = 0
     const res = await signupPortalAccount(env, { name: 'Someone Else', phone: '+855 99 888 777', password: 'secret12345', consent: true, ageConfirmed: true })
     assert.strictEqual(res.ok, false)
     assert.strictEqual(res.code, 'verification_failed')
     assert.strictEqual(res.abuse, true)
+    assert.deepStrictEqual(cacheBumps, [], 'a refused sign-up wrote no customers row and bumps nothing')
   })
 
   await check('a staff-created customer that wins after the signup read leaves no account or duplicate contact', async () => {
@@ -268,8 +281,14 @@ async function run() {
 
   await check('signup (existing customer) succeeds with membership id + MATCHING phone, links the contact', async () => {
     const contactId = seedCustomer({ name: 'Old Buyer', phone: '011 222 333', phone_normalized: '011222333', membership_number: 'LCMN-OLDBUYER' })
+    cacheBumps.length = 0
+    const customersBefore = Number(rawDb.prepare('SELECT COUNT(*) n FROM customers').get().n)
+    const accountsBefore = Number(rawDb.prepare('SELECT COUNT(*) n FROM portal_accounts').get().n)
     const res = await signupPortalAccount(env, { name: 'Old Buyer', phone: '855 11 222 333', membershipId: 'lcmn-oldbuyer', password: 'secret12345', consent: true, ageConfirmed: true })
     assert.strictEqual(res.ok, true)
+    // The cached customer list shows each customer's portal_account (contacts.ts joins portal_accounts into it), so a claim moves the customers version too -- after the
+    // portal_accounts row is committed (accountsBefore + 1) and with no customers row written (the customer already existed).
+    assert.deepStrictEqual(cacheBumps, [{ namespaces: ['customers'], customers: customersBefore, portalAccounts: accountsBefore + 1 }], 'claiming an existing customer bumps customers once, after its portal account row is written')
     const account = rawDb.prepare('SELECT contact_id, membership_id FROM portal_accounts WHERE id = ?').get([res.accountId])
     assert.strictEqual(account.contact_id, contactId, 'linked to the existing contact, no new one')
     assert.strictEqual(account.membership_id, 'lcmn-oldbuyer')

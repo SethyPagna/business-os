@@ -215,11 +215,15 @@ export async function versionedKey(kv: KVNamespace, namespace: string, suffix: s
 }
 
 async function readD1Versions(env: Env, namespaces: string[], requireReadable = false, outcome?: { value: boolean }): Promise<Map<string, number>> {
-  if (!namespaces.length) return new Map()
+  // Deduplicated first: one bound placeholder per distinct namespace, so the statement reads exactly those rows. (A json_each() list is metered by D1 as
+  // extra rows read, about 2N per request for N namespaces; a bound IN list costs one metered row per entry on a miss, at most a dozen, in exchange for ONE statement; per-namespace lookups would be a db.batch, and a bump already issues one.) Namespaces are a handful of fixed names, far under the bind limit.
+  // sql-bound-params: bounded by construction (callers pass literal namespace names, at most a dozen; the list is deduplicated).
+  const distinct = [...new Set(namespaces)]
+  if (!distinct.length) return new Map()
   try {
     const rows = await getDb(env).prepare(`SELECT namespace, version FROM cache_versions
-      WHERE namespace IN (SELECT value FROM json_each(@namespaces))`)
-      .all<{ namespace: string; version: number }>({ namespaces: JSON.stringify(namespaces) })
+      WHERE namespace IN (${distinct.map(() => '?').join(',')})`)
+      .all<{ namespace: string; version: number }>(distinct)
     return new Map(rows.filter(row => row.version != null).map(row => [row.namespace, Number(row.version)]))
   } catch (error) {
     if (requireReadable) throw error
@@ -255,7 +259,7 @@ export async function bumpVersion(env: Env, namespace: string): Promise<void> {
 // portalMaintenanceHeld).
 export const MAINTENANCE_CACHE_NAMESPACES = [
   'products', 'settings', 'stock', 'promotions', 'sales', 'returns',
-  'customers', 'suppliers', 'delivery_contacts', 'inventory', 'audit_log',
+  'customers', 'suppliers', 'delivery_contacts', 'inventory',
 ]
 
 // Never throws: the hold is already released and the caches age out by TTL regardless. Callers invoke

@@ -23,7 +23,7 @@ const cacheOverride = {
   },
   getVersion: async () => '0',
   getVersionWithFallback: async (_env, namespace) => String(versions[namespace] || 0),
-  getVersionsWithFallback: async (_env, namespaces) => namespaces.map((namespace) => String(versions[namespace] || 0)),
+  getVersionsWithFallback: async (_env, list) => list.map((namespace) => String(versions[namespace] || 0)), // same token per name as the single read
   bumpVersion: bump,
   bumpVersions: async (env, list) => { for (const namespace of list) await bump(env, namespace) },
   cacheIdentity: () => undefined,

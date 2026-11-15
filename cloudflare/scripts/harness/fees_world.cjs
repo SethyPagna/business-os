@@ -1,7 +1,7 @@
 'use strict'
 // The REAL routes/fees.ts and routes/feesCatalog.ts (mounted in index.ts's order) over an in-memory SQLite that carries the
 // full production migration chain, with the real permissions, the real sales kernel (lib/salesAnalytics.ts) and the real
-// shift reconciliation. Only the session, the push hub, Telegram and the review queue are stubbed.
+// shift reconciliation. Only the session, the push hub, Telegram, the review queue and the cache-version bump are stubbed.
 //   const w = createFeesWorld()
 //   w.sql.exec('INSERT ...')                      // seed through the raw handle
 //   const r = await w.request('GET', '/api/fees/types', undefined, w.users.full)
@@ -36,6 +36,8 @@ function createFeesWorld({ patches = [], overrides = {}, through } = {}) {
     '../lib/telegram': { sendTelegramEvent: async (...args) => { telegrams.push(args) }, telegramMoney: () => '' },
     '../lib/reviewGate': { maybeQueueForReview: async () => null },
     '../index': {},
+    // Fee writes await bumpVersions(env, ['sales']) (A-C2); the real one needs KV and D1 bindings this world does not have.
+    '../lib/cache': { bumpVersions: async () => {} },
     ...overrides,
   }
 

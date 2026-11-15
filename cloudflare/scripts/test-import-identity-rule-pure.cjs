@@ -454,6 +454,31 @@ function seedCatalog(sqlite) {
     console.log('PASS D6b unifies category/brand in touched groups only (majority, tie -> first row)')
   }
 
+  // Round 2: an unchanged re-import no longer rewrites (so no longer touches) its rows, so a group is also "touched" when the import NAMED one of its
+  // members (an update or skip row). Same fixture, nothing newer than the cutoff: only the named ids bring a group into scope.
+  {
+    const rowsOf = (sqlite) => sqlite.prepare('SELECT id, category, brand FROM products ORDER BY id').all()
+    const seed = () => {
+      const made = makeDb()
+      made.sqlite.exec(`
+        INSERT INTO products (id, name, barcode, category, brand, updated_at) VALUES
+          (1, 'Named Grp', 'N1', 'Lips', 'Dior', '2026-08-28 10:00:00'),
+          (2, 'Named Grp', 'N2', 'Odd',  'Dior', '2026-08-28 10:00:00'),
+          (3, 'Other Grp', 'O1', 'Keep', 'X',    '2026-08-28 10:00:00'),
+          (4, 'Other Grp', 'O2', 'Drift', 'Y',   '2026-08-28 10:00:00');`)
+      return made
+    }
+    const none = seed()
+    assert.strictEqual(await unifyTouchedProductGroups(none.db, '2026-08-28 11:00:00'), 0, 'control: no member newer than the cutoff and none named: nothing is in scope')
+    assert.deepStrictEqual(rowsOf(none.sqlite).map((r) => r.category), ['Lips', 'Odd', 'Keep', 'Drift'])
+    const named = seed()
+    assert.strictEqual(await unifyTouchedProductGroups(named.db, '2026-08-28 11:00:00', [1]), 1, 'naming one member of a group brings that group in scope')
+    assert.deepStrictEqual(rowsOf(named.sqlite).map((r) => r.category), ['Lips', 'Lips', 'Keep', 'Drift'], 'the named group is unified, the unnamed group is left alone')
+    const junk = seed()
+    assert.strictEqual(await unifyTouchedProductGroups(junk.db, '2026-08-28 11:00:00', [999, 0]), 0, 'ids that match no product bring nothing in scope')
+    console.log('PASS D6b round 2: a group is touched when a member is newer than the cutoff OR the import named one of its members')
+  }
+
   console.log('All import identity-rule tests passed')
 })().catch((error) => {
   console.error(error)

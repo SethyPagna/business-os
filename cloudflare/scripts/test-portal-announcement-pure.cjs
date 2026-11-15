@@ -228,7 +228,7 @@ check('cache: the public body is keyed by the settings version, so a save shows 
   assert.match(source, /body: \['portal-body-v2', \.\.\.shared, version\('promotions'\)\]/, 'the body key is built on the shared parts')
   const settingsSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'settings.ts'), 'utf8')
   const save = settingsSource.slice(settingsSource.indexOf('validatePortalAnnouncementWrite('))
-  assert.match(save, /waitUntil\(bumpVersion\(c\.env, 'settings'\)\)/, 'a save bumps the settings version that keys the body')
+  assert.match(save, /await bumpVersion\(c\.env, 'settings'\)/, 'a save bumps the settings version that keys the body (awaited before the response, A-C3)')
   const lib = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'portalText.ts'), 'utf8').replace(/\r\n/g, '\n')
   const fn = lib.slice(lib.indexOf('export function portalAnnouncementConfig'), lib.indexOf('\n}\n', lib.indexOf('export function portalAnnouncementConfig')))
   assert.ok(fn.length > 50)

@@ -25,8 +25,12 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "5f13c00d023d",
-   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+   "9e860b96b0ef",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?,?)"
+  ],
+  [
+   "1b6449cc3af3",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?)"
   ],
   [
    "e7fc997dccb2",
@@ -195,8 +199,12 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "5f13c00d023d",
-   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+   "9e860b96b0ef",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?,?)"
+  ],
+  [
+   "1b6449cc3af3",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?)"
   ],
   [
    "e7fc997dccb2",
@@ -365,8 +373,12 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "5f13c00d023d",
-   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+   "9e860b96b0ef",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?,?)"
+  ],
+  [
+   "1b6449cc3af3",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?)"
   ],
   [
    "e7fc997dccb2",
@@ -551,8 +563,12 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "5f13c00d023d",
-   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+   "9e860b96b0ef",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?,?)"
+  ],
+  [
+   "1b6449cc3af3",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?)"
   ],
   [
    "e7fc997dccb2",

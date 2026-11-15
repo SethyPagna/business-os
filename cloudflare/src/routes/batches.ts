@@ -8,7 +8,7 @@ import { audit, changedFields } from '../lib/audit'
 import { PRODUCT_SUPPLIER_REFUSAL, lotSupplierChanged } from '../lib/productSupplierGate'
 import { hasPermission, getActionTier, getPermissionTier, isActionBlocked } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionsWithFallback } from '../lib/cache'
 import { cacheIdentity } from '../lib/cache'
 import { getTrackedProductIds, listBatchesForProduct, parseReceiptSellingPrice, planReceiptSellingPrice, receiveBatchStock, type ReceiptSellingPriceRow } from '../lib/productBatches'
 import { executeStockTransaction } from '../lib/stockTransaction'
@@ -128,7 +128,7 @@ app.get('/tracked-product-ids', async (c) => {
   // Version-keyed (6.0.970): lots appear and empty out only through product/stock/inventory writes, each of which
   // moves one of these versions; the short TTL is the backstop for a writer that announces none of them.
   const namespaces = ['products', 'stock', 'inventory']
-  const versions = await Promise.all(namespaces.map((namespace) => getVersionWithFallback(c.env, namespace)))
+  const versions = await getVersionsWithFallback(c.env, namespaces)
   const productIds = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
     versions.map((version, index) => `${namespaces[index]}:${version}`).join('|'), 300, () => getTrackedProductIds(db, branchId), cacheIdentity(c))
   return c.json({ productIds })

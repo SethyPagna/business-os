@@ -20,6 +20,8 @@ const cacheOverride = {
   },
   getVersion: async () => '0',
   getVersionWithFallback: async (_env, ns) => String(versions[ns] || 0),
+  // Several namespaces in one call: the same token per name that getVersionWithFallback gives (lib/cache.ts getVersionsWithFallback).
+  getVersionsWithFallback: async (_env, list) => list.map((ns) => String(versions[ns] || 0)),
   bumpVersion: bump,
   bumpVersions: async (env, list) => { for (const ns of list) await bump(env, ns) },
   cacheIdentity: () => undefined,
@@ -59,10 +61,16 @@ const addProduct = (id, brand, barcode) => h.raw.db.exec(`INSERT INTO system_fla
   await bump(null, 'products')
   const changed = await get('/filters')
   assert.deepEqual(changed.json.brands, ['Alpha', 'Beta', 'Gamma'], 'a products bump makes the new brand visible')
-  for (const ns of ['stock', 'settings', 'promotions']) {
+  for (const ns of ['settings', 'promotions']) {
     await get('/filters'); await bump(null, ns)
     assert.ok((await get('/filters')).reads > 0, `a ${ns} bump recomputes /filters`)
   }
+  // RULE CHANGED on lane/products-search-reads (6.0.2087 line, productFiltersVersions in routes/products.ts): the vocabulary reads stock only through the stock-state and issue filters, so a
+  // plain /filters no longer keys on the 'stock' version and its entry survives sales. This used to assert that a stock bump recomputed EVERY /filters. A request that carries a stock filter still does.
+  await get('/filters'); await bump(null, 'stock')
+  assert.equal((await get('/filters')).reads, 0, 'a stock bump leaves a /filters without a stock filter cached')
+  await get('/filters?stockState=out'); await bump(null, 'stock')
+  assert.ok((await get('/filters?stockState=out')).reads > 0, 'a stock bump still recomputes /filters that filters by stock state')
 
   const dup = await get('/possible-duplicates')
   assert.equal(dup.status, 200, JSON.stringify(dup.json))

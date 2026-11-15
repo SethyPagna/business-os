@@ -480,9 +480,9 @@ app.post('/', requireWebsiteEditor, async (c) => {
     return c.json({ error: 'The promotion could not be confirmed. Check the list before retrying.', code: 'write_outcome_unknown', outcome: 'unknown' }, 503)
   }
   const newId = Number(results[0].meta?.last_row_id ?? 0)
+  // The storefront's /api/portal/promotions edge entry is keyed on this version; bump (awaited) before the push.
+  await bumpVersion(c.env, 'promotions')
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'create', id: newId }))
-  // The storefront's /api/portal/promotions edge entry is keyed on this version.
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'promotions'))
   const created = await db.prepare('SELECT * FROM promotions WHERE id = ?').get([newId])
   return c.json(created)
 })
@@ -545,8 +545,8 @@ app.put('/:id', requireWebsiteEditor, async (c) => {
   if (Number(results[0]?.meta?.changes ?? 0) !== 1) {
     return lostWriteResponse(c, db, receipt, 'promotions', 'promotion', id, expectedUpdatedAt, respond)
   }
+  await bumpVersion(c.env, 'promotions')
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'update', id }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'promotions'))
   const updated = await db.prepare('SELECT * FROM promotions WHERE id = ?').get([id])
   return c.json(updated)
 })
@@ -599,8 +599,8 @@ app.put('/reorder/all', requireWebsiteEditor, async (c) => {
     if (twin) return twin.canonical === receipt.canonical ? list() : c.json(WRITE_IDEMPOTENCY_CONFLICT, 409)
     return c.json({ error: 'The new order could not be confirmed. Reload the list before retrying.', code: 'write_outcome_unknown', outcome: 'unknown' }, 503)
   }
+  await bumpVersion(c.env, 'promotions')
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'reorder' }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'promotions'))
   // The answer is every card in its stored order, so the editor lands on what the server holds.
   const rows = await db.prepare('SELECT * FROM promotions ORDER BY sort_order ASC, id ASC').all()
   return c.json(rows)
@@ -641,8 +641,8 @@ app.delete('/:id', requireWebsiteEditor, async (c) => {
   if (Number(results[0]?.meta?.changes ?? 0) !== 1) {
     return lostWriteResponse(c, db, receipt, 'promotions', 'promotion', id, expectedUpdatedAt, respond)
   }
+  await bumpVersion(c.env, 'promotions')
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'delete', id }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'promotions'))
   return c.json({ deleted: true })
 })
 

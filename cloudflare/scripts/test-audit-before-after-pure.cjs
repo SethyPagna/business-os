@@ -424,7 +424,7 @@ async function promotionsRoute() {
     },
     '../lib/audit': auditLib,
     '../lib/permissions': { hasPermission: () => true, getPermissionTier: () => 'full', getActionTier: () => 'full' },
-    '../lib/cache': { bumpVersion: async () => {} },
+    '../lib/cache': { bumpVersion: async () => {}, bumpVersions: async () => {} },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
     '../lib/promotionRules': loadReal(workerSrc('lib/promotionRules.ts')),
     '../lib/batchCode': loadReal(workerSrc('lib/batchCode.ts')),
@@ -729,7 +729,7 @@ async function usersProfileRoute() {
     '../lib/audit': auditLib,
     './audit': auditLib,
     '../lib/permissions': { isAdminControlUser: () => true },
-    '../lib/cache': { bumpVersion: async () => {} },
+    '../lib/cache': { bumpVersion: async () => {}, bumpVersions: async () => {} },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
     '../index': {},
   }).default
@@ -770,7 +770,7 @@ async function settingsPaymentMethodRoute() {
     '../lib/audit': auditLib,
     '../lib/permissions': { hasPermission: () => true },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
-    '../lib/cache': { bumpVersion: async () => {} },
+    '../lib/cache': { bumpVersion: async () => {}, bumpVersions: async () => {} },
   }
   function load(rel) {
     if (moduleCacheLocal.has(rel)) return moduleCacheLocal.get(rel).exports
