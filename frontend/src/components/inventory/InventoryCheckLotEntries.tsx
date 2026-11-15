@@ -5,6 +5,7 @@ import Save from 'lucide-react/dist/esm/icons/save.js'
 import { fmtDateOnly } from '../../utils/formatters.ts'
 import type { InventoryCheckLotRow, InventoryCheckProduct } from '../../types/inventoryChecks.ts'
 import { lotCountOf, rowSetPlan, type LotDraft } from './inventoryCheckLots.ts'
+import { signedDelta } from './InventoryCheckCountEditor.tsx'
 
 // The per-received-date entries of the count popover (ic_lot_counts): one count box per batch that holds stock, and, collapsed at the end, the batches that hold 0 ("Show empty received dates (n)").
 // An empty date is offered because units are sometimes found on a batch the system says is empty; it is never part of "matches stock" and never read from the server here (the row carries it).
@@ -22,13 +23,18 @@ export type InventoryCheckLotEntriesProps = {
   onLotCount: (row: InventoryCheckLotRow, value: string) => void
   onLotSet?: (row: InventoryCheckLotRow, value: string) => void
   onEnter: (event: KeyboardEvent<HTMLInputElement>) => void
+  /** Units no received date holds (read-only note), whether more dates exist than one count carries, the sum of what is typed and its difference from what the dates showed. */
+  unlotted: number
+  more: boolean
+  sumText: string
+  delta: number | null
   inputClass: string
   toolClass: string
 }
 
 const idText = (row: InventoryCheckLotRow) => [row.lotCode ? String(row.lotCode) : '', row.batchNumber ? `#${row.batchNumber}` : ''].filter(Boolean).join(' ')
 
-export default function InventoryCheckLotEntries({ product, rows, emptyRows, draftLots, canViewCounts, locked, tr, onLotCount, onLotSet, onEnter, inputClass, toolClass }: InventoryCheckLotEntriesProps) {
+export default function InventoryCheckLotEntries({ product, rows, emptyRows, draftLots, canViewCounts, locked, tr, onLotCount, onLotSet, onEnter, unlotted, more, sumText, delta, inputClass, toolClass }: InventoryCheckLotEntriesProps) {
   // Something already typed on an empty date keeps it in view.
   const [shown, setShown] = useState(() => emptyRows.some(row => draftLots?.[String(row.batchId)] !== undefined))
   const open = shown || emptyRows.some(row => draftLots?.[String(row.batchId)] !== undefined)
@@ -61,7 +67,8 @@ export default function InventoryCheckLotEntries({ product, rows, emptyRows, dra
     </li>
   }
 
-  return <ul className="min-w-0 space-y-1" aria-label={tr('inventory_check_lot_dates', 'Received dates')}>
+  return <>
+  <ul className="min-w-0 space-y-1" aria-label={tr('inventory_check_lot_dates', 'Received dates')}>
     {rows.map(line)}
     {emptyRows.length > 0 ? <li data-popover-empty-toggle className="flex min-w-0 items-center">
       <button type="button" data-popover-action="toggle-empty" aria-expanded={open} aria-label={open ? hideText : toggleText} title={open ? hideText : toggleText} onClick={() => setShown(!open)}
@@ -71,4 +78,12 @@ export default function InventoryCheckLotEntries({ product, rows, emptyRows, dra
     </li> : null}
     {open ? emptyRows.map(line) : null}
   </ul>
+  {unlotted > 0 ? <p data-popover-unlotted className="mt-1 px-1 tabular-nums text-gray-600 dark:text-gray-300">{tr('inventory_check_unlotted', 'No received date')}: <strong>{unlotted}</strong></p> : null}
+  {more ? <p data-popover-more className="mt-1 px-1 leading-relaxed text-amber-800 dark:text-amber-200">{tr('inventory_check_popover_more', 'This product holds more received dates than one count can carry. Count the ones listed.')}</p> : null}
+  <div data-popover-total className="mt-1 flex min-w-0 items-center justify-end gap-2 border-t border-gray-100 pt-1 tabular-nums dark:border-gray-800">
+    <span className="text-gray-500 dark:text-gray-400">{tr('inventory_check_popover_total', 'Total')}</span>
+    <strong data-popover-sum>{sumText}</strong>
+    {delta !== null && delta !== 0 ? <span data-popover-delta className="font-semibold text-amber-800 dark:text-amber-200">{signedDelta(delta)}</span> : null}
+  </div>
+  </>
 }

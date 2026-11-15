@@ -18,7 +18,7 @@ import type { InventoryCheckId, InventoryCheckListStatus, InventoryCheckLotRow, 
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { lotTotals, type LotDraft } from './inventoryCheckLots.ts'
 import { isDraftKind, recordedStatus, rowStatusKind, ROW_STATUS_WORDS, type RowStatusKind } from './inventoryCheckStatus.ts'
-import InventoryCheckCountPopover from './InventoryCheckCountPopover.tsx'
+import InventoryCheckCountPopover, { preloadLotEntries } from './InventoryCheckCountPopover.tsx'
 import { priceFacts, type PriceMoney } from './inventoryPriceFacts.ts'
 import { finiteQuantity, parseCount, signedDelta } from './InventoryCheckCountEditor.tsx'
 import type { InventoryCheckFocusRequest } from './InventoryCheckRows.tsx'
@@ -296,6 +296,8 @@ function ListRow({ product, draft, adornment, columns, countable, copy, scanHit,
 
 export default function InventoryCheckListRows({ products, drafts, adornments = {}, focusRequest, ...props }: InventoryCheckListRowsProps) {
   const columns = listColumns({ selecting: props.selecting, canViewStock: props.canViewStock, canViewCounts: props.canViewCounts })
+  // Per received date (ic_lot_counts only): the entries' code starts loading when the list draws, so it is there before the first tap. With the switch off it is never requested.
+  useEffect(() => { if (props.lotCounts && props.selecting) preloadLotEntries() }, [props.lotCounts, props.selecting])
   const listRef = useRef<HTMLUListElement | null>(null)
   const translate = props.t
   const copyTranslate = useCallback((key: string, fallback: string) => { const value = translate(key); return value && value !== key ? value : fallback }, [translate])

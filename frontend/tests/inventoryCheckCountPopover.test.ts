@@ -274,6 +274,16 @@ const cases: Array<[string, () => Promise<void>]> = [
     await open(s, 952)
     assert.equal(flat(inPopover(s, 'data-popover-status-word')[0]), 'Waiting for approval · Issue', 'the pending word with the recorded status behind it')
   }],
+  // ---- H (round 2b): the per-batch entries are their own chunk, requested only when ic_lot_counts is on (a till without it never downloads them). ----
+  ['the per-batch entries load lazily and only when lot counts are on', async () => {
+    const popoverSource = readFileSync(new URL('../src/components/inventory/InventoryCheckCountPopover.tsx', import.meta.url), 'utf8')
+    const rowsSource = readFileSync(new URL('../src/components/inventory/InventoryCheckListRows.tsx', import.meta.url), 'utf8')
+    const importsEntries = popoverSource.split(String.fromCharCode(10)).some(line => line.startsWith('import ') && line.includes('InventoryCheckLotEntries'))
+    assert.ok(!importsEntries, 'no static import of the entries: they would join the page chunk')
+    assert.ok(popoverSource.includes('lazy(loadLotEntries)') && popoverSource.includes("import('./InventoryCheckLotEntries.tsx')"), 'a dynamic import behind lazy()')
+    assert.ok(rowsSource.includes('if (props.lotCounts && props.selecting) preloadLotEntries()'), 'requested only when lot counts are on')
+    assert.ok(!rowsSource.includes('InventoryCheckLotEntries'), 'the list rows do not import it')
+  }],
   // ---- D (review F5): each status is pinned to its icon and colour token. An icon swap (OK as a red x, not checked as a clock) goes red. ----
   ['every status wears its own icon and colour: not checked, in check, OK, issue, pending, and the draft ring', async () => {
     const items: InventoryCheckProduct[] = [

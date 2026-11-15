@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import type { InventoryCheckLotRow, InventoryCheckLotsAnswer, InventoryCheckProduct, InventoryCheckTranslator } from '../../types/inventoryChecks.ts'
 import { lotTotals, type LotDraft } from './inventoryCheckLots.ts'
-import InventoryCheckLotEntries from './InventoryCheckLotEntries.tsx'
-import { finiteQuantity, parseCount, signedDelta } from './InventoryCheckCountEditor.tsx'
+// The per-received-date entries are code only a viewer with ic_lot_counts on needs: they load as their own chunk, started when the list draws (preloadLotEntries), so they are there before any tap.
+const loadLotEntries = () => import('./InventoryCheckLotEntries.tsx')
+const InventoryCheckLotEntries = lazy(loadLotEntries)
+export const preloadLotEntries = (): void => { void loadLotEntries() }
+import { finiteQuantity, parseCount } from './InventoryCheckCountEditor.tsx'
 
 // The count popover of one row (the owner, 14 Nov: "clicking check shows the entries, and you enter there. Make it compact"). It opens from the row's status icon and renders its
 // real content from the first paint: the product, the three quick answers (matches stock, does not match, clear), and the entries.
@@ -127,11 +130,10 @@ export default function InventoryCheckCountPopover({ product, draft, byBatch, lo
     <div ref={bodyRef} data-popover-entries className="mt-1 min-w-0">
       {lots.state === 'loading' ? <p data-popover-loading role="status" className="px-1 py-2 text-gray-500 dark:text-gray-400">{tr('inventory_check_popover_loading', 'Loading received dates…')}</p> : null}
       {lots.state === 'failed' ? <p data-popover-failed role="alert" className="px-1 py-2 text-red-700 dark:text-red-300">{tr('inventory_check_popover_failed', 'Received dates could not be loaded. Close and open again.')}</p> : null}
-      {ready && batches ? <InventoryCheckLotEntries product={product} rows={rows} emptyRows={carried ? emptied : []} draftLots={draft?.lots} canViewCounts={canViewCounts} locked={locked} tr={tr} inputClass={input} toolClass={tool}
+      {ready && batches ? <Suspense fallback={null}><InventoryCheckLotEntries product={product} rows={rows} emptyRows={carried ? emptied : []} draftLots={draft?.lots} canViewCounts={canViewCounts} locked={locked} tr={tr} inputClass={input} toolClass={tool}
+        unlotted={unlotted} more={lots.state === 'ready' && lots.more} sumText={dated.dates > 0 && dated.valid ? String(dated.counted) : '—'} delta={delta}
         onLotCount={(row, value) => onLotCount(product, row, value)} onEnter={onEnter}
-        onLotSet={onLotSet ? (row, value) => { void onLotSet(product, row, value).then(quantity => { if (typeof quantity === 'number') { const apply = (list: InventoryCheckLotRow[]) => list.map(candidate => candidate.batchId === row.batchId ? { ...candidate, quantity } : candidate); setLots(previous => previous.state === 'ready' ? { ...previous, rows: apply(previous.rows) } : previous); setEmptied(apply) } }) } : undefined} /> : null}
-      {ready && batches && unlotted > 0 ? <p data-popover-unlotted className="mt-1 px-1 tabular-nums text-gray-600 dark:text-gray-300">{tr('inventory_check_unlotted', 'No received date')}: <strong>{unlotted}</strong></p> : null}
-      {ready && batches && lots.state === 'ready' && lots.more ? <p data-popover-more className="mt-1 px-1 leading-relaxed text-amber-800 dark:text-amber-200">{tr('inventory_check_popover_more', 'This product holds more received dates than one count can carry. Count the ones listed.')}</p> : null}
+        onLotSet={onLotSet ? (row, value) => { void onLotSet(product, row, value).then(quantity => { if (typeof quantity === 'number') { const apply = (list: InventoryCheckLotRow[]) => list.map(candidate => candidate.batchId === row.batchId ? { ...candidate, quantity } : candidate); setLots(previous => previous.state === 'ready' ? { ...previous, rows: apply(previous.rows) } : previous); setEmptied(apply) } }) } : undefined} /></Suspense> : null}
       {ready && !batches ? <div data-popover-single className="flex min-w-0 items-center gap-x-1.5 px-0.5">
         <span className="min-w-0 flex-1 font-semibold">{tr('inventory_check_popover_total', 'Total')}</span>
         <input data-popover-count data-popover-total type="text" inputMode="decimal" autoComplete="off" value={draft?.count ?? ''} readOnly={locked} placeholder={canViewStock && stock !== null ? String(stock) : ''} aria-label={`${tr('inventory_check_count', 'Count')}: ${product.name}`} aria-invalid={total.kind === 'invalid' ? true : undefined}
@@ -140,10 +142,5 @@ export default function InventoryCheckCountPopover({ product, draft, byBatch, lo
       </div> : null}
     </div>
 
-    {ready && batches ? <div data-popover-total className="mt-1 flex min-w-0 items-center justify-end gap-2 border-t border-gray-100 pt-1 tabular-nums dark:border-gray-800">
-      <span className="text-gray-500 dark:text-gray-400">{tr('inventory_check_popover_total', 'Total')}</span>
-      <strong data-popover-sum>{dated.dates > 0 && dated.valid ? dated.counted : '—'}</strong>
-      {delta !== null && delta !== 0 ? <span data-popover-delta className="font-semibold text-amber-800 dark:text-amber-200">{signedDelta(delta)}</span> : null}
-    </div> : null}
   </div>
 }
