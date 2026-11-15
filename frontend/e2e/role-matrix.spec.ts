@@ -195,9 +195,9 @@ for (const role of ROLES) {
 }
 
 // The Dashboard under the payload the Worker really sends each role. compat.ts:34-35 mounts acquisitionCostResponses on /dashboard and
-// /dashboard/*, so a role without product_cost_view gets its cost-shaped keys projected away (stock_value_usd among them), and
+// /dashboard/*, so a role that is not an administrator (cost is admin only since 15 Nov 2026) gets its cost-shaped keys projected away (stock_value_usd among them), and
 // Dashboard.tsx isDashboardSummaryPayload (:727-735) requires stock_value_usd to be finite. The case asks the plain question: does the
-// Dashboard load for each role that may open it? The admin and every cost holder are the controls.
+// Dashboard load for each role that may open it (the seeded Employee and Manager both do since 15 Nov 2026)? The admin is the control.
 const DASHBOARD_FAILED = /did not finish loading|returned incomplete (summary|analytics) data|incomplete data|could not be loaded for this range/i
 for (const role of ROLES.filter((entry) => accessFor(entry).canAccessPage('dashboard'))) {
   test(`${role.label}: the Dashboard loads with the payload the Worker sends this role`, async ({ browser }, testInfo) => {
@@ -606,6 +606,15 @@ for (const role of ROLES) {
         const slot = await open(page, path, landing)
         if (pageId === 'products') await expect(slot.getByText(PRODUCT_NAME).filter({ visible: true }).first(), 'the fixture catalogue rendered').toBeVisible({ timeout: 30_000 })
         if (hasProbeCost(await slot.innerText())) shownOn.push(pageId)
+        // Owner, 15 Nov 2026: the Dashboard draws no stock-value card, no profit card and no COGS for a non-admin, even from a leaking payload
+        // (a card is absent, never a $0.00). The Employee and Manager defaults both open the Dashboard now.
+        if (pageId === 'dashboard' && !seesCost(access)) {
+          await page.waitForTimeout(1_500)
+          const shown = squash(await slot.innerText())
+          for (const label of [text('stock_value', 'Stock Value'), text('gross_profit', 'Gross Profit'), text('est_profit', 'Estimated profit'), text('cogs', 'COGS'), text('profit_vs_cogs', 'Profit vs COGS')]) {
+            expect(shown.toLowerCase().includes(label.toLowerCase()), `the Dashboard of a role without cost shows "${label}"`).toBe(false)
+          }
+        }
         if (pageId === 'products' && !session.phone && grant(access, 'products', 'view')) {
           await expect.soft(slot.getByRole('columnheader', { name: new RegExp(`^${text('cost', 'Cost')}`) }), 'the Cost column exists iff the role may view costs').toHaveCount(seesCost(access) ? 1 : 0, BRIEF)
         }
@@ -687,3 +696,17 @@ for (const role of ROLES.filter((entry) => { const access = accessFor(entry); re
     } finally { await session.close() }
   })
 }
+
+// =====================================================================================================================
+// 6. Cost is administrator-only (owner, 15 Nov 2026)
+// =====================================================================================================================
+test('the grants "View product costs" and "Edit product costs" give no role any cost: only the administrator sees it', () => {
+  const inert = ROLES.find((entry) => entry.id === 'cost-viewer') as RoleDef
+  expect(inert.costGranted, 'the fixture role does hold the grant').toBe(true)
+  expect(seesCost(accessFor(inert)), 'the grant is inert').toBe(false)
+  expect(seesCost(accessFor(MANAGER)), 'the Manager default sees no cost').toBe(false)
+  expect(ROLES.filter((entry) => seesCost(accessFor(entry))).map((entry) => entry.id), 'only the admin control sees cost').toEqual(['admin'])
+  // Both seeded staff roles open the Dashboard (owner, 15 Nov 2026); the Employee only views it.
+  expect(accessFor(ROLES.find((entry) => entry.id === 'employee') as RoleDef).canAccessPage('dashboard')).toBe(true)
+  expect(accessFor(MANAGER).canAccessPage('dashboard')).toBe(true)
+})

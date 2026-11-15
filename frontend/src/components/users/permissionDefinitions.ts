@@ -121,7 +121,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'dashboard',
     tKey: 'perm_section_dashboard',
     label: 'Dashboard',
-    description: 'The Dashboard page. Export is a separate switch.',
+    description: 'The Dashboard page. Export is a separate switch. Cost, profit and stock value are shown to administrators only.',
     permissions: [
       { key: 'dashboard', tKey: 'perm_dashboard', label: 'Dashboard', sensitivity: 'normal', lead: true },
       // Independent of the page-access key above -- a role can have
@@ -190,7 +190,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'products',
     tKey: 'perm_section_products',
     label: 'Products',
-    description: 'Products and imports. Costs and destructive imports are separate. Opening stock also needs Inventory › Adjust / receive.',
+    description: 'Products and imports. Cost and profit are admin only. Destructive imports are separate. Opening stock also needs Inventory › Adjust / receive.',
     permissions: [
       // tier: true -- add, edit and delete queue via maybeQueueForReview() (lib/reviewGate.ts); an edit that
       // would merge two products queues too. Every other action is Full only (utils/permissionActions.ts lists
@@ -204,8 +204,11 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         reviewTKey: 'perm_products_review_desc',
         reviewDescription: 'Under Review, viewing and searching products works directly. Adding, editing, or deleting a product goes to the Review/Approval queue for an admin to approve or reject. So does an edit that would merge this product into another one, unless Merge duplicates is switched off for the role, which refuses that edit. Import, export, merge-duplicates, and the zero-quantity cleanup tool all require Full Access.',
       },
-      { key: 'product_cost_view', tKey: 'perm_product_cost_view', label: 'View product costs', sensitivity: 'high', shortTKey: 'perm_short_cost_view', short: 'See costs' },
-      { key: 'product_cost_edit', tKey: 'perm_product_cost_edit', label: 'Edit product costs', sensitivity: 'high', shortTKey: 'perm_short_cost_edit', short: 'Enter costs' },
+      // Retired 15 Nov 2026 (owner): cost, profit, margin, stock value and removal loss are admin-only, so these two switches would do
+      // nothing. No chip offers them; their stored values stay untouched, the way back if the owner reverses the ruling
+      // (utils/acquisitionCostAccess.ts holdsCostViewGrant / holdsCostEditGrant).
+      { key: 'product_cost_view', tKey: 'perm_product_cost_view', label: 'View product costs', sensitivity: 'high', shortTKey: 'perm_short_cost_view', short: 'See costs', retired: true },
+      { key: 'product_cost_edit', tKey: 'perm_product_cost_edit', label: 'Edit product costs', sensitivity: 'high', shortTKey: 'perm_short_cost_edit', short: 'Enter costs', retired: true },
       // Gates the replace-all and replace-columns product imports, in the import picker and in the Worker
       // (lib/importEngine.ts missingDestructiveImportPermission).
       { key: 'destructive_delete', tKey: 'perm_destructive_delete', label: 'Destructive imports: replace all and replace columns', sensitivity: 'critical', shortTKey: 'perm_short_destructive_imports', short: 'Destructive imports' },
