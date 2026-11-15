@@ -22,7 +22,7 @@ import {
   type BranchReplayRow,
   type BranchWriteFields,
 } from './branchWrites'
-import { getActionTier, getPermissionTier, getMergedPermissions, isAdminControlUser, type PermissionTier } from './permissions'
+import { getActionTier, getPermissionTier, type PermissionTier } from './permissions'
 import {
   buildAllocationStatements,
   buildOperationAllocationStatements,
@@ -359,7 +359,8 @@ export const PRODUCT_MERGE_GROUP_ACTION_KIND = 'product.merge.group'
 export const PRODUCT_MERGE_GROUP_CHILD_KIND = 'product.merge.group.child'
 export const PRODUCT_MERGE_APPLIER_KINDS = new Set(['product.merge', 'product.merge.bulk', PRODUCT_MERGE_GROUP_ACTION_KIND])
 
-function mergeChoicePermissionError(reversal: MergeReversal, user: SessionUser | null | undefined): string | null {
+// Imported where used, like the Conflicts applier below: the harnesses that load this file by name never reach this check.
+async function mergeChoicePermissionError(reversal: MergeReversal, user: SessionUser | null | undefined): Promise<string | null> {
   if (reversal.priceOverridden === true
     && (!user || getActionTier(user, 'products', 'edit') !== 'full' || getActionTier(user, 'products', 'price') === 'none')) return 'product_edit_permission_required'
   const choice = reversal.keeperChoice
@@ -367,13 +368,16 @@ function mergeChoicePermissionError(reversal: MergeReversal, user: SessionUser |
   const needsProductEdit = choice.requiresProductEdit === true
     || (choice.requiresProductEdit !== false && !!choice.fields && Object.keys(choice.fields).length > 0)
   if (needsProductEdit && (!user || getActionTier(user, 'products', 'edit') !== 'full')) return 'product_edit_permission_required'
-  if (choice.cost && (!user || (!isAdminControlUser(user) && getMergedPermissions(user).product_cost_edit !== true))) return 'cost_permission_required'
+  if (choice.cost) {
+    const { canEditAcquisitionCosts } = await import('./acquisitionCostAccess')
+    if (!user || !canEditAcquisitionCosts(user)) return 'cost_permission_required'
+  }
   return null
 }
 
-function assertMergeChoicePermissions(reversals: MergeReversal[], user: SessionUser | null | undefined): void {
+async function assertMergeChoicePermissions(reversals: MergeReversal[], user: SessionUser | null | undefined): Promise<void> {
   for (const reversal of reversals) {
-    const code = mergeChoicePermissionError(reversal, user)
+    const code = await mergeChoicePermissionError(reversal, user)
     if (code) throw Object.assign(new Error('Current permission is required to replay the saved Resolve choices.'), { code, status: 403 })
   }
 }
@@ -389,11 +393,11 @@ export async function mergeReplayPermissionEffects(env: Env, payload: Record<str
   const snap = await readMergeReplayPermissionSnapshot(env, payload)
   return {
     changesProductImages: await mergeReplayImagesFromSnapshot(env, payload, direction, snap),
-    choicePermissionError: mergeReplayChoicePermissionFromSnapshot(payload, user, snap),
+    choicePermissionError: await mergeReplayChoicePermissionFromSnapshot(payload, user, snap),
   }
 }
 
-function mergeReplayChoicePermissionFromSnapshot(payload: Record<string, unknown>, user: SessionUser, snap: { payload_json: string } | undefined): string | null {
+async function mergeReplayChoicePermissionFromSnapshot(payload: Record<string, unknown>, user: SessionUser, snap: { payload_json: string } | undefined): Promise<string | null> {
   const kind = String(payload.applier || '')
   if (kind !== 'product.merge' && kind !== 'product.merge.bulk') return null
   const snapshotId = Number(payload.snapshot_id || 0)
@@ -404,7 +408,7 @@ function mergeReplayChoicePermissionFromSnapshot(payload: Record<string, unknown
     const reversals = kind === 'product.merge.bulk' ? parsed.reversals : [parsed]
     if (!Array.isArray(reversals) || !reversals.length) return 'product_edit_permission_required'
     for (const reversal of reversals) {
-      const code = mergeChoicePermissionError(reversal, user)
+      const code = await mergeChoicePermissionError(reversal, user)
       if (code) return code
     }
     return null
@@ -3943,7 +3947,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         throw new Error('The saved details for this merge are unreadable, so it cannot be reversed.')
       }
 
-      assertMergeChoicePermissions([reversal], ctx.user)
+      await assertMergeChoicePermissions([reversal], ctx.user)
 
       if (Object.hasOwn(reversal, 'costReviewOutcome') || payload.merge_version === 3 || (reversal.bulkClusterPlan as { version?: unknown } | undefined)?.version === 3) {
         return replayMergeCostReview(payload, ctx, snap, reversal)
@@ -4026,7 +4030,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         throw new Error('The saved details for this merge are unreadable, so it cannot be reversed.')
       }
       if (!reversals.length) throw new Error('This merge has no saved folds to replay.')
-      assertMergeChoicePermissions(reversals, ctx.user)
+      await assertMergeChoicePermissions(reversals, ctx.user)
 
       if (ctx.direction === 'undo') {
         if (String(snap.status) !== 'applied') throw new UndoConflictError('This merge has already been undone.', UNDO_ALREADY_DONE_CODE)
@@ -4064,7 +4068,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
   },
   // Conflicts decisions (lib/productDataGaps.ts): "Confirm $0" and "no barcode" are rows in product_conflict_marks. The payload is the
   // mark itself ({ product_id, mark, set }); undo/redo is the compensating write. Gated like the forward route: products edit at the
-  // full tier plus Conflicts access (alsoAction), and a $0 confirmation also needs the cost-entry permission (checked in the replay).
+  // full tier plus Conflicts access (alsoAction), and a $0 confirmation also needs an administrator (checked in the replay).
   'product.conflict_mark': {
     permission: 'products',
     action: 'edit',

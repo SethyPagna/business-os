@@ -21,8 +21,9 @@ function loadAccess(transform = source => source, entry = 'acquisitionCostAccess
 }
 const actor = (own = {}, role = {}, role_code = 'manager') => ({ role_code, permissions: JSON.stringify(own), role_permissions: JSON.stringify(role) })
 const denied = actor({ products: true, inventory: true, sales: true, product_cost_view: false, product_cost_edit: false }, { product_cost_view: true, product_cost_edit: true })
-const viewer = actor({}, { product_cost_view: true })
-const editor = actor({ product_cost_edit: true })
+// Owner, 15 Nov 2026: only an administrator views costs now (the grant alone is inert, and is the first denied case above).
+const viewer = actor({ all: true })
+const editor = actor({ all: true })
 const access = loadAccess()
 const encode = (value, layers = 1) => { while (layers-- > 0) value = JSON.stringify(value); return value }
 const envelopes = ['details', 'old_value', 'new_value', 'undo_payload', 'redo_payload', 'request_json', 'response_json', 'receipt_json', 'targets_json', 'pricing_snapshot_json', 'payload_json', 'source_json', 'allocations_json', 'physical_json', 'snapshot_json', 'steps_json', 'baseline_json', 'repair_json', 'original_json', 'custom_json']

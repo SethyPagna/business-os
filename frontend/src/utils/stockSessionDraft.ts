@@ -626,10 +626,10 @@ export function lineEntryRefusal(input: {
   if (!input.canReceive) {
     return Number.isSafeInteger(qty) && qty === 0
       ? null
-      : { key: 'product_cost_edit_required', fallback: 'Cost edit permission is required to receive stock.', field: 'qty' }
+      : { key: 'product_cost_edit_required', fallback: 'Only an administrator can enter costs on received stock.', field: 'qty' }
   }
   if (!Number.isSafeInteger(qty) || qty < 0) return { key: 'fast_stockin_qty', fallback: 'Quantity must be at least 1', field: 'qty' }
-  if (!input.canEditCosts) return { key: 'product_cost_edit_required', fallback: 'Cost edit permission is required to receive stock.', field: 'cost' }
+  if (!input.canEditCosts) return { key: 'product_cost_edit_required', fallback: 'Only an administrator can enter costs on received stock.', field: 'cost' }
   const lotSupplier = typeof input.lotChoice === 'number' ? String(input.lot?.supplier_name || '').trim() : ''
   // Qty 0: every unit of this item comes from its free row, which is the free declaration.
   const gate = stockReceiptGateCode(qty === 0

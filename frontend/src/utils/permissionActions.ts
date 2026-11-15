@@ -67,8 +67,17 @@ export interface PermissionAction {
    * and `can()` answers for it.
    */
   follows?: string
+  /**
+   * Owner rule, 15 Nov 2026: cost is administrator only, and an import file carries cost, so the Worker refuses every
+   * import to anyone but an administrator (routes/importJobs.ts requireImportPermission). The row is kept, with its
+   * `requires` and the roles' stored values untouched, but no grant can make it work: the editor draws the chip as
+   * unavailable (`ADMIN_ONLY`), and `actionAllowed()` answers false. An administrator bypasses both.
+   */
+  adminOnly?: boolean
 }
 
+/** What the editor names for a row no grant can unlock: the action is administrator only. */
+export const ADMIN_ONLY: ActionRequirement = { key: 'admin_only', tKey: 'perm_admin_only', label: 'Admin only' }
 const COST_EDIT: ActionRequirement = { key: 'product_cost_edit', tKey: 'perm_product_cost_edit', label: 'Edit product costs' }
 const COST_VIEW: ActionRequirement = { key: 'product_cost_view', tKey: 'perm_product_cost_view', label: 'View product costs' }
 // A products, inventory or sales import file carries costs: the Worker creates the job with Edit product costs and
@@ -113,12 +122,12 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     { key: 'bulk_delete', tKey: 'perm_act_products_bulk_delete', label: 'Bulk delete', shortTKey: 'perm_act_products_bulk_delete', short: 'Bulk delete', review: 'block', requires: [PRODUCTS_DELETE] },
     { key: 'variant', tKey: 'perm_act_products_variant', label: 'Add variant', shortTKey: 'perm_short_variant', short: 'Variant', review: 'block', requires: [PRODUCTS_ADD] },
     { key: 'image', tKey: 'perm_act_products_image', label: 'Upload product images and edits that change them', shortTKey: 'images', short: 'Images', review: 'queue', controlReview: 'block' },
-    { key: 'import', tKey: 'perm_act_products_import', label: 'Import', shortTKey: 'import', short: 'Import', review: 'block', requires: IMPORT_COSTS },
+    { key: 'import', tKey: 'perm_act_products_import', label: 'Import', shortTKey: 'import', short: 'Import', review: 'block', requires: IMPORT_COSTS, adminOnly: true },
     // A products file that adds or changes stock is refused whole without Adjust / receive at Full (routes/importJobs.ts,
     // lib/importEngine.ts), however Import is set.
     { key: 'import_stock', tKey: 'perm_control_import_stock', label: 'Stock quantities in product imports', shortTKey: 'perm_short_import_stock', short: 'Stock in imports', review: 'block', follows: 'import', requires: [INVENTORY_ADJUST] },
     // Covers replace-all and replace-columns imports, which are products imports that also need destructive_delete.
-    { key: 'import_replace_all', tKey: 'perm_act_products_import_replace_all', label: 'Import: replace all and replace columns', shortTKey: 'perm_short_replace_import', short: 'Replace import', review: 'block', requires: [
+    { key: 'import_replace_all', tKey: 'perm_act_products_import_replace_all', label: 'Import: replace all and replace columns', shortTKey: 'perm_short_replace_import', short: 'Replace import', review: 'block', adminOnly: true, requires: [
       { key: 'products:import', tKey: 'perm_act_products_import', label: 'Import' },
       ...IMPORT_COSTS,
       { key: 'destructive_delete', tKey: 'perm_destructive_delete', label: 'Destructive imports: replace all and replace columns' },
@@ -156,6 +165,9 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // lot): strict Full Access writes that mutate the same live stock this
     // action names.
     { key: 'adjust', tKey: 'perm_act_inventory_adjust', label: 'Adjust / receive stock', shortTKey: 'perm_short_adjust_receive', short: 'Adjust / receive', review: 'block' },
+    // A receipt that carries a cost (stock session, fast stock-in, batch receive, line edit) is refused to anyone but an administrator
+    // (product_cost_edit_required); receiving without a cost is Adjust / receive as before.
+    { key: 'receive_costs', tKey: 'perm_control_inventory_receive_costs', label: 'Entering costs on received stock', shortTKey: 'perm_short_receive_costs', short: 'Receipt costs', review: 'block', follows: 'adjust', adminOnly: true },
     // POST /transfer answers 403 for Review.
     { key: 'transfer', tKey: 'perm_act_inventory_transfer', label: 'Transfer stock', shortTKey: 'transfer', short: 'Transfer', review: 'block' },
     // POST /move-row answers 403 for Review.
@@ -165,7 +177,7 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // routes/importJobs.ts: the 'inventory' and 'stock_actions' import
     // types -- strict full-grant checks there ('stock_actions' needs
     // products+inventory+sales all at Full Access).
-    { key: 'import', tKey: 'perm_act_inventory_import', label: 'Stock imports (inventory / stock-action files)', shortTKey: 'import', short: 'Import', review: 'block', requires: IMPORT_COSTS },
+    { key: 'import', tKey: 'perm_act_inventory_import', label: 'Stock imports (inventory / stock-action files)', shortTKey: 'import', short: 'Import', review: 'block', requires: IMPORT_COSTS, adminOnly: true },
     // An inventory or stock-actions file that adds or removes stock is refused whole without Adjust / receive at Full
     // (routes/importJobs.ts requireChangedProductImportStockAction, lib/importEngine.ts isStockAdjustImportType), however
     // Import is set -- the same rule as the products import's stock-quantity control above.
@@ -196,6 +208,8 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // POST / and POST /supplier carry no tier check beyond the router-wide
     // gate, so a review-tier user creates returns directly, by design.
     { key: 'add', tKey: 'perm_act_returns_add', label: 'Create return', shortTKey: 'add', short: 'Add', review: 'allow' },
+    // POST /supplier records cost and settlement, so it is refused to anyone but an administrator (routes/returns.ts).
+    { key: 'supplier', tKey: 'perm_control_returns_supplier', label: 'Supplier returns (cost and settlement)', shortTKey: 'perm_short_returns_supplier', short: 'Supplier returns', review: 'block', follows: 'add', adminOnly: true },
     // PATCH /:id answers 403 for Review: editing reverses and
     // re-applies batch restocking against live state.
     { key: 'edit', tKey: 'perm_act_returns_edit', label: 'Edit return', shortTKey: 'edit', short: 'Edit', review: 'block' },
@@ -279,7 +293,7 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // switches it off. review:'allow' keeps the View tier reading.
     { key: 'view', tKey: 'perm_act_sales_view', label: 'View sales and reports', shortTKey: 'view', short: 'View', review: 'allow' },
     { key: 'export', tKey: 'perm_act_sales_export', label: 'Export sales', shortTKey: 'export', short: 'Export', review: 'allow' },
-    { key: 'import', tKey: 'perm_act_sales_import', label: 'Import sales', shortTKey: 'import', short: 'Import', review: 'block', requires: IMPORT_COSTS },
+    { key: 'import', tKey: 'perm_act_sales_import', label: 'Import sales', shortTKey: 'import', short: 'Import', review: 'block', requires: IMPORT_COSTS, adminOnly: true },
     { key: 'status', tKey: 'perm_act_sales_status', label: 'Change or cancel sale status', shortTKey: 'status', short: 'Status', review: 'block' },
     { key: 'customer', tKey: 'perm_act_sales_customer', label: 'Change linked customer', shortTKey: 'customer', short: 'Customer', review: 'block' },
     { key: 'customer_reassign', tKey: 'perm_act_sales_customer_reassign', label: 'Reassign customer (off: sale name only)', shortTKey: 'customer', short: 'Customer', review: 'block' },
@@ -300,10 +314,8 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // explicit capability. Individual actions above remain independently
     // grantable to front-line staff.
     { key: 'bulk', tKey: 'perm_act_sales_bulk', label: 'Change multiple sales at once', shortTKey: 'perm_short_bulk', short: 'Bulk changes', review: 'block' },
-    // Owner, 14 Oct 2026: the courier's actual cost (what the shop paid the driver) on a sale, its history, the reports
-    // and the dashboard. On by default for every role that holds Sales; the Worker's canViewCourierCost
-    // (lib/courierCostAccess.ts) reads the same `sales:view_courier_cost` switch, and an administrator always sees it.
-    { key: 'view_courier_cost', tKey: 'perm_act_sales_view_courier_cost', label: 'View actual delivery cost', shortTKey: 'perm_short_courier_cost', short: 'Courier cost', review: 'allow' },
+    // The courier's actual cost row (`view_courier_cost`, owner 14 Oct 2026) is RETIRED (owner, 15 Nov 2026: cost is admin only, so a switch
+    // for it would do nothing). The Worker keeps the stored key readable as holdsCourierCostGrant (lib/courierCostAccess.ts), the way back.
   ],
 
   promotions: [
@@ -367,6 +379,8 @@ export function actionAllowed(
   if (!action) return tier !== 'none'
   const outcome = tier === 'review' && action.controlReview ? action.controlReview : outcomeAt(action, tier)
   if (outcome === 'block') return false
+  // An administrator-only row is unavailable to every non-admin; the administrator bypass lives in the caller (permissions.ts can()).
+  if (action.adminOnly) return false
   return !action.requires?.some((requirement) => !meets(requirement.key))
 }
 

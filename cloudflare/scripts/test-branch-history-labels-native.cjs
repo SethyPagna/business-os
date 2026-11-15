@@ -11,7 +11,7 @@ const { DatabaseSync } = require('node:sqlite')
 const ts = require('typescript')
 
 const root = path.join(__dirname, '..')
-const actor = { id: 7, name: 'Operator', username: 'operator', organization_id: null, role_id: null, is_active: 1,
+const actor = { id: 7, name: 'Operator', username: 'operator', role_code: 'admin', organization_id: null, role_id: null, is_active: 1,
   permissions: JSON.stringify({ branches: true, inventory: true, products: true, product_cost_edit: true, product_cost_view: true }) }
 function load(entry, overrides = {}) {
   const cache = new Map()

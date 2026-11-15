@@ -26,7 +26,8 @@ import { ROLE_PRESETS } from '../../src/components/users/rolePresetDefaults.ts'
  *   viewer             every section of permissionDefinitions.ts whose middle tier is 'view'
  *   image-only         rolePresetDefaults.ts ROLE_PRESETS 'product_viewer'
  *   webmaster          the four Website Editor area keys of permissionDefinitions.ts
- *   cost viewer        the Employee default plus product_cost_view (the grant, not the role code, must drive cost)
+ *   cost viewer        the Employee default plus product_cost_view. Owner, 15 Nov 2026: cost is ADMIN ONLY, so this grant is inert and the
+ *                      role must see exactly what the Employee default sees (no cost key, no cost on screen); only `admin` sees cost
  *   admin              rolePresetDefaults.ts ROLE_PRESETS 'admin' (the control)
  *
  *   sidebar / pages    NAV_ITEMS run through the production canAccessPage callback (AppContext.tsx), which is cut out of the
@@ -50,7 +51,7 @@ export type RoleDef = {
   roleCode: string
   /** roles.permissions: what the role editor saves. */
   grants: Grants
-  /** True when the grants hold an explicit product_cost_view. */
+  /** True when the grants hold an explicit product_cost_view. Informational since 15 Nov 2026: the grant gives a non-admin no cost (seesCost). */
   costGranted: boolean
 }
 
@@ -100,7 +101,7 @@ export const ROLES: RoleDef[] = [
   define('webmaster', 'webmaster (Website Editor areas)', 'webmaster', Object.fromEntries(
     section('customer_portal').permissions.map((entry) => [entry.key, true as const]),
   )),
-  define('cost-viewer', 'Employee default + View product costs', 'employee', { ...DEFAULT_ROLE_PERMISSIONS.employee, product_cost_view: true }),
+  define('cost-viewer', 'Employee default + View product costs (inert grant)', 'employee', { ...DEFAULT_ROLE_PERMISSIONS.employee, product_cost_view: true }),
   define('admin', 'admin (control)', 'admin', { ...preset('admin') }),
 ]
 
@@ -160,9 +161,13 @@ export function accessFor(role: RoleDef) {
 }
 
 // --- routes ------------------------------------------------------------------------------------------------------------
-/** Every admin route: the NAV_ITEMS pages plus the Server page, which the nav no longer lists but the URL still opens. */
+/**
+ * Every admin route: the NAV_ITEMS pages plus the Server page, which the nav no longer lists but the URL still opens. The Dashboard's
+ * direct URL is /dashboard: '/' is the sign-in landing (an Employee, Dashboard view only, lands elsewhere there; see the landing case
+ * in role-matrix.spec.ts), while /dashboard opens the Dashboard for every role that may.
+ */
 export const ADMIN_ROUTES: Array<{ page: string; path: string }> = [...NAV_ITEMS.map((item) => item.id), 'server']
-  .map((page) => ({ page, path: page === 'dashboard' ? '/' : getAdminPathForPage(page) }))
+  .map((page) => ({ page, path: page === 'dashboard' ? '/dashboard' : getAdminPathForPage(page) }))
 
 if (ADMIN_ROUTES.some((route) => route.page !== 'dashboard' && route.path === '/')) {
   throw new Error('a NAV_ITEMS page has no path in pathRouting.ts ADMIN_PATH_BY_PAGE')

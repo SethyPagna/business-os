@@ -52,7 +52,14 @@ const seedMap = new Function('return ' + roleDefaults.slice(seedOpen, roleDefaul
 assert.ok(seedMap.employee && seedMap.admin, 'the Employee seed was read from roleDefaults.ts')
 assert.deepEqual(employee.permissions, seedMap.employee, 'the Employee preset equals the Employee seed')
 // The owner decisions that map encodes (5 Oct, 16 Sep, 19-20 Oct 2026).
-assert.equal(Object.hasOwn(employee.permissions, 'dashboard'), false, 'Dashboard is off by default')
+// Owner, 15 Nov 2026 (reverses 20 Oct): an Employee opens the Dashboard, view only; a Manager keeps the export.
+assert.equal(employee.permissions.dashboard, true, 'Dashboard is on by default for an Employee')
+assert.equal(employee.permissions.dashboard_export, false, 'but an Employee never exports it')
+assert.equal(employeeAuthority.hasPermission('dashboard_export'), false)
+assert.equal(seedMap.manager.dashboard, true)
+assert.equal(seedMap.manager.dashboard_export, true, 'a Manager keeps the export')
+const managerPreset = ROLE_PRESETS.find((preset) => preset.key === 'manager')!
+assert.deepEqual(managerPreset.permissions, seedMap.manager, 'the Manager preset equals the Manager seed')
 assert.equal(Object.hasOwn(employee.permissions, 'inventory'), false, 'an Employee never writes physical stock')
 assert.equal(employee.permissions['products:supplier'], false)
 assert.equal(employee.permissions['products:price'], false)

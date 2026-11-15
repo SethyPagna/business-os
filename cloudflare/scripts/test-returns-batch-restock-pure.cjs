@@ -184,7 +184,7 @@ const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './perm
 // through the SAME kernel the stats surfaces use, not a parallel check.
 const removalLosses = loadReal('lib/removalLosses.ts')
 
-const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ returns: true, product_cost_edit: true, product_cost_view: true }) }
+const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', role_code: 'admin', permissions: JSON.stringify({ returns: true, product_cost_edit: true, product_cost_view: true }) }
 // Swapped for one request at a time by reqAs() so a permission-shaped probe
 // runs through the REAL lib/permissions tier resolution, not a stub of it.
 let activeUser = FAKE_USER
@@ -1664,7 +1664,7 @@ async function main() {
     // the plain return is refused; on (the suite's default user), it goes
     // through -- with no second tier to clear, as the retired
     // 'returns:settle_difference' used to be for anything with a value gap.
-    const withoutAdd = { ...FAKE_USER, permissions: JSON.stringify({ returns: { tier: 'full', actions: { add: 'none' } } }) }
+    const withoutAdd = { ...FAKE_USER, role_code: 'staff', permissions: JSON.stringify({ returns: { tier: 'full', actions: { add: 'none' } } }) }
     const denied = await reqAs(withoutAdd, 'POST', '/', {
       sale_id: 1,
       items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 12 }],
@@ -1673,7 +1673,7 @@ async function main() {
     assert.strictEqual(denied.status, 403, JSON.stringify(denied.json))
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM returns').get().n, 0)
 
-    const returnsOnly = { ...FAKE_USER, permissions: JSON.stringify({ returns: true }) }
+    const returnsOnly = { ...FAKE_USER, role_code: 'staff', permissions: JSON.stringify({ returns: true }) }
     const forbiddenCost = await reqAs(returnsOnly, 'POST', '/', {
       sale_id: 1,
       items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', cost_price_usd: 0 }],

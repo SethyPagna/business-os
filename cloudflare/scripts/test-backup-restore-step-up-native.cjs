@@ -17,7 +17,14 @@ async function main() {
   const { check, finish } = createReporter()
   try {
     await world.account('nobody', { roleCode: 'restore_nobody', permissions: {} })
+    // 15 Nov 2026: cost is admin only, so the cost grants give a non-admin nothing. `operator` is a second administrator (admin role,
+    // not the built-in default admin); `restorer` is a non-admin that holds backup_restore AND both cost grants.
     await world.account('operator', {
+      roleCode: 'admin',
+      permissions: { backup: true, backup_restore: true },
+      passwordHash: world.adminPasswordHash,
+    })
+    await world.account('restorer', {
       roleCode: 'restore_operator',
       permissions: { backup: true, backup_restore: true, product_cost_view: true, product_cost_edit: true },
       passwordHash: world.adminPasswordHash,
@@ -52,6 +59,11 @@ async function main() {
 
     await check('a backup_restore holder who is not the built-in admin is refused even with the right password', async (t) => {
       await refused(t, 'operator', () => restore('operator', { currentPassword: adminPassword }), 403, 'restore_builtin_admin_only')
+    })
+
+    await check('a non-admin backup_restore holder with both cost grants is refused on cost, even for a dry run, and nothing changes', async (t) => {
+      await refused(t, 'restorer', () => restore('restorer', { currentPassword: adminPassword }), 403, 'product_cost_edit_required')
+      await refused(t, 'restorer dry run', () => restore('restorer', { dryRun: true }), 403, 'product_cost_edit_required')
     })
 
     await check('the built-in admin without a password is refused and nothing is rolled back', async (t) => {
@@ -121,10 +133,10 @@ async function main() {
 
     await check('a backup_restore holder who is not the built-in admin may clear the hold with their own password', async (t) => {
       await seedHold()
-      const refused = await clearHold({ force: true }, 'operator')
+      const refused = await clearHold({ force: true }, 'restorer')
       t.eq('no password: code', refused.json && refused.json.code, 'current_password_required')
       t.eq('the hold is still on', await maintenanceHeld(), true)
-      const cleared = await clearHold({ force: true, currentPassword: adminPassword }, 'operator')
+      const cleared = await clearHold({ force: true, currentPassword: adminPassword }, 'restorer')
       t.eq('own password: status', cleared.status, 200)
       t.eq('the hold is off', await maintenanceHeld(), false)
     })

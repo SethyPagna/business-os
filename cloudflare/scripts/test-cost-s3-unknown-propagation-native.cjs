@@ -55,6 +55,7 @@ const WINDOW = `startDate=${DAY}&endDate=${DAY}`
 const ADMIN = { ...h.USER, permissions: '{"all":true}' }
 const PLAIN = { ...h.USER, permissions: '{"sales":true}' }
 const COST_NO_COURIER = { ...h.USER, permissions: '{"sales":true,"product_cost_view":true,"sales:view_courier_cost":false}' }
+const COST_AND_COURIER = { ...h.USER, permissions: '{"sales":true,"product_cost_view":true,"product_cost_edit":true}' }
 const NEW_KEYS = ['cost_missing_snapshot_lines', 'cost_known_lines', 'cost_complete']
 
 ;(async () => {
@@ -246,18 +247,32 @@ const NEW_KEYS = ['cost_missing_snapshot_lines', 'cost_known_lines', 'cost_compl
     assert.deepEqual(leaks, [])
   })
 
-  await check('a cost viewer without the courier-cost grant still receives the count (goods profit keeps it)', async () => {
-    h.setUser(COST_NO_COURIER)
-    try {
-      const strip = await get(sales, `/stats-strip?${WINDOW}`)
-      assert.equal(strip.totals.cost_missing_snapshot_lines, 1)
-      assert.equal(strip.totals.cost_complete, false)
-      assert.equal(strip.totals.profit_excludes_delivery, true)
-      const overview = await get(reports.default, `/overview?${WINDOW}`)
-      assert.equal(overview.sales.totals.cost_missing_snapshot_lines, 1)
-      const exported = await get(sales, `/export?${WINDOW}`)
-      assert.equal(exported.summary.cost_missing_snapshot_lines, 1)
-    } finally { h.setUser(ADMIN) }
+  // Owner rule, 15 Nov 2026: cost and profit are administrator only. The administrator receives the unknown-cost count on
+  // every surface; a non-admin holding the retired View product costs grant receives none of it, with or without the courier grant.
+  await check('the administrator receives the unknown-cost count; a non-admin holding the cost grant receives none', async () => {
+    h.setUser(ADMIN)
+    const strip = await get(sales, `/stats-strip?${WINDOW}`)
+    assert.equal(strip.totals.cost_missing_snapshot_lines, 1)
+    assert.equal(strip.totals.cost_complete, false)
+    const overview = await get(reports.default, `/overview?${WINDOW}`)
+    assert.equal(overview.sales.totals.cost_missing_snapshot_lines, 1)
+    const exported = await get(sales, `/export?${WINDOW}`)
+    assert.equal(exported.summary.cost_missing_snapshot_lines, 1)
+    const leaks = []
+    const scan = (label, value) => {
+      if (!value || typeof value !== 'object') return
+      for (const key of hasAny(value, NEW_KEYS)) leaks.push(`${label}.${key}`)
+      for (const [key, child] of Object.entries(value)) scan(`${label}.${key}`, child)
+    }
+    for (const holder of [COST_NO_COURIER, COST_AND_COURIER]) {
+      h.setUser(holder)
+      try {
+        scan('stats-strip', await get(sales, `/stats-strip?${WINDOW}`))
+        scan('export', await get(sales, `/export?${WINDOW}`))
+        scan('overview', await get(reports.default, `/overview?${WINDOW}`))
+      } finally { h.setUser(ADMIN) }
+    }
+    assert.deepEqual(leaks, [])
   })
 
   await check('costViewProfit restates profit but never drops or rewrites the unknown-cost count', () => {

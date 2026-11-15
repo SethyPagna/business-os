@@ -293,12 +293,16 @@ async function main() {
   await check('add 0 is still refused', async () => {
     seed(5)
     const permissionsBefore = FAKE_USER.permissions
-    FAKE_USER.permissions = JSON.stringify({ inventory: true, product_cost_edit: true })
+    // Cost entry is administrator only (owner, 15 Nov 2026): the actor who can enter the cost is an administrator.
+    const roleBefore = FAKE_USER.role_code
+    FAKE_USER.role_code = 'admin'
+    FAKE_USER.permissions = JSON.stringify({ inventory: true })
     try {
       const { status } = await req({ productId: 1, type: 'add', quantity: 0, reason: 'Receive', branchId: 1, batchId: 'new', unitCostUsd: 2, supplierName: 'Acme' })
       assert.strictEqual(status, 400, 'a zero add is a receipt of nothing even when the actor can enter its cost')
     } finally {
       FAKE_USER.permissions = permissionsBefore
+      FAKE_USER.role_code = roleBefore
     }
     assert.strictEqual(branchQty(), 5)
   })

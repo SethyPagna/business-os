@@ -33,7 +33,7 @@ import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.t
 import { summarizeRoleChangesByModule, type RoleChangeRow } from './roleDiff.ts'
 import { levelWord } from './rolePermissionLabel.ts'
 import { roleTierCounts } from './permissionSummary.ts'
-import { resettableRoleCode } from './roleDefaultsReset.ts'
+import { resetRolePermissions, resettableRoleCode } from './roleDefaultsReset.ts'
 import { ROLE_PRESETS } from './rolePresetDefaults'
 import { isAdminControlUser, normalizePermissionState, type PermissionValue } from '../../utils/permissions.ts'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -1183,7 +1183,8 @@ export default function Users() {
         notify(tr('role_defaults_none', 'No defaults are defined for this role. The role is unchanged.'), 'info')
         return
       }
-      setRoleForm((prev) => ({ ...prev, permissions: normalizePermissionState(defaults) }))
+      // Retired grants (the cost grants) keep the value the role holds; every drawn grant takes the default.
+      setRoleForm((prev) => ({ ...prev, permissions: resetRolePermissions(selectedRole.permissions, defaults) }))
       notify(tr('role_defaults_loaded', 'Defaults loaded into the editor. Review and save to apply them.'), 'info')
     } catch (error) {
       notify(getErrorMessage(error, tr('role_defaults_load_failed', 'The role defaults could not be loaded. The role is unchanged.')), 'error')

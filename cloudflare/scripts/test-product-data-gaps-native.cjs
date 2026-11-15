@@ -161,8 +161,9 @@ async function main() {
     assert.equal((await get('/data-gaps')).status, 400)
   })
 
-  await check('the cost filter: the unknown-cost list and count need product_cost_view; barcode lists and counts do not', async () => {
-    for (const user of [noCostView]) {
+  await check('the cost filter: the unknown-cost list and count are administrator only; barcode lists and counts are not', async () => {
+    // Owner rule, 15 Nov 2026: cost is administrator only. The retired cost grants (costViewOnly, withCost) open nothing.
+    for (const user of [noCostView, costViewOnly, withCost]) {
       const list = await get('/data-gaps?kind=unknown_cost', user)
       assert.equal(list.status, 403)
       assert.equal(list.json.items, undefined)
@@ -173,7 +174,7 @@ async function main() {
       assert.equal((await get('/data-gaps?kind=empty_barcode', user)).status, 200)
       assert.equal((await get('/data-gaps?kind=placeholder_barcode', user)).status, 200)
     }
-    for (const user of [costViewOnly, withCost, admin]) {
+    for (const user of [admin]) {
       assert.equal((await get('/data-gaps?kind=unknown_cost', user)).status, 200)
       assert.deepEqual((await get('/data-gaps/counts', user)).json.counts, { unknown_cost: UNKNOWN.length, empty_barcode: 6, placeholder_barcode: 3 })
     }
@@ -254,7 +255,7 @@ async function main() {
     assert.ok(ids(await get('/data-gaps?kind=empty_barcode&limit=100')).includes(13), 'the product is still listed')
   })
 
-  await check('refusals: a $0 confirmation needs the cost-entry permission, products edit at the full tier; the gap must still exist', async () => {
+  await check('refusals: a $0 confirmation needs an administrator, products edit at the full tier; the gap must still exist', async () => {
     assert.equal((await post({ product_id: 1, mark: 'zero_cost_confirmed', set: true }, role({ ...MERGE, product_cost_view: true }))).status, 403)
     assert.equal((await post({ product_id: 13, mark: 'no_barcode', set: true }, role({ pos: true }))).status, 403)
     const notZero = await post({ product_id: 6, mark: 'zero_cost_confirmed', set: true })

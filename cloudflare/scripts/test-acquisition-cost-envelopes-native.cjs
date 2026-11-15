@@ -321,23 +321,29 @@ async function checkEnvelopeRoutes(api) {
     encodedCases.push(...literalStructuredCases())
     const encodedObservations = []
     for (const [payload, expected] of encodedCases) {
+      // Owner rule, 15 Nov 2026: cost is administrator only. A non-admin holding the retired cost-entry grant is refused a
+      // cost-bearing history row; the administrator writes the fixture.
       user = { ...editor, id: 7 }
+      assert.equal((await post('/history', { label: 'Grant holder', undo_payload: payload })).status, 403, 'a cost-edit grant holder is not admitted')
+      user = { ...editor, role_code: 'admin', id: 7 }
       const created = await post('/history', { label: 'Encoded fixture', undo_payload: payload }), createdBody = await created.json()
       assert.equal(created.status, 200)
       assert.equal(native.prepare('SELECT undo_payload FROM action_history WHERE id=?').get(createdBody.id).undo_payload, JSON.stringify(payload))
       native.prepare("INSERT INTO pending_actions(id,section,action_type,entity_type,payload_json,status,requested_by) VALUES(1,'inventory','update','fixture',?,'rejected',7)").run(JSON.stringify(payload))
       for (const granted of [
-        { role_code: 'manager', permissions: JSON.stringify({ audit_log: true, product_cost_view: true, product_cost_edit: true }) },
-        { role_code: 'admin', permissions: JSON.stringify({ product_cost_view: false, product_cost_edit: false }) },
+        { role_code: 'manager', permissions: JSON.stringify({ audit_log: true, product_cost_view: true, product_cost_edit: true }), exact: false },
+        { role_code: 'admin', permissions: JSON.stringify({ product_cost_view: false, product_cost_edit: false }), exact: true },
       ]) {
+        // The manager holds both retired cost grants and reads the redacted envelope; only the administrator reads it exactly.
+        const shown = granted.exact ? payload : expected
         user = { ...granted, id: 9 }
         const visible = await get('/history?scope=global&all=1&limit=20'), visibleBody = await visible.json()
         assert.equal(visible.status, 200)
-        assert.deepEqual(visibleBody.items.find(row => row.id === createdBody.id).undo_payload, payload)
+        assert.deepEqual(visibleBody.items.find(row => row.id === createdBody.id).undo_payload, shown)
         user = { ...granted, id: 7 }
         const visibleMine = await get('/review/mine'), visibleMineBody = await visibleMine.json()
         assert.equal(visibleMine.status, 200)
-        assert.equal(visibleMineBody.data.find(row => row.id === 1).payload_json, JSON.stringify(payload))
+        assert.equal(visibleMineBody.data.find(row => row.id === 1).payload_json, JSON.stringify(shown))
       }
       const beforeRead = snapshot()
       user = { ...denied, id: 9, permissions: JSON.stringify({ audit_log: true, product_cost_view: false, product_cost_edit: false }) }

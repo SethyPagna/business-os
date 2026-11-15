@@ -42,11 +42,13 @@ new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(createR
 for (const language of ['en', 'km']) {
   const labels = JSON.parse(fs.readFileSync(new URL(`../src/lang/${language}.json`, import.meta.url), 'utf8'))
   for (const value of [null, 0, -1.1234, 5.1244]) {
-    fixture.__supplierContext = { user: { permissions: { product_cost_view: true } }, t: (key: string) => labels[key] || key }
+    // Owner rule, 15 Nov 2026: costs are administrator only. The administrator sees them; a non-admin holding the retired
+    // product_cost_view grant does not (the denied render below).
+    fixture.__supplierContext = { user: { role_code: 'admin', permissions: {} }, t: (key: string) => labels[key] || key }
     const props = { ret: { id: 900, return_scope: 'supplier', supplier_compensation_usd: value, supplier_compensation_khr: value, supplier_loss_usd: value, supplier_loss_khr: value, items: [{ product_name: 'Synthetic', quantity: 1, total_usd: value, total_khr: value }] }, onClose() {}, fmtUSD: (n: unknown) => `$${Number(n).toFixed(2)}`, fmtKHR: (n: unknown) => `${Math.round(Number(n))}៛` }
     const html = renderToStaticMarkup(React.createElement(detail.exports.default, props))
     assert.ok(html.includes(value === null ? labels.unknown : value === 0 ? '$0' : String(value)), `${language}: supplier detail preserves ${value}`)
-    fixture.__supplierContext = { user: { permissions: { returns: true } }, t: (key: string) => labels[key] || key }
+    fixture.__supplierContext = { user: { role_code: 'manager', permissions: { returns: true, product_cost_view: true, product_cost_edit: true } }, t: (key: string) => labels[key] || key }
     const denied = renderToStaticMarkup(React.createElement(detail.exports.default, props))
     assert.ok(!denied.includes(labels.supplier_compensation) && !denied.includes('5.1244'), `${language}: detail costs absent when denied`)
   }

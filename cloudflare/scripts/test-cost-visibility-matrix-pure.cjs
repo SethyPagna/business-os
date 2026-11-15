@@ -1,4 +1,6 @@
-// Owner, 5 Oct 2026: cost price is NEVER visible by default. This is the matrix of
+// Owner, 15 Nov 2026: cost, profit, margin, stock value and removal loss are ADMIN ONLY. product_cost_view / product_cost_edit are kept
+// as a stored switch-back (holdsCostViewGrant / holdsCostEditGrant) and give a non-admin nothing, in the Worker or the browser.
+// Owner, 5 Oct 2026 (the rule this extends): cost price is NEVER visible by default. This is the matrix of
 // every surface that can carry an acquisition cost, and what keeps it from a user
 // who holds neither product_cost_view nor product_cost_edit (the seeded Employee and
 // Manager roles hold neither).
@@ -66,7 +68,12 @@ check('GRANTS: broad access never implies a cost grant (products, inventory, sal
   assert.equal(access.canEditAcquisitionCosts(user), false)
   assert.equal(access.canViewAcquisitionCosts(session('manager', { ...everything, product_cost_edit: true })), false, 'edit does not imply view')
   assert.equal(access.canEditAcquisitionCosts(session('manager', { ...everything, product_cost_view: true })), false, 'view does not imply edit')
-  assert.equal(access.canViewAcquisitionCosts(session('manager', { product_cost_view: true })), true, 'only the explicit grant shows a cost')
+  assert.equal(access.canViewAcquisitionCosts(session('manager', { product_cost_view: true })), false, 'the explicit grant shows nothing (owner, 15 Nov 2026)')
+  assert.equal(access.canEditAcquisitionCosts(session('manager', { product_cost_edit: true })), false)
+  assert.equal(frontendAccess.canViewAcquisitionCosts(session('manager', { product_cost_view: true })), false)
+  assert.equal(frontendAccess.canEditAcquisitionCosts(session('employee', { product_cost_edit: true })), false)
+  assert.equal(access.holdsCostViewGrant(session('manager', { product_cost_view: true })), true, 'the switch-back still reads the stored grant')
+  assert.equal(frontendAccess.holdsCostEditGrant(session('manager', { product_cost_edit: true })), true)
 })
 
 check('GRANTS: the Employee seed and the one-click preset both carry the two cost grants as false, and agree', () => {
@@ -135,10 +142,10 @@ check('SERVER: Inventory costs need both grants, use the strict whitelist and ne
   for (const field of [false, true]) for (const grant of [false, true]) {
     const user = session('employee', { inventory_checks: true, inventory_check_show_cost: field, product_cost_view: grant })
     const permissions = inventory.getInventoryCheckAccess(user)
-    assert.equal(permissions.fields.cost, field && grant)
+    assert.equal(permissions.fields.cost, false, 'a non-admin never reads an Inventory cost, grant or not')
     const projected = inventory.projectInventoryCheckProduct(sample, permissions)
-    assert.equal(Object.hasOwn(projected, 'cost_price_usd'), field && grant)
-    assert.equal(Object.hasOwn(projected, 'cost_needs_review'), field && grant)
+    assert.equal(Object.hasOwn(projected, 'cost_price_usd'), false)
+    assert.equal(Object.hasOwn(projected, 'cost_needs_review'), false)
     assert.ok(!Object.hasOwn(projected, 'cost_review_key') && !Object.hasOwn(projected, 'unknown_cost'))
   }
   const projected = inventory.projectInventoryCheckProduct(sample, inventory.getInventoryCheckAccess(session('admin')))
@@ -172,7 +179,7 @@ check('WRITES: every catalog / receipt / session cost write is behind product_co
     assert.match(read('cloudflare/src/routes', file), /canEditAcquisitionCosts|hasAcquisitionCostInput/, file + ' write gate')
   }
   // Stock sessions (stockInCommit.ts) validate the request inside lib/stockSession.ts.
-  assert.match(read('cloudflare/src/lib/stockSession.ts'), /hasAcquisitionCostInput\(raw, user\)\) fail\('Cost-entry permission is required to enter receipt costs\.', 403, 'product_cost_edit_required'\)/)
+  assert.match(read('cloudflare/src/lib/stockSession.ts'), /hasAcquisitionCostInput\(raw, user\)\) fail\('Only an administrator can enter receipt costs\.', 403, 'product_cost_edit_required'\)/)
 })
 
 // ---- CLIENT matrix ---------------------------------------------------------

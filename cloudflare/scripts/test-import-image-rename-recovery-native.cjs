@@ -26,7 +26,7 @@ async function main() {
   try {
     await h.addUser(920, 'image_executor', { import: true, products: true, 'products:import': true,
       'products:import_replace_all': true, 'products:image': true, destructive_delete: true,
-      product_cost_edit: true, product_cost_view: true })
+      product_cost_edit: true, product_cost_view: true }, { role_id: (await h.q1("SELECT id FROM roles WHERE code='admin'")).id })
     await h.addSession('executor', 920)
     await executeRawStockTransaction(h.db, [h.db.prepare("INSERT INTO products(id,name,barcode,stock_quantity,cost_price_usd,is_active,updated_at) VALUES(9401,'J kept','J-KEPT',0,1,1,'2000-01-01')")])
     const call = (method, route, body) => h.api(method, route, body, { as: 'executor' })

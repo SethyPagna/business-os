@@ -1600,7 +1600,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
 function adjustPermissionRefusal(c: InventoryContext, body: Record<string, unknown>): Response | null {
   const user = c.get('user')
   if (hasAcquisitionCostInput(body, user)) {
-    return c.json({ error: 'Cost-entry permission is required to enter receipt costs.', code: 'product_cost_edit_required' }, 403)
+    return c.json({ error: 'Only an administrator can enter receipt costs.', code: 'product_cost_edit_required' }, 403)
   }
   // Part 152: not yet wired into the Review Required queue (see the
   // comment above /reasons for why -- live batch/stock state at apply

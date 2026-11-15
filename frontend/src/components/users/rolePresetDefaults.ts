@@ -41,12 +41,14 @@ export const ROLE_PRESETS: RolePreset[] = [
     labelKey: 'role_preset_employee',
     label: 'Employee',
     descriptionKey: 'role_preset_employee_desc',
-    description: 'Day-to-day front-line access: POS, individual Sales and Returns actions, and Contacts. Products: view, edit product information and upload images, with cost, prices and supplier locked. No dashboard, stock changes, bulk changes, imports, exports, contact financial history, supplier records, or administrative areas.',
+    description: 'Day-to-day front-line access: POS, individual Sales and Returns actions, and Contacts. Products: view, edit product information and upload images, with cost, prices and supplier locked. Dashboard view only, without export. No stock changes, bulk changes, imports, exports, contact financial history, supplier records, or administrative areas.',
     permissions: {
       // Keep this map EQUAL to cloudflare/src/lib/roleDefaults.ts employee (tests/rolePresetDefaults.test.ts pins it):
-      // no dashboard (owner, 20 Oct 2026) and no inventory key (an Employee never writes physical stock).
+      // Dashboard view without export (owner, 15 Nov 2026; it was off by default since 20 Oct) and no inventory key (an Employee never writes physical stock).
       // No customer_portal: the live Employee row (MERGEPERM-REPORT section 5) has no Website Editor grant, and the
       // storefront announcement strip and posts are public content (release review P2-1). An admin can add one per user.
+      dashboard: true,
+      dashboard_export: false,
       pos: true,
       sales: true,
       'sales:status': true,

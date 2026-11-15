@@ -5,7 +5,7 @@ export interface PermissionDefinition {
   tKey: string
   label: string
   sensitivity: PermissionSensitivity
-  // No longer offered as a switch, but still stored on roles and users: reviews and summaries keep naming and counting it, and its value is never touched.
+  // No longer offered as a switch or counted in the access grid, but still stored on roles and users: its value is never touched.
   retired?: boolean
   section?: string
   // True only for a permission key with a real, end-to-end-wired Review
@@ -121,7 +121,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'dashboard',
     tKey: 'perm_section_dashboard',
     label: 'Dashboard',
-    description: 'The Dashboard page. Export is a separate switch.',
+    description: 'The Dashboard page. Export is a separate switch. Cost, profit and stock value are shown to administrators only.',
     permissions: [
       { key: 'dashboard', tKey: 'perm_dashboard', label: 'Dashboard', sensitivity: 'normal', lead: true },
       // Independent of the page-access key above -- a role can have
@@ -190,7 +190,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'products',
     tKey: 'perm_section_products',
     label: 'Products',
-    description: 'Products and imports. Costs and destructive imports are separate. Opening stock also needs Inventory › Adjust / receive.',
+    description: 'Products. Imports, cost and profit are admin only. Opening stock also needs Inventory › Adjust / receive.',
     permissions: [
       // tier: true -- add, edit and delete queue via maybeQueueForReview() (lib/reviewGate.ts); an edit that
       // would merge two products queues too. Every other action is Full only (utils/permissionActions.ts lists
@@ -204,8 +204,12 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         reviewTKey: 'perm_products_review_desc',
         reviewDescription: 'Under Review, viewing and searching products works directly. Adding, editing, or deleting a product goes to the Review/Approval queue for an admin to approve or reject. So does an edit that would merge this product into another one, unless Merge duplicates is switched off for the role, which refuses that edit. Import, export, merge-duplicates, and the zero-quantity cleanup tool all require Full Access.',
       },
-      { key: 'product_cost_view', tKey: 'perm_product_cost_view', label: 'View product costs', sensitivity: 'high', shortTKey: 'perm_short_cost_view', short: 'See costs' },
-      { key: 'product_cost_edit', tKey: 'perm_product_cost_edit', label: 'Edit product costs', sensitivity: 'high', shortTKey: 'perm_short_cost_edit', short: 'Enter costs' },
+      // Retired 15 Nov 2026 (owner): cost, profit, margin, stock value and removal loss are admin-only, so these two switches would do
+      // nothing. The role editor draws no switch for them (permissionSummary.ts skips retired grants); their stored values
+      // stay untouched, the way back if the owner reverses the ruling (the Worker's lib/acquisitionCostAccess.ts holdsCostViewGrant /
+      // holdsCostEditGrant).
+      { key: 'product_cost_view', tKey: 'perm_product_cost_view', label: 'View product costs', sensitivity: 'high', shortTKey: 'perm_short_cost_view', short: 'See costs', retired: true },
+      { key: 'product_cost_edit', tKey: 'perm_product_cost_edit', label: 'Edit product costs', sensitivity: 'high', shortTKey: 'perm_short_cost_edit', short: 'Enter costs', retired: true },
       // Gates the replace-all and replace-columns product imports, in the import picker and in the Worker
       // (lib/importEngine.ts missingDestructiveImportPermission).
       { key: 'destructive_delete', tKey: 'perm_destructive_delete', label: 'Destructive imports: replace all and replace columns', sensitivity: 'critical', shortTKey: 'perm_short_destructive_imports', short: 'Destructive imports' },
@@ -493,7 +497,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         tier: true,
         middleTier: 'view',
         reviewTKey: 'perm_review_view_desc',
-        reviewDescription: 'View: watch the pending approval queue, but Approve and Reject are hidden and refused. Acting on requests needs Full Access here; approving also needs Full access to each request’s own section and action (for example Products: Edit product), plus the price, image or cost permission when the request changes one. Nobody can approve their own request. Rejecting needs only Full Access here.',
+        reviewDescription: 'View: watch the pending approval queue, but Approve and Reject are hidden and refused. Acting on requests needs Full Access here; approving also needs Full access to each request’s own section and action (for example Products: Edit product), plus the price or image permission when the request changes one (a cost change needs an administrator). Nobody can approve their own request. Rejecting needs only Full Access here.',
       },
     ],
   },
@@ -525,7 +529,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'backup',
     tKey: 'perm_section_backup',
     label: 'Backup',
-    description: 'Export a backup. Restore / reset is a separate switch.',
+    description: 'Export a backup. Administrator only: a backup holds costs. Restore / reset is a separate switch.',
     permissions: [
       { key: 'backup', tKey: 'perm_backup', label: 'Backup export', sensitivity: 'high', lead: true },
       { key: 'backup_restore', tKey: 'perm_backup_restore', label: 'Backup restore and reset', sensitivity: 'critical', shortTKey: 'perm_short_restore_reset', short: 'Restore / reset', hintTKey: 'perm_backup_restore_desc', hint: 'Restores a backup or resets business data. The audit log is never reset.' },

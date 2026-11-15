@@ -18,7 +18,8 @@ const path = require('node:path')
 const assert = require('node:assert/strict')
 const ts = require('typescript')
 const { Hono } = require('hono')
-const { fixture, user } = require('./test-stock-session-atomic.cjs')
+const { fixture, user, staff: stockUser } = require('./test-stock-session-atomic.cjs')
+// Cost entry is administrator only (owner, 15 Nov 2026): the receipts here are made by the administrator `user`; the permission case below uses the non-administrator `staff` actor.
 const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const root = process.env.STOCK_IN_EDIT_TEST_ROOT || path.join(__dirname, '..')
@@ -652,10 +653,10 @@ async function main() {
   await check('permissions: no inventory adjust -> 403; a cost without cost-entry permission -> 403; nothing moves', async () => {
     const f = fresh()
     const { movementId } = await receive(f, { requestId: 'session-perm-001', quantity: 10 })
-    const viewer = { ...user, id: 8, permissions: JSON.stringify({ products: true }) }
+    const viewer = { ...stockUser, id: 8, permissions: JSON.stringify({ products: true }) }
     const denied = await edit(f, movementId, { quantity: 12 }, { 'x-test-user': JSON.stringify(viewer) })
     assert.equal(denied.status, 403)
-    const stockOnly = { ...user, id: 9, permissions: JSON.stringify({ inventory: true }) }
+    const stockOnly = { ...stockUser, id: 9, permissions: JSON.stringify({ inventory: true }) }
     const noCost = await edit(f, movementId, { quantity: 10, unit_cost_usd: 5 }, { 'x-test-user': JSON.stringify(stockOnly) })
     assert.equal(noCost.status, 403); assert.equal(noCost.json.code, 'product_cost_edit_required')
     assert.deepEqual(totals(f), { branch: 10, product: 10, lots: 10 })

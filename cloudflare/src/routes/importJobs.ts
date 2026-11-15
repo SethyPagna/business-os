@@ -260,7 +260,7 @@ async function requireImportPermission(c: any, job: Record<string, unknown> | un
   if (isAcquisitionCostImport(type)) {
     const isRead = c.req.method === 'GET' || c.req.method === 'HEAD'
     const allowed = isRead ? canViewAcquisitionCosts(user) : canEditAcquisitionCosts(user)
-    if (!allowed) return c.json({ success: false, error: isRead ? 'Cost-view permission is required to read financial import data.' : 'Cost-entry permission is required for this import format.', code: isRead ? 'product_cost_view_required' : 'product_cost_edit_required' }, 403)
+    if (!allowed) return c.json({ success: false, error: isRead ? 'Only an administrator can read financial import data.' : 'Only an administrator can use this import format.', code: isRead ? 'product_cost_view_required' : 'product_cost_edit_required' }, 403)
   }
   const missingPermission = permissionsForType(type).find((permission) => !hasPermission(user, permission))
   if (missingPermission) {

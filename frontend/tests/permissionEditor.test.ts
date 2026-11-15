@@ -270,7 +270,7 @@ assert.ok(!km.perm_products_review_desc.includes('ការអនុម័តក
 // info hint appends, so the longer facts stay one tap away instead of on the row.
 assert.equal(sectionOf('review').description, en.perm_section_review_desc)
 assert.equal(permissionOf('review').reviewDescription, en.perm_review_view_desc)
-for (const fragment of [/Acting on requests needs Full Access here/, /own section and action/, /price, image or cost permission/, /approve their own request/, /Rejecting needs only Full Access here/]) {
+for (const fragment of [/Acting on requests needs Full Access here/, /own section and action/, /price or image permission/, /approve their own request/, /Rejecting needs only Full Access here/]) {
   assert.match(en.perm_review_view_desc, fragment)
 }
 for (const text of [en.perm_section_review_desc, en.perm_review_view_desc]) {

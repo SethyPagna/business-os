@@ -420,7 +420,7 @@ export async function replayProductConflictMark(
     throw new ProductConflictReplayError('The saved details for this action are unreadable, so it cannot be replayed.', 'undo_history_unusable')
   }
   if (mark === 'zero_cost_confirmed' && !canEditCosts) {
-    throw new ProductConflictReplayError('Confirming or reversing a $0 cost needs the cost-entry permission.', 'undo_refused')
+    throw new ProductConflictReplayError('Only an administrator can confirm or reverse a $0 cost.', 'undo_refused')
   }
   const target = direction === 'undo' ? !payload.set : payload.set
   const input: ProductConflictMarkInput = { product_id: productId, mark, set: target }

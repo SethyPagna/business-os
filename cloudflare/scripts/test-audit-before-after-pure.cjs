@@ -615,7 +615,7 @@ function productsFixture() {
   }
   const route = load('routes/products.ts').default
   const ctx = { waitUntil: () => {}, passThroughOnException: () => {} }
-  const admin = { id: 9, username: 'sethy', name: 'Sethy Owner', tier: 'full', permissions: JSON.stringify({ product_cost_view: true, product_cost_edit: true }) }
+  const admin = { id: 9, username: 'sethy', role_code: 'admin', name: 'Sethy Owner', tier: 'full', permissions: JSON.stringify({ product_cost_view: true, product_cost_edit: true }) }
   const request = async (method, url, body) => {
     const response = await route.request(url, {
       method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),

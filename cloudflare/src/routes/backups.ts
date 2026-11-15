@@ -125,9 +125,9 @@ app.post('/', async (c) => {
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const type = String(body.type || '').trim()
   if (type === 'export-folder' || type === 'export-cloudflare' || !type) {
-    if (!canViewAcquisitionCosts(user)) return c.json({ error: 'Cost-view permission is required to export an unredacted database backup.', code: 'product_cost_view_required' }, 403)
+    if (!canViewAcquisitionCosts(user)) return c.json({ error: 'Only an administrator can export an unredacted database backup.', code: 'product_cost_view_required' }, 403)
   } else if (type === 'import-folder') {
-    if (!canEditAcquisitionCosts(user)) return c.json({ error: 'Cost-entry permission is required to restore database costs.', code: 'product_cost_edit_required' }, 403)
+    if (!canEditAcquisitionCosts(user)) return c.json({ error: 'Only an administrator can restore database costs.', code: 'product_cost_edit_required' }, 403)
     if (!hasPermission(user, 'backup_restore')) {
       return c.json({ error: 'You do not have permission to perform this action' }, 403)
     }

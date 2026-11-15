@@ -94,6 +94,8 @@ async function routeRule() {
         ['Branches View without cost', actor({ branches: true })],
         ['cost explicitly off', actor({ inventory: true }, { product_cost_view: false })],
         ['cost EDIT only', actor({ inventory: true }, { product_cost_edit: true })],
+        // Owner, 15 Nov 2026: the view grant is inert now, so a holder is a non-cost caller like the rest.
+        ['cost VIEW grant (inert)', actor({ inventory: true }, { product_cost_view: true })],
       ]) {
         const body = await stock(who, query)
         const found = [...keysOf(body)]
@@ -108,7 +110,6 @@ async function routeRule() {
 
     // Controls: viewers of cost keep every figure (a filter that strips everything would pass the loop above).
     for (const [label, who] of [
-      ['cost viewer', actor({ inventory: true }, { product_cost_view: true })],
       ['administrator', { ...actor(), role_code: 'admin' }],
     ]) {
       const body = await stock(who, 'page=1&q=Example')
@@ -118,7 +119,7 @@ async function routeRule() {
       assert.equal(body.items[0].cost_price_usd, 12, `${label}: item cost kept`)
       checks++
     }
-    const unknown = await stock(actor({ inventory: true }, { product_cost_view: true }), 'page=1')
+    const unknown = await stock({ ...actor({ inventory: true }), role_code: 'admin' }, 'page=1')
     assert.equal(unknown.summary.positive_stock_value_unknown_products, 1, 'the NULL-cost product is counted unknown, for a viewer')
     assert.equal(unknown.summary.positive_value_usd, 60)
     checks++

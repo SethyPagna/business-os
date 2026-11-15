@@ -37,7 +37,9 @@ const props = {
 for (const [user, expected] of [
   [{ permissions: { products: true, inventory: true } }, false],
   [{ permissions: { product_cost_edit: true } }, false],
-  [{ permissions: { product_cost_view: true } }, true],
+  // Owner, 15 Nov 2026: the grant is inert; only an administrator sees a cost.
+  [{ permissions: { product_cost_view: true } }, false],
+  [{ permissions: { product_cost_view: true, product_cost_edit: true } }, false],
   // Admin override through the admin role (not the name, FX-sec).
   [{ username: 'admin', role_code: 'admin', permissions: { product_cost_view: false } }, true],
 ] as [PermissionUser, boolean][]) {
@@ -51,7 +53,7 @@ for (const [user, expected] of [
 
 for (const language of ['en','km']) {
  const labels=JSON.parse(readFileSync(new URL('../src/lang/'+language+'.json',import.meta.url),'utf8'))
- context.__costTestContext={user:{permissions:{product_cost_view:true}}}
+ context.__costTestContext={user:{role_code:'admin',permissions:{}}}
  const html=renderToStaticMarkup(React.createElement(Dialog,{...props,t:(key:string)=>labels[key]||key}))
  assert.ok(html.includes(labels.merge_cost_preview_unavailable))
  assert.ok(!html.includes(labels.merge_cost_average_title))
@@ -65,7 +67,7 @@ context.__costTestContext = { ...effectivePermissions({ permissions: { product_c
 const deniedReview = renderToStaticMarkup(React.createElement(ReviewScreen, {
   jobId: 1, t: () => '', notify: () => {}, onApproved: () => {}, onReviewLater: () => {}, onCancel: () => {}, autoApprove: true,
 }))
-assert.ok(deniedReview.includes('Cost view permission is required'))
+assert.ok(deniedReview.includes('Only an administrator can review financial import data'))
 assert.ok(!deniedReview.includes('Importing'), 'edit permission alone cannot mount the financial review body')
 const duplicates = read('../src/components/products/ProductDuplicatesTab.tsx')
 const resolveAdapter = read('../src/components/products/productResolveAdapter.ts')

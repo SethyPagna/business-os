@@ -25,7 +25,7 @@ export function canAuthorizeDriveSync(user: PermissionUser): boolean {
 }
 
 export const DRIVE_SYNC_AUTHORIZER_REQUIRED_MESSAGE =
-  'Google Drive sync is paused: reconnect Google Drive as a user with Backup and cost-view permission.'
+  'Google Drive sync is paused: reconnect Google Drive as an administrator.'
 
 export type DriveSyncAuthorizerCheck =
   | { allowed: true; userId: number }

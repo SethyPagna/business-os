@@ -76,7 +76,7 @@ async function main() {
     assert.equal(m.inventory_check_show_cost, false)
   })
 
-  await check('the Employee default: details visible and editable, never cost, price or supplier; no stock writer; Contacts Full; no Dashboard', () => {
+  await check('the Employee default: details visible and editable, never cost, price or supplier; no stock writer; Contacts Full; Dashboard view without export', () => {
     const e = SEED.employee
     assert.equal(e.products, true)
     for (const key of ['products:price', 'products:supplier', 'product_cost_view', 'product_cost_edit']) assert.equal(e[key], false, key)
@@ -84,8 +84,13 @@ async function main() {
     assert.equal(Object.keys(e).some((key) => key.startsWith('inventory:')), false, 'no inventory action grants either')
     assert.equal(e.contacts, true, 'Contacts is Full (owner, 20 Oct 2026)')
     assert.equal(permissions.getPermissionTier(asUser('employee'), 'contacts'), 'full')
-    assert.equal(Object.hasOwn(e, 'dashboard') && e.dashboard !== false, false, 'Dashboard is off by default (owner, 20 Oct 2026)')
-    assert.equal(permissions.getPermissionTier(asUser('employee'), 'dashboard'), 'none')
+    // Owner, 15 Nov 2026: managers and employees open the Dashboard (reverses the 20 Oct rule). An Employee views it only.
+    assert.equal(e.dashboard, true, 'Dashboard is on by default for an Employee (owner, 15 Nov 2026)')
+    assert.equal(e.dashboard_export, false, 'an Employee never exports the Dashboard')
+    assert.equal(permissions.getPermissionTier(asUser('employee'), 'dashboard'), 'full')
+    assert.equal(permissions.hasPermission(asUser('employee'), 'dashboard_export'), false)
+    assert.equal(SEED.manager.dashboard, true)
+    assert.equal(SEED.manager.dashboard_export, true, 'a Manager keeps the export')
     assert.equal(e.receipt_settings, true)
     assert.equal(e.inventory_checks, true)
     for (const field of ['price', 'barcode', 'category', 'brand', 'stock', 'received', 'sales', 'customers']) assert.equal(e['inventory_check_show_' + field], true, field)

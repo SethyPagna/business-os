@@ -2,7 +2,7 @@ const assert = require('node:assert/strict')
 const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 const fs = require('node:fs')
 const path = require('node:path')
-const { fixture, loadStockSession, user, receiveRequest, zeroCreateRequest, seedDistinctProducts } = require('./test-stock-session-atomic.cjs')
+const { fixture, loadStockSession, user, staff, withoutCost, receiveRequest, zeroCreateRequest, seedDistinctProducts } = require('./test-stock-session-atomic.cjs')
 
 function payload(f, receipt) {
   return JSON.parse(f.sql.prepare('SELECT undo_payload FROM action_history WHERE id=?').get(receipt.actionHistoryId).undo_payload)
@@ -26,9 +26,9 @@ async function main() {
   const replay = (f, receipt, direction, generation, actor = user) =>
     api.replayStockSession(f.env, actor, direction, receipt.actionHistoryId, generation, payload(f, receipt))
   {
-    const noAdjust = { ...user, permissions: JSON.stringify({ inventory: true, 'inventory:adjust': false, products: true, product_cost_edit: true, product_cost_view: true }) }
-    const noProductAdd = { ...user, permissions: JSON.stringify({ inventory: true, products: 'review' }) }
-    const noProductImage = { ...user, permissions: JSON.stringify({ inventory: true, products: true, 'products:image': false }) }
+    const noAdjust = { ...staff, permissions: JSON.stringify({ inventory: true, 'inventory:adjust': false, products: true, product_cost_edit: true, product_cost_view: true }) }
+    const noProductAdd = { ...staff, permissions: JSON.stringify({ inventory: true, products: 'review' }) }
+    const noProductImage = { ...staff, permissions: JSON.stringify({ inventory: true, products: true, 'products:image': false }) }
     assert.equal(api.canReplayStockSessionPayload(noAdjust, { requires_product_add: 1, requires_product_image: 0, requires_inventory_adjust: 0 }), true)
     assert.equal(api.canReplayStockSessionPayload(noAdjust, { requires_product_add: 1 }), false, 'legacy payloads fail closed to inventory adjust')
     assert.equal(api.canReplayStockSessionPayload(noProductAdd, { requires_product_add: 1, requires_product_image: 0, requires_inventory_adjust: 0 }), false)
@@ -36,7 +36,7 @@ async function main() {
     assert.equal(api.canReplayStockSessionPayload(noProductImage, { requires_product_add: 1, requires_product_image: 0, requires_inventory_adjust: 0 }), true)
 
     const f = fixture()
-    const r = await api.commitStockSession(f.env, noAdjust, zeroCreateRequest('zero-replay-permissions'))
+    const r = await api.commitStockSession(f.env, noAdjust, withoutCost(zeroCreateRequest('zero-replay-permissions')))
     assert.deepEqual([r.items[0].batchId, r.items[0].movementId], [null, null])
     const original = f.sql.prepare('SELECT * FROM products WHERE id=?').get(r.items[0].productId)
     const beforeDenied = state(f)
@@ -57,7 +57,7 @@ async function main() {
     console.log('PASS cost-authorized zero catalog reload undo/redo needs no inventory-adjust, is lost-ack idempotent and writes no movements')
   }
   {
-    const noProductImage = { ...user, permissions: JSON.stringify({ inventory: true, products: true, 'products:image': false }) }
+    const noProductImage = { ...staff, permissions: JSON.stringify({ inventory: true, products: true, 'products:image': false }) }
     const f = fixture()
     f.sql.prepare("INSERT INTO file_assets(original_name,stored_name,public_path,mime_type,media_type,byte_size) VALUES(?,?,?,?, 'image', 10)")
       .run('replay-image.png', 'replay-image.png', '/uploads/replay-image.png', 'image/png')
@@ -180,7 +180,7 @@ async function main() {
     }
     const detail = await http(`${r.actionHistoryId}/details`)
     assert.equal(detail.status, 200)
-    const noCreate = { ...user, permissions: JSON.stringify({ inventory: true, products: false }) }
+    const noCreate = { ...staff, permissions: JSON.stringify({ inventory: true, products: false }) }
     const listed = await (await http('', 'GET', null, noCreate)).json()
     assert.equal(listed.items[0].server_replayable, false)
     const saved = state(f)
@@ -297,7 +297,7 @@ async function main() {
     const r = await api.commitStockSession(f.env, user, createRequest())
     const before = state(f)
     for (const permissions of [{ inventory: 'review', products: true }, { inventory: true, products: false }]) {
-      await assert.rejects(replay(f, r, 'undo', 0, { ...user, permissions: JSON.stringify(permissions) }), e => e.statusCode === 403)
+      await assert.rejects(replay(f, r, 'undo', 0, { ...staff, permissions: JSON.stringify(permissions) }), e => e.statusCode === 403)
       assert.deepEqual(state(f), before)
     }
     for (const generation of [true, '0', -1, 0.5, null, undefined]) await assert.rejects(replay(f, r, 'undo', generation), e => e.statusCode === 400)

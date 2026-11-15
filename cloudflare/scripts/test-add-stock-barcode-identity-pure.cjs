@@ -148,7 +148,7 @@ const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResoluti
 // ledger (audit sibling:F14); the REAL module, so the route builds real SQL.
 const productSalesLedger = loadReal('lib/productSalesLedger.ts', { './salesAnalytics': salesAnalytics })
 
-const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
+const FAKE_USER = { id: 1, username: 'tester', role_code: 'admin', name: 'Test User', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
 
 // Sep 6 2026: the owner's low-stock alert setting reaches this module through
 // lib/lowStockSettings.ts. The SQL builder is the REAL one -- the clauses

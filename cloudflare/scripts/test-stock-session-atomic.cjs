@@ -137,9 +137,19 @@ function fixture() {
   }
 }
 
-const user = {
+// Owner rule, 15 Nov 2026: cost entry is administrator only. The atomicity, replay and receipt cases run as an administrator (the
+// only caller who may enter a cost). The tier-denial cases run as non-administrator `staff` with requests that carry NO cost, so
+// a 403 there is the tier gate and cannot be the cost rule.
+const staff = {
   id: 7, username: 'stock-user', name: 'Stock User', organization_id: null,
-  role_id: null, permissions: JSON.stringify({ inventory: true, products: true, product_cost_edit: true, product_cost_view: true }), is_active: 1,
+  role_id: null, permissions: JSON.stringify({ inventory: true, products: true }), is_active: 1,
+}
+const user = { ...staff, role_code: 'admin', permissions: '{}' }
+
+function withoutCost(request) {
+  const copy = JSON.parse(JSON.stringify(request))
+  for (const item of copy.items) { delete item.unit_cost_usd; if (item.product) delete item.product.cost_price_usd }
+  return copy
 }
 
 function receiveRequest(requestId = 'stock-request-001', quantity = 5) {
@@ -215,10 +225,22 @@ async function main() {
     assert.deepEqual(await response.json(), { error: 'createdFrom and createdTo must be provided together' })
   })
   const { commitStockSession, replayStockSession, StockSessionError } = loadStockSession()
+  await check('cost entry is administrator only: a non-admin holding both cost grants is refused and an administrator is admitted', async () => {
+    {
+      const f = fixture()
+      const before = f.sql.serialize()
+      const grantHolder = { ...staff, permissions: JSON.stringify({ inventory: true, products: true, product_cost_edit: true, product_cost_view: true }) }
+      await assert.rejects(() => commitStockSession(f.env, grantHolder, receiveRequest('grant-holder-refused')),
+        error => error instanceof StockSessionError && error.statusCode === 403 && error.code === 'product_cost_edit_required')
+      assert.deepEqual(f.sql.serialize(), before, 'the refusal wrote nothing')
+      const committed = await commitStockSession(f.env, user, receiveRequest('admin-admitted'))
+      assert.ok(committed, 'the administrator commits the same receipt')
+    }
+  })
   await check('cost entry defaults denied independently of inventory and products grants', async () => {
     const f = fixture()
     const before = f.sql.serialize()
-    const noCost = { ...user, permissions: JSON.stringify({ inventory: true, products: true }) }
+    const noCost = { ...staff, permissions: JSON.stringify({ inventory: true, products: true }) }
     await assert.rejects(() => commitStockSession(f.env, noCost, receiveRequest('no-cost-grant')),
       error => error instanceof StockSessionError && error.statusCode === 403 && error.code === 'product_cost_edit_required')
     assert.deepEqual(f.sql.serialize(), before)
@@ -396,11 +418,11 @@ async function main() {
   })
 
   await check('actual POST accepts zero create as catalog-only without inventory-adjust or review bypass', async () => {
-    const noAdjust = { ...user, permissions: JSON.stringify({ inventory: true, 'inventory:adjust': false, products: true, product_cost_edit: true, product_cost_view: true }) }
+    const noAdjust = { ...staff, permissions: JSON.stringify({ inventory: true, 'inventory:adjust': false, products: true }) }
     const f = fixture()
     const app = loadStockSession('routes/inventory.ts', noAdjust).default
     const response = await app.request('/sessions', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(zeroCreateRequest()),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(withoutCost(zeroCreateRequest())),
     }, f.env, { waitUntil(promise) { promise.catch(() => {}) } })
     assert.equal(response.status, 200, await response.clone().text())
     const receipt = await response.json()
@@ -419,26 +441,27 @@ async function main() {
     })
 
     for (const [label, actor] of [
-      ['review', { ...user, permissions: JSON.stringify({ inventory: true, products: 'review', product_cost_edit: true }) }],
-      ['blocked add', { ...user, permissions: JSON.stringify({ inventory: true, products: true, 'products:add': false, product_cost_edit: true }) }],
+      ['review', { ...staff, permissions: JSON.stringify({ inventory: true, products: 'review' }) }],
+      ['blocked add', { ...staff, permissions: JSON.stringify({ inventory: true, products: true, 'products:add': false }) }],
     ]) {
       const denied = fixture()
       const deniedApp = loadStockSession('routes/inventory.ts', actor).default
       const before = receiptState(denied.sql)
       const deniedResponse = await deniedApp.request('/sessions', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(zeroCreateRequest(`zero-denied-${label.replace(' ', '-')}`)),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(withoutCost(zeroCreateRequest(`zero-denied-${label.replace(' ', '-')}`))),
       }, denied.env, { waitUntil() {} })
       assert.equal(deniedResponse.status, 403, label)
+      assert.notEqual((await deniedResponse.json()).code, 'product_cost_edit_required', `${label}: the tier gate refused, not the cost rule`)
       assert.deepEqual(receiptState(denied.sql), before, label)
       assert.equal(denied.sql.prepare('SELECT COUNT(*) n FROM pending_actions').get().n, 0, `${label} must not queue a review outside the product workflow`)
     }
   })
 
   await check('actual POST requires product-image authority only when create_receive changes images', async () => {
-    const blockedImage = { ...user, permissions: JSON.stringify({ inventory: true, products: true, 'products:image': false, product_cost_edit: true }) }
+    const blockedImage = { ...staff, permissions: JSON.stringify({ inventory: true, products: true, 'products:image': false }) }
     const denied = fixture()
     const deniedApp = loadStockSession('routes/inventory.ts', blockedImage).default
-    const imageRequest = zeroCreateRequest('zero-image-denied', 'Image denied cream')
+    const imageRequest = withoutCost(zeroCreateRequest('zero-image-denied', 'Image denied cream'))
     imageRequest.items[0].product.image_path = '/uploads/stock-image.png'
     imageRequest.items[0].product.image_gallery = ['/uploads/stock-image.png']
     const before = denied.sql.serialize()
@@ -461,7 +484,7 @@ async function main() {
 
   await check('product-only permission admits only zero session POST in standalone and mounted routes', async () => {
     const { Hono } = require('hono')
-    const productOnly = { ...user, permissions: JSON.stringify({ inventory: false, products: true, product_cost_edit: true }) }
+    const productOnly = { ...staff, permissions: JSON.stringify({ inventory: false, products: true }) }
     for (const prefix of ['', '/api/inventory']) {
       const route = loadStockSession('routes/inventory.ts', productOnly).default
       const app = prefix ? new Hono().route(prefix, route) : route
@@ -470,9 +493,11 @@ async function main() {
         method, headers: { 'Content-Type': 'application/json' },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       }, f.env, { waitUntil(promise) { promise.catch(() => {}) } })
-      const response = await call('/sessions', 'POST', zeroCreateRequest('zero-product-only'))
+      const response = await call('/sessions', 'POST', withoutCost(zeroCreateRequest('zero-product-only')))
       assert.equal(response.status, 200, await response.clone().text())
       const before = f.sql.serialize()
+      // A positive line always carries a cost (a receipt without one is a 400), so for this non-administrator the cost rule answers
+      // before the Inventory gate: the 403 below is that rule, and the zero-line cases above are what pin the tier gates.
       const mixed = receiveRequest('zero-mixed-denied')
       mixed.items.push(zeroCreateRequest('zero-mixed-child').items[0])
       for (const body of [receiveRequest('zero-positive-denied'), mixed]) {
@@ -521,9 +546,10 @@ async function main() {
       client_request_id: 'mixed-zero-positive', mode: 'stock_in', defaults: { supplier_name: 'Fixture Supplier', branch_id: 1, received_date: '2026-09-05' },
       items: [zeroCreateRequest().items[0], { line_id: 'positive-receive', kind: 'receive', product_id: 1, quantity: 2, unit_cost_usd: 2 }],
     }
+    // A positive line carries a cost, so a non-administrator is refused by the cost rule before either permission is read.
     for (const actor of [
-      { ...user, permissions: JSON.stringify({ inventory: true, 'inventory:adjust': false, products: true, product_cost_edit: true }) },
-      { ...user, permissions: JSON.stringify({ inventory: true, products: true, 'products:add': false, product_cost_edit: true }) },
+      { ...staff, permissions: JSON.stringify({ inventory: true, 'inventory:adjust': false, products: true }) },
+      { ...staff, permissions: JSON.stringify({ inventory: true, products: true, 'products:add': false }) },
     ]) {
       const denied = fixture()
       await assert.rejects(() => commitStockSession(denied.env, actor, mixed), (error) => error instanceof StockSessionError && error.statusCode === 403)
@@ -804,5 +830,5 @@ async function main() {
   if (failures.length) throw new Error(`${failures.length} stock-session atomic regression(s) failed`)
 }
 
-module.exports = { fixture, loadStockSession, user, receiveRequest, zeroCreateRequest, receiptState, seedDistinctProducts }
+module.exports = { fixture, loadStockSession, user, staff, withoutCost, receiveRequest, zeroCreateRequest, receiptState, seedDistinctProducts }
 if (require.main === module) main().catch((error) => { console.error(error); process.exitCode = 1 })

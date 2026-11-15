@@ -14,6 +14,8 @@ import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getM
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.ts'
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.ts'
 import { NAV_ITEMS } from './components/shared/navigationConfig.ts'
+import { resolveRootLandingState } from './app/landingPage.ts'
+import { effectivePermissions } from './utils/permissions.ts'
 import { ensureTextAffordances } from './components/shared/textAffordances.ts'
 import IosInstallHint from './components/shared/IosInstallHint.tsx'
 import D1LimitBanner from './components/server/D1LimitBanner.tsx'
@@ -146,6 +148,8 @@ interface AppShellApi {
 interface AppContextValue {
   user: AppUser | null
   authReady: boolean
+  // Counts sign-ins: each assigns the org's landing page, which the shell may answer with the account's own landing (App.tsx)
+  signInEpoch: number
   page: AdminPageId
   notification: AppNotification | null
   dismissNotification: () => void
@@ -1671,7 +1675,8 @@ export default function App() {
   const {
     user,
     authReady,
-    page,
+    signInEpoch,
+    page: statePage,
     notification,
     dismissNotification,
     canAccessPage,
@@ -1703,6 +1708,49 @@ export default function App() {
   const legacyQueue = useLegacyQueueCount(authReady ? user : null)
   // Closing the notice hides it for this account until the app starts again.
   const [legacyQueueClosedFor, setLegacyQueueClosedFor] = useState('')
+  const [shellLocation, setShellLocation] = useState(() => ({ pathname: window.location.pathname, hash: window.location.hash }))
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const handleLocationChange = () => setShellLocation({ pathname: window.location.pathname, hash: window.location.hash })
+    // Admin Back can be temporarily rolled back by the dirty guard. Follow its
+    // committed event, so the raw target URL cannot bypass that guard here.
+    const handlePublicLocationChange = () => {
+      if (isPublicCatalogPath(window.location.pathname)) handleLocationChange()
+    }
+    window.addEventListener('popstate', handlePublicLocationChange)
+    window.addEventListener(APP_NAVIGATION_EVENT, handleLocationChange)
+    return () => {
+      window.removeEventListener('popstate', handlePublicLocationChange)
+      window.removeEventListener(APP_NAVIGATION_EVENT, handleLocationChange)
+    }
+  }, [])
+
+  const pathname = shellLocation.pathname
+  const isPublicCatalogRoute = isPublicCatalogPath(pathname)
+  // '/' resolves through the org's configurable default landing page
+  // (Settings > Navigation Layout, settings.default_landing_page) instead of
+  // a hardcoded 'dashboard' -- resolveAdminLandingPage falls back to
+  // 'dashboard' itself for an unset/unrecognized value, and the access-guard
+  // effect below still won't navigate a user to a page they can't open.
+  const requestedAdminPage = pathname === '/'
+    ? normalizePageId(getHubPageFromLocation(pathname, shellLocation.hash) || resolveAdminLandingPage(settings.default_landing_page), 'dashboard')
+    : normalizePageId(getAdminPageFromPath(pathname), 'dashboard')
+
+  // The page to render. For '/' with no hub page, an account that can view the Dashboard but not export it (an Employee) is shown its
+  // pre-15-Nov landing from the first render (app/landingPage.ts), so the Dashboard never mounts for it and no startup read is spent.
+  const atRoot = pathname === '/' && !getHubPageFromLocation(pathname, shellLocation.hash)
+  const rootLandingSettled = useRef('')
+  const userKey = user ? `${user.id}:${signInEpoch}` : ''
+  const rootLanding = resolveRootLandingState({
+    settingValue: settings.default_landing_page,
+    viewOnlyDashboard: !!user && canAccessPage('dashboard') && !effectivePermissions(user as never).hasPermission('dashboard_export'),
+    settled: !!userKey && rootLandingSettled.current === userKey,
+    statePage: statePage,
+    navIds: NAV_ITEMS.map((item) => item.id),
+    canAccessPage,
+  })
+  const page = (atRoot && user && rootLanding.pending ? rootLanding.shown : statePage) as AdminPageId
   const mountedPages = useMountedPages(page)
   const mobileHeaderVisible = useMobileHeaderAutoHide(page)
   const inlineMobileNavigation = useMobileSectionNavMode(settings?.ui_mobile_section_nav) === 'pages'
@@ -1833,39 +1881,15 @@ export default function App() {
     }
   }, [])
 
-  const [shellLocation, setShellLocation] = useState(() => ({ pathname: window.location.pathname, hash: window.location.hash }))
-
+  useEffect(() => { if (!user) rootLandingSettled.current = '' }, [user])
   useEffect(() => {
-    if (typeof window === 'undefined') return undefined
-    const handleLocationChange = () => setShellLocation({ pathname: window.location.pathname, hash: window.location.hash })
-    // Admin Back can be temporarily rolled back by the dirty guard. Follow its
-    // committed event, so the raw target URL cannot bypass that guard here.
-    const handlePublicLocationChange = () => {
-      if (isPublicCatalogPath(window.location.pathname)) handleLocationChange()
-    }
-    window.addEventListener('popstate', handlePublicLocationChange)
-    window.addEventListener(APP_NAVIGATION_EVENT, handleLocationChange)
-    return () => {
-      window.removeEventListener('popstate', handlePublicLocationChange)
-      window.removeEventListener(APP_NAVIGATION_EVENT, handleLocationChange)
-    }
-  }, [])
-
-  const pathname = shellLocation.pathname
-  const isPublicCatalogRoute = isPublicCatalogPath(pathname)
-  // '/' resolves through the org's configurable default landing page
-  // (Settings > Navigation Layout, settings.default_landing_page) instead of
-  // a hardcoded 'dashboard' -- resolveAdminLandingPage falls back to
-  // 'dashboard' itself for an unset/unrecognized value, and the access-guard
-  // effect below still won't navigate a user to a page they can't open.
-  const requestedAdminPage = pathname === '/'
-    ? normalizePageId(getHubPageFromLocation(pathname, shellLocation.hash) || resolveAdminLandingPage(settings.default_landing_page), 'dashboard')
-    : normalizePageId(getAdminPageFromPath(pathname), 'dashboard')
-
-  useEffect(() => {
-    if (!user || !requestedAdminPage || requestedAdminPage === page) return
-    if (canAccessPage(requestedAdminPage)) setPage(requestedAdminPage)
-  }, [canAccessPage, page, requestedAdminPage, setPage, user])
+    if (!user || !requestedAdminPage) return
+    // The landing is a once-per-sign-in decision: from here on a Dashboard the account opens on purpose (its path is also '/') stays.
+    rootLandingSettled.current = userKey
+    const wanted = atRoot ? normalizePageId(rootLanding.requested, 'dashboard') : requestedAdminPage
+    if (wanted === statePage) return
+    if (canAccessPage(wanted)) setPage(wanted)
+  }, [atRoot, canAccessPage, requestedAdminPage, rootLanding.requested, setPage, statePage, user, userKey])
 
   // User-reported bug ("logging into other users it shows me access denied
   // then redirect me afterwards"): `page`'s initial value (AppContext's

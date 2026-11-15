@@ -26,7 +26,9 @@ const Database = require('better-sqlite3')
 
 let sqlite
 let waits = []
-let user = { id: 7, name: 'Operator', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
+// Owner rule, 15 Nov 2026: cost entry is administrator only, so the operator is an administrator; the denied cases below
+// swap in a non-admin role_code with the retired cost grant.
+let user = { role_code: 'admin', id: 7, name: 'Operator', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
 const modules = new Map()
 
 function wrapDb() {
@@ -80,7 +82,7 @@ function fresh() {
   seedStockFixture(sqlite, () => sqlite.exec("INSERT INTO products(id,name,stock_quantity,cost_price_usd,cost_price_khr) VALUES(1,'Widget',0,0,0)"))
   assert.throws(() => sqlite.exec("INSERT INTO products(name) VALUES('unadmitted fixture probe')"), /stock_transaction_required/)
   waits = []
-  user = { id: 7, name: 'Operator', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
+  user = { role_code: 'admin', id: 7, name: 'Operator', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
 }
 
 // N13: POST /adjust requires a client_request_id; unless a case sets its own (to test a retry), give each call a fresh one.
@@ -184,7 +186,7 @@ async function main() {
     const oldMovements = sqlite.prepare('SELECT * FROM inventory_movements ORDER BY id').all()
     const lotsBefore = sqlite.prepare('SELECT * FROM product_batches ORDER BY id').all()
     const correction = {productId:1,type:'add',quantity:1,reason:'Count correction',branchId:1,batchId:lot.id,attribution:'correction'}
-    user = {...user,permissions:JSON.stringify({inventory:true})}
+    user = {...user,role_code:'employee',permissions:JSON.stringify({inventory:true})}
     const applied = await request(correction)
     assert.equal(applied.status,200,JSON.stringify(applied))
     assert.equal(applied.body.movementType,'adjustment')
@@ -207,7 +209,11 @@ async function main() {
     const beforeDenied=state()
     assert.equal((await request({...correction,unitCostUsd:8})).status,403)
     assert.equal(state(),beforeDenied)
-    user = {...user,permissions:JSON.stringify({inventory:true,product_cost_edit:true})}
+    // A non-admin holding the retired cost-entry grant is refused the same way; only the administrator reaches the next gate.
+    user = {...user,role_code:'employee',permissions:JSON.stringify({inventory:true,product_cost_edit:true})}
+    assert.equal((await request({...correction,unitCostUsd:8})).status,403)
+    assert.equal(state(),beforeDenied)
+    user = {...user,role_code:'admin',permissions:JSON.stringify({inventory:true,product_cost_edit:true})}
     assert.equal((await request({...correction,unitCostUsd:8})).body.code,'correction_cost_input')
     assert.equal((await request({...correction,batchId:999})).body.code,'batch_mismatch')
     assert.equal((await request({...correction,attribution:'receipt',supplierName:'Acme'})).body.code,'cost_required')

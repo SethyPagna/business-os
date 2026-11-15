@@ -288,7 +288,8 @@ await runTest('supplier return: the id survives a timeout, a lost answer and a f
         }
       },
     },
-    app: adminApp({ page: 'returns', user: { ...operator, permissions: { product_cost_view: true, product_cost_edit: true } } }),
+    // Owner rule, 15 Nov 2026: recording a supplier return's cost is administrator only, so the operator of this form is one.
+    app: adminApp({ page: 'returns', user: { ...operator, role_code: 'admin', permissions: {} } }),
     doubles: {
       'api/branchTransport.ts': { getBranches: async () => [{ id: 1, name: 'Store', is_active: true, is_default: true }] },
       'api/contactReadTransport.ts': { getSuppliers: async () => [{ id: 4, name: 'Glow Co' }] },

@@ -4408,6 +4408,13 @@ app.post('/:id/amendments', async (c) => {
     }
   }
 
+  // Setting or clearing what the shop paid the driver after the sale is administrator-only (owner, 15 Nov 2026). The refusal comes before
+  // anything is read or written and is the same whatever the stored value is, so it can never confirm a guess. Adding a delivery with its
+  // cost (delivery_added) and the checkout box are the entry paths and are not part of this rule.
+  if (kind === 'delivery_actual_cost_changed' && !canViewCourierCost(user)) {
+    return c.json({ error: 'Only an administrator can change the actual delivery cost of a sale.', code: 'courier_cost_admin_only' }, 403)
+  }
+
   const amendmentRequestId = normalizeClientRequestId(body.client_request_id)
   if (!amendmentRequestId) return c.json({ error: 'client_request_id is required for a sale amendment.', code: 'client_request_id_required' }, 400)
   const amendmentCanonical = JSON.stringify(saleLineReceiptCanonical(Number(c.req.param('id')), 'amendment', body))

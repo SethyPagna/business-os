@@ -79,8 +79,8 @@ const reportsModule=load('routes/reports.ts',{
  '../lib/saleTotals':load('lib/saleTotals.ts'),
  '../lib/auth':{requireAuth:async(c,next)=>{
    const scope=c.req.header('scope')||'all'
-   const granted=scope==='sales-no-courier'?{sales:true,'sales:view_courier_cost':false}:{[scope]:true}
-   c.set('user',{username:'fixture',role_code:'fixture',role_permissions:JSON.stringify(granted),permissions:'{}'})
+   const granted=scope==='sales-no-courier'?{sales:true,'sales:view_courier_cost':false}:scope==='sales-admin'?{sales:true}:{[scope]:true}
+   c.set('user',{username:'fixture',role_code:scope==='sales-admin'?'admin':'fixture',role_permissions:JSON.stringify(granted),permissions:'{}'})
    await next()
  }},
  '../lib/permissions':load('lib/permissions.ts'),
@@ -128,9 +128,13 @@ async function overview(query='',scope='all'){const res=await app.request('http:
  assert.ok(employeeOverviewCourier,'employee overview includes the courier activity row')
  for(const key of COURIER_COST_FIELDS)
   assert.ok(!(key in employeeOverviewCourier),`an employee whose courier-cost permission is off: the overview courier row strips ${key}`)
+ // Owner rule, 15 Nov 2026: courier cost is administrator only. The default Sales grant (and the retired courier-cost grant) no longer opens it.
  const defaultOverviewCourier=(await overview('','sales')).body.sales.couriers.find(row=>row.delivery_contact_id===7)
+ for(const key of COURIER_COST_FIELDS)
+  assert.ok(!(key in defaultOverviewCourier),`an employee with only the default Sales grant: the overview courier row strips ${key}`)
+ const adminOverviewCourier=(await overview('','sales-admin')).body.sales.couriers.find(row=>row.delivery_contact_id===7)
  for(const key of ['actual_cost_usd','actual_cost_count','margin_usd'])
-  assert.ok(key in defaultOverviewCourier,`an employee with the default courier-cost permission reads ${key} on the overview courier row`)
+  assert.ok(key in adminOverviewCourier,`an administrator reads ${key} on the overview courier row`)
  assert.equal((await get('sales','','fees')).status,403);assert.equal((await get('returns','','sales')).status,403);assert.equal((await get('expenses','','sales')).status,403)
  assert.deepEqual((await get('sales','q=Alice')).body.rows.map(r=>r.id),[1])
  assert.deepEqual((await get('sales','status=awaiting_payment&paymentMethod=Cash&startTime=09:30&endTime=10:30')).body.rows.map(r=>r.id),[2])

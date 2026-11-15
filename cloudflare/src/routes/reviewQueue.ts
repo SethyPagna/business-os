@@ -152,7 +152,7 @@ app.post('/:id/resubmit', async (c) => {
   try {
     const body = await c.req.json<{ payload?: unknown; summary?: string }>()
     if (hasAcquisitionCostInput({ payload_json: body.payload }, user)) {
-      return c.json({ error: 'Cost-entry permission is required to submit cost changes.', code: 'product_cost_edit_required' }, 403)
+      return c.json({ error: 'Only an administrator can submit cost changes.', code: 'product_cost_edit_required' }, 403)
     }
     // An edited payload is optional: resubmitting unchanged ("please look
     // again") is legitimate, e.g. when the rejection was a misunderstanding.

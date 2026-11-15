@@ -322,7 +322,7 @@ runTest('completing reviews in the session itself, and placeholders are filled',
   const bundled = { exports: {} as { default: (props: Record<string, unknown>) => unknown } }
   new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(createRequire(import.meta.url), bundled, bundled.exports)
   Object.assign(globalThis, {
-    __fastStockInTestContext: { user: { permissions: { product_cost_view: true, product_cost_edit: true } }, exchangeRate: 4250, usdSymbol: 'US$', khrSymbol: 'KHR' },
+    __fastStockInTestContext: { user: { role_code: 'admin', permissions: { product_cost_view: true, product_cost_edit: true } }, exchangeRate: 4250, usdSymbol: 'US$', khrSymbol: 'KHR' },
     __fastStockInTestDraft: { lines: [{
       key: 'l1', requestId: 'r1', product: { id: 1, name: 'Soap', barcode: '' }, productName: 'Soap', quantity: 3, unitCost: '2.5',
       freeGoods: false, createPriceVariant: false, expiryDate: '', batchChoice: 'new', batchLabel: 'New', mode: 'add', reason: '', conditionTag: '', createdProduct: false, status: 'queued',

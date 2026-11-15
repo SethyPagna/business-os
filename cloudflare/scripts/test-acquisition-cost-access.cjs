@@ -29,15 +29,17 @@ function load(filename) {
   }, mod, mod.exports)
   return mod.exports
 }
-const { projectAcquisitionCosts, acquisitionCostResponses, hasCatalogCostWrite, hasAcquisitionCostInput, canViewAcquisitionCosts, canEditAcquisitionCosts } = load(path.join(root, 'lib/acquisitionCostAccess.ts'))
+const { projectAcquisitionCosts, acquisitionCostResponses, hasCatalogCostWrite, hasAcquisitionCostInput, canViewAcquisitionCosts, canEditAcquisitionCosts, holdsCostViewGrant, holdsCostEditGrant } = load(path.join(root, 'lib/acquisitionCostAccess.ts'))
 const actor = (role_code, permissions = {}, role_permissions = {}) => ({ id: 7, username: 'staff', role_code, permissions: JSON.stringify(permissions), role_permissions: JSON.stringify(role_permissions) })
 const manager = actor('manager', { products: true, inventory: true, pos: true, sales: true })
 // The username alone no longer grants administrator control (FX-sec); the
 // role code does, case- and whitespace-insensitively.
 const admins = [actor('admin'), actor(' AdMiN '), actor('manager', { all: true }), actor('staff', {}, { all: true })]
 const staff = [{ ...actor('staff'), username: ' ADMIN ' }, manager, actor('cashier', { pos: true }), actor('staff', { products: true, inventory: true }), actor('manager', { all: false }, { all: true })]
-const viewer = actor('manager', { products: true, inventory: true, product_cost_view: true })
-const editor = actor('manager', { products: true, inventory: true, product_cost_edit: true })
+// Owner, 15 Nov 2026: cost is ADMIN ONLY. The two grant holders are negative controls now; the viewer/editor the cases below need is an administrator.
+const grantViewer = actor('manager', { products: true, inventory: true, product_cost_view: true })
+const grantEditor = actor('manager', { products: true, inventory: true, product_cost_edit: true })
+const viewer = actor('admin', { products: true, inventory: true })
 const cached = {
   items: [{ id: 1, name: 'Product', quantity: 2, selling_price_usd: 15, wholesale_price_usd: 12,
     cost_price_usd: 7, cost_price_khr: 28000, purchase_price_usd: 7,
@@ -95,17 +97,25 @@ assert.deepEqual(projectAcquisitionCosts(supplier, manager, true), { units_recei
 assert.equal(projectAcquisitionCosts(supplier, manager).total_usd, 70, 'customer/sales revenue is retained')
 checks += 4
 assert.equal(canViewAcquisitionCosts(viewer), true)
-assert.equal(canEditAcquisitionCosts(viewer), false)
+assert.equal(canEditAcquisitionCosts(viewer), true)
 assert.equal(projectAcquisitionCosts(cached, viewer), cached)
-assert.equal(hasCatalogCostWrite({ cost_price_usd: 0 }, viewer), true)
-assert.equal(canViewAcquisitionCosts(editor), false)
-assert.equal(canEditAcquisitionCosts(editor), true)
-assert.equal(projectAcquisitionCosts(cached, editor).items[0].cost_price_usd, undefined)
-assert.equal(hasCatalogCostWrite({ cost_price_usd: 0 }, editor), false)
-assert.equal(hasAcquisitionCostInput({ items: [{ unit_cost_usd: 0 }] }, editor), false)
+assert.equal(hasCatalogCostWrite({ cost_price_usd: 0 }, viewer), false)
+for (const holder of [grantViewer, grantEditor]) {
+  assert.equal(canViewAcquisitionCosts(holder), false, 'a cost grant gives a non-admin nothing to view')
+  assert.equal(canEditAcquisitionCosts(holder), false, 'a cost grant gives a non-admin nothing to edit')
+  assert.equal(projectAcquisitionCosts(cached, holder).items[0].cost_price_usd, undefined)
+  assert.equal(hasCatalogCostWrite({ cost_price_usd: 0 }, holder), true)
+  assert.equal(hasAcquisitionCostInput({ items: [{ unit_cost_usd: 0 }] }, holder), true)
+}
+// The switch-back reads the stored grants and nothing else is wired to it.
+assert.equal(holdsCostViewGrant(grantViewer), true)
+assert.equal(holdsCostViewGrant(grantEditor), false)
+assert.equal(holdsCostEditGrant(grantEditor), true)
+assert.equal(holdsCostEditGrant(grantViewer), false)
 assert.equal(canViewAcquisitionCosts(actor('manager', { product_cost_view: false }, { product_cost_view: true })), false)
-assert.equal(canEditAcquisitionCosts(actor('manager', {}, { product_cost_edit: true })), true)
+assert.equal(canEditAcquisitionCosts(actor('manager', {}, { product_cost_edit: true })), false)
 assert.equal(canViewAcquisitionCosts(actor('admin', { product_cost_view: false, product_cost_edit: false })), true)
+assert.equal(canEditAcquisitionCosts(actor('admin', { product_cost_view: false, product_cost_edit: false })), true)
 checks += 12
 
 // Sale write-conflict responses keep items as a serialized DB envelope. Staff
@@ -167,7 +177,7 @@ async function main() {
   checks += 7
   branchRows = [{ id: 1, name: 'Tea', branch_quantity: 2, purchase_price_usd: 0, selling_price_usd: 3 }]
   for (const allowed of [false, true]) {
-    const res = await request('/api/branches/1/stock', actor('staff', { branches: true, product_cost_view: allowed }))
+    const res = await request('/api/branches/1/stock', actor(allowed ? 'admin' : 'staff', { branches: true, product_cost_view: true }))
     assert.equal(res.status, 200)
     const rows = await res.json()
     assert.equal(rows[0].branch_quantity, 2)
@@ -212,9 +222,11 @@ async function main() {
     checks++
   }
   assert.equal((await request('/api/products/1/cost-breakdown', viewer)).status, 598)
-  assert.equal((await request('/api/products/1/cost-breakdown', editor)).status, 403)
-  assert.equal((await request('/api/products/1', editor, 'PUT', { cost_price_usd: 7 })).status, 598)
-  assert.equal((await request('/api/products/1', viewer, 'PUT', { cost_price_usd: 7 })).status, 403)
+  assert.equal((await request('/api/products/1/cost-breakdown', grantEditor)).status, 403)
+  assert.equal((await request('/api/products/1/cost-breakdown', grantViewer)).status, 403)
+  assert.equal((await request('/api/products/1', viewer, 'PUT', { cost_price_usd: 7 })).status, 598)
+  assert.equal((await request('/api/products/1', grantEditor, 'PUT', { cost_price_usd: 7 })).status, 403)
+  assert.equal((await request('/api/products/1', grantViewer, 'PUT', { cost_price_usd: 7 })).status, 403)
   assert.equal((await request('/api/inventory/adjust', manager, 'POST', { productId: 1, type: 'add', quantity: 1, attribution: 'correction', reason: 'Restore previous quantity' })).status, 598, 'server-derived correction is not blocked by cost permission')
   await assert.rejects(() => commitStockSession({}, manager, {}), error => error.statusCode === 400, 'cost-free request reaches existing validation')
   checks += 6

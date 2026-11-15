@@ -89,10 +89,10 @@ for (const [name, state] of [
 ] as const) {
   const Component = load(name, state)
   const render = () => renderToStaticMarkup(React.createElement(Component, { t: () => undefined, supplierId: 1, supplierName: 'Supplier', onClose: noop, fetchPurchases: noop }))
-  user = { ...user, permissions: { contacts_suppliers: true, product_cost_view: true } }
+  user = { ...user, role_code: 'admin', permissions: { contacts_suppliers: true, product_cost_view: true } }
   const granted = render()
   assert.ok(granted.includes('987.65') && granted.includes('123.45'), `${name} renders granted loaded cost values`)
-  user = { ...user, permissions: { contacts_suppliers: true, product_cost_view: false, product_cost_edit: true } }
+  user = { ...user, role_code: 'employee', permissions: { contacts_suppliers: true, product_cost_view: true, product_cost_edit: true } }
   const revoked = render()
   for (const amount of ['987.65', '123.45', '370.35', '543.21', '617.30', '$0.00']) assert.ok(!revoked.includes(amount), `${name} immediately omits ${amount} after view is revoked, including edit-only users`)
   assert.ok(revoked.includes('Retained product'), `${name} retains nonfinancial receipt content`)

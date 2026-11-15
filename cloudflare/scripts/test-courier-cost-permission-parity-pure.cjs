@@ -1,12 +1,12 @@
 'use strict'
-// The courier's actual cost sits behind one switch, `sales:view_courier_cost`, and three places must agree on it:
-//   - the Worker's gate, canViewCourierCost (src/lib/courierCostAccess.ts), which every response goes through;
-//   - the role editor's row and the runtime `can('sales', 'view_courier_cost')` (frontend utils/permissionActions.ts
-//     and utils/permissions.ts), which decide what an administrator sees when they click the row;
-//   - the role presets and the Worker's seeded roles, which decide who has it before anyone edits a role.
-// This file runs the real modules on both sides over a grid of stored permission maps and fails on any
-// disagreement. It also pins that no migration is needed: an absent key means "on", the same one-way
-// override every other `section:action` row uses, so a role saved before the row existed keeps what it had.
+// The courier's actual cost is ADMIN ONLY (owner, 15 Nov 2026: cost, profit and margin are administrator money everywhere, and what the
+// shop paid the driver is cost). Until then it sat behind `sales:view_courier_cost`, on for every Sales role. This file pins that the
+// switch is now inert and retired, over the real modules on both sides:
+//   - the Worker's gate, canViewCourierCost (src/lib/courierCostAccess.ts), answers true for an administrator and nobody else, over a
+//     grid of stored permission maps (tier x switch x role/user placement x administrator);
+//   - the role editor offers NO row for it (a switch that does nothing is a fake control) and no preset or seed stores the key;
+//   - the old rule survives, unused, as holdsCourierCostGrant: the way back if the owner reverses the ruling;
+//   - every Worker response gate still asks the one function, not the administrator flag or the amend right.
 //
 // Run: node scripts/test-courier-cost-permission-parity-pure.cjs
 const assert = require('node:assert/strict')
@@ -32,7 +32,6 @@ function load(file) {
 }
 const worker = load(path.join(cloudflareRoot, 'src/lib/courierCostAccess.ts'))
 const editorActions = load(path.join(repoRoot, 'frontend/src/utils/permissionActions.ts'))
-const editorPermissions = load(path.join(repoRoot, 'frontend/src/utils/permissions.ts'))
 const presets = load(path.join(repoRoot, 'frontend/src/components/users/rolePresetDefaults.ts'))
 
 let passed = 0
@@ -42,110 +41,78 @@ const user = (rolePermissions, ownPermissions = null, roleCode = 'employee') => 
   id: 7, username: 'staff', role_code: roleCode,
   role_permissions: JSON.stringify(rolePermissions), permissions: ownPermissions === null ? null : JSON.stringify(ownPermissions),
 })
-const workerSees = (u) => worker.canViewCourierCost(u)
-const editorSees = (u) => editorPermissions.effectivePermissions(u).can('sales', 'view_courier_cost')
 
-check('the editor has one row for it under Sales, readable in the View tier, named in English and Khmer', () => {
-  const rows = editorActions.actionsForKey('sales').filter((row) => row.key === 'view_courier_cost')
-  assert.equal(rows.length, 1)
-  assert.equal(`sales:${rows[0].key}`, KEY, 'the stored override key is the one the Worker reads')
-  assert.equal(rows[0].review, 'allow', 'the View tier keeps it, as the Worker does')
-  assert.match(fs.readFileSync(path.join(cloudflareRoot, 'src/lib/courierCostAccess.ts'), 'utf8'), new RegExp(`getActionTier\\(user, 'sales', '${rows[0].key}'\\) !== 'none'`), 'the Worker reads the same action name the editor stores')
-  const en = JSON.parse(fs.readFileSync(path.join(repoRoot, 'frontend/src/lang/en.json'), 'utf8'))
-  const km = JSON.parse(fs.readFileSync(path.join(repoRoot, 'frontend/src/lang/km.json'), 'utf8'))
-  assert.equal(en[rows[0].tKey], rows[0].label, 'the English pack carries the row label')
-  assert.ok(typeof km[rows[0].tKey] === 'string' && km[rows[0].tKey].trim(), 'the Khmer pack carries it')
-  assert.notEqual(km[rows[0].tKey], en[rows[0].tKey], 'and it is translated, not copied')
-  assert.equal(editorActions.outcomeAt(rows[0], 'none'), 'block')
-  assert.equal(editorActions.outcomeAt(rows[0], 'view'), 'allow')
-  assert.equal(editorActions.outcomeAt(rows[0], 'full'), 'allow')
-})
-
-check('editor = Worker over every stored shape: tier x switch x role/user placement x administrator', () => {
+check('the Worker gate is true for an administrator and false for everyone else, over every stored shape', () => {
   const tiers = [undefined, false, true, 'view', 'review', 'junk']
   const switches = [undefined, false, true, 'no', 0, null]
   let cells = 0
-  let granted = 0
+  let adminCells = 0
   for (const tier of tiers) {
     for (const roleSwitch of switches) {
       for (const userSwitch of switches) {
         for (const placeTierOn of ['role', 'user']) {
           const tierMap = tier === undefined ? {} : { sales: tier }
-          const role = { ...(placeTierOn === 'role' ? tierMap : {}), ...(roleSwitch === undefined ? {} : { [KEY]: roleSwitch }) }
+          const role = { ...(placeTierOn === 'role' ? tierMap : {}), ...(roleSwitch === undefined ? {} : { [KEY]: roleSwitch }), product_cost_view: true, product_cost_edit: true }
           const own = { ...(placeTierOn === 'user' ? tierMap : {}), ...(userSwitch === undefined ? {} : { [KEY]: userSwitch }) }
           for (const roleCode of ['employee', 'admin']) {
             const u = user(role, own, roleCode)
-            const label = JSON.stringify({ role, own, roleCode })
-            assert.equal(editorSees(u), workerSees(u), `editor and Worker disagree on ${label}`)
+            assert.equal(worker.canViewCourierCost(u), roleCode === 'admin', JSON.stringify({ role, own, roleCode }))
             cells += 1
-            if (workerSees(u)) granted += 1
+            if (roleCode === 'admin') adminCells += 1
           }
         }
       }
     }
   }
-  assert.ok(cells > 800 && granted > 100 && granted < cells - 100, `the grid reaches both verdicts (${granted} of ${cells})`)
+  assert.ok(cells > 800 && adminCells === cells / 2, `the grid reaches both verdicts (${adminCells} admin of ${cells})`)
 })
 
-check('editor = Worker for an all-grant and for a stored map with no Sales at all', () => {
-  for (const map of [{ all: true }, { all: true, [KEY]: false }, {}, { reports: true, dashboard: true, product_cost_view: true }, { [KEY]: true }]) {
-    const u = user(map)
-    assert.equal(editorSees(u), workerSees(u), JSON.stringify(map))
+check('an all-grant is an administrator; a stored switch, a missing Sales tier and a customer principal open nothing', () => {
+  assert.equal(worker.canViewCourierCost(user({ all: true, [KEY]: false })), true, 'an all-grant is an administrator and is never narrowed')
+  assert.equal(worker.canViewCourierCost(user({ [KEY]: true })), false)
+  assert.equal(worker.canViewCourierCost(user({ sales: true, [KEY]: true })), false, 'the old switch, even on, opens nothing')
+  assert.equal(worker.canViewCourierCost({ role_code: 'customer', role_permissions: '{}', permissions: null }), false)
+  assert.equal(worker.canViewCourierCost(null), false)
+})
+
+check('the role editor offers no row for it, and the Sales actions still name every other row', () => {
+  const rows = editorActions.actionsForKey('sales')
+  assert.equal(rows.some((row) => row.key === 'view_courier_cost'), false, 'a retired switch is not offered')
+  assert.ok(rows.length >= 7, 'the other Sales actions are untouched')
+})
+
+check('the switch-back keeps the old per-role rule (on for a Sales role until an explicit false), unused by the gate', () => {
+  for (const [map, own, expected] of [[{ sales: true }, null, true], [{ sales: 'view' }, null, true], [{ sales: true, [KEY]: false }, null, false],
+    [{ sales: true, [KEY]: false }, { [KEY]: true }, true], [{ [KEY]: true }, null, false], [{ sales: true, [KEY]: 'no' }, null, true]]) {
+    assert.equal(worker.holdsCourierCostGrant(user(map, own)), expected, JSON.stringify({ map, own }))
+    assert.equal(worker.canViewCourierCost(user(map, own)), false)
   }
-  assert.equal(workerSees(user({ all: true, [KEY]: false })), true, 'an all-grant is an administrator and is never narrowed')
-  assert.equal(workerSees(user({ [KEY]: true })), false, 'an override never grants past a missing Sales tier')
-  assert.equal(workerSees(null), false)
-  assert.equal(editorSees(null), false)
+  assert.equal(worker.holdsCourierCostGrant(user({}, null, 'admin')), true)
 })
 
-check('clicking the row in the editor flips what the Worker answers, in both directions', () => {
-  for (const tier of [true, 'view']) {
-    const start = { sales: tier, pos: true }
-    assert.equal(workerSees(user(start)), true)
-    const off = editorActions.toggleActionOverrideMap(start, 'sales', 'view_courier_cost')
-    assert.deepEqual(off, { ...start, [KEY]: false })
-    assert.equal(editorActions.isActionOverriddenOff(off, 'sales', 'view_courier_cost'), true)
-    assert.equal(workerSees(user(off)), false, `the Worker follows the switch at tier ${tier}`)
-    assert.equal(editorSees(user(off)), false)
-    const on = editorActions.toggleActionOverrideMap(off, 'sales', 'view_courier_cost')
-    assert.deepEqual(on, start, 'handing it back removes the key, so a role is stored exactly as it was before the row existed')
-    assert.equal(workerSees(user(on)), true)
-  }
-})
-
-check('role presets: every preset that holds Sales has it, the Product Viewer (no Sales) and a non-staff principal do not', () => {
-  const verdicts = Object.fromEntries(presets.ROLE_PRESETS.map((preset) => {
-    const u = user(preset.permissions, null, preset.key === 'admin' ? 'admin' : 'employee')
-    assert.equal(editorSees(u), workerSees(u), `${preset.key}: editor and Worker agree`)
-    return [preset.key, workerSees(u)]
-  }))
-  assert.deepEqual(verdicts, { employee: true, manager: true, product_viewer: false, admin: true })
-  assert.equal(Object.hasOwn(presets.ROLE_PRESETS.find((preset) => preset.key === 'employee').permissions, KEY), false,
-    'no preset stores the key: "on" is the absence of an override, so there is nothing to migrate')
-  assert.equal(workerSees({ role_code: 'customer', role_permissions: '{}', permissions: null }), false, 'a storefront or customer principal')
-})
-
-check('seeded roles: the Worker seeds the Employee with Sales and no switch, so it has the cost; nothing is written to existing roles', () => {
+check('no preset, no seeded role and no migration stores the key', () => {
+  for (const preset of presets.ROLE_PRESETS) assert.equal(Object.hasOwn(preset.permissions, KEY), false, preset.key)
   const source = fs.readFileSync(path.join(cloudflareRoot, 'src/lib/roleDefaults.ts'), 'utf8').split('\r\n').join('\n')
   const start = source.indexOf('const DEFAULT_ROLE_PERMISSIONS')
   const body = source.slice(source.indexOf('{', source.indexOf('=', start)), source.indexOf('\n}\n', start) + 2)
   const seeded = new Function(`return (${body})`)()
   assert.deepEqual(Object.keys(seeded).sort(), ['admin', 'employee', 'manager'])
-  assert.equal(Object.hasOwn(seeded.employee, KEY), false)
-  assert.equal(workerSees(user(seeded.employee)), true, 'a freshly seeded Employee reads the courier cost')
-  assert.equal(workerSees(user(seeded.admin, null, 'admin')), true)
-  assert.equal(Object.hasOwn(seeded.manager, KEY), false)
-  assert.equal(workerSees(user(seeded.manager)), true, 'a seeded Manager (the explicit preset, owner 21 Oct 2026) holds Sales and no switch, so it reads the courier cost like the Employee')
+  for (const role of ['employee', 'manager']) {
+    assert.equal(Object.hasOwn(seeded[role], KEY), false)
+    assert.equal(worker.canViewCourierCost(user(seeded[role])), false, `a seeded ${role} no longer reads the courier cost`)
+  }
+  assert.equal(worker.canViewCourierCost(user(seeded.admin, null, 'admin')), true)
   const migrations = fs.readdirSync(path.join(cloudflareRoot, 'migrations')).filter((name) => name.endsWith('.sql'))
   const touching = migrations.filter((name) => fs.readFileSync(path.join(cloudflareRoot, 'migrations', name), 'utf8').includes('view_courier_cost'))
-  assert.deepEqual(touching, [], 'no migration writes the key: roles saved before the row existed keep seeing the cost through the code default')
+  assert.deepEqual(touching, [], 'no migration writes the key')
 })
 
-check('every Worker response gate asks the permission, not the administrator role or the amend right', () => {
+check('every Worker response gate asks canViewCourierCost, not the administrator role or the amend right', () => {
   const read = (relative) => fs.readFileSync(path.join(cloudflareRoot, relative), 'utf8')
-  const gate = read('src/lib/courierCostAccess.ts')
+  const gate = read('src/lib/courierCostAccess.ts').split(String.fromCharCode(13, 10)).join(String.fromCharCode(10))
   assert.equal(/canViewSaleCourierCost/.test(gate + read('src/routes/sales.ts')), false, 'the interim amend-based gate is gone')
   assert.equal(/getActionTier\(user, 'sales', 'amend'\)/.test(gate), false)
+  assert.match(gate, /export function canViewCourierCost\(user: PermissionUser\): boolean \{\n {2}return isAdminControlUser\(user\)\n\}/)
   for (const [file, atLeast] of [['src/routes/reports.ts', 6], ['src/routes/sales.ts', 4], ['src/routes/compat.ts', 1]]) {
     assert.ok((read(file).match(/canViewCourierCost\(/g) || []).length >= atLeast, `${file} gates through canViewCourierCost`)
   }
@@ -153,4 +120,4 @@ check('every Worker response gate asks the permission, not the administrator rol
   assert.equal(/gateCourierRow\([^)]*isAdmin\)/.test(reports), false, 'the courier rows are not gated by the administrator flag')
 })
 
-console.log(`GREEN courier-cost permission parity: ${passed} checks hold`)
+console.log(`GREEN courier-cost permission: ${passed} checks hold`)

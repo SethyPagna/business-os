@@ -2,6 +2,7 @@
 // for Manager and Employee), and GET /api/roles/defaults serves it to the role editor, so the server
 // seed and the editor's "reset to defaults" can never describe two different Employees.
 //
+// Owner, 15 Nov 2026: Manager and Employee both open the Dashboard by default; migration 0310 applied the same to the existing roles.
 // Default posture (progress.md "Permissions -- default posture"): every page's default permission tier
 // is None unless the role is Admin. Manager seeds to the explicit Manager preset below (owner, 21 Oct 2026; it used to be `{}`, which made
 // the editor's "Reset to Manager defaults" a no-op). Employee receives only the explicitly
@@ -81,13 +82,16 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRole
     // action switched off (an override can only remove what the tier grants), so
     // View, Edit and Image stay on. Evening revision: the DEFAULT selling and
     // wholesale price is its own action, off here (they adjust a price per sale in
-    // the POS cart instead). Cost is a separate pair of grants that stays
-    // off by default: cost price is never visible or editable to an Employee
-    // until an admin turns product_cost_view / product_cost_edit on.
+    // the POS cart instead). Cost is admin-only (owner, 15 Nov 2026):
+    // product_cost_view / product_cost_edit are kept as the stored switch-back but grant a non-admin nothing now.
     // Owner, 19 Oct 2026: the supplier is not product information an Employee edits either
     // (products:supplier off). Setting a supplier on a NEW product stays open to a role that can add.
-    // No `inventory` key: an Employee never writes physical stock, and no `dashboard` key
-    // (owner, 20 Oct 2026: the Dashboard is off by default).
+    // No `inventory` key: an Employee never writes physical stock.
+    // Owner, 15 Nov 2026: managers and employees may open the Dashboard (this reverses the 20 Oct 2026 rule that it is off
+    // by default for an Employee). An Employee views it only: no dashboard_export. Cost, profit, margin, stock value and
+    // removal loss stay admin-only on it, whatever the grants say (lib/acquisitionCostAccess.ts).
+    dashboard: true,
+    dashboard_export: false,
     products: true,
     'products:add': false,
     'products:delete': false,

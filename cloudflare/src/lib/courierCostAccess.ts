@@ -9,12 +9,19 @@ import type { SaleRecord } from './saleRecords'
 
 /**
  * The one gate for the courier's actual cost, on every read and write response that can carry it: a sale's
- * rows and history, the reports, the dashboard. An administrator always passes. Anyone else needs a Sales
- * grant and keeps it until the role editor ("View actual delivery cost") switches `sales:view_courier_cost` off, so a role saved before the
- * row existed is decided without a migration, and a storefront or customer principal, which holds no Sales grant,
- * never passes.
+ * rows and history, the reports, the dashboard. ADMIN ONLY since the owner's 15 Nov 2026 ruling that cost and profit are
+ * administrator money everywhere: what the shop paid the driver is cost, and with it the delivery margin. A Sales grant no
+ * longer shows it (the role editor's "View actual delivery cost" row is retired); a storefront or customer principal never passes.
  */
 export function canViewCourierCost(user: PermissionUser): boolean {
+  return isAdminControlUser(user)
+}
+
+/**
+ * The per-role switch the gate above used before 15 Nov 2026 (`sales:view_courier_cost`, on for every Sales role until switched
+ * off). UNUSED: the way back. To restore it, make canViewCourierCost return this and bring the role editor row back.
+ */
+export function holdsCourierCostGrant(user: PermissionUser): boolean {
   return isAdminControlUser(user) || getActionTier(user, 'sales', 'view_courier_cost') !== 'none'
 }
 

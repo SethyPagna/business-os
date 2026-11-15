@@ -312,6 +312,11 @@ async function dashboardSummary(env: Env, query: Record<string, string>, overvie
   }
 }
 
+function omitSupplierReturnMoney(row: unknown): Record<string, unknown> {
+  const { supplier_compensation_usd: _compensation, loss_usd: _loss, ...rest } = (row || {}) as Record<string, unknown>
+  return rest
+}
+
 async function dashboardAnalytics(env: Env, query: Record<string, string>, user: PermissionUser, rankingsContext: DashboardRankingsCacheContext) {
   const isAdmin = isAdminControlUser(user)
   const canViewCosts = canViewAcquisitionCosts(user)
@@ -384,7 +389,8 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, user:
     totals: gateTotals((totals || {}) as unknown as Record<string, unknown>, isAdmin, canViewCosts, 2, canViewCourier),
     prevTotals: gateTotals((prevTotals || {}) as unknown as Record<string, unknown>, isAdmin, canViewCosts, 2, canViewCourier),
     periodReturns: periodReturns || {},
-    periodSupplierReturns: periodSupplierReturns || {},
+    // Supplier loss and compensation reconstruct the acquisition cost: omitted (not zeroed) unless cost is visible (owner, 15 Nov 2026).
+    periodSupplierReturns: canViewCosts ? (periodSupplierReturns || {}) : omitSupplierReturnMoney(periodSupplierReturns),
     // The period rows are the same money as the totals above, so they pass
     // the same gate (AL finding L4: they used to reach every dashboard caller
     // with cost, profit and the courier cost intact). 4-place bucket rows.
@@ -911,7 +917,7 @@ app.get('/system/drive-sync/status', requireAuth, async (c) => {
 // need what taking a backup copy home needs: `backup` plus cost-view (see
 // lib/driveSyncAuthority.ts). Switching sync OFF stays a plain
 // Drive-credentials action, so anyone holding the Drive credentials grant can still stop the uploads.
-const DRIVE_SYNC_AUTHORITY_ERROR = { error: 'Backup and cost-view permission are required to connect or enable Google Drive sync.', code: 'drive_sync_authority_required' }
+const DRIVE_SYNC_AUTHORITY_ERROR = { error: 'Only an administrator can connect or enable Google Drive sync.', code: 'drive_sync_authority_required' }
 app.post('/system/drive-sync/preferences', requireAuth, async (c) => {
   const denied = denyUnless(c, 'drive_credentials')
   if (denied) return denied
@@ -986,7 +992,7 @@ app.post('/system/drive-sync/forget-credentials', requireAuth, async (c) => {
   return c.json(await driveSyncStatus(c.env))
 })
 app.post('/system/drive-sync/jobs', requireAuth, async (c) => {
-  if (!canViewAcquisitionCosts(c.get('user'))) return c.json({ error: 'Cost-view permission is required to export database backups.', code: 'product_cost_view_required' }, 403)
+  if (!canViewAcquisitionCosts(c.get('user'))) return c.json({ error: 'Only an administrator can export database backups.', code: 'product_cost_view_required' }, 403)
   const denied = denyUnless(c, 'backup', 'drive_credentials')
   if (denied) return denied
   try {
@@ -1002,7 +1008,7 @@ app.post('/system/drive-sync/jobs', requireAuth, async (c) => {
 // returned backupKey can then be reviewed through the existing backup flow.
 app.post('/system/drive-sync/restore-stage/jobs', requireAuth, async (c) => {
   const user = c.get('user')
-  if (!canEditAcquisitionCosts(user)) return c.json({ error: 'Cost-entry permission is required to prepare a database restore.', code: 'product_cost_edit_required' }, 403)
+  if (!canEditAcquisitionCosts(user)) return c.json({ error: 'Only an administrator can prepare a database restore.', code: 'product_cost_edit_required' }, 403)
   if (!hasPermission(user, 'backup_restore')) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }

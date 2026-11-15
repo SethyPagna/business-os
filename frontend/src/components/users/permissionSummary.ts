@@ -12,7 +12,7 @@
 // areas, the Library and the count sessions stay separate switches (owner, 21 Oct 2026: Full = main access only;
 // the Worker has no fallback between keys, so the grid shows exactly what is stored).
 import { PERMISSION_SECTIONS, type PermissionDefinition, type PermissionSection, type PermissionSensitivity } from './permissionDefinitions.ts'
-import { actionsForKey, isActionOverriddenOff, isViewImpliedByWrite, outcomeAt, type ActionOutcome, type ActionRequirement, type PermissionAction } from '../../utils/permissionActions.ts'
+import { actionsForKey, isActionOverriddenOff, isViewImpliedByWrite, outcomeAt, type ActionOutcome, type ActionRequirement, type PermissionAction, ADMIN_ONLY } from '../../utils/permissionActions.ts'
 import { effectivePermissions, normalizePermissionState, type PermissionValue } from '../../utils/permissions.ts'
 
 export type PermissionState = Record<string, PermissionValue>
@@ -57,7 +57,8 @@ function buildRows(): ModuleRow[] {
     const fieldDefs = defs.filter((def) => fieldPrefixOf(def.key) && !alternateKeys.has(def.key))
     const main = defs.find((def) => def.tier) ?? defs.find((def) => def.lead && !def.subRow) ?? null
     const subs = defs.filter((def) => def.subRow)
-    const extras = defs.filter((def) => def !== main && !def.subRow && !def.extraOf && !alternateKeys.has(def.key) && !fieldDefs.includes(def))
+    // A retired grant (permissionDefinitions.ts) is not drawn, counted or cleared: its stored value stays as it is.
+    const extras = defs.filter((def) => !def.retired && def !== main && !def.subRow && !def.extraOf && !alternateKeys.has(def.key) && !fieldDefs.includes(def))
     const imageOnly = alternates[0]
       ? { toggle: alternates[0], fields: (alternates[0].alsoClearsKeys ?? []).map((key) => defs.find((def) => def.key === key)).filter((def): def is PermissionDefinition => !!def) }
       : null
@@ -74,7 +75,7 @@ function buildRows(): ModuleRow[] {
       actionKey: main?.key ?? null,
     })
     for (const sub of subs) {
-      rows.push({ id: sub.key, section, sub: true, lead: sub, group: [], middle: null, extras: defs.filter((def) => def.extraOf === sub.key), fields: fieldDefs, imageOnly: null, actionKey: sub.key })
+      rows.push({ id: sub.key, section, sub: true, lead: sub, group: [], middle: null, extras: defs.filter((def) => !def.retired && def.extraOf === sub.key), fields: fieldDefs, imageOnly: null, actionKey: sub.key })
     }
   }
   return rows
@@ -141,11 +142,11 @@ export function chipStates(row: ModuleRow, perms: PermissionState): ChipState[] 
     const outcome = outcomeAt(action, tier)
     const overriddenOff = isActionOverriddenOff(bag, key, action.key)
     const viewLocked = outcome !== 'block' && isViewImpliedByWrite(bag, key, action.key)
-    const missing = outcome === 'block' ? [] : unmet(action.requires)
+    const missing = outcome === 'block' ? [] : action.adminOnly ? [ADMIN_ONLY] : unmet(action.requires)
     const blocked = outcome === 'block'
     const mark: ChipMark = blocked ? 'fullOnly' : overriddenOff ? 'off' : missing.length ? 'needs' : outcome === 'queue' ? 'queue' : outcome === 'limited' ? 'limited' : 'allow'
     const controls: ControlState[] = actions.filter((entry) => entry.follows === action.key).map((control) => {
-      const controlMissing = outcomeAt(control, tier) === 'block' ? [] : unmet(control.requires)
+      const controlMissing = outcomeAt(control, tier) === 'block' ? [] : control.adminOnly ? [ADMIN_ONLY] : unmet(control.requires)
       // A parent switched off takes its control with it, whatever the level would have said.
       if (overriddenOff) return { action: control, mark: 'off', missing: [] }
       if (outcomeAt(control, tier) === 'block') return { action: control, mark: 'fullOnly', missing: [] }

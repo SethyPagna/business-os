@@ -2472,7 +2472,7 @@ app.post('/bulk-price-adjust', async (c) => {
   if (!Number.isFinite(amount) || amount <= 0) return c.json({ error: 'Amount must be a positive number' }, 400)
   const fields = Array.isArray(body.fields) ? [...new Set(body.fields.filter((f) => BULK_PRICE_FIELDS.has(f)))].sort() : []
   if (!canEditAcquisitionCosts(user) && fields.some(field => field.startsWith('cost_price_'))) {
-    return c.json({ error: 'Cost-entry permission is required to change catalog costs.', code: 'product_cost_edit_required' }, 403)
+    return c.json({ error: 'Only an administrator can change catalog costs.', code: 'product_cost_edit_required' }, 403)
   }
   if (!fields.length) return c.json({ error: 'Pick at least one price field to adjust' }, 400)
   const skipZero = Boolean(body.skip_zero)
@@ -2638,7 +2638,7 @@ app.post('/', async (c) => {
   const statusRefusal = productStatusInputRefusal(c, body)
   if (statusRefusal) return statusRefusal
   if (hasCatalogCostWrite(body, user)) {
-    return c.json({ error: 'Cost-entry permission is required to set catalog costs.', code: 'product_cost_edit_required' }, 403)
+    return c.json({ error: 'Only an administrator can set catalog costs.', code: 'product_cost_edit_required' }, 403)
   }
   // OPUS-H-1: the discount block is stored exactly as the price gate below compares it (lib/productDiscountGate.ts).
   const invalidDiscount = normalizeProductDiscountBody(body)
@@ -2942,7 +2942,7 @@ app.put('/:id', async (c) => {
   const statusRefusal = productStatusInputRefusal(c, body)
   if (statusRefusal) return statusRefusal
   if (hasCatalogCostWrite(body, user)) {
-    return c.json({ error: 'Cost-entry permission is required to change catalog costs. Omit cost fields when editing other product details.', code: 'product_cost_edit_required' }, 403)
+    return c.json({ error: 'Only an administrator can change catalog costs. Omit cost fields when editing other product details.', code: 'product_cost_edit_required' }, 403)
   }
   const id = c.req.param('id')
   // Image-only restricted role: normally blocked by the tier==='none' check
@@ -3571,7 +3571,7 @@ app.post('/variant', async (c) => {
   const statusRefusal = productStatusInputRefusal(c, body)
   if (statusRefusal) return statusRefusal
   if (hasCatalogCostWrite(body, user)) {
-    return c.json({ error: 'Cost-entry permission is required to set catalog costs.', code: 'product_cost_edit_required' }, 403)
+    return c.json({ error: 'Only an administrator can set catalog costs.', code: 'product_cost_edit_required' }, 403)
   }
   const invalidDiscount = normalizeProductDiscountBody(body)
   if (invalidDiscount) return c.json(invalidDiscount, 400)
@@ -6699,11 +6699,11 @@ app.get('/data-gaps', async (c) => {
 
 // "Confirm $0" and "This product has no barcode" (and taking either back). A mark changes no cost, stock, lot or sale; each change is one
 // batch with its audit row and its undo record. Setting a mark is a products edit (full tier, a review-tier user is refused rather than
-// queued: a mark is a decision, not a field edit); a $0 confirmation also needs the cost-entry permission.
+// queued: a mark is a decision, not a field edit); a $0 confirmation also needs an administrator.
 app.post('/data-gaps/marks', async (c) => {
   const user = c.get('user')
   // A decision hides a product from Conflicts for everyone, so it needs the same access the Conflicts reads need (merge_duplicates),
-  // plus products edit; a $0 confirmation is cost data, so it also needs cost view and the cost-entry permission. At the Full tier it
+  // plus products edit; a $0 confirmation is cost data, so it also needs an administrator. At the Full tier it
   // applies at once; at the Review tier it goes to the review queue for an admin to approve (owner ruling, 27 Oct 2026), never applied
   // directly and never refused.
   const noConflictsAccess = denyDataGaps(c)
@@ -10071,7 +10071,7 @@ app.post('/possible-duplicates/merge', async (c) => {
   // the kept product's name and barcode stay, a name or barcode difference is
   // never a refusal, and a chosen cost replaces the averaged one. Only for a
   // pair the system itself listed together (checked below), and a chosen cost
-  // needs the cost edit permission (product_cost_edit), the same grant the
+  // needs an administrator (canEditAcquisitionCosts), the same rule the
   // product form's cost field enforces.
   const keepMode = body.keep === true
   // The existing pair kernel already exceeds Free's 50-query ceiling.
@@ -10083,7 +10083,7 @@ app.post('/possible-duplicates/merge', async (c) => {
   if (body.cost_price_usd !== undefined || body.cost_price_khr !== undefined) {
     if (!keepMode) return c.json({ success: false, code: 'invalid_merge_cost', error: 'A chosen cost is only accepted by the Resolve merge.' }, 400)
     if (!canEditAcquisitionCosts(user)) {
-      return c.json({ success: false, code: 'cost_permission_required', error: 'Changing the cost needs the cost edit permission.' }, 403)
+      return c.json({ success: false, code: 'cost_permission_required', error: 'Only an administrator can change the cost.' }, 403)
     }
     const chosenMoney = (value: unknown): number | null => {
       if (value === null) return null

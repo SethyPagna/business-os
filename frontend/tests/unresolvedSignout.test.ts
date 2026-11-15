@@ -163,7 +163,7 @@ Object.assign(window, { __businessOsAuthBootstrapPromise: earlyReply })
 const pendingEarly = bootstrapModule.exports.getAppBootstrap!()
 const otpBlock = context.slice(context.indexOf('    const handleOtpLogin ='), context.indexOf("    window.addEventListener('otp:login'"))
 let shownUser: unknown = null
-const otpEnv = { ...scope, eventDetail: () => ({ id: 71 }), computeSessionExpiryMs: () => null, persistAuthState() {}, setAuthReady() {}, authEstablishedAtRef: { current: 0 }, readAppBootstrap: () => otpReply, handleUnauthorizedSession() {}, applyBootstrapPayload() { throw Error('stale apply') }, setUser(value: unknown) { shownUser = value }, loadSettings() {}, setPage() {}, settingsRef: { current: {} }, resolveAdminLandingPage: () => 'dashboard' }
+const otpEnv = { ...scope, eventDetail: () => ({ id: 71 }), computeSessionExpiryMs: () => null, persistAuthState() {}, setAuthReady() {}, authEstablishedAtRef: { current: 0 }, readAppBootstrap: () => otpReply, handleUnauthorizedSession() {}, applyBootstrapPayload() { throw Error('stale apply') }, setUser(value: unknown) { shownUser = value }, loadSettings() {}, setPage() {}, setSignInEpoch() {}, settingsRef: { current: {} }, resolveAdminLandingPage: () => 'dashboard' }
 const otpCode = ts.transpileModule(otpBlock + '\nreturn handleOtpLogin;', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 const otpHandler = new Function('env', `with(env){${otpCode}}`)(otpEnv)
 const pendingOtp = otpHandler(new Event('otp:login'))
@@ -194,7 +194,7 @@ let authClears = 0
 const accountResets: any[] = []
 const mounted: any = { ...scope, ...signout, user: { id: 71 }, publicMode: false, effects: [],
   useRef: (current: unknown) => ({ current }), useEffect: (fn: () => unknown) => mounted.effects.push(fn),
-  flushPendingWorkDrafts() {}, disconnectWS() {}, setPage() {}, setAuthReady() {}, applyBootstrapPayload() {},
+  flushPendingWorkDrafts() {}, disconnectWS() {}, setPage() {}, setSignInEpoch() {}, setAuthReady() {}, applyBootstrapPayload() {},
   recoverUnresolvedSignout: async () => {},
   resetLocalBusinessState: async (options: unknown) => { accountResets.push({ options, userAtReset: pendingUser }) },
   clearPersistedAuthState() { authClears++ }, setUser(value: unknown) { pendingUser = value },
@@ -256,7 +256,7 @@ const happyEnv: any = { ...scope, ...signout, useCallback: (fn: unknown) => fn, 
   readAppBootstrap: async () => ({ user: bootstrapped }),
   applyBootstrapPayload: async ({ user }: any) => { local.set('businessos_user', JSON.stringify(user)) },
   handleUnauthorizedSession() { throw Error('unexpected unauthorized') }, setUser() {}, loadSettings() {},
-  setPage: (value: unknown) => { landing = value }, settingsRef: { current: { default_landing_page: 'products' } }, resolveAdminLandingPage: (value: unknown) => value,
+  setPage: (value: unknown) => { landing = value }, setSignInEpoch() {}, settingsRef: { current: { default_landing_page: 'products' } }, resolveAdminLandingPage: (value: unknown) => value,
   cacheClearAll() {}, getAppApi: () => ({}), resumeWS() {}, startHealthCheck() {}, safeStorageGet: () => null, getAuthStorage: () => ({}), STORAGE_KEYS: {},
 }
 const loginBlock = context.slice(context.indexOf('  const persistAuthenticatedUser ='), context.indexOf('  const login = useCallback'))

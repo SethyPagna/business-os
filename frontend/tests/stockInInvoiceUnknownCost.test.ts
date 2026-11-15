@@ -26,7 +26,9 @@ for (const language of ['en', 'km']) {
   const t = (key: string) => labels[key] || key
   for (const [cost, unknown, lines, expected] of [[0, 2, 2, 'unknown'], [5.1234, 1, 2, 'partial'], [0, 0, 1, 'zero']] as const) {
     const group = { supplier_key: 'test', supplier_name: 'Synthetic', received_day: '2026-10-15', line_count: lines, cost_usd: cost, lines_without_cost: unknown, units_received: 2, credit_lines: 0 }
-    fixture.__invoiceContext = { user: { permissions: { product_cost_view: true } } }
+    // Owner rule, 15 Nov 2026: costs are administrator only. The administrator sees them; a non-admin holding the retired
+    // product_cost_view grant does not (the denied render below).
+    fixture.__invoiceContext = { user: { role_code: 'admin', permissions: {} } }
     fixture.__invoiceReport = { data: { invoices: [group], totals: { lines, cost_usd: cost, lines_without_cost: unknown }, total_invoices: 1 }, loading: false, error: '', lineCache: {}, detailGroup: group, closeGroup() {}, openGroup() {}, loadLines() {} }
     const html = renderToStaticMarkup(React.createElement(Component, { t }))
     if (expected === 'unknown') {
@@ -36,7 +38,7 @@ for (const language of ['en', 'km']) {
       assert.ok(html.includes('5.1234'), `${language}: known acquisition precision retained`)
       assert.ok(html.split(labels.cost_partial_count.replace('{count}', '1')).length - 1 >= 4, `${language}: total, desktop, mobile and detail disclose local unknown count`)
     } else assert.ok(html.includes('$0'), `${language}: real zero remains numeric`)
-    fixture.__invoiceContext = { user: { permissions: { contacts_suppliers: true } } }
+    fixture.__invoiceContext = { user: { role_code: 'manager', permissions: { contacts_suppliers: true, product_cost_view: true, product_cost_edit: true } } }
     const hidden = renderToStaticMarkup(React.createElement(Component, { t }))
     assert.ok(!hidden.includes('5.1234') && !hidden.includes(labels.cost_unknown), `${language}: denied costs remain absent`)
   }

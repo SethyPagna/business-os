@@ -215,6 +215,16 @@ async function assertRefused(fixtureOptions, expectedCode, label) {
     assert.deepEqual(counts(db), before)
   }
 
+  // Positive control for the withheld cost: an administrator making the same amendment is sent it.
+  {
+    const ADMIN_USER = { ...FULL_USER, id: 93, username: 'delivery_admin', role_code: 'admin' }
+    const { db, stamp } = createFixture({ status: 'completed' })
+    const adminBody = await reviewed(db, addDeliveryBody(stamp, 'admin-control'), ADMIN_USER)
+    const adminResult = await request(db, '/101/amendments', 'POST', adminBody, ADMIN_USER)
+    assert.equal(adminResult.status, 200, JSON.stringify(adminResult.body))
+    assert.equal(adminResult.body.deliveryActualCostUsd, 1.25)
+  }
+
   // Both currently editable recorded-sale statuses accept the same atomic
   // conversion. The completed case below additionally proves exact money,
   // driver snapshot, durable history and retry behavior.
@@ -227,7 +237,8 @@ async function assertRefused(fixtureOptions, expectedCode, label) {
     assert.equal(first.body.isDelivery, 1)
     assert.equal(first.body.deliveryContactId, 7)
     assert.equal(first.body.deliveryFeeUsd, 2)
-    assert.equal(first.body.deliveryActualCostUsd, 1.25)
+    // Owner rule, 15 Nov 2026: courier cost is administrator only. The sale stores it (asserted below); the response withholds it.
+    assert.equal('deliveryActualCostUsd' in first.body, false, 'a non-administrator is never sent the courier actual cost')
     assert.equal(first.body.totalUsd, 12)
     assert.equal(first.body.totalKhr, 48000)
     assert.equal(first.body.stockMoved, false)

@@ -1,12 +1,21 @@
-import { effectivePermissions, type PermissionUser } from './permissions.ts'
+import { effectivePermissions, isAdminControlUser, type PermissionUser } from './permissions.ts'
 
-/** Independent explicit grants; product/inventory access grants neither. */
+/** Owner ruling, 15 Nov 2026: cost, profit, margin, stock value and removal loss are ADMIN ONLY. Mirrors cloudflare/src/lib/acquisitionCostAccess.ts. */
 export function canViewAcquisitionCosts(user: PermissionUser): boolean {
-  return effectivePermissions(user).hasPermission('product_cost_view')
+  return isAdminControlUser(user)
 }
 
 export function canEditAcquisitionCosts(user: PermissionUser): boolean {
-  return effectivePermissions(user).hasPermission('product_cost_edit')
+  return isAdminControlUser(user)
+}
+
+/** UNUSED since 15 Nov 2026: the per-account grants, kept as the way back (swap into the two functions above). */
+export function holdsCostViewGrant(user: PermissionUser): boolean {
+  return isAdminControlUser(user) || effectivePermissions(user).merged.product_cost_view === true
+}
+
+export function holdsCostEditGrant(user: PermissionUser): boolean {
+  return isAdminControlUser(user) || effectivePermissions(user).merged.product_cost_edit === true
 }
 
 /** Omit denied inputs, rather than turning redacted values into zero writes. */
