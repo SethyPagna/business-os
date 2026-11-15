@@ -155,11 +155,17 @@ export default function PaginationControls({
   // One dense row on a 375px phone: below 400px Back/Next keep their icon and carry the label
   // as tooltip + accessible name (button policy); from 400px up the word is shown too.
   const edgeTextClass = 'whitespace-nowrap max-[399px]:hidden'
+  // The draft follows the committed page IN THE SAME RENDER that commits it (state adjusted during
+  // render, not in an effect). The top and bottom mounts each own a draft; with an effect, a page
+  // change painted first and the box caught up a render later, so a reader (or a typist, whose
+  // selected text the late reset replaced, giving "61737") saw the previous page in the other
+  // mount. Every mount now shows the committed page the moment the page is committed.
   const [pageDraft, setPageDraft] = useState(String(safePage))
-
-  useEffect(() => {
+  const [draftPage, setDraftPage] = useState(safePage)
+  if (draftPage !== safePage) {
+    setDraftPage(safePage)
     setPageDraft(String(safePage))
-  }, [safePage])
+  }
 
   // A filtered or deleted last page can leave the parent holding a page that
   // no longer exists.  Rendering the clamped number alone makes the controls
