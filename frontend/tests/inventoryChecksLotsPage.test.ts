@@ -489,6 +489,44 @@ try {
     await surface.unmount()
     lotsAnswer = null
   }
+  // ---- N7 (review 14 Nov round 2): after a direct Set to 0 inside an open popover the date holds no stock, so it leaves the counted dates (rows) and waits behind the empty dates: "Matches stock" never writes a
+  // 0 against 0 line for it. The reverse holds too: a date Set up from empty joins the counted dates. ----
+  {
+    const shape = (line: Record<string, unknown>) => 'lots' in line ? [line.productId, (line.lots as Array<{ batchId: number; counted: number; seen: number }>).map(entry => [entry.batchId, entry.counted, entry.seen])] : [line.productId, 'total', line.countedQuantity]
+    const withEmpty = (row: Row): Row => ({ ...withLots(row), lots: [...(withLots(row).lots as Row[]), { id: 11, received_at: '2026-08-01', branches: [{ branch_id: 1, quantity: 0 }] }] })
+    listAnswer = () => listBody([withEmpty(productRow(12, 'Dated product', 8))], { capabilities: { ...capabilities, lotLinesPerSubmission: 400 }, summary: { ok: 0, issue: 0, not_checked: 1, total: 1 } })
+    lotReads.length = 0; submissions.length = 0; adjusts.length = 0
+    const surface = await mount()
+    await openCount(surface, '12')
+    const lotIds = () => surface.findAll(node => node.getAttribute('data-popover-lot') !== null).map(node => node.getAttribute('data-popover-lot'))
+    assert.deepEqual(lotIds(), ['7', '9'], 'before the Set: two counted dates')
+    await surface.type(dateInput(surface, 7), '0')
+    adjustAnswer = payload => ({ productId: 12, branchId: 1, batchId: payload.batchId, before: { lotQuantity: 5, branchQuantity: 8 }, after: { lotQuantity: 0, branchQuantity: 3 } })
+    await surface.click(setButton(surface))
+    await surface.click(exact(surface, 'Set').at(-1)!)
+    await new Promise(resolve => setTimeout(resolve, 40))
+    assert.equal(adjusts.length, 1, 'the Set was written')
+    assert.deepEqual(lotIds(), ['9'], 'the date Set to 0 left the counted dates')
+    const toggle = surface.find(node => node.getAttribute('data-popover-action') === 'toggle-empty', 'empty toggle')
+    assert.ok(toggle.textContent.includes('(2)'), 'it waits behind the empty dates beside the one that was already empty')
+    await surface.click(surface.find(node => node.getAttribute('data-popover-action') === 'matches', 'matches'))
+    await closeCount(surface)
+    await surface.click(surface.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit')); await surface.click(exact(surface, 'Submit').at(-1)!); await new Promise(resolve => setTimeout(resolve, 20))
+    assert.deepEqual((submissions.at(-1)?.lines as Array<Record<string, unknown>>).map(shape), [[12, [[9, 3, 3]]]], 'Matches stock wrote only the date that holds stock: no 0 against 0 line')
+    await surface.unmount()
+    // reverse: an empty date Set up to a figure joins the counted dates
+    lotReads.length = 0; submissions.length = 0; adjusts.length = 0
+    const again = await mount()
+    await openCount(again, '12')
+    await again.click(again.find(node => node.getAttribute('data-popover-action') === 'toggle-empty', 'empty toggle'))
+    await again.type(dateInput(again, 11), '6')
+    adjustAnswer = payload => ({ productId: 12, branchId: 1, batchId: payload.batchId, before: { lotQuantity: 0, branchQuantity: 8 }, after: { lotQuantity: 6, branchQuantity: 14 } })
+    await again.click(setButton(again))
+    await again.click(exact(again, 'Set').at(-1)!)
+    await new Promise(resolve => setTimeout(resolve, 40))
+    assert.deepEqual(again.findAll(node => node.getAttribute('data-popover-lot') !== null).map(node => node.getAttribute('data-popover-lot')).sort(), ['11', '7', '9'], 'a date Set up from empty is a counted date')
+    await again.unmount()
+  }
   // ---- N3 + N5 (review 14 Nov round 2): wired only (ic_lot_counts OFF) the server still enforces its caps on every submission, so the page is told them and splits by BOTH (lines and products), with no dates in sight.
   // 401 plain products with a line cap of 400 and a product cap of 40: 40 go, the rest wait, nothing is refused. ----
   {
