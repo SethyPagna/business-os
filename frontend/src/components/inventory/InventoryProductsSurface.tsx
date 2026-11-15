@@ -147,9 +147,12 @@ export default function InventoryProductsSurface({
   // The quantity figure IS the state pill (owner, 15 Nov 2026). A plain row is coloured by its own
   // figure against its own thresholds -- both ride on every /products/search row already, and the
   // low-stock settings come from the app context, so this costs no read. A MERGED row (several
-  // real products one barcode folds into) shows the members' sum, but the Dashboard and the bell
-  // judge each real product, so the merged figure takes the family rule over the real members
-  // (best state wins) -- otherwise two low members could sum to "healthy" here and stay "low" there.
+  // real products one barcode folds into) shows the members' sum, and takes the Dashboard's family rule
+  // over the real members (best state wins, header rows skipped) -- otherwise two low members could sum
+  // to "healthy" here while the Dashboard calls the family low. The bell is different: it lists each
+  // product on its own (notifications.ts, buildInventorySection), so a merged row can be green while
+  // the bell lists one of its products as low (products of 8 and 50 with a threshold of 10: the row is
+  // healthy, the bell lists the 8). This row follows the Dashboard's family rule, deliberately.
   const stockQty = (product: InventoryProductRow) => {
     const ids = new Set((product.__mergedProductIds || [product.id]).map(Number))
     const members = ids.size > 1 ? items.filter((row) => ids.has(Number(row.id))) : []
