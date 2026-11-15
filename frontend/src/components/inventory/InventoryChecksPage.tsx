@@ -43,7 +43,7 @@ import { soleActiveBranch } from '../../utils/branchCollapse.ts'
 import { PRICE_KEYS } from './inventoryPriceFacts.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { loadWired, mergeWiredRows, NotWired, patchWiredRaw, readWiredRows, rememberWiredMode, wiredMode, wiredResult, type Branch, type WiredAccess, type WiredDeps, type WiredExtras, type WiredList, type WiredRaw } from './inventoryWired.ts'
-import { runApprovalFlow } from './inventoryCheckApprovalFlow.ts'
+import { approvalRequestBound, runApprovalFlow } from './inventoryCheckApprovalFlow.ts'
 import { productSalesFocus, queueReportsFocus } from '../sales/reports/reportsFocus.ts'
 import InventoryCheckHistoryFloat, { type InventoryCheckHistoryResult } from './InventoryCheckHistoryFloat.tsx'
 import InventoryCheckSessionsList, { InventoryCheckSessionFilterMenu, ProgressRing, SessionCounts, SessionStatusChip, initialSessionFilters, sessionDisplayName, type SessionListFilters } from './InventoryCheckSessionsList.tsx'
@@ -958,6 +958,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         send: () => decideInventoryCheckApproval(writeScope, { decision, requestId: attempt.requestId }),
         onProgress: result => { if (current()) { setApproval(result.approval); setRefusedLines(refusedMap(result.refused)) } },
         isCurrent: current,
+        maxRequests: approvalRequestBound(data?.capabilities),
       })
       if (!current()) return
       if (flow.outcome === 'done') {
