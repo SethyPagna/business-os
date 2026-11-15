@@ -31,6 +31,7 @@ const cacheOverride = {
   },
   getVersion: async (_env, ns) => String(versions.get(ns) || 0),
   getVersionWithFallback: async (_env, ns) => versions.get(ns) || 0,
+  getVersionsWithFallback: async (_env, list) => list.map((ns) => versions.get(ns) || 0), // same token per name as the single read
   cacheIdentity: () => undefined, isUnsafeVersion: () => false, deploymentId: () => 'dev', // 6.0.1048: this fake keys by URL + version itself
   bumpVersion: async (_env, ns) => { versions.set(ns, (versions.get(ns) || 0) + 1) },
   bumpVersions: async (_env, list) => { for (const ns of list) versions.set(ns, (versions.get(ns) || 0) + 1) },
