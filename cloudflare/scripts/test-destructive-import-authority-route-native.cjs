@@ -40,7 +40,13 @@ const STARTED = '2000-06-01'
 
 // ---------------------------------------------------------------- loader ----
 const transpiled = new Map()
-function makeWorld(patches = []) {
+// 15 Nov 2026: cost entry is admin only, and every products import is a cost format, so the cost gate (requireImportPermission,
+// assertCurrentImportApplyAuthority) now sits in front of the destructive grants: a non-admin never reaches them. This matrix is
+// about the destructive boundary, so its world holds the cost rule open (a source-patched copy); the cost gate itself is pinned
+// by the "cost-gate-in-front" case, which runs on the real rule.
+const COST_RULE_OPEN = { name: 'cost rule held open', file: 'lib/acquisitionCostAccess.ts', apply: text => text.split('return isAdminControlUser(user)').join('return true') }
+function makeWorld(patches = [], { realCostRule = false } = {}) {
+  if (!realCostRule) patches = [COST_RULE_OPEN, ...patches]
   const cache = new Map()
   const audits = []
   const rel = file => path.relative(SRC, file).replaceAll('\\', '/')
@@ -363,6 +369,32 @@ function addControlCases() {
   })
 }
 
+// The cost rule itself, on the REAL rule: a non-admin holding every import and cost grant (plus the destructive ones) is refused at
+// create and approve with product_cost_edit_required and nothing is written; an administrator is the positive control.
+function addCostGateCase() {
+  add('cost-gate-in-front', '', '', 'non-admin-refused-admin-completes', async () => {
+    const world = makeWorld([], { realCostRule: true })
+    for (const mode of MODES) {
+      const f = fixture(world)
+      const id = f.seedJob({ policy: policyFor(mode) })
+      const before = f.snapshot()
+      for (const result of [
+        await f.call(ACTORS.full, 'POST', '/', { type: 'products', policy: policyFor(mode) }),
+        await f.call(ACTORS.full, 'POST', `/${id}/approve`, {}),
+      ]) {
+        assert.equal(result.status, 403, result.text)
+        assert.equal(result.body.code, 'product_cost_edit_required', result.text)
+      }
+      assert.equal(f.snapshot(), before, 'a cost-refused destructive import writes nothing')
+      assert.equal(f.pending.length, 0)
+      const approved = await f.call(ACTORS.admin, 'POST', `/${id}/approve`, {})
+      assert.equal(approved.status, 200, approved.text)
+      await f.drain()
+      assert.match(f.job(id).status, /^completed/, f.job(id).last_error)
+    }
+  })
+}
+
 // The one shared definition, exercised directly.
 function addHelperCase() {
   add('helper', '', '', 'one-definition-table', async world => {
@@ -390,6 +422,7 @@ function addHelperCase() {
 }
 
 addHelperCase()
+addCostGateCase()
 addCreateCases()
 addApproveCases()
 addRetryCases()
