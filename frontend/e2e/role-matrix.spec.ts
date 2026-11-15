@@ -254,7 +254,7 @@ for (const role of ROLES.filter((entry) => accessFor(entry).canAccessPage('dashb
     // without it (isDashboardSummaryPayload), so the seeded Manager, who holds dashboard and not cost view, was shown "Dashboard summary
     // unavailable". The validator no longer requires a cost-derived key and the stock-value card is left out without the grant.
     try {
-      const slot = await open(page, '/', 'dashboard')
+      const slot = await open(page, '/dashboard', 'dashboard')
       // The startup read fills the cards a moment after the shell settles.
       await page.waitForTimeout(1_500)
       const shown = squash(await slot.innerText())
@@ -602,6 +602,7 @@ for (const role of EDITORS) {
 // =====================================================================================================================
 // 4. Cost
 // =====================================================================================================================
+// '/dashboard', not '/': an Employee at '/' lands on Notes (landingPage.ts), so the Dashboard is opened by its own path.
 // E2E Product 001's acquisition cost. Verified unique among every price, quantity and threshold in admin-products.json, so a hit
 // in the DOM can only be the cost.
 const PROBE_COST = '13.15'
@@ -609,7 +610,7 @@ const hasProbeCost = (value: string): boolean => new RegExp(`(?<![\\d.])${PROBE_
 const costProduct = (adminProducts as { items: Array<{ name: string; cost_price_usd: number }> }).items[0]
 if (costProduct.name !== PRODUCT_NAME || costProduct.cost_price_usd.toFixed(2) !== PROBE_COST) throw new Error('admin-products.json no longer starts with the cost probe product')
 
-const COST_PAGES: Array<[string, string]> = [['/', 'dashboard'], ['/products', 'products'], ['/sales', 'sales'], ['/pos', 'pos'], ['/inventory', 'inventory']]
+const COST_PAGES: Array<[string, string]> = [['/dashboard', 'dashboard'], ['/products', 'products'], ['/sales', 'sales'], ['/pos', 'pos'], ['/inventory', 'inventory']]
 
 for (const role of ROLES) {
   test(`${role.label}: no acquisition-cost key is in any response body the pages received, unless the role may view costs`, async ({ browser }, testInfo) => {
