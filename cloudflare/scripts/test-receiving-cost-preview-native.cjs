@@ -11,9 +11,7 @@ assert.ok(boundary > 0)
 const fixture = new Module(filename, module)
 fixture.filename = filename
 fixture.paths = Module._nodeModulePaths(path.dirname(filename))
-// Owner rule, 15 Nov 2026: cost is administrator only, so the shared fixture's default operator is an administrator.
 const prefix = source.slice(0, boundary).replace('let sqlite', 'let queries = []; let sqlite')
-  .replaceAll("user = { id: 7,", "user = { role_code: 'admin', id: 7,")  // the declaration and the one in fresh()
   .replace('const statement = sqlite.prepare(sql)', 'queries.push(sql); const statement = sqlite.prepare(sql)')
   .replace("['get', 'all', 'run'].map((method)", "['get', 'all', 'run', 'getOnce', 'allOnce'].map((method)")
   .replaceAll('statement[method]', "statement[method.replace('Once','')]")
