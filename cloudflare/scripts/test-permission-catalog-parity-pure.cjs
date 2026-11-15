@@ -395,6 +395,7 @@ const editorRows = new Set(editorAction.keys())
 const ALWAYS_REFUSED = {
   'branches:add': 'Shop and Warehouse are fixed: the route checks the switch and then always answers 409, so there is nothing to grant.',
   'branches:delete': 'Shop and Warehouse are fixed: the route checks the switch and then always answers 409, so there is nothing to grant.',
+  'sales:view_courier_cost': 'Retired 15 Nov 2026 (owner: cost is admin only): canViewCourierCost ignores the switch, so the editor offers no row. holdsCourierCostGrant keeps reading it as the way back.',
 }
 const SECTION_LEVEL = {
   'audit_log:view': 'The section tier is the switch (None / View = own entries / Full = everyone), so a separate row would say the same thing twice.',
@@ -543,7 +544,6 @@ const VARIABLE_KEY_SITES = [
 const DIRECT_READS = {
   'lib/inventoryCheckAccess.ts': { keys: [], why: 'Reads the merged map once; exact inventory_check_show_ fields are enumerated and checked by workerChecksKey, and the dedicated page key is checked through getActionTier.' },
   'lib/acquisitionCostAccess.ts': { keys: ['product_cost_view', 'product_cost_edit'], why: 'The two cost grants are separate keys read off the merged map.' },
-  'lib/undoAppliers.ts': { keys: ['product_cost_edit'], why: 'A revert that restores a chosen cost needs Edit product costs.' },
   'routes/products.ts': { keys: [], why: 'Hands the merged map to restrictToImageOnlyFields (lib/productWrites.ts), which reads the products_image_only keys.' },
 }
 // Branch reads that do not check branches:view.

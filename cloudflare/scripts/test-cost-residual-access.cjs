@@ -63,20 +63,20 @@ async function main() {
   opens = 0
   const supplier = await post('/returns/supplier', { items: [{ product_id: 1, quantity: 1 }] })
   assert.equal(supplier.status, 403)
-  assert.equal((await supplier.json()).code, 'product_cost_view_required')
+  assert.equal((await supplier.json()).code, 'product_cost_edit_required', 'owner, 15 Nov 2026: the edit grant is inert, so a non-admin stops at the first (entry) check')
   assert.equal(opens, 0)
   for (const grant of [{}, { product_cost_view: true }, { product_cost_edit: true }, { all: true }]) {
     user = actor(grant)
     for (const type of ['products', 'inventory', 'sales', 'stock_actions']) {
       opens = 0
       const response = await post('/imports', { type })
-      if (!grant.product_cost_edit && !grant.all) {
+      if (!grant.all) {
         assert.equal(response.status, 403); assert.equal((await response.json()).code, 'product_cost_edit_required'); assert.equal(opens, 0)
-      } else { assert.notEqual(response.status, 403, `${type} explicit edit/admin permitted`) }
+      } else { assert.notEqual(response.status, 403, `${type} admin permitted`) }
     }
     for (const type of ['export-folder', 'export-cloudflare', 'import-folder']) {
       opens = 0
-      const permitted = grant.all || (type === 'import-folder' ? grant.product_cost_edit : grant.product_cost_view)
+      const permitted = grant.all // admin only (owner, 15 Nov 2026): the two cost grants are inert
       controlPrepares = 0
       denyControlAccess = !permitted
       const response = await post('/backups', { type })
@@ -85,7 +85,7 @@ async function main() {
       assert.equal(controlPrepares, permitted ? 1 : 0)
     }
   }
-  assert.equal(maintenanceReads, 6)
+  assert.equal(maintenanceReads, 3, "only the admin grant opens a backup control now")
   assert.equal(controlDb.prepare('SELECT COUNT(*) AS n FROM system_flags').get().n, 0)
   controlDb.prepare('INSERT INTO system_flags (key, value) VALUES (?, ?)').run('maintenance', '{')
   user = actor({ all: true })
@@ -94,7 +94,7 @@ async function main() {
   assert.equal(held.status, 503)
   assert.equal((await held.json()).code, 'maintenance_active')
   assert.equal(opens, 0)
-  assert.equal(maintenanceReads, 7)
+  assert.equal(maintenanceReads, 4)
   for (const grant of [{ backup: false, product_cost_view: true }, { backup_restore: false, product_cost_edit: true }]) {
     user = actor(grant)
     opens = 0

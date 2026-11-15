@@ -234,7 +234,11 @@ const batchUrls = ['/batches/tracked-product-ids', '/batches?productId=1&branchI
   // Compat Dashboard has its own independent authority; section revocations
   // must not turn it into a Sales/Inventory page gate.
   await reachesData('/dashboard', staff({ dashboard: true }, revoked))
-  await reachesData('/import-jobs', staff({ products: true, product_cost_view: true }, { 'products:view': false }))
+  // Owner, 15 Nov 2026: the cost-view grant is inert, so a holder is read as one without it.
+  reads = 0
+  const inertGrant = await request('/import-jobs', staff({ products: true, product_cost_view: true }, { 'products:view': false }))
+  assert.equal(inertGrant.status, 200)
+  assert.equal(reads, 0, 'financial imports are not read for a non-admin cost-view holder')
   reads = 0
   const hiddenImports = await request('/import-jobs', staff({ products: true }, { 'products:view': false }))
   assert.equal(hiddenImports.status, 200)

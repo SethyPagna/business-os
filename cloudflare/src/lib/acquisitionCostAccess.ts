@@ -1,12 +1,23 @@
 import type { Context, MiddlewareHandler } from 'hono'
 import { getMergedPermissions, isAdminControlUser, type PermissionUser } from './permissions'
 
-// Separate explicit grants: legacy product/inventory/sales access grants neither.
-// Administrator-control actors retain both, even if a stored override is false.
+// Owner ruling, 15 Nov 2026: cost, profit, margin, stock value and removal-loss money is ADMIN ONLY, everywhere. The
+// "View product costs" / "Edit product costs" grants (product_cost_view, product_cost_edit) no longer give a non-admin
+// anything. Administrator-control actors hold both, even if a stored override is false.
 export function canViewAcquisitionCosts(user: PermissionUser): boolean {
-  return isAdminControlUser(user) || getMergedPermissions(user).product_cost_view === true
+  return isAdminControlUser(user)
 }
 export function canEditAcquisitionCosts(user: PermissionUser): boolean {
+  return isAdminControlUser(user)
+}
+
+// The way back to per-account cost control, kept the way contacts_full_phone was kept when full phones became universal
+// (lib/phoneAccess.ts holdsFullPhoneGrant): UNUSED since 15 Nov 2026. To restore the grants, make the two functions above
+// return these. The role editor rows (permissionDefinitions.ts) are hidden, so restoring also means un-hiding them.
+export function holdsCostViewGrant(user: PermissionUser): boolean {
+  return isAdminControlUser(user) || getMergedPermissions(user).product_cost_view === true
+}
+export function holdsCostEditGrant(user: PermissionUser): boolean {
   return isAdminControlUser(user) || getMergedPermissions(user).product_cost_edit === true
 }
 

@@ -121,8 +121,10 @@ async function main() {
     assert.equal(noCost.status, 403, 'backup without cost-view cannot choose where full backups go')
   })
 
-  await check('backup + cost-view (and admin) can still start a Drive connection', async () => {
-    for (const user of [USERS.backupAndCost, USERS.admin]) {
+  await check('only an administrator can start a Drive connection: backup + the (inert) cost-view grant is refused (owner, 15 Nov 2026)', async () => {
+    const inert = await post(app, '/system/drive-sync/oauth/start', { returnOrigin: 'https://admin.example.test', returnPath: '/' }, USERS.backupAndCost)
+    assert.equal(inert.status, 403, 'cost-view gives a non-admin nothing, so backup + cost-view cannot choose where full backups go')
+    for (const user of [USERS.admin]) {
       const res = await post(app, '/system/drive-sync/oauth/start', { returnOrigin: 'https://admin.example.test', returnPath: '/' }, user)
       assert.equal(res.status, 200, `${user.username} must be able to connect`)
       assert.match(res.body.url, /^https:\/\/accounts\.google\.com\//)
@@ -138,7 +140,10 @@ async function main() {
     assert.equal(setting('drive_sync_enabled'), '0', 'nothing was switched on')
     const disable = await post(app, '/system/drive-sync/preferences', { enabled: false }, USERS.settingsOnly)
     assert.equal(disable.status, 200, 'anyone who may manage settings can still stop the uploads')
-    const entitled = await post(app, '/system/drive-sync/preferences', { enabled: true }, USERS.backupAndCost)
+    const inertEnable = await post(app, '/system/drive-sync/preferences', { enabled: true }, USERS.backupAndCost)
+    assert.equal(inertEnable.status, 403)
+    assert.equal(setting('drive_sync_enabled'), '0')
+    const entitled = await post(app, '/system/drive-sync/preferences', { enabled: true }, USERS.admin)
     assert.equal(entitled.status, 200)
     assert.equal(setting('drive_sync_enabled'), '1')
   })
@@ -149,14 +154,14 @@ async function main() {
     assert.equal(DRIVE_SYNC_AUTHORIZED_BY_KEY, 'drive_sync_authorized_by')
     setSetting(DRIVE_SYNC_AUTHORIZED_BY_KEY, '')
     assert.equal((await checkDriveSyncAuthorizer(env)).reason, 'authorizer-missing', 'a connection with no recorded authoriser fails closed')
-    const expect = { [USERS.settingsOnly.id]: false, [USERS.settingsAndCost.id]: false, [USERS.backupNoCost.id]: false, [USERS.backupAndCost.id]: true, [USERS.admin.id]: true, [USERS.inactive.id]: false, 999: false }
+    const expect = { [USERS.settingsOnly.id]: false, [USERS.settingsAndCost.id]: false, [USERS.backupNoCost.id]: false, [USERS.backupAndCost.id]: false, [USERS.admin.id]: true, [USERS.inactive.id]: false, 999: false }
     for (const [id, allowed] of Object.entries(expect)) {
       setSetting(DRIVE_SYNC_AUTHORIZED_BY_KEY, String(id))
       assert.equal((await checkDriveSyncAuthorizer(env)).allowed, allowed, `authoriser ${id}`)
     }
     // Demotion after connecting stops the uploads with no disconnect needed.
-    setSetting(DRIVE_SYNC_AUTHORIZED_BY_KEY, String(USERS.backupAndCost.id))
-    raw.prepare('UPDATE users SET permissions = @p WHERE id = @id').run({ id: USERS.backupAndCost.id, p: JSON.stringify({ settings: true, drive_credentials: true, backup: true }) })
+    setSetting(DRIVE_SYNC_AUTHORIZED_BY_KEY, String(USERS.admin.id))
+    raw.prepare('UPDATE users SET permissions = @p WHERE id = @id').run({ id: USERS.admin.id, p: JSON.stringify({ settings: true, drive_credentials: true, backup: true, product_cost_view: true }) })
     assert.equal((await checkDriveSyncAuthorizer(env)).reason, 'authorizer-lacks-grants')
   })
 

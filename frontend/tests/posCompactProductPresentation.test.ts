@@ -29,7 +29,8 @@ for (const products of ['none', 'read', 'edit']) {
   }
 }
 assert.equal(canReadCost(true, canViewAcquisitionCosts, { username: 'admin' }), false)
-assert.equal(canReadCost(false, canViewAcquisitionCosts, { permissions: { product_cost_view: true } }), true)
+assert.equal(canReadCost(false, canViewAcquisitionCosts, { permissions: { product_cost_view: true } }), false, 'owner, 15 Nov 2026: the grant is inert')
+assert.equal(canReadCost(false, canViewAcquisitionCosts, { role_code: 'admin' }), true, 'an administrator reads cost')
 assert.equal((sheet.match(/\{canReadCost \? \(/g) || []).length, 2, 'both flat and grouped cost rows use the gate')
 assert.match(sheet, /\{canReadCost && costFloatTarget \? \(/)
 for (const amount of ['asNumber(product.selling_price_khr)', 'asNumber(product.wholesale_price_khr || 0)', '(promotion.applied_price_khr || 0)']) {

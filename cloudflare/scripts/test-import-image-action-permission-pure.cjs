@@ -46,7 +46,11 @@ const authorityEngine = loadTs('lib/importEngine.ts', {
 }, new Proxy({}, {
   get(_target, property) { return () => { throw new Error(`Unexpected authority dependency: ${String(property)}`) } },
 }))
-const acquisitionCostAccess = loadTs('lib/acquisitionCostAccess.ts', { './permissions': permissions })
+const realCostAccess = loadTs('lib/acquisitionCostAccess.ts', { './permissions': permissions })
+// Owner, 15 Nov 2026: cost is admin only, and an administrator passes every image gate, so a non-admin can no longer reach the image
+// check of a cost-bearing import. This file isolates the image gate, so it runs under the dormant per-grant switch-back
+// (holdsCostViewGrant / holdsCostEditGrant); the real admin-only rule is pinned in test-acquisition-cost-access.cjs.
+const acquisitionCostAccess = { ...realCostAccess, canViewAcquisitionCosts: realCostAccess.holdsCostViewGrant, canEditAcquisitionCosts: realCostAccess.holdsCostEditGrant }
 const media = loadTs('lib/media.ts')
 const sqlBinding = loadTs('lib/sqlBinding.ts')
 const productImagePermission = loadTs('lib/productImagePermission.ts', { './media': media, './sqlBinding': sqlBinding })

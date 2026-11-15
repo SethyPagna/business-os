@@ -312,6 +312,11 @@ async function dashboardSummary(env: Env, query: Record<string, string>, overvie
   }
 }
 
+function omitSupplierReturnMoney(row: unknown): Record<string, unknown> {
+  const { supplier_compensation_usd: _compensation, loss_usd: _loss, ...rest } = (row || {}) as Record<string, unknown>
+  return rest
+}
+
 async function dashboardAnalytics(env: Env, query: Record<string, string>, user: PermissionUser, rankingsContext: DashboardRankingsCacheContext) {
   const isAdmin = isAdminControlUser(user)
   const canViewCosts = canViewAcquisitionCosts(user)
@@ -384,7 +389,8 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, user:
     totals: gateTotals((totals || {}) as unknown as Record<string, unknown>, isAdmin, canViewCosts, 2, canViewCourier),
     prevTotals: gateTotals((prevTotals || {}) as unknown as Record<string, unknown>, isAdmin, canViewCosts, 2, canViewCourier),
     periodReturns: periodReturns || {},
-    periodSupplierReturns: periodSupplierReturns || {},
+    // Supplier loss and compensation reconstruct the acquisition cost: omitted (not zeroed) unless cost is visible (owner, 15 Nov 2026).
+    periodSupplierReturns: canViewCosts ? (periodSupplierReturns || {}) : omitSupplierReturnMoney(periodSupplierReturns),
     // The period rows are the same money as the totals above, so they pass
     // the same gate (AL finding L4: they used to reach every dashboard caller
     // with cost, profit and the courier cost intact). 4-place bucket rows.

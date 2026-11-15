@@ -80,7 +80,8 @@ check('page/action authority, explicit false and independent aggregate grants', 
   assert.equal(worker.getInventoryCheckAccess(actor).fields.stock, false)
   assert.equal(worker.getInventoryCheckAccess(actor).canCheck, false)
   assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: true, 'inventory_checks:view': false })).canView, false)
-  assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_show_cost: true, product_cost_view: true })).fields.cost, true)
+  assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_show_cost: true, product_cost_view: true })).fields.cost, false, 'owner, 15 Nov 2026: cost is admin only and Inventory never shows it; the grant is inert')
+  assert.equal(worker.getInventoryCheckAccess({ ...user({ inventory_checks: true, inventory_check_show_cost: true }), role_code: 'admin' }).fields.cost, true, 'only an administrator reaches the cost field, and only when the show-cost switch is on')
 })
 const product = {
   id: 4, name: 'Example', image_path: '/image.webp', unit: 'piece', parent_id: 2, is_group: 0,

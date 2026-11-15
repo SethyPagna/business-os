@@ -22,7 +22,8 @@ import {
   type BranchReplayRow,
   type BranchWriteFields,
 } from './branchWrites'
-import { getActionTier, getPermissionTier, getMergedPermissions, isAdminControlUser, type PermissionTier } from './permissions'
+import { getActionTier, getPermissionTier, type PermissionTier } from './permissions'
+import { canEditAcquisitionCosts } from './acquisitionCostAccess'
 import {
   buildAllocationStatements,
   buildOperationAllocationStatements,
@@ -367,7 +368,7 @@ function mergeChoicePermissionError(reversal: MergeReversal, user: SessionUser |
   const needsProductEdit = choice.requiresProductEdit === true
     || (choice.requiresProductEdit !== false && !!choice.fields && Object.keys(choice.fields).length > 0)
   if (needsProductEdit && (!user || getActionTier(user, 'products', 'edit') !== 'full')) return 'product_edit_permission_required'
-  if (choice.cost && (!user || (!isAdminControlUser(user) && getMergedPermissions(user).product_cost_edit !== true))) return 'cost_permission_required'
+  if (choice.cost && (!user || !canEditAcquisitionCosts(user))) return 'cost_permission_required'
   return null
 }
 

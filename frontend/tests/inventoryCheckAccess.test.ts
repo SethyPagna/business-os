@@ -43,7 +43,7 @@ assert.equal(getInventoryCheckAccess(user({ inventory_checks: true, 'inventory:c
 assert.equal(getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_show_price: true }, { inventory_check_show_price: false })).fields.price, false)
 assert.equal(getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_show_price: false }, { inventory_check_show_price: true })).fields.price, true)
 assert.equal(getInventoryCheckAccess(user({ inventory_checks: true }, { inventory_check_show_price: 'true' })).fields.price, false, 'only an explicit boolean true shows a field')
-assert.equal(getInventoryCheckAccess(user({ inventory_checks: true, product_cost_view: true, inventory_check_show_cost: true })).fields.cost, true)
+assert.equal(getInventoryCheckAccess(user({ inventory_checks: true, product_cost_view: true, inventory_check_show_cost: true })).fields.cost, false, 'owner, 15 Nov 2026: the cost grant is inert')
 assert.equal(getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_show_cost: true })).fields.cost, false)
 assert.equal(getInventoryCheckAccess(user({ inventory_checks: true, ...everyField, contacts: true })).canViewCustomerDetails, true)
 assert.equal(getInventoryCheckAccess(user({ inventory_checks: true, ...everyField, contacts: true, 'contacts:view': false, 'contacts:add': false, 'contacts:edit': false })).canViewCustomerDetails, false)

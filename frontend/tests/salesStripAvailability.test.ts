@@ -63,7 +63,7 @@ const fees = { totals: { amount_usd: 3, amount_khr: 4000 }, by_type: [{ fee_type
 function harness() {
   const props = {
     stripRange: { ...range }, isActive: true,
-    user: { id: 1, username: 'staff', role_code: 'staff', permissions: { sales: 'full', product_cost_view: true } } as Record<string, unknown> | null,
+    user: { id: 1, username: 'staff', role_code: 'admin', permissions: { sales: 'full', product_cost_view: true } } as Record<string, unknown> | null,
     canViewSales: true, canViewFees: true, getPermissionTier: (_key: string) => 'full', language: 'en',
     search: '', statusFilter: 'all', userFilter: 'all',
   }

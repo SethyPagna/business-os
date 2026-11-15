@@ -2,7 +2,9 @@
 // Courier (actual delivery) cost on every sale surface, against the WHOLE Worker
 // on workerd + D1.
 //
-// Owner rule (14 Oct 2026): the courier cost sits behind one permission,
+// Owner rule (15 Nov 2026, superseding the 14 Oct per-role switch): the courier cost is ADMIN ONLY. No Sales grant, cost grant or
+// courier switch opens it, so every non-admin below is a role that must see nothing. The 14 Oct text follows, for the history:
+// the courier cost sat behind one permission,
 // sales:view_courier_cost. It is on for an administrator and for every role that
 // holds Sales until the role editor switches it off. A caller with it off is a
 // cost viewer who gets GOODS profit or a plain reader who gets neither (cost grant,
@@ -41,16 +43,36 @@ const flag = name => (process.argv.slice(2).find(arg => arg.startsWith(`--${name
 const WRONG = flag('wrong')
 const BASE = flag('base')
 const GATE = 'src/lib/courierCostAccess.ts'
-const GATE_EXPRESSION = "  return isAdminControlUser(user) || getActionTier(user, 'sales', 'view_courier_cost') !== 'none'"
+const GATE_EXPRESSION = '  return isAdminControlUser(user)
+}
+
+/**
+ * The per-role switch'
 const MUTANTS = {
-  open: [{ name: 'open', file: GATE, from: GATE_EXPRESSION, to: '  return true' }],
-  amend: [{ name: 'amend', file: GATE, from: GATE_EXPRESSION, to: "  return isAdminControlUser(user) || getActionTier(user, 'sales', 'amend') === 'full'" }],
-  'admin-only': [{ name: 'admin-only', file: GATE, from: GATE_EXPRESSION, to: '  return isAdminControlUser(user)' }],
+  open: [{ name: 'open', file: GATE, from: GATE_EXPRESSION, to: '  return true
+}
+
+/**
+ * The per-role switch' }],
+  amend: [{ name: 'amend', file: GATE, from: GATE_EXPRESSION, to: "  return isAdminControlUser(user) || getActionTier(user, 'sales', 'amend') === 'full'
+}
+
+/**
+ * The per-role switch" }],
+  'sales-switch': [{ name: 'sales-switch', file: GATE, from: GATE_EXPRESSION, to: "  return isAdminControlUser(user) || getActionTier(user, 'sales', 'view_courier_cost') !== 'none'
+}
+
+/**
+ * The per-role switch" }],
   mutation: [{ name: 'mutation', file: GATE, from: 'if (mutation) args[0]', to: 'if (false) args[0]' }],
   'cost-grant': [
     { name: 'cost-grant-import', file: GATE, from: "import { getActionTier, isAdminControlUser, type PermissionUser } from './permissions'",
       to: "import { getActionTier, getMergedPermissions, isAdminControlUser, type PermissionUser } from './permissions'" },
-    { name: 'cost-grant', file: GATE, from: GATE_EXPRESSION, to: '  return isAdminControlUser(user) || getMergedPermissions(user).product_cost_view === true' },
+    { name: 'cost-grant', file: GATE, from: GATE_EXPRESSION, to: '  return isAdminControlUser(user) || getMergedPermissions(user).product_cost_view === true
+}
+
+/**
+ * The per-role switch' },
   ],
   summary: [{ name: 'summary', file: GATE, from: "record.summary.replace(COURIER_COST_SUMMARY, '$1 changed')", to: 'record.summary' }],
   ledger: [{ name: 'ledger', file: GATE, from: 'const costEntry = row.kind === COST_LEDGER_KIND', to: 'const costEntry = false' }],
@@ -186,13 +208,12 @@ async function main() {
       })
     }
 
-    // ---- the default: a Sales role nobody switched off reads what the administrator reads ----
-    for (const [label, , control] of surfaces) {
-      if (!control) continue
-      r.check(`a Sales role with the permission left on reads the courier cost on ${label}`, () => {
+    // ---- the default: a Sales role nobody touched reads NO courier cost either (owner, 15 Nov 2026: admin only) ----
+    for (const [label] of surfaces) {
+      r.check(`a Sales role with every default grant cannot read the courier cost on ${label}`, () => {
         const got = results[`default-viewer|${label}`]
         assert.equal(got.status, 200, `default-viewer ${label} answered ${got.status}`)
-        assert.ok(got.hits.length > 0, `the Sales role with the default permission sees no courier cost on ${label}`)
+        assert.deepEqual(got.hits, [], `the Sales role with the default grants sees the courier cost at ${got.hits.slice(0, 6).join(', ')}`)
       })
     }
 
@@ -273,9 +294,9 @@ async function main() {
     })
     const defaultAmenderList = await read('default-amender', `/api/sales?${RANGE}`, defaultAmender)
     const defaultAmenderRecords = await read('default-amender', `/api/sales/${idA}/records`, defaultAmender)
-    r.check('a full sales amender with the permission left on reads it on the list and in the records', () => {
-      assert.ok(defaultAmenderList.hits.length > 0)
-      assert.ok(defaultAmenderRecords.hits.length > 0)
+    r.check('a full sales amender with every default grant cannot read it on the list or in the records', () => {
+      assert.deepEqual(defaultAmenderList.hits, [])
+      assert.deepEqual(defaultAmenderRecords.hits, [])
     })
 
     // ---- every write that returns the sale's canonical snapshot leaves by the list's rule ----
@@ -316,10 +337,10 @@ async function main() {
         assert.ok(got.hits.length > 0, `the scan found no courier cost on the administrator's ${path} response`)
       })
     }
-    r.check('control: a staff account without sales:amend but with the permission left on reads the courier cost on the create response', () => {
+    r.check('a staff account without sales:amend and with every default grant cannot read the courier cost on the create response', () => {
       const got = writeOf('create', 'staff-on')
       assert.equal(got.status, 200, `staff-on create answered ${got.status}`)
-      assert.ok(got.hits.length > 0)
+      assert.deepEqual(got.hits, [])
     })
     for (const path of ['create', 'create replay', 'create-receipt (GET)', 'add items', 'status change']) {
       r.check(`a staff account with the permission off cannot read the courier cost on the ${path} response`, () => {

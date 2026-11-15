@@ -1,4 +1,5 @@
 import { replaceAssetBaseFromBootstrap } from './utils/uploadUrlKernel.ts'
+import { canEditAcquisitionCosts, canViewAcquisitionCosts } from './utils/acquisitionCostAccess.ts'
 import { getHubPageFromLocation, navigationHash, needsNavigationGuard } from './components/shared/hubNavigation.ts'
 import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from 'react'
 import type { ReactNode } from 'react'
@@ -2437,8 +2438,13 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   }, [authority])
 
   const hasPermission = useCallback((key: string) => {
+    // Owner, 15 Nov 2026: the two cost grants give a non-admin nothing (cost is admin only), so a component that asks for them directly
+    // is answered like the Worker answers (utils/acquisitionCostAccess.ts keeps the stored grants as holdsCostViewGrant / holdsCostEditGrant).
+    const normalized = String(key || '').trim().toLowerCase()
+    if (normalized === 'product_cost_view') return canViewAcquisitionCosts(user)
+    if (normalized === 'product_cost_edit') return canEditAcquisitionCosts(user)
     return authority.hasPermission(key)
-  }, [authority])
+  }, [authority, user])
 
   // Tier-aware read for REVIEW_TIER_KEYS sections (see utils/permissions.ts)
   // -- 'full' behaves exactly like hasPermission()===true, 'none' exactly

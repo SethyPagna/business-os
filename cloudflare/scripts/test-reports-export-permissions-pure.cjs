@@ -198,7 +198,8 @@ async function main() {
   }
   const plain = await samePage('sales', staff({ sales: true }), 'q=Alice')
   for (const key of ['cost_usd', 'cost_before_floor_usd', 'gross_profit_usd']) assert.equal(key in plain.rows[0], false)
-  for (const session of [staff({ sales: true, product_cost_view: true }), staff({ all: true })]) {
+  assert.equal((await samePage('sales', staff({ sales: true, product_cost_view: true }), 'q=Alice')).rows[0].cost_usd, undefined, 'owner, 15 Nov 2026: the cost-view grant is inert')
+  for (const session of [staff({ all: true })]) {
     const cost = await samePage('sales', session, 'q=Alice')
     assert.equal(cost.rows[0].cost_usd, 50)
     assert.equal(cost.rows[0].gross_profit_usd, 27)
