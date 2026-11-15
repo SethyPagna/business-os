@@ -90,7 +90,7 @@ const QUERY_ALIASES: Record<string, string> = {
 const QUERY_KEYS = new Set(['query', 'searchFields', 'branchId', 'category', 'brand', 'barcode', 'stockState', 'groupState', 'initial', 'page', 'pageSize', 'startDate', 'endDate', 'createdFrom', 'createdTo', 'sortBy', 'sortDirection'])
 const SORT_FIELDS: Record<string, InventoryCheckField | null> = { name: null, stock: 'stock', qty_sold: 'sales', customer_count: 'customers', received_date: 'received', price: 'price', cost: 'cost' }
 // ic_simple: the owner's closed list (1 Nov 2026). Dates, sales sorts, price and cost sorts, and the code-only filters have no screen and are refused (400, never a 403 that hints they exist).
-const SIMPLE_QUERY_KEYS = new Set(['query', 'branchId', 'category', 'brand', 'stockState', 'checkState', 'page', 'pageSize', 'sortBy', 'sortDirection', 'summary'])
+const SIMPLE_QUERY_KEYS = new Set(['query', 'branchId', 'category', 'brand', 'stockState', 'checkState', 'page', 'pageSize', 'sortBy', 'sortDirection', 'summary', 'groupBy'])
 const SIMPLE_SORT_FIELDS: Record<string, InventoryCheckField | null> = { name: null, stock: 'stock' }
 export const CHECK_STATES = ['not_checked', 'in_check', 'ok', 'issue'] as const
 export type InventoryCheckState = typeof CHECK_STATES[number]
@@ -125,6 +125,13 @@ export function validateInventoryCheckQuery(query: Record<string, unknown>, acce
     if (!Object.hasOwn(sorts, result.sortBy)) invalid('sortBy')
     const field = sorts[result.sortBy]
     if (field) requireField(field, 'sortBy')
+  }
+  // ic_simple grouping: the grouping defines the order, so a sort beside it is refused; a category grouping needs the category field like the category filter does.
+  if (result.groupBy) {
+    if (!['checked', 'category'].includes(result.groupBy)) invalid('groupBy')
+    if (result.sortBy) invalid('sortBy')
+    if (result.sortDirection) invalid('sortDirection')
+    if (result.groupBy === 'category') requireField('category', 'groupBy')
   }
   if (result.checkState && !(CHECK_STATES as readonly string[]).includes(result.checkState)) invalid('checkState')
   if (result.summary && !['0', '1'].includes(result.summary)) invalid('summary')

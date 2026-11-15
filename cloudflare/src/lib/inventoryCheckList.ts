@@ -109,7 +109,7 @@ export type CheckStateSets = { ok: number[]; issue: number[]; pending: number[];
 
 // The latest done/issue item of each product in the branch scope, inside the viewer's organization (items of other organizations and items whose branch differs
 // from their session's are never read): the same scope the ic_simple list used.
-const LATEST_ITEMS_SQL = `WITH latest AS (
+export const LATEST_ITEMS_SQL = `WITH latest AS (
     SELECT i.product_id AS product_id, i.state AS state, i.updated_at AS updated_at,
            ROW_NUMBER() OVER (PARTITION BY i.product_id ORDER BY i.updated_at DESC, i.session_id DESC) AS rn
     FROM inventory_check_sessions s JOIN inventory_check_items i ON i.session_id = s.id AND i.branch_id = s.branch_id
