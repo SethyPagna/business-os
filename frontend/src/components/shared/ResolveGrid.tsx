@@ -92,7 +92,7 @@ export type ResolveRow = {
   choice?: ResolveChoice
   /** Every included record holds the same value: the row folds away. */
   identical: boolean
-  /** Why the row cannot be changed (for example cost edit permission). */
+  /** Why the row cannot be changed (for example a cost change by a non-administrator). */
   locked?: string
   /** Values are names, brands, suppliers or barcodes: copy float on them. */
   copyable?: boolean

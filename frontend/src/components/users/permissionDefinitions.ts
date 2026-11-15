@@ -497,7 +497,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         tier: true,
         middleTier: 'view',
         reviewTKey: 'perm_review_view_desc',
-        reviewDescription: 'View: watch the pending approval queue, but Approve and Reject are hidden and refused. Acting on requests needs Full Access here; approving also needs Full access to each request’s own section and action (for example Products: Edit product), plus the price, image or cost permission when the request changes one. Nobody can approve their own request. Rejecting needs only Full Access here.',
+        reviewDescription: 'View: watch the pending approval queue, but Approve and Reject are hidden and refused. Acting on requests needs Full Access here; approving also needs Full access to each request’s own section and action (for example Products: Edit product), plus the price or image permission when the request changes one (a cost change needs an administrator). Nobody can approve their own request. Rejecting needs only Full Access here.',
       },
     ],
   },
@@ -529,7 +529,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'backup',
     tKey: 'perm_section_backup',
     label: 'Backup',
-    description: 'Export a backup. Restore / reset is a separate switch.',
+    description: 'Export a backup. Administrator only: a backup holds costs. Restore / reset is a separate switch.',
     permissions: [
       { key: 'backup', tKey: 'perm_backup', label: 'Backup export', sensitivity: 'high', lead: true },
       { key: 'backup_restore', tKey: 'perm_backup_restore', label: 'Backup restore and reset', sensitivity: 'critical', shortTKey: 'perm_short_restore_reset', short: 'Restore / reset', hintTKey: 'perm_backup_restore_desc', hint: 'Restores a backup or resets business data. The audit log is never reset.' },

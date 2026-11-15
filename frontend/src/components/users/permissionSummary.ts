@@ -146,7 +146,7 @@ export function chipStates(row: ModuleRow, perms: PermissionState): ChipState[] 
     const blocked = outcome === 'block'
     const mark: ChipMark = blocked ? 'fullOnly' : overriddenOff ? 'off' : missing.length ? 'needs' : outcome === 'queue' ? 'queue' : outcome === 'limited' ? 'limited' : 'allow'
     const controls: ControlState[] = actions.filter((entry) => entry.follows === action.key).map((control) => {
-      const controlMissing = outcomeAt(control, tier) === 'block' ? [] : unmet(control.requires)
+      const controlMissing = outcomeAt(control, tier) === 'block' ? [] : control.adminOnly ? [ADMIN_ONLY] : unmet(control.requires)
       // A parent switched off takes its control with it, whatever the level would have said.
       if (overriddenOff) return { action: control, mark: 'off', missing: [] }
       if (outcomeAt(control, tier) === 'block') return { action: control, mark: 'fullOnly', missing: [] }

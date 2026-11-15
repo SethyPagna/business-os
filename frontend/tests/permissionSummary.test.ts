@@ -271,6 +271,18 @@ test('chips: Add variant needs Add; opening stock and stock in imports need Adju
   assert.deepEqual(chip('inventory', { inventory: 'review' }, 'edit_reasons').controls.map((control) => control.mark), ['fullOnly'])
 })
 
+test('chips: supplier returns and receipt costs are Admin only controls on Add and Adjust / receive', () => {
+  const supplier = chip('returns', { returns: true }, 'add').controls.find((control) => control.action.key === 'supplier')
+  assert.ok(supplier, 'a Supplier returns control follows Create return')
+  assert.equal(supplier.mark, 'needs')
+  assert.deepEqual(supplier.missing.map((requirement) => requirement.key), ['admin_only'])
+  const costs = chip('inventory', { inventory: true }, 'adjust').controls.find((control) => control.action.key === 'receive_costs')
+  assert.ok(costs, 'a Receipt costs control follows Adjust / receive')
+  assert.equal(costs.mark, 'needs')
+  assert.deepEqual(costs.missing.map((requirement) => requirement.key), ['admin_only'])
+  assert.equal(chip('returns', { returns: true }, 'add').mark, 'allow', 'Create return itself still works for a customer return')
+})
+
 test('chips: a level that blocks an action says Full only, never Hidden, and the chip is inert', () => {
   for (const action of ['import', 'bulk_delete', 'export']) {
     const blocked = chip('products', { products: 'review' }, action)

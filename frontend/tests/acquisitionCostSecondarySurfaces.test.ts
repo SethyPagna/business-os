@@ -67,7 +67,7 @@ context.__costTestContext = { ...effectivePermissions({ permissions: { product_c
 const deniedReview = renderToStaticMarkup(React.createElement(ReviewScreen, {
   jobId: 1, t: () => '', notify: () => {}, onApproved: () => {}, onReviewLater: () => {}, onCancel: () => {}, autoApprove: true,
 }))
-assert.ok(deniedReview.includes('Cost view permission is required'))
+assert.ok(deniedReview.includes('Only an administrator can review financial import data'))
 assert.ok(!deniedReview.includes('Importing'), 'edit permission alone cannot mount the financial review body')
 const duplicates = read('../src/components/products/ProductDuplicatesTab.tsx')
 const resolveAdapter = read('../src/components/products/productResolveAdapter.ts')

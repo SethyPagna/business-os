@@ -225,7 +225,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
   const dueDateLabel = tr('due_date', 'Due date')
   const { fmtKHR, user } = useApp() as { fmtKHR: (value: unknown) => string; user: any }
   const canViewCosts = canViewAcquisitionCosts(user)
-  // The Worker refuses a cost from anyone without cost-entry permission, so
+  // The Worker refuses a cost from anyone who is not an administrator, so
   // the field is only offered to those who have it.
   const canEditCosts = canViewCosts && canEditAcquisitionCosts(user)
   // N6: capture the complete attempt before dispatch. A retry after a lost

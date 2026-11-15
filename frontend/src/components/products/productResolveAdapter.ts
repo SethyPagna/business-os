@@ -436,7 +436,7 @@ function localizedRefusal(error: unknown, t: Translate, partial: boolean): unkno
     : code === 'resolve_plan_budget'
       ? partial ? tr(t, 'resolve_partial_refusal_budget', 'Product resolving is unavailable on this deployment.') : tr(t, 'resolve_plan_budget', 'Product resolving is unavailable on this deployment. No changes were saved.')
     : code === 'cost_permission_required'
-      ? tr(t, 'resolve_cost_locked', 'Changing the cost needs the cost edit permission.')
+      ? tr(t, 'resolve_cost_locked', 'Only an administrator can change the cost.')
     : code === 'product_edit_permission_required'
       ? tr(t, 'merge_needs_product_edit', 'Choosing a price other than the highest needs the permission to edit product prices. Nothing was changed.')
     : code === 'merge_failed'

@@ -255,7 +255,7 @@ async function main() {
     assert.ok(ids(await get('/data-gaps?kind=empty_barcode&limit=100')).includes(13), 'the product is still listed')
   })
 
-  await check('refusals: a $0 confirmation needs the cost-entry permission, products edit at the full tier; the gap must still exist', async () => {
+  await check('refusals: a $0 confirmation needs an administrator, products edit at the full tier; the gap must still exist', async () => {
     assert.equal((await post({ product_id: 1, mark: 'zero_cost_confirmed', set: true }, role({ ...MERGE, product_cost_view: true }))).status, 403)
     assert.equal((await post({ product_id: 13, mark: 'no_barcode', set: true }, role({ pos: true }))).status, 403)
     const notZero = await post({ product_id: 6, mark: 'zero_cost_confirmed', set: true })

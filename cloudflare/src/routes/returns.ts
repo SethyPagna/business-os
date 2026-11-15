@@ -1535,7 +1535,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     expected_quote?: unknown
   }>()
 
-  if (hasAcquisitionCostInput(body.items, user)) return c.json({ error: 'Cost-entry permission is required to submit return cost overrides. Omit cost fields to use recorded costs.', code: 'product_cost_edit_required' }, 403)
+  if (hasAcquisitionCostInput(body.items, user)) return c.json({ error: 'Only an administrator can submit return cost overrides. Omit cost fields to use recorded costs.', code: 'product_cost_edit_required' }, 403)
   const rawRequestId = String(body.client_request_id ?? '').trim()
   const clientRequestId = rawRequestId || null
   if (!clientRequestId || new TextEncoder().encode(clientRequestId).byteLength > 120) {
@@ -2695,8 +2695,8 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
 // tracking any shortfall as supplier_loss_usd/khr.
 app.post('/supplier', async (c) => {
   const user = c.get('user')
-  if (!canEditAcquisitionCosts(user)) return c.json({ error: 'Cost-entry permission is required to record supplier return costs and settlement.', code: 'product_cost_edit_required' }, 403)
-  if (!canViewAcquisitionCosts(user)) return c.json({ error: 'Cost-view permission is required to review supplier return compensation and settlement.', code: 'product_cost_view_required' }, 403)
+  if (!canEditAcquisitionCosts(user)) return c.json({ error: 'Only an administrator can record supplier return costs and settlement.', code: 'product_cost_edit_required' }, 403)
+  if (!canViewAcquisitionCosts(user)) return c.json({ error: 'Only an administrator can review supplier return compensation and settlement.', code: 'product_cost_view_required' }, 403)
   const db = getDb(c.env)
   // Per-action override (Part 546): supplier returns are the same 'add'
   // action as customer returns -- one switch covers both create routes.
@@ -3140,7 +3140,7 @@ app.patch('/:id', async (c) => {
     [key: string]: unknown
   }>().catch(() => ({} as Record<string, unknown>))
 
-  if (hasAcquisitionCostInput(body.items, user)) return c.json({ error: 'Cost-entry permission is required to submit return cost overrides.', code: 'product_cost_edit_required' }, 403)
+  if (hasAcquisitionCostInput(body.items, user)) return c.json({ error: 'Only an administrator can submit return cost overrides.', code: 'product_cost_edit_required' }, 403)
   const returnId = Number(id)
   if (!Number.isSafeInteger(returnId) || returnId <= 0) return c.json({ error: 'Return not found' }, 404)
   const requestId = normalizeClientRequestId(body.client_request_id)

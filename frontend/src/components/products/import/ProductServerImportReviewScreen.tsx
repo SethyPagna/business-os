@@ -58,8 +58,8 @@ function decisionFor(choice: string): { action: string; field_overrides?: Record
 
 export default function ProductServerImportReviewScreen(props: Parameters<typeof ProductServerImportReviewBody>[0]) {
   const { hasPermission } = useApp() as { hasPermission: (key: string) => boolean }
-  if (!hasPermission('product_cost_view')) return <p role="status">{props.t('product_cost_import_view_required') || 'Cost view permission is required to review financial import data.'}</p>
-  return <>{!hasPermission('product_cost_edit') ? <p role="status">{props.t('product_cost_import_required') || 'Cost edit permission is required for this import format.'}</p> : null}<ProductServerImportReviewBody {...props} autoApprove={props.autoApprove && hasPermission('product_cost_edit')} /></>
+  if (!hasPermission('product_cost_view')) return <p role="status">{props.t('product_cost_import_view_required') || 'Only an administrator can review financial import data.'}</p>
+  return <>{!hasPermission('product_cost_edit') ? <p role="status">{props.t('product_cost_import_required') || 'Only an administrator can use this import format.'}</p> : null}<ProductServerImportReviewBody {...props} autoApprove={props.autoApprove && hasPermission('product_cost_edit')} /></>
 }
 
 function ProductServerImportReviewBody({ jobId, jobRevision, t, notify, onApproved, onReviewLater, onCancel, onJob, autoApprove = false, rowCount = 0 }: {

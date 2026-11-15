@@ -231,7 +231,7 @@ await runTest('Review tier: the transport chains the queued-for-review refresh, 
   assert.match(section, /result\?\.pending\s*\?\s*t\('reason_submitted_for_review'\)/, 'a queued decision says it was submitted, not that it was saved')
   assert.match(section, /getPermissionTier\?\.\('products'\) === 'review'/)
   assert.equal((section.match(/queuesForReview \? t\('conflict_sent_for_review_state'\)/g) || []).length, 2, 'both dialogs show "Pending approval" as the after-state for a Review-tier account')
-  assert.match(section, /onConfirmZero=\{canConfirmZero \?/, 'the $0 button needs products edit and the cost-entry permission, not the Full tier')
+  assert.match(section, /onConfirmZero=\{canConfirmZero \?/, 'the $0 button needs products edit and an administrator, not the Full tier')
   assert.match(section, /onMarkNoBarcode=\{canEditProduct \?/)
   assert.ok(!/=== 'full'/.test(section), 'no Full-tier gate remains on the buttons')
 })

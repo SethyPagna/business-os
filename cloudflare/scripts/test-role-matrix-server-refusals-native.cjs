@@ -104,7 +104,7 @@ async function main() {
         assert.equal(refused.status, 403, `${url} -> ${refused.status} ${JSON.stringify(refused.body)}`)
         // A supplier return is administrator only for its costs (owner rule, 15 Nov 2026), and that refusal answers first for a
         // non-admin, so the message differs there; every other return route answers with the plain permission refusal.
-        if (url === '/api/returns/supplier') assert.ok([DENIED, 'Cost-entry permission is required to record supplier return costs and settlement.'].includes(refused.body.error), refused.body.error)
+        if (url === '/api/returns/supplier') assert.ok([DENIED, 'Only an administrator can record supplier return costs and settlement.'].includes(refused.body.error), refused.body.error)
         else assert.equal(refused.body.error, DENIED)
       }
       assert.deepEqual([await count('returns'), await count('action_history'), await count('audit_logs')], before, 'a refused return changes nothing')

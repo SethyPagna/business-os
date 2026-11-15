@@ -4068,7 +4068,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
   },
   // Conflicts decisions (lib/productDataGaps.ts): "Confirm $0" and "no barcode" are rows in product_conflict_marks. The payload is the
   // mark itself ({ product_id, mark, set }); undo/redo is the compensating write. Gated like the forward route: products edit at the
-  // full tier plus Conflicts access (alsoAction), and a $0 confirmation also needs the cost-entry permission (checked in the replay).
+  // full tier plus Conflicts access (alsoAction), and a $0 confirmation also needs an administrator (checked in the replay).
   'product.conflict_mark': {
     permission: 'products',
     action: 'edit',

@@ -439,6 +439,15 @@ const FOLLOWED_CONTROLS = {
       /app\.post\('\/customers\/link-conflicts\/resolve-missing'[\s\S]{0,700}?denyUnlessFullContactAction\(c, 'resolve_conflicts'\)/,
     ],
   },
+  // A cost on a received line is refused to a non-administrator on every receiving route; the stock session is the one proved here.
+  'inventory:receive_costs': {
+    file: 'lib/stockSession.ts',
+    proof: [/function commitStockSession\([^)]*\) \{\s*if \(hasAcquisitionCostInput\(raw, user\)\)\s*fail\('Only an administrator can enter receipt costs\./],
+  },
+  'returns:supplier': {
+    file: 'routes/returns.ts',
+    proof: [/app\.post\('\/supplier'[\s\S]{0,400}?!canEditAcquisitionCosts\(user\)\)\s*return c\.json\(\{ error: 'Only an administrator can record supplier return costs and settlement\./],
+  },
   'inventory:rename_reasons': {
     file: 'routes/inventory.ts',
     proof: [/app\.post\('\/reasons\/replace'[\s\S]{0,700}?getActionTier\(user, 'inventory', 'edit_reasons'\) === 'none'[\s\S]{0,400}?getPermissionTier\(user, 'inventory'\) !== 'full'[\s\S]{0,300}?full_access_required/],
@@ -555,23 +564,24 @@ const OPEN_READS = {
 // leaves the field out and no row is affected. `unmodelled`: refuses a whole control for a role without the grant and
 // the editor does not say so yet (listed so it is a decision, not an oversight).
 const COST_GATES = [
-  { text: 'Cost-entry permission is required for this import format', how: 'row' },
-  { text: 'Cost-view permission is required to read financial import data', how: 'row' },
-  { text: 'Cost-entry permission is required to enter receipt costs', how: 'input' },
-  { text: 'Cost-entry permission is required to change receipt costs', how: 'input' },
-  { text: 'Cost-entry permission is required to change stored receipt costs', how: 'input' },
-  { text: 'Cost-entry permission is required to reverse a cost change', how: 'input' },
-  { text: 'Cost-entry permission is required to change catalog costs', how: 'input' },
-  { text: 'Cost-entry permission is required to set catalog costs', how: 'input' },
-  { text: 'Cost-entry permission is required to submit return cost overrides', how: 'input' },
-  { text: 'Cost-entry permission is required to submit cost changes', how: 'input' },
-  { text: 'Changing the cost needs the cost edit permission', how: 'input' },
-  { text: 'Cost-entry permission is required to record supplier return costs and settlement', how: 'unmodelled', why: 'POST /returns/supplier (a supplier return, under returns:add) also needs Edit and View product costs.' },
-  { text: 'Cost-view permission is required to review supplier return compensation and settlement', how: 'unmodelled', why: 'POST /returns/supplier (a supplier return, under returns:add) also needs Edit and View product costs.' },
-  { text: 'Cost-view permission is required to export an unredacted database backup', how: 'unmodelled', why: 'Creating a backup needs View product costs on top of the backup key.' },
-  { text: 'Cost-entry permission is required to restore database costs', how: 'unmodelled', why: 'Restoring a backup needs Edit product costs on top of backup_restore.' },
-  { text: 'Cost-view permission is required to export database backups', how: 'unmodelled', why: 'Drive sync needs View product costs on top of the backup key.' },
-  { text: 'Cost-entry permission is required to prepare a database restore', how: 'unmodelled', why: 'Staging a Drive restore needs Edit product costs on top of backup_restore.' },
+  { text: 'Only an administrator can use this import format', how: 'row' },
+  { text: 'Only an administrator can read financial import data', how: 'row' },
+  { text: 'Only an administrator can enter receipt costs', how: 'control', why: 'Shown as the Receipt costs control after Adjust / receive (inventory:receive_costs), marked Admin only.' },
+  { text: 'Only an administrator can change receipt costs', how: 'input' },
+  { text: 'Only an administrator can change stored receipt costs', how: 'input' },
+  { text: 'Only an administrator can reverse a cost change', how: 'input' },
+  { text: 'Only an administrator can change catalog costs', how: 'input' },
+  { text: 'Only an administrator can set catalog costs', how: 'input' },
+  { text: 'Only an administrator can submit return cost overrides', how: 'input' },
+  { text: 'Only an administrator can submit cost changes', how: 'input' },
+  { text: 'Only an administrator can change the cost', how: 'input' },
+  { text: 'Only an administrator can confirm or reverse a $0 cost', how: 'input' },
+  { text: 'Only an administrator can record supplier return costs and settlement', how: 'control', why: 'Shown as the Supplier returns control after Add (returns:supplier), marked Admin only.' },
+  { text: 'Only an administrator can review supplier return compensation and settlement', how: 'control', why: 'The same control: POST /returns/supplier.' },
+  { text: 'Only an administrator can export an unredacted database backup', how: 'unmodelled', why: 'The Backup row has no action chips; its description says exporting and restoring need an administrator.' },
+  { text: 'Only an administrator can restore database costs', how: 'unmodelled', why: 'The same description covers restore.' },
+  { text: 'Only an administrator can export database backups', how: 'unmodelled', why: 'Drive sync export: the same description.' },
+  { text: 'Only an administrator can prepare a database restore', how: 'unmodelled', why: 'Staging a Drive restore: the same description.' },
 ]
 
 // ---------------------------------------------------------------------------
@@ -943,9 +953,9 @@ check('every followed control rides a row the Worker checks, is stricter than it
 check('every Worker refusal that names a cost grant is classified', () => {
   const seen = new Map()
   for (const file of workerFiles) {
-    if (!/permission is required|needs the cost edit permission/.test(fs.readFileSync(file, 'utf8'))) continue
+    if (!/Only an administrator can/.test(fs.readFileSync(file, 'utf8'))) continue
     const text = workerText.get(rel(file)) ?? emit(file)
-    for (const match of text.matchAll(/'((?:Cost-entry|Cost-view) permission is required[^']*|Changing the cost needs the cost edit permission[^']*)'/g)) {
+    for (const match of text.matchAll(/'(Only an administrator can (?=[^']*(?:cost|import data|import format|backup|restore|settlement|compensation))[^']*)'/g)) {
       seen.set(match[1], [...(seen.get(match[1]) || []), rel(file)])
     }
   }

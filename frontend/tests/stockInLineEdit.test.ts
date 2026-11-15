@@ -33,7 +33,7 @@ runTest('an untouched draft builds an unchanged body that still pins the line it
   assert.deepEqual(built.body, { client_request_id: 'sil-request-0001', quantity: 10, expected_quantity: 10, expected_batch_id: 7, expected_batch_revision: 4 })
 })
 
-runTest('only the changed fields are sent; a cost is never sent without cost-entry permission', () => {
+runTest('only the changed fields are sent; a cost is never sent by a non-administrator', () => {
   const draft = { ...stockInLineDraft(row), quantity: '12', unitCostUsd: '3', receivedDate: '2026-09-07', supplierName: 'Other' }
   const withCost = buildStockInLineEditBody(row, draft, 'sil-request-0002', true)
   assert.ok(withCost.ok && withCost.changed)
@@ -112,7 +112,7 @@ runTest('the session surface offers Edit on each received line, in the compact l
   assert.match(source, /data-testid="stock-in-line-editor"[^>]*>/)
   assert.match(source, /className="grid grid-cols-2 gap-1\.5 sm:grid-cols-4"/, 'two columns on a phone, one row of four on desktop')
   assert.match(source, /idPrefix="stock-in-line-edit"/)
-  assert.match(source, /\{canEditCosts \? <InsetNumberField label=\{tr\('unit_cost'/, 'the cost field is offered only with cost-entry permission')
+  assert.match(source, /\{canEditCosts \? <InsetNumberField label=\{tr\('unit_cost'/, 'the cost field is offered only to an administrator')
   assert.match(source, /Number\(row\.edit_count\) > 0 && row\.id != null\s*\? editStockInLine\(/, 'an edited line is removed as an edit to 0, not a ledger revert')
   assert.match(source, /editStockInLine\(attempt\.movementId, attempt\.body\)/)
   assert.match(source, /<fieldset disabled=\{busy \|\| Boolean\(pendingAttempt\)\}/)

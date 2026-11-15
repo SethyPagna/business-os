@@ -15,7 +15,7 @@ export function ProductDataGapRowCard({ row, kind, t, onOpen, onConfirmZero, onM
   kind: ProductDataGapKind
   t: TranslateFn
   onOpen?: (productId: number) => void
-  /** Present only for a user who may confirm a $0 (products edit + the cost-entry permission); a Review-tier account's tap is queued. */
+  /** Present only for a user who may confirm a $0 (products edit + an administrator); a Review-tier account's tap is queued. */
   onConfirmZero?: (row: ProductDataGapRow) => void
   /** Present only for a user who may edit products (Full applies it; Review queues it). */
   onMarkNoBarcode?: (row: ProductDataGapRow) => void

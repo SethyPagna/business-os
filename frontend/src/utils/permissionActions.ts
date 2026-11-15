@@ -77,7 +77,6 @@ export interface PermissionAction {
 }
 
 /** What the editor names for a row no grant can unlock: the action is administrator only. */
-/** What the editor names for a row no grant can unlock: the action is administrator only. */
 export const ADMIN_ONLY: ActionRequirement = { key: 'admin_only', tKey: 'perm_admin_only', label: 'Admin only' }
 const COST_EDIT: ActionRequirement = { key: 'product_cost_edit', tKey: 'perm_product_cost_edit', label: 'Edit product costs' }
 const COST_VIEW: ActionRequirement = { key: 'product_cost_view', tKey: 'perm_product_cost_view', label: 'View product costs' }
@@ -166,6 +165,9 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // lot): strict Full Access writes that mutate the same live stock this
     // action names.
     { key: 'adjust', tKey: 'perm_act_inventory_adjust', label: 'Adjust / receive stock', shortTKey: 'perm_short_adjust_receive', short: 'Adjust / receive', review: 'block' },
+    // A receipt that carries a cost (stock session, fast stock-in, batch receive, line edit) is refused to anyone but an administrator
+    // (product_cost_edit_required); receiving without a cost is Adjust / receive as before.
+    { key: 'receive_costs', tKey: 'perm_control_inventory_receive_costs', label: 'Entering costs on received stock', shortTKey: 'perm_short_receive_costs', short: 'Receipt costs', review: 'block', follows: 'adjust', adminOnly: true },
     // POST /transfer answers 403 for Review.
     { key: 'transfer', tKey: 'perm_act_inventory_transfer', label: 'Transfer stock', shortTKey: 'transfer', short: 'Transfer', review: 'block' },
     // POST /move-row answers 403 for Review.
@@ -206,6 +208,8 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // POST / and POST /supplier carry no tier check beyond the router-wide
     // gate, so a review-tier user creates returns directly, by design.
     { key: 'add', tKey: 'perm_act_returns_add', label: 'Create return', shortTKey: 'add', short: 'Add', review: 'allow' },
+    // POST /supplier records cost and settlement, so it is refused to anyone but an administrator (routes/returns.ts).
+    { key: 'supplier', tKey: 'perm_control_returns_supplier', label: 'Supplier returns (cost and settlement)', shortTKey: 'perm_short_returns_supplier', short: 'Supplier returns', review: 'block', follows: 'add', adminOnly: true },
     // PATCH /:id answers 403 for Review: editing reverses and
     // re-applies batch restocking against live state.
     { key: 'edit', tKey: 'perm_act_returns_edit', label: 'Edit return', shortTKey: 'edit', short: 'Edit', review: 'block' },

@@ -1368,7 +1368,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
 
   const beginImportAction = (action: ImportActionName, options: { setLoading?: boolean } = {}): boolean => {
     if (action !== 'pick-csv' && !canEditCosts) {
-      notify(T('product_cost_import_required', 'Cost edit permission is required for this import format.'), 'error')
+      notify(T('product_cost_import_required', 'Only an administrator can use this import format.'), 'error')
       return false
     }
     if (!beginNamedAction(actionInFlightRef, action, { blocked: loading })) return false
@@ -1598,7 +1598,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
   }
 
   const handleCancelCurrentJob = async () => {
-    if (!canEditCosts) { notify(T('product_cost_import_required', 'Cost edit permission is required for this import format.'), 'error'); return }
+    if (!canEditCosts) { notify(T('product_cost_import_required', 'Only an administrator can use this import format.'), 'error'); return }
     if (!currentJob?.id) return
     if (loading) {
       const confirmed = await askToConfirm({
@@ -1632,7 +1632,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
   // pressed the job behaves exactly like a CSV with no images at all,
   // which is a safe state to sit in rather than a half-applied one.
   const handleWireImportJobImages = async () => {
-    if (!canEditCosts) { notify(T('product_cost_import_required', 'Cost edit permission is required for this import format.'), 'error'); return }
+    if (!canEditCosts) { notify(T('product_cost_import_required', 'Only an administrator can use this import format.'), 'error'); return }
     const jobId = currentJob?.id || result?.job?.id || result?.jobId
     if (!jobId || wireImagesState === 'working') return
     const wire = getProductImportApi().wireImportJobImages
@@ -2973,7 +2973,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
           >
             {loading ? T('uploading_import', 'Uploading…') : T('upload_and_import', 'Upload & import')}
           </button>
-          {!canEditCosts ? <p role="status" className="order-7 text-xs text-amber-700 dark:text-amber-300">{T('product_cost_import_required', 'Cost edit permission is required for this import format.')}</p> : null}
+          {!canEditCosts ? <p role="status" className="order-7 text-xs text-amber-700 dark:text-amber-300">{T('product_cost_import_required', 'Only an administrator can use this import format.')}</p> : null}
 
         </div>
       ) : null}
@@ -3030,7 +3030,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
           <button type="button" className="btn-primary w-full" onClick={handleImageOnlyImport} disabled={!canEditCosts || loading || (!Object.keys(imageFiles).length && !zipFile)}>
             {loading ? T('importing_images', 'Importing...') : T('match_import_images', 'Match and import {n} images').replace('{n}', String(Object.keys(imageFiles).length))}
           </button>
-          {!canEditCosts ? <p role="status" className="text-xs text-amber-700 dark:text-amber-300">{T('product_cost_import_required', 'Cost edit permission is required for this import format.')}</p> : null}
+          {!canEditCosts ? <p role="status" className="text-xs text-amber-700 dark:text-amber-300">{T('product_cost_import_required', 'Only an administrator can use this import format.')}</p> : null}
         </div>
       ) : null}
 
