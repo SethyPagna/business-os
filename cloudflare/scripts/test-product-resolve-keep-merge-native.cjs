@@ -346,7 +346,16 @@ async function main() {
     const noCost = await preview(10, 11, '&groupIds=10,11')
     assert.equal(noCost.status, 200)
     assert.equal('groupCost' in noCost.body && noCost.body.groupCost && 'cost_price_usd' in noCost.body.groupCost, false, 'cost is projected away without cost view')
+    // 15 Nov 2026: cost is admin only. A non-admin holding BOTH cost grants is refused exactly like the manager and sees no cost.
     state.user = COST_EDITOR
+    const grantsDenied = await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge', cost_price_usd: 6.5 })
+    assert.equal(grantsDenied.status, 403, JSON.stringify(grantsDenied.body))
+    assert.equal(grantsDenied.body.code, 'cost_permission_required')
+    assert.equal(dump(), before)
+    const grantsPreview = await preview(10, 11, '&groupIds=10,11')
+    assert.equal(grantsPreview.status, 200)
+    assert.equal('groupCost' in grantsPreview.body && grantsPreview.body.groupCost && 'cost_price_usd' in grantsPreview.body.groupCost, false, 'a grant holder sees no cost')
+    state.user = ADMIN // the positive control
     const seen = await preview(10, 11, '&groupIds=10,11')
     assert.ok(Object.hasOwn(seen.body.groupCost, 'cost_price_usd'), 'the permitted actor can read the current preview costs')
     const invalid = await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge', cost_price_usd: -1 })
@@ -475,8 +484,9 @@ async function main() {
     fresh()
     fixtureWrite(() => state.native.db.exec(`INSERT INTO products (id, name, barcode, cost_price_usd, selling_price_usd, is_active)
       VALUES (60, 'Lip Oil', '600001', 2, 10, 1), (61, 'Lip Oil', '600002', 4, 10, 1), (62, 'Lip Oil', '600003', 6, 10, 1)`))
-    state.user = { ...MANAGER, permissions: JSON.stringify({ products: true, inventory: true, product_cost_view: true }) }
+    state.user = ADMIN // cost view is admin only: the administrator reads the frozen mean, then a non-editor performs the merges
     const seen = await preview(60, 61, '&groupIds=60,61,62')
+    state.user = { ...MANAGER, permissions: JSON.stringify({ products: true, inventory: true, product_cost_view: true }) }
     assert.equal(seen.body.groupCost.cost_price_usd, 4)
     const resolve = { requestId: 'three-products', reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 61 }, { mergeId: 62 }] }
     const legacyPlan = productMerge.createProductMergeClusterPlan('legacy-three', 60, rows('SELECT * FROM products WHERE id IN (60,61,62)'), 2)
