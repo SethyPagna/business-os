@@ -630,7 +630,7 @@ function appBranch(opening: string): string {
 
 await check('the staff sign-in screen carries the band; the spinner and the forced password change never do', () => {
   assert.match(
-    appBranch('  if (!user) {'),
+    appBranch('\n  if (!user) {\n'),
     /<Login \/>[\s\S]*<div className=\{bottomStackClass\(BOTTOM_STACK_CLEARS_SAFE_AREA_CLASS\)\}>\s*<IosInstallHint \/>/,
     'the sign-in screen mounts the band in a bottom stack below the form',
   )
