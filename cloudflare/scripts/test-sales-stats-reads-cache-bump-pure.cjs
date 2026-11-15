@@ -32,7 +32,7 @@ function world({ kv = {}, d1 = {}, kvFails = false, d1Fails = false }, patch) {
     prepare() {
       return {
         async get(params) { calls.d1++; if (d1Fails) throw new Error('D1 unavailable'); return params.namespace in d1 ? { version: d1[params.namespace] } : undefined },
-        async all(params) { calls.d1++; if (d1Fails) throw new Error('D1 unavailable'); return JSON.parse(params.namespaces).filter((n) => n in d1).map((n) => ({ namespace: n, version: d1[n] })) },
+        async all(params) { calls.d1++; if (d1Fails) throw new Error('D1 unavailable'); return (Array.isArray(params) ? params : JSON.parse(params.namespaces)).filter((n) => n in d1).map((n) => ({ namespace: n, version: d1[n] })) },
       }
     },
   }
