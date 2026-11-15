@@ -51,7 +51,7 @@ function load(file, overrides = {}) {
   const original = Module._load
   Module._load = (request, parent, isMain) => Object.hasOwn(overrides, request) ? overrides[request] : request.startsWith('.') ? inert() : original(request, parent, isMain)
   const mod = { exports: {} }
-  try { new Function('require', 'module', 'exports', '__filename', '__dirname', code)(require, mod, mod.exports, full, path.dirname(full)) } finally { Module._load = original }
+  try { new Function('require', 'module', 'exports', '__filename', '__dirname', code)((request) => Object.hasOwn(overrides, request) ? overrides[request] : require(request), mod, mod.exports, full, path.dirname(full)) } finally { Module._load = original }
   return mod.exports
 }
 
@@ -110,6 +110,7 @@ const costPreview = load('lib/productMergeCostPreview.ts', { './catalogCostRecom
 // UI-CONFLICTS B1: the Resolve choices kernel, real, so the route never sees an inert stand-in.
 const resolveChoices = load('lib/productResolveChoices.ts', { './moneyPrecision': moneyPrecision, './searchMatch': load('lib/searchMatch.ts') })
 const undoAppliers = load('lib/undoAppliers.ts', {
+  './acquisitionCostAccess': acquisitionCostAccess,
   './stockTransaction': stockTransaction,
   './actorSnapshot': actorSnapshot,
   './db': { getDb: () => adapter },
