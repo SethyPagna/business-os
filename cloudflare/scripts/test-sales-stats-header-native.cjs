@@ -18,8 +18,8 @@ const { seedContext } = require('./read-budget/seed.cjs')
 
 const SALES = 'src/routes/sales.ts'
 const KERNEL = 'src/lib/salesAnalytics.ts'
-const SCOPE_NEW = 'const scope = where.length - 1 === windowClauseCount && !openEndedStart ? undefined : salesListFilterReportScope(where, params)'
-const SCOPE_OLD = 'const scope = salesListFilterReportScope(where, params)'
+const SCOPE_NEW = 'const scope = where.length - 1 === windowClauseCount && !openEndedStart ? undefined : salesListFilterReportScope(where, params, narrowScope)'
+const SCOPE_OLD = 'const scope = salesListFilterReportScope(where, params, narrowScope)'
 const HEADER_CALL = 'const totals = await readSalesHeaderTotals(c.env, windowFilter, scope)'
 const IMPORT_FRAG = 'readSalesReportSnapshot, readSalesHeaderTotals,'
 const WINDOW_NEW = 'const windowFilter={startDate:query.startDate||null,endDate:query.endDate||null,startTime:query.startTime||null,endTime:query.endTime||null}'
