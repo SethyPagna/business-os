@@ -28,7 +28,9 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
-const { fixture, user, receiveRequest } = require('./test-stock-session-atomic.cjs')
+const { fixture, user: stockUser, receiveRequest } = require('./test-stock-session-atomic.cjs')
+// Cost entry is administrator only (owner, 15 Nov 2026): the operator of these receipts is an administrator.
+const user = { ...stockUser, role_code: 'admin' }
 
 const root = process.env.STOCK_SESSION_TEST_ROOT || path.join(__dirname, '..')
 function loader() {

@@ -113,7 +113,7 @@ assert.match(products, /setStockFilter\(stockState\)/, 'the Products page should
 // (test-reports-cost-visibility-pure.cjs pins the server side). A non-admin
 // dashboard permission gets no profit_usd at all -- never a real 0 -- so the
 // Gross Profit card must be omitted rather than print $0.00 or NaN.
-assert.match(dashboard, /const aHasProfit = typeof analytics\?\.totals\?\.profit_usd === 'number'/,
+assert.match(dashboard, /const aHasProfit = aSeesCost && typeof analytics\?\.totals\?\.profit_usd === 'number'/,
   'the Gross Profit card must be presence-signalled, not defaulted with || 0')
 assert.match(dashboard, /\.\.\.\(aHasProfit \? \[\{\s*\n\s*id: 'profit'/,
   'the profit card must be omitted entirely (like Reports hides its profit column) when the server sent no profit_usd')

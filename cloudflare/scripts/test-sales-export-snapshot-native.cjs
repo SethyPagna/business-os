@@ -112,17 +112,19 @@ async function main() {
     assert.equal((await h.get(frozen(employee, { verifyOnly: '1' }))).status, 200)
     h.setUser(h.staff({ all: true }))
     assert.equal((await h.get(frozen(admin, { verifyOnly: '1' }))).status, 409)
-    h.setUser(h.staff({ sales: true, product_cost_view: true }))
+    // Owner rule, 15 Nov 2026: cost and courier cost are administrator only. The administrator sees both; a non-admin holding the
+    // retired cost grants sees neither, and cannot replay a token the administrator minted.
+    h.setUser(h.staff({ all: true }))
     const viewer = (await h.get()).body
     assert.equal(Object.hasOwn(viewer.totals, 'cost_usd'), true)
-    assert.equal(Object.hasOwn(viewer.totals, 'delivery_actual_cost_usd'), true, 'the courier-cost permission is on by default for a Sales role')
-    h.setUser(h.staff({ sales: true, product_cost_view: true, 'sales:view_courier_cost': false }))
+    assert.equal(Object.hasOwn(viewer.totals, 'delivery_actual_cost_usd'), true, 'an administrator reads the courier cost')
+    h.setUser(h.staff({ sales: true, product_cost_view: true, product_cost_edit: true, 'sales:view_courier_cost': true }))
     const blind = (await h.get()).body
-    assert.equal(Object.hasOwn(blind.totals, 'cost_usd'), true)
-    assert.equal(Object.hasOwn(blind.totals, 'delivery_actual_cost_usd'), false, 'switched off: the cost grant alone never opens the courier cost')
-    assert.equal(blind.totals.profit_excludes_delivery, true)
-    assert.notEqual(blind.export_token, viewer.export_token, 'the courier-cost authority is bound into the export token')
-    assert.equal((await h.get(frozen(viewer, { verifyOnly: '1' }))).status, 409, 'a token minted with the courier cost cannot be replayed without it')
+    assert.equal(Object.hasOwn(blind.totals, 'cost_usd'), false, 'the retired cost grant opens nothing')
+    assert.equal(Object.hasOwn(blind.totals, 'delivery_actual_cost_usd'), false, 'the retired courier-cost grant opens nothing')
+    assert.equal(Object.hasOwn(blind.rows[0], 'cost_usd'), false)
+    assert.notEqual(blind.export_token, viewer.export_token, 'the cost authority is bound into the export token')
+    assert.equal((await h.get(frozen(viewer, { verifyOnly: '1' }))).status, 409, 'a token minted with the costs cannot be replayed without them')
     assert.equal(Object.hasOwn(viewer.totals, 'money_contributing_rows'), true)
     assert.equal(Object.hasOwn(viewer.rows[0], 'money_complete'), true)
   })

@@ -34,7 +34,9 @@ function intent(key,base,quantity=1,fixed=0,rate=4000) {
 const originalRequest=h.request
 h.request=id=>({...originalRequest(id),items:[intent(id+'-line',9.5)]})
 async function run() {
-  const financialUser = {...h.USER, permissions:JSON.stringify({...JSON.parse(h.USER.permissions), product_cost_view:true})}
+  // Owner rule, 15 Nov 2026: cost is administrator only. The administrator sees the cost; a non-admin holding the retired
+  // product_cost_view grant does not (the hidden retry below).
+  const financialUser = {...h.USER, role_code:'admin', permissions:JSON.stringify({...JSON.parse(h.USER.permissions), product_cost_view:true})}
   h.setUser(financialUser)
   const f = h.fixture()
   seedStockFixture(f.raw.db, () => f.raw.prepare('UPDATE products SET cost_price_usd=1.2345 WHERE id=10').run())
@@ -53,7 +55,7 @@ async function run() {
   const retry = await h.postSale(f.route,{client_request_id:body.client_request_id})
   assert.equal(retry.status,200); assert.equal(retry.body.duplicate,true)
   assert.deepEqual(h.creationState(f.raw),before)
-  h.setUser({...financialUser, permissions:JSON.stringify({...JSON.parse(financialUser.permissions), product_cost_view:false})})
+  h.setUser({...financialUser, role_code:'manager', permissions:JSON.stringify({...JSON.parse(financialUser.permissions), product_cost_view:true})})
   const hiddenRetry = await h.postSale(f.route,{client_request_id:body.client_request_id})
   assert.equal(hiddenRetry.status,200)
   assert.equal(hiddenRetry.body.duplicate,true)
