@@ -189,6 +189,8 @@ async function wholeWorker() {
       assert.equal((await h.call('POST','/api/products/receiving-cost-preview',{lines:[lines[0]]},`${tier} both grants`,{cookie:await h.addEmployee(913,'preview_both',{products:true,inventory:true,product_cost_view:true,product_cost_edit:true})})).status,403,'both retired grants still give a non-admin nothing')
       await h.db.prepare('UPDATE users SET permissions=? WHERE id=911').bind(JSON.stringify({product_cost_view:false})).run()
       const revoked=await h.call('POST','/api/products/receiving-cost-preview',{lines:[lines[0]]},`${tier} revoked viewer`,{cookie:viewer})
+      // Not a discriminating arm: a non-administrator is refused with the grant stored true (above) and stored false alike, so this case
+      // cannot separate the old rule from the new one. The grant-holder arms above are the ones that do.
       assert.equal(revoked.status,403,JSON.stringify(revoked.body));assert.equal(revoked.body.results,undefined)
       const blind=await h.addEmployee(912,'preview_blind',{products:true,inventory:true,product_cost_edit:true})
       assert.equal((await h.call('POST','/api/products/receiving-cost-preview',{lines:[lines[0]]},`${tier} cost edit alone`,{cookie:blind})).status,403)

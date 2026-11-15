@@ -64,6 +64,9 @@ async function main() {
       manager: await h.addEmployee(910, 'matrix_manager', SEED.manager),
       employee: await h.addEmployee(911, 'matrix_employee', SEED.employee),
       employeeViewGrant: await h.addEmployee(912, 'matrix_employee_view', { ...SEED.employee, product_cost_view: true }),
+      // This arm does not discriminate on the READ matrix: under the old rule Edit product costs alone never opened a cost read either
+      // (reads needed View product costs), so it is green against both rules. Cost ENTRY by a grant holder is refused in the cost-write
+      // cases (test-role-matrix-server-refusals-native, the stock-session, returns and products cost-entry tests).
       managerEditGrant: await h.addEmployee(913, 'matrix_manager_edit', { ...SEED.manager, product_cost_edit: true }),
     }
     const ROUTES = [
