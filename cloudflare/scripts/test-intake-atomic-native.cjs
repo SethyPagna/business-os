@@ -3,7 +3,9 @@ const path = require('node:path')
 const assert = require('node:assert/strict')
 const ts = require('typescript')
 const { Hono } = require('hono')
-const { fixture, user } = require('./test-stock-session-atomic.cjs')
+const { fixture, user: stockUser } = require('./test-stock-session-atomic.cjs')
+// 15 Nov 2026: a receipt cost is admin only; this file is about intake atomicity, so its actor is an administrator.
+const user = { ...stockUser, role_code: 'admin' }
 const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 
 const sourceRoot = process.env.INTAKE_SOURCE_ROOT || path.join(__dirname, '..')

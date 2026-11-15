@@ -150,7 +150,10 @@ async function main() {
       assert.ok(hidden.proxy.sql.every(sql => !sql.includes('p.cost_review_key')), 'hidden cost never selects the source marker')
       for (const row of hidden.result.items) for (const key of ['cost_needs_review', 'cost_review_key', 'cost_price_usd', 'cost_price_khr']) assert.ok(!Object.hasOwn(row, key), key)
     }
-    const permitted = await read(db, query, { id: 2, role_code: 'employee', role_permissions: JSON.stringify({ inventory_checks: true, inventory_check_show_received: true, inventory_check_show_cost: true, product_cost_view: true }) }, { costReviewKeyAvailable: true })
+    // 15 Nov 2026: cost is admin only. An employee holding every cost grant sees none of it; the administrator is the positive control.
+    const grantsOnly = await read(db, query, { id: 2, role_code: 'employee', role_permissions: JSON.stringify({ inventory_checks: true, inventory_check_show_received: true, inventory_check_show_cost: true, product_cost_view: true }) }, { costReviewKeyAvailable: true })
+    for (const row of grantsOnly.result.items) for (const key of ['cost_needs_review', 'cost_review_key', 'cost_price_usd', 'cost_price_khr']) assert.ok(!Object.hasOwn(row, key), key)
+    const permitted = await read(db, query, admin, { costReviewKeyAvailable: true })
     assert.equal(permitted.result.items.find(row => row.id === 900001).cost_needs_review, true)
     db.close()
   })

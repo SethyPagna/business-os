@@ -97,6 +97,8 @@ function seed(w) {
 
 function newWorld(patches = []) {
   const w = createFeesWorld({ patches, overrides: { './analytics': { recordAnalytics: () => {} } } })
+  // 15 Nov 2026: the courier figure on a sale is admin only, so the fixture's all-seeing reader is an administrator. courierOff and noSales stay non-admin and still get no courier figure.
+  w.users.full = w.users.admin
   seed(w)
   return w
 }

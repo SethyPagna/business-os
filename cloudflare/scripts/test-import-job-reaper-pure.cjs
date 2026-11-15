@@ -191,7 +191,7 @@ async function main() {
     const calls = []
     const listed = [{ id: 'visible', type: 'products', policy_json: '{}', summary_json: '{}' }]
     const env = {
-      TEST_USER: { grants: { products: true }, permissions: JSON.stringify({ product_cost_view: true }) },
+      TEST_USER: { role_code: 'admin', grants: { products: true }, permissions: JSON.stringify({ product_cost_view: true }) },
       DB: rawListBinding({ rows: listed, calls }),
     }
     const response = await app.request('/', {}, env)
@@ -213,7 +213,7 @@ async function main() {
   {
     activeDb = instrumentDb(newDb(), { failProbe: true })
     const response = await app.request('/', {}, {
-      TEST_USER: { grants: { products: true }, permissions: JSON.stringify({ product_cost_view: true }) },
+      TEST_USER: { role_code: 'admin', grants: { products: true }, permissions: JSON.stringify({ product_cost_view: true }) },
       DB: rawListBinding({ fail: true, calls: [] }),
     })
     assert.equal(response.status, 500)

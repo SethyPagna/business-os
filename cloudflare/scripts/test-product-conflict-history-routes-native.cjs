@@ -39,6 +39,7 @@ async function main() {
     add.run(3, 'Second old zero', 'B3', 0)
     add.run(4, 'Third old zero', 'B4', 0)
     add.run(5, 'Second no barcode', null, 2)
+    add.run(6, 'Third no barcode', null, 2) // the conflicts-access test uses a non-cost mark: a $0 confirmation needs cost entry, which is admin only
   })
   raw.prepare("UPDATE system_flags SET value = '5' WHERE key = 'cost_zero_watermark'").run()
   let user = ADMIN
@@ -102,7 +103,7 @@ async function main() {
   })
 
   await check('a role with Conflicts access (merge_duplicates) off is refused on undo and on redo, and nothing changes', async () => {
-    const id = await decide(3, 'zero_cost_confirmed', actorStaff)
+    const id = await decide(6, 'no_barcode', actorStaff)
     const before = marks()
     const noConflicts = role({ ...CONFLICTS, 'products:merge_duplicates': false })
     const refusedUndo = await call(noConflicts, id, 'undo')
@@ -112,10 +113,10 @@ async function main() {
     assert.equal((await call(ADMIN, id, 'undo')).status, 200)
     const refusedRedo = await call(noConflicts, id, 'redo')
     assert.equal(refusedRedo.status, 403, JSON.stringify(refusedRedo.json))
-    assert.ok(!marks().includes('3:zero_cost_confirmed'), 'the refused redo did not re-apply the mark')
+    assert.ok(!marks().includes('6:no_barcode'), 'the refused redo did not re-apply the mark')
     assert.equal(historyRow(id).status, 'redoable')
     assert.equal((await call(role(CONFLICTS), id, 'redo')).status, 200, 'control: the same role with Conflicts access on may redo')
-    assert.ok(marks().includes('3:zero_cost_confirmed'))
+    assert.ok(marks().includes('6:no_barcode'))
   })
 
   await check('undoing a $0 confirmation needs the cost-entry permission; a no-barcode mark does not', async () => {
@@ -126,6 +127,12 @@ async function main() {
     assert.equal(refused.status, 409)
     assert.equal(refused.json.code, 'undo_refused')
     assert.ok(marks().includes('4:zero_cost_confirmed'))
+    // 15 Nov 2026: cost entry is admin only, so a role that holds BOTH cost grants is refused the same way; the administrator undoes it
+    // (the first test above is the administrator's positive control).
+    const withGrants = await call(role(CONFLICTS), zeroId, 'undo')
+    assert.equal(withGrants.status, 409, JSON.stringify(withGrants.json))
+    assert.equal(withGrants.json.code, 'undo_refused')
+    assert.ok(marks().includes('4:zero_cost_confirmed'), 'the grant holder changed nothing')
     const barcodeId = await decide(5, 'no_barcode', actorStaff)
     assert.equal((await call(withoutCostEdit, barcodeId, 'undo')).status, 200)
     assert.ok(!marks().includes('5:no_barcode'))
