@@ -415,9 +415,14 @@ async function main() {
     await refused('groupBy=checked&sessionId=own', 'groupBy')
     const inSession = await products('sessionId=own')
     assert.equal(inSession.status, 200); assert.equal(inSession.body.capabilities?.groupings, undefined, 'a session list advertises no grouping')
-    // Switch off: the old validator refuses the key.
+    // Switch off: the old list cannot group, so it accepts groupBy and ignores it (a client may always send it): byte-identical to the request without it, nothing written, no capability.
     setSwitch('off')
-    await refused('groupBy=checked', 'groupBy')
+    const offPlain = await products('branchId=1'), offIgnored = await products('branchId=1&groupBy=checked'), offCategory = await products('branchId=1&groupBy=category')
+    assert.equal(offIgnored.status, 200); assert.equal(JSON.stringify(offIgnored.body), JSON.stringify(offPlain.body), 'switch off: groupBy=checked answers exactly as without it')
+    assert.equal(JSON.stringify(offCategory.body), JSON.stringify(offPlain.body), 'switch off: groupBy=category answers exactly as without it')
+    assert.ok(!('grouping' in offIgnored.body) && !('groupings' in (offIgnored.body.capabilities ?? {})), 'switch off: no grouping block, no groupings capability')
+    await refused('groupBy=brand', 'groupBy'); assert.equal((await products('groupBy=category', BLIND)).status, 403, 'switch off: category without the field stays 403')
+    assert.equal((await products('groupBy=checked&sessionId=own')).status, 400, 'switch off: groupBy inside a session stays 400')
     setSwitch(ON)
     assert.equal(JSON.stringify([physical(), metadata()]), before, 'readers never write')
   })
