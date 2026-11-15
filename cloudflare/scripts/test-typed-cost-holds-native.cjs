@@ -77,7 +77,7 @@ const real = new Set([
   'stockTransaction', 'stockMutationReceipt', 'productCostReview', 'productMergeCostPreview', 'productConflictActionGroups',
   'acquisitionCostAccess', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db',
   'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'reviewApprovalPermission', 'productDiscountGate',
-  'conflictControl', 'renameCascade', 'schemaProbe', 'catalogCostRecompute', 'productBatches', 'productStockGuard',
+  'conflictControl', 'productDataGaps', 'renameCascade', 'schemaProbe', 'catalogCostRecompute', 'productBatches', 'productStockGuard',
   'createFold', // the create-fold helper moved out of routes/products.ts (13 Oct 2026); an unloaded module would be a no-op
 ])
 const noop = new Proxy(function () {}, { get: () => noop, apply: () => undefined, construct: () => ({}) })
@@ -95,18 +95,6 @@ const services = {
   media: { sanitizeMediaList: () => [] },
   importImageMatch: { MAX_IMAGES_PER_PRODUCT: 3 },
   productImagePermission: { ProductImageAssetError, productImageFieldsChanged: () => false, productImageFieldsChangedResolved: async () => false, resolveProductImageFields: async () => {}, omitUnchangedProductImageFields: () => {} },
-}
-// Owner rule, 15 Nov 2026: cost entry is administrator only, and an administrator is never queued for review. The Review-tier
-// case below (a requester queues a cost edit, an approver applies it) replays what a role holding the retired cost grants queued
-// before the ruling, so until a case sets globalThis.__costRuleAdmin the fixture reads the retained switch-back
-// (holdsCostViewGrant / holdsCostEditGrant, lib/acquisitionCostAccess.ts). The 'owner rule' case turns the real rule on.
-function legacyCostGrantShim(text) {
-  const swap = (name, grant) => (source) => source.replace(
-    new RegExp(`export function ${name}\\(user: PermissionUser\\): boolean \\{\\s*return isAdminControlUser\\(user\\)`),
-    `export function ${name}(user: PermissionUser): boolean {\n  return (globalThis as any).__costRuleAdmin ? isAdminControlUser(user) : ${grant}(user)`)
-  const patched = swap('canEditAcquisitionCosts', 'holdsCostEditGrant')(swap('canViewAcquisitionCosts', 'holdsCostViewGrant')(text))
-  if (patched.split('__costRuleAdmin').length !== 3) throw new Error('acquisitionCostAccess.ts changed shape: the typed-cost fixture shim no longer applies')
-  return patched
 }
 const cache = new Map()
 const transpile = (source, fileName) => ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }, fileName }).outputText
@@ -126,7 +114,7 @@ function load(relative) {
   const mod = { exports: {} }; cache.set(relative, mod.exports)
   const filename = path.join(src, relative)
   const text = fs.readFileSync(filename, 'utf8')
-  new Function('require', 'module', 'exports', transpile(relative === 'lib/acquisitionCostAccess.ts' ? legacyCostGrantShim(text) : text, filename))(localRequireFor(relative), mod, mod.exports)
+  new Function('require', 'module', 'exports', transpile(text, filename))(localRequireFor(relative), mod, mod.exports)
   cache.set(relative, mod.exports); return mod.exports
 }
 function loadFrontend(relative) {
@@ -341,22 +329,22 @@ async function main() {
   })
 
   await check('owner rule: a Review-tier requester holding the retired cost-entry grant is refused a cost edit (403, nothing queued)', async () => {
-    globalThis.__costRuleAdmin = true
-    try {
-      const p = seed()
-      const refused = await request(products, 'PUT', `/${p.id}`, { cost_price_usd: 9 }, requester)
-      assert.equal(refused.status, 403, JSON.stringify(refused))
-      assert.equal(refused.body.code, 'product_cost_edit_required')
-      assert.equal(cost(p.id), 4, 'the cost did not move')
-    } finally { delete globalThis.__costRuleAdmin }
+    const p = seed()
+    const refused = await request(products, 'PUT', `/${p.id}`, { cost_price_usd: 9 }, requester)
+    assert.equal(refused.status, 403, JSON.stringify(refused))
+    assert.equal(refused.body.code, 'product_cost_edit_required')
+    assert.equal(cost(p.id), 4, 'the cost did not move')
+    assert.equal(raw.prepare('SELECT COUNT(*) n FROM pending_actions WHERE entity_id = ?').get(p.id).n, 0)
   })
 
   await check('review queue: an approved cost edit records the entry (requester as actor); the cost holds past a sale', async () => {
     const p = seed()
-    const queued = await request(products, 'PUT', `/${p.id}`, { cost_price_usd: 9 }, requester)
-    assert.equal(queued.status, 202, JSON.stringify(queued))
+    // Queued before the ruling: the row is seeded with the frozen plan and an administrator approves it under the real rule.
+    const body = { cost_price_usd: 9 }
+    await load('lib/productWrites.ts').prepareProductMoneyWrite({ ...env, TEST_USER: admin }, body, p.id)
+    const queuedId = Number(raw.prepare("INSERT INTO pending_actions(section, action_type, entity_type, entity_id, payload_json, status, requested_by, requested_by_name) VALUES ('products', 'update', 'product', ?, ?, 'open', 2, 'requester')").run(p.id, JSON.stringify(body)).lastInsertRowid)
     assert.equal(cost(p.id), 4, 'not applied until approved')
-    const approved = await request(reviews, 'POST', `/${queued.body.pendingActionId}/approve`, {})
+    const approved = await request(reviews, 'POST', `/${queuedId}/approve`, {})
     assert.equal(approved.status, 200, JSON.stringify(approved))
     assert.equal(cost(p.id), 9)
     const [entry] = entries(p.id)
@@ -364,6 +352,18 @@ async function main() {
     assert.equal(entry.user_name, 'requester')
     sell(p)
     assert.equal(cost(p.id), 9)
+  })
+
+  await check('review queue: an old $0-cost confirmation by a non-administrator is refused at approval (the requester is re-checked under the real rule)', async () => {
+    const p = seed()
+    seedFixture(raw, () => raw.prepare('UPDATE products SET cost_price_usd = 0, cost_price_khr = 0 WHERE id = ?').run(p.id))
+    const payload = { applier: 'product.conflict_mark', product_id: p.id, mark: 'zero_cost_confirmed', set: true, expected: { cost_price_usd: 0, cost_price_khr: 0 } }
+    const pendingId = Number(raw.prepare("INSERT INTO pending_actions(section, action_type, entity_type, entity_id, payload_json, status, requested_by, requested_by_name) VALUES ('products', 'conflict_mark', 'product', ?, ?, 'open', 2, 'requester')").run(p.id, JSON.stringify(payload)).lastInsertRowid)
+    const refused = await request(reviews, 'POST', `/${pendingId}/approve`, {})
+    assert.equal(refused.status, 409, JSON.stringify(refused))
+    assert.equal(refused.body.code, 'request_permission_revoked', 'the requester holds both retired cost grants and is still refused')
+    assert.equal(raw.prepare('SELECT COUNT(*) n FROM product_conflict_marks WHERE product_id = ?').get(p.id).n, 0, 'no mark was written')
+    assert.equal(raw.prepare('SELECT status FROM pending_actions WHERE id = ?').get(pendingId).status, 'open', 'the request stays open')
   })
 
   await check('review queue: a plan-less historical queue row still records the entry; the cost holds past a sale', async () => {

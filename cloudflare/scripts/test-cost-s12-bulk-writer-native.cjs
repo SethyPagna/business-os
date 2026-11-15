@@ -81,8 +81,11 @@ const apply = (id, updates, user = admin) => request(products, 'PUT', '/' + id, 
   })
   await check('reviewed bulk cost payload remains pending until real approval then creates the canonical override', async () => {
     const id = make('S12 Reviewed',5,20000)
-    const pending = await apply(id,{purchase_price_usd:6},requester)
-    assert.equal(pending.status,202,JSON.stringify(pending))
+    // A non-administrator can no longer queue a cost; a request queued before the ruling is seeded with its frozen plan.
+    const refused = await apply(id,{purchase_price_usd:6},requester)
+    assert.equal(refused.status,403,JSON.stringify(refused))
+    assert.equal(refused.body.code,'product_cost_edit_required')
+    const pending = await seedQueued('update', id, frontendWriter.buildProductBulkUpdatePayload({purchase_price_usd:6}, row(id), requester))
     assert.equal(row(id).cost_price_usd,5)
     assert.equal(entries(id).length,0)
     assert.equal((await request(reviews,'POST','/' + pending.body.pendingActionId + '/approve',{})).status,200)
