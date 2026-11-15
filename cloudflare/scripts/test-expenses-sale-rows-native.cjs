@@ -329,6 +329,7 @@ async function scenario(w) {
 // every sale of the branch (19,000 of 20,000) to find 200.
 async function scenarioPlan(patches = []) {
   const w = createFeesWorld({ patches })
+  w.users.full = w.users.admin // 15 Nov 2026: the courier figure is admin only, so the all-seeing reader is an administrator (courierOff and noSales stay non-admin)
   w.sql.exec("INSERT INTO branches (id, name, role, is_active) VALUES (1, 'Store', 'shop', 1), (2, 'Second', 'shop', 1)")
   const insert = w.sql.prepare("INSERT INTO sales (id, created_at, sale_status, branch_id, total_usd, subtotal_usd, delivery_actual_cost_usd) VALUES (?, ?, 'completed', ?, 10, 10, ?)")
   w.sql.exec('BEGIN')
@@ -392,6 +393,7 @@ function recordStatements(w) {
 
 async function scenarioPlanFees(patches = []) {
   const w = createFeesWorld({ patches })
+  w.users.full = w.users.admin // 15 Nov 2026: the courier figure is admin only, so the all-seeing reader is an administrator (courierOff and noSales stay non-admin)
   w.sql.exec("INSERT INTO branches (id, name, role, is_active) VALUES (1, 'Store', 'shop', 1), (2, 'Second', 'shop', 1)")
   const insert = w.sql.prepare("INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, branch_id, created_at) VALUES (?, ?, ?, 0, ?, ?, ?)")
   w.sql.exec('BEGIN')
@@ -469,6 +471,7 @@ async function scenarioPlanFees(patches = []) {
 
 (async () => {
   const w = createFeesWorld()
+  w.users.full = w.users.admin // 15 Nov 2026: the courier figure is admin only, so the all-seeing reader is an administrator (courierOff and noSales stay non-admin)
   seed(w)
   await scenario(w)
   await scenarioPlan()
@@ -506,6 +509,7 @@ async function scenarioPlanFees(patches = []) {
     let red = false
     try {
       const m = createFeesWorld({ patches: [].concat(patch) })
+      m.users.full = m.users.admin // 15 Nov 2026: the courier figure is admin only, so the all-seeing reader is an administrator (courierOff and noSales stay non-admin)
       seed(m)
       await scenario(m)
       await scenarioPlan([].concat(patch))
