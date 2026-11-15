@@ -233,7 +233,7 @@ try {
     listAnswer = () => listBody([withLots(productRow(12, 'Dated product', 8)), productRow(13, 'Plain product', 4)], { capabilities, summary: { ok: 0, issue: 0, not_checked: 2, total: 2 } })
     const surface = await mount()
     await openCount(surface, '12')
-    await surface.type(dateInput(surface, 7), '4')
+    await surface.type(dateInput(surface, 7), '4'); await surface.type(dateInput(surface, 9), '3')
     await closeCount(surface)
     await openCount(surface, '13')
     assert.equal(surface.findAll(node => node.getAttribute('data-popover-lot') !== null).length, 0, 'a product with no batch counts one total')
@@ -243,7 +243,7 @@ try {
     await surface.click(exact(surface, 'Submit').at(-1)!)
     assert.equal(submissions.length, 1, 'ONE request carries both kinds of row')
     assert.deepEqual((submissions[0].lines as Array<Record<string, unknown>>).map(line => ['lots' in line ? 'dated' : 'plain', line.productId]), [['dated', 12], ['plain', 13]])
-    assert.deepEqual((submissions[0].lines as Array<{ lots: unknown }>)[0].lots, [{ batchId: 7, scope: 'lot', counted: 4, seen: 5 }])
+    assert.deepEqual((submissions[0].lines as Array<{ lots: unknown }>)[0].lots, [{ batchId: 7, scope: 'lot', counted: 4, seen: 5 }, { batchId: 9, scope: 'lot', counted: 3, seen: 3 }])
     assert.deepEqual({ ...(submissions[0].lines as Array<Record<string, unknown>>)[1] }, { productId: 13, countedQuantity: 4, seenQuantity: 4, checked: false })
     await surface.unmount()
   }
@@ -329,13 +329,13 @@ try {
     await surface.click(toggle)
     assert.deepEqual(lotIds(), ['7', '9', '11'], 'one tap reaches it, as a normal count entry')
     assert.deepEqual(lotReads, [], 'expanding reads nothing: the row carried it')
-    await surface.type(dateInput(surface, 11), '2')
-    assert.equal(rowCount(surface, '12').value, '2', 'counted like any entry')
+    await surface.type(dateInput(surface, 7), '5'); await surface.type(dateInput(surface, 9), '3'); await surface.type(dateInput(surface, 11), '2')
+    assert.equal(rowCount(surface, '12').value, '10', 'counted like any entry')
     assert.equal(statusButton(surface, '12').getAttribute('data-check-status-kind'), 'draft_issue', '2 found where the system had 0')
     await closeCount(surface)
     await surface.click(surface.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit'))
     await surface.click(exact(surface, 'Submit').at(-1)!)
-    assert.deepEqual((submissions[0].lines as Array<{ lots: unknown }>)[0].lots, [{ batchId: 11, scope: 'lot', counted: 2, seen: 0 }], 'the line is written for the date a person typed on')
+    assert.deepEqual((submissions[0].lines as Array<{ lots: unknown }>)[0].lots, [{ batchId: 7, scope: 'lot', counted: 5, seen: 5 }, { batchId: 9, scope: 'lot', counted: 3, seen: 3 }, { batchId: 11, scope: 'lot', counted: 2, seen: 0 }], 'the line is written for the dates a person typed on, the empty one included')
     await surface.unmount()
     // "matches stock" never writes a line for an empty date, even with it expanded
     submissions.length = 0
@@ -398,12 +398,12 @@ try {
     assert.equal(rowCount(surface, '12').value, '', 'B2: the row still waits for the count the person found')
     assert.notEqual(statusButton(surface, '12').getAttribute('data-check-status-kind'), 'draft_ok', 'B2: not marked matching')
     await surface.unmount()
-    // B3 control: one valid differing date alone is kept
+    // B3 control: one valid differing date (and the other date counted as it stands) is kept as typed
     listAnswer = dated; submissions.length = 0
     surface = await mount()
-    await openCount(surface, '12'); await surface.type(dateInput(surface, 7), '4'); await closeCount(surface)
+    await openCount(surface, '12'); await surface.type(dateInput(surface, 7), '4'); await surface.type(dateInput(surface, 9), '3'); await closeCount(surface)
     await markPage(surface); await submitNow(surface)
-    assert.deepEqual(sent(), [[12, [[7, 4, 5]]]], 'B3: a valid typed 4 on one date is kept as typed')
+    assert.deepEqual(sent(), [[12, [[7, 4, 5], [9, 3, 3]]]], 'B3: a valid typed 4 on one date is kept as typed')
     await surface.unmount()
     // B4: plain mode (lot counts off): "Does not match", then the page mark
     listAnswer = () => listBody([productRow(13, 'Plain', 4), productRow(14, 'Plain two', 6)], { capabilities: { fixStock: true, approveCounts: false }, summary: { ok: 0, issue: 0, not_checked: 2, total: 2 } }); submissions.length = 0
@@ -466,18 +466,34 @@ try {
     assert.equal(rowCount(surface, '12').value, '', 'the changed row whose read failed was not marked')
     assert.equal(rowCount(surface, '14').value, '8', 'the row nobody changed was')
     await surface.unmount()
-    // the server refuses a partial count: the rows take its dates, every typed count stays, no list is read, the person is told which product
+    // a count that skips a stocked date the row already lists is stopped HERE (review finding 4): no confirm, no request, the row says which date, the draft stays, and typing the date clears the mark
     lotsAnswer = nowLots; listAnswer = dated; lotReads.length = 0; submissions.length = 0
     surface = await mount()
     await openCount(surface, '12'); await surface.type(dateInput(surface, 7), '4'); await closeCount(surface)
+    await surface.click(surface.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit'))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    assert.equal(submissions.length, 0, 'no request is spent on a count that skips a stocked date')
+    assert.equal(exact(surface, 'Submit').length, 1, 'and no review is asked for: no confirm button beside the page Submit button')
+    const marked = surface.findAll(node => node.getAttribute('data-check-refusal') !== null)
+    assert.equal(marked.length, 1, 'the row is marked')
+    assert.ok(marked[0].textContent.includes('09/10/2026') && !marked[0].textContent.includes('01/10/2026'), `it names the date that was not counted: ${marked[0].textContent}`)
+    assert.equal(rowCount(surface, '12').value, '4', 'the draft is kept')
+    assert.ok(surface.findAll(node => node.getAttribute('role') === 'alert').some(node => node.textContent.includes('Dated one')), 'the page names the product')
+    await openCount(surface, '12'); await surface.type(dateInput(surface, 9), '3'); await closeCount(surface)
+    assert.equal(surface.findAll(node => node.getAttribute('data-check-refusal') !== null).length, 0, 'counting the date clears the mark')
+    await surface.unmount()
+    // the server still refuses a count that is complete on this screen but not on the server (a date received on another device): the rows take its dates, every typed count stays, no list is read, the person is told which product
+    lotsAnswer = nowLots; listAnswer = dated; lotReads.length = 0; submissions.length = 0
+    surface = await mount()
+    await openCount(surface, '12'); await surface.type(dateInput(surface, 7), '4'); await surface.type(dateInput(surface, 9), '3'); await closeCount(surface)
     const listsBefore = lists.length
     const refusal409 = await realRefusal({ error: 'inventory_check_lots_incomplete', code: 'inventory_check_lots_incomplete', productIds: [12], lots: [{ productId: 12, lots: nowLots(12).lots }] }, 409)
     submitAnswer = () => { throw refusal409 }
     await submitNow(surface)
     assert.equal(submissions.length, 1)
     assert.equal(lists.length, listsBefore, 'no list was read for the refusal: the answer carried the dates')
-    assert.equal(rowCount(surface, '12').value, '4', 'the count typed stays')
-    assert.ok(surface.findAll(node => node.getAttribute('role') === 'alert').some(node => node.textContent.includes('another date') && node.textContent.includes('Dated one')), 'the person is told what to do and which product')
+    assert.equal(rowCount(surface, '12').value, '7', 'the count typed stays')
+    assert.ok(surface.findAll(node => node.getAttribute('role') === 'alert').some(node => node.textContent.includes('another date') && node.textContent.includes('every received date') && node.textContent.includes('Dated one')), 'the person is told what to do and which product')
     await openCount(surface, '12')
     assert.deepEqual(lotReads, [], 'the rows were patched from the refusal: the popover opens with no read')
     assert.equal(surface.findAll(node => node.getAttribute('data-popover-lot') === '11').length, 1, 'the new date is there to count')
@@ -570,7 +586,7 @@ try {
     listAnswer = () => answerOf()
     const surface = await mount()
     await openCount(surface, '12')
-    await surface.type(dateInput(surface, 7), '4')
+    await surface.type(dateInput(surface, 7), '4'); await surface.type(dateInput(surface, 9), '3')
     await closeCount(surface)
     submitAnswer = () => { throw Object.assign(new Error('off'), { status: 409, code: 'inventory_check_lot_counts_off' }) }
     listAnswer = () => listBody([withLots(productRow(12, 'Dated product', 8))], { capabilities: { fixStock: true, approveCounts: false }, summary: { ok: 0, issue: 0, not_checked: 1, total: 1 } })

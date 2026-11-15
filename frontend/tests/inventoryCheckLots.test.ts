@@ -1,11 +1,27 @@
 import assert from 'node:assert/strict'
 import { createHarness, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
-import { countTextFromLots, incompleteLotAnswers, lotCountOf, lotSubmissionLine, lotTotals, rowSetPlan, splitSubmission, staleLotFigures, submissionLineCost, type LotDraft } from '../src/components/inventory/inventoryCheckLots.ts'
+import { countTextFromLots, incompleteLotAnswers, lotCountOf, lotSubmissionLine, lotTotals, rowSetPlan, splitSubmission, staleLotFigures, stockedDatesOf, submissionLineCost, uncountedDates, type LotDraft } from '../src/components/inventory/inventoryCheckLots.ts'
 import { patchWiredLots, patchWiredRaw, setToAmount, wiredListParams, wiredResult, type WiredList } from '../src/components/inventory/inventoryWired.ts'
 import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
 
 // INV-B S5: counts typed per received date and the direct Set from a row (INVENTORY-REPLAN rev. 2 sections 2.6, 2.7).
 // Pure rules first (the 05a red case among them), then the wired page's patch (a Set reads no page), then the mounted row.
+
+// ---- a count by date that skips a stocked date (review finding 4): found on the screen, before any request ----
+{
+  const rows = [{ batchId: 7, receivedAt: '2026-10-01', expiry: null, quantity: 5 }, { batchId: 9, receivedAt: '2026-10-09', expiry: null, quantity: 3 }, { batchId: 11, receivedAt: '2026-08-01', expiry: null, quantity: 0 }]
+  const stocked = stockedDatesOf({ lot_rows: rows })
+  assert.deepEqual(stocked, [{ batchId: 7, receivedAt: '2026-10-01' }, { batchId: 9, receivedAt: '2026-10-09' }], 'only dates that hold stock count (the server counts quantity above 0)')
+  assert.equal(stockedDatesOf({}), undefined, 'a row whose dates are not loaded cannot say')
+  assert.equal(stockedDatesOf({ lot_rows: rows, lots_more: true }), undefined, 'a product with more dates than one count carries is exempt, as on the server')
+  assert.equal(stockedDatesOf({ lot_rows: rows, lots_stale: true }), undefined, 'dates that may be out of date are left to the server')
+  assert.deepEqual(uncountedDates(stocked, { '7': { count: '4', seen: 5 } }).map(date => date.batchId), [9], 'one date typed, one skipped')
+  assert.deepEqual(uncountedDates(stocked, { '7': { count: '4', seen: 5 }, '9': { count: '3', seen: 3 } }), [], 'every stocked date named')
+  assert.deepEqual(uncountedDates(stocked, { '7': { count: '4', seen: 5 }, '9': { count: '', seen: 3 } }).map(date => date.batchId), [9], 'a blank is not a count')
+  assert.deepEqual(uncountedDates(stocked, { '7': { count: 'x', seen: 5 }, '9': { count: '3', seen: 3 } }).map(date => date.batchId), [7], 'a mistyped figure is not a count')
+  assert.deepEqual(uncountedDates(stocked, { '7': { count: '0', seen: 5 }, '9': { count: '0', seen: 3 } }), [], 'a typed 0 is a count')
+  assert.deepEqual(uncountedDates(undefined, { '7': { count: '4', seen: 5 } }), [], 'nothing known, nothing missing: the server stays the backstop')
+}
 
 // ---- typed text and totals ----------------------------------------------------------------------------------------------------------------------------------
 assert.deepEqual(lotCountOf(''), { kind: 'empty' })

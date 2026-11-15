@@ -22,7 +22,7 @@ export const REFUSAL_MESSAGES: Record<string, { key: string; fallback: string }>
   inventory_check_claim_lost: { key: 'inventory_check_error_claim_lost', fallback: 'Another approver took over or closed this count, so nothing was written for this line. The page was reloaded.' },
   inventory_check_too_many_lines: { key: 'inventory_check_error_too_many_lines', fallback: 'This count is larger than one submission can carry. Submit part of it, then the rest.' },
   inventory_check_too_many_products: { key: 'inventory_check_error_too_many_lines', fallback: 'This count is larger than one submission can carry. Submit part of it, then the rest.' },
-  inventory_check_lots_incomplete: { key: 'inventory_check_error_lots_incomplete', fallback: 'A product received stock on another date after you counted. Its dates were updated: count the new date and submit again. Your counts are kept.' },
+  inventory_check_lots_incomplete: { key: 'inventory_check_error_lots_incomplete', fallback: 'A product has a received date that was not counted, or received stock on another date after you counted. Its dates were updated: count every received date of the product, or use Matches stock, then submit again. Your counts are kept.' },
   inventory_check_no_lot: { key: 'inventory_check_error_no_lot', fallback: 'A product has no received date to add stock to. Receive it first.' },
   inventory_check_stock_write_refused: { key: 'inventory_check_error_write_refused', fallback: 'Stock could not be updated for some products. Try again.' },
   inventory_check_count_pending: { key: 'inventoryCheckCountPending', fallback: 'Set is blocked while a count of this product is waiting for approval. Approve or reject that count first.' },

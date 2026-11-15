@@ -34,7 +34,7 @@ import InventoryCheckListRows, { InventoryCheckListHeader, InventoryCheckSelecti
 import { finiteQuantity, parseCount } from './InventoryCheckCountEditor.tsx'
 import InventoryCheckDetailFloat from './InventoryCheckDetailFloat.tsx'
 import { fixStockOpening, fixStockRequestId, type FixStockOpening } from './inventoryCheckFixStock.ts'
-import { countTextFromLots, incompleteLotAnswers, lotSubmissionLine, lotTotals, rowSetPlan, splitSubmission, staleLotFigures, type SubmissionLotLine } from './inventoryCheckLots.ts'
+import { countTextFromLots, incompleteLotAnswers, lotSubmissionLine, lotTotals, rowSetPlan, splitSubmission, staleLotFigures, stockedDatesOf, uncountedDates, type SubmissionLotLine } from './inventoryCheckLots.ts'
 import { adjustStock } from '../../api/inventoryWriteTransport.ts'
 import { stockConflictFigures, type StockWriteAnswer } from './stockAnswerPatch.ts'
 import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
@@ -319,6 +319,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   // One request id for the whole of one approval, however many requests it takes: it is what makes every repeat safe.
   const decideAttempt = useRef<{ decision: 'approve' | 'reject' | 'close'; requestId: string } | null>(null)
   const [refusedLines, setRefusedLines] = useState<Record<string, string>>({})
+  // Products whose count by received date left a stocked date out, found by Submit before any request was sent (the rows say which dates).
+  const [uncounted, setUncounted] = useState<ReadonlySet<string>>(() => new Set())
   // The owner's way to count: what has been picked and typed on the list, held here (in memory only) until it is submitted. Keyed by product id,
   // so it survives paging and filtering; the snapshot (name, stock seen) is what the review and the server's "marked checked" test read.
   const [drafts, setDrafts] = useState<Record<string, DraftEntry>>({})
@@ -731,7 +733,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     onMatches: (product: InventoryCheckProduct, rows?: InventoryCheckLotRow[]) => {
       if (rows?.length) patchDraft(product, () => {
         const lots = Object.fromEntries(rows.map(row => [String(row.batchId), { count: String(row.quantity), seen: row.quantity }]))
-        return { lots, count: countTextFromLots(lots), checked: false, selected: true }
+        return { lots, count: countTextFromLots(lots), checked: false, selected: true, stocked: stockedDatesOf(product) }
       })
       else if (finiteQuantity(product.quantity)) patchDraft(product, () => ({ count: String(product.quantity), checked: true, selected: true, lots: undefined }))
     },
@@ -744,7 +746,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       const lots = { ...(current.lots ?? {}) }
       if (value.trim() === '') delete lots[String(row.batchId)]
       else lots[String(row.batchId)] = { count: value, seen: row.quantity }
-      return { lots, count: countTextFromLots(lots), checked: false, selected: Object.keys(lots).length > 0 ? true : current.selected }
+      return { lots, count: countTextFromLots(lots), checked: false, selected: Object.keys(lots).length > 0 ? true : current.selected, stocked: stockedDatesOf(product) ?? current.stocked }
     }),
   }
   // One tap for the whole page: every countable row without a count is answered "matches stock". Nothing is written until Submit.
@@ -770,7 +772,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         if (perBatch && product.lots_more === true) continue
         if (dates.length > 0) {
           const lots = Object.fromEntries(dates.map(row => [String(row.batchId), { count: String(row.quantity), seen: row.quantity }]))
-          result[id] = { ...(entry ?? { note: '', name: product.name }), selected: true, count: countTextFromLots(lots), checked: false, seen, lots }
+          result[id] = { ...(entry ?? { note: '', name: product.name }), selected: true, count: countTextFromLots(lots), checked: false, seen, lots, stocked: stockedDatesOf(product) }
         } else result[id] = { ...(entry ?? { note: '', name: product.name }), selected: true, count: String(seen), checked: true, seen, lots: undefined }
       }
       return result
@@ -882,9 +884,25 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     return new Map(wiredResult(raw).items.filter(item => ids.has(Number(item.id))).map(item => [Number(item.id), projectProduct(item, access.fields)]))
   }
 
+  // The stocked received dates of a draft's product: what its row lists now (nothing when the row cannot say: its dates are stale or too many, so the server decides), else, for a product on
+  // another page, what its row listed when a date was last typed on it.
+  function stockedFor(id: string, entry: DraftEntry) {
+    const product = visibleProducts.find(candidate => String(candidate.id) === id)
+    return product ? stockedDatesOf(product) : entry.stocked
+  }
   async function submit() {
     if (!current() || !selecting || submitBlocked || inFlight.current || selectedIds.length === 0) return
     if (!submitAttempt.current) {
+      // A count by received date must name every stocked date of the product (the server refuses it otherwise, 409). The rows already carry the dates, so the gap is found here: no request is spent, the row says
+      // which dates, and every typed count stays. The server's refusal remains the backstop for a date it knows and this screen does not (a stock-in on another device).
+      if (lotCountsOn) {
+        const open = selectedIds.filter(id => lotTotals(drafts[id].lots).dates > 0 && uncountedDates(stockedFor(id, drafts[id]), drafts[id].lots).length > 0)
+        setUncounted(new Set(open))
+        if (open.length) {
+          setWriteError(`${tr('inventory_check_lots_uncounted', 'Nothing was submitted. Count every received date of each marked product, or use Matches stock.')} ${t('products')}: ${open.map(id => drafts[id].name).join(', ')}`)
+          return
+        }
+      }
       const allLines: SubmissionLine[] = selectedIds.map(Number).sort((a, b) => a - b).map(productId => {
         const entry = drafts[String(productId)], count = parseCount(entry.count), note = entry.note.trim()
         const totals = lotTotals(entry.lots)
@@ -1092,7 +1110,13 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       chip: <button type="button" className="inline-flex min-h-6 max-w-full items-center gap-1 rounded-full bg-slate-100 px-2 text-[11px] font-semibold leading-relaxed text-slate-700 dark:bg-zinc-800 dark:text-slate-200" aria-label={issueBranch ? `${open}: ${issueBranch}` : open} title={open} onClick={() => onSelect({ branchId: String(issue.branch_id), sessionId: issue.session_id })}><ClipboardList className="h-3 w-3 shrink-0" aria-hidden="true" />{issueBranch ? <span className="min-w-0 break-words">{issueBranch}</span> : null}</button> }
   }) : []
   const rowProps = { canViewStock: access.fields.stock, canViewCounts, t, onOpenProduct: setDetail } as const
-  const listRowProps = { products: visibleProducts, drafts, selecting, locked: busy || !!submitAttempt.current, canViewStock: access.fields.stock, canViewCounts,
+  const rowRefusals: Record<string, string> = {}
+  for (const id of uncounted) {
+    const entry = drafts[id]
+    const missing = entry && lotTotals(entry.lots).dates > 0 ? uncountedDates(stockedFor(id, entry), entry.lots) : []
+    if (missing.length) rowRefusals[id] = tr('inventory_check_lots_uncounted_row', 'Not counted: {dates}').replace('{dates}', missing.map(date => date.receivedAt ? fmtDateOnly(date.receivedAt) : '—').join(', '))
+  }
+  const listRowProps = { products: visibleProducts, drafts, selecting, rowRefusals, locked: busy || !!submitAttempt.current, canViewStock: access.fields.stock, canViewCounts,
     ...(access.fields.price ? { priceText, promotionRules: data?.promotionRules, exchangeRate } : {}), adornments: issueChips, focusRequest, onCountEntered: onCommitted, t, onOpenProduct: setDetail, ...draftHandlers,
     ...(lotCountsOn && branchId ? { lotCounts: true, loadLots, onLotSet: directSetOn ? setLotFromRow : undefined } : {}) }
   const canCheckRows = fresh && canEdit && session?.status === 'open' && canWriteToServer && !lifecycleAttempt.current

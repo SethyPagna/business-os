@@ -33,6 +33,25 @@ export function lotTotals(lots: LotDraft | undefined): { dates: number; counted:
   return { dates, counted: round(counted), seen: round(seen), valid }
 }
 
+/** One stocked received date of a row: the batch and the day it was received (what the person is told is missing). */
+export type StockedDate = { batchId: number; receivedAt: string | null }
+
+/**
+ * The stocked received dates (quantity above 0 at the branch) a row lists, or undefined when the row cannot say: its dates are not loaded, it holds more than one count can carry (lots_more: the server
+ * exempts it), or they may be out of date (lots_stale: the server decides). The server refuses a count of a product that names some of these dates but not all.
+ */
+export function stockedDatesOf(product: { lot_rows?: readonly InventoryCheckLotRow[]; lots_more?: boolean; lots_stale?: boolean }): StockedDate[] | undefined {
+  if (!Array.isArray(product.lot_rows) || product.lots_more === true || product.lots_stale === true) return undefined
+  return product.lot_rows.filter(row => row.quantity > 0).map(row => ({ batchId: row.batchId, receivedAt: row.receivedAt ?? null }))
+}
+
+/** The stocked dates a count by date leaves out: no valid figure typed on them. Empty when nothing is known to be missing (the server's refusal stays the backstop). */
+export function uncountedDates(stocked: readonly StockedDate[] | undefined, lots: LotDraft | undefined): StockedDate[] {
+  if (!stocked?.length) return []
+  const named = new Set(Object.entries(lots ?? {}).filter(([, entry]) => lotCountOf(entry.count).kind === 'valid').map(([batch]) => batch))
+  return stocked.filter(date => !named.has(String(date.batchId)))
+}
+
 /** One draft's count text from its dates: the sum, blank when nothing valid is typed, blank when any figure is not a number (so the page asks for a number). */
 export function countTextFromLots(lots: LotDraft | undefined): string {
   const totals = lotTotals(lots)

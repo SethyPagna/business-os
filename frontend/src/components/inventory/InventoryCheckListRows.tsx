@@ -16,7 +16,7 @@ import { todayStr } from '../../utils/dateHelpers.ts'
 import { fmtDateOnly, fmtDateTime24 } from '../../utils/formatters.ts'
 import type { InventoryCheckId, InventoryCheckListStatus, InventoryCheckLotRow, InventoryCheckLotsAnswer, InventoryCheckProduct, InventoryCheckTranslator } from '../../types/inventoryChecks.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
-import { lotTotals, type LotDraft } from './inventoryCheckLots.ts'
+import { lotTotals, type LotDraft, type StockedDate } from './inventoryCheckLots.ts'
 import { isDraftKind, recordedStatus, rowStatusKind, ROW_STATUS_WORDS, type RowStatusKind } from './inventoryCheckStatus.ts'
 import InventoryCheckCountPopover, { preloadLotEntries } from './InventoryCheckCountPopover.tsx'
 import { priceFacts, type PriceMoney } from './inventoryPriceFacts.ts'
@@ -26,7 +26,7 @@ import { UNSAVED_ROW_CLASS } from './inventoryCheckGroups.ts'
 import StockQty from './StockQty.tsx'
 
 /** What a person has entered on one row of the list but not yet submitted. `checked`: the count was filled from Now by the row's check button. */
-export type ListDraft = { selected: boolean; count: string; checked: boolean; note: string; /** Counts typed per received date (ic_lot_counts); the row's count is their sum. */ lots?: LotDraft }
+export type ListDraft = { selected: boolean; count: string; checked: boolean; note: string; /** Counts typed per received date (ic_lot_counts); the row's count is their sum. */ lots?: LotDraft; /** The stocked received dates the row listed when a date was last typed on it (so Submit can check, on any page, that none was left out). */ stocked?: readonly StockedDate[] }
 export type ListDrafts = Readonly<Record<string, ListDraft | undefined>>
 
 const makeTr = (t: InventoryCheckTranslator) => (key: string, fallback: string) => {
@@ -126,6 +126,8 @@ export type InventoryCheckListRowsProps = {
   exchangeRate?: number
   /** Small badges after the barcode line, by product id (the Issues tab's "Open session" chip). */
   adornments?: Readonly<Record<string, ReactNode | undefined>>
+  /** A line under a row that cannot be submitted as it stands (a received date left out), by product id. It clears as soon as the row no longer needs it. */
+  rowRefusals?: Readonly<Record<string, string>>
   /** Scroll one row to the middle, ring it for a moment and focus its Count input or its check button. Send it with the render that shows the row. */
   focusRequest?: InventoryCheckFocusRequest
   /** After Enter in a Count input. Return true when the page handled what comes next; otherwise focus moves to the next row's Count input. */
@@ -150,6 +152,7 @@ type RowProps = Omit<InventoryCheckListRowsProps, 'products' | 'sections' | 'dra
   product: InventoryCheckProduct
   draft: ListDraft | undefined
   adornment?: ReactNode
+  refusal?: string
   columns: ListField[]
   /** The row itself can be counted (not a family header, not an uncheckable product); the viewer's right to count is `selecting`. */
   countable: boolean
@@ -171,7 +174,7 @@ function statusIconOf(kind: RowStatusKind): { Icon: typeof Check; tone: string }
   }
 }
 
-function ListRow({ product, draft, adornment, columns, countable, copy, scanHit, onAdvance, selecting, locked = false, canViewStock, canViewCounts, priceText, promotionRules, exchangeRate = 4100, t, onOpenProduct, onCount, onNote, onCountEntered, lotCounts = false, loadLots, onLotCount, onLotSet, onMatches, onDiffers, onClear }: RowProps) {
+function ListRow({ product, draft, adornment, refusal, columns, countable, copy, scanHit, onAdvance, selecting, locked = false, canViewStock, canViewCounts, priceText, promotionRules, exchangeRate = 4100, t, onOpenProduct, onCount, onNote, onCountEntered, lotCounts = false, loadLots, onLotCount, onLotSet, onMatches, onDiffers, onClear }: RowProps) {
   const tr = makeTr(t)
   const id = String(product.id)
   const counting = selecting && countable
@@ -258,7 +261,7 @@ function ListRow({ product, draft, adornment, columns, countable, copy, scanHit,
     } else if (event.key === 'Escape') { event.preventDefault(); if (!byBatch) onCount(product, '') }
   }
 
-  return <li data-inventory-check-row={id} data-check-list-status={status ?? undefined} data-selected={selected ? '' : undefined} data-unsaved={counting && draft ? '' : undefined} data-scan-hit={scanHit ? '' : undefined}
+  return <li data-inventory-check-row={id} data-check-list-status={status ?? undefined} data-selected={selected ? '' : undefined} data-unsaved={counting && draft ? '' : undefined} data-refused={refusal ? '' : undefined} data-scan-hit={scanHit ? '' : undefined}
     className={`relative min-w-0 max-w-full border-b border-l-2 border-b-gray-100 py-2 pl-2 pr-1 last:border-b-0 dark:border-b-gray-800 ${edge} ${counting && draft ? UNSAVED_ROW_CLASS : ''} ${scanHit ? 'rounded-sm ring-2 ring-primary-400 dark:ring-primary-300' : ''}`}>
     {/* A count waiting for an approver (ic_fix_stock) is shown ONCE on this surface: the status icon (the hourglass). The gutter mini tag of the review queue would repeat it. */}
     {/* One compact line where the width allows: the image keeps its square, the name takes the room, the status icon and the count input sit beside it. */}
@@ -296,11 +299,12 @@ function ListRow({ product, draft, adornment, columns, countable, copy, scanHit,
       <input type="text" value={draft?.note ?? ''} maxLength={500} readOnly={locked} placeholder={tr('inventory_check_note_placeholder', 'Note (optional)')} aria-label={`${tr('inventory_check_note_placeholder', 'Note (optional)')}: ${product.name}`}
         className="h-11 min-w-0 flex-1 rounded-lg border border-gray-300 px-2 text-xs lg:h-9 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-600 dark:bg-gray-900" onChange={event => onNote(product, event.target.value)} />
     </label> : null}
+    {refusal ? <p role="alert" data-check-refusal className="mt-1 break-words text-xs leading-relaxed text-red-700 lg:pl-12 dark:text-red-300">{refusal}</p> : null}
     {entry.kind === 'invalid' ? <p role="alert" className="mt-1 break-words text-xs leading-relaxed text-red-700 lg:pl-12 dark:text-red-300">{tr('inventory_check_invalid_count', 'Enter a valid non-negative quantity.')}</p> : null}
   </li>
 }
 
-export default function InventoryCheckListRows({ products, sections, drafts, adornments = {}, focusRequest, ...props }: InventoryCheckListRowsProps) {
+export default function InventoryCheckListRows({ products, sections, drafts, adornments = {}, rowRefusals = {}, focusRequest, ...props }: InventoryCheckListRowsProps) {
   const columns = listColumns({ selecting: props.selecting, canViewStock: props.canViewStock, canViewCounts: props.canViewCounts })
   // Per received date (ic_lot_counts only): the entries' code starts loading when the list draws, so it is there before the first tap. With the switch off it is never requested.
   useEffect(() => { if (props.lotCounts && props.selecting) preloadLotEntries() }, [props.lotCounts, props.selecting])
@@ -343,7 +347,7 @@ export default function InventoryCheckListRows({ products, sections, drafts, ado
     <ul ref={listRef} className="min-w-0 max-w-full" aria-label={label && label !== 'inventory_check_products' ? label : 'Inventory checks'}>
       {(sections ?? [{ key: '', header: null, products }]).map(section => <Fragment key={section.key}>
         {section.header ? <li data-inventory-check-group={section.key} className="min-w-0 max-w-full border-b border-b-gray-200 bg-slate-100/90 px-2 py-1 dark:border-b-gray-700 dark:bg-slate-800/80">{section.header}</li> : null}
-        {section.products.map(product => <ListRow key={product.id} product={product} draft={drafts[String(product.id)]} adornment={adornments[String(product.id)]}
+        {section.products.map(product => <ListRow key={product.id} product={product} draft={drafts[String(product.id)]} adornment={adornments[String(product.id)]} refusal={rowRefusals[String(product.id)]}
           columns={columns} copy={copy} scanHit={hitId === String(product.id)} onAdvance={onAdvance} {...props} countable={product.checkable !== false && !product.is_group} />)}
         {section.footer ? <li className="min-w-0 border-b border-b-gray-100 px-2 py-0.5 text-[11px] leading-relaxed text-gray-500 dark:border-b-gray-800 dark:text-gray-400">{section.footer}</li> : null}
       </Fragment>)}
