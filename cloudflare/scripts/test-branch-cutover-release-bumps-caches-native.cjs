@@ -12,7 +12,7 @@ const root = path.resolve(__dirname, '..')
 const repo = path.resolve(root, '..')
 const TOKEN = 'cutover-operator-test-token-0123456789abcdef'
 const ACTOR_USER = 7
-const NAMESPACES = ['products', 'settings', 'stock', 'promotions', 'sales', 'returns', 'customers', 'suppliers', 'delivery_contacts', 'inventory', 'audit_log']
+const NAMESPACES = ['products', 'settings', 'stock', 'promotions', 'sales', 'returns', 'customers', 'suppliers', 'delivery_contacts', 'inventory']
 
 async function bundleApp() {
   const entry = `

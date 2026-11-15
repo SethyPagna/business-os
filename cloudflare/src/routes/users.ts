@@ -10,7 +10,7 @@ import { DEFAULT_ROLE_PERMISSIONS } from '../lib/roleDefaults'
 import { isAdminControlGuardAbort, lastAdminRequiredBody, planAdminControlWrite } from '../lib/adminControlGuard'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { bumpVersion } from '../lib/cache'
+import { bumpVersions } from '../lib/cache'
 import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { isPublicImageFormat, UNSUPPORTED_IMAGE_MESSAGE, validateUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
@@ -701,7 +701,7 @@ app.put('/users/:id', async (c) => {
       },
     ))
     if (usernameChanged && renameScope === 'carry') {
-      await Promise.all([bumpVersion(c.env, 'sales'), bumpVersion(c.env, 'returns')])
+      await bumpVersions(c.env, ['sales', 'returns'])
     }
     c.executionCtx.waitUntil(broadcast(c.env, 'users', { action: 'update', id }))
     return c.json({ success: true, ...sanitizeUserRow(await getUserWithRole(c, id)) })
@@ -810,7 +810,7 @@ app.put('/users/:id/profile', async (c) => {
       },
     ))
     if (usernameChanged && renameScope === 'carry') {
-      await Promise.all([bumpVersion(c.env, 'sales'), bumpVersion(c.env, 'returns')])
+      await bumpVersions(c.env, ['sales', 'returns'])
     }
     c.executionCtx.waitUntil(broadcast(c.env, 'users', { action: 'update', id: targetId }))
     return c.json({ success: true, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })

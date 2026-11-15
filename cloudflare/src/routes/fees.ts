@@ -24,6 +24,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { buildAuditStatement, changedFields } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
+import { bumpVersions } from '../lib/cache'
 import { assertRequiredUpdatedAtMatch, EXPECTED_UPDATED_AT_REQUIRED, getExpectedUpdatedAt, hasExpectedUpdatedAtField, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { businessToday } from '../lib/businessDateWindow'
@@ -111,6 +112,24 @@ export async function feesAccess(c: Context<{ Bindings: Env; Variables: { user: 
 }
 app.use('*', requireAuth)
 app.use('*', feesAccess)
+
+// Which fee rows the cached sales snapshot reads: a delivery-type row or a row with a delivery contact (see lib/feeSalesImpact.ts for the proof).
+// This block is a BYTE-IDENTICAL copy of lib/feeSalesImpact.ts, kept inline so the many tests that load this module with a hand-built require map need no new
+// stub; test-fee-sales-impact-pure.cjs fails if the copies drift.
+// feeSalesImpact:begin
+export type FeeSnapshotShape = { fee_type?: unknown; delivery_contact_id?: unknown } | null | undefined
+
+export function feeAffectsSalesSnapshot(fee: FeeSnapshotShape): boolean {
+  if (!fee) return false
+  if ((fee.fee_type ?? '') === 'delivery') return true
+  return fee.delivery_contact_id != null && fee.delivery_contact_id !== ''
+}
+
+export function feeWriteNeedsSalesBump(before: FeeSnapshotShape, after: FeeSnapshotShape): boolean {
+  return feeAffectsSalesSnapshot(before) || feeAffectsSalesSnapshot(after)
+}
+// feeSalesImpact:end
+
 
 // 'expense' joined with the old-system expense migration (Part 379): 4,240
 // historical entries carry it, and manual entry offers it. Without it here,
@@ -785,6 +804,9 @@ app.post('/', async (c) => {
     return c.json({ error: 'Expense commit could not be verified. Retry the exact saved request.', code: 'write_outcome_unknown' }, 503)
   }
   const response = feeOperationReceiptResponse(committedReceipt)
+  // The cached sales report snapshot (stats strip, 20 s under the sales key) reads only delivery-type fee rows and rows with a delivery contact (lib/feeSalesImpact.ts),
+  // so only a write whose row, before or after, is one of those moves the sales version. Awaited before the response and the broadcast.
+  if (feeAffectsSalesSnapshot({ fee_type: feeType, delivery_contact_id: deliveryContactId })) await bumpVersions(c.env, ['sales'])
   c.executionCtx.waitUntil(broadcast(c.env, 'fees', { type: 'created', id: committedReceipt.fee_id }))
   c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
     type: 'fees',
@@ -932,6 +954,9 @@ app.put('/:id', async (c) => {
     throw error
   }
 
+  // The cached sales report snapshot (stats strip, 20 s under the sales key) reads only delivery-type fee rows and rows with a delivery contact (lib/feeSalesImpact.ts),
+  // so only a write whose row, before or after, is one of those moves the sales version. Awaited before the response and the broadcast.
+  if (feeWriteNeedsSalesBump(existing, fee)) await bumpVersions(c.env, ['sales'])
   c.executionCtx.waitUntil(broadcast(c.env, 'fees', { type: 'updated', id }))
   return c.json({ fee })
 })
@@ -1007,6 +1032,9 @@ app.delete('/:id', async (c) => {
     }
     throw error
   }
+  // The cached sales report snapshot (stats strip, 20 s under the sales key) reads only delivery-type fee rows and rows with a delivery contact (lib/feeSalesImpact.ts),
+  // so only a write whose row, before or after, is one of those moves the sales version. Awaited before the response and the broadcast.
+  if (feeAffectsSalesSnapshot(existing)) await bumpVersions(c.env, ['sales'])
   c.executionCtx.waitUntil(broadcast(c.env, 'fees', { type: 'deleted', id }))
   return c.json({ success: true })
 })

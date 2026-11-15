@@ -45,6 +45,9 @@ const matched = (field: string) => importRowDetailText({ code: 'inventory_import
 assert.ok(matched('sku').startsWith(`${km.sku} "DUP-1"`) && matched('barcode').startsWith(`${km.barcode} "DUP-1"`), 'sku and barcode are named in Khmer')
 assert.equal(importRowDetailText({ code: 'inventory_import_product_not_found', message: 'Product not found for sku/barcode' }, translate), km.inventory_import_product_not_found, 'a coded row with no params needs none')
 assert.equal(importRowDetailText({ code: 'inventory_import_zero_receipt', message: 'x' }, translate), km.inventory_import_zero_receipt)
+// B-C7: a contacts import row that changes nothing is a skip with this code; the review restates it in either language.
+assert.equal(importRowDetailText({ code: 'contact_import_unchanged', params: {}, message: 'No changes: this row already matches the record on file.' }, translate), km.contact_import_unchanged)
+assert.equal(importRowDetailText({ code: 'contact_import_unchanged', params: {}, message: 'No changes: this row already matches the record on file.' }, (key: string, fallback: string) => en[key] || fallback), en.contact_import_unchanged)
 assert.equal(importRowDetailText({ code: 'inventory_import_vendor_unknown', params: { a: 1 }, message: 'Unexpected vendor failure' }, translate), 'Unexpected vendor failure', 'an unknown code keeps its message')
 // The English UI shows the pack text, which is the Worker's sentence word for word.
 const english = (key: string, fallback: string) => en[key] || fallback

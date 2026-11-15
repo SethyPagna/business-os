@@ -193,6 +193,7 @@ new Function('require', 'module', 'exports', transpile(`
   import { multiplyMoney4 } from './moneyPrecision'
   import { normalizeSearchText, compactSearchText } from './searchMatch'
   import { productStockGuardStatement, assertProductStatusInput } from './productStockGuard'
+  ${extract(engineSource, 'const PRODUCT_IMPORT_TEXT_COLUMNS = ', '\n}')}
   ${extract(engineSource, 'export function productImportStockStatements(', '\n}')}
   const { catalogCostRecomputeStatement, COST_MIRROR_COLUMNS, costMirrorSql } = catalog
   // Absent before the fix: the loop then simply never calls it.

@@ -97,6 +97,7 @@ function buildAccounts(rawDb) {
   const anonymousCustomer = loadReal('lib/anonymousCustomer.ts')
   return loadReal('lib/portalAccounts.ts', {
     './db': dbModule,
+    './cache': { bumpVersions: async () => {} },
     './membershipNumber': membershipNumber,
     './phone': phone,
     './passwordPolicy': passwordPolicy,

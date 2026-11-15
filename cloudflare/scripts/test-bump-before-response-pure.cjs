@@ -30,20 +30,9 @@ const files = []
 const PROTECTED = /'(products|stock|returns)'|RETURN_WRITE_CACHE_NAMESPACES|MAINTENANCE_CACHE_NAMESPACES/
 const isBump = (name) => /^(bumpVersions?)$/.test(name)
 
-// Deferred bumps that are NOT products / stock / returns, each with the reason it may stay off the response path.
+// Deferred bumps that are NOT products / stock / returns, each with the reason it may stay off the response path. A.C3 (14 Nov): every other writer now awaits its bump before the response and the broadcast; only the sales-owned site below is left.
 const DEFERRED_NOT_PROTECTED = [
-  ['src/routes/contacts.ts', "bumpVersion(c.env, config.table)", 'customers / suppliers / delivery_contacts create'],
-  ['src/routes/contacts.ts', "bumpVersion(c.env, 'customers')", 'customers list (3 handlers)'],
-  ['src/routes/portal.ts', "bumpVersion(c.env, 'customers')", 'portal sign-up customers list'],
-  ['src/routes/pos.ts', "bumpVersion(c.env, 'settings')", 'POS settings'],
-  ['src/routes/promotions.ts', "bumpVersion(c.env, 'promotions')", 'promotion CRUD; checkout re-reads prices live'],
-  ['src/routes/returns.ts', "bumpVersion(c.env, 'settings')", 'return reason presets'],
   ['src/routes/sales.ts', "bumpVersion(c.env, 'settings')", 'a payment method typed at the till joins the settings list'],
-  ['src/routes/settings.ts', "bumpVersion(c.env, 'settings')", 'settings writers'],
-  ['src/routes/settings.ts', "bumpVersion(c.env, 'sales')", 'settings write that also moves the sales list (no stock)'],
-  ['src/routes/system.ts', "bumpVersion(c.env, section)", 'section reset of customers / suppliers / delivery contacts'],
-  ['src/routes/system.ts', "bumpVersion(c.env, 'sales')", 'legacy subtotal repair changes sales only'],
-  ['src/lib/telegramTopicSetting.ts', "bumpVersion(env, 'settings')", 'Telegram topic setting'],
 ]
 
 const rel = (file) => path.relative(root, file).split(path.sep).join('/')
@@ -117,6 +106,13 @@ check('the census sees the writers (a broken scanner would pass everything)', ()
 check('no products / stock / returns bump runs inside waitUntil', () => {
   const bad = sites.filter((s) => s.deferred && !DEFERRED_NOT_PROTECTED.some(([f, call]) => f === s.file && call === s.call))
   assert.deepEqual(bad.map((s) => `${s.file}:${s.line} ${s.call}`), [], 'bump before the response: await bumpVersions(...) after the commit, then waitUntil(broadcast(...))')
+})
+
+// Round 2 (review M10b): a bump called and neither awaited nor handed to waitUntil is fire-and-forget -- it can land after the response and the broadcast, and the
+// Worker may drop it at the end of the request. The telegram /settopic save once had this shape and no other check saw it (the order test did, this one did not).
+check('no bump is fire-and-forget: every call is awaited or inside a classified waitUntil', () => {
+  const loose = sites.filter((s) => !s.awaited && !s.deferred)
+  assert.deepEqual(loose.map((s) => `${s.file}:${s.line} ${s.call}`), [], 'await the bump (bumpVersion / bumpVersions never throw), then announce')
 })
 
 check('every classified deferred bump still exists and is not a protected namespace', () => {
