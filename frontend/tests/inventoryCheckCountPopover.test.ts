@@ -212,6 +212,46 @@ const cases: Array<[string, () => Promise<void>]> = [
     await s.click(buttons[0])
     assert.deepEqual(sets, [['set', 701, 91, '4']], 'the page is asked to set that batch to that figure (it confirms before and after itself)')
   }],
+  // ---- C (14 Nov round 2b, review F4): focus. Every way out hands focus back to the status icon, unless the person went into another field on purpose; Enter in the last entry moves on to the next row. ----
+  ['the popover is a dialog with a name (the product it counts)', async () => {
+    const s = await mount()
+    await open(s)
+    assert.equal(popover(s).getAttribute('role'), 'dialog')
+    assert.ok((popover(s).getAttribute('aria-label') || '').includes('Rose serum'), 'named after the product: ' + popover(s).getAttribute('aria-label'))
+  }],
+  ['closing with its X returns focus to the status icon', async () => {
+    const s = await mount()
+    await open(s)
+    const doc = s.body.ownerDocument as unknown as { activeElement: MemoryNode | null }
+    inPopover(s, 'data-popover-lot-count')[0].focus()
+    assert.notEqual(doc.activeElement, statusButton(s, 701))
+    await s.click(action(s, 'close'))
+    assert.equal(popoverOpen(s), false)
+    assert.equal(doc.activeElement, statusButton(s, 701), 'focus is on the status icon the popover opened from')
+  }],
+  ['Enter in the LAST entry of a per-batch popover closes it and moves on to the next row; Enter in an earlier entry only moves to the next entry', async () => {
+    const s = await mount()
+    await open(s)
+    const doc = s.body.ownerDocument as unknown as { activeElement: MemoryNode | null }
+    const enter = (node: MemoryNode) => s.call(node, 'onKeyDown', [{ key: 'Enter', preventDefault() {}, currentTarget: node, target: node, nativeEvent: { isComposing: false } }])
+    const [first, last] = inPopover(s, 'data-popover-lot-count')
+    await enter(first)
+    assert.equal(popoverOpen(s), true, 'Enter in the first of two entries only moves on')
+    assert.equal(doc.activeElement, last)
+    await enter(last)
+    assert.equal(popoverOpen(s), false, 'Enter in the last entry closes the popover')
+    const next = s.find(node => node.getAttribute('data-check-count') !== null && row(s, 702).contains(node), 'next row count')
+    assert.equal(doc.activeElement, next, 'and moves on to the next row’s count')
+  }],
+  ['a tap into another input is deliberate: closing does not take focus from it', async () => {
+    const s = await mount()
+    await open(s)
+    const doc = s.body.ownerDocument as unknown as { activeElement: MemoryNode | null }
+    const elsewhere = s.find(node => node.getAttribute('data-check-count') !== null && row(s, 702).contains(node), 'other row count')
+    elsewhere.focus()
+    await s.click(action(s, 'close'))
+    assert.equal(doc.activeElement, elsewhere, 'focus stays where the person put it')
+  }],
 ]
 
 const failures: string[] = []

@@ -30,6 +30,10 @@ export type InventoryCheckCountPopoverProps = {
   statusIcon: ReactNode
   statusText: string
   onClose: () => void
+  /** Where keyboard focus goes when the popover closes by any path (the row's status icon), unless the person has deliberately moved into another field. */
+  returnFocus?: () => void
+  /** Enter in the last entry: the popover closes and the list moves on to the next row. */
+  onAdvance?: () => void
   onCount: (product: InventoryCheckProduct, value: string) => void
   onLotCount: (product: InventoryCheckProduct, row: InventoryCheckLotRow, value: string) => void
   /** Fill the stock figure the person is looking at into every entry (the batches when given, else the total). */
@@ -43,7 +47,7 @@ export type InventoryCheckCountPopoverProps = {
 
 const tool = 'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-gray-600 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50 lg:h-9 lg:w-9 dark:text-gray-300 dark:hover:bg-zinc-800'
 
-export default function InventoryCheckCountPopover({ product, draft, byBatch, loadLots, canViewStock, canViewCounts = false, locked, t, statusIcon, statusText, onClose, onCount, onLotCount, onMatches, onDiffers, onClear, onLotSet }: InventoryCheckCountPopoverProps) {
+export default function InventoryCheckCountPopover({ product, draft, byBatch, loadLots, canViewStock, canViewCounts = false, locked, t, statusIcon, statusText, onClose, returnFocus, onAdvance, onCount, onLotCount, onMatches, onDiffers, onClear, onLotSet }: InventoryCheckCountPopoverProps) {
   const tr = (key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
   // The row already carries its stocked batches (the list read them): the entries are drawn from them at the first paint, with no request. Only a row that says lots_more, or a list that did not carry
   // batches, reads them (one request, this product).
@@ -60,6 +64,20 @@ export default function InventoryCheckCountPopover({ product, draft, byBatch, lo
       () => { if (!abort.signal.aborted) setLots({ state: 'failed' }) })
     return () => abort.abort()
   }, [product.id, byBatch])
+  // Every way out (X, Enter in the last entry, a tap outside, Escape) unmounts this popover, and the unmount returns focus to the status icon: the focused entry has just left the page, so focus would
+  // otherwise fall to the body. When it is on any field that is still on the page the person went there on purpose (a tap into another input), and it stays.
+  const giveFocusBack = useRef(returnFocus)
+  giveFocusBack.current = returnFocus
+  // A tap outside closes on mousedown and the browser then blurs the page on that same press, after this runs: so it is checked again on the next frame.
+  useEffect(() => () => {
+    const back = giveFocusBack.current
+    const check = () => {
+      const active = document.activeElement
+      if (!active || active === document.body || active === document.documentElement || !document.body.contains(active)) back?.()
+    }
+    check()
+    if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(check)
+  }, [])
   const ready = lots.state === 'ready'
   const rows = lots.state === 'ready' ? lots.rows : []
   const batches = byBatch && rows.length > 0
@@ -79,11 +97,11 @@ export default function InventoryCheckCountPopover({ product, draft, byBatch, lo
     const inputs = Array.from(bodyRef.current?.querySelectorAll<HTMLInputElement>('input[data-popover-count]') ?? [])
     const at = inputs.indexOf(event.currentTarget)
     const next = inputs[at + 1]
-    if (next) { next.focus(); next.select() } else onClose()
+    if (next) { next.focus(); next.select() } else { onClose(); onAdvance?.() }
   }
   const input = 'h-10 w-[4.5rem] lg:h-9 min-w-0 shrink-0 rounded-lg border px-2 text-right text-xs tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 read-only:opacity-60 dark:bg-gray-900'
 
-  return <div data-inventory-check-popover={String(product.id)} className="w-[min(21rem,calc(100vw-1rem))] max-w-full p-2 text-xs text-gray-800 dark:text-gray-100">
+  return <div data-inventory-check-popover={String(product.id)} role="dialog" aria-label={tr('inventory_check_open_count', 'Check and count: {name}').replace('{name}', product.name)} className="w-[min(21rem,calc(100vw-1rem))] max-w-full p-2 text-xs text-gray-800 dark:text-gray-100">
     <div className="flex min-w-0 items-start gap-1">
       <span data-popover-status title={statusText} aria-label={statusText} role="img" className="mt-1 inline-flex h-6 w-6 shrink-0 items-center justify-center">{statusIcon}</span>
       <span className="min-w-0 flex-1 break-words text-xs font-semibold leading-5">{product.name}</span>

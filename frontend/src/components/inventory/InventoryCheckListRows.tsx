@@ -213,7 +213,7 @@ function ListRow({ product, draft, adornment, columns, countable, copy, scanHit,
     {counting ? <PortalMenu align="auto" menuClassName="!rounded-xl" closeOnContentClick={false}
       trigger={<button ref={statusRef} type="button" data-check-action="status" data-check-status-kind={kind} aria-label={openLabel} title={checkedTitle} className={statusButtonClass}>{statusGlyph}</button>}
       content={({ closeMenu }) => <InventoryCheckCountPopover product={product} draft={draft} byBatch={byBatch} loadLots={loadLots} canViewStock={canViewStock} canViewCounts={canViewCounts} locked={locked} t={t} statusIcon={statusGlyph} statusText={checkedTitle}
-        onClose={closeMenu} onCount={onCount} onLotCount={(item, row, value) => onLotCount?.(item, row, value)} onMatches={(item, rows) => onMatches?.(item, rows)} onDiffers={item => onDiffers?.(item)} onClear={item => onClear?.(item)} onLotSet={onLotSet} />} />
+        onClose={closeMenu} returnFocus={() => statusRef.current?.focus()} onAdvance={() => onAdvance(product.id)} onCount={onCount} onLotCount={(item, row, value) => onLotCount?.(item, row, value)} onMatches={(item, rows) => onMatches?.(item, rows)} onDiffers={item => onDiffers?.(item)} onClear={item => onClear?.(item)} onLotSet={onLotSet} />} />
       : <span data-check-status-kind={kind} role="img" aria-label={statusWords} title={checkedTitle} className="inline-flex h-11 w-11 shrink-0 items-center justify-center lg:h-9 lg:w-9">{statusGlyph}</span>}
     {checkedOn ? <span data-check-date title={checkedTitle} className="text-[10px] leading-tight tabular-nums text-gray-500 lg:text-[11px] dark:text-gray-400">{checkedOn}</span> : null}
   </span>
