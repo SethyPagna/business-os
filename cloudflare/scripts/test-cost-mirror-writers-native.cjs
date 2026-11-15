@@ -108,6 +108,17 @@ async function main() {
     assert.equal(after.purchase_price_usd, after.cost_price_usd, 'and the twin with it')
   })
 
+  await check('owner rule: a Review-tier requester holding the retired cost-entry grant is refused a cost edit (403, nothing queued)', async () => {
+    globalThis.__costRuleAdmin = true
+    try {
+      const refused = seed('Rule refused', 5, 5)
+      const answer = await request(products, 'PUT', `/${refused}`, { cost_price_usd: 3, purchase_price_usd: 99 }, requester)
+      assert.equal(answer.status, 403, JSON.stringify(answer))
+      assert.equal(answer.body.code, 'product_cost_edit_required')
+      assert.deepEqual(pair(refused).slice(0, 2), [5, 5], 'the cost did not move')
+    } finally { delete globalThis.__costRuleAdmin }
+  })
+
   await check('review queue: an approved edit replays through the same writer, twin included', async () => {
     const queued = seed('Review edit', 5, 5)
     const pending = await request(products, 'PUT', `/${queued}`, { cost_price_usd: 3, purchase_price_usd: 99 }, requester)
