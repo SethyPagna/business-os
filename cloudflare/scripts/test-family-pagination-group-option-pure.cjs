@@ -44,7 +44,7 @@ async function capture(options) {
 
 function world() {
   const db = new DatabaseSync(':memory:')
-  db.exec(`CREATE TABLE products(id INTEGER PRIMARY KEY, name TEXT, name_key TEXT, parent_id INTEGER, created_at TEXT, is_active INTEGER DEFAULT 1, category TEXT, x TEXT)`)
+  db.exec(`CREATE TABLE products(id INTEGER PRIMARY KEY, name TEXT, name_key TEXT, parent_id INTEGER, created_at TEXT, is_active INTEGER DEFAULT 1, is_group INTEGER DEFAULT 0, category TEXT, x TEXT)`)
   const add = db.prepare('INSERT INTO products(id,name,name_key,parent_id,created_at,category,x) VALUES(?,?,?,?,?,?,?)')
   let seed = 7
   const rand = n => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n }
