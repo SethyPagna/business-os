@@ -226,7 +226,7 @@ try {
       assert.equal(m.overflow, false, `${where}: nothing runs off the viewport`)
       assert.ok(m.rowHeight <= 48, `${where}: the row stays dense (${m.rowHeight}px)`)
       // Two mounts from one element: only the bottom one carries the polite live region.
-      if (name === 'centered') assert.equal(m.live, which === 'top' ? 0 : 1, `${where}: one live region`)
+      assert.equal(m.live, which === 'top' ? 0 : 1, `${where}: one live region, on the bottom mount only`)
     }
     if (SCREENSHOT_DIR) {
       const shot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true })
