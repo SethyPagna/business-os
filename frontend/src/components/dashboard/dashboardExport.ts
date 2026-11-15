@@ -153,7 +153,8 @@ function buildDashboardKpiRows(ctx: DashboardExportContext): Row[] {
     { Section: 'KPI', Metric: 'Returns', Value: returns.return_count || 0, Period: ctx.rangeLabel },
     { Section: 'KPI', Metric: 'Refunded (USD)', Value: priceCsv(returns.refund_usd), Period: ctx.rangeLabel },
     { Section: 'KPI', Metric: 'Supplier Returns', Value: supplierReturns.return_count || 0, Period: ctx.rangeLabel },
-    { Section: 'KPI', Metric: 'Business Loss (USD)', Value: priceCsv(supplierReturns.loss_usd), Period: ctx.rangeLabel },
+    // Cost money: the Worker omits it for a non-admin (owner, 15 Nov 2026), so the row is left out rather than written as 0.00.
+    ...(typeof supplierReturns.loss_usd === 'number' ? [{ Section: 'KPI', Metric: 'Business Loss (USD)', Value: priceCsv(supplierReturns.loss_usd), Period: ctx.rangeLabel }] : []),
     { Section: 'KPI', Metric: 'In Stock', Value: ctx.summary?.in_stock_count || 0, Period: 'all-time' },
     { Section: 'KPI', Metric: 'Low Stock', Value: ctx.lowStockCount, Period: 'all-time' },
     { Section: 'KPI', Metric: 'Out Of Stock', Value: ctx.outOfStockCount, Period: 'all-time' },

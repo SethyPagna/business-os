@@ -1438,7 +1438,10 @@ export default function Dashboard() {
   // cannot match to stock movements, and a 0 there would read as "nothing was
   // removed". The headline revenue and profit above stay the canonical
   // figures -- this is reported beside them, never subtracted from them.
-  const aHasLosses = typeof analytics?.totals?.removal_loss_usd === 'number'
+  // Owner, 15 Nov 2026: every cost, profit, margin, stock value and loss figure is administrator-only. The Worker omits them for anyone else,
+  // and the client also refuses them without canViewAcquisitionCosts, so a payload that leaked them still draws no card, never a $0.00.
+  const aSeesCost = canViewAcquisitionCosts(user)
+  const aHasLosses = aSeesCost && typeof analytics?.totals?.removal_loss_usd === 'number'
   const aRemovalLoss = analytics?.totals?.removal_loss_usd || 0
   // p5/losses (Sep 15 2026): removed rows the loss chain still could not
   // price at all -- the owner's own example ("i see the report says row
@@ -1458,14 +1461,14 @@ export default function Dashboard() {
   // for a non-admin dashboard permission, never sent as 0. `|| 0` on an
   // absent profit_usd used to read as a real zero-profit period; the Gross
   // Profit card is hidden below instead when this is false.
-  const aHasProfit = typeof analytics?.totals?.profit_usd === 'number'
+  const aHasProfit = aSeesCost && typeof analytics?.totals?.profit_usd === 'number'
   const aProfit   = analytics?.totals?.profit_usd || 0
   // AL finding L4 (13 Oct 2026): the courier's actual cost is administrator-
   // only. A cost viewer who is not an administrator receives profit restated
   // on goods alone (revenue - cost) with this flag, and no courier-cost keys,
   // so the cards below drop the delivery terms instead of printing $0.00.
   const aProfitExclDelivery = (analytics?.totals as Record<string, unknown> | undefined)?.profit_excludes_delivery === true
-  const aCourierCostShown = typeof analytics?.totals?.delivery_actual_cost_usd === 'number'
+  const aCourierCostShown = aSeesCost && typeof analytics?.totals?.delivery_actual_cost_usd === 'number'
   // The period rows pass the same gate as the totals, so a caller without
   // cost and profit has no profit chart to draw: that tab is not offered.
   const chartMode: DashboardChartMode = activeChart === 'profit' && !aHasProfit ? 'revenue' : activeChart
@@ -1502,6 +1505,8 @@ export default function Dashboard() {
   const aItemsRet  = analytics?.periodReturns?.items_returned || 0
   const aSupplierReturns = analytics?.periodSupplierReturns?.return_count || 0
   const aSupplierLossUsd = analytics?.periodSupplierReturns?.loss_usd || 0
+  // Supplier loss is cost money: the Worker omits it for a non-admin, so the row shows the count, never a $0.00.
+  const aHasSupplierLoss = aSeesCost && typeof analytics?.periodSupplierReturns?.loss_usd === 'number'
   const chartData = useMemo(
     () => (analytics?.periodData || []).map((row) => normalizeDashboardGrossMetrics(row) as DashboardPeriodRow),
     [analytics?.periodData],
@@ -1798,7 +1803,9 @@ ${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profi
         { label: translateOr('items', 'Items'), value: aItemsRet },
         { label: translateOr('stats_refunded_by_return_date', 'Refunded (by return date)'), value: fmtUSD(aRefundUsd) },
         { label: translateOr('stats_refund_in_revenue', "Taken off this period's revenue"), value: fmtUSD(aKernelRefund) },
-        { label: `${translateOr('supplier_returns', 'Supplier returns')} (${aSupplierReturns})`, value: fmtUSD(aSupplierLossUsd) },
+        aHasSupplierLoss
+          ? { label: `${translateOr('supplier_returns', 'Supplier returns')} (${aSupplierReturns})`, value: fmtUSD(aSupplierLossUsd) }
+          : { label: translateOr('supplier_returns', 'Supplier returns'), value: aSupplierReturns },
       ],
     },
     // Promoted to its own outer card (user, Aug 29): pulled out of Revenue's
@@ -1861,6 +1868,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
     aStockValue,
     aStoreDiscounts,
     aSupplierLossUsd,
+    aHasSupplierLoss,
     aSupplierReturns,
     aTax,
     aTxCount,

@@ -71,9 +71,11 @@ test('control: the Worker summary is a valid Dashboard summary and carries all s
   assert.equal(isDashboardSummaryPayload(workerSummary), true)
 })
 
-test('roles that hold `dashboard`: the Manager default (no cost grant) is one, the Employee default is not', () => {
+test('roles that hold `dashboard`: the Manager and the Employee defaults both do (owner, 15 Nov 2026), neither with a cost grant', () => {
   assert.equal(hasAnyPermission(MANAGER, ['dashboard']), true, 'the Manager default opens /api/dashboard/startup')
-  assert.equal(hasAnyPermission(EMPLOYEE, ['dashboard']), false, 'the Employee default is refused by denyUnless(c, "dashboard")')
+  assert.equal(hasAnyPermission(EMPLOYEE, ['dashboard']), true, 'the Employee default opens it too (reverses the 20 Oct rule)')
+  assert.equal(hasAnyPermission(EMPLOYEE, ['dashboard_export']), false, 'but never exports it')
+  assert.equal(DEFAULT_ROLE_PERMISSIONS.employee.product_cost_view, false)
   assert.equal(DEFAULT_ROLE_PERMISSIONS.manager.product_cost_view, undefined, 'the Manager default holds no cost grant')
 })
 
@@ -87,12 +89,15 @@ test('the Dashboard accepts what the Worker sends the Manager (red before: it th
   assert.equal(isDashboardSummaryPayload(projectAcquisitionCosts(workerSummary, MANAGER)), true)
 })
 
-test('cost holders keep the cost keys and are accepted too: the grant, not the role code, decides', () => {
-  for (const user of [MANAGER_WITH_COST, ADMIN]) {
+test('only the administrator keeps the cost keys (owner, 15 Nov 2026): a manager or employee WITH the cost grant gets none', () => {
+  for (const user of [MANAGER_WITH_COST, asWorkerUser('employee', { ...DEFAULT_ROLE_PERMISSIONS.employee, product_cost_view: true })]) {
     const sent = projectAcquisitionCosts(workerSummary, user)
-    for (const key of COST_SUMMARY_KEYS) assert.equal(Object.hasOwn(sent, key), true, `${key} reaches ${user.role_code}${user === MANAGER_WITH_COST ? ' with the cost grant' : ''}`)
-    assert.equal(isDashboardSummaryPayload(sent), true)
+    for (const key of COST_SUMMARY_KEYS) assert.equal(Object.hasOwn(sent, key), false, `${key} is withheld from a non-admin even with the grant`)
+    assert.equal(isDashboardSummaryPayload(sent), true, 'and the Dashboard still accepts what it is sent')
   }
+  const sent = projectAcquisitionCosts(workerSummary, ADMIN)
+  for (const key of COST_SUMMARY_KEYS) assert.equal(Object.hasOwn(sent, key), true, `${key} reaches the administrator`)
+  assert.equal(isDashboardSummaryPayload(sent), true)
 })
 
 test('the validator still refuses a summary that is genuinely incomplete', () => {
@@ -106,7 +111,11 @@ test('the validator still refuses a summary that is genuinely incomplete', () =>
   assert.equal(isDashboardSummaryPayload({ ...sent, recent_sales: 'x' }), false)
 })
 
-test('the stock-value card needs the cost grant AND the Worker having sent it, and absent cost keys are never defaulted to 0', () => {
+test('the stock-value card needs administrator cost access AND the Worker having sent it, and absent cost keys are never defaulted to 0', () => {
+  // Every other cost, profit, loss and supplier-loss figure is gated on the same call (aSeesCost), so a leaking payload draws no card.
+  assert.ok(dashboardSource.includes('const aSeesCost = canViewAcquisitionCosts(user)'))
+  for (const gate of ["aHasLosses", "aHasProfit", "aCourierCostShown", "aHasSupplierLoss"]) assert.match(dashboardSource, new RegExp("const " + gate + " = aSeesCost && typeof"), gate + " requires cost access")
+  assert.ok(/aHasSupplierLoss\s*\? \{ label: [^\n]*fmtUSD\(aSupplierLossUsd\)/.test(dashboardSource), 'no $0.00 supplier loss without cost access: the row shows the count only')
   assert.match(dashboardSource, /const aHasStockValue = canViewAcquisitionCosts\(user\) && Number\.isFinite\(Number\(summary\?\.stock_value_usd \?\? NaN\)\)/)
   assert.match(dashboardSource, /\.\.\.\(aHasStockValue \? \[\{\s*id: 'stock-value'/, 'the card is spread in only when the stock value is shown')
   const emptyDefaults = dashboardSource.slice(dashboardSource.indexOf('const EMPTY_DASHBOARD_SUMMARY'), dashboardSource.indexOf('const EMPTY_DASHBOARD_ANALYTICS'))
