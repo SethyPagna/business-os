@@ -284,6 +284,13 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.ok(popoverSource.includes('lazyRetry(loadLotEntries') && chunkSource.includes("import('./InventoryCheckLotEntries.tsx')"), 'a dynamic import behind lazyRetry(), never a bare lazy() (a failed chunk must not tear the page down)')
     assert.ok(rowsSource.includes('if (props.lotCounts && props.selecting) preloadLotEntries()'), 'requested only when lot counts are on')
     assert.ok(!rowsSource.includes('InventoryCheckLotEntries'), 'the list rows do not import it')
+    // Chunk tidy-up: what exists only when counting per date moves with the entries; the switch-OFF first paint (the one Total box) stays in the popover.
+    const entriesSource = readFileSync(new URL('../src/components/inventory/InventoryCheckLotEntries.tsx', import.meta.url), 'utf8')
+    for (const piece of ['loadLots(product', 'data-popover-failed', 'function setLotQuantity', 'const unlotted', 'empty_lot_rows']) {
+      assert.ok(!popoverSource.includes(piece), 'per-date only code is not in the page chunk: ' + piece)
+      assert.ok(entriesSource.includes(piece), 'it is in the entries chunk: ' + piece)
+    }
+    assert.ok(popoverSource.includes('data-popover-single') && popoverSource.includes('data-popover-total'), 'the first paint without per-date counting (one Total box) stays in the popover chunk')
   }],
   // ---- D (review F5): each status is pinned to its icon and colour token. An icon swap (OK as a red x, not checked as a clock) goes red. ----
   ['every status wears its own icon and colour: not checked, in check, OK, issue, pending, and the draft ring', async () => {

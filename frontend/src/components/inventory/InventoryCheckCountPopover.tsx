@@ -27,8 +27,6 @@ import { finiteQuantity, parseCount } from './InventoryCheckCountEditor.tsx'
 // a count box on each, the row total is their sum. A product that holds no batch here (or any viewer / switch state that has none) counts one total. Counts are sellable units only.
 // Nothing here shows or reads cost. Typing only changes the page's draft; nothing is written until Submit (or the direct Set of a Full stock adjuster, which confirms its own before and after).
 
-type Lots = { state: 'loading' } | { state: 'failed' } | { state: 'ready'; rows: InventoryCheckLotRow[]; more: boolean }
-
 export type InventoryCheckCountPopoverProps = {
   product: InventoryCheckProduct
   draft: { count: string; lots?: LotDraft; selected: boolean } | undefined
@@ -69,20 +67,14 @@ export default function InventoryCheckCountPopover({ product, draft, byBatch, lo
   // The row already carries its stocked batches (the list read them): the entries are drawn from them at the first paint, with no request. Only a row that says lots_more, or a list that did not carry
   // batches, reads them (one request, this product). A row that was changed on another device after the list was read (lots_stale) reads them too: a stock-in there adds a date this row does not carry.
   const carried = Array.isArray(product.lot_rows) && product.lots_more !== true && product.lots_stale !== true
-  const [lots, setLots] = useState<Lots>(!byBatch || !loadLots ? { state: 'ready', rows: [], more: false } : carried ? { state: 'ready', rows: product.lot_rows!, more: false } : { state: 'loading' })
-  // The dates this branch holds at 0, carried by the row: behind "Show empty received dates", never read here, never part of "matches stock".
-  const [emptied, setEmptied] = useState<InventoryCheckLotRow[]>(() => product.empty_lot_rows ?? [])
+  // Counting per date at all (switch on, a way to read the dates): everything that is only for that (reading the dates, the loading and failed lines, the Set, the unlotted units) lives in the entries chunk.
+  // The first paint without it (switch OFF, or a viewer who cannot see stock) is the one Total box below, in this chunk.
+  const perBatch = byBatch && !!loadLots
+  // The counted dates the header needs (the Matches stock tick, the Total box): the row's own at the first paint, null while the entries have not reported them, [] when there is no per-date counting.
+  const [dates, setDates] = useState<InventoryCheckLotRow[] | null>(!perBatch ? [] : carried ? product.lot_rows! : null)
   const bodyRef = useRef<HTMLDivElement | null>(null)
   // A retry builds a new lazy component (a rejected one stays rejected); the key makes the entries mount again.
   const [entriesTry, setEntriesTry] = useState(0)
-  // One request when the popover opens. A late answer after it closed is dropped by the abort.
-  useEffect(() => {
-    if (!byBatch || !loadLots || carried) return undefined
-    const abort = new AbortController()
-    loadLots(product, abort.signal).then(answer => { if (!abort.signal.aborted) setLots({ state: 'ready', rows: answer.lots ?? [], more: answer.more === true }) },
-      () => { if (!abort.signal.aborted) setLots({ state: 'failed' }) })
-    return () => abort.abort()
-  }, [product.id, byBatch])
   // Every way out (X, Enter in the last entry, a tap outside, Escape) unmounts this popover, and the unmount returns focus to the status icon: the focused entry has just left the page, so focus would
   // otherwise fall to the body. When it is on any field that is still on the page the person went there on purpose (a tap into another input), and it stays.
   const giveFocusBack = useRef(returnFocus)
@@ -97,8 +89,8 @@ export default function InventoryCheckCountPopover({ product, draft, byBatch, lo
     check()
     if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(check)
   }, [])
-  const ready = lots.state === 'ready'
-  const rows = lots.state === 'ready' ? lots.rows : []
+  const ready = dates !== null
+  const rows = dates ?? []
   const batches = byBatch && rows.length > 0
   // Focus the first entry once the entries exist.
   useEffect(() => { if (ready) bodyRef.current?.querySelector<HTMLInputElement>('input[data-popover-count]')?.focus() }, [ready])
@@ -108,16 +100,7 @@ export default function InventoryCheckCountPopover({ product, draft, byBatch, lo
   const total = parseCount(draft?.count ?? '')
   const baseline = dated.dates > 0 ? dated.seen : stock
   const delta = canViewStock && total.kind === 'valid' && typeof baseline === 'number' ? total.value - baseline : null
-  const unlotted = batches && !(lots.state === 'ready' && lots.more) && stock !== null ? stock - rows.reduce((sum, row) => sum + row.quantity, 0) : 0
 
-  // A direct Set changed what one date holds. A date that holds stock is a counted date; one Set to 0 holds none, so it leaves the counted dates ("Matches stock" must never write a 0 against 0 line for it)
-  // and waits behind the empty dates, and a date Set up from empty joins the counted ones.
-  function setLotQuantity(row: InventoryCheckLotRow, quantity: number) {
-    const moved: InventoryCheckLotRow = { ...row, quantity }
-    const same = (candidate: InventoryCheckLotRow) => candidate.batchId === row.batchId
-    setLots(previous => previous.state !== 'ready' ? previous : { ...previous, rows: quantity <= 0 ? previous.rows.filter(candidate => !same(candidate)) : previous.rows.some(same) ? previous.rows.map(candidate => same(candidate) ? moved : candidate) : [...previous.rows, moved] })
-    setEmptied(previous => quantity > 0 ? previous.filter(candidate => !same(candidate)) : previous.some(same) ? previous.map(candidate => same(candidate) ? moved : candidate) : [...previous, moved])
-  }
   function onEnter(event: KeyboardEvent<HTMLInputElement>) {
     if (event.nativeEvent.isComposing || event.key !== 'Enter') return
     event.preventDefault()
@@ -148,15 +131,11 @@ export default function InventoryCheckCountPopover({ product, draft, byBatch, lo
     </div>
 
     <div ref={bodyRef} data-popover-entries className="mt-1 min-w-0">
-      {lots.state === 'loading' ? <p data-popover-loading role="status" className="px-1 py-2 text-gray-500 dark:text-gray-400">{tr('inventory_check_popover_loading', 'Loading received dates…')}</p> : null}
-      {lots.state === 'failed' ? <p data-popover-failed role="alert" className="px-1 py-2 text-red-700 dark:text-red-300">{tr('inventory_check_popover_failed', 'Received dates could not be loaded. Close and open again.')}</p> : null}
-      {ready && batches ? <LotEntriesBoundary key={entriesTry} onRetry={() => { InventoryCheckLotEntries = newLotEntries(); setEntriesTry(value => value + 1) }}
+      {perBatch ? <LotEntriesBoundary key={entriesTry} onRetry={() => { InventoryCheckLotEntries = newLotEntries(); setEntriesTry(value => value + 1) }}
         failed={retry => <p data-popover-chunk-failed role="alert" className="flex items-center gap-1 px-1 py-2 text-red-700 dark:text-red-300"><span className="min-w-0 flex-1 break-words">{tr('inventory_check_popover_chunk_failed', 'The received dates could not load. Your counts are kept.')}</span>
           <button type="button" data-popover-action="retry-entries" className={tool} aria-label={tr('retry', 'Retry')} title={tr('retry', 'Retry')} onClick={retry}><RotateCcw className="h-4 w-4" aria-hidden="true" /></button></p>}>
-        <Suspense fallback={<p data-popover-loading role="status" className="px-1 py-2 text-gray-500 dark:text-gray-400">{tr('inventory_check_popover_loading', 'Loading received dates…')}</p>}><InventoryCheckLotEntries product={product} rows={rows} emptyRows={carried ? emptied : []} draftLots={draft?.lots} canViewCounts={canViewCounts} locked={locked} tr={tr} inputClass={input} toolClass={tool}
-        unlotted={unlotted} more={lots.state === 'ready' && lots.more} sumText={dated.dates > 0 && dated.valid ? String(dated.counted) : '—'} delta={delta}
-        onLotCount={(row, value) => onLotCount(product, row, value)} onEnter={onEnter}
-        onLotSet={onLotSet ? (row, value) => { void onLotSet(product, row, value).then(quantity => { if (typeof quantity === 'number') setLotQuantity(row, quantity) }) } : undefined} /></Suspense></LotEntriesBoundary> : null}
+        <Suspense fallback={<p data-popover-loading role="status" className="px-1 py-2 text-gray-500 dark:text-gray-400">{tr('inventory_check_popover_loading', 'Loading received dates…')}</p>}><InventoryCheckLotEntries product={product} loadLots={loadLots!} carried={carried} onDates={setDates} draftLots={draft?.lots} canViewCounts={canViewCounts} locked={locked} tr={tr} inputClass={input} toolClass={tool}
+        sumText={dated.dates > 0 && dated.valid ? String(dated.counted) : '—'} delta={delta} onLotCount={(row, value) => onLotCount(product, row, value)} onEnter={onEnter} onSet={onLotSet} /></Suspense></LotEntriesBoundary> : null}
       {ready && !batches ? <div data-popover-single className="flex min-w-0 items-center gap-x-1.5 px-0.5">
         <span className="min-w-0 flex-1 font-semibold">{tr('inventory_check_popover_total', 'Total')}</span>
         <input data-popover-count data-popover-total type="text" inputMode="decimal" autoComplete="off" value={draft?.count ?? ''} readOnly={locked} placeholder={canViewStock && stock !== null ? String(stock) : ''} aria-label={`${tr('inventory_check_count', 'Count')}: ${product.name}`} aria-invalid={total.kind === 'invalid' ? true : undefined}
