@@ -10,6 +10,7 @@
 // Run: node scripts/test-inventory-check-grouped-oracle-native.cjs
 const assert = require('node:assert/strict')
 const { bundle, bundleMutated, buildWorld: buildFreshWorld, adapter } = require('./harness/ic-grouped-world.cjs')
+const { expectedRead } = require('./harness/ic-grouped-oracle.cjs')
 // Replaying every migration takes seconds, and every read here is read-only (G6), so a seed's world is built once and shared by the real code and each mutant.
 const worlds = new Map()
 const buildWorld = seed => { if (!worlds.has(seed)) worlds.set(seed, buildFreshWorld(seed)); return worlds.get(seed) }
@@ -19,67 +20,6 @@ const FIELDS = { inventory_check_show_stock: true, inventory_check_show_barcode:
 const admin = { id: 1, role_code: 'admin', role_permissions: { all: true } }
 const noCategory = { id: 3, role_code: 'staff', role_permissions: JSON.stringify({ inventory_checks: true, inventory_check_show_stock: true, inventory_check_show_brand: true }) }
 const counter = { id: 2, role_code: 'staff', role_permissions: JSON.stringify({ inventory_checks: true, ...FIELDS }) }
-
-const asciiLower = text => text.replace(/[A-Z]/g, c => c.toLowerCase())
-const trimSpaces = text => text.replace(/^ +| +$/g, '')
-const bytes = (a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b))
-const dayOf = at => new Date(Date.parse(at.includes('T') ? at : at.replace(' ', 'T') + 'Z') + 7 * 3600000).toISOString().slice(0, 10)
-
-function newestChecks(db, org, branch) {
-  const sessions = new Map(db.prepare('SELECT id, organization_id AS org, branch_id AS branch FROM inventory_check_sessions').all().map(s => [s.id, s]))
-  const best = new Map()
-  for (const item of db.prepare('SELECT session_id, product_id, branch_id, state, updated_at FROM inventory_check_items').all()) {
-    const s = sessions.get(item.session_id)
-    if (s.org !== org || s.branch !== item.branch_id || (branch !== null && item.branch_id !== branch)) continue
-    if (item.state !== 'done' && item.state !== 'issue') continue
-    if (!best.has(item.product_id) || item.updated_at > best.get(item.product_id)) best.set(item.product_id, item.updated_at)
-  }
-  return best
-}
-
-// The expected grouped read for one world, scope and pager, from the name-ordered rows.
-function expectedRead(db, nameRows, by, org, branch, page, pageSize) {
-  const dates = newestChecks(db, org, branch)
-  const info = new Map(db.prepare(`SELECT p.id AS id, p.parent_id AS parent_id, p.category AS category,
-      COALESCE(NULLIF(COALESCE(parent.name_key,p.name_key),''),'id:'||COALESCE(parent.id,p.id)) AS k, lower(trim(COALESCE(parent.name,p.name))) AS n
-    FROM products p LEFT JOIN products parent ON parent.id=p.parent_id`).all().map(r => [r.id, r]))
-  const leaves = nameRows.filter(row => row.checkable).map(row => row.id)
-  const families = new Map()
-  for (const id of leaves) {
-    const row = info.get(id), f = families.get(row.k) || { k: row.k, n: row.n, ids: [], date: null, cat: null, firstCat: new Map() }
-    f.ids.push(id)
-    const at = dates.get(id) ?? null
-    if (at !== null && (f.date === null || at > f.date)) f.date = at
-    const norm = row.category === null ? null : (trimSpaces(asciiLower(String(row.category))) || null)
-    if (norm !== null && (f.cat === null || bytes(norm, f.cat) < 0)) f.cat = norm
-    if (norm !== null && !f.firstCat.has(norm)) f.firstCat.set(norm, trimSpaces(String(row.category)))
-    families.set(row.k, f)
-  }
-  const keyOf = f => by === 'checked' ? (f.date === null ? 'never' : `d:${dayOf(f.date)}`) : (f.cat === null ? 'none' : `c:${f.cat}`)
-  const sortKey = f => by === 'checked' ? f.date : f.cat
-  const ordered = [...families.values()].sort((a, b) => {
-    const ka = sortKey(a), kb = sortKey(b)
-    if ((ka === null) !== (kb === null)) return ka === null ? 1 : -1
-    if (ka !== null && ka !== kb) return by === 'checked' ? (ka < kb ? 1 : -1) : bytes(ka, kb)
-    return bytes(a.n, b.n) || bytes(a.k, b.k)
-  })
-  const totals = new Map()
-  ordered.forEach((f, index) => { const key = keyOf(f), g = totals.get(key) || { key, families: 0, products: 0, first: index + 1, last: index + 1 }; g.families++; g.products += f.ids.length; g.last = index + 1; totals.set(key, g) })
-  const slice = ordered.slice((page - 1) * pageSize, page * pageSize), items = [], seenHeader = new Set()
-  for (const f of slice) for (const id of f.ids.sort((a, b) => a - b)) {
-    const parent = info.get(id).parent_id
-    if (parent && !seenHeader.has(parent)) { seenHeader.add(parent); items.push({ id: parent, group_key: keyOf(f) }) }
-    items.push({ id, group_key: keyOf(f) })
-  }
-  const present = [...new Set(slice.map(keyOf))]
-  const offset = (page - 1) * pageSize
-  const groups = present.map(key => {
-    const g = totals.get(key), first = slice.find(f => keyOf(f) === key)
-    const label = by === 'category' && key !== 'none' ? [...families.values()].filter(f => keyOf(f) === key && slice.includes(f)).map(f => f.firstCat.get(f.cat)).find(Boolean) ?? null : null
-    return { key, label, families: g.families, products: g.products, continued_before: g.first < offset + 1, continues_after: g.last > offset + pageSize, _first: first }
-  }).map(({ _first, ...g }) => g)
-  return { items, groups, total: ordered.length, products: leaves.length, totals }
-}
 
 async function main() {
   const real = bundle('inventoryCheckProducts.ts')
@@ -165,7 +105,7 @@ async function main() {
     M8: ['inventoryCheckProducts.ts', ['checkable: true, matches_filters: true, ...by ? { group_key: row.group_key } : {} })', "checkable: true, matches_filters: true, ...by ? { group_key: row.check_at ? 'd:' + dayOfRow(row.check_at) : 'never' } : {} })"]],
     M9: ['familyPagination.ts', ['FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY ${familyOrderSql}, family_root_id ASC) AS family_rank FROM families)` : `SELECT', 'FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY ${familyOrderSql}) AS family_rank FROM families)` : `SELECT']],
     M10: ['inventoryCheckGrouping.ts', ["rankingOrder: '(family_num_sort IS NULL) ASC,family_num_sort DESC,family_name ASC'", "rankingOrder: 'family_name ASC,(family_num_sort IS NULL) ASC,family_num_sort DESC'"]],
-    M11: ['inventoryCheckGrouping.ts', ["\"NULLIF(lower(trim(COALESCE(c.category,''))),'')\"", "\"NULLIF(COALESCE(c.category,''),'')\""]],
+    M11: ['inventoryCheckGrouping.ts', ["`NULLIF(lower(trim(COALESCE(${alias}.category,''))),'')`", "`NULLIF(COALESCE(${alias}.category,''),'')`"]],
     M12: ['inventoryCheckAccess.ts', ["    if (result.groupBy === 'category') requireField('category', 'groupBy')\n", '']],
   }
   const files = { 'inventoryCheckGrouping.ts': 'inventoryCheckProducts.ts', 'familyPagination.ts': 'inventoryCheckProducts.ts', 'inventoryCheckProducts.ts': 'inventoryCheckProducts.ts', 'inventoryCheckAccess.ts': 'inventoryCheckProducts.ts' }

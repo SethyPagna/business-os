@@ -507,11 +507,23 @@ export async function paginateProductFamilies<T = Record<string, unknown>>(
 // pageFamiliesByKeys reads the rows of one page's keys without ranking anything. Together they return exactly the rows, order and total paginateProductFamilies({ seekPage })
 // returns for the same options: same families table, same ORDER BY (the caller's familyOrderSql, then family_root_id), same candidate ids, same row filter, same intra-family order.
 
-/** The ordered family keys of the whole scope, and the family total. */
-export async function rankProductFamilies(options: FamilyPaginationOptions): Promise<{ keys: string[]; total: number }> {
+/** The ordered family keys of the whole scope, and the family total. With familyGroupSql, also the whole-scope groups in rank order (windows over every family; the ranking is not cut). */
+export async function rankProductFamilies(options: FamilyPaginationOptions): Promise<{ keys: string[]; total: number; groups?: FamilyGroupTotals[] }> {
   const opts = narrowRead(options, true)
   const { db, params, familyOrderSql } = opts
   const ctes = buildCtes({ ...opts, familyMemberBaseWhereSql: undefined, inlineFamilies: true, narrow: true })
+  if (opts.familyGroupSql) {
+    const grouped = await db.prepare(`
+    ${ctes}
+    SELECT family_root_id, ${GROUP_COLUMNS.join(', ')} FROM (
+      SELECT family_root_id, __family_rank, ${groupWindowsSql(opts.familyGroupSql.keySql, '__family_rank')}
+      FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY ${familyOrderSql}, family_root_id ASC) AS __family_rank FROM families)
+    ) ORDER BY __family_rank ASC
+  `).all<Record<string, unknown>>(params)
+    const groups = new Map<string, FamilyGroupTotals>()
+    for (const row of grouped) takeGroup(row, groups)
+    return { keys: grouped.map((row) => String(row.family_root_id)), total: grouped.length, groups: [...groups.values()] }
+  }
   const rows = await db.prepare(`
     ${ctes}
     SELECT family_root_id FROM families ORDER BY ${familyOrderSql}, family_root_id ASC
@@ -519,8 +531,8 @@ export async function rankProductFamilies(options: FamilyPaginationOptions): Pro
   return { keys: rows.map((row) => String(row.family_root_id)), total: rows.length }
 }
 
-/** The rows of the given family keys, in the keys' order, then the caller's intra-family order. The candidate ids and the row filter are buildSeekPageSql's. */
-export async function pageFamiliesByKeys<T = Record<string, unknown>>(opts: FamilyPaginationOptions, keys: readonly string[]): Promise<T[]> {
+/** The rows of the given family keys, in the keys' order, then the caller's intra-family order (keepKey: each row keeps its `__family_root_id`). The candidate ids and the row filter are buildSeekPageSql's. */
+export async function pageFamiliesByKeys<T = Record<string, unknown>>(opts: FamilyPaginationOptions, keys: readonly string[], keepKey = false): Promise<T[]> {
   if (!keys.length) return []
   const { db, params, selectColumns, joinSql, whereSql, matchRankSql, familyMemberBaseWhereSql, rankCteSql, intraFamilyOrderSql } = opts
   const rankJoin = matchRankSql?.includes('__fts_rank.') ? 'LEFT JOIN __fts_rank ON __fts_rank.id = p.id' : ''
@@ -547,6 +559,7 @@ export async function pageFamiliesByKeys<T = Record<string, unknown>>(opts: Fami
     JOIN page_families ON page_families.family_root_id = page_rows.__family_root_id
     ORDER BY page_families.family_pos ASC, ${intraFamilyOrderSql}
   `).all<Record<string, unknown>>({ ...params, __familyKeys: JSON.stringify(keys) })
+  if (keepKey) return rows as unknown as T[]
   return rows.map((row) => {
     const { __family_root_id, ...rest } = row
     return rest as unknown as T

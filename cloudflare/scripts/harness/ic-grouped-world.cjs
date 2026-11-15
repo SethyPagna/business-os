@@ -36,10 +36,9 @@ const INSTANTS = ['2026-11-01T03:00:00.000Z', '2026-11-01T16:59:59.999Z', '2026-
 const NAMES = ['Serum', 'serum', 'Cream', 'Toner', 'Mist', 'Soap', 'Balm', 'Gel', 'Lotion', 'Oil', 'Powder', 'Wash', 'Mask', 'Scrub', 'ក្រែម']
 const CATEGORIES = ['Skin', 'skin', ' Skin ', 'Hair', 'hair', '', null, 'Body', 'ក្រែម', 'Zed']
 
-function buildWorld(seed, { branches = 2 } = {}) {
+// The data of a world, written into a database that already holds every migration (the app harness seeds its own database with it). Returns the leaf product ids and the sessions.
+function populateWorld(db, seed, { branches = 2 } = {}) {
   const rnd = lcg(seed)
-  const db = new DatabaseSync(':memory:')
-  for (const sql of loadAll()) db.exec(sql)
   // Later migrations guard the stock tables; the fixture opens the permit while it seeds, as the other native worlds do.
   db.exec("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'")
   db.exec(`INSERT OR IGNORE INTO branches(id,name,is_active) VALUES(1,'One',1),(2,'Two',1),(3,'Closed',0);
@@ -86,7 +85,12 @@ function buildWorld(seed, { branches = 2 } = {}) {
     const state = ['unstarted', 'done', 'done', 'issue'][rnd(4)]
     insertItem.run(session.id, product, branch, state, state === 'unstarted' ? null : rnd(10), state === 'issue' ? 'short' : null, 2, state === 'unstarted' && rnd(2) ? null : INSTANTS[rnd(INSTANTS.length)])
   }
-  return { db, leaves, sessions }
+  return { leaves, sessions }
+}
+function buildWorld(seed, options) {
+  const db = new DatabaseSync(':memory:')
+  for (const sql of loadAll()) db.exec(sql)
+  return { db, ...populateWorld(db, seed, options) }
 }
 const adapter = db => ({ calls: 0, sql: [], async batch(statements) {
   this.calls++; this.sql.push(...statements.map(statement => statement.sql))
@@ -96,4 +100,4 @@ const adapter = db => ({ calls: 0, sql: [], async batch(statements) {
     db.exec('COMMIT'); return results
   } catch (error) { db.exec('ROLLBACK'); throw error } finally { db.exec('PRAGMA query_only=OFF') }
 } })
-module.exports = { bundle, bundleMutated, buildWorld, adapter, lcg }
+module.exports = { bundle, bundleMutated, buildWorld, populateWorld, adapter, lcg }

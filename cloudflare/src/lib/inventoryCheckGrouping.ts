@@ -32,10 +32,11 @@ export function lastCheckedSql(productId: string, branchScoped: boolean): string
 /** The business-day shift of every group key (UTC+7, the same day businessDateWindow's localDateOf names). */
 export const BUSINESS_DAY_SHIFT = '+7 hours'
 
-const CATEGORY_KEY_SQL = "NULLIF(lower(trim(COALESCE(c.category,''))),'')"
+const categoryKeySql = (alias: string): string => `NULLIF(lower(trim(COALESCE(${alias}.category,''))),'')`
 
-/** What the paginator needs for a grouping: the per-row sort expression, the group key over the `families` columns, and the order, spelled for the ranking (over `families`) and for the page wrapper (over window aggregates). */
-export function groupingPlan(by: InventoryCheckGrouping, branchScoped: boolean) {
+/** What the paginator needs for a grouping: the per-row sort expression, the group key over the `families` columns, and the order, spelled for the ranking (over `families`) and for the page wrapper (over window aggregates).
+ * `alias` is the alias of the row that carries `category`: the cohort's `c` on the ic_simple list, Products' `p` on the wired list. */
+export function groupingPlan(by: InventoryCheckGrouping, branchScoped: boolean, alias = 'c') {
   if (by === 'checked') {
     return {
       // The lookup rides on the paginator's per-row sort expression, so the COUNT statement (which drops it) never runs it.
@@ -47,7 +48,7 @@ export function groupingPlan(by: InventoryCheckGrouping, branchScoped: boolean) 
     }
   }
   return {
-    familyNumericSortSql: undefined as string | undefined, familySortValueSql: CATEGORY_KEY_SQL, materialized: false,
+    familyNumericSortSql: undefined as string | undefined, familySortValueSql: categoryKeySql(alias), materialized: false,
     productMetricsSql: 'SELECT * FROM cohort',
     familyGroupSql: { keySql: "CASE WHEN family_sort_value IS NULL THEN 'none' ELSE 'c:'||family_sort_value END" },
     rankingOrder: '(family_sort_value IS NULL) ASC,family_sort_value ASC,family_name ASC',
