@@ -178,7 +178,16 @@ const statusCounts = (text) => Object.fromEntries(JSON.parse(text).by_status.map
     })
     // exact: the +1 that used to be allowed on every shape was the read-switch memo expiring mid-run (15 s on Free), counted on a different request in each world; the harness leaves those statements out (excludeSwitchReads).
     // The +-1 that remained on the 365-day strips was the second clock statement (the Telegram fallback drain, every 20 s of wall clock; the harness leaves it out too). Nothing else is left: exact.
-    await step(`calls (report_atomic ${mode}): exactly the oracle's`, () => { for (const name of NAMES) assert.ok(n[name].calls <= o[name].calls, `${name}: calls ${n[name].calls} > ${o[name].calls}`) })
+    // the harness leaves the two clock statements out, so a route that issued an extra un-memoised switch read or drain would hide: bound what was left out by the wall clock (the memo expires every 15 s, the drain runs every 20 s, plus the cold first read)
+    await step(`switch reads (report_atomic ${mode}): within the wall-clock allowance, build and oracle`, () => {
+      for (const [label, res] of [['build', n], ['oracle', o]]) {
+        const entries = NAMES.map((name) => res[name])
+        const reads = entries.reduce((t, e) => t + e.switchReads, 0), ms = entries.reduce((t, e) => t + e.ms, 0)
+        const allowed = 2 + Math.ceil(ms / 15000) + Math.ceil(ms / 20000)
+        assert.ok(reads <= allowed, `${label}: ${reads} switch reads and drains over ${ms} ms, allowed ${allowed}`)
+      }
+    })
+    await step(`calls (report_atomic ${mode}): at most the oracle's`, () => { for (const name of NAMES) assert.ok(n[name].calls <= o[name].calls, `${name}: calls ${n[name].calls} > ${o[name].calls}`) })
   }
   await step('independent oracle: the status mix of each multi-page strip window equals a plain COUNT(*) GROUP BY over the same window', async () => {
     const world = await bootWorld({ tier: 'free' })

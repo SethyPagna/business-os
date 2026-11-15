@@ -40,6 +40,7 @@ async function runUrls({ urls, patches = [], switches, tier = 'free', fixture = 
     if (analyze) { await world.analyze(); await world.restart(); await world.login() }
     const list = typeof urls === 'function' ? await urls(world.ctx, world) : urls
     for (const [name, url] of Object.entries(list)) {
+      const sentAt = Date.now()
       const r = await world.send('GET', url, undefined, { miss: true })
       out[name] = { status: r.status, text: r.text, calls: r.calls, rr: r.rr }
       if (excludeSwitchReads) {
@@ -47,6 +48,7 @@ async function runUrls({ urls, patches = [], switches, tier = 'free', fixture = 
         out[name].calls -= reads.length
         out[name].rr -= reads.reduce((n, s) => n + s.rr, 0)
         out[name].switchReads = reads.length
+        out[name].ms = Date.now() - sentAt
       }
       if (regimes) {
         // which scope the report statements carried: the id list (json_each) or the subquery that re-runs the filter (matched_sale)
