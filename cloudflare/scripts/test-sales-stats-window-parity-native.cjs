@@ -170,7 +170,9 @@ const cases = {
     const block = src.match(/app\.get\('\/stats'[\s\S]*?\n\}\)/)?.[0] || ''
     assert.match(block, /const windowFilter=\{startDate:query\.startDate\|\|null,endDate:query\.endDate\|\|null,startTime:query\.startTime\|\|null,endTime:query\.endTime\|\|null\}/)
     assert.match(block, /readSalesHeaderTotals\(c\.env,\s*windowFilter,\s*scope\)/)
-    assert.match(block, /salesListFilterReportScope\(where,\s*params\)/)
+    assert.match(block, /salesListFilterReportScope\(where,\s*params(?:,\s*narrowScope)?\)/)
+    assert.match(block, /const narrowScope = where\.length - 1 - windowClauseCount - \(statusClausePushed \? 1 : 0\) > 0\r?\n/, 'narrowScope counts the clauses beyond the window and the status test')
+    assert.match(block, /const scope = where\.length - 1 === windowClauseCount && !openEndedStart \? undefined : salesListFilterReportScope\(where,\s*params(?:,\s*narrowScope)?\)/, 'only the window drops the scope')
   })
 
   console.log(`\n${passed} passed, ${failures.length} failed`)
