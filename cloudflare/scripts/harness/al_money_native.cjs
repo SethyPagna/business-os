@@ -147,8 +147,8 @@ async function startWorker({ returnIdFloor = 100000, patches = [] } = {}) {
   const one = async (sql, ...values) => (await all(sql, ...values))[0]
   // A second, non-admin account: role permissions as given, an approved
   // trusted device, and a real login carrying that device id.
-  async function addEmployee(id, username, permissions) {
-    await db.prepare("INSERT INTO roles(id,name,code,permissions,is_system) VALUES(?,?,'employee',?,0)").bind(id, `AL ${username}`, JSON.stringify(permissions)).run()
+  async function addEmployee(id, username, permissions, roleCode = 'employee') {
+    await db.prepare("INSERT INTO roles(id,name,code,permissions,is_system) VALUES(?,?,?,?,0)").bind(id, `AL ${username}`, roleCode, JSON.stringify(permissions)).run()
     await db.prepare("INSERT INTO users(id,username,name,password,role_id,permissions,is_active,organization_id,must_change_password) VALUES(?,?,?,?,?,'{}',1,?,0)")
       .bind(id, username, `AL ${username}`, hash, id, org.id).run()
     await db.prepare("INSERT INTO trusted_devices(user_id,device_id,device_name,status,decided_at,decided_by_user_id,decided_by_name) VALUES(?,?,'AL fixture device','approved',CURRENT_TIMESTAMP,901,'AL Admin')")

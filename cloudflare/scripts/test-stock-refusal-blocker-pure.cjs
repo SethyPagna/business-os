@@ -18,7 +18,9 @@ const path = require('node:path')
 const assert = require('node:assert/strict')
 const ts = require('typescript')
 const { Hono } = require('hono')
-const { fixture, user } = require('./test-stock-session-atomic.cjs')
+const { fixture, user: stockUser } = require('./test-stock-session-atomic.cjs')
+// Cost entry is administrator only (owner, 15 Nov 2026): the operator of the receipts here is an administrator; the permission case below keeps non-admin actors.
+const user = { ...stockUser, role_code: 'admin' }
 
 const root = path.join(__dirname, '..')
 

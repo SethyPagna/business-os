@@ -39,7 +39,7 @@ const Database = require('better-sqlite3')
 const root = path.join(__dirname, '..')
 
 const user = {
-  id: 7, username: 'stock-user', name: 'Stock User', organization_id: null,
+  id: 7, username: 'stock-user', name: 'Stock User', organization_id: null, role_code: 'admin', // cost entry is administrator only (owner, 15 Nov 2026)
   role_id: null, permissions: JSON.stringify({ inventory: true, products: true, product_cost_edit: true, product_cost_view: true }), is_active: 1,
 }
 

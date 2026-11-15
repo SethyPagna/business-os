@@ -35,7 +35,8 @@ async function main() {
     const supplier = (over = {}, options = {}) => h.call('POST', '/api/returns/supplier', {
       client_request_id: 'sup-idem-1', branch_id: 1, supplier_name: 'Synthetic supplier', reason: 'Synthetic', settlement: 'refund',
       items: [{ product_id: 801, quantity: 1, cost_price_usd: 2, cost_price_khr: 8000 }], ...over }, over.client_request_id || 'supplier return (no id)', options)
-    const employee = await h.addEmployee(1921, 'sup-idem-employee', { returns: true, product_cost_view: true, product_cost_edit: true })
+    // Cost entry is administrator only (owner, 15 Nov 2026): the second account that records supplier returns is an administrator.
+    const employee = await h.addEmployee(1921, 'sup-idem-employee', { returns: true }, 'admin')
 
     // ---- 1. the first request, then the same request again ----------------------------------------------------------
     const first = await supplier()
