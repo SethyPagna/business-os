@@ -39,6 +39,8 @@ const MUTANTS = {
   stripDatedAlwaysPlus: [{ name: 'm-strip-dated-plus', file: SALES, from: 'const STRIP_PLUS_ID_MAX_DAYS=90', to: 'const STRIP_PLUS_ID_MAX_DAYS=100000' }],
   // a scoped report (filter subquery / id list) on the plain cancelled predicate again: the planner reads every cancelled sale in the window (121 -> 1,989 rows)
   voidScopedPlain: [{ name: 'm-void-scoped-plain', file: KERNEL, from: '({ plainCancelled: !scope?.narrow })', to: '({ plainCancelled: true })' }],
+  // the plain status predicate for ANY status: NULL-status sales stop counting as 'completed' (reaches /daily-report and /day-report with a status filter)
+  voidPlainForAnyStatus: [{ name: 'm-void-any', file: KERNEL, from: "status === 'cancelled' && options.plainCancelled !== false ?", to: "status !== '' ?" }],
   stripContinuousPlus: [{ name: 'm-strip-continuous-plus', file: SALES, from: STRIP_NEW, to: "const stripId='+id'" }],
 }
 const urls = (ctx) => {
@@ -71,6 +73,11 @@ const urls = (ctx) => {
     'stats narrow returned cashier': `/api/sales/stats?endDate=${day(ctx, 0)}&status=returned&cashier=Budget`,
     'stats narrow search returned': `/api/sales/stats?search=Customer%2012&status=returned&branchId=2&cashier=zzzz`,
     'stats narrow search partial': `/api/sales/stats?search=Customer%2012&status=partial_return&branchId=2&cashier=zzzz`,
+    // the two report routes that take a status filter, each status against the old predicate (NULL status counts as completed)
+    ...Object.fromEntries(['completed', 'cancelled', 'returned', 'partial_return', 'awaiting_delivery', 'awaiting_payment'].flatMap((st) => [
+      [`daily-report ${st}`, `/api/sales/daily-report?${w(1, 0)}&status=${st}`],
+      [`day-report ${st}`, `/api/sales/day-report?date=${day(ctx, 0)}&status=${st}`],
+    ])),
     'stats cancelled': `/api/sales/stats?${w(29, 0)}&status=cancelled`,
     'stats completed': `/api/sales/stats?${w(29, 0)}&status=completed`,
     'stats search all-time': '/api/sales/stats?search=Customer%2012',
@@ -178,6 +185,7 @@ const statusCounts = (text) => Object.fromEntries(JSON.parse(text).by_status.map
   await caught('the strip cursor is >= (every multi-page window refused with 422)', MUTANTS.stripCursorGe)
   await caught('every dated window pages on +id again (a year reads +38% rows)', MUTANTS.stripDatedAlwaysPlus)
   await caught('a scoped report keeps the plain cancelled predicate (every cancelled sale in the window is read)', MUTANTS.voidScopedPlain)
+  await caught('the plain status predicate for any status (/daily-report and /day-report with a status filter)', MUTANTS.voidPlainForAnyStatus)
   await caught('an hours (continuous) window pages on +id again: a full scan per page', MUTANTS.stripContinuousPlus)
 
   // The plan, with and without table statistics (production has them; a fresh database does not).
