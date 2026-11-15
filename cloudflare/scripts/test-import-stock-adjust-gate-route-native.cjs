@@ -27,7 +27,11 @@ const BASE = process.argv.includes('--base') ? 'a77883c78' : null
 
 // ---------------------------------------------------------------- loader ----
 const transpiled = new Map()
-function makeWorld() {
+// 15 Nov 2026: cost entry is admin only and every import type here is a cost format, so the cost gate now sits in front of the
+// inventory:adjust gate and a non-admin never reaches it. This matrix is about inventory:adjust, so its world holds the cost rule
+// open (a source-patched copy); the cost gate itself is pinned by the cost-gate-in-front case, which runs on the real rule.
+const holdCostRuleOpen = text => text.split('return isAdminControlUser(user)').join('return true')
+function makeWorld({ realCostRule = false } = {}) {
   const cache = new Map()
   const rel = file => path.relative(SRC, file).replaceAll('\\', '/')
   const requireAuth = async (c, next) => {
@@ -53,7 +57,8 @@ function makeWorld() {
       return require('node:child_process').execFileSync('git', ['show', `${BASE}:cloudflare/src/${rel(file)}`],
         { cwd: path.join(__dirname, '..', '..'), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
     }
-    return fs.readFileSync(file, 'utf8')
+    const text = fs.readFileSync(file, 'utf8')
+    return !realCostRule && rel(file) === 'lib/acquisitionCostAccess.ts' ? holdCostRuleOpen(text) : text
   }
   function load(file) {
     const key = rel(file)
@@ -281,6 +286,29 @@ for (const type of Object.keys(JOBS)) {
       assert.equal(f.stock(), 0)
     })
   }
+}
+
+// The cost rule itself, on the REAL rule: a non-admin holding every import, stock and cost grant is refused product_cost_edit_required
+// at approve and retry with nothing written; an administrator is the positive control.
+for (const type of Object.keys(JOBS)) {
+  add(type, 'cost-gate-in-front', 'non-admin-refused-admin-completes', async () => {
+    const world = makeWorld({ realCostRule: true })
+    const f = fixture(world)
+    const id = f.seedJob({ type, status: 'awaiting_review' })
+    const before = f.snapshot()
+    for (const result of [
+      await f.call(ACTORS.adjuster, 'POST', `/${id}/approve`, { confirm_stock_actions: true }),
+      await f.call(ACTORS.adjuster, 'POST', `/${id}/retry`, {}),
+    ]) {
+      assert.equal(result.status, 403, result.text)
+      assert.equal(result.body.code, 'product_cost_edit_required', result.text)
+    }
+    assert.equal(f.snapshot(), before, 'a cost-refused import writes nothing')
+    assert.equal(f.pending.length, 0)
+    assert.equal(f.stock(), 0)
+    const approved = await f.call(ACTORS.admin, 'POST', `/${id}/approve`, { confirm_stock_actions: true })
+    assert.equal(approved.status, 200, approved.text)
+  })
 }
 
 // The same one-definition table, exercised directly: which classified rows count as a stock change.
