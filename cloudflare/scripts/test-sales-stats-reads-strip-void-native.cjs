@@ -14,6 +14,7 @@ const SALES = 'src/routes/sales.ts'
 const KERNEL = 'src/lib/salesAnalytics.ts'
 const STRIP_NEW = "const stripId=continuous?'id':'+id'"
 const STRIP_OLD = "const stripId='id'"
+const STRIP_CURSOR = 'AND ${stripId}>@stripAfter ORDER BY'
 const STRIP_PAGE = 'ORDER BY ${stripId} LIMIT'
 const VOID_NEW = "status === 'cancelled' ? `${alias}.sale_status = @status` : `COALESCE(${alias}.sale_status, 'completed') = @status`"
 const VOID_OLD = "`COALESCE(${alias}.sale_status, 'completed') = @status`"
@@ -32,6 +33,8 @@ const MUTANTS = {
   voidIsCaseInsensitive: [{ name: 'm-void-nocase', file: KERNEL, from: VOID_NEW, to: "status === 'cancelled' ? `lower(trim(${alias}.sale_status)) = @status` : `COALESCE(${alias}.sale_status, 'completed') = @status`" }],
   stripPagesBackwards: [{ name: 'm-strip-desc', file: SALES, from: STRIP_PAGE, to: 'ORDER BY ${stripId} DESC LIMIT' }],
   // an hours window tests datetime(created_at), which no index serves: the plus there turns every 2,000-row page into a full scan and a sort
+  // a `>=` cursor re-reads the last row of every page, so every window over one page is refused (422 duplicate_row)
+  stripCursorGe: [{ name: 'm-strip-ge', file: SALES, from: STRIP_CURSOR, to: 'AND ${stripId}>=@stripAfter ORDER BY' }],
   // every dated window on `+id` again: past about 90 days each page re-scans the window (+38% at a year)
   stripDatedAlwaysPlus: [{ name: 'm-strip-dated-plus', file: SALES, from: 'const STRIP_PLUS_ID_MAX_DAYS=90', to: 'const STRIP_PLUS_ID_MAX_DAYS=100000' }],
   stripContinuousPlus: [{ name: 'm-strip-continuous-plus', file: SALES, from: STRIP_NEW, to: "const stripId='+id'" }],
@@ -54,6 +57,8 @@ const urls = (ctx) => {
     'strip dated 180d': `/api/sales/stats-strip?${w(179, 0)}`,
     'strip dated 365d': `/api/sales/stats-strip?${w(364, 0)}`,
     'strip dated 120d': `/api/sales/stats-strip?${w(119, 0)}`,
+    'strip dated 365d hours': `/api/sales/stats-strip?${w(364, 0)}&startTime=08:00&endTime=18:00`,
+    'strip continuous 365d': `/api/sales/stats-strip?${w(364, 0)}&createdFrom=${encodeURIComponent(day(ctx, 364) + ' 00:00:00')}&createdTo=${encodeURIComponent(day(ctx, -1) + ' 00:00:00')}`,
     'strip continuous today': `/api/sales/stats-strip?${w(0, 0)}&createdFrom=${encodeURIComponent(day(ctx, 0) + ' 00:00:00')}&createdTo=${encodeURIComponent(day(ctx, -1) + ' 00:00:00')}`,
     'stats all-time': '/api/sales/stats',
     'stats today': `/api/sales/stats?${w(1, 0)}`,
@@ -71,7 +76,15 @@ const REDUCED = ['strip today', 'strip 30d', 'stats all-time']
 // a continuous window keeps the rowid walk: exactly the oracle's rows, never above (the plus there re-scans the table on every page)
 // dated windows past the plus-id crossover keep the rowid walk: exactly the oracle's rows (the plus there re-scans the window on every page)
 const LONG_DATED = ['strip dated 120d', 'strip dated 180d', 'strip dated 365d']
-const CONTINUOUS = ['strip continuous 30d', 'strip continuous 120d', 'strip continuous today']
+const CONTINUOUS = ['strip continuous 30d', 'strip continuous 120d', 'strip continuous 365d', 'strip continuous today']
+// strip windows holding more than one page, with the independent SQL that counts the same sales (no paging code involved)
+const MULTIPAGE = {
+  'strip dated 120d': (ctx) => `date(created_at, '+7 hours') >= '${day(ctx, 119)}' AND date(created_at, '+7 hours') <= '${day(ctx, 0)}'`,
+  'strip dated 365d': (ctx) => `date(created_at, '+7 hours') >= '${day(ctx, 364)}' AND date(created_at, '+7 hours') <= '${day(ctx, 0)}'`,
+  'strip continuous 120d': (ctx) => `datetime(created_at) >= '${day(ctx, 119)} 00:00:00' AND datetime(created_at) < '${day(ctx, -1)} 00:00:00'`,
+  'strip continuous 365d': (ctx) => `datetime(created_at) >= '${day(ctx, 364)} 00:00:00' AND datetime(created_at) < '${day(ctx, -1)} 00:00:00'`,
+}
+const statusCounts = (text) => Object.fromEntries(JSON.parse(text).by_status.map((r) => [r.sale_status, r.count]))
 
 ;(async () => {
   await step('the status fixture is real: the cancelled predicate separates NULL, empty and spaced variants', async () => {
@@ -100,6 +113,9 @@ const CONTINUOUS = ['strip continuous 30d', 'strip continuous 120d', 'strip cont
   const newOn = await runUrls({ urls, switches: ATOMIC })
   for (const [mode, o, n] of [['OFF', oldOff, newOff], ['ON', oldOn, newOn]]) {
     await step(`parity (report_atomic ${mode}): every strip and stats answer is byte-identical to the oracle`, () => assert.deepEqual(bodies(n), bodies(o)))
+    await step(`status (report_atomic ${mode}): every strip and stats shape answers HTTP 200, build and oracle (a refusing strip would match a refusing oracle)`, () => {
+      for (const [label, res] of [['build', n], ['oracle', o]]) for (const name of NAMES) assert.equal(res[name].status, 200, `${label} ${name} answered ${res[name].status}: ${res[name].text.slice(0, 120)}`)
+    })
     await step(`rows (report_atomic ${mode}): never above the oracle, below it for the strip and the undated report`, () => {
       // 'stats cancelled' reads the same few cancelled rows through either index (a handful of rows apart), so it gets a small allowance; nothing else may read more
       for (const name of NAMES) assert.ok(n[name].rr <= o[name].rr + (name === 'stats cancelled' ? 12 : 0), `${name}: rows ${n[name].rr} > oracle ${o[name].rr}`)
@@ -109,6 +125,19 @@ const CONTINUOUS = ['strip continuous 30d', 'strip continuous 120d', 'strip cont
     })
     await step(`calls (report_atomic ${mode}): never above the oracle`, () => { for (const name of NAMES) assert.ok(n[name].calls <= o[name].calls, `${name}: calls ${n[name].calls} > ${o[name].calls}`) })
   }
+  await step('independent oracle: the status mix of each multi-page strip window equals a plain COUNT(*) GROUP BY over the same window', async () => {
+    const world = await bootWorld({ tier: 'free' })
+    try {
+      await applyFixture(world)
+      for (const [name, win] of Object.entries(MULTIPAGE)) {
+        const want = {}
+        let total = 0
+        for (const r of await world.all(`SELECT COALESCE(NULLIF(TRIM(sale_status), ''), 'completed') st, COUNT(*) n FROM sales WHERE ${win(world.ctx)} GROUP BY st`)) { want[r.st] = r.n; total += r.n }
+        assert.ok(total > 2000, `${name}: the fixture window must span more than one 2,000-row page, has ${total}`)
+        for (const [label, res] of [['OFF', newOff], ['ON', newOn]]) assert.deepEqual(statusCounts(res[name].text), want, `${name} (${label}): by_status differs from the independent count`)
+      }
+    } finally { await world.dispose() }
+  })
   await step('the build answers the same on report_atomic OFF and ON', () => assert.deepEqual(bodies(newOn), bodies(newOff)))
   log('rows/calls oracle -> build:')
   for (const name of NAMES) log(`   ${name.padEnd(22)} OFF ${oldOff[name].rr}/${oldOff[name].calls} -> ${newOff[name].rr}/${newOff[name].calls}   ON ${oldOn[name].rr}/${oldOn[name].calls} -> ${newOn[name].rr}/${newOn[name].calls}`)
@@ -127,6 +156,7 @@ const CONTINUOUS = ['strip continuous 30d', 'strip continuous 120d', 'strip cont
     const good = analyze ? newAn : switches ? newOn : newOff
     let red = false
     try { assert.deepEqual(bodies(res), bodies(base)) } catch { red = true }
+    if (!red) for (const name of NAMES) if (res[name].status !== 200) red = true
     if (!red) for (const name of REDUCED) if (res[name].rr > good[name].rr * 1.3) red = true
     if (!red) for (const name of [...CONTINUOUS, ...LONG_DATED]) if (res[name].rr > good[name].rr * 1.05) red = true
     await step(`required red: ${label} is caught`, () => assert.ok(red, 'the mutant passed the parity and rows checks'))
@@ -137,6 +167,7 @@ const CONTINUOUS = ['strip continuous 30d', 'strip continuous 120d', 'strip cont
   await caught('NULL counted as cancelled', MUTANTS.voidNullIsCancelled)
   await caught('cancelled matched case-insensitively', MUTANTS.voidIsCaseInsensitive)
   await caught('the strip pages backwards', MUTANTS.stripPagesBackwards)
+  await caught('the strip cursor is >= (every multi-page window refused with 422)', MUTANTS.stripCursorGe)
   await caught('every dated window pages on +id again (a year reads +38% rows)', MUTANTS.stripDatedAlwaysPlus)
   await caught('an hours (continuous) window pages on +id again: a full scan per page', MUTANTS.stripContinuousPlus)
 
