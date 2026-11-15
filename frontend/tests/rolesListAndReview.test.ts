@@ -125,12 +125,17 @@ await runTest('B1 reset to defaults over the stored Employee: one row per change
     assert.ok(!text.includes(en.perm_value_not_set), 'no storage word ("Not set")')
     // A plain switch that only moves between absent and off changes nothing, and an action switch only means
     // something when it is off (on is what the level already gives); every other change is named.
+    const RETIRED_KEYS = new Set(PERMISSION_DEFS.filter((def) => def.retired).map((def) => def.key))
+    assert.ok(RETIRED_KEYS.has('product_cost_view') && RETIRED_KEYS.has('inventory_check_show_price'), 'the retired set is read from the catalogue and is not empty')
+    assert.ok(stored.some((change) => RETIRED_KEYS.has(change.key)), 'the stored Employee holds retired grants, so the exclusion is exercised')
+    let named = 0
     const MISSING = []
     for (const change of stored) {
       if (!change.key.includes(':') && ['unset', 'off'].includes(change.before) && ['unset', 'off'].includes(change.after)) continue
       if (change.key.includes(':') && change.before !== 'off' && change.after !== 'off') continue
-      // The two product-cost grants are retired (15 Nov 2026): the editor never draws them, so the review does not name them.
-      if (change.key === 'product_cost_view' || change.key === 'product_cost_edit') continue
+      // A retired grant keeps exactly its stored value through the reset and the editor never draws it, so the review does not name it.
+      if (RETIRED_KEYS.has(change.key)) continue
+      named += 1
       const [section, action] = change.key.split(':')
       let word: string | undefined
       if (change.key === 'legacy_unknown_key') word = en.role_other_permission
@@ -143,6 +148,7 @@ await runTest('B1 reset to defaults over the stored Employee: one row per change
       if (!word || !text.includes(word)) MISSING.push(`${change.key} -> ${word}`)
     }
     assert.deepEqual(MISSING, [], 'every changed key is still named in the review')
+    assert.ok(named >= 3, `non-retired changes were checked (${named}), so a change that is not named would still fail here`)
     // The key the catalogue cannot name reads as a plain translated label; the stored key is only the tooltip.
     assert.ok(!text.includes('legacy_unknown_key'), 'the raw key is not in the visible review')
     const unknownRow = page.find((node) => node.getAttribute('title') === 'legacy_unknown_key' && within(node, review), 'the unnamed key row')
