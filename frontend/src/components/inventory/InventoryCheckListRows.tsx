@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import CircleDashed from 'lucide-react/dist/esm/icons/circle-dashed.js'
+import ClipboardCheck from 'lucide-react/dist/esm/icons/clipboard-check.js'
 import Clock from 'lucide-react/dist/esm/icons/clock.js'
 import Hourglass from 'lucide-react/dist/esm/icons/hourglass.js'
 import Send from 'lucide-react/dist/esm/icons/send.js'
@@ -10,14 +11,13 @@ import ProductImage from '../pos/ProductImage.tsx'
 import PortalMenu from '../shared/PortalMenu.tsx'
 import ProductNameRail from '../shared/ProductNameRail.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
-import { PendingReviewMark } from '../shared/PendingReviewTag.tsx'
 import { useCopyFloat } from '../shared/CopyFloat.tsx'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { fmtDateOnly, fmtDateTime24 } from '../../utils/formatters.ts'
 import type { InventoryCheckId, InventoryCheckListStatus, InventoryCheckLotRow, InventoryCheckLotsAnswer, InventoryCheckProduct, InventoryCheckTranslator } from '../../types/inventoryChecks.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { lotTotals, type LotDraft } from './inventoryCheckLots.ts'
-import { isDraftKind, rowStatusKind, ROW_STATUS_WORDS, type RowStatusKind } from './inventoryCheckStatus.ts'
+import { isDraftKind, recordedStatus, rowStatusKind, ROW_STATUS_WORDS, type RowStatusKind } from './inventoryCheckStatus.ts'
 import InventoryCheckCountPopover from './InventoryCheckCountPopover.tsx'
 import { priceFacts, type PriceMoney } from './inventoryPriceFacts.ts'
 import { finiteQuantity, parseCount, signedDelta } from './InventoryCheckCountEditor.tsx'
@@ -156,7 +156,9 @@ function statusIconOf(kind: RowStatusKind): { Icon: typeof Check; tone: string }
   switch (kind) {
     case 'not_checked': return { Icon: CircleDashed, tone: 'text-gray-400 dark:text-gray-500' }
     case 'in_check': return { Icon: Clock, tone: 'text-sky-600 dark:text-sky-300' }
-    case 'ok': case 'draft_ok': case 'draft_counted': return { Icon: Check, tone: 'text-emerald-600 dark:text-emerald-400' }
+    case 'ok': case 'draft_ok': return { Icon: Check, tone: 'text-emerald-600 dark:text-emerald-400' }
+    // A count typed by someone who sees no stock: counted, nothing to compare, so it must not wear the green check of "matches stock".
+    case 'draft_counted': return { Icon: ClipboardCheck, tone: 'text-teal-600 dark:text-teal-400' }
     case 'issue': case 'draft_issue': case 'draft_empty': return { Icon: X, tone: 'text-red-600 dark:text-red-400' }
     case 'pending': return { Icon: Hourglass, tone: 'text-amber-600 dark:text-amber-400' }
   }
@@ -212,7 +214,7 @@ function ListRow({ product, draft, adornment, columns, countable, copy, scanHit,
   const statusNode = kind === null ? null : <span className="inline-flex min-w-0 flex-col items-center gap-0 lg:flex-row lg:justify-end lg:gap-1">
     {counting ? <PortalMenu align="auto" menuClassName="!rounded-xl" closeOnContentClick={false}
       trigger={<button ref={statusRef} type="button" data-check-action="status" data-check-status-kind={kind} aria-label={openLabel} title={checkedTitle} className={statusButtonClass}>{statusGlyph}</button>}
-      content={({ closeMenu }) => <InventoryCheckCountPopover product={product} draft={draft} byBatch={byBatch} loadLots={loadLots} canViewStock={canViewStock} canViewCounts={canViewCounts} locked={locked} t={t} statusIcon={statusGlyph} statusText={checkedTitle} statusWord={statusWords}
+      content={({ closeMenu }) => <InventoryCheckCountPopover product={product} draft={draft} byBatch={byBatch} loadLots={loadLots} canViewStock={canViewStock} canViewCounts={canViewCounts} locked={locked} t={t} statusIcon={statusGlyph} statusText={checkedTitle} statusWord={statusWords} recordedWord={kind === 'pending' && recordedStatus(product.check_status) ? tr(ROW_STATUS_WORDS[recordedStatus(product.check_status)!].key, ROW_STATUS_WORDS[recordedStatus(product.check_status)!].fallback) : undefined}
         onClose={closeMenu} returnFocus={() => statusRef.current?.focus()} onAdvance={() => onAdvance(product.id)} onCount={onCount} onLotCount={(item, row, value) => onLotCount?.(item, row, value)} onMatches={(item, rows) => onMatches?.(item, rows)} onDiffers={item => onDiffers?.(item)} onClear={item => onClear?.(item)} onLotSet={onLotSet} />} />
       : <span data-check-status-kind={kind} role="img" aria-label={statusWords} title={checkedTitle} className="inline-flex h-11 w-11 shrink-0 items-center justify-center lg:h-9 lg:w-9">{statusGlyph}</span>}
     {checkedOn ? <span data-check-date title={checkedTitle} className="text-[10px] leading-tight tabular-nums text-gray-500 lg:text-[11px] dark:text-gray-400">{checkedOn}</span> : null}
@@ -252,8 +254,7 @@ function ListRow({ product, draft, adornment, columns, countable, copy, scanHit,
 
   return <li data-inventory-check-row={id} data-check-list-status={status ?? undefined} data-selected={selected ? '' : undefined} data-scan-hit={scanHit ? '' : undefined}
     className={`relative min-w-0 max-w-full border-b border-l-2 border-b-gray-100 py-2 pl-2 pr-1 last:border-b-0 dark:border-b-gray-800 ${edge} ${selected ? 'bg-sky-50/70 dark:bg-sky-950/20' : ''} ${scanHit ? 'rounded-sm ring-2 ring-primary-400 dark:ring-primary-300' : ''}`}>
-    {/* A count that differs from stock and waits for an approver (ic_fix_stock): the review queue's mini tag, in the row's own start gutter. It takes no space, so the row looks the same with and without it. */}
-    {product.check_pending === true ? <PendingReviewMark data-check-pending="" label={tr('inventory_check_approval_pending', 'Waiting for approval')} className="-left-px top-1" /> : null}
+    {/* A count waiting for an approver (ic_fix_stock) is shown ONCE on this surface: the status icon (the hourglass). The gutter mini tag of the review queue would repeat it. */}
     {/* One compact line where the width allows: the image keeps its square, the name takes the room, the status icon and the count input sit beside it. */}
     <div className="flex min-w-0 items-center gap-2" data-inventory-check-main>
       <button type="button" onClick={() => onOpenProduct(product)} data-check-image className="relative block aspect-square h-12 w-12 shrink-0 overflow-hidden rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 lg:h-10 lg:w-10" aria-label={product.name} title={product.name}>

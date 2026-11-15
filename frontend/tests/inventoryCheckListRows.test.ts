@@ -199,20 +199,14 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.equal(row(s, 502).getAttribute('data-scan-hit'), '', 'the row is ringed for a moment')
     assert.ok(!calls.some(call => call[0] === 'count' && call[1] === 502 && call.length > 2 && call[2] !== '4' && call[2] !== ''), 'a scan enters no value')
   }],
-  ['a count waiting for approval carries the review queue’s mini tag in the row’s own gutter, takes no space, and only that product has it', async () => {
+  ['a count waiting for approval shows ONE pending mark on this surface, the status icon: no gutter tag repeats it', async () => {
     const waiting = { ...listed[1], check_pending: true }
     const surface = await mount({ products: [waiting, listed[0], { ...listed[5], check_pending: false }] })
     const tag = (id: number) => allInRow(surface, id, 'data-check-pending')
-    assert.equal(tag(502).length, 1, 'the waiting product has one tag')
-    assert.equal(tag(501).length, 0, 'a product with nothing waiting has none')
-    assert.equal(tag(506).length, 0, 'an explicit false draws none')
-    const mark = tag(502)[0]
-    assert.equal(mark.getAttribute('aria-label'), 'Waiting for approval'); assert.equal(mark.getAttribute('role'), 'img'); assert.equal(mark.getAttribute('title'), 'Waiting for approval')
-    assert.equal(mark.textContent, '', 'a glyph only: no word, so the row has no text to make room for')
-    for (const word of ['absolute', 'pointer-events-none', 'h-2.5', 'w-2.5']) assert.ok(mark.className.split(/\s+/).includes(word), `the mark is out of the flow and inert (${word})`)
-    assert.ok(row(surface, 502).className.split(/\s+/).includes('relative'), 'the row is the mark’s positioning container')
-    assert.ok(row(surface, 502).children.includes(mark), 'the mark is the row’s own child, not part of any cell')
-    assert.ok(!cell(surface, 502, 'status').contains(mark), 'it is not inside the status cell')
+    const hourglasses = (id: number) => row(surface, id).querySelectorAll('svg').filter(node => (node.getAttribute('class') ?? '').includes('lucide-hourglass'))
+    assert.equal(tag(502).length, 0, 'no gutter tag: it would repeat the status icon')
+    assert.equal(hourglasses(502).length, 1, 'exactly one pending hourglass in the waiting row')
+    assert.equal(hourglasses(501).length + hourglasses(506).length, 0, 'and none elsewhere')
     assert.equal(inRow(surface, 502, 'data-check-status-kind').getAttribute('data-check-status-kind'), 'pending', 'the status icon itself is the pending (hourglass) icon')
     assert.ok((inRow(surface, 502, 'data-check-status-kind').getAttribute('aria-label') || '').includes('Waiting for approval'), 'the status button’s name says it (and what it opens)')
     assert.ok((inRow(surface, 502, 'data-check-status-kind').getAttribute('title') || '').startsWith('Waiting for approval'), 'and so does its tooltip')

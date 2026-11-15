@@ -263,6 +263,17 @@ const cases: Array<[string, () => Promise<void>]> = [
     await open(s, 902)
     assert.equal(flat(inPopover(s, 'data-popover-status-word')[0]), 'Checked OK')
   }],
+  // ---- E (review F7): a blind count has its own icon; a waiting count keeps its recorded status readable in the header. ----
+  ['a count typed by a viewer who sees no stock wears its own icon, not the green check of matches stock; a pending row names the status recorded before it', async () => {
+    const blind = await mount({ products: [{ id: 951, name: 'Q', quantity: 5, check_status: 'not_checked' }], canViewStock: false, canViewCounts: false, lotCounts: false, drafts: { 951: { selected: true, count: '4', checked: false, note: '' } } })
+    const svg = statusButton(blind, 951).querySelectorAll('svg')[0]
+    assert.equal(statusButton(blind, 951).getAttribute('data-check-status-kind'), 'draft_counted')
+    assert.ok((svg.getAttribute('class') ?? '').includes('lucide-clipboard-check') && !(svg.getAttribute('class') ?? '').includes('lucide-check '), 'blind count: its own icon, distinct from the green check')
+    await blind.unmount(); live.pop()
+    const s = await mount({ products: [{ id: 952, name: 'P', quantity: 5, check_status: 'issue', check_pending: true }], lotCounts: false })
+    await open(s, 952)
+    assert.equal(flat(inPopover(s, 'data-popover-status-word')[0]), 'Waiting for approval · Issue', 'the pending word with the recorded status behind it')
+  }],
   // ---- D (review F5): each status is pinned to its icon and colour token. An icon swap (OK as a red x, not checked as a clock) goes red. ----
   ['every status wears its own icon and colour: not checked, in check, OK, issue, pending, and the draft ring', async () => {
     const items: InventoryCheckProduct[] = [

@@ -31,6 +31,8 @@ export type InventoryCheckCountPopoverProps = {
   statusText: string
   /** The status in words (what the icon means), printed in the header: a tooltip never shows on touch. */
   statusWord?: string
+  /** A count waits for approval: the status recorded before it (issue, OK), which the pending icon hides. */
+  recordedWord?: string
   onClose: () => void
   /** Where keyboard focus goes when the popover closes by any path (the row's status icon), unless the person has deliberately moved into another field. */
   returnFocus?: () => void
@@ -49,7 +51,7 @@ export type InventoryCheckCountPopoverProps = {
 
 const tool = 'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-gray-600 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50 lg:h-9 lg:w-9 dark:text-gray-300 dark:hover:bg-zinc-800'
 
-export default function InventoryCheckCountPopover({ product, draft, byBatch, loadLots, canViewStock, canViewCounts = false, locked, t, statusIcon, statusText, statusWord, onClose, returnFocus, onAdvance, onCount, onLotCount, onMatches, onDiffers, onClear, onLotSet }: InventoryCheckCountPopoverProps) {
+export default function InventoryCheckCountPopover({ product, draft, byBatch, loadLots, canViewStock, canViewCounts = false, locked, t, statusIcon, statusText, statusWord, recordedWord, onClose, returnFocus, onAdvance, onCount, onLotCount, onMatches, onDiffers, onClear, onLotSet }: InventoryCheckCountPopoverProps) {
   const tr = (key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
   // The row already carries its stocked batches (the list read them): the entries are drawn from them at the first paint, with no request. Only a row that says lots_more, or a list that did not carry
   // batches, reads them (one request, this product).
@@ -108,7 +110,7 @@ export default function InventoryCheckCountPopover({ product, draft, byBatch, lo
       <span data-popover-status title={statusText} aria-label={statusText} role="img" className="mt-1 inline-flex h-6 w-6 shrink-0 items-center justify-center">{statusIcon}</span>
       <span className="min-w-0 flex-1">
         <span className="block break-words text-xs font-semibold leading-5">{product.name}</span>
-        {statusWord ? <span data-popover-status-word className="block break-words text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{statusWord}</span> : null}
+        {statusWord ? <span data-popover-status-word className="block break-words text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{statusWord}{recordedWord ? <span data-popover-recorded-word> · {recordedWord}</span> : null}</span> : null}
       </span>
       <button type="button" data-popover-action="close" className={tool} aria-label={tr('close', 'Close')} title={tr('close', 'Close')} onClick={onClose}><X className="h-4 w-4" aria-hidden="true" /></button>
     </div>

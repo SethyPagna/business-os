@@ -85,7 +85,8 @@ const products = (query = '', actor = ADMIN) => send(productsRoute, 'GET', `/${q
 const sessions = (method, url, body, actor = ADMIN) => send(sessionsRoute, method, url, body, actor)
 const submit = (lines, over = {}, actor = COUNTER) => sessions('POST', '/submissions', { branchId: 1, requestId: 'submit-request-01', lines, ...over }, actor)
 const physical = () => ['products', 'product_batches', 'branch_stock', 'branch_batch_stock', 'damaged_stock_lots', 'sales', 'sale_items', 'inventory_movements', 'audit_logs'].map(table => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all().map(row => ({ ...row })))
-const metadata = () => ['inventory_check_sessions', 'inventory_check_items', 'inventory_check_events'].map(table => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all().map(row => ({ ...row })))
+// Every table a count can write to: the session, its items and events, the per-batch lines and the approvals. A refusal must leave all five exactly as they were.
+const metadata = () => ['inventory_check_sessions', 'inventory_check_items', 'inventory_check_events', 'inventory_check_lot_lines', 'inventory_check_approvals'].map(table => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all().map(row => ({ ...row })))
 const counts = () => metadata().map(rows => rows.length)
 let groups = 0
 const check = async (name, run) => { await run(); groups++; console.log(`PASS ${name}`) }
