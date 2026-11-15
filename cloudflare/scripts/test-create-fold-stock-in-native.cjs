@@ -224,6 +224,7 @@ async function world({ patches = [], plan = 'paid' } = {}) {
   const H = { mf, db, kv, frames: [], tokens: {}, sockets: [] }
 
   H.addUser = async (id, username, permissions, extra = {}) => {
+    if (extra.roleCode && extra.role_id == null) extra = { ...extra, role_id: (await db.prepare('SELECT id FROM roles WHERE code=?').bind(extra.roleCode).first()).id }
     await db.prepare(`INSERT INTO users(id,username,name,password,role_id,permissions,is_active,organization_id,organization_group_id)
       VALUES(?,?,?,?,?,?,1,2,2)`).bind(id, username, extra.name || username, 'x', extra.role_id ?? null, JSON.stringify(permissions)).run()
   }
@@ -392,6 +393,8 @@ async function ledger(H, e, rid = null) {
   }
 }
 const requestId = () => 'cf-' + (++seq) + '-' + Math.random().toString(36).slice(2, 10) + '-fold'
+// A non-administrator may not enter a cost (15 Nov 2026), so the permission-shaped cases send the same create without one.
+const createBodyNC = (e, extra = {}) => { const b = createBody(e, extra); delete b.cost_price_usd; return b }
 const createBody = (e, extra = {}) => ({ name: e.name, barcode: e.clean, stock_quantity: 7, branch_id: LC, cost_price_usd: 3.5, client_request_id: requestId(), ...extra })
 
 // Evidence of "a normal stock-in": the same four ledgers POST /api/batches moves, by the same quantity.
@@ -413,8 +416,9 @@ async function mainBody() {
   console.log('MODE: ' + (flavour ? 'control ' + flavour : 'production code at HEAD (no patch)') + '; plan ' + (OPTIONS.plan || 'paid'))
   const H = await world({ patches, plan: OPTIONS.plan || 'paid' })
   try {
-    // A manager who may add products AND adjust stock (Full on both), not an admin.
-    await H.addUser(2, 'cf-manager', { products: true, inventory: true, product_cost_edit: true })
+    // A manager who may add products AND adjust stock (Full on both). 15 Nov 2026: a typed cost is admin only, so the cost-entering
+    // fold/stock-in cases run as an administrator; the permission-shaped cases below stay non-admin and carry no cost.
+    await H.addUser(2, 'cf-manager', { products: true, inventory: true, product_cost_edit: true }, { roleCode: 'admin' })
     await H.addSession('manager', 2, { device: 'Manager Phone' })
     // A product editor with NO inventory permission at all.
     await H.addUser(3, 'cf-editor', { products: true, product_cost_edit: true })
@@ -507,12 +511,12 @@ async function mainBody() {
     await check('F3', 'the fold never writes the selling price: a typed price (even from a role with the price action off) leaves the survivor\'s price alone, and the stock-in still lands', 'high', async (t) => {
       const e = await existing(H)
       const before = await ledger(H, e)
-      const r = await H.api('POST', '/api/products', createBody(e, { selling_price_usd: 99, wholesale_price_usd: 50 }), { as: 'noprice' })
+      const r = await H.api('POST', '/api/products', createBodyNC(e, { selling_price_usd: 99, wholesale_price_usd: 50 }), { as: 'noprice' })
       await H.settle()
       const after = await ledger(H, e)
       t.eq('status', r.status, 200)
       t.eq('survivor selling price unchanged', (await H.q1('SELECT selling_price_usd p FROM products WHERE id=?', e.id)), { p: 9 })
-      expectStockIn(t, 'stock-in:', before, after)
+      expectStockIn(t, 'stock-in:', before, after, { cost: null }) // no typed cost: a non-admin cannot enter one
     })
 
     await check('F4', 'a retry with the SAME client_request_id replays the original answer and adds nothing again (lot, branch_stock, total, movement, audit, receipt)', 'high', async (t) => {
@@ -571,7 +575,7 @@ async function mainBody() {
     await check('F7', 'a role without inventory:adjust is refused 403 and NOTHING changes (no fold, no stock, no audit, no receipt) -- refused, not dropped', 'high', async (t) => {
       const e = await existing(H)
       const before = await ledger(H, e)
-      const r = await H.api('POST', '/api/products', createBody(e), { as: 'editor' })
+      const r = await H.api('POST', '/api/products', createBodyNC(e), { as: 'editor' })
       await H.settle()
       const after = await ledger(H, e)
       t.eq('status and code', [r.status, r.body && r.body.code], [403, 'permission_denied'])
@@ -638,7 +642,7 @@ async function mainBody() {
     await check('F9', 'control: a fold with NO starting quantity behaves as before (200, barcode cleaned, no lot, no movement, no request id needed)', 'control', async (t) => {
       const e = await existing(H)
       const before = await ledger(H, e)
-      const body = createBody(e, { stock_quantity: 0 }); delete body.client_request_id
+      const body = createBodyNC(e, { stock_quantity: 0 }); delete body.client_request_id
       const r = await H.api('POST', '/api/products', body, { as: 'editor' })
       await H.settle()
       const after = await ledger(H, e)
@@ -664,7 +668,7 @@ async function mainBody() {
     await check('R1', 'a Review-Required create matching an existing product stays HELD (202): the existing product, its stock and its barcode spelling are untouched until approval', 'high', async (t) => {
       const e = await existing(H)
       const before = await ledger(H, e)
-      const r = await H.api('POST', '/api/products', createBody(e), { as: 'reviewtier' })
+      const r = await H.api('POST', '/api/products', createBodyNC(e), { as: 'reviewtier' })
       await H.settle()
       const after = await ledger(H, e)
       t.eq('status', r.status, 202)
@@ -675,7 +679,7 @@ async function mainBody() {
 
     await check('R2', 'APPROVING that held create folds it and records the typed quantity as a normal stock-in, in the same batch that marks the request approved; the movement and audit name the reviewer', 'high', async (t) => {
       const e = await existing(H)
-      const queued = await H.api('POST', '/api/products', createBody(e), { as: 'reviewtier' })
+      const queued = await H.api('POST', '/api/products', createBodyNC(e), { as: 'reviewtier' })
       t.eq('queued (202)', queued.status, 202)
       const pendingId = queued.body && queued.body.pendingActionId
       const before = await ledger(H, e)
@@ -686,17 +690,17 @@ async function mainBody() {
       t.eq('request approved by the admin', await pending(pendingId), { status: 'approved', reviewed_by: 1 })
       t.eq('no twin minted', after.products - before.products, 0)
       t.eq('the fold stored the clean barcode', after.barcode, e.clean)
-      expectStockIn(t, 'stock-in:', before, after)
+      expectStockIn(t, 'stock-in:', before, after, { cost: null }) // the held create carried no cost (non-admin requester)
       t.eq('the movement is attributed to the approving reviewer', after.movements.slice(before.movements.length).map(m => m.u), [1])
       const fold = after.folds.slice(before.folds.length).map(f => JSON.parse(f.details))
       t.eq('one fold audit row, from the review path, naming the request', fold.map(f => [f.reason, f.pendingActionId, f.stockIn && f.stockIn.quantity]), [['review_create_identity_fold', pendingId, 7]])
-      t.eq('catalog cost is the lot-weighted mean', after.cost, 3.05)
+      t.eq('a costless receipt leaves the catalog cost as it was', after.cost, before.cost)
       t.note('approve D1 statements: ' + r.d1)
     })
 
     await check('R3', 'approving the SAME request again changes nothing (already reviewed): the stock is added once', 'high', async (t) => {
       const e = await existing(H)
-      const queued = await H.api('POST', '/api/products', createBody(e), { as: 'reviewtier' })
+      const queued = await H.api('POST', '/api/products', createBodyNC(e), { as: 'reviewtier' })
       const pendingId = queued.body.pendingActionId
       await approve(pendingId)
       await H.settle()
@@ -710,7 +714,7 @@ async function mainBody() {
 
     await check('R4', 'a request REJECTED (or decided elsewhere) before approval writes no stock: an approval that loses the race rolls the whole batch back', 'high', async (t) => {
       const e = await existing(H)
-      const queued = await H.api('POST', '/api/products', createBody(e), { as: 'reviewtier' })
+      const queued = await H.api('POST', '/api/products', createBodyNC(e), { as: 'reviewtier' })
       const pendingId = queued.body.pendingActionId
       const rejected = await H.api('POST', '/api/review/' + pendingId + '/reject', { reason: 'wrong product' })
       t.eq('rejected', rejected.status, 200)
@@ -724,7 +728,7 @@ async function mainBody() {
 
     await check('R5', 'a reviewer without inventory:adjust cannot approve a create that would add stock to an existing product: 403, the request stays open, nothing written', 'high', async (t) => {
       const e = await existing(H)
-      const queued = await H.api('POST', '/api/products', createBody(e), { as: 'reviewtier' })
+      const queued = await H.api('POST', '/api/products', createBodyNC(e), { as: 'reviewtier' })
       const pendingId = queued.body.pendingActionId
       const before = await ledger(H, e)
       const r = await approve(pendingId, 'reviewernostock')
@@ -737,7 +741,7 @@ async function mainBody() {
 
     await check('R6', 'control: that same reviewer CAN approve a queued create with no starting quantity that folds (no stock to add): barcode cleaned, request approved', 'control', async (t) => {
       const e = await existing(H)
-      const queued = await H.api('POST', '/api/products', createBody(e, { stock_quantity: 0 }), { as: 'reviewtier' })
+      const queued = await H.api('POST', '/api/products', createBodyNC(e, { stock_quantity: 0 }), { as: 'reviewtier' })
       const pendingId = queued.body.pendingActionId
       const before = await ledger(H, e)
       const r = await approve(pendingId, 'reviewernostock')
