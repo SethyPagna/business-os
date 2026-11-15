@@ -123,15 +123,22 @@ try {
   assert.equal(s.find(node => node.getAttribute('data-selection-action') === 'mark', 'mark page').getAttribute('title'), 'Mark every product in the open groups as matching stock', 'the tooltip says the tap acts on the open groups')
   assert.equal(requests.length, readsBefore, 'a mark reads nothing')
 
-  // 5. A scan of a code that sits in a collapsed group opens it.
+  // 5. A typed search (or a code scanned into the box) asks for no grouping: the answer is the flat list, every group opens again, and clearing the box brings the grouping back.
   await s.type(search(s), 'BC1001')
   await s.settle({ until: () => requests.at(-1)?.query === 'BC1001' })
-  await s.click(s.button('Collapse', head(s, 'd:2026-11-12')))
-  assert.ok(!rowIds(s).includes('1'), 'collapsed again')
+  assert.equal(requests.at(-1)?.groupBy, undefined, 'no groupBy while a search is typed')
+  assert.equal(requests.filter(request => request.query === 'BC1001' && request.groupBy !== undefined).length, 0, 'no grouped read of the search was ever sent')
+  assert.equal(headers(s).length, 0, 'the search is a flat list')
+  assert.ok(rowIds(s).includes('1'), 'the hit is on the page')
   const beforeScan = requests.length
   await enter(s)
-  assert.ok(rowIds(s).includes('1'), 'the scan opened the group of its row')
   assert.equal(requests.length, beforeScan, 'the same code is not read again')
+  assert.equal(requests.at(-1)?.groupBy, undefined, 'a scanned code is a search too')
+  await s.type(search(s), '')
+  await s.settle({ until: () => requests.at(-1)?.groupBy === 'checked' })
+  assert.equal(requests.at(-1)?.query, '', 'the cleared box is read again')
+  assert.deepEqual(headers(s).map(node => node.getAttribute('data-inventory-check-group')), ['d:2026-11-12', 'd:2026-11-03', 'never'], 'grouped again once the search is cleared')
+  assert.deepEqual(rowIds(s), ['1', '2', '3', '4'], 'with every group open (the collapse is cleared by the search)')
 
   // 6. A filter change clears the collapse; the grouping choice asks again with its own key and no sort.
   await s.click(s.button('Collapse', head(s, 'd:2026-11-03')))
@@ -147,10 +154,13 @@ try {
   requests.length = 0
   await s.type(search(s), 'BC1002')
   await enter(s)
+  await s.settle({ until: () => requests.at(-1)?.query === 'BC1002' })
+  assert.deepEqual(requests.map(request => request.groupBy), [undefined], 'the typed search never asks for Category, so the refusal is not reached')
+  await s.type(search(s), '')
   await s.settle({ until: () => requests.at(-1)?.groupBy === 'checked' })
-  assert.deepEqual(requests.map(request => request.groupBy), ['category', 'checked'], 'one refused read, then one fallback read: no loop')
+  assert.deepEqual(requests.map(request => request.groupBy), [undefined, 'category', 'checked'], 'cleared: one refused read, then one fallback read: no loop')
   await s.settle({})
-  assert.equal(requests.length, 2, 'nothing more is sent')
+  assert.equal(requests.length, 3, 'nothing more is sent')
   assert.deepEqual(headers(s).map(node => node.getAttribute('data-inventory-check-group')), ['d:2026-11-12', 'd:2026-11-03', 'never'], 'grouped by date again')
   denyCategory = false
 
@@ -159,7 +169,6 @@ try {
   assert.equal(requests.at(-1)?.groupBy, undefined)
   assert.equal(requests.at(-1)?.sortBy, 'name')
   assert.equal(headers(s).length, 0)
-  assert.equal(propsOf(search(s)).value, 'BC1002')
   await s.unmount()
 
   // 8. ic_wired: the first read of the Products-backed list carries groupBy and no sort, and its sections draw.
@@ -173,6 +182,19 @@ try {
   await chooseGroup(wiredPage, 'No grouping')
   assert.ok(wiredRequests.at(-1)?.groupBy === undefined && wiredRequests.at(-1)?.sortBy === 'name', 'No grouping goes back to the sorted read')
   assert.equal(headers(wiredPage).length, 0)
+  await chooseGroup(wiredPage, 'Last checked date')
+  assert.equal(wiredRequests.at(-1)?.groupBy, 'checked')
+  // A typed search: the wired read carries no groupBy (the device index and the Products store answer it, no extra read), and clearing it groups again.
+  const readsBeforeSearch = wiredRequests.length
+  await wiredPage.type(search(wiredPage), 'rose')
+  await wiredPage.settle({ until: () => wiredRequests.at(-1)?.query === 'rose' })
+  assert.equal(wiredRequests.length, readsBeforeSearch + 1, 'one list read for the typed search')
+  assert.equal(wiredRequests.at(-1)?.groupBy, undefined, 'wired: no groupBy while a search is typed')
+  assert.equal(headers(wiredPage).length, 0, 'wired: the search is flat')
+  await wiredPage.type(search(wiredPage), '')
+  await wiredPage.settle({ until: () => wiredRequests.at(-1)?.groupBy === 'checked' })
+  assert.equal(wiredRequests.length, readsBeforeSearch + 2, 'one list read to group again')
+  assert.deepEqual(headers(wiredPage).map(node => node.getAttribute('data-inventory-check-group')), ['d:2026-11-12', 'd:2026-11-03', 'never'], 'wired: grouped again after the search')
   await wiredPage.unmount()
   console.log('inventoryChecksGrouped mounted journeys passed')
 } finally { await harness.close() }

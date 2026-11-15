@@ -28,7 +28,7 @@ const makeApp = (seed, sourceEdits = {}) => {
 
 const SHAPES = [
   { user: 'org1', branch: null, query: {} }, { user: 'org1', branch: 1, query: {} }, { user: 'org1', branch: 2, query: {} },
-  { user: 'counter', branch: 1, query: { query: 'serum' } }, { user: 'org1', branch: null, query: { category: 'Skin' } },
+  { user: 'counter', branch: 1, query: { stockState: 'low_stock' } }, { user: 'org1', branch: null, query: { category: 'Skin' } },
   { user: 'org1', branch: 1, query: { stockState: 'in_stock' } }, { user: 'org1', branch: 1, query: { checkState: 'issue' } }, { user: 'org1', branch: 2, query: { checkState: 'ok' } },
   { user: 'org1', branch: 2, query: { checkState: 'not_checked' } }, { user: 'org2', branch: null, query: {} }, { user: 'orgNull', branch: 1, query: {} },
 ]
@@ -102,28 +102,45 @@ async function runWorld(app, seed) {
   return compared
 }
 
-// A name sibling pulled in beside a search hit (it fails another filter) belongs to the hit's family: it must carry the hit's group_key.
-async function siblingKeys(app) {
-  // The hit 5001 is a child of header 5000 (its family is the header's); 5002 is a standalone product of the same name that fails the stock filter, so no family of the ranking holds it and the
-  // name-sibling expansion pulls it in beside the hit. The hit has a check, the sibling none.
+// A typed search is answered FLAT (review finding 1): with a search the page shows every member of a family while a family's date and the header counts are computed over the matched rows, so a
+// grouped answer could put a dated row under "Never checked". groupBy (and the old sortBy=checked spelling) beside a query is accepted and ignored: the body is byte-identical to the same request
+// without it, with no grouping block and no group_key.
+async function searchIsFlat(app) {
+  // Header 5000 with two children: Rose checked 1 Nov, Lily checked 14 Nov. A second family whose matched child (Rose) was never checked while its sibling Lily was.
   app.seedStockFixture(app.raw.db, () => {
-    app.raw.db.prepare("INSERT INTO products(id,name,stock_quantity,is_group,is_active) VALUES(5000,'Serum Hdr',0,1,1)").run()
-    for (const [id, quantity, parent] of [[5001, 5, 5000], [5002, 0, null]]) {
-      app.raw.db.prepare("INSERT INTO products(id,name,stock_quantity,parent_id,is_active) VALUES(?,'Serum Twin',?,?,1)").run(id, quantity, parent)
-      app.raw.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,?)').run(id, quantity)
+    app.raw.db.prepare("INSERT INTO products(id,name,stock_quantity,is_group,is_active) VALUES(5000,'Probe Hdr',0,1,1)").run()
+    app.raw.db.prepare("INSERT INTO products(id,name,stock_quantity,is_group,is_active) VALUES(5010,'Probe2 Hdr',0,1,1)").run()
+    for (const [id, name, barcode, parent] of [[5001, 'Probe Rose', 'PRB-ROSE-1', 5000], [5002, 'Probe Lily', 'PRB-LILY-2', 5000], [5011, 'Probe2 Rose', 'PRB2-R', 5010], [5012, 'Probe2 Lily', 'PRB2-L', 5010]]) {
+      app.raw.db.prepare('INSERT INTO products(id,name,barcode,stock_quantity,parent_id,is_active) VALUES(?,?,?,5,?,1)').run(id, name, barcode, parent)
+      app.raw.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,5)').run(id)
     }
   })
   app.raw.db.prepare("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at) VALUES('sTwin',1,1,1,'Twin','open',0,'{}','2026-10-19T01:00:00.000Z','2026-10-20T01:00:00.000Z')").run()
-  app.raw.db.prepare("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,reason,updated_by,updated_at) VALUES('sTwin',5001,1,'{}',5,'{}','done',5,NULL,2,'2026-11-03T05:00:00.000Z')").run()
-  const r = await list(app, 'org1', { query: 'serum twin', stockState: 'in_stock', branchId: '1', groupBy: 'checked', pageSize: '100', summary: '0' })
-  const own = r.json.items.filter(item => item.id >= 5000)
-  assert.ok(own.some(item => item.id === 5001) && own.some(item => item.id === 5002), `the name sibling is on the page (positive control): ${JSON.stringify(own.map(i => i.id))}`)
-  assert.ok(own.every(item => item.group_key === 'd:2026-11-03'), `the hit's family and its name sibling share one group: ${JSON.stringify(own.map(i => [i.id, i.group_key]))}`)
-  assert.equal(r.status, 200, r.text.slice(0, 200))
-  assert.ok(r.json.items.every(item => typeof item.group_key === 'string' && item.group_key.length > 0), `every row, name siblings included, carries a group_key: ${JSON.stringify(r.json.items.map(i => [i.id, i.group_key]))}`)
-  const byName = new Map()
-  for (const item of r.json.items) { const key = String(item.name).trim().replace(/\s+/g, ' ').toLowerCase(); if (byName.has(key)) assert.equal(item.group_key, byName.get(key), `same-name rows share a group (${item.name})`); else byName.set(key, item.group_key) }
-  return r.json.items.length
+  const item = app.raw.db.prepare("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,reason,updated_by,updated_at) VALUES('sTwin',?,1,'{}',5,'{}','done',5,NULL,2,?)")
+  item.run(5001, '2026-11-01T05:00:00.000Z'); item.run(5002, '2026-11-14T05:00:00.000Z'); item.run(5012, '2026-11-13T05:00:00.000Z')
+  await app.load('lib/cache.ts').bumpVersion(app.env, 'inventory_checks')
+  let compared = 0
+  for (const [user, query] of [['org1', 'rose'], ['org1', 'PRB-ROSE-1'], ['org1', 'probe2'], ['counter', 'rose'], ['org1', 'a']]) for (const extra of [{ groupBy: 'checked' }, { groupBy: 'category' }, { sortBy: 'checked' }, { sortBy: 'checked', sortDirection: 'asc' }, { sortBy: 'checked', groupBy: 'checked' }]) {
+    const params = { query, branchId: '1', pageSize: '100' }
+    const flat = await list(app, user, params), asked = await list(app, user, { ...params, ...extra })
+    assert.equal(flat.status, 200, flat.text.slice(0, 200)); assert.equal(asked.status, 200, asked.text.slice(0, 200))
+    assert.equal(asked.text, flat.text, `a typed search answers byte-identically with ${JSON.stringify(extra)}: ${query}`)
+    assert.ok(!('grouping' in asked.json) && asked.json.items.every(row => !('group_key' in row)), 'flat: no grouping block, no group_key')
+    assert.ok(Array.isArray(asked.json.capabilities.groupings) && asked.json.capabilities.groupings.length > 0, 'the Group by choice is still offered for when the search is cleared')
+    compared++
+  }
+  // Positive control: the search shows the unmatched sibling beside the hit (the case the grouped answer got wrong).
+  const rose = await list(app, 'org1', { query: 'rose', branchId: '1', groupBy: 'checked', pageSize: '100' })
+  const ids = rose.json.items.map(row => row.id)
+  assert.ok(ids.includes(5001) && ids.includes(5002), `the search shows the family beside its hit: ${JSON.stringify(ids)}`)
+  // Cleared, the same page is grouped again and each family is dated by its newest check.
+  const cleared = await list(app, 'org1', { branchId: '1', groupBy: 'checked', pageSize: '100', summary: '0' })
+  const keyOf = id => cleared.json.items.find(row => row.id === id).group_key
+  assert.equal(keyOf(5001), 'd:2026-11-14'); assert.equal(keyOf(5002), 'd:2026-11-14'); assert.equal(keyOf(5011), 'd:2026-11-13')
+  // groupBy beside ids is still refused (the device index never asks for both), even with a query.
+  app.setUser(users.org1)
+  assert.equal((await app.get('/api/inventory-checks/list?groupBy=checked&ids=5001&query=rose&branchId=1')).status, 400)
+  return compared
 }
 
 async function contract(app) {
@@ -152,12 +169,12 @@ async function contract(app) {
   assert.equal((await get('org1', { branchId: '1', sortBy: 'checked', query: 'serum' })).status, 200, 'a search beside the date order is answered')
   // Switch off: the list does not exist.
   app.setSwitch('ic_wired', 'off'); assert.equal((await get('org1', { groupBy: 'checked' })).status, 404); app.setSwitch('ic_wired', 'on')
-  // A viewer without the barcode field finds a product by its whole code: the exact hit is grouped too (a restriction to that id, not a by-id read).
+  // A viewer without the barcode field finds a product by its whole code: the exact hit is read by id and answered flat when groupBy comes beside the code (a typed or scanned code is a search).
   const code = '8851234567'
   app.seedStockFixture(app.raw.db, () => { app.raw.db.prepare('UPDATE products SET barcode = ? WHERE id = 100').run(code) })
   const hit = await get('noCategory', { query: code, groupBy: 'checked', branchId: '1', summary: '0' })
-  assert.equal(hit.status, 200, hit.text.slice(0, 200)); assert.deepEqual(hit.json.items.map(i => i.id), [100]); assert.equal(typeof hit.json.items[0].group_key, 'string'); assert.equal(hit.json.total, 1)
-  assert.equal(hit.json.grouping.groups.length, 1)
+  assert.equal(hit.status, 200, hit.text.slice(0, 200)); assert.deepEqual(hit.json.items.map(i => i.id), [100]); assert.ok(!('group_key' in hit.json.items[0]) && !('grouping' in hit.json)); assert.equal(hit.json.total, 1)
+  assert.equal(hit.text, (await get('noCategory', { query: code, branchId: '1', summary: '0' })).text, 'the code answer is the same without groupBy')
   const other = await get('noCategory', { query: code, groupBy: 'checked', branchId: '2', checkState: 'ok', summary: '0' })
   assert.equal(other.status, 200); assert.ok(other.json.items.every(i => i.id === 100))
 }
@@ -167,7 +184,7 @@ function plans(app, stats) {
   const plan = sql => { const statement = app.raw.db.prepare(`EXPLAIN QUERY PLAN ${sql}`); statement.setAllowUnknownNamedParameters(true); return statement.all({}).map(row => row.detail) }
   const icScans = lines => lines.filter(line => /^SCAN (i|s|inventory_check_items|inventory_check_sessions)( |$)/.test(line) && !/idx_(branch|damaged)/.test(line))
   return (async () => {
-    for (const params of [{ groupBy: 'checked', branchId: '1' }, { groupBy: 'checked' }, { groupBy: 'checked', branchId: '1', checkState: 'ok' }, { groupBy: 'checked', query: 'a', branchId: '2' }, { groupBy: 'category' }]) {
+    for (const params of [{ groupBy: 'checked', branchId: '1' }, { groupBy: 'checked' }, { groupBy: 'checked', branchId: '1', checkState: 'ok' }, { groupBy: 'checked', stockState: 'in_stock', branchId: '2' }, { groupBy: 'category' }]) {
       app.clearCaches(); const mark = app.mark()
       const r = await list(app, 'org1', { ...params, pageSize: '10', summary: '0' })
       assert.equal(r.status, 200, r.text.slice(0, 200))
@@ -201,7 +218,9 @@ const MUTANTS = {
   // Wired only: the cache.
   M13: ['routes/products.ts', ["keyUrl.searchParams.set('ic_group', options.grouping.by)", 'void 0']],
   M14: ['routes/products.ts', ["versions = `${baseVersion}:icg:${options.setVersion ?? ''}`", 'versions = baseVersion']],
-  M15: ['routes/products.ts', ['inheritGroupKeys(await expandSearchResultsToNameSiblings(env, items as Array<Record<string, unknown>>))', '(await expandSearchResultsToNameSiblings(env, items as Array<Record<string, unknown>>))']],
+  // M15 (the name-sibling group_key inheritance in routes/products.ts) cannot be reached from this route now that a typed search is flat, so it is retired.
+  // M16: the typed-search rule removed (groupBy beside a query is honoured again).
+  M16: ['lib/inventoryCheckList.ts', ['const grouping: InventoryCheckGrouping | null = validated.query ? null : requestedGrouping', 'const grouping: InventoryCheckGrouping | null = requestedGrouping']],
   // The tie-break removed outright is hidden by the GROUP BY that builds `families` (it already hands the rows over in key order): reported, not asserted.
   M9b: ['lib/familyPagination.ts', ['ORDER BY ${familyOrderSql}, family_root_id ASC) AS __family_rank FROM families)\n    ) ORDER BY __family_rank ASC', 'ORDER BY ${familyOrderSql}) AS __family_rank FROM families)\n    ) ORDER BY __family_rank ASC']],
 }
@@ -215,7 +234,7 @@ async function main() {
 
   if (!only) await check('real code: grouped pages equal the oracle on every world, scope and pager (G1-G4, G6, cache on)', async () => {
     let compared = 0
-    for (const seed of SEEDS) { const app = makeApp(seed); compared += await runWorld(app, seed); if (seed === 2) await siblingKeys(app) }
+    for (const seed of SEEDS) { const app = makeApp(seed); compared += await runWorld(app, seed); if (seed === 2) await searchIsFlat(app) }
     assert.ok(compared > 1500, `${compared} rows compared`)
   })
   if (!only) await check('HTTP contract: refusals, capability, alias, switch off, code lookup, shape', async () => { await contract(makeApp(3)) })
@@ -224,7 +243,7 @@ async function main() {
     await plans(app, false); app.raw.db.exec('ANALYZE'); await plans(app, true)
   })
 
-  if (!process.env.SKIP_MUTANTS) await check('mutants M1-M15 are each caught', async () => {
+  if (!process.env.SKIP_MUTANTS) await check('mutants M1-M14 and M16 are each caught', async () => {
     const survived = []
     for (const [id, [file, pair]] of Object.entries(MUTANTS)) {
       if (only && !only.includes(id)) continue
@@ -234,7 +253,7 @@ async function main() {
           if (failure) break
           const app = makeApp(seed, { [file]: [pair] })
           if (id === 'M12') { await contract(app); continue }
-          if (id === 'M15') { await siblingKeys(app); continue }
+          if (id === 'M16') { await searchIsFlat(app); continue }
           await runWorld(app, seed)
         }
       } catch (error) { failure = error }

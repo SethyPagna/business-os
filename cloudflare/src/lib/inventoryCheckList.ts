@@ -65,7 +65,11 @@ export function planInventoryList(user: PermissionUser, raw: Record<string, stri
   if (sortBy !== 'created' && sortBy !== 'name' && sortBy !== 'checked') invalid('sortBy')
   if (validated.groupBy && sortWord && sortWord !== 'checked') invalid('sortBy')
   if (sortWord === 'checked' && validated.groupBy && validated.groupBy !== 'checked') invalid('sortBy')
-  const grouping: InventoryCheckGrouping | null = validated.groupBy ? (isInventoryCheckGrouping(validated.groupBy) ? validated.groupBy : invalid('groupBy')) : sortWord === 'checked' ? 'checked' : null
+  const requestedGrouping: InventoryCheckGrouping | null = validated.groupBy ? (isInventoryCheckGrouping(validated.groupBy) ? validated.groupBy : invalid('groupBy')) : sortWord === 'checked' ? 'checked' : null
+  // A typed search is answered FLAT: the family date and the header counts would be computed over the matched rows while the page shows every member of a family (routes/products.ts),
+  // so a group could disagree with the rows under it. The groupBy (or the old sortBy=checked spelling) is accepted and ignored, exactly as the switch-off path ignores it; the page
+  // itself sends none while a search is typed, and grouping returns when the search is cleared.
+  const grouping: InventoryCheckGrouping | null = validated.query ? null : requestedGrouping
   const direction = validated.sortDirection ?? (sortBy === 'name' ? 'asc' : 'desc')
   const branchId = validated.branchId && validated.branchId.toLowerCase() !== 'all' ? integer(validated.branchId, 0, Number.MAX_SAFE_INTEGER, 'branchId') : null
   const checkWord = rawCheckState?.trim() || ''
@@ -74,7 +78,7 @@ export function planInventoryList(user: PermissionUser, raw: Record<string, stri
   if (checkState && branchId === null) invalid('branchId')
   // 'pending' while ic_fix_stock is OFF (or the viewer may not see stock) is a valid choice with nothing in it: an empty page, never a 400 that a tab would repeat.
 
-  const productsQuery: Record<string, string> = { searchMode: 'smart', sort: grouping ? 'name_asc' : `${sortBy}_${direction}`, include: LIST_INCLUDE }
+  const productsQuery: Record<string, string> = { searchMode: 'smart', sort: grouping ? 'name_asc' : `${sortBy === 'checked' ? 'created' : sortBy}_${direction}`, include: LIST_INCLUDE }
   const page = integer(validated.page, 1, 100000, 'page'), pageSize = integer(validated.pageSize, DEFAULT_PAGE_SIZE, 100, 'pageSize')
   productsQuery.page = String(page); productsQuery.pageSize = String(pageSize)
   if (branchId !== null) productsQuery.branchId = String(branchId)
@@ -91,7 +95,7 @@ export function planInventoryList(user: PermissionUser, raw: Record<string, stri
   }
   if (rawIds !== undefined && rawIds.trim() !== '') {
     if (checkState) invalid('ids')
-    if (grouping) invalid('groupBy')
+    if (requestedGrouping) invalid('groupBy')
     const ids = [...new Set(rawIds.split(',').map((part) => part.trim()))]
     if (!ids.length || ids.length > options.maxIds || ids.some((id) => !/^\d+$/.test(id) || !Number.isSafeInteger(Number(id)) || Number(id) <= 0)) invalid('ids')
     productsQuery.ids = ids.join(','); productsQuery.page = '1'; productsQuery.pageSize = String(ids.length)

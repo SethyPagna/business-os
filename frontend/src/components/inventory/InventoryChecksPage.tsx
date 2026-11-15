@@ -39,7 +39,7 @@ import { adjustStock } from '../../api/inventoryWriteTransport.ts'
 import { stockConflictFigures, type StockWriteAnswer } from './stockAnswerPatch.ts'
 import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import { oldListDropsStatus, productsServerOf, productsWireParams, type ProductsServer } from './inventoryCheckProductsRequest.ts'
-import { collapseId, groupedParams, groupToAsk, inOpenGroups, type Grouping } from './inventoryCheckGroups.ts'
+import { groupedParams, groupToAsk, inOpenGroups, type Grouping } from './inventoryCheckGroups.ts'
 import { loadGroupedList } from './inventoryCheckGroupChunk.ts'
 import { soleActiveBranch } from '../../utils/branchCollapse.ts'
 import { PRICE_KEYS } from './inventoryPriceFacts.ts'
@@ -263,7 +263,6 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const [data, setData] = useState<ProductsResult | null>(null)
   // Collapsed groups (`by:key`): kept across page steps, cleared when a filter, the branch or the grouping changes. Collapsing reads nothing.
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
-  const [expandedFor, setExpandedFor] = useState(0)
   // The scope (everything but the page) whose check counts and filter options `data` holds: a page step inside it asks the server to skip them -- but only a server
   // whose last answer was the check-status list (ic_simple), which is also what `productsServer` records: the older list has no counts to skip and refuses the key.
   const summaryScope = useRef('')
@@ -332,7 +331,9 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   const { group: groupChoice, ...listFilters } = filters
   const params: QueryParams = { ...listFilters, query: appliedQuery, page, pageSize, sessionId, checkState: section === 'issues' ? 'issue' : filters.checkState }
-  const groupWire = !sessionId && section !== 'sessions' ? groupToAsk(groupChoice, knownGroupings) : null
+  // While a search is typed (or a code is scanned into the box) no grouping is asked for, on both servers: the answer is the flat list, from the device search index and the Products store on the wired path
+  // (no extra read), and a family's date or header count can never be computed over fewer rows than the page shows. The grouping returns, with the same collapse rules, once the search is cleared.
+  const groupWire = !sessionId && section !== 'sessions' && !appliedQuery.trim() ? groupToAsk(groupChoice, knownGroupings) : null
   const sessionParams: QueryParams = { branchId, page, pageSize, ...(sessionFilters.status ? { status: sessionFilters.status } : {}), ...(sessionFilters.mine ? { mine: 1 } : {}), ...(sessionFilters.waiting && sessions?.approvals ? { approval: 'pending' as const } : {}), ...(sessionRange.startDate ? { startDate: sessionRange.startDate } : {}), ...(sessionRange.endDate ? { endDate: sessionRange.endDate } : {}) }
   // scopeKey identifies WHAT is listed (filters, page, section); requestKey also changes on every refresh bump.
   // Rows stay fresh for as long as the listed scope is the loaded one, so a refresh of the same scope (the Refresh button,
@@ -1051,12 +1052,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const scanHit = scan && fresh && showsProductRows ? scanHitOf(visibleProducts, scan.query, access.fields.barcode) : null
   const focusRequest: InventoryCheckFocusRequest | undefined = scan && scanHit ? { id: scanHit.id, token: scan.token, target: scan.target } : undefined
   const scanMissed = !!scan && loadedNothing && showsProductRows
-  // A scan that lands in a collapsed group opens it, in the same render, so the row is there when the page scrolls to it.
-  const hitGroupId = grouping && scanHit && scanHit.group_key !== undefined ? collapseId(grouping.by, scanHit.group_key) : ''
-  if (scan && hitGroupId && collapsed.has(hitGroupId) && expandedFor !== scan.token) {
-    setExpandedFor(scan.token)
-    setCollapsed(previous => { const next = new Set(previous); next.delete(hitGroupId); return next })
-  }
+  // A scanned code is a typed search, which is answered flat: no groups, so nothing is collapsed around the hit.
   const scanRef = useRef(scan)
   scanRef.current = scan
   const scanHitId = useRef<string | null>(null)

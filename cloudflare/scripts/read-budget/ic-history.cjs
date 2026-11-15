@@ -55,7 +55,8 @@ function wiredEntries() {
   return [
     ['inventory-checks/list wired grouped checked', `${L}&groupBy=checked&page=1&pageSize=20`, `${L}&${twin}&page=1&pageSize=20`, 'ic_wired'],
     ['inventory-checks/list wired grouped checked page step', `${L}&groupBy=checked&page=2&pageSize=20&summary=0`, `${L}&${twin}&page=2&pageSize=20&summary=0`, 'ic_wired'],
-    ['inventory-checks/list wired grouped checked search', `${L}&groupBy=checked&query=serum&page=1&pageSize=20`, `${L}&${twin}&query=serum&page=1&pageSize=20`, 'ic_wired'],
+    // A typed search is answered flat on the wired list (the family date would be computed over the matched rows only): the shape pins that groupBy beside a query costs the name read and no more.
+    ['inventory-checks/list wired grouped checked search', `${L}&groupBy=checked&query=serum&page=1&pageSize=20`, `${L}&${twin}&query=serum&page=1&pageSize=20`, 'ic_wired', true],
     ['inventory-checks/list wired grouped checked low stock', `${L}&groupBy=checked&stockState=low_stock&page=1&pageSize=20`, `${L}&${twin}&stockState=low_stock&page=1&pageSize=20`, 'ic_wired'],
     ['inventory-checks/list wired grouped checked issues', `${L}&groupBy=checked&checkState=issue&page=1&pageSize=20`, `${L}&${twin}&checkState=issue&page=1&pageSize=20`, 'ic_wired'],
     ['inventory-checks/list wired grouped category', `${L}&groupBy=category&page=1&pageSize=20`, `${L}&${twin}&page=1&pageSize=20`, 'ic_wired'],
@@ -64,7 +65,7 @@ function wiredEntries() {
 
 // Shapes in the getShapes() form ({ id, kind, method, label, url, switches }) plus `control` (the same request in name order, on the same world).
 function getHistoryShapes(opts) {
-  return historyEntries(opts).map(([label, url, control, sw]) => ({ id: slug(label), kind: 'get', method: 'GET', label, url, anon: false, longRange: false, switches: [sw || 'ic_simple'], control }))
+  return historyEntries(opts).map(([label, url, control, sw, flat]) => ({ id: slug(label), kind: 'get', method: 'GET', label, url, anon: false, longRange: false, switches: [sw || 'ic_simple'], control, ...(flat ? { flat: true } : {}) }))
 }
 
 module.exports = { seedIcHistory, getHistoryShapes, I_SEED, DAYS, LINES }

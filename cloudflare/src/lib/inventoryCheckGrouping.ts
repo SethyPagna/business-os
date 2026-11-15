@@ -4,7 +4,7 @@
 // the chosen branch, when one is chosen). That is the updated_at of the item the list's other readers pick as the latest one (ORDER BY updated_at DESC, session_id DESC LIMIT 1), so the order
 // here can never disagree with the check_at a row shows.
 //
-// The unit is the family, because the pager's unit is the family: a family's date is the MAX over the rows the page shows, "never" when none was checked. A family is never split across
+// The unit is the family, because the pager's unit is the family: a family's date is the MAX over the family's rows that the read selected (every row of the family when no search narrows it), "never" when none was checked. A typed search is never grouped: it would select fewer rows than the page shows, so both lists answer it flat. A family is never split across
 // groups. Group totals are computed in the same statement that ranks the families (FamilyPaginationOptions.familyGroupSql), so they never depend on the page.
 import type { FamilyGroupTotals } from './familyPagination'
 import { localDateOf } from './businessDateWindow'
