@@ -1,12 +1,8 @@
 {
  "portal-config": [
   [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
+   "1b6449cc3af3",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?)"
   ],
   [
    "d12fb0f758f1",

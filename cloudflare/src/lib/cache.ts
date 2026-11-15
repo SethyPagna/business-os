@@ -215,17 +215,15 @@ export async function versionedKey(kv: KVNamespace, namespace: string, suffix: s
 }
 
 async function readD1Versions(env: Env, namespaces: string[], requireReadable = false, outcome?: { value: boolean }): Promise<Map<string, number>> {
-  // Deduplicated first, then ONE batch (one D1 round trip) of one primary-key lookup per distinct namespace, so the read costs exactly the rows it finds.
-  // Not `IN (...)`: SQLite builds an ephemeral table for an IN list and D1 meters its rows as rows read even when nothing matches (measured:
-  // two missing namespaces cost 2 rows with IN, 0 as lookups), and `IN (SELECT value FROM json_each(...))` costs about 2N more.
+  // Deduplicated first: one bound placeholder per distinct namespace, so the statement reads exactly those rows. (A json_each() list is metered by D1 as
+  // extra rows read, about 2N per request for N namespaces; a bound IN list costs one metered row per entry on a miss, at most a dozen, in exchange for ONE statement; per-namespace lookups would be a db.batch, and a bump already issues one.) Namespaces are a handful of fixed names, far under the bind limit.
+  // sql-bound-params: bounded by construction (callers pass literal namespace names, at most a dozen; the list is deduplicated).
   const distinct = [...new Set(namespaces)]
   if (!distinct.length) return new Map()
   try {
-    const results = await getDb(env).batch(distinct.map((namespace) => ({
-      sql: 'SELECT namespace, version FROM cache_versions WHERE namespace = @namespace',
-      params: { namespace },
-    })))
-    const rows = results.flatMap((result) => (result.results ?? []) as Array<{ namespace: string; version: number }>)
+    const rows = await getDb(env).prepare(`SELECT namespace, version FROM cache_versions
+      WHERE namespace IN (${distinct.map(() => '?').join(',')})`)
+      .all<{ namespace: string; version: number }>(distinct)
     return new Map(rows.filter(row => row.version != null).map(row => [row.namespace, Number(row.version)]))
   } catch (error) {
     if (requireReadable) throw error

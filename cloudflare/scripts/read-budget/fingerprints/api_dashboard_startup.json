@@ -21,28 +21,12 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
+   "9e860b96b0ef",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?,?)"
   ],
   [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
+   "1b6449cc3af3",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?)"
   ],
   [
    "3c26374fe4ff",
@@ -203,28 +187,12 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
+   "9e860b96b0ef",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?,?)"
   ],
   [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
+   "1b6449cc3af3",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?)"
   ],
   [
    "3c26374fe4ff",
@@ -385,28 +353,12 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
+   "9e860b96b0ef",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?,?)"
   ],
   [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
+   "1b6449cc3af3",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?)"
   ],
   [
    "3c26374fe4ff",
@@ -583,28 +535,12 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
+   "9e860b96b0ef",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?,?)"
   ],
   [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
+   "1b6449cc3af3",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?)"
   ],
   [
    "3c26374fe4ff",

@@ -5,20 +5,8 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "2928da9b422b",
-   "B| SELECT namespace, version FROM cache_versions WHERE namespace = ?1"
+   "9e860b96b0ef",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?,?)"
   ],
   [
    "3c26374fe4ff",
