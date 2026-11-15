@@ -6437,9 +6437,10 @@ app.get('/stats', async (c) => {
       where.push(`s.cashier_id IN (${keys.join(', ')})`)
     }
   }
+  let statusClausePushed = false
   if (query.status) {
     const clause = saleStatusFilterClause(String(query.status), params)
-    if (clause) where.push(clause)
+    if (clause) { where.push(clause); statusClausePushed = true }
   }
   if (query.branchId) {
     where.push('(s.branch_id = @branchId OR EXISTS (SELECT 1 FROM sale_items sif WHERE sif.sale_id = s.id AND sif.branch_id = @branchId))')
@@ -6459,7 +6460,9 @@ app.get('/stats', async (c) => {
     // scope still carries every list predicate, so the cohort is unchanged. Branch, cashier, status and
     // search stay scope-only (the list's branch rule also matches item branches).
     const windowFilter={startDate:query.startDate||null,endDate:query.endDate||null,startTime:query.startTime||null,endTime:query.endTime||null}
-    const scope = where.length - 1 === windowClauseCount && !openEndedStart ? undefined : salesListFilterReportScope(where, params)
+    // narrow: a clause other than the window and the status test (cashier, user, branch, search, id) holds the scope to a few sales (the cancelled group then probes it by rowid)
+    const narrowScope = where.length - 1 - windowClauseCount - (statusClausePushed ? 1 : 0) > 0
+    const scope = where.length - 1 === windowClauseCount && !openEndedStart ? undefined : salesListFilterReportScope(where, params, narrowScope)
     // Header-only reader: every number below is sale header + returns (no sale lines are read, and no cost or profit exists on the type).
     const totals = await readSalesHeaderTotals(c.env, windowFilter, scope)
     const totalCount=totals.sale_count+totals.cancelled_count

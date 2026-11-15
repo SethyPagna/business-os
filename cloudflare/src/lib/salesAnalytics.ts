@@ -711,7 +711,7 @@ export const CUSTOMER_REFUND_JOIN = `LEFT JOIN (
 // Builds the shared WHERE clause + bound params for "active sales in this
 // date range (and optional branch)". `alias` lets callers use this against
 // either a bare `sales` table or an aliased `s` in a join.
-export function whereActiveSales(alias: string, f: SalesFilters) {
+export function whereActiveSales(alias: string, f: SalesFilters, options: { plainCancelled?: boolean } = {}) {
   const clockError = localRangeClockError(f.startTime, f.endTime)
   if (clockError) throw new RangeError(clockError)
   const params: Record<string, unknown> = {}
@@ -738,7 +738,9 @@ export function whereActiveSales(alias: string, f: SalesFilters) {
   if (status) {
     // 'cancelled' is the one status no NULL maps to (COALESCE only turns NULL into 'completed'), so for it the plain column is exactly the same set --
     // and lets idx_sales_status_created_pg answer it; the wrapped column cannot (a full walk of every sale on an undated report, once per pass).
-    clauses.push(status === 'cancelled' ? `${alias}.sale_status = @status` : `COALESCE(${alias}.sale_status, 'completed') = @status`)
+    // `plainCancelled: false` (a report whose scope is already narrow: a filter's subquery or its id list) keeps the wrapped column: the planner then probes the scope
+    // instead of seeking idx_sales_status_created_pg and reading every cancelled sale in the window (121 rows became 1,989 on the lab seed). Same set either way.
+    clauses.push(status === 'cancelled' && options.plainCancelled !== false ? `${alias}.sale_status = @status` : `COALESCE(${alias}.sale_status, 'completed') = @status`)
     params.status = status
   } else {
     clauses.push(`COALESCE(${alias}.sale_status, 'completed') <> 'cancelled'`)
@@ -933,7 +935,11 @@ export type SalesReportScalarScope = (saleAlias: string) => {
   params: Record<string, SalesReportScalarScopeValue>
 }
 
-type CapturedSalesReportScalarScope = { sql: string; params: Record<string, SalesReportScalarScopeValue> }
+type CapturedSalesReportScalarScope = { sql: string; params: Record<string, SalesReportScalarScopeValue>; narrow?: boolean }
+// Scopes known to hold only a few sales (a short resolved id list, or a list filter with a cashier / user / branch / search clause beyond the window and status): the cancelled group probes them
+// by rowid instead of seeking every cancelled sale of the window. A scope that is only the window and a status holds most of the shop and is not narrow.
+const REPORT_SCOPE_NARROW = new WeakSet<SalesReportScalarScope>()
+export const REPORT_NARROW_SCOPE_IDS_MAX = 200
 
 type ReportScopeProvenance = {
   sql: string
@@ -1078,12 +1084,13 @@ function reportDashboardDateFiltersEligible(f: SalesFilters): boolean {
 // `IN (... WHERE 1=1)` that still forces a full sales scan plus a
 // temp-B-tree sort on every 2,000-row keyset page (all-time stats walk:
 // 681 -> 48 ms on the seeded lab DB, identical rows; I4-2).
-export function salesListFilterReportScope(where: string[], params: Record<string, unknown>): SalesReportScalarScope | undefined {
+export function salesListFilterReportScope(where: string[], params: Record<string, unknown>, narrow = false): SalesReportScalarScope | undefined {
   if (!where.some((clause) => clause !== '1=1')) return undefined
   const { scopedWhere, scopedParams } = salesListScopedWhere(where, params)
   const sqlForAlias = (alias: string) => `${alias}.id IN (SELECT matched_sale.id FROM sales matched_sale LEFT JOIN customers c ON c.id=matched_sale.customer_id WHERE ${scopedWhere})`
   const scope: SalesReportScalarScope = (alias) => ({ sql: sqlForAlias(alias), params: scopedParams })
   rememberReportScopeProvenance(scope, sqlForAlias('s'), scopedParams)
+  if (narrow) REPORT_SCOPE_NARROW.add(scope)
   return scope
 }
 
@@ -1150,6 +1157,7 @@ function salesIdsScope(ids: readonly number[], json = JSON.stringify(ids)): Sale
   const sqlForAlias = (alias: string) => `${alias}.id IN (SELECT value FROM json_each(@reportScope_ids))`
   const scope: SalesReportScalarScope = (alias) => ({ sql: sqlForAlias(alias), params: scopedParams })
   rememberReportScopeProvenance(scope, sqlForAlias('s'), scopedParams)
+  if (ids.length <= REPORT_NARROW_SCOPE_IDS_MAX) REPORT_SCOPE_NARROW.add(scope)
   return scope
 }
 
@@ -1228,7 +1236,7 @@ function captureSalesReportScalarScope(scope?: SalesReportScalarScope): Captured
     || /(?:^|[^A-Za-z0-9_])[:$][A-Za-z_]/.test(captured.sql)) {
     throw new ReportMoneyPrecisionError('unsupported_row')
   }
-  return Object.freeze({ sql: captured.sql.trim(), params: Object.freeze({ ...params }) })
+  return Object.freeze({ sql: captured.sql.trim(), params: Object.freeze({ ...params }), narrow: REPORT_SCOPE_NARROW.has(scope) })
 }
 
 function applySalesReportScalarScope<T extends { sql: string; params: Record<string, unknown> }>(
@@ -1432,6 +1440,10 @@ type ReportReadGroups = Pick<SalesReportSnapshot, ReportReadGroupKind>
 // The cancelled group keys its pages on a non-rowid expression: with `s.id > @after ORDER BY s.id` the planner walks the primary key of every sale (and, with table
 // statistics, still does after the status test is a plain equality); with the unary plus it seeks idx_sales_status_created_pg for the few cancelled rows and sorts them.
 const REPORT_VOID_ID_EXPR = '+s.id'
+// An unscoped or broad-scoped report takes the plain status test and pages on `+s.id`; a narrow one (a filter's subquery or id list holds the few sales that matter) keeps
+// the pre-lane wrapped test and plain `s.id`, so the planner probes the scope by rowid and never reads every cancelled sale in the window.
+const reportStatusPredicate = (scope: CapturedSalesReportScalarScope | null) => ({ plainCancelled: !scope?.narrow })
+const reportVoidIdExpr = (scope: CapturedSalesReportScalarScope | null) => scope?.narrow ? 's.id' : REPORT_VOID_ID_EXPR
 type ReportReadGroup = { kind: ReportReadGroupKind; sql: string; idExpr: string; params: Record<string, unknown>; columns: string[] }
 type ReportReadBand = { sql: string; params: Record<string, unknown> }
 type ReportReadPlan = { groups: ReportReadGroup[]; primary: { sql: string; params: Record<string, unknown> }; preciseSales: boolean; preciseReturns: boolean; itemBand?: ReportReadBand }
@@ -1502,8 +1514,8 @@ async function buildSalesReportReadPlan(
   const saleColumn = (name: string, fallback: string) => salesColumns.has(name) ? `s.${name}` : `${fallback} AS ${name}`
   const linkedDeliveryFee = feeColumns.has('sale_id') && feeColumns.has('fee_type')
     ? "EXISTS(SELECT 1 FROM fees WHERE fees.sale_id=s.id AND COALESCE(fees.fee_type,'')='delivery')" : '0'
-  const primary = applySalesReportScalarScope(whereActiveSales('s', f), scalarScope)
-  const voids = applySalesReportScalarScope(whereActiveSales('s', { ...f, status: 'cancelled' }), scalarScope)
+  const primary = applySalesReportScalarScope(whereActiveSales('s', f, reportStatusPredicate(scalarScope)), scalarScope)
+  const voids = applySalesReportScalarScope(whereActiveSales('s', { ...f, status: 'cancelled' }, reportStatusPredicate(scalarScope)), scalarScope)
   const groups: ReportReadGroup[] = []
   const saleSelect = reportSelectForPurpose({
     id: 's.id', created_at: 's.created_at', sale_status: 's.sale_status', status_before_return: saleColumn('status_before_return', 'NULL'),
@@ -1534,7 +1546,7 @@ async function buildSalesReportReadPlan(
   groups.push({ kind: 'sales', sql: `SELECT ${saleSelect.sql}
     FROM sales s WHERE ${primary.sql}`, idExpr: 's.id', params: primary.params, columns: saleSelect.columns })
   if (options.maxReceipts === undefined) groups.push({ kind: 'voidSales', sql: `SELECT ${voidSelect.sql}
-    FROM sales s WHERE ${voids.sql}`, idExpr: REPORT_VOID_ID_EXPR, params: voids.params, columns: voidSelect.columns })
+    FROM sales s WHERE ${voids.sql}`, idExpr: reportVoidIdExpr(scalarScope), params: voids.params, columns: voidSelect.columns })
   const itemFrom = datedDashboard ? 'sales s CROSS JOIN sale_items si ON si.sale_id=s.id'
     : 'sale_items si NOT INDEXED CROSS JOIN sales s ON s.id=si.sale_id'
   if (!options.headerOnly) groups.push({ kind: 'items', sql: `SELECT ${itemSelect.sql}
@@ -2033,8 +2045,8 @@ async function readSalesReportPassLegacy(
   const saleColumn = (name: string, fallback: string) => salesColumns.has(name) ? `s.${name}` : `${fallback} AS ${name}`
   const linkedDeliveryFee = feeColumns.has('sale_id') && feeColumns.has('fee_type')
     ? "EXISTS(SELECT 1 FROM fees WHERE fees.sale_id=s.id AND COALESCE(fees.fee_type,'')='delivery')" : '0'
-  const primary = applySalesReportScalarScope(whereActiveSales('s', f), scalarScope)
-  const voids = applySalesReportScalarScope(whereActiveSales('s', { ...f, status: 'cancelled' }), scalarScope)
+  const primary = applySalesReportScalarScope(whereActiveSales('s', f, reportStatusPredicate(scalarScope)), scalarScope)
+  const voids = applySalesReportScalarScope(whereActiveSales('s', { ...f, status: 'cancelled' }, reportStatusPredicate(scalarScope)), scalarScope)
   const rowBudget = { count: 0 }
   const sales = await reportKeysetRows(db, `SELECT s.id,s.created_at,s.sale_status,${saleColumn('status_before_return','NULL')},s.branch_id,s.branch_name,
       s.cashier_id,s.cashier_name,s.customer_id,s.customer_name,s.customer_phone,s.receipt_number,s.payment_method,
@@ -2048,7 +2060,7 @@ async function readSalesReportPassLegacy(
   const voidSales = options.maxReceipts !== undefined ? [] : await reportKeysetRows(db, `SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name,
       s.cashier_id,s.cashier_name,s.customer_id,s.customer_name,s.customer_phone,s.payment_method,
       ${customerAnonymous} AS customer_is_anonymous
-    FROM sales s WHERE ${voids.sql}`, REPORT_VOID_ID_EXPR, voids.params, rowBudget)
+    FROM sales s WHERE ${voids.sql}`, reportVoidIdExpr(scalarScope), voids.params, rowBudget)
   const items = options.headerOnly ? [] : await readReportSaleItems(db, f, primary, rowBudget, `SELECT si.id,si.sale_id,${itemColumn('product_id','NULL')},${itemColumn('product_name',"''")},si.quantity,
       ${itemColumn('total_usd','0')},si.cost_price_usd,${itemColumn('product_discount_usd','0')},${itemColumn('manual_discount_usd','0')}
     FROM sale_items si NOT INDEXED CROSS JOIN sales s ON s.id=si.sale_id WHERE ${primary.sql}`)

@@ -16,7 +16,7 @@ const STRIP_NEW = "const stripId=continuous?'id':'+id'"
 const STRIP_OLD = "const stripId='id'"
 const STRIP_CURSOR = 'AND ${stripId}>@stripAfter ORDER BY'
 const STRIP_PAGE = 'ORDER BY ${stripId} LIMIT'
-const VOID_NEW = "status === 'cancelled' ? `${alias}.sale_status = @status` : `COALESCE(${alias}.sale_status, 'completed') = @status`"
+const VOID_NEW = "status === 'cancelled' && options.plainCancelled !== false ? `${alias}.sale_status = @status` : `COALESCE(${alias}.sale_status, 'completed') = @status`"
 const VOID_OLD = "`COALESCE(${alias}.sale_status, 'completed') = @status`"
 const VOID_ID = "const REPORT_VOID_ID_EXPR = '+s.id'"
 
@@ -37,6 +37,8 @@ const MUTANTS = {
   stripCursorGe: [{ name: 'm-strip-ge', file: SALES, from: STRIP_CURSOR, to: 'AND ${stripId}>=@stripAfter ORDER BY' }],
   // every dated window on `+id` again: past about 90 days each page re-scans the window (+38% at a year)
   stripDatedAlwaysPlus: [{ name: 'm-strip-dated-plus', file: SALES, from: 'const STRIP_PLUS_ID_MAX_DAYS=90', to: 'const STRIP_PLUS_ID_MAX_DAYS=100000' }],
+  // a scoped report (filter subquery / id list) on the plain cancelled predicate again: the planner reads every cancelled sale in the window (121 -> 1,989 rows)
+  voidScopedPlain: [{ name: 'm-void-scoped-plain', file: KERNEL, from: '({ plainCancelled: !scope?.narrow })', to: '({ plainCancelled: true })' }],
   stripContinuousPlus: [{ name: 'm-strip-continuous-plus', file: SALES, from: STRIP_NEW, to: "const stripId='+id'" }],
 }
 const urls = (ctx) => {
@@ -65,6 +67,10 @@ const urls = (ctx) => {
     'stats 30d': `/api/sales/stats?${w(29, 0)}`,
     'stats start-only': `/api/sales/stats?startDate=${day(ctx, 10)}`,
     'stats end-only': `/api/sales/stats?endDate=${day(ctx, 10)}`,
+    // narrow scopes (a cashier / branch filter holding a few sales) on a status that goes through the cancelled group: never above the pre-lane route
+    'stats narrow returned cashier': `/api/sales/stats?endDate=${day(ctx, 0)}&status=returned&cashier=Budget`,
+    'stats narrow search returned': `/api/sales/stats?search=Customer%2012&status=returned&branchId=2&cashier=zzzz`,
+    'stats narrow search partial': `/api/sales/stats?search=Customer%2012&status=partial_return&branchId=2&cashier=zzzz`,
     'stats cancelled': `/api/sales/stats?${w(29, 0)}&status=cancelled`,
     'stats completed': `/api/sales/stats?${w(29, 0)}&status=completed`,
     'stats search all-time': '/api/sales/stats?search=Customer%2012',
@@ -72,10 +78,11 @@ const urls = (ctx) => {
 }
 const NAMES = Object.keys(urls({ anchorDate: '2026-01-01' }))
 // 'strip branch' already seeks idx_sales_branch_created (branch + window) in both builds, so it is compared for parity and never-more-rows only
-const REDUCED = ['strip today', 'strip 30d', 'stats all-time']
+const REDUCED = ['strip today', 'strip 30d', 'stats all-time', 'stats completed'] // 'stats completed': a status-only (broad) scope keeps the plain predicate and its saving
 // a continuous window keeps the rowid walk: exactly the oracle's rows, never above (the plus there re-scans the table on every page)
 // dated windows past the plus-id crossover keep the rowid walk: exactly the oracle's rows (the plus there re-scans the window on every page)
 const LONG_DATED = ['strip dated 120d', 'strip dated 180d', 'strip dated 365d']
+const NARROW = ['stats narrow returned cashier', 'stats narrow search returned', 'stats narrow search partial']
 const CONTINUOUS = ['strip continuous 30d', 'strip continuous 120d', 'strip continuous 365d', 'strip continuous today']
 // strip windows holding more than one page, with the independent SQL that counts the same sales (no paging code involved)
 const MULTIPAGE = {
@@ -120,6 +127,7 @@ const statusCounts = (text) => Object.fromEntries(JSON.parse(text).by_status.map
       // 'stats cancelled' reads the same few cancelled rows through either index (a handful of rows apart), so it gets a small allowance; nothing else may read more
       for (const name of NAMES) assert.ok(n[name].rr <= o[name].rr + (name === 'stats cancelled' ? 12 : 0), `${name}: rows ${n[name].rr} > oracle ${o[name].rr}`)
       for (const name of CONTINUOUS) assert.ok(n[name].rr <= o[name].rr, `${name}: a continuous window must keep the rowid walk (${n[name].rr} vs oracle ${o[name].rr})`)
+      for (const name of NARROW) assert.ok(n[name].rr <= o[name].rr, `${name}: a narrow scope must not read more than the pre-lane route (${n[name].rr} vs oracle ${o[name].rr})`)
       for (const name of LONG_DATED) assert.ok(n[name].rr <= o[name].rr, `${name}: a dated window past the crossover must not read more than the pre-lane route (${n[name].rr} vs oracle ${o[name].rr})`)
       for (const name of REDUCED) assert.ok(n[name].rr < o[name].rr * 0.9, `${name}: expected clearly fewer rows (${n[name].rr} vs ${o[name].rr})`)
     })
@@ -158,7 +166,7 @@ const statusCounts = (text) => Object.fromEntries(JSON.parse(text).by_status.map
     try { assert.deepEqual(bodies(res), bodies(base)) } catch { red = true }
     if (!red) for (const name of NAMES) if (res[name].status !== 200) red = true
     if (!red) for (const name of REDUCED) if (res[name].rr > good[name].rr * 1.3) red = true
-    if (!red) for (const name of [...CONTINUOUS, ...LONG_DATED]) if (res[name].rr > good[name].rr * 1.05) red = true
+    if (!red) for (const name of [...CONTINUOUS, ...LONG_DATED, ...NARROW]) if (res[name].rr > good[name].rr * 1.05) red = true
     await step(`required red: ${label} is caught`, () => assert.ok(red, 'the mutant passed the parity and rows checks'))
   }
   await caught('the strip pages on the rowid again', MUTANTS.stripKeepsRowid)
@@ -169,6 +177,7 @@ const statusCounts = (text) => Object.fromEntries(JSON.parse(text).by_status.map
   await caught('the strip pages backwards', MUTANTS.stripPagesBackwards)
   await caught('the strip cursor is >= (every multi-page window refused with 422)', MUTANTS.stripCursorGe)
   await caught('every dated window pages on +id again (a year reads +38% rows)', MUTANTS.stripDatedAlwaysPlus)
+  await caught('a scoped report keeps the plain cancelled predicate (every cancelled sale in the window is read)', MUTANTS.voidScopedPlain)
   await caught('an hours (continuous) window pages on +id again: a full scan per page', MUTANTS.stripContinuousPlus)
 
   // The plan, with and without table statistics (production has them; a fresh database does not).
