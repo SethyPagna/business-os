@@ -252,6 +252,17 @@ const cases: Array<[string, () => Promise<void>]> = [
     await s.click(action(s, 'close'))
     assert.equal(doc.activeElement, elsewhere, 'focus stays where the person put it')
   }],
+  // ---- F (review F6): the header says the status in words (a tooltip does not show on touch); the row itself stays icon-only. ----
+  ['the popover header prints the status word; the row shows no status text', async () => {
+    const s = await mount({ products: [{ id: 901, name: 'Zed', quantity: 5, check_status: 'issue' }, { id: 902, name: 'Yam', quantity: 5, check_status: 'ok' }], lotCounts: false })
+    assert.ok(!/Issue|Checked OK/.test(statusButton(s, 901).textContent), 'the status button holds only its icon')
+    await open(s, 901)
+    assert.equal(flat(inPopover(s, 'data-popover-status-word')[0]), 'Issue', 'the word of the recorded status')
+    await s.click(action(s, 'close'))
+    await s.render({ ...base, products: [{ id: 902, name: 'Yam', quantity: 5, check_status: 'ok' }], lotCounts: false })
+    await open(s, 902)
+    assert.equal(flat(inPopover(s, 'data-popover-status-word')[0]), 'Checked OK')
+  }],
   // ---- D (review F5): each status is pinned to its icon and colour token. An icon swap (OK as a red x, not checked as a clock) goes red. ----
   ['every status wears its own icon and colour: not checked, in check, OK, issue, pending, and the draft ring', async () => {
     const items: InventoryCheckProduct[] = [
