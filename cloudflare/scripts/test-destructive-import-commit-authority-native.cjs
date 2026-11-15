@@ -7,7 +7,10 @@ async function run(revoke) {
   try {
     const grants = { import: true, products: true, 'products:import': true,
       'products:import_replace_all': true, destructive_delete: true, product_cost_edit: true, product_cost_view: true }
-    await h.addUser(920, 'j_executor', grants)
+    // 15 Nov 2026: a products import is a cost format and cost entry is admin only, so the executor starts as an administrator and the
+    // late revocation is a DEMOTION (role removed, destructive grant off) between invocation and the finalizer.
+    const adminRole = await h.q1("SELECT id FROM roles WHERE code='admin'")
+    await h.addUser(920, 'j_executor', grants, { role_id: adminRole.id })
     await h.addSession('executor', 920)
     await executeRawStockTransaction(h.db, [
       h.db.prepare("INSERT INTO products(id,name,barcode,stock_quantity,cost_price_usd,is_active,updated_at) VALUES(9401,'J kept','J-KEPT',0,1,1,'2000-01-01')"),
@@ -37,7 +40,7 @@ async function run(revoke) {
     const hooks = await h.controlGet('hooks/result')
     const omitted = await h.q1('SELECT is_active FROM products WHERE id=9402')
     const job = await h.q1('SELECT status,phase,last_error,policy_json FROM import_jobs WHERE id=?', id)
-    assert.equal(JSON.parse(job.policy_json).apply_authorized_by_id, 920, 'persisted executor must be fixture nonadmin')
+    assert.equal(JSON.parse(job.policy_json).apply_authorized_by_id, 920, 'persisted executor must be the fixture executor')
     const user = await h.q1('SELECT permissions FROM users WHERE id=920')
     const audit = await h.q1("SELECT COUNT(*) AS n FROM audit_logs WHERE entity='product' AND entity_id=9402 AND json_extract(details,'$.source')='replace_all'")
     console.log(JSON.stringify({ phase: 'final', revoke, approved: approved.status,
