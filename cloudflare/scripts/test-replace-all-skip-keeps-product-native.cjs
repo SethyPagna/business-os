@@ -170,7 +170,7 @@ function fixture(world, { stockedOmitted = false, stockedKeeper = false } = {}) 
     raw.prepare(`INSERT INTO import_jobs(id,type,status,phase,policy_json,materialize_done,chunk_cursor,chunk_state_json,started_at)
       VALUES(@id,'products','awaiting_review','awaiting_review',@policy,1,0,'{}',@started)`).run({ id, policy: JSON.stringify(stored), started: STARTED })
     rows.forEach((r, sequence) => {
-      const data = { _rowNumber: r.row, name: r.name, barcode: r.barcode, description: 'from file', ...(r.mode ? { _action: r.mode } : {}) }
+      const data = { _rowNumber: r.row, name: r.name, barcode: r.barcode, description: 'from file', ...(r.category ? { category: r.category } : {}), ...(r.mode ? { _action: r.mode } : {}) }
       raw.prepare('INSERT INTO import_job_source_rows(job_id,sequence,row_number,data_json) VALUES(@id,@sequence,@row,@data)')
         .run({ id, sequence, row: r.row, data: JSON.stringify(data) })
     })
@@ -200,6 +200,10 @@ function add(tag, label, fn) { cases.push({ name: `${tag}/${label}`, tag, fn }) 
 const MATCHED = { row: 2, name: 'Serum', barcode: 'SER-1' }
 const SKIP_A = { row: 3, name: 'Keeper A', barcode: 'KEEP-A' } // skipped by a reviewer decision on row 3
 const SKIP_B_MODE = { row: 4, name: 'Keeper B', barcode: 'KEEP-B', mode: 'skip_row' }
+// The stored row exactly as the writer would leave it for the file's cells, so the guarded UPDATE finds nothing to change.
+function presetAsImported(f, id, normalized) {
+  seedFixture(f.raw, () => f.raw.prepare("UPDATE products SET description='from file',name_normalized=@n,unit_normalized='pcs',brand_compact='',cost_price_usd=NULL,cost_price_khr=NULL WHERE id=@id").run({ id, n: normalized }))
+}
 const SKIP_STOCKED = { row: 3, name: 'Keeper Stocked', barcode: 'KEEP-S' }
 const DECIDE_ROW_3 = { 3: { action: 'skip' } }
 
@@ -238,6 +242,60 @@ add('keeps', 'both-ways-of-skipping-in-one-job', async world => {
   assert.deepEqual([f.active(1), f.active(2), f.active(3), f.active(99)], [1, 1, 1, 0])
   assert.deepEqual(f.deleteAudits(), [99])
   assert.equal(f.summary(id).skippedKept, 2)
+})
+
+// An unchanged matched row is not rewritten (guarded UPDATE), so its updated_at stays
+// older than the job start. Membership must come from the ids the rows name, not from
+// updated_at -- otherwise the product the file lists is deactivated (or refuses the job).
+add('keeps', 'unchanged-matched-row-keeps-its-product-and-is-not-rewritten', async world => {
+  const f = fixture(world)
+  presetAsImported(f, 2, 'keeper a')
+  const UNCHANGED = { row: 3, name: 'Keeper A', barcode: 'KEEP-A' }
+  const id = f.seedJob({ rows: [MATCHED, UNCHANGED] })
+  await f.run(id)
+  assert.match(f.job(id).status, /^completed/, f.job(id).last_error)
+  assert.equal(f.raw.prepare('SELECT updated_at u FROM products WHERE id=2').get().u, OLD, 'the unchanged row really was not rewritten (the premise of the case)')
+  assert.equal(f.active(2), 1, 'an unchanged product the file names stays active')
+  assert.equal(f.active(1), 1, 'the changed one stays active too')
+  assert.deepEqual([f.active(3), f.active(99)], [0, 0], 'products the file never names are still deactivated')
+  assert.deepEqual(f.deleteAudits(), [3, 99])
+  assert.equal(f.summary(id).deactivated, 2)
+})
+
+add('keeps', 'unchanged-matched-row-holding-stock-never-refuses', async world => {
+  const f = fixture(world, { stockedKeeper: true })
+  presetAsImported(f, 4, 'keeper stocked')
+  const id = f.seedJob({ rows: [MATCHED, { row: 3, name: 'Keeper Stocked', barcode: 'KEEP-S' }] })
+  await f.run(id).catch(error => assert.fail('refused although the only stocked product is named by the file: ' + (error.code || error.message)))
+  assert.match(f.job(id).status, /^completed/, `${f.job(id).status}: ${f.job(id).last_error}`)
+  assert.equal(f.active(4), 1)
+  assert.equal(f.stock(4), 5)
+})
+
+// R2-1: a skipped row means "leave this product alone". Group unification is scoped by the
+// UPDATED ids only; the skipped ids still go to the replace-all keep list.
+// Group 'Tint' (ids 11-13, all updated by the file) drifts and must heal; group 'Gloss' (ids 21-23, all
+// skipped, no member updated) drifts too and must stay exactly as it is.
+function seedDriftGroup(f, name, ids, categories) {
+  ids.forEach((id, i) => seedFixture(f.raw, () => f.raw.prepare('INSERT INTO products(id,name,name_normalized,unit_normalized,barcode,category,stock_quantity,is_active,updated_at) VALUES(@id,@name,@norm,@unit,@barcode,@category,0,1,@old)')
+    .run({ id, name, norm: name.toLowerCase(), unit: "pcs", barcode: "88001" + String(id).padStart(4, "0"), category: categories[i], old: OLD })))
+}
+add('keeps', 'skipped-row-in-a-drifted-group-is-not-rewritten-but-updated-group-heals', async world => {
+  const f = fixture(world)
+  seedDriftGroup(f, 'Tint', [11, 12, 13], ['Lips', 'Lips', 'Face'])
+  seedDriftGroup(f, 'Gloss', [21, 22, 23], ['Lips', 'Lips', 'Face'])
+  const tint = [11, 12, 13].map((id, i) => ({ row: 10 + i, name: 'Tint', category: ['Lips', 'Lips', 'Face'][i], barcode: "88001" + String(id).padStart(4, "0") }))
+  const gloss = [21, 22, 23].map((id, i) => ({ row: 20 + i, name: 'Gloss', category: ['Lips', 'Lips', 'Face'][i], barcode: "88001" + String(id).padStart(4, "0") }))
+  const id = f.seedJob({ rows: [MATCHED, ...tint, ...gloss], decisions: Object.fromEntries(gloss.map(r => [r.row, { action: 'skip' }])) })
+  await f.run(id)
+  assert.match(f.job(id).status, /^completed/, f.job(id).last_error)
+  const row = pid => f.raw.prepare('SELECT category c, updated_at u FROM products WHERE id=@pid').get({ pid })
+  assert.deepEqual([21, 22, 23].map(pid => row(pid).c), ['Lips', 'Lips', 'Face'], 'a skipped row keeps its own category')
+  assert.deepEqual([21, 22, 23].map(pid => row(pid).u), [OLD, OLD, OLD], 'a skipped row is not rewritten (updated_at unchanged)')
+  assert.equal(f.raw.prepare("SELECT COUNT(*) n FROM audit_logs WHERE entity='product' AND entity_id IN (21,22,23)").get().n, 0, 'a skipped row leaves no audit row')
+  assert.deepEqual([11, 12, 13].map(pid => row(pid).c), ['Lips', 'Lips', 'Lips'], 'the updated rows group still heals')
+  assert.deepEqual([21, 22, 23, 11, 12, 13].map(pid => f.active(pid)), [1, 1, 1, 1, 1, 1], 'replace-all keeps skipped and updated products alike')
+  assert.equal(f.active(99), 0, 'an unnamed product is still deactivated')
 })
 
 add('keeps', 'two-skipped-rows-on-one-product-count-as-two-skipped-rows', async world => {
@@ -316,17 +374,32 @@ const WRONG = [
   {
     name: 'keeps-nothing', fails: c => c.tag === 'keeps',
     patches: [
-      { name: 'keeps-nothing', file: 'lib/importEngine.ts', apply: text => text.replace(/const skippedProductIds = await readSkippedProductIds\(db, jobId\)/, 'const skippedProductIds: number[] = []') },
+      { name: 'keeps-nothing', file: 'lib/importEngine.ts', apply: text => text.replace(/keepProductIds: namedProducts\.named \}/, 'keepProductIds: [] }') },
       { name: 'keeps-nothing-finalizer', file: 'lib/importEngine.ts', apply: text => text.replace(/const keepIds = JSON\.stringify\(\[[^\n]*\)\]\)/, "const keepIds = '[]'") },
     ],
   },
   {
+    // The round-1 regression: only skipped rows are kept, an unchanged (update) row is judged by updated_at alone.
+    name: 'keeps-skips-only', fails: c => c.name.startsWith('keeps/unchanged-matched-row'),
+    patches: [{ name: 'keeps-skips-only', file: 'lib/importEngine.ts', apply: text => text.replace(/keepProductIds: namedProducts\.named \}/, 'keepProductIds: namedProducts.skipped }') }],
+  },
+  {
+    // R2-1: the full named list (skips included) is handed to group unification.
+    name: 'unify-gets-skips', fails: c => c.name === 'keeps/skipped-row-in-a-drifted-group-is-not-rewritten-but-updated-group-heals',
+    patches: [{ name: 'unify-gets-skips', file: 'lib/importEngine.ts', apply: text => text.replace(/jobRow\.started_at \|\| nowIso, namedProducts\.updated\)/, 'jobRow.started_at || nowIso, namedProducts.named)') }],
+  },
+  {
+    // R2-1: the keep list is narrowed to update ids, so a skipped product would be deactivated.
+    name: 'keeps-updates-only', fails: c => ['keeps/skipped-row-in-a-drifted-group-is-not-rewritten-but-updated-group-heals', 'keeps/reviewer-skip-decision-keeps-the-matched-product', 'keeps/skip-row-mode-keeps-the-matched-product', 'keeps/both-ways-of-skipping-in-one-job', 'keeps/two-skipped-rows-on-one-product-count-as-two-skipped-rows', 'keeps/skipped-product-holding-stock-is-kept-and-never-refuses'].includes(c.name),
+    patches: [{ name: 'keeps-updates-only', file: 'lib/importEngine.ts', apply: text => text.replace(/keepProductIds: namedProducts\.named \}/, 'keepProductIds: namedProducts.updated }') }],
+  },
+  {
     // Every case that asserts an omitted product goes. Not the merge-mode control (nothing goes by design), the one-product count case (asserts no deactivation) or the refusal (throws before the UPDATE).
-    name: 'deactivates-nothing', fails: c => !['control/merge-mode-skip-reports-no-kept-count', 'keeps/two-skipped-rows-on-one-product-count-as-two-skipped-rows'].includes(c.name) && c.tag !== 'refuses',
+    name: 'deactivates-nothing', fails: c => !['control/merge-mode-skip-reports-no-kept-count', 'keeps/two-skipped-rows-on-one-product-count-as-two-skipped-rows', 'keeps/unchanged-matched-row-holding-stock-never-refuses'].includes(c.name) && c.tag !== 'refuses',
     patches: [{ name: 'deactivates-nothing', file: 'lib/importEngine.ts', apply: text => text.replace(/WHERE is_active=1 AND \(updated_at IS NULL OR updated_at < @cutoff\) AND id NOT IN/, 'WHERE is_active=2 AND (updated_at IS NULL OR updated_at < @cutoff) AND id NOT IN') }],
   },
   {
-    name: 'guard-ignores-keep', fails: c => c.name === 'keeps/skipped-product-holding-stock-is-kept-and-never-refuses',
+    name: 'guard-ignores-keep', fails: c => ['keeps/skipped-product-holding-stock-is-kept-and-never-refuses', 'keeps/unchanged-matched-row-holding-stock-never-refuses'].includes(c.name),
     patches: [{ name: 'guard-ignores-keep', file: 'lib/importEngine.ts', apply: text => text.replace(/SELECT 1 FROM products p WHERE \$\{candidates\} AND \$\{productHasStockSql\(\)\}/, 'SELECT 1 FROM products p WHERE p.is_active=1 AND (p.updated_at IS NULL OR p.updated_at < @cutoff) AND ${productHasStockSql()}') }],
   },
 ]

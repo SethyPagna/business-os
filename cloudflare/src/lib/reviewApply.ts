@@ -23,7 +23,7 @@ import { getDb } from './db'
 import { ordinaryBusinessMaintenanceGuard } from './businessMaintenanceGuard'
 import { audit, buildAuditStatement, changedFields } from './audit'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { bumpVersion } from './cache'
+import { bumpVersion, bumpVersions } from './cache'
 import { createProductWithInitialStock, productCreateDestination, updateRow, syncProductImageGallery, readProductMoneyPlan, foldBarcodeInput, PRODUCT_MONEY_VERSION, PRODUCT_SKIP_KEYS, IMAGE_ONLY_METADATA_KEYS } from './productWrites'
 import { foldCreateIntoExisting, foldCreateWithStockInWrite, type FoldDuplicate } from './createFold'
 import type { RedirectTarget } from './branchRedirectWrite'
@@ -79,6 +79,23 @@ async function notify(env: Env, waitUntil: ReviewWaitUntil | undefined, channel:
   if (waitUntil) waitUntil(sent)
   else await sent
 }
+
+// Which fee rows the cached sales snapshot reads: a delivery-type row or a row with a delivery contact (see lib/feeSalesImpact.ts for the proof).
+// This block is a BYTE-IDENTICAL copy of lib/feeSalesImpact.ts, kept inline so the many tests that load this module with a hand-built require map need no new
+// stub; test-fee-sales-impact-pure.cjs fails if the copies drift.
+// feeSalesImpact:begin
+export type FeeSnapshotShape = { fee_type?: unknown; delivery_contact_id?: unknown } | null | undefined
+
+export function feeAffectsSalesSnapshot(fee: FeeSnapshotShape): boolean {
+  if (!fee) return false
+  if ((fee.fee_type ?? '') === 'delivery') return true
+  return fee.delivery_contact_id != null && fee.delivery_contact_id !== ''
+}
+
+export function feeWriteNeedsSalesBump(before: FeeSnapshotShape, after: FeeSnapshotShape): boolean {
+  return feeAffectsSalesSnapshot(before) || feeAffectsSalesSnapshot(after)
+}
+// feeSalesImpact:end
 
 const appliers = new Map<string, Applier>()
 
@@ -276,6 +293,9 @@ registerApplier('fees', 'delete', 'fee', async (env, row, reviewer, waitUntil) =
     if (!current || (current.updated_at ?? null) !== version) throw new FeeReviewStaleError()
     throw error
   }
+  // The delete is committed (and guarded to be exactly the version read). The cached sales snapshot (stats strip) reads delivery fee rows, so removing
+  // one moves the sales version: awaited here, before the broadcast, so a peer that refetches on the push keys on the new version (as the direct DELETE does).
+  if (feeAffectsSalesSnapshot(existing)) await bumpVersions(env, ['sales'])
   await notify(env, waitUntil, 'fees', { type: 'deleted', id })
   return { pendingActionMarkedAtomically: true }
 })

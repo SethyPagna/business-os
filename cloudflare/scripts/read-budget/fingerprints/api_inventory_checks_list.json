@@ -5,12 +5,8 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "6ca123f8ecd4",
-   "WITH latest AS ( SELECT i.product_id AS product_id, i.state AS state, ROW_NUMBER() OVER (PARTITION BY i.produc"
+   "fbeb953773e0",
+   "WITH latest AS ( SELECT i.product_id AS product_id, i.state AS state, i.updated_at AS updated_at, ROW_NUMBER()"
   ],
   [
    "e7fc997dccb2",
@@ -25,8 +21,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "15abfa0998e4",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "78e4f83f41e3",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "07831119a65e",
@@ -71,8 +67,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "15abfa0998e4",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "78e4f83f41e3",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "07831119a65e",
@@ -105,12 +101,8 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "6ca123f8ecd4",
-   "WITH latest AS ( SELECT i.product_id AS product_id, i.state AS state, ROW_NUMBER() OVER (PARTITION BY i.produc"
+   "fbeb953773e0",
+   "WITH latest AS ( SELECT i.product_id AS product_id, i.state AS state, i.updated_at AS updated_at, ROW_NUMBER()"
   ],
   [
    "e7fc997dccb2",
@@ -125,8 +117,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "b06bd9fa312b",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "8a7d205cec97",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ]
  ],
  "inventory-checks-list-wired-not-checked": [
@@ -135,12 +127,8 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "6ca123f8ecd4",
-   "WITH latest AS ( SELECT i.product_id AS product_id, i.state AS state, ROW_NUMBER() OVER (PARTITION BY i.produc"
+   "fbeb953773e0",
+   "WITH latest AS ( SELECT i.product_id AS product_id, i.state AS state, i.updated_at AS updated_at, ROW_NUMBER()"
   ],
   [
    "e7fc997dccb2",
@@ -155,8 +143,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "f55a96524012",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "6c5fd3e1ac3d",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "07831119a65e",
@@ -189,20 +177,12 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
+   "fbeb953773e0",
+   "WITH latest AS ( SELECT i.product_id AS product_id, i.state AS state, i.updated_at AS updated_at, ROW_NUMBER()"
   ],
   [
-   "6ca123f8ecd4",
-   "WITH latest AS ( SELECT i.product_id AS product_id, i.state AS state, ROW_NUMBER() OVER (PARTITION BY i.produc"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
+   "5f13c00d023d",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
   ],
   [
    "5ade221b0a2e",
@@ -213,8 +193,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "cecd3bf457e3",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "d63257d5fc54",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "07831119a65e",
@@ -247,20 +227,12 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
+   "fbeb953773e0",
+   "WITH latest AS ( SELECT i.product_id AS product_id, i.state AS state, i.updated_at AS updated_at, ROW_NUMBER()"
   ],
   [
-   "6ca123f8ecd4",
-   "WITH latest AS ( SELECT i.product_id AS product_id, i.state AS state, ROW_NUMBER() OVER (PARTITION BY i.produc"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
+   "5f13c00d023d",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
   ],
   [
    "5ade221b0a2e",
@@ -271,8 +243,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "1867417a0385",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "15ce78d5a5e9",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "6e7f527bc73c",
@@ -283,7 +255,7 @@
    "SELECT MIN(CASE WHEN datetime(starts_at) > datetime(?1) THEN datetime(starts_at) END) AS starts, MIN(CASE WHEN"
   ],
   [
-   "69a12eaa01d0",
+   "0dc6cd32dca2",
    "WITH page_families AS MATERIALIZED (SELECT value AS family_root_id, key AS family_pos FROM json_each(?1)), pag"
   ],
   [
@@ -317,20 +289,12 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
+   "fbeb953773e0",
+   "WITH latest AS ( SELECT i.product_id AS product_id, i.state AS state, i.updated_at AS updated_at, ROW_NUMBER()"
   ],
   [
-   "6ca123f8ecd4",
-   "WITH latest AS ( SELECT i.product_id AS product_id, i.state AS state, ROW_NUMBER() OVER (PARTITION BY i.produc"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
+   "5f13c00d023d",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
   ],
   [
    "5ade221b0a2e",
@@ -341,8 +305,8 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "5129900d5d06",
-   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+   "3126714bbb26",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [
    "6e7f527bc73c",
@@ -353,7 +317,7 @@
    "SELECT MIN(CASE WHEN datetime(starts_at) > datetime(?1) THEN datetime(starts_at) END) AS starts, MIN(CASE WHEN"
   ],
   [
-   "5f544ee04f7e",
+   "8e5e71a244d6",
    "WITH page_families AS MATERIALIZED (SELECT value AS family_root_id, key AS family_pos FROM json_each(?1)), pag"
   ],
   [

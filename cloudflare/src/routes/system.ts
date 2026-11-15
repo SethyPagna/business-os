@@ -793,9 +793,9 @@ app.post('/reset-section', async (c) => {
 
     await rotateEpochAfterReset(c.env, 'reset-section')
     if (config.broadcastChannel) {
+      // The version namespace is the section key (the table name every reader keys on), NOT the broadcast channel's spelling ('deliveryContacts'). Awaited before the push.
+      await bumpVersion(c.env, section)
       c.executionCtx.waitUntil(broadcast(c.env, config.broadcastChannel, { action: 'reset', section }))
-      // The version namespace is the section key (the table name every reader keys on), NOT the broadcast channel's spelling ('deliveryContacts').
-      c.executionCtx.waitUntil(bumpVersion(c.env, section))
     }
 
     return c.json({
@@ -1019,7 +1019,7 @@ app.post('/sale-not-paid-stock-recovery-20260909/apply', async (c) => {
     // W3 Slice A round 2 (F2): the bump (stock too, this moves stock) is awaited BEFORE the response, and the broadcasts follow it in waitUntil,
     // so a peer is never told while the old version is still current. bumpVersions never rejects, so "did it work" is read from the version
     // tokens themselves, before and after (as lib/generalCustomerRepair.ts does).
-    const cacheNamespaces = ['sales', 'products', 'stock', 'audit_log']
+    const cacheNamespaces = ['sales', 'products', 'stock']
     const readTokens = async () => { try { return await getVersionsWithFallback(c.env, cacheNamespaces) } catch { return null } }
     const tokensBefore = await readTokens()
     await bumpVersions(c.env, cacheNamespaces)
@@ -1186,10 +1186,8 @@ app.post('/finalize-migration', async (c) => {
       const result = await repair.applyLegacySubtotalRepair(db, plan)
       // A verified replay also heals a lost post-commit refresh. This repair
       // changes sales only; do not invalidate inventory or announce stock work.
-      c.executionCtx.waitUntil(Promise.all([
-        bumpVersion(c.env, 'sales'),
-        broadcast(c.env, 'sales', { action: 'update', repair: LEGACY_SUBTOTAL_REPAIR_STEP }),
-      ]))
+      await bumpVersion(c.env, 'sales')
+      c.executionCtx.waitUntil(broadcast(c.env, 'sales', { action: 'update', repair: LEGACY_SUBTOTAL_REPAIR_STEP }))
       return c.json({
         success: true,
         outcome: result.outcome,

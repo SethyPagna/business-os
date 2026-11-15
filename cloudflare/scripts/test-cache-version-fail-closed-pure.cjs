@@ -28,7 +28,8 @@ const db = {
       },
       async all(params) {
         if (state.d1 === 'throws') throw new Error('D1 unavailable')
-        return JSON.parse(params.namespaces).filter((namespace) => state.rows.has(namespace)).map((namespace) => ({ namespace, version: state.rows.get(namespace) }))
+        // The version read binds one positional placeholder per distinct namespace (no json_each: D1 meters its rows).
+        return params.filter((namespace) => state.rows.has(namespace)).map((namespace) => ({ namespace, version: state.rows.get(namespace) }))
       },
     }
   },
