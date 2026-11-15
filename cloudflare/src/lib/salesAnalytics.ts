@@ -942,7 +942,7 @@ const REPORT_SCOPE_NARROW = new WeakSet<SalesReportScalarScope>()
 // Measured on the lab seed, a typed search resolved to N ids, rows read narrow vs broad, three shapes (search over a window of D days, the same with a cashier, an all-time receipt/name search; 95 points).
 // The narrow saving is the cancelled sales of the window (about 5 rows a day, both passes); each id costs narrow about 3.7 rows, so the crossover is about 1.4 x D ids: 2 ids in a day or three,
 // 40 in 30 days, 500 all time. One limit cannot be the crossover of all of them. Both forms read far below the pre-lane route everywhere measured (it is the choice between two cheaper forms), so the limit is
-// the one that keeps the loss against the better form under 2% on every shape: 10 (a short window with 10 ids reads about 2% more narrow; an all-time search with 11 to 500 ids reads at most 0.8% more broad).
+// the one that keeps the loss against the better form under 1.5% on every shape (worst seen: +1.3%, 2 ids over 30 days narrow, one point of 95): 10 (3 to 10 ids in a short window: -0.6% to +0.8% narrow; an all-time search with 11 to 500 ids reads at most 0.8% more broad; 11 to 13 ids in one day would read 3-5% more narrow).
 export const REPORT_NARROW_SCOPE_IDS_MAX = 10
 
 type ReportScopeProvenance = {
