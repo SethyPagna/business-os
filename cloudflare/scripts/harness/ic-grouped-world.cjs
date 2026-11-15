@@ -3,11 +3,27 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const { DatabaseSync } = require('node:sqlite')
-const { buildSync } = require('esbuild')
+const { buildSync, build } = require('esbuild')
 const { loadAll } = require('./load_migrations.cjs')
 
 const bundle = file => {
   const code = buildSync({ entryPoints: [path.join(__dirname, '../../src/lib', file)], bundle: true, platform: 'node', format: 'cjs', write: false, target: 'es2022', external: ['cloudflare:*'] }).outputFiles[0].text
+  const loaded = { exports: {} }
+  new Function('require', 'module', 'exports', code)(require, loaded, loaded.exports)
+  return loaded.exports
+}
+// A copy of the library with source edits (a planted defect): edits maps a file name under src/lib to [from, to] pairs, each of which must match exactly once.
+const bundleMutated = async (file, edits) => {
+  const plugin = { name: 'mutate', setup(build) {
+    build.onLoad({ filter: /.ts$/ }, args => {
+      const name = path.basename(args.path)
+      const text = fs.readFileSync(args.path, 'utf8').split('\r\n').join('\n')
+      if (!edits[name]) return { contents: text, loader: 'ts' }
+      let out = text
+      for (const [from, to] of edits[name]) { if (out.split(from).length !== 2) throw new Error(`mutant edit must match once in ${name}: ${from.slice(0, 60)}`); out = out.replace(from, () => to) }
+      return { contents: out, loader: 'ts' }
+    }) } }
+  const code = (await build({ entryPoints: [path.join(__dirname, '../../src/lib', file)], bundle: true, platform: 'node', format: 'cjs', write: false, target: 'es2022', external: ['cloudflare:*'], plugins: [plugin], logLevel: 'error' })).outputFiles[0].text
   const loaded = { exports: {} }
   new Function('require', 'module', 'exports', code)(require, loaded, loaded.exports)
   return loaded.exports
@@ -45,6 +61,8 @@ function buildWorld(seed, { branches = 2 } = {}) {
     add.run(id, `Header ${h}`, 0, null, 1, 'B', 'B', null, null, 'pcs', 1); const header = id++
     for (let c = 0, n = 2 + rnd(2); c < n; c++) leaf(`Child ${h}-${c}`, header)
   }
+  // Blank names tie on the empty family name; ids 998-1000 make the key order ('id:1000' < 'id:998') differ from the scan order.
+  id = 998
   for (let b = 0; b < 3; b++) leaf('  ', null)
   leaf('Inactive empty', null, 0, 0)
   // Sessions: organizations 1, 2 and NULL, branches 1 and 2, open and closed.
@@ -76,4 +94,4 @@ const adapter = db => ({ calls: 0, sql: [], async batch(statements) {
     db.exec('COMMIT'); return results
   } catch (error) { db.exec('ROLLBACK'); throw error } finally { db.exec('PRAGMA query_only=OFF') }
 } })
-module.exports = { bundle, buildWorld, adapter, lcg }
+module.exports = { bundle, bundleMutated, buildWorld, adapter, lcg }

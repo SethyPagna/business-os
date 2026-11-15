@@ -2,6 +2,7 @@ import type { BindParams, D1Compat } from './db'
 import { getInventoryCheckAccess, InventoryCheckQueryError, projectInventoryCheckProduct, validateInventoryCheckQuery, type InventoryCheckAccess } from './inventoryCheckAccess'
 import { buildInventoryCheckStockQuery, readInventoryCheckStock } from './inventoryCheckStock'
 import { FAMILY_ROOT_KEY_SQL, paginateProductFamilies } from './familyPagination'
+import { buildGroupingBlock, groupingPlan, isInventoryCheckGrouping } from './inventoryCheckGrouping'
 import { buildProductSalesLedgerSql } from './productSalesLedger'
 import { identifiedCustomerExpr, recognizedExpr } from './salesAnalytics'
 import { continuousReadWindowSql, parseContinuousReadWindow } from './continuousReadWindow'
@@ -402,9 +403,13 @@ export async function readInventoryCheckProductsSimple(db: Pick<D1Compat, 'batch
   const plan = population(rawQuery, access, options.lowStock, undefined, undefined, false, { organizationId: check.organizationId, sessionId: check.sessionId })
   const direction = plan.query.sortDirection === 'desc' ? 'DESC' : 'ASC'
   const byStock = (plan.query.sortBy || 'name') === 'stock'
+  const inSession = !!check.sessionId
+  // groupBy (validated: never with a sort): the grouping defines the order, and the paginator returns each page family's group with the group's whole-scope totals.
+  const by = isInventoryCheckGrouping(plan.query.groupBy) ? plan.query.groupBy : undefined
+  if (by && inSession) invalid('groupBy')
+  const grouped = by ? groupingPlan(by, plan.branchId !== undefined) : undefined
   const familyOrder = (name: string, number: string) => byStock ? `(${number} IS NULL) ASC,${number} ${direction},${name} ASC` : `${name} ${direction}`
   const rankWithStock = plan.stockFiltered || byStock
-  const inSession = !!check.sessionId
   const wantFacets = plan.query.summary !== '0'
   const wantCounts = wantFacets && !inSession
   // A session's rows show the stock Products shows: the branch's units plus its held units, read plainly for the page rows. The stock-verification ledger (every lot, the cache, the diagnostics) is not built for
@@ -436,7 +441,7 @@ export async function readInventoryCheckProductsSimple(db: Pick<D1Compat, 'batch
         SELECT __page.*${pageStock ? `,${stockColumnsSql('stock', PAGE_STOCK_PREFIX)}` : plainSessionStock ? ',stock.ordinary+stock.held AS __quantity,stock.held AS recorded_damaged_quantity' : ''}${showNextExpiry ? `,${NEXT_EXPIRY_SQL} AS next_expiry_date` : ''}${access.fields.received ? ',(SELECT MAX(received_at) FROM product_batches rb WHERE rb.variant_product_id=__page.id) AS latest_received_at' : ''}${inSession ? '' : `,${PAGE_CHECK_COLUMNS}`}
         FROM __page${pageStock || plainSessionStock ? ' LEFT JOIN stock ON stock.product_id=__page.id' : ''}${inSession ? '' : ' LEFT JOIN latest ON latest.product_id=__page.id'}
         WINDOW family AS (PARTITION BY __page.__family_root_id)
-        ORDER BY ${familyOrder('MIN(__page.__family_name) OVER family', 'MAX(__page.__family_num) OVER family')},__page.__family_root_id ASC,__page.id ASC`
+        ORDER BY ${grouped ? grouped.pageOrder('MIN(__page.__family_name) OVER family', by === 'checked' ? 'MAX(__page.__family_num) OVER family' : 'MIN(__page.__family_sort) OVER family') : familyOrder('MIN(__page.__family_name) OVER family', 'MAX(__page.__family_num) OVER family')},__page.__family_root_id ASC,__page.id ASC`
       const result = await schemaBatch(db, [statements[0], { ...statements[1], sql: wrappedPageSql }, { sql: branchesSql, params: { branchId: plan.branchId ?? null } },
         ...wantFacets ? [{ sql: summarySql, params: plan.params }] : []])
       branchRow = (result[2].results?.[0] || {}) as Record<string, unknown>
@@ -447,13 +452,14 @@ export async function readInventoryCheckProductsSimple(db: Pick<D1Compat, 'batch
       return result.slice(0, 2)
     } } as D1Compat,
     // Ranking by name needs no stock: rank stock-free and read stock for the page rows only. A stock sort or stock filter ranks over every row's stock.
-    rankCteSql: rankWithStock ? `${plan.ctes(true)}, product_metrics AS (SELECT * FROM cohort),
+    rankCteSql: rankWithStock ? `${plan.ctes(true)}, product_metrics AS ${grouped?.materialized ? 'MATERIALIZED ' : ''}(${grouped ? grouped.productMetricsSql : 'SELECT * FROM cohort'}),
       family_metrics AS (SELECT c.family_key,CASE WHEN COUNT(c.__quantity)=COUNT(*) THEN SUM(c.__quantity) END AS stock_quantity FROM cohort c GROUP BY c.family_key)`
-      : `${plan.ctes(false)}, product_metrics AS (SELECT * FROM cohort), family_metrics AS (SELECT DISTINCT family_key FROM cohort)`,
+      : `${plan.ctes(false)}, product_metrics AS ${grouped?.materialized ? 'MATERIALIZED ' : ''}(${grouped ? grouped.productMetricsSql : 'SELECT * FROM cohort'}), family_metrics AS (SELECT DISTINCT family_key FROM cohort)`,
     selectColumns: 'c.*', joinSql: 'JOIN product_metrics c ON c.id=p.id JOIN family_metrics f ON f.family_key=c.family_key', whereSql: 'WHERE 1=1',
     params: plan.params, page: plan.page, pageSize: plan.pageSize,
-    familyOrderSql: familyOrder('family_name', 'family_num_sort'),
-    familyNumericSortSql: byStock ? 'f.stock_quantity' : undefined, intraFamilyOrderSql: 'id ASC',
+    familyOrderSql: grouped ? grouped.rankingOrder : familyOrder('family_name', 'family_num_sort'),
+    familyNumericSortSql: grouped ? grouped.familyNumericSortSql : byStock ? 'f.stock_quantity' : undefined, intraFamilyOrderSql: 'id ASC',
+    ...(grouped ? { familySortValueSql: grouped.familySortValueSql, familyGroupSql: grouped.familyGroupSql } : {}),
   })
   if (plan.branchId && Number(branchRow.selected_branch_exists) !== 1) invalid('branchId')
   if (paged.items.length > 500) throw new InventoryCheckProductsLimitError()
@@ -462,7 +468,7 @@ export async function readInventoryCheckProductsSimple(db: Pick<D1Compat, 'batch
   for (const row of paged.items) {
     if (row.__header) {
       const header = JSON.parse(String(row.__header)) as Record<string, unknown>
-      if (!headers.has(Number(header.id))) { headers.add(Number(header.id)); items.push({ ...projectInventoryCheckProduct(header, access, true), checkable: false, matches_filters: false }) }
+      if (!headers.has(Number(header.id))) { headers.add(Number(header.id)); items.push({ ...projectInventoryCheckProduct(header, access, true), checkable: false, matches_filters: false, ...by ? { group_key: row.group_key } : {} }) }
     }
     const flags = ['invalid_quantity', 'negative_quantity', 'lot_exceeds_ordinary', 'cache_mismatch', 'invalid_allocation', 'unallocated_damaged', 'missing_branch_allocation'].filter(key => Number(row[key]) > 0)
     const byId = row.__check_by_id == null ? null : Number(row.__check_by_id)
@@ -475,7 +481,7 @@ export async function readInventoryCheckProductsSimple(db: Pick<D1Compat, 'batch
       damaged_quantity: row.recorded_damaged_quantity, ...inSession ? {} : { stock_consistent: Number(row.stock_consistent) === 1, stock_diagnostics: flags.join(',') } }, access, true)
     // The cohort carries these as NULL placeholders; a session row must not announce a verification it did not run.
     if (inSession) for (const key of VERIFICATION_KEYS) delete projected[key]
-    items.push({ ...projected, checkable: true, matches_filters: true })
+    items.push({ ...projected, checkable: true, matches_filters: true, ...by ? { group_key: row.group_key } : {} })
     if (access.fields.stock && !inSession) diagnostics.push({ product_id: row.id, stock_diagnostics: flags.join(',') })
   }
   if (items.length > 500) throw new InventoryCheckProductsLimitError()
@@ -484,7 +490,9 @@ export async function readInventoryCheckProductsSimple(db: Pick<D1Compat, 'batch
   const checkCounts = wantCounts ? { in_check: known('in_check'), ok: known('ok'), issue: known('issue') } : null
   const facetValues = (column: string) => JSON.parse(String(summary[column] || '[]')) as string[]
   const brands = access.fields.brand ? facetValues('brand_facets') : [], categories = access.fields.category ? facetValues('category_facets') : []
-  return { ...paged, items, simple: true, branches: JSON.parse(String(branchRow.branches || '[]')) as Array<{ id: number; name: string }>,
+  const grouping = by ? buildGroupingBlock(by, paged.groups ?? [], items, (plan.page - 1) * plan.pageSize, plan.pageSize) : undefined
+  const { groups: _groups, ...pagedRest } = paged
+  return { ...pagedRest, items, simple: true, ...(grouping ? { grouping } : {}), branches: JSON.parse(String(branchRow.branches || '[]')) as Array<{ id: number; name: string }>,
     ...(checkCounts ? { summary: { ...checkCounts, not_checked: Math.max(0, total - checkCounts.in_check - checkCounts.ok - checkCounts.issue), total } } : {}),
     ...(wantFacets ? { facets: { ...(access.fields.brand ? { brands: brands.slice(0, 200) } : {}), ...(access.fields.category ? { categories: categories.slice(0, 200) } : {}) },
       facetsLimited: { brands: brands.length > 200, categories: categories.length > 200 } } : {}),

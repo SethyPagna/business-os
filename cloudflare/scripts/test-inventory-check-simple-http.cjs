@@ -383,6 +383,45 @@ async function main() {
     }
   })
 
+  await check('grouped list (groupBy): the response shape, capability, refusals, the switch-off path and zero writes', async () => {
+    reset(); setSwitch(ON)
+    const before = JSON.stringify([physical(), metadata()])
+    const plain = await products('branchId=1')
+    assert.equal(plain.status, 200)
+    assert.equal(plain.body.grouping, undefined, 'no groupBy: no grouping block'); assert.ok(plain.body.items.every(item => !('group_key' in item)), 'no groupBy: no group_key')
+    assert.deepEqual(plain.body.capabilities.groupings, ['checked', 'category'], 'the capability is advertised to a viewer with the category field')
+    const grouped = await products('branchId=1&groupBy=checked')
+    assert.equal(grouped.status, 200); assert.match(grouped.cache, /no-store/)
+    // 910001 and 910002 were checked at 2026-10-20T01:00Z (UTC+7: 20 Oct), 910005 and 910006 on 5 Oct (the legacy count); the other 21 products were never checked (910003 only has an unstarted line).
+    assert.equal(grouped.body.total, 25)
+    assert.deepEqual(grouped.body.items.map(item => item.group_key), [...Array(2).fill('d:2026-10-20'), ...Array(2).fill('d:2026-10-05'), ...Array(16).fill('never')])
+    assert.deepEqual(grouped.body.grouping, { by: 'checked', unit: 'family', groups: [
+      { key: 'd:2026-10-20', label: null, families: 2, products: 2, continued_before: false, continues_after: false },
+      { key: 'd:2026-10-05', label: null, families: 2, products: 2, continued_before: false, continues_after: false },
+      { key: 'never', label: null, families: 21, products: 21, continued_before: false, continues_after: true }] })
+    const second = await products('branchId=1&groupBy=checked&page=2&summary=0')
+    assert.deepEqual(second.body.grouping.groups, [{ key: 'never', label: null, families: 21, products: 21, continued_before: true, continues_after: false }], 'page 2: the same totals, continued')
+    assert.equal(grouped.body.summary.total, 25)
+    const category = await products('branchId=1&groupBy=category&pageSize=100')
+    assert.equal(category.status, 200)
+    assert.deepEqual(category.body.grouping, { by: 'category', unit: 'family', groups: [{ key: 'c:category', label: 'Category', families: 25, products: 25, continued_before: false, continues_after: false }] })
+    assert.ok(category.body.items.every(item => item.group_key === 'c:category'))
+    // A viewer without the category field: checked only, category refused with the field-hidden code.
+    const blind = await products('groupBy=checked', BLIND)
+    assert.equal(blind.status, 200); assert.deepEqual(blind.body.capabilities.groupings, ['checked'])
+    const hidden = await products('groupBy=category', BLIND)
+    assert.equal(hidden.status, 403); assert.equal(hidden.body.code, 'inventory_check_field_hidden'); assert.equal(hidden.body.parameter, 'groupBy')
+    await refused('groupBy=checked&sortBy=name', 'sortBy'); await refused('groupBy=checked&sortDirection=desc', 'sortDirection'); await refused('groupBy=brand', 'groupBy')
+    await refused('groupBy=checked&sessionId=own', 'groupBy')
+    const inSession = await products('sessionId=own')
+    assert.equal(inSession.status, 200); assert.equal(inSession.body.capabilities?.groupings, undefined, 'a session list advertises no grouping')
+    // Switch off: the old validator refuses the key.
+    setSwitch('off')
+    await refused('groupBy=checked', 'groupBy')
+    setSwitch(ON)
+    assert.equal(JSON.stringify([physical(), metadata()]), before, 'readers never write')
+  })
+
   console.log(`${groups} groups passed`)
 }
 main().catch(error => { console.error(error); process.exit(1) })

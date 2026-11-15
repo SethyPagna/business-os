@@ -34,23 +34,22 @@ export const BUSINESS_DAY_SHIFT = '+7 hours'
 
 const CATEGORY_KEY_SQL = "NULLIF(lower(trim(COALESCE(c.category,''))),'')"
 
-/** What the paginator needs for a grouping: the per-row sort expression, the group key over the `families` columns, and the order, spelled for the ranking and for the page wrapper. */
+/** What the paginator needs for a grouping: the per-row sort expression, the group key over the `families` columns, and the order, spelled for the ranking (over `families`) and for the page wrapper (over window aggregates). */
 export function groupingPlan(by: InventoryCheckGrouping, branchScoped: boolean) {
   if (by === 'checked') {
     return {
-      familyNumericSortSql: 'c.__last_check', familySortValueSql: undefined as string | undefined,
-      productMetricsSql: `SELECT c.*,${lastCheckedSql('c.id', branchScoped)} AS __last_check FROM cohort c`,
+      // The lookup rides on the paginator's per-row sort expression, so the COUNT statement (which drops it) never runs it.
+      familyNumericSortSql: lastCheckedSql('p.id', branchScoped), familySortValueSql: undefined as string | undefined, materialized: false,
+      productMetricsSql: 'SELECT * FROM cohort',
       familyGroupSql: { keySql: `CASE WHEN family_num_sort IS NULL THEN 'never' ELSE 'd:'||date(family_num_sort,'${BUSINESS_DAY_SHIFT}') END` },
-      familyOrder: (name: string, numeric: string) => `(${numeric} IS NULL) ASC,${numeric} DESC,${name} ASC`,
       rankingOrder: '(family_num_sort IS NULL) ASC,family_num_sort DESC,family_name ASC',
       pageOrder: (name: string, numeric: string) => `(${numeric} IS NULL) ASC,${numeric} DESC,${name} ASC`,
     }
   }
   return {
-    familyNumericSortSql: undefined as string | undefined, familySortValueSql: CATEGORY_KEY_SQL,
+    familyNumericSortSql: undefined as string | undefined, familySortValueSql: CATEGORY_KEY_SQL, materialized: false,
     productMetricsSql: 'SELECT * FROM cohort',
     familyGroupSql: { keySql: "CASE WHEN family_sort_value IS NULL THEN 'none' ELSE 'c:'||family_sort_value END" },
-    familyOrder: (name: string, sort: string) => `(${sort} IS NULL) ASC,${sort} ASC,${name} ASC`,
     rankingOrder: '(family_sort_value IS NULL) ASC,family_sort_value ASC,family_name ASC',
     pageOrder: (name: string, sort: string) => `(${sort} IS NULL) ASC,${sort} ASC,${name} ASC`,
   }
@@ -76,7 +75,7 @@ export const checkedGroupKeyOf = (at: string | null): string => {
 
 /**
  * The response block of a page. `groups` are the paginator's whole-scope totals for the groups present on the page, in page order; `offset` and `pageSize` give the continuation flags.
- * A category group's label is the trimmed category of the first row on the page that has the group's key; a date group and the two tail groups carry no label (the client formats them).
+ * A category group's label is the trimmed category of the first row on the page whose own category has the group's key; a date group and the two tail groups carry no label (the client formats them).
  */
 export function buildGroupingBlock(by: InventoryCheckGrouping, groups: readonly FamilyGroupTotals[], rows: ReadonlyArray<Record<string, unknown>>, offset: number, pageSize: number): GroupingBlock {
   return {
@@ -84,7 +83,7 @@ export function buildGroupingBlock(by: InventoryCheckGrouping, groups: readonly 
     groups: groups.map((group) => {
       let label: string | null = null
       if (by === 'category' && group.key !== 'none') {
-        const row = rows.find((candidate) => candidate.group_key === group.key && candidate.checkable !== false)
+        const row = rows.find((candidate) => candidate.checkable !== false && candidate.group_key === group.key && `c:${categoryKeyOf(candidate.category)}` === group.key)
         label = row && typeof row.category === 'string' ? row.category.replace(/^ +| +$/g, '') : null
       }
       return { key: group.key, label, families: group.families, products: group.products, continued_before: group.first < offset + 1, continues_after: group.last > offset + pageSize }

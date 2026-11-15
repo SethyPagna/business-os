@@ -220,6 +220,7 @@ function narrowRead<T extends { candidateSql?: string; familyMemberBaseWhereSql?
 }
 
 function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSql' | 'whereSql' | 'matchRankSql' | 'rankCteSql' | 'matchTierSql' | 'familyMemberBaseWhereSql' | 'promotedRankSql' | 'familySortValueSql' | 'familyNumericSortSql' | 'candidateSql' | 'familyGroupSql'> & { inlineFamilies?: boolean; drivenByListParam?: string; narrow?: boolean }) {
+  // A grouped read with a per-row sort expression computes it once per row: the page statement reads `matched` twice and would otherwise evaluate the expression for each read.
   const matchRankSelect = opts.matchRankSql ? `, (${opts.matchRankSql}) AS __match_rank` : ''
   // __fts_rank is productSearchQuery's FTS_RANK_CTE_NAME (not imported: keeps
   // this helper dependency-free). When matchRankSql reads its rank column,
@@ -276,7 +277,7 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
   }
   return `
     WITH ${opts.rankCteSql ? `${opts.rankCteSql},` : ''}
-    matched AS ${rankJoin && !opts.narrow ? 'MATERIALIZED ' : ''}(
+    matched AS ${(rankJoin && !opts.narrow) || (opts.familyGroupSql && opts.familyNumericSortSql) ? 'MATERIALIZED ' : ''}(
       SELECT ${opts.narrow ? '' : `${opts.selectColumns},
              `}${FAMILY_ROOT_KEY_SQL} AS __family_root_id,
              lower(trim(COALESCE(parent.name, p.name))) AS __family_name,
@@ -339,18 +340,21 @@ function buildSeekPageSql(opts: FamilyPaginationOptions, familyOrderSql: string,
     : whereSql.replace(/^\s*WHERE\s+/i, '') || '1 = 1'
   const rowsJoins = familyMemberBaseWhereSql ? joinSql : `${joinSql}
       ${rankJoin}`
+  // Grouped: the family ranks first (a nested select), then the group windows run over every family, and only then the page is cut.
+  const groupedFamilies = opts.familyGroupSql ? `SELECT * FROM (
+        SELECT *, ${groupWindowsSql(opts.familyGroupSql.keySql, '__family_rank')},
+               COUNT(*) OVER () AS family_total
+        FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY ${familyOrderSql}, family_root_id ASC) AS __family_rank FROM families)
+      )
+      ORDER BY __family_rank ASC
+      LIMIT @__familyPageSize OFFSET @__familyOffset` : undefined
   return `
     ${ctes},
     page_families AS MATERIALIZED (
-      ${opts.familyGroupSql ? `SELECT * FROM (
-        SELECT *, COUNT(*) OVER () AS family_total,
-               ${groupWindowsSql(opts.familyGroupSql.keySql, '__family_rank')}
-        FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY ${familyOrderSql}, family_root_id ASC) AS __family_rank FROM families)
-      )
-      ORDER BY __family_rank ASC` : `SELECT *, COUNT(*) OVER () AS family_total
+      ${groupedFamilies ?? `SELECT *, COUNT(*) OVER () AS family_total
       FROM families
-      ORDER BY ${familyOrderSql}, family_root_id ASC`}
-      LIMIT @__familyPageSize OFFSET @__familyOffset
+      ORDER BY ${familyOrderSql}, family_root_id ASC
+      LIMIT @__familyPageSize OFFSET @__familyOffset`}
     ),
     page_candidates AS MATERIALIZED (
       ${pageCandidatesSql(opts.parentSeek === true)}

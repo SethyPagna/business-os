@@ -4,6 +4,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
 import { InventoryCheckQueryError, validateInventoryCheckQuery, getInventoryCheckAccess, canApproveInventoryCounts } from '../lib/inventoryCheckAccess'
+import { availableGroupings } from '../lib/inventoryCheckGrouping'
 import { getActionTier } from '../lib/permissions'
 import { readInventoryCheckProducts, readInventoryCheckProductsSimple, InventoryCheckProductsLimitError } from '../lib/inventoryCheckProducts'
 import { canSeeStaffIdentity, currentInventoryCheckActor, getInventoryCheckSession, getInventoryCheckSessionBranch, inventoryCheckDigest, InventoryCheckSessionError, approvalsAvailable, pendingApprovalLines } from '../lib/inventoryCheckSessions'
@@ -46,6 +47,8 @@ app.get('/', async c => {
       answer = { ...simple, items: simple.items.map(item => pending.has(`${item.check_session_id}:${item.id}`) ? { ...item, check_pending: true } : item),
         capabilities: { fixStock: true, approveCounts: adjust && canApproveInventoryCounts(actor) } }
     }
+    // The list advertises the groupings it can answer (a session's list has none); a client sends groupBy only for a name listed here.
+    if (!simpleSession) answer = { ...answer, capabilities: { ...(answer.capabilities as Record<string, unknown> | undefined), groupings: availableGroupings(getInventoryCheckAccess(actor).fields) } }
     const after = await currentInventoryCheckActor(db, principal)
     if (JSON.stringify(after) !== JSON.stringify(actor)) throw new InventoryCheckSessionError(403, 'inventory_check_authority_changed')
     return c.json(answer)
