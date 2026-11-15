@@ -1026,6 +1026,9 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/files/FilePickerModal')) {
       return 'file-picker-modal'
     }
+    // StockQty is used by three staff screens that load without the detail modals: its own tiny chunk keeps it out of
+    // product-detail (which would load up front for them) and out of app-shared (the storefront closure).
+    if (normalized.includes('/src/components/inventory/StockQty.tsx')) return 'stock-qty'
     if (
       normalized.includes('/src/components/products/surfaces/ProductDetailModal.tsx')
       || normalized.includes('/src/components/inventory/ProductDetailModal.tsx')

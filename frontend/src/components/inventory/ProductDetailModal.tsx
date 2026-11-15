@@ -16,7 +16,8 @@ import { getProductBatches, type ProductBatch } from '../../api/batchesTransport
 import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { useLowStockConfig } from '../../AppContext'
-import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
+import { effectiveLowStockThreshold, stockLevelState } from '../../utils/lowStockSettings.ts'
+import StockQty from './StockQty.tsx'
 import { TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
 import ScrollText from 'lucide-react/dist/esm/icons/scroll-text.js'
@@ -60,6 +61,7 @@ interface InventoryProduct {
   description?: string
   stock_quantity?: number
   low_stock_threshold?: number
+  out_of_stock_threshold?: number
   purchase_price_usd?: number
   cost_price_usd?: number
   purchase_price_khr?: number
@@ -165,11 +167,10 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
   const stockPct = lowStockThreshold > 0
     ? Math.min(100, (stockQuantity / lowStockThreshold) * 100)
     : 100
-  const stockColor = stockQuantity <= 0
-    ? 'text-red-600'
-    : stockQuantity <= lowStockThreshold
-      ? 'text-yellow-600'
-      : 'text-green-600'
+  // This used to colour by `qty <= 0` / `qty <= low`, ignoring the product's own out-of-stock
+  // threshold, so a product the list and the bell call "out" could be yellow here. The state now
+  // comes from the one shared rule (stockLevelState) and the figure itself is the tinted pill.
+  const stockLevel = stockLevelState(stockQuantity, p, lowStockConfig)
   const profit = Math.max(0, p.revenue_usd || 0) - Math.max(0, p.cogs_usd || 0)
   const stockValueUsd = stockQuantity <= 0 ? 0 : costPriceUsd === null ? null : stockQuantity * costPriceUsd
   const marginUsd = costPriceUsd === null || sellingPriceUsd <= 0 ? null : sellingPriceUsd - costPriceUsd
@@ -229,11 +230,11 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
           <div className="rounded-xl bg-gray-50 p-3 dark:bg-gray-700/50">
             <div className="mb-1.5 flex items-center justify-between">
               <span className="text-sm font-semibold text-gray-600 dark:text-gray-400">{T('current_stock', 'Current Stock')}</span>
-              <span className={`text-2xl font-bold ${stockColor}`}>{stockQuantity} <span className="text-sm font-normal">{p.unit}</span></span>
+              <span className="text-2xl font-bold"><StockQty qty={stockQuantity} product={p} config={lowStockConfig} className="font-bold" /> <span className="text-sm font-normal">{p.unit}</span></span>
             </div>
             <div className="mb-1 h-2 w-full rounded-full bg-gray-200 dark:bg-gray-600">
               <div
-                className={`h-2 rounded-full transition-all ${stockQuantity <= 0 ? 'bg-red-500' : stockQuantity <= lowStockThreshold ? 'bg-yellow-500' : 'bg-green-500'}`}
+                className={`h-2 rounded-full transition-all ${stockLevel === 'out' ? 'bg-red-500' : stockLevel === 'low' ? 'bg-yellow-500' : 'bg-green-500'}`}
                 style={{ width: `${Math.max(2, Math.min(100, stockPct))}%` }}
               />
             </div>

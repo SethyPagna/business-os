@@ -6,6 +6,7 @@ import { buildProductGroups } from '../../utils/productGrouping.ts'
 import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
 import PendingReviewSync from '../shared/PendingReviewSync.tsx'
 import PendingReviewTag from '../shared/PendingReviewTag.tsx'
+import StockQty from './StockQty.tsx'
 import { productCost } from '../../utils/costDisplay.ts'
 import { useApp } from '../../app/AppContextCore.tsx'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
@@ -143,6 +144,24 @@ export default function InventoryProductsSurface({
   const columnCount = 11
   const metric = (product: InventoryProductRow, field: InventoryMetric) => mergedInventoryMetric(product, items, field)
   const quantity = (product: InventoryProductRow) => metric(product, 'display_quantity') ?? scopedProductQuantity(product, branchFilter)
+  // The quantity figure IS the state pill (owner, 15 Nov 2026). A plain row is coloured by its own
+  // figure against its own thresholds -- both ride on every /products/search row already, and the
+  // low-stock settings come from the app context, so this costs no read. A MERGED row (several
+  // real products one barcode folds into) shows the members' sum, and takes the Dashboard's family rule
+  // over the real members (best state wins, header rows skipped) -- otherwise two low members could sum
+  // to "healthy" here while the Dashboard calls the family low. The bell is different: it lists each
+  // product on its own (notifications.ts, buildInventorySection), so a merged row can be green while
+  // the bell lists one of its products as low (products of 8 and 50 with a threshold of 10: the row is
+  // healthy, the bell lists the 8). This row follows the Dashboard's family rule, deliberately.
+  const stockQty = (product: InventoryProductRow) => {
+    const ids = new Set((product.__mergedProductIds || [product.id]).map(Number))
+    const members = ids.size > 1 ? items.filter((row) => ids.has(Number(row.id))) : []
+    return <StockQty
+      qty={quantity(product)}
+      product={product}
+      members={members.length > 1 ? members.map((row) => ({ qty: inventoryMoney(row.display_quantity) ?? scopedProductQuantity(row, branchFilter), product: row })) : undefined}
+    />
+  }
   // Money cell shape copied from the Sales list's amount cell: the USD figure
   // is the bold primary line, the KHR equivalent a muted sub-line. `tone`
   // carries the Products page's column convention (cost red, price green,
@@ -286,7 +305,7 @@ export default function InventoryProductsSurface({
                     {/* "Waiting for review" tag: in this cell's 12px start gutter, out of the flow; `relative` is on the cell with or without a tag. */}
                     <td className="relative max-w-[18rem] px-3 py-1.5"><PendingReviewTag section="products" entityType="product" ids={product.__mergedProductIds || [product.id]} className="left-px top-1" /><div className="flex min-w-0 items-start gap-1"><div className="min-w-0 flex-1"><div className="min-w-0 font-medium text-slate-800 dark:text-slate-100"><ProductNameRail name={String((product.name || '—') ?? '')} /></div><div className="truncate text-[10px] text-slate-400">{[product.brand, product.category].filter(Boolean).join(' · ')}</div></div>{productMenu(product)}</div></td>
                     <td className="px-3 py-1.5 font-mono text-slate-500">{product.barcode || '—'}</td>
-                    <td className="px-3 py-1.5 text-right font-semibold">{quantity(product)}</td>
+                    <td className="px-3 py-1.5 text-right font-semibold">{stockQty(product)}</td>
                     <td className="min-w-28 px-3 py-1.5 text-[11px]">{branchLines(product)}</td>
                     <td className="col-highlight-red px-3 py-1.5">{costCell(product)}</td>
                     <td className="col-highlight-green px-3 py-1.5">{money(product.selling_price_usd, product.selling_price_khr, priceTone)}</td>
@@ -313,7 +332,7 @@ export default function InventoryProductsSurface({
                 {!collapsed.has(group.key) && group.rows.map((product) => <div key={String(product.id)} className="card relative min-w-0 p-2 text-sm">
                   <PendingReviewTag section="products" entityType="product" ids={product.__mergedProductIds || [product.id]} className="-left-px top-1" />
                   {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
-                  <div className="flex min-w-0 items-start justify-between gap-2"><span className="min-w-0 font-medium"><ProductNameRail name={String((product.name || '—') ?? '')} /></span><strong>{quantity(product)}</strong></div>
+                  <div className="flex min-w-0 items-start justify-between gap-2"><span className="min-w-0 font-medium"><ProductNameRail name={String((product.name || '—') ?? '')} /></span><strong>{stockQty(product)}</strong></div>
                   {/* Barcode only -- the SKU half of this line went with the column. */}
                   <p className="break-all text-[11px] text-slate-500">{product.barcode || '—'}</p>
                   <div className="my-1 text-xs">{branchLines(product)}</div>
