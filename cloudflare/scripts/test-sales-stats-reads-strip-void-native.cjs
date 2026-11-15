@@ -41,6 +41,15 @@ const MUTANTS = {
   voidScopedPlain: [{ name: 'm-void-scoped-plain', file: KERNEL, from: '({ plainCancelled: !scope?.narrow })', to: '({ plainCancelled: true })' }],
   // the plain status predicate for ANY status: NULL-status sales stop counting as 'completed' (reaches /daily-report and /day-report with a status filter)
   voidPlainForAnyStatus: [{ name: 'm-void-any', file: KERNEL, from: "status === 'cancelled' && options.plainCancelled !== false ?", to: "status !== '' ?" }],
+  // a single extra statement before the header read: the exact calls check must see it (no blanket +1)
+  oneMoreCall: [{ name: 'm-one-more-call', file: SALES, from: 'const totals = await readSalesHeaderTotals(c.env, windowFilter, scope)', to: "await c.env.DB.prepare('SELECT 1').all(); const totals = await readSalesHeaderTotals(c.env, windowFilter, scope)" }],
+  // the three classification rules of GET /stats (status, branch, resolved-id limit), each broken both ways
+  statusNeverBroad: [{ name: 'm-status-never', file: SALES, from: "new Set(['completed', 'awaiting_payment'])", to: 'new Set([])' }],
+  statusAlwaysBroad: [{ name: 'm-status-always', file: SALES, from: 'statuses.every((status) => BROAD_STATS_STATUSES.has(status))', to: 'true' }],
+  branchNeverBroad: [{ name: 'm-branch-never', file: SALES, from: '- (branchClausePushed ? 1 : 0) > 0', to: '- 0 > 0' }],
+  branchOnlyAlone: [{ name: 'm-branch-alone', file: SALES, from: '- (branchClausePushed ? 1 : 0) > 0', to: '- (branchClausePushed && !statusClausePushed ? 1 : 0) > 0' }],
+  idLimitZero: [{ name: 'm-ids-zero', file: KERNEL, from: 'export const REPORT_NARROW_SCOPE_IDS_MAX = 10', to: 'export const REPORT_NARROW_SCOPE_IDS_MAX = 0' }],
+  idLimit200: [{ name: 'm-ids-200', file: KERNEL, from: 'export const REPORT_NARROW_SCOPE_IDS_MAX = 10', to: 'export const REPORT_NARROW_SCOPE_IDS_MAX = 200' }],
   stripContinuousPlus: [{ name: 'm-strip-continuous-plus', file: SALES, from: STRIP_NEW, to: "const stripId='+id'" }],
 }
 const urls = (ctx) => {
@@ -78,6 +87,23 @@ const urls = (ctx) => {
       [`daily-report ${st}`, `/api/sales/daily-report?${w(1, 0)}&status=${st}`],
       [`day-report ${st}`, `/api/sales/day-report?date=${day(ctx, 0)}&status=${st}`],
     ])),
+    // every status option, a value the filter does not know, each branch, and the combinations (the classification rules: status, branch, resolved-id limit)
+    ...Object.fromEntries(['awaiting_payment', 'partial_return', 'returned', 'awaiting_delivery', 'cancelled', 'completed', 'bogus'].flatMap((st) => [
+      [`stats status=${st} all-time`, `/api/sales/stats?status=${st}`],
+      [`stats status=${st} 30d`, `/api/sales/stats?${w(29, 0)}&status=${st}`],
+    ])),
+    'stats branch=1 all-time': '/api/sales/stats?branchId=1',
+    'stats branch=2 all-time': '/api/sales/stats?branchId=2',
+    'stats branch=1 30d': `/api/sales/stats?${w(29, 0)}&branchId=1`,
+    'stats branch=2 30d': `/api/sales/stats?${w(29, 0)}&branchId=2`,
+    'stats combo completed+branch=1 all-time': '/api/sales/stats?status=completed&branchId=1',
+    'stats combo awaiting_payment+branch=1 all-time': '/api/sales/stats?status=awaiting_payment&branchId=1',
+    'stats combo returned+branch=1 all-time': '/api/sales/stats?status=returned&branchId=1',
+    'stats combo returned+branch=1 30d': `/api/sales/stats?${w(29, 0)}&status=returned&branchId=1`,
+    'stats combo completed+cashier all-time': '/api/sales/stats?status=completed&cashier=Budget',
+    // a typed search resolved to few ids (narrow) and to more than the limit (broad)
+    'stats search 2 sales all-time': '/api/sales/stats?search=RB0000',
+    'stats search 12 sales today': `/api/sales/stats?${w(0, 0)}&search=Customer%2012`,
     'stats cancelled': `/api/sales/stats?${w(29, 0)}&status=cancelled`,
     'stats completed': `/api/sales/stats?${w(29, 0)}&status=completed`,
     'stats search all-time': '/api/sales/stats?search=Customer%2012',
@@ -89,7 +115,16 @@ const REDUCED = ['strip today', 'strip 30d', 'stats all-time', 'stats completed'
 // a continuous window keeps the rowid walk: exactly the oracle's rows, never above (the plus there re-scans the table on every page)
 // dated windows past the plus-id crossover keep the rowid walk: exactly the oracle's rows (the plus there re-scans the window on every page)
 const LONG_DATED = ['strip dated 120d', 'strip dated 180d', 'strip dated 365d']
-const NARROW = ['stats narrow returned cashier', 'stats narrow search returned', 'stats narrow search partial']
+const NARROW = ['stats narrow returned cashier', 'stats narrow search returned', 'stats narrow search partial',
+  // the rare statuses and an unknown one keep the pre-lane predicate, alone and beside a branch
+  ...['partial_return', 'returned', 'awaiting_delivery', 'cancelled', 'bogus'].flatMap((st) => [`stats status=${st} all-time`, `stats status=${st} 30d`]),
+  'stats combo returned+branch=1 all-time', 'stats combo returned+branch=1 30d', 'stats search 2 sales all-time',
+  // a cashier beside a broad status is a narrow scope: the pre-lane rows exactly
+  'stats combo completed+cashier all-time']
+// scopes that stay broad (the plain predicate and +id paging): clearly fewer rows than the pre-lane route
+const BROAD = ['stats status=completed all-time', 'stats status=awaiting_payment all-time', 'stats branch=1 all-time', 'stats combo completed+branch=1 all-time', 'stats combo awaiting_payment+branch=1 all-time']
+// every shape the three rules decide: a mutant of a rule must move one of them by more than half a percent
+const RULE_SHAPES = [...NARROW, ...BROAD, 'stats search 12 sales today']
 const CONTINUOUS = ['strip continuous 30d', 'strip continuous 120d', 'strip continuous 365d', 'strip continuous today']
 // strip windows holding more than one page, with the independent SQL that counts the same sales (no paging code involved)
 const MULTIPAGE = {
@@ -121,25 +156,29 @@ const statusCounts = (text) => Object.fromEntries(JSON.parse(text).by_status.map
     } finally { await world.dispose() }
   })
 
-  const oldOff = await runUrls({ urls, patches: OLD })
-  const newOff = await runUrls({ urls })
-  const oldOn = await runUrls({ urls, patches: OLD, switches: ATOMIC })
-  const newOn = await runUrls({ urls, switches: ATOMIC })
+  const oldOff = await runUrls({ urls, patches: OLD, excludeSwitchReads: true })
+  const newOff = await runUrls({ urls, excludeSwitchReads: true })
+  const oldOn = await runUrls({ urls, patches: OLD, switches: ATOMIC, excludeSwitchReads: true })
+  const newOn = await runUrls({ urls, switches: ATOMIC, excludeSwitchReads: true })
   for (const [mode, o, n] of [['OFF', oldOff, newOff], ['ON', oldOn, newOn]]) {
     await step(`parity (report_atomic ${mode}): every strip and stats answer is byte-identical to the oracle`, () => assert.deepEqual(bodies(n), bodies(o)))
     await step(`status (report_atomic ${mode}): every strip and stats shape answers HTTP 200, build and oracle (a refusing strip would match a refusing oracle)`, () => {
       for (const [label, res] of [['build', n], ['oracle', o]]) for (const name of NAMES) assert.equal(res[name].status, 200, `${label} ${name} answered ${res[name].status}: ${res[name].text.slice(0, 120)}`)
     })
     await step(`rows (report_atomic ${mode}): never above the oracle, below it for the strip and the undated report`, () => {
-      // 'stats cancelled' reads the same few cancelled rows through either index (a handful of rows apart), so it gets a small allowance; nothing else may read more
-      for (const name of NAMES) assert.ok(n[name].rr <= o[name].rr + (name === 'stats cancelled' ? 12 : 0), `${name}: rows ${n[name].rr} > oracle ${o[name].rr}`)
+      // two named allowances, nothing else may read more: 'stats cancelled' reads the same few cancelled rows through either index (a handful of rows apart); 'stats branch=2 30d' is the owner-accepted
+      // price of the branch rule (a branch alone is broad: 5,597 vs 5,435 rows, 162 more on a 30-day window of the small branch, while branch 1 saves 4,872 and every all-time branch shape saves)
+      const MORE_ROWS = { 'stats cancelled': 12, 'stats branch=2 30d': 162 }
+      for (const name of NAMES) assert.ok(n[name].rr <= o[name].rr + (MORE_ROWS[name] || 0), `${name}: rows ${n[name].rr} > oracle ${o[name].rr}`)
       for (const name of CONTINUOUS) assert.ok(n[name].rr <= o[name].rr, `${name}: a continuous window must keep the rowid walk (${n[name].rr} vs oracle ${o[name].rr})`)
       for (const name of NARROW) assert.ok(n[name].rr <= o[name].rr, `${name}: a narrow scope must not read more than the pre-lane route (${n[name].rr} vs oracle ${o[name].rr})`)
       for (const name of LONG_DATED) assert.ok(n[name].rr <= o[name].rr, `${name}: a dated window past the crossover must not read more than the pre-lane route (${n[name].rr} vs oracle ${o[name].rr})`)
       for (const name of REDUCED) assert.ok(n[name].rr < o[name].rr * 0.9, `${name}: expected clearly fewer rows (${n[name].rr} vs ${o[name].rr})`)
+      for (const name of BROAD) assert.ok(n[name].rr < o[name].rr * 0.97, `${name}: a broad scope must read fewer rows than the pre-lane route (${n[name].rr} vs oracle ${o[name].rr})`)
     })
-    // one call of slack: a fresh isolate's cold schema probe lands on a different request from run to run (the search-ids native documents the same +-1), seen as +1 on a random shape
-    await step(`calls (report_atomic ${mode}): never more than one above the oracle (the cold probe)`, () => { for (const name of NAMES) assert.ok(n[name].calls <= o[name].calls + 1, `${name}: calls ${n[name].calls} > ${o[name].calls} + 1`) })
+    // exact: the +1 that used to be allowed on every shape was the read-switch memo expiring mid-run (15 s on Free), counted on a different request in each world; the harness leaves those statements out (excludeSwitchReads).
+    // The +-1 that remained on the 365-day strips was the second clock statement (the Telegram fallback drain, every 20 s of wall clock; the harness leaves it out too). Nothing else is left: exact.
+    await step(`calls (report_atomic ${mode}): exactly the oracle's`, () => { for (const name of NAMES) assert.ok(n[name].calls <= o[name].calls, `${name}: calls ${n[name].calls} > ${o[name].calls}`) })
   }
   await step('independent oracle: the status mix of each multi-page strip window equals a plain COUNT(*) GROUP BY over the same window', async () => {
     const world = await bootWorld({ tier: 'free' })
@@ -159,22 +198,24 @@ const statusCounts = (text) => Object.fromEntries(JSON.parse(text).by_status.map
   for (const name of NAMES) log(`   ${name.padEnd(22)} OFF ${oldOff[name].rr}/${oldOff[name].calls} -> ${newOff[name].rr}/${newOff[name].calls}   ON ${oldOn[name].rr}/${oldOn[name].calls} -> ${newOn[name].rr}/${newOn[name].calls}`)
 
   // Production has table statistics (a fresh database does not): the same answers, and the undated report still reads fewer rows.
-  const oldAn = await runUrls({ urls, patches: OLD, analyze: true })
-  const newAn = await runUrls({ urls, analyze: true })
+  const oldAn = await runUrls({ urls, patches: OLD, analyze: true, excludeSwitchReads: true })
+  const newAn = await runUrls({ urls, analyze: true, excludeSwitchReads: true })
   await step('after ANALYZE the build answers byte-identically to the oracle and reads fewer rows', () => {
     assert.deepEqual(bodies(newAn), bodies(oldAn))
     for (const name of ['strip today', 'strip 30d']) assert.ok(newAn[name].rr < oldAn[name].rr, `${name}: ${newAn[name].rr} >= ${oldAn[name].rr}`)
     assert.ok(newAn['stats all-time'].rr < oldAn['stats all-time'].rr * 0.9, `stats all-time: ${newAn['stats all-time'].rr} vs ${oldAn['stats all-time'].rr}`)
   })
   const caught = async (label, patches, switches, analyze = false) => {
-    const res = await runUrls({ urls, patches, switches, analyze })
+    const res = await runUrls({ urls, patches, switches, analyze, excludeSwitchReads: true })
     const base = analyze ? oldAn : switches ? oldOn : oldOff
     const good = analyze ? newAn : switches ? newOn : newOff
     let red = false
     try { assert.deepEqual(bodies(res), bodies(base)) } catch { red = true }
     if (!red) for (const name of NAMES) if (res[name].status !== 200) red = true
+    if (!red) for (const name of NAMES) if (res[name].calls > good[name].calls) red = true
     if (!red) for (const name of REDUCED) if (res[name].rr > good[name].rr * 1.3) red = true
-    if (!red) for (const name of [...CONTINUOUS, ...LONG_DATED, ...NARROW]) if (res[name].rr > good[name].rr * 1.05) red = true
+    if (!red) for (const name of [...CONTINUOUS, ...LONG_DATED]) if (res[name].rr > good[name].rr * 1.05) red = true
+    if (!red) for (const name of RULE_SHAPES) if (res[name].rr > good[name].rr * 1.005) red = true
     await step(`required red: ${label} is caught`, () => assert.ok(red, 'the mutant passed the parity and rows checks'))
   }
   await caught('the strip pages on the rowid again', MUTANTS.stripKeepsRowid)
@@ -188,6 +229,13 @@ const statusCounts = (text) => Object.fromEntries(JSON.parse(text).by_status.map
   await caught('a scoped report keeps the plain cancelled predicate (every cancelled sale in the window is read)', MUTANTS.voidScopedPlain)
   await caught('the plain status predicate for any status (/daily-report and /day-report with a status filter)', MUTANTS.voidPlainForAnyStatus)
   await caught('an hours (continuous) window pages on +id again: a full scan per page', MUTANTS.stripContinuousPlus)
+  await caught('RULE status: no status is broad (completed and awaiting_payment read the pre-lane rows)', MUTANTS.statusNeverBroad)
+  await caught('RULE status: every status is broad (a rare status reads every cancelled sale of the window)', MUTANTS.statusAlwaysBroad)
+  await caught('RULE branch: a branch clause is never broad', MUTANTS.branchNeverBroad)
+  await caught('RULE branch: a branch is broad only when alone (not beside completed / awaiting_payment)', MUTANTS.branchOnlyAlone)
+  await caught('RULE id limit: a resolved list is never narrow (limit 0)', MUTANTS.idLimitZero)
+  await caught('RULE id limit: a resolved list of up to 200 ids is narrow (the old limit)', MUTANTS.idLimit200)
+  await caught('one extra D1 call on /stats (the allowance the calls check used to carry)', MUTANTS.oneMoreCall)
 
   // The plan, with and without table statistics (production has them; a fresh database does not).
   for (const analyze of [false, true]) {

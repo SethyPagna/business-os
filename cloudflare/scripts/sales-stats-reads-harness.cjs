@@ -24,7 +24,14 @@ async function applyFixture(world) {
 const day = (ctx, back) => new Date(Date.parse(ctx.anchorDate + 'T00:00:00Z') - back * 86400e3).toISOString().slice(0, 10)
 
 // One world per (patches, switches); every url answered with the Cache API missing.
-async function runUrls({ urls, patches = [], switches, tier = 'free', fixture = true, analyze = false, regimes = false, prepare }) {
+// Two statements are issued by the clock, not by the request, and land on whichever request is in flight at that moment (a different one in each world):
+//   1. the read-switch memo (lib/readSwitches.ts, 15 s on Free) re-reads the flags: 1 call, 3 rows;
+//   2. the T10 fallback drain (index.ts, SHIFT_OVERVIEW_DRAIN_INTERVAL_MS = 20 s, a module-level timestamp that every world in the process shares) runs after a GET /api/* response, in
+//      waitUntil, and reads the due Telegram sends: 1 call. This is the +-1 that only the longest strips (the most wall clock per request) used to show.
+// excludeSwitchReads leaves exactly those two statements out of the counts, so calls and rows are exact (no allowance) and a real extra call still shows.
+// Everything else, the first request's cold probes included, is counted.
+const SWITCH_READ = /^(SELECT key, value FROM system_flags WHERE key IN \(\?1, \?2\)|SELECT send_key FROM telegram_scheduled_sends\s+WHERE status = 'pending' AND due_at <= \?1 AND \(dispatch = 'fallback' OR due_at <= \?2\)\s+ORDER BY due_at LIMIT \?3)\s*$/
+async function runUrls({ urls, patches = [], switches, tier = 'free', fixture = true, analyze = false, regimes = false, prepare, excludeSwitchReads = false }) {
   const world = await bootWorld({ tier, patches, ...(switches ? { switches } : {}) })
   const out = {}
   try {
@@ -35,6 +42,12 @@ async function runUrls({ urls, patches = [], switches, tier = 'free', fixture = 
     for (const [name, url] of Object.entries(list)) {
       const r = await world.send('GET', url, undefined, { miss: true })
       out[name] = { status: r.status, text: r.text, calls: r.calls, rr: r.rr }
+      if (excludeSwitchReads) {
+        const reads = ((await world.last()).stmts || []).filter((s) => SWITCH_READ.test(String(s.raw)))
+        out[name].calls -= reads.length
+        out[name].rr -= reads.reduce((n, s) => n + s.rr, 0)
+        out[name].switchReads = reads.length
+      }
       if (regimes) {
         // which scope the report statements carried: the id list (json_each) or the subquery that re-runs the filter (matched_sale)
         const stmts = ((await world.last()).stmts || []).map((s) => String(s.raw))

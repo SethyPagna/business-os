@@ -9,7 +9,10 @@ const fs = require('node:fs')
 const [root, label, outDir] = process.argv.slice(2, 5)
 const analyze = process.argv.includes('--analyze')
 const capAt = process.argv.indexOf('--cap')
-const patches = capAt > 0 ? [{ name: 'cap', file: 'src/lib/salesAnalytics.ts', from: 'export const REPORT_SCOPE_IDS_MAX = ', to: `export const REPORT_SCOPE_IDS_MAX = ${Number(process.argv[capAt + 1])} // was ` }] : []
+const patchFileAt = process.argv.indexOf('--patch-file') // a JSON array of { name, file, from, to } (a candidate classification, measured before it is written)
+const filePatches = patchFileAt > 0 ? JSON.parse(fs.readFileSync(process.argv[patchFileAt + 1], 'utf8')) : []
+const only = process.argv.includes('--only') ? new RegExp(process.argv[process.argv.indexOf('--only') + 1]) : null
+const patches = filePatches.concat(capAt > 0 ? [{ name: 'cap', file: 'src/lib/salesAnalytics.ts', from: 'export const REPORT_SCOPE_IDS_MAX = ', to: `export const REPORT_SCOPE_IDS_MAX = ${Number(process.argv[capAt + 1])} // was ` }] : [])
 if (!root || !label || !outDir) { console.error('usage: node measure-sales-stats-shapes.cjs <sourceRoot> <label> <outDir> [--analyze] [--cap N]'); process.exit(2) }
 process.env.READ_BUDGET_DEADLINE_MS ||= '600000'
 const { bootWorld } = require(path.join(root, 'cloudflare/scripts/read-budget/world.cjs'))
@@ -27,6 +30,26 @@ async function run(switches) {
     const anyId = (await world.all("SELECT id, receipt_number r FROM sales WHERE created_at >= datetime(?, '-30 hours') ORDER BY id DESC LIMIT 1", ctx.anchor))[0]
     const from = (back) => `${day(ctx, back)} 00:00:00`
     const shapes = {
+      // every status the Sales filter offers (Sales.tsx), plus cancelled and completed, at the four windows people use; then the branch-only filter
+      ...Object.fromEntries(['awaiting_payment', 'partial_return', 'returned', 'awaiting_delivery', 'cancelled', 'completed'].flatMap((st) => [
+        [`status=${st} all-time`, `/api/sales/stats?status=${st}`],
+        [`status=${st} 30d`, `/api/sales/stats?${w(29, 0)}&status=${st}`],
+        [`status=${st} end-only`, `/api/sales/stats?endDate=${day(ctx, 10)}&status=${st}`],
+        [`status=${st} today`, `/api/sales/stats?${w(0, 0)}&status=${st}`],
+      ])),
+      'branch=1 all-time': '/api/sales/stats?branchId=1',
+      'branch=1 30d': `/api/sales/stats?${w(29, 0)}&branchId=1`,
+      'branch=1 end-only': `/api/sales/stats?endDate=${day(ctx, 10)}&branchId=1`,
+      'branch=1 today': `/api/sales/stats?${w(0, 0)}&branchId=1`,
+      'branch=2 all-time': '/api/sales/stats?branchId=2',
+      'branch=2 30d': `/api/sales/stats?${w(29, 0)}&branchId=2`,
+      'branch=2 end-only': `/api/sales/stats?endDate=${day(ctx, 10)}&branchId=2`,
+      'branch=2 today': `/api/sales/stats?${w(0, 0)}&branchId=2`,
+      'combo completed+branch=1 all-time': '/api/sales/stats?status=completed&branchId=1',
+      'combo completed+branch=1 30d': `/api/sales/stats?${w(29, 0)}&status=completed&branchId=1`,
+      'combo returned+branch=1 all-time': '/api/sales/stats?status=returned&branchId=1',
+      'combo returned+branch=1 30d': `/api/sales/stats?${w(29, 0)}&status=returned&branchId=1`,
+      'combo completed+cashier 30d': `/api/sales/stats?${w(29, 0)}&status=completed&cashier=Budget`,
       'stats today': `/api/sales/stats?${w(0, 0)}`,
       'stats 30d': `/api/sales/stats?${w(29, 0)}`,
       'stats all-time': '/api/sales/stats',
@@ -61,8 +84,13 @@ async function run(switches) {
       'reports overview 30d': `/api/reports/overview?${w(29, 0)}`,
     }
     for (const [name, url] of Object.entries(shapes)) {
+      if (only && !only.test(name)) continue
       const r = await world.send('GET', url, undefined, { miss: true })
       out[name] = { status: r.status, text: r.text, calls: r.calls, rr: r.rr }
+      // the read-switch memo (15 s) and the Telegram fallback drain (20 s) are issued by the clock and land on whichever request is in flight; leave those two statements out so two runs compare exactly
+      const reads = ((await world.last()).stmts || []).filter((s) => /^(SELECT key, value FROM system_flags WHERE key IN \(\?1, \?2\)|SELECT send_key FROM telegram_scheduled_sends\s+WHERE status = 'pending' AND due_at <= \?1 AND \(dispatch = 'fallback' OR due_at <= \?2\)\s+ORDER BY due_at LIMIT \?3)\s*$/.test(String(s.raw)))
+      out[name].calls -= reads.length
+      out[name].rr -= reads.reduce((n, s) => n + s.rr, 0)
     }
   } finally { await world.dispose() }
   return out
