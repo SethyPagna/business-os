@@ -2,18 +2,27 @@
 // answer as every piece of Worker SQL that decides out / low / healthy -- owner ask 15 Nov 2026: a product is never
 // "low" in one place and "healthy" in another.
 //
-// Nothing server-side is re-typed here. The Worker's own text is executed in node:sqlite over a 504-row x 12-config
-// matrix (quantity x both thresholds x alerts on/off x product/global mode, NULL / 0 / negative / fractional):
-//   - lowStockThresholdSql, loaded from the source (transpiled);
-//   - getFamilyStockStats, getFamilyStockAlertPage and familyStockOverviewSql (the Dashboard / alert pages), called for real;
+// The Worker's own text is executed in node:sqlite (or, for the JS copies, transpiled and called) over a 504-row x
+// 12-config matrix (quantity x both thresholds x alerts on/off x product/global mode, NULL / 0 / negative / fractional).
+// What is re-typed here is the REFERENCE rule (refState) and nothing else: each Worker line is read from its source file
+// and run as written, including the threshold COLUMN each caller passes to lowStockThresholdSql and the `stockExpr` the
+// Products / Inventory filters compare (both the catalog sum and the selected-branch form):
+//   - lowStockThresholdSql and isLowStock (lib/lowStockSettings.ts), classifyCrossing (lib/stockCrossingAlert.ts);
+//   - getFamilyStockStats, getFamilyStockAlertPage and familyStockOverviewSql (the Dashboard / alert pages), called for
+//     real, including which member of a family stands for it (the representative row);
 //   - the bell's inventory SELECT (routes/notifications.ts), the Inventory / Products / Branches stock-state filters
-//     (routes/inventory.ts, products.ts, branches.ts), the Telegram stock counts and filter (lib/telegram.ts) and the
-//     issue-state out clause (lib/searchMatch.ts), each EXTRACTED from its source text and run unchanged.
-// Each copy's answer is compared with a hand-typed reference rule (refState below), and the client with the same.
-// The family rule (stockGroupLevel) is compared with the Dashboard's has_healthy / has_low flags and the alert pages
-// on multi-member fixtures, header rows included, and isStockFamilyHeader with the server's header expression.
-// Where a line cannot be run it is pinned by exact normalised text AND occurrence count, and a census of every
-// threshold comparison in the Worker fails when a new copy appears that nobody has looked at.
+//     (routes/inventory.ts, products.ts, branches.ts), the Inventory Check filters and family flags
+//     (lib/inventoryCheckProducts.ts), the Telegram stock counts and filter (lib/telegram.ts) and the issue-state out
+//     clause (lib/searchMatch.ts).
+// Each copy's answer is compared with refState, and the client with the same. The family rule (stockGroupLevel) is
+// compared with the Dashboard's has_healthy / has_low flags and the alert pages on multi-member fixtures, header rows
+// included, and isStockFamilyHeader with the server's header expression.
+// NOT run, only pinned by exact normalised text and occurrence count: the bell's JavaScript mapping (is_out -> label, the
+// low count) and the Telegram row label. A census then reads EVERY comparison against a threshold in cloudflare/src
+// (low_stock_threshold / out_of_stock_threshold, the low_threshold / __low / __out aliases, plain JS `<= low`) and fails
+// when one is added, moved, edited or removed. Each known line names the check that runs it, and that check must have
+// run. The public storefront's literal-10 copies (routes/portal.ts, lib/portalAi.ts) are listed as named exceptions:
+// a known, separate divergence from the staff rule, so a change to them is still noticed.
 //
 // Mutants are applied in memory to the REAL sources (frontend rule and every Worker file above) and must each turn the
 // run red; a mutant that no longer matches its source fails the test (positive control). The Worker is only ever read.
@@ -53,6 +62,14 @@ function loadWorker(read: Read, rel: string, cache = new Map<string, { exports: 
   }, module)
   return module.exports
 }
+
+// One exported function lifted out of a Worker file's text and run (for a file whose imports we do not want to load).
+function loadFunction(source: string, name: string): unknown {
+  const module = { exports: {} as any }
+  new Function('exports', 'module', transpile(source, `${name}.ts`))(module.exports, module)
+  return module.exports[name]
+}
+const crossingQuantities = [-1, 0, 0.5, 2, 3, 5, 10, 11]
 
 type Level = 'out' | 'low' | 'healthy'
 type Cfg = { enabled: boolean; mode: 'product' | 'global'; threshold: number }
@@ -110,6 +127,9 @@ function d1(db: DatabaseSync): any {
   }
 }
 const matrixDb = makeDb(rows.map((row, index) => ({ id: index + 1, key: `n${index + 1}`, qty: row.qty, low: row.low, out: row.out })))
+// The same rows with one branch_stock row each (none for a NULL quantity): what the Products / Inventory `stockExpr` sums and joins.
+const catalogDb = makeDb(rows.map((row, index) => ({ id: index + 1, key: `n${index + 1}`, qty: row.qty, low: row.low, out: row.out })))
+rows.forEach((row, index) => { if (row.qty != null) catalogDb.prepare('INSERT INTO branch_stock (product_id, quantity) VALUES (?, ?)').run(index + 1, row.qty) })
 
 // Families: 1-4 members sharing one name key, some with a header row (group parent holding no stock) and header-only families.
 const familyQty = [null, -1, 0, 2, 5, 10, 11, 50]
@@ -134,6 +154,12 @@ for (let f = 0; f < 320; f += 1) {
 }
 // The review's example: products 101 (8) and 102 (50), same name and barcode, threshold 10.
 familySpecs.push({ id: 101, key: 'dup', qty: 8, low: 10, out: 0 }, { id: 102, key: 'dup', qty: 50, low: 10, out: 0 })
+// Which member stands for a family on the alert pages: an out member below a low member must not be chosen for a LOW family,
+// and when every member is out the one with the smallest quantity wins even if another is further under its own threshold.
+familySpecs.push(
+  { id: 5001, key: 'replow', qty: 0, low: 10, out: 0 }, { id: 5002, key: 'replow', qty: 10, low: 10, out: 0 },
+  { id: 5003, key: 'repout', qty: 1, low: 10, out: 1 }, { id: 5004, key: 'repout', qty: 5, low: 10, out: 10 },
+)
 const familyDb = makeDb(familySpecs)
 
 // ---- SQL extraction from the Worker's own source text ----
@@ -164,20 +190,73 @@ function pushClause(source: string, state: string, what: string): string {
 function ofIds(db: DatabaseSync, where: string): number[] {
   return (db.prepare(`SELECT id FROM products p WHERE (${where}) ORDER BY id`).all() as Array<{ id: number }>).map((r) => r.id)
 }
-
-// Every threshold comparison in the Worker, by file. A new one means a new copy of the rule: look at it, then add it here
-// (and to the parity run above) -- do not just bump the number.
-const KNOWN_COMPARISONS: Record<string, number> = {
-  'lib/familyStockStats.ts': 10, // 134-135, 238-239 (run), 337-338 (run), 267-268 / 400-401 are the representative-row ranking only
-  'lib/searchMatch.ts': 1, // issue-state 'out_of_stock' (run)
-  'lib/telegram.ts': 4, // lowOrOutOfStockSql (run), lowStockRowLines (pinned), the two stock counts (run)
-  'routes/branches.ts': 4, // in_stock / healthy / low / out filters (run)
-  'routes/inventory.ts': 3, // low / out / in_stock filters (run)
-  'routes/notifications.ts': 4, // the bell (run)
-  'routes/portal.ts': 4, // the public storefront: its own rule (in_stock, out, low with a literal 10), NOT a staff surface; named in the lane report
-  'routes/products.ts': 4, // low / out / in_stock / healthy filters (run)
+// The route filters, with the two branch_stock aliases they use (selected_bs on Products / Inventory, bs on Branches); one row each.
+function ofIdsCatalog(where: string): number[] {
+  return (catalogDb.prepare(`SELECT p.id FROM products p LEFT JOIN branch_stock selected_bs ON selected_bs.product_id = p.id
+    LEFT JOIN branch_stock bs ON bs.product_id = p.id WHERE (${where}) ORDER BY p.id`).all() as Array<{ id: number }>).map((r) => r.id)
 }
-const COMPARISON = /(<=|>=|<|>)\s*(COALESCE\([\w.]*out_of_stock_threshold|Number\([\w.]*out_of_stock_threshold|[\w.]*out_threshold|[\w.]*low_threshold|\$\{low\w*\}|\$\{lowStockThresholdSql)/
+
+// Every comparison against a stock threshold in cloudflare/src, as [file, occurrences, the check that runs it, exact normalised line].
+// A new one, or a moved, edited or removed one, means a copy of the rule changed: look at it, run it through the matrix above
+// (or pin it), then update this table -- do not just bump a number. 'by' must be the start of a check label that really ran.
+// 'storefront' is not a check: those lines are the public shop's own rule (a literal 10, the low-stock settings ignored), a
+// KNOWN divergence kept out of this change. Named so that any edit to them is noticed; the follow-up is the owner's call.
+const STOREFRONT = 'storefront'
+const STOREFRONT_REASON = 'storefront follow-up; not the staff rule'
+const KNOWN_COMPARISONS: Array<[file: string, count: number, by: string, text: string]> = [
+  ["lib/familyStockStats.ts", 1, "familyStockOverviewSql", "${both('MAX', `CASE WHEN ${qty} > COALESCE(p.out_of_stock_threshold, 0) AND ${qty} <= ${lowThresholdSql} THEN 1 ELSE 0 END`, 'has_low')},"],
+  ["lib/familyStockStats.ts", 1, "familyStockOverviewSql", "${both('MAX', `CASE WHEN ${qty} > COALESCE(p.out_of_stock_threshold, 0) AND ${qty} > ${lowThresholdSql} THEN 1 ELSE 0 END`, 'has_healthy')},"],
+  ["lib/familyStockStats.ts", 1, "Dashboard family flags", "MAX(CASE WHEN qty > out_threshold AND qty <= low_threshold THEN 1 ELSE 0 END) AS has_low,"],
+  ["lib/familyStockStats.ts", 1, "Dashboard family flags", "MAX(CASE WHEN qty > out_threshold AND qty <= low_threshold THEN 1 ELSE 0 END) AS has_low"],
+  ["lib/familyStockStats.ts", 2, "Dashboard family flags", "MAX(CASE WHEN qty > out_threshold AND qty > low_threshold THEN 1 ELSE 0 END) AS has_healthy,"],
+  ["lib/familyStockStats.ts", 1, "family representatives (alert page)", "WHEN @__alertState = 'low' AND m.qty > m.out_threshold AND m.qty <= m.low_threshold THEN 0"],
+  ["lib/familyStockStats.ts", 1, "family representatives (alert page)", "WHEN @__alertState = 'out' AND m.qty <= m.out_threshold THEN 0"],
+  ["lib/familyStockStats.ts", 1, "family representatives (overview)", "WHEN v.alert_state = 'low' AND m.qty > m.out_threshold AND m.qty <= m.low_threshold THEN 0"],
+  ["lib/familyStockStats.ts", 1, "family representatives (overview)", "WHEN v.alert_state = 'out' AND m.qty <= m.out_threshold THEN 0"],
+  ["lib/inventoryCheckProducts.ts", 1, "inventory check family flags", "MAX(CASE WHEN c.__quantity>c.__out AND c.__quantity<=c.__low THEN 1 ELSE 0 END) AS low,"],
+  ["lib/inventoryCheckProducts.ts", 1, "inventory check family flags", "MAX(CASE WHEN c.__quantity>c.__out AND c.__quantity>c.__low THEN 1 ELSE 0 END) AS healthy,"],
+  ["lib/inventoryCheckProducts.ts", 1, "inventory check filters", "if (query.stockState === 'in_stock') stockConditions.push('p.__quantity>p.__out')"],
+  ["lib/inventoryCheckProducts.ts", 1, "inventory check filters", "if (query.stockState === 'low_stock') stockConditions.push('p.__quantity>p.__out AND p.__quantity<=p.__low')"],
+  ["lib/inventoryCheckProducts.ts", 1, "inventory check filters", "if (query.stockState === 'out_of_stock') stockConditions.push('p.__quantity<=p.__out')"],
+  ["lib/lowStockSettings.ts", 1, "worker isLowStock", "if (qty <= (Number.isFinite(out) ? out : 0)) return false"],
+  ["lib/lowStockSettings.ts", 1, "worker isLowStock", "return qty <= effectiveLowStockThreshold(config, productLowThreshold)"],
+  ["lib/portalAi.ts", 1, STOREFRONT, "if (quantity <= lowThreshold) return 'low_stock'"],
+  ["lib/portalAi.ts", 1, STOREFRONT, "if (quantity <= outThreshold) return 'out_of_stock'"],
+  ["lib/searchMatch.ts", 1, "searchMatch issue 'out_of_stock'", "return `${stockExpr} <= COALESCE(p.out_of_stock_threshold, 0)`"],
+  ["lib/stockCrossingAlert.ts", 1, "classifyCrossing", "if (before > low && after <= low && after > out) return 'low'"],
+  ["lib/stockCrossingAlert.ts", 1, "classifyCrossing", "if (before > out && after <= out) return 'out'"],
+  ["lib/telegram.ts", 1, "telegram counts", "COALESCE(SUM(CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) THEN 1 ELSE 0 END), 0) AS out_of_stock,"],
+  ["lib/telegram.ts", 1, "telegram counts", "COALESCE(SUM(CASE WHEN COALESCE(stock_quantity, 0) > COALESCE(out_of_stock_threshold, 0) AND COALESCE(stock_quantity, 0) <= ${lowThresholdSql} THEN 1 ELSE 0 END), 0) AS low_stock"],
+  ["lib/telegram.ts", 1, "telegram lowOrOutOfStockSql", "`(COALESCE(stock_quantity, 0) <= ${lowThresholdSql} OR COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0))`"],
+  ["lib/telegram.ts", 1, "pin telegram lowStockRowLines out test", "const out = Number(row.stock_quantity || 0) <= Number(row.out_of_stock_threshold || 0)"],
+  ["routes/branches.ts", 1, "branches.ts", "if (stockState === 'healthy') where.push(`COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0) AND COALESCE(bs.quantity, 0) > ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')}`)"],
+  ["routes/branches.ts", 1, "branches.ts", "if (stockState === 'low') where.push(`COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0) AND COALESCE(bs.quantity, 0) <= ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')}`)"],
+  ["routes/branches.ts", 1, "branches.ts", "if (stockState === 'out' || stockState === 'out_of_stock') where.push('COALESCE(bs.quantity, 0) <= COALESCE(p.out_of_stock_threshold, 0)')"],
+  ["routes/branches.ts", 1, "branches.ts", "if (stockState === 'positive' || stockState === 'in_stock') where.push('COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0)')"],
+  ["routes/inventory.ts", 1, "inventory.ts", "if (stockState === 'in_stock' || stockState === 'positive') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0)`)"],
+  ["routes/inventory.ts", 1, "inventory.ts", "if (stockState === 'low') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} <= ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')}`)"],
+  ["routes/inventory.ts", 1, "inventory.ts", "if (stockState === 'out') where.push(`${stockExpr} <= COALESCE(p.out_of_stock_threshold, 0)`)"],
+  ["routes/notifications.ts", 1, "bell inventory SELECT", "AND (COALESCE(stock_quantity, 0) <= ${lowThresholdSql}"],
+  ["routes/notifications.ts", 1, "bell inventory SELECT", "CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) THEN 1 ELSE 0 END AS is_out,"],
+  ["routes/notifications.ts", 1, "bell inventory SELECT", "OR COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0))"],
+  ["routes/notifications.ts", 1, "bell inventory SELECT", "SUM(CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) THEN 1 ELSE 0 END) OVER () AS out_total,"],
+  ["routes/portal.ts", 1, STOREFRONT, ": 'p.is_active = 1 AND COALESCE(p.stock_quantity, 0) > COALESCE(p.out_of_stock_threshold, 0)'"],
+  ["routes/portal.ts", 1, STOREFRONT, "if (quantity <= lowThreshold) return 'low_stock'"],
+  ["routes/portal.ts", 1, STOREFRONT, "if (quantity <= outThreshold) return 'out_of_stock'"],
+  ["routes/portal.ts", 1, STOREFRONT, "if (state === 'in_stock') return `${stockExpr} > COALESCE(p.low_stock_threshold, 10)`"],
+  ["routes/portal.ts", 1, STOREFRONT, "if (state === 'low_stock') return `${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} <= COALESCE(p.low_stock_threshold, 10)`"],
+  ["routes/portal.ts", 1, STOREFRONT, "if (state === 'out_of_stock') return `${stockExpr} <= COALESCE(p.out_of_stock_threshold, 0)`"],
+  ["routes/portal.ts", 1, STOREFRONT, "where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0)`)"],
+  ["routes/products.ts", 1, "products.ts", "if (stockState === 'healthy') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} > ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')}`)"],
+  ["routes/products.ts", 1, "products.ts", "if (stockState === 'in_stock' || stockState === 'positive') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0)`)"],
+  ["routes/products.ts", 1, "products.ts", "if (stockState === 'low') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} <= ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')}`)"],
+  ["routes/products.ts", 1, "products.ts", "if (stockState === 'out') where.push(`${stockExpr} <= COALESCE(p.out_of_stock_threshold, 0)`)"],
+]
+// A comparison operator next to a threshold, on either side: the columns and aliases, '${low...}' fragments, plain JS
+// 'low' / 'out' variables, effectiveLowStockThreshold(...) and the isFinite-guarded out threshold.
+const THRESHOLD_TOKEN = String.raw`(?:COALESCE\(|Number\(|toNumber\()?(?:[\w.]*(?:low_stock_threshold|out_of_stock_threshold|low_threshold|out_threshold|__low|__out)\b|\$\{\s*low\w*\s*\}|\$\{\s*lowStockThresholdSql|effectiveLowStockThreshold\(|\(Number\.isFinite\(out\)|\blow\b|\bout\b|\blowThreshold\b|\boutThreshold\b)`
+const COMPARE_OPERATOR = String.raw`(?<![=\-<>])(?:<=|>=|<|>)(?![=>])`
+const COMPARISON = new RegExp(`${COMPARE_OPERATOR}\\s*${THRESHOLD_TOKEN}|${THRESHOLD_TOKEN}\\s*${COMPARE_OPERATOR}`)
 function listTs(dir: string, base = ''): string[] {
   return readdirSync(path.join(dir, base), { withFileTypes: true }).flatMap((entry) => {
     const rel = base ? `${base}/${entry.name}` : entry.name
@@ -188,8 +267,11 @@ function listTs(dir: string, base = ''): string[] {
 // ---- The whole parity run, over a Worker source reader and a client module ----
 async function failuresOf(read: Read, fe: any, firstOnly = false): Promise<string[]> {
   const failures: string[] = []
+  // The checks that actually ran (label up to its config tag): the census below requires each known copy's runner to be here.
+  const ran = new Set<string>()
   const check = async (label: string, fn: () => unknown) => {
     if (firstOnly && failures.length) return
+    ran.add(label.replace(/ cfg\d+.*$/, ''))
     try { await fn() } catch (error: any) { failures.push(`${label}: ${String(error?.message || error).split('\n')[0].slice(0, 170)}`) }
   }
   const lowSettings = loadWorker(read, 'src/lib/lowStockSettings.ts')
@@ -245,8 +327,10 @@ async function failuresOf(read: Read, fe: any, firstOnly = false): Promise<strin
 
     // The bell: the literal SELECT out of buildInventorySection.
     await check(`bell inventory SELECT ${tag}`, async () => {
+      // The threshold column is the one the bell itself passes, read from its source.
+      const bellLow: string = lowSettings.lowStockThresholdSql(config, extract(bellSource, /const lowThresholdSql = lowStockThresholdSql\(config, '([\w.]+)'\)/, 'the bell threshold column'))
       const sql = substitute(extract(bellSource, /async function buildInventorySection[\s\S]*?db\.prepare\(`([\s\S]*?)`\)\.all</, 'the bell inventory SELECT'),
-        { '${lowThresholdSql}': lowSql, '${stockVisibleProductSql()}': guard.stockVisibleProductSql() }, 'bell')
+        { '${lowThresholdSql}': bellLow, '${stockVisibleProductSql()}': guard.stockVisibleProductSql() }, 'bell')
       const listed = new Map((matrixDb.prepare(sql).all({ itemLimit: 100000 }) as Array<Record<string, number>>).map((r) => [r.id, r]))
       const got = ids.map((id) => { const hit = listed.get(id); return !hit ? 'healthy' : hit.is_out === 1 ? 'out' : 'low' })
       assert.deepEqual(got, refs)
@@ -265,34 +349,99 @@ async function failuresOf(read: Read, fe: any, firstOnly = false): Promise<strin
     ]
     for (const [label, rel, states] of filters) {
       const source = read2(rel)
-      for (const [state, expected] of states) {
-        await check(`${label} '${state}' filter ${tag}`, () => {
-          const clause = substitute(pushClause(source, state, label), { '${stockExpr}': STOCK_EXPR, 'COALESCE(bs.quantity, 0)': STOCK_EXPR, [LOW_CALL]: lowSql }, label)
-          sameSet(ofIds(matrixDb, clause), [...expected].sort((a, b) => a - b), `${label} ${state}`)
-        })
+      // The stock figure the filter compares is the route's own `stockExpr` (selected branch / whole-catalog sum), read from its
+      // source and run in both forms; branches.ts writes COALESCE(bs.quantity, 0) inline, so it runs as written.
+      const exprs: Array<[string, string]> = /const stockExpr = /.test(source)
+        ? (() => {
+            const found = /const stockExpr = params\.branchId \? '([^']*)'\s*:\s*'([^']*)'/.exec(source)
+            assert.ok(found, `${label}: could not find stockExpr (its shape changed: update the extraction, do not delete the check)`)
+            return [['branch', found[1]], ['catalog', found[2]]] as Array<[string, string]>
+          })()
+        : [['inline', '']]
+      for (const [variant, expr] of exprs) {
+        for (const [state, expected] of states) {
+          await check(`${label} '${state}' filter [${variant}] ${tag}`, () => {
+            const clause = substitute(pushClause(source, state, label), { '${stockExpr}': expr, [LOW_CALL]: lowSql }, label)
+            sameSet(ofIdsCatalog(clause), [...expected].sort((a, b) => a - b), `${label} ${state} ${variant}`)
+          })
+        }
       }
     }
     // Telegram: the two stock counts and the low-or-out list filter.
     const telegram = read2('lib/telegram.ts')
+    // The threshold column is the one each Telegram function itself passes to lowStockThresholdSql, read from its source.
+    const telegramLow = (fn: string): string => lowSettings.lowStockThresholdSql(config, extract(telegram, new RegExp(`function ${fn}\\([^]*?lowStockThresholdSql\\(await loadLowStockConfig\\(env\\), '([\\w.]+)'\\)`), `the ${fn} threshold column`))
     await check(`telegram counts ${tag}`, () => {
-      const out = substitute(extract(telegram, /SUM\(CASE WHEN (.+?) THEN 1 ELSE 0 END\), 0\) AS out_of_stock/, 'the telegram out count'), { '${lowThresholdSql}': lowSql }, 'telegram out')
-      const low = substitute(extract(telegram, /SUM\(CASE WHEN (.+?) THEN 1 ELSE 0 END\), 0\) AS low_stock/, 'the telegram low count'), { '${lowThresholdSql}': lowSql }, 'telegram low')
+      const countLow = telegramLow('inventorySummaryReport')
+      const out = substitute(extract(telegram, /SUM\(CASE WHEN (.+?) THEN 1 ELSE 0 END\), 0\) AS out_of_stock/, 'the telegram out count'), { '${lowThresholdSql}': countLow }, 'telegram out')
+      const low = substitute(extract(telegram, /SUM\(CASE WHEN (.+?) THEN 1 ELSE 0 END\), 0\) AS low_stock/, 'the telegram low count'), { '${lowThresholdSql}': countLow }, 'telegram low')
       sameSet(ofIds(matrixDb, out), want('out'), 'telegram out')
       sameSet(ofIds(matrixDb, low), want('low'), 'telegram low')
     })
-    await check(`telegram lowOrOutOfStockSql ${tag}`, () => {
-      const clause = substitute(extract(telegram, /const lowOrOutOfStockSql = \(lowThresholdSql: string\): string =>\s*`([^`]*)`/, 'lowOrOutOfStockSql'), { '${lowThresholdSql}': lowSql }, 'telegram list')
-      sameSet(ofIds(matrixDb, clause), [...want('out'), ...want('low')].sort((a, b) => a - b), 'telegram list')
-    })
+    // lowOrOutOfStockSql serves two callers (/stock and the day's movers), each with its own threshold column.
+    for (const caller of ['inventoryReport', 'lowStockMovedOnDay']) {
+      await check(`telegram lowOrOutOfStockSql [${caller}] ${tag}`, () => {
+        const clause = substitute(extract(telegram, /const lowOrOutOfStockSql = \(lowThresholdSql: string\): string =>\s*`([^`]*)`/, 'lowOrOutOfStockSql'), { '${lowThresholdSql}': telegramLow(caller) }, 'telegram list')
+        sameSet(ofIds(matrixDb, clause), [...want('out'), ...want('low')].sort((a, b) => a - b), 'telegram list')
+      })
+    }
     await check(`searchMatch issue 'out_of_stock' ${tag}`, () => {
       const clause = substitute(extract(read2('lib/searchMatch.ts'), /case 'out_of_stock':\s*return `([^`]*)`/, "the 'out_of_stock' issue clause"), { '${stockExpr}': STOCK_EXPR }, 'searchMatch')
       sameSet(ofIds(matrixDb, clause), want('out'), 'searchMatch out')
+    })
+
+    // Inventory Check (lib/inventoryCheckProducts.ts): the three stock filters and the family flags, read from its source. __out and
+    // __low are the columns the same file defines (its own threshold column is read too); __quantity is the figure, a NULL read as 0.
+    const checkSource = read2('lib/inventoryCheckProducts.ts')
+    const checkColumns = (): string => {
+      const outExpr = extract(checkSource, /(COALESCE\(p\.out_of_stock_threshold,0\)) AS __out/, 'the Inventory Check __out column')
+      const lowColumn = extract(checkSource, /\$\{lowStockThresholdSql\(lowStock, '([\w.]+)'\)\} AS __low/, 'the Inventory Check __low column')
+      return `(SELECT p.id, COALESCE(p.stock_quantity, 0) AS __quantity, ${outExpr} AS __out, ${lowSettings.lowStockThresholdSql(config, lowColumn)} AS __low FROM products p)`
+    }
+    for (const [state, level] of [['in_stock', 'in'], ['low_stock', 'low'], ['out_of_stock', 'out']] as const) {
+      await check(`inventory check filters '${state}' ${tag}`, () => {
+        const condition = extract(checkSource, new RegExp(`query\\.stockState === '${state}'\\) stockConditions\\.push\\('([^']*)'\\)`), `the Inventory Check '${state}' filter`)
+        const got = (matrixDb.prepare(`SELECT p.id FROM ${checkColumns()} p WHERE ${condition} ORDER BY p.id`).all() as Array<{ id: number }>).map((r) => r.id)
+        sameSet(got, level === 'in' ? [...want('low'), ...want('healthy')].sort((a, b) => a - b) : want(level), `inventory check ${state}`)
+      })
+    }
+    await check(`inventory check family flags ${tag}`, () => {
+      const healthy = extract(checkSource, /MAX\(CASE WHEN (.+?) THEN 1 ELSE 0 END\) AS healthy,/, 'the Inventory Check healthy flag')
+      const low = extract(checkSource, /MAX\(CASE WHEN (.+?) THEN 1 ELSE 0 END\) AS low,/, 'the Inventory Check low flag')
+      const flags = matrixDb.prepare(`SELECT c.id, CASE WHEN ${healthy} THEN 1 ELSE 0 END AS healthy, CASE WHEN ${low} THEN 1 ELSE 0 END AS low FROM ${checkColumns()} c ORDER BY c.id`).all() as Array<{ id: number; healthy: number; low: number }>
+      assert.deepEqual(flags.map((flag) => (flag.healthy === 1 ? 'healthy' : flag.low === 1 ? 'low' : 'out')), refs)
+    })
+
+    // The Worker's own JS copies: isLowStock, and classifyCrossing (the Telegram "now low / out" alert) lifted out of its source file
+    // (importing it would pull the Telegram module graph in).
+    await check(`worker isLowStock ${tag}`, () => rows.forEach((row, index) => {
+      assert.equal(lowSettings.isLowStock(config, row.qty, row.low, row.out), refs[index] === 'low', `row ${JSON.stringify(row)}`)
+    }))
+    await check(`classifyCrossing ${tag}`, () => {
+      const crossing = extract(read2('lib/stockCrossingAlert.ts'), /(export function classifyCrossing[\s\S]*?\n\})/, 'classifyCrossing')
+      const classify = loadFunction(crossing, 'classifyCrossing') as (before: number, after: number, low: number, out: number) => string | null
+      for (const row of rows) {
+        const low = refLow(row, config)
+        const out = row.out ?? 0
+        for (const before of crossingQuantities) for (const after of crossingQuantities) {
+          const was = refState({ ...row, qty: before }, config)
+          const now = refState({ ...row, qty: after }, config)
+          const want = !(before > after) ? null : now === 'out' && was !== 'out' ? 'out' : now === 'low' && was === 'healthy' ? 'low' : null
+          assert.equal(classify(before, after, low, out), want, `row ${JSON.stringify(row)} ${before} -> ${after}`)
+        }
+      }
     })
   }
 
   // Pinned text (not runnable in isolation): exact normalised text and occurrence count.
   await check('pin telegram lowStockRowLines out test', () => {
     assert.equal(occurrences(read2('lib/telegram.ts'), 'const out = Number(row.stock_quantity || 0) <= Number(row.out_of_stock_threshold || 0)'), 1)
+  })
+  // The bell's JS: which row is "out" (is_out), and the low count (flagged minus out). The SELECT feeding them is run above.
+  await check('pin bell JS mapping and counts', () => {
+    for (const line of ['const outCount = Number(rows[0].out_total || 0)', 'const lowCount = Math.max(0, Number(rows[0].flagged_total || 0) - outCount)', 'rows.map((product) => (Number(product.is_out) === 1']) {
+      assert.equal(occurrences(bellSource, line), 1, line)
+    }
   })
 
   // The family rule: stockGroupLevel against the Dashboard's has_healthy / has_low flags, the stats tile and the alert pages.
@@ -327,6 +476,29 @@ async function failuresOf(read: Read, fe: any, firstOnly = false): Promise<strin
       const count = (level: Level) => [...expected.values()].filter((l) => l === level).length
       assert.deepEqual([stats.total_products, stats.out_of_stock, stats.low_stock, stats.healthy], [expected.size, count('out'), count('low'), count('healthy')])
     })
+    // Which member stands for a family on an alert page: among the real (non-header) members that are themselves in the alert's
+    // state, the one with the fewest units (then the lowest id); if none is, the fewest units overall.
+    const representative = (key: string, level: Level): number => {
+      const all = membersOf.get(key) as Spec[]
+      const real = all.filter((m) => !((m.group ?? 0) === 1 && (m.parent ?? 0) === 0))
+      const pool = real.length ? real : all
+      const matching = pool.filter((m) => refState({ qty: m.qty, low: m.low, out: m.out }, config) === level)
+      return [...(matching.length ? matching : pool)].sort((a, b) => (a.qty ?? 0) - (b.qty ?? 0) || a.id - b.id)[0].id
+    }
+    const wantReps = (level: Level) => [...expected].filter(([, l]) => l === level).map(([key]) => `${key}=${representative(key, level)}`).sort()
+    await check(`family representatives (alert page) ${tag}`, async () => {
+      for (const level of ['low', 'out'] as const) {
+        const page = await family.getFamilyStockAlertPage({ db: d1(familyDb), lowStock: config, state: level, page: 1, pageSize: 5000 })
+        assert.deepEqual(page.items.map((item: { id: number }) => `${familyOf.get(item.id)}=${item.id}`).sort(), wantReps(level), `${level} alert representatives`)
+      }
+    })
+    await check(`family representatives (overview) ${tag}`, async () => {
+      const result = await d1(familyDb).prepare(family.familyStockOverviewSql(lowSql)).all({ previewSize: 5000 }) as Array<Record<string, any>>
+      for (const level of ['low', 'out'] as const) {
+        const got = result.filter((r) => r.row_kind === 'alert' && r.alert_state === level).map((r) => `${familyOf.get(r.id)}=${r.id}`).sort()
+        assert.deepEqual(got, wantReps(level), `${level} overview representatives`)
+      }
+    })
   }
 
   // The review's example, side by side: products 101 (8) and 102 (50), threshold 10.
@@ -359,14 +531,24 @@ async function failuresOf(read: Read, fe: any, firstOnly = false): Promise<strin
     assert.equal(fe.isStockFamilyHeader(null), false)
   })
 
-  // Census: every threshold comparison in the Worker is accounted for.
+  // Census: every comparison against a threshold in the Worker is accounted for, by exact text and count, and each runnable one
+  // names a check that ran in this very pass.
   await check('census of threshold comparisons', () => {
-    const found: Record<string, number> = {}
+    const found = new Map<string, number>()
     for (const rel of listTs(path.join(WORKER_ROOT, 'src'))) {
-      const lines = read2(rel).split('\n').filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line) && COMPARISON.test(line))
-      if (lines.length) found[rel] = lines.length
+      for (const line of read2(rel).split('\n')) {
+        if (/^\s*(\/\/|\*|\/\*)/.test(line) || !COMPARISON.test(line)) continue
+        const key = `${rel}\u0000${norm(line)}`
+        found.set(key, (found.get(key) || 0) + 1)
+      }
     }
-    assert.deepEqual(found, KNOWN_COMPARISONS, 'a threshold comparison appeared, moved or vanished: look at it, add it to the parity run, then update KNOWN_COMPARISONS')
+    const known = new Map(KNOWN_COMPARISONS.map(([file, count, , text]) => [`${file}\u0000${text}`, count] as const))
+    const show = (map: Map<string, number>) => [...map].map(([key, count]) => `${key.replace('\u0000', ' :: ')} x${count}`).sort()
+    assert.deepEqual(show(found), show(known), `a threshold comparison appeared, moved, changed or vanished: look at it, run it through the matrix (or pin it), then update KNOWN_COMPARISONS (the shop-front lines are "${STOREFRONT_REASON}")`)
+    for (const [file, , by, text] of KNOWN_COMPARISONS) {
+      if (by === STOREFRONT) continue
+      assert.ok([...ran].some((label) => label.startsWith(by)), `${file}: "${text.slice(0, 60)}" names the check "${by}", which did not run`)
+    }
   })
   return failures
 }
@@ -437,6 +619,25 @@ const workerMutants: WorkerMutant[] = [
   { name: 'Telegram low-or-out list drops the out half', file: 'src/lib/telegram.ts', from: ' OR COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0))`', to: ')`' },
   { name: 'Telegram row label (pinned line) uses <', file: 'src/lib/telegram.ts', from: 'const out = Number(row.stock_quantity || 0) <= Number', to: 'const out = Number(row.stock_quantity || 0) < Number' },
   { name: 'issue-state out_of_stock clause uses <', file: 'src/lib/searchMatch.ts', from: "return `${stockExpr} <= COALESCE(p.out_of_stock_threshold, 0)`", to: "return `${stockExpr} < COALESCE(p.out_of_stock_threshold, 0)`" },
+  // Copies the first version of this test could not see: Inventory Check, the crossing alert, the threshold column each caller passes, the bell JS, stockExpr, the representative row, a new copy in another style, the storefront lines.
+  { name: 'Inventory Check low filter uses <', file: 'src/lib/inventoryCheckProducts.ts', from: "stockConditions.push('p.__quantity>p.__out AND p.__quantity<=p.__low')", to: "stockConditions.push('p.__quantity>p.__out AND p.__quantity<p.__low')" },
+  { name: 'Inventory Check family low flag uses <', file: 'src/lib/inventoryCheckProducts.ts', from: 'c.__quantity>c.__out AND c.__quantity<=c.__low THEN 1 ELSE 0 END) AS low,', to: 'c.__quantity>c.__out AND c.__quantity<c.__low THEN 1 ELSE 0 END) AS low,' },
+  { name: 'Telegram "now low" crossing uses <', file: 'src/lib/stockCrossingAlert.ts', from: 'if (before > low && after <= low && after > out) return', to: 'if (before > low && after < low && after > out) return' },
+  { name: 'Worker isLowStock uses <', file: 'src/lib/lowStockSettings.ts', from: 'return qty <= effectiveLowStockThreshold(config, productLowThreshold)', to: 'return qty < effectiveLowStockThreshold(config, productLowThreshold)' },
+  { name: 'bell passes the OUT threshold column to lowStockThresholdSql', file: BELL, from: "const lowThresholdSql = lowStockThresholdSql(config, 'low_stock_threshold')", to: "const lowThresholdSql = lowStockThresholdSql(config, 'out_of_stock_threshold')" },
+  { name: 'Telegram counts pass the OUT threshold column', file: 'src/lib/telegram.ts', from: "Promise<string> {\n  const lowThresholdSql = lowStockThresholdSql(await loadLowStockConfig(env), 'low_stock_threshold')\n  const row = ", to: "Promise<string> {\n  const lowThresholdSql = lowStockThresholdSql(await loadLowStockConfig(env), 'out_of_stock_threshold')\n  const row = " },
+  { name: 'Telegram /stock list passes the OUT threshold column', file: 'src/lib/telegram.ts', from: "Promise<string> {\n  const db = getDb(env)\n  const lowThresholdSql = lowStockThresholdSql(await loadLowStockConfig(env), 'low_stock_threshold')", to: "Promise<string> {\n  const db = getDb(env)\n  const lowThresholdSql = lowStockThresholdSql(await loadLowStockConfig(env), 'out_of_stock_threshold')" },
+  { name: 'Telegram day-movers list passes the OUT threshold column', file: 'src/lib/telegram.ts', from: "more: number }> {\n  const lowThresholdSql = lowStockThresholdSql(await loadLowStockConfig(env), 'low_stock_threshold')", to: "more: number }> {\n  const lowThresholdSql = lowStockThresholdSql(await loadLowStockConfig(env), 'out_of_stock_threshold')" },
+  { name: 'bell is_out mapping judges by quantity alone', file: BELL, from: 'rows.map((product) => (Number(product.is_out) === 1', to: 'rows.map((product) => (Number(product.stock_quantity || 0) <= 0' },
+  { name: 'bell low count forgets to subtract the out rows', file: BELL, from: 'const lowCount = Math.max(0, Number(rows[0].flagged_total || 0) - outCount)', to: 'const lowCount = Math.max(0, Number(rows[0].flagged_total || 0))' },
+  { name: 'Products catalog stockExpr without COALESCE', file: 'src/routes/products.ts', from: ": '(SELECT COALESCE(SUM(catalog_bs.quantity), 0) FROM branch_stock catalog_bs WHERE catalog_bs.product_id = p.id)'", to: ": '(SELECT SUM(catalog_bs.quantity) FROM branch_stock catalog_bs WHERE catalog_bs.product_id = p.id)'" },
+  { name: 'alert-page representative: low member needs < (a low member at its threshold loses to an out one)', file: STATS, from: "WHEN @__alertState = 'low' AND m.qty > m.out_threshold AND m.qty <= m.low_threshold THEN 0", to: "WHEN @__alertState = 'low' AND m.qty > m.out_threshold AND m.qty < m.low_threshold THEN 0" },
+  { name: 'alert-page representative: out member needs <', file: STATS, from: "WHEN @__alertState = 'out' AND m.qty <= m.out_threshold THEN 0", to: "WHEN @__alertState = 'out' AND m.qty < m.out_threshold THEN 0" },
+  { name: 'overview representative: low member needs <', file: STATS, from: "WHEN v.alert_state = 'low' AND m.qty > m.out_threshold AND m.qty <= m.low_threshold THEN 0", to: "WHEN v.alert_state = 'low' AND m.qty > m.out_threshold AND m.qty < m.low_threshold THEN 0" },
+  { name: 'overview representative: out member needs <', file: STATS, from: "WHEN v.alert_state = 'out' AND m.qty <= m.out_threshold THEN 0", to: "WHEN v.alert_state = 'out' AND m.qty < m.out_threshold THEN 0" },
+  { name: 'a new copy in another style appears (census)', file: 'src/routes/products.ts', from: "  if (stockState === 'out') where.push(`${stockExpr} <= COALESCE", to: "  if (stockState === 'low_only') where.push(`${stockExpr} <= COALESCE(p.low_stock_threshold, 10)`)\n  if (stockState === 'out') where.push(`${stockExpr} <= COALESCE" },
+  { name: 'a storefront copy changes (census, named exception)', file: 'src/routes/portal.ts', from: "if (quantity <= lowThreshold) return 'low_stock'", to: "if (quantity < lowThreshold) return 'low_stock'" },
+  { name: 'the other storefront copy changes (census, named exception)', file: 'src/lib/portalAi.ts', from: "if (quantity <= lowThreshold) return 'low_stock'", to: "if (quantity < lowThreshold) return 'low_stock'" },
   { name: 'a new copy appears (census)', file: 'src/lib/searchMatch.ts', from: "function issueStateClause(key: string, stockExpr: string): string | undefined {", to: "const stray = (q: string) => `${q} <= COALESCE(p.out_of_stock_threshold, 0)`\nfunction issueStateClause(key: string, stockExpr: string): string | undefined {" },
 ]
 for (const mutant of workerMutants) {
