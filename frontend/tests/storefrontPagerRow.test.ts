@@ -47,8 +47,14 @@ const renderAt = centered.indexOf('return (')
 assert.ok(renderAt > 0, 'the branch must still render its own pill')
 assert.match(centered.slice(renderAt), /^return \(\n\s*<nav/m, 'the pager is a navigation landmark')
 assert.match(centered, /<nav[^>]*aria-label=\{pageLabel\}/, 'the landmark is named')
-assert.match(centered, /aria-live="polite"/, 'page changes are announced politely')
-assert.match(centered, /aria-live="polite">\{pageLabel\} \{safePage\} \{ofLabel\} \{totalPages\}/, 'the announcement states current and total pages')
+// Round 4: ONE shared liveRegion element serves every layout, so the storefront's announcement is that element mounted by the centered
+// branch, and the element itself is defined once, bottom mount only (the top mount stays silent, so a reader hears the move once).
+assert.equal(centered.split('{liveRegion}').length - 1, 1, 'the storefront pill mounts the shared polite live region exactly once')
+const liveDefinition = pagination.match(/const liveRegion = isTop \? null : \([\s\S]*?\n  \)\n/)
+assert.ok(liveDefinition, 'the live region is rendered on the bottom mount only (silent when the position is top)')
+assert.match(liveDefinition[0], /aria-live="polite"/, 'page changes are announced politely')
+assert.match(liveDefinition[0], /\$\{pageLabel\} \$\{safePage\} \$\{ofLabel\} \$\{totalPages\}/, 'the announcement states current and total pages')
+assert.equal(pagination.split('aria-live=').length - 1, 1, 'and there is exactly one live region in the whole component')
 
 assert.equal(pagerState(1, 1, 50, 50).visible, true, 'admin semantics stay total > 0')
 assert.equal(pagerState(1, 0, 50, 50).visible, false, 'empty admin results remain hidden')

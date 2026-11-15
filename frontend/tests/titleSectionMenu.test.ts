@@ -23,6 +23,11 @@ const browserCandidates = process.platform === 'win32'
 const browserPath = browserCandidates.find((candidate) => fs.existsSync(candidate))
 assert.ok(browserPath, 'A local Chromium or Edge executable is required')
 
+// The expected Inventory label is read from the language packs, never from the value under test.
+const packs: Record<string, Record<string, string>> = {
+  en: JSON.parse(fs.readFileSync(path.join(root, 'src/lang/en.json'), 'utf8')),
+  km: JSON.parse(fs.readFileSync(path.join(root, 'src/lang/km.json'), 'utf8')),
+}
 const sidebarSource = fs.readFileSync(path.join(root, 'src/components/navigation/Sidebar.tsx'), 'utf8')
 assert.match(sidebarSource, /<SectionTitleMenu[\s\S]*sections=\{moreOpen \? \[\] : currentSections\.map/, 'the bar title is the section menu, fed the page\'s own destinations')
 
@@ -270,7 +275,7 @@ try {
       assert.deepEqual(open.bar, barClosed, `${theme} ${language} ${page}: the top bar keeps its height, background and divider while open`);
       assert.ok(open.weights.every((w: number, index: number) => index === ids.indexOf(anchor.split(':')[2]) || w < open.weights[ids.indexOf(anchor.split(':')[2])]), `${language} ${page}: the open section differs by weight (${JSON.stringify(open.weights)})`)
       assert.ok(open.labels.every((label: string) => label.length > 0 && !/^[a-z_]+$/.test(label)), `${language} ${page}: labels are translated`)
-      if (page === 'inventory') assert.equal(open.labels[0], language === 'en' ? 'Inventory' : open.labels[0], `${language}: the Inventory page's first subpage is "Inventory", not "Products"`)
+      if (page === 'inventory') assert.equal(open.labels[0], packs[language].inventory, `${language}: the Inventory page's first subpage is "Inventory", not "Products"`)
       if (page === 'inventory') assert.notEqual(open.labels[0], await evaluate<string>(`${JSON.stringify(language)} === 'km' ? 'ផលិតផល' : 'Products'`), `${language}: and it no longer reads like the main Products page`)
       assert.equal(open.reachable, true, `${language} ${page}: every item is the topmost element at its centre, over the sticky row and the float`)
       assert.equal(open.inside, true, `${language} ${page}: the list stays inside the viewport`)

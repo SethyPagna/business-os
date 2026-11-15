@@ -208,6 +208,14 @@ try {
       await settle(name, '5', `${where}: Next from the BOTTOM pager goes forward`)
       await evaluate(`${button('top', labels.next)}.click()`)
       await settle(name, '6', `${where}: Next from the TOP pager goes forward`)
+      // Spoken page announcement: exactly one polite live region per pager element, on the BOTTOM mount, carrying the page and range / total.
+      const live = await evaluate<{ top: number; bottom: number; text: string }>(`({
+        top: document.querySelectorAll("[data-layout='${name}'] [data-pager='top'] [aria-live]").length,
+        bottom: document.querySelectorAll("[data-layout='${name}'] [data-pager='bottom'] [aria-live]").length,
+        text: document.querySelector("[data-layout='${name}'] [data-pager='bottom'] [aria-live]")?.textContent || '',
+      })`)
+      assert.deepEqual([live.top, live.bottom], [0, 1], `${where}: the top mount is silent and the bottom mount has exactly one live region`)
+      assert.ok(live.text.includes('6') && live.text.includes('101-120') && live.text.includes('123,456'), `${where}: the announcement names page 6 and the range / total (${live.text})`)
       await evaluate(`${button('bottom', labels.back)}.click()`)
       await settle(name, '5', `${where}: Back from the BOTTOM pager goes back`)
     }
@@ -225,6 +233,13 @@ try {
       await pressEnter()
       await settle(name, '6173', `${where}: an oversized page lands on the last page`)
     }
+  }
+  // One page of results: the shared rule is to SHOW the pager with both arrows disabled (not hidden, not clickable and dead).
+  for (const language of ['en', 'km']) {
+    await evaluate(`window.__render('${language}', 1, 7)`)
+    await waitFor(async () => await evaluate<boolean>(`document.querySelectorAll('[data-layout]').length === 6`) ? true : null)
+    const arrows = await evaluate<Record<string, boolean[]>>(`Object.fromEntries(Array.from(document.querySelectorAll('[data-layout]')).map((section) => [section.getAttribute('data-layout'), Array.from(section.querySelectorAll('[data-pager] button')).map((button) => button.disabled)]))`)
+    for (const name of layoutNames) assert.deepEqual(arrows[name], [true, true, true, true], `${language} ${name}: on a single page the pager shows, and Back and Next are disabled in both mounts`)
   }
   console.log('PASS pager Back/Next from top and bottom, typed page numbers, EN/KM, all six layouts')
 } catch (error) {

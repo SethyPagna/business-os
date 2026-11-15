@@ -152,6 +152,15 @@ export default function PaginationControls({
     ? `${start.toLocaleString()}-${end.toLocaleString()}`
     : `${start.toLocaleString()}-${end.toLocaleString()} / ${total.toLocaleString()}`
   const isTop = (position ?? contextPosition) === 'top'
+  // Pressing Back/Next swaps the list silently: focus stays on the arrow, whose name does not change, so
+  // nothing is spoken. EVERY layout therefore carries exactly one polite live region, on the BOTTOM mount only
+  // (the top mount stays silent, so the move is heard once). It names the page and the range / total, and,
+  // like the rest of the control, speaks only what is known (a cursor pager has no page count to claim).
+  const liveRegion = isTop ? null : (
+    <span className="sr-only" aria-live="polite">
+      {unknownTotal ? `${pageLabel} ${safePage}, ${rangeText}` : `${pageLabel} ${safePage} ${ofLabel} ${totalPages}, ${rangeText}`}
+    </span>
+  )
   // One dense row on a 375px phone: below 400px Back/Next keep their icon and carry the label
   // as tooltip + accessible name (button policy); from 400px up the word is shown too.
   const edgeTextClass = 'whitespace-nowrap max-[399px]:hidden'
@@ -263,9 +272,8 @@ export default function PaginationControls({
     // And it SAYS where it went. Pressing Next swapped the grid silently: the
     // focus stays on Next, whose accessible name does not change, so nothing
     // was announced at all. The polite live region carries the page and the
-    // total. Both mounts (above and below the grid) carry one, because either
-    // one can be the pager being operated; a reader on a page with both will
-    // hear the move once per region.
+    // total. Only the bottom mount carries it (see liveRegion), so the
+    // move is heard once.
     return (
       <nav className={`flex w-full flex-wrap items-center justify-center gap-2 ${className}`} aria-label={pageLabel}>
         <div className="inline-flex max-w-full items-center rounded-full border border-slate-300 bg-white text-xs font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
@@ -314,7 +322,7 @@ export default function PaginationControls({
             <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
           </button>
         </div>
-        {isTop ? null : <span className="sr-only" aria-live="polite">{pageLabel} {safePage} {ofLabel} {totalPages}</span>}
+        {liveRegion}
       </nav>
     )
   }
@@ -379,6 +387,7 @@ export default function PaginationControls({
           <span className={edgeTextClass}>{nextLabel}</span>
           <ChevronRight className={arrowIconClass} strokeWidth={2.5} />
         </button>
+        {liveRegion}
       </div>
     )
   }
@@ -392,7 +401,7 @@ export default function PaginationControls({
     }
     const compactDraft = boundedDraft(pageDraft)
     const compactDigits = Math.max(1, compactDraft.length)
-    // One row at any count. A seven-digit total ("2,469,101-2,469,120 of 2,469,120" beside
+    // One row at any count. A seven-digit total ("2,469,101-2,469,120 / 2,469,120" beside
     // "123456 / 123456") cannot fit 272px at 11px, and the range must never shrink or clip, so
     // long strings step down to 9px with tight padding; everyday counts keep the 11px look.
     const dense = rangeText.length + `${safePage} / ${totalPages}`.length > 40
@@ -449,6 +458,7 @@ export default function PaginationControls({
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
+        {liveRegion}
       </div>
     )
   }
@@ -505,6 +515,7 @@ export default function PaginationControls({
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
+      {liveRegion}
     </div>
   )
 }
