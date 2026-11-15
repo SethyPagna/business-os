@@ -13,7 +13,7 @@ const code = ts.transpileModule(read('components/shared/PaginationControls.tsx')
 }).outputText
 new Function('require', 'module', 'exports', code)((name: string) => {
   if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'Fragment' }
-  if (name === 'react') return { useState: (...args: any[]) => currentHooks.useState(...args), useEffect: (...args: any[]) => currentHooks.useEffect(...args) }
+  if (name === 'react') return { createContext: (value: unknown) => ({ __value: value }), useContext: (context: { __value: unknown }) => context.__value, useState: (...args: any[]) => currentHooks.useState(...args), useEffect: (...args: any[]) => currentHooks.useEffect(...args) }
   if (name.includes('pagerState')) return arithmetic
   if (name.includes('lucide-react')) return { __esModule: true, default: 'Icon' }
   throw new Error('unexpected pager dependency ' + name)

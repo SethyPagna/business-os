@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { MAX_APPROVAL_REQUESTS, runApprovalFlow } from '../src/components/inventory/inventoryCheckApprovalFlow.ts'
+import { APPROVAL_SLACK, MAX_APPROVAL_REQUESTS, approvalRequestBound, runApprovalFlow } from '../src/components/inventory/inventoryCheckApprovalFlow.ts'
 import type { InventoryCheckApproval, InventoryCheckApprovalDecision } from '../src/api/inventoryChecksTransport.ts'
 
 // Lane 6.0.1045 (P1.7): approving can take many requests (the Free plan writes one stock line per request). The flow repeats the SAME decision until the
@@ -72,6 +72,25 @@ const cases: Array<[string, () => Promise<void>]> = [
     const endless = Array.from({ length: MAX_APPROVAL_REQUESTS + 5 }, () => answer(1, 2))
     const { result, sent } = await run(endless)
     assert.equal(result.outcome, 'stalled'); assert.equal(sent.length, MAX_APPROVAL_REQUESTS)
+  }],
+  ['N8: the bound follows the real caps (lines and products), so a raised cap never stalls an approval; the boundary is exact', async () => {
+    assert.equal(approvalRequestBound(undefined), MAX_APPROVAL_REQUESTS, 'no cap known: the old bound')
+    assert.equal(approvalRequestBound({ lotLinesPerSubmission: 1600, productsPerSubmission: 500 }), 1600 + APPROVAL_SLACK, 'Paid line cap 1,600 is above the old 520')
+    assert.equal(approvalRequestBound({ lotLinesPerSubmission: 400, productsPerSubmission: 40 }), MAX_APPROVAL_REQUESTS, 'Free: the 500-product floor')
+    assert.equal(approvalRequestBound({ lotLinesPerSubmission: 100, productsPerSubmission: 2000 }), 2000 + APPROVAL_SLACK, 'a raised product cap raises it too')
+    // 1,600 one-line requests finish under the bound the Paid caps give; the old constant would have stalled at 520
+    const bound = approvalRequestBound({ lotLinesPerSubmission: 1600, productsPerSubmission: 500 })
+    const script = Array.from({ length: 1600 }, (_, index) => answer(1, 1600 - 1 - index))
+    const sent: number[] = []
+    const queue = [...script]
+    const finished = await runApprovalFlow({ send: async () => { sent.push(1); return queue.shift()! }, isCurrent: () => true, maxRequests: bound })
+    assert.equal(finished.outcome, 'done'); assert.equal(sent.length, 1600)
+    const old = await runApprovalFlow({ send: async () => answer(1, 5000), isCurrent: () => true, maxRequests: MAX_APPROVAL_REQUESTS })
+    assert.equal(old.outcome, 'stalled', 'control: the old bound does stall a 1,600-line approval')
+    // the boundary: the request AT the bound is sent, the next is not
+    let count = 0
+    const bounded = await runApprovalFlow({ send: async () => { count++; return answer(1, 2) }, isCurrent: () => true, maxRequests: 30 })
+    assert.equal(bounded.outcome, 'stalled'); assert.equal(count, 30, 'exactly the bound is sent, no more')
   }],
   ['leaving the page mid-flow stops it at once and reports nothing further', async () => {
     let live = true

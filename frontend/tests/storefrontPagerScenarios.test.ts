@@ -293,11 +293,12 @@ await runTest('the row order is [Back] [page / total] [Next] -- and both mounts 
   const pageAt = branch.indexOf('aria-label={pageLabel}', backAt)
   const totalAt = branch.indexOf('<span className={countClass}>')
   const nextAt = branch.indexOf('aria-label={nextLabel}')
-  assert.ok(backAt > 0 && pageAt > backAt && totalAt > pageAt && nextAt > totalAt)
+  const rangeAt = branch.indexOf('{rangeText}')
+  assert.ok(backAt > 0 && rangeAt > backAt && pageAt > rangeAt && totalAt > pageAt && nextAt > totalAt, 'owner 14 Nov: Back, range of total, page, total pages, Next')
   assert.doesNotMatch(branch, /<PageSizeSelect/, 'P10-20: the per-page chooser must not come back to this row')
 
   const mounts = catalogProducts.match(/<CatalogPaginationControls\b/g) || []
-  assert.equal(mounts.length, 2)
+  assert.equal(mounts.length, 1, 'one shared pager element, mounted above (TopPager) and below')
   const gates = catalogProducts.match(/\{showPager \? \(/g) || []
   assert.equal(gates.length, 2, 'both mounts must share exactly one visibility fact, or they can disagree at some size again')
 })

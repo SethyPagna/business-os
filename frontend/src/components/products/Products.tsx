@@ -32,7 +32,7 @@ import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import { useScannedQuery } from '../shared/useScannedQuery.ts'
 import { findScanHit } from '../../utils/scanExactHit.ts'
 import { classifyScanMiss } from '../../utils/scanMiss.ts'
-import PaginationControls, { PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
+import PaginationControls, { PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE, TopPager } from '../shared/PaginationControls'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
 import ProductsListSurface, { PINNED_BG, PINNED_BG_SELECTED, PINNED_CELL, ROW_TEXT_GUTTER, pinnedLeft } from './surfaces/ProductsListSurface'
 import ColumnChooser from '../shared/ColumnChooser.tsx'
@@ -5155,6 +5155,20 @@ function ProductsFullEditor() {
   // pinned search bar (user, Aug 29: "search did not stick to the very top").
   // With the scroll container flush-topped, the search bar pins to the true
   // top and nothing bleeds above it.
+  const productsPager = (
+    <PaginationControls
+      page={productPage}
+      pageSize={productSafePageSize}
+      totalItems={productTotal}
+      onPageChange={setProductPage}
+      onPageSizeChange={(nextValue) => { setProductPageSize(nextValue); setProductPage(1) }}
+      pageSizeOptions={PAGE_SIZE_OPTIONS}
+      t={t}
+      compact
+      rangeAsPageSize
+      editablePageSizeInput={false}
+    />
+  )
   return (
     <div className="page-scroll px-3 pb-3 sm:px-6 sm:pb-6">
       {/* ONE read of the open review requests for this page, shared by every
@@ -5352,18 +5366,7 @@ function ProductsFullEditor() {
         <p className="mb-2 text-center text-sm text-gray-500" role="status">{t('search_type_one_more')}</p>
       ) : (
       <div className="mb-2 flex justify-center px-0.5">
-        <PaginationControls
-          compact
-          rangeAsPageSize
-          editablePageSizeInput={false}
-          page={productPage}
-          pageSize={productSafePageSize}
-          totalItems={productTotal}
-          onPageChange={setProductPage}
-          onPageSizeChange={(nextValue) => { setProductPageSize(nextValue); setProductPage(1) }}
-          pageSizeOptions={PAGE_SIZE_OPTIONS}
-          t={t}
-        />
+        <TopPager>{productsPager}</TopPager>
       </div>
       )}
 
@@ -5783,18 +5786,7 @@ function ProductsFullEditor() {
           control, same state, just so paging through a long list doesn't
           require scrolling back up to the bar above the search row. */}
       <div className={searchTooShort ? 'hidden' : 'mt-2 flex justify-center'}>
-        <PaginationControls
-          page={productPage}
-          pageSize={productSafePageSize}
-          totalItems={productTotal}
-          onPageChange={setProductPage}
-          onPageSizeChange={(nextValue) => { setProductPageSize(nextValue); setProductPage(1) }}
-          pageSizeOptions={PAGE_SIZE_OPTIONS}
-          t={t}
-          compact
-          rangeAsPageSize
-          editablePageSizeInput={false}
-        />
+        {productsPager}
       </div>
 
       </>)}

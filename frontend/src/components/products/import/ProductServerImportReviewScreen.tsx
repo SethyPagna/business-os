@@ -4,7 +4,7 @@ import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import AppSelect from '../../shared/AppSelect'
-import PaginationControls from '../../shared/PaginationControls'
+import PaginationControls, { TopPager } from '../../shared/PaginationControls'
 import { approveImportJob, getImportJob, getImportJobReview, updateImportJobDecisions } from '../../../api/importJobsTransport'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards'
 import { importPollDelayMs } from '../../../utils/importPoll'
@@ -261,6 +261,9 @@ function ProductServerImportReviewBody({ jobId, jobRevision, t, notify, onApprov
     </div>
   }
 
+  const pager = (
+    <PaginationControls compact rangeAsPageSize page={page} pageSize={PAGE_SIZE} totalItems={total} label="records" onPageChange={setPage} />
+  )
   return <div className="space-y-4">
     <div><h3 className="text-sm font-semibold">{tr('import_review_title', 'Review before importing')} — Products</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{summary || tr('import_review_no_actions', 'No actionable rows were found.')}</p>{replaceAll ? <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{tr('import_replace_skip_note', 'Replace entire catalog: a row you skip keeps its product. Only products the file never mentions are removed.')}</p> : null}</div>
     {unresolved > 0 ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"><strong>{unresolved} flagged row(s) still need a decision.</strong> Barcode/SKU collisions stay separate by default; negative stock becomes 0. Confirm that safe result or skip the row.</div> : null}
@@ -269,6 +272,7 @@ function ProductServerImportReviewBody({ jobId, jobRevision, t, notify, onApprov
       <AppSelect value={filter} onChange={(value) => { setFilter(value); setPage(1) }} ariaLabel="Filter rows" buttonClassName="w-full px-2.5 py-2 text-sm" options={[{ value: 'all', label: 'All' }, { value: 'create', label: 'Create' }, { value: 'update', label: 'Update' }, { value: 'skip', label: 'Skip' }, { value: 'error', label: 'Errors' }]} />
       <AppSelect value={sort} onChange={(value) => { setSort(value); setPage(1) }} ariaLabel="Sort rows" buttonClassName="w-full px-2.5 py-2 text-sm" options={[{ value: 'row_asc', label: 'First–last' }, { value: 'row_desc', label: 'Last–first' }, { value: 'name_asc', label: 'Name A–Z' }, { value: 'name_desc', label: 'Name Z–A' }]} />
     </div>
+    <div className="flex justify-center"><TopPager>{pager}</TopPager></div>
     <div className="max-h-[32rem] overflow-auto rounded-xl border border-slate-200 dark:border-slate-700">
       {loadingRows ? <div className="flex justify-center p-8"><Loader2 className="h-5 w-5 animate-spin" /></div> : rows.length ? <table className="w-full min-w-[48rem] text-left text-xs"><thead className="sticky top-0 bg-slate-50 dark:bg-slate-800"><tr><th className="px-3 py-2">#</th><th className="px-3 py-2">Product</th><th className="px-3 py-2">Server preview</th><th className="px-3 py-2">Details</th><th className="px-3 py-2">Decision</th></tr></thead><tbody>{rows.map((row) => {
         const requiresDecision = choiceFor(row) === 'needs_decision'
@@ -283,7 +287,7 @@ function ProductServerImportReviewBody({ jobId, jobRevision, t, notify, onApprov
         return <tr key={row.rowNumber} className="border-t border-slate-100 align-top dark:border-slate-800"><td className="px-3 py-2">{row.rowNumber}</td><td className="px-3 py-2 font-medium">{row.identifier || String(row.data?.name || '—')}<div className="mt-0.5 font-normal text-slate-400">{String(row.data?.barcode || row.data?.sku || '')}</div></td><td className="px-3 py-2">{row.action}</td><td className="max-w-sm px-3 py-2 text-slate-500 dark:text-slate-400">{row.message || (row.warnings || []).map((warning) => warning.message).filter(Boolean).join(' · ') || '—'}</td><td className="w-52 px-3 py-2"><AppSelect value={choiceFor(row)} onChange={(value) => void saveDecision(row, value)} ariaLabel={`Decision for row ${row.rowNumber}`} buttonClassName="w-full px-2 py-1.5 text-xs" options={options} disabled={!canEditCosts || savingRow !== null} /></td></tr>
       })}</tbody></table> : <div className="p-8 text-center text-sm text-slate-500">No matching rows.</div>}
     </div>
-    <div className="flex justify-center"><PaginationControls compact rangeAsPageSize page={page} pageSize={PAGE_SIZE} totalItems={total} label="records" onPageChange={setPage} /></div>
+    <div className="flex justify-center">{pager}</div>
     {jobError ? <p className="text-xs text-red-600 dark:text-red-400">{jobError}</p> : null}
     <div className="sticky bottom-0 -mx-5 -mb-5 flex justify-end gap-2 border-t border-slate-100 bg-white px-5 pb-5 pt-3 dark:border-slate-800 dark:bg-slate-900"><button type="button" className="btn-secondary" disabled={approving} onClick={() => void onReviewLater()}>Review later</button><button type="button" className="btn-primary" disabled={!canEditCosts || approving || loadingRows || unresolved > 0} onClick={() => void confirm()}>{approving ? 'Approving…' : 'Confirm & import'}</button></div>
   </div>

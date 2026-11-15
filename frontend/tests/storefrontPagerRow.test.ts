@@ -23,7 +23,8 @@ const backAt = centered.indexOf('aria-label={backLabel}')
 const pageAt = centered.indexOf('aria-label={pageLabel}', backAt)
 const totalAt = centered.indexOf('<span className={countClass}>')
 const nextAt = centered.indexOf('aria-label={nextLabel}')
-assert.ok(backAt > 0 && pageAt > backAt && totalAt > pageAt && nextAt > totalAt, 'the row is Back, editable page, total, Next')
+const rangeAt = centered.indexOf('{rangeText}')
+assert.ok(backAt > 0 && rangeAt > backAt && pageAt > rangeAt && totalAt > pageAt && nextAt > totalAt, 'owner 14 Nov: the row is Back, item range of total, editable page, page total, Next')
 
 assert.equal((centered.match(/<button\b/g) || []).length, 2, 'Back and Next are the only buttons this branch writes itself')
 assert.equal((centered.match(/<input\b/g) || []).length, 1, 'the page remains directly editable')
@@ -33,8 +34,9 @@ assert.match(centered, /h-9/, 'the phone-first controls are 36px high')
 assert.match(centered, /max\(2\.25rem, calc\(\$\{pageDigits\}ch \+ 0\.5rem\)\)/, 'the editable field has a 36px width floor and grows with its digits')
 assert.match(centered, /focus-visible:ring-2/, 'all centered focusables share a visible keyboard ring')
 assert.match(centered, /focus-visible:ring-inset/, 'the pill cannot clip the focus ring')
-assert.doesNotMatch(centered, /hidden sm:inline/, 'Back and Next stay visible at 375px')
-assert.ok((centered.match(/whitespace-nowrap/g) || []).length >= 3, 'both labels and the count stay on one line')
+assert.doesNotMatch(centered, /hidden sm:inline/, 'Back and Next are never sm:-hidden')
+assert.equal((centered.match(/<span className=\{edgeTextClass\}>/g) || []).length, 2, 'both labels use the shared edge-text class (word from 400px, icon + tooltip below)')
+assert.ok((centered.match(/whitespace-nowrap/g) || []).length >= 1, 'the count stays on one line')
 
 // P10-20 removed the per-page-only exception this guard used to implement
 // (a one-page pill no longer stays up as a rows-per-page control, because
@@ -45,8 +47,14 @@ const renderAt = centered.indexOf('return (')
 assert.ok(renderAt > 0, 'the branch must still render its own pill')
 assert.match(centered.slice(renderAt), /^return \(\n\s*<nav/m, 'the pager is a navigation landmark')
 assert.match(centered, /<nav[^>]*aria-label=\{pageLabel\}/, 'the landmark is named')
-assert.match(centered, /aria-live="polite"/, 'page changes are announced politely')
-assert.match(centered, /aria-live="polite">\{pageLabel\} \{safePage\} \{ofLabel\} \{totalPages\}/, 'the announcement states current and total pages')
+// Round 4: ONE shared liveRegion element serves every layout, so the storefront's announcement is that element mounted by the centered
+// branch, and the element itself is defined once, bottom mount only (the top mount stays silent, so a reader hears the move once).
+assert.equal(centered.split('{liveRegion}').length - 1, 1, 'the storefront pill mounts the shared polite live region exactly once')
+const liveDefinition = pagination.match(/const liveRegion = isTop \? null : \([\s\S]*?\n  \)\n/)
+assert.ok(liveDefinition, 'the live region is rendered on the bottom mount only (silent when the position is top)')
+assert.match(liveDefinition[0], /aria-live="polite"/, 'page changes are announced politely')
+assert.match(liveDefinition[0], /\$\{pageLabel\} \$\{safePage\} \$\{ofLabel\} \$\{totalPages\}/, 'the announcement states current and total pages')
+assert.equal(pagination.split('aria-live=').length - 1, 1, 'and there is exactly one live region in the whole component')
 
 assert.equal(pagerState(1, 1, 50, 50).visible, true, 'admin semantics stay total > 0')
 assert.equal(pagerState(1, 0, 50, 50).visible, false, 'empty admin results remain hidden')

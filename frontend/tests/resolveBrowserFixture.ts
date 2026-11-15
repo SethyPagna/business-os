@@ -137,7 +137,7 @@ export async function launchResolveFixture(slug: string, fixtureSource: string):
       const tight = []; const clipped = []; let checked = 0
       for (const node of document.querySelector(${JSON.stringify(scope)}).querySelectorAll('*')) {
         const own = [...node.childNodes].some((child) => child.nodeType === 3 && /[\\u1780-\\u17FF]/.test(child.textContent))
-        if (!own || node.closest('.sr-only')) continue
+        if (!own || node.closest('.sr-only, .stock-qty-word')) continue
         checked += 1
         const style = getComputedStyle(node)
         const size = parseFloat(style.fontSize)

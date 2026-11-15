@@ -34,6 +34,8 @@ export type InventoryCheckProduct = {
   next_expiry_date?: string | null
   /** The latest check of this product in the chosen branch scope (ic_simple list rows only). Counts and names arrive only for viewers who may see them. */
   check_status?: InventoryCheckListStatus
+  /** Grouped list: the group this product's family is in (`d:YYYY-MM-DD`, `never`, `c:<category>`, `none`). */
+  group_key?: string
   check_counted_quantity?: number | null
   check_note?: string | null
   check_by?: string
@@ -51,6 +53,10 @@ export type InventoryCheckProduct = {
   lot_rows?: InventoryCheckLotRow[]
   /** The row's dates were cut at the plan's limit: the rest load on request ("More dates"). */
   lots_more?: boolean
+  /** Another device changed this row after the list was read: the dates it carries may be out of date, so they are read once (GET /lots) before the count popover or the page mark uses them. */
+  lots_stale?: boolean
+  /** Received dates this branch holds at 0 (the row carries them, nothing is read for them): offered behind "Show empty received dates" for units found on a batch the system says is empty. */
+  empty_lot_rows?: InventoryCheckLotRow[]
   /** Branch units that no received date holds (branch total minus the dates), shown read-only; absent when there are none or the dates are not known. */
   unlotted_quantity?: number
   /** ic_wired rows: what the latest count typed per received date (batch_id 0 = the branch total). */
@@ -58,7 +64,10 @@ export type InventoryCheckProduct = {
 }
 
 /** One received date held at the listed branch (ic_lot_counts): the figure a count per date is typed against. */
-export type InventoryCheckLotRow = { batchId: number; receivedAt: string | null; expiry: string | null; quantity: number }
+export type InventoryCheckLotRow = { batchId: number; receivedAt: string | null; expiry: string | null; quantity: number; /** The identity printed on the batch (read on demand by the count popover). */ lotCode?: string | null; batchNumber?: number | null }
+
+/** The answer of GET /api/inventory-checks/lots: one product's batches at one branch. `more`: the product holds more batches than one count may carry. */
+export type InventoryCheckLotsAnswer = { productId: number; branchId: number; lots: InventoryCheckLotRow[]; more?: true }
 
 export type InventoryCheckListStatus = 'not_checked' | 'in_check' | 'ok' | 'issue'
 

@@ -171,6 +171,8 @@ function getEntries(ctx) {
     ['inventory-checks/list wired low stock', `/api/inventory-checks/list?branchId=1&stockState=low_stock&page=1&pageSize=50`, { switches: ['ic_wired'] }],
     ['inventory-checks/overlay wired window of 150', `/api/inventory-checks/overlay?branchId=1&lots=1&ids=${Array.from({ length: 150 }, (_, n) => 1000 + n).join(',')}`, { switches: ['ic_wired'] }],
     ['inventory-checks/overlay wired window of 150 without lots', `/api/inventory-checks/overlay?branchId=1&ids=${Array.from({ length: 150 }, (_, n) => 1000 + n).join(',')}`, { switches: ['ic_wired'] }],
+    // ic_lot_counts: the count popover reads ONE product's batches at ONE branch when it opens (lib/inventoryCheckLots.ts); never a page of them.
+    ['inventory-checks/lots one product at a branch', `/api/inventory-checks/lots?productId=1000&branchId=1`, { switches: ['ic_lot_counts'] }],
     // INV-A S7: the shared ranked scope (switch catalog_ranked_scope, with ic_wired for the Inventory list). The harness runs every GET with the Cache API answering nothing, so these are the FIRST-read
     // cost of a scope (the ranking plus the page's rows); a stored ranking is measured by scripts/test-ranked-scope-reads-native.cjs, which reads a deep page from a stored ranking.
     ['products/search ranked Products default', `/api/products/search?${P}&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`, { switches: ['catalog_ranked_scope'] }],

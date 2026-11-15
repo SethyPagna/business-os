@@ -60,7 +60,7 @@ function load(file: string, code = read(file), extra: (id: string) => unknown = 
     if (id.endsWith('icons/hourglass.js')) return { default: (props: Record<string, unknown>) => React.createElement('svg', { 'data-icon': 'hourglass', ...props }), __esModule: true }
     const injected = extra(id)
     if (injected !== undefined) return injected
-    return { default: () => null, __esModule: true }
+    return { default: () => null, TopPager: (props: { children?: unknown }) => props.children ?? null, __esModule: true }
   }, mod, mod.exports)
   return mod.exports
 }

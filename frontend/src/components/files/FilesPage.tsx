@@ -21,7 +21,7 @@ import Modal from '../shared/Modal'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import FilterMenu from '../shared/FilterMenu'
-import PaginationControls from '../shared/PaginationControls'
+import PaginationControls, { TopPager } from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
@@ -1500,6 +1500,9 @@ export default function FilesPage() {
     </button>
   )
 
+  const pager = (
+    <PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalFiles} label={tr('files', 'files')} t={(key) => tr(key, key)} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
+  )
   return (
     <div className="page-scroll flex flex-col gap-4 p-3 sm:p-6">
       <PageHeader
@@ -1692,6 +1695,7 @@ export default function FilesPage() {
             ) : null}
           </div>
 
+          {!loadingFiles ? <div className="card flex justify-center px-4 py-3"><TopPager>{pager}</TopPager></div> : null}
           {loadingFiles && !files.length ? (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" aria-hidden="true">
               {Array.from({ length: 8 }).map((_, index) => (
@@ -1807,7 +1811,7 @@ export default function FilesPage() {
               })}
             </div>
           ) : null}
-          {!loadingFiles ? <div className="card flex justify-center px-4 py-3"><PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalFiles} label={tr('files', 'files')} t={(key) => tr(key, key)} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} /></div> : null}
+          {!loadingFiles ? <div className="card flex justify-center px-4 py-3">{pager}</div> : null}
         </>
       ) : null}
 

@@ -18,7 +18,7 @@ import type { ContactDuplicateCluster, ContactDuplicateSeverity, ContactTableKin
 import { contactHistoryParts, createContactResolveAdapter } from './contactResolveAdapter.ts'
 import SaleLinkConflictsSection, { type SaleLinkToolbarControls } from './SaleLinkConflictsSection'
 import { useApp } from '../../AppContext.tsx'
-import PaginationControls, { DEFAULT_PAGE_SIZE, paginateItems } from '../shared/PaginationControls.tsx'
+import PaginationControls, { DEFAULT_PAGE_SIZE, paginateItems, TopPager } from '../shared/PaginationControls.tsx'
 import {
   RESTORE_WORK_EVENT,
   consumePendingRestore,
@@ -589,6 +589,20 @@ export default function DuplicatesTab({ t, notify, active = true, includeSupplie
     </>
   )
 
+  const pager = (
+    <PaginationControls
+      compact
+      rangeAsPageSize
+      page={page}
+      pageSize={pageSize}
+      totalItems={visibleClusters.length}
+      onPageChange={setPage}
+      onPageSizeChange={(next) => { setPageSize(next); setPage(1) }}
+      label={t('conflicts') || 'conflicts'}
+      t={t}
+      className="justify-center"
+    />
+  )
   return (
     <div className="space-y-3">
       {saleLinksActive ? <SaleLinkConflictsSection t={t} notify={notify} renderToolbar={renderConflictToolbar} /> : (
@@ -669,6 +683,7 @@ export default function DuplicatesTab({ t, notify, active = true, includeSupplie
             </div>
           ) : null}
 
+          <TopPager>{pager}</TopPager>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {pagedClusters.map((cluster) => {
               const id = clusterKey(table, cluster)
@@ -690,18 +705,7 @@ export default function DuplicatesTab({ t, notify, active = true, includeSupplie
               )
             })}
           </div>
-          <PaginationControls
-            compact
-            rangeAsPageSize
-            page={page}
-            pageSize={pageSize}
-            totalItems={visibleClusters.length}
-            onPageChange={setPage}
-            onPageSizeChange={(next) => { setPageSize(next); setPage(1) }}
-            label={t('conflicts') || 'conflicts'}
-            t={t}
-            className="justify-center"
-          />
+          {pager}
         </>
       )}
       </>

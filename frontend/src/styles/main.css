@@ -249,6 +249,11 @@ html:not(.dark) body.lang-km .text-slate-500 {
    are exactly where Khmer becomes hard to read -- give them a floor. */
 body.lang-km .text-\[10px\] { font-size: calc(0.72rem * var(--ui-text-scale, 1)) !important; }
 body.lang-km .text-\[11px\] { font-size: calc(0.78rem * var(--ui-text-scale, 1)) !important; }
+/* The 9px step the dense compact pager takes for seven-digit counts (PaginationControls `dense`). It is DIGITS and a slash only, so it
+   takes the 10px digit size the app already uses for numbers (.price-strip-qty chip: .625rem; .7rem, the price digits, measured too wide here) --
+   without this rule the class bypasses every km floor and the Khmer pager fell from 12.48px to 9px. Checked to still fit one row at
+   320px and 375px in e2e/compact-pager-numbers.spec.ts (0.675rem still fits, 0.7rem overflows 320px). */
+body.lang-km .text-\[9px\] { font-size: calc(0.625rem * var(--ui-text-scale, 1)) !important; }
   :root {
     --sidebar-width: 240px;
     --ui-font-size: 14px;
@@ -631,6 +636,20 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
   .badge-yellow { @apply bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 text-xs px-2 py-0.5 rounded-full font-medium; }
   .badge-blue   { @apply bg-blue-100   text-blue-700   dark:bg-blue-900/30   dark:text-blue-400   text-xs px-2 py-0.5 rounded-full font-medium; }
   .badge-green, .badge-red, .badge-yellow, .badge-blue { font-size: var(--ui-chip-size, 12px); }
+
+  /* StockQty (inventory/StockQty.tsx): the stock FIGURE itself tinted by state -- not a badge beside it.
+     Same palettes as the badge-* tokens so a figure reads like the Low/Out badges elsewhere. Weight
+     comes from the cell (no font-weight here: Tailwind would widen the Khmer weight rules to it). No
+     vertical padding and an inherited line-height: the tint is the text's own line box, so a row
+     never grows and Khmer ascenders and subscripts keep the room the row already gave them. */
+  .stock-qty { @apply inline-block rounded px-1.5 tabular-nums; line-height: inherit; }
+  .stock-qty-healthy { @apply bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300; }
+  .stock-qty-low     { @apply bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300; }
+  .stock-qty-out     { @apply bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300; }
+  /* The state word, for screen readers and text selection only. Not Tailwind's sr-only: that one is position:absolute, which
+     makes it a block and puts a line break between the figure and the word in innerText and in copied text. This one stays
+     inline (white-space:pre keeps its leading space) in a net-zero 1px box, so the pill's width and height do not change. */
+  .stock-qty-word { display: inline-block; width: 1px; height: 1px; margin-right: -1px; overflow: hidden; clip-path: inset(50%); white-space: pre; }
 
   .sidebar-item {
     @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 dark:text-zinc-400

@@ -6,14 +6,15 @@
 //
 // Both answer 404 while the switch is off; the page then keeps today's list (`not_wired`). Pure functions only, so the open sequence can be tested without a browser.
 import { buildQueryString, type QueryParams } from '../../api/query.ts'
-import type { InventoryCheckProduct } from '../../types/inventoryChecks.ts'
+import type { InventoryCheckLotRow, InventoryCheckProduct } from '../../types/inventoryChecks.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
+import type { Grouping } from './inventoryCheckGroups.ts'
 import { PRICE_KEYS } from './inventoryPriceFacts.ts'
 import { patchProductFromStockAnswer, patchProductFromStockConflict, type StockConflictAnswer, type StockWriteAnswer } from './stockAnswerPatch.ts'
 
 export type Branch = { id: number; name: string }
 type Row = Record<string, unknown> & { lots_more?: boolean; id: number | string; branch_stock?: Array<{ branch_id?: number | string; branch_name?: string | null; quantity?: number | null }>; stock_quantity?: number | null; lots?: Lot[] }
-export type Lot = { id: number | string; received_at?: string | null; expiry_date?: string | null; branches?: Array<{ branch_id: number | string; quantity?: number | null }> }
+export type Lot = { id: number | string; received_at?: string | null; expiry_date?: string | null; lot_code?: string | null; batch_number?: number | null; branches?: Array<{ branch_id: number | string; quantity?: number | null }> }
 type Tagged = { product_id: number | string; branch_id?: number | string | null; condition_tag?: string | null; quantity?: number | null }
 export type OverlayEntry = {
   product_id: number
@@ -23,8 +24,8 @@ export type OverlayEntry = {
   pending?: true
 }
 export type WiredSummary = { ok?: number; issue?: number; pending?: number; not_checked?: number; total?: number }
-export type WiredExtras = { summary?: WiredSummary; capabilities?: { fixStock?: boolean; approveCounts?: boolean; lotCounts?: boolean; directSet?: boolean } }
-export type WiredList = { items: Row[]; total: number; page: number; pageSize: number; totalPages?: number; tagged_lots?: Tagged[]; /** The promotion rules behind the rows' prices (sent only to a viewer with the price grant). */ promotion_rules?: PromotionRule[]; wired?: boolean; projected?: boolean; /** The most ids one overlay read may carry (the plan's limit, echoed by the server). */ overlay_ids?: number } & WiredExtras
+export type WiredExtras = { summary?: WiredSummary; capabilities?: { fixStock?: boolean; approveCounts?: boolean; lotCounts?: boolean; directSet?: boolean; groupings?: Array<'checked' | 'category'> } }
+export type WiredList = { items: Row[]; total: number; page: number; pageSize: number; totalPages?: number; tagged_lots?: Tagged[]; /** The promotion rules behind the rows' prices (sent only to a viewer with the price grant). */ promotion_rules?: PromotionRule[]; wired?: boolean; projected?: boolean; /** Present when the read asked for a grouping (groupBy): the sections, the same shape as the check-status list's. */ grouping?: Grouping; /** The most ids one overlay read may carry (the plan's limit, echoed by the server). */ overlay_ids?: number } & WiredExtras
 export type OverlayAnswer = { items?: OverlayEntry[]; lots?: Array<{ product_id: number; lots?: Lot[]; lots_more?: boolean }> } & WiredExtras
 /** The dates of one row; `more` is set when the plan's limit cut them. */
 type RowLots = Lot[] & { more?: boolean }
@@ -44,11 +45,11 @@ export function wiredListParams(params: QueryParams, options: { omitBranch?: boo
   const out: QueryParams = {}
   for (const key of LIST_KEYS) if (present(params[key])) out[key] = params[key]
   if (present(params.branchId) && !options.omitBranch) out.branchId = params.branchId
-  // The date of the check orders only a list of checked products, so it is sent with a check state (a stale choice never reaches the server alone).
-  // ...and never beside a search or filter: the Worker refuses that combination (its pages are cut before they could narrow).
-  const narrowed = ['query', 'brand', 'category', 'stockState'].some(key => present(params[key]))
-  out.sortBy = params.sortBy === 'name' ? 'name' : params.sortBy === 'checked' && !narrowed && ['ok', 'issue', 'pending'].includes(String(params.checkState)) ? 'checked' : 'created'
-  out.sortDirection = params.sortDirection === 'asc' ? 'asc' : 'desc'
+  // A grouping defines the order: the server refuses it beside a sort. The page sends none while a search is typed (and a groupBy that did arrive beside a query is ignored by the Worker).
+  // The date order of the checks is the grouping "Last checked", never a sort.
+  if (params.groupBy) out.groupBy = params.groupBy
+  else out.sortBy = params.sortBy === 'name' ? 'name' : 'created'
+  if (!params.groupBy) out.sortDirection = params.sortDirection === 'asc' ? 'asc' : 'desc'
   if (options.skipSummary) out.summary = 0
   return out
 }
@@ -103,6 +104,7 @@ function adaptRow(row: Row, raw: Pick<WiredRaw, 'branchId' | 'overlay' | 'lots'>
     id, name: String(row.name ?? ''), sku: row.sku as string | null | undefined, barcode: row.barcode as string | null | undefined, image_path: row.image_path as string | null | undefined,
     unit: row.unit as string | null | undefined, brand: row.brand as string | null | undefined, category: row.category as string | null | undefined,
     parent_id: row.parent_id as number | string | null | undefined, checkable: true, matches_filters: true,
+    group_key: row.group_key as string | undefined,
     ...(quantity === undefined ? {} : { quantity: quantity ?? null }),
     ...(raw.damaged.has(`${id}:${branchId}`) || raw.damaged.has(`${id}:0`) ? { damaged_quantity: raw.damaged.get(`${id}:${branchId}`) ?? raw.damaged.get(`${id}:0`) } : {}),
     ...(received ? { latest_received_at: received } : {}), ...(expiry ? { next_expiry_date: expiry } : {}),
@@ -131,10 +133,17 @@ function adaptRow(row: Row, raw: Pick<WiredRaw, 'branchId' | 'overlay' | 'lots'>
   if (branchId && lots?.length) {
     const held = lots.flatMap(lot => {
       const at = (lot.branches ?? []).find(candidate => Number(candidate.branch_id) === branchId)
-      // A date at 0 is listed too: units found on it are a count (and a Set to more than 0 goes through the writer).
-      return at && Number(lot.id) > 0 ? [{ batchId: Number(lot.id), receivedAt: lot.received_at ?? null, expiry: lot.expiry_date ?? null, quantity: Number(at.quantity) }] : []
+      // Only a date that holds stock here (owner, 14 Nov: lists show only batches with stock): an empty date is never a line, so "matches stock" cannot write a zero for it.
+      return at && Number(lot.id) > 0 && Number(at.quantity) > 0 ? [{ batchId: Number(lot.id), receivedAt: lot.received_at ?? null, expiry: lot.expiry_date ?? null, quantity: Number(at.quantity), lotCode: lot.lot_code ? String(lot.lot_code) : null, batchNumber: lot.batch_number ?? null }] : []
     })
-    if (held.length) product.lot_rows = held
+    // Always set once the list carried the dates (an empty list means no batch holds stock here): the count popover draws from it at first paint and reads nothing unless lots_more.
+    product.lot_rows = held
+    // The dates this branch holds at 0 ride along (read from the same row, no request): a counter who finds units on one needs a way to enter them. Never part of "matches stock".
+    const empty = lots.flatMap(lot => {
+      const at = (lot.branches ?? []).find(candidate => Number(candidate.branch_id) === branchId)
+      return at && Number(lot.id) > 0 && !(Number(at.quantity) > 0) ? [{ batchId: Number(lot.id), receivedAt: lot.received_at ?? null, expiry: lot.expiry_date ?? null, quantity: 0, lotCode: lot.lot_code ? String(lot.lot_code) : null, batchNumber: lot.batch_number ?? null }] : []
+    })
+    if (empty.length) product.empty_lot_rows = empty
     if (lots.more) product.lots_more = true
     // Units no received date holds, read-only: the branch total minus the dates (only when every date is known).
     const unlotted = !lots.more && finite(quantity) ? quantity - held.reduce((sum, row) => sum + row.quantity, 0) : 0
@@ -157,7 +166,7 @@ export function wiredResult(raw: WiredRaw, previous?: { summary?: Record<string,
   const summary = incoming || last ? { not_checked: incoming?.not_checked ?? last?.not_checked ?? 0, in_check: 0, ok: incoming?.ok ?? last?.ok ?? 0, issue: incoming?.issue ?? last?.issue ?? 0, total: incoming?.total ?? last?.total ?? 0,
     ...(incoming?.pending !== undefined || last?.pending !== undefined ? { pending: incoming?.pending ?? last?.pending ?? 0 } : {}) } : undefined
   return {
-    wired: true as const, simple: true as const, items: list.items.map(row => adaptRow(row, { ...raw, damaged })), total: list.total, page: list.page, pageSize: list.pageSize, totalPages: list.totalPages,
+    wired: true as const, simple: true as const, items: list.items.map(row => adaptRow(row, { ...raw, damaged })), total: list.total, page: list.page, pageSize: list.pageSize, totalPages: list.totalPages, grouping: list.grouping,
     branches: raw.branches, promotionRules: Array.isArray(list.promotion_rules) ? list.promotion_rules : [], ...(summary ? { summary } : {}), ...(raw.extras.capabilities ? { capabilities: raw.extras.capabilities } : {}),
   }
 }
@@ -213,7 +222,7 @@ export async function loadWired(args: WiredLoadArgs): Promise<WiredLoad> {
   // Typed text goes through the device search index, as the pickers do: the ranked ids of the page are read by id. A viewer who may not see barcodes is searched by the server
   // (exact codes only, so a partial code can never be rebuilt from the index), and so is any scope with a filter or a check state.
   let ranked: { ids: number[]; total: number } | null = null
-  if (present(wire.query) && access.barcode && !filtered) ranked = deps.rank(String(wire.query))
+  if (present(wire.query) && access.barcode && !filtered && !wire.groupBy) ranked = deps.rank(String(wire.query))
 
   let list: WiredList | null = args.seed ?? null
   let fromStore = false
@@ -228,7 +237,7 @@ export async function loadWired(args: WiredLoadArgs): Promise<WiredLoad> {
       list = { ...found, items: [...found.items].sort((a, b) => (order.get(Number(a.id)) ?? 0) - (order.get(Number(b.id)) ?? 0)), total: ranked.total, page, pageSize, totalPages: Math.max(1, Math.ceil(ranked.total / pageSize)) }
     }
   }
-  const canonical = ranked ? null : canonicalProductsQuery(wire)
+  const canonical = ranked || wire.groupBy ? null : canonicalProductsQuery(wire)
   // The shared store holds the Products answer for this very query: no list request. A viewer who may not see stock never reads stock from it (the server cuts it from the IC answer).
   if (!list && canonical && access.stock && !args.bypassStore) {
     const held = deps.peek(canonical)
@@ -292,6 +301,37 @@ export function patchWiredRaw(raw: WiredRaw, answer: StockWriteAnswer | StockCon
   const held = lots.get(answer.productId)
   if (held) lots.set(answer.productId, withMore(apply({ id: answer.productId, lots: held }).lots as Lot[] | undefined ?? held, held.more))
   return { ...raw, lots, list: { ...raw.list, items: raw.list.items.map(row => Number(row.id) === answer.productId ? apply(row) : row) } }
+}
+
+/**
+ * A row's received dates replaced by the server's word of NOW (GET /lots for one product, or the dates a refused incomplete count answers): the dates that hold stock are exactly those listed, in the
+ * order listed; a date the row carried that is not listed holds nothing here any more (kept at 0, so it moves to the empty dates). The branch quantity moves by what the stocked dates moved, as a
+ * refused stale figure does (staleLotFigures), so units no date holds stay the same. `more` (the answer was cut at the plan's limit) only adds and updates: a date it does not list may still hold stock.
+ * Never reads anything; the row is rebuilt from the patched raw like every other patch.
+ */
+export function patchWiredLots(raw: WiredRaw, productId: number, answer: { lots: readonly InventoryCheckLotRow[]; more?: boolean }): WiredRaw {
+  const branchId = raw.branchId
+  const row = raw.list.items.find(candidate => Number(candidate.id) === productId)
+  if (!row || !branchId) return raw
+  const held: readonly Lot[] = raw.lots.get(productId) ?? row.lots ?? []
+  const heldById = new Map(held.map(lot => [Number(lot.id), lot]))
+  const listed = new Map(answer.lots.map(lot => [lot.batchId, lot]))
+  const quantityHere = (lot: Lot | undefined) => Math.max(0, Number(lot?.branches?.find(candidate => Number(candidate.branch_id) === branchId)?.quantity ?? 0))
+  const withQuantity = (lot: Lot, quantity: number): Lot => ({ ...lot, branches: [...(lot.branches ?? []).filter(candidate => Number(candidate.branch_id) !== branchId), { branch_id: branchId, quantity }] })
+  const stocked: Lot[] = answer.lots.map(lot => withQuantity(heldById.get(lot.batchId) ?? { id: lot.batchId, received_at: lot.receivedAt, expiry_date: lot.expiry, lot_code: lot.lotCode ?? null, batch_number: lot.batchNumber ?? null }, lot.quantity))
+  const others = held.filter(lot => !listed.has(Number(lot.id)))
+  // What the stocked dates moved, when both lists are whole: each listed date by its new figure, every date no longer listed by what it held. A cut list (the row's or the answer's), or a row that carried
+  // no dates at all, cannot say what the branch total did, so it is left as it is.
+  const carried = raw.lots.has(productId) || Array.isArray(row.lots)
+  const whole = carried && !answer.more && !(held as RowLots).more
+  let moved = 0
+  if (whole) moved = answer.lots.reduce((sum, lot) => sum + lot.quantity - quantityHere(heldById.get(lot.batchId)), 0) - others.reduce((sum, lot) => sum + quantityHere(lot), 0)
+  // A date the server no longer lists holds nothing here: it stays on the row at 0 (a date this branch never held stays as it is).
+  const emptied = (lot: Lot) => answer.more || !(lot.branches ?? []).some(candidate => Number(candidate.branch_id) === branchId) ? lot : withQuantity(lot, 0)
+  const lots = withMore([...stocked, ...others.map(emptied)], answer.more)
+  const items = raw.list.items.map(candidate => Number(candidate.id) !== productId || !Array.isArray(candidate.branch_stock) ? candidate
+    : { ...candidate, branch_stock: candidate.branch_stock.map(entry => Number(entry.branch_id) === branchId ? { ...entry, quantity: Math.max(0, Number(entry.quantity ?? 0) + moved) } : entry) })
+  return { ...raw, lots: new Map(raw.lots).set(productId, lots), list: { ...raw.list, items } }
 }
 
 // ---- which server this is ----------------------------------------------------------------------------------------------------------------------------------

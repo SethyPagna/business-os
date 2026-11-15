@@ -35,7 +35,8 @@ const USERS = {
   none: person(75, 'employee', { products: true }),
 }
 
-function createInvApp({ mount, seed, users = USERS }) {
+// sourceEdits: { 'lib/x.ts': [[from, to], ...] } plants a source edit (each `from` must match exactly once) in the module the app loads: a mutant for a test that must catch it.
+function createInvApp({ mount, seed, users = USERS, sourceEdits = {} }) {
   const moduleCache = new Map()
   let current = users.admin
   const statements = []
@@ -49,7 +50,12 @@ function createInvApp({ mount, seed, users = USERS }) {
     const mod = { exports: {} }
     moduleCache.set(rel, mod)
     const sourcePath = path.join(SRC, rel)
-    const output = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
+    let text = fs.readFileSync(sourcePath, 'utf8')
+    if (sourceEdits[rel]) {
+      text = text.split('\r\n').join('\n')
+      for (const [from, to] of sourceEdits[rel]) { if (text.split(from).length !== 2) throw new Error(`source edit must match once in ${rel}: ${from.slice(0, 60)}`); text = text.replace(from, () => to) }
+    }
+    const output = ts.transpileModule(text, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true }, fileName: sourcePath,
     }).outputText
     new Function('require', 'module', 'exports', output)((request) => {

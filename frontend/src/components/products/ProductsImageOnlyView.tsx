@@ -30,7 +30,7 @@ import ProductsImageOnlyControls, { type ImageOnlyScope } from './ProductsImageO
 import ScanMissNotice from '../shared/ScanMissNotice'
 import { useScannedQuery } from '../shared/useScannedQuery.ts'
 import { statsPresetRange, type DateTimeRange } from '../shared/statsStripPresets.ts'
-import PaginationControls, { PAGE_SIZE_OPTIONS } from '../shared/PaginationControls'
+import PaginationControls, { PAGE_SIZE_OPTIONS, TopPager } from '../shared/PaginationControls'
 import Modal from '../shared/Modal'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
 import { lazyRetry } from '../../utils/lazyImport.ts'
@@ -442,6 +442,18 @@ export default function ProductsImageOnlyView() {
     await saveRow(product, () => saveImagePath(product, publicPath))
   }
 
+  const pager = (
+    <PaginationControls
+      compact
+      rangeAsPageSize
+      page={page}
+      pageSize={pageSize}
+      totalItems={total}
+      onPageChange={setPage}
+      onPageSizeChange={setPageSize}
+      t={t}
+    />
+  )
   return (
     <div className="page-scroll p-3 sm:p-6">
       <ProductsImageOnlyControls
@@ -461,6 +473,7 @@ export default function ProductsImageOnlyView() {
         t={t}
       />
 
+      <div className="mb-3 flex justify-center"><TopPager>{pager}</TopPager></div>
       {loadError ? (
         <div className="flex flex-col items-center justify-center gap-3 p-8">
           <p className="text-red-600 dark:text-red-400">{loadError}</p>
@@ -656,16 +669,7 @@ export default function ProductsImageOnlyView() {
       )}
 
       <div className="mt-3 flex justify-center">
-        <PaginationControls
-          compact
-          rangeAsPageSize
-          page={page}
-          pageSize={pageSize}
-          totalItems={total}
-          onPageChange={setPage}
-          onPageSizeChange={setPageSize}
-          t={t}
-        />
+        {pager}
       </div>
 
       {libraryPickerProductId !== null ? (

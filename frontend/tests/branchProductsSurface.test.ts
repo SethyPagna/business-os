@@ -109,7 +109,7 @@ new Function('require', 'module', 'exports', compiled)((id: string) => {
   if (id.includes('costDisplay')) return require('../src/utils/costDisplay.ts')
   if (id.includes('acquisitionCostAccess')) return require('../src/utils/acquisitionCostAccess.ts')
   if (id.includes('AppContext')) return { useApp: () => ({ user: { role_code: 'admin', role_permissions: { all: true } } }) }
-  return { default: () => null, __esModule: true }
+  return { default: () => null, TopPager: (props: { children?: unknown }) => props.children ?? null, __esModule: true }
 }, module, module.exports)
 const api = module.exports
 const rows = [

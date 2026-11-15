@@ -1,5 +1,6 @@
 import { cacheKeyRequest, type CacheIdentity } from './cacheKey'
 import type { D1Compat } from './db'
+import type { FamilyGroupTotals } from './familyPagination'
 
 // The shared ranked scope of the Products list (INV-A S7, behind the read switch catalog_ranked_scope).
 //
@@ -14,7 +15,7 @@ import type { D1Compat } from './db'
 // Promotion order is time-dependent without any write (a discount window opens at 09:00): the entry stores the next EDGE, the earliest future start or end among the active
 // promotion rules and the products' own discount windows, and is not served at or after it. Only results are cached: never a promise, so nothing is shared between requests.
 
-export type RankedWindow = { keys: string[]; total: number; /** UTC 'YYYY-MM-DD HH:MM:SS' of the next promotion boundary, or null when none lies ahead. */ edgeAt: string | null }
+export type RankedWindow = { keys: string[]; total: number; /** A grouped scope only (Inventory Check groupBy): every group of the scope in rank order, with its whole-scope totals and first/last family rank. */ groups?: FamilyGroupTotals[]; /** UTC 'YYYY-MM-DD HH:MM:SS' of the next promotion boundary, or null when none lies ahead. */ edgeAt: string | null }
 
 export type RankedScope = {
   ctx: { waitUntil(promise: Promise<unknown>): void }
@@ -67,6 +68,7 @@ export async function readPromotionEdge(scope: RankedScope, produce: () => Promi
 const usable = (value: unknown, now: number): value is RankedWindow => {
   const entry = value as RankedWindow | null
   if (!entry || !Array.isArray(entry.keys) || typeof entry.total !== 'number') return false
+  if (entry.groups !== undefined && !Array.isArray(entry.groups)) return false
   return entry.edgeAt === null || (typeof entry.edgeAt === 'string' && now < utcDate(entry.edgeAt))
 }
 

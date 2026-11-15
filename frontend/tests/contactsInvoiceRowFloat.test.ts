@@ -257,7 +257,15 @@ for (const file of ['StockInInvoicesSection.tsx', 'ApInvoicesSection.tsx', 'ArIn
   // float's own position keeps the property this control actually checks: the
   // lines table (its second, inner occurrence) still lives inside the float.
   assert.ok(stockIn.indexOf('data-invoice-ledger-scroll', float) > float, 'the Stock-In lines table is the float\'s content')
-  assert.ok(stockIn.indexOf('loadLines(detailGroup, nextPage)') > float, 'and its line pager pages the lines inside the float')
+  // Owner 14 Nov: ONE lines-pager element (built above the float from the line state) mounted above AND below the table inside it.
+  assert.ok(stockIn.includes('onPageChange={(nextPage) => loadLines(detailGroup, nextPage)}'), 'the line pager pages the lines through the per-invoice loader')
+  assert.ok(stockIn.indexOf('<TopPager>{linesPager}</TopPager>', float) > float, 'and the float mounts it above the lines table')
+  // The bottom mount is the bare `{linesPager}` that is NOT the child of the TopPager: the top mount's own `{linesPager}` also contains
+  // that text, so search the source with every top mount removed (a search for the substring alone is satisfied by the top mount).
+  const bottomMounts = (source: string): number => source.split('<TopPager>{linesPager}</TopPager>').join('').split('{linesPager}').length - 1
+  assert.equal(bottomMounts(stockIn), 1, 'and below it: a second, bare mount of the same element')
+  // Negative control: the same count over a source that lost its bottom mount is 0, so the assertion above cannot be satisfied by the top mount's own text.
+  assert.equal(bottomMounts('<TopPager>{linesPager}</TopPager><table />'), 0, 'negative control: a top mount alone is not a bottom mount')
   assert.match(read('useStockInInvoiceReport.ts'), /lineCache: Record<string, LinesState>/, 'the scoped per-group line cache is named for what it is, not for an expand that no longer exists')
 }
 

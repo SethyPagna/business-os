@@ -36,8 +36,8 @@ const paginationSource = readFileSync(new URL('../src/components/shared/Paginati
 const inventorySource = readFileSync(new URL('../src/components/inventory/InventoryChecksPage.tsx', import.meta.url), 'utf8')
 assert.match(productsSource, /useState<ProductSortDirection>\('name_asc'\)/, 'Products opens sorted by name A-Z')
 assert.match(paginationSource, /export const DEFAULT_PAGE_SIZE = 20\b/, 'Products opens at 20 a page')
-assert.match(inventorySource, /sortBy: 'name', sortDirection: 'asc' \}/, 'Inventory opens sorted by name A-Z: the same order')
-assert.match(inventorySource, /useState\(bootstrapIntent\?\.pageSize \?\? 20\)/, 'and at 20 a page, so its first read is the query Products itself sends')
+assert.match(inventorySource, /sortBy: 'name', sortDirection: 'asc', group: '' \}/, 'Inventory Check keeps name A-Z as its ungrouped order; its default choice is grouped by last checked')
+assert.match(inventorySource, /useState\(bootstrapIntent\?\.pageSize \?\? 20\)/, 'and at 20 a page, so the ungrouped read (No grouping) is the query Products itself sends')
 
 const wire = (params: QueryParams, options = {}) => wiredListParams({ page: 1, pageSize: 20, sortBy: 'name', sortDirection: 'asc', ...params }, options)
 assert.equal(canonicalProductsQuery(wire({})), productsQueryString({}), 'default scope: the canonical key is the key Products sends')
@@ -52,6 +52,8 @@ assert.equal(canonicalProductsQuery(wire({ checkState: 'ok', branchId: '1' })), 
 assert.deepEqual(wiredListParams({ branchId: '', stockState: '', checkState: '', brand: '', category: '', sortBy: 'created', sortDirection: 'desc', query: '', page: 1, pageSize: 50, sessionId: '' }),
   { page: 1, pageSize: 50, sortBy: 'created', sortDirection: 'desc' }, 'empty values and the session id never go to /list')
 assert.deepEqual(wiredListParams({ branchId: '2', sortBy: 'stock', sortDirection: 'asc', page: 2, pageSize: 20 }), { page: 2, pageSize: 20, branchId: '2', sortBy: 'created', sortDirection: 'asc' }, 'a stock sort (not offered) becomes created')
+// The date order of the checks is the grouping "Last checked", never a sort: a stale sortBy=checked never reaches the Worker, with or without a check state.
+for (const checkState of ['', 'ok', 'issue', 'pending']) assert.equal(wiredListParams({ branchId: '1', page: 1, pageSize: 20, sortBy: 'checked', sortDirection: 'desc', checkState }).sortBy, 'created', `sortBy=checked is not sent (checkState '${checkState}')`)
 assert.equal(wiredListParams({ branchId: '1', page: 1, pageSize: 50 }, { omitBranch: true }).branchId, undefined, 'a sole branch is left out of the query')
 assert.equal(wiredListParams({ branchId: '1', page: 1, pageSize: 50 }, { skipSummary: true }).summary, 0, 'a page step skips the counts')
 
@@ -239,5 +241,22 @@ assert.equal(wiredMode(1_000), 'unknown'); rememberWiredMode('old', 1_000); asse
 assert.equal(wiredMode(1_000 + 5 * 60_000 + 1), 'unknown', 'and forgotten after 5 minutes, so a switch turned on is found without a reload')
 rememberWiredMode('unknown')
 assert.deepEqual(branchesOf([{ id: 1, branch_stock: [{ branch_id: 2, branch_name: 'B' }, { branch_id: 1, branch_name: 'A' }] }, { id: 2 }]), [{ id: 1, name: 'A' }, { id: 2, name: 'B' }])
+
+// ---- a grouped read: groupBy and no sort, never the Products store or the id search, and the answer's sections and keys come through ----
+{
+  const asked = wiredListParams({ page: 1, pageSize: 20, sortBy: 'name', sortDirection: 'asc', groupBy: 'checked', branchId: '1' }, { skipSummary: true })
+  assert.deepEqual(asked, { page: 1, pageSize: 20, branchId: '1', groupBy: 'checked', summary: 0 }, 'groupBy replaces the sort on the wire')
+  assert.equal(wiredListParams({ page: 1, groupBy: 'category' }).sortBy, undefined)
+  const grouping = { by: 'checked' as const, unit: 'family' as const, groups: [{ key: 'd:2026-11-12', label: null, families: 3, products: 3, continued_before: false, continues_after: false }] }
+  const held = { [CANON]: listOf([7, 8, 9]) }
+  const { log, deps: d } = deps({ held, rank: () => ({ ids: [1], total: 1 }), list: () => listOf([1, 2, 3].map(Number), { grouping, items: [1, 2, 3].map(id => row(id, { group_key: 'd:2026-11-12' })), capabilities: { groupings: ['checked', 'category'] } }) })
+  const load = await loadWired({ params: params({ groupBy: 'checked', query: 'soap' }), skipSummary: false, access: FULL, deps: d })
+  assert.equal(log.lists.length, 1); assert.equal(log.lists[0].groupBy, 'checked'); assert.equal(log.lists[0].sortBy, undefined); assert.equal(log.lists[0].ids, undefined, 'a search is asked of the server, not read by id (the server refuses groupBy beside ids)')
+  const open = await loadWired({ params: params({ groupBy: 'checked' }), skipSummary: false, access: FULL, deps: d })
+  assert.equal(open.fromStore, false, 'a grouped read is never the Products answer held in the store'); assert.equal(log.primed.length, 0, 'and is never primed as one')
+  const shown = wiredResult(load.raw)
+  assert.deepEqual(shown.grouping, grouping); assert.deepEqual(shown.items.map(item => item.group_key), ['d:2026-11-12', 'd:2026-11-12', 'd:2026-11-12'])
+  assert.deepEqual(shown.capabilities?.groupings, ['checked', 'category'])
+}
 
 console.log('inventoryWired passed: canonical key, wire query, one request on open, store hit, blind, search, rows, refresh')

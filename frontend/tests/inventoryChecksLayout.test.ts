@@ -120,23 +120,28 @@ await browser.run('PASS Inventory page layout: Products, Sessions and an open se
     const rowsFit = await browser.evaluate<boolean>(`Array.from(document.querySelectorAll('[data-inventory-check-row]')).every(row => row.scrollWidth <= row.clientWidth + 1)`)
     assert.ok(rowsFit, `${lang} ${width}: product rows wrap inside their own box`)
     if (lang === 'km') await browser.khmerRoom(`${width}px session`, '[data-inventory-check-page]', 3)
-    // The ic_simple list: a check box before each image, the selection bar, the owner's columns; nothing scrolls sideways.
+    // The ic_simple list (14 Nov): no check box; a square image that never stretches; the status ICON and the count input BESIDE the name on one line; the selection bar; the owner's columns; nothing scrolls sideways.
     await browser.open(width, `lang=${lang}&section=products&simple=1&stock=1`, `document.querySelector('[data-inventory-check-row]')`, 700)
     const listMeasured = await browser.evaluate<{ document: number; page: number }>(overflow)
     assert.ok(listMeasured.document <= 0 && listMeasured.page <= 0, `${lang} ${width} list: no horizontal scroll (${JSON.stringify(listMeasured)})`)
-    const listBar = await browser.evaluate<{ present: boolean; height: number; overflow: number; submit: string; submitHeight: number; boxes: number; boxBeforeImage: boolean; noRefresh: boolean; noCount: boolean }>(`(() => {
+    const listBar = await browser.evaluate<{ present: boolean; height: number; overflow: number; submit: string; submitHeight: number; statusIcons: number; checkBoxes: number; squares: boolean; beside: boolean; noRefresh: boolean; noCount: boolean }>(`(() => {
       const bar = document.querySelector('[data-inventory-check-selection-bar]'), row = document.querySelector('[data-inventory-check-row]')
       const submit = document.querySelector('[data-selection-action="submit"]')
       return { present: !!bar, height: bar ? bar.getBoundingClientRect().height : 0, overflow: bar ? bar.scrollWidth - bar.clientWidth : 0, submit: submit ? submit.textContent : '', submitHeight: submit ? submit.getBoundingClientRect().height : 0,
-        boxes: document.querySelectorAll('[data-check-select]').length, boxBeforeImage: row.querySelector('[data-check-select-box]').getBoundingClientRect().left < row.querySelector('[data-check-image]').getBoundingClientRect().left,
+        statusIcons: document.querySelectorAll('[data-check-action="status"]').length, checkBoxes: document.querySelectorAll('[data-check-select], input[type="checkbox"]').length,
+        squares: Array.from(document.querySelectorAll('[data-check-image]')).every(image => Math.abs(image.getBoundingClientRect().width - image.getBoundingClientRect().height) <= 1),
+        beside: Array.from(document.querySelectorAll('[data-inventory-check-row]')).every(item => { const input = item.querySelector('[data-check-count]').getBoundingClientRect(), image = item.querySelector('[data-check-image]').getBoundingClientRect(), status = item.querySelector('[data-check-action="status"]').getBoundingClientRect(); return input.top < image.bottom && status.top < image.bottom && input.left > image.right }),
         noRefresh: !Array.from(document.querySelectorAll('button')).some(node => node.getAttribute('aria-label') === ${JSON.stringify(pack.refresh)}),
         noCount: !Array.from(document.querySelectorAll('button')).some(node => (node.getAttribute('aria-label') || '').startsWith(${JSON.stringify(pack.inventory_check_start_page + ' (')})) }
     })()`)
     assert.ok(listBar.present && listBar.height <= 48 && listBar.overflow <= 0, `${lang} ${width} list: the selection bar is one line of at most 48px (${JSON.stringify(listBar)})`)
     assert.equal(listBar.submit, pack.inventory_check_submit, `${lang} ${width} list: the main action keeps its word`)
     assert.ok(listBar.submitHeight >= (width < 1024 ? 44 : 40), `${lang} ${width} list: Submit is a touch-sized button (${listBar.submitHeight})`)
-    assert.equal(listBar.boxes, 3, `${lang} ${width} list: a check box on each product`)
-    assert.ok(listBar.boxBeforeImage && listBar.noRefresh && listBar.noCount, `${lang} ${width} list: the box sits before the image, and there is no Refresh or Count (n) button (${JSON.stringify(listBar)})`)
+    assert.equal(listBar.statusIcons, 3, `${lang} ${width} list: a status icon on each product`)
+    assert.equal(listBar.checkBoxes, 0, `${lang} ${width} list: nothing is ticked by default and there is no check box`)
+    assert.ok(listBar.squares, `${lang} ${width} list: every product image keeps its square (never stretched)`)
+    assert.ok(listBar.beside, `${lang} ${width} list: the count input and the status icon sit beside the name, level with the image, not on a row of their own`)
+    assert.ok(listBar.noRefresh && listBar.noCount, `${lang} ${width} list: there is no Refresh or Count (n) button (${JSON.stringify(listBar)})`)
     const listRowsFit = await browser.evaluate<boolean>(`Array.from(document.querySelectorAll('[data-inventory-check-row]')).every(row => row.scrollWidth <= row.clientWidth + 1)`)
     assert.ok(listRowsFit, `${lang} ${width} list: rows wrap inside their own box`)
     if (width >= 1024) {

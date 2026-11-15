@@ -6,7 +6,7 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import AppSelect from '../shared/AppSelect.tsx'
 import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
-import PaginationControls, { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
+import PaginationControls, { DEFAULT_PAGE_SIZE, TopPager } from '../shared/PaginationControls'
 import { fmtDateOnly } from '../../utils/formatters'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { useStockInInvoiceReport, groupKeyOf, LINE_PAGE_SIZE, type InvoiceGroup, type InvoiceLine } from './useStockInInvoiceReport.ts'
@@ -95,6 +95,9 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
     return <span className="text-[11px] text-gray-400">--</span>
   }
 
+  const pager = (
+    <PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalInvoices} label={tr('stock_in_invoices_count', 'Invoices').toLowerCase()} t={t} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
+  )
   return (
     <div className="space-y-3 py-3 pl-[calc(0.75rem+env(safe-area-inset-left))] pr-[calc(0.75rem+env(safe-area-inset-right))]">
       {/* The filter + date row pins while the supplier-day groups scroll --
@@ -198,6 +201,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
             </div>
           ) : null}
 
+          <div className="flex justify-center"><TopPager>{pager}</TopPager></div>
           {invoices.length === 0 ? (
             <div className="py-6 text-center text-sm text-gray-400">{tr('stock_in_invoices_empty', 'No stock-in invoices match these filters.')}</div>
           ) : (
@@ -288,7 +292,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
           )}
 
           <div className="flex justify-center">
-            <PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalInvoices} label={tr('stock_in_invoices_count', 'Invoices').toLowerCase()} t={t} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
+            {pager}
           </div>
         </>
       )}
@@ -296,6 +300,10 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
       {detailGroup ? (() => {
         const linesState = lineCache[groupKeyOf(detailGroup)]
         const linePages = linesState ? Math.max(1, Math.ceil(linesState.total / linesState.pageSize)) : 1
+        // Owner 14 Nov: the opened invoice's lines page like every list -- ONE pager element, above and below the table.
+        const linesPager = linesState ? (
+          <PaginationControls compact rangeAsPageSize page={linesState.page} pageSize={linesState.pageSize} pageSizeOptions={[LINE_PAGE_SIZE]} editablePageSizeInput={false} totalItems={linesState.total} label={tr('invoice_lines', 'Lines').toLowerCase()} t={t} onPageChange={(nextPage) => loadLines(detailGroup, nextPage)} />
+        ) : null
         return (
           <InvoiceDetailFloat
             t={t}
@@ -334,6 +342,11 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
                   <div className="px-3 py-3 text-center text-sm leading-6 text-gray-400">{tr('loading', 'Loading...')}</div>
                 ) : (
                   <>
+                    {linePages > 1 ? (
+                      <div className="flex justify-center border-b border-gray-100 px-3 py-2 dark:border-gray-800">
+                        <TopPager>{linesPager}</TopPager>
+                      </div>
+                    ) : null}
                     <div data-invoice-ledger-scroll className="max-w-full overflow-x-auto overscroll-x-contain">
                       <table className="w-full min-w-[860px] text-left text-xs tabular-nums">
                         <thead className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
@@ -374,7 +387,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
                     </div>
                     {linePages > 1 ? (
                       <div className="flex justify-center border-t border-gray-100 px-3 py-2 dark:border-gray-800">
-                        <PaginationControls compact rangeAsPageSize page={linesState.page} pageSize={linesState.pageSize} pageSizeOptions={[LINE_PAGE_SIZE]} editablePageSizeInput={false} totalItems={linesState.total} label={tr('invoice_lines', 'Lines').toLowerCase()} t={t} onPageChange={(nextPage) => loadLines(detailGroup, nextPage)} />
+                        {linesPager}
                       </div>
                     ) : null}
                   </>

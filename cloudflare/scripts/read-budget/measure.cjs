@@ -14,6 +14,7 @@ const { writeShapes, measureWrite } = require('./writes.cjs')
 const { registeredRoutes, matchRoute } = require('./routes.cjs')
 const { roundUp, BUDGETS_FILE, FREE_CALL_LIMIT } = require('./budgets.cjs')
 const { measureGet, prepareWorld, codeOf, switchFence } = require('./runner.cjs')
+const { getHistoryShapes } = require('./ic-history.cjs')
 
 const FINGERPRINTS = path.join(__dirname, 'fingerprints')
 const CACHE = path.join(os.tmpdir(), 'read-budget-measure.jsonl')
@@ -206,6 +207,11 @@ async function main() {
     }
     console.log(`budgets.json: ${entries.length} shape(s) merged (${entries.map((e) => e.id).join(', ')}); ${Object.keys(prints).length} fingerprint file(s) updated; nothing else touched`)
     return
+  }
+  // The grouped Inventory Check shapes are measured on their own world (history-pass.cjs, test-read-budget-ic-history-native.cjs): a re-measure keeps their entries as they are.
+  if (fs.existsSync(BUDGETS_FILE)) {
+    const kept = new Set(getHistoryShapes().map((s) => s.id))
+    entries.push(...JSON.parse(fs.readFileSync(BUDGETS_FILE, 'utf8')).shapes.filter((e) => kept.has(e.id)))
   }
   const file = { version: 1, base: '05ef61b73', rule: 'MEASURED at the base x 1.10, rounded up; +8 rows under 80 rows. Ratchet only: a raise needs "raised": { from, reason }.',
     programme: { rows_ceiling: 100000, by: '2026-11-30' }, passes: PASSES, reasons: EXEMPTION_REASONS, exemptions, shapes: entries }

@@ -225,11 +225,12 @@ function writeShapes() {
       prepare: async (world) => {
         await world.addSwitches(['ic_simple', 'ic_fix_stock', 'ic_lot_counts'])
         const rows = await lots(world, 20, 1300)
-        const seen = new Map((await world.all('SELECT batch_id, quantity FROM branch_batch_stock WHERE branch_id = 1 AND batch_id IN (' + rows.map(() => '?').join(',') + ')', ...rows.map((r) => r.batch))).map((q) => [q.batch_id, Number(q.quantity)]))
-        return rows.map((r) => ({ ...r, seen: seen.get(r.batch) }))
+        // A per-date count must name every stocked date of its product (the server refuses a partial one), so each product carries all of its stocked batches; the first of them is the picked slice's lot.
+        const stocked = await world.all('SELECT b.variant_product_id AS pid, s.batch_id AS batch, s.quantity AS quantity FROM branch_batch_stock s JOIN product_batches b ON b.id = s.batch_id WHERE s.branch_id = 1 AND s.quantity > 0 AND b.is_active = 1 AND b.variant_product_id IN (' + rows.map(() => '?').join(',') + ') ORDER BY s.batch_id', ...rows.map((r) => r.pid))
+        return rows.map((r) => ({ ...r, dates: stocked.filter((q) => q.pid === r.pid).map((q) => ({ batch: q.batch, seen: Number(q.quantity) })) }))
       },
       run: async (world, send, rows) => {
-        try { return await send('POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('submission-lots'), lines: rows.map((r) => ({ productId: r.pid, lots: [{ batchId: r.batch, scope: 'lot', counted: r.seen - 1, seen: r.seen }] })) }) }
+        try { return await send('POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('submission-lots'), lines: rows.map((r) => ({ productId: r.pid, lots: r.dates.map((d, i) => ({ batchId: d.batch, scope: 'lot', counted: i === 0 ? d.seen - 1 : d.seen, seen: d.seen })) })) }) }
         finally { await world.restoreSwitches() }
       } },
     // The direct Set from the row: the lot Set writer with the expected figure on screen, named as a Fix stock request so the (widened) hold on a waiting count runs first.

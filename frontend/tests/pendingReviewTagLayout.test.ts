@@ -267,7 +267,8 @@ function measureInPage(): Measured {
     const r = el.getBoundingClientRect()
     return { left: round(r.left), top: round(r.top), right: round(r.right), bottom: round(r.bottom), width: round(r.width), height: round(r.height) }
   }
-  const isTag = (el: Element) => el.matches('[role="img"][aria-label]')
+  // The Inventory Check row's own status icon (an icon with a name, 14 Nov) is the row's status, not the mini tag; the list no longer draws a gutter tag at all.
+  const isTag = (el: Element) => el.matches('[role="img"][aria-label]:not([data-check-status-kind])')
   const boxes: Array<[string, Box]> = []
   const tags: Measured['tags'] = []
   for (const fixture of Array.from(document.querySelectorAll('[data-fixture]'))) {
@@ -311,7 +312,8 @@ function measureInPage(): Measured {
         })
         continue
       }
-      if (el.closest('[role="img"][aria-label], [data-pending-review-count]')) continue
+      // (the Inventory Check row's status icon is judged by its own box below: a waiting count swaps it for the hourglass, by design, so the glyph inside it is not an element that must match)
+      if (el.closest('[role="img"][aria-label], [data-pending-review-count]') || el.parentElement?.closest('[data-check-status-kind]')) continue
       boxes.push([`${name}#${index++}:${el.tagName.toLowerCase()}`, box(el)])
     }
   }
@@ -386,8 +388,8 @@ try {
       assert.equal(byFixture('fees-row').length, 1, `${label}: expense row tag`)
       assert.equal(byFixture('fees-card').length, 1, `${label}: expense card tag`)
       assert.equal(byFixture('branch-card').length, 1, `${label}: branch card tag`)
-      assert.equal(byFixture('ic-list').length, 1, `${label}: Inventory Check list: the one count waiting for approval, and no other row, carries the mark`)
-      assert.equal(byFixture('ic-list-readonly').length, 1, `${label}: Inventory Check list for a viewer who cannot count`)
+      // The Inventory Check list shows a waiting count ONCE, in its status icon (the hourglass): the gutter mini tag would repeat it, so neither list fixture draws one.
+      assert.equal(byFixture('ic-list').length + byFixture('ic-list-readonly').length, 0, `${label}: the Inventory Check list draws no gutter tag (its status icon is the one pending mark)`)
       // Inventory draws a desktop row AND a phone card for each product, and CSS shows one of the two sets. Two display
       // rows wait: the merged Tea row (ids 1 and 2, id 2 waiting) and Soap (id 7); Salt (id 8) does not.
       assert.equal(withTags.tags.filter((tag) => tag.fixture === 'inventory').length, 4, `${label}: Tea and Soap carry a tag on both the row and the card, Salt on neither`)
@@ -395,7 +397,7 @@ try {
       for (const tag of visible) {
         const where = `${label} ${tag.fixture}`
         const pack = language === 'km' ? km : en
-        assert.equal(tag.name, tag.fixture.startsWith('ic-list') ? pack.inventory_check_approval_pending : pack.pending_review_tag, `${where}: the tag is named in the page's language`)
+        assert.equal(tag.name, pack.pending_review_tag, `${where}: the tag is named in the page's language`)
         assert.equal(tag.position, 'absolute', `${where}: out of the flow`)
         assert.equal(tag.pointerEvents, 'none', `${where}: a tap goes to the row`)
         assert.ok(Math.abs(tag.box.width - 10) < 0.01 && Math.abs(tag.box.height - 10) < 0.01, `${where}: a 10px box, was ${tag.box.width} x ${tag.box.height}`)

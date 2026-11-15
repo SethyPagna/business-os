@@ -52,7 +52,7 @@ const fixture = String.raw`
 
   createRoot(document.getElementById('root')).render(
     <MergeDuplicatesReviewModal
-      t={(key) => key}
+      t={(key) => ({ back: 'Back', next: 'Next', page: 'Page', of: 'of' }[key] || key)}
       onClose={() => {}}
       onConfirm={() => { window.__confirmCalls += 1 }}
       onLoadPreview={async () => { window.__previewLoads += 1; return makePreview() }}
@@ -150,7 +150,7 @@ type PageState = { ids: number[]; status: string; acknowledged: boolean; confirm
 async function pageState(): Promise<PageState> {
   return evaluate<PageState>(`(() => ({
     ids: Array.from(document.querySelectorAll('[data-merge-preview-group]'), (node) => Number(node.getAttribute('data-merge-preview-group'))),
-    status: document.querySelector('[role=status]')?.textContent || '',
+    status: document.querySelector('[data-merge-preview-pager=bottom] [data-pager-page]')?.textContent || '',
     acknowledged: Boolean(document.querySelector('input[type=checkbox]')?.checked),
     confirmCalls: window.__confirmCalls,
     previewLoads: window.__previewLoads,
@@ -183,18 +183,23 @@ try {
   await send('Runtime.enable')
   await waitFor(async () => (await pageState()).ids.length === 25 ? true : null)
 
-  const pagerSemantics = await evaluate<{ backText: string; nextText: string; backIconFirst: boolean; nextIconLast: boolean; hiddenIcons: number }>(`(() => {
-    const back = document.querySelector('[data-merge-preview-page=back]')
-    const next = document.querySelector('[data-merge-preview-page=next]')
-    return {
-      backText: back?.textContent?.trim() || '',
-      nextText: next?.textContent?.trim() || '',
-      backIconFirst: back?.firstElementChild?.tagName.toLowerCase() === 'svg',
-      nextIconLast: next?.lastElementChild?.tagName.toLowerCase() === 'svg',
-      hiddenIcons: document.querySelectorAll('[data-merge-preview-page] svg[aria-hidden=true]').length,
+  // Owner 14 Nov: the SHARED pager, one element mounted above AND below the 25-group window, same range and page in both.
+  const pagerSemantics = await evaluate<Record<string, { back: boolean; next: boolean; range: string; page: string; order: string[] }>>(`(() => {
+    const read = (which) => {
+      const host = document.querySelector('[data-merge-preview-pager=' + which + ']')
+      const controls = Array.from(host?.querySelectorAll('button, [data-pager-range], [data-pager-page]') || [])
+      return {
+        back: Boolean(host?.querySelector('button[aria-label=Back]')),
+        next: Boolean(host?.querySelector('button[aria-label=Next]')),
+        range: host?.querySelector('[data-pager-range]')?.textContent?.trim() || '',
+        page: host?.querySelector('[data-pager-page] [aria-hidden=true]')?.textContent?.trim() || '',
+        order: controls.map((el) => el.tagName === 'BUTTON' ? el.getAttribute('aria-label') : el.hasAttribute('data-pager-range') ? 'range' : 'page'),
+      }
     }
+    return { top: read('top'), bottom: read('bottom') }
   })()`)
-  assert.deepEqual(pagerSemantics, { backText: 'Back', nextText: 'Next', backIconFirst: true, nextIconLast: true, hiddenIcons: 2 }, 'pager keeps Back/Next text with directional icons hidden from the accessible name')
+  const expectedPager = { back: true, next: true, range: '1-25 / 2,000', page: '1 / 80', order: ['Back', 'range', 'page', 'Next'] }
+  assert.deepEqual(pagerSemantics, { top: expectedPager, bottom: expectedPager }, 'the preview pages with the shared pager above and below: Back, range / total, page, Next')
 
   const reached = new Set<number>()
   await evaluate(`document.querySelector('input[type=checkbox]').click()`)
@@ -206,14 +211,14 @@ try {
     assert.equal(state.confirmCalls, 0, 'paging never invokes the merge confirmation callback')
     assert.equal(state.previewLoads, 1, 'paging does not reload or replace the validated preview')
     state.ids.forEach((id) => reached.add(id))
-    if (page < 80) await evaluate(`document.querySelector('[data-merge-preview-page=next]').click()`)
+    if (page < 80) await evaluate(`document.querySelector('[data-merge-preview-pager=top] button[aria-label=Next]').click()`)
   }
   assert.equal(reached.size, 2000, 'all 2,000 preview groups are reachable through the bounded DOM window')
   assert.deepEqual([...reached].sort((a, b) => a - b), Array.from({ length: 2000 }, (_, index) => index + 1))
 
-  await evaluate(`document.querySelector('[data-merge-preview-page=back]').click()`)
+  await evaluate(`document.querySelector('[data-merge-preview-pager=bottom] button[aria-label=Back]').click()`)
   await waitFor(async () => (await pageState()).status.includes('Page 79 of 80') ? true : null)
-  await evaluate(`document.querySelector('[data-merge-preview-page=next]').click()`)
+  await evaluate(`document.querySelector('[data-merge-preview-pager=top] button[aria-label=Next]').click()`)
   await waitFor(async () => (await pageState()).status.includes('Page 80 of 80') ? true : null)
 
   await evaluate(`Array.from(document.querySelectorAll('button')).find((button) => button.textContent.includes('Merge reviewed'))?.click()`)

@@ -570,7 +570,9 @@ assert.match(catalogPagination, /layout="centered"/, 'public catalog pagination 
 // travels in the product-grid chunk, not the shell.
 assert.match(catalogPagination, /\n\s+onPageSizeChange=\{onPageSizeChange\}/, 'public catalog pagination should forward the shopper page-size handler')
 assert.doesNotMatch(catalogPagination, /\n\s+editablePageSizeInput=/, 'the storefront must not offer a free-text page size')
-assert.match(paginationControls, /flex flex-col gap-2[^"]*sm:flex-row/, 'shared pagination should stack on narrow mobile cards and return to one row on larger screens')
+// Owner 14 Nov: every pager is ONE dense row (Back, range of total, page, Next) at every width -- it no longer stacks on phones.
+assert.doesNotMatch(paginationControls, /flex flex-col gap-2[^"]*sm:flex-row/, 'shared pagination must not stack into two rows on phones')
+assert.match(paginationControls, /mx-auto flex w-fit max-w-full items-center overflow-hidden rounded-lg/, 'the default pager is a single row at every width')
 assert.match(viteConfig, /ResetData\.tsx'\)\) return 'backup-reset-tools'/, 'destructive Backup reset panels should have an action-only chunk')
 assert.match(viteConfig, /OtpModal\.tsx'\)\) return 'settings-otp-modal'/, 'Settings OTP setup/disable modal should have an action-only chunk')
 assert.match(viteConfig, /formatters\.ts'\)\) \{[\s\S]*return 'shared-formatters'/, 'shared date/number formatters should not be owned by a lazy user detail chunk')

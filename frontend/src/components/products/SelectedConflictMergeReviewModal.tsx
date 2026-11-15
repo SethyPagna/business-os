@@ -4,7 +4,7 @@ import Modal from '../shared/Modal.tsx'
 import { ConflictIcon, CONFLICT_ICON_CLASS } from '../shared/ConflictIcon.ts'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
-import PaginationControls from '../shared/PaginationControls.tsx'
+import PaginationControls, { TopPager } from '../shared/PaginationControls.tsx'
 import { ModalCloseContext } from '../shared/modalCloseContext.ts'
 import { ProductImg } from './shared/primitives.tsx'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
@@ -372,6 +372,23 @@ export function SelectedConflictGroupReviewModal({
     const ready = finalized ? true : await onFinalize()
     if (ready) setConfirmOpen(true)
   }
+  const pager = (
+    <PaginationControls
+      page={pageIndex + 1}
+      pageSize={review.page.limit}
+      totalItems={progress.total ?? progress.loaded}
+      onPageChange={(nextPage) => {
+        if (working || nextPage === pageIndex + 1) return
+        if (nextPage < pageIndex + 1) onPreviousPage()
+        else if (canGoNext) onNextPage()
+      }}
+      label={tr('actions', 'Actions')}
+      t={t}
+      layout="centered"
+      editablePageInput={false}
+      className={working ? 'pointer-events-none opacity-50' : ''}
+    />
+  )
   return (
     <>
       <Modal
@@ -422,6 +439,7 @@ export function SelectedConflictGroupReviewModal({
             </div>
           ) : null}
 
+          <div className="flex justify-center"><TopPager>{pager}</TopPager></div>
           {review.page.groups.map((group) => <GroupReviewCard key={`${review.review_id}-${group.ordinal}`} group={group} choice={choices[group.group_key]} authority={costAuthorities?.get(group.group_key) ?? null} choicesFrozen={Boolean(finalized)} onChoice={(patch) => onChoice(group.group_key, patch)} t={t} />)}
           {review.page.removals.map((removal) => <RemovalReviewCard key={`${review.review_id}-remove-${removal.action_ordinal}`} removal={removal} t={t} />)}
           {!review.page.groups.length && !review.page.removals.length ? <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500 dark:bg-zinc-900 dark:text-gray-400">{tr('selected_conflict_empty_page', 'No actions are on this page.')}</p> : null}
@@ -435,21 +453,7 @@ export function SelectedConflictGroupReviewModal({
           ) : null}
 
           <div className="sticky bottom-0 -mx-3 -mb-3 flex flex-wrap items-center justify-between gap-2 border-t border-gray-200 bg-white px-3 py-3 dark:border-zinc-700 dark:bg-gray-800 sm:-mx-4 sm:-mb-4 sm:px-4">
-            <PaginationControls
-              page={pageIndex + 1}
-              pageSize={review.page.limit}
-              totalItems={progress.total ?? progress.loaded}
-              onPageChange={(nextPage) => {
-                if (working || nextPage === pageIndex + 1) return
-                if (nextPage < pageIndex + 1) onPreviousPage()
-                else if (canGoNext) onNextPage()
-              }}
-              label={tr('actions', 'Actions')}
-              t={t}
-              layout="centered"
-              editablePageInput={false}
-              className={working ? 'pointer-events-none opacity-50' : ''}
-            />
+            {pager}
             <div className="flex flex-wrap gap-2">
               <ModalCloseContext.Consumer>
                 {(requestClose) => <button type="button" className="btn-secondary px-3 py-2 text-sm" onClick={requestClose || onClose}>{tr('close', 'Close')}</button>}

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 
@@ -15,6 +16,8 @@ type DayGroupHeaderProps = {
   onToggle: () => void
   /** Present only in select mode. */
   selection?: DayGroupSelection
+  /** Small extra after the count (the Inventory Check list shows its unsaved-count cue here). */
+  extra?: ReactNode
   t: (key: string) => string
 }
 
@@ -23,12 +26,13 @@ type DayGroupHeaderProps = {
  * phone card alike: day label, the money-counting count, and an icon-only
  * chevron that names its action (Expand / Collapse) for touch and screen readers.
  */
-export default function DayGroupHeader({ label, count, collapsed, onToggle, selection, t }: DayGroupHeaderProps) {
+export default function DayGroupHeader({ label, count, collapsed, onToggle, selection, extra, t }: DayGroupHeaderProps) {
   const toggleLabel = collapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')
   const text = (
     <>
       <span className="min-w-0">{label}</span>
       <span className="font-normal normal-case tracking-normal text-slate-400">{count}</span>
+      {extra}
     </>
   )
   return (

@@ -77,7 +77,7 @@ const mockModules: Record<string, string> = {
   `,
   '../shared/DateTimeRangePicker': `import React from 'react'; export default function DateTimeRangePicker() { return <div data-fixture-control="date" /> }`,
   '../shared/FilterMenu': `import React from 'react'; export default function FilterMenu() { return <div data-fixture-control="filters" /> }`,
-  '../shared/PaginationControls': `import React from 'react'; export default function PaginationControls() { return <div data-fixture-control="pager" /> }`,
+  '../shared/PaginationControls': `import React from 'react'; export default function PaginationControls() { return <div data-fixture-control="pager" /> }; export const TopPager = ({ children }) => children`,
   '../shared/SearchInput': `import React from 'react'; export default function SearchInput() { return <input data-fixture-control="search" /> }`,
   '../shared/ScanSearchButton': `import React from 'react'; export default function ScanSearchButton() { return <button data-fixture-control="scan">scan</button> }`,
   '../shared/InfoHint': `import React from 'react'; export default function InfoHint() { return <button data-info-hint="true">info</button> }`,

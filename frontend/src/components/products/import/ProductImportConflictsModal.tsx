@@ -20,7 +20,7 @@ import Modal from '../../shared/Modal'
 import ScanSearchButton from '../../shared/ScanSearchButton.tsx'
 import { useScannerWedge, type ScanOrigin } from '../../shared/useScannerWedge.ts'
 import { getImportJobReview, updateImportJobDecisions } from '../../../api/importJobsTransport'
-import PaginationControls from '../../shared/PaginationControls'
+import PaginationControls, { TopPager } from '../../shared/PaginationControls'
 
 const PAGE_SIZE = 50
 const WARNING_KINDS = 'negative_stock,barcode_collision,sku_collision'
@@ -126,6 +126,9 @@ function ProductImportConflictsBody({ jobId, t, notify, onClose, onAllResolved }
   const applyLabel = tr('products_import_conflicts_apply', 'Use safe result')
   const skipLabel = tr('products_import_conflicts_skip', 'Skip row')
 
+  const pager = (
+    <PaginationControls compact rangeAsPageSize page={page} pageSize={PAGE_SIZE} totalItems={total} label={tr('records', 'records')} t={t} onPageChange={setPage} />
+  )
   return (
     <Modal title={tr('products_import_conflicts_title', 'Resolve product import conflicts')} onClose={onClose} size="xl" unsavedChanges="read-only">
       <div className="space-y-4">
@@ -153,6 +156,7 @@ function ProductImportConflictsBody({ jobId, t, notify, onClose, onAllResolved }
           </label>
           <ScanSearchButton onDetected={(value) => { setQuery(value); setPage(1) }} t={scannerText} />
         </div>
+        <div className="flex justify-center"><TopPager>{pager}</TopPager></div>
         <div className="max-h-[30rem] space-y-2 overflow-auto">
           {loading ? <div className="flex justify-center p-8"><Loader2 className="h-5 w-5 animate-spin" /></div> : rows.length ? rows.map((row) => {
             const choice = String(row.decision?.action || '')
@@ -169,7 +173,7 @@ function ProductImportConflictsBody({ jobId, t, notify, onClose, onAllResolved }
             </div>
           }) : <p className="p-8 text-center text-sm text-slate-500">{tr('products_import_conflicts_no_matches', 'No matching unresolved or reviewed product conflicts.')}</p>}
         </div>
-        <div className="flex justify-center"><PaginationControls compact rangeAsPageSize page={page} pageSize={PAGE_SIZE} totalItems={total} label={tr('records', 'records')} t={t} onPageChange={setPage} /></div>
+        <div className="flex justify-center">{pager}</div>
         <div className="flex justify-end border-t border-slate-100 pt-3 dark:border-slate-800"><button type="button" className="btn-secondary" onClick={onClose}>{tr('products_import_conflicts_done', 'Done reviewing')}</button></div>
       </div>
     </Modal>

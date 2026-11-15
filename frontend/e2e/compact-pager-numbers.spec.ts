@@ -107,3 +107,15 @@ test('negative unbounded hydrated draft reproduces100digit overflow', async ({ p
   await expect(page.getByRole('textbox')).toHaveValue('9'.repeat(100))
   expect((await clipped(page)).length).toBeGreaterThan(0)
 })
+
+// The dense step (seven-digit counts) must not bypass the Khmer size floor: digits take the app's 10px digit size (.625rem, as in the .price-strip qty chip;
+// qty chip), not the 9px Latin step, and the whole row must still fit one line at the narrowest phones.
+for (const width of [320, 375]) test(`km ${width}px dense pager keeps the Khmer digit floor and one row`, async ({ page }) => {
+  await show(page, 'km', 123456, width)
+  const sizes = await page.locator('[data-pager-range], [data-pager-page]').evaluateAll((els) => els.map((el) => parseFloat(getComputedStyle(el).fontSize)))
+  expect(sizes.length).toBeGreaterThan(0)
+  for (const size of sizes) expect(size, 'Khmer dense pager text is at least the 10px digit floor').toBeGreaterThanOrEqual(10)
+  expect(await clipped(page)).toEqual([])
+  const oneRow = await page.locator('[data-fixture] button').evaluateAll((buttons) => buttons.every((button) => Math.abs(button.getBoundingClientRect().top - buttons[0].getBoundingClientRect().top) < 1))
+  expect(oneRow).toBe(true)
+})

@@ -1,11 +1,27 @@
 import assert from 'node:assert/strict'
 import { createHarness, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
-import { countTextFromLots, lotCountOf, lotSubmissionLine, lotTotals, rowSetPlan, staleLotFigures, type LotDraft } from '../src/components/inventory/inventoryCheckLots.ts'
-import { patchWiredRaw, setToAmount, wiredListParams, wiredResult, type WiredList } from '../src/components/inventory/inventoryWired.ts'
+import { countTextFromLots, incompleteLotAnswers, lotCountOf, lotSubmissionLine, lotTotals, rowSetPlan, splitSubmission, staleLotFigures, stockedDatesOf, submissionLineCost, uncountedDates, type LotDraft } from '../src/components/inventory/inventoryCheckLots.ts'
+import { patchWiredLots, patchWiredRaw, setToAmount, wiredListParams, wiredResult, type WiredList } from '../src/components/inventory/inventoryWired.ts'
 import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
 
 // INV-B S5: counts typed per received date and the direct Set from a row (INVENTORY-REPLAN rev. 2 sections 2.6, 2.7).
 // Pure rules first (the 05a red case among them), then the wired page's patch (a Set reads no page), then the mounted row.
+
+// ---- a count by date that skips a stocked date (review finding 4): found on the screen, before any request ----
+{
+  const rows = [{ batchId: 7, receivedAt: '2026-10-01', expiry: null, quantity: 5 }, { batchId: 9, receivedAt: '2026-10-09', expiry: null, quantity: 3 }, { batchId: 11, receivedAt: '2026-08-01', expiry: null, quantity: 0 }]
+  const stocked = stockedDatesOf({ lot_rows: rows })
+  assert.deepEqual(stocked, [{ batchId: 7, receivedAt: '2026-10-01' }, { batchId: 9, receivedAt: '2026-10-09' }], 'only dates that hold stock count (the server counts quantity above 0)')
+  assert.equal(stockedDatesOf({}), undefined, 'a row whose dates are not loaded cannot say')
+  assert.equal(stockedDatesOf({ lot_rows: rows, lots_more: true }), undefined, 'a product with more dates than one count carries is exempt, as on the server')
+  assert.equal(stockedDatesOf({ lot_rows: rows, lots_stale: true }), undefined, 'dates that may be out of date are left to the server')
+  assert.deepEqual(uncountedDates(stocked, { '7': { count: '4', seen: 5 } }).map(date => date.batchId), [9], 'one date typed, one skipped')
+  assert.deepEqual(uncountedDates(stocked, { '7': { count: '4', seen: 5 }, '9': { count: '3', seen: 3 } }), [], 'every stocked date named')
+  assert.deepEqual(uncountedDates(stocked, { '7': { count: '4', seen: 5 }, '9': { count: '', seen: 3 } }).map(date => date.batchId), [9], 'a blank is not a count')
+  assert.deepEqual(uncountedDates(stocked, { '7': { count: 'x', seen: 5 }, '9': { count: '3', seen: 3 } }).map(date => date.batchId), [7], 'a mistyped figure is not a count')
+  assert.deepEqual(uncountedDates(stocked, { '7': { count: '0', seen: 5 }, '9': { count: '0', seen: 3 } }), [], 'a typed 0 is a count')
+  assert.deepEqual(uncountedDates(undefined, { '7': { count: '4', seen: 5 } }), [], 'nothing known, nothing missing: the server stays the backstop')
+}
 
 // ---- typed text and totals ----------------------------------------------------------------------------------------------------------------------------------
 assert.deepEqual(lotCountOf(''), { kind: 'empty' })
@@ -51,6 +67,28 @@ assert.equal(staleLotFigures({ body: { current: [{ productId: 77, batchId: 7, sc
 const twoDates = staleLotFigures({ current: [{ productId: 5, batchId: 7, scope: 'lot', quantity: 4 }, { productId: 5, batchId: 9, scope: 'lot', quantity: 6 }] }, [product], 1)
 assert.deepEqual(twoDates?.conflicts.map(entry => entry.current.branchQuantity), [7, 10], 'two dates of one product move the total one after the other')
 
+// ---- F1: one submission carries at most the plan's line cap; the rest waits (the server counts a plain line as 1, a dated line as one per date) ----
+const dated = (productId: number, dates: number) => ({ productId, lots: Array.from({ length: dates }, (_, n) => ({ batchId: n + 1 })) })
+assert.equal(submissionLineCost(dated(1, 3)), 3); assert.equal(submissionLineCost({}), 1, 'a plain line is one'); assert.equal(submissionLineCost({ lots: [] }), 1, 'and never zero')
+const plan = [dated(1, 3), { productId: 2 }, dated(3, 2), dated(4, 1)]
+assert.deepEqual(splitSubmission(plan, 6).send.map(line => line.productId), [1, 2, 3], '3 + 1 + 2 = 6 fits, the next would be 7')
+assert.deepEqual(splitSubmission(plan, 6).left.map(line => line.productId), [4], 'the rest waits, in order')
+assert.deepEqual(splitSubmission(plan, 5).send.map(line => line.productId), [1, 2], 'a whole product or none: 3 + 1 + 2 = 6 is over 5')
+assert.deepEqual(splitSubmission(plan, 100), { send: plan, left: [] }, 'under the cap everything goes')
+assert.deepEqual(splitSubmission(plan, undefined), { send: plan, left: [] }, 'a cap the page was not told sends everything (the server decides)')
+assert.deepEqual(splitSubmission(plan, 2).send.map(line => line.productId), [], 'a first product over the cap alone sends nothing: the page explains instead of sending')
+// N5: the product cap (the JavaScript time of one request grows with its products). Both caps hold at once; either alone limits; plain lines (cost 1 each) are limited by products too.
+assert.deepEqual(splitSubmission(plan, 100, 2).send.map(line => line.productId), [1, 2], 'two products fit the product cap although the line cap has room')
+assert.deepEqual(splitSubmission(plan, 100, 2).left.map(line => line.productId), [3, 4])
+assert.deepEqual(splitSubmission(plan, 4, 3).send.map(line => line.productId), [1, 2], 'the line cap (3 + 1 = 4) bites first: both caps are honoured')
+assert.deepEqual(splitSubmission(plan, undefined, 3).send.map(line => line.productId), [1, 2, 3], 'the product cap alone limits when no line cap is known')
+assert.deepEqual(splitSubmission(plan, undefined, undefined), { send: plan, left: [] })
+const plainLines = Array.from({ length: 401 }, (_, index) => ({ productId: index + 1, countedQuantity: 1, seenQuantity: 1, checked: true }))
+assert.equal(splitSubmission(plainLines, 400, 40).send.length, 40, 'wired only, 401 plain products: 40 go')
+assert.equal(splitSubmission(plainLines, 400, 40).left.length, 361)
+assert.equal(splitSubmission(plainLines, 400, undefined).send.length, 400, 'with only the line cap, 400 of 401 plain products go (a plain line costs 1)')
+assert.equal(splitSubmission(plainLines, 400, 500).send.length, 400)
+
 // ---- the wired page: a Set patches the row from the answer (the mounted page test counts the requests: none) ------------------------------------------------------------------------------
 const list: WiredList = {
   items: [{ id: 5, name: 'Serum', stock_quantity: 8, branch_stock: [{ branch_id: 1, branch_name: 'Main', quantity: 8 }],
@@ -59,15 +97,38 @@ const list: WiredList = {
 }
 const raw = { list, overlay: new Map(), lots: new Map(), branches: [{ id: 1, name: 'Main' }], branchId: 1, extras: {} }
 const before = wiredResult(raw)
-assert.deepEqual(before.items[0].lot_rows?.map(row => [row.batchId, row.quantity]), [[7, 5], [9, 3], [12, 0]], 'the rows list the dates this branch holds (a date at 0 too: found units are a count), not another branch\'s lot')
+assert.deepEqual(before.items[0].lot_rows?.map(row => [row.batchId, row.quantity]), [[7, 5], [9, 3]], 'the rows list the dates this branch holds STOCK on (the empty date 12 is not listed: owner, 14 Nov), not another branch\'s lot')
 const patched = patchWiredRaw(raw, { productId: 5, branchId: 1, batchId: 7, after: { lotQuantity: 4, branchQuantity: 7 } })
 const after = wiredResult(patched)
 assert.equal(after.items[0].quantity, 7, 'the branch figure takes the answer')
-assert.deepEqual(after.items[0].lot_rows?.map(row => [row.batchId, row.quantity]), [[7, 4], [9, 3], [12, 0]], 'and so does the date')
+assert.deepEqual(after.items[0].lot_rows?.map(row => [row.batchId, row.quantity]), [[7, 4], [9, 3]], 'and so does the date')
 assert.equal(wiredResult(raw).items[0].quantity, 8, 'the earlier raw is untouched')
 const conflicted = patchWiredRaw(raw, { productId: 5, branchId: 1, batchId: 7, current: { lotQuantity: 2, branchQuantity: 5 } })
-assert.deepEqual(wiredResult(conflicted).items[0].lot_rows?.map(row => row.quantity), [2, 3, 0], 'a refusal shows the figures the writer found')
+assert.deepEqual(wiredResult(conflicted).items[0].lot_rows?.map(row => row.quantity), [2, 3], 'a refusal shows the figures the writer found')
 assert.equal(patchWiredRaw(raw, { productId: 99, branchId: 1, batchId: 7, after: { lotQuantity: 0, branchQuantity: 0 } }).list.items[0], raw.list.items[0], 'another product is not touched')
+
+// ---- N4: the row's received dates replaced by the server's word of now (patchWiredLots) --------------------------------------------------------------------------------------------------------
+const lotRow = (batchId: number, quantity: number, receivedAt = '2026-11-10') => ({ batchId, receivedAt, expiry: null, quantity })
+const arrived = wiredResult(patchWiredLots(raw, 5, { lots: [lotRow(7, 5, '2026-10-01'), lotRow(9, 3, '2026-10-09'), lotRow(21, 4)] })).items[0]
+assert.deepEqual(arrived.lot_rows?.map(row => [row.batchId, row.quantity]), [[7, 5], [9, 3], [21, 4]], 'a date that arrived on another device is a row')
+assert.equal(arrived.quantity, 12, 'and the branch total moved by what it holds (8 + 4)')
+assert.equal(wiredResult(raw).items[0].quantity, 8, 'the earlier raw is untouched')
+const gone = wiredResult(patchWiredLots(raw, 5, { lots: [lotRow(7, 5, '2026-10-01')] })).items[0]
+assert.deepEqual(gone.lot_rows?.map(row => [row.batchId, row.quantity]), [[7, 5]], 'a date the server no longer lists holds no stock here')
+assert.deepEqual(gone.empty_lot_rows?.map(row => row.batchId).sort((a, b) => a - b), [9, 12], 'it moves to the empty dates (beside the one that was already empty), never to the counted ones')
+assert.equal(gone.quantity, 5, 'and the total drops by what it held (8 - 3)')
+assert.ok(!gone.empty_lot_rows?.some(row => row.batchId === 11), 'a date this branch never held (another branch\'s) does not become an empty date here')
+const cut = wiredResult(patchWiredLots(raw, 5, { lots: [lotRow(21, 4)], more: true })).items[0]
+assert.equal(cut.lots_more, true, 'a cut answer keeps the row marked as cut'); assert.equal(cut.quantity, 8, 'and cannot say what the total did: left as it is')
+assert.deepEqual(cut.lot_rows?.map(row => row.batchId).sort((a, b) => a - b), [7, 9, 21], 'the dates it does not list keep their figures')
+const bare = { ...raw, list: { ...list, items: [{ id: 5, name: 'Serum', stock_quantity: 11, branch_stock: [{ branch_id: 1, branch_name: 'Main', quantity: 11 }] }] } }
+assert.equal(wiredResult(patchWiredLots(bare, 5, { lots: [lotRow(7, 5), lotRow(9, 3)] })).items[0].quantity, 11, 'a row that carried no dates keeps its total (the dates are what is new)')
+assert.equal(patchWiredLots(raw, 99, { lots: [] }), raw, 'a product not on the page is not touched')
+// the refusal's list is read defensively (the page must never act on a malformed one)
+assert.equal(incompleteLotAnswers({ code: 'inventory_check_lots_incomplete' }), null, 'a refusal with no list')
+assert.equal(incompleteLotAnswers({ lots: [{ productId: 'x', lots: [] }, { lots: [] }] }), null, 'entries without a product id are dropped')
+assert.deepEqual(incompleteLotAnswers({ lots: [{ productId: 5, lots: [{ batchId: 7, receivedAt: '2026-10-01', expiry: null, quantity: 5 }, { batchId: 'x', quantity: 1 }, { batchId: 9, quantity: 'many' }] }] }),
+  [{ productId: 5, lots: [{ batchId: 7, receivedAt: '2026-10-01', expiry: null, quantity: 5, lotCode: null, batchNumber: null }] }], 'rows without a batch id or a number are dropped')
 
 // ---- audit G5, G10, G11, G4b, owner sort: what a row is made of ---------------------------------------------------------------------------------------------------
 {
@@ -86,73 +147,50 @@ assert.equal(patchWiredRaw(raw, { productId: 99, branchId: 1, batchId: 7, after:
   assert.equal(before.items[0].unlotted_quantity, undefined, 'and a row whose dates add up shows none')
   const cut = wiredResult({ ...raw, list: { ...list, items: [{ ...list.items[0], lots_more: true }] } }).items[0]
   assert.equal(cut.lots_more, true, 'G10: a row whose dates were cut at the plan limit says so'); assert.equal(cut.unlotted_quantity, undefined, 'and claims no unlotted remainder it cannot know')
-  assert.equal(wiredListParams({ sortBy: 'checked', checkState: 'issue' }).sortBy, 'checked')
-  assert.equal(wiredListParams({ sortBy: 'checked', checkState: 'ok', query: 'serum' }).sortBy, 'created', 'N6: never beside a search (the Worker refuses it)')
-  assert.equal(wiredListParams({ sortBy: 'checked', checkState: 'ok', brand: 'A' }).sortBy, 'created', 'nor a brand')
-  assert.equal(wiredListParams({ sortBy: 'checked', checkState: '' }).sortBy, 'created', 'a stale date order never reaches the server without a status')
-  assert.equal(wiredListParams({ sortBy: 'checked', checkState: 'not_checked' }).sortBy, 'created', 'nor with a status that has no checked list')
+  // The date order of the checks is the grouping Last checked, never a sort: sortBy=checked is never sent, whatever the status, search or filter beside it.
+  for (const extra of [{ checkState: 'issue' }, { checkState: 'ok', query: 'serum' }, { checkState: 'ok', brand: 'A' }, { checkState: '' }, { checkState: 'not_checked' }]) assert.equal(wiredListParams({ sortBy: 'checked', ...extra }).sortBy, 'created', JSON.stringify(extra))
 }
 
-// ---- the mounted row ----------------------------------------------------------------------------------------------------------------------------------------------
+// ---- the mounted row: the page never lists received dates by itself; they live in the status popover (read on demand, see inventoryCheckCountPopover.test.ts) -------------------------
 const rowProduct: InventoryCheckProduct = { id: 5, name: 'Serum', quantity: 8, check_status: 'not_checked', lot_rows: product.lot_rows }
-type Call = [string, ...unknown[]]
-const calls2: Call[] = []
-const base = {
-  products: [rowProduct], drafts: { '5': { selected: true, count: '', checked: false, note: '', lots: {} } }, selecting: true, canViewStock: true, canViewCounts: true, t: (key: string) => key,
-  onOpenProduct: () => {}, onToggle: () => {}, onCount: () => {}, onChecked: () => {}, onNote: () => {},
-  lotCounts: true,
-  onLotCount: (p: InventoryCheckProduct, lot: { batchId: number }, value: string) => { calls2.push(['lot', p.id, lot.batchId, value]) },
-  onLotSet: (p: InventoryCheckProduct, lot: { batchId: number }, value: string) => { calls2.push(['set', p.id, lot.batchId, value]) },
-}
 const harness = await createHarness({})
 const live: MountedSurface[] = []
+const loadLots = async () => ({ productId: 5, branchId: 1, lots: [{ batchId: 7, receivedAt: '2026-10-01', expiry: null, quantity: 5 }, { batchId: 9, receivedAt: '2026-10-09', expiry: null, quantity: 3 }] })
+const base = {
+  products: [rowProduct], drafts: { '5': { selected: true, count: '', checked: false, note: '', lots: {} } }, selecting: true, canViewStock: true, canViewCounts: true, t: (key: string) => key,
+  onOpenProduct: () => {}, onCount: () => {}, onNote: () => {}, lotCounts: true, loadLots, onLotCount: () => {}, onMatches: () => {}, onDiffers: () => {}, onClear: () => {},
+}
 const mount = async (props: Record<string, unknown> = {}) => { for (const old of live.splice(0)) await old.unmount(); const s = await harness.mount({ component: 'components/inventory/InventoryCheckListRows.tsx', props: { ...base, ...props }, app: {}, doubles: {} }); live.push(s); return s }
-const lots = (s: MountedSurface) => s.findAll(node => node.getAttribute('data-check-lot') !== null)
-const flat = (node: MemoryNode | undefined) => (node?.textContent ?? '').replace(/\s+/g, ' ').trim()
+const lots = (s: MountedSurface) => s.findAll(node => node.getAttribute('data-check-lot') !== null || node.getAttribute('data-popover-lot') !== null)
 const readOnly = (node: MemoryNode) => ['readOnly', 'readonly'].some(name => { const value = node.getAttribute(name); return value !== null && value !== 'false' })
+const openPopover = async (s: MountedSurface) => { await s.click(s.find(node => node.getAttribute('data-check-action') === 'status', 'status button')) }
 const failures: string[] = []
 const cases: Array<[string, () => Promise<void>]> = [
-  ['a picked row lists its received dates with a count box on each; nothing else is added', async () => {
+  ['a picked row is one line: the received dates it holds (even when the page already carries them) are not drawn until the popover opens', async () => {
     const s = await mount()
-    const dates = lots(s)
-    assert.deepEqual(dates.map(node => node.getAttribute('data-check-lot')), ['7', '9'])
-    assert.ok(flat(dates[0]).includes('inventory_check_lot_received') || flat(dates[0]).includes('Received'), 'the date is named in words')
-    assert.equal(s.findAll(node => node.getAttribute('data-check-action') === 'set-lot').length, 0, 'no Set button until a figure that differs is typed')
-    const unpicked = await mount({ drafts: {} })
-    assert.equal(lots(unpicked).length, 0, 'a row that is not picked stays a single line')
+    assert.equal(lots(s).length, 0, 'no date list on the row')
+    await openPopover(s)
+    assert.deepEqual(lots(s).map(node => node.getAttribute('data-popover-lot')), ['7', '9'], 'the popover lists them, a count box on each')
   }],
-  ['typing on a date reports that date; with dates typed the row count is read only', async () => {
-    const s = await mount()
-    const input = s.find(node => node.getAttribute('data-check-lot-count') !== null && node.parentNode === lots(s)[0], 'date input')
-    await s.call(input, 'onChange', [{ target: { value: '4' } }])
-    assert.deepEqual(calls2.pop(), ['lot', 5, 7, '4'])
-    const typedState = await mount({ drafts: { '5': { selected: true, count: '4', checked: false, note: '', lots: { '7': { count: '4', seen: 5 } } } } })
-    const rowCount = typedState.find(node => node.getAttribute('data-check-count') !== null, 'row count')
-    assert.equal(readOnly(rowCount), true, 'the sum is shown, not typed over')
+  ['after a reload each batch still shows what the latest count typed on it (counted per date comes back from the overlay); a viewer who may not read counts sees none', async () => {
+    const withLines = { ...rowProduct, check_status: 'issue', check_lines: [{ batch_id: 7, scope: 'lot', counted: 4, seen: 5 }, { batch_id: 9, scope: 'lot', counted: 3, seen: 3 }] } as InventoryCheckProduct
+    const s = await mount({ products: [withLines] })
+    await openPopover(s)
+    const recorded = s.findAll(node => node.getAttribute('data-popover-lot-recorded') !== null).map(node => node.textContent.replace(/\s+/g, ' ').trim())
+    assert.equal(recorded.length, 2, 'both batches show their counted figure')
+    assert.deepEqual(recorded.map(text => text.split(' ').pop()), ['4', '3'])
+    const blind = await mount({ products: [withLines], canViewCounts: false })
+    await openPopover(blind)
+    assert.equal(lots(blind).length, 2)
+    assert.equal(blind.findAll(node => node.getAttribute('data-popover-lot-recorded') !== null).length, 0, 'no counted figure without the right to read counts')
   }],
-  ['a differing figure offers Set only to someone allowed (onLotSet); a blind or non-adjusting viewer gets the count box alone', async () => {
-    const draft = { '5': { selected: true, count: '4', checked: false, note: '', lots: { '7': { count: '4', seen: 5 } } } }
-    const withSet = await mount({ drafts: draft })
-    const button = withSet.find(node => node.getAttribute('data-check-action') === 'set-lot', 'Set button')
-    await withSet.click(button)
-    assert.deepEqual(calls2.pop(), ['set', 5, 7, '4'])
-    const without = await mount({ drafts: draft, onLotSet: undefined })
-    assert.equal(without.findAll(node => node.getAttribute('data-check-action') === 'set-lot').length, 0)
-    const blind = await mount({ drafts: draft, canViewStock: false })
-    assert.equal(lots(blind).length, 0, 'a viewer who may not see stock sees no dates')
-  }],
-  ['after a reload the dates still show what the latest count typed on each (counted per date comes back from the overlay)', async () => {
-    const s = await mount({ products: [{ ...rowProduct, check_status: 'issue', check_lines: [{ batch_id: 7, scope: 'lot', counted: 4, seen: 5 }, { batch_id: 9, scope: 'lot', counted: 3, seen: 3 }] }] })
-    const recorded = s.findAll(node => node.getAttribute('data-check-lot-recorded') !== null).map(node => node.textContent.replace(/\s+/g, ' ').trim())
-    assert.deepEqual(recorded, ['inventory_check_counted 4', 'inventory_check_counted 3'].map(text => text.replace('inventory_check_counted', recorded[0].startsWith('Counted') ? 'Counted' : 'inventory_check_counted')), 'both dates show their counted figure')
-    const blind = await mount({ products: [{ ...rowProduct, check_lines: [{ batch_id: 7, scope: 'lot', counted: 4 }] }], canViewCounts: false })
-    assert.equal(blind.findAll(node => node.getAttribute('data-check-lot-recorded') !== null).length, 0, 'a viewer who may not read counts sees none')
-  }],
-  ['with the switch off the row is exactly the older row (no date list, no extra input)', async () => {
-    const off = await mount({ lotCounts: false, onLotCount: undefined, onLotSet: undefined })
-    assert.equal(lots(off).length, 0)
-    const rowCount = off.find(node => node.getAttribute('data-check-count') !== null, 'row count')
-    assert.equal(readOnly(rowCount), false, 'the count box is typed in as before')
+  ['with the dates typed the row count is read only (the sum); with the switch off the row is exactly the older row (no popover batch list, a plain count box)', async () => {
+    const typed = await mount({ drafts: { '5': { selected: true, count: '4', checked: false, note: '', lots: { '7': { count: '4', seen: 5 } } } } })
+    assert.equal(readOnly(typed.find(node => node.getAttribute('data-check-count') !== null, 'row count')), true, 'the sum is shown, not typed over')
+    const off = await mount({ lotCounts: false, loadLots: undefined, onLotCount: undefined, onLotSet: undefined })
+    assert.equal(readOnly(off.find(node => node.getAttribute('data-check-count') !== null, 'row count')), false, 'the count box is typed in as before')
+    await openPopover(off)
+    assert.equal(lots(off).length, 0, 'no batch list')
   }],
 ]
 try {

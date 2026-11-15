@@ -31,8 +31,6 @@ type CatalogPaginationControlsProps = {
   label?: string
   t?: Translate
   className?: string
-  /** Printed on the same row as Back/Next, e.g. "3,585 result(s)". */
-  resultsCount?: string
 }
 
 /** Any off-menu value (a stale stored choice, a hand-edited URL) becomes the default. */
@@ -97,7 +95,6 @@ export default function CatalogPaginationControls({
   label = 'products',
   t,
   className = '',
-  resultsCount,
 }: CatalogPaginationControlsProps) {
   return (
     <PaginationControls
@@ -109,7 +106,6 @@ export default function CatalogPaginationControls({
       pageSizeOptions={pageSizeOptions}
       label={label}
       t={t}
-      resultsCount={resultsCount}
       // The storefront's own layout: one centred pill -- page size / Back /
       // page / count / Next and nothing else -- and no "Showing X-Y of N" row.
       // The old wrapper classes here (a rounded card with its own background)

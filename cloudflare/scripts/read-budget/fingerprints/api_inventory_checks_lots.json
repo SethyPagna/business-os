@@ -1,0 +1,12 @@
+{
+ "inventory-checks-lots-one-product-at-a-branch": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "01c080f94896",
+   "SELECT pb.id AS id, pb.received_at AS received_at, pb.expiry_date AS expiry_date, pb.lot_code AS lot_code, pb."
+  ]
+ ]
+}

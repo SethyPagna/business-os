@@ -33,6 +33,8 @@ async function exercise(mutant = false) {
   const hooks = {
     useState(initial: any) { const owner = host, i = owner.cursor++; if (!(i in owner.slots)) owner.slots[i] = typeof initial === 'function' ? initial() : initial
       return [owner.slots[i], (v: any) => { const next = typeof v === 'function' ? v(owner.slots[i]) : v; if (!Object.is(next, owner.slots[i])) { owner.slots[i] = next; owner.dirty = true } }] },
+    createContext(value: any) { return { __value: value } },
+    useContext(context: any) { return context.__value },
     useRef(initial: any) { const i = host.cursor++; return host.slots[i] ??= { current: initial } },
     useCallback(fn: any, deps: any[]) { const i = host.cursor++; if (!host.slots[i] || deps.some((v, j) => !Object.is(v, host.slots[i].deps[j]))) host.slots[i] = { fn, deps }; return host.slots[i].fn },
     useEffect(fn: any, deps: any[]) { const owner = host, i = owner.cursor++; if (!owner.slots[i] || deps.some((v, j) => !Object.is(v, owner.slots[i].deps[j]))) owner.pending.push(() => { owner.slots[i]?.cleanup?.(); owner.slots[i] = { deps, cleanup: fn() } }) },
@@ -55,7 +57,7 @@ async function exercise(mutant = false) {
     assert.notEqual(modal, original, 'negative control must actually remove the unloaded-state guard')
   }
   const component = compile(modal, (id) => {
-    if (id.includes('PaginationControls')) return { __esModule: true, default: pager.default, DEFAULT_PAGE_SIZE: 20 }
+    if (id.includes('PaginationControls')) return { __esModule: true, default: pager.default, TopPager: pager.TopPager, DEFAULT_PAGE_SIZE: 20 }
     if (id.includes('AppContext')) return { useApp: () => ({ user: { id: 7 }, t }) }
     if (id.includes('shiftTransport')) return transport
     if (id.includes('ShiftGate')) return { SHIFT_STATE_CHANGED_EVENT: 'business-os:shift-state-changed', SHIFT_BRANCH_CHANGED_EVENT: 'business-os:shift-branch-changed' }

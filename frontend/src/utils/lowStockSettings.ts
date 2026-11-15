@@ -175,6 +175,77 @@ export function validateLowStockSettingsWrite(
 }
 // <<< SHARED LOW-STOCK RULE <<<
 
+/** The three states a stock figure can be in. The one vocabulary the pill, the tooltip and the tests share. */
+export type StockLevel = 'out' | 'low' | 'healthy'
+
+/** The product fields the rule reads. Rows carry them straight from `products`; NULL / undefined mean "no override". */
+export interface StockLevelProduct {
+  [field: string]: unknown
+  low_stock_threshold?: unknown
+  out_of_stock_threshold?: unknown
+  is_group?: unknown
+  parent_id?: unknown
+}
+
+/**
+ * THE stock-state rule for one figure, identical to the server's for numeric values (text-typed or
+ * non-finite stored values are not modelled; the columns are REAL):
+ *   out     when COALESCE(qty, 0) <= COALESCE(out_of_stock_threshold, 0)
+ *   low     when COALESCE(qty, 0) <= the effective low threshold (-1 when alerts are off,
+ *           the global number in global mode, COALESCE(product threshold, global) in product mode)
+ *   healthy otherwise
+ * Sources: lowStockThresholdSql (cloudflare/src/lib/lowStockSettings.ts), familyStockStats.ts
+ * has_healthy / has_low, notifications.ts is_out. A parity test runs that SQL in SQLite over a
+ * matrix and requires the same answer from this function, so the bell, the Dashboard cards and
+ * a single product's own row cannot call that one product low and healthy. A merged / family
+ * row is judged by stockGroupLevel (the Dashboard's family rule: the best member wins), so it
+ * can be healthy while the bell lists one of its members as low.
+ */
+export function stockLevelState(
+  qty: unknown,
+  product: StockLevelProduct | null | undefined,
+  config: LowStockConfig,
+): StockLevel {
+  const asNumber = qty == null || qty === '' ? 0 : Number(qty)
+  const have = Number.isFinite(asNumber) ? asNumber : 0
+  const outRaw = product?.out_of_stock_threshold
+  const outNumber = outRaw == null || outRaw === '' ? Number.NaN : Number(outRaw)
+  const out = Number.isFinite(outNumber) ? outNumber : 0
+  if (have <= out) return 'out'
+  if (have <= effectiveLowStockThreshold(config, product?.low_stock_threshold)) return 'low'
+  return 'healthy'
+}
+
+/** A product-family header row: a group parent that holds no stock of its own. */
+export function isStockFamilyHeader(product: StockLevelProduct | null | undefined): boolean {
+  // The server's (COALESCE(is_group, 0) = 1 AND COALESCE(parent_id, 0) = 0), familyStockStats.ts: NULL reads as 0,
+  // so a negative or fractional parent_id is NOT a header there and is not one here.
+  const group = product?.is_group == null ? 0 : Number(product.is_group)
+  const parent = product?.parent_id == null ? 0 : Number(product.parent_id)
+  return group === 1 && parent === 0
+}
+
+/**
+ * The family rule the Dashboard uses (familyStockStats.ts has_healthy / has_low): the BEST state
+ * among the members wins -- any healthy member makes the family healthy, else any low member makes
+ * it low, else out. Header rows are skipped while a real member exists, and count only when the
+ * family has nothing else. An empty family is "out", the SQL's final ELSE.
+ */
+export function stockGroupLevel(
+  members: ReadonlyArray<{ qty: unknown; product?: StockLevelProduct | null }>,
+  config: LowStockConfig,
+): StockLevel {
+  const real = members.filter((member) => !isStockFamilyHeader(member.product))
+  const counted = real.length ? real : members
+  let best: StockLevel = 'out'
+  for (const member of counted) {
+    const level = stockLevelState(member.qty, member.product, config)
+    if (level === 'healthy') return 'healthy'
+    if (level === 'low') best = 'low'
+  }
+  return best
+}
+
 export type StockTier = 'out_of_stock' | 'low_stock' | 'in_stock'
 
 /** The three-way classification the badges/tones on every client surface use. */
@@ -184,8 +255,6 @@ export function resolveStockTier(
   productLowThreshold?: unknown,
   productOutThreshold?: unknown,
 ): StockTier {
-  const qty = Number(quantity)
-  const out = Number(productOutThreshold)
-  if (!Number.isFinite(qty) || qty <= (Number.isFinite(out) ? out : 0)) return 'out_of_stock'
-  return isLowStock(config, quantity, productLowThreshold, productOutThreshold) ? 'low_stock' : 'in_stock'
+  const level = stockLevelState(quantity, { low_stock_threshold: productLowThreshold, out_of_stock_threshold: productOutThreshold }, config)
+  return level === 'out' ? 'out_of_stock' : level === 'low' ? 'low_stock' : 'in_stock'
 }

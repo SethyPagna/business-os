@@ -33,6 +33,25 @@ export function lotTotals(lots: LotDraft | undefined): { dates: number; counted:
   return { dates, counted: round(counted), seen: round(seen), valid }
 }
 
+/** One stocked received date of a row: the batch and the day it was received (what the person is told is missing). */
+export type StockedDate = { batchId: number; receivedAt: string | null }
+
+/**
+ * The stocked received dates (quantity above 0 at the branch) a row lists, or undefined when the row cannot say: its dates are not loaded, it holds more than one count can carry (lots_more: the server
+ * exempts it), or they may be out of date (lots_stale: the server decides). The server refuses a count of a product that names some of these dates but not all.
+ */
+export function stockedDatesOf(product: { lot_rows?: readonly InventoryCheckLotRow[]; lots_more?: boolean; lots_stale?: boolean }): StockedDate[] | undefined {
+  if (!Array.isArray(product.lot_rows) || product.lots_more === true || product.lots_stale === true) return undefined
+  return product.lot_rows.filter(row => row.quantity > 0).map(row => ({ batchId: row.batchId, receivedAt: row.receivedAt ?? null }))
+}
+
+/** The stocked dates a count by date leaves out: no valid figure typed on them. Empty when nothing is known to be missing (the server's refusal stays the backstop). */
+export function uncountedDates(stocked: readonly StockedDate[] | undefined, lots: LotDraft | undefined): StockedDate[] {
+  if (!stocked?.length) return []
+  const named = new Set(Object.entries(lots ?? {}).filter(([, entry]) => lotCountOf(entry.count).kind === 'valid').map(([batch]) => batch))
+  return stocked.filter(date => !named.has(String(date.batchId)))
+}
+
 /** One draft's count text from its dates: the sum, blank when nothing valid is typed, blank when any figure is not a number (so the page asks for a number). */
 export function countTextFromLots(lots: LotDraft | undefined): string {
   const totals = lotTotals(lots)
@@ -52,10 +71,53 @@ export function lotSubmissionLine(productId: number, lots: LotDraft, extra: { ch
   return { productId, lots: entries, checked: extra.checked, ...(extra.note ? { note: extra.note } : {}) }
 }
 
+/** What one line costs against the submission's cap: a line carries one entry per received date, a plain line (one total) counts as one. The server counts the same way. */
+export const submissionLineCost = (line: object): number => Math.max(1, (line as { lots?: readonly unknown[] }).lots?.length ?? 1)
+
+/**
+ * The lines one submission sends, and the ones that wait for the next. A submission is refused above the plan's line cap (capabilities.lotLinesPerSubmission) and above its product cap
+ * (capabilities.productsPerSubmission: the JavaScript time of one request grows with its products), so the page sends the longest run of lines, in order, that fits BOTH and keeps the rest as drafts:
+ * nothing is half-written (each submission is atomic) and nothing is lost. An unknown cap does not limit (the server decides). A line is one product.
+ * `send` is empty only when the first product alone is over the line cap, which the page explains instead of sending.
+ */
+export function splitSubmission<T extends object>(lines: readonly T[], cap: number | undefined, maxProducts?: number): { send: T[]; left: T[] } {
+  const lineCap = typeof cap === 'number' && Number.isFinite(cap) && cap >= 1 ? cap : Infinity
+  const productCap = typeof maxProducts === 'number' && Number.isFinite(maxProducts) && maxProducts >= 1 ? maxProducts : Infinity
+  if (lineCap === Infinity && productCap === Infinity) return { send: [...lines], left: [] }
+  let used = 0, count = 0
+  for (const line of lines) {
+    const cost = submissionLineCost(line)
+    if (used + cost > lineCap || count + 1 > productCap) break
+    used += cost; count++
+  }
+  return { send: lines.slice(0, count), left: lines.slice(count) }
+}
+
 /** What a direct Set on one received date writes: the typed figure, from the figure the row shows now. Null when nothing valid is typed or nothing would change. */
 export function rowSetPlan(row: Pick<InventoryCheckLotRow, 'batchId' | 'quantity'>, text: string): { batchId: number; before: number; after: number } | null {
   const count = lotCountOf(text)
   return count.kind === 'valid' && count.value !== row.quantity ? { batchId: row.batchId, before: row.quantity, after: count.value } : null
+}
+
+export type IncompleteLots = { productId: number; lots: InventoryCheckLotRow[] }
+
+/**
+ * A count refused because it named some, not all, of a product's stocked received dates (409 inventory_check_lots_incomplete) carries the dates each such product holds now. The page takes them
+ * into its rows (patchWiredLots) and keeps every typed count: the person counts the date that was missing and submits again. Null when the refusal carries no list (the page then reloads as it does for a stale figure).
+ */
+export function incompleteLotAnswers(cause: unknown): IncompleteLots[] | null {
+  const found = [cause, (cause as { body?: unknown } | null)?.body, (cause as { data?: unknown } | null)?.data]
+    .map(candidate => (candidate as { lots?: unknown } | null)?.lots).find(Array.isArray) as Array<{ productId?: unknown; lots?: unknown }> | undefined
+  if (!found) return null
+  const answers: IncompleteLots[] = []
+  for (const entry of found) {
+    const productId = Number(entry?.productId)
+    if (!Number.isSafeInteger(productId) || productId <= 0 || !Array.isArray(entry.lots)) continue
+    const lots = (entry.lots as Array<Partial<InventoryCheckLotRow>>).filter(lot => Number.isSafeInteger(Number(lot?.batchId)) && finite(Number(lot?.quantity))).map((lot): InventoryCheckLotRow => ({
+      batchId: Number(lot.batchId), receivedAt: lot.receivedAt ?? null, expiry: lot.expiry ?? null, quantity: Number(lot.quantity), lotCode: lot.lotCode ?? null, batchNumber: lot.batchNumber ?? null }))
+    answers.push({ productId, lots })
+  }
+  return answers.length ? answers : null
 }
 
 export type StaleLot = { productId: number; name: string; batchId: number; receivedAt: string | null; was: number | null; now: number }

@@ -115,17 +115,19 @@ for (const language of ['en', 'km'] as const) {
     state.total = 245
     await history(page, t.shift_history)
     const dialog = page.getByRole('dialog')
-    await expect(dialog.getByText('1-20 / 245', { exact: true })).toBeVisible()
-    await dialog.getByRole('button', { name: t.next, exact: true }).click()
-    await expect(dialog.getByText('21-40 / 245', { exact: true })).toBeVisible()
-    await dialog.getByRole('button', { name: t.back, exact: true }).click()
-    await expect(dialog.getByText('1-20 / 245', { exact: true })).toBeVisible()
+    await expect(dialog.getByText('1-20 / 245', { exact: true }).first()).toBeVisible()
+    // Owner 14 Nov: the history list carries its pager above AND below the rows, from one state.
+    await expect(dialog.getByText('1-20 / 245', { exact: true })).toHaveCount(2)
+    await dialog.getByRole('button', { name: t.next, exact: true }).first().click()
+    await expect(dialog.getByText('21-40 / 245', { exact: true }).first()).toBeVisible()
+    await dialog.getByRole('button', { name: t.back, exact: true }).first().click()
+    await expect(dialog.getByText('1-20 / 245', { exact: true }).first()).toBeVisible()
     for (let p = 2; p <= 13; p++) {
-      await dialog.getByRole('button', { name: t.next, exact: true }).click()
-      await expect(dialog.getByText(`${(p - 1) * 20 + 1}-${Math.min(p * 20, 245)} / 245`, { exact: true })).toBeVisible()
+      await dialog.getByRole('button', { name: t.next, exact: true }).first().click()
+      await expect(dialog.getByText(`${(p - 1) * 20 + 1}-${Math.min(p * 20, 245)} / 245`, { exact: true }).first()).toBeVisible()
     }
-    await expect(dialog.getByText('241-245 / 245', { exact: true })).toBeVisible()
-    await expect(dialog.getByRole('button', { name: t.next, exact: true })).toBeDisabled()
+    await expect(dialog.getByText('241-245 / 245', { exact: true }).first()).toBeVisible()
+    await expect(dialog.getByRole('button', { name: t.next, exact: true }).first()).toBeDisabled()
     for (const width of [1440, 375, 320]) {
       await page.setViewportSize({ width, height: 900 })
       const rect = await dialog.boundingBox()
@@ -133,7 +135,7 @@ for (const language of ['en', 'km'] as const) {
       expect(rect!.x + rect!.width).toBeLessThanOrEqual(width + 1)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
       for (const name of [t.back, t.next]) {
-        const box = await dialog.getByRole('button', { name, exact: true }).boundingBox()
+        const box = await dialog.getByRole('button', { name, exact: true }).first().boundingBox()
         expect(box!.x).toBeGreaterThanOrEqual(0); expect(box!.x + box!.width).toBeLessThanOrEqual(width + 1)
       }
       await page.screenshot({ path: info.outputPath(`shift-${language}-${width}.png`) })
@@ -141,7 +143,7 @@ for (const language of ['en', 'km'] as const) {
     state.total = 1
     await page.evaluate(() => window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'shifts' } })))
     await dialog.getByRole('button', { name: t.refresh, exact: true }).click()
-    await expect(dialog.getByText('1-1 / 1', { exact: true })).toBeVisible()
+    await expect(dialog.getByText('1-1 / 1', { exact: true }).first()).toBeVisible()
     expect(state.reads.some(url => url.pathname === '/api/shifts' && url.searchParams.get('page') === '13' && url.searchParams.get('page_size') === '20')).toBe(true)
     expect(health.pageErrors).toEqual([]); expect(health.consoleErrors).toEqual([])
     expect(state.writes).toEqual([])
@@ -171,13 +173,13 @@ test('History Refresh observes changed server count without a synthetic push', a
   const state = await fixture(context)
   await enter(page); await history(page)
   const dialog = page.getByRole('dialog')
-  await expect(dialog.getByText('1-20 / 245', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('1-20 / 245', { exact: true }).first()).toBeVisible()
   const before = state.reads.filter(url => url.pathname === '/api/shifts' && !url.searchParams.has('from')).length
   state.total = 1
   await dialog.getByRole('button', { name: 'Refresh', exact: true }).click()
   await expect.poll(() => state.reads.filter(url => url.pathname === '/api/shifts' && !url.searchParams.has('from')).length,
     { timeout: 3000, message: 'Explicit Refresh must issue a new list read, not return the fresh cached list' }).toBeGreaterThan(before)
-  await expect(dialog.getByText('1-1 / 1', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('1-1 / 1', { exact: true }).first()).toBeVisible()
 })
 
 test('History fences late mutation after permission A-B-A and accepts current success', async ({ page, context }) => {

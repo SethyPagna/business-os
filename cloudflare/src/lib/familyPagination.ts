@@ -179,7 +179,14 @@ export interface FamilyPaginationOptions {
   candidateSql?: string
   // products_parent_seek: the seek page's child lookups are written as index seeks (see pageCandidatesSql). Same rows either way; absent, the statement text is the one it always was.
   parentSeek?: boolean
+  // Opt-in family grouping: `keySql` is an expression over the `families` columns (family_num_sort, family_sort_value, ...) naming the group a family belongs to. When set, the same statement that
+  // ranks the families also returns, for each page family, its group key and the group's whole-scope totals (families, member rows) and first/last rank, computed by window functions over every family
+  // BEFORE the page filter, so a total never depends on the page. The result gains `groups` and every item a `group_key`. Omitted: every statement is the text it always was.
+  familyGroupSql?: { keySql: string }
 }
+
+/** One group as the grouped statement reports it: whole-scope totals and the first and last family rank of the group. */
+export interface FamilyGroupTotals { key: string; families: number; products: number; first: number; last: number }
 
 // Typed-search order in JS (read switch products_typed_order_js), see paginateRankedIdFamilies.
 export interface RankedIdDrivenRead {
@@ -197,6 +204,8 @@ export interface FamilyPaginationResult<T> {
   page: number
   pageSize: number
   totalPages: number
+  // Only when familyGroupSql was passed: the groups present on this page, in page order.
+  groups?: FamilyGroupTotals[]
 }
 
 // The alias the candidate list carries in the statement. lib/productSearchQuery.ts PRODUCT_SEARCH_CANDIDATE_ALIAS spells the same name (the rank expression reads `__cand.r`).
@@ -210,7 +219,8 @@ function narrowRead<T extends { candidateSql?: string; familyMemberBaseWhereSql?
   return opts
 }
 
-function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSql' | 'whereSql' | 'matchRankSql' | 'rankCteSql' | 'matchTierSql' | 'familyMemberBaseWhereSql' | 'promotedRankSql' | 'familySortValueSql' | 'familyNumericSortSql' | 'candidateSql'> & { inlineFamilies?: boolean; drivenByListParam?: string; narrow?: boolean }) {
+function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSql' | 'whereSql' | 'matchRankSql' | 'rankCteSql' | 'matchTierSql' | 'familyMemberBaseWhereSql' | 'promotedRankSql' | 'familySortValueSql' | 'familyNumericSortSql' | 'candidateSql' | 'familyGroupSql'> & { inlineFamilies?: boolean; drivenByListParam?: string; narrow?: boolean }) {
+  // A grouped read with a per-row sort expression computes it once per row: the page statement reads `matched` twice and would otherwise evaluate the expression for each read.
   const matchRankSelect = opts.matchRankSql ? `, (${opts.matchRankSql}) AS __match_rank` : ''
   // __fts_rank is productSearchQuery's FTS_RANK_CTE_NAME (not imported: keeps
   // this helper dependency-free). When matchRankSql reads its rank column,
@@ -228,6 +238,9 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
   const sortValueAgg = opts.familySortValueSql ? ', MIN(__family_sort) AS family_sort_value' : ''
   const numericSortSelect = opts.familyNumericSortSql ? `, (${opts.familyNumericSortSql}) AS __family_num` : ''
   const numericSortAgg = opts.familyNumericSortSql ? ', MAX(__family_num) AS family_num_sort' : ''
+  // A group's product count is its products, not its rows: a header row (is_group) is the family's title, not a product to count, which is how the check-status list counts it too.
+  const memberSelect = opts.familyGroupSql ? ", (CASE WHEN COALESCE(p.is_group, 0) = 1 THEN 0 ELSE 1 END) AS __member" : ''
+  const membersAgg = opts.familyGroupSql ? ', SUM(__member) AS __members' : ''
   // family_members is only built (and only joined against, see below) when
   // familyMemberBaseWhereSql is actually passed -- omitted entirely for any
   // caller that hasn't opted in, so this stays a no-op for them (same CTEs,
@@ -248,7 +261,7 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
     WITH matched AS (
       SELECT ${FAMILY_ROOT_KEY_SQL} AS __family_root_id,
              lower(trim(COALESCE(parent.name, p.name))) AS __family_name,
-             p.created_at AS __created_at${matchRankSelect}${matchTierSelect}${promotedSelect}${sortValueSelect}${numericSortSelect}
+             p.created_at AS __created_at${matchRankSelect}${matchTierSelect}${promotedSelect}${sortValueSelect}${numericSortSelect}${memberSelect}
       FROM (${opts.candidateSql}) ${CANDIDATE_ALIAS}
       CROSS JOIN products p ON p.id = ${CANDIDATE_ALIAS}.id
       LEFT JOIN products parent ON parent.id = p.parent_id
@@ -258,7 +271,7 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
     families AS ${opts.inlineFamilies ? 'NOT MATERIALIZED ' : ''}(
       SELECT __family_root_id AS family_root_id,
              MIN(__family_name) AS family_name,
-             MAX(__created_at) AS latest_created_at${matchRankAgg}${matchTierAgg}${promotedAgg}${sortValueAgg}${numericSortAgg}
+             MAX(__created_at) AS latest_created_at${matchRankAgg}${matchTierAgg}${promotedAgg}${sortValueAgg}${numericSortAgg}${membersAgg}
       FROM matched
       GROUP BY __family_root_id
     )
@@ -266,11 +279,11 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
   }
   return `
     WITH ${opts.rankCteSql ? `${opts.rankCteSql},` : ''}
-    matched AS ${rankJoin && !opts.narrow ? 'MATERIALIZED ' : ''}(
+    matched AS ${(rankJoin && !opts.narrow) || (opts.familyGroupSql && opts.familyNumericSortSql) ? 'MATERIALIZED ' : ''}(
       SELECT ${opts.narrow ? '' : `${opts.selectColumns},
              `}${FAMILY_ROOT_KEY_SQL} AS __family_root_id,
              lower(trim(COALESCE(parent.name, p.name))) AS __family_name,
-             p.created_at AS __created_at${matchRankSelect}${matchTierSelect}${promotedSelect}${sortValueSelect}${numericSortSelect}
+             p.created_at AS __created_at${matchRankSelect}${matchTierSelect}${promotedSelect}${sortValueSelect}${numericSortSelect}${memberSelect}
       ${opts.drivenByListParam
         ? `FROM json_each(@${opts.drivenByListParam}) __rank_j CROSS JOIN products p ON p.id = CAST(__rank_j.value AS INTEGER)`
         : 'FROM products p'}
@@ -282,11 +295,28 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
     families AS ${opts.inlineFamilies ? 'NOT MATERIALIZED ' : ''}(
       SELECT __family_root_id AS family_root_id,
              MIN(__family_name) AS family_name,
-             MAX(__created_at) AS latest_created_at${matchRankAgg}${matchTierAgg}${promotedAgg}${sortValueAgg}${numericSortAgg}
+             MAX(__created_at) AS latest_created_at${matchRankAgg}${matchTierAgg}${promotedAgg}${sortValueAgg}${numericSortAgg}${membersAgg}
       FROM matched
       GROUP BY __family_root_id
     )${familyMembersCte}
   `
+}
+
+// The grouped columns of a family (see FamilyPaginationOptions.familyGroupSql). The windows run over every family: nothing here filters before them.
+const GROUP_COLUMNS = ['__group_key', '__group_families', '__group_products', '__group_first', '__group_last'] as const
+function groupWindowsSql(keySql: string, rank: string): string {
+  return `(${keySql}) AS __group_key,
+             COUNT(*) OVER (PARTITION BY (${keySql})) AS __group_families,
+             SUM(__members) OVER (PARTITION BY (${keySql})) AS __group_products,
+             MIN(${rank}) OVER (PARTITION BY (${keySql})) AS __group_first,
+             MAX(${rank}) OVER (PARTITION BY (${keySql})) AS __group_last`
+}
+
+// Takes the group columns off a page row and folds them into the page's group list (first appearance order). Returns the row's group key.
+function takeGroup(row: Record<string, unknown>, groups: Map<string, FamilyGroupTotals>): string {
+  const key = String(row.__group_key)
+  if (!groups.has(key)) groups.set(key, { key, families: Number(row.__group_families), products: Number(row.__group_products), first: Number(row.__group_first), last: Number(row.__group_last) })
+  return key
 }
 
 // The seekPage statement (see FamilyPaginationOptions.seekPage).
@@ -312,13 +342,21 @@ function buildSeekPageSql(opts: FamilyPaginationOptions, familyOrderSql: string,
     : whereSql.replace(/^\s*WHERE\s+/i, '') || '1 = 1'
   const rowsJoins = familyMemberBaseWhereSql ? joinSql : `${joinSql}
       ${rankJoin}`
+  // Grouped: the family ranks first (a nested select), then the group windows run over every family, and only then the page is cut.
+  const groupedFamilies = opts.familyGroupSql ? `SELECT * FROM (
+        SELECT *, ${groupWindowsSql(opts.familyGroupSql.keySql, '__family_rank')},
+               COUNT(*) OVER () AS family_total
+        FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY ${familyOrderSql}, family_root_id ASC) AS __family_rank FROM families)
+      )
+      ORDER BY __family_rank ASC
+      LIMIT @__familyPageSize OFFSET @__familyOffset` : undefined
   return `
     ${ctes},
     page_families AS MATERIALIZED (
-      SELECT *, COUNT(*) OVER () AS family_total
+      ${groupedFamilies ?? `SELECT *, COUNT(*) OVER () AS family_total
       FROM families
       ORDER BY ${familyOrderSql}, family_root_id ASC
-      LIMIT @__familyPageSize OFFSET @__familyOffset
+      LIMIT @__familyPageSize OFFSET @__familyOffset`}
     ),
     page_candidates AS MATERIALIZED (
       ${pageCandidatesSql(opts.parentSeek === true)}
@@ -332,7 +370,7 @@ function buildSeekPageSql(opts: FamilyPaginationOptions, familyOrderSql: string,
       ${rowsJoins}
       WHERE (${rowsWhere})
     )
-    SELECT page_rows.*, page_families.family_total AS __family_total
+    SELECT page_rows.*, page_families.family_total AS __family_total${opts.familyGroupSql ? GROUP_COLUMNS.map((column) => `, page_families.${column}`).join('') : ''}
     FROM page_rows
     JOIN page_families ON page_families.family_root_id = page_rows.__family_root_id
     ORDER BY ${familyOrderSql}, page_families.family_root_id ASC, ${intraFamilyOrderSql}
@@ -364,7 +402,7 @@ export async function paginateProductFamilies<T = Record<string, unknown>>(
   // tier and promotion expressions in made the count evaluate a correlated
   // lookup per matched row for nothing (G37: 1,500 ranked ids rescanned
   // their own id list per row there, while the page statement indexed it).
-  const countCtes = buildCtes({ ...opts, matchRankSql: undefined, matchTierSql: undefined, promotedRankSql: undefined, familySortValueSql: undefined, familyNumericSortSql: undefined, narrow: opts.seekPage === true })
+  const countCtes = buildCtes({ ...opts, matchRankSql: undefined, matchTierSql: undefined, promotedRankSql: undefined, familySortValueSql: undefined, familyNumericSortSql: undefined, familyGroupSql: undefined, narrow: opts.seekPage === true })
   const offset = (page - 1) * pageSize
   // See familyMemberBaseWhereSql's own comment: opted-in callers get every
   // active row of a qualifying family (not just the ones that individually
@@ -401,6 +439,14 @@ export async function paginateProductFamilies<T = Record<string, unknown>>(
       const counted = await db.prepare(`${countCtes} SELECT COUNT(*) AS count FROM families`).get<{ count?: number }>(params)
       total = Number(counted?.count) || 0
     }
+    if (opts.familyGroupSql) {
+      const groups = new Map<string, FamilyGroupTotals>()
+      const items = rows.map((row) => {
+        const { __family_root_id, __family_name, __created_at, __match_rank, __match_tier, __promoted, __family_sort, __family_num, __family_total, __members, __group_key, __group_families, __group_products, __group_first, __group_last, ...rest } = row
+        return { ...rest, group_key: takeGroup(row, groups) } as unknown as T
+      })
+      return { items, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)), groups: [...groups.values()] }
+    }
     return {
       items: rows.map((row) => {
         const { __family_root_id, __family_name, __created_at, __match_rank, __match_tier, __promoted, __family_sort, __family_num, __family_total, ...rest } = row
@@ -418,10 +464,11 @@ export async function paginateProductFamilies<T = Record<string, unknown>>(
       sql: `
         ${ctes},
         ranked AS (
-          SELECT family_root_id, ROW_NUMBER() OVER (ORDER BY ${familyOrderSql}, family_root_id ASC) AS family_rank
-          FROM families
+          ${opts.familyGroupSql ? `SELECT family_root_id, family_rank, ${groupWindowsSql(opts.familyGroupSql.keySql, 'family_rank')}
+          FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY ${familyOrderSql}, family_root_id ASC) AS family_rank FROM families)` : `SELECT family_root_id, ROW_NUMBER() OVER (ORDER BY ${familyOrderSql}, family_root_id ASC) AS family_rank
+          FROM families`}
         )
-        SELECT ${resultSource}.*
+        SELECT ${resultSource}.*${opts.familyGroupSql ? GROUP_COLUMNS.map((column) => `, ranked.${column}`).join('') : ''}
         FROM ${resultSource}
         JOIN ranked ON ranked.family_root_id = ${resultSource}.__family_root_id
         WHERE ranked.family_rank > @__familyOffset AND ranked.family_rank <= @__familyOffsetEnd
@@ -433,6 +480,14 @@ export async function paginateProductFamilies<T = Record<string, unknown>>(
   const total = Number((countResult?.results?.[0] as { count?: number } | undefined)?.count) || 0
   const rawRows = (pageResult?.results ?? []) as Record<string, unknown>[]
 
+  if (opts.familyGroupSql) {
+    const groups = new Map<string, FamilyGroupTotals>()
+    const grouped = (Array.isArray(rawRows) ? rawRows : []).map((row) => {
+      const { __family_root_id, __family_name, __created_at, __match_rank, __match_tier, __promoted, __family_sort, __family_num, __members, __group_key, __group_families, __group_products, __group_first, __group_last, ...rest } = row
+      return { ...rest, group_key: takeGroup(row, groups) } as unknown as T
+    })
+    return { items: grouped, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)), groups: [...groups.values()] }
+  }
   const cleaned = (Array.isArray(rawRows) ? rawRows : []).map((row) => {
     const { __family_root_id, __family_name, __created_at, __match_rank, __match_tier, __promoted, __family_sort, __family_num, ...rest } = row
     return rest as unknown as T
@@ -454,11 +509,23 @@ export async function paginateProductFamilies<T = Record<string, unknown>>(
 // pageFamiliesByKeys reads the rows of one page's keys without ranking anything. Together they return exactly the rows, order and total paginateProductFamilies({ seekPage })
 // returns for the same options: same families table, same ORDER BY (the caller's familyOrderSql, then family_root_id), same candidate ids, same row filter, same intra-family order.
 
-/** The ordered family keys of the whole scope, and the family total. */
-export async function rankProductFamilies(options: FamilyPaginationOptions): Promise<{ keys: string[]; total: number }> {
+/** The ordered family keys of the whole scope, and the family total. With familyGroupSql, also the whole-scope groups in rank order (windows over every family; the ranking is not cut). */
+export async function rankProductFamilies(options: FamilyPaginationOptions): Promise<{ keys: string[]; total: number; groups?: FamilyGroupTotals[] }> {
   const opts = narrowRead(options, true)
   const { db, params, familyOrderSql } = opts
   const ctes = buildCtes({ ...opts, familyMemberBaseWhereSql: undefined, inlineFamilies: true, narrow: true })
+  if (opts.familyGroupSql) {
+    const grouped = await db.prepare(`
+    ${ctes}
+    SELECT family_root_id, ${GROUP_COLUMNS.join(', ')} FROM (
+      SELECT family_root_id, __family_rank, ${groupWindowsSql(opts.familyGroupSql.keySql, '__family_rank')}
+      FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY ${familyOrderSql}, family_root_id ASC) AS __family_rank FROM families)
+    ) ORDER BY __family_rank ASC
+  `).all<Record<string, unknown>>(params)
+    const groups = new Map<string, FamilyGroupTotals>()
+    for (const row of grouped) takeGroup(row, groups)
+    return { keys: grouped.map((row) => String(row.family_root_id)), total: grouped.length, groups: [...groups.values()] }
+  }
   const rows = await db.prepare(`
     ${ctes}
     SELECT family_root_id FROM families ORDER BY ${familyOrderSql}, family_root_id ASC
@@ -466,8 +533,8 @@ export async function rankProductFamilies(options: FamilyPaginationOptions): Pro
   return { keys: rows.map((row) => String(row.family_root_id)), total: rows.length }
 }
 
-/** The rows of the given family keys, in the keys' order, then the caller's intra-family order. The candidate ids and the row filter are buildSeekPageSql's. */
-export async function pageFamiliesByKeys<T = Record<string, unknown>>(opts: FamilyPaginationOptions, keys: readonly string[]): Promise<T[]> {
+/** The rows of the given family keys, in the keys' order, then the caller's intra-family order (keepKey: each row keeps its `__family_root_id`). The candidate ids and the row filter are buildSeekPageSql's. */
+export async function pageFamiliesByKeys<T = Record<string, unknown>>(opts: FamilyPaginationOptions, keys: readonly string[], keepKey = false): Promise<T[]> {
   if (!keys.length) return []
   const { db, params, selectColumns, joinSql, whereSql, matchRankSql, familyMemberBaseWhereSql, rankCteSql, intraFamilyOrderSql } = opts
   const rankJoin = matchRankSql?.includes('__fts_rank.') ? 'LEFT JOIN __fts_rank ON __fts_rank.id = p.id' : ''
@@ -494,6 +561,7 @@ export async function pageFamiliesByKeys<T = Record<string, unknown>>(opts: Fami
     JOIN page_families ON page_families.family_root_id = page_rows.__family_root_id
     ORDER BY page_families.family_pos ASC, ${intraFamilyOrderSql}
   `).all<Record<string, unknown>>({ ...params, __familyKeys: JSON.stringify(keys) })
+  if (keepKey) return rows as unknown as T[]
   return rows.map((row) => {
     const { __family_root_id, ...rest } = row
     return rest as unknown as T

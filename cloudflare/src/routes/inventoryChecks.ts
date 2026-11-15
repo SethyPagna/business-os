@@ -4,7 +4,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { getDb } from '../lib/db'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
-import { readSwitch } from '../lib/readSwitches'
+import { readSwitch, readSwitchMemoMs } from '../lib/readSwitches'
 import type { Env } from '../index'
 import { decideInventoryCheckApproval, type ApprovalDecided } from '../lib/inventoryCheckApprovals'
 import { getPlanLimits } from '../lib/planTier'
@@ -16,6 +16,9 @@ import { stockVisibleProductSql } from '../lib/productStockGuard'
 import { canApproveInventoryCounts, getInventoryCheckAccess, InventoryCheckQueryError } from '../lib/inventoryCheckAccess'
 import { canonicalProductsRequest, checkStateRestriction, inventoryChecksVersion, planInventoryList, projectInventoryList, readCheckStateSets, type CheckStateSets } from '../lib/inventoryCheckList'
 import { parseOverlayIds, readInventoryOverlay } from '../lib/inventoryCheckOverlay'
+import { availableGroupings, buildGroupingBlock, type GroupingBlock } from '../lib/inventoryCheckGrouping'
+import type { FamilyGroupTotals } from '../lib/familyPagination'
+import { readInventoryCheckLots } from '../lib/inventoryCheckLots'
 import { getActionTier } from '../lib/permissions'
 import { attachLotRows, readProductSearchList } from './products'
 import { approvalsAvailable, createInventoryCheckLotSubmission, createInventoryCheckSession, createInventoryCheckSubmission, lotLinesAvailable, getInventoryCheckSession, inventoryCheckDigest, inventoryCheckSessionHistory,
@@ -47,7 +50,7 @@ app.onError((error,c) => {
 /** ic_fix_stock counts as ON only once migration 0286 is applied: with the switch on and the table missing every count would fail, so it answers exactly as OFF. */
 const fixStockOn = async (c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>): Promise<boolean> => await readSwitch(c.env, 'ic_fix_stock') && await approvalsAvailable(getDb(c.env))
 /** ic_lot_counts counts as ON only once migration 0294 is applied: with the switch on and the table missing every lot count would fail, so it answers exactly as OFF. */
-const lotCountsOn = async (c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>): Promise<boolean> => await readSwitch(c.env, 'ic_lot_counts') && await lotLinesAvailable(getDb(c.env))
+const lotCountsOn = async (c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>): Promise<boolean> => await readSwitch(c.env, 'ic_lot_counts') && await lotLinesAvailable(getDb(c.env), readSwitchMemoMs(c.env))
 async function principal(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>) {
   const token = getCookie(c, 'bos_session')
   if (!token) throw new InventoryCheckSessionError(401,'invalid_session')
@@ -86,9 +89,18 @@ const singleValued = (c: IcContext): void => {
 // inventory_checks version), never a stock read.
 const fixStockCapabilities = (user: SessionUser) => ({ fixStock: true, approveCounts: getActionTier(user, 'inventory', 'adjust') === 'full' && canApproveInventoryCounts(user) })
 // ic_lot_counts: counts are typed per received date; a holder of Full stock-adjust who sees stock may also Set a received date or the branch total straight from the row.
-const capabilitiesOf = (user: SessionUser, fixStock: boolean, lotCounts: boolean, stockField: boolean) => {
-  if (!fixStock && !lotCounts) return null
-  return { ...(fixStock ? fixStockCapabilities(user) : {}), ...(lotCounts ? { lotCounts: true as const, ...(stockField && getActionTier(user, 'inventory', 'adjust') === 'full' ? { directSet: true as const } : {}) } : {}) }
+// lotLinesPerSubmission: the most received-date lines one submission may carry (the plan's number); the page sends what fits and keeps the rest, so a normal page is never refused.
+// The submission caps are sent whenever the server will enforce them: ic_lot_counts ON, or the wired page (ic_wired) whose every submission, plain lines included, goes through the lot writer and its caps (POST /submissions).
+// productsPerSubmission is the JavaScript budget of one request (Free: 10 ms), lotLinesPerSubmission the written rows. The page splits a submission by both.
+// groupings: the groupBy values the list can answer (category only with the category field); a client sends groupBy only for a name listed here.
+const capabilitiesOf = (user: SessionUser, fixStock: boolean, lotCounts: boolean, stockField: boolean, caps: { lines: number; products: number } | null, groupings: string[]) => {
+  return { ...(fixStock ? fixStockCapabilities(user) : {}), ...(lotCounts ? { lotCounts: true as const, ...(stockField && getActionTier(user, 'inventory', 'adjust') === 'full' ? { directSet: true as const } : {}) } : {}),
+    ...(caps ? { lotLinesPerSubmission: caps.lines, productsPerSubmission: caps.products } : {}), groupings }
+}
+const submissionCaps = async (c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, lotCounts: boolean) => {
+  if (!lotCounts && !await lotLinesAvailable(getDb(c.env), readSwitchMemoMs(c.env))) return null
+  const limits = getPlanLimits(c.env)
+  return { lines: limits.inventoryCheckLotLinesPerSubmission, products: limits.inventoryCheckProductsPerSubmission }
 }
 const checkCountsOf = (sets: CheckStateSets, fixStock: boolean) => ({ ok: sets.ok.length, issue: sets.issue.length, ...(fixStock ? { pending: sets.pending.length } : {}) })
 app.get('/list', async c => {
@@ -100,48 +112,48 @@ app.get('/list', async c => {
   const fixStock = access.fields.stock && await fixStockOn(c)
   const plan = planInventoryList(user, c.req.query(), { pendingAvailable: fixStock, maxIds: getPlanLimits(c.env).inventoryOverlayMaxRows })
   const productsQuery = { ...plan.productsQuery }
+  let codeHit: number | null = null
   if (plan.codeLookup) {
     // A viewer without the barcode field finds a product by its WHOLE code only: an exact hit is read by id, anything else is searched by name.
     // Only a product the list itself may show (active, or still holding stock): a retired product that happens to share the code must not capture the search.
     const hit = await db.prepare(`SELECT p.id FROM products p WHERE (p.barcode = @code OR p.sku = @code) AND ${stockVisibleProductSql('p', false)} LIMIT 2`).all<{ id: number }>({ code: plan.codeLookup })
-    if (hit.length === 1) { delete productsQuery.query; delete productsQuery.searchFields; productsQuery.ids = String(hit[0].id); productsQuery.page = '1'; productsQuery.pageSize = '1' }
+    if (hit.length === 1) { delete productsQuery.query; delete productsQuery.searchFields; productsQuery.ids = String(hit[0].id); productsQuery.page = '1'; productsQuery.pageSize = '1'; codeHit = Number(hit[0].id) }
   }
   let sets: CheckStateSets | null = null
   let setsVersion = ''
   if (plan.branchId !== null && (plan.checkState || plan.wantSummary)) ({ sets, version: setsVersion } = await readCheckStateSets(c, plan.branchId, fixStock))
-  let restriction = plan.checkState && sets ? checkStateRestriction(plan.checkState, sets) : {}
-  // sortBy=checked: the check-state ids already come newest check first; this page is the slice of them, read by id, and put back in that order.
-  let checkedPage: { ids: number[]; total: number; page: number; pageSize: number } | null = null
-  if (plan.checkedOrder && plan.checkState && sets && !sets.tooLarge) {
-    const all = plan.checkState === 'ok' ? sets.ok : plan.checkState === 'issue' ? sets.issue : sets.pending
-    const ordered = plan.checkedOrder.direction === 'asc' ? [...all].reverse() : all
-    const page = Number(productsQuery.page), pageSize = Number(productsQuery.pageSize)
-    const ids = ordered.slice((page - 1) * pageSize, page * pageSize)
-    checkedPage = { ids, total: ordered.length, page, pageSize }
-    productsQuery.ids = ids.length ? ids.join(',') : '0'; productsQuery.page = '1'; productsQuery.pageSize = String(Math.max(1, ids.length))
-    restriction = {}
+  let restriction: { restrictIdsJson?: string; excludeIdsJson?: string } = plan.checkState && sets ? checkStateRestriction(plan.checkState, sets) : {}
+  // The shared cache key is the canonical request. A grouped read never takes a by-id read (its ranking needs the keyed page read): an exact code hit becomes a restriction to that id, and the key keeps the id.
+  const keyRequest = canonicalProductsRequest(productsQuery)
+  if (plan.grouping && codeHit !== null) {
+    delete productsQuery.ids
+    const kept: number[] = restriction.restrictIdsJson === undefined ? [codeHit] : (JSON.parse(restriction.restrictIdsJson) as number[]).filter((id) => Number(id) === codeHit)
+    restriction = { ...restriction, restrictIdsJson: JSON.stringify(kept) }
   }
+  const grouping = plan.grouping ? { by: plan.grouping, checkOrg: user.organization_id ?? null } : undefined
   const include = new Set<string>([...access.fields.stock ? ['tagged_lots'] : [], ...access.fields.received ? ['lots'] : []])
-  const payload = await readProductSearchList(c, productsQuery, { include, keyRequest: canonicalProductsRequest(productsQuery), ...restriction,
+  // A grouped list keys on the inventory_checks version even with no check state: the checked grouping orders by the checks themselves.
+  const groupedVersion = grouping && !setsVersion ? await inventoryChecksVersion(c.env) : setsVersion
+  const { groups, ...payload } = await readProductSearchList(c, productsQuery, { include, keyRequest, ...restriction, ...(grouping ? { grouping } : {}),
     // Pending without the right to see it is an empty set of its own: it must not share a cached page with the admin's real Pending set.
-    ...(plan.checkState && !checkedPage ? { setKey: plan.checkState === 'pending' && !fixStock ? 'pending_unavailable' : plan.checkState, setVersion: setsVersion } : {}), lotsAdmitted: access.fields.received, taggedLotsAdmitted: access.fields.stock })
-  if (checkedPage) {
-    const place = new Map(checkedPage.ids.map((id, index) => [id, index]))
-    const body = payload as unknown as { items: Array<{ id: number }>; total?: number; page?: number; pageSize?: number; totalPages?: number }
-    body.items = [...body.items].sort((a, b) => (place.get(Number(a.id)) ?? 0) - (place.get(Number(b.id)) ?? 0))
-    body.total = checkedPage.total; body.page = checkedPage.page; body.pageSize = checkedPage.pageSize; body.totalPages = Math.max(1, Math.ceil(checkedPage.total / checkedPage.pageSize))
-  }
+    ...(plan.checkState ? { setKey: plan.checkState === 'pending' && !fixStock ? 'pending_unavailable' : plan.checkState } : codeHit !== null && grouping ? { setKey: 'code' } : {}),
+    ...(plan.checkState || grouping ? { setVersion: groupedVersion } : {}), lotsAdmitted: access.fields.received, taggedLotsAdmitted: access.fields.stock }) as Awaited<ReturnType<typeof readProductSearchList>> & { groups?: FamilyGroupTotals[] }
   const lotCounts = await lotCountsOn(c)
-  const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock)
+  const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock, await submissionCaps(c, lotCounts), availableGroupings(access.fields))
   const productsPage = getActionTier(user, 'products', 'view') !== 'none'
-  const { body, projected } = projectInventoryList(payload as Record<string, unknown>, user, access, productsPage)
+  const projection = projectInventoryList(payload as Record<string, unknown>, user, access, productsPage)
+  const { body } = projection
+  // Grouped rows carry group_key and come in the grouping order: they are never the Products page's own rows.
+  const projected = plan.grouping ? true : projection.projected
+  const groupingBlock: GroupingBlock | undefined = plan.grouping
+    ? buildGroupingBlock(plan.grouping, groups ?? [], body.items as Array<Record<string, unknown>>, (Number(productsQuery.page) - 1) * Number(productsQuery.pageSize), Number(productsQuery.pageSize)) : undefined
   const total = Number((payload as { total?: unknown }).total) || 0
   const summary = sets && plan.wantSummary && !sets.tooLarge ? { ...checkCountsOf(sets, fixStock),
     // Not checked is the catalogue total minus what was checked; it is only known when this list is the whole catalogue (no search, filter or check state).
     ...(plan.filtered ? {} : { not_checked: Math.max(0, total - sets.ok.length - sets.issue.length), total }) } : null
   // window_pages: how many pages (this one and the ones ahead) the page may read in one window; the ranking behind them is shared (catalog_ranked_scope), so a window costs rows, not rankings.
-  return c.json({ ...body, wired: true, projected, window_pages: getPlanLimits(c.env).catalogListWindowPages, overlay_ids: getPlanLimits(c.env).inventoryOverlayMaxRows, ...(summary ? { summary } : {}),
-    ...(capabilities ? { capabilities } : {}) })
+  return c.json({ ...body, wired: true, projected, window_pages: getPlanLimits(c.env).catalogListWindowPages, overlay_ids: getPlanLimits(c.env).inventoryOverlayMaxRows, ...(groupingBlock ? { grouping: groupingBlock } : {}), ...(summary ? { summary } : {}),
+    capabilities })
 })
 app.get('/overlay', async c => {
   if (!await readSwitch(c.env, 'ic_wired')) return notWired(c)
@@ -167,9 +179,23 @@ app.get('/overlay', async c => {
     lots: (row.lots ?? []).map((lot) => access.fields.stock ? lot : { ...lot, branches: (lot.branches as Array<Record<string, unknown>>).map(({ quantity: _quantity, ...entry }) => entry) }),
     ...(row.lots_more ? { lots_more: true } : {}) })) : undefined
   const sets = wantSummary ? (await readCheckStateSets(c, branchId, fixStock)).sets : null
-  const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock)
+  const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock, await submissionCaps(c, lotCounts), availableGroupings(access.fields))
   return c.json({ wired: true, branchId, version: await inventoryChecksVersion(c.env), items, ...(lots ? { lots } : {}),
-    ...(sets && !sets.tooLarge ? { summary: checkCountsOf(sets, fixStock) } : {}), ...(capabilities ? { capabilities } : {}) })
+    ...(sets && !sets.tooLarge ? { summary: checkCountsOf(sets, fixStock) } : {}), capabilities })
+})
+// ic_lot_counts: the received dates ("batches") one product holds at one branch, read ON DEMAND when a person opens the count popover of a row (one request, one product; the page never
+// lists batches for its rows). Answers 404 while the switch is OFF (the page then counts one total per product, exactly as before). No cost, supplier or price is ever selected.
+const positiveWord = (word: string | undefined, parameter: string): number => {
+  if (!word || !/^[0-9]+$/.test(word.trim()) || !Number.isSafeInteger(Number(word)) || Number(word) <= 0) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', parameter)
+  return Number(word)
+}
+app.get('/lots', async c => {
+  if (!await lotCountsOn(c)) return notWired(c)
+  singleValued(c)
+  const user = c.get('user')
+  if (!getInventoryCheckAccess(user).canView) throw new InventoryCheckQueryError(403, 'inventory_check_view_required', '')
+  const productId = positiveWord(c.req.query('productId'), 'productId'), branchId = positiveWord(c.req.query('branchId'), 'branchId')
+  return c.json(await readInventoryCheckLots(getDb(c.env), user, { productId, branchId, limit: getPlanLimits(c.env).inventoryCheckLotLinesPerProduct }))
 })
 app.get('/sessions', async c => c.json(await listInventoryCheckSessions(getDb(c.env), await principal(c), c.req.query(), { approvals: await fixStockOn(c) })))
 app.post('/sessions', async c => {
@@ -183,11 +209,11 @@ app.post('/submissions', async c => {
   // A submission whose lines carry received dates (`lots`) is the ic_lot_counts writer's; with the switch off the older writer refuses the key exactly as it always did.
   const withLots = Array.isArray((input as { lines?: unknown } | null)?.lines) && ((input as { lines: unknown[] }).lines).some(line => !!line && typeof line === 'object' && Object.hasOwn(line, 'lots'))
   // While the page is wired (ic_wired) its rows show and send branch_stock, i.e. sellable units: every submission is then judged by the writer that measures exactly that, plain lines included. The older writer's baseline adds held units and would turn a held product into a false shortage or a 409 loop.
-  const lotCounts = withLots ? await lotCountsOn(c) : await readSwitch(c.env, 'ic_wired') && await lotLinesAvailable(getDb(c.env))
+  const lotCounts = withLots ? await lotCountsOn(c) : await readSwitch(c.env, 'ic_wired') && await lotLinesAvailable(getDb(c.env), readSwitchMemoMs(c.env))
   // A tab that still holds the switch ON after it went OFF sends dates: a plain 409 with its own code, so the page re-reads its capabilities once instead of repeating a 400.
   if (withLots && !lotCounts) throw new InventoryCheckSessionError(409, 'inventory_check_lot_counts_off')
   const writer = lotCounts ? (db: ReturnType<typeof getDb>, who: Awaited<ReturnType<typeof principal>>, body: unknown, _low: Awaited<ReturnType<typeof loadLowStockConfig>>, options: Parameters<typeof createInventoryCheckSubmission>[4]) =>
-    createInventoryCheckLotSubmission(db, who, body, { ...options, maxLines: getPlanLimits(c.env).inventoryCheckLotLinesPerSubmission, maxLinesPerProduct: getPlanLimits(c.env).inventoryCheckLotLinesPerProduct }) : createInventoryCheckSubmission
+    createInventoryCheckLotSubmission(db, who, body, { ...options, maxLines: getPlanLimits(c.env).inventoryCheckLotLinesPerSubmission, maxProducts: getPlanLimits(c.env).inventoryCheckProductsPerSubmission, maxLinesPerProduct: getPlanLimits(c.env).inventoryCheckLotLinesPerProduct }) : createInventoryCheckSubmission
   const result = await writer(getDb(c.env), await principal(c), input, await loadLowStockConfig(c.env),
     { approvals: await fixStockOn(c), onApprovalCreated: ({ sessionId }) => announceCount(c.env, c.get('user'), { kind: 'created', sessionId }),
       // Each approval the submission replaced was rejected by the system: a review decided, so it is told like one (a rejection with its reason, and no person to name).

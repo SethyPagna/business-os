@@ -216,31 +216,33 @@ body.lang-km .bos-nav-chrome {
   border-bottom: 2px solid var(--nav-line);
 }
 
-/* The title is the control: plain text in the bar, no fill or border. Expanded, the subpage titles
-   continue the bar's own surface directly beneath it. */
+/* The title is the control: plain text in the bar, no fill or border. Opened, it shows a small
+   dropdown (below) anchored to the title; the bar itself never changes height, background or
+   border while it is open. */
 .bos-nav-title-button {
   color: var(--nav-ink);
 }
 
-/* While the list is open the bar and the list are one surface: the bar's divider is hidden (kept
-   transparent, so the bar does not change height) and the same line closes the list's bottom edge. */
-.bos-nav-topbar:has([data-bos-title-menu][aria-expanded='true']) {
-  border-bottom-color: transparent;
-}
-
-/* main.css pins every dark `header.md:hidden` border with !important, so dark needs its own. */
-.dark .bos-nav-topbar:has([data-bos-title-menu][aria-expanded='true']) {
-  border-bottom-color: transparent !important;
-}
-
+/* The dropdown: a compact floating panel sized to its subpage list, on the chrome's own surface,
+   hairline and accent. It overlays the page; nothing in the bar moves. */
 .bos-nav-subpages {
   background-color: var(--nav-surface);
-  border-bottom: 1px solid var(--nav-line);
+  border: 1px solid var(--nav-line);
+  border-radius: 0.75rem;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
   color: var(--nav-ink);
+  padding: 0.25rem;
 }
 
 .bos-nav-subpage {
+  border-radius: 0.5rem;
   color: var(--nav-ink-2);
+  padding-inline: 0.75rem;
+}
+
+.bos-nav-subpage:hover,
+.bos-nav-subpage:focus-visible {
+  background-color: var(--nav-accent-soft);
 }
 
 .bos-nav-subpage.is-active {

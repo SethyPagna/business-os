@@ -161,6 +161,8 @@ let groups = 0
 // ONLY=<text> runs the groups whose name contains it (diagnosis only; the gate runs them all).
 // FROM=<n> skips the first n groups (diagnosis only, after fixing group n).
 let seenGroups = 0
+// The list also advertises capabilities.groupings; these assertions are about the two Fix stock flags.
+const fixCaps = c => ({ fixStock: c?.fixStock, approveCounts: c?.approveCounts })
 const check = async (name, run) => { if (process.env.ONLY && !name.includes(process.env.ONLY)) return; if (process.env.FROM && ++seenGroups <= Number(process.env.FROM)) return; await run(); groups++; console.log(`PASS ${name}`) }
 /** A pending approval for one product created behind the API's back, as data from before a rule existed (or a racing submission) would be. */
 const injectPending = (sessionId, productId, { submittedAt = new Date().toISOString(), counted = 3, seen = 5, branchId = 1, organizationId = 1 } = {}) => {
@@ -217,7 +219,7 @@ async function main() {
     const listed = await sessions('GET', '/sessions?page=1&pageSize=20')
     assert.equal(listed.status, 200); assert.equal(listed.body.items.some(item => 'approval' in item), false)
     const rows = await products('branchId=1&pageSize=12')
-    assert.equal(rows.status, 200); assert.equal('capabilities' in rows.body, false); assert.equal(rows.body.items.some(item => 'check_pending' in item), false)
+    assert.equal(rows.status, 200); assert.equal(rows.body.capabilities?.fixStock, undefined); assert.equal(rows.body.capabilities?.approveCounts, undefined); assert.equal(rows.body.items.some(item => 'check_pending' in item), false) // the list also advertises capabilities.groupings, which has nothing to do with this switch
     const gone = await decide(id, {})
     assert.equal(gone.status, 404); assert.equal(gone.body.code, 'inventory_check_not_available')
     reset(); setSwitches('on', 'on')
@@ -239,7 +241,7 @@ async function main() {
       const gone = await decide(id, {})
       assert.equal(gone.status, 404); assert.equal(gone.body.code, 'inventory_check_not_available')
       const listed = (await products('branchId=1&pageSize=12')).body
-      assert.equal('capabilities' in listed, false); assert.equal(listed.items.some(item => 'check_pending' in item), false)
+      assert.equal(listed.capabilities?.fixStock, undefined); assert.equal(listed.capabilities?.approveCounts, undefined); assert.equal(listed.items.some(item => 'check_pending' in item), false)
     }
   })
 
@@ -263,11 +265,11 @@ async function main() {
     const byId = id => rows.items.find(item => item.id === id)
     assert.equal(byId(910002).check_pending, true); assert.equal(byId(910003).check_pending, true); assert.equal(byId(910004).check_pending, true)
     assert.equal('check_pending' in byId(910001), false, 'the matching line is not waiting for anything')
-    assert.deepEqual(rows.capabilities, { fixStock: true, approveCounts: true })
+    assert.deepEqual(fixCaps(rows.capabilities), { fixStock: true, approveCounts: true })
     // The feature flag is for anyone who sees stock; whether they can act on it is the page's own rights check and the stock writer's. Approving also needs Adjust at Full.
-    assert.deepEqual((await products('branchId=1&pageSize=12', NO_ADJUST)).body.capabilities, { fixStock: true, approveCounts: false })
-    assert.deepEqual((await products('branchId=1&pageSize=12', COUNTER)).body.capabilities, { fixStock: true, approveCounts: false })
-    assert.deepEqual((await products('branchId=1&pageSize=12', LEAD)).body.capabilities, { fixStock: true, approveCounts: true })
+    assert.deepEqual(fixCaps((await products('branchId=1&pageSize=12', NO_ADJUST)).body.capabilities), { fixStock: true, approveCounts: false })
+    assert.deepEqual(fixCaps((await products('branchId=1&pageSize=12', COUNTER)).body.capabilities), { fixStock: true, approveCounts: false })
+    assert.deepEqual(fixCaps((await products('branchId=1&pageSize=12', LEAD)).body.capabilities), { fixStock: true, approveCounts: true })
     const listed = (await sessions('GET', '/sessions?page=1&pageSize=20')).body.items.find(item => item.id === made.body.item.id)
     assert.equal(listed.approval.status, 'pending'); assert.equal(listed.approval.lines, 3)
     const detail = (await sessions('GET', `/sessions/${made.body.item.id}`)).body
@@ -282,7 +284,7 @@ async function main() {
     assert.equal('approval' in (await sessions('GET', `/sessions/${made.body.item.id}`, undefined, BLIND)).body, false)
     assert.equal((await sessions('GET', '/sessions?page=1&pageSize=20', undefined, BLIND)).body.items.some(item => 'approval' in item), false)
     const blindProducts = (await products('branchId=1&pageSize=12', BLIND)).body
-    assert.equal('capabilities' in blindProducts, false); assert.equal(blindProducts.items.some(item => 'check_pending' in item), false)
+    assert.equal(blindProducts.capabilities?.fixStock, undefined); assert.equal(blindProducts.capabilities?.approveCounts, undefined); assert.equal(blindProducts.items.some(item => 'check_pending' in item), false)
     assert.equal((await sessions('GET', `/sessions/${made.body.item.id}`, undefined, ADMIN)).body.approval.status, 'pending')
     assert.equal((await sessions('GET', `/sessions/${made.body.item.id}`, undefined, FOREIGN)).status, 404)
     assert.equal((await sessions('GET', '/sessions?page=1&pageSize=20', undefined, FOREIGN)).body.items.length, 0)
