@@ -8208,5 +8208,14 @@
   "inventory_check_popover_hide_empty": "Hide empty received dates ({count})",
   "inventory_check_lot_dates": "Received dates",
   "inventory_check_counted_rows": "{count} counted",
-  "inventory_check_mark_page_checked": "Mark every product on this page as matching stock"
+  "inventory_check_mark_page_checked": "Mark every product on this page as matching stock",
+  "inventory_check_group_by": "Group by",
+  "inventory_check_group_checked": "Last checked date",
+  "inventory_check_group_category": "Category",
+  "inventory_check_group_none": "No grouping (name A-Z)",
+  "inventory_check_group_never": "Never checked",
+  "inventory_check_group_no_category": "No category",
+  "inventory_check_group_continued": "continued",
+  "inventory_check_group_continues": "Continues on the next page",
+  "inventory_check_mark_open_groups": "Mark every product in the open groups as matching stock"
 }

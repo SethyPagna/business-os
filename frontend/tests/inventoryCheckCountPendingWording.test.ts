@@ -27,5 +27,5 @@ assert.ok(!('inventory_check_error_count_pending' in en) && !('inventory_check_e
 // Each surface maps the code (a source pin: these components are not mounted in a unit test).
 assert.match(read('../src/components/inventory/ManageBatchesModal.tsx'), /code === 'inventory_check_count_pending' \? tr\('inventoryCheckCountPending'/, 'Manage received dates')
 assert.match(read('../src/components/products/StockChangeSection.tsx'), /stockFailureText\(\{ code: row\.failure\.code, message: row\.failure\.message \}/, 'the stock sessions show the translated failure of a row')
-assert.match(read('../src/components/inventory/InventoryChecksPage.tsx'), /inventory_check_count_pending: \{ key: 'inventoryCheckCountPending'/, 'Inventory')
+assert.match(read('../src/components/inventory/inventoryCheckRefusals.ts'), /inventory_check_count_pending: \{ key: 'inventoryCheckCountPending'/, 'Inventory')
 console.log('PASS inventoryCheckCountPendingWording')

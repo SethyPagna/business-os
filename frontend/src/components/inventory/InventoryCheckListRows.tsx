@@ -22,6 +22,7 @@ import InventoryCheckCountPopover, { preloadLotEntries } from './InventoryCheckC
 import { priceFacts, type PriceMoney } from './inventoryPriceFacts.ts'
 import { finiteQuantity, parseCount, signedDelta } from './InventoryCheckCountEditor.tsx'
 import type { InventoryCheckFocusRequest } from './InventoryCheckRows.tsx'
+import { UNSAVED_ROW_CLASS } from './inventoryCheckGroups.ts'
 
 /** What a person has entered on one row of the list but not yet submitted. `checked`: the count was filled from Now by the row's check button. */
 export type ListDraft = { selected: boolean; count: string; checked: boolean; note: string; /** Counts typed per received date (ic_lot_counts); the row's count is their sum. */ lots?: LotDraft }
@@ -104,8 +105,13 @@ const listStatus = (value: unknown): InventoryCheckListStatus | null => typeof v
 /** The sentence the server records for a differing count that came with no note; the page says it in the viewer's language. */
 export const DEFAULT_COUNT_NOTE = 'Count differs from stock'
 
+/** A grouped list: each section is a header line, then its rows (none while the group is collapsed), then an optional quiet line. */
+export type ListSection = { key: string; header: ReactNode; products: readonly InventoryCheckProduct[]; footer?: ReactNode }
+
 export type InventoryCheckListRowsProps = {
   products: readonly InventoryCheckProduct[]
+  /** Grouped by the server (see InventoryCheckGroupedList): the rows are drawn under these headers, in this order. */
+  sections?: readonly ListSection[]
   drafts: ListDrafts
   /** The viewer may count: rows get a status icon that opens the count popover, and a Count input. */
   selecting: boolean
@@ -139,7 +145,7 @@ export type InventoryCheckListRowsProps = {
   onLotSet?: (product: InventoryCheckProduct, row: InventoryCheckLotRow, value: string) => Promise<number | null>
 }
 
-type RowProps = Omit<InventoryCheckListRowsProps, 'products' | 'drafts' | 'focusRequest' | 'adornments'> & {
+type RowProps = Omit<InventoryCheckListRowsProps, 'products' | 'sections' | 'drafts' | 'focusRequest' | 'adornments'> & {
   product: InventoryCheckProduct
   draft: ListDraft | undefined
   adornment?: ReactNode
@@ -252,8 +258,8 @@ function ListRow({ product, draft, adornment, columns, countable, copy, scanHit,
     } else if (event.key === 'Escape') { event.preventDefault(); if (!byBatch) onCount(product, '') }
   }
 
-  return <li data-inventory-check-row={id} data-check-list-status={status ?? undefined} data-selected={selected ? '' : undefined} data-scan-hit={scanHit ? '' : undefined}
-    className={`relative min-w-0 max-w-full border-b border-l-2 border-b-gray-100 py-2 pl-2 pr-1 last:border-b-0 dark:border-b-gray-800 ${edge} ${selected ? 'bg-sky-50/70 dark:bg-sky-950/20' : ''} ${scanHit ? 'rounded-sm ring-2 ring-primary-400 dark:ring-primary-300' : ''}`}>
+  return <li data-inventory-check-row={id} data-check-list-status={status ?? undefined} data-selected={selected ? '' : undefined} data-unsaved={counting && draft ? '' : undefined} data-scan-hit={scanHit ? '' : undefined}
+    className={`relative min-w-0 max-w-full border-b border-l-2 border-b-gray-100 py-2 pl-2 pr-1 last:border-b-0 dark:border-b-gray-800 ${edge} ${counting && draft ? UNSAVED_ROW_CLASS : ''} ${scanHit ? 'rounded-sm ring-2 ring-primary-400 dark:ring-primary-300' : ''}`}>
     {/* A count waiting for an approver (ic_fix_stock) is shown ONCE on this surface: the status icon (the hourglass). The gutter mini tag of the review queue would repeat it. */}
     {/* One compact line where the width allows: the image keeps its square, the name takes the room, the status icon and the count input sit beside it. */}
     <div className="flex min-w-0 items-center gap-2" data-inventory-check-main>
@@ -294,7 +300,7 @@ function ListRow({ product, draft, adornment, columns, countable, copy, scanHit,
   </li>
 }
 
-export default function InventoryCheckListRows({ products, drafts, adornments = {}, focusRequest, ...props }: InventoryCheckListRowsProps) {
+export default function InventoryCheckListRows({ products, sections, drafts, adornments = {}, focusRequest, ...props }: InventoryCheckListRowsProps) {
   const columns = listColumns({ selecting: props.selecting, canViewStock: props.canViewStock, canViewCounts: props.canViewCounts })
   // Per received date (ic_lot_counts only): the entries' code starts loading when the list draws, so it is there before the first tap. With the switch off it is never requested.
   useEffect(() => { if (props.lotCounts && props.selecting) preloadLotEntries() }, [props.lotCounts, props.selecting])
@@ -335,8 +341,12 @@ export default function InventoryCheckListRows({ products, drafts, adornments = 
   const label = props.t('inventory_check_products')
   return <div className="min-w-0 max-w-full">
     <ul ref={listRef} className="min-w-0 max-w-full" aria-label={label && label !== 'inventory_check_products' ? label : 'Inventory checks'}>
-      {products.map(product => <ListRow key={product.id} product={product} draft={drafts[String(product.id)]} adornment={adornments[String(product.id)]}
-        columns={columns} copy={copy} scanHit={hitId === String(product.id)} onAdvance={onAdvance} {...props} countable={product.checkable !== false && !product.is_group} />)}
+      {(sections ?? [{ key: '', header: null, products }]).map(section => <Fragment key={section.key}>
+        {section.header ? <li data-inventory-check-group={section.key} className="min-w-0 max-w-full border-b border-b-gray-200 bg-slate-100/90 px-2 py-1 dark:border-b-gray-700 dark:bg-slate-800/80">{section.header}</li> : null}
+        {section.products.map(product => <ListRow key={product.id} product={product} draft={drafts[String(product.id)]} adornment={adornments[String(product.id)]}
+          columns={columns} copy={copy} scanHit={hitId === String(product.id)} onAdvance={onAdvance} {...props} countable={product.checkable !== false && !product.is_group} />)}
+        {section.footer ? <li className="min-w-0 border-b border-b-gray-100 px-2 py-0.5 text-[11px] leading-relaxed text-gray-500 dark:border-b-gray-800 dark:text-gray-400">{section.footer}</li> : null}
+      </Fragment>)}
     </ul>
   </div>
 }
@@ -353,6 +363,8 @@ export type InventoryCheckSelectionBarProps = {
   submitLabel?: string
   /** One tap for the whole page ("matches stock"): offered when the viewer sees stock. Per received date it writes one line per stocked batch the rows carry. */
   canMarkChecked: boolean
+  /** Some groups are collapsed: the tap acts on the open ones only, and says so. */
+  openGroupsOnly?: boolean
   onMarkChecked: () => void
   onClear: () => void
   onSubmit: () => void
@@ -360,9 +372,9 @@ export type InventoryCheckSelectionBarProps = {
 }
 
 /** How many are counted, the two things to do with them as icons, and the main action, which keeps its word. There is no select-all: nothing is ticked until a person answers a row. */
-export function InventoryCheckSelectionBar({ selectedCount, blocked, busy, submitLabel, canMarkChecked, onMarkChecked, onClear, onSubmit, t }: InventoryCheckSelectionBarProps) {
+export function InventoryCheckSelectionBar({ selectedCount, blocked, busy, submitLabel, canMarkChecked, openGroupsOnly = false, onMarkChecked, onClear, onSubmit, t }: InventoryCheckSelectionBarProps) {
   const tr = makeTr(t)
-  const mark = tr('inventory_check_mark_page_checked', 'Mark every product on this page as matching stock')
+  const mark = openGroupsOnly ? tr('inventory_check_mark_open_groups', 'Mark every product in the open groups as matching stock') : tr('inventory_check_mark_page_checked', 'Mark every product on this page as matching stock')
   const clear = tr('inventory_check_clear_selection', 'Clear selection')
   const submit = submitLabel || tr('inventory_check_submit', 'Submit')
   const countText = selectedCount > 0 ? tr('inventory_check_counted_rows', '{count} counted').replace('{count}', String(selectedCount)) : ''

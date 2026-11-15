@@ -8208,5 +8208,14 @@
   "inventory_check_popover_hide_empty": "លាក់ថ្ងៃចូលដែលអស់ស្តុក ({count})",
   "inventory_check_lot_dates": "ថ្ងៃចូល",
   "inventory_check_counted_rows": "បានរាប់ {count}",
-  "inventory_check_mark_page_checked": "សម្គាល់ផលិតផលទាំងអស់ក្នុងទំព័រនេះថាត្រូវនឹងស្តុក"
+  "inventory_check_mark_page_checked": "សម្គាល់ផលិតផលទាំងអស់ក្នុងទំព័រនេះថាត្រូវនឹងស្តុក",
+  "inventory_check_group_by": "ដាក់ជាក្រុមតាម",
+  "inventory_check_group_checked": "កាលបរិច្ឆេទពិនិត្យចុងក្រោយ",
+  "inventory_check_group_category": "ប្រភេទ",
+  "inventory_check_group_none": "មិនដាក់ជាក្រុម (ឈ្មោះ A-Z)",
+  "inventory_check_group_never": "មិនទាន់ធ្លាប់ពិនិត្យ",
+  "inventory_check_group_no_category": "គ្មានប្រភេទ",
+  "inventory_check_group_continued": "បន្ត",
+  "inventory_check_group_continues": "បន្តនៅទំព័របន្ទាប់",
+  "inventory_check_mark_open_groups": "សម្គាល់ផលិតផលទាំងអស់ក្នុងក្រុមដែលបើក ថាត្រូវនឹងស្តុក"
 }

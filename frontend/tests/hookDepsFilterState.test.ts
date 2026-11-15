@@ -49,7 +49,7 @@ type Finding = { file: string; line: number; hook: string; name: string }
 // decays into a list of things nobody dares delete.
 export const ALLOWLIST: AllowEntry[] = [
   {
-    file: 'components/inventory/InventoryChecksPage.tsx', names: ['filters'], line: 343,
+    file: 'components/inventory/InventoryChecksPage.tsx', names: ['filters'], line: 378,
     reason: 'The load effect is keyed by requestKey, whose serialized params spread every filter. '
       + 'The same snapshot carries sole-branch bootstrap intent. inventoryChecksPage.test.ts '
       + 'checks each filter dispatch and delayed discovery; adding object identity would reload equal queries. '
@@ -57,7 +57,8 @@ export const ALLOWLIST: AllowEntry[] = [
       + 'from :214 to :260, past the pin\'s tolerance; the effect is still [requestKey], and requestKey is still '
       + 'JSON.stringify([params, section, refresh]) with params spreading ...filters. Body and dependencies unchanged.'
       + ' RE-VERIFIED 4 Nov 2026 after 6.0.1292 (the ic_wired branch of this effect, and its helpers above it) moved it from :319 to :343: the effect is still [requestKey], '
-      + 'and the wired branch reads `filters` only to hand the open request to the sole-branch remount (the same snapshot the older branch carries).',
+      + 'and the wired branch reads `filters` only to hand the open request to the sole-branch remount (the same snapshot the older branch carries).'
+      + ' RE-VERIFIED 15 Nov 2026 (grouped list; the refusal table left the page) at :378: the effect is still [requestKey], and requestKey now also holds the grouping asked for (groupWire), which is derived from filters.group.',
   },
   {
     file: 'components/pos/POS.tsx',

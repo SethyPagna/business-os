@@ -1,0 +1,131 @@
+import assert from 'node:assert/strict'
+import { createHarness, propsOf, type MountedSurface } from './mountedComponentHarness.ts'
+import { APP_NAVIGATION_EVENT } from '../src/app/pathRouting.ts'
+import * as dirtyWork from '../src/utils/dirtyWork.ts'
+import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
+
+// The mounted Inventory page with a server that groups its list (capabilities.groupings): what it asks for, what a header counts, and that collapsing is local.
+const COUNT_FIELDS = { inventory_check_show_price: true, inventory_check_show_barcode: true, inventory_check_show_category: true, inventory_check_show_brand: true, inventory_check_show_stock: true, inventory_check_show_received: true }
+const harness = await createHarness({ observe: ['api/actorReadScope.ts', 'utils/dirtyWork.ts'] })
+const listeners = new Map<string, Set<EventListenerOrEventListenerObject>>()
+window.addEventListener = (type: string, listener: unknown) => { if (listener) { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type)!.add(listener as EventListenerOrEventListenerObject) } }
+window.removeEventListener = (type: string, listener: unknown) => { if (listener) listeners.get(type)?.delete(listener as EventListenerOrEventListenerObject) }
+window.dispatchEvent = event => { for (const listener of [...listeners.get(event.type) ?? []]) { if (typeof listener === 'function') listener.call(window, event); else listener.handleEvent(event) }; return true }
+const applyLocation = (url: string) => { const next = new URL(url, 'https://admin.example.test/'); Object.assign(window.location, { href: next.href, pathname: next.pathname, search: next.search, hash: next.hash }) }
+window.history.pushState = (_s, _u, url) => { applyLocation(String(url)) }
+window.history.replaceState = (_s, _u, url) => { applyLocation(String(url)) }
+applyLocation('https://admin.example.test/inventory#hub:inventory:products')
+
+const row = (id: number, group_key: string, extra: Partial<InventoryCheckProduct> = {}): InventoryCheckProduct => ({ id, name: `Product ${id}`, quantity: 5, unit: 'pcs', barcode: `BC100${id}`, check_status: 'not_checked', group_key, ...extra })
+const items = [row(1, 'd:2026-11-12'), row(2, 'd:2026-11-12'), row(3, 'd:2026-11-03'), row(4, 'never')]
+const byDate = { by: 'checked', unit: 'family', groups: [
+  { key: 'd:2026-11-12', label: null, families: 2, products: 40, continued_before: false, continues_after: true },
+  { key: 'd:2026-11-03', label: null, families: 1, products: 7, continued_before: false, continues_after: false },
+  { key: 'never', label: null, families: 1, products: 120, continued_before: false, continues_after: false }] }
+const byCategory = { by: 'category', unit: 'family', groups: [
+  { key: 'c:serum', label: 'Serum', families: 2, products: 9, continued_before: false, continues_after: false },
+  { key: 'none', label: null, families: 2, products: 30, continued_before: false, continues_after: false }] }
+const categoryItems = [row(1, 'c:serum'), row(2, 'c:serum'), row(3, 'none'), row(4, 'none')]
+const requests: Array<Record<string, unknown>> = []
+let groupings: string[] | null = null
+let total = 160
+const answer = (params: Record<string, unknown>) => {
+  const grouped = params.groupBy === 'checked' || params.groupBy === 'category'
+  return { items: grouped && params.groupBy === 'category' ? categoryItems : items, total, page: 1, pageSize: 20, totalPages: Math.ceil(total / 20), simple: true, branches: [{ id: 1, name: 'Test branch' }],
+    ...(params.summary === 0 ? {} : { summary: { not_checked: 17, in_check: 2, ok: 5, issue: 1, total: 25 }, facets: { brands: [], categories: [] } }),
+    ...(groupings ? { capabilities: { groupings } } : {}), ...(grouped ? { grouping: params.groupBy === 'category' ? byCategory : byDate } : {}) }
+}
+const app = {
+  user: { id: 7, role_code: 'employee', permissions: { inventory: true, inventory_checks: true, ...COUNT_FIELDS } as Record<string, boolean> },
+  page: 'inventory', authReady: true, canWriteToServer: true,
+  t: (key: string) => ({ expand: 'Expand', collapse: 'Collapse', inventory_check_group_never: 'Never checked', inventory_check_group_no_category: 'No category', inventory_check_group_by: 'Group by', inventory_check_group_checked: 'Last checked date', inventory_check_group_category: 'Category', inventory_check_group_none: 'No grouping' } as Record<string, string>)[key] ?? key,
+  notify: () => {}, settings: { navigation_mode: 'sections' }, language: 'en', AccessDenied: () => 'Access denied',
+  navigateTo: (page: string, anchor?: string) => { window.dispatchEvent(new CustomEvent(APP_NAVIGATION_EVENT, { detail: { page, path: '/inventory', anchor } })) },
+}
+const doubles = {
+  'utils/dirtyWork.ts': dirtyWork,
+  'api/actorReadScope.ts': { captureActorReadScope: () => ({ authority: 'test', channel: 'inventoryChecks', revision: '1' }), captureActorWriteIdentity: () => ({ owner: 'test', epoch: 1 }), isActorReadScopeCurrent: () => true, isActorWriteIdentityCurrent: () => true },
+  'api/inventoryChecksTransport.ts': {
+    captureInventoryCheckWriteScope: (context: unknown, isCurrent: unknown) => ({ context, readScope: {}, writeIdentity: {}, isCurrent }),
+    readInventoryCheckList: async () => { throw Object.assign(new Error('Not found'), { status: 404, code: 'not_found' }) },
+    readInventoryCheckProducts: async (params: Record<string, unknown>) => { requests.push({ ...params }); return answer(params) },
+    readInventoryCheckSessions: async () => ({ items: [], total: 0, page: 1, pageSize: 20 }),
+  },
+}
+const mount = () => harness.mount({ component: 'components/inventory/InventoryChecksPage.tsx', app, doubles, props: {} })
+const headers = (s: MountedSurface) => s.findAll(node => node.getAttribute('data-inventory-check-group') !== null)
+const rowIds = (s: MountedSurface) => s.findAll(node => node.getAttribute('data-inventory-check-row') !== null).map(node => node.getAttribute('data-inventory-check-row'))
+const head = (s: MountedSurface, key: string) => s.find(node => node.getAttribute('data-inventory-check-group') === key, `header ${key}`)
+const pagerText = (s: MountedSurface) => s.find(node => node.getAttribute('data-inventory-check-pager') === 'top', 'top pager').textContent
+const chooseGroup = async (s: MountedSurface, option: string) => {
+  if (!s.findAll(node => node.getAttribute('data-filter-menu-section') !== null).length) await s.click(s.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'filters', 'Filters trigger'))
+  const section = s.find(node => node.getAttribute('data-filter-menu-section') === 'group', 'Group by section')
+  if (section.querySelectorAll('[role="option"]').length === 0) await s.click(s.button(/./, section))
+  await s.click(s.find(node => node.getAttribute('role') === 'option' && section.contains(node) && node.textContent === option, option))
+}
+const search = (s: MountedSurface) => s.field('inventory-check-search')
+const enter = async (s: MountedSurface) => { const box = search(s); await s.call(box, 'onKeyDown', [{ key: 'Enter', preventDefault() {}, nativeEvent: {}, currentTarget: { value: propsOf(box).value }, target: box }]) }
+
+try {
+  // 1. A server that does not advertise a grouping: the name order, and no groupBy ever on the wire.
+  const plain = await mount()
+  assert.ok(requests.length >= 1 && requests.every(request => request.groupBy === undefined), 'without the capability no request carries groupBy')
+  assert.equal(requests.at(-1)?.sortBy, 'name')
+  assert.equal(headers(plain).length, 0, 'no headers: today\'s list')
+  assert.deepEqual(rowIds(plain), ['1', '2', '3', '4'])
+  await plain.unmount()
+
+  // 2. The server advertises it: the page asks again, grouped, with no sort, and never draws the name-ordered answer first.
+  groupings = ['checked', 'category']
+  requests.length = 0
+  const s = await mount()
+  const grouped = requests.filter(request => request.groupBy !== undefined)
+  assert.ok(grouped.length >= 1 && grouped.every(request => request.groupBy === 'checked' && request.sortBy === undefined && request.sortDirection === undefined), 'groupBy=checked, no sort')
+  assert.ok(requests.filter(request => request.groupBy === undefined).length <= 1, 'at most the one plain read that learned the capability')
+  assert.deepEqual(headers(s).map(node => node.getAttribute('data-inventory-check-group')), ['d:2026-11-12', 'd:2026-11-03', 'never'])
+  assert.ok(head(s, 'd:2026-11-12').textContent.startsWith('12/11/2026') && head(s, 'd:2026-11-12').textContent.includes('40'), 'dd/mm/yyyy and the server total, not the two rows on the page')
+  assert.ok(head(s, 'never').textContent.startsWith('Never checked') && head(s, 'never').textContent.includes('120'))
+
+  // 3. Collapsing sends nothing and moves no pager or total.
+  const pagerBefore = pagerText(s), readsBefore = requests.length
+  await s.click(s.button('Collapse', head(s, 'd:2026-11-12')))
+  assert.deepEqual(rowIds(s), ['3', '4'], 'the collapsed group hides its rows')
+  assert.equal(requests.length, readsBefore, 'a collapse sends no request')
+  assert.equal(pagerText(s), pagerBefore, 'the pager is unchanged')
+  assert.ok(head(s, 'd:2026-11-12').textContent.includes('40'), 'the header total is unchanged')
+
+  // 4. The page-wide "matches stock" acts on open groups only.
+  await s.click(s.find(node => node.getAttribute('data-selection-action') === 'mark', 'mark page'))
+  assert.deepEqual(s.findAll(node => node.getAttribute('data-selected') !== null).map(node => node.getAttribute('data-inventory-check-row')), ['3', '4'], 'the collapsed group was left alone')
+  assert.equal(s.find(node => node.getAttribute('data-selected-count') !== null, 'counted').textContent, '2 counted', 'only the two open rows were answered; the hidden ones have no draft')
+  assert.equal(s.find(node => node.getAttribute('data-selection-action') === 'mark', 'mark page').getAttribute('title'), 'Mark every product in the open groups as matching stock', 'the tooltip says the tap acts on the open groups')
+  assert.equal(requests.length, readsBefore, 'a mark reads nothing')
+
+  // 5. A scan of a code that sits in a collapsed group opens it.
+  await s.type(search(s), 'BC1001')
+  await s.settle({ until: () => requests.at(-1)?.query === 'BC1001' })
+  await s.click(s.button('Collapse', head(s, 'd:2026-11-12')))
+  assert.ok(!rowIds(s).includes('1'), 'collapsed again')
+  const beforeScan = requests.length
+  await enter(s)
+  assert.ok(rowIds(s).includes('1'), 'the scan opened the group of its row')
+  assert.equal(requests.length, beforeScan, 'the same code is not read again')
+
+  // 6. A filter change clears the collapse; the grouping choice asks again with its own key and no sort.
+  await s.click(s.button('Collapse', head(s, 'd:2026-11-03')))
+  await chooseGroup(s, 'Category')
+  assert.equal(requests.at(-1)?.groupBy, 'category')
+  assert.equal(requests.at(-1)?.sortBy, undefined)
+  assert.deepEqual(headers(s).map(node => node.getAttribute('data-inventory-check-group')), ['c:serum', 'none'])
+  assert.ok(head(s, 'c:serum').textContent.startsWith('Serum') && head(s, 'none').textContent.startsWith('No category'), 'Category label, and No category last')
+  assert.deepEqual(rowIds(s), ['1', '2', '3', '4'], 'a new grouping starts with every group open')
+
+  // 7. No grouping: today's name order, no groupBy.
+  await chooseGroup(s, 'No grouping')
+  assert.equal(requests.at(-1)?.groupBy, undefined)
+  assert.equal(requests.at(-1)?.sortBy, 'name')
+  assert.equal(headers(s).length, 0)
+  assert.equal(propsOf(search(s)).value, 'BC1001')
+  await s.unmount()
+  console.log('inventoryChecksGrouped mounted journeys passed')
+} finally { await harness.close() }

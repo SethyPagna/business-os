@@ -34,6 +34,8 @@ export type InventoryCheckProduct = {
   next_expiry_date?: string | null
   /** The latest check of this product in the chosen branch scope (ic_simple list rows only). Counts and names arrive only for viewers who may see them. */
   check_status?: InventoryCheckListStatus
+  /** Grouped list: the group this product's family is in (`d:YYYY-MM-DD`, `never`, `c:<category>`, `none`). */
+  group_key?: string
   check_counted_quantity?: number | null
   check_note?: string | null
   check_by?: string

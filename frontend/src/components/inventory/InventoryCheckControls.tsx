@@ -3,6 +3,7 @@ import FilterMenu, { type FilterOption, type FilterSection } from '../shared/Fil
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
 import { isImeComposingKey } from '../../utils/imeComposition.ts'
+import { groupToAsk, type GroupChoice } from './inventoryCheckGroups.ts'
 
 export type InventoryCheckFilters = {
   branchId: string
@@ -13,6 +14,8 @@ export type InventoryCheckFilters = {
   category: string
   sortBy: string
   sortDirection: 'asc' | 'desc'
+  /** Group by (grouped list): '' is the default, the last checked date. */
+  group?: GroupChoice
 }
 /** The five values that live inside the Filters menu next to Sort. */
 const FILTER_KEYS = ['branchId', 'checkState', 'stockState', 'brand', 'category'] as const
@@ -21,8 +24,8 @@ const DEFAULT_SORT = { sortBy: 'name', sortDirection: 'asc' } as const
 const isDefaultSort = (filters: Pick<InventoryCheckFilters, 'sortBy' | 'sortDirection'>) => filters.sortBy === DEFAULT_SORT.sortBy && filters.sortDirection === DEFAULT_SORT.sortDirection
 
 /** How many Filters-menu choices are off their default: the five filters plus a non-default Sort. A fixed sole branch and the Issues tab's built-in status are not choices. */
-export function countActiveFilters(filters: InventoryCheckFilters, shown: { branch: boolean; state: boolean }): number {
-  return FILTER_KEYS.filter(key => filters[key] !== '' && (key !== 'branchId' || shown.branch) && (key !== 'checkState' || shown.state)).length + (isDefaultSort(filters) ? 0 : 1)
+export function countActiveFilters(filters: InventoryCheckFilters, shown: { branch: boolean; state: boolean; group?: boolean }): number {
+  return FILTER_KEYS.filter(key => filters[key] !== '' && (key !== 'branchId' || shown.branch) && (key !== 'checkState' || shown.state)).length + (isDefaultSort(filters) ? 0 : 1) + (shown.group && (filters.group === 'category' || filters.group === 'none') ? 1 : 0)
 }
 
 type Fields = Record<'stock' | 'brand' | 'category', boolean>
@@ -51,10 +54,12 @@ type Props = {
   limited?: Partial<Record<'brands' | 'categories', boolean>>
   /** The wired list (ic_wired) has no stock sort: Products has none, and Inventory never reads stock to order by it. */
   wired?: boolean
+  /** The groupings the server offers for this list (capabilities.groupings): the Group by choice exists only when it names some. */
+  groupings?: readonly string[]
   t: (key: string) => string
 }
 
-export default function InventoryCheckControls({ query, onQueryChange, onQuerySubmit, searchRef, scanLabelled = false, filters, onFiltersChange, onClear, fields, branches, brands = [], categories = [], inSession = false, showStateFilter = true, limited = {}, wired = false, t }: Props) {
+export default function InventoryCheckControls({ query, onQueryChange, onQuerySubmit, searchRef, scanLabelled = false, filters, onFiltersChange, onClear, fields, branches, brands = [], categories = [], inSession = false, showStateFilter = true, limited = {}, wired = false, groupings, t }: Props) {
   const soleBranch = branches.length === 1
   const choice = (key: typeof FILTER_KEYS[number], value: string, text: string): FilterOption => ({
     id: value === '' ? 'all' : value, label: text, active: filters[key] === value, onClick: () => onFiltersChange({ [key]: value }),
@@ -72,12 +77,21 @@ export default function InventoryCheckControls({ query, onQueryChange, onQuerySu
   const highLow = (sortBy: string, field: string): FilterOption[] => [
     sortChoice(sortBy, 'desc', named('sort_field_high_low', field)), sortChoice(sortBy, 'asc', named('sort_field_low_high', field)),
   ]
+  const grouped = groupToAsk(filters.group, groupings) !== null
+  const groupChoiceOption = (value: GroupChoice, text: string, active: boolean): FilterOption => ({ id: `group-${value || 'checked'}`, label: text, active, onClick: () => onFiltersChange({ group: value }) })
   const sortOptions: FilterOption[] = [sortChoice('name', 'asc', t('sort_name_az')), sortChoice('name', 'desc', t('sort_name_za'))]
   if (fields.stock && !wired) sortOptions.push(...highLow('stock', t('stock')))
   // The date of the check orders a list of checked products, so it is offered once a status that has such a list is chosen.
   if (wired && ['ok', 'issue', 'pending'].includes(filters.checkState) && !query.trim() && !filters.brand && !filters.category && !filters.stockState) sortOptions.push(sortChoice('checked', 'desc', t('inventory_check_sort_checked')))
 
-  const sections: FilterSection[] = [{ id: 'sort', label: t('sort'), options: sortOptions }]
+  // With a grouping the grouping is the order: the Sort choice comes back with "No grouping".
+  const sections: FilterSection[] = []
+  if (groupings?.length) sections.push({ id: 'group', label: t('inventory_check_group_by'), options: [
+    ...(groupings.includes('checked') ? [groupChoiceOption('', t('inventory_check_group_checked'), grouped && groupToAsk(filters.group, groupings) === 'checked')] : []),
+    ...(groupings.includes('category') ? [groupChoiceOption('category', t('inventory_check_group_category'), groupToAsk(filters.group, groupings) === 'category')] : []),
+    groupChoiceOption('none', t('inventory_check_group_none'), !grouped),
+  ] })
+  if (!grouped) sections.push({ id: 'sort', label: t('sort'), options: sortOptions })
   if (!soleBranch) sections.push({
     id: 'branchId', label: t('branch'), searchable: true,
     options: [choice('branchId', '', t('all_branches')), ...branches.map(branch => choice('branchId', String(branch.id), branch.name))],
@@ -89,7 +103,7 @@ export default function InventoryCheckControls({ query, onQueryChange, onQuerySu
   if (fields.stock) sections.push(section('stockState', t('stock_status'), [['in_stock', t('in_stock')], ['low_stock', t('low_stock')], ['out_of_stock', t('out_of_stock')]]))
   if (fields.brand && brands.length) sections.push(section('brand', t('brand'), brands.map(brand => [brand, brand]), true, limited.brands))
   if (fields.category && categories.length) sections.push(section('category', t('category'), categories.map(category => [category, category]), true, limited.categories))
-  const activeCount = countActiveFilters(filters, { branch: !soleBranch, state: showStateFilter && !wired })
+  const activeCount = countActiveFilters(filters, { branch: !soleBranch, state: showStateFilter && !wired, group: !!groupings?.length })
 
   return (
     <div className="flex min-w-0 items-center gap-1" data-inventory-check-controls data-inventory-check-search-row>
