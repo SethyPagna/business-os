@@ -138,7 +138,7 @@ await test('AC-B5: every row\'s pressed dot is the level its stored value means;
     ['contacts', 'contacts'], ['returns', 'returns'], ['fees', 'fees'], ['review', 'review'], ['audit_log', 'audit_log'], ['branches', 'branches'], ['promotions', 'promotions'],
   ] as const
   const roles: Array<{ role: Record<string, unknown>; off: Record<string, number> }> = [
-    { role: { products: 'review', product_cost_view: true, settings: 'view', sales: true, 'sales:amend': false, inventory: true, 'inventory:adjust': false, 'inventory:edit_reasons': false, dashboard: true }, off: { sales: 1, inventory: 2 } },
+    { role: { products: 'review', destructive_delete: true, settings: 'view', sales: true, 'sales:amend': false, inventory: true, 'inventory:adjust': false, 'inventory:edit_reasons': false, dashboard: true }, off: { sales: 1, inventory: 2 } },
     { role: { products: true, contacts: 'review', returns: true, fees: 'review', 'products:merge_duplicates': false }, off: { products: 1 } },
     { role: { review: 'view', audit_log: 'view', branches: true, promotions: 'view' }, off: {} },
   ]
@@ -173,7 +173,7 @@ await test('AC-B5: every row\'s pressed dot is the level its stored value means;
 })
 
 await test('one vocabulary: None / View / Review / Full on the dots, no "Custom" or "Partial Access", and the sensitive badge is a shield', async () => {
-  const { surface } = await mountEditor({ products: 'review', settings: 'view', product_cost_view: true })
+  const { surface } = await mountEditor({ products: 'review', settings: 'view', destructive_delete: true })
   const offered = (id: string) => levelCells(surface, id).map((node) => node.getAttribute('data-perm-level'))
   assert.deepEqual(offered('products'), ['none', 'review', 'full'], 'Products offers None, Review and Full')
   assert.deepEqual(offered('settings'), ['none', 'view', 'full'], 'Settings offers the View level only')

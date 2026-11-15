@@ -57,7 +57,8 @@ function buildRows(): ModuleRow[] {
     const fieldDefs = defs.filter((def) => fieldPrefixOf(def.key) && !alternateKeys.has(def.key))
     const main = defs.find((def) => def.tier) ?? defs.find((def) => def.lead && !def.subRow) ?? null
     const subs = defs.filter((def) => def.subRow)
-    const extras = defs.filter((def) => def !== main && !def.subRow && !def.extraOf && !alternateKeys.has(def.key) && !fieldDefs.includes(def))
+    // A retired grant (permissionDefinitions.ts) is not drawn, counted or cleared: its stored value stays as it is.
+    const extras = defs.filter((def) => !def.retired && def !== main && !def.subRow && !def.extraOf && !alternateKeys.has(def.key) && !fieldDefs.includes(def))
     const imageOnly = alternates[0]
       ? { toggle: alternates[0], fields: (alternates[0].alsoClearsKeys ?? []).map((key) => defs.find((def) => def.key === key)).filter((def): def is PermissionDefinition => !!def) }
       : null
@@ -74,7 +75,7 @@ function buildRows(): ModuleRow[] {
       actionKey: main?.key ?? null,
     })
     for (const sub of subs) {
-      rows.push({ id: sub.key, section, sub: true, lead: sub, group: [], middle: null, extras: defs.filter((def) => def.extraOf === sub.key), fields: fieldDefs, imageOnly: null, actionKey: sub.key })
+      rows.push({ id: sub.key, section, sub: true, lead: sub, group: [], middle: null, extras: defs.filter((def) => !def.retired && def.extraOf === sub.key), fields: fieldDefs, imageOnly: null, actionKey: sub.key })
     }
   }
   return rows

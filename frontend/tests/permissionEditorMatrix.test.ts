@@ -177,7 +177,7 @@ await test('A2: Products and Settings Full are exactly {products:true} and {sett
 })
 
 await test('A2: tapping the level that is already selected does nothing, and None clears the module', async () => {
-  const { surface, state } = await mountEditor({ products: true, product_cost_view: true, sales: 'view' })
+  const { surface, state } = await mountEditor({ products: true, destructive_delete: true, sales: 'view' })
   await surface.call(cell(surface, 'products', 'full'), 'onClick', [])
   await surface.call(cell(surface, 'sales', 'view'), 'onClick', [])
   await surface.call(cell(surface, 'dashboard', 'none'), 'onClick', [])

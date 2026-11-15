@@ -129,6 +129,8 @@ await runTest('B1 reset to defaults over the stored Employee: one row per change
     for (const change of stored) {
       if (!change.key.includes(':') && ['unset', 'off'].includes(change.before) && ['unset', 'off'].includes(change.after)) continue
       if (change.key.includes(':') && change.before !== 'off' && change.after !== 'off') continue
+      // The two product-cost grants are retired (15 Nov 2026): the editor never draws them, so the review does not name them.
+      if (change.key === 'product_cost_view' || change.key === 'product_cost_edit') continue
       const [section, action] = change.key.split(':')
       let word: string | undefined
       if (change.key === 'legacy_unknown_key') word = en.role_other_permission
@@ -169,8 +171,8 @@ await runTest('B1 pure: extras are their own lines and Full never folds them in;
   const [level, ...rest] = products.lines
   assert.equal(level.text, `${en.review_required} → ${en.label_full_access}`, 'the level line is the level move and nothing else')
   assert.ok(!level.text.includes(en.perm_short_cost_view), 'Full never folds an extra into its own line')
-  assert.deepEqual(rest.map((line) => line.text), [`+ ${en.perm_short_cost_view}`, `+ ${en.perm_short_destructive_imports}`], 'each extra is a line of its own')
-  assert.deepEqual(rest.map((line) => line.sensitivity), ['high', 'critical'], 'and carries its own shield')
+  assert.deepEqual(rest.map((line) => line.text), [`+ ${en.perm_short_destructive_imports}`], 'each extra is a line of its own; the retired cost grant is not one')
+  assert.deepEqual(rest.map((line) => line.sensitivity), ['critical'], 'and carries its own shield')
   assert.equal(products.sensitivity, 'critical')
   const settings = rows.find((row) => row.id === 'settings')
   assert.ok(!settings?.lines.some((line) => line.text === `+ ${en.perm_short_identity}`), 'Settings Full does not stand in for an extra that is not stored')

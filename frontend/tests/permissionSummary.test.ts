@@ -45,7 +45,8 @@ test('every permission key lands in exactly one place of exactly one row', () =>
       seen.set(key, entry.id)
     }
   }
-  const catalog = PERMISSION_SECTIONS.filter((section) => section.key !== 'full_access').flatMap((section) => section.permissions.map((def) => def.key))
+  // A retired grant (the two product-cost switches, 15 Nov 2026) is not part of the grid.
+  const catalog = PERMISSION_SECTIONS.filter((section) => section.key !== 'full_access').flatMap((section) => section.permissions.filter((def) => !['product_cost_view', 'product_cost_edit'].includes(def.key)).map((def) => def.key))
   assert.deepEqual([...seen.keys()].sort(), catalog.sort(), 'no key is dropped from the grid and none is invented')
 })
 
@@ -55,7 +56,7 @@ test('levels, extras and fields follow the design: tiered rows offer their middl
   assert.deepEqual(levelsOf(row('settings')), ['none', 'view', 'full'])
   for (const id of ['dashboard', 'pos', 'backup', 'library', 'inventory_checks', 'customer_portal']) assert.deepEqual(levelsOf(row(id)), ['none', 'full'], id)
   const extras = (id: string) => row(id).extras.map((def) => def.key)
-  assert.deepEqual(extras('products'), ['product_cost_view', 'product_cost_edit', 'destructive_delete'])
+  assert.deepEqual(extras('products'), ['destructive_delete'], 'the retired cost switches are not offered')
   assert.deepEqual(extras('contacts'), ['contacts_suppliers'])
   assert.deepEqual(extras('dashboard'), ['dashboard_export'])
   assert.deepEqual(extras('backup'), ['backup_restore'])
@@ -171,8 +172,9 @@ test('None clears the main key, the extras and the image-only keys, and nothing 
     products: true, product_cost_view: true, product_cost_edit: true, destructive_delete: true, products_image_only: true, products_image_only_show_price: true,
     'products:delete': false, inventory: true, sales: true,
   })
+  // The retired cost grants are not part of the row, so None leaves their stored values alone.
   const none = applyModuleLevel(row('products'), 'none', full)
-  assert.deepEqual(Object.keys(none).sort(), ['inventory', 'products:delete', 'sales'], 'switches of the action table stay, other modules are untouched')
+  assert.deepEqual(Object.keys(none).sort(), ['inventory', 'product_cost_edit', 'product_cost_view', 'products:delete', 'sales'], 'switches of the action table stay, other modules are untouched')
   const inventory = state({ inventory: true, inventory_checks: true, inventory_check_show_stock: false })
   assert.deepEqual(applyModuleLevel(row('inventory'), 'none', inventory), { inventory_checks: true, inventory_check_show_stock: false }, 'Inventory None leaves the count-session row alone')
   assert.deepEqual(applyModuleLevel(row('inventory_checks'), 'none', inventory), { inventory: true, inventory_check_show_stock: false }, 'and the sub-row removes only itself')
@@ -314,7 +316,7 @@ test('switched-off and waiting-for-approval counts match the Employee preset and
 test('what the role can do: allowed actions, then extras that are on; Administrator reads "All actions"', () => {
   assert.deepEqual(moduleCanDo(row('products'), state({ products: 'review' }), tr), ['View', 'History'], 'queued actions are counted on the row, not listed as done')
   assert.deepEqual(moduleCanDo(row('products'), state({ products: true, 'products:delete': false, 'products:bulk_delete': false, 'products:variant': false, 'products:add': false, product_cost_view: true }), tr).slice(0, 2), ['View', 'Edit'])
-  assert.ok(moduleCanDo(row('products'), state({ products: true, product_cost_view: true }), tr).includes('See costs'))
+  assert.ok(!moduleCanDo(row('products'), state({ products: true, product_cost_view: true }), tr).includes('See costs'), 'the retired cost grant is not listed')
   assert.deepEqual(moduleCanDo(row('settings'), employee, tr), ['Receipts'], 'an extra on under a None level still reads')
   assert.deepEqual(moduleCanDo(row('inventory'), state({}), tr), [], 'nothing to say at None')
   assert.deepEqual(moduleCanDo(row('products'), state({ all: true }), tr), ['All actions'])
@@ -353,7 +355,7 @@ test('search finds a row by its module, a chip by its words, and rings only the 
   assert.equal(searchRow(row('dashboard'), 'DASH', tr).hit, true)
   const opening = searchRow(row('products'), 'bulk', tr)
   assert.deepEqual([...opening.chips], ['action:bulk_delete'])
-  assert.equal(searchRow(row('products'), 'costs', tr).chips.has('grant:product_cost_view'), true)
+  assert.equal(searchRow(row('products'), 'costs', tr).chips.has('grant:product_cost_view'), false, 'a retired grant is not searchable')
   assert.equal(searchRow(row('inventory_checks'), 'recorded stock', tr).chips.has('grant:inventory_check_show_stock'), true)
   assert.equal(searchRow(row('inventory'), 'sessions', tr).hit, false, 'a sub-row word does not light the main row')
   assert.equal(searchRow(row('inventory_checks'), 'sessions', tr).hit, true)

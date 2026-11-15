@@ -5,7 +5,7 @@ export interface PermissionDefinition {
   tKey: string
   label: string
   sensitivity: PermissionSensitivity
-  // No longer offered as a switch, but still stored on roles and users: reviews and summaries keep naming and counting it, and its value is never touched.
+  // No longer offered as a switch or counted in the access grid, but still stored on roles and users: its value is never touched.
   retired?: boolean
   section?: string
   // True only for a permission key with a real, end-to-end-wired Review
@@ -205,8 +205,9 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         reviewDescription: 'Under Review, viewing and searching products works directly. Adding, editing, or deleting a product goes to the Review/Approval queue for an admin to approve or reject. So does an edit that would merge this product into another one, unless Merge duplicates is switched off for the role, which refuses that edit. Import, export, merge-duplicates, and the zero-quantity cleanup tool all require Full Access.',
       },
       // Retired 15 Nov 2026 (owner): cost, profit, margin, stock value and removal loss are admin-only, so these two switches would do
-      // nothing. No chip offers them; their stored values stay untouched, the way back if the owner reverses the ruling
-      // (utils/acquisitionCostAccess.ts holdsCostViewGrant / holdsCostEditGrant).
+      // nothing. The role editor draws no switch for them (permissionSummary.ts skips retired grants); their stored values
+      // stay untouched, the way back if the owner reverses the ruling (the Worker's lib/acquisitionCostAccess.ts holdsCostViewGrant /
+      // holdsCostEditGrant).
       { key: 'product_cost_view', tKey: 'perm_product_cost_view', label: 'View product costs', sensitivity: 'high', shortTKey: 'perm_short_cost_view', short: 'See costs', retired: true },
       { key: 'product_cost_edit', tKey: 'perm_product_cost_edit', label: 'Edit product costs', sensitivity: 'high', shortTKey: 'perm_short_cost_edit', short: 'Enter costs', retired: true },
       // Gates the replace-all and replace-columns product imports, in the import picker and in the Worker
