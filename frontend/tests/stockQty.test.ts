@@ -39,7 +39,6 @@ function loadComponent(code = readSrc('components/inventory/StockQty.tsx')): { d
   return mod.exports as never
 }
 const component = loadComponent()
-const StockQty = component.default
 const stockQtyLevel = component.stockQtyLevel
 
 function html(lang: 'en' | 'km', props: Record<string, unknown>, api = component): string {
