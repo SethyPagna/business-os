@@ -32,7 +32,6 @@ import InventoryCheckControls, { countActiveFilters, type InventoryCheckFilters 
 import InventoryCheckRows, { InventoryCheckSheetHeader, type InventoryCheckFocusRequest } from './InventoryCheckRows.tsx'
 import InventoryCheckListRows, { InventoryCheckListHeader, InventoryCheckSelectionBar, type ListDraft } from './InventoryCheckListRows.tsx'
 import { finiteQuantity, parseCount } from './InventoryCheckCountEditor.tsx'
-import InventoryCheckDetailFloat from './InventoryCheckDetailFloat.tsx'
 import { fixStockOpening, fixStockRequestId, type FixStockOpening } from './inventoryCheckFixStock.ts'
 import { countTextFromLots, incompleteLotAnswers, lotSubmissionLine, lotTotals, rowSetPlan, splitSubmission, staleLotFigures, stockedDatesOf, uncountedDates, type SubmissionLotLine } from './inventoryCheckLots.ts'
 import { adjustStock } from '../../api/inventoryWriteTransport.ts'
@@ -47,7 +46,7 @@ import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { loadWired, mergeWiredRows, NotWired, patchWiredLots, patchWiredRaw, readWiredRows, rememberWiredMode, wiredMode, wiredResult, type Branch, type WiredAccess, type WiredDeps, type WiredExtras, type WiredList, type WiredRaw } from './inventoryWired.ts'
 import { approvalRequestBound, runApprovalFlow } from './inventoryCheckApprovalFlow.ts'
 import { productSalesFocus, queueReportsFocus } from '../sales/reports/reportsFocus.ts'
-import InventoryCheckHistoryFloat, { type InventoryCheckHistoryResult } from './InventoryCheckHistoryFloat.tsx'
+import type { InventoryCheckHistoryResult } from './InventoryCheckHistoryFloat.tsx'
 import InventoryCheckSessionsList, { InventoryCheckSessionFilterMenu, ProgressRing, SessionCounts, SessionStatusChip, initialSessionFilters, sessionDisplayName, type SessionListFilters } from './InventoryCheckSessionsList.tsx'
 import HubSectionNav from '../shared/HubSectionNav.tsx'
 import { hubAnchor, useHubSection } from '../shared/hubNavigation.ts'
@@ -64,6 +63,12 @@ import { statsPresetRange, type DateTimeRange } from '../shared/statsStripPreset
 // The approval panel is only drawn on a submitted count's session: it loads when one is opened, not with the list.
 const InventoryCheckApprovalPanel = lazyRetry(() => import('./InventoryCheckApprovalPanel.tsx'), 'inventory-check-approval')
 const InventoryCheckGroupedList = lazyRetry(loadGroupedList, 'inventory-check-groups')
+// The product detail and the session history are floats opened by a tap, never part of the first paint: their code loads as their own chunks, and starts loading once the list is on screen (below),
+// so the first tap finds it already there.
+const loadDetailFloat = () => import('./InventoryCheckDetailFloat.tsx')
+const loadHistoryFloat = () => import('./InventoryCheckHistoryFloat.tsx')
+const InventoryCheckDetailFloat = lazyRetry(loadDetailFloat, 'inventory-check-detail')
+const InventoryCheckHistoryFloat = lazyRetry(loadHistoryFloat, 'inventory-check-history')
 const FastStockInModal = lazyRetry(() => import('./FastStockInModal.tsx'), 'inventory-check-fix-stock')
 
 type CheckSummary = Record<InventoryCheckListStatus, number> & { total: number }
@@ -357,6 +362,15 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const wiredAccess: WiredAccess = { stock: access.fields.stock, barcode: access.fields.barcode, received: access.fields.received }
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  // Once the list is on screen the two float chunks are fetched in the background (idle), so the first tap on a product or on History finds its code already loaded.
+  useEffect(() => {
+    if (!fresh) return
+    const idle = (globalThis as { requestIdleCallback?: (run: () => void) => number; cancelIdleCallback?: (id: number) => void })
+    const start = () => { void loadDetailFloat().catch(() => null); void loadHistoryFloat().catch(() => null) }
+    if (idle.requestIdleCallback) { const id = idle.requestIdleCallback(start); return () => idle.cancelIdleCallback?.(id) }
+    const timer = setTimeout(start, 1500)
+    return () => clearTimeout(timer)
+  }, [fresh])
   const groupScope = JSON.stringify([filters, appliedQuery])
   useEffect(() => { setCollapsed(previous => previous.size ? new Set() : previous) }, [groupScope])
   const toggleGroup = useCallback((id: string) => setCollapsed(previous => { const next = new Set(previous); if (!next.delete(id)) next.add(id); return next }), [])
@@ -1254,10 +1268,10 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
             : section === 'sessions' && access.canCheck ? <button type="button" className="btn-primary inline-flex min-h-10 items-center gap-1 px-3 text-xs" title={tr('inventory_check_count_tooltip', 'Count the products listed on this page')} onClick={() => setSection('products')}><Play className="h-4 w-4" aria-hidden="true" />{tr('inventory_check_start_page', 'Count')}</button> : null}
         </div> : null}
         {pagerNode('bottom')}
-        {detail && fresh ? <InventoryCheckDetailFloat product={detail} observation={observations[String(detail.id)]} unavailable={unavailableIds.has(String(detail.id))} fields={access.fields} priceText={priceText} promotionRules={data?.promotionRules} exchangeRate={exchangeRate} t={t} onClose={() => setDetail(null)}
+        {detail && fresh ? <Suspense fallback={null}><InventoryCheckDetailFloat product={detail} observation={observations[String(detail.id)]} unavailable={unavailableIds.has(String(detail.id))} fields={access.fields} priceText={priceText} promotionRules={data?.promotionRules} exchangeRate={exchangeRate} t={t} onClose={() => setDetail(null)}
           onFixStock={fixOpening ? () => openFixStock(fixOpening) : undefined}
-          onSales={offered && rights.can('sales', 'view') ? () => { queueReportsFocus(productSalesFocus(detail.name)); navigateTo('sales', hubAnchor('sales', 'reports')) } : undefined} /> : null}
-        {historyPage !== null ? <InventoryCheckHistoryFloat page={historyPage} history={history} error={historyError} onPage={setHistoryPage} onRetry={() => setHistoryReload(value => value + 1)} onClose={() => setHistoryPage(null)} t={t} /> : null}
+          onSales={offered && rights.can('sales', 'view') ? () => { queueReportsFocus(productSalesFocus(detail.name)); navigateTo('sales', hubAnchor('sales', 'reports')) } : undefined} /></Suspense> : null}
+        {historyPage !== null ? <Suspense fallback={null}><InventoryCheckHistoryFloat page={historyPage} history={history} error={historyError} onPage={setHistoryPage} onRetry={() => setHistoryReload(value => value + 1)} onClose={() => setHistoryPage(null)} t={t} /></Suspense> : null}
         {fixStock ? <Suspense fallback={null}><FastStockInModal
           branchOptions={branches.map(branch => ({ value: String(branch.id), label: branch.name }))} defaultBranchId={fixStock.branchId} initialMode="set" lockMode="set" initialHeader={{ branchId: String(fixStock.branchId) }}
           initialLines={[{ mode: 'set', quantity: fixStock.quantity, reason: fixStock.reason, ...fixStock.requestId ? { requestId: fixStock.requestId } : {}, product: fixStockCandidate(fixStock, branches.find(branch => branch.id === fixStock.branchId)?.name ?? null) }]}
