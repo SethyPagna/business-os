@@ -711,7 +711,7 @@ export const CUSTOMER_REFUND_JOIN = `LEFT JOIN (
 // Builds the shared WHERE clause + bound params for "active sales in this
 // date range (and optional branch)". `alias` lets callers use this against
 // either a bare `sales` table or an aliased `s` in a join.
-export function whereActiveSales(alias: string, f: SalesFilters) {
+export function whereActiveSales(alias: string, f: SalesFilters, options: { plainCancelled?: boolean } = {}) {
   const clockError = localRangeClockError(f.startTime, f.endTime)
   if (clockError) throw new RangeError(clockError)
   const params: Record<string, unknown> = {}
@@ -736,7 +736,11 @@ export function whereActiveSales(alias: string, f: SalesFilters) {
   // simply matches nothing.
   const status = typeof f.status === 'string' ? f.status.trim() : ''
   if (status) {
-    clauses.push(`COALESCE(${alias}.sale_status, 'completed') = @status`)
+    // 'cancelled' is the one status no NULL maps to (COALESCE only turns NULL into 'completed'), so for it the plain column is exactly the same set --
+    // and lets idx_sales_status_created_pg answer it; the wrapped column cannot (a full walk of every sale on an undated report, once per pass).
+    // `plainCancelled: false` (a report whose scope is already narrow: a filter's subquery or its id list) keeps the wrapped column: the planner then probes the scope
+    // instead of seeking idx_sales_status_created_pg and reading every cancelled sale in the window (121 rows became 1,989 on the lab seed). Same set either way.
+    clauses.push(status === 'cancelled' && options.plainCancelled !== false ? `${alias}.sale_status = @status` : `COALESCE(${alias}.sale_status, 'completed') = @status`)
     params.status = status
   } else {
     clauses.push(`COALESCE(${alias}.sale_status, 'completed') <> 'cancelled'`)
@@ -931,7 +935,15 @@ export type SalesReportScalarScope = (saleAlias: string) => {
   params: Record<string, SalesReportScalarScopeValue>
 }
 
-type CapturedSalesReportScalarScope = { sql: string; params: Record<string, SalesReportScalarScopeValue> }
+type CapturedSalesReportScalarScope = { sql: string; params: Record<string, SalesReportScalarScopeValue>; narrow?: boolean }
+// Scopes known to hold few sales: a short resolved id list, or a list filter with a clause beyond the window, a completed / awaiting_payment status and the branch (cashier, user, search, id, or a
+// rare or unknown status). The cancelled group probes them by rowid instead of seeking every cancelled sale of the window. A window, a broad status and a branch alone are not narrow.
+const REPORT_SCOPE_NARROW = new WeakSet<SalesReportScalarScope>()
+// Lab seed, a typed search resolved to N ids, rows read narrow vs broad (95 points: windowed, with a cashier, all-time). Narrow saves the window's cancelled sales (about 5 rows a day, both passes) and
+// pays about 3.7 rows per id, so the crossover is about 1.4 x D ids for D days (2 in a day, about 40 in 30 days, about 500 all time); one limit cannot fit every shape. 10 keeps the loss against the
+// better form near 1.3% at worst (one first sample; repeats of that shape read narrow cheaper): 3 to 10 ids in a short window -0.6% to +0.8% narrow; an all-time search of 11 to 500 ids reads at most 0.8%
+// more broad; 11 to 13 ids in one day would read 3-5% more narrow. Against the pre-lane route, 3 of the 17 points that have a base value read more in the narrow form (4,945 vs 4,881; 7,833 vs 7,629 twice).
+export const REPORT_NARROW_SCOPE_IDS_MAX = 10
 
 type ReportScopeProvenance = {
   sql: string
@@ -941,6 +953,8 @@ type ReportScopeProvenance = {
 const REPORT_SCOPE_PROVENANCE = new WeakMap<SalesReportScalarScope, ReportScopeProvenance>()
 const REPORT_ATOMIC_PURE_FUNCTIONS = new Set([
   'COALESCE', 'NULLIF', 'TRIM', 'LOWER', 'UPPER', 'REPLACE', 'INSTR', 'CAST', 'CHAR', 'LENGTH',
+  // The id-list scope (resolveReportScopeIds): a table-valued function over one bound JSON text, no table access.
+  'JSON_EACH',
 ])
 const REPORT_ATOMIC_GROUP_KEYWORDS = new Set([
   'AND', 'OR', 'NOT', 'IN', 'EXISTS', 'WHEN', 'THEN', 'ELSE', 'WHERE', 'ON', 'SELECT',
@@ -1074,8 +1088,18 @@ function reportDashboardDateFiltersEligible(f: SalesFilters): boolean {
 // `IN (... WHERE 1=1)` that still forces a full sales scan plus a
 // temp-B-tree sort on every 2,000-row keyset page (all-time stats walk:
 // 681 -> 48 ms on the seeded lab DB, identical rows; I4-2).
-export function salesListFilterReportScope(where: string[], params: Record<string, unknown>): SalesReportScalarScope | undefined {
+export function salesListFilterReportScope(where: string[], params: Record<string, unknown>, narrow = false): SalesReportScalarScope | undefined {
   if (!where.some((clause) => clause !== '1=1')) return undefined
+  const { scopedWhere, scopedParams } = salesListScopedWhere(where, params)
+  const sqlForAlias = (alias: string) => `${alias}.id IN (SELECT matched_sale.id FROM sales matched_sale LEFT JOIN customers c ON c.id=matched_sale.customer_id WHERE ${scopedWhere})`
+  const scope: SalesReportScalarScope = (alias) => ({ sql: sqlForAlias(alias), params: scopedParams })
+  rememberReportScopeProvenance(scope, sqlForAlias('s'), scopedParams)
+  if (narrow) REPORT_SCOPE_NARROW.add(scope)
+  return scope
+}
+
+/** The list's where clauses re-aliased for the matched_sale subquery, with their @params renamed into the reportScope_ namespace (shared by the scope builders below). */
+function salesListScopedWhere(where: string[], params: Record<string, unknown>): { scopedWhere: string; scopedParams: Record<string, SalesReportScalarScopeValue> } {
   const scopedParams: Record<string, SalesReportScalarScopeValue> = {}
   const scopedWhere = where.join(' AND ').replace(/\bs\./g, 'matched_sale.').replace(/@([A-Za-z][A-Za-z0-9_]*)/g, (_match, key: string) => {
     const value = params[key]
@@ -1083,10 +1107,113 @@ export function salesListFilterReportScope(where: string[], params: Record<strin
     scopedParams[`reportScope_${key}`] = value
     return `@reportScope_${key}`
   })
-  const sqlForAlias = (alias: string) => `${alias}.id IN (SELECT matched_sale.id FROM sales matched_sale LEFT JOIN customers c ON c.id=matched_sale.customer_id WHERE ${scopedWhere})`
+  return { scopedWhere, scopedParams }
+}
+
+/**
+ * The most sale ids, and the most bytes of JSON text, a scope carries inline. D1 refuses a bound value over 2,000,000 bytes (lib/saleItemPricing.ts keeps its own well
+ * under that) and every statement of every page, group and pass repeats the text, so a longer list keeps the subquery scope instead: exact, just not cheaper.
+ * 50,000 ids is about 400 KB of text at 7-digit ids, three times the whole sales table of the shop today; 800,000 bytes holds it with room under the cap.
+ */
+export const REPORT_SCOPE_IDS_MAX = 50_000
+export const REPORT_SCOPE_IDS_MAX_BYTES = 800_000
+/** The bound value that carries a resolved id list (salesIdsScope); reportKeysetRows hands each page only the slice of it that page can return. */
+const REPORT_SCOPE_IDS_PARAM = 'reportScope_ids'
+/** A group pages on a sale id (its order expression is the sale id, plain or unary-plus): the only page cursor that is a position in the scope's id list. */
+const REPORT_SALE_ID_ORDER = /^\+?s\.id$/
+/**
+ * The resolved ids of a keyset read, ascending, or null when the statement does not carry a resolved list (or one that is not strictly ascending safe integers: then the page keeps
+ * the whole list, exact but not cheaper). With the whole list in every page, `s.id IN (SELECT value FROM json_each(@ids)) AND s.id > @after ORDER BY s.id LIMIT 2000` scans the list
+ * (every element is a row read) and seeks every sale in it on EVERY page, so a match of N sales read about N*N/2000 rows: a broad search, or a match near the cap, cost as much as the
+ * subquery the list replaced. Each page after the first carries only the ids it can still return (a slice sized at the density seen so far), so the walk reads each id about once.
+ */
+// The last list parsed: a request reads the same list in every group of both passes, and a parse of a list near the cap is not free on the Free plan's CPU budget.
+let reportScopeIdsParsed: { json: string; ids: number[] | null } | null = null
+function reportScopeIdSlices(selectSql: string, idExpr: string, params: Record<string, unknown>): number[] | null {
+  const json = params[REPORT_SCOPE_IDS_PARAM]
+  if (typeof json !== 'string' || !REPORT_SALE_ID_ORDER.test(idExpr) || !selectSql.includes(`json_each(@${REPORT_SCOPE_IDS_PARAM})`)) return null
+  if (reportScopeIdsParsed?.json === json) return reportScopeIdsParsed.ids
+  let ids: number[] | null = null
+  try {
+    const parsed: unknown = JSON.parse(json)
+    if (Array.isArray(parsed)) {
+      let previous = 0
+      ids = parsed.every((id) => typeof id === 'number' && Number.isSafeInteger(id) && id > previous && ((previous = id), true)) ? parsed as number[] : null
+    }
+  } catch { ids = null }
+  reportScopeIdsParsed = { json, ids }
+  return ids
+}
+/** The index of the first id above `after`, searching `ids` (ascending) from `from`. */
+function reportFirstIdAfter(ids: readonly number[], from: number, after: number): number {
+  let low = from, high = ids.length
+  while (low < high) {
+    const middle = (low + high) >>> 1
+    if (ids[middle] > after) high = middle
+    else low = middle + 1
+  }
+  return low
+}
+
+/** A scope that is exactly this id set: `alias.id IN (SELECT value FROM json_each(@reportScope_ids))`, evaluated per statement without re-running a text match. */
+function salesIdsScope(ids: readonly number[], json = JSON.stringify(ids)): SalesReportScalarScope {
+  const scopedParams: Record<string, SalesReportScalarScopeValue> = { reportScope_ids: json }
+  const sqlForAlias = (alias: string) => `${alias}.id IN (SELECT value FROM json_each(@reportScope_ids))`
   const scope: SalesReportScalarScope = (alias) => ({ sql: sqlForAlias(alias), params: scopedParams })
   rememberReportScopeProvenance(scope, sqlForAlias('s'), scopedParams)
+  if (ids.length <= REPORT_NARROW_SCOPE_IDS_MAX) REPORT_SCOPE_NARROW.add(scope)
   return scope
+}
+
+/**
+ * A list scope with the sales it matches resolved ONCE. The subquery scope (`s.id IN (SELECT matched_sale.id ... WHERE <filter>)`) re-runs the whole filter -- for a typed
+ * search a text match over every sale and every line -- in each page of each group of each of the two passes (about 19 statements). Here ONE bounded statement, the scope's own
+ * subquery with its own where text and params, reads the matching ids (sorted), and the passes test `id IN json_each(ids)` instead. The cohort is the same set (a sale is still
+ * counted only if the reader's own window and status predicates also pass it).
+ * A match of more than REPORT_SCOPE_IDS_MAX sales, or more JSON text than REPORT_SCOPE_IDS_MAX_BYTES, is never cut: the scope is returned unchanged and keeps the subquery.
+ * Any scope that is not a list scope (none, or already an id list) is returned as it came. `ids` is the resolved set as JSON text (null when nothing was resolved):
+ * readSalesReportTotalsPinned resolves it again after the read and refuses a cohort that moved while the money was being read.
+ */
+// Only a typed search is worth resolving. A status, cashier, branch or user filter is served by an index inside every statement, so the subquery costs about what one resolve does and
+// the two resolves (before and after the read) were a pure loss: `status=cancelled` over all time read 16,629 rows on the pre-lane route and 18,541 with them. The search text is the one
+// predicate that scans every sale and every line per statement; its clause is the only one that names search_normalized.
+const LIST_SCOPE_TEXT_SEARCH = /matched_sale\.search_normalized/
+const LIST_SCOPE_SUBQUERY = /^s\.id IN \((SELECT matched_sale\.id FROM sales matched_sale LEFT JOIN customers c ON c\.id=matched_sale\.customer_id WHERE [\s\S]+)\)$/
+async function resolveReportScopeIds(env: Env, scope: SalesReportScalarScope | undefined): Promise<{ scope: SalesReportScalarScope | undefined; ids: string | null }> {
+  const unresolved = { scope, ids: null }
+  if (!scope) return unresolved
+  const captured = captureSalesReportScalarScope(scope)
+  const subquery = captured ? LIST_SCOPE_SUBQUERY.exec(captured.sql) : null
+  if (!captured || !subquery) return unresolved
+  if (!LIST_SCOPE_TEXT_SEARCH.test(subquery[1])) return unresolved
+  const rows = await getDb(env).prepare(`${subquery[1]} LIMIT @reportScopeLimit`)
+    .all<{ id: unknown }>({ ...captured.params, reportScopeLimit: REPORT_SCOPE_IDS_MAX + 1 })
+  if (rows.length > REPORT_SCOPE_IDS_MAX) return unresolved
+  const ids = rows.map((row) => Number(row.id))
+  if (ids.some((id) => !Number.isSafeInteger(id))) return unresolved
+  ids.sort((a, b) => a - b)
+  const json = JSON.stringify(ids)
+  if (json.length > REPORT_SCOPE_IDS_MAX_BYTES) return unresolved
+  return { scope: salesIdsScope(ids, json), ids: json }
+}
+
+/**
+ * The header totals through a resolved id list, kept coherent. The ids are read at one moment and the money at a later one, so a sale edited in between (a rename that
+ * moves it in or out of the search) could be counted by a cohort that no longer exists. The ids are therefore resolved again after the read: the same set means the cohort
+ * held for the whole read; a different set means it moved, and the read is repeated once, then refused as snapshot_changed (the refusal the two-pass reader already
+ * gives when its own passes disagree). A scope that resolved to nothing (none, or kept as a subquery) evaluates its filter inside every statement, as before, and needs no check.
+ */
+async function readSalesReportTotalsPinned(
+  env: Env,
+  f: SalesFilters & { contactId?: number | string | null },
+  scalarScope: SalesReportScalarScope | undefined,
+): Promise<SalesReportTotalsResult> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const pinned = await resolveReportScopeIds(env, scalarScope)
+    const report = await readSalesReportTotalsRouted(env, f, false, pinned.scope, { headerOnly: true })
+    if (pinned.ids === null || (await resolveReportScopeIds(env, scalarScope)).ids === pinned.ids) return report
+  }
+  throw new ReportMoneyPrecisionError('snapshot_changed')
 }
 
 function captureSalesReportScalarScope(scope?: SalesReportScalarScope): CapturedSalesReportScalarScope | null {
@@ -1113,7 +1240,7 @@ function captureSalesReportScalarScope(scope?: SalesReportScalarScope): Captured
     || /(?:^|[^A-Za-z0-9_])[:$][A-Za-z_]/.test(captured.sql)) {
     throw new ReportMoneyPrecisionError('unsupported_row')
   }
-  return Object.freeze({ sql: captured.sql.trim(), params: Object.freeze({ ...params }) })
+  return Object.freeze({ sql: captured.sql.trim(), params: Object.freeze({ ...params }), narrow: REPORT_SCOPE_NARROW.has(scope) })
 }
 
 function applySalesReportScalarScope<T extends { sql: string; params: Record<string, unknown> }>(
@@ -1174,24 +1301,51 @@ async function reportKeysetRows(
 ): Promise<ReportScalarRow[]> {
   const output: ReportScalarRow[] = []
   let afterId = startAfterId
+  // A resolved id list is handed to each page as a slice (see reportScopeIdSlices). The first page carries the whole list (a match that fits one page, or a window that cuts most of it,
+  // costs one statement exactly as before); after that a slice is the ids a page needs at the density seen so far, so the list is read about once in total, not once per page.
+  const ids = reportScopeIdSlices(selectSql, idExpr, params)
+  let start = ids ? reportFirstIdAfter(ids, 0, afterId) : 0
+  let sliceLength = ids ? ids.length - start : 0
   for (;;) {
     const pageSize = maxReceipts === undefined ? REPORT_MONEY_PAGE_SIZE
       : Math.min(REPORT_MONEY_PAGE_SIZE, maxReceipts - output.length + 1)
+    let pageParams = params
+    let end = 0
+    if (ids) {
+      if (start >= ids.length) break
+      end = Math.min(start + sliceLength, ids.length)
+      pageParams = { ...params, [REPORT_SCOPE_IDS_PARAM]: JSON.stringify(ids.slice(start, end)) }
+    }
     const page = await db.prepare(`${selectSql} AND ${idExpr} > @reportAfterId ORDER BY ${idExpr} LIMIT @reportPageSize`)
-      .all<ReportScalarRow>({ ...params, reportAfterId: afterId, reportPageSize: pageSize })
-    if (!page?.length) break
-    if (maxReceipts !== undefined && output.length + page.length > maxReceipts) throw new SalesReportExportTooLargeError()
-    rowBudget.count += page.length
-    if (page.length > REPORT_MONEY_PAGE_SIZE || rowBudget.count > REPORT_MONEY_MAX_ROWS) {
+      .all<ReportScalarRow>({ ...pageParams, reportAfterId: afterId, reportPageSize: pageSize })
+    if (!page?.length && !ids) break
+    const rows = page ?? []
+    if (maxReceipts !== undefined && output.length + rows.length > maxReceipts) throw new SalesReportExportTooLargeError()
+    rowBudget.count += rows.length
+    if (rows.length > REPORT_MONEY_PAGE_SIZE || rowBudget.count > REPORT_MONEY_MAX_ROWS) {
       throw new ReportMoneyPrecisionError('too_many_rows')
     }
-    for (const row of page) {
+    for (const row of rows) {
       const id = Number(row.id)
       if (!Number.isSafeInteger(id) || id <= afterId) throw new ReportMoneyPrecisionError('unsupported_row')
       afterId = id
       output.push(row)
     }
-    if (page.length < pageSize) break
+    if (!ids) {
+      if (rows.length < pageSize) break
+      continue
+    }
+    const sliceIds = end - start
+    if (rows.length >= pageSize) {
+      // The page stopped at its limit: the ids after the last row it returned are still to be read, and the ids it spent on pageSize rows say how many the next page needs.
+      const next = reportFirstIdAfter(ids, start, afterId)
+      sliceLength = Math.max(REPORT_MONEY_PAGE_SIZE, Math.ceil((next - start) * 1.25))
+      start = next
+    } else {
+      // The whole slice was read and yielded rows.length rows: the next slice is sized for a page of rows at that density (no rows: everything left, in one statement).
+      sliceLength = rows.length ? Math.max(REPORT_MONEY_PAGE_SIZE, Math.ceil(pageSize * sliceIds / rows.length * 1.25)) : ids.length
+      start = end
+    }
   }
   return output
 }
@@ -1287,6 +1441,13 @@ function reportSelectForPurpose(
 
 type ReportReadGroupKind = 'sales' | 'voidSales' | 'items' | 'returns' | 'returnItems' | 'deliveryFees'
 type ReportReadGroups = Pick<SalesReportSnapshot, ReportReadGroupKind>
+// The cancelled group keys its pages on a non-rowid expression: with `s.id > @after ORDER BY s.id` the planner walks the primary key of every sale (and, with table
+// statistics, still does after the status test is a plain equality); with the unary plus it seeks idx_sales_status_created_pg for the few cancelled rows and sorts them.
+const REPORT_VOID_ID_EXPR = '+s.id'
+// An unscoped or broad-scoped report takes the plain status test and pages on `+s.id`; a narrow one (a filter's subquery or id list holds the few sales that matter) keeps
+// the pre-lane wrapped test and plain `s.id`, so the planner probes the scope by rowid and never reads every cancelled sale in the window.
+const reportStatusPredicate = (scope: CapturedSalesReportScalarScope | null) => ({ plainCancelled: !scope?.narrow })
+const reportVoidIdExpr = (scope: CapturedSalesReportScalarScope | null) => scope?.narrow ? 's.id' : REPORT_VOID_ID_EXPR
 type ReportReadGroup = { kind: ReportReadGroupKind; sql: string; idExpr: string; params: Record<string, unknown>; columns: string[] }
 type ReportReadBand = { sql: string; params: Record<string, unknown> }
 type ReportReadPlan = { groups: ReportReadGroup[]; primary: { sql: string; params: Record<string, unknown> }; preciseSales: boolean; preciseReturns: boolean; itemBand?: ReportReadBand }
@@ -1357,8 +1518,8 @@ async function buildSalesReportReadPlan(
   const saleColumn = (name: string, fallback: string) => salesColumns.has(name) ? `s.${name}` : `${fallback} AS ${name}`
   const linkedDeliveryFee = feeColumns.has('sale_id') && feeColumns.has('fee_type')
     ? "EXISTS(SELECT 1 FROM fees WHERE fees.sale_id=s.id AND COALESCE(fees.fee_type,'')='delivery')" : '0'
-  const primary = applySalesReportScalarScope(whereActiveSales('s', f), scalarScope)
-  const voids = applySalesReportScalarScope(whereActiveSales('s', { ...f, status: 'cancelled' }), scalarScope)
+  const primary = applySalesReportScalarScope(whereActiveSales('s', f, reportStatusPredicate(scalarScope)), scalarScope)
+  const voids = applySalesReportScalarScope(whereActiveSales('s', { ...f, status: 'cancelled' }, reportStatusPredicate(scalarScope)), scalarScope)
   const groups: ReportReadGroup[] = []
   const saleSelect = reportSelectForPurpose({
     id: 's.id', created_at: 's.created_at', sale_status: 's.sale_status', status_before_return: saleColumn('status_before_return', 'NULL'),
@@ -1389,7 +1550,7 @@ async function buildSalesReportReadPlan(
   groups.push({ kind: 'sales', sql: `SELECT ${saleSelect.sql}
     FROM sales s WHERE ${primary.sql}`, idExpr: 's.id', params: primary.params, columns: saleSelect.columns })
   if (options.maxReceipts === undefined) groups.push({ kind: 'voidSales', sql: `SELECT ${voidSelect.sql}
-    FROM sales s WHERE ${voids.sql}`, idExpr: 's.id', params: voids.params, columns: voidSelect.columns })
+    FROM sales s WHERE ${voids.sql}`, idExpr: reportVoidIdExpr(scalarScope), params: voids.params, columns: voidSelect.columns })
   const itemFrom = datedDashboard ? 'sales s CROSS JOIN sale_items si ON si.sale_id=s.id'
     : 'sale_items si NOT INDEXED CROSS JOIN sales s ON s.id=si.sale_id'
   if (!options.headerOnly) groups.push({ kind: 'items', sql: `SELECT ${itemSelect.sql}
@@ -1888,8 +2049,8 @@ async function readSalesReportPassLegacy(
   const saleColumn = (name: string, fallback: string) => salesColumns.has(name) ? `s.${name}` : `${fallback} AS ${name}`
   const linkedDeliveryFee = feeColumns.has('sale_id') && feeColumns.has('fee_type')
     ? "EXISTS(SELECT 1 FROM fees WHERE fees.sale_id=s.id AND COALESCE(fees.fee_type,'')='delivery')" : '0'
-  const primary = applySalesReportScalarScope(whereActiveSales('s', f), scalarScope)
-  const voids = applySalesReportScalarScope(whereActiveSales('s', { ...f, status: 'cancelled' }), scalarScope)
+  const primary = applySalesReportScalarScope(whereActiveSales('s', f, reportStatusPredicate(scalarScope)), scalarScope)
+  const voids = applySalesReportScalarScope(whereActiveSales('s', { ...f, status: 'cancelled' }, reportStatusPredicate(scalarScope)), scalarScope)
   const rowBudget = { count: 0 }
   const sales = await reportKeysetRows(db, `SELECT s.id,s.created_at,s.sale_status,${saleColumn('status_before_return','NULL')},s.branch_id,s.branch_name,
       s.cashier_id,s.cashier_name,s.customer_id,s.customer_name,s.customer_phone,s.receipt_number,s.payment_method,
@@ -1903,7 +2064,7 @@ async function readSalesReportPassLegacy(
   const voidSales = options.maxReceipts !== undefined ? [] : await reportKeysetRows(db, `SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name,
       s.cashier_id,s.cashier_name,s.customer_id,s.customer_name,s.customer_phone,s.payment_method,
       ${customerAnonymous} AS customer_is_anonymous
-    FROM sales s WHERE ${voids.sql}`, 's.id', voids.params, rowBudget)
+    FROM sales s WHERE ${voids.sql}`, reportVoidIdExpr(scalarScope), voids.params, rowBudget)
   const items = options.headerOnly ? [] : await readReportSaleItems(db, f, primary, rowBudget, `SELECT si.id,si.sale_id,${itemColumn('product_id','NULL')},${itemColumn('product_name',"''")},si.quantity,
       ${itemColumn('total_usd','0')},si.cost_price_usd,${itemColumn('product_discount_usd','0')},${itemColumn('manual_discount_usd','0')}
     FROM sale_items si NOT INDEXED CROSS JOIN sales s ON s.id=si.sale_id WHERE ${primary.sql}`)
@@ -2073,7 +2234,7 @@ export async function readSalesHeaderTotals(
   f: SalesFilters & { contactId?: number | string | null },
   scalarScope?: SalesReportScalarScope,
 ): Promise<SalesHeaderTotals> {
-  const report = await readSalesReportTotalsRouted(env, f, false, scalarScope, { headerOnly: true })
+  const report = await readSalesReportTotalsPinned(env, f, scalarScope)
   return {
     revenue_usd: report.totals.revenue_usd,
     pending_revenue_usd: report.totals.pending_revenue_usd,

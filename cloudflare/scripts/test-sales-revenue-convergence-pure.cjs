@@ -15,6 +15,7 @@
 //
 // Run (from cloudflare/): node scripts/test-sales-revenue-convergence-pure.cjs
 const assert = require('node:assert/strict')
+const STATS_FLAG_LINES = ['let statusClausePushed = false', '  if (query.status) {', '    const clause = saleStatusFilterClause(String(query.status), params)', '    if (clause) { where.push(clause); statusClausePushed = true }', '  }', '  let branchClausePushed = false', '  if (query.branchId) {', '    branchClausePushed = true'].join('\n')
 const { execSync } = require('node:child_process')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -304,7 +305,12 @@ check('the totals-purpose projection counts five active, one cancelled and six t
   && statsReport.sale_count === statsTotals.tx_count && statsReport.cancelled_count === statsTotals.cancelled_tx_count)
 check('the /stats route delegates to the totals-purpose helper with its complete list scope',
   /readSalesHeaderTotals\(c\.env,\s*windowFilter,\s*scope\)/.test(statsBlock)
-  && /salesListFilterReportScope\(where,\s*params\)/.test(statsBlock)
+  && /salesListFilterReportScope\(where,\s*params,\s*narrowScope\)/.test(statsBlock)
+  && /const narrowScope = where\.length - 1 - windowClauseCount - \(statusClausePushed && statsStatusIsBroad\(String\(query\.status\)\) \? 1 : 0\) - \(branchClausePushed \? 1 : 0\) > 0\r?\n/.test(statsBlock)
+  && statsBlock.split('\r').join('').includes(STATS_FLAG_LINES)
+  && salesTs.includes("const BROAD_STATS_STATUSES: ReadonlySet<string> = new Set(['completed', 'awaiting_payment'])")
+  && /function statsStatusIsBroad\(raw: string\): boolean \{\r?\n  const statuses = raw\.split\(','\)\.map\(\(v\) => v\.trim\(\)\)\.filter\(Boolean\)\r?\n  return statuses\.length > 0 && statuses\.every\(\(status\) => BROAD_STATS_STATUSES\.has\(status\)\)/.test(salesTs)
+  && /const scope = where\.length - 1 === windowClauseCount && !openEndedStart \? undefined : salesListFilterReportScope\(where,\s*params,\s*narrowScope\)/.test(statsBlock)
   && /const totals\s*=\s*await readSalesHeaderTotals\b/.test(statsBlock)
   && /revenue_count:\s*totals\.sale_count\b/.test(statsBlock)
   && /const totalCount\s*=\s*totals\.sale_count\s*\+\s*totals\.cancelled_count\b/.test(statsBlock)

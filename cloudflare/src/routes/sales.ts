@@ -28,7 +28,7 @@ function canReadSales(user: SessionUser): boolean {
   return getActionTier(user, 'sales', 'view') !== 'none'
 }
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
-import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionsWithFallback } from '../lib/cache'
 import { cacheIdentity } from '../lib/cache'
 import { cachedPhoneJson, phoneCacheVariant } from '../lib/phoneCache'
 import { phoneSearchAccessOf } from '../lib/phoneAccess'
@@ -233,8 +233,8 @@ const SALES_READ_CACHE_TTL_SECONDS = 20
  *
  * - It NEVER fails the caller. A sale that is already committed must not be
  *   reported as failed because a settings row would not write, so every error
- *   is swallowed and logged. Callers hand this to `waitUntil`, off the
- *   response path.
+ *   is swallowed and logged. Callers await it before responding, so the
+ *   version bump that follows a real addition lands before the response.
  * - It reads and re-writes the whole array rather than appending, because the
  *   setting IS a JSON array; `mergePaymentMethods` keeps the existing order
  *   and the operator's own capitalisation, so a concurrent Settings edit can
@@ -273,7 +273,8 @@ async function getSalesReadCacheVersion(env: Env): Promise<string> {
   // write to any dependency makes the old response unreachable immediately.
   // 'stock': the stats strip's removal loss and profit after losses read the stock movements a Set writes; a narrow Set (stock_bump_narrow) bumps 'stock', not 'products'.
   const namespaces = ['sales', 'returns', 'customers', 'products', 'stock'] as const
-  const versions = await Promise.all(namespaces.map((namespace) => getVersionWithFallback(env, namespace)))
+  // One KV read per namespace and, for the namespaces KV does not hold, ONE D1 statement for all of them (the same tokens as five single reads, which cost up to five calls).
+  const versions = await getVersionsWithFallback(env, namespaces)
   return versions.map((version, index) => `${namespaces[index]}:${version}`).join('|')
 }
 
@@ -2040,13 +2041,13 @@ app.post('/', async (c) => {
     return c.json({ id: saleId, receiptNumber: resolvedReceiptNumber, duplicate: true, offline_owner: offlineOwner, client_request_id: clientRequestId, sale: await authoritativeSaleSnapshot(db,saleId) })
   }
   // A method typed at the till joins the configured list (user, Sep 4 2026).
-  // Off the response path: the sale is already recorded and must not be held
-  // up, or failed, by a settings write. `settings` is bumped only when the
-  // merge actually added something, so a normal checkout costs no invalidation.
-  c.executionCtx.waitUntil(
-    registerUsedPaymentMethods(c.env, { payment_method: paymentMethod, payment_details: effectivePaymentDetails })
-      .then((added) => (added.length ? bumpVersion(c.env, 'settings') : undefined)),
-  )
+  // `settings` is bumped only when the merge actually added something, so a normal
+  // checkout costs no invalidation. The settings bump is awaited like the sale's own (lib/cache.ts: bump before responding): a peer that refetches Settings on the push must not re-cache the
+  // old payment-method list under the old version. Neither step can fail the sale: registerUsedPaymentMethods swallows its own errors and the bump is guarded here.
+  const addedPaymentMethods = await registerUsedPaymentMethods(c.env, { payment_method: paymentMethod, payment_details: effectivePaymentDetails })
+  if (addedPaymentMethods.length) {
+    try { await bumpVersion(c.env, 'settings') } catch (error) { console.error('[sales] settings cache version bump failed after a new payment method was registered', error) }
+  }
   c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
     type: 'sales',
     // Receipt-summary shape (lib/telegram.ts formatSaleTelegramLines): status,
@@ -5987,6 +5988,25 @@ function concatBalanced(parts: readonly string[]): string {
   return `(${concatBalanced(parts.slice(0, middle))} || ' ' || ${concatBalanced(parts.slice(middle))})`
 }
 
+/** `id=` of GET /api/sales and GET /api/sales/stats: comma-separated, each as a Number, a value that is not a finite number is skipped. */
+function parseSaleIdFilter(raw: unknown): number[] {
+  return String(raw ?? '').split(',').map((v) => v.trim()).filter(Boolean).map((v) => Number(v)).filter((v) => Number.isFinite(v))
+}
+/** The one id filter both endpoints apply (the list and its totals must describe the same sales). */
+function pushSaleIdFilter(where: string[], params: Record<string, unknown>, ids: number[]): void {
+  if (ids.length === 1) {
+    where.push('s.id = @saleId')
+    params.saleId = ids[0]
+  } else if (ids.length > 1) {
+    const keys = ids.map((id, index) => {
+      const key = `saleId${index}`
+      params[key] = id
+      return `@${key}`
+    })
+    where.push(`s.id IN (${keys.join(', ')})`)
+  }
+}
+
 function buildSalesSearchWhere(query: Record<string, string>, params: Record<string, unknown>, access: PhoneSearchAccess): string | undefined {
   const raw = query.search || query.q || ''
   const groups = tokenizeSearchTermGroups(raw)
@@ -6110,20 +6130,7 @@ app.get('/', async (c) => {
   // findable through the free-text `search` clause, which never matched
   // s.id at all. Comma-separated for parity with the other exact-match
   // filters below (userId, status).
-  if (query.id) {
-    const ids = String(query.id).split(',').map((v) => v.trim()).filter(Boolean).map((v) => Number(v)).filter((v) => Number.isFinite(v))
-    if (ids.length === 1) {
-      where.push('s.id = @saleId')
-      params.saleId = ids[0]
-    } else if (ids.length > 1) {
-      const keys = ids.map((id, index) => {
-        const key = `saleId${index}`
-        params[key] = id
-        return `@${key}`
-      })
-      where.push(`s.id IN (${keys.join(', ')})`)
-    }
-  }
+  if (query.id) pushSaleIdFilter(where, params, parseSaleIdFilter(query.id))
   if (query.userId) {
     // The shared administrator rule (lib/permissions.ts): admin role code or
     // an effective all grant. This used to be an inline copy keyed on the
@@ -6394,6 +6401,16 @@ export function projectOperationalSaleCosts(row:Record<string,unknown>,user:Sess
 // recognized-sale revenue definition (all statuses except cancelled) that
 // Sales.tsx already uses per-row, but as a single SQL
 // aggregate over every matching row, not just the page that was fetched.
+// Which status filters leave the report scope BROAD (plain cancelled predicate and +id paging, the saving) and which are NARROW (the old wrapped predicate: the cancelled group probes the scope).
+// The shop sells Completed and Not Paid (awaiting_payment); returns are tags and the other options are rare. The two sold statuses hold most of the sales, so they stay broad (all-time rows read on the
+// lab seed: completed 523,961 broad vs 577,827 narrow, awaiting_payment 15,348 vs 17,238; pre-lane 577,817 / 17,228). A rare status (returned, partial_return, awaiting_delivery, or a value
+// the filter does not know) holds a few sales: 135-183 rows read narrow, 1,989-2,099 broad, so it keeps the pre-lane wrapped predicate. cancelled is narrow too but holds many sales (about 16,600 rows read all-time).
+const BROAD_STATS_STATUSES: ReadonlySet<string> = new Set(['completed', 'awaiting_payment'])
+function statsStatusIsBroad(raw: string): boolean {
+  const statuses = raw.split(',').map((v) => v.trim()).filter(Boolean)
+  return statuses.length > 0 && statuses.every((status) => BROAD_STATS_STATUSES.has(status))
+}
+
 app.get('/stats', async (c) => {
   const query = c.req.query()
   const user = c.get('user')
@@ -6416,6 +6433,9 @@ app.get('/stats', async (c) => {
   // Measured exception: with a start date and no end date the unscoped kernel walk reads MORE rows (64,689 vs 37,463 on the lab seed: no upper
   // bound for the date index), so that one shape keeps the scope; everything else with only the window drops it.
   const openEndedStart = Boolean(query.startDate) && !query.endDate
+  // The exact-sale filter the list has: a link to one sale reads its totals by id, never as an all-time text search. The header reader resolves the list scope once.
+  const saleIds = parseSaleIdFilter(query.id)
+  pushSaleIdFilter(where, params, saleIds)
   // A cashier saved under a number shows masked, so an account without the grant filters on it as empty (restrictedColumnSql).
   if (query.cashier) { where.push(`${phoneSearchAccessOf(user).fullPhone ? 's.cashier_name' : restrictedColumnSql('s.cashier_name')} LIKE @cashier`); params.cashier = `%${query.cashier}%` }
   if (query.userId) {
@@ -6434,11 +6454,14 @@ app.get('/stats', async (c) => {
       where.push(`s.cashier_id IN (${keys.join(', ')})`)
     }
   }
+  let statusClausePushed = false
   if (query.status) {
     const clause = saleStatusFilterClause(String(query.status), params)
-    if (clause) where.push(clause)
+    if (clause) { where.push(clause); statusClausePushed = true }
   }
+  let branchClausePushed = false
   if (query.branchId) {
+    branchClausePushed = true
     where.push('(s.branch_id = @branchId OR EXISTS (SELECT 1 FROM sale_items sif WHERE sif.sale_id = s.id AND sif.branch_id = @branchId))')
     params.branchId = query.branchId
   }
@@ -6456,7 +6479,9 @@ app.get('/stats', async (c) => {
     // scope still carries every list predicate, so the cohort is unchanged. Branch, cashier, status and
     // search stay scope-only (the list's branch rule also matches item branches).
     const windowFilter={startDate:query.startDate||null,endDate:query.endDate||null,startTime:query.startTime||null,endTime:query.endTime||null}
-    const scope = where.length - 1 === windowClauseCount && !openEndedStart ? undefined : salesListFilterReportScope(where, params)
+    // narrow: a clause other than the window, a broad status test and the branch test (cashier, user, search, id, a rare status) holds the scope to a few sales (the cancelled group then probes it by rowid)
+    const narrowScope = where.length - 1 - windowClauseCount - (statusClausePushed && statsStatusIsBroad(String(query.status)) ? 1 : 0) - (branchClausePushed ? 1 : 0) > 0
+    const scope = where.length - 1 === windowClauseCount && !openEndedStart ? undefined : salesListFilterReportScope(where, params, narrowScope)
     // Header-only reader: every number below is sale header + returns (no sale lines are read, and no cost or profit exists on the type).
     const totals = await readSalesHeaderTotals(c.env, windowFilter, scope)
     const totalCount=totals.sale_count+totals.cancelled_count
@@ -6515,13 +6540,24 @@ export function gateSalesCourierMoney(row:Record<string,unknown>,canViewCourier:
   return publicRow
 }
 
-async function readStripMoneyRows(db:ReturnType<typeof getDb>,table:'sales'|'returns',where:string,params:Record<string,unknown>) {
+// A dated strip window longer than this walks the rowid like the pre-lane route. `+id` re-scans and sorts the WHOLE window on every 2,000-row page (about W^2/2000
+// rows for W in the window); the rowid walk is one pass over the table. On the lab seed the two cross at about 92 days (a 90-day window reads 0.97x the rowid walk, 100 days
+// 1.05x, 365 days 1.43x), and production holds fewer sales per day than the seed, so its crossover sits later: at or below 90 days `+id` wins, above it the rowid walk does.
+const STRIP_PLUS_ID_MAX_DAYS=90
+function stripWindowDays(startDate:string,endDate:string):number {
+  return (Date.parse(`${endDate}T00:00:00Z`)-Date.parse(`${startDate}T00:00:00Z`))/86400000+1
+}
+async function readStripMoneyRows(db:ReturnType<typeof getDb>,table:'sales'|'returns',where:string,params:Record<string,unknown>,continuous:boolean) {
   const version=await hasColumn(db,table,'money_precision_version')?'money_precision_version':'0 AS money_precision_version'
   const amount=table==='sales'?'total_usd,sale_status':'total_refund_usd'
   const rows:Record<string,unknown>[]=[]
   let after=0
+  const stripId=continuous?'id':'+id'
   for(;;){
-    const page=await db.prepare(`SELECT id,${amount},${version} FROM ${table} WHERE ${where} AND id>@stripAfter ORDER BY id LIMIT ${REPORT_MONEY_PAGE_SIZE}`)
+    // `+id` (a unary plus: the same value, no longer a rowid): `id>@stripAfter ORDER BY id` lets the planner walk the primary key of the whole table and test the window on every row
+    // (34,745 rows for one day on the lab seed); with the plus it seeks the window on its date index and sorts the few rows it finds. The pages and their order are unchanged.
+    // A continuous (hours) window tests `datetime(created_at)`, which no index serves (audit #21): there the plus makes EVERY page a full scan plus a sort, so it keeps the rowid walk (one pass over all the pages).
+    const page=await db.prepare(`SELECT id,${amount},${version} FROM ${table} WHERE ${where} AND ${stripId}>@stripAfter ORDER BY ${stripId} LIMIT ${REPORT_MONEY_PAGE_SIZE}`)
       .all<Record<string,unknown>>({...params,stripAfter:after})
     for(const row of page){
       const id=Number(row.id)
@@ -6593,9 +6629,11 @@ app.get('/stats-strip', async (c) => {
           AND COALESCE(return_scope, 'customer') = 'customer'
           AND COALESCE(status, 'completed') <> 'cancelled'
           ${query.branchId ? 'AND branch_id = @branchId' : ''}`
+    // a continuous (hours) window or a long dated one pages on the rowid; a short dated one seeks its date index (STRIP_PLUS_ID_MAX_DAYS)
+    const rowidWalk=Boolean(continuousWindow)||!(stripWindowDays(startDate,endDate)<=STRIP_PLUS_ID_MAX_DAYS)
     const readActivity=async()=>{
-      const status=await readStripMoneyRows(db,'sales',statusClauses.join(' AND '),rangeParams)
-      const returns=await readStripMoneyRows(db,'returns',returnWhere,rangeParams)
+      const status=await readStripMoneyRows(db,'sales',statusClauses.join(' AND '),rangeParams,rowidWalk)
+      const returns=await readStripMoneyRows(db,'returns',returnWhere,rangeParams,rowidWalk)
       if(status.length+returns.length>REPORT_MONEY_MAX_ROWS)throw new ReportMoneyPrecisionError('too_many_rows')
       return {status,returns}
     }

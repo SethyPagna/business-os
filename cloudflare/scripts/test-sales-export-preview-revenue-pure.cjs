@@ -32,7 +32,7 @@ const overrides = {
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': {
     bumpVersion: async () => {},
-    getVersionWithFallback: async () => 0,
+    getVersionWithFallback: async () => 0, getVersionsWithFallback: async (_e, names) => names.map(() => 0),
     cachedJsonResponse: async (_request, _context, _key, _ttl, loader) => loader(),
     cacheIdentity: () => undefined,
     isUnsafeVersion: () => false,

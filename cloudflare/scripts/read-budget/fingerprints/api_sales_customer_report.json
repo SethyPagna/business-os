@@ -21,20 +21,20 @@
    "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
   ],
   [
-   "4a21e8983963",
-   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+   "37d37cebd5d6",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name,s.cashier_id,s.cashier"
   ],
   [
-   "ba42fdddec69",
-   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+   "cf1e47c51392",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name,s.cashier_id,s.cashier_name,s.customer_id,s.c"
   ],
   [
    "1abaf455da13",
    "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
   ],
   [
-   "ccf82c475a4a",
-   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+   "bf0f60824f37",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity,si.total_usd,si.cost_price_usd,si.product_di"
   ],
   [
    "f2326a0d77d3",
@@ -49,20 +49,20 @@
    "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
   ],
   [
-   "4a21e8983963",
-   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+   "37d37cebd5d6",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name,s.cashier_id,s.cashier"
   ],
   [
-   "ba42fdddec69",
-   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+   "cf1e47c51392",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name,s.cashier_id,s.cashier_name,s.customer_id,s.c"
   ],
   [
    "1abaf455da13",
    "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
   ],
   [
-   "ccf82c475a4a",
-   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+   "bf0f60824f37",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity,si.total_usd,si.cost_price_usd,si.product_di"
   ],
   [
    "f2326a0d77d3",

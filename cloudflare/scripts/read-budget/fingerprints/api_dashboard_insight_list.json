@@ -5,8 +5,8 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "5f13c00d023d",
-   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+   "9e860b96b0ef",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?,?)"
   ],
   [
    "51360b2bda23",
@@ -17,7 +17,7 @@
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
@@ -49,7 +49,7 @@
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
@@ -83,8 +83,8 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "5f13c00d023d",
-   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+   "9e860b96b0ef",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?,?)"
   ],
   [
    "51360b2bda23",
@@ -95,7 +95,7 @@
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [
@@ -127,7 +127,7 @@
    "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
   ],
   [
-   "bb23890c6e57",
+   "b662135e09c4",
    "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
   ],
   [

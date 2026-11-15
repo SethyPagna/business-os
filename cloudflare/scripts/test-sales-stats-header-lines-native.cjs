@@ -15,7 +15,7 @@ const { lots } = require('./read-budget/writes.cjs')
 
 const SALES = 'src/routes/sales.ts'
 const oldRoute = [
-  { name: 'old-scope', file: SALES, from: 'const scope = where.length - 1 === windowClauseCount && !openEndedStart ? undefined : salesListFilterReportScope(where, params)', to: 'const scope = salesListFilterReportScope(where, params)' },
+  { name: 'old-scope', file: SALES, from: 'const scope = where.length - 1 === windowClauseCount && !openEndedStart ? undefined : salesListFilterReportScope(where, params, narrowScope)', to: 'const scope = salesListFilterReportScope(where, params, narrowScope)' },
   { name: 'old-header', file: SALES, from: 'const totals = await readSalesHeaderTotals(c.env, windowFilter, scope)', to: 'const totals = await (async () => { const r = await readSalesReportTotals(c.env, windowFilter, false, scope); return { revenue_usd: r.totals.revenue_usd, pending_revenue_usd: r.totals.pending_revenue_usd, revenue_without_not_paid_usd: r.totals.revenue_without_not_paid_usd, not_paid_owed_usd: r.totals.not_paid_owed_usd, sale_count: r.sale_count, cancelled_count: r.cancelled_count } })()' },
   { name: 'old-import', file: SALES, from: 'readSalesReportSnapshot, readSalesHeaderTotals,', to: 'readSalesReportSnapshot, readSalesReportTotals,' },
 ]

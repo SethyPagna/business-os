@@ -14,6 +14,7 @@
 // Run: node scripts/test-sales-stats-unfiltered-scope-native.cjs
 
 const assert = require('node:assert/strict')
+const STATS_FLAG_LINES = ['let statusClausePushed = false', '  if (query.status) {', '    const clause = saleStatusFilterClause(String(query.status), params)', '    if (clause) { where.push(clause); statusClausePushed = true }', '  }', '  let branchClausePushed = false', '  if (query.branchId) {', '    branchClausePushed = true'].join('\n')
 const fs = require('node:fs')
 const path = require('node:path')
 const { transformSync } = require('esbuild')
@@ -104,7 +105,12 @@ async function check(name, fn) {
     const src = fs.readFileSync(path.join(root, 'src/routes/sales.ts'), 'utf8')
     const block = src.match(/app\.get\('\/stats'[\s\S]*?\n\}\)/)?.[0] || ''
     assert.match(block, /readSalesHeaderTotals\(c\.env,\s*windowFilter,\s*scope\)/)
-    assert.match(block, /salesListFilterReportScope\(where,\s*params\)/)
+    assert.match(block, /salesListFilterReportScope\(where,\s*params,\s*narrowScope\)/)
+    assert.match(block, /const narrowScope = where\.length - 1 - windowClauseCount - \(statusClausePushed && statsStatusIsBroad\(String\(query\.status\)\) \? 1 : 0\) - \(branchClausePushed \? 1 : 0\) > 0\r?\n/, 'narrowScope counts the clauses beyond the window and the status test')
+    assert.ok(block.split('\r').join('').includes(STATS_FLAG_LINES), 'both clause flags start false and are set where their clause is pushed')
+    assert.ok(src.includes("const BROAD_STATS_STATUSES: ReadonlySet<string> = new Set(['completed', 'awaiting_payment'])"), 'only completed and awaiting_payment are broad statuses')
+    assert.match(src, /function statsStatusIsBroad\(raw: string\): boolean \{\r?\n  const statuses = raw\.split\(','\)\.map\(\(v\) => v\.trim\(\)\)\.filter\(Boolean\)\r?\n  return statuses\.length > 0 && statuses\.every\(\(status\) => BROAD_STATS_STATUSES\.has\(status\)\)/, 'the status rule: every listed status must be broad')
+    assert.match(block, /const scope = where\.length - 1 === windowClauseCount && !openEndedStart \? undefined : salesListFilterReportScope\(where,\s*params,\s*narrowScope\)/, 'only the window drops the scope')
     assert.ok(!/matched_sale/.test(block), 'the route must not build its own copy of the scope')
   })
 
