@@ -401,7 +401,7 @@ export default function PaginationControls({
     }
     const compactDraft = boundedDraft(pageDraft)
     const compactDigits = Math.max(1, compactDraft.length)
-    // One row at any count. A seven-digit total ("2,469,101-2,469,120 of 2,469,120" beside
+    // One row at any count. A seven-digit total ("2,469,101-2,469,120 / 2,469,120" beside
     // "123456 / 123456") cannot fit 272px at 11px, and the range must never shrink or clip, so
     // long strings step down to 9px with tight padding; everyday counts keep the 11px look.
     const dense = rangeText.length + `${safePage} / ${totalPages}`.length > 40

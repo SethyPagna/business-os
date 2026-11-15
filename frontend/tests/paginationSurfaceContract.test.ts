@@ -93,9 +93,17 @@ const topPagerPending: Record<string, string> = {
   'src/components/inventory/InventoryCheckHistoryFloat.tsx': 'owned by the Inventory Check lane',
   'src/components/inventory/InventoryChecksPage.tsx': 'owned by the Inventory Check lane',
   'src/components/sales/reports/ShiftReport.tsx': 'a shift picker, not a list of rows: one pager row under the search box is already at the top',
-  'src/components/shared/NotificationCenter.tsx': 'per-section pagers inside a compact popover, whose sections hold a handful of rows',
+  'src/components/shared/NotificationCenter.tsx': 'stacked sections in a compact popover; owner to confirm (it has a Per-page selector of 10/20/50/100, so a section can hold many rows)',
   'src/components/catalog/catalogPagination.tsx': 'the storefront wrapper; CatalogProductsSection mounts it above and below',
 }
+// An exclusion reason is a claim; a false one hides a gap. NotificationCenter was excused as holding "a handful of rows" while its
+// popover has a Per-page selector of 10/20/50/100, so the reason must not make that claim while the selector exists.
+check('the NotificationCenter exclusion reason is true to its Per-page selector', () => {
+  const popover = read('frontend/src/components/shared/NotificationCenter.tsx')
+  assert.match(popover, /10, 20, 50, 100|[10, ?20, ?50, ?100]/, 'the popover still has a 10/20/50/100 selector (if this fails, revisit the reason)')
+  assert.ok(!/handful/i.test(topPagerPending['src/components/shared/NotificationCenter.tsx']), 'the reason must not say the sections hold a handful of rows')
+  assert.match(topPagerPending['src/components/shared/NotificationCenter.tsx'], /owner to confirm/)
+})
 check('every pager consumer mounts the same pager element above and below its list (or is listed as pending)', () => {
   for (const file of pagerConsumers) {
     if (topPagerPending[file]) continue
