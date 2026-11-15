@@ -30,7 +30,21 @@ const transpiled = new Map()
 // 15 Nov 2026: cost entry is admin only and every import type here is a cost format, so the cost gate now sits in front of the
 // inventory:adjust gate and a non-admin never reaches it. This matrix is about inventory:adjust, so its world holds the cost rule
 // open (a source-patched copy); the cost gate itself is pinned by the cost-gate-in-front case, which runs on the real rule.
-const holdCostRuleOpen = text => text.split('return isAdminControlUser(user)').join('return true')
+// The rule is held open the way the module itself keeps it (holdsCostViewGrant / holdsCostEditGrant, the stored per-grant switch-back),
+// not for everyone: a non-admin still passes only with the grant stored on the role, so a fixture without it is refused here too.
+// The patch asserts it made exactly the two replacements it means to, so a rename of either function cannot turn it into a no-op.
+function holdCostRuleOpen(text) {
+  text = text.split('\r\n').join('\n')
+  let replaced = 0
+  for (const [name, grant] of [['canViewAcquisitionCosts', 'holdsCostViewGrant'], ['canEditAcquisitionCosts', 'holdsCostEditGrant']]) {
+    const from = 'export function ' + name + '(user: PermissionUser): boolean {\n  return isAdminControlUser(user)\n}'
+    if (!text.includes(from)) continue
+    text = text.replace(from, 'export function ' + name + '(user: PermissionUser): boolean {\n  return ' + grant + '(user)\n}')
+    replaced += 1
+  }
+  assert.equal(replaced, 2, 'the cost-rule patch must make exactly 2 replacements (canViewAcquisitionCosts, canEditAcquisitionCosts)')
+  return text
+}
 function makeWorld({ realCostRule = false } = {}) {
   const cache = new Map()
   const rel = file => path.relative(SRC, file).replaceAll('\\', '/')

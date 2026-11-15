@@ -44,7 +44,22 @@ const transpiled = new Map()
 // assertCurrentImportApplyAuthority) now sits in front of the destructive grants: a non-admin never reaches them. This matrix is
 // about the destructive boundary, so its world holds the cost rule open (a source-patched copy); the cost gate itself is pinned
 // by the "cost-gate-in-front" case, which runs on the real rule.
-const COST_RULE_OPEN = { name: 'cost rule held open', file: 'lib/acquisitionCostAccess.ts', apply: text => text.split('return isAdminControlUser(user)').join('return true') }
+// The rule is held open the way the module itself keeps it (holdsCostViewGrant / holdsCostEditGrant, the stored per-grant switch-back),
+// not for everyone: a non-admin still passes only with the grant stored on the role, so a fixture without it is refused here too.
+// The patch asserts it made exactly the two replacements it means to, so a rename of either function cannot turn it into a no-op.
+function holdCostRuleOpenByGrant(text) {
+  text = text.split('\r\n').join('\n')
+  let replaced = 0
+  for (const [name, grant] of [['canViewAcquisitionCosts', 'holdsCostViewGrant'], ['canEditAcquisitionCosts', 'holdsCostEditGrant']]) {
+    const from = 'export function ' + name + '(user: PermissionUser): boolean {\n  return isAdminControlUser(user)\n}'
+    if (!text.includes(from)) continue
+    text = text.replace(from, 'export function ' + name + '(user: PermissionUser): boolean {\n  return ' + grant + '(user)\n}')
+    replaced += 1
+  }
+  assert.equal(replaced, 2, 'the cost-rule patch must make exactly 2 replacements (canViewAcquisitionCosts, canEditAcquisitionCosts)')
+  return text
+}
+const COST_RULE_OPEN = { name: 'cost rule held open', file: 'lib/acquisitionCostAccess.ts', apply: holdCostRuleOpenByGrant }
 function makeWorld(patches = [], { realCostRule = false } = {}) {
   if (!realCostRule) patches = [COST_RULE_OPEN, ...patches]
   const cache = new Map()
