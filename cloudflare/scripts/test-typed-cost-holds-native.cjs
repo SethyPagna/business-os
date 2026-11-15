@@ -96,6 +96,18 @@ const services = {
   importImageMatch: { MAX_IMAGES_PER_PRODUCT: 3 },
   productImagePermission: { ProductImageAssetError, productImageFieldsChanged: () => false, productImageFieldsChangedResolved: async () => false, resolveProductImageFields: async () => {}, omitUnchangedProductImageFields: () => {} },
 }
+// Owner rule, 15 Nov 2026: cost entry is administrator only, and an administrator is never queued for review. The Review-tier
+// case below (a requester queues a cost edit, an approver applies it) replays what a role holding the retired cost grants queued
+// before the ruling, so until a case sets globalThis.__costRuleAdmin the fixture reads the retained switch-back
+// (holdsCostViewGrant / holdsCostEditGrant, lib/acquisitionCostAccess.ts). The 'owner rule' case turns the real rule on.
+function legacyCostGrantShim(text) {
+  const swap = (name, grant) => (source) => source.replace(
+    new RegExp(`export function ${name}\\(user: PermissionUser\\): boolean \\{\\s*return isAdminControlUser\\(user\\)`),
+    `export function ${name}(user: PermissionUser): boolean {\n  return (globalThis as any).__costRuleAdmin ? isAdminControlUser(user) : ${grant}(user)`)
+  const patched = swap('canEditAcquisitionCosts', 'holdsCostEditGrant')(swap('canViewAcquisitionCosts', 'holdsCostViewGrant')(text))
+  if (patched.split('__costRuleAdmin').length !== 3) throw new Error('acquisitionCostAccess.ts changed shape: the typed-cost fixture shim no longer applies')
+  return patched
+}
 const cache = new Map()
 const transpile = (source, fileName) => ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }, fileName }).outputText
 function localRequireFor(relative) {
@@ -113,7 +125,8 @@ function load(relative) {
   if (cache.has(relative)) return cache.get(relative)
   const mod = { exports: {} }; cache.set(relative, mod.exports)
   const filename = path.join(src, relative)
-  new Function('require', 'module', 'exports', transpile(fs.readFileSync(filename, 'utf8'), filename))(localRequireFor(relative), mod, mod.exports)
+  const text = fs.readFileSync(filename, 'utf8')
+  new Function('require', 'module', 'exports', transpile(relative === 'lib/acquisitionCostAccess.ts' ? legacyCostGrantShim(text) : text, filename))(localRequireFor(relative), mod, mod.exports)
   cache.set(relative, mod.exports); return mod.exports
 }
 function loadFrontend(relative) {
@@ -130,7 +143,7 @@ const products = load('routes/products.ts').default
 const reviews = load('routes/reviewQueue.ts').default
 const context = { waitUntil: () => {}, passThroughOnException: () => {} }
 const costPermissions = JSON.stringify({ product_cost_edit: true, product_cost_view: true })
-const admin = { id: 1, username: 'admin', name: 'Admin', tier: 'full', permissions: JSON.stringify({ products: true, ...JSON.parse(costPermissions) }) }
+const admin = { id: 1, username: 'admin', name: 'Admin', role_code: 'admin', tier: 'full', permissions: JSON.stringify({ products: true, ...JSON.parse(costPermissions) }) } // cost entry is administrator only (owner, 15 Nov 2026)
 const requester = { id: 2, username: 'requester', name: 'Requester', tier: 'review', permissions: costPermissions }
 async function request(app, method, url, body, user = admin) {
   const response = await app.request(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, { ...env, TEST_USER: user }, context)
@@ -325,6 +338,17 @@ async function main() {
     assert.equal(saved.status, 200, JSON.stringify(saved))
     sell(p)
     assert.equal(cost(p.id), 9)
+  })
+
+  await check('owner rule: a Review-tier requester holding the retired cost-entry grant is refused a cost edit (403, nothing queued)', async () => {
+    globalThis.__costRuleAdmin = true
+    try {
+      const p = seed()
+      const refused = await request(products, 'PUT', `/${p.id}`, { cost_price_usd: 9 }, requester)
+      assert.equal(refused.status, 403, JSON.stringify(refused))
+      assert.equal(refused.body.code, 'product_cost_edit_required')
+      assert.equal(cost(p.id), 4, 'the cost did not move')
+    } finally { delete globalThis.__costRuleAdmin }
   })
 
   await check('review queue: an approved cost edit records the entry (requester as actor); the cost holds past a sale', async () => {
