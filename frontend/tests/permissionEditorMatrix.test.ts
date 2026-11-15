@@ -189,8 +189,8 @@ await test('A2: tapping the level that is already selected does nothing, and Non
 
 await test('A3: the Employee preset reads Full where it is Full, None where it is None, and nothing says Custom', async () => {
   const { surface } = await mountEditor(employee)
-  for (const id of ['pos', 'products', 'sales', 'returns', 'contacts']) assert.equal(cell(surface, id, 'full').getAttribute('aria-pressed'), 'true', `${id} is Full`)
-  for (const id of ['inventory', 'settings', 'dashboard', 'library']) assert.equal(cell(surface, id, 'none').getAttribute('aria-pressed'), 'true', `${id} is None`)
+  for (const id of ['pos', 'products', 'sales', 'returns', 'contacts', 'dashboard']) assert.equal(cell(surface, id, 'full').getAttribute('aria-pressed'), 'true', `${id} is Full`)
+  for (const id of ['inventory', 'settings', 'library']) assert.equal(cell(surface, id, 'none').getAttribute('aria-pressed'), 'true', `${id} is None`)
   assert.equal(cell(surface, 'products', 'review').getAttribute('aria-pressed'), 'false')
   assert.ok(!/\bCustom\b/i.test(surface.text()), 'no Custom anywhere')
   assert.ok(!surface.findAll((node) => /\bcustom\b/i.test(node.getAttribute('aria-label') ?? '') || /\bcustom\b/i.test(node.getAttribute('title') ?? '')).length)

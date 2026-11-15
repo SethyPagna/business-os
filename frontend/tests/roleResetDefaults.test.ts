@@ -29,7 +29,7 @@ async function runTest(name: string, fn: () => Promise<void> | void): Promise<vo
 }
 
 // The live Employee role as an owner may have left it: Dashboard on, cost view on, no supplier switch at all.
-const STORED_EMPLOYEE = { pos: true, dashboard: true, product_cost_view: true, products: true, 'products:price': false, 'legacy_unknown_key': true }
+const STORED_EMPLOYEE = { pos: true, backup: true, product_cost_view: true, products: true, 'products:price': false, 'legacy_unknown_key': true }
 const ROLES = [
   { id: 1, name: 'Admin', code: 'admin', permissions: '{"all":true}', is_system: 1 },
   { id: 2, name: 'Employee', code: 'employee', permissions: JSON.stringify(STORED_EMPLOYEE), is_system: 0, updated_at: '2026-10-19 10:00:00' },
@@ -92,7 +92,7 @@ const resetButton = (page: MountedSurface): MemoryNode[] => page.findAll((node) 
 await runTest('roleDiff: lists every changed key, absent is Not set (not Off), unknown keys are kept raw', () => {
   const changes = diffRolePermissions(STORED_EMPLOYEE, DEFAULT_ROLE_PERMISSIONS.employee, tr)
   const byKey = new Map(changes.map((change) => [change.key, change]))
-  assert.deepEqual([byKey.get('dashboard')?.before, byKey.get('dashboard')?.after], ['on', 'unset'], 'a key the defaults do not carry is Not set, not Off')
+  assert.deepEqual([byKey.get('backup')?.before, byKey.get('backup')?.after], ['on', 'unset'], 'a key the defaults do not carry is Not set, not Off')
   assert.deepEqual([byKey.get('products:supplier')?.before, byKey.get('products:supplier')?.after], ['unset', 'off'])
   assert.deepEqual([byKey.get('product_cost_view')?.before, byKey.get('product_cost_view')?.after], ['on', 'off'])
   assert.equal(byKey.get('product_cost_view')?.sensitivity, 'high', 'a cost switch carries the shield')
@@ -155,8 +155,8 @@ await runTest('Save lists one row per changed module in the shared review; confi
     assert.equal(review.querySelectorAll('dt').length, expected.length, 'one row per changed module, no more, no fewer')
     const text = review.textContent
     assert.ok(!text.includes(en.perm_value_not_set), 'the review speaks the editor\'s words, not "Not set"')
-    assert.ok(text.includes(`${en.label_full_access} → ${en.none}`), 'dashboard: Full -> None')
-    assert.ok(rows.includes(en.perm_section_dashboard) && rows.includes(en.perm_section_sales), 'a module row carries the module name')
+    assert.ok(text.includes(`${en.label_full_access} → ${en.none}`), 'backup: Full -> None')
+    assert.ok(rows.includes(en.perm_section_backup) && rows.includes(en.perm_section_sales), 'a module row carries the module name')
     assert.ok(text.includes(`− ${en.perm_short_cost_view}`), 'cost view: its own line, switched off')
     assert.match(text, new RegExp(`✕[^✓−+]*${en.supplier}`), 'the supplier switch is named on its module row')
     assert.ok(review.querySelectorAll('[role=img]').some((mark) => mark.getAttribute('aria-label') === en.permission_sensitive_high), 'the sensitivity shield marks the cost switch')

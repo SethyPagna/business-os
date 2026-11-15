@@ -33,8 +33,8 @@ async function runTest(name: string, fn: () => Promise<void> | void): Promise<vo
   try { await fn(); console.log(`PASS ${name}`) } catch (error) { failed += 1; console.error(`FAIL ${name}`); console.error(error) }
 }
 
-// The live Employee as an owner may have left it: Dashboard on, cost view on, one switched-off action, an unknown key.
-const STORED_EMPLOYEE = { pos: true, dashboard: true, product_cost_view: true, products: true, 'products:price': false, legacy_unknown_key: true }
+// The live Employee as an owner may have left it: Backup on, cost view on, one switched-off action, an unknown key.
+const STORED_EMPLOYEE = { pos: true, backup: true, product_cost_view: true, products: true, 'products:price': false, legacy_unknown_key: true }
 const ROLES = [
   { id: 1, name: 'Admin', code: 'admin', permissions: '{"all":true}', is_system: 1 },
   { id: 2, name: 'Employee', code: 'employee', permissions: JSON.stringify(STORED_EMPLOYEE), is_system: 0, updated_at: '2026-10-19 10:00:00' },
