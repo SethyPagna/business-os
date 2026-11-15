@@ -320,7 +320,7 @@ async function main() {
 
   // ---------------------------------------------------------------- stock-in session: create_receive (create and create-fold)
   const stockUser = {
-    id: 7, username: 'stock-user', name: 'Stock User', organization_id: null, role_id: null, is_active: 1,
+    id: 7, username: 'stock-user', role_code: 'admin', name: 'Stock User', organization_id: null, role_id: null, is_active: 1,
     permissions: JSON.stringify({ inventory: true, products: true, product_cost_edit: true, product_cost_view: true }),
   }
   let sessionSeq = 0

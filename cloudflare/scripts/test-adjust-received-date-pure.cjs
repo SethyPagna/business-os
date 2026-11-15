@@ -150,7 +150,7 @@ const conflictControl = loadReal('lib/conflictControl.ts')
 const movementCostSnapshot = loadReal('lib/movementCostSnapshot.ts', { './moneyPrecision': moneyPrecision })
 let capturedRevertMovement = null
 
-const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true, products: true, product_cost_edit: true, product_cost_view: true }) }
+const FAKE_USER = { id: 1, username: 'tester', role_code: 'admin', name: 'Test User', permissions: JSON.stringify({ inventory: true, products: true, product_cost_edit: true, product_cost_view: true }) }
 // products: true -- an unlocked-pricing block that changes a price needs Edit product and the price action (coordinator, 6 Oct 2026);
 // these cases test the receipt arithmetic, not that gate (see test-stock-session-selling-price-pure.cjs).
 
@@ -1056,9 +1056,11 @@ async function main() {
       { unit_cost_usd: 3.5, unit_cost_khr: 14000, total_cost_usd: 7, total_cost_khr: 28000 },
     )
     capturedRevertMovement = null
+    FAKE_USER.role_code = 'manager' // admins bypass the Review tier, so the tier refusal needs a non-admin
     FAKE_USER.permissions = JSON.stringify({ inventory: 'review', product_cost_edit: true, product_cost_view: true })
     const denied = await req('POST', `/movements/${id}/revert`, {})
     FAKE_USER.permissions = JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true })
+    FAKE_USER.role_code = 'admin'
     assert.strictEqual(denied.status, 403)
     assert.strictEqual(capturedRevertMovement, null, 'permission refusal happens before the revert kernel')
   })
