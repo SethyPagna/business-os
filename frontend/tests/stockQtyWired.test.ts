@@ -8,8 +8,7 @@
 //   - the projected before -> after in the stock-session review (StockSessionReviewStep.tsx): a projection, not on-hand.
 //   - select-option labels (Inventory.tsx, FastStockInModal.tsx): plain text, nothing to tint.
 //   - the per-branch breakdown lines in the list: a branch slice against all-branch thresholds would read "out" almost everywhere.
-// Pending, named so adopting them is a deliberate edit of this list:
-//   InventoryChecksPage.tsx / InventoryCheck*.tsx -- another lane owns them and adopts <StockQty> once both land.
+// Inventory Check (list rows and the session sheet) renders the "Now" figure through <StockQty> as well.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
@@ -19,6 +18,8 @@ const wired: Array<{ file: string; uses: RegExp }> = [
   { file: 'components/inventory/InventoryProductsSurface.tsx', uses: /<StockQty[\s\S]*?qty=\{quantity\(product\)\}/ },
   { file: 'components/inventory/ProductDetailModal.tsx', uses: /<StockQty qty=\{stockQuantity\} product=\{p\}/ },
   { file: 'components/stock-session/StockSessionLineEntry.tsx', uses: /<StockQty qty=\{pickedStock\} product=\{picked\}/ },
+  { file: 'components/inventory/InventoryCheckListRows.tsx', uses: /<StockQty qty={product.quantity} product={product}/ },
+  { file: 'components/inventory/InventoryCheckRows.tsx', uses: /<StockQty qty={product.quantity} product={product}/ },
   { file: 'components/inventory/InventoryStockModals.tsx', uses: /<StockQty qty=\{getStockQty\(transferModal\)\} product=\{transferModal\} \/>/ },
 ]
 for (const { file, uses } of wired) {
@@ -38,14 +39,12 @@ const detail = read('components/inventory/ProductDetailModal.tsx')
 assert.ok(!/stockQuantity <= 0/.test(detail.replace(/stockValueUsd[^\n]*/, '')), 'the detail pane no longer colours by qty <= 0')
 assert.ok(/stockLevelState\(stockQuantity, p, lowStockConfig\)/.test(detail), 'the bar takes the shared state')
 
-// Not touched by this lane.
-for (const file of ['components/inventory/InventoryChecksPage.tsx', 'components/inventory/InventoryCheckRows.tsx', 'components/inventory/InventoryCheckListRows.tsx']) {
-  assert.ok(!read(file).includes('StockQty'), `${file} belongs to the inventory-check lane and is pending adoption`)
-}
+// The page itself never prints the on-hand figure; only its rows do.
+assert.ok(!read('components/inventory/InventoryChecksPage.tsx').includes('StockQty'), 'InventoryChecksPage hands rows to the row components and draws no stock figure')
 
 // Deltas, past balances, lots and the projected review figure stay plain (reasons in the header).
 for (const file of ['components/inventory/InventoryMovementsSurface.tsx', 'components/inventory/MovementDetailFloat.tsx', 'components/inventory/ProductHistoryPreviewModal.tsx', 'components/inventory/ManageBatchesModal.tsx', 'components/stock-session/StockSessionReviewStep.tsx']) {
   assert.ok(!read(file).includes('StockQty'), `${file} shows deltas / past balances / lot figures / a projection, not current on-hand`)
 }
 
-console.log('PASS StockQty is wired into the list, the detail pane and the stock-in picker, the transfer subtitle; no private rule remains')
+console.log('PASS StockQty is wired into the list, the detail pane, the stock-in picker, the transfer subtitle and the Inventory Check rows; no private rule remains')

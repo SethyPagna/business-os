@@ -39,7 +39,8 @@ const row = (surface: MountedSurface, id: number) => surface.find(node => node.g
 const inRow = (surface: MountedSurface, id: number, attribute: string) => surface.find(node => node.getAttribute(attribute) !== null && row(surface, id).contains(node), `${attribute} of ${id}`)
 const allInRow = (surface: MountedSurface, id: number, attribute: string) => surface.findAll(node => node.getAttribute(attribute) !== null && row(surface, id).contains(node))
 const cell = (surface: MountedSurface, id: number, name: string) => surface.findAll(node => node.getAttribute('data-cell') === name && row(surface, id).contains(node))[0]
-const flat = (node: MemoryNode | undefined) => (node?.textContent ?? '').replace(/\s+/g, ' ').replace(/ ?· ?/g, ' · ').trim()
+const STATE_WORD = / (?:Out of Stock|Low Stock|Healthy)(?= |$)/g // StockQty prints the state word once, screen-reader only, right after the figure
+const flat = (node: MemoryNode | undefined) => (node?.textContent ?? '').replace(STATE_WORD, '').replace(/\s+/g, ' ').replace(/ ?· ?/g, ' · ').trim()
 const titlesOf = (surface: MountedSurface) => surface.find(node => node.getAttribute('data-inventory-check-sheet-header') !== null, 'list header').children.map(child => child.textContent).filter(Boolean)
 const key = (surface: MountedSurface, node: MemoryNode, name: string) => surface.call(node, 'onKeyDown', [{ key: name, preventDefault() {}, nativeEvent: {}, currentTarget: node, target: node }])
 const active = (surface: MountedSurface) => surface.body.ownerDocument.activeElement

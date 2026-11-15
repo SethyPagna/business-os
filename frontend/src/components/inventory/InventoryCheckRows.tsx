@@ -12,6 +12,7 @@ import { todayStr } from '../../utils/dateHelpers.ts'
 import { fmtDateOnly } from '../../utils/formatters.ts'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import type { InventoryCheckId, InventoryCheckObservation, InventoryCheckPatch, InventoryCheckProduct, InventoryCheckTranslator } from '../../types/inventoryChecks.ts'
+import StockQty from './StockQty.tsx'
 import InventoryCheckCountEditor, { countMatchesStock, finiteQuantity, parseCount, signedDelta, stepCount } from './InventoryCheckCountEditor.tsx'
 
 type FrozenAttempt = { patch: InventoryCheckPatch; revision: number }
@@ -301,7 +302,7 @@ function CheckRow({ product, observation, pending, error, header, adornment, fro
   const wants = (field: SheetField) => columns.fields.includes(field)
   if (wants('now')) {
     const unit = finiteQuantity(product.quantity) ? String(product.unit ?? '').trim() : ''
-    facts.push(['now', <span>{named('now')} {figure(product.quantity) ?? unknownStock}{unit ? <>{' '}<span className="text-gray-500 dark:text-gray-400">{unit}</span></> : null}{finiteQuantity(product.damaged_quantity) && product.damaged_quantity > 0 ? <>{' '}<span data-damaged className="inline-flex items-center rounded-full bg-amber-50 px-1.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-950/40 dark:text-amber-200" title={`${tr('inventory_check_damaged', 'Damaged')}: ${product.damaged_quantity}`}>{tr('inventory_check_damaged', 'Damaged')} {product.damaged_quantity}</span></> : null}</span>])
+    facts.push(['now', <span>{named('now')} {finiteQuantity(product.quantity) ? <StockQty qty={product.quantity} product={product} className="font-semibold tabular-nums" /> : unknownStock}{unit ? <>{' '}<span className="text-gray-500 dark:text-gray-400">{unit}</span></> : null}{finiteQuantity(product.damaged_quantity) && product.damaged_quantity > 0 ? <>{' '}<span data-damaged className="inline-flex items-center rounded-full bg-amber-50 px-1.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-950/40 dark:text-amber-200" title={`${tr('inventory_check_damaged', 'Damaged')}: ${product.damaged_quantity}`}>{tr('inventory_check_damaged', 'Damaged')} {product.damaged_quantity}</span></> : null}</span>])
   }
   if (wants('start')) {
     if (observation && Object.hasOwn(observation, 'baseline_quantity')) {

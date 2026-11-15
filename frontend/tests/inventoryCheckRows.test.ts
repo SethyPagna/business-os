@@ -13,6 +13,7 @@ const products: InventoryCheckProduct[] = [
 ]
 const originalProducts = JSON.stringify(products)
 const calls: Array<{ productId: number | string; patch: InventoryCheckPatch; revision: number }> = []
+const STATE_WORD = / (?:Out of Stock|Low Stock|Healthy)(?= |$)/g // StockQty prints the state word once, screen-reader only, right after the figure
 const harness = await createHarness({ observe: ['utils/dirtyWork.ts'] })
 let rejectSave = false
 const base = {
@@ -40,7 +41,7 @@ try {
   const submitOf = (surface: MountedSurface) => surface.find(node => node.getAttribute('data-check-submit') !== null, 'editor primary button')
   const headerOf = (surface: MountedSurface) => surface.find(node => node.getAttribute('data-inventory-check-sheet-header') !== null, 'sheet header')
   const titlesOf = (surface: MountedSurface) => headerOf(surface).children.map(child => child.textContent)
-  const metaOf = (surface: MountedSurface, id: number) => surface.find(node => node.getAttribute('data-inventory-check-meta') !== null && row(surface, id).contains(node), `facts of ${id}`).textContent.replace(/\s+/g, ' ').replace(/ ?· ?/g, ' · ').trim()
+  const metaOf = (surface: MountedSurface, id: number) => surface.find(node => node.getAttribute('data-inventory-check-meta') !== null && row(surface, id).contains(node), `facts of ${id}`).textContent.replace(STATE_WORD, '').replace(/\s+/g, ' ').replace(/ ?· ?/g, ' · ').trim()
   const differences = (surface: MountedSurface) => surface.findAll(node => node.getAttribute('role') === 'img' && (node.getAttribute('aria-label') || '').startsWith('Difference')).map(node => node.getAttribute('aria-label'))
   const sheetProducts: InventoryCheckProduct[] = [
     { id: 301, name: 'Count one', quantity: 10, unit: 'pcs', damaged_quantity: 1 },
@@ -502,7 +503,7 @@ try {
   const full = await mount({ products: [{ id: 301, name: 'Full line product', barcode: '885000111', brand: 'Brand B', category: 'Cat C', quantity: 10, damaged_quantity: 1 }],
     observations: { 301: { product_id: 301, state: 'done', counted_quantity: 9, reason: null, revision: 2, baseline_quantity: 12, stock_changed: true } } })
   const meta = full.find(node => node.getAttribute('data-inventory-check-meta') !== null, 'metric line').textContent
-  assert.equal(meta.replace(/\s+/g, ' ').replace(/ ?· ?/g, ' · ').trim(), 'Now 10 Damaged 1 · Start 12 (−2) · Counted 9', 'Now with its damaged chip, Start with drift size and the count read in one line')
+  assert.equal(meta.replace(STATE_WORD, '').replace(/\s+/g, ' ').replace(/ ?· ?/g, ' · ').trim(), 'Now 10 Damaged 1 · Start 12 (−2) · Counted 9', 'Now with its damaged chip, Start with drift size and the count read in one line')
   assert.equal(full.find(node => node.getAttribute('role') === 'img', 'drift marker').getAttribute('aria-label'), 'Stock changed −2')
   const copyValues = full.findAll(node => node.getAttribute('data-copy-value') !== null).map(node => node.getAttribute('data-copy-value'))
   assert.deepEqual(copyValues, ['Full line product', '885000111', 'Brand B'], 'name, barcode and brand open the shared copy float')
