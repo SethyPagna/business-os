@@ -162,7 +162,8 @@ async function load(rel: string): Promise<Record<string, unknown>> {
         contents: args.path === 'portal'
           ? 'export const createPortal = (node) => node;'
           : `export const useApp = () => globalThis.__lmCtx; export const useSync = () => ({});
-          export const useLowStockConfig = () => ({}); export const isBrokenLocalizedString = () => false;`,
+          export const useLowStockConfig = () => ({}); export const isBrokenLocalizedString = () => false;
+          export const useT = (keys) => Object.fromEntries(keys.map((key) => [key, key]));`,
         loader: 'js',
       }))
     } }],
