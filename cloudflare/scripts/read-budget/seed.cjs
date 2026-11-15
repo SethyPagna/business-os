@@ -8,7 +8,7 @@ const ADMIN = { username: 'budget_admin', password: 'budget-password-1', bootstr
 const P = 8652, C = 5164, S = 15848, FIRST_SALE = 100000, POSITIVE_LOTS = 3978, BRANCH_STOCK_ROWS = 16757
 const BIG_SALE_K = 40, BIG_SALE_LINES = 86
 
-function seedContext(now = new Date()) {
+function seedContext(now = process.env.READ_BUDGET_NOW ? new Date(process.env.READ_BUDGET_NOW) : new Date()) {
   const local = new Date(now.getTime() + 7 * 3600e3)
   const anchorDate = local.toISOString().slice(0, 10)
   const day = (back) => new Date(Date.parse(anchorDate + 'T00:00:00Z') - back * 86400e3).toISOString().slice(0, 10)
