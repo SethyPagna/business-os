@@ -280,7 +280,8 @@ const cases: Array<[string, () => Promise<void>]> = [
     const rowsSource = readFileSync(new URL('../src/components/inventory/InventoryCheckListRows.tsx', import.meta.url), 'utf8')
     const importsEntries = popoverSource.split(String.fromCharCode(10)).some(line => line.startsWith('import ') && line.includes('InventoryCheckLotEntries'))
     assert.ok(!importsEntries, 'no static import of the entries: they would join the page chunk')
-    assert.ok(popoverSource.includes('lazy(loadLotEntries)') && popoverSource.includes("import('./InventoryCheckLotEntries.tsx')"), 'a dynamic import behind lazy()')
+    const chunkSource = readFileSync(new URL('../src/components/inventory/inventoryCheckLotChunk.ts', import.meta.url), 'utf8')
+    assert.ok(popoverSource.includes('lazyRetry(loadLotEntries') && chunkSource.includes("import('./InventoryCheckLotEntries.tsx')"), 'a dynamic import behind lazyRetry(), never a bare lazy() (a failed chunk must not tear the page down)')
     assert.ok(rowsSource.includes('if (props.lotCounts && props.selecting) preloadLotEntries()'), 'requested only when lot counts are on')
     assert.ok(!rowsSource.includes('InventoryCheckLotEntries'), 'the list rows do not import it')
   }],

@@ -1,13 +1,23 @@
-import { lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { Component, Suspense, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import type { InventoryCheckLotRow, InventoryCheckLotsAnswer, InventoryCheckProduct, InventoryCheckTranslator } from '../../types/inventoryChecks.ts'
 import { lotTotals, type LotDraft } from './inventoryCheckLots.ts'
+import { lazyRetry } from '../../utils/lazyImport.ts'
+import { loadLotEntries } from './inventoryCheckLotChunk.ts'
 // The per-received-date entries are code only a viewer with ic_lot_counts on needs: they load as their own chunk, started when the list draws (preloadLotEntries), so they are there before any tap.
-const loadLotEntries = () => import('./InventoryCheckLotEntries.tsx')
-const InventoryCheckLotEntries = lazy(loadLotEntries)
-export const preloadLotEntries = (): void => { void loadLotEntries() }
+// lazyRetry: a failed or slow chunk is retried quietly and recovered by the project's own rules (never a reload while counts are unsubmitted: the page registers them as dirty work). Anything it still throws
+// is caught by LotEntriesBoundary below, so a chunk that will not load can never take the page down or lose the counts typed (they live in the page's drafts, not in this popover).
+const newLotEntries = () => lazyRetry(loadLotEntries, 'inventory-check-lot-entries')
+let InventoryCheckLotEntries = newLotEntries()
+// A warm-up only: its failure is swallowed (the popover's own load retries and reports).
+export const preloadLotEntries = (): void => { loadLotEntries().catch(() => {}) }
+class LotEntriesBoundary extends Component<{ failed: (retry: () => void) => ReactNode; onRetry: () => void; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() { return { failed: true } }
+  render() { return this.state.failed ? this.props.failed(() => { this.props.onRetry(); this.setState({ failed: false }) }) : this.props.children }
+}
 import { finiteQuantity, parseCount } from './InventoryCheckCountEditor.tsx'
 
 // The count popover of one row (the owner, 14 Nov: "clicking check shows the entries, and you enter there. Make it compact"). It opens from the row's status icon and renders its
@@ -63,6 +73,8 @@ export default function InventoryCheckCountPopover({ product, draft, byBatch, lo
   // The dates this branch holds at 0, carried by the row: behind "Show empty received dates", never read here, never part of "matches stock".
   const [emptied, setEmptied] = useState<InventoryCheckLotRow[]>(() => product.empty_lot_rows ?? [])
   const bodyRef = useRef<HTMLDivElement | null>(null)
+  // A retry builds a new lazy component (a rejected one stays rejected); the key makes the entries mount again.
+  const [entriesTry, setEntriesTry] = useState(0)
   // One request when the popover opens. A late answer after it closed is dropped by the abort.
   useEffect(() => {
     if (!byBatch || !loadLots || carried) return undefined
@@ -130,10 +142,13 @@ export default function InventoryCheckCountPopover({ product, draft, byBatch, lo
     <div ref={bodyRef} data-popover-entries className="mt-1 min-w-0">
       {lots.state === 'loading' ? <p data-popover-loading role="status" className="px-1 py-2 text-gray-500 dark:text-gray-400">{tr('inventory_check_popover_loading', 'Loading received dates…')}</p> : null}
       {lots.state === 'failed' ? <p data-popover-failed role="alert" className="px-1 py-2 text-red-700 dark:text-red-300">{tr('inventory_check_popover_failed', 'Received dates could not be loaded. Close and open again.')}</p> : null}
-      {ready && batches ? <Suspense fallback={null}><InventoryCheckLotEntries product={product} rows={rows} emptyRows={carried ? emptied : []} draftLots={draft?.lots} canViewCounts={canViewCounts} locked={locked} tr={tr} inputClass={input} toolClass={tool}
+      {ready && batches ? <LotEntriesBoundary key={entriesTry} onRetry={() => { InventoryCheckLotEntries = newLotEntries(); setEntriesTry(value => value + 1) }}
+        failed={retry => <p data-popover-chunk-failed role="alert" className="flex items-center gap-1 px-1 py-2 text-red-700 dark:text-red-300"><span className="min-w-0 flex-1 break-words">{tr('inventory_check_popover_chunk_failed', 'The received dates could not load. Your counts are kept.')}</span>
+          <button type="button" data-popover-action="retry-entries" className={tool} aria-label={tr('retry', 'Retry')} title={tr('retry', 'Retry')} onClick={retry}><RotateCcw className="h-4 w-4" aria-hidden="true" /></button></p>}>
+        <Suspense fallback={<p data-popover-loading role="status" className="px-1 py-2 text-gray-500 dark:text-gray-400">{tr('inventory_check_popover_loading', 'Loading received dates…')}</p>}><InventoryCheckLotEntries product={product} rows={rows} emptyRows={carried ? emptied : []} draftLots={draft?.lots} canViewCounts={canViewCounts} locked={locked} tr={tr} inputClass={input} toolClass={tool}
         unlotted={unlotted} more={lots.state === 'ready' && lots.more} sumText={dated.dates > 0 && dated.valid ? String(dated.counted) : '—'} delta={delta}
         onLotCount={(row, value) => onLotCount(product, row, value)} onEnter={onEnter}
-        onLotSet={onLotSet ? (row, value) => { void onLotSet(product, row, value).then(quantity => { if (typeof quantity === 'number') { const apply = (list: InventoryCheckLotRow[]) => list.map(candidate => candidate.batchId === row.batchId ? { ...candidate, quantity } : candidate); setLots(previous => previous.state === 'ready' ? { ...previous, rows: apply(previous.rows) } : previous); setEmptied(apply) } }) } : undefined} /></Suspense> : null}
+        onLotSet={onLotSet ? (row, value) => { void onLotSet(product, row, value).then(quantity => { if (typeof quantity === 'number') { const apply = (list: InventoryCheckLotRow[]) => list.map(candidate => candidate.batchId === row.batchId ? { ...candidate, quantity } : candidate); setLots(previous => previous.state === 'ready' ? { ...previous, rows: apply(previous.rows) } : previous); setEmptied(apply) } }) } : undefined} /></Suspense></LotEntriesBoundary> : null}
       {ready && !batches ? <div data-popover-single className="flex min-w-0 items-center gap-x-1.5 px-0.5">
         <span className="min-w-0 flex-1 font-semibold">{tr('inventory_check_popover_total', 'Total')}</span>
         <input data-popover-count data-popover-total type="text" inputMode="decimal" autoComplete="off" value={draft?.count ?? ''} readOnly={locked} placeholder={canViewStock && stock !== null ? String(stock) : ''} aria-label={`${tr('inventory_check_count', 'Count')}: ${product.name}`} aria-invalid={total.kind === 'invalid' ? true : undefined}

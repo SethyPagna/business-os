@@ -8200,6 +8200,7 @@
   "inventory_check_popover_clear": "Clear this count",
   "inventory_check_popover_loading": "Loading received dates…",
   "inventory_check_popover_failed": "Received dates could not be loaded. Close and open again.",
+  "inventory_check_popover_chunk_failed": "The received dates could not load. Your counts are kept.",
   "inventory_check_popover_more": "This product holds more received dates than one count can carry. Count the ones listed.",
   "inventory_check_popover_show_empty": "Show empty received dates ({count})",
   "inventory_check_popover_hide_empty": "Hide empty received dates ({count})",

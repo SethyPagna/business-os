@@ -8,7 +8,7 @@ import { appendQuery, buildQueryString, type QueryParams } from '../src/api/quer
 // INV-B S5 (14 Nov: counted in the status icon's popover, batches read on demand): the mounted Inventory page with ic_lot_counts: the status choice in one scrolling row, counts typed per received date, and a Set straight from the row
 // (confirm with before and after, the row patched from the answer, no page read; a stale figure is shown and nothing is written).
 const FIELDS = { inventory_check_show_price: true, inventory_check_show_barcode: true, inventory_check_show_category: true, inventory_check_show_brand: true, inventory_check_show_stock: true, inventory_check_show_received: true }
-const harness = await createHarness({ observe: ['api/actorReadScope.ts', 'utils/dirtyWork.ts', 'api/dataEpoch.ts', 'api/productSearchIndex.ts'] })
+const harness = await createHarness({ observe: ['api/actorReadScope.ts', 'utils/dirtyWork.ts', 'api/dataEpoch.ts', 'api/productSearchIndex.ts', 'components/inventory/inventoryCheckLotChunk.ts'] })
 const listeners = new Map<string, Set<EventListenerOrEventListenerObject>>()
 window.addEventListener = (type: string, listener: unknown) => { if (listener) { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type)!.add(listener as EventListenerOrEventListenerObject) } }
 window.removeEventListener = (type: string, listener: unknown) => { if (listener) listeners.get(type)?.delete(listener as EventListenerOrEventListenerObject) }
@@ -119,10 +119,40 @@ const openCount = async (surface: Awaited<ReturnType<typeof mount>>, id: string)
 const closeCount = async (surface: Awaited<ReturnType<typeof mount>>) => { await surface.click(surface.find(node => node.getAttribute('data-popover-action') === 'close', 'popover close')) }
 const dateInput = (surface: Awaited<ReturnType<typeof mount>>, batch: number) => surface.find(node => node.getAttribute('data-popover-lot-count') === String(batch), `date ${batch}`)
 const rowCount = (surface: Awaited<ReturnType<typeof mount>>, id: string) => surface.find(node => node.getAttribute('data-check-count') !== null && rowOf(surface, id).contains(node), 'row count ' + id) as unknown as { value: string; getAttribute: (name: string) => string | null }
+const rowInput = (surface: Awaited<ReturnType<typeof mount>>, id: string) => surface.find(node => node.getAttribute('data-check-count') !== null && rowOf(surface, id).contains(node), 'row count ' + id)
 const setButton = (surface: Awaited<ReturnType<typeof mount>>) => surface.find(node => node.getAttribute('data-popover-action') === 'set-lot', 'Set button')
 const lotLine = (surface: Awaited<ReturnType<typeof mount>>, batch: number) => surface.find(node => node.getAttribute('data-popover-lot') === String(batch), `lot ${batch}`)
 
 try {
+  // ---- N2 (review 14 Nov round 2): the per-date entries chunk fails to load. It goes first: the chunk is still unloaded, so the fault is real. The page, its rows and every unsubmitted count survive, the person is
+  // offered a retry (the project's lazyRetry recovery, no reload while counts are unsubmitted), the warm-up's rejection is swallowed, and a retry brings the entries back. ----
+  {
+    const chunkKey = 'components/inventory/inventoryCheckLotChunk.ts'
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => { unhandled.push(reason) }
+    process.on('unhandledRejection', onUnhandled)
+    let attempts = 0
+    ;(doubles as Record<string, Record<string, unknown>>)[chunkKey] = { loadLotEntries: () => { attempts += 1; return Promise.reject(new Error('Failed to fetch dynamically imported module: /assets/InventoryCheckLotEntries.js')) } }
+    listAnswer = () => listBody([withLots(productRow(12, 'Dated one', 8)), productRow(13, 'Plain product', 4)], { capabilities: { ...capabilities, lotLinesPerSubmission: 400 }, summary: { ok: 0, issue: 0, not_checked: 2, total: 2 } })
+    const surface = await mount()
+    await surface.type(rowInput(surface, '13'), '3')
+    await openCount(surface, '12')
+    await new Promise(resolve => setTimeout(resolve, 1500))
+    assert.ok(attempts >= 3, 'the import was retried quietly (' + attempts + ')')
+    assert.equal(surface.findAll(node => node.getAttribute('data-inventory-check-row') !== null).length, 2, 'the page and its rows are still there')
+    assert.equal(rowCount(surface, '13').value, '3', 'the unsubmitted count survived')
+    assert.equal(surface.findAll(node => node.getAttribute('data-inventory-check-popover') !== null).length, 1, 'the popover is still open')
+    assert.equal(surface.findAll(node => node.getAttribute('data-lazy-retry') !== null).length, 1, 'a retry is offered inside it')
+    delete (doubles as Record<string, unknown>)[chunkKey]
+    await surface.click(surface.find(node => node.getAttribute('data-lazy-retry') !== null, 'retry'))
+    await new Promise(resolve => setTimeout(resolve, 100))
+    await surface.type(dateInput(surface, 7), '4')
+    assert.equal(rowCount(surface, '12').value, '4', 'after the retry the entries work')
+    assert.equal(rowCount(surface, '13').value, '3', 'and the other count is untouched')
+    process.off('unhandledRejection', onUnhandled)
+    assert.deepEqual(unhandled, [], 'no rejection went unhandled (the warm-up swallows its own)')
+    await surface.unmount()
+  }
   // ---- the status choice: one row (the shared chip rail), every status with its count, a tap filters ----
   {
     listAnswer = () => answerOf()
