@@ -284,6 +284,50 @@ async function main() {
       assert.deepEqual(defaultAmenderRecords.hits, [])
     })
 
+    // ---- setting or clearing the cost after the sale is administrator-only on the server, not just hidden in the browser ----
+    // A Sales amender (full tier, with the cost grant and without) is refused with the same answer whatever the stored value, so a guess is
+    // never confirmed, and the database is byte-for-byte what it was. The administrator can still amend.
+    const stateOf = async saleId => JSON.stringify({
+      sale: await h.db.prepare('SELECT * FROM sales WHERE id=?').bind(saleId).first(),
+      amendments: (await h.db.prepare('SELECT * FROM sale_amendments WHERE sale_id=? ORDER BY id').bind(saleId).all()).results,
+      receipts: (await h.db.prepare('SELECT COUNT(*) AS n FROM sale_mutation_receipts').first()).n,
+      audit: (await h.db.prepare('SELECT COUNT(*) AS n FROM audit_logs').first()).n,
+    })
+    const costOf = async saleId => (await h.db.prepare('SELECT delivery_actual_cost_usd AS cost FROM sales WHERE id=?').bind(saleId).first()).cost
+    const beforeA = await stateOf(idA)
+    assert.equal(await costOf(idA), 1.37, 'the fixture holds 1.37 before the refusals')
+    const refusals = []
+    for (const [label, value] of [['a different amount', 9.99], ['the stored amount', 1.37], ['a clear', null], ['a blank', ''], ['zero', 0]]) {
+      for (const [who, cookie] of [['amender (cost grant, switch off)', amender], ['amender (every default grant)', defaultAmender]]) {
+        refusals.push({ label, who, res: await H.amendSale(h, idA, { kind: 'delivery_actual_cost_changed', client_request_id: `ccs-a-refused-${refusals.length}`, delivery_actual_cost_usd: value }, `${who} ${label}`, cookie) })
+      }
+    }
+    r.check('a Sales amender cannot set, clear or confirm the courier cost: 403 with a stable code, the same answer for every value', () => {
+      for (const { label, who, res } of refusals) {
+        assert.equal(res.status, 403, `${who} ${label} answered ${res.status} ${JSON.stringify(res.body).slice(0, 200)}`)
+        assert.equal(res.body.code, 'courier_cost_admin_only')
+        assert.match(res.body.error, /^Only an administrator can/)
+      }
+      const [first] = refusals
+      for (const { label, who, res } of refusals) assert.deepEqual(res.body, first.res.body, `${who} ${label}: the refusal differs from the first one, which would tell a guess apart`)
+      assert.deepEqual(scan(first.res.body), [])
+      assert.doesNotMatch(JSON.stringify(first.res.body), /already|1.37|9.99/)
+    })
+    const afterA = await stateOf(idA)
+    r.check('the refusals changed nothing: the sale row, its ledger, the receipts and the audit log are byte-for-byte what they were', () => {
+      assert.equal(afterA, beforeA)
+      assert.equal(JSON.parse(afterA).sale.delivery_actual_cost_usd, 1.37)
+    })
+    const adminCost = await H.amendSale(h, idA, { kind: 'delivery_actual_cost_changed', client_request_id: 'ccs-a-admin-cost', delivery_actual_cost_usd: 1.5 })
+    const adminNoop = await H.amendSale(h, idA, { kind: 'delivery_actual_cost_changed', client_request_id: 'ccs-a-admin-noop', delivery_actual_cost_usd: 1.5 })
+    const costAAfterAdmin = await costOf(idA)
+    r.check('the administrator can still amend the courier cost, and still hears that a repeat is already the cost', () => {
+      assert.equal(adminCost.status, 200, JSON.stringify(adminCost.body).slice(0, 200))
+      assert.equal(costAAfterAdmin, 1.5)
+      assert.equal(adminNoop.status, 400)
+      assert.match(adminNoop.body.error, /already the actual delivery cost/)
+    })
+
     // ---- every write that returns the sale's canonical snapshot leaves by the list's rule ----
     // Sale C is placed by a staff account that may create sales and add items but may not amend (sales:amend false);
     // sale D is the same sale placed by the administrator, the positive control that the scan sees the figure on
