@@ -238,7 +238,9 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
   const sortValueAgg = opts.familySortValueSql ? ', MIN(__family_sort) AS family_sort_value' : ''
   const numericSortSelect = opts.familyNumericSortSql ? `, (${opts.familyNumericSortSql}) AS __family_num` : ''
   const numericSortAgg = opts.familyNumericSortSql ? ', MAX(__family_num) AS family_num_sort' : ''
-  const membersAgg = opts.familyGroupSql ? ', COUNT(*) AS __members' : ''
+  // A group's product count is its products, not its rows: a header row (is_group) is the family's title, not a product to count, which is how the check-status list counts it too.
+  const memberSelect = opts.familyGroupSql ? ", (CASE WHEN COALESCE(p.is_group, 0) = 1 THEN 0 ELSE 1 END) AS __member" : ''
+  const membersAgg = opts.familyGroupSql ? ', SUM(__member) AS __members' : ''
   // family_members is only built (and only joined against, see below) when
   // familyMemberBaseWhereSql is actually passed -- omitted entirely for any
   // caller that hasn't opted in, so this stays a no-op for them (same CTEs,
@@ -259,7 +261,7 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
     WITH matched AS (
       SELECT ${FAMILY_ROOT_KEY_SQL} AS __family_root_id,
              lower(trim(COALESCE(parent.name, p.name))) AS __family_name,
-             p.created_at AS __created_at${matchRankSelect}${matchTierSelect}${promotedSelect}${sortValueSelect}${numericSortSelect}
+             p.created_at AS __created_at${matchRankSelect}${matchTierSelect}${promotedSelect}${sortValueSelect}${numericSortSelect}${memberSelect}
       FROM (${opts.candidateSql}) ${CANDIDATE_ALIAS}
       CROSS JOIN products p ON p.id = ${CANDIDATE_ALIAS}.id
       LEFT JOIN products parent ON parent.id = p.parent_id
@@ -281,7 +283,7 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
       SELECT ${opts.narrow ? '' : `${opts.selectColumns},
              `}${FAMILY_ROOT_KEY_SQL} AS __family_root_id,
              lower(trim(COALESCE(parent.name, p.name))) AS __family_name,
-             p.created_at AS __created_at${matchRankSelect}${matchTierSelect}${promotedSelect}${sortValueSelect}${numericSortSelect}
+             p.created_at AS __created_at${matchRankSelect}${matchTierSelect}${promotedSelect}${sortValueSelect}${numericSortSelect}${memberSelect}
       ${opts.drivenByListParam
         ? `FROM json_each(@${opts.drivenByListParam}) __rank_j CROSS JOIN products p ON p.id = CAST(__rank_j.value AS INTEGER)`
         : 'FROM products p'}

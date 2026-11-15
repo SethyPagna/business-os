@@ -28,10 +28,14 @@ function expectedRead(db, nameRows, by, org, branch, page, pageSize, { wired = f
     FROM products p LEFT JOIN products parent ON parent.id=p.parent_id`).all().map(r => [r.id, r]))
   // The ic_simple list shows leaves under synthetic header rows (checkable:false); the wired list shows Products' own rows, headers included, in one family with their children.
   const leaves = (wired ? nameRows : nameRows.filter(row => row.checkable)).map(row => row.id)
+  const headers = new Set(db.prepare('SELECT id FROM products WHERE COALESCE(is_group,0)=1').all().map(r => r.id))
+  const isHeader = id => headers.has(id)
   const families = new Map()
   for (const id of leaves) {
-    const row = info.get(id), f = families.get(row.k) || { k: row.k, n: row.n, ids: [], date: null, cat: null, firstCat: new Map() }
+    const row = info.get(id), f = families.get(row.k) || { k: row.k, n: row.n, ids: [], products: 0, date: null, cat: null, firstCat: new Map() }
     f.ids.push(id)
+    // A header row is the family's title, not a product: group counts (and the product total) count products only, as the ic_simple list does.
+    if (!isHeader(id)) f.products++
     const at = dates.get(id) ?? null
     if (at !== null && (f.date === null || at > f.date)) f.date = at
     const norm = row.category === null ? null : (trimSpaces(asciiLower(String(row.category))) || null)
@@ -48,7 +52,7 @@ function expectedRead(db, nameRows, by, org, branch, page, pageSize, { wired = f
     return bytes(a.n, b.n) || bytes(a.k, b.k)
   })
   const totals = new Map()
-  ordered.forEach((f, index) => { const key = keyOf(f), g = totals.get(key) || { key, families: 0, products: 0, first: index + 1, last: index + 1 }; g.families++; g.products += f.ids.length; g.last = index + 1; totals.set(key, g) })
+  ordered.forEach((f, index) => { const key = keyOf(f), g = totals.get(key) || { key, families: 0, products: 0, first: index + 1, last: index + 1 }; g.families++; g.products += f.products; g.last = index + 1; totals.set(key, g) })
   const slice = ordered.slice((page - 1) * pageSize, page * pageSize), items = [], seenHeader = new Set()
   for (const f of slice) for (const id of wired ? f.ids.sort((x, y) => bytes(asciiLower(info.get(x).name), asciiLower(info.get(y).name)) || x - y) : f.ids.sort((x, y) => x - y)) {
     const parent = wired ? null : info.get(id).parent_id
@@ -62,7 +66,7 @@ function expectedRead(db, nameRows, by, org, branch, page, pageSize, { wired = f
     const label = by === 'category' && key !== 'none' ? [...families.values()].filter(f => keyOf(f) === key && slice.includes(f)).map(f => f.firstCat.get(f.cat)).find(Boolean) ?? null : null
     return { key, label, families: g.families, products: g.products, continued_before: g.first < offset + 1, continues_after: g.last > offset + pageSize, _first: first }
   }).map(({ _first, ...g }) => g)
-  return { items, groups, total: ordered.length, products: leaves.length, totals }
+  return { items, groups, total: ordered.length, products: leaves.filter(id => !isHeader(id)).length, totals }
 }
 
 module.exports = { asciiLower, trimSpaces, bytes, dayOf, newestChecks, expectedRead }

@@ -51,7 +51,7 @@ async function nameRowsOf(app, shape, base) {
 
 // Every shape x grouping x page size x page (one past the end) of one app against the oracle.
 async function runWorld(app, seed) {
-  let compared = 0
+  let compared = 0, headersSeen = 0
   for (const shape of SHAPES) {
     const base = { ...shape.query, ...(shape.branch === null ? {} : { branchId: String(shape.branch) }) }
     const org = ORG[shape.user]
@@ -77,7 +77,10 @@ async function runWorld(app, seed) {
       assert.deepEqual([...seen].sort((a, b) => a - b), nameRows.map(r => r.id).sort((a, b) => a - b), `G1 same rows as the name order, seed ${seed} ${by} ${JSON.stringify(base)} ${pageSize}`)
       // G2: the groups seen across the pages add up to the pager's total and to the product count; G3 across page sizes is the oracle's own total (compared above).
       assert.equal([...totals.values()].reduce((n, g) => n + g.families, 0), probe.total, 'G2 families add up to the pager total')
-      assert.equal([...totals.values()].reduce((n, g) => n + g.products, 0), nameRows.length, 'G2 products add up to the product count')
+      // A header row is a family's title, not a product: the groups count products only (as the ic_simple list does), so the sum is the rows that are not headers.
+      const headerIds = new Set(app.raw.db.prepare('SELECT id FROM products WHERE COALESCE(is_group,0)=1').all().map(row => row.id))
+      assert.equal([...totals.values()].reduce((n, g) => n + g.products, 0), nameRows.filter(row => !headerIds.has(row.id)).length, 'G2 products add up to the product count (headers are not products)')
+      headersSeen += nameRows.filter(row => headerIds.has(row.id)).length
     }
   }
   // Freshness: a check written after the ranking was cached moves the inventory_checks version, and the next read must show it (the ranking is keyed on that version).
@@ -99,6 +102,7 @@ async function runWorld(app, seed) {
       }
     }
   }
+  assert.ok(headersSeen > 0, `positive control: the world has header rows to leave out of the product counts (seed ${seed})`)
   return compared
 }
 
@@ -219,6 +223,8 @@ const MUTANTS = {
   M13: ['routes/products.ts', ["keyUrl.searchParams.set('ic_group', options.grouping.by)", 'void 0']],
   M14: ['routes/products.ts', ["versions = `${baseVersion}:icg:${options.setVersion ?? ''}`", 'versions = baseVersion']],
   // M15 (the name-sibling group_key inheritance in routes/products.ts) cannot be reached from this route now that a typed search is flat, so it is retired.
+  // M17: a header row counted as a product in the group totals (finding 7: the two lists count products only).
+  M17: ['lib/familyPagination.ts', ["', SUM(__member) AS __members'", "', COUNT(*) AS __members'"]],
   // M16: the typed-search rule removed (groupBy beside a query is honoured again).
   M16: ['lib/inventoryCheckList.ts', ['const grouping: InventoryCheckGrouping | null = validated.query ? null : requestedGrouping', 'const grouping: InventoryCheckGrouping | null = requestedGrouping']],
   // The tie-break removed outright is hidden by the GROUP BY that builds `families` (it already hands the rows over in key order): reported, not asserted.
@@ -243,7 +249,7 @@ async function main() {
     await plans(app, false); app.raw.db.exec('ANALYZE'); await plans(app, true)
   })
 
-  if (!process.env.SKIP_MUTANTS) await check('mutants M1-M14 and M16 are each caught', async () => {
+  if (!process.env.SKIP_MUTANTS) await check('mutants M1-M14, M16 and M17 are each caught', async () => {
     const survived = []
     for (const [id, [file, pair]] of Object.entries(MUTANTS)) {
       if (only && !only.includes(id)) continue
