@@ -1,8 +1,8 @@
 {
  "portal-ai-status": [
   [
-   "5f13c00d023d",
-   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+   "1b6449cc3af3",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?)"
   ],
   [
    "d12fb0f758f1",

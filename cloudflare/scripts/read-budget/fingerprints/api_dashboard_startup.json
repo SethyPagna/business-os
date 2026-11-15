@@ -17,14 +17,6 @@
    "SELECT id, receipt_number, created_at, sale_status, status_before_return, return_state, delivery_pending, bran"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "603e70996cd2",
-   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
-  ],
-  [
    "9e860b96b0ef",
    "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?,?)"
   ],
@@ -33,8 +25,8 @@
    "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?)"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
    "30a136f2a95e",
@@ -191,14 +183,6 @@
    "SELECT id, receipt_number, created_at, sale_status, status_before_return, return_state, delivery_pending, bran"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "603e70996cd2",
-   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
-  ],
-  [
    "9e860b96b0ef",
    "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?,?)"
   ],
@@ -207,8 +191,8 @@
    "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?)"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
    "30a136f2a95e",
@@ -365,14 +349,6 @@
    "SELECT id, receipt_number, created_at, sale_status, status_before_return, return_state, delivery_pending, bran"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "603e70996cd2",
-   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
-  ],
-  [
    "9e860b96b0ef",
    "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?,?)"
   ],
@@ -381,8 +357,8 @@
    "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?)"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
    "30a136f2a95e",
@@ -555,14 +531,6 @@
    "SELECT id, receipt_number, created_at, sale_status, status_before_return, return_state, delivery_pending, bran"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "603e70996cd2",
-   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
-  ],
-  [
    "9e860b96b0ef",
    "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?,?)"
   ],
@@ -571,8 +539,8 @@
    "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?)"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
    "30a136f2a95e",
@@ -921,20 +889,16 @@
    "SELECT id, receipt_number, created_at, sale_status, status_before_return, return_state, delivery_pending, bran"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
+   "9e860b96b0ef",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?,?)"
+  ],
+  [
+   "1b6449cc3af3",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?)"
   ],
   [
    "603e70996cd2",
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
-  ],
-  [
-   "5f13c00d023d",
-   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
    "30a136f2a95e",

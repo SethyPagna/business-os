@@ -21,10 +21,6 @@
    "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
    "ba6c9bdbac80",
    "SELECT id, name, stock_quantity, CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) "
   ]

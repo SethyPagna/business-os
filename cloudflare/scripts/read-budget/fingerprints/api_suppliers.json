@@ -5,8 +5,8 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
+   "a49c8702fc68",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?)"
   ],
   [
    "24afc595d21c",

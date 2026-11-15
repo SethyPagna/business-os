@@ -5,8 +5,8 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "5f13c00d023d",
-   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+   "9d58aa10b960",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?,?,?)"
   ],
   [
    "0655a3775cfb",
@@ -63,8 +63,8 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "5f13c00d023d",
-   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+   "9d58aa10b960",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?,?,?)"
   ],
   [
    "51360b2bda23",
@@ -117,8 +117,8 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "5f13c00d023d",
-   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+   "9d58aa10b960",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?,?,?)"
   ],
   [
    "51360b2bda23",
@@ -227,8 +227,8 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "5f13c00d023d",
-   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+   "9d58aa10b960",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?,?,?)"
   ],
   [
    "88d815527646",

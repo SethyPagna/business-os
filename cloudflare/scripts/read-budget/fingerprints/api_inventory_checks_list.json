@@ -181,8 +181,8 @@
    "WITH latest AS ( SELECT i.product_id AS product_id, i.state AS state, i.updated_at AS updated_at, ROW_NUMBER()"
   ],
   [
-   "5f13c00d023d",
-   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+   "1b6449cc3af3",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?)"
   ],
   [
    "5ade221b0a2e",
@@ -231,8 +231,8 @@
    "WITH latest AS ( SELECT i.product_id AS product_id, i.state AS state, i.updated_at AS updated_at, ROW_NUMBER()"
   ],
   [
-   "5f13c00d023d",
-   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+   "1b6449cc3af3",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?)"
   ],
   [
    "5ade221b0a2e",
@@ -293,8 +293,8 @@
    "WITH latest AS ( SELECT i.product_id AS product_id, i.state AS state, i.updated_at AS updated_at, ROW_NUMBER()"
   ],
   [
-   "5f13c00d023d",
-   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+   "1b6449cc3af3",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?)"
   ],
   [
    "5ade221b0a2e",

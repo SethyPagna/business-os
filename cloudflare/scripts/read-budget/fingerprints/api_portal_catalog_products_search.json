@@ -1,8 +1,8 @@
 {
  "portal-catalog-products-search": [
   [
-   "5f13c00d023d",
-   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+   "28332fef2ecf",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?)"
   ],
   [
    "13512951eeab",
