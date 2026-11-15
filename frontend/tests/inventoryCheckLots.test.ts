@@ -131,11 +131,8 @@ assert.deepEqual(incompleteLotAnswers({ lots: [{ productId: 5, lots: [{ batchId:
   assert.equal(before.items[0].unlotted_quantity, undefined, 'and a row whose dates add up shows none')
   const cut = wiredResult({ ...raw, list: { ...list, items: [{ ...list.items[0], lots_more: true }] } }).items[0]
   assert.equal(cut.lots_more, true, 'G10: a row whose dates were cut at the plan limit says so'); assert.equal(cut.unlotted_quantity, undefined, 'and claims no unlotted remainder it cannot know')
-  assert.equal(wiredListParams({ sortBy: 'checked', checkState: 'issue' }).sortBy, 'checked')
-  assert.equal(wiredListParams({ sortBy: 'checked', checkState: 'ok', query: 'serum' }).sortBy, 'created', 'N6: never beside a search (the Worker refuses it)')
-  assert.equal(wiredListParams({ sortBy: 'checked', checkState: 'ok', brand: 'A' }).sortBy, 'created', 'nor a brand')
-  assert.equal(wiredListParams({ sortBy: 'checked', checkState: '' }).sortBy, 'created', 'a stale date order never reaches the server without a status')
-  assert.equal(wiredListParams({ sortBy: 'checked', checkState: 'not_checked' }).sortBy, 'created', 'nor with a status that has no checked list')
+  // The date order of the checks is the grouping Last checked, never a sort: sortBy=checked is never sent, whatever the status, search or filter beside it.
+  for (const extra of [{ checkState: 'issue' }, { checkState: 'ok', query: 'serum' }, { checkState: 'ok', brand: 'A' }, { checkState: '' }, { checkState: 'not_checked' }]) assert.equal(wiredListParams({ sortBy: 'checked', ...extra }).sortBy, 'created', JSON.stringify(extra))
 }
 
 // ---- the mounted row: the page never lists received dates by itself; they live in the status popover (read on demand, see inventoryCheckCountPopover.test.ts) -------------------------
