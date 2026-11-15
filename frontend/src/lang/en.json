@@ -8217,5 +8217,6 @@
   "inventory_check_group_no_category": "No category",
   "inventory_check_group_continued": "continued",
   "inventory_check_group_continues": "Continues on the next page",
+  "inventory_check_group_unsaved": "{count} unsaved counts in this group",
   "inventory_check_mark_open_groups": "Mark every product in the open groups as matching stock"
 }

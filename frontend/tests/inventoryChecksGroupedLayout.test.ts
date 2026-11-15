@@ -78,6 +78,18 @@ await browser.run('PASS grouped Inventory Check list layout: 375 and 1280 px, En
     assert.ok(alpha(tint.unsaved) > 0.04 && alpha(tint.unsaved) <= 0.2, `${label}: the unsaved row has a visible but see-through fill (${tint.unsaved})`)
     assert.notEqual(tint.unsaved, tint.plain, `${label}: it differs from an untouched row (${tint.plain})`)
     assert.notEqual(tint.unsaved, tint.selected, `${label}: and from the selected-row blue (${tint.selected})`)
+    // Collapse the group that holds the unsaved row: its header gets a blue dot and the exact number, and stays compact.
+    await browser.mouseClick('[data-inventory-check-group="d:2026-11-12"] button')
+    await browser.waitFor(`${label} unsaved cue`, async () => await browser.evaluate<boolean>(`document.querySelector('[data-inventory-check-group="d:2026-11-12"] [data-inventory-check-unsaved-cue]') !== null`) || null)
+    const cue = await browser.evaluate<{ text: string; count: string | null; title: string | null; alpha: string; header: number; others: number; doc: number }>(`(() => {
+      const head = document.querySelector('[data-inventory-check-group="d:2026-11-12"]'); const cue = head.querySelector('[data-inventory-check-unsaved-cue]')
+      return { text: cue.textContent.trim(), count: cue.getAttribute('data-inventory-check-unsaved-cue'), title: cue.getAttribute('title'), alpha: getComputedStyle(cue).backgroundColor, header: head.getBoundingClientRect().height,
+        others: document.querySelectorAll('[data-inventory-check-unsaved-cue]').length, doc: document.documentElement.scrollWidth - innerWidth }
+    })()`)
+    assert.ok(cue.text === '1' && cue.count === '1' && cue.others === 1, `${label}: one cue, on the collapsed group, with the exact number (${JSON.stringify(cue)})`)
+    assert.ok(cue.title && cue.title.includes('1') && cue.title !== 'inventory_check_group_unsaved', `${label}: a translated tooltip (${cue.title})`)
+    assert.ok(alpha(cue.alpha) > 0.04 && alpha(cue.alpha) <= 0.2, `${label}: the cue uses the see-through unsaved blue (${cue.alpha})`)
+    assert.ok(cue.header >= 28 && cue.header <= 48 && cue.doc <= 0, `${label}: the header stays compact and the page does not scroll sideways with the cue (${JSON.stringify(cue)})`)
     if (lang === 'km') await browser.khmerRoom(label, '[data-inventory-check-page]', 3)
     if (shots) {
       const picture = await browser.send('Page.captureScreenshot', { format: 'png' })

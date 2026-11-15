@@ -31,3 +31,8 @@ export function buildSections(products: readonly InventoryCheckProduct[], groupi
   }
   return [...sections.values()].sort((a, b) => Number(LAST_KEYS.has(a.key)) - Number(LAST_KEYS.has(b.key)))
 }
+
+/** How many rows of a group hold a count that is typed but not saved (the rows that wear UNSAVED_ROW_CLASS). */
+export function unsavedCount(products: readonly { id: string | number; checkable?: boolean; is_group?: boolean }[], drafts: Readonly<Record<string, unknown>>, selecting: boolean): number {
+  return selecting ? products.filter(product => product.checkable !== false && !product.is_group && drafts[String(product.id)]).length : 0
+}

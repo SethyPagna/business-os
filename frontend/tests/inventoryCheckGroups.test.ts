@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHarness, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
 import { collapseId, groupedParams, groupToAsk, inOpenGroups, UNSAVED_ROW_CLASS, type Grouping } from '../src/components/inventory/inventoryCheckGroups.ts'
 import { productsWireParams } from '../src/components/inventory/inventoryCheckProductsRequest.ts'
-import { buildSections, groupLabel } from '../src/components/inventory/inventoryCheckGroupSections.ts'
+import { buildSections, groupLabel, unsavedCount } from '../src/components/inventory/inventoryCheckGroupSections.ts'
 import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
 
 // Grouped Inventory Check list (15 Nov): sections from the server's items and groups, the header count is the server's whole-scope total, collapsing is local, and unsaved counts get a soft blue.
@@ -69,6 +69,27 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.deepEqual(rowIds(s), ['3', '4'])
     assert.equal(headers(s).length, 3, 'the header stays so the group can be opened again')
     assert.ok(s.button('Expand', headers(s)[0]), 'the collapsed header offers Expand')
+  }],
+  ['a collapsed group that holds unsaved counts shows a blue dot and the exact number; an open group, or none unsaved, shows nothing', async () => {
+    const draft = { selected: true, count: '5', checked: false, note: '' }
+    const drafts = { 1: draft, 2: draft, 4: draft }
+    const cue = (s: MountedSurface, index: number) => s.findAll(node => node.getAttribute('data-inventory-check-unsaved-cue') !== null && headers(s)[index].contains(node))[0] ?? null
+    const open = await mountGrouped({ drafts })
+    assert.ok([0, 1, 2].every(index => cue(open, index) === null), 'open groups show their rows, not a cue')
+    await open.unmount()
+    const shut = await mountGrouped({ drafts, collapsed: new Set([collapseId('checked', 'd:2026-11-12'), collapseId('checked', 'd:2026-11-03'), collapseId('checked', 'never')]) })
+    assert.equal(cue(shut, 0)?.getAttribute('data-inventory-check-unsaved-cue'), '2', 'two unsaved rows in the first group')
+    assert.equal(cue(shut, 1), null, 'no unsaved row in the second group: no cue')
+    assert.equal(cue(shut, 2)?.getAttribute('data-inventory-check-unsaved-cue'), '1')
+    assert.ok(flat(cue(shut, 0)!) === '2' && cue(shut, 0)!.className.includes(UNSAVED_ROW_CLASS), 'the number, in the unsaved row blue')
+    assert.ok(cue(shut, 0)!.getAttribute('title')!.includes('2'), 'a tooltip that says what it counts')
+    await shut.unmount()
+    const saved = await mountGrouped({ drafts: {}, collapsed: new Set([collapseId('checked', 'd:2026-11-12')]) })
+    assert.equal(cue(saved, 0), null, 'after a save the drafts are gone and so is the cue')
+    await saved.unmount()
+    const viewer = await mountGrouped({ drafts, selecting: false, collapsed: new Set([collapseId('checked', 'd:2026-11-12')]) })
+    assert.equal(cue(viewer, 0), null, 'a viewer who cannot count has no unsaved rows')
+    assert.equal(unsavedCount([{ id: 1, is_group: true }, { id: 2, checkable: false }, { id: 3 }], { 1: draft, 2: draft, 3: draft }, true), 1, 'header and uncheckable rows do not count')
   }],
   ['the toggle names its group by the by:key id', async () => {
     const seen: string[] = []

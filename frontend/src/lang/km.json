@@ -8217,5 +8217,6 @@
   "inventory_check_group_no_category": "គ្មានប្រភេទ",
   "inventory_check_group_continued": "បន្ត",
   "inventory_check_group_continues": "បន្តនៅទំព័របន្ទាប់",
+  "inventory_check_group_unsaved": "បានរាប់ {count} ដែលមិនទាន់រក្សាទុក ក្នុងក្រុមនេះ",
   "inventory_check_mark_open_groups": "សម្គាល់ផលិតផលទាំងអស់ក្នុងក្រុមដែលបើក ថាត្រូវនឹងស្តុក"
 }
