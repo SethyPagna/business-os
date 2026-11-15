@@ -40,7 +40,7 @@ import { stockConflictFigures, type StockWriteAnswer } from './stockAnswerPatch.
 import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import { oldListDropsStatus, productsServerOf, productsWireParams, type ProductsServer } from './inventoryCheckProductsRequest.ts'
 import { groupedParams, groupToAsk, inOpenGroups, type Grouping } from './inventoryCheckGroups.ts'
-import { loadGroupedList } from './inventoryCheckGroupChunk.ts'
+import { groupedListLoaded, loadGroupedList } from './inventoryCheckGroupChunk.ts'
 import { soleActiveBranch } from '../../utils/branchCollapse.ts'
 import { PRICE_KEYS } from './inventoryPriceFacts.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
@@ -386,6 +386,10 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     setError('')
     // A grouping is asked for until an answer has said the server has none; it defines the order, so no sort goes with it.
     const asked = groupWire && knownGroupings !== null ? groupedParams(params, groupWire) : params
+    // The grouped list's chunk is fetched while the first grouped answer is on its way, and the answer is published only once both are in: the first paint is grouped, never flat and then regrouped.
+    // A chunk that cannot be fetched does not hold the answer back (the list then draws through its Suspense fallback and lazyRetry's own recovery).
+    const groupChunk: Promise<unknown> | null = asked.groupBy && !groupedListLoaded() ? loadGroupedList().catch(() => null) : null
+    const chunkIn = async (grouped: unknown) => { if (grouped && groupChunk) await groupChunk }
     async function load() {
       try {
         if (section === 'sessions') {
@@ -400,6 +404,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
             wiredSeed.current = null
             try {
               const result = await loadWired({ params: { ...asked, branchId }, known: wiredKnown.current, seed: seed?.list ?? null, skipSummary: summaryScope.current === stepScope, bypassStore: refresh > 0, access: wiredAccess, deps: wiredDeps, signal: abort.signal })
+              await chunkIn(result.raw.list.grouping)
               if (!publish()) return
               // The data epoch moved while this was in flight: the answer belongs to the old epoch, so it is dropped and the screen reads again.
               if (currentDataEpoch() !== epoch) { setRefresh(value => value + 1); return }
@@ -448,6 +453,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
             summaryScope.current = ''
             products = await readInventoryCheckProducts<ProductsResult>(productsWireParams(params, 'simple', false), abort.signal)
           }
+          await chunkIn(products.grouping)
           if (publish()) {
             // The sole branch is chosen by a remount: it remembers what the server offered.
             knownGroupings = products.simple === true && products.capabilities?.groupings?.length ? products.capabilities.groupings : null
@@ -1116,6 +1122,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     const missing = entry && lotTotals(entry.lots).dates > 0 ? uncountedDates(stockedFor(id, entry), entry.lots) : []
     if (missing.length) rowRefusals[id] = tr('inventory_check_lots_uncounted_row', 'Not counted: {dates}').replace('{dates}', missing.map(date => date.receivedAt ? fmtDateOnly(date.receivedAt) : '—').join(', '))
   }
+  // Fetched already (the usual case: it came with the answer): drawn directly, so no Suspense turn and no flat frame. Otherwise the lazy wrapper, as before.
+  const GroupedList = groupedListLoaded()?.default ?? InventoryCheckGroupedList
   const listRowProps = { products: visibleProducts, drafts, selecting, rowRefusals, locked: busy || !!submitAttempt.current, canViewStock: access.fields.stock, canViewCounts,
     ...(access.fields.price ? { priceText, promotionRules: data?.promotionRules, exchangeRate } : {}), adornments: issueChips, focusRequest, onCountEntered: onCommitted, t, onOpenProduct: setDetail, ...draftHandlers,
     ...(lotCountsOn && branchId ? { lotCounts: true, loadLots, onLotSet: directSetOn ? setLotFromRow : undefined } : {}) }
@@ -1231,7 +1239,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
             {issueRows.map(row => <InventoryCheckRows key={row.key} products={[row.product]} observations={{ [String(row.product.id)]: row.observation }} adornments={{ [String(row.product.id)]: row.chip }} canCheck={false} {...rowProps} onSave={() => { throw new Error('Open the session to change this check.') }} />)}
           </div>
           : listMode ? (grouping
-            ? <Suspense fallback={<InventoryCheckListRows {...listRowProps} />}><InventoryCheckGroupedList {...listRowProps} grouping={grouping} collapsed={collapsed} onToggle={toggleGroup} /></Suspense>
+            ? <Suspense fallback={<InventoryCheckListRows {...listRowProps} />}><GroupedList {...listRowProps} grouping={grouping} collapsed={collapsed} onToggle={toggleGroup} /></Suspense>
             : <InventoryCheckListRows {...listRowProps} />)
           : <InventoryCheckRows key={scopeKey} products={visibleProducts} observations={observations} errors={rowErrors} adornments={{ ...adornments, ...issueChips }} frozen={frozen} pending={Object.fromEntries(visibleProducts.map(product => [String(product.id), savingId === Number(product.id)]))} locked={busy}
             canCheck={canCheckRows} inSession={!!sessionId} sheetHeader="external" reasonSuggestions={savedReasons.map(reason => reason.label)} focusRequest={focusRequest} onCommitted={onCommitted}

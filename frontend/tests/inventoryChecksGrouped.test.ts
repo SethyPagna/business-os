@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { createHarness, propsOf, type MountedSurface } from './mountedComponentHarness.ts'
+import { createHarness, MemoryNode, propsOf, type MountedSurface } from './mountedComponentHarness.ts'
 import { APP_NAVIGATION_EVENT } from '../src/app/pathRouting.ts'
 import * as dirtyWork from '../src/utils/dirtyWork.ts'
 import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
@@ -78,6 +78,20 @@ const chooseGroup = async (s: MountedSurface, option: string) => {
   await s.click(s.find(node => node.getAttribute('role') === 'option' && section.contains(node) && node.textContent === option, option))
 }
 const search = (s: MountedSurface) => s.field('inventory-check-search')
+// Every frame that reaches the screen with rows but no group header is a flat first paint: the grouped list's chunk is fetched with the first request and the list is drawn once both are in.
+function watchFlatFrames() {
+  const flatFrames: string[] = []
+  const originals = { appendChild: MemoryNode.prototype.appendChild, insertBefore: MemoryNode.prototype.insertBefore }
+  for (const name of ['appendChild', 'insertBefore'] as const) {
+    const original = originals[name] as (...args: unknown[]) => unknown
+    ;(MemoryNode.prototype as unknown as Record<string, unknown>)[name] = function (this: MemoryNode, ...args: unknown[]) {
+      const result = original.apply(this, args)
+      if (document.body.querySelector('[data-inventory-check-row]') && !document.body.querySelector('[data-inventory-check-group]')) flatFrames.push(name)
+      return result
+    }
+  }
+  return { stop: () => { Object.assign(MemoryNode.prototype, originals); return flatFrames } }
+}
 // Every Sort choice, one after the other, with "No grouping" already chosen: each read is flat, sends no groupBy, and nothing draws a section. Returns how many choices were walked.
 const sweepSorts = async (s: MountedSurface, sent: Array<Record<string, unknown>> = requests) => {
   const openSort = async () => {
@@ -124,7 +138,9 @@ try {
   groupings = ['checked', 'category']
   serverGroups = true
   requests.length = 0
+  const watch = watchFlatFrames()
   const s = await mount()
+  assert.deepEqual(watch.stop(), [], 'the first paint of a grouped list is grouped: never flat, then regrouped')
   assert.equal(requests.length, 1, 'a cold tab on a grouping server is also one list read')
   assert.ok(requests[0].groupBy === 'checked' && requests[0].sortBy === undefined && requests[0].sortDirection === undefined, 'groupBy=checked, no sort')
   assert.deepEqual(headers(s).map(node => node.getAttribute('data-inventory-check-group')), ['d:2026-11-12', 'd:2026-11-03', 'never'])
@@ -199,7 +215,9 @@ try {
   // 8. ic_wired: the first read of the Products-backed list carries groupBy and no sort, and its sections draw.
   await harness.close(); harness = await createHarness({ observe: ['api/actorReadScope.ts', 'utils/dirtyWork.ts'] })
   wiredOn = true
+  const wiredWatch = watchFlatFrames()
   const wiredPage = await mount()
+  assert.deepEqual(wiredWatch.stop(), [], 'wired: the first paint is grouped too')
   assert.equal(wiredRequests.length, 1, 'a cold wired tab is one list read')
   assert.ok(wiredRequests[0].groupBy === 'checked' && wiredRequests[0].sortBy === undefined && wiredRequests[0].sortDirection === undefined, 'groupBy=checked, no sort')
   assert.deepEqual(headers(wiredPage).map(node => node.getAttribute('data-inventory-check-group')), ['d:2026-11-12', 'd:2026-11-03', 'never'], 'the wired list is drawn in sections')
