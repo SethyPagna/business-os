@@ -43,36 +43,21 @@ const flag = name => (process.argv.slice(2).find(arg => arg.startsWith(`--${name
 const WRONG = flag('wrong')
 const BASE = flag('base')
 const GATE = 'src/lib/courierCostAccess.ts'
-const GATE_EXPRESSION = '  return isAdminControlUser(user)
-}
-
-/**
- * The per-role switch'
+const NL = String.fromCharCode(10)
+// The gate is now admin only; the mutants rewrite its body to the old or a wrong rule. The body is anchored with the closing brace and the
+// start of the next doc comment, so the anchor occurs once (the retired per-role switch function follows it).
+const TAIL = NL + '}' + NL + NL + '/**' + NL + ' * The per-role switch'
+const GATE_EXPRESSION = '  return isAdminControlUser(user)' + TAIL
+const body = (text) => '  ' + text + TAIL
 const MUTANTS = {
-  open: [{ name: 'open', file: GATE, from: GATE_EXPRESSION, to: '  return true
-}
-
-/**
- * The per-role switch' }],
-  amend: [{ name: 'amend', file: GATE, from: GATE_EXPRESSION, to: "  return isAdminControlUser(user) || getActionTier(user, 'sales', 'amend') === 'full'
-}
-
-/**
- * The per-role switch" }],
-  'sales-switch': [{ name: 'sales-switch', file: GATE, from: GATE_EXPRESSION, to: "  return isAdminControlUser(user) || getActionTier(user, 'sales', 'view_courier_cost') !== 'none'
-}
-
-/**
- * The per-role switch" }],
+  open: [{ name: 'open', file: GATE, from: GATE_EXPRESSION, to: body('return true') }],
+  amend: [{ name: 'amend', file: GATE, from: GATE_EXPRESSION, to: body("return isAdminControlUser(user) || getActionTier(user, 'sales', 'amend') === 'full'") }],
+  'sales-switch': [{ name: 'sales-switch', file: GATE, from: GATE_EXPRESSION, to: body("return isAdminControlUser(user) || getActionTier(user, 'sales', 'view_courier_cost') !== 'none'") }],
   mutation: [{ name: 'mutation', file: GATE, from: 'if (mutation) args[0]', to: 'if (false) args[0]' }],
   'cost-grant': [
     { name: 'cost-grant-import', file: GATE, from: "import { getActionTier, isAdminControlUser, type PermissionUser } from './permissions'",
       to: "import { getActionTier, getMergedPermissions, isAdminControlUser, type PermissionUser } from './permissions'" },
-    { name: 'cost-grant', file: GATE, from: GATE_EXPRESSION, to: '  return isAdminControlUser(user) || getMergedPermissions(user).product_cost_view === true
-}
-
-/**
- * The per-role switch' },
+    { name: 'cost-grant', file: GATE, from: GATE_EXPRESSION, to: body('return isAdminControlUser(user) || getMergedPermissions(user).product_cost_view === true') },
   ],
   summary: [{ name: 'summary', file: GATE, from: "record.summary.replace(COURIER_COST_SUMMARY, '$1 changed')", to: 'record.summary' }],
   ledger: [{ name: 'ledger', file: GATE, from: 'const costEntry = row.kind === COST_LEDGER_KIND', to: 'const costEntry = false' }],
