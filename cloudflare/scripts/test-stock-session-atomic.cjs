@@ -13,13 +13,27 @@ const Database = require('better-sqlite3')
 
 const root = path.join(__dirname, '..')
 
+// Owner rule, 15 Nov 2026: cost entry is administrator only. Most cases in this file are about atomicity, replay and the
+// Inventory / Products tier gates, and they need a caller who may enter a cost but is NOT an administrator (an administrator
+// passes every tier gate, so the tier-denial cases could not run). Until a case sets globalThis.__costRuleAdmin they therefore
+// read the retained switch-back (holdsCostViewGrant / holdsCostEditGrant, lib/acquisitionCostAccess.ts). The cost rule itself
+// is pinned by 'cost entry is administrator only' below, which turns the real rule on.
+function legacyCostGrantShim(text) {
+  const swap = (name, grant) => (source) => source.replace(
+    new RegExp(`export function ${name}\\(user: PermissionUser\\): boolean \\{\\s*return isAdminControlUser\\(user\\)`),
+    `export function ${name}(user: PermissionUser): boolean {\n  return (globalThis as any).__costRuleAdmin ? isAdminControlUser(user) : ${grant}(user)`)
+  const patched = swap('canEditAcquisitionCosts', 'holdsCostEditGrant')(swap('canViewAcquisitionCosts', 'holdsCostViewGrant')(text))
+  if (patched.split('__costRuleAdmin').length !== 3) throw new Error('acquisitionCostAccess.ts changed shape: the stock-session fixture shim no longer applies')
+  return patched
+}
+
 function loadStockSession(entry = 'lib/stockSession.ts', actor = user) {
   const cache = new Map()
   const load = (relativeFile) => {
     const normalized = relativeFile.replaceAll('\\', '/')
     if (cache.has(normalized)) return cache.get(normalized).exports
     const file = path.join(root, 'src', normalized)
-    const output = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    const output = ts.transpileModule(normalized === 'lib/acquisitionCostAccess.ts' ? legacyCostGrantShim(fs.readFileSync(file, 'utf8')) : fs.readFileSync(file, 'utf8'), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: file,
     }).outputText
     const mod = { exports: {} }
@@ -215,6 +229,20 @@ async function main() {
     assert.deepEqual(await response.json(), { error: 'createdFrom and createdTo must be provided together' })
   })
   const { commitStockSession, replayStockSession, StockSessionError } = loadStockSession()
+  await check('cost entry is administrator only: a non-admin holding both cost grants is refused and an administrator is admitted', async () => {
+    globalThis.__costRuleAdmin = true
+    try {
+      const f = fixture()
+      const before = f.sql.serialize()
+      const grantHolder = { ...user, permissions: JSON.stringify({ inventory: true, products: true, product_cost_edit: true, product_cost_view: true }) }
+      await assert.rejects(() => commitStockSession(f.env, grantHolder, receiveRequest('grant-holder-refused')),
+        error => error instanceof StockSessionError && error.statusCode === 403 && error.code === 'product_cost_edit_required')
+      assert.deepEqual(f.sql.serialize(), before, 'the refusal wrote nothing')
+      const admin = { ...user, role_code: 'admin', permissions: '{}' }
+      const committed = await commitStockSession(f.env, admin, receiveRequest('admin-admitted'))
+      assert.ok(committed, 'the administrator commits the same receipt')
+    } finally { delete globalThis.__costRuleAdmin }
+  })
   await check('cost entry defaults denied independently of inventory and products grants', async () => {
     const f = fixture()
     const before = f.sql.serialize()
