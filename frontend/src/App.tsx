@@ -14,6 +14,8 @@ import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getM
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.ts'
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.ts'
 import { NAV_ITEMS } from './components/shared/navigationConfig.ts'
+import { landingBounceTarget } from './app/landingPage.ts'
+import { effectivePermissions } from './utils/permissions.ts'
 import { ensureTextAffordances } from './components/shared/textAffordances.ts'
 import IosInstallHint from './components/shared/IosInstallHint.tsx'
 import D1LimitBanner from './components/server/D1LimitBanner.tsx'
@@ -1891,6 +1893,32 @@ export default function App() {
     if (!user || !page || canAccessPage(page)) return
     const fallback = NAV_ITEMS.find((item) => canAccessPage(item.id))
     if (fallback && fallback.id !== page) setPage(fallback.id as AdminPageId)
+  }, [canAccessPage, page, setPage, user])
+
+  // A Dashboard-view-only account (an Employee) keeps its pre-15-Nov landing: until its first tap or key after sign-in, a landing on
+  // the Dashboard moves to the first other page it can open (app/landingPage.ts).
+  const landingBounceActive = useRef(false)
+  useEffect(() => {
+    if (!user) { landingBounceActive.current = false; return undefined }
+    landingBounceActive.current = true
+    const disarm = () => { landingBounceActive.current = false }
+    window.addEventListener('pointerdown', disarm, { once: true, capture: true })
+    window.addEventListener('keydown', disarm, { once: true, capture: true })
+    return () => {
+      window.removeEventListener('pointerdown', disarm, true)
+      window.removeEventListener('keydown', disarm, true)
+    }
+  }, [user?.id])
+  useEffect(() => {
+    if (!user) return
+    const target = landingBounceTarget({
+      page,
+      active: landingBounceActive.current,
+      viewOnlyDashboard: canAccessPage('dashboard') && !effectivePermissions(user as never).hasPermission('dashboard_export'),
+      navIds: NAV_ITEMS.map((item) => item.id),
+      canAccessPage,
+    })
+    if (target) setPage(target as AdminPageId)
   }, [canAccessPage, page, setPage, user])
 
   const accessDeniedNode = useMemo(() => <AccessDenied />, [AccessDenied])
