@@ -44,12 +44,27 @@ function historyEntries({ lastPage = 1, lastPageName = 1 } = {}) {
     ['inventory-checks/products ic_simple grouped checked all branches', '/api/inventory-checks/products?groupBy=checked&page=1&pageSize=20', `/api/inventory-checks/products?${name}&page=1&pageSize=20`],
     ['inventory-checks/products ic_simple grouped category', `${B}&groupBy=category&page=1&pageSize=20`, `${B}&${name}&page=1&pageSize=20`],
     ['inventory-checks/products ic_simple grouped category page 2', `${B}&groupBy=category&page=2&pageSize=20&summary=0`, `${B}&${name}&page=2&pageSize=20&summary=0`],
+    // The wired list (ic_wired), measured against its own name twin (the Products reader in name order) on the same world.
+    ...wiredEntries(),
+  ]
+}
+
+function wiredEntries() {
+  const L = '/api/inventory-checks/list?branchId=1'
+  const twin = 'sortBy=name'
+  return [
+    ['inventory-checks/list wired grouped checked', `${L}&groupBy=checked&page=1&pageSize=20`, `${L}&${twin}&page=1&pageSize=20`, 'ic_wired'],
+    ['inventory-checks/list wired grouped checked page step', `${L}&groupBy=checked&page=2&pageSize=20&summary=0`, `${L}&${twin}&page=2&pageSize=20&summary=0`, 'ic_wired'],
+    ['inventory-checks/list wired grouped checked search', `${L}&groupBy=checked&query=serum&page=1&pageSize=20`, `${L}&${twin}&query=serum&page=1&pageSize=20`, 'ic_wired'],
+    ['inventory-checks/list wired grouped checked low stock', `${L}&groupBy=checked&stockState=low_stock&page=1&pageSize=20`, `${L}&${twin}&stockState=low_stock&page=1&pageSize=20`, 'ic_wired'],
+    ['inventory-checks/list wired grouped checked issues', `${L}&groupBy=checked&checkState=issue&page=1&pageSize=20`, `${L}&${twin}&checkState=issue&page=1&pageSize=20`, 'ic_wired'],
+    ['inventory-checks/list wired grouped category', `${L}&groupBy=category&page=1&pageSize=20`, `${L}&${twin}&page=1&pageSize=20`, 'ic_wired'],
   ]
 }
 
 // Shapes in the getShapes() form ({ id, kind, method, label, url, switches }) plus `control` (the same request in name order, on the same world).
 function getHistoryShapes(opts) {
-  return historyEntries(opts).map(([label, url, control]) => ({ id: slug(label), kind: 'get', method: 'GET', label, url, anon: false, longRange: false, switches: ['ic_simple'], control }))
+  return historyEntries(opts).map(([label, url, control, sw]) => ({ id: slug(label), kind: 'get', method: 'GET', label, url, anon: false, longRange: false, switches: [sw || 'ic_simple'], control }))
 }
 
 module.exports = { seedIcHistory, getHistoryShapes, I_SEED, DAYS, LINES }
