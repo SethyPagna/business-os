@@ -17,7 +17,7 @@ import { getPlanLimits } from './planTier'
 // Writers that leave no movement (branch cutover, merge undo, restore, reset, integrity repair) show the previous movement; test-inventory-last-change-writers-native.cjs
 // checks every write shape against that allowlist.
 
-const COUNT_ENTRIES_SQL = `SELECT i.product_id AS product_id, i.state AS state, i.counted_quantity AS counted_quantity, i.baseline_quantity AS baseline_quantity, i.reason AS reason,
+export const COUNT_ENTRIES_SQL = `SELECT i.product_id AS product_id, i.state AS state, i.counted_quantity AS counted_quantity, i.baseline_quantity AS baseline_quantity, i.reason AS reason,
     i.updated_by AS updated_by, i.updated_at AS updated_at, i.session_id AS session_id, i.revision AS revision, s.created_by AS created_by, u.username AS by_name
   FROM json_each(@ids) wanted
   JOIN inventory_check_items i ON i.product_id = wanted.value AND i.branch_id = @branchId AND i.session_id = (

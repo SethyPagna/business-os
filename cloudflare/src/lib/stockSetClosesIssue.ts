@@ -21,7 +21,7 @@ export const SET_CLOSE_MEMBERSHIP = 'stock_set'
 const EPS = '0.000000001'
 
 // The product's newest done/issue item at the branch inside the actor's organization (the same order the Issues filter uses).
-const LATEST = `SELECT i.session_id AS session_id, i.state AS state, i.counted_quantity AS counted, s.scope_json AS scope_json
+export const LATEST = `SELECT i.session_id AS session_id, i.state AS state, i.counted_quantity AS counted, s.scope_json AS scope_json
   FROM inventory_check_sessions s JOIN inventory_check_items i ON i.session_id=s.id AND i.branch_id=s.branch_id
   WHERE s.organization_id IS @organization AND s.branch_id=@branch AND i.product_id=@product AND i.state IN ('done','issue')
   ORDER BY i.updated_at DESC, i.session_id DESC LIMIT 1`
