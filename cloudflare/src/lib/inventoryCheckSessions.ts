@@ -157,16 +157,27 @@ export async function approvalsAvailable(db: D1Compat): Promise<boolean> {
   return approvalsSchemaReady
 }
 let lotLinesSchemaReady = false
-/** True once migration 0294 (inventory_check_lot_lines) is applied; a positive answer is remembered for the isolate, a miss re-probes. */
-export async function lotLinesAvailable(db: D1Compat): Promise<boolean> {
+let lotLinesMissingAt = 0
+/**
+ * True once migration 0294 (inventory_check_lot_lines) is applied; a positive answer is remembered for the isolate. A MISSING table is remembered for retryAfterMs (the routes pass the plan's
+ * read-switch window, readSwitchMemoMs): without 0294 every list, overlay and lots read would otherwise spend a D1 call on a probe that cannot succeed. It is a window, not for ever, so a migration
+ * applied while the isolate lives is seen within it. Any other failure (a transient D1 error) is never remembered. 0 (the default) probes every time.
+ */
+export async function lotLinesAvailable(db: D1Compat, retryAfterMs = 0, now: number = Date.now()): Promise<boolean> {
   if (lotLinesSchemaReady) return true
+  if (retryAfterMs > 0 && lotLinesMissingAt > 0 && now - lotLinesMissingAt < retryAfterMs) return false
   try {
     // A zero-row probe of the table itself (the migration creates the table, its index and its two triggers together): it reads no schema rows, which a cold isolate pays for with a sqlite_master scan.
     await db.prepare('SELECT 1 FROM inventory_check_lot_lines LIMIT 0').all()
-    lotLinesSchemaReady = true
-  } catch { lotLinesSchemaReady = false }
+    lotLinesSchemaReady = true; lotLinesMissingAt = 0
+  } catch (error) {
+    lotLinesSchemaReady = false
+    lotLinesMissingAt = /no such table/i.test(error instanceof Error ? error.message : String(error)) ? now : 0
+  }
   return lotLinesSchemaReady
 }
+/** Test hook: forget what this isolate learned about the table. */
+export function resetLotLinesProbeForTests(): void { lotLinesSchemaReady = false; lotLinesMissingAt = 0 }
 export async function approvalsReady(db: D1Compat): Promise<void> {
   if (!await approvalsAvailable(db)) fail(503, 'inventory_check_schema_unavailable')
 }

@@ -4,7 +4,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { getDb } from '../lib/db'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
-import { readSwitch } from '../lib/readSwitches'
+import { readSwitch, readSwitchMemoMs } from '../lib/readSwitches'
 import type { Env } from '../index'
 import { decideInventoryCheckApproval, type ApprovalDecided } from '../lib/inventoryCheckApprovals'
 import { getPlanLimits } from '../lib/planTier'
@@ -50,7 +50,7 @@ app.onError((error,c) => {
 /** ic_fix_stock counts as ON only once migration 0286 is applied: with the switch on and the table missing every count would fail, so it answers exactly as OFF. */
 const fixStockOn = async (c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>): Promise<boolean> => await readSwitch(c.env, 'ic_fix_stock') && await approvalsAvailable(getDb(c.env))
 /** ic_lot_counts counts as ON only once migration 0294 is applied: with the switch on and the table missing every lot count would fail, so it answers exactly as OFF. */
-const lotCountsOn = async (c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>): Promise<boolean> => await readSwitch(c.env, 'ic_lot_counts') && await lotLinesAvailable(getDb(c.env))
+const lotCountsOn = async (c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>): Promise<boolean> => await readSwitch(c.env, 'ic_lot_counts') && await lotLinesAvailable(getDb(c.env), readSwitchMemoMs(c.env))
 async function principal(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>) {
   const token = getCookie(c, 'bos_session')
   if (!token) throw new InventoryCheckSessionError(401,'invalid_session')
@@ -98,7 +98,7 @@ const capabilitiesOf = (user: SessionUser, fixStock: boolean, lotCounts: boolean
     ...(caps ? { lotLinesPerSubmission: caps.lines, productsPerSubmission: caps.products } : {}), groupings }
 }
 const submissionCaps = async (c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, lotCounts: boolean) => {
-  if (!lotCounts && !await lotLinesAvailable(getDb(c.env))) return null
+  if (!lotCounts && !await lotLinesAvailable(getDb(c.env), readSwitchMemoMs(c.env))) return null
   const limits = getPlanLimits(c.env)
   return { lines: limits.inventoryCheckLotLinesPerSubmission, products: limits.inventoryCheckProductsPerSubmission }
 }
@@ -209,7 +209,7 @@ app.post('/submissions', async c => {
   // A submission whose lines carry received dates (`lots`) is the ic_lot_counts writer's; with the switch off the older writer refuses the key exactly as it always did.
   const withLots = Array.isArray((input as { lines?: unknown } | null)?.lines) && ((input as { lines: unknown[] }).lines).some(line => !!line && typeof line === 'object' && Object.hasOwn(line, 'lots'))
   // While the page is wired (ic_wired) its rows show and send branch_stock, i.e. sellable units: every submission is then judged by the writer that measures exactly that, plain lines included. The older writer's baseline adds held units and would turn a held product into a false shortage or a 409 loop.
-  const lotCounts = withLots ? await lotCountsOn(c) : await readSwitch(c.env, 'ic_wired') && await lotLinesAvailable(getDb(c.env))
+  const lotCounts = withLots ? await lotCountsOn(c) : await readSwitch(c.env, 'ic_wired') && await lotLinesAvailable(getDb(c.env), readSwitchMemoMs(c.env))
   // A tab that still holds the switch ON after it went OFF sends dates: a plain 409 with its own code, so the page re-reads its capabilities once instead of repeating a 400.
   if (withLots && !lotCounts) throw new InventoryCheckSessionError(409, 'inventory_check_lot_counts_off')
   const writer = lotCounts ? (db: ReturnType<typeof getDb>, who: Awaited<ReturnType<typeof principal>>, body: unknown, _low: Awaited<ReturnType<typeof loadLowStockConfig>>, options: Parameters<typeof createInventoryCheckSubmission>[4]) =>
