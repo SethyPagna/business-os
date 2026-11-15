@@ -1,6 +1,14 @@
-// Every Inventory-hub surface that shows an on-hand figure renders <StockQty>, and none keeps a private
-// copy of the state rule (the detail pane used to colour by qty <= 0, ignoring the out-of-stock threshold).
-// Surfaces still pending are named here so adopting them later is a deliberate edit of this list:
+// Every Inventory-hub surface that shows the CURRENT on-hand quantity of one product renders <StockQty>, and none
+// keeps a private copy of the state rule (the detail pane used to colour by qty <= 0, ignoring the out-of-stock threshold).
+//
+// Deliberately plain (each is not a current on-hand figure, or has nothing to tint):
+//   - movement deltas (InventoryMovementsSurface.tsx): signed changes, not stock.
+//   - movement past balances (MovementDetailFloat.tsx, ProductHistoryPreviewModal.tsx): a balance at a past moment.
+//   - lots (ManageBatchesModal.tsx): lot figures have no thresholds.
+//   - the projected before -> after in the stock-session review (StockSessionReviewStep.tsx): a projection, not on-hand.
+//   - select-option labels (Inventory.tsx, FastStockInModal.tsx): plain text, nothing to tint.
+//   - the per-branch breakdown lines in the list: a branch slice against all-branch thresholds would read "out" almost everywhere.
+// Pending, named so adopting them is a deliberate edit of this list:
 //   InventoryChecksPage.tsx / InventoryCheck*.tsx -- another lane owns them and adopts <StockQty> once both land.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -11,6 +19,7 @@ const wired: Array<{ file: string; uses: RegExp }> = [
   { file: 'components/inventory/InventoryProductsSurface.tsx', uses: /<StockQty[\s\S]*?qty=\{quantity\(product\)\}/ },
   { file: 'components/inventory/ProductDetailModal.tsx', uses: /<StockQty qty=\{stockQuantity\} product=\{p\}/ },
   { file: 'components/stock-session/StockSessionLineEntry.tsx', uses: /<StockQty qty=\{pickedStock\} product=\{picked\}/ },
+  { file: 'components/inventory/InventoryStockModals.tsx', uses: /<StockQty qty=\{getStockQty\(transferModal\)\} product=\{transferModal\} \/>/ },
 ]
 for (const { file, uses } of wired) {
   const source = read(file)
@@ -33,9 +42,9 @@ for (const file of ['components/inventory/InventoryChecksPage.tsx', 'components/
   assert.ok(!read(file).includes('StockQty'), `${file} belongs to the inventory-check lane and is pending adoption`)
 }
 
-// Movements and lots show quantity DELTAS and lot figures, which have no product thresholds: not stock states.
-for (const file of ['components/inventory/InventoryMovementsSurface.tsx', 'components/inventory/ManageBatchesModal.tsx']) {
-  assert.ok(!read(file).includes('StockQty'), `${file} shows deltas / lot figures, not an on-hand state`)
+// Deltas, past balances, lots and the projected review figure stay plain (reasons in the header).
+for (const file of ['components/inventory/InventoryMovementsSurface.tsx', 'components/inventory/MovementDetailFloat.tsx', 'components/inventory/ProductHistoryPreviewModal.tsx', 'components/inventory/ManageBatchesModal.tsx', 'components/stock-session/StockSessionReviewStep.tsx']) {
+  assert.ok(!read(file).includes('StockQty'), `${file} shows deltas / past balances / lot figures / a projection, not current on-hand`)
 }
 
-console.log('PASS StockQty is wired into the list, the detail pane and the stock-in picker; no private rule remains')
+console.log('PASS StockQty is wired into the list, the detail pane and the stock-in picker, the transfer subtitle; no private rule remains')

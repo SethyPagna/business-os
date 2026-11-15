@@ -8,6 +8,7 @@ import { getProductBatches, type ProductBatch } from '../../api/batchesTransport
 import { sortLotsForDisplay } from '../../utils/lotDisplayOrder.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
+import StockQty from '../shared/StockQty.tsx'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
@@ -144,7 +145,7 @@ export default function InventoryStockModals({
             <div className="flex items-center justify-between border-b border-gray-200 px-3 py-2 dark:border-gray-700 sm:px-4">
               <div className="min-w-0">
                 <h2 className="font-bold text-gray-900 dark:text-white">{tr('transfer', 'Transfer')}</h2>
-                <div className="mt-0.5 detail-scroll-text text-xs text-gray-400">{transferModal.name} - {getStockQty(transferModal)} {transferModal.unit}</div>
+                <div className="mt-0.5 detail-scroll-text text-xs text-gray-400">{transferModal.name} - <StockQty qty={getStockQty(transferModal)} product={transferModal} /> {transferModal.unit}</div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 {onMinimizeTransfer ? <MinimizeButton onMinimize={onMinimizeTransfer} tr={tr} disabled={transferSaving} /> : null}
