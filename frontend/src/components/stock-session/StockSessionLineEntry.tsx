@@ -14,6 +14,7 @@ import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import StockConditionTagRow from '../inventory/StockConditionTagRow.tsx'
+import StockQty from '../shared/StockQty.tsx'
 import type { SavedStockReason } from '../../utils/useSavedStockReasons.ts'
 import type { LineEntryField, StockMode, StockSessionProduct } from '../../utils/stockSessionDraft.ts'
 import { IconField, InsetNumberField, INVALID_RING } from './StockSessionSharedDetails.tsx'
@@ -164,7 +165,7 @@ export default function StockSessionLineEntry(props: LineEntryProps) {
             {String(picked.name || `#${picked.id}`)}
             {pickedIsNew ? <span className="ml-1.5 inline-block rounded bg-emerald-100 px-1 align-middle text-[10px] font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">{tr('stock_session_new_product', 'New')}</span> : null}
           </span>
-          <span className="shrink-0 text-xs tabular-nums text-gray-500 dark:text-gray-400">{tr('stock', 'Stock')} {pickedStock}</span>
+          <span className="shrink-0 text-xs tabular-nums text-gray-500 dark:text-gray-400">{tr('stock', 'Stock')} {pickedIsNew ? pickedStock : <StockQty qty={pickedStock} product={picked} />}</span>
           <button type="button" disabled={busy} onClick={onClearPick} aria-label={tr('clear', 'Clear')} title={tr('clear', 'Clear')} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-white hover:text-gray-600 disabled:opacity-50 dark:hover:bg-gray-800">
             <X className="h-4 w-4" />
           </button>
