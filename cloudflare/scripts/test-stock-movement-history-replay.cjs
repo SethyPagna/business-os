@@ -5,7 +5,7 @@ function seedFixture(raw, seed) {
   return value
 }
 const assert = require('node:assert/strict')
-const { fixture, loadStockSession, user, receiveRequest } = require('./test-stock-session-atomic.cjs')
+const { fixture, loadStockSession, user, staff, receiveRequest } = require('./test-stock-session-atomic.cjs')
 const tables = ['products', 'branch_stock', 'product_batches', 'branch_batch_stock', 'inventory_movements', 'stock_session_operations', 'stock_session_members', 'stock_session_revisions', 'stock_lot_adjustment_operations', 'action_history', 'undo_snapshots', 'audit_logs']
 const state = f => tables.map(t => [t, f.sql.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()])
 const route = loadStockSession('routes/actionHistory.ts').default
@@ -16,7 +16,7 @@ async function call(f, method, url, body, actor = user) {
 }
 const preview = (f, id, actor) => call(f, 'GET', `/movements/${id}/revert-preview`, undefined, actor)
 const replay = (f, p, actor) => call(f, 'POST', `/${p.historyId}/${p.direction}`, { require_applied: true, expected_generation: p.expectedGeneration }, actor)
-const denied = { ...user, permissions: JSON.stringify({ inventory: true, 'inventory:adjust': false, products: true }) }
+const denied = { ...staff, permissions: JSON.stringify({ inventory: true, 'inventory:adjust': false, products: true }) }
 
 async function main() {
   const f = fixture()
@@ -34,10 +34,10 @@ async function main() {
     assert.deepEqual([p.kind, p.historyId, p.operationId, p.expectedGeneration, p.direction, p.lineCount], ['stock_session', receipt.actionHistoryId, receipt.operationId, 0, 'undo', 2])
     assert.equal((await preview(f, firstMovement, denied)).status, 403)
     assert.ok([403, 404].includes((await replay(f, p, denied)).status))
-    const noProductAdd = { ...user, permissions: JSON.stringify({ inventory: true, products: true, 'products:add': false }) }
+    const noProductAdd = { ...staff, permissions: JSON.stringify({ inventory: true, products: true, 'products:add': false }) }
     assert.equal((await preview(f, firstMovement, noProductAdd)).status, 403)
     assert.ok([403, 404].includes((await replay(f, p, noProductAdd)).status))
-    const otherActor = { ...user, id: 8 }
+    const otherActor = { ...staff, id: 8 }
     assert.equal((await preview(f, firstMovement, otherActor)).status, 403)
     assert.ok([403, 404].includes((await replay(f, p, otherActor)).status))
     assert.equal((await preview(f, 'bad')).status, 400)

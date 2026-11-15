@@ -830,5 +830,5 @@ async function main() {
   if (failures.length) throw new Error(`${failures.length} stock-session atomic regression(s) failed`)
 }
 
-module.exports = { fixture, loadStockSession, user, receiveRequest, zeroCreateRequest, receiptState, seedDistinctProducts }
+module.exports = { fixture, loadStockSession, user, staff, withoutCost, receiveRequest, zeroCreateRequest, receiptState, seedDistinctProducts }
 if (require.main === module) main().catch((error) => { console.error(error); process.exitCode = 1 })
