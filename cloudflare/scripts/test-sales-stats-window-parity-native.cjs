@@ -52,6 +52,13 @@ const sales = [
   [10, '2026-09-04 09:30:00', 'completed', 1, 20, 20], // outside, return dated inside window
   [11, '2026-09-15 09:30:00', 'completed', 1, 21, 21],
   [12, '2026-09-10 10:00:00', 'completed', 1, 22, 22, null, 2], // sale in branch 1, its item in branch 2 (inside the window)
+  // the other statuses the Sales filter offers, a branch-2 one among them, and a NULL status (counted as completed): outside the one-day window, inside the range
+  [13, '2026-09-11 09:00:00', 'returned', 2, 23, 23],
+  [14, '2026-09-11 09:10:00', 'partial_return', 1, 24, 24],
+  [15, '2026-09-11 09:20:00', 'awaiting_delivery', 1, 25, 0],
+  [16, '2026-09-11 09:30:00', null, 1, 26, 26],
+  [17, '2026-09-11 09:40:00', 'awaiting_payment', 2, 27, 5],
+  [18, '2026-09-11 09:50:00', 'cancelled', 2, 28, 28],
 ]
 for (const [id, at, status, branch, total, paid, upd, itemBranch] of sales) {
   insertSale.run({ id, rn: `R${id}`, at, upd: upd || at, status, branch, total, paid })
@@ -109,17 +116,32 @@ const cases = {
   'empty window': { startDate: '2027-01-01', endDate: '2027-01-02' },
   'no window at all': {},
   'branch only': { branchId: '2' },
+  'branch 1 only': { branchId: '1' },
+  'range + branch 1': { startDate: '2026-09-05', endDate: '2026-09-12', branchId: '1' },
+  'range + branch 2': { startDate: '2026-09-05', endDate: '2026-09-12', branchId: '2' },
+  // every status option, an unknown value, each alone (no window), in the range, and beside a branch: the classification (broad / narrow) must never change a figure
+  ...Object.fromEntries(['completed', 'awaiting_payment', 'returned', 'partial_return', 'awaiting_delivery', 'cancelled', 'bogus'].flatMap((st) => [
+    [`status ${st} all-time`, { status: st }],
+    [`status ${st} range`, { startDate: '2026-09-05', endDate: '2026-09-12', status: st }],
+    [`status ${st} + branch 1`, { status: st, branchId: '1' }],
+    [`status ${st} + branch 2 range`, { startDate: '2026-09-05', endDate: '2026-09-12', status: st, branchId: '2' }],
+  ])),
 }
 
 ;(async () => {
   for (const [name, query] of Object.entries(cases)) {
-    await check(`old filter and new filter agree: ${name}`, async () => {
-      const { where, params } = build(query)
-      const oldSnap = await lib.readSalesReportSnapshot({}, {}, false, lib.salesListFilterReportScope(where, params))
-      const newSnap = await lib.readSalesReportSnapshot({}, windowOf(query), false, lib.salesListFilterReportScope(where, params))
-      assert.equal(JSON.stringify(newSnap), JSON.stringify(oldSnap))
-      assert.deepEqual(lib.salesTotalsFromSnapshot(newSnap), lib.salesTotalsFromSnapshot(oldSnap))
-    })
+    // both classifications of the same scope (broad: the plain cancelled predicate and +id paging; narrow: the wrapped predicate): the figures are the same either way, and the same as the old call
+    for (const narrow of [false, true]) {
+      await check(`old filter and new filter agree (${narrow ? 'narrow' : 'broad'} scope): ${name}`, async () => {
+        const { where, params } = build(query)
+        const oldSnap = await lib.readSalesReportSnapshot({}, {}, false, lib.salesListFilterReportScope(where, params, narrow))
+        const newSnap = await lib.readSalesReportSnapshot({}, windowOf(query), false, lib.salesListFilterReportScope(where, params, narrow))
+        assert.equal(JSON.stringify(newSnap), JSON.stringify(oldSnap))
+        assert.deepEqual(lib.salesTotalsFromSnapshot(newSnap), lib.salesTotalsFromSnapshot(oldSnap))
+        const other = await lib.readSalesReportSnapshot({}, windowOf(query), false, lib.salesListFilterReportScope(where, params, !narrow))
+        assert.deepEqual(lib.salesTotalsFromSnapshot(other), lib.salesTotalsFromSnapshot(newSnap), 'broad and narrow classification must give the same totals')
+      })
+    }
   }
 
   await check('control: the one-day window really narrows, edges and later events behave', async () => {
@@ -171,7 +193,9 @@ const cases = {
     assert.match(block, /const windowFilter=\{startDate:query\.startDate\|\|null,endDate:query\.endDate\|\|null,startTime:query\.startTime\|\|null,endTime:query\.endTime\|\|null\}/)
     assert.match(block, /readSalesHeaderTotals\(c\.env,\s*windowFilter,\s*scope\)/)
     assert.match(block, /salesListFilterReportScope\(where,\s*params(?:,\s*narrowScope)?\)/)
-    assert.match(block, /const narrowScope = where\.length - 1 - windowClauseCount - \(statusClausePushed \? 1 : 0\) > 0\r?\n/, 'narrowScope counts the clauses beyond the window and the status test')
+    assert.match(block, /const narrowScope = where\.length - 1 - windowClauseCount - \(statusClausePushed && statsStatusIsBroad\(String\(query\.status\)\) \? 1 : 0\) - \(branchClausePushed \? 1 : 0\) > 0\r?\n/, 'narrowScope counts the clauses beyond the window and the status test')
+    assert.ok(src.includes("const BROAD_STATS_STATUSES: ReadonlySet<string> = new Set(['completed', 'awaiting_payment'])"), 'only completed and awaiting_payment are broad statuses')
+    assert.match(src, /function statsStatusIsBroad\(raw: string\): boolean \{\r?\n  const statuses = raw\.split\(','\)\.map\(\(v\) => v\.trim\(\)\)\.filter\(Boolean\)\r?\n  return statuses\.length > 0 && statuses\.every\(\(status\) => BROAD_STATS_STATUSES\.has\(status\)\)/, 'the status rule: every listed status must be broad')
     assert.match(block, /const scope = where\.length - 1 === windowClauseCount && !openEndedStart \? undefined : salesListFilterReportScope\(where,\s*params(?:,\s*narrowScope)?\)/, 'only the window drops the scope')
   })
 

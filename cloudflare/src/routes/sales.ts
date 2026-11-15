@@ -6394,6 +6394,16 @@ export function projectOperationalSaleCosts(row:Record<string,unknown>,user:Sess
 // recognized-sale revenue definition (all statuses except cancelled) that
 // Sales.tsx already uses per-row, but as a single SQL
 // aggregate over every matching row, not just the page that was fetched.
+// Which status filters leave the report scope BROAD (plain cancelled predicate and +id paging, the saving) and which are NARROW (the old wrapped predicate: the cancelled group probes the scope).
+// The shop sells Completed and Not Paid (awaiting_payment); returns are tags and the other options are rare. The two sold statuses hold most of the sales, so they stay broad (all-time rows read on the
+// lab seed: completed 523,961 broad vs 577,827 narrow, awaiting_payment 15,348 vs 17,238; pre-lane 577,817 / 17,228). A rare status (returned, partial_return, awaiting_delivery, cancelled, or a value
+// the filter does not know) holds a few sales: 135-183 rows read narrow, 1,989-2,099 broad, so it keeps the pre-lane wrapped predicate.
+const BROAD_STATS_STATUSES: ReadonlySet<string> = new Set(['completed', 'awaiting_payment'])
+function statsStatusIsBroad(raw: string): boolean {
+  const statuses = raw.split(',').map((v) => v.trim()).filter(Boolean)
+  return statuses.length > 0 && statuses.every((status) => BROAD_STATS_STATUSES.has(status))
+}
+
 app.get('/stats', async (c) => {
   const query = c.req.query()
   const user = c.get('user')
@@ -6442,7 +6452,9 @@ app.get('/stats', async (c) => {
     const clause = saleStatusFilterClause(String(query.status), params)
     if (clause) { where.push(clause); statusClausePushed = true }
   }
+  let branchClausePushed = false
   if (query.branchId) {
+    branchClausePushed = true
     where.push('(s.branch_id = @branchId OR EXISTS (SELECT 1 FROM sale_items sif WHERE sif.sale_id = s.id AND sif.branch_id = @branchId))')
     params.branchId = query.branchId
   }
@@ -6460,8 +6472,8 @@ app.get('/stats', async (c) => {
     // scope still carries every list predicate, so the cohort is unchanged. Branch, cashier, status and
     // search stay scope-only (the list's branch rule also matches item branches).
     const windowFilter={startDate:query.startDate||null,endDate:query.endDate||null,startTime:query.startTime||null,endTime:query.endTime||null}
-    // narrow: a clause other than the window and the status test (cashier, user, branch, search, id) holds the scope to a few sales (the cancelled group then probes it by rowid)
-    const narrowScope = where.length - 1 - windowClauseCount - (statusClausePushed ? 1 : 0) > 0
+    // narrow: a clause other than the window, a broad status test and the branch test (cashier, user, search, id, a rare status) holds the scope to a few sales (the cancelled group then probes it by rowid)
+    const narrowScope = where.length - 1 - windowClauseCount - (statusClausePushed && statsStatusIsBroad(String(query.status)) ? 1 : 0) - (branchClausePushed ? 1 : 0) > 0
     const scope = where.length - 1 === windowClauseCount && !openEndedStart ? undefined : salesListFilterReportScope(where, params, narrowScope)
     // Header-only reader: every number below is sale header + returns (no sale lines are read, and no cost or profit exists on the type).
     const totals = await readSalesHeaderTotals(c.env, windowFilter, scope)

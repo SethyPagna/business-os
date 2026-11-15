@@ -305,7 +305,9 @@ check('the totals-purpose projection counts five active, one cancelled and six t
 check('the /stats route delegates to the totals-purpose helper with its complete list scope',
   /readSalesHeaderTotals\(c\.env,\s*windowFilter,\s*scope\)/.test(statsBlock)
   && /salesListFilterReportScope\(where,\s*params(?:,\s*narrowScope)?\)/.test(statsBlock)
-  && /const narrowScope = where\.length - 1 - windowClauseCount - \(statusClausePushed \? 1 : 0\) > 0\r?\n/.test(statsBlock)
+  && /const narrowScope = where\.length - 1 - windowClauseCount - \(statusClausePushed && statsStatusIsBroad\(String\(query\.status\)\) \? 1 : 0\) - \(branchClausePushed \? 1 : 0\) > 0\r?\n/.test(statsBlock)
+  && salesTs.includes("const BROAD_STATS_STATUSES: ReadonlySet<string> = new Set(['completed', 'awaiting_payment'])")
+  && /function statsStatusIsBroad\(raw: string\): boolean \{\r?\n  const statuses = raw\.split\(','\)\.map\(\(v\) => v\.trim\(\)\)\.filter\(Boolean\)\r?\n  return statuses\.length > 0 && statuses\.every\(\(status\) => BROAD_STATS_STATUSES\.has\(status\)\)/.test(salesTs)
   && /const scope = where\.length - 1 === windowClauseCount && !openEndedStart \? undefined : salesListFilterReportScope\(where,\s*params(?:,\s*narrowScope)?\)/.test(statsBlock)
   && /const totals\s*=\s*await readSalesHeaderTotals\b/.test(statsBlock)
   && /revenue_count:\s*totals\.sale_count\b/.test(statsBlock)
