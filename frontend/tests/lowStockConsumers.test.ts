@@ -38,7 +38,7 @@ const LOW_STOCK_CONSUMERS: Array<[string, string]> = [
   ['components/products/ProductsImageOnlyView.tsx', 'Products image grid + its details flyout'],
   ['components/products/surfaces/ProductDetailModal.tsx', 'Products detail modal'],
   ['components/inventory/ProductDetailModal.tsx', 'Inventory detail modal'],
-  ['components/shared/StockQty.tsx', 'Inventory stock figure tint (list, detail pane, stock-in, transfer)'],
+  ['components/inventory/StockQty.tsx', 'Inventory stock figure tint (list, detail pane, stock-in, transfer)'],
   ['components/branches/Branches.tsx', 'Branches per-branch product cards'],
   ['components/pos/POS.tsx', 'POS grid tone + stock pills'],
   ['components/pos/ProductDetailSheet.tsx', 'POS product sheet + its variant rows'],

@@ -637,7 +637,7 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
   .badge-blue   { @apply bg-blue-100   text-blue-700   dark:bg-blue-900/30   dark:text-blue-400   text-xs px-2 py-0.5 rounded-full font-medium; }
   .badge-green, .badge-red, .badge-yellow, .badge-blue { font-size: var(--ui-chip-size, 12px); }
 
-  /* StockQty (shared/StockQty.tsx): the stock FIGURE itself tinted by state -- not a badge beside it.
+  /* StockQty (inventory/StockQty.tsx): the stock FIGURE itself tinted by state -- not a badge beside it.
      Same palettes as the badge-* tokens so a figure reads like the Low/Out badges elsewhere. Weight
      comes from the cell (no font-weight here: Tailwind would widen the Khmer weight rules to it). No
      vertical padding and an inherited line-height: the tint is the text's own line box, so a row

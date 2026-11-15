@@ -17,7 +17,7 @@ import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorR
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { useLowStockConfig } from '../../AppContext'
 import { effectiveLowStockThreshold, stockLevelState } from '../../utils/lowStockSettings.ts'
-import StockQty from '../shared/StockQty.tsx'
+import StockQty from './StockQty.tsx'
 import { TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
 import ScrollText from 'lucide-react/dist/esm/icons/scroll-text.js'

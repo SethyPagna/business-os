@@ -1,4 +1,4 @@
-// <StockQty> (components/shared/StockQty.tsx): the stock figure tinted by state.
+// <StockQty> (components/inventory/StockQty.tsx): the stock figure tinted by state.
 //
 // Rendered for real (react-dom/server) with the app's context, in both language packs. Every state is
 // asserted by its data attribute, tint class, tooltip and screen-reader word, and the family rule for a
@@ -23,7 +23,7 @@ const readSrc = (file: string) => readFileSync(new URL(`../src/${file}`, import.
 // The component compiled for real; only the app context is a stand-in whose language and settings the test sets.
 let language: 'en' | 'km' = 'en'
 let appSettings: Record<string, unknown> | undefined
-function loadComponent(code = readSrc('components/shared/StockQty.tsx')): { default: (props: Record<string, unknown>) => unknown; stockQtyLevel: (input: Record<string, unknown>) => string } {
+function loadComponent(code = readSrc('components/inventory/StockQty.tsx')): { default: (props: Record<string, unknown>) => unknown; stockQtyLevel: (input: Record<string, unknown>) => string } {
   const mod: { exports: Record<string, any> } = { exports: {} }
   new Function('require', 'module', 'exports', transformSync(code, { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code)((id: string) => {
     if (id === 'react' || id === 'react/jsx-runtime') return require(id)
@@ -129,7 +129,7 @@ const base = /\.stock-qty\s*\{([^}]*)\}/.exec(css)
 assert.ok(base && /line-height:\s*inherit/.test(base[1]) && !/\bpy-|\bp-\d|padding-(top|bottom)/.test(base[1]), '.stock-qty adds no vertical size')
 
 // ---- Mutants on the component source: each must break at least one pinned behaviour ----
-const source = readSrc('components/shared/StockQty.tsx')
+const source = readSrc('components/inventory/StockQty.tsx')
 const mutants: Array<{ name: string; from: string; to: string }> = [
   { name: 'members ignored (judges the sum)', from: 'members && members.length > 1 ? stockGroupLevel(members, config) : stockLevelState(qty, product, config)', to: 'stockLevelState(qty, product, config)' },
   { name: 'state word dropped from the tooltip', from: 'title={word}', to: 'title=""' },

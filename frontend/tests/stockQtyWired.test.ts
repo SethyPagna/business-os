@@ -23,7 +23,8 @@ const wired: Array<{ file: string; uses: RegExp }> = [
 ]
 for (const { file, uses } of wired) {
   const source = read(file)
-  assert.ok(source.includes("from '../shared/StockQty.tsx'"), `${file} imports the shared component`)
+  const importPath = file.startsWith('components/inventory/') ? './StockQty.tsx' : '../inventory/StockQty.tsx'
+  assert.ok(source.includes(`from '${importPath}'`), `${file} imports the Inventory StockQty component (kept out of components/shared, which the storefront chunk loads)`)
   assert.ok(uses.test(source), `${file} renders <StockQty> on the on-hand figure`)
 }
 

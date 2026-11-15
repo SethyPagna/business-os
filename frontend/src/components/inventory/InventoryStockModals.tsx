@@ -8,7 +8,7 @@ import { getProductBatches, type ProductBatch } from '../../api/batchesTransport
 import { sortLotsForDisplay } from '../../utils/lotDisplayOrder.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
-import StockQty from '../shared/StockQty.tsx'
+import StockQty from './StockQty.tsx'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
