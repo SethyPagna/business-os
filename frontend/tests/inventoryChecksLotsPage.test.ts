@@ -344,6 +344,47 @@ try {
     assert.deepEqual(lotReads, [], 'marking the page read no batch')
     await surface.unmount()
   }
+  // ---- N1 (review 14 Nov round 2): the whole-page mark never overwrites a row the counter already answered. A chosen status, any date typed (valid or not) and a count all stay. ----
+  {
+    const shape = (line: Record<string, unknown>) => 'lots' in line ? [line.productId, (line.lots as Array<{ batchId: number; counted: number; seen: number }>).map(entry => [entry.batchId, entry.counted, entry.seen])] : [line.productId, 'total', line.countedQuantity]
+    const markPage = async (surface: Awaited<ReturnType<typeof mount>>) => { await surface.click(surface.findAll(node => node.getAttribute('data-selection-action') === 'mark')[0]) }
+    const submitNow = async (surface: Awaited<ReturnType<typeof mount>>) => { await surface.click(surface.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit')); await surface.click(exact(surface, 'Submit').at(-1)!); await new Promise(resolve => setTimeout(resolve, 20)) }
+    const sent = () => (submissions.at(-1)?.lines as Array<Record<string, unknown>> | undefined)?.map(shape)
+    const dated = () => listBody([withLots(productRow(12, 'Dated one', 8))], { capabilities: { ...capabilities, lotLinesPerSubmission: 400 }, summary: { ok: 0, issue: 0, not_checked: 1, total: 1 } })
+    // B1: one valid shortage and one mistyped date, then the page mark: the row stays as the counter left it
+    listAnswer = dated; submissions.length = 0
+    let surface = await mount()
+    await openCount(surface, '12'); await surface.type(dateInput(surface, 7), '4'); await surface.type(dateInput(surface, 9), '3,'); await closeCount(surface)
+    const before = rowCount(surface, '12').value
+    await markPage(surface)
+    assert.equal(rowCount(surface, '12').value, before, 'B1: the page mark left the partly typed row alone')
+    assert.notEqual(statusButton(surface, '12').getAttribute('data-check-status-kind'), 'draft_ok', 'B1: it was not turned into matches stock')
+    await surface.unmount()
+    // B2: "Does not match" per batch, then the page mark: still waiting for its count, never all-matching
+    listAnswer = dated; submissions.length = 0
+    surface = await mount()
+    await openCount(surface, '12'); await surface.click(surface.find(node => node.getAttribute('data-popover-action') === 'differs', 'differs')); await closeCount(surface)
+    await markPage(surface)
+    assert.equal(rowCount(surface, '12').value, '', 'B2: the row still waits for the count the person found')
+    assert.notEqual(statusButton(surface, '12').getAttribute('data-check-status-kind'), 'draft_ok', 'B2: not marked matching')
+    await surface.unmount()
+    // B3 control: one valid differing date alone is kept
+    listAnswer = dated; submissions.length = 0
+    surface = await mount()
+    await openCount(surface, '12'); await surface.type(dateInput(surface, 7), '4'); await closeCount(surface)
+    await markPage(surface); await submitNow(surface)
+    assert.deepEqual(sent(), [[12, [[7, 4, 5]]]], 'B3: a valid typed 4 on one date is kept as typed')
+    await surface.unmount()
+    // B4: plain mode (lot counts off): "Does not match", then the page mark
+    listAnswer = () => listBody([productRow(13, 'Plain', 4), productRow(14, 'Plain two', 6)], { capabilities: { fixStock: true, approveCounts: false }, summary: { ok: 0, issue: 0, not_checked: 2, total: 2 } }); submissions.length = 0
+    surface = await mount()
+    await openCount(surface, '13'); await surface.click(surface.find(node => node.getAttribute('data-popover-action') === 'differs', 'differs')); await closeCount(surface)
+    await markPage(surface)
+    assert.equal(rowCount(surface, '13').value, '', 'B4: the answered row still waits for its count')
+    assert.equal(rowCount(surface, '14').value, '6', 'B4: an untouched row is still marked by the page mark')
+    assert.notEqual(statusButton(surface, '13').getAttribute('data-check-status-kind'), 'draft_ok')
+    await surface.unmount()
+  }
   // ---- audit G1b: the switch went OFF under an open tab: one re-read, then the same counts go as plain lines (no second refusal) ----
   {
     submissions.length = 0

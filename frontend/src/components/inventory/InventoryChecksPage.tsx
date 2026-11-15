@@ -770,7 +770,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       for (const product of selectable) {
         const id = String(product.id), seen = finiteQuantity(product.quantity) ? product.quantity : null
         const entry = result[id]
-        if (seen === null || (entry && entry.count.trim() !== '')) continue
+        // A row the counter already answered is never overwritten: a chosen status ("Does not match" waits for its count with an empty box), any date typed (valid or not: one typo blanks the row total), or a count.
+        if (seen === null || (entry && (entry.selected || entry.count.trim() !== '' || Object.keys(entry.lots ?? {}).length > 0))) continue
         const dates = perBatch ? product.lot_rows ?? [] : []
         if (perBatch && product.lots_more === true) continue
         if (dates.length > 0) {
