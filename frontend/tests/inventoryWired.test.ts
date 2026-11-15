@@ -52,6 +52,8 @@ assert.equal(canonicalProductsQuery(wire({ checkState: 'ok', branchId: '1' })), 
 assert.deepEqual(wiredListParams({ branchId: '', stockState: '', checkState: '', brand: '', category: '', sortBy: 'created', sortDirection: 'desc', query: '', page: 1, pageSize: 50, sessionId: '' }),
   { page: 1, pageSize: 50, sortBy: 'created', sortDirection: 'desc' }, 'empty values and the session id never go to /list')
 assert.deepEqual(wiredListParams({ branchId: '2', sortBy: 'stock', sortDirection: 'asc', page: 2, pageSize: 20 }), { page: 2, pageSize: 20, branchId: '2', sortBy: 'created', sortDirection: 'asc' }, 'a stock sort (not offered) becomes created')
+// The date order of the checks is the grouping "Last checked", never a sort: a stale sortBy=checked never reaches the Worker, with or without a check state.
+for (const checkState of ['', 'ok', 'issue', 'pending']) assert.equal(wiredListParams({ branchId: '1', page: 1, pageSize: 20, sortBy: 'checked', sortDirection: 'desc', checkState }).sortBy, 'created', `sortBy=checked is not sent (checkState '${checkState}')`)
 assert.equal(wiredListParams({ branchId: '1', page: 1, pageSize: 50 }, { omitBranch: true }).branchId, undefined, 'a sole branch is left out of the query')
 assert.equal(wiredListParams({ branchId: '1', page: 1, pageSize: 50 }, { skipSummary: true }).summary, 0, 'a page step skips the counts')
 

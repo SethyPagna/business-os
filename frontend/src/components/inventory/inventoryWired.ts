@@ -45,12 +45,10 @@ export function wiredListParams(params: QueryParams, options: { omitBranch?: boo
   const out: QueryParams = {}
   for (const key of LIST_KEYS) if (present(params[key])) out[key] = params[key]
   if (present(params.branchId) && !options.omitBranch) out.branchId = params.branchId
-  // The date of the check orders only a list of checked products, so it is sent with a check state (a stale choice never reaches the server alone).
-  // ...and never beside a search or filter: the Worker refuses that combination (its pages are cut before they could narrow).
-  const narrowed = ['query', 'brand', 'category', 'stockState'].some(key => present(params[key]))
-  // A grouping defines the order: the server refuses it beside a sort.
+  // A grouping defines the order: the server refuses it beside a sort. The page sends none while a search is typed (and a groupBy that did arrive beside a query is ignored by the Worker).
+  // The date order of the checks is the grouping "Last checked", never a sort.
   if (params.groupBy) out.groupBy = params.groupBy
-  else out.sortBy = params.sortBy === 'name' ? 'name' : params.sortBy === 'checked' && !narrowed && ['ok', 'issue', 'pending'].includes(String(params.checkState)) ? 'checked' : 'created'
+  else out.sortBy = params.sortBy === 'name' ? 'name' : 'created'
   if (!params.groupBy) out.sortDirection = params.sortDirection === 'asc' ? 'asc' : 'desc'
   if (options.skipSummary) out.summary = 0
   return out

@@ -114,7 +114,7 @@ type SubmissionLine = { productId: number; countedQuantity: number; seenQuantity
 type DraftEntry = ListDraft & { name: string; seen: number | null }
 const COUNTS_WORK_KEY = 'inventory-check:counts'
 const MAX_SUBMISSION = 500
-/** Leaving the date order (a status or search changed) goes back to the name order. */
+/** Choosing a grouping puts the sort back at the name order. */
 const NAME_ORDER = { sortBy: 'name', sortDirection: 'asc' as const }
 const initialFilters: InventoryCheckFilters = { branchId: '', stockState: '', checkState: '', brand: '', category: '', sortBy: 'name', sortDirection: 'asc', group: '' }
 /** The groupings this server offered (null: it answered without any; undefined: it has not answered), kept for the tab: a branch change remounts the page. */
@@ -471,7 +471,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         // A status the server no longer offers (a switch moved under this tab) is dropped once and the list read again; a second refusal shows the load error.
         if (publish() && (cause as { code?: unknown } | null)?.code === 'inventory_check_invalid_query' && filters.checkState && !checkStateRetried.current) {
           checkStateRetried.current = true
-          setFilters(previous => ({ ...previous, checkState: '', ...(previous.sortBy === 'checked' ? NAME_ORDER : {}) })); setPage(1)
+          setFilters(previous => ({ ...previous, checkState: '' })); setPage(1)
           return
         }
         if (publish()) setError(tr('inventory_check_load_failed', 'Inventory checks are unavailable. Reload to try again.'))
@@ -585,7 +585,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   function changeFilters(patch: Partial<InventoryCheckFilters>) {
     if (controlsLocked) return
     if (patch.branchId !== undefined && patch.branchId !== branchId) { void selectOrAsk({ branchId: patch.branchId, sessionId: '' }); return }
-    setFilters(previous => ({ ...previous, ...patch, ...(patch.group && patch.group !== 'none' ? NAME_ORDER : {}), ...(previous.sortBy === 'checked' && ((patch.checkState !== undefined && !['ok', 'issue', 'pending'].includes(patch.checkState)) || patch.brand || patch.category || patch.stockState) ? NAME_ORDER : {}) })); setPage(1); setScan(null)
+    setFilters(previous => ({ ...previous, ...patch, ...(patch.group && patch.group !== 'none' ? NAME_ORDER : {}) })); setPage(1); setScan(null)
   }
   function changeSessionFilters(patch: Partial<SessionListFilters>) {
     if (controlsLocked) return
@@ -1020,7 +1020,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   // Typing is read after a pause. A row being edited holds the list still (the controls are disabled), so the pause restarts once it is done.
   useEffect(() => {
     if (query === appliedQuery || controlsLocked) return
-    const timer = window.setTimeout(() => { setAppliedQuery(query); setPage(1); if (query.trim()) setFilters(previous => previous.sortBy === 'checked' ? { ...previous, ...NAME_ORDER } : previous) }, SEARCH_PAUSE_MS)
+    const timer = window.setTimeout(() => { setAppliedQuery(query); setPage(1) }, SEARCH_PAUSE_MS)
     return () => window.clearTimeout(timer)
   }, [query, appliedQuery, controlsLocked, section])
 

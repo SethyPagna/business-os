@@ -665,7 +665,7 @@ try {
     await loose.unmount()
     lotsAnswer = null
   }
-  // ---- owner 9 Nov: the date order is offered once a status that has a checked list is chosen ----
+  // ---- the date order is Group by: Last checked, never a sort: no status makes the Sort menu offer it ----
   {
     listAnswer = () => answerOf()
     const surface = await mount()
@@ -680,9 +680,9 @@ try {
     await surface.click(trigger())
     sortSection = surface.find(node => node.getAttribute('data-filter-menu-section') === 'sort', 'sort section')
     if (sortSection.querySelectorAll('[role="option"]').length === 0) await surface.click(surface.button(/./, sortSection))
-    assert.equal(sortOption().length, 1, 'the date order appears with a checked status')
-    await surface.click(sortOption()[0])
-    assert.equal(lists.at(-1)!.get('sortBy'), 'checked'); assert.equal(lists.at(-1)!.get('checkState'), 'ok')
+    assert.equal(sortOption().length, 0, 'a checked status does not bring a date sort back: that order is the Last checked grouping')
+    assert.ok(sortSection.querySelectorAll('[role="option"]').length >= 2, 'the name sorts are still offered')
+    assert.ok(lists.every(list => list.get('sortBy') !== 'checked'), 'no read ever sorted by the check date')
     await surface.unmount()
   }
   // ---- the switch off: one total per product, and no batch is ever read ----

@@ -7888,7 +7888,6 @@
   "inventory_check_error_lot_unavailable": "This received date no longer has that stock. Nothing was changed.",
   "inventory_check_error_lots_incomplete": "A product received stock on another date after you counted. Its dates were updated: count the new date and submit again. Your counts are kept.",
   "inventory_check_fixed_title": "Set from Inventory",
-  "inventory_check_sort_checked": "Newest check first",
   "inventory_check_unlotted": "No received date",
   "inventory_check_unlotted_hint": "Stock that no received date holds. Stock it in on a date to count it.",
   "inventory_check_more_dates": "More dates",

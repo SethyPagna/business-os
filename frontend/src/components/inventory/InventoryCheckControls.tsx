@@ -81,8 +81,7 @@ export default function InventoryCheckControls({ query, onQueryChange, onQuerySu
   const groupChoiceOption = (value: GroupChoice, text: string, active: boolean): FilterOption => ({ id: `group-${value || 'checked'}`, label: text, active, onClick: () => onFiltersChange({ group: value }) })
   const sortOptions: FilterOption[] = [sortChoice('name', 'asc', t('sort_name_az')), sortChoice('name', 'desc', t('sort_name_za'))]
   if (fields.stock && !wired) sortOptions.push(...highLow('stock', t('stock')))
-  // The date of the check orders a list of checked products, so it is offered once a status that has such a list is chosen.
-  if (wired && ['ok', 'issue', 'pending'].includes(filters.checkState) && !query.trim() && !filters.brand && !filters.category && !filters.stockState) sortOptions.push(sortChoice('checked', 'desc', t('inventory_check_sort_checked')))
+  // The date order of the checks is Group by: Last checked (a grouping, newest first), so Sort offers names and stock only.
 
   // With a grouping the grouping is the order: the Sort choice comes back with "No grouping".
   const sections: FilterSection[] = []

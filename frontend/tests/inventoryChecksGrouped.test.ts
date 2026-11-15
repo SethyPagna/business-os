@@ -78,6 +78,29 @@ const chooseGroup = async (s: MountedSurface, option: string) => {
   await s.click(s.find(node => node.getAttribute('role') === 'option' && section.contains(node) && node.textContent === option, option))
 }
 const search = (s: MountedSurface) => s.field('inventory-check-search')
+// Every Sort choice, one after the other, with "No grouping" already chosen: each read is flat, sends no groupBy, and nothing draws a section. Returns how many choices were walked.
+const sweepSorts = async (s: MountedSurface, sent: Array<Record<string, unknown>> = requests) => {
+  const openSort = async () => {
+    if (!s.findAll(node => node.getAttribute('data-filter-menu-section') !== null).length) await s.click(s.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'filters', 'Filters trigger'))
+    const section = s.find(node => node.getAttribute('data-filter-menu-section') === 'sort', 'Sort section (shown with No grouping)')
+    if (section.querySelectorAll('[role="option"]').length === 0) await s.click(s.button(/./, section))
+    return section
+  }
+  const count = (await openSort()).querySelectorAll('[role="option"]').length
+  assert.ok(count >= 2, 'the Sort menu offers the name sorts')
+  for (let index = 0; index < count; index++) {
+    const section = await openSort()
+    const option = section.querySelectorAll('[role="option"]')[index]
+    const label = option.textContent
+    assert.ok(!/Newest check first|inventory_check_sort_checked/.test(label), 'the date sort is not offered')
+    const before = sent.length
+    await s.click(option)
+    await s.settle({})
+    for (const request of sent.slice(before)) assert.equal(request.groupBy, undefined, `no groupBy with No grouping + ${label}`)
+    assert.equal(headers(s).length, 0, `no sections with No grouping + ${label}`)
+  }
+  return count
+}
 const enter = async (s: MountedSurface) => { const box = search(s); await s.call(box, 'onKeyDown', [{ key: 'Enter', preventDefault() {}, nativeEvent: {}, currentTarget: { value: propsOf(box).value }, target: box }]) }
 
 try {
@@ -169,6 +192,8 @@ try {
   assert.equal(requests.at(-1)?.groupBy, undefined)
   assert.equal(requests.at(-1)?.sortBy, 'name')
   assert.equal(headers(s).length, 0)
+  // 7b. No grouping plus every remaining sort: a flat list, drawn without sections, and no groupBy on the wire.
+  assert.ok(await sweepSorts(s) >= 2, 'ic_simple: every remaining sort is flat')
   await s.unmount()
 
   // 8. ic_wired: the first read of the Products-backed list carries groupBy and no sort, and its sections draw.
@@ -182,6 +207,7 @@ try {
   await chooseGroup(wiredPage, 'No grouping')
   assert.ok(wiredRequests.at(-1)?.groupBy === undefined && wiredRequests.at(-1)?.sortBy === 'name', 'No grouping goes back to the sorted read')
   assert.equal(headers(wiredPage).length, 0)
+  assert.ok(await sweepSorts(wiredPage, wiredRequests) >= 2, 'wired: every remaining sort is flat')
   await chooseGroup(wiredPage, 'Last checked date')
   assert.equal(wiredRequests.at(-1)?.groupBy, 'checked')
   // A typed search: the wired read carries no groupBy (the device index and the Products store answer it, no extra read), and clearing it groups again.
