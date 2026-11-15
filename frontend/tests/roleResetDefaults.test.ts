@@ -157,7 +157,7 @@ await runTest('Save lists one row per changed module in the shared review; confi
     assert.ok(!text.includes(en.perm_value_not_set), 'the review speaks the editor\'s words, not "Not set"')
     assert.ok(text.includes(`${en.label_full_access} → ${en.none}`), 'backup: Full -> None')
     assert.ok(rows.includes(en.perm_section_backup) && rows.includes(en.perm_section_sales), 'a module row carries the module name')
-    assert.ok(text.includes(`− ${en.perm_short_cost_view}`), 'cost view: its own line, switched off')
+    assert.ok(!text.includes(en.perm_short_cost_view), 'cost view is a retired switch (administrator only): the review draws no line for it')
     assert.match(text, new RegExp(`✕[^✓−+]*${en.supplier}`), 'the supplier switch is named on its module row')
     assert.ok(review.querySelectorAll('[role=img]').some((mark) => mark.getAttribute('aria-label') === en.permission_sensitive_high), 'the sensitivity shield marks the cost switch')
     assert.ok(!text.includes('Applies right away'), 'nobody holds the role here, so there is nothing to announce')
