@@ -1,32 +1,16 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { actionsForKey, outcomeAt } from '../src/utils/permissionActions.ts'
-import { effectivePermissions } from '../src/utils/permissions.ts'
+import { actionsForKey } from '../src/utils/permissionActions.ts'
 
-// Owner, 14 Oct 2026: the courier's actual cost is one switch, sales:view_courier_cost. It is on for every role that
-// holds Sales (an absent key means on, so no stored role needs a migration), the role editor row turns it off, and the
-// Worker answers every response through the same name. cloudflare/scripts/test-courier-cost-permission-parity-pure.cjs
-// runs both sides over every stored shape; this file pins the editor half where the frontend suite can see it.
-const courierRow = actionsForKey('sales').find((action) => action.key === 'view_courier_cost')
-assert.ok(courierRow, 'the Sales table has the courier-cost row')
-assert.equal(outcomeAt(courierRow, 'view'), 'allow', 'the View tier reads it, as the Worker does')
-assert.equal(outcomeAt(courierRow, 'full'), 'allow')
-assert.equal(outcomeAt(courierRow, 'none'), 'block')
+// Owner, 15 Nov 2026: the courier's actual cost is ADMIN ONLY, like every other cost. It used to be one switch,
+// sales:view_courier_cost (owner, 14 Oct 2026), on for every role that held Sales. The role editor row is retired, because a
+// switch that grants a non-admin nothing would only mislead; the Worker keeps the stored key readable as holdsCourierCostGrant,
+// the way back. cloudflare/scripts/test-courier-cost-permission-parity-pure.cjs runs the Worker side over every stored shape;
+// this file pins the editor half where the frontend suite can see it.
+assert.equal(actionsForKey('sales').find((action) => action.key === 'view_courier_cost'), undefined, 'the Sales table no longer offers a courier-cost row')
 
-const staff = (map: Record<string, unknown>) => effectivePermissions({ role_code: 'employee', role_permissions: JSON.stringify(map) })
-assert.equal(staff({ sales: true }).can('sales', 'view_courier_cost'), true, 'on by default')
-assert.equal(staff({ sales: 'view' }).can('sales', 'view_courier_cost'), true)
-assert.equal(staff({ sales: true, 'sales:view_courier_cost': false }).can('sales', 'view_courier_cost'), false, 'the editor row switches it off')
-assert.equal(staff({ 'sales:view_courier_cost': true }).can('sales', 'view_courier_cost'), false, 'an override never grants past a missing Sales tier')
-assert.equal(staff({ sales: true, 'sales:amend': false }).can('sales', 'view_courier_cost'), true, 'amending is a separate right')
-assert.equal(effectivePermissions({ role_code: 'admin', role_permissions: JSON.stringify({ 'sales:view_courier_cost': false }) }).can('sales', 'view_courier_cost'), true, 'an administrator is never narrowed')
-
-const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
-const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
-assert.equal(en[courierRow.tKey], courierRow.label, 'the English pack carries the row label')
-assert.ok(km[courierRow.tKey]?.trim() && km[courierRow.tKey] !== en[courierRow.tKey], 'the Khmer pack carries a translated label')
-
-assert.match(readFileSync(new URL('../../cloudflare/src/lib/courierCostAccess.ts', import.meta.url), 'utf8'),
-  /getActionTier\(user, 'sales', 'view_courier_cost'\) !== 'none'/, 'the Worker gate reads the same sales action')
+const gate = readFileSync(new URL('../../cloudflare/src/lib/courierCostAccess.ts', import.meta.url), 'utf8')
+assert.match(gate, /export function canViewCourierCost\(user: PermissionUser\): boolean \{\s*return isAdminControlUser\(user\)\s*\}/, 'the Worker gate is administrator only')
+assert.match(gate, /export function holdsCourierCostGrant[\s\S]*getActionTier\(user, 'sales', 'view_courier_cost'\) !== 'none'/, 'the retired per-role switch stays readable as the way back')
 
 console.log('courierCostPermission tests passed')
