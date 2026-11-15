@@ -469,8 +469,9 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
           }
           await chunkIn(products.grouping)
           if (publish()) {
-            // The sole branch is chosen by a remount: it remembers what the server offered.
-            knownGroupings = products.simple === true && products.capabilities?.groupings?.length ? products.capabilities.groupings : null
+            // The sole branch is chosen by a remount: it remembers what the server offered. A count session's answer advertises no groupings (the server leaves them out of a
+            // session's list), so only a list answer may update the learned value; otherwise Leave session would read the first list ungrouped.
+            if (!sessionId) knownGroupings = products.simple === true && products.capabilities?.groupings?.length ? products.capabilities.groupings : null
             if (!branchId && !sessionId && products.branches?.length === 1) {
               onSelect({ branchId: String(products.branches[0].id), sessionId: '', bootstrapIntent: { query, filters: { ...filters }, pagination: { ...pagination }, pageSize } })
               return

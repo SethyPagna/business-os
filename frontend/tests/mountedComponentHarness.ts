@@ -490,6 +490,19 @@ function harnessPlugin(observed: ReadonlySet<string>): Plugin {
   }
 }
 
+function mutationPlugin(mutate: (key: string, code: string) => string): Plugin {
+  return {
+    name: 'mounted-component-harness-mutation',
+    enforce: 'pre',
+    transform(code, id) {
+      const key = sourceKey(id)
+      if (!key) return null
+      const mutated = mutate(key, code)
+      return mutated === code ? null : { code: mutated, map: null }
+    },
+  }
+}
+
 function transformDonePlugin(): Plugin {
   return {
     name: 'mounted-component-harness-transform-done',
@@ -553,6 +566,8 @@ export interface Harness {
 export interface HarnessOptions {
   localStorage?: Record<string, string>
   observe?: readonly string[]
+  /** Test-only mutation: given a source module (key relative to src/) and its raw text, returns the text to load. Used to prove a test fails when the fix is undone. */
+  mutateSource?: (key: string, code: string) => string
 }
 
 function callingSourceModule(): string | null {
@@ -592,7 +607,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
       logLevel: 'error',
       server: { middlewareMode: true, hmr: false, watch: null },
       optimizeDeps: { noDiscovery: true, include: [] },
-      plugins: [harnessPlugin(observed), react(), transformDonePlugin()],
+      plugins: [harnessPlugin(observed), ...(options.mutateSource ? [mutationPlugin(options.mutateSource)] : []), react(), transformDonePlugin()],
     })
   } catch (error) {
     restoreGlobals()
