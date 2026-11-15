@@ -1,6 +1,7 @@
 import type { Context } from 'hono'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
+import { isInventoryCheckGrouping, type InventoryCheckGrouping } from './inventoryCheckGrouping'
 import { projectAcquisitionCosts } from './acquisitionCostAccess'
 import { cacheIdentity, cachedJsonResponse, getVersionWithFallback } from './cache'
 import { getDb } from './db'
@@ -32,8 +33,8 @@ export type InventoryListPlan = {
   access: InventoryCheckAccess
   branchId: number | null
   checkState: ListCheckState | null
-  /** sortBy=checked (a check state is chosen): the page is cut from the check-state ids in the order of the check's date, newest first unless ascending is asked. */
-  checkedOrder: { direction: 'asc' | 'desc' } | null
+  /** groupBy=checked|category (sortBy=checked is the old spelling of groupBy=checked): the families are ranked by the grouping and every row carries its group_key. */
+  grouping: InventoryCheckGrouping | null
   /** The query Products would send for this scope. */
   productsQuery: Record<string, string>
   /** A barcode-blind viewer's search text that looks like a whole code: the route looks it up exactly, and only an exact hit is searched by id. */
@@ -56,9 +57,15 @@ export function planInventoryList(user: PermissionUser, raw: Record<string, stri
   const access = getInventoryCheckAccess(user)
   for (const alias of ['sort_by', 'sort_direction', 'check_state']) if (Object.hasOwn(raw, alias)) invalid(alias)
   const { sortBy: rawSortBy, checkState: rawCheckState, ids: rawIds, ...rest } = raw
+  // sortBy=checked is the spelling older open tabs send for the date order: it is groupBy=checked, and its direction is ignored (newest first, "Never checked" last).
+  const sortWord = rawSortBy?.trim() || ''
+  if (sortWord === 'checked') delete rest.sortDirection
   const validated = validateInventoryCheckQuery(rest, access, true)
-  const sortBy = rawSortBy?.trim() || 'created'
+  const sortBy = sortWord || 'created'
   if (sortBy !== 'created' && sortBy !== 'name' && sortBy !== 'checked') invalid('sortBy')
+  if (validated.groupBy && sortWord && sortWord !== 'checked') invalid('sortBy')
+  if (sortWord === 'checked' && validated.groupBy && validated.groupBy !== 'checked') invalid('sortBy')
+  const grouping: InventoryCheckGrouping | null = validated.groupBy ? (isInventoryCheckGrouping(validated.groupBy) ? validated.groupBy : invalid('groupBy')) : sortWord === 'checked' ? 'checked' : null
   const direction = validated.sortDirection ?? (sortBy === 'name' ? 'asc' : 'desc')
   const branchId = validated.branchId && validated.branchId.toLowerCase() !== 'all' ? integer(validated.branchId, 0, Number.MAX_SAFE_INTEGER, 'branchId') : null
   const checkWord = rawCheckState?.trim() || ''
@@ -67,9 +74,7 @@ export function planInventoryList(user: PermissionUser, raw: Record<string, stri
   if (checkState && branchId === null) invalid('branchId')
   // 'pending' while ic_fix_stock is OFF (or the viewer may not see stock) is a valid choice with nothing in it: an empty page, never a 400 that a tab would repeat.
 
-  // The date of the check orders only a list of checked products: with no check state chosen there is no such list, so the choice is refused rather than half applied.
-  if (sortBy === 'checked' && !(checkState === 'ok' || checkState === 'issue' || checkState === 'pending')) invalid('sortBy')
-  const productsQuery: Record<string, string> = { searchMode: 'smart', sort: sortBy === 'checked' ? 'name_asc' : `${sortBy}_${direction}`, include: LIST_INCLUDE }
+  const productsQuery: Record<string, string> = { searchMode: 'smart', sort: grouping ? 'name_asc' : `${sortBy}_${direction}`, include: LIST_INCLUDE }
   const page = integer(validated.page, 1, 100000, 'page'), pageSize = integer(validated.pageSize, DEFAULT_PAGE_SIZE, 100, 'pageSize')
   productsQuery.page = String(page); productsQuery.pageSize = String(pageSize)
   if (branchId !== null) productsQuery.branchId = String(branchId)
@@ -86,14 +91,13 @@ export function planInventoryList(user: PermissionUser, raw: Record<string, stri
   }
   if (rawIds !== undefined && rawIds.trim() !== '') {
     if (checkState) invalid('ids')
+    if (grouping) invalid('groupBy')
     const ids = [...new Set(rawIds.split(',').map((part) => part.trim()))]
     if (!ids.length || ids.length > options.maxIds || ids.some((id) => !/^\d+$/.test(id) || !Number.isSafeInteger(Number(id)) || Number(id) <= 0)) invalid('ids')
     productsQuery.ids = ids.join(','); productsQuery.page = '1'; productsQuery.pageSize = String(ids.length)
   }
-  // The date order cuts its pages from the check-state ids before any search or filter could narrow them, so a narrowed list would come back short, empty or with a total that counts products the filter removed: the combination is refused, and the page drops the order when a search or filter is set.
-  if (sortBy === 'checked' && (productsQuery.query || productsQuery.brand || productsQuery.category || productsQuery.stockState)) invalid('sortBy')
   const filtered = Boolean(productsQuery.query || productsQuery.brand || productsQuery.category || productsQuery.stockState || productsQuery.ids || checkState)
-  return { access, branchId, checkState, checkedOrder: sortBy === 'checked' ? { direction: direction === 'asc' ? 'asc' : 'desc' } : null, productsQuery, codeLookup, filtered, wantSummary: validated.summary !== '0' }
+  return { access, branchId, checkState, grouping, productsQuery, codeLookup, filtered, wantSummary: validated.summary !== '0' }
 }
 
 /** The request the shared cache key is built from: the canonical Products URL. Host and scheme never count; only the path and the sorted parameters do. */

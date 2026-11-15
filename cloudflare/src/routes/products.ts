@@ -11,7 +11,8 @@ import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { collectMergeProductIds, describeMergeFailure } from '../lib/mergeRouteLog'
 import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
-import { pageFamiliesByKeys, paginateProductFamilies, paginateRankedIdFamilies, rankProductFamilies, typedOrderDrivenRead, typedOrderEligible, type FamilyPaginationOptions } from '../lib/familyPagination'
+import { pageFamiliesByKeys, paginateProductFamilies, paginateRankedIdFamilies, rankProductFamilies, typedOrderDrivenRead, typedOrderEligible, type FamilyGroupTotals, type FamilyPaginationOptions } from '../lib/familyPagination'
+import { groupingPlan, type InventoryCheckGrouping } from '../lib/inventoryCheckGrouping'
 import { nextPromotionEdge, readPromotionEdge, readRankedScope, type RankedScope } from '../lib/rankedScope'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { ImageOnlyQueryError, parseImageOnlyQuery, pushReceivedWindow, type ImageOnlyGrants, type ImageOnlyReceivedWindow } from '../lib/productImageOnlyQuery'
@@ -720,6 +721,9 @@ type ProductSearchOptions = {
   excludeIdsJson?: string
   // catalog_ranked_scope (INV-A S7): the ranking comes from the shared ranked-scope cache (lib/rankedScope.ts) and the page's rows are read by key. Absent: the seek-page statement.
   ranked?: RankedScope
+  // SERVER-ONLY (Inventory Check wired list, groupBy): rank the families by the grouping instead of the sort, and answer each page row's group_key plus the groups of the page. `checkOrg` is the
+  // viewer's organization (the same one the check lookup is scoped to). Always read through the ranked scope. Never read from the query string.
+  grouping?: { by: InventoryCheckGrouping; checkOrg: number | null }
   // Image-only reads only (see loadImageOnlyList). Adds the received-window
   // predicate and the brand/category option lists; absent for every other reader.
   imageOnly?: { received: ImageOnlyReceivedWindow; facets: { brand: boolean; category: boolean }; facetCache?: ImageOnlyFacetCacheContext }
@@ -901,6 +905,14 @@ async function expandSearchResultsToNameSiblings(env: Env, items: Array<Record<s
   return merged
 }
 
+// A grouped page: a name sibling pulled in beside a result row (expandSearchResultsToNameSiblings) belongs to that row's family, so it carries the same group_key.
+function inheritGroupKeys(rows: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const nameKey = (row: Record<string, unknown>) => String(row.name || '').trim().replace(/\s+/g, ' ').toLowerCase()
+  const byName = new Map<string, unknown>()
+  for (const row of rows) if (row.group_key !== undefined && !byName.has(nameKey(row))) byName.set(nameKey(row), row.group_key)
+  return rows.map((row) => row.group_key === undefined && byName.has(nameKey(row)) ? { ...row, group_key: byName.get(nameKey(row)) } : row)
+}
+
 const PRODUCT_SEARCH_ROW_COLUMNS = [
   'id', 'name', 'sku', 'barcode', 'category', 'brand', 'unit', 'description',
   'selling_price_usd', 'selling_price_khr',
@@ -997,13 +1009,30 @@ async function refreshCachedProductRows(env: Env, items: Array<Record<string, un
 
 const SEEK_PAGE_MIN_RANKED_IDS = 300
 
-async function paginateRankedFamilies(opts: FamilyPaginationOptions, scope: RankedScope): Promise<{ items: Array<Record<string, unknown>>; total: number; totalPages: number }> {
+async function paginateRankedFamilies(opts: FamilyPaginationOptions, scope: RankedScope): Promise<{ items: Array<Record<string, unknown>>; total: number; totalPages: number; groups?: FamilyGroupTotals[] }> {
   const { page, pageSize } = opts
+  const offset = (page - 1) * pageSize
+  if (opts.familyGroupSql) {
+    // A grouped order ignores promotions, so no promotion edge bounds the entry; the groups ride in the cached window.
+    const produce = async () => { const ranking = await rankProductFamilies(opts); return { keys: ranking.keys, total: ranking.total, groups: ranking.groups ?? [], edgeAt: null } }
+    let window = await readRankedScope(scope, produce)
+    if (!window.groups) window = await produce()
+    const groups = window.groups ?? []
+    const pageKeys = window.keys.slice(offset, offset + pageSize)
+    const rankOf = new Map(pageKeys.map((key, index) => [key, offset + index + 1]))
+    const rows = await pageFamiliesByKeys<Record<string, unknown>>(opts, pageKeys, true)
+    const items = rows.map((row) => {
+      const { __family_root_id, ...rest } = row
+      const rank = rankOf.get(String(__family_root_id)) ?? 0
+      return { ...rest, group_key: groups.find((group) => rank >= group.first && rank <= group.last)?.key ?? null }
+    })
+    return { items, total: window.total, totalPages: Math.max(1, Math.ceil(window.total / pageSize)), groups: groups.filter((group) => group.last >= offset + 1 && group.first <= offset + pageSize) }
+  }
   const ranked = await readRankedScope(scope, async () => {
     const [ranking, edgeAt] = await Promise.all([rankProductFamilies(opts), readPromotionEdge(scope, () => nextPromotionEdge(opts.db, new Date()))])
     return { keys: ranking.keys, total: ranking.total, edgeAt }
   })
-  const items = await pageFamiliesByKeys<Record<string, unknown>>(opts, ranked.keys.slice((page - 1) * pageSize, page * pageSize))
+  const items = await pageFamiliesByKeys<Record<string, unknown>>(opts, ranked.keys.slice(offset, offset + pageSize))
   return { items, total: ranked.total, totalPages: Math.max(1, Math.ceil(ranked.total / pageSize)) }
 }
 
@@ -1055,13 +1084,16 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   ])
   const filters = buildSearchFilters(query, lowStockConfig, options)
   const { where, joins, params, matchRankSql, rankCteSql, matchTierSql, hasSearchTerm, familyMemberWhereSql, rankedIdDriver } = filters
+  // A grouped read orders by the grouping alone (no promotions, no relevance), so the check lookup's organization and the grouping's SQL join the statement here.
+  const grouped = options.grouping ? groupingPlan(options.grouping.by, Object.hasOwn(params, 'branchId'), 'p') : undefined
+  if (options.grouping) params.checkOrg = options.grouping.checkOrg
   // The keyed page fetch pays for itself on catalogue-wide reads and on long ranked-id lists. A by-id read or a short
   // ranked-id hydration (the till's per-keystroke lookup) is already tiny, and the extra CTEs cost it 4-8 ms of SQL
   // time (lab medians: 8 ids 2 -> 7 ms, 60 ids 4 -> 9 ms, 300 ids 13 vs 16 ms, 1,500 ids 130 vs 120 ms), so it keeps
   // the default statements below SEEK_PAGE_MIN_RANKED_IDS.
   const rankedIdCount = parseRankedIds(query.rankIds, query.rankTiers)?.ids.length ?? 0
   const seekPageRead = !Object.hasOwn(params, 'byId0') && (rankedIdCount === 0 || rankedIdCount >= SEEK_PAGE_MIN_RANKED_IDS)
-  const promotedRankSql = options.imageOnly ? undefined : `CASE WHEN ${productPromotedSql(promotionRules, params)} THEN 1 ELSE 0 END`
+  const promotedRankSql = options.imageOnly || grouped ? undefined : `CASE WHEN ${productPromotedSql(promotionRules, params)} THEN 1 ELSE 0 END`
   const promoFilter = String(query.promo || '').trim().toLowerCase()
   if (promoFilter === 'promoted') {
     where.push(productPromotedSql(promotionRules, params))
@@ -1124,7 +1156,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   // An image-only list has no promoted-first lead: it is ordered by the caller's
   // name sort alone (the role cannot see promotions, and a lead would defeat name_desc).
   const familyRelevance = { hasTier: Boolean(matchTierSql), hasRank: Boolean(matchRankSql) }
-  const effectiveFamilyOrderSql = options.imageOnly
+  const effectiveFamilyOrderSql = grouped ? grouped.rankingOrder : options.imageOnly
     ? buildFamilyRelevanceOrderSql(familyOrderSql, familyRelevance)
     : buildFamilyRelevanceOrderSql(familyOrderSql, { ...familyRelevance, promotedFirst: true })
 
@@ -1145,6 +1177,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     candidateSql: candidateRead?.idsSql,
     matchTierSql,
     promotedRankSql,
+    ...(grouped ? { familyNumericSortSql: grouped.familyNumericSortSql, familySortValueSql: grouped.familySortValueSql, familyGroupSql: grouped.familyGroupSql } : {}),
     // Only opted in when a search term is actually in play (see
     // familyMemberBaseWhereSql's own comment in familyPagination.ts) --
     // this is specifically the "search matched one variant's barcode,
@@ -1165,16 +1198,18 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     ? typedOrderDrivenRead(where, rankedIdDriver) : undefined
   const typedOrdered = typedOrderRead && await readSwitch(env, 'products_typed_order_js')
     ? await paginateRankedIdFamilies<Record<string, unknown>>(familyOptions, typedOrderRead) : null
-  const { items, total, totalPages } = typedOrdered ?? (options.ranked && seekPageRead
+  if (grouped && !(options.ranked && seekPageRead)) throw new Error('a grouped read needs the ranked scope and the keyed page read')
+  const paged: { items: Array<Record<string, unknown>>; total: number; totalPages: number; groups?: FamilyGroupTotals[] } = typedOrdered ?? (options.ranked && seekPageRead
     ? await paginateRankedFamilies(familyOptions, options.ranked)
     : await paginateProductFamilies<Record<string, unknown>>(familyOptions))
+  const { items, total, totalPages } = paged
 
   // Name-duplicate half of the same fix (see expandSearchResultsToNameSiblings's
   // own comment) -- only when a search term is active, same gating as the
   // parent_id half above. Deliberately runs BEFORE attachBranchStock/
   // attachImageGallery so the newly-pulled-in sibling rows get real
   // branch_stock/image_gallery data too, not left without it.
-  const expandedItems = hasSearchTerm ? await expandSearchResultsToNameSiblings(env, items as Array<Record<string, unknown>>) : items
+  const expandedItems = hasSearchTerm ? inheritGroupKeys(await expandSearchResultsToNameSiblings(env, items as Array<Record<string, unknown>>)) : items
 
   // attachBranchStock, attachImageGallery and attachBatchCounts each read
   // off the same id list independently -- none needs another's output -- so
@@ -1217,6 +1252,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     page,
     pageSize,
     totalPages,
+    ...(paged.groups ? { groups: paged.groups } : {}),
     ...(facets ? { facets } : {}),
     // The active rule set rides every product payload so POS/Products can
     // evaluate the SAME kernel client-side (badges, cart pricing) without
@@ -1482,7 +1518,7 @@ async function searchProductsWithIndexFallback(env: Env, query: Record<string, s
 
 // The Inventory Check twin: the same index-unavailable fallback with the server-only id restriction. Separate so the shared reader's source (pinned by
 // test-worker-perf-2-round-trips-pure.cjs) stays untouched.
-async function searchRestrictedProductsWithIndexFallback(env: Env, query: Record<string, string>, restriction: Pick<ProductSearchOptions, 'restrictIdsJson' | 'excludeIdsJson' | 'ranked'>) {
+async function searchRestrictedProductsWithIndexFallback(env: Env, query: Record<string, string>, restriction: Pick<ProductSearchOptions, 'restrictIdsJson' | 'excludeIdsJson' | 'ranked' | 'grouping'>) {
   try {
     return await searchProductsPayload(env, query, restriction)
   } catch (error) {
@@ -1594,6 +1630,8 @@ export type ProductSearchListOptions = {
   excludeIdsJson?: string
   setKey?: string
   setVersion?: string
+  /** Inventory Check groupBy: rank by the grouping (see ProductSearchOptions.grouping). The key gains the grouping; the ranked scope is used whatever catalog_ranked_scope says. */
+  grouping?: { by: InventoryCheckGrouping; checkOrg: number | null }
   /** The caller has already admitted this viewer to the lots / held-stock attachments (see attachLotRows). */
   lotsAdmitted?: boolean
   taggedLotsAdmitted?: boolean
@@ -1617,19 +1655,30 @@ export async function readProductSearchList(c: Context<{ Bindings: Env; Variable
     if (restricted) keyUrl.searchParams.set('ic_set', options.setKey ?? 'set')
     keyRequest = new Request(keyUrl.toString(), { method: 'GET' })
   }
+  if (options.grouping) {
+    keyUrl.searchParams.set('ic_group', options.grouping.by)
+    keyRequest = new Request(keyUrl.toString(), { method: 'GET' })
+  }
   // catalog_ranked_scope ON: no page payload is cached. The ranking of the page's window is (lib/rankedScope.ts) and every row is read live by key, so nothing needs refreshing.
   // A version that cannot be read gives an unsafe token: no key, the ranking is computed for this request and stored nowhere (fail closed, never a stale answer).
   // A typed search keeps the page path below: a stored ranking is never read again for a key unique to the keystroke, and the ranked read costs more rows and calls than the page it replaces.
   // (The Inventory Check lists read the shared ranking and keep it.)
-  if (!(!restricted && isTypedSearch(query)) && await readSwitch(c.env, 'catalog_ranked_scope')) {
+  // A grouped list (Inventory Check groupBy) always takes this path: its order ignores promotions, so its entry is keyed on the products (and stock) version and the inventory_checks version alone.
+  if (options.grouping || (!(!restricted && isTypedSearch(query)) && await readSwitch(c.env, 'catalog_ranked_scope'))) {
     let versions: string, edgeVersions: string
     try {
-      const { version: baseVersion, extra: [promotions] } = await productSearchCacheVersions(c.env, query, ['promotions'])
-      edgeVersions = `${baseVersion}:promo:${promotions}`
-      versions = restricted ? `${baseVersion}:ic:${options.setVersion ?? ''}:promo:${promotions}` : edgeVersions
+      if (options.grouping) {
+        const { version: baseVersion } = await productSearchCacheVersions(c.env, query)
+        edgeVersions = baseVersion
+        versions = `${baseVersion}:icg:${options.setVersion ?? ''}`
+      } else {
+        const { version: baseVersion, extra: [promotions] } = await productSearchCacheVersions(c.env, query, ['promotions'])
+        edgeVersions = `${baseVersion}:promo:${promotions}`
+        versions = restricted ? `${baseVersion}:ic:${options.setVersion ?? ''}:promo:${promotions}` : edgeVersions
+      }
     } catch { versions = edgeVersions = unsafeVersionToken() }
     const limits = getPlanLimits(c.env)
-    const rankedPayload = await searchRestrictedProductsWithIndexFallback(c.env, query, { restrictIdsJson: options.restrictIdsJson, excludeIdsJson: options.excludeIdsJson,
+    const rankedPayload = await searchRestrictedProductsWithIndexFallback(c.env, query, { restrictIdsJson: options.restrictIdsJson, excludeIdsJson: options.excludeIdsJson, grouping: options.grouping,
       ranked: { ctx: c.executionCtx, request: keyRequest, versions, edgeVersions, identity: cacheIdentity(c), ttlSeconds: limits.productListCacheSeconds } })
     const [taggedRanked, lotsRanked] = await Promise.all([attachFoldedTaggedLots(c.env, user, include, rankedPayload, options.taggedLotsAdmitted === true), attachLotRows(c.env, user, include, rankedPayload, options.lotsAdmitted === true)])
     return lotsRanked === rankedPayload ? taggedRanked : { ...taggedRanked, items: lotsRanked.items }

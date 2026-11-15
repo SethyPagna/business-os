@@ -53,7 +53,7 @@ app.get('/', async c => {
     if (JSON.stringify(after) !== JSON.stringify(actor)) throw new InventoryCheckSessionError(403, 'inventory_check_authority_changed')
     return c.json(answer)
   }
-  const { sessionId: rawSession, state: rawState, reason: rawReason, customerRanking: rawRanking, checkState: rawCheckState, summary: rawSummary, ...query } = c.req.query()
+  const { sessionId: rawSession, state: rawState, reason: rawReason, customerRanking: rawRanking, checkState: rawCheckState, summary: rawSummary, groupBy: rawGroupBy, ...query } = c.req.query()
   // The ic_simple page speaks two words this old list never had, and reaches it whenever the switch is off (the default): `summary=0` on a page step (there are no check
   // counts to skip, so it is ignored) and `checkState=issue` for the Issues view (which is the old state=issue). Any other checkState has no meaning here and stays a 400.
   if (rawSummary !== undefined && rawSummary.trim() !== '' && !['0', '1'].includes(rawSummary.trim())) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', 'summary')
@@ -66,6 +66,12 @@ app.get('/', async c => {
   if (rawRanking !== undefined && !['0', '1'].includes(rawRanking)) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', 'customerRanking')
   const access = getInventoryCheckAccess(actor)
   validateInventoryCheckQuery(query, access)
+  // This list cannot group: a client that always sends groupBy (the grouped list answers it) gets today's answer, with no grouping block and no capability. A value that is not a grouping,
+  // category without the field, and a session list stay refused exactly as on the grouped list.
+  if (rawGroupBy !== undefined && rawGroupBy.trim() !== '') {
+    validateInventoryCheckQuery({ groupBy: rawGroupBy }, access, true)
+    if (sessionId) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', 'groupBy')
+  }
   if (sessionId) {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(sessionId)) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', 'sessionId')
     const detail = await getInventoryCheckSession(db, principal, sessionId)
