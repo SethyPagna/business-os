@@ -188,19 +188,8 @@ export interface StockLevelProduct {
 }
 
 /**
- * A status computed elsewhere: the numeric code a stored stock table will carry
- * (0 healthy, 1 low, 2 out -- DESIGN-stock-state.md 2.1) or the state word.
- * Anything else is "not a status" and the caller falls back to computing.
- */
-export function stockLevelFromStored(status: unknown): StockLevel | null {
-  if (status === 0 || status === '0' || status === 'healthy') return 'healthy'
-  if (status === 1 || status === '1' || status === 'low') return 'low'
-  if (status === 2 || status === '2' || status === 'out') return 'out'
-  return null
-}
-
-/**
- * THE stock-state rule for one figure, identical to the server's:
+ * THE stock-state rule for one figure, identical to the server's for numeric values (text-typed or
+ * non-finite stored values are not modelled; the columns are REAL):
  *   out     when COALESCE(qty, 0) <= COALESCE(out_of_stock_threshold, 0)
  *   low     when COALESCE(qty, 0) <= the effective low threshold (-1 when alerts are off,
  *           the global number in global mode, COALESCE(product threshold, global) in product mode)
@@ -209,18 +198,12 @@ export function stockLevelFromStored(status: unknown): StockLevel | null {
  * has_healthy / has_low, notifications.ts is_out. A parity test runs that SQL in SQLite over a
  * matrix and requires the same answer from this function, so a bell, a Dashboard card and a
  * list can never call one product low and healthy.
- *
- * `precomputed` lets a caller that already holds a stored status (computed under this same
- * config) skip the comparison; it is ignored unless it is a real status.
  */
 export function stockLevelState(
   qty: unknown,
   product: StockLevelProduct | null | undefined,
   config: LowStockConfig,
-  precomputed?: unknown,
 ): StockLevel {
-  const stored = stockLevelFromStored(precomputed)
-  if (stored) return stored
   const asNumber = qty == null || qty === '' ? 0 : Number(qty)
   const have = Number.isFinite(asNumber) ? asNumber : 0
   const outRaw = product?.out_of_stock_threshold
@@ -233,9 +216,11 @@ export function stockLevelState(
 
 /** A product-family header row: a group parent that holds no stock of its own. */
 export function isStockFamilyHeader(product: StockLevelProduct | null | undefined): boolean {
-  const group = Number(product?.is_group)
-  const parent = Number(product?.parent_id)
-  return group === 1 && !(Number.isFinite(parent) && parent > 0)
+  // The server's (COALESCE(is_group, 0) = 1 AND COALESCE(parent_id, 0) = 0), familyStockStats.ts: NULL reads as 0,
+  // so a negative or fractional parent_id is NOT a header there and is not one here.
+  const group = product?.is_group == null ? 0 : Number(product.is_group)
+  const parent = product?.parent_id == null ? 0 : Number(product.parent_id)
+  return group === 1 && parent === 0
 }
 
 /**
@@ -245,14 +230,14 @@ export function isStockFamilyHeader(product: StockLevelProduct | null | undefine
  * family has nothing else. An empty family is "out", the SQL's final ELSE.
  */
 export function stockGroupLevel(
-  members: ReadonlyArray<{ qty: unknown; product?: StockLevelProduct | null; status?: unknown }>,
+  members: ReadonlyArray<{ qty: unknown; product?: StockLevelProduct | null }>,
   config: LowStockConfig,
 ): StockLevel {
   const real = members.filter((member) => !isStockFamilyHeader(member.product))
   const counted = real.length ? real : members
   let best: StockLevel = 'out'
   for (const member of counted) {
-    const level = stockLevelState(member.qty, member.product, config, member.status)
+    const level = stockLevelState(member.qty, member.product, config)
     if (level === 'healthy') return 'healthy'
     if (level === 'low') best = 'low'
   }

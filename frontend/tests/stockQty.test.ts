@@ -61,23 +61,22 @@ for (const language of ['en', 'km'] as const) {
     assert.ok(word && word !== key, `${language} pack has ${key}`)
     assert.ok(out.includes(`data-stock-state="${state}"`), `${language} ${state}: state attribute`)
     assert.ok(out.includes(`class="stock-qty ${tint}"`), `${language} ${state}: tint class`)
-    assert.ok(out.includes(`title="${word}"`), `${language} ${state}: tooltip carries the state word`)
-    assert.ok(out.includes(`<span class="sr-only"> ${word}</span>`), `${language} ${state}: screen-reader word follows the number`)
-    assert.ok(out.includes(`>${qty}<span`), `${language} ${state}: the figure itself is the pill's text`)
+    // The tooltip sits on an aria-hidden copy of the figure and the sr-only text says figure + word: a screen reader announces the word ONCE.
+    assert.ok(out.includes(`<span aria-hidden="true" title="${word}">${qty}</span>`), `${language} ${state}: the figure carries the tooltip, hidden from screen readers`)
+    assert.ok(out.includes(`<span class="sr-only">${qty} ${word}</span>`), `${language} ${state}: screen-reader text is the figure and the word`)
+    assert.equal(out.split(word).length - 1, 2, `${language} ${state}: the word is in the markup twice (tooltip + sr-only text)`)
+    assert.equal((out.match(/title=/g) || []).length, 1, `${language} ${state}: one tooltip`)
     for (const other of cases.filter((c) => c.state !== state)) assert.ok(!out.includes(other.tint), `${language} ${state}: no ${other.tint}`)
   }
 }
 // Khmer words are real Khmer, not an English placeholder.
 for (const { key } of cases) assert.ok(/[ក-៿]/.test(packs.km[key]), `km ${key} is Khmer`)
 
-// Children replace the printed figure (for example a unit suffix) without changing the state.
-assert.ok(html('en', { qty: 4, product, children: '4 pcs' }).includes('>4 pcs<span'))
-assert.ok(html('en', { qty: 4, product, children: '4 pcs' }).includes('data-stock-state="low"'))
 // A caller can pass a class (the detail pane's bold figure).
 assert.ok(html('en', { qty: 4, product, className: 'font-bold' }).includes('class="stock-qty stock-qty-low font-bold"'))
 // null / undefined quantity prints 0 and is "out", like the server's COALESCE(qty, 0).
 assert.ok(html('en', { qty: null, product }).includes('data-stock-state="out"'))
-assert.ok(html('en', { qty: undefined, product }).includes('>0<span'))
+assert.ok(html('en', { qty: undefined, product }).includes('>0</span>'))
 
 // Settings drive the state: alerts off removes "low"; global mode ignores the product's own number.
 const off: LowStockConfig = { enabled: false, mode: 'product', threshold: 10 }
@@ -90,14 +89,19 @@ appSettings = { low_stock_threshold_mode: 'global', low_stock_threshold_default:
 assert.ok(html('en', { qty: 4, product }).includes('data-stock-state="healthy"'))
 appSettings = undefined
 
-// A precomputed status wins (shape for the later stored table).
-assert.ok(html('en', { qty: 400, product, status: 2 }).includes('data-stock-state="out"'))
-
 // Merged row: two real products, 8 each (low: threshold 10). The row shows the SUM 16, which alone is healthy,
 // but each real product is low -- the Dashboard / bell call it low, so the pill must too.
 const lowMembers = [{ qty: 8, product }, { qty: 8, product }]
 assert.equal(stockQtyLevel({ qty: 16, product, config: DEFAULT_LOW_STOCK_CONFIG, members: lowMembers }), 'low')
 assert.equal(stockQtyLevel({ qty: 16, product, config: DEFAULT_LOW_STOCK_CONFIG }), 'healthy', 'control: the sum alone is healthy')
+// The review's exact example: products 101 (8) and 102 (50), same barcode, threshold 10. The merged row is
+// healthy (the Dashboard's family rule: best product wins) while product 101 alone is low -- the bell lists 101
+// on its own, so the row is green while the bell lists one of its products. Deliberate; stockLevelParity.test.ts
+// runs the bell's, the Dashboard's and the client's answers side by side on this same fixture.
+const p101 = { id: 101, low_stock_threshold: 10, out_of_stock_threshold: 0 }
+const p102 = { id: 102, low_stock_threshold: 10, out_of_stock_threshold: 0 }
+assert.equal(stockQtyLevel({ qty: 58, product: p101, config: DEFAULT_LOW_STOCK_CONFIG, members: [{ qty: 8, product: p101 }, { qty: 50, product: p102 }] }), 'healthy', 'merged 101 + 102 row is healthy')
+assert.equal(stockQtyLevel({ qty: 8, product: p101, config: DEFAULT_LOW_STOCK_CONFIG }), 'low', 'product 101 alone is low')
 // Best member wins: one out + one healthy is healthy; one out + one low is low; all out is out.
 assert.equal(stockQtyLevel({ qty: 40, product, config: DEFAULT_LOW_STOCK_CONFIG, members: [{ qty: 0, product }, { qty: 40, product }] }), 'healthy')
 assert.equal(stockQtyLevel({ qty: 4, product, config: DEFAULT_LOW_STOCK_CONFIG, members: [{ qty: 0, product }, { qty: 4, product }] }), 'low')
@@ -127,12 +131,12 @@ assert.ok(base && /line-height:\s*inherit/.test(base[1]) && !/\bpy-|\bp-\d|paddi
 // ---- Mutants on the component source: each must break at least one pinned behaviour ----
 const source = readSrc('components/shared/StockQty.tsx')
 const mutants: Array<{ name: string; from: string; to: string }> = [
-  { name: 'members ignored (judges the sum)', from: 'members && members.length > 1 ? stockGroupLevel(members, config) : stockLevelState(qty, product, config, status)', to: 'stockLevelState(qty, product, config, status)' },
+  { name: 'members ignored (judges the sum)', from: 'members && members.length > 1 ? stockGroupLevel(members, config) : stockLevelState(qty, product, config)', to: 'stockLevelState(qty, product, config)' },
   { name: 'state word dropped from the tooltip', from: 'title={word}', to: 'title=""' },
-  { name: 'screen-reader word dropped', from: '<span className="sr-only"> {word}</span>', to: '' },
+  { name: 'screen-reader word dropped', from: '<span className="sr-only">{figure} {word}</span>', to: '' },
+  { name: 'tooltip no longer hidden from screen readers (word announced twice)', from: 'aria-hidden="true" ', to: '' },
   { name: 'low state shows the healthy word', from: "low: ['low_stock', 'Low Stock']", to: "low: ['healthy_stock', 'Healthy']" },
   { name: 'tint class not keyed by state', from: '${LEVEL_CLASS[level]}', to: 'stock-qty-healthy' },
-  { name: 'precomputed status ignored', from: 'stockLevelState(qty, product, config, status)', to: 'stockLevelState(qty, product, config)' },
 ]
 for (const mutant of mutants) {
   assert.ok(source.includes(mutant.from), `mutant "${mutant.name}" no longer matches the source`)
@@ -141,11 +145,11 @@ for (const mutant of mutants) {
   const probes = [
     html('en', { qty: 16, product, members: lowMembers }, mutated),
     html('en', { qty: 4, product }, mutated),
-    html('en', { qty: 400, product, status: 2 }, mutated),
+    html('en', { qty: 0, product }, mutated),
     html('en', { qty: 40, product }, mutated),
   ]
   const low = packs.en.low_stock
-  const holds = probes[0].includes('data-stock-state="low"') && probes[1].includes(`title="${low}"`) && probes[1].includes(`<span class="sr-only"> ${low}</span>`)
+  const holds = probes[0].includes('data-stock-state="low"') && probes[1].includes(`title="${low}"`) && probes[1].includes(`<span class="sr-only">4 ${low}</span>`) && probes[1].includes('<span aria-hidden="true" title=')
     && probes[1].includes('stock-qty-low') && probes[2].includes('data-stock-state="out"') && probes[3].includes('stock-qty-healthy')
   assert.ok(!holds, `mutant survived: ${mutant.name}`)
 }

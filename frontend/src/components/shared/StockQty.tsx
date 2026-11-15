@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react'
 import { useLowStockConfig, useT } from '../../AppContext'
 import {
   stockGroupLevel,
@@ -15,7 +14,8 @@ import {
 // The state is NEVER decided here: stockLevelState / stockGroupLevel (utils/lowStockSettings.ts)
 // are the one rule the bell, the Dashboard overview and the alert pages also use. Colour is not
 // the only signal: the title carries the state word and a screen-reader-only copy of it follows
-// the number, so the accessible name reads "5 Low Stock".
+// the number, so the accessible name reads "5 Low Stock" exactly once: the tooltip sits on an aria-hidden
+// copy of the figure (mouse users only) and the screen-reader-only text carries the figure and the word.
 
 const WORD_KEYS: Record<StockLevel, [string, string]> = {
   out: ['out_of_stock', 'Out of Stock'],
@@ -30,11 +30,7 @@ const LEVEL_CLASS: Record<StockLevel, string> = {
 }
 const WORD_KEY_LIST = ['out_of_stock', 'low_stock', 'healthy_stock']
 
-export function stockLevelWordKey(level: StockLevel): string {
-  return WORD_KEYS[level][0]
-}
-
-type Members = ReadonlyArray<{ qty: unknown; product?: StockLevelProduct | null; status?: unknown }>
+type Members = ReadonlyArray<{ qty: unknown; product?: StockLevelProduct | null }>
 
 type Props = {
   /** The figure on screen. Also what the row's own state is computed from unless `members` is given. */
@@ -42,29 +38,26 @@ type Props = {
   product?: StockLevelProduct | null
   /** Defaults to the app's low-stock settings (no read: they are already in the settings map). */
   config?: LowStockConfig
-  /** A status already computed under this config (a later stored table); skips the comparison. */
-  status?: unknown
   /** A merged / family figure: the state is the Dashboard's family rule over these members, not the sum's own. */
   members?: Members
-  /** What to print instead of the bare figure (for example `5 pcs`). */
-  children?: ReactNode
   className?: string
 }
 
-export function stockQtyLevel({ qty, product, config, status, members }: Pick<Props, 'qty' | 'product' | 'status' | 'members'> & { config: LowStockConfig }): StockLevel {
-  return members && members.length > 1 ? stockGroupLevel(members, config) : stockLevelState(qty, product, config, status)
+export function stockQtyLevel({ qty, product, config, members }: Pick<Props, 'qty' | 'product' | 'members'> & { config: LowStockConfig }): StockLevel {
+  return members && members.length > 1 ? stockGroupLevel(members, config) : stockLevelState(qty, product, config)
 }
 
-export default function StockQty({ qty, product, config, status, members, children, className = '' }: Props) {
+export default function StockQty({ qty, product, config, members, className = '' }: Props) {
   const appConfig = useLowStockConfig()
   const words = useT(WORD_KEY_LIST)
-  const level = stockQtyLevel({ qty, product, config: config || appConfig, status, members })
+  const level = stockQtyLevel({ qty, product, config: config || appConfig, members })
   const [key, fallback] = WORD_KEYS[level]
   const word = words[key] && words[key] !== key ? words[key] : fallback
+  const figure = String(qty ?? 0)
   return (
-    <span data-stock-qty="" data-stock-state={level} className={`stock-qty ${LEVEL_CLASS[level]} ${className}`.trim()} title={word}>
-      {children ?? String(qty ?? 0)}
-      <span className="sr-only"> {word}</span>
+    <span data-stock-qty="" data-stock-state={level} className={`stock-qty ${LEVEL_CLASS[level]} ${className}`.trim()}>
+      <span aria-hidden="true" title={word}>{figure}</span>
+      <span className="sr-only">{figure} {word}</span>
     </span>
   )
 }

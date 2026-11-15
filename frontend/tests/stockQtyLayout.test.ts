@@ -5,13 +5,15 @@ import { launchResolveFixture } from './resolveBrowserFixture.ts'
 // Owner ask 15 Nov 2026: the Inventory list's stock figure is itself tinted by state (green healthy,
 // yellow low, red out) -- not a badge or a column. In a real browser, the REAL InventoryProductsSurface at
 // phone and desktop widths, English and Khmer, light and dark:
-//   - every state shows, with the state word as tooltip and as screen-reader text;
+//   - every state shows, with the state word as tooltip (on an aria-hidden copy of the figure) and as screen-reader text
+//     ("4 Low Stock"), so a screen reader announces the word once;
 //   - the tint costs no height: each row/card is measured with the pill and again with the pill's classes
 //     stripped, and the two heights are equal (a pill with vertical padding fails this);
 //   - the pill stays inside its cell/card and the page never scrolls sideways;
 //   - the tint is readable (WCAG contrast >= 4.5) and differs between the themes;
 //   - Khmer text keeps its line box.
 // A merged row (two real products whose SUM looks healthy) is "low", because each real product is low.
+// The Transfer modal's subtitle (the REAL InventoryStockModals, ?view=transfer) shows the same tinted figure.
 const read = (file: string) => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')
 const packs = { en: JSON.parse(read('src/lang/en.json')) as Record<string, string>, km: JSON.parse(read('src/lang/km.json')) as Record<string, string> }
 
@@ -19,6 +21,7 @@ const fixture = String.raw`
   import React from 'react'
   import { createRoot } from 'react-dom/client'
   import InventoryProductsSurface from '/src/components/inventory/InventoryProductsSurface.tsx'
+  import InventoryStockModals from '/src/components/inventory/InventoryStockModals.tsx'
   import { AppContext, FALLBACK_APP_CONTEXT } from '/src/app/AppContextCore.tsx'
   import en from '/src/lang/en.json'
   import km from '/src/lang/km.json'
@@ -42,7 +45,16 @@ const fixture = String.raw`
     row(5, name('Merged item', 'ទំនិញបូកបញ្ចូល'), 8, { barcode: '5550' }),
   ]
   const noop = () => {}
-  createRoot(document.getElementById('root')).render(
+  const tr = (key, fallback) => (t(key) !== key ? t(key) : (fallback ?? key))
+  const transfer = (
+    <InventoryStockModals getStockQty={() => 4} onCloseTransfer={noop} onTransfer={noop} setTransferForm={noop} t={t} tr={tr}
+      transferForm={{ from_branch_id: '1', to_branch_id: '', quantity: '', reason: '' }} transferSaving={false} transferSourceBranchOptions={[]}
+      transferModal={{ ...base, id: 2, name: name('Low item', 'ទំនិញទាប'), unit: 'pcs', stock_quantity: 4, branch_stock: [{ branch_id: 1, branch_name: 'Main', quantity: 4 }] }} />
+  )
+  if (params.get('view') === 'transfer') createRoot(document.getElementById('root')).render(
+    <AppContext.Provider value={{ ...FALLBACK_APP_CONTEXT, t, language: lang }}>{transfer}</AppContext.Provider>,
+  )
+  else createRoot(document.getElementById('root')).render(
     <AppContext.Provider value={{ ...FALLBACK_APP_CONTEXT, t, language: lang }}>
       <div data-fixture="inventory" className="p-2">
         <InventoryProductsSurface items={items} total={items.length} page={1} pageSize={20} totalPages={1} branchFilter="all" loading={false} error={null}
@@ -54,7 +66,7 @@ const fixture = String.raw`
 `
 
 type Measure = {
-  pills: Array<{ state: string; text: string; title: string; srWord: string; withPill: number; withoutPill: number; inside: boolean; contrast: number; background: string }>
+  pills: Array<{ state: string; text: string; title: string; hidden: string | null; srWord: string; withPill: number; withoutPill: number; inside: boolean; contrast: number; background: string }>
   overflow: number
 }
 
@@ -67,13 +79,13 @@ const measure = String.raw`(() => {
   const over = (top, under) => ({ r: top.r * top.a + under.r * (1 - top.a), g: top.g * top.a + under.g * (1 - top.a), b: top.b * top.a + under.b * (1 - top.a) })
   const effective = (el) => { const chain = []; for (let n = el; n; n = n.parentElement) chain.push(parse(getComputedStyle(n).backgroundColor)); let acc = floor; for (const layer of chain.reverse()) acc = over(layer, acc); return acc }
   const pills = [...document.querySelectorAll('[data-stock-qty]')].filter((el) => el.getClientRects().length > 0)
-  const container = (el) => el.closest('tr') || el.closest('.card')
+  const container = (el) => el.closest('tr') || el.closest('.card') || el.closest('.detail-scroll-text')
   const first = pills.map((el) => {
     const c = container(el)
     const bg = effective(el)
     const fg = parse(getComputedStyle(el).color)
     const l1 = lum(over({ ...fg, a: 1 }, bg)) + 0.05, l2 = lum(bg) + 0.05
-    return { state: el.dataset.stockState, text: el.firstChild.textContent, title: el.title, srWord: el.querySelector('.sr-only').textContent.trim(), withPill: c.getBoundingClientRect().height,
+    return { state: el.dataset.stockState, text: el.firstChild.textContent, title: el.firstChild.title, hidden: el.firstChild.getAttribute('aria-hidden'), srWord: el.querySelector('.sr-only').textContent.trim(), withPill: c.getBoundingClientRect().height,
       inside: el.getBoundingClientRect().right <= el.parentElement.getBoundingClientRect().right + 0.5 && el.getBoundingClientRect().left >= el.parentElement.getBoundingClientRect().left - 0.5,
       contrast: Math.max(l1, l2) / Math.min(l1, l2), background: getComputedStyle(el).backgroundColor }
   })
@@ -102,13 +114,32 @@ await browser.run('PASS stock-qty layout: pill adds no row height, readable in b
     for (const pill of result.pills) {
       const word = packs[lang][{ out: 'out_of_stock', low: 'low_stock', healthy: 'healthy_stock' }[pill.state]!]
       assert.equal(pill.title, word, `${label}: tooltip is the ${pill.state} word`)
-      assert.equal(pill.srWord, word, `${label}: screen-reader text is the ${pill.state} word`)
+      assert.equal(pill.hidden, 'true', `${label}: the tooltip sits on an aria-hidden figure`)
+      assert.equal(pill.srWord, `${pill.text} ${word}`, `${label}: screen-reader text is the figure and the ${pill.state} word`)
       assert.ok(Math.abs(pill.withPill - pill.withoutPill) < 0.5, `${label}: ${pill.state} pill changed the row height ${pill.withoutPill} -> ${pill.withPill}`)
       assert.ok(pill.inside, `${label}: ${pill.state} pill stays inside its cell`)
       assert.ok(pill.contrast >= 4.5, `${label}: ${pill.state} contrast ${pill.contrast.toFixed(2)} >= 4.5`)
       assert.notEqual(pill.background, 'rgba(0, 0, 0, 0)', `${label}: ${pill.state} is actually tinted`)
       backgrounds[`${theme}:${pill.state}`] = pill.background
     }
+    assert.ok(result.overflow <= 0, `${label}: no horizontal page scroll (${result.overflow})`)
+  }
+  // The Transfer modal subtitle: one tinted figure (the product has 4 against a threshold of 10, so "low"), same tooltip and screen-reader text, no height change.
+  for (const width of [375, 1280]) for (const lang of ['en', 'km'] as const) for (const theme of ['light', 'dark']) {
+    const label = `transfer ${width}px ${lang} ${theme}`
+    await browser.open(width, `view=transfer&lang=${lang}&theme=${theme}`, `document.querySelector('[data-stock-qty]')`, 900)
+    const result = await browser.evaluate<Measure>(measure)
+    assert.equal(result.pills.length, 1, `${label}: one tinted figure in the subtitle`)
+    const [pill] = result.pills
+    const word = packs[lang].low_stock
+    assert.equal(pill.state, 'low', `${label}: state`)
+    assert.equal(pill.text, '4', `${label}: the figure`)
+    assert.equal(pill.title, word, `${label}: tooltip`)
+    assert.equal(pill.hidden, 'true', `${label}: the tooltip sits on an aria-hidden figure`)
+    assert.equal(pill.srWord, `4 ${word}`, `${label}: screen-reader text`)
+    assert.ok(Math.abs(pill.withPill - pill.withoutPill) < 0.5, `${label}: the subtitle changed height ${pill.withoutPill} -> ${pill.withPill}`)
+    assert.ok(pill.inside, `${label}: stays inside the subtitle`)
+    assert.ok(pill.contrast >= 4.5, `${label}: contrast ${pill.contrast.toFixed(2)} >= 4.5`)
     assert.ok(result.overflow <= 0, `${label}: no horizontal page scroll (${result.overflow})`)
   }
   for (const state of ['out', 'low', 'healthy']) assert.notEqual(backgrounds[`light:${state}`], backgrounds[`dark:${state}`], `${state}: dark theme has its own tint`)
