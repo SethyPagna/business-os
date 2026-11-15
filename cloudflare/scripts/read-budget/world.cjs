@@ -31,6 +31,16 @@ let last = null;
 let forceMiss = false;
 const queued = [];
 let cachePatched = false;
+// A request may carry x-budget-clock (epoch ms): the Worker's clock reads that instant, advancing in real time, for that request alone. A shape whose rows
+// depend on where the seed's dated rows sit relative to "now" pins it, so its count is the same on every day and at every hour of the run.
+const RealDate = Date;
+let clock = null;
+const clockNow = () => (clock ? clock.ms + (RealDate.now() - clock.real) : RealDate.now());
+class BudgetDate extends RealDate {
+  constructor(...a) { if (a.length === 0) super(clockNow()); else super(...a) }
+  static now() { return clockNow() }
+}
+globalThis.Date = BudgetDate;
 function patchCache() {
   if (cachePatched) return; cachePatched = true;
   const c = caches.default; const realMatch = c.match.bind(c);
@@ -110,8 +120,11 @@ export default { ...worker, async fetch(request, env, ctx) {
   if (url.pathname === '/__budget/last') return Response.json(last);
   const w = wrapEnv(env);
   forceMiss = request.headers.get('x-budget-miss') === '1';
+  const pinned = Number(request.headers.get('x-budget-clock'));
+  clock = Number.isFinite(pinned) && pinned > 0 ? { ms: pinned, real: RealDate.now() } : null;
   const { counter, result, error } = await counted((c) => worker.fetch(request, w, c));
   forceMiss = false;
+  clock = null;
   const h = { 'x-d1-calls': String(counter.calls), 'x-d1-statements': String(counter.statements), 'x-d1-rr': String(counter.rr), 'x-d1-rw': String(counter.rw), 'x-d1-bgerr': counter.bgError ? encodeURIComponent(counter.bgError.slice(0, 200)) : '' };
   if (error) return new Response('WRAPPER ' + String(error && error.stack || error), { status: 599, headers: h });
   const body = await result.arrayBuffer();
@@ -284,9 +297,14 @@ async function bootWorld({ tier = 'free', seedVariant = 'base', persistDir, seed
   attachSwitchRows(world)
   world.all = async (sql, ...values) => (await world.db.prepare(sql).bind(...values).all()).results
   // One request through the counting proxy. Past the deadline the isolate is restarted (a runaway statement dies with it).
+  // world.clockMs pins the Worker's clock for the requests sent while it is set; READ_BUDGET_NOW (an ISO instant) makes the whole run behave as if it started then
+  // (the seed's anchor date follows it too, see seed.cjs), which is how the date-independence of a shape is proven.
+  const fakeStart = process.env.READ_BUDGET_NOW ? Date.parse(process.env.READ_BUDGET_NOW) : null, realStart = Date.now()
+  const clockOf = (opts) => (opts.clock !== undefined ? opts.clock : clockHeader())
+  const clockHeader = () => (world.clockMs != null ? world.clockMs : fakeStart != null ? fakeStart + (Date.now() - realStart) : null)
   world.send = async (method, url, body, opts = {}) => {
     const cookie = opts.cookie === undefined ? world.cookie : opts.cookie
-    const init = { method, headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin', origin: ORIGIN, ...(cookie ? { cookie } : {}), ...(opts.miss ? { 'x-budget-miss': '1' } : {}) },
+    const init = { method, headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin', origin: ORIGIN, ...(cookie ? { cookie } : {}), ...(opts.miss ? { 'x-budget-miss': '1' } : {}), ...(clockOf(opts) ? { 'x-budget-clock': String(clockOf(opts)) } : {}) },
       ...(body === undefined ? {} : { body: typeof body === 'string' ? body : JSON.stringify(body) }) }
     const started = Date.now()
     let timer

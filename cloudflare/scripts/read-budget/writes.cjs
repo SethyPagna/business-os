@@ -302,15 +302,20 @@ function shiftClose() {
   return { id: 'w-shift-close', label: 'POST /api/shifts/:id/close (Telegram ON, report queued)', method: 'POST', url: '/api/shifts/:id/close',
     prepare: async (world) => {
       await world.db.prepare("INSERT OR REPLACE INTO settings(key,value,updated_at) VALUES('telegram_chat_id','-1001','v1'),('telegram_automation_enabled','true','v1'),('shift_admin_exempt','false','v1')").run()
+      // The seed's dated rows end at its anchor (12:00 business time, 05:00 UTC of the business date), so how many of them fall in the close's read window (twelve hours before the
+      // open, two days after the close) depends on the real clock: 12 to 36 hours of them sit in the future from 17:00 UTC (the business date has rolled) and the count moved
+      // by about 700 rows between 15:53 and 18:08 UTC on 15 Nov 2026 with no code change. The shift is opened and closed at a pinned instant, 16:00 UTC of the anchor's date (23:00 business time,
+      // the same business date), so the window holds the same four hours of seed rows on every day.
+      world.clockMs = Date.parse(world.ctx.anchorDate + 'T16:00:00Z')
       const opened = await world.send('POST', '/api/shifts/open', { branch_id: 1, opening_float_usd: 10, opening_float_khr: 0 })
-      if (opened.status >= 300) throw new Error(`shift fixture: open answered ${opened.status} ${opened.text.slice(0, 200)}`)
+      if (opened.status >= 300) { world.clockMs = null; throw new Error(`shift fixture: open answered ${opened.status} ${opened.text.slice(0, 200)}`) }
       const shift = opened.json.shift || opened.json
       return { id: shift.id, revision: shift.revision }
     },
     // The admin is exempt from shifts by default; the fixture turns that off for the request and puts the settings back so no later shape sees a shift rule.
     run: async (world, send, shift) => {
       try { return await send('POST', `/api/shifts/${shift.id}/close`, { client_request_id: key('shift-close'), expected_revision: shift.revision, closing_counted_usd: 100, closing_counted_khr: 41000 }) }
-      finally { await world.db.prepare("DELETE FROM settings WHERE key IN ('telegram_chat_id','telegram_automation_enabled','shift_admin_exempt')").run() }
+      finally { world.clockMs = null; await world.db.prepare("DELETE FROM settings WHERE key IN ('telegram_chat_id','telegram_automation_enabled','shift_admin_exempt')").run() }
     } }
 }
 
