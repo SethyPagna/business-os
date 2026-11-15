@@ -6,7 +6,7 @@ import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
 
 // The mounted Inventory page with a server that groups its list (capabilities.groupings): what it asks for, what a header counts, and that collapsing is local.
 const COUNT_FIELDS = { inventory_check_show_price: true, inventory_check_show_barcode: true, inventory_check_show_category: true, inventory_check_show_brand: true, inventory_check_show_stock: true, inventory_check_show_received: true }
-const harness = await createHarness({ observe: ['api/actorReadScope.ts', 'utils/dirtyWork.ts'] })
+let harness = await createHarness({ observe: ['api/actorReadScope.ts', 'utils/dirtyWork.ts'] })
 const listeners = new Map<string, Set<EventListenerOrEventListenerObject>>()
 window.addEventListener = (type: string, listener: unknown) => { if (listener) { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type)!.add(listener as EventListenerOrEventListenerObject) } }
 window.removeEventListener = (type: string, listener: unknown) => { if (listener) listeners.get(type)?.delete(listener as EventListenerOrEventListenerObject) }
@@ -29,9 +29,13 @@ const categoryItems = [row(1, 'c:serum'), row(2, 'c:serum'), row(3, 'none'), row
 const requests: Array<Record<string, unknown>> = []
 let groupings: string[] | null = null
 let total = 160
+// A server that cannot group still accepts groupBy and ignores it; one that can answers `grouping`. denyCategory: the grant is gone (403).
+let serverGroups = true
+let denyCategory = false
 const answer = (params: Record<string, unknown>) => {
-  const grouped = params.groupBy === 'checked' || params.groupBy === 'category'
-  return { items: grouped && params.groupBy === 'category' ? categoryItems : items, total, page: 1, pageSize: 20, totalPages: Math.ceil(total / 20), simple: true, branches: [{ id: 1, name: 'Test branch' }],
+  const grouped = serverGroups && (params.groupBy === 'checked' || params.groupBy === 'category')
+  if (denyCategory && params.groupBy === 'category') throw Object.assign(new Error('Hidden'), { status: 403, code: 'inventory_check_field_hidden' })
+  return { items: grouped && params.groupBy === 'category' ? categoryItems : items, total, page: 1, pageSize: 20, totalPages: Math.ceil(total / 20), simple: true, branches: [{ id: 1, name: 'Test branch' }, { id: 2, name: 'Second branch' }],
     ...(params.summary === 0 ? {} : { summary: { not_checked: 17, in_check: 2, ok: 5, issue: 1, total: 25 }, facets: { brands: [], categories: [] } }),
     ...(groupings ? { capabilities: { groupings } } : {}), ...(grouped ? { grouping: params.groupBy === 'category' ? byCategory : byDate } : {}) }
 }
@@ -67,21 +71,29 @@ const search = (s: MountedSurface) => s.field('inventory-check-search')
 const enter = async (s: MountedSurface) => { const box = search(s); await s.call(box, 'onKeyDown', [{ key: 'Enter', preventDefault() {}, nativeEvent: {}, currentTarget: { value: propsOf(box).value }, target: box }]) }
 
 try {
-  // 1. A server that does not advertise a grouping: the name order, and no groupBy ever on the wire.
+  // 1. A server that cannot group ignores groupBy: the first request already carries it, a cold tab reads exactly once, and an answer without `grouping` draws the name order with no Group by control.
+  serverGroups = false
   const plain = await mount()
-  assert.ok(requests.length >= 1 && requests.every(request => request.groupBy === undefined), 'without the capability no request carries groupBy')
-  assert.equal(requests.at(-1)?.sortBy, 'name')
-  assert.equal(headers(plain).length, 0, 'no headers: today\'s list')
+  assert.equal(requests.length, 1, 'a cold tab spends one list read, not a probe plus a second read')
+  assert.equal(requests[0].groupBy, 'checked', 'the first request carries groupBy=checked')
+  assert.equal(requests[0].sortBy, undefined, 'never together with a sort')
+  assert.equal(headers(plain).length, 0, 'no headers: the name-order list')
+  await plain.click(plain.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'filters', 'Filters trigger'))
+  assert.ok(!plain.findAll(node => node.getAttribute('data-filter-menu-section') === 'group').length, 'the Group by control is hidden')
   assert.deepEqual(rowIds(plain), ['1', '2', '3', '4'])
+  await plain.click(plain.button('next', plain.find(node => node.getAttribute('data-inventory-check-pager-lock') !== null, 'paging controls')))
+  assert.ok(requests.at(-1)?.groupBy === undefined && requests.at(-1)?.sortBy === 'name', 'once an answer carried no grouping the next read is the name-ordered read: the sort is kept, not dropped')
   await plain.unmount()
+  // The page remembers, for the tab, that this server did not group; the next scenario is a new tab on a server that does.
+  await harness.close(); harness = await createHarness({ observe: ['api/actorReadScope.ts', 'utils/dirtyWork.ts'] })
 
   // 2. The server advertises it: the page asks again, grouped, with no sort, and never draws the name-ordered answer first.
   groupings = ['checked', 'category']
+  serverGroups = true
   requests.length = 0
   const s = await mount()
-  const grouped = requests.filter(request => request.groupBy !== undefined)
-  assert.ok(grouped.length >= 1 && grouped.every(request => request.groupBy === 'checked' && request.sortBy === undefined && request.sortDirection === undefined), 'groupBy=checked, no sort')
-  assert.ok(requests.filter(request => request.groupBy === undefined).length <= 1, 'at most the one plain read that learned the capability')
+  assert.equal(requests.length, 1, 'a cold tab on a grouping server is also one list read')
+  assert.ok(requests[0].groupBy === 'checked' && requests[0].sortBy === undefined && requests[0].sortDirection === undefined, 'groupBy=checked, no sort')
   assert.deepEqual(headers(s).map(node => node.getAttribute('data-inventory-check-group')), ['d:2026-11-12', 'd:2026-11-03', 'never'])
   assert.ok(head(s, 'd:2026-11-12').textContent.startsWith('12/11/2026') && head(s, 'd:2026-11-12').textContent.includes('40'), 'dd/mm/yyyy and the server total, not the two rows on the page')
   assert.ok(head(s, 'never').textContent.startsWith('Never checked') && head(s, 'never').textContent.includes('120'))
@@ -120,12 +132,24 @@ try {
   assert.ok(head(s, 'c:serum').textContent.startsWith('Serum') && head(s, 'none').textContent.startsWith('No category'), 'Category label, and No category last')
   assert.deepEqual(rowIds(s), ['1', '2', '3', '4'], 'a new grouping starts with every group open')
 
+  // 6b. The grant for Category goes while the choice is stored: one 403, then the last checked date, once.
+  denyCategory = true
+  requests.length = 0
+  await s.type(search(s), 'BC1002')
+  await enter(s)
+  await s.settle({ until: () => requests.at(-1)?.groupBy === 'checked' })
+  assert.deepEqual(requests.map(request => request.groupBy), ['category', 'checked'], 'one refused read, then one fallback read: no loop')
+  await s.settle({})
+  assert.equal(requests.length, 2, 'nothing more is sent')
+  assert.deepEqual(headers(s).map(node => node.getAttribute('data-inventory-check-group')), ['d:2026-11-12', 'd:2026-11-03', 'never'], 'grouped by date again')
+  denyCategory = false
+
   // 7. No grouping: today's name order, no groupBy.
   await chooseGroup(s, 'No grouping')
   assert.equal(requests.at(-1)?.groupBy, undefined)
   assert.equal(requests.at(-1)?.sortBy, 'name')
   assert.equal(headers(s).length, 0)
-  assert.equal(propsOf(search(s)).value, 'BC1001')
+  assert.equal(propsOf(search(s)).value, 'BC1002')
   await s.unmount()
   console.log('inventoryChecksGrouped mounted journeys passed')
 } finally { await harness.close() }

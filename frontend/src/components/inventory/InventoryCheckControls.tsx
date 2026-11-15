@@ -77,7 +77,7 @@ export default function InventoryCheckControls({ query, onQueryChange, onQuerySu
   const highLow = (sortBy: string, field: string): FilterOption[] => [
     sortChoice(sortBy, 'desc', named('sort_field_high_low', field)), sortChoice(sortBy, 'asc', named('sort_field_low_high', field)),
   ]
-  const grouped = groupToAsk(filters.group, groupings) !== null
+  const grouped = !!groupings?.length && groupToAsk(filters.group, groupings) !== null
   const groupChoiceOption = (value: GroupChoice, text: string, active: boolean): FilterOption => ({ id: `group-${value || 'checked'}`, label: text, active, onClick: () => onFiltersChange({ group: value }) })
   const sortOptions: FilterOption[] = [sortChoice('name', 'asc', t('sort_name_az')), sortChoice('name', 'desc', t('sort_name_za'))]
   if (fields.stock && !wired) sortOptions.push(...highLow('stock', t('stock')))

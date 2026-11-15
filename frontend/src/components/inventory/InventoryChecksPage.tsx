@@ -117,8 +117,8 @@ const MAX_SUBMISSION = 500
 /** Leaving the date order (a status or search changed) goes back to the name order. */
 const NAME_ORDER = { sortBy: 'name', sortDirection: 'asc' as const }
 const initialFilters: InventoryCheckFilters = { branchId: '', stockState: '', checkState: '', brand: '', category: '', sortBy: 'name', sortDirection: 'asc', group: '' }
-/** The groupings this server offered, kept for the tab: a branch change remounts the page, and the next read asks for the grouping straight away. */
-let knownGroupings: readonly string[] | null = null
+/** The groupings this server offered (null: it answered without any; undefined: it has not answered), kept for the tab: a branch change remounts the page. */
+let knownGroupings: readonly string[] | null | undefined
 /** Typing waits for a pause this long before the list is read; Enter, the camera and the scanner gun read at once. */
 /** How long the sync echo of a Set made in this tab is ignored. */
 const OWN_SET_ECHO_MS = 10_000
@@ -261,7 +261,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const [refresh, setRefresh] = useState(0)
   const [sessionReload, setSessionReload] = useState(0)
   const [data, setData] = useState<ProductsResult | null>(null)
-  const [groupings, setGroupings] = useState<readonly string[] | null>(knownGroupings)
+  const [groupings, setGroupings] = useState<readonly string[] | null | undefined>(knownGroupings)
   // Collapsed groups (`by:key`): kept across page steps, cleared when a filter, the branch or the grouping changes. Collapsing reads nothing.
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
   const [expandedFor, setExpandedFor] = useState(0)
@@ -382,7 +382,6 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     const backgroundReload = loadedKey === scopeKey
     if (!backgroundReload) { setLoading(true); setDetail(null) }
     setError('')
-    let handedOff = false
     async function load() {
       try {
         if (section === 'sessions') {
@@ -433,7 +432,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
           //  - the other list REFUSES the key (400 inventory_check_invalid_query): ask in the other list's words;
           //  - the check-status list ANSWERS a request written in the older words, which dropped a status choice the tab holds: its rows are not the filtered ones, so ask again with the status.
           let wording: ProductsServer = productsServer.current
-          let products = await readInventoryCheckProducts<ProductsResult>(productsWireParams(groupWire ? groupedParams(params, groupWire) : params, wording, summaryScope.current === stepScope), abort.signal)
+          let products = await readInventoryCheckProducts<ProductsResult>(productsWireParams(groupWire && groupings !== null ? groupedParams(params, groupWire) : params, wording, summaryScope.current === stepScope), abort.signal)
             .catch(cause => {
               if ((cause as { code?: unknown } | null)?.code !== 'inventory_check_invalid_query' || abort.signal.aborted) throw cause
               summaryScope.current = ''
@@ -445,20 +444,15 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
             products = await readInventoryCheckProducts<ProductsResult>(productsWireParams(params, 'simple', false), abort.signal)
           }
           if (publish()) {
-            // The sole branch is chosen by a remount: it should ask for the grouping on its first read.
-            if (products.simple === true && products.capabilities?.groupings?.length) knownGroupings = products.capabilities.groupings
+            // The sole branch is chosen by a remount: it remembers what the server offered.
+            const offered = products.simple === true && products.capabilities?.groupings?.length ? products.capabilities.groupings : null
+            knownGroupings = offered
             if (!branchId && !sessionId && products.branches?.length === 1) {
               onSelect({ branchId: String(products.branches[0].id), sessionId: '', bootstrapIntent: { query, filters: { ...filters }, pagination: { ...pagination }, pageSize } })
               return
             }
             productsServer.current = productsServerOf(products)
-            const offered = products.simple === true && products.capabilities?.groupings?.length ? products.capabilities.groupings : null
-            if (!sameGroupings(offered, groupings)) {
-              knownGroupings = offered; setGroupings(offered)
-              if (offered) void loadGroupedList().catch(() => {})
-              // Asked in the plain order before the server had said it groups: read again, grouped, instead of showing the name order first.
-              if (offered && !products.grouping && groupToAsk(groupChoice, offered)) { handedOff = true; return }
-            }
+            if (groupings === undefined || !sameGroupings(offered, groupings)) setGroupings(offered)
             if (products.simple !== true) summaryScope.current = ''
             else if (products.facets) summaryScope.current = stepScope
             setData(previous => products.simple && !products.facets && previous ? { ...products, summary: previous.summary, facets: previous.facets, facetsLimited: previous.facetsLimited } : products)
@@ -469,6 +463,10 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       } catch (cause) {
         // Refused in both lists' words: forget which list this is, so Retry starts from the words both understand.
         if (publish() && (cause as { code?: unknown } | null)?.code === 'inventory_check_invalid_query') { productsServer.current = 'unknown'; summaryScope.current = '' }
+        // A stored Category choice the grant no longer allows: back to the last checked date, once (the choice cannot return to Category without a tap).
+        if (publish() && groupWire === 'category' && (cause as { code?: unknown } | null)?.code === 'inventory_check_field_hidden') {
+          setFilters(previous => ({ ...previous, group: '' })); return
+        }
         // A status the server no longer offers (a switch moved under this tab) is dropped once and the list read again; a second refusal shows the load error.
         if (publish() && (cause as { code?: unknown } | null)?.code === 'inventory_check_invalid_query' && filters.checkState && !checkStateRetried.current) {
           checkStateRetried.current = true
@@ -476,7 +474,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
           return
         }
         if (publish()) setError(tr('inventory_check_load_failed', 'Inventory checks are unavailable. Reload to try again.'))
-      } finally { if (publish() && !handedOff) setLoading(false) }
+      } finally { if (publish()) setLoading(false) }
     }
     void load()
     return () => { live = false; abort.abort() }

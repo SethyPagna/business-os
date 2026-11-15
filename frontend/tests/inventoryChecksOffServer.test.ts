@@ -34,8 +34,9 @@ let server: 'off' | 'on' = 'off'
 let refuseEverything = false
 // A server that already carries the fix maps checkState=issue to its old issue state; the server this page was built against does not.
 let aliasUnderstood = false
-const OFF_KEYS = new Set(['query', 'branchId', 'category', 'brand', 'stockState', 'page', 'pageSize', 'sortBy', 'sortDirection', 'sessionId', 'state'])
-const ON_KEYS = new Set(['query', 'branchId', 'category', 'brand', 'stockState', 'checkState', 'page', 'pageSize', 'sortBy', 'sortDirection', 'sessionId', 'summary'])
+// The server this page ships with accepts groupBy on every list path and ignores it where it cannot group.
+const OFF_KEYS = new Set(['query', 'branchId', 'category', 'brand', 'stockState', 'page', 'pageSize', 'sortBy', 'sortDirection', 'sessionId', 'state', 'groupBy'])
+const ON_KEYS = new Set(['query', 'branchId', 'category', 'brand', 'stockState', 'checkState', 'page', 'pageSize', 'sortBy', 'sortDirection', 'sessionId', 'summary', 'groupBy'])
 const branches = [{ id: 1, name: 'Branch one' }, { id: 2, name: 'Branch two' }]
 const answer = (query: URLSearchParams) => {
   const page = Number(query.get('page') ?? 1)
@@ -113,7 +114,7 @@ try {
   // ---- OFF: Products, page steps, the filter menu ----
   const products = await mount()
   noError(products, 'page 1')
-  assert.deepEqual(keysOf(last()), ['page', 'pageSize', 'sortBy', 'sortDirection'], 'page 1 asks the old list for its page, size and sort only')
+  assert.deepEqual(keysOf(last()), ['groupBy', 'page', 'pageSize'], 'the first read asks for the grouping and no sort; the old list ignores the key')
   assert.ok(products.text().includes('Product page 1'), 'the old list is drawn')
   assert.ok(!(await menuSections(products)).includes('checkState'), 'the Products filter menu offers no check-status filter the server would refuse')
   assert.ok((await menuSections(products)).includes('stockState'), 'positive control: the menu is open and its other filters are there')

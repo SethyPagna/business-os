@@ -25,7 +25,8 @@ export function oldListDropsStatus(params: QueryParams): boolean {
  */
 export function productsWireParams(params: QueryParams, server: ProductsServer, skipSummary: boolean): QueryParams {
   if (server === 'old') {
-    const { checkState, ...rest } = params
+    // The older list is told nothing about a grouping it cannot draw.
+    const { checkState, groupBy: _groupBy, ...rest } = params
     const state = typeof checkState !== 'string' ? undefined : rest.sessionId ? Object.hasOwn(OLD_SESSION_STATE, checkState) ? OLD_SESSION_STATE[checkState] : undefined : checkState === 'issue' ? 'issue' : undefined
     return state ? { ...rest, state } : rest
   }

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHarness, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
 import { collapseId, groupedParams, groupToAsk, inOpenGroups, UNSAVED_ROW_CLASS, type Grouping } from '../src/components/inventory/inventoryCheckGroups.ts'
+import { productsWireParams } from '../src/components/inventory/inventoryCheckProductsRequest.ts'
 import { buildSections, groupLabel } from '../src/components/inventory/inventoryCheckGroupSections.ts'
 import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
 
@@ -93,12 +94,17 @@ const cases: Array<[string, () => Promise<void>]> = [
   }],
   ['the grouped request carries groupBy and no sort; the plain one is untouched', async () => {
     assert.deepEqual(groupedParams({ page: 1, sortBy: 'name', sortDirection: 'asc', query: 'a' }, 'checked'), { page: 1, query: 'a', groupBy: 'checked' })
-    assert.equal(groupToAsk('', null), null, 'no capability, no groupBy')
-    assert.equal(groupToAsk('', []), null)
+    assert.equal(groupToAsk('', null), 'checked', 'before any answer the first request already carries groupBy=checked')
+    assert.equal(groupToAsk(undefined, []), 'checked')
+    assert.equal(groupToAsk('category', null), 'category', 'a stored Category choice is sent before an answer has said otherwise')
+    assert.equal(groupToAsk('category', []), 'category')
     assert.equal(groupToAsk('', ['checked', 'category']), 'checked', 'the default is the last checked date')
     assert.equal(groupToAsk('category', ['checked', 'category']), 'category')
     assert.equal(groupToAsk('category', ['checked']), 'checked', 'category only when it is listed')
     assert.equal(groupToAsk('none', ['checked', 'category']), null, 'name A-Z is the ungrouped choice')
+    assert.equal(groupToAsk('none', null), null)
+    assert.deepEqual(productsWireParams({ page: 1, groupBy: 'checked' }, 'old', false), { page: 1 }, 'the older list is never sent a grouping')
+    assert.deepEqual(productsWireParams({ page: 1, groupBy: 'checked' }, 'unknown', false), { page: 1, groupBy: 'checked' })
   }],
   ['the shape the Worker answers (family header rows carry group_key, dates and the tail have label null, a category keeps the case of the first row) builds the same sections', async () => {
     // Fixture in the shape of buildGroupingBlock / the grouped oracle: a parent header row (is_group, not checkable) sits in its family's group.

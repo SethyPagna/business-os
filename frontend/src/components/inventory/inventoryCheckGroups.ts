@@ -8,11 +8,11 @@ export type Grouping = { by: GroupBy; unit: 'family'; groups: GroupSummary[] }
 /** One id per group, across page changes: the group keys repeat between a date grouping and a category grouping. */
 export const collapseId = (by: GroupBy, key: string): string => `${by}:${key}`
 
-/** The grouping to ask for, from the choice and what the server offers. Null: read the plain name order. */
+/** The grouping to send with every list read outside a count session, from the first request: the choice, defaulting to the last checked date. Category only while the last answer offered it (or none has answered yet). Null: the person chose the name order. */
 export function groupToAsk(choice: GroupChoice | undefined, offered: readonly string[] | null | undefined): GroupBy | null {
-  if (!offered?.length || choice === 'none') return null
-  if (choice === 'category') return offered.includes('category') ? 'category' : offered.includes('checked') ? 'checked' : null
-  return offered.includes('checked') ? 'checked' : null
+  if (choice === 'none') return null
+  if (choice === 'category' && (!offered?.length || offered.includes('category'))) return 'category'
+  return 'checked'
 }
 
 /** The rows of the groups that are open: what the page-wide "matches stock" acts on. */
