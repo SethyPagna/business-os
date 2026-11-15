@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHarness } from './mountedComponentHarness.ts'
 import { APP_NAVIGATION_EVENT } from '../src/app/pathRouting.ts'
 import * as dirtyWork from '../src/utils/dirtyWork.ts'
-import { __resetApiHealthForTests, __resetApiWriteDedupeForTests, apiFetch, setSyncServerUrl } from '../src/api/http.ts'
+import { __resetApiHealthForTests, __resetApiWriteDedupeForTests } from '../src/api/http.ts'
 import { appendQuery, buildQueryString, type QueryParams } from '../src/api/query.ts'
 
 // N2 (round 3): the per-date entries chunk fails with an error lazyRetry does not recognise as a chunk error: the popover's own boundary shows a compact inline retry, the page and every count stay.
@@ -29,15 +29,6 @@ const submissions: Array<Record<string, unknown>> = []
 /** The on-demand batch reads the count popover made: [productId, branchId]. */
 const lotReads: Array<[number, number]> = []
 let submitAnswer: (input: Record<string, unknown>) => unknown = () => ({ item: { id: 'session-new' }, receipt: {}, created: true })
-/** The error the page really receives for a 400: built by the real apiFetch from a stubbed network answer, not by hand (it carries the code, never the parameter name). */
-async function realRefusal(body: Record<string, unknown>): Promise<Error> {
-  const saved = globalThis.fetch
-  globalThis.fetch = (async () => new Response(JSON.stringify(body), { status: 400, headers: { 'content-type': 'application/json' } })) as typeof fetch
-  setSyncServerUrl('https://admin.example.test'); __resetApiHealthForTests(); __resetApiWriteDedupeForTests()
-  try { await apiFetch('GET', '/api/inventory-checks/list?x=1'); throw new Error('the stub answered 400 but apiFetch did not throw') } catch (error) { return error as Error } finally { globalThis.fetch = saved }
-}
-let realRefusalSync: Error = new Error('unset')
-const sync = (detail: Record<string, unknown>) => window.dispatchEvent(new CustomEvent('sync:update', { detail }))
 let adjustAnswer: (payload: Record<string, unknown>) => unknown = () => ({})
 let listAnswer: (query: URLSearchParams) => Row | Promise<Row> = () => ({})
 let overlayEntries = new Map<number, Row>()
@@ -107,19 +98,13 @@ async function mount(permissions: Record<string, boolean> = FIELDS) {
 const withLots = (row: Row): Row => ({ ...row, lots: [
   { id: 7, received_at: '2026-10-01', branches: [{ branch_id: 1, quantity: 5 }] }, { id: 9, received_at: '2026-10-09', branches: [{ branch_id: 1, quantity: 3 }] }] })
 const capabilities = { fixStock: true, approveCounts: false, lotCounts: true, directSet: true }
-const answerOf = (summary = { ok: 2, issue: 1, pending: 1, not_checked: 5, total: 8 }) => listBody([withLots(productRow(12, 'Dated product', 8))], { capabilities, summary })
-const exact = (surface: Awaited<ReturnType<typeof mount>>, text: string) => surface.findAll(node => node.tagName === 'BUTTON' && node.textContent === text)
-const inside = (surface: Awaited<ReturnType<typeof mount>>, attribute: string) => surface.find(node => node.getAttribute(attribute) !== null, attribute)
 const rowOf = (surface: Awaited<ReturnType<typeof mount>>, id: string) => surface.find(node => node.getAttribute('data-inventory-check-row') === id, 'row ' + id)
 // 14 Nov: the status icon of a row opens the count popover, which reads that product's batches (one request) and holds a count box per batch.
 const statusButton = (surface: Awaited<ReturnType<typeof mount>>, id: string) => surface.find(node => node.getAttribute('data-check-action') === 'status' && rowOf(surface, id).contains(node), 'status button ' + id)
 const openCount = async (surface: Awaited<ReturnType<typeof mount>>, id: string) => { await surface.click(statusButton(surface, id)); await new Promise(resolve => setTimeout(resolve, 20)) }
-const closeCount = async (surface: Awaited<ReturnType<typeof mount>>) => { await surface.click(surface.find(node => node.getAttribute('data-popover-action') === 'close', 'popover close')) }
 const dateInput = (surface: Awaited<ReturnType<typeof mount>>, batch: number) => surface.find(node => node.getAttribute('data-popover-lot-count') === String(batch), `date ${batch}`)
 const rowCount = (surface: Awaited<ReturnType<typeof mount>>, id: string) => surface.find(node => node.getAttribute('data-check-count') !== null && rowOf(surface, id).contains(node), 'row count ' + id) as unknown as { value: string; getAttribute: (name: string) => string | null }
 const rowInput = (surface: Awaited<ReturnType<typeof mount>>, id: string) => surface.find(node => node.getAttribute('data-check-count') !== null && rowOf(surface, id).contains(node), 'row count ' + id)
-const setButton = (surface: Awaited<ReturnType<typeof mount>>) => surface.find(node => node.getAttribute('data-popover-action') === 'set-lot', 'Set button')
-const lotLine = (surface: Awaited<ReturnType<typeof mount>>, batch: number) => surface.find(node => node.getAttribute('data-popover-lot') === String(batch), `lot ${batch}`)
 
 try {
   const chunkKey = 'components/inventory/inventoryCheckLotChunk.ts'
