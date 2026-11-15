@@ -39,6 +39,12 @@ const answer = (params: Record<string, unknown>) => {
     ...(params.summary === 0 ? {} : { summary: { not_checked: 17, in_check: 2, ok: 5, issue: 1, total: 25 }, facets: { brands: [], categories: [] } }),
     ...(groupings ? { capabilities: { groupings } } : {}), ...(grouped ? { grouping: params.groupBy === 'category' ? byCategory : byDate } : {}) }
 }
+// ic_wired: the Products list with the same grouping block.
+let wiredOn = false
+const wiredRequests: Array<Record<string, unknown>> = []
+const wiredAnswer = (params: Record<string, unknown>) => ({ wired: true, projected: false, total, page: 1, pageSize: 20, totalPages: 8, summary: { ok: 1, issue: 0, not_checked: 3, total: 4 },
+  items: items.map(item => ({ id: item.id, name: item.name, barcode: item.barcode, stock_quantity: 5, unit: 'pcs', group_key: item.group_key, branch_stock: [{ branch_id: 1, branch_name: 'Test branch', quantity: 5 }, { branch_id: 2, branch_name: 'Second branch', quantity: 0 }] })),
+  capabilities: { groupings: ['checked', 'category'] }, ...(params.groupBy === 'checked' ? { grouping: byDate } : {}) })
 const app = {
   user: { id: 7, role_code: 'employee', permissions: { inventory: true, inventory_checks: true, ...COUNT_FIELDS } as Record<string, boolean> },
   page: 'inventory', authReady: true, canWriteToServer: true,
@@ -51,7 +57,11 @@ const doubles = {
   'api/actorReadScope.ts': { captureActorReadScope: () => ({ authority: 'test', channel: 'inventoryChecks', revision: '1' }), captureActorWriteIdentity: () => ({ owner: 'test', epoch: 1 }), isActorReadScopeCurrent: () => true, isActorWriteIdentityCurrent: () => true },
   'api/inventoryChecksTransport.ts': {
     captureInventoryCheckWriteScope: (context: unknown, isCurrent: unknown) => ({ context, readScope: {}, writeIdentity: {}, isCurrent }),
-    readInventoryCheckList: async () => { throw Object.assign(new Error('Not found'), { status: 404, code: 'not_found' }) },
+    readInventoryCheckList: async (params: Record<string, unknown>) => {
+      if (!wiredOn) throw Object.assign(new Error('Not found'), { status: 404, code: 'not_found' })
+      wiredRequests.push({ ...params })
+      return wiredAnswer(params)
+    },
     readInventoryCheckProducts: async (params: Record<string, unknown>) => { requests.push({ ...params }); return answer(params) },
     readInventoryCheckSessions: async () => ({ items: [], total: 0, page: 1, pageSize: 20 }),
   },
@@ -151,5 +161,18 @@ try {
   assert.equal(headers(s).length, 0)
   assert.equal(propsOf(search(s)).value, 'BC1002')
   await s.unmount()
+
+  // 8. ic_wired: the first read of the Products-backed list carries groupBy and no sort, and its sections draw.
+  await harness.close(); harness = await createHarness({ observe: ['api/actorReadScope.ts', 'utils/dirtyWork.ts'] })
+  wiredOn = true
+  const wiredPage = await mount()
+  assert.equal(wiredRequests.length, 1, 'a cold wired tab is one list read')
+  assert.ok(wiredRequests[0].groupBy === 'checked' && wiredRequests[0].sortBy === undefined && wiredRequests[0].sortDirection === undefined, 'groupBy=checked, no sort')
+  assert.deepEqual(headers(wiredPage).map(node => node.getAttribute('data-inventory-check-group')), ['d:2026-11-12', 'd:2026-11-03', 'never'], 'the wired list is drawn in sections')
+  assert.ok(head(wiredPage, 'd:2026-11-12').textContent.includes('40'), 'with the server total')
+  await chooseGroup(wiredPage, 'No grouping')
+  assert.ok(wiredRequests.at(-1)?.groupBy === undefined && wiredRequests.at(-1)?.sortBy === 'name', 'No grouping goes back to the sorted read')
+  assert.equal(headers(wiredPage).length, 0)
+  await wiredPage.unmount()
   console.log('inventoryChecksGrouped mounted journeys passed')
 } finally { await harness.close() }

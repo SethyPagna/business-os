@@ -8,6 +8,7 @@
 import { buildQueryString, type QueryParams } from '../../api/query.ts'
 import type { InventoryCheckLotRow, InventoryCheckProduct } from '../../types/inventoryChecks.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
+import type { Grouping } from './inventoryCheckGroups.ts'
 import { PRICE_KEYS } from './inventoryPriceFacts.ts'
 import { patchProductFromStockAnswer, patchProductFromStockConflict, type StockConflictAnswer, type StockWriteAnswer } from './stockAnswerPatch.ts'
 
@@ -23,8 +24,8 @@ export type OverlayEntry = {
   pending?: true
 }
 export type WiredSummary = { ok?: number; issue?: number; pending?: number; not_checked?: number; total?: number }
-export type WiredExtras = { summary?: WiredSummary; capabilities?: { fixStock?: boolean; approveCounts?: boolean; lotCounts?: boolean; directSet?: boolean } }
-export type WiredList = { items: Row[]; total: number; page: number; pageSize: number; totalPages?: number; tagged_lots?: Tagged[]; /** The promotion rules behind the rows' prices (sent only to a viewer with the price grant). */ promotion_rules?: PromotionRule[]; wired?: boolean; projected?: boolean; /** The most ids one overlay read may carry (the plan's limit, echoed by the server). */ overlay_ids?: number } & WiredExtras
+export type WiredExtras = { summary?: WiredSummary; capabilities?: { fixStock?: boolean; approveCounts?: boolean; lotCounts?: boolean; directSet?: boolean; groupings?: Array<'checked' | 'category'> } }
+export type WiredList = { items: Row[]; total: number; page: number; pageSize: number; totalPages?: number; tagged_lots?: Tagged[]; /** The promotion rules behind the rows' prices (sent only to a viewer with the price grant). */ promotion_rules?: PromotionRule[]; wired?: boolean; projected?: boolean; /** Present when the read asked for a grouping (groupBy): the sections, the same shape as the check-status list's. */ grouping?: Grouping; /** The most ids one overlay read may carry (the plan's limit, echoed by the server). */ overlay_ids?: number } & WiredExtras
 export type OverlayAnswer = { items?: OverlayEntry[]; lots?: Array<{ product_id: number; lots?: Lot[]; lots_more?: boolean }> } & WiredExtras
 /** The dates of one row; `more` is set when the plan's limit cut them. */
 type RowLots = Lot[] & { more?: boolean }
@@ -47,8 +48,10 @@ export function wiredListParams(params: QueryParams, options: { omitBranch?: boo
   // The date of the check orders only a list of checked products, so it is sent with a check state (a stale choice never reaches the server alone).
   // ...and never beside a search or filter: the Worker refuses that combination (its pages are cut before they could narrow).
   const narrowed = ['query', 'brand', 'category', 'stockState'].some(key => present(params[key]))
-  out.sortBy = params.sortBy === 'name' ? 'name' : params.sortBy === 'checked' && !narrowed && ['ok', 'issue', 'pending'].includes(String(params.checkState)) ? 'checked' : 'created'
-  out.sortDirection = params.sortDirection === 'asc' ? 'asc' : 'desc'
+  // A grouping defines the order: the server refuses it beside a sort.
+  if (params.groupBy) out.groupBy = params.groupBy
+  else out.sortBy = params.sortBy === 'name' ? 'name' : params.sortBy === 'checked' && !narrowed && ['ok', 'issue', 'pending'].includes(String(params.checkState)) ? 'checked' : 'created'
+  if (!params.groupBy) out.sortDirection = params.sortDirection === 'asc' ? 'asc' : 'desc'
   if (options.skipSummary) out.summary = 0
   return out
 }
@@ -103,6 +106,7 @@ function adaptRow(row: Row, raw: Pick<WiredRaw, 'branchId' | 'overlay' | 'lots'>
     id, name: String(row.name ?? ''), sku: row.sku as string | null | undefined, barcode: row.barcode as string | null | undefined, image_path: row.image_path as string | null | undefined,
     unit: row.unit as string | null | undefined, brand: row.brand as string | null | undefined, category: row.category as string | null | undefined,
     parent_id: row.parent_id as number | string | null | undefined, checkable: true, matches_filters: true,
+    group_key: row.group_key as string | undefined,
     ...(quantity === undefined ? {} : { quantity: quantity ?? null }),
     ...(raw.damaged.has(`${id}:${branchId}`) || raw.damaged.has(`${id}:0`) ? { damaged_quantity: raw.damaged.get(`${id}:${branchId}`) ?? raw.damaged.get(`${id}:0`) } : {}),
     ...(received ? { latest_received_at: received } : {}), ...(expiry ? { next_expiry_date: expiry } : {}),
@@ -164,7 +168,7 @@ export function wiredResult(raw: WiredRaw, previous?: { summary?: Record<string,
   const summary = incoming || last ? { not_checked: incoming?.not_checked ?? last?.not_checked ?? 0, in_check: 0, ok: incoming?.ok ?? last?.ok ?? 0, issue: incoming?.issue ?? last?.issue ?? 0, total: incoming?.total ?? last?.total ?? 0,
     ...(incoming?.pending !== undefined || last?.pending !== undefined ? { pending: incoming?.pending ?? last?.pending ?? 0 } : {}) } : undefined
   return {
-    wired: true as const, simple: true as const, items: list.items.map(row => adaptRow(row, { ...raw, damaged })), total: list.total, page: list.page, pageSize: list.pageSize, totalPages: list.totalPages,
+    wired: true as const, simple: true as const, items: list.items.map(row => adaptRow(row, { ...raw, damaged })), total: list.total, page: list.page, pageSize: list.pageSize, totalPages: list.totalPages, grouping: list.grouping,
     branches: raw.branches, promotionRules: Array.isArray(list.promotion_rules) ? list.promotion_rules : [], ...(summary ? { summary } : {}), ...(raw.extras.capabilities ? { capabilities: raw.extras.capabilities } : {}),
   }
 }
@@ -220,7 +224,7 @@ export async function loadWired(args: WiredLoadArgs): Promise<WiredLoad> {
   // Typed text goes through the device search index, as the pickers do: the ranked ids of the page are read by id. A viewer who may not see barcodes is searched by the server
   // (exact codes only, so a partial code can never be rebuilt from the index), and so is any scope with a filter or a check state.
   let ranked: { ids: number[]; total: number } | null = null
-  if (present(wire.query) && access.barcode && !filtered) ranked = deps.rank(String(wire.query))
+  if (present(wire.query) && access.barcode && !filtered && !wire.groupBy) ranked = deps.rank(String(wire.query))
 
   let list: WiredList | null = args.seed ?? null
   let fromStore = false
@@ -235,7 +239,7 @@ export async function loadWired(args: WiredLoadArgs): Promise<WiredLoad> {
       list = { ...found, items: [...found.items].sort((a, b) => (order.get(Number(a.id)) ?? 0) - (order.get(Number(b.id)) ?? 0)), total: ranked.total, page, pageSize, totalPages: Math.max(1, Math.ceil(ranked.total / pageSize)) }
     }
   }
-  const canonical = ranked ? null : canonicalProductsQuery(wire)
+  const canonical = ranked || wire.groupBy ? null : canonicalProductsQuery(wire)
   // The shared store holds the Products answer for this very query: no list request. A viewer who may not see stock never reads stock from it (the server cuts it from the IC answer).
   if (!list && canonical && access.stock && !args.bypassStore) {
     const held = deps.peek(canonical)

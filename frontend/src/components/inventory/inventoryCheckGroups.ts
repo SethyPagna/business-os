@@ -27,7 +27,5 @@ export function groupedParams<T extends Record<string, unknown>>(params: T, by: 
   return { ...rest, groupBy: by }
 }
 
-export const sameGroupings = (a: readonly string[] | null | undefined, b: readonly string[] | null | undefined): boolean => (a?.join(',') ?? '') === (b?.join(',') ?? '')
-
 /** A row with a count typed but not submitted: a soft see-through blue, softer than a selected row's ring and tint, in both themes. It clears when the count is saved (the draft is gone). */
 export const UNSAVED_ROW_CLASS = 'bg-sky-500/10 dark:bg-sky-400/10'

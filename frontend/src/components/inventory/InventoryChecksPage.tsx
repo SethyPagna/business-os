@@ -39,7 +39,7 @@ import { adjustStock } from '../../api/inventoryWriteTransport.ts'
 import { stockConflictFigures, type StockWriteAnswer } from './stockAnswerPatch.ts'
 import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import { oldListDropsStatus, productsServerOf, productsWireParams, type ProductsServer } from './inventoryCheckProductsRequest.ts'
-import { collapseId, groupedParams, groupToAsk, inOpenGroups, sameGroupings, type Grouping } from './inventoryCheckGroups.ts'
+import { collapseId, groupedParams, groupToAsk, inOpenGroups, type Grouping } from './inventoryCheckGroups.ts'
 import { loadGroupedList } from './inventoryCheckGroupChunk.ts'
 import { soleActiveBranch } from '../../utils/branchCollapse.ts'
 import { PRICE_KEYS } from './inventoryPriceFacts.ts'
@@ -261,7 +261,6 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const [refresh, setRefresh] = useState(0)
   const [sessionReload, setSessionReload] = useState(0)
   const [data, setData] = useState<ProductsResult | null>(null)
-  const [groupings, setGroupings] = useState<readonly string[] | null | undefined>(knownGroupings)
   // Collapsed groups (`by:key`): kept across page steps, cleared when a filter, the branch or the grouping changes. Collapsing reads nothing.
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
   const [expandedFor, setExpandedFor] = useState(0)
@@ -333,7 +332,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   const { group: groupChoice, ...listFilters } = filters
   const params: QueryParams = { ...listFilters, query: appliedQuery, page, pageSize, sessionId, checkState: section === 'issues' ? 'issue' : filters.checkState }
-  const groupWire = !sessionId && section !== 'sessions' ? groupToAsk(groupChoice, groupings) : null
+  const groupWire = !sessionId && section !== 'sessions' ? groupToAsk(groupChoice, knownGroupings) : null
   const sessionParams: QueryParams = { branchId, page, pageSize, ...(sessionFilters.status ? { status: sessionFilters.status } : {}), ...(sessionFilters.mine ? { mine: 1 } : {}), ...(sessionFilters.waiting && sessions?.approvals ? { approval: 'pending' as const } : {}), ...(sessionRange.startDate ? { startDate: sessionRange.startDate } : {}), ...(sessionRange.endDate ? { endDate: sessionRange.endDate } : {}) }
   // scopeKey identifies WHAT is listed (filters, page, section); requestKey also changes on every refresh bump.
   // Rows stay fresh for as long as the listed scope is the loaded one, so a refresh of the same scope (the Refresh button,
@@ -382,6 +381,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     const backgroundReload = loadedKey === scopeKey
     if (!backgroundReload) { setLoading(true); setDetail(null) }
     setError('')
+    // A grouping is asked for until an answer has said the server has none; it defines the order, so no sort goes with it.
+    const asked = groupWire && knownGroupings !== null ? groupedParams(params, groupWire) : params
     async function load() {
       try {
         if (section === 'sessions') {
@@ -395,12 +396,13 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
             const seed = wiredSeed.current
             wiredSeed.current = null
             try {
-              const result = await loadWired({ params: { ...params, branchId }, known: wiredKnown.current, seed: seed?.list ?? null, skipSummary: summaryScope.current === stepScope, bypassStore: refresh > 0, access: wiredAccess, deps: wiredDeps, signal: abort.signal })
+              const result = await loadWired({ params: { ...asked, branchId }, known: wiredKnown.current, seed: seed?.list ?? null, skipSummary: summaryScope.current === stepScope, bypassStore: refresh > 0, access: wiredAccess, deps: wiredDeps, signal: abort.signal })
               if (!publish()) return
               // The data epoch moved while this was in flight: the answer belongs to the old epoch, so it is dropped and the screen reads again.
               if (currentDataEpoch() !== epoch) { setRefresh(value => value + 1); return }
               rememberWiredMode('wired')
               const { raw } = result
+              knownGroupings = raw.extras.capabilities?.groupings?.length ? raw.extras.capabilities.groupings : null
               wiredRaw.current = raw
               wiredKnown.current = { branches: raw.branches, extras: raw.extras }
               if (!branchId && raw.branches.length === 1) {
@@ -432,7 +434,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
           //  - the other list REFUSES the key (400 inventory_check_invalid_query): ask in the other list's words;
           //  - the check-status list ANSWERS a request written in the older words, which dropped a status choice the tab holds: its rows are not the filtered ones, so ask again with the status.
           let wording: ProductsServer = productsServer.current
-          let products = await readInventoryCheckProducts<ProductsResult>(productsWireParams(groupWire && groupings !== null ? groupedParams(params, groupWire) : params, wording, summaryScope.current === stepScope), abort.signal)
+          let products = await readInventoryCheckProducts<ProductsResult>(productsWireParams(asked, wording, summaryScope.current === stepScope), abort.signal)
             .catch(cause => {
               if ((cause as { code?: unknown } | null)?.code !== 'inventory_check_invalid_query' || abort.signal.aborted) throw cause
               summaryScope.current = ''
@@ -445,14 +447,12 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
           }
           if (publish()) {
             // The sole branch is chosen by a remount: it remembers what the server offered.
-            const offered = products.simple === true && products.capabilities?.groupings?.length ? products.capabilities.groupings : null
-            knownGroupings = offered
+            knownGroupings = products.simple === true && products.capabilities?.groupings?.length ? products.capabilities.groupings : null
             if (!branchId && !sessionId && products.branches?.length === 1) {
               onSelect({ branchId: String(products.branches[0].id), sessionId: '', bootstrapIntent: { query, filters: { ...filters }, pagination: { ...pagination }, pageSize } })
               return
             }
             productsServer.current = productsServerOf(products)
-            if (groupings === undefined || !sameGroupings(offered, groupings)) setGroupings(offered)
             if (products.simple !== true) summaryScope.current = ''
             else if (products.facets) summaryScope.current = stepScope
             setData(previous => products.simple && !products.facets && previous ? { ...products, summary: previous.summary, facets: previous.facets, facetsLimited: previous.facetsLimited } : products)
@@ -1183,7 +1183,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
                 <fieldset disabled={controlsLocked} className="min-w-0 lg:w-[26rem] lg:shrink-0" data-inventory-check-query-lock>
                   <InventoryCheckControls query={query} onQueryChange={typeQuery} onQuerySubmit={submitQuery} searchRef={searchRef} scanLabelled={compact && !!sessionId && canCheckRows}
                     filters={filters} onFiltersChange={changeFilters} onClear={clearFilters} fields={access.fields}
-                    inSession={!!sessionId} showStateFilter={statusFilter} limited={facetsLimited} wired={wiredNow} groupings={!sessionId && !wiredNow && fresh ? data?.capabilities?.groupings : undefined}
+                    inSession={!!sessionId} showStateFilter={statusFilter} limited={facetsLimited} wired={wiredNow} groupings={!sessionId && fresh ? data?.capabilities?.groupings : undefined}
                     branches={branches} brands={data?.facets?.brands ?? wiredFacets?.brands} categories={data?.facets?.categories ?? wiredFacets?.categories} t={t} />
                 </fieldset>
                 {contextBar}
