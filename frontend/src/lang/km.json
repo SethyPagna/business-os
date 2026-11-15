@@ -8202,7 +8202,7 @@
   "inventory_check_popover_clear": "សម្អាតការរាប់នេះ",
   "inventory_check_popover_loading": "កំពុងផ្ទុកថ្ងៃចូល…",
   "inventory_check_popover_failed": "មិនអាចផ្ទុកថ្ងៃចូលបានទេ។ សូមបិទ ហើយបើកម្តងទៀត។",
-  "inventory_check_popover_chunk_failed": "មិនអាចផ្ទុកថ្ងៃទទួលបានទេ។ ចំនួនដែលអ្នកបានបញ្ចូលនៅតែរក្សាទុក។",
+  "inventory_check_popover_chunk_failed": "មិនអាចផ្ទុកថ្ងៃចូលបានទេ។ ចំនួនដែលអ្នកបានបញ្ចូលនៅតែរក្សាទុក។",
   "inventory_check_popover_more": "ផលិតផលនេះមានថ្ងៃចូលច្រើនជាងដែលការរាប់មួយអាចផ្ទុកបាន។ សូមរាប់តាមថ្ងៃដែលបានបង្ហាញ។",
   "inventory_check_popover_show_empty": "បង្ហាញថ្ងៃចូលដែលអស់ស្តុក ({count})",
   "inventory_check_popover_hide_empty": "លាក់ថ្ងៃចូលដែលអស់ស្តុក ({count})",
