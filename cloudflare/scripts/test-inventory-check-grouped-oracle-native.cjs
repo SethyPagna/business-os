@@ -1,5 +1,5 @@
 'use strict'
-// Grouped Inventory Check list (ic_simple, groupBy=checked|category) against an independent JS oracle on random worlds (node:sqlite, real migrations through 0285).
+// Grouped Inventory Check list (ic_simple, groupBy=checked|category) against an independent JS oracle on random worlds (node:sqlite, every migration replayed).
 //   G1 same rows as the name-ordered read (nothing missing, nothing doubled)     G2 group totals add up to total (families) and summary.total (products)
 //   G3 totals do not depend on page or pageSize                                  G4 every row's group_key equals the key computed here from raw items
 //   G6 the read writes nothing
@@ -9,7 +9,10 @@
 //
 // Run: node scripts/test-inventory-check-grouped-oracle-native.cjs
 const assert = require('node:assert/strict')
-const { bundle, bundleMutated, buildWorld, adapter } = require('./harness/ic-grouped-world.cjs')
+const { bundle, bundleMutated, buildWorld: buildFreshWorld, adapter } = require('./harness/ic-grouped-world.cjs')
+// Replaying every migration takes seconds, and every read here is read-only (G6), so a seed's world is built once and shared by the real code and each mutant.
+const worlds = new Map()
+const buildWorld = seed => { if (!worlds.has(seed)) worlds.set(seed, buildFreshWorld(seed)); return worlds.get(seed) }
 
 const lowStock = { enabled: true, mode: 'product', threshold: 10 }
 const FIELDS = { inventory_check_show_stock: true, inventory_check_show_barcode: true, inventory_check_show_brand: true, inventory_check_show_category: true, inventory_check_show_received: true }

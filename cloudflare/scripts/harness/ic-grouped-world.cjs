@@ -1,5 +1,5 @@
 'use strict'
-// Seeded random Inventory Check worlds on node:sqlite (real migrations 1..242, 0259, 0285) for the grouped-list tests. Fixtures are synthetic.
+// Seeded random Inventory Check worlds on node:sqlite (every migration replayed in order) for the grouped-list tests. Fixtures are synthetic.
 const fs = require('node:fs')
 const path = require('node:path')
 const { DatabaseSync } = require('node:sqlite')
@@ -39,8 +39,9 @@ const CATEGORIES = ['Skin', 'skin', ' Skin ', 'Hair', 'hair', '', null, 'Body', 
 function buildWorld(seed, { branches = 2 } = {}) {
   const rnd = lcg(seed)
   const db = new DatabaseSync(':memory:')
-  for (const sql of loadAll({ through: 242 })) db.exec(sql)
-  for (const file of ['0259_inventory_check_sessions.sql', '0285_inventory_check_items_latest.sql']) db.exec(fs.readFileSync(path.join(__dirname, '../../migrations', file), 'utf8'))
+  for (const sql of loadAll()) db.exec(sql)
+  // Later migrations guard the stock tables; the fixture opens the permit while it seeds, as the other native worlds do.
+  db.exec("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'")
   db.exec(`INSERT OR IGNORE INTO branches(id,name,is_active) VALUES(1,'One',1),(2,'Two',1),(3,'Closed',0);
     INSERT OR IGNORE INTO users(id,username,name,password,organization_id) VALUES(1,'a1','A1','x',1),(2,'a2','A2','x',1)`)
   const add = db.prepare('INSERT INTO products(id,name,stock_quantity,parent_id,is_group,brand,brands,category,categories,unit,is_active) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
@@ -65,6 +66,7 @@ function buildWorld(seed, { branches = 2 } = {}) {
   id = 998
   for (let b = 0; b < 3; b++) leaf('  ', null)
   leaf('Inactive empty', null, 0, 0)
+  db.exec("DELETE FROM system_flags WHERE key='stock_transaction_permit'")
   // Sessions: organizations 1, 2 and NULL, branches 1 and 2, open and closed.
   const sessions = []
   const insertSession = db.prepare('INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) VALUES(?,?,?,?,?,?,0,?,?,?,?)')
