@@ -100,6 +100,21 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.equal(groupToAsk('category', ['checked']), 'checked', 'category only when it is listed')
     assert.equal(groupToAsk('none', ['checked', 'category']), null, 'name A-Z is the ungrouped choice')
   }],
+  ['the shape the Worker answers (family header rows carry group_key, dates and the tail have label null, a category keeps the case of the first row) builds the same sections', async () => {
+    // Fixture in the shape of buildGroupingBlock / the grouped oracle: a parent header row (is_group, not checkable) sits in its family's group.
+    const wire = {
+      items: [{ id: 90, name: 'Serum family', is_group: true, checkable: false, group_key: 'c:serum' }, { id: 91, name: 'Serum A', quantity: 3, group_key: 'c:serum' }, { id: 92, name: 'Serum B', quantity: 1, group_key: 'c:serum' }, { id: 93, name: 'Loose', quantity: 2, group_key: 'none' }],
+      grouping: { by: 'category', unit: 'family', groups: [
+        { key: 'c:serum', label: 'Serum', families: 1, products: 12, continued_before: true, continues_after: false },
+        { key: 'none', label: null, families: 4, products: 30, continued_before: false, continues_after: false }] },
+    }
+    const built = buildSections(wire.items as InventoryCheckProduct[], wire.grouping as Grouping)!
+    assert.deepEqual(built.map(section => [section.key, section.products.map(product => product.id)]), [['c:serum', [90, 91, 92]], ['none', [93]]], 'the header row stays with its family')
+    const s = await mountGrouped({ products: wire.items, grouping: wire.grouping })
+    assert.deepEqual(rowIds(s), ['90', '91', '92', '93'])
+    assert.ok(flat(headers(s)[0]).startsWith('Serum') && flat(headers(s)[0]).includes('12') && flat(headers(s)[0]).toLowerCase().includes('continued'))
+    assert.ok(flat(headers(s)[1]).startsWith('No category') && flat(headers(s)[1]).endsWith('30'))
+  }],
   ['an unsaved count gives its row a soft see-through blue; a saved row has none, and it is not the selected look', async () => {
     const draft = { selected: true, count: '4', checked: false, note: '' }
     const s = await mountRows({ drafts: { 1: draft } })
