@@ -12,7 +12,7 @@
 // areas, the Library and the count sessions stay separate switches (owner, 21 Oct 2026: Full = main access only;
 // the Worker has no fallback between keys, so the grid shows exactly what is stored).
 import { PERMISSION_SECTIONS, type PermissionDefinition, type PermissionSection, type PermissionSensitivity } from './permissionDefinitions.ts'
-import { actionsForKey, isActionOverriddenOff, isViewImpliedByWrite, outcomeAt, type ActionOutcome, type ActionRequirement, type PermissionAction } from '../../utils/permissionActions.ts'
+import { actionsForKey, isActionOverriddenOff, isViewImpliedByWrite, outcomeAt, type ActionOutcome, type ActionRequirement, type PermissionAction, ADMIN_ONLY } from '../../utils/permissionActions.ts'
 import { effectivePermissions, normalizePermissionState, type PermissionValue } from '../../utils/permissions.ts'
 
 export type PermissionState = Record<string, PermissionValue>
@@ -141,7 +141,7 @@ export function chipStates(row: ModuleRow, perms: PermissionState): ChipState[] 
     const outcome = outcomeAt(action, tier)
     const overriddenOff = isActionOverriddenOff(bag, key, action.key)
     const viewLocked = outcome !== 'block' && isViewImpliedByWrite(bag, key, action.key)
-    const missing = outcome === 'block' ? [] : unmet(action.requires)
+    const missing = outcome === 'block' ? [] : action.adminOnly ? [ADMIN_ONLY] : unmet(action.requires)
     const blocked = outcome === 'block'
     const mark: ChipMark = blocked ? 'fullOnly' : overriddenOff ? 'off' : missing.length ? 'needs' : outcome === 'queue' ? 'queue' : outcome === 'limited' ? 'limited' : 'allow'
     const controls: ControlState[] = actions.filter((entry) => entry.follows === action.key).map((control) => {

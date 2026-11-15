@@ -190,7 +190,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'products',
     tKey: 'perm_section_products',
     label: 'Products',
-    description: 'Products and imports. Cost and profit are admin only. Destructive imports are separate. Opening stock also needs Inventory › Adjust / receive.',
+    description: 'Products. Imports, cost and profit are admin only. Opening stock also needs Inventory › Adjust / receive.',
     permissions: [
       // tier: true -- add, edit and delete queue via maybeQueueForReview() (lib/reviewGate.ts); an edit that
       // would merge two products queues too. Every other action is Full only (utils/permissionActions.ts lists

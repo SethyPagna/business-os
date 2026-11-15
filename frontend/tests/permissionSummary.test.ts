@@ -257,8 +257,11 @@ test('chips: Add variant needs Add; opening stock and stock in imports need Adju
   assert.deepEqual(chip('products', { products: true, inventory: true, 'inventory:adjust': false }, 'add').controls.map((control) => control.mark), ['needs'])
   assert.deepEqual(chip('products', { products: true, inventory: true, 'products:add': false }, 'add').controls.map((control) => control.mark), ['off'], 'a control follows its parent\'s switch')
   const imp = chip('products', { products: true, product_cost_view: true, product_cost_edit: true, inventory: true }, 'import')
-  assert.equal(imp.mark, 'allow')
-  assert.deepEqual(imp.controls.map((control) => [control.action.key, control.mark]), [['import_stock', 'allow']])
+  // Owner rule, 15 Nov 2026: import is administrator only; the retired cost grants no longer make the chip work.
+  assert.equal(imp.mark, 'needs')
+  assert.deepEqual(imp.missing.map((requirement) => requirement.key), ['admin_only'])
+  assert.equal(tr(imp.missing[0].tKey, imp.missing[0].label), 'Admin only')
+  assert.deepEqual(imp.controls.map((control) => [control.action.key, control.mark]), [['import_stock', 'needs']])
   assert.deepEqual(chip('products', { products: true, inventory: true }, 'import').controls.map((control) => control.mark), ['needs'], 'the import itself is unavailable, so its stock control is too')
   assert.deepEqual(chip('products', { products: 'review', inventory: true }, 'add').controls.map((control) => control.mark), ['fullOnly'], 'Review never reaches a control')
   assert.deepEqual(chip('products', { products: 'review', inventory: true, 'products:add': false }, 'add').controls.map((control) => control.mark), ['off'], 'a switched-off parent beats the level: the control is off, not "Full only"')

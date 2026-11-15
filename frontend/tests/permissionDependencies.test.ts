@@ -138,30 +138,33 @@ await test('stock quantities in inventory and stock-action imports are a control
   const base: Record<string, unknown> = { inventory: true, ...COSTS }
   assert.equal(can(base, 'inventory', 'import_stock'), true, 'Inventory Full holds Adjust / receive')
   assert.equal(can({ ...base, 'inventory:adjust': false }, 'inventory', 'import_stock'), false, 'Adjust / receive switched off: every file that moves stock is refused')
-  assert.equal(can({ ...base, 'inventory:adjust': false }, 'inventory', 'import'), true, 'the Import chip itself keeps its own answer')
+  // Owner rule, 15 Nov 2026: import carries cost, so the Import chip is administrator only whatever Adjust says.
+  assert.equal(can({ ...base, 'inventory:adjust': false }, 'inventory', 'import'), false, 'the Import chip is administrator only, with or without Adjust')
+  assert.equal(can({ 'inventory:adjust': false }, 'inventory', 'import', 'admin'), true, 'an administrator keeps the Import chip')
   assert.equal(can({ ...base, 'inventory:import': false }, 'inventory', 'import_stock'), false, 'follows Import: parent off')
   assert.equal(can({ ...base, 'inventory:import_stock': false }, 'inventory', 'import_stock'), true, 'a control has no switch of its own: only its parent narrows it')
   assert.equal(can({ inventory: 'review', ...COSTS }, 'inventory', 'import_stock'), false, 'Review never reaches it')
   assert.equal(can({}, 'inventory', 'import_stock', 'admin'), true)
 })
 
-await test('Import for products, inventory and sales is unavailable without both cost grants', () => {
+await test('Import for products, inventory and sales is administrator only: the retired cost grants unlock nothing', () => {
   for (const [section, base] of [['products', { products: true }], ['inventory', { inventory: true }], ['sales', { sales: true }]] as const) {
     assert.equal(can(base, section, 'import'), false, `${section}: no cost grant`)
     assert.equal(can({ ...base, product_cost_edit: true }, section, 'import'), false, `${section}: creating a job needs edit, reading it back needs view`)
     assert.equal(can({ ...base, product_cost_view: true }, section, 'import'), false, `${section}: view alone cannot create the job`)
-    assert.equal(can({ ...base, ...COSTS }, section, 'import'), true, `${section}: both grants`)
+    assert.equal(can({ ...base, ...COSTS }, section, 'import'), false, `${section}: both retired cost grants still give a non-admin nothing (the Worker refuses the import)`)
     assert.equal(can({ ...base, ...COSTS, [`${section}:import`]: false }, section, 'import'), false, `${section}: switched off wins`)
-    assert.equal(can({}, section, 'import', 'admin'), true, `${section}: an administrator holds every grant`)
+    assert.equal(can({}, section, 'import', 'admin'), true, `${section}: an administrator imports`)
   }
   assert.equal(can({ products: 'review', ...COSTS }, 'products', 'import'), false, 'Review never imports')
   assert.equal(can({ sales: 'view', ...COSTS }, 'sales', 'import'), false, 'View never imports')
   assert.equal(can({ contacts: true }, 'contacts', 'import'), true, 'contacts imports carry no costs')
 })
 
-await test('replace-all import also needs Import, both cost grants and the destructive-import grant', () => {
+await test('replace-all import is administrator only, whatever Import, the cost grants and the destructive-import grant say', () => {
   const full = { products: true, ...COSTS, destructive_delete: true }
-  assert.equal(can(full, 'products', 'import_replace_all'), true)
+  assert.equal(can(full, 'products', 'import_replace_all'), false, 'every grant held, still refused: the Worker lets only an administrator import')
+  assert.equal(can({}, 'products', 'import_replace_all', 'admin'), true, 'the administrator')
   for (const [name, mutate] of Object.entries({
     'no destructive grant': { destructive_delete: false },
     'no cost edit': { product_cost_edit: false },
@@ -261,49 +264,49 @@ const list = (pack: Record<string, string>, keys: string[]) => keys.map((key) =>
 
 for (const [name, pack] of [['English', en], ['Khmer', km]] as const) {
   const alsoNeeds = (keys: string[]) => fill(pack.perm_action_also_needs, { list: list(pack, keys) })
-  const importNeeds = alsoNeeds(['perm_product_cost_edit', 'perm_product_cost_view'])
+  const importNeeds = alsoNeeds(['perm_admin_only'])
   const importLine = (keys: string[], label: string) => fill(pack.perm_action_control_also_needs, { control: label, list: list(pack, keys) })
 
-  await test(`${name}: an import chip without the cost grants says what it needs and reads Needs another permission`, async () => {
+  await test(`${name}: an import chip says Admin only and reads Needs another permission`, async () => {
     const surface = await render(pack, { products: true })
     const row = chip(surface, 'products', 'import')
-    assert.ok((row.getAttribute('title') ?? '').includes(importNeeds), 'the tooltip names the grants')
-    assert.equal(row.getAttribute('data-perm-mark'), 'needs', 'the chip is flagged while the grants are missing')
-    assert.ok(amberLines(surface, 'products').some((line) => line.includes(list(pack, ['perm_product_cost_edit', 'perm_product_cost_view']))), 'the missing grants are named in an amber line under the chips')
+    assert.ok((row.getAttribute('title') ?? '').includes(importNeeds), 'the tooltip says Admin only')
+    assert.equal(row.getAttribute('data-perm-mark'), 'needs', 'the chip is flagged as unavailable')
+    assert.ok(amberLines(surface, 'products').some((line) => line.includes(list(pack, ['perm_admin_only']))), 'Admin only is named in an amber line under the chips')
     assert.equal(row.getAttribute('aria-pressed'), 'true', 'still a live switch for the level')
     assert.ok(row.getAttribute('aria-disabled') !== 'true')
   })
 
-  await test(`${name}: an import chip with the cost grants reads Allowed and the amber line is gone`, async () => {
-    // Inventory Full too: the import chip also carries its stock-quantity control, which needs Adjust / receive.
-    const surface = await render(pack, { products: true, inventory: true, ...COSTS })
+  await test(`${name}: the retired cost grants do not make an import chip work: it still says Admin only`, async () => {
+    const surface = await render(pack, { products: true, inventory: true, ...COSTS, destructive_delete: true })
     const row = chip(surface, 'products', 'import')
-    assert.equal(row.getAttribute('data-perm-mark'), 'allow')
-    assert.ok(!(row.getAttribute('title') ?? '').includes(importNeeds))
-    assert.equal(control(surface, 'products', 'import_stock').getAttribute('data-perm-mark'), 'allow', 'the stock-quantity control follows its parent')
-    // Replace-all still needs the destructive-import grant, which this role lacks; the held grants are not repeated.
-    assert.deepEqual(amberLines(surface, 'products'), [importLine(['perm_destructive_delete'], pack.perm_act_products_import_replace_all)], 'only the grant still missing is flagged')
+    assert.equal(row.getAttribute('data-perm-mark'), 'needs')
+    assert.ok((row.getAttribute('title') ?? '').includes(importNeeds))
+    assert.equal(control(surface, 'products', 'import_stock').getAttribute('data-perm-mark'), 'needs', 'the stock-quantity control follows its parent')
+    assert.equal(chip(surface, 'products', 'import_replace_all').getAttribute('data-perm-mark'), 'needs')
+    for (const [module, action] of [['inventory', 'import'], ['sales', 'import']] as const) {
+      const other = await render(pack, { [module]: true, ...COSTS })
+      assert.equal(chip(other, module, action).getAttribute('data-perm-mark'), 'needs', `${module} import`)
+      assert.ok((chip(other, module, action).getAttribute('title') ?? '').includes(importNeeds), `${module} import tooltip`)
+    }
+    assert.ok(pack.perm_admin_only && pack.perm_admin_only !== 'perm_admin_only', 'the pack has the Admin only wording')
   })
 
-  await test(`${name}: the inventory import's stock-quantity control names Adjust / receive until it is held, and the Import chip stays allowed`, async () => {
-    const line = importLine(['perm_act_inventory_adjust'], pack.perm_control_inventory_import_stock)
+  await test(`${name}: the inventory import's stock-quantity control is held back by Admin only, and by Adjust / receive too when that is off`, async () => {
     const held = await render(pack, { inventory: true, ...COSTS })
-    assert.equal(chip(held, 'inventory', 'import').getAttribute('data-perm-mark'), 'allow')
-    assert.equal(control(held, 'inventory', 'import_stock').getAttribute('data-perm-mark'), 'allow', 'Inventory Full holds Adjust / receive')
-    assert.ok(!amberLines(held, 'inventory').includes(line), 'nothing missing, nothing named')
+    assert.equal(control(held, 'inventory', 'import_stock').getAttribute('data-perm-mark'), 'needs', 'Admin only reaches the control through its parent')
+    assert.ok((control(held, 'inventory', 'import_stock').getAttribute('title') ?? '').includes(alsoNeeds(['perm_admin_only'])))
     const lacking = await render(pack, { inventory: true, 'inventory:adjust': false, ...COSTS })
-    assert.equal(chip(lacking, 'inventory', 'import').getAttribute('data-perm-mark'), 'allow', 'a file that moves no stock is still accepted')
     assert.equal(control(lacking, 'inventory', 'import_stock').getAttribute('data-perm-mark'), 'needs')
-    assert.ok((control(lacking, 'inventory', 'import_stock').getAttribute('title') ?? '').includes(alsoNeeds(['perm_act_inventory_adjust'])), 'the tooltip names the grant')
-    assert.ok(amberLines(lacking, 'inventory').includes(line), 'the missing grant is named in an amber line under the chips')
+    assert.ok((control(lacking, 'inventory', 'import_stock').getAttribute('title') ?? '').includes(alsoNeeds(['perm_admin_only', 'perm_act_inventory_adjust'])), 'both are named')
     const partial = await render(pack, { inventory: 'review' })
     assert.equal(control(partial, 'inventory', 'import_stock').getAttribute('data-perm-mark'), 'fullOnly', 'a level that blocks the chip blocks the control')
   })
 
-  await test(`${name}: replace-all lists every second grant`, async () => {
+  await test(`${name}: replace-all says Admin only`, async () => {
     const surface = await render(pack, { products: true })
     const row = chip(surface, 'products', 'import_replace_all')
-    assert.ok((row.getAttribute('title') ?? '').includes(alsoNeeds(['perm_act_products_import', 'perm_product_cost_edit', 'perm_product_cost_view', 'perm_destructive_delete'])))
+    assert.ok((row.getAttribute('title') ?? '').includes(alsoNeeds(['perm_admin_only'])), 'replace-all names Admin only, not grants nobody can hold')
     assert.equal(row.getAttribute('data-perm-mark'), 'needs')
   })
 

@@ -185,11 +185,18 @@ assert.equal(
   false,
   'replace-all must be denied without the destructive_delete grant',
 )
+// Owner rule, 15 Nov 2026: an import carries cost and cost is administrator only, so holding every grant still unlocks nothing
+// for a non-admin; the administrator bypass is permissions.ts can() (tests/permissionDependencies.test.ts).
 assert.equal(
   actionAllowed('products', 'import_replace_all', 'full', (key) => replaceAllGrants.includes(key)),
-  true,
-  'replace-all must be allowed at Full Access once every second grant is held',
+  false,
+  'replace-all is administrator only: every second grant held still answers false',
 )
+for (const [section, action] of [['products', 'import'], ['inventory', 'import'], ['sales', 'import'], ['products', 'import_replace_all']] as const) {
+  assert.equal(PERMISSION_ACTIONS[section].find((entry) => entry.key === action)?.adminOnly, true, `${section}:${action} is marked administrator only`)
+  assert.equal(actionAllowed(section, action, 'full', () => true), false, `${section}:${action} stays false even when every requirement is met`)
+}
+assert.equal(actionAllowed('contacts', 'import', 'full', () => true), true, 'contacts imports carry no cost and stay available')
 // requires must never resurrect a blocked action.
 assert.equal(
   actionAllowed('products', 'import_replace_all', 'review', () => true),
