@@ -203,6 +203,9 @@ function ofIdsCatalog(where: string): number[] {
 // KNOWN divergence kept out of this change. Named so that any edit to them is noticed; the follow-up is the owner's call.
 const STOREFRONT = 'storefront'
 const STOREFRONT_REASON = 'storefront follow-up; not the staff rule'
+// 'notThreshold' is not a check either: the line only looks like a threshold comparison. Named so that any edit to it is noticed.
+const NOT_A_THRESHOLD = 'notThreshold'
+const NOT_A_THRESHOLD_REASON = 'binary search bound, not a stock threshold'
 const KNOWN_COMPARISONS: Array<[file: string, count: number, by: string, text: string]> = [
   ["lib/familyStockStats.ts", 1, "familyStockOverviewSql", "${both('MAX', `CASE WHEN ${qty} > COALESCE(p.out_of_stock_threshold, 0) AND ${qty} <= ${lowThresholdSql} THEN 1 ELSE 0 END`, 'has_low')},"],
   ["lib/familyStockStats.ts", 1, "familyStockOverviewSql", "${both('MAX', `CASE WHEN ${qty} > COALESCE(p.out_of_stock_threshold, 0) AND ${qty} > ${lowThresholdSql} THEN 1 ELSE 0 END`, 'has_healthy')},"],
@@ -222,6 +225,7 @@ const KNOWN_COMPARISONS: Array<[file: string, count: number, by: string, text: s
   ["lib/lowStockSettings.ts", 1, "worker isLowStock", "return qty <= effectiveLowStockThreshold(config, productLowThreshold)"],
   ["lib/portalAi.ts", 1, STOREFRONT, "if (quantity <= lowThreshold) return 'low_stock'"],
   ["lib/portalAi.ts", 1, STOREFRONT, "if (quantity <= outThreshold) return 'out_of_stock'"],
+  ["lib/salesAnalytics.ts", 1, NOT_A_THRESHOLD, "while (low < high) {"], // NOT_A_THRESHOLD_REASON
   ["lib/searchMatch.ts", 1, "searchMatch issue 'out_of_stock'", "return `${stockExpr} <= COALESCE(p.out_of_stock_threshold, 0)`"],
   ["lib/stockCrossingAlert.ts", 1, "classifyCrossing", "if (before > low && after <= low && after > out) return 'low'"],
   ["lib/stockCrossingAlert.ts", 1, "classifyCrossing", "if (before > out && after <= out) return 'out'"],
@@ -544,9 +548,9 @@ async function failuresOf(read: Read, fe: any, firstOnly = false): Promise<strin
     }
     const known = new Map(KNOWN_COMPARISONS.map(([file, count, , text]) => [`${file}\u0000${text}`, count] as const))
     const show = (map: Map<string, number>) => [...map].map(([key, count]) => `${key.replace('\u0000', ' :: ')} x${count}`).sort()
-    assert.deepEqual(show(found), show(known), `a threshold comparison appeared, moved, changed or vanished: look at it, run it through the matrix (or pin it), then update KNOWN_COMPARISONS (the shop-front lines are "${STOREFRONT_REASON}")`)
+    assert.deepEqual(show(found), show(known), `a threshold comparison appeared, moved, changed or vanished: look at it, run it through the matrix (or pin it), then update KNOWN_COMPARISONS (the shop-front lines are "${STOREFRONT_REASON}"; the binary search bound is "${NOT_A_THRESHOLD_REASON}")`)
     for (const [file, , by, text] of KNOWN_COMPARISONS) {
-      if (by === STOREFRONT) continue
+      if (by === STOREFRONT || by === NOT_A_THRESHOLD) continue
       assert.ok([...ran].some((label) => label.startsWith(by)), `${file}: "${text.slice(0, 60)}" names the check "${by}", which did not run`)
     }
   })
