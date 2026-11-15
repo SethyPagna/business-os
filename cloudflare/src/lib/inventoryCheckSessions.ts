@@ -6,6 +6,7 @@ import { buildInventoryCheckStockQuery, readInventoryCheckStock, resetInventoryC
 import { buildInventoryCheckProductMembershipQuery } from './inventoryCheckProducts'
 import { hasPermission, isAdminControlUser } from './permissions'
 import { stockVisibleProductSql } from './productStockGuard'
+import { INVENTORY_CHECK_LOTS_OF_PRODUCTS_SQL, lotOfRow, type LotRow } from './inventoryCheckLots'
 import { actorSnapshot } from './actorSnapshot'
 import { localDateExpr } from './businessDateWindow'
 import { schemaObjectsPresent, type SchemaObject } from './schemaObjectProbe'
@@ -352,6 +353,7 @@ async function commit(db: D1Compat, principal: InventoryCheckPrincipal, actor: A
     if (text.includes('inventory_check_count_in_progress')) fail(409, 'inventory_check_count_in_progress')
     if (text.includes('inventory_check_stock_changed')) fail(409, 'inventory_check_stock_changed')
     if (text.includes('inventory_check_no_lot')) fail(409, 'inventory_check_no_lot')
+    if (text.includes('inventory_check_lots_incomplete')) fail(409, 'inventory_check_lots_incomplete')
     if (text.includes('inventory_check_conflict') || text.includes('inventory_check_baseline_changed')) {
       physicalSignature = undefined // a refused guard may mean the remembered signature is stale; the next attempt reads it again
       fail(409, text.includes('baseline_changed') ? 'inventory_check_baseline_changed' : 'inventory_check_conflict')
@@ -709,6 +711,18 @@ const LIVE_LINE_SQL = (line: string) => `CASE json_extract(${line},'$.scope')
   ELSE COALESCE((SELECT bs.quantity FROM branch_stock bs WHERE bs.product_id=json_extract(${line},'$.product_id') AND bs.branch_id=@branchId),0) END`
 const ACTIVE_LOT_SQL = (productId: string, batchId?: string) => `EXISTS(SELECT 1 FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=@branchId
   WHERE pb.variant_product_id=${productId} AND pb.is_active=1${batchId ? ` AND pb.id=${batchId}` : ''})`
+// A count that names SOME of a product's stocked received dates is not a count of the product: the dates it leaves out were never counted, yet the item would read Done. So every stocked date
+// (active, quantity above 0 at this branch: the list /lots answers) of a product counted by date must be named, and the batch refuses (409 inventory_check_lots_incomplete) when one is not. That
+// is how a stock-in on another device is caught: its new date is not on the screen that counted. One exemption: a product stocked on MORE dates than one count may carry
+// (getPlanLimits.inventoryCheckLotLinesPerProduct) can never name them all, so it is counted on the dates the page lists, exactly as before (the popover says more dates exist). The rule needs
+// no per-line work: one pass over the stocked dates of the submitted products, each tested against the set of named batch ids (built once); the cap test runs only for a date that is missing.
+const UNNAMED_STOCKED_LOT_SQL = `SELECT p.value AS product_id FROM json_each(@lotProducts) p
+  CROSS JOIN product_batches pb ON pb.variant_product_id=p.value
+  CROSS JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=@branchId
+  WHERE pb.is_active=1 AND bbs.quantity>0
+    AND pb.id NOT IN (SELECT json_extract(e.value,'$.batch_id') FROM json_each(@lines) e WHERE json_extract(e.value,'$.scope')='lot')
+    AND (SELECT COUNT(*) FROM (SELECT 1 FROM product_batches q CROSS JOIN branch_batch_stock qs ON qs.batch_id=q.id AND qs.branch_id=@branchId
+      WHERE q.variant_product_id=p.value AND q.is_active=1 AND qs.quantity>0 LIMIT @capPlusOne))<=@perProduct`
 export async function createInventoryCheckLotSubmission(db: D1Compat, principal: InventoryCheckPrincipal, input: unknown,
   options: { approvals?: boolean; maxLines: number; maxProducts: number; maxLinesPerProduct: number; onApprovalCreated?: (created: { sessionId: string }) => Promise<void>; onApprovalsReplaced?: (replaced: { sessionIds: string[] }) => Promise<void> }) {
   const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
@@ -754,6 +768,8 @@ export async function createInventoryCheckLotSubmission(db: D1Compat, principal:
   const params = { id, organization: actor.organization_id, branchId, actorId: actor.id, actorName: actorSnapshot(actor), title, scopeJson: JSON.stringify({ membership: 'submission' }), now,
     members: JSON.stringify(members), lines: JSON.stringify(lotLines),
     plain: JSON.stringify(resolved.filter(item => item.line.plain).map(item => ({ product_id: item.line.productId, seen: item.line.plain!.seen }))), count: productIds.length, sighted: sighted ? 1 : 0, eps: COUNT_EPSILON }
+  const lotProducts = resolved.filter(item => item.line.lots.some(lot => lot.scope === 'lot')).map(item => item.line.productId)
+  const incompleteParams = { lotProducts: JSON.stringify(lotProducts), lines: params.lines, branchId, perProduct: options.maxLinesPerProduct, capPlusOne: options.maxLinesPerProduct + 1 }
   const supersede = options.approvals ? supersedeStatements({ ...params, submitted: JSON.stringify(productIds), key, hash }) : []
   const lineAlias = 'e.value'
   const statements: Statement[] = [
@@ -769,6 +785,8 @@ export async function createInventoryCheckLotSubmission(db: D1Compat, principal:
     // A plain line is measured against the branch total the counter saw, inside the same batch.
     ...(sighted ? [guard(`NOT EXISTS(SELECT 1 FROM json_each(@plain) e WHERE abs(COALESCE((SELECT bs.quantity FROM branch_stock bs WHERE bs.product_id=json_extract(e.value,'$.product_id') AND bs.branch_id=@branchId),0)-json_extract(e.value,'$.seen'))>@eps)`, 'inventory_check_stock_changed', params)] : []),
     ...(sighted ? [guard(`NOT EXISTS(SELECT 1 FROM json_each(@lines) e WHERE abs(${LIVE_LINE_SQL(lineAlias)}-json_extract(${lineAlias},'$.seen'))>@eps)`, 'inventory_check_stock_changed', params)] : []),
+    // Every stocked date of a product counted by date is named (see UNNAMED_STOCKED_LOT_SQL); after the figure guards, so a moved quantity is reported first.
+    ...(lotProducts.length ? [guard(`NOT EXISTS(${UNNAMED_STOCKED_LOT_SQL})`, 'inventory_check_lots_incomplete', incompleteParams)] : []),
     ...supersede,
     { sql: `INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at)
       VALUES(@id,@organization,@branchId,@actorId,@title,'closed',0,@scopeJson,@now,@now,@now)`, params },
@@ -802,6 +820,14 @@ export async function createInventoryCheckLotSubmission(db: D1Compat, principal:
     if (error instanceof InventoryCheckSessionError && error.code === 'inventory_check_count_in_progress') {
       const busy = await db.prepare(`SELECT DISTINCT i.product_id ${BEING_APPLIED_SQL} ORDER BY i.product_id`).all<{ product_id: number }>({ organization: actor.organization_id, branchId, submitted: JSON.stringify(productIds) }).catch(() => [])
       fail(409, 'inventory_check_count_in_progress', { productIds: busy.map(row => row.product_id) })
+    }
+    if (error instanceof InventoryCheckSessionError && error.code === 'inventory_check_lots_incomplete') {
+      // Read only because the write was refused: which products left a stocked date out, and the dates each holds now (bounded by the per-product cap: a product over it is exempt, never listed here).
+      const missing = await db.prepare(`SELECT DISTINCT u.product_id FROM (${UNNAMED_STOCKED_LOT_SQL}) u ORDER BY u.product_id`).all<{ product_id: number }>(incompleteParams).catch(() => [])
+      const ids = missing.map(row => Number(row.product_id))
+      const canList = access.fields.stock && access.fields.received
+      const rows = canList && ids.length ? await db.prepare(INVENTORY_CHECK_LOTS_OF_PRODUCTS_SQL).all<LotRow & { product_id: number }>({ ids: JSON.stringify(ids), branchId }).catch(() => []) : []
+      fail(409, 'inventory_check_lots_incomplete', { productIds: ids, lots: canList ? ids.map(productId => ({ productId, lots: rows.filter(row => Number(row.product_id) === productId).map(lotOfRow) })) : [] })
     }
     if (error instanceof InventoryCheckSessionError && error.code === 'inventory_check_stock_changed') {
       // The figures of now, read only because the write was refused: per line, what the quantity is at this moment (a few rows, never the ledger).

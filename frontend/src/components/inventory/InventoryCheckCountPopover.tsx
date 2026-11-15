@@ -67,8 +67,8 @@ const tool = 'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded
 export default function InventoryCheckCountPopover({ product, draft, byBatch, loadLots, canViewStock, canViewCounts = false, locked, t, statusIcon, statusText, statusWord, recordedWord, onClose, returnFocus, onAdvance, onCount, onLotCount, onMatches, onDiffers, onClear, onLotSet }: InventoryCheckCountPopoverProps) {
   const tr = (key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
   // The row already carries its stocked batches (the list read them): the entries are drawn from them at the first paint, with no request. Only a row that says lots_more, or a list that did not carry
-  // batches, reads them (one request, this product).
-  const carried = Array.isArray(product.lot_rows) && product.lots_more !== true
+  // batches, reads them (one request, this product). A row that was changed on another device after the list was read (lots_stale) reads them too: a stock-in there adds a date this row does not carry.
+  const carried = Array.isArray(product.lot_rows) && product.lots_more !== true && product.lots_stale !== true
   const [lots, setLots] = useState<Lots>(!byBatch || !loadLots ? { state: 'ready', rows: [], more: false } : carried ? { state: 'ready', rows: product.lot_rows!, more: false } : { state: 'loading' })
   // The dates this branch holds at 0, carried by the row: behind "Show empty received dates", never read here, never part of "matches stock".
   const [emptied, setEmptied] = useState<InventoryCheckLotRow[]>(() => product.empty_lot_rows ?? [])

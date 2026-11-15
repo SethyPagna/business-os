@@ -7886,6 +7886,7 @@
   "inventory_check_error_lot_counts_off": "Counting by received date was turned off. The page was reloaded: count again.",
   "inventory_check_error_maintenance": "Maintenance is in progress. Nothing was changed; try again shortly.",
   "inventory_check_error_lot_unavailable": "This received date no longer has that stock. Nothing was changed.",
+  "inventory_check_error_lots_incomplete": "A product received stock on another date after you counted. Its dates were updated: count the new date and submit again. Your counts are kept.",
   "inventory_check_fixed_title": "Set from Inventory",
   "inventory_check_sort_checked": "Newest check first",
   "inventory_check_unlotted": "No received date",

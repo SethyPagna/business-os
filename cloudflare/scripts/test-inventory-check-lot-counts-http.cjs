@@ -163,6 +163,55 @@ async function lotMain() {
     assert.equal(recount.status, 201, 'the same count against the figures of now is recorded'); assert.equal(itemOf(910001).state, 'done')
   })
 
+  await check('N4/P1: a count that names some, not all, of the stocked dates of a product is refused with the dates of now, and nothing is written', async () => {
+    reset(); twoLots(); on()
+    const before = metadata(), stored = lotLines(), stock = physical()
+    // probe P1: batch 910001 (5) named for a product that holds 9 (5 + 4) used to answer 201 Done
+    const partial = await lotSubmit([lotLine(910002, [lot(910002, 5, 5)]), lotLine(910001, [lot(910001, 5, 5)])])
+    assert.equal(partial.status, 409, JSON.stringify(partial.body)); assert.equal(partial.body.code, 'inventory_check_lots_incomplete')
+    assert.deepEqual(partial.body.productIds, [910001], 'only the product that left a date out is named')
+    assert.deepEqual(partial.body.lots.map(entry => [entry.productId, entry.lots.map(row => [row.batchId, row.quantity])]), [[910001, [[910001, 5], [920001, 4]]]], 'the dates it holds now, in shelf order')
+    assert.ok(partial.body.lots[0].lots.every(row => !('cost' in row) && !('supplier' in row)), 'no cost or supplier')
+    assert.deepEqual(metadata(), before, 'the complete product beside it was not recorded either'); assert.deepEqual(lotLines(), stored); assert.deepEqual(physical(), stock)
+    const whole = await lotSubmit([lotLine(910001, [lot(910001, 5, 5), lot(920001, 4, 4)], { checked: true })], { requestId: 'lot-request-002' })
+    assert.equal(whole.status, 201, JSON.stringify(whole.body)); assert.equal(itemOf(910001).state, 'done', 'naming every date is a count of the product')
+  })
+
+  await check('N4: a stock-in on another device after the screen was read is caught the same way (the new date is not on the screen that counted)', async () => {
+    reset(); on()
+    const before = metadata()
+    twoLots(910002, 920002, 3) // received elsewhere after this page was read: 910002 now holds 5 + 3, the page still shows 5
+    const response = await lotSubmit([lotLine(910002, [lot(910002, 5, 5)])])
+    assert.equal(response.status, 409); assert.equal(response.body.code, 'inventory_check_lots_incomplete')
+    assert.deepEqual(response.body.lots[0].lots.map(row => [row.batchId, row.quantity]), [[910002, 5], [920002, 3]]); assert.deepEqual(metadata(), before)
+  })
+
+  await check('N4: only STOCKED dates must be named: an empty or other-branch date is left out freely, a branch-total line and a plain line are complete by themselves', async () => {
+    reset(); twoLots(); on()
+    db.prepare('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=920001').run()                                   // empty here
+    db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active) VALUES(920003,910001,'b-920003','2026-10-27',1)").run()
+    db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(920003,2,7)').run()       // 920003 is stocked only at branch 2 (a retired date cannot hold stock: the schema refuses it)
+    const ok = await lotSubmit([lotLine(910001, [lot(910001, 5, 5)])])
+    assert.equal(ok.status, 201, JSON.stringify(ok.body))
+    reset(); twoLots(); on()
+    const total = await lotSubmit([lotLine(910001, [{ scope: 'branch', counted: 8, seen: 9 }]), line(910002, 5, { seenQuantity: 5 })])
+    assert.equal(total.status, 201, JSON.stringify(total.body))
+  })
+
+  await check('N4: a product stocked on more dates than one count may carry is exempt (it cannot name them all), one at the cap is not', async () => {
+    reset(); twoLots(); on()
+    db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active) VALUES(920004,910001,'b-920004','2026-10-28',1)").run()
+    db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(920004,1,2)').run() // 910001 now holds three stocked dates
+    const { getDb } = load(path.join(__dirname, '../src/lib/db.ts'))
+    const { createInventoryCheckLotSubmission, inventoryCheckDigest } = load(path.join(__dirname, '../src/lib/inventoryCheckSessions.ts'))
+    const who = { id: COUNTER, tokenHash: await inventoryCheckDigest('token-' + COUNTER) }
+    const run = (maxLinesPerProduct, lots, requestId) => createInventoryCheckLotSubmission(getDb({ DB: binding() }), who, { branchId: 1, requestId, lines: [lotLine(910001, lots)] }, { maxLines: 500, maxProducts: 500, maxLinesPerProduct })
+    await assert.rejects(() => run(3, [lot(910001, 5, 5), lot(920001, 4, 4)], 'cap-three-0001'), error => error.code === 'inventory_check_lots_incomplete', 'three stocked dates are within a cap of 3: all must be named')
+    const exempt = await run(2, [lot(910001, 5, 5), lot(920001, 4, 4)], 'cap-two-00001')
+    assert.equal(exempt.created, true, 'three stocked dates are over a cap of 2: counted on the dates the page lists')
+    planTier.__resetPlanTierCacheForTests()
+  })
+
   await check('a counter who may not see stock sends no figure: seen is read at write, inside the insert, and the difference is still reviewed', async () => {
     reset(); twoLots(); on()
     const response = await lotSubmit([lotLine(910001, [lot(910001, 4), lot(920001, 4)])], {}, BLIND)
@@ -238,7 +287,7 @@ async function lotMain() {
     const before = metadata()
     const over = await lotSubmit([...batchesOf.slice(0, fullProducts).map(entry => countLine(entry)), countLine(batchesOf[fullProducts], 1)], { requestId: 'lot-over-cap-0001' }, COUNTER, free)
     assert.equal(over.status, 400); assert.equal(over.body.code, 'inventory_check_too_many_lines'); assert.deepEqual(metadata(), before, 'a refused submission writes nothing')
-    const small = await lotSubmit([countLine(batchesOf[0], 1)], { requestId: 'lot-small-0001' }, COUNTER, free)
+    const small = await lotSubmit([countLine(batchesOf[0])], { requestId: 'lot-small-0001' }, COUNTER, free)
     assert.equal(small.status, 201, JSON.stringify(small.body))
     // The page is told the number (overlay and list answer the same capabilities).
     const told = await send(sessionsRoute, 'GET', '/overlay?branchId=1&summary=0&ids=950000', undefined, COUNTER, { CACHE: (() => { const m = new Map(); return { get: async k => m.get(k) ?? null, put: async (k, v) => { m.set(k, v) }, delete: async k => { m.delete(k) }, list: async () => ({ keys: [] }) } })() })
@@ -246,7 +295,7 @@ async function lotMain() {
     assert.equal(told.body.capabilities.lotLinesPerSubmission, ofThePlan, 'capabilities carry the plan number the writer enforces (this world plan)')
     const fits = await lotSubmit(batchesOf.slice(0, fullProducts).map(entry => countLine(entry)), { requestId: 'lot-fits-0001' }, COUNTER, free)
     assert.equal(fits.status, 201, JSON.stringify(fits.body))
-    assert.equal(lotLines().filter(row => row.product_id >= 950000).length, 1 + cap, 'every line of the full submission is stored')
+    assert.equal(lotLines().filter(row => row.product_id >= 950000).length, per + cap, 'every line of the full submission is stored (and the one product the small count named)')
     assert.equal(fits.queries.length, small.queries.length, `1 line or ${cap}: the same number of D1 statements (one set-based INSERT ... SELECT over json_each per table)`)
   })
 

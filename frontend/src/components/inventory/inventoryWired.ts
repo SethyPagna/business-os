@@ -6,7 +6,7 @@
 //
 // Both answer 404 while the switch is off; the page then keeps today's list (`not_wired`). Pure functions only, so the open sequence can be tested without a browser.
 import { buildQueryString, type QueryParams } from '../../api/query.ts'
-import type { InventoryCheckProduct } from '../../types/inventoryChecks.ts'
+import type { InventoryCheckLotRow, InventoryCheckProduct } from '../../types/inventoryChecks.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { PRICE_KEYS } from './inventoryPriceFacts.ts'
 import { patchProductFromStockAnswer, patchProductFromStockConflict, type StockConflictAnswer, type StockWriteAnswer } from './stockAnswerPatch.ts'
@@ -299,6 +299,37 @@ export function patchWiredRaw(raw: WiredRaw, answer: StockWriteAnswer | StockCon
   const held = lots.get(answer.productId)
   if (held) lots.set(answer.productId, withMore(apply({ id: answer.productId, lots: held }).lots as Lot[] | undefined ?? held, held.more))
   return { ...raw, lots, list: { ...raw.list, items: raw.list.items.map(row => Number(row.id) === answer.productId ? apply(row) : row) } }
+}
+
+/**
+ * A row's received dates replaced by the server's word of NOW (GET /lots for one product, or the dates a refused incomplete count answers): the dates that hold stock are exactly those listed, in the
+ * order listed; a date the row carried that is not listed holds nothing here any more (kept at 0, so it moves to the empty dates). The branch quantity moves by what the stocked dates moved, as a
+ * refused stale figure does (staleLotFigures), so units no date holds stay the same. `more` (the answer was cut at the plan's limit) only adds and updates: a date it does not list may still hold stock.
+ * Never reads anything; the row is rebuilt from the patched raw like every other patch.
+ */
+export function patchWiredLots(raw: WiredRaw, productId: number, answer: { lots: readonly InventoryCheckLotRow[]; more?: boolean }): WiredRaw {
+  const branchId = raw.branchId
+  const row = raw.list.items.find(candidate => Number(candidate.id) === productId)
+  if (!row || !branchId) return raw
+  const held: readonly Lot[] = raw.lots.get(productId) ?? row.lots ?? []
+  const heldById = new Map(held.map(lot => [Number(lot.id), lot]))
+  const listed = new Map(answer.lots.map(lot => [lot.batchId, lot]))
+  const quantityHere = (lot: Lot | undefined) => Math.max(0, Number(lot?.branches?.find(candidate => Number(candidate.branch_id) === branchId)?.quantity ?? 0))
+  const withQuantity = (lot: Lot, quantity: number): Lot => ({ ...lot, branches: [...(lot.branches ?? []).filter(candidate => Number(candidate.branch_id) !== branchId), { branch_id: branchId, quantity }] })
+  const stocked: Lot[] = answer.lots.map(lot => withQuantity(heldById.get(lot.batchId) ?? { id: lot.batchId, received_at: lot.receivedAt, expiry_date: lot.expiry, lot_code: lot.lotCode ?? null, batch_number: lot.batchNumber ?? null }, lot.quantity))
+  const others = held.filter(lot => !listed.has(Number(lot.id)))
+  // What the stocked dates moved, when both lists are whole: each listed date by its new figure, every date no longer listed by what it held. A cut list (the row's or the answer's), or a row that carried
+  // no dates at all, cannot say what the branch total did, so it is left as it is.
+  const carried = raw.lots.has(productId) || Array.isArray(row.lots)
+  const whole = carried && !answer.more && !(held as RowLots).more
+  let moved = 0
+  if (whole) moved = answer.lots.reduce((sum, lot) => sum + lot.quantity - quantityHere(heldById.get(lot.batchId)), 0) - others.reduce((sum, lot) => sum + quantityHere(lot), 0)
+  // A date the server no longer lists holds nothing here: it stays on the row at 0 (a date this branch never held stays as it is).
+  const emptied = (lot: Lot) => answer.more || !(lot.branches ?? []).some(candidate => Number(candidate.branch_id) === branchId) ? lot : withQuantity(lot, 0)
+  const lots = withMore([...stocked, ...others.map(emptied)], answer.more)
+  const items = raw.list.items.map(candidate => Number(candidate.id) !== productId || !Array.isArray(candidate.branch_stock) ? candidate
+    : { ...candidate, branch_stock: candidate.branch_stock.map(entry => Number(entry.branch_id) === branchId ? { ...entry, quantity: Math.max(0, Number(entry.quantity ?? 0) + moved) } : entry) })
+  return { ...raw, lots: new Map(raw.lots).set(productId, lots), list: { ...raw.list, items } }
 }
 
 // ---- which server this is ----------------------------------------------------------------------------------------------------------------------------------

@@ -31,9 +31,9 @@ const lotReads: Array<[number, number]> = []
 let lotsAnswer: ((productId: number) => Record<string, unknown>) | null = null
 let submitAnswer: (input: Record<string, unknown>) => unknown = () => ({ item: { id: 'session-new' }, receipt: {}, created: true })
 /** The error the page really receives for a 400: built by the real apiFetch from a stubbed network answer, not by hand (it carries the code, never the parameter name). */
-async function realRefusal(body: Record<string, unknown>): Promise<Error> {
+async function realRefusal(body: Record<string, unknown>, status = 400): Promise<Error> {
   const saved = globalThis.fetch
-  globalThis.fetch = (async () => new Response(JSON.stringify(body), { status: 400, headers: { 'content-type': 'application/json' } })) as typeof fetch
+  globalThis.fetch = (async () => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })) as typeof fetch
   setSyncServerUrl('https://admin.example.test'); __resetApiHealthForTests(); __resetApiWriteDedupeForTests()
   try { await apiFetch('GET', '/api/inventory-checks/list?x=1'); throw new Error('the stub answered 400 but apiFetch did not throw') } catch (error) { return error as Error } finally { globalThis.fetch = saved }
 }
@@ -414,6 +414,80 @@ try {
     assert.equal(rowCount(surface, '14').value, '6', 'B4: an untouched row is still marked by the page mark')
     assert.notEqual(statusButton(surface, '13').getAttribute('data-check-status-kind'), 'draft_ok')
     await surface.unmount()
+  }
+  // ---- N4 (review 14 Nov round 2): the batches a row carries can be out of date (a stock-in on another device adds a date). A row changed elsewhere reads /lots once before the popover or the page mark uses
+  // its batches, and a count the server refuses as incomplete (409 inventory_check_lots_incomplete) patches the rows and keeps every typed count. ----
+  {
+    const shape = (line: Record<string, unknown>) => 'lots' in line ? [line.productId, (line.lots as Array<{ batchId: number; counted: number; seen: number }>).map(entry => [entry.batchId, entry.counted, entry.seen])] : [line.productId, 'total', line.countedQuantity]
+    const markPage = async (surface: Awaited<ReturnType<typeof mount>>) => { await surface.click(surface.findAll(node => node.getAttribute('data-selection-action') === 'mark')[0]); await new Promise(resolve => setTimeout(resolve, 20)) }
+    const submitNow = async (surface: Awaited<ReturnType<typeof mount>>) => { await surface.click(surface.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit')); await surface.click(exact(surface, 'Submit').at(-1)!); await new Promise(resolve => setTimeout(resolve, 20)) }
+    const sent = () => (submissions.at(-1)?.lines as Array<Record<string, unknown>> | undefined)?.map(shape)
+    const dated = () => listBody([withLots(productRow(12, 'Dated one', 8))], { capabilities: { ...capabilities, lotLinesPerSubmission: 400 }, summary: { ok: 0, issue: 0, not_checked: 1, total: 1 } })
+    const changedElsewhere = async () => { sync({ channel: 'inventory', payload: { id: 12, action: 'stock-in' } }); await new Promise(resolve => setTimeout(resolve, 20)) }
+    // what the server holds now: a third received date (batch 11, 4 units) arrived on another device
+    const nowLots = (productId: number) => ({ productId, branchId: 1, lots: [{ batchId: 7, receivedAt: '2026-10-01', expiry: null, quantity: 5 }, { batchId: 9, receivedAt: '2026-10-09', expiry: null, quantity: 3 }, { batchId: 11, receivedAt: '2026-11-10', expiry: null, quantity: 4 }] })
+    // popover: control first (a row nobody changed reads nothing), then the changed row reads once and shows the new date
+    listAnswer = dated; lotsAnswer = nowLots; lotReads.length = 0; submissions.length = 0
+    let surface = await mount()
+    await openCount(surface, '12')
+    assert.deepEqual(lotReads, [], 'control: a row nobody changed draws from the batches it carries, no read')
+    assert.equal(surface.findAll(node => node.getAttribute('data-popover-lot') === '11').length, 0)
+    await closeCount(surface)
+    await changedElsewhere()
+    await openCount(surface, '12')
+    assert.deepEqual(lotReads, [[12, 1]], 'a row changed on another device reads /lots once when its popover opens')
+    assert.equal(surface.findAll(node => node.getAttribute('data-popover-lot') === '11').length, 1, 'and shows the date that arrived there')
+    await surface.click(surface.find(node => node.getAttribute('data-popover-action') === 'matches', 'matches'))
+    await closeCount(surface)
+    await submitNow(surface)
+    assert.deepEqual(sent(), [[12, [[7, 5, 5], [9, 3, 3], [11, 4, 4]]]], 'Matches stock counted every date the server holds')
+    await surface.unmount()
+    // the popover read is remembered: the next open of the same row reads nothing more
+    listAnswer = dated; lotReads.length = 0
+    surface = await mount()
+    await changedElsewhere(); await openCount(surface, '12'); await closeCount(surface); await openCount(surface, '12')
+    assert.equal(lotReads.length, 1, 'read once, not on every open')
+    await surface.unmount()
+    // the whole-page mark reads the changed row once and marks every date it holds now
+    listAnswer = dated; lotReads.length = 0; submissions.length = 0
+    surface = await mount()
+    await changedElsewhere()
+    await markPage(surface)
+    assert.deepEqual(lotReads, [[12, 1]], 'the page mark read the changed row once, before using its batches')
+    await submitNow(surface)
+    assert.deepEqual(sent(), [[12, [[7, 5, 5], [9, 3, 3], [11, 4, 4]]]], 'the page mark answered every stocked date, the new one included')
+    await surface.unmount()
+    // a changed row whose read fails is left for its own popover (never marked from batches that may be out of date); an unchanged row beside it is marked
+    listAnswer = () => listBody([withLots(productRow(12, 'Dated one', 8)), withLots(productRow(14, 'Dated two', 8))], { capabilities: { ...capabilities, lotLinesPerSubmission: 400 }, summary: { ok: 0, issue: 0, not_checked: 2, total: 2 } })
+    lotsAnswer = () => { throw new Error('offline') }; lotReads.length = 0; submissions.length = 0
+    surface = await mount()
+    await changedElsewhere()
+    await markPage(surface)
+    assert.equal(rowCount(surface, '12').value, '', 'the changed row whose read failed was not marked')
+    assert.equal(rowCount(surface, '14').value, '8', 'the row nobody changed was')
+    await surface.unmount()
+    // the server refuses a partial count: the rows take its dates, every typed count stays, no list is read, the person is told which product
+    lotsAnswer = nowLots; listAnswer = dated; lotReads.length = 0; submissions.length = 0
+    surface = await mount()
+    await openCount(surface, '12'); await surface.type(dateInput(surface, 7), '4'); await closeCount(surface)
+    const listsBefore = lists.length
+    const refusal409 = await realRefusal({ error: 'inventory_check_lots_incomplete', code: 'inventory_check_lots_incomplete', productIds: [12], lots: [{ productId: 12, lots: nowLots(12).lots }] }, 409)
+    submitAnswer = () => { throw refusal409 }
+    await submitNow(surface)
+    assert.equal(submissions.length, 1)
+    assert.equal(lists.length, listsBefore, 'no list was read for the refusal: the answer carried the dates')
+    assert.equal(rowCount(surface, '12').value, '4', 'the count typed stays')
+    assert.ok(surface.findAll(node => node.getAttribute('role') === 'alert').some(node => node.textContent.includes('another date') && node.textContent.includes('Dated one')), 'the person is told what to do and which product')
+    await openCount(surface, '12')
+    assert.deepEqual(lotReads, [], 'the rows were patched from the refusal: the popover opens with no read')
+    assert.equal(surface.findAll(node => node.getAttribute('data-popover-lot') === '11').length, 1, 'the new date is there to count')
+    assert.equal((dateInput(surface, 7) as unknown as { value: string }).value, '4', 'the date typed before is still typed')
+    await surface.type(dateInput(surface, 9), '3'); await surface.type(dateInput(surface, 11), '4'); await closeCount(surface)
+    submitAnswer = () => ({ item: { id: 'session-new' }, receipt: {}, created: true })
+    await submitNow(surface)
+    assert.deepEqual(sent(), [[12, [[7, 4, 5], [9, 3, 3], [11, 4, 4]]]], 'the next Submit carries every date')
+    await surface.unmount()
+    lotsAnswer = null
   }
   // ---- N3 + N5 (review 14 Nov round 2): wired only (ic_lot_counts OFF) the server still enforces its caps on every submission, so the page is told them and splits by BOTH (lines and products), with no dates in sight.
   // 401 plain products with a line cap of 400 and a product cap of 40: 40 go, the rest wait, nothing is refused. ----

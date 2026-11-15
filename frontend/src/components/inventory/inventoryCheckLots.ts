@@ -80,6 +80,27 @@ export function rowSetPlan(row: Pick<InventoryCheckLotRow, 'batchId' | 'quantity
   return count.kind === 'valid' && count.value !== row.quantity ? { batchId: row.batchId, before: row.quantity, after: count.value } : null
 }
 
+export type IncompleteLots = { productId: number; lots: InventoryCheckLotRow[] }
+
+/**
+ * A count refused because it named some, not all, of a product's stocked received dates (409 inventory_check_lots_incomplete) carries the dates each such product holds now. The page takes them
+ * into its rows (patchWiredLots) and keeps every typed count: the person counts the date that was missing and submits again. Null when the refusal carries no list (the page then reloads as it does for a stale figure).
+ */
+export function incompleteLotAnswers(cause: unknown): IncompleteLots[] | null {
+  const found = [cause, (cause as { body?: unknown } | null)?.body, (cause as { data?: unknown } | null)?.data]
+    .map(candidate => (candidate as { lots?: unknown } | null)?.lots).find(Array.isArray) as Array<{ productId?: unknown; lots?: unknown }> | undefined
+  if (!found) return null
+  const answers: IncompleteLots[] = []
+  for (const entry of found) {
+    const productId = Number(entry?.productId)
+    if (!Number.isSafeInteger(productId) || productId <= 0 || !Array.isArray(entry.lots)) continue
+    const lots = (entry.lots as Array<Partial<InventoryCheckLotRow>>).filter(lot => Number.isSafeInteger(Number(lot?.batchId)) && finite(Number(lot?.quantity))).map((lot): InventoryCheckLotRow => ({
+      batchId: Number(lot.batchId), receivedAt: lot.receivedAt ?? null, expiry: lot.expiry ?? null, quantity: Number(lot.quantity), lotCode: lot.lotCode ?? null, batchNumber: lot.batchNumber ?? null }))
+    answers.push({ productId, lots })
+  }
+  return answers.length ? answers : null
+}
+
 export type StaleLot = { productId: number; name: string; batchId: number; receivedAt: string | null; was: number | null; now: number }
 
 /**

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHarness, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
-import { countTextFromLots, lotCountOf, lotSubmissionLine, lotTotals, rowSetPlan, splitSubmission, staleLotFigures, submissionLineCost, type LotDraft } from '../src/components/inventory/inventoryCheckLots.ts'
-import { patchWiredRaw, setToAmount, wiredListParams, wiredResult, type WiredList } from '../src/components/inventory/inventoryWired.ts'
+import { countTextFromLots, incompleteLotAnswers, lotCountOf, lotSubmissionLine, lotTotals, rowSetPlan, splitSubmission, staleLotFigures, submissionLineCost, type LotDraft } from '../src/components/inventory/inventoryCheckLots.ts'
+import { patchWiredLots, patchWiredRaw, setToAmount, wiredListParams, wiredResult, type WiredList } from '../src/components/inventory/inventoryWired.ts'
 import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
 
 // INV-B S5: counts typed per received date and the direct Set from a row (INVENTORY-REPLAN rev. 2 sections 2.6, 2.7).
@@ -90,6 +90,29 @@ assert.equal(wiredResult(raw).items[0].quantity, 8, 'the earlier raw is untouche
 const conflicted = patchWiredRaw(raw, { productId: 5, branchId: 1, batchId: 7, current: { lotQuantity: 2, branchQuantity: 5 } })
 assert.deepEqual(wiredResult(conflicted).items[0].lot_rows?.map(row => row.quantity), [2, 3], 'a refusal shows the figures the writer found')
 assert.equal(patchWiredRaw(raw, { productId: 99, branchId: 1, batchId: 7, after: { lotQuantity: 0, branchQuantity: 0 } }).list.items[0], raw.list.items[0], 'another product is not touched')
+
+// ---- N4: the row's received dates replaced by the server's word of now (patchWiredLots) --------------------------------------------------------------------------------------------------------
+const lotRow = (batchId: number, quantity: number, receivedAt = '2026-11-10') => ({ batchId, receivedAt, expiry: null, quantity })
+const arrived = wiredResult(patchWiredLots(raw, 5, { lots: [lotRow(7, 5, '2026-10-01'), lotRow(9, 3, '2026-10-09'), lotRow(21, 4)] })).items[0]
+assert.deepEqual(arrived.lot_rows?.map(row => [row.batchId, row.quantity]), [[7, 5], [9, 3], [21, 4]], 'a date that arrived on another device is a row')
+assert.equal(arrived.quantity, 12, 'and the branch total moved by what it holds (8 + 4)')
+assert.equal(wiredResult(raw).items[0].quantity, 8, 'the earlier raw is untouched')
+const gone = wiredResult(patchWiredLots(raw, 5, { lots: [lotRow(7, 5, '2026-10-01')] })).items[0]
+assert.deepEqual(gone.lot_rows?.map(row => [row.batchId, row.quantity]), [[7, 5]], 'a date the server no longer lists holds no stock here')
+assert.deepEqual(gone.empty_lot_rows?.map(row => row.batchId).sort((a, b) => a - b), [9, 12], 'it moves to the empty dates (beside the one that was already empty), never to the counted ones')
+assert.equal(gone.quantity, 5, 'and the total drops by what it held (8 - 3)')
+assert.ok(!gone.empty_lot_rows?.some(row => row.batchId === 11), 'a date this branch never held (another branch\'s) does not become an empty date here')
+const cut = wiredResult(patchWiredLots(raw, 5, { lots: [lotRow(21, 4)], more: true })).items[0]
+assert.equal(cut.lots_more, true, 'a cut answer keeps the row marked as cut'); assert.equal(cut.quantity, 8, 'and cannot say what the total did: left as it is')
+assert.deepEqual(cut.lot_rows?.map(row => row.batchId).sort((a, b) => a - b), [7, 9, 21], 'the dates it does not list keep their figures')
+const bare = { ...raw, list: { ...list, items: [{ id: 5, name: 'Serum', stock_quantity: 11, branch_stock: [{ branch_id: 1, branch_name: 'Main', quantity: 11 }] }] } }
+assert.equal(wiredResult(patchWiredLots(bare, 5, { lots: [lotRow(7, 5), lotRow(9, 3)] })).items[0].quantity, 11, 'a row that carried no dates keeps its total (the dates are what is new)')
+assert.equal(patchWiredLots(raw, 99, { lots: [] }), raw, 'a product not on the page is not touched')
+// the refusal's list is read defensively (the page must never act on a malformed one)
+assert.equal(incompleteLotAnswers({ code: 'inventory_check_lots_incomplete' }), null, 'a refusal with no list')
+assert.equal(incompleteLotAnswers({ lots: [{ productId: 'x', lots: [] }, { lots: [] }] }), null, 'entries without a product id are dropped')
+assert.deepEqual(incompleteLotAnswers({ lots: [{ productId: 5, lots: [{ batchId: 7, receivedAt: '2026-10-01', expiry: null, quantity: 5 }, { batchId: 'x', quantity: 1 }, { batchId: 9, quantity: 'many' }] }] }),
+  [{ productId: 5, lots: [{ batchId: 7, receivedAt: '2026-10-01', expiry: null, quantity: 5, lotCode: null, batchNumber: null }] }], 'rows without a batch id or a number are dropped')
 
 // ---- audit G5, G10, G11, G4b, owner sort: what a row is made of ---------------------------------------------------------------------------------------------------
 {

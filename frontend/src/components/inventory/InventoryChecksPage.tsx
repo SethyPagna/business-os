@@ -34,7 +34,7 @@ import InventoryCheckListRows, { InventoryCheckListHeader, InventoryCheckSelecti
 import { finiteQuantity, parseCount } from './InventoryCheckCountEditor.tsx'
 import InventoryCheckDetailFloat from './InventoryCheckDetailFloat.tsx'
 import { fixStockOpening, fixStockRequestId, type FixStockOpening } from './inventoryCheckFixStock.ts'
-import { countTextFromLots, lotSubmissionLine, lotTotals, rowSetPlan, splitSubmission, staleLotFigures, type SubmissionLotLine } from './inventoryCheckLots.ts'
+import { countTextFromLots, incompleteLotAnswers, lotSubmissionLine, lotTotals, rowSetPlan, splitSubmission, staleLotFigures, type SubmissionLotLine } from './inventoryCheckLots.ts'
 import { adjustStock } from '../../api/inventoryWriteTransport.ts'
 import { stockConflictFigures, type StockWriteAnswer } from './stockAnswerPatch.ts'
 import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
@@ -42,7 +42,7 @@ import { oldListDropsStatus, productsServerOf, productsWireParams, type Products
 import { soleActiveBranch } from '../../utils/branchCollapse.ts'
 import { PRICE_KEYS } from './inventoryPriceFacts.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
-import { loadWired, mergeWiredRows, NotWired, patchWiredRaw, readWiredRows, rememberWiredMode, wiredMode, wiredResult, type Branch, type WiredAccess, type WiredDeps, type WiredExtras, type WiredList, type WiredRaw } from './inventoryWired.ts'
+import { loadWired, mergeWiredRows, NotWired, patchWiredLots, patchWiredRaw, readWiredRows, rememberWiredMode, wiredMode, wiredResult, type Branch, type WiredAccess, type WiredDeps, type WiredExtras, type WiredList, type WiredRaw } from './inventoryWired.ts'
 import { approvalRequestBound, runApprovalFlow } from './inventoryCheckApprovalFlow.ts'
 import { productSalesFocus, queueReportsFocus } from '../sales/reports/reportsFocus.ts'
 import InventoryCheckHistoryFloat, { type InventoryCheckHistoryResult } from './InventoryCheckHistoryFloat.tsx'
@@ -116,6 +116,7 @@ const REFUSAL_MESSAGES: Record<string, { key: string; fallback: string }> = {
   inventory_check_claim_lost: { key: 'inventory_check_error_claim_lost', fallback: 'Another approver took over or closed this count, so nothing was written for this line. The page was reloaded.' },
   inventory_check_too_many_lines: { key: 'inventory_check_error_too_many_lines', fallback: 'This count is larger than one submission can carry. Submit part of it, then the rest.' },
   inventory_check_too_many_products: { key: 'inventory_check_error_too_many_lines', fallback: 'This count is larger than one submission can carry. Submit part of it, then the rest.' },
+  inventory_check_lots_incomplete: { key: 'inventory_check_error_lots_incomplete', fallback: 'A product received stock on another date after you counted. Its dates were updated: count the new date and submit again. Your counts are kept.' },
   inventory_check_no_lot: { key: 'inventory_check_error_no_lot', fallback: 'A product has no received date to add stock to. Receive it first.' },
   inventory_check_stock_write_refused: { key: 'inventory_check_error_write_refused', fallback: 'Stock could not be updated for some products. Try again.' },
   inventory_check_count_pending: { key: 'inventoryCheckCountPending', fallback: 'Set is blocked while a count of this product is waiting for approval. Approve or reject that count first.' },
@@ -308,6 +309,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   // The branches are known once an answer (or the branch list) has said them: a page step or a tab change never asks for them again.
   const branchesKnown = useRef(!!bootstrapIntent)
   const [changedIds, setChangedIds] = useState<number[]>([])
+  // Rows whose received dates were read (GET /lots) after the last change elsewhere: those are current, so they are not read again. A new change event takes the row out.
+  const lotsReadSince = useRef(new Set<number>())
   const [session, setSession] = useState<InventoryCheckSession | null>(null)
   const [items, setItems] = useState<InventoryCheckSessionItem[]>([])
   const [approval, setApproval] = useState<InventoryCheckApproval | null>(null)
@@ -433,7 +436,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
                 return
               }
               if (raw.extras.summary) summaryScope.current = stepScope
-              setChangedIds([])
+              setChangedIds([]); lotsReadSince.current.clear()
               setData(previous => wiredResult(raw, previous))
               setLoadedKey(scopeKey)
               return
@@ -534,6 +537,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       // The echo of this tab's own Set is not "changed on another device": the row already shows the writer's figures.
       const ownAt = ownSets.current.get(id)
       if (ownAt !== undefined && Date.now() - ownAt < OWN_SET_ECHO_MS) return
+      lotsReadSince.current.delete(id)
       setChangedIds(previous => previous.includes(id) ? previous : [...previous, id])
     }
     window.addEventListener('sync:update', onSync)
@@ -552,6 +556,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       wiredRaw.current = next
       setData(previous => wiredResult(next, previous))
       setChangedIds(previous => previous.filter(id => !rowIds.includes(id)))
+      for (const id of rowIds) lotsReadSince.current.delete(id)
     } catch { if (current()) setWriteError(tr('inventory_check_load_failed', 'Could not load Inventory. Try again.')) }
   }
 
@@ -711,7 +716,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const unavailableMembers = fresh && sessionId ? items.filter(item => item.current_product_available === false) : []
   const unavailableIds = new Set(unavailableMembers.map(item => String(item.product_id)))
   const renamedMembers = new Map(fresh && sessionId ? items.filter(item => item.current_product_available === true && item.current_product_name && item.current_product_name !== item.product_snapshot.name).map(item => [String(item.product_id), item]) : [])
-  const visibleProducts = fresh ? (data?.items ?? []).filter(product => !unavailableIds.has(String(product.id))).map(product => projectProduct(product, access.fields)) : []
+  const visibleProducts = fresh ? (data?.items ?? []).filter(product => !unavailableIds.has(String(product.id))).map(product => ({ ...projectProduct(product, access.fields), ...(changedIds.includes(Number(product.id)) && !lotsReadSince.current.has(Number(product.id)) ? { lots_stale: true } : {}) })) : []
   const unavailableProducts = unavailableMembers.map(item => ({ ...projectProduct(item.product_snapshot, access.fields), id: item.product_id, quantity: null, damaged_quantity: null, checkable: false }))
   const observations: Record<string, InventoryCheckObservation> = {}
   if (fresh) for (const item of items) observations[String(item.product_id)] = { product_id: item.product_id, state: item.state, counted_quantity: canViewCounts ? item.counted_quantity : null, reason: item.reason, revision: item.revision, ...(access.fields.stock ? { baseline_quantity: item.baseline_quantity, current_quantity: item.current_quantity, stock_changed: item.stock_changed } : {}), ...(item.lot_lines?.length ? { lot_lines: item.lot_lines } : {}) }
@@ -763,12 +768,17 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   // Counting per received date (ic_lot_counts): a product whose row carries its stocked batches gets one line per stocked batch (each with the figure it showed; empty dates never), exactly what the popover's
   // tick writes; submit splits those lines within capabilities.lotLinesPerSubmission. A product whose dates the row could not carry in full (lots_more) is left for its own popover: a partial answer would
   // read as a count of only some of its dates. A product with no stocked date is answered on its total.
-  function markPageChecked() {
+  async function markPageChecked() {
     if (submitAttempt.current) return
     const perBatch = lotCountsOn && !!branchId
+    // A row another device changed after the list was read may carry out-of-date dates: those are read once (GET /lots) first, and a row whose read failed is left for its own popover.
+    const refreshed = perBatch ? await freshenStaleRows(selectable) : new Map<number, InventoryCheckProduct>()
+    if (!current() || submitAttempt.current) return
     setDrafts(previous => {
       const result = { ...previous }
-      for (const product of selectable) {
+      for (const listed of selectable) {
+        if (perBatch && listed.lots_stale === true && !refreshed.has(Number(listed.id))) continue
+        const product = refreshed.get(Number(listed.id)) ?? listed
         const id = String(product.id), seen = finiteQuantity(product.quantity) ? product.quantity : null
         const entry = result[id]
         // A row the counter already answered is never overwritten: a chosen status ("Does not match" waits for its count with an empty box), any date typed (valid or not: one typo blanks the row total), or a count.
@@ -860,11 +870,34 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     })
   }
   // The popover of a row reads that one product's received dates (batches) at this branch when it opens: one request, never the page. A branch that is not chosen has no batches to read.
+  // A fresh word on a product's received dates (GET /lots, or the dates a refused incomplete count answers) goes into the rows in place: no list is read, nothing typed is touched.
+  function takeLots(answers: ReadonlyArray<{ productId: number; lots: InventoryCheckLotRow[]; more?: boolean }>) {
+    const raw = wiredRaw.current
+    if (!raw || !current() || !answers.length) return
+    let next = raw
+    for (const answer of answers) { next = patchWiredLots(next, answer.productId, answer); lotsReadSince.current.add(answer.productId) }
+    wiredRaw.current = next
+    setData(previous => wiredResult(next, previous))
+  }
   const loadLots = useCallback(async (product: InventoryCheckProduct, signal: AbortSignal) => {
     const answer = await readInventoryCheckLots({ productId: product.id, branchId }, signal)
     if (!current()) throw new Error('stale')
+    if (access.fields.stock && access.fields.received) takeLots([{ productId: Number(product.id), lots: answer.lots ?? [], more: answer.more === true }])
     return answer
   }, [branchId])
+  // Rows changed on another device carry dates that may be out of date (a stock-in there adds one): each is read once, in one parallel round, before the page mark uses its dates. Answers the rows by id,
+  // already patched; a row whose read failed is absent.
+  async function freshenStaleRows(rows: readonly InventoryCheckProduct[]): Promise<Map<number, InventoryCheckProduct>> {
+    const stale = rows.filter(row => row.lots_stale === true)
+    if (!stale.length || !branchId) return new Map()
+    const answers = await Promise.all(stale.map(row => readInventoryCheckLots({ productId: row.id, branchId }).then(answer => ({ productId: Number(row.id), lots: answer.lots ?? [], more: answer.more === true })).catch(() => null)))
+    const read = answers.filter((answer): answer is NonNullable<typeof answer> => answer !== null)
+    takeLots(read)
+    const raw = wiredRaw.current
+    if (!raw || !current()) return new Map()
+    const ids = new Set(read.map(answer => answer.productId))
+    return new Map(wiredResult(raw).items.filter(item => ids.has(Number(item.id))).map(item => [Number(item.id), projectProduct(item, access.fields)]))
+  }
 
   async function submit() {
     if (!current() || !selecting || submitBlocked || inFlight.current || selectedIds.length === 0) return
@@ -916,15 +949,19 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         setDrafts(previous => Object.fromEntries(Object.entries(previous).map(([id, entry]) => [id, entry.checked || named.has(Number(id)) ? { ...entry, count: '', checked: false } : entry])))
       }
       const stale = current() && wiredRaw.current ? staleLotFigures(cause, visibleProducts, Number(branchId)) : null
+      const incomplete = current() && wiredRaw.current && (cause as { code?: unknown })?.code === 'inventory_check_lots_incomplete' ? incompleteLotAnswers(cause) : null
       if (stale && wiredRaw.current) {
         // The answer names the figures the server found: the rows take them (no page is read) and the person counts again against what is shown now.
         let raw = wiredRaw.current
         for (const conflict of stale.conflicts) raw = patchWiredRaw(raw, conflict)
         wiredRaw.current = raw
         setData(previous => wiredResult(raw, previous))
+      } else if (incomplete) {
+        // A date was left out: the rows take the dates as they are now and every typed count stays; the person counts the missing date and submits again.
+        takeLots(incomplete)
       } else if (current() && !unknown && isStaleConflict(cause)) reloadAll()
-      // The server names the products whose earlier count is being applied (the refusal is the same whatever figure was typed): the person is told which, and the counts are kept.
-      const busy = (cause as { code?: unknown })?.code === 'inventory_check_count_in_progress' && Array.isArray((cause as { productIds?: unknown }).productIds)
+      // The server names the products whose earlier count is being applied, or that left a date out (the refusal is the same whatever figure was typed): the person is told which, and the counts are kept.
+      const busy = ((cause as { code?: unknown })?.code === 'inventory_check_count_in_progress' || (cause as { code?: unknown })?.code === 'inventory_check_lots_incomplete') && Array.isArray((cause as { productIds?: unknown }).productIds)
         ? ((cause as { productIds: unknown[] }).productIds).map(id => draftsRef.current[String(id)]?.name).filter((name): name is string => typeof name === 'string' && name !== '') : []
       if (current()) setWriteError(refusal ? `${tr(refusal.key, refusal.fallback)}${busy.length ? ` ${t('products')}: ${busy.join(', ')}` : ''}${stale ? ` ${stale.changed.map(item => `${item.name}${item.receivedAt ? ` (${fmtDateOnly(item.receivedAt)})` : ''}: ${item.was ?? '—'} → ${item.now}`).join('; ')}` : ''}` : tr(unknown ? unknownSaveKey(cause) : 'inventory_check_save_failed', unknown ? 'Save not confirmed. Retry the same operation or reload.' : 'Check not saved. Try again.'))
     } finally { inFlight.current = false; if (current()) setBusy(false) }
