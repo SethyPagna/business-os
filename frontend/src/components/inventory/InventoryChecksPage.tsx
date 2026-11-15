@@ -1124,7 +1124,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   </div>
   // The page controls, drawn above the list and below it from the SAME state: one request per page step, the true total, no second fetch. Count sessions page exactly like products.
   const pager = fresh ? <fieldset disabled={controlsLocked} className="min-w-0" data-inventory-check-pager-lock><PaginationControls page={page} pageSize={pageSize} totalItems={(section === 'sessions' ? sessions?.total : data?.total) ?? 0} onPageChange={value => { if (!controlsLocked) { setPage(value); setScan(null) } }} onPageSizeChange={value => { if (!controlsLocked) { setPageSize(value); setPage(1); setScan(null) } }} t={t} compact /></fieldset> : null
-  const pagerNode = (position: 'top' | 'bottom') => pager ? <div data-inventory-check-pager={position} className="min-w-0">{position === 'top' ? <TopPager>{pager}</TopPager> : pager}</div> : null
+  const pagerNode = (position: 'top' | 'bottom') => pager ? <div data-inventory-check-pager={position} className="min-w-0">{position === 'top' ? <TopPager>{pager}</TopPager> : <>{pager}</>}</div> : null
   // The context bar: where the person is (the one branch, or the open session) and what they can do from here.
   const contextBar = <div className="flex min-w-0 flex-1 items-center gap-1" data-inventory-check-context>
     {sessionId ? sessionBar : <>

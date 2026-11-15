@@ -140,12 +140,13 @@ try {
     // Sessions filters: Open / Closed / Mine / dates go to the server and send the pager back to page 1.
     // Count sessions page like products (owner, 14 Nov): the controls sit above the list AND below it, one state, one request per step, the true total (45).
     const pagerAt = (position: 'top' | 'bottom') => list.find(node => node.getAttribute('data-inventory-check-pager') === position, `${position} pager`)
-    assert.ok(pagerAt('top') !== pagerAt('bottom') && pagerAt('top').textContent.length > 0 && pagerAt('top').textContent === pagerAt('bottom').textContent, `${language}: the sessions list has the same pager above and below`)
+    const seen = (node: ReturnType<typeof pagerAt>) => node.querySelectorAll('[aria-live]').reduce((text, live) => text.replace(live.textContent, ''), node.textContent) // the bottom mount alone carries the polite live region
+    assert.ok(pagerAt('top') !== pagerAt('bottom') && pagerAt('top').textContent.length > 0 && seen(pagerAt('top')) === seen(pagerAt('bottom')), `${language}: the sessions list has the same pager above and below`)
     const readsBeforeStep = sessionReads.length
     await list.click(list.button(pack.next, pagerAt('top')))
     assert.equal(sessionReads.at(-1)?.page, 2, `${language}: paging from the TOP pager reaches page 2`)
     assert.equal(sessionReads.length, readsBeforeStep + 1, `${language}: one request per page step`)
-    assert.equal(pagerAt('top').textContent, pagerAt('bottom').textContent, `${language}: both pagers moved together`)
+    assert.equal(seen(pagerAt('top')), seen(pagerAt('bottom')), `${language}: both pagers moved together`)
     await chooseFilter(list, pack.filters, 'status', pack.shift_status_closed)
     assert.deepEqual([sessionReads.at(-1)?.status, sessionReads.at(-1)?.page], ['closed', 1], `${language}: Closed is a server filter and resets the page`)
     await list.click(list.button(pack.next))

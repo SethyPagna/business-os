@@ -440,7 +440,8 @@ try {
   // The page controls are drawn above the list AND below it (14 Nov), from one state: stepping from either sends ONE request and both show the same page.
   const pagerAt = (position: 'top' | 'bottom') => paging.find(node => node.getAttribute('data-inventory-check-pager') === position, `${position} pager`)
   const topPager = pagerAt('top'), bottomPager = pagerAt('bottom')
-  assert.ok(topPager !== bottomPager && topPager.textContent.length > 0 && topPager.textContent === bottomPager.textContent, 'the top and bottom pagers read the same')
+  const seen = (node: typeof topPager) => node.querySelectorAll('[aria-live]').reduce((text, live) => text.replace(live.textContent, ''), node.textContent) // the bottom mount alone carries the polite live region
+  assert.ok(topPager !== bottomPager && topPager.textContent.length > 0 && seen(topPager) === seen(bottomPager), 'the top and bottom pagers read the same')
   const beforeBottom = productRequests.length
   await paging.click(paging.button('next', bottomPager)); assert.equal(lastPage(), 2)
   assert.equal(productRequests.length, beforeBottom + 1, 'one request per page step, whichever pager was used')
