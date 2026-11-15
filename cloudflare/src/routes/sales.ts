@@ -6396,8 +6396,8 @@ export function projectOperationalSaleCosts(row:Record<string,unknown>,user:Sess
 // aggregate over every matching row, not just the page that was fetched.
 // Which status filters leave the report scope BROAD (plain cancelled predicate and +id paging, the saving) and which are NARROW (the old wrapped predicate: the cancelled group probes the scope).
 // The shop sells Completed and Not Paid (awaiting_payment); returns are tags and the other options are rare. The two sold statuses hold most of the sales, so they stay broad (all-time rows read on the
-// lab seed: completed 523,961 broad vs 577,827 narrow, awaiting_payment 15,348 vs 17,238; pre-lane 577,817 / 17,228). A rare status (returned, partial_return, awaiting_delivery, cancelled, or a value
-// the filter does not know) holds a few sales: 135-183 rows read narrow, 1,989-2,099 broad, so it keeps the pre-lane wrapped predicate.
+// lab seed: completed 523,961 broad vs 577,827 narrow, awaiting_payment 15,348 vs 17,238; pre-lane 577,817 / 17,228). A rare status (returned, partial_return, awaiting_delivery, or a value
+// the filter does not know) holds a few sales: 135-183 rows read narrow, 1,989-2,099 broad, so it keeps the pre-lane wrapped predicate. cancelled is narrow too but holds many sales (about 16,600 rows read all-time).
 const BROAD_STATS_STATUSES: ReadonlySet<string> = new Set(['completed', 'awaiting_payment'])
 function statsStatusIsBroad(raw: string): boolean {
   const statuses = raw.split(',').map((v) => v.trim()).filter(Boolean)

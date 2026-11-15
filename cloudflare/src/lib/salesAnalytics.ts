@@ -936,13 +936,13 @@ export type SalesReportScalarScope = (saleAlias: string) => {
 }
 
 type CapturedSalesReportScalarScope = { sql: string; params: Record<string, SalesReportScalarScopeValue>; narrow?: boolean }
-// Scopes known to hold only a few sales (a short resolved id list, or a list filter with a cashier / user / branch / search clause beyond the window and status): the cancelled group probes them
-// by rowid instead of seeking every cancelled sale of the window. A scope that is only the window and a status holds most of the shop and is not narrow.
+// Scopes known to hold few sales: a short resolved id list, or a list filter with a clause beyond the window, a completed / awaiting_payment status and the branch (cashier, user, search, id, or a
+// rare or unknown status). The cancelled group probes them by rowid instead of seeking every cancelled sale of the window. A window, a broad status and a branch alone are not narrow.
 const REPORT_SCOPE_NARROW = new WeakSet<SalesReportScalarScope>()
-// Measured on the lab seed, a typed search resolved to N ids, rows read narrow vs broad, three shapes (search over a window of D days, the same with a cashier, an all-time receipt/name search; 95 points).
-// The narrow saving is the cancelled sales of the window (about 5 rows a day, both passes); each id costs narrow about 3.7 rows, so the crossover is about 1.4 x D ids: 2 ids in a day or three,
-// 40 in 30 days, 500 all time. One limit cannot be the crossover of all of them. Both forms read far below the pre-lane route everywhere measured (it is the choice between two cheaper forms), so the limit is
-// the one that keeps the loss against the better form under 1.5% on every shape (worst seen: +1.3%, 2 ids over 30 days narrow, one point of 95): 10 (3 to 10 ids in a short window: -0.6% to +0.8% narrow; an all-time search with 11 to 500 ids reads at most 0.8% more broad; 11 to 13 ids in one day would read 3-5% more narrow).
+// Lab seed, a typed search resolved to N ids, rows read narrow vs broad (95 points: windowed, with a cashier, all-time). Narrow saves the window's cancelled sales (about 5 rows a day, both passes) and
+// pays about 3.7 rows per id, so the crossover is about 1.4 x D ids for D days (2 in a day, about 40 in 30 days, about 500 all time); one limit cannot fit every shape. 10 keeps the loss against the
+// better form near 1.3% at worst (one first sample; repeats of that shape read narrow cheaper): 3 to 10 ids in a short window -0.6% to +0.8% narrow; an all-time search of 11 to 500 ids reads at most 0.8%
+// more broad; 11 to 13 ids in one day would read 3-5% more narrow. Against the pre-lane route, 3 of the 17 points that have a base value read more in the narrow form (4,945 vs 4,881; 7,833 vs 7,629 twice).
 export const REPORT_NARROW_SCOPE_IDS_MAX = 10
 
 type ReportScopeProvenance = {
