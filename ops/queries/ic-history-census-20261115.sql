@@ -12,4 +12,4 @@ SELECT
   (SELECT COUNT(*) FROM inventory_check_sessions) AS sessions_total,
   (SELECT COUNT(DISTINCT date(updated_at, '+7 hours')) FROM inventory_check_items WHERE state IN ('done', 'issue')) AS check_days,
   (SELECT MIN(updated_at) FROM inventory_check_items WHERE state IN ('done', 'issue')) AS first_check_at,
-  (SELECT COUNT(*) FROM inventory_check_items WHERE updated_at NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z') AS items_odd_timestamp
+  (SELECT COUNT(*) FROM inventory_check_items WHERE NOT (length(updated_at) = 24 AND substr(updated_at, 5, 1) = '-' AND substr(updated_at, 11, 1) = 'T' AND substr(updated_at, 20, 1) = '.' AND substr(updated_at, 24, 1) = 'Z')) AS items_odd_timestamp
