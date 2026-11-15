@@ -1,8 +1,11 @@
 // Migration 0310: the Dashboard for the Manager and Employee roles (owner, 15 Nov 2026). Runs the REAL file against SQLite.
-//   - Manager and Employee roles gain dashboard=true; Employee also gets dashboard_export=false; Manager's export is untouched.
+//   - Manager and Employee roles gain dashboard=true; Employee also gets dashboard_export=false; Manager gets
+//     dashboard_export=true only when the key is absent (an explicit stored value is kept).
 //   - Admin, every other role, every other key and every user stay byte-identical.
 //   - Case/space variants of the code are reached; invalid JSON and non-object JSON are skipped and never abort the file.
 //   - The PRE count and the users-with-own-keys count are recorded in system_flags.
+//   - A duplicated dashboard member ends truly true for JSON.parse (last wins), not only for SQLite (first wins).
+//   - wrangler's statement splitter yields the 4 real statements (every CASE is parenthesised).
 //   - The POST assertion is real: the same file with its UPDATE removed aborts.
 // Run (from cloudflare/scripts): node test-migration-0310-dashboard-staff-roles-pure.cjs
 const assert = require('node:assert/strict')
@@ -33,15 +36,19 @@ check('the file is LF-only and appends no comment-only statement', () => {
   assert.equal(statements.at(-1), '', 'nothing but whitespace after the last semicolon')
 })
 
-check('Employee gets dashboard true and dashboard_export false; Manager gets dashboard true and keeps its export', () => {
+check('Employee gets dashboard true and dashboard_export false; Manager gets dashboard true and keeps an explicit export', () => {
   const db = world()
   role(db, 1, 'employee', { pos: true, sales: true })
   role(db, 2, 'manager', { products: true, dashboard_export: false })
   role(db, 3, 'employee', { dashboard: false, dashboard_export: true, pos: true })
+  role(db, 4, 'manager', { dashboard_export: true })
+  role(db, 5, 'manager', { products: true })
   db.exec(sql)
   assert.deepEqual(perms(db, 1), { pos: true, sales: true, dashboard: true, dashboard_export: false })
   assert.deepEqual(perms(db, 2), { products: true, dashboard_export: false, dashboard: true })
   assert.deepEqual(perms(db, 3), { dashboard: true, dashboard_export: false, pos: true }, 'an explicit stored true/false is overwritten on a ROLE row')
+  assert.deepEqual(perms(db, 4), { dashboard_export: true, dashboard: true })
+  assert.deepEqual(perms(db, 5), { products: true, dashboard: true, dashboard_export: true }, 'an ABSENT manager export key becomes true')
 })
 
 check('admin, other roles, invalid JSON, a non-object and users are untouched', () => {
@@ -66,7 +73,7 @@ check('code is matched on lower(trim(code))', () => {
   role(db, 3, 'employees', {})
   db.exec(sql)
   assert.deepEqual(perms(db, 1), { dashboard: true, dashboard_export: false })
-  assert.deepEqual(perms(db, 2), { dashboard: true })
+  assert.deepEqual(perms(db, 2), { dashboard: true, dashboard_export: true })
   assert.deepEqual(perms(db, 3), {})
 })
 
@@ -98,6 +105,32 @@ check('re-running changes nothing (updated_at and JSON stay as the first run lef
   db.exec(sql)
   assert.equal(JSON.stringify(db.prepare('SELECT * FROM roles').all()), once)
   assert.equal(flag(db, 'dashboard_staff_roles_0310_changed'), '0')
+})
+
+check('wrangler splits the file into exactly 4 statements (no CASE swallows a boundary)', () => {
+  const { unstable_splitSqlQuery: split } = require('wrangler')
+  assert.equal(split(sql).length, 4)
+})
+
+check('a duplicated dashboard / dashboard_export member ends truly true / false for JSON.parse', () => {
+  const db = world()
+  role(db, 1, 'employee', '{"dashboard":false,"pos":true,"dashboard":false,"dashboard_export":true,"dashboard_export":true}')
+  role(db, 2, 'manager', '{"dashboard":false,"dashboard":false}')
+  db.exec(sql)
+  assert.deepEqual(perms(db, 1), { pos: true, dashboard: true, dashboard_export: false })
+  assert.deepEqual(perms(db, 2), { dashboard: true, dashboard_export: true })
+  const raw = db.prepare('SELECT permissions FROM roles WHERE id=1').get().permissions
+  assert.equal((raw.match(/"dashboard"/g) || []).length, 1, 'exactly one dashboard member is left')
+})
+
+check('MUTANT: without the duplicate removal a duplicated false survives for JSON.parse', () => {
+  const noDedup = sql.replace(/json_remove\(permissions, [^)]*\)/g, 'permissions')
+  assert.notEqual(noDedup, sql)
+  const db = world()
+  role(db, 1, 'manager', '{"dashboard":false,"dashboard":false}')
+  let broken = false
+  try { db.exec(noDedup); broken = perms(db, 1).dashboard !== true } catch { broken = true }
+  assert.equal(broken, true)
 })
 
 check('MUTANT: the POST assertion is real -- the same file without its UPDATE aborts', () => {

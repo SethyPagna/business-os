@@ -7,16 +7,21 @@
 -- already exist, because ensureCoreDataInvariants() inserts Manager and Employee once and never rewrites them.
 --
 -- SCOPE: role rows only. A role is reached when lower(trim(code)) is 'manager' or 'employee' and its permissions are a valid JSON
--- OBJECT: $.dashboard becomes true; for an employee $.dashboard_export becomes false. Admin, every other role, every other key and
+-- OBJECT: $.dashboard becomes true; for an employee $.dashboard_export becomes false; for a manager $.dashboard_export becomes
+-- true ONLY when the key is absent (an explicit stored value is kept). A duplicated dashboard or dashboard_export member (which
+-- JSON.parse reads last-wins while SQLite reads first) is removed before the value is written, so both readers agree.
+-- Admin, every other role, every other key and
 -- every user are left untouched. Per-user overrides (users.permissions) win over the role and are deliberately not changed; the
 -- number of users that hold their own dashboard or dashboard_export key is recorded below so the owner can review them.
 --
+-- Statement-splitter note: every CASE is parenthesised (wrangler closes a CASE only at END followed by a space or semicolon).
 -- LF-only, append-only, generic (no client data). Re-running changes nothing: a conforming role is not selected again.
 --
 -- PRE:  count the roles this file will change; recorded in system_flags 'dashboard_staff_roles_0310_changed'. Nothing is asserted
 --       about the count itself (a fresh database has none).
--- POST: no manager or employee role with a valid JSON object is left without dashboard = true, and no such employee role is left
---       without dashboard_export = false. Asserted below (the SELECT aborts the migration otherwise).
+-- POST: no manager or employee role with a valid JSON object is left without exactly one dashboard = true, no such employee role
+--       without exactly one dashboard_export = false, and no manager role without a dashboard_export key.
+--       Asserted below (the SELECT aborts the migration otherwise).
 --       Also recorded: system_flags 'dashboard_staff_roles_0310_users_with_own_keys' = the number of users whose own permissions
 --       carry a dashboard or dashboard_export key. Read both with:
 --       SELECT key, value FROM system_flags WHERE key LIKE 'dashboard_staff_roles_0310_%';
@@ -30,29 +35,35 @@ INSERT OR REPLACE INTO system_flags (key, value, updated_at)
 SELECT 'dashboard_staff_roles_0310_changed', CAST(COUNT(*) AS TEXT), CURRENT_TIMESTAMP
 FROM roles
 WHERE lower(trim(code)) IN ('manager', 'employee')
-  AND CASE WHEN json_valid(permissions) THEN json_type(permissions) = 'object' ELSE 0 END
+  AND (CASE WHEN json_valid(permissions) THEN (json_type(permissions) = 'object') ELSE 0 END)
   AND (json_extract(permissions, '$.dashboard') IS NOT 1
-    OR (lower(trim(code)) = 'employee' AND json_extract(permissions, '$.dashboard_export') IS NOT 0));
+    OR (SELECT COUNT(*) FROM json_each((CASE WHEN json_valid(permissions) THEN (CASE WHEN json_type(permissions) = 'object' THEN permissions ELSE '{}' END) ELSE '{}' END)) AS e WHERE e.key = 'dashboard') > 1
+    OR (lower(trim(code)) = 'employee' AND (json_extract(permissions, '$.dashboard_export') IS NOT 0 OR (SELECT COUNT(*) FROM json_each((CASE WHEN json_valid(permissions) THEN (CASE WHEN json_type(permissions) = 'object' THEN permissions ELSE '{}' END) ELSE '{}' END)) AS e WHERE e.key = 'dashboard_export') > 1))
+    OR (lower(trim(code)) = 'manager' AND json_type(permissions, '$.dashboard_export') IS NULL));
 
 UPDATE roles
-SET permissions = CASE WHEN lower(trim(code)) = 'employee'
-      THEN json_set(permissions, '$.dashboard', json('true'), '$.dashboard_export', json('false'))
-      ELSE json_set(permissions, '$.dashboard', json('true')) END,
+SET permissions = (CASE WHEN lower(trim(code)) = 'employee'
+      THEN json_set(json_remove(permissions, '$.dashboard', '$.dashboard', '$.dashboard', '$.dashboard', '$.dashboard_export', '$.dashboard_export', '$.dashboard_export', '$.dashboard_export'), '$.dashboard', json('true'), '$.dashboard_export', json('false'))
+      ELSE json_insert(json_set(json_remove(permissions, '$.dashboard', '$.dashboard', '$.dashboard', '$.dashboard'), '$.dashboard', json('true')), '$.dashboard_export', json('true')) END),
     updated_at = CURRENT_TIMESTAMP
 WHERE lower(trim(code)) IN ('manager', 'employee')
-  AND CASE WHEN json_valid(permissions) THEN json_type(permissions) = 'object' ELSE 0 END
+  AND (CASE WHEN json_valid(permissions) THEN (json_type(permissions) = 'object') ELSE 0 END)
   AND (json_extract(permissions, '$.dashboard') IS NOT 1
-    OR (lower(trim(code)) = 'employee' AND json_extract(permissions, '$.dashboard_export') IS NOT 0));
+    OR (SELECT COUNT(*) FROM json_each((CASE WHEN json_valid(permissions) THEN (CASE WHEN json_type(permissions) = 'object' THEN permissions ELSE '{}' END) ELSE '{}' END)) AS e WHERE e.key = 'dashboard') > 1
+    OR (lower(trim(code)) = 'employee' AND (json_extract(permissions, '$.dashboard_export') IS NOT 0 OR (SELECT COUNT(*) FROM json_each((CASE WHEN json_valid(permissions) THEN (CASE WHEN json_type(permissions) = 'object' THEN permissions ELSE '{}' END) ELSE '{}' END)) AS e WHERE e.key = 'dashboard_export') > 1))
+    OR (lower(trim(code)) = 'manager' AND json_type(permissions, '$.dashboard_export') IS NULL));
 
-SELECT CASE WHEN (SELECT COUNT(*) FROM roles
+SELECT (CASE WHEN (SELECT COUNT(*) FROM roles
     WHERE lower(trim(code)) IN ('manager', 'employee')
-      AND CASE WHEN json_valid(permissions) THEN json_type(permissions) = 'object' ELSE 0 END
+      AND (CASE WHEN json_valid(permissions) THEN (json_type(permissions) = 'object') ELSE 0 END)
       AND (json_extract(permissions, '$.dashboard') IS NOT 1
-        OR (lower(trim(code)) = 'employee' AND json_extract(permissions, '$.dashboard_export') IS NOT 0))) = 0
-THEN 1 ELSE json_extract('[]', '$[dashboard_staff_roles_0310_post]') END;
+        OR (SELECT COUNT(*) FROM json_each((CASE WHEN json_valid(permissions) THEN (CASE WHEN json_type(permissions) = 'object' THEN permissions ELSE '{}' END) ELSE '{}' END)) AS e WHERE e.key = 'dashboard') > 1
+        OR (lower(trim(code)) = 'employee' AND (json_extract(permissions, '$.dashboard_export') IS NOT 0 OR (SELECT COUNT(*) FROM json_each((CASE WHEN json_valid(permissions) THEN (CASE WHEN json_type(permissions) = 'object' THEN permissions ELSE '{}' END) ELSE '{}' END)) AS e WHERE e.key = 'dashboard_export') > 1))
+        OR (lower(trim(code)) = 'manager' AND json_type(permissions, '$.dashboard_export') IS NULL))) = 0
+THEN 1 ELSE json_extract('[]', '$[dashboard_staff_roles_0310_post]') END);
 
 INSERT OR REPLACE INTO system_flags (key, value, updated_at)
 SELECT 'dashboard_staff_roles_0310_users_with_own_keys', CAST(COUNT(*) AS TEXT), CURRENT_TIMESTAMP
 FROM users
-WHERE CASE WHEN json_valid(permissions) THEN json_type(permissions) = 'object'
-      AND (json_type(permissions, '$.dashboard') IS NOT NULL OR json_type(permissions, '$.dashboard_export') IS NOT NULL) ELSE 0 END;
+WHERE (CASE WHEN json_valid(permissions) THEN (json_type(permissions) = 'object'
+      AND (json_type(permissions, '$.dashboard') IS NOT NULL OR json_type(permissions, '$.dashboard_export') IS NOT NULL)) ELSE 0 END);

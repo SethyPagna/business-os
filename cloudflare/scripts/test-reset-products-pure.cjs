@@ -730,7 +730,8 @@ async function main() {
     assert.deepStrictEqual(durableFlagsBefore.map(flag => flag.key), [
       // cost_zero_watermark (0273, Conflicts): a durable boundary like the others; a reset must not move it.
       // data_epoch (0288): the row survives a reset, and a reset moves it (the check after the reset).
-      'cost_zero_watermark', 'data_epoch', 'loyalty_points_reset', 'multilot_revert_watermark', 'stock_schema_epoch', 'stock_schema_receipt_boundary',
+      // dashboard_staff_roles_0310_* (0310): informational census flags recorded by the Dashboard role migration.
+      'cost_zero_watermark', 'dashboard_staff_roles_0310_changed', 'dashboard_staff_roles_0310_users_with_own_keys', 'data_epoch', 'loyalty_points_reset', 'multilot_revert_watermark', 'stock_schema_epoch', 'stock_schema_receipt_boundary',
     ])
     assert.strictEqual(durableFlagsBefore.find(flag => flag.key === 'stock_schema_epoch').value, 'legacy-separate-pool-v1')
 
