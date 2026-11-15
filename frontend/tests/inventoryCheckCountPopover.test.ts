@@ -252,6 +252,29 @@ const cases: Array<[string, () => Promise<void>]> = [
     await s.click(action(s, 'close'))
     assert.equal(doc.activeElement, elsewhere, 'focus stays where the person put it')
   }],
+  // ---- D (review F5): each status is pinned to its icon and colour token. An icon swap (OK as a red x, not checked as a clock) goes red. ----
+  ['every status wears its own icon and colour: not checked, in check, OK, issue, pending, and the draft ring', async () => {
+    const items: InventoryCheckProduct[] = [
+      { id: 801, name: 'A', quantity: 5, check_status: 'not_checked' }, { id: 802, name: 'B', quantity: 5, check_status: 'in_check' }, { id: 803, name: 'C', quantity: 5, check_status: 'ok' },
+      { id: 804, name: 'D', quantity: 5, check_status: 'issue' }, { id: 805, name: 'E', quantity: 5, check_status: 'issue', check_pending: true }, { id: 806, name: 'F', quantity: 5, check_status: 'not_checked' },
+      { id: 807, name: 'G', quantity: 5, check_status: 'not_checked' }, { id: 808, name: 'H', quantity: 5, check_status: 'not_checked' },
+    ]
+    const draft = (count: string) => ({ selected: true, count, checked: false, note: '' })
+    const s = await mount({ products: items, lotCounts: false, drafts: { 806: draft('5'), 807: draft('3'), 808: draft('') } })
+    const glyph = (id: number) => { const button = statusButton(s, id); const svg = button.querySelectorAll('svg')[0]; return { kind: button.getAttribute('data-check-status-kind'), svg: ' ' + (svg?.getAttribute('class') ?? '') + ' ', ring: (button.getAttribute('class') ?? '').includes('ring-2 ring-blue-300') } }
+    const expected: Array<[number, string, string, string, boolean]> = [
+      [801, 'not_checked', 'lucide-circle-dashed', 'text-gray-400', false], [802, 'in_check', 'lucide-clock', 'text-sky-600', false], [803, 'ok', 'lucide-check', 'text-emerald-600', false],
+      [804, 'issue', 'lucide-x', 'text-red-600', false], [805, 'pending', 'lucide-hourglass', 'text-amber-600', false],
+      [806, 'draft_ok', 'lucide-check', 'text-emerald-600', true], [807, 'draft_issue', 'lucide-x', 'text-red-600', true], [808, 'draft_empty', 'lucide-x', 'text-red-600', true],
+    ]
+    for (const [id, kind, icon, tone, ring] of expected) {
+      const got = glyph(id)
+      assert.equal(got.kind, kind, `row ${id} kind`)
+      assert.ok(got.svg.includes(` ${icon} `), `row ${id} (${kind}) draws ${icon}, got${got.svg}`)
+      assert.ok(got.svg.includes(` ${tone}`), `row ${id} (${kind}) is ${tone}, got${got.svg}`)
+      assert.equal(got.ring, ring, `row ${id} (${kind}) ring`)
+    }
+  }],
 ]
 
 const failures: string[] = []
