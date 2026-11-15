@@ -231,14 +231,13 @@ async function main() {
     })
     const seenBoth = await totalsOf(h, range('2026-10-05'), 'L4 cost + courier employee overview', both)
     const seenCourierOnly = await totalsOf(h, range('2026-10-05'), 'L4 courier-only employee overview', courierOnly)
-    r.check('L4: with the courier-cost permission on, a cost viewer reads the courier cost and the full profit, unflagged', () => {
-      assert.equal(seenBoth.delivery_actual_cost_usd, 1.5)
-      assert.equal(seenBoth.profit_usd, admin4.profit_usd)
-      assert.ok(!('profit_excludes_delivery' in seenBoth))
+    // Owner rule, 15 Nov 2026: cost, profit and courier cost are administrator only. Neither the
+    // cost grant plus the courier grant, nor the courier grant alone, brings any of it back.
+    r.check('L4: the cost and courier-cost grants together still send a non-admin no courier cost, product cost or profit', () => {
+      for (const key of ['delivery_actual_cost_usd', 'delivery_net_usd', 'delivery_margin_usd', 'cost_usd', 'profit_usd', 'margin_pct', 'removal_loss_usd']) assert.ok(!(key in seenBoth), key)
     })
-    r.check('L4: the courier-cost permission alone reads the courier cost and no product cost or profit', () => {
-      assert.equal(seenCourierOnly.delivery_actual_cost_usd, 1.5)
-      for (const key of ['cost_usd', 'profit_usd', 'margin_pct', 'removal_loss_usd']) assert.ok(!(key in seenCourierOnly), key)
+    r.check('L4: the courier-cost grant alone sends a non-admin no courier cost, product cost or profit', () => {
+      for (const key of ['delivery_actual_cost_usd', 'delivery_net_usd', 'delivery_margin_usd', 'cost_usd', 'profit_usd', 'margin_pct', 'removal_loss_usd']) assert.ok(!(key in seenCourierOnly), key)
     })
     r.check(`L4: nor can it be recovered as fee - (profit - revenue + cost): overview gives $${inferred(seen)}, day row gives $${seenDays[0] ? inferred(seenDays[0]) : 'n/a'} (hidden value $1.5)`, () => {
       assert.notEqual(inferred(seen), 1.5)

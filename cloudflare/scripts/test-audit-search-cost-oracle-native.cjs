@@ -129,7 +129,9 @@ async function main() {
     }
 
     // ---- controls: the instrument can see the figure where the reader may -------------
-    for (const who of ['admin', 'both']) {
+    // Owner rule, 15 Nov 2026: cost is administrator only, so the administrator is the one reader who may see the figure.
+    // 'both' still holds the retired cost grants and the full-phone grant: it must find nothing, like the others.
+    for (const who of ['admin']) {
       const courier = await search(who, '8.27', '&entity=sale')
       const neighbour = await search(who, '8.28', '&entity=sale')
       const acquisition = await search(who, '3.1415', '&entity=product')
@@ -143,7 +145,7 @@ async function main() {
     }
 
     // ---- the rule: with a cost hidden, its figure cannot be found by search -------------
-    for (const who of ['no-courier', 'blind']) {
+    for (const who of ['both', 'no-courier', 'blind']) {
       const probes = {}
       for (const word of ['8.27', '8.28', '7.13', 'actual_cost_after', 'delivery_actual_cost']) probes[word] = await search(who, word)
       const recovered = await recover(who)
@@ -152,7 +154,7 @@ async function main() {
       })
       r.check(`${who} recovers nothing of the courier cost digit by digit`, () => assert.equal(recovered, ''))
     }
-    for (const who of ['no-acquisition', 'blind']) {
+    for (const who of ['both', 'no-acquisition', 'blind']) {
       const probes = {}
       for (const word of ['3.1415', '3.1416', 'cost_price_usd']) probes[word] = await search(who, word, '&entity=product')
       r.check(`${who} cannot find a product cost by typing it, its new figure or its key name`, () => {
@@ -164,7 +166,7 @@ async function main() {
     const adminSales = await search('admin', '', '&entity=sale')
     const adminFee = await search('admin', 'delivery_fee', '&entity=sale')
     const costFree = adminFee.filter(row => !COST_TEXT.test(`${row.details}${row.old_value}${row.new_value}`))
-    for (const who of ['no-courier', 'no-acquisition', 'blind']) {
+    for (const who of ['both', 'no-courier', 'no-acquisition', 'blind']) {
       const sales = await search(who, '', '&entity=sale')
       const products = await search(who, '', '&entity=product')
       const byAction = await search(who, 'product_cost_update')
