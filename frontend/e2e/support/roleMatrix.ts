@@ -161,9 +161,13 @@ export function accessFor(role: RoleDef) {
 }
 
 // --- routes ------------------------------------------------------------------------------------------------------------
-/** Every admin route: the NAV_ITEMS pages plus the Server page, which the nav no longer lists but the URL still opens. */
+/**
+ * Every admin route: the NAV_ITEMS pages plus the Server page, which the nav no longer lists but the URL still opens. The Dashboard's
+ * direct URL is /dashboard: '/' is the sign-in landing (an Employee, Dashboard view only, lands elsewhere there; see the landing case
+ * in role-matrix.spec.ts), while /dashboard opens the Dashboard for every role that may.
+ */
 export const ADMIN_ROUTES: Array<{ page: string; path: string }> = [...NAV_ITEMS.map((item) => item.id), 'server']
-  .map((page) => ({ page, path: page === 'dashboard' ? '/' : getAdminPathForPage(page) }))
+  .map((page) => ({ page, path: page === 'dashboard' ? '/dashboard' : getAdminPathForPage(page) }))
 
 if (ADMIN_ROUTES.some((route) => route.page !== 'dashboard' && route.path === '/')) {
   throw new Error('a NAV_ITEMS page has no path in pathRouting.ts ADMIN_PATH_BY_PAGE')

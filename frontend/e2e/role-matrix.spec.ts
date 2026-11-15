@@ -4,6 +4,7 @@ import adminProducts from './fixtures/admin-products.json' with { type: 'json' }
 import { PERMISSION_DEFS } from '../src/components/users/permissionDefinitions.ts'
 import { pageErrorsExcludingKnown, ADMIN_ORIGIN } from './support/harness'
 import { APP_ROOT } from './support/session'
+import { NAV_ITEMS } from '../src/components/shared/navigationConfig.ts'
 import { costKeysIn } from './support/costRedaction'
 import {
   ADMIN_ROUTES, HUB_PAGES, ROLES, accessFor, deriveRole, expectedAccountPages, expectedHubSections, expectedLanding, expectedNavIds, grant, seesCost,
@@ -72,8 +73,8 @@ async function settle(page: Page, pageId: string): Promise<Locator> {
 }
 
 type Session = RoleSession & { projectName: string; phone: boolean }
-async function begin(browser: import('@playwright/test').Browser, projectName: string, role: RoleDef, redact = true): Promise<Session> {
-  const session = await openAsRole(browser, projectName, role, { redact })
+async function begin(browser: import('@playwright/test').Browser, projectName: string, role: RoleDef, redact = true, beforeSignIn?: (page: Page) => Promise<void> | void): Promise<Session> {
+  const session = await openAsRole(browser, projectName, role, { redact, beforeSignIn })
   return { ...session, projectName, phone: isPhoneProject(projectName) }
 }
 const finish = (session: Session): void => {
@@ -188,6 +189,50 @@ for (const role of ROLES) {
             ).toEqual(want)
           }
         }
+      }
+      finish(session)
+    } finally { await session.close() }
+  })
+}
+
+// The sign-in landing at '/'. Owner, 15 Nov 2026: a Manager and an Employee open the Dashboard, an Employee (view only, no export) keeps
+// the landing it had before: the first page it can open, never the Dashboard, and without the Dashboard's /dashboard/startup read. A
+// guard that moved the page off the Dashboard after it was shown once looped between the two (98-187 changes in 4 s), so this counts
+// the active page's changes from before the sign-in to 2 s after the shell has settled.
+const LANDING_ROLES = ['employee', 'locked-employee', 'cost-viewer', 'manager', 'admin']
+for (const role of ROLES.filter((entry) => LANDING_ROLES.includes(entry.id))) {
+  test(`${role.label}: signing in at / changes the active page exactly once, to the landing this role gets`, async ({ browser }, testInfo) => {
+    test.setTimeout(120_000)
+    const startup: string[] = []
+    const session = await begin(browser, testInfo.project.name, role, true, async (page) => {
+      page.on('request', (request) => { if (request.url().includes('/api/dashboard/startup')) startup.push(request.url()) })
+      await page.addInitScript(() => {
+        const seen: string[] = []
+        ;(window as unknown as { __bosActivePages: string[] }).__bosActivePages = seen
+        const read = () => document.querySelector('[data-bos-page-slot][data-bos-active-page="true"]')?.getAttribute('data-bos-page-slot') || ''
+        const note = () => { const id = read(); if (id && seen[seen.length - 1] !== id) seen.push(id) }
+        new MutationObserver(note).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-bos-active-page'] })
+      })
+    })
+    const { page, access } = session
+    try {
+      const viewOnly = access.canAccessPage('dashboard') && !access.hasPermission('dashboard_export')
+      const landing = viewOnly ? (NAV_ITEMS.find((item) => item.id !== 'dashboard' && access.canAccessPage(item.id))?.id ?? 'dashboard') : 'dashboard'
+      await settle(page, landing)
+      await page.waitForTimeout(2_000)
+      const changes = await page.evaluate(() => (window as unknown as { __bosActivePages: string[] }).__bosActivePages)
+      expect(changes, 'the active page, each time it changed, from sign-in to 2 s after the shell settled').toEqual([landing])
+      expect(startup, viewOnly ? 'a Dashboard-view-only account spends no /dashboard/startup read at sign-in' : 'the Dashboard reads its startup once').toHaveLength(viewOnly ? 0 : 1)
+      if (viewOnly) {
+        // The tap on Dashboard (its path is '/', where the landing was decided) and the deep link still open the Dashboard, and it stays there.
+        if (!session.phone) {
+          await page.locator('aside nav [data-bos-nav-id="dashboard"]').click()
+          await page.waitForTimeout(1_000)
+          expect(await activePageId(page), 'a tap on Dashboard opens it and is not pulled back to the landing').toBe('dashboard')
+        }
+        await open(page, '/dashboard', 'dashboard')
+        await page.waitForTimeout(1_000)
+        expect(await activePageId(page), 'a direct URL to /dashboard opens the Dashboard and keeps it').toBe('dashboard')
       }
       finish(session)
     } finally { await session.close() }

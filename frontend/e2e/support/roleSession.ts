@@ -47,6 +47,8 @@ export type RoleSessionOptions = {
    * admin-shaped bodies to everybody, which is the "the server leaked" case the DOM must still withhold from.
    */
   redact?: boolean
+  /** Runs on the fresh page before the sign-in page is first loaded: for init scripts and request listeners that must see the whole sign-in. */
+  beforeSignIn?: (page: Page) => Promise<void> | void
 }
 
 /**
@@ -116,6 +118,7 @@ export async function openAsRole(browser: Browser, projectName: string, role: Ro
   await page.route('**/api/auth/bootstrap', withRole)
   await page.route('**/api/auth/me', withRole)
 
+  await options.beforeSignIn?.(page)
   await signIn(page, E2E_ACCOUNTS.cashierA)
   return { page, context, access, health, bodies, close: () => context.close() }
 }

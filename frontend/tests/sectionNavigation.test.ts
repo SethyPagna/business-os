@@ -65,7 +65,7 @@ const appSource = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'u
 const headerSource = [...appSource.matchAll(/^const MOBILE_HEADER_(?:TOP_ZONE|SCROLL_DELTA)_PX = .+$/gm)].map((match) => match[0]).join('\n')
   + '\n' + appSource.slice(appSource.indexOf('function useMobileHeaderAutoHide('), appSource.indexOf('function GlobalScrollControls('))
 const shellStart = appSource.indexOf('  const [shellLocation,')
-const shellEnd = appSource.indexOf('  useEffect(() => {\n    if (!user || !requestedAdminPage')
+const shellEnd = appSource.indexOf('  // The page to render.')
 assert.ok(shellStart >= 0 && shellEnd > shellStart, 'shell probe must locate both boundaries on LF and CRLF checkouts')
 const shellSource = appSource.slice(shellStart, shellEnd)
 assert.ok(headerSource.includes('function useMobileHeaderAutoHide'))

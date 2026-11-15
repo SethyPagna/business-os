@@ -204,6 +204,8 @@ type AppRuntimeApi = {
 type AppContextValue = {
   AccessDenied: () => ReactNode
   authReady: boolean
+  // Counts sign-ins: each assigns the org's landing page, which the shell may answer with the account's own landing (App.tsx)
+  signInEpoch: number
   canAccessPage: (pageId: string) => boolean
   canWriteToServer: boolean
   recheckConnection: () => Promise<boolean>
@@ -727,6 +729,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   const [language,            setLanguage]            = useState(readStoredUiLanguage)
   const [theme,               setTheme]               = useState('light')
   const [page,                setPage]                = useState(() => getInitialAdminPage(publicMode))
+  const [signInEpoch,         setSignInEpoch]         = useState(0)
   const [notification,        setNotification]        = useState<AppNotification | null>(null)
   const [writeConflict,       setWriteConflict]       = useState<WriteConflictDetail | null>(null)
   const [langRevision,        setLangRevision]        = useState(0)
@@ -1564,6 +1567,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       // loadSettings()/applyBootstrapPayload() just wrote above rather than
       // a stale pre-login snapshot -- see settingsRef's own assignment
       // effect for why callbacks read it instead of closing over `settings`.
+      setSignInEpoch((epoch) => epoch + 1)
       setPage(resolveAdminLandingPage(settingsRef.current.default_landing_page))
     }
     window.addEventListener('otp:login', handleOtpLogin)
@@ -2009,6 +2013,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     setAuthReady(true)
     // See the OTP login handler's matching comment above -- settingsRef,
     // not the settings state var, to pick up what was just loaded.
+    setSignInEpoch((epoch) => epoch + 1)
     setPage(resolveAdminLandingPage(settingsRef.current.default_landing_page))
   }, [applyBootstrapPayload, handleUnauthorizedSession, loadSettings, readAppBootstrap])
 
@@ -2797,7 +2802,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   // `settings`, which is its own useState value.
   const appValue: AppContextValue = useMemo(() => ({
     user, login, logout, persistAuthenticatedUser,
-    authReady,
+    authReady, signInEpoch,
     page, setPage, navigateTo,
     navGuard, resolveNavGuard,
     settings, loadSettings, saveSettings, changeSessionDuration,
@@ -2817,7 +2822,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     AccessDenied: AccessDeniedConnected,
   }), [
     user, login, logout, persistAuthenticatedUser,
-    authReady,
+    authReady, signInEpoch,
     page, setPage, navigateTo,
     navGuard, resolveNavGuard,
     settings, loadSettings, saveSettings, changeSessionDuration,
