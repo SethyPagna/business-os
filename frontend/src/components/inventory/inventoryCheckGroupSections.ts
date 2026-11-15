@@ -9,7 +9,7 @@ const LAST_KEYS: ReadonlySet<string> = new Set(['never', 'none'])
 export function groupLabel(key: string, label: string | null, t: InventoryCheckTranslator): string {
   const word = (key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
   if (key === 'never') return word('inventory_check_group_never', 'Never checked')
-  if (key === 'none') return word('inventory_check_group_no_category', 'No category')
+  if (key === 'none') return word('no_category', 'No Category')
   if (key.startsWith('d:')) return fmtDateOnly(key.slice(2))
   return label?.trim() || key.slice(2)
 }

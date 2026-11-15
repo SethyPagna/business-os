@@ -6,7 +6,7 @@ import { buildSections, groupLabel, unsavedCount } from '../src/components/inven
 import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
 
 // Grouped Inventory Check list (15 Nov): sections from the server's items and groups, the header count is the server's whole-scope total, collapsing is local, and unsaved counts get a soft blue.
-const T: Record<string, string> = { inventory_check_group_never: 'Never checked', inventory_check_group_no_category: 'No category', inventory_check_group_continued: 'continued', inventory_check_group_continues: 'Continues on the next page', expand: 'Expand', collapse: 'Collapse' }
+const T: Record<string, string> = { inventory_check_group_never: 'Never checked', no_category: 'No Category', inventory_check_group_continued: 'continued', inventory_check_group_continues: 'Continues on the next page', expand: 'Expand', collapse: 'Collapse' }
 const t = (key: string) => T[key] ?? key
 const row = (id: number, group_key: string, extra: Partial<InventoryCheckProduct> = {}): InventoryCheckProduct => ({ id, name: `Product ${id}`, quantity: 5, barcode: `88${id}`, check_status: 'not_checked', group_key, ...extra })
 const summary = (key: string, products: number, label: string | null = null, more: { continued_before?: boolean; continues_after?: boolean } = {}) => ({ key, label, families: products, products, continued_before: false, continues_after: false, ...more })
@@ -31,7 +31,7 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.equal(groupLabel('d:2026-11-12', null, t), '12/11/2026')
     assert.equal(groupLabel('d:2026-01-05', null, t), '05/01/2026', 'day first, never month first')
     assert.equal(groupLabel('never', null, t), 'Never checked')
-    assert.equal(groupLabel('none', null, t), 'No category')
+    assert.equal(groupLabel('none', null, t), 'No Category')
     assert.equal(groupLabel('c:serum', 'Serum', t), 'Serum', 'a category reads as the server named it')
     const s = await mountGrouped()
     assert.deepEqual(headers(s).map(node => node.getAttribute('data-inventory-check-group')), ['d:2026-11-12', 'd:2026-11-03', 'never'])
@@ -140,7 +140,7 @@ const cases: Array<[string, () => Promise<void>]> = [
     const s = await mountGrouped({ products: wire.items, grouping: wire.grouping })
     assert.deepEqual(rowIds(s), ['90', '91', '92', '93'])
     assert.ok(flat(headers(s)[0]).startsWith('Serum') && flat(headers(s)[0]).includes('12') && flat(headers(s)[0]).toLowerCase().includes('continued'))
-    assert.ok(flat(headers(s)[1]).startsWith('No category') && flat(headers(s)[1]).endsWith('30'))
+    assert.ok(flat(headers(s)[1]).startsWith('No Category') && flat(headers(s)[1]).endsWith('30'))
   }],
   ['an unsaved count gives its row a soft see-through blue; a saved row has none, and it is not the selected look', async () => {
     const draft = { selected: true, count: '4', checked: false, note: '' }

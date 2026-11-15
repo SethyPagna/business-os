@@ -48,7 +48,7 @@ const wiredAnswer = (params: Record<string, unknown>) => ({ wired: true, project
 const app = {
   user: { id: 7, role_code: 'employee', permissions: { inventory: true, inventory_checks: true, ...COUNT_FIELDS } as Record<string, boolean> },
   page: 'inventory', authReady: true, canWriteToServer: true,
-  t: (key: string) => ({ expand: 'Expand', collapse: 'Collapse', inventory_check_group_never: 'Never checked', inventory_check_group_no_category: 'No category', inventory_check_group_by: 'Group by', inventory_check_group_checked: 'Last checked date', inventory_check_group_category: 'Category', inventory_check_group_none: 'No grouping' } as Record<string, string>)[key] ?? key,
+  t: (key: string) => ({ expand: 'Expand', collapse: 'Collapse', inventory_check_group_never: 'Never checked', no_category: 'No Category', inventory_check_group_by: 'Group by', inventory_check_group_checked: 'Last checked date', inventory_check_group_category: 'Category', inventory_check_group_none: 'No grouping' } as Record<string, string>)[key] ?? key,
   notify: () => {}, settings: { navigation_mode: 'sections' }, language: 'en', AccessDenied: () => 'Access denied',
   navigateTo: (page: string, anchor?: string) => { window.dispatchEvent(new CustomEvent(APP_NAVIGATION_EVENT, { detail: { page, path: '/inventory', anchor } })) },
 }
@@ -185,7 +185,7 @@ try {
   assert.equal(requests.at(-1)?.groupBy, 'category')
   assert.equal(requests.at(-1)?.sortBy, undefined)
   assert.deepEqual(headers(s).map(node => node.getAttribute('data-inventory-check-group')), ['c:serum', 'none'])
-  assert.ok(head(s, 'c:serum').textContent.startsWith('Serum') && head(s, 'none').textContent.startsWith('No category'), 'Category label, and No category last')
+  assert.ok(head(s, 'c:serum').textContent.startsWith('Serum') && head(s, 'none').textContent.startsWith('No Category'), 'Category label, and No Category last')
   assert.deepEqual(rowIds(s), ['1', '2', '3', '4'], 'a new grouping starts with every group open')
 
   // 6b. The grant for Category goes while the choice is stored: one 403, then the last checked date, once.

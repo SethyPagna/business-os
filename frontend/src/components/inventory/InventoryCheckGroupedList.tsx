@@ -26,7 +26,7 @@ export default function InventoryCheckGroupedList({ grouping, collapsed, onToggl
     const isCollapsed = collapsed.has(id)
     const label = groupLabel(key, group.label, t)
     const unsaved = isCollapsed ? unsavedCount(products, props.drafts, props.selecting) : 0
-    const cueText = unsaved ? word('inventory_check_group_unsaved', '{count} unsaved counts in this group').replace('{count}', String(unsaved)) : ''
+    const cueText = !unsaved ? '' : unsaved === 1 ? word('inventory_check_group_unsaved_one', '1 unsaved count in this group') : word('inventory_check_group_unsaved_many', '{count} unsaved counts in this group').replace('{count}', String(unsaved))
     return {
       key,
       header: <DayGroupHeader label={group.continued_before ? `${label} · ${word('inventory_check_group_continued', 'continued')}` : label} count={group.products} collapsed={isCollapsed} onToggle={() => onToggle(id)} extra={unsaved ? <UnsavedCue count={unsaved} text={cueText} /> : undefined} t={key => t(key) || key} />,

@@ -37,7 +37,7 @@ const inventorySource = readFileSync(new URL('../src/components/inventory/Invent
 assert.match(productsSource, /useState<ProductSortDirection>\('name_asc'\)/, 'Products opens sorted by name A-Z')
 assert.match(paginationSource, /export const DEFAULT_PAGE_SIZE = 20\b/, 'Products opens at 20 a page')
 assert.match(inventorySource, /sortBy: 'name', sortDirection: 'asc', group: '' \}/, 'Inventory Check keeps name A-Z as its ungrouped order; its default choice is grouped by last checked')
-assert.match(inventorySource, /useState\(bootstrapIntent\?\.pageSize \?\? 20\)/, 'and at 20 a page, so its first read is the query Products itself sends')
+assert.match(inventorySource, /useState\(bootstrapIntent\?\.pageSize \?\? 20\)/, 'and at 20 a page, so the ungrouped read (No grouping) is the query Products itself sends')
 
 const wire = (params: QueryParams, options = {}) => wiredListParams({ page: 1, pageSize: 20, sortBy: 'name', sortDirection: 'asc', ...params }, options)
 assert.equal(canonicalProductsQuery(wire({})), productsQueryString({}), 'default scope: the canonical key is the key Products sends')

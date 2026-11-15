@@ -8213,11 +8213,11 @@
   "inventory_check_group_by": "Group by",
   "inventory_check_group_checked": "Last checked date",
   "inventory_check_group_category": "Category",
-  "inventory_check_group_none": "No grouping (name A-Z)",
+  "inventory_check_group_none": "No grouping (name A–Z)",
   "inventory_check_group_never": "Never checked",
-  "inventory_check_group_no_category": "No category",
   "inventory_check_group_continued": "continued",
+  "inventory_check_group_unsaved_one": "1 unsaved count in this group",
+  "inventory_check_group_unsaved_many": "{count} unsaved counts in this group",
   "inventory_check_group_continues": "Continues on the next page",
-  "inventory_check_group_unsaved": "{count} unsaved counts in this group",
   "inventory_check_mark_open_groups": "Mark every product in the open groups as matching stock"
 }

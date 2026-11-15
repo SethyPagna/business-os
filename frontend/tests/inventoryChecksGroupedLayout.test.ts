@@ -87,7 +87,7 @@ await browser.run('PASS grouped Inventory Check list layout: 375 and 1280 px, En
         others: document.querySelectorAll('[data-inventory-check-unsaved-cue]').length, doc: document.documentElement.scrollWidth - innerWidth }
     })()`)
     assert.ok(cue.text === '1' && cue.count === '1' && cue.others === 1, `${label}: one cue, on the collapsed group, with the exact number (${JSON.stringify(cue)})`)
-    assert.ok(cue.title && cue.title.includes('1') && cue.title !== 'inventory_check_group_unsaved', `${label}: a translated tooltip (${cue.title})`)
+    assert.ok(cue.title && /[1១]/.test(cue.title) && !cue.title.startsWith('inventory_check_group_unsaved'), `${label}: a translated tooltip (${cue.title})`)
     assert.ok(alpha(cue.alpha) > 0.04 && alpha(cue.alpha) <= 0.2, `${label}: the cue uses the see-through unsaved blue (${cue.alpha})`)
     assert.ok(cue.header >= 28 && cue.header <= 48 && cue.doc <= 0, `${label}: the header stays compact and the page does not scroll sideways with the cue (${JSON.stringify(cue)})`)
     if (lang === 'km') await browser.khmerRoom(label, '[data-inventory-check-page]', 3)
