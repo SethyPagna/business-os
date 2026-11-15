@@ -78,7 +78,7 @@ type ProductsResult = {
   /** The rules behind the rows' promotion prices (wired answers to a viewer with the price grant). */
   promotionRules?: PromotionRule[]
   /** What the server switches on for this answer (ic_fix_stock): Fix stock and the Sales link in the detail float. */
-  capabilities?: { fixStock?: boolean; approveCounts?: boolean; lotCounts?: boolean; directSet?: boolean; lotLinesPerSubmission?: number }
+  capabilities?: { fixStock?: boolean; approveCounts?: boolean; lotCounts?: boolean; directSet?: boolean; lotLinesPerSubmission?: number; productsPerSubmission?: number }
   /** The older list (ic_simple off) answers the all-sessions Issues view with the issues themselves: one per product and session, with the reason, the counted figure and the session. */
   issues?: Array<{ product_id: number; branch_id: number; session_id: string; created_by: number; reason: string | null; revision: number; counted_quantity?: number | null }>
 }
@@ -114,7 +114,8 @@ const REFUSAL_MESSAGES: Record<string, { key: string; fallback: string }> = {
   inventory_check_baseline_missing: { key: 'inventory_check_error_baseline_missing', fallback: 'A product in this count has no recorded starting stock. Reject this count and recount.' },
   inventory_check_approval_in_progress: { key: 'inventory_check_error_approval_in_progress', fallback: 'Another approver is applying this count. If they cannot continue, close the remaining lines.' },
   inventory_check_claim_lost: { key: 'inventory_check_error_claim_lost', fallback: 'Another approver took over or closed this count, so nothing was written for this line. The page was reloaded.' },
-  inventory_check_too_many_lines: { key: 'inventory_check_error_too_many_lines', fallback: 'This count has more received dates than one submission can carry. Submit part of it, then the rest.' },
+  inventory_check_too_many_lines: { key: 'inventory_check_error_too_many_lines', fallback: 'This count is larger than one submission can carry. Submit part of it, then the rest.' },
+  inventory_check_too_many_products: { key: 'inventory_check_error_too_many_lines', fallback: 'This count is larger than one submission can carry. Submit part of it, then the rest.' },
   inventory_check_no_lot: { key: 'inventory_check_error_no_lot', fallback: 'A product has no received date to add stock to. Receive it first.' },
   inventory_check_stock_write_refused: { key: 'inventory_check_error_write_refused', fallback: 'Stock could not be updated for some products. Try again.' },
   inventory_check_count_pending: { key: 'inventoryCheckCountPending', fallback: 'Set is blocked while a count of this product is waiting for approval. Approve or reject that count first.' },
@@ -788,7 +789,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   }
   const submitBlocked = !selecting ? '' : !canWriteToServer ? tr('inventory_check_count_blocked_offline', 'Saving is unavailable while offline.')
     : !branchId ? tr('inventory_check_count_blocked_branch', 'Choose a branch first.')
-    : selectedIds.length > MAX_SUBMISSION ? tr('inventory_check_submit_too_many', 'Submit at most 500 products at a time.')
+    : selectedIds.length > MAX_SUBMISSION && typeof data?.capabilities?.productsPerSubmission !== 'number' ? tr('inventory_check_submit_too_many', 'Submit at most 500 products at a time.')
     : selectedIds.some(id => parseCount(drafts[id].count).kind !== 'valid') ? tr('inventory_check_submit_need_counts', 'Enter a count for every selected product.') : ''
 
   // ic_lot_counts: counts typed per received date, and (Full stock adjust) a Set straight from the row. Both come from the answer's capabilities; with them absent nothing here exists.
@@ -881,7 +882,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         return { productId, countedQuantity, seenQuantity: entry.seen, checked: access.fields.stock && entry.checked && !differs, ...(differs && note ? { note } : {}) }
       })
       // One submission carries at most the plan's line cap (sent in capabilities): the lines that fit go now, the rest stay as drafts for the next Submit. Nothing is refused for being long.
-      const { send, left } = splitSubmission(allLines, lotCountsOn ? data?.capabilities?.lotLinesPerSubmission : undefined)
+      // The caps are present whenever the server enforces them (ic_lot_counts, or the wired page whose plain lines go through the same writer): the split follows the caps, not the lot switch.
+      const { send, left } = splitSubmission(allLines, data?.capabilities?.lotLinesPerSubmission, data?.capabilities?.productsPerSubmission)
       if (send.length === 0) { setWriteError(tr(REFUSAL_MESSAGES.inventory_check_too_many_lines.key, REFUSAL_MESSAGES.inventory_check_too_many_lines.fallback)); return }
       const lines = send
       const differing = lines.filter(line => access.fields.stock && ('lots' in line ? line.lots.some(entry => entry.seen !== null && entry.counted !== entry.seen) : line.seenQuantity !== null && line.countedQuantity !== line.seenQuantity)).length

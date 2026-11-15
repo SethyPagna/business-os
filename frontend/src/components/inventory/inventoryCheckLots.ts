@@ -56,16 +56,19 @@ export function lotSubmissionLine(productId: number, lots: LotDraft, extra: { ch
 export const submissionLineCost = (line: object): number => Math.max(1, (line as { lots?: readonly unknown[] }).lots?.length ?? 1)
 
 /**
- * The lines one submission sends, and the ones that wait for the next. A submission is refused above the plan's line cap (capabilities.lotLinesPerSubmission), so the page sends the longest
- * run of lines, in order, that fits and keeps the rest as drafts: nothing is half-written (each submission is atomic) and nothing is lost. An unknown cap sends everything (the server decides).
- * `send` is empty only when the first product alone is over the cap, which the page explains instead of sending.
+ * The lines one submission sends, and the ones that wait for the next. A submission is refused above the plan's line cap (capabilities.lotLinesPerSubmission) and above its product cap
+ * (capabilities.productsPerSubmission: the JavaScript time of one request grows with its products), so the page sends the longest run of lines, in order, that fits BOTH and keeps the rest as drafts:
+ * nothing is half-written (each submission is atomic) and nothing is lost. An unknown cap does not limit (the server decides). A line is one product.
+ * `send` is empty only when the first product alone is over the line cap, which the page explains instead of sending.
  */
-export function splitSubmission<T extends object>(lines: readonly T[], cap: number | undefined): { send: T[]; left: T[] } {
-  if (typeof cap !== 'number' || !Number.isFinite(cap) || cap < 1) return { send: [...lines], left: [] }
+export function splitSubmission<T extends object>(lines: readonly T[], cap: number | undefined, maxProducts?: number): { send: T[]; left: T[] } {
+  const lineCap = typeof cap === 'number' && Number.isFinite(cap) && cap >= 1 ? cap : Infinity
+  const productCap = typeof maxProducts === 'number' && Number.isFinite(maxProducts) && maxProducts >= 1 ? maxProducts : Infinity
+  if (lineCap === Infinity && productCap === Infinity) return { send: [...lines], left: [] }
   let used = 0, count = 0
   for (const line of lines) {
     const cost = submissionLineCost(line)
-    if (used + cost > cap) break
+    if (used + cost > lineCap || count + 1 > productCap) break
     used += cost; count++
   }
   return { send: lines.slice(0, count), left: lines.slice(count) }

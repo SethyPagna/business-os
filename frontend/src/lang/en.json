@@ -8174,7 +8174,7 @@
   "inventory_check_error_approval_in_progress": "Another approver is applying this count. If they cannot continue, close the remaining lines.",
   "inventory_check_error_claim_lost": "Another approver took over or closed this count, so nothing was written for this line. The page was reloaded.",
   "inventory_check_error_no_lot": "A product has no received date to add stock to. Receive it first.",
-  "inventory_check_error_too_many_lines": "This count has more received dates than one submission can carry. Submit part of it, then the rest.",
+  "inventory_check_error_too_many_lines": "This count is larger than one submission can carry. Submit part of it, then the rest.",
   "inventory_check_submit_left": "Left for the next submit",
   "inventory_check_submitted_part": "{sent} products submitted. {left} more are still on the page: press Submit again.",
   "inventory_check_error_write_refused": "Stock could not be updated for some products. Try again.",

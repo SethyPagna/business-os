@@ -710,12 +710,14 @@ const LIVE_LINE_SQL = (line: string) => `CASE json_extract(${line},'$.scope')
 const ACTIVE_LOT_SQL = (productId: string, batchId?: string) => `EXISTS(SELECT 1 FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=@branchId
   WHERE pb.variant_product_id=${productId} AND pb.is_active=1${batchId ? ` AND pb.id=${batchId}` : ''})`
 export async function createInventoryCheckLotSubmission(db: D1Compat, principal: InventoryCheckPrincipal, input: unknown,
-  options: { approvals?: boolean; maxLines: number; maxLinesPerProduct: number; onApprovalCreated?: (created: { sessionId: string }) => Promise<void>; onApprovalsReplaced?: (replaced: { sessionIds: string[] }) => Promise<void> }) {
+  options: { approvals?: boolean; maxLines: number; maxProducts: number; maxLinesPerProduct: number; onApprovalCreated?: (created: { sessionId: string }) => Promise<void>; onApprovalsReplaced?: (replaced: { sessionIds: string[] }) => Promise<void> }) {
   const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
   if (options.approvals) await approvalsReady(db)
   const access = getInventoryCheckAccess(actor), sighted = access.fields.stock
   const branchId = positive(body.branchId), key = requestId(body.requestId)
   if (!Array.isArray(body.lines) || body.lines.length < 1 || body.lines.length > 500) return fail(400, 'inventory_check_product_ids_required')
+  // The plan's product cap, before a single line is parsed: the work of this request grows with its products (measured), so an over-long request is refused for almost nothing.
+  if (body.lines.length > options.maxProducts) return fail(400, 'inventory_check_too_many_products')
   const lines = body.lines.map(value => lotSubmissionLine(value, sighted, options.maxLinesPerProduct)).sort((a, b) => a.productId - b.productId)
   const productIds = lines.map(line => line.productId)
   if (new Set(productIds).size !== productIds.length) fail(400, 'inventory_check_invalid_id')

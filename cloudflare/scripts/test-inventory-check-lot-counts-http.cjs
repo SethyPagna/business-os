@@ -390,6 +390,43 @@ async function lotMain() {
     assert.equal(replay.created, false); assert.equal(told.length, size, 'a replay announces nothing')
     planTier.__resetPlanTierCacheForTests()
   })
+  await check('N3 + N5: wired only (ic_lot_counts OFF) the caps are sent AND enforced: lines and products; 40 plain products go on Free, 41 are refused with their own code, Paid keeps 500; a plain line costs 1 against the line cap (M06)', async () => {
+    reset(); setSwitch({ ic_simple: 'on', ic_fix_stock: 'on', ic_wired: 'on' })
+    const free = { PLAN_TIER: 'free' }, paid = { PLAN_TIER: 'paid' }
+    planTier.__resetPlanTierCacheForTests(); const freeLimits = planTier.getPlanLimits(free); planTier.__resetPlanTierCacheForTests(); const paidLimits = planTier.getPlanLimits(paid); planTier.__resetPlanTierCacheForTests()
+    assert.equal(freeLimits.inventoryCheckProductsPerSubmission, 40); assert.equal(paidLimits.inventoryCheckProductsPerSubmission, 500)
+    const cache = () => { const m = new Map(); return { get: async k => m.get(k) ?? null, put: async (k, v) => { m.set(k, v) }, delete: async k => { m.delete(k) }, list: async () => ({ keys: [] }) } }
+    for (const [env, limits] of [[free, freeLimits], [paid, paidLimits]]) {
+      planTier.__resetPlanTierCacheForTests()
+      const told = await send(sessionsRoute, 'GET', '/overlay?branchId=1&summary=0&ids=910001', undefined, COUNTER, { ...env, CACHE: cache() })
+      planTier.__resetPlanTierCacheForTests()
+      assert.equal(told.status, 200, JSON.stringify(told.body))
+      assert.equal(told.body.capabilities.lotLinesPerSubmission, limits.inventoryCheckLotLinesPerSubmission, 'wired only: the line cap is sent although the lot switch is off')
+      assert.equal(told.body.capabilities.productsPerSubmission, limits.inventoryCheckProductsPerSubmission, 'and the product cap')
+      assert.equal(told.body.capabilities.lotCounts, undefined, 'the lot switch is still off: no per-date capability')
+    }
+    const seed = count => { for (let n = 0; n < count; n++) { const id = 975000 + n; db.prepare('INSERT OR IGNORE INTO products(id,name,stock_quantity) VALUES(?,?,5)').run(id, 'Plain ' + n); db.prepare('INSERT OR IGNORE INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,5)').run(id); db.prepare('INSERT OR IGNORE INTO product_batches(id,variant_product_id,batch_key,received_at,is_active) VALUES(?,?,?,?,1)').run(id, id, 'plain-' + id, '2026-10-19'); db.prepare('INSERT OR IGNORE INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,5)').run(id) } }
+    seed(41)
+    const plain = count => Array.from({ length: count }, (_, n) => line(975000 + n, 5, { seenQuantity: 5, checked: true }))
+    const before = metadata()
+    const over = await lotSubmit(plain(41), { requestId: 'plain-over-cap-01' }, COUNTER, free)
+    assert.equal(over.status, 400); assert.equal(over.body.code, 'inventory_check_too_many_products'); assert.deepEqual(metadata(), before, 'a refused submission writes nothing')
+    assert.ok(over.queries.length <= 6, 'refused before any line is read (' + over.queries.length + ' statements)')
+    assert.equal((await lotSubmit(plain(40), { requestId: 'plain-fits-cap-01' }, COUNTER, free)).status, 201, 'exactly the cap goes')
+    assert.equal((await lotSubmit(plain(41), { requestId: 'plain-paid-cap-01' }, COUNTER, paid)).status, 201, 'Paid carries it')
+    // M06: the writer counts a plain line as ONE against the line cap (the page counts it the same way): called with its own small limits, 3 plain lines are over a cap of 2.
+    reset(); setSwitch({ ic_simple: 'on', ic_fix_stock: 'on', ic_wired: 'on' }); seed(3)
+    const { getDb } = load(path.join(__dirname, '../src/lib/db.ts'))
+    const { createInventoryCheckLotSubmission, inventoryCheckDigest } = load(path.join(__dirname, '../src/lib/inventoryCheckSessions.ts'))
+    const handle = getDb({ DB: binding() })
+    const who = { id: COUNTER, tokenHash: await inventoryCheckDigest('token-' + COUNTER) }
+    const limits = { maxLines: 2, maxProducts: 500, maxLinesPerProduct: 50 }
+    await assert.rejects(() => createInventoryCheckLotSubmission(handle, who, { branchId: 1, requestId: 'plain-three-01', lines: plain(3) }, limits), error => error.code === 'inventory_check_too_many_lines' && error.status === 400, 'three plain lines cost 3 against a cap of 2')
+    const two = await createInventoryCheckLotSubmission(handle, who, { branchId: 1, requestId: 'plain-two-001', lines: plain(2) }, limits)
+    assert.equal(two.created, true, 'two plain lines fit a cap of 2')
+    await assert.rejects(() => createInventoryCheckLotSubmission(handle, who, { branchId: 1, requestId: 'plain-prod-001', lines: plain(3) }, { ...limits, maxLines: 100, maxProducts: 2 }), error => error.code === 'inventory_check_too_many_products', 'the product cap is its own refusal')
+    planTier.__resetPlanTierCacheForTests()
+  })
 }
 
 lotMain().then(() => { console.log(`PASS test-inventory-check-lot-counts-http: ${groups} groups`) }).catch(error => { console.error(error); process.exit(1) })

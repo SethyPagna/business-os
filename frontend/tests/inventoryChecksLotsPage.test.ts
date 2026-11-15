@@ -294,7 +294,7 @@ try {
     await openCount(tight, '12'); await tight.click(tight.find(node => node.getAttribute('data-popover-action') === 'matches', 'matches')); await closeCount(tight)
     await tight.click(tight.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit'))
     assert.equal(submissions.length, 0, 'nothing is sent that the server would refuse')
-    assert.ok(tight.findAll(node => node.getAttribute('role') === 'alert').some(node => node.textContent.includes('more received dates than one submission can carry')), 'and the person is told in words')
+    assert.ok(tight.findAll(node => node.getAttribute('role') === 'alert').some(node => node.textContent.includes('larger than one submission can carry')), 'and the person is told in words')
     assert.equal(rowCount(tight, '12').value, '8', 'the count is kept')
     await tight.unmount()
     // the server refuses all the same (no cap known to the page): the code has its own message, the counts are kept and the same Submit is a fresh request
@@ -305,7 +305,7 @@ try {
     submitAnswer = () => { throw realRefusalSync }
     realRefusalSync = await realRefusal({ error: 'inventory_check_too_many_lines', code: 'inventory_check_too_many_lines' })
     await submitNow(refused)
-    assert.ok(refused.findAll(node => node.getAttribute('role') === 'alert').some(node => node.textContent.includes('more received dates than one submission can carry')), 'the refusal is explained, not "Check not saved. Try again."')
+    assert.ok(refused.findAll(node => node.getAttribute('role') === 'alert').some(node => node.textContent.includes('larger than one submission can carry')), 'the refusal is explained, not "Check not saved. Try again."')
     assert.equal(rowCount(refused, '12').value, '8', 'the counts are kept')
     submitAnswer = () => ({ item: { id: 'session-new' }, receipt: {}, created: true })
     await submitNow(refused)
@@ -413,6 +413,43 @@ try {
     assert.equal(rowCount(surface, '13').value, '', 'B4: the answered row still waits for its count')
     assert.equal(rowCount(surface, '14').value, '6', 'B4: an untouched row is still marked by the page mark')
     assert.notEqual(statusButton(surface, '13').getAttribute('data-check-status-kind'), 'draft_ok')
+    await surface.unmount()
+  }
+  // ---- N3 + N5 (review 14 Nov round 2): wired only (ic_lot_counts OFF) the server still enforces its caps on every submission, so the page is told them and splits by BOTH (lines and products), with no dates in sight.
+  // 401 plain products with a line cap of 400 and a product cap of 40: 40 go, the rest wait, nothing is refused. ----
+  {
+    const rows = Array.from({ length: 401 }, (_, index) => productRow(1000 + index, 'Plain ' + index, 5))
+    const plainOnly = (caps: Record<string, number>) => () => listBody(rows, { capabilities: { fixStock: true, approveCounts: false, ...caps }, summary: { ok: 0, issue: 0, not_checked: 401, total: 401 } })
+    const markAndSubmit = async (surface: Awaited<ReturnType<typeof mount>>) => {
+      await surface.click(surface.findAll(node => node.getAttribute('data-selection-action') === 'mark')[0])
+      await surface.click(surface.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit')); await surface.click(exact(surface, 'Submit').at(-1)!); await new Promise(resolve => setTimeout(resolve, 20))
+    }
+    listAnswer = plainOnly({ lotLinesPerSubmission: 400, productsPerSubmission: 40 }); submissions.length = 0
+    let surface = await mount()
+    await markAndSubmit(surface)
+    assert.equal(submissions.length, 1)
+    assert.equal((submissions[0].lines as unknown[]).length, 40, 'both caps present, no lot counts: the product cap splits the 401 plain products')
+    assert.equal(surface.findAll(node => node.getAttribute('data-selected') !== null).length, 361, 'the products that did not fit stay as drafts')
+    await surface.unmount()
+    // Only the line cap known (an older answer): 400 of 401 go, and the same split with 500 products (a Paid page)
+    for (const [caps, expected] of [[{ lotLinesPerSubmission: 400 }, 400], [{ lotLinesPerSubmission: 1600, productsPerSubmission: 500 }, 401]] as const) {
+      listAnswer = plainOnly(caps); submissions.length = 0
+      surface = await mount()
+      await markAndSubmit(surface)
+      assert.equal((submissions[0].lines as unknown[]).length, expected, JSON.stringify(caps))
+      await surface.unmount()
+    }
+  }
+  // ---- M07 (review 14 Nov round 2): the whole-page mark writes the stocked dates only: a date this branch holds at 0 is never part of "matches stock" ----
+  {
+    const withEmptyDate = (row: Row): Row => ({ ...row, lots: [
+      { id: 7, received_at: '2026-10-01', branches: [{ branch_id: 1, quantity: 5 }] }, { id: 9, received_at: '2026-10-09', branches: [{ branch_id: 1, quantity: 3 }] }, { id: 11, received_at: '2026-09-01', branches: [{ branch_id: 1, quantity: 0 }] }] })
+    listAnswer = () => listBody([withEmptyDate(productRow(20, 'With an empty date', 8))], { capabilities: { ...capabilities, lotLinesPerSubmission: 400 }, summary: { ok: 0, issue: 0, not_checked: 1, total: 1 } })
+    submissions.length = 0
+    const surface = await mount()
+    await surface.click(surface.findAll(node => node.getAttribute('data-selection-action') === 'mark')[0])
+    await surface.click(surface.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit')); await surface.click(exact(surface, 'Submit').at(-1)!); await new Promise(resolve => setTimeout(resolve, 20))
+    assert.deepEqual((submissions[0].lines as Array<{ lots: Array<{ batchId: number }> }>)[0].lots.map(entry => entry.batchId), [7, 9], 'no empty-date line: batch 11 holds 0 here and was never counted')
     await surface.unmount()
   }
   // ---- audit G1b: the switch went OFF under an open tab: one re-read, then the same counts go as plain lines (no second refusal) ----

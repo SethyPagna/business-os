@@ -88,9 +88,17 @@ const singleValued = (c: IcContext): void => {
 const fixStockCapabilities = (user: SessionUser) => ({ fixStock: true, approveCounts: getActionTier(user, 'inventory', 'adjust') === 'full' && canApproveInventoryCounts(user) })
 // ic_lot_counts: counts are typed per received date; a holder of Full stock-adjust who sees stock may also Set a received date or the branch total straight from the row.
 // lotLinesPerSubmission: the most received-date lines one submission may carry (the plan's number); the page sends what fits and keeps the rest, so a normal page is never refused.
-const capabilitiesOf = (user: SessionUser, fixStock: boolean, lotCounts: boolean, stockField: boolean, lotLinesPerSubmission: number) => {
-  if (!fixStock && !lotCounts) return null
-  return { ...(fixStock ? fixStockCapabilities(user) : {}), ...(lotCounts ? { lotCounts: true as const, lotLinesPerSubmission, ...(stockField && getActionTier(user, 'inventory', 'adjust') === 'full' ? { directSet: true as const } : {}) } : {}) }
+// The submission caps are sent whenever the server will enforce them: ic_lot_counts ON, or the wired page (ic_wired) whose every submission, plain lines included, goes through the lot writer and its caps (POST /submissions).
+// productsPerSubmission is the JavaScript budget of one request (Free: 10 ms), lotLinesPerSubmission the written rows. The page splits a submission by both.
+const capabilitiesOf = (user: SessionUser, fixStock: boolean, lotCounts: boolean, stockField: boolean, caps: { lines: number; products: number } | null) => {
+  if (!fixStock && !lotCounts && !caps) return null
+  return { ...(fixStock ? fixStockCapabilities(user) : {}), ...(lotCounts ? { lotCounts: true as const, ...(stockField && getActionTier(user, 'inventory', 'adjust') === 'full' ? { directSet: true as const } : {}) } : {}),
+    ...(caps ? { lotLinesPerSubmission: caps.lines, productsPerSubmission: caps.products } : {}) }
+}
+const submissionCaps = async (c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, lotCounts: boolean) => {
+  if (!lotCounts && !await lotLinesAvailable(getDb(c.env))) return null
+  const limits = getPlanLimits(c.env)
+  return { lines: limits.inventoryCheckLotLinesPerSubmission, products: limits.inventoryCheckProductsPerSubmission }
 }
 const checkCountsOf = (sets: CheckStateSets, fixStock: boolean) => ({ ok: sets.ok.length, issue: sets.issue.length, ...(fixStock ? { pending: sets.pending.length } : {}) })
 app.get('/list', async c => {
@@ -134,7 +142,7 @@ app.get('/list', async c => {
     body.total = checkedPage.total; body.page = checkedPage.page; body.pageSize = checkedPage.pageSize; body.totalPages = Math.max(1, Math.ceil(checkedPage.total / checkedPage.pageSize))
   }
   const lotCounts = await lotCountsOn(c)
-  const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock, getPlanLimits(c.env).inventoryCheckLotLinesPerSubmission)
+  const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock, await submissionCaps(c, lotCounts))
   const productsPage = getActionTier(user, 'products', 'view') !== 'none'
   const { body, projected } = projectInventoryList(payload as Record<string, unknown>, user, access, productsPage)
   const total = Number((payload as { total?: unknown }).total) || 0
@@ -169,7 +177,7 @@ app.get('/overlay', async c => {
     lots: (row.lots ?? []).map((lot) => access.fields.stock ? lot : { ...lot, branches: (lot.branches as Array<Record<string, unknown>>).map(({ quantity: _quantity, ...entry }) => entry) }),
     ...(row.lots_more ? { lots_more: true } : {}) })) : undefined
   const sets = wantSummary ? (await readCheckStateSets(c, branchId, fixStock)).sets : null
-  const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock, getPlanLimits(c.env).inventoryCheckLotLinesPerSubmission)
+  const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock, await submissionCaps(c, lotCounts))
   return c.json({ wired: true, branchId, version: await inventoryChecksVersion(c.env), items, ...(lots ? { lots } : {}),
     ...(sets && !sets.tooLarge ? { summary: checkCountsOf(sets, fixStock) } : {}), ...(capabilities ? { capabilities } : {}) })
 })
@@ -203,7 +211,7 @@ app.post('/submissions', async c => {
   // A tab that still holds the switch ON after it went OFF sends dates: a plain 409 with its own code, so the page re-reads its capabilities once instead of repeating a 400.
   if (withLots && !lotCounts) throw new InventoryCheckSessionError(409, 'inventory_check_lot_counts_off')
   const writer = lotCounts ? (db: ReturnType<typeof getDb>, who: Awaited<ReturnType<typeof principal>>, body: unknown, _low: Awaited<ReturnType<typeof loadLowStockConfig>>, options: Parameters<typeof createInventoryCheckSubmission>[4]) =>
-    createInventoryCheckLotSubmission(db, who, body, { ...options, maxLines: getPlanLimits(c.env).inventoryCheckLotLinesPerSubmission, maxLinesPerProduct: getPlanLimits(c.env).inventoryCheckLotLinesPerProduct }) : createInventoryCheckSubmission
+    createInventoryCheckLotSubmission(db, who, body, { ...options, maxLines: getPlanLimits(c.env).inventoryCheckLotLinesPerSubmission, maxProducts: getPlanLimits(c.env).inventoryCheckProductsPerSubmission, maxLinesPerProduct: getPlanLimits(c.env).inventoryCheckLotLinesPerProduct }) : createInventoryCheckSubmission
   const result = await writer(getDb(c.env), await principal(c), input, await loadLowStockConfig(c.env),
     { approvals: await fixStockOn(c), onApprovalCreated: ({ sessionId }) => announceCount(c.env, c.get('user'), { kind: 'created', sessionId }),
       // Each approval the submission replaced was rejected by the system: a review decided, so it is told like one (a rejection with its reason, and no person to name).

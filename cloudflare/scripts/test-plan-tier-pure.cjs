@@ -167,6 +167,7 @@ const PAID = {
   productListLotsPerRow: 50,
   inventoryOverlayMaxRows: 300,
   inventoryCheckLotLinesPerSubmission: 1_600,
+  inventoryCheckProductsPerSubmission: 500,
   inventoryCheckLotLinesPerProduct: 100,
   inventoryLastChangeMaxRows: 8,
   inventoryCheckFilterMaxIds: 10000,
@@ -226,6 +227,7 @@ const FREE = {
   productListLotsPerRow: 20,
   inventoryOverlayMaxRows: 150,
   inventoryCheckLotLinesPerSubmission: 400,
+  inventoryCheckProductsPerSubmission: 40,
   inventoryCheckLotLinesPerProduct: 50,
   inventoryLastChangeMaxRows: 4,
   inventoryCheckFilterMaxIds: 2000,
@@ -441,6 +443,9 @@ check('Inventory Check bounds come from the plan: no numeric literal caps the li
   assert.ok(/LOT_LINES_PER_PRODUCT\s*=\s*\d/.test('const LOT_LINES_PER_PRODUCT = 50') && /ids\.length\s*>\s*\d/.test('ids.length > 100'), 'the control: both patterns match what they forbid')
   const free = limitsFresh({ PLAN_TIER: 'free' }), paid = limitsFresh({ PLAN_TIER: 'paid' })
   assert.deepEqual([free.inventoryCheckLotLinesPerProduct, paid.inventoryCheckLotLinesPerProduct], [50, 100])
+  // 15 Nov: the products of one count submission are a plan number too (the JavaScript of the request grows with them: scripts/measure-inventory-check-submission-cpu.cjs), compared in the writer and sent to the page.
+  assert.ok(sessions.includes('body.lines.length > options.maxProducts'), 'the writer compares the products with the plan field')
+  assert.deepEqual([free.inventoryCheckProductsPerSubmission, paid.inventoryCheckProductsPerSubmission], [40, 500])
 })
 
 check('the bell section lifetime is a plan field, at most the 5 minutes the owner allowed (11 Nov) on both tiers, longer on Free', async () => {

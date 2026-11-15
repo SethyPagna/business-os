@@ -61,6 +61,17 @@ assert.deepEqual(splitSubmission(plan, 5).send.map(line => line.productId), [1, 
 assert.deepEqual(splitSubmission(plan, 100), { send: plan, left: [] }, 'under the cap everything goes')
 assert.deepEqual(splitSubmission(plan, undefined), { send: plan, left: [] }, 'a cap the page was not told sends everything (the server decides)')
 assert.deepEqual(splitSubmission(plan, 2).send.map(line => line.productId), [], 'a first product over the cap alone sends nothing: the page explains instead of sending')
+// N5: the product cap (the JavaScript time of one request grows with its products). Both caps hold at once; either alone limits; plain lines (cost 1 each) are limited by products too.
+assert.deepEqual(splitSubmission(plan, 100, 2).send.map(line => line.productId), [1, 2], 'two products fit the product cap although the line cap has room')
+assert.deepEqual(splitSubmission(plan, 100, 2).left.map(line => line.productId), [3, 4])
+assert.deepEqual(splitSubmission(plan, 4, 3).send.map(line => line.productId), [1, 2], 'the line cap (3 + 1 = 4) bites first: both caps are honoured')
+assert.deepEqual(splitSubmission(plan, undefined, 3).send.map(line => line.productId), [1, 2, 3], 'the product cap alone limits when no line cap is known')
+assert.deepEqual(splitSubmission(plan, undefined, undefined), { send: plan, left: [] })
+const plainLines = Array.from({ length: 401 }, (_, index) => ({ productId: index + 1, countedQuantity: 1, seenQuantity: 1, checked: true }))
+assert.equal(splitSubmission(plainLines, 400, 40).send.length, 40, 'wired only, 401 plain products: 40 go')
+assert.equal(splitSubmission(plainLines, 400, 40).left.length, 361)
+assert.equal(splitSubmission(plainLines, 400, undefined).send.length, 400, 'with only the line cap, 400 of 401 plain products go (a plain line costs 1)')
+assert.equal(splitSubmission(plainLines, 400, 500).send.length, 400)
 
 // ---- the wired page: a Set patches the row from the answer (the mounted page test counts the requests: none) ------------------------------------------------------------------------------
 const list: WiredList = {
