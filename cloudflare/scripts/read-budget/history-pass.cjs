@@ -42,8 +42,7 @@ async function runHistoryPass({ analyze = false, label, observe } = {}) {
       if (observe) observe(shape, grouped, control, before)
       n += 1
       if (!entry) { reds.push(`${shape.id}: no budget in budgets.json`); continue }
-      // A flat shape (a typed search) is the shared Products reader's own read: under ANALYZE its rows are the planner's, not this lane's, so its bound there is its name twin (below), not the grouped figure.
-      const problems = getProblems(entry, grouped, { analyze }).filter((problem) => !(shape.flat && analyze && /^rows read/.test(problem)))
+      const problems = getProblems(entry, grouped, { analyze })
       if (shape.flat) {
         // Answered flat by design (a typed search): no grouping block, and the rows read are the name twin's, not the history's.
         if (grouped.warm.json && grouped.warm.json.grouping) problems.push('positive control: a typed search was answered grouped')
