@@ -39,12 +39,12 @@ const SALES_HIDDEN = [
 // The customer's own name, saved as a number: the owner lets every account find a customer by part of it (10 Nov 2026), the response masks it.
 const SALES_CUSTOMER = [
   ['customer name that is a number', 'P28-0121', '389', { name: '012 389 666' }],
-  ['customer phone', 'P28-0122', '771', { phone: '098 771 220' }],
-  ['customer phone across its separators', 'P28-0123', '8771', { phone: '098 771 220' }],
+  ['customer phone', 'P28-0122', '666', { phone: '098 666 505' }],
+  ['customer phone across its separators', 'P28-0123', '8666', { phone: '098 666 505' }],
 ]
 const SALES_VISIBLE = [
   ['deliver at 12 Street 271', 'P28-0111', { notes: 'deliver at 12 Street 271' }],
-  ['a number inside a sentence (the note shows as typed)', 'P28-0115', { notes: 'Tel 088 713 904' }],
+  ['a number inside a sentence (the note shows as typed)', 'P28-0115', { notes: 'Tel 088 737 303' }],
   ['a 7-digit note (too short to be a phone)', 'P28-0116', { notes: '4412345' }],
   // Review B2: a branch is not a person. One named by a number is shown to everybody as stored, so the search reads it as stored.
   ['a branch named by a number', 'P28-0110', { branch: '095 777 626' }],
@@ -151,13 +151,13 @@ function run(world) {
     assert.deepEqual(sales('street', CLOSED), ['P28-0111'])
     assert.deepEqual(sales('271', CLOSED), ['P28-0111'], 'a digit word inside a text note')
     assert.deepEqual(sales('12 street 271', CLOSED), ['P28-0111'])
-    assert.deepEqual(sales('713', CLOSED), ['P28-0115'], 'a number typed inside a sentence is shown as typed, so it is searchable')
+    assert.deepEqual(sales('737', CLOSED), ['P28-0115'], 'a number typed inside a sentence is shown as typed, so it is searchable')
     assert.deepEqual(sales('4412345', CLOSED), ['P28-0116'], 'seven digits are not a phone')
     assert.deepEqual(sales('admin', CLOSED).length > 0, true, 'the default cashier')
   })
   check('the holder finds every sale by its note, cashier, branch or text, exactly as before', () => {
     for (const [, receipt, fragment] of SALES_HIDDEN) assert.ok(sales(fragment, OPEN).includes(receipt), `${receipt} ${fragment}`)
-    assert.deepEqual(sales('713', OPEN), ['P28-0115'])
+    assert.deepEqual(sales('737', OPEN), ['P28-0115'])
     assert.deepEqual(sales('street', OPEN), ['P28-0111'])
   })
 

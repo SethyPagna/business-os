@@ -51,7 +51,7 @@ async function main() {
 
   await check('real SQLite preserves named General profiles and filters only explicitly marked identities', () => {
     const db = openDb(loadAll())
-    db.prepare("INSERT INTO customers(id,name,phone,membership_number) VALUES(1,'General','086 897 171','LC-00001')").run()
+    db.prepare("INSERT INTO customers(id,name,phone,membership_number) VALUES(1,'General','086555101','LC-00001')").run()
     db.prepare("INSERT INTO customers(id,name,phone,membership_number,is_anonymous) VALUES(2,'general','', 'LC-04971',1)").run()
     assert.equal(db.prepare('SELECT is_anonymous FROM customers WHERE id=1').get().is_anonymous, 0)
     assert.deepEqual(
@@ -67,7 +67,7 @@ async function main() {
 
   await check('runtime helper trusts only the stored marker, never name phone membership or id', () => {
     assert.equal(helper.isAnonymousCustomer({ id: 24969, name: 'general', phone: '', membership_number: 'LC-04971' }), false)
-    assert.equal(helper.isAnonymousCustomer({ id: 22305, name: 'General', phone: '086897171', is_anonymous: 0 }), false)
+    assert.equal(helper.isAnonymousCustomer({ id: 22305, name: 'General', phone: '086555101', is_anonymous: 0 }), false)
     assert.equal(helper.isAnonymousCustomer({ id: 7, name: 'A real person', phone: '012345678', is_anonymous: 1 }), true)
     assert.throws(() => helper.customerIsAnonymousSql('c;DELETE'), /Invalid SQL alias/)
   })

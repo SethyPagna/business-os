@@ -263,13 +263,13 @@ async function run() {
         ).run({
           membership_id: 'ACCOUNT-RACE-WINNER',
           name: 'Account Race Winner',
-          phone: '096303404',
+          phone: '096555707',
           password_hash: 'not-used-by-test',
         })
       },
     })
 
-    const res = await signup(env, { name: 'Portal Visitor', phone: '096 303 404', password: 'secret12345', consent: true, ageConfirmed: true })
+    const res = await signup(env, { name: 'Portal Visitor', phone: '096 555 707', password: 'secret12345', consent: true, ageConfirmed: true })
     assert.strictEqual(res.ok, false)
     assert.strictEqual(res.code, 'verification_failed')
     assert.strictEqual(raceDb.prepare('SELECT COUNT(*) AS n FROM customers').get().n, 0, 'the contact insert rolls back with the account collision')

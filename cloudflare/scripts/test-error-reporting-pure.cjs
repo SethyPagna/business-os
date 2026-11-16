@@ -38,15 +38,15 @@ const json = (value) => JSON.stringify(scrubValue(value))
 async function main() {
   await check('keys that name personal data are redacted, whatever they hold', async () => {
     const out = json({
-      customerName: 'Belie Bee',
-      phone: '0965196900',
+      customerName: 'Test Person',
+      phone: '0965550100',
       email: 'a@b.com',
       address: 'Phnom Penh',
       membership_number: 'M-4471',
       sessionToken: 'abc',
       password: 'hunter2',
     })
-    for (const leaked of ['Belie Bee', '0965196900', 'a@b.com', 'Phnom Penh', 'M-4471', 'hunter2']) {
+    for (const leaked of ['Test Person', '0965550100', 'a@b.com', 'Phnom Penh', 'M-4471', 'hunter2']) {
       assert.ok(!out.includes(leaked), `"${leaked}" must not survive scrubbing`)
     }
   })
@@ -124,7 +124,7 @@ async function main() {
       return Promise.resolve({ body: null })
     }
     try {
-      await reportError('https://abc@o1.ingest.us.sentry.io/2', new Error('failed for Belie Bee on 0965196900'), {
+      await reportError('https://abc@o1.ingest.us.sentry.io/2', new Error('failed for Test Person on 0965550100'), {
         source: 'worker',
         location: '/api/sales',
         role: 'cashier',
@@ -133,10 +133,10 @@ async function main() {
       globalThis.fetch = originalFetch
     }
     assert.ok(captured, 'an envelope was sent')
-    assert.ok(!captured.includes('0965196900'), 'a phone number in the error message must not reach Sentry')
+    assert.ok(!captured.includes('0965550100'), 'a phone number in the error message must not reach Sentry')
     // NOT asserted: that the NAME is gone. A person's name in free text is
-    // genuinely indistinguishable from ordinary words -- "failed for Belie
-    // Bee" and "failed for Blue Widget" are the same shape, and any regex
+    // genuinely indistinguishable from ordinary words -- "failed for Test
+    // Person" and "failed for Blue Widget" are the same shape, and any regex
     // aggressive enough to catch the first would destroy every useful
     // message. Asserting it here would be asserting something impossible,
     // which is worse than no test: it would pass only until someone wrote a

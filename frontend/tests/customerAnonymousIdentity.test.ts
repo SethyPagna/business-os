@@ -25,7 +25,7 @@ for (const label of ['General', 'អតិថិជនទូទៅ']) {
 assert.equal(isAnonymousCustomerIdentity({ customer_is_anonymous: true }), true)
 for (const ordinary of [
   { id: 24969, name: 'General', phone: '', membership_number: 'LC-04971', is_anonymous: 0 },
-  { id: 22305, name: 'General', phone: '086897171' },
+  { id: 22305, name: 'General', phone: '086555101' },
   { name: 'Anonymous', phone: '' },
 ]) assert.equal(isAnonymousCustomerIdentity(ordinary), false, 'names and blank fields never infer authority')
 

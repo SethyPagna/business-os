@@ -20,7 +20,7 @@ const PHONES = {
   phoneAsName: '010 222 333',
   driver: '092 101 202',
   user: '081 700 800',
-  portal: '086 313 414',
+  portal: '086 555 202',
   duplicate: '011 888 999',
   supplierDuplicate: '012 777 111',
   deliveryDuplicate: '013 666 222',

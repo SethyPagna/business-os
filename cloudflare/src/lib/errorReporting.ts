@@ -49,7 +49,7 @@ const EMAIL_RE = /[\w.+-]+@[\w-]+\.[\w.-]+/g
 const LONG_NUMBER_RE = /\b[\d][\d\s-]{5,}\d\b/g
 
 // KNOWN LIMITATION, stated rather than papered over: a person's NAME in free
-// text cannot be detected. "failed for Belie Bee" and "failed for Blue
+// text cannot be detected. "failed for Test Person" and "failed for Blue
 // Widget" are the same shape, and a regex aggressive enough to catch the
 // first would destroy every useful message. Emails and long digit runs are
 // caught; names are not.

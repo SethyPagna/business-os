@@ -106,18 +106,18 @@ async function main() {
   await insertReturn('P28-RET-4', 'Fixture Sophea', 'P28-0004', 'p28-ret-4 fixture sophea tel010222333')
 
   // P2.8-F S1 (the review's probes 6 and 7): a number saved in a column the response masks. A sale's note, cashier and branch, a return's
-  // note, a supplier return saved under a number. The response shows each as `093 *** 589`; a fragment typed into the search must find nothing.
+  // note, a supplier return saved under a number. The response shows each as `012 *** 500`; a fragment typed into the search must find nothing.
   const insertMaskedSale = (receipt, { cashier = 'Admin', notes = null, branch = 'Main' }, hoursAgo) => world.run(
     `INSERT INTO sales (receipt_number, customer_id, customer_name, customer_phone, total_usd, total_khr, sale_status, payment_method, cashier_name, notes, search_normalized, branch_id, branch_name, created_at)
      VALUES (?, NULL, 'Walk-in', '', 5, 20000, 'completed', 'Cash', ?, ?, ?, ?, ?, datetime('now', ?))`,
     receipt, cashier, notes, `${receipt.toLowerCase()} ${[cashier, notes, branch].filter(Boolean).join(' ').toLowerCase()} walk in`, world.ids.branch, branch, `-${hoursAgo} hour`,
   )
-  await insertMaskedSale('P28-0007', { notes: '093 471 589' }, 7)
+  await insertMaskedSale('P28-0007', { notes: '012 471 500' }, 7)
   await insertMaskedSale('P28-0008', { cashier: '094 555 818' }, 8)
   await insertMaskedSale('P28-0009', { branch: '095 777 626' }, 9)
   await world.run(
     `INSERT INTO returns (return_number, customer_name, return_scope, status, total_refund_usd, total_refund_khr, receipt_number, notes, search_normalized, created_at)
-     VALUES ('P28-RET-5', 'Walk-in', 'customer', 'completed', 1, 4100, 'P28-0004', '093 471 589', 'p28-ret-5 walk in', datetime('now'))`,
+     VALUES ('P28-RET-5', 'Walk-in', 'customer', 'completed', 1, 4100, 'P28-0004', '012 471 500', 'p28-ret-5 walk in', datetime('now'))`,
   )
   await world.run(
     `INSERT INTO returns (return_number, supplier_name, return_scope, status, total_refund_usd, total_refund_khr, search_normalized, created_at)
@@ -245,7 +245,7 @@ async function main() {
     t.ok('sales totals 471', Number((await get(`/api/sales/stats?search=${enc('471')}`, 'admin')).json?.total_count) >= 1)
   })
   await check('no grant: a sale whose note or cashier is a number is not found by a fragment of it (list, totals, cashier filter, digit by digit)', async (t) => {
-    for (const [receipt, queries] of [['P28-0007', ['471', '47', '4715', '093 4', '589']], ['P28-0008', ['555', '094 555', '818']]]) {
+    for (const [receipt, queries] of [['P28-0007', ['471', '47', '4715', '012 4', '500']], ['P28-0008', ['555', '094 555', '818']]]) {
       for (const q of queries) {
         const r = await get(`/api/sales?search=${enc(q)}`, 'sales_only')
         t.ok(`sales ${q}: status ${r.status}`, r.status === 200)
@@ -264,7 +264,7 @@ async function main() {
       t.ok(`?cashier=${q}: P28-0008 must not be found`, !receiptsIn(list.text).includes('P28-0008'), snippetOf(list.text))
       t.eq(`?cashier=${q}: totals`, (await get(`/api/sales/stats?cashier=${enc(q)}`, 'sales_only')).json?.total_count, 0)
     }
-    t.ok('the note shows masked to this account', has((await get(`/api/sales?search=${enc('P28-0007')}`, 'sales_only')).text, '093 *** 589'))
+    t.ok('the note shows masked to this account', has((await get(`/api/sales?search=${enc('P28-0007')}`, 'sales_only')).text, '012 *** 500'))
   })
   await check('no grant: a branch named by a number is shown as stored (review B2), so the search finds it by a fragment, as the holder does', async (t) => {
     const r = await get(`/api/sales?search=${enc('777')}`, 'sales_only')
@@ -272,7 +272,7 @@ async function main() {
     t.ok('and the branch shows in full', has(r.text, '095 777 626'), r.text.slice(0, 200))
   })
   await check('no grant: a return whose note is a number, and a supplier return saved under a number, are not found by a fragment of it', async (t) => {
-    for (const q of ['471', '47', '093 4', '589']) {
+    for (const q of ['471', '47', '012 4', '500']) {
       const r = await get(`/api/returns?search=${enc(q)}`, 'sales_only')
       t.ok(`returns ${q}: P28-RET-5 must not be found`, r.status === 200 && !has(r.text, 'P28-RET-5'), snippetOf(r.text))
     }

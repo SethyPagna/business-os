@@ -3020,7 +3020,7 @@ app.get('/customers/reports/ar-invoices', async (c) => {
 // dismissal ledger with its own cluster types, so a dismissal survives
 // devices exactly like duplicate dismissals do).
 //
-// Phone comparison is zero-stripped digits ('70856070' == '070856070') --
+// Phone comparison is zero-stripped digits ('12000123' == '012000123') --
 // the same rule the legacy importer now applies (Part 551).
 const PHONE_KEY_SQL = (column: string): string =>
   `ltrim(replace(replace(replace(replace(trim(COALESCE(${column},'')),' ',''),'-',''),'(',''),')',''),'0')`
