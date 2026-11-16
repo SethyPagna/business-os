@@ -12,10 +12,16 @@ import { transformSync } from 'esbuild'
 
 const require = createRequire(import.meta.url)
 const read = (file: string) => readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
-function load(source: string): Record<string, any> {
-  const mod: { exports: Record<string, any> } = { exports: {} }
-  new Function('require', 'module', 'exports', transformSync(source, { loader: 'ts', format: 'cjs' }).code)((id: string) => require(id.replace(/^\.\//, '../src/utils/')), mod, mod.exports)
-  return mod.exports
+function load(source: string, visibilitySource = read('utils/productGroupVisibility.ts')): Record<string, any> {
+  const run = (code: string, resolve: (id: string) => unknown): Record<string, any> => {
+    const mod: { exports: Record<string, any> } = { exports: {} }
+    new Function('require', 'module', 'exports', transformSync(code, { loader: 'ts', format: 'cjs' }).code)(resolve, mod, mod.exports)
+    return mod.exports
+  }
+  const grouping = run(source, (id: string) => require(id.replace(/^\.\//, '../src/utils/')))
+  // The staff-only group rules live in productGroupVisibility.ts (kept out of the storefront closure); they read the grouping module under test.
+  const visibility = run(visibilitySource, (id: string) => id.endsWith('productGrouping.ts') ? grouping : require(id.replace(/^\.\//, '../src/utils/')))
+  return { ...grouping, ...visibility }
 }
 const permutations = <T,>(xs: T[]): T[][] => xs.length <= 1 ? [xs] : xs.flatMap((x, i) => permutations([...xs.slice(0, i), ...xs.slice(i + 1)]).map((rest) => [x, ...rest]))
 
@@ -80,10 +86,25 @@ function probe(api: Record<string, any>): string[] {
     const pair = [row(1, 'Aloe', '8851234567890', [[1, 0]]), row(2, 'Aloe', '8851234567890', [[2, 0]]), row(3, 'Aloe', '8850000000009', [[1, 5]])]
     assert.equal(sectionsOf(pair)[0].groups[0].hiddenZeroStockRowCount, 2)
   })
+  // R2-2: a name group that is ONLY a zero twin pair shows exactly as one record with the same per-branch stock would.
+  check('R2-2 a group that is only an all-zero twin pair stays listed, as the one folded row it replaces did', () => {
+    const only = [row(1, 'Lip Balm', '8851234567890', [[1, 0]]), row(2, 'Lip Balm', '8851234567890', [[2, 0]]), row(9, 'Zeta', '8850000000009', [[1, 3]])]
+    assert.deepEqual(visibleIds(only), [1, 2, 9])
+    const single = [row(1, 'Lip Balm', '8851234567890', [[1, 0], [2, 0]]), row(9, 'Zeta', '8850000000009', [[1, 3]])]
+    assert.deepEqual(visibleIds(single), [1, 9], 'control: one record, zero at two branches, is listed')
+    assert.equal(sectionsOf(only).flatMap((s) => s.groups).find((g: any) => g.rows.some((r: any) => r.id === 1)).hiddenZeroStockRowCount || 0, 0)
+  })
+  check('R2-2 the same pair beside a stocked variant is hidden, exactly as the single zero record would be', () => {
+    const withVariant = [row(1, 'Lip Balm', '8851234567890', [[1, 0]]), row(2, 'Lip Balm', '8851234567890', [[2, 0]]), row(3, 'Lip Balm', '8850000000009', [[1, 5]])]
+    const single = [row(1, 'Lip Balm', '8851234567890', [[1, 0], [2, 0]]), row(3, 'Lip Balm', '8850000000009', [[1, 5]])]
+    assert.deepEqual(visibleIds(withVariant), [3])
+    assert.deepEqual(visibleIds(single), [3])
+  })
   return failures
 }
 
 const source = read('utils/productGrouping.ts')
+const visibility = read('utils/productGroupVisibility.ts')
 const real = probe(load(source))
 assert.deepEqual(real, [], `unmutated source is red:\n${real.join('\n')}`)
 
@@ -93,10 +114,13 @@ const mutants: Array<{ name: string; from: string; to: string }> = [
   { name: 'F6 twins gathered behind the first member, not the family child', from: 'members.find((member) => toProductId(member?.parent_id) > 0) ?? members[0]', to: 'members[0]' },
   { name: 'F8 each row judged alone (the first-pass behaviour)', from: 'const members = twinsByKey.get(productTwinKey(row)) || [row]', to: 'const members = [row]' },
   { name: 'F8 twins pooled by name only', from: 'const members = twinsByKey.get(productTwinKey(row)) || [row]', to: 'const members = [...twinsByKey.values()].flat()' },
+  { name: 'R2-2 a twin-only group is judged as two rows', from: 'if (productCount <= 1) return [group]', to: 'if (false) return [group]' },
   { name: 'F8 branches not distinguished (one branch counts as many)', from: 'const key = String(entry?.branch_id ?? entry?.branch_name ?? \'\')', to: 'const key = String(Math.random())' },
 ]
 for (const mutant of mutants) {
-  assert.ok(source.includes(mutant.from), `mutant "${mutant.name}" no longer matches the source (stale mutant)`)
+  const inVisibility = visibility.includes(mutant.from)
+  assert.ok(inVisibility || source.includes(mutant.from), `mutant "${mutant.name}" no longer matches the source (stale mutant)`)
+  if (inVisibility) { assert.ok(probe(load(source, visibility.replace(mutant.from, mutant.to))).length > 0, `mutant survived: ${mutant.name}`); continue }
   let mutated = source.replace(mutant.from, mutant.to)
   // The F6 "not gathered" mutant needs a balanced replacement: sort, then skip the gather pass.
   if (mutant.name === 'F6 twins are not gathered') mutated = source.replace('gatherUnmergedTwins([...group.items].sort((left, right) => compareProductsWithinGroup(left, right, productsById)))', '[...group.items].sort((left, right) => compareProductsWithinGroup(left, right, productsById))')

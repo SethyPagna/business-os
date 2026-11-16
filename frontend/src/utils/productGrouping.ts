@@ -256,26 +256,16 @@ export function productTwinKey(row: { name?: unknown; barcode?: unknown } | null
   return `${normalizeProductGroupName(row.name)}|${identityBarcodeKey(row.barcode)}`
 }
 
-// Products opens a name group folded unless it holds unmerged twins: those start OPEN so the pair is seen side by side
-// (owner, 16 Nov 2026). A person's own fold or unfold afterwards is kept by the caller.
-export function startsCollapsedGroup(group: { hasMultipleItems?: boolean; rows?: ReadonlyArray<Record<string, unknown>> } | null | undefined): boolean {
-  return Boolean(group?.hasMultipleItems) && !groupHasUnmergedTwins(group)
-}
-
-export function groupHasUnmergedTwins(group: { rows?: ReadonlyArray<Record<string, unknown>> } | null | undefined): boolean {
-  return Boolean(group?.rows?.some((row) => row.__unmergedTwin))
-}
-
 interface BuildGroupSectionsOptions {
   productsById?: Map<unknown, ProductRecord>
   sortDirection?: unknown
 }
 
-function normalizeText(value: unknown): string {
+export function normalizeText(value: unknown): string {
   return String(value || '').trim().replace(/\s+/g, ' ')
 }
 
-function toProductId(value: unknown): ProductId {
+export function toProductId(value: unknown): ProductId {
   const id = Number(value || 0)
   return Number.isFinite(id) ? id : 0
 }
@@ -746,81 +736,6 @@ export function buildProductCategorySections(products: ProductRecord[] = [], {
     }
     return String(left.label || '').localeCompare(String(right.label || ''), undefined, { sensitivity: 'base' })
   })
-}
-
-// The branch balances a row stands for: its own, plus those of its unmerged twins. Twins used to be folded into one row spanning their
-// branches, and "hide out-of-stock rows" judged that one row; judging the cluster keeps the same answer now that each record is its own row.
-function branchBalancesOf(row: ProductGroupRow, twinsByKey: Map<string, ProductGroupRow[]>): Array<Record<string, unknown>> {
-  const members = twinsByKey.get(productTwinKey(row)) || [row]
-  const byBranch = new Map<string, Record<string, unknown>>()
-  for (const member of members) {
-    const branchStock = Array.isArray(member?.branch_stock) ? member.branch_stock as Array<Record<string, unknown>> : []
-    for (const entry of branchStock) {
-      const key = String(entry?.branch_id ?? entry?.branch_name ?? '')
-      const existing = byBranch.get(key)
-      byBranch.set(key, existing ? { ...existing, quantity: Number(existing.quantity || 0) + Number(entry?.quantity || 0) } : { ...entry })
-    }
-  }
-  return [...byBranch.values()]
-}
-
-function isAllBranchZeroRow(row: ProductGroupRow, twinsByKey: Map<string, ProductGroupRow[]>): boolean {
-  const branchStock = branchBalancesOf(row, twinsByKey)
-  // This rule is intentionally limited to a real multi-branch row. A
-  // standalone zero-stock product (or a product tracked at only one branch)
-  // remains visible; only redundant children whose recorded branch balances
-  // are all zero are removed from a same-name multi-row group. A product with
-  // unmerged twins is judged across the twins' branches, as it was when they
-  // were one folded row.
-  return branchStock.length >= 2 && branchStock.every((entry) => Number(entry?.quantity || 0) <= 0)
-}
-
-// OPT-IN only. Products.tsx runs this exclusively when the operator turns on
-// the "Hide out-of-stock rows" option in the shared FilterMenu -- it is off by
-// default, because a row this drops is a row that cannot be found, opened,
-// edited or restocked from the Products page at all. Each surviving group
-// reports how many of its rows went away via hiddenZeroStockRowCount so the
-// header can show a "N hidden" affordance rather than a silently shorter list.
-export function hideZeroStockGroupedChildRows(sections: ProductGroupSection[] = []): ProductGroupSection[] {
-  return sections.map((section) => {
-    const groups = section.groups.flatMap((group): ProductGroup[] => {
-      if (group.rows.length <= 1) return [group]
-      const twinsByKey = new Map<string, ProductGroupRow[]>()
-      for (const row of group.rows) {
-        const key = productTwinKey(row)
-        if (key) twinsByKey.set(key, [...(twinsByKey.get(key) || []), row])
-      }
-      const rows = group.rows.filter((row) => !isAllBranchZeroRow(row, twinsByKey))
-      if (!rows.length) return []
-      const visibleIds = new Set(rows.flatMap((row) => row.__mergedProductIds || []).map(toProductId))
-      const items = group.items.filter((item) => visibleIds.has(toProductId(item?.id)))
-      const branchNames = [...new Set(rows.flatMap((row) => (
-        Array.isArray(row.branch_stock)
-          ? (row.branch_stock as Array<Record<string, unknown>>).map((entry) => normalizeText(entry?.branch_name)).filter(Boolean)
-          : []
-      )))].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }))
-      return [{
-        ...group,
-        rows,
-        items,
-        ids: items.map((item) => toProductId(item?.id)).filter((id) => id > 0),
-        matchedIds: group.matchedIds.filter((id) => visibleIds.has(id)),
-        sellableItems: group.sellableItems.filter((item) => visibleIds.has(toProductId(item?.id))),
-        leadProduct: rows[0],
-        anchorId: toProductId(rows[0]?.id),
-        stockTotal: rows.reduce((sum, row) => sum + Number(row?.stock_quantity || 0), 0),
-        branchNames,
-        hasMultipleItems: items.length > 1,
-        hiddenZeroStockRowCount: group.rows.length - rows.length,
-      }]
-    })
-    return {
-      ...section,
-      groups,
-      ids: groups.flatMap((group) => group.ids),
-      items: groups.flatMap((group) => group.items),
-    }
-  }).filter((section) => section.groups.length > 0)
 }
 
 export function buildProductGroupSections(products: ProductRecord[] = [], {

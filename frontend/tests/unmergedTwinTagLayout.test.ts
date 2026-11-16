@@ -39,7 +39,7 @@ const fixture = String.raw`
   ]
   const noop = () => {}
   createRoot(document.getElementById('root')).render(
-    <AppContext.Provider value={{ ...FALLBACK_APP_CONTEXT, t, language: lang }}>
+    <AppContext.Provider value={{ ...FALLBACK_APP_CONTEXT, can: () => true, t, language: lang }}>
       <div data-fixture="inventory" className="p-2">
         <InventoryProductsSurface items={items} total={items.length} page={1} pageSize={20} totalPages={1} branchFilter="all" loading={false} error={null}
           serverStats={null} statsLoading={false} t={t} fmtUSD={v => '$' + v} fmtKHR={v => v + 'KHR'}

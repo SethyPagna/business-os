@@ -14,12 +14,13 @@ import { writeTransferDraft, transferDraftKey } from '../src/utils/minimizedWork
 const USER = { id: 7, organization_id: 1, name: 'Owner', role_code: 'admin', permissions: { all: true }, role_permissions: { all: true } }
 
 const base = { unit: 'pcs', selling_price_usd: 5, selling_price_khr: 20500, applied_price_usd: 5, applied_price_khr: 20500, is_active: 1, status: 'active', category: 'Care', brand: 'Acme', images: [], batches: [], batch_count: 0, low_stock_threshold: 10, out_of_stock_threshold: 0 }
-const rec = (id: number, name: string, barcode: string, qty: number, created: string) => ({
-  ...base, id, name, barcode, stock: qty, stock_quantity: qty, branch_quantity: qty, created_at: `${created} 00:00:00`, updated_at: `${created} 00:00:00`,
+const rec = (id: number, name: string, barcode: string, qty: number, created: string, time = '00:00:00') => ({
+  ...base, id, name, barcode, stock: qty, stock_quantity: qty, branch_quantity: qty, created_at: `${created} ${time}`, updated_at: `${created} ${time}`,
   branch_stock: [{ branch_id: 1, branch_name: 'LC Store', quantity: qty }],
 })
 // Twins 31 (8 left) and 33 (50 left); the variant 32 sits between them by id and has its own barcode.
-const TWIN_A = rec(31, 'Glow Serum', '8851234567890', 8, '2026-09-01')
+// 23:30 UTC on 1 Sep is already 2 Sep in the shop (UTC+7): the picker must show the shop's date, not the UTC slice (R2-3).
+const TWIN_A = rec(31, 'Glow Serum', '8851234567890', 8, '2026-09-01', '23:30:00')
 const VARIANT = rec(32, 'Glow Serum', '8859999999999', 5, '2026-09-02')
 const TWIN_B = rec(33, 'Glow Serum', '8851234567890', 50, '2026-10-05')
 const OTHER = rec(34, 'Aloe Gel', '8850000000011', 30, '2026-09-03')
@@ -94,10 +95,10 @@ probes['Branches stock grid'] = async (harness) => {
     assert.equal(Math.abs(at('8') - at('50')), 1, `the twins (8 and 50) sit next to each other: ${JSON.stringify(glow)}`)
   } finally { await page.unmount() }
 }
-probes['Transfer multi-picker'] = async (harness) => {
+const transferProbe = (can: (page: string, action?: string) => boolean, wantHint: string) => async (harness: Harness) => {
   assert.ok(writeTransferDraft('branch_transfer', USER.id, transferDraftKey('branch_transfer'), { fromBranch: '1', toBranch: '2', search: '', reason: '', selectedQuantities: {}, showAllProducts: true, showSelectedOnly: false }), 'the draft that opens the picker on the source branch was stored')
   const page = await harness.mount({
-    component: 'components/branches/TransferModal.tsx', props: { branches: BRANCHES, onClose() {}, onDone() {}, user: USER, notify() {} }, app: { ...app('branches'), khrToUsd: (value: number) => value / 4000, usdToKhr: (value: number) => value * 4000, displayCurrency: 'USD' },
+    component: 'components/branches/TransferModal.tsx', props: { branches: BRANCHES, onClose() {}, onDone() {}, user: USER, notify() {} }, app: { ...app('branches'), can, khrToUsd: (value: number) => value / 4000, usdToKhr: (value: number) => value * 4000, displayCurrency: 'USD' },
     doubles: { 'api/branchTransport.ts': { getBranchStock: async () => ({ items: CATALOG, page: 1, pageSize: 20, total: 4, totalPages: 1 }) } },
   })
   try {
@@ -109,13 +110,23 @@ probes['Transfer multi-picker'] = async (harness) => {
     assert.ok(at('8') >= 0 && at('50') >= 0 && at('5') >= 0, `each record shows its own available figure 8, 50 and 5: ${JSON.stringify(rows)}`)
     assert.equal(Math.abs(at('8') - at('50')), 1, `the twins sit next to each other: ${JSON.stringify(rows)}`)
     // F9: the two twin rows are told apart by a Duplicate tag and the date their record was created; the variant has neither.
-    for (const [own, date] of [['8', '01/09/2026'], ['50', '05/10/2026']]) {
+    for (const [own, date] of [['8', '02/09/2026'], ['50', '05/10/2026']]) {
       assert.ok(rows[at(own)].includes('product_duplicate_badge') && rows[at(own)].includes(date), `the twin with ${own} carries the Duplicate tag and its date ${date}: ${rows[at(own)]}`)
     }
     assert.ok(!rows[at('5')].includes('product_duplicate_badge') && !rows[at('5')].includes('/2026'), `the variant carries neither: ${rows[at('5')]}`)
     assert.notEqual(rows[at('8')], rows[at('50')], 'the twin rows no longer read the same')
+    assert.ok(!rows[at('8')].includes('01/09/2026'), 'the UTC day is not shown')
+    // R2-4: the tag points to the Conflicts tab only for a role that can open it; the group header counts records, not variants.
+    const tags = page.findAll((node) => node.getAttribute('data-unmerged-twin') === 'true')
+    assert.equal(tags.length, 2, 'both twins are tagged')
+    for (const tag of tags) assert.equal(tag.getAttribute('title'), wantHint, 'the tag tooltip follows the merge permission')
+    const header = page.text()
+    assert.ok(header.includes('transfer_group_record_count') && !header.includes('transfer_group_variant_count'), 'a group holding twins counts records, not variants')
   } finally { await page.unmount() }
 }
+
+probes['Transfer multi-picker'] = transferProbe(() => true, 'product_twin_row_hint')
+probes['Transfer multi-picker without merge permission'] = transferProbe((_page, action) => action !== 'merge_duplicates', 'product_twin_row_hint_ask')
 
 let failed = 0
 const real = await createHarness({ localStorage: { businessos_user: JSON.stringify(USER) } })
@@ -134,6 +145,9 @@ await folded.close()
 // F9 mutants: the picker without the twin's date, and without its Duplicate tag, reads the two twins alike again: its probe must go red.
 for (const [name, from, to] of [
   ['no creation date on a twin row', '{product.__unmergedTwin && product.created_at ? (', '{false ? ('],
+  ['tooltip ignores the merge permission', "hint={unmergedTwinHint(t, can('products', 'merge_duplicates'))}", "hint={unmergedTwinHint(t, true)}"],
+  ['date from the UTC slice', '{fmtDate(product.created_at)}', '{String(product.created_at).slice(8, 10) + "/" + String(product.created_at).slice(5, 7) + "/" + String(product.created_at).slice(0, 4)}'],
+  ['header counts variants for twins', "(group.rows.some((row: any) => row.__unmergedTwin) ? (t('transfer_group_record_count') || '{n} records') : (t('transfer_group_variant_count') || '{n} variants'))", "(t('transfer_group_variant_count') || '{n} variants')"],
   ['no Duplicate tag on a twin row', '{product.__unmergedTwin ? <UnmergedTwinTag', '{false ? <UnmergedTwinTag'],
 ]) {
   const mutant = await createHarness({ localStorage: { businessos_user: JSON.stringify(USER) }, mutateSource: (key, code) => {
@@ -142,7 +156,7 @@ for (const [name, from, to] of [
     return code.replace(from, to)
   } })
   let survived = false
-  try { await probes['Transfer multi-picker'](mutant); survived = true } catch { /* red, as required */ }
+  try { await probes['Transfer multi-picker'](mutant); await probes['Transfer multi-picker without merge permission'](mutant); survived = true } catch { /* red, as required */ }
   if (survived) { failed += 1; console.error(`FAIL Transfer multi-picker: mutant survived: ${name}`) } else console.log(`PASS Transfer multi-picker: mutant killed: ${name}`)
   await mutant.close()
 }

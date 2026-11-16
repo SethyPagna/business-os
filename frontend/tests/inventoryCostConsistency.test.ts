@@ -37,7 +37,7 @@ assert.equal(api.inventoryCost({ cost_price_khr: 4100, purchase_price_khr: 5000 
 const harness = await createHarness({ observe: ['components/shared/CostCalculationFloat.tsx'] })
 const authorized = { id: 1, role_code: 'admin', role_permissions: { all: true } }
 const denied = { id: 2, role_code: 'cashier', role_permissions: { inventory: 'full', products: 'full' } }
-const app = (user: typeof authorized | typeof denied) => ({ user, getPermissionTier: () => 'none', t: (key: string) => key, notify() {} })
+const app = (user: typeof authorized | typeof denied) => ({ user, can: () => true, getPermissionTier: () => 'none', t: (key: string) => key, notify() {} })
 const base = { onClose() {}, fmtUSD: (value: number) => `USD[${value}]`, fmtKHR: (value: number) => `KHR[${value}]`, t: () => undefined }
 try {
   for (const fixture of cases) {

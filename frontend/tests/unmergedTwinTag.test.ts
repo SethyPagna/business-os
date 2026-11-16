@@ -10,10 +10,16 @@ import { transformSync } from 'esbuild'
 
 const require = createRequire(import.meta.url)
 const read = (file: string) => readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
-function load(source: string): Record<string, any> {
-  const mod: { exports: Record<string, any> } = { exports: {} }
-  new Function('require', 'module', 'exports', transformSync(source, { loader: 'ts', format: 'cjs' }).code)((id: string) => require(id.replace(/^\.\//, '../src/utils/')), mod, mod.exports)
-  return mod.exports
+function load(source: string, visibilitySource = read('utils/productGroupVisibility.ts')): Record<string, any> {
+  const run = (code: string, resolve: (id: string) => unknown): Record<string, any> => {
+    const mod: { exports: Record<string, any> } = { exports: {} }
+    new Function('require', 'module', 'exports', transformSync(code, { loader: 'ts', format: 'cjs' }).code)(resolve, mod, mod.exports)
+    return mod.exports
+  }
+  const grouping = run(source, (id: string) => require(id.replace(/^\.\//, '../src/utils/')))
+  // The staff-only group rules live in productGroupVisibility.ts (kept out of the storefront closure); they read the grouping module under test.
+  const visibility = run(visibilitySource, (id: string) => id.endsWith('productGrouping.ts') ? grouping : require(id.replace(/^\.\//, '../src/utils/')))
+  return { ...grouping, ...visibility }
 }
 
 const row = (id: number, name: string, barcode: string) => ({ id, name, barcode, stock_quantity: 5, branch_stock: [{ branch_id: 1, branch_name: 'B1', quantity: 5 }] })
@@ -72,6 +78,7 @@ function probe(api: Record<string, any>): string[] {
 }
 
 const source = read('utils/productGrouping.ts')
+const visibility = read('utils/productGroupVisibility.ts')
 const real = probe(load(source))
 assert.deepEqual(real, [], `unmutated source is red:\n${real.join('\n')}`)
 
@@ -85,8 +92,10 @@ const mutants: Array<{ name: string; from: string; to: string }> = [
   { name: 'a lone row counts as its own twin', from: '(perKey.get(key) || 0) > 1', to: '(perKey.get(key) || 0) > 0' },
 ]
 for (const mutant of mutants) {
-  assert.ok(source.includes(mutant.from), `mutant "${mutant.name}" no longer matches the source (stale mutant)`)
-  assert.ok(probe(load(source.replace(mutant.from, mutant.to))).length > 0, `mutant survived: ${mutant.name}`)
+  const inVisibility = visibility.includes(mutant.from)
+  assert.ok(inVisibility || source.includes(mutant.from), `mutant "${mutant.name}" no longer matches the source (stale mutant)`)
+  const mutated = inVisibility ? probe(load(source, visibility.replace(mutant.from, mutant.to))) : probe(load(source.replace(mutant.from, mutant.to)))
+  assert.ok(mutated.length > 0, `mutant survived: ${mutant.name}`)
 }
 
 // Wiring: the three surfaces read the one rule, not a copy of it.

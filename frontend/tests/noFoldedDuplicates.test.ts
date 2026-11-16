@@ -43,7 +43,8 @@ function load(groupingSource = read('utils/productGrouping.ts'), surfaceSource =
     if (id.includes('productGrouping')) return grouping
     if (id.includes('costDisplay')) return require('../src/utils/costDisplay.ts')
     if (id.includes('acquisitionCostAccess')) return require('../src/utils/acquisitionCostAccess.ts')
-    if (id.includes('AppContextCore')) return { useApp: () => ({ user: { role_code: 'admin', role_permissions: { all: true } } }) }
+    if (id.includes('AppContextCore')) return { useApp: () => ({ can: () => true, user: { role_code: 'admin', role_permissions: { all: true } } }) }
+    if (id.endsWith('unmergedTwinHint.ts')) return require('../src/components/products/unmergedTwinHint.ts')
     if (id.endsWith('StockQty.tsx')) return stockQty
     return { default: () => null, TopPager: (props: { children?: unknown }) => props.children ?? null, __esModule: true }
   })

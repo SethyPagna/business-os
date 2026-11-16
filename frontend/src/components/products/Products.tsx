@@ -84,7 +84,8 @@ import { useIsPageActive } from '../shared/pageActivity'
 import PendingReviewSync from '../shared/PendingReviewSync'
 import PendingReviewTag from '../shared/PendingReviewTag'
 import { noteQueuedForReview } from '../../utils/pendingReviewTargets.ts'
-import { buildProductCategorySections, hideZeroStockGroupedChildRows, startsCollapsedGroup } from '../../utils/productGrouping.ts'
+import { buildProductCategorySections } from '../../utils/productGrouping.ts'
+import { hideZeroStockGroupedChildRows, startsCollapsedGroup } from '../../utils/productGroupVisibility.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId, resolveCreatedHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { UNDO_HIDDEN_VALUE_FALLBACK, undoNeedsHiddenValue, undoNeedsHiddenValueIn } from '../../utils/hiddenValueUndo.ts'
@@ -185,6 +186,7 @@ import { useMergeStockChoice } from './useMergeStockChoice.tsx'
 import { buildExactDuplicateIndex, extractDuplicateClusters, findRowDuplicateInfo, type ExactDuplicateInfo } from '../../utils/exactDuplicateProducts.ts'
 import DuplicateResolverControl from './DuplicateResolverControl.tsx'
 import UnmergedTwinTag from './UnmergedTwinTag.tsx'
+import { unmergedTwinHint } from './unmergedTwinHint.ts'
 import { catalogHasBarcode, isProductSearchTooShort, productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
 // The section chips below are the same chrome HubSectionNav renders, styled
 // from the same stylesheet (see the row's `bos-nav-chrome` class).
@@ -1120,7 +1122,7 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
                     something different from its row. */}
                 <ProductNameRail name={productName} />
               </div>
-              {p.__unmergedTwin && !dupInfo ? <UnmergedTwinTag label={tr('product_duplicate_badge', 'Duplicate')} hint={tr('product_twin_row_hint', 'Same name and barcode as another product. Merge it in the Conflicts tab.')} /> : null}
+              {p.__unmergedTwin && !dupInfo ? <UnmergedTwinTag label={tr('product_duplicate_badge', 'Duplicate')} hint={unmergedTwinHint(t, canMergeDuplicates)} /> : null}
             </div>
             {dupInfo ? (
               <DuplicateResolverControl
@@ -1342,7 +1344,7 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
                 "instead of moving the price and quantity row just keep it
                 constant there"). */}
             <div className="mt-0.5 flex min-h-[1.1875rem] flex-wrap gap-1">
-              {p.__unmergedTwin && !dupInfo ? <UnmergedTwinTag label={tr('product_duplicate_badge', 'Duplicate')} hint={tr('product_twin_row_hint', 'Same name and barcode as another product. Merge it in the Conflicts tab.')} /> : null}
+              {p.__unmergedTwin && !dupInfo ? <UnmergedTwinTag label={tr('product_duplicate_badge', 'Duplicate')} hint={unmergedTwinHint(t, canMergeDuplicates)} /> : null}
               {/* Small-screen default card shows the BARCODE here in place of
                   the category (user, Aug 29: "hide the category inside the
                   details ... replace the outside with barcode"). Category is

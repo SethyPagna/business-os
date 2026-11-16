@@ -8,6 +8,7 @@ import PendingReviewSync from '../shared/PendingReviewSync.tsx'
 import PendingReviewTag from '../shared/PendingReviewTag.tsx'
 import StockQty from './StockQty.tsx'
 import UnmergedTwinTag from '../products/UnmergedTwinTag.tsx'
+import { unmergedTwinHint } from '../products/unmergedTwinHint.ts'
 import { productCost } from '../../utils/costDisplay.ts'
 import { useApp } from '../../app/AppContextCore.tsx'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
@@ -133,7 +134,7 @@ export default function InventoryProductsSurface({
   onPageChange, onPageSizeChange, onOpenDetail, onOpenInCatalogue, onAdjust, fmtUSD, fmtKHR,
   serverStats, statsLoading, statsError, t, active = true,
 }: Props) {
-  const { user } = useApp() as { user: PermissionUser }
+  const { user, can } = useApp() as { user: PermissionUser; can: (page: string, action?: string) => boolean }
   const canViewCosts = canViewAcquisitionCosts(user)
   const groups = useMemo(() => groupInventoryProducts(items), [items])
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
@@ -152,7 +153,7 @@ export default function InventoryProductsSurface({
   const stockQty = (product: InventoryProductRow) => <StockQty qty={quantity(product)} product={product} />
   // "Duplicate" on a row whose record has an unmerged twin in this list (decided by ownRows from the loaded rows).
   const twinTag = (product: InventoryProductRow) => product.__unmergedTwin
-    ? <UnmergedTwinTag label={t('product_duplicate_badge') || 'Duplicate'} hint={t('product_twin_row_hint') || 'Same name and barcode as another product. Merge it in the Conflicts tab.'} />
+    ? <UnmergedTwinTag label={t('product_duplicate_badge') || 'Duplicate'} hint={unmergedTwinHint(t, can('products', 'merge_duplicates'))} />
     : null
   // Money cell shape copied from the Sales list's amount cell: the USD figure
   // is the bold primary line, the KHR equivalent a muted sub-line. `tone`
