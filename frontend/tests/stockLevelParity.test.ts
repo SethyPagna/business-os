@@ -1,4 +1,4 @@
-// stockLevelState / stockGroupLevel / isStockFamilyHeader (frontend/src/utils/lowStockSettings.ts) must give the SAME
+// stockLevelState (frontend/src/utils/lowStockSettings.ts) must give the SAME
 // answer as every piece of Worker SQL that decides out / low / healthy -- owner ask 15 Nov 2026: a product is never
 // "low" in one place and "healthy" in another.
 //
@@ -14,9 +14,10 @@
 //     (routes/inventory.ts, products.ts, branches.ts), the Inventory Check filters and family flags
 //     (lib/inventoryCheckProducts.ts), the Telegram stock counts and filter (lib/telegram.ts) and the issue-state out
 //     clause (lib/searchMatch.ts).
-// Each copy's answer is compared with refState, and the client with the same. The family rule (stockGroupLevel) is
-// compared with the Dashboard's has_healthy / has_low flags and the alert pages on multi-member fixtures, header rows
-// included, and isStockFamilyHeader with the server's header expression.
+// Each copy's answer is compared with refState, and the client with the same. The Dashboard's FAMILY rule lives in SQL
+// only (no stock row on any client list uses a family rule since 16 Nov 2026: every product record is its own row); it is
+// compared here with a reference model (refGroupLevel / refIsHeader, built on the client's per-product rule) on
+// multi-member fixtures, header rows included.
 // NOT run, only pinned by exact normalised text and occurrence count: the bell's JavaScript mapping (is_out -> label, the
 // low count) and the Telegram row label. A census then reads EVERY comparison against a threshold in cloudflare/src
 // (low_stock_threshold / out_of_stock_threshold, the low_threshold / __low / __out aliases, plain JS `<= low`) and fails
@@ -74,6 +75,24 @@ function loadFunction(source: string, name: string): unknown {
 const crossingQuantities = [-1, 0, 0.5, 2, 3, 5, 10, 11]
 
 type Level = 'out' | 'low' | 'healthy'
+
+// Reference model of the Dashboard's family rule (familyStockStats.ts has_healthy / has_low): the best member wins, header
+// rows are skipped while a real member exists, an empty family is "out". Kept in the test only; no client list uses it.
+const refIsHeader = (product: { is_group?: unknown; parent_id?: unknown } | null | undefined): boolean => {
+  const group = product?.is_group == null ? 0 : Number(product.is_group)
+  const parent = product?.parent_id == null ? 0 : Number(product.parent_id)
+  return group === 1 && parent === 0
+}
+const refGroupLevel = (stateOf: (qty: unknown, product: any) => Level, members: Array<{ qty: unknown; product: any }>): Level => {
+  const real = members.filter((member) => !refIsHeader(member.product))
+  let best: Level = 'out'
+  for (const member of real.length ? real : members) {
+    const level = stateOf(member.qty, member.product)
+    if (level === 'healthy') return 'healthy'
+    if (level === 'low') best = 'low'
+  }
+  return best
+}
 type Cfg = { enabled: boolean; mode: 'product' | 'global'; threshold: number }
 const configs: Cfg[] = []
 for (const threshold of [0, 3, 10]) {
@@ -489,16 +508,16 @@ async function failuresOf(read: Read, fe: any, firstOnly = false): Promise<strin
     }
   })
 
-  // The family rule: stockGroupLevel against the Dashboard's has_healthy / has_low flags, the stats tile and the alert pages.
+  // The family rule: the reference model against the Dashboard's has_healthy / has_low flags, the stats tile and the alert pages.
   const familyOf = new Map<number, string>(familySpecs.map((spec) => [spec.id, spec.key]))
   const membersOf = new Map<string, Spec[]>()
   for (const spec of familySpecs) membersOf.set(spec.key, [...(membersOf.get(spec.key) || []), spec])
   for (const [c, config] of configs.entries()) {
     const tag = `cfg${c} ${config.enabled ? 'on' : 'off'}/${config.mode}/${config.threshold}`
     const lowSql: string = lowSettings.lowStockThresholdSql(config, 'p.low_stock_threshold')
-    const expected = new Map<string, Level>([...membersOf].map(([key, members]) => [key, fe.stockGroupLevel(
-      members.map((m) => ({ qty: m.qty, product: { low_stock_threshold: m.low, out_of_stock_threshold: m.out, is_group: m.group, parent_id: m.parent } })), config)]))
-    await check(`Dashboard family flags vs stockGroupLevel ${tag}`, () => {
+    const expected = new Map<string, Level>([...membersOf].map(([key, members]) => [key, refGroupLevel((qty, product) => fe.stockLevelState(qty, product, config),
+      members.map((m) => ({ qty: m.qty, product: { low_stock_threshold: m.low, out_of_stock_threshold: m.out, is_group: m.group, parent_id: m.parent } })))]))
+    await check(`Dashboard family flags vs the reference family rule ${tag}`, () => {
       const full: string = family.familyStockOverviewSql(lowSql)
       const cut = full.indexOf('eligible AS (')
       assert.ok(cut > 0, 'the overview statement no longer has an eligible CTE (update the extraction)')
@@ -510,7 +529,7 @@ async function failuresOf(read: Read, fe: any, firstOnly = false): Promise<strin
         assert.equal(level, expected.get(flag.family_root_id), `family ${flag.family_root_id}`)
       }
     })
-    await check(`family alert pages + stats tile vs stockGroupLevel ${tag}`, async () => {
+    await check(`family alert pages + stats tile vs the reference family rule ${tag}`, async () => {
       for (const level of ['low', 'out'] as const) {
         const page = await family.getFamilyStockAlertPage({ db: d1(familyDb), lowStock: config, state: level, page: 1, pageSize: 5000 })
         const got = page.items.map((item: { id: number }) => familyOf.get(item.id)).sort()
@@ -547,7 +566,7 @@ async function failuresOf(read: Read, fe: any, firstOnly = false): Promise<strin
   }
 
   // The review's example, side by side: products 101 (8) and 102 (50), threshold 10.
-  await check('merged 101 + 102: bell lists 101 only, Dashboard and the row are healthy', async () => {
+  await check('unmerged 101 + 102: bell lists 101 only, Dashboard family healthy, rows 101 low and 102 healthy', async () => {
     const config: Cfg = { enabled: true, mode: 'product', threshold: 10 }
     const lowSql: string = lowSettings.lowStockThresholdSql(config, 'low_stock_threshold')
     const bellSql = substitute(extract(bellSource, /async function buildInventorySection[\s\S]*?db\.prepare\(`([\s\S]*?)`\)\.all</, 'the bell inventory SELECT'),
@@ -558,22 +577,22 @@ async function failuresOf(read: Read, fe: any, firstOnly = false): Promise<strin
     const flags = pair.prepare(`${family.familyStockOverviewSql(lowSettings.lowStockThresholdSql(config, 'p.low_stock_threshold')).split('eligible AS (')[0].replace(/,\s*$/, '')} SELECT has_healthy, has_low FROM family_agg`).all() as Array<Record<string, number>>
     assert.deepEqual(flags.map((flag) => ({ ...flag })), [{ has_healthy: 1, has_low: 1 }], 'the Dashboard flags the family healthy (and low)')
     const product = { low_stock_threshold: 10, out_of_stock_threshold: 0 }
-    assert.equal(fe.stockGroupLevel([{ qty: 8, product }, { qty: 50, product }], config), 'healthy', 'the merged row')
-    assert.equal(fe.stockLevelState(8, product, config), 'low', 'product 101 alone')
+    assert.equal(fe.stockLevelState(8, product, config), 'low', 'row 101 is its own row and is low, as the bell says')
+    assert.equal(fe.stockLevelState(50, product, config), 'healthy', 'row 102 is its own row and is healthy')
+    assert.equal(fe.stockGroupLevel, undefined, 'no family rule is left on the client for a stock row to use')
   })
 
   // The header-row check against the server's expression, over NULL / 0 / 1 / other values.
-  await check('isStockFamilyHeader vs the server header expression', () => {
+  await check('reference header rule vs the server header expression', () => {
     const header = extract(read2('lib/familyStockStats.ts'), /const header = '([^']*)'/, 'the header expression')
     const probe = matrixDb.prepare(`SELECT ${header} AS h FROM (SELECT @is_group AS is_group, @parent_id AS parent_id) p`)
     for (const isGroup of [null, 0, 1, 2, -1, 0.5]) {
       for (const parentId of [null, 0, 1, -1, 0.5, 5]) {
         const server = (probe.get({ is_group: isGroup, parent_id: parentId }) as { h: number }).h === 1
-        assert.equal(fe.isStockFamilyHeader({ is_group: isGroup, parent_id: parentId }), server, `is_group=${isGroup} parent_id=${parentId}`)
-        assert.equal(fe.isStockFamilyHeader({ is_group: isGroup === null ? undefined : isGroup, parent_id: parentId === null ? undefined : parentId }), server, `undefined form is_group=${isGroup} parent_id=${parentId}`)
+        assert.equal(refIsHeader({ is_group: isGroup, parent_id: parentId }), server, `is_group=${isGroup} parent_id=${parentId}`)
       }
     }
-    assert.equal(fe.isStockFamilyHeader(null), false)
+    assert.equal(refIsHeader(null), false)
   })
 
   // Census: every comparison against a threshold in the Worker is accounted for, by exact text and count, and each runnable one
@@ -618,11 +637,7 @@ const clientMutants: Array<{ name: string; from: string; to: string }> = [
   { name: 'alerts-off threshold is 0 instead of -1', from: 'export const NO_LOW_STOCK_THRESHOLD = -1', to: 'export const NO_LOW_STOCK_THRESHOLD = 0' },
   { name: 'product mode ignores the product threshold', from: 'return Number.isFinite(own) ? own : global', to: 'return global' },
   { name: 'NULL quantity is not 0', from: "const asNumber = qty == null || qty === '' ? 0 : Number(qty)", to: "const asNumber = qty == null || qty === '' ? 99 : Number(qty)" },
-  { name: 'healthy answer becomes low', from: "  return 'healthy'\n}\n\n/** A product-family header", to: "  return 'low'\n}\n\n/** A product-family header" },
-  { name: 'header check treats parent_id -1 as a header (the old rule)', from: 'return group === 1 && parent === 0', to: 'return group === 1 && !(Number.isFinite(parent) && parent > 0)' },
-  { name: 'header check ignores the parent', from: 'return group === 1 && parent === 0', to: 'return group === 1' },
-  { name: 'family rule: worst member wins instead of best', from: "if (level === 'healthy') return 'healthy'\n    if (level === 'low') best = 'low'", to: "if (level === 'out') return 'out'\n    if (level === 'low') best = 'low'" },
-  { name: 'family rule: headers are not skipped', from: 'const real = members.filter((member) => !isStockFamilyHeader(member.product))', to: 'const real = members' },
+  { name: 'healthy answer becomes low', from: "  return 'healthy'\n}\n", to: "  return 'low'\n}\n" },
 ]
 const results: Array<[string, string]> = []
 for (const mutant of clientMutants) {

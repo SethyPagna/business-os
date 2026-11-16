@@ -21,6 +21,7 @@ import IosInstallHint from './components/shared/IosInstallHint.tsx'
 import D1LimitBanner from './components/server/D1LimitBanner.tsx'
 import ReadBudgetBanner from './components/server/ReadBudgetBanner.tsx'
 import { useBranchRedirectQueue } from './components/shared/useBranchRedirectQueue.ts'
+import { TwinDismissalsLoader } from './components/shared/useTwinDismissalsLoader.ts'
 import PullToRefreshIndicator from './components/shared/PullToRefreshIndicator.tsx'
 import { usePullToRefresh } from './components/shared/usePullToRefresh.ts'
 import { STORAGE_KEYS } from './constants.ts'
@@ -2083,6 +2084,12 @@ export default function App() {
           />
         </Suspense>
       ) : null}
+      {/* The "Keep both" rulings every list reads to decide which unmerged twins keep their Duplicate tag (utils/productTwinDismissals.ts). A component of its own, so a
+          sync update re-renders it alone and not the shell. The lists that show the tag are Products, Inventory, the Transfer picker (Branches) and POS. */}
+      <TwinDismissalsLoader
+        accountKey={authReady && user ? `${user.id}:${signInEpoch}` : ''}
+        enabled={Boolean(authReady && user) && ['products', 'inventory', 'branches', 'pos'].some((id) => canAccessPage(id))}
+      />
       {branchRedirect ? (
         <Suspense fallback={null}>
           <BranchRedirectHost key={JSON.stringify(branchRedirect.request)} request={branchRedirect.request} onAnswer={branchRedirect.answer} />

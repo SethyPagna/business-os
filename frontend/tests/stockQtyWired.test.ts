@@ -33,6 +33,8 @@ for (const { file, uses } of wired) {
 const list = read('components/inventory/InventoryProductsSurface.tsx')
 assert.equal((list.match(/\{stockQty\(product\)\}/g) || []).length, 2, 'desktop cell and phone card both use the pill')
 assert.ok(!/>\{quantity\(product\)\}</.test(list), 'no bare quantity(product) is printed any more')
+// No folded rows (owner, 16 Nov 2026): the pill takes the row's own figure and product, never a family of members.
+assert.ok(!list.includes('members=') && !list.includes('stockGroupLevel'), 'the list passes no family members to the pill')
 
 // No private copy of the rule in the detail pane.
 const detail = read('components/inventory/ProductDetailModal.tsx')

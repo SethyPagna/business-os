@@ -25,7 +25,7 @@ async function operationWritesReady(db: ReturnType<typeof getDb>): Promise<boole
 }
 import { buildInClause, chunkForBinding } from '../lib/sqlBinding'
 import type { D1Compat } from '../lib/db'
-import { paginateProductFamilies } from '../lib/familyPagination'
+import { INTRA_FAMILY_NAME_BARCODE_SQL, paginateProductFamilies } from '../lib/familyPagination'
 import { getFamilyStockStats } from '../lib/familyStockStats'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -996,7 +996,7 @@ app.get('/:id/stock', async (c) => {
     db,
     selectColumns: `p.id, p.name, p.sku, p.barcode, p.brand, p.category, p.unit, p.selling_price_usd, p.selling_price_khr,
            p.purchase_price_usd, p.purchase_price_khr, p.cost_price_usd, p.cost_price_khr,
-           p.low_stock_threshold, p.out_of_stock_threshold,
+           p.low_stock_threshold, p.out_of_stock_threshold, p.created_at,
            COALESCE(bs.quantity, 0) AS branch_quantity`,
     joinSql: branchStockJoinSql,
     whereSql,
@@ -1009,7 +1009,7 @@ app.get('/:id/stock', async (c) => {
       hasTier: Boolean(matchTierSql),
       hasRank: Boolean(matchRankSql),
     }),
-    intraFamilyOrderSql: 'lower(name) ASC, id ASC',
+    intraFamilyOrderSql: `${INTRA_FAMILY_NAME_BARCODE_SQL}, id ASC`,
     matchRankSql,
     rankCteSql,
     matchTierSql,

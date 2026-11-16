@@ -1,4 +1,4 @@
-import { normalizeProductGroupName } from './productGrouping.ts'
+import { normalizeProductGroupName, unmergedTwinKeys } from './productGrouping.ts'
 
 // "Exact duplicate" handling for the Products page (user spec item #3).
 //
@@ -34,9 +34,9 @@ export type DuplicateClusterEntry = {
 }
 
 export type PossiblySameCluster = {
-  type: 'barcode' | 'name'
+  type: 'barcode' | 'name' | 'leadingzero' | 'similar'
   value: string
-  severity: 'same_barcode' | 'same_name'
+  severity: 'same_barcode' | 'same_name' | 'leading_zero' | 'similar_name'
   products: DuplicateClusterEntry[]
 }
 
@@ -62,7 +62,7 @@ export function extractDuplicateClusters(payload: unknown): PossiblySameCluster[
   return raw.filter((c): c is PossiblySameCluster => {
     if (!c || typeof c !== 'object') return false
     const type = (c as PossiblySameCluster).type
-    return (type === 'barcode' || type === 'name') && Array.isArray((c as PossiblySameCluster).products)
+    return (type === 'barcode' || type === 'name' || type === 'leadingzero' || type === 'similar') && Array.isArray((c as PossiblySameCluster).products)
   })
 }
 
@@ -89,6 +89,41 @@ export function buildExactDuplicateIndex(clusters: PossiblySameCluster[]): Map<n
     }
   }
   return index
+}
+
+// Every Conflicts cluster that lists ALL of these products, as the dismiss call names it: what "Keep both" must dismiss so the pair is no longer listed anywhere. A pair
+// inside a variant family is held by its barcode cluster AND by the name cluster of the whole name (and a leading-zero cluster when a third spelling exists); dismissing
+// only the barcode left the name cluster listing it, so the toast "no longer flagged" was false. A 'similar' cluster is not one of them: it is a different-name class
+// whose ruling also silences other products, and a twin (one name) is never decided by it (cloudflare productIdentity.ts listTwinDismissals).
+export function clustersListingProducts(clusters: readonly PossiblySameCluster[], ids: readonly number[]): Array<{ type: 'barcode' | 'name' | 'leadingzero'; value: string }> {
+  const wanted = [...new Set(ids.map(Number))]
+  const rulings: Array<{ type: 'barcode' | 'name' | 'leadingzero'; value: string }> = []
+  if (wanted.length < 2) return rulings
+  for (const cluster of clusters) {
+    if (cluster.type !== 'barcode' && cluster.type !== 'name' && cluster.type !== 'leadingzero') continue
+    if (!wanted.every((id) => (cluster.products || []).some((product) => Number(product?.id) === id))) continue
+    if (!rulings.some((ruling) => ruling.type === cluster.type && ruling.value === cluster.value)) rulings.push({ type: cluster.type, value: cluster.value })
+  }
+  return rulings
+}
+
+// What "Keep both" on a pair rules (round 6 review, B1). The pair's barcode cluster is always dismissed. A name or leading-zero cluster that also lists the pair is dismissed only
+// when it holds no twin cluster apart from the pair's own (one that shares no row with it): a ruling is keyed by the cluster, so dismissing it would also silence another pair the
+// person never chose, with no review and no undo. When it is left listed, stillListed is true and the pair stays in Conflicts. A twin cluster that overlaps the pair (a blank-barcode
+// row of the same name joins it) is the pair's own: its tag is the cluster's, so it goes with the ruling.
+export function keepBothPlan(clusters: readonly PossiblySameCluster[], ids: readonly number[], barcode: string): { rulings: Array<{ type: 'barcode' | 'name' | 'leadingzero'; value: string }>; stillListed: boolean } {
+  const wanted = new Set(ids.map(Number))
+  const rulings: Array<{ type: 'barcode' | 'name' | 'leadingzero'; value: string }> = [{ type: 'barcode', value: barcode }]
+  let stillListed = false
+  for (const ruling of clustersListingProducts(clusters, ids)) {
+    if (ruling.type === 'barcode') { if (ruling.value !== barcode) rulings.push(ruling); continue }
+    const rows = clusters.find((c) => c.type === ruling.type && c.value === ruling.value)?.products || []
+    const keys = unmergedTwinKeys(rows as never)
+    const own = new Set(rows.map((row, i) => (wanted.has(Number(row.id)) ? keys[i] : '')))
+    if (keys.some((key) => key && !own.has(key))) stillListed = true
+    else rulings.push(ruling)
+  }
+  return { rulings, stillListed }
 }
 
 // Resolve the exact-duplicate group a rendered row belongs to. A list row can

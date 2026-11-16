@@ -694,6 +694,11 @@ function handleApi(pathname, query, req, res, body) {
     // routes/products.ts GET / returns a BARE ARRAY of the first 100 items.
     return sendJson(res, 200, ADMIN_CATALOG.items.slice(0, 100))
   }
+  // routes/products.ts GET /duplicate-dismissals: { success, dismissals: [[cluster_type, key], ...] }, the Keep-both rulings behind the Duplicate tag. The fixture
+  // catalogue holds no unmerged twin, so the set is empty.
+  if (pathname === '/api/products/duplicate-dismissals') {
+    return sendJson(res, 200, { success: true, dismissals: [] })
+  }
   if (pathname === '/api/products/possible-duplicates') {
     return sendJson(res, 200, { success: true, clusters: [] })
   }
