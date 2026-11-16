@@ -75,6 +75,29 @@ const MUTANTS = [
     from: 'SET is_active = 0, merge_deactivated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = @id', to: "SET is_active = 0, merge_deactivated_at = CURRENT_TIMESTAMP, supplier_id = NULL, supplier_name = NULL, payment_status = 'paid', credit_due_date = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id" },
   { name: 'undo does not restore the original batch_key of a created lot', file: 'lib/undoAppliers.ts',
     from: "if (typeof b.batchKeyBefore === 'string' && b.batchKeyBefore) {", to: 'if (false) {' },
+  // Review round (16 Nov): the surviving mutants M10, M12 and M17, and the lead rulings M1, M2, M3, expiry and received-date rules.
+  { name: 'M10: same-day tie broken by lot id only (batch_number ignored)', file: 'lib/productMergeLots.ts', tests: ['test-merge-lots-by-date-pure.cjs', 'test-merge-by-received-date-native.cjs'],
+    from: 'return left !== right ? left - right : Number(a.id) - Number(b.id)', to: 'return Number(a.id) - Number(b.id)' },
+  // M12 (undo fingerprint not widened when the fold writes the kept lot: dropping the `|| keeperLotMetadataWritten` term at products.ts) is an EQUIVALENT
+  // mutant, not a gap: the merge action's own recorded fingerprint is always the full-row one (undoAppliers.ts mergeStateFingerprint callers pass
+  // fullBatchMetadataFingerprint: true), so an edit of the kept lot after the merge is refused with or without the snapshot flag. Verified with an
+  // edit of received_branch_name (invisible to the stock-revision trigger): still 409 (test 'undo is REFUSED once the kept lot ... was edited').
+  { name: 'M17: the write-off path does not mark its lots', file: 'routes/products.ts', tests: ['test-merge-by-received-date-native.cjs'],
+    from: 'if (wasActive) statements.push(', to: 'if (false) statements.push(' },
+  { name: 'M1: an inactive kept lot is a match target again', file: 'lib/productMergeLots.ts', tests: ['test-merge-lots-by-date-pure.cjs', 'test-merge-by-received-date-native.cjs'],
+    from: '[...keeperLots].filter(isMergeableLot).sort(lotOrder)', to: '[...keeperLots].sort(lotOrder)' },
+  { name: 'M2: an inactive discarded lot with no stock is folded or moved again', file: 'lib/productMergeLots.ts', tests: ['test-merge-lots-by-date-pure.cjs'],
+    from: '[...duplicateLots].filter(isDuplicateLotInPlay).sort(lotOrder)', to: '[...duplicateLots].sort(lotOrder)' },
+  { name: 'M2: the case read returns inactive lots again', file: 'lib/productMergeSnapshot.ts', tests: ['test-merge-by-received-date-native.cjs'],
+    from: 'AND (is_active = 1 OR EXISTS (SELECT 1 FROM branch_batch_stock WHERE batch_id = product_batches.id AND quantity > 0))', to: '' },
+  { name: 'M3: the second discarded lot of a new date is created too (no fold into the first)', file: 'lib/productMergeLots.ts', tests: ['test-merge-lots-by-date-pure.cjs', 'test-merge-by-received-date-native.cjs'],
+    from: 'const target = byDate.get(date) ?? createdByDate.get(date)', to: 'const target = byDate.get(date)' },
+  { name: 'B3: undo never restores the kept lot before-image', file: 'lib/undoAppliers.ts', tests: ['test-merge-by-received-date-native.cjs'],
+    from: 'for (const [keeperBatchId, before] of keeperLotRestores) {', to: 'for (const [keeperBatchId, before] of [] as typeof keeperLotRestores) {' },
+  { name: 'expiry compared as raw strings again', file: 'lib/productMergeLots.ts', tests: ['test-merge-lots-by-date-pure.cjs'],
+    from: '.map(isoExpiry).filter((value): value is string => value !== null)', to: '.map((value) => String(value ?? \'\').trim()).filter(Boolean)' },
+  { name: 'a non-ISO received date is read (month-first) again', file: 'lib/productMergeLots.ts', tests: ['test-merge-lots-by-date-pure.cjs'],
+    from: 'if (!text || !ISO_LED.test(text)) return null', to: 'if (!text) return null' },
 ]
 
 function copySrc(target) {

@@ -164,8 +164,6 @@ async function main() {
     const response = await app.request(`http://local/${id}/cost-breakdown`, {}, { DB: h.raw }, { waitUntil() {}, passThroughOnException() {} })
     return { status: response.status, json: await response.json().catch(() => null) }
   }
-  const creditRows = (h) => plain(h.raw.prepare(`SELECT id FROM product_batches pb WHERE pb.is_active=1 AND pb.payment_status='credit'
-    AND (pb.received_quantity IS NULL OR pb.received_quantity>0 OR COALESCE(pb.received_cost_usd,0)>0) AND pb.credit_due_date IS NOT NULL ORDER BY id`).all()).map((row) => row.id)
 
   const h = world()
   const result = await merge(h)
@@ -179,10 +177,10 @@ async function main() {
     assert.equal(h.raw.prepare('SELECT is_active FROM products WHERE id=?').get([K]).is_active, 1)
   })
 
-  await check('same date, different cost and expiry: stock is ADDED into the kept lot, per branch, with the distinct non-zero mean and the earliest expiry', () => {
+  await check('same date, different cost and expiry: stock is ADDED into the kept lot, per branch, with the quantity-weighted cost and the earliest expiry', () => {
     // K1 + D1 + D7: br1 5+3, br2 2+1, br3 0+2+1.
     assert.deepEqual(lotStock(h)[101], { 1: 8, 2: 3, 3: 3 })
-    assert.equal(byId(101).unit_cost_usd, 2.2, 'mean of the distinct costs {2.00, 2.40}; D7 repeats 2.40 and a per-lot mean would give 2.2667')
+    assert.equal(byId(101).unit_cost_usd, 2.2, 'weighted by stock: (7 x 2.00 + 5 x 2.40 + 2 x 2.40) / 14 = 2.2 exactly (a plain mean of the three costs would give 2.2667)')
     assert.equal(byId(101).expiry_date, '2027-01-31', 'the earliest of 2027-01-31, 2027-03-31, 2027-12-31')
     assert.equal(byId(101).variant_product_id, K)
   })
@@ -363,12 +361,8 @@ async function main() {
     assert.ok(twinLots.every((row) => row.excluded === 'inactive'), 'the source lots are shown, as inactive')
   })
 
-  await check('FINDING pinned: the supplier credit reminder lists only ACTIVE lots, so an emptied source lot that was on credit leaves it', () => {
-    // Before: 103 (K, credit, due 10 Dec), 201 (D, credit) and 203 (D, credit) are active credit lots.
-    assert.deepEqual(creditRows(probe), [103, 201, 203])
-    // After: 201 and 203 were added into paid kept lots and are inactive, so their credit is no longer reminded.
-    assert.deepEqual(creditRows(h), [103])
-  })
+  // The credit reminder after a merge is checked through the REAL route further down ('payables: ...'): a credit owed on a lot the merge deactivated
+  // still reminds, once, and an unmarked inactive lot does not. (An earlier check here read a private is_active = 1 query instead of the route.)
 
   await check('UNDO restores the exact prior state: lots (cost, expiry, activity, key, number), stock, allocations, products', async () => {
     const undone = await historyAction(h, 'undo')
@@ -600,7 +594,10 @@ async function main() {
 
   // ---- a later edit of a lot the merge rewrote must not be overwritten by undo's before-image ---------------------------
   await check('undo is REFUSED once the kept lot cost or expiry was edited after the merge, and nothing changes', async () => {
-    for (const [column, value] of [['expiry_date', '2027-01-01'], ['unit_cost_usd', 2.5]]) {
+    // received_branch_name is the one lot column the stock-revision trigger does not watch (test-stock-revision-ignores-batch-label-native), so
+    // an edit of it is seen ONLY by the widened full-row fingerprint the fold sets when it writes the kept lot (M12): without that widening
+    // the cost and expiry cases are still refused by the revision trigger, but this one would slip through.
+    for (const [column, value] of [['expiry_date', '2027-01-01'], ['unit_cost_usd', 2.5], ['received_branch_name', 'Renamed']]) {
       const w = world()
       assert.equal((await merge(w)).status, 200)
       fixtureWrite(w, () => w.raw.db.prepare(`UPDATE product_batches SET ${column}=?, updated_at=CURRENT_TIMESTAMP WHERE id=101`).run(value))
