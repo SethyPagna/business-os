@@ -425,7 +425,10 @@ async function main() {
       assert.equal(changed.status, 409, JSON.stringify(changed.body)); assert.equal(changed.body.code, 'resolve_request_conflict')
       const applier = undoAppliers.resolveUndoApplier(JSON.parse(history.undo_payload))
       await applier.run(JSON.parse(history.undo_payload), { env: { DB: {} }, user: ADMIN, direction: 'undo', historyId: history.id })
-      assert.deepEqual(one('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=10'), before)
+      // Undo restores the keeper's saved cost at 4 places (cost-4dp, lead decision 5: undo and restore round on write-back): the legacy 5.123456 comes back as 5.1235.
+      // NULL stays NULL and 0 stays 0, so chosen NULL, zero and a number remain distinct.
+      const at4 = (value) => (value === null ? null : Number(value.toFixed(4)))
+      assert.deepEqual(one('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=10'), { cost_price_usd: at4(before.cost_price_usd), cost_price_khr: at4(before.cost_price_khr) })
       await applier.run(JSON.parse(history.redo_payload), { env: { DB: {} }, user: ADMIN, direction: 'redo', historyId: history.id })
       assert.deepEqual(one('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=10'), expected)
       assert.deepEqual(one('SELECT undo_payload,redo_payload FROM action_history WHERE id=?', history.id), { undo_payload: history.undo_payload, redo_payload: history.redo_payload })
