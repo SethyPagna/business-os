@@ -6,6 +6,15 @@
 -- production census 16 Nov 2026 found 123 of 8,690 products with cost_price_usd over 4 decimals (predicate: ABS(c * 10000 - ROUND(c * 10000))
 -- > 0.000001 on a numeric value; ops/queries/stock-state-census-exactness-20261116.sql cost_usd_over_4dp). This file rounds them.
 --
+-- Scope predicate (round 4): a numeric value x is in scope when x IS NOT HALF_UP_4DP(x), the SQL of the shipped helper
+-- (CAST(ROUND((x) * 10000.0000000000036) AS INTEGER) / 10000.0). The scope, the PRE counts and every POST "still over 4 places" check use this one form, so a value the
+-- file cannot change is never in scope and a value it changes is never missed. The census form ABS(x * 10000 - ROUND(x * 10000)) > 0.000001 read some exact 4-place
+-- values of 2^20 and above (KHR 1500000.0002) as long: rounding cannot change them and the POST check aborted the file. ops/queries/cost-4dp-0313-precheck-20261117.sql
+-- uses the same predicate and predicts every abort below (apply_holds = 1 only when PRE and POST would pass).
+-- Added PREs (round 4), before any write: no active branch cutover (cost_4dp_0313_pre_branch_cutover_active: an active cutover protects the maintenance flag the lot statement
+-- needs, so the file would abort mid-way); no value in scope above 0 that rounds to 0 (cost_4dp_0313_pre_positive_cost_rounds_to_zero: a lot or entry cost below 0.00005 would become
+-- $0 and drop out of the catalog-cost formula as unknown; that is an owner decision, not a silent change).
+--
 -- Scope (any row, active or not): products.cost_price_usd, cost_price_khr, purchase_price_usd, purchase_price_khr; product_batches.unit_cost_usd,
 -- received_cost_usd; product_cost_entries.cost_usd, cost_khr, previous_cost_usd. Lots and entries are included on purpose: the catalog-cost
 -- formula and the merge authority read them, so a long lot or entry would bring the long product cost back at the next stock event.
@@ -79,34 +88,48 @@ SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM system_flags WHERE key = 'stock_schem
     AND NOT EXISTS (SELECT 1 FROM system_flags WHERE key IN ('maintenance', 'stock_transaction_permit'))
 THEN 1 ELSE json_extract('[]', '$[cost_4dp_0313_pre_state]') END;
 
-SELECT CASE WHEN (SELECT COUNT(*) FROM products WHERE (typeof(cost_price_usd) IN ('integer', 'real') AND ABS(cost_price_usd * 10000 - ROUND(cost_price_usd * 10000)) > 0.000001)
-    OR (typeof(cost_price_khr) IN ('integer', 'real') AND ABS(cost_price_khr * 10000 - ROUND(cost_price_khr * 10000)) > 0.000001)
-    OR (typeof(purchase_price_usd) IN ('integer', 'real') AND ABS(purchase_price_usd * 10000 - ROUND(purchase_price_usd * 10000)) > 0.000001)
-    OR (typeof(purchase_price_khr) IN ('integer', 'real') AND ABS(purchase_price_khr * 10000 - ROUND(purchase_price_khr * 10000)) > 0.000001)) <= 500
+SELECT CASE WHEN (SELECT COUNT(*) FROM products WHERE (typeof(cost_price_usd) IN ('integer', 'real') AND cost_price_usd IS NOT (CAST(ROUND((cost_price_usd) * 10000.0000000000036) AS INTEGER) / 10000.0))
+    OR (typeof(cost_price_khr) IN ('integer', 'real') AND cost_price_khr IS NOT (CAST(ROUND((cost_price_khr) * 10000.0000000000036) AS INTEGER) / 10000.0))
+    OR (typeof(purchase_price_usd) IN ('integer', 'real') AND purchase_price_usd IS NOT (CAST(ROUND((purchase_price_usd) * 10000.0000000000036) AS INTEGER) / 10000.0))
+    OR (typeof(purchase_price_khr) IN ('integer', 'real') AND purchase_price_khr IS NOT (CAST(ROUND((purchase_price_khr) * 10000.0000000000036) AS INTEGER) / 10000.0))) <= 500
 THEN 1 ELSE json_extract('[]', '$[cost_4dp_0313_pre_products_scope_over_500]') END;
 
-SELECT CASE WHEN (SELECT COUNT(*) FROM products WHERE ((typeof(cost_price_usd) IN ('integer', 'real') AND ABS(cost_price_usd * 10000 - ROUND(cost_price_usd * 10000)) > 0.000001) AND ABS(cost_price_usd) >= 1000000000) OR ((typeof(cost_price_khr) IN ('integer', 'real') AND ABS(cost_price_khr * 10000 - ROUND(cost_price_khr * 10000)) > 0.000001) AND ABS(cost_price_khr) >= 1000000000) OR ((typeof(purchase_price_usd) IN ('integer', 'real') AND ABS(purchase_price_usd * 10000 - ROUND(purchase_price_usd * 10000)) > 0.000001) AND ABS(purchase_price_usd) >= 1000000000) OR ((typeof(purchase_price_khr) IN ('integer', 'real') AND ABS(purchase_price_khr * 10000 - ROUND(purchase_price_khr * 10000)) > 0.000001) AND ABS(purchase_price_khr) >= 1000000000)) = 0
+SELECT CASE WHEN (SELECT COUNT(*) FROM products WHERE ((typeof(cost_price_usd) IN ('integer', 'real') AND cost_price_usd IS NOT (CAST(ROUND((cost_price_usd) * 10000.0000000000036) AS INTEGER) / 10000.0)) AND ABS(cost_price_usd) >= 1000000000) OR ((typeof(cost_price_khr) IN ('integer', 'real') AND cost_price_khr IS NOT (CAST(ROUND((cost_price_khr) * 10000.0000000000036) AS INTEGER) / 10000.0)) AND ABS(cost_price_khr) >= 1000000000) OR ((typeof(purchase_price_usd) IN ('integer', 'real') AND purchase_price_usd IS NOT (CAST(ROUND((purchase_price_usd) * 10000.0000000000036) AS INTEGER) / 10000.0)) AND ABS(purchase_price_usd) >= 1000000000) OR ((typeof(purchase_price_khr) IN ('integer', 'real') AND purchase_price_khr IS NOT (CAST(ROUND((purchase_price_khr) * 10000.0000000000036) AS INTEGER) / 10000.0)) AND ABS(purchase_price_khr) >= 1000000000)) = 0
 THEN 1 ELSE json_extract('[]', '$[cost_4dp_0313_pre_products_value_out_of_range]') END;
 
-SELECT CASE WHEN (SELECT COUNT(*) FROM product_batches WHERE (typeof(unit_cost_usd) IN ('integer', 'real') AND ABS(unit_cost_usd * 10000 - ROUND(unit_cost_usd * 10000)) > 0.000001)
-    OR (typeof(received_cost_usd) IN ('integer', 'real') AND ABS(received_cost_usd * 10000 - ROUND(received_cost_usd * 10000)) > 0.000001)) <= 5000
+SELECT CASE WHEN (SELECT COUNT(*) FROM product_batches WHERE (typeof(unit_cost_usd) IN ('integer', 'real') AND unit_cost_usd IS NOT (CAST(ROUND((unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0))
+    OR (typeof(received_cost_usd) IN ('integer', 'real') AND received_cost_usd IS NOT (CAST(ROUND((received_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0))) <= 5000
 THEN 1 ELSE json_extract('[]', '$[cost_4dp_0313_pre_product_batches_scope_over_5000]') END;
 
-SELECT CASE WHEN (SELECT COUNT(*) FROM product_batches WHERE ((typeof(unit_cost_usd) IN ('integer', 'real') AND ABS(unit_cost_usd * 10000 - ROUND(unit_cost_usd * 10000)) > 0.000001) AND ABS(unit_cost_usd) >= 1000000000) OR ((typeof(received_cost_usd) IN ('integer', 'real') AND ABS(received_cost_usd * 10000 - ROUND(received_cost_usd * 10000)) > 0.000001) AND ABS(received_cost_usd) >= 1000000000)) = 0
+SELECT CASE WHEN (SELECT COUNT(*) FROM product_batches WHERE ((typeof(unit_cost_usd) IN ('integer', 'real') AND unit_cost_usd IS NOT (CAST(ROUND((unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0)) AND ABS(unit_cost_usd) >= 1000000000) OR ((typeof(received_cost_usd) IN ('integer', 'real') AND received_cost_usd IS NOT (CAST(ROUND((received_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0)) AND ABS(received_cost_usd) >= 1000000000)) = 0
 THEN 1 ELSE json_extract('[]', '$[cost_4dp_0313_pre_product_batches_value_out_of_range]') END;
 
-SELECT CASE WHEN (SELECT COUNT(*) FROM product_cost_entries WHERE (typeof(cost_usd) IN ('integer', 'real') AND ABS(cost_usd * 10000 - ROUND(cost_usd * 10000)) > 0.000001)
-    OR (typeof(cost_khr) IN ('integer', 'real') AND ABS(cost_khr * 10000 - ROUND(cost_khr * 10000)) > 0.000001)
-    OR (typeof(previous_cost_usd) IN ('integer', 'real') AND ABS(previous_cost_usd * 10000 - ROUND(previous_cost_usd * 10000)) > 0.000001)) <= 5000
+SELECT CASE WHEN (SELECT COUNT(*) FROM product_cost_entries WHERE (typeof(cost_usd) IN ('integer', 'real') AND cost_usd IS NOT (CAST(ROUND((cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0))
+    OR (typeof(cost_khr) IN ('integer', 'real') AND cost_khr IS NOT (CAST(ROUND((cost_khr) * 10000.0000000000036) AS INTEGER) / 10000.0))
+    OR (typeof(previous_cost_usd) IN ('integer', 'real') AND previous_cost_usd IS NOT (CAST(ROUND((previous_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0))) <= 5000
 THEN 1 ELSE json_extract('[]', '$[cost_4dp_0313_pre_product_cost_entries_scope_over_5000]') END;
 
-SELECT CASE WHEN (SELECT COUNT(*) FROM product_cost_entries WHERE ((typeof(cost_usd) IN ('integer', 'real') AND ABS(cost_usd * 10000 - ROUND(cost_usd * 10000)) > 0.000001) AND ABS(cost_usd) >= 1000000000) OR ((typeof(cost_khr) IN ('integer', 'real') AND ABS(cost_khr * 10000 - ROUND(cost_khr * 10000)) > 0.000001) AND ABS(cost_khr) >= 1000000000) OR ((typeof(previous_cost_usd) IN ('integer', 'real') AND ABS(previous_cost_usd * 10000 - ROUND(previous_cost_usd * 10000)) > 0.000001) AND ABS(previous_cost_usd) >= 1000000000)) = 0
+SELECT CASE WHEN (SELECT COUNT(*) FROM product_cost_entries WHERE ((typeof(cost_usd) IN ('integer', 'real') AND cost_usd IS NOT (CAST(ROUND((cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0)) AND ABS(cost_usd) >= 1000000000) OR ((typeof(cost_khr) IN ('integer', 'real') AND cost_khr IS NOT (CAST(ROUND((cost_khr) * 10000.0000000000036) AS INTEGER) / 10000.0)) AND ABS(cost_khr) >= 1000000000) OR ((typeof(previous_cost_usd) IN ('integer', 'real') AND previous_cost_usd IS NOT (CAST(ROUND((previous_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0)) AND ABS(previous_cost_usd) >= 1000000000)) = 0
 THEN 1 ELSE json_extract('[]', '$[cost_4dp_0313_pre_product_cost_entries_value_out_of_range]') END;
 
 SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM product_batches pb WHERE pb.is_active IS NOT 1
     AND EXISTS (SELECT 1 FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0)
-    AND ((typeof(pb.unit_cost_usd) IN ('integer', 'real') AND ABS(pb.unit_cost_usd * 10000 - ROUND(pb.unit_cost_usd * 10000)) > 0.000001) OR (typeof(pb.received_cost_usd) IN ('integer', 'real') AND ABS(pb.received_cost_usd * 10000 - ROUND(pb.received_cost_usd * 10000)) > 0.000001)))
+    AND ((typeof(pb.unit_cost_usd) IN ('integer', 'real') AND pb.unit_cost_usd IS NOT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0)) OR (typeof(pb.received_cost_usd) IN ('integer', 'real') AND pb.received_cost_usd IS NOT (CAST(ROUND((pb.received_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0))))
 THEN 1 ELSE json_extract('[]', '$[cost_4dp_0313_pre_inactive_lot_holds_stock]') END;
+
+SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM branch_cutovers WHERE phase NOT IN ('completed', 'aborted'))
+THEN 1 ELSE json_extract('[]', '$[cost_4dp_0313_pre_branch_cutover_active]') END;
+
+SELECT CASE WHEN (SELECT COUNT(*) FROM products WHERE (typeof(cost_price_usd) IN ('integer', 'real') AND cost_price_usd > 0 AND (CAST(ROUND((cost_price_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0)
+    OR (typeof(cost_price_khr) IN ('integer', 'real') AND cost_price_khr > 0 AND (CAST(ROUND((cost_price_khr) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0)
+    OR (typeof(purchase_price_usd) IN ('integer', 'real') AND purchase_price_usd > 0 AND (CAST(ROUND((purchase_price_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0)
+    OR (typeof(purchase_price_khr) IN ('integer', 'real') AND purchase_price_khr > 0 AND (CAST(ROUND((purchase_price_khr) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0))
+  + (SELECT COUNT(*) FROM product_batches WHERE (typeof(unit_cost_usd) IN ('integer', 'real') AND unit_cost_usd > 0 AND (CAST(ROUND((unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0)
+    OR (typeof(received_cost_usd) IN ('integer', 'real') AND received_cost_usd > 0 AND (CAST(ROUND((received_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0))
+  + (SELECT COUNT(*) FROM product_cost_entries WHERE (typeof(cost_usd) IN ('integer', 'real') AND cost_usd > 0 AND (CAST(ROUND((cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0)
+    OR (typeof(cost_khr) IN ('integer', 'real') AND cost_khr > 0 AND (CAST(ROUND((cost_khr) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0)
+    OR (typeof(previous_cost_usd) IN ('integer', 'real') AND previous_cost_usd > 0 AND (CAST(ROUND((previous_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0)) = 0
+THEN 1 ELSE json_extract('[]', '$[cost_4dp_0313_pre_positive_cost_rounds_to_zero]') END;
 
 CREATE TABLE IF NOT EXISTS cost_4dp_repair_0313 (
   entity TEXT NOT NULL,
@@ -119,31 +142,31 @@ CREATE TABLE IF NOT EXISTS cost_4dp_repair_0313 (
 );
 
 INSERT INTO cost_4dp_repair_0313 (entity, row_id, col, before_value, after_value)
-SELECT 'products', id, 'cost_price_usd', cost_price_usd, (CAST(ROUND((cost_price_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM products WHERE (typeof(cost_price_usd) IN ('integer', 'real') AND ABS(cost_price_usd * 10000 - ROUND(cost_price_usd * 10000)) > 0.000001);
+SELECT 'products', id, 'cost_price_usd', cost_price_usd, (CAST(ROUND((cost_price_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM products WHERE (typeof(cost_price_usd) IN ('integer', 'real') AND cost_price_usd IS NOT (CAST(ROUND((cost_price_usd) * 10000.0000000000036) AS INTEGER) / 10000.0));
 
 INSERT INTO cost_4dp_repair_0313 (entity, row_id, col, before_value, after_value)
-SELECT 'products', id, 'cost_price_khr', cost_price_khr, (CAST(ROUND((cost_price_khr) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM products WHERE (typeof(cost_price_khr) IN ('integer', 'real') AND ABS(cost_price_khr * 10000 - ROUND(cost_price_khr * 10000)) > 0.000001);
+SELECT 'products', id, 'cost_price_khr', cost_price_khr, (CAST(ROUND((cost_price_khr) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM products WHERE (typeof(cost_price_khr) IN ('integer', 'real') AND cost_price_khr IS NOT (CAST(ROUND((cost_price_khr) * 10000.0000000000036) AS INTEGER) / 10000.0));
 
 INSERT INTO cost_4dp_repair_0313 (entity, row_id, col, before_value, after_value)
-SELECT 'products', id, 'purchase_price_usd', purchase_price_usd, (CAST(ROUND((purchase_price_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM products WHERE (typeof(purchase_price_usd) IN ('integer', 'real') AND ABS(purchase_price_usd * 10000 - ROUND(purchase_price_usd * 10000)) > 0.000001);
+SELECT 'products', id, 'purchase_price_usd', purchase_price_usd, (CAST(ROUND((purchase_price_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM products WHERE (typeof(purchase_price_usd) IN ('integer', 'real') AND purchase_price_usd IS NOT (CAST(ROUND((purchase_price_usd) * 10000.0000000000036) AS INTEGER) / 10000.0));
 
 INSERT INTO cost_4dp_repair_0313 (entity, row_id, col, before_value, after_value)
-SELECT 'products', id, 'purchase_price_khr', purchase_price_khr, (CAST(ROUND((purchase_price_khr) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM products WHERE (typeof(purchase_price_khr) IN ('integer', 'real') AND ABS(purchase_price_khr * 10000 - ROUND(purchase_price_khr * 10000)) > 0.000001);
+SELECT 'products', id, 'purchase_price_khr', purchase_price_khr, (CAST(ROUND((purchase_price_khr) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM products WHERE (typeof(purchase_price_khr) IN ('integer', 'real') AND purchase_price_khr IS NOT (CAST(ROUND((purchase_price_khr) * 10000.0000000000036) AS INTEGER) / 10000.0));
 
 INSERT INTO cost_4dp_repair_0313 (entity, row_id, col, before_value, after_value)
-SELECT 'product_batches', id, 'unit_cost_usd', unit_cost_usd, (CAST(ROUND((unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches WHERE (typeof(unit_cost_usd) IN ('integer', 'real') AND ABS(unit_cost_usd * 10000 - ROUND(unit_cost_usd * 10000)) > 0.000001);
+SELECT 'product_batches', id, 'unit_cost_usd', unit_cost_usd, (CAST(ROUND((unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches WHERE (typeof(unit_cost_usd) IN ('integer', 'real') AND unit_cost_usd IS NOT (CAST(ROUND((unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0));
 
 INSERT INTO cost_4dp_repair_0313 (entity, row_id, col, before_value, after_value)
-SELECT 'product_batches', id, 'received_cost_usd', received_cost_usd, (CAST(ROUND((received_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches WHERE (typeof(received_cost_usd) IN ('integer', 'real') AND ABS(received_cost_usd * 10000 - ROUND(received_cost_usd * 10000)) > 0.000001);
+SELECT 'product_batches', id, 'received_cost_usd', received_cost_usd, (CAST(ROUND((received_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches WHERE (typeof(received_cost_usd) IN ('integer', 'real') AND received_cost_usd IS NOT (CAST(ROUND((received_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0));
 
 INSERT INTO cost_4dp_repair_0313 (entity, row_id, col, before_value, after_value)
-SELECT 'product_cost_entries', id, 'cost_usd', cost_usd, (CAST(ROUND((cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_cost_entries WHERE (typeof(cost_usd) IN ('integer', 'real') AND ABS(cost_usd * 10000 - ROUND(cost_usd * 10000)) > 0.000001);
+SELECT 'product_cost_entries', id, 'cost_usd', cost_usd, (CAST(ROUND((cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_cost_entries WHERE (typeof(cost_usd) IN ('integer', 'real') AND cost_usd IS NOT (CAST(ROUND((cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0));
 
 INSERT INTO cost_4dp_repair_0313 (entity, row_id, col, before_value, after_value)
-SELECT 'product_cost_entries', id, 'cost_khr', cost_khr, (CAST(ROUND((cost_khr) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_cost_entries WHERE (typeof(cost_khr) IN ('integer', 'real') AND ABS(cost_khr * 10000 - ROUND(cost_khr * 10000)) > 0.000001);
+SELECT 'product_cost_entries', id, 'cost_khr', cost_khr, (CAST(ROUND((cost_khr) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_cost_entries WHERE (typeof(cost_khr) IN ('integer', 'real') AND cost_khr IS NOT (CAST(ROUND((cost_khr) * 10000.0000000000036) AS INTEGER) / 10000.0));
 
 INSERT INTO cost_4dp_repair_0313 (entity, row_id, col, before_value, after_value)
-SELECT 'product_cost_entries', id, 'previous_cost_usd', previous_cost_usd, (CAST(ROUND((previous_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_cost_entries WHERE (typeof(previous_cost_usd) IN ('integer', 'real') AND ABS(previous_cost_usd * 10000 - ROUND(previous_cost_usd * 10000)) > 0.000001);
+SELECT 'product_cost_entries', id, 'previous_cost_usd', previous_cost_usd, (CAST(ROUND((previous_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_cost_entries WHERE (typeof(previous_cost_usd) IN ('integer', 'real') AND previous_cost_usd IS NOT (CAST(ROUND((previous_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0));
 
 CREATE TABLE _cost_4dp_fingerprint_0313 (
   k INTEGER PRIMARY KEY CHECK (k = 1),
@@ -274,27 +297,27 @@ UPDATE cache_versions SET version = version + 1, updated_at = CURRENT_TIMESTAMP 
 SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM system_flags WHERE key IN ('maintenance', 'stock_transaction_permit'))
 THEN 1 ELSE json_extract('[]', '$[cost_4dp_0313_post_flag_left]') END;
 
-SELECT CASE WHEN (SELECT COUNT(*) FROM products WHERE (typeof(cost_price_usd) IN ('integer', 'real') AND ABS(cost_price_usd * 10000 - ROUND(cost_price_usd * 10000)) > 0.000001)
-    OR (typeof(cost_price_khr) IN ('integer', 'real') AND ABS(cost_price_khr * 10000 - ROUND(cost_price_khr * 10000)) > 0.000001)
-    OR (typeof(purchase_price_usd) IN ('integer', 'real') AND ABS(purchase_price_usd * 10000 - ROUND(purchase_price_usd * 10000)) > 0.000001)
-    OR (typeof(purchase_price_khr) IN ('integer', 'real') AND ABS(purchase_price_khr * 10000 - ROUND(purchase_price_khr * 10000)) > 0.000001)) = 0
+SELECT CASE WHEN (SELECT COUNT(*) FROM products WHERE (typeof(cost_price_usd) IN ('integer', 'real') AND cost_price_usd IS NOT (CAST(ROUND((cost_price_usd) * 10000.0000000000036) AS INTEGER) / 10000.0))
+    OR (typeof(cost_price_khr) IN ('integer', 'real') AND cost_price_khr IS NOT (CAST(ROUND((cost_price_khr) * 10000.0000000000036) AS INTEGER) / 10000.0))
+    OR (typeof(purchase_price_usd) IN ('integer', 'real') AND purchase_price_usd IS NOT (CAST(ROUND((purchase_price_usd) * 10000.0000000000036) AS INTEGER) / 10000.0))
+    OR (typeof(purchase_price_khr) IN ('integer', 'real') AND purchase_price_khr IS NOT (CAST(ROUND((purchase_price_khr) * 10000.0000000000036) AS INTEGER) / 10000.0))) = 0
 THEN 1 ELSE json_extract('[]', '$[cost_4dp_0313_post_products_still_over_4dp]') END;
 
 SELECT CASE WHEN (SELECT COUNT(*) FROM cost_4dp_repair_0313 l JOIN products r ON r.id = l.row_id WHERE l.entity = 'products'
     AND (CASE l.col WHEN 'cost_price_usd' THEN r.cost_price_usd WHEN 'cost_price_khr' THEN r.cost_price_khr WHEN 'purchase_price_usd' THEN r.purchase_price_usd WHEN 'purchase_price_khr' THEN r.purchase_price_khr END) IS l.after_value) = (SELECT COUNT(*) FROM cost_4dp_repair_0313 WHERE entity = 'products')
 THEN 1 ELSE json_extract('[]', '$[cost_4dp_0313_post_products_ledger]') END;
 
-SELECT CASE WHEN (SELECT COUNT(*) FROM product_batches WHERE (typeof(unit_cost_usd) IN ('integer', 'real') AND ABS(unit_cost_usd * 10000 - ROUND(unit_cost_usd * 10000)) > 0.000001)
-    OR (typeof(received_cost_usd) IN ('integer', 'real') AND ABS(received_cost_usd * 10000 - ROUND(received_cost_usd * 10000)) > 0.000001)) = 0
+SELECT CASE WHEN (SELECT COUNT(*) FROM product_batches WHERE (typeof(unit_cost_usd) IN ('integer', 'real') AND unit_cost_usd IS NOT (CAST(ROUND((unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0))
+    OR (typeof(received_cost_usd) IN ('integer', 'real') AND received_cost_usd IS NOT (CAST(ROUND((received_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0))) = 0
 THEN 1 ELSE json_extract('[]', '$[cost_4dp_0313_post_product_batches_still_over_4dp]') END;
 
 SELECT CASE WHEN (SELECT COUNT(*) FROM cost_4dp_repair_0313 l JOIN product_batches r ON r.id = l.row_id WHERE l.entity = 'product_batches'
     AND (CASE l.col WHEN 'unit_cost_usd' THEN r.unit_cost_usd WHEN 'received_cost_usd' THEN r.received_cost_usd END) IS l.after_value) = (SELECT COUNT(*) FROM cost_4dp_repair_0313 WHERE entity = 'product_batches')
 THEN 1 ELSE json_extract('[]', '$[cost_4dp_0313_post_product_batches_ledger]') END;
 
-SELECT CASE WHEN (SELECT COUNT(*) FROM product_cost_entries WHERE (typeof(cost_usd) IN ('integer', 'real') AND ABS(cost_usd * 10000 - ROUND(cost_usd * 10000)) > 0.000001)
-    OR (typeof(cost_khr) IN ('integer', 'real') AND ABS(cost_khr * 10000 - ROUND(cost_khr * 10000)) > 0.000001)
-    OR (typeof(previous_cost_usd) IN ('integer', 'real') AND ABS(previous_cost_usd * 10000 - ROUND(previous_cost_usd * 10000)) > 0.000001)) = 0
+SELECT CASE WHEN (SELECT COUNT(*) FROM product_cost_entries WHERE (typeof(cost_usd) IN ('integer', 'real') AND cost_usd IS NOT (CAST(ROUND((cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0))
+    OR (typeof(cost_khr) IN ('integer', 'real') AND cost_khr IS NOT (CAST(ROUND((cost_khr) * 10000.0000000000036) AS INTEGER) / 10000.0))
+    OR (typeof(previous_cost_usd) IN ('integer', 'real') AND previous_cost_usd IS NOT (CAST(ROUND((previous_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0))) = 0
 THEN 1 ELSE json_extract('[]', '$[cost_4dp_0313_post_product_cost_entries_still_over_4dp]') END;
 
 SELECT CASE WHEN (SELECT COUNT(*) FROM cost_4dp_repair_0313 l JOIN product_cost_entries r ON r.id = l.row_id WHERE l.entity = 'product_cost_entries'

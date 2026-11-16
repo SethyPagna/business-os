@@ -98,11 +98,14 @@ async function main() {
   // ---- 1. the fixture with one violating lot ---------------------------------------------------------------------------------------------------
   const base = run()
   assert.equal(base.max_lot_or_entry_change > 0.00004 && base.max_lot_or_entry_change <= 0.00005 + 1e-9, true, 'ties 1.00015, 2.00005 and 5000.55555 each move by half a tick')
-  assert.deepEqual({ ...base, max_lot_or_entry_change: 0 }, {
+  assert.ok(base.max_product_rederive_change > 0.00004 && base.max_product_rederive_change <= 0.00005 + 1e-9, 'the re-derive moves products 1 and 3 by about half a tick')
+  assert.deepEqual({ ...base, max_lot_or_entry_change: 0, max_product_rederive_change: 0 }, {
     products_to_round: 5, lots_to_round: 3, entries_to_round: 3, inactive_lots_holding_stock: 1, active_products_to_rederive: 2,
     products_cap: 500, products_cap_ok: 1, lots_cap: 5000, lots_cap_ok: 1, entries_cap: 5000, entries_cap_ok: 1,
     products_value_out_of_range: 0, lots_value_out_of_range: 0, entries_value_out_of_range: 0,
     max_lot_or_entry_change: 0, change_cap_ok: 1, blocking_flags: 0, epoch_ok: 1, pre_holds: 0,
+    // round 4: products 1 and 3 drift today and are in the re-derive set (0313 fixes them), nothing outside it drifts, no cutover, no positive-to-zero value
+    post_active_cost_drift_now: 2, post_drift_after_apply: 0, active_branch_cutovers: 0, max_product_rederive_change: 0, positive_cost_rounds_to_zero: 0, apply_holds: 0,
   }, 'exact numbers on the fixture: products 1,2,3,6,7; lots 1,3,7; entries 1,2,3; lot 3 violates; products 1 and 3 re-derive (2 is inactive)')
   assert.equal(migrationPre(), 'cost_4dp_0313_pre_inactive_lot_holds_stock', '0313 itself refuses this database for the same reason')
 
@@ -163,6 +166,72 @@ async function main() {
     ex('UPDATE product_cost_entries SET cost_usd = 1, cost_khr = 4100, previous_cost_usd = 1')
   }, (r, pre, name) => {
     assert.deepEqual([r.products_to_round, r.lots_to_round, r.entries_to_round, r.active_products_to_rederive, r.max_lot_or_entry_change, r.pre_holds], [0, 0, 0, 0, 0, 1], name); assert.equal(pre, null, name) })
+
+  // ---- 3b. round 4: apply_holds predicts the WHOLE file (PRE and POST), each scenario against a real run of 0313 -------------------------------
+  const objectsOf = () => JSON.stringify(db.prepare("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all())
+  const stateOf = () => JSON.stringify([db.prepare('SELECT * FROM products ORDER BY id').all(), db.prepare('SELECT * FROM product_batches ORDER BY id').all(), db.prepare('SELECT * FROM product_cost_entries ORDER BY id').all(), db.prepare('SELECT * FROM system_flags ORDER BY key').all(), objectsOf()])
+  const fullRun = () => { try { db.exec(migration); return null } catch (e) { const m = /cost_4dp_0313_[a-z0-9_]+/.exec(String(e.message)); assert.ok(m, 'the file aborted with a named check: ' + e.message); return m[0] } }
+  const whole = (name, mutate, check) => {
+    db.exec('SAVEPOINT whole')
+    try { mutate(); const row = run(); const before = stateOf(); const outcome = fullRun(); check(row, outcome, outcome === null ? null : stateOf() === before, name) } finally { db.exec('ROLLBACK TO whole; RELEASE whole') }
+  }
+  const applied = (row, outcome, name) => { assert.equal(row.apply_holds, 1, name + ': the precheck says apply'); assert.equal(outcome, null, name + ': 0313 applies') }
+  whole('cleared fixture', clean, applied)
+  // exact 4-place values at or above 2^20 are NOT long: the census form read them as long, the file could not change them and aborted at POST.
+  const censusSaysLong = (x) => db.prepare('SELECT ABS(? * 10000 - ROUND(? * 10000)) > 0.000001 AS v').get(x, x).v === 1
+  for (const x of [1500000.0002, 8388608.1234, 12345678.1234]) {
+    assert.equal(censusSaysLong(x), true, `fixture check: the old predicate reports ${x} as long (the reviewer's case)`)
+    whole('large KHR ' + x, () => { clean(); ex('UPDATE products SET cost_price_khr = ?, purchase_price_khr = ? WHERE id = 8', x, x) }, (row, outcome, _n, name) => {
+      assert.equal(row.products_to_round, 5, name + ': not counted as long (same five products as the fixture)')
+      applied(row, outcome, name)
+    })
+  }
+  whole('large KHR on an entry', () => { clean(); ex('UPDATE product_cost_entries SET cost_khr = 8388608.1234 WHERE id = 4') }, (row, outcome, _n, name) => {
+    assert.equal(row.entries_to_round, 3, name); applied(row, outcome, name)
+  })
+  // a long value that IS over 4 places at that magnitude is rounded and the file applies
+  whole('long KHR at magnitude', () => { clean(); ex('UPDATE products SET cost_price_khr = 8388608.12345, purchase_price_khr = 8388608.12345 WHERE id = 8') }, (row, outcome, _n, name) => {
+    assert.equal(row.products_to_round, 6, name); applied(row, outcome, name)
+  })
+  // drift outside the re-derive set: reported, apply_holds = 0, and 0313 aborts at POST (the PRE passes)
+  whole('drift elsewhere', () => { clean(); ex('UPDATE products SET cost_price_usd = 9, purchase_price_usd = 9 WHERE id = 8') }, (row, outcome, _n, name) => {
+    assert.equal(row.post_active_cost_drift_now, 3, name + ': products 1 and 3 (fixed by 0313) and product 8')
+    assert.equal(row.post_drift_after_apply, 1, name + ': only product 8 would still drift after 0313'); assert.equal(row.pre_holds, 1, name)
+    assert.equal(row.apply_holds, 0, name); assert.equal(outcome, 'cost_4dp_0313_post_active_cost_drift', name)
+  })
+  // a long own cost on a product outside the set drifts unless its rounded cost equals the formula: 4.16665 rounds to 4.1667 = lot 6's cost
+  whole('long cost that rounds onto the formula', () => { clean(); ex('UPDATE products SET cost_price_usd = 4.16667, purchase_price_usd = 4.16667 WHERE id = 8') }, (row, outcome, _n, name) => {
+    assert.equal(row.post_active_cost_drift_now, 3, name); assert.equal(row.post_drift_after_apply, 0, name); applied(row, outcome, name)
+  })
+  // an active branch cutover: refused at PRE, nothing written
+  whole('active cutover', () => {
+    clean()
+    ex(`INSERT INTO branch_cutovers(operation_id, begin_request_id, actor_id, organization_id, control_incarnation, maintenance_token, source_branch_id, target_branch_id, intent_json, intent_digest,
+        source_preimage_json, target_preimage_json, maintenance_flag_json, phase, capture_digest, snapshot_digest, verification_digest, created_at, updated_at)
+        VALUES ('00000000-0000-0000-0000-000000000001', 'begin-request-1', 1, 'org', '00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000003', 1, 2, '{}', ?, '{"id":1}', '{"id":2}', '{}', 'moving', ?, ?, ?, 'now', 'now')`,
+    '0'.repeat(64), '0'.repeat(64), '0'.repeat(64), '0'.repeat(64))
+  }, (row, outcome, untouched, name) => {
+    assert.equal(row.active_branch_cutovers, 1, name); assert.equal(row.pre_holds, 0, name); assert.equal(row.apply_holds, 0, name)
+    assert.equal(outcome, 'cost_4dp_0313_pre_branch_cutover_active', name); assert.equal(untouched, true, name + ': refused before any write')
+  })
+  whole('completed cutover is not active', () => {
+    clean()
+    ex(`INSERT INTO branch_cutovers(operation_id, begin_request_id, actor_id, organization_id, control_incarnation, maintenance_token, source_branch_id, target_branch_id, intent_json, intent_digest,
+        source_preimage_json, target_preimage_json, maintenance_flag_json, phase, capture_digest, snapshot_digest, verification_digest, created_at, updated_at, manifest_json, manifest_digest, terminal_json)
+        VALUES ('00000000-0000-0000-0000-000000000001', 'begin-request-1', 1, 'org', '00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000003', 1, 2, '{}', ?, '{"id":1}', '{"id":2}', '{}', 'completed', ?, ?, ?, 'now', 'now', '{}', ?, '{}')`,
+    '0'.repeat(64), '0'.repeat(64), '0'.repeat(64), '0'.repeat(64), '0'.repeat(64))
+  }, (row, outcome, _n, name) => { assert.equal(row.active_branch_cutovers, 0, name); applied(row, outcome, name) })
+  // a tiny positive cost that would round to 0 needs an owner decision: refused at PRE, nothing written (the reviewer's probe: 0.4546 became 5)
+  for (const [label, sqlText] of [['lot unit cost', 'UPDATE product_batches SET unit_cost_usd = 0.00004 WHERE id = 1'], ['lot received cost', 'UPDATE product_batches SET received_cost_usd = 0.00004 WHERE id = 1'],
+    ['entry cost', 'UPDATE product_cost_entries SET cost_usd = 0.00004 WHERE id = 1'], ['entry cost in riel', 'UPDATE product_cost_entries SET cost_khr = 0.00004 WHERE id = 1'], ['product cost', 'UPDATE products SET cost_price_usd = 0.00004 WHERE id = 6']]) {
+    whole('positive rounds to zero: ' + label, () => { clean(); ex(sqlText) }, (row, outcome, untouched, name) => {
+      assert.equal(row.positive_cost_rounds_to_zero, 1, name); assert.equal(row.pre_holds, 0, name); assert.equal(row.apply_holds, 0, name)
+      assert.equal(outcome, 'cost_4dp_0313_pre_positive_cost_rounds_to_zero', name); assert.equal(untouched, true, name + ': refused before any write')
+    })
+  }
+  whole('0.00005 rounds to 0.0001, not zero', () => { clean(); ex('UPDATE product_batches SET unit_cost_usd = 0.00005, received_cost_usd = 0.00005 WHERE id = 7') }, (row, outcome, _n, name) => {
+    assert.equal(row.positive_cost_rounds_to_zero, 0, name); applied(row, outcome, name)
+  })
 
   // ---- 4. no personal data ---------------------------------------------------------------------------------------------------------------------
   assert.ok(!JSON.stringify(base).includes('SECRET'), 'no sentinel personal value reaches the result')

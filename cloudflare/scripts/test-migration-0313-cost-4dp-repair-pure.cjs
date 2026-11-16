@@ -126,7 +126,7 @@ const costs = (db) => ({
   entries: rows(db, 'SELECT id, cost_usd, cost_khr, previous_cost_usd FROM product_cost_entries ORDER BY id'),
 })
 const over4 = (db) => {
-  const p = (c) => `typeof(${c}) IN ('integer','real') AND ABS(${c} * 10000 - ROUND(${c} * 10000)) > 0.000001`
+  const p = (c) => `typeof(${c}) IN ('integer','real') AND ${c} IS NOT (CAST(ROUND((${c}) * 10000.0000000000036) AS INTEGER) / 10000.0)`
   const n = (t, cols) => one(db, `SELECT COUNT(*) n FROM ${t} WHERE ${cols.map(p).map((x) => `(${x})`).join(' OR ')}`).n
   return { products: n('products', ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr']),
     lots: n('product_batches', ['unit_cost_usd', 'received_cost_usd']), entries: n('product_cost_entries', ['cost_usd', 'cost_khr', 'previous_cost_usd']) }
