@@ -340,6 +340,15 @@ async function check(name, fn) {
   }
 }
 
+// The census predicate (stock-state-census cost_usd_over_4dp) as ids: every product, lot or manual cost entry holding a cost over 4 decimals.
+const over4 = (c) => `(typeof(${c}) IN ('integer','real') AND ABS(${c} * 10000 - ROUND(${c} * 10000)) > 0.000001)`
+const costCensus = () => ({
+  products: rawDb.prepare(`SELECT id FROM products WHERE ${['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr'].map(over4).join(' OR ')} ORDER BY id`).all().map(row => row.id),
+  lots: rawDb.prepare(`SELECT id FROM product_batches WHERE ${['unit_cost_usd', 'received_cost_usd'].map(over4).join(' OR ')} ORDER BY id`).all().map(row => row.id),
+  entries: rawDb.prepare(`SELECT id FROM product_cost_entries WHERE ${['cost_usd', 'cost_khr', 'previous_cost_usd'].map(over4).join(' OR ')} ORDER BY id`).all().map(row => row.id),
+})
+const isLongCost = (value) => Math.abs(value * 10000 - Math.round(value * 10000)) > 0.000001
+
 async function main() {
   await check('the actual movement route validates continuous date bounds before any stock test', async () => {
     const response = await app.request('/movements?createdFrom=2026-10-01T17%3A00%3A00Z', {}, fakeEnv, fakeExecutionCtx)
@@ -406,6 +415,8 @@ async function main() {
       assert.equal(json.createdSibling, true)
       const sibling = rawDb.prepare('SELECT cost_price_khr c, purchase_price_khr p FROM products WHERE id = @id').get({ id: json.productId })
       assert.deepEqual({ ...sibling }, { c: want, p: want }, 'sibling KHR cost for source ' + sourceCost)
+      // Census after the add: the source row keeps its legacy cost on purpose (the add does not rewrite it); the sibling adds no row over 4 decimals.
+      assert.deepEqual(costCensus(), { products: isLongCost(sourceCost) ? [4758] : [], lots: [], entries: [] }, 'census after the sibling add, source ' + sourceCost)
       assert.equal(rawDb.prepare('SELECT cost_price_khr c FROM products WHERE id = 4758').get({}).c, sourceCost, 'the source row is not rewritten by the add')
     }
   })
@@ -421,6 +432,7 @@ async function main() {
       assert.equal(json.createdSibling, true)
       const sibling = rawDb.prepare('SELECT cost_price_usd c, purchase_price_usd p FROM products WHERE id = @id').get({ id: json.productId })
       assert.deepEqual({ ...sibling }, { c: want, p: want }, 'sibling USD cost for source ' + sourceCost)
+      assert.deepEqual(costCensus(), { products: isLongCost(sourceCost) ? [4758] : [], lots: [], entries: [] }, 'census after the sibling add, source ' + sourceCost)
     }
   })
 

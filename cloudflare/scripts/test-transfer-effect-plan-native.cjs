@@ -233,6 +233,13 @@ async function main() {
     }
   })
 
+  // The census predicate (stock-state-census cost_usd_over_4dp) as ids: every lot, product or manual cost entry holding a cost over 4 decimals.
+  const over4 = (c) => `(typeof(${c}) IN ('integer','real') AND ABS(${c} * 10000 - ROUND(${c} * 10000)) > 0.000001)`
+  const census = (raw) => ({
+    lots: raw.prepare(`SELECT id FROM product_batches WHERE ${['unit_cost_usd', 'received_cost_usd'].map(over4).join(' OR ')} ORDER BY id`).all().map(row => row.id),
+    products: raw.prepare(`SELECT id FROM products WHERE ${['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr'].map(over4).join(' OR ')} ORDER BY id`).all().map(row => row.id),
+    entries: raw.prepare(`SELECT id FROM product_cost_entries WHERE ${['cost_usd', 'cost_khr', 'previous_cost_usd'].map(over4).join(' OR ')} ORDER BY id`).all().map(row => row.id),
+  })
   // cost-4dp: a transfer to ANOTHER product row creates the destination lot with the source lot's cost; a legacy cost over 4 places is stored
   // rounded (half away from zero), the movement snapshot keeps what the source lot held, a same-product transfer creates no lot.
   await check('cost-4dp: the lot a cross-product transfer creates is stored to 4 places', async () => {
@@ -244,6 +251,9 @@ async function main() {
       const made = w.raw.prepare('SELECT unit_cost_usd c FROM product_batches WHERE variant_product_id=4').all().map(row => row.c)
       assert.deepEqual(made, [want], 'destination lot for source cost ' + source)
       assert.equal(w.raw.prepare('SELECT unit_cost_usd c FROM product_batches WHERE id=1').get().c, source, 'the source lot is not rewritten')
+      // Census after the transfer: the one legacy source lot (id 1, deliberately not rewritten) is the only row over 4 decimals, and only when the source was long; the new lot adds none.
+      const legacy = Math.abs(source * 10000 - Math.round(source * 10000)) > 0.000001
+      assert.deepEqual(census(w.raw), { lots: legacy ? [1] : [], products: [], entries: [] }, 'census after the transfer of source cost ' + source)
     }
     const same = world()
     seedFixture(same.raw, () => same.raw.prepare('UPDATE product_batches SET unit_cost_usd=1.00015 WHERE id=1').run())
