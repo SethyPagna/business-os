@@ -193,5 +193,6 @@ SELECT
     'shop_devices', (SELECT COUNT(*) FROM shop_devices)
   ) AS rows_10,
   json_object(
-    'telegram_shift_report_sends', (SELECT COUNT(*) FROM telegram_shift_report_sends)
+    'telegram_shift_report_sends', (SELECT COUNT(*) FROM telegram_shift_report_sends),
+    'cost_4dp_repair_0313', (SELECT COUNT(*) FROM cost_4dp_repair_0313)
   ) AS rows_11;
