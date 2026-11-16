@@ -6,7 +6,7 @@ import type { SessionUser } from './auth'
 // imports one by one, so a new runtime import would break them.
 import type { ResolveChoiceValues } from './productResolveChoices'
 import { getDb } from './db'
-import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedStatement } from './catalogCostRecompute'
+import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedStatement, roundStoredCost } from './catalogCostRecompute'
 import { mergeCostUndoStatements, parseMergeCostOutcome, type MergeCostOutcome } from './productCostReview'
 import { audit } from './audit'
 import { hasRecordedSaleMoneyPrecision } from './saleMoneyPrecision'
@@ -2069,7 +2069,8 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
     // missing field would wipe a real cost off the keeper on undo -- so the
     // two columns join the SET list only when they are actually present.
     // Each column is restored exactly as snapshotted, unknown (NULL) included; one the snapshot never recorded is left alone.
-    const savedCost = (value: number | null | undefined): number | null => (value == null || !Number.isFinite(Number(value)) ? null : Number(value))
+    // A snapshot written before the 4-place rule can hold a cost over 4 places; it is restored rounded (nearest, half away from zero).
+    const savedCost = (value: number | null | undefined): number | null => roundStoredCost(value)
     const hasUsdCost = r.keeperPricingBefore.cost_price_usd !== undefined
     const hasKhrCost = r.keeperPricingBefore.cost_price_khr !== undefined
     const hasUsdTwin = r.keeperPricingBefore.purchase_price_usd !== undefined
@@ -3448,7 +3449,8 @@ async function replayMergeCostReview(payload: Record<string, unknown>, ctx: Undo
       AND json_extract(${eventJson('b')},'$.cost_review.before_key') IS @beforeKey
       AND json_extract(${eventJson('b')},'$.cost_review.fallback_usd') IS @usd AND json_extract(${eventJson('b')},'$.cost_review.fallback_khr') IS @khr)`)
     .get<{ id: number; details: string }>({ keeper: String(reversal.keeperId), rootKey: outcome.rootKey, currentKey: outcome.reviewKey,
-      beforeKey: outcome.beforeKey, usd: outcome.original.usd, khr: outcome.original.khr, mergeOperation: reversal.operationId,
+      // The merge receipt records the keeper's fallback cost at 4 places (mergeCostReviewStatements), so it is matched at 4 places.
+      beforeKey: outcome.beforeKey, usd: roundStoredCost(outcome.original.usd), khr: roundStoredCost(outcome.original.khr), mergeOperation: reversal.operationId,
       eventGeneration: state?.direction === 'undo' ? Number(pointer.generation) - 1 : Number(pointer.generation) })
   if (!root) throw refuse()
   const schema=await mergeReplayColumns(db)

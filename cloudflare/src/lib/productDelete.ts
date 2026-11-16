@@ -1,6 +1,7 @@
 import { assertProductsHaveNoStock, stockedProductIds, PRODUCT_HAS_STOCK_CODE, PRODUCT_HAS_STOCK_MESSAGE, productStockGuardStatement } from './productStockGuard'
 import type { SessionUser } from './auth'
 import { actorSnapshot } from './actorSnapshot'
+import { roundMoney4 } from './moneyPrecision'
 import type { getDb } from './db'
 
 export const PRODUCT_REMOVE_ACTION_KIND = 'product.remove'
@@ -234,10 +235,23 @@ function identifier(value: string): string {
   return `"${value}"`
 }
 
-function exactObjectSql(alias: string, object: Record<string, unknown>, parameter: string): string {
+// The four cost columns of a product row. A snapshot taken before the 4-place rule can hold a cost over 4 places; undo restores it rounded
+// (restoreProductStatement) and 0313 rounds the live row, so the guards accept the saved figure or its 4-place form (nearest, half away from zero).
+const PRODUCT_COST_FIELDS = ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr']
+const roundCost = (value: number): number | null => (Number.isFinite(value) ? roundMoney4(value) : null)
+function roundedProductCosts(row: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(row).map(([field, value]) => [field, PRODUCT_COST_FIELDS.includes(field) && typeof value === 'number' ? roundCost(value) : value]))
+}
+
+function exactObjectSql(alias: string, object: Record<string, unknown>, parameter: string, roundedParameter?: string): string {
   const fields = Object.keys(object)
   if (!fields.length) return '0'
-  return fields.map((field) => `${alias}.${identifier(field)} IS json_extract(@${parameter},'$.${field}')`).join('\n        AND ')
+  return fields.map((field) => {
+    const exact = `${alias}.${identifier(field)} IS json_extract(@${parameter},'$.${field}')`
+    const value = object[field]
+    return roundedParameter && PRODUCT_COST_FIELDS.includes(field) && typeof value === 'number' && roundCost(value) !== value
+      ? `(${exact} OR ${alias}.${identifier(field)} IS json_extract(@${roundedParameter},'$.${field}'))` : exact
+  }).join('\n        AND ')
 }
 
 function exactRowsSql(args: {
@@ -375,9 +389,9 @@ export function productRemoveGraphGuards(
     const selected = Object.fromEntries(productColumns.slice(offset, offset + 32).map((field) => [field, snapshot.product[field]]))
     productGuards.push({
       sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products p WHERE p.id=@product
-        AND ${exactObjectSql('p', selected, 'productJson')})
+        AND ${exactObjectSql('p', selected, 'productJson', 'productRoundedJson')})
         THEN 1 ELSE json_extract('', '$') END AS product_remove_product_guard`,
-      params: { product: plan.product_id, productJson: JSON.stringify(selected) },
+      params: { product: plan.product_id, productJson: JSON.stringify(selected), productRoundedJson: JSON.stringify(roundedProductCosts(selected)) },
     })
   }
   const rowGuards = [
@@ -654,7 +668,7 @@ function restoreProductStatement(plan: ProductRemovePlan): ProductRemoveStatemen
   return {
     sql: `UPDATE products SET ${fields.map((field) => `${identifier(field)}=json_extract(@row,'$.${field}')`).join(',')}
       WHERE id=@product`,
-    params: { row: JSON.stringify({ ...plan.product, is_active: 1 }), product: plan.product_id },
+    params: { row: JSON.stringify({ ...roundedProductCosts(plan.product), is_active: 1 }), product: plan.product_id },
   }
 }
 
