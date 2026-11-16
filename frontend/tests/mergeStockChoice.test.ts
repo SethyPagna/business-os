@@ -76,6 +76,7 @@ test('MERGE explains the received-date rule: same date is ADDED (weighted cost, 
   assert.match(hint, /weighted average/i)
   assert.match(hint, /earliest/i)
   assert.match(hint, /becomes a new received-date record/i)
+  assert.match(hint, /several records of one duplicate with that same date become a single record/i)
   assert.match(hint, /already inactive stay as they are/i)
   assert.doesNotMatch(hint, /lot code|batch number|batch(es)?|lots?/i)
 })
