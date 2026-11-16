@@ -249,13 +249,13 @@ const KNOWN_COMPARISONS: Array<[file: string, count: number, by: string, text: s
   ["routes/notifications.ts", 1, "bell inventory SELECT", "CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) THEN 1 ELSE 0 END AS is_out,"],
   ["routes/notifications.ts", 1, "bell inventory SELECT", "OR COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0))"],
   ["routes/notifications.ts", 1, "bell inventory SELECT", "SUM(CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) THEN 1 ELSE 0 END) OVER () AS out_total,"],
-  ["routes/portal.ts", 1, STOREFRONT, ": 'p.is_active = 1 AND COALESCE(p.stock_quantity, 0) > COALESCE(p.out_of_stock_threshold, 0)'"],
+  ["routes/portal.ts", 1, STOREFRONT, ": `p.is_active = 1 AND COALESCE(p.stock_quantity, 0) > ${portalStockLevelSql(rule).out}`"],
   ["routes/portal.ts", 1, STOREFRONT_RUN, "if (quantity <= low) return 'low_stock'"],
   ["routes/portal.ts", 1, STOREFRONT_RUN, "if (quantity <= out) return 'out_of_stock'"],
   ["routes/portal.ts", 1, STOREFRONT_RUN, "if (state === 'in_stock') return `${stockExpr} > ${level.out} AND ${stockExpr} > ${level.low}`"],
   ["routes/portal.ts", 1, STOREFRONT_RUN, "if (state === 'low_stock') return `${stockExpr} > ${level.out} AND ${stockExpr} <= ${level.low}`"],
   ["routes/portal.ts", 1, STOREFRONT_RUN, "if (state === 'out_of_stock') return `${stockExpr} <= ${level.out}`"],
-  ["routes/portal.ts", 1, STOREFRONT, "where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0)`)"],
+  ["routes/portal.ts", 1, STOREFRONT, "where.push(`${stockExpr} > ${level.out}`)"],
   ["routes/products.ts", 1, "products.ts", "if (stockState === 'healthy') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} > ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')}`)"],
   ["routes/products.ts", 1, "products.ts", "if (stockState === 'in_stock' || stockState === 'positive') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0)`)"],
   ["routes/products.ts", 1, "products.ts", "if (stockState === 'low') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} <= ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')}`)"],
@@ -263,7 +263,7 @@ const KNOWN_COMPARISONS: Array<[file: string, count: number, by: string, text: s
 ]
 // A comparison operator next to a threshold, on either side: the columns and aliases, '${low...}' fragments, plain JS
 // 'low' / 'out' variables, effectiveLowStockThreshold(...) and the isFinite-guarded out threshold.
-const THRESHOLD_TOKEN = String.raw`(?:COALESCE\(|Number\(|toNumber\()?(?:[\w.]*(?:low_stock_threshold|out_of_stock_threshold|low_threshold|out_threshold|__low|__out)\b|\$\{\s*low\w*\s*\}|\$\{\s*lowStockThresholdSql|\$\{\s*level\.(?:low|out)\s*\}|effectiveLowStockThreshold\(|\(Number\.isFinite\(out\)|\blow\b|\bout\b|\blowThreshold\b|\boutThreshold\b)`
+const THRESHOLD_TOKEN = String.raw`(?:COALESCE\(|Number\(|toNumber\()?(?:[\w.]*(?:low_stock_threshold|out_of_stock_threshold|low_threshold|out_threshold|__low|__out)\b|\$\{\s*low\w*\s*\}|\$\{\s*lowStockThresholdSql|\$\{\s*level\.(?:low|out)\s*\}|\$\{\s*portalStockLevelSql\([^)]*\)\.out\s*\}|effectiveLowStockThreshold\(|\(Number\.isFinite\(out\)|\blow\b|\bout\b|\blowThreshold\b|\boutThreshold\b)`
 const COMPARE_OPERATOR = String.raw`(?<![=\-<>])(?:<=|>=|<|>)(?![=>])`
 const COMPARISON = new RegExp(`${COMPARE_OPERATOR}\\s*${THRESHOLD_TOKEN}|${THRESHOLD_TOKEN}\\s*${COMPARE_OPERATOR}`)
 function listTs(dir: string, base = ''): string[] {
