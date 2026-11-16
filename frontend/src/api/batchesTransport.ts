@@ -115,11 +115,11 @@ export type BatchSelection = {
 
 // GET /api/batches/tracked-product-ids?branchId= -- product ids with a lot
 // HOLDING STOCK (quantity > 0), optionally scoped to one branch (owner 14 Nov:
-// an empty lot cannot be transferred, so it does not count). Its one reader is
-// the Transfer screen, which shows its received-date picker for these products;
-// the POS tap always opens the lot sheet and no longer reads this list (11 Nov).
-// The Worker may serve it up to 5 minutes late after a sale empties or a cancel
-// refills a lot; the server picks the lot (FIFO or the named one) either way.
+// an empty lot cannot be transferred, so it does not count). The POS stopped
+// reading it in 6.0.1639 (its tap always opens the lot sheet). Its only caller
+// is TransferModal single mode, unreachable today (mode has no setter); the live
+// multiple mode loads each row's lots itself. Cached on products + stock +
+// inventory, so a sale that empties a lot shows here at once.
 export function getTrackedBatchProductIds(branchId?: number | string | null): Promise<{ productIds: number[] }> {
   const scope = branchId != null && branchId !== 'all' ? String(branchId) : 'all'
   const query = scope === 'all' ? '' : `?branchId=${encodeURIComponent(scope)}`

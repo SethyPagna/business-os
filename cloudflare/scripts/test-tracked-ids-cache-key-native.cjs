@@ -1,22 +1,17 @@
 #!/usr/bin/env node
 'use strict'
-// S1, audit #3 (owner 14 Nov: "Drop `stock` from that list's cache key"): GET /api/batches/tracked-product-ids is cached on the versions of `products` and `inventory` and no
-// longer on `stock`, which every sale moves on every till (hit rate: prod misses 264 x 32,889 rows against 60 hits in the 7-day metrics).
+// S1, audit #3, REVERSED. 6.0.2314 dropped `stock` from this cache key; the lead ruled under the Core Rule that a zero saving cannot justify an inexact list, so 6.0.2314 was
+// reverted by a forward commit. GET /api/batches/tracked-product-ids is cached on the versions of `products`, `stock` and `inventory`.
+// The answer is a pure function of (branch, which lots hold quantity > 0). A sale that empties a lot, a cancel or undo that refills one, and a quantity-only Set with the narrow
+// switch on move ONLY `stock`. No shipped screen reads the list today (TransferModal single mode is unreachable, the POS stopped in 6.0.1639), so keeping `stock` in the key
+// costs nothing and the list stays exact.
 //
-// What the key used to separate, and what it separates now (url = branch + identity, then versions):
-//     before: url | products | stock | inventory        after: url | products | inventory
-// The answer is a pure function of (branch, which lots hold quantity > 0). So the question "is the cached answer identical for every input the key used to separate?" is answered
-// by enumerating every kind of write that can change that function and asking, per kind, which versions it moves:
-//   * a write that moves `products` or `inventory` (receive, stock-in, return, transfer, merge, import, adjust with the narrow switch off, reset) recomputes under the new key: IDENTICAL.
-//   * a write that moves nothing the answer reads (a sale that leaves the lot above zero, any quantity change that does not cross zero) leaves the answer unchanged: the cached answer is
-//     identical to a fresh one, and the new key keeps it instead of recomputing: the saving.
-//   * the ONE remaining difference, the set difference between the old and the new key: a write that moves `stock` and neither `products` nor `inventory` AND takes a lot across zero
-//     (a sale emptying a lot, a cancelled sale or an undo refilling one, a quantity-only Set with the narrow switch on). The old key recomputed at once; the new one serves the previous
-//     list for at most the entry's TTL (300 s, asserted below). That is the owner's accepted trade: the list only decides whether the Transfer screen shows its OPTIONAL received-date
-//     picker, and the server chooses the lots itself (FIFO or the named lot, lib/transferOperation.ts), so a late list never moves stock from the wrong lot.
-// The test runs the REAL route against the migrated schema with a version-keyed fake cache, drives the real writers that exist in the harness (POST /api/inventory/adjust and PATCH
-// /api/batches/:id/branches/:branchId, switch off and on), emulates the others with the exact versions their call sites bump, pins those call sites with a source scan, and plants
-// mutants (a key that drops `products`, `inventory` or the branch; a key that keeps `stock`).
+// This test enumerates every kind of write that can change the answer and asks, per kind, whether the route answers from its cache exactly what a fresh compute answers:
+//   * the real key: NO writer may come back late, including the five that take a lot across zero with a stock-only bump;
+//   * a mutant key that drops `stock` must leave EXACTLY those five zero-crossing writers late (so the test tells the right key from the wrong one);
+//   * mutants that drop `products`, the branch, or every version turn it red too.
+// It runs the REAL route against the migrated schema with a version-keyed fake cache, drives the real writers that exist in the harness (POST /api/inventory/adjust and PATCH
+// /api/batches/:id/branches/:branchId, switch off and on), emulates the others with the exact versions their call sites bump, and pins those call sites with a source scan.
 // Run: node scripts/test-tracked-ids-cache-key-native.cjs
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -87,7 +82,7 @@ const resetWorld = () => {
   store = new Map()
   for (const key of Object.keys(versions)) delete versions[key]
 }
-// The writers. `run` changes the rows (and bumps what the real call site bumps); `declared` marks the one class the owner's rule lets be late.
+// The writers. `run` changes the rows (and bumps what the real call site bumps); `declared` marks the zero-crossing stock-only writers: the ones a key without `stock` would serve late.
 const SALE_BUMPS = ['stock', 'sales'] // routes/sales.ts bumpVersions(c.env, ['stock', 'sales']) at every sale write; lib/saleBulkStatus.ts ['sales', 'stock']
 const writers = [
   { name: 'sale leaves the lot above zero (7 -> 5)', bumps: SALE_BUMPS, run: async () => { permit('UPDATE branch_batch_stock SET quantity=5 WHERE batch_id=10 AND branch_id=1'); await cacheOverride.bumpVersions(null, SALE_BUMPS) } },
@@ -123,7 +118,7 @@ async function enumerate(rule) {
     const cached = await answers() // what the route answers now, from its cache wherever the key still matches
     const fresh = await truth(rule) // what the database says now (this drops the entries: the writer's effect has been captured in `cached`)
     const changed = JSON.stringify(before) !== JSON.stringify(fresh)
-    rows.push({ name: writer.name, declared: !!writer.declared, moved, changed, late: JSON.stringify(cached) !== JSON.stringify(fresh), oldKeyWouldRecompute: moved.some((n) => ['products', 'stock', 'inventory'].includes(n)), newKeyRecomputes: moved.some((n) => ['products', 'inventory'].includes(n)) })
+    rows.push({ name: writer.name, declared: !!writer.declared, moved, changed, late: JSON.stringify(cached) !== JSON.stringify(fresh) })
   }
   return rows
 }
@@ -139,7 +134,7 @@ function bumpCallSites(filter) {
   return found.sort()
 }
 function staticCallSiteScan() {
-  // Every bumpVersion(s) call in src that moves `stock` with a literal list and neither `products` nor `inventory`: the complete "stock-only" writer set the key now ignores.
+  // Every bumpVersion(s) call in src that moves `stock` with a literal list and neither `products` nor `inventory`: the complete literal stock-only writer set.
   const found = []
   const walk = (dir) => { for (const entry of fs.readdirSync(dir, { withFileTypes: true })) { const full = path.join(dir, entry.name); if (entry.isDirectory()) walk(full); else if (full.endsWith('.ts')) scan(full) } }
   const scan = (file) => {
@@ -157,31 +152,23 @@ async function main() {
   // 0. the route's key, as written
   const source = fs.readFileSync(path.join(SRC, 'routes', 'batches.ts'), 'utf8')
   const route = source.slice(source.indexOf("app.get('/tracked-product-ids'"), source.indexOf("app.get('/damaged-lots'"))
-  assert.match(route, /const namespaces = \['products', 'inventory'\]/, 'the key is exactly products + inventory')
-  assert.doesNotMatch(route, /'stock'/, "`stock` is not part of the tracked-ids key")
+  assert.match(route, /const namespaces = \['products', 'stock', 'inventory'\]/, 'the key is exactly products + stock + inventory')
   assert.match(route, /, 300, \(\) => getTrackedProductIds\(db, branchId\)/, 'the entry lives 300 s: the backstop for a write that announces nothing')
 
-  // 1. the real key, over every writer
+  // 1. the real key, over every writer: no writer comes back late
   const real = await enumerate((url, tokens) => `${url}#${tokens.join('|')}`)
-  assert.deepEqual(requestedNamespaces, ['products', 'inventory'], 'the route asked the cache for exactly these two versions')
+  assert.deepEqual(requestedNamespaces, ['products', 'stock', 'inventory'], 'the route asked the cache for exactly these three versions')
   assert.equal(seenTtl, TTL_SECONDS, 'and cached for 300 s')
-  const stale = real.filter((row) => row.late)
-  // the set difference between the old key and the new one = the writers where the old key recomputed, the new one does not, and the answer changed
-  const setDifference = real.filter((row) => row.changed && row.oldKeyWouldRecompute && !row.newKeyRecomputes)
-  assert.deepEqual(stale.map((row) => row.name), setDifference.map((row) => row.name), 'the answers that are late are exactly the set difference between the old key and the new one')
-  assert.deepEqual(stale.map((row) => row.name), real.filter((row) => row.declared).map((row) => row.name), 'and exactly the declared stock-only zero-crossing writers')
-  for (const row of real) {
-    assert.ok(!row.changed || row.oldKeyWouldRecompute, `${row.name}: the OLD key never served a changed answer here (the new difference is all there is)`)
-    if (!row.declared) assert.equal(row.late, false, `${row.name}: cached answer identical to a fresh one`)
-    if (row.late) assert.ok(row.moved.length > 0 && row.moved.every((n) => ['stock', 'sales'].includes(n)), `${row.name}: a late answer only follows a stock-only write (${row.moved})`)
+  assert.deepEqual(real.filter((row) => row.late).map((row) => row.name), [], 'no writer leaves the cached answer different from a fresh one')
+  const crossing = real.filter((row) => row.declared)
+  assert.equal(crossing.length, 5, 'five writers take a lot across zero with a stock-only bump')
+  for (const row of crossing) {
+    assert.ok(row.changed, `${row.name}: its answer really changes (so the cache must recompute it)`)
+    assert.ok(row.moved.length > 0 && row.moved.every((n) => ['stock', 'sales'].includes(n)), `${row.name}: it moves only stock/sales (${row.moved})`)
   }
-  const kept = real.filter((row) => !row.changed && !row.newKeyRecomputes && row.oldKeyWouldRecompute)
-  assert.ok(kept.length >= 1, 'the saving exists: a write the old key recomputed for (a sale above zero) is now served from the cache with an identical answer')
-  // The late answer ends at the TTL: expire the entry and the answer is exact again.
-  for (const row of stale) assert.ok(row.late)
-  console.log(`PASS real key: ${real.length} writers; ${stale.length} late = the set difference {${stale.map((r) => r.name.split(',')[0].slice(0, 40)).join(' | ')}}; ${kept.length} recomputes saved with identical answers`)
+  console.log(`PASS real key: ${real.length} writers, none late; ${crossing.length} zero-crossing stock-only writers all recompute`)
 
-  // 2. the complete stock-only writer set, pinned by a scan of every bump call site
+  // 2. the complete literal stock-only writer set, pinned by a scan of every bump call site
   const stockOnly = staticCallSiteScan()
   assert.deepEqual(stockOnly, [
     "lib/saleBulkStatus.ts: ['sales', 'stock']",
@@ -189,7 +176,7 @@ async function main() {
     "routes/sales.ts: ['stock', 'sales']",
     "routes/sales.ts: ['stock', 'sales']",
     "routes/sales.ts: ['stock', 'sales']",
-  ], 'a new literal stock-only bump must be reviewed against this list (it joins the declared late class); dynamic lists (undo, the narrow Set) are covered by the rows above')
+  ], 'a new literal stock-only bump must be reviewed against this list (its answer-changing writes depend on stock being in the key); dynamic lists (undo, the narrow Set) are covered by the rows above')
   // `inventory` is only ever bumped together with `products` (system reset), so a key that dropped it would be observationally equal today: the one equivalent mutant, shown by this scan, not by a row.
   const inventorySites = bumpCallSites((list) => /'inventory'/.test(list))
   assert.ok(inventorySites.length >= 1 && inventorySites.every((site) => /'products'/.test(site)), `every bump of 'inventory' also bumps 'products': ${inventorySites}`)
@@ -205,9 +192,9 @@ async function main() {
     const rows = await enumerate(rule)
     assert.ok(red(rows), `mutant "${name}" survived: no undeclared late answer appeared`)
   }
-  // And the old key (stock kept) must show no late answer at all: that is what the test is a set difference against.
-  const withStock = await enumerate((url, tokens) => `${url}#${tokens.join('|')}#stock:${versions.stock || 0}`)
-  assert.deepEqual(withStock.filter((row) => row.late).map((row) => row.name), [], 'the old key (stock included) is exact for every writer here')
-  console.log(`PASS mutants: ${mutants.length} keys that drop a component that matters turn the enumeration red; the old key is exact`)
+  // The mutant that matters: a key that drops `stock` leaves EXACTLY the five zero-crossing stock-only writers late, no more and no fewer.
+  const droppedStock = await enumerate((url, tokens) => `${url}#${tokens.filter((token) => !token.startsWith('stock:')).join('|')}`)
+  assert.deepEqual(droppedStock.filter((row) => row.late).map((row) => row.name), crossing.map((row) => row.name), 'a key without stock serves exactly the five zero-crossing writers late')
+  console.log(`PASS mutants: ${mutants.length} keys that drop a component that matters turn the enumeration red; the key without stock leaves exactly ${crossing.length} zero-crossing writers late`)
 }
 main().catch((error) => { console.error(error); process.exit(1) })
