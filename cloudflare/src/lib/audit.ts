@@ -57,7 +57,7 @@ export const AUDIT_RETENTION_KEPT_ENTITY_ACTIONS: Readonly<Record<string, readon
   users: AUDIT_RETENTION_ACCOUNT_ACTIONS,
   product: AUDIT_RETENTION_PRODUCT_ACTIONS,
   products: AUDIT_RETENTION_PRODUCT_ACTIONS,
-  system: ['reset_data', 'factory_reset', 'finalize_migration'],
+  system: ['reset_data', 'factory_reset', 'finalize_migration', 'sales_daily_rebuild'],
   'data-integrity': ['repair'],
   backup: ['restore'],
   import_job: ['import_job_approve', 'import_job_retry'],

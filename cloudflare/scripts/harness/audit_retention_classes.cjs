@@ -150,6 +150,7 @@ const ROWS = [
   ['system', 'reset_data', KEPT],
   ['system', 'finalize_migration', KEPT],
   ['system', 'import_orphan_staging_clean', PURGED],
+  ['system', 'sales_daily_rebuild', KEPT],
   ['data-integrity', 'repair', KEPT],
   ['settings', 'update', PURGED],
   ['pos_address_presets', 'update', PURGED],
@@ -280,7 +281,7 @@ const ROWS = [
 // caught instead of re-checked against itself. OWNER_KEPT: pairs the rule keeps forever. OWNER_PRUNED: controls that must
 // still expire. [entity, action, details?]
 const OWNER_KEPT = [
-  ['system', 'reset_data'], ['system', 'factory_reset'], ['system', 'finalize_migration'], ['data-integrity', 'repair'],
+  ['system', 'reset_data'], ['system', 'factory_reset'], ['system', 'finalize_migration'], ['system', 'sales_daily_rebuild'], ['data-integrity', 'repair'],
   ['backup', 'restore'], ['import_job', 'import_job_approve'], ['import_job', 'import_job_retry'],
   ['customer', 'link_sales'], ['customer', 'relink_sales'], ['customer', 'create_and_link_sales'], ['customer', 'merge'],
   ['customer', 'customer_same_name_phone_merge'], ['customer', 'mark_anonymous_customer'],

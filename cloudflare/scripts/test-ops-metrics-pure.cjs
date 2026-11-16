@@ -48,7 +48,7 @@ function fakeAnalytics(answers) {
   const calls = []
   const fetchImpl = async (url, init) => {
     calls.push({ url, init })
-    const name = /blob8 AS revision/.test(init.body) ? 'build-revisions' : /AS shape\b/.test(init.body) ? 'request-shapes' : /index1 = 'report_atomic_shadow'/.test(init.body) ? 'report-atomic-shadow' : /blob1 = 'bg'/.test(init.body) ? 'background-runs' : /blob4 AS status/.test(init.body) ? 'route-errors' : 'route-latency'
+    const name = /blob8 AS revision/.test(init.body) ? 'build-revisions' : /AS shape\b/.test(init.body) ? 'request-shapes' : /index1 = 'report_atomic_shadow'/.test(init.body) ? 'report-atomic-shadow' : /index1 = 'sales_daily_shadow'/.test(init.body) ? 'sales-daily-shadow' : /blob1 = 'bg'/.test(init.body) ? 'background-runs' : /blob4 AS status/.test(init.body) ? 'route-errors' : 'route-latency'
     const answer = answers[name] || { status: 200, data: [] }
     const body = answer.raw !== undefined ? answer.raw : JSON.stringify({ meta: [], data: answer.data, rows: answer.data.length })
     return { ok: answer.status >= 200 && answer.status < 300, status: answer.status, text: async () => body }
@@ -84,7 +84,7 @@ function fakeAnalytics(answers) {
       assert.strictEqual(sql.split("timestamp >= toDateTime('2026-09-30 01:00:00') AND timestamp < toDateTime('2026-09-30 13:00:00')").length, 2, `${name}: day 2 window`)
       assert.ok(/AND \(\(timestamp >= [^\n]* OR \(timestamp >= [^\n]*\)\)/.test(sql), `${name}: the day windows are OR-ed inside one AND group`)
       assert.ok(!/blob8 =/.test(sql), `${name}: no build filter unless asked`)
-      assert.ok(/\bFROM Business_OS_Analytics\b/.test(sql) && (name === 'report-atomic-shadow' ? /\bindex1 = 'report_atomic_shadow'/ : /\bindex1 = 'req_metrics'/).test(sql), `${name}: dataset and index`)
+      assert.ok(/\bFROM Business_OS_Analytics\b/.test(sql) && (name === 'report-atomic-shadow' ? /\bindex1 = 'report_atomic_shadow'/ : name === 'sales-daily-shadow' ? /\bindex1 = 'sales_daily_shadow'/ : /\bindex1 = 'req_metrics'/).test(sql), `${name}: dataset and index`)
     }
     const filtered = metrics.buildQuery(templates['route-latency'], { windows, revision: 'c0ffee12ab34-dirty' })
     assert.ok(filtered.includes(") AND blob8 = 'c0ffee12ab34-dirty'"), filtered)
@@ -142,7 +142,7 @@ function fakeAnalytics(answers) {
   })
 
   await check('request shapes and background runs: registered, read the layout lib/requestMetrics.ts writes, same template rules, and the datapoint they read exists', () => {
-    assert.deepStrictEqual([...metrics.QUERY_NAMES], ['route-latency', 'route-errors', 'build-revisions', 'request-shapes', 'background-runs', 'report-atomic-shadow'])
+    assert.deepStrictEqual([...metrics.QUERY_NAMES], ['route-latency', 'route-errors', 'build-revisions', 'request-shapes', 'background-runs', 'report-atomic-shadow', 'sales-daily-shadow'])
     const rm = requestMetricsModule()
     const shapes = metrics.buildQuery(templates['request-shapes'], { windows })
     // The query groups by the 13 characters after 'shape=' (no nested if(): the Analytics Engine parser's recursion limit refused 16 of them, and
@@ -230,6 +230,25 @@ function fakeAnalytics(answers) {
     assert.ok(!text.includes('periods'), 'the public log names no route')
   })
 
+  await check('sales daily shadow: its own kind and file, the same layout and flip rule as the report shadow, flat SQL (no nested if, no semicolon), one query per business day', async () => {
+    const sql = metrics.buildQuery(templates['sales-daily-shadow'], { windows, revision: 'c0ffee12ab34' })
+    for (const part of ["index1 = 'sales_daily_shadow'", 'blob1 AS route', 'blob2 AS outcome', 'blob3 AS first_diff_path', 'SUM(_sample_interval) AS comparisons', 'GROUP BY day, route, outcome, first_diff_path']) assert.ok(sql.includes(part), part)
+    assert.ok(!sql.includes('blob8') && !/\bif\(/i.test(sql) && !/multiIf/i.test(sql) && !sql.includes(';'), 'flat: no revision filter, no if(), no semicolon')
+    assert.ok(!templates['sales-daily-shadow'].includes("index1 = 'report_atomic_shadow'"), 'it never reads the report switch evidence')
+    const fake = fakeAnalytics({
+      'sales-daily-shadow': { status: 200, data: [{ day: '2026-11-14 00:00:00', route: 'dashboard', outcome: 'match', first_diff_path: '', comparisons: '10', served_bytes: '1' }] },
+      'build-revisions': { status: 200, data: [{ revision: 'dev' }] },
+    })
+    const result = await metrics.readMetrics({ fetchImpl: fake.fetchImpl, accountId: ACCOUNT, token: TOKEN, from: '2026-11-14', days: 3 })
+    assert.strictEqual(fake.calls.filter((c) => /index1 = 'sales_daily_shadow'/.test(c.init.body)).length, 3, 'one query per day')
+    assert.deepStrictEqual(result.salesDailyShadow.map((r) => [r.business_date, r.route, r.comparisons]), [['2026-11-14', 'dashboard', 10], ['2026-11-15', 'dashboard', 10], ['2026-11-16', 'dashboard', 10]])
+    assert.strictEqual(result.salesDailyShadowSummary.flipReady, true)
+    assert.strictEqual(result.shadowSummary.comparisons, 0, 'the report atomic evidence is untouched')
+    const text = metrics.publicLines({ result }).map(([t, v]) => common.formatPublic(t, v)).join('\n')
+    assert.ok(text.includes('sales daily shadow: 3 of 3 business days compared; comparisons 30, match 30, mismatch 0') && text.includes('sales daily flip ready: yes'), text)
+    assert.ok(!text.includes('dashboard'), 'the public log names no route')
+  })
+
   await check('request-shape and background rows reach the result as numbers and strings; the public log counts them and names nothing', async () => {
     const fake = fakeAnalytics({
       'request-shapes': { status: 200, data: [{ route: '/api/products/search', method: 'GET', shape: 'default', cache: 'miss', requests: '12', rows_read_total: '540000', rows_read_avg: '45000', d1_calls_avg: '11', wall_p95_ms: 'x' }] },
@@ -274,7 +293,7 @@ function fakeAnalytics(answers) {
       assert.ok(/^SELECT /.test(init.body), 'the body is the SQL itself, not JSON')
     }
     const bodies = fake.calls.map((c) => c.init.body)
-    assert.deepStrictEqual(metrics.QUERY_NAMES.map((name, i) => [name, bodies[i].includes("blob8 = 'c0ffee12ab34'")]), [['route-latency', true], ['route-errors', true], ['build-revisions', false], ['request-shapes', true], ['background-runs', true], ['report-atomic-shadow', false]], 'the build filter narrows every query but the builds list')
+    assert.deepStrictEqual(metrics.QUERY_NAMES.map((name, i) => [name, bodies[i].includes("blob8 = 'c0ffee12ab34'")]), [['route-latency', true], ['route-errors', true], ['build-revisions', false], ['request-shapes', true], ['background-runs', true], ['report-atomic-shadow', false], ['sales-daily-shadow', false]], 'the build filter narrows every query but the builds list')
     await assert.rejects(metrics.readMetrics({ fetchImpl: fake.fetchImpl, accountId: 'not-an-account', token: TOKEN, from: '2026-09-29', days: 1 }), (e) => e.code === 'bad-account-id')
   })
 

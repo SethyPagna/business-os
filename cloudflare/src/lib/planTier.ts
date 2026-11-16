@@ -311,6 +311,42 @@ export type PlanLimits = {
   // serverSignals.ts SIGNAL_TTL_MS) are sized from the Free value; scripts/test-plan-tier-pure.cjs pins that they still cover it.
   readSwitchMemoSeconds: number
 
+  // lib/salesDailyTotals.ts + lib/salesDailyCron.ts (read switch `sales_daily`): the stored daily sales totals. One recompute visit claims at most
+  // salesDailyRecomputeDaysPerRun dirty past days (one claim batch, one kernel read for them all, one commit batch: the calls do not grow with the
+  // days, the rows read do). The nightly reconcile re-derives the last salesDailyReconcileRecentDays days and a rotating slice of
+  // salesDailyReconcileOlderDaysPerRun older days from the raw records and compares; it runs at most once per salesDailyReconcileMinIntervalSeconds.
+  // salesDailyAlertListedDays is how many differing days one owner alert names. salesDailyRebuildMaxDays bounds one POST /api/system/sales-daily/rebuild
+  // range (each day it marks is a row written). Free keeps the slices small: its Worker has 10 ms of CPU and the kernel runs in the isolate.
+  salesDailyRecomputeDaysPerRun: number
+  salesDailyReconcileRecentDays: number
+  salesDailyReconcileOlderDaysPerRun: number
+  salesDailyReconcileMinIntervalSeconds: number
+  salesDailyAlertListedDays: number
+  salesDailyRebuildMaxDays: number
+  // The longest stored payload one day may carry (UTF-8 bytes). A day over it is stored with refusal sales_daily_payload_too_large and read raw. D1 holds 2 MB a row;
+  // Free's smaller number also bounds the JSON.parse a Free reader pays per day within its 10 ms of CPU.
+  salesDailyMaxPayloadBytes: number
+  // The BUDGET of one cron visit of either step (lib/salesDailyCron.ts), sized from scripts/sales-daily-cpu-floor.cjs (14 Nov 2026, laptop Node, 31 exact money keys per
+  // sale, common-denominator summation: 0.0125 ms per sale, 3.75 ms for a 300-sale day; the kernel's own per-add gcd cost 70 ms the same day). A Worker has no CPU clock
+  // (Date.now only moves at I/O), so a visit charges an ESTIMATE per unit of work, one business day, and stops BEFORE the next day would pass a budget:
+  // salesDailyStepCpuBudgetMs of the isolate's CPU (Free 7 of its 10 ms), salesDailyStepWallBudgetMs of wall time, and the D1 queries left under d1QueriesPerInvocation
+  // after salesDailyQueryReserve. A day's estimate is salesDailyCpuMsPerDayFixed + salesDailyCpuMsPerSourceRow x the rows it read (twice the measured per-sale cost, one sale
+  // per row, to leave room for the per-sale facts, the JSON and the encode that the floor does not time) and salesDailyKernelQueriesPerDay + the step's own statements.
+  // The first day of a visit always runs (progress); a day too heavy for the plan on its own is the known limit, named in the report.
+  // A shadow run (the stored path computed beside the raw one and compared) needs spare reads and CPU: Paid only, never on Free (owner: shadow on Paid before 30 Nov).
+  salesDailyShadowAllowed: boolean
+  // A day whose payload fails a storage rule is retried after salesDailyFailBackoffSeconds, doubled per failure up to salesDailyFailBackoffMaxSeconds; after salesDailyPoisonAlertAfter
+  // failures the owner is alerted (the same Telegram path as a mismatch). The same on both tiers: rules of the check, not of the plan.
+  salesDailyFailBackoffSeconds: number
+  salesDailyFailBackoffMaxSeconds: number
+  salesDailyPoisonAlertAfter: number
+  salesDailyStepCpuBudgetMs: number
+  salesDailyStepWallBudgetMs: number
+  salesDailyCpuMsPerSourceRow: number
+  salesDailyCpuMsPerDayFixed: number
+  salesDailyKernelQueriesPerDay: number
+  salesDailyQueryReserve: number
+
   // lib/buildShare.ts: how a request that finds costly shared work already being done by another request waits for it instead of doing
   // it again (storefront builds, the Dashboard overview, the core-data check, the stock-session column probe). The first request sets a
   // "building since <time>" marker (a plain value); the others poll for its FINISHED result with their own timer and never await
@@ -514,6 +550,23 @@ const PAID_LIMITS: PlanLimits = {
   dashboardStockOverviewCacheSeconds: 30,
   dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 5,
+  salesDailyRecomputeDaysPerRun: 30,
+  salesDailyReconcileRecentDays: 7,
+  salesDailyReconcileOlderDaysPerRun: 30,
+  salesDailyReconcileMinIntervalSeconds: 20 * 60 * 60,
+  salesDailyAlertListedDays: 3,
+  salesDailyRebuildMaxDays: 4000,
+  salesDailyMaxPayloadBytes: 1_000_000,
+  salesDailyShadowAllowed: true,
+  salesDailyFailBackoffSeconds: 3600,
+  salesDailyFailBackoffMaxSeconds: 86_400,
+  salesDailyPoisonAlertAfter: 3,
+  salesDailyStepCpuBudgetMs: 5000,
+  salesDailyStepWallBudgetMs: 60_000,
+  salesDailyCpuMsPerSourceRow: 0.025,
+  salesDailyCpuMsPerDayFixed: 0.3,
+  salesDailyKernelQueriesPerDay: 10,
+  salesDailyQueryReserve: 6,
   buildSharePollMs: 50,
   buildShareWaitMs: 1000,
   buildShareStaleMs: 3000,
@@ -575,6 +628,23 @@ const FREE_LIMITS: PlanLimits = {
   dashboardStockOverviewCacheSeconds: 300,
   dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 15,
+  salesDailyRecomputeDaysPerRun: 3,
+  salesDailyReconcileRecentDays: 7,
+  salesDailyReconcileOlderDaysPerRun: 3,
+  salesDailyReconcileMinIntervalSeconds: 20 * 60 * 60,
+  salesDailyAlertListedDays: 3,
+  salesDailyRebuildMaxDays: 1000,
+  salesDailyMaxPayloadBytes: 500_000,
+  salesDailyShadowAllowed: false,
+  salesDailyFailBackoffSeconds: 3600,
+  salesDailyFailBackoffMaxSeconds: 86_400,
+  salesDailyPoisonAlertAfter: 3,
+  salesDailyStepCpuBudgetMs: 7,
+  salesDailyStepWallBudgetMs: 20_000,
+  salesDailyCpuMsPerSourceRow: 0.025,
+  salesDailyCpuMsPerDayFixed: 0.3,
+  salesDailyKernelQueriesPerDay: 10,
+  salesDailyQueryReserve: 6,
   buildSharePollMs: 100,
   buildShareWaitMs: 2000,
   buildShareStaleMs: 5000,
