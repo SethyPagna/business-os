@@ -54,6 +54,8 @@ function getEntries(ctx) {
     ['categories', '/api/categories'], ['units', '/api/units'],
     // batches
     ['batches/picker-lots', '/api/batches/picker-lots?productId=1000&branchId=1'], ['batches/tracked-product-ids (active-or-stock batch catalog)', '/api/batches/tracked-product-ids'],
+    // S1 r2 F5: the shape a caller sends (the Transfer screen's single mode always passes its source branch), which reads the branch index, not the whole table.
+    ['batches/tracked-product-ids (branch scoped)', '/api/batches/tracked-product-ids?branchId=1'],
     ['batches/damaged-lots', '/api/batches/damaged-lots'], ['batches', '/api/batches?productId=1000'],
     // The live Transfer screen's per-row lot read (TransferModal multiple mode): the lots holding stock at the SOURCE branch.
     ['batches (Transfer lots, onlyAvailable at the source branch)', '/api/batches?productId=1000&branchId=1&onlyAvailable=1'],

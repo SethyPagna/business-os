@@ -12,5 +12,19 @@
    "9aaceb707d4d",
    "SELECT DISTINCT pb.variant_product_id AS productId FROM branch_batch_stock bbs JOIN product_batches pb ON pb.i"
   ]
+ ],
+ "batches-tracked-product-ids-branch-scoped": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "28332fef2ecf",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?)"
+  ],
+  [
+   "e84a734f16a9",
+   "SELECT DISTINCT pb.variant_product_id AS productId FROM branch_batch_stock bbs JOIN product_batches pb ON pb.i"
+  ]
  ]
 }
