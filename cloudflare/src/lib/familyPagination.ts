@@ -57,9 +57,21 @@ export const FAMILY_ROOT_KEY_SQL = `COALESCE(NULLIF(COALESCE(parent.name_key, p.
  * which the caller adds its own tail and finally id. Two unmerged duplicates (same name, same barcode)
  * are therefore consecutive under every sort a list offers (owner, 16 Nov 2026: "show them next to each
  * other, so it is easier to notice"). It orders the page's own rows in memory: no extra row is read.
- * Needs the selected columns `name` and `barcode`.
+ *
+ * The name is lower(trim()) like the family key. The barcode is the IDENTITY key the client, the duplicate
+ * finder and merge use (identityBarcodeKey in frontend/src/utils/productDetailRule.ts): trimmed, lowercased,
+ * and for an all-digit code folded past leading zeros when 3 or more digits remain, so '0885...' and '885...'
+ * are consecutive on flat lists as well. SQLite trim() strips spaces only, JS trim() any whitespace: a code
+ * with a tab or newline around it is the one case the two can differ.
+ * Defaults to the selected columns `name` and `barcode`; pass the qualified/aliased names otherwise.
  */
-export const INTRA_FAMILY_NAME_BARCODE_SQL = "lower(name) ASC, (COALESCE(trim(barcode), '') = '') ASC, lower(trim(barcode)) ASC"
+export function intraFamilyNameBarcodeSql(nameColumn = 'name', barcodeColumn = 'barcode'): string {
+  const code = `lower(trim(COALESCE(${barcodeColumn}, '')))`
+  const identityKey = `CASE WHEN ${code} NOT GLOB '*[^0-9]*' AND length(ltrim(${code}, '0')) >= 3 THEN ltrim(${code}, '0') ELSE ${code} END`
+  return `lower(trim(${nameColumn})) ASC, (${code} = '') ASC, ${identityKey} ASC`
+}
+
+export const INTRA_FAMILY_NAME_BARCODE_SQL = intraFamilyNameBarcodeSql()
 
 export interface FamilyPaginationOptions {
   db: D1Compat
