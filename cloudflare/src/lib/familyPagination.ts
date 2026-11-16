@@ -52,6 +52,15 @@ import type { D1Compat } from './db'
  */
 export const FAMILY_ROOT_KEY_SQL = `COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent.id, p.id))`
 
+/**
+ * Order of the rows INSIDE one family on a page: name, then barcode (rows with no barcode last), after
+ * which the caller adds its own tail and finally id. Two unmerged duplicates (same name, same barcode)
+ * are therefore consecutive under every sort a list offers (owner, 16 Nov 2026: "show them next to each
+ * other, so it is easier to notice"). It orders the page's own rows in memory: no extra row is read.
+ * Needs the selected columns `name` and `barcode`.
+ */
+export const INTRA_FAMILY_NAME_BARCODE_SQL = "lower(name) ASC, (COALESCE(trim(barcode), '') = '') ASC, lower(trim(barcode)) ASC"
+
 export interface FamilyPaginationOptions {
   db: D1Compat
   // Column list for the SELECT, using the `p.` alias, e.g.

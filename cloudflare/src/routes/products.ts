@@ -11,7 +11,7 @@ import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { collectMergeProductIds, describeMergeFailure } from '../lib/mergeRouteLog'
 import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
-import { pageFamiliesByKeys, paginateProductFamilies, paginateRankedIdFamilies, rankProductFamilies, typedOrderDrivenRead, typedOrderEligible, type FamilyGroupTotals, type FamilyPaginationOptions } from '../lib/familyPagination'
+import { INTRA_FAMILY_NAME_BARCODE_SQL, pageFamiliesByKeys, paginateProductFamilies, paginateRankedIdFamilies, rankProductFamilies, typedOrderDrivenRead, typedOrderEligible, type FamilyGroupTotals, type FamilyPaginationOptions } from '../lib/familyPagination'
 import { groupingPlan, type InventoryCheckGrouping } from '../lib/inventoryCheckGrouping'
 import { nextPromotionEdge, readPromotionEdge, readRankedScope, type RankedScope } from '../lib/rankedScope'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
@@ -1050,11 +1050,12 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     : sort === 'created_asc' ? 'latest_created_at ASC, family_name ASC'
     : sort === 'name_desc' ? 'family_name DESC'
     : 'family_name ASC'
-  const intraFamilyOrderSql =
-    sort === 'created_desc' ? 'created_at DESC, id DESC'
-    : sort === 'created_asc' ? 'created_at ASC, id ASC'
-    : sort === 'name_desc' ? 'lower(name) DESC, id ASC'
-    : 'lower(name) ASC, id ASC'
+  // Inside a family: name, then barcode, then the sort's own tail, then id, so unmerged duplicates sit
+  // next to each other under every sort (owner, 16 Nov 2026).
+  const intraFamilyOrderSql = [
+    INTRA_FAMILY_NAME_BARCODE_SQL,
+    sort === 'created_desc' ? 'created_at DESC, id DESC' : sort === 'created_asc' ? 'created_at ASC, id ASC' : 'id ASC',
+  ].join(', ')
 
   const db = getDb(env)
   // loadLowStockConfig and the promotion-rules read are independent of each
