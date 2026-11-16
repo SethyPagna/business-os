@@ -188,4 +188,60 @@ check('plan: nothing is planned for a lot with no same-date kept lot', () => {
   assert.deepEqual(lots.planFoldedLotMetadata([lot(1, '2026-11-03')], [lot(10, '2026-11-09'), lot(11, null)]), [])
 })
 
+check('expiry: compared as ISO dates, so padded and unpadded forms order correctly (batches.ts stores an expiry as typed)', () => {
+  assert.equal(lots.isoExpiry('2027-1-5'), '2027-01-05')
+  assert.equal(lots.isoExpiry('2027-01-05'), '2027-01-05')
+  assert.equal(lots.isoExpiry('2027-13-05'), null)
+  assert.equal(lots.isoExpiry('31/01/2027'), null)
+  // String comparison would pick '2027-01-31' (its second character '0' is below '1'); the earlier date is 5 January.
+  assert.equal(lots.foldedLotExpiry('2027-01-31', ['2027-1-5']), '2027-01-05')
+  assert.equal(lots.foldedLotExpiry('2027-1-5', ['2027-01-31']), '2027-01-05')
+  assert.equal(lots.foldedLotExpiry('2027-01-05', ['2027-1-31', null]), '2027-01-05')
+  assert.equal(lots.foldedLotExpiry('2027-2-1', ['2027-12-1']), '2027-02-01')
+  // Not a date: never wins over one that is, and when nothing is a date the kept lot's own value stays.
+  assert.equal(lots.foldedLotExpiry('31/01/2027', ['2027-03-01']), '2027-03-01')
+  assert.equal(lots.foldedLotExpiry('31/01/2027', ['n/a']), '31/01/2027')
+  assert.equal(lots.foldedLotExpiry(null, [null, '']), null)
+})
+
+check('received date: only ISO is read; a day-first slash date is refused (never misread month-first), so such a lot never matches', () => {
+  assert.equal(lots.mergeLotReceivedDate('03/11/2026'), null, 'Date.parse would call this 11 March')
+  assert.equal(lots.mergeLotReceivedDate('3/11/2026'), null)
+  assert.equal(lots.mergeLotReceivedDate('11/03/2026'), null)
+  assert.equal(lots.mergeLotReceivedDate('Nov 3 2026'), null)
+  assert.equal(lots.mergeLotReceivedDate('20261103'), null)
+  assert.equal(lots.mergeLotReceivedDate('2026-11-03'), '2026-11-03')
+  assert.deepEqual([...lots.matchDuplicateLots([lot(1, '03/11/2026')], [lot(10, '03/11/2026')])], [])
+})
+
+check('M1: an inactive kept lot is never a match target, even with the lowest batch number; the active lot of that day is', () => {
+  const archived = lot(101, '2026-11-10', { batch_number: 1, is_active: 0 })
+  const active = lot(102, '2026-11-10', { batch_number: 2, is_active: 1 })
+  assert.deepEqual([...lots.matchDuplicateLots([archived, active], [lot(201, '2026-11-10')])], [[201, 102]])
+  assert.deepEqual([...lots.matchDuplicateLots([archived], [lot(201, '2026-11-10')])], [], 'only an archived lot that day: the discarded lot is created')
+  assert.deepEqual([...lots.keeperLotByDate([archived])], [])
+})
+
+check('M2: an inactive discarded lot with no stock is left out entirely; one still holding stock stays in play', () => {
+  const dormant = lot(201, '2026-11-10', { is_active: 0, lot_quantity: 0 })
+  const stuck = lot(202, '2026-11-10', { is_active: 0, lot_quantity: 3 })
+  assert.deepEqual([...lots.matchDuplicateLots([lot(101, '2026-11-10')], [dormant])], [])
+  assert.deepEqual([...lots.matchDuplicateLots([lot(101, '2026-11-10')], [dormant, stuck])], [[202, 101]])
+  assert.equal(lots.isDuplicateLotInPlay(dormant), false)
+  assert.equal(lots.isDuplicateLotInPlay(stuck), true)
+})
+
+check('M3: discarded lots of one date the keeper lacks end as ONE new lot: the first (batch_number, then id) is created, the others fold into it', () => {
+  const dups = [lot(12, '2026-11-20', { batch_number: 5 }), lot(11, '2026-11-20', { batch_number: 3 }), lot(13, '2026-11-20', { batch_number: 3 }), lot(14, '2026-11-21'), lot(15, null), lot(16, null)]
+  assert.deepEqual([...lots.matchDuplicateLots([lot(1, '2026-11-03')], dups)].sort((a, b) => a[0] - b[0]), [[12, 11], [13, 11]], '11 (number 3, lowest id) is created; 12 and 13 fold into it; 14 is alone that day; undated lots never match')
+  const plan = lots.planFoldedLotMetadata([lot(1, '2026-11-03')], dups.map((d) => ({ ...d, unit_cost_usd: d.id === 11 ? 4 : 6, lot_quantity: 2, expiry_date: d.id === 12 ? '2027-01-01' : '2027-06-01' })))
+  assert.equal(plan.length, 1)
+  assert.equal(plan[0].keeperLotId, 11, 'the created lot is the target of the plan')
+  assert.deepEqual(plan[0].duplicateLotIds, [12, 13])
+  assert.equal(plan[0].unit_cost_usd, 5.3333, '(2 x 4 + 2 x 6 + 2 x 6) / 6, the created lot counted with its own stock')
+  assert.equal(plan[0].expiry_date, '2027-01-01', 'earliest expiry')
+  // Two merges that both lack the date agree: the created lot of the first is a target for the next (group path).
+  assert.deepEqual([...lots.matchDuplicateLots([lot(1, '2026-11-03'), lot(11, '2026-11-20')], [lot(21, '2026-11-20')])], [[21, 11]])
+})
+
 console.log(`${passed} passed, 0 failed`)

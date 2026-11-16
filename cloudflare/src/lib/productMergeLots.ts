@@ -53,10 +53,16 @@ export type MergeLotRow = {
 
 const BARE_DATE = /^\d{4}-\d{2}-\d{2}$/
 
-/** The business-day date ('YYYY-MM-DD') of a lot's received_at, or null when it has none. */
+// A stored received_at is ISO: a bare date, or a timestamp that starts with one. Every writer normalises to it (the UI route through
+// normalizeTypedDate, day-first; CSV cells through normalizeToIsoDate by their column's own order; stock-in and counts write the business
+// date). A day-first slash string such as '03/11/2026' is therefore never stored; read here it would be misread MONTH-first by Date.parse
+// (as 11 March), so anything that is not ISO-led is refused (no date: it never matches) instead of guessed.
+const ISO_LED = /^\d{4}-\d{2}-\d{2}(?:[T ]|$)/
+
+/** The business-day date ('YYYY-MM-DD') of a lot's received_at, or null when it has none or is not ISO. */
 export function mergeLotReceivedDate(receivedAt: unknown): string | null {
   const text = String(receivedAt ?? '').trim()
-  if (!text) return null
+  if (!text || !ISO_LED.test(text)) return null
   if (BARE_DATE.test(text)) return text
   const local = localDateOf(text)
   return BARE_DATE.test(local) ? local : null
@@ -156,9 +162,27 @@ export function foldedLotCost(keeper: CostedLot, added: readonly CostedLot[]): n
   return weightedMeanMoney4(bearing.map((lot) => ({ amount: lot.cost, factor: lot.quantity })), totalQuantity)
 }
 
-/** The earliest non-empty expiry across the kept lot and the lots added; the kept lot's own when none has one. */
+const EXPIRY_ISO = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ].*)?$/
+
+/**
+ * An expiry as ISO 'YYYY-MM-DD' for comparing, or null when it is not a Y-M-D date. batches.ts stores an expiry as typed, so '2027-1-5' and
+ * '2027-01-31' both exist; compared as strings '2027-1-5' would sort after '2027-01-31' (the character '1' is greater than '0').
+ */
+export function isoExpiry(value: unknown): string | null {
+  const match = EXPIRY_ISO.exec(String(value ?? '').trim())
+  if (!match) return null
+  const month = Number(match[2])
+  const day = Number(match[3])
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null
+  return `${match[1]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+/**
+ * The earliest expiry across the kept lot and the lots added, compared as ISO dates (padded or not); the kept lot's own when none has
+ * one. The winner is written as ISO. A value that is not a Y-M-D date is not compared and never wins over one that is.
+ */
 export function foldedLotExpiry(keeperExpiry: unknown, addedExpiries: readonly unknown[]): string | null {
-  const present = [keeperExpiry, ...addedExpiries].map((value) => String(value ?? '').trim()).filter(Boolean)
+  const present = [keeperExpiry, ...addedExpiries].map(isoExpiry).filter((value): value is string => value !== null)
   if (!present.length) return keeperExpiry == null ? null : String(keeperExpiry)
   return present.reduce((earliest, value) => (value < earliest ? value : earliest))
 }
