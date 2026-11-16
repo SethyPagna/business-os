@@ -322,17 +322,24 @@ function main() {
     assert.throws(() => d.exec(sqlText), /malformed JSON|JSON path/i, `${label} rounded to 4 decimals is caught by the exact fingerprint`)
   }
 
-  // Resolution of the fingerprint (round 4, mutant E1): the history figure moves by 0.00001 at the SAME text length (1.23456 -> 1.23457). A fingerprint at x 10000
-  // with the length kept cannot see it (12345.6 and 12345.7 both round to 12346); the shipped x 1e6 sum must abort the file.
+  // Resolution of the fingerprint (mutants E1 and E3). The history figure moves at the SAME text length, so only the resolution of the sum can see it:
+  //   1.23456 -> 1.23457 (a 1e-5 step): a fingerprint at x 10000 reads 12345.6 and 12345.7, both 12346, and misses it (mutant E1);
+  //   1.234567 -> 1.234568 (a 1e-6 step): x 10000 and x 1e5 (mutant E3) both round both to the same integer, only the shipped x 1e6 sum aborts the file.
   {
-    const nudge = (s) => s.replace("DELETE FROM system_flags WHERE key = 'stock_transaction_permit' AND value = 'legacy-separate-pool-v1';", "UPDATE sale_items SET cost_price_usd = 1.23457;\nDELETE FROM system_flags WHERE key = 'stock_transaction_permit' AND value = 'legacy-separate-pool-v1';")
-    const seeded = () => { const d = fixture(); d.exec('UPDATE sale_items SET cost_price_usd = 1.23456, cost_price_khr = 0'); assert.ok(one(d, 'SELECT COUNT(*) n FROM sale_items').n > 0, 'the fixture has sale items'); return d }
-    assert.notEqual(nudge(text), text)
-    assert.throws(() => seeded().exec(nudge(text)), /malformed JSON|JSON path/i, 'a 1e-6 change of history at the same length aborts the file')
+    const nudge = (s, to) => s.replace("DELETE FROM system_flags WHERE key = 'stock_transaction_permit' AND value = 'legacy-separate-pool-v1';", `UPDATE sale_items SET cost_price_usd = ${to};
+DELETE FROM system_flags WHERE key = 'stock_transaction_permit' AND value = 'legacy-separate-pool-v1';`)
+    const seeded = (from) => { const d = fixture(); d.exec(`UPDATE sale_items SET cost_price_usd = ${from}, cost_price_khr = 0`); assert.ok(one(d, 'SELECT COUNT(*) n FROM sale_items').n > 0, 'the fixture has sale items'); return d }
+    assert.notEqual(nudge(text, 1.23457), text)
     assert.ok(text.includes('* 1000000.0'), 'the shipped fingerprint resolves 1e-6')
-    const weakened = text.split('* 1000000.0').join('* 10000.0')
-    assert.notEqual(weakened, text)
-    assert.doesNotThrow(() => seeded().exec(nudge(weakened)), 'mutant E1 (x 10000, length kept) does not see the change, so the test above is the one that pins the resolution')
+    for (const [from, to, step] of [[1.23456, 1.23457, '1e-5'], [1.234567, 1.234568, '1e-6']]) {
+      assert.throws(() => seeded(from).exec(nudge(text, to)), /malformed JSON|JSON path/i, `a ${step} change of history (${from} -> ${to}, same length) aborts the file`)
+    }
+    const e1 = text.split('* 1000000.0').join('* 10000.0')
+    const e3 = text.split('* 1000000.0').join('* 100000.0')
+    assert.notEqual(e1, text); assert.notEqual(e3, text)
+    assert.doesNotThrow(() => seeded(1.23456).exec(nudge(e1, 1.23457)), 'mutant E1 (x 10000) does not see the 1e-5 change, so the behavioural test above pins the resolution')
+    assert.doesNotThrow(() => seeded(1.234567).exec(nudge(e3, 1.234568)), 'mutant E3 (x 1e5) does not see the 1e-6 change, so the behavioural test above pins the resolution')
+    assert.throws(() => seeded(1.23456).exec(nudge(e3, 1.23457)), /malformed JSON|JSON path/i, 'mutant E3 still sees the 1e-5 change: the 1e-6 nudge is what separates it')
   }
 
   // Drift: three lots on hand at 1.00004, 1.00004 and 1.00014 (product 9). The lot triggers stand down under the maintenance flag, so rounding the lots
