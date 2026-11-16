@@ -84,8 +84,12 @@ export async function dismissProductClustersAndRefresh(
 // beside other rows, the pair stays in Conflicts and is not called "no longer flagged". A refused ruling throws for the caller to report.
 export async function keepBothDuplicate(clusters: readonly PossiblySameCluster[], info: ExactDuplicateInfo, notify: (message: string) => void, t: (key: string) => string, refresh: () => Promise<unknown>): Promise<void> {
   const { rulings, stillListed } = keepBothPlan(clusters, info.members.map((member) => Number(member.id)), info.barcode)
-  const { failed } = await dismissProductClustersAndRefresh(rulings)
-  if (failed.length) throw failed[0].error
+  const { stored, failed } = await dismissProductClustersAndRefresh(rulings)
+  if (failed.length) {
+    // Some rulings were stored before one was refused: the list must show the tags and listings as they now are, then the refusal is reported.
+    if (stored.length) await refresh().catch(() => undefined)
+    throw failed[0].error
+  }
   notify(stillListed ? (t('product_duplicate_kept_still_listed') || 'Kept both. Still in a duplicate group with other rows: review it in Conflicts') : (t('product_duplicate_kept_both') || 'Kept both -- no longer flagged as duplicates'))
   await refresh()
 }

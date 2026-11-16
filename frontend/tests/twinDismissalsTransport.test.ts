@@ -24,7 +24,7 @@ function load(source: string, failOn: string[] = []) {
       } }
     }
     if (id.endsWith('productTwinDismissals.ts')) return dismissals
-    if (id.endsWith('exactDuplicateProducts.ts')) return {}
+    if (id.endsWith('exactDuplicateProducts.ts')) return { keepBothPlan: () => ({ rulings: [...RULINGS], stillListed: false }) }
     throw new Error(`unexpected require ${id}`)
   }, mod, mod.exports)
   return { api: mod.exports, calls }
@@ -79,6 +79,40 @@ for (const mutant of mutants) {
   assert.ok(failures.length > 0, `mutant survived: ${mutant.name}`)
 }
 
+// ---- Keep both when some rulings are refused (round 7 review, info): what WAS stored changes the tags, so the list is refreshed, and the refusal is still reported --------------
+async function partialKeepBoth(source: string, failOn: string[], refreshFails = false): Promise<{ refreshes: number; reported: string; notified: number }> {
+  const all = load(source, failOn)
+  let refreshes = 0, notified = 0, reported = ''
+  try { await all.api.keepBothDuplicate([], { key: 'k', barcode: '8851', members: [{ id: 1 }, { id: 2 }] }, () => { notified += 1 }, (key: string) => key, async () => { refreshes += 1; if (refreshFails) throw new Error('refresh failed') }) } catch (error) { reported = String((error as Error).message) }
+  return { refreshes, reported, notified }
+}
+const keepBothRun = async (source: string): Promise<string[]> => {
+  const failures: string[] = []
+  const some = await partialKeepBoth(source, ['name:Kind Variant'])
+  if (some.refreshes !== 1) failures.push(`a partly stored Keep both refreshes the list once (got ${some.refreshes})`)
+  if (some.reported !== 'refused name') failures.push(`the refusal is still reported (got "${some.reported}")`)
+  if (some.notified !== 0) failures.push('no success toast after a refusal')
+  const broken = await partialKeepBoth(source, ['name:Kind Variant'], true)
+  if (broken.reported !== 'refused name') failures.push(`a failed refresh must not hide the refusal (got "${broken.reported}")`)
+  const none = await partialKeepBoth(source, ['barcode:8851', 'name:Kind Variant', 'leadingzero:8851'])
+  if (none.refreshes !== 0) failures.push('nothing stored, nothing refreshed')
+  if (none.reported !== 'refused barcode') failures.push('the first refusal is reported')
+  const ok = await partialKeepBoth(source, [])
+  if (ok.refreshes !== 1 || ok.notified !== 1 || ok.reported !== '') failures.push('a clean Keep both refreshes once and toasts once')
+  return failures
+}
+assert.deepEqual(await keepBothRun(REAL_SOURCE), [], 'the real Keep both on a partial failure')
+const partialMutants = [
+  { name: 'no refresh after a partial failure (round 7)', from: '    if (stored.length) await refresh().catch(() => undefined)\n', to: '' },
+  { name: 'refresh even when nothing was stored', from: '    if (stored.length) await refresh().catch(() => undefined)\n', to: '    await refresh().catch(() => undefined)\n' },
+  { name: 'a failed refresh hides the refusal', from: 'await refresh().catch(() => undefined)', to: 'await refresh()' },
+]
+for (const mutant of partialMutants) {
+  assert.ok(REAL_SOURCE.includes(mutant.from), `mutant "${mutant.name}" no longer matches the source (stale mutant)`)
+  const failures = await keepBothRun(REAL_SOURCE.replace(mutant.from, mutant.to))
+  assert.ok(failures.length > 0, `mutant survived: ${mutant.name}`)
+}
+
 // ---- the clusters a pair sits in ---------------------------------------------------------------------------------------------------------------------
 const entry = (id: number, name: string, barcode: string) => ({ id, name, barcode, cost_price_usd: 1, selling_price_usd: 2, stock_quantity: 0, image_path: null })
 const pair = [entry(1, 'Kind Variant', '8851'), entry(2, 'Kind Variant', '8851')]
@@ -109,4 +143,4 @@ assert.match(tab, /await dismissProductClustersAndRefresh\(targets\.map/, "the C
 assert.equal((tab.match(/await dismissProductClusterAndRefresh\(/g) || []).length, 1, 'only the single Dismiss goes through the one-ruling call')
 assert.ok(!/for \(const cluster of targets\)/.test(tab.slice(tab.indexOf('const bulkDismiss'), tab.indexOf('const updateGroupRemoval'))), 'and no per-cluster loop in the bulk Dismiss')
 
-console.log(`PASS twin dismissal transport: ${RULINGS.length} rulings are stored in order and read back once, a failure does not stop the rest, nothing is read when nothing was stored; ${mutants.length} mutants killed; the pair's clusters are picked; Products and the bulk Dismiss use the one call`)
+console.log(`PASS twin dismissal transport: ${RULINGS.length} rulings are stored in order and read back once, a failure does not stop the rest, nothing is read when nothing was stored; ${mutants.length} mutants killed; a partly refused Keep both still refreshes the list (${partialMutants.length} mutants killed); the pair's clusters are picked; Products and the bulk Dismiss use the one call`)
