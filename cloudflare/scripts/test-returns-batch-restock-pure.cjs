@@ -753,6 +753,40 @@ async function main() {
     assert.strictEqual(aggregateQty, 6, 'aggregate should match the batch ledger')
   })
 
+  // S1 (owner 14 Nov): the Transfer list counts a product as tracked only while a lot holds stock, so a lot a sale emptied drops it. A return must still restock that SAME
+  // lot -- the return finds its lot by id, never through the tracked list -- and the product comes back onto the list with it. A second return, and an edit of the first, do too.
+  await check('a return into an emptied lot is accepted, restocks that same lot, and the product is tracked again (S1)', async () => {
+    seed()
+    const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 5, lotCode: 'EMPTIED' })
+    await drainLot(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
+    seedRows(rawDb,()=>rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId }))
+    const lotQty = () => rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @b AND branch_id = 1').get({ b: batch.batchId }).quantity
+    assert.strictEqual(lotQty(), 0, 'sanity: the sale emptied the lot')
+    assert.strictEqual(rawDb.prepare('SELECT is_active FROM product_batches WHERE id = ?').get([batch.batchId]).is_active, 1, 'sanity: the emptied lot stays active')
+    assert.deepStrictEqual(await productBatches.getTrackedProductIds(db, 1), [], 'an emptied lot no longer makes the product tracked')
+
+    const first = await req('POST', '/', { sale_id: 1, items: [{ sale_item_id: 1, product_id: 1, quantity: 3, return_to_stock: true, applied_price_usd: 10 }], reason: 'Into the emptied lot' })
+    assert.strictEqual(first.status, 200, JSON.stringify(first.json))
+    assert.strictEqual(lotQty(), 3, 'the units land in the emptied lot, not in a new one')
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM product_batches WHERE variant_product_id = 1').get().n, 1, 'no second lot was made')
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity, 3, 'the aggregate agrees with the lot')
+    assert.deepStrictEqual(await productBatches.getTrackedProductIds(db, 1), [1], 'the product is tracked again once the lot holds stock')
+
+    // The return is applied once: the same client_request_id replays the first answer and moves nothing.
+    const replay = await req('POST', '/', { client_request_id: 'S1-emptied-lot-replay', sale_id: 1, items: [{ sale_item_id: 1, product_id: 1, quantity: 1, return_to_stock: true, applied_price_usd: 10 }], reason: 'Replay' })
+    assert.strictEqual(replay.status, 200, JSON.stringify(replay.json))
+    const afterOne = lotQty()
+    const again = await req('POST', '/', { client_request_id: 'S1-emptied-lot-replay', sale_id: 1, items: [{ sale_item_id: 1, product_id: 1, quantity: 1, return_to_stock: true, applied_price_usd: 10 }], reason: 'Replay' })
+    assert.deepStrictEqual(again.json, replay.json)
+    assert.strictEqual(lotQty(), afterOne, 'a replay of the same request does not restock twice')
+
+    // Reversal: edit the first return down to 1 unit; the lot gives back the difference, the product stays tracked while it holds stock.
+    const edited = await req('PATCH', `/${first.json.id}`, { items: [{ sale_item_id: 1, product_id: 1, quantity: 1, return_to_stock: true, applied_price_usd: 10 }], reason: 'Edited down' })
+    assert.strictEqual(edited.status, 200, JSON.stringify(edited.json))
+    assert.strictEqual(lotQty(), afterOne - 2, 'the edit reversed 3 out of the same lot and put 1 back')
+    assert.deepStrictEqual(await productBatches.getTrackedProductIds(db, 1), [1])
+  })
+
   await check('multi-lot return records its per-lot split and an edit reverses each EXACT lot (no phantom stock)', async () => {
     seed()
     const batchQtyOf = (b) => rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = 1').get({ batchId: b.batchId }).quantity

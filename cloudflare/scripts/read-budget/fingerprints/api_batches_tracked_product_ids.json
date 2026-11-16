@@ -9,8 +9,8 @@
    "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?,?)"
   ],
   [
-   "17897e202e94",
-   "SELECT DISTINCT pb.variant_product_id AS productId FROM product_batches pb WHERE pb.is_active = 1 OR EXISTS (S"
+   "9aaceb707d4d",
+   "SELECT DISTINCT pb.variant_product_id AS productId FROM branch_batch_stock bbs JOIN product_batches pb ON pb.i"
   ]
  ]
 }

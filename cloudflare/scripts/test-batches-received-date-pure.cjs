@@ -48,5 +48,8 @@ assert.doesNotMatch(listRoute.slice(listRoute.indexOf('const knownPositive'), li
 console.log('PASS batch list exposes all positive known lot quantity without changing active choices')
 const trackedReader = productBatches.slice(productBatches.indexOf('export async function getTrackedProductIds'), productBatches.indexOf('// GET /api/batches?productId='))
 assert.match(trackedReader, /bbs\.branch_id = @branchId/, 'tracked ids must stay branch-scoped')
-assert.match(trackedReader, /pb\.is_active = 1 OR bbs\.quantity > 0/, 'active zero-quantity rows and inactive positive rows must both trigger the picker')
-console.log('PASS inactive positive lots still trigger the scoped picker read')
+// S1 (owner 14 Nov): tracked means a lot HOLDING stock. An active empty lot no longer counts; an inactive lot with positive stock still does (its provenance must show), so there is no is_active test at all.
+assert.match(trackedReader, /bbs\.quantity > 0/, 'only lots holding stock make a product tracked')
+assert.doesNotMatch(trackedReader, /pb\.is_active/, 'inactive positive lots count, and active empty lots do not: no is_active test')
+assert.doesNotMatch(trackedReader, />= 0/, 'a zero-quantity lot is not stock')
+console.log('PASS positive lots (active or not) make a product tracked; empty ones do not')

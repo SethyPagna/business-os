@@ -7,7 +7,7 @@
 --   pairs_checked     context: how many pairs moved in the window (0 on a quiet day)
 --   rollup_drift_products              products.stock_quantity vs SUM(branch_stock) for a moved product
 --   pairs_lots_exceed_branch           SUM(lot stock) above branch_stock on a moved pair (a transfer refuses it)
---   tracked_pairs_unlotted / _units    branch_stock above the lot sum on a pair the POS treats as lot-tracked
+--   tracked_pairs_unlotted / _units    branch_stock above the lot sum on a pair the POS treats as lot-tracked (an active or positive lot at the branch: the lot sheet's rule, not the narrower Transfer list of getTrackedProductIds since S1)
 --   damaged_remaining_on_inactive_product  tagged damaged units left on a missing or inactive row of a moved product
 --   info_pairs_without_branch_row      context: a moved pair with no branch_stock row (not an alarm: legacy ids)
 -- Blind spots, by design: (1) stock written WITHOUT any movement (a products import snapshot, the old STK-C drain) is not in the
