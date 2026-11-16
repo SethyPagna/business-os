@@ -3,9 +3,9 @@ import { getInitialKey } from '../../../utils/initials.ts'
 interface ProductSelectionRecord {
   id?: unknown
   parent_id?: unknown
-  // Present on rows produced by mergeSameDetailRows (utils/productGrouping.ts)
-  // -- always set, even for a 1-item cluster (as [id]). Lists every real
-  // underlying product id a merged display row represents.
+  // Present on the display rows of buildProductGroups (ownRows in
+  // utils/productGrouping.ts) -- always set, as [id]: the record the row stands
+  // for. (mergeSameDetailRows, used only by the public storefront, can list several.)
   __mergedProductIds?: unknown[]
   [key: string]: unknown
 }

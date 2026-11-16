@@ -250,8 +250,9 @@ type ProductGroupMeta = {
   hasMultipleItems?: boolean
   maxSellingPriceUsd?: number
   minSellingPriceUsd?: number
-  // The group's child rows with branch-only duplicates merged, as the
-  // Products list shows them: what a scanned barcode is matched against.
+  // The group's child rows, one per product record (an unmerged duplicate is
+  // its own row), as the Products list shows them: what a scanned barcode is
+  // matched against (findScanHit counts unmerged twins as one hit).
   rows?: ProductRecord[]
   stockTotal?: number
 }

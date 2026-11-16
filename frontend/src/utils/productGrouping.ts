@@ -43,14 +43,10 @@ export interface ProductGroup {
   ids: ProductId[]
   matchedIds: ProductId[]
   items: ProductRecord[]
-  // Display rows after collapsing branch-only duplicates (see
-  // mergeSameDetailRows): one entry per genuinely distinct product, each
-  // possibly spanning multiple branches via its own combined branch_stock.
-  // Products/Inventory list surfaces should iterate this, not `items`, so
-  // same-name-same-details rows that differ only by branch render as a
-  // single row instead of one row per branch. `items` is kept as-is (every
-  // raw underlying product row) for selection/bulk-action scope and for
-  // anything that needs the true per-row id list.
+  // Display rows: one per product record (see ownRows), in the same order as `items`, each with its own
+  // stock figure and its __unmergedTwin flag. Staff list surfaces iterate this; an unmerged duplicate is its
+  // own row and sits next to its twin. `items` holds the same records without the row markers, for selection
+  // and bulk-action scope.
   rows: ProductGroupRow[]
   leadProduct: ProductRecord
   sellableItems: Array<ProductRecord & {
@@ -385,7 +381,9 @@ function compareProducts(left: ProductRecord, right: ProductRecord, { rootId = 0
 // sorts after the barcoded ones. The barcode key is the identity key (leading zeros folded), the same
 // one the duplicate finder and merge use, so "same barcode" means the same thing everywhere.
 export function compareProductsByNameBarcodeId(left: ProductRecord, right: ProductRecord): number {
-  const nameDelta = String(left?.name || '').localeCompare(String(right?.name || ''), undefined, { sensitivity: 'base' })
+  // The name as the identity key reads it (trimmed, spaces collapsed, lower case), so ' Glow  Serum' and 'glow serum' tie and the
+  // barcode decides, instead of the raw text splitting two twins.
+  const nameDelta = normalizeProductGroupName(left?.name).localeCompare(normalizeProductGroupName(right?.name), undefined, { sensitivity: 'base' })
   if (nameDelta !== 0) return nameDelta
   const leftKey = identityBarcodeKey(left?.barcode)
   const rightKey = identityBarcodeKey(right?.barcode)
@@ -397,6 +395,35 @@ export function compareProductsByNameBarcodeId(left: ProductRecord, right: Produ
   // Same name and same barcode (or both without one): the older name -> branch -> price -> barcode -> id
   // order decides, so it can never pull an unrelated barcode in between two duplicates.
   return compareProductsByNameBranchPriceBarcode(left, right)
+}
+
+// An old-style explicit family (a parent row with parent_id children) keeps its parent first and its children together, which can leave a
+// parentless twin of one child on the far side of the parent row. This pass moves every twin of a product right behind the one that sits
+// in an explicit family (else the first), changing nothing else, so a pair is always side by side (owner, 16 Nov 2026). It only runs for a
+// group that has such a family: the sort alone keeps every other pair together.
+function gatherUnmergedTwins(sorted: ProductRecord[]): ProductRecord[] {
+  if (!sorted.some((item) => toProductId(item?.parent_id) > 0)) return sorted
+  const clusters = new Map<string, ProductRecord[]>()
+  for (const item of sorted) {
+    const key = productTwinKey(item)
+    if (!key) continue
+    const members = clusters.get(key)
+    if (members) members.push(item)
+    else clusters.set(key, [item])
+  }
+  const anchors = new Map<string, ProductRecord>()
+  for (const [key, members] of clusters) {
+    if (members.length > 1) anchors.set(key, members.find((member) => toProductId(member?.parent_id) > 0) ?? members[0])
+  }
+  if (!anchors.size) return sorted
+  const out: ProductRecord[] = []
+  for (const item of sorted) {
+    const key = productTwinKey(item)
+    const anchor = key ? anchors.get(key) : undefined
+    if (!anchor) out.push(item)
+    else if (item === anchor) out.push(anchor, ...(clusters.get(key) || []).filter((member) => member !== anchor))
+  }
+  return out
 }
 
 function buildChildrenByParentId(products: ProductRecord[] = []): Map<ProductId, ProductRecord[]> {
@@ -437,8 +464,8 @@ function compareProductsWithinGroup(left: ProductRecord, right: ProductRecord, p
   const rightRootId = resolveFamilyRootId(right, productsById)
 
   if (leftRootId !== rightRootId) {
-    const leftRootName = String(resolveRootProduct(left, productsById)?.name || left?.name || '')
-    const rightRootName = String(resolveRootProduct(right, productsById)?.name || right?.name || '')
+    const leftRootName = normalizeProductGroupName(resolveRootProduct(left, productsById)?.name || left?.name || '')
+    const rightRootName = normalizeProductGroupName(resolveRootProduct(right, productsById)?.name || right?.name || '')
     const familyNameDelta = leftRootName.localeCompare(rightRootName, undefined, { sensitivity: 'base' })
     if (familyNameDelta !== 0) return familyNameDelta
     // Parentless rows (every imported row) are each their own root, so same-name rows land HERE: order the
@@ -543,7 +570,7 @@ export function buildProductGroups(
   }
 
   return [...groups.values()].map((group): ProductGroup => {
-    const items = [...group.items].sort((left, right) => compareProductsWithinGroup(left, right, productsById))
+    const items = gatherUnmergedTwins([...group.items].sort((left, right) => compareProductsWithinGroup(left, right, productsById)))
     const familyRootIdSet = new Set(items.map((item) => resolveFamilyRootId(item, productsById)).filter((id) => Number.isFinite(id) && id > 0))
     const familyRootIds = [...familyRootIdSet]
     const leadProduct = items.find((item) => {
@@ -721,12 +748,30 @@ export function buildProductCategorySections(products: ProductRecord[] = [], {
   })
 }
 
-function isAllBranchZeroRow(row: ProductGroupRow): boolean {
-  const branchStock = Array.isArray(row?.branch_stock) ? row.branch_stock as Array<Record<string, unknown>> : []
+// The branch balances a row stands for: its own, plus those of its unmerged twins. Twins used to be folded into one row spanning their
+// branches, and "hide out-of-stock rows" judged that one row; judging the cluster keeps the same answer now that each record is its own row.
+function branchBalancesOf(row: ProductGroupRow, twinsByKey: Map<string, ProductGroupRow[]>): Array<Record<string, unknown>> {
+  const members = twinsByKey.get(productTwinKey(row)) || [row]
+  const byBranch = new Map<string, Record<string, unknown>>()
+  for (const member of members) {
+    const branchStock = Array.isArray(member?.branch_stock) ? member.branch_stock as Array<Record<string, unknown>> : []
+    for (const entry of branchStock) {
+      const key = String(entry?.branch_id ?? entry?.branch_name ?? '')
+      const existing = byBranch.get(key)
+      byBranch.set(key, existing ? { ...existing, quantity: Number(existing.quantity || 0) + Number(entry?.quantity || 0) } : { ...entry })
+    }
+  }
+  return [...byBranch.values()]
+}
+
+function isAllBranchZeroRow(row: ProductGroupRow, twinsByKey: Map<string, ProductGroupRow[]>): boolean {
+  const branchStock = branchBalancesOf(row, twinsByKey)
   // This rule is intentionally limited to a real multi-branch row. A
   // standalone zero-stock product (or a product tracked at only one branch)
   // remains visible; only redundant children whose recorded branch balances
-  // are all zero are removed from a same-name multi-row group.
+  // are all zero are removed from a same-name multi-row group. A product with
+  // unmerged twins is judged across the twins' branches, as it was when they
+  // were one folded row.
   return branchStock.length >= 2 && branchStock.every((entry) => Number(entry?.quantity || 0) <= 0)
 }
 
@@ -740,7 +785,12 @@ export function hideZeroStockGroupedChildRows(sections: ProductGroupSection[] = 
   return sections.map((section) => {
     const groups = section.groups.flatMap((group): ProductGroup[] => {
       if (group.rows.length <= 1) return [group]
-      const rows = group.rows.filter((row) => !isAllBranchZeroRow(row))
+      const twinsByKey = new Map<string, ProductGroupRow[]>()
+      for (const row of group.rows) {
+        const key = productTwinKey(row)
+        if (key) twinsByKey.set(key, [...(twinsByKey.get(key) || []), row])
+      }
+      const rows = group.rows.filter((row) => !isAllBranchZeroRow(row, twinsByKey))
       if (!rows.length) return []
       const visibleIds = new Set(rows.flatMap((row) => row.__mergedProductIds || []).map(toProductId))
       const items = group.items.filter((item) => visibleIds.has(toProductId(item?.id)))

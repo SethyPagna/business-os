@@ -269,10 +269,9 @@ interface ProductRecord {
   out_of_stock_threshold?: number | string | null
   is_active?: boolean | number | null
   is_group?: boolean | number | null
-  // Present on rows produced by mergeSameDetailRows (utils/productGrouping.ts)
-  // when 2+ raw product rows -- identical except for branch -- collapsed
-  // into this one display row. Lists every real underlying product id so
-  // selection/bulk actions on the merged row still act on all of them.
+  // Present on the display rows of buildProductGroups (ownRows in
+  // utils/productGrouping.ts): the row's own product id, as a one-element list.
+  // Selection and bulk actions read it, so a row always acts on its own record.
   __mergedProductIds?: EntityId[]
   [key: string]: unknown
 }
@@ -5097,9 +5096,8 @@ function ProductsFullEditor() {
     )
   }, [canAddVariant, canEditProduct, canWireImages, openProductFormTab, tr])
 
-  // P3-L6. Held rows are keyed off the group's FULL id list, not its display
-  // rows: kept from the days when duplicates were folded into one visible
-  // row; the group's full id list is still the safe key for held units.
+  // P3-L6. Held rows are keyed off the group's FULL id list (every record of
+  // the name group), which is the safe key for held units.
   const groupTaggedRows = useCallback((group: { ids?: Array<string | number> }): TaggedStockRow[] => {
     if (!taggedLotsByProduct.size) return []
     const seen = new Set<string>()
