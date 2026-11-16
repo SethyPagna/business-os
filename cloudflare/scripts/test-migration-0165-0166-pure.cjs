@@ -228,11 +228,11 @@ assert.strictEqual(db.prepare('SELECT COUNT(*) c FROM product_merge_map_0165').g
 assert.strictEqual(db.prepare("SELECT COUNT(*) c FROM audit_logs WHERE user_name='migration:0165_product_same_name_merge'").get().c, mapCountBefore, '0165: audit row count matches map row count after second run')
 
 // ---------------------------------------------------------------- 0166 --
-db.prepare("INSERT INTO customers (id, name, phone, email) VALUES (25000, 'ah ling', '099503494', NULL)").run()
-db.prepare("INSERT INTO customers (id, name, phone, email) VALUES (25001, 'ah ling', '099503494', 'ling@example.com')").run()
-db.prepare("INSERT INTO customers (id, name, phone) VALUES (30000, 'ah ling', '099999999')").run() // different phone -> negative control
+db.prepare("INSERT INTO customers (id, name, phone, email) VALUES (25000, 'test customer', '012000001', NULL)").run()
+db.prepare("INSERT INTO customers (id, name, phone, email) VALUES (25001, 'test customer', '012000001', 'ling@example.com')").run()
+db.prepare("INSERT INTO customers (id, name, phone) VALUES (30000, 'test customer', '012000002')").run() // different phone -> negative control
 db.prepare("INSERT INTO sales (id, receipt_number, customer_id) VALUES (901, 'R2', 25001)").run()
-db.prepare("INSERT INTO customer_receivables (id, legacy_id, customer_id, customer_name, invoice_date, status, source_file, source_row) VALUES (1, 1, 25001, 'ah ling', '2026-01-01', 'open', 'f', 1)").run()
+db.prepare("INSERT INTO customer_receivables (id, legacy_id, customer_id, customer_name, invoice_date, status, source_file, source_row) VALUES (1, 1, 25001, 'test customer', '2026-01-01', 'open', 'f', 1)").run()
 
 db.exec(sql0166)
 

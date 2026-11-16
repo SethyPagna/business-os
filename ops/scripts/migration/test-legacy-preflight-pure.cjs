@@ -20,8 +20,8 @@ const migrationDir = __dirname
     assert.equal(resolved.status, 'resolved', raw)
     assert.equal(resolved.user.id, id, raw)
   }
-  assert.equal(helpers.canonicalLegacyPhone('093 702 628'), '093702628', 'local leading zero must be retained for storage/equality')
-  assert.equal(helpers.canonicalLegacyPhone('+855 93 702 628'), '093702628', 'country form must fold to the same local canonical key')
+  assert.equal(helpers.canonicalLegacyPhone('012 000 123'), '012000123', 'local leading zero must be retained for storage/equality')
+  assert.equal(helpers.canonicalLegacyPhone('+855 12 000 123'), '012000123', 'country form must fold to the same local canonical key')
   assert.equal(helpers.resolveUniqueBarcode('00123', [{ id: 8 }]).status, 'resolved')
   assert.equal(helpers.resolveUniqueBarcode('00123', [{ id: 8 }, { id: 9 }]).status, 'quarantined_duplicate_barcode')
   const override = helpers.resolveReviewedSep1ItemOverride({

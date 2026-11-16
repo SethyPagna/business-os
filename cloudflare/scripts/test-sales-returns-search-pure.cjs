@@ -197,7 +197,7 @@ db.prepare(`INSERT INTO sale_items (id, sale_id, product_id, product_name, sku) 
   .run(2, 2, 2, 'Blush Brush', 'SKU-RTB1')
 
 db.prepare(`INSERT INTO sales (id, receipt_number, cashier_name, customer_name, customer_phone, branch_name, payment_method, notes, customer_id)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(3, '3329@2024-12-30', 'Alice', 'Sonika Neou', '017305533', 'Shop', 'ABA', null, null)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(3, '3329@2024-12-30', 'Alice', 'Test Customer', '018700501', 'Shop', 'ABA', null, null)
 db.prepare(`INSERT INTO sale_items (id, sale_id, product_id, product_name, sku) VALUES (?, ?, ?, ?, ?)`)
   .run(3, 3, 3, 'Legacy Sale Item', 'SKU-HIST')
 

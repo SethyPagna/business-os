@@ -134,7 +134,7 @@ const OWNER_ITEMS = [
 ]
 const ownerSale = {
   status: 'awaiting_payment', createdAt: '2026-09-23T05:06:16.000Z', receiptNumber: '20260923-120616', cashier: 'Za', branch: 'Shop',
-  customer: 'Jrukprey', phone: '070489626', exchangeRate: 4065,
+  customer: 'Test Nickname', phone: '070555401', exchangeRate: 4065,
   items: OWNER_ITEMS.map(([name, price, cut]) => ({ name, quantity: 1, basePriceUsd: price, unitPriceUsd: price - cut, lineTotalUsd: price - cut })),
   subtotalUsd: 1271, discountUsd: 0, taxUsd: 0, totalUsd: 1271, totalKhr: 5166615, paidUsd: 0, paidKhr: 0,
 }

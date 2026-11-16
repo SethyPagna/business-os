@@ -183,22 +183,22 @@ await runTest('product/inventory/sales import modals accept a dropped file, not 
 // via the user's own uploaded customers-template-final.csv (a blank header
 // at column 3 with real phone-number data underneath it).
 await runTest('getBlankCsvHeaderColumns flags a blank header with real data under it', () => {
-  const text = 'name,membership_number,,email\nBelie Bee,,0965196900,'
+  const text = 'name,membership_number,,email\nTest Person,,0965550100,'
   assert.deepEqual(getBlankCsvHeaderColumns(text), [3])
 })
 
 await runTest('getBlankCsvHeaderColumns ignores a genuinely empty spare column (no header, no data)', () => {
-  const text = 'name,email,\nBelie Bee,belie@example.com,'
+  const text = 'name,email,\nTest Person,testperson@example.com,'
   assert.deepEqual(getBlankCsvHeaderColumns(text), [])
 })
 
 await runTest('getBlankCsvHeaderColumns flags multiple blank-header columns, 1-based and in order', () => {
-  const text = 'name,,email,,notes\nBelie Bee,012,belie@example.com,extra,'
+  const text = 'name,,email,,notes\nTest Person,012,testperson@example.com,extra,'
   assert.deepEqual(getBlankCsvHeaderColumns(text), [2, 4])
 })
 
 await runTest('getBlankCsvHeaderColumns returns empty for a file with no blank headers at all', () => {
-  const text = 'name,email\nBelie Bee,belie@example.com'
+  const text = 'name,email\nTest Person,testperson@example.com'
   assert.deepEqual(getBlankCsvHeaderColumns(text), [])
 })
 

@@ -100,7 +100,7 @@ function seed() {
     membership: 'LC-04971', updated: '2026-09-04 04:54:57', gender: 'other', normalized: '',
   })
   db.prepare(`INSERT INTO customers(id,name,phone,updated_at,is_anonymous)
-    VALUES(22305,'General Real','086897171','2026-09-04 04:54:57',0)`).run()
+    VALUES(22305,'General Real','086555101','2026-09-04 04:54:57',0)`).run()
   for (const id of [101, 102, 103, 104, 105]) {
     db.prepare(`INSERT INTO sales(id,receipt_number,customer_id,customer_name,created_at)
       VALUES(@id,@receipt,24969,'general','2026-09-01 00:00:00')`).run({ id, receipt: `R-${id}` })
