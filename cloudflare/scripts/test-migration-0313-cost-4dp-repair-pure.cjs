@@ -322,6 +322,19 @@ function main() {
     assert.throws(() => d.exec(sqlText), /malformed JSON|JSON path/i, `${label} rounded to 4 decimals is caught by the exact fingerprint`)
   }
 
+  // Resolution of the fingerprint (round 4, mutant E1): the history figure moves by 0.00001 at the SAME text length (1.23456 -> 1.23457). A fingerprint at x 10000
+  // with the length kept cannot see it (12345.6 and 12345.7 both round to 12346); the shipped x 1e6 sum must abort the file.
+  {
+    const nudge = (s) => s.replace("DELETE FROM system_flags WHERE key = 'stock_transaction_permit' AND value = 'legacy-separate-pool-v1';", "UPDATE sale_items SET cost_price_usd = 1.23457;\nDELETE FROM system_flags WHERE key = 'stock_transaction_permit' AND value = 'legacy-separate-pool-v1';")
+    const seeded = () => { const d = fixture(); d.exec('UPDATE sale_items SET cost_price_usd = 1.23456, cost_price_khr = 0'); assert.ok(one(d, 'SELECT COUNT(*) n FROM sale_items').n > 0, 'the fixture has sale items'); return d }
+    assert.notEqual(nudge(text), text)
+    assert.throws(() => seeded().exec(nudge(text)), /malformed JSON|JSON path/i, 'a 1e-6 change of history at the same length aborts the file')
+    assert.ok(text.includes('* 1000000.0'), 'the shipped fingerprint resolves 1e-6')
+    const weakened = text.split('* 1000000.0').join('* 10000.0')
+    assert.notEqual(weakened, text)
+    assert.doesNotThrow(() => seeded().exec(nudge(weakened)), 'mutant E1 (x 10000, length kept) does not see the change, so the test above is the one that pins the resolution')
+  }
+
   // Drift: three lots on hand at 1.00004, 1.00004 and 1.00014 (product 9). The lot triggers stand down under the maintenance flag, so rounding the lots
   // alone leaves the catalog cost at the mean of the long lots; the file re-derives it, and the health query's active_cost_drift reads 0.
   const driftSql = fs.readFileSync(path.join(root, '..', 'ops', 'queries', 'health-catalog-cost.sql'), 'utf8')
