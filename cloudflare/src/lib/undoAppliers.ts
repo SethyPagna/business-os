@@ -304,6 +304,9 @@ export interface MergeReversal {
     keeperStockBefore: Array<{ branch_id: number; quantity: number }>
     saleAllocationIds?: number[]
     returnAllocationIds?: number[]
+    // Single-lot sale/return lines the fold re-pointed (their own batch_id, no allocation row). Absent on older snapshots: nothing to put back.
+    saleItemIds?: number[]
+    returnItemIds?: number[]
     // 16 Nov 2026 (lots match by received date): the kept lot's own cost, expiry and activity BEFORE the fold added stock
     // into it and re-derived them. Undo writes them back. Absent on snapshots written before then (they matched by
     // batch_key and never touched the kept lot's cost or expiry), so an absent value restores nothing rather than zeroing.
@@ -2258,6 +2261,9 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
     stmts.push({ sql: 'UPDATE product_batches SET is_active = 1, merge_deactivated_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dupBatchId } })
     for (const grp of chunk(intIds(fb.saleAllocationIds), 400)) stmts.push({ sql: `UPDATE sale_item_batch_allocations SET batch_id = @dupBatchId WHERE id IN (${grp.join(',')})`, params: { dupBatchId } })
     for (const grp of chunk(intIds(fb.returnAllocationIds), 400)) stmts.push({ sql: `UPDATE return_item_batch_allocations SET batch_id = @dupBatchId WHERE id IN (${grp.join(',')})`, params: { dupBatchId } })
+    // Guarded by the kept lot id: a line the fold re-pointed goes back; one that has moved on since is left alone.
+    for (const grp of chunk(intIds(fb.saleItemIds), 400)) stmts.push({ sql: `UPDATE sale_items SET batch_id = @dupBatchId WHERE batch_id = @keeperBatchId AND id IN (${grp.join(',')})`, params: { dupBatchId, keeperBatchId } })
+    for (const grp of chunk(intIds(fb.returnItemIds), 400)) stmts.push({ sql: `UPDATE return_items SET batch_id = @dupBatchId WHERE batch_id = @keeperBatchId AND id IN (${grp.join(',')})`, params: { dupBatchId, keeperBatchId } })
     const keeperBBefore = new Map((fb.keeperStockBefore || []).map((x) => [Number(x.branch_id), Number(x.quantity) || 0]))
     for (const d of (fb.dupStockBefore || [])) {
       const b = Number(d.branch_id)

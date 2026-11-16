@@ -57,6 +57,10 @@ assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted
       VALUES(1,9102,1);
     INSERT INTO return_item_batch_allocations(return_item_id,batch_id,quantity)
       VALUES(1,9102,1);
+    INSERT INTO sales(id,receipt_number) VALUES(9301,'S-9301');
+    INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,batch_id) VALUES(9401,9301,9002,'Tea',1,9102);
+    INSERT INTO returns(id,return_number,sale_id) VALUES(9302,'R-9302',9301);
+    INSERT INTO return_items(id,return_id,product_id,product_name,quantity,batch_id) VALUES(9402,9302,9002,'Tea',1,9102);
   `))
   const { readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots } = loadSnapshotModule()
   const { adapter, batches } = countedAdapter(d1)
@@ -81,6 +85,10 @@ assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted
   assert.deepEqual(lots.get(9102).keeperStockBefore.map((row) => Number(row.quantity)), [1])
   assert.equal(lots.get(9102).saleAllocationIds.length, 1)
   assert.equal(lots.get(9102).returnAllocationIds.length, 1)
+  // A single-lot line names the lot in its own batch_id (no allocation row); the same two reads carry it, so the read count is unchanged.
+  assert.deepEqual(lots.get(9102).saleItemIds, [9401])
+  assert.deepEqual(lots.get(9102).returnItemIds, [9402])
+  assert.equal(lots.get(9102).saleAllocationIds.includes(9401), false, 'a line id is never mistaken for an allocation id')
   assert.equal(lots.has(9103), false, 'a directly repointed lot needs no dependent read')
 
   const repointOnly = { ...snapshot, duplicateBatchRows: snapshot.duplicateBatchRows.filter((row) => row.id === 9103) }

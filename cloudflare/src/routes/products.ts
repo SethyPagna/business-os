@@ -4741,6 +4741,9 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
     keeperStockBefore: Array<{ branch_id: number; quantity: number }>
     saleAllocationIds?: number[]
     returnAllocationIds?: number[]
+    /** Single-lot sale/return lines whose own batch_id followed the lot to the kept lot; undo puts them back. */
+    saleItemIds?: number[]
+    returnItemIds?: number[]
     /** The kept lot's own cost, expiry and activity before this fold changed them; undo puts them back. */
     keeperLotBefore?: { unit_cost_usd: number | null; expiry_date: string | null; is_active: number | null }
     receivedDate?: string
@@ -4827,9 +4830,15 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
         keeperStockBefore: keeperBatchStockBefore.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })),
         saleAllocationIds: lotSnapshot.saleAllocationIds,
         returnAllocationIds: lotSnapshot.returnAllocationIds,
+        saleItemIds: lotSnapshot.saleItemIds,
+        returnItemIds: lotSnapshot.returnItemIds,
       })
       statements.push({ sql: 'UPDATE sale_item_batch_allocations SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId', params: { keeperBatchId: existingCanonicalBatchId, dupBatchId: batchRow.id } })
       statements.push({ sql: 'UPDATE return_item_batch_allocations SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId', params: { keeperBatchId: existingCanonicalBatchId, dupBatchId: batchRow.id } })
+      // Batch identity: in same batch, out same batch, return same batch. A single-lot line keeps its lot in its own
+      // batch_id (no allocation row), so it follows the stock to the kept lot or a later return would hit an inactive lot.
+      statements.push({ sql: 'UPDATE sale_items SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId', params: { keeperBatchId: existingCanonicalBatchId, dupBatchId: batchRow.id } })
+      statements.push({ sql: 'UPDATE return_items SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId', params: { keeperBatchId: existingCanonicalBatchId, dupBatchId: batchRow.id } })
       // The kept lot carries the mean of the distinct non-zero costs and the earliest expiry across every lot added
       // into it, written once however many discarded lots land there. Supplier, lot code and payment stay its own.
       const keeperLotPlan = foldedLotPlanByKeeperId.get(existingCanonicalBatchId)
@@ -7092,7 +7101,7 @@ function selectedConflictStatementEstimate(
       statements += 2
     } else if (lotMatches.has(Number(batch.id))) {
       const lot = dependentLots.get(Number(batch.id))
-      statements += (lot?.duplicateStockRows.filter((row) => Number(row.quantity)).length || 0) + 5
+      statements += (lot?.duplicateStockRows.filter((row) => Number(row.quantity)).length || 0) + 7 // activate, clear, deactivate, 2 allocation + 2 single-lot line re-points
     } else {
       repointedLots += 1
     }
@@ -7401,7 +7410,7 @@ function selectedConflictLightStatementEstimate(
     if (keeperBatchId == null) repointedLots += 1
     else {
       collisionBatchIds.add(Number(batch.id))
-      mergeBatchStatements += batchStock.filter((row) => Number(row.batch_id) === Number(batch.id) && Number(row.quantity)).length + 5
+      mergeBatchStatements += batchStock.filter((row) => Number(row.batch_id) === Number(batch.id) && Number(row.quantity)).length + 7
     }
   }
   mergeBatchStatements += Math.ceil(repointedLots / MERGE_LOT_REPOINT_CHUNK) + new Set(lotMatches.values()).size // + one cost/expiry write per kept lot

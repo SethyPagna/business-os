@@ -49,6 +49,15 @@ const MUTANTS = [
     from: 'SET is_active = 0, merge_deactivated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = @id', to: 'SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id' },
   { name: 'undo leaves the merge marker on a reactivated lot', file: 'lib/undoAppliers.ts', all: true,
     from: 'SET is_active = 1, merge_deactivated_at = NULL, updated_at', to: 'SET is_active = 1, updated_at' },
+  // Single-lot lines (sale_items.batch_id / return_items.batch_id) follow the lot: only the single-lot test needs to run.
+  { name: 'sale_items.batch_id is not re-pointed to the kept lot', file: 'routes/products.ts', tests: ['test-merge-single-lot-lines-native.cjs'],
+    from: "'UPDATE sale_items SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId'", to: "'SELECT 1 /* UPDATE sale_items SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId */'" },
+  { name: 'return_items.batch_id is not re-pointed to the kept lot', file: 'routes/products.ts', tests: ['test-merge-single-lot-lines-native.cjs'],
+    from: "'UPDATE return_items SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId'", to: "'SELECT 1 /* UPDATE return_items SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId */'" },
+  { name: 'undo skips putting sale_items.batch_id back', file: 'lib/undoAppliers.ts', tests: ['test-merge-single-lot-lines-native.cjs'],
+    from: 'chunk(intIds(fb.saleItemIds), 400)', to: 'chunk([], 400)' },
+  { name: 'undo skips putting return_items.batch_id back', file: 'lib/undoAppliers.ts', tests: ['test-merge-single-lot-lines-native.cjs'],
+    from: 'chunk(intIds(fb.returnItemIds), 400)', to: 'chunk([], 400)' },
   { name: 'undo does not restore the original batch_key of a created lot', file: 'lib/undoAppliers.ts',
     from: "if (typeof b.batchKeyBefore === 'string' && b.batchKeyBefore) {", to: 'if (false) {' },
 ]

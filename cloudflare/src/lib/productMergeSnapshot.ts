@@ -74,6 +74,9 @@ export type ProductMergeLotSnapshot = {
   keeperStockBefore: ProductMergeStockRow[]
   saleAllocationIds: number[]
   returnAllocationIds: number[]
+  /** Single-lot sale lines and return lines that name this lot in their own batch_id (no allocation rows). */
+  saleItemIds: number[]
+  returnItemIds: number[]
 }
 
 type KeyedRead = { key: string; sql: string; params?: BindParams }
@@ -237,8 +240,11 @@ export function planProductMergeDependentLotSnapshots(
     if (keeperBatchId != null) {
       reads.push(
         { key: `keeperStock:${duplicateBatchId}`, sql: 'SELECT branch_id, quantity FROM branch_batch_stock WHERE batch_id = @id', params: { id: keeperBatchId } },
-        { key: `saleAllocations:${duplicateBatchId}`, sql: 'SELECT id FROM sale_item_batch_allocations WHERE batch_id = @id', params: { id: duplicateBatchId } },
-        { key: `returnAllocations:${duplicateBatchId}`, sql: 'SELECT id FROM return_item_batch_allocations WHERE batch_id = @id', params: { id: duplicateBatchId } },
+        // A single-lot line names its lot in sale_items.batch_id / return_items.batch_id and writes no allocation row: the fold
+        // follows it too. Each table's allocation read carries its line read as one more UNION ALL term, so a colliding lot still
+        // costs four reads (the dependent batch bound is unchanged).
+        { key: `saleAllocations:${duplicateBatchId}`, sql: "SELECT 'allocation' AS kind, id FROM sale_item_batch_allocations WHERE batch_id = @id UNION ALL SELECT 'line' AS kind, id FROM sale_items WHERE batch_id = @id", params: { id: duplicateBatchId } },
+        { key: `returnAllocations:${duplicateBatchId}`, sql: "SELECT 'allocation' AS kind, id FROM return_item_batch_allocations WHERE batch_id = @id UNION ALL SELECT 'line' AS kind, id FROM return_items WHERE batch_id = @id", params: { id: duplicateBatchId } },
       )
     }
   }
@@ -251,8 +257,10 @@ export function planProductMergeDependentLotSnapshots(
       result.set(duplicateBatchId, {
         duplicateStockRows: (rows.get(`dupStock:${duplicateBatchId}`) || []) as ProductMergeStockRow[],
         keeperStockBefore: keeperBatchId == null ? [] : (rows.get(`keeperStock:${duplicateBatchId}`) || []) as ProductMergeStockRow[],
-        saleAllocationIds: keeperBatchId == null ? [] : (rows.get(`saleAllocations:${duplicateBatchId}`) || []).map((row) => Number(row.id)),
-        returnAllocationIds: keeperBatchId == null ? [] : (rows.get(`returnAllocations:${duplicateBatchId}`) || []).map((row) => Number(row.id)),
+        saleAllocationIds: keeperBatchId == null ? [] : (rows.get(`saleAllocations:${duplicateBatchId}`) || []).filter((row) => row.kind === 'allocation').map((row) => Number(row.id)),
+        returnAllocationIds: keeperBatchId == null ? [] : (rows.get(`returnAllocations:${duplicateBatchId}`) || []).filter((row) => row.kind === 'allocation').map((row) => Number(row.id)),
+        saleItemIds: keeperBatchId == null ? [] : (rows.get(`saleAllocations:${duplicateBatchId}`) || []).filter((row) => row.kind === 'line').map((row) => Number(row.id)),
+        returnItemIds: keeperBatchId == null ? [] : (rows.get(`returnAllocations:${duplicateBatchId}`) || []).filter((row) => row.kind === 'line').map((row) => Number(row.id)),
       })
     }
     return result
