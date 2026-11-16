@@ -90,6 +90,7 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/requestBodyGuard': loadReal('lib/requestBodyGuard.ts'),
   '../lib/db': { getDb: () => flakyDb },
   '../lib/sqlBinding': loadReal('lib/sqlBinding.ts'),
+  '../lib/lowStockSettings': loadReal('lib/lowStockSettings.ts', { './db': { getDb: () => flakyDb } }),
   '../lib/familyPagination': loadReal('lib/familyPagination.ts'),
   '../lib/cache': { isUnsafeVersion: () => false, deploymentId: () => 'dev',
     cachedJsonResponse: async (_req, _ctx, _version, _ttl, producer) => producer(),

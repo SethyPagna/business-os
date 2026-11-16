@@ -116,6 +116,7 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/requestBodyGuard': loadReal('lib/requestBodyGuard.ts'),
   '../lib/db': { getDb: () => db },
   '../lib/sqlBinding': loadReal('lib/sqlBinding.ts'),
+  '../lib/lowStockSettings': loadReal('lib/lowStockSettings.ts', { './db': { getDb: () => db } }),
   '../lib/familyPagination': familyPagination,
   '../lib/searchMatch': searchMatch,
   '../lib/productSearchQuery': productSearchQuery,
