@@ -491,9 +491,11 @@ async function main() {
     ['Tw Lz B 601,00601 before Tw Lz A 0601,0601,601 (B has the lower ids)', [[161, 'Tw Lz B', '601'], [162, 'Tw Lz B', '00601'], [163, 'Tw Lz A', '0601'], [164, 'Tw Lz A', '0601'], [165, 'Tw Lz A', '601']], 163, ['barcode:0601'], 'product_duplicate_kept_still_listed'],
     ['long codes: Tw Lz C R,R,0R beside Tw Lz D 0R,00R', [[171, 'Tw Lz C', '8851234567870'], [172, 'Tw Lz C', '8851234567870'], [173, 'Tw Lz C', '08851234567870'], [174, 'Tw Lz D', '08851234567870'], [175, 'Tw Lz D', '008851234567870']], 171, ['barcode:8851234567870'], 'product_duplicate_kept_still_listed'],
     ['Tw Lz F 601,601 beside Tw Lz E 0601,0601,601', [[181, 'Tw Lz E', '0601'], [182, 'Tw Lz E', '0601'], [183, 'Tw Lz E', '601'], [186, 'Tw Lz F', '601'], [187, 'Tw Lz F', '601']], 181, ['barcode:0601'], 'product_duplicate_kept_still_listed'],
-    ['whitespace: the pair, and a third row whose name differs only in an inner space', [[201, 'Tw Ws', '8851234567880'], [202, 'Tw Ws', '8851234567880'], [203, 'Tw  Ws', '8851234567880']], 201, ['barcode:8851234567880'], 'product_duplicate_kept_both'],
+    ['whitespace 2+1: Tw Ws R,R beside Tw  Ws R (one display group of three; the whole group is the click)', [[201, 'Tw Ws', '8851234567880'], [202, 'Tw Ws', '8851234567880'], [203, 'Tw  Ws', '8851234567880']], 201, ['barcode:8851234567880'], 'product_duplicate_kept_both', [201, 202, 203]],
+    ['whitespace 2+2 (round 8 review E1): Tw Ws R,R beside Tw  Ws R,R (one display group of four, so no separate twin is ruled behind the person)', [[201, 'Tw Ws', '8851234567880'], [202, 'Tw Ws', '8851234567880'], [203, 'Tw  Ws', '8851234567880'], [204, 'Tw  Ws', '8851234567880']], 201, ['barcode:8851234567880'], 'product_duplicate_kept_both', [201, 202, 203, 204]],
+    ['whitespace 2+2 with a blank-barcode row of the first spelling: the name cluster lists two of the group, so the toast says still listed', [[201, 'Tw Ws', '8851234567880'], [202, 'Tw Ws', '8851234567880'], [203, 'Tw  Ws', '8851234567880'], [204, 'Tw  Ws', '8851234567880'], [205, 'Tw Ws', '']], 201, ['barcode:8851234567880'], 'product_duplicate_kept_still_listed', [201, 202, 203, 204]],
   ]
-  for (const [title, spec, pick, expectedRulings, expectedToast] of KEEP_BOTH_SHAPES) await check(`Keep both on a pair over the real routes: ${title}`, async () => {
+  for (const [title, spec, pick, expectedRulings, expectedToast, expectedGroup] of KEEP_BOTH_SHAPES) await check(`Keep both on a pair over the real routes: ${title}`, async () => {
     fresh()
     fixtureWrite(() => state.native.db.exec('INSERT INTO products (id, name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, stock_quantity, is_active) VALUES ' + spec.map(([id, name, code]) => `(${id}, '${name}', '${code}', 4, 0, 10, 0, 1)`).join(', ')))
     const out = await esbuild({ stdin: { contents: "export * from './utils/productGrouping.ts'\nexport * from './utils/productTwinDismissals.ts'\nexport * as exact from './utils/exactDuplicateProducts.ts'\n", resolveDir: path.join(__dirname, '../../frontend/src'), loader: 'ts' }, bundle: true, write: false, platform: 'node', format: 'cjs', target: 'es2022', logLevel: 'error' })
@@ -522,14 +524,19 @@ async function main() {
     const info = fe.exact.buildExactDuplicateIndex(fe.exact.extractDuplicateClusters(before.body)).get(pick)
     assert.ok(info, 'the pair is offered Keep both')
     const ids = info.members.map((m) => Number(m.id))
+    if (expectedGroup) assert.deepEqual([...ids].sort((x, y) => x - y), expectedGroup, 'the group Keep both is offered on is every row the Products list shows as that name with that code (it groups names with the collapsing key)')
+    const listedBefore = new Set(before.body.clusters.flatMap((c) => c.products.map((p) => Number(p.id))))
     const toasts = []
     await tm.exports.keepBothDuplicate(fe.exact.extractDuplicateClusters(before.body), info, (m) => toasts.push(m), (k) => k, async () => {})
     const ruled = rows('SELECT cluster_type, cluster_value FROM product_duplicate_dismissals ORDER BY cluster_type, cluster_value').map((r) => `${r.cluster_type}:${r.cluster_value}`)
     const after = await conflicts()
+    const listedAfter = new Set(after.body.clusters.flatMap((c) => c.products.map((p) => Number(p.id))))
+    for (const id of listedBefore) if (!listedAfter.has(id)) assert.ok(ids.includes(id), `row ${id} lost its Conflicts listing although it is not in the group the person clicked`)
     const T1 = tags()
     assert.deepEqual(ruled, expectedRulings, 'only the rulings this pair is owed are stored')
     assert.deepEqual(toasts, [expectedToast], 'the toast says whether the pair is still listed')
-    assert.equal(inOneCluster(after.body.clusters, ids), expectedToast === 'product_duplicate_kept_still_listed', 'the toast is true: the pair is listed exactly when it says so')
+    const listedTogether = after.body.clusters.some((c) => c.type !== 'barcode' && c.type !== 'similar' && c.products.filter((p) => ids.includes(Number(p.id))).length >= 2)
+    assert.equal(listedTogether, expectedToast === 'product_duplicate_kept_still_listed', 'the toast is true: two or more of the group are listed together exactly when it says so')
     let separate = 0
     for (const T of T0) {
       if (T.some((id) => ids.includes(id))) continue
