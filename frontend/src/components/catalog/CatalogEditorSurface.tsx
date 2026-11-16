@@ -1353,7 +1353,7 @@ function CatalogEditorSurfaceContent() {
               <HintLabel
                 className="text-sm font-semibold text-slate-900"
                 title={copy('portalCatalogSettings', 'Catalog settings')}
-                hint={copy('stockThresholdHint', "These set the website's own Low stock and Out of stock levels when \"Use website-wide thresholds\" is chosen. Leave a level empty to use the shop's low-stock setting.")}
+                hint={copy('stockThresholdHint', "Website-wide thresholds: the Low and Out levels below are the website's own; leave one empty to use the shop's low-stock setting. Shop thresholds: each product's own level, or the one number in Settings when the shop uses a single level.")}
               />
               <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 <div>
@@ -1368,19 +1368,25 @@ function CatalogEditorSurfaceContent() {
                     buttonClassName="h-10 w-full"
                     menuClassName="min-w-[16rem]"
                     options={[
-                      { value: 'product', label: copy('stockThresholdModeProduct', 'Use each product threshold') },
+                      { value: 'product', label: copy('stockThresholdModeProduct', "Use the shop's thresholds") },
                       { value: 'global', label: copy('stockThresholdModeGlobal', 'Use website-wide thresholds') },
                     ]}
                   />
                 </div>
-                <div>
-                  <label htmlFor="portal-low-stock-threshold" className="block text-sm font-medium text-slate-700">{copy('lowStockThreshold', 'Low stock threshold')}</label>
-                  <input id="portal-low-stock-threshold" name="customer_portal_low_stock_threshold" className="input" type="number" min="0" step="0.01" value={editorDraft.customer_portal_low_stock_threshold ?? ''} placeholder={copy('stockThresholdEmpty', 'Shop setting')} onChange={(event) => setDraft('customer_portal_low_stock_threshold', event.target.value)} />
-                </div>
-                <div>
-                  <label htmlFor="portal-out-stock-threshold" className="block text-sm font-medium text-slate-700">{copy('outOfStockThreshold', 'Out of stock threshold')}</label>
-                  <input id="portal-out-stock-threshold" name="customer_portal_out_of_stock_threshold" className="input" type="number" min="0" step="0.01" value={editorDraft.customer_portal_out_of_stock_threshold ?? ''} placeholder={copy('stockThresholdEmpty', 'Shop setting')} onChange={(event) => setDraft('customer_portal_out_of_stock_threshold', event.target.value)} />
-                </div>
+                {editorDraft.customer_portal_stock_threshold_mode === 'global' ? (
+                  <>
+                    <div>
+                      <label htmlFor="portal-low-stock-threshold" className="block text-sm font-medium text-slate-700">{copy('lowStockThreshold', 'Low stock threshold')}</label>
+                      <input id="portal-low-stock-threshold" name="customer_portal_low_stock_threshold" className="input" type="number" min="0" step="0.01" value={editorDraft.customer_portal_low_stock_threshold ?? ''} placeholder={copy('stockThresholdEmpty', 'Shop setting')} onChange={(event) => setDraft('customer_portal_low_stock_threshold', event.target.value)} />
+                    </div>
+                    <div>
+                      <label htmlFor="portal-out-stock-threshold" className="block text-sm font-medium text-slate-700">{copy('outOfStockThreshold', 'Out of stock threshold')}</label>
+                      <input id="portal-out-stock-threshold" name="customer_portal_out_of_stock_threshold" className="input" type="number" min="0" step="0.01" value={editorDraft.customer_portal_out_of_stock_threshold ?? ''} placeholder={copy('stockThresholdEmpty', 'Shop setting')} onChange={(event) => setDraft('customer_portal_out_of_stock_threshold', event.target.value)} />
+                    </div>
+                  </>
+                ) : (
+                  <p data-testid="portal-stock-threshold-product-note" className="text-xs leading-relaxed text-slate-500 sm:col-span-1 xl:col-span-2 sm:self-end sm:pb-2">{copy('stockThresholdProductNote', "The shop's thresholds are used. Choose website-wide thresholds to set the website's own levels.")}</p>
+                )}
               </div>
             </div>
 

@@ -857,6 +857,10 @@ type PortalStockStatus = 'in_stock' | 'low_stock' | 'out_of_stock'
 // The Website Editor's own levels (CatalogEditorSurface "Catalog settings").
 // They count only in 'global' ("Use website-wide thresholds") mode, exactly
 // as before; in 'product' mode the shop's rule resolves each product.
+//
+// Lead ruling, 16 Nov 2026 (owner rule "Website's own levels", which does not name the mode): the website levels apply ONLY in website-wide mode.
+// In per-product mode each product's own threshold applies, as the editor's mode selector says, and the editor shows no level inputs there. In the
+// shop's Settings, a global mode means the one Settings number stands in for every product's own low threshold.
 export const PORTAL_STOCK_LEVEL_KEYS = [
   'customer_portal_stock_threshold_mode',
   'customer_portal_low_stock_threshold',

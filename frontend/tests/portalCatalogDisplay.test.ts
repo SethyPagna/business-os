@@ -313,6 +313,22 @@ runTest('portal editor compacts compatible controls into responsive rows with mo
   assert.match(catalogEditorSource, /min-h-11[^>]*rounded-xl/, 'compact switch rows must retain a 44px mobile touch target')
 })
 
+runTest('the website Low and Out inputs exist only in website-wide mode; the shop-thresholds mode shows a one-line note instead, in both packs', () => {
+  const normalized = catalogEditorSource.replace(/\r\n/g, '\n')
+  const globalBranch = normalized.indexOf("customer_portal_stock_threshold_mode === 'global' ? (")
+  const noteBranch = normalized.indexOf('data-testid="portal-stock-threshold-product-note"')
+  const lowInput = normalized.indexOf('id="portal-low-stock-threshold"')
+  const outInput = normalized.indexOf('id="portal-out-stock-threshold"')
+  assert.ok(globalBranch > 0 && lowInput > globalBranch && outInput > lowInput && noteBranch > outInput, 'both inputs sit inside the website-wide branch, the note in the other')
+  assert.equal(normalized.split('id="portal-low-stock-threshold"').length, 2, 'one low input, not a second always-visible copy')
+  const read = (pack: string) => fs.readFileSync(new URL(`../src/lang/${pack}.json`, import.meta.url), 'utf8')
+  for (const pack of ['en', 'km']) {
+    const text = read(pack)
+    assert.equal(text.split('"stockThresholdProductNote"').length, 3, `${pack}: the note exists at both pack locations`)
+  }
+  assert.doesNotMatch(read('en'), /Use each product threshold/, 'the option no longer claims each product threshold: in a global-mode shop the website uses the Settings number')
+})
+
 runTest('portal editor compaction keeps guidance, validation, preview, and linked account actions', () => {
   assert.match(catalogEditorSource, /<HintLabel[\s\S]*portalAssistantHint/)
   assert.match(catalogEditorSource, /<InfoHint[\s\S]*contactChannelsHint/)
