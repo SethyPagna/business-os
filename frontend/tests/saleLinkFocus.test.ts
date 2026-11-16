@@ -57,6 +57,11 @@ assert.match(fees, /<EntityLink page="sales" anchor="hub:sales:sales" \{\.\.\.sa
 const report = read('src/components/products/surfaces/ProductDetailReport.tsx')
 assert.match(report, /page="sales" anchor="hub:sales:sales" \{\.\.\.saleLinkTarget\(sale\.id, sale\.receipt_number\)\}/, 'the product report sale rows must open the sale')
 
+// The Dashboard's recent-sale detail: "Open sales page" opens the sale on screen, not just the page.
+const dashboard = read('src/components/dashboard/Dashboard.tsx')
+assert.ok(dashboard.includes('saleLinkTarget(recentSaleDetail.id, recentSaleDetail.receipt_number)'), 'the Dashboard recent-sale button must pass the sale through saleLinkTarget')
+assert.ok(dashboard.includes("queueEntitySearch('sales', target.search, 'hub:sales:sales', target.focus)"), 'and queue the focus before navigating')
+
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name)

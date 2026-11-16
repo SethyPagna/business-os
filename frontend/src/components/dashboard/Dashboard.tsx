@@ -40,6 +40,8 @@ import { showsBranchComparison } from '../../utils/branchScope.ts'
 import { useBranchRows } from '../../utils/useBranchRows.ts'
 import { soleActiveBranch } from '../../utils/branchCollapse.ts'
 import SoleBranchLabel from '../shared/SoleBranchLabel.tsx'
+import { queueEntitySearch } from '../shared/entityLinkFocus.ts'
+import { saleLinkTarget } from '../sales/salesFocus.ts'
 
 const ImportReportModal = lazyRetry(() => import('../shared/ImportReportModal'), 'ImportReportModal')
 const ExportChoiceDialog = lazyRetry(() => import('../shared/ExportChoiceDialog'), 'dashboard-export-choices')
@@ -2755,6 +2757,9 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
                 type="button"
                 className="btn-secondary col-span-2 w-full"
                 onClick={() => {
+                  // The sale on screen is the one the Sales page opens, not just the page (same handoff as the other Open sale links).
+                  const target = saleLinkTarget(recentSaleDetail.id, recentSaleDetail.receipt_number)
+                  queueEntitySearch('sales', target.search, 'hub:sales:sales', target.focus)
                   setRecentSaleDetail(null)
                   setRecentSalesOpen(false)
                   navigateTo('sales')
