@@ -90,7 +90,7 @@ const pairProbe = (find: typeof findScanHit, own: typeof ownRows = ownRows): str
   const failures: string[] = []
   const check = (name: string, fn: () => void) => { try { fn() } catch (error) { failures.push(`${name}: ${(error as Error).message.split('\n')[0]}`) } }
   check('a same-name same-barcode pair is one hit: the first twin of the group', () => {
-    const group = { rows: [{ id: 1, name: 'Glow Serum', barcode: DIOR }, { id: 2, name: 'glow  serum ', barcode: DIOR }] }
+    const group = { rows: [{ id: 1, name: 'Glow Serum', barcode: DIOR }, { id: 2, name: ' glow serum ', barcode: DIOR }] }
     const hit = find([group], ROWS_OF, DIOR)
     assert.equal(hit?.group, group)
     assert.equal(hit?.row.id, 1)
@@ -159,7 +159,7 @@ runTest('mutants of the twin rule are killed', () => {
     ['twins matched across groups', 'scan', 'if (key && hit.group === group && key === hitKey) continue', 'if (key && key === hitKey) continue'],
     ['twin rule stops after the first twin', 'scan', 'hitKey = key\n', 'hitKey = key + hit.row.id\n'],
     ['twins matched on name alone (every same-name row is one cluster)', 'grouping', 'for (const cluster of clusterRowsByBarcodeIdentity(rows)) {', 'for (const cluster of [rows]) {'],
-    ['raw name, not normalised', 'grouping', 'const name = normalizeProductGroupName(item?.name)', "const name = String(item?.name ?? '')"],
+    ['raw name, not normalised', 'grouping', 'const name = serverNameKey(item?.name)', "const name = String(item?.name ?? '')"],
     ['no twin is ever found (the regression)', 'grouping', 'if (cluster.length < 2) continue', 'continue'],
   ]
   for (const [name, file, from, to] of mutants) {

@@ -243,10 +243,20 @@ export function ownRows(items: ProductRecord[] = []): ProductGroupRow[] {
   return source.map((item, index) => ({ ...item, __mergedProductIds: [toProductId(item?.id)], __mergedRowCount: 1, __unmergedTwin: Boolean(keys[index]), __twinKey: keys[index] }))
 }
 
+// The Worker's products.name_key: SQLite lower(trim(name)) (migration 0010). trim() takes off spaces only, lower() folds A-Z only, and inner
+// spaces stay, so two names that differ only in inner spaces are two name keys on the server. The twin rule compares names with exactly this,
+// so a tag is never put on a pair the Conflicts sweep (which groups by name_key) cannot list.
+// The owner's 15 Sep rule also collapses inner spaces; that needs a migration of the stored name_key first (a separate, data-changing step), and until
+// then Conflicts and this rule agree on the uncollapsed key.
+export function serverNameKey(value: unknown): string {
+  // One pass: the edge spaces go (a run of spaces compares below 'A'), each A-Z folds to lower case.
+  return String(value ?? '').replace(/^ +| +$|[A-Z]/g, (found) => (found < 'A' ? '' : found.toLowerCase()))
+}
+
 // "Same product" for a person, one key per row: the owner's identity rule of 15 Sep 2026, which is the Worker's own
 // clusterRowsByBarcodeIdentity (utils/productDetailRule.ts, a verbatim copy of cloudflare/src/lib/productDetailRule.ts that
-// cloudflare/scripts/test-twin-rule-parity-pure.cjs holds identical and runs side by side with this). Same name (trimmed,
-// spaces collapsed, lower case) is the same product unless two genuinely different REAL barcodes separate the rows; an empty,
+// cloudflare/scripts/test-twin-rule-parity-pure.cjs holds identical and runs side by side with this). Same name (the Worker's
+// name_key, serverNameKey) is the same product unless two genuinely different REAL barcodes separate the rows; an empty,
 // word-like, short or placeholder barcode never separates them and joins the real one (ranked winner when there are several),
 // and rows that differ only in leading zeros are one. A cluster of two or more rows is a twin: every member gets the same
 // non-empty key, a row alone in its cluster gets ''. The rule is a property of the rows loaded together, so it is computed
@@ -257,15 +267,19 @@ export function unmergedTwinKeys(items: readonly ProductRecord[]): string[] {
   const keys: string[] = new Array(items.length).fill('')
   const byName = new Map<string, number[]>()
   items.forEach((item, index) => {
-    const name = normalizeProductGroupName(item?.name)
-    if (!name || Number(item?.is_group || 0) || item?.is_active === 0 || item?.is_active === false) return
+    const { is_group: group, is_active: active } = item ?? {}
+    const name = serverNameKey(item?.name)
+    if (!name || Number(group || 0) || active === 0 || active === false) return
     const members = byName.get(name)
     if (members) members.push(index)
     else byName.set(name, [index])
   })
   for (const [name, indexes] of byName) {
     if (indexes.length < 2) continue
-    const rows = indexes.map((index) => ({ index, barcode: items[index]?.barcode, id: items[index]?.id, stock_quantity: items[index]?.stock_quantity }))
+    const rows = indexes.map((index) => {
+      const item = items[index]
+      return { index, barcode: item?.barcode, id: item?.id, stock_quantity: item?.stock_quantity }
+    })
     for (const cluster of clusterRowsByBarcodeIdentity(rows)) {
       if (cluster.length < 2) continue
       const real = cluster.find((row) => isRealBarcode(row.barcode))

@@ -26,7 +26,7 @@ function load(source: string, visibilitySource = read('utils/productGroupVisibil
 
 const row = (id: number, name: string, barcode: string) => ({ id, name, barcode, stock_quantity: 5, branch_stock: [{ branch_id: 1, branch_name: 'B1', quantity: 5 }] })
 const TWIN_A = row(1, 'Glow Serum', '8851234567890')
-const TWIN_B = row(2, ' glow  serum', '08851234567890') // same name once normalised, leading zero on the barcode
+const TWIN_B = row(2, ' glow serum', '08851234567890') // same name_key (the Worker's lower(trim(name)): case and edge spaces), leading zero on the barcode
 const VARIANT_A = row(3, 'Aloe Gel', '8850000000011')
 const VARIANT_B = row(4, 'Aloe Gel', '8850000000022') // same name, a different REAL barcode: a variant, not a twin
 const NO_CODE_A = row(5, 'Plain Soap', '')
@@ -100,9 +100,9 @@ const mutants: Array<{ name: string; from: string; to: string }> = [
   { name: 'tag on variants (twin = same name, any barcode)', from: CLUSTER, to: 'for (const cluster of [rows]) {' },
   { name: 'the old real-barcode-only rule (an empty or word barcode is nobody\'s twin)', from: CLUSTER, to: 'for (const cluster of clusterRowsByBarcodeIdentity(rows.filter((row) => isRealBarcode(row.barcode)))) {' },
   { name: 'leading zeros not folded (clusters by the raw barcode text)', from: CLUSTER, to: 'for (const cluster of [...Map.groupBy(rows, (row) => String(row.barcode ?? \'\')).values()]) {' },
-  { name: 'name compared raw, not normalised', from: 'const name = normalizeProductGroupName(item?.name)', to: 'const name = String(item?.name ?? \'\')' },
+  { name: 'name compared raw, not normalised', from: 'const name = serverNameKey(item?.name)', to: 'const name = String(item?.name ?? \'\')' },
   { name: 'a lone row counts as its own twin', from: 'if (cluster.length < 2) continue', to: 'if (cluster.length < 1) continue' },
-  { name: 'a group row or an inactive row counts', from: "if (!name || Number(item?.is_group || 0) || item?.is_active === 0 || item?.is_active === false) return", to: 'if (!name) return' },
+  { name: 'a group row or an inactive row counts', from: "if (!name || Number(group || 0) || active === 0 || active === false) return", to: 'if (!name) return' },
 ]
 for (const mutant of mutants) {
   const inVisibility = visibility.includes(mutant.from)
