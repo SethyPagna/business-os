@@ -47,7 +47,9 @@ app.post('/rebuild', async (c) => {
     if (flags.quarantined) {
       const caused = flags.quarantineDays
       if (caused && caused.some((day) => day < from || day > to)) return c.json({ success: false, error: 'The range must cover every day that caused the quarantine.', code: 'sales_daily_clear_range', days: caused }, 400)
-      verifyDays = caused ?? Array.from({ length: days }, (_, i) => new Date(Date.parse(`${from}T00:00:00Z`) + i * 86_400_000).toISOString().slice(0, 10))
+      const named = caused ?? Array.from({ length: days }, (_, i) => new Date(Date.parse(`${from}T00:00:00Z`) + i * 86_400_000).toISOString().slice(0, 10))
+      // a verification still under way (a verified day differed again and re-quarantined) keeps the days not yet verified: the record is a union, never a replacement
+      verifyDays = [...new Set([...(flags.verify ?? []), ...named])].sort()
     }
   }
   const passwordDenied = await denyUnlessCurrentPassword(c, body, 403)
