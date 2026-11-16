@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { courierMoneyColumns, deliveryProfitIsLoss, optionalMoney, showsCourierCost, showsDeliveryProfit } from '../src/components/contacts/deliveryReportCourierMoney.ts'
+import { courierMoneyColumns, showsLinkedExpenses, deliveryProfitIsLoss, optionalMoney, showsCourierCost, showsDeliveryProfit } from '../src/components/contacts/deliveryReportCourierMoney.ts'
 
 // Review finding A, 16 Nov 2026. The delivery margin (fee charged minus the courier's actual cost) is courier money and
 // travels under delivery_margin_usd. A bare margin_usd is stripped from every Sales response for staff as product money,
@@ -74,4 +74,11 @@ for (const key of ['actual_cost_usd', 'actual_cost_count', 'delivery_margin_usd'
 assert.ok(/[.]{3}[(]show[.]margin [?] \[`/.test(grouped), 'the on-screen summary drops the profit part when omitted')
 assert.ok(grouped.includes('...(show.margin ? { delivery_margin_usd: sum'), 'the totals row drops the profit sum when omitted')
 
+// Linked expenses ride on the same courier grant: omitted keys hide the stat (no "$0.00 · 0៛", no "undefined expense rows").
+assert.equal(showsLinkedExpenses({ linked_expense_usd: 4, linked_expense_khr: 8000, linked_expense_count: 2 }), true)
+assert.equal(showsLinkedExpenses({ linked_expense_usd: 0, linked_expense_khr: 0, linked_expense_count: 0 }), true, 'a real zero is a figure')
+assert.equal(showsLinkedExpenses({}), false, 'no grant: the stat is hidden')
+assert.equal(showsLinkedExpenses({ linked_expense_count: 1 }), false)
+assert.ok(modal.includes('showsLinkedExpenses(row) ? stat('), 'the modal wraps the linked-expense stat in the helper')
+assert.ok(!/${row.linked_expense_count} /.test(modal), 'an omitted linked_expense_count must never print as "undefined"')
 console.log('deliveryReportCourierMoney.test.ts passed')

@@ -4,7 +4,7 @@ import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getDeliveryContactReport } from '../../api/salesTransport.ts'
 import { useSync } from '../../AppContext.tsx'
-import { deliveryProfitIsLoss, showsCourierCost, showsDeliveryProfit } from './deliveryReportCourierMoney.ts'
+import { deliveryProfitIsLoss, showsCourierCost, showsDeliveryProfit, showsLinkedExpenses } from './deliveryReportCourierMoney.ts'
 
 // X3 (Part 395): "delivery can also check expenses of delivery by contact" --
 // the per-courier drill on a delivery contact, mirroring the supplier
@@ -25,12 +25,12 @@ interface DeliveryContactReportRow {
   // Absent when the account lacks sales:view_courier_cost.
   actual_cost_usd?: number
   actual_cost_count?: number
-  linked_expense_count: number
-  linked_expense_usd: number
-  linked_expense_khr: number
+  linked_expense_count?: number
+  linked_expense_usd?: number
+  linked_expense_khr?: number
   delivery_margin_usd?: number
   last_delivery_at: string | null
-  last_expense_at: string | null
+  last_expense_at?: string | null
 }
 
 interface DeliveryContactReportModalProps {
@@ -142,11 +142,11 @@ export default function DeliveryContactReportModal({ contactId, contactName, t, 
                 money(row.actual_cost_usd),
                 `${row.actual_cost_count ?? 0}/${row.deliveries} ${tr(t, 'recorded', 'recorded')}`,
               ) : null}
-              {stat(
+              {showsLinkedExpenses(row) ? stat(
                 tr(t, 'linked_delivery_expenses', 'Linked expenses'),
                 expenseMoney(row.linked_expense_usd, row.linked_expense_khr),
-                `${row.linked_expense_count} ${tr(t, 'expense_rows', 'expense rows')}${row.last_expense_at ? ` · ${tr(t, 'last_delivery', 'Last')}: ${String(row.last_expense_at).slice(0, 10)}` : ''}`,
-              )}
+                `${row.linked_expense_count ?? 0} ${tr(t, 'expense_rows', 'expense rows')}${row.last_expense_at ? ` · ${tr(t, 'last_delivery', 'Last')}: ${String(row.last_expense_at).slice(0, 10)}` : ''}`,
+              ) : null}
             </div>
             {showsDeliveryProfit(row) ? (
               <div className={`rounded-xl border px-3 py-2 text-sm font-semibold ${deliveryProfitIsLoss(row)

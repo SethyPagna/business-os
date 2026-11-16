@@ -6,10 +6,18 @@ export interface CourierMoneyFields {
   actual_cost_usd?: number | null
   actual_cost_count?: number | null
   delivery_margin_usd?: number | null
+  linked_expense_usd?: number | null
+  linked_expense_khr?: number | null
+  linked_expense_count?: number | null
 }
 
 export function showsCourierCost(row: CourierMoneyFields): boolean {
   return typeof row.actual_cost_usd === 'number'
+}
+
+/** The linked-expense stat (delivery expenses booked against the courier) is courier money too: the Worker omits it with the cost. */
+export function showsLinkedExpenses(row: CourierMoneyFields): boolean {
+  return typeof row.linked_expense_usd === 'number' && typeof row.linked_expense_count === 'number'
 }
 
 export function showsDeliveryProfit(row: CourierMoneyFields): boolean {
