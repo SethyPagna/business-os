@@ -28,7 +28,7 @@ import { listImportJobs as listImportJobsRequest } from '../../api/importJobsTra
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { FOREGROUND_RESUME_REASON } from '../../utils/permissionRefreshAccumulator.ts'
-import { planBellStaleFollowUp, planThrottledSyncReload } from '../../api/syncRuntime.ts'
+import { planThrottledSyncReload } from '../../api/syncRuntime.ts'
 import { IMPORT_JOBS_SHARED_LIMIT, onImportJobPush } from '../../utils/importJobRefresh.ts'
 import AppSelect from './AppSelect'
 import PaginationControls from './PaginationControls'
@@ -544,9 +544,6 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   const refreshDueWhileHiddenRef = useRef(false)
   const failureCountRef = useRef(0)
   const lastSummaryLoadAtRef = useRef(0)
-  // The last sync event that asked for a reload, and the follow-up read already spent on the entry that answered it (planBellStaleFollowUp).
-  const lastBellSyncEventAtRef = useRef(0)
-  const bellFollowUpRef = useRef({ generatedAtMs: 0, fired: 0 })
 
   useEffect(() => {
     const syncVisibility = () => setVisibilityActive(matchesVisibilityMode(visibility))
@@ -581,7 +578,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     }
   }
 
-  const scheduleRefresh = useCallback((delayMs: number, followUpFor = 0) => {
+  const scheduleRefresh = useCallback((delayMs: number) => {
     if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current)
     refreshTimerRef.current = window.setTimeout(() => {
       refreshTimerRef.current = null
@@ -592,7 +589,6 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
         refreshDueWhileHiddenRef.current = true
         return
       }
-      if (followUpFor) bellFollowUpRef.current = { generatedAtMs: followUpFor, fired: bellFollowUpRef.current.generatedAtMs === followUpFor ? bellFollowUpRef.current.fired + 1 : 1 }
       void loadSummary(true)
     }, delayMs)
   }, [])
@@ -657,17 +653,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
         5 * 60 * 1000,
         Number(result?.cooldownUntil || 0) - Date.now(),
       )
-      // The badge must never be older than the Worker's entry lifetime (owner 11 Nov: at most 5 minutes). A reload answered by an entry that
-      // predates the sync event which asked for it would otherwise keep that older count until the 2-hour timer: read once more as it expires.
-      const generatedAtMs = typeof result?.generatedAt === 'string' ? Date.parse(result.generatedAt) : Number.NaN
-      const followUpDelay = result?.unavailable ? null : planBellStaleFollowUp({
-        generatedAtMs,
-        lastEventAtMs: lastBellSyncEventAtRef.current,
-        nowMs: Date.now(),
-        followUpsFired: bellFollowUpRef.current.generatedAtMs === generatedAtMs ? bellFollowUpRef.current.fired : 0,
-      })
-      if (followUpDelay !== null) scheduleRefresh(followUpDelay, generatedAtMs)
-      else scheduleRefresh(result?.unavailable ? unavailableDelay : NOTIFICATION_SUMMARY_IDLE_REFRESH_MS)
+      scheduleRefresh(result?.unavailable ? unavailableDelay : NOTIFICATION_SUMMARY_IDLE_REFRESH_MS)
     } catch (error) {
       if (!aliveRef.current || !isTrackedRequestCurrent(requestRef, requestId)) return
       failureCountRef.current += 1
@@ -778,7 +764,6 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     // it's the one channel semantically built for this exact component,
     // so a device approve/deny elsewhere never refreshed the bell live.
     if (['inventory', 'sales', 'returns', 'customers', 'suppliers', 'deliveryContacts', 'notifications', 'catalog', 'settings'].includes(syncChannel.channel)) {
-      lastBellSyncEventAtRef.current = Date.now()
       const plan = planThrottledSyncReload(
         syncChannel.channel,
         Date.now() - lastSummaryLoadAtRef.current,

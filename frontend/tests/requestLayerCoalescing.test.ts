@@ -187,7 +187,7 @@ await test('bell: a burst of sales pushes reloads the summary once per 30 s; not
   const env: Record<string, unknown> = {
     ...bellConstants(),
     planThrottledSyncReload: syncRuntime.planThrottledSyncReload,
-    FOREGROUND_RESUME_REASON, visibilityActive: true, lastSummaryLoadAtRef, lastBellSyncEventAtRef: { current: 0 }, loadSummary,
+    FOREGROUND_RESUME_REASON, visibilityActive: true, lastSummaryLoadAtRef, loadSummary,
     // scheduleRefresh's contract: one pending timer, replaced by each call, then loadSummary.
     scheduleRefresh: (delayMs: number) => {
       if (refreshTimer != null) clock.clearTimeout(refreshTimer)
