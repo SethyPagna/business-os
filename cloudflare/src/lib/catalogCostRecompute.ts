@@ -66,14 +66,18 @@ const OVERRIDDEN_ON_HAND_QTY_SQL = `(SELECT SUM(bbs.quantity) FROM branch_batch_
             JOIN product_batches ob ON ob.id = bbs.batch_id
           WHERE ob.variant_product_id = products.id AND ob.is_active = 1
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0)`
-// Nearest 4dp, half away from zero -- weightedMeanMoney4, which rounds the
-// exact decimal quotient. SQLite's ROUND() rounds the binary double, so an
-// exact tie (1.0001 and 1.0002, one each: 1.00015) can land either side
-// depending on the engine version. Every input here is positive, so this
-// adds the half and truncates, with a 1e-8-unit nudge: with 4dp costs a
-// non-tie quotient sits at least 1/(2 x total quantity) units from a tie,
-// far above double error and far above the nudge.
-export const HALF_UP_4DP = (value: string) => `CAST(${value} * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0`
+// Nearest 4dp, half away from zero: the SQL twin of roundMoney4 (moneyPrecision.ts), which rounds the exact decimal a double prints as. SQLite's
+// ROUND(x, 4) rounds the binary double, so an exact tie (1.0001 and 1.0002, one each: 1.00015) can land either side depending on the engine version.
+// This form scales once by 10000 times (1 + 3.6e-16) and rounds the scaled value half away from zero with ROUND(x), which is exact on integers and
+// halves: the 3.6e-16 relative nudge is larger than the error of the double (<= 1.1e-16), of the scaling (<= 1.1e-16) and of the product (<= 1.1e-16),
+// so a decimal tie lands on the tie whatever its magnitude, and smaller than half a unit while the scaled value is under 1.4e15 (a magnitude of
+// 1.4e11; money is capped at 1e11). Sign-symmetric (-1.00015 is -1.0002), NULL stays NULL, and the integer cast means no negative zero. The operand
+// appears once, so it may be an aggregate or a subquery. Equal to roundMoney4 on every decimal tie, 4-place value and random value tried up to
+// 1e8 (scripts/test-half-up-4dp-property-pure.cjs); a double within 2 ulps of a tie that is not the double nearest to it is read as the tie.
+export const HALF_UP_4DP = (value: string) => `(CAST(ROUND((${value}) * 10000.0000000000036) AS INTEGER) / 10000.0)`
+// The text migrations 0195 to 0261 shipped (positive values only, exact below about 16,000): kept so the 'legacy' and 'validated-unrounded' policies still
+// name those migrations' exact trigger text. Nothing new uses it.
+const HALF_UP_4DP_AS_SHIPPED = (value: string) => `CAST(${value} * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0`
 
 /**
  * 'legacy' = the 0195 / 0255 text; 'validated' = the current text (typed positive input, and the sold-out fallback rounded to 4 places like the
@@ -109,8 +113,9 @@ function buildCatalogCostFormulaSql(inputPolicy: CatalogCostInputPolicy): Readon
   const eligibleLot = `pb.variant_product_id = products.id AND pb.is_active = 1
         AND ${positiveCostSql('pb.unit_cost_usd', inputPolicy)}
         AND (pb.id > ${LATEST_MANUAL_BASELINE_SQL} OR ${LATEST_MANUAL_BASELINE_SQL} IS NULL)`
+  const halfUp = inputPolicy === 'validated' ? HALF_UP_4DP : HALF_UP_4DP_AS_SHIPPED
   return { hasRecordedLot: `EXISTS(SELECT 1 FROM product_batches pb WHERE ${eligibleLot})`, derive: `COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN ${HALF_UP_4DP('SUM(qty * cost) / SUM(qty)')} END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN ${halfUp('SUM(qty * cost) / SUM(qty)')} END
       FROM (SELECT pb.unit_cost_usd AS cost, ${LOT_ON_HAND_QTY_SQL} AS qty FROM product_batches pb
         WHERE ${eligibleLot}
         UNION ALL

@@ -32,7 +32,7 @@ tprod AS MATERIALIZED (
 ),
 d AS MATERIALIZED (
   SELECT products.id, products.cost_price_usd, products.purchase_price_usd, products.cost_price_khr, products.purchase_price_khr, COALESCE(
-      (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+      (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
         FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
           WHERE pb.variant_product_id = products.id AND pb.is_active = 1
           AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -44,7 +44,7 @@ d AS MATERIALIZED (
               AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
           WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
             AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-      (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+      (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
           AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
           AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)

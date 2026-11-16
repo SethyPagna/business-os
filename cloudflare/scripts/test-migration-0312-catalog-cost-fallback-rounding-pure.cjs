@@ -80,8 +80,12 @@ async function main() {
   const triggerPart = migrationText.slice(migrationText.indexOf(guardDrop), migrationText.indexOf('\nSELECT CASE', migrationText.indexOf(guardDrop)))
   assert.ok(!triggerPart.includes('(SELECT pb.unit_cost_usd FROM product_batches pb'), 'no verbatim fallback in the new triggers')
   assert.notEqual(costs.catalogCostReviewTriggersSql(), costs.catalogCostReviewTriggersSql({ inputPolicy: 'validated-unrounded' }))
-  assert.equal(costs.catalogCostReviewTriggersSql().replace(/CAST\(pb\.unit_cost_usd \* 10000\.0 \+ 0\.5 \+ 1e-8 AS INTEGER\) \/ 10000\.0/g, 'pb.unit_cost_usd'),
-    costs.catalogCostReviewTriggersSql({ inputPolicy: 'validated-unrounded' }), 'the only difference is the fallback rounding')
+  // Two differences from what 0261 shipped: the fallback is rounded, and the rounding text of the weighted mean is HALF_UP_4DP (exact on negatives and on
+  // ties of 16,384 and above) in place of the nudge form 0195 introduced. Undoing both lands on the shipped text.
+  const rounding = (operand) => costs.HALF_UP_4DP(operand)
+  assert.equal(costs.catalogCostReviewTriggersSql().split(rounding('pb.unit_cost_usd')).join('pb.unit_cost_usd')
+    .split(rounding('SUM(qty * cost) / SUM(qty)')).join('CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0'),
+  costs.catalogCostReviewTriggersSql({ inputPolicy: 'validated-unrounded' }), 'the only differences are the fallback rounding and the form of the rounding')
   const outsideTriggers = migrationText.replace(/CREATE TRIGGER[\s\S]*?\nEND;/g, '').replace(/--[^\n]*/g, '')
   assert.ok(!/^\s*(INSERT|UPDATE|DELETE|CREATE\s+TABLE|ALTER)\b/im.test(outsideTriggers), 'no row write or table change outside trigger bodies')
   assert.equal((migrationText.replace(/--[^\n]*/g, '').match(/CREATE TRIGGER /g) || []).length, 7)

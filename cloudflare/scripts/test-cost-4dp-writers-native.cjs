@@ -212,17 +212,15 @@ async function scenarios() {
   assert.equal(money.meanMoney4([1.0001, 1.0002]), 1.0002, 'mean of 1.0001 and 1.0002 is the tie 1.00015: away from zero')
   assert.equal(money.meanMoney4([1.1, 1.2, 1.4]), 1.2333)
   assert.equal(money.weightedMeanMoney4([{ amount: 1.0001, factor: 1 }, { amount: 1.0002, factor: 1 }], 2), 1.0002, 'weighted tie')
-  // The SQL nudge the catalog formula, the merge authority and the repair use equals the exact decimal on 40,000 decimal ties; ROUND(x, 4) does not.
-  const nudge = raw.prepare('SELECT ROUND(?, 4) r, CAST(? * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 n')
-  let sqliteRoundWrong = 0
+  // HALF_UP_4DP, the SQL rounding the catalog formula, the merge authority, the bulk adjust and the repair use, equals the exact decimal on 40,000
+  // decimal ties of 1 to 5 and on the negative of each (the full range, random values and two SQLite engines are in test-half-up-4dp-property-pure.cjs).
+  const half = raw.prepare(`SELECT ${load('lib/catalogCostRecompute.ts').HALF_UP_4DP('?')} n`)
   for (let k = 10000; k < 50000; k++) {
     const text = `${Math.floor(k / 10000)}.${String(k % 10000).padStart(4, '0')}5`
     const want = money.roundMoney4(text)
-    const got = nudge.get(Number(text), Number(text))
-    assert.equal(got.n, want, `nudge(${text})`)
-    if (got.r !== want) sqliteRoundWrong++
+    assert.equal(half.get(Number(text)).n, want, `HALF_UP_4DP(${text})`)
+    assert.equal(half.get(-Number(text)).n, -want, `HALF_UP_4DP(-${text})`)
   }
-  assert.ok(sqliteRoundWrong > 10000, `SQLite ROUND(x, 4) rounds the binary double and lands ${sqliteRoundWrong} of 40000 decimal ties on the wrong side: the reason no cost path uses it`)
   assert.deepEqual(census(), { products: 0, lots: 0, entries: 0 }, 'census at the end')
 }
 

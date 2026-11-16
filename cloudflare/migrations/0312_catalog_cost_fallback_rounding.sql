@@ -8,7 +8,9 @@
 -- eligible lot's cost stands in), copied pb.unit_cost_usd verbatim: a lot at 1.00015 wrote 1.00015 into products.cost_price_usd and
 -- purchase_price_usd. The six triggers below carry that formula (0195 names; text last defined by 0261), so they are dropped and
 -- created again from catalogCostReviewTriggersSql() with the fallback wrapped in the same rounding. Nothing else in a trigger changes
--- (same events, same WHEN guards, same +is_active plan as 0261, same review-key clearing).
+-- (same events, same WHEN guards, same +is_active plan as 0261, same review-key clearing) except the rounding text itself: the old
+-- nudge form was wrong on negatives and on ties of 16,384 and above, so both branches now use HALF_UP_4DP,
+-- (CAST(ROUND((x) * 10000.0000000000036) AS INTEGER) / 10000.0), equal to roundMoney4 (scripts/test-half-up-4dp-property-pure.cjs).
 -- The cost-review guard product_cost_review_update_guard_0255 (text last defined by 0257) compares a cleared review key with the same
 -- formula, so it is re-created from productCostReviewConfirmationGuardSql() too. Left alone, it would compare the rounded figure a
 -- trigger wrote with its own verbatim derive and abort the stock write whenever a sold-out lot is over 4 decimals.
@@ -38,7 +40,7 @@ WHEN NEW.cost_review_key IS NOT OLD.cost_review_key
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL))
     AND NEW.cost_price_usd IS (COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -50,7 +52,7 @@ WHEN NEW.cost_review_key IS NOT OLD.cost_review_key
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
@@ -92,7 +94,7 @@ WHEN COALESCE(NEW.quantity, 0) > 0
 BEGIN
   UPDATE products SET
         cost_price_usd = COALESCE(COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -104,13 +106,13 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
       ORDER BY COALESCE(pb.received_at, '') DESC, pb.id DESC LIMIT 1)), cost_price_usd),
         purchase_price_usd = COALESCE(COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -122,13 +124,13 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
       ORDER BY COALESCE(pb.received_at, '') DESC, pb.id DESC LIMIT 1)), purchase_price_usd)
       WHERE +is_active = 1 AND id IN (SELECT variant_product_id FROM product_batches WHERE id IN (NEW.batch_id)) AND EXISTS (SELECT 1 FROM (SELECT COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -140,7 +142,7 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
@@ -151,7 +153,7 @@ BEGIN
     AND EXISTS(SELECT 1 FROM product_batches pb WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)) AND cost_price_usd IS (COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -163,7 +165,7 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
@@ -177,7 +179,7 @@ WHEN (COALESCE(OLD.quantity, 0) <> COALESCE(NEW.quantity, 0) OR OLD.batch_id IS 
 BEGIN
   UPDATE products SET
         cost_price_usd = COALESCE(COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -189,13 +191,13 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
       ORDER BY COALESCE(pb.received_at, '') DESC, pb.id DESC LIMIT 1)), cost_price_usd),
         purchase_price_usd = COALESCE(COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -207,13 +209,13 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
       ORDER BY COALESCE(pb.received_at, '') DESC, pb.id DESC LIMIT 1)), purchase_price_usd)
       WHERE +is_active = 1 AND id IN (SELECT variant_product_id FROM product_batches WHERE id IN (OLD.batch_id, NEW.batch_id)) AND EXISTS (SELECT 1 FROM (SELECT COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -225,7 +227,7 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
@@ -236,7 +238,7 @@ BEGIN
     AND EXISTS(SELECT 1 FROM product_batches pb WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)) AND cost_price_usd IS (COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -248,7 +250,7 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
@@ -262,7 +264,7 @@ WHEN COALESCE(OLD.quantity, 0) > 0
 BEGIN
   UPDATE products SET
         cost_price_usd = COALESCE(COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -274,13 +276,13 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
       ORDER BY COALESCE(pb.received_at, '') DESC, pb.id DESC LIMIT 1)), cost_price_usd),
         purchase_price_usd = COALESCE(COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -292,13 +294,13 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
       ORDER BY COALESCE(pb.received_at, '') DESC, pb.id DESC LIMIT 1)), purchase_price_usd)
       WHERE +is_active = 1 AND id IN (SELECT variant_product_id FROM product_batches WHERE id IN (OLD.batch_id)) AND EXISTS (SELECT 1 FROM (SELECT COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -310,7 +312,7 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
@@ -321,7 +323,7 @@ BEGIN
     AND EXISTS(SELECT 1 FROM product_batches pb WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)) AND cost_price_usd IS (COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -333,7 +335,7 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
@@ -347,7 +349,7 @@ WHEN NEW.variant_product_id IS NOT NULL
 BEGIN
   UPDATE products SET
         cost_price_usd = COALESCE(COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -359,13 +361,13 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
       ORDER BY COALESCE(pb.received_at, '') DESC, pb.id DESC LIMIT 1)), cost_price_usd),
         purchase_price_usd = COALESCE(COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -377,13 +379,13 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
       ORDER BY COALESCE(pb.received_at, '') DESC, pb.id DESC LIMIT 1)), purchase_price_usd)
       WHERE +is_active = 1 AND id = NEW.variant_product_id AND EXISTS (SELECT 1 FROM (SELECT COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -395,7 +397,7 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
@@ -406,7 +408,7 @@ BEGIN
     AND EXISTS(SELECT 1 FROM product_batches pb WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)) AND cost_price_usd IS (COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -418,7 +420,7 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
@@ -432,7 +434,7 @@ WHEN OLD.variant_product_id IS NOT NULL
 BEGIN
   UPDATE products SET
         cost_price_usd = COALESCE(COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -444,13 +446,13 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
       ORDER BY COALESCE(pb.received_at, '') DESC, pb.id DESC LIMIT 1)), cost_price_usd),
         purchase_price_usd = COALESCE(COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -462,13 +464,13 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
       ORDER BY COALESCE(pb.received_at, '') DESC, pb.id DESC LIMIT 1)), purchase_price_usd)
       WHERE +is_active = 1 AND id = OLD.variant_product_id AND EXISTS (SELECT 1 FROM (SELECT COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -480,7 +482,7 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
@@ -491,7 +493,7 @@ BEGIN
     AND EXISTS(SELECT 1 FROM product_batches pb WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)) AND cost_price_usd IS (COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -503,7 +505,7 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
@@ -516,7 +518,7 @@ WHEN NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extr
 BEGIN
   UPDATE products SET
         cost_price_usd = COALESCE(COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -528,13 +530,13 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
       ORDER BY COALESCE(pb.received_at, '') DESC, pb.id DESC LIMIT 1)), cost_price_usd),
         purchase_price_usd = COALESCE(COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -546,13 +548,13 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
       ORDER BY COALESCE(pb.received_at, '') DESC, pb.id DESC LIMIT 1)), purchase_price_usd)
       WHERE +is_active=1 AND id IN (OLD.variant_product_id,NEW.variant_product_id) AND EXISTS (SELECT 1 FROM (SELECT COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -564,7 +566,7 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
@@ -575,7 +577,7 @@ BEGIN
     AND EXISTS(SELECT 1 FROM product_batches pb WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)) AND cost_price_usd IS (COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN (CAST(ROUND((SUM(qty * cost) / SUM(qty)) * 10000.0000000000036) AS INTEGER) / 10000.0) END
       FROM (SELECT pb.unit_cost_usd AS cost, (SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) AS qty FROM product_batches pb
         WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
@@ -587,7 +589,7 @@ BEGIN
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0) AS qty FROM product_cost_entries pce
         WHERE pce.id = (SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)
           AND typeof(pce.cost_usd) IN ('integer','real') AND pce.cost_usd > 0 AND pce.cost_usd <= 1.7976931348623157e308)),
-    (SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb
+    (SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb
       WHERE pb.variant_product_id = products.id AND pb.is_active = 1
         AND typeof(pb.unit_cost_usd) IN ('integer','real') AND pb.unit_cost_usd > 0 AND pb.unit_cost_usd <= 1.7976931348623157e308
         AND (pb.id > (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) OR (SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1) IS NULL)
@@ -597,7 +599,7 @@ END;
 SELECT CASE WHEN (SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name IN ('catalog_cost_on_hand_stock_insert_0195','catalog_cost_on_hand_stock_update_0195','catalog_cost_on_hand_stock_delete_0195','catalog_cost_on_hand_lot_insert_0195','catalog_cost_on_hand_lot_delete_0195','catalog_cost_review_lot_update_0255','product_cost_review_update_guard_0255')) = 7
 THEN 1 ELSE json_extract('[]','$[fallback_rounding_0312_post_triggers_missing]') END;
 SELECT CASE WHEN (SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name IN ('catalog_cost_on_hand_stock_insert_0195','catalog_cost_on_hand_stock_update_0195','catalog_cost_on_hand_stock_delete_0195','catalog_cost_on_hand_lot_insert_0195','catalog_cost_on_hand_lot_delete_0195','catalog_cost_review_lot_update_0255','product_cost_review_update_guard_0255')
-  AND instr(sql, 'SELECT CAST(pb.unit_cost_usd * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 FROM product_batches pb') > 0) = 7
+  AND instr(sql, 'SELECT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) FROM product_batches pb') > 0) = 7
 THEN 1 ELSE json_extract('[]','$[fallback_rounding_0312_post_fallback_not_rounded]') END;
 SELECT CASE WHEN (SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name IN ('catalog_cost_on_hand_stock_insert_0195','catalog_cost_on_hand_stock_update_0195','catalog_cost_on_hand_stock_delete_0195','catalog_cost_on_hand_lot_insert_0195','catalog_cost_on_hand_lot_delete_0195','catalog_cost_review_lot_update_0255','product_cost_review_update_guard_0255')
   AND instr(sql, '(SELECT pb.unit_cost_usd FROM product_batches pb') > 0) = 0
