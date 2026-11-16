@@ -298,16 +298,24 @@ function transferBulk(n, offset) {
     } }
 }
 
+// The instant the shift-close fixture opens and closes at: 16:00 UTC of the seed's anchor date (23:00 business time, the same business date) so the window holds the same few
+// hours of seed rows on every day, but never earlier than two seconds after the real clock, so no row a previous shape stamped with the real time falls inside the window
+// [open, open + 1 day). The business date of the result stays the real one (readCurrent reads SQLite's own clock) except in the last two seconds before 17:00 UTC.
+function shiftCloseInstant(anchorDate, nowMs) {
+  return Math.max(Date.parse(anchorDate + 'T16:00:00Z'), nowMs + 2000)
+}
+
 // The admin opens a shift in branch 1 (setup, before the isolate restarts) and the measured request closes it with Telegram configured (chat id, automation on, the world's bot token).
 function shiftClose() {
   return { id: 'w-shift-close', label: 'POST /api/shifts/:id/close (Telegram ON, report queued)', method: 'POST', url: '/api/shifts/:id/close',
     prepare: async (world) => {
       await world.db.prepare("INSERT OR REPLACE INTO settings(key,value,updated_at) VALUES('telegram_chat_id','-1001','v1'),('telegram_automation_enabled','true','v1'),('shift_admin_exempt','false','v1')").run()
       // The seed's dated rows end at its anchor (12:00 business time, 05:00 UTC of the business date), so how many of them fall in the close's read window (twelve hours before the
-      // open, two days after the close) depends on the real clock: 12 to 36 hours of them sit in the future from 17:00 UTC (the business date has rolled) and the count moved
-      // by about 700 rows between 15:53 and 18:08 UTC on 15 Nov 2026 with no code change. The shift is opened and closed at a pinned instant, 16:00 UTC of the anchor's date (23:00 business time,
-      // the same business date), so the window holds the same four hours of seed rows on every day.
-      world.clockMs = Date.parse(world.ctx.anchorDate + 'T16:00:00Z')
+      // open, two days after the close) depends on the real clock; the shift is therefore opened and closed at a pinned instant (shiftCloseInstant), not at the real one.
+      // The pinned instant is never BEHIND the real clock either: earlier shapes of this pass wrote rows stamped with the real time (one wrote 4,240 fees with a NULL branch), the
+      // close's last-activity look holds its window open a day beyond, and from 16:00 to 17:00 UTC the fixed 16:00 UTC instant is already past, so those rows sat inside the window
+      // and the close read 6,209 rows against a budget of 2,566. Pinned by test-read-budget-shift-clock-pure.cjs.
+      world.clockMs = shiftCloseInstant(world.ctx.anchorDate, Date.now())
       const opened = await world.send('POST', '/api/shifts/open', { branch_id: 1, opening_float_usd: 10, opening_float_khr: 0 })
       if (opened.status >= 300) { world.clockMs = null; throw new Error(`shift fixture: open answered ${opened.status} ${opened.text.slice(0, 200)}`) }
       const shift = opened.json.shift || opened.json
@@ -333,4 +341,4 @@ async function measureWrite(world, shape, { fingerprints = false } = {}) {
 // Request ids come from one counter, so two worlds that run the same shapes in the same order send the same ids.
 const resetSequence = () => { sequence = 0 }
 
-module.exports = { writeShapes, measureWrite, rowCounts, lots, resetSequence, returnOf }
+module.exports = { shiftCloseInstant, writeShapes, measureWrite, rowCounts, lots, resetSequence, returnOf }
