@@ -43,7 +43,9 @@ async function check(name, input, expected, source = 'received_lot') {
     for (const row of projected.batchStock) sqlite.prepare('INSERT INTO branch_batch_stock VALUES(?,?)').run(row.batch_id, row.quantity)
     for (const row of projected.currentCostEntries) sqlite.prepare('INSERT INTO product_cost_entries VALUES(?,?,?,?)').run(row.id, row.product_id, row.cost_usd, row.baseline_batch_id)
     const derived = sqlite.prepare(`SELECT COALESCE(${CATALOG_COST_DERIVE_SQL},cost_price_usd) cost FROM products`).get().cost
-    assert.equal(actual.cost_price_usd, derived, 'JSON projection must equal the real-affinity table formula')
+    // cost-4dp: the preview shows the figure the merge stores, the real-affinity formula rounded to 4 places (nearest, ties away from zero)
+    const stored = derived == null ? null : sqlite.prepare('SELECT CAST(? * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 AS r').get(derived).r
+    assert.equal(actual.cost_price_usd, stored, 'JSON projection must equal the real-affinity table formula, stored to 4 places')
   } finally { sqlite.close() }
 }
 
@@ -57,9 +59,10 @@ async function main() {
   await check('null cost excluded', graph([null, 6]), 6)
   await check('invalid text cost excluded', graph(['invalid', 6]), 6)
   await check('unknown lots preserve fallback', graph([null, 0]), 9, 'keeper_fallback')
-  for (const fallback of [null, 0, 5.123456789012345]) {
+  // cost-4dp: the preview shows the figure the merge will store, so a fallback over 4 places is shown rounded (nearest, ties away from zero)
+  for (const [fallback, shown] of [[null, null], [0, 0], [5.123456789012345, 5.1235], [1.00015, 1.0002], [4.1667, 4.1667]]) {
     const input = graph([null, 0]); input.products[0].cost_price_usd = fallback
-    await check('nullable raw fallback ' + fallback, input, fallback, 'keeper_fallback')
+    await check('nullable raw fallback ' + fallback, input, shown, 'keeper_fallback')
   }
   await check('four-place rounding', graph([1.0001, 1.0002]), 1.0002)
   await check('fractional quantities', graph([4, 6], [0.2, 0.3]), 5.2)

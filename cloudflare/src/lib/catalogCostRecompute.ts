@@ -73,13 +73,18 @@ const OVERRIDDEN_ON_HAND_QTY_SQL = `(SELECT SUM(bbs.quantity) FROM branch_batch_
 // adds the half and truncates, with a 1e-8-unit nudge: with 4dp costs a
 // non-tie quotient sits at least 1/(2 x total quantity) units from a tie,
 // far above double error and far above the nudge.
-const HALF_UP_4DP = (value: string) => `CAST(${value} * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0`
+export const HALF_UP_4DP = (value: string) => `CAST(${value} * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0`
 
 /**
  * 'legacy' = the 0195 / 0255 text; 'validated' = the current text (typed positive input, and the sold-out fallback rounded to 4 places like the
  * weighted branch); 'validated-unrounded' = what 0256 and 0261 shipped (the fallback copies the lot cost verbatim). The last exists only so
  * those migrations' pins and the 0312 recovery notes can still name their exact text.
  */
+/** A stored cost value as it must be written: nearest 4 places, half away from zero; unknown (NULL, non-numeric) stays null. */
+export function roundStoredCost(value: unknown): number | null {
+  return value == null || value === '' || !Number.isFinite(Number(value)) ? null : roundMoney4(typeof value === 'string' ? value : Number(value))
+}
+
 export type CatalogCostInputPolicy = 'legacy' | 'validated' | 'validated-unrounded'
 
 function positiveCostSql(value: string, inputPolicy: CatalogCostInputPolicy): string {

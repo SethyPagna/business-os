@@ -1,4 +1,4 @@
-import { CATALOG_COST_DERIVE_SQL, CATALOG_COST_HAS_RECORDED_LOT_SQL, catalogCostFormulaSql, type CatalogCostInputPolicy } from './catalogCostRecompute'
+import { CATALOG_COST_DERIVE_SQL, CATALOG_COST_HAS_RECORDED_LOT_SQL, HALF_UP_4DP, catalogCostFormulaSql, roundStoredCost, type CatalogCostInputPolicy } from './catalogCostRecompute'
 
 export type MergeCostFallback = { usd: number | null; khr: number | null }
 export type MergeCostOutcome = {
@@ -112,9 +112,12 @@ export function explicitCostReviewWritePlan(input: {
   }
 }
 
+// The merged keeper's cost is stored to 4 places, nearest, half away from zero (owner rule), whichever source wins: the recorded-lot derive is
+// rounded already, but the keeper's own stored cost (the fallback) and the latest manual entry are copies of stored values, so the whole
+// authority is rounded once here. NULL stays NULL.
 export function mergeCostAuthorityUsdSql(fallbackSql: string): string {
-  return `CASE WHEN ${CATALOG_COST_HAS_RECORDED_LOT_SQL} THEN COALESCE(${CATALOG_COST_DERIVE_SQL},${fallbackSql})
-    ELSE COALESCE(${MERGE_COST_LATEST_MANUAL_SQL},${fallbackSql}) END`
+  return HALF_UP_4DP(`(CASE WHEN ${CATALOG_COST_HAS_RECORDED_LOT_SQL} THEN COALESCE(${CATALOG_COST_DERIVE_SQL},${fallbackSql})
+    ELSE COALESCE(${MERGE_COST_LATEST_MANUAL_SQL},${fallbackSql}) END)`)
 }
 
 const MERGE_COST_AUTHORITY_USD_SQL = mergeCostAuthorityUsdSql('@fallbackUsd')
@@ -123,8 +126,8 @@ export function mergeCostReviewStatements(outcome: MergeCostOutcome, actor: { id
   if (!Number.isSafeInteger(generation) || generation < 0) throw new Error('Invalid merge cost generation')
   const afterKey = `CASE WHEN ${CATALOG_COST_HAS_RECORDED_LOT_SQL} THEN NULL ELSE @reviewKey END`
   const usd = MERGE_COST_AUTHORITY_USD_SQL
-  const params = { productId: outcome.keeperId, reviewKey: outcome.reviewKey, fallbackUsd: outcome.original.usd,
-    fallbackKhr: outcome.original.khr, actorId: actor.id, actorName: actor.name, beforeKey: outcome.beforeKey, rootKey: outcome.rootKey,
+  const params = { productId: outcome.keeperId, reviewKey: outcome.reviewKey, fallbackUsd: roundStoredCost(outcome.original.usd),
+    fallbackKhr: roundStoredCost(outcome.original.khr), actorId: actor.id, actorName: actor.name, beforeKey: outcome.beforeKey, rootKey: outcome.rootKey,
     operationId, costGeneration: generation, eventKind: outcome.rootKey === outcome.reviewKey ? 'merge' : 'merge_redo' }
   return [{ sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products WHERE id=@productId AND cost_review_key IS @beforeKey)
     THEN 1 ELSE json_extract('', '$') END AS merge_review_guard`, params },

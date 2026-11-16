@@ -48,6 +48,30 @@ async function main() {
     assert.deepEqual(keeperCost(), { cost_price_usd: 0, cost_price_khr: 0 })
   })
 
+  // cost-4dp: the keeper's own stored cost is the fallback when no recorded lot decides. A legacy value over 4 places (1.00015, 6-9 places) must come
+  // out at 4, nearest, ties away from zero, in the cost, its purchase twin and the KHR column; the twin's unknown cost changes nothing.
+  await check('merge: a keeper cost over 4 decimals with no recorded lot is stored rounded (cost-4dp)', async () => {
+    for (const [stored, want, storedKhr, wantKhr] of [[4.166667, 4.1667, 20500, 20500], [1.00015, 1.0002, 4100.12345, 4100.1235], [9.123456789, 9.1235, 20500.5, 20500.5], [0.00005, 0.0001, 4100, 4100]]) {
+      fresh()
+      setCosts(10, stored, storedKhr); setCosts(11, null, null)
+      const done = await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge' })
+      assert.equal(done.status, 200, JSON.stringify(done.body))
+      assert.deepEqual(keeperCost(), { cost_price_usd: want, cost_price_khr: wantKhr }, 'keeper ' + stored + ' / ' + storedKhr)
+      assert.equal(one('SELECT purchase_price_usd p FROM products WHERE id = 10').p, want, 'the purchase twin is the same figure')
+    }
+  })
+
+  await check('merge: a legacy manual cost entry over 4 decimals decides the keeper and is stored rounded (cost-4dp)', async () => {
+    for (const [entry, want] of [[1.00015, 1.0002], [2.345678, 2.3457]]) {
+      fresh()
+      setCosts(11, null, null)
+      fixtureWrite(() => state.native.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(10,?,'manual',900)").run(entry))
+      const done = await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge' })
+      assert.equal(done.status, 200, JSON.stringify(done.body))
+      assert.equal(keeperCost().cost_price_usd, want, 'manual entry ' + entry)
+    }
+  })
+
   await check('merge of two recorded 0 costs keeps a recorded 0', async () => {
     fresh()
     setCosts(10, 0, 0); setCosts(11, 0, 0)
