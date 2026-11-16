@@ -59,12 +59,16 @@ function observationWhere(filter: NonNullable<InventoryCheckProductsOptions['obs
 export type InventoryCheckSimpleScope = { organizationId: number | null; sessionId?: string }
 
 // A product's check facts in one branch scope. Items of other organizations and items whose branch differs from their session's are never read.
-const CHECK_SCOPE_SQL = 's.organization_id IS @checkOrg AND i.branch_id=s.branch_id AND (@branchId IS NULL OR i.branch_id=@branchId)'
+// Two texts instead of `@branchId IS NULL OR ...`, and the join pinned (the CROSS JOIN fixes the order: a product's items by the 0285 index, then the session by key; INDEXED BY fixes the index).
+// Production keeps no statistics, so a free planner may start from inventory_check_sessions and probe the items once per session for every product: sessions x products rows. See lastCheckedSql.
+// Every copy of the "latest check" rule that reads items for a SET of products (the summary, the page rows) or per cohort row (the checkState filter) goes through these two.
+const checkScopeSql = (branchScoped: boolean) => `s.organization_id IS @checkOrg AND i.branch_id=s.branch_id${branchScoped ? ' AND i.branch_id=@branchId' : ''}`
+const CHECK_ITEMS_SQL = 'inventory_check_items i INDEXED BY inventory_check_items_product_latest CROSS JOIN inventory_check_sessions s ON s.id=i.session_id'
 const CHECK_ITEM_STATE = { in_check: 'unstarted', ok: 'done', issue: 'issue' } as const
-const IN_OPEN_CHECK_SQL = (id: string) => `EXISTS (SELECT 1 FROM inventory_check_items i JOIN inventory_check_sessions s ON s.id=i.session_id
-  WHERE i.product_id=${id} AND i.state='unstarted' AND s.status='open' AND ${CHECK_SCOPE_SQL})`
-const LATEST_STATE_SQL = (id: string) => `(SELECT i.state FROM inventory_check_items i JOIN inventory_check_sessions s ON s.id=i.session_id
-  WHERE i.product_id=${id} AND i.state IN ('done','issue') AND ${CHECK_SCOPE_SQL} ORDER BY i.updated_at DESC,i.session_id DESC LIMIT 1)`
+const IN_OPEN_CHECK_SQL = (id: string, branchScoped: boolean) => `EXISTS (SELECT 1 FROM ${CHECK_ITEMS_SQL}
+  WHERE i.product_id=${id} AND i.state='unstarted' AND s.status='open' AND ${checkScopeSql(branchScoped)})`
+const LATEST_STATE_SQL = (id: string, branchScoped: boolean) => `(SELECT i.state FROM ${CHECK_ITEMS_SQL}
+  WHERE i.product_id=${id} AND i.state IN ('done','issue') AND ${checkScopeSql(branchScoped)} ORDER BY i.updated_at DESC,i.session_id DESC LIMIT 1)`
 
 function checkStateCondition(state: string, simple: InventoryCheckSimpleScope, params: Record<string, unknown>): string {
   if (simple.sessionId) {
@@ -72,9 +76,10 @@ function checkStateCondition(state: string, simple: InventoryCheckSimpleScope, p
     params.checkItemState = CHECK_ITEM_STATE[state as keyof typeof CHECK_ITEM_STATE]
     return 'EXISTS (SELECT 1 FROM inventory_check_items it WHERE it.session_id=@checkSession AND it.product_id=p.id AND it.state=@checkItemState)'
   }
-  if (state === 'in_check') return IN_OPEN_CHECK_SQL('p.id')
-  if (state === 'ok' || state === 'issue') return `(NOT ${IN_OPEN_CHECK_SQL('p.id')} AND ${LATEST_STATE_SQL('p.id')}=${state === 'ok' ? "'done'" : "'issue'"})`
-  if (state === 'not_checked') return `(NOT ${IN_OPEN_CHECK_SQL('p.id')} AND ${LATEST_STATE_SQL('p.id')} IS NULL)`
+  const scoped = params.branchId !== null && params.branchId !== undefined
+  if (state === 'in_check') return IN_OPEN_CHECK_SQL('p.id', scoped)
+  if (state === 'ok' || state === 'issue') return `(NOT ${IN_OPEN_CHECK_SQL('p.id', scoped)} AND ${LATEST_STATE_SQL('p.id', scoped)}=${state === 'ok' ? "'done'" : "'issue'"})`
+  if (state === 'not_checked') return `(NOT ${IN_OPEN_CHECK_SQL('p.id', scoped)} AND ${LATEST_STATE_SQL('p.id', scoped)} IS NULL)`
   return invalid('checkState')
 }
 
@@ -380,13 +385,13 @@ export type InventoryCheckSimpleOptions = {
 }
 
 // The latest done/issue observation and the open-session flag for the page rows only (ids come from the __page CTE of the enclosing statement).
-const PAGE_CHECK_CTES = `latest AS (SELECT product_id,state,counted_quantity,reason,updated_by,updated_at,session_id,branch_id,created_by,by_name FROM (
+const pageCheckCtes = (branchScoped: boolean) => `latest AS (SELECT product_id,state,counted_quantity,reason,updated_by,updated_at,session_id,branch_id,created_by,by_name FROM (
     SELECT i.product_id,i.state,i.counted_quantity,i.reason,i.updated_by,i.updated_at,i.session_id,i.branch_id,s.created_by,u.username AS by_name,
       ROW_NUMBER() OVER (PARTITION BY i.product_id ORDER BY i.updated_at DESC,i.session_id DESC) AS rn
-    FROM inventory_check_items i JOIN inventory_check_sessions s ON s.id=i.session_id LEFT JOIN users u ON u.id=i.updated_by
-    WHERE i.state IN ('done','issue') AND i.product_id IN (SELECT id FROM __page) AND ${CHECK_SCOPE_SQL}) WHERE rn=1),
-  open_check AS (SELECT DISTINCT i.product_id FROM inventory_check_items i JOIN inventory_check_sessions s ON s.id=i.session_id
-    WHERE i.state='unstarted' AND s.status='open' AND i.product_id IN (SELECT id FROM __page) AND ${CHECK_SCOPE_SQL})`
+    FROM (SELECT DISTINCT id FROM __page) pg CROSS JOIN ${CHECK_ITEMS_SQL} LEFT JOIN users u ON u.id=i.updated_by
+    WHERE i.product_id=pg.id AND i.state IN ('done','issue') AND ${checkScopeSql(branchScoped)}) WHERE rn=1),
+  open_check AS (SELECT DISTINCT i.product_id FROM (SELECT DISTINCT id FROM __page) pg CROSS JOIN ${CHECK_ITEMS_SQL}
+    WHERE i.product_id=pg.id AND i.state='unstarted' AND s.status='open' AND ${checkScopeSql(branchScoped)})`
 const PAGE_CHECK_COLUMNS = `CASE WHEN __page.id IN (SELECT product_id FROM open_check) THEN 'in_check' WHEN latest.state='issue' THEN 'issue'
     WHEN latest.state='done' THEN 'ok' ELSE 'not_checked' END AS check_status,
   latest.counted_quantity AS __check_count,latest.reason AS check_note,latest.updated_by AS __check_by_id,latest.by_name AS __check_by_name,
@@ -421,8 +426,8 @@ export async function readInventoryCheckProductsSimple(db: Pick<D1Compat, 'batch
     FROM cohort c,json_each(replace(json_array(COALESCE(c.${field},'')||'||'||COALESCE(c.${field === 'brand' ? 'brands' : 'categories'},'')),'||','","')) choice
     WHERE trim(choice.value)<>'' ORDER BY value COLLATE NOCASE,value LIMIT 201))` : "'[]'"
   const summarySql = `WITH ${plan.ctes(plan.stockFiltered)}${wantCounts ? `,
-    obs AS MATERIALIZED (SELECT i.product_id,i.state,i.updated_at,i.session_id,s.status AS session_status FROM inventory_check_items i
-      JOIN inventory_check_sessions s ON s.id=i.session_id WHERE i.product_id IN (SELECT id FROM cohort) AND ${CHECK_SCOPE_SQL}),
+    obs AS MATERIALIZED (SELECT i.product_id,i.state,i.updated_at,i.session_id,s.status AS session_status FROM (SELECT DISTINCT id FROM cohort) c CROSS JOIN ${CHECK_ITEMS_SQL}
+      WHERE i.product_id=c.id AND ${checkScopeSql(plan.branchId !== undefined)}),
     open_check AS (SELECT DISTINCT product_id FROM obs WHERE state='unstarted' AND session_status='open'),
     latest AS (SELECT product_id,state FROM (SELECT product_id,state,ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY updated_at DESC,session_id DESC) AS rn
       FROM obs WHERE state IN ('done','issue')) WHERE rn=1)` : ''}
@@ -437,7 +442,7 @@ export async function readInventoryCheckProductsSimple(db: Pick<D1Compat, 'batch
   const paged = await paginateProductFamilies<Record<string, unknown>>({
     db: { batch: async statements => {
       const pageSql = `${statements[1].sql}\nLIMIT 501`
-      const wrappedPageSql = `WITH __page AS MATERIALIZED (${pageSql})${pageStock ? `, stock AS (${pageStock.rowsSql})` : plainSessionStock ? `, stock AS (${PLAIN_SESSION_STOCK_SQL})` : ''}${inSession ? '' : `, ${PAGE_CHECK_CTES}`}
+      const wrappedPageSql = `WITH __page AS MATERIALIZED (${pageSql})${pageStock ? `, stock AS (${pageStock.rowsSql})` : plainSessionStock ? `, stock AS (${PLAIN_SESSION_STOCK_SQL})` : ''}${inSession ? '' : `, ${pageCheckCtes(plan.branchId !== undefined)}`}
         SELECT __page.*${pageStock ? `,${stockColumnsSql('stock', PAGE_STOCK_PREFIX)}` : plainSessionStock ? ',stock.ordinary+stock.held AS __quantity,stock.held AS recorded_damaged_quantity' : ''}${showNextExpiry ? `,${NEXT_EXPIRY_SQL} AS next_expiry_date` : ''}${access.fields.received ? ',(SELECT MAX(received_at) FROM product_batches rb WHERE rb.variant_product_id=__page.id) AS latest_received_at' : ''}${inSession ? '' : `,${PAGE_CHECK_COLUMNS}`}
         FROM __page${pageStock || plainSessionStock ? ' LEFT JOIN stock ON stock.product_id=__page.id' : ''}${inSession ? '' : ' LEFT JOIN latest ON latest.product_id=__page.id'}
         WINDOW family AS (PARTITION BY __page.__family_root_id)
