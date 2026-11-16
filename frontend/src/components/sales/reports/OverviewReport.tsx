@@ -47,6 +47,7 @@ import {
   type StatementGroup,
   type StatementLine,
 } from './reportModel.ts'
+import { courierMoneyColumns, optionalMoney } from '../../contacts/deliveryReportCourierMoney.ts'
 import { exportMenuItems, rangeSubtitle, tableLabels, type ReportViewProps } from './reportTypes.ts'
 
 interface ReturnsTotals { count: number; refund_usd: number }
@@ -58,9 +59,10 @@ interface CourierRow {
   deliveries: number
   charged_fee_usd: number
   absorbed_fee_usd: number
-  actual_cost_usd: number
-  actual_cost_count: number
-  delivery_margin_usd: number
+  // Omitted by the Worker without sales:view_courier_cost: undefined, never 0.
+  actual_cost_usd?: number
+  actual_cost_count?: number
+  delivery_margin_usd?: number
   last_delivery_at: string | null
 }
 interface ReasonRow { reason: string; count: number; refund_usd: number }
@@ -169,13 +171,14 @@ export default function OverviewReport(p: ReportViewProps) {
     { key: 'collected_usd', label: tr('collected_total', 'Collected total'), kind: 'money', value: (r) => r.collected_usd },
     { key: 'share', label: tr('rpt_share', 'Share'), kind: 'pct', value: (r) => pct(r.revenue_usd, paymentRevenue), defaultVisible: false },
   ]
+  const showCourier = courierMoneyColumns(couriers)
   const courierColumns: Array<ReportColumn<CourierRow>> = [
     { key: 'name', label: tr('rpt_courier', 'Courier'), primary: true, value: (r) => r.delivery_contact_name || tr('unknown', 'Unknown') },
     { key: 'deliveries', label: tr('rpt_deliveries', 'Deliveries'), kind: 'int', value: (r) => r.deliveries },
     { key: 'charged_fee_usd', label: tr('rpt_delivery_charged', 'Delivery fee charged'), kind: 'money', value: (r) => r.charged_fee_usd },
     { key: 'absorbed_fee_usd', label: tr('rpt_store_delivery', 'Store-paid delivery fee'), kind: 'money', value: (r) => r.absorbed_fee_usd },
-    { key: 'actual_cost_usd', label: tr('rpt_delivery_cost', 'Actual delivery cost'), kind: 'money', value: (r) => r.actual_cost_usd },
-    { key: 'delivery_margin_usd', label: tr('rpt_delivery_margin', 'Delivery profit'), kind: 'money', value: (r) => r.delivery_margin_usd, emphasis: true },
+    ...(showCourier.cost ? [{ key: 'actual_cost_usd', label: tr('rpt_delivery_cost', 'Actual delivery cost'), kind: 'money' as const, value: (r: CourierRow) => r.actual_cost_usd }] : []),
+    ...(showCourier.margin ? [{ key: 'delivery_margin_usd', label: tr('rpt_delivery_margin', 'Delivery profit'), kind: 'money' as const, value: (r: CourierRow) => r.delivery_margin_usd, emphasis: true }] : []),
     { key: 'last_delivery_at', label: tr('rpt_last_delivery', 'Last delivery'), kind: 'datetime', value: (r) => r.last_delivery_at, defaultVisible: false },
   ]
   const reasonColumns: Array<ReportColumn<ReasonRow>> = [
