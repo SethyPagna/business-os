@@ -89,6 +89,9 @@ export interface ProductGroupSection {
 export interface ProductGroupRow extends ProductRecord {
   __mergedProductIds: ProductId[]
   __mergedRowCount: number
+  // True when another record of the same group has the same name and the same real barcode (an
+  // unmerged duplicate). Set by ownRows from the rows already loaded; no read behind it.
+  __unmergedTwin?: boolean
 }
 
 // Fields intentionally left out of the "is this the same product, just at a
@@ -237,7 +240,34 @@ export function mergeSameDetailRows(items: ProductRecord[] = []): ProductGroupRo
 // moves its stock into the kept product, so no folded row is ever left to render. mergeSameDetailRows
 // above stays for the PUBLIC storefront only, where a customer must never see the same article twice.
 export function ownRows(items: ProductRecord[] = []): ProductGroupRow[] {
-  return (Array.isArray(items) ? items : []).map((item) => ({ ...item, __mergedProductIds: [toProductId(item?.id)], __mergedRowCount: 1 }))
+  const source = Array.isArray(items) ? items : []
+  const perKey = new Map<string, number>()
+  for (const item of source) {
+    const key = productTwinKey(item)
+    if (key) perKey.set(key, (perKey.get(key) || 0) + 1)
+  }
+  return source.map((item) => {
+    const key = productTwinKey(item)
+    return { ...item, __mergedProductIds: [toProductId(item?.id)], __mergedRowCount: 1, __unmergedTwin: Boolean(key) && (perKey.get(key) || 0) > 1 }
+  })
+}
+
+// "Same product" for a person: the normalised name plus the real barcode with leading zeros folded (the identity
+// key the duplicate finder and merge use). '' for a row without a real barcode, which is never anyone's twin.
+// The one rule behind the scan hit, the Duplicate tag and the open state of a group that holds twins.
+export function productTwinKey(row: { name?: unknown; barcode?: unknown } | null | undefined): string {
+  if (!row || !isRealBarcode(row.barcode)) return ''
+  return `${normalizeProductGroupName(row.name)}|${identityBarcodeKey(row.barcode)}`
+}
+
+// Products opens a name group folded unless it holds unmerged twins: those start OPEN so the pair is seen side by side
+// (owner, 16 Nov 2026). A person's own fold or unfold afterwards is kept by the caller.
+export function startsCollapsedGroup(group: { hasMultipleItems?: boolean; rows?: ReadonlyArray<Record<string, unknown>> } | null | undefined): boolean {
+  return Boolean(group?.hasMultipleItems) && !groupHasUnmergedTwins(group)
+}
+
+export function groupHasUnmergedTwins(group: { rows?: ReadonlyArray<Record<string, unknown>> } | null | undefined): boolean {
+  return Boolean(group?.rows?.some((row) => row.__unmergedTwin))
 }
 
 interface BuildGroupSectionsOptions {

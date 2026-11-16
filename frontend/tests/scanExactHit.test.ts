@@ -133,25 +133,34 @@ runTest('unmerged twins count as one scan hit, different products stay ambiguous
 
 runTest('mutants of the twin rule are killed', () => {
   const require = createRequire(import.meta.url)
-  const source = readFileSync(new URL('../src/utils/scanExactHit.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
-  const load = (code: string): typeof findScanHit => {
+  const read = (file: string) => readFileSync(new URL(`../src/utils/${file}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+  const compile = (code: string, resolve: (id: string) => unknown): Record<string, any> => {
     const mod: { exports: Record<string, any> } = { exports: {} }
-    new Function('require', 'module', 'exports', transformSync(code, { loader: 'ts', format: 'cjs' }).code)((id: string) => require(id.replace(/^\.\//, '../src/utils/')), mod, mod.exports)
-    return mod.exports.findScanHit
+    new Function('require', 'module', 'exports', transformSync(code, { loader: 'ts', format: 'cjs' }).code)(resolve, mod, mod.exports)
+    return mod.exports
   }
-  assert.deepEqual(pairProbe(load(source)), [], 'the unmutated copy passes')
-  const mutants: Array<[string, string, string]> = [
-    ['no twin rule at all (the regression)', 'if (hit.group === group && key === hitKey) continue', 'if (false) continue'],
-    ['twins matched on barcode alone, any name', 'return `${normalizeProductGroupName(row.name)}|${identityBarcodeKey(row.barcode)}`', 'return identityBarcodeKey(row.barcode)'],
-    ['twins matched on name alone', 'return `${normalizeProductGroupName(row.name)}|${identityBarcodeKey(row.barcode)}`', 'return normalizeProductGroupName(row.name)'],
-    ['raw barcode, leading zeros not folded', 'identityBarcodeKey(row.barcode)}`', 'String(row.barcode)}`'],
-    ['raw name, not normalised', 'normalizeProductGroupName(row.name)}|', 'String(row.name)}|'],
-    ['twins matched across groups', 'if (hit.group === group && key === hitKey) continue', 'if (key === hitKey) continue'],
-    ['twin rule stops after the first twin', 'hitKey = key\n', 'hitKey = key + hit.row.id\n'],
+  const scanSource = read('scanExactHit.ts')
+  const groupingSource = read('productGrouping.ts')
+  const load = (scan: string, grouping: string): typeof findScanHit => {
+    const groupingModule = compile(grouping, (id) => require(id.replace(/^\.\//, '../src/utils/')))
+    return compile(scan, (id) => (id.endsWith('productGrouping.ts') ? groupingModule : require(id.replace(/^\.\//, '../src/utils/')))).findScanHit
+  }
+  assert.deepEqual(pairProbe(load(scanSource, groupingSource)), [], 'the unmutated copy passes')
+  const keyLine = 'return `${normalizeProductGroupName(row.name)}|${identityBarcodeKey(row.barcode)}`'
+  const mutants: Array<[string, 'scan' | 'grouping', string, string]> = [
+    ['no twin rule at all (the regression)', 'scan', 'if (key && hit.group === group && key === hitKey) continue', 'if (false) continue'],
+    ['twins matched across groups', 'scan', 'if (key && hit.group === group && key === hitKey) continue', 'if (key && key === hitKey) continue'],
+    ['twin rule stops after the first twin', 'scan', 'hitKey = key\n', 'hitKey = key + hit.row.id\n'],
+    ['twins matched on barcode alone, any name', 'grouping', keyLine, 'return identityBarcodeKey(row.barcode)'],
+    ['twins matched on name alone', 'grouping', keyLine, 'return normalizeProductGroupName(row.name)'],
+    ['raw barcode, leading zeros not folded', 'grouping', 'identityBarcodeKey(row.barcode)}`\n}', 'String(row.barcode)}`\n}'],
+    ['raw name, not normalised', 'grouping', 'normalizeProductGroupName(row.name)}|${identityBarcodeKey', 'String(row.name)}|${identityBarcodeKey'],
   ]
-  for (const [name, from, to] of mutants) {
-    assert.ok(source.includes(from), `mutant "${name}" no longer matches the source (stale mutant)`)
-    assert.notDeepEqual(pairProbe(load(source.replace(from, to))), [], `mutant survived: ${name}`)
+  for (const [name, file, from, to] of mutants) {
+    const target = file === 'scan' ? scanSource : groupingSource
+    assert.ok(target.includes(from), `mutant "${name}" no longer matches the source (stale mutant)`)
+    const mutated = target.replace(from, to)
+    assert.notDeepEqual(pairProbe(file === 'scan' ? load(mutated, groupingSource) : load(scanSource, mutated)), [], `mutant survived: ${name}`)
   }
 })
 

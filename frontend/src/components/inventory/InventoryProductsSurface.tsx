@@ -7,6 +7,7 @@ import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
 import PendingReviewSync from '../shared/PendingReviewSync.tsx'
 import PendingReviewTag from '../shared/PendingReviewTag.tsx'
 import StockQty from './StockQty.tsx'
+import UnmergedTwinTag from '../products/UnmergedTwinTag.tsx'
 import { productCost } from '../../utils/costDisplay.ts'
 import { useApp } from '../../app/AppContextCore.tsx'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
@@ -149,6 +150,10 @@ export default function InventoryProductsSurface({
   // from the app context, so this costs no read. Two unmerged twins of 8 and 50 with a threshold of
   // 10 therefore show a low 8 and a healthy 50, exactly what the bell lists. No family rule here.
   const stockQty = (product: InventoryProductRow) => <StockQty qty={quantity(product)} product={product} />
+  // "Duplicate" on a row whose record has an unmerged twin in this list (decided by ownRows from the loaded rows).
+  const twinTag = (product: InventoryProductRow) => product.__unmergedTwin
+    ? <UnmergedTwinTag label={t('product_duplicate_badge') || 'Duplicate'} hint={t('product_twin_row_hint') || 'Same name and barcode as another product. Merge it in the Conflicts tab.'} />
+    : null
   // Money cell shape copied from the Sales list's amount cell: the USD figure
   // is the bold primary line, the KHR equivalent a muted sub-line. `tone`
   // carries the Products page's column convention (cost red, price green,
@@ -289,7 +294,7 @@ export default function InventoryProductsSurface({
                   <tr key={String(product.id)} className="border-t border-slate-100 hover:bg-blue-50/60 dark:border-slate-800 dark:hover:bg-blue-900/10" onClick={() => { if (product.__mergedProductIds?.length <= 1) onOpenDetail(product) }}>
                     {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
                     {/* "Waiting for review" tag: in this cell's 12px start gutter, out of the flow; `relative` is on the cell with or without a tag. */}
-                    <td className="relative max-w-[18rem] px-3 py-1.5"><PendingReviewTag section="products" entityType="product" ids={product.__mergedProductIds || [product.id]} className="left-px top-1" /><div className="flex min-w-0 items-start gap-1"><div className="min-w-0 flex-1"><div className="min-w-0 font-medium text-slate-800 dark:text-slate-100"><ProductNameRail name={String((product.name || '—') ?? '')} /></div><div className="truncate text-[10px] text-slate-400">{[product.brand, product.category].filter(Boolean).join(' · ')}</div></div>{productMenu(product)}</div></td>
+                    <td className="relative max-w-[18rem] px-3 py-1.5"><PendingReviewTag section="products" entityType="product" ids={product.__mergedProductIds || [product.id]} className="left-px top-1" /><div className="flex min-w-0 items-start gap-1"><div className="min-w-0 flex-1"><div className="flex min-w-0 items-center gap-1 font-medium text-slate-800 dark:text-slate-100"><span className="min-w-0 flex-1"><ProductNameRail name={String((product.name || '—') ?? '')} /></span>{twinTag(product)}</div><div className="truncate text-[10px] text-slate-400">{[product.brand, product.category].filter(Boolean).join(' · ')}</div></div>{productMenu(product)}</div></td>
                     <td className="px-3 py-1.5 font-mono text-slate-500">{product.barcode || '—'}</td>
                     <td className="px-3 py-1.5 text-right font-semibold">{stockQty(product)}</td>
                     <td className="min-w-28 px-3 py-1.5 text-[11px]">{branchLines(product)}</td>
@@ -320,7 +325,7 @@ export default function InventoryProductsSurface({
                   {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
                   <div className="flex min-w-0 items-start justify-between gap-2"><span className="min-w-0 font-medium"><ProductNameRail name={String((product.name || '—') ?? '')} /></span><strong>{stockQty(product)}</strong></div>
                   {/* Barcode only -- the SKU half of this line went with the column. */}
-                  <p className="break-all text-[11px] text-slate-500">{product.barcode || '—'}</p>
+                  <p className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-slate-500"><span className="min-w-0 break-all">{product.barcode || '—'}</span>{twinTag(product)}</p>
                   <div className="my-1 text-xs">{branchLines(product)}</div>
                   {/* Same colour language as the desktop columns, so a value
                       does not change meaning when the layout does. */}

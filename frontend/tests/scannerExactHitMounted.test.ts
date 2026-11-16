@@ -242,6 +242,21 @@ try {
     assert.equal(ids[0], shown.filter((id) => id === '31' || id === '32')[0], 'the first twin in list order')
   })
 
+  await check('Products: a group with unmerged twins starts OPEN with a Duplicate tag on each twin; a variants-only group stays folded, untagged', async () => {
+    const page = await mountProducts([...PAIR_CATALOG, row(41, 'Aloe Gel', '8850000000011'), row(42, 'Aloe Gel', '8850000000022')])
+    const shown = (id: number): boolean => page.findAll((node) => node.getAttribute('data-product-jump-id') === String(id) && node.getAttribute('data-clickable') === 'true').length > 0
+    assert.equal(shown(31) && shown(32), true, 'both twins are visible on first load, with no click and no scan')
+    assert.equal(shown(41) || shown(42), false, 'the Aloe Gel variants (two real barcodes) start folded')
+    const taggedIds = new Set<string>()
+    for (const tag of page.findAll((node) => node.getAttribute('data-unmerged-twin') === 'true')) {
+      for (let node: MemoryNode | null = tag; node; node = node.parentElement) {
+        const id = node.getAttribute('data-product-jump-id')
+        if (id) { taggedIds.add(id); break }
+      }
+    }
+    assert.deepEqual([...taggedIds].sort(), ['31', '32'], 'the Duplicate tag is on both twins and on nothing else (not the single Chanel row, not a variant)')
+  })
+
   await check('Products: two rows sharing the barcode single out nothing', async () => {
     const page = await mountProducts([...CATALOG.slice(0, 2), row(25, 'Dior Sauvage Travel', DIOR), CATALOG[2]])
     await scan(page, DIOR)

@@ -84,7 +84,7 @@ import { useIsPageActive } from '../shared/pageActivity'
 import PendingReviewSync from '../shared/PendingReviewSync'
 import PendingReviewTag from '../shared/PendingReviewTag'
 import { noteQueuedForReview } from '../../utils/pendingReviewTargets.ts'
-import { buildProductCategorySections, hideZeroStockGroupedChildRows } from '../../utils/productGrouping.ts'
+import { buildProductCategorySections, hideZeroStockGroupedChildRows, startsCollapsedGroup } from '../../utils/productGrouping.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId, resolveCreatedHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { UNDO_HIDDEN_VALUE_FALLBACK, undoNeedsHiddenValue, undoNeedsHiddenValueIn } from '../../utils/hiddenValueUndo.ts'
@@ -184,6 +184,7 @@ import { getPossiblySameProducts, dismissProductDuplicateCluster } from '../../a
 import { useMergeStockChoice } from './useMergeStockChoice.tsx'
 import { buildExactDuplicateIndex, extractDuplicateClusters, findRowDuplicateInfo, type ExactDuplicateInfo } from '../../utils/exactDuplicateProducts.ts'
 import DuplicateResolverControl from './DuplicateResolverControl.tsx'
+import UnmergedTwinTag from './UnmergedTwinTag.tsx'
 import { catalogHasBarcode, isProductSearchTooShort, productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
 // The section chips below are the same chrome HubSectionNav renders, styled
 // from the same stylesheet (see the row's `bos-nav-chrome` class).
@@ -1120,6 +1121,7 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
                     something different from its row. */}
                 <ProductNameRail name={productName} />
               </div>
+              {p.__unmergedTwin && !dupInfo ? <UnmergedTwinTag label={tr('product_duplicate_badge', 'Duplicate')} hint={tr('product_twin_row_hint', 'Same name and barcode as another product. Merge it in the Conflicts tab.')} /> : null}
             </div>
             {dupInfo ? (
               <DuplicateResolverControl
@@ -1341,6 +1343,7 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
                 "instead of moving the price and quantity row just keep it
                 constant there"). */}
             <div className="mt-0.5 flex min-h-[1.1875rem] flex-wrap gap-1">
+              {p.__unmergedTwin && !dupInfo ? <UnmergedTwinTag label={tr('product_duplicate_badge', 'Duplicate')} hint={tr('product_twin_row_hint', 'Same name and barcode as another product. Merge it in the Conflicts tab.')} /> : null}
               {/* Small-screen default card shows the BARCODE here in place of
                   the category (user, Aug 29: "hide the category inside the
                   details ... replace the outside with barcode"). Category is
@@ -4046,9 +4049,12 @@ function ProductsFullEditor() {
 
       productSections.forEach((section) => {
         section.groups.forEach((group) => {
-          if (!group?.hasMultipleItems) return
           if (initializedCollapsedGroupKeysRef.current.has(group.key)) return
+          if (!group?.hasMultipleItems) return
           initializedCollapsedGroupKeysRef.current.add(group.key)
+          // A group that holds unmerged duplicates starts OPEN (see startsCollapsedGroup); a variants-only group starts
+          // folded. Either way the person's own fold or unfold sticks: each key is initialised once.
+          if (!startsCollapsedGroup(group)) return
           next.add(group.key)
           changed = true
         })

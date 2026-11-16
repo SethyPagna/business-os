@@ -4183,6 +4183,7 @@
   "product_duplicate_merged": "Merged -- stock, received dates and images were carried onto the kept product",
   "product_duplicate_badge": "Duplicate",
   "product_duplicate_row_hint": "Same barcode and name as another product. Resolve it here -- the usual edit/manage actions are hidden until then.",
+  "product_twin_row_hint": "Same name and barcode as another product. Merge it in the Conflicts tab.",
   "product_duplicate_kept_both": "Kept both -- no longer flagged as duplicates",
   "duplicate_keep_this": "Keep this",
   "duplicate_keep_this_hint": "Keep this record and merge the other duplicate(s) into it",
