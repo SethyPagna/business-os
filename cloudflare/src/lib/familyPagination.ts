@@ -61,8 +61,11 @@ export const FAMILY_ROOT_KEY_SQL = `COALESCE(NULLIF(COALESCE(parent.name_key, p.
  * The name is lower(trim()) like the family key. The barcode is the IDENTITY key the client, the duplicate
  * finder and merge use (identityBarcodeKey in frontend/src/utils/productDetailRule.ts): trimmed, lowercased,
  * and for an all-digit code folded past leading zeros when 3 or more digits remain, so '0885...' and '885...'
- * are consecutive on flat lists as well. SQLite trim() strips spaces only, JS trim() any whitespace: a code
- * with a tab or newline around it is the one case the two can differ.
+ * are consecutive on flat lists as well. The two keys are not byte-identical for exotic input (measured on
+ * 31 probes, 4 differ): SQLite trim() strips spaces only while JS trim() strips any whitespace (a tab, newline
+ * or no-break space around a code), and SQLite lower() folds ASCII letters only while JS lower-cases every
+ * script (a non-ASCII capital in a code). Only the ORDER of such rows can differ, never which rows are returned,
+ * and the grouped surfaces re-sort on the client with the JS key.
  * Defaults to the selected columns `name` and `barcode`; pass the qualified/aliased names otherwise.
  */
 export function intraFamilyNameBarcodeSql(nameColumn = 'name', barcodeColumn = 'barcode'): string {
