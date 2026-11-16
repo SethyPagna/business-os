@@ -391,7 +391,8 @@ export function productRemoveGraphGuards(
       sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products p WHERE p.id=@product
         AND ${exactObjectSql('p', selected, 'productJson', 'productRoundedJson')})
         THEN 1 ELSE json_extract('', '$') END AS product_remove_product_guard`,
-      params: { product: plan.product_id, productJson: JSON.stringify(selected), productRoundedJson: JSON.stringify(roundedProductCosts(selected)) },
+      // The rounded twin is bound only when some saved cost is over 4 places (the SQL names it only then), so a plan without one binds exactly what it always did.
+      params: { product: plan.product_id, productJson: JSON.stringify(selected), ...(JSON.stringify(roundedProductCosts(selected)) !== JSON.stringify(selected) ? { productRoundedJson: JSON.stringify(roundedProductCosts(selected)) } : {}) },
     })
   }
   const rowGuards = [
