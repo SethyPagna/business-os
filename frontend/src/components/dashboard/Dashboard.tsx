@@ -80,6 +80,7 @@ interface AppContextValue {
   navigateTo: NavigateFn
   user?: AppUser | null
   hasPermission: (key: string) => boolean
+  can: (permissionKey: string, actionKey: string) => boolean
 }
 
 interface SyncContextValue {
@@ -795,7 +796,7 @@ function normalizeDashboardAnalyticsPayload(value: unknown): DashboardAnalytics 
 }
 
 export default function Dashboard() {
-  const { t, fmtUSD, fmtKHR, navigateTo, user, hasPermission, settings } = useApp()
+  const { t, fmtUSD, fmtKHR, navigateTo, user, hasPermission, can, settings } = useApp()
   // The payment-method and branch cards are split rows: 4 places so they add up to
   // the window figure exactly (owner, 13 Oct 2026); the headline KPI cards keep cents.
   const usdSymbol = String(settings?.currency_usd_symbol || '$')
@@ -2753,20 +2754,23 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
                   <div className="detail-scroll-text mt-1 text-sm font-semibold text-gray-900 dark:text-white">{item.value}</div>
                 </div>
               ))}
-              <button
-                type="button"
-                className="btn-secondary col-span-2 w-full"
-                onClick={() => {
-                  // The sale on screen is the one the Sales page opens, not just the page (same handoff as the other Open sale links).
-                  const target = saleLinkTarget(recentSaleDetail.id, recentSaleDetail.receipt_number)
-                  queueEntitySearch('sales', target.search, 'hub:sales:sales', target.focus)
-                  setRecentSaleDetail(null)
-                  setRecentSalesOpen(false)
-                  navigateTo('sales')
-                }}
-              >
-                {translateOr('open_sales_page', 'Open sales page')}
-              </button>
+              {/* Only for someone who may open Sales (the Expenses "Open sale" link gates the same way): a custom role without it must not be offered a page it cannot read. */}
+              {can('sales', 'view') ? (
+                <button
+                  type="button"
+                  className="btn-secondary col-span-2 w-full"
+                  onClick={() => {
+                    // The sale on screen is the one the Sales page opens, not just the page (same handoff as the other Open sale links).
+                    const target = saleLinkTarget(recentSaleDetail.id, recentSaleDetail.receipt_number)
+                    queueEntitySearch('sales', target.search, 'hub:sales:sales', target.focus)
+                    setRecentSaleDetail(null)
+                    setRecentSalesOpen(false)
+                    navigateTo('sales')
+                  }}
+                >
+                  {translateOr('open_sales_page', 'Open sales page')}
+                </button>
+              ) : null}
             </div>
           </div>
         </div>

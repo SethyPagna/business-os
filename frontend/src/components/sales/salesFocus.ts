@@ -22,6 +22,18 @@ export function parseSalesFocus(payload: unknown): SalesFocus | null {
 }
 
 /**
+ * The Sales page's state after a link's handoff arrives: the receipt as the box text, the focus, and every filter that could hide the sale cleared.
+ * The date range was always reset; the status and user filters were not, so a leftover "Not Paid" or one cashier hid the very sale the link opened (every
+ * "Open sale" link shared this). Null when the payload names nothing to search. Pure, so the page's effect and the test read the same rule.
+ */
+export function salesHandoffState(payload: unknown): { search: string; focus: SalesFocus | null; statusFilter: 'all'; userFilter: 'all' } | null {
+  if (!payload || typeof payload !== 'object') return null
+  const search = String((payload as { search?: unknown }).search || '').trim()
+  if (!search) return null
+  return { search, focus: parseSalesFocus(payload), statusFilter: 'all', userFilter: 'all' }
+}
+
+/**
  * The sale id the list and the totals should read exactly, or null to read the typed search as before.
  * `typed` is the search box as typed; `sent` is the debounced value the requests use (it lags `typed` by one debounce), so the focus holds through
  * that lag instead of firing one all-time receipt search for the old text.
