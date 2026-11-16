@@ -177,11 +177,19 @@ check('POST aborts when an index is not the partial one', () => {
 })
 
 // ---- S13 ----------------------------------------------------------------------------------------------------------------------------------------------------
+// A later migration that drops and recreates the index (0309 added sales_daily_rebuild) carries the current predicate, so
+// the S13 checks run on 0303 plus those rebuilds: the sweep must plan through the index production actually has.
 const normalize = (text) => text.replace(/\s+/g, ' ').trim()
-check('S13 drift: the index WHERE in the migration is AUDIT_RETENTION_DELETABLE_SQL, whitespace aside, and the delete embeds the same constant', () => {
-  const where = /CREATE INDEX idx_audit_logs_retention_deletable ON audit_logs \(created_at\) WHERE ([^\n]*);/.exec(sql)[1]
+const INDEX_WHERE = /CREATE INDEX idx_audit_logs_retention_deletable ON audit_logs \(created_at\) WHERE ([^\n]*);/
+const rebuilds = fs.readdirSync(directory).filter((f) => f.endsWith('.sql') && f > migration).sort()
+  .map((f) => fs.readFileSync(path.join(directory, f), 'utf8')).filter((text) => INDEX_WHERE.test(text))
+for (const text of rebuilds) post.exec(text)
+check('S13 drift: the newest index WHERE (0303 or a later rebuild) is AUDIT_RETENTION_DELETABLE_SQL, whitespace aside, and the delete embeds the same constant', () => {
+  const where = INDEX_WHERE.exec(rebuilds.length ? rebuilds[rebuilds.length - 1] : sql)[1]
   assert.equal(normalize(where), normalize(audit.AUDIT_RETENTION_DELETABLE_SQL))
   assert.ok(normalize(auditDelete).includes(normalize(audit.AUDIT_RETENTION_DELETABLE_SQL)))
+  const live = post.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_audit_logs_retention_deletable'").get().sql
+  assert.equal(normalize(INDEX_WHERE.exec(`${live};`)[1]), normalize(audit.AUDIT_RETENTION_DELETABLE_SQL))
 })
 check('S13: the sweep plans through idx_audit_logs_retention_deletable', () => {
   const p = plan(post, auditDelete, { cutoff: '2026-09-01' })
