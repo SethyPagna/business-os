@@ -996,7 +996,7 @@ app.get('/:id/stock', async (c) => {
     db,
     selectColumns: `p.id, p.name, p.sku, p.barcode, p.brand, p.category, p.unit, p.selling_price_usd, p.selling_price_khr,
            p.purchase_price_usd, p.purchase_price_khr, p.cost_price_usd, p.cost_price_khr,
-           p.low_stock_threshold, p.out_of_stock_threshold,
+           p.low_stock_threshold, p.out_of_stock_threshold, p.created_at,
            COALESCE(bs.quantity, 0) AS branch_quantity`,
     joinSql: branchStockJoinSql,
     whereSql,

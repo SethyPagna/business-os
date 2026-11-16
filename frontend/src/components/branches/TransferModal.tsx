@@ -35,6 +35,9 @@ import { productSearchRequest, rankedSearchOverride, useProductSearchIndex } fro
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
+import { fmtDateOnly } from '../../utils/formatters.ts'
+import UnmergedTwinTag from '../products/UnmergedTwinTag.tsx'
+import Calendar from 'lucide-react/dist/esm/icons/calendar.js'
 import { sortLotsForDisplay } from '../../utils/lotDisplayOrder.ts'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
@@ -137,6 +140,10 @@ type TransferProduct = {
   barcode?: string
   unit?: string
   branch_quantity?: number | string
+  // When the record was created (the branch stock list carries it) and whether buildProductGroups flagged it as an
+  // unmerged twin of another record: together they tell two twin rows apart in the picker.
+  created_at?: string
+  __unmergedTwin?: boolean
 }
 
 /**
@@ -1827,7 +1834,20 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                         />
                         <div className="min-w-0 flex-1 basis-[60%] sm:basis-auto">
                           <div className="min-w-0 text-sm font-medium text-gray-900 dark:text-white"><ProductNameRail name={String((product.name) ?? '')} /></div>
-                          {product.sku ? <div className="break-all font-mono text-xs text-gray-400">{product.sku}</div> : null}
+                          {product.sku || product.__unmergedTwin ? (
+                            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-gray-400">
+                              {product.sku ? <span className="break-all font-mono">{product.sku}</span> : null}
+                              {/* An unmerged twin reads exactly like its pair, so it carries the Duplicate tag and the date its record was
+                                  created (already on the row: no extra read) to tell the two apart. */}
+                              {product.__unmergedTwin ? <UnmergedTwinTag label={t('product_duplicate_badge') || 'Duplicate'} hint={t('product_twin_row_hint') || 'Same name and barcode as another product. Merge it in the Conflicts tab.'} /> : null}
+                              {product.__unmergedTwin && product.created_at ? (
+                                <span className="inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap leading-relaxed" title={t('date_added') || 'Date added'} data-twin-date="true">
+                                  <Calendar className="h-3 w-3 shrink-0" aria-hidden="true" />
+                                  {fmtDateOnly(product.created_at)}
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </div>
                         <span className="ml-auto shrink-0 text-xs text-gray-500 sm:ml-0 dark:text-gray-400">
                           {t('available') || 'Available'}: {product.branch_quantity} {product.unit}

@@ -143,5 +143,8 @@ async function run(source, label) {
   assert.equal((ic.match(/intraFamilyOrderSql: IC_INTRA_FAMILY_ORDER_SQL/g) || []).length, 2, 'the simple and the wired IC reads use the shared intra order')
   assert.equal((ic.match(/__page\.__family_root_id ASC,\$\{IC_PAGE_INTRA_ORDER_SQL\}/g) || []).length, 2, 'both IC page wrappers repeat it')
   assert.ok(!/intraFamilyOrderSql: 'id ASC'/.test(ic), 'no id-only intra order is left in the IC list')
+  // The branch stock rows carry created_at, which the Transfer picker shows to tell two twin rows apart (it is on the products row already: no extra read).
+  const branches = fs.readFileSync(path.join(routes, 'branches.ts'), 'utf8')
+  assert.ok(/p\.out_of_stock_threshold, p\.created_at,\s*\n\s*COALESCE\(bs\.quantity, 0\) AS branch_quantity/.test(branches), 'GET /branches/:id/stock no longer selects p.created_at')
   console.log(`PASS duplicate rows adjacent: ${Object.keys(tails).length} sorts x default/seek paging, pair at the page boundary, barcode search, ${killed} mutants killed`)
 })().catch(error => { console.error(error); process.exit(1) })
