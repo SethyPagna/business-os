@@ -1,7 +1,7 @@
 // Which row, if any, a scanned barcode points at.
 //
 // A scan never adds or picks a product (owner rule, 2 Sep): it fills the search
-// box and the list narrows. When exactly ONE child row carries that barcode the
+// box and the list narrows. When exactly ONE product (unmerged twins count as one) carries that barcode the
 // surface may highlight it and scroll to it, so the person confirms with one
 // deliberate tap or Enter. Barcode is the only identity of a product row, so
 // this asks searchRelevanceTier for the exact-barcode tier and nothing else: a
@@ -9,6 +9,8 @@
 // longer GTIN is not a hit. Leading zeros fold and UPC-E pairs with UPC-A,
 // because that is what the tier already does for the server's search.
 import { MATCH_TIER_EXACT_BARCODE, searchRelevanceTier } from './searchMatch.ts'
+import { identityBarcodeKey } from './productDetailRule.ts'
+import { normalizeProductGroupName } from './productGrouping.ts'
 
 export interface ScanRow {
   barcode?: unknown
@@ -19,12 +21,18 @@ export function isExactBarcodeHit(row: ScanRow | null | undefined, query: unknow
   return searchRelevanceTier(row, query, { nameTiers: false }) === MATCH_TIER_EXACT_BARCODE
 }
 
+// Two unmerged duplicates (same name, same identity barcode, leading zeros folded) are separate rows
+// but one product to a person scanning: they count as one hit. The row kept is the first in list order.
+function twinKey(row: ScanRow): string {
+  return `${normalizeProductGroupName(row.name)}|${identityBarcodeKey(row.barcode)}`
+}
+
 /**
  * The one exact-barcode row across every group, with the group that owns it, or
- * null when none matches or two rows share the barcode (then nothing is singled
- * out and the matches are simply listed). `rowsOf` returns a group's child
- * rows: pass what the person sees as separate rows, not the raw records that a
- * display row merges.
+ * null when none matches or two DIFFERENT products share the barcode (then
+ * nothing is singled out and the matches are simply listed). Unmerged twins
+ * inside one group are the same product: the first of them is the hit.
+ * `rowsOf` returns a group's child rows, one per record.
  */
 export function findScanHit<G, R extends ScanRow>(
   groups: Iterable<G>,
@@ -32,11 +40,17 @@ export function findScanHit<G, R extends ScanRow>(
   query: unknown,
 ): { group: G; row: R } | null {
   let hit: { group: G; row: R } | null = null
+  let hitKey = ''
   for (const group of groups) {
     for (const row of rowsOf(group)) {
       if (!isExactBarcodeHit(row, query)) continue
-      if (hit) return null
+      const key = twinKey(row)
+      if (hit) {
+        if (hit.group === group && key === hitKey) continue
+        return null
+      }
       hit = { group, row }
+      hitKey = key
     }
   }
   return hit

@@ -28,6 +28,9 @@ const CATALOG = [
   row(24, 'Chanel Coco Mini', `1${DIOR}`),
 ]
 const TWIN_CATALOG = [...CATALOG.slice(0, 2), row(25, 'Dior Sauvage Travel', DIOR)]
+// Two UNMERGED duplicates: separate records, same name, same barcode (one with a leading zero). They are
+// one product to a person scanning, so the scan must still single out the one card / group.
+const PAIR_CATALOG = [row(31, 'Dior Sauvage', DIOR), row(32, 'Dior Sauvage', `0${DIOR}`), row(23, 'Chanel Coco', '3145891264003')]
 
 const harness = await createHarness({ localStorage: { businessos_user: JSON.stringify(USER) } })
 const browser = globalThis as unknown as { window: { localStorage: Storage; sessionStorage: Storage; matchMedia: (query: string) => unknown } }
@@ -189,6 +192,20 @@ try {
     assert.deepEqual(scrolled, [], 'and nothing is scrolled to or focused')
   })
 
+  await check('POS: an unmerged same-name pair is one card: a scan rings, scrolls to and focuses it', async () => {
+    asDesktop(true)
+    scrolled.length = 0
+    const till = await mountTill(PAIR_CATALOG)
+    await scan(till, DIOR)
+    await till.waitFor(() => marked(till).length === 1, 'the one card of the pair to be marked (a pair sharing a barcode made the scan return null)')
+    await till.settle()
+    const card = marked(till)[0]
+    assert.ok(card.textContent.includes('Dior Sauvage'))
+    assert.ok(scrolled.includes(card), 'the card was scrolled into view')
+    const active = (globalThis as unknown as { document: { activeElement: MemoryNode } }).document.activeElement
+    assert.equal(active, card, 'Enter would act on the card of the pair: focus moved to it')
+  })
+
   await check('POS: a text search or a prefix of a barcode rings nothing', async () => {
     asDesktop(false)
     const till = await mountTill(CATALOG)
@@ -210,6 +227,19 @@ try {
     assert.equal(hasRow(22), true, 'the group was opened for the scanned row')
     const ids = [...new Set(marked(page).map((node) => node.getAttribute('data-product-jump-id')))]
     assert.deepEqual(ids, ['22'], 'only the row whose barcode is exactly the scanned one (not 21, not the longer GTIN 24)')
+  })
+
+  await check('Products: an unmerged same-name pair opens its group and marks the FIRST twin only', async () => {
+    const page = await mountProducts(PAIR_CATALOG)
+    const rowIds = (): string[] => page.findAll((node) => node.getAttribute('data-clickable') === 'true' && node.getAttribute('data-product-jump-id') !== null)
+      .map((node) => String(node.getAttribute('data-product-jump-id')))
+    await scan(page, DIOR)
+    await page.waitFor(() => marked(page).length > 0, 'a twin to be marked (a pair sharing a barcode made the scan return null)')
+    const shown = [...new Set(rowIds())]
+    assert.ok(shown.includes('31') && shown.includes('32'), 'the group opened with both twins visible: ' + shown.join(','))
+    const ids = [...new Set(marked(page).map((node) => node.getAttribute('data-product-jump-id')))]
+    assert.equal(ids.length, 1, 'one twin is marked, not both')
+    assert.equal(ids[0], shown.filter((id) => id === '31' || id === '32')[0], 'the first twin in list order')
   })
 
   await check('Products: two rows sharing the barcode single out nothing', async () => {
