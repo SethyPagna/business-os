@@ -61,7 +61,7 @@ function load(file: string, code = read(file), extra: (id: string) => unknown = 
     const injected = extra(id)
     if (injected !== undefined) return injected
     // The Inventory rows of this fixture are same-name rows with short barcodes: twins under the owner's identity rule, so the surface asks for the tag's tooltip.
-    return { default: () => null, TopPager: (props: { children?: unknown }) => props.children ?? null, unmergedTwinHint: () => '', __esModule: true }
+    return { default: () => null, TopPager: (props: { children?: unknown }) => props.children ?? null, unmergedTwinHint: () => '', useTwinDismissals: () => new Set(), __esModule: true }
   }, mod, mod.exports)
   return mod.exports
 }

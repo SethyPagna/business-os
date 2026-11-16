@@ -85,6 +85,7 @@ import PendingReviewSync from '../shared/PendingReviewSync'
 import PendingReviewTag from '../shared/PendingReviewTag'
 import { noteQueuedForReview } from '../../utils/pendingReviewTargets.ts'
 import { buildProductCategorySections } from '../../utils/productGrouping.ts'
+import { useTwinDismissals } from '../shared/useTwinDismissalsLoader.ts'
 import { hideZeroStockGroupedChildRows, startsCollapsedGroup } from '../../utils/productGroupVisibility.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId, resolveCreatedHistorySnapshot } from '../../utils/historyHelpers.ts'
@@ -181,7 +182,8 @@ import { buildPromotionsFilterSection } from '../shared/PromotionsFilterOptions.
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import type { LowStockConfig } from '../../utils/lowStockSettings.ts'
 import type { BulkDeleteJobStatus } from '../../api/productWriteTransport.ts'
-import { getPossiblySameProducts, dismissProductDuplicateCluster } from '../../api/productWriteTransport.ts'
+import { getPossiblySameProducts } from '../../api/productWriteTransport.ts'
+import { dismissProductClusterAndRefresh } from '../shared/twinDismissalsTransport.ts'
 import { useMergeStockChoice } from './useMergeStockChoice.tsx'
 import { buildExactDuplicateIndex, extractDuplicateClusters, findRowDuplicateInfo, type ExactDuplicateInfo } from '../../utils/exactDuplicateProducts.ts'
 import DuplicateResolverControl from './DuplicateResolverControl.tsx'
@@ -3485,7 +3487,7 @@ function ProductsFullEditor() {
     if (dupResolverBusyKey) return
     setDupResolverBusyKey(info.key)
     try {
-      await dismissProductDuplicateCluster('barcode', info.barcode)
+      await dismissProductClusterAndRefresh('barcode', info.barcode)
       notify(t('product_duplicate_kept_both') || 'Kept both — no longer flagged as duplicates')
       await refreshDuplicateClusters(true)
     } catch (e) {
@@ -3852,6 +3854,9 @@ function ProductsFullEditor() {
   // initial) -- replaces the old name-initial-letter sectioning here and
   // on Inventory.tsx. POS.tsx's own AlphaIndexRail is untouched -- that one
   // was never part of this ask, it stays name-initial.
+  // A "Keep both" ruling takes the Duplicate tag, the open state and the scan's one-product treatment off the pair (utils/productTwinDismissals.ts), so the sections
+  // are rebuilt when the loaded rulings change.
+  const twinDismissals = useTwinDismissals()
   const productSections = useMemo<ProductSectionLike[]>(
     () => {
       const sections = buildProductCategorySections(filtered, {
@@ -3872,7 +3877,7 @@ function ProductsFullEditor() {
       // the filters above is reachable here.
       return (hideZeroStockRows ? hideZeroStockGroupedChildRows(sections) : sections) as unknown as ProductSectionLike[]
     },
-    [filtered, hideZeroStockRows, productSortDirection, productsById, searchTerms, t],
+    [filtered, hideZeroStockRows, productSortDirection, productsById, searchTerms, t, twinDismissals],
   )
 
   const allVisibleProducts = useMemo<ProductRecord[]>(

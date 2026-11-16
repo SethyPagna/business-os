@@ -490,6 +490,7 @@ export function setProductConflictMark(productId: number, mark: ProductConflictM
   ) as Promise<{ changed?: boolean; pending?: boolean; pendingActionId?: number }>
 }
 
+// Staff callers go through components/shared/twinDismissalsTransport.ts dismissProductClusterAndRefresh, which also re-reads the rulings behind the Duplicate tag.
 export function dismissProductDuplicateCluster(type: 'leadingzero' | 'barcode' | 'name' | 'similar', value: string): Promise<unknown> {
   return route(
     'products:dismissDuplicateCluster',

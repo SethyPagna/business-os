@@ -101,7 +101,7 @@ const mutants: Array<{ name: string; from: string; to: string }> = [
   { name: 'the old real-barcode-only rule (an empty or word barcode is nobody\'s twin)', from: CLUSTER, to: 'for (const cluster of clusterRowsByBarcodeIdentity(rows.filter((row) => isRealBarcode(row.barcode)))) {' },
   { name: 'leading zeros not folded (clusters by the raw barcode text)', from: CLUSTER, to: 'for (const cluster of [...Map.groupBy(rows, (row) => String(row.barcode ?? \'\')).values()]) {' },
   { name: 'name compared raw, not normalised', from: 'const name = serverNameKey(item?.name)', to: 'const name = String(item?.name ?? \'\')' },
-  { name: 'a lone row counts as its own twin', from: 'if (cluster.length < 2) continue', to: 'if (cluster.length < 1) continue' },
+  { name: 'a lone row counts as its own twin', from: 'if (cluster.length < 2 || twinDismissalRule?.(cluster, name, rows)) continue', to: 'if (cluster.length < 1 || twinDismissalRule?.(cluster, name, rows)) continue' },
   { name: 'a group row or an inactive row counts', from: "if (!name || Number(group || 0) || active === 0 || active === false) return", to: 'if (!name) return' },
 ]
 for (const mutant of mutants) {

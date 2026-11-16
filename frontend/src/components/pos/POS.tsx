@@ -95,6 +95,7 @@ import {
 import { buildProductSearchTerms } from '../../utils/searchTerms.ts'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
 import { findScanHit } from '../../utils/scanExactHit.ts'
+import { useTwinDismissals } from '../shared/useTwinDismissalsLoader.ts'
 import { classifyScanMiss } from '../../utils/scanMiss.ts'
 import { posCustomerSearchRequest } from './posCustomerSearch.ts'
 import { catalogHasBarcode, isProductSearchTooShort, productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
@@ -2514,11 +2515,13 @@ export default function POS() {
   // this pass to safely re-verify from a single page; card-building below
   // still needs buildVisibleProductCards to collapse same-name rows for
   // display, it just no longer re-filters by groupFilter afterward.
+  // A "Keep both" ruling takes a pair out of the scan's one-product treatment, so the cards are rebuilt when the loaded rulings change.
+  const twinDismissals = useTwinDismissals()
   const visibleProductCards = useMemo(() => (
     buildVisibleProductCards(filteredProducts, productsById, {
       preserveInputOrder: Boolean(debouncedProductSearch.trim()),
     }) as unknown as ProductRecord[]
-  ), [debouncedProductSearch, filteredProducts, productsById])
+  ), [debouncedProductSearch, filteredProducts, productsById, twinDismissals])
 
   useEffect(() => {
     setProductPage(1)

@@ -107,6 +107,7 @@ new Function('require', 'module', 'exports', compiled)((id: string) => {
   if (id === 'react' || id === 'react/jsx-runtime') return require(id)
   if (id.includes('productGrouping')) return require('../src/utils/productGrouping.ts')
   if (id.includes('unmergedTwinHint')) return { unmergedTwinHint: () => '' }
+  if (id.includes('useTwinDismissalsLoader')) return { useTwinDismissals: () => new Set() }
   if (id.includes('costDisplay')) return require('../src/utils/costDisplay.ts')
   if (id.includes('acquisitionCostAccess')) return require('../src/utils/acquisitionCostAccess.ts')
   if (id.includes('AppContext')) return { useApp: () => ({ user: { role_code: 'admin', role_permissions: { all: true } }, can: () => true }) }

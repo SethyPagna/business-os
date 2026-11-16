@@ -34,6 +34,7 @@ import { createRowSearch } from '../../utils/rowSearch.ts'
 import { productSearchRequest, rankedSearchOverride, useProductSearchIndex } from '../../api/productSearchIndex.ts'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
+import { useTwinDismissals } from '../shared/useTwinDismissalsLoader.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { fmtDate } from '../../utils/formatters.ts'
 import { unmergedTwinHint } from '../products/unmergedTwinHint.ts'
@@ -912,6 +913,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   // "variant" pair (which stays two distinct products, grouped only for
   // display). group.rows is one row per product record (productGrouping.ts ownRows),
   // so an unmerged duplicate is its own checkbox row, next to its twin.
+  // A "Keep both" ruling takes the Duplicate tag off the pair (utils/productTwinDismissals.ts); both groupings below are rebuilt when the loaded rulings change.
+  const twinDismissals = useTwinDismissals()
   const groupedMulti = useMemo(
     () => buildProductGroups(
       filteredMulti as unknown as Parameters<typeof buildProductGroups>[0],
@@ -920,7 +923,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       // grouping must not re-sort that back to A-Z.
       { preserveInputOrder: Boolean(debouncedSearch.trim()) },
     ),
-    [filteredMulti, debouncedSearch],
+    [filteredMulti, debouncedSearch, twinDismissals],
   )
 
   const selectedEntries = useMemo(

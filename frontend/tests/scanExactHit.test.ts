@@ -160,7 +160,7 @@ runTest('mutants of the twin rule are killed', () => {
     ['twin rule stops after the first twin', 'scan', 'hitKey = key\n', 'hitKey = key + hit.row.id\n'],
     ['twins matched on name alone (every same-name row is one cluster)', 'grouping', 'for (const cluster of clusterRowsByBarcodeIdentity(rows)) {', 'for (const cluster of [rows]) {'],
     ['raw name, not normalised', 'grouping', 'const name = serverNameKey(item?.name)', "const name = String(item?.name ?? '')"],
-    ['no twin is ever found (the regression)', 'grouping', 'if (cluster.length < 2) continue', 'continue'],
+    ['no twin is ever found (the regression)', 'grouping', 'if (cluster.length < 2 || twinDismissalRule?.(cluster, name, rows)) continue', 'continue'],
   ]
   for (const [name, file, from, to] of mutants) {
     const target = file === 'scan' ? scanSource : groupingSource

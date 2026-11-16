@@ -11,6 +11,7 @@ import UnmergedTwinTag from '../products/UnmergedTwinTag.tsx'
 import { unmergedTwinHint } from '../products/unmergedTwinHint.ts'
 import { productCost } from '../../utils/costDisplay.ts'
 import { useApp } from '../../app/AppContextCore.tsx'
+import { useTwinDismissals } from '../shared/useTwinDismissalsLoader.ts'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import type { PermissionUser } from '../../utils/permissions.ts'
 
@@ -136,7 +137,9 @@ export default function InventoryProductsSurface({
 }: Props) {
   const { user, can } = useApp() as { user: PermissionUser; can: (page: string, action?: string) => boolean }
   const canViewCosts = canViewAcquisitionCosts(user)
-  const groups = useMemo(() => groupInventoryProducts(items), [items])
+  // A "Keep both" ruling takes the Duplicate tag off the pair (utils/productTwinDismissals.ts), so the groups are rebuilt when the loaded rulings change.
+  const twinDismissals = useTwinDismissals()
+  const groups = useMemo(() => groupInventoryProducts(items), [items, twinDismissals])
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   // P10-6: the cost float opens for whichever row's cost cell was clicked --
   // against that row's own product id, the same record View details/Adjust target.

@@ -253,6 +253,17 @@ export function serverNameKey(value: unknown): string {
   return String(value ?? '').replace(/^ +| +$|[A-Z]/g, (found) => (found < 'A' ? '' : found.toLowerCase()))
 }
 
+// A twin cluster that the person already ruled on with "Keep both" is not a duplicate any more: Conflicts no longer lists it, and nothing else
+// may flag it. The rule lives in utils/productTwinDismissals.ts (staff only, so the public storefront's chunk does not carry it) and registers
+// itself through setTwinDismissalRule the moment the dismissals are loaded; without one no cluster is dismissed.
+// Called with the twin cluster, its server name key and every loaded row of that name (the Conflicts name cluster's own members).
+type TwinDismissalRow = { barcode?: unknown }
+export type TwinDismissalRule = (cluster: readonly TwinDismissalRow[], nameKey: string, nameGroup: readonly TwinDismissalRow[]) => boolean
+let twinDismissalRule: TwinDismissalRule | null = null
+export function setTwinDismissalRule(rule: TwinDismissalRule | null): void {
+  twinDismissalRule = rule
+}
+
 // "Same product" for a person, one key per row: the owner's identity rule of 15 Sep 2026, which is the Worker's own
 // clusterRowsByBarcodeIdentity (utils/productDetailRule.ts, a verbatim copy of cloudflare/src/lib/productDetailRule.ts that
 // cloudflare/scripts/test-twin-rule-parity-pure.cjs holds identical and runs side by side with this). Same name (the Worker's
@@ -261,8 +272,8 @@ export function serverNameKey(value: unknown): string {
 // and rows that differ only in leading zeros are one. A cluster of two or more rows is a twin: every member gets the same
 // non-empty key, a row alone in its cluster gets ''. The rule is a property of the rows loaded together, so it is computed
 // for a list, not a single row: the scan hit, the Duplicate tag and the open state of a name group all read this one key.
-// Scope is the Conflicts sweep's own (findPossiblySameProductClusters): an active product that is not a group row, so a tag is
-// only ever put on a row the Conflicts tab can list and merge.
+// Scope is the Conflicts sweep's own (findPossiblySameProductClusters): an active product that is not a group row, and a cluster
+// that "Keep both" has not dismissed, so a tag is only ever put on a row the Conflicts tab can list and merge.
 export function unmergedTwinKeys(items: readonly ProductRecord[]): string[] {
   const keys: string[] = new Array(items.length).fill('')
   const byName = new Map<string, number[]>()
@@ -281,7 +292,7 @@ export function unmergedTwinKeys(items: readonly ProductRecord[]): string[] {
       return { index, barcode: item?.barcode, id: item?.id, stock_quantity: item?.stock_quantity }
     })
     for (const cluster of clusterRowsByBarcodeIdentity(rows)) {
-      if (cluster.length < 2) continue
+      if (cluster.length < 2 || twinDismissalRule?.(cluster, name, rows)) continue
       const real = cluster.find((row) => isRealBarcode(row.barcode))
       const key = `${name}|${real ? identityBarcodeKey(real.barcode) : ''}`
       for (const row of cluster) keys[row.index] = key

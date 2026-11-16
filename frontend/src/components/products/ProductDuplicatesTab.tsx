@@ -19,7 +19,6 @@ import { ProductImg } from './shared/primitives.tsx'
 import ProductDataGapsSection from './ProductDataGapsSection.tsx'
 import {
   getPossiblySameProducts,
-  dismissProductDuplicateCluster,
   createSelectedConflictGroupReview,
   applySelectedConflictGroupReview,
   finalizeSelectedConflictGroupReview,
@@ -30,6 +29,8 @@ import {
   type SelectedConflictGroupApplyBody,
   type SelectedConflictGroupApplyResult,
 } from '../../api/productWriteTransport.ts'
+// A dismissal also re-reads the rulings behind the Duplicate tag (components/shared/twinDismissalsTransport.ts), so the tag goes with the cluster.
+import { dismissProductClusterAndRefresh } from '../shared/twinDismissalsTransport.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
 import ResolveModal, { type ResolveDraft } from '../shared/ResolveModal.tsx'
 import { useCopyFloat } from '../shared/CopyFloat.tsx'
@@ -388,7 +389,7 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
     const id = clusterKey(cluster)
     setDismissingId(id)
     try {
-      await dismissProductDuplicateCluster(cluster.type, cluster.value)
+      await dismissProductClusterAndRefresh(cluster.type, cluster.value)
       removeCluster(id)
     } catch (e: unknown) {
       notify(e instanceof Error ? e.message : (t('dismiss_duplicate_failed') || 'Could not dismiss this duplicate'), 'error')
@@ -487,7 +488,7 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
     for (const cluster of targets) {
       setBulkProgress(replaceVars(t('bulk_dismissing_progress') || 'Dismissing {done}/{total}…', { done: done + 1, total: targets.length }))
       try {
-        await dismissProductDuplicateCluster(cluster.type, cluster.value)
+        await dismissProductClusterAndRefresh(cluster.type, cluster.value)
         removeCluster(clusterKey(cluster))
       } catch {
         failed += 1
