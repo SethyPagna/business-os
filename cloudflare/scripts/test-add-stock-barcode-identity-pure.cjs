@@ -410,6 +410,20 @@ async function main() {
     }
   })
 
+  await check('cost-4dp: the sibling row stores the copied source USD cost to 4 places when no lot figure replaces it', async () => {
+    // A $0 lot is not an eligible cost (a derived cost needs a positive lot), so the sibling keeps the cost copied from its source row.
+    for (const [sourceCost, want] of [[4.123456, 4.1235], [17.00005, 17.0001], [9.5, 9.5]]) {
+      seed()
+      seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET cost_price_usd=@c, purchase_price_usd=@c WHERE id=4758').run({ c: sourceCost }))
+      const { status, json } = await req({ productId: 4758, type: 'add', quantity: 3, reason: 'Stock received', supplierName: 'Bong Long', unitCostUsd: 0, freeGoods: true, branchId: 2,
+        unlockPricing: true, pricing: { barcode: '999888777666', selling_price_usd: 22.0 } })
+      assert.equal(status, 200, JSON.stringify(json))
+      assert.equal(json.createdSibling, true)
+      const sibling = rawDb.prepare('SELECT cost_price_usd c, purchase_price_usd p FROM products WHERE id = @id').get({ id: json.productId })
+      assert.deepEqual({ ...sibling }, { c: want, p: want }, 'sibling USD cost for source ' + sourceCost)
+    }
+  })
+
   await check('a different barcode ALREADY held by a sibling routes there instead of making a third row', async () => {
     seed()
     seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO products (id, name, name_key, barcode, is_active, is_group, stock_quantity, cost_price_usd, purchase_price_usd, selling_price_usd) VALUES (47155, @name, @nameKey, '999888777666', 1, 0, 0, 30.0, 30.0, 22.0)")
