@@ -85,6 +85,17 @@ export function roundStoredCost(value: unknown): number | null {
   return value == null || value === '' || !Number.isFinite(Number(value)) ? null : roundMoney4(typeof value === 'string' ? value : Number(value))
 }
 
+/**
+ * True when `after` is `before` itself or only `before` stored to 4 places. Saving a product that still holds a legacy cost over 4 places
+ * rounds it; that is not a typed cost, so it must not record a manual cost entry (which would freeze the catalog formula at the baseline)
+ * or confirm a cost review.
+ */
+export function isCostRoundingOnly(after: number | null | undefined, before: number | null | undefined): boolean {
+  if ((after ?? null) === (before ?? null)) return true
+  if (after == null || before == null || !Number.isFinite(before)) return false
+  return roundMoney4(before) === after
+}
+
 export type CatalogCostInputPolicy = 'legacy' | 'validated' | 'validated-unrounded'
 
 function positiveCostSql(value: string, inputPolicy: CatalogCostInputPolicy): string {
@@ -650,7 +661,7 @@ export function planManualCostChange(
   const beforeKhr = canonicalCost(before.cost_price_khr)
   const afterUsd = hasUsd ? canonicalCost(body.cost_price_usd) : beforeUsd
   const afterKhr = hasKhr ? canonicalCost(body.cost_price_khr) : beforeKhr
-  const changed = (hasUsd && afterUsd !== beforeUsd) || (hasKhr && afterKhr !== beforeKhr)
+  const changed = (hasUsd && !isCostRoundingOnly(afterUsd, beforeUsd)) || (hasKhr && !isCostRoundingOnly(afterKhr, beforeKhr))
   if (!changed) return null
 
   // product_cost_entries records costs that were typed (cost_usd is NOT NULL), so a cleared or still-unknown USD cost

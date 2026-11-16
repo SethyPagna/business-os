@@ -19,7 +19,7 @@ import { normalizeSearchText, compactSearchText, foldNativeDigits } from './sear
 import { MAX_IMAGES_PER_PRODUCT } from './importImageMatch'
 import type { Env } from '../index'
 import { roundMoney4, sellingPriceCeilCent, subtractDecimalSum } from './moneyPrecision'
-import { planManualCostChange, catalogCostRecomputeStatement, typedCostEntryAfterWriteStatement, mirrorCostColumns } from './catalogCostRecompute'
+import { planManualCostChange, catalogCostRecomputeStatement, typedCostEntryAfterWriteStatement, mirrorCostColumns, isCostRoundingOnly } from './catalogCostRecompute'
 import { requireReceivingBranch, receivingBranchAssertion, ReceivingBranchError, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from './receivingBranch'
 import {
   BRANCH_REDIRECT_TARGET_INVALID_CODE, BRANCH_REDIRECT_TARGET_INVALID_ERROR, addressedStatements, branchEffectRefusal, isBranchRedirectGuardError,
@@ -67,13 +67,33 @@ function moneyInput(value: unknown): number | null {
 function moneyFields(version: MoneyPlan['version']): readonly ProductMoneyField[] {
   return version === 1 ? PRODUCT_MONEY_FIELDS_V1 : PRODUCT_MONEY_FIELDS_V2
 }
+// The four columns a cost lives in (cost and its purchase twin, USD and KHR): stored to 4 places, nearest, half away from zero (owner rule).
+const ROUNDED_COST_COLUMNS = ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr'] as const
+const isCostField = (field: string) => (ROUNDED_COST_COLUMNS as readonly string[]).includes(field)
+/**
+ * Rounds the cost columns of a product row payload in place. The single door for a row that reaches the database without a money plan (an
+ * approved request queued before 13 Sep 2026, a stock-session or review create): a plan already rounds, and rounding a 4-place value is a
+ * no-op. A null, blank or non-numeric value is left for the validators that already own it.
+ */
+export function roundProductCostPayload<T extends Record<string, unknown>>(payload: T): T {
+  const writable: Record<string, unknown> = payload
+  for (const field of ROUNDED_COST_COLUMNS) {
+    const value = writable[field]
+    if (value == null || (typeof value === 'string' && value.trim() === '')) continue
+    if ((typeof value !== 'number' && typeof value !== 'string') || !Number.isFinite(Number(value))) continue
+    writable[field] = roundMoney4(value)
+  }
+  return payload
+}
 function nextMoney(field: ProductMoneyField, value: unknown, before?: number | null): number | null {
   const parsed = moneyInput(value)
-  // A no-op must not reprice an authoritative historical value, even >4dp.
-  if (parsed === before && (parsed === null || typeof value === 'number')) return before ?? null
+  // A no-op must not reprice an authoritative historical value, even >4dp -- except a cost: costs are stored to 4 places, so a cost that
+  // still holds more is rounded when the product is saved (and that rounding is not a typed cost, see isCostRoundingOnly).
+  const keepsHistorical = !isCostField(field)
+  if (parsed === before && (parsed === null || (keepsHistorical && typeof value === 'number'))) return before ?? null
   if (parsed == null) return null
   try {
-    if (parsed === before && before != null && subtractDecimalSum(value as string, [before]) === '0') return before
+    if (keepsHistorical && parsed === before && before != null && subtractDecimalSum(value as string, [before]) === '0') return before
     // USD has cents. KHR catalog money is retained at nearest4, not forced
     // into USD cents or a new physical-cash denomination convention.
     return field === 'selling_price_usd' || field === 'wholesale_price_usd'
@@ -297,6 +317,7 @@ export function buildInsertPayload(
   const moneyPlan = readProductMoneyPlan(body)
   if (moneyPlan && moneyPlan.kind !== 'create') invalidMoneyPlan()
   const payload = { ...cleanPayload(body, columns), ...required }
+  roundProductCostPayload(payload)
   applySearchNormalizedColumns(payload, body, columns, true)
   if (columns.has('created_at') && payload.created_at == null) payload.created_at = nowIso()
   if (columns.has('updated_at') && payload.updated_at == null) payload.updated_at = nowIso()
@@ -473,6 +494,8 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
   // edit; none may write the stock rollup.
   if (table === 'products') omitProductUpdateStock(payload)
   if (table === 'products') delete payload.is_active
+  // Costs reach the database at 4 places whatever door they came through (a request queued before the money plans carries the raw figure).
+  if (table === 'products') roundProductCostPayload(payload)
   // The cost this edit writes is the figure its twin takes: a form that re-sends the stale twin it loaded, or none, ends with
   // purchase_price_* equal to the cost (the plan's before-image still guards the twin's old value).
   if (table === 'products') mirrorCostColumns(payload)
@@ -535,7 +558,7 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
     const written = { usd: Object.hasOwn(body, 'cost_price_usd'), khr: Object.hasOwn(body, 'cost_price_khr') }
     const entry = typedCostEntryAfterWriteStatement(Number(id), legacyCostWrite.before, written, legacyCostWrite.actor)
     const confirmsKnownUsd = written.usd && typeof payload.cost_price_usd === 'number' && Number.isFinite(payload.cost_price_usd)
-      && payload.cost_price_usd >= 0 && payload.cost_price_usd !== legacyCostWrite.before.cost_price_usd
+      && payload.cost_price_usd >= 0 && !isCostRoundingOnly(payload.cost_price_usd, legacyCostWrite.before.cost_price_usd)
     try {
       const results = await executeStockTransaction(getDb(env), [
         ...(stockGuard ? [stockGuard] : []),
@@ -553,7 +576,7 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
     }
   } else if (costChange && costOverrideActor && costBefore) {
     const confirmsKnownUsd = Object.hasOwn(body, 'cost_price_usd') && typeof body.cost_price_usd === 'number'
-      && Number.isFinite(body.cost_price_usd) && body.cost_price_usd >= 0 && body.cost_price_usd !== costBefore.cost_price_usd
+      && Number.isFinite(body.cost_price_usd) && body.cost_price_usd >= 0 && !isCostRoundingOnly(body.cost_price_usd, costBefore.cost_price_usd)
     const auditParams = { actorId: costOverrideActor.id, actorName: costOverrideActor.name, productId: Number(id), entityId: String(id),
       oldValue: JSON.stringify({ cost_price_usd: costBefore.cost_price_usd, cost_price_khr: costBefore.cost_price_khr }) }
     // A cleared cost has no product_cost_entries row (cost_usd is NOT NULL: the table records costs, not their absence),
