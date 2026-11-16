@@ -1002,7 +1002,7 @@ check('held: outside deploy chain, after dependencies including0195; independent
     /^CREATE INDEX idx_sales_daily_totals_pending ON sales_daily_totals\(business_date\) WHERE state <> 0$/,
     /^CREATE INDEX idx_customers_anonymous ON customers\(id\) WHERE COALESCE\(is_anonymous, 0\) <> 0$/,
     /^INSERT INTO sales_daily_totals\(business_date, state\) SELECT DISTINCT COALESCE\(date\(created_at, '\+7 hours'\), ''\), 1 FROM sales WHERE 1 ON CONFLICT\(business_date\) DO NOTHING$/,
-    /^INSERT INTO system_flags \(key, value, updated_at\) VALUES \('sales_daily_coverage', json_object\('epoch', \(SELECT value FROM system_flags WHERE key = 'data_epoch'\), 'kernel', 1\), CURRENT_TIMESTAMP\) ON CONFLICT\(key\) DO UPDATE SET value = excluded\.value, updated_at = excluded\.updated_at$/,
+    /^INSERT INTO system_flags \(key, value, updated_at\) VALUES \('sales_daily_coverage', json_object\('epoch', \(SELECT value FROM system_flags WHERE key = 'data_epoch'\), 'kernel', \d+\), CURRENT_TIMESTAMP\) ON CONFLICT\(key\) DO UPDATE SET value = excluded\.value, updated_at = excluded\.updated_at$/,
   ]
   const derivedDailyTotalsFile = (text, repairText) => {
     const code = sqlCode(text)
