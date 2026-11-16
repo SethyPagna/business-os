@@ -5,8 +5,10 @@
 --                                              cold isolate, so it must be 0
 --   pairs_lots_exceed_branch                    SUM(lot stock) > branch_stock (a transfer refuses)
 --   tracked_pairs_unlotted / _units             branch_stock above the lot sum on a pair the POS
---                                              treats as lot-tracked (getTrackedProductIds, branch
---                                              scope): the till shows and sells less than Stock
+--                                              treats as lot-tracked (a lot at that branch that is
+--                                              active or holds stock: the lot sheet's rule; since S1,
+--                                              16 Nov, getTrackedProductIds is narrower: positive lots
+--                                              only, for the Transfer list): the till shows and sells less than Stock
 --   damaged_remaining_on_inactive_product       tagged damaged units left on a missing or inactive row
 --                                              migration 0242 refuses new stock on an inactive product (damaged lots
 --                                              included), so after it this is zero except for pre-0242 residue

@@ -23,6 +23,8 @@ const lots = [lot(71, 5), lot(72, 7, '2026-09-05')]
 
 assert.deepEqual(positiveTransferLots([lot(1, 0), lot(2, -1), lot(3, 1, '2026-09-01', 0), lot(4, 1, null), lot(5, 2)]).map((row) => row.id), [5],
   'only active, dated lots with stock are offered')
+// A lot holding less than one unit still holds stock (quantities are REAL): offered. cloudflare/scripts/test-transfer-lot-list-oracle-native.cjs proves the same list server-side.
+assert.deepEqual(positiveTransferLots([lot(6, 0.25), lot(7, 0.5), lot(8, 0)]).map((row) => row.id), [6, 7], 'lots holding 0.25 and 0.5 are offered, the empty one is not')
 assert.deepEqual(selectedTransferLot(product, lots, undefined, 2), { productId: 7, quantity: 2 }, 'no lot chosen: lot-less line, Worker allocates FIFO')
 assert.equal(selectedTransferLot(product, lots, 71, 5).batchId, 71, 'an explicit earlier date is kept even though a later date holds more')
 assert.throws(() => selectedTransferLot(product, lots, 71, 6), /quantity/, 'bounded by the lot')

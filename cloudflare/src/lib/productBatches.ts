@@ -76,15 +76,15 @@ function generateBatchKey(): string {
   return ` no-lot:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`
 }
 
-// GET /api/batches/tracked-product-ids -- product ids the POS should force
-// through the batch-picker (ProductDetailSheet) instead of a one-tap add.
-// A product counts as tracked when it has an active scoped lot (including a
-// zero-quantity row, preserving the existing picker gate) OR an inactive lot
-// with positive known stock. Inactive rows remain absent from the received-date
-// picker, but their provenance must still make POS load the scoped scalar that
-// prevents their units being offered as date-less stock. When branchId is
-// given, scope to that branch so another branch's lots do not force this
-// picker here.
+// GET /api/batches/tracked-product-ids -- product ids that have a lot HOLDING STOCK (quantity > 0). Its only code reader is
+// TransferModal single mode, which is unreachable today (mode has no setter; the live multiple mode loads each row's lots itself,
+// and the POS stopped reading this list in 6.0.1639, where the lot sheet's own per-product check decides what it shows). The owner ruled on 14 Nov that its list shows only products whose lots still hold stock: an empty lot cannot be
+// transferred. So an active zero-stock lot, a negative one or an inactive empty one no longer counts; an inactive lot with positive
+// stock does (migration 0154 keeps every positive lot active, and its provenance still has to show). When branchId is given, only
+// lots at that branch count, so another branch's lots do not make a product appear here.
+// A product whose lots are all empty is not lost: the lot sheet, the returns restock (which finds its own lot by id) and the
+// stock writers do not read this list. Ops diagnostics ops/queries/*-stock-ledgers.sql and branch-exceeds-lots.sql keep the wider
+// "active or positive" test on purpose: they measure what the lot sheet shows, not what the Transfer list offers.
 // Per-product batch COUNT for a list badge (Products + Inventory). The list
 // reads deliberately do NOT ship every product's full batch array
 // (production has ~6,700 batches -- the detail view loads them on demand),
@@ -555,17 +555,12 @@ export function planReconcileBranchSnapshot(input: {
 }
 
 export async function getTrackedProductIds(db: D1Compat, branchId: number | null): Promise<number[]> {
-  const sql = branchId
-    ? `SELECT DISTINCT pb.variant_product_id AS productId
-       FROM product_batches pb
-       JOIN branch_batch_stock bbs
-         ON bbs.batch_id = pb.id
-        AND bbs.branch_id = @branchId
-       WHERE pb.is_active = 1 OR bbs.quantity > 0`
-    : `SELECT DISTINCT pb.variant_product_id AS productId
-       FROM product_batches pb
-       WHERE pb.is_active = 1
-          OR EXISTS (SELECT 1 FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0)`
+  // Branch: idx_branch_batch_stock_branch_qty (branch_id, quantity DESC, batch_id) answers "positive lots at this branch" as one
+  // range seek. No branch: the positive-only partial index idx_branch_batch_stock_positive_batch_0155 holds exactly these rows.
+  const sql = `SELECT DISTINCT pb.variant_product_id AS productId
+       FROM branch_batch_stock bbs
+       JOIN product_batches pb ON pb.id = bbs.batch_id
+       WHERE ${branchId ? 'bbs.branch_id = @branchId AND ' : ''}bbs.quantity > 0`
   const rows = await db.prepare(sql).all<{ productId: number }>(branchId ? { branchId } : {})
   return rows.map((row) => Number(row.productId)).filter((id) => Number.isFinite(id))
 }

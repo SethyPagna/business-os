@@ -7,7 +7,7 @@ const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // in-memory SQLite. Nothing here touches D1, a network or wrangler.
 //
 // Part 1, (product, branch) pairs holding stock. A pair "has lots" the way the till decides it
-// (getTrackedProductIds): a lot row at THAT branch that is active or holds stock.
+// (the lot sheet's rule, which getTrackedProductIds had until S1 on 16 Nov): a lot row at THAT branch that is active or holds stock.
 //   healthy tracked      lots 5+5, branch 10                 -> counted as having lots, not split
 //   the split            lots 0+3, branch 10                 -> split (what a pre-fix Revert left)
 //   no live lot          no lot row at all, branch 10        -> NOT split: the till sells branch_stock
