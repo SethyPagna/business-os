@@ -456,7 +456,8 @@ async function buildSupplierCreditSection(env: Env, days: number): Promise<Notif
     FROM product_batches pb
     JOIN products p ON p.id = pb.variant_product_id
     -- A supplier payable is owed whatever the lot's stock state: a lot a merge deactivated keeps reminding.
-    -- Lots deactivated by a revert, a product delete or a manual deactivate keep their own intent.
+    -- Lots deactivated by a revert, a product delete or a manual deactivate keep their own intent. The WHERE term below is written
+    -- exactly as migration 0311's idx_product_batches_credit_open predicate, which is how the planner reads that index (not a scan).
     WHERE (pb.is_active = 1 OR pb.merge_deactivated_at IS NOT NULL)
       AND pb.payment_status = 'credit'
       AND (pb.received_quantity IS NULL OR pb.received_quantity > 0 OR COALESCE(pb.received_cost_usd, 0) > 0)

@@ -6,7 +6,14 @@
 -- product delete or a manual deactivate keep their own intent. This nullable column is that marker. The merge fold
 -- sets it; the merge undo clears it.
 --
--- SHAPE. Append-only, schema only: ONE nullable column on the existing rowid table product_batches. No row is
+-- SHAPE. Append-only, schema only: ONE nullable column on the existing rowid table product_batches, and ONE partial index (credit lots that are
+-- active or merge-deactivated; on every existing row it holds exactly what idx_product_batches_credit_due holds).
+--
+-- WHY THE INDEX. The credit reminder in the notification bell reads credit lots through idx_product_batches_credit_due, whose partial
+-- predicate is is_active = 1. A reminder that also counts merge-deactivated lots ("is_active = 1 OR merge_deactivated_at IS NOT NULL")
+-- cannot use that index and scans every lot (about 37k rows on the read-budget world, double the bell's budget). The new index has the
+-- same key and the predicate the reminder now states, so the reminder is an index search again and, with no merged lot, holds exactly
+-- the rows idx_product_batches_credit_due holds. The old index stays for its other readers. No row is
 -- read, rewritten or reinterpreted, no trigger or index is touched, so every existing reader sees the same rows.
 -- LF-only.
 --
@@ -16,11 +23,14 @@
 --
 -- PRE-ASSERTION (run before applying; expect zero rows, the column does not exist yet):
 --   SELECT name FROM pragma_table_info('product_batches') WHERE name = 'merge_deactivated_at';
+--   SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_product_batches_credit_open';
 -- POST-ASSERTION (run after applying; expect one row, and zero rows with the marker set):
 --   SELECT name FROM pragma_table_info('product_batches') WHERE name = 'merge_deactivated_at';
+--   SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_product_batches_credit_open';   -- one row
 --   SELECT COUNT(*) FROM product_batches WHERE merge_deactivated_at IS NOT NULL;   -- 0 until a merge runs
 --
--- RECOVERY. D1 cannot drop a column inside a migration the app depends on; leaving the column in place is harmless
+-- RECOVERY. DROP INDEX IF EXISTS idx_product_batches_credit_open; is safe at any time (the reminder then scans, slower but correct).
+-- D1 cannot drop a column inside a migration the app depends on; leaving the column in place is harmless
 -- (nothing reads it except the credit reminder, which treats NULL as "not merge-deactivated"). To roll the code back,
 -- deploy the previous Worker: it ignores the column.
 --
@@ -34,3 +44,5 @@
 --     AND id IN (SELECT json_extract(fb.value, '$.dupBatchId')
 --                FROM undo_snapshots s, json_each(s.payload_json, '$.foldedBatches') fb WHERE s.kind = 'product.merge');
 ALTER TABLE product_batches ADD COLUMN merge_deactivated_at TEXT;
+CREATE INDEX idx_product_batches_credit_open ON product_batches (credit_due_date)
+  WHERE payment_status = 'credit' AND (is_active = 1 OR merge_deactivated_at IS NOT NULL);

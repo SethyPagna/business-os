@@ -1,6 +1,6 @@
 'use strict'
 // Pins migration 0311 (product_batches.merge_deactivated_at) on the REAL migration chain:
-//   - the file is LF-only, numbered 0311 once, adds exactly one nullable TEXT column, keeps rowid, carries PRE / POST /
+//   - the file is LF-only, numbered 0311 once, adds exactly one nullable TEXT column and the credit-reminder partial index, keeps rowid, carries PRE / POST /
 //     RECOVERY notes and states the backfill decision;
 //   - a lot that exists before the migration is unchanged by it (the marker is NULL: nothing is reinterpreted);
 //   - it splits into the single ALTER statement the D1 runner will execute, and a second run aborts (append-only).
@@ -30,7 +30,8 @@ check('the file is LF-only, numbered 0311 once, keeps rowid, and carries PRE / P
   for (const word of ['PRE-ASSERTION', 'POST-ASSERTION', 'RECOVERY', 'BACKFILL DECISION']) assert.ok(sql.includes(word), word)
   assert.deepEqual(fs.readdirSync(directory).filter((f) => f.startsWith('0311_')), [migration])
   const statements = sql.replace(/^--.*$/gm, '').split(';').map((s) => s.trim()).filter(Boolean)
-  assert.deepEqual(statements, ['ALTER TABLE product_batches ADD COLUMN merge_deactivated_at TEXT'])
+  assert.deepEqual(statements, ['ALTER TABLE product_batches ADD COLUMN merge_deactivated_at TEXT',
+    "CREATE INDEX idx_product_batches_credit_open ON product_batches (credit_due_date)\n  WHERE payment_status = 'credit' AND (is_active = 1 OR merge_deactivated_at IS NOT NULL)"])
 })
 
 check('it adds exactly one nullable TEXT column and leaves every existing lot unmarked and unchanged', () => {
@@ -51,6 +52,9 @@ check('it adds exactly one nullable TEXT column and leaves every existing lot un
   assert.equal(db.prepare('SELECT merge_deactivated_at AS m FROM product_batches WHERE id=5').get().m, null)
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM product_batches WHERE merge_deactivated_at IS NOT NULL').get().n, 0, 'POST-ASSERTION: nothing marked')
   assert.equal(db.prepare('SELECT rowid AS r FROM product_batches WHERE id=5').get().r, 5, 'still a rowid table')
+  // The credit-reminder index (read-budget: the reminder is an index search): one partial index, holding the existing credit lot.
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='index' AND name='idx_product_batches_credit_open'").get().n, 1, 'POST-ASSERTION: the index exists')
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM product_batches INDEXED BY idx_product_batches_credit_open WHERE payment_status = 'credit' AND (is_active = 1 OR merge_deactivated_at IS NOT NULL)").get().n, 0, 'the existing lot is inactive and unmarked: not in the index')
 })
 
 check('append-only: a second run aborts', () => {
