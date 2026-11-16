@@ -46,6 +46,13 @@ migration, at that time -- a peer session or another agent asking for it is not 
   the same commit as the owner-approved move). Moving it in keeps the name 0200.
   Not sorting last is fine: wrangler applies unapplied files by number, and 0201-0203 (auth only) touch none of its tables (the test checks that).
 
+- **0313_cost_4dp_repair.sql** (parked 16 Nov 2026, lane cost-4dp) -- rounds stored costs over 4 decimals (products cost and purchase twin, lot unit and
+  received cost, manual cost entries) to 4 places, nearest, half away from zero, with a before/after ledger, PRE and POST assertions and
+  recovery SQL in its header. Census 16 Nov: 123 of 8,690 products. Leaves sale_items, return_items, inventory_movements and every
+  cost_review_key untouched (asserted). Size it first with `ops/queries/cost-4dp-counts-20261116.sql` and `cost-4dp-ids-20261116.sql`. Pinned by
+  `cloudflare/scripts/test-migration-0313-cost-4dp-repair-pure.cjs`, which fails if the file appears in `cloudflare/migrations` without a deliberate
+  move. Moving it in keeps the name 0313, needs the lead's go, and the held 0200 must then be numbered above it (0200 reads lot and cost-entry costs).
+
 - **revert_set_sk2_cleanser_repair.sql** (parked 6 Oct 2026, lane REVERT-SET) -- one product,
   SK-II Gentle Cleanser 20g (5357, Shop): the owner meant to revert a Set of +27 (#48034) and
   reverted the delivery of 30 (#48026) instead. Owner ruling (6 Oct 22:50): delivery back, the Set
