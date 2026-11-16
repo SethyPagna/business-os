@@ -1,18 +1,19 @@
 const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // THE STOREFRONT LOW-STOCK PARITY TEST.
 //
-// The public storefront's low / out-of-stock label must be the shop's ONE rule (owner, 15 Nov 2026): the same as the notification bell, the
-// Dashboard and the admin lists (lib/lowStockSettings.ts: the Settings alert switch, the threshold mode, the global number, the per-product
-// override, and the per-product out threshold). It used to carry a rule of its own, a literal 10 plus a customer_portal_* triple, so a shop that set
-// its threshold to 3 still saw 'low' at 10 on the storefront.
+// The public storefront's Low stock / Out of stock labels use the storefront's OWN levels, by owner decision of 16 Nov 2026 ("Website's own
+// levels"): the Website Editor's customer_portal_* thresholds when the editor is set to website-wide thresholds ('global') and a level is filled
+// in, and otherwise the SHOP's low-stock setting (lib/lowStockSettings.ts: alert switch, threshold mode, global number, per-product override,
+// per-product out threshold) -- never a fixed 10. Inventory, the bell and the Dashboard keep the shop setting.
 //
-// This file loads the REAL routes/portal.ts (the harness of test-portal-search-relevance-order-pure.cjs) and the REAL lib/lowStockSettings.ts,
-// and compares, for every combination of the three Settings rows (unset, valid, zero, negative, fractional, junk, null) x per-product overrides x
-// out thresholds x quantities: (1) the label function against the shared rule; (2) the real search endpoint's stock_status, its per-branch
-// availability and its stockState filter pills against the same rule, over seeded products. It also pins that exact quantities, thresholds and the
-// branch ledger never appear in the public payload.
+// This file loads the REAL routes/portal.ts (the harness of test-portal-search-relevance-order-pure.cjs) and the REAL lib/lowStockSettings.ts
+// and compares, for every combination of the three website rows (set, empty, invalid) x the three shop rows x per-product overrides x out
+// thresholds x quantities: (1) the label function against an independent oracle; (2) the real search endpoint's stock_status, its per-branch
+// availability and its stockState filter pills against the same oracle, over seeded products. It also pins that exact quantities, thresholds
+// and the branch ledger never appear in the public payload. The AI assistant's mapping is pinned by test-portal-ai-stock-status-pure.cjs.
 //
-// Mutant (kept honest by the controls below): the literal 10 back in portalStockStatusFor / the stockState SQL turns this red.
+// Mutants (kept honest by the controls below, and run by hand against this file): the literal 10 back in portalStockStatusFor or the stockState
+// SQL; ignoring the website levels; ignoring the shop fallback; the old in_stock pill without the out clause.
 //
 // Run from the cloudflare directory: node scripts/test-portal-low-stock-parity-pure.cjs
 const fs = require('fs')
@@ -65,10 +66,6 @@ const productSearchQuery = loadReal('lib/productSearchQuery.ts', { './searchMatc
 const familyPagination = loadReal('lib/familyPagination.ts')
 const promotionRulesSql = loadReal('lib/promotionRulesSql.ts', { './promotionRules': loadReal('lib/promotionRules.ts') })
 
-const { paginateProductFamilies } = familyPagination
-const { loadActivePromotionRules, productPromotedSql } = promotionRulesSql
-const { normalizeSearchText } = searchMatch
-
 // N13: the shared actor / branch kernels these routes now import.
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const portalRoute = loadReal('routes/portal.ts', {
@@ -116,14 +113,11 @@ const portalRoute = loadReal('routes/portal.ts', {
 })
 
 const app = portalRoute.default
-const { buildPortalProductFilters } = portalRoute
 const fakeExecutionCtx = { waitUntil: (p) => { if (p && p.catch) p.catch(() => {}) }, passThroughOnException: () => {} }
-
-const portalSrc = fs.readFileSync(path.join(root, 'src', 'routes', 'portal.ts'), 'utf8')
 
 const lowStockLib = loadReal('lib/lowStockSettings.ts', { './db': { getDb: () => db } })
 const { resolveLowStockConfig, isLowStock } = lowStockLib
-const { portalStockStatusFor } = portalRoute
+const { portalStockStatusFor, resolvePortalStockRule } = portalRoute
 
 let passed = 0
 const failures = []
@@ -131,26 +125,56 @@ async function check(name, fn) {
   try { await fn(); passed += 1; console.log(`PASS ${name}`) } catch (error) { failures.push(name); console.log(`FAIL ${name}\n      ${error && error.message}`) }
 }
 
-// The shop's ONE rule, read from the shared module: out first, then low strictly above out.
-function sharedState(config, qty, low, out) {
-  const o = Number(out)
-  if (Number(qty) <= (Number.isFinite(o) ? o : 0)) return 'out_of_stock'
-  return isLowStock(config, qty, low, out) ? 'low_stock' : 'in_stock'
+// ---- the oracle: written from the owner's rule, not from the implementation -------------------------------------------------------------
+// A website level counts when it is a non-blank, finite, non-negative number. Only 'global' mode ("Use website-wide thresholds") uses the
+// website levels at all. An empty website level falls back to the SHOP's rule (low) or to the product's own out threshold (out).
+function websiteLevel(raw) {
+  if (raw === undefined || raw === null) return null
+  const text = String(raw).trim()
+  if (text === '') return null
+  const n = Number(text)
+  return Number.isFinite(n) && n >= 0 ? n : null
 }
+function oracle(web, shop, qty, low, out) {
+  const useWebsite = web.customer_portal_stock_threshold_mode === 'global'
+  const webLow = useWebsite ? websiteLevel(web.customer_portal_low_stock_threshold) : null
+  const webOut = useWebsite ? websiteLevel(web.customer_portal_out_of_stock_threshold) : null
+  const productOut = Number(out)
+  const outLevel = webOut !== null ? webOut : (Number.isFinite(productOut) ? productOut : 0)
+  if (Number(qty) <= outLevel) return 'out_of_stock'
+  if (webLow !== null) return Number(qty) <= webLow ? 'low_stock' : 'in_stock'
+  // The shop's rule, from the shared module (the same one the bell and the admin lists use); qty is already above out here.
+  return isLowStock(resolveLowStockConfig(shop), qty, low, 0) ? 'low_stock' : 'in_stock'
+}
+const merged = (web, shop) => ({ ...shop, ...web })
 
-// Every combination of the Settings rows. `undefined` = the row was never written.
-const ENABLED = [undefined, 'true', 'false', '0', '1', 'off', 'on', 'no', 'yes', '']
-const MODE = [undefined, 'product', 'global', 'GLOBAL', 'nonsense']
-const THRESHOLD = [undefined, '0', '1', '3', '10', '25', '1000000', '1000001', '-1', '-5', '2.5', 'abc', '', null]
-function settingsFor(enabled, mode, threshold) {
+// Website rows. `undefined` = the row was never written.
+function webFor(mode, low, out) {
   const map = {}
-  if (enabled !== undefined) map.low_stock_alert_enabled = enabled
-  if (mode !== undefined) map.low_stock_threshold_mode = mode
-  if (threshold !== undefined) map.low_stock_threshold_default = threshold
+  if (mode !== undefined) map.customer_portal_stock_threshold_mode = mode
+  if (low !== undefined) map.customer_portal_low_stock_threshold = low
+  if (out !== undefined) map.customer_portal_out_of_stock_threshold = out
   return map
 }
-const CONFIGS = []
-for (const e of ENABLED) for (const m of MODE) for (const t of THRESHOLD) CONFIGS.push(settingsFor(e, m, t))
+const WEB_LOWS = [undefined, '', '   ', '0', '5', '2.5', 'abc', '-3', null, '1e999']
+const WEB_OUTS = [undefined, '0', '2', '', 'abc', '-1', '8']
+const WEBSITE = []
+for (const low of WEB_LOWS) for (const out of WEB_OUTS) WEBSITE.push(webFor('global', low, out))
+// Anything but exactly 'global' leaves the editor's levels unused, even with numbers filled in.
+for (const mode of [undefined, 'product', 'Global', 'nonsense']) WEBSITE.push(webFor(mode, '5', '2'))
+
+// Shop rows, a spread of every kind of value.
+const SHOP = []
+for (const e of [undefined, 'false', 'off']) for (const m of [undefined, 'product', 'global', 'GLOBAL', 'nonsense']) {
+  for (const t of [undefined, '0', '3', '25', '2.5', 'abc', '-1', null]) {
+    const map = {}
+    if (e !== undefined) map.low_stock_alert_enabled = e
+    if (m !== undefined) map.low_stock_threshold_mode = m
+    if (t !== undefined) map.low_stock_threshold_default = t
+    SHOP.push(map)
+  }
+}
+SHOP.push({ low_stock_alert_enabled: 'true', low_stock_threshold_mode: 'global', low_stock_threshold_default: '3' })
 
 // Per-product overrides (null = the column is NULL), out thresholds, quantities.
 const LOWS = [null, 0, 2, 3, 10, 2.5, 100]
@@ -160,39 +184,51 @@ const QTYS = [-3, 0, 1, 2, 3, 4, 5, 6, 10, 11, 100, 101]
 await_main().catch((error) => { console.error(error); process.exit(1) })
 
 async function await_main() {
-  // 1. The pure label function against the shared rule: every config x low x out x quantity.
-  await check('the label equals the shared rule for every settings row, override, out threshold and quantity', () => {
+  // 1. The pure label function against the oracle: every website row x shop row x low x out x quantity.
+  await check('the label equals the owner rule for every website row (set, empty, invalid), shop row, override, out threshold and quantity', () => {
     let compared = 0
     const seen = new Set()
-    for (const settings of CONFIGS) {
-      const config = resolveLowStockConfig(settings)
+    for (const web of WEBSITE) for (const shop of SHOP) {
+      const rule = resolvePortalStockRule(merged(web, shop))
       for (const low of LOWS) for (const out of OUTS) for (const qty of QTYS) {
-        const got = portalStockStatusFor(config, qty, low, out)
-        const want = sharedState(config, qty, low, out)
-        assert.equal(got, want, `config ${JSON.stringify(settings)} low=${low} out=${out} qty=${qty}`)
+        const got = portalStockStatusFor(rule, qty, low, out)
+        const want = oracle(web, shop, qty, low, out)
+        assert.equal(got, want, `web ${JSON.stringify(web)} shop ${JSON.stringify(shop)} low=${low} out=${out} qty=${qty}`)
         seen.add(got)
         compared += 1
       }
     }
-    assert.ok(compared > 100000, `the matrix must be large (${compared})`)
+    assert.ok(compared > 1000000, `the matrix must be large (${compared})`)
     assert.deepEqual([...seen].sort(), ['in_stock', 'low_stock', 'out_of_stock'], 'the matrix must reach all three labels')
   })
 
-  // 2. It must really read the settings: a control that the literal 10 cannot pass.
-  await check('CONTROL: a threshold other than 10 moves the label (the old fixed 10 would not)', () => {
-    const at = (settings, qty, low) => portalStockStatusFor(resolveLowStockConfig(settings), qty, low, 0)
-    assert.equal(at({ low_stock_threshold_mode: 'global', low_stock_threshold_default: '3' }, 5, 10), 'in_stock', 'global 3: five is healthy although the product says 10')
-    assert.equal(at({ low_stock_threshold_mode: 'global', low_stock_threshold_default: '25' }, 20, 0), 'low_stock', 'global 25: twenty is low')
-    assert.equal(at({}, 20, null), 'in_stock', 'unset row, NULL override: the default of 10 applies')
-    assert.equal(at({}, 10, null), 'low_stock')
-    assert.equal(at({}, 5, 0), 'in_stock', 'a stored override of 0 is honoured, not turned into 10 (it used to be: Number(0 || 10))')
-    assert.equal(at({ low_stock_alert_enabled: 'false' }, 1, 10), 'in_stock', 'alerts off: there is no low label')
-    assert.equal(at({ low_stock_alert_enabled: 'false' }, 0, 10), 'out_of_stock', 'alerts off leaves out of stock alone')
+  // 2. Controls that the old behaviours cannot pass: a literal 10, ignoring the website levels, ignoring the shop fallback.
+  const at = (settings, qty, low, out = 0) => portalStockStatusFor(resolvePortalStockRule(settings), qty, low, out)
+  await check('CONTROL: the website levels move the label (a rule that ignores them, or a fixed 10, cannot pass)', () => {
+    const web = { customer_portal_stock_threshold_mode: 'global', customer_portal_low_stock_threshold: '4', customer_portal_out_of_stock_threshold: '1' }
+    assert.equal(at(web, 5, 10), 'in_stock', 'website low 4: five is healthy although the product says 10')
+    assert.equal(at(web, 4, 100), 'low_stock', 'website low 4: four is low although the product says 100')
+    assert.equal(at(web, 1, 0), 'out_of_stock', 'website out 1: one is out although the product says 0')
+    assert.equal(at(web, 2, 0), 'low_stock')
+    assert.equal(at({ ...web, customer_portal_stock_threshold_mode: 'product' }, 5, 10), 'low_stock', 'product mode: the website levels are not used')
+    assert.equal(at({ ...web, customer_portal_low_stock_threshold: '25' }, 20, 0), 'low_stock', 'website low 25: twenty is low')
+    assert.equal(at({ ...web, low_stock_alert_enabled: 'false' }, 4, 10), 'low_stock', 'the website level stands even when the shop alerts are off')
+  })
+  await check('CONTROL: an empty website level falls back to the SHOP setting, never a fixed 10', () => {
+    const empty = { customer_portal_stock_threshold_mode: 'global', customer_portal_low_stock_threshold: '', customer_portal_out_of_stock_threshold: '' }
+    assert.equal(at({ ...empty, low_stock_threshold_mode: 'global', low_stock_threshold_default: '3' }, 5, 10), 'in_stock', 'shop global 3: five is healthy')
+    assert.equal(at({ ...empty, low_stock_threshold_mode: 'global', low_stock_threshold_default: '25' }, 20, 0), 'low_stock', 'shop global 25: twenty is low')
+    assert.equal(at({ ...empty, low_stock_alert_enabled: 'false' }, 1, 10), 'in_stock', 'shop alerts off: no low label')
+    assert.equal(at({ ...empty, low_stock_alert_enabled: 'false' }, 0, 10), 'out_of_stock')
+    assert.equal(at({ ...empty, low_stock_threshold_mode: 'global', low_stock_threshold_default: '3' }, 20, null), 'in_stock', 'an unset product override follows the shop global, not 10')
+    assert.equal(at(empty, 5, 0), 'in_stock', 'a stored product override of 0 is honoured, not turned into 10')
+    assert.equal(at({ customer_portal_stock_threshold_mode: 'global' }, 10, null), 'low_stock', 'nothing set anywhere: the shop default of 10 applies')
+    assert.equal(at({ customer_portal_stock_threshold_mode: 'global', customer_portal_low_stock_threshold: 'abc' }, 5, 3, 0), 'in_stock', 'an invalid website level is ignored: the product 3 applies')
+    assert.equal(at({ customer_portal_stock_threshold_mode: 'global', customer_portal_low_stock_threshold: '-3' }, 5, 3, 0), 'in_stock', 'a negative website level is ignored')
   })
 
   // 3. The real endpoint: badge, filter pills and branch availability, over seeded products, for a spread of settings.
   const raw = db.db
-  const BRANCH_IDS = [1, 2]
   seedStockFixture(raw, () => {
     raw.exec("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)")
     raw.exec("INSERT INTO branches (id, name, is_active, is_default) VALUES (2, 'Second', 1, 0)")
@@ -219,8 +255,9 @@ async function await_main() {
   })
   assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM products').get().n, products.length)
 
+  const RULE_KEYS = ['low_stock_alert_enabled', 'low_stock_threshold_mode', 'low_stock_threshold_default', 'customer_portal_stock_threshold_mode', 'customer_portal_low_stock_threshold', 'customer_portal_out_of_stock_threshold']
   const setSettings = (map) => {
-    raw.exec("DELETE FROM settings WHERE key IN ('low_stock_alert_enabled','low_stock_threshold_mode','low_stock_threshold_default')")
+    raw.exec(`DELETE FROM settings WHERE key IN (${RULE_KEYS.map((k) => `'${k}'`).join(',')})`)
     const put = raw.prepare('INSERT INTO settings (key, value) VALUES (?, ?)')
     for (const [key, value] of Object.entries(map)) put.run(key, value === null ? null : String(value))
   }
@@ -236,24 +273,31 @@ async function await_main() {
     return items
   }
 
-  // A representative spread of the settings (the full set is covered above against the same function the endpoint calls).
-  const ENDPOINT_SETTINGS = [
-    {},
-    { low_stock_threshold_mode: 'global', low_stock_threshold_default: '3' },
-    { low_stock_threshold_mode: 'global', low_stock_threshold_default: '0' },
-    { low_stock_threshold_mode: 'global', low_stock_threshold_default: '25' },
-    { low_stock_threshold_mode: 'product', low_stock_threshold_default: '5' },
-    { low_stock_alert_enabled: 'false' },
-    { low_stock_alert_enabled: 'false', low_stock_threshold_mode: 'global', low_stock_threshold_default: '50' },
-    { low_stock_threshold_mode: 'global', low_stock_threshold_default: 'abc' },
-    { low_stock_threshold_mode: 'global', low_stock_threshold_default: '-4' },
-    { low_stock_threshold_mode: 'global', low_stock_threshold_default: null },
-    { low_stock_alert_enabled: 'true', low_stock_threshold_mode: 'bogus', low_stock_threshold_default: '2.5' },
+  const G = (low, out) => webFor('global', low, out)
+  const ENDPOINT = [
+    // [website rows, shop rows]
+    [{}, {}],
+    [{}, { low_stock_threshold_mode: 'global', low_stock_threshold_default: '3' }],
+    [{}, { low_stock_alert_enabled: 'false' }],
+    [G('5', '2'), {}],
+    [G('5', '2'), { low_stock_threshold_mode: 'global', low_stock_threshold_default: '25' }],
+    [G('5', '2'), { low_stock_alert_enabled: 'false' }],
+    [G('', ''), { low_stock_threshold_mode: 'global', low_stock_threshold_default: '3' }],
+    [G('', '3'), { low_stock_threshold_mode: 'global', low_stock_threshold_default: '25' }],
+    [G('25', ''), { low_stock_alert_enabled: 'false' }],
+    [G('0', '0'), {}],
+    [G('2.5', '1'), { low_stock_threshold_mode: 'global', low_stock_threshold_default: '50' }],
+    [G('abc', 'abc'), { low_stock_threshold_mode: 'global', low_stock_threshold_default: '3' }],
+    [G('-4', '-1'), { low_stock_threshold_mode: 'global', low_stock_threshold_default: '3' }],
+    [G(null, null), {}],
+    [G('8', '8'), {}],
+    [webFor('product', '5', '2'), { low_stock_threshold_mode: 'global', low_stock_threshold_default: '3' }],
+    [webFor('Global', '5', '2'), {}],
+    [G('5', '2'), { low_stock_alert_enabled: 'true', low_stock_threshold_mode: 'bogus', low_stock_threshold_default: '2.5' }],
   ]
-  for (const settings of ENDPOINT_SETTINGS) {
-    await check(`endpoint: badge, filter pills and branch availability follow the shared rule for ${JSON.stringify(settings)}`, async () => {
-      setSettings(settings)
-      const config = resolveLowStockConfig(settings)
+  for (const [web, shop] of ENDPOINT) {
+    await check(`endpoint: badge, filter pills and branch availability follow the rule for website ${JSON.stringify(web)} shop ${JSON.stringify(shop)}`, async () => {
+      setSettings(merged(web, shop))
       const wantByName = new Map(products.map((p) => [`Fixture ${p.id}`, p]))
       const all = await pages('q=')
       assert.equal(all.length, products.length, 'unfiltered search returns every product')
@@ -261,12 +305,12 @@ async function await_main() {
       for (const item of all) {
         const p = wantByName.get(item.name)
         assert.ok(p, `unknown item ${item.name}`)
-        const want = sharedState(config, p.qty, p.low, p.out)
+        const want = oracle(web, shop, p.qty, p.low, p.out)
         assert.equal(item.stock_status, want, `${item.name} qty=${p.qty} low=${p.low} out=${p.out}`)
         labelOf.set(item.name, item.stock_status)
         const availability = Object.fromEntries((item.branch_availability || []).map((b) => [b.branch_id, b.status]))
-        assert.equal(availability[1], sharedState(config, p.qty, p.low, p.out), `${item.name} branch 1`)
-        assert.equal(availability[2], sharedState(config, p.branch2, p.low, p.out), `${item.name} branch 2`)
+        assert.equal(availability[1], oracle(web, shop, p.qty, p.low, p.out), `${item.name} branch 1`)
+        assert.equal(availability[2], oracle(web, shop, p.branch2, p.low, p.out), `${item.name} branch 2`)
         // Redaction: neither exact quantities nor thresholds nor the ledger ride along.
         for (const key of ['stock_quantity', 'low_stock_threshold', 'out_of_stock_threshold', 'branch_stock']) {
           assert.equal(Object.prototype.hasOwnProperty.call(item, key), false, `${key} must not be public`)
@@ -279,22 +323,21 @@ async function await_main() {
         const got = (await pages(`q=&stockState=${state}`)).map((item) => item.name).sort()
         const want = [...labelOf].filter(([, label]) => label === state).map(([name]) => name).sort()
         assert.deepEqual(got, want, `stockState=${state} must list exactly the ${state} badges`)
-        if (state === 'low_stock' && settings.low_stock_alert_enabled === 'false') assert.equal(got.length, 0, 'alerts off: nobody is low')
       }
       // Per-branch filtered view: the badge and the pill are judged on that branch's quantity.
-      const branchOne = await pages('q=&branchId=2&stockState=low_stock')
-      for (const item of branchOne) {
+      const branchTwo = await pages('q=&branchId=2&stockState=low_stock')
+      for (const item of branchTwo) {
         const p = wantByName.get(item.name)
-        assert.equal(sharedState(config, p.branch2, p.low, p.out), 'low_stock', `${item.name} on branch 2`)
+        assert.equal(oracle(web, shop, p.branch2, p.low, p.out), 'low_stock', `${item.name} on branch 2`)
       }
-      const expectedBranchTwoLow = products.filter((p) => sharedState(config, p.branch2, p.low, p.out) === 'low_stock').length
-      assert.equal(branchOne.length, expectedBranchTwoLow, 'branch 2 low pill lists every low product of that branch')
+      const expectedBranchTwoLow = products.filter((p) => oracle(web, shop, p.branch2, p.low, p.out) === 'low_stock').length
+      assert.equal(branchTwo.length, expectedBranchTwoLow, 'branch 2 low pill lists every low product of that branch')
       assert.ok(states.size >= 2, 'the fixture must exercise more than one label')
     })
   }
 
-  // 4. The settings must reach the endpoint: the same product flips label when the shop changes its rule.
-  await check('changing the shop rule changes the storefront label of one and the same product', async () => {
+  // 4. The settings must reach the endpoint: the same product flips label when the website or the shop changes its rule.
+  await check('changing the website or shop level changes the storefront label of one and the same product', async () => {
     const p = products.find((x) => x.low === 10 && x.out === 0 && x.qty === 5)
     assert.ok(p)
     const labelUnder = async (settings) => {
@@ -303,8 +346,25 @@ async function await_main() {
       return found.stock_status
     }
     assert.equal(await labelUnder({}), 'low_stock')
-    assert.equal(await labelUnder({ low_stock_threshold_mode: 'global', low_stock_threshold_default: '3' }), 'in_stock')
+    assert.equal(await labelUnder({ low_stock_threshold_mode: 'global', low_stock_threshold_default: '3' }), 'in_stock', 'the shop level moves it')
     assert.equal(await labelUnder({ low_stock_alert_enabled: 'false' }), 'in_stock')
+    assert.equal(await labelUnder(G('4', '')), 'in_stock', 'the website level moves it')
+    assert.equal(await labelUnder({ ...G('6', ''), low_stock_threshold_mode: 'global', low_stock_threshold_default: '3' }), 'low_stock', 'the website level beats the shop level')
+    assert.equal(await labelUnder({ ...G('', ''), low_stock_threshold_mode: 'global', low_stock_threshold_default: '3' }), 'in_stock', 'empty website levels: the shop level answers')
+  })
+
+  // 5. No leak: the public payloads carry no threshold keys or values beyond what base exposed (none).
+  await check('no public payload carries a website or shop threshold row', async () => {
+    setSettings(merged(G('4242', '2424'), { low_stock_threshold_mode: 'global', low_stock_threshold_default: '3737' }))
+    for (const route of ['/config', '/bootstrap', '/catalog/products/search?q=&page=1&pageSize=20']) {
+      const res = await app.request(route, { method: 'GET' }, fakeEnv, fakeExecutionCtx)
+      const text = await res.text()
+      assert.equal(res.status, 200, route + ' must answer: ' + text.slice(0, 120))
+      assert.ok(text.length > 20, route + ' must carry a body')
+      for (const needle of ['customer_portal_low_stock_threshold', 'customer_portal_out_of_stock_threshold', 'customer_portal_stock_threshold_mode', 'low_stock_threshold_default', 'stockThresholdMode', 'lowStockThreshold', '4242', '2424', '3737']) {
+        assert.ok(!text.includes(needle), `${route} must not carry ${needle}`)
+      }
+    }
   })
 
   console.log(`\n${passed} passed, ${failures.length} failed`)

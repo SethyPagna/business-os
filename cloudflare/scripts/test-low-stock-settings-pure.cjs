@@ -419,12 +419,12 @@ async function main() {
     // sweep above rejects, which proves the sweep is capable of failing.
     // routes/portal.ts used to be the exempt storefront (its own
     // customer_portal_* triple); since the owner's one-rule decision (15 Nov
-    // 2026) it is threaded like every other reader and must stay that way.
+    // 2026) it falls back to the shop's rule wherever the Website Editor's own level is empty (owner decision of 16 Nov 2026: the storefront has its own levels) and must stay that way.
     assert.match(readCf('lib/portalAi.ts'), /low_stock_threshold,\s*10\)/, 'the sweep needs one file that still carries the literal')
     const portal = readCf('routes/portal.ts')
     assert.doesNotMatch(portal, /low_stock_threshold,\s*10\)/, 'the storefront must not carry its own fallback of 10')
-    assert.match(portal, /lowStockThresholdSql/, 'the storefront stock-state filter uses the shared SQL fragment')
-    assert.match(portal, /effectiveLowStockThreshold/, 'the storefront badge uses the shared threshold')
+    assert.ok(portal.includes("lowStockThresholdSql(rule.shop, 'p.low_stock_threshold')"), 'the storefront stock-state filter falls back to the shared SQL fragment')
+    assert.ok(portal.includes('effectiveLowStockThreshold(rule.shop'), 'the storefront badge falls back to the shared threshold')
   })
 
   await check('the Settings row is gated on the permission the Worker actually enforces', () => {
