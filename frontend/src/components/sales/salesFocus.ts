@@ -80,3 +80,16 @@ export function useSettleSalesFocus(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [typed, sent, range])
 }
+
+/**
+ * What a link that opens ONE sale hands to the Sales page: the receipt as the box text and the sale id as the exact focus.
+ * Every "Open sale" link builds its EntityLink props here, so none of them can land on the list unfocused (the Expenses link did: it queued the receipt
+ * only, an all-time typed search). A sale with no receipt text falls back to the id as the box text, which is still a usable search and still focuses.
+ * An id that is not a positive whole number yields no focus, and the link degrades to the plain receipt search it was.
+ */
+export function saleLinkTarget(saleId: unknown, receipt: unknown): { search: string; focus?: { saleId: number } } {
+  const id = typeof saleId === 'number' ? saleId : typeof saleId === 'string' && /^\d+$/.test(saleId.trim()) ? Number(saleId.trim()) : NaN
+  const valid = Number.isSafeInteger(id) && id > 0
+  const search = String(receipt ?? '').trim() || (valid ? String(id) : '')
+  return valid ? { search, focus: { saleId: id } } : { search }
+}
