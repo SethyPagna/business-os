@@ -1,4 +1,6 @@
-// Migration 0310: the Dashboard for the Manager and Employee roles (owner, 15 Nov 2026). Runs the REAL file against SQLite.
+// Migration 0310: the Dashboard and the courier cost for the Manager and Employee roles (owner, 15 and 16 Nov 2026). Runs the REAL file against SQLite.
+//   - Owner, 16 Nov 2026: both roles also get sales:view_courier_cost = true ONLY when the key is absent; an explicit true, false
+//     or null is kept (the matrix check below, with a mutant that overwrites).
 //   - Manager and Employee roles gain dashboard=true; Employee also gets dashboard_export=false; Manager gets
 //     dashboard_export=true only when the key is absent (an explicit stored value is kept).
 //   - Admin, every other role, every other key and every user stay byte-identical.
@@ -45,11 +47,11 @@ check('Employee gets dashboard true and dashboard_export false; Manager gets das
   role(db, 4, 'manager', { dashboard_export: true })
   role(db, 5, 'manager', { products: true })
   db.exec(sql)
-  assert.deepEqual(perms(db, 1), { pos: true, sales: true, dashboard: true, dashboard_export: false })
-  assert.deepEqual(perms(db, 2), { products: true, dashboard_export: false, dashboard: true })
-  assert.deepEqual(perms(db, 3), { dashboard: true, dashboard_export: false, pos: true }, 'an explicit stored true/false is overwritten on a ROLE row')
-  assert.deepEqual(perms(db, 4), { dashboard_export: true, dashboard: true })
-  assert.deepEqual(perms(db, 5), { products: true, dashboard: true, dashboard_export: true }, 'an ABSENT manager export key becomes true')
+  assert.deepEqual(perms(db, 1), { pos: true, sales: true, dashboard: true, dashboard_export: false, 'sales:view_courier_cost': true })
+  assert.deepEqual(perms(db, 2), { products: true, dashboard_export: false, dashboard: true, 'sales:view_courier_cost': true })
+  assert.deepEqual(perms(db, 3), { dashboard: true, dashboard_export: false, pos: true, 'sales:view_courier_cost': true }, 'an explicit stored true/false is overwritten on a ROLE row')
+  assert.deepEqual(perms(db, 4), { dashboard_export: true, dashboard: true, 'sales:view_courier_cost': true })
+  assert.deepEqual(perms(db, 5), { products: true, dashboard: true, dashboard_export: true, 'sales:view_courier_cost': true }, 'an ABSENT manager export key becomes true')
 })
 
 check('admin, other roles, invalid JSON, a non-object and users are untouched', () => {
@@ -73,15 +75,15 @@ check('code is matched on lower(trim(code))', () => {
   role(db, 2, 'MANAGER', {})
   role(db, 3, 'employees', {})
   db.exec(sql)
-  assert.deepEqual(perms(db, 1), { dashboard: true, dashboard_export: false })
-  assert.deepEqual(perms(db, 2), { dashboard: true, dashboard_export: true })
+  assert.deepEqual(perms(db, 1), { dashboard: true, dashboard_export: false, 'sales:view_courier_cost': true })
+  assert.deepEqual(perms(db, 2), { dashboard: true, dashboard_export: true, 'sales:view_courier_cost': true })
   assert.deepEqual(perms(db, 3), {})
 })
 
 check('PRE count and the users with their own dashboard keys are recorded', () => {
   const db = world()
   role(db, 1, 'employee', {})
-  role(db, 2, 'manager', { dashboard: true, dashboard_export: true })
+  role(db, 2, 'manager', { dashboard: true, dashboard_export: true, 'sales:view_courier_cost': true })
   role(db, 3, 'manager', {})
   const user = (id, p) => db.prepare('INSERT INTO users(id,username,role_id,permissions) VALUES(?,?,?,?)').run(id, 'u' + id, 1, p)
   user(1, '{"dashboard":false}'); user(2, '{"dashboard_export":true}'); user(3, '{"pos":true}'); user(4, 'broken'); user(5, '{"dashboard":true,"dashboard_export":false}'); user(6, '[]')
@@ -120,8 +122,8 @@ check('a duplicated dashboard / dashboard_export member ends truly true / false 
   role(db, 1, 'employee', '{"dashboard":false,"pos":true,"dashboard":false,"dashboard_export":true,"dashboard_export":true}')
   role(db, 2, 'manager', '{"dashboard":false,"dashboard":false}')
   db.exec(sql)
-  assert.deepEqual(perms(db, 1), { pos: true, dashboard: true, dashboard_export: false })
-  assert.deepEqual(perms(db, 2), { dashboard: true, dashboard_export: true })
+  assert.deepEqual(perms(db, 1), { pos: true, dashboard: true, dashboard_export: false, 'sales:view_courier_cost': true })
+  assert.deepEqual(perms(db, 2), { dashboard: true, dashboard_export: true, 'sales:view_courier_cost': true })
   const raw = db.prepare('SELECT permissions FROM roles WHERE id=1').get().permissions
   assert.equal((raw.match(/"dashboard"/g) || []).length, 1, 'exactly one dashboard member is left')
 })
@@ -130,7 +132,7 @@ check('a manager whose dashboard_export is duplicated ends with one member, hold
   const db = world()
   role(db, 1, 'manager', '{"dashboard_export":true,"pos":true,"dashboard_export":false}')
   role(db, 2, 'manager', '{"dashboard_export":false,"dashboard_export":true,"dashboard":true}')
-  role(db, 3, 'manager', '{"dashboard":true,"dashboard_export":false}')
+  role(db, 3, 'manager', '{"dashboard":true,"dashboard_export":false,"sales:view_courier_cost":true}')
   role(db, 4, 'manager', '{"dashboard":true,"dashboard_export":true,"dashboard_export":true,"dashboard_export":false,"dashboard_export":true}')
   const before3 = db.prepare('SELECT permissions FROM roles WHERE id=3').get().permissions
   assert.equal(JSON.parse(db.prepare('SELECT permissions FROM roles WHERE id=1').get().permissions).dashboard_export, false, 'the fixture reads false for JSON.parse')
@@ -147,6 +149,58 @@ check('a manager whose dashboard_export is duplicated ends with one member, hold
   assert.equal(perms(db, 1).dashboard, true)
   assert.equal(db.prepare('SELECT permissions FROM roles WHERE id=3').get().permissions, before3, 'a conforming manager with an explicit false is not rewritten')
   assert.equal(flag(db, 'dashboard_staff_roles_0310_changed'), '3', 'the three non-conforming managers are counted, the conforming one is not')
+})
+
+check('COURIER: sales:view_courier_cost becomes true only when ABSENT, for both roles; true, false and null are kept (matrix)', () => {
+  const KEY = 'sales:view_courier_cost'
+  const db = world()
+  let id = 0
+  const rows = []
+  for (const code of ['employee', 'manager']) {
+    for (const stored of ['absent', true, false, null]) {
+      for (const dashboardKeys of [true, false]) {
+        id += 1
+        // dashboardKeys false: the role is also selected for its Dashboard keys, so the UPDATE path carries the explicit value through
+        const base = dashboardKeys ? { pos: true, dashboard: true, dashboard_export: code === 'manager' } : { pos: true }
+        role(db, id, code, stored === 'absent' ? base : { ...base, [KEY]: stored })
+        rows.push({ id, code, stored })
+      }
+    }
+  }
+  role(db, 90, 'admin', { all: true })
+  role(db, 91, 'warehouse', { inventory: true })
+  const outside = JSON.stringify(db.prepare('SELECT id,permissions,updated_at FROM roles WHERE id>=90 ORDER BY id').all())
+  db.exec(sql)
+  for (const { id: rid, code, stored } of rows) {
+    const expected = stored === 'absent' ? true : stored
+    assert.equal(Object.hasOwn(perms(db, rid), KEY), true, code + '/' + stored + ': the member exists')
+    assert.equal(perms(db, rid)[KEY], expected, code + '/' + stored)
+    assert.equal(perms(db, rid).pos, true, 'every other key is kept')
+  }
+  assert.equal(JSON.stringify(db.prepare('SELECT id,permissions,updated_at FROM roles WHERE id>=90 ORDER BY id').all()), outside, 'admin and other roles are untouched')
+  assert.equal(flag(db, 'dashboard_staff_roles_0310_changed'), '10', 'counted: the 8 roles without Dashboard keys plus the 2 with Dashboard keys but no courier key')
+})
+
+check('MUTANT: a json_set instead of json_insert overwrites an explicit false (the matrix catches it)', () => {
+  const mutant = sql.replace('SET permissions = json_insert((CASE', 'SET permissions = json_set((CASE')
+  assert.notEqual(mutant, sql)
+  const db = world()
+  role(db, 1, 'employee', { 'sales:view_courier_cost': false })
+  db.exec(mutant)
+  assert.equal(perms(db, 1)['sales:view_courier_cost'], true, 'the mutant overwrote the explicit false, so the real file is the one that keeps it')
+  const real = world()
+  role(real, 1, 'employee', { 'sales:view_courier_cost': false })
+  real.exec(sql)
+  assert.equal(perms(real, 1)['sales:view_courier_cost'], false)
+})
+
+check('MUTANT: a file that never writes the key aborts at the POST assertion for a role with conforming Dashboard keys', () => {
+  const needle = ", '$.\"sales:view_courier_cost\"', json('true')),\n    updated_at"
+  const mutant = sql.replace(needle, "),\n    updated_at")
+  assert.notEqual(mutant, sql)
+  const db = world()
+  role(db, 1, 'employee', { dashboard: true, dashboard_export: false })
+  assert.throws(() => db.exec(mutant), /dashboard_staff_roles_0310_post|malformed JSON path/i)
 })
 
 check('MUTANT: without the duplicate removal a duplicated false survives for JSON.parse', () => {
