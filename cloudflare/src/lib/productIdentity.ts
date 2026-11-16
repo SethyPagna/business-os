@@ -489,6 +489,14 @@ const dismissKey = (type: string, value: string): string => `${type}${DISMISS_DE
 // so a value the panel echoes back (a display name, say) folds to the exact
 // stored key: 'barcode' -> trimmed barcode, 'name' -> name_key, 'similar' ->
 // fuzzy key.
+// The key a 'name' cluster is stored and matched under: EXACTLY the products.name_key column, which the 0010 triggers keep as SQLite lower(trim(name)). That trims
+// the space character only and lower-cases A-Z only, and it keeps inner whitespace runs, tabs, accents and Khmer as typed. normalizeProductGroupName (collapse
+// whitespace runs, JS lower-case) is a different, looser key; a dismissal stored under it never matched the sweep's name_key for such a name, so Keep both was a no-op and the
+// Duplicate tag stayed for ever (review r5, M1). D1's lower() has no ICU, so the A-Z-only fold is what production does too.
+export function sqliteNameKey(value: unknown): string {
+  return String(value ?? '').replace(/^ +| +$/g, '').replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+}
+
 export function normalizeProductClusterKey(type: 'leadingzero' | 'barcode' | 'name' | 'similar', value: unknown): string {
   // A leading-zero cluster is keyed by the FOLDED barcode, so a dismissal
   // recorded from either twin's spelling records -- and later matches -- the
@@ -497,7 +505,7 @@ export function normalizeProductClusterKey(type: 'leadingzero' | 'barcode' | 'na
   if (type === 'leadingzero') return identityBarcodeKey(value)
   if (type === 'barcode') return String(value ?? '').trim()
   if (type === 'similar') return normalizeProductFuzzyName(value)
-  return normalizeProductGroupName(value)
+  return sqliteNameKey(value)
 }
 
 // The Resolve grid's Keep merge (owner N1/N3, 23 Sep 2026) may fold products
@@ -541,6 +549,17 @@ export function absorbedBarcodes(finalBarcode: unknown, merged: { barcode?: unkn
   const raw = String(merged?.barcode ?? '').trim()
   if (!raw) return []
   return identityBarcodeKey(raw) === identityBarcodeKey(finalBarcode) && String(finalBarcode ?? '').trim() ? [] : [raw]
+}
+
+// What the client needs to know which unmerged twins "Keep both" has already ruled on: the stored dismissals of the three cluster types a same-name
+// twin can sit in ('name', 'barcode', 'leadingzero'; a 'similar' cluster is a different-name class a twin is never decided by). Rows are the
+// normalized keys findPossiblySameProductClusters tests (dismissKey), shipped as [type, value] pairs. One covering-index read on
+// idx_product_dup_dismissals_key (0083), the same table read GET /possible-duplicates already pays in full on every sweep.
+export async function listTwinDismissals(db: D1Compat): Promise<Array<[string, string]>> {
+  const rows = await db
+    .prepare(`SELECT cluster_type, cluster_value FROM product_duplicate_dismissals WHERE cluster_type IN ('name', 'barcode', 'leadingzero') ORDER BY cluster_type, cluster_value`)
+    .all<{ cluster_type: string; cluster_value: string }>({})
+  return rows.map((row) => [row.cluster_type, row.cluster_value])
 }
 
 export async function findPossiblySameProductClusters(db: D1Compat): Promise<PossiblySameProductCluster[]> {

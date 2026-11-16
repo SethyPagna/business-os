@@ -17,7 +17,7 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "89537e7841d2",
+   "f5d32a4676ba",
    "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
   ],
   [

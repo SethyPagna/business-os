@@ -1,0 +1,16 @@
+{
+ "products-duplicate-dismissals-twin-tag-rulings": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "a49c8702fc68",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?)"
+  ],
+  [
+   "783157851bd1",
+   "SELECT cluster_type, cluster_value FROM product_duplicate_dismissals WHERE cluster_type IN ('name', 'barcode',"
+  ]
+ ]
+}

@@ -25,7 +25,7 @@
    "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
   ],
   [
-   "7311cd637523",
+   "11667df569a0",
    "B| WITH __page AS MATERIALIZED ( WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,"
   ],
   [
@@ -67,7 +67,7 @@
    "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
   ],
   [
-   "9895ed9532b9",
+   "fed51d8f57a6",
    "B| WITH __page AS MATERIALIZED ( WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,"
   ],
   [
@@ -109,7 +109,7 @@
    "B| WITH stock AS (WITH wanted AS (SELECT id,stock_quantity FROM products), ordinary AS ( SELECT s.product_id,s"
   ],
   [
-   "f453f476348c",
+   "dbcc9e098a0a",
    "B| WITH __page AS MATERIALIZED ( WITH stock AS (WITH wanted AS (SELECT id,stock_quantity FROM products), ordin"
   ],
   [
@@ -151,7 +151,7 @@
    "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
   ],
   [
-   "7311cd637523",
+   "11667df569a0",
    "B| WITH __page AS MATERIALIZED ( WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,"
   ],
   [
@@ -193,7 +193,7 @@
    "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
   ],
   [
-   "c4f70b3adca2",
+   "708c978ecd5c",
    "B| WITH __page AS MATERIALIZED ( WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,"
   ],
   [
@@ -263,7 +263,7 @@
    "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
   ],
   [
-   "9799dec66c13",
+   "30afb19cc10c",
    "B| WITH __page AS MATERIALIZED ( WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,"
   ],
   [
@@ -305,7 +305,7 @@
    "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
   ],
   [
-   "7311cd637523",
+   "11667df569a0",
    "B| WITH __page AS MATERIALIZED ( WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,"
   ],
   [
@@ -347,7 +347,7 @@
    "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
   ],
   [
-   "9799dec66c13",
+   "30afb19cc10c",
    "B| WITH __page AS MATERIALIZED ( WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,"
   ],
   [
@@ -389,7 +389,7 @@
    "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
   ],
   [
-   "7311cd637523",
+   "11667df569a0",
    "B| WITH __page AS MATERIALIZED ( WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,"
   ],
   [
@@ -431,7 +431,7 @@
    "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
   ],
   [
-   "9799dec66c13",
+   "30afb19cc10c",
    "B| WITH __page AS MATERIALIZED ( WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,"
   ],
   [
@@ -501,7 +501,7 @@
    "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
   ],
   [
-   "9799dec66c13",
+   "30afb19cc10c",
    "B| WITH __page AS MATERIALIZED ( WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,"
   ],
   [
@@ -543,7 +543,7 @@
    "B| WITH stock AS (WITH wanted AS (SELECT id,stock_quantity FROM products), ordinary AS ( SELECT s.product_id,s"
   ],
   [
-   "c5e58769d85b",
+   "3d588aed2219",
    "B| WITH __page AS MATERIALIZED ( WITH stock AS (WITH wanted AS (SELECT id,stock_quantity FROM products), ordin"
   ],
   [
@@ -925,7 +925,7 @@
    "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
   ],
   [
-   "aa043ba07753",
+   "7d195d9042e2",
    "B| WITH __page AS MATERIALIZED ( WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,"
   ],
   [

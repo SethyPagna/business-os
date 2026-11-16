@@ -1,5 +1,5 @@
 import { compareInitialKeys, getInitialKey } from './initials.ts'
-import { normalizeLeadingZeroBarcodeForCleanup, clusterRowsByBarcodeIdentity, isRealBarcode } from './productDetailRule.ts'
+import { normalizeLeadingZeroBarcodeForCleanup, clusterRowsByBarcodeIdentity, identityBarcodeKey, isRealBarcode } from './productDetailRule.ts'
 import { resolveProductMergeEconomics } from './productMerge.ts'
 
 type ProductId = number
@@ -43,14 +43,10 @@ export interface ProductGroup {
   ids: ProductId[]
   matchedIds: ProductId[]
   items: ProductRecord[]
-  // Display rows after collapsing branch-only duplicates (see
-  // mergeSameDetailRows): one entry per genuinely distinct product, each
-  // possibly spanning multiple branches via its own combined branch_stock.
-  // Products/Inventory list surfaces should iterate this, not `items`, so
-  // same-name-same-details rows that differ only by branch render as a
-  // single row instead of one row per branch. `items` is kept as-is (every
-  // raw underlying product row) for selection/bulk-action scope and for
-  // anything that needs the true per-row id list.
+  // Display rows: one per product record (see ownRows), in the same order as `items`, each with its own
+  // stock figure and its __unmergedTwin flag. Staff list surfaces iterate this; an unmerged duplicate is its
+  // own row and sits next to its twin. `items` holds the same records without the row markers, for selection
+  // and bulk-action scope.
   rows: ProductGroupRow[]
   leadProduct: ProductRecord
   sellableItems: Array<ProductRecord & {
@@ -89,6 +85,11 @@ export interface ProductGroupSection {
 export interface ProductGroupRow extends ProductRecord {
   __mergedProductIds: ProductId[]
   __mergedRowCount: number
+  // True when another record of the same group is the same product under the owner's identity rule (an
+  // unmerged duplicate: same name, and no two genuinely different real barcodes between them). Set by ownRows from the rows already loaded; no read behind it.
+  __unmergedTwin?: boolean
+  // The cluster this row is a twin in ('' when it is not one): every member of one twin cluster carries the same key.
+  __twinKey?: string
 }
 
 // Fields intentionally left out of the "is this the same product, just at a
@@ -232,16 +233,84 @@ export function mergeSameDetailRows(items: ProductRecord[] = []): ProductGroupRo
   })
 }
 
+// One display row per real product record (owner, 16 Nov 2026: no folded duplicates). A duplicate
+// that has not been merged shows as its own row with its own figure; merging (Products > Duplicates)
+// moves its stock into the kept product, so no folded row is ever left to render. mergeSameDetailRows
+// above stays for the PUBLIC storefront only, where a customer must never see the same article twice.
+export function ownRows(items: ProductRecord[] = []): ProductGroupRow[] {
+  const source = Array.isArray(items) ? items : []
+  const keys = unmergedTwinKeys(source)
+  return source.map((item, index) => ({ ...item, __mergedProductIds: [toProductId(item?.id)], __mergedRowCount: 1, __unmergedTwin: Boolean(keys[index]), __twinKey: keys[index] }))
+}
+
+// The Worker's products.name_key: SQLite lower(trim(name)) (migration 0010). trim() takes off spaces only, lower() folds A-Z only, and inner
+// spaces stay, so two names that differ only in inner spaces are two name keys on the server. The twin rule compares names with exactly this,
+// so a tag is never put on a pair the Conflicts sweep (which groups by name_key) cannot list.
+// The owner's 15 Sep rule also collapses inner spaces; that needs a migration of the stored name_key first (a separate, data-changing step), and until
+// then Conflicts and this rule agree on the uncollapsed key.
+export function serverNameKey(value: unknown): string {
+  // One pass: the edge spaces go (a run of spaces compares below 'A'), each A-Z folds to lower case.
+  return String(value ?? '').replace(/^ +| +$|[A-Z]/g, (found) => (found < 'A' ? '' : found.toLowerCase()))
+}
+
+// A twin cluster that the person already ruled on with "Keep both" is not a duplicate any more: Conflicts no longer lists it, and nothing else
+// may flag it. The rule lives in utils/productTwinDismissals.ts (staff only, so the public storefront's chunk does not carry it) and registers
+// itself through setTwinDismissalRule the moment the dismissals are loaded; without one no cluster is dismissed.
+// Called with the twin cluster, its server name key and every loaded row of that name (the Conflicts name cluster's own members).
+type TwinDismissalRow = { barcode?: unknown }
+export type TwinDismissalRule = (cluster: readonly TwinDismissalRow[], nameKey: string, nameGroup: readonly TwinDismissalRow[]) => boolean
+let twinDismissalRule: TwinDismissalRule | null = null
+export function setTwinDismissalRule(rule: TwinDismissalRule | null): void {
+  twinDismissalRule = rule
+}
+
+// "Same product" for a person, one key per row: the owner's identity rule of 15 Sep 2026, which is the Worker's own
+// clusterRowsByBarcodeIdentity (utils/productDetailRule.ts, a verbatim copy of cloudflare/src/lib/productDetailRule.ts that
+// cloudflare/scripts/test-twin-rule-parity-pure.cjs holds identical and runs side by side with this). Same name (the Worker's
+// name_key, serverNameKey) is the same product unless two genuinely different REAL barcodes separate the rows; an empty,
+// word-like, short or placeholder barcode never separates them and joins the real one (ranked winner when there are several),
+// and rows that differ only in leading zeros are one. A cluster of two or more rows is a twin: every member gets the same
+// non-empty key, a row alone in its cluster gets ''. The rule is a property of the rows loaded together, so it is computed
+// for a list, not a single row: the scan hit, the Duplicate tag and the open state of a name group all read this one key.
+// Scope is the Conflicts sweep's own (findPossiblySameProductClusters): an active product that is not a group row, and a cluster
+// that "Keep both" has not dismissed, so a tag is only ever put on a row the Conflicts tab can list and merge.
+export function unmergedTwinKeys(items: readonly ProductRecord[]): string[] {
+  const keys: string[] = new Array(items.length).fill('')
+  const byName = new Map<string, number[]>()
+  items.forEach((item, index) => {
+    const { is_group: group, is_active: active } = item ?? {}
+    const name = serverNameKey(item?.name)
+    if (!name || Number(group || 0) || active === 0 || active === false) return
+    const members = byName.get(name)
+    if (members) members.push(index)
+    else byName.set(name, [index])
+  })
+  for (const [name, indexes] of byName) {
+    if (indexes.length < 2) continue
+    const rows = indexes.map((index) => {
+      const item = items[index]
+      return { index, barcode: item?.barcode, id: item?.id, stock_quantity: item?.stock_quantity }
+    })
+    for (const cluster of clusterRowsByBarcodeIdentity(rows)) {
+      if (cluster.length < 2 || twinDismissalRule?.(cluster, name, rows)) continue
+      const real = cluster.find((row) => isRealBarcode(row.barcode))
+      const key = `${name}|${real ? identityBarcodeKey(real.barcode) : ''}`
+      for (const row of cluster) keys[row.index] = key
+    }
+  }
+  return keys
+}
+
 interface BuildGroupSectionsOptions {
   productsById?: Map<unknown, ProductRecord>
   sortDirection?: unknown
 }
 
-function normalizeText(value: unknown): string {
+export function normalizeText(value: unknown): string {
   return String(value || '').trim().replace(/\s+/g, ' ')
 }
 
-function toProductId(value: unknown): ProductId {
+export function toProductId(value: unknown): ProductId {
   const id = Number(value || 0)
   return Number.isFinite(id) ? id : 0
 }
@@ -338,8 +407,56 @@ function compareProducts(left: ProductRecord, right: ProductRecord, { rootId = 0
   const rightParent = toProductId(right?.parent_id)
   if (Boolean(leftParent) !== Boolean(rightParent)) return leftParent ? 1 : -1
 
-  // name -> branch -> price -> barcode, per the requested Groups sort order.
+  return compareProductsByNameBarcodeId(left, right)
+}
+
+// Order of the rows inside one name group: name, then barcode, then the older branch / price / id
+// tail (owner, 16 Nov 2026: "show duplicates next to each other, so it is easier to notice"). Two unmerged duplicates share a name and
+// a barcode, so they are consecutive here whatever their branch, price or id gap; a row with no barcode
+// sorts after the barcoded ones. The barcode key is the identity key (leading zeros folded), the same
+// one the duplicate finder and merge use, so "same barcode" means the same thing everywhere.
+export function compareProductsByNameBarcodeId(left: ProductRecord, right: ProductRecord): number {
+  // The name as the identity key reads it (trimmed, spaces collapsed, lower case), so ' Glow  Serum' and 'glow serum' tie and the
+  // barcode decides, instead of the raw text splitting two twins.
+  const nameDelta = normalizeProductGroupName(left?.name).localeCompare(normalizeProductGroupName(right?.name), undefined, { sensitivity: 'base' })
+  if (nameDelta !== 0) return nameDelta
+  const leftKey = identityBarcodeKey(left?.barcode)
+  const rightKey = identityBarcodeKey(right?.barcode)
+  if (leftKey !== rightKey) {
+    if (!leftKey) return 1
+    if (!rightKey) return -1
+    return leftKey < rightKey ? -1 : 1
+  }
+  // Same name and same barcode (or both without one): the older name -> branch -> price -> barcode -> id
+  // order decides, so it can never pull an unrelated barcode in between two duplicates.
   return compareProductsByNameBranchPriceBarcode(left, right)
+}
+
+// A twin cluster is kept together whatever the sort did: the sort orders by name and barcode, which keeps a pair of equal
+// codes side by side, but a real/empty or real/word pair, a family's parent row or a third row with another code can still
+// stand between two twins. This pass moves every twin of a product right behind the one that sits in an explicit family (a
+// parent_id child), else the first, changing nothing else, so a pair is always side by side (owner, 16 Nov 2026).
+function gatherUnmergedTwins(sorted: ProductRecord[]): ProductRecord[] {
+  const keys = unmergedTwinKeys(sorted)
+  if (!keys.some(Boolean)) return sorted
+  const clusters = new Map<string, ProductRecord[]>()
+  sorted.forEach((item, index) => {
+    const key = keys[index]
+    if (!key) return
+    const members = clusters.get(key)
+    if (members) members.push(item)
+    else clusters.set(key, [item])
+  })
+  const anchors = new Map<string, ProductRecord>()
+  for (const [key, members] of clusters) anchors.set(key, members.find((member) => toProductId(member?.parent_id) > 0) ?? members[0])
+  const out: ProductRecord[] = []
+  sorted.forEach((item, index) => {
+    const key = keys[index]
+    const anchor = key ? anchors.get(key) : undefined
+    if (!anchor) out.push(item)
+    else if (item === anchor) out.push(anchor, ...(clusters.get(key) || []).filter((member) => member !== anchor))
+  })
+  return out
 }
 
 function buildChildrenByParentId(products: ProductRecord[] = []): Map<ProductId, ProductRecord[]> {
@@ -380,11 +497,14 @@ function compareProductsWithinGroup(left: ProductRecord, right: ProductRecord, p
   const rightRootId = resolveFamilyRootId(right, productsById)
 
   if (leftRootId !== rightRootId) {
-    const leftRootName = String(resolveRootProduct(left, productsById)?.name || left?.name || '')
-    const rightRootName = String(resolveRootProduct(right, productsById)?.name || right?.name || '')
+    const leftRootName = normalizeProductGroupName(resolveRootProduct(left, productsById)?.name || left?.name || '')
+    const rightRootName = normalizeProductGroupName(resolveRootProduct(right, productsById)?.name || right?.name || '')
     const familyNameDelta = leftRootName.localeCompare(rightRootName, undefined, { sensitivity: 'base' })
     if (familyNameDelta !== 0) return familyNameDelta
-    return leftRootId - rightRootId
+    // Parentless rows (every imported row) are each their own root, so same-name rows land HERE: order the
+    // ROOTS name, barcode, id -- never by root id alone, which would put an unrelated row between two
+    // duplicates. Ordering by the root (not the row) keeps an explicit family contiguous and the order total.
+    return compareProductsByNameBarcodeId(resolveRootProduct(left, productsById), resolveRootProduct(right, productsById)) || leftRootId - rightRootId
   }
 
   return compareProducts(left, right, { rootId: leftRootId })
@@ -483,7 +603,7 @@ export function buildProductGroups(
   }
 
   return [...groups.values()].map((group): ProductGroup => {
-    const items = [...group.items].sort((left, right) => compareProductsWithinGroup(left, right, productsById))
+    const items = gatherUnmergedTwins([...group.items].sort((left, right) => compareProductsWithinGroup(left, right, productsById)))
     const familyRootIdSet = new Set(items.map((item) => resolveFamilyRootId(item, productsById)).filter((id) => Number.isFinite(id) && id > 0))
     const familyRootIds = [...familyRootIdSet]
     const leadProduct = items.find((item) => {
@@ -529,7 +649,7 @@ export function buildProductGroups(
       ids: items.map((item) => toProductId(item?.id)).filter((id) => Number.isFinite(id) && id > 0),
       matchedIds: [...(group.matchedIds || new Set())].filter((id) => Number.isFinite(id) && id > 0),
       items,
-      rows: mergeSameDetailRows(items),
+      rows: ownRows(items),
       leadProduct,
       sellableItems,
       hasMultipleItems: items.length > 1,
@@ -659,58 +779,6 @@ export function buildProductCategorySections(products: ProductRecord[] = [], {
     }
     return String(left.label || '').localeCompare(String(right.label || ''), undefined, { sensitivity: 'base' })
   })
-}
-
-function isAllBranchZeroRow(row: ProductGroupRow): boolean {
-  const branchStock = Array.isArray(row?.branch_stock) ? row.branch_stock as Array<Record<string, unknown>> : []
-  // This rule is intentionally limited to a real multi-branch row. A
-  // standalone zero-stock product (or a product tracked at only one branch)
-  // remains visible; only redundant children whose recorded branch balances
-  // are all zero are removed from a same-name multi-row group.
-  return branchStock.length >= 2 && branchStock.every((entry) => Number(entry?.quantity || 0) <= 0)
-}
-
-// OPT-IN only. Products.tsx runs this exclusively when the operator turns on
-// the "Hide out-of-stock rows" option in the shared FilterMenu -- it is off by
-// default, because a row this drops is a row that cannot be found, opened,
-// edited or restocked from the Products page at all. Each surviving group
-// reports how many of its rows went away via hiddenZeroStockRowCount so the
-// header can show a "N hidden" affordance rather than a silently shorter list.
-export function hideZeroStockGroupedChildRows(sections: ProductGroupSection[] = []): ProductGroupSection[] {
-  return sections.map((section) => {
-    const groups = section.groups.flatMap((group): ProductGroup[] => {
-      if (group.rows.length <= 1) return [group]
-      const rows = group.rows.filter((row) => !isAllBranchZeroRow(row))
-      if (!rows.length) return []
-      const visibleIds = new Set(rows.flatMap((row) => row.__mergedProductIds || []).map(toProductId))
-      const items = group.items.filter((item) => visibleIds.has(toProductId(item?.id)))
-      const branchNames = [...new Set(rows.flatMap((row) => (
-        Array.isArray(row.branch_stock)
-          ? (row.branch_stock as Array<Record<string, unknown>>).map((entry) => normalizeText(entry?.branch_name)).filter(Boolean)
-          : []
-      )))].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }))
-      return [{
-        ...group,
-        rows,
-        items,
-        ids: items.map((item) => toProductId(item?.id)).filter((id) => id > 0),
-        matchedIds: group.matchedIds.filter((id) => visibleIds.has(id)),
-        sellableItems: group.sellableItems.filter((item) => visibleIds.has(toProductId(item?.id))),
-        leadProduct: rows[0],
-        anchorId: toProductId(rows[0]?.id),
-        stockTotal: rows.reduce((sum, row) => sum + Number(row?.stock_quantity || 0), 0),
-        branchNames,
-        hasMultipleItems: items.length > 1,
-        hiddenZeroStockRowCount: group.rows.length - rows.length,
-      }]
-    })
-    return {
-      ...section,
-      groups,
-      ids: groups.flatMap((group) => group.ids),
-      items: groups.flatMap((group) => group.items),
-    }
-  }).filter((section) => section.groups.length > 0)
 }
 
 export function buildProductGroupSections(products: ProductRecord[] = [], {

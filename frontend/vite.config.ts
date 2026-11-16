@@ -690,6 +690,11 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/branchRedirect.ts') || normalized.endsWith('/src/api/branchRefusalLanguage.ts')
       || normalized.endsWith('/src/components/shared/useBranchRedirectQueue.ts')) return 'branch-redirect'
     if (normalized.endsWith('/src/components/shared/BranchRedirectHost.tsx')) return 'branch-redirect-host'
+    // The "Keep both" rulings behind the Duplicate tag (utils/productTwinDismissals.ts, the shell's loader and the transport that reads them): staff only. Left to the
+    // generic components/shared/ and utils/ catch-alls they land in 'app-shared', which the storefront loads, and the transport imports the product write API, so the
+    // public catalog closure would carry that admin transport (+9.9 KB) for a tag it never shows. Their own chunk is imported by the shell and the staff lists only.
+    if (normalized.endsWith('/src/utils/productTwinDismissals.ts') || normalized.endsWith('/src/components/shared/twinDismissalsTransport.ts')
+      || normalized.endsWith('/src/components/shared/useTwinDismissalsLoader.ts')) return 'twin-dismissals'
     // The branch-rule refusal localizer (its message tables are large) is wanted by the operator screens only, never by the
     // storefront catalog closure that shares app-api-methods.
     if (normalized.endsWith('/src/api/branchRuleErrors.ts') || normalized.endsWith('/src/api/transferRunRefusal.ts')) return 'branch-rule-errors'

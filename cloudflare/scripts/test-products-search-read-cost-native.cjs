@@ -19,6 +19,10 @@
 // world never bumps a version, so KV holds none and every namespace goes to D1; production reads D1 only for the namespaces KV does not hold, normally none. What the change buys is
 // fewer D1 statements per request (9 -> 8 on branch1_in_stock, 12 -> 9 on filters). The ceilings of those shapes carry the margin.
 //
+// RE-RECORDED 16 Nov 2026 (lane no-folded-duplicates, round 3): 8 hashes (created_desc, name_desc, tie_name_desc_p73, tie_created_desc_p28, tie_created_desc_p31, tie_created_asc_p67, products_text_default, rank_ids_1500_p16)
+// changed because the order of the rows INSIDE one name family is now name, barcode (leading zeros folded), then the sort's tail, then id (unmerged twins sit next to each other). The row set, every row's
+// contents, every total and the D1 reads are the same; scripts/proof-twin-order-only.cjs products shows it (the base-order clauses patched back in reproduce all 81 recorded hashes, the current code
+// returns the same rows with only the order inside a family moved). The other 73 hashes are untouched.
 // Run: node scripts/test-products-search-read-cost-native.cjs   (about two minutes: it migrates a workerd D1)
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -123,13 +127,15 @@ const UPC_BATTERY = {
 }
 const ALL_ROUTES = { ...BATTERY, ...UPC_BATTERY }
 
+// The eight recordings of 16 Nov 2026 (see RE-RECORDED above): they differ from the 04ab054cb output by the order of rows inside a name family only.
+const RE_RECORDED = ['created_desc', 'name_desc', 'tie_name_desc_p73', 'tie_created_desc_p28', 'tie_created_desc_p31', 'tie_created_asc_p67', 'products_text_default', 'rank_ids_1500_p16']
 const GOLDEN = {
   browse: ['bee834f06f373adadca7f6f4c2810876d010aeb0481c5f6ece26eb11225575c1', 19076, 10040],
   browse_p3_50: ['6548e64bf667d77701d90e65413446f5df55cdf407ef79b4a948b01166c6eb3f', 19541, 11120],
   browse_past_end: ['87b65a7137cf933663fd01f3c834ae03f4084ac28fd449ac78a5d27a860f7c55', 16624, 13630],
-  created_desc: ['aac7d52bd72061bcc92803a0e581450fbbe24af1d2bb87024ff96523d9156c22', 19294, 10510],
+  created_desc: ['487a1dd017f5e9fb4d561720008d2e3c03542d1d939011296312c7622e049ae1', 19294, 10510],
   created_asc: ['c2507d26a11fdf586f13a6a3116858d925e40558536354a24d706d9f5608791c', 18971, 9910],
-  name_desc: ['b14e8f59d53bc968dcdcee36dd7c7515a021ac6cbd9445e7b642068049995b19', 19005, 9940],
+  name_desc: ['5cfd7a316dd7324efb075f2c6bd6c7813bce685e001b013962c9e7a1f085a715', 19005, 9940],
   q_serum: ['d5dd98c1e013aa176c12599482b4d4079335231b19da686648c20dd7c0ce91a9', 22331, 9580],
   q_serum_p2: ['ec517d38e2ea8d2301ebed5e9ee7eaaa6b45fda0758a4e9657e00e22a11ed11d', 22319, 9550],
   q_multiword: ['854c57cf8e8d6f862d6d2ed1381d5676de914bbcf7134ee13afe37832c26f54e', 25361, 11170],
@@ -163,18 +169,18 @@ const GOLDEN = {
   tie_name_asc_p20: ['57bdf838bbef156b15a5b987729e00b422f6a4372358864f41ef449e4104c416', 18791, 9560],
   tie_name_asc_p21: ['9a64b38321fa48d149fd5859a0541b78be604f41885915e89fbd4007530790a0', 18791, 9560],
   tie_name_asc_p22: ['9609cdf8f8687f973dc92c311256c82c0e8fce4847ec9d05c994c52aec062076', 19007, 9920],
-  tie_name_desc_p73: ['be13871511e345b8a618d7612e54699408beab031e74c7ee85c153e0bb1aede9', 18951, 9830],
+  tie_name_desc_p73: ['5c9f770fa6ac8064b8e599e2241bdba079dd9e5316ba895c260978bbbf171224', 18951, 9830],
   tie_name_desc_p74: ['e5a16e0f8563e7772c804fc14592b6a7a8314a24553e08e2d0967f03bdbb0f29', 18791, 9560],
   tie_name_desc_p75: ['84bda336ff25bcb0ece9a2bd26fdc6209b0bf598d8e43dd805412484168816e8', 18791, 9560],
   tie_name_desc_p76: ['0d7bbc8a84628b659f3cc3b34518b8ced36ea606ba1293b83f48779648e5d0e6', 18751, 9420],
-  tie_created_desc_p28: ['04235bea1968f8d54ed3ec944a910d80a5bd568f698f3cafcdd3c38e946101a8', 18818, 9620],
+  tie_created_desc_p28: ['bf871978c722405e5758b16e3373eaee6f3c4b49b4f4f6b5d94009d7af051ec7', 18818, 9620],
   tie_created_desc_p29: ['346976def4a24c5a2c2961286f0ec27fc1a699eda9811636634bf336910c0cc8', 18791, 9560],
   tie_created_desc_p30: ['761f4cc25283d8003ab589243e7b32e1b27f06b22186969a221cceba269ed6eb', 18791, 9560],
-  tie_created_desc_p31: ['a2c6560a15e557e711ec831f634bb3fdff2a8d863e20f66e0b2efb31468826d1', 18963, 9860],
+  tie_created_desc_p31: ['820439862929403aa9830ef4c0eac3081ece7b43b127b6fb8740efd681592bfb', 18963, 9860],
   tie_created_asc_p64: ['ff31089536e6a76e4bc884f07ce616e5ff3f679b2a5cb9a47b51ff7051deff7c', 18923, 9780],
   tie_created_asc_p65: ['7c4be5d2355cb9db61528333809117757ec642abf0e91ba28ae475f8b0432754', 18791, 9560],
   tie_created_asc_p66: ['c67eefb98b4a597983c9e1a4d7687d480afced8a1a772bbc34d0d266ec2f6374', 18791, 9560],
-  tie_created_asc_p67: ['c6b9f803775967e2d764f57346a6ae795ab7f8aeb888d29f8b026667cffccb01', 18973, 9880],
+  tie_created_asc_p67: ['fa7c7756be70ff0880d06f33dc8902c3157f327f44777b59661f3c92d9f48653', 18973, 9880],
   include_lots: ['7a959df3c56587a71507840d90dfb9ac9c37f7fafb4a014be951d776ac15108f', 18941, 9700],
   list: ['6ae039ac2de057cc3446b980776c34b95238c729c0f7b355a6a7d2019294c086', 20485, 13200],
   filters: ['1bb261d5c5f0bcd519344079a4e26511119b07fdc165d1ec7596b3aa5d957223', 20487, 21520],
@@ -195,9 +201,9 @@ const GOLDEN = {
   q_cream_rules: ['1a319309f2ba8ed1b5b37d019300c12486d071f3f89609f6817e4577783f0053', 4356, 2150],
   q_100_discounted: ['318fa6d0c8f92fc67d5d759772b034fd37b9572a3915c415f65bcecf77adc5e8', 2281, 340], // hash and rows at 6e8eed496; 317 rows now. Text '100' matches 2 of the 50 discounted families, so (unlike the old 'balm', which matched all 50 and returned the discounted shape's exact bytes) this response differs from the 'discounted' shape's.
   pos_text_48: ['3d4b294375da0679b75ae5bef573c253142468980a5d3a5738ee3786659f0f61', 6504, 3880],
-  products_text_default: ['b8b316d65677d7d168c75c50a7b503699d1bea5bb9e428ef0502b12fc8d5d770', 15445, 10910],
+  products_text_default: ['064ab918da7d131babf9d95b59daadde7c7c795804d65dd5d431eb47483d58b0', 15445, 10910],
   comma_or: ['5af76fdead187f4c579a30909eb2080e1493a03a878cf0e26af40b1c9f3151dd', 17872, 11880],
-  rank_ids_1500_p16: ['b3c954c8d8013875aa9b559f2f77c7ff041706849f5cc32506158ecb8f32e780', 12283, 11330],
+  rank_ids_1500_p16: ['27c4319d39ce6d46eb2bfdc9b38bdff9c3f61803af0d37ec0d9f81b6ab6a4566', 12283, 11330],
   q_upc_a: ['2c302633ae5e77d9c11f58a000bfd218e199aaff190350ca774449bf034a8e75', 2149, 110],
   q_upc_e: ['bdff6586c57519d3794ef5d379786fcad31ac7f124f7f9bffd7b2fd6aa7d84ae', 2149, 110],
   q_upc_short: ['57391b2ec654c239cc6e43b2d5e40f2708743e95adae09d823dc5d006b015804', 2243, 210],
@@ -231,13 +237,13 @@ async function main() {
     let oldTotal = 0, newTotal = 0
     for (const label of Object.keys(ALL_ROUTES)) {
       const [hash, oldRows, ceiling] = GOLDEN[label]
-      assert.equal(sha(out[label].text), hash, `${label}: response differs from the 04ab054cb output`)
+      assert.equal(sha(out[label].text), hash, `${label}: response differs from its recording (${RE_RECORDED.includes(label) ? 'the 04ab054cb output, re-recorded for the intra-family order' : 'the 04ab054cb output'})`)
       assert.ok(out[label].rows <= ceiling, `${label}: ${out[label].rows} rows read, ceiling ${ceiling} (was ${oldRows} at 04ab054cb)`)
       oldTotal += oldRows
       newTotal += out[label].rows
     }
     assert.ok(newTotal < oldTotal * 0.53, `battery reads ${newTotal} rows, was ${oldTotal}; expected under 53 per cent`)
-    console.log(`PASS ${Object.keys(ALL_ROUTES).length} responses byte-identical to 04ab054cb; rows read ${oldTotal} -> ${newTotal} (${Math.round(100 * newTotal / oldTotal)} per cent)`)
+    console.log(`PASS ${Object.keys(ALL_ROUTES).length} responses match their recordings (${Object.keys(ALL_ROUTES).length - RE_RECORDED.length} byte-identical to 04ab054cb, ${RE_RECORDED.length} re-recorded: same rows, only the order inside a family differs); rows read ${oldTotal} -> ${newTotal} (${Math.round(100 * newTotal / oldTotal)} per cent)`)
     for (const label of ['browse', 'browse_p3_50', 'created_desc', 'q_serum', 'q_multiword', 'q_child_sku', 'branch1_in_stock', 'low_stock', 'list', 'index_p0'])
       console.log(`MEASURE ${label}: ${GOLDEN[label][1]} -> ${out[label].rows}`)
 

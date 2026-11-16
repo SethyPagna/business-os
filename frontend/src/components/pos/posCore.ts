@@ -407,9 +407,10 @@ export function buildVariantChildrenByParentId(products: readonly ProductRecord[
     if (!map.has(parentId)) map.set(parentId, [])
     map.get(parentId)?.push(product)
   })
-  // name -> branch -> price -> barcode, same order as the family/group sort
-  // in productGrouping.ts's compareProducts -- see getPrimaryBranchLabel
-  // there for what "branch" means for a product with a branch_stock array.
+  // name -> branch -> price -> barcode -> id (compareProductsByNameBranchPriceBarcode in
+  // productGrouping.ts; see getPrimaryBranchLabel there for what "branch" means for a product
+  // with a branch_stock array). The group sort itself is name -> barcode -> this tail, so
+  // unmerged twins sit together; this list orders variants, where the branch comes first.
   map.forEach((items) => items.sort((left, right) => compareProductsByNameBranchPriceBarcode(left, right)))
   return map
 }

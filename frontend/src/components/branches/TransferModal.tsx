@@ -34,7 +34,12 @@ import { createRowSearch } from '../../utils/rowSearch.ts'
 import { productSearchRequest, rankedSearchOverride, useProductSearchIndex } from '../../api/productSearchIndex.ts'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
+import { useTwinDismissals } from '../shared/useTwinDismissalsLoader.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
+import { fmtDate } from '../../utils/formatters.ts'
+import { unmergedTwinHint } from '../products/unmergedTwinHint.ts'
+import UnmergedTwinTag from '../products/UnmergedTwinTag.tsx'
+import Calendar from 'lucide-react/dist/esm/icons/calendar.js'
 import { sortLotsForDisplay } from '../../utils/lotDisplayOrder.ts'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
@@ -137,6 +142,10 @@ type TransferProduct = {
   barcode?: string
   unit?: string
   branch_quantity?: number | string
+  // When the record was created (the branch stock list carries it) and whether buildProductGroups flagged it as an
+  // unmerged twin of another record: together they tell two twin rows apart in the picker.
+  created_at?: string
+  __unmergedTwin?: boolean
 }
 
 /**
@@ -902,8 +911,10 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   // pair (which the import/transfer backend already merges into one
   // product) looked identical in this list to a same-name-different-price
   // "variant" pair (which stays two distinct products, grouped only for
-  // display). group.rows is already branch-merged (see productGrouping.ts)
-  // so branch-only duplicates collapse into one checkbox row here too.
+  // display). group.rows is one row per product record (productGrouping.ts ownRows),
+  // so an unmerged duplicate is its own checkbox row, next to its twin.
+  // A "Keep both" ruling takes the Duplicate tag off the pair (utils/productTwinDismissals.ts); both groupings below are rebuilt when the loaded rulings change.
+  const twinDismissals = useTwinDismissals()
   const groupedMulti = useMemo(
     () => buildProductGroups(
       filteredMulti as unknown as Parameters<typeof buildProductGroups>[0],
@@ -912,7 +923,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       // grouping must not re-sort that back to A-Z.
       { preserveInputOrder: Boolean(debouncedSearch.trim()) },
     ),
-    [filteredMulti, debouncedSearch],
+    [filteredMulti, debouncedSearch, twinDismissals],
   )
 
   const selectedEntries = useMemo(
@@ -1827,7 +1838,20 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                         />
                         <div className="min-w-0 flex-1 basis-[60%] sm:basis-auto">
                           <div className="min-w-0 text-sm font-medium text-gray-900 dark:text-white"><ProductNameRail name={String((product.name) ?? '')} /></div>
-                          {product.sku ? <div className="break-all font-mono text-xs text-gray-400">{product.sku}</div> : null}
+                          {product.sku || product.__unmergedTwin ? (
+                            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-gray-400">
+                              {product.sku ? <span className="break-all font-mono">{product.sku}</span> : null}
+                              {/* An unmerged twin reads exactly like its pair, so it carries the Duplicate tag and the date its record was
+                                  created (already on the row: no extra read) to tell the two apart. */}
+                              {product.__unmergedTwin ? <UnmergedTwinTag label={t('product_duplicate_badge') || 'Duplicate'} hint={unmergedTwinHint(t, can('products', 'merge_duplicates'))} /> : null}
+                              {product.__unmergedTwin && product.created_at ? (
+                                <span className="inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap leading-relaxed" title={t('date_added') || 'Date added'} data-twin-date="true">
+                                  <Calendar className="h-3 w-3 shrink-0" aria-hidden="true" />
+                                  {fmtDate(product.created_at)}
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </div>
                         <span className="ml-auto shrink-0 text-xs text-gray-500 sm:ml-0 dark:text-gray-400">
                           {t('available') || 'Available'}: {product.branch_quantity} {product.unit}
@@ -1875,11 +1899,9 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                       </div>
                     )
                   })
-                  // Same-name group with more than one distinct row (a real
-                  // price/barcode/etc. variant, not just a branch
-                  // duplicate -- those already collapsed via group.rows) --
-                  // label it so the operator can tell these are variants of
-                  // one product name, not unrelated separate products.
+                  // Same-name group with more than one row (a variant or an
+                  // unmerged duplicate, each its own record) -- label it so the
+                  // operator can tell these belong to one product name.
                   // group.rows.length === 1 renders with no header at all,
                   // same as before this change.
                   if (group.rows.length <= 1) return rows
@@ -1888,7 +1910,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                       key={`group-${group.key}`}
                       className="min-w-0 bg-gray-50 px-4 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:bg-gray-800/60"
                     >
-                      <ProductNameRail name={String(group.name ?? '')} /> · {(t('transfer_group_variant_count') || '{n} variants').replace('{n}', String(group.rows.length))}
+                      <ProductNameRail name={String(group.name ?? '')} /> · {(group.rows.some((row: any) => row.__unmergedTwin) ? (t('transfer_group_record_count') || '{n} records') : (t('transfer_group_variant_count') || '{n} variants')).replace('{n}', String(group.rows.length))}
                     </div>,
                     ...rows,
                   ]

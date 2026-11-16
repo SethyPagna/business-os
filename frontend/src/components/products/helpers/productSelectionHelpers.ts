@@ -3,9 +3,9 @@ import { getInitialKey } from '../../../utils/initials.ts'
 interface ProductSelectionRecord {
   id?: unknown
   parent_id?: unknown
-  // Present on rows produced by mergeSameDetailRows (utils/productGrouping.ts)
-  // -- always set, even for a 1-item cluster (as [id]). Lists every real
-  // underlying product id a merged display row represents.
+  // Present on the display rows of buildProductGroups (ownRows in
+  // utils/productGrouping.ts) -- always set, as [id]: the record the row stands
+  // for. (mergeSameDetailRows, used only by the public storefront, can list several.)
   __mergedProductIds?: unknown[]
   [key: string]: unknown
 }
@@ -60,8 +60,8 @@ export function normalizePositiveProductIds<TValue>(
 export function buildVisibleProductIds(products: ProductSelectionRecord[] = []): number[] {
   const ids: number[] = []
   for (const product of products) {
-    // A merged display row (2+ branch-duplicate rows collapsed into one --
-    // see mergeSameDetailRows) is selected/scoped by ALL of its underlying
+    // A display row that stands for several records (none from the staff lists now,
+    // since 16 Nov 2026; kept for any caller that still folds) is selected/scoped by ALL of its underlying
     // ids (rowScopeIds in Products.tsx uses __mergedProductIds the same
     // way), not just the lead row's own `id`. Falling back to `product.id`
     // alone here would silently drop the non-lead ids from every

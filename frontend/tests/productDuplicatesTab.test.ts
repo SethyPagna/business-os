@@ -100,7 +100,10 @@ test('global review freezes once, then reuses one apply receipt across bounded c
 
 test('dismiss remains sequential and the group review write path owns its own cancellation and reload', () => {
   assert.match(src, /bulk_dismissing_progress/)
-  assert.match(src, /catch \{\s*\n\s*failed \+= 1/, 'one failed cluster must not abort the rest')
+  // Round 6 (I1): the loop moved into dismissProductClustersAndRefresh, which keeps going past a failed cluster and re-reads the rulings once after the last
+  // (tests/twinDismissalsTransport.test.ts runs it); the tab reports the failures once at the end.
+  assert.match(src, /const \{ failed: failures \} = await dismissProductClustersAndRefresh\(/, 'one failed cluster must not abort the rest: the bulk goes through the one call that continues past a failure')
+  assert.match(src, /const failed = failures\.length/)
   assert.match(src, /bulk_dismiss_partial_failure/)
   assert.match(src, /const writeWillReconcileWhenSettled = groupWriteInFlightRef\.current/)
   assert.match(src, /groupWriteInFlightRef\.current = false[\s\S]*await load\(\)/, 'a cancelled or unknown write reloads only after transport cache invalidation settles')

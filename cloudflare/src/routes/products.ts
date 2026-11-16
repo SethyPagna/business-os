@@ -11,7 +11,7 @@ import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { collectMergeProductIds, describeMergeFailure } from '../lib/mergeRouteLog'
 import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
-import { pageFamiliesByKeys, paginateProductFamilies, paginateRankedIdFamilies, rankProductFamilies, typedOrderDrivenRead, typedOrderEligible, type FamilyGroupTotals, type FamilyPaginationOptions } from '../lib/familyPagination'
+import { INTRA_FAMILY_NAME_BARCODE_SQL, pageFamiliesByKeys, paginateProductFamilies, paginateRankedIdFamilies, rankProductFamilies, typedOrderDrivenRead, typedOrderEligible, type FamilyGroupTotals, type FamilyPaginationOptions } from '../lib/familyPagination'
 import { groupingPlan, type InventoryCheckGrouping } from '../lib/inventoryCheckGrouping'
 import { nextPromotionEdge, readPromotionEdge, readRankedScope, type RankedScope } from '../lib/rankedScope'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
@@ -41,8 +41,8 @@ import { audit, buildAuditStatement, changedFields, isSecretShapedAuditKey } fro
 import { getPlanLimits } from '../lib/planTier'
 import { countProductDataGaps, findOpenConflictMarkRequest, listProductDataGaps, parseProductConflictMarkInput, parseProductDataGapKind, preflightProductConflictMark, ProductConflictMarkError, readConfirmedValue, setProductConflictMark } from '../lib/productDataGaps'
 import type { PossiblySameProductCluster, PossiblySameProductEntry } from '../lib/productIdentity'
-import { absorbedBarcodes, keeperFollowsBarcode, productIdsInOneCluster } from '../lib/productIdentity'
-import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, findSameIdentityProduct, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeProductClusterKey, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
+import { absorbedBarcodes, keeperFollowsBarcode, listTwinDismissals, productIdsInOneCluster } from '../lib/productIdentity'
+import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, findSameIdentityProduct, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeProductClusterKey, sqliteNameKey, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { lotRemainingSql } from '../lib/lotRemaining'
 import { compareCosts, normalizeProductGroupName } from '../lib/productDetailRule'
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
@@ -1050,11 +1050,12 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     : sort === 'created_asc' ? 'latest_created_at ASC, family_name ASC'
     : sort === 'name_desc' ? 'family_name DESC'
     : 'family_name ASC'
-  const intraFamilyOrderSql =
-    sort === 'created_desc' ? 'created_at DESC, id DESC'
-    : sort === 'created_asc' ? 'created_at ASC, id ASC'
-    : sort === 'name_desc' ? 'lower(name) DESC, id ASC'
-    : 'lower(name) ASC, id ASC'
+  // Inside a family: name, then barcode, then the sort's own tail, then id, so unmerged duplicates sit
+  // next to each other under every sort (owner, 16 Nov 2026).
+  const intraFamilyOrderSql = [
+    INTRA_FAMILY_NAME_BARCODE_SQL,
+    sort === 'created_desc' ? 'created_at DESC, id DESC' : sort === 'created_asc' ? 'created_at ASC, id ASC' : 'id ASC',
+  ].join(', ')
 
   const db = getDb(env)
   // loadLowStockConfig and the promotion-rules read are independent of each
@@ -6661,6 +6662,18 @@ app.get('/possible-duplicates', async (c) => {
   return c.json({ success: true, clusters })
 })
 
+// The "Keep both" rulings the client needs to decide which unmerged twins still get the Duplicate tag: a twin cluster that every Conflicts cluster holding it has been
+// dismissed from is not listed there any more, so it must not be flagged (frontend utils/productTwinDismissals.ts holds the client rule). Anyone who can run a product
+// search sees the tag, so the audience is the search index's, not the Conflicts tab's. Keyed on the products version alone (create/edit/merge/delete/import/undo and every
+// dismissal advance it) and read as one covering-index SELECT per miss; a hit reads nothing.
+app.get('/duplicate-dismissals', async (c) => {
+  const denial = productSearchIndexDenialReason(c.get('user'))
+  if (denial) return c.json({ success: false, error: denial }, 403)
+  const dismissals = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
+    await catalogReadVersion(c.env, ['products']), getPlanLimits(c.env).possibleDuplicatesCacheSeconds, () => listTwinDismissals(getDb(c.env)), cacheIdentity(c))
+  return c.json({ success: true, dismissals })
+})
+
 // Conflicts' other sections: products with an unknown cost (catalog, received dates, held damaged lots, unproven old $0), no barcode and
 // placeholder "0" barcodes (lib/productDataGaps.ts holds the rules). Same gate as the sweep above, which is what shows the tab; the
 // unknown-cost list and count are cost data, so they also need product_cost_view (a role without it gets the barcode counts only).
@@ -7181,7 +7194,7 @@ async function prepareSelectedConflictCase(
     return { ordinal, case_key: requested.case_key, product_ids: requestedIds, code: 'not_exact_pair', message: 'This conflict no longer contains the reviewed exact two-product set.' }
   }
   const authoritativeClusterValue = normalizeProductClusterKey(requested.cluster_type, requested.cluster_value)
-  const initialClusterNameKey = normalizeProductGroupName(cluster.products[0]?.name)
+  const initialClusterNameKey = sqliteNameKey(cluster.products[0]?.name)
   const fingerprintBefore = await readSelectedConflictFingerprint(
     db, requestedIds[0], requestedIds[1], requested.cluster_type, authoritativeClusterValue, initialClusterNameKey,
   )
@@ -7199,7 +7212,7 @@ async function prepareSelectedConflictCase(
   }
   const keeper = eligibility.keeper as SelectedConflictProductRow
   const discarded = eligibility.discarded as SelectedConflictProductRow
-  const clusterNameKey = normalizeProductGroupName(keeper.name)
+  const clusterNameKey = sqliteNameKey(keeper.name)
   const authoritativeMemberIds = await readSelectedConflictClusterMemberIds(
     db, requested.cluster_type, authoritativeClusterValue, clusterNameKey,
   )
@@ -7401,7 +7414,7 @@ async function prepareSelectedConflictApplyPreflightCases(
       continue
     }
     const authoritativeClusterValue = normalizeProductClusterKey(requested.cluster_type, requested.cluster_value)
-    const initialClusterNameKey = normalizeProductGroupName(cluster.products[0]?.name)
+    const initialClusterNameKey = sqliteNameKey(cluster.products[0]?.name)
     const before = await readSelectedConflictFingerprint(db, requestedIds[0], requestedIds[1], requested.cluster_type, authoritativeClusterValue, initialClusterNameKey)
     const { sql, params } = buildInClause('selectedPreflightProduct', requestedIds)
     const rows = await db.prepare(`SELECT p.id,p.name,p.barcode,p.image_path,p.is_active,COALESCE(p.is_group,0) AS is_group,p.updated_at,
@@ -7416,7 +7429,7 @@ async function prepareSelectedConflictApplyPreflightCases(
     }
     const keeper = eligibility.keeper as SelectedConflictProductRow
     const discarded = eligibility.discarded as SelectedConflictProductRow
-    const clusterNameKey = normalizeProductGroupName(keeper.name)
+    const clusterNameKey = sqliteNameKey(keeper.name)
     const [memberIds, stockImpact, imageChanges] = await Promise.all([
       readSelectedConflictClusterMemberIds(db, requested.cluster_type, authoritativeClusterValue, clusterNameKey),
       readMergeStockImpact(db, discarded.id, new Map()),
