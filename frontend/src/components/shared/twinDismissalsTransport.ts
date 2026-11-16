@@ -25,9 +25,10 @@ export async function refreshTwinDismissals(): Promise<void> {
     if (token === readToken) setTwinDismissals(parseTwinDismissals(payload))
   } catch (error) {
     // Non-fatal, see above, except a refusal.
-    // (A forced password change also answers 403, with its own code: that is a pause, not a refusal of the role.)
+    // Only the route's own refusal (403 with its code) is final. Any other 403 (an edge layer's block page, code edge_interference; a forced password change) or error is
+    // transient: the set stays as it was and the next products sync asks again (round 6 review, L3).
     const refusal = error as { status?: unknown; code?: unknown } | null
-    if (token === readToken && Number(refusal?.status) === 403 && refusal?.code !== 'password_change_required') {
+    if (token === readToken && Number(refusal?.status) === 403 && refusal?.code === 'twin_dismissals_denied') {
       denied = true
       setTwinDismissalsReadable(false)
     }

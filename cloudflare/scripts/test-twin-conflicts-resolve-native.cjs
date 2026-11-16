@@ -421,8 +421,10 @@ async function main() {
       state.user = role(permissions)
       const answer = await dismissals()
       assert.equal(answer.status, status, `${label}: ${JSON.stringify(answer.body)}`)
-      if (status === 403) assert.equal(answer.body.dismissals, undefined, `${label}: a refused role is shown no names or barcodes`)
-      else assert.deepEqual(answer.body.dismissals, [['barcode', '8851234567801']], label)
+      if (status === 403) {
+        assert.equal(answer.body.dismissals, undefined, `${label}: a refused role is shown no names or barcodes`)
+        assert.equal(answer.body.code, 'twin_dismissals_denied', `${label}: the refusal carries the code the client latches on (any other 403 is transient)`)
+      } else assert.deepEqual(answer.body.dismissals, [['barcode', '8851234567801']], label)
     }
     state.user = ADMIN
   })

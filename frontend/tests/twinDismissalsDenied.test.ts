@@ -72,7 +72,7 @@ function probe(sources: Sources = {}): Promise<string[]> {
     if (!world.markup().includes('data-unmerged-twin')) failures.push('after an answer the tag shows')
     if (!world.store.getTwinDismissals().has(world.store.twinDismissalKey('barcode', '8851'))) failures.push('and the rulings are held')
 
-    world.answer({ status: 403 })
+    world.answer({ status: 403, code: 'twin_dismissals_denied' })
     await world.transport.refreshTwinDismissals()
     if (world.markup() !== '') failures.push('a 403 takes the tag off: that role cannot tell a ruled pair from an open one')
     if (world.store.areTwinDismissalsReadable()) failures.push('and marks the rulings unreadable')
@@ -87,7 +87,7 @@ function probe(sources: Sources = {}): Promise<string[]> {
     await world.transport.refreshTwinDismissals()
     if (world.calls.length !== asked + 1) failures.push('and asks the route again')
 
-    for (const [label, other] of [['a network failure', {}], ['a server error', { status: 500 }], ['a forced password change', { status: 403, code: 'password_change_required' }]] as Array<[string, Answer]>) {
+    for (const [label, other] of [['a network failure', {}], ['a server error', { status: 500 }], ['a forced password change', { status: 403, code: 'password_change_required' }], ['an edge layer 403', { status: 403, code: 'edge_interference' }], ['a 403 with no code', { status: 403 }]] as Array<[string, Answer]>) {
       const second = load(sources)
       second.answer(other)
       await second.transport.refreshTwinDismissals()
@@ -104,11 +104,12 @@ assert.deepEqual(await probe(), [], 'the real transport and tag')
 
 const transportSource = read('components/shared/twinDismissalsTransport.ts')
 const tagSource = read('components/products/UnmergedTwinTag.tsx')
-const REFUSAL = "    if (token === readToken && Number(refusal?.status) === 403 && refusal?.code !== 'password_change_required') {"
+const REFUSAL = "    if (token === readToken && Number(refusal?.status) === 403 && refusal?.code === 'twin_dismissals_denied') {"
 const mutants: Array<{ name: string; file: 'transport' | 'tag'; from: string; to: string }> = [
   { name: 'a 403 is swallowed like any failure (the pre-L3 behaviour)', file: 'transport', from: REFUSAL, to: '    if (false) {' },
   { name: 'every error is a refusal', file: 'transport', from: REFUSAL, to: '    if (token === readToken) {' },
-  { name: 'a forced password change is a refusal', file: 'transport', from: "Number(refusal?.status) === 403 && refusal?.code !== 'password_change_required'", to: 'Number(refusal?.status) === 403' },
+  { name: 'any 403 is a refusal (the round 5 behaviour: an edge layer block latches it)', file: 'transport', from: "Number(refusal?.status) === 403 && refusal?.code === 'twin_dismissals_denied'", to: 'Number(refusal?.status) === 403' },
+  { name: 'every 403 but a forced password change is a refusal', file: 'transport', from: "Number(refusal?.status) === 403 && refusal?.code === 'twin_dismissals_denied'", to: "Number(refusal?.status) === 403 && refusal?.code !== 'password_change_required'" },
   { name: 'a refused account is asked again', file: 'transport', from: '  if (denied) return\n', to: '' },
   { name: 'a new account keeps the refusal', file: 'transport', from: '  denied = false\n  setTwinDismissalsReadable(true)', to: '  setTwinDismissalsReadable(true)' },
   { name: 'the tag ignores the refusal', file: 'tag', from: '  if (!rulingsReadable) return null\n', to: '' },
@@ -126,6 +127,6 @@ assert.match(loader, /if \(loadedFor\.current !== accountKey\) forgetTwinDismiss
 assert.match(loader, /loadedFor\.current = ''\n      forgetTwinDismissalDenial\(\)/, 'and a sign-out forgets the refusal')
 // The route is not widened: it still refuses a role with no product search access, and the tag is the only thing a refused role loses.
 const route = readFileSync(new URL('../../cloudflare/src/routes/products.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
-assert.match(route, /app\.get\('\/duplicate-dismissals', async \(c\) => \{\n  const denial = productSearchIndexDenialReason\(c\.get\('user'\)\)\n  if \(denial\) return c\.json\(\{ success: false, error: denial \}, 403\)/, 'the route still refuses what the search index refuses')
+assert.match(route, /app\.get\('\/duplicate-dismissals', async \(c\) => \{\n  const denial = productSearchIndexDenialReason\(c\.get\('user'\)\)\n(?:  \/\/ .*\n)?  if \(denial\) return c\.json\(\{ success: false, error: denial, code: 'twin_dismissals_denied' \}, 403\)/, 'the route still refuses what the search index refuses, with the code the client latches on')
 
 console.log(`PASS twin dismissals denied: an answer shows the tag, a 403 takes it off and is not asked again, a new account asks again, a network error or a forced password change leaves it; ${mutants.length} mutants killed; the route is not widened`)

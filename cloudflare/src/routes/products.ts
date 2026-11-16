@@ -6668,7 +6668,8 @@ app.get('/possible-duplicates', async (c) => {
 // dismissal advance it) and read as one covering-index SELECT per miss; a hit reads nothing.
 app.get('/duplicate-dismissals', async (c) => {
   const denial = productSearchIndexDenialReason(c.get('user'))
-  if (denial) return c.json({ success: false, error: denial }, 403)
+  // The code is how the client tells this role refusal from any other 403 (an edge layer's block page, a forced password change): only this one is final for the account.
+  if (denial) return c.json({ success: false, error: denial, code: 'twin_dismissals_denied' }, 403)
   const dismissals = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
     await catalogReadVersion(c.env, ['products']), getPlanLimits(c.env).possibleDuplicatesCacheSeconds, () => listTwinDismissals(getDb(c.env)), cacheIdentity(c))
   return c.json({ success: true, dismissals })
