@@ -76,9 +76,9 @@ function generateBatchKey(): string {
   return ` no-lot:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`
 }
 
-// GET /api/batches/tracked-product-ids -- product ids that have a lot HOLDING STOCK (quantity > 0). The only reader is the
-// Transfer screen (the POS tap always opens the lot sheet since 11 Nov, and the sheet's own per-product lot check decides what it
-// shows), and the owner ruled on 14 Nov that its list shows only products whose lots still hold stock: an empty lot cannot be
+// GET /api/batches/tracked-product-ids -- product ids that have a lot HOLDING STOCK (quantity > 0). Its only code reader is
+// TransferModal single mode, which is unreachable today (mode has no setter; the live multiple mode loads each row's lots itself,
+// and the POS stopped reading this list in 6.0.1639, where the lot sheet's own per-product check decides what it shows). The owner ruled on 14 Nov that its list shows only products whose lots still hold stock: an empty lot cannot be
 // transferred. So an active zero-stock lot, a negative one or an inactive empty one no longer counts; an inactive lot with positive
 // stock does (migration 0154 keeps every positive lot active, and its provenance still has to show). When branchId is given, only
 // lots at that branch count, so another branch's lots do not make a product appear here.

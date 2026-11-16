@@ -91,10 +91,10 @@ app.use('*', async (c, next) => {
   // Receiving or correcting batch stock is a stock adjustment, so WRITES
   // stay behind 'inventory', same as routes/inventory.ts.
   //
-  // READS cannot. The POS calls GET /tracked-product-ids on load to learn
-  // which products need the lot picker instead of a one-tap add, and GET /
-  // to list a product's lots once one is tapped. A cashier holding only
-  // 'pos' was getting 403 on both, and the frontend treats that failure as
+  // READS cannot. The POS used to call GET /tracked-product-ids on load (until 6.0.1639; today the
+  // POS tap always opens the lot sheet) and still calls GET / and /picker-lots to list a product's
+  // lots once one is tapped. A cashier holding only
+  // 'pos' was getting 403 on those, and the frontend treats that failure as
   // "no product is batch-tracked" (a deliberate non-blocking fallback) --
   // so the picker never appeared and the cashier sold batch-tracked stock
   // WITHOUT choosing a lot. Silent, and wrong in the worst direction: it
@@ -117,11 +117,11 @@ app.use('*', async (c, next) => {
   return next()
 })
 
-// GET /api/batches/tracked-product-ids?branchId= -- POS fetches this once
-// (not per product tap) to know which products need the batch-picker
-// instead of a one-tap add. Kept as its own lightweight endpoint rather
-// than adding a column to the main product-search query, to avoid touching
-// that hot path for a feature most products won't use.
+// GET /api/batches/tracked-product-ids?branchId= -- product ids with a lot holding stock. The POS stopped
+// reading it in 6.0.1639 (its tap always opens the lot sheet) and the live Transfer screen (multiple mode)
+// loads each row's lots itself (GET /api/batches?onlyAvailable=1); the one remaining caller is TransferModal
+// single mode, which is unreachable today (mode has no setter). Kept as its own lightweight endpoint, off the
+// main product-search hot path.
 app.get('/tracked-product-ids', async (c) => {
   const db = getDb(c.env)
   const branchId = Number(c.req.query('branchId')) || null

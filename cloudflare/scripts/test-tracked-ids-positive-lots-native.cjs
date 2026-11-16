@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict'
 // S1 (stock-state design 15 Nov, owner 14 Nov): GET /api/batches/tracked-product-ids counts a product only while a lot HOLDS STOCK (quantity > 0) in the scope asked for.
-// The reader is lib/productBatches.ts getTrackedProductIds; its only consumer is the Transfer screen, which lists a product's batches with onlyAvailable (lots holding stock).
+// The reader is lib/productBatches.ts getTrackedProductIds; it has no reader in the shipped build (TransferModal single mode is unreachable and the POS stopped reading it in 6.0.1639), and the live Transfer screen lists a product's batches itself with onlyAvailable (lots holding stock; scripts/test-transfer-lot-list-oracle-native.cjs).
 //
 // Four proofs, each on the REAL migrated schema in node:sqlite, with the real library transpiled (no copy of the SQL lives in this file except the OLD text, kept verbatim as the oracle):
 //   1. ORACLE      over random worlds (branches, positive / zero / negative lots, inactive lots, inactive products, tagged and damaged rows, held units): the new ids
