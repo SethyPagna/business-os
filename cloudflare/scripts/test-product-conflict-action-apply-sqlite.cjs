@@ -354,11 +354,13 @@ async function main() {
     const keeper = { ...fixture.d1.db.prepare(`SELECT barcode,category,brand,unit,cost_price_usd,selling_price_usd,
       wholesale_price_usd,stock_quantity FROM products WHERE id=10000`).get() }
     assert.deepEqual(keeper, { barcode: '700000', category: 'C', brand: 'Two', unit: 'pack',
-      // U-cost (owner ruling 2026-09-25): the keeper's catalog cost is the quantity-weighted
-      // mean of the lots it now holds -- 2 @ 4 in LOT-A, and LOT-C's 4 units added into LOT-B (same received
-      // day, 16 Nov 2026), which becomes the mean of its distinct costs (6 and 8 -> 7) on 7 units:
-      // (2 x 4 + 7 x 7) / 9 = 6.3333. A key fold left LOT-B at 6 (5.5556).
-      cost_price_usd: 6.3333, selling_price_usd: 10, wholesale_price_usd: 9, stock_quantity: 9 })
+      // U-cost (owner ruling 2026-09-25) and the merge cost rule (owner 5 Oct 2026: quantity-weighted, 4 places): LOT-A holds
+      // 2 @ 4 (2026-09-01); LOT-B 3 @ 6 and LOT-C 4 @ 8 both arrived 2026-09-02, so LOT-C's units are added into LOT-B (16 Nov 2026).
+      // Hand oracle: LOT-B = (3 x 6 + 4 x 8) / 7 = 50 / 7 = 7.142857 -> 7.1429 (4 places, stored). The catalog cost is then derived from the
+      // STORED lot costs: (2 x 4 + 7 x 7.1429) / 9 = 58.0003 / 9 = 6.444477 -> 6.4445 (the fifth place is 7, so it rounds up). Taking the unrounded
+      // 50 / 7 would give 6.4444; the stored 4-place lot cost is what the catalog reads, so 6.4445 is the consistent figure. A key fold left LOT-B at 6 (5.5556).
+      cost_price_usd: 6.4445, selling_price_usd: 10, wholesale_price_usd: 9, stock_quantity: 9 })
+    assert.equal(fixture.d1.db.prepare('SELECT unit_cost_usd FROM product_batches WHERE id=99002').get().unit_cost_usd, 7.1429, 'LOT-B: (3 x 6 + 4 x 8) / 7 at 4 places')
     assert.deepEqual(fixture.d1.db.prepare('SELECT id,is_active FROM products WHERE id IN (10001,10002) ORDER BY id').all().map((row) => ({ ...row })), [
       { id: 10001, is_active: 0 }, { id: 10002, is_active: 0 },
     ])

@@ -65,9 +65,10 @@ async function main() {
   assert.equal(firstPlan.selected.category.value, 'B')
   assert.equal(firstPlan.selected.brand.value, 'One')
   assert.equal(firstPlan.selected.unit.value, 'box')
-  // The same-day lots (4 and 6) fold into one: its cost is the mean of the distinct non-zero costs, 5, on all 5 units (it stayed 4 on a key fold).
-  assert.equal(firstPlan.projected_result.economics.cost_price_usd, 5)
-  assert.equal(firstPlan.projected_result.costAuthority.cost_price_usd, 5)
+  // The same-day lots fold into one: its cost is the quantity-weighted average (owner 5 Oct 2026), hand oracle
+  // (2 units @ 4 + 3 units @ 6) / 5 = 26 / 5 = 5.2 on all 5 units (a plain mean of the costs would say 5; it stayed 4 on a key fold).
+  assert.equal(firstPlan.projected_result.economics.cost_price_usd, 5.2)
+  assert.equal(firstPlan.projected_result.costAuthority.cost_price_usd, 5.2)
   assert.equal(firstPlan.projected_result.costAuthority.keeperId, 10000)
   assert.equal(firstPlan.projected_result.costAuthority.source, 'received_lot')
   assert.equal(firstPlan.projected_result.costAuthority.needsReview, false)
