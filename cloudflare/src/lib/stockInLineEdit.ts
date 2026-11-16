@@ -819,11 +819,19 @@ function deltaGuards(input: {
     { product: input.productId, branch: input.branchId, change: input.branchChange })]
   for (const lot of input.deltas) {
     const params: Row = { id: lot.id, product: input.productId, branch: input.branchId, change: lot.stockChange }
-    const pins = lot.fields.map(([column, value], index) => { params[`f${index}`] = value; return `AND ${column} IS @f${index}` })
+    // A lot cost saved before the 4-place rule may be over 4 places, and 0313 rounds the live row: the pin accepts the saved figure or its 4-place form.
+    const pins = lot.fields.map(([column, value], index) => {
+      params[`f${index}`] = value
+      if (column === 'unit_cost_usd' && typeof value === 'number') { params[`f${index}r`] = roundMoney4(value); return `AND (${column} IS @f${index} OR ${column} IS @f${index}r)` }
+      return `AND ${column} IS @f${index}`
+    })
     for (const [name, move] of [['rq', lot.rq], ['rc', lot.rc]] as const) {
       if (move && 'set' in move) {
         params[name] = (name === 'rq' ? lot.from.receivedQuantity : lot.from.receivedCostUsd)
-        pins.push(`AND ${name === 'rq' ? 'received_quantity' : 'received_cost_usd'} IS @${name}`)
+        const column = name === 'rq' ? 'received_quantity' : 'received_cost_usd'
+        const saved = params[name]
+        if (name === 'rc' && typeof saved === 'number') { params.rcRounded = roundMoney4(saved); pins.push(`AND (${column} IS @rc OR ${column} IS @rcRounded)`) }
+        else pins.push(`AND ${column} IS @${name}`)
       }
     }
     out.push(guard(`EXISTS(SELECT 1 FROM product_batches WHERE id=@id AND variant_product_id=@product ${pins.join(' ')})
@@ -850,13 +858,13 @@ function deltaWrites(input: { deltas: LotDelta[]; productId: number; branchId: n
     if (lot.to.isActive === 1 && lot.from.isActive !== 1) first.push({ sql: 'UPDATE product_batches SET is_active=1 WHERE id=@id', params: base })
     const sets: string[] = []
     const params: Row = { id: lot.id }
-    lot.fields.forEach(([column, , value], index) => { sets.push(`${column}=@t${index}`); params[`t${index}`] = value })
+    lot.fields.forEach(([column, , value], index) => { sets.push(`${column}=@t${index}`); params[`t${index}`] = column === 'unit_cost_usd' && typeof value === 'number' ? roundMoney4(value) : value })
     if (lot.rq) {
       if ('set' in lot.rq) { sets.push('received_quantity=@rqTo'); params.rqTo = lot.rq.set }
       else { sets.push('received_quantity=MAX(0,COALESCE(received_quantity,0)+@rqChange)'); params.rqChange = lot.rq.change }
     }
     if (lot.rc) {
-      if ('set' in lot.rc) { sets.push('received_cost_usd=@rcTo'); params.rcTo = lot.rc.set }
+      if ('set' in lot.rc) { sets.push('received_cost_usd=@rcTo'); params.rcTo = typeof lot.rc.set === 'number' ? roundMoney4(lot.rc.set) : lot.rc.set }
       else { sets.push('received_cost_usd=CASE WHEN received_cost_usd IS NULL THEN NULL ELSE MAX(0,ROUND(received_cost_usd+@rcChange,4)) END'); params.rcChange = lot.rc.change }
     }
     if (sets.length) lotRows.push({ sql: `UPDATE product_batches SET ${sets.join(',')},updated_at=CURRENT_TIMESTAMP WHERE id=@id`, params })

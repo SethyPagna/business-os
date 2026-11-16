@@ -254,6 +254,20 @@ function exactObjectSql(alias: string, object: Record<string, unknown>, paramete
   }).join('\n        AND ')
 }
 
+// The two lot cost columns. A lot saved before the 4-place rule can hold a cost over 4 places and 0313 rounds the live row, so the lot guard
+// accepts the saved figure or its 4-place form. Every other lot column stays exact.
+const LOT_COST_FIELDS = ['unit_cost_usd', 'received_cost_usd']
+const ROUNDED_KEY = '__r4'
+function lotRowsWithRoundedTwin(rows: Array<Record<string, unknown>>): { rows: Array<Record<string, unknown>>; roundedFields: string[] } {
+  const isLong = (row: Record<string, unknown>, field: string) => typeof row[field] === 'number' && roundCost(row[field] as number) !== row[field]
+  const roundedFields = LOT_COST_FIELDS.filter((field) => rows.some((row) => isLong(row, field)))
+  if (!roundedFields.length) return { rows, roundedFields }
+  return { roundedFields, rows: rows.map((row) => {
+    const twin = Object.fromEntries(roundedFields.filter((field) => isLong(row, field)).map((field) => [field, roundCost(row[field] as number)]))
+    return Object.keys(twin).length ? { ...row, [ROUNDED_KEY]: twin } : row
+  }) }
+}
+
 function exactRowsSql(args: {
   table: string
   alias: string
@@ -261,9 +275,14 @@ function exactRowsSql(args: {
   rows: Array<Record<string, unknown>>
   parameter: string
   identity: string[]
+  roundedFields?: string[]
 }): string {
   const columns = args.rows[0] ? Object.keys(args.rows[0]).filter((field) => field !== 'branch_name') : args.identity
-  const matches = columns.map((field) => `${args.alias}.${identifier(field)} IS json_extract(expected.value,'$.${field}')`).join('\n              AND ')
+  const matches = columns.map((field) => {
+    const exact = `${args.alias}.${identifier(field)} IS json_extract(expected.value,'$.${field}')`
+    return args.roundedFields?.includes(field)
+      ? `(${exact} OR (json_type(expected.value,'$.${ROUNDED_KEY}.${field}') IS NOT NULL AND ${args.alias}.${identifier(field)} IS json_extract(expected.value,'$.${ROUNDED_KEY}.${field}')))` : exact
+  }).join('\n              AND ')
   return `(SELECT COUNT(*) FROM ${args.table} ${args.alias} WHERE ${args.scope})=json_array_length(json(@${args.parameter}))
       AND NOT EXISTS (SELECT 1 FROM json_each(json(@${args.parameter})) expected WHERE NOT EXISTS (
         SELECT 1 FROM ${args.table} ${args.alias} WHERE ${args.scope}${matches ? `\n              AND ${matches}` : ''}
@@ -395,11 +414,12 @@ export function productRemoveGraphGuards(
       params: { product: plan.product_id, productJson: JSON.stringify(selected), ...(JSON.stringify(roundedProductCosts(selected)) !== JSON.stringify(selected) ? { productRoundedJson: JSON.stringify(roundedProductCosts(selected)) } : {}) },
     })
   }
-  const rowGuards = [
+  const lots = lotRowsWithRoundedTwin(snapshot.batches)
+  const rowGuards: Array<Parameters<typeof exactRowsSql>[0] & { bound?: Array<Record<string, unknown>> }> = [
     { table: 'branch_stock', alias: 'bs', scope: 'bs.product_id=@product', rows: snapshot.branch_stock,
       parameter: 'rowsJson', identity: ['id', 'product_id', 'branch_id', 'quantity', 'rfid_confirmed_qty'] },
     { table: 'product_batches', alias: 'pb', scope: 'pb.variant_product_id=@product', rows: snapshot.batches,
-      parameter: 'rowsJson', identity: ['id'] },
+      parameter: 'rowsJson', identity: ['id'], roundedFields: lots.roundedFields, bound: lots.rows },
     { table: 'branch_batch_stock', alias: 'bbs', scope: 'bbs.batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=@product)',
       rows: snapshot.branch_batch_stock, parameter: 'rowsJson', identity: ['id'] },
     { table: 'product_images', alias: 'pi', scope: 'pi.product_id=@product', rows: snapshot.product_images,
@@ -414,7 +434,7 @@ export function productRemoveGraphGuards(
   return [...productGuards, ...rowGuards.map((guard) => ({
     sql: `SELECT CASE WHEN ${exactRowsSql(guard)}
       THEN 1 ELSE json_extract('', '$') END AS product_remove_graph_guard`,
-    params: { product: plan.product_id, rowsJson: JSON.stringify(guard.rows) },
+    params: { product: plan.product_id, rowsJson: JSON.stringify(guard.bound ?? guard.rows) },
   }))]
 }
 

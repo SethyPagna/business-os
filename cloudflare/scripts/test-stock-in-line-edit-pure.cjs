@@ -784,6 +784,37 @@ async function main() {
     assert.deepEqual(JSON.parse(writeSnapshot(f)).slice(0, 5), JSON.parse(before).slice(0, 5))
   })
 
+  // Round 4 (M1 sibling): an edit made before the 4-place rule left a lot cost over 4 places in its saved state; 0313 then rounded the live lot.
+  // The undo pin accepts the saved figure or its 4-place form, restores the old cost at 4 places, and still refuses a real change.
+  async function longCostEdit(live) {
+    const f = fresh()
+    const { movementId, batchId } = await receive(f, { requestId: `session-long-${live}`.replace(/\W/g, '-').slice(0, 40).padEnd(12, 'x'), quantity: 10 })
+    const res = await edit(f, movementId, { quantity: 12, unit_cost_usd: 3, expected_quantity: 10, expected_batch_id: batchId })
+    assert.equal(res.status, 200, JSON.stringify(res.json))
+    const op = f.sql.prepare('SELECT before_json b, after_json a FROM stock_lot_adjustment_operations WHERE id=?').get(res.json.operation_id)
+    const longen = (json, from, to) => json.split(`"unitCostUsd":${from}`).join(`"unitCostUsd":${to}`)
+    assert.ok(op.a.includes('"unitCostUsd":3') && op.b.includes('"unitCostUsd":2'), 'the saved states carry the lot costs')
+    f.sql.prepare('UPDATE stock_lot_adjustment_operations SET before_json=?, after_json=? WHERE id=?').run(longen(op.b, 2, 2.123456), longen(op.a, 3, 3.123456), res.json.operation_id)
+    seedStockFixture(f.sql, () => f.sql.prepare('UPDATE product_batches SET unit_cost_usd=? WHERE id=?').run(live, batchId))
+    return { f, batchId, history: historyOf(f, res.json.operation_id) }
+  }
+  await check('undo after 0313 rounded the lot the edit left: accepted, restored at 4 places', async () => {
+    for (const live of [3.123456, 3.1235]) {
+      const { f, batchId, history } = await longCostEdit(live)
+      const undone = await undo(f, history.id, 0)
+      assert.equal(undone.status, 200, `live ${live}: ${JSON.stringify(undone.json)}`)
+      assert.equal(lot(f, batchId).unit_cost_usd, 2.1235, 'the restored cost is rounded, not the saved 2.123456')
+    }
+  })
+  await check('undo still refuses a real change of the lot cost (4.1234 / 4.1236 / NULL / 0 against a saved 3.123456)', async () => {
+    for (const live of [3.1234, 3.1236, null, 0]) {
+      const { f, batchId, history } = await longCostEdit(live)
+      const refused = await undo(f, history.id, 0)
+      assert.notEqual(refused.status, 200, `live ${live} must be refused: ${JSON.stringify(refused.json)}`)
+      assert.equal(lot(f, batchId).unit_cost_usd, live, 'a refused undo writes nothing')
+    }
+  })
+
   await check('REVERT-SET: an edit is not redone into a session that was undone', async () => {
     const f = fresh()
     const { movementId, batchId } = await receive(f, { requestId: 'session-rs-00005', quantity: 10 })
