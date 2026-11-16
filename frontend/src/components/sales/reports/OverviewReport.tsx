@@ -47,7 +47,7 @@ import {
   type StatementGroup,
   type StatementLine,
 } from './reportModel.ts'
-import { courierMoneyColumns, optionalMoney } from '../../contacts/deliveryReportCourierMoney.ts'
+import { courierMoneyColumns } from '../../contacts/deliveryReportCourierMoney.ts'
 import { exportMenuItems, rangeSubtitle, tableLabels, type ReportViewProps } from './reportTypes.ts'
 
 interface ReturnsTotals { count: number; refund_usd: number }
