@@ -41,7 +41,7 @@ import { audit, buildAuditStatement, changedFields, isSecretShapedAuditKey } fro
 import { getPlanLimits } from '../lib/planTier'
 import { countProductDataGaps, findOpenConflictMarkRequest, listProductDataGaps, parseProductConflictMarkInput, parseProductDataGapKind, preflightProductConflictMark, ProductConflictMarkError, readConfirmedValue, setProductConflictMark } from '../lib/productDataGaps'
 import type { PossiblySameProductCluster, PossiblySameProductEntry } from '../lib/productIdentity'
-import { absorbedBarcodes, keeperFollowsBarcode, productIdsInOneCluster } from '../lib/productIdentity'
+import { absorbedBarcodes, keeperFollowsBarcode, listTwinDismissals, productIdsInOneCluster } from '../lib/productIdentity'
 import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, findSameIdentityProduct, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeProductClusterKey, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { lotRemainingSql } from '../lib/lotRemaining'
 import { compareCosts, normalizeProductGroupName } from '../lib/productDetailRule'
@@ -6660,6 +6660,18 @@ app.get('/possible-duplicates', async (c) => {
     }, cacheIdentity(c))
   const clusters = produced ? cached : (await withLiveClusterMembers(c.env, cached)) ?? await findPossiblySameProductClusters(getDb(c.env))
   return c.json({ success: true, clusters })
+})
+
+// The "Keep both" rulings the client needs to decide which unmerged twins still get the Duplicate tag: a twin cluster that every Conflicts cluster holding it has been
+// dismissed from is not listed there any more, so it must not be flagged (frontend utils/productTwinDismissals.ts holds the client rule). Anyone who can run a product
+// search sees the tag, so the audience is the search index's, not the Conflicts tab's. Keyed on the products version alone (create/edit/merge/delete/import/undo and every
+// dismissal advance it) and read as one covering-index SELECT per miss; a hit reads nothing.
+app.get('/duplicate-dismissals', async (c) => {
+  const denial = productSearchIndexDenialReason(c.get('user'))
+  if (denial) return c.json({ success: false, error: denial }, 403)
+  const dismissals = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
+    await catalogReadVersion(c.env, ['products']), getPlanLimits(c.env).possibleDuplicatesCacheSeconds, () => listTwinDismissals(getDb(c.env)), cacheIdentity(c))
+  return c.json({ success: true, dismissals })
 })
 
 // Conflicts' other sections: products with an unknown cost (catalog, received dates, held damaged lots, unproven old $0), no barcode and

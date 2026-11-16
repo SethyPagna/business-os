@@ -543,6 +543,17 @@ export function absorbedBarcodes(finalBarcode: unknown, merged: { barcode?: unkn
   return identityBarcodeKey(raw) === identityBarcodeKey(finalBarcode) && String(finalBarcode ?? '').trim() ? [] : [raw]
 }
 
+// What the client needs to know which unmerged twins "Keep both" has already ruled on: the stored dismissals of the three cluster types a same-name
+// twin can sit in ('name', 'barcode', 'leadingzero'; a 'similar' cluster is a different-name class a twin is never decided by). Rows are the
+// normalized keys findPossiblySameProductClusters tests (dismissKey), shipped as [type, value] pairs. One covering-index read on
+// idx_product_dup_dismissals_key (0083), the same table read GET /possible-duplicates already pays in full on every sweep.
+export async function listTwinDismissals(db: D1Compat): Promise<Array<[string, string]>> {
+  const rows = await db
+    .prepare(`SELECT cluster_type, cluster_value FROM product_duplicate_dismissals WHERE cluster_type IN ('name', 'barcode', 'leadingzero') ORDER BY cluster_type, cluster_value`)
+    .all<{ cluster_type: string; cluster_value: string }>({})
+  return rows.map((row) => [row.cluster_type, row.cluster_value])
+}
+
 export async function findPossiblySameProductClusters(db: D1Compat): Promise<PossiblySameProductCluster[]> {
   const [rows, dismissalRows] = await Promise.all([
     db.prepare(`
