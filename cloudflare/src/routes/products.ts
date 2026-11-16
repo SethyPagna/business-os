@@ -51,7 +51,7 @@ import { INVALID_RESOLVE_CHOICES_CODE, KEEPER_CHOICE_BEFORE_SQL, MERGE_APPLIED_P
 import { createProductMergeClusterPlan, isMergePriceEditError, MERGE_COST_FIELDS, MERGE_PRICE_EDIT_CODE, MERGE_PRICE_EDIT_MESSAGE, MERGE_PRICE_FIELDS, mergePriceEditError, mergePriceOverrides, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergeSourceUnmovedAssertion, MERGE_CONFLICT_RETRY, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
 import { sendTelegramEvent } from '../lib/telegram'
 import { PRODUCT_EDIT_ALERT_HEADING, PRODUCT_MERGE_ALERT_HEADING, formatProductEditAlertLines, formatProductMergeAlertLines, productEditAlertFields } from '../lib/productEditAlert'
-import { CATALOG_COST_DERIVE_SQL, COST_MIRROR_COLUMNS, catalogCostRecomputeIfChangedSql, costEntryActorParams, costMirrorSql, typedCostEntriesBeforeWriteSql } from '../lib/catalogCostRecompute'
+import { CATALOG_COST_DERIVE_SQL, COST_MIRROR_COLUMNS, HALF_UP_4DP, catalogCostRecomputeIfChangedSql, costEntryActorParams, costMirrorSql, typedCostEntriesBeforeWriteSql } from '../lib/catalogCostRecompute'
 import { explicitCostReviewWritePlan, mergeCostOutcome, mergeCostReviewStatements, mergeCostAuthorityUsdSql, type MergeCostFallback, type MergeCostOutcome } from '../lib/productCostReview'
 import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, productMergeSourceExtent, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
 import type { ProductMergeCaseSnapshot, ProductMergeLotSnapshot } from '../lib/productMergeSnapshot'
@@ -2515,8 +2515,11 @@ app.post('/bulk-price-adjust', async (c) => {
     return c.json({ count: row?.n || 0 })
   }
 
+  // A cost is stored to 4 places, nearest, half away from zero (owner rule; the adjust cut it to 2 and a riel cost to 0): the nudge form of the
+  // catalog-cost formula, because SQLite ROUND() rounds the binary double and lands about half of the decimal ties on the wrong side. A price
+  // (selling, wholesale) keeps its cents / riel.
   const nextValueSql = (field: string) => field.startsWith('cost_price_')
-    ? `MAX(0, ROUND(${field} + @delta, ${field.endsWith('_khr') ? 0 : 2}))`
+    ? `MAX(0, ${HALF_UP_4DP(`(${field} + @delta)`)})`
     : `MAX(0, ROUND(COALESCE(${field}, 0) + @delta, ${field.endsWith('_khr') ? 0 : 2}))`
   const claimNonce = crypto.randomUUID()
   const ownClaim = `EXISTS (SELECT 1 FROM audit_logs al WHERE al.entity = 'product' AND al.entity_id = 'bulk-price-adjust'

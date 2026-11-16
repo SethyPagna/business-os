@@ -672,7 +672,8 @@ export function planManualCostChange(
     VALUES (@productId, @costUsd, @costKhr, @previousCostUsd, 'manual', @userId, @userName,
       (SELECT COALESCE(MAX(id),0) FROM product_batches WHERE variant_product_id=@productId))
   `, params: { productId, costUsd: afterUsd, costKhr: hasKhr ? afterKhr : null,
-    previousCostUsd: before.cost_price_usd, userId: actor.id, userName: actor.name } } }
+    // The entry records the cost it replaced; a legacy value over 4 places is recorded at 4 (cost-4dp).
+    previousCostUsd: roundStoredCost(before.cost_price_usd), userId: actor.id, userName: actor.name } } }
 }
 
 export function planManualCostEntry(
@@ -713,7 +714,7 @@ export function typedCostEntriesBeforeWriteSql(input: { nextUsdSql: string | nul
   const usdSql = nextUsdSql ?? 'products.cost_price_usd'
   // cost_usd is NOT NULL and an unknown cost is not an entry: only a USD cost that will be known is recorded (0 included).
   return `INSERT INTO product_cost_entries (product_id, cost_usd, cost_khr, previous_cost_usd, source, user_id, user_name, baseline_batch_id)
-    SELECT products.id, ${usdSql}, ${nextKhrSql ?? 'NULL'}, products.cost_price_usd,
+    SELECT products.id, ${usdSql}, ${nextKhrSql ?? 'NULL'}, ${HALF_UP_4DP('products.cost_price_usd')},
       'manual', @costEntryUserId, @costEntryUserName,
       (SELECT COALESCE(MAX(pb.id), 0) FROM product_batches pb WHERE pb.variant_product_id = products.id)
     FROM products
@@ -770,7 +771,7 @@ export function typedCostEntryAfterWriteStatement(
   ].filter(Boolean)
   return {
     sql: `INSERT INTO product_cost_entries (product_id, cost_usd, cost_khr, previous_cost_usd, source, user_id, user_name, baseline_batch_id)
-    SELECT products.id, products.cost_price_usd, ${written.khr ? 'products.cost_price_khr' : 'NULL'}, @costEntryBeforeUsd,
+    SELECT products.id, products.cost_price_usd, ${written.khr ? 'products.cost_price_khr' : 'NULL'}, @costEntryPreviousUsd,
       'manual', @costEntryUserId, @costEntryUserName,
       (SELECT COALESCE(MAX(pb.id), 0) FROM product_batches pb WHERE pb.variant_product_id = products.id)
     FROM products
@@ -779,6 +780,7 @@ export function typedCostEntryAfterWriteStatement(
       costEntryProductId: productId,
       costEntryBeforeUsd: before.cost_price_usd ?? null,
       costEntryBeforeKhr: before.cost_price_khr ?? null,
+      costEntryPreviousUsd: roundStoredCost(before.cost_price_usd),
       ...costEntryActorParams(actor),
     },
   }

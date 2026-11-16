@@ -33,6 +33,12 @@ const MUTANTS = {
   'buildInsertPayload: a plan-less create / planInsertRow is written as given': [
     { file: 'lib/productWrites.ts', from: '  roundProductCostPayload(payload)\n  applySearchNormalizedColumns(payload, body, columns, true)', to: '  applySearchNormalizedColumns(payload, body, columns, true)' },
   ],
+  'bulk adjust: a cost is cut back to 2 places (riel to 0)': [
+    { file: 'routes/products.ts', from: '? `MAX(0, ${HALF_UP_4DP(`(${field} + @delta)`)})`', to: "? `MAX(0, ROUND(${field} + @delta, ${field.endsWith('_khr') ? 0 : 2}))`" },
+  ],
+  'bulk adjust: a cost is rounded with SQLite ROUND(x, 4), which lands decimal ties on the wrong side': [
+    { file: 'routes/products.ts', from: '? `MAX(0, ${HALF_UP_4DP(`(${field} + @delta)`)})`', to: '? `MAX(0, ROUND(${field} + @delta, 4))`' },
+  ],
   'isCostRoundingOnly: re-saving a legacy long cost is counted as a typed cost': [
     { file: 'lib/catalogCostRecompute.ts', from: "  if ((after ?? null) === (before ?? null)) return true\n  if (after == null || before == null || !Number.isFinite(before)) return false\n  return roundMoney4(before) === after", to: '  return (after ?? null) === (before ?? null)' },
   ],
@@ -132,6 +138,20 @@ async function scenarios() {
   const made = raw.prepare("SELECT id, cost_price_usd, cost_price_khr, purchase_price_usd FROM products WHERE name='W queued create'").get()
   assert.deepEqual({ ...made, id: 0 }, { id: 0, cost_price_usd: 4.1667, cost_price_khr: 4100.1235, purchase_price_usd: 4.1667 }, 'queue create: rounded at apply')
   assert.deepEqual(census(), { products: 0, lots: 0, entries: 0 }, 'census after the queue')
+
+  // ---- catalog-wide cost adjust: 4 places (it cut costs to 2), nearest, a tie away from zero; the twin and the entry hold the stored figure -----------------
+  const bulkUp = Number(seedFixture(raw, () => raw.prepare('INSERT INTO products(name,cost_price_usd,purchase_price_usd,cost_price_khr,purchase_price_khr,is_active) VALUES(?,?,?,?,?,1)').run('W bulk up', 4.1667, 4.1667, 20500.5, 20500.5)).lastInsertRowid)
+  const bulkTie = Number(seedFixture(raw, () => raw.prepare('INSERT INTO products(name,cost_price_usd,purchase_price_usd,is_active) VALUES(?,?,?,1)').run('W bulk tie', 1.00055, 1.00055)).lastInsertRowid)
+  void bulkTie
+  raw.prepare('INSERT INTO _legacy_long(id) VALUES(?)').run(bulkTie)
+  const adjusted = await request(products, 'POST', '/bulk-price-adjust', { direction: 'increase', amount: 0.00005, fields: ['cost_price_usd', 'cost_price_khr'], client_request_id: 'cost4dp-bulk-up-0001' })
+  assert.equal(adjusted.status, 200, JSON.stringify(adjusted))
+  assert.deepEqual(pair(bulkUp), [4.1668, 4.1668, 20500.5001, 20500.5001], 'bulk: 4.1667 + 0.00005 is the tie 4.16675 -> 4.1668; the riel cost keeps 4 places too')
+  assert.equal(raw.prepare('SELECT cost_usd c FROM product_cost_entries WHERE product_id=? ORDER BY id DESC LIMIT 1').get(bulkUp).c, 4.1668, 'bulk: the manual entry holds the stored figure')
+  const wide = await request(products, 'POST', '/bulk-price-adjust', { direction: 'increase', amount: 0.01, fields: ['cost_price_usd'], client_request_id: 'cost4dp-bulk-cent-0001' })
+  assert.equal(wide.status, 200, JSON.stringify(wide))
+  assert.equal(row(bulkUp).cost_price_usd, 4.1768, 'bulk: a cent keeps places 3 and 4 (it was rounded to 2 places: 4.18)')
+  assert.deepEqual(census(), { products: 0, lots: 0, entries: 0 }, 'census after the bulk adjusts (the legacy-long fixture rows are excluded until their first rewrite)')
 
   // ---- planInsertRow (stock-in session, review create) ---------------------------------------------------------------------------------------
   const columns = new Set(['name', 'cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr', 'is_active', 'created_at', 'updated_at'])
