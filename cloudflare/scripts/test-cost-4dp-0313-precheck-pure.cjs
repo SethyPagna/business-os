@@ -44,6 +44,8 @@ async function main() {
 
   const db = openDb(loadAll()).db
   const ex = (text, ...a) => db.prepare(text).run(...a)
+  // Every trigger is dropped so the fixture can be written directly; their SQL is kept so section 3c can put them back and run with triggers live.
+  const triggerSql = db.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger'").all().map((t) => t.sql)
   for (const t of db.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger'").all()) db.exec(`DROP TRIGGER "${t.name}"`)
   db.exec('PRAGMA ignore_check_constraints = ON; DELETE FROM settings; DELETE FROM branches; DELETE FROM audit_logs; DELETE FROM product_batches; DELETE FROM product_cost_entries; DELETE FROM products;')
   db.exec("DELETE FROM system_flags WHERE key IN ('maintenance', 'stock_transaction_permit', 'stock_schema_epoch')")
@@ -232,6 +234,27 @@ async function main() {
   whole('0.00005 rounds to 0.0001, not zero', () => { clean(); ex('UPDATE product_batches SET unit_cost_usd = 0.00005, received_cost_usd = 0.00005 WHERE id = 7') }, (row, outcome, _n, name) => {
     assert.equal(row.positive_cost_rounds_to_zero, 0, name); applied(row, outcome, name)
   })
+
+  // ---- 3c. as on production: every trigger live and the stock_schema_epoch row present ---------------------------------------------------------
+  // The scenarios above run with every trigger dropped (and, for most, no epoch row), which production never is. Here the real triggers are back.
+  // The one divergence found with triggers live: with NO stock_schema_epoch row the precheck says epoch_ok = 1 / apply_holds = 1 but 0313 aborts at
+  // raise:stock_transaction_required (its permit insert selects the epoch row). Production always has the row (stock_schema_epoch:23 in the
+  // system-flag keys export, epoch_ok = 1 in the precheck), so that case cannot happen there; it is pinned below only so nobody reads it as a bug.
+  // the fixture is changed first (triggers would refuse a direct write), then the real triggers are put back
+  const liveTriggers = (mutate) => () => { clean(); mutate(); for (const s of triggerSql) db.exec(s); assert.ok(db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'trigger'").get().n >= 10, 'the real triggers are live') }
+  whole('triggers live, epoch present', liveTriggers(() => assert.equal(db.prepare("SELECT value FROM system_flags WHERE key = 'stock_schema_epoch'").get().value, 'legacy-separate-pool-v1')), (row, outcome, _n, name) => {
+    assert.equal(row.epoch_ok, 1, name); assert.equal(row.products_to_round, 5, name); applied(row, outcome, name)
+  })
+  whole('triggers live, drift elsewhere', liveTriggers(() => ex('UPDATE products SET cost_price_usd = 9, purchase_price_usd = 9 WHERE id = 8')), (row, outcome, _n, name) => {
+    assert.equal(row.apply_holds, 0, name); assert.equal(outcome, 'cost_4dp_0313_post_active_cost_drift', name)
+  })
+  db.exec('SAVEPOINT noepoch')
+  try {
+    liveTriggers(() => ex("DELETE FROM system_flags WHERE key = 'stock_schema_epoch'"))()
+    const row = run()
+    assert.equal(row.epoch_ok, 1, 'no epoch row (cannot happen on production)'); assert.equal(row.apply_holds, 1, 'the precheck cannot see a missing row')
+    assert.throws(() => db.exec(migration), /stock_transaction_required/, '0313 aborts when the epoch row is missing and triggers are live')
+  } finally { db.exec('ROLLBACK TO noepoch; RELEASE noepoch') }
 
   // ---- 4. no personal data ---------------------------------------------------------------------------------------------------------------------
   assert.ok(!JSON.stringify(base).includes('SECRET'), 'no sentinel personal value reaches the result')
