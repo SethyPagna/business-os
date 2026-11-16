@@ -125,9 +125,14 @@ app.use('*', async (c, next) => {
 app.get('/tracked-product-ids', async (c) => {
   const db = getDb(c.env)
   const branchId = Number(c.req.query('branchId')) || null
-  // Version-keyed (6.0.970): lots appear and empty out only through product/stock/inventory writes, each of which
-  // moves one of these versions; the short TTL is the backstop for a writer that announces none of them.
-  const namespaces = ['products', 'stock', 'inventory']
+  // Version-keyed (6.0.970): lots appear through product/inventory writes, each of which moves one of these versions; the short TTL is the
+  // backstop for a writer that announces none of them. `stock` is NOT in the key (owner 14 Nov): every sale moves `stock` on every
+  // till, and the list only feeds the Transfer screen, whose server-side FIFO / named-lot checks are the authority (transferOperation.ts). The
+  // price is that a stock-only write which takes a lot across zero (a sale emptying one, a cancelled sale or an undo refilling one, a quantity-only
+  // Set while the stock_bump_narrow switch is on) shows on this list after at most the 300 s below, not at once; every writer that creates a lot or
+  // moves stock between lots (receive, stock-in, return, transfer, merge, import, a structural Set, reset) still bumps `products`, so those are
+  // never late. Proof, including the exact set of late writers: scripts/test-tracked-ids-cache-key-native.cjs.
+  const namespaces = ['products', 'inventory']
   const versions = await getVersionsWithFallback(c.env, namespaces)
   const productIds = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
     versions.map((version, index) => `${namespaces[index]}:${version}`).join('|'), 300, () => getTrackedProductIds(db, branchId), cacheIdentity(c))

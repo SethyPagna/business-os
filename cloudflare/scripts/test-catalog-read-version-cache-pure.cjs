@@ -87,9 +87,12 @@ const addProduct = (id, brand, barcode) => h.raw.db.exec(`INSERT INTO system_fla
   assert.ok(Array.isArray(tracked.json.productIds) && tracked.reads > 0)
   assert.equal((await get('/tracked-product-ids?branchId=1', batches)).reads, 0, 'tracked ids repeat reads nothing')
   assert.ok((await get('/tracked-product-ids?branchId=2', batches)).reads > 0, 'a different branch is a different entry')
-  for (const ns of ['products', 'stock', 'inventory']) {
+  for (const ns of ['products', 'inventory']) {
     await bump(null, ns)
     assert.ok((await get('/tracked-product-ids?branchId=1', batches)).reads > 0, `a ${ns} bump recomputes tracked ids`)
   }
+  // S1 (owner 14 Nov): `stock` left the key, so a sale on any till no longer makes the Transfer screen's list re-read every lot (scripts/test-tracked-ids-cache-key-native.cjs holds the set-difference proof).
+  await bump(null, 'stock')
+  assert.equal((await get('/tracked-product-ids?branchId=1', batches)).reads, 0, 'a stock bump leaves the tracked ids cached')
   console.log('PASS catalog read caches: hit at same versions, recompute on bump, dismissal invalidates')
 })().catch((error) => { console.error(error); process.exitCode = 1 })

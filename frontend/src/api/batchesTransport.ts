@@ -113,10 +113,13 @@ export type BatchSelection = {
   quantity: number
 }
 
-// GET /api/batches/tracked-product-ids?branchId= -- product ids that carry
-// active batch/expiry tracking, optionally scoped to one branch. Used by
-// the POS to decide which products need the batch-picker instead of a
-// one-tap add.
+// GET /api/batches/tracked-product-ids?branchId= -- product ids with a lot
+// HOLDING STOCK (quantity > 0), optionally scoped to one branch (owner 14 Nov:
+// an empty lot cannot be transferred, so it does not count). Its one reader is
+// the Transfer screen, which shows its received-date picker for these products;
+// the POS tap always opens the lot sheet and no longer reads this list (11 Nov).
+// The Worker may serve it up to 5 minutes late after a sale empties or a cancel
+// refills a lot; the server picks the lot (FIFO or the named one) either way.
 export function getTrackedBatchProductIds(branchId?: number | string | null): Promise<{ productIds: number[] }> {
   const scope = branchId != null && branchId !== 'all' ? String(branchId) : 'all'
   const query = scope === 'all' ? '' : `?branchId=${encodeURIComponent(scope)}`
