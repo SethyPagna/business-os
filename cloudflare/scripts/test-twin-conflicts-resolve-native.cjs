@@ -9,8 +9,12 @@
 //   * every tagged cluster is in one Conflicts cluster, for the Worker as it is and NOT for the old rule (a sweep that only lists a shared code of
 //     4 or more characters), which this test turns red;
 //   * every tagged cluster resolves, whichever row is kept: the real barcode wins, two empty barcodes stay one empty barcode, and the merged cost is
-//     the mean of the distinct non-zero costs;
-//   * a pair the tag does not mark (two genuinely different real barcodes) is still listed and still resolvable: Conflicts is the superset.
+//     the cost the grid preview shows and the merge applies, the weighted cost of the received lots (owner, 5 Oct 2026: 2 at $4 and 3 at $6 is $5.2);
+//   * a pair the tag does not mark (two genuinely different real barcodes) is still listed and still resolvable: Conflicts is the superset;
+//   * "Keep both" is a ruling (round 3/4 review, finding (a)): the real dismiss route stores it, the real GET /duplicate-dismissals ships it, and the real client
+//     rule drops a dismissed cluster, so at EVERY step of a dismissal a twin cluster is tagged exactly when the Conflicts sweep lists it (a tag on a pair the tab
+//     no longer lists was a dead end: Resolve refuses it with product_merge_not_duplicates). Every kind of pair, and a cluster listed by two Conflicts clusters
+//     that needs both dismissed. Mutants: the client ignores the rulings, the route ships none.
 //
 // Run (from cloudflare/scripts): node test-twin-conflicts-resolve-native.cjs
 const assert = require('node:assert/strict')
@@ -157,7 +161,8 @@ function buildApp(sweepPatches = []) {
 
 const KHMER = '៨៨៥១២៣៤៥៦៧៨៩០' // the real barcode's digits in Khmer numerals: not [0-9], so not a real barcode
 const REAL = '8851234567890'
-// Pairs: [first id, second id, name, barcode, barcode, tagged?]. Costs are 4 and 6 (distinct, non-zero): the merged cost the rule gives is 5.
+// Pairs: [first id, second id, name, barcode, barcode, tagged?]. Every row holds one received lot: the first of a pair 2 units at $4, the second 3 units at $6, so the
+// merged cost is (2 x 4 + 3 x 6) / 5 = 5.2, which is what the grid's preview shows and the merge applies (the mean of the distinct costs, 5, is the superseded rule).
 const PAIRS = [
   [101, 102, 'Tw Real Empty', REAL, '', true],
   [103, 104, 'Tw Empty Empty', '', '', true],
@@ -167,13 +172,25 @@ const PAIRS = [
   [111, 112, 'Tw Real Khmer', REAL, KHMER, true],
   [113, 114, 'Tw Real Word', '8851234567891', 'Mask', true],
   [115, 116, 'Tw Variants', '8851234567892', '8859999999999', false],
+  // Each of these owns its code: a barcode cluster spans names (the Worker groups it by the code alone), so a shared code would tie two pairs' rulings together.
+  [118, 119, 'Tw Real Real', '8851234567801', '8851234567801', true],
+  [120, 121, 'Tw Leading Zero', '8851234567802', '08851234567802', true],
+  [122, 123, 'Tw Word Same', 'NoBox777', 'NoBox777', true],
 ]
+// A twin cluster beside a real variant of its own name: held by the barcode cluster of its code AND by the name cluster, two rulings that must both be made.
+const BESIDE = { name: 'Tw Beside Variant', ids: [124, 125, 126], twin: [124, 125], codes: ['8851234567811', '8851234567811', '8851234567812'] }
+const TAGGED_CLUSTERS = [...PAIRS.filter((p) => p[5]).map((p) => [p[0], p[1]]), BESIDE.twin]
 const SEED = `
   INSERT INTO branches (id, name) VALUES (1, 'shop');
   INSERT INTO products (id, name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, stock_quantity, is_active) VALUES
 ${PAIRS.flatMap(([a, b, name, x, y]) => [`    (${a}, '${name}', '${x}', 4, 0, 10, 0, 1)`, `    (${b}, '${name}', '${y}', 6, 0, 10, 0, 1)`]).join(',\n')},
-    (117, 'Tw Alone', '8850000000001', 3, 0, 8, 0, 1);
-  INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (102, 1, 2), (104, 1, 3);
+    (117, 'Tw Alone', '8850000000001', 3, 0, 8, 0, 1),
+${BESIDE.ids.map((id, i) => `    (${id}, '${BESIDE.name}', '${BESIDE.codes[i]}', 4, 0, 10, 0, 1)`).join(',\n')};
+${PAIRS.flatMap(([a, b]) => [[a, 2, 4], [b, 3, 6]]).map(([id, quantity, cost]) => `
+  INSERT INTO product_batches (id, variant_product_id, batch_key, is_active, unit_cost_usd, received_at) VALUES (${1000 + id}, ${id}, 'lot-${id}', 1, ${cost}, '2026-09-01');
+  INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (${1000 + id}, 1, ${quantity});
+  INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (${id}, 1, ${quantity});
+  UPDATE products SET stock_quantity = ${quantity} WHERE id = ${id};`).join('')}
 `
 const ADMIN = { id: 1, username: 'admin', name: 'Admin', role_code: 'admin', permissions: '{}' }
 const SEED_MARK = SEED
@@ -214,13 +231,32 @@ const merge = (body) => request('POST', '/api/products/possible-duplicates/merge
 const preview = (keepId, mergeId, extra = '') => request('GET', `/api/products/possible-duplicates/merge-preview?keepId=${keepId}&mergeId=${mergeId}&keep=1${extra}`)
 const conflicts = () => request('GET', '/api/products/possible-duplicates')
 
-// The client's own twin rule over the rows this database holds (what Products, Inventory and Transfer tag).
-async function clientTwinClusters() {
-  const out = await esbuild({ entryPoints: [path.join(__dirname, '../../frontend/src/utils/productGrouping.ts')], bundle: true, write: false, platform: 'node', format: 'cjs', target: 'es2022', logLevel: 'error' })
+// The client's own twin rule over the rows this database holds (what Products, Inventory and Transfer tag), with the "Keep both" rulings the real route shipped
+// (null: none loaded, the rule as it stood before the rulings). clientPatches edit the real client source (mutants).
+const clientModules = new Map()
+async function clientApi(clientPatches = []) {
+  const key = JSON.stringify(clientPatches)
+  if (clientModules.has(key)) return clientModules.get(key)
+  const frontend = path.join(__dirname, '../../frontend/src')
+  const patcher = { name: 'client-patches', setup(b) {
+    b.onLoad({ filter: /\.ts$/ }, (args) => {
+      let text = fs.readFileSync(args.path, 'utf8').replace(/\r\n/g, '\n')
+      for (const [from, to] of clientPatches) if (text.includes(from)) text = text.replace(from, () => to)
+      return { contents: text, loader: 'ts' }
+    })
+  } }
+  const entry = "export * from './utils/productGrouping.ts'\nexport * from './utils/productTwinDismissals.ts'\n"
+  const out = await esbuild({ stdin: { contents: entry, resolveDir: frontend, loader: 'ts' }, plugins: [patcher], bundle: true, write: false, platform: 'node', format: 'cjs', target: 'es2022', logLevel: 'error' })
   const mod = { exports: {} }
   new Function('require', 'module', 'exports', out.outputFiles[0].text)(require, mod, mod.exports)
+  clientModules.set(key, mod.exports)
+  return mod.exports
+}
+async function clientTwinClusters(payload = null, clientPatches = []) {
+  const api = await clientApi(clientPatches)
+  api.setTwinDismissals(payload ? api.parseTwinDismissals(payload) : api.NO_TWIN_DISMISSALS)
   const items = rows('SELECT id, name, barcode, stock_quantity, is_active, is_group FROM products ORDER BY id')
-  const keys = mod.exports.unmergedTwinKeys(items)
+  const keys = api.unmergedTwinKeys(items)
   const byKey = new Map()
   items.forEach((item, index) => { if (keys[index]) byKey.set(keys[index], [...(byKey.get(keys[index]) || []), item.id]) })
   return [...byKey.values()].map((ids) => ids.sort((a, b) => a - b))
@@ -237,8 +273,8 @@ async function listing() {
   fresh()
   const failures = []
   const tagged = await clientTwinClusters()
-  const expected = PAIRS.filter((p) => p[5]).map((p) => [p[0], p[1]])
-  try { assert.deepEqual(tagged, expected, 'the client tags exactly the seeded twin pairs') } catch (error) { failures.push(error.message.split('\n')[0]) }
+  const expected = TAGGED_CLUSTERS
+  try { assert.deepEqual(tagged, expected, 'the client tags exactly the seeded twin clusters') } catch (error) { failures.push(error.message.split('\n')[0]) }
   const listed = await conflicts()
   if (listed.status !== 200) return [`GET /possible-duplicates ${listed.status}`]
   for (const ids of tagged) if (!inOneCluster(listed.body.clusters, ids)) failures.push(`tagged cluster ${ids} is not listed by the Conflicts sweep`)
@@ -273,16 +309,23 @@ async function main() {
         assert.equal(seen.status, 200, JSON.stringify(seen.body))
         assert.equal(seen.body.cluster, true)
         assert.equal(seen.body.blocked, null, 'a listed pair is never refused')
-        assert.equal(Number(seen.body.groupCost.cost_price_usd), 5, 'the cost the rule gives is the mean of the distinct non-zero costs (4 and 6)')
+        // The cost the grid shows is the authority's (rendered from POST resolve/cost-preview; the preview carries the same one): the weighted cost of the received lots.
+        // groupCost and identity.costAfter still hold the superseded mean of the distinct costs (5) and no client renders either, so neither is asserted.
+        assert.equal(Number(seen.body.costAuthority.cost_price_usd), 5.2, 'the cost the grid applies is the weighted cost of the lots: (2 x 4 + 3 x 6) / 5')
+        assert.equal(seen.body.costAuthority.source, 'received_lot')
         const done = await merge({ keepId: keep, mergeId: drop, keep: true, stock: 'merge' })
         assert.equal(done.status, 200, JSON.stringify(done.body))
+        assert.equal(Number(one('SELECT cost_price_usd AS c FROM products WHERE id = ?', keep).c), 5.2, 'the merge applies the cost the preview showed')
         assert.equal(one('SELECT is_active FROM products WHERE id = ?', keep).is_active, 1)
         assert.equal(one('SELECT is_active FROM products WHERE id = ?', drop).is_active, 0)
         const realOf = (code) => /^[0-9]{6,}$/.test(code) && !/^0+$/.test(code)
         // N1 (owner, 23 Sep 2026, later than the 15 Sep identity rule): the merge FOLLOWS the kept product. A kept row with no barcode takes the other's real one
         // (real wins over empty, either way round); a kept row that carries any barcode, a word included, keeps it and the other code is recorded (the audit row and
         // the merged record), never lost. Two empty barcodes stay one empty barcode. The person picks the real row as Keep to have the real code win over a word.
-        const wanted = keepCode.trim() ? keepCode : (realOf(dropCode) ? dropCode : keepCode)
+        // Two spellings of one real code (leading zeros) are one barcode, and the already-clean spelling survives whichever row is kept (the auto-merge's own rule).
+        const stripZeros = (code) => code.replace(/^0+/, '')
+        const oneCode = realOf(keepCode) && realOf(dropCode) && keepCode !== dropCode && stripZeros(keepCode) === stripZeros(dropCode)
+        const wanted = oneCode ? stripZeros(keepCode) : keepCode.trim() ? keepCode : (realOf(dropCode) ? dropCode : keepCode)
         assert.equal(one('SELECT barcode FROM products WHERE id = ?', keep).barcode, wanted)
         assert.deepEqual(done.body.keeper.absorbed_barcodes, dropCode.trim() && wanted !== dropCode && !(realOf(keepCode) && realOf(dropCode)) ? [dropCode] : [], 'the barcode the kept row does not carry is recorded, not dropped')
         assert.equal(one('SELECT barcode FROM products WHERE id = ?', drop).barcode, dropCode, 'the merged record keeps its own code')
@@ -302,6 +345,109 @@ async function main() {
       })
     }
   }
+
+  // ---- "Keep both" (finding (a)) ------------------------------------------------------------------------------------------------------------------
+  // What the client is told, through the real route, and what it then tags, against what the real sweep lists, with every ruling made through the real dismiss route
+  // the way the Conflicts tab makes it (the cluster's own type and value).
+  const dismissals = () => request('GET', '/api/products/duplicate-dismissals')
+  const dismiss = (type, value) => request('POST', '/api/products/possible-duplicates/dismiss', { type, value })
+  const holding = (clusters, ids) => clusters.filter((cluster) => ids.every((id) => cluster.products.some((p) => Number(p.id) === id)))
+  async function rulingFailures(label, clientPatches = []) {
+    const failures = []
+    const shipped = await dismissals()
+    if (shipped.status !== 200) return [`${label}: GET /duplicate-dismissals ${shipped.status}`]
+    const all = await clientTwinClusters(null, clientPatches)
+    const tagged = await clientTwinClusters(shipped.body, clientPatches)
+    const listed = await conflicts()
+    for (const ids of all) {
+      const isTagged = tagged.some((candidate) => candidate.join() === ids.join())
+      const isListed = holding(listed.body.clusters, ids).length > 0
+      if (isTagged && !isListed) failures.push(`${label}: cluster ${ids} is tagged but Conflicts does not list it (a dead end)`)
+      if (!isTagged && isListed) failures.push(`${label}: cluster ${ids} is listed by Conflicts but not tagged`)
+      if (isTagged) {
+        const seen = await preview(ids[0], ids[1], `&groupIds=${ids.join(',')}`)
+        if (seen.status !== 200 || seen.body.blocked !== null || seen.body.cluster !== true) failures.push(`${label}: tagged cluster ${ids} cannot be resolved: ${JSON.stringify(seen.body.blocked)}`)
+      }
+    }
+    return failures
+  }
+  // A person "Keeps both" of one cluster: every Conflicts cluster that lists it is dismissed in turn, and at every step the tag and the listing agree.
+  async function keepBothSteps(ids, clientPatches = [], label = ids.join('+')) {
+    fresh()
+    const failures = await rulingFailures(`${label} before`, clientPatches)
+    const steps = holding((await conflicts()).body.clusters, ids)
+    if (!steps.length) failures.push(`${label}: no Conflicts cluster lists the pair to begin with`)
+    for (const [index, cluster] of steps.entries()) {
+      const answer = await dismiss(cluster.type, cluster.value)
+      if (answer.status !== 200) failures.push(`${label}: dismiss ${cluster.type} answered ${answer.status}`)
+      failures.push(...await rulingFailures(`${label} after dismissing ${index + 1} of ${steps.length} (${cluster.type})`, clientPatches))
+    }
+    return { failures, steps }
+  }
+
+  const TAGGED_PAIRS = PAIRS.filter((p) => p[5])
+  await check('GET /duplicate-dismissals ships what the dismiss route stored, nothing the twin rule cannot use, and answers a person without product access with 403', async () => {
+    fresh()
+    assert.deepEqual((await dismissals()).body, { success: true, dismissals: [] })
+    for (const [type, value] of [['name', 'Some Name'], ['barcode', '  8851234567801 '], ['leadingzero', '08851234567802'], ['similar', 'Some Name']]) assert.equal((await dismiss(type, value)).status, 200)
+    assert.deepEqual((await dismissals()).body.dismissals, [['barcode', '8851234567801'], ['leadingzero', '8851234567802'], ['name', 'some name']], 'normalised keys, the three cluster types a twin sits in, sorted')
+    state.user = { id: 9, username: 'nobody', name: 'Nobody', role_code: 'custom', role_permissions: JSON.stringify({ contacts: true }), permissions: '{}' }
+    assert.equal((await dismissals()).status, 403)
+    state.user = ADMIN
+  })
+  for (const [a, b, name] of TAGGED_PAIRS) {
+    await check(`"Keep both" on "${name}": the tag and the Conflicts listing agree at every step, the pair ends untagged and unlisted, Resolve refuses it, every other cluster keeps its tag`, async () => {
+      const { failures, steps } = await keepBothSteps([a, b], [], name)
+      assert.deepEqual(failures, [])
+      const tagged = await clientTwinClusters((await dismissals()).body)
+      assert.equal(tagged.some((ids) => ids.includes(a)), false, 'the pair lost its tag')
+      assert.equal(holding((await conflicts()).body.clusters, [a, b]).length, 0, 'and Conflicts lists it no more')
+      assert.equal(tagged.length, TAGGED_CLUSTERS.length - 1, 'only this pair lost its tag')
+      const refused = await merge({ keepId: a, mergeId: b, keep: true, stock: 'merge' })
+      assert.equal(refused.status, 409)
+      assert.equal(refused.body.code, 'product_merge_not_duplicates', 'the dead end the tag used to lead to')
+      assert.ok(steps.length >= 1)
+    })
+  }
+  await check('a twin cluster beside a real variant is listed by two Conflicts clusters: it keeps its tag until both are dismissed, in either order', async () => {
+    for (const order of [['barcode', 'name'], ['name', 'barcode']]) {
+      fresh()
+      const listed = holding((await conflicts()).body.clusters, BESIDE.twin)
+      assert.deepEqual(listed.map((cluster) => cluster.type).sort(), ['barcode', 'name'], 'a barcode cluster and a name cluster list it')
+      assert.deepEqual(await rulingFailures('start'), [])
+      const first = listed.find((cluster) => cluster.type === order[0])
+      assert.equal((await dismiss(first.type, first.value)).status, 200)
+      assert.deepEqual(await rulingFailures(`after ${order[0]}`), [])
+      assert.ok((await clientTwinClusters((await dismissals()).body)).some((ids) => ids.join() === BESIDE.twin.join()), `still tagged after only the ${order[0]} cluster: the ${order[1]} cluster still lists it`)
+      const second = listed.find((cluster) => cluster.type === order[1])
+      assert.equal((await dismiss(second.type, second.value)).status, 200)
+      assert.deepEqual(await rulingFailures(`after ${order[1]}`), [])
+      assert.equal((await clientTwinClusters((await dismissals()).body)).some((ids) => ids.join() === BESIDE.twin.join()), false, 'untagged once both are dismissed')
+    }
+  })
+  await check('MUTANT, the client ignores the rulings: the tagged-but-unlisted dead end is found', async () => {
+    const { failures } = await keepBothSteps([118, 119], [["if (cluster.length < 2 || twinDismissalRule?.(cluster, name, rows)) continue", 'if (cluster.length < 2) continue']], 'Tw Real Real')
+    assert.ok(failures.some((f) => /tagged but Conflicts does not list it/.test(f)), `expected the dead end, got ${JSON.stringify(failures)}`)
+  })
+  await check('MUTANT, the route ships no rulings: the same dead end is found', async () => {
+    buildApp([["    .all<{ cluster_type: string; cluster_value: string }>({})\n  return rows.map((row) => [row.cluster_type, row.cluster_value])", "    .all<{ cluster_type: string; cluster_value: string }>({})\n  return rows.slice(0, 0).map((row) => [row.cluster_type, row.cluster_value])"]])
+    const { failures } = await keepBothSteps([118, 119], [], 'Tw Real Real')
+    buildApp()
+    assert.ok(failures.some((f) => /tagged but Conflicts does not list it/.test(f)), `expected the dead end, got ${JSON.stringify(failures)}`)
+  })
+  await check('MUTANT, the client waits for one cluster only (some, not every): a pair a second cluster still lists loses its tag', async () => {
+    const { failures } = await keepBothSteps(BESIDE.twin, [['holders.every((key) => dismissals.has(key))', 'holders.some((key) => dismissals.has(key))']], 'Tw Beside Variant')
+    assert.ok(failures.some((f) => /listed by Conflicts but not tagged/.test(f)), `expected the lost tag, got ${JSON.stringify(failures)}`)
+  })
+  await check('the dismissal read is one covering-index SELECT: the plan names idx_product_dup_dismissals_key and no table scan', async () => {
+    fresh()
+    const plan = rows("EXPLAIN QUERY PLAN SELECT cluster_type, cluster_value FROM product_duplicate_dismissals WHERE cluster_type IN ('name', 'barcode', 'leadingzero') ORDER BY cluster_type, cluster_value").map((row) => row.detail).join(' | ')
+    assert.match(plan, /USING COVERING INDEX idx_product_dup_dismissals_key/, plan)
+    assert.doesNotMatch(plan, /SCAN product_duplicate_dismissals(?! USING)/, plan)
+    state.queries = 0
+    await dismissals()
+    assert.equal(state.queries, 1, 'one statement per answer (the shipped route reads nothing else)')
+  })
 
   await check('the variants pair (not tagged, listed) is still resolvable: Conflicts is the superset', async () => {
     fresh()
