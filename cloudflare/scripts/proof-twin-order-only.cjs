@@ -16,8 +16,14 @@ const fs = require('node:fs')
 const path = require('node:path')
 const assert = require('node:assert/strict')
 const { createHash } = require('node:crypto')
+const { execFileSync } = require('node:child_process')
 
 const FP = path.join(__dirname, 'read-budget', 'fingerprints')
+// The recordings this proof compares the base-order code with are the ones that stood BEFORE 0d25bde59 re-recorded them for the lane's order, so the proof reads them from
+// git at the last commit that carried them (36676922a), not from the working tree, where they are now the lane's own. That is what lets it be re-run at any later commit
+// (at HEAD it used to fail with CONTROL FAILED because it read the re-recorded hashes).
+const RECORDED_AT = '36676922a'
+const recordedFile = (file) => execFileSync('git', ['show', `${RECORDED_AT}:cloudflare/scripts/${file}`], { cwd: path.join(__dirname, '..', '..'), encoding: 'utf8', maxBuffer: 1 << 26, env: { ...process.env, GIT_NO_LAZY_FETCH: '1' } })
 // The order clauses as they were at the base (acbb7e455), as in-memory source patches.
 const PATCHES = [
   { name: 'shared', file: 'src/lib/familyPagination.ts',
@@ -118,8 +124,9 @@ async function products() {
   const src = fs.readFileSync(path.join(__dirname, 'test-products-search-read-cost-native.cjs'), 'utf8')
   const segment = src.slice(src.indexOf('const SEARCH = '), src.indexOf('const GOLDEN = '))
   const { ALL_ROUTES, UPC_ROWS, UPC_BATTERY } = new Function('require', `${segment}; return { ALL_ROUTES, UPC_ROWS, UPC_BATTERY }`)(require)
+  // The recorded response hashes, as they were before the re-record (the route list above is the same in both).
   const golden = {}
-  for (const m of src.matchAll(/^\s+(\w+): \['([0-9a-f]{64})', (\d+), (\d+)\]/gm)) golden[m[1]] = m[2]
+  for (const m of recordedFile('test-products-search-read-cost-native.cjs').matchAll(/^\s+(\w+): \['([0-9a-f]{64})', (\d+), (\d+)\]/gm)) golden[m[1]] = m[2]
   const run = async (patches) => {
     const world = await openWorld(catalogFixture(2000, 3000), patches)
     try {
