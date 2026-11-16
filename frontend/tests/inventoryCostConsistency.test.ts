@@ -73,9 +73,11 @@ try {
     { id: 42, name: 'Grouped serum', barcode: '123456789', stock_quantity: 2, cost_price_usd: null, purchase_price_usd: 9, cost_price_khr: 0, purchase_price_khr: 9000, cost_needs_review: true },
   ]
   const grouped = api.groupInventoryProducts(rows)[0].rows
-  assert.equal(grouped.length, 1, 'canonical normalization keeps equivalent branch rows together')
-  assert.equal(api.inventoryCost(grouped[0], 'usd'), null, 'grouped unknown costs never become zero or a purchase mirror')
-  assert.equal(grouped[0].cost_needs_review, true, 'review on any member stays visible')
+  assert.equal(grouped.length, 2, 'unmerged duplicates stay two rows (owner, 16 Nov 2026)')
+  assert.equal(api.inventoryCost(grouped[0], 'usd'), null, 'unknown costs never become zero or a purchase mirror')
+  assert.equal(api.inventoryCost(grouped[1], 'usd'), null)
+  assert.equal(grouped[0].cost_needs_review, false, 'a row carries only its own review flag')
+  assert.equal(grouped[1].cost_needs_review, true, 'the flagged record shows its own tag')
   for (const user of [authorized, denied]) {
     const opened: number[] = []
     const surface = await harness.mount({ component: 'components/inventory/InventoryProductsSurface.tsx', props: {
@@ -85,10 +87,10 @@ try {
     assert.equal(surface.text().includes('Cost needs review'), user === authorized, 'grouped review tag is actor-scoped')
     assert.ok(!surface.text().includes('USD[0]') && !surface.text().includes('USD[9]'), 'mounted list keeps unknown canonical cost unavailable')
     const buttons = surface.findAll(node => node.getAttribute('title') === 'Calculated cost price')
-    assert.equal(buttons.length, user === authorized ? 2 : 0, 'desktop and mobile cost actions respect permission')
+    assert.equal(buttons.length, user === authorized ? 4 : 0, 'desktop and mobile cost actions (two rows each) respect permission')
     if (user === authorized) {
       await surface.click(buttons[0])
-      assert.deepEqual(opened, [Number(grouped[0].id)], 'merged cost float uses the displayed representative product')
+      assert.deepEqual(opened, [Number(grouped[0].id)], 'the cost float opens for the row that was clicked')
     }
     await surface.unmount()
   }

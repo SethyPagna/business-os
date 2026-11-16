@@ -1,5 +1,5 @@
 import { compareInitialKeys, getInitialKey } from './initials.ts'
-import { normalizeLeadingZeroBarcodeForCleanup, clusterRowsByBarcodeIdentity, isRealBarcode } from './productDetailRule.ts'
+import { normalizeLeadingZeroBarcodeForCleanup, clusterRowsByBarcodeIdentity, identityBarcodeKey, isRealBarcode } from './productDetailRule.ts'
 import { resolveProductMergeEconomics } from './productMerge.ts'
 
 type ProductId = number
@@ -232,6 +232,14 @@ export function mergeSameDetailRows(items: ProductRecord[] = []): ProductGroupRo
   })
 }
 
+// One display row per real product record (owner, 16 Nov 2026: no folded duplicates). A duplicate
+// that has not been merged shows as its own row with its own figure; merging (Products > Duplicates)
+// moves its stock into the kept product, so no folded row is ever left to render. mergeSameDetailRows
+// above stays for the PUBLIC storefront only, where a customer must never see the same article twice.
+export function ownRows(items: ProductRecord[] = []): ProductGroupRow[] {
+  return (Array.isArray(items) ? items : []).map((item) => ({ ...item, __mergedProductIds: [toProductId(item?.id)], __mergedRowCount: 1 }))
+}
+
 interface BuildGroupSectionsOptions {
   productsById?: Map<unknown, ProductRecord>
   sortDirection?: unknown
@@ -338,7 +346,26 @@ function compareProducts(left: ProductRecord, right: ProductRecord, { rootId = 0
   const rightParent = toProductId(right?.parent_id)
   if (Boolean(leftParent) !== Boolean(rightParent)) return leftParent ? 1 : -1
 
-  // name -> branch -> price -> barcode, per the requested Groups sort order.
+  return compareProductsByNameBarcodeId(left, right)
+}
+
+// Order of the rows inside one name group: name, then barcode, then the older branch / price / id
+// tail (owner, 16 Nov 2026: "show duplicates next to each other, so it is easier to notice"). Two unmerged duplicates share a name and
+// a barcode, so they are consecutive here whatever their branch, price or id gap; a row with no barcode
+// sorts after the barcoded ones. The barcode key is the identity key (leading zeros folded), the same
+// one the duplicate finder and merge use, so "same barcode" means the same thing everywhere.
+export function compareProductsByNameBarcodeId(left: ProductRecord, right: ProductRecord): number {
+  const nameDelta = String(left?.name || '').localeCompare(String(right?.name || ''), undefined, { sensitivity: 'base' })
+  if (nameDelta !== 0) return nameDelta
+  const leftKey = identityBarcodeKey(left?.barcode)
+  const rightKey = identityBarcodeKey(right?.barcode)
+  if (leftKey !== rightKey) {
+    if (!leftKey) return 1
+    if (!rightKey) return -1
+    return leftKey < rightKey ? -1 : 1
+  }
+  // Same name and same barcode (or both without one): the older name -> branch -> price -> barcode -> id
+  // order decides, so it can never pull an unrelated barcode in between two duplicates.
   return compareProductsByNameBranchPriceBarcode(left, right)
 }
 
@@ -384,7 +411,10 @@ function compareProductsWithinGroup(left: ProductRecord, right: ProductRecord, p
     const rightRootName = String(resolveRootProduct(right, productsById)?.name || right?.name || '')
     const familyNameDelta = leftRootName.localeCompare(rightRootName, undefined, { sensitivity: 'base' })
     if (familyNameDelta !== 0) return familyNameDelta
-    return leftRootId - rightRootId
+    // Parentless rows (every imported row) are each their own root, so same-name rows land HERE: order the
+    // ROOTS name, barcode, id -- never by root id alone, which would put an unrelated row between two
+    // duplicates. Ordering by the root (not the row) keeps an explicit family contiguous and the order total.
+    return compareProductsByNameBarcodeId(resolveRootProduct(left, productsById), resolveRootProduct(right, productsById)) || leftRootId - rightRootId
   }
 
   return compareProducts(left, right, { rootId: leftRootId })
@@ -529,7 +559,7 @@ export function buildProductGroups(
       ids: items.map((item) => toProductId(item?.id)).filter((id) => Number.isFinite(id) && id > 0),
       matchedIds: [...(group.matchedIds || new Set())].filter((id) => Number.isFinite(id) && id > 0),
       items,
-      rows: mergeSameDetailRows(items),
+      rows: ownRows(items),
       leadProduct,
       sellableItems,
       hasMultipleItems: items.length > 1,

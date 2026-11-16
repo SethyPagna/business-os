@@ -90,9 +90,8 @@ type ProductGroup = {
   anchorId?: ProductId
   ids: ProductId[]
   items: ProductLike[]
-  // Display rows: branch-only duplicates already collapsed into one row
-  // each (see mergeSameDetailRows in utils/productGrouping.ts). Render
-  // these, not `items` -- `items` stays around for bulk-selection scope.
+  // Display rows: one per real product record (ownRows in utils/productGrouping.ts),
+  // unmerged duplicates next to each other. Render these, not `items`.
   rows: ProductLike[]
   hasMultipleItems: boolean
   leadProduct?: ProductLike

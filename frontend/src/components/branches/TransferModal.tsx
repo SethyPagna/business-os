@@ -902,8 +902,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   // pair (which the import/transfer backend already merges into one
   // product) looked identical in this list to a same-name-different-price
   // "variant" pair (which stays two distinct products, grouped only for
-  // display). group.rows is already branch-merged (see productGrouping.ts)
-  // so branch-only duplicates collapse into one checkbox row here too.
+  // display). group.rows is one row per product record (productGrouping.ts ownRows),
+  // so an unmerged duplicate is its own checkbox row, next to its twin.
   const groupedMulti = useMemo(
     () => buildProductGroups(
       filteredMulti as unknown as Parameters<typeof buildProductGroups>[0],
@@ -1875,11 +1875,9 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                       </div>
                     )
                   })
-                  // Same-name group with more than one distinct row (a real
-                  // price/barcode/etc. variant, not just a branch
-                  // duplicate -- those already collapsed via group.rows) --
-                  // label it so the operator can tell these are variants of
-                  // one product name, not unrelated separate products.
+                  // Same-name group with more than one row (a variant or an
+                  // unmerged duplicate, each its own record) -- label it so the
+                  // operator can tell these belong to one product name.
                   // group.rows.length === 1 renders with no header at all,
                   // same as before this change.
                   if (group.rows.length <= 1) return rows

@@ -853,11 +853,10 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
       lowStock: lowStockConfig,
     })
     const thumbnailState = buildProductThumbnailState(p)
-    // A merged row (see mergeSameDetailRows) represents multiple real
-    // product ids -- selecting/checking it needs to act on all of them
-    // together, not just the lead id, or a bulk delete would silently
-    // leave the other branch-duplicate rows behind. Falls back to the
-    // single id for ordinary, unmerged rows.
+    // Every product record is its own row (owner, 16 Nov 2026: no folded
+    // duplicates), so a row's scope is its own id; __mergedProductIds is the
+    // one-element list buildProductGroups gives each row. The fallback to
+    // [productId] covers rows that did not come through it.
     const rowScopeIds = p.__mergedProductIds?.length ? p.__mergedProductIds : [productId]
     const rowSelected = isSelectionScopeFullySelected(rowScopeIds)
     // Exact duplicate (same real barcode + same name, per the server sweep)?
@@ -5093,9 +5092,8 @@ function ProductsFullEditor() {
   }, [canAddVariant, canEditProduct, canWireImages, openProductFormTab, tr])
 
   // P3-L6. Held rows are keyed off the group's FULL id list, not its display
-  // rows: mergeSameDetailRows collapses branch-only duplicates into one
-  // visible row, and the merged-away product may be the one carrying the
-  // held units. Keying off the display rows would hide them.
+  // rows: kept from the days when duplicates were folded into one visible
+  // row; the group's full id list is still the safe key for held units.
   const groupTaggedRows = useCallback((group: { ids?: Array<string | number> }): TaggedStockRow[] => {
     if (!taggedLotsByProduct.size) return []
     const seen = new Set<string>()
