@@ -85,9 +85,11 @@ export interface ProductGroupSection {
 export interface ProductGroupRow extends ProductRecord {
   __mergedProductIds: ProductId[]
   __mergedRowCount: number
-  // True when another record of the same group has the same name and the same real barcode (an
-  // unmerged duplicate). Set by ownRows from the rows already loaded; no read behind it.
+  // True when another record of the same group is the same product under the owner's identity rule (an
+  // unmerged duplicate: same name, and no two genuinely different real barcodes between them). Set by ownRows from the rows already loaded; no read behind it.
   __unmergedTwin?: boolean
+  // The cluster this row is a twin in ('' when it is not one): every member of one twin cluster carries the same key.
+  __twinKey?: string
 }
 
 // Fields intentionally left out of the "is this the same product, just at a
@@ -237,23 +239,41 @@ export function mergeSameDetailRows(items: ProductRecord[] = []): ProductGroupRo
 // above stays for the PUBLIC storefront only, where a customer must never see the same article twice.
 export function ownRows(items: ProductRecord[] = []): ProductGroupRow[] {
   const source = Array.isArray(items) ? items : []
-  const perKey = new Map<string, number>()
-  for (const item of source) {
-    const key = productTwinKey(item)
-    if (key) perKey.set(key, (perKey.get(key) || 0) + 1)
-  }
-  return source.map((item) => {
-    const key = productTwinKey(item)
-    return { ...item, __mergedProductIds: [toProductId(item?.id)], __mergedRowCount: 1, __unmergedTwin: Boolean(key) && (perKey.get(key) || 0) > 1 }
-  })
+  const keys = unmergedTwinKeys(source)
+  return source.map((item, index) => ({ ...item, __mergedProductIds: [toProductId(item?.id)], __mergedRowCount: 1, __unmergedTwin: Boolean(keys[index]), __twinKey: keys[index] }))
 }
 
-// "Same product" for a person: the normalised name plus the real barcode with leading zeros folded (the identity
-// key the duplicate finder and merge use). '' for a row without a real barcode, which is never anyone's twin.
-// The one rule behind the scan hit, the Duplicate tag and the open state of a group that holds twins.
-export function productTwinKey(row: { name?: unknown; barcode?: unknown } | null | undefined): string {
-  if (!row || !isRealBarcode(row.barcode)) return ''
-  return `${normalizeProductGroupName(row.name)}|${identityBarcodeKey(row.barcode)}`
+// "Same product" for a person, one key per row: the owner's identity rule of 15 Sep 2026, which is the Worker's own
+// clusterRowsByBarcodeIdentity (utils/productDetailRule.ts, a verbatim copy of cloudflare/src/lib/productDetailRule.ts that
+// cloudflare/scripts/test-twin-rule-parity-pure.cjs holds identical and runs side by side with this). Same name (trimmed,
+// spaces collapsed, lower case) is the same product unless two genuinely different REAL barcodes separate the rows; an empty,
+// word-like, short or placeholder barcode never separates them and joins the real one (ranked winner when there are several),
+// and rows that differ only in leading zeros are one. A cluster of two or more rows is a twin: every member gets the same
+// non-empty key, a row alone in its cluster gets ''. The rule is a property of the rows loaded together, so it is computed
+// for a list, not a single row: the scan hit, the Duplicate tag and the open state of a name group all read this one key.
+// Scope is the Conflicts sweep's own (findPossiblySameProductClusters): an active product that is not a group row, so a tag is
+// only ever put on a row the Conflicts tab can list and merge.
+export function unmergedTwinKeys(items: readonly ProductRecord[]): string[] {
+  const keys: string[] = new Array(items.length).fill('')
+  const byName = new Map<string, number[]>()
+  items.forEach((item, index) => {
+    const name = normalizeProductGroupName(item?.name)
+    if (!name || Number(item?.is_group || 0) || item?.is_active === 0 || item?.is_active === false) return
+    const members = byName.get(name)
+    if (members) members.push(index)
+    else byName.set(name, [index])
+  })
+  for (const [name, indexes] of byName) {
+    if (indexes.length < 2) continue
+    const rows = indexes.map((index) => ({ index, barcode: items[index]?.barcode, id: items[index]?.id, stock_quantity: items[index]?.stock_quantity }))
+    for (const cluster of clusterRowsByBarcodeIdentity(rows)) {
+      if (cluster.length < 2) continue
+      const real = cluster.find((row) => isRealBarcode(row.barcode))
+      const key = `${name}|${real ? identityBarcodeKey(real.barcode) : ''}`
+      for (const row of cluster) keys[row.index] = key
+    }
+  }
+  return keys
 }
 
 interface BuildGroupSectionsOptions {
@@ -387,32 +407,30 @@ export function compareProductsByNameBarcodeId(left: ProductRecord, right: Produ
   return compareProductsByNameBranchPriceBarcode(left, right)
 }
 
-// An old-style explicit family (a parent row with parent_id children) keeps its parent first and its children together, which can leave a
-// parentless twin of one child on the far side of the parent row. This pass moves every twin of a product right behind the one that sits
-// in an explicit family (else the first), changing nothing else, so a pair is always side by side (owner, 16 Nov 2026). It only runs for a
-// group that has such a family: the sort alone keeps every other pair together.
+// A twin cluster is kept together whatever the sort did: the sort orders by name and barcode, which keeps a pair of equal
+// codes side by side, but a real/empty or real/word pair, a family's parent row or a third row with another code can still
+// stand between two twins. This pass moves every twin of a product right behind the one that sits in an explicit family (a
+// parent_id child), else the first, changing nothing else, so a pair is always side by side (owner, 16 Nov 2026).
 function gatherUnmergedTwins(sorted: ProductRecord[]): ProductRecord[] {
-  if (!sorted.some((item) => toProductId(item?.parent_id) > 0)) return sorted
+  const keys = unmergedTwinKeys(sorted)
+  if (!keys.some(Boolean)) return sorted
   const clusters = new Map<string, ProductRecord[]>()
-  for (const item of sorted) {
-    const key = productTwinKey(item)
-    if (!key) continue
+  sorted.forEach((item, index) => {
+    const key = keys[index]
+    if (!key) return
     const members = clusters.get(key)
     if (members) members.push(item)
     else clusters.set(key, [item])
-  }
+  })
   const anchors = new Map<string, ProductRecord>()
-  for (const [key, members] of clusters) {
-    if (members.length > 1) anchors.set(key, members.find((member) => toProductId(member?.parent_id) > 0) ?? members[0])
-  }
-  if (!anchors.size) return sorted
+  for (const [key, members] of clusters) anchors.set(key, members.find((member) => toProductId(member?.parent_id) > 0) ?? members[0])
   const out: ProductRecord[] = []
-  for (const item of sorted) {
-    const key = productTwinKey(item)
+  sorted.forEach((item, index) => {
+    const key = keys[index]
     const anchor = key ? anchors.get(key) : undefined
     if (!anchor) out.push(item)
     else if (item === anchor) out.push(anchor, ...(clusters.get(key) || []).filter((member) => member !== anchor))
-  }
+  })
   return out
 }
 

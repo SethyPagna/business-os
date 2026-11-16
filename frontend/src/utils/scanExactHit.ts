@@ -9,19 +9,20 @@
 // longer GTIN is not a hit. Leading zeros fold and UPC-E pairs with UPC-A,
 // because that is what the tier already does for the server's search.
 import { MATCH_TIER_EXACT_BARCODE, searchRelevanceTier } from './searchMatch.ts'
-import { productTwinKey } from './productGrouping.ts'
 
 export interface ScanRow {
   barcode?: unknown
   name?: unknown
+  // Set by ownRows (utils/productGrouping.ts unmergedTwinKeys): rows of one unmerged twin cluster share it. A row without it is nobody's twin.
+  __twinKey?: unknown
 }
 
 export function isExactBarcodeHit(row: ScanRow | null | undefined, query: unknown): boolean {
   return searchRelevanceTier(row, query, { nameTiers: false }) === MATCH_TIER_EXACT_BARCODE
 }
 
-// Two unmerged duplicates (same name, same identity barcode, leading zeros folded) are separate rows
-// but one product to a person scanning (productTwinKey): they count as one hit. The first in list order is kept.
+// Two unmerged duplicates (one twin cluster under the owner's identity rule) are separate rows
+// but one product to a person scanning (the __twinKey ownRows stamps): they count as one hit. The first in list order is kept.
 /**
  * The one exact-barcode row across every group, with the group that owns it, or
  * null when none matches or two DIFFERENT products share the barcode (then
@@ -39,7 +40,7 @@ export function findScanHit<G, R extends ScanRow>(
   for (const group of groups) {
     for (const row of rowsOf(group)) {
       if (!isExactBarcodeHit(row, query)) continue
-      const key = productTwinKey(row)
+      const key = String(row.__twinKey || '')
       if (hit) {
         if (key && hit.group === group && key === hitKey) continue
         return null

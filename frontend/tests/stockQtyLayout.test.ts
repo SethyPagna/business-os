@@ -54,10 +54,10 @@ const fixture = String.raw`
       transferModal={{ ...base, id: 2, name: name('Low item', 'ទំនិញទាប'), unit: 'pcs', stock_quantity: 4, branch_stock: [{ branch_id: 1, branch_name: 'Main', quantity: 4 }] }} />
   )
   if (params.get('view') === 'transfer') createRoot(document.getElementById('root')).render(
-    <AppContext.Provider value={{ ...FALLBACK_APP_CONTEXT, t, language: lang }}>{transfer}</AppContext.Provider>,
+    <AppContext.Provider value={{ ...FALLBACK_APP_CONTEXT, t, language: lang, can: () => true }}>{transfer}</AppContext.Provider>,
   )
   else createRoot(document.getElementById('root')).render(
-    <AppContext.Provider value={{ ...FALLBACK_APP_CONTEXT, t, language: lang }}>
+    <AppContext.Provider value={{ ...FALLBACK_APP_CONTEXT, t, language: lang, can: () => true }}>
       <div data-fixture="inventory" className="p-2">
         <InventoryProductsSurface items={items} total={items.length} page={1} pageSize={20} totalPages={1} branchFilter="all" loading={false} error={null}
           serverStats={null} statsLoading={false} t={t} fmtUSD={v => '$' + v} fmtKHR={v => v + 'KHR'}

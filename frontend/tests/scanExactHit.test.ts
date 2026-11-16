@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { transformSync } from 'esbuild'
 import { findScanHit, isExactBarcodeHit } from '../src/utils/scanExactHit.ts'
+import { ownRows } from '../src/utils/productGrouping.ts'
 
 let failed = 0
 
@@ -82,9 +83,10 @@ runTest('two different products sharing the barcode single out nothing, in one g
 })
 
 // Owner, 16 Nov 2026: an unmerged duplicate is its own row, so a group now lists one row per record. Two
-// records with the same normalised name and the same identity barcode are one product to a scanner.
-const ROWS_OF = (group: { rows: Array<{ id?: number; name?: string; barcode?: string }> }) => group.rows
-const pairProbe = (find: typeof findScanHit): string[] => {
+// records that are one product under the owner's identity rule are one product to a scanner. The rows come through the real
+// ownRows, which is what stamps the twin key the scan reads (a group's rows are always ownRows rows).
+const pairProbe = (find: typeof findScanHit, own: typeof ownRows = ownRows): string[] => {
+  const ROWS_OF = (group: { rows: Array<{ id?: number; name?: string; barcode?: string }> }) => own(group.rows)
   const failures: string[] = []
   const check = (name: string, fn: () => void) => { try { fn() } catch (error) { failures.push(`${name}: ${(error as Error).message.split('\n')[0]}`) } }
   check('a same-name same-barcode pair is one hit: the first twin of the group', () => {
@@ -110,6 +112,11 @@ const pairProbe = (find: typeof findScanHit): string[] => {
     const group = { rows: [{ id: 1, name: 'Glow Serum', barcode: DIOR }, { id: 2, name: 'Glow Serum', barcode: DIOR }, { id: 3, name: 'Glow Serum Mini', barcode: DIOR }] }
     assert.equal(find([group], ROWS_OF, DIOR), null)
   })
+  check('twin pairs of one key in two different groups are ambiguous (the groups are different cards)', () => {
+    const a = { rows: [{ id: 1, name: 'Glow Serum', barcode: DIOR }, { id: 2, name: 'Glow Serum', barcode: DIOR }] }
+    const b = { rows: [{ id: 3, name: 'Glow Serum', barcode: DIOR }, { id: 4, name: 'Glow Serum', barcode: DIOR }] }
+    assert.equal(find([a, b], ROWS_OF, DIOR), null)
+  })
   check('a pair of twins in two different groups is ambiguous (the groups are different cards)', () => {
     const a = { rows: [{ id: 1, name: 'Glow Serum', barcode: DIOR }] }
     const b = { rows: [{ id: 2, name: 'Glow Serum', barcode: DIOR }] }
@@ -128,7 +135,7 @@ const pairProbe = (find: typeof findScanHit): string[] => {
 }
 
 runTest('unmerged twins count as one scan hit, different products stay ambiguous', () => {
-  assert.deepEqual(pairProbe(findScanHit), [])
+  assert.deepEqual(pairProbe(findScanHit, ownRows), [])
 })
 
 runTest('mutants of the twin rule are killed', () => {
@@ -141,26 +148,25 @@ runTest('mutants of the twin rule are killed', () => {
   }
   const scanSource = read('scanExactHit.ts')
   const groupingSource = read('productGrouping.ts')
-  const load = (scan: string, grouping: string): typeof findScanHit => {
+  const probeWith = (scan: string, grouping: string): string[] => {
     const groupingModule = compile(grouping, (id) => require(id.replace(/^\.\//, '../src/utils/')))
-    return compile(scan, (id) => (id.endsWith('productGrouping.ts') ? groupingModule : require(id.replace(/^\.\//, '../src/utils/')))).findScanHit
+    const find = compile(scan, (id) => require(id.replace(/^\.\//, '../src/utils/'))).findScanHit
+    return pairProbe(find, groupingModule.ownRows)
   }
-  assert.deepEqual(pairProbe(load(scanSource, groupingSource)), [], 'the unmutated copy passes')
-  const keyLine = 'return `${normalizeProductGroupName(row.name)}|${identityBarcodeKey(row.barcode)}`'
+  assert.deepEqual(probeWith(scanSource, groupingSource), [], 'the unmutated copy passes')
   const mutants: Array<[string, 'scan' | 'grouping', string, string]> = [
     ['no twin rule at all (the regression)', 'scan', 'if (key && hit.group === group && key === hitKey) continue', 'if (false) continue'],
     ['twins matched across groups', 'scan', 'if (key && hit.group === group && key === hitKey) continue', 'if (key && key === hitKey) continue'],
     ['twin rule stops after the first twin', 'scan', 'hitKey = key\n', 'hitKey = key + hit.row.id\n'],
-    ['twins matched on barcode alone, any name', 'grouping', keyLine, 'return identityBarcodeKey(row.barcode)'],
-    ['twins matched on name alone', 'grouping', keyLine, 'return normalizeProductGroupName(row.name)'],
-    ['raw barcode, leading zeros not folded', 'grouping', 'identityBarcodeKey(row.barcode)}`\n}', 'String(row.barcode)}`\n}'],
-    ['raw name, not normalised', 'grouping', 'normalizeProductGroupName(row.name)}|${identityBarcodeKey', 'String(row.name)}|${identityBarcodeKey'],
+    ['twins matched on name alone (every same-name row is one cluster)', 'grouping', 'for (const cluster of clusterRowsByBarcodeIdentity(rows)) {', 'for (const cluster of [rows]) {'],
+    ['raw name, not normalised', 'grouping', 'const name = normalizeProductGroupName(item?.name)', "const name = String(item?.name ?? '')"],
+    ['no twin is ever found (the regression)', 'grouping', 'if (cluster.length < 2) continue', 'continue'],
   ]
   for (const [name, file, from, to] of mutants) {
     const target = file === 'scan' ? scanSource : groupingSource
     assert.ok(target.includes(from), `mutant "${name}" no longer matches the source (stale mutant)`)
     const mutated = target.replace(from, to)
-    assert.notDeepEqual(pairProbe(file === 'scan' ? load(mutated, groupingSource) : load(scanSource, mutated)), [], `mutant survived: ${name}`)
+    assert.notDeepEqual(file === 'scan' ? probeWith(mutated, groupingSource) : probeWith(scanSource, mutated), [], `mutant survived: ${name}`)
   }
 })
 

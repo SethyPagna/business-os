@@ -1,5 +1,7 @@
-// Owner, 16 Nov 2026 (F3 ruling "Open, tag both rows"). One rule decides "is this an unmerged twin": the same normalised
-// name AND the same real barcode (leading zeros folded). It drives (1) the Duplicate tag on each twin row, (2) the open state
+// Owner, 16 Nov 2026 (F3 ruling "Open, tag both rows"). One rule decides "is this an unmerged twin": the owner's identity rule of
+// 15 Sep 2026, the Worker's clusterRowsByBarcodeIdentity (cloudflare/scripts/test-twin-rule-parity-pure.cjs runs the Worker and this
+// side over one table): same name, unless two genuinely different REAL barcodes separate the rows; an empty, word-like, short or
+// placeholder barcode does not. It drives (1) the Duplicate tag on each twin row, (2) the open state
 // of a Products name group (twins start OPEN, variants-only groups stay folded) and (3) the scan hit (scanExactHit.test.ts).
 // Mutants edit the real source and must each turn it red. The mounted pages and the rendered tag are in
 // scannerExactHitMounted.test.ts and unmergedTwinTagLayout.test.ts.
@@ -28,7 +30,7 @@ const TWIN_B = row(2, ' glow  serum', '08851234567890') // same name once normal
 const VARIANT_A = row(3, 'Aloe Gel', '8850000000011')
 const VARIANT_B = row(4, 'Aloe Gel', '8850000000022') // same name, a different REAL barcode: a variant, not a twin
 const NO_CODE_A = row(5, 'Plain Soap', '')
-const NO_CODE_B = row(6, 'Plain Soap', '') // empty and placeholder barcodes are nobody's twin
+const NO_CODE_B = row(6, 'Plain Soap', '') // empty and placeholder barcodes never separate same-name rows: they are twins of each other
 const PLACEHOLDER_A = row(9, 'Plain Soap', '0')
 const PLACEHOLDER_B = row(10, 'Plain Soap', '0')
 const OTHER_NAME = row(7, 'Glow Serum Mini', '8851234567890') // same code, other name: a different product
@@ -50,12 +52,15 @@ function probe(api: Record<string, any>): string[] {
     assert.equal(flag(g, 3), false)
     assert.equal(flag(g, 4), false)
   })
-  check('rows without a real barcode are nobody\'s twin', () => {
+  check('empty and placeholder barcodes never separate same-name rows: the owner rule: both empty merge into one empty', () => {
     const g = group('plain soap')
-    assert.equal(flag(g, 5), false)
-    assert.equal(flag(g, 6), false)
-    assert.equal(flag(g, 9), false, 'the literal 0 is a placeholder')
-    assert.equal(flag(g, 10), false)
+    for (const id of [5, 6, 9, 10]) assert.equal(flag(g, id), true, 'row ' + id)
+  })
+  check('a real barcode and an empty or word barcode on one name are twins; two different real barcodes plus an empty one tag the empty row with the ranked winner', () => {
+    const pair = api.buildProductGroups([row(21, 'Lip Balm', '8851234567890'), row(22, 'Lip Balm', ''), row(23, 'Lip Tint', '8851234567891'), row(24, 'Lip Tint', 'NoBox188')], new Map()) as any[]
+    for (const g of pair) for (const r of g.rows) assert.equal(r.__unmergedTwin, true, r.name + ' ' + r.id)
+    const three = api.buildProductGroups([{ ...row(31, 'Mask', '8851234567890'), stock_quantity: 9 }, row(32, 'Mask', '8859999999999'), row(33, 'Mask', '')], new Map()) as any[]
+    assert.deepEqual(three[0].rows.map((r: any) => [r.id, r.__unmergedTwin]).sort(), [[31, true], [32, false], [33, true]])
   })
   check('the same code under another name is a different product, not a twin', () => {
     const g = group('glow serum mini')
@@ -71,8 +76,14 @@ function probe(api: Record<string, any>): string[] {
     assert.equal(api.startsCollapsedGroup(mixed[0]), false)
     assert.deepEqual(mixed[0].rows.map((r: any) => [r.id, r.__unmergedTwin]).sort(), [[1, true], [2, true], [8, false]])
   })
-  check('a single product never has multiple items, so it is never folded', () => {
-    assert.equal(api.startsCollapsedGroup(group('plain soap')) === true, group('plain soap').hasMultipleItems === true)
+  check('a group row or an inactive row is not a twin: the Conflicts sweep lists active, non-group products only', () => {
+    const g = api.buildProductGroups([row(41, 'Sun Gel', '8851234567890'), { ...row(42, 'Sun Gel', '8851234567890'), is_active: 0 }, { ...row(43, 'Sun Gel', ''), is_group: 1 }], new Map()) as any[]
+    assert.deepEqual(g[0].rows.map((r: any) => r.__unmergedTwin), [false, false, false])
+  })
+  check('a group of only twins starts open; a single product has one row and is never a twin', () => {
+    assert.equal(api.startsCollapsedGroup(group('plain soap')), false)
+    assert.equal(group('glow serum mini').hasMultipleItems, false)
+    assert.equal(flag(group('glow serum mini'), 7), false)
   })
   return failures
 }
@@ -82,14 +93,16 @@ const visibility = read('utils/productGroupVisibility.ts')
 const real = probe(load(source))
 assert.deepEqual(real, [], `unmutated source is red:\n${real.join('\n')}`)
 
+const CLUSTER = 'for (const cluster of clusterRowsByBarcodeIdentity(rows)) {'
 const mutants: Array<{ name: string; from: string; to: string }> = [
   { name: 'every group starts open (open-all)', from: 'return Boolean(group?.hasMultipleItems) && !groupHasUnmergedTwins(group)', to: 'return false' },
   { name: 'every group starts folded (twins hidden again)', from: 'return Boolean(group?.hasMultipleItems) && !groupHasUnmergedTwins(group)', to: 'return Boolean(group?.hasMultipleItems)' },
-  { name: 'tag on variants (twin = same name, any barcode)', from: "return `${normalizeProductGroupName(row.name)}|${identityBarcodeKey(row.barcode)}`", to: 'return normalizeProductGroupName(row.name)' },
-  { name: 'tag on placeholder barcodes (no real-barcode guard)', from: "if (!row || !isRealBarcode(row.barcode)) return ''", to: "if (!row) return ''" },
-  { name: 'leading zeros not folded', from: 'identityBarcodeKey(row.barcode)}`\n}', to: 'String(row.barcode)}`\n}' },
-  { name: 'name compared raw, not normalised', from: 'normalizeProductGroupName(row.name)}|${identityBarcodeKey(row.barcode)}`\n}', to: 'String(row.name)}|${identityBarcodeKey(row.barcode)}`\n}' },
-  { name: 'a lone row counts as its own twin', from: '(perKey.get(key) || 0) > 1', to: '(perKey.get(key) || 0) > 0' },
+  { name: 'tag on variants (twin = same name, any barcode)', from: CLUSTER, to: 'for (const cluster of [rows]) {' },
+  { name: 'the old real-barcode-only rule (an empty or word barcode is nobody\'s twin)', from: CLUSTER, to: 'for (const cluster of clusterRowsByBarcodeIdentity(rows.filter((row) => isRealBarcode(row.barcode)))) {' },
+  { name: 'leading zeros not folded (clusters by the raw barcode text)', from: CLUSTER, to: 'for (const cluster of [...Map.groupBy(rows, (row) => String(row.barcode ?? \'\')).values()]) {' },
+  { name: 'name compared raw, not normalised', from: 'const name = normalizeProductGroupName(item?.name)', to: 'const name = String(item?.name ?? \'\')' },
+  { name: 'a lone row counts as its own twin', from: 'if (cluster.length < 2) continue', to: 'if (cluster.length < 1) continue' },
+  { name: 'a group row or an inactive row counts', from: "if (!name || Number(item?.is_group || 0) || item?.is_active === 0 || item?.is_active === false) return", to: 'if (!name) return' },
 ]
 for (const mutant of mutants) {
   const inVisibility = visibility.includes(mutant.from)
@@ -106,4 +119,4 @@ assert.equal((products.match(/<UnmergedTwinTag /g) || []).length, 2, 'Products t
 assert.equal((inventory.match(/twinTag\(product\)/g) || []).length, 2, 'Inventory tags the desktop row and the phone card')
 assert.match(inventory, /product\.__unmergedTwin/, 'Inventory reads the flag ownRows set')
 
-console.log(`PASS unmerged twin rule: tag, open state and scan share one key; variants, placeholders and other names are not twins; ${mutants.length} mutants killed`)
+console.log(`PASS unmerged twin rule: tag, open state and scan share one key; variants and other names are not twins, empty and word barcodes are; ${mutants.length} mutants killed`)

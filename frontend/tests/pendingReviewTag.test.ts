@@ -56,11 +56,12 @@ function load(file: string, code = read(file), extra: (id: string) => unknown = 
   new Function('require', 'module', 'exports', transformSync(code, { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code)((id: string) => {
     if (id === 'react' || id === 'react/jsx-runtime') return require(id)
     if (id.endsWith('utils/pendingReviewTargets.ts')) return store
-    if (id.endsWith('AppContextCore.tsx')) return { useApp: () => ({ t: translate, getPermissionTier: () => 'full' }), useSync: () => ({ syncChannel: null }) }
+    if (id.endsWith('AppContextCore.tsx')) return { useApp: () => ({ t: translate, getPermissionTier: () => 'full', can: () => true }), useSync: () => ({ syncChannel: null }) }
     if (id.endsWith('icons/hourglass.js')) return { default: (props: Record<string, unknown>) => React.createElement('svg', { 'data-icon': 'hourglass', ...props }), __esModule: true }
     const injected = extra(id)
     if (injected !== undefined) return injected
-    return { default: () => null, TopPager: (props: { children?: unknown }) => props.children ?? null, __esModule: true }
+    // The Inventory rows of this fixture are same-name rows with short barcodes: twins under the owner's identity rule, so the surface asks for the tag's tooltip.
+    return { default: () => null, TopPager: (props: { children?: unknown }) => props.children ?? null, unmergedTwinHint: () => '', __esModule: true }
   }, mod, mod.exports)
   return mod.exports
 }

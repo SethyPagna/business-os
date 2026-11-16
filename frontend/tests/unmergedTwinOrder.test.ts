@@ -112,8 +112,8 @@ const mutants: Array<{ name: string; from: string; to: string }> = [
   { name: 'F5 name compared raw again', from: 'const nameDelta = normalizeProductGroupName(left?.name).localeCompare(normalizeProductGroupName(right?.name), undefined, { sensitivity: \'base\' })', to: 'const nameDelta = String(left?.name || \'\').localeCompare(String(right?.name || \'\'), undefined, { sensitivity: \'base\' })' },
   { name: 'F6 twins are not gathered', from: 'const items = gatherUnmergedTwins([...group.items].sort(', to: 'const items = (([...group.items].sort(' },
   { name: 'F6 twins gathered behind the first member, not the family child', from: 'members.find((member) => toProductId(member?.parent_id) > 0) ?? members[0]', to: 'members[0]' },
-  { name: 'F8 each row judged alone (the first-pass behaviour)', from: 'const members = twinsByKey.get(productTwinKey(row)) || [row]', to: 'const members = [row]' },
-  { name: 'F8 twins pooled by name only', from: 'const members = twinsByKey.get(productTwinKey(row)) || [row]', to: 'const members = [...twinsByKey.values()].flat()' },
+  { name: 'F8 each row judged alone (the first-pass behaviour)', from: "const members = twinsByKey.get(String(row.__twinKey || '')) || [row]", to: 'const members = [row]' },
+  { name: 'F8 twins pooled by name only', from: "const members = twinsByKey.get(String(row.__twinKey || '')) || [row]", to: 'const members = [...twinsByKey.values()].flat()' },
   { name: 'R2-2 a twin-only group is judged as two rows', from: 'if (productCount <= 1) return [group]', to: 'if (false) return [group]' },
   { name: 'F8 branches not distinguished (one branch counts as many)', from: 'const key = String(entry?.branch_id ?? entry?.branch_name ?? \'\')', to: 'const key = String(Math.random())' },
 ]

@@ -115,11 +115,14 @@ assert.deepEqual([...fixture].sort((a, b) => a.id - b.id).map((p) => p.id), [1, 
 
 const groupingSource = read('utils/productGrouping.ts')
 const surfaceSource = read('components/inventory/InventoryProductsSurface.tsx')
-const mutants: Array<{ name: string; file: 'grouping' | 'surface'; from: string; to: string }> = [
+// `also` is a second edit to the same source: since the gather pass (gatherUnmergedTwins) now puts every twin cluster side by side whatever the sort did,
+// a broken comparator is only visible with the gather pass off as well, so those mutants switch both.
+const GATHER_OFF: [string, string] = ['  if (!keys.some(Boolean)) return sorted', '  return sorted']
+const mutants: Array<{ name: string; file: 'grouping' | 'surface'; from: string; to: string; also?: [string, string] }> = [
   { name: 'folds the duplicates into one row again', file: 'grouping', from: 'rows: ownRows(items),', to: 'rows: mergeSameDetailRows(items),' },
-  { name: 'drops the barcode tie-break (name, then id)', file: 'grouping', from: 'if (leftKey !== rightKey) {', to: 'if (false) {' },
-  { name: 'parentless same-name rows ordered by root id alone', file: 'grouping', from: 'return compareProductsByNameBarcodeId(resolveRootProduct(left, productsById), resolveRootProduct(right, productsById)) || leftRootId - rightRootId', to: 'return leftRootId - rightRootId' },
-  { name: 'barcode compared by id, not identity key', file: 'grouping', from: 'const leftKey = identityBarcodeKey(left?.barcode)', to: 'const leftKey = String(left?.id)' },
+  { name: 'drops the barcode tie-break (name, then id)', file: 'grouping', from: 'if (leftKey !== rightKey) {', to: 'if (false) {', also: GATHER_OFF },
+  { name: 'parentless same-name rows ordered by root id alone', file: 'grouping', from: 'return compareProductsByNameBarcodeId(resolveRootProduct(left, productsById), resolveRootProduct(right, productsById)) || leftRootId - rightRootId', to: 'return leftRootId - rightRootId', also: GATHER_OFF },
+  { name: 'barcode compared by id, not identity key', file: 'grouping', from: 'const leftKey = identityBarcodeKey(left?.barcode)', to: 'const leftKey = String(left?.id)', also: GATHER_OFF },
   { name: 'row coloured by a summed figure of its barcode siblings', file: 'surface', from: 'const stockQty = (product: InventoryProductRow) => <StockQty qty={quantity(product)} product={product} />',
     to: 'const stockQty = (product: InventoryProductRow) => <StockQty qty={items.filter((r) => r.barcode === product.barcode).reduce((s, r) => s + Number(r.display_quantity || 0), 0)} product={product} />' },
 ]
@@ -127,7 +130,9 @@ const results: string[] = []
 for (const mutant of mutants) {
   const source = mutant.file === 'grouping' ? groupingSource : surfaceSource
   assert.ok(source.includes(mutant.from), `mutant "${mutant.name}" no longer matches the source (stale mutant)`)
-  const mutated = mutant.file === 'grouping' ? load(groupingSource.replace(mutant.from, mutant.to)) : load(groupingSource, surfaceSource.replace(mutant.from, mutant.to))
+  if (mutant.also) assert.ok(source.includes(mutant.also[0]), `mutant "${mutant.name}": its second edit no longer matches the source (stale mutant)`)
+  const edited = mutant.file === 'grouping' ? source.replace(mutant.from, mutant.to) : ''
+  const mutated = mutant.file === 'grouping' ? load(mutant.also ? edited.replace(mutant.also[0], mutant.also[1]) : edited) : load(groupingSource, surfaceSource.replace(mutant.from, mutant.to))
   const failed = probe(mutated)
   assert.ok(failed.length > 0, `mutant survived: ${mutant.name}`)
   results.push(mutant.name)

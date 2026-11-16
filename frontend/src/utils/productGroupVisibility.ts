@@ -1,4 +1,4 @@
-import { normalizeText, productTwinKey, toProductId, type ProductGroup, type ProductGroupRow, type ProductGroupSection } from './productGrouping.ts'
+import { normalizeText, toProductId, type ProductGroup, type ProductGroupRow, type ProductGroupSection } from './productGrouping.ts'
 
 // What Products does with a name group that holds unmerged twins, kept out of productGrouping.ts on purpose: that module rides in the
 // storefront's catalog-products closure (performanceBudgets), and these are staff-only rules (the Products page's open state and its opt-in
@@ -17,7 +17,7 @@ export function groupHasUnmergedTwins(group: { rows?: ReadonlyArray<Record<strin
 // The branch balances a row stands for: its own, plus those of its unmerged twins. Twins used to be folded into one row spanning their
 // branches, and "hide out-of-stock rows" judged that one row; judging the cluster keeps the same answer now that each record is its own row.
 function branchBalancesOf(row: ProductGroupRow, twinsByKey: Map<string, ProductGroupRow[]>): Array<Record<string, unknown>> {
-  const members = twinsByKey.get(productTwinKey(row)) || [row]
+  const members = twinsByKey.get(String(row.__twinKey || '')) || [row]
   const byBranch = new Map<string, Record<string, unknown>>()
   for (const member of members) {
     const branchStock = Array.isArray(member?.branch_stock) ? member.branch_stock as Array<Record<string, unknown>> : []
@@ -53,12 +53,12 @@ export function hideZeroStockGroupedChildRows(sections: ProductGroupSection[] = 
       if (group.rows.length <= 1) return [group]
       const twinsByKey = new Map<string, ProductGroupRow[]>()
       for (const row of group.rows) {
-        const key = productTwinKey(row)
+        const key = String(row.__twinKey || '')
         if (key) twinsByKey.set(key, [...(twinsByKey.get(key) || []), row])
       }
       // A group whose rows are all one twin cluster WAS one folded row, and a lone row is always kept (above). Count
       // products the way the fold did -- a twin cluster is one -- so a zero twin pair shows exactly as one zero record would.
-      const productCount = group.rows.reduce((count, row) => count + (productTwinKey(row) && twinsByKey.get(productTwinKey(row))![0] !== row ? 0 : 1), 0)
+      const productCount = group.rows.reduce((count, row) => count + (row.__twinKey && twinsByKey.get(String(row.__twinKey))![0] !== row ? 0 : 1), 0)
       if (productCount <= 1) return [group]
       const rows = group.rows.filter((row) => !isAllBranchZeroRow(row, twinsByKey))
       if (!rows.length) return []

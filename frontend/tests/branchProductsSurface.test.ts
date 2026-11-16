@@ -106,9 +106,10 @@ const compiled = transformSync(surface, { loader: 'tsx', format: 'cjs', jsx: 'au
 new Function('require', 'module', 'exports', compiled)((id: string) => {
   if (id === 'react' || id === 'react/jsx-runtime') return require(id)
   if (id.includes('productGrouping')) return require('../src/utils/productGrouping.ts')
+  if (id.includes('unmergedTwinHint')) return { unmergedTwinHint: () => '' }
   if (id.includes('costDisplay')) return require('../src/utils/costDisplay.ts')
   if (id.includes('acquisitionCostAccess')) return require('../src/utils/acquisitionCostAccess.ts')
-  if (id.includes('AppContext')) return { useApp: () => ({ user: { role_code: 'admin', role_permissions: { all: true } } }) }
+  if (id.includes('AppContext')) return { useApp: () => ({ user: { role_code: 'admin', role_permissions: { all: true } }, can: () => true }) }
   return { default: () => null, TopPager: (props: { children?: unknown }) => props.children ?? null, __esModule: true }
 }, module, module.exports)
 const api = module.exports

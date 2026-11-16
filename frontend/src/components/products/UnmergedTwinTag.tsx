@@ -1,7 +1,7 @@
 import Copy from 'lucide-react/dist/esm/icons/copy.js'
 
 // The small "Duplicate" tag on a row whose product record has an unmerged twin: another record with the
-// same name and the same real barcode in the same list (productTwinKey in utils/productGrouping.ts decides,
+// same name in the same list that the owner's identity rule counts as one product (unmergedTwinKeys in utils/productGrouping.ts decides,
 // from rows already loaded -- no read). One shared chip so Products and Inventory, desktop and phone,
 // say it the same way. It sits in a line the row already has, so it adds no row height; leading-relaxed
 // keeps the Khmer glyphs' room. The tooltip says what to do about it.
