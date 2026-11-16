@@ -73,6 +73,13 @@ const EXCLUDED = {
   product_cost_mirror_0269: '0269 purchase_price twin backfill ledger (before/after per product); reversal aid, not business data',
 }
 
+// Decided now for a table a HELD migration will create (ops/scripts/migration/held): the decision is recorded before the table can reach a deploy. Valid while
+// the table is absent from cloudflare/migrations; the moment the migration moves in, the table must be in the schema and the decision applies.
+const HELD_EXCLUDED = {
+  cost_4dp_repair_0313: '0313 cost rounding ledger (before/after per cost column written); reversal aid, not business data; a restore replaces the rows it describes with its own copy',
+}
+for (const [table, reason] of Object.entries(HELD_EXCLUDED)) EXCLUDED[table] = reason
+
 // NOT backed up at c5b28762 and no recorded decision either way. Listed so
 // this test is green for the one table this change decides about
 // (stock_mutation_receipts) while every one of these stays visible. Each
@@ -130,7 +137,7 @@ check('every migrated table is backed up or explicitly excluded with a reason', 
 
 check('every exclusion names a real table and carries a reason; none is also backed up', () => {
   for (const [table, reason] of Object.entries({ ...EXCLUDED, ...UNRULED })) {
-    assert.ok(names.has(table), `stale exclusion: ${table} is not created by any migration`)
+    assert.ok(names.has(table) || table in HELD_EXCLUDED, `stale exclusion: ${table} is not created by any migration`)
     assert.ok(String(reason).trim().length > 5, `${table} needs a reason`)
     assert.ok(!BACKUP_TABLES.includes(table), `${table} is both backed up and excluded`)
   }

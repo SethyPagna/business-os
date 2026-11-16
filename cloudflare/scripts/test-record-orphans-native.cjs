@@ -98,6 +98,10 @@ const NOT_A_REFERENCE = new Set([
  * it dangle -- and each is pinned by a step below that performs exactly that
  * write, so the exemption cannot quietly become a cover for a real orphan.
  */
+// Classified now for a column a HELD migration will create (ops/scripts/migration/held); it takes effect, and is asserted, once the table is in the schema.
+const HELD_HISTORICAL_REFERENCE = {
+  'cost_4dp_repair_0313.row_id': '0313 rounding ledger: row_id names a product, lot or cost entry by the table in its entity column; a ledger entry outlives its row and is read only by hand',
+}
 const HISTORICAL_REFERENCE = {
   'inventory_check_sessions.branch_id': '0259 freezes the session branch identity; branch retirement cannot reparent the baseline',
   'inventory_check_items.branch_id': '0259 freezes the branch counted at session admission, independent of the live branch row',
@@ -210,7 +214,7 @@ function deriveSchema() {
       if (!match || declaredColumns.has(column.name) || !/INT/i.test(column.type || '')) continue
       const base = match[1]
       if (NOT_A_REFERENCE.has(base)) continue
-      if (HISTORICAL_REFERENCE[`${table}.${column.name}`]) { historical.push(`${table}.${column.name}`); continue }
+      if (HISTORICAL_REFERENCE[`${table}.${column.name}`] || HELD_HISTORICAL_REFERENCE[`${table}.${column.name}`]) { historical.push(`${table}.${column.name}`); continue }
       const parent = CHILD_SCOPED[`${table}.${column.name}`] || resolveOwner(base, known)
       if (!parent || !hasId.has(parent)) { unresolved.push(`${table}.${column.name}`); continue }
       relations.push({ child: table, column: column.name, parent, parentKey: 'id', source: 'convention' })
@@ -226,7 +230,7 @@ const orphanSql = (relation) =>
   + ` FROM ${relation.child} c LEFT JOIN ${relation.parent} p ON p.${relation.parentKey} = c.${relation.column}`
   + ` WHERE c.${relation.column} IS NOT NULL AND p.${relation.parentKey} IS NULL`
 
-function auditFileText(relations) {
+function auditFileText(relations, historicalPresent = []) {
   return [
     '-- Orphan audit -- READ ONLY. One SELECT per parent/child relation in the',
     '-- Business OS schema, each returning (relation, orphan_count).',
@@ -243,7 +247,7 @@ function auditFileText(relations) {
     '--',
     '-- Deliberately NOT audited, because the id is provenance and the row it',
     '-- named is meant to be gone:',
-    ...Object.entries(HISTORICAL_REFERENCE).map(([column, reason]) => `--   ${column} -- ${reason}`),
+    ...Object.entries({ ...HISTORICAL_REFERENCE, ...HELD_HISTORICAL_REFERENCE }).filter(([column]) => column in HISTORICAL_REFERENCE || historicalPresent.includes(column)).map(([column, reason]) => `--   ${column} -- ${reason}`),
     '--',
     '-- Every statement is a SELECT. There are no writes and no PRAGMA here.',
     '-- A healthy database answers 0 for every relation. A nonzero count on a',
@@ -450,7 +454,7 @@ async function main() {
   const started = Date.now()
   const schema = deriveSchema()
   if (process.argv.includes('--generate')) {
-    fs.writeFileSync(auditSqlPath, auditFileText(schema.relations))
+    fs.writeFileSync(auditSqlPath, auditFileText(schema.relations, schema.historical))
     console.log('Generated ops/scripts/audit/orphan-audit.sql; review and commit it before the read-only test')
     return
   }
@@ -470,7 +474,7 @@ async function main() {
       assert.ok(schema.relations.some(relation => `${relation.child}.${relation.column}->${relation.parent}` === required),
         `the audit lost a core relation: ${required}`)
     }
-    assert.deepEqual(schema.historical.slice().sort(), Object.keys(HISTORICAL_REFERENCE).slice().sort(),
+    assert.deepEqual(schema.historical.slice().sort(), [...Object.keys(HISTORICAL_REFERENCE), ...Object.keys(HELD_HISTORICAL_REFERENCE).filter(column => schema.historical.includes(column))].sort(),
       'a HISTORICAL_REFERENCE entry names a column the schema no longer has, or one stopped matching')
     report('every *_id column in the schema is audited or explicitly classified')
   } catch (error) { report('every *_id column in the schema is audited or explicitly classified', error) }
@@ -484,7 +488,7 @@ async function main() {
   catch (error) { report('Inventory snapshot identities are historical and declared session FKs remain audited', error) }
 
   try {
-    const expected = auditFileText(schema.relations)
+    const expected = auditFileText(schema.relations, schema.historical)
     assertStaleArtifactRefusal(expected)
     assertAuditFile(auditSqlPath, expected)
     // Check the STATEMENTS, not the header comment -- the comment names the very

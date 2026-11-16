@@ -18,6 +18,15 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const { openDb } = require('./harness/d1compat.cjs')
+const ts = require('typescript')
+function compile(file, dependencies = {}) {
+  const module = { exports: {} }
+  const js = ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/lib', file + '.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText
+  new Function('exports', 'require', 'module', js)(module.exports, (name) => dependencies[name], module)
+  return module.exports
+}
+const money = compile('moneyPrecision')
+const catalog = compile('catalogCostRecompute', { './moneyPrecision': money })
 
 const root = path.resolve(__dirname, '..')
 const migrationsDir = path.join(root, 'migrations')
@@ -50,24 +59,27 @@ function fixture({ extraProducts = 0 } = {}) {
     [5, 1, 3.5, 4100, 3.50005, 4100, 0],                                          // long purchase mirror only (tie 3.50005)
     [6, 1, 1.00015, 4100, 1.00015, 4100, 0],                                      // active with a review key and a recorded sold-out lot
     [7, 1, 9.123456789, 4100, 9.123456789, 4100, 0],                              // long cost, no lots at all
-    [8, 1, 1.00105, 4100, 1.00105, 4100, 0],                                      // a tie that SQLite ROUND(x, 4) rounds DOWN (1.001)
+    [8, 1, 1.00105, 4100, 1.00105, 4100, 0],
+    // 9 is not listed here: three lots on hand (below) make the lot triggers derive its catalog cost, the state the re-derive must keep consistent                                      // a tie that SQLite ROUND(x, 4) rounds DOWN (1.001)
   ]
   for (const p of P) {
     db.prepare(`INSERT INTO products(id, name, is_active, cost_price_usd, cost_price_khr, purchase_price_usd, purchase_price_khr, stock_quantity,
       selling_price_usd, wholesale_price_usd, name_key, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 12.345678, 11.5, ?, '2026-11-01T01:02:03Z')`)
       .run(p[0], `P${p[0]}`, p[1], p[2], p[3], p[4], p[5], p[6], `k${p[0]}`)
   }
+  db.prepare("INSERT INTO products(id, name, is_active, stock_quantity, selling_price_usd, wholesale_price_usd, name_key, updated_at) VALUES (9, 'P9', 1, 3, 12.345678, 11.5, 'k9', '2026-11-01T01:02:03Z')").run()
   // lot id, product, active, unit cost, received cost, received at
   const B = [
     [1, 1, 1, 1.2333333333333334, 149.573577, '2026-10-01'], [2, 1, 1, 2, 10, '2026-10-02'],
     [3, 3, 1, 1.00015, 1.00015, '2026-10-01'], [4, 4, 1, 2.0001, 6.0003, '2026-10-01'],
     [5, 6, 1, 1.00015, 2.00005, '2026-10-01'], [6, 2, 0, 4.166667, 4.166667, '2026-09-01'],
+    [7, 9, 1, 1.00004, null, '2026-10-01'], [8, 9, 1, 1.00004, null, '2026-10-02'], [9, 9, 1, 1.00014, null, '2026-10-03'],
   ]
   for (const b of B) {
     db.prepare("INSERT INTO product_batches(id, variant_product_id, batch_key, is_active, unit_cost_usd, received_cost_usd, received_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
       .run(b[0], b[1], `bk${b[0]}`, b[2], b[3], b[4], b[5])
   }
-  db.exec('INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) VALUES (1, 1, 3), (2, 1, 2), (4, 1, 3)')
+  db.exec('INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) VALUES (1, 1, 3), (2, 1, 2), (4, 1, 3), (7, 1, 1), (8, 1, 1), (9, 1, 1)')
   // The lot inserts fired the catalog-cost triggers: put the fixture's long product costs back (the state the repair meets in production).
   for (const p of P) {
     db.prepare('UPDATE products SET cost_price_usd = ?, cost_price_khr = ?, purchase_price_usd = ?, purchase_price_khr = ? WHERE id = ?').run(p[2], p[3], p[4], p[5], p[0])
@@ -148,13 +160,13 @@ function main() {
   const db = fixture()
   const before = costs(db)
   const beforeUntouched = untouched(db)
-  assert.deepEqual(over4(db), { products: 7, lots: 4, entries: 2 }, 'the fixture holds long values in every column of the scope')
+  assert.deepEqual(over4(db), { products: 7, lots: 7, entries: 2 }, 'the fixture holds long values in every column of the scope')
   db.exec(text)
   const after = costs(db)
   assert.deepEqual(over4(db), { products: 0, lots: 0, entries: 0 })
   assert.deepEqual(untouched(db), beforeUntouched, 'sale_items, return_items, movements, review keys, prices, stock, updated_at and flags are byte-identical')
   assert.deepEqual(after.products, [
-    { id: 1, cost_price_usd: 1.2333, cost_price_khr: 4100.1235, purchase_price_usd: 1.2333, purchase_price_khr: 4100.1235 },  // 1.2333333.. down; 4100.12345 is a tie -> up
+    { id: 1, cost_price_usd: 1.54, cost_price_khr: 4100.1235, purchase_price_usd: 1.54, purchase_price_khr: 4100.1235 },  // re-derived from its rounded lots, (3 x 1.2333 + 2 x 2) / 5; 4100.12345 is a tie, up
     { id: 2, cost_price_usd: 4.1667, cost_price_khr: 4100, purchase_price_usd: 4.1667, purchase_price_khr: 4100 },
     { id: 3, cost_price_usd: 1.0002, cost_price_khr: null, purchase_price_usd: 1.0002, purchase_price_khr: 0 },                 // tie 1.00015 -> 1.0002; null and 0 stay
     { id: 4, cost_price_usd: 2.0001, cost_price_khr: 6000, purchase_price_usd: 2.0001, purchase_price_khr: 6000 },              // clean row untouched
@@ -162,6 +174,7 @@ function main() {
     { id: 6, cost_price_usd: 1.0002, cost_price_khr: 4100, purchase_price_usd: 1.0002, purchase_price_khr: 4100 },
     { id: 7, cost_price_usd: 9.1235, cost_price_khr: 4100, purchase_price_usd: 9.1235, purchase_price_khr: 4100 },
     { id: 8, cost_price_usd: 1.0011, cost_price_khr: 4100, purchase_price_usd: 1.0011, purchase_price_khr: 4100 },
+    { id: 9, cost_price_usd: 1, cost_price_khr: 0, purchase_price_usd: 1, purchase_price_khr: 0 },                              // re-derived from three rounded lots (1.00004, 1.00004, 1.00014)
   ])
   assert.deepEqual(after.lots, [
     { id: 1, unit_cost_usd: 1.2333, received_cost_usd: 149.5736 },   // 149.573577 -> 149.5736
@@ -170,6 +183,7 @@ function main() {
     { id: 4, unit_cost_usd: 2.0001, received_cost_usd: 6.0003 },
     { id: 5, unit_cost_usd: 1.0002, received_cost_usd: 2.0001 },     // 2.00005 tie -> 2.0001
     { id: 6, unit_cost_usd: 4.1667, received_cost_usd: 4.1667 },
+    { id: 7, unit_cost_usd: 1, received_cost_usd: null }, { id: 8, unit_cost_usd: 1, received_cost_usd: null }, { id: 9, unit_cost_usd: 1.0001, received_cost_usd: null },
   ])
   assert.deepEqual(after.entries, [
     { id: 1, cost_usd: 1.0002, cost_khr: 5000.5556, previous_cost_usd: 1.1111 },
@@ -182,7 +196,7 @@ function main() {
   const key = (r) => `${r.entity}:${r.row_id}:${r.col}`
   const byKey = Object.fromEntries(ledger.map((r) => [key(r), r]))
   const expectLedger = {
-    'products:1:cost_price_usd': [1.2333333333333334, 1.2333], 'products:1:cost_price_khr': [4100.12345, 4100.1235], 'products:1:purchase_price_usd': [1.2333333333333334, 1.2333],
+    'products:1:cost_price_usd': [1.2333333333333334, 1.54], 'products:1:cost_price_khr': [4100.12345, 4100.1235], 'products:1:purchase_price_usd': [1.2333333333333334, 1.54],
     'products:1:purchase_price_khr': [4100.12345, 4100.1235], 'products:2:cost_price_usd': [4.166667, 4.1667], 'products:2:purchase_price_usd': [4.166667, 4.1667],
     'products:3:cost_price_usd': [1.00015, 1.0002], 'products:3:purchase_price_usd': [1.00015, 1.0002], 'products:5:purchase_price_usd': [3.50005, 3.5001],
     'products:6:cost_price_usd': [1.00015, 1.0002], 'products:6:purchase_price_usd': [1.00015, 1.0002], 'products:7:cost_price_usd': [9.123456789, 9.1235], 'products:7:purchase_price_usd': [9.123456789, 9.1235],
@@ -190,11 +204,13 @@ function main() {
     'product_batches:1:unit_cost_usd': [1.2333333333333334, 1.2333], 'product_batches:1:received_cost_usd': [149.573577, 149.5736], 'product_batches:3:unit_cost_usd': [1.00015, 1.0002],
     'product_batches:3:received_cost_usd': [1.00015, 1.0002], 'product_batches:5:unit_cost_usd': [1.00015, 1.0002], 'product_batches:5:received_cost_usd': [2.00005, 2.0001],
     'product_batches:6:unit_cost_usd': [4.166667, 4.1667], 'product_batches:6:received_cost_usd': [4.166667, 4.1667],
+    'product_batches:7:unit_cost_usd': [1.00004, 1], 'product_batches:8:unit_cost_usd': [1.00004, 1], 'product_batches:9:unit_cost_usd': [1.00014, 1.0001],
+    'products:9:cost_price_usd': [1.0001, 1], 'products:9:purchase_price_usd': [1.0001, 1],
     'product_cost_entries:1:cost_usd': [1.00015, 1.0002], 'product_cost_entries:1:cost_khr': [5000.55555, 5000.5556], 'product_cost_entries:1:previous_cost_usd': [1.1111111, 1.1111],
     'product_cost_entries:2:previous_cost_usd': [1.00015, 1.0002],
   }
   assert.deepEqual(Object.keys(byKey).sort(), Object.keys(expectLedger).sort(), 'the ledger holds exactly the columns that were over 4 places')
-  assert.equal(ledger.length, 27)
+  assert.equal(ledger.length, 32)
   for (const [k, [b, a]] of Object.entries(expectLedger)) {
     assert.equal(byKey[k].before_value, b, `${k} before`)
     assert.equal(byKey[k].after_value, a, `${k} after`)
@@ -277,13 +293,67 @@ function main() {
     .replace("DELETE FROM system_flags WHERE key = 'maintenance' AND value = '{\"mode\":\"restore\"}';\n", ''), /malformed JSON|JSON path/i)
   // A smaller scope leaves long values behind.
   mutant('lots left out of the scope', (s) => s.replace(/INSERT INTO cost_4dp_repair_0313 \(entity, row_id, col, before_value, after_value\)\nSELECT 'product_batches', id, 'received_cost_usd'[^;]*;\n/, ''), /malformed JSON|JSON path/i)
-  // ROUND(x, 4) rounds the binary double: 1.00015 stores as 1.000149999999999961 and goes DOWN. The nudge form is what makes the tie exact.
-  const naive = mutant('ROUND(x, 4)', (s) => s.replace(/\(\(CASE WHEN (\w+) < 0 THEN -CAST\(-\1 \* 10000\.0 \+ 0\.5 \+ 1e-8 AS INTEGER\) ELSE CAST\(\1 \* 10000\.0 \+ 0\.5 \+ 1e-8 AS INTEGER\) END\) \/ 10000\.0\)/g, 'ROUND($1, 4)'))
-  assert.notDeepEqual(costs(naive), after, 'ROUND(x, 4) gives a different answer on the fixture (the tie cases)')
-  assert.equal(one(naive, 'SELECT cost_price_usd c FROM products WHERE id = 8').c, 1.001, 'ROUND(1.00105, 4) lands on 1.001, the wrong side of the tie')
-  // Unsigned truncation without the sign branch would mis-round negatives: the sign-aware form is symmetric.
+  // The rounding is checked against roundMoney4, never against an engine's ROUND(x, 4) (which differs between SQLite versions): every ledger row of a
+  // lot, an entry or a product's own cost column that the re-derive did not move holds exactly the 4-place figure roundMoney4 gives.
+  const rederived = new Set(rows(db, "SELECT row_id FROM cost_4dp_repair_0313 WHERE entity = 'products' AND after_value IS NOT before_value").map((r) => r.row_id))
+  for (const r of ledger) {
+    if (r.entity === 'products' && rederived.has(r.row_id) && money.roundMoney4(r.before_value) !== r.after_value) continue
+    assert.equal(r.after_value, money.roundMoney4(r.before_value), `${key(r)}: the repair equals roundMoney4`)
+  }
+  assert.ok(text.includes(catalog.catalogCostFormulaSql('validated').derive), 'the re-derive is the formula the triggers use (catalogCostFormulaSql)')
+  assert.ok(text.includes(catalog.HALF_UP_4DP('cost_price_usd')), 'the rounding is HALF_UP_4DP')
+  // The statements: no comment-only statement, at most 5 terms in any compound SELECT (D1), LF only.
+  const { unstable_splitSqlQuery: splitSql } = require('wrangler')
+  const statements = splitSql(text)
+  assert.ok(statements.length > 40)
+  for (const s of statements) {
+    assert.ok(s.replace(/--[^\n]*/g, '').trim().length > 0, 'a statement that is only a comment: ' + s.slice(0, 60))
+    assert.ok(((s.match(/\bUNION(?:\s+ALL)?\b/gi) || []).length + 1) <= 5 * Math.max(1, (s.match(/\bSELECT\b/gi) || []).length), 'too many compound terms: ' + s.slice(0, 60))
+  }
+
+  // History fingerprint: rounding history to 4 decimals changes nothing a sum of ROUND(x * 10000) can see; the exact fingerprint sees it and the POST aborts.
+  for (const [label, table, sql] of [['sale_items', 'sale_items', 'UPDATE sale_items SET cost_price_usd = ROUND(cost_price_usd, 4)'],
+    ['return_items', 'return_items', 'UPDATE return_items SET cost_price_usd = ROUND(cost_price_usd, 4)'],
+    ['inventory_movements', 'inventory_movements', 'UPDATE inventory_movements SET unit_cost_usd = ROUND(unit_cost_usd, 4), total_cost_usd = ROUND(total_cost_usd, 4)']]) {
+    const d = fixture()
+    assert.notEqual(one(d, `SELECT COUNT(*) n FROM ${table} WHERE cost_price_usd IS NOT ROUND(cost_price_usd, 4)`.replace(/cost_price_usd/g, table === 'inventory_movements' ? 'unit_cost_usd' : 'cost_price_usd')).n, 0, `${label}: the fixture holds a long snapshot to round`)
+    const sqlText = text.replace("DELETE FROM system_flags WHERE key = 'stock_transaction_permit' AND value = 'legacy-separate-pool-v1';", `${sql};\nDELETE FROM system_flags WHERE key = 'stock_transaction_permit' AND value = 'legacy-separate-pool-v1';`)
+    assert.notEqual(sqlText, text)
+    assert.throws(() => d.exec(sqlText), /malformed JSON|JSON path/i, `${label} rounded to 4 decimals is caught by the exact fingerprint`)
+  }
+
+  // Drift: three lots on hand at 1.00004, 1.00004 and 1.00014 (product 9). The lot triggers stand down under the maintenance flag, so rounding the lots
+  // alone leaves the catalog cost at the mean of the long lots; the file re-derives it, and the health query's active_cost_drift reads 0.
+  const driftSql = fs.readFileSync(path.join(root, '..', 'ops', 'queries', 'health-catalog-cost.sql'), 'utf8')
+  const noRederive = (s) => s.replace(/WITH d AS MATERIALIZED \([\s\S]*?\)\nINSERT INTO cost_4dp_repair_0313[\s\S]*?DO UPDATE SET after_value = excluded\.after_value;\n/g, '')
+    .replace(/UPDATE products SET\n  cost_price_usd = COALESCE\(\(SELECT after_value FROM cost_4dp_repair_0313 WHERE entity = 'products' AND row_id = products\.id AND col = 'cost_price_usd'\), cost_price_usd\),\n  purchase_price_usd[\s\S]*?;\n/, '')
+  const driftBefore = fixture()
+  assert.equal(one(driftBefore, 'SELECT cost_price_usd c FROM products WHERE id = 9').c, 1.0001, 'the fixture product 9 holds the mean of its long lots')
+  assert.notEqual(noRederive(text), text, 'the no-re-derive mutation applied')
+  assert.throws(() => fixture().exec(noRederive(text)), /post_active_cost_drift/, 'without the re-derive, POST aborts on active_cost_drift')
+  const driftDb = fixture()
+  driftDb.exec(text)
+  assert.equal(one(driftDb, 'SELECT cost_price_usd c FROM products WHERE id = 9').c, 1, 'product 9 is re-derived from its rounded lots: (1 + 1 + 1.0001) / 3 = 1.0000333 -> 1')
+  const health = driftDb.prepare(driftSql.replace(/--[^\n]*/g, '')).get()
+  assert.equal(health.active_cost_drift, 0, 'the health query agrees: no active cost drift after the repair')
+
+  // PRE for trigger 0154: an INACTIVE lot that still holds branch stock cannot be updated, so the file stops first, with a name, before any write.
+  const guarded = fixture()
+  const lotTriggers = rows(guarded, "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'positive_lot_%0154'")
+  for (const t of lotTriggers) guarded.exec(`DROP TRIGGER ${t.name}`)
+  guarded.exec(PERMIT)
+  guarded.exec("INSERT INTO product_batches(id, variant_product_id, batch_key, is_active, unit_cost_usd, received_cost_usd, received_at) VALUES (90, 3, 'inactive-with-stock', 0, 1.00015, 1.00015, '2026-09-01')")
+  guarded.exec('INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) VALUES (90, 1, 2)')
+  guarded.exec(NO_PERMIT)
+  for (const t of lotTriggers) guarded.exec(t.sql + ';')
+  const guardedBefore = JSON.stringify(costs(guarded))
+  assert.throws(() => guarded.exec(text), /cost_4dp_0313_pre_inactive_lot_holds_stock/, 'PRE names the lot problem')
+  assert.equal(JSON.stringify(costs(guarded)), guardedBefore, 'nothing was written')
+  assert.equal(one(guarded, "SELECT COUNT(*) n FROM sqlite_master WHERE name = 'cost_4dp_repair_0313'").n, 0, 'no ledger created')
+  assert.throws(() => guarded.exec("UPDATE product_batches SET unit_cost_usd = 1.0002 WHERE id = 90"), /Cannot deactivate a received lot/, 'control: without the PRE the 0154 trigger aborts the lot update')
+  // Sign symmetry of the rounding the file uses is in test-half-up-4dp-property-pure.cjs; here the SQL text for a negative value is the same expression.
   const sym = openDb(chain((f) => f < MIGRATION)).db
-  assert.equal(one(sym, 'SELECT ((CASE WHEN -1.00015 < 0 THEN -CAST(-(-1.00015) * 10000.0 + 0.5 + 1e-8 AS INTEGER) ELSE CAST(-1.00015 * 10000.0 + 0.5 + 1e-8 AS INTEGER) END) / 10000.0) AS v').v, -1.0002, 'ties go away from zero for a negative value too')
+  assert.equal(one(sym, `SELECT ${catalog.HALF_UP_4DP('-1.00015')} AS v`).v, -1.0002, 'ties go away from zero for a negative value too')
 
   console.log('test-migration-0313-cost-4dp-repair-pure: ok')
 }
