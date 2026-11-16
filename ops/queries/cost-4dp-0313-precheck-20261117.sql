@@ -21,13 +21,18 @@
 --                                                        otherwise a tiny cost becomes unknown/$0: an owner decision
 --   pre_holds                                            1 only when every PRE check above passes (including cutover and positive-to-zero)
 --   apply_holds                                          1 only when 0313 would apply: pre_holds and its POST checks (drift outside the re-derive set, change cap) would pass
--- One pass over products, product_batches and product_cost_entries, a lookup of branch_batch_stock for each in-scope inactive lot, and system_flags.
+-- One pass over products, product_batches and product_cost_entries (positive_cost_rounds_to_zero is folded into that pass), a lookup of branch_batch_stock for each in-scope inactive lot, and system_flags.
 -- No id, name, phone or customer column; every figure is a count or a maximum. No helper table of an applied migration. Never ANALYZE, never a write.
 -- ops:min-rows 1
 -- ops:max-rows 1
--- ops:max-rows-read 130000
+-- ops:max-rows-read 236723
 WITH ps AS MATERIALIZED (
   SELECT id,
+CASE WHEN (typeof(cost_price_usd) IN ('integer', 'real') AND cost_price_usd > 0 AND (CAST(ROUND((cost_price_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0)
+        OR (typeof(cost_price_khr) IN ('integer', 'real') AND cost_price_khr > 0 AND (CAST(ROUND((cost_price_khr) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0)
+        OR (typeof(purchase_price_usd) IN ('integer', 'real') AND purchase_price_usd > 0 AND (CAST(ROUND((purchase_price_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0)
+        OR (typeof(purchase_price_khr) IN ('integer', 'real') AND purchase_price_khr > 0 AND (CAST(ROUND((purchase_price_khr) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0)
+      THEN 1 ELSE 0 END AS rounds_to_zero,
     CASE WHEN (typeof(cost_price_usd) IN ('integer', 'real') AND cost_price_usd IS NOT (CAST(ROUND((cost_price_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) AND ABS(cost_price_usd) >= 1000000000)
         OR (typeof(cost_price_khr) IN ('integer', 'real') AND cost_price_khr IS NOT (CAST(ROUND((cost_price_khr) * 10000.0000000000036) AS INTEGER) / 10000.0) AND ABS(cost_price_khr) >= 1000000000)
         OR (typeof(purchase_price_usd) IN ('integer', 'real') AND purchase_price_usd IS NOT (CAST(ROUND((purchase_price_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) AND ABS(purchase_price_usd) >= 1000000000)
@@ -42,6 +47,9 @@ WITH ps AS MATERIALIZED (
 ls AS MATERIALIZED (
   SELECT pb.variant_product_id AS pid,
     CASE WHEN pb.is_active IS NOT 1 AND EXISTS (SELECT 1 FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0) THEN 1 ELSE 0 END AS inactive_holds_stock,
+CASE WHEN (typeof(pb.unit_cost_usd) IN ('integer', 'real') AND pb.unit_cost_usd > 0 AND (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0)
+        OR (typeof(pb.received_cost_usd) IN ('integer', 'real') AND pb.received_cost_usd > 0 AND (CAST(ROUND((pb.received_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0)
+      THEN 1 ELSE 0 END AS rounds_to_zero,
     CASE WHEN (typeof(pb.unit_cost_usd) IN ('integer', 'real') AND pb.unit_cost_usd IS NOT (CAST(ROUND((pb.unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) AND ABS(pb.unit_cost_usd) >= 1000000000)
         OR (typeof(pb.received_cost_usd) IN ('integer', 'real') AND pb.received_cost_usd IS NOT (CAST(ROUND((pb.received_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) AND ABS(pb.received_cost_usd) >= 1000000000)
       THEN 1 ELSE 0 END AS out_of_range,
@@ -56,6 +64,10 @@ ls AS MATERIALIZED (
 ),
 es AS MATERIALIZED (
   SELECT e.product_id AS pid,
+CASE WHEN (typeof(e.cost_usd) IN ('integer', 'real') AND e.cost_usd > 0 AND (CAST(ROUND((e.cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0)
+        OR (typeof(e.cost_khr) IN ('integer', 'real') AND e.cost_khr > 0 AND (CAST(ROUND((e.cost_khr) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0)
+        OR (typeof(e.previous_cost_usd) IN ('integer', 'real') AND e.previous_cost_usd > 0 AND (CAST(ROUND((e.previous_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0)
+      THEN 1 ELSE 0 END AS rounds_to_zero,
     CASE WHEN (typeof(e.cost_usd) IN ('integer', 'real') AND e.cost_usd IS NOT (CAST(ROUND((e.cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) AND ABS(e.cost_usd) >= 1000000000)
         OR (typeof(e.cost_khr) IN ('integer', 'real') AND e.cost_khr IS NOT (CAST(ROUND((e.cost_khr) * 10000.0000000000036) AS INTEGER) / 10000.0) AND ABS(e.cost_khr) >= 1000000000)
         OR (typeof(e.previous_cost_usd) IN ('integer', 'real') AND e.previous_cost_usd IS NOT (CAST(ROUND((e.previous_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) AND ABS(e.previous_cost_usd) >= 1000000000)
@@ -126,9 +138,7 @@ r AS (
       WHERE id NOT IN (SELECT pid FROM ls) AND id NOT IN (SELECT pid FROM es)) AS post_drift_after_apply,
     (SELECT COUNT(*) FROM branch_cutovers WHERE phase NOT IN ('completed', 'aborted')) AS active_branch_cutovers,
     COALESCE((SELECT MAX(ABS(derived_after - COALESCE(c, 0))) FROM rd WHERE derived_after IS NOT NULL), 0) AS max_product_rederive_change,
-    (SELECT COUNT(*) FROM products WHERE (typeof(cost_price_usd) IN ('integer', 'real') AND cost_price_usd > 0 AND (CAST(ROUND((cost_price_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0) OR (typeof(cost_price_khr) IN ('integer', 'real') AND cost_price_khr > 0 AND (CAST(ROUND((cost_price_khr) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0) OR (typeof(purchase_price_usd) IN ('integer', 'real') AND purchase_price_usd > 0 AND (CAST(ROUND((purchase_price_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0) OR (typeof(purchase_price_khr) IN ('integer', 'real') AND purchase_price_khr > 0 AND (CAST(ROUND((purchase_price_khr) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0))
-      + (SELECT COUNT(*) FROM product_batches WHERE (typeof(unit_cost_usd) IN ('integer', 'real') AND unit_cost_usd > 0 AND (CAST(ROUND((unit_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0) OR (typeof(received_cost_usd) IN ('integer', 'real') AND received_cost_usd > 0 AND (CAST(ROUND((received_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0))
-      + (SELECT COUNT(*) FROM product_cost_entries WHERE (typeof(cost_usd) IN ('integer', 'real') AND cost_usd > 0 AND (CAST(ROUND((cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0) OR (typeof(cost_khr) IN ('integer', 'real') AND cost_khr > 0 AND (CAST(ROUND((cost_khr) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0) OR (typeof(previous_cost_usd) IN ('integer', 'real') AND previous_cost_usd > 0 AND (CAST(ROUND((previous_cost_usd) * 10000.0000000000036) AS INTEGER) / 10000.0) = 0)) AS positive_cost_rounds_to_zero,
+    (SELECT COALESCE(SUM(rounds_to_zero), 0) FROM ps) + (SELECT COALESCE(SUM(rounds_to_zero), 0) FROM ls) + (SELECT COALESCE(SUM(rounds_to_zero), 0) FROM es) AS positive_cost_rounds_to_zero,
     (SELECT COALESCE(SUM(out_of_range), 0) FROM ps) AS products_value_out_of_range,
     (SELECT COALESCE(SUM(out_of_range), 0) FROM ls) AS lots_value_out_of_range,
     (SELECT COALESCE(SUM(out_of_range), 0) FROM es) AS entries_value_out_of_range,
