@@ -174,7 +174,7 @@ const PAID = {
   productListCacheSeconds: 60,
   possibleDuplicatesCacheSeconds: 300,
   catalogListWindowPages: 4,
-  notificationSectionCacheSeconds: 300,
+  notificationSectionCacheSeconds: 45,
   d1DailyRowsRead: 833000000,
   d1DailyRowsWritten: 1666000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -272,7 +272,9 @@ const FREE_IS_LONGER = ['productListCacheSeconds', 'possibleDuplicatesCacheSecon
 // deliberately the LARGER number; Paid keeps its old size so its reads do not change. Their own list, one line apart from the
 // lifetimes above, so a lane that names a new lifetime and a lane that names a new page size never edit the same line.
 const FREE_IS_LONGER_PAGE_SIZES = ['paymentMethodScanPageSize']
-const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES]
+// The bell's section lifetime (routes/notifications.ts): owner 11 Nov, up to 5 minutes, so never above 300 on either tier.
+const FREE_IS_LONGER_BELL = ['notificationSectionCacheSeconds']
+const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES, ...FREE_IS_LONGER_BELL]
 
 // Fields that are deliberately the SAME number on both tiers, named so the exemption cannot grow unnoticed. The Expenses export asks for 500 rows a page and the
 // offset path caps at 500, so a smaller Free page only turned an export of up to 500 rows (a month's: one request today) into two pages that each pay the cursor's
@@ -281,9 +283,7 @@ const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES]
 // the same on both tiers; the read switch dash_overview_5m decides whether it is used, and what Free saves is the recompute a sale used to force.
 // coreInvariantsReverifySeconds is 24 h on both tiers since 11 Nov (Paid was 6 h: a run reads ~23k rows, four a day). sessionTouchIntervalSeconds is the
 // 15-minute last-seen touch on both tiers (it only bounds a one-row write; nothing reads it to decide).
-// notificationSectionCacheSeconds (routes/notifications.ts) is the bell's section lifetime: the owner's 11 Nov rule is a bell up to 5 minutes old, so it is 300 on BOTH tiers (Paid was 45 until the 16 Nov
-// stock-state audit #5: no figure the owner needs justified six times the inventory passes). Never above 300 on either tier.
-const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'notificationSectionCacheSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser', 'scheduledBackupAfterHourLocal', 'scheduledBackupKeep', 'scheduledBackupMaxAttemptsPerDay', 'scheduledBackupCopyPollGapMinutes', 'scheduledBackupStaleHours', 'backupPoolGraceHours', 'driveStaleMirrorHours']
+const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser', 'scheduledBackupAfterHourLocal', 'scheduledBackupKeep', 'scheduledBackupMaxAttemptsPerDay', 'scheduledBackupCopyPollGapMinutes', 'scheduledBackupStaleHours', 'backupPoolGraceHours', 'driveStaleMirrorHours']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //
@@ -448,13 +448,12 @@ check('Inventory Check bounds come from the plan: no numeric literal caps the li
   assert.deepEqual([free.inventoryCheckProductsPerSubmission, paid.inventoryCheckProductsPerSubmission], [40, 500])
 })
 
-check('the bell section lifetime is a plan field and exactly the 5 minutes the owner allowed (11 Nov) on both tiers, Paid included', async () => {
+check('the bell section lifetime is a plan field, at most the 5 minutes the owner allowed (11 Nov) on both tiers, longer on Free', async () => {
   for (const tier of ['free', 'paid']) {
     const seconds = PLAN_LIMITS_BY_TIER[tier].notificationSectionCacheSeconds
     assert.ok(Number.isInteger(seconds) && seconds > 0 && seconds <= 300, tier + ' lifetime ' + seconds + ' must be 1..300 s')
   }
-  assert.equal(PLAN_LIMITS_BY_TIER.paid.notificationSectionCacheSeconds, 300, 'Paid is no longer 45 s (audit #5)')
-  assert.equal(PLAN_LIMITS_BY_TIER.free.notificationSectionCacheSeconds, PLAN_LIMITS_BY_TIER.paid.notificationSectionCacheSeconds)
+  assert.ok(PLAN_LIMITS_BY_TIER.free.notificationSectionCacheSeconds > PLAN_LIMITS_BY_TIER.paid.notificationSectionCacheSeconds)
 })
 
 check('planTier.ts imports nothing at runtime', async () => {

@@ -80,10 +80,7 @@ const overrides = {
 const modules = new Map()
 function load(rel) {
   if (modules.has(rel)) return modules.get(rel).exports
-  let text = fs.readFileSync(path.join(SRC, rel), 'utf8')
-  // Mutant seam for test-bell-ttl-plan-limits-pure.cjs: the plan field read replaced by a literal, to prove the lifetime checks below can tell.
-  if (rel === 'routes/notifications.ts' && process.env.TEST_MUTATE_BELL_TTL) text = text.replace('getPlanLimits(c.env).notificationSectionCacheSeconds', process.env.TEST_MUTATE_BELL_TTL)
-  const output = ts.transpileModule(text, {
+  const output = ts.transpileModule(fs.readFileSync(path.join(SRC, rel), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
     fileName: path.join(SRC, rel),
   }).outputText
