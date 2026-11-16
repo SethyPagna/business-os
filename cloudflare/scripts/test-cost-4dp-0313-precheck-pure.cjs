@@ -131,8 +131,11 @@ async function main() {
     assert.equal(r.blocking_flags, 1, name); assert.equal(r.pre_holds, 0, name); assert.equal(pre, 'cost_4dp_0313_pre_state', name) })
   scenario('foreign epoch', () => { clean(); ex("UPDATE system_flags SET value = 'other' WHERE key = 'stock_schema_epoch'") }, (r, pre, name) => {
     assert.equal(r.epoch_ok, 0, name); assert.equal(r.pre_holds, 0, name); assert.equal(pre, 'cost_4dp_0313_pre_state', name) })
-  scenario('no epoch row is fine', () => { clean(); ex("DELETE FROM system_flags WHERE key = 'stock_schema_epoch'") }, (r, pre, name) => {
-    assert.equal(r.epoch_ok, 1, name); assert.equal(r.pre_holds, 1, name); assert.equal(pre, null, name) })
+  // No epoch row: the PRE block alone still passes (its check only refuses a foreign value), but 0313's triggers raise stock_transaction_required at the
+  // first write because the permit is taken from that row (section 3c runs it with the triggers live). The precheck must predict that abort.
+  scenario('no epoch row', () => { clean(); ex("DELETE FROM system_flags WHERE key = 'stock_schema_epoch'") }, (r, pre, name) => {
+    assert.equal(r.epoch_ok, 0, name); assert.equal(r.pre_holds, 0, name); assert.equal(r.apply_holds, 0, name)
+    assert.equal(pre, null, name + ': the PRE block of 0313 itself passes; the abort comes later, from the triggers') })
   scenario('product value out of range', () => { clean(); ex('UPDATE products SET cost_price_usd = 1234567890.12345 WHERE id = 6') }, (r, pre, name) => {
     assert.equal(r.products_value_out_of_range, 1, name); assert.equal(r.pre_holds, 0, name); assert.equal(pre, 'cost_4dp_0313_pre_products_value_out_of_range', name) })
   scenario('lot value out of range', () => { clean(); ex('UPDATE product_batches SET unit_cost_usd = 1234567890.12345 WHERE id = 7') }, (r, pre, name) => {
@@ -246,10 +249,10 @@ async function main() {
   })
 
   // ---- 3c. as on production: every trigger live and the stock_schema_epoch row present ---------------------------------------------------------
-  // The scenarios above run with every trigger dropped (and, for most, no epoch row), which production never is. Here the real triggers are back.
-  // The one divergence found with triggers live: with NO stock_schema_epoch row the precheck says epoch_ok = 1 / apply_holds = 1 but 0313 aborts at
-  // raise:stock_transaction_required (its permit insert selects the epoch row). Production always has the row (stock_schema_epoch:23 in the
-  // system-flag keys export, epoch_ok = 1 in the precheck), so that case cannot happen there; it is pinned below only so nobody reads it as a bug.
+  // The scenarios above run with every trigger dropped, which production never is. Here the real triggers are back, and the fixture's
+  // stock_schema_epoch row is present (inserted with the other fixture rows above; only the 'no epoch row' world below deletes it).
+  // With NO stock_schema_epoch row 0313 aborts at raise:stock_transaction_required (its permit insert selects the epoch row), so epoch_ok is 0 and
+  // apply_holds is 0: the precheck and 0313 agree. Production has the row (stock_schema_epoch:23 in the system-flag keys export).
   // the fixture is changed first (triggers would refuse a direct write), then the real triggers are put back
   const liveTriggers = (mutate) => () => { clean(); mutate(); for (const s of triggerSql) db.exec(s); assert.ok(db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'trigger'").get().n >= 10, 'the real triggers are live') }
   whole('triggers live, epoch present', liveTriggers(() => assert.equal(db.prepare("SELECT value FROM system_flags WHERE key = 'stock_schema_epoch'").get().value, 'legacy-separate-pool-v1')), (row, outcome, _n, name) => {
@@ -262,8 +265,14 @@ async function main() {
   try {
     liveTriggers(() => ex("DELETE FROM system_flags WHERE key = 'stock_schema_epoch'"))()
     const row = run()
-    assert.equal(row.epoch_ok, 1, 'no epoch row (cannot happen on production)'); assert.equal(row.apply_holds, 1, 'the precheck cannot see a missing row')
+    assert.equal(row.epoch_ok, 0, 'no epoch row'); assert.equal(row.apply_holds, 0, 'the precheck predicts the abort of a missing row')
     assert.throws(() => db.exec(migration), /stock_transaction_required/, '0313 aborts when the epoch row is missing and triggers are live')
+    // mutant E1: the old epoch_ok (only a foreign value refuses) says apply on this world, which 0313 aborts
+    const oldEpoch = "CASE WHEN NOT EXISTS (SELECT 1 FROM system_flags WHERE key = 'stock_schema_epoch' AND value IS NOT 'legacy-separate-pool-v1') THEN 1 ELSE 0 END AS epoch_ok"
+    const newEpoch = "CASE WHEN EXISTS (SELECT 1 FROM system_flags WHERE key = 'stock_schema_epoch' AND value IS 'legacy-separate-pool-v1') THEN 1 ELSE 0 END AS epoch_ok"
+    assert.ok(sql.includes(newEpoch), 'mutant anchor present: the shipped epoch_ok')
+    const old = run(sql.split(newEpoch).join(oldEpoch))
+    assert.equal(old.epoch_ok, 1, 'mutant E1 (the old epoch_ok) reads 1 on a missing row'); assert.equal(old.apply_holds, 1, 'mutant E1 would say apply on a world 0313 aborts')
   } finally { db.exec('ROLLBACK TO noepoch; RELEASE noepoch') }
 
   // ---- 4. no personal data ---------------------------------------------------------------------------------------------------------------------
