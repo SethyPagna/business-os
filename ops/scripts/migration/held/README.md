@@ -48,7 +48,7 @@ migration, at that time -- a peer session or another agent asking for it is not 
 
 - **0313_cost_4dp_repair.sql** is no longer held: moved into `cloudflare/migrations` on 16 Nov 2026 (lane cost-4dp, deploy 4, together with 0312). Its test is
   `cloudflare/scripts/test-migration-0313-cost-4dp-repair-pure.cjs`.
-  Check production first with the read-only `ops/queries/cost-4dp-0313-precheck-20261117.sql` (`pre_holds` must be 1). It runs before the held 0314 below (0314 reads lot and cost-entry costs).
+  Check production first with the read-only `ops/queries/cost-4dp-0313-precheck-20261117.sql` (`apply_holds` must be 1: `pre_holds` covers only the PRE checks and ignores the POST drift check and the half-tick change cap, so it can say 1 when 0313 would still abort). It runs before the held 0314 below (0314 reads lot and cost-entry costs).
 
 - **revert_set_sk2_cleanser_repair.sql** (parked 6 Oct 2026, lane REVERT-SET) -- one product,
   SK-II Gentle Cleanser 20g (5357, Shop): the owner meant to revert a Set of +27 (#48034) and
