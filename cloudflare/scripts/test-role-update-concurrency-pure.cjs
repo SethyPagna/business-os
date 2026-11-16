@@ -92,7 +92,7 @@ const usersRoute = load('routes/users.ts', {
   },
   '../lib/audit': { requestDeviceColumnSql: realAudit.requestDeviceColumnSql, requestDeviceParams: realAudit.requestDeviceParams, changedFields: realAudit.changedFields, auditChangeColumns: realAudit.auditChangeColumns, isSecretShapedAuditKey: () => false, audit: async () => { legacyAuditCalls += 1 } },
   // normalizePermissionMap is the save route's write-time normaliser; these fixtures carry plain booleans, so an object passes through unchanged.
-  '../lib/permissions': { isAdminControlUser: (actor) => actor?.isAdmin === true, normalizePermissionMap: (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : {}) },
+  '../lib/permissions': require('./harness/permissions_stub.cjs').permissionsWith({ isAdminControlUser: (actor) => actor?.isAdmin === true, normalizePermissionMap: (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : {}) }),
   '../lib/conflictControl': conflictControl,
   '../durable-objects/broadcastHub': {
     broadcast: async (...args) => { broadcasts.push(args) },
