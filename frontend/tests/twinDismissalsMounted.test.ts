@@ -146,7 +146,8 @@ assert.equal((tab.match(/await dismissProductClusterAndRefresh\(/g) || []).lengt
 assert.ok(!/dismissProductDuplicateCluster\(/.test(tab), 'and never through the bare transport')
 const productsSource = read('components/products/Products.tsx')
 // Round 6 (L2): Keep both dismisses every Conflicts cluster that lists the pair, in one call that re-reads once (tests/twinDismissalsTransport.test.ts runs it).
-assert.match(productsSource, /await dismissProductClustersAndRefresh\(rulings\)/, "Products' Keep both re-reads the rulings")
+assert.match(productsSource, /await keepBothDuplicate\(/, "Products' Keep both goes through the one handler, which re-reads the rulings once")
+assert.match(transport, /await dismissProductClustersAndRefresh\(rulings\)/, 'and that handler dismisses in one re-reading call')
 assert.ok(!/dismissProductDuplicateCluster\(/.test(productsSource), 'and never goes through the bare transport')
 
 console.log(`PASS twin dismissals mounted: the real Inventory list tags both twins of a pair before a ruling and neither after it, per cluster kind; ${mutants.length} mutants killed; the shell, four lists and every dismissal path are wired`)

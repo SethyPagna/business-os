@@ -24,6 +24,7 @@ function load(source: string, failOn: string[] = []) {
       } }
     }
     if (id.endsWith('productTwinDismissals.ts')) return dismissals
+    if (id.endsWith('exactDuplicateProducts.ts')) return {}
     throw new Error(`unexpected require ${id}`)
   }, mod, mod.exports)
   return { api: mod.exports, calls }
@@ -99,8 +100,8 @@ assert.deepEqual(clustersListingProducts([clusters[0], clusters[0]], [1, 2]), [{
 
 // ---- the callers --------------------------------------------------------------------------------------------------------------------------------------
 const products = read('components/products/Products.tsx')
-assert.match(products, /clustersListingProducts\(extractDuplicateClusters\(duplicateClusters\), info\.members\.map/, "Products' Keep both dismisses every cluster that lists the pair")
-assert.match(products, /await dismissProductClustersAndRefresh\(rulings\)/, 'in one call, so the rulings are re-read once')
+assert.match(products, /await keepBothDuplicate\(extractDuplicateClusters\(duplicateClusters\), info,/, "Products' Keep both goes through keepBothDuplicate (tests/keepBothNarrow.test.ts runs it over the real sweep)")
+assert.match(read('components/shared/twinDismissalsTransport.ts'), /await dismissProductClustersAndRefresh\(rulings\)/, 'in one call, so the rulings are re-read once')
 assert.ok(!/dismissProductClusterAndRefresh\(/.test(products), 'and Products never goes through the one-ruling call')
 assert.ok(!/dismissProductDuplicateCluster\(/.test(products), 'nor the bare transport')
 const tab = read('components/products/ProductDuplicatesTab.tsx')

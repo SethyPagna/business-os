@@ -183,9 +183,9 @@ import type { PromotionRule } from '../../utils/promotionRules.ts'
 import type { LowStockConfig } from '../../utils/lowStockSettings.ts'
 import type { BulkDeleteJobStatus } from '../../api/productWriteTransport.ts'
 import { getPossiblySameProducts } from '../../api/productWriteTransport.ts'
-import { dismissProductClustersAndRefresh } from '../shared/twinDismissalsTransport.ts'
+import { keepBothDuplicate } from '../shared/twinDismissalsTransport.ts'
 import { useMergeStockChoice } from './useMergeStockChoice.tsx'
-import { buildExactDuplicateIndex, clustersListingProducts, extractDuplicateClusters, findRowDuplicateInfo, type ExactDuplicateInfo } from '../../utils/exactDuplicateProducts.ts'
+import { buildExactDuplicateIndex, extractDuplicateClusters, findRowDuplicateInfo, type ExactDuplicateInfo } from '../../utils/exactDuplicateProducts.ts'
 import DuplicateResolverControl from './DuplicateResolverControl.tsx'
 import UnmergedTwinTag from './UnmergedTwinTag.tsx'
 import { unmergedTwinHint } from './unmergedTwinHint.ts'
@@ -3488,12 +3488,7 @@ function ProductsFullEditor() {
     if (dupResolverBusyKey) return
     setDupResolverBusyKey(info.key)
     try {
-      const rulings = clustersListingProducts(extractDuplicateClusters(duplicateClusters), info.members.map((member) => Number(member.id)))
-      if (!rulings.some((ruling) => ruling.type === 'barcode' && ruling.value === info.barcode)) rulings.unshift({ type: 'barcode', value: info.barcode })
-      const { failed } = await dismissProductClustersAndRefresh(rulings)
-      if (failed.length) throw failed[0].error
-      notify(t('product_duplicate_kept_both') || 'Kept both — no longer flagged as duplicates')
-      await refreshDuplicateClusters(true)
+      await keepBothDuplicate(extractDuplicateClusters(duplicateClusters), info, notify, t, () => refreshDuplicateClusters(true))
     } catch (e) {
       notify(getErrorMessage(e, t('dismiss_duplicate_failed') || 'Could not update this duplicate'), 'error')
     } finally {

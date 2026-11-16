@@ -1,4 +1,4 @@
-import { normalizeProductGroupName } from './productGrouping.ts'
+import { normalizeProductGroupName, unmergedTwinKeys } from './productGrouping.ts'
 
 // "Exact duplicate" handling for the Products page (user spec item #3).
 //
@@ -105,6 +105,25 @@ export function clustersListingProducts(clusters: readonly PossiblySameCluster[]
     if (!rulings.some((ruling) => ruling.type === cluster.type && ruling.value === cluster.value)) rulings.push({ type: cluster.type, value: cluster.value })
   }
   return rulings
+}
+
+// What "Keep both" on a pair rules (round 6 review, B1). The pair's barcode cluster is always dismissed. A name or leading-zero cluster that also lists the pair is dismissed only
+// when it holds no twin cluster apart from the pair's own (one that shares no row with it): a ruling is keyed by the cluster, so dismissing it would also silence another pair the
+// person never chose, with no review and no undo. When it is left listed, stillListed is true and the pair stays in Conflicts. A twin cluster that overlaps the pair (a blank-barcode
+// row of the same name joins it) is the pair's own: its tag is the cluster's, so it goes with the ruling.
+export function keepBothPlan(clusters: readonly PossiblySameCluster[], ids: readonly number[], barcode: string): { rulings: Array<{ type: 'barcode' | 'name' | 'leadingzero'; value: string }>; stillListed: boolean } {
+  const wanted = new Set(ids.map(Number))
+  const rulings: Array<{ type: 'barcode' | 'name' | 'leadingzero'; value: string }> = [{ type: 'barcode', value: barcode }]
+  let stillListed = false
+  for (const ruling of clustersListingProducts(clusters, ids)) {
+    if (ruling.type === 'barcode') { if (ruling.value !== barcode) rulings.push(ruling); continue }
+    const rows = clusters.find((c) => c.type === ruling.type && c.value === ruling.value)?.products || []
+    const keys = unmergedTwinKeys(rows as never)
+    const own = new Set(rows.map((row, i) => (wanted.has(Number(row.id)) ? keys[i] : '')))
+    if (keys.some((key) => key && !own.has(key))) stillListed = true
+    else rulings.push(ruling)
+  }
+  return { rulings, stillListed }
 }
 
 // Resolve the exact-duplicate group a rendered row belongs to. A list row can

@@ -50,6 +50,7 @@ function load(sources: Sources = {}) {
     }
     if (id.endsWith('productWriteTransport.ts')) return { dismissProductDuplicateCluster: async () => ({ success: true }) }
     if (id.endsWith('productTwinDismissals.ts')) return store
+    if (id.endsWith('exactDuplicateProducts.ts')) return {}
     throw new Error(`unexpected require ${id}`)
   })
   const tag = compile(sources.tag ?? read('components/products/UnmergedTwinTag.tsx'), (id) => {
