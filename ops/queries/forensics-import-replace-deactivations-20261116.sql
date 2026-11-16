@@ -1,4 +1,4 @@
--- R2-3 data health: products a replace-all import deactivated although the SAME import named them (R2-3, 16 Nov 2026).
+-- R2-3 one-off forensics: products a replace-all import deactivated although the SAME import named them (R2-3, 16 Nov 2026).
 -- The bug (R2-3): a single-chunk replace-all products import with a branch column deactivated products the file listed, because
 -- the cutoff it removes by (updated_at < cutoff, finalizeProductReplacement in lib/importEngine.ts) is compared as TEXT between an
 -- ISO stamp (the import writes 2026-11-12T08:00:00.000Z, nowIso) and the SQL form (import_jobs.started_at, CURRENT_TIMESTAMP:
@@ -23,7 +23,11 @@
 -- file really listed it; never by SQL.
 -- ops:min-rows 0
 -- ops:max-rows 5000
--- ops:max-rows-read 37483
+-- ops:max-rows-read 2000
+-- Why 2000: the join into inventory_movements is pinned (INDEXED BY ... via CROSS JOIN, removed rows outermost), so it seeks one product's
+-- rows at a time whatever the optimizer statistics say: 562 rows read on the read-budget seed without ANALYZE and 562 with it. Unpinned, the
+-- same query flipped to a full scan of inventory_movements once ANALYZE had run (34,075 rows on the seed). 2000 is about 3.5 x the seed (the
+-- production volume of delete audit rows since 1 Oct is not known) and still 17 x under that scan, so the guard still refuses a plan that flips.
 WITH removed AS MATERIALIZED (
   SELECT CAST(a.entity_id AS INTEGER) AS product_id,
     json_extract(a.details, '$.importJobId') AS job_id,
@@ -37,7 +41,7 @@ WITH removed AS MATERIALIZED (
 named AS MATERIALIZED (
   SELECT r.job_id, r.product_id, COUNT(*) AS stock_rows
   FROM removed r
-  JOIN inventory_movements m ON m.product_id = r.product_id
+  CROSS JOIN inventory_movements m INDEXED BY idx_inventory_movements_product_created_pg ON m.product_id = r.product_id
   WHERE substr(m.reason, 1, 15) = 'Product import '
     AND substr(m.reason, 16, length(r.job_id) + 6) = r.job_id || ', row '
   GROUP BY r.job_id, r.product_id

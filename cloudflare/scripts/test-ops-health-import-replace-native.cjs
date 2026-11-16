@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Fixture proof for ops/queries/health-import-replace-deactivations-20261116.sql (R2-3): products a replace-all import deactivated although the
+// Fixture proof for ops/queries/forensics-import-replace-deactivations-20261116.sql (R2-3): products a replace-all import deactivated although the
 // same import named them. The query runs exactly as the ops workflow runs it (the guard's canonical text) on a fresh node:sqlite database built
 // from every migration, seeded with two worlds:
 //   * the bug happened: a replace-all job removed products its own apply wrote stock rows for (a file with a branch column);
@@ -17,7 +17,7 @@ const { DatabaseSync } = require('node:sqlite')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 const ROOT = path.resolve(__dirname, '..', '..')
-const NAME = 'health-import-replace-deactivations-20261116'
+const NAME = 'forensics-import-replace-deactivations-20261116'
 const PERSONAL_COLUMN = /(^|_)(name|phone|address|email|note|notes)(_|$)/
 
 let passed = 0
@@ -172,6 +172,22 @@ async function main() {
     const plan = db.prepare(`EXPLAIN QUERY PLAN ${query.sql}`).all().map((row) => row.detail).join('\n')
     assert.match(plan, /idx_audit_logs_action_created/, plan)
     assert.match(plan, /idx_inventory_movements_product_created_pg/, plan)
+  })
+
+  await check('the movement join is pinned: the plan seeks the product index with or without optimizer statistics (never a scan of inventory_movements)', () => {
+    const db = migratedDatabase()
+    const planOf = () => db.prepare(`EXPLAIN QUERY PLAN ${query.sql}`).all().map((row) => row.detail).join('\n')
+    assert.match(query.sql, /CROSS JOIN inventory_movements m INDEXED BY idx_inventory_movements_product_created_pg/, 'the pin is in the query text')
+    const without = planOf()
+    // Production runs without statistics (never ANALYZE there); a plan must not depend on that staying true. ANALYZE needs rows to flip it.
+    insert(db, 'audit_logs', Array.from({ length: 40 }, (_, i) => removal(500 + i, `job-s${i % 3}`, '2026-11-12T08:00:00.000Z', '2026-11-12T08:00:01.000Z')))
+    insert(db, 'inventory_movements', Array.from({ length: 400 }, (_, i) => stockRow(2000 + i, 'job-other', i)))
+    db.exec('ANALYZE')
+    const withStats = planOf()
+    for (const [label, plan] of [['without statistics', without], ['with statistics', withStats]]) {
+      assert.match(plan, /SEARCH m USING INDEX idx_inventory_movements_product_created_pg/, `${label}: ${plan}`)
+      assert.doesNotMatch(plan, /SCAN m\b/, `${label}: ${plan}`)
+    }
   })
 
   for (const db of opened) db.close()
