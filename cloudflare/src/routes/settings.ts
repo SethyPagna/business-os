@@ -6,7 +6,7 @@ import { audit, changedFields, auditChangeColumns, isSecretShapedAuditKey, reque
 import { getPermissionTier, hasPermission, isAdminControlUser } from '../lib/permissions'
 import { firstChangedAdminOnlySettingKey } from '../lib/settingsAdminKeys'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { bumpVersion } from '../lib/cache'
+import { bumpVersion, bumpVersions } from '../lib/cache'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { isSensitiveSettingKey, isSystemOwnedSettingKey, newestNonSystemOwnedStamp, NOT_SYSTEM_OWNED_SETTING_SQL } from '../lib/settingsSensitive'
 import { canReadSettingKey, settingsVisibleTo } from '../lib/settingsVisibility'
@@ -656,7 +656,7 @@ app.post('/payment-methods/backfill', async (c) => {
     action: 'payment_methods_backfill',
     added: merged.added,
   }, changedFields({ configured_methods: configured }, { configured_methods: merged.methods }))
-  c.executionCtx.waitUntil(Promise.all([bumpVersion(c.env, 'settings'), bumpVersion(c.env, 'sales')]))
+  await bumpVersions(c.env, ['settings', 'sales'])
   return c.json({ methods: merged.methods, added: merged.added })
 })
 
@@ -865,7 +865,7 @@ app.post('/payment-methods/replace', async (c) => {
     const parsed = JSON.parse(auditRow?.details || '{}') as { linkedSales?: number; linkedDetails?: number }
     committedCounts = { linkedSales: Number(parsed.linkedSales || 0), linkedDetails: Number(parsed.linkedDetails || 0) }
   } catch { /* the committed audit row remains the authoritative evidence */ }
-  await Promise.all([bumpVersion(c.env, 'settings'), bumpVersion(c.env, 'sales')])
+  await bumpVersions(c.env, ['settings', 'sales'])
   c.executionCtx.waitUntil(broadcast(c.env, 'settings', { action: 'payment_method_replace', from, to, scope }))
   return c.json({ success: true, methods: next, scope, ...committedCounts, settings_updated_at: stamp })
 })
@@ -1349,7 +1349,7 @@ app.post('/', async (c) => {
   // This isolate's memoised low-stock config (lib/lowStockSettings.ts) must not outlive the save that
   // just changed it; other isolates re-confirm against the `settings` version bumped below.
   invalidateLowStockConfigMemo()
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'settings'))
+  await bumpVersion(c.env, 'settings')
   // `writeId` lets the saving tab recognise this broadcast as its own echo.
   const writeId = crypto.randomUUID()
   c.executionCtx.waitUntil(broadcast(c.env, 'settings', { action: 'update', keys: changedKeys, writeId }))
@@ -1397,7 +1397,7 @@ app.put('/audit-log-retention', async (c) => {
   const keys = ['audit_log_retention_days']
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'settings', null, { keys },
     changedFields({ audit_log_retention_days: before?.value ?? null }, { audit_log_retention_days: value }, { keys }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'settings'))
+  await bumpVersion(c.env, 'settings')
   c.executionCtx.waitUntil(broadcast(c.env, 'settings', { action: 'update', keys, writeId: crypto.randomUUID() }))
   return c.json({ key: keys[0], value, updatedAt: await getSettingsUpdatedAt(c.env, keys) })
 })

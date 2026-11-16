@@ -2,6 +2,7 @@ import { hashPassword, spendFailedSignInFloor, upgradePasswordHash, verifySignIn
 import { failedSignInFloor, noteLegacyBcryptSeen, noteLegacyBcryptUpgraded } from './failedSignInCost'
 import { mintMembershipNumber, isMembershipCollision } from './membershipNumber'
 import { getDb } from './db'
+import { bumpVersions } from './cache'
 import { canonicalizePhone } from './phone'
 import { formatPhoneP8, collectContactPhones, contactDuplicateWriteGuardStatement } from './contactDuplicates'
 import { passwordMinLengthError, passwordTooShort } from './passwordPolicy'
@@ -339,6 +340,11 @@ async function claimAccount(
     throw lastError instanceof Error ? lastError : new Error('Could not mint a unique membership id')
   }
 
+  // Either way the sign-up committed something the cached customer list shows: a brand-new sign-up wrote a customers row, and a claim of an existing
+  // customer wrote the portal_accounts row behind that customer's `portal_account` badge (contacts.ts joins it into the list). The Sales caches that key on
+  // customers and the rankings read the same version. Move it before answering so the next staff read cannot be served the list from before the sign-up.
+  // A refused sign-up returned above and wrote nothing, so it does not bump.
+  await bumpVersions(env, ['customers'])
   return { ok: true, accountId, membershipId, name: args.name }
 }
 

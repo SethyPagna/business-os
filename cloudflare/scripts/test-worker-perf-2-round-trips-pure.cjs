@@ -91,11 +91,11 @@ check('contacts.ts create: audit()/bumpVersion() deferred into waitUntil ahead o
     /^\s*await audit\(c\.env, user\?\.id \?\? null, actorSnapshot\(user\), 'create', config\.entity, id/m,
     'the create audit must not gate the response any more',
   )
-  assert.doesNotMatch(
-    createBlock,
-    /^\s*await bumpVersion\(c\.env, config\.table\)/m,
-    'bumpVersion must not gate the response any more',
-  )
+  // A-C3 (14 Nov) reverses the old Perf-2 deferral for the bump only: the response and a peer refetching on the push must key on the NEW
+  // version, so the bump is awaited, and it comes BEFORE the deferred audit/broadcast fan-out. The audit stays deferred (asserted above).
+  const bumpAt = createBlock.search(/^\s*await bumpVersion\(c\.env, config\.table\)/m)
+  const fanOutAt = createBlock.search(/c\.executionCtx\.waitUntil\(Promise\.all\(\[/)
+  assert.ok(bumpAt >= 0 && fanOutAt > bumpAt, 'the create awaits its bump before the audit/broadcast waitUntil')
 })
 
 // --- returns.ts POST / --------------------------------------------------------

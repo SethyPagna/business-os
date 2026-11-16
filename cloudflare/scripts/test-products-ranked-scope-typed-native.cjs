@@ -65,7 +65,8 @@ async function main() {
       assert.ok(on.calls <= off[name].calls, `${name}: ${on.calls} calls is no more than OFF ${off[name].calls}`)
       assert.ok(on.rows <= off[name].rows + 40, `${name}: ${on.rows} rows is no more than OFF ${off[name].rows}`)
       assert.notEqual(noCarve.cache, on.cache, `${name}: control: without the carve-out the ranked path answers (${noCarve.cache})`)
-      assert.ok(noCarve.calls > on.calls, `${name}: control: without the carve-out it costs more calls (${noCarve.calls} vs ${on.calls})`)
+      // The page path reads its versions in one call now (the ranked path read them in two), so a short list can cost the same calls either way: the carve-out must still save calls OR rows.
+      assert.ok(noCarve.calls > on.calls || noCarve.rows > on.rows, `${name}: control: without the carve-out it costs more calls or rows (${noCarve.calls}c/${noCarve.rows}r vs ${on.calls}c/${on.rows}r)`)
       lines.push(`${name}: OFF ${off[name].rows}r/${off[name].calls}c, ON ${on.rows}r/${on.calls}c, ON-RAW ${noCarve.rows}r/${noCarve.calls}c`)
     }
     for (const [name, url] of Object.entries(rankedPath)) {

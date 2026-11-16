@@ -182,7 +182,7 @@ async function main() {
     const count = (rel, pattern) => (fs.readFileSync(path.join(root, rel), 'utf8').match(pattern) || []).length
     assert.equal(count('lib/productWrites.ts', /mirrorCostColumns\(/g), 3, 'insertRow, planInsertRow and updateRow')
     assert.equal(count('lib/createFold.ts', /mirrorCostColumns\(/g), 1)
-    assert.equal(count('lib/importEngine.ts', /costMirrorSql\(/g), 7, 'the two full UPDATEs and the INSERT (usd and khr each), and the column-level UPDATE')
+    assert.equal(count('lib/importEngine.ts', /costMirrorSql\(/g), 9, 'the two full UPDATEs and the INSERT (usd and khr each), the column-level UPDATE, and the two reads in productImportChangedGuardSql that compare the stored twin against the same expression the UPDATE would write (B-C7)')
     assert.equal(count('lib/stockActionCommit.ts', /costMirrorSql\(/g), 1)
     assert.equal(count('lib/undoAppliers.ts', /purchase_price_(usd|khr) = @purchase(Usd|Khr)/g), 2, 'the merge undo restores the twin its snapshot recorded, usd and khr')
     assert.equal(count('routes/products.ts', /purchase_price_(usd|khr): costOrNull\(canonicalBefore/g), 2, 'the merge snapshot records the keeper twin, usd and khr')

@@ -137,6 +137,7 @@ const feeRoute = loadReal('routes/fees.ts', { '../lib/schemaObjectProbe': requir
   '../lib/expenseReads': loadReal('lib/expenseReads.ts', { './readSwitches': { readSwitch: async () => false } }),
   '../lib/planTier': loadReal('lib/planTier.ts'),
   '../lib/reviewGate': { maybeQueueForReview: async () => null },
+  '../lib/cache': { bumpVersion: async () => {}, bumpVersions: async () => {} },
   '../lib/businessDateWindow': { businessToday: () => '2026-09-08' },
   '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'),
   '../lib/telegram': { sendTelegramEvent: async () => {}, telegramMoney: () => '' },
