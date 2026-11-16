@@ -5,7 +5,7 @@ import { getDb } from '../lib/db'
 import { buildUserRenameStatements } from '../lib/userIdentity'
 import { requireAuth, revokeUserSessions, type SessionUser } from '../lib/auth'
 import { audit, changedFields, auditChangeColumns, requestDeviceColumnSql, requestDeviceParams } from '../lib/audit'
-import { isAdminControlUser } from '../lib/permissions'
+import { isAdminControlUser, normalizePermissionMap } from '../lib/permissions'
 import { DEFAULT_ROLE_PERMISSIONS } from '../lib/roleDefaults'
 import { isAdminControlGuardAbort, lastAdminRequiredBody, planAdminControlWrite } from '../lib/adminControlGuard'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
@@ -578,7 +578,7 @@ app.post('/users', async (c) => {
     `).run({
       username, name, org: orgId, group: groupId, phone, phone_lookup: phoneLookup,
       email, avatar: avatar.value, password: hash,
-      permissions: JSON.stringify(body.permissions || {}), role_id: roleId,
+      permissions: JSON.stringify(normalizePermissionMap(body.permissions)), role_id: roleId,
       is_active: body.is_active == null ? 1 : body.is_active,
     })
     const createdId = result.lastInsertRowid
@@ -631,7 +631,7 @@ app.put('/users/:id', async (c) => {
 
   const markDeleted = !!body.delete_user
   const nextIsActive = markDeleted ? 0 : (body.is_active ?? Number(existing.is_active || 0))
-  const nextPermissions = body.permissions === undefined ? parseJsonSafe(existing.permissions) : body.permissions
+  const nextPermissions = body.permissions === undefined ? parseJsonSafe(existing.permissions) : normalizePermissionMap(body.permissions)
   // Never leave zero active administrators (FX-sec2, lib/adminControlGuard.ts).
   const adminGuard = await planAdminControlWrite(db, { user: { id, roleId: body.role_id || null, permissions: JSON.stringify(nextPermissions), active: Number(nextIsActive) === 1 } })
   if ('refusal' in adminGuard) return c.json(adminGuard.refusal, 409)
@@ -1029,7 +1029,7 @@ app.post('/roles', async (c) => {
   try {
     const db = getDb(c.env)
     const result = await db.prepare('INSERT INTO roles (name, code, is_system, permissions) VALUES (@name, NULL, 0, @permissions)').run({
-      name, permissions: JSON.stringify(body.permissions || {}),
+      name, permissions: JSON.stringify(normalizePermissionMap(body.permissions)),
     })
     await audit(c.env, actor?.id ?? null, actor?.name ?? null, 'create', 'role', result.lastInsertRowid, { name })
     c.executionCtx.waitUntil(broadcast(c.env, 'roles', { action: 'create', id: result.lastInsertRowid }))
@@ -1064,7 +1064,7 @@ app.put('/roles/:id', async (c) => {
   if (!name) return c.json({ success: false, error: 'Name required' }, 400)
   if (normalizeLookup(name) === 'admin') return c.json({ success: false, error: 'Admin role is reserved' }, 400)
   try {
-    const permissions = JSON.stringify(body.permissions || {})
+    const permissions = JSON.stringify(normalizePermissionMap(body.permissions))
     // Nothing to save: the same name and the same grants (key order is not a
     // difference; `true` and `1` ARE, since permission checks are strict).
     // Writing anyway moved updated_at -- so another admin's open editor then

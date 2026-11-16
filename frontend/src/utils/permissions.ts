@@ -117,13 +117,22 @@ export const REVIEW_TIER_KEYS = new Set<string>(['fees', 'branches', 'products',
 // audit_log's 'view' is OWN-scoped (see only your own entries), full = all.
 export const VIEW_TIER_KEYS = new Set<string>(['settings', 'sales', 'promotions', 'review', 'audit_log'])
 
-/** Preserve supported stored tiers without granting access for truthy junk. */
+/**
+ * One stored permission value as the Worker reads it (cloudflare/src/lib/permissions.ts storedPermissionValue, pinned by
+ * cloudflare/scripts/test-permission-stored-value-parity-pure.cjs). A section key is granted only by true, or by 'review' / 'view'
+ * on a key that carries that tier. An action key ('products:delete') narrows only on an explicit false; every other value is no
+ * opinion, so it shows as ON. Showing it OFF made the next save write false and quietly take the action away.
+ */
+export function storedPermissionValue(key: string, raw: unknown): PermissionValue {
+  if (key.includes(':')) return raw !== false
+  if (raw === 'review' && REVIEW_TIER_KEYS.has(key)) return 'review'
+  if (raw === 'view' && VIEW_TIER_KEYS.has(key)) return 'view'
+  return raw === true
+}
+
+/** Preserve supported stored tiers without granting access for truthy junk (see storedPermissionValue). */
 export function normalizePermissionState(value: unknown): Record<string, PermissionValue> {
-  return Object.fromEntries(Object.entries(parsePermissionMap(value)).map(([key, raw]) => [key,
-    raw === 'review' && REVIEW_TIER_KEYS.has(key) ? 'review'
-      : raw === 'view' && VIEW_TIER_KEYS.has(key) ? 'view'
-        : raw === true,
-  ]))
+  return Object.fromEntries(Object.entries(parsePermissionMap(value)).map(([key, raw]) => [key, storedPermissionValue(key, raw)]))
 }
 
 /** Mirrors the Worker's optional sale-amendment window; 0 is unlimited. */
