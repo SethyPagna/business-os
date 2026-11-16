@@ -131,6 +131,22 @@ async function probe(patches: Patch[] = []): Promise<string[]> {
     assert.ok(ruled.rows.every((r: any) => r.__unmergedTwin === false && !r.__twinKey), 'no tag, and no twin key for the scan to merge two rows into one hit')
   })
 
+  // Round 5, L1: the fold decision must not depend on which rows are loaded. A filter, a search or a branch view can show two 601 rows and hide the 0601 row the Worker folds
+  // them with; the Worker lists no name cluster for that group, so its leading-zero ruling is the one that takes the pair off, and the tag must go with it.
+  check('a subset of a group the Worker folds into a leading-zero cluster loses its tag with that ruling, whichever rows are loaded', () => {
+    const shade = [row(41, 'Subset Shade', '601'), row(42, 'Subset Shade', '601'), row(43, 'Subset Shade', '0601')]
+    const ruled = api.parseTwinDismissals(dismissals([['leadingzero', '601']]))
+    for (const loaded of [shade, shade.slice(0, 2), shade.slice(1), [shade[0], shade[2]]]) {
+      api.setTwinDismissals(api.NO_TWIN_DISMISSALS)
+      assert.equal(idsOf(api, loaded).length, loaded.length, `before the ruling every loaded row of ${loaded.map((r) => r.id)} is a twin`)
+      api.setTwinDismissals(ruled)
+      assert.deepEqual(idsOf(api, loaded), [], `rows ${loaded.map((r) => r.id)} are still tagged after the leading-zero ruling, and no cluster lists them`)
+    }
+    // Nothing else changes: the same two rows with no ruling, or with a ruling on another code, stay tagged.
+    api.setTwinDismissals(api.parseTwinDismissals(dismissals([['leadingzero', '617']])))
+    assert.equal(idsOf(api, shade.slice(0, 2)).length, 2)
+  })
+
   check('garbage from the server is "no rulings", never a throw', () => {
     for (const payload of [null, undefined, {}, { dismissals: 'x' }, { dismissals: [null, [1, 2], ['name']] }]) assert.equal(api.parseTwinDismissals(payload).size, 0)
   })
@@ -181,6 +197,7 @@ const MUTANTS: Array<{ name: string; patches: Patch[] }> = [
   { name: 'the name key lowers every letter, Unicode included (JS toLowerCase, not SQLite lower)', patches: [{ file: GROUPING, from: ".replace(/^ +| +$|[A-Z]/g, (found) => (found < 'A' ? '' : found.toLowerCase()))", to: ".replace(/^ +| +$|[A-Z]/g, (found) => (found < 'A' ? '' : found.toLowerCase())).toLowerCase()" }] },
   { name: 'the name key trims every kind of whitespace (JS trim, not SQLite trim)', patches: [{ file: GROUPING, from: ".replace(/^ +| +$|[A-Z]/g, (found) => (found < 'A' ? '' : found.toLowerCase()))", to: '.trim().replace(/[A-Z]/g, (found) => found.toLowerCase())' }] },
   { name: 'the barcode cluster floor is 6, not 4 (a 5-character shared code stops being a holder)', patches: [{ file: DISMISS, from: 'const MIN_BARCODE_CLUSTER_LENGTH = 4', to: 'const MIN_BARCODE_CLUSTER_LENGTH = 6' }] },
+  { name: 'the fold is judged on the loaded rows alone (a subset that looks unfolded keeps the tag after the leading-zero ruling)', patches: [{ file: DISMISS, from: '  if (hidden !== null && dismissals.has(hidden)) return true\n', to: '' }] },
 ]
 for (const mutant of MUTANTS) {
   const failures = await probe(mutant.patches)

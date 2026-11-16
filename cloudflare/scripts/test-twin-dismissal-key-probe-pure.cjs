@@ -1,11 +1,13 @@
 'use strict'
-// Review r5, M1, as an exhaustive probe over the REAL Worker sweep, the REAL dismissals read and the REAL client rule (no route, no D1: a fake database serves the rows
+// Review r5, M1 and L1, as an exhaustive probe over the REAL Worker sweep, the REAL dismissals read and the REAL client rule (no route, no D1: a fake database serves the rows
 // the sweep's own SELECTs ask for, with the name_key SQLite's lower(trim(name)) gives, which is what the 0010 triggers store).
 //
 //   M1  "Keep both" must be able to clear the tag. For every small name group, every Conflicts cluster the sweep lists is dismissed the way POST
 //       /possible-duplicates/dismiss stores it (normalizeProductClusterKey over the cluster's own value); the tag must then be gone from the rows. Names: no inner
 //       space, an inner run of spaces, an accented capital, Khmer with an inner run. A dismissal key that collapsed whitespace or folded accents (the old key) leaves
 //       most inner-space and accent cases tagged for ever, which the control below turns red.
+//   L1  tag implies listed on ANY loaded subset of the rows (a filter, a search or a branch view hides some). Every tagged cluster of a subset must still be held
+//       whole by a cluster the sweep lists for the full rows.
 //
 // Run (from cloudflare/scripts): node test-twin-dismissal-key-probe-pure.cjs
 const assert = require('node:assert/strict')
@@ -35,7 +37,10 @@ async function bundle(contents, resolveDir, patches = []) {
 }
 
 const REAL = '8851234567890'
-const DOMAIN = ['', '0', 'Mask', 'NoBox188', '601', '0601', '00601', '12345', REAL, '0' + REAL, ' ' + REAL, '8859999999999']
+const UPCA = '012345000065'
+const UPCE = '01234565'
+const KHMER = '\u17e8\u17e8\u17e5\u17e1\u17e2\u17e3\u17e4\u17e5\u17e6\u17e7\u17e8\u17e9\u17e0'
+const DOMAIN = ['', '0', '00', 'Mask', 'NoBox188', 'nobox188', 'abc', '601', '0601', '00601', '12345', '012345', REAL, '0' + REAL, ' ' + REAL, '8859999999999', UPCA, UPCE, KHMER]
 const subsets = (list) => list.reduce((all, item) => all.concat(all.map((set) => [...set, item])), [[]])
 function multisets(domain, size, start = 0) {
   if (!size) return [[]]
@@ -115,6 +120,78 @@ async function main() {
       const result = await stillTagged(name, old, { identity: patched, client })
       assert.ok(result.stuck.length > 0, `the old key must leave ${JSON.stringify(name)} stuck (it did not, so this probe cannot tell the keys apart)`)
     }
+  })
+
+  // ---- L1: tag implies listed on every loaded subset ------------------------------------------------------------------------------------------------
+  // Dismiss each subset of the listed clusters, then tag every subset of the rows the way a filtered list would, and require that every tagged cluster is still
+  // held whole by a cluster the sweep lists for the whole catalogue.
+  async function subsetViolations(api = { identity, client }, names = ['Probe Name']) {
+    let checks = 0
+    const violations = []
+    for (const name of names) {
+      for (const size of [2, 3, 4]) {
+        for (const codes of multisets(size === 4 ? ['', '0', 'Mask', '601', '0601', REAL, '0' + REAL, '8859999999999'] : DOMAIN, size)) {
+          const rows = rowsOf(name, codes, (i) => (i === 0 ? 9 : 0))
+          const listed0 = await api.identity.findPossiblySameProductClusters(fakeDb(rows, []))
+          for (const chosen of subsets(listed0)) {
+            const dismissals = chosen.map((cluster) => ({ cluster_type: cluster.type, cluster_value: routeKey(api.identity, cluster.type, cluster.value) }))
+            const listed = await api.identity.findPossiblySameProductClusters(fakeDb(rows, dismissals))
+            api.client.setTwinDismissals(api.client.parseTwinDismissals({ dismissals: await api.identity.listTwinDismissals(fakeDb(rows, dismissals)) }))
+            for (const loaded of subsets(rows).filter((subset) => subset.length >= 2)) {
+              for (const ids of twinClusters(loaded)) {
+                checks += 1
+                if (!holds(listed, ids)) violations.push(`codes ${JSON.stringify(codes)} dismissed ${JSON.stringify(chosen.map((c) => `${c.type}:${c.value}`))} loaded ${loaded.map((r) => r.id)} tagged ${ids}`)
+              }
+            }
+          }
+        }
+      }
+    }
+    api.client.setTwinDismissals(api.client.NO_TWIN_DISMISSALS)
+    return { checks, violations }
+  }
+  await check('tag implies listed on every loaded subset of the rows, after every subset of rulings (rows of 2, 3 and 4)', async () => {
+    const { checks, violations } = await subsetViolations()
+    assert.ok(checks > 5000, `checks ${checks}`)
+    assert.deepEqual(violations.slice(0, 3), [], `${violations.length} of ${checks} tags are not listed`)
+  })
+  // Larger groups than the exhaustive pass can enumerate: 5 to 7 rows of one name (with a neighbour of another name), a random set of rulings, and random loaded subsets of
+  // the rows (a filter, a search, a branch view). Seeded, so a red is reproducible.
+  await check('tag implies listed on random loaded subsets of random groups of 5 to 7 rows under random rulings (seeded, 4000 cases)', async () => {
+    let seed = 20261116
+    const next = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296 }
+    const pick = (list) => list[Math.floor(next() * list.length)]
+    let checks = 0
+    const violations = []
+    for (let n = 0; n < 4000; n += 1) {
+      const size = 5 + Math.floor(next() * 3)
+      const name = pick(['Probe Name', 'Probe  Name', 'Crème Éclat'])
+      const codes = Array.from({ length: size }, () => pick(DOMAIN))
+      const rows = rowsOf(name, codes, (i) => (next() < 0.3 ? 9 : 0))
+      if (next() < 0.5) rows.push({ id: 99, name: 'Other Thing', barcode: pick(DOMAIN), stock_quantity: 0, is_active: 1, is_group: 0 })
+      const listed0 = await identity.findPossiblySameProductClusters(fakeDb(rows, []))
+      const chosen = listed0.filter(() => next() < 0.6)
+      const dismissals = chosen.map((cluster) => ({ cluster_type: cluster.type, cluster_value: routeKey(identity, cluster.type, cluster.value) }))
+      const listed = await identity.findPossiblySameProductClusters(fakeDb(rows, dismissals))
+      client.setTwinDismissals(client.parseTwinDismissals({ dismissals: await identity.listTwinDismissals(fakeDb(rows, dismissals)) }))
+      for (let k = 0; k < 6; k += 1) {
+        const loaded = rows.filter(() => next() < 0.6)
+        for (const ids of twinClusters(loaded)) {
+          checks += 1
+          if (!holds(listed, ids)) violations.push(`codes ${JSON.stringify(codes)} dismissed ${JSON.stringify(chosen.map((c) => `${c.type}:${c.value}`))} loaded ${loaded.map((r) => r.id)} tagged ${ids}`)
+        }
+      }
+    }
+    client.setTwinDismissals(client.NO_TWIN_DISMISSALS)
+    assert.ok(checks > 3000, `checks ${checks}`)
+    assert.deepEqual(violations.slice(0, 3), [], `${violations.length} of ${checks} tags are not listed`)
+  })
+  await check('CONTROL, a client that judges the fold on the loaded rows alone (the pre-L1 rule) tags a pair nothing lists: codes ["601","601","0601"], leadingzero dismissed, rows 1 and 2 loaded', async () => {
+    const mutant = await bundle("export * from './utils/productGrouping.ts'\nexport * from './utils/productTwinDismissals.ts'\n", path.join(FRONTEND, 'src'), [
+      ['  if (hidden !== null && dismissals.has(hidden)) return true\n', ''],
+    ])
+    const result = await subsetViolations({ identity, client: mutant }, ['Probe Name'])
+    assert.ok(result.violations.length > 0, 'a client that ignores the group rule must be caught')
   })
 
   console.log(failed ? `\n${failed} check(s) failed` : '\nall checks passed')

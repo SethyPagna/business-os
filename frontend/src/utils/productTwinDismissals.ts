@@ -61,16 +61,35 @@ export function twinClusterHolderKeys(cluster: readonly Row[], nameKey: string, 
   if (fold !== null) keys.push(twinDismissalKey('leadingzero', fold))
   // The name cluster is not listed when it is the barcode or the leading-zero cluster under another name (one decision is never shown twice). That is
   // judged on the rows loaded, which can only be a subset of the Worker's name group: a subset that looks folded when the whole group is not leaves the
-  // name cluster out of the holders, which at worst drops a tag from a pair Conflicts still lists, and never tags a pair it does not.
+  // name cluster out of the holders, which at worst drops a tag from a pair Conflicts still lists. The one shape that can go the other way, a subset that
+  // looks unfolded when the whole group is folded, is hiddenFoldKey below.
   if (sharedBarcode(nameGroup) === null && leadingZeroFold(nameGroup) === null) keys.push(twinDismissalKey('name', nameKey))
   return keys
 }
 
-// True when the person has dismissed every Conflicts cluster that lists this twin cluster.
+// A name group whose loaded rows all carry ONE spelling of a barcode of exactly 3 characters (a MAC shade, 601) cannot be told apart from a subset of a group that has
+// a second spelling (0601) among the rows a filter, a search or a branch view hides. The Worker folds such a whole group into its leading-zero cluster and does not list the
+// name cluster at all, so the name key is no holder there: dismissing the leading-zero cluster is the ruling that takes the pair off the list. Longer codes need no such
+// care (sharedBarcode already leaves the name out of the holders) and a group with two spellings is the leading-zero cluster itself. The key of the ruling that may
+// hold this name group is returned, or null when the loaded rows already decide it (round 5 review, L1: the fold decision must not depend on which rows are loaded).
+function hiddenFoldKey(nameGroup: readonly Row[]): string | null {
+  if (sharedBarcode(nameGroup) !== null || leadingZeroFold(nameGroup) !== null) return null
+  const folds = new Set(nameGroup.map((row) => identityBarcodeKey(row.barcode)))
+  const spellings = new Set(nameGroup.map((row) => trimmedBarcode(row).toLowerCase()))
+  const [fold] = folds
+  return folds.size === 1 && fold.length >= MIN_FOLDED_LENGTH && spellings.size === 1 ? twinDismissalKey('leadingzero', fold) : null
+}
+
+// True when the person has dismissed every Conflicts cluster that lists this twin cluster. A ruling that dismisses the leading-zero cluster a hidden row could make of
+// this name group also counts (hiddenFoldKey): a tag is only ever shown for a pair some listed cluster holds, on any subset of the rows. The price is a tag that goes from
+// a pair whose name cluster IS listed when a leading-zero ruling of the same code exists for another name (the ruling is keyed by the code alone); Conflicts lists it still.
 export function isTwinClusterDismissed(dismissals: TwinDismissals, cluster: readonly Row[], nameKey: string, nameGroup: readonly Row[]): boolean {
   if (!dismissals.size) return false
   const holders = twinClusterHolderKeys(cluster, nameKey, nameGroup)
-  return holders.length > 0 && holders.every((key) => dismissals.has(key))
+  if (!holders.length) return false
+  const hidden = hiddenFoldKey(nameGroup)
+  if (hidden !== null && dismissals.has(hidden)) return true
+  return holders.every((key) => dismissals.has(key))
 }
 
 // ---- the loaded dismissals: one set for the staff shell, read by every list --------------------------------------------------------------------------
@@ -95,10 +114,6 @@ export function setTwinDismissals(next: TwinDismissals): void {
   for (const listener of [...listeners]) listener()
 }
 
-export function subscribeTwinDismissals(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => { listeners.delete(listener) }
-}
 // Whether this account may read the rulings at all (round 5 review, L3). The Worker refuses the route to a role with no product search access (a branches-only role, an
 // image-only Products reader), and for such a role the set stays empty for ever: a pair already ruled Keep both would show the Duplicate tag for ever. A tag is then
 // not shown at all (UnmergedTwinTag), which leaves the rows, their order and their grouping alone; and the route is never asked to reveal names to a role it refuses.
@@ -114,3 +129,7 @@ export function setTwinDismissalsReadable(next: boolean): void {
   for (const listener of [...listeners]) listener()
 }
 
+export function subscribeTwinDismissals(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
+}
