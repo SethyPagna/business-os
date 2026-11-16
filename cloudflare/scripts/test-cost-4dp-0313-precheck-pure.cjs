@@ -231,6 +231,16 @@ async function main() {
       assert.equal(outcome, 'cost_4dp_0313_pre_positive_cost_rounds_to_zero', name); assert.equal(untouched, true, name + ': refused before any write')
     })
   }
+  // the change cap (round 5, mutant X4): the rounding factor 10000.0000000000036 pushes a value just under a tie, at a magnitude near 1e8, over the half tick: the
+  // change is 0.0000500381 here. Every PRE passes (the value is under 1e9), so only apply_holds sees it, and 0313 aborts at its POST.
+  const OVER_CAP = 99999999.00004996
+  for (const [label, sqlText] of [['lot', 'UPDATE product_batches SET unit_cost_usd = ? WHERE id = 7'], ['entry', 'UPDATE product_cost_entries SET cost_usd = ? WHERE id = 4']]) {
+    whole('change over half a tick: ' + label, () => { clean(); ex(sqlText, OVER_CAP) }, (row, outcome, _n, name) => {
+      assert.ok(row.max_lot_or_entry_change > 0.00005 + 1e-9, name + ': the change is over the cap'); assert.equal(row.change_cap_ok, 0, name)
+      assert.equal(row.pre_holds, 1, name + ': the PRE checks pass'); assert.equal(row.apply_holds, 0, name + ': but 0313 would not apply')
+      assert.equal(outcome, 'cost_4dp_0313_post_change_over_half_tick', name)
+    })
+  }
   whole('0.00005 rounds to 0.0001, not zero', () => { clean(); ex('UPDATE product_batches SET unit_cost_usd = 0.00005, received_cost_usd = 0.00005 WHERE id = 7') }, (row, outcome, _n, name) => {
     assert.equal(row.positive_cost_rounds_to_zero, 0, name); applied(row, outcome, name)
   })
@@ -266,6 +276,12 @@ async function main() {
   assert.equal(mutate('<= 500 THEN 1 ELSE 0 END AS products_cap_ok', '<= 4 THEN 1 ELSE 0 END AS products_cap_ok').products_cap_ok, 0, 'cap mutant')
   assert.equal(mutate('<= 0.00005 + 1e-9', '<= 0.00004').change_cap_ok, 0, 'change cap mutant')
   assert.equal(mutate('ABS(pb.unit_cost_usd) >= 1000000000', 'ABS(pb.unit_cost_usd) >= 1').lots_value_out_of_range, 2, 'range threshold mutant (unit cost of lots 1 and 7)')
+  // mutant X4: apply_holds without its change-cap clause says apply on the over-cap world (the real one is asserted to be 0 above)
+  scenario('X4 over-cap world', () => { clean(); ex('UPDATE product_batches SET unit_cost_usd = ? WHERE id = 7', 99999999.00004996) }, () => {
+    const tail = 'AND post_drift_after_apply = 0 AND max_lot_or_entry_change <= 0.00005 + 1e-9'
+    assert.equal(run().apply_holds, 0, 'the shipped apply_holds refuses it')
+    assert.equal(mutate(tail, 'AND post_drift_after_apply = 0').apply_holds, 1, 'mutant X4 (change cap dropped from apply_holds) would say apply')
+  })
   scenario('quantity filter', clean, () => {
     assert.equal(mutate('bbs.quantity > 0', '1').inactive_lots_holding_stock, 1, 'dropping the quantity filter counts the zero-quantity row of lot 3')
   })
