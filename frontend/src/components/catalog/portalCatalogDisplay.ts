@@ -1,5 +1,4 @@
 import { calculateProductDiscount, isProductDiscountActive } from '../../utils/pricing.ts'
-import { DEFAULT_LOW_STOCK_CONFIG, effectiveLowStockThreshold, type LowStockConfig } from '../../utils/lowStockSettings.ts'
 import { promotionBadgeForProduct, evaluatePromotionPricing, isProductPromoted, type PromotionRule } from '../../utils/promotionRules.ts'
 
 type PortalProduct = Record<string, unknown>
@@ -78,23 +77,6 @@ export function shouldShowStockStatus(config: { showStockStatus?: boolean } = {}
 
 export type PortalStockStatus = 'in_stock' | 'low_stock' | 'out_of_stock'
 
-interface PortalStockConfig {
-  stockThresholdMode?: string
-  lowStockThreshold?: unknown
-  outOfStockThreshold?: unknown
-  /** The shop's low-stock setting; only the admin editor's preview has it. The public page falls back to the shop default. */
-  lowStock?: LowStockConfig
-}
-
-// A Website Editor level counts when it is a non-blank, finite, non-negative number; anything else is "not set".
-// Same validation as the Worker's resolvePortalStockRule (routes/portal.ts).
-function websiteStockLevel(raw: unknown): number | null {
-  const text = String(raw ?? '').trim()
-  if (text === '') return null
-  const value = Number(text)
-  return Number.isFinite(value) && value >= 0 ? value : null
-}
-
 // Higher = more available. Used when several server rows merge into one
 // storefront card: the combined badge takes the MOST available status, so
 // a product that any branch/row still carries never shows as out of stock.
@@ -123,52 +105,28 @@ export function combinePortalStockStatus(a: unknown, b: unknown): PortalStockSta
   return PORTAL_STOCK_STATUS_RANK[right] > PORTAL_STOCK_STATUS_RANK[left] ? right : left
 }
 
-// SECURITY BOUNDARY (public storefront): the portal API no longer ships raw
+// SECURITY BOUNDARY (public storefront): the portal API never ships raw
 // stock_quantity / per-branch quantities / low- and out-of-stock thresholds
-// to shoppers -- it ships a server-computed `stock_status` plus per-branch
-// `branch_availability` statuses (routes/portal.ts attachPortalStockStatus).
-// This resolver reads those first. The quantity/threshold math below it is
-// a LEGACY FALLBACK only, for payloads that still carry raw fields: the
-// admin editor's own preview drafts and pre-deploy localStorage snapshots.
+// to shoppers. Every public product payload (/bootstrap, /catalog/products,
+// search) carries a server-computed `stock_status` plus per-branch
+// `branch_availability` statuses (routes/portal.ts withLivePortalStock), with
+// the website's own levels (owner decision of 16 Nov 2026) already applied
+// there. This resolver only reads that answer and holds no threshold math, so
+// it cannot drift from the server's rule: a row with no served status shows no
+// stock label (in_stock), never a guess from a fixed 10.
 export function resolvePortalStockStatus(
   product: PortalProduct = {},
   branchId: unknown = 'all',
-  config: PortalStockConfig = {},
 ): PortalStockStatus {
   if (portalStockWithheld(product)) return 'in_stock'
   const wholeStore = !branchId || branchId === 'all'
-  if (wholeStore) {
-    const served = normalizePortalStockStatus(product?.stock_status)
-    if (served) return served
-  } else {
-    const availability = Array.isArray(product?.branch_availability) ? product.branch_availability : []
-    const entry = availability.find((row) => String((row as PortalProduct | null | undefined)?.branch_id) === String(branchId))
-    if (entry) {
-      const served = normalizePortalStockStatus((entry as PortalProduct).status)
-      if (served) return served
-    } else if (normalizePortalStockStatus(product?.stock_status)) {
-      // Server-shaped payload but no entry for this branch: no stock row
-      // there at all.
-      return 'out_of_stock'
-    }
-  }
-  // Legacy quantity math -- the same rule the server applies before redacting
-  // (routes/portal.ts resolvePortalStockRule, owner decision of 16 Nov 2026):
-  // the website's own levels when the editor is on website-wide thresholds and
-  // a level is filled in, else the shop's low-stock setting -- never a fixed 10.
-  const quantity = wholeStore
-    ? Number(product?.stock_quantity || 0)
-    : Number((Array.isArray(product?.branch_stock) ? product.branch_stock : [])
-        .find((entry) => String((entry as PortalProduct | null | undefined)?.branch_id) === String(branchId))
-        ?.quantity as number | string | null | undefined || 0)
-  const useGlobal = config.stockThresholdMode === 'global'
-  const productOut = Number(product?.out_of_stock_threshold)
-  const outThreshold = (useGlobal ? websiteStockLevel(config.outOfStockThreshold) : null) ?? (Number.isFinite(productOut) ? productOut : 0)
-  if (quantity <= outThreshold) return 'out_of_stock'
-  const lowThreshold = (useGlobal ? websiteStockLevel(config.lowStockThreshold) : null)
-    ?? effectiveLowStockThreshold(config.lowStock || DEFAULT_LOW_STOCK_CONFIG, product?.low_stock_threshold)
-  if (quantity <= lowThreshold) return 'low_stock'
-  return 'in_stock'
+  if (wholeStore) return normalizePortalStockStatus(product?.stock_status) ?? 'in_stock'
+  const availability = Array.isArray(product?.branch_availability) ? product.branch_availability : []
+  const entry = availability.find((row) => String((row as PortalProduct | null | undefined)?.branch_id) === String(branchId))
+  const served = entry ? normalizePortalStockStatus((entry as PortalProduct).status) : null
+  if (served) return served
+  // Server-shaped payload but no entry for this branch: no stock row there at all.
+  return normalizePortalStockStatus(product?.stock_status) ? 'out_of_stock' : 'in_stock'
 }
 
 export type ColumnRange = readonly [min: number, max: number]

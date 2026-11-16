@@ -232,8 +232,8 @@ runTest('both stock-status render sites (filter pills + card badge) delegate to 
 // --- Server-computed stock status (public leak fix) ---------------------
 // The portal payload ships stock_status/branch_availability instead of raw
 // quantities+thresholds (routes/portal.ts attachPortalStockStatus). The
-// resolver must read those first and only fall back to quantity math for
-// legacy rows (editor preview drafts, pre-deploy caches).
+// resolver reads only those; it has no quantity math, so legacy
+// rows (pre-deploy caches) show no label.
 
 runTest('resolvePortalStockStatus prefers the server-computed whole-store status', () => {
   assert.equal(resolvePortalStockStatus({ stock_status: 'low_stock', stock_quantity: 999 }, 'all'), 'low_stock')
@@ -254,38 +254,17 @@ runTest('resolvePortalStockStatus reads per-branch availability, missing branch 
   assert.equal(resolvePortalStockStatus(product, 99), 'out_of_stock')
 })
 
-runTest('resolvePortalStockStatus legacy fallback keeps the historical badge math', () => {
-  const legacy = { stock_quantity: 5, low_stock_threshold: 10, out_of_stock_threshold: 0, branch_stock: [{ branch_id: 3, quantity: 0 }] }
-  assert.equal(resolvePortalStockStatus(legacy, 'all'), 'low_stock')
-  assert.equal(resolvePortalStockStatus(legacy, 3), 'out_of_stock')
-  assert.equal(resolvePortalStockStatus({ stock_quantity: 50 }, 'all'), 'in_stock', 'defaults: out=0, low=10')
-  assert.equal(
-    resolvePortalStockStatus({ stock_quantity: 5, low_stock_threshold: 10 }, 'all', { stockThresholdMode: 'global', lowStockThreshold: 2, outOfStockThreshold: 0 }),
-    'in_stock',
-    'global threshold mode still honored on legacy rows',
-  )
-})
-
-// Owner decision of 16 Nov 2026 ("Website's own levels"): the website's levels when set, else the SHOP's low-stock setting, never a fixed 10.
-// Mirrors the Worker's resolvePortalStockRule (cloudflare/scripts/test-portal-low-stock-parity-pure.cjs is the full matrix).
-runTest('resolvePortalStockStatus legacy fallback: website levels when set, else the shop setting, never a fixed 10', () => {
-  const global = (low: unknown, out: unknown) => ({ stockThresholdMode: 'global', lowStockThreshold: low, outOfStockThreshold: out })
-  const shopGlobal3 = { enabled: true, mode: 'global' as const, threshold: 3 }
-  const shopOff = { enabled: false, mode: 'product' as const, threshold: 10 }
-  const row = (qty: number, low?: number | null, out?: number | null) => ({ stock_quantity: qty, low_stock_threshold: low ?? null, out_of_stock_threshold: out ?? 0 })
-  // Website levels set: they win over the product and the shop.
-  assert.equal(resolvePortalStockStatus(row(5, 10), 'all', { ...global('4', '1'), lowStock: shopGlobal3 }), 'in_stock')
-  assert.equal(resolvePortalStockStatus(row(4, 100), 'all', global('4', '1')), 'low_stock')
-  assert.equal(resolvePortalStockStatus(row(1, 100), 'all', global('4', '1')), 'out_of_stock')
-  // Product mode: the website levels are ignored even when filled in.
-  assert.equal(resolvePortalStockStatus(row(5, 10), 'all', { stockThresholdMode: 'product', lowStockThreshold: '2', outOfStockThreshold: '0' }), 'low_stock')
-  // Empty / invalid website level: the shop's setting answers, not a fixed 10.
-  assert.equal(resolvePortalStockStatus(row(5, 10), 'all', { ...global('', ''), lowStock: shopGlobal3 }), 'in_stock')
-  assert.equal(resolvePortalStockStatus(row(20, 0), 'all', { ...global('', ''), lowStock: { enabled: true, mode: 'global', threshold: 25 } }), 'low_stock')
-  assert.equal(resolvePortalStockStatus(row(1, 10), 'all', { ...global(undefined, undefined), lowStock: shopOff }), 'in_stock', 'shop alerts off: no low label')
-  assert.equal(resolvePortalStockStatus(row(20), 'all', { ...global('abc', '-1'), lowStock: shopGlobal3 }), 'in_stock', 'invalid levels are ignored')
-  assert.equal(resolvePortalStockStatus(row(20), 'all', global('', '')), 'in_stock', 'no product override and no shop config: the shop default of 10, 20 is healthy')
-  assert.equal(resolvePortalStockStatus(row(5, 0), 'all', global('', '')), 'in_stock', 'a stored product override of 0 is honoured')
+// Owner decision of 16 Nov 2026 ("Website's own levels"): the website's levels are applied by the SERVER (the Worker parity test,
+// cloudflare/scripts/test-portal-low-stock-parity-pure.cjs, is the full matrix). The browser holds no threshold math, so it can never
+// fall back to a fixed 10: a row with no served status shows no stock label, whatever raw numbers it carries.
+runTest('resolvePortalStockStatus reads only what the server served; raw quantities and thresholds are never judged in the browser', () => {
+  const raw = { stock_quantity: 0, low_stock_threshold: 10, out_of_stock_threshold: 0, branch_stock: [{ branch_id: 3, quantity: 0 }] }
+  assert.equal(resolvePortalStockStatus(raw, 'all'), 'in_stock')
+  assert.equal(resolvePortalStockStatus(raw, 3), 'in_stock')
+  assert.equal(resolvePortalStockStatus({ stock_quantity: 5, low_stock_threshold: 10 }, 'all'), 'in_stock', 'no fixed 10')
+  assert.equal(resolvePortalStockStatus({ stock_status: 'low_stock', stock_quantity: 500 }, 'all'), 'low_stock', 'the served status wins over any raw number')
+  assert.equal(resolvePortalStockStatus({ stock_status: 'in_stock', branch_availability: [{ branch_id: 3, status: 'low_stock' }] }, 3), 'low_stock')
+  assert.equal(resolvePortalStockStatus({ branch_availability: [{ branch_id: 3 }], stock_quantity: 4 }, 3), 'in_stock', 'an entry without a status is not a status')
 })
 
 runTest('combinePortalStockStatus takes the most-available status and defaults unknowns to out', () => {
@@ -296,9 +275,9 @@ runTest('combinePortalStockStatus takes the most-available status and defaults u
 })
 
 runTest('the storefront no longer ships raw stock math -- components resolve via the shared helper', () => {
-  assert.match(catalogProductsSectionSource, /resolvePortalStockStatus\(product, selectedStockBranch, previewConfig\)/)
-  assert.match(publicCatalogPageSource, /resolvePortalStockStatus\(product, selectedStockBranch, displayConfig\)/)
-  assert.match(catalogPageSource, /resolvePortalStockStatus\(product, statusBranch, displayConfig\)/)
+  assert.match(catalogProductsSectionSource, /resolvePortalStockStatus\(product, selectedStockBranch\)/)
+  assert.match(publicCatalogPageSource, /resolvePortalStockStatus\(product, selectedStockBranch\)/)
+  assert.match(catalogPageSource, /resolvePortalStockStatus\(product, statusBranch\)/)
   assert.doesNotMatch(publicCatalogPageSource, /function getStockStatus/, 'PublicCatalogPage must not keep its own quantity-based copy')
   assert.doesNotMatch(catalogPageSource, /function getStockStatus/, 'CatalogPage must not keep its own quantity-based copy')
 })
@@ -318,7 +297,7 @@ runTest('stock withheld by the Worker (stock status off) is never read as out of
   assert.equal(resolvePortalStockStatus(withheld, 'all'), 'in_stock')
   assert.equal(resolvePortalStockStatus(withheld, 3), 'in_stock')
   assert.equal(productMatchesPortalBranches(withheld, ['3']), true, 'the Worker already applied the branch filter')
-  assert.equal(resolvePortalStockStatus({ stock_quantity: 0 }, 'all'), 'out_of_stock', 'a legacy row with a quantity still counts')
+  assert.equal(resolvePortalStockStatus({ stock_quantity: 0 }, 'all'), 'in_stock', 'a legacy row with a raw quantity is no longer judged here')
   assert.equal(productMatchesPortalBranches({ branch_stock: [] }, ['3']), false, 'a legacy row with a ledger still counts')
 })
 

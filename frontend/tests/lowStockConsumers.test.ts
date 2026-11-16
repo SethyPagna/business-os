@@ -80,12 +80,12 @@ for (const sample of ['x.low_stock_threshold || 10', 'x.low_stock_threshold ?? 1
 }
 assert.ok(!SWEPT_PATTERNS.some((pattern) => pattern.test('effectiveLowStockThreshold(config, p.low_stock_threshold)')), 'the sweep must accept a threaded read')
 
-// The STOREFRONT's legacy fallback (portalCatalogDisplay.ts) follows the same rule as the Worker's resolvePortalStockRule, by owner decision of
-// 16 Nov 2026 ("Website's own levels"): the website's levels when set, else the shop's low-stock setting -- so it carries no literal 10 either.
+// The STOREFRONT carries no stock threshold math at all (owner decision of 16 Nov 2026, "Website's own levels"): the Worker applies the website's
+// levels and serves stock_status, and portalCatalogDisplay.ts only reads it. So it has no literal 10, no shop-rule import and no threshold reads.
 const portal = read('components/catalog/portalCatalogDisplay.ts')
-for (const pattern of SWEPT_PATTERNS) assert.ok(!pattern.test(portal), 'the storefront fallback must not carry the literal 10')
-assert.ok(portal.includes('effectiveLowStockThreshold('), 'the storefront fallback falls back to the shared low-stock rule')
-assert.ok(portal.includes('config.lowStockThreshold'), 'the storefront fallback still reads the website levels')
+for (const pattern of SWEPT_PATTERNS) assert.ok(!pattern.test(portal), 'the storefront resolver must not carry the literal 10')
+assert.ok(!portal.includes('lowStockSettings') && !portal.includes('DEFAULT_LOW_STOCK_CONFIG'), 'the storefront resolver must not import the shop rule')
+assert.ok(!/low_stock_threshold|out_of_stock_threshold/.test(portal), 'the storefront resolver must not read the raw threshold columns')
 assert.ok(!/useLowStockConfig/.test(portal))
 
 // -- behaviour, through the real helpers ------------------------------------

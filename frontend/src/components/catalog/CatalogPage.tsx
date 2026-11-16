@@ -2145,7 +2145,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       if (!productMatchesPortalBranches(product, branchFilter)) return false
 
       const statusBranch = branchFilter.length === 1 ? branchFilter[0] : 'all'
-      const status = resolvePortalStockStatus(product, statusBranch, displayConfig)
+      const status = resolvePortalStockStatus(product, statusBranch)
       if (displayConfig.showStockStatus !== false && stockFilter.length && !stockFilter.includes(status)) return false
       if (!displayConfig.showOutOfStockProducts && status === 'out_of_stock') return false
 
@@ -3110,7 +3110,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   }, [products, recommendedProductSearchTerm])
 
   const openProductDetail = (product: CatalogProduct) => {
-    const status = resolvePortalStockStatus(product, selectedStockBranch, displayConfig)
+    const status = resolvePortalStockStatus(product, selectedStockBranch)
     const gallery = normalizeProductGallery(product)
     const pricePresentation = displayConfig.showPrices
       ? buildPortalPricePresentation(product, displayConfig, formatPortalPrice)
