@@ -73,9 +73,26 @@ async function resolveLotsToCountedProduct(db: D1Compat, movements: ExistingCoun
     ).all<{ id: number; productId: number; batchKey: string | null; receivedAt: string | null }>(params)
   })
   const lotById = new Map(lotRows.map((row) => [Number(row.id), row]))
-  // Rare (only history a merge reparented), so one indexed read per key.
-  const sameKeyLot = new Map<string, number | null>()
+  // Only history a merge reparented reaches the fallbacks, but a count of many products can hold many such actions: read every counted
+  // product's lots ONCE, in chunked IN reads (never one awaited read per product or per key), and resolve from memory. A large merge's
+  // history therefore costs ceil(products / bind chunk) reads, not one per product plus one per key.
+  const reparentedProducts = [...new Set(movements.flatMap((m) => (m.batchActions || [])
+    .filter((a) => { const lot = lotById.get(Number(a.batchId)); return lot && Number(lot.productId) !== m.productId })
+    .map(() => m.productId)))]
+  const keeperRows = reparentedProducts.length
+    ? await selectInChunks(reparentedProducts, 0, (chunk) => {
+      const { sql, params } = buildInClause('prod', chunk)
+      return db.prepare(`SELECT id, variant_product_id AS productId, batch_key AS batchKey, received_at, batch_number, is_active
+        FROM product_batches WHERE variant_product_id IN (${sql})`).all<MergeLotRow & { productId: number; batchKey: string | null }>(params)
+    })
+    : []
   const keeperLotsByDate = new Map<number, Map<string, MergeLotRow>>()
+  const sameKeyLot = new Map<string, number | null>()
+  for (const productId of reparentedProducts) {
+    const own = keeperRows.filter((row) => Number(row.productId) === productId)
+    keeperLotsByDate.set(productId, keeperLotByDate(own))
+    for (const row of own) if (row.batchKey != null) sameKeyLot.set(`${productId}:${row.batchKey}`, Number(row.id))
+  }
   const strays: StrayLotAction[] = []
   for (const movement of movements) {
     if (!movement.batchActions?.length) continue
@@ -89,23 +106,10 @@ async function resolveLotsToCountedProduct(db: D1Compat, movements: ExistingCoun
       let target: number | null = null
       const receivedDate = lot ? mergeLotReceivedDate(lot.receivedAt) : null
       if (receivedDate) {
-        if (!keeperLotsByDate.has(movement.productId)) {
-          const keeperLots = await db.prepare('SELECT id, received_at, batch_number FROM product_batches WHERE variant_product_id = @productId')
-            .all<MergeLotRow>({ productId: movement.productId })
-          keeperLotsByDate.set(movement.productId, keeperLotByDate(keeperLots))
-        }
-        const sameDay = keeperLotsByDate.get(movement.productId)!.get(receivedDate)
+        const sameDay = keeperLotsByDate.get(movement.productId)?.get(receivedDate)
         if (sameDay) target = Number(sameDay.id)
       }
-      if (target == null && lot && lot.batchKey != null) {
-        const key = `${movement.productId}:${lot.batchKey}`
-        if (!sameKeyLot.has(key)) {
-          const row = await db.prepare('SELECT id FROM product_batches WHERE variant_product_id = @productId AND batch_key = @batchKey')
-            .get<{ id: number }>({ productId: movement.productId, batchKey: lot.batchKey })
-          sameKeyLot.set(key, row ? Number(row.id) : null)
-        }
-        target = sameKeyLot.get(key) ?? null
-      }
+      if (target == null && lot && lot.batchKey != null) target = sameKeyLot.get(`${movement.productId}:${lot.batchKey}`) ?? null
       if (target != null) {
         resolved.push({ batchId: target, quantity: action.quantity, ...(action.quantity > 0 ? { receivedBatchId: Number(action.batchId) } : {}) })
       } else {
