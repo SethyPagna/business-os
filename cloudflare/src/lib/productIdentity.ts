@@ -489,6 +489,14 @@ const dismissKey = (type: string, value: string): string => `${type}${DISMISS_DE
 // so a value the panel echoes back (a display name, say) folds to the exact
 // stored key: 'barcode' -> trimmed barcode, 'name' -> name_key, 'similar' ->
 // fuzzy key.
+// The key a 'name' cluster is stored and matched under: EXACTLY the products.name_key column, which the 0010 triggers keep as SQLite lower(trim(name)). That trims
+// the space character only and lower-cases A-Z only, and it keeps inner whitespace runs, tabs, accents and Khmer as typed. normalizeProductGroupName (collapse
+// whitespace runs, JS lower-case) is a different, looser key; a dismissal stored under it never matched the sweep's name_key for such a name, so Keep both was a no-op and the
+// Duplicate tag stayed for ever (review r5, M1). D1's lower() has no ICU, so the A-Z-only fold is what production does too.
+export function sqliteNameKey(value: unknown): string {
+  return String(value ?? '').replace(/^ +| +$/g, '').replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+}
+
 export function normalizeProductClusterKey(type: 'leadingzero' | 'barcode' | 'name' | 'similar', value: unknown): string {
   // A leading-zero cluster is keyed by the FOLDED barcode, so a dismissal
   // recorded from either twin's spelling records -- and later matches -- the
@@ -497,7 +505,7 @@ export function normalizeProductClusterKey(type: 'leadingzero' | 'barcode' | 'na
   if (type === 'leadingzero') return identityBarcodeKey(value)
   if (type === 'barcode') return String(value ?? '').trim()
   if (type === 'similar') return normalizeProductFuzzyName(value)
-  return normalizeProductGroupName(value)
+  return sqliteNameKey(value)
 }
 
 // The Resolve grid's Keep merge (owner N1/N3, 23 Sep 2026) may fold products

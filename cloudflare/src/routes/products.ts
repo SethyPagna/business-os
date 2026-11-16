@@ -42,7 +42,7 @@ import { getPlanLimits } from '../lib/planTier'
 import { countProductDataGaps, findOpenConflictMarkRequest, listProductDataGaps, parseProductConflictMarkInput, parseProductDataGapKind, preflightProductConflictMark, ProductConflictMarkError, readConfirmedValue, setProductConflictMark } from '../lib/productDataGaps'
 import type { PossiblySameProductCluster, PossiblySameProductEntry } from '../lib/productIdentity'
 import { absorbedBarcodes, keeperFollowsBarcode, listTwinDismissals, productIdsInOneCluster } from '../lib/productIdentity'
-import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, findSameIdentityProduct, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeProductClusterKey, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
+import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, findSameIdentityProduct, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeProductClusterKey, sqliteNameKey, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { lotRemainingSql } from '../lib/lotRemaining'
 import { compareCosts, normalizeProductGroupName } from '../lib/productDetailRule'
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
@@ -7194,7 +7194,7 @@ async function prepareSelectedConflictCase(
     return { ordinal, case_key: requested.case_key, product_ids: requestedIds, code: 'not_exact_pair', message: 'This conflict no longer contains the reviewed exact two-product set.' }
   }
   const authoritativeClusterValue = normalizeProductClusterKey(requested.cluster_type, requested.cluster_value)
-  const initialClusterNameKey = normalizeProductGroupName(cluster.products[0]?.name)
+  const initialClusterNameKey = sqliteNameKey(cluster.products[0]?.name)
   const fingerprintBefore = await readSelectedConflictFingerprint(
     db, requestedIds[0], requestedIds[1], requested.cluster_type, authoritativeClusterValue, initialClusterNameKey,
   )
@@ -7212,7 +7212,7 @@ async function prepareSelectedConflictCase(
   }
   const keeper = eligibility.keeper as SelectedConflictProductRow
   const discarded = eligibility.discarded as SelectedConflictProductRow
-  const clusterNameKey = normalizeProductGroupName(keeper.name)
+  const clusterNameKey = sqliteNameKey(keeper.name)
   const authoritativeMemberIds = await readSelectedConflictClusterMemberIds(
     db, requested.cluster_type, authoritativeClusterValue, clusterNameKey,
   )
@@ -7414,7 +7414,7 @@ async function prepareSelectedConflictApplyPreflightCases(
       continue
     }
     const authoritativeClusterValue = normalizeProductClusterKey(requested.cluster_type, requested.cluster_value)
-    const initialClusterNameKey = normalizeProductGroupName(cluster.products[0]?.name)
+    const initialClusterNameKey = sqliteNameKey(cluster.products[0]?.name)
     const before = await readSelectedConflictFingerprint(db, requestedIds[0], requestedIds[1], requested.cluster_type, authoritativeClusterValue, initialClusterNameKey)
     const { sql, params } = buildInClause('selectedPreflightProduct', requestedIds)
     const rows = await db.prepare(`SELECT p.id,p.name,p.barcode,p.image_path,p.is_active,COALESCE(p.is_group,0) AS is_group,p.updated_at,
@@ -7429,7 +7429,7 @@ async function prepareSelectedConflictApplyPreflightCases(
     }
     const keeper = eligibility.keeper as SelectedConflictProductRow
     const discarded = eligibility.discarded as SelectedConflictProductRow
-    const clusterNameKey = normalizeProductGroupName(keeper.name)
+    const clusterNameKey = sqliteNameKey(keeper.name)
     const [memberIds, stockImpact, imageChanges] = await Promise.all([
       readSelectedConflictClusterMemberIds(db, requested.cluster_type, authoritativeClusterValue, clusterNameKey),
       readMergeStockImpact(db, discarded.id, new Map()),

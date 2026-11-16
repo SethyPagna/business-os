@@ -176,10 +176,15 @@ const PAIRS = [
   [118, 119, 'Tw Real Real', '8851234567801', '8851234567801', true],
   [120, 121, 'Tw Leading Zero', '8851234567802', '08851234567802', true],
   [122, 123, 'Tw Word Same', 'NoBox777', 'NoBox777', true],
+  // Names the dismissal key must agree on with the sweep's name_key, which is SQLite lower(trim(name)) (review r5, M1): an inner run of spaces, an accented capital
+  // (lower() folds A-Z only) and the same in Khmer. A key that collapsed the spaces or folded the accent stored a ruling the sweep never matched, so the tag stayed for ever.
+  [127, 128, 'Tw  Inner Space', '8851234567821', '', true],
+  [129, 130, 'Tw Crème Éclat', '', '', true],
+  [131, 132, 'ក្រែម  លាប ម៉ាស', '', '', true],
 ]
 // A twin cluster beside a real variant of its own name: held by the barcode cluster of its code AND by the name cluster, two rulings that must both be made.
 const BESIDE = { name: 'Tw Beside Variant', ids: [124, 125, 126], twin: [124, 125], codes: ['8851234567811', '8851234567811', '8851234567812'] }
-const TAGGED_CLUSTERS = [...PAIRS.filter((p) => p[5]).map((p) => [p[0], p[1]]), BESIDE.twin]
+const TAGGED_CLUSTERS = [...PAIRS.filter((p) => p[5]).map((p) => [p[0], p[1]]), BESIDE.twin].sort((left, right) => left[0] - right[0])
 const SEED = `
   INSERT INTO branches (id, name) VALUES (1, 'shop');
   INSERT INTO products (id, name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, stock_quantity, is_active) VALUES
