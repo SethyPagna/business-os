@@ -358,7 +358,7 @@ export function gateCourierRow(row: Record<string, unknown>, canViewCourier: boo
   if (canViewCourier) return row
   const {
     actual_cost_usd, actual_cost_count, linked_expense_count, linked_expense_usd, linked_expense_khr,
-    last_expense_at, margin_usd, ...publicRow
+    last_expense_at, delivery_margin_usd, ...publicRow
   } = row
   return publicRow
 }

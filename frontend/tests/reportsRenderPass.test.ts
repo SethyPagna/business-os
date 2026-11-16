@@ -129,7 +129,7 @@ const transportSource = String.raw`
     const out = []
     for (let i = 0; i < n; i++) {
       if (by === 'product') { out.push({ product_id: i, product_name: 'Product ' + i, sale_count: (i % 7) + 1, qty: (i % 11) + 1, line_sales_usd: 10 + i, cost_usd: 4 + i, profit_usd: 6 + i, margin_pct: 40 }); continue }
-      if (by === 'courier') { out.push({ delivery_contact_id: i, delivery_contact_name: 'Courier ' + i, deliveries: (i % 5) + 1, charged_fee_usd: 2 + i, absorbed_fee_usd: 0, actual_cost_usd: 1 + i, actual_cost_count: 1, margin_usd: 1 + i, last_delivery_at: '2026-01-01 08:00:00' }); continue }
+      if (by === 'courier') { out.push({ delivery_contact_id: i, delivery_contact_name: 'Courier ' + i, deliveries: (i % 5) + 1, charged_fee_usd: 2 + i, absorbed_fee_usd: 0, actual_cost_usd: 1 + i, actual_cost_count: 1, delivery_margin_usd: 1 + i, last_delivery_at: '2026-01-01 08:00:00' }); continue }
       out.push({ key: String(i), label: 'Group ' + i, entity_id: i, tx_count: (i % 6) + 1, gross_sales_usd: 20 + i, revenue_usd: 18 + i, refund_usd: 0, collected_total_usd: 18 + i, avg_order_usd: 9 })
     }
     return out

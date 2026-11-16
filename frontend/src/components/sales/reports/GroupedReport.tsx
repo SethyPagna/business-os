@@ -16,6 +16,7 @@ import { Fold, IconButton, OverflowMenu } from '../../shared/kit'
 import ReceiptSheet, { type ReceiptLine } from './ReceiptSheet.tsx'
 import ReportFrame, { useReportData } from './ReportFrame.tsx'
 import ReportTable, { csvColumnsFor, type ReportColumn } from './ReportTable.tsx'
+import { courierMoneyColumns, optionalMoney } from '../../contacts/deliveryReportCourierMoney.ts'
 import {
   BASIS_LABELS,
   basisValue,
@@ -143,9 +144,10 @@ export interface CourierRow {
   deliveries: number
   charged_fee_usd: number
   absorbed_fee_usd: number
-  actual_cost_usd: number
-  actual_cost_count: number
-  margin_usd: number
+  // Omitted by the Worker without sales:view_courier_cost: undefined, never 0.
+  actual_cost_usd?: number
+  actual_cost_count?: number
+  delivery_margin_usd?: number
   last_delivery_at: string | null
 }
 
@@ -237,9 +239,9 @@ export default function GroupedReport(p: ReportViewProps) {
                 deliveries: num(o.deliveries),
                 charged_fee_usd: num(o.charged_fee_usd),
                 absorbed_fee_usd: num(o.absorbed_fee_usd),
-                actual_cost_usd: num(o.actual_cost_usd),
-                actual_cost_count: num(o.actual_cost_count),
-                margin_usd: num(o.margin_usd),
+                actual_cost_usd: optionalMoney(o.actual_cost_usd),
+                actual_cost_count: optionalMoney(o.actual_cost_count),
+                delivery_margin_usd: optionalMoney(o.delivery_margin_usd),
                 last_delivery_at: o.last_delivery_at == null ? null : String(o.last_delivery_at),
               }
             })
@@ -359,16 +361,19 @@ export default function GroupedReport(p: ReportViewProps) {
 
   if (by === 'courier') {
     // Memoized for the same reason as the products branch above.
+    const show = courierMoneyColumns(courierRows)
     const columns = useMemo<Array<ReportColumn<CourierRow>>>(() => [
       { key: 'name', label: tr('rpt_courier', 'Courier'), primary: true, value: (r) => r.delivery_contact_name || tr('unknown', 'Unknown') },
       { key: 'deliveries', label: tr('rpt_deliveries', 'Deliveries'), kind: 'int', value: (r) => r.deliveries },
       { key: 'charged_fee_usd', label: tr('rpt_delivery_charged', 'Delivery fee charged'), kind: 'money', value: (r) => r.charged_fee_usd },
       { key: 'absorbed_fee_usd', label: tr('rpt_store_delivery', 'Store-paid delivery fee'), kind: 'money', value: (r) => r.absorbed_fee_usd },
-      { key: 'actual_cost_usd', label: tr('rpt_delivery_cost', 'Actual delivery cost'), kind: 'money', value: (r) => r.actual_cost_usd },
-      { key: 'actual_cost_count', label: tr('rpt_costed_deliveries', 'Costed deliveries'), kind: 'int', value: (r) => r.actual_cost_count, defaultVisible: false },
-      { key: 'margin_usd', label: tr('rpt_delivery_margin', 'Delivery profit'), kind: 'money', value: (r) => r.margin_usd, emphasis: true },
+      ...(show.cost ? [
+        { key: 'actual_cost_usd', label: tr('rpt_delivery_cost', 'Actual delivery cost'), kind: 'money' as const, value: (r: CourierRow) => r.actual_cost_usd },
+        { key: 'actual_cost_count', label: tr('rpt_costed_deliveries', 'Costed deliveries'), kind: 'int' as const, value: (r: CourierRow) => r.actual_cost_count, defaultVisible: false },
+      ] : []),
+      ...(show.margin ? [{ key: 'delivery_margin_usd', label: tr('rpt_delivery_margin', 'Delivery profit'), kind: 'money' as const, value: (r: CourierRow) => r.delivery_margin_usd, emphasis: true }] : []),
       { key: 'last_delivery_at', label: tr('rpt_last_delivery', 'Last delivery'), kind: 'datetime', value: (r) => r.last_delivery_at, defaultVisible: false },
-    ], [tr]) // eslint-disable-line react-hooks/rules-of-hooks -- `by` is fixed per mounted instance
+    ], [tr, show.cost, show.margin]) // eslint-disable-line react-hooks/rules-of-hooks -- `by` is fixed per mounted instance
     const sum = (k: keyof CourierRow) => round4(courierRows.reduce((s, r) => s + num(r[k]), 0))
     const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtRow), courierRows)
     return (
@@ -377,7 +382,7 @@ export default function GroupedReport(p: ReportViewProps) {
         titleControl={p.titleControl}
         hint={{ label: title, text: tr('rpt_hint_couriers', 'Delivery sales per courier: what customers were charged, what the store absorbed, the recorded actual cost (only deliveries with a cost recorded) and the resulting margin.') }}
         menuAction={exportMenu(() => downloadCSV(reportFileName('couriers', filters, 'csv'), csv()), () => openPrintExport({ title: printTitle, subtitle, headers: columns.map((c) => c.label), rows: csv() }))}
-        summary={courierRows.length ? joinSummary([countLabel(sum('deliveries'), REPORT_NOUNS.delivery, tr), `${tr('rpt_delivery_charged', 'Delivery fee charged')} ${fmtMoney(sum('charged_fee_usd'))}`, `${tr('rpt_store_delivery', 'Store-paid delivery fee')} ${fmtMoney(sum('absorbed_fee_usd'))}`, `${tr('rpt_delivery_cost', 'Actual delivery cost')} ${fmtMoney(sum('actual_cost_usd'))}`, `${tr('rpt_delivery_margin', 'Delivery profit')} ${fmtMoney(sum('margin_usd'))}`]) : ''}
+        summary={courierRows.length ? joinSummary([countLabel(sum('deliveries'), REPORT_NOUNS.delivery, tr), `${tr('rpt_delivery_charged', 'Delivery fee charged')} ${fmtMoney(sum('charged_fee_usd'))}`, `${tr('rpt_store_delivery', 'Store-paid delivery fee')} ${fmtMoney(sum('absorbed_fee_usd'))}`, ...(show.cost ? [`${tr('rpt_delivery_cost', 'Actual delivery cost')} ${fmtMoney(sum('actual_cost_usd'))}`] : []), ...(show.margin ? [`${tr('rpt_delivery_margin', 'Delivery profit')} ${fmtMoney(sum('delivery_margin_usd'))}`] : [])]) : ''}
         error={state.error}
         onRetry={state.reload}
         retryLabel={tr('retry', 'Retry')}
@@ -391,7 +396,7 @@ export default function GroupedReport(p: ReportViewProps) {
           fmtMoney={fmtRow}
           labels={labels}
           loading={state.loading}
-          totalsRow={courierRows.length > 1 ? { delivery_contact_id: null, delivery_contact_name: labels.total, deliveries: sum('deliveries'), charged_fee_usd: sum('charged_fee_usd'), absorbed_fee_usd: sum('absorbed_fee_usd'), actual_cost_usd: sum('actual_cost_usd'), actual_cost_count: sum('actual_cost_count'), margin_usd: sum('margin_usd'), last_delivery_at: null } : null}
+          totalsRow={courierRows.length > 1 ? { delivery_contact_id: null, delivery_contact_name: labels.total, deliveries: sum('deliveries'), charged_fee_usd: sum('charged_fee_usd'), absorbed_fee_usd: sum('absorbed_fee_usd'), ...(show.cost ? { actual_cost_usd: sum('actual_cost_usd'), actual_cost_count: sum('actual_cost_count') } : {}), ...(show.margin ? { delivery_margin_usd: sum('delivery_margin_usd') } : {}), last_delivery_at: null } : null}
           sort={sort}
           onSortChange={setSort}
           maxHeight="calc(70 * var(--app-vh))"
