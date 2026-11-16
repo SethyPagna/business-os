@@ -72,27 +72,23 @@ const leaks = (value) => {
 }
 
 // ---- the gate ----------------------------------------------------------------
-// Owner, 15 Nov 2026: the courier's actual cost is cost money and ADMIN ONLY, like every other cost, profit and margin figure. No Sales grant,
-// cost grant or per-user value opens it. The old per-role switch (sales:view_courier_cost) is kept only as holdsCourierCostGrant.
-check('gate: an administrator and an all-grant may read the courier cost', () => {
-  for (const [name, user] of [['administrator', ADMIN], ['all-grant', ALL_GRANT]]) assert.equal(access.canViewCourierCost(user), true, name)
+check('gate: an administrator, an all-grant and every Sales role (until switched off) may read the courier cost', () => {
+  for (const [name, user] of [['administrator', ADMIN], ['all-grant', ALL_GRANT], ['Sales view tier', DEFAULT_VIEWER],
+    ['Sales full, no amend', DEFAULT_STAFF], ['Sales full with amend', DEFAULT_AMENDER]]) {
+    assert.equal(access.canViewCourierCost(user), true, name)
+  }
 })
-check('gate: every other principal is closed, whatever Sales, cost or courier grants it holds', () => {
-  for (const [name, user] of [['Sales view tier', DEFAULT_VIEWER], ['Sales full, no amend', DEFAULT_STAFF], ['Sales full with amend', DEFAULT_AMENDER],
-    ['cost viewer', COST_VIEWER], ['amender', AMENDER], ['plain', PLAIN]]) assert.equal(access.canViewCourierCost(user), false, name)
-  assert.equal(access.canViewCourierCost({ role_code: 'employee', role_permissions: '{"sales":true,"sales:view_courier_cost":true,"product_cost_view":true,"product_cost_edit":true}' }), false, 'every grant at once')
+check('gate: the switch, a missing Sales grant and a non-staff principal close it; a cost grant or amend never opens it', () => {
+  assert.equal(access.canViewCourierCost(COST_VIEWER), false, 'a cost-view grant is not the courier permission')
+  assert.equal(access.canViewCourierCost(AMENDER), false, 'amending a sale is not the courier permission')
+  assert.equal(access.canViewCourierCost(PLAIN), false)
   assert.equal(access.canViewCourierCost({ role_code: 'employee', role_permissions: '{"reports":true,"dashboard":true,"product_cost_view":true}' }), false, 'no Sales grant')
-  assert.equal(access.canViewCourierCost({ role_code: 'customer', role_permissions: '{}' }), false, 'a storefront or customer principal')
+  assert.equal(access.canViewCourierCost({ role_code: 'customer', role_permissions: '{}' }), false, 'a storefront or customer principal holds no Sales grant')
   assert.equal(access.canViewCourierCost(null), false)
-  assert.equal(access.canViewCourierCost({ role_code: 'employee', role_permissions: `{"sales":true,${OFF}}`, permissions: '{"sales:view_courier_cost":true}' }), false, 'a per-user value opens nothing')
+  assert.equal(access.canViewCourierCost({ role_code: 'employee', role_permissions: '{"sales":false,"sales:view_courier_cost":true}' }), false, 'an override can only remove: it never grants past a missing tier')
+  assert.equal(access.canViewCourierCost({ role_code: 'employee', role_permissions: '{"sales":true,"sales:view_courier_cost":"no"}' }), true, 'only an explicit false switches it off')
   assert.equal(access.canViewCourierCost({ role_code: 'admin', role_permissions: `{${OFF}}` }), true, 'an administrator is never narrowed')
-})
-check('switch-back: holdsCourierCostGrant keeps the old per-role rule, unused by the gate', () => {
-  assert.equal(access.holdsCourierCostGrant(DEFAULT_STAFF), true)
-  assert.equal(access.holdsCourierCostGrant(PLAIN), false)
-  assert.equal(access.holdsCourierCostGrant({ role_code: 'employee', role_permissions: '{"sales":true,"sales:view_courier_cost":"no"}' }), true, 'only an explicit false switches it off')
-  assert.equal(access.holdsCourierCostGrant({ role_code: 'employee', role_permissions: '{"sales":false,"sales:view_courier_cost":true}' }), false)
-  assert.equal(access.holdsCourierCostGrant({ role_code: 'admin', role_permissions: `{${OFF}}` }), true)
+  assert.equal(access.canViewCourierCost({ role_code: 'employee', role_permissions: `{"sales":true,${OFF}}`, permissions: '{"sales:view_courier_cost":true}' }), true, 'a per-user value overrides the role, key by key')
 })
 
 // ---- the records, built by the real builder ----------------------------------------
@@ -137,9 +133,8 @@ for (const [name, user] of [['cost viewer', COST_VIEWER], ['sales amender with t
   })
 }
 
-check('administrator: the records are returned untouched (same objects); a default Sales role gets none of the figures', () => {
-  for (const user of [DEFAULT_VIEWER, DEFAULT_STAFF, DEFAULT_AMENDER]) assert.deepEqual(leaks(access.redactSaleRecords(built, user)), [], 'owner, 15 Nov 2026: a Sales grant no longer shows the courier cost')
-  for (const user of [ADMIN, ALL_GRANT]) assert.strictEqual(access.redactSaleRecords(built, user), built)
+check('administrator and a default Sales role: the records are returned untouched (same objects)', () => {
+  for (const user of [ADMIN, ALL_GRANT, DEFAULT_VIEWER, DEFAULT_STAFF, DEFAULT_AMENDER]) assert.strictEqual(access.redactSaleRecords(built, user), built)
 })
 
 check('a redacted trail keeps every record, kind, actor, time and the customer fee', () => {
@@ -201,7 +196,7 @@ for (const [name, user] of [['cost viewer', COST_VIEWER], ['plain reader', PLAIN
 }
 
 check('administrator and a default Sales role: the ledger is returned untouched', () => {
-  for (const user of [ADMIN]) assert.strictEqual(access.redactAmendmentEntries(ledger, user), ledger)
+  for (const user of [ADMIN, DEFAULT_VIEWER, DEFAULT_STAFF, DEFAULT_AMENDER]) assert.strictEqual(access.redactAmendmentEntries(ledger, user), ledger)
 })
 
 check('a redacted ledger keeps every entry, the fee amounts and the totals, and marks only what it changed', () => {
@@ -256,7 +251,7 @@ check('an audit row that spells the cost in camelCase or as the riel twin is red
   assert.doesNotMatch(feeAudit, like, 'a fee-only row stays searchable')
 })
 check('administrator and a default Sales role: the audit rows are returned untouched', () => {
-  for (const user of [ADMIN]) assert.strictEqual(access.redactAuditRows(auditRows, user), auditRows)
+  for (const user of [ADMIN, DEFAULT_VIEWER, DEFAULT_STAFF]) assert.strictEqual(access.redactAuditRows(auditRows, user), auditRows)
 })
 
 // ---- negative controls: the checks above must catch a plausible wrong gate ---------------
@@ -264,25 +259,24 @@ const mutate = (from, to) => {
   assert.equal(gateSource.split(from).length - 1, 1, `mutant anchor must occur once: ${from}`)
   return load('src/lib/courierCostAccess.ts', gateSource.replace(from, to))
 }
-const GATE_HEAD = 'export function canViewCourierCost(user: PermissionUser): boolean {' + String.fromCharCode(10) + '  '
-const GATE_EXPRESSION = GATE_HEAD + 'return isAdminControlUser(user)'
+const GATE_EXPRESSION = "return isAdminControlUser(user) || getActionTier(user, 'sales', 'view_courier_cost') !== 'none'"
 const wrongGate = {
   'every caller': 'return true',
   'cost grant opens it': 'return isAdminControlUser(user) || /product_cost_view/.test(String(user && user.role_permissions))',
   'full amender opens it (the retired interim rule)': "return isAdminControlUser(user) || getActionTier(user, 'sales', 'amend') === 'full'",
   'the switch is ignored': "return isAdminControlUser(user) || getActionTier(user, 'sales', 'view') !== 'none'",
-  'the old per-role Sales switch (retired 15 Nov 2026)': "return isAdminControlUser(user) || getActionTier(user, 'sales', 'view_courier_cost') !== 'none'",
+  'administrators only': 'return isAdminControlUser(user)',
 }
 for (const [name, body] of Object.entries(wrongGate)) {
   check(`mutant (${name}): the gate verdicts differ from the rule and this file notices`, () => {
-    const bad = mutate(GATE_EXPRESSION, GATE_HEAD + body)
+    const bad = mutate(GATE_EXPRESSION, body)
     const verdicts = [ADMIN, DEFAULT_VIEWER, DEFAULT_STAFF, DEFAULT_AMENDER, COST_VIEWER, AMENDER, PLAIN].map((user) => bad.canViewCourierCost(user))
     const rule = [ADMIN, DEFAULT_VIEWER, DEFAULT_STAFF, DEFAULT_AMENDER, COST_VIEWER, AMENDER, PLAIN].map((user) => access.canViewCourierCost(user))
     assert.notDeepEqual(verdicts, rule)
   })
 }
 check('mutant (every caller): the cost viewer\'s records leak and this file notices', () => {
-  const bad = mutate(GATE_EXPRESSION, GATE_HEAD + 'return true')
+  const bad = mutate(GATE_EXPRESSION, 'return true')
   assert.notDeepEqual(leaks(bad.redactSaleRecords(built, COST_VIEWER)), [])
   assert.notDeepEqual(leaks(bad.redactAmendmentEntries(ledger, COST_VIEWER)), [])
 })
@@ -314,7 +308,7 @@ for (const [who, user] of [['a plain reader', PLAIN], ['a cost viewer', COST_VIE
     assert.equal(out.id, 7)
   })
 }
-for (const [who, user] of [['an administrator', ADMIN], ['an all-grant', ALL_GRANT]]) {
+for (const [who, user] of [['an administrator', ADMIN], ['a default Sales role', DEFAULT_STAFF], ['a full amender with the permission on', DEFAULT_AMENDER]]) {
   check(`control: ${who} gets the write response untouched`, () => {
     const body = saleSnapshot()
     assert.equal(access.projectCourierCostResponse(body, user), body)
@@ -348,6 +342,59 @@ check('mutant (records cap passes through): a snapshot nested past the cap leaks
 check('mutant (camelCase twin kept): the camelCase cost keys of a write response are caught', () => {
   const bad = mutate('const fingerprint = (key: string): string => key.toLowerCase().replace(/[\\s_-]/g, \'\')', 'const fingerprint = (key: string): string => key')
   assert.notDeepEqual(leaks(bad.projectCourierCostResponse(saleSnapshot(), PLAIN)), [])
+})
+
+// ---- differential: the gate answers exactly as production did (fdcc77055), for every role and permission shape ----------------
+// Owner, 16 Nov 2026: the courier cost is visible to staff and administrator and is a granted permission. The text below is the production
+// function of commit fdcc77055, frozen here; the live gate must give the same answer for every role and every stored value.
+const PRODUCTION_FDCC77055 = [
+  "import { getActionTier, isAdminControlUser, type PermissionUser } from './permissions'",
+  'export function canViewCourierCost(user: PermissionUser): boolean {',
+  "  return isAdminControlUser(user) || getActionTier(user, 'sales', 'view_courier_cost') !== 'none'",
+  '}',
+].join(String.fromCharCode(10))
+const frozen = load('src/lib/courierCostAccess.ts', PRODUCTION_FDCC77055)
+const KEYS = [undefined, 'true', 'false', '"no"', 'null', '"view"', '"review"', '"full"', '0', '1']
+const roleMaps = ['{}', '{"all":true}', '{"sales":true}', '{"sales":"view"}', '{"sales":"review"}', '{"sales":false}', '{"sales":"none"}', '{"reports":true,"product_cost_view":true}', 'not json', '[]', 'null']
+  .flatMap((base) => KEYS.map((k) => (k === undefined || !base.startsWith('{') ? base : base.slice(0, -1) + (base.length > 2 ? ',' : '') + '"sales:view_courier_cost":' + k + '}')))
+const userMaps = [undefined, null, '{}', '{"sales:view_courier_cost":true}', '{"sales:view_courier_cost":false}', '{"sales":false}', '{"sales":true}', '{"all":true}', 'not json']
+const principals = []
+for (const role_code of ['admin', 'Admin', ' admin ', 'employee', 'manager', 'customer', 'storefront', '', undefined]) {
+  for (const role_permissions of roleMaps) for (const permissions of userMaps) principals.push({ role_code, role_permissions, ...(permissions === undefined ? {} : { permissions }) })
+}
+principals.push(null, undefined, {}, { role_code: 'employee' })
+check('differential vs fdcc77055: canViewCourierCost answers identically for ' + principals.length + ' principals (role code x role map x courier value x user map)', () => {
+  let trues = 0
+  for (const user of principals) {
+    const live = access.canViewCourierCost(user)
+    assert.equal(live, frozen.canViewCourierCost(user), JSON.stringify(user))
+    if (live) trues += 1
+  }
+  assert.ok(trues > 100 && trues < principals.length - 100, 'the matrix holds both answers in volume (' + trues + ' true)')
+})
+check('the live gate source carries the production expression and no admin-only shortcut', () => {
+  assert.ok(gateSource.includes("return isAdminControlUser(user) || getActionTier(user, 'sales', 'view_courier_cost') !== 'none'"))
+  assert.equal(/holdsCourierCostGrant|courier_cost_admin_only/.test(gateSource), false)
+})
+check('discriminating: staff with the grant read the cost; staff with it switched off, and a cost-only viewer, do not; the admin does', () => {
+  const staffGranted = { role_code: 'employee', role_permissions: '{"sales":true,"sales:view_courier_cost":true}' }
+  const staffOff = { role_code: 'employee', role_permissions: '{"sales":true,"sales:view_courier_cost":false}' }
+  const costOnlyOff = { role_code: 'manager', role_permissions: '{"sales":"view","product_cost_view":true,"product_cost_edit":true,"sales:view_courier_cost":false}' }
+  assert.equal(access.canViewCourierCost(staffGranted), true)
+  assert.equal(access.canViewCourierCost(staffOff), false)
+  assert.equal(access.canViewCourierCost(costOnlyOff), false, 'product cost grants never open the courier cost')
+  assert.equal(access.canViewCourierCost(ADMIN), true)
+  assert.strictEqual(access.redactSaleRecords(built, staffGranted), built, 'granted staff get the records untouched')
+  assert.deepEqual(leaks(access.redactSaleRecords(built, staffOff)), [], 'switched-off staff get none of the figures')
+  const acq = load('src/lib/acquisitionCostAccess.ts')
+  assert.equal(acq.canViewAcquisitionCosts(staffGranted), false, 'product cost and profit stay admin only for granted staff')
+  assert.equal(acq.canViewAcquisitionCosts(ADMIN), true)
+})
+check('mutant (admin-only gate): the differential and the staff checks notice', () => {
+  const bad = mutate("return isAdminControlUser(user) || getActionTier(user, 'sales', 'view_courier_cost') !== 'none'", 'return isAdminControlUser(user)')
+  const staffGranted = { role_code: 'employee', role_permissions: '{"sales":true,"sales:view_courier_cost":true}' }
+  assert.notEqual(bad.canViewCourierCost(staffGranted), frozen.canViewCourierCost(staffGranted))
+  assert.equal(principals.some((user) => bad.canViewCourierCost(user) !== frozen.canViewCourierCost(user)), true)
 })
 
 console.log(`GREEN courier cost access: ${passed} checks hold`)

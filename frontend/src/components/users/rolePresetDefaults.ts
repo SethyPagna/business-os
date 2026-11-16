@@ -58,6 +58,8 @@ export const ROLE_PRESETS: RolePreset[] = [
       'sales:bulk': false,
       'sales:import': false,
       'sales:export': false,
+      // Owner, 16 Nov 2026: the courier's actual cost is visible to staff and administrator, as a visible granted permission (written here, not left to the code default).
+      'sales:view_courier_cost': true,
       // Owner, 5 Oct 2026: product information edits and image upload, no costs. Full
       // tier with every other Products action off (keep in step with
       // cloudflare/src/lib/roleDefaults.ts DEFAULT_ROLE_PERMISSIONS.employee).
@@ -129,6 +131,8 @@ export const ROLE_PRESETS: RolePreset[] = [
       inventory_check_show_cost: false,
       branches: true,
       sales: true,
+      // Owner, 16 Nov 2026: the courier's actual cost is visible to staff and administrator, as a visible granted permission (written here, not left to the code default).
+      'sales:view_courier_cost': true,
       returns: true,
       fees: true,
       contacts: true,

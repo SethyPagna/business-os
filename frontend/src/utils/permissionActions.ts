@@ -314,8 +314,10 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // explicit capability. Individual actions above remain independently
     // grantable to front-line staff.
     { key: 'bulk', tKey: 'perm_act_sales_bulk', label: 'Change multiple sales at once', shortTKey: 'perm_short_bulk', short: 'Bulk changes', review: 'block' },
-    // The courier's actual cost row (`view_courier_cost`, owner 14 Oct 2026) is RETIRED (owner, 15 Nov 2026: cost is admin only, so a switch
-    // for it would do nothing). The Worker keeps the stored key readable as holdsCourierCostGrant (lib/courierCostAccess.ts), the way back.
+    // Owner, 14 Oct 2026, confirmed 16 Nov 2026: the courier's actual cost (what the shop paid the driver) on a sale, its history, the reports
+    // and the dashboard. A visible, granted permission: on by default for the Manager and Employee roles; the Worker's canViewCourierCost
+    // (lib/courierCostAccess.ts) reads the same `sales:view_courier_cost` switch, and an administrator always sees it. Product cost and profit stay admin only.
+    { key: 'view_courier_cost', tKey: 'perm_act_sales_view_courier_cost', label: 'View actual delivery cost', shortTKey: 'perm_short_courier_cost', short: 'Courier cost', review: 'allow' },
   ],
 
   promotions: [

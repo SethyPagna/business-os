@@ -275,6 +275,22 @@ const NEW_KEYS = ['cost_missing_snapshot_lines', 'cost_known_lines', 'cost_compl
     assert.deepEqual(leaks, [])
   })
 
+  // Owner, 16 Nov 2026: the courier cost is a granted permission, separate from the product-cost money above. Staff holding it read the courier
+  // figure and still none of the unknown-cost count (product cost); the same staff with it switched off read neither.
+  await check('staff with the courier permission read the courier cost and no unknown-cost count; with it switched off they read neither', async () => {
+    try {
+      h.setUser(COST_AND_COURIER)
+      const granted = (await get(reports.default, `/overview?${WINDOW}`)).sales.totals
+      assert.equal(typeof granted.delivery_actual_cost_usd, 'number', 'the courier permission reads the courier cost')
+      assert.deepEqual(hasAny(granted, NEW_KEYS), [])
+      for (const key of ['cost_usd', 'profit_usd']) assert.equal(Object.hasOwn(granted, key), false, key)
+      h.setUser(COST_NO_COURIER)
+      const off = (await get(reports.default, `/overview?${WINDOW}`)).sales.totals
+      assert.equal(Object.hasOwn(off, 'delivery_actual_cost_usd'), false, 'switched off: no courier cost')
+      assert.deepEqual(hasAny(off, NEW_KEYS), [])
+    } finally { h.setUser(ADMIN) }
+  })
+
   await check('costViewProfit restates profit but never drops or rewrites the unknown-cost count', () => {
     const restated = profitView.costViewProfit({ revenue_usd: 10, cost_usd: 4, profit_usd: 5, cost_missing_snapshot_lines: 2, cost_known_lines: 3, cost_complete: false })
     assert.equal(restated.profit_usd, 6)

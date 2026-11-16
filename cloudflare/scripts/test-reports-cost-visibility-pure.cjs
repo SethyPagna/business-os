@@ -224,9 +224,11 @@ function assertNoSensitive(value, label) {
     const adminBody = pick(await request(pathname, true))
     assert.match(JSON.stringify(adminBody), /"cost_usd"|"actual_cost_usd"/, `${pathname} admin retains sensitive detail`)
   }
-  // Owner, 15 Nov 2026: cost, profit and the courier's actual cost are ADMIN ONLY. A non-admin holding the cost-view grant, the courier
-  // permission, or both is answered exactly like one holding neither; the administrator is the control (asserted in the loop above).
+  // Owner, 15 Nov 2026: product cost and profit are ADMIN ONLY, so the cost-view grant is inert. Owner, 16 Nov 2026: the courier's actual cost is a
+  // granted permission (sales:view_courier_cost, on for staff): a non-admin holding it reads the courier keys and still no product cost or profit.
+  // The administrator is the control (asserted in the loop above); the four cells cover every cost x courier combination.
   const everyGrant = [[false, false], [true, false], [false, true], [true, true]]
+  const productKeysOf = sensitiveTotals.filter((key) => !['delivery_actual_cost_usd', 'delivery_actual_cost_count', 'delivery_margin_usd', 'delivery_net_usd', 'recognized_delivery_cost_usd', 'pending_delivery_cost_usd'].includes(key))
   for (const pathname of ['/business-summary/sales?pageSize=10', '/business-summary/sales?intent=export&pageSize=10']) {
     const denied = await request(pathname, false)
     for (const [cost, courier] of everyGrant) {
@@ -236,7 +238,11 @@ function assertNoSensitive(value, label) {
       assertNoSensitive(granted.rows, `${pathname} cost=${cost} courier=${courier}`)
       assert.equal(Object.hasOwn(granted.rows[0], 'profit_excludes_delivery'), false, 'no profit at all, so no flag')
       assert.equal(granted.rows[0].revenue_usd, denied.rows[0].revenue_usd, 'public revenue is unchanged by the grant')
-      if (pathname.includes('intent=export')) assertNoSensitive(granted.totals, 'export totals for a grant holder')
+      if (pathname.includes('intent=export')) {
+        const text = JSON.stringify(granted.totals)
+        for (const key of [...productKeysOf, 'cost_usd', 'profit_usd']) assert.equal(text.includes('"' + key + '"'), false, 'export totals never carry ' + key + ' for a grant holder')
+        assert.equal(Object.hasOwn(granted.totals, 'delivery_actual_cost_usd'), courier, 'export totals carry the courier cost exactly when the courier permission is held (cost=' + cost + ')')
+      }
     }
     assert.equal((await request(pathname, true)).rows[0].gross_profit_usd, 13, `${pathname}: the administrator keeps the full receipt profit`)
     if (pathname.includes('intent=export')) {
@@ -250,8 +256,11 @@ function assertNoSensitive(value, label) {
     ['/grouped?by=branch', (body) => body.rows[0]]]) {
     for (const [cost, courier] of everyGrant) {
       const seen = pick(await request(pathname, false, cost, courier))
-      for (const key of [...courierKeys, 'cost_usd', 'profit_usd', 'margin_pct', 'removal_loss_usd', 'profit_excludes_delivery']) {
+      for (const key of ['cost_usd', 'profit_usd', 'margin_pct', 'removal_loss_usd', 'profit_excludes_delivery']) {
         assert.equal(Object.hasOwn(seen, key), false, `${pathname} cost=${cost} courier=${courier}: a grant holder never receives ${key}`)
+      }
+      for (const key of courierKeys) {
+        assert.equal(Object.hasOwn(seen, key), courier, `${pathname} cost=${cost} courier=${courier}: ${key} follows the courier permission alone`)
       }
     }
     const adminSeen = pick(await request(pathname, true))
@@ -261,11 +270,11 @@ function assertNoSensitive(value, label) {
   for (const pathname of ['/overview', '/grouped?by=courier']) {
     const rows = (body) => body.sales ? body.sales.couriers : body.rows
     for (const [cost, courier] of everyGrant) {
-      assert.equal(Object.hasOwn(rows(await request(pathname, false, cost, courier))[0], 'actual_cost_usd'), false, `${pathname}: no grant reads the courier row cost`)
+      assert.equal(Object.hasOwn(rows(await request(pathname, false, cost, courier))[0], 'actual_cost_usd'), courier, `${pathname} cost=${cost} courier=${courier}: the courier row cost follows the courier permission alone`)
     }
     assert.equal(Object.hasOwn(rows(await request(pathname, true))[0], 'actual_cost_usd'), true, `${pathname}: the administrator does`)
   }
-  console.log('PASS cost and courier grants are inert on every report: admin only (15 Nov 2026)')
+  console.log('PASS product cost and profit are admin only on every report (the cost grant is inert); the courier cost follows its own permission (16 Nov 2026)')
   console.log('PASS mounted overview/day/group/export employee and admin payload parity')
   console.log('PASS report totals/day/group/export gates hide actual and derived delivery costs for employees and retain them for admins')
 })().catch((error) => { console.error(error); process.exitCode = 1 })

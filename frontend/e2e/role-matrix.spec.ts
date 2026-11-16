@@ -6,8 +6,9 @@ import { pageErrorsExcludingKnown, ADMIN_ORIGIN } from './support/harness'
 import { APP_ROOT } from './support/session'
 import { NAV_ITEMS } from '../src/components/shared/navigationConfig.ts'
 import { costKeysIn } from './support/costRedaction'
+import { canViewCourierCost } from '../../cloudflare/src/lib/courierCostAccess.ts'
 import {
-  ADMIN_ROUTES, HUB_PAGES, ROLES, accessFor, deriveRole, expectedAccountPages, expectedHubSections, expectedLanding, expectedNavIds, grant, seesCost,
+  ADMIN_ROUTES, HUB_PAGES, ROLES, accessFor, deriveRole, expectedAccountPages, expectedHubSections, expectedLanding, expectedNavIds, grant, seesCost, workerUser,
   type RoleAccess, type RoleDef,
 } from './support/roleMatrix'
 import { isPhoneProject, openAsRole, type RoleSession } from './support/roleSession'
@@ -755,4 +756,25 @@ test('the grants "View product costs" and "Edit product costs" give no role any 
   // Both seeded staff roles open the Dashboard (owner, 15 Nov 2026); the Employee only views it.
   expect(accessFor(ROLES.find((entry) => entry.id === 'employee') as RoleDef).canAccessPage('dashboard')).toBe(true)
   expect(accessFor(MANAGER).canAccessPage('dashboard')).toBe(true)
+})
+
+// Owner, 16 Nov 2026: "Courier cost: visible to staff and admin ... show in permissions, done as given permission to staff." The courier's actual cost is its own
+// granted permission (sales:view_courier_cost), independent of product cost: the Manager and Employee defaults hold it, the editor and the Worker answer the same for
+// every role, switching it off closes it for that role alone, and product cost stays administrator only for all of them.
+test('courier cost permission: the role editor and the Worker agree for every role; staff hold it, product cost stays admin only', () => {
+  const rows = ROLES.map((entry) => ({ id: entry.id, access: accessFor(entry), worker: canViewCourierCost(workerUser(entry)) }))
+  for (const { id, access, worker } of rows) expect(access.can('sales', 'view_courier_cost'), `${id}: editor = Worker`).toBe(worker)
+  const byId = Object.fromEntries(rows.map((row) => [row.id, row.worker]))
+  expect(byId.employee, 'Employee default').toBe(true)
+  expect(byId.manager, 'Manager default').toBe(true)
+  expect(byId['cost-viewer'], 'Employee plus the inert cost grant').toBe(true)
+  expect(byId.admin, 'administrator').toBe(true)
+  expect(byId.cashier, 'POS-only role (no Sales)').toBe(false)
+  expect(byId['image-only'], 'Product Viewer preset (no Sales)').toBe(false)
+  expect(byId.webmaster, 'Website Editor role (no Sales)').toBe(false)
+  const employee = ROLES.find((entry) => entry.id === 'employee') as RoleDef
+  const off = deriveRole(employee, 'employee-courier-off', 'Employee default, courier cost switched off', { 'sales:view_courier_cost': false })
+  expect(canViewCourierCost(workerUser(off)), 'switched off: the Worker closes it').toBe(false)
+  expect(accessFor(off).can('sales', 'view_courier_cost'), 'switched off: the editor agrees').toBe(false)
+  for (const { id, access } of rows) if (id !== 'admin') expect(seesCost(access), `${id}: product cost stays admin only`).toBe(false)
 })

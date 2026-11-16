@@ -11,10 +11,10 @@ export function resettableRoleCode(role: { code?: unknown } | null | undefined):
   return code === 'employee' || code === 'manager' ? code : null
 }
 
-// A retired grant (permissionDefinitions.ts `retired`, plus the retired Sales action row) is not drawn in the editor and is not counted
+// A retired grant (permissionDefinitions.ts `retired`; no action row is retired since 16 Nov 2026, when the courier cost row came back) is not drawn in the editor and is not counted
 // or cleared by it: its stored value is left exactly as it is, so a reset must not write the default over it either. The cost grants
 // are the case: owner, 15 Nov 2026, cost is administrator only, and the stored grants are the way back if that ruling is reversed.
-const RETIRED_ACTION_KEYS = ['sales:view_courier_cost']
+const RETIRED_ACTION_KEYS: readonly string[] = []
 export const RETIRED_PERMISSION_KEYS: readonly string[] = [
   ...PERMISSION_DEFS.filter((def) => def.retired).map((def) => def.key),
   ...RETIRED_ACTION_KEYS,

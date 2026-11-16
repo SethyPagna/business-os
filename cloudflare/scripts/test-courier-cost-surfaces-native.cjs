@@ -2,9 +2,7 @@
 // Courier (actual delivery) cost on every sale surface, against the WHOLE Worker
 // on workerd + D1.
 //
-// Owner rule (15 Nov 2026, superseding the 14 Oct per-role switch): the courier cost is ADMIN ONLY. No Sales grant, cost grant or
-// courier switch opens it, so every non-admin below is a role that must see nothing. The 14 Oct text follows, for the history:
-// the courier cost sat behind one permission,
+// Owner rule (14 Oct 2026): the courier cost sits behind one permission,
 // sales:view_courier_cost. It is on for an administrator and for every role that
 // holds Sales until the role editor switches it off. A caller with it off is a
 // cost viewer who gets GOODS profit or a plain reader who gets neither (cost grant,
@@ -43,22 +41,18 @@ const flag = name => (process.argv.slice(2).find(arg => arg.startsWith(`--${name
 const WRONG = flag('wrong')
 const BASE = flag('base')
 const GATE = 'src/lib/courierCostAccess.ts'
-const NL = String.fromCharCode(10)
-// The gate is now admin only; the mutants rewrite its body to the old or a wrong rule. The body is anchored with the closing brace and the
-// start of the next doc comment, so the anchor occurs once (the retired per-role switch function follows it).
-const TAIL = NL + '}' + NL + NL + '/**' + NL + ' * The per-role switch'
-const GATE_EXPRESSION = '  return isAdminControlUser(user)' + TAIL
-const body = (text) => '  ' + text + TAIL
+const GATE_EXPRESSION = "  return isAdminControlUser(user) || getActionTier(user, 'sales', 'view_courier_cost') !== 'none'"
 const MUTANTS = {
-  open: [{ name: 'open', file: GATE, from: GATE_EXPRESSION, to: body('return true') }],
-  amend: [{ name: 'amend', file: GATE, from: GATE_EXPRESSION, to: body("return isAdminControlUser(user) || getActionTier(user, 'sales', 'amend') === 'full'") }],
-  'sales-switch': [{ name: 'sales-switch', file: GATE, from: GATE_EXPRESSION, to: body("return isAdminControlUser(user) || getActionTier(user, 'sales', 'view_courier_cost') !== 'none'") }],
+  open: [{ name: 'open', file: GATE, from: GATE_EXPRESSION, to: '  return true' }],
+  amend: [{ name: 'amend', file: GATE, from: GATE_EXPRESSION, to: "  return isAdminControlUser(user) || getActionTier(user, 'sales', 'amend') === 'full'" }],
+  'admin-only': [{ name: 'admin-only', file: GATE, from: GATE_EXPRESSION, to: '  return isAdminControlUser(user)' }],
   mutation: [{ name: 'mutation', file: GATE, from: 'if (mutation) args[0]', to: 'if (false) args[0]' }],
   'cost-grant': [
     { name: 'cost-grant-import', file: GATE, from: "import { getActionTier, isAdminControlUser, type PermissionUser } from './permissions'",
       to: "import { getActionTier, getMergedPermissions, isAdminControlUser, type PermissionUser } from './permissions'" },
-    { name: 'cost-grant', file: GATE, from: GATE_EXPRESSION, to: body('return isAdminControlUser(user) || getMergedPermissions(user).product_cost_view === true') },
+    { name: 'cost-grant', file: GATE, from: GATE_EXPRESSION, to: '  return isAdminControlUser(user) || getMergedPermissions(user).product_cost_view === true' },
   ],
+  'amend-gate': [{ name: 'amend-gate', file: 'src/routes/sales.ts', from: "if (kind === 'delivery_actual_cost_changed' && !canViewCourierCost(user)) {", to: "if (false) {" }],
   summary: [{ name: 'summary', file: GATE, from: "record.summary.replace(COURIER_COST_SUMMARY, '$1 changed')", to: 'record.summary' }],
   ledger: [{ name: 'ledger', file: GATE, from: 'const costEntry = row.kind === COST_LEDGER_KIND', to: 'const costEntry = false' }],
 }
@@ -193,12 +187,13 @@ async function main() {
       })
     }
 
-    // ---- the default: a Sales role nobody touched reads NO courier cost either (owner, 15 Nov 2026: admin only) ----
-    for (const [label] of surfaces) {
-      r.check(`a Sales role with every default grant cannot read the courier cost on ${label}`, () => {
+    // ---- the default: a Sales role nobody switched off reads what the administrator reads ----
+    for (const [label, , control] of surfaces) {
+      if (!control) continue
+      r.check(`a Sales role with the permission left on reads the courier cost on ${label}`, () => {
         const got = results[`default-viewer|${label}`]
         assert.equal(got.status, 200, `default-viewer ${label} answered ${got.status}`)
-        assert.deepEqual(got.hits, [], `the Sales role with the default grants sees the courier cost at ${got.hits.slice(0, 6).join(', ')}`)
+        assert.ok(got.hits.length > 0, `the Sales role with the default permission sees no courier cost on ${label}`)
       })
     }
 
@@ -279,53 +274,9 @@ async function main() {
     })
     const defaultAmenderList = await read('default-amender', `/api/sales?${RANGE}`, defaultAmender)
     const defaultAmenderRecords = await read('default-amender', `/api/sales/${idA}/records`, defaultAmender)
-    r.check('a full sales amender with every default grant cannot read it on the list or in the records', () => {
-      assert.deepEqual(defaultAmenderList.hits, [])
-      assert.deepEqual(defaultAmenderRecords.hits, [])
-    })
-
-    // ---- setting or clearing the cost after the sale is administrator-only on the server, not just hidden in the browser ----
-    // A Sales amender (full tier, with the cost grant and without) is refused with the same answer whatever the stored value, so a guess is
-    // never confirmed, and the database is byte-for-byte what it was. The administrator can still amend.
-    const stateOf = async saleId => JSON.stringify({
-      sale: await h.db.prepare('SELECT * FROM sales WHERE id=?').bind(saleId).first(),
-      amendments: (await h.db.prepare('SELECT * FROM sale_amendments WHERE sale_id=? ORDER BY id').bind(saleId).all()).results,
-      receipts: (await h.db.prepare('SELECT COUNT(*) AS n FROM sale_mutation_receipts').first()).n,
-      audit: (await h.db.prepare('SELECT COUNT(*) AS n FROM audit_logs').first()).n,
-    })
-    const costOf = async saleId => (await h.db.prepare('SELECT delivery_actual_cost_usd AS cost FROM sales WHERE id=?').bind(saleId).first()).cost
-    const beforeA = await stateOf(idA)
-    assert.equal(await costOf(idA), 1.37, 'the fixture holds 1.37 before the refusals')
-    const refusals = []
-    for (const [label, value] of [['a different amount', 9.99], ['the stored amount', 1.37], ['a clear', null], ['a blank', ''], ['zero', 0]]) {
-      for (const [who, cookie] of [['amender (cost grant, switch off)', amender], ['amender (every default grant)', defaultAmender]]) {
-        refusals.push({ label, who, res: await H.amendSale(h, idA, { kind: 'delivery_actual_cost_changed', client_request_id: `ccs-a-refused-${refusals.length}`, delivery_actual_cost_usd: value }, `${who} ${label}`, cookie) })
-      }
-    }
-    r.check('a Sales amender cannot set, clear or confirm the courier cost: 403 with a stable code, the same answer for every value', () => {
-      for (const { label, who, res } of refusals) {
-        assert.equal(res.status, 403, `${who} ${label} answered ${res.status} ${JSON.stringify(res.body).slice(0, 200)}`)
-        assert.equal(res.body.code, 'courier_cost_admin_only')
-        assert.match(res.body.error, /^Only an administrator can/)
-      }
-      const [first] = refusals
-      for (const { label, who, res } of refusals) assert.deepEqual(res.body, first.res.body, `${who} ${label}: the refusal differs from the first one, which would tell a guess apart`)
-      assert.deepEqual(scan(first.res.body), [])
-      assert.doesNotMatch(JSON.stringify(first.res.body), /already|1.37|9.99/)
-    })
-    const afterA = await stateOf(idA)
-    r.check('the refusals changed nothing: the sale row, its ledger, the receipts and the audit log are byte-for-byte what they were', () => {
-      assert.equal(afterA, beforeA)
-      assert.equal(JSON.parse(afterA).sale.delivery_actual_cost_usd, 1.37)
-    })
-    const adminCost = await H.amendSale(h, idA, { kind: 'delivery_actual_cost_changed', client_request_id: 'ccs-a-admin-cost', delivery_actual_cost_usd: 1.5 })
-    const adminNoop = await H.amendSale(h, idA, { kind: 'delivery_actual_cost_changed', client_request_id: 'ccs-a-admin-noop', delivery_actual_cost_usd: 1.5 })
-    const costAAfterAdmin = await costOf(idA)
-    r.check('the administrator can still amend the courier cost, and still hears that a repeat is already the cost', () => {
-      assert.equal(adminCost.status, 200, JSON.stringify(adminCost.body).slice(0, 200))
-      assert.equal(costAAfterAdmin, 1.5)
-      assert.equal(adminNoop.status, 400)
-      assert.match(adminNoop.body.error, /already the actual delivery cost/)
+    r.check('a full sales amender with the permission left on reads it on the list and in the records', () => {
+      assert.ok(defaultAmenderList.hits.length > 0)
+      assert.ok(defaultAmenderRecords.hits.length > 0)
     })
 
     // ---- every write that returns the sale's canonical snapshot leaves by the list's rule ----
@@ -366,10 +317,10 @@ async function main() {
         assert.ok(got.hits.length > 0, `the scan found no courier cost on the administrator's ${path} response`)
       })
     }
-    r.check('a staff account without sales:amend and with every default grant cannot read the courier cost on the create response', () => {
+    r.check('control: a staff account without sales:amend but with the permission left on reads the courier cost on the create response', () => {
       const got = writeOf('create', 'staff-on')
       assert.equal(got.status, 200, `staff-on create answered ${got.status}`)
-      assert.deepEqual(got.hits, [])
+      assert.ok(got.hits.length > 0)
     })
     for (const path of ['create', 'create replay', 'create-receipt (GET)', 'add items', 'status change']) {
       r.check(`a staff account with the permission off cannot read the courier cost on the ${path} response`, () => {
@@ -420,6 +371,59 @@ async function main() {
       console.log(`MATRIX ${label.padEnd(26)} ${cells.join(' | ')}`)
     }
     console.log(`MATRIX ${'sales list (amender off)'.padEnd(26)} ${amenderList.hits.length ? 'VISIBLE' : 'hidden'}`)
+
+    // ---- changing the cost after the sale needs the courier cost permission (owner, 16 Nov 2026), as production did for a holder ----
+    // Whoever cannot read the cost may not change it blind: 403 with a stable code and ONE body for every value, so a guess is never confirmed, and the
+    // database is byte-for-byte what it was. A holder of the grant (the default amender) and the administrator amend as before. Entry paths
+    // (checkout, delivery_added) are not part of this rule and were exercised in the fixture above by the same accounts.
+    const plainAmender = await h.addEmployee(967, 'ccs_plain_amender', { sales: true, ...OFF })
+    const stateOf = async saleId => JSON.stringify({
+      sale: await h.db.prepare('SELECT * FROM sales WHERE id=?').bind(saleId).first(),
+      amendments: (await h.db.prepare('SELECT * FROM sale_amendments WHERE sale_id=? ORDER BY id').bind(saleId).all()).results,
+      receipts: (await h.db.prepare('SELECT COUNT(*) AS n FROM sale_mutation_receipts').first()).n,
+      audit: (await h.db.prepare('SELECT COUNT(*) AS n FROM audit_logs').first()).n,
+    })
+    const costOf = async saleId => (await h.db.prepare('SELECT delivery_actual_cost_usd AS cost FROM sales WHERE id=?').bind(saleId).first()).cost
+    const beforeA = await stateOf(idA)
+    assert.equal(await costOf(idA), 1.37, 'the fixture holds 1.37 before the refusals')
+    const refusals = []
+    for (const [label, value] of [['a different amount', 9.99], ['the stored amount', 1.37], ['a clear', null], ['a blank', ''], ['zero', 0]]) {
+      for (const [who, cookie] of [['amender (cost grant, courier switch off)', amender], ['amender (sales only, courier switch off)', plainAmender]]) {
+        refusals.push({ label, who, res: await H.amendSale(h, idA, { kind: 'delivery_actual_cost_changed', client_request_id: `ccs-a-refused-${refusals.length}`, delivery_actual_cost_usd: value }, `${who} ${label}`, cookie) })
+      }
+    }
+    r.check('an amender without the courier cost permission cannot set, clear or confirm it: 403, a stable code, the same body for every value', () => {
+      for (const { label, who, res } of refusals) {
+        assert.equal(res.status, 403, `${who} ${label} answered ${res.status} ${JSON.stringify(res.body).slice(0, 200)}`)
+        assert.equal(res.body.code, 'courier_cost_permission_required')
+        assert.match(res.body.error, /^You need the courier cost permission/)
+      }
+      const [first] = refusals
+      for (const { label, who, res } of refusals) assert.deepEqual(res.body, first.res.body, `${who} ${label}: the refusal differs from the first one, which would tell a guess apart`)
+      assert.deepEqual(scan(first.res.body), [])
+      assert.doesNotMatch(JSON.stringify(first.res.body), /already|1.37|9.99/)
+    })
+    const afterA = await stateOf(idA)
+    r.check('the refusals changed nothing: the sale row, its ledger, the receipts and the audit log are byte-for-byte what they were', () => {
+      assert.equal(afterA, beforeA)
+      assert.equal(JSON.parse(afterA).sale.delivery_actual_cost_usd, 1.37)
+    })
+    const holderCost = await H.amendSale(h, idA, { kind: 'delivery_actual_cost_changed', client_request_id: 'ccs-a-holder-cost', delivery_actual_cost_usd: 1.5 }, 'holder amend cost', defaultAmender)
+    const holderNoop = await H.amendSale(h, idA, { kind: 'delivery_actual_cost_changed', client_request_id: 'ccs-a-holder-noop', delivery_actual_cost_usd: 1.5 }, 'holder repeat', defaultAmender)
+    const costAAfterHolder = await costOf(idA)
+    const adminCost = await H.amendSale(h, idA, { kind: 'delivery_actual_cost_changed', client_request_id: 'ccs-a-admin-cost', delivery_actual_cost_usd: 1.6 })
+    const costAAfterAdmin = await costOf(idA)
+    r.check('a full amender who holds the courier cost permission can change it, as in production, and hears that a repeat is already the cost', () => {
+      assert.equal(holderCost.status, 200, JSON.stringify(holderCost.body).slice(0, 200))
+      assert.equal(costAAfterHolder, 1.5)
+      assert.ok(scan(holderCost.body).length > 0, 'the holder reads the cost back on the amend response')
+      assert.equal(holderNoop.status, 400)
+      assert.match(holderNoop.body.error, /already the actual delivery cost/)
+    })
+    r.check('the administrator can change the courier cost', () => {
+      assert.equal(adminCost.status, 200, JSON.stringify(adminCost.body).slice(0, 200))
+      assert.equal(costAAfterAdmin, 1.6)
+    })
   } finally {
     await h.mf.dispose?.()
   }

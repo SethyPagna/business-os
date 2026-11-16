@@ -215,7 +215,8 @@ async function assertRefused(fixtureOptions, expectedCode, label) {
     assert.deepEqual(counts(db), before)
   }
 
-  // Positive control for the withheld cost: an administrator making the same amendment is sent it.
+  // Owner, 16 Nov 2026: the courier cost is a granted permission. The delivery_added entry path stores the cost for anyone who may amend; the RESPONSE
+  // carries it for an administrator and for a holder of sales:view_courier_cost (the default), and withholds it from an account with the permission off.
   {
     const ADMIN_USER = { ...FULL_USER, id: 93, username: 'delivery_admin', role_code: 'admin' }
     const { db, stamp } = createFixture({ status: 'completed' })
@@ -223,6 +224,13 @@ async function assertRefused(fixtureOptions, expectedCode, label) {
     const adminResult = await request(db, '/101/amendments', 'POST', adminBody, ADMIN_USER)
     assert.equal(adminResult.status, 200, JSON.stringify(adminResult.body))
     assert.equal(adminResult.body.deliveryActualCostUsd, 1.25)
+    const OFF_USER = { ...FULL_USER, id: 94, username: 'delivery_courier_off', permissions: JSON.stringify({ sales: true, 'sales:view_courier_cost': false }) }
+    const off = createFixture({ status: 'completed' })
+    const offBody = await reviewed(off.db, addDeliveryBody(off.stamp, 'off-control'), OFF_USER)
+    const offResult = await request(off.db, '/101/amendments', 'POST', offBody, OFF_USER)
+    assert.equal(offResult.status, 200, JSON.stringify(offResult.body))
+    assert.equal('deliveryActualCostUsd' in offResult.body, false, 'an account without the courier cost permission is never sent the cost')
+    assert.equal(get(off.db, 'SELECT delivery_actual_cost_usd AS c FROM sales WHERE id=101').c, 1.25, 'the entry path still stores it')
   }
 
   // Both currently editable recorded-sale statuses accept the same atomic
@@ -237,8 +245,7 @@ async function assertRefused(fixtureOptions, expectedCode, label) {
     assert.equal(first.body.isDelivery, 1)
     assert.equal(first.body.deliveryContactId, 7)
     assert.equal(first.body.deliveryFeeUsd, 2)
-    // Owner rule, 15 Nov 2026: courier cost is administrator only. The sale stores it (asserted below); the response withholds it.
-    assert.equal('deliveryActualCostUsd' in first.body, false, 'a non-administrator is never sent the courier actual cost')
+    assert.equal(first.body.deliveryActualCostUsd, 1.25)
     assert.equal(first.body.totalUsd, 12)
     assert.equal(first.body.totalKhr, 48000)
     assert.equal(first.body.stockMoved, false)

@@ -176,12 +176,15 @@ await runTest('Save lists one row per changed module in the shared review; confi
 })
 
 await runTest('resetRolePermissions: retired grants stay exactly as stored, drawn grants take the default', () => {
-  assert.ok(RETIRED_PERMISSION_KEYS.includes('product_cost_view') && RETIRED_PERMISSION_KEYS.includes('product_cost_edit') && RETIRED_PERMISSION_KEYS.includes('sales:view_courier_cost'))
-  const defaults = { pos: true, products: true, product_cost_view: false, product_cost_edit: false, 'sales:view_courier_cost': false, inventory_check_show_price: true }
-  const stored = { pos: false, product_cost_view: true, 'sales:view_courier_cost': true, legacy_unknown_key: true }
+  assert.ok(RETIRED_PERMISSION_KEYS.includes('product_cost_view') && RETIRED_PERMISSION_KEYS.includes('product_cost_edit'))
+  // Owner, 16 Nov 2026: the courier cost grant is a drawn switch again, so a reset takes the default for it like any other drawn grant.
+  assert.ok(!RETIRED_PERMISSION_KEYS.includes('sales:view_courier_cost'), 'the courier cost grant is not retired')
+  const defaults = { pos: true, products: true, product_cost_view: false, product_cost_edit: false, 'sales:view_courier_cost': true, inventory_check_show_price: true }
+  const stored = { pos: false, product_cost_view: true, 'sales:view_courier_cost': false, legacy_unknown_key: true }
   assert.deepEqual(resetRolePermissions(stored, defaults), { pos: true, products: true, product_cost_view: true, 'sales:view_courier_cost': true })
-  assert.deepEqual(resetRolePermissions({}, defaults), { pos: true, products: true }, 'nothing stored: nothing written for a retired grant')
-  assert.deepEqual(resetRolePermissions('{"product_cost_edit":true}', defaults), { pos: true, products: true, product_cost_edit: true }, 'a stored JSON text reads the same')
+  assert.equal(resetRolePermissions({}, defaults)['sales:view_courier_cost'], true, 'nothing stored: the default is written for a drawn grant')
+  assert.deepEqual(resetRolePermissions({}, defaults), { pos: true, products: true, 'sales:view_courier_cost': true }, 'nothing stored: nothing written for a retired grant, the default for a drawn one')
+  assert.deepEqual(resetRolePermissions('{"product_cost_edit":true}', defaults), { pos: true, products: true, 'sales:view_courier_cost': true, product_cost_edit: true }, 'a stored JSON text reads the same')
   // DISCRIMINATING: the reset the review caught, defaults written over the stored grant, differs from the stored value.
   assert.notEqual(resetRolePermissions(stored, defaults).product_cost_view, defaults.product_cost_view)
 })

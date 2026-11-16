@@ -93,7 +93,7 @@ test('every surface that prints profit reads the flag; both packs carry the labe
   assert.match(sales, /profitTerms\(\{ \.\.\.formulaTotals, profit_excludes_delivery: profitExclDelivery \}\)/)
   const dashboard = read('src/components/dashboard/Dashboard.tsx')
   assert.match(dashboard, /profitTerms\(\{ \.\.\.aFormulaTotals, profit_excludes_delivery: aProfitExclDelivery \}\)/)
-  assert.match(dashboard, /const aCourierCostShown = aSeesCost && typeof analytics\?\.totals\?\.delivery_actual_cost_usd === 'number'/)
+  assert.match(dashboard, /const aCourierCostShown = typeof analytics\?\.totals\?\.delivery_actual_cost_usd === 'number'/)
   // periodData is now gated like the totals, so without profit there is no profit chart to offer.
   assert.match(dashboard, /\.\.\.\(aHasProfit \? \[\['profit', profitVsCogsLabel\]\]/)
   assert.match(dashboard, /const chartMode: DashboardChartMode = activeChart === 'profit' && !aHasProfit \? 'revenue' : activeChart/)

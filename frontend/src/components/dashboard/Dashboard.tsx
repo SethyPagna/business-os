@@ -1468,7 +1468,8 @@ export default function Dashboard() {
   // on goods alone (revenue - cost) with this flag, and no courier-cost keys,
   // so the cards below drop the delivery terms instead of printing $0.00.
   const aProfitExclDelivery = (analytics?.totals as Record<string, unknown> | undefined)?.profit_excludes_delivery === true
-  const aCourierCostShown = aSeesCost && typeof analytics?.totals?.delivery_actual_cost_usd === 'number'
+  // Owner, 16 Nov 2026: the courier cost follows its own grant (sales:view_courier_cost, admin always); the Worker omits it without the grant, so the key being present is the gate.
+  const aCourierCostShown = typeof analytics?.totals?.delivery_actual_cost_usd === 'number'
   // The period rows pass the same gate as the totals, so a caller without
   // cost and profit has no profit chart to draw: that tab is not offered.
   const chartMode: DashboardChartMode = activeChart === 'profit' && !aHasProfit ? 'revenue' : activeChart

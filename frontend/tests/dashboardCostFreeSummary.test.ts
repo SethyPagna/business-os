@@ -114,7 +114,9 @@ test('the validator still refuses a summary that is genuinely incomplete', () =>
 test('the stock-value card needs administrator cost access AND the Worker having sent it, and absent cost keys are never defaulted to 0', () => {
   // Every other cost, profit, loss and supplier-loss figure is gated on the same call (aSeesCost), so a leaking payload draws no card.
   assert.ok(dashboardSource.includes('const aSeesCost = canViewAcquisitionCosts(user)'))
-  for (const gate of ["aHasLosses", "aHasProfit", "aCourierCostShown", "aHasSupplierLoss"]) assert.match(dashboardSource, new RegExp("const " + gate + " = aSeesCost && typeof"), gate + " requires cost access")
+  for (const gate of ["aHasLosses", "aHasProfit", "aHasSupplierLoss"]) assert.match(dashboardSource, new RegExp("const " + gate + " = aSeesCost && typeof"), gate + " requires cost access")
+  // Owner, 16 Nov 2026: the courier cost is NOT product cost. It follows its own permission, which the Worker enforces by omitting the keys; the card shows whenever they arrive.
+  assert.ok(dashboardSource.includes("const aCourierCostShown = typeof analytics?.totals?.delivery_actual_cost_usd === 'number'"), 'the courier figure does not require product cost access')
   assert.ok(/aHasSupplierLoss\s*\? \{ label: [^\n]*fmtUSD\(aSupplierLossUsd\)/.test(dashboardSource), 'no $0.00 supplier loss without cost access: the row shows the count only')
   assert.match(dashboardSource, /const aHasStockValue = canViewAcquisitionCosts\(user\) && Number\.isFinite\(Number\(summary\?\.stock_value_usd \?\? NaN\)\)/)
   assert.match(dashboardSource, /\.\.\.\(aHasStockValue \? \[\{\s*id: 'stock-value'/, 'the card is spread in only when the stock value is shown')

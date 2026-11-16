@@ -395,7 +395,6 @@ const editorRows = new Set(editorAction.keys())
 const ALWAYS_REFUSED = {
   'branches:add': 'Shop and Warehouse are fixed: the route checks the switch and then always answers 409, so there is nothing to grant.',
   'branches:delete': 'Shop and Warehouse are fixed: the route checks the switch and then always answers 409, so there is nothing to grant.',
-  'sales:view_courier_cost': 'Retired 15 Nov 2026 (owner: cost is admin only): canViewCourierCost ignores the switch, so the editor offers no row. holdsCourierCostGrant keeps reading it as the way back.',
 }
 const SECTION_LEVEL = {
   'audit_log:view': 'The section tier is the switch (None / View = own entries / Full = everyone), so a separate row would say the same thing twice.',
@@ -576,7 +575,6 @@ const COST_GATES = [
   { text: 'Only an administrator can submit cost changes', how: 'input' },
   { text: 'Only an administrator can change the cost', how: 'input' },
   { text: 'Only an administrator can confirm or reverse a $0 cost', how: 'input' },
-  { text: 'Only an administrator can change the actual delivery cost of a sale', how: 'input' },
   { text: 'Only an administrator can record supplier return costs and settlement', how: 'control', why: 'Shown as the Supplier returns control after Add (returns:supplier), marked Admin only.' },
   { text: 'Only an administrator can review supplier return compensation and settlement', how: 'control', why: 'The same control: POST /returns/supplier.' },
   { text: 'Only an administrator can export an unredacted database backup', how: 'unmodelled', why: 'The Backup row has no action chips; its description says exporting and restoring need an administrator.' },

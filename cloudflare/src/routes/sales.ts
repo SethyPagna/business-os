@@ -4409,11 +4409,12 @@ app.post('/:id/amendments', async (c) => {
     }
   }
 
-  // Setting or clearing what the shop paid the driver after the sale is administrator-only (owner, 15 Nov 2026). The refusal comes before
-  // anything is read or written and is the same whatever the stored value is, so it can never confirm a guess. Adding a delivery with its
-  // cost (delivery_added) and the checkout box are the entry paths and are not part of this rule.
+  // Setting or clearing what the shop paid the driver after the sale needs the courier cost permission (owner, 16 Nov 2026: an administrator, or a
+  // role holding sales:view_courier_cost, which the Manager and Employee defaults do). Whoever may not read the cost may not change it blind. The
+  // refusal comes before anything is read or written and is the same body whatever the stored value is, so it can never confirm a guess. Adding a
+  // delivery with its cost (delivery_added) and the checkout box are the entry paths and are not part of this rule.
   if (kind === 'delivery_actual_cost_changed' && !canViewCourierCost(user)) {
-    return c.json({ error: 'Only an administrator can change the actual delivery cost of a sale.', code: 'courier_cost_admin_only' }, 403)
+    return c.json({ error: 'You need the courier cost permission to change the actual delivery cost of a sale.', code: 'courier_cost_permission_required' }, 403)
   }
 
   const amendmentRequestId = normalizeClientRequestId(body.client_request_id)

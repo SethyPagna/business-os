@@ -128,10 +128,10 @@ async function overview(query='',scope='all'){const res=await app.request('http:
  assert.ok(employeeOverviewCourier,'employee overview includes the courier activity row')
  for(const key of COURIER_COST_FIELDS)
   assert.ok(!(key in employeeOverviewCourier),`an employee whose courier-cost permission is off: the overview courier row strips ${key}`)
- // Owner rule, 15 Nov 2026: courier cost is administrator only. The default Sales grant (and the retired courier-cost grant) no longer opens it.
+ // Owner, 16 Nov 2026: the courier cost is a granted permission: the default Sales grant holds it, an administrator always does.
  const defaultOverviewCourier=(await overview('','sales')).body.sales.couriers.find(row=>row.delivery_contact_id===7)
- for(const key of COURIER_COST_FIELDS)
-  assert.ok(!(key in defaultOverviewCourier),`an employee with only the default Sales grant: the overview courier row strips ${key}`)
+ for(const key of ['actual_cost_usd','actual_cost_count','margin_usd'])
+  assert.ok(key in defaultOverviewCourier,`an employee with the default courier-cost permission reads ${key} on the overview courier row`)
  const adminOverviewCourier=(await overview('','sales-admin')).body.sales.couriers.find(row=>row.delivery_contact_id===7)
  for(const key of ['actual_cost_usd','actual_cost_count','margin_usd'])
   assert.ok(key in adminOverviewCourier,`an administrator reads ${key} on the overview courier row`)

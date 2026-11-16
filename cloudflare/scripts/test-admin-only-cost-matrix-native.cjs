@@ -20,8 +20,12 @@ const mod = { exports: {} }
 new Function('module', 'exports', ts.transpileModule(seedSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(mod, mod.exports)
 const SEED = mod.exports.DEFAULT_ROLE_PERMISSIONS
 
-// A key that names acquisition cost, profit, margin, stock value, removal loss or supplier loss/compensation (the courier cost too).
+// A key that names acquisition cost, profit, margin, stock value, removal loss or supplier loss/compensation (the courier cost too: see COURIER_LEAF).
 const COST_KEY = /(^|_)(cost|costs|cogs|profit|margin|purchase_price|stock_value|removal_loss|positive_value|total_value|compensation)(_|$)|^(supplier_)?loss_(usd|khr)$|revenue_after_losses|credit_open/i
+// Owner, 16 Nov 2026: the courier's actual cost is a granted permission (sales:view_courier_cost, on in the Manager and Employee seeds), NOT admin only.
+// Its keys match COST_KEY by name, so a non-admin response is scanned for them separately: product cost, profit and the rest stay admin only.
+const COURIER_LEAF = /^(delivery_(actual_cost|margin|net)_(usd|khr|count)|(recognized|pending)_delivery_cost_usd|actual_cost_(usd|count)|margin_usd)$/
+const productCostKeys = (value) => costKeys(value).filter((path) => !COURIER_LEAF.test(path.split('.').pop()))
 const DATE = '2026-11-10'
 const range = `startDate=${DATE}&endDate=${DATE}`
 function costKeys(value, trail = '$', found = []) {
@@ -69,6 +73,7 @@ async function main() {
       // cases (test-role-matrix-server-refusals-native, the stock-session, returns and products cost-entry tests).
       managerEditGrant: await h.addEmployee(913, 'matrix_manager_edit', { ...SEED.manager, product_cost_edit: true }),
     }
+    const employeeCourierOff = await h.addEmployee(914, 'matrix_employee_courier_off', { ...SEED.employee, 'sales:view_courier_cost': false })
     const ROUTES = [
       ['dashboard summary', `/api/dashboard?${range}`],
       ['dashboard analytics', `/api/analytics?${range}`],
@@ -99,15 +104,31 @@ async function main() {
           const res = await read(cookie, url, `${who} ${name}`)
           if (name === 'products list' || url.startsWith('/api/reports')) assert.ok(res.status === 200 || res.status === 403, `status ${res.status}`)
           else assert.equal(res.status, 200, `${who} must be able to open the Dashboard: ${res.status} ${JSON.stringify(res.body).slice(0, 160)}`)
-          assert.deepEqual(costKeys(res.body), [], 'omitted, never zeroed')
+          assert.deepEqual(productCostKeys(res.body), [], 'omitted, never zeroed')
         })
       }
     }
+    await check('the seeds store the courier permission as true (written, not left to the code default)', () => {
+      assert.strictEqual(SEED.manager['sales:view_courier_cost'], true)
+      assert.strictEqual(SEED.employee['sales:view_courier_cost'], true)
+    })
+    await check('manager (seed) and employee (seed) read the courier cost on the Dashboard analytics: a granted permission, not admin only', async () => {
+      for (const who of ['manager', 'employee']) {
+        const totals = (await read(cookies[who], `/api/analytics?${range}`, `${who} analytics courier`)).body.totals
+        assert.equal(totals.delivery_actual_cost_usd, 1.5, `${who} reads the courier cost`)
+        assert.equal(typeof totals.delivery_margin_usd, 'number', `${who} reads the delivery margin`)
+      }
+    })
+    await check('an employee with the courier permission switched off reads no courier cost, no margin built on it, and still no product cost', async () => {
+      const res = await read(employeeCourierOff, `/api/analytics?${range}`, 'courier-off employee analytics')
+      assert.equal(res.status, 200)
+      assert.deepEqual(costKeys(res.body), [], 'no cost-like key of any kind')
+    })
     await check('employee (seed) may open the Dashboard but the supplier return keeps only its count', async () => {
       const body = (await read(cookies.employee, `/api/analytics?${range}`, 'employee analytics')).body
       assert.equal(body.periodSupplierReturns.return_count, 1)
       assert.ok(!('loss_usd' in body.periodSupplierReturns) && !('supplier_compensation_usd' in body.periodSupplierReturns))
-      assert.ok(!('profit_usd' in body.totals) && !('cost_usd' in body.totals) && !('delivery_actual_cost_usd' in body.totals))
+      assert.ok(!('profit_usd' in body.totals) && !('cost_usd' in body.totals), 'product cost and profit stay admin only')
     })
   } finally { await h.mf.dispose() }
   console.log(failures.length ? `RED ${failures.length} failed` : 'GREEN admin-only cost matrix')

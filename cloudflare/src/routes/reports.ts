@@ -217,11 +217,13 @@ function unknownCostFields(sent: unknown, known: unknown, diagnostic: ReturnType
  * cost / profit / margin keys are NOT assigned (a client cannot tell "0"
  * from "hidden", so absence is the contract -- same rule as
  * buildDaySummaryRow / buildSaleReportRow above). Product costs follow
- * canViewCosts and the courier's actual cost follows canViewCourier
- * (lib/courierCostAccess.ts); both are administrator only since 15 Nov 2026,
- * so the callers pass the same answer for both. The branches that tell the two
- * apart (non-admin with one of them) cannot be reached today; they are kept as
- * the way back if either is given to a role again. An administrator holds both.
+ * canViewCosts (administrator only since 15 Nov 2026) and the courier's actual
+ * cost follows canViewCourier (lib/courierCostAccess.ts: an administrator, or a
+ * role holding sales:view_courier_cost, which staff do since 16 Nov 2026). So a
+ * non-admin with the courier permission reaches the courier-only branches below
+ * and reads the courier keys and no product cost or profit; the cost-without-
+ * courier branches are kept for a caller that passes canViewCosts. An
+ * administrator holds both.
  */
 export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: boolean, canViewCosts = isAdmin, places: 2 | 4 = 2, canViewCourier = isAdmin): Record<string, unknown> {
   if (!isAdmin && canViewCosts && !canViewCourier) {

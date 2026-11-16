@@ -42,6 +42,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRole
     inventory_check_show_cost: false,
     branches: true,
     sales: true,
+    // Owner, 16 Nov 2026: the courier's actual cost is visible to staff and administrator, as a visible granted permission (written here, not left to the code default).
+    'sales:view_courier_cost': true,
     returns: true,
     fees: true,
     contacts: true,
@@ -116,6 +118,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRole
     'sales:bulk': false,
     'sales:import': false,
     'sales:export': false,
+    // Owner, 16 Nov 2026: the courier's actual cost is visible to staff and administrator, as a visible granted permission (written here, not left to the code default).
+    'sales:view_courier_cost': true,
     returns: true,
     'returns:bulk': false,
     'returns:export': false,

@@ -129,8 +129,11 @@ async function main() {
     }
 
     // ---- controls: the instrument can see the figure where the reader may -------------
-    // Owner rule, 15 Nov 2026: cost is administrator only, so the administrator is the one reader who may see the figure.
-    // 'both' still holds the retired cost grants and the full-phone grant: it must find nothing, like the others.
+    // Owner rules, 15 and 16 Nov 2026: product cost is administrator only, and the audit search excludes every row that names a cost ('%cost%',
+    // lib/acquisitionCostAccess.ts) for anyone without product-cost authority. A courier-cost row names "cost", so the administrator is the one
+    // reader who can FIND the figure by typing it; 'both' (courier permission on by default, retired product-cost grants) finds nothing, exactly as a
+    // default staff account did in production. That is hiding more, never less: the rows themselves still list (asserted below) and the figure
+    // never leaves a response a reader may not see.
     for (const who of ['admin']) {
       const courier = await search(who, '8.27', '&entity=sale')
       const neighbour = await search(who, '8.28', '&entity=sale')
