@@ -523,7 +523,7 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
   // full money preimage guard before recording an override or its baseline.
   if (costOverrideActor && (!moneyPlan || table !== 'products')) invalidMoneyPlan()
   const costBefore = moneyPlan?.before as { cost_price_usd: number | null; cost_price_khr: number | null } | null
-  const costChange = costOverrideActor && costBefore ? planManualCostChange(Number(id), costBefore, body, costOverrideActor) : null
+  const costChange = costOverrideActor && costBefore ? planManualCostChange(Number(id), costBefore, roundProductCostPayload({ ...body }), costOverrideActor) : null
   const stockGuard = table === 'products' ? productStockGuardStatement([Number(id)], 'active') : null
   const nativeStockGuard = stockGuard ? env.DB.prepare(stockGuard.sql.replace(/@productIds/g, '?')).bind(stockGuard.params.productIds) : null
   let result

@@ -358,6 +358,27 @@ async function main() {
       assert.equal(costEntries(id)[0].previous_cost_usd,stored)
     }
   })
+  await check('a queued plan saved with a long cost (9.123456) is accepted and stored at 4 places in the product AND in the cost entry', async () => {
+    const productWrites = load('lib/productWrites.ts')
+    for (const [label, usd, khr, wantUsd, wantKhr] of [['usd only', 9.123456, undefined, 9.1235, null], ['usd and khr', 9.123456, 20500.123456, 9.1235, 20500.1235]]) {
+      const id = seedProduct(`QueuedLong-${label}`)
+      const body = { cost_price_usd: 8, ...(khr === undefined ? {} : { cost_price_khr: 1 }) }
+      await productWrites.prepareProductMoneyWrite(env, body, id, null)
+      const plan = body[productWrites.PRODUCT_MONEY_PLAN]
+      assert.ok(plan, 'a plan was prepared')
+      // the plan a pre-4dp client queued: the long cost is both in the body and in the frozen plan
+      body.cost_price_usd = usd; plan.after.cost_price_usd = usd
+      if (khr !== undefined) { body.cost_price_khr = khr; plan.after.cost_price_khr = khr }
+      for (const key of ['purchase_price_usd', 'purchase_price_khr']) if (Object.prototype.hasOwnProperty.call(body, key)) { body[key] = key.endsWith('usd') ? usd : khr; plan.after[key] = body[key] }
+      await productWrites.updateRow(env, 'products', id, body, { id: 9, name: 'Sethy Owner' })
+      assert.equal(row(id).cost_price_usd, wantUsd, label + ': product cost stored at 4 places')
+      if (khr !== undefined) assert.equal(row(id).cost_price_khr, wantKhr, label + ': product riel cost stored at 4 places')
+      const [entry] = costEntries(id)
+      assert.ok(entry, label + ': a typed cost records an entry')
+      assert.equal(entry.cost_usd, wantUsd, label + ': the cost entry holds the rounded cost, not the queued long one')
+      if (khr !== undefined) assert.equal(entry.cost_khr, wantKhr, label + ': the entry riel cost is rounded')
+    }
+  })
   await check('NULL-to-zero records an override; exact resaves do not', async () => {
     for (const [previous,next] of [[null,0]]) {
       const id = seedProduct(`ExactTransition-${previous}`)
