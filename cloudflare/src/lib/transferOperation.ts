@@ -10,7 +10,7 @@ import { canonicalTransferAuthorityGuardStatement } from './canonicalBranchIdent
 import { transferIntentAuditStatement } from './transferOperationReceipt'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
-import { resolveMovementCostSnapshot, type MovementCostPair } from './movementCostSnapshot'
+import { resolveMovementCostSnapshot, storedLotCost, type MovementCostPair } from './movementCostSnapshot'
 
 export const TRANSFER_OPERATION_KIND = 'stock.transfer'
 type Statement = { sql: string; params?: Record<string, unknown> }
@@ -209,7 +209,8 @@ export async function planTransferOperation(db: D1Compat, args: {
           statements.push({ sql: `INSERT INTO product_batches(variant_product_id,batch_key,lot_code,received_at,expiry_date,notes,is_active,batch_number,unit_cost_usd)
             SELECT @product,@key,@lot,@received,@expiry,@notes,1,COALESCE(MAX(batch_number),0)+1,@usd FROM product_batches WHERE variant_product_id=@product`,
           params: { product: line.destProductId, key, lot: lotCode, received: sourceLot.received_at, expiry: sourceLot.expiry_date, notes: sourceLot.notes,
-            usd: costSnapshot.unitCostUsd } })
+            // The movement snapshot keeps the source lot's cost as it was; the NEW lot is stored to 4 places (cost-4dp).
+            usd: storedLotCost(costSnapshot.unitCostUsd) } })
         }
       }
       allocations.push({ source_batch_id: take.batchId, destination_batch_id: destination?.id ?? null, destination_batch_key: key, quantity: take.quantity, source_snapshot: sourceLot, destination_snapshot: destination, cost_snapshot: costSnapshot })

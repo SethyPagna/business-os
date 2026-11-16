@@ -219,7 +219,7 @@ export type ReceiveBatchPlanInput = {
   receiptTotalUsd?: number | null
   paymentStatus?: 'paid' | 'credit' | null
   creditDueDate?: string | null
-  /** Internal only: retain an already-recorded catalog/lot snapshot verbatim. */
+  /** Identity matching only (prepareReceiptLotTarget): find a lot by its stored legacy cost. Never makes a write unrounded. */
   preserveHistoricalUnitCost?: boolean
   /**
    * Required whenever a receipt records a unit cost. It freezes the current
@@ -297,7 +297,9 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
   const receivedAt = normalizeTypedDate(input.receivedDate) || businessToday()
   const lotCode = dateToBatchCode(receivedAt) as string
   const batchKey = input.provenanceKey ? ` event:${input.provenanceKey}` : input.receiptLotTarget?.batchKey ?? lotCode
-  const unitCostUsd = unitCostForReceipt(input.unitCostUsd, input.preserveHistoricalUnitCost === true)
+  // A lot's cost is stored to 4 places whichever door wrote it (cost-4dp): preserveHistoricalUnitCost only widens the identity MATCH of
+  // prepareReceiptLotTarget (a legacy 5-place lot is found by its own cost); the value a receipt writes is always rounded.
+  const unitCostUsd = unitCostForReceipt(input.unitCostUsd)
   const receivedCost = unitCostUsd !== null && input.receiptTotalUsd != null
     ? roundMoney4(input.receiptTotalUsd)
     : receiptCostUsd(unitCostUsd, quantity)

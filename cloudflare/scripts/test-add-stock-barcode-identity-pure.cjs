@@ -394,6 +394,22 @@ async function main() {
     assert.notEqual(json.productId, 4758, 'the stock belongs on the new row')
   })
 
+  // cost-4dp: the sibling row copies the SOURCE row's cost when the request names none; a legacy cost over 4 places is stored rounded.
+  await check('cost-4dp: the sibling row an add creates stores the copied source cost to 4 places', async () => {
+    // The sibling's USD cost is its own lot's figure (0195); the KHR cost has no per-lot figure, so the copy is what is stored.
+    for (const [sourceCost, want] of [[4100.12345, 4100.1235], [123.456789, 123.4568], [20500.5, 20500.5]]) {
+      seed()
+      seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET cost_price_khr=@c, purchase_price_khr=@c WHERE id=4758').run({ c: sourceCost }))
+      const { status, json } = await req({ productId: 4758, type: 'add', quantity: 3, reason: 'Stock received', supplierName: 'Bong Long', unitCostUsd: 3, branchId: 2,
+        unlockPricing: true, pricing: { barcode: '999888777666', selling_price_usd: 22.0 } })
+      assert.equal(status, 200, JSON.stringify(json))
+      assert.equal(json.createdSibling, true)
+      const sibling = rawDb.prepare('SELECT cost_price_khr c, purchase_price_khr p FROM products WHERE id = @id').get({ id: json.productId })
+      assert.deepEqual({ ...sibling }, { c: want, p: want }, 'sibling KHR cost for source ' + sourceCost)
+      assert.equal(rawDb.prepare('SELECT cost_price_khr c FROM products WHERE id = 4758').get({}).c, sourceCost, 'the source row is not rewritten by the add')
+    }
+  })
+
   await check('a different barcode ALREADY held by a sibling routes there instead of making a third row', async () => {
     seed()
     seedStockFixture(rawDb,()=>rawDb.prepare("INSERT INTO products (id, name, name_key, barcode, is_active, is_group, stock_quantity, cost_price_usd, purchase_price_usd, selling_price_usd) VALUES (47155, @name, @nameKey, '999888777666', 1, 0, 0, 30.0, 30.0, 22.0)")
