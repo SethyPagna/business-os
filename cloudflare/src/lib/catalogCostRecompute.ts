@@ -88,7 +88,8 @@ export function roundStoredCost(value: unknown): number | null {
 /**
  * True when `after` is `before` itself or only `before` stored to 4 places. Saving a product that still holds a legacy cost over 4 places
  * rounds it; that is not a typed cost, so it must not record a manual cost entry (which would freeze the catalog formula at the baseline)
- * or confirm a cost review.
+ * or confirm a cost review. The product form shows and pre-fills 4 decimals, so a plain re-save sends the rounded value back.
+ * NULL against a number is never rounding: NULL to 0 and 0 to NULL stay exact and record an override.
  */
 export function isCostRoundingOnly(after: number | null | undefined, before: number | null | undefined): boolean {
   if ((after ?? null) === (before ?? null)) return true

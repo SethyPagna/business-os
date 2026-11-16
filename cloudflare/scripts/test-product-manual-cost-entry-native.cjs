@@ -350,16 +350,16 @@ async function main() {
     assert.deepEqual(costEntries(id),entriesBefore)
     assert.equal(row(id).cost_price_usd,14)
   })
-  await check('previous cost preserves unknown NULL and exact historical precision, without inferred backfill', async () => {
-    for (const previous of [null,3.123456]) {
+  await check('previous cost preserves unknown NULL and stores a legacy long value to 4 places, without inferred backfill', async () => {
+    for (const [previous,stored] of [[null,null],[3.123456,3.1235]]) {
       const id = seedProduct(`Previous-${previous}`)
       seedFixture(raw, () => raw.prepare('UPDATE products SET cost_price_usd=? WHERE id=?').run(previous,id))
       assert.equal((await request('PUT',`/${id}`,{cost_price_usd:8})).status,200)
-      assert.equal(costEntries(id)[0].previous_cost_usd,previous)
+      assert.equal(costEntries(id)[0].previous_cost_usd,stored)
     }
   })
-  await check('actual NULL-to-zero and legacy precision changes record override; exact resaves do not', async () => {
-    for (const [previous,next] of [[null,0],[3.123456,3.1235]]) {
+  await check('NULL-to-zero records an override; exact resaves do not', async () => {
+    for (const [previous,next] of [[null,0]]) {
       const id = seedProduct(`ExactTransition-${previous}`)
       seedFixture(raw, () => raw.prepare('UPDATE products SET cost_price_usd=? WHERE id=?').run(previous,id))
       const baseline = seedLot(id,7)
@@ -376,11 +376,11 @@ async function main() {
       assert.equal((await request('PUT',`/${id}`,{cost_price_usd:next})).status,200)
       assert.equal(costEntries(id).length,1)
     }
-    for (const same of [null,0,3.123456]) {
+    for (const [same,stored] of [[null,null],[0,0],[3.123456,3.1235]]) {
       const id = seedProduct(`ExactNoOp-${same}`)
       seedFixture(raw, () => raw.prepare('UPDATE products SET cost_price_usd=? WHERE id=?').run(same,id))
       assert.equal((await request('PUT',`/${id}`,{cost_price_usd:same})).status,200)
-      assert.equal(row(id).cost_price_usd,same)
+      assert.equal(row(id).cost_price_usd,stored,'a legacy long cost is stored to 4 places, never recorded as a typed cost')
       assert.equal(costEntries(id).length,0)
       assert.equal(raw.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='cost_override' AND entity_id=?").get(String(id)).n,0)
     }
