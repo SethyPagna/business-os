@@ -3481,9 +3481,9 @@ function ProductsFullEditor() {
     }
   }, [dupResolverBusyKey, load, mergeWithChoice, notify, refreshDuplicateClusters, t])
 
-  // "Keep both": dismiss every Conflicts cluster that lists this pair (these are genuinely different
-  // items), so the sweep stops flagging it -- the false-positive escape hatch. The barcode cluster is always one of them; a pair inside a variant
-  // family is held by the name cluster too, and the toast below is only true once that is dismissed as well. One re-read of the rulings after them all.
+  // "Keep both": the pair's barcode cluster is always dismissed (these are genuinely different items), the false-positive escape hatch. A name or leading-zero cluster
+  // that also lists the pair is dismissed only when every row that ruling reaches is in the pair (keepBothPlan), because a ruling is keyed wider than the cluster; when one is
+  // left, the pair stays in Conflicts and the toast says so. One re-read of the rulings after them all.
   const handleDuplicateKeepBoth = useCallback(async (info: ExactDuplicateInfo) => {
     if (dupResolverBusyKey) return
     setDupResolverBusyKey(info.key)

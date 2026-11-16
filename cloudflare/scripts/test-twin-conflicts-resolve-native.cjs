@@ -482,6 +482,63 @@ async function main() {
     assert.equal(state.queries, 1, 'one statement per answer (the shipped route reads nothing else)')
   })
 
+  // Products' "Keep both" over the REAL routes (round 7 review, B2): the real handler (frontend keepBothDuplicate, compiled from its source) reads the real Conflicts route, stores
+  // its rulings through the real dismiss route, and another pair that shares no row with the pair must keep its Duplicate tag AND its Conflicts listing. The leading-zero ruling is
+  // keyed by the folded code alone, across every product name, so a ruling made for one name's cluster used to silence another name's pair (Tw Lz B, Tw Lz F), depending on row order.
+  const KEEP_BOTH_SHAPES = [
+    ['r6 B1: blank, real A, then the pair on real B in one name', [[151, 'Tw Collateral', ''], [152, 'Tw Collateral', '8851234567861'], [153, 'Tw Collateral', '8851234567862'], [154, 'Tw Collateral', '8851234567862']], 153, ['barcode:8851234567862'], 'product_duplicate_kept_still_listed'],
+    ['Tw Lz A 0601,0601,601 beside Tw Lz B 601,00601 (A first)', [[161, 'Tw Lz A', '0601'], [162, 'Tw Lz A', '0601'], [163, 'Tw Lz A', '601'], [164, 'Tw Lz B', '601'], [165, 'Tw Lz B', '00601']], 161, ['barcode:0601'], 'product_duplicate_kept_still_listed'],
+    ['Tw Lz B 601,00601 before Tw Lz A 0601,0601,601 (B has the lower ids)', [[161, 'Tw Lz B', '601'], [162, 'Tw Lz B', '00601'], [163, 'Tw Lz A', '0601'], [164, 'Tw Lz A', '0601'], [165, 'Tw Lz A', '601']], 163, ['barcode:0601'], 'product_duplicate_kept_still_listed'],
+    ['long codes: Tw Lz C R,R,0R beside Tw Lz D 0R,00R', [[171, 'Tw Lz C', '8851234567870'], [172, 'Tw Lz C', '8851234567870'], [173, 'Tw Lz C', '08851234567870'], [174, 'Tw Lz D', '08851234567870'], [175, 'Tw Lz D', '008851234567870']], 171, ['barcode:8851234567870'], 'product_duplicate_kept_still_listed'],
+    ['Tw Lz F 601,601 beside Tw Lz E 0601,0601,601', [[181, 'Tw Lz E', '0601'], [182, 'Tw Lz E', '0601'], [183, 'Tw Lz E', '601'], [186, 'Tw Lz F', '601'], [187, 'Tw Lz F', '601']], 181, ['barcode:0601'], 'product_duplicate_kept_still_listed'],
+    ['whitespace: the pair, and a third row whose name differs only in an inner space', [[201, 'Tw Ws', '8851234567880'], [202, 'Tw Ws', '8851234567880'], [203, 'Tw  Ws', '8851234567880']], 201, ['barcode:8851234567880'], 'product_duplicate_kept_both'],
+  ]
+  for (const [title, spec, pick, expectedRulings, expectedToast] of KEEP_BOTH_SHAPES) await check(`Keep both on a pair over the real routes: ${title}`, async () => {
+    fresh()
+    fixtureWrite(() => state.native.db.exec('INSERT INTO products (id, name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, stock_quantity, is_active) VALUES ' + spec.map(([id, name, code]) => `(${id}, '${name}', '${code}', 4, 0, 10, 0, 1)`).join(', ')))
+    const out = await esbuild({ stdin: { contents: "export * from './utils/productGrouping.ts'\nexport * from './utils/productTwinDismissals.ts'\nexport * as exact from './utils/exactDuplicateProducts.ts'\n", resolveDir: path.join(__dirname, '../../frontend/src'), loader: 'ts' }, bundle: true, write: false, platform: 'node', format: 'cjs', target: 'es2022', logLevel: 'error' })
+    const pm = { exports: {} }
+    new Function('require', 'module', 'exports', out.outputFiles[0].text)(require, pm, pm.exports)
+    const fe = pm.exports
+    const transportSource = fs.readFileSync(path.join(__dirname, '../../frontend/src/components/shared/twinDismissalsTransport.ts'), 'utf8').replace(/\r\n/g, '\n')
+    const tm = { exports: {} }
+    new Function('require', 'module', 'exports', require('esbuild').transformSync(transportSource, { loader: 'ts', format: 'cjs' }).code)((id) => {
+      if (id.endsWith('http.ts')) return { apiFetch: async (method, url) => { const a = await request(method, url); if (a.status !== 200) throw Object.assign(new Error(`HTTP ${a.status}`), { status: a.status, code: a.body && a.body.code }); return a.body } }
+      if (id.endsWith('productWriteTransport.ts')) return { dismissProductDuplicateCluster: async (type, value) => { const a = await dismiss(type, value); if (a.status !== 200) throw new Error(`dismiss ${a.status} ${JSON.stringify(a.body)}`); return a.body } }
+      if (id.endsWith('productTwinDismissals.ts')) return fe
+      if (id.endsWith('exactDuplicateProducts.ts')) return fe.exact
+      throw new Error(`unexpected require ${id}`)
+    }, tm, tm.exports)
+    const tags = () => {
+      const items = rows('SELECT id, name, barcode, stock_quantity, is_active, is_group FROM products ORDER BY id')
+      const keys = fe.unmergedTwinKeys(items)
+      const byKey = new Map()
+      items.forEach((item, i) => { if (keys[i]) byKey.set(keys[i], [...(byKey.get(keys[i]) || []), item.id]) })
+      return [...byKey.values()].map((ids) => ids.sort((a, b) => a - b))
+    }
+    fe.setTwinDismissals(fe.parseTwinDismissals((await dismissals()).body))
+    const before = await conflicts()
+    const T0 = tags()
+    const info = fe.exact.buildExactDuplicateIndex(fe.exact.extractDuplicateClusters(before.body)).get(pick)
+    assert.ok(info, 'the pair is offered Keep both')
+    const ids = info.members.map((m) => Number(m.id))
+    const toasts = []
+    await tm.exports.keepBothDuplicate(fe.exact.extractDuplicateClusters(before.body), info, (m) => toasts.push(m), (k) => k, async () => {})
+    const ruled = rows('SELECT cluster_type, cluster_value FROM product_duplicate_dismissals ORDER BY cluster_type, cluster_value').map((r) => `${r.cluster_type}:${r.cluster_value}`)
+    const after = await conflicts()
+    const T1 = tags()
+    assert.deepEqual(ruled, expectedRulings, 'only the rulings this pair is owed are stored')
+    assert.deepEqual(toasts, [expectedToast], 'the toast says whether the pair is still listed')
+    assert.equal(inOneCluster(after.body.clusters, ids), expectedToast === 'product_duplicate_kept_still_listed', 'the toast is true: the pair is listed exactly when it says so')
+    let separate = 0
+    for (const T of T0) {
+      if (T.some((id) => ids.includes(id))) continue
+      separate += 1
+      assert.ok(T1.some((t) => t.join() === T.join()), `the separate pair ${T} keeps its Duplicate tag`)
+      assert.ok(inOneCluster(after.body.clusters, T), `the separate pair ${T} keeps its Conflicts listing`)
+    }
+    if (/Lz|Collateral/.test(title)) assert.ok(separate >= 1, 'the shape has a separate pair to protect')
+  })
   await check('the variants pair (not tagged, listed) is still resolvable: Conflicts is the superset', async () => {
     fresh()
     const done = await merge({ keepId: 115, mergeId: 116, keep: true, stock: 'merge' })

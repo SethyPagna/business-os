@@ -1,4 +1,5 @@
-import { normalizeProductGroupName, unmergedTwinKeys } from './productGrouping.ts'
+import { serverNameKey } from './productGrouping.ts'
+import { identityBarcodeKey } from './productDetailRule.ts'
 
 // "Exact duplicate" handling for the Products page (user spec item #3).
 //
@@ -17,8 +18,8 @@ import { normalizeProductGroupName, unmergedTwinKeys } from './productGrouping.t
 // come out of a same_barcode cluster (a same_name cluster has, by
 // definition, differing barcodes), refined down to the members whose
 // normalized name also matches. We normalize the name with the frontend's
-// own normalizeProductGroupName so the flag agrees with how the list itself
-// groups rows by name.
+// own serverNameKey (the Worker's name_key: edge spaces trimmed, A-Z lower-cased, inner
+// whitespace kept) so the flag agrees with how Conflicts groups rows by name.
 //
 // Dismissing a cluster ("Keep both") drops it from the server sweep, so a
 // re-fetch clears the flags for free -- no separate client bookkeeping.
@@ -77,7 +78,7 @@ export function buildExactDuplicateIndex(clusters: PossiblySameCluster[]): Map<n
     if (!barcode) continue
     const byName = new Map<string, DuplicateClusterEntry[]>()
     for (const product of cluster.products || []) {
-      const nameKey = normalizeProductGroupName(product?.name || '')
+      const nameKey = serverNameKey(product?.name)
       if (!nameKey) continue
       if (!byName.has(nameKey)) byName.set(nameKey, [])
       byName.get(nameKey)!.push(product)
@@ -107,20 +108,24 @@ export function clustersListingProducts(clusters: readonly PossiblySameCluster[]
   return rulings
 }
 
-// What "Keep both" on a pair rules (round 6 review, B1). The pair's barcode cluster is always dismissed. A name or leading-zero cluster that also lists the pair is dismissed only
-// when it holds no twin cluster apart from the pair's own (one that shares no row with it): a ruling is keyed by the cluster, so dismissing it would also silence another pair the
-// person never chose, with no review and no undo. When it is left listed, stillListed is true and the pair stays in Conflicts. A twin cluster that overlaps the pair (a blank-barcode
-// row of the same name joins it) is the pair's own: its tag is the cluster's, so it goes with the ruling.
+// What "Keep both" on a pair rules (round 6 review B1, round 7 review B2). The pair's barcode cluster is always dismissed. A name or leading-zero cluster that also lists the pair is
+// dismissed only when EVERY row the dismissal reaches is in the pair, because a ruling is keyed by something wider than the one cluster the person looked at: a name by its name_key, and a
+// leading-zero cluster by the FOLDED code alone, across every product name (cloudflare productIdentity.ts dismissKey('leadingzero', folded)). So all clusters of that type and key are
+// checked, never the first one found (which made the answer depend on row order), and a leading-zero ruling is also withheld while any other row anywhere carries that folded code, since the
+// client hides the Duplicate tag of a name group whose rows all share one 3-digit spelling on the same ruling (productTwinDismissals.ts hiddenFoldKey). A cluster left unruled keeps
+// the pair listed, so stillListed is true and the toast says so. Names compare as the Worker keys them (serverNameKey, SQLite lower(trim())), not with whitespace collapsed.
 export function keepBothPlan(clusters: readonly PossiblySameCluster[], ids: readonly number[], barcode: string): { rulings: Array<{ type: 'barcode' | 'name' | 'leadingzero'; value: string }>; stillListed: boolean } {
   const wanted = new Set(ids.map(Number))
   const rulings: Array<{ type: 'barcode' | 'name' | 'leadingzero'; value: string }> = [{ type: 'barcode', value: barcode }]
+  const keyOf = (type: string, value: unknown): string => (type === 'leadingzero' ? identityBarcodeKey(value) : serverNameKey(value))
+  const outside = (product: DuplicateClusterEntry | undefined): boolean => !wanted.has(Number(product?.id))
   let stillListed = false
   for (const ruling of clustersListingProducts(clusters, ids)) {
     if (ruling.type === 'barcode') { if (ruling.value !== barcode) rulings.push(ruling); continue }
-    const rows = clusters.find((c) => c.type === ruling.type && c.value === ruling.value)?.products || []
-    const keys = unmergedTwinKeys(rows as never)
-    const own = new Set(rows.map((row, i) => (wanted.has(Number(row.id)) ? keys[i] : '')))
-    if (keys.some((key) => key && !own.has(key))) stillListed = true
+    const key = keyOf(ruling.type, ruling.value)
+    const reached = clusters.some((cluster) => cluster.type === ruling.type && keyOf(cluster.type, cluster.value) === key && (cluster.products || []).some(outside))
+    const sharesFold = ruling.type === 'leadingzero' && clusters.some((cluster) => (cluster.products || []).some((product) => outside(product) && identityBarcodeKey(product?.barcode) === key))
+    if (reached || sharesFold) stillListed = true
     else rulings.push(ruling)
   }
   return { rulings, stillListed }
