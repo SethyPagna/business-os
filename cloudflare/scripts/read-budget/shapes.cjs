@@ -55,6 +55,8 @@ function getEntries(ctx) {
     // batches
     ['batches/picker-lots', '/api/batches/picker-lots?productId=1000&branchId=1'], ['batches/tracked-product-ids (active-or-stock batch catalog)', '/api/batches/tracked-product-ids'],
     ['batches/damaged-lots', '/api/batches/damaged-lots'], ['batches', '/api/batches?productId=1000'],
+    // The live Transfer screen's per-row lot read (TransferModal multiple mode): the lots holding stock at the SOURCE branch.
+    ['batches (Transfer lots, onlyAvailable at the source branch)', '/api/batches?productId=1000&branchId=1&onlyAvailable=1'],
     // inventory
     ['inventory/products/search default', `/api/inventory/products/search?${P}&sort=name_asc&include=branch_stock`], ['inventory/products/search text', `/api/inventory/products/search?${P}&query=balm`],
     ['inventory/bootstrap', '/api/inventory/bootstrap'], ['inventory/summary', '/api/inventory/summary'], ['inventory/stats', '/api/inventory/stats'],
