@@ -101,6 +101,33 @@ export function planThrottledSyncReload(
   return { runNow: false, delayMs: minIntervalMs - msSinceLastLoad }
 }
 
+/** The owner's bound on the bell (11 Nov): never more than 5 minutes old. The Worker's entry lifetime is at most this on every plan (planTier.ts, test-plan-tier-pure). */
+export const BELL_MAX_AGE_MS = 5 * 60 * 1000
+/** Past the entry's expiry before the follow-up reads, so a client clock a few seconds ahead of the Worker still lands after the expiry. */
+export const BELL_FOLLOW_UP_MARGIN_MS = 10_000
+/** A follow-up that came back with the same entry (a client clock far ahead of the Worker) is tried once more, never sooner than this. */
+export const BELL_FOLLOW_UP_RETRY_MIN_MS = 30_000
+export const BELL_FOLLOW_UP_MAX_ATTEMPTS = 2
+
+/**
+ * After a bell reload: when must one more read happen so the badge is never older than BELL_MAX_AGE_MS (plus the margin)?
+ *
+ * A sync-triggered reload can be served the Worker's cached entry, computed BEFORE the write that triggered it, and the next timed
+ * refresh is two hours away. That is the only way the badge ends up older than the bound: a reload whose answer was computed at or
+ * after the last sync event reflects that event, and a later write sends its own event. So a follow-up is due only when the entry
+ * predates the last event, and it lands just after the entry expires (a read then recomputes; it is also the read anyone else would
+ * make at that moment, so it adds at most one recompute per entry lifetime). Returns the delay in ms, or null when none is due.
+ * `followUpsFired` counts follow-up timers already spent on this same entry.
+ */
+export function planBellStaleFollowUp(args: { generatedAtMs: number; lastEventAtMs: number; nowMs: number; followUpsFired: number }): number | null {
+  const { generatedAtMs, lastEventAtMs, nowMs, followUpsFired } = args
+  if (!Number.isFinite(generatedAtMs) || !Number.isFinite(lastEventAtMs) || lastEventAtMs <= 0) return null
+  if (generatedAtMs >= lastEventAtMs) return null
+  if (followUpsFired >= BELL_FOLLOW_UP_MAX_ATTEMPTS) return null
+  const due = generatedAtMs + BELL_MAX_AGE_MS + BELL_FOLLOW_UP_MARGIN_MS - nowMs
+  return Math.max(due, followUpsFired > 0 ? BELL_FOLLOW_UP_RETRY_MIN_MS : 1_000)
+}
+
 // ---- Coalesced sync events (lane 6.0.1002) ----
 // One sale makes this tab dispatch `inventory` then `sales` (and a remote sale pushes several channels), and each
 // `sync:update` used to reload every page that listens for it, so the Dashboard read its aggregates two or three times
