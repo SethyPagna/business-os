@@ -25,6 +25,7 @@ const batches = compile(read('productBatches'), {
   './receivingBranch': compile(read('receivingBranch')),
 })
 const catalog = compile(read('catalogCostRecompute'), { './moneyPrecision': money })
+const importNumbers = compile(read('importNumbers'), { './moneyPrecision': money })
 const source = read('importEngine')
 const start = source.indexOf('const group: Array<{ sql: string; params: Record<string, unknown> }> = [rowGuardStatement(r.rowNumber), ...rowWriteGroup]')
 const end = source.indexOf('\n            }\n          } else {', start)
@@ -172,6 +173,19 @@ function setup() {
   await runD1BatchGroupsInChunks(precision.db, [precision.plan(.0003, 1, .5), precision.plan(.0003, 2, .5)])
   assert.equal(precision.sqlite.prepare('SELECT received_cost_usd FROM product_batches').get().received_cost_usd, .0004)
   assert.deepEqual(precision.sqlite.prepare('SELECT total_cost_usd FROM inventory_movements').all().map(row => row.total_cost_usd), [.0002, .0002])
+
+  // cost-4dp: the cost of a stock-action import receipt is the parsed sheet cost, which importNumbers.parseImportCost already stores at 4 places,
+  // nearest, ties away from zero; the lots and the derived catalog cost that follow stay at 4. The composer is below that layer, so it is fed what
+  // the parser returns. The census predicate (this fixture has no cost columns on product_cost_entries, so products and lots only).
+  assert.deepEqual(['4.166666666', '1.00015'].map(text => importNumbers.parseImportCost(text)), [4.1667, 1.0002], 'the sheet cost is rounded before any receipt is planned')
+  const longCost = setup()
+  await runD1BatchGroupsInChunks(longCost.db, [longCost.plan(importNumbers.parseImportCost('4.166666666'), 1, 2), longCost.plan(importNumbers.parseImportCost('1.00015'), 2, 1)])
+  assert.deepEqual(longCost.sqlite.prepare('SELECT unit_cost_usd FROM product_batches ORDER BY id').all().map(row => row.unit_cost_usd), [4.1667, 1.0002], 'import receipt lots at 4 places')
+  const censusCols = { products: ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr'], product_batches: ['unit_cost_usd', 'received_cost_usd'] }
+  for (const [table, cols] of Object.entries(censusCols)) {
+    const over = cols.map(c => `(typeof(${c}) IN ('integer','real') AND ABS(${c} * 10000 - ROUND(${c} * 10000)) > 0.000001)`).join(' OR ')
+    assert.equal(longCost.sqlite.prepare(`SELECT COUNT(*) n FROM ${table} WHERE ${over}`).get().n, 0, `census after the import receipts: ${table}`)
+  }
 
   const chunked = setup()
   await runD1BatchGroupsInChunks(chunked.db, Array.from({ length: 100 }, () => chunked.plan(5)))
