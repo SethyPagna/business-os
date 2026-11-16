@@ -117,12 +117,12 @@ async function overview(query='',scope='all'){const res=await app.request('http:
  const nonadmin=await get('sales','','sales');assert.ok(!('cost_usd' in nonadmin.body.rows[0]));assert.ok(!('cost_before_floor_usd' in nonadmin.body.rows[0]));assert.ok(!('gross_profit_usd' in nonadmin.body.rows[0]))
  const courierFixture={delivery_contact_id:7,delivery_contact_name:'Grab',deliveries:2,charged_fee_usd:3,absorbed_fee_usd:1,
   paid_fee_usd:2,receivable_fee_usd:1,paid_by_method:[],actual_cost_usd:4,actual_cost_count:2,
-  linked_expense_count:1,linked_expense_usd:4,linked_expense_khr:0,last_delivery_at:'2026-09-04',last_expense_at:'2026-09-04',margin_usd:-1}
+  linked_expense_count:1,linked_expense_usd:4,linked_expense_khr:0,last_delivery_at:'2026-09-04',last_expense_at:'2026-09-04',delivery_margin_usd:-1}
  const employeeCourier=reportsModule.gateCourierRow(courierFixture,false)
- for(const key of ['actual_cost_usd','actual_cost_count','linked_expense_count','linked_expense_usd','linked_expense_khr','last_expense_at','margin_usd'])
+ for(const key of ['actual_cost_usd','actual_cost_count','linked_expense_count','linked_expense_usd','linked_expense_khr','last_expense_at','delivery_margin_usd'])
   assert.ok(!(key in employeeCourier),`employee courier row strips ${key}`)
  assert.deepEqual(reportsModule.gateCourierRow(courierFixture,true),courierFixture,'admin courier row retains cost, linked expense, and margin')
- const COURIER_COST_FIELDS=['actual_cost_usd','actual_cost_count','linked_expense_count','linked_expense_usd','linked_expense_khr','last_expense_at','margin_usd']
+ const COURIER_COST_FIELDS=['actual_cost_usd','actual_cost_count','linked_expense_count','linked_expense_usd','linked_expense_khr','last_expense_at','delivery_margin_usd']
  const employeeOverview=await overview('','sales-no-courier')
  const employeeOverviewCourier=employeeOverview.body.sales.couriers.find(row=>row.delivery_contact_id===7)
  assert.ok(employeeOverviewCourier,'employee overview includes the courier activity row')
@@ -130,10 +130,10 @@ async function overview(query='',scope='all'){const res=await app.request('http:
   assert.ok(!(key in employeeOverviewCourier),`an employee whose courier-cost permission is off: the overview courier row strips ${key}`)
  // Owner, 16 Nov 2026: the courier cost is a granted permission: the default Sales grant holds it, an administrator always does.
  const defaultOverviewCourier=(await overview('','sales')).body.sales.couriers.find(row=>row.delivery_contact_id===7)
- for(const key of ['actual_cost_usd','actual_cost_count','margin_usd'])
+ for(const key of ['actual_cost_usd','actual_cost_count','delivery_margin_usd'])
   assert.ok(key in defaultOverviewCourier,`an employee with the default courier-cost permission reads ${key} on the overview courier row`)
  const adminOverviewCourier=(await overview('','sales-admin')).body.sales.couriers.find(row=>row.delivery_contact_id===7)
- for(const key of ['actual_cost_usd','actual_cost_count','margin_usd'])
+ for(const key of ['actual_cost_usd','actual_cost_count','delivery_margin_usd'])
   assert.ok(key in adminOverviewCourier,`an administrator reads ${key} on the overview courier row`)
  assert.equal((await get('sales','','fees')).status,403);assert.equal((await get('returns','','sales')).status,403);assert.equal((await get('expenses','','sales')).status,403)
  assert.deepEqual((await get('sales','q=Alice')).body.rows.map(r=>r.id),[1])

@@ -19,7 +19,7 @@ const h=harness.exports
  // P3-L5/F2 (Sep 15 2026): /stats-strip now wires the same removal-loss block
  // getSalesTotals attaches (previously it never queried it at all), gated by
  // the same gateSalesReportMoney door as cost_usd/profit_usd. Cover both here.
- const privateKeys=['cost_usd','profit_usd','pending_cost_usd','pending_profit_usd','delivery_actual_cost_usd','delivery_net_usd','delivery_margin_usd','recognized_delivery_cost_usd','pending_delivery_cost_usd','actual_cost_usd','linked_expense_usd','margin_usd',
+ const privateKeys=['cost_usd','profit_usd','pending_cost_usd','pending_profit_usd','delivery_actual_cost_usd','delivery_net_usd','delivery_margin_usd','recognized_delivery_cost_usd','pending_delivery_cost_usd','actual_cost_usd','linked_expense_usd','delivery_margin_usd',
    'removal_loss_usd','removal_loss_qty','removal_loss_unvalued_rows','revenue_after_losses_usd','profit_after_losses_usd']
  const admin=await get(paths[0]);assert.equal(admin.totals.cost_usd,4);assert.equal(admin.totals.revenue_usd,10,'header adjustment recognized exactly once')
  // No removal happened in this fixture's window, so the block is a real zero
@@ -66,7 +66,7 @@ const h=harness.exports
  await assertList({all:true},true,true)
  h.cache.cachedJsonResponse=originalCache
  const module=h.load('routes/sales.ts')
- const courier={charged_fee_usd:5,actual_cost_usd:2,actual_cost_count:1,linked_expense_count:1,linked_expense_usd:2,linked_expense_khr:0,last_expense_at:'private',margin_usd:3}
+ const courier={charged_fee_usd:5,actual_cost_usd:2,actual_cost_count:1,linked_expense_count:1,linked_expense_usd:2,linked_expense_khr:0,last_expense_at:'private',delivery_margin_usd:3}
  assert.deepEqual(module.gateSalesCourierMoney(courier,false),{charged_fee_usd:5})
  assert.equal(module.gateSalesCourierMoney(courier,true),courier)
  h.setUser({...h.USER,permissions:'{"all":true}'})

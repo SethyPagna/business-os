@@ -23,9 +23,9 @@ function load(file) {
       getProductSalesReport: async () => ({ rows: [{ ...data }], total_groups: 1, totals: { ...data } }),
       getSalesGroupedReport: async () => ({ rows: [{ ...data }], total_groups: 1, totals: { ...data } }),
       getSalesOverviewBlocks: async () => ({ totals: { ...data }, paymentMethods: { rows: [{ ...data }], total_groups: 1, totals: { ...data } },
-        couriers: [{ actual_cost_usd: 3, margin_usd: 1, revenue_usd: 20 }] }),
+        couriers: [{ actual_cost_usd: 3, delivery_margin_usd: 1, revenue_usd: 20 }] }),
       getBusinessSummarySalesRows: async () => [{ ...data, id: 1 }],
-      getDeliveryContactTotals: async () => [{ actual_cost_usd: 3, margin_usd: 1, revenue_usd: 20 }] }
+      getDeliveryContactTotals: async () => [{ actual_cost_usd: 3, delivery_margin_usd: 1, revenue_usd: 20 }] }
     if (name.startsWith('.')) return load(path.resolve(path.dirname(file), name + '.ts'))
     return require(name)
   }, mod, mod.exports)

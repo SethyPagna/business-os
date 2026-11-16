@@ -216,7 +216,7 @@ const env = { DB: {} }
     'same contact id merges across name snapshots; the LATEST snapshot names the line')
   ok(grab.charged_fee_usd === 2 && grab.absorbed_fee_usd === 3,
     'customer-paid vs store-absorbed fees split per courier')
-  ok(grab.actual_cost_usd === 3.5 && grab.actual_cost_count === 2 && grab.margin_usd === -1.5,
+  ok(grab.actual_cost_usd === 3.5 && grab.actual_cost_count === 2 && grab.delivery_margin_usd === -1.5,
     'actual courier cost sums; margin = charged - actual (can be negative)')
   const unlinked = couriers.find((r) => r.delivery_contact_id === null)
   ok(unlinked.delivery_contact_name === 'ពូ​ ខុម' && unlinked.deliveries === 1 && unlinked.actual_cost_count === 0,
