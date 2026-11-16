@@ -1,4 +1,4 @@
-// Oracle proof for ops/scripts/migration/held/0200_sale_cost_on_hand_repair.sql
+// Oracle proof for ops/scripts/migration/held/0314_sale_cost_on_hand_repair.sql
 // (U-cost2, refuter R-cost findings 1-4).
 //
 // ONE event list is replayed twice on real migrated SQLite (node:sqlite via
@@ -55,7 +55,7 @@ const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 const migrationsDir = path.resolve(__dirname, '../migrations')
-const heldPath = process.env.HELD_0200_SQL || path.resolve(__dirname, '../../ops/scripts/migration/held/0200_sale_cost_on_hand_repair.sql')
+const heldPath = process.env.HELD_0200_SQL || path.resolve(__dirname, '../../ops/scripts/migration/held/0314_sale_cost_on_hand_repair.sql')
 const migrationText = fs.readFileSync(heldPath, 'utf8')
 const migration0195 = fs.readFileSync(path.join(migrationsDir, '0195_catalog_cost_on_hand.sql'), 'utf8')
 // 0195's recompute statement, verbatim: the fixed catalog rule the ORACLE runs after every event.

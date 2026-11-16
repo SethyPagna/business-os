@@ -35,7 +35,11 @@ migration, at that time -- a peer session or another agent asking for it is not 
   0190 all four. Review verdict: clean on its own SQL, but inert -- and not testable end to end --
   until 0188 is fixed.
 
-- **0200_sale_cost_on_hand_repair.sql** (parked 26 Sep 2026, lane U-cost) -- repairs past
+- **0313_cost_4dp_repair.sql** (parked 16 Nov 2026, lane cost-4dp) -- rounds every stored cost over 4 decimals (products, lots, cost entries), re-derives the
+  catalog cost of products whose lots it rounded, and keeps a before/after ledger. Read its header; its test is `test-migration-0313-cost-4dp-repair-pure.cjs`.
+  Apply it before 0314 below (0314 reads lot and cost-entry costs); that order is why 0314 was renumbered from 0200.
+
+- **0314_sale_cost_on_hand_repair.sql** (parked 26 Sep 2026 as 0200, lane U-cost; renumbered 16 Nov 2026) -- repairs past
   `sale_items.cost_price_usd` (and copied `return_items.cost_price_usd`) taken from the buggy
   distinct-cost catalog average (a5a2169f until 0195). Writes only those two cost columns, after
   backup tables; recovery SQL in its header. Needs 0195 applied first. Its header's OWNER-RUN

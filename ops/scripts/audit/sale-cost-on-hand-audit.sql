@@ -14,9 +14,9 @@
 -- design. Run each statement on its own with --command (wrangler d1 execute
 -- --file returns no rows); the exact owner-run commands, and which numbers to
 -- read, are in the header of
--- ops/scripts/migration/held/0200_sale_cost_on_hand_repair.sql (OWNER-RUN AUDIT).
+-- ops/scripts/migration/held/0314_sale_cost_on_hand_repair.sql (OWNER-RUN AUDIT).
 -- The plan text between plan:begin and plan:stop is byte-identical to
--- ops/scripts/migration/held/0200_sale_cost_on_hand_repair.sql (pinned by
+-- ops/scripts/migration/held/0314_sale_cost_on_hand_repair.sql (pinned by
 -- cloudflare/scripts/test-held-0200-sale-cost-repair-pure.cjs); the
 -- method, reconstruction, guard and limits are documented in that
 -- migration's header.
