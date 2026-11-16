@@ -4192,7 +4192,7 @@
   "merge_stock_choice_lead": "still holds stock. Choose what happens to it.",
   "merge_stock_choice_lead_empty": "holds no stock and will be merged into it.",
   "merge_stock_choice_merge": "Merge the stock",
-  "merge_stock_choice_merge_hint": "Every received-date record moves onto the kept product with its received-date code, branch, cost and dates unchanged. If the kept product already has the same received date at the same branch, the quantities are added together and one row is kept.",
+  "merge_stock_choice_merge_hint": "Stock with the same received date is added into the matching received-date record of the kept product (the cost becomes the weighted average, the expiry the earliest). A received date the kept product does not have becomes a new received-date record. Records that are already inactive stay as they are.",
   "merge_stock_choice_merge_cross_identity": "These rows are NOT the same product -- the stock would move onto a product with a different barcode or cost.",
   "merge_identity_differs_title": "These are not the same product",
   "merge_identity_differs_hint": "Name, barcode and cost together decide whether two rows are one product. These rows differ, so this is not a duplicate clean-up -- the stock and history would move onto a DIFFERENT product. Merge only if you are sure they really are one item.",
