@@ -101,7 +101,7 @@ function buildLegacyWorld(seed) {
         .run(batchId, p, rand() < 0.3 ? ` no-lot:${batchId}` : `K${batchId}`, rand() < 0.5 ? `LOT-${batchId}` : null, '2026-10-0' + (1 + (batchId % 8)), lotActive, rand() < 0.2 ? 'tagged' : null, rand() < 0.1 ? 1 : 0)
       for (const branch of BRANCHES) {
         if (rand() < 0.45) continue // no row for this lot at this branch
-        const quantity = pick(rand, [0, 0, 0, 1, 2.5, 7, 40, -1, -3.5])
+        const quantity = pick(rand, [0, 0, 0, 0.25, 0.5, 1, 2.5, 7, 40, -1, -3.5])
         db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?)').run(batchId, branch, quantity)
       }
       if (rand() < 0.15) db.prepare("INSERT INTO damaged_stock_lots(product_id,branch_id,batch_id,quantity,quantity_remaining,condition_tag,source) VALUES(?,?,?,?,?,?,?)").run(p, pick(rand, BRANCHES), batchId, 2, pick(rand, [0, 2]), 'damaged', 'return')
@@ -172,7 +172,7 @@ function buildGuardedWorld(seed) {
       db.prepare('INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active) VALUES(?,?,?,?,?,?)').run(batchId, p, `K${batchId}`, `LOT-${batchId}`, '2026-10-0' + (1 + (batchId % 8)), lotActive)
       for (const branch of BRANCHES) {
         if (rand() < 0.4) continue
-        const quantity = lotActive ? pick(rand, [0, 0, 1, 2.5, 7]) : 0
+        const quantity = lotActive ? pick(rand, [0, 0, 0.25, 0.5, 1, 2.5, 7]) : 0
         db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?)').run(batchId, branch, quantity)
       }
     }
@@ -245,6 +245,9 @@ async function main() {
     ['empty active lots are counted again', (s) => s.replace('bbs.quantity > 0`', '(bbs.quantity > 0 OR pb.is_active = 1)`')],
     ['inactive lots are ignored', (s) => s.replace('bbs.quantity > 0`', 'bbs.quantity > 0 AND pb.is_active = 1`')],
     ['a negative lot counts', (s) => s.replace('bbs.quantity > 0`', 'bbs.quantity <> 0`')],
+    // F2: quantities are REAL, so a lot holding 0.25 or 0.5 holds stock; these two drop it and only a world with a lot between 0 and 1 can tell.
+    ['>= 1 instead of > 0 (drops a lot holding 0.25 or 0.5)', (s) => s.replace('bbs.quantity > 0`', 'bbs.quantity >= 1`')],
+    ['CAST(quantity AS INTEGER) > 0 (drops a lot holding 0.25 or 0.5)', (s) => s.replace('bbs.quantity > 0`', 'CAST(bbs.quantity AS INTEGER) > 0`')],
     ['another branch counts when the branch is set', (s) => s.replace("'bbs.branch_id = @branchId AND '", "'bbs.branch_id <> @branchId AND '")],
   ]
   for (const [name, mutate] of mutants) {
