@@ -79,19 +79,14 @@ function lotOrder(a: MergeLotRow, b: MergeLotRow): number {
 }
 
 /**
- * A lot a merge may touch: an ACTIVE one (a row without an is_active field counts as active). An inactive kept lot is never a match
- * target and is never reactivated by a merge; an inactive duplicate lot is left exactly as it was (lead ruling 16 Nov 2026).
+ * A lot a merge may fold or match: an ACTIVE one (a row without an is_active field counts as active). An inactive kept lot is never a match
+ * target and is never reactivated by a merge. An inactive DISCARDED lot is never folded and never marked: it is re-pointed onto the keeper
+ * exactly as it is (inactive, unmarked), so the sale lines whose product_id follows the merge still find their lot under the same product
+ * (lead ruling 16 Nov 2026, B2). A lot that is inactive and still holds stock cannot exist: the 0154 triggers refuse positive stock on an
+ * inactive lot, so the earlier "inactive but stocked" exception was unreachable and is gone.
  */
 export function isMergeableLot(lot: MergeLotRow): boolean {
   return lot.is_active == null || Number(lot.is_active) === 1
-}
-
-/**
- * A discarded lot a merge must handle: an active one, or an inactive one that still holds stock (legacy data: positive stock must stay
- * selectable, and the discarded product cannot be deactivated while stock sits on it). An inactive lot with no stock is left as it was.
- */
-export function isDuplicateLotInPlay(lot: MergeLotRow): boolean {
-  return isMergeableLot(lot) || Number(lot.lot_quantity) > 0
 }
 
 /** receivedDate -> the one ACTIVE kept lot that date's stock is added into. */
@@ -110,7 +105,7 @@ export function keeperLotByDate<T extends MergeLotRow>(keeperLots: readonly T[])
  *   - With no such kept lot, the discarded lots of one date become ONE new lot: the first of them (lowest batch_number, then id) is
  *     created on the keeper and the others are folded into it (owner 16 Nov 2026: "add stock to batch if there is"; one row per date).
  *     The target is then a discarded lot id, which is itself absent from the map.
- *   - A lot with no received date is never matched: it is created as it is. An inactive discarded lot with no stock is ignored entirely.
+ *   - A lot with no received date is never matched: it is created as it is. An inactive discarded lot is ignored here (it is re-pointed as it is).
  * One implementation for the fold, the previews, the estimates and the group (Conflicts) path.
  */
 export function matchDuplicateLots(
@@ -120,7 +115,7 @@ export function matchDuplicateLots(
   const byDate = keeperLotByDate(keeperLots)
   const createdByDate = new Map<string, MergeLotRow>()
   const matches = new Map<number, number>()
-  for (const lot of [...duplicateLots].filter(isDuplicateLotInPlay).sort(lotOrder)) {
+  for (const lot of [...duplicateLots].filter(isMergeableLot).sort(lotOrder)) {
     const date = mergeLotReceivedDate(lot.received_at)
     if (!date) continue
     const target = byDate.get(date) ?? createdByDate.get(date)

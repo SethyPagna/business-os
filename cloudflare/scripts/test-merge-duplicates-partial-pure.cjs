@@ -343,7 +343,7 @@ async function oversizedWritePlanRefusesBeforeMutation() {
   assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM action_history').get().n, 0)
 }
 
-async function oversizedDependentReadRefusesBeforeMutation() {
+async function manyCollidingLotsMergeInSetReads() {
   const d1 = seedGroups([1], d1 => {
     // Lots meet by RECEIVED DATE (16 Nov 2026), so each pair shares a day (the key is kept too, as before).
     const insertBatch = d1.db.prepare('INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,received_at,is_active) VALUES(?,?,?,?,?,1)')
@@ -354,13 +354,14 @@ async function oversizedDependentReadRefusesBeforeMutation() {
     }
   })
   const result = await invoke(loadMergeHandler(makeAdapter(d1)))
+  // B1 (16 Nov 2026): 21 colliding lots were refused (4 dependent reads per lot against a limit of 80). The dependent reads are three SET reads now,
+  // so the same merge goes through, whatever the lot count (test-merge-fold-set-based-native.cjs measures 77).
   assert.equal(result.status, 200)
-  assert.equal(result.body.complete, false)
-  assert.equal(result.body.blockedOnly, true)
-  assert.equal(result.body.mergedProducts, 0)
-  assert.equal(result.body.refusals[0]?.code, 'merge_case_exceeds_safe_limit')
-  assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=2').get().is_active, 1)
-  assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM action_history').get().n, 0)
+  assert.equal(result.body.complete, true, JSON.stringify(result.body))
+  assert.equal(result.body.mergedProducts, 1)
+  assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=2').get().is_active, 0)
+  assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM product_batches WHERE variant_product_id=1 AND is_active=1').get().n, 21, 'each pair shares a day: 21 kept lots')
+  assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM product_batches WHERE variant_product_id=2 AND merge_deactivated_at IS NOT NULL').get().n, 21, 'and 21 folded, marked source lots')
 }
 
 async function complexLaterMemberBlocksWholeThreeRowCluster() {
@@ -486,7 +487,7 @@ async function oversizedPlanHistoryRefusesBeforeMutation() {
   await postCommitHistoryLookupFailureRemainsReported()
   await wrongBatchMetadataFailsClosed()
   await oversizedWritePlanRefusesBeforeMutation()
-  await oversizedDependentReadRefusesBeforeMutation()
+  await manyCollidingLotsMergeInSetReads()
   await complexLaterMemberBlocksWholeThreeRowCluster()
   await laterPrimaryImageBlocksWholeThreeRowCluster()
   await saturatedPlanHistoryRefusesBeforeMutation()

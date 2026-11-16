@@ -222,13 +222,14 @@ check('M1: an inactive kept lot is never a match target, even with the lowest ba
   assert.deepEqual([...lots.keeperLotByDate([archived])], [])
 })
 
-check('M2: an inactive discarded lot with no stock is left out entirely; one still holding stock stays in play', () => {
+check('M2 (N2): an inactive discarded lot is never matched or folded, whatever its quantity field says (it is re-pointed as it is by the fold)', () => {
   const dormant = lot(201, '2026-11-10', { is_active: 0, lot_quantity: 0 })
+  // Unreachable in data (0154 refuses stock on an inactive lot); the old "inactive but stocked stays in play" exception is gone.
   const stuck = lot(202, '2026-11-10', { is_active: 0, lot_quantity: 3 })
   assert.deepEqual([...lots.matchDuplicateLots([lot(101, '2026-11-10')], [dormant])], [])
-  assert.deepEqual([...lots.matchDuplicateLots([lot(101, '2026-11-10')], [dormant, stuck])], [[202, 101]])
-  assert.equal(lots.isDuplicateLotInPlay(dormant), false)
-  assert.equal(lots.isDuplicateLotInPlay(stuck), true)
+  assert.deepEqual([...lots.matchDuplicateLots([lot(101, '2026-11-10')], [dormant, stuck])], [])
+  assert.equal(lots.isDuplicateLotInPlay, undefined, 'the dead exception is removed')
+  assert.deepEqual([...lots.matchDuplicateLots([lot(101, '2026-11-10')], [dormant, lot(203, '2026-11-10')])], [[203, 101]], 'an active lot of the same date still folds')
 })
 
 check('M3: discarded lots of one date the keeper lacks end as ONE new lot: the first (batch_number, then id) is created, the others fold into it', () => {

@@ -2053,6 +2053,96 @@ export function mergeKeeperRestoreStatement(r: MergeReversal, canChangeProductIm
   }
 }
 
+// A kept lot's cost leaves the undo as a 4-place stored cost (half away from zero), like every cost writer: a no-op on 4-place data, and a
+// long pre-merge value (a lot costed before the 4-place rounding) is restored as the rounded figure the rest of the system holds. The
+// scale-once-and-round form is the one catalogCostRecompute's HALF_UP_4DP uses. (No runtime import here: test loaders stub this module's imports.)
+export function roundRestoredLotCost(value: unknown): number | null {
+  if (value == null || value === '') return null
+  const cost = Number(value)
+  if (!Number.isFinite(cost)) return null
+  const rounded = Math.round(Math.abs(cost) * 10000.0000000000036) / 10000
+  return cost < 0 ? -rounded : rounded
+}
+
+// The set-based reversal of a merge's lot folds: one statement per kind, however many lots were folded (it was about 8 per lot, plus one per
+// extra branch). Each statement binds one JSON parameter read with json_each (far below D1's 100 bindings, flat expression depth); the id
+// maps are chunked so no parameter or correlated lookup grows with the lot count. ORDER (the B3 order): lots are reactivated first, every
+// lot's stock is put back, and only then is a kept lot's own active flag restored: the 0154 stock trigger refuses stock on an inactive lot.
+// Tolerant of older snapshots: a fold without the id lists or keeperLotBefore restores nothing for them rather than zeroing a column, and a
+// fold recorded with sourceWasActive false (an earlier build of this lane) keeps its source lot inactive.
+const UNDO_FOLD_CHUNK = 200
+export function mergeFoldReversalStatements(folds: NonNullable<MergeReversal['foldedBatches']>): Array<{ sql: string; params: Record<string, unknown> }> {
+  const stmts: Array<{ sql: string; params: Record<string, unknown> }> = []
+  const json = (rows: unknown[]) => JSON.stringify(rows)
+  const reactivate: number[] = []
+  const saleAllocations: Array<{ id: number; dup: number }> = []
+  const returnAllocations: Array<{ id: number; dup: number }> = []
+  const saleLines: Array<{ id: number; dup: number; keeper: number }> = []
+  const returnLines: Array<{ id: number; dup: number; keeper: number }> = []
+  const keeperRestore = new Map<string, { batch: number; branch: number; q: number }>()
+  const keeperRemove = new Map<string, { batch: number; branch: number }>()
+  const dupPut = new Map<string, { batch: number; branch: number; q: number }>()
+  const keeperLotRestores = new Map<number, NonNullable<NonNullable<MergeReversal['foldedBatches']>[number]['keeperLotBefore']>>()
+  for (const fb of folds) {
+    const dup = Number(fb.dupBatchId)
+    const keeper = Number(fb.keeperBatchId)
+    if (fb.sourceWasActive !== false) reactivate.push(dup)
+    for (const id of intIds(fb.saleAllocationIds)) saleAllocations.push({ id, dup })
+    for (const id of intIds(fb.returnAllocationIds)) returnAllocations.push({ id, dup })
+    for (const id of intIds(fb.saleItemIds)) saleLines.push({ id, dup, keeper })
+    for (const id of intIds(fb.returnItemIds)) returnLines.push({ id, dup, keeper })
+    const keeperBefore = new Map((fb.keeperStockBefore || []).map((x) => [Number(x.branch_id), Number(x.quantity) || 0]))
+    for (const d of (fb.dupStockBefore || [])) {
+      const branch = Number(d.branch_id)
+      const key = `${keeper}:${branch}`
+      if (keeperBefore.has(branch)) { keeperRemove.delete(key); keeperRestore.set(key, { batch: keeper, branch, q: keeperBefore.get(branch)! }) }
+      else { keeperRestore.delete(key); keeperRemove.set(key, { batch: keeper, branch }) }
+      dupPut.set(`${dup}:${branch}`, { batch: dup, branch, q: Number(d.quantity) || 0 })
+    }
+    const before = fb.keeperLotBefore
+    if (before && typeof before === 'object' && !keeperLotRestores.has(keeper)) keeperLotRestores.set(keeper, before)
+  }
+  for (const ids of chunk(reactivate, 400)) {
+    stmts.push({ sql: 'UPDATE product_batches SET is_active = 1, merge_deactivated_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id IN (SELECT value FROM json_each(@ids))', params: { ids: json(ids) } })
+  }
+  const lookup = (field: string, column: string) => `(SELECT CAST(json_extract(m.value, '$.${field}') AS INTEGER) FROM json_each(@rows) m WHERE CAST(json_extract(m.value, '$.id') AS INTEGER) = ${column})`
+  const rowIds = "SELECT CAST(json_extract(value, '$.id') AS INTEGER) FROM json_each(@rows)"
+  for (const part of chunk(saleAllocations, UNDO_FOLD_CHUNK)) stmts.push({ sql: `UPDATE sale_item_batch_allocations SET batch_id = ${lookup('dup', 'sale_item_batch_allocations.id')} WHERE id IN (${rowIds})`, params: { rows: json(part) } })
+  for (const part of chunk(returnAllocations, UNDO_FOLD_CHUNK)) stmts.push({ sql: `UPDATE return_item_batch_allocations SET batch_id = ${lookup('dup', 'return_item_batch_allocations.id')} WHERE id IN (${rowIds})`, params: { rows: json(part) } })
+  // Guarded by the kept lot id: a line the fold re-pointed goes back; one that has moved on since is left alone.
+  for (const part of chunk(saleLines, UNDO_FOLD_CHUNK)) stmts.push({ sql: `UPDATE sale_items SET batch_id = ${lookup('dup', 'sale_items.id')} WHERE id IN (${rowIds}) AND batch_id = ${lookup('keeper', 'sale_items.id')}`, params: { rows: json(part) } })
+  for (const part of chunk(returnLines, UNDO_FOLD_CHUNK)) stmts.push({ sql: `UPDATE return_items SET batch_id = ${lookup('dup', 'return_items.id')} WHERE id IN (${rowIds}) AND batch_id = ${lookup('keeper', 'return_items.id')}`, params: { rows: json(part) } })
+  // Stock: the kept lots' branch rows back to their before-image (or removed when the branch had none), then each source lot's own rows back.
+  const pairs = "SELECT CAST(json_extract(value, '$.batch') AS INTEGER), CAST(json_extract(value, '$.branch') AS INTEGER) FROM json_each(@rows)"
+  const keeperQuantity = "(SELECT json_extract(m.value, '$.q') FROM json_each(@rows) m WHERE CAST(json_extract(m.value, '$.batch') AS INTEGER) = branch_batch_stock.batch_id AND CAST(json_extract(m.value, '$.branch') AS INTEGER) = branch_batch_stock.branch_id)"
+  for (const part of chunk([...keeperRestore.values()], UNDO_FOLD_CHUNK)) stmts.push({ sql: `UPDATE branch_batch_stock SET quantity = ${keeperQuantity}, updated_at = CURRENT_TIMESTAMP WHERE (batch_id, branch_id) IN (${pairs})`, params: { rows: json(part) } })
+  for (const part of chunk([...keeperRemove.values()], UNDO_FOLD_CHUNK)) stmts.push({ sql: `DELETE FROM branch_batch_stock WHERE (batch_id, branch_id) IN (${pairs})`, params: { rows: json(part) } })
+  for (const part of chunk([...dupPut.values()], UNDO_FOLD_CHUNK)) {
+    stmts.push({ sql: `DELETE FROM branch_batch_stock WHERE (batch_id, branch_id) IN (${pairs})`, params: { rows: json(part) } })
+    stmts.push({
+      sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity, updated_at)
+            SELECT CAST(json_extract(value, '$.batch') AS INTEGER), CAST(json_extract(value, '$.branch') AS INTEGER), json_extract(value, '$.q'), CURRENT_TIMESTAMP FROM json_each(@rows) WHERE true`,
+      params: { rows: json(part) },
+    })
+  }
+  // The kept lot's own cost, expiry and activity before the fold, once per kept lot, written AFTER every folded lot's stock is back.
+  const restoreRows = [...keeperLotRestores].map(([id, before]) => ({
+    id,
+    cost: roundRestoredLotCost(before.unit_cost_usd),
+    expiry: before.expiry_date == null ? null : String(before.expiry_date),
+    active: before.is_active == null ? null : Number(before.is_active),
+  }))
+  for (const part of chunk(restoreRows, UNDO_FOLD_CHUNK)) {
+    const field = (name: string) => `(SELECT json_extract(m.value, '$.${name}') FROM json_each(@rows) m WHERE CAST(json_extract(m.value, '$.id') AS INTEGER) = product_batches.id)`
+    stmts.push({
+      sql: `UPDATE product_batches SET unit_cost_usd = ${field('cost')}, expiry_date = ${field('expiry')},
+              is_active = COALESCE(${field('active')}, is_active), updated_at = CURRENT_TIMESTAMP WHERE id IN (${rowIds})`,
+      params: { rows: json(part) },
+    })
+  }
+  return stmts
+}
+
 async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChangeProductImages = true): Promise<AtomicMergeStatement[]> {
   const db = getDb(env)
   const keeperId = Number(r.keeperId)
@@ -2263,42 +2353,7 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
   // a kept lot that was archived goes back to archived only once nothing sits on it (the 0154 stock trigger refuses stock on an
   // inactive lot), and with several discarded lots folded into one kept lot the first restore would otherwise run while a later
   // lot's stock still sat on it. Each fold entry carries the same before-image, so the first one per kept lot is the one used.
-  const keeperLotRestores = new Map<number, NonNullable<NonNullable<MergeReversal['foldedBatches']>[number]['keeperLotBefore']>>()
-  for (const fb of (r.foldedBatches || [])) {
-    const dupBatchId = Number(fb.dupBatchId)
-    const keeperBatchId = Number(fb.keeperBatchId)
-    if (fb.sourceWasActive !== false) stmts.push({ sql: 'UPDATE product_batches SET is_active = 1, merge_deactivated_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dupBatchId } })
-    for (const grp of chunk(intIds(fb.saleAllocationIds), 400)) stmts.push({ sql: `UPDATE sale_item_batch_allocations SET batch_id = @dupBatchId WHERE id IN (${grp.join(',')})`, params: { dupBatchId } })
-    for (const grp of chunk(intIds(fb.returnAllocationIds), 400)) stmts.push({ sql: `UPDATE return_item_batch_allocations SET batch_id = @dupBatchId WHERE id IN (${grp.join(',')})`, params: { dupBatchId } })
-    // Guarded by the kept lot id: a line the fold re-pointed goes back; one that has moved on since is left alone.
-    for (const grp of chunk(intIds(fb.saleItemIds), 400)) stmts.push({ sql: `UPDATE sale_items SET batch_id = @dupBatchId WHERE batch_id = @keeperBatchId AND id IN (${grp.join(',')})`, params: { dupBatchId, keeperBatchId } })
-    for (const grp of chunk(intIds(fb.returnItemIds), 400)) stmts.push({ sql: `UPDATE return_items SET batch_id = @dupBatchId WHERE batch_id = @keeperBatchId AND id IN (${grp.join(',')})`, params: { dupBatchId, keeperBatchId } })
-    const keeperBBefore = new Map((fb.keeperStockBefore || []).map((x) => [Number(x.branch_id), Number(x.quantity) || 0]))
-    for (const d of (fb.dupStockBefore || [])) {
-      const b = Number(d.branch_id)
-      if (keeperBBefore.has(b)) {
-        stmts.push({ sql: 'UPDATE branch_batch_stock SET quantity = @q, updated_at = CURRENT_TIMESTAMP WHERE batch_id = @kb AND branch_id = @b', params: { kb: keeperBatchId, b, q: keeperBBefore.get(b) } })
-      } else {
-        stmts.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @kb AND branch_id = @b', params: { kb: keeperBatchId, b } })
-      }
-      stmts.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @db AND branch_id = @b', params: { db: dupBatchId, b } })
-      stmts.push({ sql: 'INSERT INTO branch_batch_stock (batch_id, branch_id, quantity, updated_at) VALUES (@db, @b, @q, CURRENT_TIMESTAMP)', params: { db: dupBatchId, b, q: Number(d.quantity) || 0 } })
-    }
-    const before = fb.keeperLotBefore
-    if (before && typeof before === 'object' && !keeperLotRestores.has(keeperBatchId)) keeperLotRestores.set(keeperBatchId, before)
-  }
-  for (const [keeperBatchId, before] of keeperLotRestores) {
-    stmts.push({
-      sql: `UPDATE product_batches SET unit_cost_usd = @cost, expiry_date = @expiry,
-              is_active = CASE WHEN @active IS NULL THEN is_active ELSE @active END, updated_at = CURRENT_TIMESTAMP WHERE id = @kb`,
-      params: {
-        kb: keeperBatchId,
-        cost: before.unit_cost_usd == null ? null : Number(before.unit_cost_usd),
-        expiry: before.expiry_date == null ? null : String(before.expiry_date),
-        active: before.is_active == null ? null : Number(before.is_active),
-      },
-    })
-  }
+  stmts.push(...mergeFoldReversalStatements(r.foldedBatches || []))
 
   // 6b. WRITE-OFF undo: the discarded row's lots were deactivated in place and
   //     their per-branch stock cleared (nothing was moved onto the keeper), so

@@ -80,7 +80,7 @@ assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted
 
   const lots = await readProductMergeDependentLotSnapshots(adapter, snapshot, 'merge')
   assert.equal(batches.length, 2, 'dependent collision reads use one second D1 batch call')
-  assert.equal(batches[1].length, 4, 'one collision reads both stocks and both allocation tables')
+  assert.equal(batches[1].length, 3, 'the dependent reads are SET reads: one lot-stock read and the two allocation/line reads, whatever the lot count')
   assert.deepEqual(lots.get(9102).duplicateStockRows.map((row) => Number(row.quantity)), [2])
   assert.deepEqual(lots.get(9102).keeperStockBefore.map((row) => Number(row.quantity)), [1])
   assert.equal(lots.get(9102).saleAllocationIds.length, 1)
@@ -102,7 +102,7 @@ assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted
 
   const writeOff = await readProductMergeDependentLotSnapshots(adapter, snapshot, 'write_off')
   assert.equal(batches.length, beforeNoop + 1, 'all write-off lot stock reads share one second-phase batch')
-  assert.equal(batches.at(-1).length, 2)
+  assert.equal(batches.at(-1).length, 1, 'write-off needs only the one lot-stock read')
   assert.deepEqual([...writeOff.keys()], [9102, 9103])
 
   const collisionSnapshot = (count) => ({
@@ -111,29 +111,34 @@ assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted
       id: 20_000 + index,
       batch_key: `collision-${index}`,
       batch_number: index + 1,
-      received_at: `2026-01-${String(index + 1).padStart(2, '0')}`,
+      received_at: new Date(Date.UTC(2026, 0, 1 + index)).toISOString().slice(0, 10),
     })),
     duplicateBatchRows: Array.from({ length: count }, (_, index) => ({
       id: 30_000 + index,
       batch_key: `collision-${index}`,
       batch_number: index + 1,
-      received_at: `2026-01-${String(index + 1).padStart(2, '0')}`,
+      received_at: new Date(Date.UTC(2026, 0, 1 + index)).toISOString().slice(0, 10),
     })),
   })
-  const beforeBoundedLots = batches.length
-  await readProductMergeDependentLotSnapshots(adapter, collisionSnapshot(20), 'merge')
-  assert.equal(batches.length, beforeBoundedLots + 1)
-  assert.equal(batches.at(-1).length, 80, 'twenty colliding lots fit the bounded dependent read batch')
-
-  const beforeOversizedLots = batches.length
+  // B1 (16 Nov 2026): the reads were 4 per folded lot against a limit of 80, so a merge of more than 19 lots was refused. They are set reads now.
+  for (const count of [1, 10, 20, 21, 77, 304]) {
+    const before = batches.length
+    await readProductMergeDependentLotSnapshots(adapter, collisionSnapshot(count), 'merge')
+    assert.equal(batches.length, before + 1, `${count} colliding lots use one dependent D1 batch call`)
+    assert.equal(batches.at(-1).length, 3, `${count} colliding lots cost three reads, the same as one`)
+  }
+  // The reads still bind ONE id list each, so the dependent read of 304 lots is not an oversized batch; the limit itself still guards.
   await assert.rejects(
-    readProductMergeDependentLotSnapshots(adapter, collisionSnapshot(21), 'merge'),
-    (error) => String(error).includes('merge_read_batch_statement_limit')
-      && error?.code === 'merge_read_batch_statement_limit'
-      && error.statementCount === 84
-      && error.maxStatements === 80,
+    readProductMergeDependentLotSnapshots(adapter, collisionSnapshot(21), 'merge', 2),
+    (error) => error?.code === 'merge_read_batch_statement_limit' && error.statementCount === 3 && error.maxStatements === 2,
   )
-  assert.equal(batches.length, beforeOversizedLots, 'oversized dependent reads fail before a D1 batch call')
+  // An already-inactive discarded lot is neither folded nor read: it is only re-pointed (lead ruling, B2).
+  const withInactive = collisionSnapshot(2)
+  withInactive.duplicateBatchRows.push({ id: 39_999, batch_key: 'archived', batch_number: 9, received_at: '2026-01-01', is_active: 0 })
+  const inactiveLots = await readProductMergeDependentLotSnapshots(adapter, withInactive, 'merge')
+  assert.deepEqual([...inactiveLots.keys()], [30_000, 30_001], 'the archived lot has no dependent snapshot')
+  const inactiveWriteOff = await readProductMergeDependentLotSnapshots(adapter, withInactive, 'write_off')
+  assert.deepEqual([...inactiveWriteOff.keys()], [30_000, 30_001], 'and a write-off leaves it where it is')
 
   for (const statementGroup of batches) {
     for (const sql of statementGroup) {

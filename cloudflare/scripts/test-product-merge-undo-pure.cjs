@@ -606,8 +606,9 @@ assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted
     assert.match(appliersSrc, /INSERT INTO branch_stock \(product_id, branch_id, quantity, rfid_confirmed_qty\)/)
     assert.match(appliersSrc, /action: 'merge_duplicates'/)
     assert.match(appliersSrc, /DELETE FROM inventory_movements WHERE id IN/)
-    assert.match(productsSrc, /UPDATE sale_item_batch_allocations SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId/)
-    assert.match(productsSrc, /UPDATE return_item_batch_allocations SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId/)
+    // The fold re-points both allocation tables (and the single-lot lines) in ONE set-based statement per table (mergeFoldStatements).
+    assert.match(productsSrc, /for \(const table of \['sale_item_batch_allocations', 'return_item_batch_allocations', 'sale_items', 'return_items'\]\)/)
+    assert.match(productsSrc, /UPDATE \$\{table\} SET batch_id = \$\{foldTargetOf\('batch_id'\)\} WHERE batch_id IN/)
     assert.match(appliersSrc, /This merge has later stock or received-date activity/)
   })
 

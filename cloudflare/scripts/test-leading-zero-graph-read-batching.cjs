@@ -137,7 +137,7 @@ async function main() {
     assert.equal(digest(newGraph), digest(oldGraph), 'canonical graph digest identical')
     assert.equal(d1.db.prepare('SELECT total_changes() AS n').get().n, before)
     assert.ok(newDb.calls.every(call => call.length <= 80))
-    const expected = Math.ceil(count / 3) + (lots ? Math.ceil(count / 20) : 0)
+    const expected = Math.ceil(count / 3) + (lots ? Math.ceil(count * 3 / 80) : 0) // 3 SET reads per collision case (16 Nov 2026), packed 80 to a call
     assert.equal(newDb.calls.length, expected)
     assert.equal(oldDb.calls.length, count * (lots ? 6 : 5))
     if (count === 25) {

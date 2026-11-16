@@ -201,7 +201,13 @@ async function runSeed(seed, opts = {}) {
   }
   for (const l of ex.untouched) {
     const a = lotA(l.id), b = before.lots.find((x) => x.id === l.id)
-    if (J(a) !== J(b)) issues.push('M1/M2: inactive lot ' + l.id + ' changed ' + J(b) + ' -> ' + J(a))
+    // An inactive lot of the DISCARDED product is re-pointed onto the keeper (B2, lead ruling 16 Nov): its owner, batch number and (on a key clash)
+    // batch key change; it stays inactive and unmarked, with its stock, cost, expiry, supplier and dates exactly as they were.
+    if (b && b.variant_product_id === D) {
+      if (a.variant_product_id !== K) issues.push('B2: inactive discarded lot ' + l.id + ' not re-pointed onto the keeper')
+      const strip = (row) => { const { variant_product_id, batch_number, batch_key, updated_at, ...rest } = row; return rest }
+      if (J(strip(a)) !== J(strip(b))) issues.push('M1/M2: inactive lot ' + l.id + ' changed ' + J(b) + ' -> ' + J(a))
+    } else if (J(a) !== J(b)) issues.push('M1/M2: inactive lot ' + l.id + ' changed ' + J(b) + ' -> ' + J(a))
   }
   return { h, lots, before, after, ex, issues, res }
 }

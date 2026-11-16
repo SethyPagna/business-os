@@ -389,7 +389,7 @@ async function main() {
     assert.equal(applied.body.complete,true,JSON.stringify(applied.body))
     // Lead ruling 16 Nov 2026: a merge never reactivates a kept lot, with or without retained stock; an empty inactive source lot is left as it was.
     assert.equal(lots.db.prepare('SELECT is_active FROM product_batches WHERE id=9301').get().is_active,0,'an archived kept lot stays archived whatever stock it holds')
-    assert.deepEqual({...lots.db.prepare('SELECT is_active,variant_product_id,merge_deactivated_at FROM product_batches WHERE id=9302').get()},{is_active:0,variant_product_id:9102,merge_deactivated_at:null},'an empty inactive source lot is left exactly as it was')
+    assert.deepEqual({...lots.db.prepare('SELECT is_active,variant_product_id,merge_deactivated_at FROM product_batches WHERE id=9302').get()},{is_active:0,variant_product_id:9101,merge_deactivated_at:null},'an empty inactive source lot stays inactive and unmarked and is re-pointed onto the keeper (B2: its sale lines follow the product)')
   }
   // Exact local-browser fixture metadata: 11 selected exact pairs among 12
   // detected clusters (the remaining three-member cluster is client-blocked).
@@ -553,7 +553,7 @@ async function main() {
     const { app: tornApp, controls } = loadRoute(torn)
     let injected = false
     controls.beforeBatch = async (statements) => {
-      if (injected || !statements.some(({ sql }) => /SELECT branch_id, quantity FROM branch_batch_stock/.test(sql))) return
+      if (injected || !statements.some(({ sql }) => /SELECT batch_id, branch_id, quantity FROM branch_batch_stock WHERE batch_id IN \(SELECT value FROM json_each/.test(sql))) return
       injected = true
       seedFixture(torn.db, () => torn.db.prepare('UPDATE products SET selling_price_usd=99 WHERE id=9102').run())
     }

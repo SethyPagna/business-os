@@ -55,7 +55,7 @@ import { CATALOG_COST_DERIVE_SQL, COST_MIRROR_COLUMNS, catalogCostRecomputeIfCha
 import { explicitCostReviewWritePlan, mergeCostOutcome, mergeCostReviewStatements, mergeCostAuthorityUsdSql, type MergeCostFallback, type MergeCostOutcome } from '../lib/productCostReview'
 import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, productMergeSourceExtent, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
 import type { ProductMergeCaseSnapshot, ProductMergeLotSnapshot } from '../lib/productMergeSnapshot'
-import { matchDuplicateLots, mergeLotReceivedDate, planFoldedLotMetadata, type MergeLotRow } from '../lib/productMergeLots'
+import { isMergeableLot, matchDuplicateLots, mergeLotReceivedDate, planFoldedLotMetadata, type MergeLotRow } from '../lib/productMergeLots'
 import {
   PRODUCT_CONFLICT_MERGE_MANIFEST_VERSION,
   ProductConflictMergeValidationError,
@@ -4190,6 +4190,65 @@ export async function productMergeChangesImages(
 
 const MERGE_LOT_REPOINT_CHUNK = 100
 
+// The set-based fold of discarded lots into kept lots (one statement per kind, whatever the lot count). Each statement binds ONE JSON
+// parameter, read with json_each, so it stays far below D1's 100 bindings and its expression depth is flat (no CASE or OR chains).
+// Chunks keep each JSON parameter small (about 50 bytes per entry).
+const MERGE_FOLD_CHUNK = 200
+const MERGE_FOLD_STOCK_CHUNK = 400
+type MergeFoldLot = { dup: number; target: number }
+type MergeFoldStock = { target: number; branch: number; qty: number }
+type MergeFoldLotMetadata = { id: number; cost: number | null; expiry: string | null }
+/** Fixed statements per fold chunk: delete the lot stock, mark the source lots, and four re-points (sale allocations, return allocations, sale lines, return lines). */
+const MERGE_FOLD_STATEMENTS_PER_CHUNK = 6
+
+/** The exact statement count mergeFoldStatements() builds; the admission estimates call this so they cannot drift from the writer. */
+export function mergeFoldStatementCount(foldedLots: number, stockEntries: number, keptLotsWritten: number): number {
+  const chunks = (count: number, size: number) => Math.ceil(Math.max(0, count) / size)
+  if (foldedLots <= 0) return 0
+  return chunks(stockEntries, MERGE_FOLD_STOCK_CHUNK) + chunks(foldedLots, MERGE_FOLD_CHUNK) * MERGE_FOLD_STATEMENTS_PER_CHUNK + chunks(keptLotsWritten, MERGE_FOLD_CHUNK)
+}
+
+const FOLD_DUP_IDS_SQL = "SELECT CAST(json_extract(value, '$.dup') AS INTEGER) FROM json_each(@fold)"
+const foldTargetOf = (column: string) => `(SELECT CAST(json_extract(f.value, '$.target') AS INTEGER) FROM json_each(@fold) f WHERE CAST(json_extract(f.value, '$.dup') AS INTEGER) = ${column})`
+
+export function mergeFoldStatements(
+  lots: readonly MergeFoldLot[],
+  stock: readonly MergeFoldStock[],
+  keptLots: readonly MergeFoldLotMetadata[],
+): Array<{ sql: string; params: Record<string, unknown> }> {
+  if (!lots.length) return []
+  const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
+  // 1. The discarded lots' stock is added into the kept lots, in lot order (so a fractional quantity sums as the per-lot writes did).
+  for (const part of chunkItems(stock, MERGE_FOLD_STOCK_CHUNK)) {
+    statements.push({
+      sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity)
+            SELECT CAST(json_extract(value, '$.target') AS INTEGER), CAST(json_extract(value, '$.branch') AS INTEGER), json_extract(value, '$.qty') FROM json_each(@stock) WHERE true
+            ON CONFLICT(batch_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity, updated_at = CURRENT_TIMESTAMP`,
+      params: { stock: JSON.stringify(part.map((row) => ({ target: row.target, branch: row.branch, qty: row.qty }))) },
+    })
+  }
+  for (const part of chunkItems(lots, MERGE_FOLD_CHUNK)) {
+    const params = { fold: JSON.stringify(part.map((row) => ({ dup: row.dup, target: row.target }))) }
+    // 2. Their own stock is cleared, 3. they are deactivated and marked (the marker keeps their payable counted once).
+    statements.push({ sql: `DELETE FROM branch_batch_stock WHERE batch_id IN (${FOLD_DUP_IDS_SQL})`, params })
+    statements.push({ sql: `UPDATE product_batches SET is_active = 0, merge_deactivated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id IN (${FOLD_DUP_IDS_SQL})`, params })
+    // 4. Batch identity (in same batch, out same batch, return same batch): allocations and single-lot lines follow the stock to the kept lot.
+    for (const table of ['sale_item_batch_allocations', 'return_item_batch_allocations', 'sale_items', 'return_items']) {
+      statements.push({ sql: `UPDATE ${table} SET batch_id = ${foldTargetOf('batch_id')} WHERE batch_id IN (${FOLD_DUP_IDS_SQL})`, params })
+    }
+  }
+  // 5. The kept lot carries the quantity-weighted cost ($0 or unknown left out, 4 places) and the earliest expiry across every lot added to it.
+  for (const part of chunkItems(keptLots, MERGE_FOLD_CHUNK)) {
+    const metaOf = (field: string) => `(SELECT json_extract(m.value, '$.${field}') FROM json_each(@kept) m WHERE CAST(json_extract(m.value, '$.id') AS INTEGER) = product_batches.id)`
+    statements.push({
+      sql: `UPDATE product_batches SET unit_cost_usd = ${metaOf('cost')}, expiry_date = ${metaOf('expiry')}, updated_at = CURRENT_TIMESTAMP
+            WHERE id IN (SELECT CAST(json_extract(value, '$.id') AS INTEGER) FROM json_each(@kept))`,
+      params: { kept: JSON.stringify(part.map((row) => ({ id: row.id, cost: row.cost, expiry: row.expiry }))) },
+    })
+  }
+  return statements
+}
+
 const MERGE_BUDGET_ERROR = /merge_case_statement_budget_exceeded|merge_case_fingerprint_statement_budget_exceeded|merge_read_batch_statement_limit/
 const MERGE_CONFLICT_RETRY_MESSAGE = 'Stock on one of these products changed while the merge was being saved. Nothing was saved. Try again.'
 const MERGE_TOO_LARGE_MESSAGE = 'This product has too many linked stock or history rows for one safe merge and remains unchanged.'
@@ -4735,8 +4794,6 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
   // unique per product -- so its before-image is captured exactly once).
   const repointedBatches: Array<{ id: number; batchNumber: number | null }> = []
   const foldedBatches: Array<{
-    /** false when the discarded lot was already inactive (legacy stock on it): the fold neither marked nor deactivated it, so undo must not reactivate it. */
-    sourceWasActive?: false
     dupBatchId: number
     keeperBatchId: number
     dupStockBefore: Array<{ branch_id: number; quantity: number }>
@@ -4775,7 +4832,14 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
   const dependentLotSnapshots = atomicHistory?.preparedDependentLotSnapshots
     ?? await readProductMergeDependentLotSnapshots(db, snapshot, stockDisposition)
   const lotsToRepoint: Array<{ id: number; number: number; key?: string }> = []
+  // The fold is SET-based: the loop only collects, and mergeFoldStatements() below writes one statement per kind for every folded lot
+  // (it was 7 statements per lot, which refused any merge above about 10 lots).
+  const foldLots: MergeFoldLot[] = []
+  const foldStock: MergeFoldStock[] = []
+  const foldLotMetadata: MergeFoldLotMetadata[] = []
   for (const batchRow of dupBatchRows) {
+    // WRITE-OFF acts on the active lots only; an already-inactive lot stays where it is.
+    if (writeOffStock && !isMergeableLot(batchRow)) continue
     if (writeOffStock) {
       // REMOVE: the lot belonged to the row being discarded, so it does not
       // travel. Its branch_batch_stock is cleared and the lot row itself is
@@ -4813,21 +4877,15 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
       if (!lotSnapshot) throw new Error('merge_snapshot_incomplete')
       const dupBatchStockRows = lotSnapshot.duplicateStockRows
       const keeperBatchStockBefore = lotSnapshot.keeperStockBefore
-      // Only ACTIVE kept lots are match targets (productMergeLots.ts), so a merge never reactivates an archived lot.
+      // Only ACTIVE kept lots are match targets and only ACTIVE discarded lots are folded (productMergeLots.ts), so a merge never
+      // reactivates an archived lot and the fold's source lot is always active before it is marked.
       for (const bbs of dupBatchStockRows) {
         const qty = Number(bbs.quantity) || 0
         if (!qty) continue
-        statements.push({
-          sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@batchId, @branchId, @qty)
-                ON CONFLICT(batch_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity, updated_at = CURRENT_TIMESTAMP`,
-          params: { batchId: existingCanonicalBatchId, branchId: bbs.branch_id, qty },
-        })
+        foldStock.push({ target: existingCanonicalBatchId, branch: Number(bbs.branch_id), qty })
       }
-      statements.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @id', params: { id: batchRow.id } })
-      const sourceWasActive = Number(batchRow.is_active ?? 1) === 1
-      if (sourceWasActive) statements.push({ sql: 'UPDATE product_batches SET is_active = 0, merge_deactivated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchRow.id } })
+      foldLots.push({ dup: Number(batchRow.id), target: existingCanonicalBatchId })
       foldedBatches.push({
-        ...(sourceWasActive ? {} : { sourceWasActive: false as const }),
         dupBatchId: batchRow.id,
         keeperBatchId: existingCanonicalBatchId,
         dupStockBefore: dupBatchStockRows.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })),
@@ -4837,12 +4895,8 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
         saleItemIds: lotSnapshot.saleItemIds,
         returnItemIds: lotSnapshot.returnItemIds,
       })
-      statements.push({ sql: 'UPDATE sale_item_batch_allocations SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId', params: { keeperBatchId: existingCanonicalBatchId, dupBatchId: batchRow.id } })
-      statements.push({ sql: 'UPDATE return_item_batch_allocations SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId', params: { keeperBatchId: existingCanonicalBatchId, dupBatchId: batchRow.id } })
-      // Batch identity: in same batch, out same batch, return same batch. A single-lot line keeps its lot in its own
-      // batch_id (no allocation row), so it follows the stock to the kept lot or a later return would hit an inactive lot.
-      statements.push({ sql: 'UPDATE sale_items SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId', params: { keeperBatchId: existingCanonicalBatchId, dupBatchId: batchRow.id } })
-      statements.push({ sql: 'UPDATE return_items SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId', params: { keeperBatchId: existingCanonicalBatchId, dupBatchId: batchRow.id } })
+      // Batch identity (in same batch, out same batch, return same batch): the allocations and the single-lot lines' own batch_id follow
+      // the stock to the kept lot, re-pointed by mergeFoldStatements().
       // The kept lot carries the quantity-weighted cost ($0 or unknown left out, 4 places) and the earliest expiry across every lot added
       // into it, written once however many discarded lots land there. Supplier, lot code, payment status and due date stay its own, even when empty.
       const keeperLotPlan = foldedLotPlanByKeeperId.get(existingCanonicalBatchId)
@@ -4851,10 +4905,7 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
         foldedKeeperLotsWritten.add(existingCanonicalBatchId)
         if (keeperLotPlan.costChanged || keeperLotPlan.expiryChanged) {
           keeperLotMetadataWritten = true
-          statements.push({
-            sql: 'UPDATE product_batches SET unit_cost_usd = @unitCost, expiry_date = @expiry, updated_at = CURRENT_TIMESTAMP WHERE id = @id',
-            params: { id: existingCanonicalBatchId, unitCost: keeperLotPlan.unit_cost_usd, expiry: keeperLotPlan.expiry_date },
-          })
+          foldLotMetadata.push({ id: existingCanonicalBatchId, cost: keeperLotPlan.unit_cost_usd, expiry: keeperLotPlan.expiry_date })
         }
       }
       const justFolded = foldedBatches[foldedBatches.length - 1]
@@ -4892,12 +4943,14 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
       } else {
         lotsToRepoint.push({ id: batchRow.id, number: nextCanonicalBatchNumber, key: batchKeyOnKeeper })
       }
-      lotsCreatedForAudit.push({ lotId: batchRow.id, batchNumber: nextCanonicalBatchNumber, receivedDate: mergeLotReceivedDate(batchRow.received_at) })
+      // An already-inactive lot is only re-pointed (no lot is created for the date); the audit names the lots the merge created.
+      if (isMergeableLot(batchRow)) lotsCreatedForAudit.push({ lotId: batchRow.id, batchNumber: nextCanonicalBatchNumber, receivedDate: mergeLotReceivedDate(batchRow.received_at) })
       nextCanonicalBatchNumber += 1
       repointedBatches.push({ id: batchRow.id, batchNumber: batchRow.batch_number, ...(batchKeyOnKeeper ? { batchKeyBefore: String(batchRow.batch_key) } : {}) })
       batchesMovedThisDup += 1
     }
   }
+  statements.push(...mergeFoldStatements(foldLots, foldStock, foldLotMetadata))
   // One statement per chunk, not per lot: a product with dozens of lots would
   // otherwise spend the whole 100-statement bound on the repoint alone.
   for (const lotChunk of chunkItems(lotsToRepoint, MERGE_LOT_REPOINT_CHUNK)) statements.push(repointLotsStatement(canonicalId, lotChunk))
@@ -5605,10 +5658,8 @@ function canonicalLeadingZeroGraphSnapshot(value: LeadingZeroApprovedGraph | und
     duplicateProduct: snapshot.duplicateProduct || null,
     canonicalBatchRows: byId(snapshot.canonicalBatchRows),
     canonicalBatchStockRows: byId(snapshot.canonicalBatchStockRows),
-    // Only lots in play take part in a merge (active, or inactive but still holding stock; any other inactive lot is left as it was): the
-    // same set the case read returns.
-    duplicateBatchRows: byId(value.duplicateBatchRowsFull.filter((row) => Number((row as { is_active?: unknown }).is_active ?? 1) === 1
-      || value.duplicateBatchStockRows.some((stock) => Number(stock.batch_id) === Number(row.id) && Number(stock.quantity) > 0))),
+    // Every lot of the discarded product, the same set the case read returns.
+    duplicateBatchRows: byId(value.duplicateBatchRowsFull),
     duplicateBatchStockRows: byId(value.duplicateBatchStockRows),
     saleAllocationRows: byId(value.saleAllocationRows),
     returnAllocationRows: byId(value.returnAllocationRows),
@@ -7103,18 +7154,21 @@ function selectedConflictStatementEstimate(
   statements += 2 // deactivate discarded + keeper economics
   const lotMatches = matchDuplicateLots(snapshot.canonicalBatchRows, snapshot.duplicateBatchRows)
   let repointedLots = 0
+  let foldedLots = 0
+  let foldStockEntries = 0
   for (const batch of snapshot.duplicateBatchRows) {
     if (stockChoice === 'write_off') {
-      statements += 2
+      if (isMergeableLot(batch)) statements += 2
     } else if (lotMatches.has(Number(batch.id))) {
       const lot = dependentLots.get(Number(batch.id))
-      statements += (lot?.duplicateStockRows.filter((row) => Number(row.quantity)).length || 0) + 7 // activate, clear, deactivate, 2 allocation + 2 single-lot line re-points
+      foldedLots += 1
+      foldStockEntries += lot?.duplicateStockRows.filter((row) => Number(row.quantity)).length || 0
     } else {
       repointedLots += 1
     }
   }
-  // One cost and expiry write per kept lot that takes stock (same-date match, productMergeLots.ts).
-  if (stockChoice === 'merge') statements += new Set(lotMatches.values()).size
+  // The set-based fold is one statement per kind whatever the lot count (mergeFoldStatements), plus one cost and expiry write for the kept lots.
+  if (stockChoice === 'merge') statements += mergeFoldStatementCount(foldedLots, foldStockEntries, new Set(lotMatches.values()).size)
   statements += Math.ceil(repointedLots / MERGE_LOT_REPOINT_CHUNK)
   statements += snapshot.reparentedByTable.length
   statements += snapshot.promotionRuleRows.filter((rule) => {
@@ -7412,22 +7466,26 @@ function selectedConflictLightStatementEstimate(
   const collisionBatchIds = new Set<number>()
   let mergeBatchStatements = 0
   let repointedLots = 0
+  let foldedLots = 0
+  let foldStockEntries = 0
   for (const batch of mergedBatches) {
     const keeperBatchId = lotMatches.get(Number(batch.id))
     if (keeperBatchId == null) repointedLots += 1
     else {
       collisionBatchIds.add(Number(batch.id))
-      mergeBatchStatements += batchStock.filter((row) => Number(row.batch_id) === Number(batch.id) && Number(row.quantity)).length + 7
+      foldedLots += 1
+      foldStockEntries += batchStock.filter((row) => Number(row.batch_id) === Number(batch.id) && Number(row.quantity)).length
     }
   }
-  mergeBatchStatements += Math.ceil(repointedLots / MERGE_LOT_REPOINT_CHUNK) + new Set(lotMatches.values()).size // + one cost/expiry write per kept lot
+  // The set-based fold: one statement per kind whatever the lot count, plus one cost/expiry write for the kept lots (mergeFoldStatements).
+  mergeBatchStatements += mergeFoldStatementCount(foldedLots, foldStockEntries, new Set(lotMatches.values()).size) + Math.ceil(repointedLots / MERGE_LOT_REPOINT_CHUNK)
   const common = stockTransactionStatementCount(1) + SELECTED_CONFLICT_FINGERPRINT_STATEMENT_COUNT + 1 // product CAS, selected-state guards, discarded stock clear
     + (canChangeImages ? mergedImages.length + 2 : 1)
     + 2 // deactivate and economics
     + reparentGroups.size + promotionCount + (childCount ? 2 : 0)
     + 1 + 2 + 2 + 2 + 3 // discarded-stock guard, stock caches, stock-session Undo close, receipt transition/guard, atomic history
   const merge = common + SELECTED_CONFLICT_COST_REVIEW_STATEMENT_COUNT + branchStock.length * 2 + mergeBatchStatements
-  const writeOff = common + SELECTED_CONFLICT_COST_REVIEW_STATEMENT_COUNT + branchStock.length + mergedBatches.length * 2
+  const writeOff = common + SELECTED_CONFLICT_COST_REVIEW_STATEMENT_COUNT + branchStock.length + mergedBatches.filter((row) => isMergeableLot(row as MergeLotRow)).length * 2
 
   const chunksOf80 = (count: number) => Math.ceil(Math.max(0, count) / 80)
   const savedBatchIds = new Set<number>([

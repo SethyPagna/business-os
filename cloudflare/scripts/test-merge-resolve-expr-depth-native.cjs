@@ -203,7 +203,9 @@ async function main() {
       assert.equal(f.h.raw.prepare('SELECT SUM(quantity) n FROM branch_stock WHERE product_id=2').get().n,units)
       const redo=await historyStep(f,history.id,'redo',1);assert.equal(redo.status,200,JSON.stringify(redo.json))
       assert.equal(f.h.raw.prepare('SELECT SUM(quantity) n FROM branch_stock WHERE product_id=1').get().n,units)
-      assert.equal(f.h.raw.prepare('SELECT COUNT(*) n FROM product_batches WHERE variant_product_id=1 AND unit_cost_usd=3').get().n,77)
+      // Lots of one received date become ONE lot on the keeper (owner 16 Nov 2026): 77 lots on 2026-09-01 -> one lot holding every unit at cost 3.
+      const kept=f.h.raw.prepare('SELECT pb.id,pb.unit_cost_usd,(SELECT SUM(quantity) FROM branch_batch_stock WHERE batch_id=pb.id) q FROM product_batches pb WHERE pb.variant_product_id=1 AND pb.is_active=1').all()
+      assert.equal(kept.length,1);assert.equal(kept[0].unit_cost_usd,3);assert.equal(kept[0].q,units)
       assert.equal(f.h.raw.prepare('SELECT cost_usd FROM product_cost_entries ORDER BY id DESC LIMIT 1').get().cost_usd,mutation==='unrelated'?0:7.123456789012345)
       if(mutation==='unrelated'){assert.equal(f.h.raw.prepare('SELECT cost_price_usd FROM products WHERE id=3').get().cost_price_usd,null);assert.equal(f.h.raw.prepare('SELECT cost_usd FROM product_cost_entries WHERE product_id=3').get().cost_usd,0)}
     }

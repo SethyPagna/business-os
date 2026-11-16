@@ -290,7 +290,9 @@ async function main() {
     })
   }
 
-  await check('DISCRIMINATING: a case too large for one atomic batch (many lots that fold into the keeper\'s) is a coded 409 that changes nothing, not a 500', async () => {
+  // B1 (16 Nov 2026): many lots that fold into the keeper's used to be refused (7 statements per lot). The fold is set-based now, so 30 of them merge,
+  // and the case that is still too large for one atomic batch is a WRITE-OFF of many lots (two statements per lot, unchanged): a coded 409.
+  await check('30 lots that fold into the keeper\'s lots merge in one atomic batch and the shelf agrees with the lots', async () => {
     const f = fixture(TWINS)
     fixtureWrite(f.h, () => f.h.raw.db.exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 30)
       INSERT INTO product_batches(variant_product_id, batch_key, batch_number, is_active, received_quantity, received_at)
@@ -299,8 +301,23 @@ async function main() {
       INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) SELECT id, 1, 1 FROM product_batches;
       INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(1, 1, 30), (2, 1, 30);
       UPDATE products SET stock_quantity = 30;`))
-    const before = digest(f)
     const res = await f.h.request('POST', '/possible-duplicates/merge', { keepId: 1, mergeId: 2, stock: 'merge' })
+    assert.equal(res.status, 200, JSON.stringify(res.json))
+    assert.equal(one(f, 'SELECT COALESCE(SUM(quantity), 0) AS n FROM branch_stock WHERE product_id = 1').n, 60)
+    assert.equal(one(f, 'SELECT COALESCE(SUM(bbs.quantity), 0) AS n FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id = bbs.batch_id WHERE pb.variant_product_id = 1').n, 60)
+  })
+
+  await check('DISCRIMINATING: a case too large for one atomic batch (a write-off of many lots, two statements each) is a coded 409 that changes nothing, not a 500', async () => {
+    const f = fixture(TWINS)
+    fixtureWrite(f.h, () => f.h.raw.db.exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 80)
+      INSERT INTO product_batches(variant_product_id, batch_key, batch_number, is_active, received_quantity, received_at)
+      SELECT 1, 'shared-' || i, i, 1, 1, date('2026-01-01', '+' || i || ' day') FROM n
+      UNION ALL SELECT 2, 'shared-' || i, i, 1, 1, date('2026-01-01', '+' || i || ' day') FROM n;
+      INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) SELECT id, 1, 1 FROM product_batches;
+      INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(1, 1, 30), (2, 1, 30);
+      UPDATE products SET stock_quantity = 30;`))
+    const before = digest(f)
+    const res = await f.h.request('POST', '/possible-duplicates/merge', { keepId: 1, mergeId: 2, stock: 'write_off' })
     assert.equal(res.status, 409, JSON.stringify(res.json))
     assert.equal(res.json.code, 'merge_case_exceeds_safe_limit')
     assert.equal(digest(f), before, 'a refusal changes nothing')
