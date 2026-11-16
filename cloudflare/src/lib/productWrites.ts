@@ -146,7 +146,10 @@ export function readProductMoneyPlan(body: Record<string, unknown>): MoneyPlan |
     if (!owns(raw.after, field)) continue
     const after = raw.after[field]
     if (after !== null && (typeof after !== 'number' || !Number.isFinite(after) || after < 0)) return invalidMoneyPlan()
-    if (body[field] !== after || nextMoney(field, after, raw.kind === 'update' ? (raw.before as MoneyBefore)[field] : undefined) !== after) return invalidMoneyPlan()
+    // A plan saved before cost-4dp can hold a legacy cost over 4 places (typically one left unchanged beside an edited price). Such a cost is
+    // accepted and stored rounded by the writers (roundProductCostPayload); only a figure that is not a cost must already be its own canonical form.
+    const canonical = nextMoney(field, after, raw.kind === 'update' ? (raw.before as MoneyBefore)[field] : undefined)
+    if (body[field] !== after || (!isCostField(field) && canonical !== after)) return invalidMoneyPlan()
   }
   return raw as unknown as MoneyPlan
 }

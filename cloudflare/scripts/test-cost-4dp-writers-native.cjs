@@ -42,6 +42,21 @@ const MUTANTS = {
   'isCostRoundingOnly: re-saving a legacy long cost is counted as a typed cost': [
     { file: 'lib/catalogCostRecompute.ts', from: "  if ((after ?? null) === (before ?? null)) return true\n  if (after == null || before == null || !Number.isFinite(before)) return false\n  return roundMoney4(before) === after", to: '  return (after ?? null) === (before ?? null)' },
   ],
+  // M4: the entry a queued (plan-less) cost edit records copies the replaced cost raw.
+  'typedCostEntryAfterWriteStatement: previous cost left raw (M4)': [
+    { file: 'lib/catalogCostRecompute.ts', from: 'costEntryPreviousUsd: roundStoredCost(before.cost_price_usd),', to: 'costEntryPreviousUsd: before.cost_price_usd ?? null,' },
+  ],
+  // M5: the entry the product form records copies the replaced cost raw.
+  'planManualCostChange: previous cost left raw (M5)': [
+    { file: 'lib/catalogCostRecompute.ts', from: 'previousCostUsd: roundStoredCost(before.cost_price_usd), userId', to: 'previousCostUsd: before.cost_price_usd, userId' },
+  ],
+  // M8: costs keep the old exact no-op rule. updateRow rounds the payload afterwards and hides it, so the scenario reads the plan prepareProductMoneyWrite stamps.
+  'nextMoney: a cost keeps the historical exact no-op rule (M8)': [
+    { file: 'lib/productWrites.ts', from: 'const keepsHistorical = !isCostField(field)', to: 'const keepsHistorical = true' },
+  ],
+  'readProductMoneyPlan: a frozen plan with a legacy long cost is refused again': [
+    { file: 'lib/productWrites.ts', from: '(!isCostField(field) && canonical !== after)', to: 'canonical !== after' },
+  ],
 }
 const MUTANT = process.env.COST4DP_MUTANT || ''
 
@@ -66,8 +81,8 @@ const harnessEnd = harnessText.indexOf(';(async () => {')
 assert.ok(harnessEnd > 0, 'the money-write-policy harness moved')
 const harnessModule = { exports: {} }
 new Function('require', '__dirname', 'module', `${harnessText.slice(0, harnessEnd)}
-module.exports = { products, reviews, writer, request, row, raw, admin, requester, seedFixture, load }`)(createRequire(harnessPath), __dirname, harnessModule)
-const { products, reviews, writer, request, row, raw, seedFixture, load } = harnessModule.exports
+module.exports = { products, reviews, writer, request, row, raw, admin, requester, seedFixture, load, env }`)(createRequire(harnessPath), __dirname, harnessModule)
+const { products, reviews, writer, request, row, raw, admin, seedFixture, load, env } = harnessModule.exports
 const money = load('lib/moneyPrecision.ts')
 
 const over4 = (c) => `(typeof(${c}) IN ('integer','real') AND ABS(${c} * 10000 - ROUND(${c} * 10000)) > 0.000001)`
@@ -93,7 +108,9 @@ const queuePlanless = (actionType, productId, payload) => Number(raw.prepare(
   "INSERT INTO pending_actions(section,action_type,entity_type,entity_id,payload_json,status,requested_by,requested_by_name) VALUES('products',?,'product',?,?,'open',2,'Requester')")
   .run(actionType, productId, JSON.stringify(payload)).lastInsertRowid)
 const approve = (pendingId) => request(reviews, 'POST', `/${pendingId}/approve`, {})
-const finish = (id) => raw.prepare('INSERT OR IGNORE INTO _legacy_long(id) SELECT ?').run(id)
+// A legacy row is excluded from the products census only until a writer rewrites it; finish() takes it out of the list so the census counts it again.
+const finish = (id) => raw.prepare('DELETE FROM _legacy_long WHERE id=?').run(id)
+const lastEntry = (id) => raw.prepare('SELECT cost_usd, previous_cost_usd FROM product_cost_entries WHERE product_id=? ORDER BY id DESC LIMIT 1').get(id)
 
 async function scenarios() {
   // ---- create ------------------------------------------------------------------------------------------------------------------------------
@@ -118,6 +135,10 @@ async function scenarios() {
   assert.deepEqual(pair(typed).slice(0, 2), [1.0002, 1.0002], 'edit: a typed tie 1.00015 goes up')
   assert.equal(raw.prepare('SELECT cost_usd c FROM product_cost_entries WHERE product_id=? ORDER BY id DESC LIMIT 1').get(typed).c, 1.0002, 'edit: the manual cost entry holds the stored 4-place figure')
   finish(typed)
+  const prevLong = seedLegacy('W previous', 3.123456, null)
+  assert.equal((await request(products, 'PUT', `/${prevLong}`, { cost_price_usd: 7 })).status, 200)
+  assert.deepEqual({ ...lastEntry(prevLong) }, { cost_usd: 7, previous_cost_usd: 3.1235 }, 'edit: the manual entry records the cost it replaced at 4 places, not the legacy long figure')
+  finish(prevLong)
   assert.deepEqual(census(), { products: 0, lots: 0, entries: 0 }, 'census after edit')
 
   // ---- a request queued before 13 Sep 2026 (no money plan), approved today -------------------------------------------------------------------
@@ -133,16 +154,38 @@ async function scenarios() {
   assert.equal((await approve(queuePlanless('update', queuedTwin, { purchase_price_usd: '3.45675' }))).status, 200)
   assert.equal(row(queuedTwin).purchase_price_usd, 3.4568, 'queue update: a lone purchase cost is rounded (tie goes up)')
   finish(queuedTwin)
+  const queuedPrev = seedLegacy('W queued previous', 3.123456, null)
+  assert.equal((await approve(queuePlanless('update', queuedPrev, { cost_price_usd: 5 }))).status, 200)
+  assert.deepEqual({ ...lastEntry(queuedPrev) }, { cost_usd: 5, previous_cost_usd: 3.1235 }, 'queue update: the typed-cost entry records the replaced cost at 4 places')
+  finish(queuedPrev)
   const createPending = queuePlanless('create', null, { name: 'W queued create', cost_price_usd: '4.16666666', cost_price_khr: 4100.12345, purchase_price_usd: 99 })
   assert.equal((await approve(createPending)).status, 200)
   const made = raw.prepare("SELECT id, cost_price_usd, cost_price_khr, purchase_price_usd FROM products WHERE name='W queued create'").get()
   assert.deepEqual({ ...made, id: 0 }, { id: 0, cost_price_usd: 4.1667, cost_price_khr: 4100.1235, purchase_price_usd: 4.1667 }, 'queue create: rounded at apply')
+  // A money plan frozen before this change can hold a legacy cost over 4 places, left unchanged beside an edited price. It was refused with
+  // product_money_plan_invalid; it is accepted and the cost is stored rounded (lead decision 4), with no typed-cost entry.
+  const planned = seedLegacy('W frozen plan', 3.123456, null)
+  const plannedBefore = row(planned)
+  const v1Fields = ['cost_price_usd', 'cost_price_khr', 'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr']
+  const frozen = { cost_price_usd: 3.123456, selling_price_usd: 9, product_money_policy_version: 1, _product_money_write_plan: { version: 1, kind: 'update', product_id: planned,
+    before: Object.fromEntries([...v1Fields, 'updated_at', 'name'].map((k) => [k, plannedBefore[k] ?? null])), after: { cost_price_usd: 3.123456, selling_price_usd: 9 }, group_rename: null } }
+  const frozenId = Number(raw.prepare("INSERT INTO pending_actions(section,action_type,entity_type,entity_id,payload_json,status,requested_by,requested_by_name) VALUES('products','update','product',?,?,'open',2,'Requester')").run(planned, JSON.stringify(frozen)).lastInsertRowid)
+  const frozenApproved = await approve(frozenId)
+  assert.equal(frozenApproved.status, 200, 'a frozen plan holding a legacy long cost unchanged is accepted: ' + JSON.stringify(frozenApproved))
+  assert.deepEqual([row(planned).cost_price_usd, row(planned).selling_price_usd], [3.1235, 9], 'frozen plan: the legacy cost is stored rounded, the edited price applied')
+  assert.equal(entries(planned), 0, 'frozen plan: rounding a legacy cost is not a typed cost')
+  finish(planned)
+  // The layer that sees the raw value: the plan a new request is stamped with. updateRow rounds the payload again, so a regression here would hide there.
+  const prepared = seedLegacy('W prepared', 3.123456, null)
+  const preparedBody = { cost_price_usd: 3.123456 }
+  await writer.prepareProductMoneyWrite({ ...env, TEST_USER: admin }, preparedBody, prepared)
+  assert.equal(preparedBody.cost_price_usd, 3.1235, 'prepare: a legacy cost re-sent as it is stored comes out at 4 places (the historical no-op rule is gone for costs)')
+  assert.equal(preparedBody._product_money_write_plan.after.cost_price_usd, 3.1235, 'prepare: the plan holds the stored figure')
   assert.deepEqual(census(), { products: 0, lots: 0, entries: 0 }, 'census after the queue')
 
   // ---- catalog-wide cost adjust: 4 places (it cut costs to 2), nearest, a tie away from zero; the twin and the entry hold the stored figure -----------------
   const bulkUp = Number(seedFixture(raw, () => raw.prepare('INSERT INTO products(name,cost_price_usd,purchase_price_usd,cost_price_khr,purchase_price_khr,is_active) VALUES(?,?,?,?,?,1)').run('W bulk up', 4.1667, 4.1667, 20500.5, 20500.5)).lastInsertRowid)
   const bulkTie = Number(seedFixture(raw, () => raw.prepare('INSERT INTO products(name,cost_price_usd,purchase_price_usd,is_active) VALUES(?,?,?,1)').run('W bulk tie', 1.00055, 1.00055)).lastInsertRowid)
-  void bulkTie
   raw.prepare('INSERT INTO _legacy_long(id) VALUES(?)').run(bulkTie)
   const adjusted = await request(products, 'POST', '/bulk-price-adjust', { direction: 'increase', amount: 0.00005, fields: ['cost_price_usd', 'cost_price_khr'], client_request_id: 'cost4dp-bulk-up-0001' })
   assert.equal(adjusted.status, 200, JSON.stringify(adjusted))
@@ -151,7 +194,8 @@ async function scenarios() {
   const wide = await request(products, 'POST', '/bulk-price-adjust', { direction: 'increase', amount: 0.01, fields: ['cost_price_usd'], client_request_id: 'cost4dp-bulk-cent-0001' })
   assert.equal(wide.status, 200, JSON.stringify(wide))
   assert.equal(row(bulkUp).cost_price_usd, 4.1768, 'bulk: a cent keeps places 3 and 4 (it was rounded to 2 places: 4.18)')
-  assert.deepEqual(census(), { products: 0, lots: 0, entries: 0 }, 'census after the bulk adjusts (the legacy-long fixture rows are excluded until their first rewrite)')
+  finish(bulkTie)
+  assert.deepEqual(census(), { products: 0, lots: 0, entries: 0 }, 'census after the bulk adjusts (the legacy-long bulkTie row was rewritten, so it is counted again)')
 
   // ---- planInsertRow (stock-in session, review create) ---------------------------------------------------------------------------------------
   const columns = new Set(['name', 'cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr', 'is_active', 'created_at', 'updated_at'])
