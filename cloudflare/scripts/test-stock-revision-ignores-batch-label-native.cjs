@@ -62,8 +62,11 @@ async function main() {
     const ofList = /CREATE TRIGGER stock_revision_product_batches_update AFTER UPDATE OF([\s\S]*?)ON product_batches/.exec(migration)[1].split(',').map((s) => s.trim()).filter(Boolean)
     const f = fixture()
     const columns = f.sql.prepare("SELECT name FROM pragma_table_info('product_batches')").all().map((c) => c.name)
-    assert.deepEqual([...ofList].sort(), columns.filter((c) => c !== 'received_branch_name').sort(),
-      'every product_batches column except received_branch_name must be listed; add a new column here')
+    // 0311's merge markers are bookkeeping written only beside is_active (a listed column) by the merge fold and its undo,
+    // so the trigger already fires for every write of theirs; they are deliberately not part of this list.
+    const MERGE_MARKERS = ['merge_deactivated_at', 'merge_payable_moved']
+    assert.deepEqual([...ofList].sort(), columns.filter((c) => c !== 'received_branch_name' && !MERGE_MARKERS.includes(c)).sort(),
+      'every product_batches column except received_branch_name and the 0311 merge markers must be listed; add a new column here')
     assert.ok(columns.includes('received_branch_name'))
     const original = read('0124_stock_session_operations.sql')
     const originalTrigger = original.slice(original.indexOf('CREATE TRIGGER stock_revision_product_batches_update'), original.indexOf('CREATE TRIGGER stock_revision_product_batches_delete'))

@@ -41,7 +41,7 @@ function fixtureWrite(h, run) {
 //   Branch stock: br1 18 (1 untracked), br2 5, br3 1          205 D5 no received date $0, key = K1's key    br3 3
 //                                                             Branch stock: br1 7, br2 8 (1 untracked), br3 6
 //
-//   D1 and D7 are both 3 Nov: two discarded lots into ONE kept lot (K1), cost {2.00, 2.40, 2.40} -> distinct mean 2.20
+//   D1 and D7 are both 3 Nov: two discarded lots into ONE kept lot (K1), cost {2.00, 2.40, 2.40} -> weighted mean 2.20
 //   (a per-lot mean is 2.2667), expiry the earliest of 2027-01-31 / 03-31 / 12-31.
 //   D6 was received at 23:30 UTC on 3 Nov = 4 Nov in the shop, so it meets K5 (4 Nov), not K1 (3 Nov, the UTC day).
 //   Its $0 is not part of K5's mean (K5 stays $4.00); K5 takes its expiry (it had none).
@@ -96,7 +96,7 @@ function world() {
   return h
 }
 
-const LOT_COLUMNS = 'merge_deactivated_at IS NOT NULL AS merge_marked,id,variant_product_id,batch_key,batch_number,lot_code,received_at,expiry_date,unit_cost_usd,is_active,supplier_id,supplier_name,payment_status,credit_due_date,received_quantity,received_cost_usd,received_branch_id'
+const LOT_COLUMNS = 'merge_deactivated_at IS NOT NULL AS merge_marked,merge_payable_moved IS NOT NULL AS payable_moved,id,variant_product_id,batch_key,batch_number,lot_code,received_at,expiry_date,unit_cost_usd,is_active,supplier_id,supplier_name,payment_status,credit_due_date,received_quantity,received_cost_usd,received_branch_id'
 function lots(h) { return plain(h.raw.prepare(`SELECT ${LOT_COLUMNS} FROM product_batches ORDER BY id`).all()) }
 function lot(h, id) { return lots(h).find((row) => row.id === id) }
 function lotStock(h) {
@@ -487,6 +487,80 @@ async function main() {
     assert.equal((await merge(w)).status, 200)
     fixtureWrite(w, () => w.raw.db.exec('DELETE FROM branch_batch_stock WHERE batch_id=103; UPDATE product_batches SET is_active=0 WHERE id=103'))
     assert.deepEqual(await reminderIds(w), { count: 2, ids: [201, 203] }, 'a manually deactivated kept lot drops out; the merge-deactivated ones stay')
+  })
+
+  // ---- owner rules 5 and 6 Oct: cost = quantity-weighted average (a $0 or unknown cost not weighted), 4 places --------------
+  await check('the kept lot cost is the quantity-weighted average at 4 places, and undo restores the exact previous cost', async () => {
+    const w = world()
+    // Kept lot 101 holds 7 at an exact 5-place $2.33333; discarded 201 holds 5 at $3.00 and 207 holds 2 at $2.40, all 3 Nov:
+    // (7 x 2.33333 + 5 x 3 + 2 x 2.4) / 14 = 36.13331 / 14 = 2.58095... -> 2.581 (4 places: 2.5810). A plain mean of the three
+    // costs is 2.5778; only the stock weights give 2.581.
+    fixtureWrite(w, () => w.raw.db.exec('UPDATE product_batches SET unit_cost_usd=2.33333 WHERE id=101; UPDATE product_batches SET unit_cost_usd=3 WHERE id=201'))
+    const prior = state(w)
+    assert.equal((await merge(w)).status, 200)
+    const stored = lot(w, 101).unit_cost_usd
+    assert.equal(stored, 2.581, 'weighted by the stock combined, stored at 4 places (2.58095... is never stored raw)')
+    assert.equal(stored, Math.round(stored * 10000) / 10000)
+    const snap = JSON.parse(w.raw.prepare("SELECT payload_json FROM undo_snapshots WHERE kind='product.merge' ORDER BY id DESC LIMIT 1").get().payload_json)
+    assert.equal(snap.foldedBatches.find((fb) => fb.keeperBatchId === 101).keeperLotBefore.unit_cost_usd, 2.33333, 'the snapshot keeps the exact previous value')
+    assert.equal((await historyAction(w, 'undo')).status, 200)
+    assert.equal(lot(w, 101).unit_cost_usd, 2.33333, 'undo restores the exact previous cost')
+    assert.equal(state(w), prior)
+  })
+
+  await check('a $0 lot is not weighted: the kept lot takes the real cost; and two $0 lots leave the kept lot at $0', async () => {
+    const w = world()
+    // Lot 105 (kept, $4.00, 3 units) meets 206 (discarded, $0, 1 unit): the real cost stands, not (3 x 4 + 1 x 0) / 4 = 3.
+    assert.equal((await merge(w)).status, 200)
+    assert.equal(lot(w, 105).unit_cost_usd, 4)
+    // Kept $0 meets a real cost: the real cost wins.
+    const v = world()
+    fixtureWrite(v, () => v.raw.db.exec('UPDATE product_batches SET unit_cost_usd=0 WHERE id=105; UPDATE product_batches SET unit_cost_usd=6.5 WHERE id=206'))
+    assert.equal((await merge(v)).status, 200)
+    assert.equal(lot(v, 105).unit_cost_usd, 6.5, 'a $0 kept lot takes the real cost of the lot added to it')
+    // Both $0: stays $0.
+    const z = world()
+    fixtureWrite(z, () => z.raw.db.exec('UPDATE product_batches SET unit_cost_usd=0 WHERE id=105'))
+    assert.equal((await merge(z)).status, 200)
+    assert.equal(lot(z, 105).unit_cost_usd, 0, 'both $0 stays $0')
+  })
+
+  // ---- owner 6 Oct: a lot with no supplier merges into the one that has a supplier --------------------------------------
+  const supplierWorld = () => {
+    const w = world()
+    // Kept lot 105 has no supplier (paid, no due date). The lot added to it, 206, owes supplier 2 on credit due in 3 days.
+    fixtureWrite(w, () => w.raw.db.exec(`UPDATE product_batches SET supplier_id=NULL, supplier_name=NULL, payment_status='paid', credit_due_date=NULL WHERE id=105;
+      UPDATE product_batches SET payment_status='credit' WHERE id=206;
+      UPDATE product_batches SET credit_due_date=date('now','+3 day') WHERE payment_status='credit'`))
+    return w
+  }
+  await check('supplier: a kept lot with none takes the added lot supplier, payment status and due date; a kept lot with a supplier keeps its own', async () => {
+    const w = supplierWorld()
+    const dueBefore = lot(w, 206).credit_due_date
+    assert.equal((await merge(w)).status, 200)
+    const kept = lot(w, 105)
+    assert.deepEqual({ supplier_id: kept.supplier_id, supplier_name: kept.supplier_name, payment_status: kept.payment_status, credit_due_date: kept.credit_due_date },
+      { supplier_id: 2, supplier_name: 'Sup D', payment_status: 'credit', credit_due_date: dueBefore })
+    // 101 already had supplier 1 and 201 (supplier 2, credit) folded into it: 101 keeps supplier 1.
+    assert.equal(lot(w, 101).supplier_id, 1)
+    assert.equal(lot(w, 101).payment_status, 'paid')
+    assert.equal((await historyAction(w, 'undo')).status, 200)
+    const back = lot(w, 105)
+    assert.deepEqual({ supplier_id: back.supplier_id, supplier_name: back.supplier_name, payment_status: back.payment_status, credit_due_date: back.credit_due_date },
+      { supplier_id: null, supplier_name: null, payment_status: 'paid', credit_due_date: null }, 'undo puts the kept lot supplier fields back exactly')
+  })
+  await check('supplier: the payable moved to the kept lot is reminded once (the donor lot is skipped), and undo restores both', async () => {
+    const w = supplierWorld()
+    const prior = state(w)
+    assert.deepEqual(await reminderIds(w), { count: 4, ids: [103, 201, 203, 206] }, 'before the merge')
+    assert.equal((await merge(w)).status, 200)
+    assert.equal(lot(w, 206).merge_marked, 1)
+    assert.equal(lot(w, 206).payable_moved, 1, 'the donor lot is marked: its payable now lives on the kept lot')
+    assert.deepEqual(await reminderIds(w), { count: 4, ids: [103, 105, 201, 203] }, 'the kept lot 105 reminds for the credit it took from 206, once; 206 is not counted again; 201 and 203 (their kept lots have suppliers) still remind')
+    assert.equal((await historyAction(w, 'undo')).status, 200)
+    assert.equal(lot(w, 206).payable_moved, 0)
+    assert.deepEqual(await reminderIds(w), { count: 4, ids: [103, 201, 203, 206] }, 'after undo')
+    assert.equal(state(w), prior)
   })
 
   // ---- a later edit of a lot the merge rewrote must not be overwritten by undo's before-image ---------------------------

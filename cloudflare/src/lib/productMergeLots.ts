@@ -1,5 +1,5 @@
 import { localDateOf } from './businessDateWindow'
-import { meanMoney4 } from './moneyPrecision'
+import { meanMoney4, weightedMeanMoney4 } from './moneyPrecision'
 
 // Which lot of the KEEPER a discarded product's lot is folded into, and what
 // the kept lot carries afterwards. ONE implementation: the fold itself
@@ -17,10 +17,19 @@ import { meanMoney4 } from './moneyPrecision'
 //   * MATCH BY RECEIVED DATE, in the business day (Cambodia, UTC+7), never by
 //     batch_key. A stored full timestamp is a UTC instant, so 23:30 UTC on 3
 //     Nov is 4 Nov in the shop; a stored bare date is already a business date.
-//   * Same date: the duplicate lot's stock is added into the kept lot. The kept
-//     lot then carries the mean of the DISTINCT non-zero costs (zero and unknown
-//     are left out, as in every cost mean) and the EARLIEST non-null expiry.
-//     Its supplier, lot code, payment status and credit due date stay its own.
+//   * Same date: the duplicate lot's stock is added into the kept lot (always,
+//     whatever its cost or expiry). The kept lot then carries
+//       - COST: the QUANTITY-WEIGHTED average of the costs of the lots combined
+//         (owner 5 Oct 2026 "cost = weighted average"; each lot's weight is its
+//         stock being combined, summed over branches). A $0 or unknown cost is
+//         left out of the weights (owner 6 Oct): the real cost stands; if every
+//         lot is $0 or unknown the kept lot's own value stands; if the weights
+//         total 0 the kept lot's own cost stands. Rounded to 4 places by the
+//         one rounding the cost writers use (moneyPrecision).
+//       - EXPIRY: the earliest non-null.
+//       - SUPPLIER: its own, unless it has none and an added lot has one (owner
+//         6 Oct), then that lot's supplier with its payment status and due date.
+//     Lot code stays its own.
 //   * No same-date kept lot: the duplicate lot is re-pointed as a new lot.
 //   * Several kept lots on that date: the lowest batch_number takes it (then
 //     the lowest id), so the choice never depends on read order.
@@ -92,20 +101,46 @@ function positiveCost(value: unknown): number | null {
   return Number.isFinite(cost) && cost > 0 ? cost : null
 }
 
-/**
- * The cost a kept lot carries after lots are added into it: the mean of the
- * DISTINCT non-zero costs across the kept lot and every lot added (4/5/6 is 5,
- * never a pairwise 5.25; ten receipts at 4 and one at 5 is 4.50). Zero and
- * unknown costs are excluded. With one distinct figure the lot keeps that
- * figure exactly as stored (an old five-place cost is not rewritten); with
- * none the kept lot's own value (zero or unknown) stands.
- */
-export function foldedLotCost(keeperCost: unknown, addedCosts: readonly unknown[]): number | null {
-  const distinct = [...new Set([keeperCost, ...addedCosts].map(positiveCost).filter((cost): cost is number => cost !== null))]
-  if (distinct.length === 0) return keeperCost == null || keeperCost === '' ? null : Number(keeperCost)
-  if (distinct.length === 1) return distinct[0]
-  return meanMoney4(distinct)
+export type CostedLot = { cost: unknown; quantity: unknown }
+
+const nonNegative = (value: unknown): number => {
+  const quantity = Number(value)
+  return Number.isFinite(quantity) && quantity > 0 ? quantity : 0
 }
+
+/**
+ * The cost a kept lot carries after lots are added into it: the QUANTITY-WEIGHTED average of the costs of the kept lot
+ * and every lot added, each weighted by its stock (4 at $4 and 6 at $5 is $4.60; two lots of 6 at $4 and $5 are $4.50).
+ * A $0 or unknown cost is not weighted: with one real cost among them that cost stands exactly, with none the kept lot's
+ * own value (zero or unknown) stands, and when the weights of the real costs total 0 the kept lot's own cost stands.
+ * Every figure leaves through moneyPrecision's 4-place rounding (owner 30 Sep): weightedMeanMoney4 for the mean,
+ * meanMoney4 for a single figure.
+ */
+export function foldedLotCost(keeper: CostedLot, added: readonly CostedLot[]): number | null {
+  const own = keeper.cost == null || keeper.cost === '' ? null : Number(keeper.cost)
+  const bearing = [keeper, ...added].map((lot) => ({ cost: positiveCost(lot.cost), quantity: nonNegative(lot.quantity) }))
+    .filter((lot): lot is { cost: number; quantity: number } => lot.cost !== null)
+  if (bearing.length === 0) return own
+  if (bearing.length === 1) return meanMoney4([bearing[0].cost])
+  const totalQuantity = bearing.reduce((sum, lot) => sum + lot.quantity, 0)
+  if (totalQuantity <= 0) return own
+  return weightedMeanMoney4(bearing.map((lot) => ({ amount: lot.cost, factor: lot.quantity })), totalQuantity)
+}
+
+export type LotSupplier = { supplier_id: number | null; supplier_name: string | null; payment_status: string | null; credit_due_date: string | null }
+
+/** A lot has a supplier when it names one by id or by name (a lot with neither merges into one that has). */
+export function lotHasSupplier(lot: MergeLotRow): boolean {
+  const id = lot.supplier_id == null || lot.supplier_id === '' ? 0 : Number(lot.supplier_id)
+  return (Number.isFinite(id) && id > 0) || String(lot.supplier_name ?? '').trim() !== ''
+}
+
+const supplierOf = (lot: MergeLotRow): LotSupplier => ({
+  supplier_id: lot.supplier_id == null || lot.supplier_id === '' ? null : Number(lot.supplier_id),
+  supplier_name: lot.supplier_name == null ? null : String(lot.supplier_name),
+  payment_status: lot.payment_status == null ? null : String(lot.payment_status),
+  credit_due_date: lot.credit_due_date == null ? null : String(lot.credit_due_date),
+})
 
 /** The earliest non-empty expiry across the kept lot and the lots added; the kept lot's own when none has one. */
 export function foldedLotExpiry(keeperExpiry: unknown, addedExpiries: readonly unknown[]): string | null {
@@ -122,6 +157,8 @@ export type FoldedLotMetadata = {
   expiry_date: string | null
   costChanged: boolean
   expiryChanged: boolean
+  /** Set when the kept lot has no supplier and an added lot has one: that lot's supplier, payment status and due date. */
+  supplier: (LotSupplier & { fromLotId: number }) | null
 }
 
 /**
@@ -133,9 +170,12 @@ export function planFoldedLotMetadata(
   keeperLots: readonly MergeLotRow[],
   duplicateLots: readonly MergeLotRow[],
   matches: ReadonlyMap<number, number> = matchDuplicateLots(keeperLots, duplicateLots),
+  /** Total stock per lot id (sum over branches) as it stands before the fold; a row's own lot_quantity is the fallback. */
+  quantities?: ReadonlyMap<number, number>,
 ): FoldedLotMetadata[] {
   const keeperById = new Map(keeperLots.map((lot) => [Number(lot.id), lot]))
   const duplicateById = new Map(duplicateLots.map((lot) => [Number(lot.id), lot]))
+  const quantityOf = (lot: MergeLotRow) => quantities?.get(Number(lot.id)) ?? lot.lot_quantity
   const grouped = new Map<number, number[]>()
   for (const [duplicateId, keeperId] of [...matches].sort((a, b) => a[0] - b[0])) {
     grouped.set(keeperId, [...(grouped.get(keeperId) || []), duplicateId])
@@ -143,8 +183,10 @@ export function planFoldedLotMetadata(
   return [...grouped].sort((a, b) => a[0] - b[0]).map(([keeperLotId, duplicateLotIds]) => {
     const keeper = keeperById.get(keeperLotId)!
     const added = duplicateLotIds.map((id) => duplicateById.get(id)!)
-    const unit_cost_usd = foldedLotCost(keeper.unit_cost_usd, added.map((lot) => lot.unit_cost_usd))
+    const unit_cost_usd = foldedLotCost({ cost: keeper.unit_cost_usd, quantity: quantityOf(keeper) }, added.map((lot) => ({ cost: lot.unit_cost_usd, quantity: quantityOf(lot) })))
     const expiry_date = foldedLotExpiry(keeper.expiry_date, added.map((lot) => lot.expiry_date))
+    // The lowest batch_number (then id) among the added lots that name a supplier, when the kept lot names none.
+    const donor = lotHasSupplier(keeper) ? undefined : [...added].sort(lotOrder).find(lotHasSupplier)
     const same = (a: unknown, b: unknown) => (a == null || a === '' ? null : String(a)) === (b == null || b === '' ? null : String(b))
     return {
       keeperLotId,
@@ -154,6 +196,7 @@ export function planFoldedLotMetadata(
       expiry_date,
       costChanged: !same(keeper.unit_cost_usd, unit_cost_usd),
       expiryChanged: !same(keeper.expiry_date, expiry_date),
+      supplier: donor ? { ...supplierOf(donor), fromLotId: Number(donor.id) } : null,
     }
   })
 }

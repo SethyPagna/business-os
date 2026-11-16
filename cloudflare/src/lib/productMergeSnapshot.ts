@@ -161,7 +161,8 @@ export function planProductMergeCaseSnapshot(
       key: 'duplicateBatches',
       // The two lot_* columns let the fold assert in its write batch that nothing moved on these lots since this read.
       // received_at, expiry_date and unit_cost_usd are what the date match and the folded lot's cost and expiry read.
-      sql: `SELECT id, batch_key, batch_number, received_at, expiry_date, unit_cost_usd,
+      // supplier_id, supplier_name, payment_status and credit_due_date: a kept lot with no supplier takes an added lot's.
+      sql: `SELECT id, batch_key, batch_number, received_at, expiry_date, unit_cost_usd, supplier_id, supplier_name, payment_status, credit_due_date,
         (SELECT COALESCE(SUM(quantity), 0) FROM branch_batch_stock WHERE batch_id = product_batches.id) AS lot_quantity,
         (SELECT COUNT(*) FROM branch_batch_stock WHERE batch_id = product_batches.id) AS lot_stock_rows
         FROM product_batches WHERE variant_product_id = @id`,

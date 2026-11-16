@@ -47,7 +47,7 @@ async function main(){
   assert.equal(result.body.costAuthority.cost_price_usd,manual);assert.equal(result.body.costAuthority.source,'manual');assert.equal(result.body.costAuthority.needsReview,true)
   const done=await merge({keepId:20,mergeId:21,keep:true,stock:'merge'});assert.equal(done.status,200,JSON.stringify(done.body));assert.equal(one('SELECT cost_price_usd value FROM products WHERE id=20').value,manual)
  })
- for(const [sameKey,manual,stock,expected,source,review]of [[false,undefined,'merge',5,'received_lot',false],[true,undefined,'merge',6,'received_lot',false],[true,7,'merge',7,'manual',true],[false,7,'write_off',7,'manual',true]])await check('actual graph collision/manual/writeoff '+JSON.stringify([sameKey,manual,stock]),async()=>{
+ for(const [sameKey,manual,stock,expected,source,review]of [[false,undefined,'merge',5,'received_lot',false],[true,undefined,'merge',5,'received_lot',false],[true,7,'merge',7,'manual',true],[false,7,'write_off',7,'manual',true]])await check('actual graph collision/manual/writeoff '+JSON.stringify([sameKey,manual,stock]),async()=>{
   lots(sameKey,manual)
   const before=rows('SELECT * FROM products ORDER BY id'),{result}=await quote([{mergeId:21,stock}])
   assert.deepEqual(rows('SELECT * FROM products ORDER BY id'),before)

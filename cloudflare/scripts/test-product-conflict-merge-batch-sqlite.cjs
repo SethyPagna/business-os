@@ -353,8 +353,8 @@ async function main() {
       assert.deepEqual(lots.db.prepare('SELECT branch_id,quantity FROM branch_stock WHERE product_id=9101 ORDER BY branch_id').all().map(row=>({...row})),[{branch_id:901,quantity:7},{branch_id:902,quantity:7}])
       for(const row of before.product_batches) {
         const after=lots.db.prepare('SELECT * FROM product_batches WHERE id=?').get(row.id)
-        // 16 Nov 2026: the kept lot (9301) takes the source's stock ON THE SAME DAY, so it carries the mean of the distinct costs (4 and 6).
-        for(const key of ['received_at','expiry_date','unit_cost_usd','received_quantity','received_cost_usd','lot_code']) assert.equal(after[key],collision&&row.id===9301&&key==='unit_cost_usd'?5:row[key],key+' preserved')
+        // 16 Nov 2026: the kept lot (9301) takes the source's stock ON THE SAME DAY, so it carries the quantity-weighted cost: (9 x 4 + 5 x 6) / 14 = 4.7143 at 4 places.
+        for(const key of ['received_at','expiry_date','unit_cost_usd','received_quantity','received_cost_usd','lot_code']) assert.equal(after[key],collision&&row.id===9301&&key==='unit_cost_usd'?4.7143:row[key],key+' preserved')
       }
       for(const t of ['sale_item_batch_allocations','return_item_batch_allocations']) {
         const expected=before[t].map(row=>({...row,batch_id:collision?9301:9302}))

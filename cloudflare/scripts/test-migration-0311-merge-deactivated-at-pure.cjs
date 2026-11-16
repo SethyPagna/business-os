@@ -30,10 +30,10 @@ check('the file is LF-only, numbered 0311 once, keeps rowid, and carries PRE / P
   for (const word of ['PRE-ASSERTION', 'POST-ASSERTION', 'RECOVERY', 'BACKFILL DECISION']) assert.ok(sql.includes(word), word)
   assert.deepEqual(fs.readdirSync(directory).filter((f) => f.startsWith('0311_')), [migration])
   const statements = sql.replace(/^--.*$/gm, '').split(';').map((s) => s.trim()).filter(Boolean)
-  assert.deepEqual(statements, ['ALTER TABLE product_batches ADD COLUMN merge_deactivated_at TEXT'])
+  assert.deepEqual(statements, ['ALTER TABLE product_batches ADD COLUMN merge_deactivated_at TEXT', 'ALTER TABLE product_batches ADD COLUMN merge_payable_moved INTEGER'])
 })
 
-check('it adds exactly one nullable TEXT column and leaves every existing lot unmarked and unchanged', () => {
+check('it adds exactly two nullable columns and leaves every existing lot unmarked and unchanged', () => {
   const db = chain()
   const before = columns(db)
   assert.equal(before.some((c) => c.name === 'merge_deactivated_at'), false, 'PRE-ASSERTION: the column does not exist yet')
@@ -45,11 +45,11 @@ check('it adds exactly one nullable TEXT column and leaves every existing lot un
   const lotBefore = row()
   db.exec(sql)
   const after = columns(db)
-  assert.deepEqual(after.filter((c) => !before.some((b) => b.name === c.name)), [{ name: 'merge_deactivated_at', type: 'TEXT', not_null: 0, dflt_value: null }])
+  assert.deepEqual(after.filter((c) => !before.some((b) => b.name === c.name)), [{ name: 'merge_deactivated_at', type: 'TEXT', not_null: 0, dflt_value: null }, { name: 'merge_payable_moved', type: 'INTEGER', not_null: 0, dflt_value: null }])
   assert.deepEqual(after.filter((c) => before.some((b) => b.name === c.name)), before, 'no existing column changed')
   assert.deepEqual(row(), lotBefore, 'the existing lot is unchanged')
   assert.equal(db.prepare('SELECT merge_deactivated_at AS m FROM product_batches WHERE id=5').get().m, null)
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM product_batches WHERE merge_deactivated_at IS NOT NULL').get().n, 0, 'POST-ASSERTION: nothing marked')
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM product_batches WHERE merge_deactivated_at IS NOT NULL OR merge_payable_moved IS NOT NULL').get().n, 0, 'POST-ASSERTION: nothing marked')
   assert.equal(db.prepare('SELECT rowid AS r FROM product_batches WHERE id=5').get().r, 5, 'still a rowid table')
 })
 

@@ -6,15 +6,19 @@
 -- product delete or a manual deactivate keep their own intent. This nullable column is that marker. The merge fold
 -- sets it; the merge undo clears it.
 --
--- SHAPE. Append-only, schema only: one nullable TEXT column on the existing rowid table product_batches. No row is
+-- SHAPE. Append-only, schema only: two nullable columns on the existing rowid table product_batches. No row is
 -- read, rewritten or reinterpreted, no trigger or index is touched, so every existing reader sees the same rows.
 -- LF-only.
 --
--- PRE-ASSERTION (run before applying; expect zero rows, the column must not exist yet):
---   SELECT name FROM pragma_table_info('product_batches') WHERE name = 'merge_deactivated_at';
--- POST-ASSERTION (run after applying; expect one row, and zero rows with the marker set):
---   SELECT name FROM pragma_table_info('product_batches') WHERE name = 'merge_deactivated_at';
---   SELECT COUNT(*) FROM product_batches WHERE merge_deactivated_at IS NOT NULL;   -- 0 until a merge runs
+-- A second nullable column, merge_payable_moved (INTEGER), is set on a merge-deactivated lot whose supplier, payment status
+-- and due date the kept lot took over (owner 6 Oct: a lot with no supplier merges into the one that has one). The credit
+-- reminder skips such a lot: that payable is counted on the kept lot, once.
+--
+-- PRE-ASSERTION (run before applying; expect zero rows, neither column exists yet):
+--   SELECT name FROM pragma_table_info('product_batches') WHERE name IN ('merge_deactivated_at', 'merge_payable_moved');
+-- POST-ASSERTION (run after applying; expect two rows, and zero rows with either marker set):
+--   SELECT name FROM pragma_table_info('product_batches') WHERE name IN ('merge_deactivated_at', 'merge_payable_moved');
+--   SELECT COUNT(*) FROM product_batches WHERE merge_deactivated_at IS NOT NULL OR merge_payable_moved IS NOT NULL;   -- 0 until a merge runs
 --
 -- RECOVERY. D1 cannot drop a column inside a migration the app depends on; leaving the column in place is harmless
 -- (nothing reads it except the credit reminder, which treats NULL as "not merge-deactivated"). To roll the code back,
@@ -30,3 +34,4 @@
 --     AND id IN (SELECT json_extract(fb.value, '$.dupBatchId')
 --                FROM undo_snapshots s, json_each(s.payload_json, '$.foldedBatches') fb WHERE s.kind = 'product.merge');
 ALTER TABLE product_batches ADD COLUMN merge_deactivated_at TEXT;
+ALTER TABLE product_batches ADD COLUMN merge_payable_moved INTEGER;

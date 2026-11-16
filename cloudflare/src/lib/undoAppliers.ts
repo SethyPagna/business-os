@@ -310,7 +310,12 @@ export interface MergeReversal {
     // 16 Nov 2026 (lots match by received date): the kept lot's own cost, expiry and activity BEFORE the fold added stock
     // into it and re-derived them. Undo writes them back. Absent on snapshots written before then (they matched by
     // batch_key and never touched the kept lot's cost or expiry), so an absent value restores nothing rather than zeroing.
-    keeperLotBefore?: { unit_cost_usd: number | null; expiry_date: string | null; is_active: number | null }
+    keeperLotBefore?: {
+      unit_cost_usd: number | null; expiry_date: string | null; is_active: number | null
+      // Present only when the kept lot took an added lot's supplier: its own supplier fields as they were.
+      supplierBefore?: { supplier_id: number | null; supplier_name: string | null; payment_status: string | null; credit_due_date: string | null }
+      supplierFromLotId?: number
+    }
     receivedDate?: string
   }>
   reparentedSaleItemIds: number[]
@@ -2258,7 +2263,7 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
   for (const fb of (r.foldedBatches || [])) {
     const dupBatchId = Number(fb.dupBatchId)
     const keeperBatchId = Number(fb.keeperBatchId)
-    stmts.push({ sql: 'UPDATE product_batches SET is_active = 1, merge_deactivated_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dupBatchId } })
+    stmts.push({ sql: 'UPDATE product_batches SET is_active = 1, merge_deactivated_at = NULL, merge_payable_moved = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dupBatchId } })
     for (const grp of chunk(intIds(fb.saleAllocationIds), 400)) stmts.push({ sql: `UPDATE sale_item_batch_allocations SET batch_id = @dupBatchId WHERE id IN (${grp.join(',')})`, params: { dupBatchId } })
     for (const grp of chunk(intIds(fb.returnAllocationIds), 400)) stmts.push({ sql: `UPDATE return_item_batch_allocations SET batch_id = @dupBatchId WHERE id IN (${grp.join(',')})`, params: { dupBatchId } })
     // Guarded by the kept lot id: a line the fold re-pointed goes back; one that has moved on since is left alone.
@@ -2290,6 +2295,20 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
           active: before.is_active == null ? null : Number(before.is_active),
         },
       })
+      const supplierBefore = before.supplierBefore
+      if (supplierBefore && typeof supplierBefore === 'object') {
+        stmts.push({
+          sql: `UPDATE product_batches SET supplier_id = @supplierId, supplier_name = @supplierName, payment_status = @paymentStatus,
+                credit_due_date = @creditDueDate, updated_at = CURRENT_TIMESTAMP WHERE id = @kb`,
+          params: {
+            kb: keeperBatchId,
+            supplierId: supplierBefore.supplier_id == null ? null : Number(supplierBefore.supplier_id),
+            supplierName: supplierBefore.supplier_name == null ? null : String(supplierBefore.supplier_name),
+            paymentStatus: supplierBefore.payment_status == null ? null : String(supplierBefore.payment_status),
+            creditDueDate: supplierBefore.credit_due_date == null ? null : String(supplierBefore.credit_due_date),
+          },
+        })
+      }
     }
   }
 
@@ -2301,7 +2320,7 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
   for (const wb of (r.writtenOffBatches || [])) {
     const batchId = Number(wb?.batchId)
     if (!Number.isInteger(batchId) || batchId <= 0) continue
-    stmts.push({ sql: 'UPDATE product_batches SET is_active = 1, merge_deactivated_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchId } })
+    stmts.push({ sql: 'UPDATE product_batches SET is_active = 1, merge_deactivated_at = NULL, merge_payable_moved = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchId } })
     for (const s of (wb.stockBefore || [])) {
       stmts.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @b AND branch_id = @br', params: { b: batchId, br: Number(s.branch_id) } })
       stmts.push({ sql: 'INSERT INTO branch_batch_stock (batch_id, branch_id, quantity, updated_at) VALUES (@b, @br, @q, CURRENT_TIMESTAMP)', params: { b: batchId, br: Number(s.branch_id), q: Number(s.quantity) || 0 } })

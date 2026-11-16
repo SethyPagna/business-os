@@ -51,7 +51,10 @@ export function projectMergeCostGraph(graph: MergeCostPreviewGraph, plans: Merge
       // Same-date match (productMergeLots.ts) against the keeper as the earlier steps left it: the fold's own rule.
       const keeperLots = batches.filter(row => Number(row.variant_product_id) === plan.keepId) as unknown as MergeLotRow[]
       const matches = step.stock === 'merge' ? matchDuplicateLots(keeperLots, memberLots) : new Map<number, number>()
-      for (const folded of step.stock === 'merge' ? planFoldedLotMetadata(keeperLots, memberLots, matches) : []) {
+      // Each lot's weight in the folded cost is its stock being combined (sum over branches, as it stands before this step).
+      const quantities = new Map<number, number>()
+      for (const row of stock) quantities.set(Number(row.batch_id), (quantities.get(Number(row.batch_id)) || 0) + (Number(row.quantity) || 0))
+      for (const folded of step.stock === 'merge' ? planFoldedLotMetadata(keeperLots, memberLots, matches, quantities) : []) {
         const keptLot = keeperLots.find(row => Number(row.id) === folded.keeperLotId)
         if (keptLot) keptLot.unit_cost_usd = folded.unit_cost_usd
       }

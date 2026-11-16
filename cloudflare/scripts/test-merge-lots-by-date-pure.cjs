@@ -2,9 +2,11 @@
 // Pure rules for the 16 Nov 2026 owner ruling: merged duplicate lots integrate with the merge by RECEIVED DATE.
 //   * same business day (Cambodia UTC+7): add; no same-day kept lot: create; no date: create;
 //   * several kept lots on the day: lowest batch_number, then id;
-//   * the kept lot carries the mean of the DISTINCT NON-ZERO costs and the earliest non-null expiry.
-// Each assertion is chosen so that the wrong implementation (batch_key match, UTC date, zero-inclusive or weighted mean,
-// latest expiry) fails it.
+//   * the kept lot carries the QUANTITY-WEIGHTED average cost (owner 5 Oct), a $0 or unknown cost left out of the weights (6 Oct),
+//     rounded to 4 places by the one money helper; the earliest non-null expiry; and, when it has no supplier, an added lot's
+//     supplier with its payment status and due date (6 Oct).
+// Each assertion is chosen so that the wrong implementation (batch_key match, UTC date, plain mean, $0 in the weights,
+// no rounding, latest expiry, supplier not taken) fails it.
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -81,23 +83,51 @@ check('two discarded lots on one day both land in the one kept lot', () => {
   assert.deepEqual([...lots.matchDuplicateLots(keeper, dup)].sort(), [[10, 1], [11, 1]])
 })
 
-check('cost: mean of the distinct non-zero costs, zero and unknown excluded', () => {
-  assert.equal(lots.foldedLotCost(2, [2.4]), 2.2)
-  // Equal cost: unchanged, and not re-rounded.
-  assert.equal(lots.foldedLotCost(2, [2]), 2)
-  assert.equal(lots.foldedLotCost(1.23456, [1.23456]), 1.23456)
-  // A zero (or unknown) cost on either side is not part of the mean: a plain mean would give 1 and 2.
-  assert.equal(lots.foldedLotCost(2, [0]), 2)
-  assert.equal(lots.foldedLotCost(0, [2]), 2)
-  assert.equal(lots.foldedLotCost(null, [2]), 2)
-  assert.equal(lots.foldedLotCost(2, [null]), 2)
-  // Distinct, not per lot: 4, 4, 5 -> 4.5 (a per-lot mean is 4.3333).
-  assert.equal(lots.foldedLotCost(4, [4, 5]), 4.5)
-  // 4, 5, 6 -> 5 (a pairwise fold gives 5.25).
-  assert.equal(lots.foldedLotCost(4, [5, 6]), 5)
-  // Nothing positive: the kept lot's own value stands (0 stays 0, unknown stays unknown).
-  assert.equal(lots.foldedLotCost(0, [0]), 0)
-  assert.equal(lots.foldedLotCost(null, [null]), null)
+const L = (cost, quantity) => ({ cost, quantity })
+check('cost: quantity-weighted average of the lots combined', () => {
+  // 4 at 4.00 and 6 at 5.00 -> 4.60 (a plain mean is 4.50). The owner example: 2.00 and 2.40 at equal stock is 2.20.
+  assert.equal(lots.foldedLotCost(L(4, 4), [L(5, 6)]), 4.6)
+  assert.equal(lots.foldedLotCost(L(2, 5), [L(2.4, 5)]), 2.2)
+  // The weights are the stock, not the lot count: 1 at 2 and 9 at 3 is 2.9 (a plain mean is 2.5); order does not matter.
+  assert.equal(lots.foldedLotCost(L(2, 1), [L(3, 9)]), 2.9)
+  assert.equal(lots.foldedLotCost(L(3, 9), [L(2, 1)]), 2.9)
+  // Equal costs stay put.
+  assert.equal(lots.foldedLotCost(L(3, 4), [L(3, 6)]), 3)
+  // Not a distinct-values mean: 4, 4, 5 at stock 3, 3, 4 -> (12 + 12 + 20) / 10 = 4.4 (distinct mean 4.5, per-lot mean 4.3333).
+  assert.equal(lots.foldedLotCost(L(4, 3), [L(4, 3), L(5, 4)]), 4.4)
+  // Three lots at unequal stock: (2*6 + 3*1 + 4*1) / 8 = 2.375 (a pairwise fold or a plain mean says otherwise).
+  assert.equal(lots.foldedLotCost(L(2, 6), [L(3, 1), L(4, 1)]), 2.375)
+})
+
+check('cost: $0 or unknown is not weighted; both $0 or unknown stays; zero stock falls back to the kept lot', () => {
+  // One real cost among them: it stands exactly, whatever the stock of the $0 lot (a $0 in the weights would give 1).
+  assert.equal(lots.foldedLotCost(L(2, 10), [L(0, 10)]), 2)
+  assert.equal(lots.foldedLotCost(L(0, 10), [L(2, 10)]), 2)
+  assert.equal(lots.foldedLotCost(L(null, 10), [L(2, 3)]), 2)
+  assert.equal(lots.foldedLotCost(L(2, 10), [L(null, 3)]), 2)
+  assert.equal(lots.foldedLotCost(L(2, 10), [L('', 3), L(0, 4), L(3, 10)]), 2.5, 'the $0 and unknown lots drop out, the two real costs weigh 10 and 10')
+  // Both $0 or unknown: the kept lot's own value stays (0 stays 0, unknown stays unknown).
+  assert.equal(lots.foldedLotCost(L(0, 3), [L(0, 4)]), 0)
+  assert.equal(lots.foldedLotCost(L(null, 3), [L(null, 4)]), null)
+  assert.equal(lots.foldedLotCost(L(0, 3), [L(null, 4)]), 0)
+  // Both quantities 0: the average is undefined, the kept lot's cost stands.
+  assert.equal(lots.foldedLotCost(L(2, 0), [L(3, 0)]), 2)
+  assert.equal(lots.foldedLotCost(L(2, 5), [L(3, 0)]), 2, 'a lot with no stock carries no weight')
+  assert.equal(lots.foldedLotCost(L(2, 0), [L(3, 5)]), 3)
+})
+
+check('cost: stored to 4 places by the one money rounding (a repeating weighted mean is rounded, never raw)', () => {
+  // 1 at 1, 1 at 2, 1 at 2.5 -> 5.5 / 3 = 1.8333...; 1 at 1, 2 at 2 -> 5 / 3 = 1.6666... -> 1.6667 (half away from zero)
+  assert.equal(lots.foldedLotCost(L(1, 1), [L(2, 1), L(2.5, 1)]), 1.8333)
+  assert.equal(lots.foldedLotCost(L(1, 1), [L(2, 2)]), 1.6667)
+  // The coordinator example, (2 + 2.4 + 2.35) / 3 at equal stock, is exact at 4 places.
+  assert.equal(lots.foldedLotCost(L(2, 5), [L(2.4, 5), L(2.35, 5)]), 2.25)
+  // A single real cost arriving with more than 4 places is stored at 4 as well.
+  assert.equal(lots.foldedLotCost(L(null, 0), [L(1.23456, 4)]), 1.2346)
+  for (const [keeper, added] of [[L(1, 7), [L(2, 3), L(2.5, 11)]], [L(3.1, 2), [L(3.17, 5), L(3.333, 9)]], [L(2, 1), [L(2.4, 3), L(2.2, 7)]]]) {
+    const cost = lots.foldedLotCost(keeper, added)
+    assert.equal(cost, Math.round(cost * 10000) / 10000, 'never more than 4 decimals: ' + cost)
+  }
 })
 
 check('expiry: the earliest non-empty one, the kept lot\'s own when none has any', () => {
@@ -109,34 +139,56 @@ check('expiry: the earliest non-empty one, the kept lot\'s own when none has any
   assert.equal(lots.foldedLotExpiry('2027-03-31', ['2027-01-31', '2027-02-28']), '2027-01-31')
 })
 
-check('plan: same date with different cost and expiry (the owner example)', () => {
-  const keeper = [lot(1, '2026-11-03', { unit_cost_usd: 2, expiry_date: '2027-01-31' })]
-  const dup = [lot(10, '2026-11-03', { unit_cost_usd: 2.4, expiry_date: '2027-03-31' })]
+const supplied = { supplier_id: 5, supplier_name: 'Sup', payment_status: 'credit', credit_due_date: '2026-12-01' }
+const noSupplier = { supplier_id: null, supplier_name: null, payment_status: 'paid', credit_due_date: null }
+check('plan: same date with different cost and expiry (the owner example), weighted by the stock combined', () => {
+  const keeper = [lot(1, '2026-11-03', { unit_cost_usd: 2, expiry_date: '2027-01-31', lot_quantity: 5, ...supplied })]
+  const dup = [lot(10, '2026-11-03', { unit_cost_usd: 2.4, expiry_date: '2027-03-31', lot_quantity: 5 })]
   const [plan] = lots.planFoldedLotMetadata(keeper, dup)
   assert.deepEqual({ ...plan }, {
     keeperLotId: 1, duplicateLotIds: [10], receivedDate: '2026-11-03',
-    unit_cost_usd: 2.2, expiry_date: '2027-01-31', costChanged: true, expiryChanged: false,
+    unit_cost_usd: 2.2, expiry_date: '2027-01-31', costChanged: true, expiryChanged: false, supplier: null,
   })
+  // The same lots with unequal stock: 2 x 2 + 8 x 2.4 = 23.2 / 10 = 2.32 (a plain mean would still say 2.2).
+  const [unequal] = lots.planFoldedLotMetadata(keeper, dup, undefined, new Map([[1, 2], [10, 8]]))
+  assert.equal(unequal.unit_cost_usd, 2.32, 'the supplied quantities, not the row fields, are the weights')
 })
 
 check('plan: equal cost and a later duplicate expiry changes nothing; an earlier one changes only the expiry', () => {
-  const keeper = [lot(1, '2026-11-03', { unit_cost_usd: 3, expiry_date: '2027-06-30' })]
-  const [same] = lots.planFoldedLotMetadata(keeper, [lot(10, '2026-11-03', { unit_cost_usd: 3, expiry_date: '2027-09-30' })])
+  const keeper = [lot(1, '2026-11-03', { unit_cost_usd: 3, expiry_date: '2027-06-30', lot_quantity: 4 })]
+  const [same] = lots.planFoldedLotMetadata(keeper, [lot(10, '2026-11-03', { unit_cost_usd: 3, expiry_date: '2027-09-30', lot_quantity: 2 })])
   assert.equal(same.costChanged, false)
   assert.equal(same.expiryChanged, false)
-  const [earlier] = lots.planFoldedLotMetadata(keeper, [lot(10, '2026-11-03', { unit_cost_usd: 3, expiry_date: '2027-02-28' })])
+  const [earlier] = lots.planFoldedLotMetadata(keeper, [lot(10, '2026-11-03', { unit_cost_usd: 3, expiry_date: '2027-02-28', lot_quantity: 2 })])
   assert.equal(earlier.costChanged, false)
   assert.equal(earlier.expiryChanged, true)
   assert.equal(earlier.expiry_date, '2027-02-28')
 })
 
-check('plan: two discarded lots into one kept lot are one group (one write, cluster-wide mean)', () => {
-  const keeper = [lot(1, '2026-11-03', { unit_cost_usd: 4 })]
-  const dup = [lot(10, '2026-11-03', { unit_cost_usd: 5 }), lot(11, '2026-11-03', { unit_cost_usd: 6 })]
+check('plan: two discarded lots into one kept lot are one group (one write, cluster-wide weighted mean)', () => {
+  const keeper = [lot(1, '2026-11-03', { unit_cost_usd: 4, lot_quantity: 2 })]
+  const dup = [lot(10, '2026-11-03', { unit_cost_usd: 5, lot_quantity: 3 }), lot(11, '2026-11-03', { unit_cost_usd: 6, lot_quantity: 5 })]
   const plan = lots.planFoldedLotMetadata(keeper, dup)
   assert.equal(plan.length, 1)
   assert.deepEqual(plan[0].duplicateLotIds, [10, 11])
-  assert.equal(plan[0].unit_cost_usd, 5)
+  assert.equal(plan[0].unit_cost_usd, 5.3, '(2*4 + 3*5 + 5*6) / 10')
+})
+
+check('supplier: a kept lot with none takes an added lot supplier, payment status and due date; one that has a supplier keeps its own', () => {
+  const dup = lot(10, '2026-11-03', { unit_cost_usd: 2, lot_quantity: 1, ...supplied })
+  const [takes] = lots.planFoldedLotMetadata([lot(1, '2026-11-03', { unit_cost_usd: 2, lot_quantity: 1, ...noSupplier })], [dup])
+  assert.deepEqual({ ...takes.supplier }, { supplier_id: 5, supplier_name: 'Sup', payment_status: 'credit', credit_due_date: '2026-12-01', fromLotId: 10 })
+  const [keeps] = lots.planFoldedLotMetadata([lot(1, '2026-11-03', { unit_cost_usd: 2, lot_quantity: 1, supplier_id: 9, supplier_name: 'Own', payment_status: 'paid', credit_due_date: null })], [dup])
+  assert.equal(keeps.supplier, null, 'its own supplier stays')
+  // A supplier named only by name counts as a supplier; an empty string and a zero id do not.
+  const [byName] = lots.planFoldedLotMetadata([lot(1, '2026-11-03', { supplier_id: null, supplier_name: 'Only name' })], [dup])
+  assert.equal(byName.supplier, null)
+  const [empty] = lots.planFoldedLotMetadata([lot(1, '2026-11-03', { supplier_id: 0, supplier_name: '  ' })], [dup])
+  assert.equal(empty.supplier.fromLotId, 10)
+  // Neither side has one: nothing to take. Several donors: the lowest batch_number (then id) gives.
+  assert.equal(lots.planFoldedLotMetadata([lot(1, '2026-11-03', noSupplier)], [lot(10, '2026-11-03', noSupplier)])[0].supplier, null)
+  const [two] = lots.planFoldedLotMetadata([lot(1, '2026-11-03', noSupplier)], [lot(11, '2026-11-03', { batch_number: 7, ...supplied, supplier_id: 7 }), lot(10, '2026-11-03', { batch_number: 3, ...supplied, supplier_id: 3 })])
+  assert.equal(two.supplier.supplier_id, 3)
 })
 
 check('plan: nothing is planned for a lot with no same-date kept lot', () => {
