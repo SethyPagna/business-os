@@ -70,6 +70,50 @@ async function main() {
     console.log('PASS stock-session undo restores product cost columns at 4 places')
   }
   {
+    // Round 5 (mutant SS2, the replay pin made exact again): a session whose CREATED lot holds a cost over 4 places, 0313 rounding that lot between commit and
+    // undo. The saved images say 1.123456, the live lot says 1.1235: the replay pin must accept the rounded figure (and only it) or undo is refused forever.
+    const text0313 = fs.readFileSync(path.join(__dirname, '..', 'migrations', '0313_cost_4dp_repair.sql'), 'utf8')
+    const lotOf = (f) => f.sql.prepare('SELECT b.id, b.unit_cost_usd u, b.is_active a FROM product_batches b JOIN products p ON p.id = b.variant_product_id WHERE p.barcode = ?').get('CREAM')
+    const longLotSession = async (liveBeforeUndo, run0313) => {
+      const f = fixture()
+      const r = await api.commitStockSession(f.env, user, createRequest())
+      const lot = lotOf(f)
+      assert.equal(lot.u, 1.25, 'the session created the lot at 1.25')
+      // a pre-rule session: the lot and every saved image of it hold 1.123456 instead of 1.25
+      seedStockFixture(f.sql, () => f.sql.prepare('UPDATE product_batches SET unit_cost_usd = 1.123456 WHERE id = ?').run(lot.id))
+      const snapshotId = f.sql.prepare('SELECT o.snapshot_id s FROM stock_session_operations o').get().s
+      const snap = f.sql.prepare('SELECT payload_json p FROM undo_snapshots WHERE id = ?').get(snapshotId).p
+      const parsed = JSON.parse(snap); const paths = []
+      for (const side of ['before', 'after', 'expected']) ((parsed[side] || {}).batches || []).forEach((b, i) => { if (b.id === lot.id && b.unit_cost_usd === 1.25) paths.push(`$.${side}.batches[${i}].unit_cost_usd`) })
+      assert.ok(paths.length >= 2, 'the saved images of the created lot are patched')
+      const patched = f.sql.prepare(`SELECT json_set(?, ${paths.map(() => '?, 1.123456').join(', ')}) AS j`).get(snap, ...paths).j
+      f.sql.prepare('UPDATE undo_snapshots SET payload_json = ? WHERE id = ?').run(patched, snapshotId)
+      if (run0313) { f.sql.exec(text0313); assert.equal(lotOf(f).u, 1.1235, '0313 rounded the lot') }
+      if (liveBeforeUndo !== undefined) seedStockFixture(f.sql, () => f.sql.prepare('UPDATE product_batches SET unit_cost_usd = ? WHERE id = ?').run(liveBeforeUndo, lot.id))
+      return { f, r, lot }
+    }
+    {
+      const { f, r, lot } = await longLotSession(undefined, true)
+      await replay(f, r, 'undo', 0)
+      assert.deepEqual({ ...lotOf(f) }, { id: lot.id, u: null, a: 0 }, 'undo after 0313 is accepted: the rounded lot is the session lot, so the created lot goes back to inactive')
+      await replay(f, r, 'redo', 1)
+      assert.deepEqual({ ...lotOf(f) }, { id: lot.id, u: 1.1235, a: 1 }, 'redo restores the created lot at 4 places')
+    }
+    for (const [label, live] of [['a real change to 1.1234', 1.1234], ['a real change to NULL', null]]) {
+      const { f, r, lot } = await longLotSession(live, true)
+      const saved = state(f)
+      await assert.rejects(replay(f, r, 'undo', 0), e => e.statusCode === 409, `${label} after 0313 is still refused`)
+      assert.deepEqual(state(f), saved, `${label}: nothing was written`)
+      assert.equal(lotOf(f).u, live, `${label}: the lot is untouched (${lot.id})`)
+    }
+    {
+      const { f, r } = await longLotSession(undefined, false)
+      await replay(f, r, 'undo', 0)
+      assert.equal(lotOf(f).u, null, 'control: a still-long lot (no 0313) undoes')
+    }
+    console.log('PASS stock-session undo after 0313 accepts the rounded created lot and refuses a real change (mutant SS2)')
+  }
+  {
     const noProductImage = { ...staff, permissions: JSON.stringify({ inventory: true, products: true, 'products:image': false }) }
     const f = fixture()
     f.sql.prepare("INSERT INTO file_assets(original_name,stored_name,public_path,mime_type,media_type,byte_size) VALUES(?,?,?,?, 'image', 10)")
