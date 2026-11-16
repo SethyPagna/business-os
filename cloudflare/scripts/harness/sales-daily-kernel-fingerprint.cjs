@@ -1,7 +1,7 @@
 'use strict'
 // Fingerprint of the LIVE money kernel that the stored daily totals must be computed by (design 7.6).
 //
-// The kernel is src/lib/salesAnalytics.ts and every module it imports at run time (the relative-import closure, type-only imports left out), except
+// The kernel is src/lib/salesAnalytics.ts and every module it reaches at run time (the relative closure over static imports, re-exports and string-literal dynamic import(), type-only left out), except
 // db.ts (the connection seam, no money rule). Each file is cut into its top-level statements; interfaces and type aliases are erased at build time and
 // are skipped; every other statement (imports, functions, consts, classes) is hashed over its TOKENS: comments, whitespace and line endings do not
 // move a hash, any other change does, including a single character inside a SQL template. Token texts come from the TypeScript parser, so the hash does
@@ -54,19 +54,29 @@ function fileHashes(text) {
   return { imports: sha(imports.join(',')), decls }
 }
 
-function relativeImports(text, fromFile) {
+/**
+ * Every relative module this file pulls in at run time, as posix paths without extension: static imports, re-exports (`export { x } from './m'`,
+ * `export * from './m'`) and dynamic `import('./m')` with a string literal, found anywhere in the file (function bodies included). Type-only imports and
+ * exports are erased at build time and are left out. `opts.dynamic` / `opts.reexports` (default true) exist only so a test can run a blind walker as a mutant.
+ */
+function relativeImports(text, fromFile, opts) {
+  const dynamic = !opts || opts.dynamic !== false
+  const reexports = !opts || opts.reexports !== false
   const sf = ts.createSourceFile('kernel.ts', norm(text), ts.ScriptTarget.ES2022, true)
   const found = []
-  for (const stmt of sf.statements) {
-    if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier) || !stmt.moduleSpecifier.text.startsWith('.')) continue
-    if (stmt.importClause && stmt.importClause.isTypeOnly) continue
-    found.push(posix(path.join(path.dirname(fromFile), stmt.moduleSpecifier.text)))
+  const add = (spec) => { if (spec.startsWith('.')) found.push(posix(path.join(path.dirname(fromFile), spec))) }
+  const visit = (node) => {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier) && !(node.importClause && node.importClause.isTypeOnly)) add(node.moduleSpecifier.text)
+    else if (reexports && ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier) && !node.isTypeOnly) add(node.moduleSpecifier.text)
+    else if (dynamic && ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword && node.arguments.length && ts.isStringLiteralLike(node.arguments[0])) add(node.arguments[0].text)
+    ts.forEachChild(node, visit)
   }
+  visit(sf)
   return found
 }
 
 /** `overrides`: Map of posix path relative to cloudflare/ -> replacement source text (a mutant or a fixture). */
-function fingerprint(overrides) {
+function fingerprint(overrides, walkOpts) {
   const files = {}
   const texts = {}
   const queue = [ENTRY]
@@ -82,7 +92,7 @@ function fingerprint(overrides) {
     }
     files[rel] = fileHashes(text)
     texts[rel] = text
-    for (const dep of relativeImports(text, rel)) {
+    for (const dep of relativeImports(text, rel, walkOpts)) {
       const resolved = [`${dep}.ts`, `${dep}/index.ts`].find((c) => (overrides && overrides.has(c)) || fs.existsSync(path.join(ROOT, c)))
       if (!resolved) throw new Error(`import ${dep} from ${rel} does not resolve`)
       queue.push(resolved)

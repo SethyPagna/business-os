@@ -11,6 +11,7 @@
 // Kernel status at this commit: the seam is NOT wired (getSalesDailyKernel() is null); when it is, the same checks apply to the wired seam.
 //
 // Run (from cloudflare/): node scripts/test-sales-daily-kernel-fingerprint-pure.cjs
+// The walker (static imports, dynamic import(), re-exports) is unit-tested by K0, independent of the pin.
 // After a deliberate kernel change: bump SALES_DAILY_KERNEL_VERSION, then node scripts/harness/sales-daily-kernel-fingerprint.cjs --write-pin
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -105,7 +106,39 @@ function cronProblems(overrides) {
 }
 
 async function main() {
-  await check('K1 the live kernel (13 files, every statement) matches the pin for the version in force, and the history entry agrees', () => {
+  await check('K0 the module walker follows static imports, string-literal dynamic import() and both re-export forms, transitively; type-only edges and computed imports are not edges (and a walker blind to dynamic imports, or to re-exports, fails this)', () => {
+    const E = F.ENTRY
+    const fixture = new Map([
+      [E, `import { a } from './fxStatic'
+import type { T } from './fxTypeOnly'
+export * from './fxStar'
+export { r } from './fxNamed'
+export type { U } from './fxTypeExport'
+export async function f(n: string) { const m = await import('./fxDynamic'); return import('./fx' + n) }
+`],
+      ['src/lib/fxStatic.ts', 'export const a = 1'],
+      ['src/lib/fxStar.ts', "export const s = 1"],
+      ['src/lib/fxNamed.ts', "export const r = 1; export const deep = () => import('./fxDeepDynamic')"],
+      ['src/lib/fxDynamic.ts', "export * from './fxDeepReexport'"],
+      ['src/lib/fxDeepDynamic.ts', 'export const d = 1'],
+      ['src/lib/fxDeepReexport.ts', 'export const e = 1'],
+      ['src/lib/fxTypeOnly.ts', 'export type T = 1'],
+      ['src/lib/fxTypeExport.ts', 'export type U = 1'],
+    ])
+    const names = (opts) => Object.keys(F.fingerprint(fixture, opts).files).sort()
+    const want = ['src/lib/fxDeepDynamic.ts', 'src/lib/fxDeepReexport.ts', 'src/lib/fxDynamic.ts', 'src/lib/fxNamed.ts', 'src/lib/fxStar.ts', 'src/lib/fxStatic.ts', E].sort()
+    assert.deepEqual(names(), want)
+    assert.deepEqual(F.relativeImports(fixture.get(E), E).sort(), ['src/lib/fxDynamic', 'src/lib/fxNamed', 'src/lib/fxStar', 'src/lib/fxStatic'])
+    assert.notDeepEqual(names({ dynamic: false }), want, 'MUTANT: a walker that ignores dynamic imports')
+    assert.ok(!names({ dynamic: false }).includes('src/lib/fxDynamic.ts'))
+    assert.notDeepEqual(names({ reexports: false }), want, 'MUTANT: a walker that ignores re-exports')
+    assert.ok(!names({ reexports: false }).includes('src/lib/fxStar.ts') && !names({ reexports: false }).includes('src/lib/fxNamed.ts'))
+    // the real tree: the dynamic edge of salesAnalytics (the legacy/atomic switch) and what it imports are in the kernel
+    const real = Object.keys(F.fingerprint(new Map()).files)
+    for (const f of ['src/lib/reportAtomicSwitch.ts', 'src/lib/analytics.ts', 'src/lib/planTier.ts', 'src/lib/readSwitches.ts']) assert.ok(real.includes(f), f)
+  })
+
+  await check('K1 the live kernel (every file of the closure, every statement) matches the pin for the version in force, and the history entry agrees', () => {
     assert.deepEqual(liveProblems(new Map()), [])
     const pin = F.readPin()
     assert.equal(pin.version, F.currentVersion(new Map()))
