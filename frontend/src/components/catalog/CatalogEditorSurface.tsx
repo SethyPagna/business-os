@@ -1353,7 +1353,7 @@ function CatalogEditorSurfaceContent() {
               <HintLabel
                 className="text-sm font-semibold text-slate-900"
                 title={copy('portalCatalogSettings', 'Catalog settings')}
-                hint={copy('stockThresholdHint', 'Global thresholds override the product-level stock badges on the website only.')}
+                hint={copy('stockThresholdHint', "These set the website's own Low stock and Out of stock levels when \"Use website-wide thresholds\" is chosen. Leave a level empty to use the shop's low-stock setting.")}
               />
               <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 <div>
@@ -1375,11 +1375,11 @@ function CatalogEditorSurfaceContent() {
                 </div>
                 <div>
                   <label htmlFor="portal-low-stock-threshold" className="block text-sm font-medium text-slate-700">{copy('lowStockThreshold', 'Low stock threshold')}</label>
-                  <input id="portal-low-stock-threshold" name="customer_portal_low_stock_threshold" className="input" type="number" min="0" step="0.01" value={editorDraft.customer_portal_low_stock_threshold || '10'} onChange={(event) => setDraft('customer_portal_low_stock_threshold', event.target.value)} />
+                  <input id="portal-low-stock-threshold" name="customer_portal_low_stock_threshold" className="input" type="number" min="0" step="0.01" value={editorDraft.customer_portal_low_stock_threshold ?? ''} placeholder={copy('stockThresholdEmpty', 'Shop setting')} onChange={(event) => setDraft('customer_portal_low_stock_threshold', event.target.value)} />
                 </div>
                 <div>
                   <label htmlFor="portal-out-stock-threshold" className="block text-sm font-medium text-slate-700">{copy('outOfStockThreshold', 'Out of stock threshold')}</label>
-                  <input id="portal-out-stock-threshold" name="customer_portal_out_of_stock_threshold" className="input" type="number" min="0" step="0.01" value={editorDraft.customer_portal_out_of_stock_threshold || '0'} onChange={(event) => setDraft('customer_portal_out_of_stock_threshold', event.target.value)} />
+                  <input id="portal-out-stock-threshold" name="customer_portal_out_of_stock_threshold" className="input" type="number" min="0" step="0.01" value={editorDraft.customer_portal_out_of_stock_threshold ?? ''} placeholder={copy('stockThresholdEmpty', 'Shop setting')} onChange={(event) => setDraft('customer_portal_out_of_stock_threshold', event.target.value)} />
                 </div>
               </div>
             </div>

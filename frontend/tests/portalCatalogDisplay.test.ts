@@ -266,6 +266,28 @@ runTest('resolvePortalStockStatus legacy fallback keeps the historical badge mat
   )
 })
 
+// Owner decision of 16 Nov 2026 ("Website's own levels"): the website's levels when set, else the SHOP's low-stock setting, never a fixed 10.
+// Mirrors the Worker's resolvePortalStockRule (cloudflare/scripts/test-portal-low-stock-parity-pure.cjs is the full matrix).
+runTest('resolvePortalStockStatus legacy fallback: website levels when set, else the shop setting, never a fixed 10', () => {
+  const global = (low: unknown, out: unknown) => ({ stockThresholdMode: 'global', lowStockThreshold: low, outOfStockThreshold: out })
+  const shopGlobal3 = { enabled: true, mode: 'global' as const, threshold: 3 }
+  const shopOff = { enabled: false, mode: 'product' as const, threshold: 10 }
+  const row = (qty: number, low?: number | null, out?: number | null) => ({ stock_quantity: qty, low_stock_threshold: low ?? null, out_of_stock_threshold: out ?? 0 })
+  // Website levels set: they win over the product and the shop.
+  assert.equal(resolvePortalStockStatus(row(5, 10), 'all', { ...global('4', '1'), lowStock: shopGlobal3 }), 'in_stock')
+  assert.equal(resolvePortalStockStatus(row(4, 100), 'all', global('4', '1')), 'low_stock')
+  assert.equal(resolvePortalStockStatus(row(1, 100), 'all', global('4', '1')), 'out_of_stock')
+  // Product mode: the website levels are ignored even when filled in.
+  assert.equal(resolvePortalStockStatus(row(5, 10), 'all', { stockThresholdMode: 'product', lowStockThreshold: '2', outOfStockThreshold: '0' }), 'low_stock')
+  // Empty / invalid website level: the shop's setting answers, not a fixed 10.
+  assert.equal(resolvePortalStockStatus(row(5, 10), 'all', { ...global('', ''), lowStock: shopGlobal3 }), 'in_stock')
+  assert.equal(resolvePortalStockStatus(row(20, 0), 'all', { ...global('', ''), lowStock: { enabled: true, mode: 'global', threshold: 25 } }), 'low_stock')
+  assert.equal(resolvePortalStockStatus(row(1, 10), 'all', { ...global(undefined, undefined), lowStock: shopOff }), 'in_stock', 'shop alerts off: no low label')
+  assert.equal(resolvePortalStockStatus(row(20), 'all', { ...global('abc', '-1'), lowStock: shopGlobal3 }), 'in_stock', 'invalid levels are ignored')
+  assert.equal(resolvePortalStockStatus(row(20), 'all', global('', '')), 'in_stock', 'no product override and no shop config: the shop default of 10, 20 is healthy')
+  assert.equal(resolvePortalStockStatus(row(5, 0), 'all', global('', '')), 'in_stock', 'a stored product override of 0 is honoured')
+})
+
 runTest('combinePortalStockStatus takes the most-available status and defaults unknowns to out', () => {
   assert.equal(combinePortalStockStatus('out_of_stock', 'low_stock'), 'low_stock')
   assert.equal(combinePortalStockStatus('in_stock', 'low_stock'), 'in_stock')

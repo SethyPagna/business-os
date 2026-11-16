@@ -68,13 +68,24 @@ for (const [relPath, surface] of LOW_STOCK_CONSUMERS) {
   )
 }
 
-// Positive control: the sweep above is capable of failing. The STOREFRONT
-// keeps its own documented customer_portal_* threshold triple (the hint in
-// en.json says it applies on the customer portal only), so it still carries
-// exactly the shape the sweep rejects -- which both proves the instrument
-// works and pins the storefront's independence as a decision.
+// Positive control: the sweep above is capable of failing. It rejects the three shapes of the old literal, so a sample that carries
+// each of them must trip it (and a threaded sample must not).
+const SWEPT_PATTERNS = [
+  /low_stock_threshold\s*\|\|\s*10/,
+  /low_stock_threshold\s*\?\?\s*10/,
+  /low_stock_threshold,\s*10\)/,
+]
+for (const sample of ['x.low_stock_threshold || 10', 'x.low_stock_threshold ?? 10', 'toNumber(p.low_stock_threshold, 10)']) {
+  assert.ok(SWEPT_PATTERNS.some((pattern) => pattern.test(sample)), `the sweep must reject: ${sample}`)
+}
+assert.ok(!SWEPT_PATTERNS.some((pattern) => pattern.test('effectiveLowStockThreshold(config, p.low_stock_threshold)')), 'the sweep must accept a threaded read')
+
+// The STOREFRONT's legacy fallback (portalCatalogDisplay.ts) follows the same rule as the Worker's resolvePortalStockRule, by owner decision of
+// 16 Nov 2026 ("Website's own levels"): the website's levels when set, else the shop's low-stock setting -- so it carries no literal 10 either.
 const portal = read('components/catalog/portalCatalogDisplay.ts')
-assert.ok(/low_stock_threshold.*\|\|\s*10/.test(portal), 'the storefront is expected to keep its own rule')
+for (const pattern of SWEPT_PATTERNS) assert.ok(!pattern.test(portal), 'the storefront fallback must not carry the literal 10')
+assert.ok(portal.includes('effectiveLowStockThreshold('), 'the storefront fallback falls back to the shared low-stock rule')
+assert.ok(portal.includes('config.lowStockThreshold'), 'the storefront fallback still reads the website levels')
 assert.ok(!/useLowStockConfig/.test(portal))
 
 // -- behaviour, through the real helpers ------------------------------------

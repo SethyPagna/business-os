@@ -468,6 +468,17 @@ function toNumber(value: unknown, fallback: unknown = 0): number {
   return Number.isFinite(parsed) ? parsed : (Number.isFinite(fallbackNumber) ? fallbackNumber : 0)
 }
 
+/**
+ * A Website Editor stock level as the text the Worker stores: a non-negative number, or '' when empty/invalid
+ * (empty = the website uses the shop's low-stock setting; never a made-up default such as 10).
+ */
+function websiteStockLevel(value: unknown): string {
+  const text = String(value ?? '').trim()
+  if (text === '') return ''
+  const parsed = Number(text)
+  return Number.isFinite(parsed) && parsed >= 0 ? String(parsed) : ''
+}
+
 /** Restrict price display mode to supported options only. */
 function normalizePriceDisplay(value: unknown): string {
   const raw = String(value || '').trim()
@@ -776,8 +787,8 @@ function buildDraft(config: PortalConfig): PortalDraft {
     customer_portal_recommended_product_ids: JSON.stringify(normalizeRecommendedProductIds(config.recommendedProductIds || [])),
     customer_portal_refresh_seconds: String(config.refreshSeconds ?? 20),
     customer_portal_stock_threshold_mode: config.stockThresholdMode || 'product',
-    customer_portal_low_stock_threshold: String(config.lowStockThreshold ?? 10),
-    customer_portal_out_of_stock_threshold: String(config.outOfStockThreshold ?? 0),
+    customer_portal_low_stock_threshold: String(config.lowStockThreshold ?? ''),
+    customer_portal_out_of_stock_threshold: String(config.outOfStockThreshold ?? ''),
     customer_portal_grid_columns_auto: config.gridColumnsAuto !== false,
     customer_portal_announcement_enabled: !!config.announcementEnabled,
     customer_portal_announcement_text_en: config.announcementTextEn || '',
@@ -928,8 +939,8 @@ function applyDraft(config: PortalConfig, draft: PortalDraft): PortalConfig {
     recommendedProductIds: normalizeRecommendedProductIds(draft.customer_portal_recommended_product_ids || config.recommendedProductIds || []),
     refreshSeconds: Math.min(120, Math.max(5, Math.round(toNumber(draft.customer_portal_refresh_seconds, config.refreshSeconds)))),
     stockThresholdMode: draft.customer_portal_stock_threshold_mode === 'global' ? 'global' : 'product',
-    lowStockThreshold: Math.max(0, toNumber(draft.customer_portal_low_stock_threshold, config.lowStockThreshold)),
-    outOfStockThreshold: Math.max(0, toNumber(draft.customer_portal_out_of_stock_threshold, config.outOfStockThreshold)),
+    lowStockThreshold: websiteStockLevel(draft.customer_portal_low_stock_threshold),
+    outOfStockThreshold: websiteStockLevel(draft.customer_portal_out_of_stock_threshold),
     gridColumnsAuto: toBoolean(draft.customer_portal_grid_columns_auto, config.gridColumnsAuto !== false),
     announcementEnabled: toBoolean(draft.customer_portal_announcement_enabled, !!config.announcementEnabled),
     announcementTextEn: typeof draft.customer_portal_announcement_text_en === 'string' ? draft.customer_portal_announcement_text_en : config.announcementTextEn,
@@ -1145,8 +1156,8 @@ const DEFAULT_CONFIG = {
   highlightRankLimit: 3,
   refreshSeconds: 20,
   stockThresholdMode: 'product',
-  lowStockThreshold: 10,
-  outOfStockThreshold: 0,
+  lowStockThreshold: '',
+  outOfStockThreshold: '',
   gridColumnsAuto: true,
   announcementEnabled: false,
   announcementTextEn: '',
@@ -2581,8 +2592,9 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       }
 
       const sanitizedRefreshSeconds = Math.min(120, Math.max(5, Math.floor(toNumber(editorDraft.customer_portal_refresh_seconds, 20))))
-      const sanitizedLowStockThreshold = Math.max(0, toNumber(editorDraft.customer_portal_low_stock_threshold, 10))
-      const sanitizedOutOfStockThreshold = Math.max(0, toNumber(editorDraft.customer_portal_out_of_stock_threshold, 0))
+      // An empty website level stays empty (the website then uses the shop's low-stock setting); it is never filled in with a default.
+      const sanitizedLowStockThreshold = websiteStockLevel(editorDraft.customer_portal_low_stock_threshold)
+      const sanitizedOutOfStockThreshold = websiteStockLevel(editorDraft.customer_portal_out_of_stock_threshold)
       const sanitizedGridMobile = clampToRange(Math.round(toNumber(editorDraft.customer_portal_grid_columns_mobile, 1)), STORED_PHONE_COLUMNS)
       const sanitizedGridDesktop = clampToRange(Math.round(toNumber(editorDraft.customer_portal_grid_columns_desktop, 4)), PORTAL_GRID_LIMITS.desktop)
       const sanitizedHighlightRankLimit = Math.max(1, Math.min(10, Math.round(toNumber(editorDraft.customer_portal_highlight_rank_limit, 3))))
@@ -2773,8 +2785,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         customer_portal_recommended_product_ids: JSON.stringify(recommendedProductIds),
         customer_portal_refresh_seconds: String(sanitizedRefreshSeconds),
         customer_portal_stock_threshold_mode: editorDraft.customer_portal_stock_threshold_mode === 'global' ? 'global' : 'product',
-        customer_portal_low_stock_threshold: String(sanitizedLowStockThreshold),
-        customer_portal_out_of_stock_threshold: String(sanitizedOutOfStockThreshold),
+        customer_portal_low_stock_threshold: sanitizedLowStockThreshold,
+        customer_portal_out_of_stock_threshold: sanitizedOutOfStockThreshold,
         customer_portal_grid_columns_auto: editorDraft.customer_portal_grid_columns_auto === false ? 'false' : 'true',
         customer_portal_announcement_enabled: editorDraft.customer_portal_announcement_enabled ? 'true' : 'false',
         customer_portal_announcement_text_en: String(editorDraft.customer_portal_announcement_text_en || '').trim(),
