@@ -399,10 +399,10 @@ async function await_main() {
   // Website-wide mode, low 5, out 3, hide ON. A qty 2 / product out 0 is Out by the website level; B qty 4 / product out 5 is LOW by it (4 > 3); C is healthy;
   // D is empty. So the default list is B and C: before the fix A was listed wearing "Out of stock" and B was hidden from the default list.
   const hideFixture = [
-    [3001, 'Hide A qty2 out0', 'HideCatA', 'HideBrandA', 2, 0],
-    [3002, 'Hide B qty4 out5', 'HideCatB', 'HideBrandB', 4, 5],
-    [3003, 'Hide C qty20 out0', 'HideCatC', 'HideBrandC', 20, 0],
-    [3004, 'Hide D qty0 out0', 'HideCatD', 'HideBrandD', 0, 0],
+    [3001, 'Hide A qty2 out0', 'HideCatA', 'Alpha Hide', 2, 0],
+    [3002, 'Hide B qty4 out5', 'HideCatB', 'Bravo Hide', 4, 5],
+    [3003, 'Hide C qty20 out0', 'HideCatC', 'Charlie Hide', 20, 0],
+    [3004, 'Hide D qty0 out0', 'HideCatD', 'Delta Hide', 0, 0],
   ]
   const hideInsert = raw.prepare(`INSERT INTO products
     (id, name, sku, barcode, brand, category, unit, stock_quantity, low_stock_threshold, out_of_stock_threshold,
@@ -465,6 +465,24 @@ async function await_main() {
       for (const item of [...search.items, ...boot.catalog.items]) assert.notEqual(item.stock_status, 'out_of_stock', `${item.name} is listed but labelled Out`)
     })
   }
+  // The A-Z rail (one letter per brand initial, counting the products under it) is cut by the SAME rule as the list under it: the stock pill, the hide
+  // clause and the website levels. Brands start with A, B, C and D for the four products, so the rail says which products it counted.
+  await check('the A-Z rail counts exactly the products the list shows, under the website levels, with and without a stock pill', async () => {
+    const rail = (initials) => Object.fromEntries((initials || []).map((row) => [row.value, Number(row.count)]))
+    const search = async (query) => rail((await get(`/catalog/products/search?q=&page=1&pageSize=100${query}`)).initials)
+    const WIDE = G('5', '3')
+    setHide(WIDE, 'false')
+    assert.deepEqual(await search(''), { B: 1, C: 1 }, 'hide on, website levels: A is Out, B is only Low')
+    assert.deepEqual(await search('&stockState=out_of_stock'), { A: 1, D: 1 }, 'the Out pill')
+    assert.deepEqual(await search('&stockState=low_stock'), { B: 1 }, 'the Low pill')
+    assert.deepEqual(await search('&stockState=in_stock'), { C: 1 }, 'the In stock pill')
+    assert.deepEqual(rail((await get('/bootstrap')).catalog.initials), { B: 1, C: 1 }, 'the bootstrap rail follows the same hide rule')
+    setHide(WIDE, 'true')
+    assert.deepEqual(await search(''), { A: 1, B: 1, C: 1, D: 1 }, 'hide off: every brand')
+    setHide(webFor('product', '5', '3'), 'false')
+    assert.deepEqual(await search(''), { A: 1, C: 1 }, 'product mode: the product out thresholds decide')
+    assert.deepEqual(await search('&stockState=out_of_stock'), { B: 1, D: 1 })
+  })
   await check('hide out of stock OFF lists every active product, whatever the levels', async () => {
     setHide(G('5', '3'), 'true')
     const every = hideFixture.map(([, name]) => name).sort()
