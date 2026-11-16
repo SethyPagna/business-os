@@ -118,6 +118,8 @@ const fakeExecutionCtx = { waitUntil: (p) => { if (p && p.catch) p.catch(() => {
 const lowStockLib = loadReal('lib/lowStockSettings.ts', { './db': { getDb: () => db } })
 const { resolveLowStockConfig, isLowStock } = lowStockLib
 const { portalStockStatusFor, resolvePortalStockRule } = portalRoute
+// The Website Editor preview's own resolver (it hides client-side from the status the server served), loaded as shipped.
+const frontendPortal = require('../../frontend/src/components/catalog/portalCatalogDisplay.ts')
 
 let passed = 0
 const failures = []
@@ -365,6 +367,97 @@ async function await_main() {
         assert.ok(!text.includes(needle), `${route} must not carry ${needle}`)
       }
     }
+  })
+
+  // 6. "Hide out of stock products" uses the SAME out level as the badge (owner decision of 16 Nov 2026; routes/portal.ts portalVisibleProductFilter).
+  // Website-wide mode, low 5, out 3, hide ON. A qty 2 / product out 0 is Out by the website level; B qty 4 / product out 5 is LOW by it (4 > 3); C is healthy;
+  // D is empty. So the default list is B and C: before the fix A was listed wearing "Out of stock" and B was hidden from the default list.
+  const hideFixture = [
+    [3001, 'Hide A qty2 out0', 'HideCatA', 'HideBrandA', 2, 0],
+    [3002, 'Hide B qty4 out5', 'HideCatB', 'HideBrandB', 4, 5],
+    [3003, 'Hide C qty20 out0', 'HideCatC', 'HideBrandC', 20, 0],
+    [3004, 'Hide D qty0 out0', 'HideCatD', 'HideBrandD', 0, 0],
+  ]
+  const hideInsert = raw.prepare(`INSERT INTO products
+    (id, name, sku, barcode, brand, category, unit, stock_quantity, low_stock_threshold, out_of_stock_threshold,
+     is_active, name_normalized, name_key, selling_price_usd)
+    VALUES (?, ?, ?, ?, ?, ?, 'pcs', ?, NULL, ?, 1, ?, ?, 10)`)
+  seedStockFixture(raw, () => {
+    // Earlier sections' products leave the storefront: emptied first (an active product with stock cannot be deactivated), then inactive.
+    raw.exec('DELETE FROM branch_stock WHERE product_id < 3000')
+    raw.exec('UPDATE products SET stock_quantity = 0 WHERE id < 3000')
+    raw.exec('UPDATE products SET is_active = 0 WHERE id < 3000')
+    for (const [id, name, category, brand, qty, out] of hideFixture) {
+      hideInsert.run(id, name, `H${id}`, `${9200000000000 + id}`, brand, category, qty, out, name.toLowerCase(), name.toLowerCase())
+      stock.run(id, 1, qty)
+    }
+  })
+  const HIDE_KEYS = ['customer_portal_show_out_of_stock_products', 'customer_portal_show_stock_status']
+  const setHide = (settings, show) => {
+    setSettings(settings)
+    raw.exec(`DELETE FROM settings WHERE key IN (${HIDE_KEYS.map((k) => `'${k}'`).join(',')})`)
+    raw.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('customer_portal_show_out_of_stock_products', show)
+  }
+  const get = async (route) => {
+    const res = await app.request(route, { method: 'GET' }, fakeEnv, fakeExecutionCtx)
+    assert.equal(res.status, 200, route)
+    return res.json()
+  }
+  const names = (items) => (items || []).map((item) => item.name).sort()
+  const clientVisible = (items) => items.filter((item) => frontendPortal.resolvePortalStockStatus(item, 'all') !== 'out_of_stock')
+  const HIDE_SCENARIOS = [
+    // [label, settings, expected default list, expected Out pill list]
+    ['website-wide low 5 / out 3', G('5', '3'), ['Hide B qty4 out5', 'Hide C qty20 out0'], ['Hide A qty2 out0', 'Hide D qty0 out0']],
+    ['website-wide, out level empty: the product out thresholds decide', G('5', ''), ['Hide A qty2 out0', 'Hide C qty20 out0'], ['Hide B qty4 out5', 'Hide D qty0 out0']],
+    ['product mode: the website levels are not used', webFor('product', '5', '3'), ['Hide A qty2 out0', 'Hide C qty20 out0'], ['Hide B qty4 out5', 'Hide D qty0 out0']],
+  ]
+  for (const [label, settings, wantDefault, wantOut] of HIDE_SCENARIOS) {
+    await check(`hide out of stock ON, ${label}: search, bootstrap, meta, AI catalog and the editor preview list what the badge allows`, async () => {
+      setHide(settings, 'false')
+      const search = await get('/catalog/products/search?q=&page=1&pageSize=100')
+      assert.deepEqual(names(search.items), wantDefault, 'search, no pill')
+      assert.equal(search.total, wantDefault.length, 'search total')
+      assert.deepEqual(names((await get('/catalog/products/search?q=&stockState=out_of_stock&page=1&pageSize=100')).items), wantOut, 'the Out pill is the complement of the default list')
+      const boot = await get('/bootstrap')
+      assert.deepEqual(names(boot.catalog.items), wantDefault, 'bootstrap catalog')
+      assert.equal(boot.catalog.total, wantDefault.length, 'bootstrap total')
+      const standalone = await get('/catalog/products')
+      assert.deepEqual(names(standalone.items), wantDefault, '/catalog/products')
+      // Meta counts: a category and a brand appear only while a visible product carries them.
+      const wantCats = hideFixture.filter(([, name]) => wantDefault.includes(name)).map(([, , category]) => category).sort()
+      const wantBrands = hideFixture.filter(([, name]) => wantDefault.includes(name)).map(([, , , brand]) => brand).sort()
+      for (const meta of [boot.meta, await get('/catalog/meta')]) {
+        assert.deepEqual(meta.categories.map((row) => row.name).sort(), wantCats, 'meta categories')
+        assert.deepEqual(meta.brands.map((row) => row.name).sort(), wantBrands, 'meta brands')
+      }
+      const ai = await portalRoute.loadPortalAiCatalog(fakeEnv, false, resolvePortalStockRule(settings))
+      assert.deepEqual(names(ai), wantDefault, 'AI catalog')
+      // The editor preview hides client-side (CatalogPage.tsx: status === 'out_of_stock'); every card the server listed must survive it.
+      assert.deepEqual(names(clientVisible(search.items)), wantDefault, 'the preview hides nothing the server listed')
+      assert.deepEqual(names(clientVisible(boot.catalog.items)), wantDefault, 'the preview hides nothing the bootstrap listed')
+      // And no listed card wears "Out of stock" while hide is on.
+      for (const item of [...search.items, ...boot.catalog.items]) assert.notEqual(item.stock_status, 'out_of_stock', `${item.name} is listed but labelled Out`)
+    })
+  }
+  await check('hide out of stock OFF lists every active product, whatever the levels', async () => {
+    setHide(G('5', '3'), 'true')
+    const every = hideFixture.map(([, name]) => name).sort()
+    assert.deepEqual(names((await get('/catalog/products/search?q=&page=1&pageSize=100')).items), every)
+    assert.deepEqual(names((await get('/bootstrap')).catalog.items), every)
+  })
+  await check('the hide clause is byte-identical to the product-threshold SQL in product mode and with an empty website out level', () => {
+    const visible = portalRoute.portalVisibleProductFilter
+    const was = 'p.is_active = 1 AND COALESCE(p.stock_quantity, 0) > COALESCE(p.out_of_stock_threshold, 0)'
+    assert.equal(visible(false, resolvePortalStockRule(webFor('product', '5', '3'))), was)
+    assert.equal(visible(false, resolvePortalStockRule(G('5', ''))), was)
+    assert.equal(visible(false, resolvePortalStockRule({})), was)
+    assert.equal(visible(false), was, 'no rule given: the default rule')
+    assert.equal(visible(false, resolvePortalStockRule(G('5', '3'))), 'p.is_active = 1 AND COALESCE(p.stock_quantity, 0) > 3')
+    assert.equal(visible(true, resolvePortalStockRule(G('5', '3'))), 'p.is_active = 1', 'hide off: nothing about stock')
+    const productMode = portalRoute.buildPortalProductFilters({}, true, false, resolvePortalStockRule(webFor('product', '5', '3')))
+    assert.ok(productMode.where.includes('COALESCE(p.stock_quantity, 0) > COALESCE(p.out_of_stock_threshold, 0)'), 'the search default clause is unchanged in product mode')
+    const website = portalRoute.buildPortalProductFilters({}, true, false, resolvePortalStockRule(G('5', '3')))
+    assert.ok(website.where.includes('COALESCE(p.stock_quantity, 0) > 3'), 'the search default clause uses the website out level')
   })
 
   console.log(`\n${passed} passed, ${failures.length} failed`)

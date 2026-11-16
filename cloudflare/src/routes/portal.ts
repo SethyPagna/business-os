@@ -736,10 +736,15 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
 // function of that setting: still excludes when the merchant wants
 // out-of-stock hidden (matching the historical default), but includes
 // everything (still gated on is_active) when they've asked to show it.
-function portalVisibleProductFilter(showOutOfStockProducts: boolean): string {
+//
+// "Out of stock" here is the SAME out level the card's badge and the Out pill use (portalStockLevelSql, owner decision of 16 Nov 2026,
+// "Website's own levels"): the website's out level in website-wide mode when it is filled in, else the product's own. Hiding by the
+// product's column alone listed cards that wear "Out of stock" and hid products the badge calls Low. With no website out level (product
+// mode, or an empty field) the fragment is byte-identical to what it always was.
+export function portalVisibleProductFilter(showOutOfStockProducts: boolean, rule: PortalStockRule = DEFAULT_PORTAL_STOCK_RULE): string {
   return showOutOfStockProducts
     ? 'p.is_active = 1'
-    : 'p.is_active = 1 AND COALESCE(p.stock_quantity, 0) > COALESCE(p.out_of_stock_threshold, 0)'
+    : `p.is_active = 1 AND COALESCE(p.stock_quantity, 0) > ${portalStockLevelSql(rule).out}`
 }
 
 // Category-first, name-second default browsing order for the public
@@ -969,9 +974,9 @@ async function attachPortalStockStatus(env: Env, products: Array<Record<string, 
   }) }
 }
 
-async function buildPortalMeta(env: Env, showOutOfStockProducts: boolean) {
+async function buildPortalMeta(env: Env, showOutOfStockProducts: boolean, rule: PortalStockRule) {
   const db = getDb(env)
-  const visibleFilter = portalVisibleProductFilter(showOutOfStockProducts)
+  const visibleFilter = portalVisibleProductFilter(showOutOfStockProducts, rule)
   // GROUP BY the normalized value rather than plain DISTINCT -- see the
   // matching fix/comment in routes/products.ts's loadProductFilters() for
   // why (imported data with inconsistent brand/category casing produced
@@ -1004,9 +1009,9 @@ async function buildPortalMeta(env: Env, showOutOfStockProducts: boolean) {
   }
 }
 
-async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean, showPrices: boolean) {
+async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean, showPrices: boolean, rule: PortalStockRule) {
   const db = getDb(env)
-  const visibleFilter = portalVisibleProductFilter(showOutOfStockProducts)
+  const visibleFilter = portalVisibleProductFilter(showOutOfStockProducts, rule)
   const page = 1
   // Matches the search endpoint's own default below (Part 202) -- this
   // snapshot is what cachedPortal?.catalog?.pageSize on the frontend
@@ -1729,10 +1734,11 @@ app.get('/config', (c) => servePortalPublic(c, 'config', false, async () => {
 app.get('/bootstrap', (c) => servePortalPublic(c, 'bootstrap', true, async () => {
   const settings = await loadSettingsMap(c.env)
   const showOutOfStockProducts = portalShowsOutOfStock(settings)
+  const stockRule = resolvePortalStockRule(settings)
   const [config, meta, catalog, promotionEdgeSeconds] = await Promise.all([
     withActiveRecommendedProducts(c.env, buildPublicPortalConfig(settings, c.env)),
-    buildPortalMeta(c.env, showOutOfStockProducts),
-    buildPortalCatalog(c.env, showOutOfStockProducts, portalShowsPrices(settings)),
+    buildPortalMeta(c.env, showOutOfStockProducts, stockRule),
+    buildPortalCatalog(c.env, showOutOfStockProducts, portalShowsPrices(settings), stockRule),
     portalPromotionEdgeSeconds(c.env),
   ])
   return {
@@ -1753,15 +1759,16 @@ app.get('/bootstrap', (c) => servePortalPublic(c, 'bootstrap', true, async () =>
 // logic needed -- both reuse the same buildPortalMeta/buildPortalCatalog
 // helpers /bootstrap above already calls.
 app.get('/catalog/meta', (c) => servePortalPublic(c, 'meta', false, async () => {
-  const showOutOfStockProducts = portalShowsOutOfStock(await loadSettingsMap(c.env))
-  return { value: await buildPortalMeta(c.env, showOutOfStockProducts), ttl: portalCatalogTtl(showOutOfStockProducts) }
+  const settings = await loadSettingsMap(c.env)
+  const showOutOfStockProducts = portalShowsOutOfStock(settings)
+  return { value: await buildPortalMeta(c.env, showOutOfStockProducts, resolvePortalStockRule(settings)), ttl: portalCatalogTtl(showOutOfStockProducts) }
 }, null))
 
 app.get('/catalog/products', (c) => servePortalPublic(c, 'products', true, async () => {
   const settings = await loadSettingsMap(c.env)
   const showOutOfStockProducts = portalShowsOutOfStock(settings)
   const [catalog, promotionEdgeSeconds] = await Promise.all([
-    buildPortalCatalog(c.env, showOutOfStockProducts, portalShowsPrices(settings)),
+    buildPortalCatalog(c.env, showOutOfStockProducts, portalShowsPrices(settings), resolvePortalStockRule(settings)),
     portalPromotionEdgeSeconds(c.env),
   ])
   return { value: catalog, ttl: cappedTtl(portalCatalogTtl(showOutOfStockProducts), promotionEdgeSeconds) }
@@ -1927,7 +1934,7 @@ function collectRecommendationCitations(recommendations: Array<{ citations?: unk
 // the AI sees exactly the same visible-product set a shopper does.
 export async function loadPortalAiCatalog(env: Env, showOutOfStockProducts: boolean, rule: PortalStockRule) {
   const db = getDb(env)
-  const visibleFilter = portalVisibleProductFilter(showOutOfStockProducts)
+  const visibleFilter = portalVisibleProductFilter(showOutOfStockProducts, rule)
   // SECURITY BOUNDARY -- this SELECT is the only product data the public AI
   // assistant ever sees. It is an explicit allowlist of public, on-card
   // fields ONLY. Never add internal columns here: cost_price_usd/khr, any
@@ -3026,7 +3033,8 @@ export function buildPortalProductFilters(query: Record<string, string>, allowSt
     // products hidden by default: exclude them. When
     // showOutOfStockProducts is true, fall through without adding this
     // clause so out-of-stock items are included like everything else.
-    where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0)`)
+    // The same out level the badge and the Out pill use (see portalVisibleProductFilter).
+    where.push(`${stockExpr} > ${level.out}`)
   }
 
   // Snapshot before the search clause is added -- every OTHER filter
