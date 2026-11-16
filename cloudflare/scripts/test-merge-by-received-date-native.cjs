@@ -410,8 +410,8 @@ async function main() {
   for (const [name, keep, extra] of [
     ['same-date add only', [201]],
     ['create only', [204]],
-    // The kept lot was archived and empty: the add re-activates it, and undo must archive it again (and give back its expiry).
-    ['same-date add into an archived, empty kept lot', [204], (w) => {
+    // Lead ruling 16 Nov 2026 (M1): an archived kept lot on the same day is NOT a match target and is never reactivated; the source lot is created.
+    ['same date as an archived kept lot (not a target: the source lot is created)', [204], (w) => {
       w.raw.db.exec(`INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,lot_code,received_at,expiry_date,unit_cost_usd,is_active,supplier_id,supplier_name,received_quantity)
         VALUES(106,${K},'K-KEY-6',6,'K-LOT-6','2026-11-20','2027-08-31',6,0,1,'Sup K',0);
         UPDATE product_batches SET expiry_date='2027-02-28' WHERE id=204;`)
@@ -437,9 +437,11 @@ async function main() {
       assert.equal((await merge(w)).status, 200)
       assert.notEqual(state(w), prior)
       if (extra) {
-        assert.equal(lot(w, 106).is_active, 1, 'the archived kept lot took the stock and is active again')
-        assert.equal(lot(w, 106).expiry_date, '2027-02-28')
-        assert.deepEqual(lotStock(w)[106], { 1: 2, 2: 2 })
+        assert.equal(lot(w, 106).is_active, 0, 'the archived kept lot is never reactivated')
+        assert.equal(lot(w, 106).expiry_date, '2027-08-31', 'and takes no expiry')
+        assert.deepEqual(lotStock(w)[106] || {}, {}, 'and no stock')
+        assert.deepEqual([lot(w, 204).variant_product_id, lot(w, 204).is_active, lot(w, 204).merge_marked], [K, 1, 0], 'the source lot is created active on the keeper, unmarked')
+        assert.deepEqual(lotStock(w)[204], { 1: 2, 2: 2 }, 'with its own stock')
       }
       assert.equal((await historyAction(w, 'undo')).status, 200)
       assert.equal(state(w), prior)
@@ -621,6 +623,90 @@ async function main() {
     // The restore either refuses (its safety fingerprint no longer matches the edited record) or runs without the new
     // fields; it must never null the cost and expiry of a kept lot.
     for (const id of [101, 104, 105]) assert.notEqual(lot(w, id).unit_cost_usd, null, `lot ${id} cost survives (undo status ${undone.status})`)
+  })
+
+  // ---- lead rulings 16 Nov 2026: M2 (an already-inactive lot is left as it was), M3 (one new lot per date), B3 (undo order) ---------------
+  await check('M2: an already-inactive credit lot on the discarded product is not folded, not marked, not reminded, and undo leaves it exactly as it was', async () => {
+    const w = creditWorld()
+    // Lot 208: manually deactivated, on credit from supplier 2, received the day lot 102 of the keeper arrived (2026-11-10), no stock.
+    fixtureWrite(w, () => w.raw.db.exec(`INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,lot_code,received_at,is_active,supplier_id,supplier_name,payment_status,credit_due_date,received_quantity,received_cost_usd,unit_cost_usd)
+      VALUES(208,${D},'D-KEY-8',8,'D-LOT-8','2026-11-10',0,2,'Sup D','credit',date('now','+3 day'),2,8,4)`))
+    const reminders = await reminderIds(w)
+    assert.ok(!reminders.ids.includes(208), 'an unmarked inactive lot does not remind')
+    const prior = state(w)
+    assert.equal((await merge(w)).status, 200)
+    assert.deepEqual({ ...lot(w, 208), }, { ...lots(w).find((row) => row.id === 208) })
+    assert.deepEqual([lot(w, 208).is_active, lot(w, 208).merge_marked, lot(w, 208).variant_product_id], [0, 0, D], 'not folded, not marked, still on the discarded product')
+    assert.ok(!(await reminderIds(w)).ids.includes(208), 'still not reminded after the merge')
+    assert.equal((await historyAction(w, 'undo')).status, 200)
+    assert.equal(state(w), prior, 'undo restores the exact prior state; the lot is still inactive')
+  })
+  await check('M3: two discarded lots on a date the kept product lacks end as ONE new lot (weighted cost, earliest expiry), and undo is exact', async () => {
+    const w = world()
+    fixtureWrite(w, () => {
+      w.raw.db.exec(`INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,lot_code,received_at,expiry_date,unit_cost_usd,is_active,supplier_id,supplier_name,payment_status,received_quantity,received_cost_usd)
+        VALUES(209,${D},'D-KEY-9',8,'D-LOT-9','2026-11-20','2027-05-01',3,1,2,'Sup D','paid',3,9);
+        INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(209,1,3);
+        UPDATE branch_stock SET quantity=quantity+3 WHERE product_id=${D} AND branch_id=1;
+        UPDATE products SET stock_quantity=stock_quantity+3 WHERE id=${D};`)
+    })
+    const prior = state(w)
+    assert.equal((await merge(w)).status, 200)
+    const onDate = lots(w).filter((row) => row.variant_product_id === K && row.is_active === 1 && String(row.received_at).startsWith('2026-11-20'))
+    assert.deepEqual(onDate.map((row) => row.id), [204], 'one active lot for 2026-11-20 on the keeper: the first (lowest batch_number) of the two')
+    assert.equal(lot(w, 204).unit_cost_usd, 4.7143, '(4 x 6 + 3 x 3) / 7 = 4.7143')
+    assert.equal(lot(w, 204).expiry_date, '2027-05-01', 'the earliest non-null expiry')
+    assert.deepEqual(lotStock(w)[204], { 1: 5, 2: 2 })
+    assert.deepEqual([lot(w, 209).is_active, lot(w, 209).merge_marked, lot(w, 209).variant_product_id], [0, 1, D], 'the second lot is folded into the first and kept as an inactive marked record')
+    assert.equal((await historyAction(w, 'undo')).status, 200)
+    assert.equal(state(w), prior, 'undo restores both lots exactly')
+  })
+  await check('B3: undo restores a kept lot that was archived before a fold only AFTER every folded lot has given its stock back (two lots into one)', async () => {
+    const w = world()
+    // Kept lot 107: empty, received 2026-11-25. Discarded lots 211 and 212 arrived the same day, each with stock: both fold into 107.
+    fixtureWrite(w, () => w.raw.db.exec(`INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,lot_code,received_at,expiry_date,unit_cost_usd,is_active,supplier_id,supplier_name,payment_status,received_quantity,received_cost_usd)
+      VALUES(107,${K},'K-KEY-7',7,'K-LOT-7','2026-11-25',NULL,5,1,1,'Sup K','paid',0,0),
+            (211,${D},'D-KEY-11',8,'D-LOT-11','2026-11-25','2027-03-01',2,1,2,'Sup D','paid',1,2),
+            (212,${D},'D-KEY-12',9,'D-LOT-12','2026-11-25','2027-04-01',4,1,2,'Sup D','paid',2,8);
+      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(211,1,1),(212,1,2);
+      UPDATE branch_stock SET quantity=quantity+3 WHERE product_id=${D} AND branch_id=1;
+      UPDATE products SET stock_quantity=stock_quantity+3 WHERE id=${D};`))
+    assert.equal((await merge(w)).status, 200)
+    assert.deepEqual(lotStock(w)[107], { 1: 3 }, 'both discarded lots folded into kept lot 107')
+    // A snapshot written before the M1 ruling could carry an ARCHIVED kept lot in keeperLotBefore (is_active 0, empty): replay one as an older
+    // action recorded it. The restore used to run per folded lot, archiving the kept lot while the second lot's stock still sat on it.
+    const snap = w.raw.prepare("SELECT id,payload_json FROM undo_snapshots WHERE kind='product.merge' ORDER BY id DESC LIMIT 1").get()
+    const payload = JSON.parse(snap.payload_json)
+    const into107 = payload.foldedBatches.filter((fb) => fb.keeperBatchId === 107)
+    assert.equal(into107.length, 2)
+    for (const fb of into107) { fb.keeperLotBefore.is_active = 0; fb.keeperStockBefore = [] }
+    w.raw.db.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=?').run(JSON.stringify(payload), snap.id)
+    const undone = await historyAction(w, 'undo')
+    assert.equal(undone.status, 200, JSON.stringify(undone.json))
+    assert.equal(lot(w, 107).is_active, 0, 'the kept lot is archived again once nothing sits on it')
+    assert.deepEqual(lotStock(w)[107] || {}, {}, 'and nothing sits on it')
+    for (const id of [211, 212]) assert.deepEqual([lot(w, id).is_active, lot(w, id).merge_marked, lot(w, id).variant_product_id], [1, 0, D], `discarded lot ${id} is back`)
+  })
+  await check('M10: two same-day kept lots: the LOWEST BATCH NUMBER takes the stock, not the lowest id', async () => {
+    const w = world()
+    // Kept lots 102 (batch 2) and 103 (batch 3) both arrived 2026-11-10. Swap their numbers: 103 is now first by number, 102 first by id.
+    fixtureWrite(w, () => w.raw.db.exec('UPDATE product_batches SET batch_number=9 WHERE id=102; UPDATE product_batches SET batch_number=1 WHERE id=103'))
+    assert.equal((await merge(w)).status, 200)
+    assert.equal(lot(w, 202).is_active, 0)
+    assert.deepEqual(lotStock(w)[103], { 1: 6, 2: 4 }, 'discarded lot 202 (2026-11-10, 4 at branch 2) was added into 103, the lowest batch number')
+    assert.deepEqual(lotStock(w)[102], { 1: 4 }, 'and 102 (lowest id) is untouched')
+  })
+  await check('M17: a write-off merge marks exactly the lots it deactivated that were active, and undo clears it', async () => {
+    const w = creditWorld()
+    const prior = state(w)
+    const res = await w.request('POST', '/possible-duplicates/merge', { keepId: K, mergeId: D, stock: 'write_off' })
+    assert.equal(res.status, 200, JSON.stringify(res.json))
+    const writtenOff = lots(w).filter((row) => row.variant_product_id === D && row.is_active === 0)
+    assert.ok(writtenOff.length >= 5, 'the discarded product lots are deactivated in place')
+    assert.ok(writtenOff.every((row) => row.merge_marked === 1), 'each is marked as merge-deactivated (and so keeps reminding while a credit is owed)')
+    assert.equal((await historyAction(w, 'undo')).status, 200)
+    assert.deepEqual(lots(w).filter((row) => row.merge_marked === 1), [])
+    assert.equal(state(w), prior)
   })
 
   console.log(`${passed} passed, ${failed} failed`)

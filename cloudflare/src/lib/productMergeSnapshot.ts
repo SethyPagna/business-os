@@ -161,10 +161,13 @@ export function planProductMergeCaseSnapshot(
       key: 'duplicateBatches',
       // The two lot_* columns let the fold assert in its write batch that nothing moved on these lots since this read.
       // received_at, expiry_date and unit_cost_usd are what the date match and the folded lot's cost and expiry read.
-      sql: `SELECT id, batch_key, batch_number, received_at, expiry_date, unit_cost_usd,
+      // Only lots in play: active ones, and inactive ones still holding stock. A lot already inactive with no stock is left exactly as it
+      // was (lead ruling 16 Nov 2026).
+      sql: `SELECT id, batch_key, batch_number, received_at, expiry_date, unit_cost_usd, is_active,
         (SELECT COALESCE(SUM(quantity), 0) FROM branch_batch_stock WHERE batch_id = product_batches.id) AS lot_quantity,
         (SELECT COUNT(*) FROM branch_batch_stock WHERE batch_id = product_batches.id) AS lot_stock_rows
-        FROM product_batches WHERE variant_product_id = @id`,
+        FROM product_batches WHERE variant_product_id = @id
+          AND (is_active = 1 OR EXISTS (SELECT 1 FROM branch_batch_stock WHERE batch_id = product_batches.id AND quantity > 0))`,
       params: { id: duplicateId },
     },
     { key: 'duplicateImages', sql: 'SELECT image_path, sort_order FROM product_images WHERE product_id = @id ORDER BY sort_order ASC, id ASC', params: { id: duplicateId } },

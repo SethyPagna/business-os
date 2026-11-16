@@ -4735,6 +4735,8 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
   // unique per product -- so its before-image is captured exactly once).
   const repointedBatches: Array<{ id: number; batchNumber: number | null }> = []
   const foldedBatches: Array<{
+    /** false when the discarded lot was already inactive (legacy stock on it): the fold neither marked nor deactivated it, so undo must not reactivate it. */
+    sourceWasActive?: false
     dupBatchId: number
     keeperBatchId: number
     dupStockBefore: Array<{ branch_id: number; quantity: number }>
@@ -4756,13 +4758,15 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
   for (const row of snapshot.canonicalBatchStockRows) lotQuantityBefore.set(Number(row.batch_id), (lotQuantityBefore.get(Number(row.batch_id)) || 0) + (Number(row.quantity) || 0))
   for (const row of dupBatchRows) lotQuantityBefore.set(Number(row.id), Number(row.lot_quantity) || 0)
   const foldedLotPlanByKeeperId = new Map(planFoldedLotMetadata(canonicalBatchRows, dupBatchRows, lotMatchByDuplicateId, lotQuantityBefore).map((plan) => [plan.keeperLotId, plan]))
-  const canonicalLotById = new Map(canonicalBatchRows.map((row) => [Number(row.id), row]))
+  // A fold target is a kept lot, or a discarded lot that is created on the keeper for a date the keeper lacks (its before-image is its own row).
+  const createdTargetIds = new Set([...lotMatchByDuplicateId.values()].filter((id) => dupBatchRows.some((row) => Number(row.id) === id)))
+  const canonicalLotById = new Map([...canonicalBatchRows, ...dupBatchRows.filter((row) => createdTargetIds.has(Number(row.id)))].map((row) => [Number(row.id), row]))
   const canonicalBatchKeys = new Set(canonicalBatchRows.map((row) => String(row.batch_key)))
   const foldedKeeperLotsWritten = new Set<number>()
   let keeperLotMetadataWritten = false
   const lotsCreatedForAudit: Array<{ lotId: number; batchNumber: number; receivedDate: string | null }> = []
   // WRITE-OFF only: each lot deactivated in place, its per-branch stock cleared.
-  const writtenOffBatches: Array<{ batchId: number; stockBefore: Array<{ branch_id: number; quantity: number }> }> = []
+  const writtenOffBatches: Array<{ batchId: number; stockBefore: Array<{ branch_id: number; quantity: number }>; wasActive?: false }> = []
   // The per-lot detail behind a write-off, recorded in the audit entry so the
   // lots that were destroyed are named (code, number, branch, quantity) rather
   // than collapsing into one anonymous total.
@@ -4784,10 +4788,13 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
       if (!lotSnapshot) throw new Error('merge_snapshot_incomplete')
       const dupBatchStockRows = lotSnapshot.duplicateStockRows
       statements.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @id', params: { id: batchRow.id } })
-      statements.push({ sql: 'UPDATE product_batches SET is_active = 0, merge_deactivated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchRow.id } })
+      // A lot that was already inactive (legacy stock on it) stays unmarked: the marker means "a merge deactivated this lot".
+      const wasActive = Number(batchRow.is_active ?? 1) === 1
+      if (wasActive) statements.push({ sql: 'UPDATE product_batches SET is_active = 0, merge_deactivated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchRow.id } })
       writtenOffBatches.push({
         batchId: batchRow.id,
         stockBefore: dupBatchStockRows.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })),
+        ...(wasActive ? {} : { wasActive: false }),
       })
       for (const bbs of dupBatchStockRows) {
         writtenOffLotDetail.push({
@@ -4806,16 +4813,7 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
       if (!lotSnapshot) throw new Error('merge_snapshot_incomplete')
       const dupBatchStockRows = lotSnapshot.duplicateStockRows
       const keeperBatchStockBefore = lotSnapshot.keeperStockBefore
-      // An archived same-key keeper can still own stock. Activate it before
-      // folding positive quantities so the committed stock stays selectable.
-      // Empty historical lots keep their prior state; dates/costs do not change.
-      statements.push({
-        sql: `UPDATE product_batches SET is_active = 1, updated_at = CURRENT_TIMESTAMP
-              WHERE id = @keeperBatchId AND COALESCE(is_active, 0) <> 1
-                AND EXISTS (SELECT 1 FROM branch_batch_stock
-                            WHERE batch_id IN (@keeperBatchId, @dupBatchId) AND quantity > 0)`,
-        params: { keeperBatchId: existingCanonicalBatchId, dupBatchId: batchRow.id },
-      })
+      // Only ACTIVE kept lots are match targets (productMergeLots.ts), so a merge never reactivates an archived lot.
       for (const bbs of dupBatchStockRows) {
         const qty = Number(bbs.quantity) || 0
         if (!qty) continue
@@ -4826,8 +4824,10 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
         })
       }
       statements.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @id', params: { id: batchRow.id } })
-      statements.push({ sql: 'UPDATE product_batches SET is_active = 0, merge_deactivated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchRow.id } })
+      const sourceWasActive = Number(batchRow.is_active ?? 1) === 1
+      if (sourceWasActive) statements.push({ sql: 'UPDATE product_batches SET is_active = 0, merge_deactivated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchRow.id } })
       foldedBatches.push({
+        ...(sourceWasActive ? {} : { sourceWasActive: false as const }),
         dupBatchId: batchRow.id,
         keeperBatchId: existingCanonicalBatchId,
         dupStockBefore: dupBatchStockRows.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })),
@@ -4843,7 +4843,7 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
       // batch_id (no allocation row), so it follows the stock to the kept lot or a later return would hit an inactive lot.
       statements.push({ sql: 'UPDATE sale_items SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId', params: { keeperBatchId: existingCanonicalBatchId, dupBatchId: batchRow.id } })
       statements.push({ sql: 'UPDATE return_items SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId', params: { keeperBatchId: existingCanonicalBatchId, dupBatchId: batchRow.id } })
-      // The kept lot carries the mean of the distinct non-zero costs and the earliest expiry across every lot added
+      // The kept lot carries the quantity-weighted cost ($0 or unknown left out, 4 places) and the earliest expiry across every lot added
       // into it, written once however many discarded lots land there. Supplier, lot code, payment status and due date stay its own, even when empty.
       const keeperLotPlan = foldedLotPlanByKeeperId.get(existingCanonicalBatchId)
       const keeperLotBefore = canonicalLotById.get(existingCanonicalBatchId)
@@ -5605,7 +5605,10 @@ function canonicalLeadingZeroGraphSnapshot(value: LeadingZeroApprovedGraph | und
     duplicateProduct: snapshot.duplicateProduct || null,
     canonicalBatchRows: byId(snapshot.canonicalBatchRows),
     canonicalBatchStockRows: byId(snapshot.canonicalBatchStockRows),
-    duplicateBatchRows: byId(value.duplicateBatchRowsFull),
+    // Only lots in play take part in a merge (active, or inactive but still holding stock; any other inactive lot is left as it was): the
+    // same set the case read returns.
+    duplicateBatchRows: byId(value.duplicateBatchRowsFull.filter((row) => Number((row as { is_active?: unknown }).is_active ?? 1) === 1
+      || value.duplicateBatchStockRows.some((stock) => Number(stock.batch_id) === Number(row.id) && Number(stock.quantity) > 0))),
     duplicateBatchStockRows: byId(value.duplicateBatchStockRows),
     saleAllocationRows: byId(value.saleAllocationRows),
     returnAllocationRows: byId(value.returnAllocationRows),

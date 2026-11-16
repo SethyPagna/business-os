@@ -72,27 +72,54 @@ function lotOrder(a: MergeLotRow, b: MergeLotRow): number {
   return left !== right ? left - right : Number(a.id) - Number(b.id)
 }
 
-/** receivedDate -> the one kept lot that date's stock is added into. */
+/**
+ * A lot a merge may touch: an ACTIVE one (a row without an is_active field counts as active). An inactive kept lot is never a match
+ * target and is never reactivated by a merge; an inactive duplicate lot is left exactly as it was (lead ruling 16 Nov 2026).
+ */
+export function isMergeableLot(lot: MergeLotRow): boolean {
+  return lot.is_active == null || Number(lot.is_active) === 1
+}
+
+/**
+ * A discarded lot a merge must handle: an active one, or an inactive one that still holds stock (legacy data: positive stock must stay
+ * selectable, and the discarded product cannot be deactivated while stock sits on it). An inactive lot with no stock is left as it was.
+ */
+export function isDuplicateLotInPlay(lot: MergeLotRow): boolean {
+  return isMergeableLot(lot) || Number(lot.lot_quantity) > 0
+}
+
+/** receivedDate -> the one ACTIVE kept lot that date's stock is added into. */
 export function keeperLotByDate<T extends MergeLotRow>(keeperLots: readonly T[]): Map<string, T> {
   const byDate = new Map<string, T>()
-  for (const lot of [...keeperLots].sort(lotOrder)) {
+  for (const lot of [...keeperLots].filter(isMergeableLot).sort(lotOrder)) {
     const date = mergeLotReceivedDate(lot.received_at)
     if (date && !byDate.has(date)) byDate.set(date, lot)
   }
   return byDate
 }
 
-/** Discarded lot id -> kept lot id, for the lots that have a same-date kept lot. Others are absent (created). */
+/**
+ * Discarded lot id -> the lot its stock is added into. A key present means FOLD, a key absent means the lot is created on the keeper.
+ *   - A same-business-day ACTIVE kept lot is the target (lowest batch_number, then id).
+ *   - With no such kept lot, the discarded lots of one date become ONE new lot: the first of them (lowest batch_number, then id) is
+ *     created on the keeper and the others are folded into it (owner 16 Nov 2026: "add stock to batch if there is"; one row per date).
+ *     The target is then a discarded lot id, which is itself absent from the map.
+ *   - A lot with no received date is never matched: it is created as it is. An inactive discarded lot with no stock is ignored entirely.
+ * One implementation for the fold, the previews, the estimates and the group (Conflicts) path.
+ */
 export function matchDuplicateLots(
   keeperLots: readonly MergeLotRow[],
   duplicateLots: readonly MergeLotRow[],
 ): Map<number, number> {
   const byDate = keeperLotByDate(keeperLots)
+  const createdByDate = new Map<string, MergeLotRow>()
   const matches = new Map<number, number>()
-  for (const lot of duplicateLots) {
+  for (const lot of [...duplicateLots].filter(isDuplicateLotInPlay).sort(lotOrder)) {
     const date = mergeLotReceivedDate(lot.received_at)
-    const target = date ? byDate.get(date) : undefined
+    if (!date) continue
+    const target = byDate.get(date) ?? createdByDate.get(date)
     if (target) matches.set(Number(lot.id), Number(target.id))
+    else createdByDate.set(date, lot)
   }
   return matches
 }
@@ -158,8 +185,10 @@ export function planFoldedLotMetadata(
   /** Total stock per lot id (sum over branches) as it stands before the fold; a row's own lot_quantity is the fallback. */
   quantities?: ReadonlyMap<number, number>,
 ): FoldedLotMetadata[] {
-  const keeperById = new Map(keeperLots.map((lot) => [Number(lot.id), lot]))
   const duplicateById = new Map(duplicateLots.map((lot) => [Number(lot.id), lot]))
+  // A target may be a discarded lot that is itself created on the keeper (the first of several on a date the keeper lacks).
+  const keeperById = new Map([...keeperLots, ...[...new Set(matches.values())].map((id) => duplicateById.get(id)).filter((lot): lot is MergeLotRow => !!lot)]
+    .map((lot) => [Number(lot.id), lot] as const))
   const quantityOf = (lot: MergeLotRow) => quantities?.get(Number(lot.id)) ?? lot.lot_quantity
   const grouped = new Map<number, number[]>()
   for (const [duplicateId, keeperId] of [...matches].sort((a, b) => a[0] - b[0])) {

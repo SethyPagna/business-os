@@ -298,6 +298,8 @@ export interface MergeReversal {
   // that key on another date); undo puts the original key back. Absent on snapshots written before 16 Nov 2026.
   repointedBatches: Array<{ id: number; batchNumber: number | null; batchKeyBefore?: string }>
   foldedBatches: Array<{
+    /** false when the discarded lot was already inactive before the fold (absent = it was active): undo leaves it inactive. */
+    sourceWasActive?: false
     dupBatchId: number
     keeperBatchId: number
     dupStockBefore: Array<{ branch_id: number; quantity: number }>
@@ -326,6 +328,8 @@ export interface MergeReversal {
   // WRITE-OFF only: the discarded row's lots, deactivated in place with their
   // per-branch stock cleared. Undo reactivates each and re-inserts the stock.
   writtenOffBatches?: Array<{
+    /** false when the lot was already inactive before the write-off (absent = it was active): undo leaves it inactive. */
+    wasActive?: false
     batchId: number
     stockBefore: Array<{ branch_id: number; quantity: number }>
   }>
@@ -2255,10 +2259,15 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
       stmts.push({ sql: 'UPDATE product_batches SET batch_key = @key WHERE id = @id AND variant_product_id = @dupId', params: { key: b.batchKeyBefore, id: Number(b.id), dupId } })
     }
   }
+  // The kept lot's own cost, expiry and activity before the fold, once per kept lot, written AFTER every folded lot's stock is back:
+  // a kept lot that was archived goes back to archived only once nothing sits on it (the 0154 stock trigger refuses stock on an
+  // inactive lot), and with several discarded lots folded into one kept lot the first restore would otherwise run while a later
+  // lot's stock still sat on it. Each fold entry carries the same before-image, so the first one per kept lot is the one used.
+  const keeperLotRestores = new Map<number, NonNullable<NonNullable<MergeReversal['foldedBatches']>[number]['keeperLotBefore']>>()
   for (const fb of (r.foldedBatches || [])) {
     const dupBatchId = Number(fb.dupBatchId)
     const keeperBatchId = Number(fb.keeperBatchId)
-    stmts.push({ sql: 'UPDATE product_batches SET is_active = 1, merge_deactivated_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dupBatchId } })
+    if (fb.sourceWasActive !== false) stmts.push({ sql: 'UPDATE product_batches SET is_active = 1, merge_deactivated_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dupBatchId } })
     for (const grp of chunk(intIds(fb.saleAllocationIds), 400)) stmts.push({ sql: `UPDATE sale_item_batch_allocations SET batch_id = @dupBatchId WHERE id IN (${grp.join(',')})`, params: { dupBatchId } })
     for (const grp of chunk(intIds(fb.returnAllocationIds), 400)) stmts.push({ sql: `UPDATE return_item_batch_allocations SET batch_id = @dupBatchId WHERE id IN (${grp.join(',')})`, params: { dupBatchId } })
     // Guarded by the kept lot id: a line the fold re-pointed goes back; one that has moved on since is left alone.
@@ -2275,22 +2284,20 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
       stmts.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @db AND branch_id = @b', params: { db: dupBatchId, b } })
       stmts.push({ sql: 'INSERT INTO branch_batch_stock (batch_id, branch_id, quantity, updated_at) VALUES (@db, @b, @q, CURRENT_TIMESTAMP)', params: { db: dupBatchId, b, q: Number(d.quantity) || 0 } })
     }
-    // The kept lot's own cost, expiry and activity, as they were before the fold re-derived them. Written after its stock is
-    // back (a lot that was archived is archived again only once nothing sits on it). Idempotent when several discarded lots
-    // folded into one kept lot: each entry carries the same before-image.
     const before = fb.keeperLotBefore
-    if (before && typeof before === 'object') {
-      stmts.push({
-        sql: `UPDATE product_batches SET unit_cost_usd = @cost, expiry_date = @expiry,
-                is_active = CASE WHEN @active IS NULL THEN is_active ELSE @active END, updated_at = CURRENT_TIMESTAMP WHERE id = @kb`,
-        params: {
-          kb: keeperBatchId,
-          cost: before.unit_cost_usd == null ? null : Number(before.unit_cost_usd),
-          expiry: before.expiry_date == null ? null : String(before.expiry_date),
-          active: before.is_active == null ? null : Number(before.is_active),
-        },
-      })
-    }
+    if (before && typeof before === 'object' && !keeperLotRestores.has(keeperBatchId)) keeperLotRestores.set(keeperBatchId, before)
+  }
+  for (const [keeperBatchId, before] of keeperLotRestores) {
+    stmts.push({
+      sql: `UPDATE product_batches SET unit_cost_usd = @cost, expiry_date = @expiry,
+              is_active = CASE WHEN @active IS NULL THEN is_active ELSE @active END, updated_at = CURRENT_TIMESTAMP WHERE id = @kb`,
+      params: {
+        kb: keeperBatchId,
+        cost: before.unit_cost_usd == null ? null : Number(before.unit_cost_usd),
+        expiry: before.expiry_date == null ? null : String(before.expiry_date),
+        active: before.is_active == null ? null : Number(before.is_active),
+      },
+    })
   }
 
   // 6b. WRITE-OFF undo: the discarded row's lots were deactivated in place and
@@ -2301,7 +2308,7 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
   for (const wb of (r.writtenOffBatches || [])) {
     const batchId = Number(wb?.batchId)
     if (!Number.isInteger(batchId) || batchId <= 0) continue
-    stmts.push({ sql: 'UPDATE product_batches SET is_active = 1, merge_deactivated_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchId } })
+    if (wb.wasActive !== false) stmts.push({ sql: 'UPDATE product_batches SET is_active = 1, merge_deactivated_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchId } })
     for (const s of (wb.stockBefore || [])) {
       stmts.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @b AND branch_id = @br', params: { b: batchId, br: Number(s.branch_id) } })
       stmts.push({ sql: 'INSERT INTO branch_batch_stock (batch_id, branch_id, quantity, updated_at) VALUES (@b, @br, @q, CURRENT_TIMESTAMP)', params: { b: batchId, br: Number(s.branch_id), q: Number(s.quantity) || 0 } })
