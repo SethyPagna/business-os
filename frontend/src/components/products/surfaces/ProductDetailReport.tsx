@@ -22,6 +22,7 @@ import { canViewAcquisitionCosts } from '../../../utils/acquisitionCostAccess.ts
 import type { PermissionUser } from '../../../utils/permissions.ts'
 import AttributeSupplierModal from './AttributeSupplierModal.tsx'
 import EntityLink from '../../shared/EntityLink.tsx'
+import { saleLinkTarget } from '../../sales/salesFocus.ts'
 import ChipRail, { RailChip } from '../../shared/kit/ChipRail.tsx'
 
 // D3 (Part 422; reworked Part 563): the detail page's report sections, per
@@ -436,7 +437,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD, lea
                     <p className="py-1 text-center text-gray-400">{tr('no_data_found', 'No data found')}</p>
                   ) : drill.map((sale) => (
                     <div key={sale.id} className="flex items-center justify-between gap-2">
-                      <EntityLink page="sales" anchor="hub:sales:sales" navigate={navigateTo} className="detail-scroll-text min-w-0 flex-1 font-mono text-gray-500" title={tr('open_sale', 'Open sale')}>
+                      <EntityLink page="sales" anchor="hub:sales:sales" {...saleLinkTarget(sale.id, sale.receipt_number)} navigate={navigateTo} className="detail-scroll-text min-w-0 flex-1 font-mono text-gray-500" title={tr('open_sale', 'Open sale')}>
                         {sale.receipt_number || `#${sale.id}`}
                       </EntityLink>
                       {sale.customer_name ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo} className="detail-scroll-text min-w-0 max-w-[8rem] text-gray-400" title={tr('open_customer', 'Open customer')}>{sale.customer_name}</EntityLink> : null}

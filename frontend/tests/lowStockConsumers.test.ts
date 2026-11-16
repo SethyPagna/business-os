@@ -68,13 +68,24 @@ for (const [relPath, surface] of LOW_STOCK_CONSUMERS) {
   )
 }
 
-// Positive control: the sweep above is capable of failing. The STOREFRONT
-// keeps its own documented customer_portal_* threshold triple (the hint in
-// en.json says it applies on the customer portal only), so it still carries
-// exactly the shape the sweep rejects -- which both proves the instrument
-// works and pins the storefront's independence as a decision.
+// Positive control: the sweep above is capable of failing. It rejects the three shapes of the old literal, so a sample that carries
+// each of them must trip it (and a threaded sample must not).
+const SWEPT_PATTERNS = [
+  /low_stock_threshold\s*\|\|\s*10/,
+  /low_stock_threshold\s*\?\?\s*10/,
+  /low_stock_threshold,\s*10\)/,
+]
+for (const sample of ['x.low_stock_threshold || 10', 'x.low_stock_threshold ?? 10', 'toNumber(p.low_stock_threshold, 10)']) {
+  assert.ok(SWEPT_PATTERNS.some((pattern) => pattern.test(sample)), `the sweep must reject: ${sample}`)
+}
+assert.ok(!SWEPT_PATTERNS.some((pattern) => pattern.test('effectiveLowStockThreshold(config, p.low_stock_threshold)')), 'the sweep must accept a threaded read')
+
+// The STOREFRONT carries no stock threshold math at all (owner decision of 16 Nov 2026, "Website's own levels"): the Worker applies the website's
+// levels and serves stock_status, and portalCatalogDisplay.ts only reads it. So it has no literal 10, no shop-rule import and no threshold reads.
 const portal = read('components/catalog/portalCatalogDisplay.ts')
-assert.ok(/low_stock_threshold.*\|\|\s*10/.test(portal), 'the storefront is expected to keep its own rule')
+for (const pattern of SWEPT_PATTERNS) assert.ok(!pattern.test(portal), 'the storefront resolver must not carry the literal 10')
+assert.ok(!portal.includes('lowStockSettings') && !portal.includes('DEFAULT_LOW_STOCK_CONFIG'), 'the storefront resolver must not import the shop rule')
+assert.ok(!/low_stock_threshold|out_of_stock_threshold/.test(portal), 'the storefront resolver must not read the raw threshold columns')
 assert.ok(!/useLowStockConfig/.test(portal))
 
 // -- behaviour, through the real helpers ------------------------------------

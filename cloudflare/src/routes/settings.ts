@@ -36,7 +36,7 @@ import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { POS_ADDRESS_PRESETS_KEY } from '../lib/addressPresets'
 import { normalizePortalUploadPath } from '../lib/safeLinkUrl'
-import { AUTOMATIC_PORTAL_LANGUAGE, normalizePortalImageAlt, PORTAL_ANNOUNCEMENT_KEYS, portalLanguageSetting, privateTranslationKey, validatePortalAnnouncementWrite, withoutOtherLanguageTranslations } from '../lib/portalText'
+import { AUTOMATIC_PORTAL_LANGUAGE, invalidPortalStockLevelKey, normalizePortalImageAlt, PORTAL_ANNOUNCEMENT_KEYS, portalLanguageSetting, privateTranslationKey, validatePortalAnnouncementWrite, withoutOtherLanguageTranslations } from '../lib/portalText'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -1186,6 +1186,17 @@ app.post('/', async (c) => {
           ? 'Low stock alert scope must be "product" or "global".'
           : 'Low stock alert switch must be on or off.',
       code: lowStockError,
+    }, 400)
+  }
+
+  // The Website Editor's own Low / Out of stock levels decide the storefront badges, the filter pills and what "hide out of stock" lists, so the Editor's
+  // rule (empty, or a number from 0 up; CatalogPage.tsx websiteStockLevel) is enforced here too. Rejected, never clamped.
+  const badStockLevelKey = invalidPortalStockLevelKey(body)
+  if (badStockLevelKey) {
+    return c.json({
+      error: 'The website Low stock and Out of stock levels must be empty or a number from 0 up.',
+      code: 'invalid_portal_stock_level',
+      key: badStockLevelKey,
     }, 400)
   }
 

@@ -63,6 +63,7 @@ const loadPortal = (portalTextModule) => load('routes/portal.ts', {
   '../lib/safeLinkUrl': load('lib/safeLinkUrl.ts'),
   '../lib/portalText': portalTextModule,
   '../lib/sqlBinding': load('lib/sqlBinding.ts'),
+  '../lib/lowStockSettings': load('lib/lowStockSettings.ts', { './db': { getDb: () => db } }),
   '../lib/familyPagination': load('lib/familyPagination.ts'),
   '../lib/promotionRulesSql': { loadActivePromotionRules: async () => [], productPromotedSql: () => '0' },
 })

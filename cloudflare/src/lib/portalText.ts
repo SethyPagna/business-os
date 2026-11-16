@@ -258,3 +258,25 @@ export function validatePortalAnnouncementWrite(body: Record<string, unknown>, s
 
   return { ok: true, values }
 }
+
+// The Website Editor's own Low and Out of stock levels (customer_portal_*_threshold). The one rule for a stored value: empty (= use the shop's setting), or
+// a finite number from 0 up. It is the Editor's own check (CatalogPage.tsx websiteStockLevel) and the read side's (routes/portal.ts portalWebsiteLevel, which
+// treats anything else as "not set"); a Worker write that disagreed would store text the Editor never would. Rejected, never clamped.
+export const PORTAL_STOCK_LEVEL_SETTING_KEYS = ['customer_portal_low_stock_threshold', 'customer_portal_out_of_stock_threshold'] as const
+
+export function isPortalStockLevelValue(raw: unknown): boolean {
+  if (raw !== null && raw !== undefined && typeof raw !== 'string' && typeof raw !== 'number') return false
+  const text = String(raw ?? '').trim()
+  if (text === '') return true
+  const value = Number(text)
+  return Number.isFinite(value) && value >= 0
+}
+
+/** The first website stock level in a settings payload that breaks the rule, or null. Keys the payload does not carry are not this function's business. */
+export function invalidPortalStockLevelKey(body?: Record<string, unknown> | null): string | null {
+  const payload = body || {}
+  for (const key of PORTAL_STOCK_LEVEL_SETTING_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(payload, key) && !isPortalStockLevelValue(payload[key])) return key
+  }
+  return null
+}

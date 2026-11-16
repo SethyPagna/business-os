@@ -55,7 +55,7 @@ assert.equal(nextSalesFocus(null, 'R0000123', 'R0000123', none), null)
 const sales = read('src/components/sales/Sales.tsx')
 const note = read('src/components/shifts/ShiftCloseDriftNote.tsx')
 assert.match(note, /<EntityLink page="sales" anchor="hub:sales:sales" search=\{sale\.receipt\} focus=\{\{ saleId: sale\.saleId \}\}/, 'the shift report link must queue the sale id with the receipt')
-assert.match(sales, /setSalesFocus\(parseSalesFocus\(payload\)\)/, 'Sales must seed the focus from the handoff')
+assert.ok(sales.includes('salesHandoffState(JSON.parse(raw))') && sales.includes('setSalesFocus(handoff.focus)'), 'Sales must seed the focus from the handoff')
 assert.match(sales, /\.\.\.\(focusSaleId \? \{ id: focusSaleId \} : effectiveSalesSearch \? \{ search: effectiveSalesSearch \} : \{\}\)/, 'with a focus the requests carry id and NOT the receipt as a search')
 assert.match(sales, /activeSalesFocusId\(salesFocus, search, effectiveSalesSearch, salesDateRange\)/)
 // the same params feed the list and the totals, so one id filter reaches both endpoints

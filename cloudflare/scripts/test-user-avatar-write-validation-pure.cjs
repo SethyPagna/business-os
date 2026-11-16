@@ -67,7 +67,7 @@ const app = load('routes/users.ts', {
   '../lib/adminControlGuard': { planAdminControlWrite: async () => ({ guard: { sql: 'SELECT 1', params: {} } }), isAdminControlGuardAbort: () => false, lastAdminRequiredBody: () => ({}) },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', actor); return next() }, revokeUserSessions: noop },
   '../lib/audit': { changedFields: () => null, auditChangeColumns: () => ({}), audit: noop },
-  '../lib/permissions': { isAdminControlUser: (u) => u?.isAdmin === true },
+  '../lib/permissions': require('./harness/permissions_stub.cjs').permissionsWith({ isAdminControlUser: (u) => u?.isAdmin === true }),
   '../lib/conflictControl': { assertUpdatedAtMatch: () => {}, getExpectedUpdatedAt: () => null, writeConflictResponse: () => ({}), WriteConflictError: class {} },
   '../durable-objects/broadcastHub': { broadcast: noop },
   '../lib/cache': { bumpVersion: noop },

@@ -42,17 +42,37 @@ test('raw stock fields are destructured OFF the public row, never spread back', 
   assertMatch(/\.\.\.publicFields,\s*\n\s*stock_status:/, 'the public row is publicFields + computed statuses only')
 })
 
-test('the status rule matches the storefront badge math (out<=outThreshold, low<=lowThreshold default 10)', () => {
-  assertMatch(/if \(quantity <= outThreshold\) return 'out_of_stock'/)
-  assertMatch(/if \(quantity <= lowThreshold\) return 'low_stock'/)
-  assertMatch(/Number\(rawOut \|\| 0\)/)
-  assertMatch(/Number\(rawLow \|\| 10\)/)
+// The behaviour (every settings combination, badge and filter) is pinned by test-portal-low-stock-parity-pure.cjs; these are the source-shape floor.
+function mustInclude(text, message) {
+  if (!src.includes(text)) throw new Error(message || `expected portal.ts to contain ${text}`)
+}
+function mustNotInclude(text, message) {
+  if (src.includes(text)) throw new Error(message || `expected portal.ts NOT to contain ${text}`)
+}
+
+test("the status rule is the storefront's own levels (website levels, else the shop's setting), never a literal 10", () => {
+  mustInclude("const out = rule.out ?? (Number.isFinite(productOut) ? productOut : 0)")
+  mustInclude("const low = rule.low ?? effectiveLowStockThreshold(rule.shop, rawLow)")
+  // The old private math: a literal 10 fallback.
+  mustNotInclude('Number(rawLow || 10)', 'the storefront must not carry its own low fallback of 10')
+  mustNotInclude('COALESCE(p.low_stock_threshold, 10)', 'the stock-state filter must use lowStockThresholdSql')
+  mustNotInclude('?? 10', 'no literal-10 fallback on the storefront')
+  // The Website Editor's levels are read (owner decision of 16 Nov 2026) and named in the decision record.
+  for (const key of ['customer_portal_stock_threshold_mode', 'customer_portal_low_stock_threshold', 'customer_portal_out_of_stock_threshold']) {
+    mustInclude(key, `the storefront reads the website level ${key}`)
+  }
+  mustInclude('by owner decision of 16 Nov 2026', "the decision record stays in the code comment")
 })
 
-test('the merchant global-threshold mode is honored server-side', () => {
-  assertMatch(/customer_portal_stock_threshold_mode/, 'global vs per-product threshold mode must be read from settings')
-  assertMatch(/customer_portal_low_stock_threshold/)
-  assertMatch(/customer_portal_out_of_stock_threshold/)
+test('the rule rides in the existing settings reads: no separate low-stock config call on the portal', () => {
+  mustNotInclude('loadLowStockConfig', 'a separate loadLowStockConfig call would add a D1 call per public request (portal-bootstrap 20 -> 21)')
+  mustInclude("WHERE key IN ('customer_portal_show_stock_status', ${portalStockRuleKeysSql()})", 'attachPortalStockStatus reads the rule rows in its own settings read')
+  mustInclude("'customer_portal_show_prices', ${portalStockRuleKeysSql()})", 'the search settings read carries the rule rows')
+  mustInclude("lowStockThresholdSql(rule.shop, 'p.low_stock_threshold')")
+  mustInclude('buildPortalProductFilters(query, allowStockStateFilter, showOutOfStockProducts, stockRule)', 'search must hand the rule to the filter')
+  mustInclude("buildPortalProductFilters({ ...query, initial: 'all' }, allowStockStateFilter, showOutOfStockProducts, stockRule)", 'the A-Z rail must filter by the same rule')
+  mustInclude('resolvePortalStockRule(settings))', 'the AI route resolves the rule from its own settings read')
+  mustInclude('rule.low ?? effectiveLowStockThreshold(rule.shop, row.low_stock_threshold)', 'the AI mapping (behaviour pinned by test-portal-ai-stock-status-pure.cjs)')
 })
 
 test('branch availability carries statuses only -- no quantities, no branch names', () => {

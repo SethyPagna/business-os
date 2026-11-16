@@ -78,6 +78,7 @@ import {
 import { clearWorkDraft, flushPendingWorkDraft } from '../../utils/workDrafts.ts'
 import { draftAuthorityChangedText, isDraftAuthorityCurrent } from '../../utils/draftAuthority.ts'
 import { useFrozenDraftAuthority } from '../../utils/useFrozenDraftAuthority.ts'
+import { saleLinkTarget } from '../sales/salesFocus.ts'
 
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'fees-export-options')
 const ExpenseLabelManagerModal = lazyRetry(() => import('./ExpenseLabelManagerModal'), 'expense-label-manager-modal')
@@ -1177,7 +1178,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
             <p className="text-xs text-slate-500 dark:text-slate-400">{tr('expense_sale_delivery_note', 'This is the courier cost recorded on the sale. Change it on the sale.')}</p>
             {canViewSales && navigateTo ? (
               <div className="flex justify-end border-t border-slate-200 pt-3 text-sm dark:border-slate-700">
-                <EntityLink page="sales" anchor="hub:sales:sales" search={selected.sale_receipt_number || String(selected.sale_id ?? '')} navigate={navigateTo}>
+                <EntityLink page="sales" anchor="hub:sales:sales" {...saleLinkTarget(selected.sale_id, selected.sale_receipt_number)} navigate={navigateTo}>
                   {tr('open_sale', 'Open sale')}
                 </EntityLink>
               </div>

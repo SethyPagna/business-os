@@ -413,16 +413,18 @@ async function main() {
   })
 
   await check('the parity sweep can tell a threaded file from an unthreaded one', () => {
-    // Positive control. routes/portal.ts is the STOREFRONT, which ships its
-    // own documented customer_portal_* threshold triple and is deliberately
-    // NOT wired to the admin setting (frontend/src/lang/en.json's hint says
-    // the portal values apply "on the customer portal only"). It therefore
-    // still carries exactly the pattern the sweep above rejects -- proving
-    // the sweep is capable of failing, and pinning the storefront's
-    // independence as a decision rather than an oversight.
+    // Positive control. lib/portalAi.ts still carries the unset-field default
+    // of 10 (loadPortalAiCatalog always supplies the EFFECTIVE threshold, so it
+    // only applies to a row without the column) -- exactly the pattern the
+    // sweep above rejects, which proves the sweep is capable of failing.
+    // routes/portal.ts used to be the exempt storefront (its own
+    // customer_portal_* triple); since the owner's one-rule decision (15 Nov
+    // 2026) it falls back to the shop's rule wherever the Website Editor's own level is empty (owner decision of 16 Nov 2026: the storefront has its own levels) and must stay that way.
+    assert.match(readCf('lib/portalAi.ts'), /low_stock_threshold,\s*10\)/, 'the sweep needs one file that still carries the literal')
     const portal = readCf('routes/portal.ts')
-    assert.match(portal, /low_stock_threshold,\s*10\)/, 'the storefront is expected to keep its own rule')
-    assert.doesNotMatch(portal, /lowStockThresholdSql/)
+    assert.doesNotMatch(portal, /low_stock_threshold,\s*10\)/, 'the storefront must not carry its own fallback of 10')
+    assert.ok(portal.includes("lowStockThresholdSql(rule.shop, 'p.low_stock_threshold')"), 'the storefront stock-state filter falls back to the shared SQL fragment')
+    assert.ok(portal.includes('effectiveLowStockThreshold(rule.shop'), 'the storefront badge falls back to the shared threshold')
   })
 
   await check('the Settings row is gated on the permission the Worker actually enforces', () => {
@@ -466,9 +468,6 @@ async function main() {
     // resurrected one) fail here instead of quietly answering to a number
     // the owner never chose.
     const ALLOWED = new Set([
-      // The storefront's own documented customer_portal_* rule; the
-      // positive control below proves this sweep can still fail.
-      'routes/portal.ts',
       // An IMPORT default, not a reader: it fills the product row's OWN
       // low_stock_threshold column when a spreadsheet leaves it blank, and
       // 10 is that column's schema default (products.low_stock_threshold
@@ -476,15 +475,11 @@ async function main() {
       // display setting would make an import's result depend on a switch
       // that is meant to change nothing stored.
       'lib/importEngine.ts',
-      // The storefront AI assistant. Its deriveStockStatus says it mirrors
-      // "the admin UI", but the surface it actually ships to -- an anonymous
-      // visitor, beside catalog cards whose status comes from
-      // routes/portal.ts's attachPortalStockStatus and the customer_portal_*
-      // triple -- is the storefront. It is left on the storefront side of the
-      // line drawn above rather than quietly moved to the admin's number;
-      // which of the two storefront rules it should follow is the owner's
-      // call, and is raised as one (it already disagrees with the cards
-      // beside it whenever the portal thresholds are set to global).
+      // The storefront AI assistant's deriveStockStatus. It receives the
+      // EFFECTIVE threshold in each row's low_stock_threshold (routes/portal.ts
+      // loadPortalAiCatalog resolves it through the shared rule), so the 10
+      // here is only the default for a row that lacks the column. It is also
+      // the positive control below: the one file that must still match.
       'lib/portalAi.ts',
     ])
     const offenders = []

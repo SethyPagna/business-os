@@ -65,7 +65,7 @@ const usersRoute = load('routes/users.ts', {
     revokeUserSessions: authLib.revokeUserSessions,
   },
   '../lib/audit': { changedFields: () => null, auditChangeColumns: () => ({}), audit: async () => {} },
-  '../lib/permissions': { isAdminControlUser: (u) => u?.isAdmin === true },
+  '../lib/permissions': require('./harness/permissions_stub.cjs').permissionsWith({ isAdminControlUser: (u) => u?.isAdmin === true }),
   '../lib/conflictControl': { assertUpdatedAtMatch: () => {}, getExpectedUpdatedAt: () => null, writeConflictResponse: () => ({}), WriteConflictError: class {} },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },

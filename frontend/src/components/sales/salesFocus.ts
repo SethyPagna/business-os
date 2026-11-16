@@ -22,6 +22,18 @@ export function parseSalesFocus(payload: unknown): SalesFocus | null {
 }
 
 /**
+ * The Sales page's state after a link's handoff arrives: the receipt as the box text, the focus, and every filter that could hide the sale cleared.
+ * The date range was always reset; the status and user filters were not, so a leftover "Not Paid" or one cashier hid the very sale the link opened (every
+ * "Open sale" link shared this). Null when the payload names nothing to search. Pure, so the page's effect and the test read the same rule.
+ */
+export function salesHandoffState(payload: unknown): { search: string; focus: SalesFocus | null; statusFilter: 'all'; userFilter: 'all' } | null {
+  if (!payload || typeof payload !== 'object') return null
+  const search = String((payload as { search?: unknown }).search || '').trim()
+  if (!search) return null
+  return { search, focus: parseSalesFocus(payload), statusFilter: 'all', userFilter: 'all' }
+}
+
+/**
  * The sale id the list and the totals should read exactly, or null to read the typed search as before.
  * `typed` is the search box as typed; `sent` is the debounced value the requests use (it lags `typed` by one debounce), so the focus holds through
  * that lag instead of firing one all-time receipt search for the old text.
@@ -79,4 +91,17 @@ export function useSettleSalesFocus(
     // `focus` is read only to tell a stale render from a fresh one; a change of focus itself re-runs this through typed/sent/range on the next render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [typed, sent, range])
+}
+
+/**
+ * What a link that opens ONE sale hands to the Sales page: the receipt as the box text and the sale id as the exact focus.
+ * Every "Open sale" link builds its EntityLink props here, so none of them can land on the list unfocused (the Expenses link did: it queued the receipt
+ * only, an all-time typed search). A sale with no receipt text falls back to the id as the box text, which is still a usable search and still focuses.
+ * An id that is not a positive whole number yields no focus, and the link degrades to the plain receipt search it was.
+ */
+export function saleLinkTarget(saleId: unknown, receipt: unknown): { search: string; focus?: { saleId: number } } {
+  const id = typeof saleId === 'number' ? saleId : typeof saleId === 'string' && /^\d+$/.test(saleId.trim()) ? Number(saleId.trim()) : NaN
+  const valid = Number.isSafeInteger(id) && id > 0
+  const search = String(receipt ?? '').trim() || (valid ? String(id) : '')
+  return valid ? { search, focus: { saleId: id } } : { search }
 }
