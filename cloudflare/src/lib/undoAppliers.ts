@@ -2255,7 +2255,7 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
   for (const fb of (r.foldedBatches || [])) {
     const dupBatchId = Number(fb.dupBatchId)
     const keeperBatchId = Number(fb.keeperBatchId)
-    stmts.push({ sql: 'UPDATE product_batches SET is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dupBatchId } })
+    stmts.push({ sql: 'UPDATE product_batches SET is_active = 1, merge_deactivated_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dupBatchId } })
     for (const grp of chunk(intIds(fb.saleAllocationIds), 400)) stmts.push({ sql: `UPDATE sale_item_batch_allocations SET batch_id = @dupBatchId WHERE id IN (${grp.join(',')})`, params: { dupBatchId } })
     for (const grp of chunk(intIds(fb.returnAllocationIds), 400)) stmts.push({ sql: `UPDATE return_item_batch_allocations SET batch_id = @dupBatchId WHERE id IN (${grp.join(',')})`, params: { dupBatchId } })
     const keeperBBefore = new Map((fb.keeperStockBefore || []).map((x) => [Number(x.branch_id), Number(x.quantity) || 0]))
@@ -2295,7 +2295,7 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
   for (const wb of (r.writtenOffBatches || [])) {
     const batchId = Number(wb?.batchId)
     if (!Number.isInteger(batchId) || batchId <= 0) continue
-    stmts.push({ sql: 'UPDATE product_batches SET is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchId } })
+    stmts.push({ sql: 'UPDATE product_batches SET is_active = 1, merge_deactivated_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchId } })
     for (const s of (wb.stockBefore || [])) {
       stmts.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @b AND branch_id = @br', params: { b: batchId, br: Number(s.branch_id) } })
       stmts.push({ sql: 'INSERT INTO branch_batch_stock (batch_id, branch_id, quantity, updated_at) VALUES (@b, @br, @q, CURRENT_TIMESTAMP)', params: { b: batchId, br: Number(s.branch_id), q: Number(s.quantity) || 0 } })

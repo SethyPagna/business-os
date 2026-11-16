@@ -4777,7 +4777,7 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
       if (!lotSnapshot) throw new Error('merge_snapshot_incomplete')
       const dupBatchStockRows = lotSnapshot.duplicateStockRows
       statements.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @id', params: { id: batchRow.id } })
-      statements.push({ sql: 'UPDATE product_batches SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchRow.id } })
+      statements.push({ sql: 'UPDATE product_batches SET is_active = 0, merge_deactivated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchRow.id } })
       writtenOffBatches.push({
         batchId: batchRow.id,
         stockBefore: dupBatchStockRows.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })),
@@ -4819,7 +4819,7 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
         })
       }
       statements.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @id', params: { id: batchRow.id } })
-      statements.push({ sql: 'UPDATE product_batches SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchRow.id } })
+      statements.push({ sql: 'UPDATE product_batches SET is_active = 0, merge_deactivated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchRow.id } })
       foldedBatches.push({
         dupBatchId: batchRow.id,
         keeperBatchId: existingCanonicalBatchId,

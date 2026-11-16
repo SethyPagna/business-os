@@ -30,7 +30,7 @@ const MUTANTS = [
   { name: 'the highest batch_number takes a same-day match', file: 'lib/productMergeLots.ts',
     from: 'return left !== right ? left - right : Number(a.id) - Number(b.id)', to: 'return left !== right ? right - left : Number(a.id) - Number(b.id)' },
   { name: 'the source lot is deleted', file: 'routes/products.ts',
-    from: "statements.push({ sql: 'UPDATE product_batches SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchRow.id } })\n      foldedBatches.push({",
+    from: "statements.push({ sql: 'UPDATE product_batches SET is_active = 0, merge_deactivated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchRow.id } })\n      foldedBatches.push({",
     to: "statements.push({ sql: 'DELETE FROM product_batches WHERE id = @id', params: { id: batchRow.id } })\n      foldedBatches.push({" },
   { name: 'the kept lot cost and expiry are never written', file: 'routes/products.ts',
     from: 'if (keeperLotPlan.costChanged || keeperLotPlan.expiryChanged) {', to: 'if (false) {' },
@@ -43,6 +43,12 @@ const MUTANTS = [
     from: 'SET unit_cost_usd = @cost, expiry_date = @expiry,', to: 'SET unit_cost_usd = unit_cost_usd + 0 * COALESCE(@cost, 0), expiry_date = @expiry,' },
   { name: 'undo skips the kept lot expiry', file: 'lib/undoAppliers.ts',
     from: 'expiry_date = @expiry,\n                is_active', to: 'expiry_date = expiry_date || substr(@expiry, 1, 0),\n                is_active' },
+  { name: 'the credit reminder filters is_active = 1 again', file: 'routes/notifications.ts',
+    from: 'WHERE (pb.is_active = 1 OR pb.merge_deactivated_at IS NOT NULL)', to: 'WHERE pb.is_active = 1' },
+  { name: 'the merge does not mark the lots it deactivates', file: 'routes/products.ts', all: true,
+    from: 'SET is_active = 0, merge_deactivated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = @id', to: 'SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id' },
+  { name: 'undo leaves the merge marker on a reactivated lot', file: 'lib/undoAppliers.ts', all: true,
+    from: 'SET is_active = 1, merge_deactivated_at = NULL, updated_at', to: 'SET is_active = 1, updated_at' },
   { name: 'undo does not restore the original batch_key of a created lot', file: 'lib/undoAppliers.ts',
     from: "if (typeof b.batchKeyBefore === 'string' && b.batchKeyBefore) {", to: 'if (false) {' },
 ]
@@ -60,9 +66,9 @@ for (const mutant of MUTANTS) {
     const original = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n')
     const count = typeof mutant.from === 'string' ? original.split(mutant.from).length - 1 : (original.match(mutant.from) || []).length
     assert.ok(count >= 1, `mutant "${mutant.name}" no longer matches ${mutant.file}`)
-    fs.writeFileSync(file, original.replace(mutant.from, () => mutant.to).replace(/\n/g, '\r\n'))
+    fs.writeFileSync(file, (mutant.all && typeof mutant.from === 'string' ? original.split(mutant.from).join(mutant.to) : original.replace(mutant.from, () => mutant.to)).replace(/\n/g, '\r\n'))
     let red = null
-    for (const test of TESTS) {
+    for (const test of mutant.tests || TESTS) {
       const run = spawnSync(process.execPath, [path.join(__dirname, test)], {
         env: { ...process.env, BOS_HARNESS_SRC_DIR: dir }, encoding: 'utf8', timeout: 600000,
       })

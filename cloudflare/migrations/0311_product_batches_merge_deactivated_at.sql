@@ -1,0 +1,32 @@
+-- 0311: mark the lots a product merge deactivated.
+--
+-- WHY. A merge folds a duplicate's lot into the kept product's same-day lot and leaves the source lot behind as an
+-- inactive record (never deleted). Its supplier credit is still owed, so supplier-payable readers (the credit-due
+-- reminder) must still count it, and ONLY the lots a merge deactivated: lots deactivated by a stock-in revert, a
+-- product delete or a manual deactivate keep their own intent. This nullable column is that marker. The merge fold
+-- sets it; the merge undo clears it.
+--
+-- SHAPE. Append-only, schema only: one nullable TEXT column on the existing rowid table product_batches. No row is
+-- read, rewritten or reinterpreted, no trigger or index is touched, so every existing reader sees the same rows.
+-- LF-only.
+--
+-- PRE-ASSERTION (run before applying; expect zero rows, the column must not exist yet):
+--   SELECT name FROM pragma_table_info('product_batches') WHERE name = 'merge_deactivated_at';
+-- POST-ASSERTION (run after applying; expect one row, and zero rows with the marker set):
+--   SELECT name FROM pragma_table_info('product_batches') WHERE name = 'merge_deactivated_at';
+--   SELECT COUNT(*) FROM product_batches WHERE merge_deactivated_at IS NOT NULL;   -- 0 until a merge runs
+--
+-- RECOVERY. D1 cannot drop a column inside a migration the app depends on; leaving the column in place is harmless
+-- (nothing reads it except the credit reminder, which treats NULL as "not merge-deactivated"). To roll the code back,
+-- deploy the previous Worker: it ignores the column.
+--
+-- BACKFILL DECISION: NONE here. Lots deactivated by merges that ran BEFORE this column existed stay unmarked, so
+-- their credit does not remind until a separate, owner-approved data step marks them. It is not done in the
+-- migration because it is a data write to production whose row count cannot be sized from a migration, and a wrong
+-- guess would re-open credits the owner already settled. The exact statement, to run only on the owner's say-so
+-- after a SELECT COUNT(*) of the same predicate:
+--   UPDATE product_batches SET merge_deactivated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)
+--   WHERE is_active = 0 AND merge_deactivated_at IS NULL AND payment_status = 'credit'
+--     AND id IN (SELECT json_extract(fb.value, '$.dupBatchId')
+--                FROM undo_snapshots s, json_each(s.payload_json, '$.foldedBatches') fb WHERE s.kind = 'product.merge');
+ALTER TABLE product_batches ADD COLUMN merge_deactivated_at TEXT;

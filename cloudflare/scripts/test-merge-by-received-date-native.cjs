@@ -96,7 +96,7 @@ function world() {
   return h
 }
 
-const LOT_COLUMNS = 'id,variant_product_id,batch_key,batch_number,lot_code,received_at,expiry_date,unit_cost_usd,is_active,supplier_id,supplier_name,payment_status,credit_due_date,received_quantity,received_cost_usd,received_branch_id'
+const LOT_COLUMNS = 'merge_deactivated_at IS NOT NULL AS merge_marked,id,variant_product_id,batch_key,batch_number,lot_code,received_at,expiry_date,unit_cost_usd,is_active,supplier_id,supplier_name,payment_status,credit_due_date,received_quantity,received_cost_usd,received_branch_id'
 function lots(h) { return plain(h.raw.prepare(`SELECT ${LOT_COLUMNS} FROM product_batches ORDER BY id`).all()) }
 function lot(h, id) { return lots(h).find((row) => row.id === id) }
 function lotStock(h) {
@@ -445,6 +445,49 @@ async function main() {
       assert.equal(state(w), prior)
     })
   }
+
+  // ---- supplier payables: a credit owed on a lot the merge deactivated still reminds, once --------------------------------
+  // Lots 103 (kept, credit), 201 and 203 (discarded, credit; both fold into kept lots) are the three open credits.
+  const reminderIds = async (w, days) => {
+    const app = w.load('routes/notifications.ts').default
+    const response = await app.request('http://local/summary', {}, { DB: w.raw }, { waitUntil() {}, passThroughOnException() {} })
+    assert.equal(response.status, 200)
+    const json = await response.json()
+    const section = json.sections.find((row) => row.id === 'supplier_credit')
+    return section ? { count: section.count, ids: section.items.map((item) => Number(String(item.id).replace('supplier-credit-', ''))).sort((a, b) => a - b) } : { count: 0, ids: [] }
+  }
+  const creditWorld = () => {
+    const w = world()
+    fixtureWrite(w, () => w.raw.db.exec("UPDATE product_batches SET credit_due_date=date('now','+3 day') WHERE payment_status='credit'"))
+    return w
+  }
+  await check('payables: the merge marks exactly the lots it deactivated (folded and written-off), never a created lot, and undo clears it', async () => {
+    const w = creditWorld()
+    assert.equal((await merge(w)).status, 200)
+    const marked = lots(w).filter((row) => row.merge_marked === 1).map((row) => row.id)
+    const inactive = lots(w).filter((row) => row.is_active === 0).map((row) => row.id)
+    assert.deepEqual(marked, inactive, 'every merge-deactivated lot is marked and no other lot is')
+    assert.ok(marked.includes(201) && marked.includes(203), 'the discarded credit lots are marked')
+    assert.ok(!marked.includes(204) && !marked.includes(205), 'a created lot stays an active lot of the keeper, unmarked')
+    assert.equal((await historyAction(w, 'undo')).status, 200)
+    assert.deepEqual(lots(w).filter((row) => row.merge_marked === 1), [], 'undo clears every marker')
+  })
+  await check('payables: the credit reminder counts a credit on a merged-away lot, once, beside the kept lot (and undo does not double it)', async () => {
+    const w = creditWorld()
+    assert.deepEqual(await reminderIds(w), { count: 3, ids: [103, 201, 203] }, 'before the merge')
+    assert.equal((await merge(w)).status, 200)
+    assert.equal(lot(w, 201).is_active, 0)
+    assert.equal(lot(w, 203).is_active, 0)
+    assert.deepEqual(await reminderIds(w), { count: 3, ids: [103, 201, 203] }, 'after the merge: the same three credits, each once, none lost')
+    assert.equal((await historyAction(w, 'undo')).status, 200)
+    assert.deepEqual(await reminderIds(w), { count: 3, ids: [103, 201, 203] }, 'after undo')
+  })
+  await check('payables: a lot deactivated by something other than a merge keeps its own intent (control: not reminded)', async () => {
+    const w = creditWorld()
+    assert.equal((await merge(w)).status, 200)
+    fixtureWrite(w, () => w.raw.db.exec('DELETE FROM branch_batch_stock WHERE batch_id=103; UPDATE product_batches SET is_active=0 WHERE id=103'))
+    assert.deepEqual(await reminderIds(w), { count: 2, ids: [201, 203] }, 'a manually deactivated kept lot drops out; the merge-deactivated ones stay')
+  })
 
   // ---- a later edit of a lot the merge rewrote must not be overwritten by undo's before-image ---------------------------
   await check('undo is REFUSED once the kept lot cost or expiry was edited after the merge, and nothing changes', async () => {
