@@ -35,10 +35,6 @@ migration, at that time -- a peer session or another agent asking for it is not 
   0190 all four. Review verdict: clean on its own SQL, but inert -- and not testable end to end --
   until 0188 is fixed.
 
-- **0313_cost_4dp_repair.sql** (parked 16 Nov 2026, lane cost-4dp) -- rounds every stored cost over 4 decimals (products, lots, cost entries), re-derives the
-  catalog cost of products whose lots it rounded, and keeps a before/after ledger. Read its header; its test is `test-migration-0313-cost-4dp-repair-pure.cjs`.
-  Apply it before 0314 below (0314 reads lot and cost-entry costs); that order is why 0314 was renumbered from 0200.
-
 - **0314_sale_cost_on_hand_repair.sql** (parked 26 Sep 2026 as 0200, lane U-cost; renumbered 16 Nov 2026) -- repairs past
   `sale_items.cost_price_usd` (and copied `return_items.cost_price_usd`) taken from the buggy
   distinct-cost catalog average (a5a2169f until 0195). Writes only those two cost columns, after
@@ -47,15 +43,12 @@ migration, at that time -- a peer session or another agent asking for it is not 
   cost delta D, ledger_unverified count) before the owner decides. Pinned by
   `cloudflare/scripts/test-held-0200-sale-cost-repair-pure.cjs`, which also fails if the file
   appears in `cloudflare/migrations` without being moved there on purpose (update that check in
-  the same commit as the owner-approved move). Moving it in keeps the name 0200.
+  the same commit as the owner-approved move). Moving it in keeps the name 0314.
   Not sorting last is fine: wrangler applies unapplied files by number, and 0201-0203 (auth only) touch none of its tables (the test checks that).
 
-- **0313_cost_4dp_repair.sql** (parked 16 Nov 2026, lane cost-4dp) -- rounds stored costs over 4 decimals (products cost and purchase twin, lot unit and
-  received cost, manual cost entries) to 4 places, nearest, half away from zero, with a before/after ledger, PRE and POST assertions and
-  recovery SQL in its header. Census 16 Nov: 123 of 8,690 products. Leaves sale_items, return_items, inventory_movements and every
-  cost_review_key untouched (asserted). Size it first with `ops/queries/cost-4dp-counts-20261116.sql` and `cost-4dp-ids-20261116.sql`. Pinned by
-  `cloudflare/scripts/test-migration-0313-cost-4dp-repair-pure.cjs`, which fails if the file appears in `cloudflare/migrations` without a deliberate
-  move. Moving it in keeps the name 0313, needs the lead's go, and the held 0200 must then be numbered above it (0200 reads lot and cost-entry costs).
+- **0313_cost_4dp_repair.sql** is no longer held: moved into `cloudflare/migrations` on 16 Nov 2026 (lane cost-4dp, deploy 4, together with 0312). Its test is
+  `cloudflare/scripts/test-migration-0313-cost-4dp-repair-pure.cjs`.
+  It runs before the held 0314 below (0314 reads lot and cost-entry costs).
 
 - **revert_set_sk2_cleanser_repair.sql** (parked 6 Oct 2026, lane REVERT-SET) -- one product,
   SK-II Gentle Cleanser 20g (5357, Shop): the owner meant to revert a Set of +27 (#48034) and
@@ -103,7 +96,7 @@ dataset-operation lifecycle chain is unwired in production.
 
 0185 through 0191 stay reserved -- do not reuse them for a new, unrelated migration even though
 they are currently absent from `cloudflare/migrations`. The next new migration starts at **0193**.
-0199 is reserved by lane U-branch (its held Shop -> Store consolidation) and 0200 by the held
-sale-cost repair above; do not reuse either.
+0199 is reserved by lane U-branch (its held Shop -> Store consolidation) and 0314 (was 0200) by the held
+sale-cost repair above; do not reuse either; 0313 is the cost repair, now in the chain.
 0264 and 0265 are reserved by the held sale-status normalization above (lane 6.0.891); do not reuse them.
 0192 (`stock_mutation_receipts.sql`) is independent of all five and stays in the normal chain.

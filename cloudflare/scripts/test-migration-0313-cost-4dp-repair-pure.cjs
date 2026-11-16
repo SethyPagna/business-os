@@ -30,9 +30,8 @@ const catalog = compile('catalogCostRecompute', { './moneyPrecision': money })
 
 const root = path.resolve(__dirname, '..')
 const migrationsDir = path.join(root, 'migrations')
-const heldDir = path.join(root, '..', 'ops', 'scripts', 'migration', 'held')
 const MIGRATION = '0313_cost_4dp_repair.sql'
-const text = fs.readFileSync(path.join(heldDir, MIGRATION), 'utf8')
+const text = fs.readFileSync(path.join(migrationsDir, MIGRATION), 'utf8')
 const files = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()
 const chain = (filter) => files.filter(filter).map((f) => fs.readFileSync(path.join(migrationsDir, f), 'utf8'))
 const GUARD = 'product_cost_review_update_guard_0255'
@@ -134,9 +133,10 @@ const over4 = (db) => {
 }
 
 function main() {
-  // Held: the repair is kept out of the deploy chain until the lead moves it in (that move is the decision to run it on production).
-  assert.ok(!files.includes(MIGRATION), 'held: 0313 must not appear in cloudflare/migrations without a deliberate move (update this check and the held-0200 ordering in the same commit)')
-  assert.ok(files.includes('0312_catalog_cost_fallback_rounding.sql') && files.every((f) => f < MIGRATION), 'the chain it is applied on ends at 0312')
+  // In the deploy chain (moved in 16 Nov 2026, deploy 4, together with 0312): applied after 0312, before the held 0314 sale-cost repair.
+  assert.ok(files.includes(MIGRATION), '0313 is a chain file in cloudflare/migrations')
+  assert.ok(!fs.existsSync(path.join(root, '..', 'ops', 'scripts', 'migration', 'held', MIGRATION)), 'and no longer a held file')
+  assert.ok(files.includes('0312_catalog_cost_fallback_rounding.sql') && files.filter((f) => f < MIGRATION).pop() === '0312_catalog_cost_fallback_rounding.sql', 'it directly follows 0312 in the chain')
   // ---- 1. text ---------------------------------------------------------------------------------------------------------------------------------
   assert.ok(!text.includes('\r'), 'LF-only')
   const code = text.replace(/--[^\n]*/g, '')

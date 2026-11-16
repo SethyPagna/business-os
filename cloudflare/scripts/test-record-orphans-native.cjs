@@ -98,10 +98,6 @@ const NOT_A_REFERENCE = new Set([
  * it dangle -- and each is pinned by a step below that performs exactly that
  * write, so the exemption cannot quietly become a cover for a real orphan.
  */
-// Classified now for a column a HELD migration will create (ops/scripts/migration/held); it takes effect, and is asserted, once the table is in the schema.
-const HELD_HISTORICAL_REFERENCE = {
-  'cost_4dp_repair_0313.row_id': '0313 rounding ledger: row_id names a product, lot or cost entry by the table in its entity column; a ledger entry outlives its row and is read only by hand',
-}
 const HISTORICAL_REFERENCE = {
   'inventory_check_sessions.branch_id': '0259 freezes the session branch identity; branch retirement cannot reparent the baseline',
   'inventory_check_items.branch_id': '0259 freezes the branch counted at session admission, independent of the live branch row',
@@ -131,6 +127,7 @@ const HISTORICAL_REFERENCE = {
   // loser is deleted, the map/pairs keep its id. Pinned by test-migration-0174-pure.cjs.
   'product_merge_map_0174.loser_id': 'the merged product is deleted by 0174; the map keeps its id as provenance',
   'product_merge_pairs_0174.loser_id': 'the seed pair names a product 0174 goes on to delete; kept for provenance/idempotence',
+  'cost_4dp_repair_0313.row_id': '0313 rounding ledger: row_id names a product, lot or cost entry by the table in its entity column; a ledger entry outlives its row and is read only by hand',
 }
 /** Leading qualifiers that describe a ROLE, not a different kind of parent. */
 const QUALIFIER = new Set(['from', 'to', 'source', 'destination', 'expected', 'seen', 'last_seen', 'last',
@@ -214,7 +211,7 @@ function deriveSchema() {
       if (!match || declaredColumns.has(column.name) || !/INT/i.test(column.type || '')) continue
       const base = match[1]
       if (NOT_A_REFERENCE.has(base)) continue
-      if (HISTORICAL_REFERENCE[`${table}.${column.name}`] || HELD_HISTORICAL_REFERENCE[`${table}.${column.name}`]) { historical.push(`${table}.${column.name}`); continue }
+      if (HISTORICAL_REFERENCE[`${table}.${column.name}`]) { historical.push(`${table}.${column.name}`); continue }
       const parent = CHILD_SCOPED[`${table}.${column.name}`] || resolveOwner(base, known)
       if (!parent || !hasId.has(parent)) { unresolved.push(`${table}.${column.name}`); continue }
       relations.push({ child: table, column: column.name, parent, parentKey: 'id', source: 'convention' })
@@ -247,7 +244,7 @@ function auditFileText(relations, historicalPresent = []) {
     '--',
     '-- Deliberately NOT audited, because the id is provenance and the row it',
     '-- named is meant to be gone:',
-    ...Object.entries({ ...HISTORICAL_REFERENCE, ...HELD_HISTORICAL_REFERENCE }).filter(([column]) => column in HISTORICAL_REFERENCE || historicalPresent.includes(column)).map(([column, reason]) => `--   ${column} -- ${reason}`),
+    ...Object.entries(HISTORICAL_REFERENCE).map(([column, reason]) => `--   ${column} -- ${reason}`),
     '--',
     '-- Every statement is a SELECT. There are no writes and no PRAGMA here.',
     '-- A healthy database answers 0 for every relation. A nonzero count on a',
@@ -474,7 +471,7 @@ async function main() {
       assert.ok(schema.relations.some(relation => `${relation.child}.${relation.column}->${relation.parent}` === required),
         `the audit lost a core relation: ${required}`)
     }
-    assert.deepEqual(schema.historical.slice().sort(), [...Object.keys(HISTORICAL_REFERENCE), ...Object.keys(HELD_HISTORICAL_REFERENCE).filter(column => schema.historical.includes(column))].sort(),
+    assert.deepEqual(schema.historical.slice().sort(), Object.keys(HISTORICAL_REFERENCE).sort(),
       'a HISTORICAL_REFERENCE entry names a column the schema no longer has, or one stopped matching')
     report('every *_id column in the schema is audited or explicitly classified')
   } catch (error) { report('every *_id column in the schema is audited or explicitly classified', error) }

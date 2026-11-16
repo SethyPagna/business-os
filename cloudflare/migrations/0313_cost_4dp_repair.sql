@@ -1,7 +1,6 @@
--- 0313 cost 4dp repair (lane cost-4dp, board item cost-4dp). HELD: kept in ops/scripts/migration/held, outside the deploy chain.
--- Moving it into cloudflare/migrations (keeping the name 0313) is the decision to run it on production: the lead decides, after reading
--- cost-4dp-counts-20261116.sql and cost-4dp-ids-20261116.sql on the same day. The held 0200 sale-cost repair is numbered 0314 (above this file), so
--- production and a fresh database apply 0313 first; test-held-0200-sale-cost-repair-pure.cjs and README.md in this folder name it.
+-- 0313 cost 4dp repair (lane cost-4dp, board item cost-4dp). In the deploy chain since 16 Nov 2026: ships in the same deploy as 0312, sized first with
+-- cost-4dp-counts-20261116.sql and cost-4dp-ids-20261116.sql. The held 0314 sale-cost repair (ops/scripts/migration/held, was 0200) is numbered above this
+-- file, so production and a fresh database apply 0313 first; test-held-0200-sale-cost-repair-pure.cjs and the held README.md name it.
 -- Owner rule (30 Sep 2026): prices and costs are stored to 4 decimals, nearest, half away from zero. The writers are fixed in the Worker
 -- (same lane; 0312 re-creates the catalog-cost triggers with the sold-out fallback rounded). Values written before those fixes remain:
 -- production census 16 Nov 2026 found 123 of 8,690 products with cost_price_usd over 4 decimals (predicate: ABS(c * 10000 - ROUND(c * 10000))
