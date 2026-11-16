@@ -1,5 +1,5 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react'
-import { refreshTwinDismissals, supersedeTwinDismissalReads } from './twinDismissalsTransport.ts'
+import { forgetTwinDismissalDenial, refreshTwinDismissals, supersedeTwinDismissalReads } from './twinDismissalsTransport.ts'
 import { useSync } from '../../AppContext.tsx'
 import {
   NO_TWIN_DISMISSALS,
@@ -23,11 +23,13 @@ export function useTwinDismissalsLoader(accountKey: string, enabled: boolean): v
     if (!enabled || !accountKey) {
       supersedeTwinDismissalReads()
       loadedFor.current = ''
+      forgetTwinDismissalDenial()
       setTwinDismissals(NO_TWIN_DISMISSALS)
       return undefined
     }
     // A new account reads at once; a later products change waits a moment so a burst of writes is one read.
     const delay = loadedFor.current === accountKey ? SYNC_REFRESH_DELAY_MS : 0
+    if (loadedFor.current !== accountKey) forgetTwinDismissalDenial()
     loadedFor.current = accountKey
     const timer = setTimeout(() => { void refreshTwinDismissals() }, delay)
     return () => clearTimeout(timer)

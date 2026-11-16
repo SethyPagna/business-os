@@ -99,3 +99,18 @@ export function subscribeTwinDismissals(listener: () => void): () => void {
   listeners.add(listener)
   return () => { listeners.delete(listener) }
 }
+// Whether this account may read the rulings at all (round 5 review, L3). The Worker refuses the route to a role with no product search access (a branches-only role, an
+// image-only Products reader), and for such a role the set stays empty for ever: a pair already ruled Keep both would show the Duplicate tag for ever. A tag is then
+// not shown at all (UnmergedTwinTag), which leaves the rows, their order and their grouping alone; and the route is never asked to reveal names to a role it refuses.
+let readable = true
+
+export function areTwinDismissalsReadable(): boolean {
+  return readable
+}
+
+export function setTwinDismissalsReadable(next: boolean): void {
+  if (readable === next) return
+  readable = next
+  for (const listener of [...listeners]) listener()
+}
+

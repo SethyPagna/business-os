@@ -56,7 +56,7 @@ function load(sources: Sources = {}) {
     if (id.endsWith('unmergedTwinHint.ts')) return require('../src/components/products/unmergedTwinHint.ts')
     if (id.endsWith('useTwinDismissalsLoader.ts')) return loader
     if (id.endsWith('StockQty.tsx')) return stockQty
-    if (id.endsWith('UnmergedTwinTag.tsx')) return compile(read('components/products/UnmergedTwinTag.tsx'), (inner) => (inner.includes('lucide-react') ? { default: () => null, __esModule: true } : (() => { throw new Error(`unexpected require ${inner}`) })()))
+    if (id.endsWith('UnmergedTwinTag.tsx')) return compile(read('components/products/UnmergedTwinTag.tsx'), (inner) => (inner.includes('lucide-react') ? { default: () => null, __esModule: true } : inner.endsWith('productTwinDismissals.ts') ? dismissals : (() => { throw new Error(`unexpected require ${inner}`) })()))
     return { default: () => null, TopPager: (props: { children?: unknown }) => props.children ?? null, __esModule: true }
   })
   return { grouping, dismissals, surface }

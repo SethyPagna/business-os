@@ -400,6 +400,32 @@ async function main() {
     assert.equal((await dismissals()).status, 403)
     state.user = ADMIN
   })
+  // Round 5, L3: the shell asks for every account that can open Products, Inventory, Branches or POS, and the route answers exactly the roles that may run a product search (the
+  // search index's audience). A role it refuses gets no Duplicate tag in the client (frontend/tests/twinDismissalsDenied.test.ts); a role it serves reads names and barcodes of
+  // dismissed clusters only, which a person who can search the catalogue sees anyway. The route is not widened to the two refused roles that open a list with the tag.
+  await check('GET /duplicate-dismissals answers every role that may search products and refuses a branches-only role and an image-only Products reader (the client then shows no tag)', async () => {
+    fresh()
+    assert.equal((await dismiss('barcode', '8851234567801')).status, 200)
+    const role = (permissions) => ({ id: 9, username: 'role', name: 'Role', role_code: 'custom', role_permissions: JSON.stringify(permissions), permissions: '{}' })
+    const expected = [
+      ['products', { products: true }, 200],
+      ['pos', { pos: true }, 200],
+      ['inventory', { inventory: true }, 200],
+      ['sales (view)', { sales: true }, 200],
+      ['products with the image-only grant too', { products: true, products_image_only: true }, 200],
+      ['branches only', { branches: true }, 403],
+      ['image-only Products only', { products_image_only: true }, 403],
+      ['contacts only', { contacts: true }, 403],
+    ]
+    for (const [label, permissions, status] of expected) {
+      state.user = role(permissions)
+      const answer = await dismissals()
+      assert.equal(answer.status, status, `${label}: ${JSON.stringify(answer.body)}`)
+      if (status === 403) assert.equal(answer.body.dismissals, undefined, `${label}: a refused role is shown no names or barcodes`)
+      else assert.deepEqual(answer.body.dismissals, [['barcode', '8851234567801']], label)
+    }
+    state.user = ADMIN
+  })
   for (const [a, b, name] of TAGGED_PAIRS) {
     await check(`"Keep both" on "${name}": the tag and the Conflicts listing agree at every step, the pair ends untagged and unlisted, Resolve refuses it, every other cluster keeps its tag`, async () => {
       const { failures, steps } = await keepBothSteps([a, b], [], name)
