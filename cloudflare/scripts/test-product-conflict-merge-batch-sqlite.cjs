@@ -29,6 +29,7 @@ function loadTs(rel, stubs = {}) {
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
     const helper = request.split('/').pop()
     if (['stockTransaction', 'stockMutationReceipt', 'productCostReview', 'productMergeCostPreview', 'productConflictActionGroups', 'catalogCostRecompute', 'productIdentity', 'productDetailRule', 'productMerge', 'productConflictMergeBatch', 'sqlBinding', 'moneyPrecision'].includes(helper)) return loadTs(path.join('lib', helper + '.ts'))
+    if (/(^|\/)(productMergeLots|businessDateWindow)$/.test(request)) return loadTs(path.join('lib', request.split('/').pop() + '.ts'), {})
     if (request.startsWith('.') || request === 'hono') return permissive()
     return original.call(Module, request, parent, main)
   }
@@ -323,7 +324,7 @@ async function main() {
         INSERT INTO return_item_batch_allocations(id,return_item_id,sale_item_id,batch_id,branch_id,quantity,lot_code,expiry_date)
           VALUES(9706,9704,9702,9302,901,1,'D1','2029-01-01');
       `))
-      if (collision) seedFixture(lots.db, () => lots.db.exec("UPDATE product_batches SET batch_key='keeper-lot' WHERE id=9302; UPDATE product_batches SET is_active=0 WHERE id=9301"))
+      if (collision) seedFixture(lots.db, () => lots.db.exec("UPDATE product_batches SET batch_key='keeper-lot', received_at='2026-08-21' WHERE id=9302; UPDATE product_batches SET is_active=0 WHERE id=9301"))
       })
       // Proves activation occurs before the stock write, not just eventually.
       lots.db.exec(`CREATE TRIGGER require_active_merge_destination BEFORE INSERT ON branch_batch_stock
@@ -352,7 +353,8 @@ async function main() {
       assert.deepEqual(lots.db.prepare('SELECT branch_id,quantity FROM branch_stock WHERE product_id=9101 ORDER BY branch_id').all().map(row=>({...row})),[{branch_id:901,quantity:7},{branch_id:902,quantity:7}])
       for(const row of before.product_batches) {
         const after=lots.db.prepare('SELECT * FROM product_batches WHERE id=?').get(row.id)
-        for(const key of ['received_at','expiry_date','unit_cost_usd','received_quantity','received_cost_usd','lot_code']) assert.equal(after[key],row[key],key+' preserved')
+        // 16 Nov 2026: the kept lot (9301) takes the source's stock ON THE SAME DAY, so it carries the mean of the distinct costs (4 and 6).
+        for(const key of ['received_at','expiry_date','unit_cost_usd','received_quantity','received_cost_usd','lot_code']) assert.equal(after[key],collision&&row.id===9301&&key==='unit_cost_usd'?5:row[key],key+' preserved')
       }
       for(const t of ['sale_item_batch_allocations','return_item_batch_allocations']) {
         const expected=before[t].map(row=>({...row,batch_id:collision?9301:9302}))
@@ -366,6 +368,7 @@ async function main() {
   for(const keeperQuantity of [0,5]) {
     const lots=seed()
     await seedPre0154LegacyLots(lots, () => seedFixture(lots.db, () => lots.db.exec(`UPDATE product_batches SET is_active=0;
+      UPDATE product_batches SET received_at='2026-08-21'; -- lots meet by RECEIVED DATE (16 Nov 2026): both arrived the same day
       UPDATE product_batches SET batch_key='keeper-lot' WHERE id=9302;
       UPDATE branch_stock SET quantity=0 WHERE product_id=9102;
       UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=9302;

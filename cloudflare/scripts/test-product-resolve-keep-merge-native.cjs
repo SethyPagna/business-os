@@ -91,6 +91,7 @@ const adapter = {
 
 const stockTransaction = load('lib/stockTransaction.ts')
 const moneyPrecision = load('lib/moneyPrecision.ts')
+const productMergeLots = load('lib/productMergeLots.ts', { './moneyPrecision': moneyPrecision, './businessDateWindow': load('lib/businessDateWindow.ts') })
 const permissions = load('lib/permissions.ts')
 const planTier = load('lib/planTier.ts')
 const requestBodyGuard = load('lib/requestBodyGuard.ts')
@@ -100,13 +101,13 @@ const detailRule = load('lib/productDetailRule.ts', { './moneyPrecision': moneyP
 const productIdentity = load('lib/productIdentity.ts', { './db': {}, './sqlBinding': sqlBinding, './productDetailRule': detailRule })
 const productMerge = load('lib/productMerge.ts', { './moneyPrecision': moneyPrecision })
 const productStockGuard = load('lib/productStockGuard.ts')
-const productMergeSnapshot = load('lib/productMergeSnapshot.ts', { './db': {} })
+const productMergeSnapshot = load('lib/productMergeSnapshot.ts', { './db': {}, './productMergeLots': productMergeLots })
 const acquisitionCostAccess = load('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const noAudit = { audit: async (_env, _uid, _uname, action, entity, id, detail) => { state.audits.push({ action, entity, id, detail }) } }
 const broadcastHub = { broadcast: async () => {} }
 const catalogCost = load('lib/catalogCostRecompute.ts', { './moneyPrecision': moneyPrecision })
 const costReview = load('lib/productCostReview.ts', { './catalogCostRecompute': catalogCost })
-const costPreview = load('lib/productMergeCostPreview.ts', { './catalogCostRecompute': catalogCost, './productCostReview': costReview, './productConflictActionGroups': load('lib/productConflictActionGroups.ts') })
+const costPreview = load('lib/productMergeCostPreview.ts', { './productMergeLots': productMergeLots, './catalogCostRecompute': catalogCost, './productCostReview': costReview, './productConflictActionGroups': load('lib/productConflictActionGroups.ts') })
 // UI-CONFLICTS B1: the Resolve choices kernel, real, so the route never sees an inert stand-in.
 const resolveChoices = load('lib/productResolveChoices.ts', { './moneyPrecision': moneyPrecision, './searchMatch': load('lib/searchMatch.ts') })
 const undoAppliers = load('lib/undoAppliers.ts', {
@@ -149,6 +150,7 @@ const productModule = load('routes/products.ts', {
   '../lib/productMerge': productMerge,
   '../lib/productStockGuard': productStockGuard,
   '../lib/productMergeSnapshot': productMergeSnapshot,
+  '../lib/productMergeLots': productMergeLots,
   '../lib/productResolveChoices': resolveChoices,
   '../lib/mergeRouteLog': load('lib/mergeRouteLog.ts'),
   '../lib/sqlBinding': sqlBinding,

@@ -345,10 +345,12 @@ async function oversizedWritePlanRefusesBeforeMutation() {
 
 async function oversizedDependentReadRefusesBeforeMutation() {
   const d1 = seedGroups([1], d1 => {
-    const insertBatch = d1.db.prepare('INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,is_active) VALUES(?,?,?,?,1)')
+    // Lots meet by RECEIVED DATE (16 Nov 2026), so each pair shares a day (the key is kept too, as before).
+    const insertBatch = d1.db.prepare('INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,received_at,is_active) VALUES(?,?,?,?,?,1)')
     for (let ordinal = 1; ordinal <= 21; ordinal += 1) {
-      insertBatch.run(1000 + ordinal, 1, `shared-${ordinal}`, ordinal)
-      insertBatch.run(2000 + ordinal, 2, `shared-${ordinal}`, ordinal)
+      const received = `2026-10-${String(ordinal).padStart(2, '0')}`
+      insertBatch.run(1000 + ordinal, 1, `shared-${ordinal}`, ordinal, received)
+      insertBatch.run(2000 + ordinal, 2, `shared-${ordinal}`, ordinal, received)
     }
   })
   const result = await invoke(loadMergeHandler(makeAdapter(d1)))

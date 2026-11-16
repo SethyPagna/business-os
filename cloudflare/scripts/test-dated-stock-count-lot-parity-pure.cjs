@@ -88,6 +88,7 @@ function loadWithStubs(relPath, stubs) {
     if (request === './stockTransaction' || request === '../lib/stockTransaction') return lib('stockTransaction')
     if (['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request)) return moneyPrecision
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
+    if (/(^|\/)(productMergeLots|businessDateWindow)$/.test(request)) return loadWithStubs(path.join('lib', request.split('/').pop() + '.ts'), {})
     if (request.startsWith('.') || request === 'hono') return permissive()
     return original.call(Module, request, parent, isMain)
   }
@@ -587,7 +588,10 @@ async function main() {
     })
   }
 
-  await test('E1: the keeper holds two lots on the twin\'s date at different costs: the reversal goes back on the lot the fold put the twin\'s units in (same key), not the first lot of that date', async () => {
+  // 16 Nov 2026: the fold adds a twin's lot into the keeper's lot of the SAME RECEIVED DATE (lowest batch_number when there are
+  // several), no longer into the lot with the same batch_key. Here the twin's lot has lot B's key (same date, same cost), but the
+  // fold puts its units in lot A, so the reversal must follow the date (lot A), not the key (lot B).
+  await test('E1: the keeper holds two lots on the twin\'s date at different costs: the twin\'s units join the lowest-numbered lot of that date, and the reversal goes back on it, not on the lot with the twin\'s key', async () => {
     const { rawDb, db } = freshDb()
     const K = 116
     const D = 117
@@ -599,11 +603,11 @@ async function main() {
       ['receive keeper 3 @09-01 at $2 (lot B)', () => receive(db, K, 3, '2026-09-01', 2), { branch: 8, lots: '2026-09-01=5 2026-09-01=3' }],
       ['receive twin 6 @09-01 at $2 (lot B\'s key)', () => receive(db, D, 6, '2026-09-01', 2), { branch: 8 }],
       ['count twin 09-10 = 2 (drains its lot by 4)', () => applyCount(db, D, [['2026-09-10', 2]]), { branch: 8 }],
-      ['fold the twin into the keeper: its 2 join lot B', () => fold(K, D, 'merge'), { branch: 10, lots: '2026-09-01=5 2026-09-01=5' }],
-      // The drain of 4 goes back on lot B (9); the count's -2 then drains FIFO
-      // from lot A (3). The same-date fallback would have put the 4 on lot A.
-      ['keeper count 09-10 = 12', () => applyCount(db, K, [['2026-09-10', 12]]), { branch: 12, lots: '2026-09-01=3 2026-09-01=9' }],
-      ['re-applied', () => applyCount(db, K, [['2026-09-10', 12]]), { branch: 12, lots: '2026-09-01=3 2026-09-01=9' }],
+      ['fold the twin into the keeper: its 2 join lot A (the lowest batch_number on that date)', () => fold(K, D, 'merge'), { branch: 10, lots: '2026-09-01=7 2026-09-01=3' }],
+      // The drain of 4 goes back on lot A (11); the count's -2 then drains FIFO from lot A again (9). Resolving by the twin's
+      // batch_key would have put the 4 on lot B (7), which the fold never touched.
+      ['keeper count 09-10 = 12', () => applyCount(db, K, [['2026-09-10', 12]]), { branch: 12, lots: '2026-09-01=9 2026-09-01=3' }],
+      ['re-applied', () => applyCount(db, K, [['2026-09-10', 12]]), { branch: 12, lots: '2026-09-01=9 2026-09-01=3' }],
     ], [D])
   })
 

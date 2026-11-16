@@ -1,5 +1,6 @@
 import type { BindParams, getDb } from './db'
 import type { ProductMergeSourceExtent } from './productMerge'
+import { matchDuplicateLots } from './productMergeLots'
 
 type ProductMergeDb = ReturnType<typeof getDb>
 
@@ -156,7 +157,8 @@ export function planProductMergeCaseSnapshot(
     {
       key: 'duplicateBatches',
       // The two lot_* columns let the fold assert in its write batch that nothing moved on these lots since this read.
-      sql: `SELECT id, batch_key, batch_number,
+      // received_at, expiry_date and unit_cost_usd are what the date match and the folded lot's cost and expiry read.
+      sql: `SELECT id, batch_key, batch_number, received_at, expiry_date, unit_cost_usd,
         (SELECT COALESCE(SUM(quantity), 0) FROM branch_batch_stock WHERE batch_id = product_batches.id) AS lot_quantity,
         (SELECT COUNT(*) FROM branch_batch_stock WHERE batch_id = product_batches.id) AS lot_stock_rows
         FROM product_batches WHERE variant_product_id = @id`,
@@ -200,7 +202,7 @@ export function planProductMergeCaseSnapshot(
   return { reads, decode }
 }
 
-// Lot preimages depend on the first snapshot's batch-key comparison, so they
+// Lot preimages depend on the first snapshot's received-date match (productMergeLots.ts), so they
 // form a second read phase. All required lot/allocation reads within that phase
 // remain independent and share one D1 call. A case with only repointed lots (or
 // no lots) does not issue this second call at all.
@@ -219,12 +221,12 @@ export function planProductMergeDependentLotSnapshots(
   stockDisposition: 'merge' | 'write_off',
   maxStatements = PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS,
 ): ProductMergeReadPlan<Map<number, ProductMergeLotSnapshot>> {
-  const keeperBatchIdByKey = new Map(snapshot.canonicalBatchRows.map((row) => [row.batch_key, Number(row.id)]))
+  const lotMatches = matchDuplicateLots(snapshot.canonicalBatchRows, snapshot.duplicateBatchRows)
   const reads: KeyedRead[] = []
   const requested: Array<{ duplicateBatchId: number; keeperBatchId: number | null }> = []
   for (const batch of snapshot.duplicateBatchRows) {
     const duplicateBatchId = Number(batch.id)
-    const keeperBatchId = stockDisposition === 'merge' ? keeperBatchIdByKey.get(batch.batch_key) ?? null : null
+    const keeperBatchId = stockDisposition === 'merge' ? lotMatches.get(duplicateBatchId) ?? null : null
     if (stockDisposition === 'merge' && keeperBatchId == null) continue
     requested.push({ duplicateBatchId, keeperBatchId })
     reads.push({

@@ -28,7 +28,7 @@ function loadTs(rel, stubs = {}) {
   Module._load = (request, parent, isMain) => {
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
     const helper = request.split('/').pop()
-    if (['stockTransaction', 'stockMutationReceipt', 'productCostReview', 'productMergeCostPreview', 'productConflictActionGroups', 'catalogCostRecompute', 'productIdentity', 'productDetailRule', 'productMerge', 'productConflictMergeBatch', 'sqlBinding', 'moneyPrecision'].includes(helper)) return loadTs(path.join('lib', helper + '.ts'))
+    if (['stockTransaction', 'stockMutationReceipt', 'productCostReview', 'productMergeCostPreview', 'productConflictActionGroups', 'catalogCostRecompute', 'productIdentity', 'productDetailRule', 'productMerge', 'productConflictMergeBatch', 'sqlBinding', 'moneyPrecision', 'productMergeLots', 'businessDateWindow'].includes(helper)) return loadTs(path.join('lib', helper + '.ts'))
     return request.startsWith('.') || request === 'hono' ? permissive() : original.call(Module, request, parent, isMain)
   }
 

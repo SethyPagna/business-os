@@ -6,15 +6,19 @@ const ts = require('typescript')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
-function loadSnapshotModule() {
-  const abs = path.join(__dirname, '..', 'src', 'lib', 'productMergeSnapshot.ts')
+// productMergeSnapshot matches lots by received date through productMergeLots (16 Nov 2026), which sits on two leaf libs.
+function loadLib(name) {
+  const abs = path.join(__dirname, '..', 'src', 'lib', `${name}.ts`)
   const { outputText } = ts.transpileModule(fs.readFileSync(abs, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
     fileName: abs,
   })
   const mod = { exports: {} }
-  new Function('exports', 'require', 'module', outputText)(mod.exports, require, mod)
+  new Function('exports', 'require', 'module', outputText)(mod.exports, (id) => (id.startsWith('./') ? loadLib(id.slice(2)) : require(id)), mod)
   return mod.exports
+}
+function loadSnapshotModule() {
+  return loadLib('productMergeSnapshot')
 }
 
 function countedAdapter(d1) {
@@ -45,8 +49,8 @@ assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted
       VALUES(9001,901,2,1),(9002,901,3,2);
     INSERT INTO product_images(product_id,image_path,sort_order)
       VALUES(9001,'/uploads/keeper.webp',0),(9002,'/uploads/tea.webp',0);
-    INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,is_active)
-      VALUES(9101,9001,'same',1,1),(9102,9002,'same',1,1),(9103,9002,'move',2,1);
+    INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,received_at,is_active)
+      VALUES(9101,9001,'same',1,'2026-11-03',1),(9102,9002,'same',1,'2026-11-03',1),(9103,9002,'move',2,'2026-11-05',1);
     INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)
       VALUES(9101,901,1),(9102,901,2),(9103,901,1);
     INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,quantity)
@@ -83,6 +87,10 @@ assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted
   const beforeNoop = batches.length
   assert.equal((await readProductMergeDependentLotSnapshots(adapter, repointOnly, 'merge')).size, 0)
   assert.equal(batches.length, beforeNoop, 'no collision means no empty second batch')
+  // 16 Nov 2026: lots meet by RECEIVED DATE. The same batch_key on another day is not a collision, so it needs no dependent read.
+  const otherDay = { ...snapshot, duplicateBatchRows: snapshot.duplicateBatchRows.map((row) => (row.id === 9102 ? { ...row, received_at: '2026-11-04' } : row)) }
+  assert.equal((await readProductMergeDependentLotSnapshots(adapter, otherDay, 'merge')).size, 0, 'the same key on another day is not a match')
+  assert.equal(batches.length, beforeNoop, 'and it issues no second batch')
 
   const writeOff = await readProductMergeDependentLotSnapshots(adapter, snapshot, 'write_off')
   assert.equal(batches.length, beforeNoop + 1, 'all write-off lot stock reads share one second-phase batch')
@@ -95,11 +103,13 @@ assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted
       id: 20_000 + index,
       batch_key: `collision-${index}`,
       batch_number: index + 1,
+      received_at: `2026-01-${String(index + 1).padStart(2, '0')}`,
     })),
     duplicateBatchRows: Array.from({ length: count }, (_, index) => ({
       id: 30_000 + index,
       batch_key: `collision-${index}`,
       batch_number: index + 1,
+      received_at: `2026-01-${String(index + 1).padStart(2, '0')}`,
     })),
   })
   const beforeBoundedLots = batches.length

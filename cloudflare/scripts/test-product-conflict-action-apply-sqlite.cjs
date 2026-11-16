@@ -63,7 +63,7 @@ async function prepareThreeMemberReview(parentChain = false) {
   seedFixture(d1.db, () => d1.db.prepare(`INSERT INTO product_batches
     (id,variant_product_id,batch_key,lot_code,expiry_date,received_at,is_active,notes,batch_number,supplier_id,supplier_name,
      unit_cost_usd,payment_status,credit_due_date,received_quantity,received_branch_id,received_cost_usd)
-    VALUES(99003,10002,'receipt-b','LOT-C','2027-03-01','2026-09-03',1,'third receipt',1,43,'Supplier C',8,'paid',NULL,4,1,32)`).run())
+    VALUES(99003,10002,'receipt-b','LOT-C','2027-03-01','2026-09-02',1,'third receipt',1,43,'Supplier C',8,'paid',NULL,4,1,32)`).run())
   seedFixture(d1.db, () => d1.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(99003,1,4)').run())
   groups[0].member_ids = [10000, 10001, 10002]
   if(parentChain) {
@@ -97,7 +97,7 @@ async function prepareThreeMemberReview(parentChain = false) {
   assert.deepEqual(storedPlan.projected_result.lot_dispositions.slice(0,2).map((row) => ({ source: row.source_batch_id,
     target: row.target_batch_id, collision: row.collision, supplier: row.supplier_name, received: row.received_at })), [
     { source: 99002, target: 99002, collision: 'reparent', supplier: 'Supplier B', received: '2026-09-02' },
-    { source: 99003, target: 99002, collision: 'fold', supplier: 'Supplier C', received: '2026-09-03' },
+    { source: 99003, target: 99002, collision: 'fold', supplier: 'Supplier C', received: '2026-09-02' },
   ])
   return { d1, groups, ...loaded, review: review.body, finalized: finalized.body, auditRows }
 }
@@ -355,9 +355,10 @@ async function main() {
       wholesale_price_usd,stock_quantity FROM products WHERE id=10000`).get() }
     assert.deepEqual(keeper, { barcode: '700000', category: 'C', brand: 'Two', unit: 'pack',
       // U-cost (owner ruling 2026-09-25): the keeper's catalog cost is the quantity-weighted
-      // mean of the lots it now holds -- 2 @ 4 in LOT-A, and LOT-C's 4 units folded into
-      // LOT-B's 3 @ 6: (2 x 4 + 7 x 6) / 9 = 5.5556. The plan's distinct mean said 6.
-      cost_price_usd: 5.5556, selling_price_usd: 10, wholesale_price_usd: 9, stock_quantity: 9 })
+      // mean of the lots it now holds -- 2 @ 4 in LOT-A, and LOT-C's 4 units added into LOT-B (same received
+      // day, 16 Nov 2026), which becomes the mean of its distinct costs (6 and 8 -> 7) on 7 units:
+      // (2 x 4 + 7 x 7) / 9 = 6.3333. A key fold left LOT-B at 6 (5.5556).
+      cost_price_usd: 6.3333, selling_price_usd: 10, wholesale_price_usd: 9, stock_quantity: 9 })
     assert.deepEqual(fixture.d1.db.prepare('SELECT id,is_active FROM products WHERE id IN (10001,10002) ORDER BY id').all().map((row) => ({ ...row })), [
       { id: 10001, is_active: 0 }, { id: 10002, is_active: 0 },
     ])
@@ -366,7 +367,7 @@ async function main() {
     assert.deepEqual(fixture.d1.db.prepare(`SELECT id,variant_product_id,supplier_name,received_at,is_active FROM product_batches
       WHERE id IN (99002,99003) ORDER BY id`).all().map((row) => ({ ...row })), [
       { id: 99002, variant_product_id: 10000, supplier_name: 'Supplier B', received_at: '2026-09-02', is_active: 1 },
-      { id: 99003, variant_product_id: 10002, supplier_name: 'Supplier C', received_at: '2026-09-03', is_active: 0 },
+      { id: 99003, variant_product_id: 10002, supplier_name: 'Supplier C', received_at: '2026-09-02', is_active: 0 },
     ])
     assert.equal(fixture.d1.db.prepare("SELECT COUNT(*) n FROM action_history WHERE json_extract(undo_payload,'$.applier')='product.merge.group'").get().n, 1)
     assert.equal(fixture.d1.db.prepare("SELECT COUNT(*) n FROM undo_snapshots WHERE kind='product.merge.group.child' AND status='applied'").get().n, 2)

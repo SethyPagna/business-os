@@ -294,7 +294,9 @@ export interface MergeReversal {
   dupStockBefore: Array<{ branch_id: number; quantity: number; rfid_confirmed_qty: number }>
   dupImagesBefore: Array<{ image_path: string; sort_order: number | null }>
   imagesMovedToKeeper: string[]
-  repointedBatches: Array<{ id: number; batchNumber: number | null }>
+  // batchKeyBefore: present only when the created lot had to take a new batch_key on the keeper (the keeper already owned
+  // that key on another date); undo puts the original key back. Absent on snapshots written before 16 Nov 2026.
+  repointedBatches: Array<{ id: number; batchNumber: number | null; batchKeyBefore?: string }>
   foldedBatches: Array<{
     dupBatchId: number
     keeperBatchId: number
@@ -302,6 +304,11 @@ export interface MergeReversal {
     keeperStockBefore: Array<{ branch_id: number; quantity: number }>
     saleAllocationIds?: number[]
     returnAllocationIds?: number[]
+    // 16 Nov 2026 (lots match by received date): the kept lot's own cost, expiry and activity BEFORE the fold added stock
+    // into it and re-derived them. Undo writes them back. Absent on snapshots written before then (they matched by
+    // batch_key and never touched the kept lot's cost or expiry), so an absent value restores nothing rather than zeroing.
+    keeperLotBefore?: { unit_cost_usd: number | null; expiry_date: string | null; is_active: number | null }
+    receivedDate?: string
   }>
   reparentedSaleItemIds: number[]
   reparentedMovementIds: number[]
@@ -2241,6 +2248,9 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
   //    stock, and restore the keeper batch's stock for the folded branches.
   for (const b of (r.repointedBatches || [])) {
     stmts.push({ sql: 'UPDATE product_batches SET variant_product_id = @dupId, batch_number = @num, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { dupId, num: b.batchNumber == null ? null : Number(b.batchNumber), id: Number(b.id) } })
+    if (typeof b.batchKeyBefore === 'string' && b.batchKeyBefore) {
+      stmts.push({ sql: 'UPDATE product_batches SET batch_key = @key WHERE id = @id AND variant_product_id = @dupId', params: { key: b.batchKeyBefore, id: Number(b.id), dupId } })
+    }
   }
   for (const fb of (r.foldedBatches || [])) {
     const dupBatchId = Number(fb.dupBatchId)
@@ -2258,6 +2268,22 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
       }
       stmts.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @db AND branch_id = @b', params: { db: dupBatchId, b } })
       stmts.push({ sql: 'INSERT INTO branch_batch_stock (batch_id, branch_id, quantity, updated_at) VALUES (@db, @b, @q, CURRENT_TIMESTAMP)', params: { db: dupBatchId, b, q: Number(d.quantity) || 0 } })
+    }
+    // The kept lot's own cost, expiry and activity, as they were before the fold re-derived them. Written after its stock is
+    // back (a lot that was archived is archived again only once nothing sits on it). Idempotent when several discarded lots
+    // folded into one kept lot: each entry carries the same before-image.
+    const before = fb.keeperLotBefore
+    if (before && typeof before === 'object') {
+      stmts.push({
+        sql: `UPDATE product_batches SET unit_cost_usd = @cost, expiry_date = @expiry,
+                is_active = CASE WHEN @active IS NULL THEN is_active ELSE @active END, updated_at = CURRENT_TIMESTAMP WHERE id = @kb`,
+        params: {
+          kb: keeperBatchId,
+          cost: before.unit_cost_usd == null ? null : Number(before.unit_cost_usd),
+          expiry: before.expiry_date == null ? null : String(before.expiry_date),
+          active: before.is_active == null ? null : Number(before.is_active),
+        },
+      })
     }
   }
 

@@ -30,7 +30,8 @@ async function createReview(app, groups, requestId) {
 async function main() {
   let scaleEvidence = null
   const { d1, groups } = seed(2)
-  d1.db.prepare("UPDATE product_batches SET batch_key='receipt-a' WHERE id=99002").run()
+  // Lots meet by RECEIVED DATE (16 Nov 2026): 99002 now arrived the same day as the keeper's lot 99001 (the key is kept too, as before).
+  d1.db.prepare("UPDATE product_batches SET batch_key='receipt-a', received_at='2026-09-01' WHERE id=99002").run()
   const { app, controls } = loadRoute(d1)
   const review = await createReview(app, groups, 'finalize_review_001')
   const request = {
@@ -64,7 +65,9 @@ async function main() {
   assert.equal(firstPlan.selected.category.value, 'B')
   assert.equal(firstPlan.selected.brand.value, 'One')
   assert.equal(firstPlan.selected.unit.value, 'box')
-  assert.equal(firstPlan.projected_result.economics.cost_price_usd, 4)
+  // The same-day lots (4 and 6) fold into one: its cost is the mean of the distinct non-zero costs, 5, on all 5 units (it stayed 4 on a key fold).
+  assert.equal(firstPlan.projected_result.economics.cost_price_usd, 5)
+  assert.equal(firstPlan.projected_result.costAuthority.cost_price_usd, 5)
   assert.equal(firstPlan.projected_result.costAuthority.keeperId, 10000)
   assert.equal(firstPlan.projected_result.costAuthority.source, 'received_lot')
   assert.equal(firstPlan.projected_result.costAuthority.needsReview, false)
@@ -73,7 +76,7 @@ async function main() {
   assert.deepEqual(firstPlan.projected_result.lot_dispositions.map((row) => ({
     source: row.source_batch_id, target: row.target_batch_id, collision: row.collision,
     supplier: row.supplier_name, received: row.received_at,
-  })), [{ source: 99002, target: 99001, collision: 'fold', supplier: 'Supplier B', received: '2026-09-02' }])
+  })), [{ source: 99002, target: 99001, collision: 'fold', supplier: 'Supplier B', received: '2026-09-01' }])
   const members = d1.db.prepare('SELECT product_id,role,status,operation_id FROM product_conflict_action_group_members WHERE review_id=? ORDER BY product_id').all(review.review_id)
   assert.deepEqual(members.map((row) => row.role), ['keeper', 'merged', 'merged', 'keeper'])
   assert.ok(members.filter((row) => row.role === 'merged').every((row) => row.status === 'planned' && row.operation_id))
