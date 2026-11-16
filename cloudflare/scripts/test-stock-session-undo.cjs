@@ -57,6 +57,19 @@ async function main() {
     console.log('PASS cost-authorized zero catalog reload undo/redo needs no inventory-adjust, is lost-ack idempotent and writes no movements')
   }
   {
+    // Round 4: a product cost saved over 4 places is restored at 4 places by undo (not verbatim), and redo of that undo is not refused.
+    const f = fixture()
+    seedStockFixture(f.sql, () => f.sql.exec('UPDATE products SET cost_price_usd=2.123456, purchase_price_usd=2.123456, cost_price_khr=4123.456789, purchase_price_khr=4123.456789 WHERE id=1'))
+    const r = await api.commitStockSession(f.env, user, receiveRequest('long-cost-undo-001', 3))
+    assert.equal(f.sql.prepare('SELECT cost_price_usd c FROM products WHERE id=1').get().c, 2, 'the receipt re-derives the catalog cost')
+    await replay(f, r, 'undo', 0)
+    const undone = f.sql.prepare('SELECT cost_price_usd c, purchase_price_usd p, cost_price_khr k, purchase_price_khr pk FROM products WHERE id=1').get()
+    assert.deepEqual({ ...undone }, { c: 2.1235, p: 2.1235, k: 4123.456789, pk: 4123.456789 }, 'undo restores the saved long cost at 4 places, not verbatim; a column the session never changed is not touched (0313 rounds it)')
+    await replay(f, r, 'redo', 1)
+    assert.equal(f.sql.prepare('SELECT cost_price_usd c FROM products WHERE id=1').get().c, 2, 'redo of the rounded undo is not refused')
+    console.log('PASS stock-session undo restores product cost columns at 4 places')
+  }
+  {
     const noProductImage = { ...staff, permissions: JSON.stringify({ inventory: true, products: true, 'products:image': false }) }
     const f = fixture()
     f.sql.prepare("INSERT INTO file_assets(original_name,stored_name,public_path,mime_type,media_type,byte_size) VALUES(?,?,?,?, 'image', 10)")
