@@ -17,6 +17,7 @@ const path = require('node:path')
 const assert = require('node:assert/strict')
 const { createHash } = require('node:crypto')
 const { execFileSync } = require('node:child_process')
+const { matchStatements } = require('./harness/statement-multiset.cjs')
 
 const FP = path.join(__dirname, 'read-budget', 'fingerprints')
 // The recordings this proof compares the base-order code with are the ones that stood BEFORE 0d25bde59 re-recorded them for the lane's order, so the proof reads them from
@@ -149,10 +150,11 @@ async function products() {
     assert.equal(sha(base[label].text), golden[label], `${label}: CONTROL FAILED, the base-order patch does not reproduce the recorded hash`)
     // Ambient statements (the scheduled-send drain, a throttled session touch, a flags refresh) land on whichever request is next; they are not part of a shape.
     const own = (r) => r.log.filter((e) => !AMBIENT_SQL.test(e.sql))
-    // The same statements in the same order; a statement may differ from its base text only in an ORDER BY clause (the patches replace exactly those constants).
+    // The same statements; a statement may differ from its base text only in an ORDER BY clause (the patches replace exactly those constants). Matched as a multiset, not by
+    // position: the world logs a statement when it completes, so a Promise.all (bootstrap_pos) can complete the same statements in a different order in the two worlds
+    // (harness/statement-multiset.cjs; test-statement-multiset-pure.cjs holds the shuffled-order control).
     assert.equal(own(lane[label]).length, own(base[label]).length, `${label}: the same number of statements`)
-    own(lane[label]).forEach((e, i) => { const was = own(base[label])[i].sql; if (e.sql !== was) assert.ok(/ORDER BY/.test(e.sql) && /ORDER BY/.test(was) && e.sql.replace(/\s+/g, ' ').slice(0, 60) === was.replace(/\s+/g, ' ').slice(0, 60), `${label}: statement ${i} differs outside an ORDER BY statement`) })
-    const textDiffers = own(lane[label]).filter((e, i) => e.sql !== own(base[label])[i].sql).length
+    const textDiffers = matchStatements(own(lane[label]).map((e) => e.sql), own(base[label]).map((e) => e.sql), label).differing
     assert.equal(own(lane[label]).reduce((n, e) => n + e.rows, 0), own(base[label]).reduce((n, e) => n + e.rows, 0), `${label}: same rows read`)
     if (process.env.PROOF_SQL) for (const w of [['lane', lane], ['base', base]]) for (const e of w[1][label].log) { const i = e.sql.lastIndexOf('ORDER BY'); if (/family_root_id/.test(e.sql.slice(i))) console.error(w[0], e.sql.slice(i, i + 700)) }
     if (lane[label].text === base[label].text) { identical += 1; continue }
