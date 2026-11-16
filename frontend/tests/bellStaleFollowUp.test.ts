@@ -150,7 +150,6 @@ async function freshScenario(b: ReturnType<typeof bell>) {
   await b.clock.advance(60 * 60_000)
   assert.equal(b.server.requests, requests, 'no follow-up read when the answer already reflects the write')
 }
-const { planBellStaleFollowUp } = syncRuntime
 
 await test('a sync reload served an entry older than the write is followed by one read as that entry expires', () => staleScenario(bell()))
 await test('a reload answered by an entry computed after the write needs no follow-up; no extra read', () => freshScenario(bell()))
