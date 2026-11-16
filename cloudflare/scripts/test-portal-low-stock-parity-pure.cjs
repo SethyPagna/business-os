@@ -115,8 +115,6 @@ const portalRoute = loadReal('routes/portal.ts', {
 const app = portalRoute.default
 const fakeExecutionCtx = { waitUntil: (p) => { if (p && p.catch) p.catch(() => {}) }, passThroughOnException: () => {} }
 
-const lowStockLib = loadReal('lib/lowStockSettings.ts', { './db': { getDb: () => db } })
-const { resolveLowStockConfig, isLowStock } = lowStockLib
 const { portalStockStatusFor, resolvePortalStockRule } = portalRoute
 // The Website Editor preview's own resolver (it hides client-side from the status the server served), loaded as shipped.
 const frontendPortal = require('../../frontend/src/components/catalog/portalCatalogDisplay.ts')
@@ -145,8 +143,21 @@ function oracle(web, shop, qty, low, out) {
   const outLevel = webOut !== null ? webOut : (Number.isFinite(productOut) ? productOut : 0)
   if (Number(qty) <= outLevel) return 'out_of_stock'
   if (webLow !== null) return Number(qty) <= webLow ? 'low_stock' : 'in_stock'
-  // The shop's rule, from the shared module (the same one the bell and the admin lists use); qty is already above out here.
-  return isLowStock(resolveLowStockConfig(shop), qty, low, 0) ? 'low_stock' : 'in_stock'
+  return Number(qty) <= shopLowLevel(shop, low) ? 'low_stock' : 'in_stock'
+}
+// The shop half, written from the shop's rule (Settings: the alert switch, the scope, the one number, a product's own threshold) and NOT from
+// lib/lowStockSettings: a bug in that module can no longer hide inside the oracle that is meant to catch it. The low level a quantity is compared with:
+// alerts off = -1 (the shop's "no quantity is low" level), the one Settings number in global scope, else the product's own threshold, else the one number.
+// An unreadable or unset switch / scope / number means on / per-product / 10.
+function shopLowLevel(shop, productLow) {
+  const switchText = String(shop.low_stock_alert_enabled ?? '').trim().toLowerCase()
+  if (['0', 'false', 'off', 'no'].includes(switchText)) return -1
+  const numberText = String(shop.low_stock_threshold_default ?? '').trim()
+  const oneNumber = /^[0-9]+$/.test(numberText) && Number(numberText) <= 1000000 ? Number(numberText) : 10
+  if (String(shop.low_stock_threshold_mode ?? '').trim().toLowerCase() === 'global') return oneNumber
+  const ownText = String(productLow ?? '').trim()
+  const own = ownText === '' ? Number.NaN : Number(ownText)
+  return Number.isFinite(own) ? own : oneNumber
 }
 const merged = (web, shop) => ({ ...shop, ...web })
 
@@ -158,7 +169,8 @@ function webFor(mode, low, out) {
   if (out !== undefined) map.customer_portal_out_of_stock_threshold = out
   return map
 }
-const WEB_LOWS = [undefined, '', '   ', '0', '5', '2.5', 'abc', '-3', null, '1e999']
+// The last six are the spellings Number() accepts that a person would not type, and the ones it refuses: the rule treats them as the Editor does.
+const WEB_LOWS = [undefined, '', '   ', '0', '5', '2.5', 'abc', '-3', null, '1e999', '0x10', '+5', ' 5 ', '1e21', '-0', 'Infinity']
 const WEB_OUTS = [undefined, '0', '2', '', 'abc', '-1', '8']
 const WEBSITE = []
 for (const low of WEB_LOWS) for (const out of WEB_OUTS) WEBSITE.push(webFor('global', low, out))
@@ -180,7 +192,8 @@ SHOP.push({ low_stock_alert_enabled: 'true', low_stock_threshold_mode: 'global',
 
 // Per-product overrides (null = the column is NULL), out thresholds, quantities.
 const LOWS = [null, 0, 2, 3, 10, 2.5, 100]
-const OUTS = [null, 0, 2, 5]
+// A negative product out threshold is no sane setting, but it is stored text a shop could hold; every surface must still answer alike.
+const OUTS = [null, 0, 2, 5, -1, -5]
 const QTYS = [-3, 0, 1, 2, 3, 4, 5, 6, 10, 11, 100, 101]
 
 await_main().catch((error) => { console.error(error); process.exit(1) })
@@ -206,6 +219,19 @@ async function await_main() {
 
   // 2. Controls that the old behaviours cannot pass: a literal 10, ignoring the website levels, ignoring the shop fallback.
   const at = (settings, qty, low, out = 0) => portalStockStatusFor(resolvePortalStockRule(settings), qty, low, out)
+  await check('CONTROL: the independent shop oracle answers the known cases (a broken oracle cannot pass the matrix by agreeing with everything)', () => {
+    assert.equal(shopLowLevel({}, null), 10)
+    assert.equal(shopLowLevel({}, 7), 7)
+    assert.equal(shopLowLevel({ low_stock_threshold_mode: 'GLOBAL', low_stock_threshold_default: '3' }, 7), 3)
+    assert.equal(shopLowLevel({ low_stock_threshold_default: '3' }, null), 3)
+    assert.equal(shopLowLevel({ low_stock_alert_enabled: ' Off ' }, 7), -1)
+    assert.equal(shopLowLevel({ low_stock_threshold_default: '2.5' }, null), 10, 'a fractional or junk global is not a number: 10')
+    assert.equal(shopLowLevel({ low_stock_threshold_default: '-1' }, null), 10)
+    assert.equal(oracle(webFor('global', '4', ''), {}, 4, null, -5), 'low_stock', 'a negative product out threshold: four is above it, and at the website low of 4')
+    assert.equal(oracle({}, {}, 0, null, -1), 'low_stock', 'qty 0 above a product out of -1 is low (0 <= 10), not out')
+    assert.equal(oracle({}, {}, -1, null, -1), 'out_of_stock', 'at the negative out level it is out')
+    assert.equal(oracle({}, {}, 5, 1, -5), 'in_stock', 'product low of 1: five is healthy')
+  })
   await check('CONTROL: the website levels move the label (a rule that ignores them, or a fixed 10, cannot pass)', () => {
     const web = { customer_portal_stock_threshold_mode: 'global', customer_portal_low_stock_threshold: '4', customer_portal_out_of_stock_threshold: '1' }
     assert.equal(at(web, 5, 10), 'in_stock', 'website low 4: five is healthy although the product says 10')
