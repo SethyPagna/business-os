@@ -43,9 +43,9 @@ async function main() {
     // a finished world: every day clean, stamped with the current epoch and kernel, a payload each; d4 has no row (lost); the coverage names the current epoch
     let epoch = await flagValue('data_epoch')
     if (!epoch) { epoch = 'a'.repeat(32); await world.run("INSERT INTO system_flags(key,value,updated_at) VALUES('data_epoch',?,CURRENT_TIMESTAMP)", epoch) }
-    await world.run("UPDATE sales_daily_totals SET state = 0, kernel_version = 1, data_epoch = ?, payload = '{\"v\":1,\"branches\":{}}', source_rows = 1, computed_at = '2026-11-10T00:00:00.000Z'", epoch)
+    await world.run("UPDATE sales_daily_totals SET state = 0, kernel_version = " + T.SALES_DAILY_KERNEL_VERSION + ", data_epoch = ?, payload = '{\"v\":1,\"branches\":{}}', source_rows = 1, computed_at = '2026-11-10T00:00:00.000Z'", epoch)
     await world.run('DELETE FROM sales_daily_totals WHERE business_date = ?', DAY.d4)
-    await world.run("INSERT INTO system_flags(key,value,updated_at) VALUES('sales_daily_coverage',?,CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value", JSON.stringify({ epoch, kernel: 1 }))
+    await world.run("INSERT INTO system_flags(key,value,updated_at) VALUES('sales_daily_coverage',?,CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value", JSON.stringify({ epoch, kernel: T.SALES_DAILY_KERNEL_VERSION }))
     await world.run("INSERT INTO system_flags(key,value,updated_at) VALUES('sales_daily_alert_mismatch','{\"sent\":false,\"days\":[]}',CURRENT_TIMESTAMP)")
     await quarantine([DAY.d2, DAY.d5])
     const start = await snapshot()

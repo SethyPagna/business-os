@@ -131,8 +131,8 @@ async function main() {
 
   // ---- C. which days a reader may serve -------------------------------------------------------------------------------------------------------------------
   const EPOCH = 'a'.repeat(32)
-  const flags = (over = {}) => ({ epoch: EPOCH, coverage: { epoch: EPOCH, kernel: 1 }, quarantined: false, maintenance: false, reconcile: { older: '', cycle: null }, quarantineDays: null, alerts: { mismatch: null, poison: null }, verify: null, ...over })
-  const day = (over = {}) => ({ business_date: '2026-11-01', state: 0, claim_gen: 1, kernel_version: 1, data_epoch: EPOCH, refusal: null, ...over })
+  const flags = (over = {}) => ({ epoch: EPOCH, coverage: { epoch: EPOCH, kernel: T.SALES_DAILY_KERNEL_VERSION }, quarantined: false, maintenance: false, reconcile: { older: '', cycle: null }, quarantineDays: null, alerts: { mismatch: null, poison: null }, verify: null, ...over })
+  const day = (over = {}) => ({ business_date: '2026-11-01', state: 0, claim_gen: 1, kernel_version: T.SALES_DAILY_KERNEL_VERSION, data_epoch: EPOCH, refusal: null, ...over })
 
   await check('C1 only a clean day of this kernel and this epoch is served; every other state means read it raw; a kernel refusal is raised, an own refusal is read raw', () => {
     assert.equal(T.classifyStoredDay(day(), flags()), 'serve')
@@ -153,9 +153,9 @@ async function main() {
     assert.equal(T.salesDailyStoredReadAllowed(flags({ quarantined: true })), false)
     assert.equal(T.salesDailyStoredReadAllowed(flags({ maintenance: true })), false)
     assert.equal(T.salesDailyStoredReadAllowed(flags({ coverage: null })), false)
-    assert.equal(T.salesDailyStoredReadAllowed(flags({ coverage: { epoch: 'c'.repeat(32), kernel: 1 } })), false)
+    assert.equal(T.salesDailyStoredReadAllowed(flags({ coverage: { epoch: 'c'.repeat(32), kernel: T.SALES_DAILY_KERNEL_VERSION } })), false)
     assert.equal(T.salesDailyStoredReadAllowed(flags({ epoch: null })), false)
-    const rows = [{ key: 'data_epoch', value: EPOCH }, { key: 'sales_daily_coverage', value: JSON.stringify({ epoch: EPOCH, kernel: 1 }) }]
+    const rows = [{ key: 'data_epoch', value: EPOCH }, { key: 'sales_daily_coverage', value: JSON.stringify({ epoch: EPOCH, kernel: T.SALES_DAILY_KERNEL_VERSION }) }]
     assert.equal(T.salesDailyStoredReadAllowed(T.salesDailyFlagsFromRows(rows)), true)
     assert.equal(T.salesDailyStoredReadAllowed(T.salesDailyFlagsFromRows([...rows, { key: 'sales_daily_quarantine', value: '{}' }])), false)
     assert.equal(T.salesDailyStoredReadAllowed(T.salesDailyFlagsFromRows([...rows, { key: 'maintenance', value: '{}' }])), false)
@@ -165,7 +165,7 @@ async function main() {
   await check('C3 the cron re-covers on a new epoch, a new kernel version, or no coverage, and never on a matching one', () => {
     assert.equal(T.salesDailyNeedsRecover(flags()), false)
     assert.equal(T.salesDailyNeedsRecover(flags({ coverage: { epoch: EPOCH, kernel: 0 } })), true)
-    assert.equal(T.salesDailyNeedsRecover(flags({ coverage: { epoch: 'c'.repeat(32), kernel: 1 } })), true)
+    assert.equal(T.salesDailyNeedsRecover(flags({ coverage: { epoch: 'c'.repeat(32), kernel: T.SALES_DAILY_KERNEL_VERSION } })), true)
     assert.equal(T.salesDailyNeedsRecover(flags({ coverage: null })), true)
     assert.equal(T.salesDailyNeedsRecover(flags({ epoch: null, coverage: null })), false, 'no epoch: nothing to cover yet')
   })
@@ -237,7 +237,7 @@ async function main() {
     const done = rows()
     assert.deepEqual(done.filter((r) => r.state === 0).map((r) => r.business_date), DAYS.slice(0, 6))
     assert.deepEqual(stateOf('2026-11-14').state, 1, 'today stays dirty')
-    for (const r of done.filter((x) => x.state === 0)) assert.deepEqual([r.kernel_version, r.data_epoch, r.refusal], [1, epochNow(), null])
+    for (const r of done.filter((x) => x.state === 0)) assert.deepEqual([r.kernel_version, r.data_epoch, r.refusal], [T.SALES_DAILY_KERNEL_VERSION, epochNow(), null])
     assert.deepEqual(JSON.parse(stateOf('2026-11-10').payload), { v: 1, branches: { 1: { bucket: { money: { revenue: '10' }, counts: { tx: 1 } } } } })
     const second = await cron.runSalesDailyRecompute(env, dep())
     assert.deepEqual([second.pending, second.claimed, second.more], [0, 0, false], 'nothing left to do costs one read')
@@ -256,9 +256,10 @@ async function main() {
     const after = await cron.runSalesDailyRecompute(env, dep())
     assert.equal(after.committed, 3)
     assert.ok(rows().every((r) => r.state === 0 && r.data_epoch === epochNow()))
-    // a kernel version bump: coverage names kernel 1, the code now says 2
-    const bumped = await cron.runSalesDailyRecompute(env, dep({ kernel: kernelOf({}, 1) }))
-    assert.equal(bumped.claimed, 0)
+    // a kernel version bump: coverage names the current kernel, the code now says one newer
+    const bumped = await cron.runSalesDailyRecompute(env, dep({ kernel: kernelOf({}, T.SALES_DAILY_KERNEL_VERSION - 1) }))
+    assert.equal(bumped.skipped, 'kernel-version')
+    assert.equal(bumped.claimed, undefined)
   })
 
   await check('D4 a write BETWEEN claim and commit sets the day dirty again: the commit is refused, nothing stale is stored, the next visit gets it', async () => {

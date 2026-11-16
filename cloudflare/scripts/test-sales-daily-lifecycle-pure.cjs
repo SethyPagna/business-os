@@ -124,15 +124,15 @@ async function main() {
 
   await check('L6 a commit by an isolate of an older kernel version is refused once the coverage names a newer one (no orphan clean row)', async () => {
     const env = w.fresh(['2026-10-01'])
-    w.db().exec("UPDATE system_flags SET value = json_set(value, '$.kernel', 2) WHERE key = 'sales_daily_coverage'")
+    w.db().exec(`UPDATE system_flags SET value = json_set(value, '$.kernel', ${T.SALES_DAILY_KERNEL_VERSION + 1}) WHERE key = 'sales_daily_coverage'`)
     const run = await cron.runSalesDailyRecompute(env, w.dep())
-    assert.equal(run.skipped ?? run.recovered ? 'recover' : 'x', 'recover', 'coverage names kernel 2 but the code is kernel 1: the cron re-covers instead of committing')
-    w.db().exec("UPDATE system_flags SET value = json_set(value, '$.kernel', 2) WHERE key = 'sales_daily_coverage'") // a newer isolate re-covered for kernel 2 after the old one read its day
+    assert.equal(run.skipped ?? run.recovered ? 'recover' : 'x', 'recover', 'coverage names a newer kernel than the code: the cron re-covers instead of committing')
+    w.db().exec(`UPDATE system_flags SET value = json_set(value, '$.kernel', ${T.SALES_DAILY_KERNEL_VERSION + 1}) WHERE key = 'sales_daily_coverage'`) // a newer isolate re-covered for kernel 2 after the old one read its day
     const claim = T.claimStatement(['2026-10-01'])
     const claimed = w.db().prepare(claim.sql).all(claim.params)
-    const commit = T.commitStatement({ day: '2026-10-01', claimGen: claimed[0].claim_gen, computed: { payload: { v: 1, branches: {} }, sourceRows: 0, refusal: null }, epoch: w.epochNow(), kernel: 1, nowIso: 'x' }, 1000000)
+    const commit = T.commitStatement({ day: '2026-10-01', claimGen: claimed[0].claim_gen, computed: { payload: { v: 1, branches: {} }, sourceRows: 0, refusal: null }, epoch: w.epochNow(), kernel: T.SALES_DAILY_KERNEL_VERSION, nowIso: 'x' }, 1000000)
     const changes = w.db().prepare(commit.sql).run(commit.params).meta.changes
-    assert.equal(changes, 0, 'refused: the coverage kernel is 2')
+    assert.equal(changes, 0, 'refused: the coverage kernel is newer')
   })
 
   console.log(`\n${passed} checks passed`)

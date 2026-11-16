@@ -1,13 +1,23 @@
 {
- "version": 1,
- "aggregate": "e0fc6748b9692bad96e1",
+ "version": 2,
+ "aggregate": "79ef55bb36a7d1f69a8a",
  "history": [
   {
    "version": 1,
    "aggregate": "e0fc6748b9692bad96e1"
+  },
+  {
+   "version": 2,
+   "aggregate": "79ef55bb36a7d1f69a8a"
   }
  ],
  "files": {
+  "src/lib/analytics.ts": {
+   "imports": "cfc19ad7ce0a9947195b",
+   "decls": {
+    "function recordAnalytics": "b1f0e477adac0038ffc0"
+   }
+  },
   "src/lib/businessDateWindow.ts": {
    "imports": "e3b0c44298fc1c149afb",
    "decls": {
@@ -127,6 +137,19 @@
     "function nativeChangeAmounts": "3bf77864a0f44ede8cc9"
    }
   },
+  "src/lib/planTier.ts": {
+   "imports": "cfc19ad7ce0a9947195b",
+   "decls": {
+    "const PAID_LIMITS": "b2326a39314de14b23cf",
+    "const FREE_LIMITS": "afc41525b41d04a81c59",
+    "const PLAN_LIMITS_BY_TIER": "57ef4f47a0b3f78fa6b5",
+    "const cachedTier": "613785f4b27076d31cf4",
+    "function resolvePlanTier": "bbec11cf79e71df458fe",
+    "function getPlanLimits": "94495ff90f5bf6ebef1e",
+    "function freePlanRefusalSuffix": "eec5dc494e107ff0ad8c",
+    "function __resetPlanTierCacheForTests": "a58f686c8cdccda80fe4"
+   }
+  },
   "src/lib/promotionRules.ts": {
    "imports": "78f7a8f535775294ac45",
    "decls": {
@@ -161,6 +184,63 @@
     "function evaluateCartPromotionAdjustments": "da3976701160e429c20b"
    }
   },
+  "src/lib/readSwitches.ts": {
+   "imports": "ca31cdfee835b97b5004",
+   "decls": {
+    "const READ_SWITCH_KEY": "ec74d78379b98bf70f55",
+    "const DATA_EPOCH_KEY": "60f86231a87982bcd37c",
+    "const SWITCH_ROWS_SQL": "b0ea261f9d75efe95cd7",
+    "const SWITCH_ROWS_PARAMS": "a4b24a47963dd78afa1a",
+    "const KNOWN_READ_SWITCHES": "36aa9ba64a091946cff9",
+    "const readSwitchMemoMs": "70f761d778b80e80bcc0",
+    "const READ_SWITCH_SHADOW_MAX_RATE": "87e382cd4dde2d8eb187",
+    "const SWITCH_HEADER": "606e68d82f328a520997",
+    "const OFF": "95e3e85dd2fd3ed8f564",
+    "const SHADOW_TOKEN": "c60502787ddc1aafb9ac",
+    "const STORED_NAME": "bdfc79a9c899ea822860",
+    "function isKnownReadSwitch": "faba30c56ebf857892aa",
+    "function allOff": "bb775c990c14bafd0d97",
+    "function emptyReadSwitches": "bce9e4ce8819205caa54",
+    "function parseSwitchToken": "57e1f39db90c9b7fec19",
+    "function formatSwitchToken": "356e84d4e7da1c0f9188",
+    "const DATA_EPOCH_PATTERN": "fea62046040f0ad84788",
+    "function parseDataEpoch": "417bd9fe34b3e4275cf2",
+    "function splitSwitchRows": "6f733f8eab9c9680b2cf",
+    "function storedObject": "0cbf86dac1f38250866e",
+    "function parseReadSwitches": "b9c6ecb2f771c9d0ed6d",
+    "function serializeReadSwitches": "0b5f12cd2e67358d4fb0",
+    "function parseFlipState": "2b79b435439d8f86ffa3",
+    "const REQUEST_METRICS_HOOK": "822edc07060262c3874b",
+    "function noteConsulted": "baa1d8ac7abe2400d9ca",
+    "function epochTag": "f19fe272cf863ffc640e",
+    "function createReadSwitchStore": "e06630991b08e11c6fdb",
+    "const SWITCH_FLIP_UPSERT_SQL": "b16c5cf5048a8919b4d6",
+    "const SWITCH_FLIP_GUARD_SQL": "7adaa6758d8193d73f6e",
+    "function buildFlipStatements": "d6a33935139dd4cd786a",
+    "const store": "80b8fe6e5cb3ab68c5d4",
+    "const readSwitchState": "b1ba242ee90ae6949fa2",
+    "const readSwitch": "c9a6f7d46cdcdae54e80",
+    "const primeReadSwitches": "2dcbeea970aa9fdcaf87",
+    "const switchHeaderValue": "1f4fbb27ab4d30ea3c32",
+    "const switchKeySalt": "41c5548f46a73234cec1",
+    "const readDataEpoch": "1e4ea009dced94b250f4",
+    "const epochTagNow": "b21b5c957b5c63f466b5",
+    "const resetReadSwitchMemo": "c1d28a4e1bf66f29dd24",
+    "const runInReadScope": "453d0da19b5c849bec1f",
+    "const BUILD_PATHS": "01170e2ccc061959b4ba",
+    "const BUILD_RETRY_MS": "1e1a76e460bdf9e65db7",
+    "const BUILD_HASH": "031801b6fca5007b17db",
+    "const BUILD_PENDING_MS": "311c1c594fe54ad0eb55",
+    "const builtHash": "39dc67ca79450e6621f0",
+    "function readBuildHash": "dad20143765b85a7ef33",
+    "function frontendBuildHash": "2ed7106a51e33a5dca2d",
+    "const resetBuildHash": "bdc27f72bc078ea19286",
+    "const BUILD_HEADER": "9fbf270081406baeb03f",
+    "const EPOCH_HEADER": "bfc8423761408d4de23a",
+    "function applySignalHeaders": "f527cc439a4ca7ea24fa",
+    "function readSwitchHeader": "06a2d19b25a07820f3cb"
+   }
+  },
   "src/lib/refundMoneyPrecision.ts": {
    "imports": "9305033921112a985923",
    "decls": {
@@ -186,6 +266,20 @@
     "function isRemovalLossComplete": "68058149c58ffd9f861a",
     "function removalLossesByBucket": "fb4721a4b43d9857f0cf",
     "function removalLossTotals": "52ef78d5c9efcec52898"
+   }
+  },
+  "src/lib/reportAtomicSwitch.ts": {
+   "imports": "7b971a99731e80b3b6f3",
+   "decls": {
+    "const REPORT_ATOMIC_SWITCH": "94299673bb20706feac0",
+    "const REPORT_ATOMIC_LONG_SWITCH": "0e37ac6c20c7d2110c05",
+    "const sampler": "6449c59b93d675d35123",
+    "function setReportShadowSamplerForTests": "e940f692bc952f77589f",
+    "function reportAtomicMode": "0c4e1eed6f03de536af8",
+    "function reportCanonicalJson": "3af3e9d996ab9218dcf5",
+    "function differingPaths": "0e1fbd538e085aace3d2",
+    "function shadowCompare": "d768415ab11a00b01408",
+    "function routeReportRead": "a24b52e1e1ca1ada3537"
    }
   },
   "src/lib/reportMoneyPrecision.ts": {
@@ -338,7 +432,7 @@
     "function refundExcessExpr": "1b2e4ea617102fcab00f",
     "const RESTOCKED_RETURN_LINE": "b9d3e318662568bfe880",
     "const CUSTOMER_REFUND_JOIN": "43b9e26d6ddd7d1e808a",
-    "function whereActiveSales": "d4c28c7dc956c763ea24",
+    "function whereActiveSales": "ea69351691383a32c151",
     "function removalLossWindowApplies": "dd4478a36748ffb9402e",
     "function whereRemovalMovements": "d5f95f917de72977852a",
     "function readRemovalLossRows": "9179fea221504805c184",
@@ -346,8 +440,10 @@
     "function withRemovalLosses": "5efa6c531a87b033b149",
     "class SalesReportExportTooLargeError": "1be12bf27424a7beff70",
     "function refuseHeaderOnly": "84ce78f3840e789ff178",
+    "const REPORT_SCOPE_NARROW": "07430994a7b12ea2dbb2",
+    "const REPORT_NARROW_SCOPE_IDS_MAX": "440cc862510a878f4bda",
     "const REPORT_SCOPE_PROVENANCE": "bc7755845cfd4a6257ea",
-    "const REPORT_ATOMIC_PURE_FUNCTIONS": "cd264810435ab106de36",
+    "const REPORT_ATOMIC_PURE_FUNCTIONS": "5559489a3335ee0ef439",
     "const REPORT_ATOMIC_GROUP_KEYWORDS": "3ef86c34ee1947eef9b7",
     "const REPORT_ATOMIC_BLOCKED_KEYWORDS": "76955b7c744cbfff1f24",
     "function reportScopeTokens": "068f5c8ab20447929ad9",
@@ -356,8 +452,21 @@
     "function reportAtomicScopeProvenanceEligible": "e463be0eb75a99da9ebf",
     "function reportAtomicFiltersEligible": "b6b1578f60c0b06464fb",
     "function reportDashboardDateFiltersEligible": "6ea6e5b73f3c49db5851",
-    "function salesListFilterReportScope": "902887bfaf8a7acad572",
-    "function captureSalesReportScalarScope": "c77eb7cabbdb95726dbd",
+    "function salesListFilterReportScope": "ab94e8836ffeae135d63",
+    "function salesListScopedWhere": "1fda43e16d85be33f458",
+    "const REPORT_SCOPE_IDS_MAX": "02641fb0dea12ecbb577",
+    "const REPORT_SCOPE_IDS_MAX_BYTES": "6dfedc386508a3bb5315",
+    "const REPORT_SCOPE_IDS_PARAM": "ce61ded108a8acad849b",
+    "const REPORT_SALE_ID_ORDER": "3be4db3b628ac1ea974a",
+    "const reportScopeIdsParsed": "fa705edd5ad5268dce57",
+    "function reportScopeIdSlices": "37ab433468a43bb8c674",
+    "function reportFirstIdAfter": "72af57189409125adde6",
+    "function salesIdsScope": "39fea76a585d951f2d34",
+    "const LIST_SCOPE_TEXT_SEARCH": "fc485b999c8de083e20d",
+    "const LIST_SCOPE_SUBQUERY": "42374370bfb2f144eadd",
+    "function resolveReportScopeIds": "5eb16b0a580ff1293a49",
+    "function readSalesReportTotalsPinned": "64e173ae17e9d2b0c02b",
+    "function captureSalesReportScalarScope": "392b16c8c28660de922e",
     "function applySalesReportScalarScope": "253f743f33382a0d3e63",
     "const REPORT_COLUMN_TABLES": "c43a12767c8b7edef732",
     "function prefetchReportColumns": "d7ddb4fe1ea5b13d83c6",
@@ -365,7 +474,7 @@
     "function reportRestoreValuesActive": "f27925ee5583786691d8",
     "function reportRestoreActive": "6d0fddee6a403ff04eb0",
     "function assertReportReadable": "cd201c0fe58cbbc92f41",
-    "function reportKeysetRows": "2fe7dc126db9ea536cf9",
+    "function reportKeysetRows": "b67ca58044fb01f0fc31",
     "function reportFilterHasDateWindow": "e7861ca96a258505e4e7",
     "function readReportSaleItems": "d38f7a8846db494d7e0d",
     "function reportRowsEqual": "40c69f340ff3f6555536",
@@ -376,11 +485,14 @@
     "function reportDashboardAllTimeProjectionEligible": "87781cc917aeaeb6fd39",
     "const REPORT_DASHBOARD_OMITTED_HEADER_FIELDS": "a5c07b3f91250f2cb398",
     "function reportSelectForPurpose": "5890201cd8b4ceeab1b0",
+    "const REPORT_VOID_ID_EXPR": "6c1f28aabb0f9e7b40d0",
+    "const reportStatusPredicate": "d40ec01b15ff3a030072",
+    "const reportVoidIdExpr": "ae3800aa8c1955802aa0",
     "function reportDashboardDateContextEligible": "80d3f262186b5dd63c04",
     "function reportDashboardProjectionContextEligible": "5171bbbce0efd1e46d8f",
     "function reportEmptyGroups": "ccc0fa88dadd127a44c1",
     "function reportSnapshotFromPlan": "4575748b5f43a8365632",
-    "function buildSalesReportReadPlan": "aa83b4497f302bb7f241",
+    "function buildSalesReportReadPlan": "3b7436f3c1b03a3f1106",
     "function readSalesReportPass": "4d4310c20a2dd2208886",
     "const REPORT_TOTALS_POLICY": "01598576a4b91ab95f11",
     "const REPORT_TOTALS_FRAME_BYTES": "8b3375fece952a0edd06",
@@ -411,14 +523,14 @@
     "function validateReportReadOptions": "52794176ee6db099802d",
     "function readSalesReportSnapshotForPurpose": "8f32b6521700eea4886f",
     "function readSalesReportCapturedSnapshot": "60f0506743683d3d1237",
-    "function readSalesReportPassLegacy": "f03e346201b2d6eb3d90",
+    "function readSalesReportPassLegacy": "25e4b0f65285fa5ba42e",
     "function readSalesReportSnapshotLegacy": "bb3eedb2b510d26ec31f",
     "function routeReportRead": "9137338e953ae2296fd4",
     "function reportPlainFilters": "affb5d2bcf22959995c8",
     "function readSalesReportSnapshotAtomic": "678844f122c8c0e778e8",
     "function readSalesReportSnapshot": "32e92004c4b272b55ce4",
     "function readSalesReportTotals": "5cf89b14dc1dc8cf0de1",
-    "function readSalesHeaderTotals": "7a390bff60b90cea8df7",
+    "function readSalesHeaderTotals": "28511e9dabe50060e303",
     "function readSalesReportTotalsRouted": "5526fd2494183f2e85b9",
     "function readSalesReportTotalsAtomic": "890032d1fecd19d718f7",
     "const REPORT_EXACT_KEYS": "c922df5271b1c079d419",
@@ -482,9 +594,9 @@
     "function exportProductSplitFromSnapshot": "96d5a6845b5a1838eb11",
     "function paymentMethodBreakdownFromSnapshot": "5e120d6b8f759d677f42",
     "function getPaymentMethodBreakdown": "6a04414fcae3e11e976e",
-    "function deliveryContactTotalsFromSnapshot": "8a2f2f9c91821828f096",
+    "function deliveryContactTotalsFromSnapshot": "4aa1c34eef490ce4a0bf",
     "function getSalesOverviewBlocks": "103044151ca4b5ba95ce",
-    "function getDeliveryContactTotals": "685652f4e15a17054e21",
+    "function getDeliveryContactTotals": "2d3bdf7ff2ad5d074b85",
     "function getCustomerSalesTotals": "b2b699f63fea5a861e4a",
     "function getSalesDayReport": "dee97565c6f98e294709",
     "function previousPeriodFilters": "78f93179075b6b9b7c58",
