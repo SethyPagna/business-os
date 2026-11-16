@@ -1,6 +1,6 @@
 import type { D1Compat } from './db'
 import type { MergedCostOutlier } from './productDetailRule'
-import { weightedMeanMoney4 } from './moneyPrecision'
+import { roundMoney4, weightedMeanMoney4 } from './moneyPrecision'
 
 // A cost read from a row, unknown (NULL) kept as null. Local on purpose: this lib is loaded alone by many source tests that stub
 // every other relative import.
@@ -75,7 +75,12 @@ const OVERRIDDEN_ON_HAND_QTY_SQL = `(SELECT SUM(bbs.quantity) FROM branch_batch_
 // far above double error and far above the nudge.
 const HALF_UP_4DP = (value: string) => `CAST(${value} * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0`
 
-export type CatalogCostInputPolicy = 'legacy' | 'validated'
+/**
+ * 'legacy' = the 0195 / 0255 text; 'validated' = the current text (typed positive input, and the sold-out fallback rounded to 4 places like the
+ * weighted branch); 'validated-unrounded' = what 0256 and 0261 shipped (the fallback copies the lot cost verbatim). The last exists only so
+ * those migrations' pins and the 0312 recovery notes can still name their exact text.
+ */
+export type CatalogCostInputPolicy = 'legacy' | 'validated' | 'validated-unrounded'
 
 function positiveCostSql(value: string, inputPolicy: CatalogCostInputPolicy): string {
   return inputPolicy === 'legacy'
@@ -95,7 +100,7 @@ function buildCatalogCostFormulaSql(inputPolicy: CatalogCostInputPolicy): Readon
         SELECT pce.cost_usd AS cost, ${OVERRIDDEN_ON_HAND_QTY_SQL} AS qty FROM product_cost_entries pce
         WHERE pce.id = ${LATEST_MANUAL_ENTRY_ID_SQL}
           AND ${positiveCostSql('pce.cost_usd', inputPolicy)})),
-    (SELECT pb.unit_cost_usd FROM product_batches pb
+    (SELECT ${inputPolicy === 'validated' ? HALF_UP_4DP('pb.unit_cost_usd') : 'pb.unit_cost_usd'} FROM product_batches pb
       WHERE ${eligibleLot}
       ORDER BY COALESCE(pb.received_at, '') DESC, pb.id DESC LIMIT 1))` }
 }
@@ -103,6 +108,7 @@ function buildCatalogCostFormulaSql(inputPolicy: CatalogCostInputPolicy): Readon
 const CATALOG_COST_FORMULAS = {
   legacy: Object.freeze(buildCatalogCostFormulaSql('legacy')),
   validated: Object.freeze(buildCatalogCostFormulaSql('validated')),
+  'validated-unrounded': Object.freeze(buildCatalogCostFormulaSql('validated-unrounded')),
 }
 
 export function catalogCostFormulaSql(inputPolicy: CatalogCostInputPolicy = 'validated'): Readonly<{ derive: string; hasRecordedLot: string }> {
@@ -148,6 +154,7 @@ function buildCatalogCostChangedSql(inputPolicy: CatalogCostInputPolicy): string
 const CATALOG_COST_WRITES = {
   legacy: Object.freeze({ set: buildCatalogCostSetSql('legacy'), changed: buildCatalogCostChangedSql('legacy') }),
   validated: Object.freeze({ set: buildCatalogCostSetSql('validated'), changed: buildCatalogCostChangedSql('validated') }),
+  'validated-unrounded': Object.freeze({ set: buildCatalogCostSetSql('validated-unrounded'), changed: buildCatalogCostChangedSql('validated-unrounded') }),
 }
 
 /**
@@ -536,7 +543,9 @@ export function buildCatalogCostBreakdown(
     return { ...base, weight_quantity: overriddenOnHand, share: shareOf(overriddenOnHand), excluded: null }
   })
 
-  const fallbackCost = positiveCost(fallbackLot?.unit_cost_usd)
+  // The SQL fallback rounds the newest lot's cost to 4 places (HALF_UP_4DP); the breakdown must show the figure that is stored.
+  const fallbackLotCost = positiveCost(fallbackLot?.unit_cost_usd)
+  const fallbackCost = fallbackLotCost === null ? null : roundMoney4(fallbackLotCost)
   const derivedUsd = weightedMean ?? fallbackCost
   const resultUsd = derivedUsd != null ? derivedUsd : knownCost(product.cost_price_usd)
   const distinctUsd = [...new Set(weightedTerms.map((term) => term.cost_usd).concat(fallbackCost !== null ? [fallbackCost] : []))].sort((a, b) => a - b)

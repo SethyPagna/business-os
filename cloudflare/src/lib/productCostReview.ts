@@ -182,7 +182,7 @@ BEGIN SELECT RAISE(ABORT,'product_cost_review_write_refused'); END;
 `
 }
 
-export function productCostReviewConfirmationGuardSql(): string {
+export function productCostReviewConfirmationGuardSql({ inputPolicy = 'validated' }: { inputPolicy?: CatalogCostInputPolicy } = {}): string {
   const event = "CASE WHEN json_valid(a.details) THEN a.details ELSE '{}' END"
   const unchanged = COST_REVIEW_MONEY_FIELDS.map(field => `NEW.${field} IS OLD.${field}`).join(' AND ')
   const confirmation = `AND NOT EXISTS(SELECT 1 FROM audit_logs a WHERE a.action='cost_override' AND a.entity='product' AND a.entity_id=CAST(OLD.id AS TEXT)
@@ -196,5 +196,5 @@ export function productCostReviewConfirmationGuardSql(): string {
     AND json_extract(${event},'$.cost_review.revision_before')=COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(OLD.id AS TEXT)),0)
     AND json_extract(${event},'$.cost_review.after_usd') IS NEW.cost_price_usd AND json_extract(${event},'$.cost_review.after_khr') IS NEW.cost_price_khr)
   `
-  return productCostReviewUpdateGuardSql().replace('  AND NOT EXISTS(SELECT 1 FROM audit_logs a', `  ${confirmation}AND NOT EXISTS(SELECT 1 FROM audit_logs a`)
+  return productCostReviewUpdateGuardSql({ inputPolicy }).replace('  AND NOT EXISTS(SELECT 1 FROM audit_logs a', `  ${confirmation}AND NOT EXISTS(SELECT 1 FROM audit_logs a`)
 }

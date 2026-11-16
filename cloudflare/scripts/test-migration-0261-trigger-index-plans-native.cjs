@@ -81,9 +81,9 @@ async function main() {
   await check('migration text: generator triggers, name triggers with only + added, exact index expression, LF-only', async () => {
     assert.ok(!migrationText.includes('\r'), 'LF-only (wrangler splits trigger bodies on /\\sEND[;\\s]$/)')
     const drops = (names) => names.map((n) => `DROP TRIGGER IF EXISTS ${n};\n`).join('')
-    assert.ok(migrationText.includes(drops(CATALOG) + costs.catalogCostReviewTriggersSql()), 'catalog triggers are catalogCostReviewTriggersSql()')
-    assert.ok(costs.catalogCostReviewTriggersSql().includes('+is_active') && !/WHERE is_active/.test(costs.catalogCostReviewTriggersSql()))
-    assert.ok(read('0256_validated_catalog_cost.sql').endsWith(costs.catalogCostReviewTriggersSql({ primaryKeyPlan: false })), 'recovery: primaryKeyPlan:false is 0256 text')
+    assert.ok(migrationText.includes(drops(CATALOG) + costs.catalogCostReviewTriggersSql({ inputPolicy: 'validated-unrounded' })), 'catalog triggers are catalogCostReviewTriggersSql()')
+    assert.ok(costs.catalogCostReviewTriggersSql({ inputPolicy: 'validated-unrounded' }).includes('+is_active') && !/WHERE is_active/.test(costs.catalogCostReviewTriggersSql({ inputPolicy: 'validated-unrounded' })))
+    assert.ok(read('0256_validated_catalog_cost.sql').endsWith(costs.catalogCostReviewTriggersSql({ inputPolicy: 'validated-unrounded', primaryKeyPlan: false })), 'recovery: primaryKeyPlan:false is 0256 text')
     assert.ok(migrationText.includes(drops(NAME.map(([n]) => n))))
     const body = (text, prefix, name) => { const i = text.indexOf(`${prefix} ${name}\n`); assert.ok(i >= 0, name); return text.slice(i + prefix.length + 1, text.indexOf('\nEND;', i) + 5) }
     for (const [name, file] of NAME) {
@@ -130,7 +130,7 @@ async function main() {
   })
 
   await check('chain: full chain applies, a re-run changes nothing, a missing trigger aborts the file', async () => {
-    const db = chainDb(() => true)
+    const db = chainDb((f) => f <= MIGRATION)
     const schema = () => JSON.stringify(db.prepare('SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name').all())
     const first = schema()
     db.exec(migrationText)
@@ -176,7 +176,7 @@ function mulberry32(seed) {
 
 function equivalence(mutate) {
   const oldDb = chainDb(before0261)
-  const newDb = chainDb(() => true)
+  const newDb = chainDb((f) => f <= MIGRATION)
   if (mutate) mutate(newDb)
   const dbs = [oldDb, newDb]
   const NAMES = ['Rose Serum', 'rose serum ', ' ROSE SERUM', 'Lip Balm', 'lip balm', 'Night Cream', '', 'Toner', 'toner', 'Mask 01', 'Mask 02']
