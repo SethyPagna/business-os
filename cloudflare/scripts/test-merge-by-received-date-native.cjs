@@ -96,7 +96,7 @@ function world() {
   return h
 }
 
-const LOT_COLUMNS = 'merge_deactivated_at IS NOT NULL AS merge_marked,merge_payable_moved IS NOT NULL AS payable_moved,id,variant_product_id,batch_key,batch_number,lot_code,received_at,expiry_date,unit_cost_usd,is_active,supplier_id,supplier_name,payment_status,credit_due_date,received_quantity,received_cost_usd,received_branch_id'
+const LOT_COLUMNS = 'merge_deactivated_at IS NOT NULL AS merge_marked,id,variant_product_id,batch_key,batch_number,lot_code,received_at,expiry_date,unit_cost_usd,is_active,supplier_id,supplier_name,payment_status,credit_due_date,received_quantity,received_cost_usd,received_branch_id'
 function lots(h) { return plain(h.raw.prepare(`SELECT ${LOT_COLUMNS} FROM product_batches ORDER BY id`).all()) }
 function lot(h, id) { return lots(h).find((row) => row.id === id) }
 function lotStock(h) {
@@ -525,42 +525,75 @@ async function main() {
     assert.equal(lot(z, 105).unit_cost_usd, 0, 'both $0 stays $0')
   })
 
-  // ---- owner 6 Oct: a lot with no supplier merges into the one that has a supplier --------------------------------------
+  // ---- lead ruling 16 Nov: the kept lot NEVER takes a duplicate's supplier; the payable stays on the source lot -------------
+  // Payables are counted per receipt. Kept lot 105 has no supplier (paid, received 3 for $12). The lot added to it, 206, is on credit
+  // from supplier 2 (received 1 for $6, due in 3 days). Supplier 2's payable is exactly 206's $6, counted once, and 105's own
+  // $12 receipt is never attributed to supplier 2.
   const supplierWorld = () => {
     const w = world()
-    // Kept lot 105 has no supplier (paid, no due date). The lot added to it, 206, owes supplier 2 on credit due in 3 days.
     fixtureWrite(w, () => w.raw.db.exec(`UPDATE product_batches SET supplier_id=NULL, supplier_name=NULL, payment_status='paid', credit_due_date=NULL WHERE id=105;
-      UPDATE product_batches SET payment_status='credit' WHERE id=206;
+      UPDATE product_batches SET payment_status='credit', received_quantity=1, received_cost_usd=6 WHERE id=206;
       UPDATE product_batches SET credit_due_date=date('now','+3 day') WHERE payment_status='credit'`))
     return w
   }
-  await check('supplier: a kept lot with none takes the added lot supplier, payment status and due date; a kept lot with a supplier keeps its own', async () => {
+  const ownFields = (row) => ({ supplier_id: row.supplier_id, supplier_name: row.supplier_name, payment_status: row.payment_status, credit_due_date: row.credit_due_date })
+  const supplierFigures = async (w) => {
+    const invoices = await supplierReport(w)
+    assert.equal(invoices.status, 200, JSON.stringify(invoices.json))
+    const bought = await purchases(w, 2)
+    assert.equal(bought.status, 200, JSON.stringify(bought.json))
+    return { invoices: invoices.json, totals: bought.json.totals }
+  }
+  const strip = (value) => JSON.parse(JSON.stringify(value, (key, v) => (key === 'remaining_quantity' || key === 'product_name' || key === 'products' ? undefined : v)))
+  await check('supplier: the kept lot keeps its own supplier, payment status and due date (empty stays empty); the duplicate keeps its own on the inactive source lot', async () => {
     const w = supplierWorld()
-    const dueBefore = lot(w, 206).credit_due_date
+    const keptBefore = ownFields(lot(w, 105))
+    const sourceBefore = ownFields(lot(w, 206))
+    assert.deepEqual(keptBefore, { supplier_id: null, supplier_name: null, payment_status: 'paid', credit_due_date: null })
+    assert.equal(sourceBefore.supplier_id, 2)
     assert.equal((await merge(w)).status, 200)
-    const kept = lot(w, 105)
-    assert.deepEqual({ supplier_id: kept.supplier_id, supplier_name: kept.supplier_name, payment_status: kept.payment_status, credit_due_date: kept.credit_due_date },
-      { supplier_id: 2, supplier_name: 'Sup D', payment_status: 'credit', credit_due_date: dueBefore })
-    // 101 already had supplier 1 and 201 (supplier 2, credit) folded into it: 101 keeps supplier 1.
+    assert.deepEqual(ownFields(lot(w, 105)), keptBefore, 'kept lot still has no supplier and is still paid')
+    assert.equal(lot(w, 105).received_cost_usd, 12, 'its own receipt is untouched')
+    assert.deepEqual(ownFields(lot(w, 206)), sourceBefore, 'the source lot keeps supplier 2 and its credit')
+    assert.equal(lot(w, 206).is_active, 0)
+    assert.equal(lot(w, 206).merge_marked, 1)
+    // 101 already had supplier 1 and 201 (supplier 2, credit) folded into it: 101 keeps supplier 1, paid.
     assert.equal(lot(w, 101).supplier_id, 1)
     assert.equal(lot(w, 101).payment_status, 'paid')
-    assert.equal((await historyAction(w, 'undo')).status, 200)
-    const back = lot(w, 105)
-    assert.deepEqual({ supplier_id: back.supplier_id, supplier_name: back.supplier_name, payment_status: back.payment_status, credit_due_date: back.credit_due_date },
-      { supplier_id: null, supplier_name: null, payment_status: 'paid', credit_due_date: null }, 'undo puts the kept lot supplier fields back exactly')
   })
-  await check('supplier: the payable moved to the kept lot is reminded once (the donor lot is skipped), and undo restores both', async () => {
+  await check('supplier: payables total, stock-in invoice report and credit reminder count the duplicate receipt exactly once, and the kept lot stays unattributed', async () => {
     const w = supplierWorld()
     const prior = state(w)
-    assert.deepEqual(await reminderIds(w), { count: 4, ids: [103, 201, 203, 206] }, 'before the merge')
+    const before = await supplierFigures(w)
+    // Supplier 2's open credit: lots 201 ($12), 203 ($5) and 206 ($6). Lot 105 ($12, no supplier) is not among them.
+    assert.equal(before.totals.credit_open_usd, 23)
+    assert.equal(before.totals.credit_batches, 3)
+    assert.deepEqual(await reminderIds(w), { count: 4, ids: [103, 201, 203, 206] })
     assert.equal((await merge(w)).status, 200)
-    assert.equal(lot(w, 206).merge_marked, 1)
-    assert.equal(lot(w, 206).payable_moved, 1, 'the donor lot is marked: its payable now lives on the kept lot')
-    assert.deepEqual(await reminderIds(w), { count: 4, ids: [103, 105, 201, 203] }, 'the kept lot 105 reminds for the credit it took from 206, once; 206 is not counted again; 201 and 203 (their kept lots have suppliers) still remind')
+    const after = await supplierFigures(w)
+    assert.equal(after.totals.credit_open_usd, 23, 'payables total: 206 counted once, 105 never added')
+    assert.equal(after.totals.credit_batches, 3)
+    assert.deepEqual(strip(after.totals), strip(before.totals), 'every supplier 2 total is unchanged by the merge')
+    assert.deepEqual(after.invoices, before.invoices, 'the stock-in invoice report is unchanged: the kept lot is not a supplier 2 line')
+    const attributed = plain(w.raw.prepare("SELECT id FROM product_batches WHERE supplier_id = 2 AND payment_status = 'credit' ORDER BY id").all()).map((row) => row.id)
+    assert.deepEqual(attributed, [201, 203, 206], 'the credit lots of supplier 2 are the three source records; 105 is not one')
+    assert.deepEqual(await reminderIds(w), { count: 4, ids: [103, 201, 203, 206] }, 'the reminder counts 206 once through its marker; 105 never reminds')
     assert.equal((await historyAction(w, 'undo')).status, 200)
-    assert.equal(lot(w, 206).payable_moved, 0)
+    assert.equal(lot(w, 206).merge_marked, 0, 'undo clears the marker')
+    assert.deepEqual(ownFields(lot(w, 105)), { supplier_id: null, supplier_name: null, payment_status: 'paid', credit_due_date: null })
     assert.deepEqual(await reminderIds(w), { count: 4, ids: [103, 201, 203, 206] }, 'after undo')
-    assert.equal(state(w), prior)
+    assert.equal(state(w), prior, 'undo restores the exact prior state')
+    assert.deepEqual(await supplierFigures(w), before)
+  })
+  await check('supplier: merging the same world twice (double apply) never moves a payable onto the kept lot', async () => {
+    const w = supplierWorld()
+    assert.equal((await merge(w)).status, 200)
+    const once = state(w)
+    const again = await merge(w)
+    assert.notEqual(again.status, 500, JSON.stringify(again.json))
+    assert.deepEqual(ownFields(lot(w, 105)), { supplier_id: null, supplier_name: null, payment_status: 'paid', credit_due_date: null })
+    assert.deepEqual(await reminderIds(w), { count: 4, ids: [103, 201, 203, 206] })
+    if (again.status !== 200) assert.equal(state(w), once, 'a refused second apply writes nothing')
   })
 
   // ---- a later edit of a lot the merge rewrote must not be overwritten by undo's before-image ---------------------------

@@ -3,10 +3,10 @@
 //   * same business day (Cambodia UTC+7): add; no same-day kept lot: create; no date: create;
 //   * several kept lots on the day: lowest batch_number, then id;
 //   * the kept lot carries the QUANTITY-WEIGHTED average cost (owner 5 Oct), a $0 or unknown cost left out of the weights (6 Oct),
-//     rounded to 4 places by the one money helper; the earliest non-null expiry; and, when it has no supplier, an added lot's
-//     supplier with its payment status and due date (6 Oct).
+//     rounded to 4 places by the one money helper; the earliest non-null expiry; and its OWN supplier,
+//     payment status and due date, never an added lot's (lead ruling 16 Nov: payables are counted per receipt).
 // Each assertion is chosen so that the wrong implementation (batch_key match, UTC date, plain mean, $0 in the weights,
-// no rounding, latest expiry, supplier not taken) fails it.
+// no rounding, latest expiry, supplier taken) fails it.
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -147,7 +147,7 @@ check('plan: same date with different cost and expiry (the owner example), weigh
   const [plan] = lots.planFoldedLotMetadata(keeper, dup)
   assert.deepEqual({ ...plan }, {
     keeperLotId: 1, duplicateLotIds: [10], receivedDate: '2026-11-03',
-    unit_cost_usd: 2.2, expiry_date: '2027-01-31', costChanged: true, expiryChanged: false, supplier: null,
+    unit_cost_usd: 2.2, expiry_date: '2027-01-31', costChanged: true, expiryChanged: false,
   })
   // The same lots with unequal stock: 2 x 2 + 8 x 2.4 = 23.2 / 10 = 2.32 (a plain mean would still say 2.2).
   const [unequal] = lots.planFoldedLotMetadata(keeper, dup, undefined, new Map([[1, 2], [10, 8]]))
@@ -174,21 +174,14 @@ check('plan: two discarded lots into one kept lot are one group (one write, clus
   assert.equal(plan[0].unit_cost_usd, 5.3, '(2*4 + 3*5 + 5*6) / 10')
 })
 
-check('supplier: a kept lot with none takes an added lot supplier, payment status and due date; one that has a supplier keeps its own', () => {
+check('supplier: the plan never carries a supplier, whatever the kept lot has or the added lots owe', () => {
   const dup = lot(10, '2026-11-03', { unit_cost_usd: 2, lot_quantity: 1, ...supplied })
-  const [takes] = lots.planFoldedLotMetadata([lot(1, '2026-11-03', { unit_cost_usd: 2, lot_quantity: 1, ...noSupplier })], [dup])
-  assert.deepEqual({ ...takes.supplier }, { supplier_id: 5, supplier_name: 'Sup', payment_status: 'credit', credit_due_date: '2026-12-01', fromLotId: 10 })
-  const [keeps] = lots.planFoldedLotMetadata([lot(1, '2026-11-03', { unit_cost_usd: 2, lot_quantity: 1, supplier_id: 9, supplier_name: 'Own', payment_status: 'paid', credit_due_date: null })], [dup])
-  assert.equal(keeps.supplier, null, 'its own supplier stays')
-  // A supplier named only by name counts as a supplier; an empty string and a zero id do not.
-  const [byName] = lots.planFoldedLotMetadata([lot(1, '2026-11-03', { supplier_id: null, supplier_name: 'Only name' })], [dup])
-  assert.equal(byName.supplier, null)
-  const [empty] = lots.planFoldedLotMetadata([lot(1, '2026-11-03', { supplier_id: 0, supplier_name: '  ' })], [dup])
-  assert.equal(empty.supplier.fromLotId, 10)
-  // Neither side has one: nothing to take. Several donors: the lowest batch_number (then id) gives.
-  assert.equal(lots.planFoldedLotMetadata([lot(1, '2026-11-03', noSupplier)], [lot(10, '2026-11-03', noSupplier)])[0].supplier, null)
-  const [two] = lots.planFoldedLotMetadata([lot(1, '2026-11-03', noSupplier)], [lot(11, '2026-11-03', { batch_number: 7, ...supplied, supplier_id: 7 }), lot(10, '2026-11-03', { batch_number: 3, ...supplied, supplier_id: 3 })])
-  assert.equal(two.supplier.supplier_id, 3)
+  for (const keeper of [noSupplier, { supplier_id: 9, supplier_name: 'Own', payment_status: 'paid', credit_due_date: null }, { supplier_id: null, supplier_name: 'Only name' }]) {
+    const [plan] = lots.planFoldedLotMetadata([lot(1, '2026-11-03', { unit_cost_usd: 2, lot_quantity: 1, ...keeper })], [dup])
+    assert.equal('supplier' in plan, false, 'the plan has no supplier to write')
+    assert.equal(Object.keys(plan).some((key) => /supplier|payment|credit/i.test(key)), false)
+  }
+  assert.equal(typeof lots.lotHasSupplier, 'undefined', 'no supplier-take helper remains')
 })
 
 check('plan: nothing is planned for a lot with no same-date kept lot', () => {

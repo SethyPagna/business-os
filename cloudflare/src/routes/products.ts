@@ -4745,7 +4745,7 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
     saleItemIds?: number[]
     returnItemIds?: number[]
     /** The kept lot's own cost, expiry and activity before this fold changed them; undo puts them back. */
-    keeperLotBefore?: { unit_cost_usd: number | null; expiry_date: string | null; is_active: number | null; supplierBefore?: { supplier_id: number | null; supplier_name: string | null; payment_status: string | null; credit_due_date: string | null }; supplierFromLotId?: number }
+    keeperLotBefore?: { unit_cost_usd: number | null; expiry_date: string | null; is_active: number | null }
     receivedDate?: string
   }> = []
   // 16 Nov 2026: lots match by received DATE (lib/productMergeLots.ts), not by batch_key. One shared plan: the
@@ -4844,7 +4844,7 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
       statements.push({ sql: 'UPDATE sale_items SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId', params: { keeperBatchId: existingCanonicalBatchId, dupBatchId: batchRow.id } })
       statements.push({ sql: 'UPDATE return_items SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId', params: { keeperBatchId: existingCanonicalBatchId, dupBatchId: batchRow.id } })
       // The kept lot carries the mean of the distinct non-zero costs and the earliest expiry across every lot added
-      // into it, written once however many discarded lots land there. Supplier, lot code and payment stay its own.
+      // into it, written once however many discarded lots land there. Supplier, lot code, payment status and due date stay its own, even when empty.
       const keeperLotPlan = foldedLotPlanByKeeperId.get(existingCanonicalBatchId)
       const keeperLotBefore = canonicalLotById.get(existingCanonicalBatchId)
       if (keeperLotPlan && !foldedKeeperLotsWritten.has(existingCanonicalBatchId)) {
@@ -4856,18 +4856,6 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
             params: { id: existingCanonicalBatchId, unitCost: keeperLotPlan.unit_cost_usd, expiry: keeperLotPlan.expiry_date },
           })
         }
-        // A kept lot with no supplier takes the supplier of an added lot that has one, with its payment status and due date
-        // (owner 6 Oct). The donor lot's payable now lives on the kept lot, so the donor is marked and the credit reminder
-        // counts that payable once (migration 0311's merge_payable_moved).
-        if (keeperLotPlan.supplier) {
-          keeperLotMetadataWritten = true
-          const { fromLotId, ...taken } = keeperLotPlan.supplier
-          statements.push({
-            sql: 'UPDATE product_batches SET supplier_id = @supplierId, supplier_name = @supplierName, payment_status = @paymentStatus, credit_due_date = @creditDueDate, updated_at = CURRENT_TIMESTAMP WHERE id = @id',
-            params: { id: existingCanonicalBatchId, supplierId: taken.supplier_id, supplierName: taken.supplier_name, paymentStatus: taken.payment_status, creditDueDate: taken.credit_due_date },
-          })
-          statements.push({ sql: 'UPDATE product_batches SET merge_payable_moved = 1 WHERE id = @id', params: { id: fromLotId } })
-        }
       }
       const justFolded = foldedBatches[foldedBatches.length - 1]
       justFolded.receivedDate = keeperLotPlan?.receivedDate
@@ -4876,16 +4864,6 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
           unit_cost_usd: keeperLotBefore.unit_cost_usd == null ? null : Number(keeperLotBefore.unit_cost_usd),
           expiry_date: keeperLotBefore.expiry_date == null ? null : String(keeperLotBefore.expiry_date),
           is_active: keeperLotBefore.is_active == null ? null : Number(keeperLotBefore.is_active),
-          // Exact supplier fields before the kept lot took an added lot's supplier; undo puts them back.
-          ...(keeperLotPlan?.supplier ? {
-            supplierBefore: {
-              supplier_id: keeperLotBefore.supplier_id == null ? null : Number(keeperLotBefore.supplier_id),
-              supplier_name: keeperLotBefore.supplier_name == null ? null : String(keeperLotBefore.supplier_name),
-              payment_status: keeperLotBefore.payment_status == null ? null : String(keeperLotBefore.payment_status),
-              credit_due_date: keeperLotBefore.credit_due_date == null ? null : String(keeperLotBefore.credit_due_date),
-            },
-            supplierFromLotId: keeperLotPlan.supplier.fromLotId,
-          } : {}),
         }
       }
       batchesFoldedThisDup += 1

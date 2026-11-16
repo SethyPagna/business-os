@@ -456,9 +456,8 @@ async function buildSupplierCreditSection(env: Env, days: number): Promise<Notif
     FROM product_batches pb
     JOIN products p ON p.id = pb.variant_product_id
     -- A supplier payable is owed whatever the lot's stock state: a lot a merge deactivated keeps reminding.
-    -- Lots deactivated by a revert, a product delete or a manual deactivate keep their own intent. A merge-deactivated lot whose
-    -- supplier and credit moved onto the kept lot (merge_payable_moved) is counted there, once.
-    WHERE (pb.is_active = 1 OR (pb.merge_deactivated_at IS NOT NULL AND pb.merge_payable_moved IS NULL))
+    -- Lots deactivated by a revert, a product delete or a manual deactivate keep their own intent.
+    WHERE (pb.is_active = 1 OR pb.merge_deactivated_at IS NOT NULL)
       AND pb.payment_status = 'credit'
       AND (pb.received_quantity IS NULL OR pb.received_quantity > 0 OR COALESCE(pb.received_cost_usd, 0) > 0)
       AND pb.credit_due_date IS NOT NULL AND trim(pb.credit_due_date) != ''

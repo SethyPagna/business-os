@@ -27,9 +27,11 @@ import { meanMoney4, weightedMeanMoney4 } from './moneyPrecision'
 //         total 0 the kept lot's own cost stands. Rounded to 4 places by the
 //         one rounding the cost writers use (moneyPrecision).
 //       - EXPIRY: the earliest non-null.
-//       - SUPPLIER: its own, unless it has none and an added lot has one (owner
-//         6 Oct), then that lot's supplier with its payment status and due date.
-//     Lot code stays its own.
+//       - SUPPLIER, payment status, credit due date and lot code: its own, unchanged,
+//         even when empty (lead ruling 16 Nov: payables are counted per receipt, so
+//         taking a duplicate's supplier would make the kept lot's OWN receipt payable
+//         to a supplier it was never bought from). The added lot's supplier and payable
+//         stay on its own inactive source record, counted once through merge_deactivated_at.
 //   * No same-date kept lot: the duplicate lot is re-pointed as a new lot.
 //   * Several kept lots on that date: the lowest batch_number takes it (then
 //     the lowest id), so the choice never depends on read order.
@@ -127,21 +129,6 @@ export function foldedLotCost(keeper: CostedLot, added: readonly CostedLot[]): n
   return weightedMeanMoney4(bearing.map((lot) => ({ amount: lot.cost, factor: lot.quantity })), totalQuantity)
 }
 
-export type LotSupplier = { supplier_id: number | null; supplier_name: string | null; payment_status: string | null; credit_due_date: string | null }
-
-/** A lot has a supplier when it names one by id or by name (a lot with neither merges into one that has). */
-export function lotHasSupplier(lot: MergeLotRow): boolean {
-  const id = lot.supplier_id == null || lot.supplier_id === '' ? 0 : Number(lot.supplier_id)
-  return (Number.isFinite(id) && id > 0) || String(lot.supplier_name ?? '').trim() !== ''
-}
-
-const supplierOf = (lot: MergeLotRow): LotSupplier => ({
-  supplier_id: lot.supplier_id == null || lot.supplier_id === '' ? null : Number(lot.supplier_id),
-  supplier_name: lot.supplier_name == null ? null : String(lot.supplier_name),
-  payment_status: lot.payment_status == null ? null : String(lot.payment_status),
-  credit_due_date: lot.credit_due_date == null ? null : String(lot.credit_due_date),
-})
-
 /** The earliest non-empty expiry across the kept lot and the lots added; the kept lot's own when none has one. */
 export function foldedLotExpiry(keeperExpiry: unknown, addedExpiries: readonly unknown[]): string | null {
   const present = [keeperExpiry, ...addedExpiries].map((value) => String(value ?? '').trim()).filter(Boolean)
@@ -157,8 +144,6 @@ export type FoldedLotMetadata = {
   expiry_date: string | null
   costChanged: boolean
   expiryChanged: boolean
-  /** Set when the kept lot has no supplier and an added lot has one: that lot's supplier, payment status and due date. */
-  supplier: (LotSupplier & { fromLotId: number }) | null
 }
 
 /**
@@ -185,8 +170,6 @@ export function planFoldedLotMetadata(
     const added = duplicateLotIds.map((id) => duplicateById.get(id)!)
     const unit_cost_usd = foldedLotCost({ cost: keeper.unit_cost_usd, quantity: quantityOf(keeper) }, added.map((lot) => ({ cost: lot.unit_cost_usd, quantity: quantityOf(lot) })))
     const expiry_date = foldedLotExpiry(keeper.expiry_date, added.map((lot) => lot.expiry_date))
-    // The lowest batch_number (then id) among the added lots that name a supplier, when the kept lot names none.
-    const donor = lotHasSupplier(keeper) ? undefined : [...added].sort(lotOrder).find(lotHasSupplier)
     const same = (a: unknown, b: unknown) => (a == null || a === '' ? null : String(a)) === (b == null || b === '' ? null : String(b))
     return {
       keeperLotId,
@@ -196,7 +179,6 @@ export function planFoldedLotMetadata(
       expiry_date,
       costChanged: !same(keeper.unit_cost_usd, unit_cost_usd),
       expiryChanged: !same(keeper.expiry_date, expiry_date),
-      supplier: donor ? { ...supplierOf(donor), fromLotId: Number(donor.id) } : null,
     }
   })
 }
