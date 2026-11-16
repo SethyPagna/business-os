@@ -183,9 +183,9 @@ import type { PromotionRule } from '../../utils/promotionRules.ts'
 import type { LowStockConfig } from '../../utils/lowStockSettings.ts'
 import type { BulkDeleteJobStatus } from '../../api/productWriteTransport.ts'
 import { getPossiblySameProducts } from '../../api/productWriteTransport.ts'
-import { dismissProductClusterAndRefresh } from '../shared/twinDismissalsTransport.ts'
+import { dismissProductClustersAndRefresh } from '../shared/twinDismissalsTransport.ts'
 import { useMergeStockChoice } from './useMergeStockChoice.tsx'
-import { buildExactDuplicateIndex, extractDuplicateClusters, findRowDuplicateInfo, type ExactDuplicateInfo } from '../../utils/exactDuplicateProducts.ts'
+import { buildExactDuplicateIndex, clustersListingProducts, extractDuplicateClusters, findRowDuplicateInfo, type ExactDuplicateInfo } from '../../utils/exactDuplicateProducts.ts'
 import DuplicateResolverControl from './DuplicateResolverControl.tsx'
 import UnmergedTwinTag from './UnmergedTwinTag.tsx'
 import { unmergedTwinHint } from './unmergedTwinHint.ts'
@@ -3481,13 +3481,17 @@ function ProductsFullEditor() {
     }
   }, [dupResolverBusyKey, load, mergeWithChoice, notify, refreshDuplicateClusters, t])
 
-  // "Keep both": dismiss the barcode cluster (these are genuinely different
-  // items), so the sweep stops flagging it -- the false-positive escape hatch.
+  // "Keep both": dismiss every Conflicts cluster that lists this pair (these are genuinely different
+  // items), so the sweep stops flagging it -- the false-positive escape hatch. The barcode cluster is always one of them; a pair inside a variant
+  // family is held by the name cluster too, and the toast below is only true once that is dismissed as well. One re-read of the rulings after them all.
   const handleDuplicateKeepBoth = useCallback(async (info: ExactDuplicateInfo) => {
     if (dupResolverBusyKey) return
     setDupResolverBusyKey(info.key)
     try {
-      await dismissProductClusterAndRefresh('barcode', info.barcode)
+      const rulings = clustersListingProducts(extractDuplicateClusters(duplicateClusters), info.members.map((member) => Number(member.id)))
+      if (!rulings.some((ruling) => ruling.type === 'barcode' && ruling.value === info.barcode)) rulings.unshift({ type: 'barcode', value: info.barcode })
+      const { failed } = await dismissProductClustersAndRefresh(rulings)
+      if (failed.length) throw failed[0].error
       notify(t('product_duplicate_kept_both') || 'Kept both — no longer flagged as duplicates')
       await refreshDuplicateClusters(true)
     } catch (e) {
@@ -3495,7 +3499,7 @@ function ProductsFullEditor() {
     } finally {
       setDupResolverBusyKey(null)
     }
-  }, [dupResolverBusyKey, notify, refreshDuplicateClusters, t])
+  }, [dupResolverBusyKey, duplicateClusters, notify, refreshDuplicateClusters, t])
 
   // Review-before-delete cleanup for products that have sat at 0 stock
   // across every branch for a while (progress.md part 91's spec, built

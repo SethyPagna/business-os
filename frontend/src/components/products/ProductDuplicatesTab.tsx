@@ -30,7 +30,7 @@ import {
   type SelectedConflictGroupApplyResult,
 } from '../../api/productWriteTransport.ts'
 // A dismissal also re-reads the rulings behind the Duplicate tag (components/shared/twinDismissalsTransport.ts), so the tag goes with the cluster.
-import { dismissProductClusterAndRefresh } from '../shared/twinDismissalsTransport.ts'
+import { dismissProductClusterAndRefresh, dismissProductClustersAndRefresh } from '../shared/twinDismissalsTransport.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
 import ResolveModal, { type ResolveDraft } from '../shared/ResolveModal.tsx'
 import { useCopyFloat } from '../shared/CopyFloat.tsx'
@@ -483,18 +483,12 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
     const targets = clusters.filter((cluster) => selectedKeys.has(clusterKey(cluster)))
     if (!targets.length || bulkBusy) return
     setBulkBusy(true)
-    let failed = 0
-    let done = 0
-    for (const cluster of targets) {
-      setBulkProgress(replaceVars(t('bulk_dismissing_progress') || 'Dismissing {done}/{total}…', { done: done + 1, total: targets.length }))
-      try {
-        await dismissProductClusterAndRefresh(cluster.type, cluster.value)
-        removeCluster(clusterKey(cluster))
-      } catch {
-        failed += 1
-      }
-      done += 1
-    }
+    // One re-read of the rulings behind the Duplicate tag after the whole bulk, not one per cluster.
+    const { failed: failures } = await dismissProductClustersAndRefresh(targets.map((cluster) => ({ type: cluster.type, value: cluster.value })), {
+      before: (index) => setBulkProgress(replaceVars(t('bulk_dismissing_progress') || 'Dismissing {done}/{total}…', { done: index + 1, total: targets.length })),
+      stored: (_ruling, index) => removeCluster(clusterKey(targets[index])),
+    })
+    const failed = failures.length
     setBulkBusy(false)
     setBulkProgress('')
     setSelectedKeys(new Set())

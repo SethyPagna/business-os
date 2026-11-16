@@ -34,9 +34,9 @@ export type DuplicateClusterEntry = {
 }
 
 export type PossiblySameCluster = {
-  type: 'barcode' | 'name'
+  type: 'barcode' | 'name' | 'leadingzero' | 'similar'
   value: string
-  severity: 'same_barcode' | 'same_name'
+  severity: 'same_barcode' | 'same_name' | 'leading_zero' | 'similar_name'
   products: DuplicateClusterEntry[]
 }
 
@@ -62,7 +62,7 @@ export function extractDuplicateClusters(payload: unknown): PossiblySameCluster[
   return raw.filter((c): c is PossiblySameCluster => {
     if (!c || typeof c !== 'object') return false
     const type = (c as PossiblySameCluster).type
-    return (type === 'barcode' || type === 'name') && Array.isArray((c as PossiblySameCluster).products)
+    return (type === 'barcode' || type === 'name' || type === 'leadingzero' || type === 'similar') && Array.isArray((c as PossiblySameCluster).products)
   })
 }
 
@@ -89,6 +89,22 @@ export function buildExactDuplicateIndex(clusters: PossiblySameCluster[]): Map<n
     }
   }
   return index
+}
+
+// Every Conflicts cluster that lists ALL of these products, as the dismiss call names it: what "Keep both" must dismiss so the pair is no longer listed anywhere. A pair
+// inside a variant family is held by its barcode cluster AND by the name cluster of the whole name (and a leading-zero cluster when a third spelling exists); dismissing
+// only the barcode left the name cluster listing it, so the toast "no longer flagged" was false. A 'similar' cluster is not one of them: it is a different-name class
+// whose ruling also silences other products, and a twin (one name) is never decided by it (cloudflare productIdentity.ts listTwinDismissals).
+export function clustersListingProducts(clusters: readonly PossiblySameCluster[], ids: readonly number[]): Array<{ type: 'barcode' | 'name' | 'leadingzero'; value: string }> {
+  const wanted = [...new Set(ids.map(Number))]
+  const rulings: Array<{ type: 'barcode' | 'name' | 'leadingzero'; value: string }> = []
+  if (wanted.length < 2) return rulings
+  for (const cluster of clusters) {
+    if (cluster.type !== 'barcode' && cluster.type !== 'name' && cluster.type !== 'leadingzero') continue
+    if (!wanted.every((id) => (cluster.products || []).some((product) => Number(product?.id) === id))) continue
+    if (!rulings.some((ruling) => ruling.type === cluster.type && ruling.value === cluster.value)) rulings.push({ type: cluster.type, value: cluster.value })
+  }
+  return rulings
 }
 
 // Resolve the exact-duplicate group a rendered row belongs to. A list row can

@@ -29,8 +29,34 @@ export function supersedeTwinDismissalReads(): void {
 
 // A dismissal also changes which unmerged twins keep their Duplicate tag, so the answer is not returned until the rulings have been re-read: every caller (Products'
 // Keep both, the Conflicts tab's Dismiss and its bulk Dismiss) then sees the tag go with the cluster.
-export async function dismissProductClusterAndRefresh(type: 'leadingzero' | 'barcode' | 'name' | 'similar', value: string): Promise<unknown> {
+export type ClusterType = 'leadingzero' | 'barcode' | 'name' | 'similar'
+export type ClusterRuling = { type: ClusterType; value: string }
+
+export async function dismissProductClusterAndRefresh(type: ClusterType, value: string): Promise<unknown> {
   const result = await dismissProductDuplicateCluster(type, value)
   await refreshTwinDismissals()
   return result
+}
+
+// Several rulings made together (Keep both on a pair that more than one Conflicts cluster lists; the Conflicts tab's bulk Dismiss): each is stored in turn, a failure
+// does not stop the rest (the caller reports it), and the rulings are re-read ONCE after the last, not after every one: a re-read follows a products version bump, so
+// each is a cache miss that reads the whole dismissals table. Nothing is re-read when no call stored a ruling.
+export async function dismissProductClustersAndRefresh(
+  rulings: readonly ClusterRuling[],
+  hooks: { before?: (index: number) => void; stored?: (ruling: ClusterRuling, index: number) => void } = {},
+): Promise<{ stored: ClusterRuling[]; failed: Array<{ ruling: ClusterRuling; error: unknown }> }> {
+  const stored: ClusterRuling[] = []
+  const failed: Array<{ ruling: ClusterRuling; error: unknown }> = []
+  for (const [index, ruling] of rulings.entries()) {
+    hooks.before?.(index)
+    try {
+      await dismissProductDuplicateCluster(ruling.type, ruling.value)
+      stored.push(ruling)
+      hooks.stored?.(ruling, index)
+    } catch (error) {
+      failed.push({ ruling, error })
+    }
+  }
+  if (stored.length) await refreshTwinDismissals()
+  return { stored, failed }
 }

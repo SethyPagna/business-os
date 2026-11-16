@@ -142,10 +142,11 @@ for (const [file, memo] of [
 const transport = read('components/shared/twinDismissalsTransport.ts')
 assert.match(transport, /const result = await dismissProductDuplicateCluster\(type, value\)\n  await refreshTwinDismissals\(\)\n  return result/, 'dismissProductClusterAndRefresh re-reads the rulings before it answers')
 const tab = read('components/products/ProductDuplicatesTab.tsx')
-assert.equal((tab.match(/await dismissProductClusterAndRefresh\(/g) || []).length, 2, 'the Conflicts tab dismisses (one, and bulk) only through the call that re-reads')
+assert.equal((tab.match(/await dismissProductClusterAndRefresh\(/g) || []).length + (tab.match(/await dismissProductClustersAndRefresh\(/g) || []).length, 2, 'the Conflicts tab dismisses (one, and bulk) only through the calls that re-read')
 assert.ok(!/dismissProductDuplicateCluster\(/.test(tab), 'and never through the bare transport')
 const productsSource = read('components/products/Products.tsx')
-assert.match(productsSource, /await dismissProductClusterAndRefresh\('barcode', info\.barcode\)/, "Products' Keep both re-reads the rulings")
+// Round 6 (L2): Keep both dismisses every Conflicts cluster that lists the pair, in one call that re-reads once (tests/twinDismissalsTransport.test.ts runs it).
+assert.match(productsSource, /await dismissProductClustersAndRefresh\(rulings\)/, "Products' Keep both re-reads the rulings")
 assert.ok(!/dismissProductDuplicateCluster\(/.test(productsSource), 'and never goes through the bare transport')
 
 console.log(`PASS twin dismissals mounted: the real Inventory list tags both twins of a pair before a ruling and neither after it, per cluster kind; ${mutants.length} mutants killed; the shell, four lists and every dismissal path are wired`)
