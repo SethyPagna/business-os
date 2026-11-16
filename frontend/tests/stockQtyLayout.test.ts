@@ -13,7 +13,8 @@ import { launchResolveFixture } from './resolveBrowserFixture.ts'
 //   - the pill stays inside its cell/card and the page never scrolls sideways;
 //   - the tint is readable (WCAG contrast >= 4.5) and differs between the themes;
 //   - Khmer text keeps its line box.
-// A merged row (two real products whose SUM looks healthy) is "low", because each real product is low.
+// Two UNMERGED duplicates (same name and barcode; 8 and 50 against a threshold of 10) are two rows side by side, one low and one
+// healthy, each judged on its own figure (owner, 16 Nov 2026: no folded rows, duplicates next to each other).
 // The Transfer modal's subtitle (the REAL InventoryStockModals, ?view=transfer) shows the same tinted figure.
 const read = (file: string) => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')
 const packs = { en: JSON.parse(read('src/lang/en.json')) as Record<string, string>, km: JSON.parse(read('src/lang/km.json')) as Record<string, string> }
@@ -42,8 +43,8 @@ const fixture = String.raw`
     row(1, name('Out of stock item', 'ទំនិញអស់ពីស្តុក'), 0),
     row(2, name('Low stock item with a rather long product name for the phone layout', 'ទំនិញស្តុកទាបដែលមានឈ្មោះវែងខ្លាំងសម្រាប់ទូរស័ព្ទ ១០០មីលីលីត្រ'), 4),
     row(3, name('Healthy item', 'ទំនិញស្តុកល្អ'), 40),
-    row(4, name('Merged item', 'ទំនិញបូកបញ្ចូល'), 8, { barcode: '5550' }),
-    row(5, name('Merged item', 'ទំនិញបូកបញ្ចូល'), 8, { barcode: '5550' }),
+    row(4, name('Duplicate item', 'ទំនិញស្ទួន'), 8, { barcode: '5550' }),
+    row(5, name('Duplicate item', 'ទំនិញស្ទួន'), 50, { barcode: '5550' }),
   ]
   const noop = () => {}
   const tr = (key, fallback) => (t(key) !== key ? t(key) : (fallback ?? key))
@@ -53,10 +54,10 @@ const fixture = String.raw`
       transferModal={{ ...base, id: 2, name: name('Low item', 'ទំនិញទាប'), unit: 'pcs', stock_quantity: 4, branch_stock: [{ branch_id: 1, branch_name: 'Main', quantity: 4 }] }} />
   )
   if (params.get('view') === 'transfer') createRoot(document.getElementById('root')).render(
-    <AppContext.Provider value={{ ...FALLBACK_APP_CONTEXT, t, language: lang }}>{transfer}</AppContext.Provider>,
+    <AppContext.Provider value={{ ...FALLBACK_APP_CONTEXT, t, language: lang, can: () => true }}>{transfer}</AppContext.Provider>,
   )
   else createRoot(document.getElementById('root')).render(
-    <AppContext.Provider value={{ ...FALLBACK_APP_CONTEXT, t, language: lang }}>
+    <AppContext.Provider value={{ ...FALLBACK_APP_CONTEXT, t, language: lang, can: () => true }}>
       <div data-fixture="inventory" className="p-2">
         <InventoryProductsSurface items={items} total={items.length} page={1} pageSize={20} totalPages={1} branchFilter="all" loading={false} error={null}
           serverStats={null} statsLoading={false} t={t} fmtUSD={v => '$' + v} fmtKHR={v => v + 'KHR'}
@@ -112,9 +113,11 @@ await browser.run('PASS stock-qty layout: pill adds no row height, readable in b
       writeFileSync(`${process.env.STOCK_QTY_SHOTS}/stock-qty-${width}-${lang}-${theme}.png`, Buffer.from(shot.data, 'base64'))
     }
     const result = await browser.evaluate<Measure>(measure)
-    // 5 products, 2 merged into 1 row => 4 rows/cards, one pill each.
-    assert.equal(result.pills.length, 4, `${label}: one pill per visible row`)
-    assert.deepEqual(result.pills.map((p) => p.state).sort(), ['healthy', 'low', 'low', 'out'], `${label}: out, healthy, the low row, and the merged row (members low though their sum is 16)`)
+    // 5 products, none folded => 5 rows/cards, one pill each.
+    assert.equal(result.pills.length, 5, `${label}: one pill per visible row`)
+    assert.deepEqual(result.pills.map((p) => p.state).sort(), ['healthy', 'healthy', 'low', 'low', 'out'], `${label}: out, healthy, the low row, and the two duplicates (8 low, 50 healthy)`)
+    const figures = result.pills.map((p) => p.text)
+    assert.equal(Math.abs(figures.indexOf('8') - figures.indexOf('50')), 1, `${label}: the two duplicates sit next to each other (${figures})`)
     for (const pill of result.pills) {
       const word = packs[lang][{ out: 'out_of_stock', low: 'low_stock', healthy: 'healthy_stock' }[pill.state]!]
       assert.equal(pill.title, word, `${label}: tooltip is the ${pill.state} word`)

@@ -35,9 +35,25 @@ const WORKER = `
     return Response.json({ status: response.status, text, log })
   } }`
 
-async function openWorld(fixtureSql) {
-  const bundle = await build({ stdin: { resolveDir: root, loader: 'ts', contents: WORKER }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022',
+// patches: [{ name, file: 'src/lib/x.ts', from, to }] rewrite source text in memory at bundle time (the same mechanism as read-budget/world.cjs): a mutant, or the
+// old text of a clause, so a test can compare the current code with a recorded one. Each anchor must occur exactly once and be applied.
+async function openWorld(fixtureSql, patches = []) {
+  const applied = new Set()
+  const plugins = patches.length ? [{ name: 'read-cost-source-patches', setup(b) {
+    b.onLoad({ filter: /[\\/]src[\\/].*\.ts$/ }, (args) => {
+      let text = fs.readFileSync(args.path, 'utf8')
+      const rel = path.relative(root, args.path).split(path.sep).join('/')
+      for (const p of patches.filter((x) => x.file === rel)) {
+        if (text.split(p.from).length !== 2) throw new Error('patch ' + p.name + ': anchor must occur exactly once in ' + rel)
+        text = text.replace(p.from, () => p.to)
+        applied.add(p.name)
+      }
+      return { contents: text, loader: 'ts' }
+    })
+  } }] : []
+  const bundle = await build({ plugins, stdin: { resolveDir: root, loader: 'ts', contents: WORKER }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022',
     conditions: ['workerd', 'worker', 'browser'], external: ['node:*', 'cloudflare:*'], logLevel: 'error' })
+  for (const p of patches) if (!applied.has(p.name)) throw new Error('patch ' + p.name + ' was not applied')
   const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'],
     d1Databases: ['DB'], kvNamespaces: ['CACHE'], log: new Log(LogLevel.ERROR) })
   const db = await mf.getD1Database('DB')

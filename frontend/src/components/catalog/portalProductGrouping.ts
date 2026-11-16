@@ -33,7 +33,10 @@ export function collapsePortalProductGroups(products: CatalogProduct[], preserve
   if (!products.length) return products
   const productsById = new Map<unknown, CatalogProduct>(products.map((p) => [p?.id, p]))
   return buildProductGroups(products, productsById as unknown as Map<unknown, ProductRecord>, { preserveInputOrder }).map((group) => {
-    const candidates = group.rows.length ? group.rows : group.items
+    // The public storefront still shows one card per article: the staff lists show every record as its own row
+    // (owner, 16 Nov 2026), so the fold the customer sees is made here, from the group's records.
+    const folded = mergeSameDetailRows(group.items)
+    const candidates = folded.length ? folded : group.items
     return candidates.reduce((best, row) => {
       const price = Number((row as CatalogProduct)?.selling_price_usd || 0)
       const bestPrice = Number((best as CatalogProduct)?.selling_price_usd || 0)

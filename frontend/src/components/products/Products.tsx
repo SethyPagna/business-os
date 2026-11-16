@@ -84,7 +84,9 @@ import { useIsPageActive } from '../shared/pageActivity'
 import PendingReviewSync from '../shared/PendingReviewSync'
 import PendingReviewTag from '../shared/PendingReviewTag'
 import { noteQueuedForReview } from '../../utils/pendingReviewTargets.ts'
-import { buildProductCategorySections, hideZeroStockGroupedChildRows } from '../../utils/productGrouping.ts'
+import { buildProductCategorySections } from '../../utils/productGrouping.ts'
+import { useTwinDismissals } from '../shared/useTwinDismissalsLoader.ts'
+import { hideZeroStockGroupedChildRows, startsCollapsedGroup } from '../../utils/productGroupVisibility.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId, resolveCreatedHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { UNDO_HIDDEN_VALUE_FALLBACK, undoNeedsHiddenValue, undoNeedsHiddenValueIn } from '../../utils/hiddenValueUndo.ts'
@@ -180,10 +182,13 @@ import { buildPromotionsFilterSection } from '../shared/PromotionsFilterOptions.
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import type { LowStockConfig } from '../../utils/lowStockSettings.ts'
 import type { BulkDeleteJobStatus } from '../../api/productWriteTransport.ts'
-import { getPossiblySameProducts, dismissProductDuplicateCluster } from '../../api/productWriteTransport.ts'
+import { getPossiblySameProducts } from '../../api/productWriteTransport.ts'
+import { keepBothDuplicate } from '../shared/twinDismissalsTransport.ts'
 import { useMergeStockChoice } from './useMergeStockChoice.tsx'
 import { buildExactDuplicateIndex, extractDuplicateClusters, findRowDuplicateInfo, type ExactDuplicateInfo } from '../../utils/exactDuplicateProducts.ts'
 import DuplicateResolverControl from './DuplicateResolverControl.tsx'
+import UnmergedTwinTag from './UnmergedTwinTag.tsx'
+import { unmergedTwinHint } from './unmergedTwinHint.ts'
 import { catalogHasBarcode, isProductSearchTooShort, productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
 // The section chips below are the same chrome HubSectionNav renders, styled
 // from the same stylesheet (see the row's `bos-nav-chrome` class).
@@ -268,10 +273,9 @@ interface ProductRecord {
   out_of_stock_threshold?: number | string | null
   is_active?: boolean | number | null
   is_group?: boolean | number | null
-  // Present on rows produced by mergeSameDetailRows (utils/productGrouping.ts)
-  // when 2+ raw product rows -- identical except for branch -- collapsed
-  // into this one display row. Lists every real underlying product id so
-  // selection/bulk actions on the merged row still act on all of them.
+  // Present on the display rows of buildProductGroups (ownRows in
+  // utils/productGrouping.ts): the row's own product id, as a one-element list.
+  // Selection and bulk actions read it, so a row always acts on its own record.
   __mergedProductIds?: EntityId[]
   [key: string]: unknown
 }
@@ -853,11 +857,10 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
       lowStock: lowStockConfig,
     })
     const thumbnailState = buildProductThumbnailState(p)
-    // A merged row (see mergeSameDetailRows) represents multiple real
-    // product ids -- selecting/checking it needs to act on all of them
-    // together, not just the lead id, or a bulk delete would silently
-    // leave the other branch-duplicate rows behind. Falls back to the
-    // single id for ordinary, unmerged rows.
+    // Every product record is its own row (owner, 16 Nov 2026: no folded
+    // duplicates), so a row's scope is its own id; __mergedProductIds is the
+    // one-element list buildProductGroups gives each row. The fallback to
+    // [productId] covers rows that did not come through it.
     const rowScopeIds = p.__mergedProductIds?.length ? p.__mergedProductIds : [productId]
     const rowSelected = isSelectionScopeFullySelected(rowScopeIds)
     // Exact duplicate (same real barcode + same name, per the server sweep)?
@@ -1121,6 +1124,7 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
                     something different from its row. */}
                 <ProductNameRail name={productName} />
               </div>
+              {p.__unmergedTwin && !dupInfo ? <UnmergedTwinTag label={tr('product_duplicate_badge', 'Duplicate')} hint={unmergedTwinHint(t, canMergeDuplicates)} /> : null}
             </div>
             {dupInfo ? (
               <DuplicateResolverControl
@@ -1342,6 +1346,7 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
                 "instead of moving the price and quantity row just keep it
                 constant there"). */}
             <div className="mt-0.5 flex min-h-[1.1875rem] flex-wrap gap-1">
+              {p.__unmergedTwin && !dupInfo ? <UnmergedTwinTag label={tr('product_duplicate_badge', 'Duplicate')} hint={unmergedTwinHint(t, canMergeDuplicates)} /> : null}
               {/* Small-screen default card shows the BARCODE here in place of
                   the category (user, Aug 29: "hide the category inside the
                   details ... replace the outside with barcode"). Category is
@@ -3476,21 +3481,20 @@ function ProductsFullEditor() {
     }
   }, [dupResolverBusyKey, load, mergeWithChoice, notify, refreshDuplicateClusters, t])
 
-  // "Keep both": dismiss the barcode cluster (these are genuinely different
-  // items), so the sweep stops flagging it -- the false-positive escape hatch.
+  // "Keep both": dismiss the pair's barcode cluster (these are genuinely different items), the false-positive escape hatch, and nothing else: a name or leading-zero ruling is keyed
+  // wider than the pair and would silence rows the person never chose (keepBothPlan). When a name or leading-zero cluster still lists two or more of the group, the toast says it is still
+  // in Conflicts. One re-read of the rulings after it.
   const handleDuplicateKeepBoth = useCallback(async (info: ExactDuplicateInfo) => {
     if (dupResolverBusyKey) return
     setDupResolverBusyKey(info.key)
     try {
-      await dismissProductDuplicateCluster('barcode', info.barcode)
-      notify(t('product_duplicate_kept_both') || 'Kept both — no longer flagged as duplicates')
-      await refreshDuplicateClusters(true)
+      await keepBothDuplicate(extractDuplicateClusters(duplicateClusters), info, notify, t, () => refreshDuplicateClusters(true))
     } catch (e) {
       notify(getErrorMessage(e, t('dismiss_duplicate_failed') || 'Could not update this duplicate'), 'error')
     } finally {
       setDupResolverBusyKey(null)
     }
-  }, [dupResolverBusyKey, notify, refreshDuplicateClusters, t])
+  }, [dupResolverBusyKey, duplicateClusters, notify, refreshDuplicateClusters, t])
 
   // Review-before-delete cleanup for products that have sat at 0 stock
   // across every branch for a while (progress.md part 91's spec, built
@@ -3849,6 +3853,9 @@ function ProductsFullEditor() {
   // initial) -- replaces the old name-initial-letter sectioning here and
   // on Inventory.tsx. POS.tsx's own AlphaIndexRail is untouched -- that one
   // was never part of this ask, it stays name-initial.
+  // A "Keep both" ruling takes the Duplicate tag, the open state and the scan's one-product treatment off the pair (utils/productTwinDismissals.ts), so the sections
+  // are rebuilt when the loaded rulings change.
+  const twinDismissals = useTwinDismissals()
   const productSections = useMemo<ProductSectionLike[]>(
     () => {
       const sections = buildProductCategorySections(filtered, {
@@ -3869,7 +3876,7 @@ function ProductsFullEditor() {
       // the filters above is reachable here.
       return (hideZeroStockRows ? hideZeroStockGroupedChildRows(sections) : sections) as unknown as ProductSectionLike[]
     },
-    [filtered, hideZeroStockRows, productSortDirection, productsById, searchTerms, t],
+    [filtered, hideZeroStockRows, productSortDirection, productsById, searchTerms, t, twinDismissals],
   )
 
   const allVisibleProducts = useMemo<ProductRecord[]>(
@@ -4047,9 +4054,12 @@ function ProductsFullEditor() {
 
       productSections.forEach((section) => {
         section.groups.forEach((group) => {
-          if (!group?.hasMultipleItems) return
           if (initializedCollapsedGroupKeysRef.current.has(group.key)) return
+          if (!group?.hasMultipleItems) return
           initializedCollapsedGroupKeysRef.current.add(group.key)
+          // A group that holds unmerged duplicates starts OPEN (see startsCollapsedGroup); a variants-only group starts
+          // folded. Either way the person's own fold or unfold sticks: each key is initialised once.
+          if (!startsCollapsedGroup(group)) return
           next.add(group.key)
           changed = true
         })
@@ -5092,10 +5102,8 @@ function ProductsFullEditor() {
     )
   }, [canAddVariant, canEditProduct, canWireImages, openProductFormTab, tr])
 
-  // P3-L6. Held rows are keyed off the group's FULL id list, not its display
-  // rows: mergeSameDetailRows collapses branch-only duplicates into one
-  // visible row, and the merged-away product may be the one carrying the
-  // held units. Keying off the display rows would hide them.
+  // P3-L6. Held rows are keyed off the group's FULL id list (every record of
+  // the name group), which is the safe key for held units.
   const groupTaggedRows = useCallback((group: { ids?: Array<string | number> }): TaggedStockRow[] => {
     if (!taggedLotsByProduct.size) return []
     const seen = new Set<string>()

@@ -90,9 +90,8 @@ type ProductGroup = {
   anchorId?: ProductId
   ids: ProductId[]
   items: ProductLike[]
-  // Display rows: branch-only duplicates already collapsed into one row
-  // each (see mergeSameDetailRows in utils/productGrouping.ts). Render
-  // these, not `items` -- `items` stays around for bulk-selection scope.
+  // Display rows: one per real product record (ownRows in utils/productGrouping.ts),
+  // unmerged duplicates next to each other. Render these, not `items`.
   rows: ProductLike[]
   hasMultipleItems: boolean
   leadProduct?: ProductLike
@@ -401,12 +400,12 @@ export default function ProductsListSurface({
                       </tr>
                       {!isCollapsed ? section.groups.map((group) => {
                         const groupCollapsed = collapsedProductGroups.has(group.key)
-                        // Wrapper card only shows when there's more than one
-                        // *display row* left after merging branch-only
-                        // duplicates -- a group whose rows fully merge down
-                        // to one just renders as that single row, same as
-                        // any other product (branch breakdown still shows
-                        // via its own Details cell).
+                        // Wrapper card only shows when the group has more than
+                        // one row (one per product record; an unmerged
+                        // duplicate is its own row). A group of one just
+                        // renders as that single row, same as any other
+                        // product (branch breakdown still shows via its own
+                        // Details cell).
                         const showGroupRow = group.rows.length > 1
                         return (
                           <Fragment key={group.key}>

@@ -29,7 +29,7 @@ async function operationWritesReady(db: ReturnType<typeof getDb>): Promise<boole
 import { localDateAtOrAfter, localDateAtOrBefore } from '../lib/businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { attachBatchCounts } from '../lib/productBatches'
-import { paginateProductFamilies } from '../lib/familyPagination'
+import { INTRA_FAMILY_NAME_BARCODE_SQL, paginateProductFamilies } from '../lib/familyPagination'
 import { buildProductSalesLedgerSql } from '../lib/productSalesLedger'
 import { getFamilyStockStats } from '../lib/familyStockStats'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
@@ -666,7 +666,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
       // would 500 with "no such column: name". The row order is discarded
       // either way in that mode (see `items: metadataOnly ? [] : ...`
       // below), so fall back to the one column guaranteed to exist.
-      intraFamilyOrderSql: metadataOnly ? 'id ASC' : 'lower(name) ASC, id ASC',
+      intraFamilyOrderSql: metadataOnly ? 'id ASC' : `${INTRA_FAMILY_NAME_BARCODE_SQL}, id ASC`,
       matchRankSql: metadataOnly ? undefined : matchRankSql,
       rankCteSql: metadataOnly ? undefined : rankCteSql,
       matchTierSql: metadataOnly ? undefined : matchTierSql,

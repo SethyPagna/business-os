@@ -212,7 +212,7 @@ function Page() {
   }, [])
   // The app's own context, in the page's language: the tags and the Add button name read their words from it.
   return (
-    <AppContext.Provider value={{ ...FALLBACK_APP_CONTEXT, t, language: lang }}>
+    <AppContext.Provider value={{ ...FALLBACK_APP_CONTEXT, t, language: lang, can: () => true }}>
       <main style={{ padding: 12, maxWidth: 1180 }} data-ready={ready ? '1' : '0'}>
         <Toolbar />
         <InventoryTable />

@@ -47,7 +47,10 @@ function getEntries(ctx) {
     ['products/stock-ledger', `/api/products/stock-ledger?${P}&${R(M, T)}`], ['products/stock-ledger/:id/balance', '/api/products/stock-ledger/1/balance'],
     ['products/auto-merges/:productId', '/api/products/auto-merges/1000'], ['products/rename-impact', '/api/products/rename-impact?name=Product%200%20Serum'],
     ['products/bulk-delete-jobs/:id', '/api/products/bulk-delete-jobs/1'], ['products/merge-duplicates/preview', '/api/products/merge-duplicates/preview'],
-    ['products/possible-duplicates (Conflicts)', '/api/products/possible-duplicates'], ['products/data-gaps/counts (Conflicts badges)', '/api/products/data-gaps/counts'],
+    ['products/possible-duplicates (Conflicts)', '/api/products/possible-duplicates'],
+    // The "Keep both" rulings every product list reads to decide which unmerged twins keep the Duplicate tag: one covering-index SELECT over product_duplicate_dismissals per cache miss.
+    ['products/duplicate-dismissals (twin tag rulings)', '/api/products/duplicate-dismissals'],
+    ['products/data-gaps/counts (Conflicts badges)', '/api/products/data-gaps/counts'],
     ['products/data-gaps', `/api/products/data-gaps?${P}`], ['products/possible-duplicates/merge-batch/reviews/:id', '/api/products/possible-duplicates/merge-batch/reviews/1'],
     ['products/possible-duplicates/merge-preview', '/api/products/possible-duplicates/merge-preview?ids=1000,1001'],
     ['products/zero-quantity-candidates', '/api/products/zero-quantity-candidates'], ['products/lookups/usage', '/api/products/lookups/usage?type=brand&value=Brand%201'],
