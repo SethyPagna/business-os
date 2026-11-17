@@ -113,6 +113,9 @@ const submissionCaps = async (c: Context<{ Bindings: Env; Variables: { user: Ses
   return { lines: limits.inventoryCheckLotLinesPerSubmission, products: limits.inventoryCheckProductsPerSubmission }
 }
 // days: one chip per Cambodia business day on which some product had its LATEST count (newest first), from the same cached sets as the counts (no statement of its own).
+// tooLarge: more checked products than inventoryCheckFilterMaxIds, so there are no counts and no days to give: the summary says so (`{ tooLarge: true }`) instead of vanishing, and a page that holds chips from an
+// earlier answer clears them. The check-state filters are refused (503) while it holds.
+const summaryOf = (sets: CheckStateSets, fixStock: boolean) => sets.tooLarge ? { tooLarge: true as const } : checkCountsOf(sets, fixStock)
 const checkCountsOf = (sets: CheckStateSets, fixStock: boolean) => ({ ok: sets.ok.length, issue: sets.issue.length, ...(fixStock ? { pending: sets.pending.length } : {}),
   days: sets.days.map((entry) => ({ day: entry.day, count: entry.ids.length })) })
 app.get('/list', async c => {
@@ -162,9 +165,9 @@ app.get('/list', async c => {
   const groupingBlock: GroupingBlock | undefined = plan.grouping
     ? buildGroupingBlock(plan.grouping, groups ?? [], body.items as Array<Record<string, unknown>>, (Number(productsQuery.page) - 1) * Number(productsQuery.pageSize), Number(productsQuery.pageSize)) : undefined
   const total = Number((payload as { total?: unknown }).total) || 0
-  const summary = sets && plan.wantSummary && !sets.tooLarge ? { ...checkCountsOf(sets, fixStock),
+  const summary = sets && plan.wantSummary ? { ...summaryOf(sets, fixStock),
     // Not checked is the catalogue total minus what was checked; it is only known when this list is the whole catalogue (no search, filter or check state).
-    ...(plan.filtered ? {} : { not_checked: Math.max(0, total - sets.ok.length - sets.issue.length), total }) } : null
+    ...(plan.filtered || sets.tooLarge ? {} : { not_checked: Math.max(0, total - sets.ok.length - sets.issue.length), total }) } : null
   // window_pages: how many pages (this one and the ones ahead) the page may read in one window; the ranking behind them is shared (catalog_ranked_scope), so a window costs rows, not rankings.
   return c.json({ ...body, wired: true, projected, window_pages: getPlanLimits(c.env).catalogListWindowPages, overlay_ids: getPlanLimits(c.env).inventoryOverlayMaxRows, ...(groupingBlock ? { grouping: groupingBlock } : {}), ...(summary ? { summary } : {}),
     capabilities })
@@ -195,7 +198,7 @@ app.get('/overlay', async c => {
   const sets = wantSummary ? (await readCheckStateSets(c, branchId, fixStock)).sets : null
   const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock, await submissionCaps(c, lotCounts), availableGroupings(access.fields))
   return c.json({ wired: true, branchId, version: await inventoryChecksVersion(c.env), items, ...(lots ? { lots } : {}),
-    ...(sets && !sets.tooLarge ? { summary: checkCountsOf(sets, fixStock) } : {}), capabilities })
+    ...(sets ? { summary: summaryOf(sets, fixStock) } : {}), capabilities })
 })
 // ic_lot_counts: the received dates ("batches") one product holds at one branch, read ON DEMAND when a person opens the count popover of a row (one request, one product; the page never
 // lists batches for its rows). Answers 404 while the switch is OFF (the page then counts one total per product, exactly as before). No cost, supplier or price is ever selected.

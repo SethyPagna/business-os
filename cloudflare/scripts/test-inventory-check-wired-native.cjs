@@ -278,10 +278,12 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
   const tooBig = await app.get('/api/inventory-checks/list?branchId=1&checkState=not_checked', freeEnv)
   check('Free: a checked set over inventoryCheckFilterMaxIds (2,000) is refused 503 inventory_check_filter_too_large', tooBig.status === 503 && tooBig.json.code === 'inventory_check_filter_too_large')
   const stillPlain = await app.get('/api/inventory-checks/list?branchId=1', freeEnv)
-  check('the plain list still answers (without a summary) when the sets are too large', stillPlain.status === 200 && !('summary' in stillPlain.json))
+  check('the plain list still answers when the sets are too large, and its summary says so (tooLarge, no counts, no days) instead of vanishing', stillPlain.status === 200 && JSON.stringify(stillPlain.json.summary) === '{"tooLarge":true}', () => JSON.stringify(stillPlain.json.summary))
+  const bigOverlay = await app.get('/api/inventory-checks/overlay?branchId=1&ids=100,101', freeEnv)
+  check('the overlay says so too, and a page under the limit has no tooLarge flag', bigOverlay.status === 200 && JSON.stringify(bigOverlay.json.summary) === '{"tooLarge":true}')
   app.clearCaches()
   const paidBig = await app.get('/api/inventory-checks/list?branchId=1&checkState=ok')
-  check('Paid: the same set (10,000) is served', paidBig.status === 200 && paidBig.json.summary.ok > 2000 && paidBig.json.total === 3)
+  check('Paid: the same set (10,000) is served', paidBig.status === 200 && paidBig.json.summary.ok > 2000 && paidBig.json.total === 3 && !('tooLarge' in paidBig.json.summary))
 
   // ---- overlay ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
   app.clearCaches(); app.kv.clear()

@@ -98,8 +98,11 @@ Every decision is one audit event on the product in the session History (`GET /s
 ## 4. Date chips
 
 `GET /api/inventory-checks/list` and `GET /api/inventory-checks/overlay` return `summary.days: [{ "day": "2026-11-12", "count": 3 }]`, newest first, under the same rule as the status counts
-(`summary=0` leaves it out; one branch only; absent when the branch has more checked products than `inventoryCheckFilterMaxIds`, exactly as the status counts are). Each product sits under the Cambodia
+(`summary=0` leaves it out; one branch only; `{ "tooLarge": true }` when the branch has more checked products than `inventoryCheckFilterMaxIds`, see below). Each product sits under the Cambodia
 business day (UTC+7) of its LATEST count at the branch. No new D1 statement is made for it.
+
+**Too many checked products.** When the branch has more checked products than `inventoryCheckFilterMaxIds`, the summary is `{ "tooLarge": true }` (no `ok`, `issue`, `pending`, `not_checked`, `total` or `days`)
+instead of being left out, so a page that holds chips or counts from an earlier answer clears them. The check-state and day filters are refused (`503 inventory_check_filter_too_large`) while it holds.
 
 **The day is the day the product was counted, never the day it was approved.** Approving a line flips it to Done and rewrites the item's own time, so the day is taken from the count's own time: for a submitted
 count (the only kind that is ever approved) the time it was submitted; for every other kind (an observation, a Set that closed an Issue) the item's own time. The overlay's `check.at` follows the same rule, so a row's
