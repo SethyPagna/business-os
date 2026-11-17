@@ -251,12 +251,20 @@ async function request(state, routePath, method = 'POST', body = {}) {
 
 async function main() {
   // Holds the destructive permission so the replace_columns cases below isolate the image gate.
-  const blocked = () => role({ products: true, product_cost_edit: true, destructive_delete: true, 'products:image': false })
+  const blocked = () => role({ products: true, product_cost_view: true, product_cost_edit: true, destructive_delete: true, 'products:image': false })
   {
     const state = freshState(role({ products: true, 'products:image': true }))
     const response = await request(state, '/job-1/approve')
     assert.equal(response.status, 403)
     assert.equal((await response.json()).code, 'product_cost_edit_required')
+    assert.equal(state.dbWrites + state.queue.length, 0)
+  }
+  {
+    // 17 Nov 2026: an import write needs View AND Edit product costs; Edit alone is refused for the missing View, before any write.
+    const state = freshState(role({ products: true, product_cost_edit: true, 'products:image': true }))
+    const response = await request(state, '/job-1/approve')
+    assert.equal(response.status, 403)
+    assert.equal((await response.json()).code, 'product_cost_view_required')
     assert.equal(state.dbWrites + state.queue.length, 0)
   }
 
@@ -387,7 +395,7 @@ async function main() {
   }
 
   {
-    const state = freshState(role({ products: true, product_cost_edit: true, 'products:image': true }), { status: 'failed', analyzedRows: [resultRow('update', '/uploads/new.png')] })
+    const state = freshState(role({ products: true, product_cost_view: true, product_cost_edit: true, 'products:image': true }), { status: 'failed', analyzedRows: [resultRow('update', '/uploads/new.png')] })
     const response = await request(state, '/job-1/retry')
     assert.equal(response.status, 200)
     assert.equal(JSON.parse(state.job.policy_json).apply_authorized_by_id, state.user.id)
@@ -396,7 +404,7 @@ async function main() {
   }
 
   {
-    const state = freshState(role({ products: true, product_cost_edit: true }))
+    const state = freshState(role({ products: true, product_cost_view: true, product_cost_edit: true }))
     const response = await request(state, '/job-1/images/wire')
     assert.equal(response.status, 200)
     assert.equal(state.dbWrites, 1)
