@@ -107,10 +107,16 @@ async function main() {
       for(const row of hidden.body.items) for(const key of ['cost_needs_review','cost_review_key','cost_price_usd','cost_price_khr']) assert.ok(!Object.hasOwn(row,key),key)
     }
     db.prepare('UPDATE users SET permissions=? WHERE id=900001').run(JSON.stringify({inventory_checks:true,inventory_check_show_cost:true,product_cost_view:true}))
-    // 15 Nov 2026: cost is admin only. The employee holding every cost grant sees none of it; the administrator is the positive control.
+    // 17 Nov 2026 (slice A): cost is the editable View product costs grant; on this branch the Inventory cost field is still
+    // also required (slices B/C1 drop that gate). The non-admin holding both sees the marker; Edit without View sees nothing.
     const grantsOnly=await request('pageSize=3')
     assert.equal(grantsOnly.status,200)
-    for(const row of grantsOnly.body.items) for(const key of ['cost_needs_review','cost_review_key','cost_price_usd','cost_price_khr']) assert.ok(!Object.hasOwn(row,key),key)
+    assert.deepEqual(grantsOnly.body.items.map(row=>row.cost_needs_review),[true,false,false],'a non-admin holding View product costs and the Inventory cost field sees cost')
+    db.prepare('UPDATE users SET permissions=? WHERE id=900001').run(JSON.stringify({inventory_checks:true,inventory_check_show_cost:true,product_cost_edit:true}))
+    const editOnly=await request('pageSize=3')
+    assert.equal(editOnly.status,200)
+    for(const row of editOnly.body.items) for(const key of ['cost_needs_review','cost_review_key','cost_price_usd','cost_price_khr']) assert.ok(!Object.hasOwn(row,key),key)
+    db.prepare('UPDATE users SET permissions=? WHERE id=900001').run(JSON.stringify({inventory_checks:true,inventory_check_show_cost:true,product_cost_view:true}))
     const permitted=await request('pageSize=3',900003)
     assert.equal(permitted.status,200); assert.deepEqual(permitted.body.items.map(row=>row.cost_needs_review),[true,false,false])
     assert.deepEqual(physical(),before,'read metadata does not alter business data')
