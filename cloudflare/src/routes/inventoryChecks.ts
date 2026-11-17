@@ -112,7 +112,9 @@ const submissionCaps = async (c: Context<{ Bindings: Env; Variables: { user: Ses
   const limits = getPlanLimits(c.env)
   return { lines: limits.inventoryCheckLotLinesPerSubmission, products: limits.inventoryCheckProductsPerSubmission }
 }
-const checkCountsOf = (sets: CheckStateSets, fixStock: boolean) => ({ ok: sets.ok.length, issue: sets.issue.length, ...(fixStock ? { pending: sets.pending.length } : {}) })
+// days: one chip per Cambodia business day on which some product had its LATEST count (newest first), from the same cached sets as the counts (no statement of its own).
+const checkCountsOf = (sets: CheckStateSets, fixStock: boolean) => ({ ok: sets.ok.length, issue: sets.issue.length, ...(fixStock ? { pending: sets.pending.length } : {}),
+  days: sets.days.map((entry) => ({ day: entry.day, count: entry.ids.length })) })
 app.get('/list', async c => {
   if (!await readSwitch(c.env, 'ic_wired')) return notWired(c)
   singleValued(c)
@@ -131,8 +133,8 @@ app.get('/list', async c => {
   }
   let sets: CheckStateSets | null = null
   let setsVersion = ''
-  if (plan.branchId !== null && (plan.checkState || plan.wantSummary)) ({ sets, version: setsVersion } = await readCheckStateSets(c, plan.branchId, fixStock))
-  let restriction: { restrictIdsJson?: string; excludeIdsJson?: string } = plan.checkState && sets ? checkStateRestriction(plan.checkState, sets) : {}
+  if (plan.branchId !== null && (plan.checkState || plan.checkedOn || plan.wantSummary)) ({ sets, version: setsVersion } = await readCheckStateSets(c, plan.branchId, fixStock))
+  let restriction: { restrictIdsJson?: string; excludeIdsJson?: string } = (plan.checkState || plan.checkedOn) && sets ? checkStateRestriction(plan.checkState, sets, plan.checkedOn) : {}
   // The shared cache key is the canonical request. A grouped read never takes a by-id read (its ranking needs the keyed page read): an exact code hit becomes a restriction to that id, and the key keeps the id.
   const keyRequest = canonicalProductsRequest(productsQuery)
   if (plan.grouping && codeHit !== null) {
@@ -144,10 +146,12 @@ app.get('/list', async c => {
   const include = new Set<string>([...access.fields.stock ? ['tagged_lots'] : [], ...access.fields.received ? ['lots'] : []])
   // A grouped list keys on the inventory_checks version even with no check state: the checked grouping orders by the checks themselves.
   const groupedVersion = grouping && !setsVersion ? await inventoryChecksVersion(c.env) : setsVersion
+  // The cached page is keyed by the restriction's own name: the state (Pending without the right to see it is an empty set of its own: it must not share a cached page with the admin's real Pending set)
+  // and the day, so a page of one day never serves another.
+  const setKey = [plan.checkState ? (plan.checkState === 'pending' && !fixStock ? 'pending_unavailable' : plan.checkState) : '', plan.checkedOn ? `day:${plan.checkedOn}` : ''].filter(Boolean).join('|')
   const { groups, ...payload } = await readProductSearchList(c, productsQuery, { include, keyRequest, ...restriction, ...(grouping ? { grouping } : {}),
-    // Pending without the right to see it is an empty set of its own: it must not share a cached page with the admin's real Pending set.
-    ...(plan.checkState ? { setKey: plan.checkState === 'pending' && !fixStock ? 'pending_unavailable' : plan.checkState } : codeHit !== null && grouping ? { setKey: 'code' } : {}),
-    ...(plan.checkState || grouping ? { setVersion: groupedVersion } : {}), lotsAdmitted: access.fields.received, taggedLotsAdmitted: access.fields.stock }) as Awaited<ReturnType<typeof readProductSearchList>> & { groups?: FamilyGroupTotals[] }
+    ...(setKey ? { setKey } : codeHit !== null && grouping ? { setKey: 'code' } : {}),
+    ...(plan.checkState || plan.checkedOn || grouping ? { setVersion: groupedVersion } : {}), lotsAdmitted: access.fields.received, taggedLotsAdmitted: access.fields.stock }) as Awaited<ReturnType<typeof readProductSearchList>> & { groups?: FamilyGroupTotals[] }
   const lotCounts = await lotCountsOn(c)
   const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock, await submissionCaps(c, lotCounts), availableGroupings(access.fields))
   const productsPage = getActionTier(user, 'products', 'view') !== 'none'

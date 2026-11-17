@@ -90,10 +90,20 @@ const QUERY_ALIASES: Record<string, string> = {
 const QUERY_KEYS = new Set(['query', 'searchFields', 'branchId', 'category', 'brand', 'barcode', 'stockState', 'groupState', 'initial', 'page', 'pageSize', 'startDate', 'endDate', 'createdFrom', 'createdTo', 'sortBy', 'sortDirection'])
 const SORT_FIELDS: Record<string, InventoryCheckField | null> = { name: null, stock: 'stock', qty_sold: 'sales', customer_count: 'customers', received_date: 'received', price: 'price', cost: 'cost' }
 // ic_simple: the owner's closed list (1 Nov 2026). Dates, sales sorts, price and cost sorts, and the code-only filters have no screen and are refused (400, never a 403 that hints they exist).
-const SIMPLE_QUERY_KEYS = new Set(['query', 'branchId', 'category', 'brand', 'stockState', 'checkState', 'page', 'pageSize', 'sortBy', 'sortDirection', 'summary', 'groupBy'])
+const SIMPLE_QUERY_KEYS = new Set(['query', 'branchId', 'category', 'brand', 'stockState', 'checkState', 'checkedOn', 'page', 'pageSize', 'sortBy', 'sortDirection', 'summary', 'groupBy'])
 const SIMPLE_SORT_FIELDS: Record<string, InventoryCheckField | null> = { name: null, stock: 'stock' }
 export const CHECK_STATES = ['not_checked', 'in_check', 'ok', 'issue'] as const
 export type InventoryCheckState = typeof CHECK_STATES[number]
+
+/** A real calendar date written YYYY-MM-DD (strict: no other spelling, no day the calendar does not have, no year before 1000). */
+export function isCalendarDay(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!match) return false
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])]
+  if (year < 1000) return false
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+}
 
 export function validateInventoryCheckQuery(query: Record<string, unknown>, access: InventoryCheckAccess, simple = false): Record<string, string> {
   if (!access.canView) throw new InventoryCheckQueryError(403, 'inventory_check_view_required', '')
@@ -135,6 +145,7 @@ export function validateInventoryCheckQuery(query: Record<string, unknown>, acce
   }
   if (result.checkState && !(CHECK_STATES as readonly string[]).includes(result.checkState)) invalid('checkState')
   if (result.summary && !['0', '1'].includes(result.summary)) invalid('summary')
+  if (result.checkedOn && !isCalendarDay(result.checkedOn)) invalid('checkedOn')
   if (result.sortDirection) {
     result.sortDirection = result.sortDirection.toLowerCase()
     if (!['asc', 'desc'].includes(result.sortDirection)) invalid('sortDirection')
