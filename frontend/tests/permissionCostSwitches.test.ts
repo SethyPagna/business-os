@@ -3,7 +3,10 @@
 //
 // Run: node tests/permissionCostSwitches.test.ts
 import assert from 'node:assert/strict'
-import { readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { readFileSync, writeFileSync, rmSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { MODULE_ROWS } from '../src/components/users/permissionSummary.ts'
 import { createHarness, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
 
@@ -67,15 +70,22 @@ await test('MUTANT: with both grants flagged retired the model drops them, so th
   const summary = readFileSync(new URL('permissionSummary.ts', dir), 'utf8')
   const keep = "short: 'See costs' }"
   assert.ok(definitions.includes(keep) && definitions.includes("short: 'Enter costs' }"))
-  const defsMutant = new URL('permissionDefinitions.mutant.ts', dir)
-  const summaryMutant = new URL('permissionSummary.mutant.ts', dir)
-  writeFileSync(defsMutant, definitions.replace(keep, "short: 'See costs', retired: true }").replace("short: 'Enter costs' }", "short: 'Enter costs', retired: true }"))
-  writeFileSync(summaryMutant, summary.replace("'./permissionDefinitions.ts'", "'./permissionDefinitions.mutant.ts'"))
+  // The mutant copies live in a temp directory OUTSIDE src/ (a concurrent tsc or Vite run on the tree never sees them, and a killed run leaves nothing in the
+  // tree); their relative imports are rewritten to absolute file URLs so they still resolve the real modules. The directory is removed on success and failure.
+  const absolutize = (source: string): string => source.replace(/(\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)(['"])(\.{1,2}\/[^'"]+)\2/g,
+    (_match, lead: string, quote: string, spec: string) => `${lead}${quote}${pathToFileURL(join(fileURLToPath(dir), spec)).href}${quote}`)
+  const scratch = mkdtempSync(join(tmpdir(), 'perm-cost-mutant-'))
   try {
+    writeFileSync(join(scratch, 'package.json'), '{"type":"module"}')
+    const defsMutant = pathToFileURL(join(scratch, 'permissionDefinitions.mutant.ts'))
+    const summaryMutant = pathToFileURL(join(scratch, 'permissionSummary.mutant.ts'))
+    writeFileSync(defsMutant, absolutize(definitions.replace(keep, "short: 'See costs', retired: true }").replace("short: 'Enter costs' }", "short: 'Enter costs', retired: true }")))
+    writeFileSync(summaryMutant, absolutize(summary).replace(/(['"])[^'"]*permissionDefinitions\.ts\1/, JSON.stringify(defsMutant.href)))
     const mutant = await import(summaryMutant.href) as { MODULE_ROWS: typeof MODULE_ROWS }
     const listed = mutant.MODULE_ROWS.flatMap((row) => row.extras.map((def) => def.key))
     assert.ok(COST_GRANTS.every((key) => !listed.includes(key)), 'the mutant model no longer offers the switches')
-  } finally { rmSync(defsMutant); rmSync(summaryMutant) }
+    assert.ok(scratch.startsWith(tmpdir()) && !fileURLToPath(dir).startsWith(scratch), 'the mutant lives outside src')
+  } finally { rmSync(scratch, { recursive: true, force: true }) }
 })
 
 await harness.close()
