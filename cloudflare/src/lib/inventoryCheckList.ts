@@ -178,7 +178,7 @@ const GROUP_KEYS = {
   brand: ['brand', 'brands'],
   received: ['batch_count', 'expiry_date', 'expiry_alert_days'],
 } as const
-// Nobody's Inventory answer carries cost, whatever the grant: the page counts and shows figures, not money.
+// Cost leaves the answer unless the viewer may see acquisition costs (access.fields.cost, the shared rule of lib/acquisitionCostAccess.ts): one switch for cost everywhere.
 const COST_KEYS = ['cost_price_usd', 'cost_price_khr', 'cost_needs_review', 'purchase_price_usd', 'purchase_price_khr', 'cost_review_key']
 // Products-page fields that are not Inventory Check grants: they stay for a viewer who may also read the Products page.
 const PRODUCTS_PAGE_KEYS = ['supplier', 'description']
@@ -192,7 +192,7 @@ function projectLot(lot: Record<string, unknown>, access: InventoryCheckAccess, 
 
 function projectRow(row: Record<string, unknown>, access: InventoryCheckAccess, productsPage: boolean): Record<string, unknown> {
   const out: Record<string, unknown> = { ...row }
-  for (const key of COST_KEYS) delete out[key]
+  if (!access.fields.cost) for (const key of COST_KEYS) delete out[key]
   for (const field of Object.keys(GROUP_KEYS) as Array<keyof typeof GROUP_KEYS>) if (!access.fields[field]) for (const key of GROUP_KEYS[field]) delete out[key]
   if (!productsPage) for (const key of PRODUCTS_PAGE_KEYS) delete out[key]
   // The branch list stays (which branches exist is not a stock figure), without the quantities.

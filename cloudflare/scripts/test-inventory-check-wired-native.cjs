@@ -3,7 +3,7 @@
 //  OFF   both routes answer 404 and prepare no Inventory Check statement; the legacy list is unaffected (R7: a legacy-key request stays on the old route, with the switch ON too);
 //  PARITY  for 10 scopes x 3 viewers the list rows are Products' rows (byte-identical for a viewer whose Products answer needs no cut; otherwise exactly the documented cut), the
 //          second route is a cache HIT in both orders, and no statement of either route reads the stock ledger (a positive control shows the pin can see it on the old route);
-//  PROJECTION  a blind counter gets no stock, no lot quantity and no held stock; barcode, price, category, brand, received date follow the grants; nobody gets cost;
+//  PROJECTION  a blind counter gets no stock, no lot quantity and no held stock; barcode, price, category, brand, received date follow the grants; cost only for a viewer who may see acquisition costs (admin);
 //  FILTERS  Issues / Counted / Pending use the server-only restriction, Not checked leaves the checked set out; latest wins; other branches and organizations are not read;
 //          a set over inventoryCheckFilterMaxIds is refused 503; the counts are IC data on the inventory_checks version;
 //  OVERLAY  the viewer's count entries, pending marks and last movement of the window's ids only; mixed-format created_at (14:00 beats ISO 09:00); bounded by the plan fields;
@@ -96,7 +96,7 @@ const GROUPS = {
 }
 function expectedRow(row, fields, productsPage) {
   const out = { ...row }
-  for (const key of COST) delete out[key]
+  if (!fields.cost) for (const key of COST) delete out[key]
   for (const [group, keys] of Object.entries(GROUPS)) if (!fields[group]) for (const key of keys) delete out[key]
   if (!productsPage) { delete out.supplier; delete out.description }
   if (!fields.stock) out.branch_stock = out.branch_stock.map(({ quantity: _q, ...entry }) => entry)
@@ -105,7 +105,7 @@ function expectedRow(row, fields, productsPage) {
   return JSON.parse(JSON.stringify(out))
 }
 const FIELDS = {
-  admin: { stock: true, barcode: true, price: true, category: true, brand: true, received: true }, checker: { stock: true, barcode: true, price: true, category: true, brand: true, received: true },
+  admin: { stock: true, barcode: true, price: true, category: true, brand: true, received: true, cost: true }, checker: { stock: true, barcode: true, price: true, category: true, brand: true, received: true },
   stockOnly: { stock: true, received: true }, receivedOnly: { received: true }, blind: { brand: true, category: true },
 }
 const PAGE = { admin: true, checker: true, stockOnly: false, receivedOnly: false, blind: false }
@@ -172,7 +172,7 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
         const own = await app.get(withLots(productsUrl))
         check(`${name} / checker: a viewer whose Products answer needs no cut gets byte-identical rows and projected:false`, wired.json.projected === false && JSON.stringify(itemsOf(wired)) === JSON.stringify(own.json.items))
       } else if (viewer === 'admin') {
-        check(`${name} / admin: cost is cut, so the answer says projected:true (the page must not hand it to Products' store)`, wired.json.projected === true && !JSON.stringify(wired.json.items).includes('cost_price'))
+        check(`${name} / admin: cost is kept (the viewer may see it) and the rows are Products' own, so projected:false`, wired.json.projected === false && itemsOf(wired).every((row) => 'cost_price_usd' in row))
       } else check(`${name} / stockOnly: projected:true`, wired.json.projected === true)
       checkedScopes++
     }

@@ -21,7 +21,8 @@ export function getInventoryCheckAccess(user: PermissionUser): InventoryCheckAcc
   const fields = Object.fromEntries(INVENTORY_CHECK_FIELDS.map(field => {
     return [field, canView && (admin || permissions[`inventory_check_show_${field}`] === true)]
   })) as Record<InventoryCheckField, boolean>
-  fields.cost = fields.cost && canViewAcquisitionCosts(user)
+  // One switch for cost everywhere: the shared acquisition-cost rule (the retired inventory_check_show_cost field is no longer consulted).
+  fields.cost = canView && canViewAcquisitionCosts(user)
   return {
     canView,
     canCheck: admin || canView && getActionTier(user, 'inventory_checks', 'check') === 'full',
