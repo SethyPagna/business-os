@@ -221,7 +221,7 @@ const CANON = canonicalProductsQuery(wire({}))!
   const step = wiredResult((await loadWired({ params: params({ page: 2 }), skipSummary: true, access: FULL, deps: deps({ list: () => listOf([1]) }).deps })).raw, first)
   assert.deepEqual(step.summary, first.summary, 'a page step brings no counts: the last ones stay')
   const filteredSummary = wiredResult((await loadWired({ params: params({ brand: 'A' }), skipSummary: false, access: FULL, deps: deps({ list: () => listOf([1], { summary: { ok: 1, issue: 0 } }) }).deps })).raw, first)
-  assert.deepEqual(filteredSummary.summary, { not_checked: 170, in_check: 0, ok: 1, issue: 0, total: 180 }, 'a filtered answer has no not-checked figure: that one stays')
+  assert.equal(filteredSummary.summary, undefined, 'a summary that is not a whole answer (no not-checked, no total) carries no figure: nothing is completed from an older answer')
 }
 
 // ---- a by-id refresh ---------------------------------------------------------------------------------------------------------------------------------------

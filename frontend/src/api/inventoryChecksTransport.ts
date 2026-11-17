@@ -166,8 +166,8 @@ export function readInventoryCheckList<T>(params: QueryParams, signal?: AbortSig
 }
 
 /** ic_wired: the users' count entries and last stock change for the visible ids of one branch (lots=1 also brings the received dates the shared rows lack). */
-export function readInventoryCheckOverlay<T>(params: { branchId: number | string; ids: Array<number | string>; lots?: boolean }, signal?: AbortSignal): Promise<T> {
-  return apiFetch('GET', appendQuery(`${base}/overlay`, buildQueryString({ branchId: params.branchId, ids: params.ids.join(','), ...(params.lots ? { lots: 1 } : {}) })), undefined, undefined, { signal })
+export function readInventoryCheckOverlay<T>(params: { branchId: number | string; ids: Array<number | string>; lots?: boolean; /** false: the page already holds the branch's figures, so the server need not build them (summary=0). */ summary?: boolean }, signal?: AbortSignal): Promise<T> {
+  return apiFetch('GET', appendQuery(`${base}/overlay`, buildQueryString({ branchId: params.branchId, ids: params.ids.join(','), ...(params.lots ? { lots: 1 } : {}), ...(params.summary === false ? { summary: 0 } : {}) })), undefined, undefined, { signal })
 }
 
 /** ic_lot_counts: ONE product's batches at ONE branch, read only when its count popover opens (never for a page of rows). Answers 404 while the switch is OFF. */
