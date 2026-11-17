@@ -10,7 +10,8 @@
 --   line_set_json  the LINES of the approval, fixed when it is created: { "<product id>": 1, ... }, one key per product the count found different from stock (the same rule that counts `lines`,
 --     including a product whose received dates differ although their totals agree). Every reader of "does this line wait for approval" (the list, the overlay, the Fix stock and Set holds,
 --     the replacement of an older count by a newer one, the engine) reads this one set instead of re-deriving the rule from the items, so they can never disagree and none of them scans the
---     session's items. NULL means "not recorded": an approval created by a Worker that does not know the column (during a deploy) keeps the earlier rule for its readers.
+--     session's items. NULL means "not recorded": an approval created by a Worker that does not know the column (in the window between migrations apply and the publish, or after a Worker rollback). Every reader and the engine
+--     then use the same dated rule (countDiffersSql: the item total or any received date), so the two agree for it; ops/queries/inventory-check-approvals-line-set.sql counts these rows (expect 0 after the publish).
 --
 -- PRE:  inventory_check_approvals exists with its four 0286 triggers; neither column exists. A failed check reads a malformed JSON path and aborts the file.
 -- POST: both columns exist (line_decisions_json NOT NULL default '{}' and a JSON-object CHECK; line_set_json nullable with a JSON-object CHECK), every existing row holds no decision ('{}'), the

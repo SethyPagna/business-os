@@ -15,12 +15,16 @@ async function check(name, run) { try { await run(); console.log('PASS ' + name)
 
 // The reader text of the base: the item total only (it cannot see a product whose dates offset each other).
 const OLD_WAITING = [
-  ["AND CASE WHEN ${a}.line_set_json IS NULL THEN (${i}.baseline_quantity IS NOT NULL AND ${i}.counted_quantity IS NOT NULL AND abs(${i}.baseline_quantity-${i}.counted_quantity)>0.000000001)\n    ELSE json_extract(${a}.line_set_json,'$.\"'||${i}.product_id||'\"') IS NOT NULL END",
+  ["AND CASE WHEN ${a}.line_set_json IS NULL THEN ${countDiffersSql(i, '0.000000001')}\n    ELSE json_extract(${a}.line_set_json,'$.\"'||${i}.product_id||'\"') IS NOT NULL END",
     "AND ${i}.baseline_quantity IS NOT NULL AND ${i}.counted_quantity IS NOT NULL AND abs(${i}.baseline_quantity-${i}.counted_quantity)>0.000000001"]]
+// The NULL fallbacks of round 2: the item total only, where the engine's own fallback is countDiffersSql (the dated rule).
+const ITEM_TOTAL_WAITING = [["THEN ${countDiffersSql(i, '0.000000001')}\n    ELSE", "THEN (${i}.baseline_quantity IS NOT NULL AND ${i}.counted_quantity IS NOT NULL AND abs(${i}.baseline_quantity-${i}.counted_quantity)>0.000000001)\n    ELSE"]]
+const ITEM_TOTAL_REJECT = [["AND ${countDiffersSql('i', '0.000000001')}\n            AND json_extract", "AND i.baseline_quantity IS NOT NULL AND i.counted_quantity IS NOT NULL AND abs(i.baseline_quantity-i.counted_quantity)>0.000000001\n            AND json_extract"]]
 const OLD_REJECT = [
-  ["        AND CASE WHEN ${A}.line_set_json IS NULL\n          THEN NOT EXISTS(", "        AND CASE WHEN 1\n          THEN NOT EXISTS("]]
+  ["        AND CASE WHEN ${A}.line_set_json IS NULL\n          THEN NOT EXISTS(", "        AND CASE WHEN 1\n          THEN NOT EXISTS("], ...ITEM_TOTAL_REJECT]
 const OLD_READ = [['  if (only) return only.length ?', '  if (false as boolean) return only!.length ?']]
-const MUTANTS = { 'approval day instead of count day': { 'lib/inventoryCheckList.ts': [["CASE WHEN json_extract(scope_json, '$.membership') = 'submission' THEN started_at ELSE updated_at END", 'updated_at']] }, 'engine scans every item': { 'lib/inventoryCheckApprovals.ts': OLD_READ }, 'old waiting rule (item total)': { 'lib/inventoryCheckSessions.ts': OLD_WAITING }, 'old auto-reject rule (item scan)': { 'lib/inventoryCheckSessions.ts': OLD_REJECT } }
+const MUTANTS = { 'approval day instead of count day': { 'lib/inventoryCheckList.ts': [["CASE WHEN json_extract(scope_json, '$.membership') = 'submission' THEN started_at ELSE updated_at END", 'updated_at']] }, 'engine scans every item': { 'lib/inventoryCheckApprovals.ts': OLD_READ }, 'old waiting rule (item total)': { 'lib/inventoryCheckSessions.ts': OLD_WAITING }, 'old auto-reject rule (item scan)': { 'lib/inventoryCheckSessions.ts': OLD_REJECT },
+  'NULL set: item total in the waiting readers': { 'lib/inventoryCheckSessions.ts': ITEM_TOTAL_WAITING }, 'NULL set: item total in the auto-reject': { 'lib/inventoryCheckSessions.ts': ITEM_TOTAL_REJECT } }
 
 function kit(sourceEdits) {
   const w = createLotSetWorld({ admin: true, ...(sourceEdits ? { sourceEdits } : {}) })
@@ -41,7 +45,12 @@ function kit(sourceEdits) {
   const approvals = f => f.raw.prepare('SELECT * FROM inventory_check_approvals ORDER BY submitted_at, rowid').all()
   const lots = f => f.raw.prepare('SELECT batch_id,quantity FROM branch_batch_stock WHERE batch_id IN (10,11) ORDER BY batch_id').all().map(row => [row.batch_id, row.quantity])
   const dated = (a, b) => ({ productId: 1, lots: [{ batchId: 10, scope: 'lot', counted: a[0], seen: a[1] }, { batchId: 11, scope: 'lot', counted: b[0], seen: b[1] }] })
-  return { w, sessions, fixStock, world, submit, decide, line, approvals, lots, dated }
+  // An approval the OLD Worker made between `migrations apply` and the publish (or after a rollback): its INSERT does not name line_set_json, so it is NULL. The identity trigger is lifted only for the fixture.
+  const nullify = (f, id) => {
+    f.raw.exec('DROP TRIGGER IF EXISTS inventory_check_approvals_identity'); f.raw.prepare('UPDATE inventory_check_approvals SET line_set_json=NULL WHERE session_id=?').run(id)
+    f.raw.exec("CREATE TRIGGER inventory_check_approvals_identity BEFORE UPDATE OF session_id,organization_id,branch_id,lines,submitted_by,submitted_at,baselines_json,line_set_json ON inventory_check_approvals BEGIN SELECT RAISE(ABORT,'inventory_check_approval_immutable'); END;")
+  }
+  return { w, sessions, fixStock, world, nullify, submit, decide, line, approvals, lots, dated }
 }
 
 /** High 1: a recount of an offsetting product replaces the older count; the newest count wins. */
@@ -98,6 +107,36 @@ async function holds(k) {
   assert.equal(await k.sessions.productWaitsForApproval(f.db, 1, 1), false, 'a rejected line no longer waits')
 }
 
+/** Medium 1: an approval with NO recorded set (made by the old Worker in the deploy window) is read by the engine's own rule everywhere, so an offsetting line waits, a recount replaces it, and the shop ends on the newest count. */
+async function nullset(k) {
+  const f = k.world()
+  const made = await k.submit(f, 'set-nul-submit-001', [k.dated([6, 5], [3, 4])]) // A 6 of 5, B 3 of 4: the totals agree, the dates do not
+  assert.equal(made.status, 201, JSON.stringify(made.body))
+  const id = k.approvals(f)[0].session_id; k.nullify(f, id)
+  assert.equal(k.approvals(f)[0].line_set_json, null)
+  assert.equal(await k.sessions.productWaitsForApproval(f.db, 1, 1), true, 'N4: the offsetting product waits although its approval records no set')
+  assert.equal(await k.sessions.lineWaitsForApproval(f.db, id, 1), true)
+  const second = await k.submit(f, 'set-nul-submit-002', [k.dated([5, 5], [2, 4])])
+  assert.equal(second.status, 201, JSON.stringify(second.body))
+  const rows = k.approvals(f)
+  assert.equal(rows.filter(row => row.status === 'pending').length, 1, 'N5: one pending approval after the recount (the older was replaced)')
+  assert.equal(rows[0].status, 'rejected'); assert.equal(rows[0].decision_note, 'Replaced by a newer count')
+  const stale = await k.decide(f, id, { decision: 'approve', requestId: 'set-nul-approve-001' })
+  assert.equal(stale.status, 409, JSON.stringify(stale.body))
+  const done = await k.decide(f, rows[1].session_id, { decision: 'approve', requestId: 'set-nul-approve-002' })
+  assert.equal(done.status, 200, JSON.stringify(done.body))
+  assert.deepEqual(k.lots(f), [[10, 5], [11, 2]], 'N6: the shop ends on the newest count (A=5, B=2)')
+  // The auto-reject reads the same fallback: a newer count of ANOTHER product must not end a NULL approval that still holds the offsetting line.
+  const g = k.world()
+  const first = await k.submit(g, 'set-nul-submit-003', [k.dated([6, 5], [3, 4]), { productId: 2, countedQuantity: 5, seenQuantity: 6 }])
+  assert.equal(first.status, 201, JSON.stringify(first.body))
+  const oldId = k.approvals(g)[0].session_id; k.nullify(g, oldId)
+  const next = await k.submit(g, 'set-nul-submit-004', [{ productId: 2, countedQuantity: 4, seenQuantity: 6 }])
+  assert.equal(next.status, 201, JSON.stringify(next.body))
+  const old = k.approvals(g).find(row => row.session_id === oldId)
+  assert.equal(old.status, 'pending', `N7: the NULL approval still holds the offsetting line of product 1 (got ${old.status}, "${old.decision_note}")`)
+}
+
 /** The engine reads only the lines of the set, by primary key (a 60-product count with 6 lines). */
 async function scan(k) {
   const f = k.world()
@@ -148,11 +187,13 @@ const SCENARIOS = {
   high2: { run: high2, title: 'High 2: a newer count of another product does not end an approval that still holds an open offsetting line' },
   scan: { run: scan, title: "the engine reads only the lines of the set, by primary key: no scan of the session's items, no lot-line probe per item" },
   chipday: { run: chipday, title: 'the chip day of a count approved later is the day it was counted (counted 12 Nov, approved after: 12 Nov)' },
+  nullset: { run: nullset, title: "Medium 1: an approval with no recorded set (deploy window) is read by the engine's rule everywhere: an offsetting line waits, a recount replaces it, the newest count wins" },
   holds: { run: holds, title: 'the offsetting product waits everywhere: Set hold, Fix stock hold, the page tag; a rejected line stops waiting' },
 }
 // Which scenarios each planted mutant (the old reader text) must be caught by.
 // (High 2 is the auto-reject's: the waiting readers alone do not end the approval.)
-const CAUGHT_BY = { 'old waiting rule (item total)': ['high1', 'holds'], 'old auto-reject rule (item scan)': ['high2'], 'engine scans every item': ['scan'], 'approval day instead of count day': ['chipday'] }
+const CAUGHT_BY = { 'old waiting rule (item total)': ['high1', 'holds'], 'old auto-reject rule (item scan)': ['high2'], 'engine scans every item': ['scan'], 'approval day instead of count day': ['chipday'],
+  'NULL set: item total in the waiting readers': ['nullset'], 'NULL set: item total in the auto-reject': ['nullset'] }
 
 async function main() {
   for (const { title, run } of Object.values(SCENARIOS)) await check(title, () => run(kit()))
