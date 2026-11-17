@@ -103,6 +103,23 @@ const cases: Array<[string, () => Promise<void>]> = [
     await new Promise(resolve => setTimeout(resolve, 60))
     assert.deepEqual(reads, [], 'zero requests on open')
   }],
+  ['a viewer who HAS the stock grant but whose row carries no usable quantity is shown no stock at all: no Stock row, no badge, no difference, never a false 0', async () => {
+    const observation = { product_id: 41, state: 'issue', revision: 1, counted_quantity: 5, reason: 'Two crushed', baseline_quantity: 9, current_quantity: null, stock_changed: false }
+    for (const quantity of [null, undefined, Number.NaN, 'abc', Number.POSITIVE_INFINITY]) {
+      const row = { ...product, quantity, damaged_quantity: null } as unknown as InventoryCheckProduct
+      const s = await mount({ observation }, asAdmin, row)
+      const body = text(s)
+      const label = `quantity ${String(quantity)}`
+      assert.ok(!body.includes('Stock') && !body.includes('In stock') && !body.includes('Low stock') && !body.includes('Out of stock'), `${label}: no stock row and no badge: ${body}`)
+      assert.ok(!body.includes('Difference') && !body.includes('NaN') && !body.includes('Infinity'), `${label}: no difference against a stock that is not known: ${body}`)
+      assert.ok(body.includes('Starting stock9') && body.includes('Counted5') && !body.includes('Counted5 ('), `${label}: the figures that ARE known show, the count with no delta: ${body}`)
+      assert.ok(!/Held/.test(body), `${label}: nothing held shown`)
+      await s.unmount()
+    }
+    // contrast: the same row with a real quantity shows all of them, so the absence above is the missing figure and not a broken fixture
+    const real = await mount({ observation }, asAdmin, { ...product, quantity: 8 } as unknown as InventoryCheckProduct)
+    assert.ok(text(real).includes('Stock') && /Low stock|In stock/.test(text(real)) && text(real).includes('Difference−1') && text(real).includes('Counted5 (−3)'), text(real))
+  }],
   ['the unavailable note and both language packs: the one new key exists in en and km', async () => {
     const s = await mount({ unavailable: true })
     assert.ok(text(s).includes('This original product is unavailable'), 'the saved-snapshot note')

@@ -305,6 +305,35 @@ try {
     await other.unmount()
   }
 
+  // ---- "Not checked" and a date exclude each other: a product that was never counted has no date, so the two together would always list nothing ----
+  {
+    const days = [{ day: '2026-11-10', count: 1 }, { day: '2026-11-12', count: 3 }]
+    listAnswer = () => listBody([productRow(12, 'Sequence product', 8)], { summary: { ok: 3, issue: 1, not_checked: 5, total: 9, days } })
+    const surface = await mount()
+    const dayChip = (day: string) => surface.find(node => node.getAttribute('data-day-chip') === day, `day chip ${day}`)
+    const statusChip = () => surface.find(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Not checked'), 'Not checked chip')
+    const last = () => lists[lists.length - 1]
+    await surface.click(dayChip('2026-11-12'))
+    await surface.waitFor(() => lists.length === 2, 'the dated read')
+    assert.equal(last().get('checkedOn'), '2026-11-12'); assert.equal(last().has('checkState'), false)
+    // Not checked while a date is chosen: the date goes (the read has the status and no date), and All on the rail is pressed again.
+    await surface.click(statusChip())
+    await surface.waitFor(() => lists.length === 3, 'the Not checked read')
+    assert.equal(last().get('checkState'), 'not_checked', 'the status is asked for'); assert.equal(last().has('checkedOn'), false, 'and the date is gone')
+    await surface.waitFor(() => dayChip('').getAttribute('aria-pressed') === 'true', 'All is the chosen date chip')
+    assert.equal(statusChip().getAttribute('aria-pressed'), 'true', 'Not checked is pressed')
+    // A date while Not checked is chosen: the status goes (the read has the date and no status), and Not checked is no longer pressed.
+    await surface.click(dayChip('2026-11-10'))
+    await surface.waitFor(() => lists.length === 4, 'the second dated read')
+    assert.equal(last().get('checkedOn'), '2026-11-10', 'the date is asked for'); assert.equal(last().has('checkState'), false, 'and the status is gone')
+    await surface.waitFor(() => statusChip().getAttribute('aria-pressed') === 'false', 'Not checked is not pressed')
+    assert.equal(dayChip('2026-11-10').getAttribute('aria-pressed'), 'true')
+    // Another status keeps a chosen date (only Not checked, which has no date, excludes it).
+    await surface.click(surface.find(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Checked OK'), 'Checked OK chip'))
+    await surface.waitFor(() => lists.length === 5, 'the Checked OK read')
+    assert.deepEqual([last().get('checkState'), last().get('checkedOn')], ['ok', '2026-11-10'], 'Checked OK on a date is a real question and keeps both')
+    await surface.unmount()
+  }
   console.log('inventoryChecksWired passed: blind store, changed-elsewhere hint, by-id refresh, ranked search, late answers, date chips, too many products, refused date')
 } finally {
   await harness.close()
