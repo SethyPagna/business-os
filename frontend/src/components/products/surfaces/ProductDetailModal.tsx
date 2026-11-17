@@ -343,9 +343,9 @@ export default function ProductDetailModal({
                           // leading-relaxed: Khmer needs more line room than Latin text.
                           <span className="ml-2 text-xs leading-relaxed">
                             {expiryTier === 'expired'
-                              ? `${T('inventory_check_expired', 'Expired')} · ${daysText(Math.abs(expiryDaysLeft))}`
+                              ? `${T('expired', 'Expired')} · ${daysText(Math.abs(expiryDaysLeft))}`
                               : expiryTier === 'soon'
-                                ? `${T('inventory_check_expires_soon', 'Expires soon')} · ${daysText(expiryDaysLeft)}`
+                                ? `${T('expiring_soon', 'Expiring soon')} · ${daysText(expiryDaysLeft)}`
                                 : daysText(expiryDaysLeft)}
                           </span>
                         ) : null}

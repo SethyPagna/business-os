@@ -5,7 +5,7 @@ import { offsetDate } from '../src/utils/dateHelpers.ts'
 import { computeExpiryStatus } from '../src/components/pos/posCore.ts'
 
 // Owner rules: dates render dd/mm/yyyy, every word goes through both language packs. The shared ProductDetailModal (Products AND Inventory) printed the expiry as yyyy-mm-dd with an English "d"
-// suffix and had lost the tiering the retired Inventory detail float had (Expired / Expires soon). This mounts the REAL modal with no extra props (exactly Products' call) and pins the date, the
+// suffix and had lost the tiering the retired Inventory detail float had (Expired / Expiring soon). This mounts the REAL modal with no extra props (exactly Products' call) and pins the date, the
 // translated days-left, and the three tiers around their edges (-1, 0, 30, 31 days, the default window), in English and in Khmer from the real packs.
 
 const pack = (name: string) => JSON.parse(fs.readFileSync(new URL(`../src/lang/${name}.json`, import.meta.url), 'utf8')) as Record<string, string>
@@ -48,11 +48,11 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.equal(flat(odd), 'soon-ish')
     assert.equal(expiryNode(odd).getAttribute('data-expiry'), 'ok')
   }],
-  ['tiers: -1 Expired (red), 0 and 30 Expires soon (amber), 31 plain; the words come from the packs', async () => {
+  ['tiers: -1 Expired (red), 0 and 30 Expiring soon (amber), 31 plain; the words come from the packs', async () => {
     for (const [offset, tier, english, khmer] of [
-      [-1, 'expired', 'Expired · 1d', 'ផុតកំណត់ហើយ · 1 ថ្ងៃ'],
-      [0, 'soon', 'Expires soon · 0d', 'ជិតផុតកំណត់ · 0 ថ្ងៃ'],
-      [30, 'soon', 'Expires soon · 30d', 'ជិតផុតកំណត់ · 30 ថ្ងៃ'],
+      [-1, 'expired', 'Expired · 1d', 'ផុតកំណត់ · 1 ថ្ងៃ'],
+      [0, 'soon', 'Expiring soon · 0d', 'ជិតផុតកំណត់ · 0 ថ្ងៃ'],
+      [30, 'soon', 'Expiring soon · 30d', 'ជិតផុតកំណត់ · 30 ថ្ងៃ'],
       [31, 'ok', '31d', '31 ថ្ងៃ'],
     ] as const) {
       const day = offsetDate(offset)
@@ -71,15 +71,19 @@ const cases: Array<[string, () => Promise<void>]> = [
       assert.equal(expiryNode(s).getAttribute('data-expiry'), tier, `alert ${String(alert)} / ${offset} days`)
       const pos = computeExpiryStatus(day, alert)
       assert.equal(pos?.status === 'expiring' ? 'soon' : pos?.status, tier, `POS agrees for alert ${String(alert)} / ${offset} days`)
-      assert.ok(flat(s).endsWith(tier === 'soon' ? `Expires soon · ${offset}d` : `${offset}d`), flat(s))
+      assert.ok(flat(s).endsWith(tier === 'soon' ? `Expiring soon · ${offset}d` : `${offset}d`), flat(s))
     }
     assert.equal(expiryNode(await mount(offsetDate(-2), en, 7)).getAttribute('data-expiry'), 'expired')
   }],
   ['without a pack the English fallbacks still read the same (Products on a missing key)', async () => {
     const day = offsetDate(10)
-    assert.equal(flat(await mount(day, null)), `${dmy(day)} Expires soon · 10d`)
+    assert.equal(flat(await mount(day, null)), `${dmy(day)} Expiring soon · 10d`)
   }],
 ]
+
+// The generic keys POS uses (Khmer "Expired" stays ផុតកំណត់ as it always was on Products), never the Inventory-only inventory_check_* pair.
+assert.equal(en.expired, 'Expired'); assert.equal(km.expired, 'ផុតកំណត់'); assert.equal(en.expiring_soon, 'Expiring soon')
+assert.ok(!/inventory_check_expire/.test(fs.readFileSync(new URL('../src/components/products/surfaces/ProductDetailModal.tsx', import.meta.url), 'utf8')), 'the shared modal uses the generic expiry keys')
 
 const failures: string[] = []
 try {
@@ -88,4 +92,4 @@ try {
   }
 } finally { await harness.close() }
 if (failures.length) throw new Error(`${failures.length} of ${cases.length} expiry cases failed:\n  - ${failures.join('\n  - ')}`)
-console.log(`productDetailExpiry passed: ${cases.length} cases (dd/mm/yyyy, translated days, Expired / Expires soon tiers, en + km)`)
+console.log(`productDetailExpiry passed: ${cases.length} cases (dd/mm/yyyy, translated days, Expired / Expiring soon tiers, en + km)`)
