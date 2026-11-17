@@ -91,7 +91,8 @@ const QUERY_ALIASES: Record<string, string> = {
 const QUERY_KEYS = new Set(['query', 'searchFields', 'branchId', 'category', 'brand', 'barcode', 'stockState', 'groupState', 'initial', 'page', 'pageSize', 'startDate', 'endDate', 'createdFrom', 'createdTo', 'sortBy', 'sortDirection'])
 const SORT_FIELDS: Record<string, InventoryCheckField | null> = { name: null, stock: 'stock', qty_sold: 'sales', customer_count: 'customers', received_date: 'received', price: 'price', cost: 'cost' }
 // ic_simple: the owner's closed list (1 Nov 2026). Dates, sales sorts, price and cost sorts, and the code-only filters have no screen and are refused (400, never a 403 that hints they exist).
-const SIMPLE_QUERY_KEYS = new Set(['query', 'branchId', 'category', 'brand', 'stockState', 'checkState', 'checkedOn', 'page', 'pageSize', 'sortBy', 'sortDirection', 'summary', 'groupBy'])
+// checkedOn (the day filter of the wired list) is NOT one of them: a caller that cannot honour it (the older products list, the scope of a new session) answers 400 for it, as it always did, never accepts it and ignores it.
+const SIMPLE_QUERY_KEYS = new Set(['query', 'branchId', 'category', 'brand', 'stockState', 'checkState', 'page', 'pageSize', 'sortBy', 'sortDirection', 'summary', 'groupBy'])
 const SIMPLE_SORT_FIELDS: Record<string, InventoryCheckField | null> = { name: null, stock: 'stock' }
 export const CHECK_STATES = ['not_checked', 'in_check', 'ok', 'issue'] as const
 export type InventoryCheckState = typeof CHECK_STATES[number]
@@ -106,14 +107,14 @@ export function isCalendarDay(value: string): boolean {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
 }
 
-export function validateInventoryCheckQuery(query: Record<string, unknown>, access: InventoryCheckAccess, simple = false): Record<string, string> {
+export function validateInventoryCheckQuery(query: Record<string, unknown>, access: InventoryCheckAccess, simple = false, options: { checkedOn?: boolean } = {}): Record<string, string> {
   if (!access.canView) throw new InventoryCheckQueryError(403, 'inventory_check_view_required', '')
   const result: Record<string, string> = {}
   const invalid = (parameter: string): never => { throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', parameter) }
   const requireField = (field: InventoryCheckField, parameter: string): void => {
     if (!access.fields[field]) throw new InventoryCheckQueryError(403, 'inventory_check_field_hidden', parameter)
   }
-  const keys = simple ? SIMPLE_QUERY_KEYS : QUERY_KEYS, sorts = simple ? SIMPLE_SORT_FIELDS : SORT_FIELDS
+  const keys = simple ? (options.checkedOn ? new Set([...SIMPLE_QUERY_KEYS, 'checkedOn']) : SIMPLE_QUERY_KEYS) : QUERY_KEYS, sorts = simple ? SIMPLE_SORT_FIELDS : SORT_FIELDS
   for (const [rawKey, rawValue] of Object.entries(query)) {
     const key = QUERY_ALIASES[rawKey] || rawKey
     if (!keys.has(key)) invalid(rawKey)

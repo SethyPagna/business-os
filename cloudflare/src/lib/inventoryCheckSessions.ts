@@ -577,12 +577,17 @@ export const SUPERSEDE_EVENTS_SQL = `INSERT INTO inventory_check_events(session_
   WHERE j.value=@id`
 function supersedeStatements(params: Record<string, unknown>): Statement[] {
   const A = 'inventory_check_approvals'
+  /** A field of the decision of the approver who rejected a line last (NULL when no line was rejected by a person). */
+  const REJECTER = (field: string): string => `(SELECT json_extract(d.value,'$.${field}') FROM json_each(${A}.line_decisions_json) d WHERE json_extract(d.value,'$.decision')='reject' ORDER BY json_extract(d.value,'$.at') DESC, d.key DESC LIMIT 1)`
   const waitingOfApproval = `FROM inventory_check_items i WHERE i.session_id=${A}.session_id AND i.product_id IN (SELECT value FROM json_each(@submitted)) AND ${waitingLineSql(A, 'i')}`
   return [
     guard(`NOT EXISTS(SELECT 1 ${BEING_APPLIED_SQL})`, 'inventory_check_count_in_progress', params),
     { sql: `UPDATE ${A} SET superseded_json=json_patch(superseded_json,(SELECT json_group_object(CAST(i.product_id AS TEXT),@id) ${waitingOfApproval}))
       WHERE organization_id IS @organization AND branch_id=@branchId AND status='pending' AND EXISTS(SELECT 1 ${waitingOfApproval})`, params },
-    { sql: `UPDATE ${A} SET status='rejected',decided_by=NULL,decided_by_name=NULL,decided_at=@now,decision_note=@replacedNote,decision_request_id=@key
+    // An approval with no line left open ends here. When a PERSON rejected a line, the end is that person's (the approver who rejected last: the lines they did not reject were replaced, so nothing is
+    // left to apply), never "replaced"; with no rejected line it is the system's, with its note.
+    { sql: `UPDATE ${A} SET status='rejected',decided_by=${REJECTER('by')},decided_by_name=CASE WHEN ${REJECTER('by')} IS NULL THEN NULL ELSE ${REJECTER('by_name')} END,decided_at=@now,
+        decision_note=CASE WHEN ${REJECTER('by')} IS NULL THEN @replacedNote ELSE NULL END,decision_request_id=@key
       WHERE organization_id IS @organization AND branch_id=@branchId AND status='pending' AND applying_request_id IS NULL AND applied_json='{}'
         AND EXISTS(SELECT 1 FROM json_each(superseded_json) WHERE value=@id)
         AND CASE WHEN ${A}.line_set_json IS NULL
@@ -591,12 +596,20 @@ function supersedeStatements(params: Record<string, unknown>): Statement[] {
             AND json_extract(${A}.line_decisions_json,'$."'||i.product_id||'".decision') IS NOT 'reject')
           ELSE NOT EXISTS(SELECT 1 FROM json_each(${A}.line_set_json) j WHERE json_extract(${A}.superseded_json,'$."'||j.key||'"') IS NULL
             AND json_extract(${A}.line_decisions_json,'$."'||j.key||'".decision') IS NOT 'reject') END
-      RETURNING session_id`, params: { ...params, replacedNote: REPLACED_NOTE } },
+      RETURNING session_id,decided_by,decided_by_name,line_decisions_json`, params: { ...params, replacedNote: REPLACED_NOTE } },
     { sql: SUPERSEDE_EVENTS_SQL, params },
   ]
 }
 /** A differing count with no typed note carries this sentence; the page shows its own translation in its place. */
 export const DEFAULT_COUNT_NOTE = 'Count differs from stock'
+/** What a submission told about the approvals it ended: the ones the system ended (every line replaced, no person involved) and the ones a PERSON's rejected lines ended (decided by that approver). */
+export type ReplacedApprovals = { sessionIds: string[]; byPerson?: Array<{ sessionId: string; by: string; rejectedLines: number }> }
+async function announceReplaced(announce: ((replaced: ReplacedApprovals) => Promise<void>) | undefined, rows: unknown[] | undefined): Promise<void> {
+  const ended = (rows ?? []) as Array<{ session_id: string; decided_by: number | null; decided_by_name: string | null; line_decisions_json: string | null }>
+  if (!ended.length) return
+  const byPerson = ended.filter(row => row.decided_by != null).map(row => ({ sessionId: String(row.session_id), by: row.decided_by_name ?? '', rejectedLines: Object.values(lineDecisions(row.line_decisions_json)).filter(entry => entry.decision === 'reject').length }))
+  try { await announce?.({ sessionIds: ended.filter(row => row.decided_by == null).map(row => String(row.session_id)), ...(byPerson.length ? { byPerson } : {}) }) } catch { /* announced best-effort */ }
+}
 /** The decision note of an approval every line of which a newer count replaced: no person decided it (decided_by is NULL), and this says why. The page and the alert show their own words. */
 export const REPLACED_NOTE = 'Replaced by a newer count'
 const COUNT_EPSILON = 0.000000001
@@ -620,7 +633,7 @@ function submissionLine(value: unknown): SubmissionLine {
  * `approvals` (ic_fix_stock): a submission with at least one count that differs from stock also creates ONE pending approval in the same atomic commit.
  */
 export async function createInventoryCheckSubmission(db: D1Compat, principal: InventoryCheckPrincipal, input: unknown, lowStock: LowStockConfig,
-  options: { approvals?: boolean; onApprovalCreated?: (created: { sessionId: string }) => Promise<void>; onApprovalsReplaced?: (replaced: { sessionIds: string[] }) => Promise<void> } = {}) {
+  options: { approvals?: boolean; onApprovalCreated?: (created: { sessionId: string }) => Promise<void>; onApprovalsReplaced?: (replaced: ReplacedApprovals) => Promise<void> } = {}) {
   const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
   if (options.approvals) await approvalsReady(db)
   const access = getInventoryCheckAccess(actor)
@@ -718,11 +731,7 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
   // Told once, after the commit that made the approval (never for a replay); an announcement never fails the submission it announces.
   if (differing > 0 && !saved.replayed) { try { await options.onApprovalCreated?.({ sessionId: saved.event.session_id }) } catch { /* announced best-effort */ } }
   // The approvals this commit replaced were rejected by the system: each is a review decided, so each is told once (the statement that rejected them names them; a replay is never told again).
-  if (!saved.replayed && supersede.length) {
-    const replacedAt = statements.indexOf(supersede[2]) + 1 // the batch starts with the authority guard
-    const replacedIds = (saved.results?.[replacedAt]?.results ?? []).map(row => String((row as { session_id: string }).session_id))
-    if (replacedIds.length) { try { await options.onApprovalsReplaced?.({ sessionIds: replacedIds }) } catch { /* announced best-effort */ } }
-  }
+  if (!saved.replayed && supersede.length) await announceReplaced(options.onApprovalsReplaced, saved.results?.[statements.indexOf(supersede[2]) + 1]?.results)
   return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), ...(await sessionApproval(db, actor, saved.event.session_id, options)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed }
 }
 // ---- ic_lot_counts: a count per received date (INV-B S5; migration 0294; Inventory replan rev. 2, sections 2.6 and 2.7) ----------------------------------------------------------
@@ -788,7 +797,7 @@ const UNNAMED_STOCKED_LOT_SQL = `SELECT p.value AS product_id FROM json_each(@lo
     AND (SELECT COUNT(*) FROM (SELECT 1 FROM product_batches q CROSS JOIN branch_batch_stock qs ON qs.batch_id=q.id AND qs.branch_id=@branchId
       WHERE q.variant_product_id=p.value AND q.is_active=1 AND qs.quantity>0 LIMIT @capPlusOne))<=@perProduct`
 export async function createInventoryCheckLotSubmission(db: D1Compat, principal: InventoryCheckPrincipal, input: unknown,
-  options: { approvals?: boolean; maxLines: number; maxProducts: number; maxLinesPerProduct: number; onApprovalCreated?: (created: { sessionId: string }) => Promise<void>; onApprovalsReplaced?: (replaced: { sessionIds: string[] }) => Promise<void> }) {
+  options: { approvals?: boolean; maxLines: number; maxProducts: number; maxLinesPerProduct: number; onApprovalCreated?: (created: { sessionId: string }) => Promise<void>; onApprovalsReplaced?: (replaced: ReplacedApprovals) => Promise<void> }) {
   const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
   if (options.approvals) await approvalsReady(db)
   const access = getInventoryCheckAccess(actor), sighted = access.fields.stock
@@ -906,11 +915,7 @@ export async function createInventoryCheckLotSubmission(db: D1Compat, principal:
   }
   const created = options.approvals && !saved.replayed && (saved.results?.[approvalAt + 1]?.results ?? []).length > 0
   if (created) { try { await options.onApprovalCreated?.({ sessionId: saved.event.session_id }) } catch { /* announced best-effort */ } }
-  if (!saved.replayed && supersede.length) {
-    const replacedAt = statements.indexOf(supersede[2]) + 1 // the batch starts with the authority guard
-    const replacedIds = (saved.results?.[replacedAt]?.results ?? []).map(row => String((row as { session_id: string }).session_id))
-    if (replacedIds.length) { try { await options.onApprovalsReplaced?.({ sessionIds: replacedIds }) } catch { /* announced best-effort */ } }
-  }
+  if (!saved.replayed && supersede.length) await announceReplaced(options.onApprovalsReplaced, saved.results?.[statements.indexOf(supersede[2]) + 1]?.results) // the batch starts with the authority guard
   return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), ...(await sessionApproval(db, actor, saved.event.session_id, options)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed }
 }
 export async function patchInventoryCheckObservation(db: D1Compat, principal: InventoryCheckPrincipal, id: string, productId: number, input: unknown) {

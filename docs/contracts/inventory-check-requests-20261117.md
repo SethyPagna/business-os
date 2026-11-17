@@ -21,7 +21,10 @@ POST /api/inventory-checks/sessions/:id/approval/lines
 * 200 body: `{ approval, applied: 0, remaining, done, line: { productId, action }, replayed? }`.
   * `approval` is the approval detail (below). `remaining` is how many lines are still open. `done` is true when the approval ended with this decision.
   * A reject that leaves no line open ends the approval in the same batch: `approved` if anything was applied, otherwise `rejected` (by the approver, never "replaced"). It stays pending when nothing was applied
-    but another approver's claim is held (that claimer finishes or closes it). One Telegram alert is sent when an approval ends; none per line.
+    but another approver's claim is held AND has planned or applied something (that claimer finishes or closes it). A claim that planned and applied nothing does not hold it: the last reject ends it as
+    `rejected` by the approver (`closed: { lines: {} }`). One Telegram alert is sent when an approval ends; none per line.
+  * When a newer count replaces the last open line after the approver rejected another line, the approval ends as that approver's rejection (`decided_by_name` is the approver, no `replaced` flag, no "Replaced by a
+    newer count" note) and the one alert names them with the rejected lines; with no rejected line it is still the system's `replaced` end.
 
 Refusals (always `{ error, code }`, plus `productIds` where a line is named):
 
@@ -92,7 +95,9 @@ is left open (not superseded, not rejected), so a newer count of another product
 ### History
 
 Every decision is one audit event on the product in the session History (`GET /sessions/:id/history`, action `observe`): `after.approval` is `line_rejected`, `line_modified` or `pending` (a reopen),
-`before.approval` the line's state before; for a modify `after.counted_quantity` is the modified total and `after.reason` the note. An approval that ends because of a reject adds the usual approval event
+`before.approval` the line's state before; for a modify `after.counted_quantity` is the modified total and `after.reason` the note. When a modified line is applied, its Stock Changes movement reads
+`Inventory check approved: modified to N (counted M)` (per received date for a dated line) and the applied event keeps the counter's figure in `counted_quantity` with `modified: true` and the approver's total in
+`modified_counted_quantity`; each applied date entry carries `counted` (the approver's) and `was` (the counter's). An approval that ends because of a reject adds the usual approval event
 (`after.approval` `approved` or `rejected`). The Telegram alert, once, when the approval ends with rejected lines, has a row `Lines: 3 approved, 1 rejected`; without rejected lines the alert is unchanged.
 
 ## 4. Date chips
@@ -111,6 +116,7 @@ count (the only kind that is ever approved) the time it was submitted; for every
 `GET /list?branchId=1&checkedOn=2026-11-12` keeps only products whose latest count was on that day; it combines with `checkState`, search, brand, category and the other filters. `checkedOn` must be a real
 calendar date `YYYY-MM-DD` and needs a single branch (`branchId`), otherwise `400 inventory_check_invalid_query` with `parameter: "checkedOn"` (or `"branchId"`). It cannot be combined with `ids`.
 With more checked products than the cap the filter is refused `503 inventory_check_filter_too_large`, as the status filters are.
+`checkedOn` belongs to this list only: the older products list and the scope of a new session refuse it (`400 inventory_check_invalid_query`, `parameter: "checkedOn"`), as they did before the chips existed.
 
 ## 5. Cost on the list
 

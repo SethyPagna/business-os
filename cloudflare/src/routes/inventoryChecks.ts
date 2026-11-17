@@ -29,9 +29,10 @@ import { approvalsAvailable, createInventoryCheckLotSubmission, createInventoryC
 const reviewAlertHook = (): ReviewAlertHook | undefined =>
   (globalThis as unknown as Record<symbol, ReviewAlertHook | undefined>)[Symbol.for('business-os.review-alert.v1')]
 // `system`: no person decided (an approval every line of which a newer count replaced), so no "By" row is sent.
-const announceCount = (env: Env, user: SessionUser, event: Pick<ReviewAlertEvent, 'kind' | 'reason' | 'summary'> & { sessionId: string; system?: true }): Promise<void> =>
+// `by`: the person who decided, when it is not the caller (an approval ended by a submission after the approver's own rejected lines: it is that approver's decision, not the submitter's).
+const announceCount = (env: Env, user: SessionUser, event: Pick<ReviewAlertEvent, 'kind' | 'reason' | 'summary'> & { sessionId: string; system?: true; by?: string }): Promise<void> =>
   Promise.resolve(reviewAlertHook()?.announce(env, {
-    kind: event.kind, by: event.kind === 'created' || event.system ? undefined : actorSnapshot(user), reason: event.reason ?? null, ...(event.summary ? { summary: event.summary } : {}),
+    kind: event.kind, by: event.kind === 'created' || event.system ? undefined : event.by ?? actorSnapshot(user), reason: event.reason ?? null, ...(event.summary ? { summary: event.summary } : {}),
     row: { section: 'inventory_checks', action_type: 'approve', entity_type: 'count', entity_id: event.sessionId, payload_json: '{}', requested_by_name: event.kind === 'created' ? actorSnapshot(user) : null },
   }))
 
@@ -234,7 +235,11 @@ app.post('/submissions', async c => {
   const result = await writer(getDb(c.env), await principal(c), input, await loadLowStockConfig(c.env),
     { approvals: await fixStockOn(c), onApprovalCreated: ({ sessionId }) => announceCount(c.env, c.get('user'), { kind: 'created', sessionId }),
       // Each approval the submission replaced was rejected by the system: a review decided, so it is told like one (a rejection with its reason, and no person to name).
-      onApprovalsReplaced: async ({ sessionIds }) => { for (const sessionId of sessionIds) await announceCount(c.env, c.get('user'), { kind: 'rejected', sessionId, reason: REPLACED_NOTE, system: true }) } })
+      onApprovalsReplaced: async ({ sessionIds, byPerson }) => {
+        for (const sessionId of sessionIds) await announceCount(c.env, c.get('user'), { kind: 'rejected', sessionId, reason: REPLACED_NOTE, system: true })
+        // An approval the approver's own rejected lines ended (the rest was replaced): the approver's rejection, with the lines they rejected, never "replaced".
+        for (const ended of byPerson ?? []) await announceCount(c.env, c.get('user'), { kind: 'rejected', sessionId: ended.sessionId, reason: null, by: ended.by, summary: { applied: 0, rejected: ended.rejectedLines } })
+      } })
   return c.json(result, result.created ? 201 : 200)
 })
 app.get('/sessions/:id', async c => c.json(await getInventoryCheckSession(getDb(c.env), await principal(c), c.req.param('id'), { approvals: await fixStockOn(c), lotLines: await lotCountsOn(c) })))

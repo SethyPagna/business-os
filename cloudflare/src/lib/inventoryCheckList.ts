@@ -63,7 +63,7 @@ export function planInventoryList(user: PermissionUser, raw: Record<string, stri
   // sortBy=checked is the spelling older open tabs send for the date order: it is groupBy=checked, and its direction is ignored (newest first, "Never checked" last).
   const sortWord = rawSortBy?.trim() || ''
   if (sortWord === 'checked') delete rest.sortDirection
-  const validated = validateInventoryCheckQuery(rest, access, true)
+  const validated = validateInventoryCheckQuery(rest, access, true, { checkedOn: true })
   const sortBy = sortWord || 'created'
   if (sortBy !== 'created' && sortBy !== 'name' && sortBy !== 'checked') invalid('sortBy')
   if (validated.groupBy && sortWord && sortWord !== 'checked') invalid('sortBy')

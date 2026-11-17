@@ -10,7 +10,7 @@ const { createInvApp } = require('./harness/inv-app.cjs')
 let checks = 0
 function check(label, cond, detail) { if (!cond && detail) console.log(typeof detail === 'function' ? detail() : detail); assert.ok(cond, `FAIL: ${label}`); checks++; console.log(`  ok  ${label}`) }
 
-const MOUNT = { '/api/products': 'routes/products.ts', '/api/inventory-checks': 'routes/inventoryChecks.ts' }
+const MOUNT = { '/api/products': 'routes/products.ts', '/api/inventory-checks/products': 'routes/inventoryCheckProducts.ts', '/api/inventory-checks': 'routes/inventoryChecks.ts' }
 function seed(raw, seedStockFixture) {
   seedStockFixture(raw.db, () => {
     for (let id = 100; id <= 105; id++) {
@@ -121,6 +121,19 @@ const STATEMENT = /inventory_check_(items|sessions|approvals)/
   const coldApproved = await cold('/api/inventory-checks/list?branchId=1', approved)
   check('the count day costs no statement: the same 2 Inventory Check statements', coldApproved.n === 2, String(coldApproved.n))
 
+  // ---- checkedOn belongs to the wired list only ------------------------------------------------------------------------------------------------------------------------------------------------
+  const refusesDay = async (a) => {
+    a.setUser(a.users.checker); a.setSwitch('ic_simple', 'on')
+    const scoped = await a.send('POST', '/api/inventory-checks/sessions', { branchId: 1, requestId: 'scope-day-00001', productIds: [100], scope: { checkedOn: '2026-11-12' } })
+    const older = await a.get('/api/inventory-checks/products?branchId=1&checkedOn=2026-11-12')
+    return { scoped, older }
+  }
+  const refused = await refusesDay(approved)
+  check('a session created from a scope that names a check day is refused (400 naming checkedOn), never accepted and ignored', refused.scoped.status === 400 && refused.scoped.json.code === 'inventory_check_invalid_query' && refused.scoped.json.parameter === 'checkedOn', () => JSON.stringify([refused.scoped.status, refused.scoped.json]))
+  check('so is the older products list', refused.older.status === 400 && refused.older.json.parameter === 'checkedOn', () => JSON.stringify([refused.older.status, refused.older.json]))
+  const stillList = await approved.get('/api/inventory-checks/list?branchId=1&checkedOn=2026-11-12')
+  check('while the wired list keeps the filter', stillList.status === 200 && ids(stillList) === '103,105')
+
   // ---- mutants: the same assertions go red ------------------------------------------------------------------------------------------------------------------------------------------------
   const run = async (name, edits, probe, seedWith = seed) => {
     const mutant = make(edits, seedWith)
@@ -144,6 +157,9 @@ const STATEMENT = /inventory_check_(items|sessions|approvals)/
   }, seedApproved)
   await run('the overlay shows the approval time as the checked-at time', { 'lib/inventoryCheckOverlay.ts': [["CASE WHEN json_extract(s.scope_json, '$.membership') = 'submission' THEN s.started_at ELSE i.updated_at END AS updated_at", 'i.updated_at AS updated_at']] }, async (m) => {
     m.setUser(m.users.checker); const r = await m.get('/api/inventory-checks/overlay?branchId=1&ids=105'); return r.json.items[0].check.at !== '2026-11-12T03:00:00.000Z'
+  }, seedApproved)
+  await run('checkedOn accepted again by the ic_simple callers (and ignored)', { 'lib/inventoryCheckAccess.ts': [["'checkState', 'page',", "'checkState', 'checkedOn', 'page',"]] }, async (m) => {
+    const r = await refusesDay(m); return r.scoped.status !== 400 || r.older.status !== 400
   }, seedApproved)
   console.log(`PASS test-inventory-check-date-chips-native (${checks} checks)`)
   process.exit(0)

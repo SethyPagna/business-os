@@ -138,4 +138,11 @@ check('allowlisted query contract cannot fall back to unknown derived sorting', 
   assert.throws(() => worker.validateInventoryCheckQuery({}, worker.getInventoryCheckAccess(null)), error => error.status === 403 && error.code === 'inventory_check_view_required')
   assert.equal(worker.validateInventoryCheckQuery({ barcode: '123' }, access).barcode, '123')
 })
+check('checkedOn is the wired list\'s day filter only: every other caller of the validator refuses it (400 naming checkedOn), as before the day chips existed; the list opts in and keeps its strict calendar date', () => {
+  const access = worker.getInventoryCheckAccess(user({}, {}, 'admin'))
+  for (const simple of [false, true]) assert.throws(() => worker.validateInventoryCheckQuery({ checkedOn: '2026-11-12' }, access, simple), error => error.status === 400 && error.code === 'inventory_check_invalid_query' && error.parameter === 'checkedOn', `simple=${simple}`)
+  assert.equal(worker.validateInventoryCheckQuery({ checkedOn: '2026-11-12' }, access, true, { checkedOn: true }).checkedOn, '2026-11-12')
+  for (const bad of ['2026-02-30', '2026-1-5', 'today']) assert.throws(() => worker.validateInventoryCheckQuery({ checkedOn: bad }, access, true, { checkedOn: true }), error => error.status === 400 && error.parameter === 'checkedOn', bad)
+  assert.equal(worker.validateInventoryCheckQuery({ checkedOn: '' }, access, true, { checkedOn: true }).checkedOn, undefined, 'a blank day is no filter on the list')
+})
 console.log(`PASS ${checks} Inventory check access groups; 2700 Worker/frontend parity cells`)
