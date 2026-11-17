@@ -31,8 +31,8 @@ const MUTANTS = { 'approval day instead of count day': { 'lib/inventoryCheckAppr
 function kit(sourceEdits) {
   const w = createLotSetWorld({ admin: true, ...(sourceEdits ? { sourceEdits } : {}) })
   const planTier = w.load('lib/planTier.ts'), sessions = w.load('lib/inventoryCheckSessions.ts'), fixStock = w.load('lib/inventoryCheckFixStock.ts')
-  const world = () => {
-    const f = w.world({ switches: ON })
+  const world = (switches = ON) => {
+    const f = w.world({ switches })
     w.seed(f, "UPDATE branch_batch_stock SET quantity=5 WHERE batch_id=10; UPDATE branch_batch_stock SET quantity=4 WHERE batch_id=11; UPDATE branch_stock SET quantity=9 WHERE product_id=1; UPDATE products SET stock_quantity=9 WHERE id=1;" +
       "INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active) VALUES(2,'Toner','TON',1,0,6,1);" +
       "INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,6);" +
@@ -209,27 +209,46 @@ async function main() {
     }
   }
 
-  await check('the set is recorded at creation by both writers: a lots submission and a plain submission (the plain one has no received dates)', async () => {
-    const k = kit(), f = k.world()
-    await k.submit(f, 'set-both-submit-01', [k.dated([6, 5], [3, 4]), { productId: 2, countedQuantity: 6, seenQuantity: 6 }])
+  // The two INSERT writers of an approval. With ic_wired (or ic_lot_counts) on, EVERY submission goes through the lot writer, plain lines included, so the plain writer (createInventoryCheckSubmission)
+  // is reached only with both switches off: its world below. A planted mutant per writer proves each assertion reaches the writer it names.
+  const PLAIN = { ic_simple: 'on', ic_fix_stock: 'on' }
+  const PLAIN_WRITER_EMPTY_SET = { 'lib/inventoryCheckSessions.ts': [["const lineSet = JSON.stringify(Object.fromEntries(differingItems.map(item => [String(item.line.productId), 1])))", "const lineSet = '{}'"]] }
+  const LOT_WRITER_EMPTY_SET = { 'lib/inventoryCheckSessions.ts': [["json_group_object(CAST(i.product_id AS TEXT),1) AS line_set FROM", "'{}' AS line_set FROM"]] }
+  const lotWriter = async edits => {
+    const k = kit(edits), f = k.world()
+    const made = await k.submit(f, 'set-lot-submit-01', [k.dated([6, 5], [3, 4]), { productId: 2, countedQuantity: 6, seenQuantity: 6 }])
+    assert.equal(made.status, 201, JSON.stringify(made.body))
+    assert.equal(f.raw.prepare('SELECT COUNT(*) AS n FROM inventory_check_lot_lines').get().n > 0, true, 'the lot writer ran: it wrote lot lines')
     const [row] = k.approvals(f)
     assert.equal(row.lines, 1); assert.deepEqual(JSON.parse(row.line_set_json), { 1: 1 }, 'only the product found different is a line; the matching one is not')
-    // The plain route (no lots): POST /sessions/submit-style writer is the older submission.
-    const plain = await k.w.call(f, 'POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: 'set-both-submit-02', lines: [{ productId: 2, countedQuantity: 5, seenQuantity: 6 }] })
-    assert.equal(plain.status, 201, JSON.stringify(plain.body))
-    const rows = k.approvals(f); assert.deepEqual(JSON.parse(rows[1].line_set_json), { 2: 1 })
-  })
+  }
+  const plainWriter = async edits => {
+    const k = kit(edits), f = k.world(PLAIN)
+    const made = await k.submit(f, 'set-plain-submit-01', [{ productId: 2, countedQuantity: 5, seenQuantity: 6 }, { productId: 1, countedQuantity: 9, seenQuantity: 9 }])
+    assert.equal(made.status, 201, JSON.stringify(made.body))
+    assert.equal(f.raw.prepare('SELECT COUNT(*) AS n FROM inventory_check_lot_lines').get().n, 0, 'the plain writer ran: it writes no lot lines')
+    const [row] = k.approvals(f)
+    assert.equal(row.lines, 1); assert.deepEqual(JSON.parse(row.line_set_json), { 2: 1 }, 'only the product found different is a line')
+  }
+  await check('the set is recorded at creation by the lot writer (a lots submission)', () => lotWriter())
+  await check('the set is recorded at creation by the plain writer (ic_wired and ic_lot_counts off: no received dates)', () => plainWriter())
+  for (const [name, run, edits] of [['lot writer', lotWriter, LOT_WRITER_EMPTY_SET], ['plain writer', plainWriter, PLAIN_WRITER_EMPTY_SET]]) {
+    let caught = false
+    try { await run(edits) } catch { caught = true }
+    await check(`mutant "the ${name} records an empty set" is caught by its own assertion`, () => assert.ok(caught, 'the assertion passed although the writer recorded no set'))
+  }
 
-  await check('the set never changes after creation (the identity trigger), and the detail projects exactly the server\'s lines', async () => {
+  await check('the set never changes after creation (the identity trigger), and the detail GET projects exactly the server\'s lines on its own', async () => {
     const k = kit(), f = k.world()
     const made = await k.submit(f, 'set-ident-submit-01', [k.dated([6, 5], [3, 4]), { productId: 2, countedQuantity: 5, seenQuantity: 6 }])
     assert.deepEqual(made.body.approval.line_ids, [1, 2]); assert.equal(made.body.approval.lines, 2)
     assert.throws(() => f.raw.exec("UPDATE inventory_check_approvals SET line_set_json='{\"1\":1}'"), /inventory_check_approval_immutable/)
-    const detail = await k.w.call(f, 'GET', `/api/inventory-checks/sessions/${made.body.session?.id ?? k.approvals(f)[0].session_id}?approvals=1`)
-    assert.deepEqual(detail.body.approval?.line_ids ?? made.body.approval.line_ids, [1, 2])
+    const detail = await k.w.call(f, 'GET', `/api/inventory-checks/sessions/${k.approvals(f)[0].session_id}?approvals=1`)
+    assert.equal(detail.status, 200, JSON.stringify(detail.body))
+    assert.deepEqual(detail.body.approval.line_ids, [1, 2], 'the detail read projects line_ids itself (not the creation answer)')
   })
 
-  await check('an approval with no recorded set (made by a Worker that does not know the column) keeps the earlier rule and is still decidable', async () => {
+  await check('an approval with no recorded set (made by a Worker that does not know the column) is read by the engine's rule and is still decidable', async () => {
     const k = kit(), f = k.world()
     await k.submit(f, 'set-null-submit-01', [{ productId: 2, countedQuantity: 5, seenQuantity: 6 }])
     f.raw.exec('DROP TRIGGER inventory_check_approvals_identity; UPDATE inventory_check_approvals SET line_set_json=NULL')

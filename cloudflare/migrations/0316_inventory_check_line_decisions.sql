@@ -30,10 +30,14 @@
 --       The table holds one row per submitted count that differs from stock, so each is a handful of rows; no other table is read or written. At runtime a decision writes one
 --       approval row, one session row and one event row; creating an approval computes the set inside the statement that already counts the lines (no extra read or write).
 -- Append-only, LF-only, rowid kept (no WITHOUT ROWID: it breaks backups and BACKUP_TABLES / the branch cutover capture read rowids), generic (no client data), no ANALYZE.
--- Rollback-safe: the previous Worker never names either column and runs unchanged on the new schema (its own INSERTs and UPDATEs leave them at '{}' / NULL; its approvals keep the earlier rule).
+-- Rollback: the schema change itself is safe for the previous Worker, which never names either column and starts on the new schema (its own INSERTs and UPDATEs leave them at '{}' / NULL). It is NOT neutral for an
+-- approval that already uses what this file added: it ignores line_decisions_json, so on a pending approval it would APPLY a line an approver rejected and would apply the COUNTER's figure for a line the approver
+-- modified; it creates approvals with line_set_json NULL (the new Worker reads those by the engine's own rule) and its approval flip rewrites an item's updated_at / updated_by (the new Worker's does not; see Backfill 2).
+-- BEFORE rolling the Worker back, run ops/queries/inventory-check-approvals-line-set.sql: pending_with_line_decisions must be 0 (decide or close those approvals first). After a rollback, and again after the next
+-- publish, pending_without_line_set and items_with_approval_time show what the older Worker wrote.
 -- A Worker that names a column needs this migration applied first, like every column the engine reads (deploy order: migrations, then the Worker).
 -- RECOVERY: nothing to restore: a decision lives in line_decisions_json only, so dropping it loses decisions on pending approvals (rejected lines would read as open again; nothing was applied
---   for them), and line_set_json is derived from the items and can be recomputed by the UPDATE of this file. Full undo (after the Worker that reads them is rolled back), in this order,
+--   for them), and line_set_json is derived from the items and can be recomputed by the first UPDATE of this file. The second UPDATE (count times) is not undone and needs no undo: it wrote back the values its items were inserted with, and the approval's own decided_at / applied_json keep the approval time. Full undo (after the Worker that reads them is rolled back), in this order,
 --   because a trigger that names a column blocks dropping it:
 --     DROP TRIGGER IF EXISTS inventory_check_approvals_identity;
 --     CREATE TRIGGER inventory_check_approvals_identity BEFORE UPDATE OF session_id,organization_id,branch_id,lines,submitted_by,submitted_at,baselines_json ON inventory_check_approvals BEGIN SELECT RAISE(ABORT,'inventory_check_approval_immutable'); END;

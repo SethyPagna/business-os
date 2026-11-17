@@ -51,6 +51,13 @@ check('the file is LF-only, numbered 0316 once, keeps rowid, has PRE / POST / RE
   assert.equal(/no row is read or written/i.test(sql), false, 'the header must not say no row is read or written: the CHECK is tested against existing rows and the backfill writes')
   assert.match(sql, /tests an added CHECK against the rows already in the table/)
   assert.deepEqual(fs.readdirSync(directory).filter(file => file.startsWith('0316_')), [migration])
+  // The rollback note says what is true: the previous Worker ignores the decisions column, so it is not "rollback-safe" once approvers have used it, and the pre-rollback check it names exists.
+  assert.equal(/Rollback-safe/.test(sql), false, 'the file does not claim the previous Worker is safe on approvals that use the new columns')
+  assert.match(sql, /APPLY a line an approver rejected/); assert.match(sql, /pending_with_line_decisions must be 0/)
+  const query = path.join(__dirname, '../../ops/queries/inventory-check-approvals-line-set.sql')
+  assert.ok(fs.existsSync(query), 'the ops query the note names exists')
+  const queryText = fs.readFileSync(query, 'utf8')
+  for (const column of ['pending_without_line_set', 'pending_with_line_decisions', 'items_with_approval_time']) assert.ok(queryText.includes(column) && sql.includes(column), `the note and the query both name ${column}`)
 })
 
 check('it is PRE, two ALTER TABLE ADD COLUMN, the two backfill UPDATEs, the identity trigger swap and POST: no comment-only statement, at most 5 compound terms, one statement per step', () => {
