@@ -1436,6 +1436,16 @@ const REPLAY_UNPINNED_COLUMNS: Record<'products' | 'batches', ReadonlySet<string
 // Undo and redo write a cost back at 4 places (owner rule, 30 Sep 2026): a snapshot taken before the rule can hold a longer figure, and 0313 rounds the live row.
 const RESTORED_COST_COLUMNS = new Set(['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr', 'unit_cost_usd'])
 const restoredCost = (column: string, value: unknown): unknown => RESTORED_COST_COLUMNS.has(column) && typeof value === 'number' && Number.isFinite(value) ? roundMoney4(value) : value
+// Identical to halfUp4dpJs in lib/catalogCostRecompute.ts (the JS twin of 0313's HALF_UP_4DP); pinned by scripts/test-half-up-4dp-js-twin-native.cjs.
+function halfUp4dpJs(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  const scaled = value * 10000.0000000000036
+  if (!(Math.abs(scaled) < 9.2e18)) return null
+  const units = scaled < 0 ? -Math.trunc(-scaled + 0.5) : Math.trunc(scaled + 0.5)
+  return units / 10000 + 0
+}
+// The pin also accepts the figure 0313's HALF_UP_4DP leaves, which differs from roundMoney4 on a near-tie double.
+const halfUpCost = (column: string, value: unknown): number | null => RESTORED_COST_COLUMNS.has(column) ? halfUp4dpJs(value) : null
 const PRODUCT_DERIVED_COST_COLUMNS = ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr'] as const
 // The attribution a lot the session created loses once nothing received remains on it.
 const BATCH_ATTRIBUTION_COLUMNS = ['supplier_id', 'supplier_name', 'unit_cost_usd', 'payment_status', 'credit_due_date', 'received_branch_id', 'expiry_date', 'notes'] as const
@@ -1591,10 +1601,10 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
     for (let i = 0; i < columns.length; i += 40) {
       const slice = columns.slice(i, i + 40)
       // A saved cost over 4 places is pinned as that figure or its 4-place form: undo writes it back rounded and 0313 rounds the live row.
-      const longCost = (c: string) => RESTORED_COST_COLUMNS.has(c) && typeof pinned[c] === 'number' && restoredCost(c, pinned[c]) !== pinned[c]
-      statements.push(assertion(`EXISTS(SELECT 1 FROM ${table} WHERE id=@rowId AND ${slice.map((c, j) => longCost(c) ? `("${c}" IS @p${j} OR "${c}" IS @r${j})` : `"${c}" IS @p${j}`).join(' AND ')})`,
+      const longCost = (c: string) => RESTORED_COST_COLUMNS.has(c) && typeof pinned[c] === 'number' && (restoredCost(c, pinned[c]) !== pinned[c] || halfUpCost(c, pinned[c]) !== pinned[c])
+      statements.push(assertion(`EXISTS(SELECT 1 FROM ${table} WHERE id=@rowId AND ${slice.map((c, j) => longCost(c) ? `("${c}" IS @p${j} OR "${c}" IS @r${j} OR "${c}" IS @h${j})` : `"${c}" IS @p${j}`).join(' AND ')})`,
         { rowId: row.id, ...Object.fromEntries(slice.map((c, j) => [`p${j}`, pinned[c] ?? null])),
-          ...Object.fromEntries(slice.map((c, j) => [j, c] as const).filter(([, c]) => longCost(c)).map(([j, c]) => [`r${j}`, restoredCost(c, pinned[c])])) }))
+          ...Object.fromEntries(slice.map((c, j) => [j, c] as const).filter(([, c]) => longCost(c)).flatMap(([j, c]) => [[`r${j}`, restoredCost(c, pinned[c])], [`h${j}`, halfUpCost(c, pinned[c])]])) }))
     }
   }
   for (const key of REPLAY_MUTATION_ORDER[direction]) {

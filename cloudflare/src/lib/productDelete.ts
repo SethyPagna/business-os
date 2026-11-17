@@ -236,21 +236,35 @@ function identifier(value: string): string {
 }
 
 // The four cost columns of a product row. A snapshot taken before the 4-place rule can hold a cost over 4 places; undo restores it rounded
-// (restoreProductStatement) and 0313 rounds the live row, so the guards accept the saved figure or its 4-place form (nearest, half away from zero).
+// (restoreProductStatement, nearest, half away from zero) and 0313 rounds the live row with HALF_UP_4DP, which differs from that on a near-tie double,
+// so the guards accept the saved figure or its 4-place form by either rule.
 const PRODUCT_COST_FIELDS = ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr']
 const roundCost = (value: number): number | null => (Number.isFinite(value) ? roundMoney4(value) : null)
+// Identical to halfUp4dpJs in lib/catalogCostRecompute.ts (the JS twin of 0313's HALF_UP_4DP); pinned by scripts/test-half-up-4dp-js-twin-native.cjs.
+function halfUp4dpJs(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  const scaled = value * 10000.0000000000036
+  if (!(Math.abs(scaled) < 9.2e18)) return null
+  const units = scaled < 0 ? -Math.trunc(-scaled + 0.5) : Math.trunc(scaled + 0.5)
+  return units / 10000 + 0
+}
+const halfCost = (value: number): number | null => halfUp4dpJs(value)
+const isLongCost = (value: number): boolean => roundCost(value) !== value || halfCost(value) !== value
 function roundedProductCosts(row: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(row).map(([field, value]) => [field, PRODUCT_COST_FIELDS.includes(field) && typeof value === 'number' ? roundCost(value) : value]))
 }
+function halfUpProductCosts(row: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(row).map(([field, value]) => [field, PRODUCT_COST_FIELDS.includes(field) && typeof value === 'number' ? halfCost(value) : value]))
+}
 
-function exactObjectSql(alias: string, object: Record<string, unknown>, parameter: string, roundedParameter?: string): string {
+function exactObjectSql(alias: string, object: Record<string, unknown>, parameter: string, roundedParameter?: string, halfParameter?: string): string {
   const fields = Object.keys(object)
   if (!fields.length) return '0'
   return fields.map((field) => {
     const exact = `${alias}.${identifier(field)} IS json_extract(@${parameter},'$.${field}')`
     const value = object[field]
-    return roundedParameter && PRODUCT_COST_FIELDS.includes(field) && typeof value === 'number' && roundCost(value) !== value
-      ? `(${exact} OR ${alias}.${identifier(field)} IS json_extract(@${roundedParameter},'$.${field}'))` : exact
+    return roundedParameter && halfParameter && PRODUCT_COST_FIELDS.includes(field) && typeof value === 'number' && isLongCost(value)
+      ? `(${exact} OR ${alias}.${identifier(field)} IS json_extract(@${roundedParameter},'$.${field}') OR ${alias}.${identifier(field)} IS json_extract(@${halfParameter},'$.${field}'))` : exact
   }).join('\n        AND ')
 }
 
@@ -258,13 +272,16 @@ function exactObjectSql(alias: string, object: Record<string, unknown>, paramete
 // accepts the saved figure or its 4-place form. Every other lot column stays exact.
 const LOT_COST_FIELDS = ['unit_cost_usd', 'received_cost_usd']
 const ROUNDED_KEY = '__r4'
+const HALF_UP_KEY = '__h4'
 function lotRowsWithRoundedTwin(rows: Array<Record<string, unknown>>): { rows: Array<Record<string, unknown>>; roundedFields: string[] } {
-  const isLong = (row: Record<string, unknown>, field: string) => typeof row[field] === 'number' && roundCost(row[field] as number) !== row[field]
+  const isLong = (row: Record<string, unknown>, field: string) => typeof row[field] === 'number' && isLongCost(row[field] as number)
   const roundedFields = LOT_COST_FIELDS.filter((field) => rows.some((row) => isLong(row, field)))
   if (!roundedFields.length) return { rows, roundedFields }
   return { roundedFields, rows: rows.map((row) => {
-    const twin = Object.fromEntries(roundedFields.filter((field) => isLong(row, field)).map((field) => [field, roundCost(row[field] as number)]))
-    return Object.keys(twin).length ? { ...row, [ROUNDED_KEY]: twin } : row
+    const long = roundedFields.filter((field) => isLong(row, field))
+    const twin = Object.fromEntries(long.map((field) => [field, roundCost(row[field] as number)]))
+    const half = Object.fromEntries(long.map((field) => [field, halfCost(row[field] as number)]))
+    return long.length ? { ...row, [ROUNDED_KEY]: twin, [HALF_UP_KEY]: half } : row
   }) }
 }
 
@@ -281,7 +298,8 @@ function exactRowsSql(args: {
   const matches = columns.map((field) => {
     const exact = `${args.alias}.${identifier(field)} IS json_extract(expected.value,'$.${field}')`
     return args.roundedFields?.includes(field)
-      ? `(${exact} OR (json_type(expected.value,'$.${ROUNDED_KEY}.${field}') IS NOT NULL AND ${args.alias}.${identifier(field)} IS json_extract(expected.value,'$.${ROUNDED_KEY}.${field}')))` : exact
+      ? `(${exact} OR (json_type(expected.value,'$.${ROUNDED_KEY}.${field}') IS NOT NULL AND ${args.alias}.${identifier(field)} IS json_extract(expected.value,'$.${ROUNDED_KEY}.${field}'))
+              OR (json_type(expected.value,'$.${HALF_UP_KEY}.${field}') IS NOT NULL AND ${args.alias}.${identifier(field)} IS json_extract(expected.value,'$.${HALF_UP_KEY}.${field}')))` : exact
   }).join('\n              AND ')
   return `(SELECT COUNT(*) FROM ${args.table} ${args.alias} WHERE ${args.scope})=json_array_length(json(@${args.parameter}))
       AND NOT EXISTS (SELECT 1 FROM json_each(json(@${args.parameter})) expected WHERE NOT EXISTS (
@@ -408,10 +426,11 @@ export function productRemoveGraphGuards(
     const selected = Object.fromEntries(productColumns.slice(offset, offset + 32).map((field) => [field, snapshot.product[field]]))
     productGuards.push({
       sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products p WHERE p.id=@product
-        AND ${exactObjectSql('p', selected, 'productJson', 'productRoundedJson')})
+        AND ${exactObjectSql('p', selected, 'productJson', 'productRoundedJson', 'productHalfJson')})
         THEN 1 ELSE json_extract('', '$') END AS product_remove_product_guard`,
       // The rounded twin is bound only when some saved cost is over 4 places (the SQL names it only then), so a plan without one binds exactly what it always did.
-      params: { product: plan.product_id, productJson: JSON.stringify(selected), ...(JSON.stringify(roundedProductCosts(selected)) !== JSON.stringify(selected) ? { productRoundedJson: JSON.stringify(roundedProductCosts(selected)) } : {}) },
+      params: { product: plan.product_id, productJson: JSON.stringify(selected), ...(JSON.stringify(roundedProductCosts(selected)) !== JSON.stringify(selected) || JSON.stringify(halfUpProductCosts(selected)) !== JSON.stringify(selected)
+        ? { productRoundedJson: JSON.stringify(roundedProductCosts(selected)), productHalfJson: JSON.stringify(halfUpProductCosts(selected)) } : {}) },
     })
   }
   const lots = lotRowsWithRoundedTwin(snapshot.batches)

@@ -84,6 +84,35 @@ const HALF_UP_4DP_AS_SHIPPED = (value: string) => `CAST(${value} * 10000.0 + 0.5
  * weighted branch); 'validated-unrounded' = what 0256 and 0261 shipped (the fallback copies the lot cost verbatim). The last exists only so
  * those migrations' pins and the 0312 recovery notes can still name their exact text.
  */
+/**
+ * The exact JS twin of HALF_UP_4DP, as SQLite evaluates it: scale by 10000.0000000000036, ROUND(x) (SQLite adds half and truncates, away from zero for a
+ * negative), cast to an integer, divide by 10000.0. Null for a value that is not a finite number or whose scaled form leaves the int64 range (nothing
+ * money-sized does). Migration 0313 rounds long costs with this text, and roundStoredCost (roundMoney4) can differ from it on a near-tie double (about
+ * 0.25% of division results: 21.398249999999997 is 21.3982 by roundStoredCost and 21.3983 here), so a guard that asks whether a live cost is the saved
+ * cost stored to 4 places accepts either form (isCostRoundingOf).
+ */
+export function halfUp4dpJs(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  const scaled = value * 10000.0000000000036
+  if (!(Math.abs(scaled) < 9.2e18)) return null
+  const units = scaled < 0 ? -Math.trunc(-scaled + 0.5) : Math.trunc(scaled + 0.5)
+  return units / 10000 + 0
+}
+
+/** The 4-place forms a saved cost may take after rounding: roundStoredCost's and HALF_UP_4DP's, never the saved figure itself. */
+export function costRoundingForms(saved: unknown): number[] {
+  if (typeof saved !== 'number' || !Number.isFinite(saved)) return []
+  let nearest: number | null = null
+  try { nearest = roundStoredCost(saved) } catch { nearest = null }
+  const half = halfUp4dpJs(saved)
+  return [...new Set([nearest, half].filter((form): form is number => form !== null && form !== saved))]
+}
+
+/** True when `live` is a number that is the number `saved` stored to 4 places by either rule, and is not `saved` itself. NULL is never rounding. */
+export function isCostRoundingOf(saved: unknown, live: unknown): boolean {
+  return typeof live === 'number' && costRoundingForms(saved).includes(live)
+}
+
 /** A stored cost value as it must be written: nearest 4 places, half away from zero; unknown (NULL, non-numeric) stays null. */
 export function roundStoredCost(value: unknown): number | null {
   return value == null || value === '' || !Number.isFinite(Number(value)) ? null : roundMoney4(typeof value === 'string' ? value : Number(value))

@@ -180,6 +180,15 @@ function refuse(status: number, message: string, code: string, details: Row = {}
   throw new EditRefusal(status, message, code, details)
 }
 
+// Identical to halfUp4dpJs in lib/catalogCostRecompute.ts (the JS twin of 0313's HALF_UP_4DP); pinned by scripts/test-half-up-4dp-js-twin-native.cjs.
+function halfUp4dpJs(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  const scaled = value * 10000.0000000000036
+  if (!(Math.abs(scaled) < 9.2e18)) return null
+  const units = scaled < 0 ? -Math.trunc(-scaled + 0.5) : Math.trunc(scaled + 0.5)
+  return units / 10000 + 0
+}
+
 // A failed guard inserts 0 into stock_session_guards, whose CHECK(guard_value
 // = 1) aborts the whole batch. Same helper shape as lib/stockLotAdjustment.ts.
 function guard(condition: string, params: Row): Statement {
@@ -819,10 +828,16 @@ function deltaGuards(input: {
     { product: input.productId, branch: input.branchId, change: input.branchChange })]
   for (const lot of input.deltas) {
     const params: Row = { id: lot.id, product: input.productId, branch: input.branchId, change: lot.stockChange }
-    // A lot cost saved before the 4-place rule may be over 4 places, and 0313 rounds the live row: the pin accepts the saved figure or its 4-place form.
+    // A lot cost saved before the 4-place rule may be over 4 places, and 0313 rounds the live row: the pin accepts the saved figure or its 4-place form
+    // by either rule (roundMoney4, or HALF_UP_4DP which 0313 used; they differ on a near-tie double).
     const pins = lot.fields.map(([column, value], index) => {
       params[`f${index}`] = value
-      if (column === 'unit_cost_usd' && typeof value === 'number') { params[`f${index}r`] = roundMoney4(value); return `AND (${column} IS @f${index} OR ${column} IS @f${index}r)` }
+      if (column === 'unit_cost_usd' && typeof value === 'number') {
+        params[`f${index}r`] = roundMoney4(value)
+        const half = halfUp4dpJs(value)
+        if (half !== null) params[`f${index}h`] = half
+        return `AND (${column} IS @f${index} OR ${column} IS @f${index}r${half !== null ? ` OR ${column} IS @f${index}h` : ''})`
+      }
       return `AND ${column} IS @f${index}`
     })
     for (const [name, move] of [['rq', lot.rq], ['rc', lot.rc]] as const) {
@@ -830,7 +845,12 @@ function deltaGuards(input: {
         params[name] = (name === 'rq' ? lot.from.receivedQuantity : lot.from.receivedCostUsd)
         const column = name === 'rq' ? 'received_quantity' : 'received_cost_usd'
         const saved = params[name]
-        if (name === 'rc' && typeof saved === 'number') { params.rcRounded = roundMoney4(saved); pins.push(`AND (${column} IS @rc OR ${column} IS @rcRounded)`) }
+        if (name === 'rc' && typeof saved === 'number') {
+          params.rcRounded = roundMoney4(saved)
+          const half = halfUp4dpJs(saved)
+          if (half !== null) params.rcHalfUp = half
+          pins.push(`AND (${column} IS @rc OR ${column} IS @rcRounded${half !== null ? ` OR ${column} IS @rcHalfUp` : ''})`)
+        }
         else pins.push(`AND ${column} IS @${name}`)
       }
     }

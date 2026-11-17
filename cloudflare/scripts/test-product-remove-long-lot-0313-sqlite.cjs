@@ -56,6 +56,30 @@ async function main() {
     assert.equal((await replay(f, 'redo', 1)).complete, true)
     assert.equal(active(f), 0, 'redo removes it again')
   }
+  // B2 (round 7): near-tie costs, where roundMoney4 and 0313's HALF_UP_4DP differ (21.398249999999997 is 21.3982 and 21.3983). 0313 leaves the HALF_UP_4DP form,
+  // (the product's USD cost equals its lot cost: the on-hand triggers re-derive it from the lots) so the removal guards accept it as well as roundMoney4's, on the product row and on the lot, and still refuse any other value.
+  {
+    const NEAR_TIE = 'UPDATE product_batches SET unit_cost_usd=21.398249999999997,received_cost_usd=0.6551499999999999 WHERE id=99001; UPDATE products SET cost_price_usd=21.398249999999997,purchase_price_usd=21.398249999999997,cost_price_khr=57310.638249999996,purchase_price_khr=57310.638249999996 WHERE id=10000;'
+    const f = await removed(NEAR_TIE, true)
+    assert.deepEqual(lot(f), { u: 21.3983, r: 0.6552 }, '0313 rounded the near-tie lot by HALF_UP_4DP (roundMoney4 would say 21.3982 and 0.6551)')
+    assert.equal((await replay(f, 'undo', 0)).complete, true, 'undo accepts the HALF_UP_4DP form')
+    assert.equal(active(f), 1, 'the product is restored')
+    assert.equal((await replay(f, 'redo', 1)).complete, true)
+    assert.equal(active(f), 0)
+    // the roundMoney4 form is accepted too (a lot stored by the write path), and any other value is refused
+    for (const [value, accepted] of [['21.3982', true], ['21.3983', true], ['21.3984', false], ['21.39825', false], ['NULL', false]]) {
+      const g = await removed(NEAR_TIE, false)
+      seedStockFixture(g.d1.db, () => g.d1.db.exec('UPDATE product_batches SET unit_cost_usd=' + value + ' WHERE id=99001'))
+      if (accepted) { assert.equal((await replay(g, 'undo', 0)).complete, true, 'live lot ' + value + ' is a rounding of the saved cost'); assert.equal(active(g), 1) }
+      else { await assert.rejects(() => replay(g, 'undo', 0), undefined, 'live lot ' + value + ' is not'); assert.equal(active(g), 0) }
+    }
+    for (const [column, value, accepted] of [['cost_price_usd', '21.3982', true], ['cost_price_usd', '21.3983', true], ['cost_price_usd', '21.3984', false], ['cost_price_khr', '57310.6382', true], ['cost_price_khr', '57310.6383', true], ['purchase_price_khr', '57310.6384', false]]) {
+      const g = await removed(NEAR_TIE, false)
+      seedStockFixture(g.d1.db, () => g.d1.db.exec('UPDATE products SET ' + column + '=' + value + ' WHERE id=10000'))
+      if (accepted) { assert.equal((await replay(g, 'undo', 0)).complete, true, column + ' ' + value + ' is a rounding of the saved cost'); assert.equal(active(g), 1) }
+      else { await assert.rejects(() => replay(g, 'undo', 0), undefined, column + ' ' + value + ' is not'); assert.equal(active(g), 0) }
+    }
+  }
   // A control: no 0313, long lot untouched.
   { const f = await removed(LONG, false); assert.equal((await replay(f, 'undo', 0)).complete, true); assert.equal(active(f), 1) }
   // C control: 4-place lot, 0313 runs.
