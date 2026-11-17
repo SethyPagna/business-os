@@ -9,7 +9,7 @@ import { buildQueryString, type QueryParams } from '../../api/query.ts'
 import type { InventoryCheckLotRow, InventoryCheckProduct } from '../../types/inventoryChecks.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import type { Grouping } from './inventoryCheckGroups.ts'
-import { PRICE_KEYS } from './inventoryPriceFacts.ts'
+import { COST_KEYS, PRICE_KEYS } from './inventoryPriceFacts.ts'
 import { patchProductFromStockAnswer, patchProductFromStockConflict, type StockConflictAnswer, type StockWriteAnswer } from './stockAnswerPatch.ts'
 
 export type Branch = { id: number; name: string }
@@ -111,6 +111,8 @@ function adaptRow(row: Row, raw: Pick<WiredRaw, 'branchId' | 'overlay' | 'lots'>
   }
   // The prices the row already carries (the server cut them without the price grant); inventoryPriceFacts reads them.
   for (const key of PRICE_KEYS) if (Object.hasOwn(row, key)) (product as Record<string, unknown>)[key] = row[key]
+  // The cost keys the same way: the Worker sends them only to a viewer who may see cost, so a row either carries them or has none. The page draws them only for a viewer canViewAcquisitionCosts allows.
+  for (const key of COST_KEYS) if (Object.hasOwn(row, key)) (product as Record<string, unknown>)[key] = row[key]
   if (branchId) {
     product.check_status = check ? (check.state === 'issue' ? 'issue' : 'ok') : 'not_checked'
     product.check_branch_id = branchId

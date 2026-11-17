@@ -49,7 +49,11 @@ const rawOf = (items: Array<Record<string, unknown>>, extra: Record<string, unkn
   const result = wiredResult(rawOf([priced, cut], { promotion_rules: [rule()] }))
   const [a, b] = result.items as unknown as Array<Record<string, unknown>>
   assert.equal(a.selling_price_usd, 10); assert.equal(a.wholesale_price_usd, 8); assert.equal(a.discount_percent, 20); assert.equal(a.discount_enabled, 1)
-  assert.equal(Object.hasOwn(a, 'cost_price_usd'), false, 'cost is never carried onto an Inventory row (the owner has not decided; today nobody sees it)')
+  assert.equal(a.cost_price_usd, 3, 'a cost key the server sent (it sends them only to a viewer who may see cost, owner 17 Nov) is carried onto the row')
+  assert.equal(Object.keys(b).some(key => key.includes('cost') || key.startsWith('purchase')), false, 'a row the server sent no cost for carries none: nothing to show, nothing to guess')
+  const withCost = wiredResult(rawOf([{ ...priced, cost_price_khr: 12300, purchase_price_usd: 2, cost_needs_review: true, cost_review_key: 'k1' }])).items[0] as unknown as Record<string, unknown>
+  for (const key of ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'cost_needs_review', 'cost_review_key']) assert.ok(Object.hasOwn(withCost, key), `${key} is copied when present`)
+  assert.equal(Object.hasOwn(withCost, 'secret_margin'), false)
   assert.equal(Object.keys(b).some(key => key.includes('price') || key.startsWith('discount')), false, 'a row the server cut has no price field')
   assert.equal(result.promotionRules.length, 1, 'the answer\'s promotion rules ride along'); assert.deepEqual(wiredResult(rawOf([cut])).promotionRules, [], 'none when the answer has none')
 }

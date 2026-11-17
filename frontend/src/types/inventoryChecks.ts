@@ -29,6 +29,13 @@ export type InventoryCheckProduct = {
   discount_badge_color?: string | null
   discount_starts_at?: string | null
   discount_ends_at?: string | null
+  /** ic_wired rows, only when the server sent cost to this viewer (admin by default; see inventoryPriceFacts.ts COST_KEYS). Never present for anybody else. */
+  cost_price_usd?: number | string | null
+  cost_price_khr?: number | string | null
+  purchase_price_usd?: number | string | null
+  purchase_price_khr?: number | string | null
+  cost_needs_review?: boolean | number | null
+  cost_review_key?: string | null
   latest_received_at?: string | null
   /** Earliest expiry among lots still holding stock; sent only while received dates are visible. */
   next_expiry_date?: string | null
