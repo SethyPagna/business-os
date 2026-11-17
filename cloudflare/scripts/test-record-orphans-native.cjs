@@ -127,6 +127,7 @@ const HISTORICAL_REFERENCE = {
   // loser is deleted, the map/pairs keep its id. Pinned by test-migration-0174-pure.cjs.
   'product_merge_map_0174.loser_id': 'the merged product is deleted by 0174; the map keeps its id as provenance',
   'product_merge_pairs_0174.loser_id': 'the seed pair names a product 0174 goes on to delete; kept for provenance/idempotence',
+  'cost_4dp_repair_0313.row_id': '0313 rounding ledger: row_id names a product, lot or cost entry by the table in its entity column; a ledger entry outlives its row and is read only by hand',
 }
 /** Leading qualifiers that describe a ROLE, not a different kind of parent. */
 const QUALIFIER = new Set(['from', 'to', 'source', 'destination', 'expected', 'seen', 'last_seen', 'last',
@@ -226,7 +227,7 @@ const orphanSql = (relation) =>
   + ` FROM ${relation.child} c LEFT JOIN ${relation.parent} p ON p.${relation.parentKey} = c.${relation.column}`
   + ` WHERE c.${relation.column} IS NOT NULL AND p.${relation.parentKey} IS NULL`
 
-function auditFileText(relations) {
+function auditFileText(relations, historicalPresent = []) {
   return [
     '-- Orphan audit -- READ ONLY. One SELECT per parent/child relation in the',
     '-- Business OS schema, each returning (relation, orphan_count).',
@@ -450,7 +451,7 @@ async function main() {
   const started = Date.now()
   const schema = deriveSchema()
   if (process.argv.includes('--generate')) {
-    fs.writeFileSync(auditSqlPath, auditFileText(schema.relations))
+    fs.writeFileSync(auditSqlPath, auditFileText(schema.relations, schema.historical))
     console.log('Generated ops/scripts/audit/orphan-audit.sql; review and commit it before the read-only test')
     return
   }
@@ -470,7 +471,7 @@ async function main() {
       assert.ok(schema.relations.some(relation => `${relation.child}.${relation.column}->${relation.parent}` === required),
         `the audit lost a core relation: ${required}`)
     }
-    assert.deepEqual(schema.historical.slice().sort(), Object.keys(HISTORICAL_REFERENCE).slice().sort(),
+    assert.deepEqual(schema.historical.slice().sort(), Object.keys(HISTORICAL_REFERENCE).sort(),
       'a HISTORICAL_REFERENCE entry names a column the schema no longer has, or one stopped matching')
     report('every *_id column in the schema is audited or explicitly classified')
   } catch (error) { report('every *_id column in the schema is audited or explicitly classified', error) }
@@ -484,7 +485,7 @@ async function main() {
   catch (error) { report('Inventory snapshot identities are historical and declared session FKs remain audited', error) }
 
   try {
-    const expected = auditFileText(schema.relations)
+    const expected = auditFileText(schema.relations, schema.historical)
     assertStaleArtifactRefusal(expected)
     assertAuditFile(auditSqlPath, expected)
     // Check the STATEMENTS, not the header comment -- the comment names the very

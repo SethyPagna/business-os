@@ -68,10 +68,13 @@ async function main(){
   assert.ok(history)
   const merged=await read(),payload=JSON.parse(history.undo_payload)
   if(process.argv.includes('--precision')){
+   // The fixture arranges a legacy cost over 4 places (5.123456789012345 and 20500.12345678901) directly. Since the 4-place rule (owner, 30 Sep 2026) every cost the
+   // merge WRITES is stored at 4 places: the cost review event records the keeper's original cost as the 4-place figure, and the merged row holds it.
    assert.equal(before.cost_price_usd,5.123456789012345);assert.equal(before.cost_price_khr,20500.12345678901)
    const costEvent=JSON.parse((await h.one("SELECT details FROM audit_logs WHERE action='cost_override' AND entity_id='60000' ORDER BY id DESC LIMIT 1")).details).cost_review
-   assert.equal(costEvent.fallback_usd,before.cost_price_usd);assert.equal(costEvent.fallback_khr,before.cost_price_khr)
+   assert.equal(costEvent.fallback_usd,5.1235);assert.equal(costEvent.fallback_khr,20500.1235)
    assert.equal(costEvent.after_usd,merged.cost_price_usd);assert.equal(costEvent.after_khr,merged.cost_price_khr)
+   assert.equal(Number(merged.cost_price_usd.toFixed(4)),merged.cost_price_usd);assert.equal(Number(merged.cost_price_khr.toFixed(4)),merged.cost_price_khr)
   }
   const beforeEvents=await h.all('SELECT * FROM audit_logs ORDER BY id'),beforeSnapshot=await h.one('SELECT * FROM undo_snapshots WHERE id=?',payload.snapshot_id)
   if(fault==='initial'){
@@ -102,16 +105,19 @@ async function main(){
   assert.equal(undone.status,200,JSON.stringify(undone.body))
   const afterUndo=await read()
   console.log('V3_HTTP '+JSON.stringify({before,merged,afterUndo,historyStatus:(await h.one('SELECT status FROM action_history WHERE id=?',history.id)).status}))
-  assert.deepEqual(afterUndo,before,'new v3 history undo must restore prior review identity')
+  // Undo writes the keeper's cost back at 4 places (owner rule, 30 Sep 2026): the legacy long cost of --precision comes back as its 4-place figure, every other
+  // mode restores the row exactly.
+  const restored=process.argv.includes('--precision')?{...before,cost_price_usd:5.1235,cost_price_khr:20500.1235}:before
+  assert.deepEqual(afterUndo,restored,'new v3 history undo must restore prior review identity')
   console.log('PASS authenticated current-v3 history undo restores original keeper currencies and review identity')
   const eventsBefore=await h.all("SELECT * FROM audit_logs WHERE action='cost_override' AND entity_id='60000' ORDER BY id")
   const repeat=await h.call('POST','/api/action-history/'+history.id+'/undo',{require_applied:true,expected_generation:0},'repeat committed undo')
-  assert.equal(repeat.status,200,JSON.stringify(repeat.body));assert.deepEqual(await read(),before)
+  assert.equal(repeat.status,200,JSON.stringify(repeat.body));assert.deepEqual(await read(),restored)
   assert.deepEqual(await h.all("SELECT * FROM audit_logs WHERE action='cost_override' AND entity_id='60000' ORDER BY id"),eventsBefore)
   const redo=await h.call('POST','/api/action-history/'+history.id+'/redo',{require_applied:true,expected_generation:1},'v3 history redo')
   assert.equal(redo.status,200,JSON.stringify(redo.body))
   const redone=await read()
-  assert.equal(redone.cost_price_usd,before.cost_price_usd);assert.equal(redone.cost_price_khr,before.cost_price_khr)
+  assert.equal(redone.cost_price_usd,restored.cost_price_usd);assert.equal(redone.cost_price_khr,restored.cost_price_khr)
   assert.match(redone.cost_review_key,/^[a-f0-9]{32}$/);assert.notEqual(redone.cost_review_key,merged.cost_review_key)
   const replayState=JSON.parse((await h.one('SELECT payload_json FROM undo_snapshots WHERE id=?',payload.snapshot_id)).payload_json).costReviewState
   assert.equal(replayState.graph_version,2);assert.equal(typeof replayState.graph_state,'string')

@@ -13,6 +13,9 @@ export type MovementCostComponent = {
   unitCostKhr?: number | null
 }
 
+/** The cost a NEW lot is stored with when it copies a movement snapshot's unit cost: 4 places, nearest, half away from zero (cost-4dp). The snapshot itself keeps the source lot's cost as it was. */
+export const storedLotCost = (unit: number | null): number | null => (unit == null ? null : roundMoney4(unit))
+
 const money = (value: unknown): number | null => {
   if (value == null || value === '') return null
   const parsed = typeof value === 'number' ? value : Number(value)

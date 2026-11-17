@@ -71,6 +71,7 @@ const EXCLUDED = {
   stock_session_guards: 'transient single-writer guard',
   // One-time repair ledgers of a migration that rewrote business rows: before/after values for a reversal by hand; a restore
   // replaces the rows themselves with the backup's own copy, so it must not bring the ledger back.
+  cost_4dp_repair_0313: '0313 cost rounding ledger (before/after per cost column written); reversal aid, not business data; a restore replaces the rows it describes with its own copy',
   product_cost_mirror_0269: '0269 purchase_price twin backfill ledger (before/after per product); reversal aid, not business data',
 }
 

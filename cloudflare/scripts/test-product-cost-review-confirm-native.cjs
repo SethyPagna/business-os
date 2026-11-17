@@ -176,15 +176,15 @@ const snapshot = () => JSON.stringify(['products','audit_logs','product_cost_ent
     before ??= raw.prepare('SELECT cost_price_usd,cost_price_khr,updated_at FROM products WHERE id=?').get(productId)
     return writes.updateRow({DB},'products',productId,body,undefined,{before,actor:{id:admin.id,name:admin.name}})
   }
-  for(const [beforeUsd,usd] of [[7,9.123456789],[7,0],[null,0]]) {
+  for(const [beforeUsd,usd,stored] of [[7,9.123456789,9.1235],[7,0,0],[null,0,0]]) {
     const productId=seed(beforeUsd)
     await legacyEdit(productId,{cost_price_usd:usd})
     const row=raw.prepare('SELECT cost_price_usd,cost_review_key FROM products WHERE id=?').get(productId)
-    assert.equal(row.cost_price_usd,usd)
+    assert.equal(row.cost_price_usd,stored)
     assert.equal(row.cost_review_key,null)
     assert.equal(raw.prepare('SELECT COUNT(*) n FROM product_cost_entries WHERE product_id=?').get(productId).n,1)
   }
-  console.log('PASS legacy queued known-cost edits retain precision and atomically confirm including zero')
+  console.log('PASS legacy queued known-cost edits store 4 places and atomically confirm including zero')
   for(const body of [{cost_price_usd:7,selling_price_usd:4},{cost_price_khr:9},{cost_price_usd:null}]) {
     const productId=seed(7)
     await legacyEdit(productId,body)

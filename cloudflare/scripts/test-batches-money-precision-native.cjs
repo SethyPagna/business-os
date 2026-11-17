@@ -68,9 +68,11 @@ async function request(method, cost, extra = {}) {
   }
   assert.equal(receives, 0)
   assert.equal(audits, 0)
-  for (const [cost, expected] of [[null, null], [0, 0], ['1.23455', 1.2346], [1.2345, 1.2345]]) {
+  // cost-4dp: the lot edit stores 4 places, nearest, ties away from zero (1.00015 and 2.345678 included), and the census finds nothing over 4
+  for (const [cost, expected] of [[null, null], [0, 0], ['1.23455', 1.2346], [1.2345, 1.2345], ['1.00015', 1.0002], [1.00105, 1.0011], ['2.345678', 2.3457]]) {
     assert.equal((await request('PATCH', cost)).status, 200)
     assert.equal(raw.prepare('SELECT unit_cost_usd FROM product_batches WHERE id=1').get().unit_cost_usd, expected)
+    require('./harness/cost-4dp-census.cjs').assertNoCostOver4dp(raw, 'lot edit ' + cost)
   }
   console.log('PASS actual Hono batch POST/PATCH raw negative numeric/string refusal, prewrite invariance, rounded-zero gate and nullable four-decimal PATCH')
 

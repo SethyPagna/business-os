@@ -1,4 +1,4 @@
-// Companion for ops/scripts/migration/held/0200_sale_cost_on_hand_repair.sql and
+// Companion for ops/scripts/migration/held/0314_sale_cost_on_hand_repair.sql and
 // ops/scripts/audit/sale-cost-on-hand-audit.sql (U-cost Part B, owner decision
 // 2026-09-26: past sale lines whose recorded cost came from the buggy catalog
 // average get the cost of the stock on hand when they were sold).
@@ -42,7 +42,7 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 
 const migrationsDir = path.resolve(__dirname, '../migrations')
 const heldDir = path.resolve(__dirname, '../../ops/scripts/migration/held')
-const heldName = '0200_sale_cost_on_hand_repair.sql'
+const heldName = '0314_sale_cost_on_hand_repair.sql'
 const migrationText = fs.readFileSync(path.join(heldDir, heldName), 'utf8')
 const migration0195 = fs.readFileSync(path.join(migrationsDir, '0195_catalog_cost_on_hand.sql'), 'utf8')
 const auditText = fs.readFileSync(path.resolve(__dirname, '../../ops/scripts/audit/sale-cost-on-hand-audit.sql'), 'utf8')
@@ -813,7 +813,9 @@ function assertPopulatedOrders(chain, chainText, mixed, backfills = [], revision
   raw.limits.exprDepth = 100
   freezeClock(raw)
   try {
-    const heldNumber = Number(heldName.slice(0, 4))
+    // The position the repair was written at (it was 0200; the file is 0314 now so the cost 4dp repair 0313 runs before it). Every migration written since is a "later" one,
+    // and run(false), held after all of them, is the position the renumbered file really has.
+    const heldNumber = 200
     for (const file of chain.filter(file => Number(file.slice(0, 4)) > 195 && Number(file.slice(0, 4)) < heldNumber)) raw.exec(chainText(file))
     raw.exec("INSERT INTO pending_actions(section,action_type,entity_type,entity_id,payload_json,status) VALUES('branches','update','branch',1,'{}','open')")
     // ---- RET-B 0235 seed (begin): two imported sales, so 0235 marks rows in
@@ -936,7 +938,7 @@ check('held: outside deploy chain, after dependencies including0195; independent
     }
     return true
   }
-  const costReviewDdl = ['0243_stock_schema_epoch.sql', '0255_product_cost_review.sql', '0256_validated_catalog_cost.sql', '0257_product_cost_review_confirmation.sql', '0258_catalog_cost_admission.sql', '0261_trigger_index_plans.sql']
+  const costReviewDdl = ['0243_stock_schema_epoch.sql', '0255_product_cost_review.sql', '0256_validated_catalog_cost.sql', '0257_product_cost_review_confirmation.sql', '0258_catalog_cost_admission.sql', '0261_trigger_index_plans.sql', '0312_catalog_cost_fallback_rounding.sql']
   for (const file of costReviewDdl) {
     assert.equal(costReviewDdlOnly(chainText(file)), true, `${file} changes only unread metadata and triggers on tables the repair never writes`)
     assert.equal(costReviewDdlOnly(chainText(file) + '\nUPDATE sale_items SET cost_price_usd=123;'), false)

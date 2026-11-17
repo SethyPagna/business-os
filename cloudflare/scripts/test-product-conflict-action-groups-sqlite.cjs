@@ -148,7 +148,7 @@ function loadRoute(d1, realMergeRuntime = false) {
     },
     './saleAmendments': { amendmentEntryStatement: never },
   }) : undefined
-  loadTs('routes/products.ts', {
+  const routes = loadTs('routes/products.ts', {
     hono: { Hono: FakeHono }, '../index': {}, '../lib/db': { getDb: () => db }, '../lib/auth': { requireAuth: async () => {} },
     '../lib/productDetailRule': detail, '../lib/sqlBinding': binding, '../lib/productIdentity': identity, '../lib/productMerge': merge,
     '../lib/productConflictMergeBatch': selected, '../lib/productConflictActionGroups': actionGroups, '../lib/permissions': permissions,
@@ -160,7 +160,7 @@ function loadRoute(d1, realMergeRuntime = false) {
     '../lib/audit': { audit: async () => {} }, '../lib/cache': { bumpVersion: async () => {}, bumpVersions: async () => {}, cachedJsonResponse: async () => null, getVersionWithFallback: async () => '1' },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
   })
-  return { app: FakeHono.instance, controls, undo, db, productDelete, permissions }
+  return { app: FakeHono.instance, controls, undo, db, productDelete, permissions, routes }
 }
 
 function seed(groupCount = 801) {

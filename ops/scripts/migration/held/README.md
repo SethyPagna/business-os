@@ -35,7 +35,7 @@ migration, at that time -- a peer session or another agent asking for it is not 
   0190 all four. Review verdict: clean on its own SQL, but inert -- and not testable end to end --
   until 0188 is fixed.
 
-- **0200_sale_cost_on_hand_repair.sql** (parked 26 Sep 2026, lane U-cost) -- repairs past
+- **0314_sale_cost_on_hand_repair.sql** (parked 26 Sep 2026 as 0200, lane U-cost; renumbered 16 Nov 2026) -- repairs past
   `sale_items.cost_price_usd` (and copied `return_items.cost_price_usd`) taken from the buggy
   distinct-cost catalog average (a5a2169f until 0195). Writes only those two cost columns, after
   backup tables; recovery SQL in its header. Needs 0195 applied first. Its header's OWNER-RUN
@@ -43,8 +43,12 @@ migration, at that time -- a peer session or another agent asking for it is not 
   cost delta D, ledger_unverified count) before the owner decides. Pinned by
   `cloudflare/scripts/test-held-0200-sale-cost-repair-pure.cjs`, which also fails if the file
   appears in `cloudflare/migrations` without being moved there on purpose (update that check in
-  the same commit as the owner-approved move). Moving it in keeps the name 0200.
+  the same commit as the owner-approved move). Moving it in keeps the name 0314.
   Not sorting last is fine: wrangler applies unapplied files by number, and 0201-0203 (auth only) touch none of its tables (the test checks that).
+
+- **0313_cost_4dp_repair.sql** is no longer held: moved into `cloudflare/migrations` on 16 Nov 2026 (lane cost-4dp, deploy 4, together with 0312). Its test is
+  `cloudflare/scripts/test-migration-0313-cost-4dp-repair-pure.cjs`.
+  Check production first with the read-only `ops/queries/cost-4dp-0313-precheck-20261117.sql` (`apply_holds` must be 1: `pre_holds` covers only the PRE checks and ignores the POST drift check and the half-tick change cap, so it can say 1 when 0313 would still abort). It runs before the held 0314 below (0314 reads lot and cost-entry costs).
 
 - **revert_set_sk2_cleanser_repair.sql** (parked 6 Oct 2026, lane REVERT-SET) -- one product,
   SK-II Gentle Cleanser 20g (5357, Shop): the owner meant to revert a Set of +27 (#48034) and
@@ -92,7 +96,7 @@ dataset-operation lifecycle chain is unwired in production.
 
 0185 through 0191 stay reserved -- do not reuse them for a new, unrelated migration even though
 they are currently absent from `cloudflare/migrations`. The next new migration starts at **0193**.
-0199 is reserved by lane U-branch (its held Shop -> Store consolidation) and 0200 by the held
-sale-cost repair above; do not reuse either.
+0199 is reserved by lane U-branch (its held Shop -> Store consolidation) and 0314 (was 0200) by the held
+sale-cost repair above; do not reuse either; 0313 is the cost repair, now in the chain.
 0264 and 0265 are reserved by the held sale-status normalization above (lane 6.0.891); do not reuse them.
 0192 (`stock_mutation_receipts.sql`) is independent of all five and stays in the normal chain.

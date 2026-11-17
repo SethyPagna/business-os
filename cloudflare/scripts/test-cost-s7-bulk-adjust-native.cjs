@@ -57,6 +57,29 @@ const seedCosted = (name, usd, khr = null) => Number(seedFixture(raw, () => raw.
     assert.equal(row(noPrice).selling_price_usd, 2)
   })
 
+  // cost-4dp: a cost is stored to 4 decimals (the adjust cut it to 2), nearest, a tie goes away from zero, the purchase twin and the manual entry hold
+  // the same figure, and the census predicate finds nothing over 4 places afterwards.
+  await check('bulk price adjust: a cost keeps 4 decimals, ties go away from zero, twin and entry agree (cost-4dp)', async () => {
+    const census4 = require('./harness/cost-4dp-census.cjs')
+    const up = seedCosted('S7 Bulk 4dp up', 4.1667, 20500.5)
+    const mid = seedCosted('S7 Bulk 4dp mid', 1.2345, null)
+    const applied = await request(products, 'POST', '/bulk-price-adjust', { direction: 'increase', amount: 0.00005, fields: ['cost_price_usd', 'cost_price_khr'], client_request_id: 's7-bulk-4dp-up-1' })
+    assert.equal(applied.status, 200, JSON.stringify(applied))
+    assert.deepEqual(costs(up), { usd: 4.1668, khr: 20500.5001 }, '4.1667 + 0.00005 is the tie 4.16675: up, and KHR keeps 4 places too')
+    assert.equal(costs(mid).usd, 1.2346, '1.2345 + 0.00005 is the tie 1.23455: up')
+    assert.equal(row(up).purchase_price_usd, 4.1668, 'the purchase twin moves to the same figure')
+    assert.deepEqual(entries(up).map((entry) => [entry.cost_usd, entry.previous_cost_usd]), [[4.1668, 4.1667]], 'the manual entry holds the stored figure')
+    census4.assertNoCostOver4dp(raw, 'after an increase of 0.00005')
+    const down = seedCosted('S7 Bulk 4dp down', 1.0003, null)
+    const lowered = await request(products, 'POST', '/bulk-price-adjust', { direction: 'decrease', amount: 0.00015, fields: ['cost_price_usd'], client_request_id: 's7-bulk-4dp-down-1' })
+    assert.equal(lowered.status, 200, JSON.stringify(lowered))
+    assert.equal(costs(down).usd, 1.0002, '1.0003 - 0.00015 is the tie 1.00015: away from zero, up')
+    const wide = await request(products, 'POST', '/bulk-price-adjust', { direction: 'increase', amount: 0.01, fields: ['cost_price_usd'], client_request_id: 's7-bulk-4dp-cent-1' })
+    assert.equal(wide.status, 200, JSON.stringify(wide))
+    assert.equal(costs(mid).usd, 1.2445, 'a cent keeps the third and fourth place: 1.2346 - 0.00015 = 1.23445 (tie, up) = 1.2345, + 0.01 = 1.2445 (it was rounded to 2 places)')
+    census4.assertNoCostOver4dp(raw, 'after the three adjusts')
+  })
+
   console.log(failed ? '\\n' + failed + ' check(s) failed' : '\\nall checks passed')
   process.exitCode = failed ? 1 : 0
 })().catch((error) => { console.error(error); process.exitCode = 1 })

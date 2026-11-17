@@ -51,7 +51,7 @@ function migrationContract() {
   assert.ok(old.includes(review.productCostReviewGuardSql({ inputPolicy: 'legacy' })))
   assert.ok(old.endsWith(catalogCost.catalogCostReviewTriggersSql({ inputPolicy: 'legacy', primaryKeyPlan: false })))
   const names = ['catalog_cost_on_hand_stock_insert_0195', 'catalog_cost_on_hand_stock_update_0195', 'catalog_cost_on_hand_stock_delete_0195', 'catalog_cost_on_hand_lot_insert_0195', 'catalog_cost_on_hand_lot_delete_0195', 'catalog_cost_review_lot_update_0255', 'product_cost_review_update_guard_0255']
-  const expected = names.map(name => 'DROP TRIGGER ' + name + ';\n').join('') + review.productCostReviewUpdateGuardSql() + catalogCost.catalogCostReviewTriggersSql({ primaryKeyPlan: false })
+  const expected = names.map(name => 'DROP TRIGGER ' + name + ';\n').join('') + review.productCostReviewUpdateGuardSql({ inputPolicy: 'validated-unrounded' }) + catalogCost.catalogCostReviewTriggersSql({ inputPolicy: 'validated-unrounded', primaryKeyPlan: false })
   const actual = migration('0256_validated_catalog_cost.sql')
   assert.equal(actual, expected)
   assert.ok(!actual.includes('\r'))

@@ -47,6 +47,11 @@ function load(relative) {
     const from = 'WHERE (batch_id,branch_id) IN (SELECT from_batch,from_branch FROM (${sourceLots}))'
     assert.ok(source.includes(from)); source = source.replace(from, 'WHERE EXISTS(SELECT 1 FROM (${sourceLots}) a WHERE a.from_batch=branch_batch_stock.batch_id AND a.from_branch=branch_batch_stock.branch_id)')
   }
+  //   TRANSFER_WRONG_CONTROL=copy_cost     the new destination lot copies the source lot's cost unrounded (cost-4dp)
+  if (relative === 'lib/transferOperation.ts' && process.env.TRANSFER_WRONG_CONTROL === 'copy_cost') {
+    const from = 'usd: storedLotCost(costSnapshot.unitCostUsd) }'
+    assert.ok(source.includes(from)); source = source.replace(from, 'usd: costSnapshot.unitCostUsd }')
+  }
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   new Function('require', 'module', 'exports', compiled)(request => {
     if (['./importMaintenanceFence', '../durable-objects/broadcastHub', './cache'].includes(request)) return new Proxy({}, { get: () => () => { throw Error('Unexpected effect ' + request) } })
@@ -226,6 +231,35 @@ async function main() {
       seedFixture(w.raw, () => w.raw.exec('UPDATE branch_batch_stock SET quantity=3 WHERE batch_id=2 AND branch_id=1'))
       assert.equal(stockState(w), before)
     }
+  })
+
+  // The census predicate (stock-state-census cost_usd_over_4dp) as ids: every lot, product or manual cost entry holding a cost over 4 decimals.
+  const over4 = (c) => `(typeof(${c}) IN ('integer','real') AND ABS(${c} * 10000 - ROUND(${c} * 10000)) > 0.000001)`
+  const census = (raw) => ({
+    lots: raw.prepare(`SELECT id FROM product_batches WHERE ${['unit_cost_usd', 'received_cost_usd'].map(over4).join(' OR ')} ORDER BY id`).all().map(row => row.id),
+    products: raw.prepare(`SELECT id FROM products WHERE ${['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr'].map(over4).join(' OR ')} ORDER BY id`).all().map(row => row.id),
+    entries: raw.prepare(`SELECT id FROM product_cost_entries WHERE ${['cost_usd', 'cost_khr', 'previous_cost_usd'].map(over4).join(' OR ')} ORDER BY id`).all().map(row => row.id),
+  })
+  // cost-4dp: a transfer to ANOTHER product row creates the destination lot with the source lot's cost; a legacy cost over 4 places is stored
+  // rounded (half away from zero), the movement snapshot keeps what the source lot held, a same-product transfer creates no lot.
+  await check('cost-4dp: the lot a cross-product transfer creates is stored to 4 places', async () => {
+    for (const [source, want] of [[1.00015, 1.0002], [2.345678, 2.3457], [1.5, 1.5], [1.00014, 1.0001]]) {
+      const w = world()
+      seedFixture(w.raw, () => w.raw.prepare('UPDATE product_batches SET unit_cost_usd=? WHERE id=1').run(source))
+      const planned = await plan(w, [{ productId: 1, destProductId: 4, quantity: 2, batchId: null }])
+      await executeStockTransaction(w.db, planned.statements, 'once')
+      const made = w.raw.prepare('SELECT unit_cost_usd c FROM product_batches WHERE variant_product_id=4').all().map(row => row.c)
+      assert.deepEqual(made, [want], 'destination lot for source cost ' + source)
+      assert.equal(w.raw.prepare('SELECT unit_cost_usd c FROM product_batches WHERE id=1').get().c, source, 'the source lot is not rewritten')
+      // Census after the transfer: the one legacy source lot (id 1, deliberately not rewritten) is the only row over 4 decimals, and only when the source was long; the new lot adds none.
+      const legacy = Math.abs(source * 10000 - Math.round(source * 10000)) > 0.000001
+      assert.deepEqual(census(w.raw), { lots: legacy ? [1] : [], products: [], entries: [] }, 'census after the transfer of source cost ' + source)
+    }
+    const same = world()
+    seedFixture(same.raw, () => same.raw.prepare('UPDATE product_batches SET unit_cost_usd=1.00015 WHERE id=1').run())
+    const before = same.raw.prepare('SELECT COUNT(*) n FROM product_batches').get().n
+    await executeStockTransaction(same.db, (await plan(same, [{ productId: 1, destProductId: 1, quantity: 2, batchId: null }])).statements, 'once')
+    assert.equal(same.raw.prepare('SELECT COUNT(*) n FROM product_batches').get().n, before, 'a same-product transfer moves the lot, creates none')
   })
 
   await check('E8: the transfer commits for renamed branches whose roles say shop and warehouse (names are labels)', async () => {

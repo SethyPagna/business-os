@@ -1,5 +1,5 @@
 import type { D1Compat } from './db'
-import { CATALOG_COST_HAS_RECORDED_LOT_SQL } from './catalogCostRecompute'
+import { CATALOG_COST_HAS_RECORDED_LOT_SQL, roundStoredCost } from './catalogCostRecompute'
 import { matchDuplicateLots, planFoldedLotMetadata, type MergeLotRow } from './productMergeLots'
 import { MERGE_COST_LATEST_MANUAL_SQL, mergeCostAuthorityUsdSql } from './productCostReview'
 import { PRODUCT_CONFLICT_ACTION_MAX_MEMBERS_PER_GROUP, PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_GROUP, PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_REVIEW, PRODUCT_CONFLICT_ACTION_MAX_GROUP_SOURCE_BYTES, PRODUCT_CONFLICT_ACTION_MAX_REVIEW_DETAIL_BYTES } from './productConflictActionGroups'
@@ -84,7 +84,9 @@ export function projectMergeCostGraph(graph: MergeCostPreviewGraph, plans: Merge
     }
     const entries = jsonRows(graph.currentCostEntries.filter(row => members.has(Number(row.product_id))), ['id', 'product_id', 'cost_usd', 'baseline_batch_id'])
     entries.forEach(row => { row.product_id = plan.keepId })
-    const group = { products: [{ id: plan.keepId, cost_price_usd: money(keeper.cost_price_usd), cost_price_khr: money(keeper.cost_price_khr) }], batches, batchStock: stock, currentCostEntries: entries }
+    // The merge stores the keeper's own cost as roundStoredCost (productCostReview.ts mergeCostReviewStatements), so the preview shows that value.
+    const keeperCost = (value: unknown) => roundStoredCost(money(value))
+    const group = { products: [{ id: plan.keepId, cost_price_usd: keeperCost(keeper.cost_price_usd), cost_price_khr: keeperCost(keeper.cost_price_khr) }], batches, batchStock: stock, currentCostEntries: entries }
     if (new TextEncoder().encode(JSON.stringify(group)).length > PRODUCT_CONFLICT_ACTION_MAX_GROUP_SOURCE_BYTES) throw new MergeCostPreviewUnavailableError()
     result.products.push(...group.products); result.batches.push(...batches); result.batchStock.push(...stock); result.currentCostEntries.push(...entries)
   }

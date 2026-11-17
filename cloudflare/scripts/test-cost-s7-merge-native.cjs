@@ -48,6 +48,33 @@ async function main() {
     assert.deepEqual(keeperCost(), { cost_price_usd: 0, cost_price_khr: 0 })
   })
 
+  // cost-4dp: the keeper's own stored cost is the fallback when no recorded lot decides. A legacy value over 4 places (1.00015, 6-9 places) must come
+  // out at 4, nearest, ties away from zero, in the cost, its purchase twin and the KHR column; the twin's unknown cost changes nothing.
+  await check('merge: a keeper cost over 4 decimals with no recorded lot is stored rounded (cost-4dp)', async () => {
+    for (const [stored, want, storedKhr, wantKhr] of [[4.166667, 4.1667, 20500, 20500], [1.00015, 1.0002, 4100.12345, 4100.1235], [9.123456789, 9.1235, 20500.5, 20500.5], [0.00005, 0.0001, 4100, 4100]]) {
+      fresh()
+      setCosts(10, stored, storedKhr); setCosts(11, null, null)
+      const done = await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge' })
+      assert.equal(done.status, 200, JSON.stringify(done.body))
+      assert.deepEqual(keeperCost(), { cost_price_usd: want, cost_price_khr: wantKhr }, 'keeper ' + stored + ' / ' + storedKhr)
+      assert.equal(one('SELECT purchase_price_usd p FROM products WHERE id = 10').p, want, 'the purchase twin is the same figure')
+      require('./harness/cost-4dp-census.cjs').assertNoCostOver4dp(state.native.db, 'census after the merge of ' + stored)
+    }
+  })
+
+  await check('merge: a legacy manual cost entry over 4 decimals decides the keeper and is stored rounded (cost-4dp)', async () => {
+    for (const [entry, want] of [[1.00015, 1.0002], [2.345678, 2.3457]]) {
+      fresh()
+      setCosts(11, null, null)
+      fixtureWrite(() => state.native.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(10,?,'manual',900)").run(entry))
+      const done = await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge' })
+      assert.equal(done.status, 200, JSON.stringify(done.body))
+      assert.equal(keeperCost().cost_price_usd, want, 'manual entry ' + entry)
+      // The merge never rewrites the manual entry it read (history), so the legacy long entry is the one row the census still finds.
+      assert.deepEqual(require('./harness/cost-4dp-census.cjs').countOver4dp(state.native.db), { products: 0, lots: 0, entries: 1 }, 'census after the merge: only the untouched legacy entry')
+    }
+  })
+
   await check('merge of two recorded 0 costs keeps a recorded 0', async () => {
     fresh()
     setCosts(10, 0, 0); setCosts(11, 0, 0)
@@ -108,6 +135,19 @@ async function main() {
     assert.equal((await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge' })).status, 200)
     await runHistory(lastHistory(), 'undo')
     assert.deepEqual(keeperCost(), { cost_price_usd: 5, cost_price_khr: 20500 })
+  })
+
+  await check('undo restores a snapshot cost over 4 decimals at 4 decimals, twin included (cost-4dp)', async () => {
+    fresh()
+    setCosts(10, 4.123456, 20500.12345); setCosts(11, null, null)
+    fixtureWrite(() => state.native.db.exec('UPDATE products SET purchase_price_usd = 4.123456, purchase_price_khr = 20500.12345 WHERE id = 10'))
+    assert.equal((await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge' })).status, 200)
+    const saved = one("SELECT payload_json FROM undo_snapshots WHERE kind = 'product.merge' ORDER BY id DESC")
+    assert.equal(JSON.parse(saved.payload_json).keeperPricingBefore.cost_price_usd, 4.123456, 'the fixture snapshot holds the legacy long figure')
+    await runHistory(lastHistory(), 'undo')
+    assert.deepEqual(keeperCost(), { cost_price_usd: 4.1235, cost_price_khr: 20500.1235 }, 'restored rounded, not verbatim')
+    assert.deepEqual(one('SELECT purchase_price_usd u, purchase_price_khr k FROM products WHERE id = 10'), { u: 4.1235, k: 20500.1235 })
+    require('./harness/cost-4dp-census.cjs').assertNoCostOver4dp(state.native.db, 'census after the undo')
   })
 
   await check('a snapshot that recorded no cost at all (older than Sep 4 2026) leaves the keeper cost alone on undo', async () => {

@@ -97,18 +97,19 @@ const apply = (id, updates, user = admin) => request(products, 'PUT', '/' + id, 
       const id = make('S12 Snapshot ' + value,value,value)
       seedFixture(raw, () => raw.prepare('UPDATE products SET purchase_price_usd=?,purchase_price_khr=? WHERE id=?').run(value,value,id))
       const before = row(id)
+      const stored = Math.round(value * 10000) / 10000 // cost-4dp: a snapshot cost over 4 places comes back stored to 4 (2.345678 -> 2.3457), as a re-save of any legacy cost does
       const count = await frontendWriter.restoreProductSnapshotFields([before],{
         fetchProductsByIds:async()=>[row(id)],buildPayload:frontendWriter.buildProductWritePayload,
         updateProduct:async(productId,payload)=>{const result=await request(products,'PUT','/' + productId,payload);assert.equal(result.status,200,JSON.stringify(result))},
       })
       assert.equal(count,1)
-      assert.deepEqual([row(id).cost_price_usd,row(id).cost_price_khr,row(id).purchase_price_usd,row(id).purchase_price_khr],[value,value,value,value])
+      assert.deepEqual([row(id).cost_price_usd,row(id).cost_price_khr,row(id).purchase_price_usd,row(id).purchase_price_khr],[stored,stored,stored,stored])
       assert.equal(entries(id).length,0,'unchanged snapshot is not a new cost override')
       await frontendWriter.restoreProductSnapshotFields([{id,name:before.name,description:'Undo without cost access'}],{
         fetchProductsByIds:async()=>[row(id)],buildPayload:frontendWriter.buildProductWritePayload,
         updateProduct:async(productId,payload)=>{assert.ok(!Object.keys(payload).some(k=>/^(cost|purchase)_price_/.test(k)));const result=await request(products,'PUT','/' + productId,payload);assert.equal(result.status,200)},
       })
-      assert.equal(row(id).cost_price_usd,value)
+      assert.equal(row(id).cost_price_usd,stored)
       assert.equal(row(id).custom_fields,before.custom_fields,'redacted undo omits custom fields and preserves stored JSON')
     }
     for (const custom of [{size:'large'},['one','two'],'{"legacy":true}',null]) {

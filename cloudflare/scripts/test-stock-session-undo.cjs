@@ -57,6 +57,79 @@ async function main() {
     console.log('PASS cost-authorized zero catalog reload undo/redo needs no inventory-adjust, is lost-ack idempotent and writes no movements')
   }
   {
+    // Round 4: a product cost saved over 4 places is restored at 4 places by undo (not verbatim), and redo of that undo is not refused.
+    const f = fixture()
+    seedStockFixture(f.sql, () => f.sql.exec('UPDATE products SET cost_price_usd=2.123456, purchase_price_usd=2.123456, cost_price_khr=4123.456789, purchase_price_khr=4123.456789 WHERE id=1'))
+    const r = await api.commitStockSession(f.env, user, receiveRequest('long-cost-undo-001', 3))
+    assert.equal(f.sql.prepare('SELECT cost_price_usd c FROM products WHERE id=1').get().c, 2, 'the receipt re-derives the catalog cost')
+    await replay(f, r, 'undo', 0)
+    const undone = f.sql.prepare('SELECT cost_price_usd c, purchase_price_usd p, cost_price_khr k, purchase_price_khr pk FROM products WHERE id=1').get()
+    assert.deepEqual({ ...undone }, { c: 2.1235, p: 2.1235, k: 4123.456789, pk: 4123.456789 }, 'undo restores the saved long cost at 4 places, not verbatim; a column the session never changed is not touched (0313 rounds it)')
+    await replay(f, r, 'redo', 1)
+    assert.equal(f.sql.prepare('SELECT cost_price_usd c FROM products WHERE id=1').get().c, 2, 'redo of the rounded undo is not refused')
+    console.log('PASS stock-session undo restores product cost columns at 4 places')
+  }
+  {
+    // Round 5 (mutant SS2, the replay pin made exact again): a session whose CREATED lot holds a cost over 4 places, 0313 rounding that lot between commit and
+    // undo. The saved images say 1.123456, the live lot says 1.1235: the replay pin must accept the rounded figure (and only it) or undo is refused forever.
+    const text0313 = fs.readFileSync(path.join(__dirname, '..', 'migrations', '0313_cost_4dp_repair.sql'), 'utf8')
+    const lotOf = (f) => f.sql.prepare('SELECT b.id, b.unit_cost_usd u, b.is_active a FROM product_batches b JOIN products p ON p.id = b.variant_product_id WHERE p.barcode = ?').get('CREAM')
+    const longLotSession = async (liveBeforeUndo, run0313, savedCost = 1.123456, rounded0313 = 1.1235) => {
+      const f = fixture()
+      const r = await api.commitStockSession(f.env, user, createRequest())
+      const lot = lotOf(f)
+      assert.equal(lot.u, 1.25, 'the session created the lot at 1.25')
+      // a pre-rule session: the lot and every saved image of it hold 1.123456 instead of 1.25
+      seedStockFixture(f.sql, () => f.sql.prepare('UPDATE product_batches SET unit_cost_usd = ? WHERE id = ?').run(savedCost, lot.id))
+      const snapshotId = f.sql.prepare('SELECT o.snapshot_id s FROM stock_session_operations o').get().s
+      const snap = f.sql.prepare('SELECT payload_json p FROM undo_snapshots WHERE id = ?').get(snapshotId).p
+      const parsed = JSON.parse(snap); const paths = []
+      for (const side of ['before', 'after', 'expected']) ((parsed[side] || {}).batches || []).forEach((b, i) => { if (b.id === lot.id && b.unit_cost_usd === 1.25) paths.push(`$.${side}.batches[${i}].unit_cost_usd`) })
+      assert.ok(paths.length >= 2, 'the saved images of the created lot are patched')
+      const patched = f.sql.prepare(`SELECT json_set(?, ${paths.map(() => '?, ' + savedCost).join(', ')}) AS j`).get(snap, ...paths).j
+      f.sql.prepare('UPDATE undo_snapshots SET payload_json = ? WHERE id = ?').run(patched, snapshotId)
+      if (run0313) { f.sql.exec(text0313); assert.equal(lotOf(f).u, rounded0313, '0313 rounded the lot') }
+      if (liveBeforeUndo !== undefined) seedStockFixture(f.sql, () => f.sql.prepare('UPDATE product_batches SET unit_cost_usd = ? WHERE id = ?').run(liveBeforeUndo, lot.id))
+      return { f, r, lot }
+    }
+    {
+      const { f, r, lot } = await longLotSession(undefined, true)
+      await replay(f, r, 'undo', 0)
+      assert.deepEqual({ ...lotOf(f) }, { id: lot.id, u: null, a: 0 }, 'undo after 0313 is accepted: the rounded lot is the session lot, so the created lot goes back to inactive')
+      await replay(f, r, 'redo', 1)
+      assert.deepEqual({ ...lotOf(f) }, { id: lot.id, u: 1.1235, a: 1 }, 'redo restores the created lot at 4 places')
+    }
+    for (const [label, live] of [['a real change to 1.1234', 1.1234], ['a real change to NULL', null]]) {
+      const { f, r, lot } = await longLotSession(live, true)
+      const saved = state(f)
+      await assert.rejects(replay(f, r, 'undo', 0), e => e.statusCode === 409, `${label} after 0313 is still refused`)
+      assert.deepEqual(state(f), saved, `${label}: nothing was written`)
+      assert.equal(lotOf(f).u, live, `${label}: the lot is untouched (${lot.id})`)
+    }
+    {
+      const { f, r } = await longLotSession(undefined, false)
+      await replay(f, r, 'undo', 0)
+      assert.equal(lotOf(f).u, null, 'control: a still-long lot (no 0313) undoes')
+    }
+    {
+      // Round 7: a near-tie created-lot cost, where roundMoney4 (21.3982) and 0313's HALF_UP_4DP (21.3983) differ. The pin accepts either form and nothing else.
+      const NEAR_TIE = 21.398249999999997
+      const { f, r, lot } = await longLotSession(undefined, true, NEAR_TIE, 21.3983)
+      await replay(f, r, 'undo', 0)
+      assert.deepEqual({ ...lotOf(f) }, { id: lot.id, u: null, a: 0 }, 'undo after 0313 accepts the HALF_UP_4DP form of a near-tie cost')
+      const { f: g, r: gr } = await longLotSession(21.3982, true, NEAR_TIE, 21.3983)
+      await replay(g, gr, 'undo', 0)
+      assert.equal(lotOf(g).u, null, 'the roundMoney4 form is accepted as well')
+      for (const live of [21.3981, 21.3984, null]) {
+        const { f: h, r: hr } = await longLotSession(live, true, NEAR_TIE, 21.3983)
+        const saved = state(h)
+        await assert.rejects(replay(h, hr, 'undo', 0), e => e.statusCode === 409, `a live lot cost of ${live} is still refused`)
+        assert.deepEqual(state(h), saved, `${live}: nothing was written`)
+      }
+    }
+    console.log('PASS stock-session undo after 0313 accepts the rounded created lot and refuses a real change (mutant SS2)')
+  }
+  {
     const noProductImage = { ...staff, permissions: JSON.stringify({ inventory: true, products: true, 'products:image': false }) }
     const f = fixture()
     f.sql.prepare("INSERT INTO file_assets(original_name,stored_name,public_path,mime_type,media_type,byte_size) VALUES(?,?,?,?, 'image', 10)")

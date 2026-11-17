@@ -13,3 +13,5 @@
 # Backstop: cloudflare/scripts/test-migration-line-endings-pure.cjs
 cloudflare/migrations/*.sql text eol=lf
 ops/scripts/migration/held/*.sql text eol=lf
+# Ops SQL read as source text by pure tests (LF-only assertions) must check out LF on Windows too, or those tests fail on a CRLF working copy.
+ops/queries/*.sql text eol=lf

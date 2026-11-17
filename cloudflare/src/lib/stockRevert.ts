@@ -578,7 +578,6 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
         productId, branchId, quantity: magnitude, batchId, unitCostUsd,
         // Free units ride at the effective unit cost, so unit x quantity drifts off what the supplier was paid.
         receiptTotalUsd: m.total_cost_usd != null ? Number(m.total_cost_usd) : null,
-        preserveHistoricalUnitCost: true,
         supplierId: priorAttribution?.supplier_id ?? null,
         supplierName: priorAttribution?.supplier_name ?? null,
         paymentStatus: priorAttribution?.payment_status === 'paid' || priorAttribution?.payment_status === 'credit' ? priorAttribution.payment_status : null,

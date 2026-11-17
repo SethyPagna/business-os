@@ -194,5 +194,6 @@ SELECT
   ) AS rows_10,
   json_object(
     'sales_daily_totals', (SELECT COUNT(*) FROM sales_daily_totals),
-    'telegram_shift_report_sends', (SELECT COUNT(*) FROM telegram_shift_report_sends)
+    'telegram_shift_report_sends', (SELECT COUNT(*) FROM telegram_shift_report_sends),
+    'cost_4dp_repair_0313', (SELECT COUNT(*) FROM cost_4dp_repair_0313)
   ) AS rows_11;
