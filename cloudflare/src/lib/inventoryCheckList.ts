@@ -123,12 +123,15 @@ export type CheckStateSets = { ok: number[]; issue: number[]; pending: number[];
 
 // The latest done/issue item of each product in the branch scope, inside the viewer's organization (items of other organizations and items whose branch differs
 // from their session's are never read): the same scope the ic_simple list used.
+// The DAY is the day the product was COUNTED, never the day it was approved: an approval flips its lines to Done and rewrites the item's updated_at, but a submitted count (membership 'submission', the only
+// kind that is ever approved) was recorded in one commit whose time is the session's started_at (which the table never lets change: inventory_check_sessions_identity), so that is the count time; every other kind of session keeps the item's own time (an observation's, or the
+// Set's that closed an Issue). The session's columns ride in the window's rows already read (no extra row, no extra statement).
 export const LATEST_ITEMS_SQL = `WITH latest AS (
-    SELECT i.product_id AS product_id, i.state AS state, i.updated_at AS updated_at,
+    SELECT i.product_id AS product_id, i.state AS state, i.updated_at AS updated_at, s.scope_json AS scope_json, s.started_at AS started_at,
            ROW_NUMBER() OVER (PARTITION BY i.product_id ORDER BY i.updated_at DESC, i.session_id DESC) AS rn
     FROM inventory_check_sessions s JOIN inventory_check_items i ON i.session_id = s.id AND i.branch_id = s.branch_id
     WHERE s.organization_id IS @organization AND s.branch_id = @branchId AND i.state IN ('done', 'issue'))
-  SELECT product_id, state, ${localDateExpr('updated_at')} AS day FROM latest WHERE rn = 1 ORDER BY updated_at DESC, product_id LIMIT @limit`
+  SELECT product_id, state, ${localDateExpr(`CASE WHEN json_extract(scope_json, '$.membership') = 'submission' THEN started_at ELSE updated_at END`)} AS day FROM latest WHERE rn = 1 ORDER BY updated_at DESC, product_id LIMIT @limit`
 // Products with a count line still waiting for approval at the branch (the same line rule the row tag uses).
 const PENDING_ITEMS_SQL = `SELECT i.product_id AS product_id FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id = a.session_id AND i.branch_id = a.branch_id
   WHERE a.organization_id IS @organization AND a.branch_id = @branchId AND ${waitingLineSql('a', 'i')} GROUP BY i.product_id ORDER BY MAX(a.submitted_at) DESC, i.product_id LIMIT @limit`

@@ -20,7 +20,7 @@ const OLD_WAITING = [
 const OLD_REJECT = [
   ["        AND CASE WHEN ${A}.line_set_json IS NULL\n          THEN NOT EXISTS(", "        AND CASE WHEN 1\n          THEN NOT EXISTS("]]
 const OLD_READ = [['  if (only) return only.length ?', '  if (false as boolean) return only!.length ?']]
-const MUTANTS = { 'engine scans every item': { 'lib/inventoryCheckApprovals.ts': OLD_READ }, 'old waiting rule (item total)': { 'lib/inventoryCheckSessions.ts': OLD_WAITING }, 'old auto-reject rule (item scan)': { 'lib/inventoryCheckSessions.ts': OLD_REJECT } }
+const MUTANTS = { 'approval day instead of count day': { 'lib/inventoryCheckList.ts': [["CASE WHEN json_extract(scope_json, '$.membership') = 'submission' THEN started_at ELSE updated_at END", 'updated_at']] }, 'engine scans every item': { 'lib/inventoryCheckApprovals.ts': OLD_READ }, 'old waiting rule (item total)': { 'lib/inventoryCheckSessions.ts': OLD_WAITING }, 'old auto-reject rule (item scan)': { 'lib/inventoryCheckSessions.ts': OLD_REJECT } }
 
 function kit(sourceEdits) {
   const w = createLotSetWorld({ admin: true, ...(sourceEdits ? { sourceEdits } : {}) })
@@ -123,15 +123,36 @@ async function scan(k) {
     for (const sql of itemReads) { assert.match(sql, /i\.product_id IN \(SELECT value FROM json_each\(\?\d+\)\)/, 'a read of the count\'s items names its lines'); assert.doesNotMatch(sql, /inventory_check_lot_lines|abs\(/, 'no per-item rule or lot probe') }
 }
 
+/** The chip day is the day the count was MADE: counted 12 Nov and approved later (the approval flips the line and rewrites the item's updated_at), it stays under 12 Nov. */
+async function chipday(k) {
+  const f = k.world()
+  const made = await k.submit(f, 'set-day-submit-01', [{ productId: 2, countedQuantity: 5, seenQuantity: 6 }])
+  assert.equal(made.status, 201, JSON.stringify(made.body))
+  const id = k.approvals(f)[0].session_id
+  // The count is backdated to 12 Nov (the table forbids changing a session's started_at, as it should: it is the count time; only this fixture lifts the trigger).
+  f.raw.exec('DROP TRIGGER inventory_check_sessions_identity')
+  f.raw.prepare("UPDATE inventory_check_sessions SET started_at='2026-11-12T03:00:00.000Z' WHERE id=?").run(id)
+  f.raw.prepare("UPDATE inventory_check_items SET updated_at='2026-11-12T03:00:00.000Z' WHERE session_id=?").run(id)
+  const list = k.w.load('lib/inventoryCheckList.ts')
+  const dayOf = () => f.raw.prepare(list.LATEST_ITEMS_SQL).all({ organization: null, branchId: 1, limit: 100 }).find(row => row.product_id === 2)?.day
+  assert.equal(dayOf(), '2026-11-12', 'before the approval')
+  const done = await k.decide(f, id, { decision: 'approve', requestId: 'set-day-approve-01' })
+  assert.equal(done.status, 200, JSON.stringify(done.body)); assert.equal(done.body.approval.status, 'approved')
+  const flipped = f.raw.prepare('SELECT state,updated_at FROM inventory_check_items WHERE session_id=? AND product_id=2').get(id)
+  assert.equal(flipped.state, 'done'); assert.notEqual(flipped.updated_at, '2026-11-12T03:00:00.000Z', 'the approval rewrote the item time')
+  assert.equal(dayOf(), '2026-11-12', 'after the approval: still the count day, not the approval day')
+}
+
 const SCENARIOS = {
   high1: { run: high1, title: 'High 1: a recount of an offsetting product replaces the older count (one pending approval, the newest count wins: A=5, B=2)' },
   high2: { run: high2, title: 'High 2: a newer count of another product does not end an approval that still holds an open offsetting line' },
   scan: { run: scan, title: "the engine reads only the lines of the set, by primary key: no scan of the session's items, no lot-line probe per item" },
+  chipday: { run: chipday, title: 'the chip day of a count approved later is the day it was counted (counted 12 Nov, approved after: 12 Nov)' },
   holds: { run: holds, title: 'the offsetting product waits everywhere: Set hold, Fix stock hold, the page tag; a rejected line stops waiting' },
 }
 // Which scenarios each planted mutant (the old reader text) must be caught by.
 // (High 2 is the auto-reject's: the waiting readers alone do not end the approval.)
-const CAUGHT_BY = { 'old waiting rule (item total)': ['high1', 'holds'], 'old auto-reject rule (item scan)': ['high2'], 'engine scans every item': ['scan'] }
+const CAUGHT_BY = { 'old waiting rule (item total)': ['high1', 'holds'], 'old auto-reject rule (item scan)': ['high2'], 'engine scans every item': ['scan'], 'approval day instead of count day': ['chipday'] }
 
 async function main() {
   for (const { title, run } of Object.values(SCENARIOS)) await check(title, () => run(kit()))

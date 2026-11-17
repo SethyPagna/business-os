@@ -101,6 +101,10 @@ Every decision is one audit event on the product in the session History (`GET /s
 (`summary=0` leaves it out; one branch only; absent when the branch has more checked products than `inventoryCheckFilterMaxIds`, exactly as the status counts are). Each product sits under the Cambodia
 business day (UTC+7) of its LATEST count at the branch. No new D1 statement is made for it.
 
+**The day is the day the product was counted, never the day it was approved.** Approving a line flips it to Done and rewrites the item's own time, so the day is taken from the count's own time: for a submitted
+count (the only kind that is ever approved) the time it was submitted; for every other kind (an observation, a Set that closed an Issue) the item's own time. The overlay's `check.at` follows the same rule, so a row's
+"checked at" and its chip always agree. A count made on 12 Nov and approved on 17 Nov is under 12 Nov.
+
 `GET /list?branchId=1&checkedOn=2026-11-12` keeps only products whose latest count was on that day; it combines with `checkState`, search, brand, category and the other filters. `checkedOn` must be a real
 calendar date `YYYY-MM-DD` and needs a single branch (`branchId`), otherwise `400 inventory_check_invalid_query` with `parameter: "checkedOn"` (or `"branchId"`). It cannot be combined with `ids`.
 With more checked products than the cap the filter is refused `503 inventory_check_filter_too_large`, as the status filters are.
