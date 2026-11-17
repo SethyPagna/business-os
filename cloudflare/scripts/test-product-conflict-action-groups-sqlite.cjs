@@ -33,6 +33,7 @@ function loadTs(rel, stubs = {}) {
     const dependency = request.split('/').at(-1)
     if (request.startsWith('.') && productionDependencies.has(dependency)) return productionDependencies.get(dependency)
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
+    if (/(^|\/)(productMergeLots|businessDateWindow)$/.test(request)) return loadTs(path.join('lib', request.split('/').pop() + '.ts'), {})
     if (request.startsWith('.') || request === 'hono') return permissive()
     return original.call(Module, request, parent, main)
   }

@@ -279,6 +279,8 @@ export const MERGE_CONFLICT_RETRY = 'merge_conflict_retry'
 // ones it did not. This read-only statement aborts the whole batch (the
 // closed-session statements with it) when the discarded product's shelf, lots or
 // movement count differ from what was read; the caller answers a retryable 409.
+// The lots counted are EVERY lot of the discarded product: the case read, the leading-zero plan and this assertion use the one set.
+
 export function productMergeSourceUnmovedAssertion(productId: number, extent: ProductMergeSourceExtent): { sql: string; params: Record<string, unknown> } {
   const readsLotStock = extent.lotQuantity != null && extent.lotStockRows != null
   const lotStockTerms = readsLotStock
@@ -290,7 +292,7 @@ export function productMergeSourceUnmovedAssertion(productId: number, extent: Pr
     sql: `SELECT CASE WHEN
       (SELECT COUNT(*) FROM branch_stock WHERE product_id = @id) = @shelfRows
       AND (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id) = @shelfQuantity
-      AND (SELECT COUNT(*) FROM product_batches WHERE variant_product_id = @id) = @lotRows
+      AND (SELECT COUNT(*) FROM product_batches pb WHERE pb.variant_product_id = @id) = @lotRows
       AND (SELECT COUNT(*) FROM inventory_movements WHERE product_id = @id) = @movements${lotStockTerms}
       THEN 1 ELSE json_extract('[1]', '$[${MERGE_CONFLICT_RETRY}]') END AS merge_source_guard`,
     params: {

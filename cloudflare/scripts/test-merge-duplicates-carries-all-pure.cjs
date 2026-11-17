@@ -58,7 +58,9 @@ check('the merge records inventory_movements for the transferred quantity', () =
 check('the merge re-points or folds product_batches', () => {
   assert.ok(/repointLotsStatement\(canonicalId/.test(mergeBlock) && /UPDATE product_batches SET variant_product_id = @canonicalId/.test(routeSrc),
     'non-colliding batches must move to the canonical product (in chunks, one statement per chunk)')
-  assert.ok(/INSERT INTO branch_batch_stock[\s\S]*?quantity = quantity \+ excluded\.quantity/.test(mergeBlock), 'colliding batches must fold their per-branch stock in')
+  // Set-based (16 Nov 2026): the fold block collects the lots and mergeFoldStatements() writes one upsert for all of them.
+  assert.ok(/mergeFoldStatements\(foldLots, foldStock, foldLotMetadata\)/.test(mergeBlock), 'the fold block hands its folded lots to the set-based writer (no product argument: the lines are selected by batch_id alone, which idx_sale_items_batch_id_partial serves)')
+  assert.ok(/INSERT INTO branch_batch_stock[\s\S]*?quantity = quantity \+ excluded\.quantity/.test(routeSrc), 'colliding batches must fold their per-branch stock in')
 })
 
 check('the merge carries product_images onto the canonical row (the bug this test exists for)', () => {

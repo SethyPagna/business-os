@@ -49,8 +49,16 @@ async function check(name, input, expected, source = 'received_lot') {
 
 async function main() {
   await check('integer weighted inputs', graph(), 5.2)
-  const folded = graph(); folded.batches[1].batch_key = folded.batches[0].batch_key
-  await check('same-key keeper cost', folded, 4)
+  // 16 Nov 2026: a lot meets the keeper's lot of the SAME RECEIVED DAY (not the same batch_key). Stock is added into it and its
+  // cost becomes the quantity-weighted average: (2 x 4 + 3 x 6) / 5 = 5.2 on all 5 units (it used to stay 4 on a key match).
+  const folded = graph(); folded.batches[1].received_at = folded.batches[0].received_at
+  await check('same-day keeper cost: weighted average on the summed stock', folded, 5.2)
+  const sameKeyOtherDay = graph(); sameKeyOtherDay.batches[1].batch_key = sameKeyOtherDay.batches[0].batch_key
+  await check('same key on another day is no match: both lots keep their own cost and weight', sameKeyOtherDay, 5.2)
+  const lateUtc = graph(); lateUtc.batches[0].received_at = '2026-09-02'; lateUtc.batches[1].received_at = '2026-09-01 23:30:00'
+  await check('a 23:30 UTC receipt is the next business day, so it meets the 2 Sep lot', lateUtc, 5.2)
+  const zeroCost = graph([0, 6]); zeroCost.batches[1].received_at = zeroCost.batches[0].received_at
+  await check('a zero cost is not averaged into the same-day lot', zeroCost, 6)
   const manual = graph(); manual.currentCostEntries.push({ id: 1, product_id: 1, cost_usd: 7, baseline_batch_id: 10 })
   await check('manual baseline plus new lot', manual, 6.4)
   await check('zero cost excluded', graph([0, 6]), 6)

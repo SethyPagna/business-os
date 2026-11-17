@@ -29,6 +29,7 @@ function loadTs(rel, stubs = {}) {
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
     const helper = request.split('/').pop()
     if (['stockTransaction', 'stockMutationReceipt', 'productCostReview', 'productMergeCostPreview', 'productConflictActionGroups', 'catalogCostRecompute', 'productIdentity', 'productDetailRule', 'productMerge', 'productConflictMergeBatch', 'sqlBinding', 'moneyPrecision'].includes(helper)) return loadTs(path.join('lib', helper + '.ts'))
+    if (/(^|\/)(productMergeLots|businessDateWindow)$/.test(request)) return loadTs(path.join('lib', request.split('/').pop() + '.ts'), {})
     if (request.startsWith('.') || request === 'hono') return permissive()
     return original.call(Module, request, parent, main)
   }
@@ -323,7 +324,7 @@ async function main() {
         INSERT INTO return_item_batch_allocations(id,return_item_id,sale_item_id,batch_id,branch_id,quantity,lot_code,expiry_date)
           VALUES(9706,9704,9702,9302,901,1,'D1','2029-01-01');
       `))
-      if (collision) seedFixture(lots.db, () => lots.db.exec("UPDATE product_batches SET batch_key='keeper-lot' WHERE id=9302; UPDATE product_batches SET is_active=0 WHERE id=9301"))
+      if (collision) seedFixture(lots.db, () => lots.db.exec("UPDATE product_batches SET batch_key='keeper-lot', received_at='2026-08-21' WHERE id=9302; UPDATE product_batches SET is_active=0 WHERE id=9301"))
       })
       // Proves activation occurs before the stock write, not just eventually.
       lots.db.exec(`CREATE TRIGGER require_active_merge_destination BEFORE INSERT ON branch_batch_stock
@@ -331,6 +332,10 @@ async function main() {
         BEGIN SELECT RAISE(ABORT,'positive merge destination is inactive'); END;`)
       const tracked = ['products','branch_stock','product_batches','branch_batch_stock','sale_items','return_items','sale_item_batch_allocations','return_item_batch_allocations']
       const before = Object.fromEntries(tracked.map(t=>[t,lots.db.prepare('SELECT * FROM '+t+' ORDER BY id').all()]))
+      // Lead ruling 16 Nov 2026: a merge never reactivates an archived kept lot and leaves an already-inactive lot as it was, so legacy stock that
+      // already sat on an inactive lot stays there (the merge neither fixes nor creates it): the count of such rows must not change.
+      const stuckOnInactive = () => lots.db.prepare('SELECT COUNT(*) n FROM branch_batch_stock b JOIN product_batches p ON p.id=b.batch_id WHERE b.quantity>0 AND COALESCE(p.is_active,0)<>1').get().n
+      const stuckBefore = stuckOnInactive()
       const { app: lotApp } = loadRoute(lots)
       const preview = await call(lotApp, '/possible-duplicates/merge-batch/preview', { cases: [{case_key:'barcode:1111',cluster_type:'barcode',cluster_value:'1111',product_ids:[9101,9102]}] })
       assert.equal(preview.status,200)
@@ -347,25 +352,27 @@ async function main() {
         continue
       }
       assert.equal(applied.body.complete,true,JSON.stringify(applied.body))
-      assert.equal(lots.db.prepare(`SELECT COUNT(*) n FROM branch_batch_stock b JOIN product_batches p ON p.id=b.batch_id
-        WHERE p.variant_product_id=9101 AND b.quantity>0 AND COALESCE(p.is_active,0)<>1`).get().n,0)
+      assert.ok(stuckOnInactive()<=stuckBefore,'the merge creates no stock on an inactive lot (it may fold legacy stock into an active lot, never the reverse)')
       assert.deepEqual(lots.db.prepare('SELECT branch_id,quantity FROM branch_stock WHERE product_id=9101 ORDER BY branch_id').all().map(row=>({...row})),[{branch_id:901,quantity:7},{branch_id:902,quantity:7}])
       for(const row of before.product_batches) {
         const after=lots.db.prepare('SELECT * FROM product_batches WHERE id=?').get(row.id)
+        // Lead ruling 16 Nov 2026: in the collision variant the kept lot (9301, same day as the source) is ARCHIVED, and an archived kept lot is never a
+        // match target nor reactivated: the source lot is created on the keeper instead, so no lot's cost, dates or code change.
         for(const key of ['received_at','expiry_date','unit_cost_usd','received_quantity','received_cost_usd','lot_code']) assert.equal(after[key],row[key],key+' preserved')
       }
       for(const t of ['sale_item_batch_allocations','return_item_batch_allocations']) {
-        const expected=before[t].map(row=>({...row,batch_id:collision?9301:9302}))
+        const expected=before[t].map(row=>({...row,batch_id:9302}))
         assert.deepEqual(lots.db.prepare('SELECT * FROM '+t+' ORDER BY id').all().map(row=>({...row})),expected,'allocation provenance preserved')
       }
-      assert.equal(lots.db.prepare('SELECT is_active FROM product_batches WHERE id=?').get(collision?9301:9302).is_active,1)
+      for(const row of before.product_batches) assert.equal(lots.db.prepare('SELECT is_active FROM product_batches WHERE id=?').get(row.id).is_active,row.id===9302?1:row.is_active,`lot ${row.id}: a merge reactivates no archived KEPT lot; only the moved source lot that still holds stock (9302) is activated so its stock stays selectable`)
       const counts=tableCounts(lots)
-      console.log(`PASS ${collision?'same-key inactive keeper':'inactive reparented source'}: multi-branch stock active, provenance intact (${counts.product_batches} lots)`)
+      console.log(`PASS ${collision?'same-key inactive keeper (not a target, not reactivated)':'inactive reparented source'}: lots keep their activity, provenance intact (${counts.product_batches} lots)`)
     }
   }
   for(const keeperQuantity of [0,5]) {
     const lots=seed()
     await seedPre0154LegacyLots(lots, () => seedFixture(lots.db, () => lots.db.exec(`UPDATE product_batches SET is_active=0;
+      UPDATE product_batches SET received_at='2026-08-21'; -- lots meet by RECEIVED DATE (16 Nov 2026): both arrived the same day
       UPDATE product_batches SET batch_key='keeper-lot' WHERE id=9302;
       UPDATE branch_stock SET quantity=0 WHERE product_id=9102;
       UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=9302;
@@ -380,7 +387,9 @@ async function main() {
       cases:preview.body.cases.map((item,ordinal)=>({ordinal,case_key:item.case_key,keep_id:item.keep_id,merge_id:item.merge_id,state_digest:item.state_digest,stock:item.needs_stock_choice?'merge':null})),
     })
     assert.equal(applied.body.complete,true,JSON.stringify(applied.body))
-    assert.equal(lots.db.prepare('SELECT is_active FROM product_batches WHERE id=9301').get().is_active,keeperQuantity>0?1:0,'retained positive keeper activates; empty historical keeper stays inactive')
+    // Lead ruling 16 Nov 2026: a merge never reactivates a kept lot, with or without retained stock; an empty inactive source lot is left as it was.
+    assert.equal(lots.db.prepare('SELECT is_active FROM product_batches WHERE id=9301').get().is_active,0,'an archived kept lot stays archived whatever stock it holds')
+    assert.deepEqual({...lots.db.prepare('SELECT is_active,variant_product_id,merge_deactivated_at FROM product_batches WHERE id=9302').get()},{is_active:0,variant_product_id:9101,merge_deactivated_at:null},'an empty inactive source lot stays inactive and unmarked and is re-pointed onto the keeper (B2: its sale lines follow the product)')
   }
   // Exact local-browser fixture metadata: 11 selected exact pairs among 12
   // detected clusters (the remaining three-member cluster is client-blocked).
@@ -544,7 +553,7 @@ async function main() {
     const { app: tornApp, controls } = loadRoute(torn)
     let injected = false
     controls.beforeBatch = async (statements) => {
-      if (injected || !statements.some(({ sql }) => /SELECT branch_id, quantity FROM branch_batch_stock/.test(sql))) return
+      if (injected || !statements.some(({ sql }) => /SELECT batch_id, branch_id, quantity FROM branch_batch_stock WHERE batch_id IN \(SELECT value FROM json_each/.test(sql))) return
       injected = true
       seedFixture(torn.db, () => torn.db.prepare('UPDATE products SET selling_price_usd=99 WHERE id=9102').run())
     }

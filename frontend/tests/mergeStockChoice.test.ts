@@ -69,13 +69,16 @@ test('both dispositions are offered and neither is pre-selected', () => {
   assert.match(dialog, /danger=\{choice === 'write_off' \|\| identityDiffers\}/, 'writing stock off is the destructive branch')
 })
 
-test('MERGE explains that same received-date same-branch quantities are ADDED, not replaced', () => {
+test('MERGE explains the received-date rule: same date is ADDED (weighted cost, earliest expiry), another date becomes a new record', () => {
   const hint = en.merge_stock_choice_merge_hint
   assert.ok(hint, 'merge_stock_choice_merge_hint must ship in the pack')
-  assert.match(hint, /received-date code/i)
-  assert.doesNotMatch(hint, /\blot code\b|\bbatch number\b/i)
-  assert.match(hint, /branch/i)
-  assert.match(hint, /added together/i)
+  assert.match(hint, /same received date is added into the matching received-date record/i)
+  assert.match(hint, /weighted average/i)
+  assert.match(hint, /earliest/i)
+  assert.match(hint, /becomes a new received-date record/i)
+  assert.match(hint, /several records of one duplicate with that same date become a single record/i)
+  assert.match(hint, /already inactive stay as they are/i)
+  assert.doesNotMatch(hint, /lot code|batch number|batch(es)?|lots?/i)
 })
 
 test('REMOVE explains the balancing stock movement (reason, who, when)', () => {

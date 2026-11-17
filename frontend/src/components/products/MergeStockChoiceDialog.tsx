@@ -160,7 +160,7 @@ export default function MergeStockChoiceDialog({
       hint: [
         T(
           'merge_stock_choice_merge_hint',
-          'Every received-date record moves onto the kept product with its received-date code, branch, cost and dates unchanged. If the kept product already has the same received date at the same branch, the quantities are added together and one row is kept.',
+          'Stock with the same received date is added into the matching received-date record of the kept product (the cost becomes the weighted average, the expiry the earliest). A received date the kept product does not have becomes a new received-date record. Records that are already inactive stay as they are.',
         ),
         // Spelled out on the option itself, not only in the banner above: the
         // operator picking "merge the stock" is the one who needs to know the

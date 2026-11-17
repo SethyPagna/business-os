@@ -273,6 +273,16 @@ async function rootLotShares(db: D1Compat, rootId: number): Promise<LotShare[]> 
 
 const MERGED_LOT_REFUSAL = 'This change moved stock on a received date that now belongs to another product (the products were merged), so it cannot be reverted here. Nothing was changed; correct it with a new count instead.'
 
+// The movement's lot is not under the product being reverted. When a product merge deactivated that lot (the fold or the write-off marks it
+// with merge_deactivated_at, the lot stays on the discarded record), the cause is the merge and the operator gets the merged-products
+// sentence; any other cause (never the same product's lot) keeps the generic one. Both refuse the same way: 400 revert_lot_moved, nothing written.
+const LOT_NOT_OF_PRODUCT_REFUSAL = 'Selected received date does not belong to this product'
+async function lotMovedRefusal(db: D1Compat, batchId: number, productId: number): Promise<RevertResult> {
+  const merged = await db.prepare('SELECT 1 AS merged FROM product_batches WHERE id = @batchId AND variant_product_id <> @productId AND merge_deactivated_at IS NOT NULL')
+    .get<{ merged: number }>({ batchId, productId })
+  return refuse(400, 'revert_lot_moved', merged ? MERGED_LOT_REFUSAL : LOT_NOT_OF_PRODUCT_REFUSAL)
+}
+
 // A removal with no recorded lot draw, written after a lot of its product existed: it may have drawn on several, and
 // putting its units back on a guess (the newest lot, the oldest, a new one) would give a delivery stock it never had.
 // branch_stock alone would restore them as undated units, losing their lot (FIFO, expiry, cost, supplier).
@@ -506,7 +516,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
         LEFT JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
         WHERE pb.id = @batchId AND pb.variant_product_id = @productId
       `).get<{ available: number }>({ batchId, productId, branchId })
-      if (!lot) return refuse(400, 'revert_lot_moved', 'Selected received date does not belong to this product')
+      if (!lot) return lotMovedRefusal(db, batchId, productId)
       const available = Number(lot.available) || 0
       if (magnitude > available) return withBlocker(db, lotShortRefusal(available, magnitude), { productId, branchId, batchId, afterMovementId: Number(m.id) })
       statements.push(...planRemoveStockFromBatch({ batchId, productId, branchId, quantity: magnitude }).statements)
@@ -555,7 +565,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     const before = await db.prepare(
       'SELECT id, received_cost_usd FROM product_batches WHERE id = @batchId AND variant_product_id = @productId',
     ).get<{ id: number; received_cost_usd: number | null }>({ batchId, productId })
-    if (!before) return refuse(400, 'revert_lot_moved', 'Selected received date does not belong to this product')
+    if (!before) return lotMovedRefusal(db, batchId, productId)
     // The original's recorded cost is copied as it stands: a priced receipt keeps its price, and a recorded
     // $0 keeps being $0 when the row says so in words (a declared free-goods receipt). Both cost columns
     // default to 0 (0001), so a 0/0 row with no such declaration (a dated count) never recorded a cost and
@@ -584,7 +594,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     // lot regains its stock (and picker visibility), its received figures stay.
     const lot = await db.prepare('SELECT id FROM product_batches WHERE id = @batchId AND variant_product_id = @productId')
       .get<{ id: number }>({ batchId, productId })
-    if (!lot) return refuse(400, 'revert_lot_moved', 'Selected received date does not belong to this product')
+    if (!lot) return lotMovedRefusal(db, batchId, productId)
     statements.push(...restoreBatchStockStatements(batchId, branchId, magnitude), ...aggregateDeltaStatements(productId, branchId, magnitude))
     usedBatchId = batchId
   } else {

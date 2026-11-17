@@ -16,6 +16,7 @@
 import type { D1Compat } from './db'
 import { buildInClause, chunkForBinding, selectInChunks } from './sqlBinding'
 import { normalizeToIsoDate } from './batchCode'
+import { keeperLotByDate, mergeLotReceivedDate, type MergeLotRow } from './productMergeLots'
 import { importBranchRedirectGuards, validateCanonicalImportBranchIds } from './importBranchAuthority'
 import {
   BranchRedirectTargetInvalidError, branchEffectRefusal, branchRedirectDetail, readBranchDirectory, resolveBranchEffect,
@@ -52,11 +53,16 @@ type StrayLotAction = { movement: ExistingCountMovement; action: LotAction; date
 // keeper's lots short of its branch_stock (R-stock3: keeper branch 9, lots 7,
 // merged-away lot 2). So every superseded action whose lot is not the counted
 // product's is moved, before the plan sees it, onto the counted product's lot
-// with the same batch_key: exactly where the fold put that lot's units (a
-// repointed lot keeps its key, and a chain of merges keeps it too). The
-// receipt it reverses is still un-received from the lot that recorded it.
-// Actions with no such lot (a written-off lot the keeper has no key for, or a
-// lot that no longer exists) come back as strays for placeStrayLotActions.
+// received the same business day, else the one with the same batch_key.
+// Since 16 Nov 2026 the fold adds a lot into the keeper's lot of the SAME
+// RECEIVED DATE (lib/productMergeLots.ts, the one rule the fold itself uses);
+// before that it matched by key, and the two agree wherever a key names its
+// date. The date goes first so a lot folded into a same-day lot with another
+// key still lands where the fold put it, and the key stays as the fallback
+// for a merge made under the old rule. The receipt it reverses is still
+// un-received from the lot that recorded it. Actions with no such lot (a
+// written-off lot the keeper has no match for, or a lot that no longer
+// exists) come back as strays for placeStrayLotActions.
 async function resolveLotsToCountedProduct(db: D1Compat, movements: ExistingCountMovement[]): Promise<StrayLotAction[]> {
   const namedIds = [...new Set(movements.flatMap((m) => (m.batchActions || []).map((a) => Number(a.batchId))))]
   if (!namedIds.length) return []
@@ -67,8 +73,26 @@ async function resolveLotsToCountedProduct(db: D1Compat, movements: ExistingCoun
     ).all<{ id: number; productId: number; batchKey: string | null; receivedAt: string | null }>(params)
   })
   const lotById = new Map(lotRows.map((row) => [Number(row.id), row]))
-  // Rare (only history a merge reparented), so one indexed read per key.
+  // Only history a merge reparented reaches the fallbacks, but a count of many products can hold many such actions: read every counted
+  // product's lots ONCE, in chunked IN reads (never one awaited read per product or per key), and resolve from memory. A large merge's
+  // history therefore costs ceil(products / bind chunk) reads, not one per product plus one per key.
+  const reparentedProducts = [...new Set(movements.flatMap((m) => (m.batchActions || [])
+    .filter((a) => { const lot = lotById.get(Number(a.batchId)); return lot && Number(lot.productId) !== m.productId })
+    .map(() => m.productId)))]
+  const keeperRows = reparentedProducts.length
+    ? await selectInChunks(reparentedProducts, 0, (chunk) => {
+      const { sql, params } = buildInClause('prod', chunk)
+      return db.prepare(`SELECT id, variant_product_id AS productId, batch_key AS batchKey, received_at, batch_number, is_active
+        FROM product_batches WHERE variant_product_id IN (${sql})`).all<MergeLotRow & { productId: number; batchKey: string | null }>(params)
+    })
+    : []
+  const keeperLotsByDate = new Map<number, Map<string, MergeLotRow>>()
   const sameKeyLot = new Map<string, number | null>()
+  for (const productId of reparentedProducts) {
+    const own = keeperRows.filter((row) => Number(row.productId) === productId)
+    keeperLotsByDate.set(productId, keeperLotByDate(own))
+    for (const row of own) if (row.batchKey != null) sameKeyLot.set(`${productId}:${row.batchKey}`, Number(row.id))
+  }
   const strays: StrayLotAction[] = []
   for (const movement of movements) {
     if (!movement.batchActions?.length) continue
@@ -80,15 +104,12 @@ async function resolveLotsToCountedProduct(db: D1Compat, movements: ExistingCoun
         continue
       }
       let target: number | null = null
-      if (lot && lot.batchKey != null) {
-        const key = `${movement.productId}:${lot.batchKey}`
-        if (!sameKeyLot.has(key)) {
-          const row = await db.prepare('SELECT id FROM product_batches WHERE variant_product_id = @productId AND batch_key = @batchKey')
-            .get<{ id: number }>({ productId: movement.productId, batchKey: lot.batchKey })
-          sameKeyLot.set(key, row ? Number(row.id) : null)
-        }
-        target = sameKeyLot.get(key) ?? null
+      const receivedDate = lot ? mergeLotReceivedDate(lot.receivedAt) : null
+      if (receivedDate) {
+        const sameDay = keeperLotsByDate.get(movement.productId)?.get(receivedDate)
+        if (sameDay) target = Number(sameDay.id)
       }
+      if (target == null && lot && lot.batchKey != null) target = sameKeyLot.get(`${movement.productId}:${lot.batchKey}`) ?? null
       if (target != null) {
         resolved.push({ batchId: target, quantity: action.quantity, ...(action.quantity > 0 ? { receivedBatchId: Number(action.batchId) } : {}) })
       } else {
