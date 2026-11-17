@@ -118,6 +118,8 @@ export const ROLE_PRESETS: RolePreset[] = [
       portal_about: true,
       pos: true,
       products: true,
+      product_cost_view: false,
+      product_cost_edit: false,
       inventory: true,
       inventory_checks: true,
       inventory_check_show_price: true,

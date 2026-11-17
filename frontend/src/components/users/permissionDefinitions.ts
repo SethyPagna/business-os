@@ -190,7 +190,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'products',
     tKey: 'perm_section_products',
     label: 'Products',
-    description: 'Products. Imports, cost and profit are admin only. Opening stock also needs Inventory › Adjust / receive.',
+    description: 'Products. Cost and profit need a cost grant (admin by default). Opening stock also needs Inventory › Adjust / receive.',
     permissions: [
       // tier: true -- add, edit and delete queue via maybeQueueForReview() (lib/reviewGate.ts); an edit that
       // would merge two products queues too. Every other action is Full only (utils/permissionActions.ts lists
@@ -204,12 +204,11 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         reviewTKey: 'perm_products_review_desc',
         reviewDescription: 'Under Review, viewing and searching products works directly. Adding, editing, or deleting a product goes to the Review/Approval queue for an admin to approve or reject. So does an edit that would merge this product into another one, unless Merge duplicates is switched off for the role, which refuses that edit. Import, export, merge-duplicates, and the zero-quantity cleanup tool all require Full Access.',
       },
-      // Retired 15 Nov 2026 (owner): cost, profit, margin, stock value and removal loss are admin-only, so these two switches would do
-      // nothing. The role editor draws no switch for them (permissionSummary.ts skips retired grants); their stored values
-      // stay untouched, the way back if the owner reverses the ruling (the Worker's lib/acquisitionCostAccess.ts holdsCostViewGrant /
-      // holdsCostEditGrant).
-      { key: 'product_cost_view', tKey: 'perm_product_cost_view', label: 'View product costs', sensitivity: 'high', shortTKey: 'perm_short_cost_view', short: 'See costs', retired: true },
-      { key: 'product_cost_edit', tKey: 'perm_product_cost_edit', label: 'Edit product costs', sensitivity: 'high', shortTKey: 'perm_short_cost_edit', short: 'Enter costs', retired: true },
+      // Owner, 17 Nov 2026 (reverses the 15 Nov retirement): cost, profit, margin, stock value and removal loss are admin only by
+      // default and follow these two switches, per role or per user. Cost and profit share the one switch (price minus profit
+      // reveals cost). Backups, restore and Drive sync stay admin only whatever these say. Courier cost has its own grant.
+      { key: 'product_cost_view', tKey: 'perm_product_cost_view', label: 'View product costs', sensitivity: 'high', shortTKey: 'perm_short_cost_view', short: 'See costs' },
+      { key: 'product_cost_edit', tKey: 'perm_product_cost_edit', label: 'Edit product costs', sensitivity: 'high', shortTKey: 'perm_short_cost_edit', short: 'Enter costs' },
       // Gates the replace-all and replace-columns product imports, in the import picker and in the Worker
       // (lib/importEngine.ts missingDestructiveImportPermission).
       { key: 'destructive_delete', tKey: 'perm_destructive_delete', label: 'Destructive imports: replace all and replace columns', sensitivity: 'critical', shortTKey: 'perm_short_destructive_imports', short: 'Destructive imports' },

@@ -60,6 +60,18 @@ assert.equal(seedMap.manager.dashboard, true)
 assert.equal(seedMap.manager.dashboard_export, true, 'a Manager keeps the export')
 const managerPreset = ROLE_PRESETS.find((preset) => preset.key === 'manager')!
 assert.deepEqual(managerPreset.permissions, seedMap.manager, 'the Manager preset equals the Manager seed')
+// Owner, 17 Nov 2026: cost and profit are admin only by default and an editable grant. Both seeds and both presets WRITE the two grants
+// off explicitly, so the role editor shows them as off rather than unset; an owner switches them on per role.
+for (const [name, map] of [['Employee preset', employee.permissions], ['Manager preset', managerPreset.permissions], ['Employee seed', seedMap.employee], ['Manager seed', seedMap.manager]] as const) {
+  assert.strictEqual(map.product_cost_view, false, name + ' writes product_cost_view off')
+  assert.strictEqual(map.product_cost_edit, false, name + ' writes product_cost_edit off')
+}
+const managerUser = { role_code: 'manager', permissions: managerPreset.permissions }
+assert.equal(canViewAcquisitionCosts(managerUser), false, 'a Manager sees no cost by default')
+assert.equal(canEditAcquisitionCosts(managerUser), false)
+const grantedManager = { role_code: 'manager', permissions: { ...managerPreset.permissions, product_cost_view: true } }
+assert.equal(canViewAcquisitionCosts(grantedManager), true, 'switching the grant on shows cost to a Manager')
+assert.equal(canEditAcquisitionCosts(grantedManager), false, 'and does not imply editing')
 assert.equal(Object.hasOwn(employee.permissions, 'inventory'), false, 'an Employee never writes physical stock')
 assert.equal(employee.permissions['products:supplier'], false)
 assert.equal(employee.permissions['products:price'], false)

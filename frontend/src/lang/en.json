@@ -231,7 +231,7 @@
   "perm_section_sales_desc": "View: read sales and reports. Full: change sales and open Shifts.",
   "perm_section_dashboard_desc": "The Dashboard page. Export is a separate switch. Cost, profit and stock value are shown to administrators only.",
   "perm_section_promotions_desc": "View: see the rules. Full: create, edit and delete them.",
-  "perm_section_products_desc": "Products. Imports, cost and profit are admin only. Opening stock also needs Inventory › Adjust / receive.",
+  "perm_section_products_desc": "Products. Cost and profit need a cost grant (admin by default). Opening stock also needs Inventory › Adjust / receive.",
   "perm_section_inventory_desc": "Stock levels, adjustments and transfers. Counting is set by Inventory check sessions.",
   "perm_section_branches_desc": "Branch details, exports and stock transfers between branches.",
   "perm_section_returns_desc": "Customer returns. Has its own switch, separate from Sales.",

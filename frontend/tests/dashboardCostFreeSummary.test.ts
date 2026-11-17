@@ -76,7 +76,7 @@ test('roles that hold `dashboard`: the Manager and the Employee defaults both do
   assert.equal(hasAnyPermission(EMPLOYEE, ['dashboard']), true, 'the Employee default opens it too (reverses the 20 Oct rule)')
   assert.equal(hasAnyPermission(EMPLOYEE, ['dashboard_export']), false, 'but never exports it')
   assert.equal(DEFAULT_ROLE_PERMISSIONS.employee.product_cost_view, false)
-  assert.equal(DEFAULT_ROLE_PERMISSIONS.manager.product_cost_view, undefined, 'the Manager default holds no cost grant')
+  assert.equal(DEFAULT_ROLE_PERMISSIONS.manager.product_cost_view, false, 'the Manager default writes the cost grant off (owner, 17 Nov 2026)')
 })
 
 test('WHY it failed: for the Manager the Worker removes every cost-derived summary key, stock_value_usd among them', () => {
@@ -89,11 +89,15 @@ test('the Dashboard accepts what the Worker sends the Manager (red before: it th
   assert.equal(isDashboardSummaryPayload(projectAcquisitionCosts(workerSummary, MANAGER)), true)
 })
 
-test('only the administrator keeps the cost keys (owner, 15 Nov 2026): a manager or employee WITH the cost grant gets none', () => {
+test('the cost keys follow the grant (owner, 17 Nov 2026): a manager or employee WITH product_cost_view keeps them, one without gets none', () => {
   for (const user of [MANAGER_WITH_COST, asWorkerUser('employee', { ...DEFAULT_ROLE_PERMISSIONS.employee, product_cost_view: true })]) {
     const sent = projectAcquisitionCosts(workerSummary, user)
-    for (const key of COST_SUMMARY_KEYS) assert.equal(Object.hasOwn(sent, key), false, `${key} is withheld from a non-admin even with the grant`)
-    assert.equal(isDashboardSummaryPayload(sent), true, 'and the Dashboard still accepts what it is sent')
+    for (const key of COST_SUMMARY_KEYS) assert.equal(Object.hasOwn(sent, key), true, `${key} reaches a non-admin who holds the grant`)
+    assert.equal(isDashboardSummaryPayload(sent), true, 'and the Dashboard accepts what it is sent')
+  }
+  for (const user of [MANAGER, EMPLOYEE, asWorkerUser('manager', { ...DEFAULT_ROLE_PERMISSIONS.manager, product_cost_edit: true })]) {
+    const sent = projectAcquisitionCosts(workerSummary, user)
+    for (const key of COST_SUMMARY_KEYS) assert.equal(Object.hasOwn(sent, key), false, `${key} is withheld without the view grant`)
   }
   const sent = projectAcquisitionCosts(workerSummary, ADMIN)
   for (const key of COST_SUMMARY_KEYS) assert.equal(Object.hasOwn(sent, key), true, `${key} reaches the administrator`)

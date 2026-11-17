@@ -28,7 +28,7 @@ async function runTest(name: string, fn: () => Promise<void> | void): Promise<vo
   try { await fn(); console.log(`PASS ${name}`) } catch (error) { failed += 1; console.error(`FAIL ${name}`); console.error(error) }
 }
 
-// The live Employee role as an owner may have left it: Dashboard on, cost view on, no supplier switch at all.
+// The live Employee role as an owner may have left it: Dashboard on, cost view on, no supplier switch at all. (Cost view is a drawn grant again, owner, 17 Nov 2026.)
 const STORED_EMPLOYEE = { pos: true, backup: true, product_cost_view: true, products: true, 'products:price': false, 'legacy_unknown_key': true }
 const ROLES = [
   { id: 1, name: 'Admin', code: 'admin', permissions: '{"all":true}', is_system: 1 },
@@ -157,36 +157,38 @@ await runTest('Save lists one row per changed module in the shared review; confi
     assert.ok(!text.includes(en.perm_value_not_set), 'the review speaks the editor\'s words, not "Not set"')
     assert.ok(text.includes(`${en.label_full_access} → ${en.none}`), 'backup: Full -> None')
     assert.ok(rows.includes(en.perm_section_backup) && rows.includes(en.perm_section_sales), 'a module row carries the module name')
-    assert.ok(!text.includes(en.perm_short_cost_view), 'cost view is a retired switch (administrator only): the review draws no line for it')
+    assert.ok(text.includes(en.perm_short_cost_view), 'cost view is a drawn switch (owner, 17 Nov 2026): the review names its change from on to off')
     assert.match(text, new RegExp(`✕[^✓−+]*${en.supplier}`), 'the supplier switch is named on its module row')
     assert.ok(review.querySelectorAll('[role=img]').some((mark) => mark.getAttribute('aria-label') === en.permission_sensitive_high), 'the sensitivity shield marks a sensitive switch on the review (backup: Full to None)')
     assert.ok(!text.includes('Applies right away'), 'nobody holds the role here, so there is nothing to announce')
     await page.click(page.button(new RegExp(`^${en.save}`), review), { until: () => calls.updates.length === 1, waitingFor: 'the single write' })
     assert.equal(calls.updates.length, 1, 'confirm writes exactly once')
     assert.equal(calls.updates[0].id, 2)
-    // Every drawn grant is the default; a retired grant (the cost grants among them) is what the role held, here the stored true.
+    // Every drawn grant is the default, the two cost grants among them (they are drawn since 17 Nov 2026); a retired grant is what the role held.
     const written = calls.updates[0].payload.permissions as Record<string, unknown>
     const drawn = (map: Record<string, unknown>) => Object.fromEntries(Object.entries(map).filter(([key]) => !RETIRED_PERMISSION_KEYS.includes(key)))
     assert.deepEqual(drawn(written), drawn(DEFAULT_ROLE_PERMISSIONS.employee as Record<string, unknown>), 'every drawn grant is exactly the default')
-    assert.equal(written.product_cost_view, true, 'the stored cost grant is not overwritten with the default false, unseen')
-    assert.deepEqual(Object.keys(written).filter((key) => RETIRED_PERMISSION_KEYS.includes(key)), ['product_cost_view'], 'a retired grant the role never held is not added')
+    assert.equal(written.product_cost_view, false, 'the reset takes the default for the cost grant, and the review above named it')
+    assert.deepEqual(Object.keys(written).filter((key) => RETIRED_PERMISSION_KEYS.includes(key)), [], 'a retired grant the role never held is not added')
   } finally {
     await page.unmount()
   }
 })
 
 await runTest('resetRolePermissions: retired grants stay exactly as stored, drawn grants take the default', () => {
-  assert.ok(RETIRED_PERMISSION_KEYS.includes('product_cost_view') && RETIRED_PERMISSION_KEYS.includes('product_cost_edit'))
+  assert.ok(RETIRED_PERMISSION_KEYS.includes('inventory_check_show_price') && RETIRED_PERMISSION_KEYS.includes('inventory_check_show_cost'))
+  assert.ok(!RETIRED_PERMISSION_KEYS.includes('product_cost_view') && !RETIRED_PERMISSION_KEYS.includes('product_cost_edit'), 'the cost grants are drawn again (owner, 17 Nov 2026)')
   // Owner, 16 Nov 2026: the courier cost grant is a drawn switch again, so a reset takes the default for it like any other drawn grant.
   assert.ok(!RETIRED_PERMISSION_KEYS.includes('sales:view_courier_cost'), 'the courier cost grant is not retired')
   const defaults = { pos: true, products: true, product_cost_view: false, product_cost_edit: false, 'sales:view_courier_cost': true, inventory_check_show_price: true }
-  const stored = { pos: false, product_cost_view: true, 'sales:view_courier_cost': false, legacy_unknown_key: true }
-  assert.deepEqual(resetRolePermissions(stored, defaults), { pos: true, products: true, product_cost_view: true, 'sales:view_courier_cost': true })
+  const stored = { pos: false, product_cost_view: true, 'sales:view_courier_cost': false, inventory_check_show_price: false, legacy_unknown_key: true }
+  assert.deepEqual(resetRolePermissions(stored, defaults), { pos: true, products: true, product_cost_view: false, product_cost_edit: false, 'sales:view_courier_cost': true, inventory_check_show_price: false })
   assert.equal(resetRolePermissions({}, defaults)['sales:view_courier_cost'], true, 'nothing stored: the default is written for a drawn grant')
-  assert.deepEqual(resetRolePermissions({}, defaults), { pos: true, products: true, 'sales:view_courier_cost': true }, 'nothing stored: nothing written for a retired grant, the default for a drawn one')
-  assert.deepEqual(resetRolePermissions('{"product_cost_edit":true}', defaults), { pos: true, products: true, 'sales:view_courier_cost': true, product_cost_edit: true }, 'a stored JSON text reads the same')
-  // DISCRIMINATING: the reset the review caught, defaults written over the stored grant, differs from the stored value.
-  assert.notEqual(resetRolePermissions(stored, defaults).product_cost_view, defaults.product_cost_view)
+  assert.deepEqual(resetRolePermissions({}, defaults), { pos: true, products: true, product_cost_view: false, product_cost_edit: false, 'sales:view_courier_cost': true }, 'nothing stored: nothing written for a retired grant, the default for a drawn one')
+  assert.deepEqual(resetRolePermissions('{"inventory_check_show_price":false}', defaults), { pos: true, products: true, product_cost_view: false, product_cost_edit: false, 'sales:view_courier_cost': true, inventory_check_show_price: false }, 'a stored JSON text reads the same')
+  // DISCRIMINATING: a stored cost grant is overwritten by the default (drawn), a stored retired grant is not.
+  assert.notEqual(resetRolePermissions(stored, defaults).product_cost_view, stored.product_cost_view)
+  assert.notEqual(resetRolePermissions(stored, defaults).inventory_check_show_price, defaults.inventory_check_show_price)
 })
 
 await runTest('cancelling the review writes nothing and keeps the draft', async () => {

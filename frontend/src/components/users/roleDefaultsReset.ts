@@ -12,8 +12,8 @@ export function resettableRoleCode(role: { code?: unknown } | null | undefined):
 }
 
 // A retired grant (permissionDefinitions.ts `retired`; no action row is retired since 16 Nov 2026, when the courier cost row came back) is not drawn in the editor and is not counted
-// or cleared by it: its stored value is left exactly as it is, so a reset must not write the default over it either. The cost grants
-// are the case: owner, 15 Nov 2026, cost is administrator only, and the stored grants are the way back if that ruling is reversed.
+// or cleared by it: its stored value is left exactly as it is, so a reset must not write the default over it either. The two cost grants
+// (product_cost_view, product_cost_edit) are drawn again since the owner's 17 Nov 2026 ruling, so a reset takes their default (off) like any other drawn grant.
 const RETIRED_ACTION_KEYS: readonly string[] = []
 export const RETIRED_PERMISSION_KEYS: readonly string[] = [
   ...PERMISSION_DEFS.filter((def) => def.retired).map((def) => def.key),
