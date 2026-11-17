@@ -269,7 +269,10 @@ function ListRow({ product, draft, adornment, refusal, columns, countable, copy,
       className="inline-flex min-h-6 items-center rounded border-0 bg-transparent p-0 text-left decoration-dotted underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
       <PriceValue tone="cost" className="tabular-nums">{cost.usd === null ? <CostValue value={null} fmt={value => costText(value)} t={key => tr(key, '')} /> : costText(cost.usd, cost.khr ?? undefined)}</PriceValue></button>])
   }
-  const dotted = (parts: Array<[string, ReactNode]>) => parts.map(([key, node], index) => <Fragment key={key}>{index > 0 ? <span aria-hidden="true">·</span> : null}{node}</Fragment>)
+  const dotted = (parts: Array<[string, ReactNode]>) => parts.map(([key, node], index) => index > 0
+    // The separator and the part after it are one unit, so a wrapped line can never start with (or hold) a lone "·".
+    ? <span key={key} className="inline-flex min-w-0 items-center gap-x-1.5"><span aria-hidden="true">·</span>{node}</span>
+    : <Fragment key={key}>{node}</Fragment>)
   const edge = status ? LIST_STATUS[status].edge : 'border-l-transparent'
   const recordedNote = status === 'issue' ? product.check_note : null
   const note = recordedNote === DEFAULT_COUNT_NOTE ? tr('inventory_check_default_note', 'Count differs from stock') : recordedNote
@@ -312,7 +315,9 @@ function ListRow({ product, draft, adornment, refusal, columns, countable, copy,
         <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] leading-relaxed text-gray-600 lg:contents lg:text-xs dark:text-gray-300" data-inventory-check-meta>
           {facts.map(([field, node]) => {
             if (node === null) return <span key={field} aria-hidden="true" data-cell={field} className={cellClass(field, true)} />
-            return <Fragment key={field}>{shown++ > 0 ? <span aria-hidden="true" className="lg:hidden">·</span> : null}<span data-cell={field} className={cellClass(field)}>{node}</span></Fragment>
+            const cellNode = <span data-cell={field} className={cellClass(field)}>{node}</span>
+            // Below the sheet width the separator and its cell wrap as one unit (never a lone "·" on a line); from lg up the wrapper vanishes and the cell is a grid cell.
+            return shown++ > 0 ? <span key={field} className="inline-flex min-w-0 items-center gap-x-1.5 lg:contents"><span aria-hidden="true" className="lg:hidden">·</span>{cellNode}</span> : <Fragment key={field}>{cellNode}</Fragment>
           })}
         </div>
       </div>

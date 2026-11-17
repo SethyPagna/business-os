@@ -327,7 +327,10 @@ function CheckRow({ product, observation, pending, error, header, adornment, fro
   if (barcode) identity.push(['barcode', <span {...copy(barcode)} className="break-all">{barcode}</span>])
   if (product.brand) identity.push(['brand', <span {...copy(product.brand)}>{product.brand}</span>])
   if (product.category) identity.push(['category', <span>{product.category}</span>])
-  const dotted = (parts: Array<[string, ReactNode]>) => parts.map(([key, node], index) => <Fragment key={key}>{index > 0 ? <span aria-hidden="true">·</span> : null}{node}</Fragment>)
+  const dotted = (parts: Array<[string, ReactNode]>) => parts.map(([key, node], index) => index > 0
+    // The separator and the part after it are one unit, so a wrapped line can never start with (or hold) a lone "·".
+    ? <span key={key} className="inline-flex min-w-0 items-center gap-x-1.5"><span aria-hidden="true">·</span>{node}</span>
+    : <Fragment key={key}>{node}</Fragment>)
   const expiryName = expiry ? expiry.tone === 'expired' ? tr('inventory_check_expired', 'Expired') : expiry.tone === 'soon' ? tr('inventory_check_expires_soon', 'Expires soon') : tr('expiry', 'Expiry') : ''
   const shownState = state
   const edge = shownState === 'done' ? 'border-l-emerald-500' : shownState === 'issue' ? 'border-l-amber-500' : 'border-l-transparent'
@@ -362,7 +365,9 @@ function CheckRow({ product, observation, pending, error, header, adornment, fro
           // With a Count input the sheet's count cell is that input; the saved count then reads on a phone only.
           const phoneOnly = field === 'count' && showCountInput
           if (node === null) return phoneOnly ? null : <span key={field} aria-hidden="true" data-cell={field} className={cellClass(field, true)} />
-          return <Fragment key={field}>{shown++ > 0 ? <span aria-hidden="true" className="lg:hidden">·</span> : null}<span data-cell={field} className={phoneOnly ? 'lg:hidden' : cellClass(field)}>{node}</span></Fragment>
+          const cellNode = <span data-cell={field} className={phoneOnly ? 'lg:hidden' : cellClass(field)}>{node}</span>
+          // Below the sheet width the separator and its cell wrap as one unit (never a lone "·" on a line); from lg up the wrapper vanishes and the cell is a grid cell.
+          return shown++ > 0 ? <span key={field} className="inline-flex min-w-0 items-center gap-x-1.5 lg:contents"><span aria-hidden="true" className="lg:hidden">·</span>{cellNode}</span> : <Fragment key={field}>{cellNode}</Fragment>
         })}
         {showCountInput ? <span data-cell="count-input" className={`hidden lg:block lg:shrink-0 ${CELL_BOX.count}`}>
           <input data-check-count id={`inventory-check-sheet-count-${product.id}`} type="text" inputMode="numeric" autoComplete="off" value={draft ? draft.count : countText ?? savedCount}
