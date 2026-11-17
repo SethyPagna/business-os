@@ -66,7 +66,8 @@ function oldRules(real) {
       const explicit = permissions[`inventory_check_show_${field}`]
       return [field, canView && (admin || (typeof explicit === 'boolean' ? explicit : invTier === 'full'))]
     }))
-    fields.cost = fields.cost && real.acquisition.canViewAcquisitionCosts(user)
+    // 18 Nov 2026: the cost field is outside migration 0270. The retired inventory_check_show_cost switch is gone on both sides (View product costs alone decides), so this frozen model follows it.
+    fields.cost = canView && real.acquisition.canViewAcquisitionCosts(user)
     const checkTier = P.getActionTier(user, 'inventory', 'check')
     return {
       canView,
