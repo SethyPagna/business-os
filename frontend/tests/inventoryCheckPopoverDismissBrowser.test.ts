@@ -19,6 +19,7 @@ const fixture = String.raw`
   const products = [product(1, 'Alpha serum'), product(2, 'Beta cream'), product(3, 'Gamma toner'), product(4, 'Delta mist')]
   window.__opened = []
   window.__plain = 0
+  window.__submit = 0
   function Fixture() {
     const [drafts, setDrafts] = useState({})
     const patch = (item, change) => setDrafts(previous => {
@@ -29,6 +30,7 @@ const fixture = String.raw`
       <div style={{ padding: 8 }}>
         <PortalMenu trigger={<button type="button" data-plain-trigger>Plain menu</button>} content={<div data-plain-content style={{ padding: 8 }}>plain content</div>} />
         <button type="button" data-plain-target onClick={() => { window.__plain += 1 }}>Elsewhere</button>
+        <button type="button" data-submit-target onClick={() => { window.__submit += 1 }}>Submit</button>
       </div>
       <ListModule.default products={products} drafts={drafts} selecting canViewStock canViewCounts focusRequest={undefined} t={t} onOpenProduct={item => { window.__opened.push(item.id) }}
         priceText={usd => '$' + Number(usd).toFixed(2)} promotionRules={[]} exchangeRate={4100}
@@ -116,6 +118,42 @@ await browser.run('PASS count popover: the click that dismisses it is swallowed 
   await tapAt(await blankPoint(4))
   await waitFor('row 4 opens after a swipe dismissal', `window.__opened.length >= 1`)
   assert.deepEqual(await opened(), [4], 'a swipe that closed the popover leaves no stale swallow: the next tap opens its row')
+
+  // ---- M2 (r2): the swallow is for the row's own open handler only. A real control pressed while the popover is open acts on its FIRST tap ----------------------------------
+  await browser.evaluate('window.__opened.length = 0; window.__submit = 0')
+  await openPopover(1)
+  await tapAt(await centre('[data-submit-target]'))
+  await waitFor('popover closed by the Submit tap', `${popover} === null`)
+  await browser.pause(450)
+  assert.equal(await browser.evaluate('window.__submit'), 1, 'touch: Submit acts on the first tap while the popover is open (it also closes the popover)')
+  assert.deepEqual(await opened(), [], 'touch: and nothing under the finger opened')
+  // ...and the swallow is over: the next row tap opens straight away.
+  await tapAt(await blankPoint(2))
+  await waitFor('row 2 opens right after the control tap', `window.__opened.length === 1`)
+  await browser.send('Emulation.setTouchEmulationEnabled', { enabled: false })
+  await browser.evaluate('window.__opened.length = 0; window.__submit = 0')
+  await openPopover(1)
+  await mouseAt(await centre('[data-submit-target]'))
+  await waitFor('popover closed by the Submit click', `${popover} === null`)
+  await browser.pause(450)
+  assert.equal(await browser.evaluate('window.__submit'), 1, 'mouse: Submit acts on the first click while the popover is open')
+  assert.deepEqual(await opened(), [], 'mouse: and no row opened')
+  // Another row's own control (its status button) also acts on the first press: it closes this popover and opens its own.
+  await openPopover(1)
+  await mouseAt(await centre(status(3)))
+  await waitFor('row 3 popover open on the first press', `document.querySelector('${row(3)} [data-inventory-check-popover], [data-inventory-check-popover]') !== null`)
+  await browser.pause(450)
+  assert.equal(await browser.evaluate(`document.querySelectorAll('[data-inventory-check-popover]').length`), 1, 'exactly one popover is open after the first press on another row control')
+  await mouseAt(await blankPoint(4))
+  await waitFor('popover closed by blank row space', `${popover} === null`)
+  await browser.pause(450)
+  assert.deepEqual(await opened(), [], 'blank row space is still swallowed: the row did not open')
+  // The row's picture button is a pointer-only duplicate of the row's open handler (data-row-open): it is swallowed like blank space, not treated as a control.
+  await openPopover(1)
+  await mouseAt(await centre(`${row(4)} [data-check-image]`))
+  await waitFor('popover closed by the picture press', `${popover} === null`)
+  await browser.pause(450)
+  assert.deepEqual(await opened(), [], 'the picture button of another row does not open it on the dismissing press')
 
   // ---- a PortalMenu that did not opt in is unchanged: the press that closes it also presses the button under it ---------------------------------
   await browser.mouseClick('[data-plain-trigger]')

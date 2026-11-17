@@ -347,7 +347,7 @@ function CheckRow({ product, observation, pending, error, header, adornment, fro
     className={`min-w-0 max-w-full cursor-pointer border-b border-l-2 border-b-gray-100 py-2 pl-2 last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:border-b-gray-800 ${edge} ${busy ? 'lg:opacity-70' : ''} ${scanHit ? 'rounded-sm ring-2 ring-primary-400 dark:ring-primary-300' : ''}`} aria-busy={busy}>
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 lg:flex lg:items-center" data-inventory-check-main>
       <div className={`flex min-w-0 items-start gap-2 ${PRODUCT_BOX}`}>
-        <button type="button" tabIndex={-1} onClick={openDetail} className="h-11 min-h-11 w-11 shrink-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 lg:h-10 lg:min-h-10 lg:w-10" aria-label={product.name} title={product.name}>
+        <button type="button" tabIndex={-1} onClick={openDetail} data-row-open className="h-11 min-h-11 w-11 shrink-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 lg:h-10 lg:min-h-10 lg:w-10" aria-label={product.name} title={product.name}>
           <ProductImage src={product.image_path || undefined} alt="" className="h-11 w-11 rounded-lg object-cover lg:h-10 lg:w-10" />
         </button>
         <span className="min-w-0 flex-1">

@@ -299,7 +299,7 @@ function ListRow({ product, draft, adornment, refusal, columns, countable, copy,
     {/* A count waiting for an approver (ic_fix_stock) is shown ONCE on this surface: the status icon (the hourglass). The gutter mini tag of the review queue would repeat it. */}
     {/* One compact line where the width allows: the image keeps its square, the name takes the room, the status icon and the count input sit beside it. */}
     <div className="flex min-w-0 items-center gap-2" data-inventory-check-main>
-      <button type="button" tabIndex={-1} onClick={openDetail} data-check-image className="relative block aspect-square h-12 w-12 shrink-0 overflow-hidden rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 lg:h-10 lg:w-10" aria-label={product.name} title={product.name}>
+      <button type="button" tabIndex={-1} onClick={openDetail} data-check-image data-row-open className="relative block aspect-square h-12 w-12 shrink-0 overflow-hidden rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 lg:h-10 lg:w-10" aria-label={product.name} title={product.name}>
         <ProductImage src={product.image_path || undefined} alt="" className="absolute inset-0 h-full w-full rounded-lg object-cover" />
       </button>
       <div className="min-w-0 flex-1 lg:contents">
