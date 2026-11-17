@@ -552,10 +552,20 @@ export async function createInventoryCheckSession(db: D1Compat, principal: Inven
   const saved = await commit(db, principal, actor, statements, key, hash)
   return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed }
 }
-/** The waiting lines of the submitted products at one branch whose stock figures are planned: they are being applied now and cannot be replaced. */
+/**
+ * Is this key of an approval's plan, or of the dates it has already landed, one of the product's? The engine keys a product's line "<product id>", and a product with several differing received dates
+ * "<product id>:<batch id>" for each date, so the key is the id itself or the id and a colon.
+ */
+export const keyOfProductSql = (key: string, productId: string): string => `(${key}=CAST(${productId} AS TEXT) OR substr(${key},1,length(CAST(${productId} AS TEXT))+1)=CAST(${productId} AS TEXT)||':')`
+/**
+ * The waiting lines of the submitted products at one branch that are being applied now and cannot be replaced: one of their stock figures is planned (plan_json, under any key form of the product), or one of
+ * their received dates has already landed and is not yet folded into the product's line (applied_json.units: the product is half applied). A product with a landed date is held even when the plan is empty (a
+ * takeover clears the plan before the new claimer plans again), so no recount can replace a line the approval has written part of.
+ */
 const BEING_APPLIED_SQL = `FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id=a.session_id
   WHERE a.organization_id IS @organization AND a.branch_id=@branchId AND i.product_id IN (SELECT value FROM json_each(@submitted)) AND ${WAITING_LINE_SQL}
-    AND json_extract(a.plan_json,'$."'||i.product_id||'"') IS NOT NULL`
+    AND (EXISTS(SELECT 1 FROM json_each(a.plan_json) k WHERE ${keyOfProductSql('k.key', 'i.product_id')})
+      OR EXISTS(SELECT 1 FROM json_each(a.applied_json,'$.units') k WHERE ${keyOfProductSql('k.key', 'i.product_id')}))`
 /**
  * Queue-first: one waiting item per product, holding the newest count. A count of a product whose earlier count still waits at this branch closes that older line as
  * superseded in the same atomic commit that records the new one; the new count then queues itself if it differs from stock, or is Done if it equals it. An approval left

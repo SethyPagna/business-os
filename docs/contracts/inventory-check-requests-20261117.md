@@ -127,6 +127,13 @@ With more checked products than the cap the filter is refused `503 inventory_che
 true (the Worker's `getInventoryCheckAccess(user).fields.cost` is now exactly that, for a viewer who may view Inventory Check). They are removed for everyone else, in the list, its exports and the overlay.
 The overlay itself carries no cost.
 
+## 5b. A recount while a line is being applied
+
+`POST /api/inventory-checks/submissions` is refused with `409 inventory_check_count_in_progress` (and `productIds` naming them) when any submitted product has a line that is being applied: one of its stock writes is
+planned (under any key form: a product with several differing received dates is planned once per date) or one of its dates has already landed and the product is not yet complete. Nothing is recorded, nothing is replaced,
+and the refusal tells nobody what the stock holds. The approver finishes the approval (repeat Approve) or closes it (Close keeps what landed, recorded as partial); the recount can then be made. A line whose writes never
+landed is not held: the claim is released and the recount replaces it as usual. An approval is never ended "Replaced by a newer count" while one of its dates has landed.
+
 ## 6. Language keys the UI is expected to need (not added to the packs by this lane)
 
 Buttons (icon-only, translated tooltip): `inventory_check_line_accept`, `inventory_check_line_modify`, `inventory_check_line_reject`, `inventory_check_line_reopen`.
