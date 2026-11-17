@@ -473,7 +473,8 @@ try {
     await surface.click(surface.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit'))
     await new Promise(resolve => setTimeout(resolve, 20))
     assert.equal(submissions.length, 0, 'no request is spent on a count that skips a stocked date')
-    assert.equal(exact(surface, 'Submit').length, 1, 'and no review is asked for: no confirm button beside the page Submit button')
+    // the page Submit button wears the count as a pill (17 Nov), so it reads Submit1; a review dialog's confirm button would be a second one
+    assert.equal(surface.findAll(node => node.tagName === 'BUTTON' && /^Submit\d*$/.test(node.textContent)).length, 1, 'and no review is asked for: no confirm button beside the page Submit button')
     const marked = surface.findAll(node => node.getAttribute('data-check-refusal') !== null)
     assert.equal(marked.length, 1, 'the row is marked')
     assert.ok(marked[0].textContent.includes('09/10/2026') && !marked[0].textContent.includes('01/10/2026'), `it names the date that was not counted: ${marked[0].textContent}`)

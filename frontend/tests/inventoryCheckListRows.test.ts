@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { createHarness, propsOf, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
 import { fmtDateTime24 } from '../src/utils/formatters.ts'
 import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
+import { offsetDate } from '../src/utils/dateHelpers.ts'
 
 // Lane 6.0.1044 (P1.6a): the Inventory Check list counts by itself. (14 Nov: no check box; a status ICON with its date opens the count popover; the count input sits beside the name.) The owner's columns (product, barcode,
 // stock now, next expiry, check status, counted, note, last checked by and when), the count typed in the row, one check button, a note
@@ -46,6 +47,15 @@ const key = (surface: MountedSurface, node: MemoryNode, name: string) => surface
 const active = (surface: MountedSurface) => surface.body.ownerDocument.activeElement
 
 const cases: Array<[string, () => Promise<void>]> = [
+  ['the expiry badge uses the OWN alert window of the product (expiry_alert_days), exactly as the detail modal and POS do', async () => {
+    const s = await mount({ selecting: false, products: [
+      { id: 701, name: 'Short window', quantity: 3, next_expiry_date: offsetDate(20), expiry_alert_days: 7 },
+      { id: 702, name: 'Long window', quantity: 3, next_expiry_date: offsetDate(45), expiry_alert_days: 60 },
+      { id: 703, name: 'No window sent', quantity: 3, next_expiry_date: offsetDate(20) },
+      { id: 704, name: 'Gone', quantity: 3, next_expiry_date: offsetDate(-1), expiry_alert_days: 7 },
+    ] })
+    assert.deepEqual([701, 702, 703, 704].map(id => inRow(s, id, 'data-expiry').getAttribute('data-expiry')), ['ok', 'soon', 'soon', 'expired'])
+  }],
   ['the header names exactly the columns this viewer has, and is hidden below 1024px', async () => {
     const header = async (props: Record<string, unknown>) => mountPart('InventoryCheckListHeader', { selecting: true, canViewStock: true, canViewCounts: true, t: base.t, ...props })
     let h = await header({})
@@ -175,6 +185,129 @@ const cases: Array<[string, () => Promise<void>]> = [
     const text = s.text()
     for (const word of ['Price', 'Cost', 'Sold', 'Cust', '2.5', '1.2']) assert.ok(!text.includes(word), `no ${word} anywhere`)
   }],
+  ['prices show their value in the Products tones and NO visible word; the name is sr-only text and a tooltip (owner, 17 Nov)', async () => {
+    const priced = { ...listed[0], selling_price_usd: 12.5, selling_price_khr: 51250, wholesale_price_usd: 10, discount_enabled: 1, discount_type: 'percent', discount_percent: 10 } as unknown as InventoryCheckProduct
+    const money = (usd: unknown) => `$${Number(usd).toFixed(2)}`
+    const s = await mount({ products: [priced], selecting: false, priceText: money })
+    const price = (key: string) => allInRow(s, 501, 'data-price').find(node => node.getAttribute('data-price') === key) as MemoryNode
+    const hidden = (node: MemoryNode) => node.querySelectorAll('.sr-only')
+    const visible = (node: MemoryNode) => hidden(node).reduce((text, part) => text.replace(part.textContent, ''), node.textContent).replace(/\s+/g, ' ').trim()
+    assert.deepEqual(allInRow(s, 501, 'data-price').map(node => node.getAttribute('data-price')), ['selling', 'wholesale', 'promotion'], 'the three prices are on the row, in order')
+    assert.deepEqual(['selling', 'wholesale', 'promotion'].map(key => visible(price(key))), ['$12.50', '$10.00', '$11.25'], 'each shows its value and nothing else')
+    assert.deepEqual(['selling', 'wholesale', 'promotion'].map(key => hidden(price(key)).map(node => node.textContent.trim())), [['Selling price'], ['Wholesale price'], ['Promotion']], 'the name survives as sr-only text')
+    assert.deepEqual(['selling', 'wholesale', 'promotion'].map(key => price(key).getAttribute('title')), ['Selling price', 'Wholesale price', 'Promotion'], 'and as a tooltip')
+    const everyVisible = hidden(row(s, 501)).reduce((text, part) => text.replace(part.textContent, ''), row(s, 501).textContent)
+    for (const word of ['Selling price', 'Wholesale price', 'Promotion']) assert.ok(!everyVisible.includes(word), `no visible "${word}" anywhere on the row`)
+    const has = (node: MemoryNode, classes: string) => classes.split(' ').every(name => node.className.split(/\s+/).includes(name))
+    assert.ok(has(price('selling'), 'font-semibold text-green-700 dark:text-green-400'), 'selling is green and semibold, as on Products')
+    assert.ok(has(price('wholesale'), 'font-medium text-primary-700 dark:text-primary-400'), 'wholesale is primary and medium, as on Products')
+    const badge = price('promotion').querySelectorAll('span').find(node => node.className.includes('bg-rose-50')) as MemoryNode
+    assert.ok(badge && has(badge, 'text-rose-700 dark:text-rose-200 font-bold'), 'the promotion is the rose badge of Products (ProductDiscountBadge)')
+    assert.equal(badge.textContent, '$11.25', 'with the price only: no leading word')
+    assert.equal(allInRow(s, 501, 'data-price').filter(node => node.tagName === 'BUTTON').length, 0, 'without cost nothing here is a button')
+    await s.render({ ...base, products: [priced], selecting: false })
+    assert.equal(allInRow(s, 501, 'data-price').length, 0, 'no price grant (no priceText): no price at all')
+  }],
+  ['cost shows only to a viewer who may see it AND only when the row carries it; it is red, and a tap opens the cost float, not the detail', async () => {
+    const withCost = { ...listed[0], selling_price_usd: 12.5, cost_price_usd: 3.21, cost_price_khr: 13161 } as unknown as InventoryCheckProduct
+    const money = (usd: unknown) => `$${Number(usd).toFixed(2)}`
+    const opened: Array<number | string> = []
+    const costs = (surface: MountedSurface) => allInRow(surface, 501, 'data-price').filter(node => node.getAttribute('data-price') === 'cost')
+    // allowed: the page passes costText and onOpenCost only for canViewAcquisitionCosts
+    const s = await mount({ products: [withCost], selecting: false, priceText: money, costText: money, onOpenCost: (product: InventoryCheckProduct) => { opened.push(product.id) } })
+    assert.equal(costs(s).length, 1, 'one cost value')
+    const cost = costs(s)[0]
+    assert.equal(cost.tagName, 'BUTTON', 'it is a button')
+    assert.equal(cost.textContent.trim(), '$3.21', 'the value, with no visible word')
+    assert.ok(cost.querySelectorAll('span').some(node => node.className.includes('text-red-600') && node.className.includes('dark:text-red-400')), 'cost is red, as on Products')
+    assert.ok((cost.getAttribute('title') || '').length > 0 && (cost.getAttribute('aria-label') || '').length > 0, 'a name and a tooltip')
+    const opensBefore = calls.filter(call => call[0] === 'open').length
+    await s.click(cost)
+    assert.deepEqual(opened, [501], 'a tap opens the calculated-cost float for this product')
+    assert.equal(calls.filter(call => call[0] === 'open').length, opensBefore, 'and does not open the detail')
+    // not allowed: the row carries cost keys but the page gave no cost formatter
+    await s.render({ ...base, products: [withCost], selecting: false, priceText: money })
+    assert.equal(costs(s).length, 0, 'a viewer who may not see cost sees none, even when the row carries it')
+    assert.ok(!row(s, 501).textContent.includes('3.21'), 'the figure is nowhere on the row')
+    // allowed, but the server sent no cost: nothing to draw, not even unknown
+    await s.render({ ...base, products: [{ ...listed[0], selling_price_usd: 12.5 } as unknown as InventoryCheckProduct], selecting: false, priceText: money, costText: money, onOpenCost: () => {} })
+    assert.equal(costs(s).length, 0, 'no cost key on the row, no cost drawn')
+    // cost does not depend on the price grant
+    await s.render({ ...base, products: [withCost], selecting: false, costText: money, onOpenCost: () => {} })
+    assert.equal(costs(s).length, 1, 'cost does not depend on the price grant')
+  }],
+  ['a click anywhere on a row opens the detail, except on its controls; a press on a copy target waits out the double-click window (the copy gesture still works)', async () => {
+    const s = await mount({ products: [{ ...listed[0], selling_price_usd: 12.5, cost_price_usd: 2 } as unknown as InventoryCheckProduct, listed[1]], priceText: (usd: unknown) => `$${usd}`, costText: (usd: unknown) => `$${usd}`, onOpenCost: () => {} })
+    const opens = () => calls.filter(call => call[0] === 'open').length
+    const start = opens()
+    const dead: Array<[string, MemoryNode]> = [
+      ['the status button', inRow(s, 501, 'data-check-action')],
+      ['the count input', inRow(s, 501, 'data-check-count')],
+      ['the cost value', inRow(s, 501, 'data-check-cost')],
+    ]
+    for (const [what, node] of dead) { await s.click(node); assert.equal(opens(), start, `a click on ${what} does not open the detail`) }
+    const main = inRow(s, 501, 'data-inventory-check-main')
+    await s.click(main)
+    assert.equal(opens(), start + 1, 'a click on the empty part of the row opens it')
+    assert.deepEqual(calls.at(-1), ['open', 501])
+    const barcode = row(s, 501).querySelectorAll('span').find(node => node.textContent === '885000501' && node.getAttribute('data-copy-value') !== null) as MemoryNode
+    assert.ok(barcode, 'the barcode is a copy target')
+    // pressed directly (the harness's click waits for every timer to go quiet, which would hide the window)
+    ;(propsOf(row(s, 501)).onClick as (event: unknown) => void)({ target: barcode, currentTarget: row(s, 501), defaultPrevented: false })
+    assert.equal(opens(), start + 1, 'a press on a copy target does not open at once: a double-click must be able to copy instead')
+    await new Promise(resolve => setTimeout(resolve, 400))
+    assert.equal(opens(), start + 2, 'a single press on it opens after the double-click window')
+    // a click that bubbles through React from a portal (the count popover) is not a click on the row
+    const li = row(s, 502)
+    const outside = row(s, 501)
+    await s.call(li, 'onClick', [{ target: outside, currentTarget: li, defaultPrevented: false }])
+    assert.equal(opens(), start + 2, 'a click whose target is outside the row in the DOM (a portal) is ignored')
+    await s.call(li, 'onClick', [{ target: li, currentTarget: li, defaultPrevented: true }])
+    assert.equal(opens(), start + 2, 'a click a control already handled is ignored')
+  }],
+  ['the row is focusable and Enter ON the row opens it; Enter inside its count input does not', async () => {
+    const s = await mount({ drafts: { 501: { selected: true, count: '8', checked: false, note: '' } } })
+    const li = row(s, 501)
+    assert.equal(propsOf(li).tabIndex, 0, 'the row is a tab stop')
+    const start = calls.filter(call => call[0] === 'open').length
+    await s.call(li, 'onKeyDown', [{ key: 'Enter', target: li, currentTarget: li, preventDefault() {}, nativeEvent: {} }])
+    assert.deepEqual(calls.at(-1), ['open', 501])
+    await s.call(li, 'onKeyDown', [{ key: ' ', target: li, currentTarget: li, preventDefault() {}, nativeEvent: {} }])
+    await s.call(li, 'onKeyDown', [{ key: 'Enter', target: inRow(s, 501, 'data-check-count'), currentTarget: li, preventDefault() {}, nativeEvent: {} }])
+    assert.equal(calls.filter(call => call[0] === 'open').length, start + 1, 'only Enter on the row itself opens; Enter in the count input belongs to the count')
+    assert.equal(propsOf(inRow(s, 501, 'data-check-image')).tabIndex, -1, 'the image button is no second tab stop for the same action')
+  }],
+  ['the date chips sit in the Submit row: All then each day (newest first) with its count; a tap says which; a viewer who cannot count gets the rail alone', async () => {
+    const taps: string[] = []
+    const days = [{ day: '2026-11-12', count: 3 }, { day: '2026-11-10', count: 12 }]
+    const props = (extra: Record<string, unknown> = {}) => ({ selectedCount: 0, blocked: '', busy: false, canMarkChecked: true, t: base.t, onMarkChecked: () => {}, onClear: () => {}, onSubmit: () => {}, days, checkedOn: '', onCheckedOn: (day: string) => { taps.push(day) }, ...extra })
+    const bar = await mountPart('InventoryCheckSelectionBar', props())
+    const chips = () => bar.findAll(node => node.getAttribute('data-day-chip') !== null)
+    const rail = bar.find(node => node.getAttribute('data-inventory-check-days-rail') !== null, 'date rail')
+    assert.deepEqual(chips().map(node => node.getAttribute('data-day-chip')), ['', '2026-11-12', '2026-11-10'], 'All, then newest first')
+    assert.deepEqual(chips().map(node => node.textContent), ['All', '12/11/20263', '10/11/202612'], 'dd/mm/yyyy with the count beside it')
+    assert.ok(rail.contains(chips()[1]) && bar.find(node => node.getAttribute('data-inventory-check-selection-bar') !== null, 'bar').contains(rail), 'the rail is inside the Submit row')
+    assert.equal(rail.getAttribute('data-chip-rail'), '', 'the shared ChipRail: sideways scroll, fades, drag and arrow keys')
+    assert.ok(rail.className.includes('flex-1') && rail.className.includes('min-w-0'), 'it takes the empty space of the row and may shrink')
+    assert.deepEqual(chips().map(node => node.getAttribute('aria-pressed')), ['true', 'false', 'false'], 'All is pressed while no day is chosen')
+    assert.ok((chips()[1].getAttribute('title') || '').includes('12/11/2026') && (chips()[1].getAttribute('title') || '').includes('3'), 'the tooltip says what the count is')
+    await bar.click(chips()[2]); await bar.click(chips()[0])
+    assert.deepEqual(taps, ['2026-11-10', ''], 'a chip tap says which day, All says none')
+    await bar.render(props({ checkedOn: '2026-11-10' }))
+    assert.deepEqual(chips().map(node => node.getAttribute('aria-pressed')), ['false', 'false', 'true'], 'the chosen day is pressed')
+    await bar.render(props({ daysDisabled: true }))
+    assert.ok(chips().every(node => propsOf(node).disabled === true), 'the chips wait while the list changes')
+    await bar.render(props({ counting: false }))
+    assert.equal(bar.findAll(node => node.getAttribute('data-selection-action') !== null).length, 0, 'a viewer who cannot count: no mark, clear or Submit')
+    assert.equal(chips().length, 3, 'but the chips')
+    await bar.render(props({ days: [] }))
+    assert.equal(chips().length, 0, 'no days, no chips')
+    assert.equal(bar.findAll(node => node.getAttribute('data-selection-action') === 'submit').length, 1, 'the counting row is as it was')
+    await bar.render(props({ days: [], counting: false }))
+    assert.equal(bar.findAll(node => node.getAttribute('data-inventory-check-selection-bar') !== null).length, 0, 'nothing to count and no dates: nothing is drawn')
+    await bar.render(props({ onCheckedOn: undefined }))
+    assert.equal(chips().length, 0, 'a bar with no handler draws no chips')
+  }],
   ['Enter in a valid count moves to the next row’s count input, unless the page handled it', async () => {
     const entered: Array<number | string> = [], invalidEnters: string[] = []
     let handled = false
@@ -230,7 +363,9 @@ const cases: Array<[string, () => Promise<void>]> = [
     await bar.render(props({ selectedCount: 3 }))
     assert.equal(bar.find(node => node.getAttribute('data-selected-count') !== null, 'count').textContent, '3 counted')
     assert.equal(submit().getAttribute('aria-disabled'), null, 'Submit is ready')
-    assert.equal(submit().textContent.trim(), 'Submit', 'the main action keeps its word')
+    assert.equal(submit().textContent.trim().replace(/\d+$/, ''), 'Submit', 'the main action keeps its word (and wears the count as a pill)')
+    assert.equal(bar.find(node => node.getAttribute('data-selected-pill') !== null, 'count pill').textContent, '3', '"3 counted" moved into a pill on Submit')
+    assert.ok(submit().contains(bar.find(node => node.getAttribute('data-selected-pill') !== null, 'count pill')), 'the pill is inside the Submit button')
     for (const action of ['mark', 'clear']) {
       const button = bar.find(node => node.getAttribute('data-selection-action') === action, action)
       assert.equal(button.textContent.trim(), '', `${action} is an icon`)
@@ -249,7 +384,7 @@ const cases: Array<[string, () => Promise<void>]> = [
     await bar.render(props({ selectedCount: 2, busy: true }))
     assert.equal(submit().getAttribute('aria-disabled'), 'true', 'busy: Submit waits')
     await bar.render(props({ selectedCount: 2, submitLabel: 'Retry' }))
-    assert.equal(submit().textContent.trim(), 'Retry', 'an unconfirmed attempt offers Retry in the same place')
+    assert.equal(submit().textContent.trim().replace(/\d+$/, ''), 'Retry', 'an unconfirmed attempt offers Retry in the same place')
     await bar.render(props({ selectedCount: 2, canMarkChecked: false }))
     assert.equal(bar.findAll(node => node.getAttribute('data-selection-action') === 'mark').length, 0, 'no stock figure, no whole-page mark')
   }],

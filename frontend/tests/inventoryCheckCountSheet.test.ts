@@ -329,7 +329,7 @@ await browser.run('PASS Inventory count sheet and list: aligned columns, count e
   await waitFor('Escape returned focus to the status icon', focusIs(statusOf(3)))
   await openPopover(3)
   await browser.mouseClick('[data-popover-total]')
-  await browser.mouseClick('[data-selected-count]')
+  await browser.mouseClick('[data-inventory-check-sheet-header]') // a neutral spot outside the popover (the count text became sr-only, a pill on Submit)
   await waitFor('popover closed by an outside tap', "document.querySelector('[data-inventory-check-popover]') === null")
   await waitFor('an outside tap returned focus to the status icon', focusIs(statusOf(3)))
   await openPopover(3)
@@ -369,8 +369,12 @@ await browser.run('PASS Inventory count sheet and list: aligned columns, count e
   // Phone: a square image on the left, the status icon and the count input beside the name, every control at least 40px.
   await browser.open(360, 'lang=en&mode=list', ready, 740)
   await noSidewaysScroll('en 360 list')
-  const phonePrices = await browser.evaluate<string>("Array.from(document.querySelectorAll('" + row(2) + " [data-price]'), node => node.textContent.replace(/\\s+/g, ' ').trim()).join(' | ')")
-  assert.equal(phonePrices, packs.en.selling_price + ' $12.50 | ' + packs.en.wholesale_price + ' $10.00 | ' + packs.en.promotion + ' $11.25', 'a phone row (long name) carries selling, wholesale and the live promotion price, labels inside (' + phonePrices + ')')
+  // 17 Nov: the values are drawn without their words; each name stays as sr-only text and a tooltip
+  const pricesOf = () => browser.evaluate<{ shown: string; named: string; titles: string }>("(() => { const nodes = Array.from(document.querySelectorAll('" + row(2) + " [data-price]')); const flat = text => text.replace(/\\s+/g, ' ').trim(); return { shown: nodes.map(node => { const copy = node.cloneNode(true); copy.querySelectorAll('.sr-only').forEach(part => part.remove()); return flat(copy.textContent) }).join(' | '), named: nodes.map(node => flat(Array.from(node.querySelectorAll('.sr-only'), part => part.textContent).join(' '))).join(' | '), titles: nodes.map(node => node.getAttribute('title')).join(' | ') } })()")
+  const phonePrices = await pricesOf()
+  assert.equal(phonePrices.shown, '$12.50 | $10.00 | $11.25', 'a phone row (long name) carries selling, wholesale and the live promotion price, values only (' + phonePrices.shown + ')')
+  assert.equal(phonePrices.named, packs.en.selling_price + ' | ' + packs.en.wholesale_price + ' | ' + packs.en.promotion, 'each value keeps its name for a screen reader')
+  assert.equal(phonePrices.titles, packs.en.selling_price + ' | ' + packs.en.wholesale_price + ' | ' + packs.en.promotion, 'and as a tooltip')
   const listFacts = await browser.evaluate<string>("document.querySelector('" + row(1) + " [data-inventory-check-meta]').textContent.replace(/\\s+/g, ' ').trim()")
   assert.ok(listFacts.includes('Counted 10') && listFacts.includes('Last checked @amy'), 'a phone reads the same facts in one line (' + listFacts + ')')
   const tall = await browser.evaluate<{ image: number[]; info: number[]; side: number[]; count: boolean }>("(() => { const r = document.querySelector('" + row(2) + "'); const box = node => { const b = node.getBoundingClientRect(); return [Math.round(b.top), Math.round(b.bottom), Math.round(b.left), Math.round(b.right)] }; const meta = r.querySelector('[data-inventory-check-meta]'); return { image: box(r.querySelector('[data-check-image]')), info: box(meta.parentElement), side: box(r.querySelector('[data-inventory-check-side]')), count: r.querySelector('[data-check-count]').getClientRects().length > 0 } })()")
@@ -391,8 +395,9 @@ await browser.run('PASS Inventory count sheet and list: aligned columns, count e
   await browser.khmerRoom('1280px list', '[data-fixture-scroller]', 12)
   await browser.open(360, 'lang=km&mode=list', ready, 740)
   await noSidewaysScroll('km 360 list')
-  const phonePricesKm = await browser.evaluate<string>("Array.from(document.querySelectorAll('" + row(2) + " [data-price]'), node => node.textContent.replace(/\\s+/g, ' ').trim()).join(' | ')")
-  assert.equal(phonePricesKm, packs.km.selling_price + ' $12.50 | ' + packs.km.wholesale_price + ' $10.00 | ' + packs.km.promotion + ' $11.25', 'km: the same three prices with the Khmer labels (' + phonePricesKm + ')')
+  const phonePricesKm = await pricesOf()
+  assert.equal(phonePricesKm.shown, '$12.50 | $10.00 | $11.25', 'km: the same three values (' + phonePricesKm.shown + ')')
+  assert.equal(phonePricesKm.titles, packs.km.selling_price + ' | ' + packs.km.wholesale_price + ' | ' + packs.km.promotion, 'km: the Khmer names stay as the tooltips')
   await browser.khmerRoom('360px list', '[data-fixture-scroller]', 12)
 
   // ---- 360px, English and Khmer ------------------------------------------------------------------------------------------------

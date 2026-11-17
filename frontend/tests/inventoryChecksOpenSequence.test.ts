@@ -48,6 +48,8 @@ let listsAnswered = 0
 const probes: string[] = []
 let branchListCalls = 0
 let branchListFails = false
+/** The wired list answers with the date chips (summary.days) while this is on. */
+let daysOn = false
 const heldByProducts = new Map<string, unknown>()
 const answer = (query: URLSearchParams) => {
   const base = { items: [{ id: 12, name: 'Sequence product', quantity: 8, unit: 'pcs' }], total: 45, page: Number(query.get('page') ?? 1), pageSize: 20, branches }
@@ -58,7 +60,8 @@ const answer = (query: URLSearchParams) => {
 }
 const wiredList = (query: URLSearchParams) => ({
   items: [{ id: 12, name: 'Sequence product', unit: 'pcs', stock_quantity: 8 * branches.length, branch_stock: branches.map(branch => ({ branch_id: branch.id, branch_name: branch.name, quantity: 8 })) }],
-  total: 45, page: Number(query.get('page') ?? 1), pageSize: 20, totalPages: 3, wired: true, projected: false, summary: { ok: 2, issue: 1, not_checked: 42, total: 45 },
+  total: 45, page: Number(query.get('page') ?? 1), pageSize: 20, totalPages: 3, wired: true, projected: false,
+  summary: { ok: 2, issue: 1, not_checked: 42, total: 45, ...(daysOn ? { days: [{ day: '2026-11-12', count: 2 }, { day: '2026-11-10', count: 1 }] } : {}) },
 })
 const app = {
   user: { id: 7, role_code: 'employee', permissions: { inventory: true, inventory_checks: true, ...COUNT_FIELDS } as Record<string, boolean> },
@@ -184,6 +187,41 @@ try {
   const issuesTwo = await openPage([{ id: 1, name: 'Branch one' }, { id: 2, name: 'Branch two' }], true, true, 'issues')
   assert.equal(listCalls.length, 0, 'ic_wired ON, two branches, Issues: no wired list without a branch'); assert.equal(calls.length, 1, 'and exactly one read of the older list')
   await issuesTwo.unmount()
+
+  // ---- date chips (owner, 17 Nov): a chip tap is ONE /list plus ONE overlay, exactly what a status chip tap costs; the rail adds no request of its own ----
+  daysOn = true
+  const dated = await openPage([{ id: 1, name: 'Only branch' }], true, true)
+  assert.equal(listCalls.length, 1, 'the rail adds no request to the open: still one list'); assert.equal(overlayCalls.length, 1, 'and one overlay')
+  const chipsOf = () => dated.findAll(node => node.getAttribute('data-day-chip') !== null)
+  assert.deepEqual(chipsOf().map(node => node.getAttribute('data-day-chip')), ['', '2026-11-12', '2026-11-10'], 'All, then the days newest first (they come with the summary the list already reads)')
+  const requestsOf = () => ({ lists: listCalls.length, overlays: overlayCalls.length, older: calls.length })
+  const afterTap = async (tap: () => Promise<void>) => {
+    const before = requestsOf()
+    await tap()
+    await dated.waitFor(() => listCalls.length === before.lists + 1 && overlayCalls.length === before.overlays + 1, 'one list and one overlay')
+    await dated.settle()
+    const after = requestsOf()
+    return { lists: after.lists - before.lists, overlays: after.overlays - before.overlays, older: after.older - before.older }
+  }
+  const statusTap = await afterTap(() => dated.click(dated.button('Checked OK')))
+  assert.deepEqual(statusTap, { lists: 1, overlays: 1, older: 0 }, 'a status chip tap: one list, one overlay')
+  assert.equal(listCalls.at(-1)!.query.get('checkState'), 'ok')
+  const dayTap = await afterTap(() => dated.click(chipsOf().find(node => node.getAttribute('data-day-chip') === '2026-11-12')!))
+  assert.deepEqual(dayTap, statusTap, 'a date chip tap costs exactly what a status chip tap costs')
+  assert.equal(listCalls.at(-1)!.query.get('checkedOn'), '2026-11-12', 'and asks for that day')
+  assert.equal(listCalls.at(-1)!.query.get('branchId'), '1', 'with the branch (the date is per branch)')
+  assert.equal(listCalls.at(-1)!.query.get('checkState'), 'ok', 'beside the status already chosen')
+  assert.equal(chipsOf().find(node => node.getAttribute('data-day-chip') === '2026-11-12')!.getAttribute('aria-pressed'), 'true', 'the chosen chip is pressed')
+  assert.equal(chipsOf().length, 3, 'the rail keeps every date while one is chosen')
+  const allTap = await afterTap(() => dated.click(chipsOf().find(node => node.getAttribute('data-day-chip') === '')!))
+  assert.deepEqual(allTap, statusTap, 'All costs the same')
+  assert.equal(listCalls.at(-1)!.query.has('checkedOn'), false, 'and sends no date')
+  await dated.unmount()
+  daysOn = false
+  // no days in the summary (nothing counted yet, or too many products to list them): no rail at all
+  const undated = await openPage([{ id: 1, name: 'Only branch' }], true, true)
+  assert.equal(undated.findAll(node => node.getAttribute('data-day-chip') !== null).length, 0, 'no days, no chips')
+  await undated.unmount()
 
   // ---- ic_wired OFF: today's behaviour, exactly ----
   let probed = 0

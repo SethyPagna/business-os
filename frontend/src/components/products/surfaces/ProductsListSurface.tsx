@@ -6,6 +6,7 @@ import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import { chooserHostKey, productTableMinWidthRem, productTableSpans, type ProductColumn } from '../config/productTableColumns.ts'
 import type { ScanMiss } from '../../../utils/scanMiss.ts'
+import { VALUE_TONE } from './ProductRowParts.tsx'
 
 // ---------------------------------------------------------------------------
 // Desktop table geometry: ONE left rail
@@ -57,10 +58,11 @@ export const PINNED_BG = 'bg-white dark:bg-zinc-800'
 export const PINNED_BG_SELECTED = 'bg-primary-50 dark:bg-zinc-700'
 // Header cells keep the opaque thead colour from main.css; they only need to sit above the body's pinned cells.
 const PINNED_HEAD = 'sticky z-[6]'
+// Cost and margin take the shared value tones (ProductRowParts VALUE_TONE, which the Inventory rows read too); the selling column's own header ink stays what it was.
 const COLUMN_TONE: Record<string, string> = {
-  cost: 'col-highlight-red text-red-600 dark:text-red-400',
+  cost: `col-highlight-red ${VALUE_TONE.cost}`,
   selling: 'col-highlight-green text-green-600 dark:text-green-400',
-  margin: 'text-blue-600 dark:text-blue-400',
+  margin: VALUE_TONE.margin,
 }
 /** Padding between the image column and the start of any title text. */
 export const ROW_TEXT_GUTTER = 'px-2'

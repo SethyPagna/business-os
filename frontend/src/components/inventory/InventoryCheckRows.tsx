@@ -8,11 +8,12 @@ import ProductImage from '../pos/ProductImage.tsx'
 import ProductNameRail from '../shared/ProductNameRail.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
 import { useCopyFloat } from '../shared/CopyFloat.tsx'
-import { todayStr } from '../../utils/dateHelpers.ts'
+import { computeExpiryStatus } from '../pos/posCore.ts'
 import { fmtDateOnly } from '../../utils/formatters.ts'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import type { InventoryCheckId, InventoryCheckObservation, InventoryCheckPatch, InventoryCheckProduct, InventoryCheckTranslator } from '../../types/inventoryChecks.ts'
 import StockQty from './StockQty.tsx'
+import { rowClickOpens } from './inventoryCheckRowClick.ts'
 import InventoryCheckCountEditor, { countMatchesStock, finiteQuantity, parseCount, signedDelta, stepCount } from './InventoryCheckCountEditor.tsx'
 
 type FrozenAttempt = { patch: InventoryCheckPatch; revision: number }
@@ -112,12 +113,12 @@ export function InventoryCheckSheetHeader({ t, className = '', ...flags }: Sheet
 
 const rowIconButton = 'inline-flex h-11 min-h-11 w-11 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-gray-600 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50 lg:h-10 lg:min-h-10 lg:w-10 dark:text-gray-300 dark:hover:bg-zinc-800'
 
-/** 'YYYY-MM-DD' expiry as the month-year it is printed with, and how close it is (30 days, the app-wide alert window). */
-function expiryBadge(date: string | null | undefined): { text: string; tone: 'expired' | 'soon' | 'ok'; full: string } | null {
+/** 'YYYY-MM-DD' expiry as the month-year it is printed with, and how close it is: the product's own alert window (30 days when unset), judged by POS's computeExpiryStatus like the detail modal. */
+function expiryBadge(date: string | null | undefined, alertDays?: unknown): { text: string; tone: 'expired' | 'soon' | 'ok'; full: string } | null {
   const match = String(date ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (!match) return null
-  const days = Math.round((Date.parse(`${match[0]}T00:00:00Z`) - Date.parse(`${todayStr()}T00:00:00Z`)) / 86400000)
-  return { text: `${match[2]}/${match[1]}`, tone: days < 0 ? 'expired' : days <= 30 ? 'soon' : 'ok', full: fmtDateOnly(match[0]) }
+  const info = match ? computeExpiryStatus(match[0], alertDays) : null
+  if (!match || !info) return null
+  return { text: `${match[2]}/${match[1]}`, tone: info.status === 'expiring' ? 'soon' : info.status, full: fmtDateOnly(match[0]) }
 }
 
 function CheckRow({ product, observation, pending, error, header, adornment, frozenAttempt, copy, columns, reasonSuggestions, scanHit, onAdvance, canCheck, locked = false, canViewStock = true, canViewCounts = canCheck || canViewStock, t, onOpenProduct, onSave, onEditingChange, onCommitted }: {
@@ -321,22 +322,37 @@ function CheckRow({ product, observation, pending, error, header, adornment, fro
   let shown = 0
 
   const barcode = product.barcode || product.sku
-  const expiry = expiryBadge(product.next_expiry_date)
+  const expiry = expiryBadge(product.next_expiry_date, product.expiry_alert_days)
   const identity: Array<[string, ReactNode]> = []
   if (barcode) identity.push(['barcode', <span {...copy(barcode)} className="break-all">{barcode}</span>])
   if (product.brand) identity.push(['brand', <span {...copy(product.brand)}>{product.brand}</span>])
   if (product.category) identity.push(['category', <span>{product.category}</span>])
-  const dotted = (parts: Array<[string, ReactNode]>) => parts.map(([key, node], index) => <Fragment key={key}>{index > 0 ? <span aria-hidden="true">·</span> : null}{node}</Fragment>)
+  const dotted = (parts: Array<[string, ReactNode]>) => parts.map(([key, node], index) => index > 0
+    // The separator and the part after it are one unit, so a wrapped line can never start with (or hold) a lone "·".
+    ? <span key={key} className="inline-flex min-w-0 items-center gap-x-1.5"><span aria-hidden="true">·</span>{node}</span>
+    : <Fragment key={key}>{node}</Fragment>)
   const expiryName = expiry ? expiry.tone === 'expired' ? tr('inventory_check_expired', 'Expired') : expiry.tone === 'soon' ? tr('inventory_check_expires_soon', 'Expires soon') : tr('expiry', 'Expiry') : ''
   const shownState = state
   const edge = shownState === 'done' ? 'border-l-emerald-500' : shownState === 'issue' ? 'border-l-amber-500' : 'border-l-transparent'
   const note = state === 'issue' ? observation?.reason : null
 
+  // The whole row opens the detail, as on the list rows (owner, 17 Nov); not while this row's own count editor is open, and Enter works on the focused row itself.
+  const openDetail = () => onOpenProduct(product)
+  // The row is a focus stop that opens the product on Enter and on a press: its name says so (a list item with no name is announced as nothing). It stays a list item, not a button: the row holds real buttons
+  // and inputs of its own, and a button may not contain them.
+  // Name, then the recorded state, so the row's label does not hide what the row says.
+  const stateWords = state === 'done' ? tr('inventory_check_done', 'Done') : state === 'issue' ? tr('inventory_check_issue', 'Issue') : ''
+  const rowOpenLabel = `${tr('open_product', 'Open product')}: ${product.name}${stateWords ? ` — ${stateWords}` : ''}`
+  function onRowKeyDown(event: KeyboardEvent<HTMLLIElement>) {
+    if (event.key === 'Enter' && event.target === event.currentTarget && !event.nativeEvent?.isComposing) { event.preventDefault(); openDetail() }
+  }
+
   return <li data-inventory-check-row={String(product.id)} data-check-state={shownState ?? 'unstarted'} data-scan-hit={scanHit ? '' : undefined}
-    className={`min-w-0 max-w-full border-b border-l-2 border-b-gray-100 py-2 pl-2 last:border-b-0 dark:border-b-gray-800 ${edge} ${busy ? 'lg:opacity-70' : ''} ${scanHit ? 'rounded-sm ring-2 ring-primary-400 dark:ring-primary-300' : ''}`} aria-busy={busy}>
+    tabIndex={0} onClick={draft ? undefined : event => rowClickOpens(event, openDetail)} onKeyDown={onRowKeyDown} aria-label={rowOpenLabel}
+    className={`min-w-0 max-w-full cursor-pointer border-b border-l-2 border-b-gray-100 py-2 pl-2 last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:border-b-gray-800 ${edge} ${busy ? 'lg:opacity-70' : ''} ${scanHit ? 'rounded-sm ring-2 ring-primary-400 dark:ring-primary-300' : ''}`} aria-busy={busy}>
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 lg:flex lg:items-center" data-inventory-check-main>
       <div className={`flex min-w-0 items-start gap-2 ${PRODUCT_BOX}`}>
-        <button type="button" onClick={() => onOpenProduct(product)} className="h-11 min-h-11 w-11 shrink-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 lg:h-10 lg:min-h-10 lg:w-10" aria-label={product.name} title={product.name}>
+        <button type="button" tabIndex={-1} onClick={openDetail} data-row-open className="h-11 min-h-11 w-11 shrink-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 lg:h-10 lg:min-h-10 lg:w-10" aria-label={product.name} title={product.name}>
           <ProductImage src={product.image_path || undefined} alt="" className="h-11 w-11 rounded-lg object-cover lg:h-10 lg:w-10" />
         </button>
         <span className="min-w-0 flex-1">
@@ -351,7 +367,9 @@ function CheckRow({ product, observation, pending, error, header, adornment, fro
           // With a Count input the sheet's count cell is that input; the saved count then reads on a phone only.
           const phoneOnly = field === 'count' && showCountInput
           if (node === null) return phoneOnly ? null : <span key={field} aria-hidden="true" data-cell={field} className={cellClass(field, true)} />
-          return <Fragment key={field}>{shown++ > 0 ? <span aria-hidden="true" className="lg:hidden">·</span> : null}<span data-cell={field} className={phoneOnly ? 'lg:hidden' : cellClass(field)}>{node}</span></Fragment>
+          const cellNode = <span data-cell={field} className={phoneOnly ? 'lg:hidden' : cellClass(field)}>{node}</span>
+          // Below the sheet width the separator and its cell wrap as one unit (never a lone "·" on a line); from lg up the wrapper vanishes and the cell is a grid cell.
+          return shown++ > 0 ? <span key={field} className="inline-flex min-w-0 items-center gap-x-1.5 lg:contents"><span aria-hidden="true" className="lg:hidden">·</span>{cellNode}</span> : <Fragment key={field}>{cellNode}</Fragment>
         })}
         {showCountInput ? <span data-cell="count-input" className={`hidden lg:block lg:shrink-0 ${CELL_BOX.count}`}>
           <input data-check-count id={`inventory-check-sheet-count-${product.id}`} type="text" inputMode="numeric" autoComplete="off" value={draft ? draft.count : countText ?? savedCount}

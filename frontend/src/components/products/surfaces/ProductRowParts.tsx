@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { HTMLAttributes, ReactNode } from 'react'
 import Lock from 'lucide-react/dist/esm/icons/lock.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
 import { useCopyFloat } from '../../shared/CopyFloat.tsx'
@@ -90,7 +90,7 @@ export function ProductDiscountBadge({
   const shownLabel = extra.title || label
   const text = extra.isQuantityHint
     ? (extra.title || `${label} ${extra.minQuantity || 0}+`)
-    : `${shownLabel} ${priceText(fmtUSD, promo.applied_price_usd || 0)}`
+    : [shownLabel, priceText(fmtUSD, promo.applied_price_usd || 0)].filter(Boolean).join(' ')
   return (
     <span className={className} title={text} data-reveal-text={text}>
       {text}
@@ -215,6 +215,34 @@ export function ReadOnlyMark({ tip }: { tip: string }) {
   )
 }
 
+/**
+ * The ONE source of the colour of a money value, on every surface that prints one (owner, 17 Nov: "wire what is done in the Products page"). Products' price cells and the Inventory rows both read it:
+ * selling green and semibold, wholesale primary and medium, cost red, margin blue. `muted` is the read-only look of a price the user cannot change.
+ */
+export const VALUE_TONE = {
+  selling: 'font-semibold text-green-700 dark:text-green-400',
+  wholesale: 'font-medium text-primary-700 dark:text-primary-400',
+  cost: 'text-red-600 dark:text-red-400',
+  margin: 'text-blue-600 dark:text-blue-400',
+  muted: 'text-gray-500 dark:text-gray-400',
+} as const
+export type PriceTone = keyof typeof VALUE_TONE
+
+type PriceValueProps = Omit<HTMLAttributes<HTMLSpanElement>, 'className'> & {
+  tone: PriceTone
+  /** What the value is, for a screen reader (sr-only text) and the tooltip. Omit it where a column header already says so (Products' table cells). */
+  label?: string
+  className?: string
+  children: ReactNode
+}
+
+/** An inline money value in its tone. With a `label` the value carries its name invisibly (sr-only) and as a tooltip, so a row can drop the visible word and keep the meaning. */
+export function PriceValue({ tone, label, className = '', children, ...rest }: PriceValueProps) {
+  const ink = className ? `${VALUE_TONE[tone]} ${className}` : VALUE_TONE[tone]
+  if (!label) return <span {...rest} className={ink}>{children}</span>
+  return <span {...rest} className={ink} title={label}><span className="sr-only">{label} </span>{children}</span>
+}
+
 type ProductPriceCellProps = {
   usd: number
   khr: number
@@ -231,14 +259,11 @@ export function ProductPriceCell({ usd, khr, tone, lockTip, fmtUSD, fmtKHR, chil
   if (tone === 'wholesale' && !(usd > 0) && !(khr > 0)) {
     return <div className="flex items-center justify-end gap-1 text-gray-300">{lockTip ? <ReadOnlyMark tip={lockTip} /> : null}<span>—</span></div>
   }
-  const ink = lockTip
-    ? 'text-gray-500 dark:text-gray-400'
-    : tone === 'selling' ? 'font-semibold text-green-700 dark:text-green-400' : 'font-medium text-primary-700 dark:text-primary-400'
   return (
     <div className="min-w-0">
       <div className="flex items-center justify-end gap-1">
         {lockTip ? <ReadOnlyMark tip={lockTip} /> : null}
-        <span className={ink}>{fmtUSD(usd)}</span>
+        <PriceValue tone={lockTip ? 'muted' : tone}>{fmtUSD(usd)}</PriceValue>
       </div>
       {khr > 0 ? <div {...getKhmerTextProps(fmtKHR(khr), 'text-xs text-gray-400')}>{fmtKHR(khr)}</div> : null}
       {children}

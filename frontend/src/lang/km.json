@@ -8234,5 +8234,9 @@
   "inventory_check_group_unsaved_one": "បានរាប់ ១ ដែលមិនទាន់រក្សាទុក ក្នុងក្រុមនេះ",
   "inventory_check_group_unsaved_many": "បានរាប់ {count} ដែលមិនទាន់រក្សាទុក ក្នុងក្រុមនេះ",
   "inventory_check_group_continues": "បន្តនៅទំព័របន្ទាប់",
-  "inventory_check_mark_open_groups": "សម្គាល់ផលិតផលទាំងអស់ក្នុងក្រុមដែលបើក ថាត្រូវនឹងស្តុក"
+  "inventory_check_mark_open_groups": "សម្គាល់ផលិតផលទាំងអស់ក្នុងក្រុមដែលបើក ថាត្រូវនឹងស្តុក",
+  "inventory_check_last_change": "ការផ្លាស់ប្តូរស្តុកចុងក្រោយ",
+  "inventory_check_days_label": "ពិនិត្យចុងក្រោយនៅថ្ងៃ",
+  "inventory_check_day_tooltip": "ផលិតផល {count} ពិនិត្យចុងក្រោយនៅថ្ងៃទី {date}",
+  "product_expiry_days_short": "{count} ថ្ងៃ"
 }

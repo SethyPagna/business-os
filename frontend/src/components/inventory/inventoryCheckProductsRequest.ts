@@ -24,11 +24,21 @@ export function oldListDropsStatus(params: QueryParams): boolean {
  * Before any answer the page cannot tell, and Issues goes out as checkState=issue, which the ic_simple list reads and the older list maps to state=issue.
  */
 export function productsWireParams(params: QueryParams, server: ProductsServer, skipSummary: boolean): QueryParams {
+  // The date chips (checkedOn) belong to the wired list alone: neither older list has a word for them.
+  const { checkedOn: _checkedOn, ...forWire } = params
   if (server === 'old') {
     // The older list is told nothing about a grouping it cannot draw.
-    const { checkState, groupBy: _groupBy, ...rest } = params
+    const { checkState, groupBy: _groupBy, ...rest } = forWire
     const state = typeof checkState !== 'string' ? undefined : rest.sessionId ? Object.hasOwn(OLD_SESSION_STATE, checkState) ? OLD_SESSION_STATE[checkState] : undefined : checkState === 'issue' ? 'issue' : undefined
     return state ? { ...rest, state } : rest
   }
-  return server === 'simple' && skipSummary ? { ...params, summary: 0 } : params
+  return server === 'simple' && skipSummary ? { ...forWire, summary: 0 } : forWire
+}
+
+/**
+ * The scope recorded on a NEW count session: the listing's own filters, without the empty ones and without the date chip. checkedOn is a filter of the wired list and its overlay alone; the scope of a new
+ * session answers it with 400 inventory_check_invalid_query (parameter "checkedOn"), so it must never ride along, even if a date chip was chosen before the page fell back to an older list.
+ */
+export function sessionScopeParams(params: QueryParams): QueryParams {
+  return Object.fromEntries(Object.entries(params).filter(([key, value]) => key !== 'checkedOn' && value !== '' && value != null))
 }

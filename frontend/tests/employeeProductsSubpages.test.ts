@@ -49,7 +49,7 @@ test('TABS: Duplicates needs its own merge action, so the Employee never gets it
 test('MODAL: the sales / supplier history report is mounted only with products:history', () => {
   const modal = read('../src/components/products/surfaces/ProductDetailModal.tsx')
   assert.match(modal, /const canReadProductHistory = can \? can\('products', 'history'\) : false/)
-  assert.match(modal, /\{productId > 0 && canReadProductHistory \? \(/)
+  assert.match(modal, /\{report && productId > 0 && canReadProductHistory \? \(/)
 })
 
 test('PACKS: the new action row has text in both languages', () => {
