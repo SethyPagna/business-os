@@ -14,7 +14,7 @@ import type { StockInCommitLine } from './stockInCommit'
 import { bumpVersion } from '../lib/cache'
 import { stockVisibleProductSql } from '../lib/productStockGuard'
 import { canApproveInventoryCounts, getInventoryCheckAccess, InventoryCheckQueryError } from '../lib/inventoryCheckAccess'
-import { canonicalProductsRequest, checkStateRestriction, inventoryChecksVersion, planInventoryList, projectInventoryList, readCheckStateSets, type CheckStateSets } from '../lib/inventoryCheckList'
+import { canonicalProductsRequest, checkStateRestriction, inventoryChecksVersion, planInventoryList, projectInventoryList, readCheckStateSets, readCheckSummary, type CheckStateSets } from '../lib/inventoryCheckList'
 import { parseOverlayIds, readInventoryOverlay } from '../lib/inventoryCheckOverlay'
 import { availableGroupings, buildGroupingBlock, type GroupingBlock } from '../lib/inventoryCheckGrouping'
 import type { FamilyGroupTotals } from '../lib/familyPagination'
@@ -113,12 +113,9 @@ const submissionCaps = async (c: Context<{ Bindings: Env; Variables: { user: Ses
   const limits = getPlanLimits(c.env)
   return { lines: limits.inventoryCheckLotLinesPerSubmission, products: limits.inventoryCheckProductsPerSubmission }
 }
-// days: one chip per Cambodia business day on which some product had its LATEST count (newest first), from the same cached sets as the counts (no statement of its own).
-// tooLarge: more checked products than inventoryCheckFilterMaxIds, so there are no counts and no days to give: the summary says so (`{ tooLarge: true }`) instead of vanishing, and a page that holds chips from an
-// earlier answer clears them. The check-state filters are refused (503) while it holds.
-const summaryOf = (sets: CheckStateSets, fixStock: boolean) => sets.tooLarge ? { tooLarge: true as const } : checkCountsOf(sets, fixStock)
-const checkCountsOf = (sets: CheckStateSets, fixStock: boolean) => ({ ok: sets.ok.length, issue: sets.issue.length, ...(fixStock ? { pending: sets.pending.length } : {}),
-  days: sets.days.map((entry) => ({ day: entry.day, count: entry.ids.length })) })
+// The summary (lib/inventoryCheckList.ts readCheckSummary) is ONE object, the same from /list (when the request names a branch) and /overlay (always): counts of product rows, total, not_checked, the date chips and,
+// with Fix stock, pending. tooLarge: more checked products than inventoryCheckFilterMaxIds, so there are no counts and no days to give: it says `{ tooLarge: true }` instead of vanishing, and a page that holds
+// chips from an earlier answer clears them. The check-state filters are refused (503) while it holds.
 app.get('/list', async c => {
   if (!await readSwitch(c.env, 'ic_wired')) return notWired(c)
   singleValued(c)
@@ -137,7 +134,7 @@ app.get('/list', async c => {
   }
   let sets: CheckStateSets | null = null
   let setsVersion = ''
-  if (plan.branchId !== null && (plan.checkState || plan.checkedOn || plan.wantSummary)) ({ sets, version: setsVersion } = await readCheckStateSets(c, plan.branchId, fixStock))
+  if (plan.branchId !== null && (plan.checkState || plan.checkedOn)) ({ sets, version: setsVersion } = await readCheckStateSets(c, plan.branchId, fixStock))
   let restriction: { restrictIdsJson?: string; excludeIdsJson?: string } = (plan.checkState || plan.checkedOn) && sets ? checkStateRestriction(plan.checkState, sets, plan.checkedOn) : {}
   // The shared cache key is the canonical request. A grouped read never takes a by-id read (its ranking needs the keyed page read): an exact code hit becomes a restriction to that id, and the key keeps the id.
   const keyRequest = canonicalProductsRequest(productsQuery)
@@ -165,10 +162,8 @@ app.get('/list', async c => {
   const projected = plan.grouping ? true : projection.projected
   const groupingBlock: GroupingBlock | undefined = plan.grouping
     ? buildGroupingBlock(plan.grouping, groups ?? [], body.items as Array<Record<string, unknown>>, (Number(productsQuery.page) - 1) * Number(productsQuery.pageSize), Number(productsQuery.pageSize)) : undefined
-  const total = Number((payload as { total?: unknown }).total) || 0
-  const summary = sets && plan.wantSummary ? { ...summaryOf(sets, fixStock),
-    // Not checked is the catalogue total minus what was checked; it is only known when this list is the whole catalogue (no search, filter or check state).
-    ...(plan.filtered || sets.tooLarge ? {} : { not_checked: Math.max(0, total - sets.ok.length - sets.issue.length), total }) } : null
+  // The counts are the branch-wide figures of the unfiltered list, whatever this page is filtered to; a request that names no branch has none.
+  const summary = plan.branchId !== null && plan.wantSummary ? await readCheckSummary(c, plan.branchId, fixStock, sets ? { sets, version: setsVersion } : undefined) : null
   // window_pages: how many pages (this one and the ones ahead) the page may read in one window; the ranking behind them is shared (catalog_ranked_scope), so a window costs rows, not rankings.
   return c.json({ ...body, wired: true, projected, window_pages: getPlanLimits(c.env).catalogListWindowPages, overlay_ids: getPlanLimits(c.env).inventoryOverlayMaxRows, ...(groupingBlock ? { grouping: groupingBlock } : {}), ...(summary ? { summary } : {}),
     capabilities })
@@ -196,10 +191,10 @@ app.get('/overlay', async c => {
   const lots = withLots ? (withLots.items as Array<{ id: number; lots?: Array<Record<string, unknown>>; lots_more?: true }>).map((row) => ({ product_id: row.id,
     lots: (row.lots ?? []).map((lot) => access.fields.stock ? lot : { ...lot, branches: (lot.branches as Array<Record<string, unknown>>).map(({ quantity: _quantity, ...entry }) => entry) }),
     ...(row.lots_more ? { lots_more: true } : {}) })) : undefined
-  const sets = wantSummary ? (await readCheckStateSets(c, branchId, fixStock)).sets : null
+  const summary = wantSummary ? await readCheckSummary(c, branchId, fixStock) : null
   const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock, await submissionCaps(c, lotCounts), availableGroupings(access.fields))
   return c.json({ wired: true, branchId, version: await inventoryChecksVersion(c.env), items, ...(lots ? { lots } : {}),
-    ...(sets ? { summary: summaryOf(sets, fixStock) } : {}), capabilities })
+    ...(summary ? { summary } : {}), capabilities })
 })
 // ic_lot_counts: the received dates ("batches") one product holds at one branch, read ON DEMAND when a person opens the count popover of a row (one request, one product; the page never
 // lists batches for its rows). Answers 404 while the switch is OFF (the page then counts one total per product, exactly as before). No cost, supplier or price is ever selected.

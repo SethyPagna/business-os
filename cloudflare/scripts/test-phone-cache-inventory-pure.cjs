@@ -25,7 +25,7 @@ const PHONE_FREE = {
   'routes/notifications.ts': { cachedJsonResponse: 1, put: 1, why: 'inventory / expiry / inventory-full / supplier_credit sections: products and totals (the loyalty section takes the contacts option, below). The put is the plan-lifetime ttlOnly entry (store.put): only the inventory, expiry, inventory-full and supplier-credit sections use ttlOnly, and none reads a contact column' },
   'routes/products.ts': { cachedJsonResponse: 7, put: 1, why: 'product search, bootstrap, filters, facets, clusters, counts, and the Keep-both dismissals (/duplicate-dismissals: barcodes and lower-cased name keys of dismissed twin clusters, listTwinDismissals; no contact column)' },
   'routes/sales.ts': { cachedJsonResponse: 2, why: '/stats and /stats-strip: counts and totals' },
-  'lib/inventoryCheckList.ts': { cachedJsonResponse: 1, why: 'Inventory Check state sets (INV-A S4a): product ids per check state at one branch, no contact (the ranked scope, lib/rankedScope.ts, stores family keys and a promotion edge: also no contact)' },
+  'lib/inventoryCheckList.ts': { cachedJsonResponse: 2, why: 'Inventory Check state sets (INV-A S4a): product ids per check state at one branch, and the status counts built from them (numbers and days), no contact (the ranked scope, lib/rankedScope.ts, stores family keys and a promotion edge: also no contact)' },
   'lib/dashboardStockOverview.ts': { put: 1, why: 'stock overview figures' },
   'lib/r2.ts': { put: 1, why: 'image bytes' },
   'lib/rankedScope.ts': { put: 2, why: 'promotion edge date and the ranked window (R3): product family keys and a promotion edge, no contact column' },

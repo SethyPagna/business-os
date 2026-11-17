@@ -3,11 +3,12 @@ import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import { isInventoryCheckGrouping, type InventoryCheckGrouping } from './inventoryCheckGrouping'
 import { projectAcquisitionCosts } from './acquisitionCostAccess'
-import { cacheIdentity, cachedJsonResponse, getVersionWithFallback } from './cache'
+import { cacheIdentity, cachedJsonResponse, getVersionWithFallback, getVersionsWithFallback } from './cache'
 import { getDb } from './db'
 import { getInventoryCheckAccess, InventoryCheckQueryError, validateInventoryCheckQuery, type InventoryCheckAccess } from './inventoryCheckAccess'
 import { InventoryCheckSessionError, waitingLineSql } from './inventoryCheckSessions'
 import { getPlanLimits } from './planTier'
+import { catalogProductSql } from './productStockGuard'
 import { localDateExpr } from './businessDateWindow'
 import type { PermissionUser } from './permissions'
 
@@ -138,10 +139,10 @@ const PENDING_ITEMS_SQL = `SELECT i.product_id AS product_id FROM inventory_chec
 /** The inventory_checks cache version: every Inventory Check writer moves it (awaited), so the sets below and every restricted list key on it. */
 export const inventoryChecksVersion = (env: Env): Promise<string> => getVersionWithFallback(env, 'inventory_checks')
 
-export async function readCheckStateSets(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, branchId: number, withPending: boolean): Promise<{ sets: CheckStateSets; version: string }> {
+export async function readCheckStateSets(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, branchId: number, withPending: boolean, knownVersion?: string): Promise<{ sets: CheckStateSets; version: string }> {
   const user = c.get('user'), env = c.env, db = getDb(env)
   const limit = getPlanLimits(env).inventoryCheckFilterMaxIds
-  const version = await inventoryChecksVersion(env)
+  const version = knownVersion ?? await inventoryChecksVersion(env)
   const organization = user.organization_id ?? null
   const sets = await cachedJsonResponse(new Request(`https://ic.invalid/__bos/ic-state?branchId=${branchId}&pending=${withPending ? 1 : 0}&order=2`, { method: 'GET' }), c.executionCtx,
     `ic:${version}`, getPlanLimits(env).productListCacheSeconds, async (): Promise<CheckStateSets> => {
@@ -154,6 +155,48 @@ export async function readCheckStateSets(c: Context<{ Bindings: Env; Variables: 
         pending: pending.map((row) => Number(row.product_id)), days: [...byDay.entries()].sort((a, b) => a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0).map(([day, ids]) => ({ day, ids })), tooLarge: false }
     }, cacheIdentity(c))
   return { sets, version }
+}
+
+// The status counts of one branch, ONE object for /list and /overlay. The unit is the product row (never a name family) and the population is the rows the unfiltered list can show: the list's own
+// scope, catalogProductSql (an active product; the branch only picks which stock to display). ok/issue/pending are the rows of that population whose LATEST count at the branch has the state, so a
+// count made on a product that has since left the list is in no figure, and not_checked = total - ok - issue holds by construction. Each number is what the matching chip shows when tapped.
+export type CheckSummary = { ok: number; issue: number; pending?: number; not_checked: number; total: number; days: Array<{ day: string; count: number }> } | { tooLarge: true }
+
+// The population size (a covering-index count) moves only with the products version, so it is cached apart from the check state: a count saved does not re-count the catalogue.
+export const POPULATION_TOTAL_SQL = `SELECT COUNT(*) AS n FROM products p WHERE ${catalogProductSql('p')}`
+// Which of the checked ids are in the population: json_each drives primary-key seeks, nothing else is read.
+export const POPULATION_CHECKED_SQL = `SELECT p.id AS id FROM products p WHERE ${catalogProductSql('p', false)} AND p.id IN (SELECT value FROM json_each(@ids))`
+
+export function summaryFromSets(sets: CheckStateSets, withPending: boolean, population: { total: number; inList: ReadonlySet<number> }): CheckSummary {
+  if (sets.tooLarge) return { tooLarge: true }
+  const inList = (ids: readonly number[]) => ids.filter((id) => population.inList.has(id)).length
+  const ok = inList(sets.ok), issue = inList(sets.issue)
+  return { ok, issue, ...(withPending ? { pending: inList(sets.pending) } : {}), not_checked: population.total - ok - issue, total: population.total,
+    days: sets.days.map((entry) => ({ day: entry.day, count: inList(entry.ids) })).filter((entry) => entry.count > 0) }
+}
+
+async function readPopulationTotal(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, products: string): Promise<number> {
+  const env = c.env
+  return cachedJsonResponse(new Request('https://ic.invalid/__bos/ic-population?order=1', { method: 'GET' }), c.executionCtx, `icn:${products}`, getPlanLimits(env).productListCacheSeconds,
+    async () => Number((await getDb(env).prepare(POPULATION_TOTAL_SQL).get<{ n: number }>())?.n ?? 0), cacheIdentity(c))
+}
+
+/**
+ * The summary of a branch, cached on the inventory_checks version AND the products version (a product entering or leaving the list moves the second), so a warm open is cache hits and no statement.
+ * `loaded` is the sets a caller already read (the same cached entry), so a restricted list does not read them twice.
+ */
+export async function readCheckSummary(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, branchId: number, withPending: boolean, loaded?: { sets: CheckStateSets; version: string }): Promise<CheckSummary> {
+  const env = c.env, db = getDb(env)
+  // Both versions in one read (one statement at most), and the sets below take the one already read.
+  const [version, products] = loaded ? [loaded.version, await getVersionWithFallback(env, 'products')] : await getVersionsWithFallback(env, ['inventory_checks', 'products'])
+  return cachedJsonResponse(new Request(`https://ic.invalid/__bos/ic-summary?branchId=${branchId}&pending=${withPending ? 1 : 0}&order=1`, { method: 'GET' }), c.executionCtx,
+    `icp:${version}:${products}`, getPlanLimits(env).productListCacheSeconds, async (): Promise<CheckSummary> => {
+      const { sets } = loaded ?? await readCheckStateSets(c, branchId, withPending, version)
+      if (sets.tooLarge) return { tooLarge: true }
+      const ids = [...new Set([...sets.ok, ...sets.issue, ...sets.pending])]
+      const [total, rows] = await Promise.all([readPopulationTotal(c, products), ids.length ? db.prepare(POPULATION_CHECKED_SQL).all<{ id: number }>({ ids: JSON.stringify(ids) }) : Promise.resolve([])])
+      return summaryFromSets(sets, withPending, { total, inList: new Set(rows.map((row) => Number(row.id))) })
+    }, cacheIdentity(c))
 }
 
 /**
