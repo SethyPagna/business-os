@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { createHarness, type MountedSurface } from './mountedComponentHarness.ts'
 import { loadSource } from './productsSurfaceFixture.ts'
 import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
+import { COPY_ATTR } from '../src/components/shared/textAffordances.ts'
 
 // Inventory redesign, slice C1 review L3 (17 Nov 2026): no live leak, but the walls behind the Worker were thin. The page's projection stripped prices but not cost keys, and the detail passed the SKU
 // whatever the barcode grant said. Both are walls for the day a row arrives carrying more than its viewer may see (a Products-store row, a future server change): this file hands them exactly that row.
@@ -36,7 +37,7 @@ const mount = async (fields: Record<string, boolean>, user: Record<string, unkno
   live.push(surface)
   return surface
 }
-const everything = (surface: MountedSurface) => [surface.text(), ...surface.findAll(() => true).flatMap(node => ['title', 'aria-label', 'data-copy', 'alt', 'href', 'value', 'placeholder'].map(name => node.getAttribute(name) ?? ''))].join('\n')
+const everything = (surface: MountedSurface) => [surface.text(), ...surface.findAll(() => true).flatMap(node => ['title', 'aria-label', COPY_ATTR, 'alt', 'href', 'value', 'placeholder'].map(name => node.getAttribute(name) ?? ''))].join('\n')
 
 const cases: Array<[string, () => Promise<void>]> = [
   ['projectProduct cuts each group on its own switch, and cost keys go without the cost gate even when the price grant is held', async () => {
@@ -77,6 +78,8 @@ const cases: Array<[string, () => Promise<void>]> = [
     const sighted = await mount(ALL, asAdmin)
     const all = everything(sighted)
     for (const shown of ['SKU-7731', '885000041', 'Brand Z', '3.21', '12.50', '10.00']) assert.ok(all.includes(shown), `${shown} shows with the grants`)
+    // The scan's copy attribute is the one CopyFloat really writes (data-copy-value): the barcode sits in it, so a leak through a copy target would be seen by the scans above.
+    assert.ok(sighted.findAll(node => node.getAttribute(COPY_ATTR) === '885000041').length > 0, `a node carries the barcode in ${COPY_ATTR}`)
   }],
 ]
 
