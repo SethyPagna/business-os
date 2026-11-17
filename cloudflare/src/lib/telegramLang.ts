@@ -213,6 +213,8 @@ const LABELS = {
   changed: { en: 'Changed', km: 'បានផ្លាស់ប្ដូរ' },
   request: { en: 'Request', km: 'សំណើ' },
   requestedBy: { en: 'Requested by', km: 'បានស្នើសុំដោយ' },         // km.json requested_by
+  // A count approval that ended with rejected lines: "Lines: 3 approved, 1 rejected". km.json lines; the two words are km.json approved / rejected.
+  lines: { en: 'Lines', km: 'ជួរ', localizeValue: true },
 
   // --- returns ---
   ret: { en: 'RET', km: 'លេខប្រគល់មកវិញ' },
@@ -491,6 +493,8 @@ const VALUE_PHRASES: Record<string, ValuePhrase> = {
   Unknown: 'មិនស្គាល់',
   unpaid: 'មិនទាន់បង់',
   none: 'គ្មាន',
+  approved: 'បានអនុម័ត',                                                // km.json approved
+  rejected: 'បានបដិសេធ',                                                // km.json rejected
   ...SALE_STATUS_PHRASES,
   // return stock actions (lib/returnsStock.ts ReturnStockAction)
   restock: 'បញ្ចូលស្តុកវិញ',

@@ -5,9 +5,10 @@ import { actorSnapshot } from './actorSnapshot'
 import { APPROVAL_CLAIM_LOST } from './stockMutationReceipt'
 import {
   APPROVAL_DETAIL_COLUMNS, InventoryCheckSessionError, appliedLines, approvalBaselines, approvalsReady, authorityGuard, countDiffersSql, currentInventoryCheckActor, eventStatement, guard, inventoryCheckDigest,
-  object, projectApproval, requestId as requestIdOf, REPLACED_NOTE, schemaReady, sessionRow, supersededLines,
-  type Actor, type ApprovalAppliedLine, type ApprovalRow, type InventoryCheckPrincipal, type Statement,
+  lineDecisions, object, projectApproval, requestId as requestIdOf, REPLACED_NOTE, schemaReady, sessionRow, supersededLines,
+  type Actor, type ApprovalAppliedLine, type ApprovalLineDecision, type ApprovalRow, type InventoryCheckPrincipal, type Statement,
 } from './inventoryCheckSessions'
+import { checkLineShape, parseLineDecisionInput, type LineInput } from './inventoryCheckLineInput'
 import type { StockInCommitLine, StockInCommitLineResult } from '../routes/stockInCommit'
 
 /*
@@ -60,7 +61,7 @@ const fail = (status: InventoryCheckSessionError['status'], code: string, detail
 
 export type ApprovalStockWriter = (lines: StockInCommitLine[]) => Promise<StockInCommitLineResult[]>
 /** Told once when a decision commits (never for a replay): who decided is the caller's own account; the reason is the rejection note. */
-export type ApprovalDecided = (decided: { decision: ApprovalDecision | 'replaced'; sessionId: string; note: string | null; applied?: number; notApplied?: number }) => Promise<void>
+export type ApprovalDecided = (decided: { decision: ApprovalDecision | 'replaced'; sessionId: string; note: string | null; applied?: number; notApplied?: number; rejectedLines?: number }) => Promise<void>
 export type ApprovalDecision = 'approve' | 'reject' | 'close'
 /** The plan-sized numbers (lib/planTier.ts); the caller reads them, this module holds no literal. */
 export type ApprovalLimits = { takeoverSeconds: number }
@@ -197,8 +198,8 @@ async function readLines(db: D1Compat, sessionId: string, branchId: number): Pro
   return items.filter(item => item.differs === 1)
 }
 
-/** The approval row is exactly as this decision read it: the same lines applied and the same lines replaced by newer counts. */
-const UNCHANGED = `applied_json=@oldApplied AND superseded_json=@oldSuperseded`
+/** The approval row is exactly as this decision read it: the same lines applied, the same lines replaced by newer counts and the same decisions of the approver on lines (a figure modified after a plan was read is never applied from the plan). */
+const UNCHANGED = `applied_json=@oldApplied AND superseded_json=@oldSuperseded AND line_decisions_json=@oldDecisions`
 
 /** True while no write of the old claim has landed that this decision did not read; proved inside the batch that ends the claim, so a write that lands in between is refused here, never overwritten. */
 const NO_UNSEEN_WRITE_SQL = `NOT EXISTS(SELECT 1 FROM stock_mutation_receipts WHERE actor_id=@oldBy AND written=1 AND request_id IN (SELECT value FROM json_each(@unseenIds)))`
@@ -226,6 +227,8 @@ export async function decideInventoryCheckApproval(db: D1Compat, principal: Inve
   const key = requestIdOf(body.requestId)
   const note = body.note == null ? null : typeof body.note === 'string' ? body.note.trim() || null : fail(400, 'inventory_check_invalid_note')
   if (note !== null && note.length > 500) fail(400, 'inventory_check_invalid_note')
+  // productIds (approve only): accept these lines, leave the others open. Absent: every open line, as it always was.
+  const productIds = body.productIds === undefined ? null : parseProductIds(body.productIds, decision)
   const actor = await currentInventoryCheckActor(db, principal); await schemaReady(db); await approvalsReady(db)
   if (!canApproveInventoryCounts(actor)) fail(403, 'inventory_check_approve_required')
   const session = await sessionRow(db, actor, sessionId)
@@ -242,9 +245,13 @@ export async function decideInventoryCheckApproval(db: D1Compat, principal: Inve
   if (lines.length !== row.lines) return fail(409, 'inventory_check_approval_lines_changed')
   const applied = appliedLines(row.applied_json), held = appliedUnits(row.applied_json)
   const superseded = supersededLines(row.superseded_json)
-  const remaining = lines.filter(item => !applied[String(item.product_id)] && !superseded[String(item.product_id)])
+  // The approver's decisions on lines: a rejected line is never applied and is no longer open; a modified line is applied from its modified figure (readFacts).
+  const decisions = lineDecisions(row.line_decisions_json)
+  const isRejected = (item: { product_id: number }): boolean => decisions[String(item.product_id)]?.decision === 'reject'
+  const rejectedCount = lines.filter(isRejected).length
+  const remaining = lines.filter(item => !applied[String(item.product_id)] && !superseded[String(item.product_id)] && !isRejected(item))
   const now = new Date().toISOString()
-  const base = { id: sessionId, organization: actor.organization_id, branchId: session.branch_id, actorId: actor.id, actorName: actorSnapshot(actor), now, note, key, oldApplied: row.applied_json, oldSuperseded: row.superseded_json }
+  const base = { id: sessionId, organization: actor.organization_id, branchId: session.branch_id, actorId: actor.id, actorName: actorSnapshot(actor), now, note, key, oldApplied: row.applied_json, oldSuperseded: row.superseded_json, oldDecisions: row.line_decisions_json ?? '{}' }
 
   if (decision === 'reject') {
     if (Object.keys(applied).length) fail(409, 'inventory_check_approval_partly_applied')
@@ -263,15 +270,26 @@ export async function decideInventoryCheckApproval(db: D1Compat, principal: Inve
   const stored = plansOf(row.plan_json)
   const count = { sessionId, submittedAt: row.submitted_at }
   const baselines = approvalBaselines(row.baselines_json)
-  if (decision === 'close') return await closeApproval(db, actor, session, row, base, { remaining, applied, held, stored, count, baselines, limits, onDecided })
+  if (decision === 'close') return await closeApproval(db, actor, session, row, base, { remaining, applied, held, stored, count, baselines, limits, onDecided, decisions, rejectedCount })
 
   if (getActionTier(actor, 'inventory', 'adjust') !== 'full') fail(403, 'inventory_check_adjust_required')
+  // The lines this request accepts. Every named line must be a line of the count and not rejected; one already applied or replaced by a newer count is simply not open any more (a repeat of the request is fine).
+  if (productIds) for (const productId of productIds) {
+    const line = lines.find(item => item.product_id === productId)
+    if (!line) fail(404, 'inventory_check_line_not_found', { productIds: [productId] })
+    if (line && isRejected(line)) fail(409, 'inventory_check_line_rejected', { productIds: [productId] })
+  }
+  const wanted = productIds ? remaining.filter(item => productIds.includes(item.product_id)) : remaining
+  if (productIds && !wanted.length) return await respond(db, actor, sessionId, 0, 0, true)
+  // Lines this request does not accept keep the plan they were already sent with: a stored plan is never dropped by an accept that names other lines.
+  const wantedIds = new Set(wanted.map(item => item.product_id))
+  const carried = productIds ? Object.fromEntries(Object.entries(stored).filter(([unitKey]) => !wantedIds.has(productOf(unitKey)))) : {}
   // Only the approver who started applying continues it, and always under the request id that started it: the stock writers' receipts are per approver and request id.
   // Another approver takes it over only when that approver is gone; the takeover is a request of its own (it moves no stock) and the repeat continues under the new key.
   if (row.applying_request_id && row.applying_by !== actor.id) {
     const why = await claimerGone(db, row, limits.takeoverSeconds)
     if (!why) fail(409, 'inventory_check_approval_in_progress')
-    return await takeOver(db, actor, session, row, base, { why: why as string, remaining, applied, held, stored, count, baselines })
+    return await takeOver(db, actor, session, row, base, { why: why as string, remaining, applied, held, stored, count, baselines, decisions })
   }
   const stockKey = row.applying_request_id ?? key
   const sent = await receiptsOf(db, actor.id, Object.keys(stored).map(unitKey => stockId(stockKey, unitKey)))
@@ -279,17 +297,17 @@ export async function decideInventoryCheckApproval(db: D1Compat, principal: Inve
   // in the same batch when it is already known to be needed.
   const planned = (unit: Unit): boolean => !!stored[unit.key] && sent.has(stockId(stockKey, unit.key))
   const storedProducts = new Set(Object.keys(stored).map(productOf))
-  let facts = await readFacts(db, session.branch_id, count, remaining, baselines, remaining.some(item => !storedProducts.has(item.product_id)) || Object.keys(stored).some(unitKey => !sent.has(stockId(stockKey, unitKey))))
-  const freshProducts = remaining.filter(item => (facts.units.get(item.product_id) ?? []).some(unit => !held[unit.key] && !planned(unit)))
-  if (freshProducts.length && !facts.since) facts = await readFacts(db, session.branch_id, count, remaining, baselines, true)
+  let facts = await readFacts(db, session.branch_id, count, wanted, baselines, wanted.some(item => !storedProducts.has(item.product_id)) || Object.keys(stored).some(unitKey => !sent.has(stockId(stockKey, unitKey))), decisions)
+  const freshProducts = wanted.filter(item => (facts.units.get(item.product_id) ?? []).some(unit => !held[unit.key] && !planned(unit)))
+  if (freshProducts.length && !facts.since) facts = await readFacts(db, session.branch_id, count, wanted, baselines, true, decisions)
   const { plans, refused } = freshProducts.length ? planProducts(facts, freshProducts) : { plans: new Map<string, Plan>(), refused: [] as Refusal[] }
   const refusedIds = new Set(refused.map(refusal => refusal.productId))
   // A line that cannot be applied is refused on its own; the others go on. When nothing is left to apply, the request itself is refused with the first reason, naming every refused line.
-  const openProducts = remaining.filter(item => !refusedIds.has(item.product_id))
+  const openProducts = wanted.filter(item => !refusedIds.has(item.product_id))
   if (!openProducts.length && refused.length) fail(409, refused[0].code, { productIds: refused.filter(refusal => refusal.code === refused[0].code).map(refusal => refusal.productId), refused })
   const open: Open[] = openProducts.flatMap(item => (facts.units.get(item.product_id) ?? []).filter(unit => !held[unit.key])
     .map(unit => ({ item, unit, plan: planned(unit) ? stored[unit.key] : plans.get(unit.key) ?? stored[unit.key] })).filter((entry): entry is Open => !!entry.plan))
-  const plansOfTodo = (entries: Open[]): string => JSON.stringify(Object.fromEntries(entries.map(entry => [entry.unit.key, entry.plan])))
+  const plansOfTodo = (entries: Open[]): string => JSON.stringify({ ...carried, ...Object.fromEntries(entries.map(entry => [entry.unit.key, entry.plan])) })
   const claim = { ...base, stockKey, newPlan: plansOfTodo(open), oldPlan: row.plan_json }
   const claimMine = `(applying_request_id IS NULL OR (applying_request_id=@stockKey AND applying_by=@actorId))`
   let recorded = false
@@ -312,10 +330,11 @@ export async function decideInventoryCheckApproval(db: D1Compat, principal: Inve
     if (result?.ok === true) landed.set(entry.unit.key, entryOf(result, entry.plan, now))
     else if (result && result.code !== 'deferred') failed.push({ productId: entry.unit.productId, code: typeof result.code === 'string' ? result.code : null, error: String(result.error ?? 'refused') })
   }
-  const folded = fold({ remaining, units: facts.units, lines: applied, held, landed, at: now, partial: false })
-  const left = remaining.length - folded.completed.length
-  const finish = left === 0
-  const unitsLeft = remaining.reduce((sum, item) => sum + (facts.units.get(item.product_id) ?? []).filter(unit => !landed.has(unit.key) && !held[unit.key]).length, 0)
+  const folded = fold({ remaining: wanted, units: facts.units, lines: applied, held, landed, at: now, partial: false })
+  const left = wanted.length - folded.completed.length
+  // The approval ends once no line is left open: every line applied, rejected or replaced. An accept of some lines that finishes them while others stay open ends only the request (done), not the approval.
+  const finish = left === 0 && wanted.length === remaining.length
+  const unitsLeft = wanted.reduce((sum, item) => sum + (facts.units.get(item.product_id) ?? []).filter(unit => !landed.has(unit.key) && !held[unit.key]).length, 0)
   if (!landed.size && !finish) {
     // Planning a count is the dearest request of an approval, and the stock writer sends nothing once the request has used the invocation's statements (the commit answers those lines 'deferred', untouched).
     // When this request has just recorded the plan, that costs nothing: the claim and the plan stay and the repeat, which does not record again, writes. A repeat that defers again is a refusal.
@@ -325,7 +344,7 @@ export async function decideInventoryCheckApproval(db: D1Compat, principal: Inve
   }
 
   // Nothing applied and nothing left to apply: every line was replaced by a newer count after this approval was claimed. It ends as replaced, exactly as a close does in that case.
-  const replacedOnly = finish && Object.keys(folded.lines).length === 0
+  const replacedOnly = finish && Object.keys(folded.lines).length === 0 && rejectedCount === 0
   // The plan this request wrote or read: a request of the same claimer that recorded another plan in between is not overwritten (the repeat replays what landed).
   const next = { ...base, stockKey, planBefore: recorded ? claim.newPlan : row.plan_json, newApplied: appliedJson(folded.lines, folded.held), planAfter: plansOfTodo(open.filter(entry => !landed.has(entry.unit.key))) }
   const statements: Statement[] = [
@@ -333,17 +352,21 @@ export async function decideInventoryCheckApproval(db: D1Compat, principal: Inve
   ]
   statements.push(...await landingStatements(actor, sessionId, session.revision, base, folded.completed, stockKey))
   statements.push({ sql: 'UPDATE inventory_check_sessions SET updated_at=@now WHERE id=@id', params: base })
+  // Nothing applied but a line the approver rejected: the approver ended it, so it is a rejection by a person (not "replaced"), whatever the other lines were.
+  const rejectedEnd = finish && !replacedOnly && Object.keys(folded.lines).length === 0
   if (finish) {
     const hash = await inventoryCheckDigest(JSON.stringify({ action: 'approval', id: sessionId, decision, note }))
-    statements.push(replacedOnly ? replacedUpdate({ ...next, key: stockKey }) : decidedUpdate('approved', { ...next, key: stockKey }), guard('changes()=1', 'inventory_check_conflict', {}),
-      eventStatement(actor, { sessionId, action: 'observe', key: stockKey, hash, before: { approval: 'pending', lines: row.lines }, after: { approval: replacedOnly ? 'rejected' : 'approved', lines: row.lines, ...(replacedOnly ? { replaced: true } : {}) }, result: { sessionRevision: session.revision }, now }))
+    const ending = replacedOnly ? replacedUpdate({ ...next, key: stockKey }) : rejectedEnd ? linesRejectedUpdate({ ...next, key: stockKey }, !!row.applying_request_id) : decidedUpdate('approved', { ...next, key: stockKey })
+    statements.push(ending, guard('changes()=1', 'inventory_check_conflict', {}),
+      eventStatement(actor, { sessionId, action: 'observe', key: stockKey, hash, before: { approval: 'pending', lines: row.lines }, after: { approval: replacedOnly || rejectedEnd ? 'rejected' : 'approved', lines: row.lines, ...(replacedOnly ? { replaced: true } : {}) }, result: { sessionRevision: session.revision }, now }))
   } else {
     statements.push({ sql: `UPDATE inventory_check_approvals SET applied_json=@newApplied,plan_json=@planAfter,applying_at=@now WHERE session_id=@id AND status='pending' AND ${UNCHANGED} AND plan_json=@planBefore AND ${claimMine}`, params: next },
       guard('changes()=1', 'inventory_check_conflict', {}))
   }
   await record(db, actor, statements)
-  if (finish) await announce(onDecided, replacedOnly ? { decision: 'replaced', sessionId, note: REPLACED_NOTE } : { decision, sessionId, note })
-  return await respond(db, actor, sessionId, landed.size, unitsLeft, finish, { failed, refused })
+  if (finish) await announce(onDecided, replacedOnly ? { decision: 'replaced', sessionId, note: REPLACED_NOTE } : { decision: rejectedEnd ? 'reject' : decision, sessionId, note, applied: Object.keys(folded.lines).length, rejectedLines: rejectedCount })
+  // done: nothing is left to do for what this request asked (the approval ended, or the lines it accepted are applied).
+  return await respond(db, actor, sessionId, landed.size, unitsLeft, finish || left === 0, { failed, refused })
 }
 
 /** The item flips and audit events of products whose stock writes all landed; the key is the stock request that carried them. */
@@ -372,9 +395,9 @@ const openUnits = (remaining: ItemFacts[], facts: Facts, held: Record<string, Un
  * still running refuses the takeover for now, and everything else is planned afresh by the repeat, under the new approver's own request id.
  */
 async function takeOver(db: D1Compat, actor: Actor, session: { branch_id: number; revision: number }, row: EngineRow, base: Record<string, unknown>,
-  context: { why: string; remaining: ItemFacts[]; applied: Record<string, AppliedLine>; held: Record<string, UnitEntry>; stored: Record<string, Plan>; count: { sessionId: string; submittedAt: string }; baselines: Record<string, number> }) {
+  context: { why: string; remaining: ItemFacts[]; applied: Record<string, AppliedLine>; held: Record<string, UnitEntry>; stored: Record<string, Plan>; count: { sessionId: string; submittedAt: string }; baselines: Record<string, number>; decisions: Record<string, ApprovalLineDecision> }) {
   const sessionId = base.id as string, key = base.key as string, now = base.now as string, oldKey = row.applying_request_id as string
-  const facts = await readFacts(db, session.branch_id, context.count, context.remaining, context.baselines, false)
+  const facts = await readFacts(db, session.branch_id, context.count, context.remaining, context.baselines, false, context.decisions)
   const { landed, unseen } = await reconcile(db, row, openUnits(context.remaining, facts, context.held), context.stored, now)
   const folded = fold({ remaining: context.remaining, units: facts.units, lines: context.applied, held: context.held, landed, at: now, partial: false })
   const params = { ...base, oldKey, oldBy: row.applying_by, oldPlan: row.plan_json, newApplied: appliedJson(folded.lines, folded.held), unseenIds: JSON.stringify(unseen) }
@@ -400,13 +423,14 @@ async function takeOver(db: D1Compat, actor: Actor, session: { branch_id: number
  * A product part-applied (some of its received dates landed) is recorded with what landed, marked partial.
  */
 async function closeApproval(db: D1Compat, actor: Actor, session: { branch_id: number; revision: number }, row: EngineRow, base: Record<string, unknown>,
-  context: { remaining: ItemFacts[]; applied: Record<string, AppliedLine>; held: Record<string, UnitEntry>; stored: Record<string, Plan>; count: { sessionId: string; submittedAt: string }; baselines: Record<string, number>; limits: ApprovalLimits; onDecided?: ApprovalDecided }) {
+  context: { remaining: ItemFacts[]; applied: Record<string, AppliedLine>; held: Record<string, UnitEntry>; stored: Record<string, Plan>; count: { sessionId: string; submittedAt: string }; baselines: Record<string, number>; limits: ApprovalLimits; onDecided?: ApprovalDecided;
+    decisions: Record<string, ApprovalLineDecision>; rejectedCount: number }) {
   const sessionId = base.id as string, key = base.key as string, now = base.now as string, note = base.note as string | null
   // Another approver closes under a claim only once its approver is gone, as for a takeover; the claimer himself may always close.
   if (row.applying_request_id && row.applying_by !== actor.id && !await claimerGone(db, row, context.limits.takeoverSeconds)) fail(409, 'inventory_check_approval_in_progress')
   // The reason each line cannot be applied is what the planner would say now; a line it would still apply is recorded as simply not applied. Failing to read it never keeps the approval open.
   let facts: Facts
-  try { facts = await readFacts(db, session.branch_id, context.count, context.remaining, context.baselines, true) } catch { facts = await readFacts(db, session.branch_id, context.count, context.remaining, context.baselines, false) }
+  try { facts = await readFacts(db, session.branch_id, context.count, context.remaining, context.baselines, true, context.decisions) } catch { facts = await readFacts(db, session.branch_id, context.count, context.remaining, context.baselines, false, context.decisions) }
   let landed = new Map<string, UnitEntry>(), unseen: string[] = []
   if (row.applying_request_id) ({ landed, unseen } = await reconcile(db, row, openUnits(context.remaining, facts, context.held), context.stored, now))
   const folded = fold({ remaining: context.remaining, units: facts.units, lines: context.applied, held: context.held, landed, at: now, partial: true })
@@ -418,7 +442,8 @@ async function closeApproval(db: D1Compat, actor: Actor, session: { branch_id: n
   }
   const appliedCount = Object.keys(folded.lines).length, status = appliedCount > 0 ? 'approved' : 'rejected'
   // Nothing applied and no line left to close: every remaining line was replaced by a newer count. It ends as replaced, with no person as its decider, exactly as an approval that finishes so does.
-  const replaced = appliedCount === 0 && unapplied.length === 0
+  // A line the approver rejected is a person's decision: with one, the close is the approver's, never "replaced".
+  const replaced = appliedCount === 0 && unapplied.length === 0 && context.rejectedCount === 0
   const params = { ...base, deciderId: replaced ? null : base.actorId, deciderName: replaced ? null : base.actorName, decisionNote: replaced ? REPLACED_NOTE : note, oldKey: row.applying_request_id, oldBy: row.applying_by, oldPlan: row.plan_json, newApplied: appliedJson(folded.lines, {}), unseenIds: JSON.stringify(unseen),
     closed: JSON.stringify({ lines: Object.fromEntries(unapplied.map(item => [String(item.product_id), reasons.get(item.product_id) ?? 'inventory_check_not_applied'])) }) }
   // plan_json=@oldPlan: a line that joined the plan after this read (the claimer planned it and may already have written it) is not covered by the unseen receipts above, so a changed plan refuses the close.
@@ -435,7 +460,7 @@ async function closeApproval(db: D1Compat, actor: Actor, session: { branch_id: n
       after: { approval: status, closed: true, applied: appliedCount, not_applied: JSON.parse(params.closed).lines, ...(replaced ? { replaced: true } : {}) },
       result: { sessionRevision: session.revision }, now }),
   ])
-  await announce(context.onDecided, replaced ? { decision: 'replaced', sessionId, note: REPLACED_NOTE } : { decision: 'close', sessionId, note, applied: appliedCount, notApplied: unapplied.length })
+  await announce(context.onDecided, replaced ? { decision: 'replaced', sessionId, note: REPLACED_NOTE } : { decision: 'close', sessionId, note, applied: appliedCount, notApplied: unapplied.length, rejectedLines: context.rejectedCount })
   return await respond(db, actor, sessionId, landed.size, 0, true)
 }
 
@@ -454,7 +479,7 @@ const REFUSAL_ORDER = ['inventory_check_product_retired', 'inventory_check_basel
  * The received dates of the products still to apply, from the count's own lines (one statement), and, when `plan` is asked for, what happened to those products since the count and the newest
  * received date holding stock for a branch-total line, in the same call. Never the stock ledger: the figures a line is applied from are the count's own seen and counted figures.
  */
-async function readFacts(db: D1Compat, branchId: number, count: { sessionId: string; submittedAt: string }, products: ItemFacts[], baselines: Record<string, number>, plan: boolean): Promise<Facts> {
+async function readFacts(db: D1Compat, branchId: number, count: { sessionId: string; submittedAt: string }, products: ItemFacts[], baselines: Record<string, number>, plan: boolean, decisions: Record<string, ApprovalLineDecision> = {}): Promise<Facts> {
   const ids = products.map(item => item.product_id)
   // The lines table is asked for in the same call as everything else, with no probe of its own (a probe reads the whole schema on a cold isolate); a database without migration 0294 answers
   // "no such table" and the same read is made without it (every count there is an older, product-level one).
@@ -482,8 +507,10 @@ async function readFacts(db: D1Compat, branchId: number, count: { sessionId: str
   for (const item of products) {
     const own = dates.get(item.product_id)
     // A count made without received dates (older, or ic_lot_counts OFF) is one branch-total line against the stock its counter saw.
-    const lines = own?.length ? own.map(lot => ({ batchId: Number(lot.batch_id), scope: lot.scope, counted: Number(lot.counted_quantity), seen: lot.seen_quantity == null ? null : Number(lot.seen_quantity) }))
+    const typed = own?.length ? own.map(lot => ({ batchId: Number(lot.batch_id), scope: lot.scope, counted: Number(lot.counted_quantity), seen: lot.seen_quantity == null ? null : Number(lot.seen_quantity) }))
       : [{ batchId: 0, scope: 'branch' as const, counted: item.counted_quantity as number, seen: baselines[String(item.product_id)] ?? null }]
+    // A line the approver modified is applied from the modified figure, against what the counter saw: the counter's own figures in the count are never changed.
+    const lines = modifiedLines(typed, decisions[String(item.product_id)])
     const differing = lines.filter(line => line.seen === null || Math.abs(line.counted - line.seen) > EPSILON)
     const many = differing.length > 1
     units.set(item.product_id, differing.map(line => ({ ...line, productId: item.product_id, many, key: many ? `${item.product_id}:${line.batchId}` : String(item.product_id) })))
@@ -581,6 +608,132 @@ const replacedUpdate = (params: Record<string, unknown>): Statement => ({
 const decidedUpdate = (status: 'approved' | 'rejected', params: Record<string, unknown>): Statement => ({
   sql: `UPDATE inventory_check_approvals SET status='${status}',decided_by=@actorId,decided_by_name=@actorName,decided_at=@now,decision_note=@note,decision_request_id=@key${status === 'approved' ? ",applied_json=@newApplied,plan_json='{}'" : ''}
     WHERE session_id=@id AND status='pending' AND ${UNCHANGED}${status === 'rejected' ? ' AND applying_request_id IS NULL' : ''}`, params })
+
+/** An approval the approver ended with no stock written for it: every line left was rejected by a person (or replaced), so it ends as a rejection BY the approver. A claimed row may only be rejected with closed_json set, so a claimed one carries an empty close. */
+const linesRejectedUpdate = (params: Record<string, unknown>, claimed: boolean): Statement => ({
+  sql: `UPDATE inventory_check_approvals SET status='rejected',decided_by=@actorId,decided_by_name=@actorName,decided_at=@now,decision_note=@note,decision_request_id=@key,plan_json='{}'${claimed ? ",closed_json='{\"lines\":{}}'" : ''}
+    WHERE session_id=@id AND status='pending' AND ${UNCHANGED}`, params })
+
+// ---- per-line decisions (migration 0316) --------------------------------------------------------------------------------------------------------------------------------------------
+
+/** The accept request's product list: only an approve may name lines; one to 500 distinct ids. */
+function parseProductIds(value: unknown, decision: ApprovalDecision): number[] {
+  if (decision !== 'approve') return fail(400, 'inventory_check_invalid_request')
+  if (!Array.isArray(value) || value.length < 1 || value.length > 500) return fail(400, 'inventory_check_product_ids_required')
+  const ids = value.map(entry => typeof entry === 'number' && Number.isSafeInteger(entry) && entry > 0 ? entry : fail(400, 'inventory_check_invalid_id'))
+  if (new Set(ids).size !== ids.length) fail(400, 'inventory_check_invalid_id')
+  return ids
+}
+
+type TypedLine = { batchId: number; scope: 'lot' | 'branch'; counted: number; seen: number | null }
+/**
+ * The figures a line is applied from once the approver's decision is read: a modified line replaces what was counted (one figure for a line counted as a total, the named dates for a line counted by
+ * received date) and keeps what the counter saw. Without a modify the count's own figures stand. The counter's rows are never changed: this is only how they are read here.
+ */
+function modifiedLines(lines: TypedLine[], decision: ApprovalLineDecision | undefined): TypedLine[] {
+  if (decision?.decision !== 'modify') return lines
+  if (!lines.some(line => line.scope === 'lot')) return lines.map(line => typeof decision.counted === 'number' ? { ...line, counted: decision.counted } : line)
+  const byDate = new Map((decision.lots ?? []).map(lot => [lot.batchId, lot.counted]))
+  return lines.map(line => byDate.has(line.batchId) ? { ...line, counted: byDate.get(line.batchId) as number } : line)
+}
+
+/** The received-date lines the counter typed for one product, in the order the engine reads them; none for a database without migration 0294 or a count made without dates. */
+async function readTypedLines(db: D1Compat, sessionId: string, item: ItemFacts, baselines: Record<string, number>): Promise<TypedLine[]> {
+  let rows: Array<{ batch_id: number; scope: 'lot' | 'branch'; seen_quantity: number | null; counted_quantity: number }> = []
+  try {
+    rows = await db.prepare('SELECT batch_id,scope,seen_quantity,counted_quantity FROM inventory_check_lot_lines WHERE session_id=@sessionId AND product_id=@productId ORDER BY batch_id').all({ sessionId, productId: item.product_id })
+  } catch (error) {
+    if (!/no such table:?\s*inventory_check_lot_lines/i.test(error instanceof Error ? error.message : String(error))) throw error
+  }
+  return rows.length ? rows.map(lot => ({ batchId: Number(lot.batch_id), scope: lot.scope, counted: Number(lot.counted_quantity), seen: lot.seen_quantity == null ? null : Number(lot.seen_quantity) }))
+    : [{ batchId: 0, scope: 'branch' as const, counted: item.counted_quantity as number, seen: baselines[String(item.product_id)] ?? null }]
+}
+
+/** How many lines of a count are still open, from the approval row alone (for a replayed answer): lines minus applied, replaced and rejected. */
+const openLinesOf = (row: ApprovalRow): number => Math.max(0, row.lines - Object.keys(appliedLines(row.applied_json)).length - Object.keys(supersededLines(row.superseded_json)).length
+  - Object.values(lineDecisions(row.line_decisions_json)).filter(entry => entry.decision === 'reject').length)
+
+const lineState = (entry: ApprovalLineDecision | undefined): string => !entry ? 'pending' : entry.decision === 'reject' ? 'line_rejected' : 'line_modified'
+
+/**
+ * The approver's decision on ONE line of a waiting count: reject it, modify the figure it is applied from, or reopen an earlier decision. It writes the approval's decisions, the session's
+ * updated time and one audit event in ONE guarded batch, and moves no stock. The guard: the approval is still pending, exactly as this request read it (the same lines applied, replaced,
+ * decided and planned), so a line that is being applied, or was applied or replaced in between, is never decided; a request that raced an apply is refused and repeated. A reject that leaves no
+ * line open ends the approval in the same batch (approved if anything was applied, rejected if not and nothing is claimed), told once. The request id makes a repeat safe: the same
+ * request replays its answer, the same id with other input is refused.
+ */
+export async function decideInventoryCheckLine(db: D1Compat, principal: InventoryCheckPrincipal, sessionId: string, input: unknown, onDecided?: ApprovalDecided) {
+  const parsed = parseLineDecisionInput(input)
+  const actor = await currentInventoryCheckActor(db, principal); await schemaReady(db); await approvalsReady(db)
+  if (!canApproveInventoryCounts(actor)) fail(403, 'inventory_check_approve_required')
+  const session = await sessionRow(db, actor, sessionId)
+  const productId = parsed.productId, key = parsed.requestId
+  const hash = await inventoryCheckDigest(JSON.stringify({ action: 'approval-line', id: sessionId, productId, line: parsed.action, counted: parsed.counted ?? null, lots: parsed.lots ? [...parsed.lots].sort((a, b) => a.batchId - b.batchId) : null, note: parsed.note }))
+  const previous = await db.prepare('SELECT request_hash FROM inventory_check_events WHERE actor_id=@actorId AND request_id=@key').get<{ request_hash: string }>({ actorId: actor.id, key })
+  const row = await db.prepare(`SELECT ${APPROVAL_DETAIL_COLUMNS},plan_json FROM inventory_check_approvals WHERE session_id=@id AND organization_id IS @organization`)
+    .get<EngineRow>({ id: sessionId, organization: actor.organization_id })
+  if (!row) return fail(404, 'inventory_check_approval_not_found')
+  if (previous) {
+    if (previous.request_hash !== hash) fail(409, 'inventory_check_request_reused')
+    return { ...await respond(db, actor, sessionId, 0, openLinesOf(row), row.status !== 'pending'), line: { productId, action: parsed.action }, replayed: true }
+  }
+  if (row.status !== 'pending') fail(409, 'inventory_check_approval_decided')
+  // Modifying is accepting a figure: it needs what accepting needs (Inventory adjust at Full, and not one's own count while another approver exists). Reject and reopen move no stock.
+  if (parsed.action === 'modify') {
+    if (getActionTier(actor, 'inventory', 'adjust') !== 'full') fail(403, 'inventory_check_adjust_required')
+    if (row.submitted_by === actor.id && await anotherApproverExists(db, actor)) fail(403, 'inventory_check_self_approval')
+  }
+  const lines = await readLines(db, sessionId, session.branch_id)
+  if (lines.length !== row.lines) return fail(409, 'inventory_check_approval_lines_changed')
+  const line = lines.find(item => item.product_id === productId)
+  if (!line) return fail(404, 'inventory_check_line_not_found', { productIds: [productId] })
+  const applied = appliedLines(row.applied_json), held = appliedUnits(row.applied_json), superseded = supersededLines(row.superseded_json), stored = plansOf(row.plan_json)
+  const ofProduct = (unitKey: string): boolean => productOf(unitKey) === productId
+  if (applied[String(productId)]) fail(409, 'inventory_check_line_applied', { productIds: [productId] })
+  if (Object.keys(held).some(ofProduct) || Object.keys(stored).some(ofProduct)) fail(409, 'inventory_check_line_in_progress', { productIds: [productId] })
+  if (superseded[String(productId)]) fail(409, 'inventory_check_count_superseded', { productIds: [productId] })
+  const decisions = lineDecisions(row.line_decisions_json), current = decisions[String(productId)]
+  if (parsed.action === 'reject' && current?.decision === 'reject') fail(409, 'inventory_check_line_already_rejected', { productIds: [productId] })
+  if (parsed.action === 'reopen' && !current) fail(409, 'inventory_check_line_not_decided', { productIds: [productId] })
+  const now = new Date().toISOString()
+  const decided: ApprovalLineDecision | undefined = parsed.action === 'reopen' ? undefined
+    : { decision: parsed.action === 'reject' ? 'reject' : 'modify', ...(parsed.counted !== undefined ? { counted: parsed.counted } : {}), ...(parsed.lots ? { lots: [...parsed.lots].sort((a, b) => a.batchId - b.batchId) } : {}),
+      ...(parsed.note ? { note: parsed.note } : {}), by: actor.id, by_name: actorSnapshot(actor), at: now }
+  let figure: number | undefined
+  if (parsed.action === 'modify') {
+    const typed = await readTypedLines(db, sessionId, line, approvalBaselines(row.baselines_json))
+    checkLineShape(parsed, { dated: typed.some(entry => entry.scope === 'lot'), batchIds: typed.filter(entry => entry.scope === 'lot').map(entry => entry.batchId) })
+    const effective = modifiedLines(typed, decided)
+    if (effective.some(entry => entry.seen === null)) fail(409, 'inventory_check_baseline_missing', { productIds: [productId] })
+    // A figure that equals what the counter saw on every date applies nothing: the approver rejects the line instead.
+    if (!effective.some(entry => Math.abs(entry.counted - (entry.seen as number)) > EPSILON)) fail(409, 'inventory_check_modify_matches_seen', { productIds: [productId] })
+    figure = effective.reduce((sum, entry) => sum + entry.counted, 0)
+  }
+  const nextDecisions = { ...decisions }
+  if (decided) nextDecisions[String(productId)] = decided; else delete nextDecisions[String(productId)]
+  // A reject that leaves no line open ends the approval: approved when something was applied; rejected when nothing was and nobody holds a claim (a claimed row is finished or closed by its claimer).
+  const openAfter = lines.filter(item => item.product_id !== productId && !applied[String(item.product_id)] && !superseded[String(item.product_id)] && decisions[String(item.product_id)]?.decision !== 'reject').length
+  const appliedCount = Object.keys(applied).length
+  const ends = parsed.action === 'reject' && openAfter === 0 && (appliedCount > 0 || !row.applying_request_id)
+  const status = appliedCount > 0 ? 'approved' : 'rejected'
+  const params = { id: sessionId, organization: actor.organization_id, branchId: session.branch_id, actorId: actor.id, actorName: actorSnapshot(actor), now, note: parsed.note, key, productId,
+    oldApplied: row.applied_json, oldSuperseded: row.superseded_json, oldDecisions: row.line_decisions_json ?? '{}', oldPlan: row.plan_json, newDecisions: JSON.stringify(nextDecisions) }
+  const unchanged = `session_id=@id AND status='pending' AND ${UNCHANGED} AND plan_json=@oldPlan${ends && status === 'rejected' ? ' AND applying_request_id IS NULL' : ''}`
+  const endHash = await inventoryCheckDigest(JSON.stringify({ action: 'approval-line-end', id: sessionId, key }))
+  await record(db, actor, [
+    guard(`EXISTS(SELECT 1 FROM inventory_check_approvals WHERE ${unchanged})`, 'inventory_check_conflict', params),
+    { sql: `UPDATE inventory_check_approvals SET line_decisions_json=@newDecisions${ends ? `,status='${status}',decided_by=@actorId,decided_by_name=@actorName,decided_at=@now,decision_note=@note,decision_request_id=@key,plan_json='{}'` : ''} WHERE ${unchanged}`, params },
+    guard('changes()=1', 'inventory_check_conflict', {}),
+    { sql: 'UPDATE inventory_check_sessions SET updated_at=@now WHERE id=@id', params },
+    eventStatement(actor, { sessionId, productId, action: 'observe', key, hash,
+      before: { approval: lineState(current), counted_quantity: line.counted_quantity },
+      after: { approval: lineState(decided), counted_quantity: figure ?? line.counted_quantity, ...(parsed.note ? { reason: parsed.note } : {}) },
+      result: { sessionRevision: session.revision }, now }),
+    ...(ends ? [eventStatement(actor, { sessionId, action: 'observe', key: `${key}-end`, hash: endHash, before: { approval: 'pending', lines: row.lines }, after: { approval: status, lines: row.lines }, result: { sessionRevision: session.revision }, now })] : []),
+  ])
+  if (ends) await announce(onDecided, { decision: appliedCount > 0 ? 'approve' : 'reject', sessionId, note: parsed.note, applied: appliedCount, rejectedLines: Object.values(nextDecisions).filter(entry => entry.decision === 'reject').length })
+  return { ...await respond(db, actor, sessionId, 0, openAfter + (ends || parsed.action === 'reject' ? 0 : 1), ends), line: { productId, action: parsed.action } }
+}
 
 async function record(db: D1Compat, actor: Actor, statements: Statement[]): Promise<void> {
   try { await db.batchOnce([authorityGuard(actor), ...statements]) }

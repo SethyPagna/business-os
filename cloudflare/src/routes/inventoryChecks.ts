@@ -6,7 +6,7 @@ import { getDb } from '../lib/db'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
 import { readSwitch, readSwitchMemoMs } from '../lib/readSwitches'
 import type { Env } from '../index'
-import { decideInventoryCheckApproval, type ApprovalDecided } from '../lib/inventoryCheckApprovals'
+import { decideInventoryCheckApproval, decideInventoryCheckLine, type ApprovalDecided } from '../lib/inventoryCheckApprovals'
 import { getPlanLimits } from '../lib/planTier'
 import type { ReviewAlertEvent, ReviewAlertHook } from '../lib/reviewAlert'
 import type { InventoryContext } from './inventory'
@@ -29,9 +29,9 @@ import { approvalsAvailable, createInventoryCheckLotSubmission, createInventoryC
 const reviewAlertHook = (): ReviewAlertHook | undefined =>
   (globalThis as unknown as Record<symbol, ReviewAlertHook | undefined>)[Symbol.for('business-os.review-alert.v1')]
 // `system`: no person decided (an approval every line of which a newer count replaced), so no "By" row is sent.
-const announceCount = (env: Env, user: SessionUser, event: Pick<ReviewAlertEvent, 'kind' | 'reason'> & { sessionId: string; system?: true }): Promise<void> =>
+const announceCount = (env: Env, user: SessionUser, event: Pick<ReviewAlertEvent, 'kind' | 'reason' | 'summary'> & { sessionId: string; system?: true }): Promise<void> =>
   Promise.resolve(reviewAlertHook()?.announce(env, {
-    kind: event.kind, by: event.kind === 'created' || event.system ? undefined : actorSnapshot(user), reason: event.reason ?? null,
+    kind: event.kind, by: event.kind === 'created' || event.system ? undefined : actorSnapshot(user), reason: event.reason ?? null, ...(event.summary ? { summary: event.summary } : {}),
     row: { section: 'inventory_checks', action_type: 'approve', entity_type: 'count', entity_id: event.sessionId, payload_json: '{}', requested_by_name: event.kind === 'created' ? actorSnapshot(user) : null },
   }))
 
@@ -47,6 +47,16 @@ app.onError((error,c) => {
   const details = error instanceof InventoryCheckSessionError && error.details ? error.details : error instanceof InventoryCheckQueryError ? { parameter: error.parameter } : {}
   return c.json({ ...details, error: code, code, ...(code === 'inventory_check_outcome_unknown' || code === SAVED_REFRESH_CODE ? { outcome: 'unknown' } : {}) }, status)
 })
+/**
+ * The alert an approval's end sends, once and only when it ends (never per line). A close that applied nothing reads as a rejection (the reason is its note or "Closed"); one that applied something reads as
+ * an approval. When the approver rejected lines, the alert says how many lines were applied and how many were rejected.
+ */
+const approvalAnnouncer = (c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>): ApprovalDecided => ({ decision, sessionId, note, applied, rejectedLines }) => {
+  if (decision === 'replaced') return announceCount(c.env, c.get('user'), { kind: 'rejected', sessionId, reason: REPLACED_NOTE, system: true })
+  const rejected = decision === 'reject' || (decision === 'close' && !applied)
+  return announceCount(c.env, c.get('user'), { kind: rejected ? 'rejected' : 'approved', sessionId, reason: rejected ? note ?? (decision === 'close' ? 'Closed' : null) : null,
+    ...(rejectedLines ? { summary: { applied: applied ?? 0, rejected: rejectedLines } } : {}) })
+}
 /** ic_fix_stock counts as ON only once migration 0286 is applied: with the switch on and the table missing every count would fail, so it answers exactly as OFF. */
 const fixStockOn = async (c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>): Promise<boolean> => await readSwitch(c.env, 'ic_fix_stock') && await approvalsAvailable(getDb(c.env))
 /** ic_lot_counts counts as ON only once migration 0294 is applied: with the switch on and the table missing every lot count would fail, so it answers exactly as OFF. */
@@ -227,14 +237,14 @@ app.post('/sessions/:id/approval', async c => {
   if (!await fixStockOn(c)) throw new InventoryCheckSessionError(404, 'inventory_check_not_available')
   // The stock writer is the Set sessions' own commit; it is loaded only when a decision reaches stock, so every refusal and a rejection never touch it.
   const writeStock = async (lines: StockInCommitLine[]) => (await import('./stockInCommit')).runStockInCommit(c as unknown as InventoryContext, lines)
-  // A close that applied nothing reads as a rejection (the reason is its note or "Closed"); one that applied something reads as an approval.
-  const onDecided: ApprovalDecided = ({ decision, sessionId, note, applied }) => {
-    if (decision === 'replaced') return announceCount(c.env, c.get('user'), { kind: 'rejected', sessionId, reason: REPLACED_NOTE, system: true })
-    const rejected = decision === 'reject' || (decision === 'close' && !applied)
-    return announceCount(c.env, c.get('user'), { kind: rejected ? 'rejected' : 'approved', sessionId, reason: rejected ? note ?? (decision === 'close' ? 'Closed' : null) : null })
-  }
+  const onDecided = approvalAnnouncer(c)
   const limits = { takeoverSeconds: getPlanLimits(c.env).inventoryCheckApprovalTakeoverSeconds }
   return c.json(await decideInventoryCheckApproval(getDb(c.env), await principal(c), c.req.param('id'), await c.req.json().catch(()=>null), writeStock, limits, onDecided))
+})
+// One decision on one line of a waiting count (migration 0316): reject, modify or reopen it. It moves no stock; the alert is sent once, when the approval ends (see approvalAnnouncer).
+app.post('/sessions/:id/approval/lines', async c => {
+  if (!await fixStockOn(c)) throw new InventoryCheckSessionError(404, 'inventory_check_not_available')
+  return c.json(await decideInventoryCheckLine(getDb(c.env), await principal(c), c.req.param('id'), await c.req.json().catch(()=>null), approvalAnnouncer(c)))
 })
 app.get('/sessions/:id/history', async c => c.json(await inventoryCheckSessionHistory(getDb(c.env), await principal(c), c.req.param('id'), c.req.query())))
 app.patch('/sessions/:id/items/:productId', async c => {

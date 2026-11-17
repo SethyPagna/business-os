@@ -370,7 +370,7 @@ assert.ok(scanned.length >= 20, `expected to scan real label sites, found ${scan
 // The review alerts compose their rows in lib/reviewAlert.ts: the scan must really have read it, or a label added there
 // later would ship English-only without this test noticing.
 assert.deepEqual([...new Set(scanned.filter(([rel]) => rel === 'src/lib/reviewAlert.ts').map(([, name]) => name))].sort(),
-  ['By', 'Merged', 'Reason', 'Request', 'Requested by'], 'the scan found the five rows the review alerts emit')
+  ['By', 'Lines', 'Merged', 'Reason', 'Request', 'Requested by'], 'the scan found the six rows the review alerts emit (Lines: a count approval that ended with rejected lines)')
 console.log(`PASS coverage: all ${new Set(scanned.map(([, name]) => name)).size} emitted line labels resolve in the dictionary`)
 
 // --- 4. composed event payloads: both languages on every labelled line ------

@@ -141,12 +141,16 @@ export type InventoryCheckApproval = { status: 'pending' | 'approved' | 'rejecte
   /** Per product, the stock the counter saw when counting: the figure the count is measured against. */
   baselines?: Record<string, number>;
   /** Lines replaced by a newer count of the same product (queue-first: one waiting item per product): product id -> the session of the newer count. They are never applied. */
-  superseded?: Record<string, string> }
+  superseded?: Record<string, string>;
+  /** What the approver decided per product (migration 0316): a rejected line is never applied; a modified line is applied from the modified figure. Absent key: the line is open. */
+  line_decisions?: Record<string, ApprovalLineDecision> }
+/** One approver decision on one line, as stored (by is the account id, never shown) and as projected (by_name only to a viewer who may see staff names). */
+export type ApprovalLineDecision = { decision: 'reject' | 'modify'; counted?: number; lots?: Array<{ batchId: number; counted: number }>; note?: string | null; by?: number; by_name?: string | null; at: string }
 export type ApprovalRow = { session_id: string; status: 'pending' | 'approved' | 'rejected'; lines: number; submitted_by: number; submitted_at: string;
   decided_by: number | null; decided_by_name: string | null; decided_at: string | null; decision_note: string | null; decision_request_id: string | null; applied_json: string;
-  applying_request_id: string | null; applying_by: number | null; applying_at: string | null; takeovers: number; closed_json: string | null; baselines_json?: string; superseded_json?: string }
+  applying_request_id: string | null; applying_by: number | null; applying_at: string | null; takeovers: number; closed_json: string | null; baselines_json?: string; superseded_json?: string; line_decisions_json?: string }
 export const APPROVAL_COLUMNS = 'session_id,status,lines,submitted_by,submitted_at,decided_by,decided_by_name,decided_at,decision_note,decision_request_id,applied_json,applying_request_id,applying_by,applying_at,takeovers,closed_json'
-export const APPROVAL_DETAIL_COLUMNS = `${APPROVAL_COLUMNS},baselines_json,superseded_json`
+export const APPROVAL_DETAIL_COLUMNS = `${APPROVAL_COLUMNS},baselines_json,superseded_json,line_decisions_json`
 let approvalsSchemaReady = false
 /** True once migration 0286 (the table and its four triggers) is applied; a positive answer is remembered for the isolate, a miss re-probes. */
 export async function approvalsAvailable(db: D1Compat): Promise<boolean> {
@@ -202,6 +206,14 @@ export function supersededLines(json: string | undefined): Record<string, string
     return Object.fromEntries(entries.filter(([, value]) => typeof value === 'string')) as Record<string, string>
   } catch { return {} }
 }
+/** The approver's decisions per product (migration 0316); an unreadable or missing column is no decision at all. */
+export function lineDecisions(json: string | undefined | null): Record<string, ApprovalLineDecision> {
+  try {
+    const parsed = JSON.parse(json ?? '{}') as unknown
+    const entries = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? Object.entries(parsed) : []
+    return Object.fromEntries(entries.filter(([, value]) => !!value && typeof value === 'object' && ((value as { decision?: unknown }).decision === 'reject' || (value as { decision?: unknown }).decision === 'modify'))) as Record<string, ApprovalLineDecision>
+  } catch { return {} }
+}
 /** The lines a close left unapplied, each with its reason. */
 export function closedLines(json: string | null): { lines: Record<string, string> } | undefined {
   if (!json) return undefined
@@ -209,6 +221,13 @@ export function closedLines(json: string | null): { lines: Record<string, string
     const lines = (JSON.parse(json) as { lines?: unknown }).lines
     return { lines: lines && typeof lines === 'object' && !Array.isArray(lines) ? lines as Record<string, string> : {} }
   } catch { return { lines: {} } }
+}
+/** The decisions as a viewer sees them: the figures and the note, who decided only for a viewer who may see staff names. */
+function projectLineDecisions(actor: Actor, json: string): Record<string, ApprovalLineDecision> {
+  return Object.fromEntries(Object.entries(lineDecisions(json)).map(([productId, entry]) => {
+    const { by, by_name, ...rest } = entry
+    return [productId, { ...rest, ...(typeof by === 'number' && canSeeStaffIdentity(actor, by) && by_name ? { by_name } : {}) }]
+  }))
 }
 export function projectApproval(actor: Actor, row: ApprovalRow, detail = false): InventoryCheckApproval {
   const applied = appliedLines(row.applied_json), closed = closedLines(row.closed_json)
@@ -219,7 +238,8 @@ export function projectApproval(actor: Actor, row: ApprovalRow, detail = false):
     ...(row.decided_by != null && canSeeStaffIdentity(actor, row.decided_by) ? { decided_by_name: row.decided_by_name } : {}),
     ...(row.status === 'pending' && row.applying_request_id ? { applying: true, ...(row.applying_by === actor.id ? { applying_request_id: row.applying_request_id } : {}) } : {}),
     ...(detail ? { applied_lines: applied, ...(row.baselines_json ? { baselines: approvalBaselines(row.baselines_json) } : {}),
-      ...(Object.keys(supersededLines(row.superseded_json)).length ? { superseded: supersededLines(row.superseded_json) } : {}) } : {}) }
+      ...(Object.keys(supersededLines(row.superseded_json)).length ? { superseded: supersededLines(row.superseded_json) } : {}),
+      ...(row.line_decisions_json !== undefined ? { line_decisions: projectLineDecisions(actor, row.line_decisions_json) } : {}) } : {}) }
 }
 /** One query for the approvals of the given sessions, inside the viewer's organization. Callers ask only for viewers who may see stock. */
 export async function approvalRows(db: D1Compat, actor: Actor, ids: string[], detail = false): Promise<ApprovalRow[]> {
@@ -228,9 +248,10 @@ export async function approvalRows(db: D1Compat, actor: Actor, ids: string[], de
   return db.prepare(`SELECT ${detail ? APPROVAL_DETAIL_COLUMNS : APPROVAL_COLUMNS} FROM inventory_check_approvals WHERE organization_id IS @organization
     AND session_id IN (SELECT value FROM json_each(@ids))`).all<ApprovalRow>({ organization: actor.organization_id, ids: JSON.stringify(ids) })
 }
-/** A line waits when its approval is pending, it is a difference, no stock write for it has been recorded and no newer count of the product has replaced it. */
+/** A line waits when its approval is pending, it is a difference, no stock write for it has been recorded, no newer count of the product has replaced it and the approver has not rejected it (a rejected line is never applied). */
 export const waitingLineSql = (a: string, i: string): string => `${a}.status='pending' AND ${i}.baseline_quantity IS NOT NULL AND ${i}.counted_quantity IS NOT NULL AND abs(${i}.baseline_quantity-${i}.counted_quantity)>0.000000001
-  AND json_extract(${a}.applied_json,'$.lines."'||${i}.product_id||'"') IS NULL AND json_extract(${a}.superseded_json,'$."'||${i}.product_id||'"') IS NULL`
+  AND json_extract(${a}.applied_json,'$.lines."'||${i}.product_id||'"') IS NULL AND json_extract(${a}.superseded_json,'$."'||${i}.product_id||'"') IS NULL
+  AND json_extract(${a}.line_decisions_json,'$."'||${i}.product_id||'".decision') IS NOT 'reject'`
 const WAITING_LINE_SQL = waitingLineSql('a', 'i')
 /**
  * THE rule for "this count line differs from stock", used by the statement that creates an approval (its `lines`) and by the engine that decides it (which lines it plans, rejects or closes), so the
@@ -547,7 +568,8 @@ function supersedeStatements(params: Record<string, unknown>): Statement[] {
       WHERE organization_id IS @organization AND branch_id=@branchId AND status='pending' AND applying_request_id IS NULL AND applied_json='{}'
         AND EXISTS(SELECT 1 FROM json_each(superseded_json) WHERE value=@id)
         AND NOT EXISTS(SELECT 1 FROM inventory_check_items i WHERE i.session_id=${A}.session_id AND i.baseline_quantity IS NOT NULL AND i.counted_quantity IS NOT NULL
-          AND abs(i.baseline_quantity-i.counted_quantity)>0.000000001 AND json_extract(superseded_json,'$."'||i.product_id||'"') IS NULL)
+          AND abs(i.baseline_quantity-i.counted_quantity)>0.000000001 AND json_extract(superseded_json,'$."'||i.product_id||'"') IS NULL
+          AND json_extract(line_decisions_json,'$."'||i.product_id||'".decision') IS NOT 'reject')
       RETURNING session_id`, params: { ...params, replacedNote: REPLACED_NOTE } },
     { sql: SUPERSEDE_EVENTS_SQL, params },
   ]
@@ -559,7 +581,7 @@ export const REPLACED_NOTE = 'Replaced by a newer count'
 const COUNT_EPSILON = 0.000000001
 const SUBMISSION_LINE_KEYS = new Set(['productId', 'countedQuantity', 'seenQuantity', 'checked', 'note'])
 type SubmissionLine = { productId: number; counted: number; seen: number | null; checked: boolean; note: string | null }
-function submissionQuantity(value: unknown): number {
+export function submissionQuantity(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1_000_000_000 ? value : fail(400, 'inventory_check_invalid_quantity')
 }
 function submissionLine(value: unknown): SubmissionLine {
