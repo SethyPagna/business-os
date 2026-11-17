@@ -340,13 +340,15 @@ function CheckRow({ product, observation, pending, error, header, adornment, fro
   const openDetail = () => onOpenProduct(product)
   // The row is a focus stop that opens the product on Enter and on a press: its name says so (a list item with no name is announced as nothing). It stays a list item, not a button: the row holds real buttons
   // and inputs of its own, and a button may not contain them.
-  const rowOpenLabel = `${tr('open_product', 'Open product')}: ${product.name}`
+  // Name, then the recorded state, so the row's label does not hide what the row says.
+  const stateWords = state === 'done' ? tr('inventory_check_done', 'Done') : state === 'issue' ? tr('inventory_check_issue', 'Issue') : ''
+  const rowOpenLabel = `${tr('open_product', 'Open product')}: ${product.name}${stateWords ? ` — ${stateWords}` : ''}`
   function onRowKeyDown(event: KeyboardEvent<HTMLLIElement>) {
     if (event.key === 'Enter' && event.target === event.currentTarget && !event.nativeEvent?.isComposing) { event.preventDefault(); openDetail() }
   }
 
   return <li data-inventory-check-row={String(product.id)} data-check-state={shownState ?? 'unstarted'} data-scan-hit={scanHit ? '' : undefined}
-    tabIndex={0} onClick={draft ? undefined : event => rowClickOpens(event, openDetail)} onKeyDown={onRowKeyDown} aria-label={rowOpenLabel} aria-keyshortcuts="Enter"
+    tabIndex={0} onClick={draft ? undefined : event => rowClickOpens(event, openDetail)} onKeyDown={onRowKeyDown} aria-label={rowOpenLabel}
     className={`min-w-0 max-w-full cursor-pointer border-b border-l-2 border-b-gray-100 py-2 pl-2 last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:border-b-gray-800 ${edge} ${busy ? 'lg:opacity-70' : ''} ${scanHit ? 'rounded-sm ring-2 ring-primary-400 dark:ring-primary-300' : ''}`} aria-busy={busy}>
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 lg:flex lg:items-center" data-inventory-check-main>
       <div className={`flex min-w-0 items-start gap-2 ${PRODUCT_BOX}`}>

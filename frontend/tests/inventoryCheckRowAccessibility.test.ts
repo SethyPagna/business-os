@@ -5,7 +5,7 @@ import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
 
 // Inventory redesign, slice C1 review L8 (17 Nov 2026): the whole Inventory row opens the product and is a focus stop (tabIndex 0, Enter), but it had no name, so a screen reader said nothing
 // useful on it. Both row lists (the count list and the in-session sheet) now give the row its name, "Open product: <name>" in the viewer's language, and its key (Enter). The row must NOT become
-// role="button" / a link: it holds real buttons and inputs, and an interactive role may not contain another one (nested-interactive). So this file pins both halves, on both lists:
+// role="button" / a link (Follow-up, r2: the name also carries the product's status, "Open product: X — Checked OK", and aria-keyshortcuts is gone: Enter is not a shortcut): it holds real buttons and inputs, and an interactive role may not contain another one (nested-interactive). So this file pins both halves, on both lists:
 //   1. the row names what it does, in English and in Khmer, with the product's own name
 //   2. no nested interactive: no interactive element (button, a, input, select, textarea, or an interactive role) has an interactive ancestor inside the row
 //   3. the inner controls stay reachable: the status / count controls are still tab stops, and the image button (a duplicate target) is not
@@ -22,10 +22,13 @@ const listed: InventoryCheckProduct[] = [
   { id: 504, name: 'ទឹកអប់ក្លិនផ្កាម្លិះ', quantity: 9, check_status: 'not_checked' },
 ]
 const sheet: InventoryCheckProduct[] = [{ id: 11, name: 'Sheet variant', quantity: 3, sku: 'VARIANT-11' }, { id: 12, name: 'ក្រែមលាបមុខ', quantity: 7, barcode: 'VARIANT-12' }]
+// The status key each fixture row names itself with (the list: its recorded status; the sheet: done / issue, nothing for a product not started).
+const listedStatus = ['inventory_check_status_ok', 'inventory_check_status_not_checked']
+const sheetState = ['inventory_check_done', 'inventory_check_issue']
 const mountList = (lang: Record<string, string>) => track(harness.mount({ component: 'components/inventory/InventoryCheckListRows.tsx',
   props: { products: listed, drafts: {}, selecting: true, canViewStock: true, canViewCounts: true, t: translator(lang), onOpenProduct: () => {}, onCount: () => {}, onChecked: () => {}, onNote: () => {}, onToggle: () => {} }, app: {}, doubles: {} }))
 const mountSheet = (lang: Record<string, string>) => track(harness.mount({ component: 'components/inventory/InventoryCheckRows.tsx',
-  props: { products: sheet, observations: {}, pending: {}, errors: {}, canCheck: true, t: translator(lang), onOpenProduct: () => {}, onSave: async () => {} }, app: {}, doubles: {} }))
+  props: { products: sheet, observations: { 11: { product_id: 11, state: 'done', revision: 1 }, 12: { product_id: 12, state: 'issue', revision: 1, reason: 'Crushed', counted_quantity: 5 } }, pending: {}, errors: {}, canCheck: true, t: translator(lang), onOpenProduct: () => {}, onSave: async () => {} }, app: {}, doubles: {} }))
 
 const INTERACTIVE_ROLES = new Set(['button', 'link', 'checkbox', 'radio', 'switch', 'textbox', 'combobox', 'listbox', 'slider', 'spinbutton', 'tab', 'menuitem', 'option', 'searchbox'])
 const isInteractive = (node: MemoryNode) => ['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA', 'SUMMARY'].includes(node.tagName) && !(node.tagName === 'A' && node.getAttribute('href') === null) || INTERACTIVE_ROLES.has(node.getAttribute('role') ?? '')
@@ -55,8 +58,8 @@ const cases: Array<[string, () => Promise<void>]> = [
       assert.equal(rows.length, listed.length)
       rows.forEach((row, index) => {
         assert.equal(row.tagName, 'LI')
-        assert.equal(row.getAttribute('aria-label'), `${word}: ${listed[index].name}`, 'the name says what the row does, with the product')
-        assert.equal(row.getAttribute('aria-keyshortcuts'), 'Enter')
+        assert.equal(row.getAttribute('aria-label'), `${word}: ${listed[index].name} — ${lang[listedStatus[index]]}`, 'the name says what the row does, with the product and its status')
+        assert.equal(row.getAttribute('aria-keyshortcuts'), null, 'Enter is how any focused row activates, not a shortcut to announce')
         assert.equal(row.getAttribute('tabindex') ?? row.getAttribute('tabIndex'), '0', 'still a focus stop')
         assert.ok(!['button', 'link'].includes(row.getAttribute('role') ?? ''), 'not an interactive role: the row contains real controls')
       })
@@ -70,8 +73,8 @@ const cases: Array<[string, () => Promise<void>]> = [
       const rows = rowsOf(s)
       assert.equal(rows.length, sheet.length)
       rows.forEach((row, index) => {
-        assert.equal(row.getAttribute('aria-label'), `${word}: ${sheet[index].name}`)
-        assert.equal(row.getAttribute('aria-keyshortcuts'), 'Enter')
+        assert.equal(row.getAttribute('aria-label'), `${word}: ${sheet[index].name}${sheetState[index] ? ` — ${lang[sheetState[index]]}` : ''}`)
+        assert.equal(row.getAttribute('aria-keyshortcuts'), null)
         assert.ok(!['button', 'link'].includes(row.getAttribute('role') ?? ''))
       })
       await s.unmount()
