@@ -616,6 +616,8 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   error.forceable = parsed?.forceable === true
   error.operationId = parsed?.operationId || null
   // A refusal that names products (an Inventory count whose stock moved since it was counted, an approval line that cannot be applied) keeps the list and, for an approval, the reason of each line.
+  // A refused query names the parameter it refused (inventory_check_invalid_query), so the page can drop exactly that filter instead of failing the whole list.
+  error.parameter = typeof parsed?.parameter === 'string' ? parsed.parameter : null
   error.productIds = Array.isArray(parsed?.productIds) ? parsed.productIds.filter((id: unknown) => Number.isSafeInteger(id)) : null
   error.refused = Array.isArray(parsed?.refused) ? parsed.refused : null
   // An Inventory count refused for leaving a stocked received date out (409 inventory_check_lots_incomplete) lists, per product, the dates it holds now (the page takes them into its rows and keeps the counts).

@@ -5,6 +5,7 @@ import * as dirtyWork from '../src/utils/dirtyWork.ts'
 import { appendQuery, buildQueryString, type QueryParams } from '../src/api/query.ts'
 import { canonicalProductsQuery, loadWired, wiredListParams, wiredResult, type WiredDeps, type WiredList, type WiredRaw } from '../src/components/inventory/inventoryWired.ts'
 import { checkDaysOf, dayChipsOf } from '../src/components/inventory/inventoryCheckDays.ts'
+import { productsWireParams, sessionScopeParams } from '../src/components/inventory/inventoryCheckProductsRequest.ts'
 
 // INV-B S4b: the mounted Inventory Check page against fixture servers that follow the S4a contract (GET /api/inventory-checks/list and /overlay, 404 while ic_wired is off).
 //   - a viewer who may not see stock reads no stock from the shared Products store (the store is not used for them; the server cuts stock from its own answer)
@@ -95,11 +96,21 @@ const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
   const rawOf = (summary: Record<string, unknown> | undefined): WiredRaw => ({ list: { items: [{ id: 1, name: 'A' }], total: 1, page: 1, pageSize: 20 } as never, overlay: new Map(), lots: new Map(), branches: [{ id: 1, name: 'B' }], branchId: 1, extras: { summary: summary as never } })
   const days = [{ day: '2026-11-12', count: 2 }, { day: '2026-11-10', count: 1 }]
   const first = wiredResult(rawOf({ ok: 2, issue: 1, not_checked: 4, total: 7, days }))
-  assert.deepEqual(first.summary?.days, days, 'the days ride the summary')
-  assert.deepEqual(wiredResult(rawOf(undefined), first).summary?.days, days, 'a page step brings no summary: the last days stay')
-  assert.equal(wiredResult(rawOf({ ok: 2, issue: 1, not_checked: 4, total: 7 }), first).summary?.days, undefined, 'a fresh summary without days (too many products to list them) does NOT keep the old chips')
-  assert.equal(wiredResult(rawOf({ ok: 2, issue: 1, not_checked: 4, total: 7, tooLarge: true, days }), first).summary?.tooLarge, true)
-  assert.deepEqual(checkDaysOf(wiredResult(rawOf({ ok: 0, issue: 0, not_checked: 1, total: 1, tooLarge: true, days })).summary), [], 'tooLarge: no chips, whatever days came with it')
+  const daysOfSummary = (result: ReturnType<typeof wiredResult>) => (result.summary as { days?: unknown } | undefined)?.days
+  assert.deepEqual(daysOfSummary(first), days, 'the days ride the summary')
+  assert.deepEqual(daysOfSummary(wiredResult(rawOf(undefined), first)), days, 'a page step brings no summary: the last days stay')
+  assert.equal(daysOfSummary(wiredResult(rawOf({ ok: 2, issue: 1, not_checked: 4, total: 7 }), first)), undefined, 'a fresh summary without days does NOT keep the old chips')
+  // The Worker's too-many-products answer (docs/contracts/inventory-check-requests-20261117.md section 4): { "tooLarge": true } and NOTHING else.
+  const tooLarge = wiredResult(rawOf({ tooLarge: true }), first)
+  assert.deepEqual(tooLarge.summary, { tooLarge: true }, 'tooLarge replaces the whole summary: no stale counts (not even a false 0) and no stale days')
+  assert.deepEqual(checkDaysOf(tooLarge.summary), [], 'and no chips')
+  assert.deepEqual(wiredResult(rawOf(undefined), tooLarge).summary, { tooLarge: true }, 'a page step (no summary) keeps the flag, and so keeps the rail hidden')
+  const normal = wiredResult(rawOf({ ok: 1, issue: 0, not_checked: 2, total: 3, days }), tooLarge)
+  assert.deepEqual([normal.summary && 'tooLarge' in normal.summary, daysOfSummary(normal)], [false, days], 'a later fresh summary brings the counts and the days back')
+  assert.deepEqual(wiredResult(rawOf(undefined), first).summary?.tooLarge, undefined, 'contrast: a page step after a normal summary is not too large')
+  // checkedOn belongs to the wired list (and its overlay) alone: neither older list, nor a session, ever hears of it
+  assert.deepEqual(sessionScopeParams({ checkedOn: '2026-11-12', branchId: '1', query: '', brand: 'Acme', checkState: 'issue', sessionId: undefined }), { branchId: '1', brand: 'Acme', checkState: 'issue' }, 'the scope of a new count session keeps the filters but never the date chip (it answers checkedOn with a 400), and drops empty ones')
+  for (const server of ['unknown', 'simple', 'old'] as const) assert.equal(Object.hasOwn(productsWireParams({ checkedOn: '2026-11-12', page: 1, pageSize: 20, branchId: 1 }, server, false), 'checkedOn'), false, `the ${server} products list is never sent checkedOn`)
   // the chip list: newest first, malformed or empty entries dropped, the chosen day kept on the rail
   assert.deepEqual(checkDaysOf({ days: [{ day: '2026-11-10', count: 1 }, { day: '2026-11-12', count: 2 }, { day: '2026-11-12', count: 9 }, { day: 'garbage', count: 1 }, { day: '2026-11-11', count: 0 }, { day: '2026-11-09', count: 1.5 }, null] }), [{ day: '2026-11-12', count: 2 }, { day: '2026-11-10', count: 1 }], 'sorted newest first; a repeat, a bad date and a zero or fractional count are dropped')
   assert.deepEqual(checkDaysOf({ days: 'nope' }), []); assert.deepEqual(checkDaysOf(undefined), []); assert.deepEqual(checkDaysOf({}), [])
@@ -220,16 +231,81 @@ try {
     await surface.waitFor(() => chips()[0].getAttribute('aria-pressed') === 'true', 'All is pressed again')
     assert.ok(lists.every((query, index) => index === 1 ? query.get('checkedOn') === '2026-11-12' : !query.has('checkedOn')), 'every other read carries no date')
     await surface.unmount()
-    listAnswer = () => listBody([productRow(12, 'Sequence product', 8)], { summary: { ok: 0, issue: 0, not_checked: 1, total: 1, tooLarge: true, days } })
+    listAnswer = () => listBody([productRow(12, 'Sequence product', 8)], { summary: { tooLarge: true } })
     const large = await mount()
-    assert.equal(large.findAll(node => node.getAttribute('data-day-chip') !== null).length, 0, 'tooLarge: no chips')
+    assert.equal(large.findAll(node => node.getAttribute('data-day-chip') !== null).length, 0, 'tooLarge (the Worker answer { tooLarge: true }): no chips')
+    assert.equal(large.findAll(node => node.getAttribute('data-inventory-check-status-rail') !== null).length, 0, 'and no status chips with counts that do not exist')
     await large.unmount()
     listAnswer = () => listBody([productRow(12, 'Sequence product', 8)])
     const none = await mount()
     assert.equal(none.findAll(node => node.getAttribute('data-day-chip') !== null).length, 0, 'no days: no chips')
     await none.unmount()
   }
-  console.log('inventoryChecksWired passed: blind store, changed-elsewhere hint, by-id refresh, ranked search, late answers, date chips')
+  // ---- too many products: an answer that says so clears the chips and counts the page already holds; a page step that brings no summary keeps them ----
+  {
+    const days = [{ day: '2026-11-10', count: 1 }, { day: '2026-11-12', count: 3 }]
+    const rows = (name: string) => [productRow(12, name, 8)]
+    listAnswer = () => listBody(rows('Sequence product'), { summary: { ok: 3, issue: 1, not_checked: 5, total: 9, days } })
+    const surface = await mount()
+    const chips = () => surface.findAll(node => node.getAttribute('data-day-chip') !== null)
+    const statusRail = () => surface.findAll(node => node.getAttribute('data-inventory-check-status-rail') !== null)
+    assert.equal(chips().length, 3, 'control: the rail is drawn from the first summary')
+    assert.ok(statusRail().length === 1 && statusRail()[0].textContent.includes('5'), 'control: the status chips carry their counts')
+    listAnswer = () => listBody(rows('Sequence product'), { summary: { tooLarge: true } })
+    await surface.click(surface.find(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Not checked'), 'Not checked chip'))
+    await surface.waitFor(() => lists.length === 2, 'the read that says too many')
+    await surface.waitFor(() => chips().length === 0, 'the date rail is gone')
+    assert.equal(statusRail().length, 0, 'the status chips (with their old counts) are gone too')
+    assert.ok(!/Checked OK\s*3|Issues\s*1/.test(surface.text()), 'no count of the earlier answer is left on screen')
+    await surface.unmount()
+
+    // A page step asks for no summary and the server sends none: the days stay exactly as they are (the contract's "missing summary" case).
+    const pages = (query: URLSearchParams) => listBody(rows(query.get('page') === '2' ? 'Page two product' : 'Page one product'), { total: 45, totalPages: 3, page: Number(query.get('page') || 1), ...(query.get('summary') === '0' ? { summary: undefined } : { summary: { ok: 3, issue: 1, not_checked: 5, total: 9, days } }) })
+    listAnswer = pages
+    const stepper = await mount()
+    const stepChips = () => stepper.findAll(node => node.getAttribute('data-day-chip') !== null)
+    assert.equal(stepChips().length, 3, 'control: chips on page 1')
+    await stepper.click(stepper.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'next', 'next page'))
+    await stepper.waitFor(() => stepper.text().includes('Page two product'), 'page 2 is drawn')
+    assert.equal(lists[1].get('summary'), '0', 'the page step asked for no summary')
+    assert.deepEqual(stepChips().map(node => node.getAttribute('data-day-chip')), ['', '2026-11-12', '2026-11-10'], 'and the chips stay')
+    await stepper.unmount()
+  }
+
+  // ---- a refused date: the server will not filter by checkedOn (400 naming it) or cannot (503 too many products); the page drops the date and lists every date, exactly as for a refused status ----
+  {
+    const days = [{ day: '2026-11-10', count: 1 }, { day: '2026-11-12', count: 3 }]
+    for (const refusal of [{ code: 'inventory_check_invalid_query', parameter: 'checkedOn', status: 400 }, { code: 'inventory_check_filter_too_large', status: 503 }]) {
+      listAnswer = query => {
+        if (query.get('checkedOn')) throw Object.assign(new Error('refused'), refusal)
+        return listBody([productRow(12, 'Sequence product', 8)], { summary: { ok: 3, issue: 1, not_checked: 5, total: 9, days } })
+      }
+      const surface = await mount()
+      const chips = () => surface.findAll(node => node.getAttribute('data-day-chip') !== null)
+      await surface.click(chips()[1])
+      await surface.waitFor(() => lists.length >= 2, 'the dated read')
+      assert.equal(lists[1].get('checkedOn'), '2026-11-12')
+      // The list of every date comes back (from Products' held answer or a new read: either way it carries no date).
+      await surface.waitFor(() => chips()[0]?.getAttribute('aria-pressed') === 'true', `All is the chosen chip again after ${refusal.code}`)
+      assert.ok(lists.slice(2).every(query => !query.has('checkedOn')), 'no read after the refusal carries the date')
+      assert.ok(!surface.text().includes('Inventory checks are unavailable'), `${refusal.code}: no "unavailable" with the date still set`)
+      assert.ok(surface.text().includes('Sequence product'), 'the list is drawn')
+      assert.equal(chips().length, 3, 'the rail is still there')
+      await surface.unmount()
+    }
+    // contrast: a refusal that is NOT about the date (another parameter) is not swallowed by this recovery
+    listAnswer = query => {
+      if (query.get('checkedOn')) throw Object.assign(new Error('refused'), { code: 'inventory_check_invalid_query', parameter: 'branchId', status: 400 })
+      return listBody([productRow(12, 'Sequence product', 8)], { summary: { ok: 3, issue: 1, not_checked: 5, total: 9, days } })
+    }
+    const other = await mount()
+    await other.click(other.findAll(node => node.getAttribute('data-day-chip') !== null)[1])
+    await other.waitFor(() => other.text().includes('Inventory checks are unavailable'), 'a refusal naming another parameter still shows the load error')
+    assert.equal(lists.filter(query => !query.get('checkedOn')).length, 1, 'and does not retry without the date')
+    await other.unmount()
+  }
+
+  console.log('inventoryChecksWired passed: blind store, changed-elsewhere hint, by-id refresh, ranked search, late answers, date chips, too many products, refused date')
 } finally {
   await harness.close()
 }

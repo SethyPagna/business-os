@@ -38,7 +38,7 @@ import { countTextFromLots, incompleteLotAnswers, lotSubmissionLine, lotTotals, 
 import { adjustStock } from '../../api/inventoryWriteTransport.ts'
 import { stockConflictFigures, type StockWriteAnswer } from './stockAnswerPatch.ts'
 import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
-import { oldListDropsStatus, productsServerOf, productsWireParams, type ProductsServer } from './inventoryCheckProductsRequest.ts'
+import { oldListDropsStatus, productsServerOf, productsWireParams, sessionScopeParams, type ProductsServer } from './inventoryCheckProductsRequest.ts'
 import { groupedParams, groupToAsk, inOpenGroups, type Grouping } from './inventoryCheckGroups.ts'
 import { groupedListLoaded, loadGroupedList } from './inventoryCheckGroupChunk.ts'
 import { soleActiveBranch } from '../../utils/branchCollapse.ts'
@@ -83,7 +83,7 @@ type ProductsResult = {
   /** The rows came from the wired list (ic_wired): the Products rows plus the overlay, sorted by created or name. */
   wired?: boolean
   /** Check counts and filter options come with page 1 and with a filter change, never with a page step (the page keeps the last ones). */
-  summary?: CheckSummary & { pending?: number; /** The dates of the last counts (wired list only), newest first. */ days?: CheckDay[]; tooLarge?: boolean }
+  summary?: (CheckSummary & { pending?: number; /** The dates of the last counts (wired list only), newest first. */ days?: CheckDay[]; tooLarge?: undefined }) | { /** Too many checked products to count: no counts, no dates, and the status and date filters are refused. */ tooLarge: true }
   facets?: { brands?: string[]; categories?: string[] }
   facetsLimited?: { brands: boolean; categories: boolean }
   /** The rules behind the rows' promotion prices (wired answers to a viewer with the price grant). */
@@ -312,6 +312,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const inFlight = useRef(false)
   const ownSets = useRef(new Map<number, number>())
   const checkStateRetried = useRef(false)
+  const checkedOnRetried = useRef(false)
   const attempts = useRef(new Map<number, Attempt>())
   const createAttempt = useRef<{ title: string; productIds: number[]; scope: QueryParams; requestId: string } | null>(null)
   const lifecycleAttempt = useRef<{ action: 'close' | 'resume'; revision: number; requestId: string } | null>(null)
@@ -418,6 +419,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
               // The data epoch moved while this was in flight: the answer belongs to the old epoch, so it is dropped and the screen reads again.
               if (currentDataEpoch() !== epoch) { setRefresh(value => value + 1); return }
               rememberWiredMode('wired')
+              checkStateRetried.current = false; checkedOnRetried.current = false
               const { raw } = result
               knownGroupings = raw.extras.capabilities?.groupings?.length ? raw.extras.capabilities.groupings : null
               wiredRaw.current = raw
@@ -476,7 +478,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
             else if (products.facets) summaryScope.current = stepScope
             setData(previous => products.simple && !products.facets && previous ? { ...products, summary: previous.summary, facets: previous.facets, facetsLimited: previous.facetsLimited } : products)
             setLoadedKey(scopeKey)
-            checkStateRetried.current = false
+            checkStateRetried.current = false; checkedOnRetried.current = false
           }
         }
       } catch (cause) {
@@ -486,8 +488,18 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         if (publish() && groupWire === 'category' && (cause as { code?: unknown } | null)?.code === 'inventory_check_field_hidden') {
           setFilters(previous => ({ ...previous, group: '' })); return
         }
-        // A status the server no longer offers (a switch moved under this tab) is dropped once and the list read again; a second refusal shows the load error.
-        if (publish() && (cause as { code?: unknown } | null)?.code === 'inventory_check_invalid_query' && filters.checkState && !checkStateRetried.current) {
+        const refusal = cause as { code?: unknown; parameter?: unknown } | null
+        // A date the server will not filter by (it refuses checkedOn with a 400 that names it, or, with too many checked products to list their dates, a 503 filter_too_large) is dropped once and the list read again,
+        // exactly as a refused status is: the person lands on the list of every date, never on "unavailable" with the filter still set.
+        if (publish() && filters.checkedOn && !checkedOnRetried.current
+          && ((refusal?.code === 'inventory_check_invalid_query' && refusal.parameter === 'checkedOn') || refusal?.code === 'inventory_check_filter_too_large')) {
+          checkedOnRetried.current = true
+          setFilters(previous => ({ ...previous, checkedOn: '' })); setPage(1)
+          return
+        }
+        // A status the server no longer offers (a switch moved under this tab, or too many checked products to filter by status) is dropped once and the list read again; a second refusal shows the load error.
+        if (publish() && filters.checkState && !checkStateRetried.current
+          && ((refusal?.code === 'inventory_check_invalid_query' && refusal.parameter !== 'checkedOn') || refusal?.code === 'inventory_check_filter_too_large')) {
           checkStateRetried.current = true
           setFilters(previous => ({ ...previous, checkState: '' })); setPage(1)
           return
@@ -669,7 +681,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         confirmLabel: tr('inventory_check_start_page', 'Count'),
       })
       if (!confirmed || !current() || inFlight.current) return
-      createAttempt.current = { title: tr('inventory_check_page_session', 'Visible page check'), productIds, scope: { ...Object.fromEntries(Object.entries(params).filter(([, value]) => value !== '' && value != null)), membership: 'visible_page' }, requestId: createClientRequestId('inventory_check') }
+      createAttempt.current = { title: tr('inventory_check_page_session', 'Visible page check'), productIds, scope: { ...sessionScopeParams(params), membership: 'visible_page' }, requestId: createClientRequestId('inventory_check') }
     }
     inFlight.current = true; setBusy(true); setWriteError('')
     try {
@@ -867,7 +879,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     wiredRaw.current = next
     setData(previous => {
       const moved = wiredResult(next, previous)
-      return moved.summary && previous?.summary ? { ...moved, summary: { ...moved.summary, issue: Math.max(0, previous.summary.issue - 1), ok: previous.summary.ok + 1 } } : moved
+      return moved.summary && previous?.summary && moved.summary.tooLarge !== true && previous.summary.tooLarge !== true ? { ...moved, summary: { ...moved.summary, issue: Math.max(0, previous.summary.issue - 1), ok: previous.summary.ok + 1 } } : moved
     })
   }
   // The popover of a row reads that one product's received dates (batches) at this branch when it opens: one request, never the page. A branch that is not chosen has no batches to read.
@@ -1039,20 +1051,23 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   // The owner's summary: check counts only. A session shows its own counts in the session bar, and the old contract sends none.
   const checkInfo = !sessionId && !!data?.simple
   const summary = fresh && checkInfo ? data?.summary : undefined
+  // Too many checked products to count: the server sends no counts and no dates and refuses the status and date filters, so none of those controls is drawn (a chip would only lead to a refusal).
+  const tooLarge = summary?.tooLarge === true
+  const counts = summary && summary.tooLarge !== true ? summary : undefined
   // The wired page has no "In check" (nothing is in a session there) and, with a branch chosen, its one status choice is the chip rail: the numbers ride on its chips.
-  const cards: StatCardDef[] = summary ? (['not_checked', 'in_check', 'ok', 'issue'] as const).filter(key => !(data?.wired === true && key === 'in_check')).map(key => ({
-    key, label: tr(key === 'issue' ? 'issues' : `inventory_check_status_${key}`, key === 'not_checked' ? 'Not checked' : key === 'in_check' ? 'In check' : key === 'ok' ? 'Checked OK' : 'Issues'), value: summary[key],
+  const cards: StatCardDef[] = counts ? (['not_checked', 'in_check', 'ok', 'issue'] as const).filter(key => !(data?.wired === true && key === 'in_check')).map(key => ({
+    key, label: tr(key === 'issue' ? 'issues' : `inventory_check_status_${key}`, key === 'not_checked' ? 'Not checked' : key === 'in_check' ? 'In check' : key === 'ok' ? 'Checked OK' : 'Issues'), value: counts[key],
   })) : []
   // The status choice, in one row that scrolls sideways (the shared chip rail): every status the viewer can see, with how many products are in it.
   const statusChips: Array<{ value: string; label: string; count?: number }> = [{ value: '', label: t('all') },
-    { value: 'not_checked', label: tr('inventory_check_status_not_checked', 'Not checked'), count: summary?.not_checked },
-    { value: 'ok', label: tr('inventory_check_status_ok', 'Checked OK'), count: summary?.ok },
-    { value: 'issue', label: tr('issues', 'Issues'), count: summary?.issue },
-    ...(data?.capabilities?.fixStock && summary?.pending !== undefined ? [{ value: 'pending', label: tr('inventory_check_approval_pending', 'Waiting for approval'), count: summary.pending }] : [])]
+    { value: 'not_checked', label: tr('inventory_check_status_not_checked', 'Not checked'), count: counts?.not_checked },
+    { value: 'ok', label: tr('inventory_check_status_ok', 'Checked OK'), count: counts?.ok },
+    { value: 'issue', label: tr('issues', 'Issues'), count: counts?.issue },
+    ...(data?.capabilities?.fixStock && counts?.pending !== undefined ? [{ value: 'pending', label: tr('inventory_check_approval_pending', 'Waiting for approval'), count: counts.pending }] : [])]
   const rowEditing = Object.values(editingRows).some(Boolean)
   const controlsLocked = busy || !!createAttempt.current || rowEditing
   // The date chips (the wired list at one branch only: counts are per branch, and the server sends no days for too many products). The chosen day stays on the rail even if the summary stops listing it, so "All" is always one tap away.
-  const dayChips = wiredNow && !sessionId && section === 'products' && branchId ? dayChipsOf(checkDaysOf(data?.summary), filters.checkedOn ?? '') : []
+  const dayChips = wiredNow && !sessionId && section === 'products' && branchId && !tooLarge ? dayChipsOf(checkDaysOf(data?.summary), filters.checkedOn ?? '') : []
   // The row stays on screen while a read is under way (the chips wait, the counting buttons are disabled): it never flickers away with the list.
   const barShown = checkInfo && section !== 'sessions' && (access.canCheck || dayChips.length > 0)
   // "Not checked" products have no date, so a date beside it would always be an empty list: choosing a date leaves that status.
@@ -1220,8 +1235,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
                 <InventoryCheckSessionFilterMenu value={sessionFilters} onChange={changeSessionFilters} approvals={sessions?.approvals === true} branches={branches} branchId={branchId} onBranchChange={id => changeFilters({ branchId: id })} onClear={clearFilters} t={t} />
               </fieldset>} />
             : <>
-              {checkInfo && !(wiredNow && statusFilter && branchId) ? <StatsStrip layout="scroll" cards={cards} t={t} loading={loading || !fresh} /> : null}
-              {checkInfo && statusFilter && branchId ? <ChipRail label={t('inventory_check_state')} data-inventory-check-status-rail>
+              {checkInfo && !tooLarge && !(wiredNow && statusFilter && branchId) ? <StatsStrip layout="scroll" cards={cards} t={t} loading={loading || !fresh} /> : null}
+              {checkInfo && !tooLarge && statusFilter && branchId ? <ChipRail label={t('inventory_check_state')} data-inventory-check-status-rail>
                 {statusChips.map(chip => <RailChip key={chip.value || 'all'} selected={filters.checkState === chip.value} disabled={controlsLocked} onClick={() => changeFilters({ checkState: chip.value, ...(chip.value === 'not_checked' ? { checkedOn: '' } : {}) })}
                   badge={chip.count === undefined ? undefined : <span className="tabular-nums opacity-70">{chip.count}</span>}>{chip.label}</RailChip>)}
               </ChipRail> : null}

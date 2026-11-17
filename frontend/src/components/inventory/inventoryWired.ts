@@ -172,9 +172,12 @@ export function wiredResult(raw: WiredRaw, previous?: { summary?: Record<string,
   const incoming = raw.extras.summary, last = previous?.summary as WiredSummary | undefined
   // The dates are the one part that is NOT carried over a fresh summary: an answer that brings a summary but no days (too many products to list them) must not keep the old chips.
   const days = incoming ? incoming.days : last?.days
-  const summary = incoming || last ? { not_checked: incoming?.not_checked ?? last?.not_checked ?? 0, in_check: 0, ok: incoming?.ok ?? last?.ok ?? 0, issue: incoming?.issue ?? last?.issue ?? 0, total: incoming?.total ?? last?.total ?? 0,
+  // Too many checked products to count (the Worker's { tooLarge: true }, with no counts and no days): the answer says NOTHING about them, so nothing from an earlier answer may stand in for it. A page step brings no
+  // summary at all and keeps the last one, which is how the flag itself is carried.
+  const tooLarge = (incoming ?? last)?.tooLarge === true
+  const summary = tooLarge ? { tooLarge: true as const } : incoming || last ? { not_checked: incoming?.not_checked ?? last?.not_checked ?? 0, in_check: 0, ok: incoming?.ok ?? last?.ok ?? 0, issue: incoming?.issue ?? last?.issue ?? 0, total: incoming?.total ?? last?.total ?? 0,
     ...(incoming?.pending !== undefined || last?.pending !== undefined ? { pending: incoming?.pending ?? last?.pending ?? 0 } : {}),
-    ...(days ? { days } : {}), ...((incoming ? incoming.tooLarge : last?.tooLarge) === true ? { tooLarge: true } : {}) } : undefined
+    ...(days ? { days } : {}) } : undefined
   return {
     wired: true as const, simple: true as const, items: list.items.map(row => adaptRow(row, { ...raw, damaged })), total: list.total, page: list.page, pageSize: list.pageSize, totalPages: list.totalPages, grouping: list.grouping,
     branches: raw.branches, promotionRules: Array.isArray(list.promotion_rules) ? list.promotion_rules : [], ...(summary ? { summary } : {}), ...(raw.extras.capabilities ? { capabilities: raw.extras.capabilities } : {}),
