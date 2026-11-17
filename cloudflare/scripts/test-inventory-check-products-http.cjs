@@ -98,7 +98,6 @@ async function main() {
     assert.deepEqual({...current.body,items:current.body.items.map(row=>({...row,cost_needs_review:false}))},old.body,'full HTTP output changes only the marker')
     for(const secret of ['cost_review_key','product_cost_review_key_available','0123456789abcdef0123456789abcdef']) assert.ok(!JSON.stringify(current.body).includes(secret),secret)
     for(const permissions of [
-      {inventory_checks:true,inventory_check_show_cost:false,product_cost_view:true},
       {inventory_checks:true,inventory_check_show_cost:true,product_cost_view:false},
     ]) {
       db.prepare('UPDATE users SET permissions=? WHERE id=900001').run(JSON.stringify(permissions))
@@ -107,11 +106,15 @@ async function main() {
       for(const row of hidden.body.items) for(const key of ['cost_needs_review','cost_review_key','cost_price_usd','cost_price_khr']) assert.ok(!Object.hasOwn(row,key),key)
     }
     db.prepare('UPDATE users SET permissions=? WHERE id=900001').run(JSON.stringify({inventory_checks:true,inventory_check_show_cost:true,product_cost_view:true}))
-    // 17 Nov 2026 (slice A): cost is the editable View product costs grant; on this branch the Inventory cost field is still
-    // also required (slices B/C1 drop that gate). The non-admin holding both sees the marker; Edit without View sees nothing.
+    // 18 Nov 2026 (composed A+B+C1): cost is the editable View product costs grant alone; the retired inventory_check_show_cost
+    // switch is not read. The grant holder sees the marker with the switch false; Edit without View sees nothing.
     const grantsOnly=await request('pageSize=3')
     assert.equal(grantsOnly.status,200)
     assert.deepEqual(grantsOnly.body.items.map(row=>row.cost_needs_review),[true,false,false],'a non-admin holding View product costs and the Inventory cost field sees cost')
+    db.prepare('UPDATE users SET permissions=? WHERE id=900001').run(JSON.stringify({inventory_checks:true,inventory_check_show_cost:false,product_cost_view:true}))
+    const grantNoSwitch=await request('pageSize=3')
+    assert.equal(grantNoSwitch.status,200)
+    assert.deepEqual(grantNoSwitch.body.items.map(row=>row.cost_needs_review),[true,false,false],'the grant alone shows cost even with the retired switch false')
     db.prepare('UPDATE users SET permissions=? WHERE id=900001').run(JSON.stringify({inventory_checks:true,inventory_check_show_cost:true,product_cost_edit:true}))
     const editOnly=await request('pageSize=3')
     assert.equal(editOnly.status,200)

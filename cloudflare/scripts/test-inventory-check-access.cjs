@@ -80,10 +80,10 @@ check('page/action authority, explicit false and independent aggregate grants', 
   assert.equal(worker.getInventoryCheckAccess(actor).fields.stock, false)
   assert.equal(worker.getInventoryCheckAccess(actor).canCheck, false)
   assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: true, 'inventory_checks:view': false })).canView, false)
-  // 17 Nov 2026 (slice A alone): the View product costs grant is editable; the Inventory cost field still also needs inventory_check_show_cost on this branch.
+  // 18 Nov 2026 (composed A+B+C1): the editable View product costs grant alone decides cost; the retired inventory_check_show_cost switch is no longer read.
   assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_show_cost: true, product_cost_view: true })).fields.cost, true, 'a non-admin holding View product costs and the cost field sees cost')
   assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_show_cost: true })).fields.cost, false, 'the field switch alone is not the grant')
-  assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: true, product_cost_view: true })).fields.cost, false, 'the grant alone does not switch the Inventory cost field on (slice A)')
+  assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: true, product_cost_view: true })).fields.cost, true, 'the View product costs grant alone shows cost (composed A+B+C1)')
   assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_show_cost: true, product_cost_edit: true })).fields.cost, false, 'Edit without View cannot read cost')
   assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_show_cost: true, product_cost_view: true }, { product_cost_view: false })).fields.cost, false, "a user's own false beats the role's grant")
   assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_show_cost: true, product_cost_view: 'true' })).fields.cost, false, 'only the literal true is a grant')
