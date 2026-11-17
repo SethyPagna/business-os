@@ -745,6 +745,9 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/components/inventory/stockAnswerPatch.ts')) return 'inventory-stock-patch'
     if (normalized.endsWith('/src/components/inventory/inventoryExport.ts')) return 'inventory-export'
     if (normalized.endsWith('/src/api/inventoryWriteTransport.ts')) return 'inventory-write-api'
+    // The count-session transport (sessions, submissions, the approval and per-line decisions) is imported by the Inventory page only; in the /src/api/ catch-all the per-line decision
+    // transport added 168 bytes to app-api-methods and pushed the storefront catalog closure past its performanceBudgets ceiling (C2 review).
+    if (normalized.endsWith('/src/api/inventoryChecksTransport.ts')) return 'inventory-checks-api'
     if (
       normalized.endsWith('/src/api/importJobsTransport.ts')
       || normalized.endsWith('/src/api/importTransport.ts')

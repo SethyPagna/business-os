@@ -47,7 +47,7 @@ try {
     fs.writeFileSync(path.join(assets, `${entry}-12345678.js`), 'export const value = 1;')
   }
   // The Expenses transport chunk and the pages that must NOT load it (E1-F): only the Expenses page imports it here.
-  for (const entry of ['fees-api', 'Returns', 'EditReturnModal', 'ReturnsBulkActionModal', 'app-api-methods']) {
+  for (const entry of ['fees-api', 'inventory-checks-api', 'Returns', 'EditReturnModal', 'ReturnsBulkActionModal', 'app-api-methods']) {
     fs.writeFileSync(path.join(assets, `${entry}-12345678.js`), 'export const value = 1;')
   }
   fs.writeFileSync(path.join(assets, 'FeesPage-12345678.js'), 'import "./fees-api-12345678.js"; export const value = 1;')
@@ -64,7 +64,7 @@ try {
   fs.writeFileSync(path.join(assets, 'fixture.css'), [400, 500, 600].map(weight => `@font-face{font-family:Noto Sans Khmer;font-weight:${weight};src:url(/assets/fixture.woff2)}`).join('\n'))
   const valid = verify()
   assert.equal(valid.status, 0, valid.stdout + valid.stderr)
-  assert.match(valid.stdout, /emitted static chunk graph: 27 chunks, zero cycles/)
+  assert.match(valid.stdout, /emitted static chunk graph: 28 chunks, zero cycles/)
   // A till page that statically imports SheetJS must fail the gate.
   fs.writeFileSync(path.join(assets, 'vendor-xlsx-12345678.js'), 'export const xlsx = 1;')
   fs.writeFileSync(path.join(assets, 'POS-12345678.js'), 'import { xlsx } from "./vendor-xlsx-12345678.js"; export const value = xlsx;')
