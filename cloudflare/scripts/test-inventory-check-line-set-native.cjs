@@ -248,7 +248,7 @@ async function main() {
     assert.deepEqual(detail.body.approval.line_ids, [1, 2], 'the detail read projects line_ids itself (not the creation answer)')
   })
 
-  await check('an approval with no recorded set (made by a Worker that does not know the column) is read by the engine's rule and is still decidable', async () => {
+  await check('an approval with no recorded set (made by a Worker that does not know the column) is read by the engine\'s rule and is still decidable', async () => {
     const k = kit(), f = k.world()
     await k.submit(f, 'set-null-submit-01', [{ productId: 2, countedQuantity: 5, seenQuantity: 6 }])
     f.raw.exec('DROP TRIGGER inventory_check_approvals_identity; UPDATE inventory_check_approvals SET line_set_json=NULL')
