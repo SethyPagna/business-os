@@ -107,7 +107,7 @@ const ADMIN = 900003, COUNTER = 900001, BLIND = 900002, FOREIGN = 900004, LEAD =
 function reset() {
   db?.close(); db = new DatabaseSync(':memory:')
   for (const sql of loadAll({ through: 242 })) db.exec(sql)
-  for (const file of ['0259_inventory_check_sessions.sql', '0285_inventory_check_items_latest.sql', '0286_inventory_check_approvals.sql']) db.exec(fs.readFileSync(path.join(__dirname, '../migrations', file), 'utf8'))
+  for (const file of ['0259_inventory_check_sessions.sql', '0285_inventory_check_items_latest.sql', '0286_inventory_check_approvals.sql', '0316_inventory_check_line_decisions.sql']) db.exec(fs.readFileSync(path.join(__dirname, '../migrations', file), 'utf8'))
   const full = { inventory_checks: true, inventory_check_show_stock: true, inventory_check_show_barcode: true, inventory_check_show_brand: true, inventory_check_show_category: true, inventory_check_show_received: true }
   db.prepare('INSERT INTO roles(id,name,code,permissions) VALUES(900001,?,?,?),(900002,?,?,?),(900006,?,?,?),(900007,?,?,?),(900008,?,?,?)').run('Counter', 'employee', JSON.stringify(full),
     'Blind', 'blind', JSON.stringify({ inventory_checks: true, inventory_check_show_brand: true }),
