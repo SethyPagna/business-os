@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { createHarness, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
+import { createHarness, type MountedSurface } from './mountedComponentHarness.ts'
 
 // Owner, 17 Nov 2026 (Inventory redesign, slice C1): Inventory's product detail IS Products' ProductDetailModal, wired through three optional props. This file mounts the REAL modal and pins them:
 //   visible   a viewer whose grants cut stock or price sees no stock row and no price cell, never a false 0 or $0.00 (the modal used to print Number(p.stock_quantity || 0) and $0 prices)

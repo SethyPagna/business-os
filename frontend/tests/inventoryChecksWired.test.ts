@@ -206,7 +206,7 @@ try {
   // ---- date chips on the page: the rail comes with the summary, a tap sends checkedOn (and the branch), All sends none, no days means no rail ----
   {
     const days = [{ day: '2026-11-10', count: 1 }, { day: '2026-11-12', count: 3 }]
-    listAnswer = query => listBody([productRow(12, 'Sequence product', 8)], { summary: { ok: 3, issue: 1, not_checked: 5, total: 9, days } })
+    listAnswer = () => listBody([productRow(12, 'Sequence product', 8)], { summary: { ok: 3, issue: 1, not_checked: 5, total: 9, days } })
     const surface = await mount()
     const chips = () => surface.findAll(node => node.getAttribute('data-day-chip') !== null)
     assert.deepEqual(chips().map(node => node.getAttribute('data-day-chip')), ['', '2026-11-12', '2026-11-10'], 'All, then newest first whatever order the server sent')
