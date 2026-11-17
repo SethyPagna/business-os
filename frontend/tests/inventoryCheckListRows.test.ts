@@ -175,6 +175,57 @@ const cases: Array<[string, () => Promise<void>]> = [
     const text = s.text()
     for (const word of ['Price', 'Cost', 'Sold', 'Cust', '2.5', '1.2']) assert.ok(!text.includes(word), `no ${word} anywhere`)
   }],
+  ['prices show their value in the Products tones and NO visible word; the name is sr-only text and a tooltip (owner, 17 Nov)', async () => {
+    const priced = { ...listed[0], selling_price_usd: 12.5, selling_price_khr: 51250, wholesale_price_usd: 10, discount_enabled: 1, discount_type: 'percent', discount_percent: 10 } as unknown as InventoryCheckProduct
+    const money = (usd: unknown) => `$${Number(usd).toFixed(2)}`
+    const s = await mount({ products: [priced], selecting: false, priceText: money })
+    const price = (key: string) => allInRow(s, 501, 'data-price').find(node => node.getAttribute('data-price') === key) as MemoryNode
+    const hidden = (node: MemoryNode) => node.querySelectorAll('.sr-only')
+    const visible = (node: MemoryNode) => hidden(node).reduce((text, part) => text.replace(part.textContent, ''), node.textContent).replace(/\s+/g, ' ').trim()
+    assert.deepEqual(allInRow(s, 501, 'data-price').map(node => node.getAttribute('data-price')), ['selling', 'wholesale', 'promotion'], 'the three prices are on the row, in order')
+    assert.deepEqual(['selling', 'wholesale', 'promotion'].map(key => visible(price(key))), ['$12.50', '$10.00', '$11.25'], 'each shows its value and nothing else')
+    assert.deepEqual(['selling', 'wholesale', 'promotion'].map(key => hidden(price(key)).map(node => node.textContent.trim())), [['Selling price'], ['Wholesale price'], ['Promotion']], 'the name survives as sr-only text')
+    assert.deepEqual(['selling', 'wholesale', 'promotion'].map(key => price(key).getAttribute('title')), ['Selling price', 'Wholesale price', 'Promotion'], 'and as a tooltip')
+    const everyVisible = hidden(row(s, 501)).reduce((text, part) => text.replace(part.textContent, ''), row(s, 501).textContent)
+    for (const word of ['Selling price', 'Wholesale price', 'Promotion']) assert.ok(!everyVisible.includes(word), `no visible "${word}" anywhere on the row`)
+    const has = (node: MemoryNode, classes: string) => classes.split(' ').every(name => node.className.split(/\s+/).includes(name))
+    assert.ok(has(price('selling'), 'font-semibold text-green-700 dark:text-green-400'), 'selling is green and semibold, as on Products')
+    assert.ok(has(price('wholesale'), 'font-medium text-primary-700 dark:text-primary-400'), 'wholesale is primary and medium, as on Products')
+    const badge = price('promotion').querySelectorAll('span').find(node => node.className.includes('bg-rose-50')) as MemoryNode
+    assert.ok(badge && has(badge, 'text-rose-700 dark:text-rose-200 font-bold'), 'the promotion is the rose badge of Products (ProductDiscountBadge)')
+    assert.equal(badge.textContent, '$11.25', 'with the price only: no leading word')
+    assert.equal(allInRow(s, 501, 'data-price').filter(node => node.tagName === 'BUTTON').length, 0, 'without cost nothing here is a button')
+    await s.render({ ...base, products: [priced], selecting: false })
+    assert.equal(allInRow(s, 501, 'data-price').length, 0, 'no price grant (no priceText): no price at all')
+  }],
+  ['cost shows only to a viewer who may see it AND only when the row carries it; it is red, and a tap opens the cost float, not the detail', async () => {
+    const withCost = { ...listed[0], selling_price_usd: 12.5, cost_price_usd: 3.21, cost_price_khr: 13161 } as unknown as InventoryCheckProduct
+    const money = (usd: unknown) => `$${Number(usd).toFixed(2)}`
+    const opened: Array<number | string> = []
+    const costs = (surface: MountedSurface) => allInRow(surface, 501, 'data-price').filter(node => node.getAttribute('data-price') === 'cost')
+    // allowed: the page passes costText and onOpenCost only for canViewAcquisitionCosts
+    const s = await mount({ products: [withCost], selecting: false, priceText: money, costText: money, onOpenCost: (product: InventoryCheckProduct) => { opened.push(product.id) } })
+    assert.equal(costs(s).length, 1, 'one cost value')
+    const cost = costs(s)[0]
+    assert.equal(cost.tagName, 'BUTTON', 'it is a button')
+    assert.equal(cost.textContent.trim(), '$3.21', 'the value, with no visible word')
+    assert.ok(cost.querySelectorAll('span').some(node => node.className.includes('text-red-600') && node.className.includes('dark:text-red-400')), 'cost is red, as on Products')
+    assert.ok((cost.getAttribute('title') || '').length > 0 && (cost.getAttribute('aria-label') || '').length > 0, 'a name and a tooltip')
+    const opensBefore = calls.filter(call => call[0] === 'open').length
+    await s.click(cost)
+    assert.deepEqual(opened, [501], 'a tap opens the calculated-cost float for this product')
+    assert.equal(calls.filter(call => call[0] === 'open').length, opensBefore, 'and does not open the detail')
+    // not allowed: the row carries cost keys but the page gave no cost formatter
+    await s.render({ ...base, products: [withCost], selecting: false, priceText: money })
+    assert.equal(costs(s).length, 0, 'a viewer who may not see cost sees none, even when the row carries it')
+    assert.ok(!row(s, 501).textContent.includes('3.21'), 'the figure is nowhere on the row')
+    // allowed, but the server sent no cost: nothing to draw, not even unknown
+    await s.render({ ...base, products: [{ ...listed[0], selling_price_usd: 12.5 } as unknown as InventoryCheckProduct], selecting: false, priceText: money, costText: money, onOpenCost: () => {} })
+    assert.equal(costs(s).length, 0, 'no cost key on the row, no cost drawn')
+    // cost does not depend on the price grant
+    await s.render({ ...base, products: [withCost], selecting: false, costText: money, onOpenCost: () => {} })
+    assert.equal(costs(s).length, 1, 'cost does not depend on the price grant')
+  }],
   ['Enter in a valid count moves to the next row’s count input, unless the page handled it', async () => {
     const entered: Array<number | string> = [], invalidEnters: string[] = []
     let handled = false

@@ -94,16 +94,16 @@ const doubles = {
     readInventoryCheckSessions: async () => ({ items: [], total: 0, page: 1, pageSize: 20 }), readInventoryCheckSession: async () => ({ item: null, items: [] }), readInventoryCheckHistory: async () => ({ items: [], total: 0, page: 1, pageSize: 20 }),
   },
 }
-const app = (permissions: Record<string, boolean>, pack: Record<string, string>) => ({
-  user: { id: 7, role_code: 'employee', permissions: { inventory: true, inventory_checks: true, ...permissions } as Record<string, boolean> },
+const app = (permissions: Record<string, boolean>, pack: Record<string, string>, role = 'employee') => ({
+  user: { id: 7, role_code: role, permissions: { inventory: true, inventory_checks: true, ...permissions } as Record<string, boolean> },
   page: 'inventory', authReady: true, canWriteToServer: true, t: (key: string) => pack[key] ?? key, notify: () => {}, settings: { navigation_mode: 'sections' }, language: 'en', AccessDenied: () => 'Access denied',
   exchangeRate: 4100, formatPrice: (usd: unknown) => `$${Number(usd).toFixed(2)}`,
   navigateTo: (page: string, anchor?: string) => { window.history.pushState(null, '', `/inventory#${anchor || ''}`); window.dispatchEvent(new CustomEvent(APP_NAVIGATION_EVENT, { detail: { page, path: '/inventory', anchor } })) },
 })
-async function mount(permissions: Record<string, boolean>, pack: Record<string, string> = en) {
+async function mount(permissions: Record<string, boolean>, pack: Record<string, string> = en, role = 'employee') {
   lists.length = 0
   open('hub:inventory:products')
-  return harness.mount({ component: 'components/inventory/InventoryChecksPage.tsx', app: app(permissions, pack), doubles, props: {} })
+  return harness.mount({ component: 'components/inventory/InventoryChecksPage.tsx', app: app(permissions, pack, role), doubles, props: {} })
 }
 const rowText = (surface: Awaited<ReturnType<typeof mount>>) => surface.find(node => node.getAttribute('data-inventory-check-row') === '12', 'row 12').textContent.replace(/\s+/g, ' ')
 const priceNodes = (surface: Awaited<ReturnType<typeof mount>>) => surface.findAll(node => node.getAttribute('data-price') !== null)
@@ -118,7 +118,14 @@ try {
     assert.ok(text.includes(`${en.wholesale_price} $8.00`), 'wholesale price on the row')
     assert.ok(text.includes(`${en.promotion} $8.00`), 'the live product discount (20% off $10) as the promotion price')
     assert.deepEqual(priceNodes(surface).map(node => node.getAttribute('data-price')), ['selling', 'wholesale', 'promotion'])
-    assert.ok(!text.includes('3.21') && !text.includes('13161'), 'cost is on the Products row but never on an Inventory row')
+    // 17 Nov: the words are not drawn; each value carries its name as sr-only text and a tooltip
+    for (const [key, label] of [['selling', en.selling_price], ['wholesale', en.wholesale_price], ['promotion', en.promotion]] as const) {
+      const node = priceNodes(surface).find(candidate => candidate.getAttribute('data-price') === key)!
+      assert.deepEqual(node.querySelectorAll('.sr-only').map(part => part.textContent.trim()), [label], `${key}: its name is sr-only`)
+      assert.equal(node.getAttribute('title'), label, `${key}: and its tooltip`)
+    }
+    assert.ok(!text.includes('3.21') && !text.includes('13161'), 'an employee (no cost view) never sees the cost the row carries')
+    assert.equal(surface.findAll(node => node.getAttribute('data-check-cost') !== null).length, 0, 'and has no cost button')
     assert.equal(lists.length, 1, 'the prices cost no extra read')
     await surface.unmount()
   }
@@ -129,6 +136,22 @@ try {
     const text = rowText(surface)
     assert.ok(text.includes(km.selling_price) && text.includes(km.wholesale_price) && text.includes(km.promotion), 'the three labels in Khmer')
     await surface.unmount()
+  }
+  // an admin sees the cost, red, on the same row, and a tap on it is the calculated-cost float (not the detail)
+  {
+    served = listBody([pricedRow], true)
+    const surface = await mount({ ...FIELDS, inventory_check_show_price: true }, en, 'admin')
+    const cost = surface.findAll(node => node.getAttribute('data-check-cost') !== null)
+    assert.equal(cost.length, 1, 'admin: the row shows its cost')
+    assert.equal(cost[0].textContent.trim(), '$3.21', 'the Products catalogue cost, in the display currency')
+    assert.deepEqual(priceNodes(surface).map(node => node.getAttribute('data-price')), ['selling', 'wholesale', 'promotion', 'cost'], 'cost follows the prices')
+    assert.equal(lists.length, 1, 'cost costs no extra read')
+    await surface.unmount()
+    // the server sent no cost keys (Slice B not live, or the viewer may not see cost): an admin sees none, not an unknown
+    served = listBody([Object.fromEntries(Object.entries(pricedRow).filter(([key]) => !key.startsWith('cost_')))], true)
+    const bare = await mount({ ...FIELDS, inventory_check_show_price: true }, en, 'admin')
+    assert.equal(bare.findAll(node => node.getAttribute('data-check-cost') !== null).length, 0, 'no cost keys on the row: no cost drawn')
+    await bare.unmount()
   }
   // an expired promotion is not shown as one
   {

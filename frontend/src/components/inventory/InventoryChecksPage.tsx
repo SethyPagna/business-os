@@ -70,6 +70,8 @@ const loadHistoryFloat = () => import('./InventoryCheckHistoryFloat.tsx')
 const InventoryCheckDetailFloat = lazyRetry(loadDetailFloat, 'inventory-check-detail')
 const InventoryCheckHistoryFloat = lazyRetry(loadHistoryFloat, 'inventory-check-history')
 const FastStockInModal = lazyRetry(() => import('./FastStockInModal.tsx'), 'inventory-check-fix-stock')
+// The calculated-cost float (a tap on the red cost value of a row, for a viewer who may see cost): its own chunk, read on demand only.
+const CostCalculationFloat = lazyRetry(() => import('../shared/CostCalculationFloat.tsx'), 'inventory-check-cost-float')
 
 type CheckSummary = Record<InventoryCheckListStatus, number> & { total: number }
 type ProductsResult = {
@@ -230,7 +232,7 @@ function ListSkeleton({ loadingText }: { loadingText: string }) {
 
 function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access: InventoryCheckAccess; selection: Selection; onSelect: (selection: Selection) => void; isCurrent: () => boolean }) {
   const { t, user, canWriteToServer, navigateTo, notify } = useApp() as AppContextCoreValue
-  const { formatPrice, exchangeRate } = useApp() as AppContextCoreValue
+  const { formatPrice, exchangeRate, fmtUSD, fmtKHR } = useApp() as AppContextCoreValue
   const { branchId, sessionId } = selection
   const bootstrapIntent = selection.bootstrapIntent
   const tr = (key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
@@ -310,6 +312,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   }, [])
   const [detail, setDetail] = useState<InventoryCheckProduct | null>(null)
   const [fixStock, setFixStock] = useState<FixStockOpening | null>(null)
+  const [costFor, setCostFor] = useState<InventoryCheckProduct | null>(null)
   const [historyPage, setHistoryPage] = useState<number | null>(null)
   const [historyReload, setHistoryReload] = useState(0)
   const [history, setHistory] = useState<InventoryCheckHistoryResult | null>(null)
@@ -1140,7 +1143,9 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   // Fetched already (the usual case: it came with the answer): drawn directly, so no Suspense turn and no flat frame. Otherwise the lazy wrapper, as before.
   const GroupedList = groupedListLoaded()?.default ?? InventoryCheckGroupedList
   const listRowProps = { products: visibleProducts, drafts, selecting, rowRefusals, locked: busy || !!submitAttempt.current, canViewStock: access.fields.stock, canViewCounts,
-    ...(access.fields.price ? { priceText, promotionRules: data?.promotionRules, exchangeRate } : {}), adornments: issueChips, focusRequest, onCountEntered: onCommitted, t, onOpenProduct: setDetail, ...draftHandlers,
+    ...(access.fields.price ? { priceText, promotionRules: data?.promotionRules, exchangeRate } : {}),
+    // Cost only for a viewer canViewAcquisitionCosts allows (fields.cost); the Worker sends the cost keys to nobody else either.
+    ...(access.fields.cost ? { costText: priceText, onOpenCost: setCostFor } : {}), adornments: issueChips, focusRequest, onCountEntered: onCommitted, t, onOpenProduct: setDetail, ...draftHandlers,
     ...(lotCountsOn && branchId ? { lotCounts: true, loadLots, onLotSet: directSetOn ? setLotFromRow : undefined } : {}) }
   const canCheckRows = fresh && canEdit && session?.status === 'open' && canWriteToServer && !lifecycleAttempt.current
   // One column header for the whole list, pinned with the controls: the rows below line up under it from 1024px.
@@ -1272,6 +1277,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         {detail && fresh ? <Suspense fallback={null}><InventoryCheckDetailFloat product={detail} observation={observations[String(detail.id)]} unavailable={unavailableIds.has(String(detail.id))} fields={access.fields} priceText={priceText} promotionRules={data?.promotionRules} exchangeRate={exchangeRate} t={t} onClose={() => setDetail(null)}
           onFixStock={fixOpening ? () => openFixStock(fixOpening) : undefined}
           onSales={offered && rights.can('sales', 'view') ? () => { queueReportsFocus(productSalesFocus(detail.name)); navigateTo('sales', hubAnchor('sales', 'reports')) } : undefined} /></Suspense> : null}
+        {costFor && access.fields.cost ? <Suspense fallback={null}><CostCalculationFloat productId={costFor.id} productName={costFor.name} onClose={() => setCostFor(null)} fmtUSD={value => fmtUSD(value)} fmtKHR={value => fmtKHR(value)} t={(key, fallback) => tr(key, fallback)} /></Suspense> : null}
         {historyPage !== null ? <Suspense fallback={null}><InventoryCheckHistoryFloat page={historyPage} history={history} error={historyError} onPage={setHistoryPage} onRetry={() => setHistoryReload(value => value + 1)} onClose={() => setHistoryPage(null)} t={t} /></Suspense> : null}
         {fixStock ? <Suspense fallback={null}><FastStockInModal
           branchOptions={branches.map(branch => ({ value: String(branch.id), label: branch.name }))} defaultBranchId={fixStock.branchId} initialMode="set" lockMode="set" initialHeader={{ branchId: String(fixStock.branchId) }}

@@ -12,6 +12,8 @@ import PortalMenu from '../shared/PortalMenu.tsx'
 import ProductNameRail from '../shared/ProductNameRail.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
 import { useCopyFloat } from '../shared/CopyFloat.tsx'
+import { PriceValue, ProductDiscountBadge } from '../products/surfaces/ProductRowParts.tsx'
+import CostValue from '../shared/CostValue.tsx'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { fmtDateOnly, fmtDateTime24 } from '../../utils/formatters.ts'
 import type { InventoryCheckId, InventoryCheckListStatus, InventoryCheckLotRow, InventoryCheckLotsAnswer, InventoryCheckProduct, InventoryCheckTranslator } from '../../types/inventoryChecks.ts'
@@ -19,7 +21,7 @@ import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { lotTotals, type LotDraft, type StockedDate } from './inventoryCheckLots.ts'
 import { isDraftKind, recordedStatus, rowStatusKind, ROW_STATUS_WORDS, type RowStatusKind } from './inventoryCheckStatus.ts'
 import InventoryCheckCountPopover, { preloadLotEntries } from './InventoryCheckCountPopover.tsx'
-import { priceFacts, type PriceMoney } from './inventoryPriceFacts.ts'
+import { costFact, priceFacts, type PriceMoney } from './inventoryPriceFacts.ts'
 import { finiteQuantity, parseCount, signedDelta } from './InventoryCheckCountEditor.tsx'
 import type { InventoryCheckFocusRequest } from './InventoryCheckRows.tsx'
 import { UNSAVED_ROW_CLASS } from './inventoryCheckGroups.ts'
@@ -124,6 +126,10 @@ export type InventoryCheckListRowsProps = {
   priceText?: (usd: unknown, khr?: unknown) => string
   promotionRules?: readonly PromotionRule[]
   exchangeRate?: number
+  /** The viewer may see cost (canViewAcquisitionCosts, through the page's access): formats a cost like a price. Absent: no cost is drawn, whatever the row carries. */
+  costText?: (usd: unknown, khr?: unknown) => string
+  /** The red cost value was tapped: the page opens the calculated-cost float (a sibling of the list, so its clicks never reach a row). */
+  onOpenCost?: (product: InventoryCheckProduct) => void
   /** Small badges after the barcode line, by product id (the Issues tab's "Open session" chip). */
   adornments?: Readonly<Record<string, ReactNode | undefined>>
   /** A line under a row that cannot be submitted as it stands (a received date left out), by product id. It clears as soon as the row no longer needs it. */
@@ -174,7 +180,7 @@ function statusIconOf(kind: RowStatusKind): { Icon: typeof Check; tone: string }
   }
 }
 
-function ListRow({ product, draft, adornment, refusal, columns, countable, copy, scanHit, onAdvance, selecting, locked = false, canViewStock, canViewCounts, priceText, promotionRules, exchangeRate = 4100, t, onOpenProduct, onCount, onNote, onCountEntered, lotCounts = false, loadLots, onLotCount, onLotSet, onMatches, onDiffers, onClear }: RowProps) {
+function ListRow({ product, draft, adornment, refusal, columns, countable, copy, scanHit, onAdvance, selecting, locked = false, canViewStock, canViewCounts, priceText, promotionRules, exchangeRate = 4100, costText, onOpenCost, t, onOpenProduct, onCount, onNote, onCountEntered, lotCounts = false, loadLots, onLotCount, onLotSet, onMatches, onDiffers, onClear }: RowProps) {
   const tr = makeTr(t)
   const id = String(product.id)
   const counting = selecting && countable
@@ -236,15 +242,29 @@ function ListRow({ product, draft, adornment, refusal, columns, countable, copy,
   if (barcode) identity.push(['barcode', <span {...copy(barcode)} className="break-all">{barcode}</span>])
   if (product.brand) identity.push(['brand', <span {...copy(product.brand)}>{product.brand}</span>])
   if (product.category) identity.push(['category', <span>{product.category}</span>])
-  // Price details ride the same wrapping line as the barcode and brand (no new line, label inside), from the fields the row already carries.
+  // Price details ride the same wrapping line as the barcode and brand, from the fields the row already carries. The VALUE carries the colour (the Products tones, ProductRowParts VALUE_TONE) and its name only invisibly:
+  // sr-only text and a tooltip (owner, 17 Nov: drop the words "Selling price" and "Wholesale price", keep the values, highlighted).
   const prices = priceText ? priceFacts(product as unknown as Record<string, unknown>, promotionRules, exchangeRate) : null
-  const priceFact = (key: 'selling' | 'wholesale' | 'promotion', label: string, money: PriceMoney | null) => {
-    if (money && priceText) identity.push([key, <span data-price={key}><span className="text-gray-400 dark:text-gray-500">{label}</span> <strong className="font-semibold tabular-nums text-gray-700 dark:text-gray-200">{priceText(money.usd, money.khr ?? undefined)}</strong></span>])
+  const priceFact = (key: 'selling' | 'wholesale', label: string, money: PriceMoney | null) => {
+    if (money && priceText) identity.push([key, <PriceValue data-price={key} tone={key} label={label} className="tabular-nums">{priceText(money.usd, money.khr ?? undefined)}</PriceValue>])
   }
   if (prices) {
     priceFact('selling', tr('selling_price', 'Selling price'), prices.selling)
     priceFact('wholesale', tr('wholesale_price', 'Wholesale price'), prices.wholesale)
-    priceFact('promotion', tr('promotion', 'Promotion'), prices.promotion)
+    // The promotion is Products' own badge (rose pill); its word is dropped like the others and kept for screen readers and the tooltip.
+    if (prices.promotion && priceText) {
+      const promotion = prices.promotion
+      const promotionLabel = tr('promotion', 'Promotion')
+      identity.push(['promotion', <span data-price="promotion" title={promotionLabel}><span className="sr-only">{promotionLabel} </span><ProductDiscountBadge product={{}} promotion={{ active: true, applied_price_usd: promotion.usd }} fmtUSD={usd => priceText(usd, promotion.khr ?? undefined)} label="" /></span>])
+    }
+  }
+  // Cost: only for a viewer who may see it AND only when the row carries it (the server sends it to nobody else). It is a button: the tap opens the calculated-cost float (the page owns it).
+  const cost = costText && onOpenCost ? costFact(product as unknown as Record<string, unknown>) : null
+  if (cost && costText && onOpenCost) {
+    const costLabel = tr('label_cost', 'Cost')
+    identity.push(['cost', <button type="button" data-price="cost" data-check-cost onClick={() => onOpenCost(product)} title={tr('cost_breakdown_title', 'Calculated cost price')} aria-label={`${costLabel}: ${tr('cost_breakdown_title', 'Calculated cost price')}`}
+      className="inline-flex min-h-6 items-center rounded border-0 bg-transparent p-0 text-left decoration-dotted underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+      <PriceValue tone="cost" className="tabular-nums">{cost.usd === null ? <CostValue value={null} fmt={value => costText(value)} t={key => tr(key, '')} /> : costText(cost.usd, cost.khr ?? undefined)}</PriceValue></button>])
   }
   const dotted = (parts: Array<[string, ReactNode]>) => parts.map(([key, node], index) => <Fragment key={key}>{index > 0 ? <span aria-hidden="true">·</span> : null}{node}</Fragment>)
   const edge = status ? LIST_STATUS[status].edge : 'border-l-transparent'
