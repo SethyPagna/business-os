@@ -42,9 +42,9 @@ function fixture(options: { edit?: boolean; granted?: boolean; pending?: boolean
   let actor = 7
   const authority = { current: { key: 'initial', revision: 0 } }
   const formIdentity = { current: { id: options.edit ? 12 : null, revision: 0 } }
-  // Owner rule, 15 Nov 2026: cost entry is administrator only. 'granted' means an administrator; everyone else holds the retired
-  // product_cost_edit grant and still gets no cost in the payload (the negative control).
-  const user = { id: 7, name: 'Staff', role_code: options.granted === true ? 'admin' : 'staff', permissions: { product_cost_edit: true } }
+  // Owner rule, 17 Nov 2026: cost entry follows product_cost_edit. 'granted' is a non-admin who holds it; the others hold
+  // product_cost_view only and still get no cost in the payload (the negative control).
+  const user = { id: 7, name: 'Staff', role_code: 'staff', permissions: { product_cost_view: true, product_cost_edit: options.granted === true } }
   const api = async (kind: string, payload: Row) => {
     calls.push({ kind, payload })
     if (options.hold) await options.hold.promise

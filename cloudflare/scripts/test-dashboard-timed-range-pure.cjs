@@ -186,11 +186,7 @@ async function main() {
   user = { id: 2, username: 'employee', role_code: 'employee', permissions: JSON.stringify({ dashboard: true }) }
   equal('cost_usd' in (await request('/analytics', timed)).totals, false, 'cost hidden without cost-view grant')
   user.permissions = JSON.stringify({ dashboard: true, product_cost_view: true })
-  // Owner rule, 15 Nov 2026: cost is administrator only; the retired cost-view grant gives a non-admin nothing.
-  equal('cost_usd' in (await request('/analytics', timed)).totals, false, 'the retired cost-view grant no longer shows cost to a non-admin')
-  user = { id: 1, username: 'owner', role_code: 'admin', permissions: '{}' }
-  equal('cost_usd' in (await request('/analytics', timed)).totals, true, 'the administrator sees cost')
-  user = { id: 2, username: 'employee', role_code: 'employee', permissions: '{}' }
+  equal('cost_usd' in (await request('/analytics', timed)).totals, true, 'cost-view grant preserved')
   user.permissions = '{}'
   reads = 0
   await request('/dashboard/startup', timed, 403)

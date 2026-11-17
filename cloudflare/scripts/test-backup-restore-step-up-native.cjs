@@ -17,7 +17,7 @@ async function main() {
   const { check, finish } = createReporter()
   try {
     await world.account('nobody', { roleCode: 'restore_nobody', permissions: {} })
-    // 15 Nov 2026: cost is admin only, so the cost grants give a non-admin nothing. `operator` is a second administrator (admin role,
+    // 17 Nov 2026: backups and restore stay administrator only whatever the cost grants say. `operator` is a second administrator (admin role,
     // not the built-in default admin); `restorer` is a non-admin that holds backup_restore AND both cost grants.
     await world.account('operator', {
       roleCode: 'admin',
@@ -61,9 +61,9 @@ async function main() {
       await refused(t, 'operator', () => restore('operator', { currentPassword: adminPassword }), 403, 'restore_builtin_admin_only')
     })
 
-    await check('a non-admin backup_restore holder with both cost grants is refused on cost, even for a dry run, and nothing changes', async (t) => {
-      await refused(t, 'restorer', () => restore('restorer', { currentPassword: adminPassword }), 403, 'product_cost_edit_required')
-      await refused(t, 'restorer dry run', () => restore('restorer', { dryRun: true }), 403, 'product_cost_edit_required')
+    await check('a non-admin backup_restore holder with both cost grants is refused as not an administrator (the cost grants do not open a restore), even for a dry run, and nothing changes', async (t) => {
+      await refused(t, 'restorer', () => restore('restorer', { currentPassword: adminPassword }), 403, 'admin_required')
+      await refused(t, 'restorer dry run', () => restore('restorer', { dryRun: true }), 403, 'admin_required')
     })
 
     await check('the built-in admin without a password is refused and nothing is rolled back', async (t) => {

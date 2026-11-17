@@ -438,7 +438,7 @@ const FOLLOWED_CONTROLS = {
       /app\.post\('\/customers\/link-conflicts\/resolve-missing'[\s\S]{0,700}?denyUnlessFullContactAction\(c, 'resolve_conflicts'\)/,
     ],
   },
-  // A cost on a received line is refused to a non-administrator on every receiving route; the stock session is the one proved here.
+  // A cost on a received line needs Edit product costs on every receiving route (an administrator always holds it); the stock session is the one proved here.
   'inventory:receive_costs': {
     file: 'lib/stockSession.ts',
     proof: [/function commitStockSession\([^)]*\) \{\s*if \(hasAcquisitionCostInput\(raw, user\)\)\s*fail\('Only an administrator can enter receipt costs\./],
@@ -565,7 +565,7 @@ const OPEN_READS = {
 const COST_GATES = [
   { text: 'Only an administrator can use this import format', how: 'row' },
   { text: 'Only an administrator can read financial import data', how: 'row' },
-  { text: 'Only an administrator can enter receipt costs', how: 'control', why: 'Shown as the Receipt costs control after Adjust / receive (inventory:receive_costs), marked Admin only.' },
+  { text: 'Only an administrator can enter receipt costs', how: 'control', why: 'Shown as the Receipt costs control after Adjust / receive (inventory:receive_costs), which needs Edit product costs (owner, 17 Nov 2026).' },
   { text: 'Only an administrator can change receipt costs', how: 'input' },
   { text: 'Only an administrator can change stored receipt costs', how: 'input' },
   { text: 'Only an administrator can reverse a cost change', how: 'input' },
@@ -575,10 +575,10 @@ const COST_GATES = [
   { text: 'Only an administrator can submit cost changes', how: 'input' },
   { text: 'Only an administrator can change the cost', how: 'input' },
   { text: 'Only an administrator can confirm or reverse a $0 cost', how: 'input' },
-  { text: 'Only an administrator can record supplier return costs and settlement', how: 'control', why: 'Shown as the Supplier returns control after Add (returns:supplier), marked Admin only.' },
+  { text: 'Only an administrator can record supplier return costs and settlement', how: 'control', why: 'Shown as the Supplier returns control after Add (returns:supplier), which needs Edit and View product costs (owner, 17 Nov 2026).' },
   { text: 'Only an administrator can review supplier return compensation and settlement', how: 'control', why: 'The same control: POST /returns/supplier.' },
-  { text: 'Only an administrator can export an unredacted database backup', how: 'unmodelled', why: 'The Backup row has no action chips; its description says exporting and restoring need an administrator.' },
-  { text: 'Only an administrator can restore database costs', how: 'unmodelled', why: 'The same description covers restore.' },
+  { text: 'Only an administrator can export an unredacted database backup', how: 'unmodelled', why: 'The Backup row has no action chips; its description says exporting and restoring need an administrator whatever the cost grants say (owner, 17 Nov 2026).' },
+  { text: 'Only an administrator can restore a database backup', how: 'unmodelled', why: 'The same description covers restore.' },
   { text: 'Only an administrator can export database backups', how: 'unmodelled', why: 'Drive sync export: the same description.' },
   { text: 'Only an administrator can prepare a database restore', how: 'unmodelled', why: 'Staging a Drive restore: the same description.' },
 ]

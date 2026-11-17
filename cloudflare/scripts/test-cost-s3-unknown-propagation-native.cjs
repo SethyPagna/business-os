@@ -247,39 +247,28 @@ const NEW_KEYS = ['cost_missing_snapshot_lines', 'cost_known_lines', 'cost_compl
     assert.deepEqual(leaks, [])
   })
 
-  // Owner rule, 15 Nov 2026: cost and profit are administrator only. The administrator receives the unknown-cost count on
-  // every surface; a non-admin holding the retired View product costs grant receives none of it, with or without the courier grant.
-  await check('the administrator receives the unknown-cost count; a non-admin holding the cost grant receives none', async () => {
-    h.setUser(ADMIN)
-    const strip = await get(sales, `/stats-strip?${WINDOW}`)
-    assert.equal(strip.totals.cost_missing_snapshot_lines, 1)
-    assert.equal(strip.totals.cost_complete, false)
-    const overview = await get(reports.default, `/overview?${WINDOW}`)
-    assert.equal(overview.sales.totals.cost_missing_snapshot_lines, 1)
-    const exported = await get(sales, `/export?${WINDOW}`)
-    assert.equal(exported.summary.cost_missing_snapshot_lines, 1)
-    const leaks = []
-    const scan = (label, value) => {
-      if (!value || typeof value !== 'object') return
-      for (const key of hasAny(value, NEW_KEYS)) leaks.push(`${label}.${key}`)
-      for (const [key, child] of Object.entries(value)) scan(`${label}.${key}`, child)
-    }
-    for (const holder of [COST_NO_COURIER, COST_AND_COURIER]) {
-      h.setUser(holder)
+  // Owner rule, 17 Nov 2026: cost and profit follow the View product costs grant (admin by default). The administrator and a non-admin holding
+  // the grant receive the unknown-cost count on every surface, with or without the courier grant.
+  await check('the administrator and a non-admin holding the cost grant receive the unknown-cost count on every surface', async () => {
+    for (const who of [ADMIN, COST_NO_COURIER, COST_AND_COURIER]) {
+      h.setUser(who)
       try {
-        scan('stats-strip', await get(sales, `/stats-strip?${WINDOW}`))
-        scan('export', await get(sales, `/export?${WINDOW}`))
-        scan('overview', await get(reports.default, `/overview?${WINDOW}`))
+        const strip = await get(sales, `/stats-strip?${WINDOW}`)
+        assert.equal(strip.totals.cost_missing_snapshot_lines, 1)
+        assert.equal(strip.totals.cost_complete, false)
+        const overview = await get(reports.default, `/overview?${WINDOW}`)
+        assert.equal(overview.sales.totals.cost_missing_snapshot_lines, 1)
+        const exported = await get(sales, `/export?${WINDOW}`)
+        assert.equal(exported.summary.cost_missing_snapshot_lines, 1)
       } finally { h.setUser(ADMIN) }
     }
-    assert.deepEqual(leaks, [])
   })
 
-  // Owner, 16 Nov 2026: the courier cost is a granted permission, separate from the product-cost money above. Staff holding it read the courier
-  // figure and still none of the unknown-cost count (product cost); the same staff with it switched off read neither.
-  await check('staff with the courier permission read the courier cost and no unknown-cost count; with it switched off they read neither', async () => {
+  // Owner, 16 Nov 2026: the courier cost is a granted permission, separate from the product-cost money above. Staff holding it (and no cost grant)
+  // read the courier figure and none of the unknown-cost count (product cost); a cost-grant holder with it switched off reads the count and no courier cost.
+  await check('courier permission alone reads the courier cost and no unknown-cost count; the cost grant with it switched off reads the count and no courier cost', async () => {
     try {
-      h.setUser(COST_AND_COURIER)
+      h.setUser(PLAIN)
       const granted = (await get(reports.default, `/overview?${WINDOW}`)).sales.totals
       assert.equal(typeof granted.delivery_actual_cost_usd, 'number', 'the courier permission reads the courier cost')
       assert.deepEqual(hasAny(granted, NEW_KEYS), [])
@@ -287,7 +276,7 @@ const NEW_KEYS = ['cost_missing_snapshot_lines', 'cost_known_lines', 'cost_compl
       h.setUser(COST_NO_COURIER)
       const off = (await get(reports.default, `/overview?${WINDOW}`)).sales.totals
       assert.equal(Object.hasOwn(off, 'delivery_actual_cost_usd'), false, 'switched off: no courier cost')
-      assert.deepEqual(hasAny(off, NEW_KEYS), [])
+      assert.equal(off.cost_missing_snapshot_lines, 1, 'the cost grant reads the unknown-cost count')
     } finally { h.setUser(ADMIN) }
   })
 

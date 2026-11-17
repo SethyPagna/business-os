@@ -84,8 +84,7 @@ function load(relative) {
   if (cache.has(relative)) return cache.get(relative)
   const mod = { exports: {} }; cache.set(relative, mod.exports)
   const filename = path.join(src, relative)
-  const text = fs.readFileSync(filename, 'utf8')
-  const output = ts.transpileModule(text, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }, fileName: filename }).outputText
+  const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }, fileName: filename }).outputText
   const localRequire = request => {
     if (request === 'hono') return { Hono }
     const name = request.split('/').pop()
@@ -119,20 +118,10 @@ const frontendWriter = loadFrontend('components/products/helpers/productWriteHel
 const context = { waitUntil: () => {}, passThroughOnException: () => {} }
 // Administrator control comes from the role, not the name (FX-sec).
 const admin = { id: 1, username: 'admin', name: 'Admin', role_code: 'admin', tier: 'full' }
-// Owner rule, 15 Nov 2026: cost entry is administrator only and an administrator is never queued for review, so a Review-tier
-// requester queues requests that carry NO cost. A cost request that is already queued (from before the ruling) is seeded straight
-// into pending_actions with its frozen plan, and an administrator approves it under the real rule.
 const requester = { id: 2, username: 'requester', name: 'Requester', tier: 'review', permissions: JSON.stringify({ product_cost_edit: true, product_cost_view: true }) }
 async function request(app, method, url, body, user = admin) {
   const response = await app.request(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, { ...env, TEST_USER: user }, context)
   return { status: response.status, body: await response.json() }
-}
-// A cost request queued before the ruling: the body gets the frozen plan the route used to attach, and is inserted as the requester's
-// open row. Returns the pending id; the response shape mirrors the old queue answer.
-async function seedQueued(actionType, productId, body) {
-  await writer.prepareProductMoneyWrite({ ...env, TEST_USER: admin }, body, productId)
-  const id = Number(raw.prepare("INSERT INTO pending_actions(section,action_type,entity_type,entity_id,payload_json,status,requested_by,requested_by_name) VALUES('products',?,'product',?,?,'open',2,'Requester')").run(actionType, productId, JSON.stringify(body)).lastInsertRowid)
-  return { status: 202, body: { pendingActionId: id } }
 }
 const row = id => raw.prepare('SELECT * FROM products WHERE id=?').get(id)
 function seed(name = 'Existing') {
@@ -149,11 +138,8 @@ function seed(name = 'Existing') {
   const variant = await request(products, 'POST', '/variant', { name: 'Variant New', cost_price_usd: 1.2345, selling_price_usd: '1.23004' })
   assert.equal(variant.status, 200, JSON.stringify(variant))
   assert.equal(row(variant.body.id).selling_price_usd, 1.24)
-  const refusedCostQueue = await request(products, 'POST', '/', { name: 'Refused New', cost_price_usd: '1.23455' }, requester)
-  assert.equal(refusedCostQueue.status, 403, 'a non-administrator holding both retired cost grants cannot queue a cost')
-  assert.equal(refusedCostQueue.body.code, 'product_cost_edit_required')
-  assert.equal(raw.prepare("SELECT COUNT(*) n FROM pending_actions WHERE payload_json LIKE '%Refused New%'").get().n, 0)
-  const queuedCreate = await seedQueued('create', null, { name: 'Reviewed New', cost_price_usd: '1.23455', selling_price_usd: '1.23000000000000001' })
+  const queuedCreate = await request(products, 'POST', '/', { name: 'Reviewed New', cost_price_usd: '1.23455', selling_price_usd: '1.23000000000000001' }, requester)
+  assert.equal(queuedCreate.status, 202, JSON.stringify(queuedCreate))
   assert.equal((await request(reviews, 'POST', `/${queuedCreate.body.pendingActionId}/approve`, {})).status, 200)
   const reviewedCreated = raw.prepare("SELECT * FROM products WHERE name='Reviewed New'").get()
   assert.equal(reviewedCreated.cost_price_usd, 1.2346)
@@ -207,7 +193,8 @@ function seed(name = 'Existing') {
   // The first edit of this row wrote its cost and so set its purchase twin to it (lane 6.0.944): the before-image is what the row holds now.
   const purchaseBeforeQueue = row(id).purchase_price_usd
   assert.equal(purchaseBeforeQueue, 1.2345)
-  const queued = await seedQueued('update', id, { cost_price_usd: 1.2345, selling_price_usd: '1.23004' })
+  const queued = await request(products, 'PUT', `/${id}`, { cost_price_usd: 1.2345, selling_price_usd: '1.23004' }, requester)
+  assert.equal(queued.status, 202, JSON.stringify(queued))
   const pendingId = queued.body.pendingActionId
   const pending = raw.prepare('SELECT * FROM pending_actions WHERE id=?').get(pendingId)
   const payload = JSON.parse(pending.payload_json)
@@ -227,25 +214,14 @@ function seed(name = 'Existing') {
   assert.deepEqual(textPayload._product_money_write_plan.after, {})
   raw.prepare("UPDATE pending_actions SET status='rejected' WHERE id=?").run(textPending.id)
   const textBefore = row(id)
-  {
-    const injection = await request(reviews, 'POST', `/${textPending.id}/resubmit`, { payload: { description: textPayload.description, selling_price_usd: 1.23004 } }, requester)
+  for (const extra of [{ cost_price_usd: -.00004 }, { selling_price_usd: 1.23004 }]) {
+    const injection = await request(reviews, 'POST', `/${textPending.id}/resubmit`, { payload: { description: textPayload.description, ...extra } }, requester)
     assert.equal(injection.status, 409)
     assert.equal(injection.body.code, 'product_money_plan_immutable')
     assert.deepEqual(row(id), textBefore)
     assert.equal(raw.prepare('SELECT status FROM pending_actions WHERE id=?').get(textPending.id).status, 'rejected')
-    // A cost smuggled into a resubmission is the real rule's refusal now: the requester is not an administrator.
-    const costInjection = await request(reviews, 'POST', `/${textPending.id}/resubmit`, { payload: { description: textPayload.description, cost_price_usd: -.00004 } }, requester)
-    assert.equal(costInjection.status, 403)
-    assert.equal(costInjection.body.code, 'product_cost_edit_required')
-    assert.deepEqual(row(id), textBefore)
-    assert.equal(raw.prepare('SELECT status FROM pending_actions WHERE id=?').get(textPending.id).status, 'rejected')
   }
-  // A resubmitted payload that repeats the frozen plan names its before-image costs, so a non-administrator sends none: the request is
-  // reopened unchanged.
-  const withPlan = await request(reviews, 'POST', `/${textPending.id}/resubmit`, { payload: textPayload }, requester)
-  assert.equal(withPlan.status, 403)
-  assert.equal(withPlan.body.code, 'product_cost_edit_required')
-  assert.equal((await request(reviews, 'POST', `/${textPending.id}/resubmit`, {}, requester)).status, 200)
+  assert.equal((await request(reviews, 'POST', `/${textPending.id}/resubmit`, { payload: textPayload }, requester)).status, 200)
   assert.equal((await request(reviews, 'POST', `/${textPending.id}/approve`, {})).status, 200)
   assert.equal(row(id).cost_price_usd, textBefore.cost_price_usd)
   assert.equal(row(id).selling_price_usd, textBefore.selling_price_usd)
@@ -261,18 +237,18 @@ function seed(name = 'Existing') {
   const expectedRace = await request(products, 'PUT', `/${expectedId}`, { expectedUpdatedAt: 'editor revision', cost_price_usd: 2 })
   assert.equal(expectedRace.status, 409)
   assert.equal(row(expectedId).cost_price_usd, 99, 'snapshot may not adopt a newer revision than the supplied editor token')
-  const stale = await seedQueued('update', id, { cost_price_usd: 2 })
+  const stale = await request(products, 'PUT', `/${id}`, { cost_price_usd: 2 }, requester)
   seedFixture(raw, () => raw.prepare('UPDATE products SET cost_price_usd=7 WHERE id=?').run(id))
   const staleRow = row(id)
   assert.equal((await request(reviews, 'POST', `/${stale.body.pendingActionId}/approve`, {})).body.code, 'product_money_state_conflict')
   assert.deepEqual(row(id), staleRow)
-  const stalePurchase = await seedQueued('update', id, { purchase_price_usd: '3.45675' })
+  const stalePurchase = await request(products, 'PUT', `/${id}`, { purchase_price_usd: '3.45675' }, requester)
   seedFixture(raw, () => raw.prepare('UPDATE products SET purchase_price_usd=8.765432 WHERE id=?').run(id))
   const stalePurchaseRow = row(id)
   const stalePurchaseResult = await request(reviews, 'POST', `/${stalePurchase.body.pendingActionId}/approve`, {})
   assert.equal(stalePurchaseResult.body.code, 'product_money_state_conflict')
   assert.deepEqual(row(id), stalePurchaseRow, 'purchase-only concurrent change is covered by the v2 before-image CAS')
-  const race = await seedQueued('update', id, { cost_price_usd: 3 })
+  const race = await request(products, 'PUT', `/${id}`, { cost_price_usd: 3 }, requester)
   beforeProductUpdate = () => seedFixture(raw, () => raw.prepare('UPDATE products SET selling_price_usd=9 WHERE id=?').run(id))
   assert.equal((await request(reviews, 'POST', `/${race.body.pendingActionId}/approve`, {})).body.code, 'product_money_state_conflict')
   assert.equal(row(id).cost_price_usd, 7)
@@ -280,20 +256,14 @@ function seed(name = 'Existing') {
   raw.prepare("UPDATE pending_actions SET status='rejected' WHERE id=?").run(race.body.pendingActionId)
   const saved = JSON.parse(raw.prepare('SELECT payload_json FROM pending_actions WHERE id=?').get(race.body.pendingActionId).payload_json)
   const changed = { ...saved }; delete changed._product_money_write_plan; delete changed.product_money_policy_version
-  // Both payloads carry a cost, so the real rule refuses the non-administrator requester before the plan is compared. The plan
-  // immutability itself is pinned above with a cost-free payload.
-  for (const payload of [changed, saved]) {
-    const refused = await request(reviews, 'POST', `/${race.body.pendingActionId}/resubmit`, { payload }, requester)
-    assert.equal(refused.status, 403)
-    assert.equal(refused.body.code, 'product_cost_edit_required')
-  }
-  assert.equal(raw.prepare('SELECT status FROM pending_actions WHERE id=?').get(race.body.pendingActionId).status, 'rejected')
+  assert.equal((await request(reviews, 'POST', `/${race.body.pendingActionId}/resubmit`, { payload: changed }, requester)).body.code, 'product_money_plan_immutable')
+  assert.equal((await request(reviews, 'POST', `/${race.body.pendingActionId}/resubmit`, { payload: saved }, requester)).status, 200)
   const oldId = Number(raw.prepare("INSERT INTO pending_actions(section,action_type,entity_type,entity_id,payload_json,status,requested_by) VALUES('products','update','product',?,?,'open',2)").run(id, JSON.stringify({ cost_price_usd: 1.234567, selling_price_usd: 1.23004 })).lastInsertRowid)
   assert.equal((await request(reviews, 'POST', `/${oldId}/approve`, {})).status, 200)
   assert.equal(row(id).cost_price_usd, 1.234567, 'old unversioned plan is not restamped or repriced')
   assert.equal(row(id).selling_price_usd, 1.23004)
   raw.prepare("UPDATE pending_actions SET status='rejected' WHERE id=?").run(oldId)
-  assert.equal((await request(reviews, 'POST', `/${oldId}/resubmit`, { payload: saved }, requester)).body.code, 'product_cost_edit_required', 'a legacy row cannot be reopened with client-authored policy metadata: the payload names costs, so a non-administrator is refused')
+  assert.equal((await request(reviews, 'POST', `/${oldId}/resubmit`, { payload: saved }, requester)).body.code, 'product_money_plan_immutable', 'legacy queue cannot accept client-authored policy metadata')
   const v1ReplayProductId = seed('Frozen v1 replay')
   const v1ReplayBefore = row(v1ReplayProductId)
   const v1Fields = ['cost_price_usd', 'cost_price_khr', 'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr']
@@ -380,7 +350,7 @@ function seed(name = 'Existing') {
     assert.equal(raw.prepare('SELECT COUNT(*) n FROM products').get().n, expectedCount)
     assert.equal(auditCount, auditAtStart)
   }
-  const reviewedGroup = await seedQueued('update', atomicGroupId, { name: 'Reviewed Group', __rename_scope: 'group', cost_price_usd: 99 })
+  const reviewedGroup = await request(products, 'PUT', `/${atomicGroupId}`, { name: 'Reviewed Group', __rename_scope: 'group', cost_price_usd: 99 }, requester)
   assert.equal(reviewedGroup.status, 202)
   assert.equal(row(atomicGroupId).name, 'Atomic Group', 'review submission has no group side effects')
   assert.deepEqual(row(atomicSibling), atomicSiblingBefore)

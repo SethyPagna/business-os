@@ -108,18 +108,16 @@ async function main() {
         else assert.equal(refused.body.error, DENIED)
       }
       assert.deepEqual([await count('returns'), await count('action_history'), await count('audit_logs')], before, 'a refused return changes nothing')
-      for (const [who, url] of [[returnAdd, '/api/returns'], [undefined, '/api/returns/supplier'], [returnAddNoCosts, '/api/returns'], [undefined, '/api/returns']]) {
+      for (const [who, url] of [[returnAdd, '/api/returns'], [returnAdd, '/api/returns/supplier'], [returnAddNoCosts, '/api/returns'], [undefined, '/api/returns/supplier'], [undefined, '/api/returns']]) {
         const passed = await h.call('POST', url, { items: [] }, `holds returns:add ${url}`, who ? as(who) : {})
         assert.notEqual(passed.status, 403, `${url} passes the permission gate for a role that holds returns:add (got ${passed.status} ${JSON.stringify(passed.body)})`)
       }
       // A supplier return is refused for its cost grants first, with its own message: still 403, still nothing written.
-      // Owner rule, 15 Nov 2026: supplier-return costs are administrator only, so the retired cost grants no longer open it
-      // either (the administrator, the call with no cookie above, passes the gate).
-      for (const [who, label] of [[returnAddNoCosts, 'returns:add but no cost grants'], [returnAdd, 'returns:add and the retired cost grants']]) {
-        const noCosts = await h.call('POST', '/api/returns/supplier', { items: [] }, label, as(who))
-        assert.equal(noCosts.status, 403, label)
-        assert.equal(noCosts.body.code, 'product_cost_edit_required', label)
-      }
+      // Owner rule, 17 Nov 2026: supplier-return costs follow the cost grants (Edit and View product costs), so a role without them is refused
+      // and a role holding both passes the gate (the call with returnAdd above; the administrator, the call with no cookie, passes too).
+      const noCosts = await h.call('POST', '/api/returns/supplier', { items: [] }, 'returns:add but no cost grants', as(returnAddNoCosts))
+      assert.equal(noCosts.status, 403)
+      assert.equal(noCosts.body.code, 'product_cost_edit_required')
     })
 
     await check('Settings Save: a View-tier role may read Settings but the Worker refuses its save with 403 and the setting stays; a Full role saves', async () => {
@@ -143,7 +141,7 @@ async function main() {
       assert.equal((await h.call('GET', '/api/promotions', undefined, 'employee reads rules', as(employee))).status, 200, 'POS prices from the same rules')
     })
 
-    await check('Manager Dashboard: the seeded Manager gets 200 with every key the Dashboard validator reads and none of the cost-derived keys; the administrator gets them and a cost-grant holder does not; the Employee default opens it without cost; a role with Dashboard off is refused', async () => {
+    await check('Manager Dashboard: the seeded Manager gets 200 with every key the Dashboard validator reads and none of the cost-derived keys; the administrator and a cost-grant holder get them; the Employee default opens it without cost; a role with Dashboard off is refused', async () => {
       const startup = await h.call('GET', '/api/dashboard/startup', undefined, 'manager dashboard', as(manager))
       assert.equal(startup.status, 200, JSON.stringify(startup.body))
       const summary = startup.body.summary
@@ -151,11 +149,11 @@ async function main() {
       for (const key of REQUIRED_SUMMARY_KEYS) assert.ok(Object.hasOwn(summary, key), `the Manager's summary carries ${key}, which the Dashboard requires`)
       for (const key of COST_SUMMARY_KEYS) assert.equal(Object.hasOwn(summary, key), false, `${key} is removed for a caller without product_cost_view`)
       assert.ok(startup.body.analytics && Object.hasOwn(startup.body.analytics.totals, 'revenue_usd'), 'the analytics half the page also validates is whole')
-      // Owner rule, 15 Nov 2026: cost is administrator only. A Manager holding the retired View product costs grant gets none
-      // of the cost keys; the administrator (the harness's default caller) does.
+      // Owner rule, 17 Nov 2026: cost follows product_cost_view. A Manager holding the grant gets the cost keys, like the administrator
+      // (the harness's default caller).
       const costed = await h.call('GET', '/api/dashboard/startup', undefined, 'cost holder dashboard', as(managerWithCost))
       assert.equal(costed.status, 200, JSON.stringify(costed.body))
-      for (const key of COST_SUMMARY_KEYS) assert.equal(Object.hasOwn(costed.body.summary, key), false, `${key} is still removed for a Manager who holds product_cost_view`)
+      for (const key of COST_SUMMARY_KEYS) assert.ok(Object.hasOwn(costed.body.summary, key), `discriminating: ${key} reaches a Manager who holds product_cost_view`)
       const adminStartup = await h.call('GET', '/api/dashboard/startup', undefined, 'admin dashboard')
       assert.equal(adminStartup.status, 200, JSON.stringify(adminStartup.body))
       for (const key of COST_SUMMARY_KEYS) assert.ok(Object.hasOwn(adminStartup.body.summary, key), `discriminating: ${key} reaches the administrator`)

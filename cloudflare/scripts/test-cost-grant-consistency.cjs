@@ -41,21 +41,22 @@ app.route('/sales', sales.default)
 app.route('/compat', load(path.join(root, 'routes/compat.ts')).default)
 const actor = (permissions = {}, role_permissions = {}, role_code = 'manager') => ({ id: 7, username: 'employee', role_code, permissions: JSON.stringify({ ...(permissions.sales ? { dashboard: true } : {}), ...permissions }), role_permissions: JSON.stringify(role_permissions) })
 async function main() {
-  // [actor, product costs, administrator, the courier's actual cost]. Owner, 15 Nov 2026: product cost and profit are ADMIN ONLY, so the two cost
-  // grants are inert. Owner, 16 Nov 2026: the courier's actual cost is its own permission (sales:view_courier_cost): on for every Sales role until a
-  // role switches it off, independent of the cost grants; the admin row is the control.
+  // [actor, product costs, administrator, the courier's actual cost]. Owner, 17 Nov 2026: product cost and profit are admin only BY DEFAULT and follow
+  // product_cost_view (one switch for both); edit alone shows nothing. Owner, 16 Nov 2026: the courier's actual cost is its own permission
+  // (sales:view_courier_cost): on for every Sales role until a role switches it off, independent of the cost grant; the admin row is the control.
   const OFF = { 'sales:view_courier_cost': false }
   for (const [who, expectedCost, admin, seesCourier] of [
     [actor({ sales: true }), false, false, true],
-    [actor({ sales: true, product_cost_view: true }), false, false, true],
-    [actor({ sales: true }, { product_cost_view: true }), false, false, true],
+    [actor({ sales: true, product_cost_view: true }), true, false, true],
+    [actor({ sales: true }, { product_cost_view: true }), true, false, true],
     [actor({ sales: true, product_cost_view: false }, { product_cost_view: true }), false, false, true],
     [actor({ sales: true, product_cost_edit: true }), false, false, true],
     [actor({ sales: true, ...OFF }), false, false, false],
-    [actor({ sales: true, product_cost_view: true, ...OFF }), false, false, false],
+    [actor({ sales: true, product_cost_view: true, ...OFF }), true, false, false], // cost and profit without the courier cost: profit restated on goods
     [actor({ sales: true }, OFF), false, false, false],
     [actor({ sales: true, 'sales:view_courier_cost': true }, OFF), false, false, true], // a per-user value overrides the role's, key by key
-    [actor({ sales: true, 'sales:view_courier_cost': true, product_cost_view: true, product_cost_edit: true }), false, false, true], // the courier grant never opens product cost or profit
+    [actor({ sales: true, 'sales:view_courier_cost': true, product_cost_view: true, product_cost_edit: true }), true, false, true],
+    [actor({ sales: true, 'sales:view_courier_cost': true, product_cost_view: false, product_cost_edit: true }), false, false, true], // the courier grant never opens product cost or profit, and edit is not view
     [actor({ product_cost_view: false, ...OFF }, {}, 'admin'), true, true, true],
   ]) {
     user = who

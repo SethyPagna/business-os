@@ -94,8 +94,7 @@ function load(relative) {
 
 const products = load('routes/products.ts').default
 const context = { waitUntil: () => {}, passThroughOnException: () => {} }
-// Owner rule, 15 Nov 2026: cost entry and cost reads are administrator only, so the fixture owner is an administrator.
-const admin = { id: 9, username: 'sethy', name: 'Sethy Owner', role_code: 'admin', tier: 'full', permissions: JSON.stringify({ product_cost_view: true, product_cost_edit: true }) }
+const admin = { id: 9, username: 'sethy', name: 'Sethy Owner', tier: 'full', permissions: JSON.stringify({ product_cost_view: true, product_cost_edit: true }) }
 
 async function request(method, url, body) {
   const response = await products.request(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, { ...env, TEST_USER: admin }, context)
@@ -322,12 +321,7 @@ async function main() {
     const denied = await costRoute.request(`/${id}/cost-breakdown`,{}, {...env,TEST_USER:employee},context)
     assert.equal(denied.status,403,'edit-only user cannot read previous or current costs')
     const viewer = {...employee,permissions:JSON.stringify({product_cost_view:true,product_cost_edit:false})}
-    const bothGrants = {...employee,permissions:JSON.stringify({product_cost_view:true,product_cost_edit:true})}
-    for (const holder of [viewer, bothGrants]) {
-      const refused = await costRoute.request(`/${id}/cost-breakdown`,{}, {...env,TEST_USER:holder},context)
-      assert.equal(refused.status,403,'a non-admin holding the retired cost grants still cannot read costs')
-    }
-    const allowed = await costRoute.request(`/${id}/cost-breakdown`,{}, {...env,TEST_USER:admin},context)
+    const allowed = await costRoute.request(`/${id}/cost-breakdown`,{}, {...env,TEST_USER:viewer},context)
     assert.equal(allowed.status,200)
     assert.equal((await allowed.json()).inputs.find(input=>input.source==='manual').previous_cost_usd,7)
   })

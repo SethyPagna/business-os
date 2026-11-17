@@ -137,9 +137,9 @@ function fixture() {
   }
 }
 
-// Owner rule, 15 Nov 2026: cost entry is administrator only. The atomicity, replay and receipt cases run as an administrator (the
-// only caller who may enter a cost). The tier-denial cases run as non-administrator `staff` with requests that carry NO cost, so
-// a 403 there is the tier gate and cannot be the cost rule.
+// Owner rule, 17 Nov 2026: cost entry follows product_cost_edit (admin by default). The atomicity, replay and receipt cases run as an
+// administrator. The tier-denial cases run as non-administrator `staff` with requests that carry NO cost, so a 403 there is the tier
+// gate and cannot be the cost rule.
 const staff = {
   id: 7, username: 'stock-user', name: 'Stock User', organization_id: null,
   role_id: null, permissions: JSON.stringify({ inventory: true, products: true }), is_active: 1,
@@ -225,16 +225,18 @@ async function main() {
     assert.deepEqual(await response.json(), { error: 'createdFrom and createdTo must be provided together' })
   })
   const { commitStockSession, replayStockSession, StockSessionError } = loadStockSession()
-  await check('cost entry is administrator only: a non-admin holding both cost grants is refused and an administrator is admitted', async () => {
+  await check('cost entry follows the edit grant: a non-admin without it (even holding view) is refused; a holder and an administrator are admitted', async () => {
     {
       const f = fixture()
       const before = f.sql.serialize()
-      const grantHolder = { ...staff, permissions: JSON.stringify({ inventory: true, products: true, product_cost_edit: true, product_cost_view: true }) }
-      await assert.rejects(() => commitStockSession(f.env, grantHolder, receiveRequest('grant-holder-refused')),
+      const viewOnly = { ...staff, permissions: JSON.stringify({ inventory: true, products: true, product_cost_view: true }) }
+      await assert.rejects(() => commitStockSession(f.env, viewOnly, receiveRequest('view-only-refused')),
         error => error instanceof StockSessionError && error.statusCode === 403 && error.code === 'product_cost_edit_required')
       assert.deepEqual(f.sql.serialize(), before, 'the refusal wrote nothing')
-      const committed = await commitStockSession(f.env, user, receiveRequest('admin-admitted'))
-      assert.ok(committed, 'the administrator commits the same receipt')
+      const grantHolder = { ...staff, permissions: JSON.stringify({ inventory: true, products: true, product_cost_edit: true }) }
+      assert.ok(await commitStockSession(f.env, grantHolder, receiveRequest('grant-holder-admitted')), 'a non-admin holding the edit grant commits the receipt')
+      const f2 = fixture()
+      assert.ok(await commitStockSession(f2.env, user, receiveRequest('admin-admitted')), 'the administrator commits the same receipt')
     }
   })
   await check('cost entry defaults denied independently of inventory and products grants', async () => {

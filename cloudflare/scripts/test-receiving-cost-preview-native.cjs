@@ -50,7 +50,7 @@ const arrange = sql => seedStockFixture(f.sql(), () => f.sql().exec(sql))
 const protectedWrite = sql => f.load('lib/stockTransaction.ts').executeStockTransaction(f.db(), [{ sql }], 'once')
 async function writer(input) {
   if(input.wire==='adjust')return f.request(input.body)
-  if(input.wire==='stock_session')return f.load('lib/stockSession.ts').commitStockSession({DB:{},PLAN_TIER:'paid'}, {id:7,name:'Operator',role_code:'admin',permissions:JSON.stringify({inventory:true,product_cost_edit:true,product_cost_view:true})}, {client_request_id:`preview-session-${++sequence}-abcdefgh`,mode:'stock_in',items:[{line_id:`preview-line-${sequence}`, ...input.body}]})
+  if(input.wire==='stock_session')return f.load('lib/stockSession.ts').commitStockSession({DB:{},PLAN_TIER:'paid'}, {id:7,name:'Operator',permissions:JSON.stringify({inventory:true,product_cost_edit:true,product_cost_view:true})}, {client_request_id:`preview-session-${++sequence}-abcdefgh`,mode:'stock_in',items:[{line_id:`preview-line-${sequence}`, ...input.body}]})
   const b=input.body
   const body={client_request_id:`preview-receive-${++sequence}-abcdefgh`,product_id:b.productId,branch_id:b.branchId,quantity:b.quantity,free_quantity:b.freeQuantity,unit_cost_usd:b.unitCostUsd,free_goods:b.freeGoods,batch_id:b.batchId,received_date:b.receivedDate,supplier_name:b.supplierName,supplier_id:b.supplierId}
   const response=await batches.request('/',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)},{},{waitUntil:()=>{},passThroughOnException:()=>{}})
@@ -132,10 +132,10 @@ async function main() {
     assert.equal((await preview([line(3,1,{type:'remove'})])).body.results[0].reason,'unsupported_operation')
     assert.equal((await preview([{key:'new',wire:'stock_session',body:{kind:'create_receive'}}])).body.results[0].reason,'unsupported_operation')
   })
-  await check('active product and branch scope with a non-admin cost-grant holder denied',async()=>{
+  await check('active product and branch scope with current cost-view denial',async()=>{
     assert.equal((await preview([line(3,1,{branchId:999})])).body.results[0].reason,'branch_unavailable')
     arrange('UPDATE products SET is_active=0');assert.equal((await preview([line(3)])).body.results[0].reason,'product_unavailable')
-    f.setUser({id:7,permissions:JSON.stringify({inventory:true,products:true,product_cost_edit:true,product_cost_view:true})})
+    f.setUser({id:7,permissions:JSON.stringify({inventory:true,products:true,product_cost_edit:true})})
     const denied=await preview([line(3)]);assert.equal(denied.status,403);assert.equal(denied.queries.length,0);assert.equal(denied.body.results,undefined)
   })
   await check('one and 25 lines use one read, no per-line DB calls',async()=>{
@@ -185,12 +185,9 @@ async function wholeWorker() {
       assert.ok(measured.every(m=>m.statements<=(tier==='free'?50:1000)))
       assert.deepEqual(await snapshot(),before,'actual full Worker preview creates no persistent database changes')
       const viewer=await h.addEmployee(911,'preview_viewer',{products:true,inventory:true,product_cost_view:true})
-      assert.equal((await h.call('POST','/api/products/receiving-cost-preview',{lines:[lines[0]]},`${tier} viewer`,{cookie:viewer})).status,403,'the retired View product costs grant gives a non-admin nothing')
-      assert.equal((await h.call('POST','/api/products/receiving-cost-preview',{lines:[lines[0]]},`${tier} both grants`,{cookie:await h.addEmployee(913,'preview_both',{products:true,inventory:true,product_cost_view:true,product_cost_edit:true})})).status,403,'both retired grants still give a non-admin nothing')
+      assert.equal((await h.call('POST','/api/products/receiving-cost-preview',{lines:[lines[0]]},`${tier} viewer`,{cookie:viewer})).status,200)
       await h.db.prepare('UPDATE users SET permissions=? WHERE id=911').bind(JSON.stringify({product_cost_view:false})).run()
       const revoked=await h.call('POST','/api/products/receiving-cost-preview',{lines:[lines[0]]},`${tier} revoked viewer`,{cookie:viewer})
-      // Not a discriminating arm: a non-administrator is refused with the grant stored true (above) and stored false alike, so this case
-      // cannot separate the old rule from the new one. The grant-holder arms above are the ones that do.
       assert.equal(revoked.status,403,JSON.stringify(revoked.body));assert.equal(revoked.body.results,undefined)
       const blind=await h.addEmployee(912,'preview_blind',{products:true,inventory:true,product_cost_edit:true})
       assert.equal((await h.call('POST','/api/products/receiving-cost-preview',{lines:[lines[0]]},`${tier} cost edit alone`,{cookie:blind})).status,403)

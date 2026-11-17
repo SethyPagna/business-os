@@ -1,15 +1,14 @@
 import { effectivePermissions, isAdminControlUser, type PermissionUser } from './permissions.ts'
 
-/** Owner ruling, 15 Nov 2026: cost, profit, margin, stock value and removal loss are ADMIN ONLY. Mirrors cloudflare/src/lib/acquisitionCostAccess.ts. */
+/** Owner ruling, 17 Nov 2026 (reverses 15 Nov): cost, profit, margin, stock value and removal loss are admin only by default and follow the editable product_cost_view / product_cost_edit grants. Mirrors cloudflare/src/lib/acquisitionCostAccess.ts. */
 export function canViewAcquisitionCosts(user: PermissionUser): boolean {
-  return isAdminControlUser(user)
+  return holdsCostViewGrant(user)
 }
 
 export function canEditAcquisitionCosts(user: PermissionUser): boolean {
-  return isAdminControlUser(user)
+  return holdsCostEditGrant(user)
 }
 
-/** UNUSED since 15 Nov 2026: the per-account grants, kept as the way back (swap into the two functions above). */
 export function holdsCostViewGrant(user: PermissionUser): boolean {
   return isAdminControlUser(user) || effectivePermissions(user).merged.product_cost_view === true
 }

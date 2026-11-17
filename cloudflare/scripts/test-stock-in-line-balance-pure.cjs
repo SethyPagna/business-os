@@ -350,12 +350,8 @@ const wire = { rows: [{ ...cream, before_qty: 7, after_qty: 12 }] }
 const hidden = costs.projectAcquisitionCosts(wire, staff).rows[0]
 ok(!('received_unit_cost_usd' in hidden) && !('received_total_cost_usd' in hidden) && !('unit_cost_usd' in hidden), 'without cost-view access the as-received costs are stripped')
 ok(hidden.received_quantity === 5 && hidden.before_qty === 7 && hidden.after_qty === 12, 'the quantities and the stock balance stay visible')
-// Owner rule, 15 Nov 2026: cost is administrator only. The retired product_cost_view grant shows a non-admin nothing.
-const grantHolder = costs.projectAcquisitionCosts(wire, viewer).rows[0]
-ok(!('received_unit_cost_usd' in grantHolder) && !('received_total_cost_usd' in grantHolder) && !('unit_cost_usd' in grantHolder), 'a non-admin holding the retired cost-view grant still sees no as-received cost')
-const administrator = { id: 1, username: 'admin', role_code: 'admin', permissions: '{}', role_permissions: '{}' }
-const shown = costs.projectAcquisitionCosts(wire, administrator).rows[0]
-ok(shown.received_unit_cost_usd === 4, 'an administrator still sees them')
+const shown = costs.projectAcquisitionCosts(wire, viewer).rows[0]
+ok(shown.received_unit_cost_usd === 4, 'a cost viewer still sees them')
 
 console.log(`\n${checks} stock-in line balance checks passed`)
 }

@@ -167,7 +167,7 @@ const productSalesLedger = loadReal('lib/productSalesLedger.ts', { './salesAnaly
 const conflictControl = loadReal('lib/conflictControl.ts')
 const movementCostSnapshot = loadReal('lib/movementCostSnapshot.ts', { './moneyPrecision': moneyPrecision })
 
-const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', role_code: 'admin', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
+const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
 
 // Only the /adjust path is driven here -- the list/search/dated-count
 // endpoints' dependencies are stubbed inert (never called by these checks).

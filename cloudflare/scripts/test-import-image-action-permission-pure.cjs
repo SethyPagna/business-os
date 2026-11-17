@@ -46,11 +46,7 @@ const authorityEngine = loadTs('lib/importEngine.ts', {
 }, new Proxy({}, {
   get(_target, property) { return () => { throw new Error(`Unexpected authority dependency: ${String(property)}`) } },
 }))
-const realCostAccess = loadTs('lib/acquisitionCostAccess.ts', { './permissions': permissions })
-// Owner, 15 Nov 2026: cost is admin only, and an administrator passes every image gate, so a non-admin can no longer reach the image
-// check of a cost-bearing import. This file isolates the image gate, so it runs under the dormant per-grant switch-back
-// (holdsCostViewGrant / holdsCostEditGrant); the real admin-only rule is pinned in test-acquisition-cost-access.cjs.
-const acquisitionCostAccess = { ...realCostAccess, canViewAcquisitionCosts: realCostAccess.holdsCostViewGrant, canEditAcquisitionCosts: realCostAccess.holdsCostEditGrant }
+const acquisitionCostAccess = loadTs('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const media = loadTs('lib/media.ts')
 const sqlBinding = loadTs('lib/sqlBinding.ts')
 const productImagePermission = loadTs('lib/productImagePermission.ts', { './media': media, './sqlBinding': sqlBinding })
@@ -105,7 +101,7 @@ function permissiveModule() {
   })
 }
 
-function loadImportRoute(state, costAccess = acquisitionCostAccess) {
+function loadImportRoute(state) {
   const staging = {
     prepare(sql) {
       return {
@@ -196,7 +192,7 @@ function loadImportRoute(state, costAccess = acquisitionCostAccess) {
     '../lib/db': { getDb: () => db },
     '../lib/importMaintenanceFence': { getImportFencedDb: async () => db, isImportMaintenanceFenceError: () => false },
     '../lib/permissions': permissions,
-    '../lib/acquisitionCostAccess': costAccess,
+    '../lib/acquisitionCostAccess': acquisitionCostAccess,
     '../lib/media': media,
     '../lib/importEngine': importEngine,
     '../lib/productImagePermission': productImagePermission,
@@ -242,8 +238,8 @@ function loadImportRoute(state, costAccess = acquisitionCostAccess) {
   }
 }
 
-async function request(state, routePath, method = 'POST', body = {}, costAccess = acquisitionCostAccess) {
-  return loadImportRoute(state, costAccess).request(routePath, {
+async function request(state, routePath, method = 'POST', body = {}) {
+  return loadImportRoute(state).request(routePath, {
     method,
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -262,24 +258,6 @@ async function main() {
     assert.equal(response.status, 403)
     assert.equal((await response.json()).code, 'product_cost_edit_required')
     assert.equal(state.dbWrites + state.queue.length, 0)
-  }
-
-  {
-    // The REAL rule (cost is administrator only), not the per-grant switch-back the rest of this file runs under: holding both cost
-    // grants opens nothing for a non-admin, and an administrator is not stopped by a blocked image action.
-    const holdsBoth = () => role({ products: true, product_cost_view: true, product_cost_edit: true, destructive_delete: true, 'products:image': true })
-    const shim = freshState(holdsBoth())
-    assert.equal((await request(shim, '/job-1/approve')).status, 200, 'under the per-grant switch-back the same grants approve, so the case below discriminates')
-    const real = freshState(holdsBoth())
-    const refused = await request(real, '/job-1/approve', 'POST', {}, realCostAccess)
-    assert.equal(refused.status, 403)
-    assert.equal((await refused.json()).code, 'product_cost_edit_required')
-    assert.equal(real.dbWrites + real.queue.length, 0)
-    const admin = freshState({ ...role({}), role_code: 'admin', permissions: JSON.stringify({ all: true }) }, { analyzedRows: [resultRow('update', '/uploads/new.png')] })
-    const approved = await request(admin, '/job-1/approve', 'POST', {}, realCostAccess)
-    assert.equal(approved.status, 200, 'an administrator approves under the real rule')
-    assert.equal(admin.queue.length, 1)
-    console.log('PASS the real cost rule: both cost grants do not open an import for a non-admin; an administrator approves')
   }
 
   {

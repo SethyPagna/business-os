@@ -26,8 +26,8 @@ const Database = require('better-sqlite3')
 
 let sqlite
 let waits = []
-// Owner rule, 15 Nov 2026: cost entry is administrator only, so the operator is an administrator; the denied cases below
-// swap in a non-admin role_code with the retired cost grant.
+// Owner rule, 17 Nov 2026: cost entry follows product_cost_edit (admin by default), so the operator is an administrator; the cases below
+// swap in a non-admin role_code with the grant off, then on.
 let user = { role_code: 'admin', id: 7, name: 'Operator', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
 const modules = new Map()
 
@@ -209,9 +209,12 @@ async function main() {
     const beforeDenied=state()
     assert.equal((await request({...correction,unitCostUsd:8})).status,403)
     assert.equal(state(),beforeDenied)
-    // A non-admin holding the retired cost-entry grant is refused the same way; only the administrator reaches the next gate.
-    user = {...user,role_code:'employee',permissions:JSON.stringify({inventory:true,product_cost_edit:true})}
+    // A non-admin without the cost-entry grant is refused the same way; the administrator and a non-admin holding the grant reach the next gate.
+    user = {...user,role_code:'employee',permissions:JSON.stringify({inventory:true,product_cost_edit:false})}
     assert.equal((await request({...correction,unitCostUsd:8})).status,403)
+    assert.equal(state(),beforeDenied)
+    user = {...user,role_code:'employee',permissions:JSON.stringify({inventory:true,product_cost_edit:true})}
+    assert.equal((await request({...correction,unitCostUsd:8})).body.code,'correction_cost_input','a non-admin holding the edit grant reaches the next gate')
     assert.equal(state(),beforeDenied)
     user = {...user,role_code:'admin',permissions:JSON.stringify({inventory:true,product_cost_edit:true})}
     assert.equal((await request({...correction,unitCostUsd:8})).body.code,'correction_cost_input')
