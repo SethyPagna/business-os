@@ -7,8 +7,9 @@
 -- written after a merge that names a moved lot (a historical import writes no stock movement), then a merge undo, leaves a line whose product differs from its lot's product, and a
 -- later fold would leave it on an inactive lot. The fold now selects purely by batch_id, which is exact, and these indexes make that a seek.
 -- Both are PARTIAL (WHERE batch_id IS NOT NULL): most lines name no lot (production counts: about 40,000 sale_items of which 2,777 carry a lot, about 3,000 return_items of which 8 do),
--- so the index holds only the lot-bearing rows. SQLite uses a partial index only for a statement that states the predicate, or whose IN list implies it; the fold statements say
--- `batch_id IS NOT NULL` where the planner needs it (pinned by scripts/test-migration-0315-sale-return-line-batch-index-pure.cjs, which also pins the EXPLAIN plans: a migration cannot run EXPLAIN).
+-- so the index holds only the lot-bearing rows. SQLite uses a partial index only for a statement that states the predicate, or whose terms imply it; the fold statements
+-- select by `batch_id IN (...)`, which implies batch_id IS NOT NULL, so no extra term is written (pinned by scripts/test-migration-0315-sale-return-line-batch-index-pure.cjs,
+-- which also pins the EXPLAIN plans: a migration cannot run EXPLAIN). Without that inference the fold is still exact; it only reads as much as r4 did.
 --
 -- PRE:  sale_items and return_items exist; neither index exists. A failed check reads a malformed JSON path and aborts the file.
 -- POST: idx_sale_items_batch_id_partial and idx_return_items_batch_id_partial exist with their batch_id column and IS NOT NULL predicate; no table or row changes.
@@ -17,6 +18,9 @@
 -- Append-only, LF-only, rowid kept (no WITHOUT ROWID: it breaks backups), generic (no client data). Idempotent only through the PRE check.
 -- Rollback-safe: the previous Worker never names these indexes and runs unchanged on the new schema; this Worker returns the same rows with or without them (it only seeks faster).
 -- RECOVERY: schema only. Full undo: DROP INDEX IF EXISTS idx_return_items_batch_id_partial; DROP INDEX IF EXISTS idx_sale_items_batch_id_partial;
+--   Partial apply (one index exists, so a rerun aborts on PRE): first check d1_migrations for this file name.
+--   Not recorded: run both DROP INDEX IF EXISTS statements, then rerun migrations apply.
+--   Recorded but an index missing: run that one CREATE INDEX line from this file by hand; do not rerun the file.
 
 SELECT CASE WHEN (SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('sale_items', 'return_items')) = 2
   AND (SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name IN ('idx_sale_items_batch_id_partial', 'idx_return_items_batch_id_partial')) = 0

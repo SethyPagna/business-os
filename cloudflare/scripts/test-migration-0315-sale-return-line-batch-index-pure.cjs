@@ -77,7 +77,8 @@ check('it applies on a fresh chain, adds exactly the two indexes, changes no row
   db.exec(sql)
   assert.deepEqual(objects(db).filter((o) => !objs.includes(o)), INDEXES.map((n) => `index:${n}`))
   assert.equal(rowsBefore(db), rows)
-  assert.throws(() => db.exec(sql), /bad JSON path|already exists/i)
+  // The PRE check, not CREATE INDEX, must be what stops a rerun: CREATE INDEX would say "already exists".
+  assert.throws(() => db.exec(sql), /bad JSON path/i)
 })
 
 const after = chain(true); seed(after)
