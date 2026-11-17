@@ -89,7 +89,8 @@ A rejected line no longer counts as "waiting" anywhere (the Waiting filter, the 
 **The lines of an approval are a stored set.** `line_ids` (the approval detail, ascending product ids) is the set of products the count found different from stock, fixed when the approval is created and never changed. It is
 exactly the products the server treats as lines, including a product whose received dates differ although their totals agree (A counted 6 of 5, B 3 of 4): that product IS a line and is listed, whatever its total says.
 The panel must list `line_ids` and not re-derive lines from the figures. `lines` is their count (`line_ids.length`). `line_ids` is absent only for an approval created before migration 0316 (or by a Worker that did not know
-the column during a deploy): the panel then falls back to the items whose total differs, as before. A newer count of a product in the set replaces that line (`superseded`); the approval ends as replaced only when no line of the set
+the column: in the window between `migrations apply` and the publish, or after a rollback): the server then reads its lines by the engine's own rule (the item total, or any received date) everywhere, and the panel
+falls back to the items whose figures differ. The ops query `inventory-check-approvals-line-set` counts these rows (expect 0 after the publish). A newer count of a product in the set replaces that line (`superseded`); the approval ends as replaced only when no line of the set
 is left open (not superseded, not rejected), so a newer count of another product never ends it.
 
 ### History
@@ -109,9 +110,11 @@ business day (UTC+7) of its LATEST count at the branch. No new D1 statement is m
 **Too many checked products.** When the branch has more checked products than `inventoryCheckFilterMaxIds`, the summary is `{ "tooLarge": true }` (no `ok`, `issue`, `pending`, `not_checked`, `total` or `days`)
 instead of being left out, so a page that holds chips or counts from an earlier answer clears them. The check-state and day filters are refused (`503 inventory_check_filter_too_large`) while it holds.
 
-**The day is the day the product was counted, never the day it was approved.** Approving a line flips it to Done and rewrites the item's own time, so the day is taken from the count's own time: for a submitted
-count (the only kind that is ever approved) the time it was submitted; for every other kind (an observation, a Set that closed an Issue) the item's own time. The overlay's `check.at` follows the same rule, so a row's
-"checked at" and its chip always agree. A count made on 12 Nov and approved on 17 Nov is under 12 Nov.
+**The day is the day the product was counted, never the day it was approved, and "latest" is the most recent COUNT by count time.** Approving a line flips its state to Done and changes nothing else about the count: the item keeps
+the time and the person of the count that made it (a submission's commit, an observation's save, the Set that closed an Issue; migration 0316 restores them for an approval an earlier Worker had already flipped). So the
+chip day, the choice of a product's latest count (the list's state and chips, the overlay, the Set that closes an Issue), the overlay's `check.at` and its `check.by` (the counter, never the approver) all read the same two
+columns and always agree. Approving an OLDER count never makes it the newer one: a submission of 12 Nov approved on 17 Nov leaves an open-session Issue of 13 Nov as the product's latest, under 13 Nov. Who approved and
+when is the approval's own `decided_by_name` / `decided_at`. A count made on 12 Nov and approved on 17 Nov is under 12 Nov. A reopened Set (Undo) is a new count made on the day of the Undo.
 
 `GET /list?branchId=1&checkedOn=2026-11-12` keeps only products whose latest count was on that day; it combines with `checkState`, search, brand, category and the other filters. `checkedOn` must be a real
 calendar date `YYYY-MM-DD` and needs a single branch (`branchId`), otherwise `400 inventory_check_invalid_query` with `parameter: "checkedOn"` (or `"branchId"`). It cannot be combined with `ids`.

@@ -387,7 +387,9 @@ async function landingStatements(actor: Actor, sessionId: string, sessionRevisio
   for (const { item, line } of completed) {
     const flip = item.state === 'issue', productId = item.product_id
     const params = { ...base, productId }, changed = modified.get(productId)
-    if (flip) statements.push({ sql: `UPDATE inventory_check_items SET state='done',reason=NULL,revision=revision+1,updated_by=@actorId,updated_at=@now
+    // The flip changes the state only. updated_at and updated_by are the time and the person of the COUNT (every "latest count" read orders by updated_at: index 0285), so an approval of an older count
+    // must never make it the newer one; who approved and when is the approval's own record (decided_by, decided_at).
+    if (flip) statements.push({ sql: `UPDATE inventory_check_items SET state='done',reason=NULL,revision=revision+1
       WHERE session_id=@id AND product_id=@productId AND branch_id=@branchId AND state='issue'`, params }, guard('changes()=1', 'inventory_check_conflict', {}))
     statements.push(eventStatement(actor, { sessionId, productId, action: 'observe', key: `${stockKey}-${productId}`,
       hash: await inventoryCheckDigest(JSON.stringify({ action: 'approval-line', id: sessionId, productId, key: stockKey })),

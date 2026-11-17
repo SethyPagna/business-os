@@ -23,7 +23,9 @@ const ITEM_TOTAL_REJECT = [["AND ${countDiffersSql('i', '0.000000001')}\n       
 const OLD_REJECT = [
   ["        AND CASE WHEN ${A}.line_set_json IS NULL\n          THEN NOT EXISTS(", "        AND CASE WHEN 1\n          THEN NOT EXISTS("], ...ITEM_TOTAL_REJECT]
 const OLD_READ = [['  if (only) return only.length ?', '  if (false as boolean) return only!.length ?']]
-const MUTANTS = { 'approval day instead of count day': { 'lib/inventoryCheckList.ts': [["CASE WHEN json_extract(scope_json, '$.membership') = 'submission' THEN started_at ELSE updated_at END", 'updated_at']] }, 'engine scans every item': { 'lib/inventoryCheckApprovals.ts': OLD_READ }, 'old waiting rule (item total)': { 'lib/inventoryCheckSessions.ts': OLD_WAITING }, 'old auto-reject rule (item scan)': { 'lib/inventoryCheckSessions.ts': OLD_REJECT },
+// The approval flip of round 2: it rewrote the item's time (and its updated_by) with the approval's own.
+const OLD_FLIP = [["UPDATE inventory_check_items SET state='done',reason=NULL,revision=revision+1\n      WHERE session_id=@id", "UPDATE inventory_check_items SET state='done',reason=NULL,revision=revision+1,updated_by=@actorId,updated_at=@now\n      WHERE session_id=@id"]]
+const MUTANTS = { 'approval day instead of count day': { 'lib/inventoryCheckApprovals.ts': OLD_FLIP }, 'engine scans every item': { 'lib/inventoryCheckApprovals.ts': OLD_READ }, 'old waiting rule (item total)': { 'lib/inventoryCheckSessions.ts': OLD_WAITING }, 'old auto-reject rule (item scan)': { 'lib/inventoryCheckSessions.ts': OLD_REJECT },
   'NULL set: item total in the waiting readers': { 'lib/inventoryCheckSessions.ts': ITEM_TOTAL_WAITING }, 'NULL set: item total in the auto-reject': { 'lib/inventoryCheckSessions.ts': ITEM_TOTAL_REJECT } }
 
 function kit(sourceEdits) {
@@ -162,7 +164,7 @@ async function scan(k) {
     for (const sql of itemReads) { assert.match(sql, /i\.product_id IN \(SELECT value FROM json_each\(\?\d+\)\)/, 'a read of the count\'s items names its lines'); assert.doesNotMatch(sql, /inventory_check_lot_lines|abs\(/, 'no per-item rule or lot probe') }
 }
 
-/** The chip day is the day the count was MADE: counted 12 Nov and approved later (the approval flips the line and rewrites the item's updated_at), it stays under 12 Nov. */
+/** The chip day is the day the count was MADE: counted 12 Nov and approved later (the approval flips the line's state and leaves its count time alone), it stays under 12 Nov. */
 async function chipday(k) {
   const f = k.world()
   const made = await k.submit(f, 'set-day-submit-01', [{ productId: 2, countedQuantity: 5, seenQuantity: 6 }])
@@ -178,7 +180,7 @@ async function chipday(k) {
   const done = await k.decide(f, id, { decision: 'approve', requestId: 'set-day-approve-01' })
   assert.equal(done.status, 200, JSON.stringify(done.body)); assert.equal(done.body.approval.status, 'approved')
   const flipped = f.raw.prepare('SELECT state,updated_at FROM inventory_check_items WHERE session_id=? AND product_id=2').get(id)
-  assert.equal(flipped.state, 'done'); assert.notEqual(flipped.updated_at, '2026-11-12T03:00:00.000Z', 'the approval rewrote the item time')
+  assert.equal(flipped.state, 'done'); assert.equal(flipped.updated_at, '2026-11-12T03:00:00.000Z', 'the approval left the count time alone')
   assert.equal(dayOf(), '2026-11-12', 'after the approval: still the count day, not the approval day')
 }
 

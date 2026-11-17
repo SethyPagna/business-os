@@ -17,10 +17,10 @@ import { getPlanLimits } from './planTier'
 // Writers that leave no movement (branch cutover, merge undo, restore, reset, integrity repair) show the previous movement; test-inventory-last-change-writers-native.cjs
 // checks every write shape against that allowlist.
 
-// updated_at is the time the product was COUNTED (the "checked at" the row shows): the submission's time for a submitted count (an approval later rewrites the item's own updated_at when it flips the line
-// to Done), the item's own time for every other kind of session. The same rule as the date chips (lib/inventoryCheckList.ts); the session is joined already.
+// updated_at is the time the product was COUNTED (the "checked at" the row shows) and updated_by the person who counted: nothing writes either but a count (the approval flip changes the state only),
+// so the latest count by this column is the most recent count, an approval of an older one never makes it the newer one, and "by" agrees with "at". The same column as the date chips (lib/inventoryCheckList.ts).
 export const COUNT_ENTRIES_SQL = `SELECT i.product_id AS product_id, i.state AS state, i.counted_quantity AS counted_quantity, i.baseline_quantity AS baseline_quantity, i.reason AS reason,
-    i.updated_by AS updated_by, CASE WHEN json_extract(s.scope_json, '$.membership') = 'submission' THEN s.started_at ELSE i.updated_at END AS updated_at, i.session_id AS session_id, i.revision AS revision, s.created_by AS created_by, u.username AS by_name
+    i.updated_by AS updated_by, i.updated_at AS updated_at, i.session_id AS session_id, i.revision AS revision, s.created_by AS created_by, u.username AS by_name
   FROM json_each(@ids) wanted
   JOIN inventory_check_items i ON i.product_id = wanted.value AND i.branch_id = @branchId AND i.session_id = (
     SELECT x.session_id FROM inventory_check_items x JOIN inventory_check_sessions sx ON sx.id = x.session_id

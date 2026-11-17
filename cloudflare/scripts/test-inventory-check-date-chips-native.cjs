@@ -40,7 +40,7 @@ function seedApproved(raw, seedStockFixture) {
   seed(raw, seedStockFixture)
   seedStockFixture(raw.db, () => {
     raw.prepare(`INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,scope_json,started_at,updated_at) VALUES('s6',NULL,1,72,'Count s6','closed','{"membership":"submission"}','2026-11-12T03:00:00.000Z','2026-11-17T03:00:00.000Z')`).run()
-    raw.prepare(`INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,reason,revision,updated_by,updated_at) VALUES('s6',105,1,'{}',10,'{}','done',8,NULL,2,72,'2026-11-17T03:00:00.000Z')`).run()
+    raw.prepare(`INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,reason,revision,updated_by,updated_at) VALUES('s6',105,1,'{}',10,'{}','done',8,NULL,2,72,'2026-11-12T03:00:00.000Z')`).run()
     raw.prepare(`INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,scope_json,started_at,updated_at) VALUES('s7',NULL,1,72,'Set from Inventory','closed','{"membership":"stock_set","operation":"op1"}','2026-11-13T02:00:00.000Z','2026-11-13T02:00:00.000Z')`).run()
     raw.prepare(`INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,reason,revision,updated_by,updated_at) VALUES('s7',102,1,'{}',8,'{}','done',8,NULL,1,72,'2026-11-13T02:00:00.000Z')`).run()
   })
@@ -106,12 +106,12 @@ const STATEMENT = /inventory_check_(items|sessions|approvals)/
   const mark = app.mark(); await app.get('/api/inventory-checks/list?branchId=1&checkedOn=2026-11-10')
   check('the sets are cached by version: another day of the same branch reads no check-state statement', app.since(mark).filter((sql) => /ROW_NUMBER\(\) OVER \(PARTITION BY i\.product_id/.test(sql)).length === 0)
 
-  // ---- the day is the day the product was COUNTED, never the day an approval rewrote the item ----------------------------------------------------------------------------------------------
+  // ---- the day is the day the product was COUNTED, never the day it was approved (the approval flips the state and leaves the item's time alone; the session's updated_at is the approval's) ----------------------------------------------------------------------------------------------
   const EXPECTED_APPROVED = [{ day: '2026-11-13', count: 1 }, { day: '2026-11-12', count: 2 }, { day: '2026-11-11', count: 1 }, { day: '2026-11-10', count: 1 }]
   const countDay = async (a) => { a.setUser(a.users.checker); a.clearCaches(); return a.get('/api/inventory-checks/list?branchId=1') }
   const approved = make({}, seedApproved)
   const approvedList = await countDay(approved)
-  check('a count made on 12 Nov and approved on 17 Nov is under 12 Nov, not 17 Nov (the approval rewrote the item time)', JSON.stringify(approvedList.json.summary.days) === JSON.stringify(EXPECTED_APPROVED), () => JSON.stringify(approvedList.json.summary))
+  check('a count made on 12 Nov and approved on 17 Nov is under 12 Nov, not 17 Nov (the approval day: the session was updated on the 17th)', JSON.stringify(approvedList.json.summary.days) === JSON.stringify(EXPECTED_APPROVED), () => JSON.stringify(approvedList.json.summary))
   check('a Set that closed an Issue is its own time (13 Nov), as an observation is', approvedList.json.summary.days[0].day === '2026-11-13')
   const onCountDay = await approved.get('/api/inventory-checks/list?branchId=1&checkedOn=2026-11-12'), onApprovalDay = await approved.get('/api/inventory-checks/list?branchId=1&checkedOn=2026-11-17')
   check('checkedOn is the count day too: 12 Nov keeps 103 and 105, the approval day 17 Nov keeps nothing', ids(onCountDay) === '103,105' && ids(onApprovalDay) === '')
@@ -142,8 +142,8 @@ const STATEMENT = /inventory_check_(items|sessions|approvals)/
     check(`mutant "${name}" is caught`, caught === true)
   }
   const LIST = 'lib/inventoryCheckList.ts'
-  const DAY = "${localDateExpr(`CASE WHEN json_extract(scope_json, '$.membership') = 'submission' THEN started_at ELSE updated_at END`)}"
-  await run('a UTC day instead of the Cambodia day', { [LIST]: [[DAY, "substr(CASE WHEN json_extract(scope_json, '$.membership') = 'submission' THEN started_at ELSE updated_at END, 1, 10)"]] }, async (m) => {
+  const DAY = "${localDateExpr('updated_at')}"
+  await run('a UTC day instead of the Cambodia day', { [LIST]: [[DAY, "substr(updated_at, 1, 10)"]] }, async (m) => {
     m.setUser(m.users.checker); const r = await m.get('/api/inventory-checks/list?branchId=1'); return JSON.stringify(r.json.summary.days) !== JSON.stringify(EXPECTED_DAYS)
   })
   await run('an extra statement for the chips', { [LIST]: [["const pending = withPending ?", "await db.prepare('SELECT COUNT(*) AS n FROM inventory_check_items').all(); const pending = withPending ?"]] }, async (m) => {
@@ -152,10 +152,10 @@ const STATEMENT = /inventory_check_(items|sessions|approvals)/
   await run('every count of a product, not its latest', { [LIST]: [['WHERE rn = 1 ORDER BY updated_at DESC', 'ORDER BY updated_at DESC']] }, async (m) => {
     m.setUser(m.users.checker); const r = await m.get('/api/inventory-checks/list?branchId=1&checkedOn=2026-11-09'); return ids(r) !== ''
   })
-  await run('the approval day instead of the count day (the item time for every session)', { [LIST]: [["CASE WHEN json_extract(scope_json, '$.membership') = 'submission' THEN started_at ELSE updated_at END", 'updated_at']] }, async (m) => {
+  await run('the approval day instead of the count day (the session time, which every approval step rewrites)', { [LIST]: [['i.state AS state, i.updated_at AS updated_at,', 'i.state AS state, s.updated_at AS updated_at,']] }, async (m) => {
     const r = await countDay(m); return JSON.stringify(r.json.summary.days) !== JSON.stringify(EXPECTED_APPROVED)
   }, seedApproved)
-  await run('the overlay shows the approval time as the checked-at time', { 'lib/inventoryCheckOverlay.ts': [["CASE WHEN json_extract(s.scope_json, '$.membership') = 'submission' THEN s.started_at ELSE i.updated_at END AS updated_at", 'i.updated_at AS updated_at']] }, async (m) => {
+  await run('the overlay shows the approval time as the checked-at time', { 'lib/inventoryCheckOverlay.ts': [['i.updated_by AS updated_by, i.updated_at AS updated_at,', 'i.updated_by AS updated_by, s.updated_at AS updated_at,']] }, async (m) => {
     m.setUser(m.users.checker); const r = await m.get('/api/inventory-checks/overlay?branchId=1&ids=105'); return r.json.items[0].check.at !== '2026-11-12T03:00:00.000Z'
   }, seedApproved)
   await run('checkedOn accepted again by the ic_simple callers (and ignored)', { 'lib/inventoryCheckAccess.ts': [["'checkState', 'page',", "'checkState', 'checkedOn', 'page',"]] }, async (m) => {

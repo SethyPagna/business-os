@@ -1,7 +1,7 @@
 -- 0316: the approver's decision on ONE line of a submitted Inventory Check count, and the set of lines each approval was created with (lane/inv-check-requests, owner ask of 17 Nov 2026).
 --
 -- A submitted count waits as ONE approval row (0286) that was accepted or refused as a whole. An approver can now reject or modify a single line and accept lines one by one; the
--- engine (lib/inventoryCheckApprovals.ts) keeps the one queue. Two columns are added:
+-- engine (lib/inventoryCheckApprovals.ts) keeps the one queue. Two columns are added, and the count time of items an earlier approval rewrote is restored (see Backfill):
 --
 --   line_decisions_json  what the approver decided per product, so the counter's own figures in inventory_check_items are never changed and every decision stays visible next to them:
 --     { "<product id>": { "decision": "reject" | "modify", "counted"?: n, "lots"?: [{ "batchId": n, "counted": n }], "note"?: text, "by": account id, "by_name": username, "at": ISO time } }
@@ -15,12 +15,19 @@
 --
 -- PRE:  inventory_check_approvals exists with its four 0286 triggers; neither column exists. A failed check reads a malformed JSON path and aborts the file.
 -- POST: both columns exist (line_decisions_json NOT NULL default '{}' and a JSON-object CHECK; line_set_json nullable with a JSON-object CHECK), every existing row holds no decision ('{}'), the
---       set is recorded for no decided row, the four triggers still exist and the identity trigger now also names line_set_json (the set never changes after the approval is created).
+--       set is recorded for no decided row, no Done item of an approval's session carries a time other than its session's started_at, the four triggers still exist and the identity trigger now also names line_set_json (the set never changes after the approval is created).
 --       Pinned by scripts/test-migration-0316-inventory-check-line-decisions-pure.cjs.
--- Backfill: PENDING approvals only get their set, computed from their items by the creation rule, and only where it agrees with `lines`; a decided row is frozen by the 0286 triggers and is never
+-- Backfill: two UPDATEs.
+--   1. line_set_json: PENDING approvals only get their set, computed from their items by the creation rule, and only where it agrees with `lines`; a decided row is frozen by the 0286 triggers and is never
 --   a waiting line, so its set stays NULL. The backfill runs before the identity trigger is re-created, so it is not refused by it; a claimed pending row takes it like any other update.
--- Cost: SQLite tests an added CHECK against the rows already in the table (a scan of it), and the backfill reads the items of each PENDING approval by the table's primary key and writes
---       that row once. The table holds one row per submitted count that differs from stock, so this is a handful of rows; no other table is read or written. At runtime a decision writes one
+--   2. the count time of items that an earlier Worker's approval had rewritten. An item's updated_at / updated_by are the time and the person of its COUNT, and every "latest count" read orders by updated_at; the
+--   approval's flip used to overwrite both with the approval's own, so approving an OLDER count made it the newer one. The flip no longer writes either. For an item that sits in a session with an approval, is
+--   Done and whose updated_at differs from its session's started_at (nothing else ever writes a submitted count's item after it is inserted: the session is closed, so only the old flip can have), both are
+--   restored to what the item was inserted with: the session's started_at and created_by. The approval's own record (decided_at, decided_by, applied_json) still holds when it was approved and by whom.
+--   Exact for every such item, safe to repeat, and not undone by the undo below (it only restores the values the item had before the flip first wrote them).
+-- Cost: SQLite tests an added CHECK against the rows already in the table (a scan of it), and the first backfill reads the items of each PENDING approval by the table's primary key and writes
+--       that row once; the second reads, for each approval's session, its items by their primary key (session, product) and writes only an item an old flip rewrote.
+--       The table holds one row per submitted count that differs from stock, so each is a handful of rows; no other table is read or written. At runtime a decision writes one
 --       approval row, one session row and one event row; creating an approval computes the set inside the statement that already counts the lines (no extra read or write).
 -- Append-only, LF-only, rowid kept (no WITHOUT ROWID: it breaks backups and BACKUP_TABLES / the branch cutover capture read rowids), generic (no client data), no ANALYZE.
 -- Rollback-safe: the previous Worker never names either column and runs unchanged on the new schema (its own INSERTs and UPDATEs leave them at '{}' / NULL; its approvals keep the earlier rule).
@@ -42,7 +49,7 @@
 --   Not recorded and decisions_col = 0, set_col = 0, triggers = 4, identity_with_set = 0: nothing ran; rerun migrations apply.
 --   Not recorded and anything else (a rerun would abort on PRE): bring the database back by the full undo above (skip the lines whose object is already absent; if triggers is 3 the identity trigger
 --     is missing: run only its CREATE TRIGGER line), then rerun migrations apply.
---   Recorded and something is missing: run, from this file and in its order, only the statements the facts say are missing (each ALTER TABLE line; the UPDATE is safe to repeat; then, if identity_with_set
+--   Recorded and something is missing: run, from this file and in its order, only the statements the facts say are missing (each ALTER TABLE line; both UPDATEs are safe to repeat; then, if identity_with_set
 --     is 0, DROP TRIGGER IF EXISTS and CREATE TRIGGER inventory_check_approvals_identity); do not rerun the file.
 --   Recorded and decisions_col = 1, set_col = 1, triggers = 4, identity_with_set = 1: nothing to do.
 
@@ -64,6 +71,11 @@ UPDATE inventory_check_approvals SET line_set_json = (SELECT json_group_object(C
       AND i.baseline_quantity IS NOT NULL AND (abs(i.baseline_quantity - i.counted_quantity) > 0.000000001
         OR EXISTS(SELECT 1 FROM inventory_check_lot_lines l WHERE l.session_id = i.session_id AND l.product_id = i.product_id AND abs(l.seen_quantity - l.counted_quantity) > 0.000000001)));
 
+UPDATE inventory_check_items SET updated_at = (SELECT s.started_at FROM inventory_check_sessions s WHERE s.id = inventory_check_items.session_id),
+    updated_by = (SELECT s.created_by FROM inventory_check_sessions s WHERE s.id = inventory_check_items.session_id)
+  WHERE state = 'done' AND session_id IN (SELECT a.session_id FROM inventory_check_approvals a)
+    AND updated_at <> (SELECT s.started_at FROM inventory_check_sessions s WHERE s.id = inventory_check_items.session_id);
+
 DROP TRIGGER inventory_check_approvals_identity;
 
 CREATE TRIGGER inventory_check_approvals_identity BEFORE UPDATE OF
@@ -75,4 +87,6 @@ SELECT CASE WHEN (SELECT COUNT(*) FROM pragma_table_info('inventory_check_approv
   AND (SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name = 'inventory_check_approvals_identity' AND sql LIKE '%line_set_json%') = 1
   AND (SELECT COUNT(*) FROM inventory_check_approvals WHERE line_decisions_json <> '{}') = 0
   AND (SELECT COUNT(*) FROM inventory_check_approvals WHERE line_set_json IS NOT NULL AND status <> 'pending') = 0
+  AND (SELECT COUNT(*) FROM inventory_check_items i JOIN inventory_check_sessions s ON s.id = i.session_id
+    WHERE i.state = 'done' AND i.session_id IN (SELECT a.session_id FROM inventory_check_approvals a) AND i.updated_at <> s.started_at) = 0
 THEN 1 ELSE json_extract('[]','$[inventory_check_line_decisions_0316_post]') END;

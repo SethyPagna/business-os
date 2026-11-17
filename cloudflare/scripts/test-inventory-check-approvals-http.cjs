@@ -366,9 +366,10 @@ async function main() {
     const items = db.prepare('SELECT product_id,state,counted_quantity,reason,revision,updated_by FROM inventory_check_items ORDER BY product_id').all().map(item => ({ ...item }))
     assert.deepEqual(items, [
       { product_id: 910001, state: 'done', counted_quantity: 5, reason: null, revision: 1, updated_by: COUNTER },
-      { product_id: 910002, state: 'done', counted_quantity: 3, reason: null, revision: 2, updated_by: ADMIN },
-      { product_id: 910003, state: 'done', counted_quantity: 12, reason: null, revision: 2, updated_by: ADMIN },
-      { product_id: 910004, state: 'done', counted_quantity: 9, reason: null, revision: 2, updated_by: ADMIN }])
+      // The flip changes the state (and the revision) only: updated_by stays the COUNTER, like updated_at the count time (who approved is the approval's decided_by).
+      { product_id: 910002, state: 'done', counted_quantity: 3, reason: null, revision: 2, updated_by: COUNTER },
+      { product_id: 910003, state: 'done', counted_quantity: 12, reason: null, revision: 2, updated_by: COUNTER },
+      { product_id: 910004, state: 'done', counted_quantity: 9, reason: null, revision: 2, updated_by: COUNTER }])
     const rows = (await products('branchId=1&pageSize=12')).body.items
     assert.ok([910002, 910003, 910004].every(pid => rows.find(item => item.id === pid).check_status === 'ok' && !('check_pending' in rows.find(item => item.id === pid))))
     const history = (await sessions('GET', `/sessions/${id}/history?page=1&pageSize=50`)).body

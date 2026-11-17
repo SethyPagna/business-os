@@ -53,15 +53,16 @@ check('the file is LF-only, numbered 0316 once, keeps rowid, has PRE / POST / RE
   assert.deepEqual(fs.readdirSync(directory).filter(file => file.startsWith('0316_')), [migration])
 })
 
-check('it is PRE, two ALTER TABLE ADD COLUMN, the backfill UPDATE, the identity trigger swap and POST: no comment-only statement, at most 5 compound terms, one statement per step', () => {
-  assert.equal(statements.length, 7)
+check('it is PRE, two ALTER TABLE ADD COLUMN, the two backfill UPDATEs, the identity trigger swap and POST: no comment-only statement, at most 5 compound terms, one statement per step', () => {
+  assert.equal(statements.length, 8)
   assert.match(statements[0], /^SELECT CASE WHEN/)
   assert.match(statements[1], /^ALTER TABLE inventory_check_approvals ADD COLUMN line_decisions_json TEXT NOT NULL DEFAULT '\{\}' CHECK/)
   assert.match(statements[2], /^ALTER TABLE inventory_check_approvals ADD COLUMN line_set_json TEXT CHECK\(line_set_json IS NULL OR/)
   assert.match(statements[3], /^UPDATE inventory_check_approvals SET line_set_json = .* WHERE status = 'pending' AND lines = /s)
-  assert.match(statements[4], /^DROP TRIGGER inventory_check_approvals_identity$/)
-  assert.match(statements[5], /^CREATE TRIGGER inventory_check_approvals_identity BEFORE UPDATE OF\s+session_id,organization_id,branch_id,lines,submitted_by,submitted_at,baselines_json,line_set_json ON inventory_check_approvals\s+BEGIN SELECT RAISE\(ABORT,'inventory_check_approval_immutable'\); END$/)
-  assert.match(statements[6], /^SELECT CASE WHEN/)
+  assert.match(statements[4], /^UPDATE inventory_check_items SET updated_at = \(SELECT s\.started_at .* WHERE state = 'done' AND session_id IN \(SELECT a\.session_id FROM inventory_check_approvals a\)/s)
+  assert.match(statements[5], /^DROP TRIGGER inventory_check_approvals_identity$/)
+  assert.match(statements[6], /^CREATE TRIGGER inventory_check_approvals_identity BEFORE UPDATE OF\s+session_id,organization_id,branch_id,lines,submitted_by,submitted_at,baselines_json,line_set_json ON inventory_check_approvals\s+BEGIN SELECT RAISE\(ABORT,'inventory_check_approval_immutable'\); END$/)
+  assert.match(statements[7], /^SELECT CASE WHEN/)
   for (const statement of statements) assert.ok((statement.match(/\b(UNION|INTERSECT|EXCEPT)\b/gi) || []).length < 5, 'at most 5 compound SELECT terms')
   assert.equal(statements.some(statement => /^\s*$/.test(code(statement))), false)
 })
@@ -85,6 +86,32 @@ check('both columns are added; the set is backfilled for PENDING approvals by th
   assert.ok(db.prepare(`SELECT rowid FROM ${T}`).get(), 'a rowid table')
 })
 
+check('the items of approvals: an item an earlier flip rewrote gets its count time and counter back; every other item is untouched; POST sees an item left rewritten', () => {
+  const db = chain()
+  const LATER = '2026-11-17T04:00:00.000Z'
+  const mk = (id, scope, by) => db.exec(`INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,scope_json,started_at,updated_at,closed_at) VALUES('${id}',1,1,${by},'t','closed','${scope}','${NOW}','${NOW}','${NOW}')`)
+  const put = (id, product, state, at, by) => db.exec(`INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,reason,revision,updated_by,updated_at) VALUES('${id}',${product},1,'{}',5,'{}','${state}',4,${state === 'issue' ? "'miscount'" : 'NULL'},1,${by},'${at}')`)
+  mk('f-flipped', '{"membership":"submission"}', 8); put('f-flipped', 1, 'done', LATER, 9); put('f-flipped', 2, 'done', NOW, 8); put('f-flipped', 3, 'issue', NOW, 8); approval(db, 'f-flipped', 1, 'approved')
+  mk('f-pending', '{"membership":"submission"}', 8); put('f-pending', 1, 'done', LATER, 9); approval(db, 'f-pending', 1)
+  mk('f-obs', '{}', 8); put('f-obs', 1, 'done', LATER, 9) // an open-session observation made later, by another person: its own time and observer
+  const before = db.prepare('SELECT session_id,product_id,state,updated_at,updated_by,revision FROM inventory_check_items ORDER BY session_id,product_id').all().map(row => ({ ...row }))
+  db.exec(sql)
+  const after = db.prepare('SELECT session_id,product_id,state,updated_at,updated_by,revision FROM inventory_check_items ORDER BY session_id,product_id').all().map(row => ({ ...row }))
+  for (const row of after) {
+    const was = before.find(old => old.session_id === row.session_id && old.product_id === row.product_id)
+    if (row.product_id === 1 && (row.session_id === 'f-flipped' || row.session_id === 'f-pending')) assert.deepEqual(row, { ...was, updated_at: NOW, updated_by: 8 }, `${row.session_id}: restored to the count time and the counter, state and revision as they were`)
+    else assert.deepEqual(row, was, `${row.session_id}/${row.product_id} is untouched`)
+  }
+  // POST fires when a Done item of an approval's session carries another time.
+  db.prepare("UPDATE inventory_check_items SET updated_at=? WHERE session_id='f-flipped' AND product_id=2").run(LATER)
+  assert.throws(() => db.exec(statements[7]), /inventory_check_line_decisions_0316_post/)
+  // A second run of the statement changes nothing (safe to repeat).
+  db.prepare("UPDATE inventory_check_items SET updated_at=? WHERE session_id='f-flipped' AND product_id=2").run(NOW)
+  const settled = JSON.stringify(db.prepare('SELECT * FROM inventory_check_items ORDER BY session_id,product_id').all())
+  db.exec(statements[4] + ';')
+  assert.equal(JSON.stringify(db.prepare('SELECT * FROM inventory_check_items ORDER BY session_id,product_id').all()), settled)
+})
+
 check('the CHECKs: a decision column holds a JSON object and never NULL; the set holds a JSON object or NULL', () => {
   const db = chain(); seed(db); db.exec(sql)
   assert.throws(() => db.prepare(`UPDATE ${T} SET line_decisions_json=? WHERE session_id='s-plain'`).run('not json'), /CHECK/)
@@ -101,7 +128,7 @@ check('PRE aborts a second run and a database without the 0286 table; POST fires
   assert.throws(() => db.exec(sql), /inventory_check_line_decisions_0316_pre|duplicate column/)
   const bare = new DatabaseSync(':memory:')
   assert.throws(() => bare.exec(sql), /inventory_check_line_decisions_0316_pre/)
-  const post = statements[6]
+  const post = statements[7]
   const dirty = chain(); seed(dirty); dirty.exec(sql); dirty.prepare(`UPDATE ${T} SET line_decisions_json='{"5":{"decision":"reject"}}' WHERE session_id='s-plain'`).run()
   assert.throws(() => dirty.exec(post), /inventory_check_line_decisions_0316_post/, 'the POST assertion sees a non-empty decision column')
   const decided = chain(); seed(decided); decided.exec(sql); decided.exec('DROP TRIGGER inventory_check_approvals_identity; DROP TRIGGER inventory_check_approvals_decided')
@@ -138,7 +165,7 @@ check('RECOVERY, executed: the full undo restores the 0286 table shape exactly (
 
 check('RECOVERY, executed: a crash after ANY statement of the file is either undone (then the file applies again) or finished by hand from the file (same end state as a full apply)', () => {
   const full = chain(); seed(full); full.exec(sql)
-  for (let done = 1; done < statements.length - 1; done++) {
+  for (let done = 1; done < statements.length - 1; done++) { // a crash after each statement but the last (POST)
     const partial = chain(); seed(partial)
     for (const statement of statements.slice(0, done)) partial.exec(statement + ';')
     // Not recorded: undo (the facts are not the untouched ones) and rerun.
@@ -153,9 +180,10 @@ check('RECOVERY, executed: a crash after ANY statement of the file is either und
     if (!have('line_decisions_json')) partial.exec(statements[1] + ';')
     if (!have('line_set_json')) partial.exec(statements[2] + ';')
     partial.exec(statements[3] + ';') // the UPDATE is safe to repeat
-    if (!identityWithSet()) { partial.exec('DROP TRIGGER IF EXISTS inventory_check_approvals_identity;'); partial.exec(statements[5] + ';') }
+    partial.exec(statements[4] + ';') // so is the second
+    if (!identityWithSet()) { partial.exec('DROP TRIGGER IF EXISTS inventory_check_approvals_identity;'); partial.exec(statements[6] + ';') }
     assert.deepEqual(shape(partial), shape(full), `after ${done} statement(s): finishing by hand gives the full result`)
-    assert.doesNotThrow(() => partial.exec(statements[6] + ';'), 'POST holds')
+    assert.doesNotThrow(() => partial.exec(statements[7] + ';'), 'POST holds')
   }
 })
 
