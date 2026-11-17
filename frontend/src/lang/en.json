@@ -8237,5 +8237,6 @@
   "inventory_check_mark_open_groups": "Mark every product in the open groups as matching stock",
   "inventory_check_last_change": "Last stock change",
   "inventory_check_days_label": "Last checked on",
-  "inventory_check_day_tooltip": "{count} products last checked on {date}"
+  "inventory_check_day_tooltip": "{count} products last checked on {date}",
+  "product_expiry_days_short": "{count}d"
 }

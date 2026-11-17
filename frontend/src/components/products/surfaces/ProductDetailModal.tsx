@@ -24,6 +24,8 @@ import CostCalculationFloat from '../../shared/CostCalculationFloat.tsx'
 import CostValue from '../../shared/CostValue.tsx'
 import { knownCost } from '../../../utils/costDisplay.ts'
 import { branchStockLinesWorthShowing } from '../../../utils/branchScope.ts'
+import { daysUntilDay } from '../../../utils/dateHelpers.ts'
+import { fmtDateOnly } from '../../../utils/formatters.ts'
 import ScrollText from 'lucide-react/dist/esm/icons/scroll-text.js'
 
 // Loaded when the float is opened. The field history is a rare read behind a
@@ -138,7 +140,8 @@ type PriceCellProps = {
   children: ReactNode
 }
 
-const MS_PER_DAY = 86400000
+// Expiry tiers (the rule the retired Inventory detail float used): passed is Expired, within 30 days is Expires soon, later is plain.
+const EXPIRES_SOON_DAYS = 30
 
 export default function ProductDetailModal({
   visible,
@@ -209,7 +212,10 @@ export default function ProductDetailModal({
   const primaryImage = gallery[0] || ''
   const unitColor = p.unit ? unitMap?.[p.unit]?.color || '' : ''
   const expiryDate = String(p.expiry_date || '').trim()
-  const expiryDaysLeft = expiryDate ? Math.ceil((new Date(`${expiryDate}T00:00:00`).getTime() - Date.now()) / MS_PER_DAY) : null
+  const expiryDay = expiryDate.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
+  const expiryDaysLeft = expiryDay ? daysUntilDay(expiryDay) : null
+  const expiryTier = expiryDaysLeft === null ? 'ok' : expiryDaysLeft < 0 ? 'expired' : expiryDaysLeft <= EXPIRES_SOON_DAYS ? 'soon' : 'ok'
+  const daysText = (count: number) => T('product_expiry_days_short', '{count}d').replace('{count}', String(count))
   // includeEmpty: true -- every product gets a "day added" batch at
   // creation (seedInitialBatchForNewProduct) that legitimately starts at 0
   // stock; the full detail view is the one place that should still count it.
@@ -328,13 +334,17 @@ export default function ProductDetailModal({
                   {p.supplier ? <Row label={T('label_supplier', 'Supplier')}><EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="contacts" anchor="hub:contacts:suppliers" search={p.supplier} navigate={navigateTo} title={T('open_supplier', 'Open supplier')}><span {...copy(p.supplier)}>{p.supplier}</span></EntityLink></Row> : null}
                   {expiryDate ? (
                     <Row label={T('product_expiry_date', 'Expiry')}>
-                      <span className={expiryDaysLeft != null && expiryDaysLeft < 0 ? 'text-red-600 dark:text-red-300' : 'text-amber-600 dark:text-amber-300'}>
-                        {expiryDate}
+                      <span data-expiry={expiryTier} className={expiryTier === 'expired' ? 'text-red-600 dark:text-red-300' : expiryTier === 'soon' ? 'text-amber-600 dark:text-amber-300' : undefined}>
+                        {fmtDateOnly(expiryDate)}
+                        {expiryDaysLeft != null ? ' ' : null}
                         {expiryDaysLeft != null ? (
-                          <span className="ml-2 text-xs">
-                            {expiryDaysLeft < 0
-                              ? `${T('expired', 'Expired')} ${Math.abs(expiryDaysLeft)}d`
-                              : `${expiryDaysLeft}d`}
+                          // leading-relaxed: Khmer needs more line room than Latin text.
+                          <span className="ml-2 text-xs leading-relaxed">
+                            {expiryTier === 'expired'
+                              ? `${T('inventory_check_expired', 'Expired')} · ${daysText(Math.abs(expiryDaysLeft))}`
+                              : expiryTier === 'soon'
+                                ? `${T('inventory_check_expires_soon', 'Expires soon')} · ${daysText(expiryDaysLeft)}`
+                                : daysText(expiryDaysLeft)}
                           </span>
                         ) : null}
                       </span>

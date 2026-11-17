@@ -22,6 +22,11 @@ export function todayStr(): string {
   return toLocalDateString(businessNow())
 }
 
+// Whole days from the business today to a 'YYYY-MM-DD' day (negative once it has passed). Pure calendar arithmetic on both ends, so no device timezone or time of day can shift it.
+export function daysUntilDay(day: string, today: string = todayStr()): number {
+  return Math.round((Date.parse(`${day}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000)
+}
+
 export function offsetDate(days: number): string {
   const d = businessNow()
   d.setDate(d.getDate() + days)

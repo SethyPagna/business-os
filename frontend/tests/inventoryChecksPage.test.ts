@@ -225,7 +225,7 @@ try {
   assert.ok(detailText.includes('Received date01/10/2026'), 'and the latest received date: ' + detailText)
   assert.ok(detailText.includes('Counted0 (−8)') && detailText.includes('Check statusIssue · Shelf differs'), 'and the count against stock and the check status with its reason: ' + detailText)
   const modalText = surface.text().replace(/\s+/g, ' ')
-  assert.ok(modalText.includes('Stock') && modalText.includes('8') && modalText.includes('pcs') && modalText.includes('2027-03-15'), 'the product rows show the stock with its unit and the next expiry: ' + modalText)
+  assert.ok(modalText.includes('Stock') && modalText.includes('8') && modalText.includes('pcs') && /Expiry15\/03\/2027 \d+d/.test(modalText) && !modalText.includes('2027-03-15'), 'the product rows show the stock with its unit and the next expiry as dd/mm/yyyy with a days-left suffix: ' + modalText)
   assert.equal(surface.find(node => node.getAttribute('data-detail-meta-row') !== null, 'brand and category line').textContent, 'Test brand', 'the brand sits in the header, as on Products')
   assert.ok(!modalText.includes('Product Test variant') && surface.findAll(node => node.tagName === 'H2' && node.textContent.trim() === 'Product').length === 0, 'the name is the title: no Product heading')
   assert.ok(!/Cost|Price|Sold|Customers/.test(detailText) && modalText.includes('Selling price$17.00') && !modalText.includes('913.27') && !/Cost|Margin/.test(modalText), 'an employee with the price grant sees the selling price but never the cost or the margin: ' + modalText)
