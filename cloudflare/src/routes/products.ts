@@ -1,4 +1,4 @@
-import { costRoundedGraphState, mergeCostContinuationGuard, mergeFingerprintDiffersOnlyByCostRounding, readMergeReviewGroups, mergeReviewGroupGuards } from '../lib/undoAppliers'
+import { UndoConflictError, UNDO_RECORD_CHANGED_CODE, costRoundedGraphState, mergeCostContinuationGuard, mergeFingerprintDiffersOnlyByCostRounding, readMergeReviewGroups, mergeReviewGroupGuards } from '../lib/undoAppliers'
 import { previewMergeCosts, MergeCostPreviewUnavailableError, type MergeCostStep, type MergeCostPreviewGraph, type MergeCostAuthority } from '../lib/productMergeCostPreview'
 import { assertProductStatusInput, assertProductsActive, catalogProductSql, productStockGuardStatement, productHasStockSql, productStockGuardError } from '../lib/productStockGuard'
 import { Hono, type Context } from 'hono'
@@ -4438,10 +4438,7 @@ export async function foldDuplicateProductInto(
     : {}
   if (atomicHistory?.bulkClusterPlan) {
     const plan = atomicHistory.bulkClusterPlan
-    const reviewedRedoSourceMatches = (row: Record<string, unknown>) => {
-      const source = plan.members.find((candidate) => candidate.id === Number(row.id))
-      return Boolean(source && Object.entries(source.money).every(([field, value]) => Number(row[field] ?? 0) === Number(value ?? 0)))
-    }
+    const reviewedRedoSourceMatches = (row: Record<string, unknown>) => reviewedRedoMoneyMatches(plan, row)
     // U-cost: a resumed cluster's earlier folds moved lots, so the 0195
     // triggers may have re-derived the keeper's USD cost from its on-hand lots.
     const keeperDerivedCost = atomicHistory.resumedCluster
@@ -8718,7 +8715,19 @@ function reviewedKeeperCatalogBefore(
   }
 }
 
-function productConflictOriginalMemberMatches(
+/**
+ * The redo-side source compare of a reviewed group fold: does the live row hold the plan member's money? Every field is exact, except that a cost
+ * column (MERGE_COST_FIELDS) also accepts the saved cost stored to 4 places by either rule (isCostRoundingOf), which is all migration 0313 did to it.
+ * The rounding branch needs a NUMBER on both sides: a live NULL is never the rounding of a saved cost, however small (0.00004 does not become NULL),
+ * and a saved NULL never accepts a live number. Selling and wholesale prices stay exact.
+ */
+export function reviewedRedoMoneyMatches(plan: ProductMergeClusterPlan, row: Record<string, unknown>): boolean {
+  const source = plan.members.find((candidate) => candidate.id === Number(row.id))
+  return Boolean(source && Object.entries(source.money).every(([field, value]) => Number(row[field] ?? 0) === Number(value ?? 0)
+    || ((MERGE_COST_FIELDS as readonly string[]).includes(field) && isCostRoundingOf(value, row[field]))))
+}
+
+export function productConflictOriginalMemberMatches(
   detail: ProductConflictActionGroupPlan,
   productId: number,
   row: Record<string, unknown> | undefined,
@@ -8733,7 +8742,7 @@ function productConflictOriginalMemberMatches(
     field === 'updated_at' && parentEffect ? parentEffect.updatedAt : expected[field] ?? ''))
   // A cost that migration 0313 has since rounded to 4 places (either rule) is the reviewed cost, not a change.
   const moneyMatch = moneyFields.every((field) => Number(row[field] ?? 0) === Number(expected[field] ?? 0)
-    || ((MERGE_COST_FIELDS as readonly string[]).includes(field) && isCostRoundingOf(Number(expected[field] ?? 0), Number(row[field] ?? 0))))
+    || ((MERGE_COST_FIELDS as readonly string[]).includes(field) && isCostRoundingOf(expected[field], row[field])))
   return textMatch && moneyMatch
     && (!parentEffect || Number(row.parent_id) === parentEffect.parentId)
     && Number(row.is_active) === 1 && Number(row.is_group) === 0
@@ -9578,20 +9587,39 @@ registerProductMergeGroupRedo(async (ctx) => {
   if (!fold || fold.operation_id !== ctx.operationId || Number(ctx.reversal.keeperId) !== Number(plan.keeper_id)) {
     throw new Error('merge_group_plan_conflict')
   }
-  const products = await ctx.db.prepare(`SELECT id,name,image_path FROM products WHERE id IN (@keeper,@member)`)
-    .all<{ id: number; name: string | null; image_path: string | null }>({ keeper: plan.keeper_id, member: fold.member_id })
+  // One read serves the fold and the preflight below: the keeper, this child's member and every later child's member (their source money too).
+  const wanted = [...new Set([Number(plan.keeper_id), Number(fold.member_id), ...ctx.redoDupIds])]
+  const products = await ctx.db.prepare(`SELECT id,name,image_path,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr
+    FROM products WHERE id IN (SELECT value FROM json_each(@ids))`)
+    .all<{ id: number; name: string | null; image_path: string | null } & Record<string, unknown>>({ ids: JSON.stringify(wanted) })
   const keeper = products.find((row) => Number(row.id) === Number(plan.keeper_id))
   const duplicate = products.find((row) => Number(row.id) === Number(fold.member_id))
   if (!keeper || !duplicate) throw new Error('merge_group_product_unavailable')
+  const changed = () => new UndoConflictError('This group merge changed after it was undone, so it can no longer be redone safely. Nothing was changed.', UNDO_RECORD_CHANGED_CODE)
+  // Preflight. A group redo commits ONE child per request, so a later child whose source no longer matches (the fold refuses it) would leave the group
+  // half redone, with Undo closed and Apply refused. Before the first child commits, check the keeper and every later child's member with the compare
+  // the fold itself uses (reviewedRedoMoneyMatches: exact, but a cost accepts 0313's rounding) and refuse the whole redo, nothing written. Later requests
+  // check what is still to fold.
+  for (const id of wanted) {
+    if (id === Number(plan.keeper_id) && ctx.childOrdinal > 0) continue // the resumed keeper is matched by the fold against its earlier folds
+    const row = products.find((candidate) => Number(candidate.id) === id)
+    if (!row || !reviewedRedoMoneyMatches(plan.cluster_plan, row)) throw changed()
+  }
   const branches = await ctx.db.prepare('SELECT id,name FROM branches').all<{ id: number; name: string }>()
-  await foldDuplicateProductInto(ctx.env, ctx.db, ctx.user, keeper, duplicate,
-    new Map(branches.map((row) => [Number(row.id), row.name])), 'reviewed product conflict group redo',
-    ctx.reversal.stockDisposition || 'merge', resolveProductMergeClusterPlanEconomics(plan.cluster_plan), {
-      operationId: ctx.operationId, bulkClusterPlan: plan.cluster_plan, resumedCluster: ctx.childOrdinal > 0,
-      reviewedPlan: plan, reviewedRedo: true, reviewedCatalogBefore: ctx.reversal.keeperCatalogBefore,
-      preStatements:ctx.graphGuards, groupGraphReversals:ctx.graphReversals, groupCompletionStatements: ctx.completionStatements,
-      snapshotContext: { review_id: ctx.reviewId, group_key: ctx.groupKey, authority: plan.authority },
-    })
+  try {
+    await foldDuplicateProductInto(ctx.env, ctx.db, ctx.user, keeper, duplicate,
+      new Map(branches.map((row) => [Number(row.id), row.name])), 'reviewed product conflict group redo',
+      ctx.reversal.stockDisposition || 'merge', resolveProductMergeClusterPlanEconomics(plan.cluster_plan), {
+        operationId: ctx.operationId, bulkClusterPlan: plan.cluster_plan, resumedCluster: ctx.childOrdinal > 0,
+        reviewedPlan: plan, reviewedRedo: true, reviewedCatalogBefore: ctx.reversal.keeperCatalogBefore,
+        preStatements:ctx.graphGuards, groupGraphReversals:ctx.graphReversals, groupCompletionStatements: ctx.completionStatements,
+        snapshotContext: { review_id: ctx.reviewId, group_key: ctx.groupKey, authority: plan.authority },
+      })
+  } catch (error) {
+    // The fold's own plain-Error refusals would reach the client as HTTP 500 with a raw code; a replay refusal is a coded 409 the client translates.
+    if (/merge_cluster_plan_conflict|merge_identity_conflict/.test(String(error))) throw changed()
+    throw error
+  }
 })
 
 app.get('/possible-duplicates/merge-batch/reviews/:reviewId', async (c) => {

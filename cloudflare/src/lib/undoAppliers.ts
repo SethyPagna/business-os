@@ -2814,6 +2814,8 @@ export interface ProductMergeGroupRedoContext {
   operationId: string
   graphReversals?: MergeReversal[]
   graphGuards?: AtomicMergeStatement[]
+  /** The duplicate (merged) product ids of this child and every later one this redo still folds, in fold order. */
+  redoDupIds: number[]
   completionStatements: (freshReversal: MergeReversal, receipt?: AtomicMergeGraphReceipt) => AtomicMergeStatement[]
 }
 
@@ -3334,6 +3336,7 @@ async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: Un
       childSnapshotId: child.id, childOrdinal: targetIndex, historyId: Number(ctx.historyId), generation,
       operationId: String(child.reversal.operationId || ''),
       graphReversals:preparedGroupGraph ? children.map(row=>row.reversal) : undefined, graphGuards:groupGraphGuard?[groupGraphGuard]:undefined,
+      redoDupIds: children.slice(targetIndex).map(row => Number(row.reversal.dupId)),
       completionStatements: (freshReversal, graph) => productMergeGroupCompletionStatements({
         direction: ctx.direction, user: ctx.user!, historyId: Number(ctx.historyId), groupSnapshotId: pointer.snapshotId,
         groupSnapshot, association, child, generation, final, nextPrefixFingerprint, freshReversal, graph,
