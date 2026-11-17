@@ -45,13 +45,16 @@ const LIST_LABELS = { not_checked: ['inventory_check_status_not_checked', 'Not c
 /** The fields of the Inventory row that ProductDetailModal reads, in the shape it reads them. Only what the viewer's grants left on the row crosses: nothing is guessed, nothing is re-read. */
 export function detailRecord(product: InventoryCheckProduct, fields: InventoryCheckAccess['fields']): Record<string, unknown> {
   const row = product as unknown as Record<string, unknown>
+  // Each group of fields crosses only with its grant, even if the row arrived carrying more (the page projects the row first; this is the wall behind it, for a caller that does not).
   const record: Record<string, unknown> = {
-    id: product.id, name: product.name, sku: product.sku ?? undefined, barcode: product.barcode ?? undefined, category: product.category ?? undefined, brand: product.brand ?? undefined,
+    id: product.id, name: product.name, sku: fields.barcode ? product.sku ?? undefined : undefined, barcode: fields.barcode ? product.barcode ?? undefined : undefined,
+    category: fields.category ? product.category ?? undefined : undefined, brand: fields.brand ? product.brand ?? undefined : undefined,
     unit: product.unit ?? undefined, image_path: product.image_path ?? undefined,
     stock_quantity: fields.stock && finiteQuantity(product.quantity) ? product.quantity : undefined,
     expiry_date: fields.received && product.next_expiry_date ? String(product.next_expiry_date).slice(0, 10) : undefined,
   }
-  for (const key of [...PRICE_KEYS, ...COST_KEYS]) if (Object.hasOwn(row, key)) record[key] = row[key]
+  if (fields.price) for (const key of PRICE_KEYS) if (Object.hasOwn(row, key)) record[key] = row[key]
+  if (fields.cost) for (const key of COST_KEYS) if (Object.hasOwn(row, key)) record[key] = row[key]
   // The product's own stock thresholds, so the modal's badge says what Products says (the global Settings mode still overrides inside the modal, as on Products). Only with the stock grant.
   if (fields.stock) for (const key of STOCK_THRESHOLD_KEYS) if (Object.hasOwn(row, key)) record[key] = row[key]
   return record

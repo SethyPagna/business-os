@@ -42,8 +42,7 @@ import { oldListDropsStatus, productsServerOf, productsWireParams, type Products
 import { groupedParams, groupToAsk, inOpenGroups, type Grouping } from './inventoryCheckGroups.ts'
 import { groupedListLoaded, loadGroupedList } from './inventoryCheckGroupChunk.ts'
 import { soleActiveBranch } from '../../utils/branchCollapse.ts'
-import { PRICE_KEYS } from './inventoryPriceFacts.ts'
-import { STOCK_THRESHOLD_KEYS } from './inventoryStockFacts.ts'
+import { projectProduct } from './inventoryCheckProject.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { loadWired, mergeWiredRows, NotWired, patchWiredLots, patchWiredRaw, readWiredRows, rememberWiredMode, wiredMode, wiredResult, type Branch, type WiredAccess, type WiredDeps, type WiredExtras, type WiredList, type WiredRaw } from './inventoryWired.ts'
 import { approvalRequestBound, runApprovalFlow } from './inventoryCheckApprovalFlow.ts'
@@ -163,16 +162,6 @@ function fixStockCandidate(opening: FixStockOpening, branchName: string | null) 
   const ordinary = Math.max(0, (Number(product.quantity) || 0) - (Number(product.damaged_quantity) || 0))
   return { id: product.id, name: product.name, barcode: product.barcode ?? null, brand: product.brand ?? null, unit: product.unit ?? null, image_path: product.image_path ?? null,
     stock_quantity: ordinary, branch_stock: [{ branch_id: opening.branchId, branch_name: branchName, quantity: ordinary }] }
-}
-
-function projectProduct(product: InventoryCheckProduct, fields: InventoryCheckAccess['fields']): InventoryCheckProduct {
-  const visible = { ...product }
-  if (!fields.stock) { delete visible.quantity; delete visible.damaged_quantity; for (const key of STOCK_THRESHOLD_KEYS) delete (visible as Record<string, unknown>)[key] }
-  if (!fields.brand) delete visible.brand
-  if (!fields.category) delete visible.category
-  if (!fields.barcode) { delete visible.barcode; delete visible.sku }
-  if (!fields.price) for (const key of PRICE_KEYS) delete (visible as Record<string, unknown>)[key]
-  return visible
 }
 
 
