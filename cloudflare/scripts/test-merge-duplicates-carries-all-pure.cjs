@@ -59,7 +59,7 @@ check('the merge re-points or folds product_batches', () => {
   assert.ok(/repointLotsStatement\(canonicalId/.test(mergeBlock) && /UPDATE product_batches SET variant_product_id = @canonicalId/.test(routeSrc),
     'non-colliding batches must move to the canonical product (in chunks, one statement per chunk)')
   // Set-based (16 Nov 2026): the fold block collects the lots and mergeFoldStatements() writes one upsert for all of them.
-  assert.ok(/mergeFoldStatements\(foldLots, foldStock, foldLotMetadata\)/.test(mergeBlock), 'the fold block hands its folded lots to the set-based writer')
+  assert.ok(/mergeFoldStatements\(foldLots, foldStock, foldLotMetadata, dup\.id\)/.test(mergeBlock), 'the fold block hands its folded lots and the DISCARDED product id (dup.id, never the keeper) to the set-based writer')
   assert.ok(/INSERT INTO branch_batch_stock[\s\S]*?quantity = quantity \+ excluded\.quantity/.test(routeSrc), 'colliding batches must fold their per-branch stock in')
 })
 
