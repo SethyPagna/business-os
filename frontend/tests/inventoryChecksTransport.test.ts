@@ -124,6 +124,20 @@ assert.deepEqual(calls.at(-1)?.body, { decision: 'reject', requestId: 'reject-bb
 await exports.decideInventoryCheckApproval(capture(), { decision: 'close', requestId: 'close-bbbb' })
 assert.equal(calls.at(-1)?.method, 'POST'); assert.equal(calls.at(-1)?.path, '/api/inventory-checks/sessions/sub%201/approval')
 assert.deepEqual(calls.at(-1)?.body, { decision: 'close', requestId: 'close-bbbb' }, 'a close goes to the same decision path with its own request id')
+// Accepting some lines carries the ids with the same request id; one line decision goes to the lines path, one request, with its figures and request id.
+await exports.decideInventoryCheckApproval(capture(), { decision: 'approve', requestId: 'approve-eeee', productIds: [4, 9] })
+assert.deepEqual(calls.at(-1)?.body, { decision: 'approve', requestId: 'approve-eeee', productIds: [4, 9] })
+const beforeLine = calls.length
+await exports.decideInventoryCheckLine(capture(), { productId: 4, action: 'modify', counted: 7, requestId: 'line-aaaaaa' })
+assert.equal(calls.length, beforeLine + 1, 'one line decision is one request')
+assert.equal(calls.at(-1)?.method, 'POST'); assert.equal(calls.at(-1)?.path, '/api/inventory-checks/sessions/sub%201/approval/lines')
+assert.deepEqual(calls.at(-1)?.body, { productId: 4, action: 'modify', counted: 7, requestId: 'line-aaaaaa' })
+assert.equal(routes.at(-1)?.options.isWrite, true, 'a line decision is a write under the same fences')
+const lineScope = capture()
+current = { ...current, epoch: 11 }
+await assert.rejects(exports.decideInventoryCheckLine(lineScope, { productId: 4, action: 'reject', requestId: 'line-bbbbbb' }), (error: any) => error.code === 'inventory_check_scope_changed' && error.outcome === 'not_dispatched')
+assert.equal(calls.length, beforeLine + 1, 'a line decision for a session that is no longer open is never sent')
+current = { branchId: '1', sessionId: 'sub 1', epoch: 10 }
 const decideScope = capture()
 current = { ...current, epoch: 11 }
 const beforeStale = calls.length

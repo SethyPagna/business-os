@@ -10,6 +10,8 @@ import type { InventoryCheckLotsAnswer, InventoryCheckObservation, InventoryChec
 export type InventoryCheckApprovalLine = { before: number; target: number; after: number; at: string; settled?: true
   /** The stock ran out before the whole shortage the count found could be removed: stock was set to 0 and `wanted` (below zero) is the figure the count asked for. */
   clamped?: true; wanted?: number }
+/** The approver's decision on one line (reject, or modify to a figure: one total, or the dates of a line counted by received date). Absent line = open. */
+export type InventoryCheckLineDecision = { decision: 'reject' | 'modify'; counted?: number; lots?: Array<{ batchId: number; counted: number }>; note?: string; at: string; by_name?: string }
 /** A submitted count's approval (ic_fix_stock). Sent only to a viewer who may see stock. */
 export type InventoryCheckApproval = {
   status: 'pending' | 'approved' | 'rejected'
@@ -34,6 +36,10 @@ export type InventoryCheckApproval = {
   baselines?: Record<string, number>
   /** Lines a newer count of the same product replaced (one waiting item per product): product id -> the newer count's session. They are never applied. */
   superseded?: Record<string, string>
+  /** The stored set of products the approval is about, ascending (absent only for an approval made before migration 0316: the panel then falls back to the items whose figures differ). */
+  line_ids?: number[]
+  /** The approver's decisions, by product id; a product with no key is open. */
+  line_decisions?: Record<string, InventoryCheckLineDecision>
 }
 /** The answer to one request of a decision: approving repeats the same request until done. */
 export type InventoryCheckApprovalDecision = {
@@ -50,6 +56,9 @@ export type InventoryCheckApprovalDecision = {
   /** The request recorded the plan but used up its statements before any stock was written; nothing is lost, repeating it writes. */
   deferred?: true
 }
+
+/** The answer to one line decision: no stock moves; `approval` is the approval's new state. */
+export type InventoryCheckLineAnswer = { approval: InventoryCheckApproval; applied: number; remaining: number; done: boolean; line: { productId: number; action: 'reject' | 'modify' | 'reopen' }; replayed?: boolean }
 
 export type InventoryCheckSession = {
   id: string
@@ -216,9 +225,15 @@ export function submitInventoryCheckCounts(scope: InventoryCheckWriteScope, inpu
 }
 
 /** Approve, reject or close the open session's submitted count. Approving is repeated with the SAME requestId until the answer says done; closing ends an approval that cannot be finished (no stock moves). */
-export function decideInventoryCheckApproval(scope: InventoryCheckWriteScope, input: { decision: 'approve' | 'reject' | 'close'; requestId: string }): Promise<InventoryCheckApprovalDecision> {
+export function decideInventoryCheckApproval(scope: InventoryCheckWriteScope, input: { decision: 'approve' | 'reject' | 'close'; requestId: string; /** Approve only: accept these lines and leave the rest open. */ productIds?: number[] }): Promise<InventoryCheckApprovalDecision> {
   if (!scope.context.sessionId) throw new Error('An Inventory session is required.')
   return write(scope, `${sessionPath(scope.context.sessionId)}/approval`, 'POST', input)
+}
+
+/** Reject, modify or reopen ONE line of the open session's pending approval. One request, replay-safe under its requestId; the answer carries the new approval. */
+export function decideInventoryCheckLine(scope: InventoryCheckWriteScope, input: { productId: number; action: 'reject' | 'modify' | 'reopen'; counted?: number; lots?: Array<{ batchId: number; counted: number }>; note?: string; requestId: string }): Promise<InventoryCheckLineAnswer> {
+  if (!scope.context.sessionId) throw new Error('An Inventory session is required.')
+  return write(scope, `${sessionPath(scope.context.sessionId)}/approval/lines`, 'POST', input)
 }
 
 export function changeInventoryCheckSession(scope: InventoryCheckWriteScope, action: 'close' | 'resume', expectedRevision: number, requestId: string): Promise<{ item: InventoryCheckSession; receipt: InventoryCheckReceipt }> {
