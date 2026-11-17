@@ -55,8 +55,10 @@ export function projectMergeCostGraph(graph: MergeCostPreviewGraph, plans: Merge
       const quantities = new Map<number, number>()
       for (const row of stock) quantities.set(Number(row.batch_id), (quantities.get(Number(row.batch_id)) || 0) + (Number(row.quantity) || 0))
       for (const folded of step.stock === 'merge' ? planFoldedLotMetadata(keeperLots, memberLots, matches, quantities) : []) {
-        const keptLot = keeperLots.find(row => Number(row.id) === folded.keeperLotId)
-        if (keptLot) keptLot.unit_cost_usd = folded.unit_cost_usd
+        // The fold writes this cost to the lot it folds INTO: a lot already on the keeper, or the first of the discarded product's lots of a date the keeper
+        // lacks (that lot is created on the keeper, and the others of its date are folded into it). So the target is looked up among every lot of the group.
+        const target = batches.find(row => Number(row.id) === folded.keeperLotId)
+        if (target) target.unit_cost_usd = folded.unit_cost_usd
       }
       for (const batch of memberLots) {
         const ownStock = stock.filter(row => Number(row.batch_id) === Number(batch.id))
