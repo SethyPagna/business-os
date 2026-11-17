@@ -235,7 +235,7 @@ export type ReceiveBody = {
 // was lost is replayed from its stored result instead of topping the lot up
 // a second time.
 export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody): Promise<Response> {
-  if (hasAcquisitionCostInput(body, c.get('user'))) return c.json({ error: 'Only an administrator can enter receipt costs.', code: 'product_cost_edit_required' }, 403)
+  if (hasAcquisitionCostInput(body, c.get('user'))) return c.json({ error: 'Entering receipt costs needs Edit product costs.', code: 'product_cost_edit_required' }, 403)
   const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
   const callCounting = (await metrics?.callCounting?.()) === true
   return withStockMutationReceipt(
@@ -268,7 +268,7 @@ export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody
 // on runAdjustActionKernel and lib/stockMutationReceipt.ts's header.
 async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody, atomicMark: StockMutationAtomicMark): Promise<Response> {
   const user = c.get('user')
-  if (hasAcquisitionCostInput(body, user)) return c.json({ error: 'Only an administrator can enter receipt costs.', code: 'product_cost_edit_required' }, 403)
+  if (hasAcquisitionCostInput(body, user)) return c.json({ error: 'Entering receipt costs needs Edit product costs.', code: 'product_cost_edit_required' }, 403)
   const db = getDb(c.env)
 
   const productId = Number(body.product_id)
@@ -477,7 +477,7 @@ app.patch('/:id', async (c) => {
     .catch(() => ({} as { expiry_date?: string | null; notes?: string | null; is_active?: boolean; received_at?: string | null }))
 
   if (!canEditAcquisitionCosts(user) && Object.prototype.hasOwnProperty.call(body, 'unit_cost_usd')) {
-    return c.json({ error: 'Only an administrator can change stored receipt costs.', code: 'product_cost_edit_required' }, 403)
+    return c.json({ error: 'Changing stored receipt costs needs Edit product costs.', code: 'product_cost_edit_required' }, 403)
   }
   const existing = await db.prepare('SELECT id, variant_product_id, updated_at, supplier_id, supplier_name FROM product_batches WHERE id = ?').get<{ id: number; variant_product_id: number; updated_at: string | null; supplier_id: number | null; supplier_name: string | null }>([id])
   if (!existing) return c.json({ error: 'Received date not found' }, 404)

@@ -150,11 +150,17 @@ async function main() {
       assert.ok(hidden.proxy.sql.every(sql => !sql.includes('p.cost_review_key')), 'hidden cost never selects the source marker')
       for (const row of hidden.result.items) for (const key of ['cost_needs_review', 'cost_review_key', 'cost_price_usd', 'cost_price_khr']) assert.ok(!Object.hasOwn(row, key), key)
     }
-    // 15 Nov 2026: cost is admin only. An employee holding every cost grant sees none of it; the administrator is the positive control.
-    const grantsOnly = await read(db, query, { id: 2, role_code: 'employee', role_permissions: JSON.stringify({ inventory_checks: true, inventory_check_show_received: true, inventory_check_show_cost: true, product_cost_view: true }) }, { costReviewKeyAvailable: true })
-    for (const row of grantsOnly.result.items) for (const key of ['cost_needs_review', 'cost_review_key', 'cost_price_usd', 'cost_price_khr']) assert.ok(!Object.hasOwn(row, key), key)
+    // 17 Nov 2026 (slice A): cost visibility is the editable View product costs grant. On this branch the Inventory field
+    // still ALSO needs inventory_check_show_cost (slices B/C1 drop that gate), so a non-admin shows cost only with both.
     const permitted = await read(db, query, admin, { costReviewKeyAvailable: true })
     assert.equal(permitted.result.items.find(row => row.id === 900001).cost_needs_review, true)
+    const grantsOnly = await read(db, query, { id: 2, role_code: 'employee', role_permissions: JSON.stringify({ inventory_checks: true, inventory_check_show_received: true, inventory_check_show_cost: true, product_cost_view: true }) }, { costReviewKeyAvailable: true })
+    assert.ok(grantsOnly.proxy.sql.some(sql => sql.includes('p.cost_review_key')), 'a non-admin holding View product costs plus the Inventory cost field selects the source marker')
+    assert.deepEqual(grantsOnly.result.items.map(row => row.cost_needs_review), permitted.result.items.map(row => row.cost_needs_review), 'the grant holder sees the same marker the administrator sees')
+    assert.equal(grantsOnly.result.items.find(row => row.id === 900001).cost_needs_review, true)
+    // Edit without View never reads cost.
+    const editOnly = await read(db, query, { id: 2, role_code: 'employee', role_permissions: JSON.stringify({ inventory_checks: true, inventory_check_show_received: true, inventory_check_show_cost: true, product_cost_edit: true }) }, { costReviewKeyAvailable: true })
+    for (const row of editOnly.result.items) for (const key of ['cost_needs_review', 'cost_review_key', 'cost_price_usd', 'cost_price_khr']) assert.ok(!Object.hasOwn(row, key), key)
     db.close()
   })
   await check('four stock ledgers overlap once, unknown stays nullable and genuine zero is out', async () => {

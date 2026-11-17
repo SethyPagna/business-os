@@ -8,12 +8,13 @@ import { BUSINESS_TZ_FORWARD, BUSINESS_UTC_OFFSET_MINUTES, localTodayExpr } from
 import { parseContinuousReadWindow, continuousReadWindowSql } from '../lib/continuousReadWindow'
 import { hasAnyPermission, isAdminControlUser } from '../lib/permissions'
 import { getPlanLimits } from '../lib/planTier'
+import { holdsCostViewGrant } from '../lib/acquisitionCostAccess'
 import { loadTelegramConfig, scheduleTelegramShiftOverview, scheduleTelegramShiftReport, sendTelegramShiftReport, sendTelegramStaleShiftAlert, type ShiftReportAction, type ShiftReportOptions, type ShiftReportSession } from '../lib/telegram'
 import { firstCharacters } from '../lib/telegramLang'
 import {
   loadShiftCloseDrift, loadShiftCloseFigures, loadShiftFigures, loadShiftReconciliation, parseShiftCloseFigures,
-  applyShiftTimeReview, readShiftCloseInputsDigest, readShiftTimeReview, shiftCloseInputsDigestSql, shiftLastActivityMs, SHIFT_REVIEW, TIME_REVIEW_MEMO_PREFIX, newShiftReadMemo,
-  type ShiftReadMemo, type ShiftTimeReview, type ShiftCloseDrift, type ShiftCloseFigures, type ShiftCloseInputsDigest, type ShiftFigures, type ShiftReconciliation,
+  applyShiftTimeReview, gateShiftFiguresCosts, readShiftCloseInputsDigest, readShiftTimeReview, shiftCloseInputsDigestSql, shiftLastActivityMs, SHIFT_REVIEW, TIME_REVIEW_MEMO_PREFIX, newShiftReadMemo,
+  type ShiftReadMemo, type ShiftTimeReview, type ShiftCloseDrift, type ShiftCloseFigures, type ShiftCloseInputsDigest, type ShiftFigures, type ShiftFiguresWithoutCosts, type ShiftReconciliation,
 } from '../lib/shiftReconciliation'
 import type { Env } from '../index'
 import { RIEL_CASH_NOT_HUNDREDS, rielCashAmountValid } from '../lib/saleStatusResolution'
@@ -1009,8 +1010,10 @@ function isCloseInputsChangedError(error: unknown): boolean {
  *
  * ADMIN ONLY, like the derived drawer comparison above. Registered opening,
  * additional and closing counts remain visible on authorized operational rows.
- * COGS/profit and the comparison use the same existing reviewer identity as
- * cancel and cross-cashier reads (canManageShifts).
+ * The report and the comparison use the same existing reviewer identity as
+ * cancel and cross-cashier reads (canManageShifts); within the report, COGS,
+ * profit and removal loss additionally follow the View product costs grant
+ * (gateShiftFiguresCosts), the one switch every cost surface answers to.
  *
  * Absent from the LIST read and from /current on purpose: each call runs the
  * sales kernel over the window, and neither a page of shifts nor a polled
@@ -1021,12 +1024,14 @@ function isCloseInputsChangedError(error: unknown): boolean {
  * Null on failure, for the same reason as the reconciliation: the close has
  * already committed, and losing the report half must never fail the request.
  */
-async function figuresFor(env: Env, user: SessionUser, shift: ShiftRow, memo?: ShiftReadMemo): Promise<ShiftFigures | null> {
+async function figuresFor(env: Env, user: SessionUser, shift: ShiftRow, memo?: ShiftReadMemo): Promise<ShiftFigures | ShiftFiguresWithoutCosts | null> {
   if (!canManageShifts(user)) return null
-  try { return await loadShiftFigures(env, shift, Date.now(), memo) } catch { return null }
+  // Who reads the report is shift management (administrator); whether COGS, profit and removal loss are in it is the View product costs grant (an
+  // administrator always holds it, so today nothing changes; a reader without it would get the cost keys absent).
+  try { return gateShiftFiguresCosts(await loadShiftFigures(env, shift, Date.now(), memo), holdsCostViewGrant(user)) } catch { return null }
 }
 type ReconciledShift = ShiftPresentedRow & ShiftDrawer & {
-  figures?: ShiftFigures | null
+  figures?: ShiftFigures | ShiftFiguresWithoutCosts | null
   /** Set when the invocation had no calls left for the report figures: the shift is closed, the figures are on its history read. */
   figures_pending?: true
 }

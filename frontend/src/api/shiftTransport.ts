@@ -310,8 +310,9 @@ export type ShiftFigures = {
   additional_cash?: ShiftMoney
   closing: ShiftCountedMoney
   sales_usd: number
-  cogs_usd: number
-  profit_usd: number
+  /** Cost, profit and removal loss are ABSENT for a reader without View product costs (the Worker's gateShiftFiguresCosts). */
+  cogs_usd?: number
+  profit_usd?: number
   sales_without_not_paid_usd?: number
   profit_without_not_paid_usd?: number
   delivery_fee_usd: number

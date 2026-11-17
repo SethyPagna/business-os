@@ -124,7 +124,7 @@ export default function ImportHub({
         if (entry.chosen === 'skip' || entry.detected === 'deferred_ledger' || entry.status === 'queued' || entry.status === 'error') continue
         const update = (patch: Partial<PlanEntry>) => setPlan((previous) => previous.map((row, i) => i === index ? { ...row, ...patch } : row))
         try {
-          if (needsCostEdit(entry.chosen) && !canEditCosts) throw new Error(T('product_cost_import_required', 'Only an administrator can use this import format.'))
+          if (needsCostEdit(entry.chosen) && !canEditCosts) throw new Error(T('product_cost_import_required', 'This import format needs View and Edit product costs.'))
           update({ status: 'creating' })
           const created = await createImportJob({
             type: entry.chosen,
@@ -173,7 +173,7 @@ export default function ImportHub({
   // renders body content only.
   return (
     <div className="space-y-4">
-      {!canEditCosts && plan.some(entry => needsCostEdit(entry.chosen)) ? <p role="status" className="text-xs text-amber-700 dark:text-amber-300">{T('product_cost_import_required', 'Only an administrator can use this import format.')}</p> : null}
+      {!canEditCosts && plan.some(entry => needsCostEdit(entry.chosen)) ? <p role="status" className="text-xs text-amber-700 dark:text-amber-300">{T('product_cost_import_required', 'This import format needs View and Edit product costs.')}</p> : null}
       <button
         type="button"
         onClick={() => inputRef.current?.click()}

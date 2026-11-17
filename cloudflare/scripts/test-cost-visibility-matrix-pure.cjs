@@ -1,5 +1,6 @@
-// Owner, 15 Nov 2026: cost, profit, margin, stock value and removal loss are ADMIN ONLY. product_cost_view / product_cost_edit are kept
-// as a stored switch-back (holdsCostViewGrant / holdsCostEditGrant) and give a non-admin nothing, in the Worker or the browser.
+// Owner, 17 Nov 2026 (reverses 15 Nov): cost, profit, margin, stock value and removal loss are admin only BY DEFAULT and follow the
+// editable product_cost_view / product_cost_edit grants (holdsCostViewGrant / holdsCostEditGrant), in the Worker and the browser.
+// Backups, restore and Drive sync stay admin only whatever the grants say.
 // Owner, 5 Oct 2026 (the rule this extends): cost price is NEVER visible by default. This is the matrix of
 // every surface that can carry an acquisition cost, and what keeps it from a user
 // who holds neither product_cost_view nor product_cost_edit (the seeded Employee and
@@ -49,7 +50,7 @@ const presets = (() => {
 
 const session = (role, own = {}) => ({ id: 9, username: role, role_code: role, role_permissions: JSON.stringify(SEED[role] || {}), permissions: JSON.stringify(own) })
 
-check('GRANTS: no seeded role except Admin can view or edit a cost, in the Worker or the browser', () => {
+check('GRANTS: no seeded role except Admin can view or edit a cost by default, in the Worker or the browser', () => {
   for (const role of ['employee', 'manager']) {
     const user = session(role, role === 'manager' ? { products: true, inventory: true, sales: true, returns: true, contacts: true } : {})
     assert.equal(access.canViewAcquisitionCosts(user), false, role + ' view (Worker)')
@@ -68,23 +69,33 @@ check('GRANTS: broad access never implies a cost grant (products, inventory, sal
   assert.equal(access.canEditAcquisitionCosts(user), false)
   assert.equal(access.canViewAcquisitionCosts(session('manager', { ...everything, product_cost_edit: true })), false, 'edit does not imply view')
   assert.equal(access.canEditAcquisitionCosts(session('manager', { ...everything, product_cost_view: true })), false, 'view does not imply edit')
-  assert.equal(access.canViewAcquisitionCosts(session('manager', { product_cost_view: true })), false, 'the explicit grant shows nothing (owner, 15 Nov 2026)')
-  assert.equal(access.canEditAcquisitionCosts(session('manager', { product_cost_edit: true })), false)
-  assert.equal(frontendAccess.canViewAcquisitionCosts(session('manager', { product_cost_view: true })), false)
-  assert.equal(frontendAccess.canEditAcquisitionCosts(session('employee', { product_cost_edit: true })), false)
-  assert.equal(access.holdsCostViewGrant(session('manager', { product_cost_view: true })), true, 'the switch-back still reads the stored grant')
+  // The explicit grant is the switch (owner, 17 Nov 2026): a non-admin holder sees and/or edits, in both packages.
+  assert.equal(access.canViewAcquisitionCosts(session('manager', { product_cost_view: true })), true)
+  assert.equal(access.canEditAcquisitionCosts(session('manager', { product_cost_edit: true })), true)
+  assert.equal(frontendAccess.canViewAcquisitionCosts(session('manager', { product_cost_view: true })), true)
+  assert.equal(frontendAccess.canEditAcquisitionCosts(session('employee', { product_cost_edit: true })), true)
+  assert.equal(access.holdsCostViewGrant(session('manager', { product_cost_view: true })), true)
   assert.equal(frontendAccess.holdsCostEditGrant(session('manager', { product_cost_edit: true })), true)
+  // Both helpers ARE the grant checks: neither may be an administrator-only alias again.
+  for (const file of ['cloudflare/src/lib/acquisitionCostAccess.ts', 'frontend/src/utils/acquisitionCostAccess.ts']) {
+    const source = read(file)
+    assert.match(source, /export function canViewAcquisitionCosts\(user: PermissionUser\): boolean \{\n  return holdsCostViewGrant\(user\)\n\}/, file + ' view')
+    assert.match(source, /export function canEditAcquisitionCosts\(user: PermissionUser\): boolean \{\n  return holdsCostEditGrant\(user\)\n\}/, file + ' edit')
+  }
 })
 
-check('GRANTS: the Employee seed and the one-click preset both carry the two cost grants as false, and agree', () => {
-  assert.equal(SEED.employee.product_cost_view, false)
-  assert.equal(SEED.employee.product_cost_edit, false)
-  assert.match(presets, /product_cost_view: false/)
-  assert.match(presets, /product_cost_edit: false/)
-  for (const role of ['manager', 'admin']) {
-    assert.equal(SEED[role].product_cost_view, undefined, role + ' seed grants no cost view by name')
-    assert.equal(SEED[role].product_cost_edit, undefined)
+check('GRANTS: the Employee and Manager seeds and presets carry the two cost grants as an explicit false, and agree', () => {
+  for (const role of ['employee', 'manager']) {
+    assert.equal(SEED[role].product_cost_view, false, role + ' seed writes the view grant off')
+    assert.equal(SEED[role].product_cost_edit, false, role + ' seed writes the edit grant off')
   }
+  const presetSource = read('frontend/src/components/users/rolePresetDefaults.ts')
+  const managerPreset = presetSource.slice(presetSource.indexOf("key: 'manager'"), presetSource.indexOf("key: 'product_viewer'"))
+  for (const block of [presets, managerPreset]) {
+    assert.match(block, /product_cost_view: false/)
+    assert.match(block, /product_cost_edit: false/)
+  }
+  assert.equal(SEED.admin.product_cost_view, undefined, 'admin holds the cost switches through all, not by name')
 })
 
 check('GRANTS: the Employee default holds Products View, Edit and Image and nothing else on Products', () => {
@@ -114,7 +125,7 @@ const PROJECTED = {
   'compat.ts': [/app\.use\('\/dashboard', acquisitionCostResponses\)/, /app\.use\('\/analytics', acquisitionCostResponses\)/, /app\.use\('\/system\/audit-logs', acquisitionCostResponses\)/, /canViewAcquisitionCosts/],
   'reports.ts': [/canViewAcquisitionCosts/, /gateTotals/],
   'productCost.ts': [/canViewAcquisitionCosts/],
-  'backups.ts': [/canViewAcquisitionCosts/, /canEditAcquisitionCosts/],
+  'backups.ts': [/isAdminControlUser\(user\)/],
   'inventoryCheckProducts.ts': [/getInventoryCheckAccess\(actor\)/, /readInventoryCheckProducts\(db, actor, query,/, /currentInventoryCheckActor\(db, principal\)/],
 }
 // route files that never put a cost-bearing field in a response (checked below)
@@ -138,16 +149,19 @@ check('SERVER: every route file is classified, so a new surface cannot ship unre
   for (const file of known) assert.ok(files.includes(file), file + ' is classified but no longer exists')
 })
 
-check('SERVER: Inventory costs need both grants, use the strict whitelist and never expose the raw review key', () => {
+check('SERVER: Inventory costs follow the cost grant, use the strict whitelist and never expose the raw review key', () => {
   const inventory = load(path.join(root, 'cloudflare/src/lib/inventoryCheckAccess.ts'))
   const sample = { id: 1, name: 'Synthetic', cost_price_usd: 7, cost_needs_review: true, cost_review_key: 'private-source-key', unknown_cost: 99 }
   for (const field of [false, true]) for (const grant of [false, true]) {
     const user = session('employee', { inventory_checks: true, inventory_check_show_cost: field, product_cost_view: grant })
     const permissions = inventory.getInventoryCheckAccess(user)
-    assert.equal(permissions.fields.cost, false, 'a non-admin never reads an Inventory cost, grant or not')
+    // Without the grant a non-admin never reads an Inventory cost, whatever the retired per-field switch says. With the grant
+    // the field switch may still matter until the Inventory lane drops that gate; both states keep these two lines true.
+    if (!grant) assert.equal(permissions.fields.cost, false, 'no grant: no Inventory cost')
+    if (grant && field) assert.equal(permissions.fields.cost, true, 'the grant (and the field) shows the Inventory cost')
     const projected = inventory.projectInventoryCheckProduct(sample, permissions)
-    assert.equal(Object.hasOwn(projected, 'cost_price_usd'), false)
-    assert.equal(Object.hasOwn(projected, 'cost_needs_review'), false)
+    assert.equal(Object.hasOwn(projected, 'cost_price_usd'), permissions.fields.cost === true)
+    assert.equal(Object.hasOwn(projected, 'cost_needs_review'), permissions.fields.cost === true)
     assert.ok(!Object.hasOwn(projected, 'cost_review_key') && !Object.hasOwn(projected, 'unknown_cost'))
   }
   const projected = inventory.projectInventoryCheckProduct(sample, inventory.getInventoryCheckAccess(session('admin')))
@@ -173,6 +187,26 @@ check('SERVER: the NO_COST route files do not select or return a cost column in 
   assert.doesNotMatch(notifications, /label:[^\n]*unit_cost|meta:[^\n]*unit_cost/, 'the credit reminder never prints the lot cost')
 })
 
+check('BACKUP: export, restore and Drive sync are admin only and never read the cost helpers', () => {
+  for (const file of ['cloudflare/src/routes/backups.ts', 'cloudflare/src/lib/driveSyncAuthority.ts']) {
+    const source = read(file).replace(/\/\/.*$/gm, '')
+    assert.doesNotMatch(source, /canViewAcquisitionCosts|canEditAcquisitionCosts|holdsCost/, file + ' must not use the cost helpers')
+    assert.match(source, /isAdminControlUser/, file + ' gates on administrator control')
+  }
+  const compat = read('cloudflare/src/routes/compat.ts')
+  for (const route of ["'/system/drive-sync/jobs'", "'/system/drive-sync/restore-stage/jobs'"]) {
+    const at = compat.indexOf(route)
+    assert.ok(at > 0, route)
+    const head = compat.slice(at, at + 400)
+    assert.match(head, /isAdminControlUser\(/, route + ' is an administrator gate')
+    assert.doesNotMatch(head, /AcquisitionCosts/, route + ' does not use the cost helpers')
+  }
+  const holder = { id: 3, username: 'ops', role_code: 'manager', role_permissions: '{}', permissions: JSON.stringify({ backup: true, backup_restore: true, product_cost_view: true, product_cost_edit: true }) }
+  assert.equal(access.canViewAcquisitionCosts(holder) && access.canEditAcquisitionCosts(holder), true, 'the holder really has the cost grants')
+  const permissionsModule = load(path.join(root, 'cloudflare/src/lib/permissions.ts'))
+  assert.equal(permissionsModule.isAdminControlUser(holder), false, 'but is not an administrator, so the backup gates refuse')
+})
+
 check('WRITES: every catalog / receipt / session cost write is behind product_cost_edit', () => {
   const products = read('cloudflare/src/routes/products.ts')
   assert.match(products, /hasCatalogCostWrite\(body, user\)/, 'PUT /products/:id')
@@ -181,7 +215,7 @@ check('WRITES: every catalog / receipt / session cost write is behind product_co
     assert.match(read('cloudflare/src/routes', file), /canEditAcquisitionCosts|hasAcquisitionCostInput/, file + ' write gate')
   }
   // Stock sessions (stockInCommit.ts) validate the request inside lib/stockSession.ts.
-  assert.match(read('cloudflare/src/lib/stockSession.ts'), /hasAcquisitionCostInput\(raw, user\)\) fail\('Only an administrator can enter receipt costs\.', 403, 'product_cost_edit_required'\)/)
+  assert.match(read('cloudflare/src/lib/stockSession.ts'), /hasAcquisitionCostInput\(raw, user\)\) fail\('Entering receipt costs needs Edit product costs\.', 403, 'product_cost_edit_required'\)/)
 })
 
 // ---- CLIENT matrix ---------------------------------------------------------

@@ -92,7 +92,9 @@ for (const [name, state] of [
   user = { ...user, role_code: 'admin', permissions: { contacts_suppliers: true, product_cost_view: true } }
   const granted = render()
   assert.ok(granted.includes('987.65') && granted.includes('123.45'), `${name} renders granted loaded cost values`)
-  user = { ...user, role_code: 'employee', permissions: { contacts_suppliers: true, product_cost_view: true, product_cost_edit: true } }
+  user = { ...user, role_code: 'employee', permissions: { contacts_suppliers: true, product_cost_view: true } }
+  assert.equal(render(), granted, name + ': a non-admin holding the view grant sees what the administrator sees (owner, 17 Nov 2026)')
+  user = { ...user, role_code: 'employee', permissions: { contacts_suppliers: true, product_cost_view: false, product_cost_edit: true } }
   const revoked = render()
   for (const amount of ['987.65', '123.45', '370.35', '543.21', '617.30', '$0.00']) assert.ok(!revoked.includes(amount), `${name} immediately omits ${amount} after view is revoked, including edit-only users`)
   assert.ok(revoked.includes('Retained product'), `${name} retains nonfinancial receipt content`)

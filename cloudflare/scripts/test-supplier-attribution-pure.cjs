@@ -126,7 +126,7 @@ const productSalesLedger = loadReal('lib/productSalesLedger.ts', { './salesAnaly
 // against scripts/ and the whole test file dies at load time.
 const conflictControl = loadReal('lib/conflictControl.ts')
 
-const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', role_code: 'admin', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
+const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
 
 // Sep 6 2026: the owner's low-stock alert setting reaches this module through
 // lib/lowStockSettings.ts. The SQL builder is the REAL one -- the clauses

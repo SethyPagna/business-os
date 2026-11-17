@@ -911,6 +911,24 @@ export function composeShiftFigures(input: ShiftFiguresInput): ShiftFigures {
   }
 }
 
+/** The keys of ShiftFigures that are product cost, profit or removal loss (priced at cost): one switch with every other cost surface (owner, 17 Nov 2026). */
+export const SHIFT_FIGURE_COST_KEYS = [
+  'cogs_usd', 'profit_usd', 'profit_without_not_paid_usd', 'cost_missing_snapshot_lines',
+  'removal_loss_usd', 'revenue_after_losses_usd', 'profit_after_losses_usd', 'removal_loss_unvalued_rows',
+] as const
+export type ShiftFiguresWithoutCosts = Omit<ShiftFigures, typeof SHIFT_FIGURE_COST_KEYS[number]>
+/**
+ * The report figures for a reader. Cost, profit and removal loss follow the View product costs grant like every other cost surface: a reader without
+ * it gets the figures with those keys ABSENT (a client cannot tell 0 from hidden). Who may read the shift report at all stays the caller's decision
+ * (routes/shifts.ts canManageShifts); this only decides the cost half. Pure; never mutates its input.
+ */
+export function gateShiftFiguresCosts(figures: ShiftFigures, canViewCosts: boolean): ShiftFigures | ShiftFiguresWithoutCosts {
+  if (canViewCosts) return figures
+  const out: Record<string, unknown> = { ...figures }
+  for (const key of SHIFT_FIGURE_COST_KEYS) delete out[key]
+  return out as ShiftFiguresWithoutCosts
+}
+
 /** The fees typed 'delivery' -- the delivery half of the same expense set. */
 export async function shiftDeliveryFeeExpenses(
   env: Env,

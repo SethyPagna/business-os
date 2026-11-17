@@ -126,7 +126,8 @@ await runTest('B1 reset to defaults over the stored Employee: one row per change
     // A plain switch that only moves between absent and off changes nothing, and an action switch only means
     // something when it is off (on is what the level already gives); every other change is named.
     const RETIRED_KEYS = new Set(PERMISSION_DEFS.filter((def) => def.retired).map((def) => def.key))
-    assert.ok(RETIRED_KEYS.has('product_cost_view') && RETIRED_KEYS.has('inventory_check_show_price'), 'the retired set is read from the catalogue and is not empty')
+    assert.ok(RETIRED_KEYS.has('inventory_check_show_cost') && RETIRED_KEYS.has('inventory_check_show_price'), 'the retired set is read from the catalogue and is not empty')
+    assert.ok(!RETIRED_KEYS.has('product_cost_view') && !RETIRED_KEYS.has('product_cost_edit'), 'the cost grants are drawn (owner, 17 Nov 2026)')
     assert.ok(stored.some((change) => RETIRED_KEYS.has(change.key)), 'the stored Employee holds retired grants, so the exclusion is exercised')
     let named = 0
     const MISSING = []
@@ -177,8 +178,8 @@ await runTest('B1 pure: extras are their own lines and Full never folds them in;
   const [level, ...rest] = products.lines
   assert.equal(level.text, `${en.review_required} → ${en.label_full_access}`, 'the level line is the level move and nothing else')
   assert.ok(!level.text.includes(en.perm_short_cost_view), 'Full never folds an extra into its own line')
-  assert.deepEqual(rest.map((line) => line.text), [`+ ${en.perm_short_destructive_imports}`], 'each extra is a line of its own; the retired cost grant is not one')
-  assert.deepEqual(rest.map((line) => line.sensitivity), ['critical'], 'and carries its own shield')
+  assert.deepEqual(rest.map((line) => line.text), [`+ ${en.perm_short_cost_view}`, `+ ${en.perm_short_destructive_imports}`], 'each extra is a line of its own, the cost grant among them')
+  assert.deepEqual(rest.map((line) => line.sensitivity), ['high', 'critical'], 'and carries its own shield')
   assert.equal(products.sensitivity, 'critical')
   const settings = rows.find((row) => row.id === 'settings')
   assert.ok(!settings?.lines.some((line) => line.text === `+ ${en.perm_short_identity}`), 'Settings Full does not stand in for an extra that is not stored')

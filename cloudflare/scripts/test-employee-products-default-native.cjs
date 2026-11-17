@@ -79,8 +79,7 @@ async function main() {
     }
     assert.equal(acquisitionCostAccess.canViewAcquisitionCosts(EMPLOYEE_USER), false)
     assert.equal(acquisitionCostAccess.canEditAcquisitionCosts(EMPLOYEE_USER), false)
-    assert.equal(acquisitionCostAccess.canViewAcquisitionCosts(EMPLOYEE_WITH_COST), false, 'owner, 15 Nov 2026: cost is admin only, so the grant gives a named employee nothing')
-    assert.equal(acquisitionCostAccess.canEditAcquisitionCosts(EMPLOYEE_WITH_COST), false)
+    assert.equal(acquisitionCostAccess.canViewAcquisitionCosts(EMPLOYEE_WITH_COST), true, 'an admin can still grant cost to a named employee')
     assert.equal(acquisitionCostAccess.canViewAcquisitionCosts(MANAGER_USER), false, 'a Manager does not see cost by default either')
     assert.equal(acquisitionCostAccess.canEditAcquisitionCosts(MANAGER_USER), false)
   })
@@ -397,16 +396,12 @@ async function main() {
     assert.equal(await approval.reviewApprovalPermissionError({}, ADMIN, queued({ supplier: 'Other Co' })), null)
   })
 
-  await check('Employee default, even with the cost grants added by an admin, may NOT write a cost (owner, 15 Nov 2026: admin only)', async () => {
+  await check('Employee default with the cost grants added by an admin may write a cost; the default alone never does', async () => {
     fresh()
     state.user = EMPLOYEE_WITH_COST
     const row = one('SELECT updated_at FROM products WHERE id = ?', KEEP)
     const done = await request('PUT', '/api/products/' + KEEP, { cost_price_usd: 4.5, expected_updated_at: row.updated_at })
-    assert.equal(done.status, 403, JSON.stringify(done.body))
-    assert.equal(done.body.code, 'product_cost_edit_required')
-    state.user = ADMIN
-    const admin = await request('PUT', '/api/products/' + KEEP, { cost_price_usd: 4.5, expected_updated_at: row.updated_at })
-    assert.equal(admin.status, 200, 'control: an administrator writes the same cost: ' + JSON.stringify(admin.body))
+    assert.equal(done.status, 200, JSON.stringify(done.body))
   })
 
   await check('role matrix (PERM-UI): with the matching grant off the Worker refuses product Delete, bulk Delete, Add variant and Edit with 403 and no state change, and the same calls pass the gate for a role that holds them', async () => {

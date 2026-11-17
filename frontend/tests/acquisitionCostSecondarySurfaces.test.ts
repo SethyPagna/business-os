@@ -37,9 +37,9 @@ const props = {
 for (const [user, expected] of [
   [{ permissions: { products: true, inventory: true } }, false],
   [{ permissions: { product_cost_edit: true } }, false],
-  // Owner, 15 Nov 2026: the grant is inert; only an administrator sees a cost.
-  [{ permissions: { product_cost_view: true } }, false],
-  [{ permissions: { product_cost_view: true, product_cost_edit: true } }, false],
+  // Owner, 17 Nov 2026: the View grant shows the cost to a non-admin; edit alone does not.
+  [{ permissions: { product_cost_view: true } }, true],
+  [{ permissions: { product_cost_view: true, product_cost_edit: true } }, true],
   // Admin override through the admin role (not the name, FX-sec).
   [{ username: 'admin', role_code: 'admin', permissions: { product_cost_view: false } }, true],
 ] as [PermissionUser, boolean][]) {
@@ -67,7 +67,7 @@ context.__costTestContext = { ...effectivePermissions({ permissions: { product_c
 const deniedReview = renderToStaticMarkup(React.createElement(ReviewScreen, {
   jobId: 1, t: () => '', notify: () => {}, onApproved: () => {}, onReviewLater: () => {}, onCancel: () => {}, autoApprove: true,
 }))
-assert.ok(deniedReview.includes('Only an administrator can review financial import data'))
+assert.ok(deniedReview.includes('Reviewing financial import data needs View product costs'))
 assert.ok(!deniedReview.includes('Importing'), 'edit permission alone cannot mount the financial review body')
 const duplicates = read('../src/components/products/ProductDuplicatesTab.tsx')
 const resolveAdapter = read('../src/components/products/productResolveAdapter.ts')

@@ -393,7 +393,7 @@ async function ledger(H, e, rid = null) {
   }
 }
 const requestId = () => 'cf-' + (++seq) + '-' + Math.random().toString(36).slice(2, 10) + '-fold'
-// A non-administrator may not enter a cost (15 Nov 2026), so the permission-shaped cases send the same create without one.
+// A user without Edit product costs may not enter a cost (owner, 17 Nov 2026; an administrator always holds it), so the permission-shaped cases send the same create without one.
 const createBodyNC = (e, extra = {}) => { const b = createBody(e, extra); delete b.cost_price_usd; return b }
 const createBody = (e, extra = {}) => ({ name: e.name, barcode: e.clean, stock_quantity: 7, branch_id: LC, cost_price_usd: 3.5, client_request_id: requestId(), ...extra })
 
@@ -416,7 +416,7 @@ async function mainBody() {
   console.log('MODE: ' + (flavour ? 'control ' + flavour : 'production code at HEAD (no patch)') + '; plan ' + (OPTIONS.plan || 'paid'))
   const H = await world({ patches, plan: OPTIONS.plan || 'paid' })
   try {
-    // A manager who may add products AND adjust stock (Full on both). 15 Nov 2026: a typed cost is admin only, so the cost-entering
+    // A manager who may add products AND adjust stock (Full on both). 17 Nov 2026: a typed cost needs Edit product costs (an administrator holds it), so the cost-entering
     // fold/stock-in cases run as an administrator; the permission-shaped cases below stay non-admin and carry no cost.
     await H.addUser(2, 'cf-manager', { products: true, inventory: true, product_cost_edit: true }, { roleCode: 'admin' })
     await H.addSession('manager', 2, { device: 'Manager Phone' })

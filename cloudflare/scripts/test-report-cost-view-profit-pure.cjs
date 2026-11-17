@@ -79,7 +79,7 @@ const sales = read('src/routes/sales.ts')
 const compat = read('src/routes/compat.ts')
 check('reports.ts: gateTotals and the business-summary row gate route the cost view through costViewProfit', () => {
   assert.match(reports, /if \(!isAdmin && canViewCosts && !canViewCourier\) \{[\s\S]{0,400}return costViewProfit\(gateTotals\(row, true, true, places\)\)/)
-  assert.match(reports, /export function gateBusinessSummarySaleRow\(row: Record<string, unknown>, isAdmin: boolean, canViewCosts = isAdmin, canViewCourier = isAdmin\)/)
+  assert.match(reports, /export function gateBusinessSummarySaleRow\(row: Record<string, unknown>, isAdmin: boolean, canViewCosts: boolean, canViewCourier = isAdmin\)/)
   assert.match(reports, /if \(!isAdmin && !canViewCourier\) return costViewProfit\(adminRow\)/)
   assert.equal((reports.match(/gateBusinessSummarySaleRow\(row, isAdmin, /g) || []).length, 2, 'the export and the paged list pass both authorities')
 })

@@ -6513,7 +6513,7 @@ app.get('/stats', async (c) => {
 // match".
 // Match reports.ts' authority boundary without importing a route module. Apply
 // after shared cache reads: private cost fields must never depend on cache owner.
-export function gateSalesReportMoney(row:Record<string,unknown>,isAdmin:boolean,canViewCosts=isAdmin,canViewCourier=isAdmin):Record<string,unknown> {
+export function gateSalesReportMoney(row:Record<string,unknown>,isAdmin:boolean,canViewCosts:boolean,canViewCourier=isAdmin):Record<string,unknown> {
   if(isAdmin||(canViewCosts&&canViewCourier))return row
   // A cost grant without the courier-cost permission: the courier-cost keys
   // leave and profit is restated on goods, so the courier cost cannot be

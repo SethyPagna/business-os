@@ -458,7 +458,7 @@ async function run() {
     const backups = loadReal('routes/backups.ts', {
       '../lib/auth': { requireAuth: async (c, next) => { c.set('user', { id: 1, username: 'admin' }); return next() } },
       '../lib/audit': { audit: async () => {}, auditOrThrow: async () => {} },
-      '../lib/permissions': { hasPermission: () => true },
+      '../lib/permissions': { hasPermission: () => true, isAdminControlUser: () => true },
       '../lib/planTier': { getPlanLimits: () => ({ scheduledBackupAfterHourLocal: 21, scheduledBackupKeep: 7 }) }, // only GET / reads it (the schedule block)
       '../lib/acquisitionCostAccess': { canViewAcquisitionCosts: () => true, canEditAcquisitionCosts: () => true },
       '../lib/destructiveStepUp': { denyUnlessCurrentPassword: async () => null, denyUnlessDefaultAdmin: async () => null },

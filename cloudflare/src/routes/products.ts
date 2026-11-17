@@ -2474,7 +2474,7 @@ app.post('/bulk-price-adjust', async (c) => {
   if (!Number.isFinite(amount) || amount <= 0) return c.json({ error: 'Amount must be a positive number' }, 400)
   const fields = Array.isArray(body.fields) ? [...new Set(body.fields.filter((f) => BULK_PRICE_FIELDS.has(f)))].sort() : []
   if (!canEditAcquisitionCosts(user) && fields.some(field => field.startsWith('cost_price_'))) {
-    return c.json({ error: 'Only an administrator can change catalog costs.', code: 'product_cost_edit_required' }, 403)
+    return c.json({ error: 'Changing catalog costs needs Edit product costs.', code: 'product_cost_edit_required' }, 403)
   }
   if (!fields.length) return c.json({ error: 'Pick at least one price field to adjust' }, 400)
   const skipZero = Boolean(body.skip_zero)
@@ -2643,7 +2643,7 @@ app.post('/', async (c) => {
   const statusRefusal = productStatusInputRefusal(c, body)
   if (statusRefusal) return statusRefusal
   if (hasCatalogCostWrite(body, user)) {
-    return c.json({ error: 'Only an administrator can set catalog costs.', code: 'product_cost_edit_required' }, 403)
+    return c.json({ error: 'Setting catalog costs needs Edit product costs.', code: 'product_cost_edit_required' }, 403)
   }
   // OPUS-H-1: the discount block is stored exactly as the price gate below compares it (lib/productDiscountGate.ts).
   const invalidDiscount = normalizeProductDiscountBody(body)
@@ -2947,7 +2947,7 @@ app.put('/:id', async (c) => {
   const statusRefusal = productStatusInputRefusal(c, body)
   if (statusRefusal) return statusRefusal
   if (hasCatalogCostWrite(body, user)) {
-    return c.json({ error: 'Only an administrator can change catalog costs. Omit cost fields when editing other product details.', code: 'product_cost_edit_required' }, 403)
+    return c.json({ error: 'Changing catalog costs needs Edit product costs. Omit cost fields when editing other product details.', code: 'product_cost_edit_required' }, 403)
   }
   const id = c.req.param('id')
   // Image-only restricted role: normally blocked by the tier==='none' check
@@ -3576,7 +3576,7 @@ app.post('/variant', async (c) => {
   const statusRefusal = productStatusInputRefusal(c, body)
   if (statusRefusal) return statusRefusal
   if (hasCatalogCostWrite(body, user)) {
-    return c.json({ error: 'Only an administrator can set catalog costs.', code: 'product_cost_edit_required' }, 403)
+    return c.json({ error: 'Setting catalog costs needs Edit product costs.', code: 'product_cost_edit_required' }, 403)
   }
   const invalidDiscount = normalizeProductDiscountBody(body)
   if (invalidDiscount) return c.json(invalidDiscount, 400)
@@ -10329,7 +10329,7 @@ app.post('/possible-duplicates/merge', async (c) => {
   if (body.cost_price_usd !== undefined || body.cost_price_khr !== undefined) {
     if (!keepMode) return c.json({ success: false, code: 'invalid_merge_cost', error: 'A chosen cost is only accepted by the Resolve merge.' }, 400)
     if (!canEditAcquisitionCosts(user)) {
-      return c.json({ success: false, code: 'cost_permission_required', error: 'Only an administrator can change the cost.' }, 403)
+      return c.json({ success: false, code: 'cost_permission_required', error: 'Changing the cost needs Edit product costs.' }, 403)
     }
     const chosenMoney = (value: unknown): number | null => {
       if (value === null) return null

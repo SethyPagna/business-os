@@ -19,10 +19,8 @@ async function main() {
     '../lib/saleBulkUpdate': { SALE_BULK_UPDATE_KINDS: new Set() },
   }).default
   app.route('/api/action-history', historyRoutes)
-  // Owner rule, 15 Nov 2026: a merge that chooses a cost is administrator only, so the original owner is an administrator and
-  // 'demoted' is the same account after losing it (a non-admin, whatever cost grant it still stores).
-  const sameOwner = { ...EDITOR, id: 3, role_code: 'admin', permissions: JSON.stringify({ products: true, product_cost_edit: true }) }
-  const demoted = { ...sameOwner, role_code: 'employee', permissions: JSON.stringify({ products: true, 'products:edit': false, product_cost_edit: false }) }
+  const sameOwner = { ...EDITOR, id: 3, permissions: JSON.stringify({ products: true, product_cost_edit: true }) }
+  const demoted = { ...sameOwner, permissions: JSON.stringify({ products: true, 'products:edit': false, product_cost_edit: false }) }
   async function merged(choices, cost) {
     fresh()
     state.user = sameOwner

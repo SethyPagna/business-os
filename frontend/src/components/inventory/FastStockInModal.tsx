@@ -1005,7 +1005,7 @@ export default function FastStockInModal({
     if (refuseDestination(pending)) return
     if (!(Number(branchId) > 0)) { notify(tr('fast_stockin_pick_branch', 'Pick a branch'), 'error'); return }
     if (!canEditCosts && pending.some((line) => line.mode === 'add' && line.quantity + line.freeQuantity > 0)) {
-      notify(tr('product_cost_edit_required', 'Only an administrator can enter costs on received stock.'), 'error')
+      notify(tr('product_cost_edit_required', 'Entering costs on received stock needs Edit product costs.'), 'error')
       return
     }
     setSaving(true)

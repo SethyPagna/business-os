@@ -164,6 +164,7 @@ const shiftsRoute = loadReal('routes/shifts.ts', {
   },
   '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
   '../lib/planTier': { getPlanLimits: () => ({ d1QueriesPerInvocation: 1000 }) },
+  '../lib/acquisitionCostAccess': { holdsCostViewGrant: () => true }, // figuresFor reaches it only for a reader canManageShifts already admitted (an administrator holds it)
   '../lib/telegram': {
     // The spy stands where the real sender does. It records and returns; it
     // has no token, no chat id and no fetch, so this file cannot transmit.
@@ -332,6 +333,7 @@ async function main() {
     },
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
     '../lib/planTier': { getPlanLimits: () => ({ d1QueriesPerInvocation: 1000 }) },
+    '../lib/acquisitionCostAccess': { holdsCostViewGrant: () => true }, // figuresFor reaches it only for a reader canManageShifts already admitted (an administrator holds it)
     '../lib/telegram': { scheduleTelegramShiftReport: async () => 'unavailable', loadTelegramConfig: async () => ({}), sendTelegramShiftReport: async () => { throw new Error('a shift that does not exist must not be reported') } },
   })
   const strangerApp = stranger.default || stranger

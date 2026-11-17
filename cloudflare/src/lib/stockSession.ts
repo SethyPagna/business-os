@@ -720,7 +720,7 @@ async function sessionLandings(db: D1Compat, request: StockSessionRequest, redir
 }
 
 export async function commitStockSession(env: Env, user: SessionUser, raw: unknown, redirectTarget: RedirectTarget = null, queryBudget?: StockSessionQueryBudget): Promise<StockSessionReceipt> {
-  if (hasAcquisitionCostInput(raw, user)) fail('Only an administrator can enter receipt costs.', 403, 'product_cost_edit_required')
+  if (hasAcquisitionCostInput(raw, user)) fail('Entering receipt costs needs Edit product costs.', 403, 'product_cost_edit_required')
   let request = parseRequest(raw, isAdminControlUser(user) ? ADMIN_MAX_IMAGES_PER_PRODUCT : MAX_IMAGES_PER_PRODUCT)
   const requiresInventoryAdjust = request.items.some((line) => line.quantity > 0)
   const requiresProductImage = stockSessionChangesProductImages(request)

@@ -51,7 +51,7 @@ export type RoleDef = {
   roleCode: string
   /** roles.permissions: what the role editor saves. */
   grants: Grants
-  /** True when the grants hold an explicit product_cost_view. Informational since 15 Nov 2026: the grant gives a non-admin no cost (seesCost). */
+  /** True when the grants hold an explicit product_cost_view (or all). Since 17 Nov 2026 that grant IS the switch: it is what makes seesCost true for a non-admin. */
   costGranted: boolean
 }
 
@@ -101,7 +101,7 @@ export const ROLES: RoleDef[] = [
   define('webmaster', 'webmaster (Website Editor areas)', 'webmaster', Object.fromEntries(
     section('customer_portal').permissions.map((entry) => [entry.key, true as const]),
   )),
-  define('cost-viewer', 'Employee default + View product costs (inert grant)', 'employee', { ...DEFAULT_ROLE_PERMISSIONS.employee, product_cost_view: true }),
+  define('cost-viewer', 'Employee default + View product costs (grant on)', 'employee', { ...DEFAULT_ROLE_PERMISSIONS.employee, product_cost_view: true }),
   define('admin', 'admin (control)', 'admin', { ...preset('admin') }),
 ]
 

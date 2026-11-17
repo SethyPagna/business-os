@@ -144,6 +144,7 @@ const route = loadReal('routes/shifts.ts', {
   '../lib/permissions': loadReal('lib/permissions.ts'),
   '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
   '../lib/planTier': { getPlanLimits: () => ({ d1QueriesPerInvocation: 1000 }) },
+  '../lib/acquisitionCostAccess': { holdsCostViewGrant: () => true }, // figuresFor reaches it only for a reader canManageShifts already admitted (an administrator holds it)
   '../lib/telegram': { scheduleTelegramShiftReport: async () => 'unavailable', loadTelegramConfig: async () => ({}), sendTelegramShiftReport: async (_env, id) => { telegramReportsFor.push(id); return true } },
   // REAL, over the same database: the whole point is that the close dialog and
   // the bot are fed by one function, so a stub here would prove nothing.
