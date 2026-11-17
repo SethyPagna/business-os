@@ -3442,7 +3442,7 @@ function mergeReplayGallerySql(): string {
     WHERE i.product_id IN (@keeper,@discarded) ORDER BY i.id))`
 }
 
-async function mergeReplayColumns(db: ReturnType<typeof getDb>): Promise<Map<string, string[]>> {
+export async function mergeReplayColumns(db: ReturnType<typeof getDb>): Promise<Map<string, string[]>> {
   const tables = [...new Set(['products', 'product_images', 'product_batches', 'branch_stock', 'branch_batch_stock', 'inventory_movements',
     'stock_session_members', 'promotion_rules', 'sale_item_batch_allocations', 'return_item_batch_allocations', ...MERGE_REPARENT_TABLES.map(row => row.table)])]
   const rows = await db.prepare(`SELECT t.value table_name,p.name FROM json_each(@tables) t JOIN pragma_table_info(t.value) p ORDER BY t.value,p.cid`)
@@ -3456,7 +3456,7 @@ async function mergeReplayColumns(db: ReturnType<typeof getDb>): Promise<Map<str
   return columns
 }
 
-function mergeReplayGraphSql(reversal: MergeReversal | MergeReversal[], schema: Map<string, string[]>): AtomicMergeStatement {
+export function mergeReplayGraphSql(reversal: MergeReversal | MergeReversal[], schema: Map<string, string[]>): AtomicMergeStatement {
   const list=Array.isArray(reversal)?reversal:[reversal]
   const reads = mergeFingerprintReads(list, true)
   if(Array.isArray(reversal)) {
