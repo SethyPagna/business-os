@@ -33,6 +33,7 @@ import { canonicalizePhone } from '../lib/phone'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { customerIsProfileSql } from '../lib/anonymousCustomer'
+import { DEFAULT_LOW_STOCK_CONFIG, effectiveLowStockThreshold, LOW_STOCK_SETTING_KEYS, lowStockThresholdSql, resolveLowStockConfig, type LowStockConfig } from '../lib/lowStockSettings'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -735,10 +736,15 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
 // function of that setting: still excludes when the merchant wants
 // out-of-stock hidden (matching the historical default), but includes
 // everything (still gated on is_active) when they've asked to show it.
-function portalVisibleProductFilter(showOutOfStockProducts: boolean): string {
+//
+// "Out of stock" here is the SAME out level the card's badge and the Out pill use (portalStockLevelSql, owner decision of 16 Nov 2026,
+// "Website's own levels"): the website's out level in website-wide mode when it is filled in, else the product's own. Hiding by the
+// product's column alone listed cards that wear "Out of stock" and hid products the badge calls Low. With no website out level (product
+// mode, or an empty field) the fragment is byte-identical to what it always was.
+export function portalVisibleProductFilter(showOutOfStockProducts: boolean, rule: PortalStockRule = DEFAULT_PORTAL_STOCK_RULE): string {
   return showOutOfStockProducts
     ? 'p.is_active = 1'
-    : 'p.is_active = 1 AND COALESCE(p.stock_quantity, 0) > COALESCE(p.out_of_stock_threshold, 0)'
+    : `p.is_active = 1 AND COALESCE(p.stock_quantity, 0) > ${portalStockLevelSql(rule).out}`
 }
 
 // Category-first, name-second default browsing order for the public
@@ -822,11 +828,18 @@ export function buildPortalBrowseOrder(view: PortalBrowseView, sort: PortalBrows
 //    plus `branch_availability` [{branch_id, status}] so the branch filter
 //    and per-branch badge keep working (a shopper may ask "is this at the
 //    branch near me" -- the ANSWER is public, the ledger is not). The rule
-//    mirrors the storefront's historical badge math exactly: out when
-//    qty <= out_of_stock_threshold (default 0), low when qty <=
-//    low_stock_threshold (default 10), else in -- honoring the merchant's
-//    customer_portal_stock_threshold_mode='global' setting, which the old
-//    client-side computation silently ignored on the live site.
+//    is the storefront's OWN thresholds, by owner decision of 16 Nov 2026
+//    ("Website's own levels"): the Website Editor's customer_portal_* levels
+//    when the editor is set to website-wide thresholds and a level is filled
+//    in, and otherwise the SHOP's low-stock setting (lib/lowStockSettings.ts:
+//    per-product, or the Settings global, or none when alerts are off) -- never
+//    a fixed 10. Out when qty <= the out level (the website's, else the
+//    product's out_of_stock_threshold, default 0), low when above that and qty
+//    <= the low level, else in. Inventory, the bell and the Dashboard keep the
+//    shop setting and never see the website levels. The badge, the per-branch
+//    availability, the filter pills (buildPortalProductFilters) and the AI
+//    assistant all resolve through resolvePortalStockRule below, from the
+//    SAME settings read, so a badge and the list under it cannot disagree.
 //
 // 2. REDACTS the raw fields the computation consumed: stock_quantity,
 //    low_stock_threshold, out_of_stock_threshold, and the old per-branch
@@ -841,9 +854,76 @@ export function buildPortalBrowseOrder(view: PortalBrowseView, sort: PortalBrows
 // down in production with exactly this unbounded `IN (...)`.
 type PortalStockStatus = 'in_stock' | 'low_stock' | 'out_of_stock'
 
-function portalStockStatusFor(quantity: number, outThreshold: number, lowThreshold: number): PortalStockStatus {
-  if (quantity <= outThreshold) return 'out_of_stock'
-  if (quantity <= lowThreshold) return 'low_stock'
+// The Website Editor's own levels (CatalogEditorSurface "Catalog settings").
+// They count only in 'global' ("Use website-wide thresholds") mode, exactly
+// as before; in 'product' mode the shop's rule resolves each product.
+//
+// Lead ruling, 16 Nov 2026 (owner rule "Website's own levels", which does not name the mode): the website levels apply ONLY in website-wide mode.
+// In per-product mode each product's own threshold applies, as the editor's mode selector says, and the editor shows no level inputs there. In the
+// shop's Settings, a global mode means the one Settings number stands in for every product's own low threshold.
+export const PORTAL_STOCK_LEVEL_KEYS = [
+  'customer_portal_stock_threshold_mode',
+  'customer_portal_low_stock_threshold',
+  'customer_portal_out_of_stock_threshold',
+] as const
+
+export interface PortalStockRule {
+  /** The shop's low-stock setting: what an empty website level falls back to. */
+  shop: LowStockConfig
+  /** The website's low level, or null when it is not set (use the shop's). */
+  low: number | null
+  /** The website's out-of-stock level, or null when it is not set (use the product's own, default 0). */
+  out: number | null
+}
+
+export const DEFAULT_PORTAL_STOCK_RULE: PortalStockRule = { shop: DEFAULT_LOW_STOCK_CONFIG, low: null, out: null }
+
+// Blank, non-numeric, infinite or negative = not set (the editor saves a
+// whole number or decimal from 0 up). Blank used to read as 0 (Number('')).
+function portalWebsiteLevel(raw: unknown): number | null {
+  const text = String(raw ?? '').trim()
+  if (text === '') return null
+  const value = Number(text)
+  return Number.isFinite(value) && value >= 0 ? value : null
+}
+
+/** The storefront's rule from any settings map: the website's levels when set, else the shop's. */
+export function resolvePortalStockRule(settings?: Record<string, unknown> | null): PortalStockRule {
+  const map = settings || {}
+  const shop = resolveLowStockConfig(map)
+  if (String(map.customer_portal_stock_threshold_mode || '') !== 'global') return { shop, low: null, out: null }
+  return {
+    shop,
+    low: portalWebsiteLevel(map.customer_portal_low_stock_threshold),
+    out: portalWebsiteLevel(map.customer_portal_out_of_stock_threshold),
+  }
+}
+
+// The same two levels as SQL fragments, for the filter pills. Website levels
+// are validated finite numbers, so inlining them is safe.
+function portalStockLevelSql(rule: PortalStockRule): { out: string; low: string } {
+  return {
+    out: rule.out === null ? 'COALESCE(p.out_of_stock_threshold, 0)' : String(rule.out),
+    low: rule.low === null ? lowStockThresholdSql(rule.shop, 'p.low_stock_threshold') : String(rule.low),
+  }
+}
+
+// Every settings row the storefront's stock rule reads: the website's three plus the shop's three. Fixed constant keys
+// (no user text), quoted for a literal IN (...) list. Built per call, not at module load, so a test that loads this route
+// with an inert lib/lowStockSettings stub still loads it.
+function portalStockRuleKeysSql(): string {
+  return [...PORTAL_STOCK_LEVEL_KEYS, ...LOW_STOCK_SETTING_KEYS].map((key) => `'${key}'`).join(', ')
+}
+
+// Out first, then low strictly above out -- the same order isLowStock and every
+// SQL filter use. A non-numeric product out threshold counts as 0, as
+// COALESCE(.., 0) does in SQL.
+export function portalStockStatusFor(rule: PortalStockRule, quantity: number, rawLow: unknown, rawOut: unknown): PortalStockStatus {
+  const productOut = Number(rawOut)
+  const out = rule.out ?? (Number.isFinite(productOut) ? productOut : 0)
+  if (quantity <= out) return 'out_of_stock'
+  const low = rule.low ?? effectiveLowStockThreshold(rule.shop, rawLow)
+  if (quantity <= low) return 'low_stock'
   return 'in_stock'
 }
 
@@ -853,20 +933,20 @@ async function attachPortalStockStatus(env: Env, products: Array<Record<string, 
   const ids = Array.from(new Set(products.map((p) => Number(p.id)).filter((id) => Number.isFinite(id) && id > 0)))
   if (!ids.length) return { hidden: false, products }
   const db = getDb(env)
+  // The rule's six rows (website levels + the shop's setting) ride in the ONE settings read this function
+  // already made: no extra call on a cold isolate, and the badge reads the same instant as the pills.
   const [branchRows, thresholdRows] = await Promise.all([
     db.prepare(`
       SELECT id FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC
     `).all<{ id: number }>(),
     db.prepare(`
       SELECT key, value FROM settings
-      WHERE key IN ('customer_portal_stock_threshold_mode', 'customer_portal_low_stock_threshold', 'customer_portal_out_of_stock_threshold', 'customer_portal_show_stock_status')
+      WHERE key IN ('customer_portal_show_stock_status', ${portalStockRuleKeysSql()})
     `).all<{ key: string; value: string }>(),
   ])
   const thresholdSettings = Object.fromEntries((thresholdRows || []).map((row) => [row.key, row.value]))
   if (!normalizeBoolean(thresholdSettings.customer_portal_show_stock_status, true)) return { hidden: true, products: [] }
-  const useGlobalThresholds = String(thresholdSettings.customer_portal_stock_threshold_mode || '') === 'global'
-  const globalLow = Number(thresholdSettings.customer_portal_low_stock_threshold ?? 10)
-  const globalOut = Number(thresholdSettings.customer_portal_out_of_stock_threshold ?? 0)
+  const rule = resolvePortalStockRule(thresholdSettings)
   const stockRows = await selectInChunks(ids, 0, (chunk) => {
     const { sql, params } = buildInClause('id', chunk)
     return db.prepare(`
@@ -886,23 +966,21 @@ async function attachPortalStockStatus(env: Env, products: Array<Record<string, 
       branch_stock: _neverServed,
       ...publicFields
     } = product
-    const outThreshold = useGlobalThresholds ? (Number.isFinite(globalOut) ? globalOut : 0) : Number(rawOut || 0)
-    const lowThreshold = useGlobalThresholds ? (Number.isFinite(globalLow) ? globalLow : 10) : Number(rawLow || 10)
     const productId = Number(product.id)
     return {
       ...publicFields,
-      stock_status: portalStockStatusFor(Number(rawQuantity || 0), outThreshold, lowThreshold),
+      stock_status: portalStockStatusFor(rule, Number(rawQuantity || 0), rawLow, rawOut),
       branch_availability: branchRows.map((branch) => ({
         branch_id: branch.id,
-        status: portalStockStatusFor(quantityByProductBranch.get(`${productId}:${branch.id}`) || 0, outThreshold, lowThreshold),
+        status: portalStockStatusFor(rule, quantityByProductBranch.get(`${productId}:${branch.id}`) || 0, rawLow, rawOut),
       })),
     }
   }) }
 }
 
-async function buildPortalMeta(env: Env, showOutOfStockProducts: boolean) {
+async function buildPortalMeta(env: Env, showOutOfStockProducts: boolean, rule: PortalStockRule) {
   const db = getDb(env)
-  const visibleFilter = portalVisibleProductFilter(showOutOfStockProducts)
+  const visibleFilter = portalVisibleProductFilter(showOutOfStockProducts, rule)
   // GROUP BY the normalized value rather than plain DISTINCT -- see the
   // matching fix/comment in routes/products.ts's loadProductFilters() for
   // why (imported data with inconsistent brand/category casing produced
@@ -935,9 +1013,9 @@ async function buildPortalMeta(env: Env, showOutOfStockProducts: boolean) {
   }
 }
 
-async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean, showPrices: boolean) {
+async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean, showPrices: boolean, rule: PortalStockRule) {
   const db = getDb(env)
-  const visibleFilter = portalVisibleProductFilter(showOutOfStockProducts)
+  const visibleFilter = portalVisibleProductFilter(showOutOfStockProducts, rule)
   const page = 1
   // Matches the search endpoint's own default below (Part 202) -- this
   // snapshot is what cachedPortal?.catalog?.pageSize on the frontend
@@ -1660,10 +1738,11 @@ app.get('/config', (c) => servePortalPublic(c, 'config', false, async () => {
 app.get('/bootstrap', (c) => servePortalPublic(c, 'bootstrap', true, async () => {
   const settings = await loadSettingsMap(c.env)
   const showOutOfStockProducts = portalShowsOutOfStock(settings)
+  const stockRule = resolvePortalStockRule(settings)
   const [config, meta, catalog, promotionEdgeSeconds] = await Promise.all([
     withActiveRecommendedProducts(c.env, buildPublicPortalConfig(settings, c.env)),
-    buildPortalMeta(c.env, showOutOfStockProducts),
-    buildPortalCatalog(c.env, showOutOfStockProducts, portalShowsPrices(settings)),
+    buildPortalMeta(c.env, showOutOfStockProducts, stockRule),
+    buildPortalCatalog(c.env, showOutOfStockProducts, portalShowsPrices(settings), stockRule),
     portalPromotionEdgeSeconds(c.env),
   ])
   return {
@@ -1684,15 +1763,16 @@ app.get('/bootstrap', (c) => servePortalPublic(c, 'bootstrap', true, async () =>
 // logic needed -- both reuse the same buildPortalMeta/buildPortalCatalog
 // helpers /bootstrap above already calls.
 app.get('/catalog/meta', (c) => servePortalPublic(c, 'meta', false, async () => {
-  const showOutOfStockProducts = portalShowsOutOfStock(await loadSettingsMap(c.env))
-  return { value: await buildPortalMeta(c.env, showOutOfStockProducts), ttl: portalCatalogTtl(showOutOfStockProducts) }
+  const settings = await loadSettingsMap(c.env)
+  const showOutOfStockProducts = portalShowsOutOfStock(settings)
+  return { value: await buildPortalMeta(c.env, showOutOfStockProducts, resolvePortalStockRule(settings)), ttl: portalCatalogTtl(showOutOfStockProducts) }
 }, null))
 
 app.get('/catalog/products', (c) => servePortalPublic(c, 'products', true, async () => {
   const settings = await loadSettingsMap(c.env)
   const showOutOfStockProducts = portalShowsOutOfStock(settings)
   const [catalog, promotionEdgeSeconds] = await Promise.all([
-    buildPortalCatalog(c.env, showOutOfStockProducts, portalShowsPrices(settings)),
+    buildPortalCatalog(c.env, showOutOfStockProducts, portalShowsPrices(settings), resolvePortalStockRule(settings)),
     portalPromotionEdgeSeconds(c.env),
   ])
   return { value: catalog, ttl: cappedTtl(portalCatalogTtl(showOutOfStockProducts), promotionEdgeSeconds) }
@@ -1856,9 +1936,9 @@ function collectRecommendationCitations(recommendations: Array<{ citations?: unk
 // same showOutOfStockProducts flag as buildPortalMeta/buildPortalCatalog
 // and reuses the identical portalVisibleProductFilter() SQL fragment, so
 // the AI sees exactly the same visible-product set a shopper does.
-async function loadPortalAiCatalog(env: Env, showOutOfStockProducts: boolean) {
+export async function loadPortalAiCatalog(env: Env, showOutOfStockProducts: boolean, rule: PortalStockRule) {
   const db = getDb(env)
-  const visibleFilter = portalVisibleProductFilter(showOutOfStockProducts)
+  const visibleFilter = portalVisibleProductFilter(showOutOfStockProducts, rule)
   // SECURITY BOUNDARY -- this SELECT is the only product data the public AI
   // assistant ever sees. It is an explicit allowlist of public, on-card
   // fields ONLY. Never add internal columns here: cost_price_usd/khr, any
@@ -1880,7 +1960,14 @@ async function loadPortalAiCatalog(env: Env, showOutOfStockProducts: boolean) {
     ORDER BY COALESCE(created_at, updated_at) DESC, id DESC
     LIMIT 500
   `).all<Record<string, unknown>>()
-  const items = products || []
+  // The assistant's coarse stock_status must follow the storefront's own rule too (the website levels, else the shop's
+  // low-stock setting): hand lib/portalAi.ts the EFFECTIVE out and low thresholds in the rows' own columns.
+  const items = (products || []).map((row): Record<string, unknown> => ({
+    ...row,
+    // lib/portalAi.ts compares quantity to out_of_stock_threshold and low_stock_threshold: hand it the storefront rule's EFFECTIVE levels.
+    out_of_stock_threshold: rule.out ?? row.out_of_stock_threshold,
+    low_stock_threshold: rule.low ?? effectiveLowStockThreshold(rule.shop, row.low_stock_threshold),
+  }))
   if (!items.length) return items
 
   // Up to 500 rows come back from the query above -- five times D1's
@@ -1951,7 +2038,7 @@ app.post('/ai/chat', async (c) => {
       return c.json({ error: 'The shopping assistant has reached today\'s limit. Please try again tomorrow.', code: 'portal_ai_budget_exhausted' }, 429)
     }
 
-    const products = await loadPortalAiCatalog(c.env, config.showOutOfStockProducts)
+    const products = await loadPortalAiCatalog(c.env, config.showOutOfStockProducts, resolvePortalStockRule(settings))
     const response = await generatePortalAiResponse(c.env, {
       config: {
         businessName: config.businessName,
@@ -2832,7 +2919,8 @@ app.patch('/submissions/:id/review', requireAuth, async (c) => {
 // excludes out-of-stock items when the merchant actually wants them
 // hidden; an explicit stock-status pill (e.g. a "notify me" out-of-stock
 // filter) still always overrides this default either way.
-export function buildPortalProductFilters(query: Record<string, string>, allowStockStateFilter = true, showOutOfStockProducts = false) {
+export function buildPortalProductFilters(query: Record<string, string>, allowStockStateFilter = true, showOutOfStockProducts = false, rule: PortalStockRule = DEFAULT_PORTAL_STOCK_RULE) {
+  const level = portalStockLevelSql(rule)
   const where: string[] = ['p.is_active = 1']
   const params: Record<string, unknown> = {}
   const joins: string[] = []
@@ -2937,9 +3025,10 @@ export function buildPortalProductFilters(query: Record<string, string>, allowSt
     : []
   if (stockStates.length) {
     const clauses = stockStates.map((state) => {
-      if (state === 'out_of_stock') return `${stockExpr} <= COALESCE(p.out_of_stock_threshold, 0)`
-      if (state === 'low_stock') return `${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} <= COALESCE(p.low_stock_threshold, 10)`
-      if (state === 'in_stock') return `${stockExpr} > COALESCE(p.low_stock_threshold, 10)`
+      if (state === 'out_of_stock') return `${stockExpr} <= ${level.out}`
+      if (state === 'low_stock') return `${stockExpr} > ${level.out} AND ${stockExpr} <= ${level.low}`
+      // Above the out threshold TOO: with an out threshold at or above the low one, a product can be past the low line and still be out of stock.
+      if (state === 'in_stock') return `${stockExpr} > ${level.out} AND ${stockExpr} > ${level.low}`
       return '1=1'
     })
     where.push(`(${clauses.join(' OR ')})`)
@@ -2948,7 +3037,8 @@ export function buildPortalProductFilters(query: Record<string, string>, allowSt
     // products hidden by default: exclude them. When
     // showOutOfStockProducts is true, fall through without adding this
     // clause so out-of-stock items are included like everything else.
-    where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0)`)
+    // The same out level the badge and the Out pill use (see portalVisibleProductFilter).
+    where.push(`${stockExpr} > ${level.out}`)
   }
 
   // Snapshot before the search clause is added -- every OTHER filter
@@ -2987,18 +3077,21 @@ async function runPortalProductSearch(env: Env, query: Record<string, string>): 
   // on every search/page/filter request -- see buildPortalConfig's
   // showStockStatus/showOutOfStockProducts for the same settings used to
   // drive the editor toggles and the badge/pill display.
+  // The storefront stock rule's six rows (website levels + the shop's setting) ride along in the SAME read (no extra
+  // call on a cold isolate): the stock-state pills must filter by the same levels the badges show.
   const stockSettingsRows = await db.prepare(
-    `SELECT key, value FROM settings WHERE key IN ('customer_portal_show_stock_status', 'customer_portal_show_out_of_stock_products', 'customer_portal_show_prices')`
+    `SELECT key, value FROM settings WHERE key IN ('customer_portal_show_stock_status', 'customer_portal_show_out_of_stock_products', 'customer_portal_show_prices', ${portalStockRuleKeysSql()})`
   ).all<{ key: string; value: string }>()
   const stockSettings: Record<string, string> = {}
   for (const row of stockSettingsRows || []) stockSettings[row.key] = row.value
+  const stockRule = resolvePortalStockRule(stockSettings)
   const allowStockStateFilter = normalizeBoolean(stockSettings.customer_portal_show_stock_status, true)
   const showOutOfStockProducts = normalizeBoolean(stockSettings.customer_portal_show_out_of_stock_products, true)
   const showPrices = normalizeBoolean(stockSettings.customer_portal_show_prices, true)
   const browse = parsePortalBrowse(query, showPrices)
   const browseOrder = buildPortalBrowseOrder(browse.view, browse.sort)
 
-  const filters = buildPortalProductFilters(query, allowStockStateFilter, showOutOfStockProducts)
+  const filters = buildPortalProductFilters(query, allowStockStateFilter, showOutOfStockProducts, stockRule)
   const { where, joins, params } = filters
   // Kept as its own clause (not folded into buildPortalProductFilters/
   // baseWhere) since it's applied here, after the function returns -- but
@@ -3200,7 +3293,7 @@ async function runPortalProductSearch(env: Env, query: Record<string, string>): 
   // a second sequential await after attachPortalStockStatus for no reason.
   // Fan the two independent D1 round trips out together, same shape as
   // buildPortalCatalog's rail above.
-  const { where: initialsWhere, joins: initialsJoins, params: initialsParams } = buildPortalProductFilters({ ...query, initial: 'all' }, allowStockStateFilter, showOutOfStockProducts)
+  const { where: initialsWhere, joins: initialsJoins, params: initialsParams } = buildPortalProductFilters({ ...query, initial: 'all' }, allowStockStateFilter, showOutOfStockProducts, stockRule)
   // Counts name GROUPS, not rows -- a group renders as ONE card on the
   // storefront, so counting rows would promise more products under a letter
   // than the grid can possibly show. Matches buildPortalCatalog's rail above

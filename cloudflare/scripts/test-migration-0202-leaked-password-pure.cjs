@@ -172,7 +172,7 @@ const authRoute = load('routes/auth.ts', {
   '../lib/audit': { audit: auditSpy },
   '../lib/secretCrypto': { encryptSecret: async (v) => v, decryptSecret: async (v) => v },
   '../lib/totp': { generateTotpSecret: () => 'S', verifyTotp: async () => false, verifyTotpStep: async () => null },
-  '../lib/permissions': { isAdminControlUser: () => false },
+  '../lib/permissions': require('./harness/permissions_stub.cjs').permissionsWith({ isAdminControlUser: () => false }),
   '../lib/planTier': { resolvePlanTier: () => 'pro' },
   '../lib/rateLimit': rateLimit,
   '../lib/currentPasswordGuard': guard,

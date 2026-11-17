@@ -24,8 +24,17 @@ const SEED = mod.exports.DEFAULT_ROLE_PERMISSIONS
 const COST_KEY = /(^|_)(cost|costs|cogs|profit|margin|purchase_price|stock_value|removal_loss|positive_value|total_value|compensation)(_|$)|^(supplier_)?loss_(usd|khr)$|revenue_after_losses|credit_open/i
 // Owner, 16 Nov 2026: the courier's actual cost is a granted permission (sales:view_courier_cost, on in the Manager and Employee seeds), NOT admin only.
 // Its keys match COST_KEY by name, so a non-admin response is scanned for them separately: product cost, profit and the rest stay admin only.
-const COURIER_LEAF = /^(delivery_(actual_cost|margin|net)_(usd|khr|count)|(recognized|pending)_delivery_cost_usd|actual_cost_(usd|count)|margin_usd)$/
-const productCostKeys = (value) => costKeys(value).filter((path) => !COURIER_LEAF.test(path.split('.').pop()))
+// Exact names and exact places only. The first group are unambiguous courier names and may sit anywhere. The second group is
+// the per-courier ROW (actual_cost_*, delivery_margin_usd) and is exempt only inside a courier list: a bare margin_usd, or an
+// actual_cost_usd outside a courier row, is never exempt, so a product margin that leaks fails here (review finding C, 16 Nov).
+const COURIER_LEAF = /^(delivery_(actual_cost|margin|net)_(usd|khr|count)|(recognized|pending)_delivery_cost_usd)$/
+const COURIER_ROW_LEAF = /^(actual_cost_(usd|count)|delivery_margin_usd)$/
+const COURIER_ROW_PATH = /\.(couriers|delivery_contacts)\[\]\.[^.]+$/
+const isCourierPath = (path) => {
+  const leaf = path.split('.').pop()
+  return COURIER_LEAF.test(leaf) || (COURIER_ROW_LEAF.test(leaf) && COURIER_ROW_PATH.test(path))
+}
+const productCostKeys = (value) => costKeys(value).filter((path) => !isCourierPath(path))
 const DATE = '2026-11-10'
 const range = `startDate=${DATE}&endDate=${DATE}`
 function costKeys(value, trail = '$', found = []) {
@@ -91,6 +100,15 @@ async function main() {
         assert.ok(costKeys(res.body).length > 0, 'the scan must see a cost key in the admin response, or it proves nothing')
       })
     }
+    // Instrument control for review finding C: the exemption is exact keys in exact places, so a product margin_usd (or an
+    // actual_cost_usd outside a courier row) is still reported, and only the real courier rows are let through.
+    await check('instrument control: the courier exemption is exact (a bare margin_usd leak is still caught)', () => {
+      assert.deepEqual(productCostKeys({ totals: { margin_usd: 1 } }), ['$.totals.margin_usd'])
+      assert.deepEqual(productCostKeys({ products: [{ margin_usd: 1 }] }), ['$.products[].margin_usd'])
+      assert.deepEqual(productCostKeys({ totals: { actual_cost_usd: 1 } }), ['$.totals.actual_cost_usd'])
+      assert.deepEqual(productCostKeys({ sales: { couriers: [{ actual_cost_usd: 1, actual_cost_count: 1, delivery_margin_usd: 1 }] } }), [])
+      assert.deepEqual(productCostKeys({ totals: { delivery_margin_usd: 1, delivery_actual_cost_usd: 1 } }), [])
+    })
     await check('admin control: the supplier loss and compensation are present on the analytics payload', async () => {
       const body = (await read(null, `/api/analytics?${range}`, 'admin analytics')).body
       assert.equal(body.periodSupplierReturns.loss_usd, 5)

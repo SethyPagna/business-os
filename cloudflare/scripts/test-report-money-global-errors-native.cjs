@@ -47,7 +47,7 @@ Module._load = function(request, parent, isMain) {
       return next()
     },
   }
-  if (request === '../lib/permissions') return { getActionTier: () => 'full', isAdminControlUser: () => true }
+  if (request === '../lib/permissions') return require('./harness/permissions_stub.cjs').permissionsWith({ getActionTier: () => 'full', isAdminControlUser: () => true })
   if (request === '../lib/db') return { getDb: () => ({}) }
   if (request === '../lib/saleTotals') return { round2: (value) => Math.round(Number(value) * 100) / 100 }
   if (request === '../lib/businessDateWindow') return new Proxy({}, { get: () => harmless })

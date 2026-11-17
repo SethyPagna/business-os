@@ -3370,7 +3370,7 @@ export interface DeliveryContactTotalsRow {
   linked_expense_count: number
   linked_expense_usd: number
   linked_expense_khr: number
-  margin_usd: number
+  delivery_margin_usd: number
   last_delivery_at: string | null
   last_expense_at: string | null
   // ---- additive (peer reports-redesign lane, Sep 6 2026) ----------------
@@ -3469,7 +3469,7 @@ function deliveryContactTotalsFromSnapshot(
 ): DeliveryContactTotalsRow[] {
   type ExactDelivery = Omit<DeliveryContactTotalsRow,
     'charged_fee_usd' | 'absorbed_fee_usd' | 'paid_fee_usd' | 'receivable_fee_usd' | 'actual_cost_usd'
-    | 'linked_expense_usd' | 'linked_expense_khr' | 'margin_usd' | 'paid_by_method'> & {
+    | 'linked_expense_usd' | 'linked_expense_khr' | 'delivery_margin_usd' | 'paid_by_method'> & {
       charged: ReportExactDecimal; absorbed: ReportExactDecimal; paid: ReportExactDecimal; receivable: ReportExactDecimal
       actual: ReportExactDecimal; expenseUsd: ReportExactDecimal; expenseKhr: ReportExactDecimal
       methods: Map<string, { count: number; fee: ReportExactDecimal }>; _lastAt: string
@@ -3532,7 +3532,7 @@ function deliveryContactTotalsFromSnapshot(
     paid_fee_usd: group.paid.toNumber(BUCKET_MONEY_PLACES), receivable_fee_usd: group.receivable.toNumber(BUCKET_MONEY_PLACES), actual_cost_usd: group.actual.toNumber(BUCKET_MONEY_PLACES),
     actual_cost_count: group.actual_cost_count, linked_expense_count: group.linked_expense_count,
     linked_expense_usd: group.expenseUsd.toNumber(BUCKET_MONEY_PLACES), linked_expense_khr: group.expenseKhr.toNumber(BUCKET_MONEY_PLACES),
-    margin_usd: group.charged.subtract(group.actual).toNumber(BUCKET_MONEY_PLACES), last_delivery_at: group.last_delivery_at,
+    delivery_margin_usd: group.charged.subtract(group.actual).toNumber(BUCKET_MONEY_PLACES), last_delivery_at: group.last_delivery_at,
     last_expense_at: group.last_expense_at, paid_by_method: [...group.methods.entries()].map(([payment_method, value]) => ({
       payment_method, count: value.count, fee_usd: value.fee.toNumber(BUCKET_MONEY_PLACES),
     })).sort((a, b) => b.fee_usd - a.fee_usd || a.payment_method.localeCompare(b.payment_method)),
@@ -3673,7 +3673,7 @@ export async function getDeliveryContactTotals(
         linked_expense_count: 0,
         linked_expense_usd: 0,
         linked_expense_khr: 0,
-        margin_usd: 0,
+        delivery_margin_usd: 0,
         last_delivery_at: lastAt || null,
         last_expense_at: null,
         _lastAt: lastAt,
@@ -3715,7 +3715,7 @@ export async function getDeliveryContactTotals(
         linked_expense_count: num(r.linked_expense_count),
         linked_expense_usd: num(r.linked_expense_usd),
         linked_expense_khr: num(r.linked_expense_khr),
-        margin_usd: 0,
+        delivery_margin_usd: 0,
         last_delivery_at: null,
         last_expense_at: expenseAt || null,
         _lastAt: '',
@@ -3755,7 +3755,7 @@ export async function getDeliveryContactTotals(
       actual_cost_usd: round2(row.actual_cost_usd),
       linked_expense_usd: round2(row.linked_expense_usd),
       linked_expense_khr: round2(row.linked_expense_khr),
-      margin_usd: round2(row.charged_fee_usd - row.actual_cost_usd),
+      delivery_margin_usd: round2(row.charged_fee_usd - row.actual_cost_usd),
     }))
     .sort((a, b) => (b.deliveries + b.linked_expense_count) - (a.deliveries + a.linked_expense_count))
 }

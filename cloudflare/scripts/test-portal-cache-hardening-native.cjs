@@ -100,6 +100,7 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/requestBodyGuard': loadReal('lib/requestBodyGuard.ts'),
   '../lib/db': dbModule,
   '../lib/sqlBinding': loadReal('lib/sqlBinding.ts'),
+  '../lib/lowStockSettings': loadReal('lib/lowStockSettings.ts', { './db': dbModule }),
   '../lib/familyPagination': loadReal('lib/familyPagination.ts'),
   '../lib/cache': cache,
   '../lib/auth': { requireAuth: async (c) => c.json({ error: 'auth' }, 401) },

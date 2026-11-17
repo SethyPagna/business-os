@@ -113,10 +113,13 @@ export type BatchSelection = {
   quantity: number
 }
 
-// GET /api/batches/tracked-product-ids?branchId= -- product ids that carry
-// active batch/expiry tracking, optionally scoped to one branch. Used by
-// the POS to decide which products need the batch-picker instead of a
-// one-tap add.
+// GET /api/batches/tracked-product-ids?branchId= -- product ids with a lot
+// HOLDING STOCK (quantity > 0), optionally scoped to one branch (owner 14 Nov:
+// an empty lot cannot be transferred, so it does not count). The POS stopped
+// reading it in 6.0.1639 (its tap always opens the lot sheet). Its only caller
+// is TransferModal single mode, unreachable today (mode has no setter); the live
+// multiple mode loads each row's lots itself. Cached on products + stock +
+// inventory, so a sale that empties a lot shows here at once.
 export function getTrackedBatchProductIds(branchId?: number | string | null): Promise<{ productIds: number[] }> {
   const scope = branchId != null && branchId !== 'all' ? String(branchId) : 'all'
   const query = scope === 'all' ? '' : `?branchId=${encodeURIComponent(scope)}`

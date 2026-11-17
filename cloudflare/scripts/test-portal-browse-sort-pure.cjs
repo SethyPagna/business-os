@@ -81,6 +81,7 @@ const portalRoute = loadReal('routes/portal.ts', {
   // Real, pure -- its chunking is what keeps these reads inside D1's
   // 100-bound-parameter limit, so a stub would test the stub.
   '../lib/sqlBinding': loadReal('lib/sqlBinding.ts'),
+  '../lib/lowStockSettings': loadReal('lib/lowStockSettings.ts', { './db': { getDb: () => db } }),
   // Real, pure -- 6.5 made the portal paginate by GROUP through this
   // shared helper; stubbing it would test the stub's idea of paging.
   '../lib/familyPagination': loadReal('lib/familyPagination.ts'),

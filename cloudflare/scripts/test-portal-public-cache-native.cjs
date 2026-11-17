@@ -69,6 +69,7 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
   '../lib/requestBodyGuard': loadReal('lib/requestBodyGuard.ts'),
   '../lib/db': dbModule,
+  '../lib/lowStockSettings': loadReal('lib/lowStockSettings.ts', { './db': dbModule }),
   '../lib/sqlBinding': loadReal('lib/sqlBinding.ts'),
   '../lib/familyPagination': loadReal('lib/familyPagination.ts'),
   '../lib/cache': cache,

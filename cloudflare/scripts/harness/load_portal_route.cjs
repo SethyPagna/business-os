@@ -54,6 +54,7 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/requestBodyGuard': loadReal('lib/requestBodyGuard.ts'),
   '../index': {},
   '../lib/db': { getDb: () => null },
+  '../lib/lowStockSettings': loadReal('lib/lowStockSettings.ts', { './db': { getDb: () => null } }),
   '../lib/auth': { requireAuth: async (c, next) => next() },
   '../lib/permissions': { hasPermission: () => true },
   '../lib/audit': { audit: async () => {} },

@@ -83,13 +83,6 @@ type PortalPreviewConfig = {
   showProductBrand?: boolean
   showProductDiscount?: boolean
   showStockStatus?: boolean
-  // Legacy-fallback threshold config for resolvePortalStockStatus (only
-  // consulted for rows that still carry raw quantities -- editor preview
-  // drafts and pre-deploy caches; live rows arrive with server-computed
-  // statuses).
-  stockThresholdMode?: string
-  lowStockThreshold?: unknown
-  outOfStockThreshold?: unknown
 }
 
 type CatalogProduct = Record<string, unknown> & {
@@ -1036,7 +1029,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           // Server-computed status (see portalCatalogDisplay.ts's resolver
           // and its SECURITY BOUNDARY note) -- raw quantities/thresholds no
           // longer reach the storefront payload.
-          const status = resolvePortalStockStatus(product, selectedStockBranch, previewConfig)
+          const status = resolvePortalStockStatus(product, selectedStockBranch)
           const gallery = normalizeProductGallery(product)
           const primaryImage = gallery[0] || ''
           const highlightBadges = buildPortalHighlightBadges(product, previewConfig, copy, promotionRules)

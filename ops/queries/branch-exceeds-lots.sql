@@ -8,7 +8,8 @@
 -- the lot identity (FIFO order, expiry, cost, supplier) of the restored units.
 --
 -- Part 1: (product, branch) pairs where branch_stock is ABOVE the lot sum. A pair "has
--- lots" exactly as the till decides it (lib/productBatches.ts getTrackedProductIds): it
+-- lots" exactly as the lot sheet decides it (the rule lib/productBatches.ts getTrackedProductIds had
+-- until S1, 16 Nov; it is now narrower, positive lots only, for the Transfer list): it
 -- holds a lot row at that branch that is active or holds stock. For such a pair the
 -- excess units sell only as "Received date not recorded". A pair without such a lot is
 -- plain stock with no live lot: the till sells it from branch_stock, so it is NOT a

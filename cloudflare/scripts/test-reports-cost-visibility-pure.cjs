@@ -162,11 +162,11 @@ for (const input of [saleSensitive, JSON.parse(JSON.stringify(saleSensitive))]) 
 const courier = {
   delivery_contact_name: 'Courier', deliveries: 4, charged_fee_usd: 5, absorbed_fee_usd: 1,
   actual_cost_usd: 3, actual_cost_count: 4, linked_expense_count: 2, linked_expense_usd: 2,
-  linked_expense_khr: 8000, last_expense_at: '2026-09-13', margin_usd: 2,
+  linked_expense_khr: 8000, last_expense_at: '2026-09-13', delivery_margin_usd: 2,
 }
 for (const input of [courier, JSON.parse(JSON.stringify(courier))]) {
   const employee = reports.gateCourierRow(input, false)
-  for (const key of ['actual_cost_usd','actual_cost_count','linked_expense_count','linked_expense_usd','linked_expense_khr','last_expense_at','margin_usd']) {
+  for (const key of ['actual_cost_usd','actual_cost_count','linked_expense_count','linked_expense_usd','linked_expense_khr','last_expense_at','delivery_margin_usd']) {
     assert.equal(Object.hasOwn(employee, key), false, `courier ${key} must be absent for employee`)
   }
   assert.equal(employee.charged_fee_usd, 5)
@@ -208,7 +208,7 @@ async function request(pathname, admin, costView = false, courierView = false) {
 function assertNoSensitive(value, label) {
   const text = JSON.stringify(value)
   for (const key of [...sensitiveTotals, ...Object.keys(productSensitive), ...Object.keys(saleSensitive),
-    'actual_cost_usd','linked_expense_usd','linked_expense_khr','margin_usd']) {
+    'actual_cost_usd','linked_expense_usd','linked_expense_khr','delivery_margin_usd']) {
     assert.equal(text.includes(`"${key}"`), false, `${label} leaks ${key}`)
   }
 }

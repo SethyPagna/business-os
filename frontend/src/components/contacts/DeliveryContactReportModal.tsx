@@ -4,6 +4,7 @@ import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getDeliveryContactReport } from '../../api/salesTransport.ts'
 import { useSync } from '../../AppContext.tsx'
+import { deliveryProfitIsLoss, showsCourierCost, showsDeliveryProfit, showsLinkedExpenses } from './deliveryReportCourierMoney.ts'
 
 // X3 (Part 395): "delivery can also check expenses of delivery by contact" --
 // the per-courier drill on a delivery contact, mirroring the supplier
@@ -21,14 +22,15 @@ interface DeliveryContactReportRow {
   deliveries: number
   charged_fee_usd: number
   absorbed_fee_usd: number
-  actual_cost_usd: number
-  actual_cost_count: number
-  linked_expense_count: number
-  linked_expense_usd: number
-  linked_expense_khr: number
-  margin_usd: number
+  // Absent when the account lacks sales:view_courier_cost.
+  actual_cost_usd?: number
+  actual_cost_count?: number
+  linked_expense_count?: number
+  linked_expense_usd?: number
+  linked_expense_khr?: number
+  delivery_margin_usd?: number
   last_delivery_at: string | null
-  last_expense_at: string | null
+  last_expense_at?: string | null
 }
 
 interface DeliveryContactReportModalProps {
@@ -135,24 +137,26 @@ export default function DeliveryContactReportModal({ contactId, contactName, t, 
                 row.last_delivery_at ? `${tr(t, 'last_delivery', 'Last')}: ${String(row.last_delivery_at).slice(0, 10)}` : undefined)}
               {stat(tr(t, 'delivery_charged', 'Delivery fee charged'), money(row.charged_fee_usd))}
               {stat(tr(t, 'delivery_absorbed', 'Absorbed by store'), money(row.absorbed_fee_usd))}
-              {stat(
+              {showsCourierCost(row) ? stat(
                 tr(t, 'delivery_actual_cost', 'Actual delivery cost'),
                 money(row.actual_cost_usd),
-                `${row.actual_cost_count}/${row.deliveries} ${tr(t, 'recorded', 'recorded')}`,
-              )}
-              {stat(
+                `${row.actual_cost_count ?? 0}/${row.deliveries} ${tr(t, 'recorded', 'recorded')}`,
+              ) : null}
+              {showsLinkedExpenses(row) ? stat(
                 tr(t, 'linked_delivery_expenses', 'Linked expenses'),
                 expenseMoney(row.linked_expense_usd, row.linked_expense_khr),
-                `${row.linked_expense_count} ${tr(t, 'expense_rows', 'expense rows')}${row.last_expense_at ? ` · ${tr(t, 'last_delivery', 'Last')}: ${String(row.last_expense_at).slice(0, 10)}` : ''}`,
-              )}
+                `${row.linked_expense_count ?? 0} ${tr(t, 'expense_rows', 'expense rows')}${row.last_expense_at ? ` · ${tr(t, 'last_delivery', 'Last')}: ${String(row.last_expense_at).slice(0, 10)}` : ''}`,
+              ) : null}
             </div>
-            <div className={`rounded-xl border px-3 py-2 text-sm font-semibold ${row.margin_usd < 0
-              ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300'
-              : 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-300'}`}>
-                {tr(t, 'delivery_margin', 'Delivery profit')}: {money(row.margin_usd)}
-              <span className="ml-1.5 text-xs font-normal opacity-75">({tr(t, 'delivery_margin_hint', 'charged minus actual cost paid')})</span>
-            </div>
-            {row.actual_cost_count < row.deliveries ? (
+            {showsDeliveryProfit(row) ? (
+              <div className={`rounded-xl border px-3 py-2 text-sm font-semibold ${deliveryProfitIsLoss(row)
+                ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300'
+                : 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-300'}`}>
+                  {tr(t, 'delivery_margin', 'Delivery profit')}: {money(row.delivery_margin_usd)}
+                <span className="ml-1.5 text-xs font-normal opacity-75">({tr(t, 'delivery_margin_hint', 'charged minus actual cost paid')})</span>
+              </div>
+            ) : null}
+            {showsCourierCost(row) && (row.actual_cost_count ?? 0) < row.deliveries ? (
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 {tr(t, 'delivery_cost_partial_hint', 'Some deliveries have no actual delivery cost. Totals include recorded costs only; missing costs are not zero.')}
               </p>

@@ -6537,7 +6537,7 @@ export function gateSalesReportMoney(row:Record<string,unknown>,isAdmin:boolean,
 const reportMoneyAccess=(user:SessionUser)=>[isAdminControlUser(user),canViewAcquisitionCosts(user),canViewCourierCost(user)] as const
 export function gateSalesCourierMoney(row:Record<string,unknown>,canViewCourier:boolean):Record<string,unknown> {
   if(canViewCourier)return row
-  const {actual_cost_usd,actual_cost_count,linked_expense_count,linked_expense_usd,linked_expense_khr,last_expense_at,margin_usd,...publicRow}=row
+  const {actual_cost_usd,actual_cost_count,linked_expense_count,linked_expense_usd,linked_expense_khr,last_expense_at,delivery_margin_usd,...publicRow}=row
   return publicRow
 }
 

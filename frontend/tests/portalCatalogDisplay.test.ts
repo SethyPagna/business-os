@@ -232,8 +232,8 @@ runTest('both stock-status render sites (filter pills + card badge) delegate to 
 // --- Server-computed stock status (public leak fix) ---------------------
 // The portal payload ships stock_status/branch_availability instead of raw
 // quantities+thresholds (routes/portal.ts attachPortalStockStatus). The
-// resolver must read those first and only fall back to quantity math for
-// legacy rows (editor preview drafts, pre-deploy caches).
+// resolver reads only those; it has no quantity math, so legacy
+// rows (pre-deploy caches) show no label.
 
 runTest('resolvePortalStockStatus prefers the server-computed whole-store status', () => {
   assert.equal(resolvePortalStockStatus({ stock_status: 'low_stock', stock_quantity: 999 }, 'all'), 'low_stock')
@@ -254,16 +254,17 @@ runTest('resolvePortalStockStatus reads per-branch availability, missing branch 
   assert.equal(resolvePortalStockStatus(product, 99), 'out_of_stock')
 })
 
-runTest('resolvePortalStockStatus legacy fallback keeps the historical badge math', () => {
-  const legacy = { stock_quantity: 5, low_stock_threshold: 10, out_of_stock_threshold: 0, branch_stock: [{ branch_id: 3, quantity: 0 }] }
-  assert.equal(resolvePortalStockStatus(legacy, 'all'), 'low_stock')
-  assert.equal(resolvePortalStockStatus(legacy, 3), 'out_of_stock')
-  assert.equal(resolvePortalStockStatus({ stock_quantity: 50 }, 'all'), 'in_stock', 'defaults: out=0, low=10')
-  assert.equal(
-    resolvePortalStockStatus({ stock_quantity: 5, low_stock_threshold: 10 }, 'all', { stockThresholdMode: 'global', lowStockThreshold: 2, outOfStockThreshold: 0 }),
-    'in_stock',
-    'global threshold mode still honored on legacy rows',
-  )
+// Owner decision of 16 Nov 2026 ("Website's own levels"): the website's levels are applied by the SERVER (the Worker parity test,
+// cloudflare/scripts/test-portal-low-stock-parity-pure.cjs, is the full matrix). The browser holds no threshold math, so it can never
+// fall back to a fixed 10: a row with no served status shows no stock label, whatever raw numbers it carries.
+runTest('resolvePortalStockStatus reads only what the server served; raw quantities and thresholds are never judged in the browser', () => {
+  const raw = { stock_quantity: 0, low_stock_threshold: 10, out_of_stock_threshold: 0, branch_stock: [{ branch_id: 3, quantity: 0 }] }
+  assert.equal(resolvePortalStockStatus(raw, 'all'), 'in_stock')
+  assert.equal(resolvePortalStockStatus(raw, 3), 'in_stock')
+  assert.equal(resolvePortalStockStatus({ stock_quantity: 5, low_stock_threshold: 10 }, 'all'), 'in_stock', 'no fixed 10')
+  assert.equal(resolvePortalStockStatus({ stock_status: 'low_stock', stock_quantity: 500 }, 'all'), 'low_stock', 'the served status wins over any raw number')
+  assert.equal(resolvePortalStockStatus({ stock_status: 'in_stock', branch_availability: [{ branch_id: 3, status: 'low_stock' }] }, 3), 'low_stock')
+  assert.equal(resolvePortalStockStatus({ branch_availability: [{ branch_id: 3 }], stock_quantity: 4 }, 3), 'in_stock', 'an entry without a status is not a status')
 })
 
 runTest('combinePortalStockStatus takes the most-available status and defaults unknowns to out', () => {
@@ -274,9 +275,9 @@ runTest('combinePortalStockStatus takes the most-available status and defaults u
 })
 
 runTest('the storefront no longer ships raw stock math -- components resolve via the shared helper', () => {
-  assert.match(catalogProductsSectionSource, /resolvePortalStockStatus\(product, selectedStockBranch, previewConfig\)/)
-  assert.match(publicCatalogPageSource, /resolvePortalStockStatus\(product, selectedStockBranch, displayConfig\)/)
-  assert.match(catalogPageSource, /resolvePortalStockStatus\(product, statusBranch, displayConfig\)/)
+  assert.match(catalogProductsSectionSource, /resolvePortalStockStatus\(product, selectedStockBranch\)/)
+  assert.match(publicCatalogPageSource, /resolvePortalStockStatus\(product, selectedStockBranch\)/)
+  assert.match(catalogPageSource, /resolvePortalStockStatus\(product, statusBranch\)/)
   assert.doesNotMatch(publicCatalogPageSource, /function getStockStatus/, 'PublicCatalogPage must not keep its own quantity-based copy')
   assert.doesNotMatch(catalogPageSource, /function getStockStatus/, 'CatalogPage must not keep its own quantity-based copy')
 })
@@ -296,7 +297,7 @@ runTest('stock withheld by the Worker (stock status off) is never read as out of
   assert.equal(resolvePortalStockStatus(withheld, 'all'), 'in_stock')
   assert.equal(resolvePortalStockStatus(withheld, 3), 'in_stock')
   assert.equal(productMatchesPortalBranches(withheld, ['3']), true, 'the Worker already applied the branch filter')
-  assert.equal(resolvePortalStockStatus({ stock_quantity: 0 }, 'all'), 'out_of_stock', 'a legacy row with a quantity still counts')
+  assert.equal(resolvePortalStockStatus({ stock_quantity: 0 }, 'all'), 'in_stock', 'a legacy row with a raw quantity is no longer judged here')
   assert.equal(productMatchesPortalBranches({ branch_stock: [] }, ['3']), false, 'a legacy row with a ledger still counts')
 })
 
@@ -310,6 +311,22 @@ runTest('portal editor compacts compatible controls into responsive rows with mo
   assert.match(catalogEditorSource, /data-testid="portal-contact-channel-grid"[^>]*sm:grid-cols-2[^>]*2xl:grid-cols-3/)
   assert.match(catalogEditorSource, /data-testid="portal-logo-controls-grid"[^>]*sm:grid-cols-2[^>]*xl:grid-cols-3/)
   assert.match(catalogEditorSource, /min-h-11[^>]*rounded-xl/, 'compact switch rows must retain a 44px mobile touch target')
+})
+
+runTest('the website Low and Out inputs exist only in website-wide mode; the shop-thresholds mode shows a one-line note instead, in both packs', () => {
+  const normalized = catalogEditorSource.replace(/\r\n/g, '\n')
+  const globalBranch = normalized.indexOf("customer_portal_stock_threshold_mode === 'global' ? (")
+  const noteBranch = normalized.indexOf('data-testid="portal-stock-threshold-product-note"')
+  const lowInput = normalized.indexOf('id="portal-low-stock-threshold"')
+  const outInput = normalized.indexOf('id="portal-out-stock-threshold"')
+  assert.ok(globalBranch > 0 && lowInput > globalBranch && outInput > lowInput && noteBranch > outInput, 'both inputs sit inside the website-wide branch, the note in the other')
+  assert.equal(normalized.split('id="portal-low-stock-threshold"').length, 2, 'one low input, not a second always-visible copy')
+  const read = (pack: string) => fs.readFileSync(new URL(`../src/lang/${pack}.json`, import.meta.url), 'utf8')
+  for (const pack of ['en', 'km']) {
+    const text = read(pack)
+    assert.equal(text.split('"stockThresholdProductNote"').length, 3, `${pack}: the note exists at both pack locations`)
+  }
+  assert.doesNotMatch(read('en'), /Use each product threshold/, 'the option no longer claims each product threshold: in a global-mode shop the website uses the Settings number')
 })
 
 runTest('portal editor compaction keeps guidance, validation, preview, and linked account actions', () => {

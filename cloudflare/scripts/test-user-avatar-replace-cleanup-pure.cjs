@@ -78,7 +78,7 @@ const app = load('routes/users.ts', {
     auditChangeColumns: () => ({}),
     audit: async (...args) => { audits.push(args) },
   },
-  '../lib/permissions': { isAdminControlUser: (u) => u?.isAdmin === true },
+  '../lib/permissions': require('./harness/permissions_stub.cjs').permissionsWith({ isAdminControlUser: (u) => u?.isAdmin === true }),
   '../lib/conflictControl': { assertUpdatedAtMatch: () => {}, getExpectedUpdatedAt: () => null, writeConflictResponse: () => ({}), WriteConflictError: class {} },
   '../durable-objects/broadcastHub': { broadcast: noop },
   '../lib/cache': { bumpVersion: noop },

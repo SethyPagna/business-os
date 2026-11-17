@@ -93,7 +93,7 @@ import { mutationVersionAtLeast, reconcileDirectMutationReceipt, readCommittedMu
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { isAdminControlUser, saleAmendmentWindowAllows } from '../../utils/permissions.ts'
 import { advanceSaleSecurityScope, saleSecurityFingerprint } from './saleSettlementConfig.ts'
-import { activeSalesFocusId, parseSalesFocus, useSettleSalesFocus, type SalesFocus } from './salesFocus.ts'
+import { activeSalesFocusId, salesHandoffState, useSettleSalesFocus, type SalesFocus } from './salesFocus.ts'
 import { recoverSaleStatus, type SaleStatusRecoveryResult } from '../../utils/saleStatusRecovery.ts'
 import { PAID_SALE_STATUSES, salePaymentStatus, statusChangeNeedsPayment } from '../../utils/saleStatusResolution.ts'
 import { saleStatusDisplay, saleStatusWords } from '../../utils/saleStatusDisplay.ts'
@@ -461,12 +461,14 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       try { raw = window.sessionStorage.getItem('bos:sales:focus') } catch { return }
       if (!raw) return
       try {
-        const payload = JSON.parse(raw) as { search?: unknown; saleId?: unknown }
-        const search = String(payload?.search || '').trim()
-        if (search) {
-          setSearch(search)
+        const handoff = salesHandoffState(JSON.parse(raw))
+        if (handoff) {
+          setSearch(handoff.search)
           setStripRange({ ...EMPTY_DATE_TIME_RANGE })
-          setSalesFocus(parseSalesFocus(payload))
+          // A leftover status or user filter would hide the sale the link names.
+          setStatusFilter(handoff.statusFilter)
+          setUserFilter(handoff.userFilter)
+          setSalesFocus(handoff.focus)
         }
       } catch {
         // A malformed handoff must not block the Sales page.

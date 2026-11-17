@@ -232,8 +232,8 @@ const DEFAULT_PUBLIC_CONFIG: PortalConfig = {
   logoPositionX: 50,
   logoPositionY: 50,
   logoZoom: 100,
-  lowStockThreshold: 10,
-  outOfStockThreshold: 0,
+  lowStockThreshold: '',
+  outOfStockThreshold: '',
   priceDisplay: 'USD',
   promoItems: [],
   recommendedProductIds: [],
@@ -1050,7 +1050,7 @@ export default function PublicCatalogPage() {
   // itself, so the flyout shows numbers consistent with the card that was
   // clicked.
   const openProductDetail = (product: CatalogProduct) => {
-    const status = resolvePortalStockStatus(product, selectedStockBranch, displayConfig)
+    const status = resolvePortalStockStatus(product, selectedStockBranch)
     const gallery = normalizeProductGallery(product)
     const pricePresentation = displayConfig.showPrices
       ? buildPortalPricePresentation(product, displayConfig, formatPortalPrice, portalPromotionRules)

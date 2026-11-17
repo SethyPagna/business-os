@@ -1,0 +1,583 @@
+import { localDateRangeClause } from './businessDateWindow'
+import { MAX_MONEY_ABS } from './moneyPrecision'
+import { ReportExactDecimal } from './reportMoneyPrecision'
+
+// Stored daily sales totals (migration 0308, read switch `sales_daily`). PURE: no Worker, D1 or analytics imports, so the claim protocol, the
+// fraction text and the payload rules are testable without a database (scripts/test-sales-daily-claim-protocol-pure.cjs).
+//
+// WHAT IS STORED. One row per Cambodia business date holds the report kernel's own RUNNING TOTALS for that day, never the finished figures: the
+// kernel's later steps (the cost floor, the "with/without Not Paid" rounding, avg_order, the 2- and 4-place roundings) are not additive and must run
+// after summing, so a window is the sum of its days' totals finished by the unchanged kernel. Money in the totals is an exact fraction (the kernel
+// works in bigint fractions; a refund pro-rata or a KHR deposit over its rate is not a decimal), stored as canonical text "n" or "n/d".
+//
+// WHO WRITES IT. Only the recompute cron step (lib/salesDailyCron.ts), never a request and never a sales writer. Four triggers (migration 0308) only
+// MARK a day dirty; the recompute claims it, reads the raw records through the kernel and commits. A reader serves a day only while it is CLEAN.
+//
+// THE PROTOCOL (all of it is plain SQL on one row, so two tills and two recomputes cannot corrupt it):
+//   state 0 clean, 1 dirty, 2 being recomputed.
+//   claim   UPDATE ... SET state = 2, claim_gen = claim_gen + 1 WHERE business_date IN (...) AND state <> 0       (RETURNING the new generations)
+//   commit  UPDATE ... SET state = 0, payload ... WHERE business_date = d AND state = 2 AND claim_gen = mine AND data_epoch row = the epoch read first
+//   A write between claim and commit runs the revision trigger, which sets the day back to state 1: the commit matches no row and the day stays
+//   dirty (the next visit claims it again with a newer generation). A second recompute that claimed later holds a newer generation: the earlier
+//   commit is refused. A restore or reset rotates the data epoch: a commit made under the old epoch is refused, and a stored day is served only
+//   under the epoch it was computed in.
+export const SALES_DAILY_SWITCH = 'sales_daily'
+/** Bump when ANY step of the kernel that feeds a stored day changes meaning (scripts/test-sales-daily-kernel-fingerprint-pure.cjs ties it to the code). */
+export const SALES_DAILY_KERNEL_VERSION = 2
+export const SALES_DAILY_PAYLOAD_VERSION = 1
+export const SALES_DAILY_COVERAGE_KEY = 'sales_daily_coverage'
+export const SALES_DAILY_QUARANTINE_KEY = 'sales_daily_quarantine'
+export const SALES_DAILY_RECONCILE_CURSOR_KEY = 'sales_daily_reconcile_cursor'
+/** Owner alerts are stored SEPARATELY from the quarantine flag: an alert never confirmed sent is retried on every reconcile visit until it is. One row per kind. */
+export const SALES_DAILY_ALERT_KEYS = Object.freeze({ mismatch: 'sales_daily_alert_mismatch', poison: 'sales_daily_alert_poison' } as const)
+export type SalesDailyAlertKind = keyof typeof SALES_DAILY_ALERT_KEYS
+/** The days an administrator cleared out of quarantine and that a reconcile must still find in agreement before any stored read resumes. */
+export const SALES_DAILY_VERIFY_KEY = 'sales_daily_verify'
+export const SALES_DAILY_DATE = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/
+export const SALES_DAILY_STATE = Object.freeze({ clean: 0, dirty: 1, claimed: 2 } as const)
+/** The refusal codes that are not the kernel's own: such a day is never served from storage and its readers take the raw path. */
+export const SALES_DAILY_OWN_REFUSAL_PREFIX = 'sales_daily_'
+export const SALES_DAILY_PAYLOAD_TOO_LARGE = 'sales_daily_payload_too_large'
+
+// ---- exact fractions as canonical text ---------------------------------------------------------------------------------------------------------------------
+
+const FRACTION_TEXT = /^-?(?:0|[1-9]\d*)(?:\/[1-9]\d*)?$/
+// ReportExactDecimal.recorded is an INPUT check: it refuses an integer above MAX_MONEY_ABS (1e11). An AGGREGATE is not an input: the numerator and the
+// denominator of a day's exact sum are routinely far above 1e11 (a KHR deposit over its rate, a legacy pro-rata refund, the lcm of several rates) while the
+// VALUE stays far inside the money bound. So a bigint above the input bound is rebuilt from digit chunks of at most 10 digits (each below it), joined with
+// multiply and add, which carry no bound check. The text length cap is a sanity bound for stored data (a day's text also answers to the plan's payload size).
+const CHUNK_DIGITS = 10
+const INPUT_BOUND = BigInt(MAX_MONEY_ABS)
+export const SALES_DAILY_MAX_FRACTION_CHARS = 20_000
+
+type Fraction = { n: bigint; d: bigint }
+const abs = (value: bigint): bigint => (value < 0n ? -value : value)
+function gcd(left: bigint, right: bigint): bigint {
+  while (right !== 0n) { const rest = left % right; left = right; right = rest }
+  return left
+}
+function reduced(n: bigint, d: bigint): Fraction {
+  if (d === 0n) throw new RangeError('fraction_zero_denominator')
+  if (d < 0n) { n = -n; d = -d }
+  const divisor = gcd(abs(n), d)
+  return divisor > 1n ? { n: n / divisor, d: d / divisor } : { n, d }
+}
+const fractionText = (value: Fraction): string => (value.d === 1n ? value.n.toString() : `${value.n}/${value.d}`)
+
+/** True only for the canonical text: reduced, positive denominator, no "+" or leading zeros, no "-0". */
+export function isCanonicalFractionText(text: unknown): text is string {
+  if (typeof text !== 'string' || text.length > SALES_DAILY_MAX_FRACTION_CHARS || !FRACTION_TEXT.test(text)) return false
+  if (text === '-0') return false
+  const slash = text.indexOf('/')
+  if (slash < 0) return true
+  const n = BigInt(text.slice(0, slash)), d = BigInt(text.slice(slash + 1))
+  if (d === 1n) return false
+  const back = reduced(n, d)
+  return back.n === n && back.d === d
+}
+
+function parseFraction(text: string): Fraction {
+  if (!isCanonicalFractionText(text)) throw new RangeError('fraction_text_invalid')
+  const slash = text.indexOf('/')
+  return slash < 0 ? { n: BigInt(text), d: 1n } : { n: BigInt(text.slice(0, slash)), d: BigInt(text.slice(slash + 1)) }
+}
+
+/** Exact sum of two canonical fraction texts, canonical again. */
+export function addFractionTexts(left: string, right: string): string {
+  const a = parseFraction(left), b = parseFraction(right)
+  return fractionText(reduced(a.n * b.d + b.n * a.d, a.d * b.d))
+}
+
+/** Exact sum of any number of canonical fraction texts ("0" for none). Order cannot change the answer. */
+export function sumFractionTexts(texts: Iterable<string>): string {
+  let sum: Fraction = { n: 0n, d: 1n }
+  for (const text of texts) {
+    const next = parseFraction(text)
+    sum = reduced(sum.n * next.d + next.n * sum.d, sum.d * next.d)
+  }
+  return fractionText(sum)
+}
+
+function exactFromBigint(value: bigint): ReportExactDecimal {
+  if (abs(value) <= INPUT_BOUND) return ReportExactDecimal.recorded(Number(value))
+  const negative = value < 0n
+  const digits = abs(value).toString()
+  let result = ReportExactDecimal.zero()
+  for (let at = 0; at < digits.length; at += CHUNK_DIGITS) {
+    const chunk = digits.slice(at, at + CHUNK_DIGITS)
+    result = result.multiply(ReportExactDecimal.recorded(`1${'0'.repeat(chunk.length)}`)).add(ReportExactDecimal.recorded(chunk))
+  }
+  return negative ? ReportExactDecimal.zero().subtract(result) : result
+}
+
+/** The kernel's exact value for a canonical fraction text. */
+export function textToExact(text: string): ReportExactDecimal {
+  const value = parseFraction(text)
+  const n = exactFromBigint(value.n)
+  return value.d === 1n ? n : n.divide(exactFromBigint(value.d))
+}
+
+/**
+ * A kernel exact value as canonical fraction text. ReportExactDecimal exposes no numerator or denominator (reportMoneyPrecision.ts is not edited by this
+ * slice), so the runtime field is read; the shape is checked, so a kernel that changes its representation fails loudly here and in the round-trip test
+ * instead of storing a wrong total.
+ */
+export function exactToText(value: ReportExactDecimal): string {
+  const inner = (value as unknown as { value?: { n?: unknown; d?: unknown } }).value
+  if (!inner || typeof inner.n !== 'bigint' || typeof inner.d !== 'bigint' || inner.d <= 0n) throw new RangeError('exact_value_unreadable')
+  return fractionText(reduced(inner.n, inner.d))
+}
+
+/**
+ * The exact running sum of one money key over a day. Numerators are added per DENOMINATOR (an add of the same denominator as one already seen is a single
+ * bigint add), and the denominators are brought to their lcm and the sum reduced ONCE, in text(). The kernel's ReportExactDecimal.add reduces by gcd on
+ * every add (31 keys x every sale), which on a day with a few non-decimal fractions (a riel deposit over its rate, a legacy pro-rata refund) grows its
+ * numbers and its cost with every sale. The VALUE is identical: a sum of rationals does not depend on how it is carried, and the reduced result is
+ * canonical (scripts/test-sales-daily-accumulator-pure.cjs proves it against the kernel's own adds on randomised days). It reads the kernel value's
+ * numerator and denominator the way exactToText does and fails loudly when they are unreadable.
+ */
+export class SalesDailyExactSum {
+  private readonly byDenominator = new Map<bigint, bigint>()
+
+  addFraction(n: bigint, d: bigint): this {
+    if (d <= 0n) throw new RangeError('fraction_zero_denominator')
+    if (n !== 0n) this.byDenominator.set(d, (this.byDenominator.get(d) ?? 0n) + n)
+    return this
+  }
+
+  add(value: ReportExactDecimal): this {
+    const inner = (value as unknown as { value?: { n?: unknown; d?: unknown } }).value
+    if (!inner || typeof inner.n !== 'bigint' || typeof inner.d !== 'bigint' || inner.d <= 0n) throw new RangeError('exact_value_unreadable')
+    return this.addFraction(inner.n, inner.d)
+  }
+
+  /** Canonical fraction text of the sum so far. */
+  text(): string {
+    let n = 0n
+    let d = 1n
+    for (const [part, numerator] of this.byDenominator) {
+      if (part === d) n += numerator
+      else if (d % part === 0n) n += numerator * (d / part)
+      else if (part % d === 0n) { n = n * (part / d) + numerator; d = part }
+      else {
+        const common = gcd(d, part)
+        const scaleOld = part / common
+        n = n * scaleOld + numerator * (d / common)
+        d *= scaleOld
+      }
+    }
+    return fractionText(reduced(n, d))
+  }
+
+  /** The sum as the kernel's exact value (the text codec, so the same bound rules as a stored day). */
+  toExact(): ReportExactDecimal { return textToExact(this.text()) }
+}
+
+// ---- the stored payload ---------------------------------------------------------------------------------------------------------------------------------
+
+export type SalesDailyBucket = { money: Record<string, string>; counts: Record<string, number> }
+export type SalesDailyBranch = { bucket: SalesDailyBucket; [section: string]: unknown }
+/** `branches` is keyed by the sale header's branch id, "0" for a sale with none. The sections beside `bucket` (label, rows, summary, hours, pay, cust, prod, ...) are the kernel's. */
+export type SalesDailyPayload = { v: number; branches: Record<string, SalesDailyBranch> }
+/** What the kernel hands back for one business date. A refusal day carries the kernel's own code and an empty payload. */
+/** `queries` (optional) is how many D1 statements the kernel's read of that one date cost, so a visit can charge its query budget with the real number. */
+export type SalesDailyComputed = { payload: SalesDailyPayload; sourceRows: number; refusal: string | null; queries?: number }
+
+const BRANCH_KEY = /^(?:0|[1-9]\d{0,15})$/
+const MONEY_KEY = /^[a-z][a-zA-Z0-9_]{0,63}$/
+
+/** Key-sorted JSON: two payloads are equal exactly when their canonical texts are equal. */
+export function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null'
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  const record = value as Record<string, unknown>
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`
+}
+
+function opaqueIsSafe(value: unknown, depth: number): boolean {
+  if (depth > 12) return false
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true
+  if (typeof value === 'number') return Number.isFinite(value)
+  if (Array.isArray(value)) return value.every((item) => opaqueIsSafe(item, depth + 1))
+  if (typeof value === 'object') return Object.entries(value as Record<string, unknown>).every(([key, item]) => key !== '__proto__' && opaqueIsSafe(item, depth + 1))
+  return false
+}
+
+/** The reason a payload is not storable, or null. Money is canonical fraction text, counts are non-negative safe integers; nothing else is trusted. */
+export function salesDailyPayloadProblem(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return 'payload_not_object'
+  const { v, branches, ...rest } = payload as Record<string, unknown>
+  if (v !== SALES_DAILY_PAYLOAD_VERSION) return 'payload_version'
+  if (Object.keys(rest).length) return 'payload_unknown_key'
+  if (!branches || typeof branches !== 'object' || Array.isArray(branches)) return 'payload_branches'
+  for (const [id, entry] of Object.entries(branches as Record<string, unknown>)) {
+    if (!BRANCH_KEY.test(id)) return 'payload_branch_key'
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return 'payload_branch'
+    const bucket = (entry as Record<string, unknown>).bucket as SalesDailyBucket | undefined
+    if (!bucket || typeof bucket !== 'object' || !bucket.money || typeof bucket.money !== 'object' || !bucket.counts || typeof bucket.counts !== 'object') return 'payload_bucket'
+    for (const [key, value] of Object.entries(bucket.money)) if (!MONEY_KEY.test(key) || !isCanonicalFractionText(value)) return 'payload_money'
+    for (const [key, value] of Object.entries(bucket.counts)) if (!MONEY_KEY.test(key) || !Number.isSafeInteger(value) || value < 0) return 'payload_count'
+    if (!opaqueIsSafe(entry, 0)) return 'payload_section'
+  }
+  return null
+}
+
+/** The text that is stored: validated, then key-sorted. Throws on a payload the rules above refuse (a kernel bug must never reach storage). */
+export function encodeSalesDailyPayload(payload: SalesDailyPayload): string {
+  const problem = salesDailyPayloadProblem(payload)
+  if (problem) throw new RangeError(problem)
+  return canonicalJson(payload)
+}
+
+/** The payload a stored text holds, or null when it is not valid JSON or breaks the rules (the caller then reads that day raw). */
+export function decodeSalesDailyPayload(text: unknown): SalesDailyPayload | null {
+  if (typeof text !== 'string' || !text) return null
+  let parsed: unknown
+  try { parsed = JSON.parse(text) } catch { return null }
+  return salesDailyPayloadProblem(parsed) === null ? (parsed as SalesDailyPayload) : null
+}
+
+/** Names of the differing places, two levels deep, never values (an analytics label and an alert must not carry business data). */
+export function salesDailyDifferingPaths(left: unknown, right: unknown, limit = 8): string[] {
+  const out: string[] = []
+  const walk = (a: unknown, b: unknown, path: string, depth: number) => {
+    if (out.length >= limit || canonicalJson(a) === canonicalJson(b)) return
+    const objects = a && b && typeof a === 'object' && typeof b === 'object' && !Array.isArray(a) && !Array.isArray(b)
+    if (!objects || depth === 0) { out.push(path || '(root)'); return }
+    const x = a as Record<string, unknown>, y = b as Record<string, unknown>
+    for (const key of [...new Set([...Object.keys(x), ...Object.keys(y)])].sort()) walk(x[key], y[key], path ? `${path}.${key}` : key, depth - 1)
+  }
+  walk(left, right, '', 3)
+  return out
+}
+
+// ---- coverage, quarantine and what may be served ----------------------------------------------------------------------------------------------------
+
+/** system_flags 'sales_daily_coverage': the data epoch the seed (or the last re-cover) covered, and the kernel version it was re-cover for. */
+export type SalesDailyCoverage = { epoch: string | null; kernel: number }
+const EPOCH_TEXT = /^[0-9a-f]{32}$/
+
+export function parseSalesDailyCoverage(raw: unknown): SalesDailyCoverage | null {
+  if (typeof raw !== 'string') return null
+  let parsed: unknown
+  try { parsed = JSON.parse(raw) } catch { return null }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  const { epoch, kernel } = parsed as { epoch?: unknown; kernel?: unknown }
+  return { epoch: typeof epoch === 'string' && EPOCH_TEXT.test(epoch) ? epoch : null, kernel: Number.isSafeInteger(kernel) ? (kernel as number) : 0 }
+}
+
+export const salesDailyCoverageText = (epoch: string, kernel: number = SALES_DAILY_KERNEL_VERSION): string => JSON.stringify({ epoch, kernel })
+
+/**
+ * Where the nightly reconcile is. `older` is its place in the history (the last older day a finished cycle reached, '' to start from the oldest). `cycle` exists
+ * only while a cycle is unfinished (its visits are resumable, one day per unit): the recent window it started with, the last recent and older day already judged
+ * and how many older days it has taken, so a visit that stops at its budget (or is killed) continues exactly where the last judged day was.
+ */
+export type SalesDailyReconcileCycle = { recentFrom: string; recentLast: string; olderLast: string; olderCount: number }
+export type SalesDailyReconcileState = { older: string; cycle: SalesDailyReconcileCycle | null }
+const dateOrEmpty = (value: unknown): string => (typeof value === 'string' && (value === '' || SALES_DAILY_DATE.test(value)) ? value : '')
+
+/** Reads the stored cursor row: the JSON above, or the bare date (or '') an older build wrote. Anything unreadable starts over (safe: it only re-checks days). */
+export function parseSalesDailyReconcileState(raw: unknown): SalesDailyReconcileState {
+  if (typeof raw !== 'string') return { older: '', cycle: null }
+  if (raw === '' || SALES_DAILY_DATE.test(raw)) return { older: raw, cycle: null }
+  let parsed: unknown
+  try { parsed = JSON.parse(raw) } catch { return { older: '', cycle: null } }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { older: '', cycle: null }
+  const { older, cycle } = parsed as { older?: unknown; cycle?: unknown }
+  const c = cycle as Partial<SalesDailyReconcileCycle> | null | undefined
+  const valid = c && typeof c === 'object' && typeof c.recentFrom === 'string' && SALES_DAILY_DATE.test(c.recentFrom) && Number.isSafeInteger(c.olderCount) && (c.olderCount as number) >= 0
+  return { older: dateOrEmpty(older), cycle: valid ? { recentFrom: c.recentFrom as string, recentLast: dateOrEmpty(c.recentLast), olderLast: dateOrEmpty(c.olderLast), olderCount: c.olderCount as number } : null }
+}
+
+export type SalesDailyAlertState = { sent: boolean; days: string[] }
+export type SalesDailyFlags = {
+  epoch: string | null; coverage: SalesDailyCoverage | null; quarantined: boolean; maintenance: boolean; reconcile: SalesDailyReconcileState
+  /** The quarantine row's own days (every day that caused it), or null when it names none readable. */
+  quarantineDays: string[] | null
+  alerts: Record<SalesDailyAlertKind, SalesDailyAlertState | null>
+  /** Days still to be verified after a cleared quarantine; null when no verification is pending. */
+  verify: string[] | null
+}
+
+const dayList = (value: unknown): string[] | null => (Array.isArray(value) && value.length && value.every((day) => typeof day === 'string' && SALES_DAILY_DATE.test(day)) ? (value as string[]) : null)
+function jsonOf(raw: unknown): Record<string, unknown> | null {
+  if (typeof raw !== 'string') return null
+  try { const parsed = JSON.parse(raw); return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null } catch { return null }
+}
+function alertState(raw: unknown): SalesDailyAlertState | null {
+  if (raw === undefined) return null
+  const parsed = jsonOf(raw)
+  return { sent: parsed?.sent === true, days: dayList(parsed?.days) ?? [] }
+}
+
+/** The one statement that reads everything a reader or a cron visit needs to decide, keyed rows of system_flags. */
+export const SALES_DAILY_FLAGS_SQL = `SELECT key, value FROM system_flags WHERE key IN ('data_epoch', '${SALES_DAILY_COVERAGE_KEY}', '${SALES_DAILY_QUARANTINE_KEY}', '${SALES_DAILY_RECONCILE_CURSOR_KEY}', '${SALES_DAILY_ALERT_KEYS.mismatch}', '${SALES_DAILY_ALERT_KEYS.poison}', '${SALES_DAILY_VERIFY_KEY}', 'maintenance')`
+
+export function salesDailyFlagsFromRows(rows: ReadonlyArray<{ key?: unknown; value?: unknown }>): SalesDailyFlags {
+  const byKey = new Map<string, unknown>(rows.map((row) => [String(row.key), row.value]))
+  const epoch = byKey.get('data_epoch')
+  return {
+    epoch: typeof epoch === 'string' && EPOCH_TEXT.test(epoch) ? epoch : null,
+    coverage: parseSalesDailyCoverage(byKey.get(SALES_DAILY_COVERAGE_KEY)),
+    quarantined: byKey.has(SALES_DAILY_QUARANTINE_KEY),
+    maintenance: byKey.has('maintenance'),
+    reconcile: parseSalesDailyReconcileState(byKey.get(SALES_DAILY_RECONCILE_CURSOR_KEY)),
+    quarantineDays: dayList(jsonOf(byKey.get(SALES_DAILY_QUARANTINE_KEY))?.days),
+    alerts: { mismatch: alertState(byKey.get(SALES_DAILY_ALERT_KEYS.mismatch)), poison: alertState(byKey.get(SALES_DAILY_ALERT_KEYS.poison)) },
+    verify: byKey.has(SALES_DAILY_VERIFY_KEY) ? (dayList(jsonOf(byKey.get(SALES_DAILY_VERIFY_KEY))?.days) ?? []) : null,
+  }
+}
+
+/** A reader may use ANY stored day only when this is true: a readable epoch, covered by the seed, no quarantine and no maintenance. */
+export function salesDailyStoredReadAllowed(flags: SalesDailyFlags): boolean {
+  return !flags.quarantined && flags.verify === null && !flags.maintenance && flags.epoch !== null && flags.coverage !== null && flags.coverage.epoch === flags.epoch
+}
+
+/** The cron must re-seed and re-cover when the coverage names another epoch or another kernel version than now. */
+export function salesDailyNeedsRecover(flags: SalesDailyFlags, kernel: number = SALES_DAILY_KERNEL_VERSION): boolean {
+  return flags.epoch !== null && (flags.coverage === null || flags.coverage.epoch !== flags.epoch || flags.coverage.kernel !== kernel)
+}
+
+export type StoredDayRow = {
+  business_date: string
+  state: number
+  claim_gen: number
+  kernel_version: number
+  data_epoch: string
+  refusal: string | null
+  payload?: string
+  source_rows?: number
+  computed_at?: string | null
+}
+export type SalesDailyDayUse = 'serve' | 'refuse' | 'missing' | 'dirty' | 'claimed' | 'old_kernel' | 'old_epoch' | 'unusable'
+
+/**
+ * What a reader does with one day. Only 'serve' (the stored totals) and 'refuse' (the kernel refused this day's records: the window raises the same
+ * code the raw path would) answer from storage; every other value means "read this day raw", in the same batch as the other days.
+ */
+export function classifyStoredDay(row: StoredDayRow | undefined | null, flags: SalesDailyFlags, kernel: number = SALES_DAILY_KERNEL_VERSION): SalesDailyDayUse {
+  if (!row) return 'missing'
+  if (row.state === SALES_DAILY_STATE.dirty) return 'dirty'
+  if (row.state === SALES_DAILY_STATE.claimed) return 'claimed'
+  if (row.state !== SALES_DAILY_STATE.clean) return 'unusable'
+  if (row.kernel_version !== kernel) return 'old_kernel'
+  if (flags.epoch === null || row.data_epoch !== flags.epoch) return 'old_epoch'
+  if (row.refusal) return row.refusal.startsWith(SALES_DAILY_OWN_REFUSAL_PREFIX) ? 'unusable' : 'refuse'
+  return 'serve'
+}
+
+/**
+ * The second-round check of a stored read: the (date, state, claim_gen) the first round saw must be what a second read of the same days sees. A
+ * change means a write or a recompute landed between the two reads, so the caller retries once and then takes the raw path.
+ */
+export function storedDaysHeldStill(first: ReadonlyArray<StoredDayRow>, second: ReadonlyArray<StoredDayRow>): boolean {
+  if (first.length !== second.length) return false
+  const key = (row: StoredDayRow) => `${row.business_date}|${row.state}|${row.claim_gen}`
+  const seen = new Set(second.map(key))
+  return first.every((row) => seen.has(key(row)))
+}
+
+// ---- the budget of one cron visit ----------------------------------------------------------------------------------------------------------------------
+
+export type SalesDailyBudgetLimits = {
+  d1QueriesPerInvocation: number
+  salesDailyStepCpuBudgetMs: number
+  salesDailyStepWallBudgetMs: number
+  salesDailyCpuMsPerSourceRow: number
+  salesDailyCpuMsPerDayFixed: number
+  salesDailyKernelQueriesPerDay: number
+  salesDailyQueryReserve: number
+}
+export type SalesDailyStop = 'cpu' | 'wall' | 'queries'
+
+/**
+ * What one visit of a cron step may still do. A Worker has no CPU clock (Date.now() only moves when I/O completes), so CPU is an ESTIMATE charged per day from
+ * the rows the day read; wall time is the real clock; queries are counted. The unit of work is ONE business day: before starting another, the visit asks whether a
+ * day of the expected size still fits every budget, and stops (resumable from its cursor) when it does not. The first day of a visit always runs, so a visit
+ * always makes progress.
+ */
+export class SalesDailyStepBudget {
+  private readonly startedAt: number
+  private cpuMs = 0
+  private queries = 0
+  private lastDayRows = 0
+  constructor(private readonly limits: SalesDailyBudgetLimits, private readonly clock: () => number = Date.now) { this.startedAt = clock() }
+
+  spendQueries(count: number): void { this.queries += count }
+  /** Charges one finished day: the rows it read are the CPU estimate's input and the next day's size guess. */
+  spendDay(sourceRows: number): void {
+    this.cpuMs += this.limits.salesDailyCpuMsPerDayFixed + this.limits.salesDailyCpuMsPerSourceRow * Math.max(0, sourceRows)
+    this.lastDayRows = Math.max(0, sourceRows)
+  }
+  estimateMs(rows: number): number { return this.limits.salesDailyCpuMsPerDayFixed + this.limits.salesDailyCpuMsPerSourceRow * Math.max(0, rows) }
+  /** `knownRows`: what the stored row says the next day read last time (0 when unknown); the larger of that and the previous day of this visit is the guess. */
+  allowsAnotherDay(knownRows: number, ownStatements: number): { ok: true } | { ok: false; reason: SalesDailyStop } {
+    if (this.cpuMs + this.estimateMs(Math.max(knownRows, this.lastDayRows)) > this.limits.salesDailyStepCpuBudgetMs) return { ok: false, reason: 'cpu' }
+    if (this.clock() - this.startedAt >= this.limits.salesDailyStepWallBudgetMs) return { ok: false, reason: 'wall' }
+    if (this.queries + this.limits.salesDailyKernelQueriesPerDay + ownStatements > this.limits.d1QueriesPerInvocation - this.limits.salesDailyQueryReserve) return { ok: false, reason: 'queries' }
+    return { ok: true }
+  }
+  snapshot(): { cpuMs: number; queries: number } { return { cpuMs: this.cpuMs, queries: this.queries } }
+}
+
+// ---- statements (named parameters, as lib/db.ts translates them) ------------------------------------------------------------------------------------
+
+export type SalesDailyStatement = { sql: string; params: Record<string, unknown> }
+
+/** The dirty (or half-done) past days, newest first: the partial index idx_sales_daily_totals_pending holds exactly these. Today is never recomputed. */
+export function pendingDaysStatement(today: string, limit: number, nowIso: string): SalesDailyStatement {
+  return { sql: 'SELECT business_date, source_rows FROM sales_daily_totals WHERE state <> 0 AND business_date < @today AND (retry_after IS NULL OR retry_after <= @nowIso) ORDER BY business_date DESC LIMIT @limit', params: { today, limit, nowIso: `${nowIso.slice(0, 19)}Z` } }
+}
+
+/** One statement claims every named day that is not clean (a still-claimed day is taken over: its older commit will be refused). */
+export function claimStatement(days: readonly string[]): SalesDailyStatement {
+  return {
+    sql: 'UPDATE sales_daily_totals SET state = 2, claim_gen = claim_gen + 1 WHERE business_date IN (SELECT value FROM json_each(@days)) AND state <> 0 RETURNING business_date, claim_gen',
+    params: { days: JSON.stringify(days) },
+  }
+}
+
+export type SalesDailyCommit = { day: string; claimGen: number; computed: SalesDailyComputed; epoch: string; kernel: number; nowIso: string }
+
+/**
+ * One day's commit. It writes only the row this recompute still holds (state 2, its own generation) and only while the data epoch is still the one read
+ * BEFORE the records were. A refused commit changes no row and the day stays dirty or claimed, to be claimed again.
+ */
+export function commitStatement(commit: SalesDailyCommit, maxPayloadBytes: number): SalesDailyStatement {
+  let payload = '{}'
+  let refusal = commit.computed.refusal
+  if (!refusal) {
+    payload = encodeSalesDailyPayload(commit.computed.payload)
+    if (new TextEncoder().encode(payload).length > maxPayloadBytes) { payload = '{}'; refusal = SALES_DAILY_PAYLOAD_TOO_LARGE }
+  }
+  return {
+    sql: `UPDATE sales_daily_totals SET state = 0, kernel_version = @kernel, data_epoch = @epoch, refusal = @refusal, payload = @payload, source_rows = @sourceRows, computed_at = @nowIso, fail_count = 0, retry_after = NULL
+      WHERE business_date = @day AND state = 2 AND claim_gen = @claimGen AND (SELECT value FROM system_flags WHERE key = 'data_epoch') = @epoch
+        AND COALESCE((SELECT json_extract(value, '$.kernel') FROM system_flags WHERE key = '${SALES_DAILY_COVERAGE_KEY}'), -1) = @kernel`,
+    params: { day: commit.day, claimGen: commit.claimGen, kernel: commit.kernel, epoch: commit.epoch, refusal, payload, sourceRows: commit.computed.sourceRows, nowIso: commit.nowIso },
+  }
+}
+
+/** Reads the (state, claim_gen) of named days: the reconcile's before and after look. */
+export function dayStatesStatement(days: readonly string[], withPayload = false): SalesDailyStatement {
+  return {
+    sql: `SELECT business_date, state, claim_gen, kernel_version, data_epoch, refusal${withPayload ? ', payload' : ''} FROM sales_daily_totals WHERE business_date IN (SELECT value FROM json_each(@days))`,
+    params: { days: JSON.stringify(days) },
+  }
+}
+
+/** The days between two dates that have a row (the reconcile's recent window) and the older days after a cursor, oldest first. */
+export function reconcileRecentStatement(from: string, today: string, after = ''): SalesDailyStatement {
+  return { sql: 'SELECT business_date, source_rows FROM sales_daily_totals WHERE business_date >= @from AND business_date > @after AND business_date < @today AND state = 0 ORDER BY business_date', params: { from, after, today } }
+}
+export function reconcileOlderStatement(cursor: string, before: string, limit: number): SalesDailyStatement {
+  return { sql: 'SELECT business_date, source_rows FROM sales_daily_totals WHERE business_date > @cursor AND business_date < @before AND state = 0 ORDER BY business_date LIMIT @limit', params: { cursor, before, limit } }
+}
+
+/**
+ * A mismatch: every differing day goes dirty and every stored read stops. The quarantine row is written once (the first reason stays); the LAST
+ * statement's meta.changes tells the caller whether THIS call set it, which is what decides the single owner alert. Names of days only, no figures.
+ */
+export function quarantineStatements(days: readonly string[], paths: readonly string[], nowIso: string): SalesDailyStatement[] {
+  return [
+    // FIRST: the alert row, raised only while no quarantine row exists, so the statement's own change count says whether THIS call newly quarantined. It is a separate
+    // row from the quarantine: a failed send leaves it unsent and every later reconcile visit retries it until it is sent (markAlertSentStatement).
+    {
+      sql: `INSERT INTO system_flags (key, value, updated_at) SELECT '${SALES_DAILY_ALERT_KEYS.mismatch}', @alert, @nowIso WHERE NOT EXISTS (SELECT 1 FROM system_flags WHERE key = '${SALES_DAILY_QUARANTINE_KEY}')
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      params: { alert: JSON.stringify({ sent: false, days, at: nowIso }), nowIso },
+    },
+    ...days.map((day) => ({ sql: 'UPDATE sales_daily_totals SET state = 1 WHERE business_date = @day AND state <> 1', params: { day } })),
+    {
+      sql: `INSERT INTO system_flags (key, value, updated_at) VALUES ('${SALES_DAILY_QUARANTINE_KEY}', @value, @nowIso) ON CONFLICT(key) DO NOTHING`,
+      params: { value: JSON.stringify({ at: nowIso, days, paths: paths.slice(0, 6) }), nowIso },
+    },
+  ]
+}
+
+export function markAlertSentStatement(kind: SalesDailyAlertKind, nowIso: string): SalesDailyStatement {
+  return { sql: "UPDATE system_flags SET value = json_set(value, '$.sent', json('true')), updated_at = @nowIso WHERE key = @key", params: { key: SALES_DAILY_ALERT_KEYS[kind], nowIso } }
+}
+
+/** The poison alert: raised for a day whose failures passed the plan threshold, only when there is no alert row or the last one was already sent (an unsent one is retried as it is). */
+export function poisonAlertStatement(day: string, nowIso: string): SalesDailyStatement {
+  return {
+    sql: `INSERT INTO system_flags (key, value, updated_at) VALUES ('${SALES_DAILY_ALERT_KEYS.poison}', @value, @nowIso)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at WHERE json_extract(system_flags.value, '$.sent') = 1`,
+    params: { value: JSON.stringify({ sent: false, days: [day], at: nowIso }), nowIso },
+  }
+}
+
+/**
+ * One day whose payload could not be stored (it failed a payload rule): back to dirty (a reader reads it raw), a failure counter and a backoff, so it neither
+ * blocks the other days nor is retried at once. Guarded by the generation (and state) the caller held, so a newer claim or a write is never overwritten.
+ */
+export function failedDayStatement(day: string, claimGen: number, fromState: number, nowMs: number, baseSeconds: number, maxSeconds: number): SalesDailyStatement {
+  // the backoff is computed in SQL from the OLD fail_count (an UPDATE reads the old row): 1st failure waits base, then base x2, x4 ... up to max
+  return {
+    sql: `UPDATE sales_daily_totals SET state = 1, fail_count = fail_count + 1,
+      retry_after = strftime('%Y-%m-%dT%H:%M:%SZ', @nowSec + MIN(@maxSeconds, @baseSeconds * (1 << MIN(fail_count, 29))), 'unixepoch')
+      WHERE business_date = @day AND claim_gen = @claimGen AND state = @fromState RETURNING fail_count`,
+    params: { day, claimGen, fromState, nowSec: Math.floor(nowMs / 1000), baseSeconds, maxSeconds },
+  }
+}
+
+/** An administrator cleared the quarantine: stored reads stay stopped until a reconcile finds these days in agreement. */
+export function verifyStartStatement(days: readonly string[], nowIso: string): SalesDailyStatement {
+  return {
+    sql: `INSERT INTO system_flags (key, value, updated_at) VALUES ('${SALES_DAILY_VERIFY_KEY}', @value, @nowIso) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    params: { value: JSON.stringify({ days, at: nowIso }), nowIso },
+  }
+}
+export function verifyRemainingStatement(remaining: readonly string[], nowIso: string): SalesDailyStatement {
+  return remaining.length
+    ? verifyStartStatement(remaining, nowIso)
+    : { sql: `DELETE FROM system_flags WHERE key = '${SALES_DAILY_VERIFY_KEY}'`, params: {} }
+}
+
+/** The reconcile's place (one row), written after every judged day so a visit that is stopped or killed resumes at the next day. */
+export function reconcileCursorStatement(state: SalesDailyReconcileState, nowIso: string): SalesDailyStatement {
+  const cursor = JSON.stringify(state)
+  return {
+    sql: `INSERT INTO system_flags (key, value, updated_at) VALUES ('${SALES_DAILY_RECONCILE_CURSOR_KEY}', @cursor, @nowIso) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    params: { cursor, nowIso },
+  }
+}
+
+/** Re-seed every day that has a sale (a missing row is "not covered"), mark every row dirty, and cover the current epoch and kernel version. One batch. */
+export function recoverStatements(epoch: string, kernel: number, nowIso: string): SalesDailyStatement[] {
+  return [
+    { sql: 'UPDATE sales_daily_totals SET state = 1 WHERE state <> 1', params: {} },
+    { sql: "INSERT INTO sales_daily_totals(business_date, state) SELECT DISTINCT COALESCE(date(created_at, '+7 hours'), ''), 1 FROM sales WHERE 1 ON CONFLICT(business_date) DO NOTHING", params: {} },
+    {
+      sql: `INSERT INTO system_flags (key, value, updated_at) SELECT '${SALES_DAILY_COVERAGE_KEY}', @coverage, @nowIso WHERE (SELECT value FROM system_flags WHERE key = 'data_epoch') = @epoch
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      params: { coverage: salesDailyCoverageText(epoch, kernel), epoch, nowIso },
+    },
+  ]
+}
+
+/** The admin rebuild of a range: re-seed the days that have sales and are missing, mark every day of the range dirty. The cron does the recompute. */
+export function rebuildRangeStatements(from: string, to: string): SalesDailyStatement[] {
+  return [
+    {
+      sql: `INSERT INTO sales_daily_totals(business_date, state) SELECT DISTINCT COALESCE(date(created_at, '+7 hours'), ''), 1 FROM sales WHERE ${localDateRangeClause('created_at', '@from', '@to')} ON CONFLICT(business_date) DO NOTHING`,
+      params: { from, to },
+    },
+    { sql: 'UPDATE sales_daily_totals SET state = 1 WHERE business_date >= @from AND business_date <= @to AND state <> 1', params: { from, to } },
+  ]
+}
+
+/** A real calendar date in YYYY-MM-DD (2026-02-30 is not one). */
+export function isSalesDailyDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !SALES_DAILY_DATE.test(value)) return false
+  const parsed = new Date(`${value}T00:00:00Z`)
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+}
+
+/** Days from `from` to `to` inclusive; 0 when the range is reversed. */
+export function salesDailyRangeDays(from: string, to: string): number {
+  const span = (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000
+  return span < 0 ? 0 : span + 1
+}

@@ -215,6 +215,35 @@ export function getPermissionTier(user: PermissionUser, key: string | null | und
   return 'none'
 }
 
+// ---------------------------------------------------------------------------
+// What a STORED permission value means, and the write-time normaliser built on it
+// ---------------------------------------------------------------------------
+// The checks above read a stored value two different ways, and a role editor that reads it a third way silently changes access
+// the next time it saves (it shows OFF for something the Worker grants, and the save then writes false):
+//
+//   section key  ('products', 'pos', 'all', ...)  granted ONLY by the boolean true, or by the literal 'review' / 'view' on a key that
+//                                                 carries that tier. Every other value ("true", 1, null, ...) is none.
+//   action key   ('products:delete', ...)         narrows ONLY on the boolean false (isActionBlocked). Every other value, "false",
+//                                                 0, null included, is no opinion: the action stays as the tier left it.
+//
+// storedPermissionValue is that one reading, as a value: the boolean/tier the Worker acts on. frontend/src/utils/permissions.ts
+// mirrors it (normalizePermissionState) and scripts/test-permission-stored-value-parity-pure.cjs compares the two over every
+// stored value, tier and placement. normalizePermissionMap applies it at WRITE time so stored JSON holds real booleans and the
+// two literal tiers only. It never changes what the Worker decides: a junk section value becomes false (it was none), a junk
+// action value becomes true (it was no opinion), so saving a role cannot widen or narrow anything.
+export function storedPermissionValue(key: string, raw: unknown): PermissionValue {
+  if (key.includes(':')) return raw !== false
+  if (raw === 'review' && REVIEW_TIER_KEYS.has(key)) return 'review'
+  if (raw === 'view' && VIEW_TIER_KEYS.has(key)) return 'view'
+  return raw === true
+}
+
+/** The permission object a role or user save stores: a plain object of real booleans plus the 'review' / 'view' tiers. Anything else is {}. */
+export function normalizePermissionMap(value: unknown): Record<string, PermissionValue> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, raw]) => [key, storedPermissionValue(key, raw)]))
+}
+
 export function isReviewRequired(user: PermissionUser, key: string | null | undefined): boolean {
   return getPermissionTier(user, key) === 'review'
 }

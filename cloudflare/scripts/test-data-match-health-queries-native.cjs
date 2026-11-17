@@ -272,12 +272,16 @@ async function main() {
     assert.equal(row.pairs_lots_exceed_branch, one(db, 'lots-exceed-branch-stock').pairs_lots_exceed_branch, 'the same figure as lots-exceed-branch-stock')
     const { getTrackedProductIds } = loadRealLib('productBatches.ts')
     const d1 = { prepare: (sql) => ({ all: async (params) => db.prepare(sql).all(params || {}) }) }
-    const tracked = new Set(await getTrackedProductIds(d1, 1))
+    // "Tracked" in these ops queries is the lot sheet's rule: a lot at the branch that is active or holds stock. Since S1 (16 Nov) getTrackedProductIds is the narrower Transfer
+    // list (lots holding stock only), so the rule is stated here from the raw rows and the Transfer list must sit inside it.
+    const tracked = new Set(db.prepare('SELECT DISTINCT pb.variant_product_id AS id FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = 1 WHERE pb.is_active = 1 OR bbs.quantity > 0').all().map((r) => r.id))
     assert.ok(tracked.has(5) && !tracked.has(6), 'an active lot is tracked, an inactive empty one is not')
+    const transferList = await getTrackedProductIds(d1, 1)
+    assert.ok(transferList.length > 0 && transferList.every((id) => tracked.has(id)), 'the Transfer list (lots holding stock) is inside the lot-sheet set')
     const lotSum = new Map(db.prepare('SELECT pb.variant_product_id AS pid, SUM(bbs.quantity) AS q FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id = bbs.batch_id WHERE bbs.branch_id = 1 GROUP BY pb.variant_product_id').all().map((r) => [r.pid, r.q]))
     const unlottedOnTill = db.prepare('SELECT product_id, quantity FROM branch_stock WHERE branch_id = 1').all()
       .filter((b) => tracked.has(b.product_id) && b.quantity - (lotSum.get(b.product_id) || 0) > 0.000001)
-    assert.equal(row.tracked_pairs_unlotted, unlottedOnTill.length, 'tracked pairs as the till (getTrackedProductIds) sees them')
+    assert.equal(row.tracked_pairs_unlotted, unlottedOnTill.length, 'tracked pairs as the lot sheet sees them (active or positive lot at the branch)')
   })
 
   await check('health-movement-balance holds still under correct writes and moves only for stock changed without a movement', () => {

@@ -21,8 +21,10 @@
 // low count) and the Telegram row label. A census then reads EVERY comparison against a threshold in cloudflare/src
 // (low_stock_threshold / out_of_stock_threshold, the low_threshold / __low / __out aliases, plain JS `<= low`) and fails
 // when one is added, moved, edited or removed. Each known line names the check that runs it, and that check must have
-// run. The public storefront's literal-10 copies (routes/portal.ts, lib/portalAi.ts) are listed as named exceptions:
-// a known, separate divergence from the staff rule, so a change to them is still noticed.
+// run. The public storefront (routes/portal.ts) has its OWN levels by owner decision of 16 Nov 2026: the Website Editor's
+// thresholds when set, else the shop's rule. Its label and its three stock-state pills are run through the matrix below, with the
+// website levels EMPTY (they must equal the shop rule) and with them SET (they must follow the website numbers); the AI assistant's
+// copy (lib/portalAi.ts) and the hide-out-of-stock membership are listed as named exceptions, so a change to them is still noticed.
 //
 // Mutants are applied in memory to the REAL sources (frontend rule and every Worker file above) and must each turn the
 // run red; a mutant that no longer matches its source fails the test (positive control). The Worker is only ever read.
@@ -199,10 +201,13 @@ function ofIdsCatalog(where: string): number[] {
 // Every comparison against a stock threshold in cloudflare/src, as [file, occurrences, the check that runs it, exact normalised line].
 // A new one, or a moved, edited or removed one, means a copy of the rule changed: look at it, run it through the matrix above
 // (or pin it), then update this table -- do not just bump a number. 'by' must be the start of a check label that really ran.
-// 'storefront' is not a check: those lines are the public shop's own rule (a literal 10, the low-stock settings ignored), a
-// KNOWN divergence kept out of this change. Named so that any edit to them is noticed; the follow-up is the owner's call.
+// 'storefront' is not a check here: those lines are run by the Worker's own tests (the AI assistant's copy by
+// scripts/test-portal-ai-stock-status-pure.cjs; the hide-out-of-stock membership is the per-product out threshold, as before).
+// Named so that any edit to them is noticed.
 const STOREFRONT = 'storefront'
-const STOREFRONT_REASON = 'storefront follow-up; not the staff rule'
+const STOREFRONT_REASON = 'storefront line run by the Worker tests, not here'
+// The public storefront's label and filter pills ARE run here (see 'storefront label and filter pills').
+const STOREFRONT_RUN = 'storefront label and filter pills'
 // 'notThreshold' is not a check either: the line only looks like a threshold comparison. Named so that any edit to it is noticed.
 const NOT_A_THRESHOLD = 'notThreshold'
 const NOT_A_THRESHOLD_REASON = 'binary search bound, not a stock threshold'
@@ -244,13 +249,13 @@ const KNOWN_COMPARISONS: Array<[file: string, count: number, by: string, text: s
   ["routes/notifications.ts", 1, "bell inventory SELECT", "CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) THEN 1 ELSE 0 END AS is_out,"],
   ["routes/notifications.ts", 1, "bell inventory SELECT", "OR COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0))"],
   ["routes/notifications.ts", 1, "bell inventory SELECT", "SUM(CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) THEN 1 ELSE 0 END) OVER () AS out_total,"],
-  ["routes/portal.ts", 1, STOREFRONT, ": 'p.is_active = 1 AND COALESCE(p.stock_quantity, 0) > COALESCE(p.out_of_stock_threshold, 0)'"],
-  ["routes/portal.ts", 1, STOREFRONT, "if (quantity <= lowThreshold) return 'low_stock'"],
-  ["routes/portal.ts", 1, STOREFRONT, "if (quantity <= outThreshold) return 'out_of_stock'"],
-  ["routes/portal.ts", 1, STOREFRONT, "if (state === 'in_stock') return `${stockExpr} > COALESCE(p.low_stock_threshold, 10)`"],
-  ["routes/portal.ts", 1, STOREFRONT, "if (state === 'low_stock') return `${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} <= COALESCE(p.low_stock_threshold, 10)`"],
-  ["routes/portal.ts", 1, STOREFRONT, "if (state === 'out_of_stock') return `${stockExpr} <= COALESCE(p.out_of_stock_threshold, 0)`"],
-  ["routes/portal.ts", 1, STOREFRONT, "where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0)`)"],
+  ["routes/portal.ts", 1, STOREFRONT, ": `p.is_active = 1 AND COALESCE(p.stock_quantity, 0) > ${portalStockLevelSql(rule).out}`"],
+  ["routes/portal.ts", 1, STOREFRONT_RUN, "if (quantity <= low) return 'low_stock'"],
+  ["routes/portal.ts", 1, STOREFRONT_RUN, "if (quantity <= out) return 'out_of_stock'"],
+  ["routes/portal.ts", 1, STOREFRONT_RUN, "if (state === 'in_stock') return `${stockExpr} > ${level.out} AND ${stockExpr} > ${level.low}`"],
+  ["routes/portal.ts", 1, STOREFRONT_RUN, "if (state === 'low_stock') return `${stockExpr} > ${level.out} AND ${stockExpr} <= ${level.low}`"],
+  ["routes/portal.ts", 1, STOREFRONT_RUN, "if (state === 'out_of_stock') return `${stockExpr} <= ${level.out}`"],
+  ["routes/portal.ts", 1, STOREFRONT, "where.push(`${stockExpr} > ${level.out}`)"],
   ["routes/products.ts", 1, "products.ts", "if (stockState === 'healthy') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} > ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')}`)"],
   ["routes/products.ts", 1, "products.ts", "if (stockState === 'in_stock' || stockState === 'positive') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0)`)"],
   ["routes/products.ts", 1, "products.ts", "if (stockState === 'low') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} <= ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')}`)"],
@@ -258,7 +263,7 @@ const KNOWN_COMPARISONS: Array<[file: string, count: number, by: string, text: s
 ]
 // A comparison operator next to a threshold, on either side: the columns and aliases, '${low...}' fragments, plain JS
 // 'low' / 'out' variables, effectiveLowStockThreshold(...) and the isFinite-guarded out threshold.
-const THRESHOLD_TOKEN = String.raw`(?:COALESCE\(|Number\(|toNumber\()?(?:[\w.]*(?:low_stock_threshold|out_of_stock_threshold|low_threshold|out_threshold|__low|__out)\b|\$\{\s*low\w*\s*\}|\$\{\s*lowStockThresholdSql|effectiveLowStockThreshold\(|\(Number\.isFinite\(out\)|\blow\b|\bout\b|\blowThreshold\b|\boutThreshold\b)`
+const THRESHOLD_TOKEN = String.raw`(?:COALESCE\(|Number\(|toNumber\()?(?:[\w.]*(?:low_stock_threshold|out_of_stock_threshold|low_threshold|out_threshold|__low|__out)\b|\$\{\s*low\w*\s*\}|\$\{\s*lowStockThresholdSql|\$\{\s*level\.(?:low|out)\s*\}|\$\{\s*portalStockLevelSql\([^)]*\)\.out\s*\}|effectiveLowStockThreshold\(|\(Number\.isFinite\(out\)|\blow\b|\bout\b|\blowThreshold\b|\boutThreshold\b)`
 const COMPARE_OPERATOR = String.raw`(?<![=\-<>])(?:<=|>=|<|>)(?![=>])`
 const COMPARISON = new RegExp(`${COMPARE_OPERATOR}\\s*${THRESHOLD_TOKEN}|${THRESHOLD_TOKEN}\\s*${COMPARE_OPERATOR}`)
 function listTs(dir: string, base = ''): string[] {
@@ -392,6 +397,42 @@ async function failuresOf(read: Read, fe: any, firstOnly = false): Promise<strin
     await check(`searchMatch issue 'out_of_stock' ${tag}`, () => {
       const clause = substitute(extract(read2('lib/searchMatch.ts'), /case 'out_of_stock':\s*return `([^`]*)`/, "the 'out_of_stock' issue clause"), { '${stockExpr}': STOCK_EXPR }, 'searchMatch')
       sameSet(ofIds(matrixDb, clause), want('out'), 'searchMatch out')
+    })
+
+    // The public storefront (routes/portal.ts), owner decision of 16 Nov 2026: its OWN levels. Its label function and its three
+    // stock-state pills are lifted out of the source and run as written, twice: with the website levels EMPTY the storefront IS the
+    // shop rule (refs), and with the website levels SET (low 3, out 1) it follows those two numbers whatever the shop says.
+    const portalSource = read2('routes/portal.ts')
+    type PortalLabel = (rule: unknown, qty: number, low: unknown, out: unknown) => string
+    await check(`${STOREFRONT_RUN} (website levels empty or set) ${tag}`, () => {
+      const labelFn = extract(portalSource, /(export function portalStockStatusFor[\s\S]*?\n\})\n/, 'portalStockStatusFor')
+      const exportsBox: { portalStockStatusFor?: PortalLabel } = {}
+      new Function('exports', 'effectiveLowStockThreshold', transpile(labelFn, 'portalStockStatusFor.ts'))(exportsBox, lowSettings.effectiveLowStockThreshold)
+      const label = exportsBox.portalStockStatusFor as PortalLabel
+      // The SQL levels the pills compare against, from the storefront's own portalStockLevelSql (run as written).
+      const levelsBox: { portalStockLevelSql?: (rule: unknown) => { out: string; low: string } } = {}
+      new Function('lowStockThresholdSql', 'box', `${transpile(extract(portalSource, /(function portalStockLevelSql[\s\S]*?\n\})\n/, 'portalStockLevelSql'), 'portalStockLevelSql.ts')}\nbox.portalStockLevelSql = portalStockLevelSql`)(lowSettings.lowStockThresholdSql, levelsBox)
+      const levelsFor = levelsBox.portalStockLevelSql as (rule: unknown) => { out: string; low: string }
+      const pill = (state: string, rule: unknown): number[] => {
+        const text = extract(portalSource, new RegExp(`if \\(state === '${state}'\\) return \`([^\`]*)\``), `the storefront '${state}' pill`)
+        const level = levelsFor(rule)
+        return ofIds(matrixDb, substitute(text, { '${stockExpr}': STOCK_EXPR, '${level.out}': level.out, '${level.low}': level.low }, 'storefront pill'))
+      }
+      const asState: Record<Level, string> = { out: 'out_of_stock', low: 'low_stock', healthy: 'in_stock' }
+      // Website levels empty: the shop's rule, exactly.
+      const emptyRule = { shop: config, low: null, out: null }
+      rows.forEach((row, index) => assert.equal(label(emptyRule, row.qty ?? 0, row.low, row.out), asState[refs[index]], `label ${JSON.stringify(row)}`))
+      sameSet(pill('out_of_stock', emptyRule), want('out'), 'storefront out pill')
+      sameSet(pill('low_stock', emptyRule), want('low'), 'storefront low pill')
+      sameSet(pill('in_stock', emptyRule), want('healthy'), 'storefront in_stock pill')
+      // Website levels set: low 3, out 1, whatever the shop and the product say.
+      const setRule = { shop: config, low: 3, out: 1 }
+      const websiteState = (row: Row): Level => ((row.qty ?? 0) <= 1 ? 'out' : (row.qty ?? 0) <= 3 ? 'low' : 'healthy')
+      rows.forEach((row) => assert.equal(label(setRule, row.qty ?? 0, row.low, row.out), asState[websiteState(row)], `website label ${JSON.stringify(row)}`))
+      const wantWebsite = (level: Level) => ids.filter((_, index) => websiteState(rows[index]) === level)
+      sameSet(pill('out_of_stock', setRule), wantWebsite('out'), 'storefront website out pill')
+      sameSet(pill('low_stock', setRule), wantWebsite('low'), 'storefront website low pill')
+      sameSet(pill('in_stock', setRule), wantWebsite('healthy'), 'storefront website in_stock pill')
     })
 
     // Inventory Check (lib/inventoryCheckProducts.ts): the three stock filters and the family flags, read from its source. __out and
@@ -640,8 +681,19 @@ const workerMutants: WorkerMutant[] = [
   { name: 'overview representative: low member needs <', file: STATS, from: "WHEN v.alert_state = 'low' AND m.qty > m.out_threshold AND m.qty <= m.low_threshold THEN 0", to: "WHEN v.alert_state = 'low' AND m.qty > m.out_threshold AND m.qty < m.low_threshold THEN 0" },
   { name: 'overview representative: out member needs <', file: STATS, from: "WHEN v.alert_state = 'out' AND m.qty <= m.out_threshold THEN 0", to: "WHEN v.alert_state = 'out' AND m.qty < m.out_threshold THEN 0" },
   { name: 'a new copy in another style appears (census)', file: 'src/routes/products.ts', from: "  if (stockState === 'out') where.push(`${stockExpr} <= COALESCE", to: "  if (stockState === 'low_only') where.push(`${stockExpr} <= COALESCE(p.low_stock_threshold, 10)`)\n  if (stockState === 'out') where.push(`${stockExpr} <= COALESCE" },
-  { name: 'a storefront copy changes (census, named exception)', file: 'src/routes/portal.ts', from: "if (quantity <= lowThreshold) return 'low_stock'", to: "if (quantity < lowThreshold) return 'low_stock'" },
-  { name: 'the other storefront copy changes (census, named exception)', file: 'src/lib/portalAi.ts', from: "if (quantity <= lowThreshold) return 'low_stock'", to: "if (quantity < lowThreshold) return 'low_stock'" },
+  { name: 'the storefront label uses < for low', file: 'src/routes/portal.ts', from: "if (quantity <= low) return 'low_stock'", to: "if (quantity < low) return 'low_stock'" },
+  { name: 'the storefront label uses < for out', file: 'src/routes/portal.ts', from: "if (quantity <= out) return 'out_of_stock'", to: "if (quantity < out) return 'out_of_stock'" },
+  { name: 'the storefront label ignores the website low level', file: 'src/routes/portal.ts', from: 'const low = rule.low ?? effectiveLowStockThreshold(rule.shop, rawLow)', to: 'const low = effectiveLowStockThreshold(rule.shop, rawLow)' },
+  { name: 'the storefront label ignores the website out level', file: 'src/routes/portal.ts', from: 'const out = rule.out ?? (Number.isFinite(productOut) ? productOut : 0)', to: 'const out = Number.isFinite(productOut) ? productOut : 0' },
+  { name: 'the storefront label falls back to a literal 10', file: 'src/routes/portal.ts', from: 'const low = rule.low ?? effectiveLowStockThreshold(rule.shop, rawLow)', to: 'const low = rule.low ?? Number(rawLow || 10)' },
+  { name: 'the storefront in_stock pill forgets the out clause', file: 'src/routes/portal.ts', from: "if (state === 'in_stock') return `${stockExpr} > ${level.out} AND ${stockExpr} > ${level.low}`", to: "if (state === 'in_stock') return `${stockExpr} > ${level.low}`" },
+  { name: 'the storefront low pill uses <', file: 'src/routes/portal.ts', from: 'AND ${stockExpr} <= ${level.low}`', to: 'AND ${stockExpr} < ${level.low}`' },
+  { name: 'the storefront pills ignore the website out level', file: 'src/routes/portal.ts', from: "out: rule.out === null ? 'COALESCE(p.out_of_stock_threshold, 0)' : String(rule.out),", to: "out: 'COALESCE(p.out_of_stock_threshold, 0)'," },
+  { name: 'the storefront pills ignore the website low level', file: 'src/routes/portal.ts', from: "low: rule.low === null ? lowStockThresholdSql(rule.shop, 'p.low_stock_threshold') : String(rule.low),", to: "low: lowStockThresholdSql(rule.shop, 'p.low_stock_threshold')," },
+  { name: 'the storefront pills fall back to a literal 10', file: 'src/routes/portal.ts', from: "low: rule.low === null ? lowStockThresholdSql(rule.shop, 'p.low_stock_threshold') : String(rule.low),", to: "low: rule.low === null ? 'COALESCE(p.low_stock_threshold, 10)' : String(rule.low)," },
+  { name: 'a new storefront comparison appears (census)', file: 'src/routes/portal.ts', from: "if (quantity <= out) return 'out_of_stock'", to: "if (quantity <= out || quantity <= low) return 'out_of_stock'" },
+  { name: 'the AI assistant copy changes (census, named exception)', file: 'src/lib/portalAi.ts', from: "if (quantity <= outThreshold) return 'out_of_stock'", to: "if (quantity < outThreshold) return 'out_of_stock'" },
+  { name: 'the other AI assistant copy changes (census, named exception)', file: 'src/lib/portalAi.ts', from: "if (quantity <= lowThreshold) return 'low_stock'", to: "if (quantity < lowThreshold) return 'low_stock'" },
   { name: 'a new copy appears (census)', file: 'src/lib/searchMatch.ts', from: "function issueStateClause(key: string, stockExpr: string): string | undefined {", to: "const stray = (q: string) => `${q} <= COALESCE(p.out_of_stock_threshold, 0)`\nfunction issueStateClause(key: string, stockExpr: string): string | undefined {" },
 ]
 for (const mutant of workerMutants) {
