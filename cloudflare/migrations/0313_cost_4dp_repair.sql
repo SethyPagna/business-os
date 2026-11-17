@@ -28,7 +28,7 @@
 -- predicate of ops/queries/health-catalog-cost.sql.
 --
 -- NOT touched, asserted unchanged below: sale_items, return_items, inventory_movements (every cost snapshot), the products cost_review_key,
--- is_active, prices, quantities and updated_at, and every row outside the scope. There is no stored daily-totals table in this schema.
+-- is_active, prices, quantities and updated_at, and every row outside the scope. The stored daily sales totals (sales_daily_totals, 0308) hold revenue and counts computed from the sales tables and read no cost column, and this file does not touch the sales tables, so nothing there needs recomputing.
 -- The history fingerprint is exact: per cost column the sum of the length of its text form and the sum of ROUND(x * 1e6), so history rounded to
 -- 4 decimals is seen (a sum of ROUND(x * 10000) cannot see it).
 --
