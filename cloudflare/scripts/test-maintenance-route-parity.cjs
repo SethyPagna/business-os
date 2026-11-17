@@ -11,7 +11,7 @@ async function main() {
     // K10b: the restore row is written with auditOrThrow; env.auditDown makes that write fail.
     audit: `export const audit=async(env,...args)=>{env.events.push({kind:'audit',args})};
       export const auditOrThrow=async(env,...args)=>{if(env.auditDown)throw new Error('audit store unavailable');env.events.push({kind:'audit',args})}`,
-    permissions: `export const hasPermission=()=>true`,
+    permissions: `export const hasPermission=()=>true;export const isAdminControlUser=()=>true`,
     destructiveStepUp: `export const denyUnlessDefaultAdmin=async()=>null;export const denyUnlessCurrentPassword=async()=>null`,
     acquisitionCostAccess: `export const canViewAcquisitionCosts=()=>true;export const canEditAcquisitionCosts=()=>true`,
     backup: `export const CLOUDFLARE_BACKUP_KEEP=1;export const createCloudflareBackup=()=>{};export const getSystemJob=()=>{};export const linkCloudflareBackupJob=()=>{};export const listCloudflareBackups=()=>{};export const pruneCloudflareBackups=()=>{};export const validateCloudflareBackup=()=>{};

@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { ACQUISITION_COST_TEXT_PATTERNS, acquisitionCostResponses, canViewAcquisitionCosts, canEditAcquisitionCosts } from '../lib/acquisitionCostAccess'
+import { ACQUISITION_COST_TEXT_PATTERNS, acquisitionCostResponses, canViewAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
 import { cacheIdentity } from '../lib/cacheKey'
 import { requireAuth } from '../lib/auth'
