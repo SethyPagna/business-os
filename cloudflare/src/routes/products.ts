@@ -1,4 +1,4 @@
-import { UndoConflictError, UNDO_RECORD_CHANGED_CODE, costRoundedGraphState, mergeCostContinuationGuard, mergeFingerprintDiffersOnlyByCostRounding, readMergeReviewGroups, mergeReviewGroupGuards } from '../lib/undoAppliers'
+import { UndoConflictError, UNDO_RECORD_CHANGED_CODE, costRoundedGraphState, mergeCostContinuationGuard, mergeFingerprintDiffersOnlyByCostRounding, mergeStateFingerprintMatches, readMergeReviewGroups, mergeReviewGroupGuards } from '../lib/undoAppliers'
 import { previewMergeCosts, MergeCostPreviewUnavailableError, type MergeCostStep, type MergeCostPreviewGraph, type MergeCostAuthority } from '../lib/productMergeCostPreview'
 import { assertProductStatusInput, assertProductsActive, catalogProductSql, productStockGuardStatement, productHasStockSql, productStockGuardError } from '../lib/productStockGuard'
 import { Hono, type Context } from 'hono'
@@ -10412,7 +10412,7 @@ app.post('/possible-duplicates/merge', async (c) => {
           catch { return c.json({ code: 'merge_state_conflict', error: 'The previous merge changed. Refresh before continuing.' }, 409) }
         }
         if (!reversal || saved?.status !== 'applied' || reversal.fingerprintPending
-          || await mergeStateFingerprint(db, [reversal], resolveGuards) !== reversal.mergedStateFingerprint) {
+          || !await mergeStateFingerprintMatches(db, [reversal], String(reversal.mergedStateFingerprint), resolveGuards)) {
           return c.json({ code: 'merge_state_conflict', error: 'The previous merge changed. Refresh before continuing.' }, 409)
         }
       }

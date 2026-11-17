@@ -1049,6 +1049,74 @@ const COST_COLUMNS: Readonly<Record<string, readonly string[]>> = {
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
 
+// A receipt saved BEFORE a deploy reads some tables with SELECT * (the graph receipt of every v3 merge, the full-lot fingerprint of a merge that wrote a kept
+// lot), so it holds the column list the table had then. Migration 0311 added product_batches.merge_deactivated_at, so every merge recorded by the previous
+// build would otherwise refuse to undo or redo once the deploy has run. A saved receipt equals live state when the ONLY difference is a column listed here
+// for that table and the cell is NULL in every live row (a lot a later merge marked is a real change and refuses); the live rows are then projected onto the
+// saved column order. The list is explicit and keyed by table: nothing else widens. The deploy's other migrations (0312 triggers, 0313 data, 0315 indexes) add
+// no column and rebuild no table that a receipt reads.
+const RECEIPT_ADDED_COLUMNS: Readonly<Record<string, readonly string[]>> = { product_batches: ['merge_deactivated_at'] }
+// The receipt read keys (mergeFingerprintReads) that serialise a table in full.
+const RECEIPT_KEY_TABLE: Readonly<Record<string, string>> = { batches: 'product_batches', casBatchMetadata: 'product_batches' }
+const receiptAddedColumns = (readKey: string): readonly string[] => RECEIPT_ADDED_COLUMNS[RECEIPT_KEY_TABLE[readKey.split(':')[0]] ?? ''] ?? []
+
+/**
+ * One graph read ([column names, rows]) as the live schema serialises it, projected onto the saved column list; null when the live list is not the saved
+ * list plus allow-listed added columns, or an added cell is not NULL in some row. A row is an array of groups of up to 15 cells, so it is re-grouped.
+ */
+function projectGraphEntryOntoSaved(readKey: string, savedEntry: unknown[], liveEntry: unknown[]): unknown[] | null {
+  const allowed = receiptAddedColumns(readKey)
+  const savedColumns = savedEntry[0], liveColumns = liveEntry[0], liveRows = liveEntry[1]
+  if (!allowed.length || !Array.isArray(savedColumns) || !Array.isArray(liveColumns) || !Array.isArray(liveRows)) return null
+  const keep: number[] = [], drop: number[] = []
+  liveColumns.forEach((name, index) => (typeof name === 'string' && !savedColumns.includes(name) ? drop : keep).push(index))
+  if (!drop.length || drop.some((index) => !allowed.includes(liveColumns[index] as string))) return null
+  if (!same(keep.map((index) => liveColumns[index]), savedColumns)) return null
+  const rows: unknown[] = []
+  for (const row of liveRows) {
+    if (!Array.isArray(row) || !row.every(Array.isArray)) return null
+    const cells = (row as unknown[][]).flat()
+    if (cells.length !== liveColumns.length || drop.some((index) => !same(cells[index], ['null', null]))) return null
+    rows.push(chunk(keep.map((index) => cells[index]), GRAPH_GROUP_SIZE))
+  }
+  return [savedColumns, rows]
+}
+
+/** A live fingerprint row without the allow-listed added columns the saved row lacks, when each is NULL; otherwise the row as it is (and so unequal). */
+function dropAddedRowColumns(readKey: string, savedRow: unknown, liveRow: unknown): unknown {
+  const allowed = receiptAddedColumns(readKey)
+  if (!allowed.length || !isRecord(savedRow) || !isRecord(liveRow)) return liveRow
+  const extra = Object.keys(liveRow).filter((field) => !Object.hasOwn(savedRow, field))
+  if (!extra.length || extra.some((field) => !allowed.includes(field) || liveRow[field] !== null)) return liveRow
+  return Object.fromEntries(Object.entries(liveRow).filter(([field]) => !extra.includes(field)))
+}
+
+/** The plain merge fingerprint: do the two differ only by the columns a deploy's migration added (NULL live), nothing else? Never accepts rounding. */
+export function mergeFingerprintAddedColumnsOnly(saved: string, live: string): boolean {
+  let a: unknown, b: unknown
+  try { a = JSON.parse(saved); b = JSON.parse(live) } catch { return false }
+  if (!isRecord(a) || !isRecord(b)) return false
+  const keys = Object.keys(a)
+  if (keys.length !== Object.keys(b).length || keys.some((key) => !Object.hasOwn(b, key))) return false
+  return keys.every((key) => Array.isArray(a[key]) && Array.isArray(b[key]) && same(a[key], (b[key] as unknown[]).map((row, index) => dropAddedRowColumns(key, (a[key] as unknown[])[index], row))))
+}
+
+/** The graph receipt text: do the two differ only by the columns a deploy's migration added (NULL live), nothing else? Never accepts rounding. */
+export function mergeGraphStateAddedColumnsOnly(saved: string, live: string): boolean {
+  let a: unknown, b: unknown
+  try { a = JSON.parse(saved); b = JSON.parse(live) } catch { return false }
+  if (!isRecord(a) || !isRecord(b)) return false
+  const keys = Object.keys(a)
+  if (keys.length !== Object.keys(b).length || keys.some((key) => !Object.hasOwn(b, key))) return false
+  return keys.every((key) => {
+    const savedEntry = a[key], liveEntry = b[key]
+    if (!Array.isArray(savedEntry) || !Array.isArray(liveEntry) || savedEntry.length !== 2 || liveEntry.length !== 2) return false
+    if (same(savedEntry, liveEntry)) return true
+    const projected = same(savedEntry[0], liveEntry[0]) ? null : projectGraphEntryOntoSaved(key.split(':')[0], savedEntry, liveEntry)
+    return projected !== null && same(savedEntry, projected)
+  })
+}
+
 /** True when `live` is `saved` stored to 4 places and is not `saved` itself. Both must be numbers: NULL is never rounding. */
 function isCostRounding(saved: unknown, live: unknown): boolean {
   return isCostRoundingOf(saved, live)
@@ -1064,7 +1132,10 @@ export function mergeFingerprintDiffersOnlyByCostRounding(saved: string, live: s
   for (const key of keys) {
     const columns = COST_COLUMNS[key]
     if (!columns) { if (!same(a[key], b[key])) return false; continue }
-    const savedRows = a[key], liveRows = b[key]
+    const savedRows = a[key]
+    let liveRows = b[key]
+    // A column the deploy added (NULL in every live row) is not a difference (RECEIPT_ADDED_COLUMNS).
+    if (Array.isArray(savedRows) && Array.isArray(liveRows) && RECEIPT_KEY_TABLE[key]) liveRows = liveRows.map((row, index) => dropAddedRowColumns(key, savedRows[index], row))
     if (!Array.isArray(savedRows) || !Array.isArray(liveRows) || savedRows.length !== liveRows.length) return false
     for (let index = 0; index < savedRows.length; index += 1) {
       const savedRow = savedRows[index], liveRow = liveRows[index]
@@ -1108,10 +1179,18 @@ export function mergeGraphStateCostRounding(saved: string, live: string): Map<st
   const roundedColumns = new Map<string, boolean>()
   let revisions: { saved: unknown; live: unknown } | null = null
   for (const key of keys) {
-    const savedEntry = a[key], liveEntry = b[key]
-    if (!Array.isArray(savedEntry) || !Array.isArray(liveEntry) || savedEntry.length !== 2 || liveEntry.length !== 2) return null
+    const savedEntry = a[key]
+    const liveRaw = b[key]
+    if (!Array.isArray(savedEntry) || !Array.isArray(liveRaw) || savedEntry.length !== 2 || liveRaw.length !== 2) return null
+    let liveEntry: unknown[] = liveRaw
     const columns = savedEntry[0]
-    if (!same(columns, liveEntry[0]) || !Array.isArray(columns)) return null
+    if (!Array.isArray(columns)) return null
+    // A column the deploy added (NULL in every live row) is projected away; the rest of the comparison is unchanged (RECEIPT_ADDED_COLUMNS).
+    if (!same(columns, liveEntry[0])) {
+      const projected = projectGraphEntryOntoSaved(key.split(':')[0], savedEntry, liveEntry)
+      if (!projected) return null
+      liveEntry = projected
+    }
     const base = key.split(':')[0]
     const costColumns = COST_COLUMNS[base]
     const savedRows = savedEntry[1], liveRows = liveEntry[1]
@@ -1165,6 +1244,14 @@ export function mergeGraphStateCostRounding(saved: string, live: string): Map<st
 }
 
 export const mergeGraphStateDiffersOnlyByCostRounding = (saved: string, live: string): boolean => mergeGraphStateCostRounding(saved, live) !== null
+
+/** The live fingerprint (its in-transaction guards pushed to `guards`) equals the saved one, or differs only by a column a deploy's migration added. */
+export async function mergeStateFingerprintMatches(
+  db: ReturnType<typeof getDb>, reversals: MergeReversal[], saved: string, guards?: AtomicMergeStatement[],
+): Promise<boolean> {
+  const live = await mergeStateFingerprint(db, reversals, guards)
+  return live === saved || mergeFingerprintAddedColumnsOnly(saved, live)
+}
 
 async function assertMergeStateUnchanged(
   db: ReturnType<typeof getDb>, reversals: MergeReversal[], expected?: string, transactionGuards?: AtomicMergeStatement[],
@@ -3673,11 +3760,23 @@ export async function mergeCostContinuationGuard(db: ReturnType<typeof getDb>, r
   const state = reversal.costReviewState
   if (!state || !mergeReplayStateValid(state, state.generation)) throw new UndoConflictError('The previous merge has no current cost dependency receipt.')
   const { graph } = await prepareAtomicMergeGraphReceipt(db, reversal)
-  const predicate = mergeReplayGraphPredicate(reversal, state, graph)
-  const condition = `EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@continuationSnapshot AND kind='product.merge' AND status='applied' AND payload_json IS @continuationPayload) AND (${predicate.sql})`
-  const params = { ...predicate.params, continuationSnapshot: snapshotId, continuationPayload: payload }
-  if (!await db.prepare(`SELECT 1 AS valid WHERE ${condition}`).get(params)) throw new UndoConflictError('The previous merge cost dependencies changed.')
-  return { sql: `SELECT CASE WHEN ${condition} THEN 1 ELSE json_extract('', '$') END AS merge_cost_continuation_guard`, params }
+  const build = (graphState: string) => {
+    const predicate = mergeReplayGraphPredicate(reversal, { ...state, graph_state: graphState }, graph)
+    return {
+      condition: `EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@continuationSnapshot AND kind='product.merge' AND status='applied' AND payload_json IS @continuationPayload) AND (${predicate.sql})`,
+      params: { ...predicate.params, continuationSnapshot: snapshotId, continuationPayload: payload },
+    }
+  }
+  let guard = build(state.graph_state)
+  if (!await db.prepare(`SELECT 1 AS valid WHERE ${guard.condition}`).get(guard.params)) {
+    // Only after the exact guard failed is the live receipt read: a receipt saved before a deploy lacks a column its migration added (RECEIPT_ADDED_COLUMNS).
+    // The guard then compares the live graph with itself at commit, so a race is still caught.
+    const live = (await db.prepare(`SELECT ${graph.sql} AS state`).get<{ state: unknown }>(graph.params))?.state
+    if (typeof live !== 'string' || !mergeGraphStateAddedColumnsOnly(state.graph_state, live)) throw new UndoConflictError('The previous merge cost dependencies changed.')
+    guard = build(live)
+    if (!await db.prepare(`SELECT 1 AS valid WHERE ${guard.condition}`).get(guard.params)) throw new UndoConflictError('The previous merge cost dependencies changed.')
+  }
+  return { sql: `SELECT CASE WHEN ${guard.condition} THEN 1 ELSE json_extract('', '$') END AS merge_cost_continuation_guard`, params: guard.params }
 }
 
 async function finalizeMergeCostGraph(
