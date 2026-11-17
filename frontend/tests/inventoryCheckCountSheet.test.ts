@@ -329,7 +329,7 @@ await browser.run('PASS Inventory count sheet and list: aligned columns, count e
   await waitFor('Escape returned focus to the status icon', focusIs(statusOf(3)))
   await openPopover(3)
   await browser.mouseClick('[data-popover-total]')
-  await browser.mouseClick('[data-selected-count]')
+  await browser.mouseClick('[data-inventory-check-sheet-header]') // a neutral spot outside the popover (the count text became sr-only, a pill on Submit)
   await waitFor('popover closed by an outside tap', "document.querySelector('[data-inventory-check-popover]') === null")
   await waitFor('an outside tap returned focus to the status icon', focusIs(statusOf(3)))
   await openPopover(3)

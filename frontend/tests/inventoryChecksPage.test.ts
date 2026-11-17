@@ -584,7 +584,7 @@ try {
   submitFailure = 'unknown'
   await counting.click(barAction('submit')); await confirmInDialog(counting, 'Submit')
   assert.ok(counting.text().includes('Save not confirmed'), 'an unconfirmed submit says so')
-  assert.equal(barAction('submit').textContent.trim(), 'retry', 'and the main action becomes Retry')
+  assert.equal(barAction('submit').textContent.trim().replace(/\d+$/, ''), 'retry', 'and the main action becomes Retry')
   assert.equal(propsOf(inside(12, 'data-check-count')).readOnly, true, 'the rows are frozen while it is unconfirmed')
   submitFailure = 'none'
   await counting.click(barAction('submit'))

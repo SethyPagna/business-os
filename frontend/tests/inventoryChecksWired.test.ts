@@ -3,6 +3,8 @@ import { createHarness } from './mountedComponentHarness.ts'
 import { APP_NAVIGATION_EVENT } from '../src/app/pathRouting.ts'
 import * as dirtyWork from '../src/utils/dirtyWork.ts'
 import { appendQuery, buildQueryString, type QueryParams } from '../src/api/query.ts'
+import { canonicalProductsQuery, loadWired, wiredListParams, wiredResult, type WiredDeps, type WiredList, type WiredRaw } from '../src/components/inventory/inventoryWired.ts'
+import { checkDaysOf, dayChipsOf } from '../src/components/inventory/inventoryCheckDays.ts'
 
 // INV-B S4b: the mounted Inventory Check page against fixture servers that follow the S4a contract (GET /api/inventory-checks/list and /overlay, 404 while ic_wired is off).
 //   - a viewer who may not see stock reads no stock from the shared Products store (the store is not used for them; the server cuts stock from its own answer)
@@ -84,6 +86,36 @@ async function mount(permissions: Record<string, boolean> = FIELDS) {
 }
 const sync = (detail: Record<string, unknown>) => window.dispatchEvent(new CustomEvent('sync:update', { detail }))
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+// ---- pure: the date chips (owner, 17 Nov). The server sends summary.days = [{ day: 'YYYY-MM-DD', count }] with the status counts, and accepts checkedOn=YYYY-MM-DD. ----
+{
+  assert.equal(wiredListParams({ checkedOn: '2026-11-12', page: 1, pageSize: 20, sortBy: 'name', sortDirection: 'asc' }).checkedOn, '2026-11-12', 'checkedOn is on the wire')
+  assert.equal(Object.hasOwn(wiredListParams({ checkedOn: '', page: 1 }), 'checkedOn'), false, 'an empty date is not sent')
+  assert.equal(canonicalProductsQuery(wiredListParams({ checkedOn: '2026-11-12', page: 1, pageSize: 20, sortBy: 'name', sortDirection: 'asc' })), null, 'a dated read is never Products\' own answer')
+  const rawOf = (summary: Record<string, unknown> | undefined): WiredRaw => ({ list: { items: [{ id: 1, name: 'A' }], total: 1, page: 1, pageSize: 20 } as never, overlay: new Map(), lots: new Map(), branches: [{ id: 1, name: 'B' }], branchId: 1, extras: { summary: summary as never } })
+  const days = [{ day: '2026-11-12', count: 2 }, { day: '2026-11-10', count: 1 }]
+  const first = wiredResult(rawOf({ ok: 2, issue: 1, not_checked: 4, total: 7, days }))
+  assert.deepEqual(first.summary?.days, days, 'the days ride the summary')
+  assert.deepEqual(wiredResult(rawOf(undefined), first).summary?.days, days, 'a page step brings no summary: the last days stay')
+  assert.equal(wiredResult(rawOf({ ok: 2, issue: 1, not_checked: 4, total: 7 }), first).summary?.days, undefined, 'a fresh summary without days (too many products to list them) does NOT keep the old chips')
+  assert.equal(wiredResult(rawOf({ ok: 2, issue: 1, not_checked: 4, total: 7, tooLarge: true, days }), first).summary?.tooLarge, true)
+  assert.deepEqual(checkDaysOf(wiredResult(rawOf({ ok: 0, issue: 0, not_checked: 1, total: 1, tooLarge: true, days })).summary), [], 'tooLarge: no chips, whatever days came with it')
+  // the chip list: newest first, malformed or empty entries dropped, the chosen day kept on the rail
+  assert.deepEqual(checkDaysOf({ days: [{ day: '2026-11-10', count: 1 }, { day: '2026-11-12', count: 2 }, { day: '2026-11-12', count: 9 }, { day: 'garbage', count: 1 }, { day: '2026-11-11', count: 0 }, { day: '2026-11-09', count: 1.5 }, null] }), [{ day: '2026-11-12', count: 2 }, { day: '2026-11-10', count: 1 }], 'sorted newest first; a repeat, a bad date and a zero or fractional count are dropped')
+  assert.deepEqual(checkDaysOf({ days: 'nope' }), []); assert.deepEqual(checkDaysOf(undefined), []); assert.deepEqual(checkDaysOf({}), [])
+  assert.deepEqual(dayChipsOf([{ day: '2026-11-12', count: 2 }], '2026-11-05'), [{ day: '2026-11-12', count: 2 }, { day: '2026-11-05' }], 'a chosen day the summary no longer lists stays on the rail, without a count')
+  assert.deepEqual(dayChipsOf([{ day: '2026-11-12', count: 2 }], ''), [{ day: '2026-11-12', count: 2 }])
+  assert.deepEqual(dayChipsOf([{ day: '2026-11-12', count: 2 }], 'not a day'), [{ day: '2026-11-12', count: 2 }], 'a malformed chosen day adds nothing')
+  // a sole branch is left out of the query EXCEPT for a dated read (the date is per branch, as a status is)
+  const wire: string[] = []
+  const deps: WiredDeps = { readList: async (params: QueryParams) => { wire.push(buildQueryString(params)); return { items: [{ id: 1, name: 'A', branch_stock: [{ branch_id: 1, branch_name: 'B', quantity: 1 }] }], total: 1, page: 1, pageSize: 20, wired: true, projected: false } as WiredList }, readOverlay: async () => ({ items: [] }), peek: () => null, prime: () => {}, rank: () => null }
+  const access = { stock: true, barcode: true, received: false }
+  const known = { branches: [{ id: 1, name: 'B' }] }
+  await loadWired({ params: { page: 1, pageSize: 20, sortBy: 'name', sortDirection: 'asc', branchId: 1 }, known, skipSummary: false, access, deps })
+  await loadWired({ params: { page: 1, pageSize: 20, sortBy: 'name', sortDirection: 'asc', branchId: 1, checkedOn: '2026-11-12' }, known, skipSummary: false, access, deps })
+  assert.equal(wire[0].includes('branchId'), false, 'sole branch, no restriction: the branch is left out (the same read as Products)')
+  assert.ok(wire[1].includes('branchId=1') && wire[1].includes('checkedOn=2026-11-12'), 'sole branch, dated read: the branch is named')
+}
 
 try {
   // ---- blind count: the shared store holds Products' rows WITH stock; this viewer's page must not read it ----
@@ -171,7 +203,33 @@ try {
     assert.equal(overlays.length, 0, 'it is dropped before any overlay is asked for it')
     await surfaceB.unmount()
   }
-  console.log('inventoryChecksWired passed: blind store, changed-elsewhere hint, by-id refresh, ranked search, late answers')
+  // ---- date chips on the page: the rail comes with the summary, a tap sends checkedOn (and the branch), All sends none, no days means no rail ----
+  {
+    const days = [{ day: '2026-11-10', count: 1 }, { day: '2026-11-12', count: 3 }]
+    listAnswer = query => listBody([productRow(12, 'Sequence product', 8)], { summary: { ok: 3, issue: 1, not_checked: 5, total: 9, days } })
+    const surface = await mount()
+    const chips = () => surface.findAll(node => node.getAttribute('data-day-chip') !== null)
+    assert.deepEqual(chips().map(node => node.getAttribute('data-day-chip')), ['', '2026-11-12', '2026-11-10'], 'All, then newest first whatever order the server sent')
+    assert.deepEqual(chips().map(node => node.textContent), ['All', '12/11/20263', '10/11/20261'], 'dd/mm/yyyy and the count')
+    await surface.click(chips()[1])
+    await surface.waitFor(() => lists.length === 2, 'the dated read')
+    assert.equal(lists[1].get('checkedOn'), '2026-11-12'); assert.equal(lists[1].get('branchId'), '1')
+    await surface.waitFor(() => chips().find(node => node.getAttribute('data-day-chip') === '2026-11-12')?.getAttribute('aria-pressed') === 'true', 'the chip is pressed')
+    assert.equal(chips().length, 3, 'the rail keeps every date')
+    await surface.click(chips()[0])
+    await surface.waitFor(() => chips()[0].getAttribute('aria-pressed') === 'true', 'All is pressed again')
+    assert.ok(lists.every((query, index) => index === 1 ? query.get('checkedOn') === '2026-11-12' : !query.has('checkedOn')), 'every other read carries no date')
+    await surface.unmount()
+    listAnswer = () => listBody([productRow(12, 'Sequence product', 8)], { summary: { ok: 0, issue: 0, not_checked: 1, total: 1, tooLarge: true, days } })
+    const large = await mount()
+    assert.equal(large.findAll(node => node.getAttribute('data-day-chip') !== null).length, 0, 'tooLarge: no chips')
+    await large.unmount()
+    listAnswer = () => listBody([productRow(12, 'Sequence product', 8)])
+    const none = await mount()
+    assert.equal(none.findAll(node => node.getAttribute('data-day-chip') !== null).length, 0, 'no days: no chips')
+    await none.unmount()
+  }
+  console.log('inventoryChecksWired passed: blind store, changed-elsewhere hint, by-id refresh, ranked search, late answers, date chips')
 } finally {
   await harness.close()
 }

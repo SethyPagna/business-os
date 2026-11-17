@@ -31,6 +31,7 @@ import type { InventoryCheckListStatus, InventoryCheckLotRow, InventoryCheckObse
 import InventoryCheckControls, { countActiveFilters, type InventoryCheckFilters } from './InventoryCheckControls.tsx'
 import InventoryCheckRows, { InventoryCheckSheetHeader, type InventoryCheckFocusRequest } from './InventoryCheckRows.tsx'
 import InventoryCheckListRows, { InventoryCheckListHeader, InventoryCheckSelectionBar, type ListDraft } from './InventoryCheckListRows.tsx'
+import { checkDaysOf, dayChipsOf, type CheckDay } from './inventoryCheckDays.ts'
 import { finiteQuantity, parseCount } from './InventoryCheckCountEditor.tsx'
 import { fixStockOpening, fixStockRequestId, type FixStockOpening } from './inventoryCheckFixStock.ts'
 import { countTextFromLots, incompleteLotAnswers, lotSubmissionLine, lotTotals, rowSetPlan, splitSubmission, staleLotFigures, stockedDatesOf, uncountedDates, type SubmissionLotLine } from './inventoryCheckLots.ts'
@@ -82,7 +83,7 @@ type ProductsResult = {
   /** The rows came from the wired list (ic_wired): the Products rows plus the overlay, sorted by created or name. */
   wired?: boolean
   /** Check counts and filter options come with page 1 and with a filter change, never with a page step (the page keeps the last ones). */
-  summary?: CheckSummary & { pending?: number }
+  summary?: CheckSummary & { pending?: number; /** The dates of the last counts (wired list only), newest first. */ days?: CheckDay[]; tooLarge?: boolean }
   facets?: { brands?: string[]; categories?: string[] }
   facetsLimited?: { brands: boolean; categories: boolean }
   /** The rules behind the rows' promotion prices (wired answers to a viewer with the price grant). */
@@ -123,7 +124,7 @@ const COUNTS_WORK_KEY = 'inventory-check:counts'
 const MAX_SUBMISSION = 500
 /** Choosing a grouping puts the sort back at the name order. */
 const NAME_ORDER = { sortBy: 'name', sortDirection: 'asc' as const }
-const initialFilters: InventoryCheckFilters = { branchId: '', stockState: '', checkState: '', brand: '', category: '', sortBy: 'name', sortDirection: 'asc', group: '' }
+const initialFilters: InventoryCheckFilters = { branchId: '', stockState: '', checkState: '', checkedOn: '', brand: '', category: '', sortBy: 'name', sortDirection: 'asc', group: '' }
 /** The groupings this server offered (null: it answered without any; undefined: it has not answered), kept for the tab: a branch change remounts the page. */
 let knownGroupings: readonly string[] | null | undefined
 /** Typing waits for a pause this long before the list is read; Enter, the camera and the scanner gun read at once. */
@@ -340,7 +341,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const current = () => mounted.current && isCurrent() && isActorReadScopeCurrent(writeScope.readScope, false) && isActorWriteIdentityCurrent(writeScope.writeIdentity)
   const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   const { group: groupChoice, ...listFilters } = filters
-  const params: QueryParams = { ...listFilters, query: appliedQuery, page, pageSize, sessionId, checkState: section === 'issues' ? 'issue' : filters.checkState }
+  // The date chips filter the product list only: inside a session and on the Issues tab the date is not part of the question.
+  const params: QueryParams = { ...listFilters, query: appliedQuery, page, pageSize, sessionId, checkState: section === 'issues' ? 'issue' : filters.checkState, checkedOn: !sessionId && section === 'products' ? filters.checkedOn : '' }
   // While a search is typed (or a code is scanned into the box) no grouping is asked for, on both servers: the answer is the flat list, from the device search index and the Products store on the wired path
   // (no extra read), and a family's date or header count can never be computed over fewer rows than the page shows. The grouping returns, with the same collapse rules, once the search is cleared.
   const groupWire = !sessionId && section !== 'sessions' && !appliedQuery.trim() ? groupToAsk(groupChoice, knownGroupings) : null
@@ -415,7 +417,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         } else {
           const stepScope = JSON.stringify([{ ...params, page: undefined }, section, refresh])
           // ic_wired: the Products rows plus the overlay. Only the products list of one branch or all branches: a session's own list and the all-branches Issues view keep today's path.
-          if (!sessionId && wiredMode() !== 'old' && (!params.checkState || branchId)) {
+          if (!sessionId && wiredMode() !== 'old' && ((!params.checkState && !params.checkedOn) || branchId)) {
             const epoch = currentDataEpoch()
             const seed = wiredSeed.current
             wiredSeed.current = null
@@ -1059,6 +1061,12 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     ...(data?.capabilities?.fixStock && summary?.pending !== undefined ? [{ value: 'pending', label: tr('inventory_check_approval_pending', 'Waiting for approval'), count: summary.pending }] : [])]
   const rowEditing = Object.values(editingRows).some(Boolean)
   const controlsLocked = busy || !!createAttempt.current || rowEditing
+  // The date chips (the wired list at one branch only: counts are per branch, and the server sends no days for too many products). The chosen day stays on the rail even if the summary stops listing it, so "All" is always one tap away.
+  const dayChips = wiredNow && !sessionId && section === 'products' && branchId ? dayChipsOf(checkDaysOf(data?.summary), filters.checkedOn ?? '') : []
+  // The row stays on screen while a read is under way (the chips wait, the counting buttons are disabled): it never flickers away with the list.
+  const barShown = checkInfo && section !== 'sessions' && (access.canCheck || dayChips.length > 0)
+  // "Not checked" products have no date, so a date beside it would always be an empty list: choosing a date leaves that status.
+  function chooseDay(day: string) { changeFilters({ checkedOn: day, ...(day && filters.checkState === 'not_checked' ? { checkState: '' } : {}) }) }
   // Typing is read after a pause. A row being edited holds the list still (the controls are disabled), so the pause restarts once it is done.
   useEffect(() => {
     if (query === appliedQuery || controlsLocked) return
@@ -1083,7 +1091,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   // The status choice exists once an answer has shown which list this is: the check-status list (ic_simple) has it everywhere; the older list has it only inside a session
   // (its unstarted | done | issue), and the Issues tab elsewhere -- so no choice is drawn for it on the Products list, and none before the first answer.
   const statusFilter = section !== 'issues' && !!data && (data.simple === true || !!sessionId)
-  const filtersActive = countActiveFilters(filters, { branch: branches.length > 1, state: statusFilter, group: !!grouping }) > 0 || !!query.trim()
+  const filtersActive = countActiveFilters(filters, { branch: branches.length > 1, state: statusFilter, group: !!grouping }) > 0 || !!query.trim() || !!filters.checkedOn
   const sessionFiltersActive = !!(sessionFilters.status || sessionFilters.mine || sessionFilters.waiting || sessionRange.startDate || sessionRange.endDate || (branches.length > 1 && !!branchId))
   // The older list (ic_simple off) draws the all-sessions Issues view from the answer's `issues` (reason, counted figure, the session), not from product rows.
   const oldIssues = section === 'issues' && !sessionId && !!data && data.simple !== true
@@ -1224,7 +1232,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
             : <>
               {checkInfo && !(wiredNow && statusFilter && branchId) ? <StatsStrip layout="scroll" cards={cards} t={t} loading={loading || !fresh} /> : null}
               {checkInfo && statusFilter && branchId ? <ChipRail label={t('inventory_check_state')} data-inventory-check-status-rail>
-                {statusChips.map(chip => <RailChip key={chip.value || 'all'} selected={filters.checkState === chip.value} disabled={controlsLocked} onClick={() => changeFilters({ checkState: chip.value })}
+                {statusChips.map(chip => <RailChip key={chip.value || 'all'} selected={filters.checkState === chip.value} disabled={controlsLocked} onClick={() => changeFilters({ checkState: chip.value, ...(chip.value === 'not_checked' ? { checkedOn: '' } : {}) })}
                   badge={chip.count === undefined ? undefined : <span className="tabular-nums opacity-70">{chip.count}</span>}>{chip.label}</RailChip>)}
               </ChipRail> : null}
               <div className="flex min-w-0 flex-col gap-1 lg:flex-row lg:items-center lg:gap-2">
@@ -1236,7 +1244,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
                 </fieldset>
                 {contextBar}
               </div>
-              {selecting ? <InventoryCheckSelectionBar selectedCount={selectedIds.length} blocked={submitBlocked} busy={busy} canMarkChecked={access.fields.stock} openGroupsOnly={collapsed.size > 0}
+              {barShown ? <InventoryCheckSelectionBar selectedCount={selectedIds.length} blocked={submitBlocked} busy={busy || !listMode} canMarkChecked={access.fields.stock} openGroupsOnly={collapsed.size > 0}
+                counting={access.canCheck} days={dayChips} checkedOn={filters.checkedOn ?? ''} onCheckedOn={chooseDay} daysDisabled={controlsLocked || !fresh}
                 submitLabel={submitAttempt.current ? t('retry') : undefined} onMarkChecked={markPageChecked} onClear={clearSelection} onSubmit={() => { void submit() }} t={t} /> : null}
               {sheetHeader}
             </>}

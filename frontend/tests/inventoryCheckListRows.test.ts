@@ -267,6 +267,37 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.equal(calls.filter(call => call[0] === 'open').length, start + 1, 'only Enter on the row itself opens; Enter in the count input belongs to the count')
     assert.equal(propsOf(inRow(s, 501, 'data-check-image')).tabIndex, -1, 'the image button is no second tab stop for the same action')
   }],
+  ['the date chips sit in the Submit row: All then each day (newest first) with its count; a tap says which; a viewer who cannot count gets the rail alone', async () => {
+    const taps: string[] = []
+    const days = [{ day: '2026-11-12', count: 3 }, { day: '2026-11-10', count: 12 }]
+    const props = (extra: Record<string, unknown> = {}) => ({ selectedCount: 0, blocked: '', busy: false, canMarkChecked: true, t: base.t, onMarkChecked: () => {}, onClear: () => {}, onSubmit: () => {}, days, checkedOn: '', onCheckedOn: (day: string) => { taps.push(day) }, ...extra })
+    const bar = await mountPart('InventoryCheckSelectionBar', props())
+    const chips = () => bar.findAll(node => node.getAttribute('data-day-chip') !== null)
+    const rail = bar.find(node => node.getAttribute('data-inventory-check-days-rail') !== null, 'date rail')
+    assert.deepEqual(chips().map(node => node.getAttribute('data-day-chip')), ['', '2026-11-12', '2026-11-10'], 'All, then newest first')
+    assert.deepEqual(chips().map(node => node.textContent), ['All', '12/11/20263', '10/11/202612'], 'dd/mm/yyyy with the count beside it')
+    assert.ok(rail.contains(chips()[1]) && bar.find(node => node.getAttribute('data-inventory-check-selection-bar') !== null, 'bar').contains(rail), 'the rail is inside the Submit row')
+    assert.equal(rail.getAttribute('data-chip-rail'), '', 'the shared ChipRail: sideways scroll, fades, drag and arrow keys')
+    assert.ok(rail.className.includes('flex-1') && rail.className.includes('min-w-0'), 'it takes the empty space of the row and may shrink')
+    assert.deepEqual(chips().map(node => node.getAttribute('aria-pressed')), ['true', 'false', 'false'], 'All is pressed while no day is chosen')
+    assert.ok((chips()[1].getAttribute('title') || '').includes('12/11/2026') && (chips()[1].getAttribute('title') || '').includes('3'), 'the tooltip says what the count is')
+    await bar.click(chips()[2]); await bar.click(chips()[0])
+    assert.deepEqual(taps, ['2026-11-10', ''], 'a chip tap says which day, All says none')
+    await bar.render(props({ checkedOn: '2026-11-10' }))
+    assert.deepEqual(chips().map(node => node.getAttribute('aria-pressed')), ['false', 'false', 'true'], 'the chosen day is pressed')
+    await bar.render(props({ daysDisabled: true }))
+    assert.ok(chips().every(node => propsOf(node).disabled === true), 'the chips wait while the list changes')
+    await bar.render(props({ counting: false }))
+    assert.equal(bar.findAll(node => node.getAttribute('data-selection-action') !== null).length, 0, 'a viewer who cannot count: no mark, clear or Submit')
+    assert.equal(chips().length, 3, 'but the chips')
+    await bar.render(props({ days: [] }))
+    assert.equal(chips().length, 0, 'no days, no chips')
+    assert.equal(bar.findAll(node => node.getAttribute('data-selection-action') === 'submit').length, 1, 'the counting row is as it was')
+    await bar.render(props({ days: [], counting: false }))
+    assert.equal(bar.findAll(node => node.getAttribute('data-inventory-check-selection-bar') !== null).length, 0, 'nothing to count and no dates: nothing is drawn')
+    await bar.render(props({ onCheckedOn: undefined }))
+    assert.equal(chips().length, 0, 'a bar with no handler draws no chips')
+  }],
   ['Enter in a valid count moves to the next row’s count input, unless the page handled it', async () => {
     const entered: Array<number | string> = [], invalidEnters: string[] = []
     let handled = false
@@ -322,7 +353,9 @@ const cases: Array<[string, () => Promise<void>]> = [
     await bar.render(props({ selectedCount: 3 }))
     assert.equal(bar.find(node => node.getAttribute('data-selected-count') !== null, 'count').textContent, '3 counted')
     assert.equal(submit().getAttribute('aria-disabled'), null, 'Submit is ready')
-    assert.equal(submit().textContent.trim(), 'Submit', 'the main action keeps its word')
+    assert.equal(submit().textContent.trim().replace(/\d+$/, ''), 'Submit', 'the main action keeps its word (and wears the count as a pill)')
+    assert.equal(bar.find(node => node.getAttribute('data-selected-pill') !== null, 'count pill').textContent, '3', '"3 counted" moved into a pill on Submit')
+    assert.ok(submit().contains(bar.find(node => node.getAttribute('data-selected-pill') !== null, 'count pill')), 'the pill is inside the Submit button')
     for (const action of ['mark', 'clear']) {
       const button = bar.find(node => node.getAttribute('data-selection-action') === action, action)
       assert.equal(button.textContent.trim(), '', `${action} is an icon`)
@@ -341,7 +374,7 @@ const cases: Array<[string, () => Promise<void>]> = [
     await bar.render(props({ selectedCount: 2, busy: true }))
     assert.equal(submit().getAttribute('aria-disabled'), 'true', 'busy: Submit waits')
     await bar.render(props({ selectedCount: 2, submitLabel: 'Retry' }))
-    assert.equal(submit().textContent.trim(), 'Retry', 'an unconfirmed attempt offers Retry in the same place')
+    assert.equal(submit().textContent.trim().replace(/\d+$/, ''), 'Retry', 'an unconfirmed attempt offers Retry in the same place')
     await bar.render(props({ selectedCount: 2, canMarkChecked: false }))
     assert.equal(bar.findAll(node => node.getAttribute('data-selection-action') === 'mark').length, 0, 'no stock figure, no whole-page mark')
   }],

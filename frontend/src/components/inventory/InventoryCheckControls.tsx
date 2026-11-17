@@ -10,6 +10,8 @@ export type InventoryCheckFilters = {
   stockState: string
   /** not_checked | in_check | ok | issue; inside a session the three item states in_check | ok | issue. */
   checkState: string
+  /** 'YYYY-MM-DD': only the products last counted on that Cambodia business day (the date chips in the Submit row, wired list only). '' = every date. */
+  checkedOn?: string
   brand: string
   category: string
   sortBy: string

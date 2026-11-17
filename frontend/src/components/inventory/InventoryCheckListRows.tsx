@@ -27,6 +27,8 @@ import type { InventoryCheckFocusRequest } from './InventoryCheckRows.tsx'
 import { UNSAVED_ROW_CLASS } from './inventoryCheckGroups.ts'
 import StockQty from './StockQty.tsx'
 import { rowClickOpens } from './inventoryCheckRowClick.ts'
+import { dayLabel } from './inventoryCheckDays.ts'
+import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 
 /** What a person has entered on one row of the list but not yet submitted. `checked`: the count was filled from Now by the row's check button. */
 export type ListDraft = { selected: boolean; count: string; checked: boolean; note: string; /** Counts typed per received date (ic_lot_counts); the row's count is their sum. */ lots?: LotDraft; /** The stocked received dates the row listed when a date was last typed on it (so Submit can check, on any page, that none was left out). */ stocked?: readonly StockedDate[] }
@@ -400,22 +402,50 @@ export type InventoryCheckSelectionBarProps = {
   onMarkChecked: () => void
   onClear: () => void
   onSubmit: () => void
+  /** false: a viewer who cannot count gets the date rail alone (no mark, clear or Submit). Default true. */
+  counting?: boolean
+  /** The dates products were last counted on, newest first, each with how many (the server's summary.days). Empty: no rail. */
+  days?: ReadonlyArray<{ day: string; count?: number }>
+  /** The chosen date ('YYYY-MM-DD'), or '' for every date. */
+  checkedOn?: string
+  /** A chip was tapped: its date, or '' for "All". Absent: no rail. */
+  onCheckedOn?: (day: string) => void
+  /** The list is changing: the chips wait like every other control. */
+  daysDisabled?: boolean
   t: InventoryCheckTranslator
 }
 
-/** How many are counted, the two things to do with them as icons, and the main action, which keeps its word. There is no select-all: nothing is ticked until a person answers a row. */
-export function InventoryCheckSelectionBar({ selectedCount, blocked, busy, submitLabel, canMarkChecked, openGroupsOnly = false, onMarkChecked, onClear, onSubmit, t }: InventoryCheckSelectionBarProps) {
+/**
+ * The row of the page's counting actions: mark-the-page and clear as icons, the main action (Submit, which keeps its word and carries how many are counted as a pill), and in the space between them the DATE CHIPS
+ * (owner, 17 Nov): "All" then each day products were last counted on, newest first, each with its count, in one rail that scrolls sideways (fades, drag, arrow keys; the chosen chip scrolls into view).
+ * There is no select-all: nothing is ticked until a person answers a row. A viewer who cannot count still gets the chips.
+ */
+export function InventoryCheckSelectionBar({ selectedCount, blocked, busy, submitLabel, canMarkChecked, openGroupsOnly = false, counting = true, days = [], checkedOn = '', onCheckedOn, daysDisabled = false, onMarkChecked, onClear, onSubmit, t }: InventoryCheckSelectionBarProps) {
   const tr = makeTr(t)
   const mark = openGroupsOnly ? tr('inventory_check_mark_open_groups', 'Mark every product in the open groups as matching stock') : tr('inventory_check_mark_page_checked', 'Mark every product on this page as matching stock')
   const clear = tr('inventory_check_clear_selection', 'Clear selection')
   const submit = submitLabel || tr('inventory_check_submit', 'Submit')
   const countText = selectedCount > 0 ? tr('inventory_check_counted_rows', '{count} counted').replace('{count}', String(selectedCount)) : ''
+  const dayTip = tr('inventory_check_day_tooltip', '{count} products last checked on {date}')
+  const rail = days.length > 0 && onCheckedOn
+    ? <ChipRail label={tr('inventory_check_days_label', 'Last checked on')} className="min-w-0 flex-1" data-inventory-check-days-rail>
+      <RailChip selected={checkedOn === ''} disabled={daysDisabled} data-day-chip="" onClick={() => onCheckedOn('')}>{tr('all', 'All')}</RailChip>
+      {days.map(entry => <RailChip key={entry.day} selected={checkedOn === entry.day} disabled={daysDisabled} data-day-chip={entry.day} title={entry.count === undefined ? dayLabel(entry.day) : dayTip.replace('{count}', String(entry.count)).replace('{date}', dayLabel(entry.day))} onClick={() => onCheckedOn(entry.day)}
+        badge={entry.count === undefined ? undefined : <span className="tabular-nums opacity-70">{entry.count}</span>}>{dayLabel(entry.day)}</RailChip>)}
+    </ChipRail>
+    : <span className="min-w-0 flex-1" aria-hidden="true" />
+  if (!counting && !(days.length > 0 && onCheckedOn)) return null
   return <div data-inventory-check-selection-bar className="flex min-w-0 items-center gap-1 pl-2">
-    {canMarkChecked ? <button type="button" data-selection-action="mark" className={rowIconButton} aria-label={mark} title={mark} disabled={busy} onClick={onMarkChecked}><ListChecks className="h-5 w-5" aria-hidden="true" /></button> : null}
-    <span data-selected-count aria-live="polite" className="min-w-0 flex-1 truncate px-1 text-xs tabular-nums text-gray-600 dark:text-gray-300">{countText}</span>
-    {selectedCount > 0 ? <button type="button" data-selection-action="clear" className={rowIconButton} aria-label={clear} title={clear} disabled={busy} onClick={onClear}><X className="h-5 w-5" aria-hidden="true" /></button> : null}
-    {blocked && selectedCount > 0 ? <InfoHint text={blocked} label={blocked} /> : null}
-    <button type="button" data-selection-action="submit" className="btn-primary inline-flex min-h-11 shrink-0 items-center gap-1 px-3 text-xs aria-disabled:cursor-not-allowed aria-disabled:opacity-60 lg:min-h-10"
-      aria-disabled={blocked || busy || selectedCount === 0 ? true : undefined} title={blocked || submit} onClick={() => { if (!blocked && !busy && selectedCount > 0) onSubmit() }}><Send className="h-4 w-4" aria-hidden="true" />{submit}</button>
+    {counting && canMarkChecked ? <button type="button" data-selection-action="mark" className={rowIconButton} aria-label={mark} title={mark} disabled={busy} onClick={onMarkChecked}><ListChecks className="h-5 w-5" aria-hidden="true" /></button> : null}
+    {rail}
+    {counting ? <>
+      {/* The count is announced as words for a screen reader; the sighted see the pill on Submit. */}
+      <span data-selected-count aria-live="polite" className="sr-only">{countText}</span>
+      {selectedCount > 0 ? <button type="button" data-selection-action="clear" className={rowIconButton} aria-label={clear} title={clear} disabled={busy} onClick={onClear}><X className="h-5 w-5" aria-hidden="true" /></button> : null}
+      {blocked && selectedCount > 0 ? <InfoHint text={blocked} label={blocked} /> : null}
+      <button type="button" data-selection-action="submit" className="btn-primary inline-flex min-h-11 shrink-0 items-center gap-1 px-3 text-xs aria-disabled:cursor-not-allowed aria-disabled:opacity-60 lg:min-h-10"
+        aria-disabled={blocked || busy || selectedCount === 0 ? true : undefined} title={blocked || submit} onClick={() => { if (!blocked && !busy && selectedCount > 0) onSubmit() }}><Send className="h-4 w-4" aria-hidden="true" />{submit}
+        {selectedCount > 0 ? <span data-selected-pill aria-hidden="true" className="rounded-full bg-white/25 px-1.5 text-[10px] font-semibold leading-relaxed tabular-nums">{selectedCount}</span> : null}</button>
+    </> : null}
   </div>
 }
