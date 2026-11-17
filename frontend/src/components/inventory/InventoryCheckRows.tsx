@@ -8,7 +8,7 @@ import ProductImage from '../pos/ProductImage.tsx'
 import ProductNameRail from '../shared/ProductNameRail.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
 import { useCopyFloat } from '../shared/CopyFloat.tsx'
-import { todayStr } from '../../utils/dateHelpers.ts'
+import { computeExpiryStatus } from '../pos/posCore.ts'
 import { fmtDateOnly } from '../../utils/formatters.ts'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import type { InventoryCheckId, InventoryCheckObservation, InventoryCheckPatch, InventoryCheckProduct, InventoryCheckTranslator } from '../../types/inventoryChecks.ts'
@@ -113,12 +113,12 @@ export function InventoryCheckSheetHeader({ t, className = '', ...flags }: Sheet
 
 const rowIconButton = 'inline-flex h-11 min-h-11 w-11 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-gray-600 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50 lg:h-10 lg:min-h-10 lg:w-10 dark:text-gray-300 dark:hover:bg-zinc-800'
 
-/** 'YYYY-MM-DD' expiry as the month-year it is printed with, and how close it is (30 days, the app-wide alert window). */
-function expiryBadge(date: string | null | undefined): { text: string; tone: 'expired' | 'soon' | 'ok'; full: string } | null {
+/** 'YYYY-MM-DD' expiry as the month-year it is printed with, and how close it is: the product's own alert window (30 days when unset), judged by POS's computeExpiryStatus like the detail modal. */
+function expiryBadge(date: string | null | undefined, alertDays?: unknown): { text: string; tone: 'expired' | 'soon' | 'ok'; full: string } | null {
   const match = String(date ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (!match) return null
-  const days = Math.round((Date.parse(`${match[0]}T00:00:00Z`) - Date.parse(`${todayStr()}T00:00:00Z`)) / 86400000)
-  return { text: `${match[2]}/${match[1]}`, tone: days < 0 ? 'expired' : days <= 30 ? 'soon' : 'ok', full: fmtDateOnly(match[0]) }
+  const info = match ? computeExpiryStatus(match[0], alertDays) : null
+  if (!match || !info) return null
+  return { text: `${match[2]}/${match[1]}`, tone: info.status === 'expiring' ? 'soon' : info.status, full: fmtDateOnly(match[0]) }
 }
 
 function CheckRow({ product, observation, pending, error, header, adornment, frozenAttempt, copy, columns, reasonSuggestions, scanHit, onAdvance, canCheck, locked = false, canViewStock = true, canViewCounts = canCheck || canViewStock, t, onOpenProduct, onSave, onEditingChange, onCommitted }: {
@@ -322,7 +322,7 @@ function CheckRow({ product, observation, pending, error, header, adornment, fro
   let shown = 0
 
   const barcode = product.barcode || product.sku
-  const expiry = expiryBadge(product.next_expiry_date)
+  const expiry = expiryBadge(product.next_expiry_date, product.expiry_alert_days)
   const identity: Array<[string, ReactNode]> = []
   if (barcode) identity.push(['barcode', <span {...copy(barcode)} className="break-all">{barcode}</span>])
   if (product.brand) identity.push(['brand', <span {...copy(product.brand)}>{product.brand}</span>])

@@ -106,6 +106,16 @@ try {
       assert.equal(s.findAll(node => node.getAttribute('data-expiry') !== null && row(s, 401).contains(node)).length, 0, 'no expiry date, no badge')
       await s.unmount()
     }],
+    ['the expiry badge uses the OWN alert window of the product (expiry_alert_days), exactly as the detail modal and POS do', async () => {
+      const s = await mount({ canCheck: false, products: [
+        { id: 411, name: 'Short window', quantity: 3, next_expiry_date: offsetDate(20), expiry_alert_days: 7 },
+        { id: 412, name: 'Long window', quantity: 3, next_expiry_date: offsetDate(45), expiry_alert_days: 60 },
+        { id: 413, name: 'No window sent', quantity: 3, next_expiry_date: offsetDate(20) },
+      ] })
+      const tone = (id: number) => s.find(node => node.getAttribute('data-expiry') !== null && row(s, id).contains(node), `expiry of ${id}`).getAttribute('data-expiry')
+      assert.deepEqual([411, 412, 413].map(tone), ['ok', 'soon', 'soon'])
+      await s.unmount()
+    }],
     ['the Count input exists only for someone who can check and see stock', async () => {
       const s = await mount({ products: sheetProducts, observations: inSession })
       assert.equal(countInputs(s).length, 3)

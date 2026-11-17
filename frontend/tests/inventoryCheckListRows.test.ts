@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { createHarness, propsOf, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
 import { fmtDateTime24 } from '../src/utils/formatters.ts'
 import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
+import { offsetDate } from '../src/utils/dateHelpers.ts'
 
 // Lane 6.0.1044 (P1.6a): the Inventory Check list counts by itself. (14 Nov: no check box; a status ICON with its date opens the count popover; the count input sits beside the name.) The owner's columns (product, barcode,
 // stock now, next expiry, check status, counted, note, last checked by and when), the count typed in the row, one check button, a note
@@ -46,6 +47,15 @@ const key = (surface: MountedSurface, node: MemoryNode, name: string) => surface
 const active = (surface: MountedSurface) => surface.body.ownerDocument.activeElement
 
 const cases: Array<[string, () => Promise<void>]> = [
+  ['the expiry badge uses the OWN alert window of the product (expiry_alert_days), exactly as the detail modal and POS do', async () => {
+    const s = await mount({ selecting: false, products: [
+      { id: 701, name: 'Short window', quantity: 3, next_expiry_date: offsetDate(20), expiry_alert_days: 7 },
+      { id: 702, name: 'Long window', quantity: 3, next_expiry_date: offsetDate(45), expiry_alert_days: 60 },
+      { id: 703, name: 'No window sent', quantity: 3, next_expiry_date: offsetDate(20) },
+      { id: 704, name: 'Gone', quantity: 3, next_expiry_date: offsetDate(-1), expiry_alert_days: 7 },
+    ] })
+    assert.deepEqual([701, 702, 703, 704].map(id => inRow(s, id, 'data-expiry').getAttribute('data-expiry')), ['ok', 'soon', 'soon', 'expired'])
+  }],
   ['the header names exactly the columns this viewer has, and is hidden below 1024px', async () => {
     const header = async (props: Record<string, unknown>) => mountPart('InventoryCheckListHeader', { selecting: true, canViewStock: true, canViewCounts: true, t: base.t, ...props })
     let h = await header({})
