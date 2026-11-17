@@ -4807,7 +4807,7 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
     saleItemIds?: number[]
     returnItemIds?: number[]
     /** The kept lot's own cost, expiry and activity before this fold changed them; undo puts them back. */
-    keeperLotBefore?: { unit_cost_usd: number | null; expiry_date: string | null; is_active: number | null }
+    keeperLotBefore?: { unit_cost_usd: number | null; expiry_date: string | null; is_active: number | null; updated_at?: string | null }
     receivedDate?: string
   }> = []
   // 16 Nov 2026: lots match by received DATE (lib/productMergeLots.ts), not by batch_key. One shared plan: the
@@ -4918,6 +4918,9 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
           unit_cost_usd: keeperLotBefore.unit_cost_usd == null ? null : Number(keeperLotBefore.unit_cost_usd),
           expiry_date: keeperLotBefore.expiry_date == null ? null : String(keeperLotBefore.expiry_date),
           is_active: keeperLotBefore.is_active == null ? null : Number(keeperLotBefore.is_active),
+          // The row's own stamp, so undo writes it back exactly: the full-lot fingerprint of an earlier member of a group covers it. A lot read without
+          // the column (a discarded lot that becomes the kept lot) carries none and undo stamps it as it always did.
+          ...(Object.hasOwn(keeperLotBefore, 'updated_at') ? { updated_at: keeperLotBefore.updated_at == null ? null : String(keeperLotBefore.updated_at) } : {}),
         }
       }
       batchesFoldedThisDup += 1

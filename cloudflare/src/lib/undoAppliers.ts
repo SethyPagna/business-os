@@ -312,7 +312,7 @@ export interface MergeReversal {
     // 16 Nov 2026 (lots match by received date): the kept lot's own cost, expiry and activity BEFORE the fold added stock
     // into it and re-derived them. Undo writes them back. Absent on snapshots written before then (they matched by
     // batch_key and never touched the kept lot's cost or expiry), so an absent value restores nothing rather than zeroing.
-    keeperLotBefore?: { unit_cost_usd: number | null; expiry_date: string | null; is_active: number | null }
+    keeperLotBefore?: { unit_cost_usd: number | null; expiry_date: string | null; is_active: number | null; updated_at?: string | null }
     receivedDate?: string
   }>
   reparentedSaleItemIds: number[]
@@ -2257,12 +2257,16 @@ export function mergeFoldReversalStatements(folds: NonNullable<MergeReversal['fo
     cost: roundStoredCost(before.unit_cost_usd),
     expiry: before.expiry_date == null ? null : String(before.expiry_date),
     active: before.is_active == null ? null : Number(before.is_active),
+    // Exactly the stamp the lot had (null included). A before-image saved before the stamp was recorded has no key and is stamped now, as it was.
+    ...(Object.hasOwn(before, 'updated_at') ? { stamp: before.updated_at == null ? null : String(before.updated_at) } : {}),
   }))
   for (const part of chunk(restoreRows, UNDO_FOLD_CHUNK)) {
     const field = (name: string) => `(SELECT json_extract(m.value, '$.${name}') FROM json_each(@rows) m WHERE CAST(json_extract(m.value, '$.id') AS INTEGER) = product_batches.id)`
     stmts.push({
       sql: `UPDATE product_batches SET unit_cost_usd = ${field('cost')}, expiry_date = ${field('expiry')},
-              is_active = COALESCE(${field('active')}, is_active), updated_at = CURRENT_TIMESTAMP WHERE id IN (${rowIds})`,
+              is_active = COALESCE(${field('active')}, is_active),
+              updated_at = CASE WHEN (SELECT json_type(m.value, '$.stamp') FROM json_each(@rows) m WHERE CAST(json_extract(m.value, '$.id') AS INTEGER) = product_batches.id) IS NULL
+                THEN CURRENT_TIMESTAMP ELSE ${field('stamp')} END WHERE id IN (${rowIds})`,
       params: { rows: json(part) },
     })
   }
