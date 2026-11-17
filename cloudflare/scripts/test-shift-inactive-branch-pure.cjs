@@ -104,6 +104,7 @@ function route(sqlite, source, getUser) {
     '../lib/permissions': loadReal('lib/permissions.ts'),
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
     '../lib/planTier': { getPlanLimits: () => ({ d1QueriesPerInvocation: 1000 }) },
+    '../lib/acquisitionCostAccess': { holdsCostViewGrant: () => true }, // figuresFor reaches it only for a reader canManageShifts already admitted (an administrator holds it)
     '../lib/telegram': { scheduleTelegramShiftReport: async () => 'unavailable', loadTelegramConfig: async () => ({}), sendTelegramShiftReport: async () => true, sendTelegramStaleShiftAlert: async () => true, scheduleTelegramShiftOverview: async () => true },
     // No sales tables here: the branch rule is under test, not the arithmetic.
     '../lib/shiftReconciliation': {

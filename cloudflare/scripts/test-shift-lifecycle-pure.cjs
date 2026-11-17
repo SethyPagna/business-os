@@ -152,6 +152,7 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
     '../lib/audit': { audit: async () => { throw new Error('lifecycle audit must be in the D1 batch') } },
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
     '../lib/planTier': { getPlanLimits: () => ({ d1QueriesPerInvocation: 1000 }) },
+    '../lib/acquisitionCostAccess': { holdsCostViewGrant: () => true }, // figuresFor reaches it only for a reader canManageShifts already admitted (an administrator holds it)
     '../lib/telegram': {
       scheduleTelegramShiftReport: async () => 'unavailable', loadTelegramConfig: async () => ({}), sendTelegramShiftReport: async (_env, shiftId) => { sent.push(shiftId); return true },
       // T10: the Reports overview a minute after a close (lib/telegram.ts).

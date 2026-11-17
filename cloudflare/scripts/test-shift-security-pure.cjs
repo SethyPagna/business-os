@@ -76,6 +76,7 @@ async function main() {
     '../lib/audit': { audit: async () => { throw new Error('shift writes must use the atomic audit batch') } },
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
     '../lib/planTier': { getPlanLimits: () => ({ d1QueriesPerInvocation: 1000 }) },
+    '../lib/acquisitionCostAccess': { holdsCostViewGrant: () => true }, // figuresFor reaches it only for a reader canManageShifts already admitted (an administrator holds it)
     '../lib/telegram': { scheduleTelegramShiftReport: async () => 'unavailable', loadTelegramConfig: async () => ({}), sendTelegramShiftReport: async () => true },
     // This fixture has no sales/fees/returns tables -- it is the permission
     // boundary under test, not the drawer arithmetic (that is

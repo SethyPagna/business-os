@@ -259,3 +259,14 @@ test('blank closing counts do not disable POS close or print an invented zero dr
   assert.match(gate, /shiftCountedPairText\(closed\.closing_counted_usd, closed\.closing_counted_khr, fmtUSD, fmtKHR\)/)
   assert.doesNotMatch(gate, /value: money\(closed\.closing_counted_usd/)
 })
+test('a figures block without the cost keys (a reader without View product costs) draws no cost row and keeps everything else', () => {
+  const { cogs_usd, profit_usd, profit_without_not_paid_usd, ...costless } = { ...figures, profit_without_not_paid_usd: 1, removal_loss_usd: 30, revenue_after_losses_usd: 70, profit_after_losses_usd: -2 }
+  void cogs_usd; void profit_usd; void profit_without_not_paid_usd
+  const { removal_loss_usd, revenue_after_losses_usd, profit_after_losses_usd, ...withoutLosses } = costless
+  void removal_loss_usd; void revenue_after_losses_usd; void profit_after_losses_usd
+  const keys = shiftFigureRows(withoutLosses).map((row) => row.key)
+  assert.deepEqual(keys, ['sales', 'delivery_fees', 'delivery_actual_cost', 'shift_other_expenses', 'refunds', 'not_paid_owed'])
+  assert.ok(!keys.some((key) => ['cogs', 'profit', 'profit_paid_only'].includes(key) || key.startsWith('rpt_')))
+  // the holder's full block still draws them (positive control)
+  assert.deepEqual(shiftFigureRows(figures).map((row) => row.key).filter((key) => key === 'cogs' || key === 'profit'), ['cogs', 'profit'])
+})
