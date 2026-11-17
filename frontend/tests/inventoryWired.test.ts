@@ -4,7 +4,7 @@ import { transformSync } from 'esbuild'
 import ts from 'typescript'
 import { buildQueryString, type QueryParams } from '../src/api/query.ts'
 import {
-  branchesOf, canonicalProductsQuery, countDifference, loadWired, mergeWiredRows, NotWired, readWiredRows, rememberWiredMode, setToAmount, wiredListParams, wiredMode, wiredResult,
+  branchesOf, canonicalProductsQuery, countDifference, loadWired, mergeOverlaySummary, mergeWiredRows, NotWired, readWiredRows, rememberWiredMode, setToAmount, wiredListParams, wiredMode, wiredResult,
   type OverlayAnswer, type OverlayEntry, type WiredAccess, type WiredDeps, type WiredList,
 } from '../src/components/inventory/inventoryWired.ts'
 
@@ -71,13 +71,15 @@ const row = (id: number, extra: Record<string, unknown> = {}) => ({ id, name: `P
 const listOf = (ids: number[], extra: Partial<WiredList> & Record<string, unknown> = {}): WiredList => ({ items: ids.map(id => row(id)), total: 180, page: 1, pageSize: ids.length, totalPages: 4, wired: true, projected: false,
   tagged_lots: [{ product_id: ids[0], branch_id: 1, condition_tag: 'damaged', quantity: 2 }, { product_id: ids[0], branch_id: 1, condition_tag: 'expired', quantity: 5 }], ...extra })
 const overlayEntry = (id: number, extra: Partial<OverlayEntry> = {}): OverlayEntry => ({ product_id: id, last_change_at: '2026-11-03 14:00:00', ...extra })
+// The real Worker overlay summary (cloudflare/src/routes/inventoryChecks.ts checkCountsOf): ok and issue always, pending only while Fix stock is on; never not_checked or total.
+const workerSummary = (ok: number, issue: number, pending?: number) => ({ ok, issue, ...(pending === undefined ? {} : { pending }) })
 const FULL: WiredAccess = { stock: true, barcode: true, received: true }
 type Log = { lists: QueryParams[]; overlays: Array<{ branchId: number; ids: number[]; lots?: boolean }>; primed: Array<{ query: string; payload: Record<string, unknown> }> }
 function deps(options: { held?: Record<string, unknown>; list?: (params: QueryParams) => WiredList | Promise<WiredList>; overlay?: (ids: number[]) => OverlayAnswer; rank?: WiredDeps['rank'] } = {}): { log: Log; deps: WiredDeps } {
   const log: Log = { lists: [], overlays: [], primed: [] }
   return { log, deps: {
     readList: async params => { log.lists.push(params); return (options.list ?? (() => listOf([1, 2, 3])))(params) },
-    readOverlay: async params => { log.overlays.push(params); return (options.overlay ?? ((ids: number[]) => ({ items: ids.map(id => overlayEntry(id)) })))(params.ids) },
+    readOverlay: async params => { log.overlays.push(params); return (options.overlay ?? ((ids: number[]) => ({ items: ids.map(id => overlayEntry(id)), summary: workerSummary(3, 1) })))(params.ids) },
     peek: query => options.held?.[query] ?? null,
     prime: (query, payload) => { log.primed.push({ query, payload: payload as Record<string, unknown> }) },
     rank: options.rank ?? (() => null),
@@ -222,6 +224,23 @@ const CANON = canonicalProductsQuery(wire({}))!
   assert.deepEqual(step.summary, first.summary, 'a page step brings no counts: the last ones stay')
   const filteredSummary = wiredResult((await loadWired({ params: params({ brand: 'A' }), skipSummary: false, access: FULL, deps: deps({ list: () => listOf([1], { summary: { ok: 1, issue: 0 } }) }).deps })).raw, first)
   assert.deepEqual(filteredSummary.summary, { not_checked: 170, in_check: 0, ok: 1, issue: 0, total: 180 }, 'a filtered answer has no not-checked figure: that one stays')
+}
+
+{
+  // the overlay answers in the Worker's shape (ok, issue, pending: no not_checked, no total): the list's not-checked and total stand, never 0
+  const withCounts = listOf([1], { summary: { ok: 3, issue: 1, not_checked: 5, total: 9 } })
+  const same = wiredResult((await loadWired({ params: params({ branchId: '1' }), skipSummary: false, access: FULL, deps: deps({ list: () => withCounts, overlay: ids => ({ items: ids.map(id => overlayEntry(id)), summary: workerSummary(3, 1) }) }).deps })).raw)
+  assert.deepEqual(same.summary, { not_checked: 5, in_check: 0, ok: 3, issue: 1, total: 9 }, 'overlay with the same ok/issue: not checked stays 5, total stays')
+  const moved = wiredResult((await loadWired({ params: params({ branchId: '1' }), skipSummary: false, access: FULL, deps: deps({ list: () => withCounts, overlay: ids => ({ items: ids.map(id => overlayEntry(id)), summary: workerSummary(4, 2, 7) }) }).deps })).raw)
+  assert.deepEqual(moved.summary, { not_checked: 3, in_check: 0, ok: 4, issue: 2, total: 9, pending: 7 }, 'a fresher ok/issue moves not checked by the Worker identity total - ok - issue (pending is not subtracted)')
+  const over = wiredResult((await loadWired({ params: params({ branchId: '1' }), skipSummary: false, access: FULL, deps: deps({ list: () => withCounts, overlay: ids => ({ items: ids.map(id => overlayEntry(id)), summary: workerSummary(8, 3) }) }).deps })).raw)
+  assert.equal(over.summary?.not_checked, 0, 'never below zero')
+  const filteredList = listOf([1], { summary: { ok: 3, issue: 1 } })
+  const filtered = wiredResult((await loadWired({ params: params({ branchId: '1', brand: 'A' }), skipSummary: false, access: FULL, deps: deps({ list: () => filteredList, overlay: ids => ({ items: ids.map(id => overlayEntry(id)), summary: workerSummary(4, 1) }) }).deps })).raw)
+  assert.equal(filtered.summary?.ok, 4); assert.equal(filtered.summary?.not_checked, 0, 'a filtered list sent no not-checked figure: none is invented (the old fallback 0 stands only with no last figure)')
+  const step = wiredResult((await loadWired({ params: params({ branchId: '1', page: 2 }), skipSummary: true, access: FULL, deps: deps({ list: () => listOf([1]), overlay: ids => ({ items: ids.map(id => overlayEntry(id)) }) }).deps })).raw, moved)
+  assert.deepEqual(step.summary, moved.summary, 'a page step (no summary anywhere) keeps the last summary')
+  assert.deepEqual(mergeOverlaySummary({ ok: 1, issue: 1, not_checked: 5, total: 9 }, undefined), { ok: 1, issue: 1, not_checked: 5, total: 9 })
 }
 
 // ---- a by-id refresh ---------------------------------------------------------------------------------------------------------------------------------------

@@ -271,12 +271,25 @@ export async function loadWired(args: WiredLoadArgs): Promise<WiredLoad> {
       const answer = await deps.readOverlay({ branchId, ids: wanted.slice(start, start + chunk), lots: needLots }, signal)
       for (const entry of answer.items ?? []) overlay.set(Number(entry.product_id), entry)
       for (const entry of answer.lots ?? []) lots.set(Number(entry.product_id), withMore(entry.lots, entry.lots_more))
-      if (answer.summary || answer.capabilities) extras = { summary: answer.summary ?? extras.summary, capabilities: answer.capabilities ?? extras.capabilities }
+      if (answer.summary || answer.capabilities) extras = { summary: mergeOverlaySummary(extras.summary, answer.summary), capabilities: answer.capabilities ?? extras.capabilities }
     }
   }
   // A Products-held answer carries neither the check counts nor the capabilities: what the screen already learned stands in until an answer brings them.
   if (fromStore) extras = { summary: extras.summary, capabilities: extras.capabilities ?? args.known?.extras?.capabilities }
   return { raw: { list, overlay, lots, branches, branchId, extras }, fromStore, listRequests }
+}
+
+/**
+ * The overlay answer folded into the list summary field by field. The Worker's overlay summary carries only ok, issue and (while Fix stock is on) pending: it never carries not_checked or total,
+ * so those stay the list's and a number the overlay does not send is never defaulted to 0. Not checked is the catalogue total minus ok minus issue (pending is not subtracted), exactly the Worker's
+ * own definition in routes/inventoryChecks.ts /list; it is recomputed from the overlay's fresher ok and issue only when the list sent both not_checked and total (a filtered list sends neither: it stays absent).
+ */
+export function mergeOverlaySummary(base: WiredSummary | undefined, over: WiredSummary | undefined): WiredSummary | undefined {
+  if (!over) return base
+  const merged: WiredSummary = { ...base }
+  for (const key of ['ok', 'issue', 'pending', 'not_checked', 'total'] as const) if (typeof over[key] === 'number') merged[key] = over[key]
+  if (typeof over.not_checked !== 'number' && typeof base?.not_checked === 'number' && typeof merged.total === 'number') merged.not_checked = Math.max(0, merged.total - (merged.ok ?? 0) - (merged.issue ?? 0))
+  return merged
 }
 
 /** Put refreshed rows (by id) into the raw screen: the page keeps its order and everything else. */
