@@ -16,6 +16,7 @@ const { seedStockFixture } = require('./seed-stock-fixture.cjs')
 const root = path.resolve(__dirname, '..', '..')
 
 // options.admin: the acting user is an administrator with a real user row and session (the count approvals route checks its actor and session against the database).
+// options.sourceEdits: { 'lib/x.ts': [[from, to], ...] } plants a source edit (each `from` must match exactly once) in a module this world loads: a mutant for a test that must catch it.
 const TOKEN = 'approver-token-0001'
 function createLotSetWorld(options = {}) {
   const actor = options.admin
@@ -27,7 +28,12 @@ function createLotSetWorld(options = {}) {
   function load(relative) {
     if (cache.has(relative)) return cache.get(relative).exports
     const file = path.join(root, 'src', relative)
-    const compiled = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: file }).outputText
+    let text = fs.readFileSync(file, 'utf8')
+    if (options.sourceEdits && options.sourceEdits[relative]) {
+      text = text.split('\r\n').join('\n')
+      for (const [from, to] of options.sourceEdits[relative]) { if (text.split(from).length !== 2) throw new Error(`source edit must match once in ${relative}: ${from.slice(0, 60)}`); text = text.replace(from, () => to) }
+    }
+    const compiled = ts.transpileModule(text, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: file }).outputText
     const module = { exports: {} }
     cache.set(relative, module)
     // import('./x') of a module in src is resolved like the static imports.

@@ -5,7 +5,7 @@ import { actorSnapshot } from './actorSnapshot'
 import { APPROVAL_CLAIM_LOST } from './stockMutationReceipt'
 import {
   APPROVAL_DETAIL_COLUMNS, InventoryCheckSessionError, appliedLines, approvalBaselines, approvalsReady, authorityGuard, countDiffersSql, currentInventoryCheckActor, eventStatement, guard, inventoryCheckDigest,
-  lineDecisions, object, projectApproval, requestId as requestIdOf, REPLACED_NOTE, schemaReady, sessionRow, supersededLines,
+  lineDecisions, lineSetIds, object, projectApproval, requestId as requestIdOf, REPLACED_NOTE, schemaReady, sessionRow, supersededLines,
   type Actor, type ApprovalAppliedLine, type ApprovalLineDecision, type ApprovalRow, type InventoryCheckPrincipal, type Statement,
 } from './inventoryCheckSessions'
 import { checkLineShape, parseLineDecisionInput, type LineInput } from './inventoryCheckLineInput'
@@ -68,7 +68,7 @@ export type ApprovalLimits = { takeoverSeconds: number }
 /** Why one line cannot be applied now. */
 type Refusal = { productId: number; code: string }
 type ItemFacts = { product_id: number; baseline_quantity: number | null; counted_quantity: number | null; state: 'unstarted' | 'done' | 'issue'; reason: string | null; revision: number }
-/** An item with the engine's reading of whether it is a line (`differs`: the creation rule, countDiffersSql). */
+/** An item with the engine's reading of whether it is a line (`differs`: the creation rule, countDiffersSql), for an approval with no recorded set of lines. */
 type ItemRow = ItemFacts & { differs: number }
 /** One stock write of an approval: a received-date line of a count (scope 'lot'), or a branch-total line (scope 'branch', batchId 0; an older product-level count is one). `many`: the product has several. */
 type Unit = { key: string; productId: number; batchId: number; scope: 'lot' | 'branch'; counted: number; seen: number | null; many: boolean }
@@ -184,10 +184,19 @@ function fold(input: { remaining: ItemFacts[]; units: Map<number, Unit[]>; lines
 }
 
 /**
- * The lines of a count: its items the creation rule (countDiffersSql) calls differences, so the engine sees exactly the lines the approval was created with. A database without migration 0294
- * has no dated lines, so the same rule is read without them (the same fallback as readFacts).
+ * The product ids of the lines the approval was created with (line_set_json, migration 0316), or null when none is recorded (NULL column: an approval made before it, or by a Worker that does not know it).
+ * A recorded set that cannot be read as product ids is an empty set, which never matches the approval's line count: the decision is refused, never guessed.
  */
-async function readLines(db: D1Compat, sessionId: string, branchId: number): Promise<ItemFacts[]> {
+const recordedLines = (row: { line_set_json?: string | null }): number[] | null => row.line_set_json == null ? null : lineSetIds(row.line_set_json) ?? []
+
+/**
+ * The lines of a count, so the engine sees exactly the lines the approval was created with. With a recorded set (`only`) it reads just those items by primary key: no scan of the session's items, and no
+ * probe of the lot-lines table. Without one it falls back to the creation rule (countDiffersSql) over all the items; a database without migration 0294 has no dated lines, so the same rule is read without
+ * them (the same fallback as readFacts).
+ */
+async function readLines(db: D1Compat, sessionId: string, branchId: number, only: number[] | null): Promise<ItemFacts[]> {
+  if (only) return only.length ? await db.prepare(`SELECT i.product_id,i.baseline_quantity,i.counted_quantity,i.state,i.reason,i.revision
+    FROM inventory_check_items i WHERE i.session_id=@id AND i.branch_id=@branchId AND i.product_id IN (SELECT value FROM json_each(@ids)) ORDER BY i.product_id`).all<ItemFacts>({ id: sessionId, branchId, ids: JSON.stringify(only) }) : []
   const read = (dated: boolean) => db.prepare(`SELECT i.product_id,i.baseline_quantity,i.counted_quantity,i.state,i.reason,i.revision,CASE WHEN ${countDiffersSql('i', '0.000000001', dated)} THEN 1 ELSE 0 END AS differs
     FROM inventory_check_items i WHERE i.session_id=@id AND i.branch_id=@branchId ORDER BY i.product_id`).all<ItemRow>({ id: sessionId, branchId })
   let items: ItemRow[]
@@ -241,7 +250,7 @@ export async function decideInventoryCheckApproval(db: D1Compat, principal: Inve
     return fail(409, 'inventory_check_approval_decided')
   }
   if (decision === 'approve' && row.submitted_by === actor.id && await anotherApproverExists(db, actor)) fail(403, 'inventory_check_self_approval')
-  const lines = await readLines(db, sessionId, session.branch_id)
+  const lines = await readLines(db, sessionId, session.branch_id, recordedLines(row))
   if (lines.length !== row.lines) return fail(409, 'inventory_check_approval_lines_changed')
   const applied = appliedLines(row.applied_json), held = appliedUnits(row.applied_json)
   const superseded = supersededLines(row.superseded_json)
@@ -683,10 +692,22 @@ export async function decideInventoryCheckLine(db: D1Compat, principal: Inventor
     if (getActionTier(actor, 'inventory', 'adjust') !== 'full') fail(403, 'inventory_check_adjust_required')
     if (row.submitted_by === actor.id && await anotherApproverExists(db, actor)) fail(403, 'inventory_check_self_approval')
   }
-  const lines = await readLines(db, sessionId, session.branch_id)
-  if (lines.length !== row.lines) return fail(409, 'inventory_check_approval_lines_changed')
-  const line = lines.find(item => item.product_id === productId)
-  if (!line) return fail(404, 'inventory_check_line_not_found', { productIds: [productId] })
+  // With a recorded set only the decided line is read (by primary key); the other lines are known by id alone, which is all their openness needs.
+  const recorded = recordedLines(row)
+  let lineIds: number[], line: ItemFacts | undefined
+  if (recorded) {
+    if (recorded.length !== row.lines) return fail(409, 'inventory_check_approval_lines_changed')
+    lineIds = recorded
+    if (!recorded.includes(productId)) return fail(404, 'inventory_check_line_not_found', { productIds: [productId] })
+    line = (await readLines(db, sessionId, session.branch_id, [productId]))[0]
+    if (!line) return fail(409, 'inventory_check_approval_lines_changed')
+  } else {
+    const lines = await readLines(db, sessionId, session.branch_id, null)
+    if (lines.length !== row.lines) return fail(409, 'inventory_check_approval_lines_changed')
+    lineIds = lines.map(item => item.product_id)
+    line = lines.find(item => item.product_id === productId)
+    if (!line) return fail(404, 'inventory_check_line_not_found', { productIds: [productId] })
+  }
   const applied = appliedLines(row.applied_json), held = appliedUnits(row.applied_json), superseded = supersededLines(row.superseded_json), stored = plansOf(row.plan_json)
   const ofProduct = (unitKey: string): boolean => productOf(unitKey) === productId
   if (applied[String(productId)]) fail(409, 'inventory_check_line_applied', { productIds: [productId] })
@@ -712,7 +733,7 @@ export async function decideInventoryCheckLine(db: D1Compat, principal: Inventor
   const nextDecisions = { ...decisions }
   if (decided) nextDecisions[String(productId)] = decided; else delete nextDecisions[String(productId)]
   // A reject that leaves no line open ends the approval: approved when something was applied; rejected when nothing was and nobody holds a claim (a claimed row is finished or closed by its claimer).
-  const openAfter = lines.filter(item => item.product_id !== productId && !applied[String(item.product_id)] && !superseded[String(item.product_id)] && decisions[String(item.product_id)]?.decision !== 'reject').length
+  const openAfter = lineIds.filter(id => id !== productId && !applied[String(id)] && !superseded[String(id)] && decisions[String(id)]?.decision !== 'reject').length
   const appliedCount = Object.keys(applied).length
   const ends = parsed.action === 'reject' && openAfter === 0 && (appliedCount > 0 || !row.applying_request_id)
   const status = appliedCount > 0 ? 'approved' : 'rejected'

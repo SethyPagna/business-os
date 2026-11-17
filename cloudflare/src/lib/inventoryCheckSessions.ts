@@ -143,14 +143,16 @@ export type InventoryCheckApproval = { status: 'pending' | 'approved' | 'rejecte
   /** Lines replaced by a newer count of the same product (queue-first: one waiting item per product): product id -> the session of the newer count. They are never applied. */
   superseded?: Record<string, string>;
   /** What the approver decided per product (migration 0316): a rejected line is never applied; a modified line is applied from the modified figure. Absent key: the line is open. */
-  line_decisions?: Record<string, ApprovalLineDecision> }
+  line_decisions?: Record<string, ApprovalLineDecision>;
+  /** The product ids of the approval's lines, fixed when it was created (migration 0316), ascending. Absent: not recorded (created before the column existed); `lines` is then only a count. */
+  line_ids?: number[] }
 /** One approver decision on one line, as stored (by is the account id, never shown) and as projected (by_name only to a viewer who may see staff names). */
 export type ApprovalLineDecision = { decision: 'reject' | 'modify'; counted?: number; lots?: Array<{ batchId: number; counted: number }>; note?: string | null; by?: number; by_name?: string | null; at: string }
 export type ApprovalRow = { session_id: string; status: 'pending' | 'approved' | 'rejected'; lines: number; submitted_by: number; submitted_at: string;
   decided_by: number | null; decided_by_name: string | null; decided_at: string | null; decision_note: string | null; decision_request_id: string | null; applied_json: string;
-  applying_request_id: string | null; applying_by: number | null; applying_at: string | null; takeovers: number; closed_json: string | null; baselines_json?: string; superseded_json?: string; line_decisions_json?: string }
+  applying_request_id: string | null; applying_by: number | null; applying_at: string | null; takeovers: number; closed_json: string | null; baselines_json?: string; superseded_json?: string; line_decisions_json?: string; line_set_json?: string | null }
 export const APPROVAL_COLUMNS = 'session_id,status,lines,submitted_by,submitted_at,decided_by,decided_by_name,decided_at,decision_note,decision_request_id,applied_json,applying_request_id,applying_by,applying_at,takeovers,closed_json'
-export const APPROVAL_DETAIL_COLUMNS = `${APPROVAL_COLUMNS},baselines_json,superseded_json,line_decisions_json`
+export const APPROVAL_DETAIL_COLUMNS = `${APPROVAL_COLUMNS},baselines_json,superseded_json,line_decisions_json,line_set_json`
 let approvalsSchemaReady = false
 /** True once migration 0286 (the table and its four triggers) is applied; a positive answer is remembered for the isolate, a miss re-probes. */
 export async function approvalsAvailable(db: D1Compat): Promise<boolean> {
@@ -214,6 +216,16 @@ export function lineDecisions(json: string | undefined | null): Record<string, A
     return Object.fromEntries(entries.filter(([, value]) => !!value && typeof value === 'object' && ((value as { decision?: unknown }).decision === 'reject' || (value as { decision?: unknown }).decision === 'modify'))) as Record<string, ApprovalLineDecision>
   } catch { return {} }
 }
+/** The product ids of an approval's recorded line set, ascending; null when none is recorded (a NULL column: created before migration 0316, or by a Worker that does not know it). */
+export function lineSetIds(json: string | null | undefined): number[] | null {
+  if (json == null) return null
+  try {
+    const parsed = JSON.parse(json) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    const ids = Object.keys(parsed).map(key => Number(key))
+    return ids.every(id => Number.isSafeInteger(id) && id > 0) ? ids.sort((a, b) => a - b) : null
+  } catch { return null }
+}
 /** The lines a close left unapplied, each with its reason. */
 export function closedLines(json: string | null): { lines: Record<string, string> } | undefined {
   if (!json) return undefined
@@ -239,7 +251,8 @@ export function projectApproval(actor: Actor, row: ApprovalRow, detail = false):
     ...(row.status === 'pending' && row.applying_request_id ? { applying: true, ...(row.applying_by === actor.id ? { applying_request_id: row.applying_request_id } : {}) } : {}),
     ...(detail ? { applied_lines: applied, ...(row.baselines_json ? { baselines: approvalBaselines(row.baselines_json) } : {}),
       ...(Object.keys(supersededLines(row.superseded_json)).length ? { superseded: supersededLines(row.superseded_json) } : {}),
-      ...(row.line_decisions_json !== undefined ? { line_decisions: projectLineDecisions(actor, row.line_decisions_json) } : {}) } : {}) }
+      ...(row.line_decisions_json !== undefined ? { line_decisions: projectLineDecisions(actor, row.line_decisions_json) } : {}),
+      ...(lineSetIds(row.line_set_json) ? { line_ids: lineSetIds(row.line_set_json) as number[] } : {}) } : {}) }
 }
 /** One query for the approvals of the given sessions, inside the viewer's organization. Callers ask only for viewers who may see stock. */
 export async function approvalRows(db: D1Compat, actor: Actor, ids: string[], detail = false): Promise<ApprovalRow[]> {
@@ -248,8 +261,13 @@ export async function approvalRows(db: D1Compat, actor: Actor, ids: string[], de
   return db.prepare(`SELECT ${detail ? APPROVAL_DETAIL_COLUMNS : APPROVAL_COLUMNS} FROM inventory_check_approvals WHERE organization_id IS @organization
     AND session_id IN (SELECT value FROM json_each(@ids))`).all<ApprovalRow>({ organization: actor.organization_id, ids: JSON.stringify(ids) })
 }
-/** A line waits when its approval is pending, it is a difference, no stock write for it has been recorded, no newer count of the product has replaced it and the approver has not rejected it (a rejected line is never applied). */
-export const waitingLineSql = (a: string, i: string): string => `${a}.status='pending' AND ${i}.baseline_quantity IS NOT NULL AND ${i}.counted_quantity IS NOT NULL AND abs(${i}.baseline_quantity-${i}.counted_quantity)>0.000000001
+/**
+ * A line waits when its approval is pending, the product is one of the approval's LINES, no stock write for it has been recorded, no newer count of the product has replaced it and the approver has not
+ * rejected it (a rejected line is never applied). The lines are the set the approval was created with (line_set_json, migration 0316): one stored answer for every reader, whatever the rule that built it
+ * (a product whose received dates differ with equal totals is a line). Only an approval with no recorded set (NULL: made before the column, or by a Worker that does not know it) falls back to the item total.
+ */
+export const waitingLineSql = (a: string, i: string): string => `${a}.status='pending' AND CASE WHEN ${a}.line_set_json IS NULL THEN (${i}.baseline_quantity IS NOT NULL AND ${i}.counted_quantity IS NOT NULL AND abs(${i}.baseline_quantity-${i}.counted_quantity)>0.000000001)
+    ELSE json_extract(${a}.line_set_json,'$."'||${i}.product_id||'"') IS NOT NULL END
   AND json_extract(${a}.applied_json,'$.lines."'||${i}.product_id||'"') IS NULL AND json_extract(${a}.superseded_json,'$."'||${i}.product_id||'"') IS NULL
   AND json_extract(${a}.line_decisions_json,'$."'||${i}.product_id||'".decision') IS NOT 'reject'`
 const WAITING_LINE_SQL = waitingLineSql('a', 'i')
@@ -567,9 +585,12 @@ function supersedeStatements(params: Record<string, unknown>): Statement[] {
     { sql: `UPDATE ${A} SET status='rejected',decided_by=NULL,decided_by_name=NULL,decided_at=@now,decision_note=@replacedNote,decision_request_id=@key
       WHERE organization_id IS @organization AND branch_id=@branchId AND status='pending' AND applying_request_id IS NULL AND applied_json='{}'
         AND EXISTS(SELECT 1 FROM json_each(superseded_json) WHERE value=@id)
-        AND NOT EXISTS(SELECT 1 FROM inventory_check_items i WHERE i.session_id=${A}.session_id AND i.baseline_quantity IS NOT NULL AND i.counted_quantity IS NOT NULL
-          AND abs(i.baseline_quantity-i.counted_quantity)>0.000000001 AND json_extract(superseded_json,'$."'||i.product_id||'"') IS NULL
-          AND json_extract(line_decisions_json,'$."'||i.product_id||'".decision') IS NOT 'reject')
+        AND CASE WHEN ${A}.line_set_json IS NULL
+          THEN NOT EXISTS(SELECT 1 FROM inventory_check_items i WHERE i.session_id=${A}.session_id AND i.baseline_quantity IS NOT NULL AND i.counted_quantity IS NOT NULL
+            AND abs(i.baseline_quantity-i.counted_quantity)>0.000000001 AND json_extract(${A}.superseded_json,'$."'||i.product_id||'"') IS NULL
+            AND json_extract(${A}.line_decisions_json,'$."'||i.product_id||'".decision') IS NOT 'reject')
+          ELSE NOT EXISTS(SELECT 1 FROM json_each(${A}.line_set_json) j WHERE json_extract(${A}.superseded_json,'$."'||j.key||'"') IS NULL
+            AND json_extract(${A}.line_decisions_json,'$."'||j.key||'".decision') IS NOT 'reject') END
       RETURNING session_id`, params: { ...params, replacedNote: REPLACED_NOTE } },
     { sql: SUPERSEDE_EVENTS_SQL, params },
   ]
@@ -645,7 +666,10 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
     event_request_id: `${key}-${item.line.productId}`, event_hash: await inventoryCheckDigest(JSON.stringify({ action: 'submit-line', hash, productId: item.line.productId })) })))
   if (members.some(member => !member.product || !member.baseline)) fail(409, 'inventory_check_baseline_changed')
   // A count differs when stock was readable and not equal to it; this is judged here for every viewer, so a count typed without seeing stock is still reviewed.
-  const differing = options.approvals ? resolved.filter(item => item.baseline?.quantity != null && Math.abs(item.baseline.quantity - item.line.counted) > COUNT_EPSILON).length : 0
+  const differingItems = options.approvals ? resolved.filter(item => item.baseline?.quantity != null && Math.abs(item.baseline.quantity - item.line.counted) > COUNT_EPSILON) : []
+  const differing = differingItems.length
+  // The approval's lines, recorded with it (migration 0316): the products counted different from stock, the one set every reader of "waits for approval" reads.
+  const lineSet = JSON.stringify(Object.fromEntries(differingItems.map(item => [String(item.line.productId), 1])))
   const scope = { membership: 'submission' }
   // The figure a count is later measured against is the stock at submit. For a viewer who sees stock it equals what the counter saw (checked above); for anyone else it is the only trustworthy figure.
   const seenJson = JSON.stringify(Object.fromEntries(resolved.map(item => [String(item.line.productId), item.baseline?.quantity ?? null]).filter(([, seen]) => seen !== null)))
@@ -678,8 +702,8 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
         json_object('state','unstarted','counted_quantity',NULL,'reason',NULL,'revision',0),
         json_object('state',json_extract(value,'$.state'),'counted_quantity',json_extract(value,'$.counted'),'reason',json_extract(value,'$.reason'),'revision',1),
         json_object('sessionRevision',0,'itemRevision',1),@now FROM json_each(@members)`, params },
-    ...(differing > 0 ? [{ sql: `INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submitted_at,baselines_json)
-      VALUES(@id,@organization,@branchId,'pending',@differing,@actorId,@now,@seenJson)`, params: { ...params, differing, seenJson } }] : []),
+    ...(differing > 0 ? [{ sql: `INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submitted_at,baselines_json,line_set_json)
+      VALUES(@id,@organization,@branchId,'pending',@differing,@actorId,@now,@seenJson,@lineSet)`, params: { ...params, differing, seenJson, lineSet } }] : []),
   ]
   let saved: Awaited<ReturnType<typeof commit>>
   try { saved = await commit(db, principal, actor, statements, key, hash) }
@@ -850,9 +874,9 @@ export async function createInventoryCheckLotSubmission(db: D1Compat, principal:
   ]
   // The approval exists only when a count differs (judged from the stored figures, so a blind count is reviewed too); it carries the per-product seen totals.
   const approvalAt = statements.length
-  if (options.approvals) statements.push({ sql: `INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submitted_at,baselines_json)
-    SELECT @id,@organization,@branchId,'pending',d.n,@actorId,@now,(SELECT json_group_object(CAST(i.product_id AS TEXT),i.baseline_quantity) FROM inventory_check_items i WHERE i.session_id=@id AND i.baseline_quantity IS NOT NULL)
-    FROM (SELECT COUNT(*) AS n FROM inventory_check_items i WHERE i.session_id=@id AND ${countDiffersSql('i', '@eps')}) d WHERE d.n>0 RETURNING session_id`, params })
+  if (options.approvals) statements.push({ sql: `INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submitted_at,baselines_json,line_set_json)
+    SELECT @id,@organization,@branchId,'pending',d.n,@actorId,@now,(SELECT json_group_object(CAST(i.product_id AS TEXT),i.baseline_quantity) FROM inventory_check_items i WHERE i.session_id=@id AND i.baseline_quantity IS NOT NULL),d.line_set
+    FROM (SELECT COUNT(*) AS n,json_group_object(CAST(i.product_id AS TEXT),1) AS line_set FROM inventory_check_items i WHERE i.session_id=@id AND ${countDiffersSql('i', '@eps')}) d WHERE d.n>0 RETURNING session_id`, params })
   let saved: Awaited<ReturnType<typeof commit>>
   try { saved = await commit(db, principal, actor, statements, key, hash) }
   catch (error) {

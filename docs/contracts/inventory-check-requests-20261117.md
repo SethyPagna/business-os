@@ -3,7 +3,8 @@
 Slice B of the 17 Nov 2026 Inventory redesign. The Worker side is built against this file; the frontend lanes (requests panel, list and detail) read it. Everything here is already enforced by the Worker, so a
 screen rule is only a convenience.
 
-Migration `0316_inventory_check_line_decisions.sql` adds `inventory_check_approvals.line_decisions_json`. It must be applied before the Worker that reads it is deployed.
+Migration `0316_inventory_check_line_decisions.sql` adds `inventory_check_approvals.line_decisions_json` (the approver's decisions) and `inventory_check_approvals.line_set_json` (the lines the approval was created with, see section 3).
+It must be applied before the Worker that reads them is deployed (deploy order: migrations, then the Worker; a Worker that runs ahead of it fails the count pages and the Fix stock and Set holds).
 
 ## 1. One decision on one line
 
@@ -81,6 +82,12 @@ New field `line_decisions`: `{ "<productId>": { "decision": "reject" | "modify",
 (`by_name` only for a viewer who may see staff names; the account id is never sent). An absent key means the line is open. `lines`, `applied_lines`, `superseded`, `closed` are as before.
 
 A rejected line no longer counts as "waiting" anywhere (the Waiting filter, the row's pending tag, Fix stock's hold).
+
+**The lines of an approval are a stored set.** `line_ids` (the approval detail, ascending product ids) is the set of products the count found different from stock, fixed when the approval is created and never changed. It is
+exactly the products the server treats as lines, including a product whose received dates differ although their totals agree (A counted 6 of 5, B 3 of 4): that product IS a line and is listed, whatever its total says.
+The panel must list `line_ids` and not re-derive lines from the figures. `lines` is their count (`line_ids.length`). `line_ids` is absent only for an approval created before migration 0316 (or by a Worker that did not know
+the column during a deploy): the panel then falls back to the items whose total differs, as before. A newer count of a product in the set replaces that line (`superseded`); the approval ends as replaced only when no line of the set
+is left open (not superseded, not rejected), so a newer count of another product never ends it.
 
 ### History
 
