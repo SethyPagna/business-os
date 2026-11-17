@@ -72,6 +72,8 @@ const response = (params: Record<string, unknown> = {}) => oldServer
 const app = {
   user: { id: 7, role_code: 'employee', permissions: { inventory: true, inventory_checks: true, ...COUNT_FIELDS, inventory_check_show_cost: false } as Record<string, boolean> },
   page: 'inventory', authReady: true, canWriteToServer: true, t: (key: string) => SORT_WORDS[key] ?? key,
+  // what Products' detail modal (the Inventory detail since 17 Nov) reads from the app
+  getPermissionTier: () => 'none', can: () => false, fmtUSD: (value: unknown) => '$' + Number(value).toFixed(2), fmtKHR: (value: unknown) => Number(value).toFixed(0) + '៛',
   notify: (message: string, kind?: string) => { notices.push([message, kind ?? '']) },
   settings: { navigation_mode: 'sections' }, language: 'en', AccessDenied: () => 'Access denied',
   navigateTo: (page: string, anchor?: string) => {
@@ -218,10 +220,15 @@ try {
   assert.ok(surface.text().includes('@alice') && surface.text().includes('Shelf differs'), 'ordinary own-write channel invalidation preserves the selected session')
   await surface.click(surface.button('Test variant'))
   const detailText = surface.find(node => node.getAttribute('data-inventory-check-detail') !== null, 'detail list').textContent
-  assert.ok(detailText.includes('Current stock8 pcs') && detailText.includes('Starting stock9') && detailText.includes('Difference−1'), 'the detail float shows stock with its unit, the fixed baseline and the drift: ' + detailText)
-  assert.ok(detailText.includes('Received date01/10/2026') && detailText.includes('Expiry15/03/2027'), 'and the latest received date and the next expiry: ' + detailText)
-  assert.ok(detailText.includes('Counted0 (−8)') && detailText.includes('Check statusIssue · Shelf differs') && detailText.includes('BrandTest brand'), 'and the count against stock, the check status with its reason and brand: ' + detailText)
-  assert.ok(!/Cost|Price|Sold|Customers/.test(detailText) && !surface.text().includes('913.27'), 'the float has no cost, price, sold or customers row')
+  // 17 Nov: the detail is Products' own modal (name as the title, brand and barcode in its header, stock with its unit, expiry) with Inventory's check facts in its slot
+  assert.ok(detailText.includes('Starting stock9') && detailText.includes('Difference−1'), 'the check facts show the fixed baseline and the drift: ' + detailText)
+  assert.ok(detailText.includes('Received date01/10/2026'), 'and the latest received date: ' + detailText)
+  assert.ok(detailText.includes('Counted0 (−8)') && detailText.includes('Check statusIssue · Shelf differs'), 'and the count against stock and the check status with its reason: ' + detailText)
+  const modalText = surface.text().replace(/\s+/g, ' ')
+  assert.ok(modalText.includes('Stock') && modalText.includes('8') && modalText.includes('pcs') && modalText.includes('2027-03-15'), 'the product rows show the stock with its unit and the next expiry: ' + modalText)
+  assert.equal(surface.find(node => node.getAttribute('data-detail-meta-row') !== null, 'brand and category line').textContent, 'Test brand', 'the brand sits in the header, as on Products')
+  assert.ok(!modalText.includes('Product Test variant') && surface.findAll(node => node.tagName === 'H2' && node.textContent.trim() === 'Product').length === 0, 'the name is the title: no Product heading')
+  assert.ok(!/Cost|Price|Sold|Customers/.test(detailText) && modalText.includes('Selling price$17.00') && !modalText.includes('913.27') && !/Cost|Margin/.test(modalText), 'an employee with the price grant sees the selling price but never the cost or the margin: ' + modalText)
   await surface.click(surface.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'Close', 'detail close'))
   await surface.click(surface.button('Close session'))
   assert.ok(surface.text().includes('Close this count session?'), 'Close first shows the shared review')
@@ -357,7 +364,9 @@ try {
   assert.equal(admin.findAll(node => node.getAttribute('data-check-action') === 'done').length, 1, 'administrator authority can edit another creator session')
   await admin.click(admin.button('Test variant'))
   const adminDetail = admin.find(node => node.getAttribute('data-inventory-check-detail') !== null, 'detail list').textContent
-  assert.ok(!/Cost|Price|Sold|Customers/.test(adminDetail) && !admin.text().includes('913.27'), 'cost left the list for everyone: not even an administrator sees it here')
+  assert.ok(!/Cost|Price|Sold|Customers/.test(adminDetail), 'the check-fact list itself carries no money row')
+  const adminModal = admin.text().replace(/\s+/g, ' ')
+  assert.ok(adminModal.includes('$913.27') && adminModal.includes('$17.00'), 'an administrator sees the cost and the selling price on the detail (owner, 17 Nov): ' + adminModal)
   await admin.unmount()
 
   window.history.replaceState(null, '', '/inventory?retained=1#hub:inventory:issues')

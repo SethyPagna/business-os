@@ -93,7 +93,19 @@ type ProductDetailProduct = {
   [key: string]: unknown
 }
 
+/**
+ * Which groups of facts this viewer may see. Inventory wires this modal for viewers whose grants can cut stock or price: a field that is cut is not drawn at all (never a false 0 or $0).
+ * Every key defaults to true, so Products passes nothing and behaves exactly as before. `cost` only ever narrows what canViewAcquisitionCosts already allows.
+ */
+export type ProductDetailVisible = Partial<Record<'stock' | 'price' | 'cost' | 'barcode' | 'brand' | 'category', boolean>>
+
 type ProductDetailModalProps = {
+  /** Fields this viewer may see (see ProductDetailVisible). Absent: all of them. */
+  visible?: ProductDetailVisible
+  /** Extra facts the caller owns (Inventory: check status, counted, last checked, last stock change, Fix stock, Sales), drawn under the product's own rows, above the links row. */
+  children?: ReactNode
+  /** false: skip the detail report and the stock ledger reads (ProductDetailReport). Inventory never re-reads stock when a product opens. Default true. */
+  report?: boolean
   p: ProductDetailProduct
   catMap?: ColorLookup
   unitMap?: ColorLookup
@@ -129,6 +141,9 @@ type PriceCellProps = {
 const MS_PER_DAY = 86400000
 
 export default function ProductDetailModal({
+  visible,
+  children,
+  report = true,
   p,
   unitMap,
   fmtUSD,
@@ -146,7 +161,13 @@ export default function ProductDetailModal({
   // Owner, 5 Oct 2026 (evening): the sales / supplier history report is a Products sub-page; the Employee default
   // (products:history off) sees only the product's own information and images here. The Worker refuses the reads too.
   const canReadProductHistory = can ? can('products', 'history') : false
-  const canViewCosts = canViewAcquisitionCosts(user)
+  // Cost needs BOTH the viewer's right (admin, or the grant) and the caller's word that this record carries a cost; the float behind it is the same `canViewCosts` below.
+  const canViewCosts = canViewAcquisitionCosts(user) && visible?.cost !== false
+  const showStock = visible?.stock !== false
+  const showPrice = visible?.price !== false
+  const showBarcode = visible?.barcode !== false
+  const showBrand = visible?.brand !== false
+  const showCategory = visible?.category !== false
   const [descriptionDetailOpen, setDescriptionDetailOpen] = useState(false)
   // P10-6: the calculated-cost float.
   const [costFloatOpen, setCostFloatOpen] = useState(false)
@@ -166,7 +187,7 @@ export default function ProductDetailModal({
   const copy = useCopyFloat(T)
   const productName = String(p.name || '')
   // One active branch: its chip would only repeat the quantity above.
-  const branchStockLines = branchStockLinesWorthShowing(p.branch_stock || [])
+  const branchStockLines = showStock ? branchStockLinesWorthShowing(p.branch_stock || []) : []
   // The catalog cost column decides known vs unknown; the purchase column is a default-0 mirror and only stands in when the record carries no cost key.
   const costUsdValue = knownCost(p.cost_price_usd !== undefined ? p.cost_price_usd : p.purchase_price_usd)
   const purchaseKhr = knownCost(p.cost_price_khr !== undefined ? p.cost_price_khr : p.purchase_price_khr)
@@ -281,11 +302,11 @@ export default function ProductDetailModal({
             {/* Brand first, then category, on ONE line that scrolls sideways
                 when long (scroll-x-clean has no touch-action, so a vertical
                 swipe here still scrolls the sheet). SKU is a body row. */}
-            {p.brand || p.category ? (
+            {(showBrand && p.brand) || (showCategory && p.category) ? (
               <div className="scroll-x-clean mt-0.5 text-xs text-gray-500 dark:text-gray-400" data-detail-meta-row="brand-category">
-                {p.brand ? <span className="whitespace-nowrap" {...copy(p.brand)}><EntityLink className="text-inherit no-underline hover:text-inherit hover:underline" page="products" anchor="hub:products:products" focus={{ brand: p.brand }} navigate={navigateTo} title={T('open_product', 'Open product')}>{p.brand}</EntityLink></span> : null}
-                {p.brand && p.category ? <span className="mx-1 text-gray-300" aria-hidden="true">·</span> : null}
-                {p.category ? <span className="whitespace-nowrap"><EntityLink className="text-inherit no-underline hover:text-inherit hover:underline" page="products" anchor="hub:products:products" focus={{ category: p.category }} navigate={navigateTo} title={T('open_product', 'Open product')}>{p.category}</EntityLink></span> : null}
+                {showBrand && p.brand ? <span className="whitespace-nowrap" {...copy(p.brand)}><EntityLink className="text-inherit no-underline hover:text-inherit hover:underline" page="products" anchor="hub:products:products" focus={{ brand: p.brand }} navigate={navigateTo} title={T('open_product', 'Open product')}>{p.brand}</EntityLink></span> : null}
+                {showBrand && p.brand && showCategory && p.category ? <span className="mx-1 text-gray-300" aria-hidden="true">·</span> : null}
+                {showCategory && p.category ? <span className="whitespace-nowrap"><EntityLink className="text-inherit no-underline hover:text-inherit hover:underline" page="products" anchor="hub:products:products" focus={{ category: p.category }} navigate={navigateTo} title={T('open_product', 'Open product')}>{p.category}</EntityLink></span> : null}
               </div>
             ) : null}
           </div>
@@ -302,7 +323,7 @@ export default function ProductDetailModal({
               <div className="min-w-0 space-y-2.5 sm:pr-5">
                 <div className="grid grid-cols-1 gap-y-1.5">
                   {/* barcode contract: <span className="whitespace-nowrap font-mono">{p.barcode}</span> */}
-                  {p.barcode ? <Row label={T('barcode', 'Barcode')}><EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={p.barcode} navigate={navigateTo} title={T('open_product', 'Open product')}><span className="whitespace-nowrap font-mono" {...copy(p.barcode)}>{p.barcode}</span></EntityLink></Row> : null}
+                  {showBarcode && p.barcode ? <Row label={T('barcode', 'Barcode')}><EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={p.barcode} navigate={navigateTo} title={T('open_product', 'Open product')}><span className="whitespace-nowrap font-mono" {...copy(p.barcode)}>{p.barcode}</span></EntityLink></Row> : null}
                   {p.sku ? <Row label={T('sku', 'SKU')}><span className="font-mono">{p.sku}</span></Row> : null}
                   {p.supplier ? <Row label={T('label_supplier', 'Supplier')}><EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="contacts" anchor="hub:contacts:suppliers" search={p.supplier} navigate={navigateTo} title={T('open_supplier', 'Open supplier')}><span {...copy(p.supplier)}>{p.supplier}</span></EntityLink></Row> : null}
                   {expiryDate ? (
@@ -362,22 +383,22 @@ export default function ProductDetailModal({
               </div>
 
               <div className="min-w-0 space-y-2.5 border-t border-gray-100 pt-2.5 dark:border-gray-700 sm:border-t-0 sm:pl-5 sm:pt-0">
-                <div className="grid grid-cols-2 gap-2" data-detail-price-row="cost-wholesale">
+                {canViewCosts || showPrice ? <div className="grid grid-cols-2 gap-2" data-detail-price-row="cost-wholesale">
                   {canViewCosts ? <PriceCell label={T('label_cost', 'Cost')}>
                     <button type="button" onClick={() => setCostFloatOpen(true)} className="text-left text-red-600 decoration-dotted underline-offset-2 hover:underline" title={T('cost_breakdown_title', 'Calculated cost price')} aria-label={T('cost_breakdown_title', 'Calculated cost price')}><CostValue value={costUsdValue} fmt={fmtUSD} t={(key) => T(key, '')} /></button>
                     {purchaseKhr !== null ? <span className="ml-2 text-xs font-normal text-gray-400">{fmtKHR(purchaseKhr)}</span> : null}
                     {p.cost_needs_review === true ? <span className="mt-1 block text-xs font-normal text-amber-700 dark:text-amber-400">{T('merge_cost_needs_review', 'Cost needs review')}</span> : null}
                   </PriceCell> : null}
-                  <PriceCell label={T('wholesale_price', 'Wholesale price')}>
+                  {showPrice ? <PriceCell label={T('wholesale_price', 'Wholesale price')}>
                     {(wholesaleUsd > 0 || wholesaleKhr > 0) ? (
                       <>
                         <span className="text-indigo-600 dark:text-indigo-300">{priceText(fmtUSD, wholesaleUsd)}</span>
                         {wholesaleKhr > 0 ? <span className="ml-2 text-xs font-normal text-gray-400">{priceText(fmtKHR, wholesaleKhr)}</span> : null}
                       </>
                     ) : <span className="text-gray-300 dark:text-gray-600">—</span>}
-                  </PriceCell>
-                </div>
-                <div className="grid grid-cols-2 gap-2" data-detail-price-row="selling-margin">
+                  </PriceCell> : null}
+                </div> : null}
+                {showPrice ? <div className="grid grid-cols-2 gap-2" data-detail-price-row="selling-margin">
                   <PriceCell label={T('label_selling_price', 'Selling price')}>
                     <span className="text-green-600">{priceText(fmtUSD, sellingUsd)}</span>
                     {sellingKhr > 0 ? <span className="ml-2 text-xs font-normal text-gray-400">{priceText(fmtKHR, sellingKhr)}</span> : null}
@@ -390,10 +411,10 @@ export default function ProductDetailModal({
                       </>
                     ) : <span className="text-gray-300 dark:text-gray-600">—</span>}
                   </PriceCell> : null}
-                </div>
+                </div> : null}
                 {/* Stock, unit and status on ONE row (owner, 30 Sep): the
-                    badge needs no "Status" label of its own. */}
-                <Row label={T('label_stock', 'Stock')}>
+                    badge needs no "Status" label of its own. A viewer whose grants cut stock sees no stock row at all, never a false 0. */}
+                {showStock ? <Row label={T('label_stock', 'Stock')}>
                   <strong className="text-gray-900 dark:text-white">{stockQuantity}</strong>
                   {p.unit ? (
                     unitColor ? (
@@ -413,8 +434,8 @@ export default function ProductDetailModal({
                   ) : (
                     <span className="badge-green ml-2">{T('in_stock', 'In stock')}</span>
                   )}
-                </Row>
-                {promotion.active ? (
+                </Row> : null}
+                {showPrice && promotion.active ? (
                   <Row label={T('product_discount', 'Discounts')}>
                     <span className="text-rose-600 dark:text-rose-300">{priceText(fmtUSD, promotion.applied_price_usd)}</span>
                     {promotion.applied_price_khr > 0 ? <span className="ml-2 text-xs text-gray-400">{priceText(fmtKHR, promotion.applied_price_khr)}</span> : null}
@@ -426,10 +447,13 @@ export default function ProductDetailModal({
               </div>
             </div>
 
+            {/* The caller's own facts (Inventory's check status, counted, last checked, last stock change, Fix stock, Sales). Absent for Products: nothing is drawn. */}
+            {children ? <div className="border-t border-gray-100 pt-2.5 dark:border-gray-700" data-detail-extra="">{children}</div> : null}
+
             {/* The links row, rendered ONCE at every width (it used to mount
                 the report twice, one copy hidden by CSS, so every open fetched
                 it twice). Content-sized chips wrap to a second line on phones. */}
-            {productId > 0 && canReadProductHistory ? (
+            {report && productId > 0 && canReadProductHistory ? (
               <div className="border-t border-gray-100 pt-2.5 dark:border-gray-700" data-detail-links-row="">
                 <Suspense fallback={<div className="flex flex-wrap gap-1.5">{leadingPills}</div>}>
                   <ProductDetailReport productId={productId} barcode={p.barcode} t={t || (() => undefined)} fmtUSD={fmtUSD} leadingPills={leadingPills} />

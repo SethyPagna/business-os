@@ -8234,5 +8234,6 @@
   "inventory_check_group_unsaved_one": "1 unsaved count in this group",
   "inventory_check_group_unsaved_many": "{count} unsaved counts in this group",
   "inventory_check_group_continues": "Continues on the next page",
-  "inventory_check_mark_open_groups": "Mark every product in the open groups as matching stock"
+  "inventory_check_mark_open_groups": "Mark every product in the open groups as matching stock",
+  "inventory_check_last_change": "Last stock change"
 }

@@ -65,9 +65,9 @@ const InventoryCheckApprovalPanel = lazyRetry(() => import('./InventoryCheckAppr
 const InventoryCheckGroupedList = lazyRetry(loadGroupedList, 'inventory-check-groups')
 // The product detail and the session history are floats opened by a tap, never part of the first paint: their code loads as their own chunks, and starts loading once the list is on screen (below),
 // so the first tap finds it already there.
-const loadDetailFloat = () => import('./InventoryCheckDetailFloat.tsx')
+const loadDetailFloat = () => import('./InventoryCheckDetail.tsx')
 const loadHistoryFloat = () => import('./InventoryCheckHistoryFloat.tsx')
-const InventoryCheckDetailFloat = lazyRetry(loadDetailFloat, 'inventory-check-detail')
+const InventoryCheckDetail = lazyRetry(loadDetailFloat, 'inventory-check-detail')
 const InventoryCheckHistoryFloat = lazyRetry(loadHistoryFloat, 'inventory-check-history')
 const FastStockInModal = lazyRetry(() => import('./FastStockInModal.tsx'), 'inventory-check-fix-stock')
 // The calculated-cost float (a tap on the red cost value of a row, for a viewer who may see cost): its own chunk, read on demand only.
@@ -1274,7 +1274,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
             : section === 'sessions' && access.canCheck ? <button type="button" className="btn-primary inline-flex min-h-10 items-center gap-1 px-3 text-xs" title={tr('inventory_check_count_tooltip', 'Count the products listed on this page')} onClick={() => setSection('products')}><Play className="h-4 w-4" aria-hidden="true" />{tr('inventory_check_start_page', 'Count')}</button> : null}
         </div> : null}
         {pagerNode('bottom')}
-        {detail && fresh ? <Suspense fallback={null}><InventoryCheckDetailFloat product={detail} observation={observations[String(detail.id)]} unavailable={unavailableIds.has(String(detail.id))} fields={access.fields} priceText={priceText} promotionRules={data?.promotionRules} exchangeRate={exchangeRate} t={t} onClose={() => setDetail(null)}
+        {detail && fresh ? <Suspense fallback={null}><InventoryCheckDetail product={detail} observation={observations[String(detail.id)]} unavailable={unavailableIds.has(String(detail.id))} fields={access.fields} priceText={access.fields.price ? priceText : undefined} promotionRules={data?.promotionRules} exchangeRate={exchangeRate} fmtUSD={fmtUSD} fmtKHR={fmtKHR} navigateTo={navigateTo} t={t} onClose={() => setDetail(null)}
           onFixStock={fixOpening ? () => openFixStock(fixOpening) : undefined}
           onSales={offered && rights.can('sales', 'view') ? () => { queueReportsFocus(productSalesFocus(detail.name)); navigateTo('sales', hubAnchor('sales', 'reports')) } : undefined} /></Suspense> : null}
         {costFor && access.fields.cost ? <Suspense fallback={null}><CostCalculationFloat productId={costFor.id} productName={costFor.name} onClose={() => setCostFor(null)} fmtUSD={value => fmtUSD(value)} fmtKHR={value => fmtKHR(value)} t={(key, fallback) => tr(key, fallback)} /></Suspense> : null}

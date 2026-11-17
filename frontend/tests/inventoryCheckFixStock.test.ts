@@ -106,7 +106,7 @@ const response = () => ({ items: [{ ...row, ...rowOverride }], total: 1, page: 1
 const baseUser = { id: 7, username: 'alice', role_code: 'employee', permissions: { inventory: true, inventory_checks: true, sales: true, inventory_check_show_barcode: true, inventory_check_show_brand: true, inventory_check_show_category: true, inventory_check_show_stock: true, inventory_check_show_received: true } as Record<string, unknown> }
 const app = {
   user: baseUser as Record<string, unknown>,
-  page: 'inventory', authReady: true, canWriteToServer: true, t: (key: string) => key, settings: { navigation_mode: 'sections' }, language: 'en', AccessDenied: () => 'Access denied',
+  page: 'inventory', authReady: true, canWriteToServer: true, t: (key: string) => key, getPermissionTier: () => 'none', can: () => false, fmtUSD: (value: unknown) => '$' + Number(value).toFixed(2), fmtKHR: (value: unknown) => Number(value).toFixed(0) + '៛', settings: { navigation_mode: 'sections' }, language: 'en', AccessDenied: () => 'Access denied',
   usdSymbol: '$', khrSymbol: '៛', exchangeRate: 4100, notify() {},
   navigateTo: (page: string, anchor?: string) => { navigations.push([page, anchor]) },
 }
