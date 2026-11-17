@@ -3,7 +3,7 @@
 -- file, so production and a fresh database apply 0313 first; test-held-0200-sale-cost-repair-pure.cjs and the held README.md name it.
 -- Owner rule (30 Sep 2026): prices and costs are stored to 4 decimals, nearest, half away from zero. The writers are fixed in the Worker
 -- (same lane; 0312 re-creates the catalog-cost triggers with the sold-out fallback rounded). Values written before those fixes remain:
--- production census 16 Nov 2026 found 123 of 8,690 products with cost_price_usd over 4 decimals (predicate: ABS(c * 10000 - ROUND(c * 10000))
+-- a production census found products with cost_price_usd over 4 decimals (predicate: ABS(c * 10000 - ROUND(c * 10000))
 -- > 0.000001 on a numeric value; ops/queries/stock-state-census-exactness-20261116.sql cost_usd_over_4dp). This file rounds them.
 --
 -- Scope predicate (round 4): a numeric value x is in scope when x IS NOT HALF_UP_4DP(x), the SQL of the shipped helper
@@ -43,7 +43,7 @@
 -- sees maintenance mode for a few milliseconds. Run it in a quiet window.
 --
 -- PRE:  the stock epoch, when there is one, is legacy-separate-pool-v1; no maintenance flag and no permit; the scope is within the caps
---       (products 500, lots 5000, entries 5000: production census 123 products), every value in scope is below 1e9 in magnitude, and no
+--       (products 500, lots 5000, entries 5000), every value in scope is below 1e9 in magnitude, and no
 --       INACTIVE lot that still holds branch stock needs a write (trigger positive_lot_reject_inactive_update_0154 aborts any update of
 --       such a lot, so the file stops first, named cost_4dp_0313_pre_inactive_lot_holds_stock, before any write), or the file aborts.
 --       Record the three counts from cost-4dp-counts-20261116.sql beforehand.

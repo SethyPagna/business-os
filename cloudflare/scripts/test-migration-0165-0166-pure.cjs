@@ -229,7 +229,7 @@ assert.strictEqual(db.prepare("SELECT COUNT(*) c FROM audit_logs WHERE user_name
 
 // ---------------------------------------------------------------- 0166 --
 db.prepare("INSERT INTO customers (id, name, phone, email) VALUES (25000, 'test customer', '012000001', NULL)").run()
-db.prepare("INSERT INTO customers (id, name, phone, email) VALUES (25001, 'test customer', '012000001', 'ling@example.com')").run()
+db.prepare("INSERT INTO customers (id, name, phone, email) VALUES (25001, 'test customer', '012000001', 'customer@example.com')").run()
 db.prepare("INSERT INTO customers (id, name, phone) VALUES (30000, 'test customer', '012000002')").run() // different phone -> negative control
 db.prepare("INSERT INTO sales (id, receipt_number, customer_id) VALUES (901, 'R2', 25001)").run()
 db.prepare("INSERT INTO customer_receivables (id, legacy_id, customer_id, customer_name, invoice_date, status, source_file, source_row) VALUES (1, 1, 25001, 'test customer', '2026-01-01', 'open', 'f', 1)").run()
@@ -240,7 +240,7 @@ db.exec(sql0166)
   assert.ok(db.prepare('SELECT 1 FROM customers WHERE id = 25000').get(), 'C1: lowest id survives as keeper')
   assert.ok(!db.prepare('SELECT 1 FROM customers WHERE id = 25001').get(), 'C1: same name+phone loser deleted')
   assert.ok(db.prepare('SELECT 1 FROM customers WHERE id = 30000').get(), 'C1: same name DIFFERENT phone is untouched (negative control)')
-  assert.strictEqual(db.prepare('SELECT email FROM customers WHERE id = 25000').get().email, 'ling@example.com', 'C1: keeper blank email backfilled from loser')
+  assert.strictEqual(db.prepare('SELECT email FROM customers WHERE id = 25000').get().email, 'customer@example.com', 'C1: keeper blank email backfilled from loser')
   assert.strictEqual(db.prepare('SELECT customer_id FROM sales WHERE id = 901').get().customer_id, 25000, 'C1: sales.customer_id repointed')
   assert.strictEqual(db.prepare('SELECT customer_id FROM customer_receivables WHERE id = 1').get().customer_id, 25000, 'C1: customer_receivables.customer_id repointed')
 }

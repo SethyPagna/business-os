@@ -3,10 +3,10 @@
 --
 -- The merge fold re-points sale_items.batch_id and return_items.batch_id from a discarded lot to the kept one, and the planner reads the same lines first. Neither table had
 -- an index on batch_id, so `WHERE batch_id IN (...)` was a full pass over sale_items and over return_items for the read and again for each re-point (r4: 92,109 rows read to fold 1 lot
--- on a census-shaped world of 40,000 sale lines and 3,000 return lines; base reads 6,042). Selecting through the product-first index instead (r5) was cheap but not exact: a line
+-- on a census-shaped test world; base reads 6,042). Selecting through the product-first index instead (r5) was cheap but not exact: a line
 -- written after a merge that names a moved lot (a historical import writes no stock movement), then a merge undo, leaves a line whose product differs from its lot's product, and a
 -- later fold would leave it on an inactive lot. The fold now selects purely by batch_id, which is exact, and these indexes make that a seek.
--- Both are PARTIAL (WHERE batch_id IS NOT NULL): most lines name no lot (production counts: about 40,000 sale_items of which 2,777 carry a lot, about 3,000 return_items of which 8 do),
+-- Both are PARTIAL (WHERE batch_id IS NOT NULL): most lines name no lot (only a small share of sale and return lines carry one),
 -- so the index holds only the lot-bearing rows. SQLite uses a partial index only for a statement that states the predicate, or whose terms imply it; the fold statements
 -- select by `batch_id IN (...)`, which implies batch_id IS NOT NULL, so no extra term is written (pinned by scripts/test-migration-0315-sale-return-line-batch-index-pure.cjs,
 -- which also pins the EXPLAIN plans: a migration cannot run EXPLAIN). Without that inference the fold is still exact; it only reads as much as r4 did.
