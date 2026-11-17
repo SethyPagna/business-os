@@ -389,7 +389,7 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, user:
     totals: gateTotals((totals || {}) as unknown as Record<string, unknown>, isAdmin, canViewCosts, 2, canViewCourier),
     prevTotals: gateTotals((prevTotals || {}) as unknown as Record<string, unknown>, isAdmin, canViewCosts, 2, canViewCourier),
     periodReturns: periodReturns || {},
-    // Supplier loss and compensation reconstruct the acquisition cost: omitted (not zeroed) unless cost is visible (owner, 15 Nov 2026).
+    // Supplier loss and compensation reconstruct the acquisition cost: omitted (not zeroed) unless cost is visible (View product costs; owner, 17 Nov 2026).
     periodSupplierReturns: canViewCosts ? (periodSupplierReturns || {}) : omitSupplierReturnMoney(periodSupplierReturns),
     // The period rows are the same money as the totals above, so they pass
     // the same gate (AL finding L4: they used to reach every dashboard caller

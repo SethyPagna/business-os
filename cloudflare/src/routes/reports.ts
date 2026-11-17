@@ -217,7 +217,7 @@ function unknownCostFields(sent: unknown, known: unknown, diagnostic: ReturnType
  * cost / profit / margin keys are NOT assigned (a client cannot tell "0"
  * from "hidden", so absence is the contract -- same rule as
  * buildDaySummaryRow / buildSaleReportRow above). Product costs follow
- * canViewCosts (administrator only since 15 Nov 2026) and the courier's actual
+ * canViewCosts (the View product costs grant, administrator by default; owner, 17 Nov 2026) and the courier's actual
  * cost follows canViewCourier (lib/courierCostAccess.ts: an administrator, or a
  * role holding sales:view_courier_cost, which staff do since 16 Nov 2026). So a
  * non-admin with the courier permission reaches the courier-only branches below
