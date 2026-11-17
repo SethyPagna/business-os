@@ -116,9 +116,6 @@ export async function runProductMergeReadBatch(
   return new Map(reads.map((read, index) => [read.key, resultRows(results[index])]))
 }
 
-/** The sale-line product predicate shared by the merge's line read and its fold re-point (see planProductMergeDependentLotSnapshots). */
-export const SALE_LINE_PRODUCT_FILTER = 'product_id = @dupProductId'
-
 const PRODUCT_MONEY_COLUMNS = `selling_price_usd, selling_price_khr,
   wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr, purchase_price_usd, purchase_price_khr`
 
@@ -255,22 +252,10 @@ export function planProductMergeDependentLotSnapshots(
   if (foldedIds.length) {
     // A single-lot line names its lot in sale_items.batch_id / return_items.batch_id and writes no allocation row: the fold follows it too.
     // Each table's allocation read carries its line read as one more UNION ALL term.
-    // sale_items has NO index on batch_id (the 40,000-row table was scanned twice per merge: 92,421 rows read against base's 30,080), so its
-    // line read goes through idx_sale_items_product_branch_sale_pg (product_id first). That selects exactly the lot's lines only while a line
-    // carries the product that owns its lot: true for every current writer (sales.ts, saleLineAddition.ts, stockActionCommit.ts and returns.ts
-    // check the lot against the line's product) and for the merge itself (the fold runs before the re-parent, lines and lots move together),
-    // but NOT provable for rows written before those checks; the read-only production count in the round-5 report sizes that (expected 0).
-    // SALE_LINE_PRODUCT_FILTER is that predicate and mergeFoldStatements() writes the same one, so the read and the re-point select the same
-    // rows. return_items and return_item_batch_allocations have no product-first index, so their reads stay on batch_id alone (exact).
+    // The line reads select by batch_id alone (exact, whatever product a line names): idx_sale_items_batch_id_partial and idx_return_items_batch_id_partial (migration 0315) make them seeks.
     const ids = JSON.stringify(foldedIds)
-    const duplicateProductId = Number(snapshot.duplicateProduct?.id)
-    const saleLineProduct = Number.isSafeInteger(duplicateProductId) && duplicateProductId > 0
     reads.push(
-      {
-        key: 'saleAllocations',
-        sql: `SELECT 'allocation' AS kind, batch_id, id FROM sale_item_batch_allocations WHERE batch_id IN (SELECT value FROM json_each(@ids)) UNION ALL SELECT 'line' AS kind, batch_id, id FROM sale_items WHERE ${saleLineProduct ? SALE_LINE_PRODUCT_FILTER : '1'} AND batch_id IN (SELECT value FROM json_each(@ids)) ORDER BY kind, id`,
-        params: saleLineProduct ? { ids, dupProductId: duplicateProductId } : { ids },
-      },
+      { key: 'saleAllocations', sql: "SELECT 'allocation' AS kind, batch_id, id FROM sale_item_batch_allocations WHERE batch_id IN (SELECT value FROM json_each(@ids)) UNION ALL SELECT 'line' AS kind, batch_id, id FROM sale_items WHERE batch_id IN (SELECT value FROM json_each(@ids)) ORDER BY kind, id", params: { ids } },
       { key: 'returnAllocations', sql: "SELECT 'allocation' AS kind, batch_id, id FROM return_item_batch_allocations WHERE batch_id IN (SELECT value FROM json_each(@ids)) UNION ALL SELECT 'line' AS kind, batch_id, id FROM return_items WHERE batch_id IN (SELECT value FROM json_each(@ids)) ORDER BY kind, id", params: { ids } },
     )
   }

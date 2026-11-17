@@ -53,7 +53,7 @@ import { sendTelegramEvent } from '../lib/telegram'
 import { PRODUCT_EDIT_ALERT_HEADING, PRODUCT_MERGE_ALERT_HEADING, formatProductEditAlertLines, formatProductMergeAlertLines, productEditAlertFields } from '../lib/productEditAlert'
 import { CATALOG_COST_DERIVE_SQL, COST_MIRROR_COLUMNS, catalogCostRecomputeIfChangedSql, costEntryActorParams, costMirrorSql, typedCostEntriesBeforeWriteSql } from '../lib/catalogCostRecompute'
 import { explicitCostReviewWritePlan, mergeCostOutcome, mergeCostReviewStatements, mergeCostAuthorityUsdSql, type MergeCostFallback, type MergeCostOutcome } from '../lib/productCostReview'
-import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, SALE_LINE_PRODUCT_FILTER, productMergeSourceExtent, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
+import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, productMergeSourceExtent, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
 import type { ProductMergeCaseSnapshot, ProductMergeLotSnapshot } from '../lib/productMergeSnapshot'
 import { isMergeableLot, matchDuplicateLots, mergeLotReceivedDate, planFoldedLotMetadata, type MergeLotRow } from '../lib/productMergeLots'
 import {
@@ -4215,8 +4215,6 @@ export function mergeFoldStatements(
   lots: readonly MergeFoldLot[],
   stock: readonly MergeFoldStock[],
   keptLots: readonly MergeFoldLotMetadata[],
-  /** The discarded product's id: its sale lines are found through the product-first index, not by a scan on batch_id. Omitted = no product filter (exact, but a full scan of sale_items). */
-  dupProductId: number | null = null,
 ): Array<{ sql: string; params: Record<string, unknown> }> {
   if (!lots.length) return []
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
@@ -4235,13 +4233,10 @@ export function mergeFoldStatements(
     statements.push({ sql: `DELETE FROM branch_batch_stock WHERE batch_id IN (${FOLD_DUP_IDS_SQL})`, params })
     statements.push({ sql: `UPDATE product_batches SET is_active = 0, merge_deactivated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id IN (${FOLD_DUP_IDS_SQL})`, params })
     // 4. Batch identity (in same batch, out same batch, return same batch): allocations and single-lot lines follow the stock to the kept lot.
+    // Lines are selected by batch_id ALONE (exact: no assumption that a line carries its lot's product). sale_items and return_items are searched through the partial indexes of
+    // migration 0315 (idx_sale_items_batch_id_partial, idx_return_items_batch_id_partial); without them each of these two statements is a full pass over its table.
     for (const table of ['sale_item_batch_allocations', 'return_item_batch_allocations', 'sale_items', 'return_items']) {
-      // sale_items only: the same product-first predicate as the read (productMergeSnapshot.ts), so the 40,000-row table is not scanned per merge.
-      const byProduct = table === 'sale_items' && dupProductId != null
-      statements.push({
-        sql: `UPDATE ${table} SET batch_id = ${foldTargetOf('batch_id')} WHERE ${byProduct ? `${SALE_LINE_PRODUCT_FILTER} AND ` : ''}batch_id IN (${FOLD_DUP_IDS_SQL})`,
-        params: byProduct ? { ...params, dupProductId } : params,
-      })
+      statements.push({ sql: `UPDATE ${table} SET batch_id = ${foldTargetOf('batch_id')} WHERE batch_id IN (${FOLD_DUP_IDS_SQL})`, params })
     }
   }
   // 5. The kept lot carries the quantity-weighted cost ($0 or unknown left out, 4 places) and the earliest expiry across every lot added to it.
@@ -4957,7 +4952,7 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
       batchesMovedThisDup += 1
     }
   }
-  statements.push(...mergeFoldStatements(foldLots, foldStock, foldLotMetadata, dup.id))
+  statements.push(...mergeFoldStatements(foldLots, foldStock, foldLotMetadata))
   // One statement per chunk, not per lot: a product with dozens of lots would
   // otherwise spend the whole 100-statement bound on the repoint alone.
   for (const lotChunk of chunkItems(lotsToRepoint, MERGE_LOT_REPOINT_CHUNK)) statements.push(repointLotsStatement(canonicalId, lotChunk))

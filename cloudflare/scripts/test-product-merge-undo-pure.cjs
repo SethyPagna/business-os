@@ -608,7 +608,10 @@ assert.throws(() => d1.db.prepare("INSERT INTO products(name) VALUES('unadmitted
     assert.match(appliersSrc, /DELETE FROM inventory_movements WHERE id IN/)
     // The fold re-points both allocation tables (and the single-lot lines) in ONE set-based statement per table (mergeFoldStatements).
     assert.match(productsSrc, /for \(const table of \['sale_item_batch_allocations', 'return_item_batch_allocations', 'sale_items', 'return_items'\]\)/)
-    assert.match(productsSrc, /UPDATE \$\{table\} SET batch_id = \$\{foldTargetOf\('batch_id'\)\} WHERE batch_id IN/)
+    assert.match(productsSrc, /UPDATE \$\{table\} SET batch_id = \$\{foldTargetOf\('batch_id'\)\} WHERE batch_id IN \(\$\{FOLD_DUP_IDS_SQL\}\)`/)
+    // Round 6: selected by batch_id ALONE (exact). No product predicate in the re-point or in the planner's line read (round 5's was not exact, review r5 F2).
+    assert.doesNotMatch(productsSrc, /SALE_LINE_PRODUCT_FILTER|dupProductId/)
+    assert.doesNotMatch(fs.readFileSync(path.join(__dirname, '../src/lib/productMergeSnapshot.ts'), 'utf8'), /SALE_LINE_PRODUCT_FILTER|dupProductId/)
     assert.match(appliersSrc, /This merge has later stock or received-date activity/)
   })
 
