@@ -441,11 +441,11 @@ const FOLLOWED_CONTROLS = {
   // A cost on a received line needs Edit product costs on every receiving route (an administrator always holds it); the stock session is the one proved here.
   'inventory:receive_costs': {
     file: 'lib/stockSession.ts',
-    proof: [/function commitStockSession\([^)]*\) \{\s*if \(hasAcquisitionCostInput\(raw, user\)\)\s*fail\('Only an administrator can enter receipt costs\./],
+    proof: [/function commitStockSession\([^)]*\) \{\s*if \(hasAcquisitionCostInput\(raw, user\)\)\s*fail\('Entering receipt costs needs Edit product costs\./],
   },
   'returns:supplier': {
     file: 'routes/returns.ts',
-    proof: [/app\.post\('\/supplier'[\s\S]{0,400}?!canEditAcquisitionCosts\(user\)\)\s*return c\.json\(\{ error: 'Only an administrator can record supplier return costs and settlement\./],
+    proof: [/app\.post\('\/supplier'[\s\S]{0,400}?!canEditAcquisitionCosts\(user\)\)\s*return c\.json\(\{ error: 'Recording supplier return costs and settlement needs Edit product costs\./],
   },
   'inventory:rename_reasons': {
     file: 'routes/inventory.ts',
@@ -563,20 +563,20 @@ const OPEN_READS = {
 // leaves the field out and no row is affected. `unmodelled`: refuses a whole control for a role without the grant and
 // the editor does not say so yet (listed so it is a decision, not an oversight).
 const COST_GATES = [
-  { text: 'Only an administrator can use this import format', how: 'row' },
-  { text: 'Only an administrator can read financial import data', how: 'row' },
-  { text: 'Only an administrator can enter receipt costs', how: 'control', why: 'Shown as the Receipt costs control after Adjust / receive (inventory:receive_costs), which needs Edit product costs (owner, 17 Nov 2026).' },
-  { text: 'Only an administrator can change receipt costs', how: 'input' },
-  { text: 'Only an administrator can change stored receipt costs', how: 'input' },
-  { text: 'Only an administrator can reverse a cost change', how: 'input' },
-  { text: 'Only an administrator can change catalog costs', how: 'input' },
-  { text: 'Only an administrator can set catalog costs', how: 'input' },
-  { text: 'Only an administrator can submit return cost overrides', how: 'input' },
-  { text: 'Only an administrator can submit cost changes', how: 'input' },
-  { text: 'Only an administrator can change the cost', how: 'input' },
-  { text: 'Only an administrator can confirm or reverse a $0 cost', how: 'input' },
-  { text: 'Only an administrator can record supplier return costs and settlement', how: 'control', why: 'Shown as the Supplier returns control after Add (returns:supplier), which needs Edit and View product costs (owner, 17 Nov 2026).' },
-  { text: 'Only an administrator can review supplier return compensation and settlement', how: 'control', why: 'The same control: POST /returns/supplier.' },
+  { text: 'This import format needs View and Edit product costs', how: 'row' },
+  { text: 'Reading financial import data needs View product costs', how: 'row' },
+  { text: 'Entering receipt costs needs Edit product costs', how: 'control', why: 'Shown as the Receipt costs control after Adjust / receive (inventory:receive_costs), which needs Edit product costs (owner, 17 Nov 2026).' },
+  { text: 'Changing receipt costs needs Edit product costs', how: 'input' },
+  { text: 'Changing stored receipt costs needs Edit product costs', how: 'input' },
+  { text: 'Reversing a cost change needs Edit product costs', how: 'input' },
+  { text: 'Changing catalog costs needs Edit product costs', how: 'input' },
+  { text: 'Setting catalog costs needs Edit product costs', how: 'input' },
+  { text: 'Submitting return cost overrides needs Edit product costs', how: 'input' },
+  { text: 'Submitting cost changes needs Edit product costs', how: 'input' },
+  { text: 'Changing the cost needs Edit product costs', how: 'input' },
+  { text: 'Confirming or reversing a $0 cost needs Edit product costs', how: 'input' },
+  { text: 'Recording supplier return costs and settlement needs Edit product costs', how: 'control', why: 'Shown as the Supplier returns control after Add (returns:supplier), which needs Edit and View product costs (owner, 17 Nov 2026).' },
+  { text: 'Reviewing supplier return compensation and settlement needs View product costs', how: 'control', why: 'The same control: POST /returns/supplier.' },
   { text: 'Only an administrator can export an unredacted database backup', how: 'unmodelled', why: 'The Backup row has no action chips; its description says exporting and restoring need an administrator whatever the cost grants say (owner, 17 Nov 2026).' },
   { text: 'Only an administrator can restore a database backup', how: 'unmodelled', why: 'The same description covers restore.' },
   { text: 'Only an administrator can export database backups', how: 'unmodelled', why: 'Drive sync export: the same description.' },
@@ -952,9 +952,13 @@ check('every followed control rides a row the Worker checks, is stricter than it
 check('every Worker refusal that names a cost grant is classified', () => {
   const seen = new Map()
   for (const file of workerFiles) {
-    if (!/Only an administrator can/.test(fs.readFileSync(file, 'utf8'))) continue
+    if (!/Only an administrator can|product costs/.test(fs.readFileSync(file, 'utf8'))) continue
     const text = workerText.get(rel(file)) ?? emit(file)
+    // A refusal names either the administrator (backup and restore: never the cost grants) or the switch the role editor labels, "View product costs" / "Edit product costs".
     for (const match of text.matchAll(/'(Only an administrator can (?=[^']*(?:cost|import data|import format|backup|restore|settlement|compensation))[^']*)'/g)) {
+      seen.set(match[1], [...(seen.get(match[1]) || []), rel(file)])
+    }
+    for (const match of text.matchAll(/'([A-Z][^'\n]*? needs (?:View and Edit|View|Edit) product costs[^'\n]*)'/g)) {
       seen.set(match[1], [...(seen.get(match[1]) || []), rel(file)])
     }
   }

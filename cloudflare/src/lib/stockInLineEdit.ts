@@ -403,7 +403,7 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
   if (tier !== 'full') refuse(403, 'Editing a stock-in line requires Full Access to adjust inventory.', 'permission_denied')
   const request = parseStockInLineEditRequest(movementId, body)
   if (request.unitCostProvided && !canEditAcquisitionCosts(user)) {
-    refuse(403, 'Only an administrator can change receipt costs.', 'product_cost_edit_required')
+    refuse(403, 'Changing receipt costs needs Edit product costs.', 'product_cost_edit_required')
   }
   const requestId = String(body.client_request_id ?? '').trim()
   if (!REQUEST_ID.test(requestId)) refuse(400, 'A stable client_request_id (8-120 letters, digits, "-" or "_") is required.', 'invalid_client_request_id')
@@ -889,7 +889,7 @@ export async function replayStockInLineEdit(
   env: Env, user: SessionUser, direction: 'undo' | 'redo', historyId: number, generation: unknown, payload: Row,
 ): Promise<void> {
   if (getActionTier(user, 'inventory', 'adjust') !== 'full') throw new StockInLineEditReplayError('Editing a stock-in line requires Full Access to adjust inventory.', 403)
-  if (Number(payload.requires_cost_edit) === 1 && !canEditAcquisitionCosts(user)) throw new StockInLineEditReplayError('Only an administrator can reverse a cost change.', 403)
+  if (Number(payload.requires_cost_edit) === 1 && !canEditAcquisitionCosts(user)) throw new StockInLineEditReplayError('Reversing a cost change needs Edit product costs.', 403)
   if (Number(payload.requires_supplier_edit) === 1 && getActionTier(user, 'products', 'supplier') === 'none') throw new StockInLineEditReplayError(PRODUCT_SUPPLIER_REFUSAL.error, 403, PRODUCT_SUPPLIER_REFUSAL.code)
   const db = getDb(env)
   const row = await db.prepare('SELECT * FROM stock_lot_adjustment_operations WHERE id=@operation AND history_id=@history')

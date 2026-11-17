@@ -121,7 +121,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'dashboard',
     tKey: 'perm_section_dashboard',
     label: 'Dashboard',
-    description: 'The Dashboard page. Export is a separate switch. Cost, profit and stock value are shown to administrators only.',
+    description: 'The Dashboard page. Export is a separate switch. Cost, profit and stock value need View product costs (Products).',
     permissions: [
       { key: 'dashboard', tKey: 'perm_dashboard', label: 'Dashboard', sensitivity: 'normal', lead: true },
       // Independent of the page-access key above -- a role can have
@@ -190,7 +190,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'products',
     tKey: 'perm_section_products',
     label: 'Products',
-    description: 'Products. Cost and profit need a cost grant (admin by default). Opening stock also needs Inventory › Adjust / receive.',
+    description: 'Products. Cost and profit need View product costs (admin by default). Opening stock also needs Adjust / receive.',
     permissions: [
       // tier: true -- add, edit and delete queue via maybeQueueForReview() (lib/reviewGate.ts); an edit that
       // would merge two products queues too. Every other action is Full only (utils/permissionActions.ts lists
@@ -496,7 +496,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         tier: true,
         middleTier: 'view',
         reviewTKey: 'perm_review_view_desc',
-        reviewDescription: 'View: watch the pending approval queue, but Approve and Reject are hidden and refused. Acting on requests needs Full Access here; approving also needs Full access to each request’s own section and action (for example Products: Edit product), plus the price or image permission when the request changes one (a cost change needs an administrator). Nobody can approve their own request. Rejecting needs only Full Access here.',
+        reviewDescription: 'View: watch the pending approval queue, but Approve and Reject are hidden and refused. Acting on requests needs Full Access here; approving also needs Full access to each request’s own section and action (for example Products: Edit product), plus the price or image permission when the request changes one (a cost change needs Edit product costs). Nobody can approve their own request. Rejecting needs only Full Access here.',
       },
     ],
   },

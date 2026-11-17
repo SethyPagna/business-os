@@ -152,7 +152,7 @@ export const STOCK_IN_LINE_EDIT_ERRORS: Record<string, [string, string]> = {
   line_not_editable: ['stock_in_line_error_not_editable', 'This line cannot be edited here.'],
   session_undone: ['stock_in_line_error_session_undone', 'This stock-in session was undone. Redo it first, then edit the line.'],
   session_undo_closed: ['stock_in_line_error_session_undo_closed', 'This stock-in session was undone, and a product merge closed its Undo, so it cannot be redone. The line cannot be edited.'],
-  product_cost_edit_required: ['stock_in_line_error_cost_permission', 'Only an administrator can change receipt costs.'],
+  product_cost_edit_required: ['stock_in_line_error_cost_permission', 'Changing receipt costs needs Edit product costs.'],
   permission_denied: ['stock_in_line_error_permission', 'You do not have permission to edit stock-in lines.'],
   migration_required: ['stock_in_line_error_migration', 'Editing stock-in lines is not available on this server yet. Nothing was changed.'],
   // The receipt gate the Worker re-runs on a changed supplier / cost.

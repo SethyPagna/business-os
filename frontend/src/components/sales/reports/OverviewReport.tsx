@@ -345,7 +345,7 @@ export default function OverviewReport(p: ReportViewProps) {
         titleControl={p.titleControl}
         hint={{
           label: tr(view.labelKey, view.fallback),
-          text: tr('rpt_hint_overview', 'Revenue = net sales of recognized sales minus refunds; tax and delivery are excluded. Cost and profit are visible to admins only.'),
+          text: tr('rpt_hint_overview', 'Revenue = net sales of recognized sales minus refunds; tax and delivery are excluded. Cost and profit need View product costs.'),
         }}
         menuAction={p.canExport() ? <OverflowMenu label={tr('export', 'Export')} items={exportMenuItems(tr, p.canExport, exportCsv, exportPrint, { csv: <Download className="h-3.5 w-3.5" />, print: <Printer className="h-3.5 w-3.5" /> })} /> : null}
         error={state.error}

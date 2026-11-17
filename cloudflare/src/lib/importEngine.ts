@@ -618,7 +618,7 @@ export async function assertCurrentImportApplyAuthority(
   }
   const missingPermission = permissionsForImportType(job.type).find((permission) => !hasPermission(actor, permission))
   if (isAcquisitionCostImport(job.type) && !canEditAcquisitionCosts(actor)) {
-    throw new ImportApplyAuthorizationError('product_cost_edit', 'The user who authorized this import is no longer an administrator.')
+    throw new ImportApplyAuthorizationError('product_cost_edit', 'The user who authorized this import no longer has Edit product costs.')
   }
   if (missingPermission) {
     throw new ImportApplyAuthorizationError(missingPermission, `The user who authorized this import no longer has ${missingPermission} permission.`)

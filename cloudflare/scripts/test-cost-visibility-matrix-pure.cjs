@@ -215,7 +215,7 @@ check('WRITES: every catalog / receipt / session cost write is behind product_co
     assert.match(read('cloudflare/src/routes', file), /canEditAcquisitionCosts|hasAcquisitionCostInput/, file + ' write gate')
   }
   // Stock sessions (stockInCommit.ts) validate the request inside lib/stockSession.ts.
-  assert.match(read('cloudflare/src/lib/stockSession.ts'), /hasAcquisitionCostInput\(raw, user\)\) fail\('Only an administrator can enter receipt costs\.', 403, 'product_cost_edit_required'\)/)
+  assert.match(read('cloudflare/src/lib/stockSession.ts'), /hasAcquisitionCostInput\(raw, user\)\) fail\('Entering receipt costs needs Edit product costs\.', 403, 'product_cost_edit_required'\)/)
 })
 
 // ---- CLIENT matrix ---------------------------------------------------------

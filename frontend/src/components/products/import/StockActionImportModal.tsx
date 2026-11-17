@@ -175,7 +175,7 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
   // The one dispatch: create + upload + start, then hand off to the shared
   // direct-apply screen -- the operator already reviewed the rows above.
   const handleImport = async () => {
-    if (!canEditCosts) { setError(tr('product_cost_import_required', 'Only an administrator can use this import format.')); return }
+    if (!canEditCosts) { setError(tr('product_cost_import_required', 'This import format needs View and Edit product costs.')); return }
     if (busy || !csvText.trim()) return
     setBusy(true)
     setError('')
@@ -210,7 +210,7 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
     }
   }
 
-  if (reviewJob && !canViewCosts) return <Modal title={tr('stock_import_title', 'Import Stock Actions')} onClose={onClose} unsavedChanges="read-only"><p role="status">{tr('product_cost_import_view_required', 'Only an administrator can review financial import data.')}</p></Modal>
+  if (reviewJob && !canViewCosts) return <Modal title={tr('stock_import_title', 'Import Stock Actions')} onClose={onClose} unsavedChanges="read-only"><p role="status">{tr('product_cost_import_view_required', 'Reviewing financial import data needs View product costs.')}</p></Modal>
 
   return (
     <Modal title={tr('stock_import_title', 'Import Stock Actions', 'នាំចូលសកម្មភាពស្តុក')} onClose={onClose} draggable unsavedChanges={{ dirty: Boolean(csvText) }}>
@@ -336,7 +336,7 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
           ) : null}
 
           {error ? <div className="text-sm text-red-600 dark:text-red-400">{error}</div> : null}
-          {!canEditCosts ? <p role="status" className="text-xs text-amber-700 dark:text-amber-300">{tr('product_cost_import_required', 'Only an administrator can use this import format.')}</p> : null}
+          {!canEditCosts ? <p role="status" className="text-xs text-amber-700 dark:text-amber-300">{tr('product_cost_import_required', 'This import format needs View and Edit product costs.')}</p> : null}
 
           <div className="flex gap-2">
             <button type="button" className="btn-secondary flex-1" onClick={onClose} disabled={busy}>{tr('cancel', 'Cancel', 'បោះបង់')}</button>
