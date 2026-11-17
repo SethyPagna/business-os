@@ -92,6 +92,11 @@ async function main() {
   const both = await world('G: product cost, lot cost and received cost long, 0313 between', {
     pre: `${LONG_KHR}; UPDATE product_batches SET unit_cost_usd = 6.123456, received_cost_usd = 18.370368 WHERE id = 99002;`, run0313: true })
   assertUndone(both, { 'p.10001.k': 24600.1235, 'b.99002.u': 6.1235, 'b.99002.rc': 18.3704 })
+  // R19 (mutant MC2, the purchase twin dropped): a USD cost AND its purchase twin rounded by 0313 (two ledger rows, two revision bumps).
+  const usdPair = await world('H: duplicate cost and purchase USD long, 0313 between', {
+    pre: 'UPDATE products SET cost_price_usd = 6.123456, purchase_price_usd = 6.123456 WHERE id = 10001', run0313: true })
+  assert.deepEqual(usdPair.ledger.map((r) => r.col), ['cost_price_usd', 'purchase_price_usd'], 'H: 0313 rounded both USD columns')
+  assertUndone(usdPair, {})
 
   // --- Refusals: each is refused by the current code and leaves the data alone. ---
   // A column that is not a cost changed: a long selling price that "rounded" is still later activity.
@@ -132,6 +137,11 @@ async function main() {
   assert.equal(fp(print([row(5.123456)]), print([row(null)])), false, 'number to NULL')
   assert.equal(fp(print([row(null)]), print([row(0)])), false, 'NULL to 0')
   assert.equal(fp(print([row(0)]), print([row(null)])), false, '0 to NULL')
+  // MC2: every one of the four product cost columns is accepted, not only cost_price_usd (the purchase twin and the KHR pair too).
+  for (const column of ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr']) {
+    assert.equal(fp(print([{ ...row(1), [column]: 5.123456 }]), print([{ ...row(1), [column]: 5.1235 }])), true, column + ' long against its rounding')
+    assert.equal(fp(print([{ ...row(1), [column]: 5.123456 }]), print([{ ...row(1), [column]: 5.1236 }])), false, column + ' not its rounding')
+  }
   assert.equal(fp(print([row(5.123456)]), print([row(5.1235), row(1)])), false, 'a row added')
   assert.equal(fp(print([row(5.123456)]), JSON.stringify({ products: [row(5.1235)], batches: [], other: [2] })), false, 'a different table')
   assert.equal(fp(print([{ ...row(5.123456), selling_price_usd: 9.123456 }]), print([{ ...row(5.1235), selling_price_usd: 9.1235 }])), false, 'a non-cost column rounded')
@@ -146,14 +156,28 @@ async function main() {
     graphRevisions: [['entity_type', 'entity_key', 'revision'], [[[cell('text', 'product'), cell('text', '7'), cell('integer', revision)]]]],
     ...extra,
   })
-  assert.deepEqual([...graph(graphText('5.1234560000000003', 2), graphText('5.1234999999999999', 4))], ['7'], 'rounded cost, revision bumped')
+  // 0313 bumps the product revision once for its first UPDATE (the four cost columns) and once more for its second (cost_price_usd, purchase_price_usd):
+  // a rounded USD cost carries exactly two bumps, any other count refuses (a no-op UPDATE, an A-B-A edit, a change in a table the graph does not read).
+  assert.deepEqual([...graph(graphText('5.1234560000000003', 2), graphText('5.1234999999999999', 4))], [['7', 2]], 'rounded USD cost, two revision bumps')
+  assert.equal(graph(graphText('5.1234560000000003', 2), graphText('5.1234999999999999', 5)), null, 'one bump more than 0313 makes')
+  assert.equal(graph(graphText('5.1234560000000003', 2), graphText('5.1234999999999999', 3)), null, 'one bump fewer than 0313 makes')
   assert.equal(graph(graphText('5.1234560000000003', 2), graphText('5.1234560000000003', 4)), null, 'a revision bump with no rounding')
   assert.equal(graph(graphText('5.1234560000000003', 2), graphText('5.1234999999999999', 1)), null, 'a revision that went down')
   assert.equal(graph(graphText('5.1234560000000003', 2), graphText('5.1236000000000004', 3)), null, 'a cost that is not the rounding')
   assert.equal(graph(graphText('5.1234999999999999', 2), graphText('5.1236000000000004', 2)), null, 'a saved 4-place cost that differs')
-  assert.deepEqual([...graph(graphText('5.1234560000000003', 2), graphText('5.1234999999999999', 2))], ['7'], 'rounded cost, revision unchanged')
+  assert.equal(graph(graphText('5.1234560000000003', 2), graphText('5.1234999999999999', 2)), null, 'a rounded cost whose revision did not move is not what 0313 does')
   assert.equal(graph(graphText('5.1234560000000003', 2), graphText('5.1234999999999999', 2, { 'products:0': [['id', 'cost_price_usd', 'name'], [[[cell('integer', 7), cell('real', '5.1234999999999999'), cell('text', 'renamed')]]]] })), null, 'a renamed row')
   assert.equal(graph(graphText('5.1234560000000003', 2), graphText('5.1234999999999999', 2).replace('"product"', '"batch"')), null, 'a revision of another entity type')
+  // S4 (mutant MI, the cell type check dropped): a saved cost cell that is text or NULL is never a number to round, and a live text cell is not a number.
+  const costCell = (type, value) => JSON.stringify({
+    'products:0': [['id', 'cost_price_usd'], [[[cell('integer', 7), cell(type, value)]]]],
+    graphRevisions: [['entity_type', 'entity_key', 'revision'], [[[cell('text', 'product'), cell('text', '7'), cell('integer', 4)]]]] })
+  const savedCell = (type, value) => costCell(type, value).replace('"integer",4', '"integer",2')
+  assert.equal(graph(savedCell('text', '5.123456'), costCell('real', '5.1234999999999999')), null, 'a text saved cost cell')
+  assert.equal(graph(savedCell('null', null), costCell('real', '0')), null, 'a NULL saved cost cell')
+  assert.equal(graph(savedCell('real', '5.1234560000000003'), costCell('text', '5.1235')), null, 'a text live cost cell')
+  assert.deepEqual([...graph(savedCell('real', '5.1234560000000003'), costCell('real', '5.1234999999999999'))], [['7', 2]], 'control: the real cell is accepted')
+  assert.deepEqual([...graph(savedCell('real', '5.0000100000000003'), costCell('integer', '5'))], [['7', 2]], 'a cost rounded to a whole number reads back as an integer cell')
 
   // --- The single (non-group) merge receipt: the same rule on the live graph and the two product revisions. ---
   await singleReceipt()
@@ -177,6 +201,15 @@ async function singleReceipt() {
   assert.notEqual(live.graph_state, saved.graph_state, '0313 rounded the duplicate cost')
   assert.ok(live.duplicate_revision > saved.duplicate_revision, '0313 updated the product row, so its revision trigger fired')
   assert.deepEqual(await f.undo.costRoundedReplayState(d1, reversal, saved, prepared.graph), live, 'rounding only: the receipt is the live one')
+  assert.equal(live.duplicate_revision - saved.duplicate_revision, 1, 'a KHR-only rounding is one bump (0313 first UPDATE)')
+  // The revision must have moved by exactly 0313's bumps (S1, mutant MA2): a decrease, one bump too many and one too few are all refused.
+  for (const [label, wrong] of [['a revision decrease', { ...saved, duplicate_revision: live.duplicate_revision + 1 }],
+    ['one bump more than 0313 made', { ...saved, duplicate_revision: saved.duplicate_revision - 1 }], ['one bump fewer than 0313 made', { ...saved, duplicate_revision: saved.duplicate_revision + 1 }]]) {
+    assert.equal(await f.undo.costRoundedReplayState(d1, reversal, wrong, prepared.graph), wrong, label + ' stays refused')
+  }
+  // R10: a no-op UPDATE on the rounded duplicate after 0313 is one bump more than 0313 made.
+  seedStockFixture(d1.db, () => d1.db.exec('UPDATE products SET name = name WHERE id = 10001'))
+  assert.equal(await f.undo.costRoundedReplayState(d1, reversal, saved, prepared.graph), saved, 'a no-op UPDATE on top of the rounding stays refused')
   // A revision bump on a product whose cost was NOT rounded (the keeper) is later activity.
   const keeperBumped = { ...saved, keeper_revision: saved.keeper_revision - 1 }
   assert.deepEqual(await f.undo.costRoundedReplayState(d1, reversal, keeperBumped, prepared.graph), keeperBumped, 'an unexplained keeper revision stays refused')
