@@ -116,6 +116,8 @@ function adaptRow(row: Row, raw: Pick<WiredRaw, 'branchId' | 'overlay' | 'lots'>
   for (const key of PRICE_KEYS) if (Object.hasOwn(row, key)) (product as Record<string, unknown>)[key] = row[key]
   // The stock thresholds the same way (stock grant only, cut by the Worker otherwise): the row's stock figure and the detail's badge are judged on the product's own numbers, as Products judges them.
   for (const key of STOCK_THRESHOLD_KEYS) if (Object.hasOwn(row, key)) (product as Record<string, unknown>)[key] = row[key]
+  // The product's own expiry window, which the Worker sends with the received facts (expiry_date's group): the detail tiers the date on it, as POS does.
+  if (Object.hasOwn(row, 'expiry_alert_days')) (product as Record<string, unknown>).expiry_alert_days = row.expiry_alert_days
   // The cost keys the same way: the Worker sends them only to a viewer who may see cost, so a row either carries them or has none. The page draws them only for a viewer canViewAcquisitionCosts allows.
   for (const key of COST_KEYS) if (Object.hasOwn(row, key)) (product as Record<string, unknown>)[key] = row[key]
   if (branchId) {

@@ -24,7 +24,7 @@ import CostCalculationFloat from '../../shared/CostCalculationFloat.tsx'
 import CostValue from '../../shared/CostValue.tsx'
 import { knownCost } from '../../../utils/costDisplay.ts'
 import { branchStockLinesWorthShowing } from '../../../utils/branchScope.ts'
-import { daysUntilDay } from '../../../utils/dateHelpers.ts'
+import { computeExpiryStatus } from '../../pos/posCore.ts'
 import { fmtDateOnly } from '../../../utils/formatters.ts'
 import { VALUE_TONE } from './ProductRowParts.tsx'
 import ScrollText from 'lucide-react/dist/esm/icons/scroll-text.js'
@@ -88,6 +88,8 @@ type ProductDetailProduct = {
   discount_badge_color?: string
   discount_label?: string
   expiry_date?: string
+  /** The product's own "expires soon" window in days (30 when unset); judged by computeExpiryStatus, as POS does. */
+  expiry_alert_days?: unknown
   created_at?: string
   image_path?: string
   image_gallery?: unknown[]
@@ -140,9 +142,6 @@ type PriceCellProps = {
   label: string
   children: ReactNode
 }
-
-// Expiry tiers (the rule the retired Inventory detail float used): passed is Expired, within 30 days is Expires soon, later is plain.
-const EXPIRES_SOON_DAYS = 30
 
 export default function ProductDetailModal({
   visible,
@@ -214,8 +213,10 @@ export default function ProductDetailModal({
   const unitColor = p.unit ? unitMap?.[p.unit]?.color || '' : ''
   const expiryDate = String(p.expiry_date || '').trim()
   const expiryDay = expiryDate.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
-  const expiryDaysLeft = expiryDay ? daysUntilDay(expiryDay) : null
-  const expiryTier = expiryDaysLeft === null ? 'ok' : expiryDaysLeft < 0 ? 'expired' : expiryDaysLeft <= EXPIRES_SOON_DAYS ? 'soon' : 'ok'
+  // The one expiry rule (POS and the dashboard use it too): the product's OWN alert window (expiry_alert_days, 30 when unset), not a fixed 30 days.
+  const expiryInfo = expiryDay ? computeExpiryStatus(expiryDay, p.expiry_alert_days) : null
+  const expiryDaysLeft = expiryInfo ? expiryInfo.daysRemaining : null
+  const expiryTier = expiryInfo ? (expiryInfo.status === 'expiring' ? 'soon' : expiryInfo.status) : 'ok'
   const daysText = (count: number) => T('product_expiry_days_short', '{count}d').replace('{count}', String(count))
   // includeEmpty: true -- every product gets a "day added" batch at
   // creation (seedInitialBatchForNewProduct) that legitimately starts at 0

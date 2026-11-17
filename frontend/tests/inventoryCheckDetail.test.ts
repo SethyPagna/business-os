@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { createHarness, type MountedSurface } from './mountedComponentHarness.ts'
 import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
 import { readFileSync } from 'node:fs'
+import { offsetDate } from '../src/utils/dateHelpers.ts'
 
 // Owner, 17 Nov 2026: Inventory's product detail is Products' own detail modal, wired from the Products page: the product NAME is the title (no "Product" heading), brand · category and the barcode sit in the header,
 // the prices are Products' coloured prices, the cost shows only to a viewer who may see it, and Inventory's own facts (check status, counted, last checked, LAST STOCK CHANGE, Fix stock, the Sales link) fill the modal's
@@ -86,6 +87,14 @@ const cases: Array<[string, () => Promise<void>]> = [
     await blind.unmount()
     const quiet = await mount({}, asAdmin, { ...product, last_change_at: null } as unknown as InventoryCheckProduct)
     assert.ok(!quiet.find(node => node.getAttribute('data-inventory-check-detail') !== null, 'facts').textContent.includes('Last stock change'), 'no recorded change: no row')
+  }],
+  ['the expiry tier uses the OWN alert window of the product (expiry_alert_days from the received group), and a viewer without received facts sees no expiry at all', async () => {
+    const expiry = (offset: number) => offsetDate(offset)
+    const tierOf = async (row: Record<string, unknown>, fields = ALL) => { for (const old of live.splice(0)) await old.unmount(); const s = await mount({ fields }, asAdmin, { ...product, ...row } as unknown as InventoryCheckProduct); const node = s.findAll(n => n.getAttribute("data-expiry") !== null)[0]; return node ? node.getAttribute('data-expiry') : null }
+    assert.equal(await tierOf({ next_expiry_date: expiry(20), expiry_alert_days: 7 }), 'ok', 'alert 7, 20 days left: not soon')
+    assert.equal(await tierOf({ next_expiry_date: expiry(45), expiry_alert_days: 60 }), 'soon', 'alert 60, 45 days left: soon')
+    assert.equal(await tierOf({ next_expiry_date: expiry(20) }), 'soon', 'no window sent: the 30-day default')
+    assert.equal(await tierOf({ next_expiry_date: expiry(20), expiry_alert_days: 7 }, { ...ALL, received: false }), null, 'no received grant: no expiry shown, so no window either')
   }],
   ['Fix stock and the Sales link are in the modal when offered, and call back', async () => {
     const calls: string[] = []

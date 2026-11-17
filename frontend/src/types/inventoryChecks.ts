@@ -42,6 +42,8 @@ export type InventoryCheckProduct = {
   latest_received_at?: string | null
   /** Earliest expiry among lots still holding stock; sent only while received dates are visible. */
   next_expiry_date?: string | null
+  /** The product's own "expires soon" window in days; sent with the received facts, so only while received dates are visible. */
+  expiry_alert_days?: number | string | null
   /** The latest check of this product in the chosen branch scope (ic_simple list rows only). Counts and names arrive only for viewers who may see them. */
   check_status?: InventoryCheckListStatus
   /** Grouped list: the group this product's family is in (`d:YYYY-MM-DD`, `never`, `c:<category>`, `none`). */

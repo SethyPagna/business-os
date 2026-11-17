@@ -56,6 +56,8 @@ export function detailRecord(product: InventoryCheckProduct, fields: InventoryCh
   if (fields.price) for (const key of PRICE_KEYS) if (Object.hasOwn(row, key)) record[key] = row[key]
   if (fields.cost) for (const key of COST_KEYS) if (Object.hasOwn(row, key)) record[key] = row[key]
   // The product's own stock thresholds, so the modal's badge says what Products says (the global Settings mode still overrides inside the modal, as on Products). Only with the stock grant.
+  // The expiry window travels with the expiry date (the received grant), so the detail tiers the date on this product's own window.
+  if (fields.received && Object.hasOwn(row, 'expiry_alert_days')) record.expiry_alert_days = row.expiry_alert_days
   if (fields.stock) for (const key of STOCK_THRESHOLD_KEYS) if (Object.hasOwn(row, key)) record[key] = row[key]
   return record
 }

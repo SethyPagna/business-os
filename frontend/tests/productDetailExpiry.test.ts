@@ -2,10 +2,11 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { createHarness, type MountedSurface } from './mountedComponentHarness.ts'
 import { offsetDate } from '../src/utils/dateHelpers.ts'
+import { computeExpiryStatus } from '../src/components/pos/posCore.ts'
 
 // Owner rules: dates render dd/mm/yyyy, every word goes through both language packs. The shared ProductDetailModal (Products AND Inventory) printed the expiry as yyyy-mm-dd with an English "d"
 // suffix and had lost the tiering the retired Inventory detail float had (Expired / Expires soon). This mounts the REAL modal with no extra props (exactly Products' call) and pins the date, the
-// translated days-left, and the three tiers around their edges (-1, 0, 30, 31 days), in English and in Khmer from the real packs.
+// translated days-left, and the three tiers around their edges (-1, 0, 30, 31 days, the default window), in English and in Khmer from the real packs.
 
 const pack = (name: string) => JSON.parse(fs.readFileSync(new URL(`../src/lang/${name}.json`, import.meta.url), 'utf8')) as Record<string, string>
 const en = pack('en')
@@ -16,11 +17,11 @@ const app = { user: { id: 1, role_code: 'admin', permissions: {} }, getPermissio
 const live: MountedSurface[] = []
 const dmy = (iso: string) => iso.split('-').reverse().join('/')
 // The modal draws into a body-level portal, so a surface left mounted would be found by the next lookup: one at a time.
-const mount = async (expiry: string, lang: Record<string, string> | null) => {
+const mount = async (expiry: string, lang: Record<string, string> | null, alertDays?: unknown) => {
   for (const old of live.splice(0)) await old.unmount()
   const surface = await harness.mount({
     component: 'components/products/surfaces/ProductDetailModal.tsx',
-    props: { p: { id: 41, name: 'Synthetic serum', unit: 'pcs', stock_quantity: 7, selling_price_usd: 12.5, expiry_date: expiry }, fmtUSD: money, fmtKHR: (v: unknown) => `${v}៛`, onClose: () => {}, ...(lang ? { t: (key: string) => lang[key] } : {}) },
+    props: { p: { id: 41, name: 'Synthetic serum', unit: 'pcs', stock_quantity: 7, selling_price_usd: 12.5, expiry_date: expiry, ...(alertDays === undefined ? {} : { expiry_alert_days: alertDays }) }, fmtUSD: money, fmtKHR: (v: unknown) => `${v}៛`, onClose: () => {}, ...(lang ? { t: (key: string) => lang[key] } : {}) },
     app,
     doubles: {},
   })
@@ -62,6 +63,17 @@ const cases: Array<[string, () => Promise<void>]> = [
       assert.equal(tier === 'expired' ? cls.includes('text-red-600') : tier === 'soon' ? cls.includes('text-amber-600') : cls === '', true, `colour for ${tier}: "${cls}"`)
       assert.equal(flat(await mount(day, km)), `${dmy(day)} ${khmer}`, `km ${offset}`)
     }
+  }],
+  ['the window is the OWN expiry_alert_days of the product, exactly as POS judges it: alert 7 / 20 days left is not soon, alert 60 / 45 days left is soon, and every case agrees with computeExpiryStatus', async () => {
+    for (const [alert, offset, tier] of [[7, 20, 'ok'], [7, 7, 'soon'], [7, 8, 'ok'], [60, 45, 'soon'], [60, 60, 'soon'], [60, 61, 'ok'], ['14', 14, 'soon'], ['14', 15, 'ok'], [null, 30, 'soon'], [null, 31, 'ok'], [0, 30, 'soon'], [0, 31, 'ok'], ['abc', 31, 'ok']] as const) {
+      const day = offsetDate(offset)
+      const s = await mount(day, en, alert)
+      assert.equal(expiryNode(s).getAttribute('data-expiry'), tier, `alert ${String(alert)} / ${offset} days`)
+      const pos = computeExpiryStatus(day, alert)
+      assert.equal(pos?.status === 'expiring' ? 'soon' : pos?.status, tier, `POS agrees for alert ${String(alert)} / ${offset} days`)
+      assert.ok(flat(s).endsWith(tier === 'soon' ? `Expires soon · ${offset}d` : `${offset}d`), flat(s))
+    }
+    assert.equal(expiryNode(await mount(offsetDate(-2), en, 7)).getAttribute('data-expiry'), 'expired')
   }],
   ['without a pack the English fallbacks still read the same (Products on a missing key)', async () => {
     const day = offsetDate(10)

@@ -12,6 +12,7 @@ export function projectProduct(product: InventoryCheckProduct, fields: Inventory
   const visible = { ...product }
   const loose = visible as Record<string, unknown>
   if (!fields.stock) { delete visible.quantity; delete visible.damaged_quantity; for (const key of STOCK_THRESHOLD_KEYS) delete loose[key] }
+  if (!fields.received) delete visible.expiry_alert_days
   if (!fields.brand) delete visible.brand
   if (!fields.category) delete visible.category
   if (!fields.barcode) { delete visible.barcode; delete visible.sku }
