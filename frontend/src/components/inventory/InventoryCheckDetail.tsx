@@ -1,5 +1,6 @@
 import { useCallback, type ReactNode } from 'react'
 import BarChart3 from 'lucide-react/dist/esm/icons/bar-chart-3.js'
+import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
 import Wrench from 'lucide-react/dist/esm/icons/wrench.js'
 import ProductDetailModal, { type ProductDetailVisible } from '../products/surfaces/ProductDetailModal.tsx'
 import type { EntityNavigate } from '../shared/EntityLink.tsx'
@@ -33,6 +34,8 @@ type Props = {
   onFixStock?: () => void
   /** Opens this product's sales in Reports. Absent without Sales view. */
   onSales?: () => void
+  /** Opens the count request this product is waiting on, in its session. Present only for a product whose count waits for approval. */
+  onOpenRequest?: () => void
 }
 
 const STATE_LABELS = {
@@ -77,7 +80,7 @@ export function detailVisibility(product: InventoryCheckProduct, fields: Invento
  * The Inventory product detail: Products' own detail modal (name as the title, brand · category and barcode in the header, coloured prices, cost for a viewer who may see it) with
  * Inventory's facts in its children slot, and its report switched off: opening a product re-reads nothing (no detail report, no stock ledger).
  */
-export default function InventoryCheckDetail({ product, observation, unavailable, fields, promotionRules, exchangeRate = 4100, priceText, fmtUSD, fmtKHR, navigateTo, t, onClose, onFixStock, onSales }: Props) {
+export default function InventoryCheckDetail({ product, observation, unavailable, fields, promotionRules, exchangeRate = 4100, priceText, fmtUSD, fmtKHR, navigateTo, t, onClose, onFixStock, onSales, onOpenRequest }: Props) {
   const tr = useCallback((key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }, [t])
   const now = fields.stock && finiteQuantity(product.quantity) ? product.quantity : null
   const start = fields.stock && observation && finiteQuantity(observation.baseline_quantity) ? observation.baseline_quantity : null
@@ -111,7 +114,9 @@ export default function InventoryCheckDetail({ product, observation, unavailable
     {shown.length ? <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-xs leading-relaxed" data-inventory-check-detail>
       {shown.flatMap(([label, value]) => [<dt key={`${label}-label`} className="text-gray-500 leading-relaxed">{label}</dt>, <dd key={`${label}-value`} className="min-w-0 break-words text-right font-medium tabular-nums text-gray-800 dark:text-gray-100">{value}</dd>])}
     </dl> : null}
-    {onFixStock || onSales ? <div className="mt-3 flex min-w-0 items-center justify-end gap-2" data-inventory-check-detail-actions>
+    {onFixStock || onSales || onOpenRequest ? <div className="mt-3 flex min-w-0 flex-wrap items-center justify-end gap-2" data-inventory-check-detail-actions>
+      {onOpenRequest ? <button type="button" data-check-open-request onClick={onOpenRequest} className="mr-auto inline-flex min-h-8 max-w-full items-center gap-1 rounded-full bg-slate-100 px-3 text-[11px] font-semibold leading-relaxed text-slate-700 dark:bg-zinc-800 dark:text-slate-200"
+        aria-label={tr('inventory_check_open_request', 'Open request')} title={tr('inventory_check_open_request', 'Open request')}><ClipboardList className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span className="min-w-0 break-words">{tr('inventory_check_open_request', 'Open request')}</span></button> : null}
       {onSales ? <button type="button" data-check-sales-link onClick={onSales} aria-label={tr('inventory_check_sales_tooltip', 'Sales of this product, last 30 days')} title={tr('inventory_check_sales_tooltip', 'Sales of this product, last 30 days')}
         className="btn-secondary inline-flex h-11 min-h-11 w-11 shrink-0 items-center justify-center rounded-lg p-0 lg:h-10 lg:min-h-10 lg:w-10"><BarChart3 className="h-5 w-5" aria-hidden="true" /></button> : null}
       {onFixStock ? <button type="button" data-check-fix-stock onClick={onFixStock} className="btn-primary inline-flex h-11 min-h-11 shrink-0 items-center gap-1 px-3 text-xs lg:h-10 lg:min-h-10"><Wrench className="h-4 w-4" aria-hidden="true" />{tr('inventory_check_fix_stock', 'Fix stock')}</button> : null}

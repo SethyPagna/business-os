@@ -8273,5 +8273,6 @@
   "inventory_check_line_reject_confirm": "ជួរនេះមិនត្រូវបានអនុវត្តទេ ហើយស្តុកនៅដដែល។ អ្នកអាចបើកវាឡើងវិញពេលការរាប់នៅរង់ចាំ។",
   "inventory_check_line_state_applied": "បានអនុវត្ត",
   "inventory_check_line_state_applying": "កំពុងអនុវត្ត",
-  "inventory_check_line_state_waiting": "រង់ចាំអ្នកអនុម័តដែលកំពុងអនុវត្តការរាប់នេះ"
+  "inventory_check_line_state_waiting": "រង់ចាំអ្នកអនុម័តដែលកំពុងអនុវត្តការរាប់នេះ",
+  "inventory_check_open_request": "បើកសំណើ"
 }

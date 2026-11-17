@@ -8273,5 +8273,6 @@
   "inventory_check_line_reject_confirm": "The line is not applied and stock stays as it is. You can reopen it while the count is waiting.",
   "inventory_check_line_state_applied": "Applied",
   "inventory_check_line_state_applying": "Being applied",
-  "inventory_check_line_state_waiting": "Waiting for the approver applying this count"
+  "inventory_check_line_state_waiting": "Waiting for the approver applying this count",
+  "inventory_check_open_request": "Open request"
 }
