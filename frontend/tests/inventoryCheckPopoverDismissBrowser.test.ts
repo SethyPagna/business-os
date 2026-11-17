@@ -65,7 +65,18 @@ const swipeFrom = async (point: { x: number; y: number }) => {
   for (const dy of [-10, -30, -60]) await browser.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: point.x, y: point.y + dy }] })
   await browser.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
 }
-const openPopover = async (id: number) => { await browser.mouseClick(status(id)); await waitFor(`popover of ${id} open`, `${popover} !== null`) }
+// A PortalMenu is drawn at the page corner for one frame and then moved beside its trigger (reposition). A press before that lands on the menu itself, which is not what a person can do, so every
+// open waits until the menu has stopped moving.
+const settleMenu = async (selector: string) => {
+  let previous = ''
+  await browser.waitFor(`${selector} is positioned`, async () => {
+    const rect = await browser.evaluate<string>(`(() => { const node = document.querySelector(${JSON.stringify(selector)}); if (!node) return ""; const box = node.closest("[data-portal-menu-content]").getBoundingClientRect(); return [box.left, box.top, box.width, box.height].join(",") })()`)
+    const settled = rect !== '' && rect === previous && !rect.startsWith('0,0,')
+    previous = rect
+    return settled ? true : null
+  }, 8000)
+}
+const openPopover = async (id: number) => { await browser.mouseClick(status(id)); await waitFor(`popover of ${id} open`, `${popover} !== null`); await settleMenu('[data-inventory-check-popover]') }
 
 await browser.run('PASS count popover: the click that dismisses it is swallowed (mouse and touch), once, and plain PortalMenus keep their one-tap behaviour', async () => {
   await browser.open(1024, '', `document.querySelector('${row(4)}')`, 900)
@@ -109,6 +120,7 @@ await browser.run('PASS count popover: the click that dismisses it is swallowed 
   // ---- a PortalMenu that did not opt in is unchanged: the press that closes it also presses the button under it ---------------------------------
   await browser.mouseClick('[data-plain-trigger]')
   await waitFor('plain menu open', `document.querySelector('[data-plain-content]') !== null`)
+  await settleMenu('[data-plain-content]')
   await mouseAt(await centre('[data-plain-target]'))
   await waitFor('plain menu closed', `document.querySelector('[data-plain-content]') === null`)
   await browser.pause(450)
