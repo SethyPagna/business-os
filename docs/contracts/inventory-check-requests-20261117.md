@@ -90,7 +90,7 @@ A rejected line no longer counts as "waiting" anywhere (the Waiting filter, the 
 exactly the products the server treats as lines, including a product whose received dates differ although their totals agree (A counted 6 of 5, B 3 of 4): that product IS a line and is listed, whatever its total says.
 The panel must list `line_ids` and not re-derive lines from the figures. `lines` is their count (`line_ids.length`). `line_ids` is absent only for an approval created before migration 0316 (or by a Worker that did not know
 the column: in the window between `migrations apply` and the publish, or after a rollback): the server then reads its lines by the engine's own rule (the item total, or any received date) everywhere, and the panel
-falls back to the items whose figures differ. The ops query `inventory-check-approvals-line-set` counts these rows (expect 0 after the publish). A newer count of a product in the set replaces that line (`superseded`); the approval ends as replaced only when no line of the set
+falls back to the items whose figures differ. The ops query `inventory-check-approvals-postflight` counts these rows (expect 0 after the publish); the separate `inventory-check-approvals-pre-rollback` query (run only before `deploy-rollback.yml`) counts pending approvals that carry per-line decisions. A newer count of a product in the set replaces that line (`superseded`); the approval ends as replaced only when no line of the set
 is left open (not superseded, not rejected), so a newer count of another product never ends it.
 
 ### History

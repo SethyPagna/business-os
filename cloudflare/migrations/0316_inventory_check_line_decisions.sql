@@ -11,7 +11,7 @@
 --     including a product whose received dates differ although their totals agree). Every reader of "does this line wait for approval" (the list, the overlay, the Fix stock and Set holds,
 --     the replacement of an older count by a newer one, the engine) reads this one set instead of re-deriving the rule from the items, so they can never disagree and none of them scans the
 --     session's items. NULL means "not recorded": an approval created by a Worker that does not know the column (in the window between migrations apply and the publish, or after a Worker rollback). Every reader and the engine
---     then use the same dated rule (countDiffersSql: the item total or any received date), so the two agree for it; ops/queries/inventory-check-approvals-line-set.sql counts these rows (expect 0 after the publish).
+--     then use the same dated rule (countDiffersSql: the item total or any received date), so the two agree for it; ops/queries/inventory-check-approvals-postflight.sql counts these rows (expect 0 after the publish).
 --
 -- PRE:  inventory_check_approvals exists with its four 0286 triggers; neither column exists. A failed check reads a malformed JSON path and aborts the file.
 -- POST: both columns exist (line_decisions_json NOT NULL default '{}' and a JSON-object CHECK; line_set_json nullable with a JSON-object CHECK), every existing row holds no decision ('{}'), the
@@ -33,8 +33,8 @@
 -- Rollback: the schema change itself is safe for the previous Worker, which never names either column and starts on the new schema (its own INSERTs and UPDATEs leave them at '{}' / NULL). It is NOT neutral for an
 -- approval that already uses what this file added: it ignores line_decisions_json, so on a pending approval it would APPLY a line an approver rejected and would apply the COUNTER's figure for a line the approver
 -- modified; it creates approvals with line_set_json NULL (the new Worker reads those by the engine's own rule) and its approval flip rewrites an item's updated_at / updated_by (the new Worker's does not; see Backfill 2).
--- BEFORE rolling the Worker back, run ops/queries/inventory-check-approvals-line-set.sql: pending_with_line_decisions must be 0 (decide or close those approvals first). After a rollback, and again after the next
--- publish, pending_without_line_set and items_with_approval_time show what the older Worker wrote.
+-- BEFORE rolling the Worker back, run ops/queries/inventory-check-approvals-pre-rollback.sql: pending_with_line_decisions must be 0 (decide or close those approvals first). After a rollback, and again after the next
+-- publish, ops/queries/inventory-check-approvals-postflight.sql (pending_without_line_set, items_with_approval_time) shows what the older Worker wrote.
 -- A Worker that names a column needs this migration applied first, like every column the engine reads (deploy order: migrations, then the Worker).
 -- RECOVERY: nothing to restore: a decision lives in line_decisions_json only, so dropping it loses decisions on pending approvals (rejected lines would read as open again; nothing was applied
 --   for them), and line_set_json is derived from the items and can be recomputed by the first UPDATE of this file. The second UPDATE (count times) is not undone and needs no undo: it wrote back the values its items were inserted with, and the approval's own decided_at / applied_json keep the approval time. Full undo (after the Worker that reads them is rolled back), in this order,

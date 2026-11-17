@@ -1,8 +1,9 @@
 'use strict'
-// ops/queries/inventory-check-approvals-line-set.sql: the postflight / pre-rollback counts around migration 0316: pending approvals with no recorded set of lines (line_set_json IS NULL), pending
-// approvals with a per-line decision (line_decisions_json <> '{}'), and Done items of an approval's session whose time is not their session's count time (an item the old approval flip rewrote).
-// Pure: a minimal schema of the columns it reads, every case through the real guard and the real Ops verdict, and wrong variants that must disagree.
-// Run: node scripts/test-inventory-check-approvals-line-set-query-pure.cjs
+// ops/queries/inventory-check-approvals-postflight.sql (pending approvals with no recorded set of lines, and Done items of an approval's session whose time is not their session's count time: an item the old
+// approval flip rewrote) and ops/queries/inventory-check-approvals-pre-rollback.sql (pending approvals with a per-line decision, line_decisions_json <> '{}'): the two halves of the former single query, split
+// so the rollback-only count (non-zero in normal use) never sits in a routine postflight.
+// Pure: a minimal schema of the columns they read, every case through the real guard and the real Ops verdict, and wrong variants that must disagree.
+// Run: node scripts/test-inventory-check-approvals-queries-pure.cjs
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -12,6 +13,7 @@ const { DatabaseSync } = require('node:sqlite')
 const root = path.resolve(__dirname, '../..')
 const T0 = '2026-11-12T03:00:00.000Z', T1 = '2026-11-17T04:00:00.000Z'
 // approvals: [session, status, line_set_json, line_decisions_json]; items: [session, product, state, updated_at]. Sessions are started at T0.
+// Expected counts: [pending_without_line_set, pending_with_line_decisions, items_with_approval_time].
 const cases = [
   ['no approvals', { approvals: [], items: [] }, [0, 0, 0]],
   ['pending with a set and no decision', { approvals: [['a', 'pending', '{"1":1}', '{}']], items: [['a', 1, 'issue', T0]] }, [0, 0, 0]],
@@ -28,26 +30,35 @@ const cases = [
 ;(async () => {
   const { loadQuery, guardSql } = await import(pathToFileURL(path.join(root, 'ops/scripts/ops-sql-guard.mjs')))
   const { interpretD1Output } = await import(pathToFileURL(path.join(root, 'ops/scripts/ops-d1-export.mjs')))
-  const query = loadQuery('inventory-check-approvals-line-set')
-  assert.deepEqual(query.rules, { minRows: 1, maxRows: 1, expectZero: ['pending_without_line_set', 'pending_with_line_decisions', 'items_with_approval_time'] })
-  assert.equal(query.maxRowsRead, 100)
-  const file = fs.readFileSync(query.file, 'utf8')
-  assert.equal(file.includes('\r'), false, 'LF only')
-  assert.deepEqual(guardSql(file.replace(/\r?\n/g, '\r\n')), { sql: query.sql, rules: query.rules }, 'a CRLF checkout runs the same canonical text')
-  assert.match(query.sql, /^SELECT /); assert.doesNotMatch(query.sql, /\b(UNION|INSERT|UPDATE|DELETE)\b/i)
+  assert.equal(fs.existsSync(path.join(root, 'ops/queries/inventory-check-approvals-line-set.sql')), false, 'the combined query is retired')
+  const loaded = {}
+  for (const [name, expectZero] of [['postflight', ['pending_without_line_set', 'items_with_approval_time']], ['pre-rollback', ['pending_with_line_decisions']]]) {
+    const query = loadQuery('inventory-check-approvals-' + name)
+    assert.deepEqual(query.rules, { minRows: 1, maxRows: 1, expectZero }, name)
+    assert.equal(query.maxRowsRead, 100, name)
+    // No LF-only assertion on the file: ops/queries has no eol=lf attribute, so a CI checkout is CRLF. The CRLF-equivalence check is the right one.
+    const file = fs.readFileSync(query.file, 'utf8')
+    assert.deepEqual(guardSql(file.replace(/\r?\n/g, '\r\n')), { sql: query.sql, rules: query.rules }, name + ': a CRLF checkout runs the same canonical text')
+    assert.match(query.sql, /^SELECT /); assert.doesNotMatch(query.sql, /\b(UNION|INSERT|UPDATE|DELETE)\b/i)
+    loaded[name] = query
+  }
+  assert.match(fs.readFileSync(loaded['pre-rollback'].file, 'utf8'), /^-- inventory-check-approvals-pre-rollback: run ONLY before deploy-rollback\.yml/, 'the header says when to run it')
+  assert.doesNotMatch(loaded.postflight.sql, /line_decisions_json/, 'the rollback-only count is not in the postflight')
+  assert.doesNotMatch(loaded['pre-rollback'].sql, /line_set_json|inventory_check_items/, 'the postflight counts are not in the pre-rollback query')
   // Wrong variants: each must give a different answer on at least one case (a query that cannot be told from these proves nothing).
   const col = (name, expr) => `(${expr}) AS ${name}`
   const A = 'SELECT COUNT(*) FROM inventory_check_approvals'
   const item = "SELECT COUNT(*) FROM inventory_check_items i JOIN inventory_check_sessions s ON s.id = i.session_id WHERE i.state = 'done' AND i.session_id IN (SELECT a.session_id FROM inventory_check_approvals a) AND i.updated_at <> s.started_at"
-  const build = (a, b, c) => `SELECT ${col('pending_without_line_set', a)}, ${col('pending_with_line_decisions', b)}, ${col('items_with_approval_time', c)}`
+  const post = (a, c) => `SELECT ${col('pending_without_line_set', a)}, ${col('items_with_approval_time', c)}`
+  const pre = b => `SELECT ${col('pending_with_line_decisions', b)}`
   const good = [`${A} WHERE status = 'pending' AND line_set_json IS NULL`, `${A} WHERE status = 'pending' AND line_decisions_json <> '{}'`, item]
   const wrong = [
-    build(`${A} WHERE line_set_json IS NULL`, good[1], good[2]), // counts decided approvals
-    build(good[0], `${A} WHERE line_decisions_json <> '{}'`, good[2]), // counts decided approvals
-    build(`${A} WHERE status = 'pending' AND line_set_json = '{}'`, good[1], good[2]), // an empty set is not a missing set
-    build(good[0], `${A} WHERE status = 'pending' AND line_decisions_json IS NOT NULL`, good[2]), // every row has a decision column
-    build(good[0], good[1], item.replace("i.state = 'done' AND ", '')), // counts items that were never flipped
-    build(good[0], good[1], item.replace("i.session_id IN (SELECT a.session_id FROM inventory_check_approvals a)", '1')), // counts open-session observations
+    ['postflight', post(`${A} WHERE line_set_json IS NULL`, good[2])], // counts decided approvals
+    ['pre-rollback', pre(`${A} WHERE line_decisions_json <> '{}'`)], // counts decided approvals
+    ['postflight', post(`${A} WHERE status = 'pending' AND line_set_json = '{}'`, good[2])], // an empty set is not a missing set
+    ['pre-rollback', pre(`${A} WHERE status = 'pending' AND line_decisions_json IS NOT NULL`)], // every row has a decision column
+    ['postflight', post(good[0], item.replace("i.state = 'done' AND ", ''))], // counts items that were never flipped
+    ['postflight', post(good[0], item.replace('i.session_id IN (SELECT a.session_id FROM inventory_check_approvals a)', '1'))], // counts open-session observations
   ]
   const detected = wrong.map(() => false)
   for (const [name, { approvals, items }, [withoutSet, withDecisions, withTime]] of cases) {
@@ -59,16 +70,22 @@ const cases = [
       for (const id of new Set([...approvals.map(row => row[0]), ...items.map(row => row[0])])) db.prepare('INSERT INTO inventory_check_sessions(id,started_at) VALUES(?,?)').run(id, T0)
       for (const row of approvals) db.prepare('INSERT INTO inventory_check_approvals(session_id,status,line_set_json,line_decisions_json) VALUES(?,?,?,?)').run(...row)
       for (const row of items) db.prepare('INSERT INTO inventory_check_items(session_id,product_id,state,updated_at) VALUES(?,?,?,?)').run(...row)
-      const observed = { ...db.prepare(query.sql).get() }
-      const expected = { pending_without_line_set: withoutSet, pending_with_line_decisions: withDecisions, items_with_approval_time: withTime }
-      assert.deepEqual(observed, expected, name)
-      const verdict = interpretD1Output(JSON.stringify([{ success: true, results: [observed], meta: { rows_written: 0, changes: 0, changed_db: false } }]), query.rules)
-      const clean = withoutSet === 0 && withDecisions === 0 && withTime === 0
-      assert.equal(verdict.ok, clean, `${name}: the Ops verdict`)
-      assert.deepEqual(verdict.problems, clean ? [] : ['expect-zero-failed'], name)
-      wrong.forEach((sql, i) => { if (JSON.stringify({ ...db.prepare(sql).get() }) !== JSON.stringify(expected)) detected[i] = true })
+      const expectedBy = {
+        postflight: { pending_without_line_set: withoutSet, items_with_approval_time: withTime },
+        'pre-rollback': { pending_with_line_decisions: withDecisions },
+      }
+      for (const which of ['postflight', 'pre-rollback']) {
+        const query = loaded[which], expected = expectedBy[which]
+        const observed = { ...db.prepare(query.sql).get() }
+        assert.deepEqual(observed, expected, `${name} (${which})`)
+        const verdict = interpretD1Output(JSON.stringify([{ success: true, results: [observed], meta: { rows_written: 0, changes: 0, changed_db: false } }]), query.rules)
+        const clean = Object.values(expected).every(value => value === 0)
+        assert.equal(verdict.ok, clean, `${name} (${which}): the Ops verdict`)
+        assert.deepEqual(verdict.problems, clean ? [] : ['expect-zero-failed'], `${name} (${which})`)
+      }
+      wrong.forEach(([which, sql], i) => { if (JSON.stringify({ ...db.prepare(sql).get() }) !== JSON.stringify(expectedBy[which])) detected[i] = true })
     } finally { db.close() }
   }
   assert.deepEqual(detected, wrong.map(() => true), 'every wrong variant disagrees with the query on at least one case')
-  console.log('PASS test-inventory-check-approvals-line-set-query-pure (' + cases.length + ' cases)')
+  console.log('PASS test-inventory-check-approvals-queries-pure (' + cases.length + ' cases, two queries)')
 })().catch(error => { console.error(error); process.exit(1) })

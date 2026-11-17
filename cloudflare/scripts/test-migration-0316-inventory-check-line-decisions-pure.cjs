@@ -54,10 +54,16 @@ check('the file is LF-only, numbered 0316 once, keeps rowid, has PRE / POST / RE
   // The rollback note says what is true: the previous Worker ignores the decisions column, so it is not "rollback-safe" once approvers have used it, and the pre-rollback check it names exists.
   assert.equal(/Rollback-safe/.test(sql), false, 'the file does not claim the previous Worker is safe on approvals that use the new columns')
   assert.match(sql, /APPLY a line an approver rejected/); assert.match(sql, /pending_with_line_decisions must be 0/)
-  const query = path.join(__dirname, '../../ops/queries/inventory-check-approvals-line-set.sql')
-  assert.ok(fs.existsSync(query), 'the ops query the note names exists')
-  const queryText = fs.readFileSync(query, 'utf8')
-  for (const column of ['pending_without_line_set', 'pending_with_line_decisions', 'items_with_approval_time']) assert.ok(queryText.includes(column) && sql.includes(column), `the note and the query both name ${column}`)
+  const queries = { postflight: ['pending_without_line_set', 'items_with_approval_time'], 'pre-rollback': ['pending_with_line_decisions'] }
+  for (const [name, columns] of Object.entries(queries)) {
+    const query = path.join(__dirname, `../../ops/queries/inventory-check-approvals-${name}.sql`)
+    assert.ok(fs.existsSync(query), `the ops query the note names exists: ${name}`)
+    assert.ok(sql.includes(`inventory-check-approvals-${name}.sql`), `the note names the ${name} query by file`)
+    const queryText = fs.readFileSync(query, 'utf8')
+    for (const column of columns) assert.ok(queryText.includes(column) && sql.includes(column), `the note and the ${name} query both name ${column}`)
+  }
+  assert.equal(fs.existsSync(path.join(__dirname, '../../ops/queries/inventory-check-approvals-line-set.sql')), false, 'the single combined query is retired: its rollback column does not belong in a postflight')
+  assert.equal(sql.includes('inventory-check-approvals-line-set'), false, 'the note names no retired query')
 })
 
 check('it is PRE, two ALTER TABLE ADD COLUMN, the two backfill UPDATEs, the identity trigger swap and POST: no comment-only statement, at most 5 compound terms, one statement per step', () => {
