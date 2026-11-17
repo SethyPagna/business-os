@@ -8256,5 +8256,22 @@
   "inventory_check_error_invalid_request": "The request was not valid. Reload and try again.",
   "inventory_check_error_not_found": "This count or its approval no longer exists. Reload and try again.",
   "inventory_check_error_lines_changed": "The count no longer matches its approval. The page was reloaded.",
-  "inventory_check_error_authority_changed": "The account or session changed. Sign in again and retry."
+  "inventory_check_error_authority_changed": "The account or session changed. Sign in again and retry.",
+  "inventory_check_approve_all": "Approve all",
+  "inventory_check_approve_all_confirm": "Every open line is applied. A modified line uses your figure; rejected lines are left out.",
+  "inventory_check_line_accept": "Accept line",
+  "inventory_check_line_modify": "Modify",
+  "inventory_check_line_modify_save": "Save figure",
+  "inventory_check_line_reject": "Reject line",
+  "inventory_check_line_reopen": "Reopen line",
+  "inventory_check_line_decided_reject": "Rejected",
+  "inventory_check_line_modified_to": "Modified to {value}",
+  "inventory_check_line_decided_by": "by {name}",
+  "inventory_check_line_open": "Open",
+  "inventory_check_line_open_lines": "Open lines",
+  "inventory_check_line_reject_title": "Reject this line?",
+  "inventory_check_line_reject_confirm": "The line is not applied and stock stays as it is. You can reopen it while the count is waiting.",
+  "inventory_check_line_state_applied": "Applied",
+  "inventory_check_line_state_applying": "Being applied",
+  "inventory_check_line_state_waiting": "Waiting for the approver applying this count"
 }

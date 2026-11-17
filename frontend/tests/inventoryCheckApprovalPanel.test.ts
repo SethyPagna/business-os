@@ -24,6 +24,7 @@ const live: MountedSurface[] = []
 const mount = async (props: Record<string, unknown> = {}) => { const surface = await harness.mount({ component: 'components/inventory/InventoryCheckApprovalPanel.tsx', props: { ...base, ...props }, app: {}, doubles: {} }); live.push(surface); return surface }
 const action = (surface: MountedSurface, name: string) => surface.findAll(node => node.getAttribute('data-approval-action') === name)[0]
 const lineOf = (surface: MountedSurface, id: number) => surface.find(node => node.getAttribute('data-approval-line') === String(id), `line ${id}`)
+const disabled = (node: MemoryNode) => node.getAttribute('disabled') !== null || (node as unknown as { disabled?: boolean }).disabled === true
 const text = (node: MemoryNode | undefined) => (node?.textContent ?? '').replace(/\s+/g, ' ').trim()
 
 const cases: Array<[string, () => Promise<void>]> = [
@@ -65,7 +66,7 @@ const cases: Array<[string, () => Promise<void>]> = [
   ['Approve and Reject appear only for someone who may decide, only while pending, and fire their own handlers', async () => {
     const panel = await mount()
     assert.ok(action(panel, 'approve') && action(panel, 'reject'))
-    assert.equal(text(action(panel, 'approve')), 'Approve'); assert.equal(action(panel, 'reject').getAttribute('aria-label'), 'Reject', 'the secondary action is icon-only with its name')
+    assert.equal(text(action(panel, 'approve')), 'Approve all'); assert.equal(action(panel, 'reject').getAttribute('aria-label'), 'Reject', 'the secondary action is icon-only with its name')
     calls.length = 0
     await panel.click(action(panel, 'approve')); await panel.click(action(panel, 'reject'))
     assert.deepEqual(calls, ['approve', 'reject'])
@@ -169,6 +170,126 @@ const cases: Array<[string, () => Promise<void>]> = [
   ['the panel never invents a figure it was not given: no system figure, no line', async () => {
     const blind = await mount({ items: [{ ...item(1, 'Serum A', 12, 7), baseline_quantity: undefined, current_quantity: undefined }] })
     assert.equal(blind.findAll(node => node.getAttribute('data-approval-line') !== null).length, 0)
+  }],
+  // ---- slice C2: per-line accept / modify / reject / reopen ----
+  ['the lines are the approval stored set (line_ids), not what the figures say: a product whose dates differ though its total agrees IS a line, and a product outside the set is not', async () => {
+    const dated = item(4, 'Dated D', 9, 9, { lot_lines: [{ batch_id: 7, scope: 'lot', counted: 6, seen: 5, received_at: '2026-10-01' }, { batch_id: 9, scope: 'lot', counted: 3, seen: 4, received_at: '2026-10-09' }] })
+    const panel = await mount({ items: [...items, dated], approval: { ...pending, lines: 2, line_ids: [3, 4] } })
+    assert.deepEqual(panel.findAll(node => node.getAttribute('data-approval-line') !== null).map(node => node.getAttribute('data-approval-line')), ['3', '4'], 'the stored set, in its order; products 1 and 2 differ but are not in it')
+    await panel.render({ ...base, items: [...items, dated], approval: { ...pending, line_ids: [] } })
+    assert.equal(panel.findAll(node => node.getAttribute('data-approval-line') !== null).length, 0, 'an empty stored set is not re-derived from the figures')
+  }],
+  ['every open line has accept, modify and reject (icon-only, translated tooltip); each fires its own handler with the product id; none while busy', async () => {
+    const got: string[] = []
+    const handlers = { onAccept: (id: number) => { got.push(`accept ${id}`) }, onRejectLine: (id: number) => { got.push(`reject ${id}`) }, onReopen: (id: number) => { got.push(`reopen ${id}`) }, onModify: async () => true }
+    const panel = await mount({ ...handlers, canClose: true })
+    const lineAction = (id: number, name: string) => panel.findAll(node => node.getAttribute('data-approval-line-action') === name && lineOf(panel, id).contains(node))[0]
+    for (const name of ['accept', 'modify', 'reject']) {
+      const button = lineAction(2, name)
+      assert.ok(button, `${name} is offered`); assert.equal(button.getAttribute('aria-label'), button.getAttribute('title')); assert.ok(button.getAttribute('aria-label'), 'a tooltip'); assert.equal(text(button), '', 'icon-only')
+    }
+    await panel.click(lineAction(2, 'accept')); await panel.click(lineAction(1, 'reject'))
+    assert.deepEqual(got, ['accept 2', 'reject 1'])
+    await panel.render({ ...base, ...handlers, canClose: true, busy: true })
+    for (const name of ['accept', 'modify', 'reject']) assert.equal(disabled(lineAction(2, name)), true, `${name} is disabled while a request runs`)
+  }],
+  ['per-line buttons follow the rights: accept and modify need canDecide (the extra, the approveCounts capability, online), reject and reopen need canClose; none with no right, none on a decided count, none without a handler', async () => {
+    const handlers = { onAccept: () => {}, onRejectLine: () => {}, onReopen: () => {}, onModify: async () => true }
+    const names = (panel: MountedSurface, id: number) => panel.findAll(node => node.getAttribute('data-approval-line-action') !== null && lineOf(panel, id).contains(node)).map(node => node.getAttribute('data-approval-line-action'))
+    const both = await mount({ ...handlers, canDecide: true, canClose: true }); assert.deepEqual(names(both, 1), ['accept', 'modify', 'reject'])
+    await both.render({ ...base, ...handlers, canDecide: false, canClose: true }); assert.deepEqual(names(both, 1), ['reject'], 'offline or without the capability: only what moves no stock')
+    await both.render({ ...base, ...handlers, canDecide: false, canClose: false }); assert.deepEqual(names(both, 1), [], 'no right, no buttons')
+    await both.render({ ...base, ...handlers, canDecide: true, canClose: true, approval: { ...pending, status: 'approved', decided_at: '2026-11-02T03:00:00Z' } }); assert.deepEqual(names(both, 1), [], 'a decided count has none')
+    await both.render({ ...base, canDecide: true, canClose: true }); assert.deepEqual(names(both, 1), [], 'the page that gives no handler offers no button')
+  }],
+  ['a line being applied, applied, replaced or waiting on another approver shows that state and no actions; the others of the same count keep theirs', async () => {
+    const handlers = { onAccept: () => {}, onRejectLine: () => {}, onReopen: () => {}, onModify: async () => true }
+    const names = (panel: MountedSurface, id: number) => panel.findAll(node => node.getAttribute('data-approval-line-action') !== null && lineOf(panel, id).contains(node)).map(node => node.getAttribute('data-approval-line-action'))
+    const states = (panel: MountedSurface) => panel.findAll(node => node.getAttribute('data-approval-line-state') !== null).map(node => node.getAttribute('data-approval-line-state'))
+    const applied = { ...pending, applied: 1, applied_lines: { 1: { before: 5, target: 10, after: 10, at: 'x' } }, superseded: { 2: 'newer' } }
+    const panel = await mount({ ...handlers, canClose: true, approval: applied })
+    assert.deepEqual(states(panel), ['applied', 'superseded']); assert.deepEqual([names(panel, 1), names(panel, 2)], [[], []])
+    assert.match(text(lineOf(panel, 1)), /Applied/)
+    await panel.render({ ...base, ...handlers, canClose: true, approval: { ...pending, applying: true, applying_request_id: 'inventory_check_approval_mine' } })
+    assert.deepEqual(states(panel), ['applying', 'applying']); assert.deepEqual(names(panel, 1), []); assert.match(text(lineOf(panel, 1)), /Being applied/)
+    await panel.render({ ...base, ...handlers, canClose: true, approval: { ...pending, applying: true } })
+    assert.deepEqual(states(panel), ['waiting', 'waiting']); assert.deepEqual(names(panel, 2), []); assert.match(text(lineOf(panel, 2)), /Waiting for the approver/)
+    await panel.render({ ...base, ...handlers, canClose: true, approval: pending })
+    assert.deepEqual(states(panel), ['open', 'open']); assert.deepEqual(names(panel, 2), ['accept', 'modify', 'reject'])
+  }],
+  ['a rejected line shows a chip with who and when and no result, and reopen while the count is pending; a modified line shows the approver figure, its own Set to and what the counter typed', async () => {
+    const got: number[] = []
+    const decided = { ...pending, line_decisions: {
+      1: { decision: 'reject' as const, at: '2026-11-02T02:00:00Z', by_name: 'boss' },
+      2: { decision: 'modify' as const, counted: 4, at: '2026-11-02T02:30:00Z', by_name: 'boss' } } }
+    const panel = await mount({ approval: decided, canClose: true, onReopen: (id: number) => { got.push(id) } })
+    const chip = (id: number) => panel.find(node => node.getAttribute('data-approval-decision') === String(id), `chip ${id}`)
+    assert.equal(chip(1).getAttribute('data-decision'), 'reject'); assert.match(text(chip(1)), /Rejected/); assert.match(text(chip(1)), /@boss/); assert.match(text(chip(1)), /2026/, 'and when')
+    assert.equal(panel.findAll(node => node.getAttribute('data-approval-target') === '1').length, 0, 'a rejected line is never set to anything')
+    assert.equal(chip(2).getAttribute('data-decision'), 'modify'); assert.match(text(chip(2)), /Modified to 4/)
+    assert.match(text(lineOf(panel, 2)), /Counted 3/, 'what the counter typed stays on the line'); assert.equal(text(panel.find(node => node.getAttribute('data-approval-target') === '2', 'target')), 'Set to 3', 'now 4 + modified 4 - seen 5')
+    const reopens = panel.findAll(node => node.getAttribute('data-approval-line-action') === 'reopen'); assert.equal(reopens.length, 2)
+    assert.equal(panel.findAll(node => node.getAttribute('data-approval-line-action') === 'accept').length, 0, 'a decided line offers reopen only')
+    await panel.click(reopens[1]); assert.deepEqual(got, [2])
+    await panel.render({ ...base, approval: { ...decided, status: 'approved', decided_at: '2026-11-02T03:00:00Z' }, canClose: true, onReopen: () => {} })
+    assert.equal(panel.findAll(node => node.getAttribute('data-approval-line-action') === 'reopen').length, 0, 'no reopen once the approval ended'); assert.ok(chip(1), 'the chip stays as the record')
+    await panel.render({ ...base, approval: { ...decided, line_decisions: { 1: { decision: 'reject', at: '2026-11-02T02:00:00Z' } } }, canClose: true, onReopen: () => {} })
+    assert.doesNotMatch(text(chip(1)), /@/, 'a viewer who may not see staff names gets no name')
+  }],
+  ['modify: the box opens at the counter figure, Set to follows what is typed, a figure the Worker would refuse says why and cannot be saved, and a good figure saves with its product id', async () => {
+    const saved: Array<[number, unknown]> = []
+    const panel = await mount({ onModify: async (id: number, figures: unknown) => { saved.push([id, figures]); return true } })
+    await panel.click(panel.findAll(node => node.getAttribute('data-approval-line-action') === 'modify' && lineOf(panel, 2).contains(node))[0])
+    const box = panel.find(node => node.getAttribute('data-approval-figure') === '2', 'figure box'); const confirm = () => panel.findAll(node => node.getAttribute('data-approval-line-action') === 'confirm')[0]
+    const preview = () => text(panel.find(node => node.getAttribute('data-approval-preview') === '2', 'preview'))
+    assert.equal((box as unknown as { value: string }).value, '3', 'starts at what the counter typed')
+    await panel.type(box, '9'); assert.equal(preview(), 'Set to 8', 'now 4 + 9 - seen 5')
+    await panel.type(box, '10'); assert.equal(preview(), 'Set to 9')
+    for (const [typed, sentence] of [['-1', 'Enter a whole number'], ['2.5', 'not a whole number'], ['abc', 'Enter a whole number'], ['1000000001', 'Enter a whole number'], ['5', 'equals what the counter saw']] as const) {
+      await panel.type(box, typed)
+      assert.match(text(panel.find(node => node.getAttribute('data-approval-problem') === '2', `problem for ${typed}`)), new RegExp(sentence), typed)
+      assert.equal(panel.findAll(node => node.getAttribute('data-approval-preview') === '2').length, 0, `${typed}: no preview for a figure that cannot be saved`)
+      assert.equal(disabled(confirm()), true, `${typed}: cannot be confirmed`)
+    }
+    await panel.type(box, ''); assert.equal(disabled(confirm()), true, 'an empty box cannot be confirmed'); assert.equal(panel.findAll(node => node.getAttribute('data-approval-problem') === '2').length, 0, 'and says nothing yet')
+    await panel.type(box, '0'); assert.equal(preview(), 'Set to 0', 'zero is a figure: max(0, 4 + 0 - 5)')
+    await panel.click(confirm())
+    assert.deepEqual(saved, [[2, { counted: 0 }]]); assert.equal(panel.findAll(node => node.getAttribute('data-approval-figure') === '2').length, 0, 'saved: the editor closes')
+  }],
+  ['modify cancel and refusal: cancel closes without saving; a save the page refuses keeps the editor open with the figure typed; the refusal is on the line', async () => {
+    const saved: unknown[] = []
+    const panel = await mount({ onModify: async (_id: number, figures: unknown) => { saved.push(figures); return false } })
+    const open = () => panel.click(panel.findAll(node => node.getAttribute('data-approval-line-action') === 'modify' && lineOf(panel, 1).contains(node))[0])
+    await open(); await panel.click(panel.findAll(node => node.getAttribute('data-approval-line-action') === 'cancel')[0])
+    assert.equal(panel.findAll(node => node.getAttribute('data-approval-figure') === '1').length, 0); assert.equal(saved.length, 0)
+    await open(); await panel.type(panel.find(node => node.getAttribute('data-approval-figure') === '1', 'box'), '8'); await panel.click(panel.findAll(node => node.getAttribute('data-approval-line-action') === 'confirm')[0])
+    assert.deepEqual(saved, [{ counted: 8 }]); assert.equal((panel.find(node => node.getAttribute('data-approval-figure') === '1', 'box still open') as unknown as { value: string }).value, '8', 'a refused save keeps the figure')
+    await panel.render({ ...base, onModify: async () => true, lineErrors: { 1: 'This count changed while you were working.' } })
+    assert.match(text(panel.find(node => node.getAttribute('data-approval-line-error') === '1', 'line error')), /changed while you were working/, 'the refusal is on the line')
+  }],
+  ['a line counted by received date edits only its counted dates: one box per date, and the figures go out as lots; the chip shows the total and each date the approver figure beside the counter one', async () => {
+    const dated = item(4, 'Dated D', 9, 9, { lot_lines: [{ batch_id: 7, scope: 'lot', counted: 6, seen: 5, received_at: '2026-10-01' }, { batch_id: 9, scope: 'lot', counted: 3, seen: 4, received_at: '2026-10-09' }] })
+    const saved: unknown[] = []
+    const panel = await mount({ items: [dated], approval: { ...pending, lines: 1, line_ids: [4] }, onModify: async (_id: number, figures: unknown) => { saved.push(figures); return true } })
+    await panel.click(panel.findAll(node => node.getAttribute('data-approval-line-action') === 'modify')[0])
+    const boxes = panel.findAll(node => (node.getAttribute('data-approval-figure') ?? '').startsWith('4:')); assert.deepEqual(boxes.map(node => node.getAttribute('data-approval-figure')), ['4:7', '4:9'])
+    assert.deepEqual(boxes.map(node => (node as unknown as { value: string }).value), ['6', '3'])
+    assert.equal(panel.findAll(node => node.getAttribute('data-approval-preview') === '4').length, 0, 'no product-level result is invented for a dated line')
+    await panel.type(boxes[0], '5'); await panel.type(boxes[1], '4')
+    assert.match(text(panel.find(node => node.getAttribute('data-approval-problem') === '4', 'matches seen')), /equals what the counter saw/, 'both dates at what the counter saw: nothing to apply')
+    await panel.type(boxes[1], '2'); await panel.click(panel.findAll(node => node.getAttribute('data-approval-line-action') === 'confirm')[0])
+    assert.deepEqual(saved, [{ lots: [{ batchId: 7, counted: 5 }, { batchId: 9, counted: 2 }] }])
+    await panel.render({ ...base, items: [dated], approval: { ...pending, lines: 1, line_ids: [4], line_decisions: { 4: { decision: 'modify', lots: [{ batchId: 7, counted: 5 }, { batchId: 9, counted: 2 }], at: '2026-11-02T02:00:00Z', by_name: 'boss' } } }, canClose: true, onReopen: () => {} })
+    assert.match(text(panel.find(node => node.getAttribute('data-approval-decision') === '4', 'chip')), /Modified to 7/, 'the chip shows the total of the dates')
+    assert.match(text(panel.find(node => node.getAttribute('data-approval-lot-lines') === '4', 'dates')), /5 → 5 \(6\)/, 'a date shows the approver figure and what the counter typed')
+  }],
+  ['the header: Approve all keeps its icon and word, and reject-all and close stay icon-only with their names', async () => {
+    const panel = await mount({ approval: { ...pending, applied: 1, applying: true, applying_request_id: 'inventory_check_approval_mine' }, onClose: () => {} })
+    assert.equal(text(action(panel, 'approve')), 'Approve all'); assert.ok(action(panel, 'approve').querySelector('svg'), 'with its icon')
+    assert.equal(action(panel, 'reject'), undefined, 'a count being applied has no Reject')
+    assert.equal(text(action(panel, 'close')), '', 'close is icon-only'); assert.ok(action(panel, 'close').getAttribute('aria-label'))
+    await panel.render({ ...base, approval: pending })
+    assert.equal(text(action(panel, 'reject')), '', 'reject is icon-only'); assert.ok(action(panel, 'reject').getAttribute('aria-label'))
   }],
 ]
 

@@ -8256,5 +8256,22 @@
   "inventory_check_error_invalid_request": "សំណើមិនត្រឹមត្រូវ។ សូមផ្ទុកទំព័រឡើងវិញ ហើយសាកល្បងម្តងទៀត។",
   "inventory_check_error_not_found": "ការរាប់នេះ ឬការអនុម័តរបស់វាលែងមានទៀតហើយ។ សូមផ្ទុកទំព័រឡើងវិញ ហើយសាកល្បងម្តងទៀត។",
   "inventory_check_error_lines_changed": "ការរាប់នេះលែងត្រូវនឹងការអនុម័តរបស់វាទៀតហើយ។ ទំព័របានផ្ទុកឡើងវិញ។",
-  "inventory_check_error_authority_changed": "គណនី ឬវគ្គបានប្តូរ។ សូមចូលម្តងទៀត ហើយសាកល្បងឡើងវិញ។"
+  "inventory_check_error_authority_changed": "គណនី ឬវគ្គបានប្តូរ។ សូមចូលម្តងទៀត ហើយសាកល្បងឡើងវិញ។",
+  "inventory_check_approve_all": "អនុម័តទាំងអស់",
+  "inventory_check_approve_all_confirm": "ជួរដែលនៅបើកទាំងអស់នឹងត្រូវអនុវត្ត។ ជួរដែលបានកែប្រែប្រើចំនួនរបស់អ្នក ហើយជួរដែលបានបដិសេធត្រូវបានរំលង។",
+  "inventory_check_line_accept": "ទទួលយកជួរនេះ",
+  "inventory_check_line_modify": "កែប្រែ",
+  "inventory_check_line_modify_save": "រក្សាទុកចំនួន",
+  "inventory_check_line_reject": "បដិសេធជួរនេះ",
+  "inventory_check_line_reopen": "បើកជួរនេះឡើងវិញ",
+  "inventory_check_line_decided_reject": "បានបដិសេធ",
+  "inventory_check_line_modified_to": "បានកែប្រែទៅ {value}",
+  "inventory_check_line_decided_by": "ដោយ {name}",
+  "inventory_check_line_open": "បើក",
+  "inventory_check_line_open_lines": "ជួរដែលនៅបើក",
+  "inventory_check_line_reject_title": "បដិសេធជួរនេះឬ?",
+  "inventory_check_line_reject_confirm": "ជួរនេះមិនត្រូវបានអនុវត្តទេ ហើយស្តុកនៅដដែល។ អ្នកអាចបើកវាឡើងវិញពេលការរាប់នៅរង់ចាំ។",
+  "inventory_check_line_state_applied": "បានអនុវត្ត",
+  "inventory_check_line_state_applying": "កំពុងអនុវត្ត",
+  "inventory_check_line_state_waiting": "រង់ចាំអ្នកអនុម័តដែលកំពុងអនុវត្តការរាប់នេះ"
 }
