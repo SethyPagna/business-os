@@ -36,6 +36,9 @@ export type InventoryCheckProduct = {
   purchase_price_khr?: number | string | null
   cost_needs_review?: boolean | number | null
   cost_review_key?: string | null
+  /** ic_wired rows, only for a viewer with the stock grant: the product's own thresholds, which Products' stock badge judges it on (see inventoryStockFacts.ts). */
+  low_stock_threshold?: number | string | null
+  out_of_stock_threshold?: number | string | null
   latest_received_at?: string | null
   /** Earliest expiry among lots still holding stock; sent only while received dates are visible. */
   next_expiry_date?: string | null

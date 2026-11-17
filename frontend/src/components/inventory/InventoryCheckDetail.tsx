@@ -10,6 +10,7 @@ import type { InventoryCheckObservation, InventoryCheckProduct, InventoryCheckTr
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { finiteQuantity, signedDelta } from './InventoryCheckCountEditor.tsx'
 import { COST_KEYS, costFact, PRICE_KEYS, priceFacts } from './inventoryPriceFacts.ts'
+import { STOCK_THRESHOLD_KEYS } from './inventoryStockFacts.ts'
 
 type Props = {
   product: InventoryCheckProduct
@@ -51,6 +52,8 @@ export function detailRecord(product: InventoryCheckProduct, fields: InventoryCh
     expiry_date: fields.received && product.next_expiry_date ? String(product.next_expiry_date).slice(0, 10) : undefined,
   }
   for (const key of [...PRICE_KEYS, ...COST_KEYS]) if (Object.hasOwn(row, key)) record[key] = row[key]
+  // The product's own stock thresholds, so the modal's badge says what Products says (the global Settings mode still overrides inside the modal, as on Products). Only with the stock grant.
+  if (fields.stock) for (const key of STOCK_THRESHOLD_KEYS) if (Object.hasOwn(row, key)) record[key] = row[key]
   return record
 }
 

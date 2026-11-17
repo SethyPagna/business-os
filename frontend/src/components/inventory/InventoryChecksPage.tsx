@@ -43,6 +43,7 @@ import { groupedParams, groupToAsk, inOpenGroups, type Grouping } from './invent
 import { groupedListLoaded, loadGroupedList } from './inventoryCheckGroupChunk.ts'
 import { soleActiveBranch } from '../../utils/branchCollapse.ts'
 import { PRICE_KEYS } from './inventoryPriceFacts.ts'
+import { STOCK_THRESHOLD_KEYS } from './inventoryStockFacts.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { loadWired, mergeWiredRows, NotWired, patchWiredLots, patchWiredRaw, readWiredRows, rememberWiredMode, wiredMode, wiredResult, type Branch, type WiredAccess, type WiredDeps, type WiredExtras, type WiredList, type WiredRaw } from './inventoryWired.ts'
 import { approvalRequestBound, runApprovalFlow } from './inventoryCheckApprovalFlow.ts'
@@ -166,7 +167,7 @@ function fixStockCandidate(opening: FixStockOpening, branchName: string | null) 
 
 function projectProduct(product: InventoryCheckProduct, fields: InventoryCheckAccess['fields']): InventoryCheckProduct {
   const visible = { ...product }
-  if (!fields.stock) { delete visible.quantity; delete visible.damaged_quantity }
+  if (!fields.stock) { delete visible.quantity; delete visible.damaged_quantity; for (const key of STOCK_THRESHOLD_KEYS) delete (visible as Record<string, unknown>)[key] }
   if (!fields.brand) delete visible.brand
   if (!fields.category) delete visible.category
   if (!fields.barcode) { delete visible.barcode; delete visible.sku }
