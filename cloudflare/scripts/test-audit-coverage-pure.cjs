@@ -80,9 +80,9 @@ ok(readSwitchesLib.includes('{ sql: `${flip.record.sql} WHERE changes() = 1`') &
 
 const inventoryChecks = fs.readFileSync(path.join(routesDir, 'inventoryChecks.ts'), 'utf8')
 assert.deepEqual([...inventoryChecks.matchAll(/\bapp\.(post|patch|put|delete)\('([^']+)'/g)].map(match => [match[1], match[2]]), [
-  ['post', '/sessions'], ['post', '/submissions'], ['post', '/sessions/:id/approval'], ['patch', '/sessions/:id/items/:productId'], ['patch', '/sessions/:id'],
+  ['post', '/sessions'], ['post', '/submissions'], ['post', '/sessions/:id/approval'], ['post', '/sessions/:id/approval/lines'], ['patch', '/sessions/:id/items/:productId'], ['patch', '/sessions/:id'],
 ])
-for (const writer of ['createInventoryCheckSession', 'createInventoryCheckSubmission', 'decideInventoryCheckApproval', 'patchInventoryCheckObservation', 'patchInventoryCheckSession']) {
+for (const writer of ['createInventoryCheckSession', 'createInventoryCheckSubmission', 'decideInventoryCheckApproval', 'decideInventoryCheckLine', 'patchInventoryCheckObservation', 'patchInventoryCheckSession']) {
   // POST /submissions picks its writer (the per-received-date one while ic_lot_counts is on) and calls it as `writer`; both writers are named in the route.
   const call = writer === 'createInventoryCheckSubmission' ? 'writer' : writer
   ok(inventoryChecks.includes(`await ${call}(getDb(c.env), await principal(c),`), `Inventory mutation delegates to authenticated ${writer}`)
@@ -100,10 +100,15 @@ ok((inventoryWriter.match(/eventStatement\(actor, \{/g) || []).length === 5 && (
 ok(inventoryWriter.includes('await db.batchOnce([authorityGuard(actor), ...statements])'), 'Inventory event and mutation share the authority-guarded transaction')
 // The counts approval (6.0.1045) records through its own writer: every decision and every applied line commits its immutable event with the approval row, under the same authority guard.
 const approvalWriter = fs.readFileSync(path.join(routesDir, '../lib/inventoryCheckApprovals.ts'), 'utf8')
-ok((approvalWriter.match(/eventStatement\(actor, \{/g) || []).length === 5 && (approvalWriter.match(/await record\(db, actor,/g) || []).length === 6,
-  'the approval writer includes its line, approve, reject, takeover and close events in the atomic record (the claim and its release are the other two records: they carry no event because they change no count)')
+// The per-line decision (migration 0316) is one more record with its own event (and the event of the end it causes, in the same batch): 7 events, 7 records (the claim and its release carry none: they change no count).
+ok((approvalWriter.match(/eventStatement\(actor, \{/g) || []).length === 7 && (approvalWriter.match(/await record\(db, actor,/g) || []).length === 7,
+  'the approval writer includes its line, approve, reject, takeover, close and per-line decision events in the atomic record (the claim and its release are the other two records: they carry no event because they change no count)')
+{
+  const body = approvalWriter.split('export async function decideInventoryCheckLine(')[1]?.split('\nasync function record(')[0] || ''
+  ok(body.includes('eventStatement(actor, {') && body.includes('await record(db, actor, ['), 'decideInventoryCheckLine commits its audit event in the same batch as the decision')
+}
 ok(approvalWriter.includes('await db.batchOnce([authorityGuard(actor), ...statements])'), 'the approval event and decision share the authority-guarded transaction')
-ok(/status='pending' AND \$\{UNCHANGED\}/.test(approvalWriter) && /const UNCHANGED = `applied_json=@oldApplied AND superseded_json=@oldSuperseded`/.test(approvalWriter) && /inventory_check_conflict/.test(approvalWriter), 'a decision applies only to the approval state it read (the lines applied and the lines replaced by newer counts)')
+ok(/status='pending' AND \$\{UNCHANGED\}/.test(approvalWriter) && /const UNCHANGED = `applied_json=@oldApplied AND superseded_json=@oldSuperseded AND line_decisions_json=@oldDecisions`/.test(approvalWriter) && /inventory_check_conflict/.test(approvalWriter), 'a decision applies only to the approval state it read (the lines applied and the lines replaced by newer counts)')
 const inventoryMigration = fs.readFileSync(path.join(routesDir, '../../migrations/0259_inventory_check_sessions.sql'), 'utf8')
 ok(/UNIQUE\(actor_id,request_id\)/.test(inventoryMigration) && /inventory_check_events_no_update BEFORE UPDATE/.test(inventoryMigration)
   && /inventory_check_events_no_delete BEFORE DELETE/.test(inventoryMigration), 'Inventory audit is request-unique and immutable')

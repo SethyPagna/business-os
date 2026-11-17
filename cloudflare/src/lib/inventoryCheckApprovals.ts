@@ -8,7 +8,7 @@ import {
   lineDecisions, lineSetIds, object, projectApproval, requestId as requestIdOf, REPLACED_NOTE, schemaReady, sessionRow, supersededLines,
   type Actor, type ApprovalAppliedLine, type ApprovalLineDecision, type ApprovalRow, type InventoryCheckPrincipal, type Statement,
 } from './inventoryCheckSessions'
-import { checkLineShape, parseLineDecisionInput, type LineInput } from './inventoryCheckLineInput'
+import { checkLineShape, parseLineDecisionInput } from './inventoryCheckLineInput'
 import type { StockInCommitLine, StockInCommitLineResult } from '../routes/stockInCommit'
 
 /*

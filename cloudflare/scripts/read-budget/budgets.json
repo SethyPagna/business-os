@@ -710,6 +710,7 @@
     {"id":"inventory-checks-list-wired-grouped-category","method":"GET","route":"/api/inventory-checks/list","params":"branchId=1&groupBy=category&page=1&pageSize=20","status":200,"cold_calls_max":18,"rows_max":75023,"rows_max_analyze":75027,"rows_written_max":8,"class":"H","expect":"ok"},
     {"id":"batches-transfer-lots-onlyavailable-at-the-source-branch","method":"GET","route":"/api/batches","params":"productId=1000&branchId=1&onlyAvailable=1","status":200,"cold_calls_max":7,"rows_max":34,"rows_max_analyze":36,"rows_written_max":8,"class":"N","expect":"ok"},
     {"id":"batches-tracked-product-ids-branch-scoped","method":"GET","route":"/api/batches/tracked-product-ids","params":"branchId=1","status":200,"cold_calls_max":8,"rows_max":8760,"rows_max_analyze":8766,"rows_written_max":8,"class":"N","expect":"ok"},
-    {"id":"products-duplicate-dismissals-twin-tag-rulings","method":"GET","route":"/api/products/duplicate-dismissals","params":"","status":200,"cold_calls_max":8,"rows_max":14,"rows_max_analyze":20,"rows_written_max":8,"class":"N","expect":"ok"}
+    {"id":"products-duplicate-dismissals-twin-tag-rulings","method":"GET","route":"/api/products/duplicate-dismissals","params":"","status":200,"cold_calls_max":8,"rows_max":14,"rows_max_analyze":20,"rows_written_max":8,"class":"N","expect":"ok"},
+    {"id":"w-inventory-check-approval-line","method":"POST","route":"/api/inventory-checks/sessions/:id/approval/lines","params":"","status":200,"cold_calls_max":16,"rows_max":1036,"rows_max_analyze":1036,"rows_written_max":16,"class":"N","expect":"ok"}
   ]
 }

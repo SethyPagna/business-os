@@ -143,6 +143,22 @@ function approvalStep({ id, label, offset, counting, lots: dated = false }) {
     } }
 }
 
+// One decision on one line of a waiting count (migration 0316): the approver rejects one of the count's two lines. It moves no stock: ONE guarded batch writes the decision, the session's time and one audit
+// event, after the reads of the approval, its line and the actor. The count and its counter are the approval shapes' (the same fixture); the other line stays open, so the approval does not end.
+function approvalLine({ id, label, offset }) {
+  const base = approvalStep({ id, label, offset, counting: true })
+  return { ...base, url: '/api/inventory-checks/sessions/:id/approval/lines',
+    prepare: async (world) => {
+      const made = await base.prepare(world)
+      const line = (await world.all('SELECT product_id FROM inventory_check_items WHERE session_id = ? ORDER BY product_id LIMIT 1', made.id))[0]
+      return { ...made, productId: line.product_id }
+    },
+    run: async (world, send, prepared) => {
+      try { return await send('POST', '/api/inventory-checks/sessions/' + prepared.id + '/approval/lines', { productId: prepared.productId, action: 'reject', requestId: prepared.request }) }
+      finally { await world.restoreSwitches() }
+    } }
+}
+
 function writeShapes() {
   const shapes = [
     { id: 'w-login-cold', label: 'POST /api/auth/login (cold isolate)', method: 'POST', url: '/api/auth/login', anon: true,
@@ -250,6 +266,7 @@ function writeShapes() {
     // an approval applies ONE stock line (a lowering Set), records it and answers. The second is the same request under the write pass's own config, call_counting
     // ON (P1.1): the commit's cap becomes stockInLinesPerRequestByCalls (2 on Free), so one request applies both lines and finishes the approval.
     approvalStep({ id: 'w-inventory-check-approval-step', label: 'POST /api/inventory-checks/sessions/:id/approval 2 lines (ic_fix_stock, first line)', offset: 1100, counting: false }),
+    approvalLine({ id: 'w-inventory-check-approval-line', label: 'POST /api/inventory-checks/sessions/:id/approval/lines reject one of 2 lines (ic_fix_stock)', offset: 1250 }),
     approvalStep({ id: 'w-inventory-check-approval-step-counted', label: 'POST /api/inventory-checks/sessions/:id/approval 2 lines (ic_fix_stock, call_counting ON, both lines)', offset: 1150, counting: true }),
     // INV S6: the same two-line step with the count typed per received date (ic_lot_counts): each line is one received date Set from what the count found, no stock ledger read.
     approvalStep({ id: 'w-inventory-check-approval-lot-line', label: 'POST /api/inventory-checks/sessions/:id/approval 2 received-date lines (ic_fix_stock, ic_lot_counts, call_counting ON, both lines)', offset: 1200, counting: true, lots: true }),
