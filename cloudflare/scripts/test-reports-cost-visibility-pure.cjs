@@ -77,13 +77,13 @@ const saleSensitive = { cost_usd: 7, cost_before_floor_usd: 7, cost_missing_snap
   money_precision_mode: 'canonical_v1', money_complete: false, money_unknown_cost_lines: 2, money_contributing_rows: 9 }
 
 for (const input of [totals, JSON.parse(JSON.stringify(totals))]) {
-  const employee = reports.gateTotals(input, false)
+  const employee = reports.gateTotals(input, false, false)
   assert.equal(employee.revenue_usd, 20)
   assert.equal(employee.recognized_delivery_usd, 3, 'customer-charged delivery remains ordinary report money')
   assert.equal(employee.pending_delivery_usd, 2)
   for (const key of sensitiveTotals) assert.equal(Object.hasOwn(employee, key), false, `${key} must be absent, not zero`)
 }
-const admin = reports.gateTotals(totals, true)
+const admin = reports.gateTotals(totals, true, true)
 for (const key of sensitiveTotals.filter((key) => key !== 'margin_pct')) {
   assert.equal(Object.hasOwn(admin, key), true, `admin retains ${key}`)
 }
@@ -95,7 +95,7 @@ assert.equal(Object.hasOwn(admin, 'margin_pct'), true)
 // question nobody asked -- the same absence-is-the-contract rule above.
 {
   const noLosses = { revenue_usd: 20, cost_usd: 5, profit_usd: 15 }
-  const adminNoLosses = reports.gateTotals(noLosses, true)
+  const adminNoLosses = reports.gateTotals(noLosses, true, true)
   for (const key of ['removal_loss_usd', 'removal_loss_qty', 'removal_loss_unvalued_rows',
     'revenue_after_losses_usd', 'profit_after_losses_usd']) {
     assert.equal(Object.hasOwn(adminNoLosses, key), false, `${key} stays absent when the kernel sent none`)
@@ -105,7 +105,7 @@ assert.equal(Object.hasOwn(admin, 'margin_pct'), true)
   const adminZero = reports.gateTotals({
     ...noLosses, removal_loss_usd: 0, removal_loss_qty: 0, removal_loss_unvalued_rows: 0,
     revenue_after_losses_usd: 20, profit_after_losses_usd: 15,
-  }, true)
+  }, true, true)
   assert.equal(adminZero.removal_loss_usd, 0)
   assert.equal(adminZero.profit_after_losses_usd, 15)
 }
@@ -153,9 +153,9 @@ for (const input of [productSensitive, JSON.parse(JSON.stringify(productSensitiv
   for (const key of Object.keys(productSensitive)) assert.equal(Object.hasOwn(employee, key), false, `product ${key} hidden`)
 }
 for (const input of [saleSensitive, JSON.parse(JSON.stringify(saleSensitive))]) {
-  const employee = reports.gateBusinessSummarySaleRow({ revenue_usd: 20, ...input }, false)
+  const employee = reports.gateBusinessSummarySaleRow({ revenue_usd: 20, ...input }, false, false)
   for (const key of Object.keys(saleSensitive)) assert.equal(Object.hasOwn(employee, key), false, `sale ${key} hidden`)
-  const adminSale = reports.gateBusinessSummarySaleRow({ revenue_usd: 20, ...input }, true)
+  const adminSale = reports.gateBusinessSummarySaleRow({ revenue_usd: 20, ...input }, true, true)
   for (const key of Object.keys(saleSensitive)) assert.equal(Object.hasOwn(adminSale, key), true, `admin sale retains ${key}`)
 }
 
@@ -190,8 +190,8 @@ assert.deepEqual(reports.gateCourierRow(courier, true), courier)
   const both = reports.gateTotals(totals, false, true, 2, true)
   for (const key of sensitiveTotals) assert.equal(Object.hasOwn(both, key), true, `cost grant plus courier permission retains ${key}`)
   assert.equal(Object.hasOwn(both, 'profit_excludes_delivery'), false, 'both grants read the full profit')
-  assert.deepEqual(both, reports.gateTotals(totals, true), 'both grants read what an administrator reads')
-  assert.deepEqual(reports.gateTotals(totals, false, false, 2, false), reports.gateTotals(totals, false), 'neither grant: the public row')
+  assert.deepEqual(both, reports.gateTotals(totals, true, true), 'both grants read what an administrator reads')
+  assert.deepEqual(reports.gateTotals(totals, false, false, 2, false), reports.gateTotals(totals, false, false), 'neither grant: the public row')
 
   const receipt = { revenue_usd: 20, ...saleSensitive }
   assert.equal(reports.gateBusinessSummarySaleRow(receipt, false, true, true).gross_profit_usd, 13, 'both grants read the receipt profit with the courier cost in it')
@@ -297,3 +297,6 @@ assert.match(source, /getSalesGroupedReport[\s\S]*\.map\(\(r\) => gateTotals/)
 assert.match(source, /totals = gateTotals\(report\.totals/)
 assert.match(source, /totals = gateProductRow\(report\.totals/)
 assert.match(source, /getDeliveryContactTotals[\s\S]*\.map\(\(row\) => gateCourierRow/)
+// L3 (17 Nov 2026): no gate may default the cost flag to "is an administrator"; every caller passes the helper's answer (typecheck proves it).
+assert.doesNotMatch(source, /canViewCosts = isAdmin/, 'reports.ts gates take the cost flag from the caller')
+assert.doesNotMatch(fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sales.ts'), 'utf8'), /canViewCosts\s*=\s*isAdmin/, 'sales.ts gateSalesReportMoney takes the cost flag from the caller')

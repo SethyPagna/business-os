@@ -225,7 +225,7 @@ function unknownCostFields(sent: unknown, known: unknown, diagnostic: ReturnType
  * courier branches are kept for a caller that passes canViewCosts. An
  * administrator holds both.
  */
-export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: boolean, canViewCosts = isAdmin, places: 2 | 4 = 2, canViewCourier = isAdmin): Record<string, unknown> {
+export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: boolean, canViewCosts: boolean, places: 2 | 4 = 2, canViewCourier = isAdmin): Record<string, unknown> {
   if (!isAdmin && canViewCosts && !canViewCourier) {
     // A cost grant without the courier-cost permission: the courier-cost keys
     // leave, and profit is restated on goods so the courier cost cannot come
@@ -322,7 +322,7 @@ export function gateProductRow(row: Record<string, unknown>, isAdmin: boolean, p
   }
 }
 
-export function gateBusinessSummarySaleRow(row: Record<string, unknown>, isAdmin: boolean, canViewCosts = isAdmin, canViewCourier = isAdmin): Record<string, unknown> {
+export function gateBusinessSummarySaleRow(row: Record<string, unknown>, isAdmin: boolean, canViewCosts: boolean, canViewCourier = isAdmin): Record<string, unknown> {
   const diagnostic = reportMoneyDiagnostic(row)
   const { cost_usd, cost_before_floor_usd, cost_missing_snapshot_lines, cost_complete, gross_profit_usd,
     money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows, ...publicRow } = row
