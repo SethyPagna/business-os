@@ -9,7 +9,7 @@
 --   *_cap and *_cap_ok                                   the PRE caps (products 500, lots 5000, entries 5000) and whether the count is within them
 --   *_value_out_of_range                                 in-scope values of 1e9 or more in magnitude (PRE); MUST be 0
 --   max_lot_or_entry_change, change_cap_ok               the largest rounding change of a lot or entry value and whether it is within 0.00005 (POST)
---   blocking_flags, epoch_ok                             a maintenance or stock_transaction_permit flag (PRE), MUST be 0; epoch_ok is 0 when stock_schema_epoch is not legacy-separate-pool-v1, MUST be 1
+--   blocking_flags, epoch_ok                             a maintenance or stock_transaction_permit flag (PRE), MUST be 0; epoch_ok is 0 when stock_schema_epoch is not legacy-separate-pool-v1 or its row is missing (0313's triggers then raise stock_transaction_required), MUST be 1
 --   post_active_cost_drift_now                           active products whose stored cost is not the catalog-cost formula's figure now, over ALL active products with the
 --                                                        predicate of health-catalog-cost.sql (what active_cost_drift reads today; 0313 fixes the re-derived ones)
 --   post_drift_after_apply                               the drift 0313's POST would see: active products OUTSIDE the re-derive set (no in-scope lot or entry), with their own
@@ -144,7 +144,7 @@ r AS (
     (SELECT COALESCE(SUM(out_of_range), 0) FROM es) AS entries_value_out_of_range,
     MAX(COALESCE((SELECT MAX(change) FROM ls), 0), COALESCE((SELECT MAX(change) FROM es), 0)) AS max_lot_or_entry_change,
     (SELECT COUNT(*) FROM system_flags WHERE key IN ('maintenance', 'stock_transaction_permit')) AS blocking_flags,
-    CASE WHEN NOT EXISTS (SELECT 1 FROM system_flags WHERE key = 'stock_schema_epoch' AND value IS NOT 'legacy-separate-pool-v1') THEN 1 ELSE 0 END AS epoch_ok
+    CASE WHEN EXISTS (SELECT 1 FROM system_flags WHERE key = 'stock_schema_epoch' AND value IS 'legacy-separate-pool-v1') THEN 1 ELSE 0 END AS epoch_ok
 )
 SELECT
   products_to_round, lots_to_round, entries_to_round, inactive_lots_holding_stock, active_products_to_rederive,
