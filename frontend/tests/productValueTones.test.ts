@@ -9,6 +9,7 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { headOf, loadSource, renderSurface } from './productsSurfaceFixture.ts'
 import { productColumnsFor } from '../src/components/products/config/productTableColumns.ts'
+import { createHarness } from './mountedComponentHarness.ts'
 
 const parts = await loadSource('components/products/surfaces/ProductRowParts.tsx')
 const PriceCell = parts.ProductPriceCell as React.ComponentType<Record<string, unknown>>
@@ -27,7 +28,7 @@ function legacyPriceCell(args: { usd: number; tone: 'selling' | 'wholesale'; loc
 }
 const cell = (props: Record<string, unknown>) => h(PriceCell, { khr: 0, fmtUSD: fmt, fmtKHR: (v: number) => `${v}៛`, ...props })
 
-const cases: Array<[string, () => void]> = [
+const cases: Array<[string, () => void | Promise<void>]> = [
   ['Products price cells are byte-identical to the markup before PriceValue (selling, wholesale, read-only, no wholesale)', () => {
     for (const args of [{ usd: 12.5, tone: 'selling' }, { usd: 8, tone: 'wholesale' }, { usd: 12.5, tone: 'selling', lockTip: 'No price permission' }, { usd: 8, tone: 'wholesale', lockTip: 'No price permission' }] as const) {
       assert.equal(html(cell(args)), html(legacyPriceCell(args)), `${args.tone}${'lockTip' in args ? ' (locked)' : ''}`)
@@ -69,11 +70,39 @@ const cases: Array<[string, () => void]> = [
     assert.match(surface, /VALUE_TONE\.cost/)
     assert.match(surface, /margin: VALUE_TONE\.margin/)
   }],
+  ['the detail sheet draws selling, wholesale, cost and margin in the SAME tones as the rows (it used to read green-600 / indigo-600 literals)', async () => {
+    const found = await detailTones()
+    assert.equal(found.selling, VALUE_TONE.selling)
+    assert.equal(found.wholesale, VALUE_TONE.wholesale, 'wholesale was text-indigo-600 here and text-primary-700 on the rows')
+    assert.ok((found.cost ?? '').includes(VALUE_TONE.cost), `cost: ${found.cost}`)
+    assert.equal(found.margin, VALUE_TONE.margin)
+  }],
+  ['the detail sheet source carries no money colour literal of its own', () => {
+    const modal = read('components/products/surfaces/ProductDetailModal.tsx')
+    assert.match(modal, /import \{ VALUE_TONE \} from '\.\/ProductRowParts\.tsx'/)
+    for (const literal of ['text-indigo-', 'text-green-600', 'text-blue-600', 'text-red-600 decoration']) assert.ok(!modal.includes(literal), `the detail sheet does not copy ${literal}`)
+  }],
 ]
+
+// The detail sheet (Products AND Inventory mount it) is the other place these four colours are drawn; mounted for real, each value must carry exactly the shared class string.
+const detailHarness = await createHarness({})
+const detailTones = async () => {
+  const surface = await detailHarness.mount({
+    component: 'components/products/surfaces/ProductDetailModal.tsx',
+    props: { p: { id: 41, name: 'Tone serum', unit: 'pcs', stock_quantity: 7, selling_price_usd: 12.5, wholesale_price_usd: 10, cost_price_usd: 3.21 }, fmtUSD: fmt, fmtKHR: (v: number) => `${v}៛`, onClose: () => {}, report: false },
+    app: { user: { id: 1, role_code: 'admin', permissions: {} }, getPermissionTier: () => 'full', can: () => false, t: (key: string) => key, settings: {} },
+    doubles: {},
+  })
+  const classOf = (value: string) => surface.find(node => node.textContent === value && (node.getAttribute('class') ?? '') !== '' && node.children.every(child => child.textContent !== value), value).getAttribute('class')
+  const found = { selling: classOf('$12.50'), wholesale: classOf('$10.00'), cost: surface.find(node => node.tagName === 'BUTTON' && node.textContent === '$3.21', 'cost button').getAttribute('class'), margin: classOf('$9.29') }
+  await surface.unmount()
+  return found
+}
 
 let failed = 0
 for (const [name, run] of cases) {
-  try { run(); console.log(`PASS ${name}`) } catch (error) { failed += 1; console.error(`FAIL ${name}`); console.error(error) }
+  try { await run(); console.log(`PASS ${name}`) } catch (error) { failed += 1; console.error(`FAIL ${name}`); console.error(error) }
 }
+await detailHarness.close()
 if (failed) process.exit(1)
 console.log(`productValueTones passed: ${cases.length} cases`)

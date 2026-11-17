@@ -26,6 +26,7 @@ import { knownCost } from '../../../utils/costDisplay.ts'
 import { branchStockLinesWorthShowing } from '../../../utils/branchScope.ts'
 import { daysUntilDay } from '../../../utils/dateHelpers.ts'
 import { fmtDateOnly } from '../../../utils/formatters.ts'
+import { VALUE_TONE } from './ProductRowParts.tsx'
 import ScrollText from 'lucide-react/dist/esm/icons/scroll-text.js'
 
 // Loaded when the float is opened. The field history is a rare read behind a
@@ -395,14 +396,14 @@ export default function ProductDetailModal({
               <div className="min-w-0 space-y-2.5 border-t border-gray-100 pt-2.5 dark:border-gray-700 sm:border-t-0 sm:pl-5 sm:pt-0">
                 {canViewCosts || showPrice ? <div className="grid grid-cols-2 gap-2" data-detail-price-row="cost-wholesale">
                   {canViewCosts ? <PriceCell label={T('label_cost', 'Cost')}>
-                    <button type="button" onClick={() => setCostFloatOpen(true)} className="text-left text-red-600 decoration-dotted underline-offset-2 hover:underline" title={T('cost_breakdown_title', 'Calculated cost price')} aria-label={T('cost_breakdown_title', 'Calculated cost price')}><CostValue value={costUsdValue} fmt={fmtUSD} t={(key) => T(key, '')} /></button>
+                    <button type="button" onClick={() => setCostFloatOpen(true)} className={`text-left ${VALUE_TONE.cost} decoration-dotted underline-offset-2 hover:underline`} title={T('cost_breakdown_title', 'Calculated cost price')} aria-label={T('cost_breakdown_title', 'Calculated cost price')}><CostValue value={costUsdValue} fmt={fmtUSD} t={(key) => T(key, '')} /></button>
                     {purchaseKhr !== null ? <span className="ml-2 text-xs font-normal text-gray-400">{fmtKHR(purchaseKhr)}</span> : null}
                     {p.cost_needs_review === true ? <span className="mt-1 block text-xs font-normal text-amber-700 dark:text-amber-400">{T('merge_cost_needs_review', 'Cost needs review')}</span> : null}
                   </PriceCell> : null}
                   {showPrice ? <PriceCell label={T('wholesale_price', 'Wholesale price')}>
                     {(wholesaleUsd > 0 || wholesaleKhr > 0) ? (
                       <>
-                        <span className="text-indigo-600 dark:text-indigo-300">{priceText(fmtUSD, wholesaleUsd)}</span>
+                        <span className={VALUE_TONE.wholesale}>{priceText(fmtUSD, wholesaleUsd)}</span>
                         {wholesaleKhr > 0 ? <span className="ml-2 text-xs font-normal text-gray-400">{priceText(fmtKHR, wholesaleKhr)}</span> : null}
                       </>
                     ) : <span className="text-gray-300 dark:text-gray-600">—</span>}
@@ -410,13 +411,14 @@ export default function ProductDetailModal({
                 </div> : null}
                 {showPrice ? <div className="grid grid-cols-2 gap-2" data-detail-price-row="selling-margin">
                   <PriceCell label={T('label_selling_price', 'Selling price')}>
-                    <span className="text-green-600">{priceText(fmtUSD, sellingUsd)}</span>
+                    <span className={VALUE_TONE.selling}>{priceText(fmtUSD, sellingUsd)}</span>
                     {sellingKhr > 0 ? <span className="ml-2 text-xs font-normal text-gray-400">{priceText(fmtKHR, sellingKhr)}</span> : null}
                   </PriceCell>
                   {canViewCosts ? <PriceCell label={T('label_margin', 'Margin')}>
                     {costUsdValue !== null && sellingUsd > 0 ? (
                       <>
-                        <span className={marginUsd >= 0 ? 'text-blue-600' : 'text-yellow-600'}>{fmtUSD(marginUsd)}</span>
+                        {/* A negative margin keeps its warning colour; every other money colour is the shared tone. */}
+                        <span className={marginUsd >= 0 ? VALUE_TONE.margin : 'text-yellow-600 dark:text-yellow-400'}>{fmtUSD(marginUsd)}</span>
                         <span className="ml-2 text-xs font-normal text-gray-400">{marginPct.toFixed(1)}%</span>
                       </>
                     ) : <span className="text-gray-300 dark:text-gray-600">—</span>}

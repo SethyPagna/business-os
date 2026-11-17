@@ -49,7 +49,7 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.ok(body.includes('$12.50') && body.includes('$10.00'), 'selling and wholesale')
     assert.ok(body.includes('$3.21'), 'an administrator sees the cost')
     assert.ok(admin.findAll(node => node.className.includes('text-red-600') && node.textContent.includes('$3.21')).length > 0, 'cost is red')
-    assert.ok(admin.findAll(node => node.className.includes('text-green-600') && node.textContent.includes('$12.50')).length > 0, 'selling is green')
+    assert.ok(admin.findAll(node => node.className.includes('text-green-700') && node.textContent.includes('$12.50')).length > 0, 'selling is the Products green (VALUE_TONE.selling)')
     await admin.unmount()
     const employee = await mount({}, asEmployee)
     assert.ok(!text(employee).includes('$3.21') && !text(employee).includes('Cost'), 'an employee without the cost view never sees the cost the row carries')
