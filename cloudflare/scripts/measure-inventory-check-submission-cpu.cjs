@@ -55,7 +55,7 @@ const COUNTER = 900001
 function reset() {
   db?.close(); db = new DatabaseSync(':memory:')
   for (const sql of loadAll({ through: 242 })) db.exec(sql)
-  for (const file of ['0259_inventory_check_sessions.sql', '0285_inventory_check_items_latest.sql', '0286_inventory_check_approvals.sql', '0294_inventory_check_lot_lines.sql']) db.exec(fs.readFileSync(path.join(HEAD, 'migrations', file), 'utf8'))
+  for (const file of ['0259_inventory_check_sessions.sql', '0285_inventory_check_items_latest.sql', '0286_inventory_check_approvals.sql', '0294_inventory_check_lot_lines.sql', '0316_inventory_check_line_decisions.sql']) db.exec(fs.readFileSync(path.join(HEAD, 'migrations', file), 'utf8'))
   const full = { inventory_checks: true, inventory_check_show_stock: true, inventory_check_show_barcode: true, inventory_check_show_brand: true, inventory_check_show_category: true, inventory_check_show_received: true }
   db.prepare('INSERT INTO roles(id,name,code,permissions) VALUES(900001,?,?,?)').run('Counter', 'employee', JSON.stringify(full))
   db.exec("INSERT INTO roles(id,name,code,permissions) VALUES(900003,'Administrator','admin','{}')")

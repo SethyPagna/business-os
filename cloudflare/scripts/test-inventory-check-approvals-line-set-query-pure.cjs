@@ -1,0 +1,74 @@
+'use strict'
+// ops/queries/inventory-check-approvals-line-set.sql: the postflight / pre-rollback counts around migration 0316: pending approvals with no recorded set of lines (line_set_json IS NULL), pending
+// approvals with a per-line decision (line_decisions_json <> '{}'), and Done items of an approval's session whose time is not their session's count time (an item the old approval flip rewrote).
+// Pure: a minimal schema of the columns it reads, every case through the real guard and the real Ops verdict, and wrong variants that must disagree.
+// Run: node scripts/test-inventory-check-approvals-line-set-query-pure.cjs
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const { pathToFileURL } = require('node:url')
+const { DatabaseSync } = require('node:sqlite')
+
+const root = path.resolve(__dirname, '../..')
+const T0 = '2026-11-12T03:00:00.000Z', T1 = '2026-11-17T04:00:00.000Z'
+// approvals: [session, status, line_set_json, line_decisions_json]; items: [session, product, state, updated_at]. Sessions are started at T0.
+const cases = [
+  ['no approvals', { approvals: [], items: [] }, [0, 0, 0]],
+  ['pending with a set and no decision', { approvals: [['a', 'pending', '{"1":1}', '{}']], items: [['a', 1, 'issue', T0]] }, [0, 0, 0]],
+  ['pending without a set (made by a Worker that does not know the column)', { approvals: [['a', 'pending', null, '{}']], items: [['a', 1, 'issue', T0]] }, [1, 0, 0]],
+  ['pending with a set and a rejected line', { approvals: [['a', 'pending', '{"1":1,"2":1}', '{"2":{"decision":"reject"}}']], items: [['a', 1, 'issue', T0]] }, [0, 1, 0]],
+  ['pending without a set and a modified line', { approvals: [['a', 'pending', null, '{"1":{"decision":"modify","counted":3}}']], items: [['a', 1, 'issue', T0]] }, [1, 1, 0]],
+  ['decided approvals never count in the first two: approved without a set, rejected with a decision', { approvals: [['a', 'approved', null, '{}'], ['b', 'rejected', '{"1":1}', '{"1":{"decision":"reject"}}']], items: [['a', 1, 'done', T0], ['b', 1, 'issue', T0]] }, [0, 0, 0]],
+  ['several pending rows are summed', { approvals: [['a', 'pending', null, '{}'], ['b', 'pending', null, '{}'], ['c', 'pending', '{"1":1}', '{"1":{"decision":"reject"}}'], ['d', 'approved', null, '{"1":{"decision":"reject"}}']], items: [] }, [2, 1, 0]],
+  ['an item the old flip rewrote (Done, time is the approval\'s)', { approvals: [['a', 'approved', null, '{}']], items: [['a', 1, 'done', T1], ['a', 2, 'done', T0]] }, [0, 0, 1]],
+  ['a pending approval with a flipped line counts too', { approvals: [['a', 'pending', '{"1":1,"2":1}', '{}']], items: [['a', 1, 'done', T1], ['a', 2, 'issue', T1]] }, [0, 0, 1]],
+  ['an item with another time in a session with no approval (an observation made later) is not counted', { approvals: [['a', 'approved', null, '{}']], items: [['a', 1, 'done', T0], ['open', 1, 'done', T1]] }, [0, 0, 0]],
+]
+
+;(async () => {
+  const { loadQuery, guardSql } = await import(pathToFileURL(path.join(root, 'ops/scripts/ops-sql-guard.mjs')))
+  const { interpretD1Output } = await import(pathToFileURL(path.join(root, 'ops/scripts/ops-d1-export.mjs')))
+  const query = loadQuery('inventory-check-approvals-line-set')
+  assert.deepEqual(query.rules, { minRows: 1, maxRows: 1, expectZero: ['pending_without_line_set', 'pending_with_line_decisions', 'items_with_approval_time'] })
+  assert.equal(query.maxRowsRead, 100)
+  const file = fs.readFileSync(query.file, 'utf8')
+  assert.equal(file.includes('\r'), false, 'LF only')
+  assert.deepEqual(guardSql(file.replace(/\r?\n/g, '\r\n')), { sql: query.sql, rules: query.rules }, 'a CRLF checkout runs the same canonical text')
+  assert.match(query.sql, /^SELECT /); assert.doesNotMatch(query.sql, /\b(UNION|INSERT|UPDATE|DELETE)\b/i)
+  // Wrong variants: each must give a different answer on at least one case (a query that cannot be told from these proves nothing).
+  const col = (name, expr) => `(${expr}) AS ${name}`
+  const A = 'SELECT COUNT(*) FROM inventory_check_approvals'
+  const item = "SELECT COUNT(*) FROM inventory_check_items i JOIN inventory_check_sessions s ON s.id = i.session_id WHERE i.state = 'done' AND i.session_id IN (SELECT a.session_id FROM inventory_check_approvals a) AND i.updated_at <> s.started_at"
+  const build = (a, b, c) => `SELECT ${col('pending_without_line_set', a)}, ${col('pending_with_line_decisions', b)}, ${col('items_with_approval_time', c)}`
+  const good = [`${A} WHERE status = 'pending' AND line_set_json IS NULL`, `${A} WHERE status = 'pending' AND line_decisions_json <> '{}'`, item]
+  const wrong = [
+    build(`${A} WHERE line_set_json IS NULL`, good[1], good[2]), // counts decided approvals
+    build(good[0], `${A} WHERE line_decisions_json <> '{}'`, good[2]), // counts decided approvals
+    build(`${A} WHERE status = 'pending' AND line_set_json = '{}'`, good[1], good[2]), // an empty set is not a missing set
+    build(good[0], `${A} WHERE status = 'pending' AND line_decisions_json IS NOT NULL`, good[2]), // every row has a decision column
+    build(good[0], good[1], item.replace("i.state = 'done' AND ", '')), // counts items that were never flipped
+    build(good[0], good[1], item.replace("i.session_id IN (SELECT a.session_id FROM inventory_check_approvals a)", '1')), // counts open-session observations
+  ]
+  const detected = wrong.map(() => false)
+  for (const [name, { approvals, items }, [withoutSet, withDecisions, withTime]] of cases) {
+    const db = new DatabaseSync(':memory:')
+    try {
+      db.exec("CREATE TABLE inventory_check_approvals(session_id TEXT PRIMARY KEY, status TEXT NOT NULL, line_set_json TEXT, line_decisions_json TEXT NOT NULL DEFAULT '{}')")
+      db.exec('CREATE TABLE inventory_check_sessions(id TEXT PRIMARY KEY, started_at TEXT NOT NULL)')
+      db.exec('CREATE TABLE inventory_check_items(session_id TEXT NOT NULL, product_id INTEGER NOT NULL, state TEXT NOT NULL, updated_at TEXT, PRIMARY KEY(session_id, product_id))')
+      for (const id of new Set([...approvals.map(row => row[0]), ...items.map(row => row[0])])) db.prepare('INSERT INTO inventory_check_sessions(id,started_at) VALUES(?,?)').run(id, T0)
+      for (const row of approvals) db.prepare('INSERT INTO inventory_check_approvals(session_id,status,line_set_json,line_decisions_json) VALUES(?,?,?,?)').run(...row)
+      for (const row of items) db.prepare('INSERT INTO inventory_check_items(session_id,product_id,state,updated_at) VALUES(?,?,?,?)').run(...row)
+      const observed = { ...db.prepare(query.sql).get() }
+      const expected = { pending_without_line_set: withoutSet, pending_with_line_decisions: withDecisions, items_with_approval_time: withTime }
+      assert.deepEqual(observed, expected, name)
+      const verdict = interpretD1Output(JSON.stringify([{ success: true, results: [observed], meta: { rows_written: 0, changes: 0, changed_db: false } }]), query.rules)
+      const clean = withoutSet === 0 && withDecisions === 0 && withTime === 0
+      assert.equal(verdict.ok, clean, `${name}: the Ops verdict`)
+      assert.deepEqual(verdict.problems, clean ? [] : ['expect-zero-failed'], name)
+      wrong.forEach((sql, i) => { if (JSON.stringify({ ...db.prepare(sql).get() }) !== JSON.stringify(expected)) detected[i] = true })
+    } finally { db.close() }
+  }
+  assert.deepEqual(detected, wrong.map(() => true), 'every wrong variant disagrees with the query on at least one case')
+  console.log('PASS test-inventory-check-approvals-line-set-query-pure (' + cases.length + ' cases)')
+})().catch(error => { console.error(error); process.exit(1) })

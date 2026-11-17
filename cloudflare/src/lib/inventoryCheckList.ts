@@ -8,6 +8,7 @@ import { getDb } from './db'
 import { getInventoryCheckAccess, InventoryCheckQueryError, validateInventoryCheckQuery, type InventoryCheckAccess } from './inventoryCheckAccess'
 import { InventoryCheckSessionError, waitingLineSql } from './inventoryCheckSessions'
 import { getPlanLimits } from './planTier'
+import { localDateExpr } from './businessDateWindow'
 import type { PermissionUser } from './permissions'
 
 // The wired Inventory Check list (INV-A S4a, behind the read switch `ic_wired`): the rows are the Products list for the scope, read by the SAME reader and from the
@@ -39,7 +40,9 @@ export type InventoryListPlan = {
   productsQuery: Record<string, string>
   /** A barcode-blind viewer's search text that looks like a whole code: the route looks it up exactly, and only an exact hit is searched by id. */
   codeLookup: string | null
-  /** Any narrowing at all (search, brand, category, stock state, ids or a check state): the catalogue total is then not the page's total. */
+  /** checkedOn=YYYY-MM-DD: only products whose LATEST count at the branch was on that Cambodia business day. */
+  checkedOn: string | null
+  /** Any narrowing at all (search, brand, category, stock state, ids, a check state or a day): the catalogue total is then not the page's total. */
   filtered: boolean
   wantSummary: boolean
 }
@@ -60,7 +63,7 @@ export function planInventoryList(user: PermissionUser, raw: Record<string, stri
   // sortBy=checked is the spelling older open tabs send for the date order: it is groupBy=checked, and its direction is ignored (newest first, "Never checked" last).
   const sortWord = rawSortBy?.trim() || ''
   if (sortWord === 'checked') delete rest.sortDirection
-  const validated = validateInventoryCheckQuery(rest, access, true)
+  const validated = validateInventoryCheckQuery(rest, access, true, { checkedOn: true })
   const sortBy = sortWord || 'created'
   if (sortBy !== 'created' && sortBy !== 'name' && sortBy !== 'checked') invalid('sortBy')
   if (validated.groupBy && sortWord && sortWord !== 'checked') invalid('sortBy')
@@ -76,6 +79,8 @@ export function planInventoryList(user: PermissionUser, raw: Record<string, stri
   if (checkWord && !(LIST_CHECK_STATES as readonly string[]).includes(checkWord)) invalid('checkState')
   const checkState = (checkWord || null) as ListCheckState | null
   if (checkState && branchId === null) invalid('branchId')
+  const checkedOn = validated.checkedOn ?? null
+  if (checkedOn && branchId === null) invalid('branchId')
   // 'pending' while ic_fix_stock is OFF (or the viewer may not see stock) is a valid choice with nothing in it: an empty page, never a 400 that a tab would repeat.
 
   const productsQuery: Record<string, string> = { searchMode: 'smart', sort: grouping ? 'name_asc' : `${sortBy === 'checked' ? 'created' : sortBy}_${direction}`, include: LIST_INCLUDE }
@@ -94,14 +99,14 @@ export function planInventoryList(user: PermissionUser, raw: Record<string, stri
     if (!access.fields.barcode) { productsQuery.searchFields = 'name'; if (looksLikeCode(validated.query)) codeLookup = validated.query }
   }
   if (rawIds !== undefined && rawIds.trim() !== '') {
-    if (checkState) invalid('ids')
+    if (checkState || checkedOn) invalid('ids')
     if (requestedGrouping) invalid('groupBy')
     const ids = [...new Set(rawIds.split(',').map((part) => part.trim()))]
     if (!ids.length || ids.length > options.maxIds || ids.some((id) => !/^\d+$/.test(id) || !Number.isSafeInteger(Number(id)) || Number(id) <= 0)) invalid('ids')
     productsQuery.ids = ids.join(','); productsQuery.page = '1'; productsQuery.pageSize = String(ids.length)
   }
-  const filtered = Boolean(productsQuery.query || productsQuery.brand || productsQuery.category || productsQuery.stockState || productsQuery.ids || checkState)
-  return { access, branchId, checkState, grouping, productsQuery, codeLookup, filtered, wantSummary: validated.summary !== '0' }
+  const filtered = Boolean(productsQuery.query || productsQuery.brand || productsQuery.category || productsQuery.stockState || productsQuery.ids || checkState || checkedOn)
+  return { access, branchId, checkState, checkedOn, grouping, productsQuery, codeLookup, filtered, wantSummary: validated.summary !== '0' }
 }
 
 /** The request the shared cache key is built from: the canonical Products URL. Host and scheme never count; only the path and the sorted parameters do. */
@@ -113,16 +118,19 @@ export class InventoryCheckFilterTooLargeError extends InventoryCheckSessionErro
   constructor() { super(503, 'inventory_check_filter_too_large') }
 }
 
-export type CheckStateSets = { ok: number[]; issue: number[]; pending: number[]; tooLarge: boolean }
+/** days: the Cambodia business day of each product's LATEST count at the branch, newest day first, with the products whose latest count that was (the date chips and the checkedOn filter). */
+export type CheckStateSets = { ok: number[]; issue: number[]; pending: number[]; days: Array<{ day: string; ids: number[] }>; tooLarge: boolean }
 
 // The latest done/issue item of each product in the branch scope, inside the viewer's organization (items of other organizations and items whose branch differs
 // from their session's are never read): the same scope the ic_simple list used.
+// The DAY is the day the product was COUNTED, never the day it was approved. An item's updated_at is the time of its COUNT (a submission's commit, an observation's save, the Set that closed an Issue) and
+// nothing else writes it: the approval flip changes the state only. So "latest" (ORDER BY updated_at: index 0285) and the day read the same column, and approving an older count never makes it the newer one.
 export const LATEST_ITEMS_SQL = `WITH latest AS (
     SELECT i.product_id AS product_id, i.state AS state, i.updated_at AS updated_at,
            ROW_NUMBER() OVER (PARTITION BY i.product_id ORDER BY i.updated_at DESC, i.session_id DESC) AS rn
     FROM inventory_check_sessions s JOIN inventory_check_items i ON i.session_id = s.id AND i.branch_id = s.branch_id
     WHERE s.organization_id IS @organization AND s.branch_id = @branchId AND i.state IN ('done', 'issue'))
-  SELECT product_id, state FROM latest WHERE rn = 1 ORDER BY updated_at DESC, product_id LIMIT @limit`
+  SELECT product_id, state, ${localDateExpr('updated_at')} AS day FROM latest WHERE rn = 1 ORDER BY updated_at DESC, product_id LIMIT @limit`
 // Products with a count line still waiting for approval at the branch (the same line rule the row tag uses).
 const PENDING_ITEMS_SQL = `SELECT i.product_id AS product_id FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id = a.session_id AND i.branch_id = a.branch_id
   WHERE a.organization_id IS @organization AND a.branch_id = @branchId AND ${waitingLineSql('a', 'i')} GROUP BY i.product_id ORDER BY MAX(a.submitted_at) DESC, i.product_id LIMIT @limit`
@@ -135,22 +143,30 @@ export async function readCheckStateSets(c: Context<{ Bindings: Env; Variables: 
   const limit = getPlanLimits(env).inventoryCheckFilterMaxIds
   const version = await inventoryChecksVersion(env)
   const organization = user.organization_id ?? null
-  const sets = await cachedJsonResponse(new Request(`https://ic.invalid/__bos/ic-state?branchId=${branchId}&pending=${withPending ? 1 : 0}&order=1`, { method: 'GET' }), c.executionCtx,
+  const sets = await cachedJsonResponse(new Request(`https://ic.invalid/__bos/ic-state?branchId=${branchId}&pending=${withPending ? 1 : 0}&order=2`, { method: 'GET' }), c.executionCtx,
     `ic:${version}`, getPlanLimits(env).productListCacheSeconds, async (): Promise<CheckStateSets> => {
-      const latest = await db.prepare(LATEST_ITEMS_SQL).all<{ product_id: number; state: string }>({ organization, branchId, limit: limit + 1 })
+      const latest = await db.prepare(LATEST_ITEMS_SQL).all<{ product_id: number; state: string; day: string | null }>({ organization, branchId, limit: limit + 1 })
       const pending = withPending ? await db.prepare(PENDING_ITEMS_SQL).all<{ product_id: number }>({ organization, branchId, limit: limit + 1 }) : []
-      if (latest.length > limit || pending.length > limit) return { ok: [], issue: [], pending: [], tooLarge: true }
+      if (latest.length > limit || pending.length > limit) return { ok: [], issue: [], pending: [], days: [], tooLarge: true }
+      const byDay = new Map<string, number[]>()
+      for (const row of latest) if (row.day) byDay.set(row.day, [...byDay.get(row.day) ?? [], Number(row.product_id)])
       return { ok: latest.filter((row) => row.state === 'done').map((row) => Number(row.product_id)), issue: latest.filter((row) => row.state === 'issue').map((row) => Number(row.product_id)),
-        pending: pending.map((row) => Number(row.product_id)), tooLarge: false }
+        pending: pending.map((row) => Number(row.product_id)), days: [...byDay.entries()].sort((a, b) => a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0).map(([day, ids]) => ({ day, ids })), tooLarge: false }
     }, cacheIdentity(c))
   return { sets, version }
 }
 
-/** The restriction a check state puts on the Products cohort: the ids to keep, or the checked ids to leave out. */
-export function checkStateRestriction(state: ListCheckState, sets: CheckStateSets): { restrictIdsJson?: string; excludeIdsJson?: string } {
+/**
+ * The restriction a check state and/or a check day put on the Products cohort: the ids to keep, or the checked ids to leave out. A day keeps the products whose LATEST count was on it; with a state it
+ * is the products in both (`not_checked` and a day cannot both hold: nothing).
+ */
+export function checkStateRestriction(state: ListCheckState | null, sets: CheckStateSets, day: string | null = null): { restrictIdsJson?: string; excludeIdsJson?: string } {
   if (sets.tooLarge) throw new InventoryCheckFilterTooLargeError()
-  if (state === 'not_checked') return { excludeIdsJson: JSON.stringify([...new Set([...sets.ok, ...sets.issue])]) }
-  return { restrictIdsJson: JSON.stringify(state === 'ok' ? sets.ok : state === 'issue' ? sets.issue : sets.pending) }
+  const onDay = day === null ? null : new Set(sets.days.find((entry) => entry.day === day)?.ids ?? [])
+  if (state === null) return { restrictIdsJson: JSON.stringify(onDay ? [...onDay] : []) }
+  if (state === 'not_checked') return onDay ? { restrictIdsJson: '[]' } : { excludeIdsJson: JSON.stringify([...new Set([...sets.ok, ...sets.issue])]) }
+  const ids = state === 'ok' ? sets.ok : state === 'issue' ? sets.issue : sets.pending
+  return { restrictIdsJson: JSON.stringify(onDay ? ids.filter((id) => onDay.has(id)) : ids) }
 }
 
 // ---- projection ------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -164,7 +180,7 @@ const GROUP_KEYS = {
   brand: ['brand', 'brands'],
   received: ['batch_count', 'expiry_date', 'expiry_alert_days'],
 } as const
-// Nobody's Inventory answer carries cost, whatever the grant: the page counts and shows figures, not money.
+// Cost leaves the answer unless the viewer may see acquisition costs (access.fields.cost, the shared rule of lib/acquisitionCostAccess.ts): one switch for cost everywhere.
 const COST_KEYS = ['cost_price_usd', 'cost_price_khr', 'cost_needs_review', 'purchase_price_usd', 'purchase_price_khr', 'cost_review_key']
 // Products-page fields that are not Inventory Check grants: they stay for a viewer who may also read the Products page.
 const PRODUCTS_PAGE_KEYS = ['supplier', 'description']
@@ -178,7 +194,7 @@ function projectLot(lot: Record<string, unknown>, access: InventoryCheckAccess, 
 
 function projectRow(row: Record<string, unknown>, access: InventoryCheckAccess, productsPage: boolean): Record<string, unknown> {
   const out: Record<string, unknown> = { ...row }
-  for (const key of COST_KEYS) delete out[key]
+  if (!access.fields.cost) for (const key of COST_KEYS) delete out[key]
   for (const field of Object.keys(GROUP_KEYS) as Array<keyof typeof GROUP_KEYS>) if (!access.fields[field]) for (const key of GROUP_KEYS[field]) delete out[key]
   if (!productsPage) for (const key of PRODUCTS_PAGE_KEYS) delete out[key]
   // The branch list stays (which branches exist is not a stock figure), without the quantities.

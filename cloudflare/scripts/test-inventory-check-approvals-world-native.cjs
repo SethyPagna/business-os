@@ -119,7 +119,7 @@ async function main() {
       const lines = JSON.parse(approval.applied_json).lines
       assert.deepEqual([lines[LOW].before, lines[LOW].after, lines[RAISE].before, lines[RAISE].after], [before[LOW].ordinary, total(LOW) - 2, before[RAISE].ordinary, total(RAISE) + 1])
       const items = await world.all('SELECT product_id,state,revision,updated_by FROM inventory_check_items WHERE session_id=? ORDER BY product_id', id)
-      assert.deepEqual(items.filter(item => [LOW, RAISE].includes(item.product_id)).map(item => [item.state, item.revision, item.updated_by]), [['done', 2, 903], ['done', 2, 903]])
+      assert.deepEqual(items.filter(item => [LOW, RAISE].includes(item.product_id)).map(item => [item.state, item.revision, item.updated_by]), [['done', 2, 902], ['done', 2, 902]]) // the flip changes state and revision only: updated_by stays the counter (902), the approver (903) is the approval's decided_by
       const movements = await world.all("SELECT product_id,movement_type,quantity FROM inventory_movements WHERE reason LIKE '%Inventory check approved%' ORDER BY id")
       assert.ok(movements.some(row => row.product_id === LOW), 'the lowering left its stock movement')
       const operations = await world.all("SELECT request_id FROM stock_lot_adjustment_operations WHERE request_id LIKE ?", `${request}-%`)

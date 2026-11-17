@@ -107,7 +107,8 @@ const ADMIN = 900003, COUNTER = 900001, BLIND = 900002, FOREIGN = 900004, LEAD =
 function reset() {
   db?.close(); db = new DatabaseSync(':memory:')
   for (const sql of loadAll({ through: 242 })) db.exec(sql)
-  for (const file of ['0259_inventory_check_sessions.sql', '0285_inventory_check_items_latest.sql', '0286_inventory_check_approvals.sql']) db.exec(fs.readFileSync(path.join(__dirname, '../migrations', file), 'utf8'))
+  // 0294 (the lot-lines table) always precedes 0316 in the real chain, and every reader of a waiting line (waitingLineSql: the fallback for an approval with no recorded set) names that table, so it stays.
+  for (const file of ['0259_inventory_check_sessions.sql', '0285_inventory_check_items_latest.sql', '0286_inventory_check_approvals.sql', '0294_inventory_check_lot_lines.sql', '0316_inventory_check_line_decisions.sql']) db.exec(fs.readFileSync(path.join(__dirname, '../migrations', file), 'utf8'))
   const full = { inventory_checks: true, inventory_check_show_stock: true, inventory_check_show_barcode: true, inventory_check_show_brand: true, inventory_check_show_category: true, inventory_check_show_received: true }
   db.prepare('INSERT INTO roles(id,name,code,permissions) VALUES(900001,?,?,?),(900002,?,?,?),(900006,?,?,?),(900007,?,?,?),(900008,?,?,?)').run('Counter', 'employee', JSON.stringify(full),
     'Blind', 'blind', JSON.stringify({ inventory_checks: true, inventory_check_show_brand: true }),
@@ -365,9 +366,10 @@ async function main() {
     const items = db.prepare('SELECT product_id,state,counted_quantity,reason,revision,updated_by FROM inventory_check_items ORDER BY product_id').all().map(item => ({ ...item }))
     assert.deepEqual(items, [
       { product_id: 910001, state: 'done', counted_quantity: 5, reason: null, revision: 1, updated_by: COUNTER },
-      { product_id: 910002, state: 'done', counted_quantity: 3, reason: null, revision: 2, updated_by: ADMIN },
-      { product_id: 910003, state: 'done', counted_quantity: 12, reason: null, revision: 2, updated_by: ADMIN },
-      { product_id: 910004, state: 'done', counted_quantity: 9, reason: null, revision: 2, updated_by: ADMIN }])
+      // The flip changes the state (and the revision) only: updated_by stays the COUNTER, like updated_at the count time (who approved is the approval's decided_by).
+      { product_id: 910002, state: 'done', counted_quantity: 3, reason: null, revision: 2, updated_by: COUNTER },
+      { product_id: 910003, state: 'done', counted_quantity: 12, reason: null, revision: 2, updated_by: COUNTER },
+      { product_id: 910004, state: 'done', counted_quantity: 9, reason: null, revision: 2, updated_by: COUNTER }])
     const rows = (await products('branchId=1&pageSize=12')).body.items
     assert.ok([910002, 910003, 910004].every(pid => rows.find(item => item.id === pid).check_status === 'ok' && !('check_pending' in rows.find(item => item.id === pid))))
     const history = (await sessions('GET', `/sessions/${id}/history?page=1&pageSize=50`)).body
@@ -1344,9 +1346,8 @@ async function main() {
   })
 
   // ---- INV S6: a count per received date is applied to ITS received date ----------------------------------------------------------------------------------------------
-  /** Migration 0294 on the current database, and product 910001 holding a second received date (batch 920001, 4 units): A = batch 910001 (5), B = batch 920001 (4). */
+  /** The lot-lines table is there since reset(); this adds product 910001 holding a second received date (batch 920001, 4 units): A = batch 910001 (5), B = batch 920001 (4). */
   const withDates = () => {
-    db.exec(fs.readFileSync(path.join(__dirname, '../migrations/0294_inventory_check_lot_lines.sql'), 'utf8'))
     setSwitches('on', 'on', 'on')
     db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active) VALUES(920001,910001,'batch-920001','2026-10-25',1)").run()
     db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(920001,1,4)').run()

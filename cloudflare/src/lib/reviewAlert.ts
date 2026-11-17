@@ -1,6 +1,6 @@
 // One Telegram alert per review event (created, approved, rejected, resubmitted), sent after the write it announces
 // committed. At most once: a replay, a refusal or a 409 sends nothing, and neither does a committed decision whose reply
-// was lost. A message is a heading and up to four rows (Request, Merged, Reason, Requested by / By): usernames only,
+// was lost. A message is a heading and up to four rows (Request, Merged, Reason, Lines, Requested by / By): usernames only,
 // never money, a phone, an email or the request summary.
 // Reached through a global hook (installReviewAlerts, called from index.ts), not an import: reviewGate, reviewQueue and
 // the products route are loaded in isolation by many tests, and an absent hook is a no-op.
@@ -31,6 +31,8 @@ export type ReviewAlertEvent = {
   merged?: { retired?: string | null; kept?: string | null } | null
   /** The record's name read BEFORE the change, for a record the change removes (an expense delete). */
   recordName?: string | null
+  /** A count's end when the approver rejected some of its lines: how many lines were applied and how many rejected. */
+  summary?: { applied: number; rejected: number } | null
 }
 
 export type ReviewAlertHook = {
@@ -147,6 +149,9 @@ export function formatReviewAlert(event: ReviewAlertEvent, recordName: string | 
   if (event.kind === 'rejected') {
     const reason = reviewAlertReason(event.reason)
     if (reason) lines.push(`Reason: ${reason}`)
+  }
+  if ((event.kind === 'approved' || event.kind === 'rejected') && event.summary && Number.isSafeInteger(event.summary.applied) && Number.isSafeInteger(event.summary.rejected)) {
+    lines.push(`Lines: ${Math.max(0, event.summary.applied)} approved, ${Math.max(0, event.summary.rejected)} rejected`)
   }
   const requestedBy = reviewAlertName(event.row.requested_by_name)
   if (requestedBy) lines.push(`Requested by: ${requestedBy}`)

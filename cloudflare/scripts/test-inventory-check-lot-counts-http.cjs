@@ -43,7 +43,7 @@ const ADMIN = 900003, COUNTER = 900001, BLIND = 900002, VIEWER = 900005, FOREIGN
 function reset() {
   db?.close(); db = new DatabaseSync(':memory:')
   for (const sql of loadAll({ through: 242 })) db.exec(sql)
-  for (const file of ['0259_inventory_check_sessions.sql', '0285_inventory_check_items_latest.sql', '0286_inventory_check_approvals.sql', '0294_inventory_check_lot_lines.sql']) db.exec(fs.readFileSync(path.join(__dirname, '../migrations', file), 'utf8'))
+  for (const file of ['0259_inventory_check_sessions.sql', '0285_inventory_check_items_latest.sql', '0286_inventory_check_approvals.sql', '0294_inventory_check_lot_lines.sql', '0316_inventory_check_line_decisions.sql']) db.exec(fs.readFileSync(path.join(__dirname, '../migrations', file), 'utf8'))
   const full = { inventory_checks: true, inventory_check_show_stock: true, inventory_check_show_barcode: true, inventory_check_show_brand: true, inventory_check_show_category: true, inventory_check_show_received: true }
   db.prepare('INSERT INTO roles(id,name,code,permissions) VALUES(900001,?,?,?),(900002,?,?,?),(900005,?,?,?)').run('Counter', 'employee', JSON.stringify(full),
     'Blind', 'blind', JSON.stringify({ inventory_checks: true, inventory_check_show_brand: true }),
@@ -414,7 +414,10 @@ async function lotMain() {
     setSwitch({ ic_simple: 'on', ic_fix_stock: 'on', ic_wired: 'on' })
     const off = await send(sessionsRoute, 'GET', '/overlay?branchId=1&ids=910001', undefined, COUNTER, { CACHE: kv })
     assert.equal(off.body.items.find(item => item.product_id === 910001).check.lots, undefined, 'OFF: the entry is exactly what it was')
-    assert.ok(!off.queries.some(sql => /inventory_check_lot_lines/.test(sql.sql || sql)), 'OFF: the lot-lines table is not read')
+    // The overlay's own lot-lines statement (the join on the wanted ids) is not sent when OFF. The pending-lines statement names the table too, but only inside the fallback for an approval with no recorded
+    // set (line_set_json NULL: made by a Worker that does not know the column), where the engine's own dated rule applies; SQLite evaluates that branch for such a row alone.
+    assert.ok(!off.queries.some(sql => /JOIN inventory_check_lot_lines l ON l\.product_id = wanted\.value/.test(sql.sql || sql)), 'OFF: the lot-lines table is not read by the overlay')
+    assert.ok(read.queries.some(sql => /JOIN inventory_check_lot_lines l ON l\.product_id = wanted\.value/.test(sql.sql || sql)), 'and ON reads it by that statement (the control: the pattern finds the statement)')
   })
 
   await check('alerts: a differing lot count tells the approvers once, a matching one tells nobody, a replaced approval is told as rejected, a replay announces nothing', async () => {
