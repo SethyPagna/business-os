@@ -64,6 +64,7 @@ const adapter = {
 }
 
 const moneyPrecision = load('lib/moneyPrecision.ts')
+const productMergeLots = load('lib/productMergeLots.ts', { './moneyPrecision': moneyPrecision, './businessDateWindow': load('lib/businessDateWindow.ts') })
 const searchMatch = load('lib/searchMatch.ts')
 const choicesLib = load('lib/productResolveChoices.ts', { './moneyPrecision': moneyPrecision, './searchMatch': searchMatch })
 const permissions = load('lib/permissions.ts')
@@ -74,7 +75,7 @@ const detailRule = load('lib/productDetailRule.ts', { './moneyPrecision': moneyP
 const productIdentity = load('lib/productIdentity.ts', { './db': {}, './sqlBinding': sqlBinding, './productDetailRule': detailRule })
 const productMerge = load('lib/productMerge.ts', { './moneyPrecision': moneyPrecision })
 const productStockGuard = load('lib/productStockGuard.ts')
-const productMergeSnapshot = load('lib/productMergeSnapshot.ts', { './db': {} })
+const productMergeSnapshot = load('lib/productMergeSnapshot.ts', { './db': {}, './productMergeLots': productMergeLots })
 const acquisitionCostAccess = load('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const noAudit = { audit: async () => {} }
 const broadcastHub = { broadcast: async () => {} }
@@ -110,6 +111,7 @@ const products = load('routes/products.ts', {
   '../lib/productMerge': productMerge,
   '../lib/productStockGuard': productStockGuard,
   '../lib/productMergeSnapshot': productMergeSnapshot,
+  '../lib/productMergeLots': productMergeLots,
   '../lib/productResolveChoices': choicesLib,
   '../lib/searchMatch': searchMatch,
   '../lib/sqlBinding': sqlBinding,

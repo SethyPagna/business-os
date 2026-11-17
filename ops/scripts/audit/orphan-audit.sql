@@ -24,6 +24,7 @@
 --   product_merge_pairs_0168.loser_id -- the seed pair names a product 0168 goes on to delete; kept for provenance/idempotence
 --   product_merge_map_0174.loser_id -- the merged product is deleted by 0174; the map keeps its id as provenance
 --   product_merge_pairs_0174.loser_id -- the seed pair names a product 0174 goes on to delete; kept for provenance/idempotence
+--   cost_4dp_repair_0313.row_id -- 0313 rounding ledger: row_id names a product, lot or cost entry by the table in its entity column; a ledger entry outlives its row and is read only by hand
 --
 -- Every statement is a SELECT. There are no writes and no PRAGMA here.
 -- A healthy database answers 0 for every relation. A nonzero count on a

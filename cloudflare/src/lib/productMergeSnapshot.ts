@@ -1,5 +1,6 @@
 import type { BindParams, getDb } from './db'
 import type { ProductMergeSourceExtent } from './productMerge'
+import { isMergeableLot, matchDuplicateLots } from './productMergeLots'
 
 type ProductMergeDb = ReturnType<typeof getDb>
 
@@ -73,6 +74,9 @@ export type ProductMergeLotSnapshot = {
   keeperStockBefore: ProductMergeStockRow[]
   saleAllocationIds: number[]
   returnAllocationIds: number[]
+  /** Single-lot sale lines and return lines that name this lot in their own batch_id (no allocation rows). */
+  saleItemIds: number[]
+  returnItemIds: number[]
 }
 
 type KeyedRead = { key: string; sql: string; params?: BindParams }
@@ -156,7 +160,11 @@ export function planProductMergeCaseSnapshot(
     {
       key: 'duplicateBatches',
       // The two lot_* columns let the fold assert in its write batch that nothing moved on these lots since this read.
-      sql: `SELECT id, batch_key, batch_number,
+      // received_at, expiry_date and unit_cost_usd are what the date match and the folded lot's cost and expiry read.
+      // EVERY lot of the discarded product, as base reads it: an active one is folded or created on the keeper, an already-inactive one is
+      // re-pointed onto the keeper untouched (lead ruling 16 Nov 2026, B2: its sale lines move to the keeper, so the lot must follow or a later
+      // return of that line is refused as 'owned by another product').
+      sql: `SELECT id, batch_key, batch_number, received_at, expiry_date, unit_cost_usd, is_active,
         (SELECT COALESCE(SUM(quantity), 0) FROM branch_batch_stock WHERE batch_id = product_batches.id) AS lot_quantity,
         (SELECT COUNT(*) FROM branch_batch_stock WHERE batch_id = product_batches.id) AS lot_stock_rows
         FROM product_batches WHERE variant_product_id = @id`,
@@ -200,7 +208,7 @@ export function planProductMergeCaseSnapshot(
   return { reads, decode }
 }
 
-// Lot preimages depend on the first snapshot's batch-key comparison, so they
+// Lot preimages depend on the first snapshot's received-date match (productMergeLots.ts), so they
 // form a second read phase. All required lot/allocation reads within that phase
 // remain independent and share one D1 call. A case with only repointed lots (or
 // no lots) does not issue this second call at all.
@@ -219,38 +227,66 @@ export function planProductMergeDependentLotSnapshots(
   stockDisposition: 'merge' | 'write_off',
   maxStatements = PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS,
 ): ProductMergeReadPlan<Map<number, ProductMergeLotSnapshot>> {
-  const keeperBatchIdByKey = new Map(snapshot.canonicalBatchRows.map((row) => [row.batch_key, Number(row.id)]))
+  const lotMatches = matchDuplicateLots(snapshot.canonicalBatchRows, snapshot.duplicateBatchRows)
   const reads: KeyedRead[] = []
   const requested: Array<{ duplicateBatchId: number; keeperBatchId: number | null }> = []
   for (const batch of snapshot.duplicateBatchRows) {
     const duplicateBatchId = Number(batch.id)
-    const keeperBatchId = stockDisposition === 'merge' ? keeperBatchIdByKey.get(batch.batch_key) ?? null : null
+    // Only an ACTIVE discarded lot is folded or written off; an inactive one is re-pointed or left as it was (productMergeLots.ts).
+    if (!isMergeableLot(batch)) continue
+    const keeperBatchId = stockDisposition === 'merge' ? lotMatches.get(duplicateBatchId) ?? null : null
     if (stockDisposition === 'merge' && keeperBatchId == null) continue
     requested.push({ duplicateBatchId, keeperBatchId })
+  }
+  // SET reads, not per-lot reads: one JSON id list per read, grouped by batch_id in JS, so the read count is the same for 1 lot and for 1000
+  // (it was 4 per folded lot, which refused any merge above 19 lots against the 80-statement bound).
+  const lotIds = [...new Set(requested.flatMap(({ duplicateBatchId, keeperBatchId }) => (keeperBatchId == null ? [duplicateBatchId] : [duplicateBatchId, keeperBatchId])))]
+  const foldedIds = [...new Set(requested.filter((lot) => lot.keeperBatchId != null).map((lot) => lot.duplicateBatchId))]
+  if (lotIds.length) {
     reads.push({
-      key: `dupStock:${duplicateBatchId}`,
-      sql: 'SELECT branch_id, quantity FROM branch_batch_stock WHERE batch_id = @id',
-      params: { id: duplicateBatchId },
+      key: 'lotStock',
+      sql: 'SELECT batch_id, branch_id, quantity FROM branch_batch_stock WHERE batch_id IN (SELECT value FROM json_each(@ids)) ORDER BY id',
+      params: { ids: JSON.stringify(lotIds) },
     })
-    if (keeperBatchId != null) {
-      reads.push(
-        { key: `keeperStock:${duplicateBatchId}`, sql: 'SELECT branch_id, quantity FROM branch_batch_stock WHERE batch_id = @id', params: { id: keeperBatchId } },
-        { key: `saleAllocations:${duplicateBatchId}`, sql: 'SELECT id FROM sale_item_batch_allocations WHERE batch_id = @id', params: { id: duplicateBatchId } },
-        { key: `returnAllocations:${duplicateBatchId}`, sql: 'SELECT id FROM return_item_batch_allocations WHERE batch_id = @id', params: { id: duplicateBatchId } },
-      )
-    }
+  }
+  if (foldedIds.length) {
+    // A single-lot line names its lot in sale_items.batch_id / return_items.batch_id and writes no allocation row: the fold follows it too.
+    // Each table's allocation read carries its line read as one more UNION ALL term.
+    // The line reads select by batch_id alone (exact, whatever product a line names): idx_sale_items_batch_id_partial and idx_return_items_batch_id_partial (migration 0315) make them seeks.
+    const ids = JSON.stringify(foldedIds)
+    reads.push(
+      { key: 'saleAllocations', sql: "SELECT 'allocation' AS kind, batch_id, id FROM sale_item_batch_allocations WHERE batch_id IN (SELECT value FROM json_each(@ids)) UNION ALL SELECT 'line' AS kind, batch_id, id FROM sale_items WHERE batch_id IN (SELECT value FROM json_each(@ids)) ORDER BY kind, id", params: { ids } },
+      { key: 'returnAllocations', sql: "SELECT 'allocation' AS kind, batch_id, id FROM return_item_batch_allocations WHERE batch_id IN (SELECT value FROM json_each(@ids)) UNION ALL SELECT 'line' AS kind, batch_id, id FROM return_items WHERE batch_id IN (SELECT value FROM json_each(@ids)) ORDER BY kind, id", params: { ids } },
+    )
   }
   if (reads.length && (!Number.isSafeInteger(maxStatements) || maxStatements <= 0 || reads.length > maxStatements)) {
     throw new ProductMergeReadBatchLimitError(reads.length, maxStatements)
   }
   const decode: ProductMergeReadPlan<Map<number, ProductMergeLotSnapshot>>['decode'] = (rows) => {
+    const byBatch = (key: string): Map<number, Array<Record<string, unknown>>> => {
+      const grouped = new Map<number, Array<Record<string, unknown>>>()
+      for (const row of rows.get(key) || []) {
+        const id = Number(row.batch_id)
+        const list = grouped.get(id)
+        if (list) list.push(row)
+        else grouped.set(id, [row])
+      }
+      return grouped
+    }
+    const stock = byBatch('lotStock')
+    const sale = byBatch('saleAllocations')
+    const returns = byBatch('returnAllocations')
+    const ofKind = (grouped: Map<number, Array<Record<string, unknown>>>, id: number, kind: string) => (grouped.get(id) || []).filter((row) => row.kind === kind).map((row) => Number(row.id))
+    const stockOf = (id: number) => (stock.get(id) || []).map(({ branch_id, quantity }) => ({ branch_id, quantity })) as ProductMergeStockRow[]
     const result = new Map<number, ProductMergeLotSnapshot>()
     for (const { duplicateBatchId, keeperBatchId } of requested) {
       result.set(duplicateBatchId, {
-        duplicateStockRows: (rows.get(`dupStock:${duplicateBatchId}`) || []) as ProductMergeStockRow[],
-        keeperStockBefore: keeperBatchId == null ? [] : (rows.get(`keeperStock:${duplicateBatchId}`) || []) as ProductMergeStockRow[],
-        saleAllocationIds: keeperBatchId == null ? [] : (rows.get(`saleAllocations:${duplicateBatchId}`) || []).map((row) => Number(row.id)),
-        returnAllocationIds: keeperBatchId == null ? [] : (rows.get(`returnAllocations:${duplicateBatchId}`) || []).map((row) => Number(row.id)),
+        duplicateStockRows: stockOf(duplicateBatchId),
+        keeperStockBefore: keeperBatchId == null ? [] : stockOf(keeperBatchId),
+        saleAllocationIds: keeperBatchId == null ? [] : ofKind(sale, duplicateBatchId, 'allocation'),
+        returnAllocationIds: keeperBatchId == null ? [] : ofKind(returns, duplicateBatchId, 'allocation'),
+        saleItemIds: keeperBatchId == null ? [] : ofKind(sale, duplicateBatchId, 'line'),
+        returnItemIds: keeperBatchId == null ? [] : ofKind(returns, duplicateBatchId, 'line'),
       })
     }
     return result

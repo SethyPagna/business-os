@@ -1,7 +1,7 @@
 import type { BindParams, D1Compat } from './db'
 import { getInventoryCheckAccess, InventoryCheckQueryError, projectInventoryCheckProduct, validateInventoryCheckQuery, type InventoryCheckAccess } from './inventoryCheckAccess'
 import { buildInventoryCheckStockQuery, readInventoryCheckStock } from './inventoryCheckStock'
-import { FAMILY_ROOT_KEY_SQL, paginateProductFamilies } from './familyPagination'
+import { FAMILY_ROOT_KEY_SQL, intraFamilyNameBarcodeSql, paginateProductFamilies } from './familyPagination'
 import { buildGroupingBlock, groupingPlan, isInventoryCheckGrouping } from './inventoryCheckGrouping'
 import { buildProductSalesLedgerSql } from './productSalesLedger'
 import { identifiedCustomerExpr, recognizedExpr } from './salesAnalytics'
@@ -201,6 +201,12 @@ const NEXT_EXPIRY_SQL = `(SELECT MIN(pb.expiry_date) FROM product_batches pb JOI
 const STOCK_ROW_COLUMNS = ['invalid_quantity', 'negative_quantity', 'lot_exceeds_ordinary', 'cache_mismatch', 'invalid_allocation', 'unallocated_damaged',
   'missing_branch_allocation', 'recorded_ordinary_quantity', 'recorded_lot_quantity', 'recorded_damaged_quantity', 'recorded_cache_quantity'] as const
 const PAGE_STOCK_PREFIX = '__page_stock_'
+// Inside one family the list is ordered name, then barcode (identity key, leading zeros folded), then id, like every other
+// product list, so two unmerged duplicates are consecutive (owner, 16 Nov 2026). The barcode is the always-selected __code_barcode
+// (the ordering reveals no code to a caller without the barcode field). The page wrapper repeats it with the __page alias because
+// it re-sorts the page rows by window aggregates.
+const IC_INTRA_FAMILY_ORDER_SQL = `${intraFamilyNameBarcodeSql('name', '__code_barcode')}, id ASC`
+const IC_PAGE_INTRA_ORDER_SQL = `${intraFamilyNameBarcodeSql('__page.name', '__page.__code_barcode')}, __page.id ASC`
 const VERIFICATION_KEYS = ['stock_consistent', 'stock_diagnostics', 'recorded_ordinary_quantity', 'recorded_lot_quantity', 'recorded_damaged_quantity', 'recorded_cache_quantity'] as const
 // The page rows' stock for a session, with no verification: the branch's ordinary units and its held units (a missing branch row is 0, as the ledger counts it).
 const PLAIN_SESSION_STOCK_SQL = `SELECT __page.id AS product_id,
@@ -316,7 +322,7 @@ export async function readInventoryCheckProducts(db: Pick<D1Compat, 'batch'>, us
         FROM __page${pageStock ? ' LEFT JOIN stock ON stock.product_id=__page.id' : ''}${namePage ? ` LEFT JOIN ledger l ON l.product_id=__page.id
         LEFT JOIN (${customerCountsSql}) bc ON bc.product_id=__page.id` : ''}
         WINDOW family AS (PARTITION BY __page.__family_root_id)
-        ORDER BY ${familyOrder('MIN(__page.__family_name) OVER family', 'MAX(__page.__family_num) OVER family')},__page.__family_root_id ASC,__page.id ASC`
+        ORDER BY ${familyOrder('MIN(__page.__family_name) OVER family', 'MAX(__page.__family_num) OVER family')},__page.__family_root_id ASC,${IC_PAGE_INTRA_ORDER_SQL}`
       const result = await schemaBatch(db, [statements[0], { ...statements[1], sql: wrappedPageSql || pageSql },
         { sql: summarySql, params: { ...plan.params, rankingLimit: limit } }])
       summary = (result[2].results?.[0] || {}) as Record<string, unknown>
@@ -328,7 +334,7 @@ export async function readInventoryCheckProducts(db: Pick<D1Compat, 'batch'>, us
     rankCteSql: namePage ? namePageCtes() : rankCtes(rankWithStock), selectColumns: 'c.*', joinSql: 'JOIN product_metrics c ON c.id=p.id JOIN family_metrics f ON f.family_key=c.family_key', whereSql: 'WHERE 1=1',
     params: plan.params, page: plan.page, pageSize: plan.pageSize,
     familyOrderSql: familyOrder('family_name', 'family_num_sort'),
-    familyNumericSortSql: numeric ? `f.${numeric}` : undefined, intraFamilyOrderSql: 'id ASC',
+    familyNumericSortSql: numeric ? `f.${numeric}` : undefined, intraFamilyOrderSql: IC_INTRA_FAMILY_ORDER_SQL,
   })
   if (plan.branchId && Number(summary.selected_branch_exists) !== 1) invalid('branchId')
   if (paged.items.length > 500) throw new InventoryCheckProductsLimitError()
@@ -446,7 +452,7 @@ export async function readInventoryCheckProductsSimple(db: Pick<D1Compat, 'batch
         SELECT __page.*${pageStock ? `,${stockColumnsSql('stock', PAGE_STOCK_PREFIX)}` : plainSessionStock ? ',stock.ordinary+stock.held AS __quantity,stock.held AS recorded_damaged_quantity' : ''}${showNextExpiry ? `,${NEXT_EXPIRY_SQL} AS next_expiry_date` : ''}${access.fields.received ? ',(SELECT MAX(received_at) FROM product_batches rb WHERE rb.variant_product_id=__page.id) AS latest_received_at' : ''}${inSession ? '' : `,${PAGE_CHECK_COLUMNS}`}
         FROM __page${pageStock || plainSessionStock ? ' LEFT JOIN stock ON stock.product_id=__page.id' : ''}${inSession ? '' : ' LEFT JOIN latest ON latest.product_id=__page.id'}
         WINDOW family AS (PARTITION BY __page.__family_root_id)
-        ORDER BY ${grouped ? grouped.pageOrder('MIN(__page.__family_name) OVER family', by === 'checked' ? 'MAX(__page.__family_num) OVER family' : 'MIN(__page.__family_sort) OVER family') : familyOrder('MIN(__page.__family_name) OVER family', 'MAX(__page.__family_num) OVER family')},__page.__family_root_id ASC,__page.id ASC`
+        ORDER BY ${grouped ? grouped.pageOrder('MIN(__page.__family_name) OVER family', by === 'checked' ? 'MAX(__page.__family_num) OVER family' : 'MIN(__page.__family_sort) OVER family') : familyOrder('MIN(__page.__family_name) OVER family', 'MAX(__page.__family_num) OVER family')},__page.__family_root_id ASC,${IC_PAGE_INTRA_ORDER_SQL}`
       const result = await schemaBatch(db, [statements[0], { ...statements[1], sql: wrappedPageSql }, { sql: branchesSql, params: { branchId: plan.branchId ?? null } },
         ...wantFacets ? [{ sql: summarySql, params: plan.params }] : []])
       branchRow = (result[2].results?.[0] || {}) as Record<string, unknown>
@@ -463,7 +469,7 @@ export async function readInventoryCheckProductsSimple(db: Pick<D1Compat, 'batch
     selectColumns: 'c.*', joinSql: 'JOIN product_metrics c ON c.id=p.id JOIN family_metrics f ON f.family_key=c.family_key', whereSql: 'WHERE 1=1',
     params: plan.params, page: plan.page, pageSize: plan.pageSize,
     familyOrderSql: grouped ? grouped.rankingOrder : familyOrder('family_name', 'family_num_sort'),
-    familyNumericSortSql: grouped ? grouped.familyNumericSortSql : byStock ? 'f.stock_quantity' : undefined, intraFamilyOrderSql: 'id ASC',
+    familyNumericSortSql: grouped ? grouped.familyNumericSortSql : byStock ? 'f.stock_quantity' : undefined, intraFamilyOrderSql: IC_INTRA_FAMILY_ORDER_SQL,
     ...(grouped ? { familySortValueSql: grouped.familySortValueSql, familyGroupSql: grouped.familyGroupSql } : {}),
   })
   if (plan.branchId && Number(branchRow.selected_branch_exists) !== 1) invalid('branchId')

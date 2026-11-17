@@ -43,7 +43,7 @@ const cluster = (value: string, left = product(1), right = product(2)): ProductC
 })
 
 assert.equal(selectedConflictEligibility(cluster('012345000065')).eligible, true)
-assert.equal(selectedConflictCaseKey({ type: 'name', value: '  Case   WATER ' }), 'name:case water', 'case keys use the same normalized cluster identity the Worker validates')
+assert.equal(selectedConflictCaseKey({ type: 'name', value: '  Case   WATER ' }), 'name:case water', 'the client case key collapses inner spaces and lowercases; it no longer equals the Worker\'s dismissal key (which trims and lowercases only), and this test pins the client side only')
 assert.deepEqual(
   selectedConflictEligibility(cluster('pair', product(5, { barcode: '001234565' }), product(4, { barcode: '01234565' }))),
   { eligible: true, keeper: product(4, { barcode: '01234565' }), discarded: product(5, { barcode: '001234565' }) },

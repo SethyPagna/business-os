@@ -85,7 +85,7 @@ async function main() {
         assert.equal(result.body.item.cost_needs_review,true);assert.ok(!Object.hasOwn(result.body.item,'cost_review_key'));assert.deepEqual(result.body.product,result.body.item)
       })
     }
-    for (const [value,manual,lot,expected] of [[null,null,null,null],[0,null,null,0],[5,7,null,7],[5,7.123456789012345,null,7.123456789012345],[5,null,8,8]]) {
+    for (const [value,manual,lot,expected] of [[null,null,null,null],[0,null,null,0],[5,7,null,7],[5,7.123456789012345,null,7.1235],[5,null,8,8]]) {
       const p = await pair('selected',value,{manual,lot})
       const preview = await h.call('POST','/api/products/possible-duplicates/merge-batch/preview',{cases:[{
         case_key:`barcode:${p.barcode}`,cluster_type:'barcode',cluster_value:p.barcode,product_ids:[p.keepId,p.mergeId],
@@ -172,7 +172,7 @@ async function main() {
     const no=await h.call('POST','/api/products/possible-duplicates/merge-batch/preview',body,'denied selected preview',{cookie:denied})
     proof.check('selected permission denial remains enforced',()=>assert.equal(no.status,403,JSON.stringify(no.body)))
     }
-    for(const [value,manual,lot,expected] of (initialRace||redoRace||postPce||recovery||recoveryChanged||partialRecovery||lostAck?[[null,null,null,null]]:[[null,null,null,null],[0,null,null,0],[5,7.123456789012345,null,7.123456789012345],[5,null,8,8]])) {
+    for(const [value,manual,lot,expected] of (initialRace||redoRace||postPce||recovery||recoveryChanged||partialRecovery||lostAck?[[null,null,null,null]]:[[null,null,null,null],[0,null,null,0],[5,7.123456789012345,null,7.1235],[5,null,8,8]])) {
       const p=await pair('selected',value,{manual,lot})
       const third=nextId++
       await arrangeStock(h,h.db.prepare('INSERT INTO products(id,name,name_key,barcode,cost_price_usd,cost_price_khr,selling_price_usd,is_active) VALUES(?,?,?,?,9,36000,10,1)').bind(third,p.name,p.name.toLowerCase(),p.barcode))

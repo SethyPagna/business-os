@@ -5,6 +5,9 @@ runner._compile(source.slice(0,boundary)+'\nmodule.exports={fresh,one,rows,state
 const {fresh,one,rows,state,request,merge,preview,adapter,catalogCost,fixtureWrite}=runner.exports
 
 let count=0
+// What the merge stores for a legacy long cost: nearest 4 places (roundMoney4). The preview must show the same value.
+const STORED4={5.123456789012345:5.1235,20500.12345678901:20500.1235,7.123456789012345:7.1235}
+const stored4=v=>v===null?null:(STORED4[v]??v)
 async function check(name,fn){fresh();try{await fn();count++;console.log('PASS '+name)}finally{state.native.db.close()}}
 async function quote(steps=[{mergeId:21,stock:'merge'}]){
  const group=[20,...steps.map(step=>step.mergeId)].join(',')
@@ -16,7 +19,7 @@ async function quote(steps=[{mergeId:21,stock:'merge'}]){
 }
 function lots(sameKey=false,manual){
  fixtureWrite(() => state.native.db.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_at) VALUES(900,20,'keeper',1,4,'2026-09-01')"))
- fixtureWrite(() => state.native.db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_at) VALUES(902,21,?,1,8,'2026-09-02')").run(sameKey?'keeper':'loser'))
+ fixtureWrite(() => state.native.db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,unit_cost_usd,received_at) VALUES(902,21,?,1,8,?)").run(sameKey?'keeper':'loser',sameKey?'2026-09-01':'2026-09-02')) // 16 Nov 2026: lots meet by RECEIVED DAY; "sameKey" is the same-day (and same-key) lot
  fixtureWrite(() => state.native.db.exec('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(900,1,3),(902,1,1);INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(20,1,3),(21,1,1);UPDATE products SET stock_quantity=3 WHERE id=20;UPDATE products SET stock_quantity=1 WHERE id=21'))
  if(manual!==undefined)fixtureWrite(() => state.native.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(21,?,'manual',901)").run(manual))
 }
@@ -36,18 +39,19 @@ async function main(){
  for(const usd of [null,0,5.123456789012345])for(const khr of [null,0,20500.12345678901])await check('canonical nullable/raw precision '+usd+'/'+khr,async()=>{
   fixtureWrite(() => state.native.db.prepare('UPDATE products SET cost_price_usd=?,purchase_price_usd=99,cost_price_khr=? WHERE id=20').run(usd,khr))
   const {result}=await quote(),authority=result.body.costAuthority
-  assert.deepEqual(authority,{version:1,keeperId:20,cost_price_usd:usd,cost_price_khr:khr,needsReview:true,source:'keeper_fallback'})
+  assert.deepEqual(authority,{version:1,keeperId:20,cost_price_usd:stored4(usd),cost_price_khr:stored4(khr),needsReview:true,source:'keeper_fallback'})
   const done=await merge({keepId:20,mergeId:21,keep:true,stock:'merge'})
   assert.equal(done.status,200,JSON.stringify(done.body))
-  assert.deepEqual(one('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=20'),{cost_price_usd:usd,cost_price_khr:khr})
+  assert.deepEqual(one('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=20'),{cost_price_usd:authority.cost_price_usd,cost_price_khr:authority.cost_price_khr},'the merge stores exactly what the preview showed, USD and KHR')
+  assert.deepEqual(one('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=20'),{cost_price_usd:stored4(usd),cost_price_khr:stored4(khr)})
  })
  for(const manual of [7,0,7.123456789012345])await check('latest manual raw '+manual,async()=>{
   fixtureWrite(() => state.native.db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(20,?,'manual',0)").run(manual))
   const {result}=await quote()
-  assert.equal(result.body.costAuthority.cost_price_usd,manual);assert.equal(result.body.costAuthority.source,'manual');assert.equal(result.body.costAuthority.needsReview,true)
-  const done=await merge({keepId:20,mergeId:21,keep:true,stock:'merge'});assert.equal(done.status,200,JSON.stringify(done.body));assert.equal(one('SELECT cost_price_usd value FROM products WHERE id=20').value,manual)
+  assert.equal(result.body.costAuthority.cost_price_usd,stored4(manual));assert.equal(result.body.costAuthority.source,'manual');assert.equal(result.body.costAuthority.needsReview,true)
+  const done=await merge({keepId:20,mergeId:21,keep:true,stock:'merge'});assert.equal(done.status,200,JSON.stringify(done.body));assert.equal(one('SELECT cost_price_usd value FROM products WHERE id=20').value,stored4(manual))
  })
- for(const [sameKey,manual,stock,expected,source,review]of [[false,undefined,'merge',5,'received_lot',false],[true,undefined,'merge',4,'received_lot',false],[true,7,'merge',7,'manual',true],[false,7,'write_off',7,'manual',true]])await check('actual graph collision/manual/writeoff '+JSON.stringify([sameKey,manual,stock]),async()=>{
+ for(const [sameKey,manual,stock,expected,source,review]of [[false,undefined,'merge',5,'received_lot',false],[true,undefined,'merge',5,'received_lot',false],[true,7,'merge',7,'manual',true],[false,7,'write_off',7,'manual',true]])await check('actual graph collision/manual/writeoff '+JSON.stringify([sameKey,manual,stock]),async()=>{
   lots(sameKey,manual)
   const before=rows('SELECT * FROM products ORDER BY id'),{result}=await quote([{mergeId:21,stock}])
   assert.deepEqual(rows('SELECT * FROM products ORDER BY id'),before)
@@ -129,9 +133,9 @@ async function main(){
  for(const value of [null,0,7.123456789012345])await check('bulk authoritative nullable parity '+value,async()=>{
   fixtureWrite(() => state.native.db.prepare('UPDATE products SET cost_price_usd=? WHERE id=20').run(value))
   const seen=await request('GET','/api/products/merge-duplicates/preview')
-  assert.equal(seen.status,200,JSON.stringify(seen.body));assert.equal(seen.body.groups[0].costAuthority.cost_price_usd,value);assert.ok(seen.body.costReview)
+  assert.equal(seen.status,200,JSON.stringify(seen.body));assert.equal(seen.body.groups[0].costAuthority.cost_price_usd,stored4(value));assert.ok(seen.body.costReview)
   const done=await request('POST','/api/products/merge-duplicates',{cost_review:seen.body.costReview})
-  assert.equal(done.status,200,JSON.stringify(done.body));assert.equal(done.body.mergedProducts,1);assert.equal(one('SELECT cost_price_usd value FROM products WHERE id=20').value,value)
+  assert.equal(done.status,200,JSON.stringify(done.body));assert.equal(done.body.mergedProducts,1);assert.equal(one('SELECT cost_price_usd value FROM products WHERE id=20').value,stored4(value))
   console.log('QUERY bulk preview='+seen.queries+' apply='+done.queries)
  })
  for(const phase of ['before_request','before_fold'])await check('bulk frozen PCE dependency '+phase,async()=>{

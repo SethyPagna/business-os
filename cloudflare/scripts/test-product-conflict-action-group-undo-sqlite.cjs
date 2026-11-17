@@ -23,7 +23,8 @@ async function setup(single = false) {
     VALUES(10004,'Unmerged child',1,10001,'2026-09-01 00:00:00')`).run())
   d1.db.prepare(`INSERT INTO promotion_rules(title,product_ids,updated_at)
     VALUES('Shared member offer','[10001,10002,10003]','2026-09-01 00:00:00')`).run()
-  d1.db.exec(`UPDATE product_batches SET batch_key='receipt-a' WHERE id=99002;
+  // Lots meet by RECEIVED DATE (16 Nov 2026): 99002 arrived the same day as the keeper's lot 99001 (the key is kept too, as before).
+  d1.db.exec(`UPDATE product_batches SET batch_key='receipt-a', received_at='2026-09-01' WHERE id=99002;
     INSERT INTO sales(id,branch_id) VALUES(17000,1);
     INSERT INTO sale_items(id,sale_id,product_id,quantity,branch_id) VALUES(17001,17000,10001,1,1);
     INSERT INTO sale_item_batch_allocations(id,sale_item_id,batch_id,branch_id,quantity) VALUES(17002,17001,99002,1,1);

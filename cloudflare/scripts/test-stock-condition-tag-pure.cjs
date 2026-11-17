@@ -93,6 +93,7 @@ function loadReal(relPath, requireOverrides = {}) {
     if (request in requireOverrides) return requireOverrides[request]
     if (request === './stockTransaction' || request === '../lib/stockTransaction') return stockTransaction
     if (request === '../lib/planTier') return loadReal('lib/planTier.ts')
+    if (request === './moneyPrecision' || request === '../lib/moneyPrecision') return loadReal('lib/moneyPrecision.ts')
     return originalLoad.call(this, request, parent, isMain)
   }
   const moduleObj = { exports: {} }

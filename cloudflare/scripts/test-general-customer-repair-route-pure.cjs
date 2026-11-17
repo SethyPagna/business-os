@@ -219,7 +219,7 @@ function seedRepair() {
     gender: 'other',
     normalized: '',
   })
-  db.prepare("INSERT INTO customers(id,name,phone,updated_at,is_anonymous) VALUES(22305,'General Real','086897171','2026-09-04 04:54:57',0)").run()
+  db.prepare("INSERT INTO customers(id,name,phone,updated_at,is_anonymous) VALUES(22305,'General Real','086555101','2026-09-04 04:54:57',0)").run()
   for (const id of [101, 102, 103, 104, 105]) {
     db.prepare("INSERT INTO sales(id,receipt_number,customer_id,customer_name,created_at) VALUES(@id,@receipt,24969,'general','2026-09-01 00:00:00')")
       .run({ id, receipt: `R-${id}` })
@@ -285,7 +285,7 @@ async function main() {
     assert.deepEqual(Object.keys(preview.json.request).sort(), ['confirmation', 'expected_updated_at', 'manifest_sha256', 'step'])
     assert.match(preview.json.request.manifest_sha256, /^[a-f0-9]{64}$/)
     const serialized = JSON.stringify(preview.json)
-    for (const secret of ['private@example.test', 'private address', 'private company', 'private notes', 'LC-04971', '086897171']) {
+    for (const secret of ['private@example.test', 'private address', 'private company', 'private notes', 'LC-04971', '086555101']) {
       assert.ok(!serialized.includes(secret), `preview leaked ${secret}`)
     }
   })

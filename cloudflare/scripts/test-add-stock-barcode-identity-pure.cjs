@@ -340,6 +340,15 @@ async function check(name, fn) {
   }
 }
 
+// The census predicate (stock-state-census cost_usd_over_4dp) as ids: every product, lot or manual cost entry holding a cost over 4 decimals.
+const over4 = (c) => `(typeof(${c}) IN ('integer','real') AND ABS(${c} * 10000 - ROUND(${c} * 10000)) > 0.000001)`
+const costCensus = () => ({
+  products: rawDb.prepare(`SELECT id FROM products WHERE ${['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr'].map(over4).join(' OR ')} ORDER BY id`).all().map(row => row.id),
+  lots: rawDb.prepare(`SELECT id FROM product_batches WHERE ${['unit_cost_usd', 'received_cost_usd'].map(over4).join(' OR ')} ORDER BY id`).all().map(row => row.id),
+  entries: rawDb.prepare(`SELECT id FROM product_cost_entries WHERE ${['cost_usd', 'cost_khr', 'previous_cost_usd'].map(over4).join(' OR ')} ORDER BY id`).all().map(row => row.id),
+})
+const isLongCost = (value) => Math.abs(value * 10000 - Math.round(value * 10000)) > 0.000001
+
 async function main() {
   await check('the actual movement route validates continuous date bounds before any stock test', async () => {
     const response = await app.request('/movements?createdFrom=2026-10-01T17%3A00%3A00Z', {}, fakeEnv, fakeExecutionCtx)
@@ -392,6 +401,39 @@ async function main() {
     assert.equal(productCount(), before + 1, 'a new barcode is a new article and must get its own row')
     assert.equal(json.createdSibling, true, 'createdSibling must be true for a real barcode change')
     assert.notEqual(json.productId, 4758, 'the stock belongs on the new row')
+  })
+
+  // cost-4dp: the sibling row copies the SOURCE row's cost when the request names none; a legacy cost over 4 places is stored rounded.
+  await check('cost-4dp: the sibling row an add creates stores the copied source cost to 4 places', async () => {
+    // The sibling's USD cost is its own lot's figure (0195); the KHR cost has no per-lot figure, so the copy is what is stored.
+    for (const [sourceCost, want] of [[4100.12345, 4100.1235], [123.456789, 123.4568], [20500.5, 20500.5]]) {
+      seed()
+      seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET cost_price_khr=@c, purchase_price_khr=@c WHERE id=4758').run({ c: sourceCost }))
+      const { status, json } = await req({ productId: 4758, type: 'add', quantity: 3, reason: 'Stock received', supplierName: 'Bong Long', unitCostUsd: 3, branchId: 2,
+        unlockPricing: true, pricing: { barcode: '999888777666', selling_price_usd: 22.0 } })
+      assert.equal(status, 200, JSON.stringify(json))
+      assert.equal(json.createdSibling, true)
+      const sibling = rawDb.prepare('SELECT cost_price_khr c, purchase_price_khr p FROM products WHERE id = @id').get({ id: json.productId })
+      assert.deepEqual({ ...sibling }, { c: want, p: want }, 'sibling KHR cost for source ' + sourceCost)
+      // Census after the add: the source row keeps its legacy cost on purpose (the add does not rewrite it); the sibling adds no row over 4 decimals.
+      assert.deepEqual(costCensus(), { products: isLongCost(sourceCost) ? [4758] : [], lots: [], entries: [] }, 'census after the sibling add, source ' + sourceCost)
+      assert.equal(rawDb.prepare('SELECT cost_price_khr c FROM products WHERE id = 4758').get({}).c, sourceCost, 'the source row is not rewritten by the add')
+    }
+  })
+
+  await check('cost-4dp: the sibling row stores the copied source USD cost to 4 places when no lot figure replaces it', async () => {
+    // A $0 lot is not an eligible cost (a derived cost needs a positive lot), so the sibling keeps the cost copied from its source row.
+    for (const [sourceCost, want] of [[4.123456, 4.1235], [17.00005, 17.0001], [9.5, 9.5]]) {
+      seed()
+      seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET cost_price_usd=@c, purchase_price_usd=@c WHERE id=4758').run({ c: sourceCost }))
+      const { status, json } = await req({ productId: 4758, type: 'add', quantity: 3, reason: 'Stock received', supplierName: 'Bong Long', unitCostUsd: 0, freeGoods: true, branchId: 2,
+        unlockPricing: true, pricing: { barcode: '999888777666', selling_price_usd: 22.0 } })
+      assert.equal(status, 200, JSON.stringify(json))
+      assert.equal(json.createdSibling, true)
+      const sibling = rawDb.prepare('SELECT cost_price_usd c, purchase_price_usd p FROM products WHERE id = @id').get({ id: json.productId })
+      assert.deepEqual({ ...sibling }, { c: want, p: want }, 'sibling USD cost for source ' + sourceCost)
+      assert.deepEqual(costCensus(), { products: isLongCost(sourceCost) ? [4758] : [], lots: [], entries: [] }, 'census after the sibling add, source ' + sourceCost)
+    }
   })
 
   await check('a different barcode ALREADY held by a sibling routes there instead of making a third row', async () => {

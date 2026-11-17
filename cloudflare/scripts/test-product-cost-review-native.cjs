@@ -102,7 +102,8 @@ async function mergeCases(){
   assert.match(one('SELECT cost_review_key value FROM products WHERE id=10').value,/^[a-f0-9]{32}$/)
   console.log('PASS actual no-lot merge retains original keeper canonical currencies and assigns review identity')
  }finally{state.native.db.close()}
- for(const usd of [null,0,5.123456]){
+ // cost-4dp: the keeper's retained cost is stored to 4 places (5.123456 -> 5.1235), the audit shows the stored figure and the original it kept
+ for(const [usd,stored] of [[null,null],[0,0],[5.123456,5.1235],[5.1234,5.1234]]){
   fresh()
   try{
    seedFixture(state.native.db, () => state.native.db.prepare('UPDATE products SET cost_price_usd=?,purchase_price_usd=99,cost_price_khr=NULL,purchase_price_khr=999 WHERE id=10').run(usd))
@@ -114,9 +115,9 @@ async function mergeCases(){
     const body={keepId:10,mergeId,keep:true,...(mergeId===11?{stock:'merge'}:{}),resolve}
     const done=await merge(body)
     assert.equal(done.status,200,JSON.stringify(done.body))
-    assert.deepEqual(one('SELECT cost_price_usd,cost_price_khr,purchase_price_usd,purchase_price_khr FROM products WHERE id=10'),{cost_price_usd:usd,cost_price_khr:null,purchase_price_usd:usd,purchase_price_khr:null})
+    assert.deepEqual(one('SELECT cost_price_usd,cost_price_khr,purchase_price_usd,purchase_price_khr FROM products WHERE id=10'),{cost_price_usd:stored,cost_price_khr:null,purchase_price_usd:stored,purchase_price_khr:null})
     const audit=JSON.parse(one("SELECT details FROM audit_logs WHERE action='cost_override' AND entity_id='10' ORDER BY id DESC LIMIT 1").details).cost_review
-    assert.equal(audit.after_usd,usd);assert.equal(audit.after_khr,null);assert.equal(audit.fallback_usd,usd)
+    assert.equal(audit.after_usd,stored);assert.equal(audit.after_khr,null);assert.equal(audit.fallback_usd,stored)
     const before=JSON.stringify(rows('SELECT * FROM audit_logs ORDER BY id'))
     const retry=await merge(body)
     assert.equal(retry.status,200,JSON.stringify(retry.body));assert.equal(retry.body.replayed,true)
@@ -154,7 +155,7 @@ async function mergeCases(){
      if(quantity===null)seedFixture(state.native.db, () => state.native.db.exec('DELETE FROM branch_batch_stock WHERE batch_id=900;DELETE FROM product_batches WHERE id=900'))
      const before=rows('SELECT * FROM product_cost_entries ORDER BY id'),done=await merge({keepId:10,mergeId:11,keep:true,stock:'merge'})
      assert.equal(done.status,200,JSON.stringify(done.body))
-     const expected=typeof manual==='number'&&manual>=0?manual:fallback
+     const expected=typeof manual==='number'&&manual>=0?Math.round(manual*10000)/10000:fallback // cost-4dp: a legacy manual entry over 4 places is stored rounded
      const stored=one('SELECT cost_price_usd,cost_price_khr,cost_review_key FROM products WHERE id=10')
      assert.equal(stored.cost_price_usd,expected);assert.equal(stored.cost_price_khr,20500);assert.match(stored.cost_review_key,/^[a-f0-9]{32}$/)
      assert.deepEqual(rows('SELECT * FROM product_cost_entries ORDER BY id'),before)

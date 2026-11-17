@@ -784,6 +784,104 @@ async function main() {
     assert.deepEqual(JSON.parse(writeSnapshot(f)).slice(0, 5), JSON.parse(before).slice(0, 5))
   })
 
+  // Round 4 (M1 sibling): an edit made before the 4-place rule left a lot cost over 4 places in its saved state; 0313 then rounded the live lot.
+  // The undo pin accepts the saved figure or its 4-place form, restores the old cost at 4 places, and still refuses a real change.
+  async function longCostEdit(live, savedAfter = 3.123456) {
+    const f = fresh()
+    const { movementId, batchId } = await receive(f, { requestId: `session-long-${live}-${savedAfter}`.replace(/\W/g, '-').slice(0, 40).padEnd(12, 'x'), quantity: 10 })
+    const res = await edit(f, movementId, { quantity: 12, unit_cost_usd: 3, expected_quantity: 10, expected_batch_id: batchId })
+    assert.equal(res.status, 200, JSON.stringify(res.json))
+    const op = f.sql.prepare('SELECT before_json b, after_json a FROM stock_lot_adjustment_operations WHERE id=?').get(res.json.operation_id)
+    const longen = (json, from, to) => json.split(`"unitCostUsd":${from}`).join(`"unitCostUsd":${to}`)
+    assert.ok(op.a.includes('"unitCostUsd":3') && op.b.includes('"unitCostUsd":2'), 'the saved states carry the lot costs')
+    f.sql.prepare('UPDATE stock_lot_adjustment_operations SET before_json=?, after_json=? WHERE id=?').run(longen(op.b, 2, 2.123456), longen(op.a, 3, savedAfter), res.json.operation_id)
+    seedStockFixture(f.sql, () => f.sql.prepare('UPDATE product_batches SET unit_cost_usd=? WHERE id=?').run(live, batchId))
+    return { f, batchId, history: historyOf(f, res.json.operation_id) }
+  }
+  await check('undo after 0313 rounded the lot the edit left: accepted, restored at 4 places', async () => {
+    for (const live of [3.123456, 3.1235]) {
+      const { f, batchId, history } = await longCostEdit(live)
+      const undone = await undo(f, history.id, 0)
+      assert.equal(undone.status, 200, `live ${live}: ${JSON.stringify(undone.json)}`)
+      assert.equal(lot(f, batchId).unit_cost_usd, 2.1235, 'the restored cost is rounded, not the saved 2.123456')
+    }
+  })
+  // Round 7: a near-tie saved cost, where roundMoney4 and 0313's HALF_UP_4DP differ (21.398249999999997 is 21.3982 and 21.3983): the pin accepts both forms.
+  await check('undo after 0313 rounded a near-tie lot cost: both rounding forms accepted, any other value refused', async () => {
+    const saved = 21.398249999999997
+    for (const live of [21.3982, 21.3983, saved]) {
+      const { f, batchId, history } = await longCostEdit(live, saved)
+      const undone = await undo(f, history.id, 0)
+      assert.equal(undone.status, 200, `live ${live}: ${JSON.stringify(undone.json)}`)
+      assert.equal(lot(f, batchId).unit_cost_usd, 2.1235, 'the restored cost is rounded')
+    }
+    for (const live of [21.3981, 21.3984, 21.39825, null, 0]) {
+      const { f, batchId, history } = await longCostEdit(live, saved)
+      const refused = await undo(f, history.id, 0)
+      assert.notEqual(refused.status, 200, `live ${live} must be refused: ${JSON.stringify(refused.json)}`)
+      assert.equal(lot(f, batchId).unit_cost_usd, live, 'a refused undo writes nothing')
+    }
+  })
+  await check('undo still refuses a real change of the lot cost (4.1234 / 4.1236 / NULL / 0 against a saved 3.123456)', async () => {
+    for (const live of [3.1234, 3.1236, null, 0]) {
+      const { f, batchId, history } = await longCostEdit(live)
+      const refused = await undo(f, history.id, 0)
+      assert.notEqual(refused.status, 200, `live ${live} must be refused: ${JSON.stringify(refused.json)}`)
+      assert.equal(lot(f, batchId).unit_cost_usd, live, 'a refused undo writes nothing')
+    }
+  })
+
+  // Round 5 (mutant SIL2, the received-cost pin exact again): the same story for the lot's RECEIVED cost. The edit moves it 20 -> 36 (quantity 10 -> 12 at a new
+  // unit cost 3); the saved after-state holds 36.123456 and 0313 rounded the live lot to 36.1235. The undo accepts that, restores the old received cost at 4
+  // places, or NULL when the old figure was unknown, and still refuses a real change (including NULL). The received-cost pin exists only when the edit moved
+  // the cost to or from NULL (a number to a number is a delta), so the pinned cases are the ones whose old figure was NULL.
+  async function longReceivedEdit(live, beforeReceived, savedAfter = 36.123456) {
+    const f = fresh()
+    const { movementId, batchId } = await receive(f, { requestId: `session-rc-${String(live)}-${String(beforeReceived)}-${savedAfter}`.replace(/\W/g, '-').slice(0, 40).padEnd(12, 'x'), quantity: 10 })
+    const res = await edit(f, movementId, { quantity: 12, unit_cost_usd: 3, expected_quantity: 10, expected_batch_id: batchId })
+    assert.equal(res.status, 200, JSON.stringify(res.json))
+    const op = f.sql.prepare('SELECT before_json b, after_json a FROM stock_lot_adjustment_operations WHERE id=?').get(res.json.operation_id)
+    assert.ok(op.a.includes('"receivedCostUsd":36') && op.b.includes('"receivedCostUsd":20'), 'the saved states carry the received costs')
+    f.sql.prepare('UPDATE stock_lot_adjustment_operations SET before_json=?, after_json=? WHERE id=?').run(
+      op.b.split('"receivedCostUsd":20').join(`"receivedCostUsd":${beforeReceived === null ? 'null' : beforeReceived}`), op.a.split('"receivedCostUsd":36').join('"receivedCostUsd":' + savedAfter), res.json.operation_id)
+    seedStockFixture(f.sql, () => f.sql.prepare('UPDATE product_batches SET received_cost_usd=? WHERE id=?').run(live, batchId))
+    return { f, batchId, history: historyOf(f, res.json.operation_id) }
+  }
+  await check('undo after 0313 rounded the received cost the edit left: accepted, restored at 4 places or NULL (mutant SIL2)', async () => {
+    for (const [live, before, restored] of [[36.123456, 20.123456, 20.1235], [36.1235, 20.123456, 20.1235], [36.1235, 20, 20], [36.1235, null, null], [36.123456, null, null]]) {
+      const { f, batchId, history } = await longReceivedEdit(live, before)
+      const undone = await undo(f, history.id, 0)
+      assert.equal(undone.status, 200, `live ${live}, before ${before}: ${JSON.stringify(undone.json)}`)
+      assert.equal(lot(f, batchId).received_cost_usd, restored, `live ${live}, before ${before}: the old received cost comes back at 4 places`)
+    }
+  })
+  // Round 7: the received cost pin takes a near-tie figure's roundMoney4 form and its HALF_UP_4DP form (0313's).
+  await check('undo after 0313 rounded a near-tie received cost: both rounding forms accepted, any other value refused', async () => {
+    const saved = 21.398249999999997
+    for (const live of [21.3982, 21.3983, saved]) {
+      const { f, batchId, history } = await longReceivedEdit(live, null, saved)
+      const undone = await undo(f, history.id, 0)
+      assert.equal(undone.status, 200, `live ${live}: ${JSON.stringify(undone.json)}`)
+      assert.equal(lot(f, batchId).received_cost_usd, null, 'the old unknown received cost comes back as NULL')
+    }
+    for (const live of [21.3981, 21.3984, null, 0]) {
+      const { f, batchId, history } = await longReceivedEdit(live, null, saved)
+      const refused = await undo(f, history.id, 0)
+      assert.notEqual(refused.status, 200, `live ${live} must be refused: ${JSON.stringify(refused.json)}`)
+      assert.equal(lot(f, batchId).received_cost_usd, live, 'a refused undo writes nothing')
+    }
+  })
+  await check('undo still refuses a real change of the received cost (36.1234 / 36.1236 / NULL / 0 against a saved 36.123456)', async () => {
+    for (const live of [36.1234, 36.1236, null, 0]) {
+      for (const before of [null]) { // the pin exists only for a move to or from NULL (stockInLineEdit.ts pins.push); a number to a number is a delta and is never pinned
+        const { f, batchId, history } = await longReceivedEdit(live, before)
+        const refused = await undo(f, history.id, 0)
+        assert.notEqual(refused.status, 200, `live ${live}, before ${before} must be refused: ${JSON.stringify(refused.json)}`)
+        assert.equal(lot(f, batchId).received_cost_usd, live, 'a refused undo writes nothing')
+      }
+    }
+  })
+
   await check('REVERT-SET: an edit is not redone into a session that was undone', async () => {
     const f = fresh()
     const { movementId, batchId } = await receive(f, { requestId: 'session-rs-00005', quantity: 10 })

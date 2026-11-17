@@ -1,5 +1,6 @@
 import type { D1Compat } from './db'
-import { CATALOG_COST_HAS_RECORDED_LOT_SQL } from './catalogCostRecompute'
+import { CATALOG_COST_HAS_RECORDED_LOT_SQL, roundStoredCost } from './catalogCostRecompute'
+import { matchDuplicateLots, planFoldedLotMetadata, type MergeLotRow } from './productMergeLots'
 import { MERGE_COST_LATEST_MANUAL_SQL, mergeCostAuthorityUsdSql } from './productCostReview'
 import { PRODUCT_CONFLICT_ACTION_MAX_MEMBERS_PER_GROUP, PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_GROUP, PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_REVIEW, PRODUCT_CONFLICT_ACTION_MAX_GROUP_SOURCE_BYTES, PRODUCT_CONFLICT_ACTION_MAX_REVIEW_DETAIL_BYTES } from './productConflictActionGroups'
 
@@ -40,24 +41,35 @@ export function projectMergeCostGraph(graph: MergeCostPreviewGraph, plans: Merge
     ids.forEach(id => seen.add(id))
     const members = new Set(ids), keeper = graph.products.find(row => Number(row.id) === plan.keepId)
     if (!keeper || graph.products.filter(row => members.has(Number(row.id))).length !== ids.length) throw new MergeCostPreviewUnavailableError()
-    const batches = jsonRows(graph.batches.filter(row => members.has(Number(row.variant_product_id))), ['id', 'variant_product_id', 'batch_key', 'is_active', 'unit_cost_usd', 'received_at'])
+    const batches = jsonRows(graph.batches.filter(row => members.has(Number(row.variant_product_id))), ['id', 'variant_product_id', 'batch_key', 'batch_number', 'is_active', 'unit_cost_usd', 'received_at'])
     if (batches.length > PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_GROUP) throw new MergeCostPreviewUnavailableError()
     const batchIds = new Set(batches.map(row => Number(row.id)))
     const stock = jsonRows(graph.batchStock.filter(row => batchIds.has(Number(row.batch_id))), ['batch_id', 'branch_id', 'quantity'])
-    const byKey = new Map(batches.filter(row => Number(row.variant_product_id) === plan.keepId).map(row => [String(row.batch_key), row]))
     for (const step of plan.steps) {
       if (!['merge', 'write_off'].includes(step.stock)) throw new MergeCostPreviewUnavailableError()
-      for (const batch of batches.filter(row => Number(row.variant_product_id) === step.mergeId)) {
+      const memberLots = batches.filter(row => Number(row.variant_product_id) === step.mergeId) as unknown as MergeLotRow[]
+      // Same-date match (productMergeLots.ts) against the keeper as the earlier steps left it: the fold's own rule.
+      const keeperLots = batches.filter(row => Number(row.variant_product_id) === plan.keepId) as unknown as MergeLotRow[]
+      const matches = step.stock === 'merge' ? matchDuplicateLots(keeperLots, memberLots) : new Map<number, number>()
+      // Each lot's weight in the folded cost is its stock being combined (sum over branches, as it stands before this step).
+      const quantities = new Map<number, number>()
+      for (const row of stock) quantities.set(Number(row.batch_id), (quantities.get(Number(row.batch_id)) || 0) + (Number(row.quantity) || 0))
+      for (const folded of step.stock === 'merge' ? planFoldedLotMetadata(keeperLots, memberLots, matches, quantities) : []) {
+        // The fold writes this cost to the lot it folds INTO: a lot already on the keeper, or the first of the discarded product's lots of a date the keeper
+        // lacks (that lot is created on the keeper, and the others of its date are folded into it). So the target is looked up among every lot of the group.
+        const target = batches.find(row => Number(row.id) === folded.keeperLotId)
+        if (target) target.unit_cost_usd = folded.unit_cost_usd
+      }
+      for (const batch of memberLots) {
         const ownStock = stock.filter(row => Number(row.batch_id) === Number(batch.id))
         if (step.stock === 'write_off') {
           batch.is_active = 0
           ownStock.forEach(row => { row.quantity = 0 })
           continue
         }
-        const target = byKey.get(String(batch.batch_key))
+        const target = batches.find(row => Number(row.id) === matches.get(Number(batch.id)))
         if (!target) {
           batch.variant_product_id = plan.keepId
-          byKey.set(String(batch.batch_key), batch)
           continue
         }
         const targetStock = stock.filter(row => Number(row.batch_id) === Number(target.id))
@@ -74,7 +86,9 @@ export function projectMergeCostGraph(graph: MergeCostPreviewGraph, plans: Merge
     }
     const entries = jsonRows(graph.currentCostEntries.filter(row => members.has(Number(row.product_id))), ['id', 'product_id', 'cost_usd', 'baseline_batch_id'])
     entries.forEach(row => { row.product_id = plan.keepId })
-    const group = { products: [{ id: plan.keepId, cost_price_usd: money(keeper.cost_price_usd), cost_price_khr: money(keeper.cost_price_khr) }], batches, batchStock: stock, currentCostEntries: entries }
+    // The merge stores the keeper's own cost as roundStoredCost (productCostReview.ts mergeCostReviewStatements), so the preview shows that value.
+    const keeperCost = (value: unknown) => roundStoredCost(money(value))
+    const group = { products: [{ id: plan.keepId, cost_price_usd: keeperCost(keeper.cost_price_usd), cost_price_khr: keeperCost(keeper.cost_price_khr) }], batches, batchStock: stock, currentCostEntries: entries }
     if (new TextEncoder().encode(JSON.stringify(group)).length > PRODUCT_CONFLICT_ACTION_MAX_GROUP_SOURCE_BYTES) throw new MergeCostPreviewUnavailableError()
     result.products.push(...group.products); result.batches.push(...batches); result.batchStock.push(...stock); result.currentCostEntries.push(...entries)
   }

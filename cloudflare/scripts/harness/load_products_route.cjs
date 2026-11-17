@@ -17,7 +17,8 @@ const ts = require('typescript')
 const { openDb } = require('./d1compat.cjs')
 const { loadAll } = require('./load_migrations.cjs')
 
-const SRC_DIR = path.join(__dirname, '..', '..', 'src')
+// BOS_HARNESS_SRC_DIR: the mutation runner (mutants-merge-lots-by-date.cjs) points this at a mutated copy of src/.
+const SRC_DIR = process.env.BOS_HARNESS_SRC_DIR || path.join(__dirname, '..', '..', 'src')
 
 // lib/db.ts's D1Compat answers run() with { changes, lastInsertRowid } and
 // all() with a plain row array; the shared harness answers D1's raw shape.

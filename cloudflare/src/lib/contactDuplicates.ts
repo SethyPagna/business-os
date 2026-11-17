@@ -309,7 +309,7 @@ const NARROWING_MIN_FRAGMENT = 3
 // never becomes a match: the narrowing only chooses which rows are looked at.
 // Falls back to null (today's full comparison) for a number the index cannot be proven to hold: longer than 15 digits, or whose fragment is under 3 characters.
 // The rule also strips "/", which the view does not, so two numbers saved in one field ("012 345 678 / 098 765 432", canonical 18 digits) are found only
-// through that fallback. A slashed field of 15 digits or fewer ("023 216 666/7", written by a customer CSV import and by the API create/update path) is found by
+// through that fallback. A slashed field of 15 digits or fewer ("023 000 000/1", written by a customer CSV import and by the API create/update path) is found by
 // extra phrases: a stored value the rule accepts holds only digits and "/" (and separators the view strips), so a "/" inside the typed fragment sits between two
 // of its adjacent digits a,b and the view shows "a/b", or "a//" when the slashes repeat; every such pair is added to the digits OR (the exact comparison still decides).
 // One shape stays unseen and is pinned in the differential: an option phone stored as a JSON number (the view reads text only).

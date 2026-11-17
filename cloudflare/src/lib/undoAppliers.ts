@@ -6,7 +6,7 @@ import type { SessionUser } from './auth'
 // imports one by one, so a new runtime import would break them.
 import type { ResolveChoiceValues } from './productResolveChoices'
 import { getDb } from './db'
-import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedStatement } from './catalogCostRecompute'
+import { CATALOG_COST_DERIVE_SQL, HALF_UP_4DP, catalogCostRecomputeIfChangedStatement, isCostRoundingOf, roundStoredCost } from './catalogCostRecompute'
 import { mergeCostUndoStatements, parseMergeCostOutcome, type MergeCostOutcome } from './productCostReview'
 import { audit } from './audit'
 import { hasRecordedSaleMoneyPrecision } from './saleMoneyPrecision'
@@ -294,14 +294,26 @@ export interface MergeReversal {
   dupStockBefore: Array<{ branch_id: number; quantity: number; rfid_confirmed_qty: number }>
   dupImagesBefore: Array<{ image_path: string; sort_order: number | null }>
   imagesMovedToKeeper: string[]
-  repointedBatches: Array<{ id: number; batchNumber: number | null }>
+  // batchKeyBefore: present only when the created lot had to take a new batch_key on the keeper (the keeper already owned
+  // that key on another date); undo puts the original key back. Absent on snapshots written before 16 Nov 2026.
+  repointedBatches: Array<{ id: number; batchNumber: number | null; batchKeyBefore?: string }>
   foldedBatches: Array<{
+    /** false when the discarded lot was already inactive before the fold (absent = it was active): undo leaves it inactive. */
+    sourceWasActive?: false
     dupBatchId: number
     keeperBatchId: number
     dupStockBefore: Array<{ branch_id: number; quantity: number }>
     keeperStockBefore: Array<{ branch_id: number; quantity: number }>
     saleAllocationIds?: number[]
     returnAllocationIds?: number[]
+    // Single-lot sale/return lines the fold re-pointed (their own batch_id, no allocation row). Absent on older snapshots: nothing to put back.
+    saleItemIds?: number[]
+    returnItemIds?: number[]
+    // 16 Nov 2026 (lots match by received date): the kept lot's own cost, expiry and activity BEFORE the fold added stock
+    // into it and re-derived them. Undo writes them back. Absent on snapshots written before then (they matched by
+    // batch_key and never touched the kept lot's cost or expiry), so an absent value restores nothing rather than zeroing.
+    keeperLotBefore?: { unit_cost_usd: number | null; expiry_date: string | null; is_active: number | null; updated_at?: string | null }
+    receivedDate?: string
   }>
   reparentedSaleItemIds: number[]
   reparentedMovementIds: number[]
@@ -316,6 +328,8 @@ export interface MergeReversal {
   // WRITE-OFF only: the discarded row's lots, deactivated in place with their
   // per-branch stock cleared. Undo reactivates each and re-inserts the stock.
   writtenOffBatches?: Array<{
+    /** false when the lot was already inactive before the write-off (absent = it was active): undo leaves it inactive. */
+    wasActive?: false
     batchId: number
     stockBefore: Array<{ branch_id: number; quantity: number }>
   }>
@@ -1018,6 +1032,227 @@ export async function readMergeReviewGroups(db: ReturnType<typeof getDb>, groups
   return groups.map(members => ({ graph: mergeReviewGroupGraph(graph, members) }))
 }
 
+// Migration 0313 rounds long cost values (over 4 places) to 4 places. A merge records, at merge time, a fingerprint of the merged products, lots and
+// cost entries and (for a cost-dependency merge) a graph receipt of the same rows. Undo compares them with the live rows. A cost that 0313 rounded in
+// between is not later activity, so the comparison accepts it, and ONLY it: every differing value must be a cost column 0313 rounds, the saved value
+// must be a number, and the live value must be that saved number stored to 4 places by EITHER rule: roundStoredCost (nearest, half away from zero on the
+// decimal the double prints as) or the migration's HALF_UP_4DP (isCostRoundingOf; they differ on a near-tie double, and 0313 used the second).
+// Any other column, a cost moved by more than rounding, a saved value that is already at 4 places, NULL against a number (either way), and a row added, removed or reordered stay refused.
+const MERGE_PRODUCT_COST_COLUMNS: readonly string[] = ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr']
+const COST_COLUMNS: Readonly<Record<string, readonly string[]>> = {
+  products: MERGE_PRODUCT_COST_COLUMNS,
+  batches: ['unit_cost_usd', 'received_cost_usd'],
+  casBatchMetadata: ['unit_cost_usd', 'received_cost_usd'],
+  currentCostEntries: ['cost_usd', 'cost_khr', 'previous_cost_usd'],
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
+const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
+
+// A receipt saved BEFORE a deploy reads some tables with SELECT * (the graph receipt of every v3 merge, the full-lot fingerprint of a merge that wrote a kept
+// lot), so it holds the column list the table had then. Migration 0311 added product_batches.merge_deactivated_at, so every merge recorded by the previous
+// build would otherwise refuse to undo or redo once the deploy has run. A saved receipt equals live state when the ONLY difference is a column listed here
+// for that table and the cell is NULL in every live row (a lot a later merge marked is a real change and refuses); the live rows are then projected onto the
+// saved column order. The list is explicit and keyed by table: nothing else widens. The deploy's other migrations (0312 triggers, 0313 data, 0315 indexes) add
+// no column and rebuild no table that a receipt reads.
+const RECEIPT_ADDED_COLUMNS: Readonly<Record<string, readonly string[]>> = { product_batches: ['merge_deactivated_at'] }
+// The receipt read keys (mergeFingerprintReads) that serialise a table in full.
+const RECEIPT_KEY_TABLE: Readonly<Record<string, string>> = { batches: 'product_batches', casBatchMetadata: 'product_batches' }
+const receiptAddedColumns = (readKey: string): readonly string[] => RECEIPT_ADDED_COLUMNS[RECEIPT_KEY_TABLE[readKey.split(':')[0]] ?? ''] ?? []
+
+/**
+ * One graph read ([column names, rows]) as the live schema serialises it, projected onto the saved column list; null when the live list is not the saved
+ * list plus allow-listed added columns, or an added cell is not NULL in some row. A row is an array of groups of up to 15 cells, so it is re-grouped.
+ */
+function projectGraphEntryOntoSaved(readKey: string, savedEntry: unknown[], liveEntry: unknown[]): unknown[] | null {
+  const allowed = receiptAddedColumns(readKey)
+  const savedColumns = savedEntry[0], liveColumns = liveEntry[0], liveRows = liveEntry[1]
+  if (!allowed.length || !Array.isArray(savedColumns) || !Array.isArray(liveColumns) || !Array.isArray(liveRows)) return null
+  const keep: number[] = [], drop: number[] = []
+  liveColumns.forEach((name, index) => (typeof name === 'string' && !savedColumns.includes(name) ? drop : keep).push(index))
+  if (!drop.length || drop.some((index) => !allowed.includes(liveColumns[index] as string))) return null
+  if (!same(keep.map((index) => liveColumns[index]), savedColumns)) return null
+  const rows: unknown[] = []
+  for (const row of liveRows) {
+    if (!Array.isArray(row) || !row.every(Array.isArray)) return null
+    const cells = (row as unknown[][]).flat()
+    if (cells.length !== liveColumns.length || drop.some((index) => !same(cells[index], ['null', null]))) return null
+    rows.push(chunk(keep.map((index) => cells[index]), GRAPH_GROUP_SIZE))
+  }
+  return [savedColumns, rows]
+}
+
+/** A live fingerprint row without the allow-listed added columns the saved row lacks, when each is NULL; otherwise the row as it is (and so unequal). */
+function dropAddedRowColumns(readKey: string, savedRow: unknown, liveRow: unknown): unknown {
+  const allowed = receiptAddedColumns(readKey)
+  if (!allowed.length || !isRecord(savedRow) || !isRecord(liveRow)) return liveRow
+  const extra = Object.keys(liveRow).filter((field) => !Object.hasOwn(savedRow, field))
+  if (!extra.length || extra.some((field) => !allowed.includes(field) || liveRow[field] !== null)) return liveRow
+  return Object.fromEntries(Object.entries(liveRow).filter(([field]) => !extra.includes(field)))
+}
+
+/** The plain merge fingerprint: do the two differ only by the columns a deploy's migration added (NULL live), nothing else? Never accepts rounding. */
+export function mergeFingerprintAddedColumnsOnly(saved: string, live: string): boolean {
+  let a: unknown, b: unknown
+  try { a = JSON.parse(saved); b = JSON.parse(live) } catch { return false }
+  if (!isRecord(a) || !isRecord(b)) return false
+  const keys = Object.keys(a)
+  if (keys.length !== Object.keys(b).length || keys.some((key) => !Object.hasOwn(b, key))) return false
+  return keys.every((key) => Array.isArray(a[key]) && Array.isArray(b[key]) && same(a[key], (b[key] as unknown[]).map((row, index) => dropAddedRowColumns(key, (a[key] as unknown[])[index], row))))
+}
+
+/** The graph receipt text: do the two differ only by the columns a deploy's migration added (NULL live), nothing else? Never accepts rounding. */
+export function mergeGraphStateAddedColumnsOnly(saved: string, live: string): boolean {
+  let a: unknown, b: unknown
+  try { a = JSON.parse(saved); b = JSON.parse(live) } catch { return false }
+  if (!isRecord(a) || !isRecord(b)) return false
+  const keys = Object.keys(a)
+  if (keys.length !== Object.keys(b).length || keys.some((key) => !Object.hasOwn(b, key))) return false
+  return keys.every((key) => {
+    const savedEntry = a[key], liveEntry = b[key]
+    if (!Array.isArray(savedEntry) || !Array.isArray(liveEntry) || savedEntry.length !== 2 || liveEntry.length !== 2) return false
+    if (same(savedEntry, liveEntry)) return true
+    const projected = same(savedEntry[0], liveEntry[0]) ? null : projectGraphEntryOntoSaved(key.split(':')[0], savedEntry, liveEntry)
+    return projected !== null && same(savedEntry, projected)
+  })
+}
+
+/** True when `live` is `saved` stored to 4 places and is not `saved` itself. Both must be numbers: NULL is never rounding. */
+function isCostRounding(saved: unknown, live: unknown): boolean {
+  return isCostRoundingOf(saved, live)
+}
+
+/** The plain merge fingerprint (a JSON object of row arrays): do the two differ only by 0313 cost rounding? */
+export function mergeFingerprintDiffersOnlyByCostRounding(saved: string, live: string): boolean {
+  let a: unknown, b: unknown
+  try { a = JSON.parse(saved); b = JSON.parse(live) } catch { return false }
+  if (!isRecord(a) || !isRecord(b)) return false
+  const keys = Object.keys(a)
+  if (keys.length !== Object.keys(b).length || keys.some((key) => !Object.hasOwn(b, key))) return false
+  for (const key of keys) {
+    const columns = COST_COLUMNS[key]
+    if (!columns) { if (!same(a[key], b[key])) return false; continue }
+    const savedRows = a[key]
+    let liveRows = b[key]
+    // A column the deploy added (NULL in every live row) is not a difference (RECEIPT_ADDED_COLUMNS).
+    if (Array.isArray(savedRows) && Array.isArray(liveRows) && RECEIPT_KEY_TABLE[key]) liveRows = liveRows.map((row, index) => dropAddedRowColumns(key, savedRows[index], row))
+    if (!Array.isArray(savedRows) || !Array.isArray(liveRows) || savedRows.length !== liveRows.length) return false
+    for (let index = 0; index < savedRows.length; index += 1) {
+      const savedRow = savedRows[index], liveRow = liveRows[index]
+      if (!isRecord(savedRow) || !isRecord(liveRow)) return false
+      const fields = Object.keys(savedRow)
+      if (fields.length !== Object.keys(liveRow).length || fields.some((field) => !Object.hasOwn(liveRow, field))) return false
+      for (const field of fields) {
+        if (same(savedRow[field], liveRow[field])) continue
+        if (!(columns.includes(field) && isCostRounding(savedRow[field], liveRow[field]))) return false
+      }
+    }
+  }
+  return true
+}
+
+const GRAPH_GROUP_SIZE = 15
+
+/**
+ * The product revision bumps migration 0313 makes to a product whose cost it rounded: its first UPDATE of the row (the four cost columns) bumps once,
+ * and its second UPDATE (cost_price_usd and purchase_price_usd, 0313's recompute) bumps once more for a product with a USD cost column in the repair set.
+ */
+export const revisionBumps = (usdColumnRounded: boolean): number => (usdColumnRounded ? 2 : 1)
+
+/**
+ * The merge graph receipt text (mergeReplayGraphSql): { "<read key>": [ [column names], [ row, ... ] ] }, each row an array of groups of up to 15
+ * cells and each cell [typeof, value] with a real written as its 17-digit text. Returns, for each product whose cost 0313 rounded, the number of product
+ * revision bumps 0313 made to it (see revisionBumps), when the two texts differ only by 0313 cost rounding (an empty map when they are identical),
+ * else null.
+ *
+ * 0313's own UPDATEs of a product row fire the product revision trigger (0124): the receipt's revision of a rounded product is higher than saved by
+ * exactly the bumps 0313 made, and every other product's revision is unchanged. Any other revision difference refuses (a no-op UPDATE, an A-B-A edit,
+ * a change in a table the graph does not read).
+ */
+export function mergeGraphStateCostRounding(saved: string, live: string): Map<string, number> | null {
+  let a: unknown, b: unknown
+  try { a = JSON.parse(saved); b = JSON.parse(live) } catch { return null }
+  if (!isRecord(a) || !isRecord(b)) return null
+  const keys = Object.keys(a)
+  if (keys.length !== Object.keys(b).length || keys.some((key) => !Object.hasOwn(b, key))) return null
+  // product id -> whether a USD cost column (cost_price_usd, purchase_price_usd) was among the rounded cells
+  const roundedColumns = new Map<string, boolean>()
+  let revisions: { saved: unknown; live: unknown } | null = null
+  for (const key of keys) {
+    const savedEntry = a[key]
+    const liveRaw = b[key]
+    if (!Array.isArray(savedEntry) || !Array.isArray(liveRaw) || savedEntry.length !== 2 || liveRaw.length !== 2) return null
+    let liveEntry: unknown[] = liveRaw
+    const columns = savedEntry[0]
+    if (!Array.isArray(columns)) return null
+    // A column the deploy added (NULL in every live row) is projected away; the rest of the comparison is unchanged (RECEIPT_ADDED_COLUMNS).
+    if (!same(columns, liveEntry[0])) {
+      const projected = projectGraphEntryOntoSaved(key.split(':')[0], savedEntry, liveEntry)
+      if (!projected) return null
+      liveEntry = projected
+    }
+    const base = key.split(':')[0]
+    const costColumns = COST_COLUMNS[base]
+    const savedRows = savedEntry[1], liveRows = liveEntry[1]
+    if (!Array.isArray(savedRows) || !Array.isArray(liveRows) || savedRows.length !== liveRows.length) return null
+    if (base === 'graphRevisions') { revisions = { saved: savedRows, live: liveRows }; continue }
+    for (let index = 0; index < savedRows.length; index += 1) {
+      if (same(savedRows[index], liveRows[index])) continue
+      if (!costColumns) return null
+      const savedGroups = savedRows[index], liveGroups = liveRows[index]
+      if (!Array.isArray(savedGroups) || !Array.isArray(liveGroups) || savedGroups.length !== liveGroups.length) return null
+      for (let group = 0; group < savedGroups.length; group += 1) {
+        const savedCells = savedGroups[group], liveCells = liveGroups[group]
+        if (!Array.isArray(savedCells) || !Array.isArray(liveCells) || savedCells.length !== liveCells.length) return null
+        for (let cell = 0; cell < savedCells.length; cell += 1) {
+          if (same(savedCells[cell], liveCells[cell])) continue
+          const column = columns[group * GRAPH_GROUP_SIZE + cell]
+          const savedCell = savedCells[cell], liveCell = liveCells[cell]
+          if (typeof column !== 'string' || !costColumns.includes(column) || !Array.isArray(savedCell) || !Array.isArray(liveCell)) return null
+          // A long cost is a real. The live cost is a real or, when it rounded to a whole number, an integer.
+          if (savedCell[0] !== 'real' || (liveCell[0] !== 'real' && liveCell[0] !== 'integer')) return null
+          if (!isCostRounding(Number(savedCell[1]), Number(liveCell[1]))) return null
+          if (base === 'products') {
+            const idColumn = columns.indexOf('id')
+            const idCell = idColumn < 0 ? null : (savedGroups[Math.floor(idColumn / GRAPH_GROUP_SIZE)] as unknown[] | undefined)?.[idColumn % GRAPH_GROUP_SIZE]
+            if (!Array.isArray(idCell)) return null
+            roundedColumns.set(String(idCell[1]), roundedColumns.get(String(idCell[1])) === true || column === 'cost_price_usd' || column === 'purchase_price_usd')
+          }
+        }
+      }
+    }
+  }
+  const rounded = new Map<string, number>([...roundedColumns].map(([id, usd]) => [id, revisionBumps(usd)]))
+  if (revisions) {
+    const savedRows = revisions.saved as unknown[], liveRows = revisions.live as unknown[]
+    const flat = (row: unknown): unknown[] | null => Array.isArray(row) ? row.flatMap((group) => Array.isArray(group) ? group : []) : null
+    for (let index = 0; index < savedRows.length; index += 1) {
+      if (same(savedRows[index], liveRows[index]) && !rounded.has(String((flat(savedRows[index]) as unknown[][] | null)?.[1]?.[1]))) continue
+      const before = flat(savedRows[index]), after = flat(liveRows[index])
+      // graphRevisions columns: entity_type, entity_key, revision.
+      const cells = (row: unknown[] | null) => row && row.length === 3 && row.every(Array.isArray) ? row as unknown[][] : null
+      const x = cells(before), y = cells(after)
+      if (!x || !y || !same(x[0], y[0]) || !same(x[1], y[1])) return null
+      if (x[0][1] !== 'product' && !same(x[2], y[2])) return null
+      if (x[0][1] === 'product') {
+        if (x[2][0] !== 'integer' || y[2][0] !== 'integer') return null
+        if (Number(y[2][1]) - Number(x[2][1]) !== (rounded.get(String(x[1][1])) ?? 0)) return null
+      }
+    }
+  }
+  return rounded
+}
+
+export const mergeGraphStateDiffersOnlyByCostRounding = (saved: string, live: string): boolean => mergeGraphStateCostRounding(saved, live) !== null
+
+/** The live fingerprint (its in-transaction guards pushed to `guards`) equals the saved one, or differs only by a column a deploy's migration added. */
+export async function mergeStateFingerprintMatches(
+  db: ReturnType<typeof getDb>, reversals: MergeReversal[], saved: string, guards?: AtomicMergeStatement[],
+): Promise<boolean> {
+  const live = await mergeStateFingerprint(db, reversals, guards)
+  return live === saved || mergeFingerprintAddedColumnsOnly(saved, live)
+}
+
 async function assertMergeStateUnchanged(
   db: ReturnType<typeof getDb>, reversals: MergeReversal[], expected?: string, transactionGuards?: AtomicMergeStatement[],
 ): Promise<void> {
@@ -1028,7 +1263,10 @@ async function assertMergeStateUnchanged(
   // existing row-level guards. Every snapshot written by the atomic path has
   // fingerprintPending until a complete expected value is stored.
   if (transactionGuards && !expected) throw new UndoConflictError('This group merge is missing its safety fingerprint.')
-  if (expected && await mergeStateFingerprint(db, reversals, transactionGuards) !== expected) {
+  // 0313 rounds a long cost after the merge; that alone is not later activity (mergeFingerprintDiffersOnlyByCostRounding above). The in-transaction guards pushed by
+  // mergeStateFingerprint compare the rows just read with the rows at commit, so an accepted rounding is still checked against races.
+  const live = expected ? await mergeStateFingerprint(db, reversals, transactionGuards) : ''
+  if (expected && live !== expected && !mergeFingerprintDiffersOnlyByCostRounding(expected, live)) {
     throw new UndoConflictError('This merge has later stock or received-date activity, so it can no longer be undone safely.', UNDO_RECORD_CHANGED_CODE)
   }
 }
@@ -2039,6 +2277,89 @@ export function mergeKeeperRestoreStatement(r: MergeReversal, canChangeProductIm
   }
 }
 
+// The set-based reversal of a merge's lot folds: one statement per kind, however many lots were folded (it was about 8 per lot, plus one per
+// extra branch). Each statement binds one JSON parameter read with json_each (far below D1's 100 bindings, flat expression depth); the id
+// maps are chunked so no parameter or correlated lookup grows with the lot count. ORDER (the B3 order): lots are reactivated first, every
+// lot's stock is put back, and only then is a kept lot's own active flag restored: the 0154 stock trigger refuses stock on an inactive lot.
+// Tolerant of older snapshots: a fold without the id lists or keeperLotBefore restores nothing for them rather than zeroing a column, and a
+// fold recorded with sourceWasActive false (an earlier build of this lane) keeps its source lot inactive.
+const UNDO_FOLD_CHUNK = 200
+export function mergeFoldReversalStatements(folds: NonNullable<MergeReversal['foldedBatches']>): Array<{ sql: string; params: Record<string, unknown> }> {
+  const stmts: Array<{ sql: string; params: Record<string, unknown> }> = []
+  const json = (rows: unknown[]) => JSON.stringify(rows)
+  const reactivate: number[] = []
+  const saleAllocations: Array<{ id: number; dup: number }> = []
+  const returnAllocations: Array<{ id: number; dup: number }> = []
+  const saleLines: Array<{ id: number; dup: number; keeper: number }> = []
+  const returnLines: Array<{ id: number; dup: number; keeper: number }> = []
+  const keeperRestore = new Map<string, { batch: number; branch: number; q: number }>()
+  const keeperRemove = new Map<string, { batch: number; branch: number }>()
+  const dupPut = new Map<string, { batch: number; branch: number; q: number }>()
+  const keeperLotRestores = new Map<number, NonNullable<NonNullable<MergeReversal['foldedBatches']>[number]['keeperLotBefore']>>()
+  for (const fb of folds) {
+    const dup = Number(fb.dupBatchId)
+    const keeper = Number(fb.keeperBatchId)
+    if (fb.sourceWasActive !== false) reactivate.push(dup)
+    for (const id of intIds(fb.saleAllocationIds)) saleAllocations.push({ id, dup })
+    for (const id of intIds(fb.returnAllocationIds)) returnAllocations.push({ id, dup })
+    for (const id of intIds(fb.saleItemIds)) saleLines.push({ id, dup, keeper })
+    for (const id of intIds(fb.returnItemIds)) returnLines.push({ id, dup, keeper })
+    const keeperBefore = new Map((fb.keeperStockBefore || []).map((x) => [Number(x.branch_id), Number(x.quantity) || 0]))
+    for (const d of (fb.dupStockBefore || [])) {
+      const branch = Number(d.branch_id)
+      const key = `${keeper}:${branch}`
+      if (keeperBefore.has(branch)) { keeperRemove.delete(key); keeperRestore.set(key, { batch: keeper, branch, q: keeperBefore.get(branch)! }) }
+      else { keeperRestore.delete(key); keeperRemove.set(key, { batch: keeper, branch }) }
+      dupPut.set(`${dup}:${branch}`, { batch: dup, branch, q: Number(d.quantity) || 0 })
+    }
+    const before = fb.keeperLotBefore
+    if (before && typeof before === 'object' && !keeperLotRestores.has(keeper)) keeperLotRestores.set(keeper, before)
+  }
+  for (const ids of chunk(reactivate, 400)) {
+    stmts.push({ sql: 'UPDATE product_batches SET is_active = 1, merge_deactivated_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id IN (SELECT value FROM json_each(@ids))', params: { ids: json(ids) } })
+  }
+  const lookup = (field: string, column: string) => `(SELECT CAST(json_extract(m.value, '$.${field}') AS INTEGER) FROM json_each(@rows) m WHERE CAST(json_extract(m.value, '$.id') AS INTEGER) = ${column})`
+  const rowIds = "SELECT CAST(json_extract(value, '$.id') AS INTEGER) FROM json_each(@rows)"
+  for (const part of chunk(saleAllocations, UNDO_FOLD_CHUNK)) stmts.push({ sql: `UPDATE sale_item_batch_allocations SET batch_id = ${lookup('dup', 'sale_item_batch_allocations.id')} WHERE id IN (${rowIds})`, params: { rows: json(part) } })
+  for (const part of chunk(returnAllocations, UNDO_FOLD_CHUNK)) stmts.push({ sql: `UPDATE return_item_batch_allocations SET batch_id = ${lookup('dup', 'return_item_batch_allocations.id')} WHERE id IN (${rowIds})`, params: { rows: json(part) } })
+  // Guarded by the kept lot id: a line the fold re-pointed goes back; one that has moved on since is left alone.
+  for (const part of chunk(saleLines, UNDO_FOLD_CHUNK)) stmts.push({ sql: `UPDATE sale_items SET batch_id = ${lookup('dup', 'sale_items.id')} WHERE id IN (${rowIds}) AND batch_id = ${lookup('keeper', 'sale_items.id')}`, params: { rows: json(part) } })
+  for (const part of chunk(returnLines, UNDO_FOLD_CHUNK)) stmts.push({ sql: `UPDATE return_items SET batch_id = ${lookup('dup', 'return_items.id')} WHERE id IN (${rowIds}) AND batch_id = ${lookup('keeper', 'return_items.id')}`, params: { rows: json(part) } })
+  // Stock: the kept lots' branch rows back to their before-image (or removed when the branch had none), then each source lot's own rows back.
+  const pairs = "SELECT CAST(json_extract(value, '$.batch') AS INTEGER), CAST(json_extract(value, '$.branch') AS INTEGER) FROM json_each(@rows)"
+  const keeperQuantity = "(SELECT json_extract(m.value, '$.q') FROM json_each(@rows) m WHERE CAST(json_extract(m.value, '$.batch') AS INTEGER) = branch_batch_stock.batch_id AND CAST(json_extract(m.value, '$.branch') AS INTEGER) = branch_batch_stock.branch_id)"
+  for (const part of chunk([...keeperRestore.values()], UNDO_FOLD_CHUNK)) stmts.push({ sql: `UPDATE branch_batch_stock SET quantity = ${keeperQuantity}, updated_at = CURRENT_TIMESTAMP WHERE (batch_id, branch_id) IN (${pairs})`, params: { rows: json(part) } })
+  for (const part of chunk([...keeperRemove.values()], UNDO_FOLD_CHUNK)) stmts.push({ sql: `DELETE FROM branch_batch_stock WHERE (batch_id, branch_id) IN (${pairs})`, params: { rows: json(part) } })
+  for (const part of chunk([...dupPut.values()], UNDO_FOLD_CHUNK)) {
+    stmts.push({ sql: `DELETE FROM branch_batch_stock WHERE (batch_id, branch_id) IN (${pairs})`, params: { rows: json(part) } })
+    stmts.push({
+      sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity, updated_at)
+            SELECT CAST(json_extract(value, '$.batch') AS INTEGER), CAST(json_extract(value, '$.branch') AS INTEGER), json_extract(value, '$.q'), CURRENT_TIMESTAMP FROM json_each(@rows) WHERE true`,
+      params: { rows: json(part) },
+    })
+  }
+  // The kept lot's own cost, expiry and activity before the fold, once per kept lot, written AFTER every folded lot's stock is back.
+  const restoreRows = [...keeperLotRestores].map(([id, before]) => ({
+    id,
+    cost: roundStoredCost(before.unit_cost_usd),
+    expiry: before.expiry_date == null ? null : String(before.expiry_date),
+    active: before.is_active == null ? null : Number(before.is_active),
+    // Exactly the stamp the lot had (null included). A before-image saved before the stamp was recorded has no key and is stamped now, as it was.
+    ...(Object.hasOwn(before, 'updated_at') ? { stamp: before.updated_at == null ? null : String(before.updated_at) } : {}),
+  }))
+  for (const part of chunk(restoreRows, UNDO_FOLD_CHUNK)) {
+    const field = (name: string) => `(SELECT json_extract(m.value, '$.${name}') FROM json_each(@rows) m WHERE CAST(json_extract(m.value, '$.id') AS INTEGER) = product_batches.id)`
+    stmts.push({
+      sql: `UPDATE product_batches SET unit_cost_usd = ${field('cost')}, expiry_date = ${field('expiry')},
+              is_active = COALESCE(${field('active')}, is_active),
+              updated_at = CASE WHEN (SELECT json_type(m.value, '$.stamp') FROM json_each(@rows) m WHERE CAST(json_extract(m.value, '$.id') AS INTEGER) = product_batches.id) IS NULL
+                THEN CURRENT_TIMESTAMP ELSE ${field('stamp')} END WHERE id IN (${rowIds})`,
+      params: { rows: json(part) },
+    })
+  }
+  return stmts
+}
+
 async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChangeProductImages = true): Promise<AtomicMergeStatement[]> {
   const db = getDb(env)
   const keeperId = Number(r.keeperId)
@@ -2069,7 +2390,8 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
     // missing field would wipe a real cost off the keeper on undo -- so the
     // two columns join the SET list only when they are actually present.
     // Each column is restored exactly as snapshotted, unknown (NULL) included; one the snapshot never recorded is left alone.
-    const savedCost = (value: number | null | undefined): number | null => (value == null || !Number.isFinite(Number(value)) ? null : Number(value))
+    // A snapshot written before the 4-place rule can hold a cost over 4 places; it is restored rounded (nearest, half away from zero).
+    const savedCost = (value: number | null | undefined): number | null => roundStoredCost(value)
     const hasUsdCost = r.keeperPricingBefore.cost_price_usd !== undefined
     const hasKhrCost = r.keeperPricingBefore.cost_price_khr !== undefined
     const hasUsdTwin = r.keeperPricingBefore.purchase_price_usd !== undefined
@@ -2241,25 +2563,15 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
   //    stock, and restore the keeper batch's stock for the folded branches.
   for (const b of (r.repointedBatches || [])) {
     stmts.push({ sql: 'UPDATE product_batches SET variant_product_id = @dupId, batch_number = @num, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { dupId, num: b.batchNumber == null ? null : Number(b.batchNumber), id: Number(b.id) } })
-  }
-  for (const fb of (r.foldedBatches || [])) {
-    const dupBatchId = Number(fb.dupBatchId)
-    const keeperBatchId = Number(fb.keeperBatchId)
-    stmts.push({ sql: 'UPDATE product_batches SET is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dupBatchId } })
-    for (const grp of chunk(intIds(fb.saleAllocationIds), 400)) stmts.push({ sql: `UPDATE sale_item_batch_allocations SET batch_id = @dupBatchId WHERE id IN (${grp.join(',')})`, params: { dupBatchId } })
-    for (const grp of chunk(intIds(fb.returnAllocationIds), 400)) stmts.push({ sql: `UPDATE return_item_batch_allocations SET batch_id = @dupBatchId WHERE id IN (${grp.join(',')})`, params: { dupBatchId } })
-    const keeperBBefore = new Map((fb.keeperStockBefore || []).map((x) => [Number(x.branch_id), Number(x.quantity) || 0]))
-    for (const d of (fb.dupStockBefore || [])) {
-      const b = Number(d.branch_id)
-      if (keeperBBefore.has(b)) {
-        stmts.push({ sql: 'UPDATE branch_batch_stock SET quantity = @q, updated_at = CURRENT_TIMESTAMP WHERE batch_id = @kb AND branch_id = @b', params: { kb: keeperBatchId, b, q: keeperBBefore.get(b) } })
-      } else {
-        stmts.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @kb AND branch_id = @b', params: { kb: keeperBatchId, b } })
-      }
-      stmts.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @db AND branch_id = @b', params: { db: dupBatchId, b } })
-      stmts.push({ sql: 'INSERT INTO branch_batch_stock (batch_id, branch_id, quantity, updated_at) VALUES (@db, @b, @q, CURRENT_TIMESTAMP)', params: { db: dupBatchId, b, q: Number(d.quantity) || 0 } })
+    if (typeof b.batchKeyBefore === 'string' && b.batchKeyBefore) {
+      stmts.push({ sql: 'UPDATE product_batches SET batch_key = @key WHERE id = @id AND variant_product_id = @dupId', params: { key: b.batchKeyBefore, id: Number(b.id), dupId } })
     }
   }
+  // The kept lot's own cost, expiry and activity before the fold, once per kept lot, written AFTER every folded lot's stock is back:
+  // a kept lot that was archived goes back to archived only once nothing sits on it (the 0154 stock trigger refuses stock on an
+  // inactive lot), and with several discarded lots folded into one kept lot the first restore would otherwise run while a later
+  // lot's stock still sat on it. Each fold entry carries the same before-image, so the first one per kept lot is the one used.
+  stmts.push(...mergeFoldReversalStatements(r.foldedBatches || []))
 
   // 6b. WRITE-OFF undo: the discarded row's lots were deactivated in place and
   //     their per-branch stock cleared (nothing was moved onto the keeper), so
@@ -2269,7 +2581,7 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
   for (const wb of (r.writtenOffBatches || [])) {
     const batchId = Number(wb?.batchId)
     if (!Number.isInteger(batchId) || batchId <= 0) continue
-    stmts.push({ sql: 'UPDATE product_batches SET is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchId } })
+    if (wb.wasActive !== false) stmts.push({ sql: 'UPDATE product_batches SET is_active = 1, merge_deactivated_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchId } })
     for (const s of (wb.stockBefore || [])) {
       stmts.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @b AND branch_id = @br', params: { b: batchId, br: Number(s.branch_id) } })
       stmts.push({ sql: 'INSERT INTO branch_batch_stock (batch_id, branch_id, quantity, updated_at) VALUES (@b, @br, @q, CURRENT_TIMESTAMP)', params: { b: batchId, br: Number(s.branch_id), q: Number(s.quantity) || 0 } })
@@ -2676,6 +2988,8 @@ export interface ProductMergeGroupRedoContext {
   operationId: string
   graphReversals?: MergeReversal[]
   graphGuards?: AtomicMergeStatement[]
+  /** The duplicate (merged) product ids of this child and every later one this redo still folds, in fold order. */
+  redoDupIds: number[]
   completionStatements: (freshReversal: MergeReversal, receipt?: AtomicMergeGraphReceipt) => AtomicMergeStatement[]
 }
 
@@ -2951,7 +3265,7 @@ function productMergeGroupCompletionStatements(args: {
  * guards reject races; exact predecessor non-time fields must match AFTER the
  * reversal, before any timestamp is restored. Never bless a new fingerprint.
  */
-function productMergeGroupPredecessorTimestamps(child: ProductMergeGroupChild, predecessor?: ProductMergeGroupChild): {
+export function productMergeGroupPredecessorTimestamps(child: ProductMergeGroupChild, predecessor?: ProductMergeGroupChild): {
   before: AtomicMergeStatement[]; after: AtomicMergeStatement[]
 } {
   const before: AtomicMergeStatement[] = []
@@ -2988,16 +3302,33 @@ function productMergeGroupPredecessorTimestamps(child: ProductMergeGroupChild, p
   // either the saved figure or the one derived from the lots now held (a
   // legacy after-image recorded the plan's merged cost, not the derivation).
   const derivedCostColumns = new Set(['cost_price_usd', 'purchase_price_usd'])
+  // 0313 rounds a long cost of a product row after the merge, and undo writes costs back at 4 places, so a cost column also matches the saved figure
+  // stored to 4 places by either rule: HALF_UP_4DP evaluated in SQL (0313's own text) or roundStoredCost's form, which the row carries in __r4 (the two
+  // differ on a near-tie double). A saved NULL or a saved 4-place cost has no other form, so nothing else widens.
+  const ROUNDED_TWIN = '__r4'
+  const withRoundedTwin = (table: string, row: Record<string, unknown>): Record<string, unknown> => {
+    if (table !== 'products') return row
+    const twin: Record<string, number> = {}
+    for (const field of MERGE_PRODUCT_COST_COLUMNS) {
+      const value = row[field]
+      const nearest = typeof value === 'number' && Number.isFinite(value) ? roundStoredCost(value) : null
+      if (nearest !== null && nearest !== value) twin[field] = nearest
+    }
+    return Object.keys(twin).length ? { ...row, [ROUNDED_TWIN]: twin } : row
+  }
   const fieldGuard = (table: string, field: string, derivedCost: boolean) => {
     const saved = `json_extract(saved.value,'$.${field}')`
+    const rounded = table === 'products' && MERGE_PRODUCT_COST_COLUMNS.includes(field)
+      ? ` OR (typeof(${saved}) IN ('integer','real') AND (live."${field}" IS ${HALF_UP_4DP(saved)}`
+        + ` OR (json_type(saved.value,'$.${ROUNDED_TWIN}.${field}') IS NOT NULL AND live."${field}" IS json_extract(saved.value,'$.${ROUNDED_TWIN}.${field}'))))` : ''
     return derivedCost && table === 'products' && derivedCostColumns.has(field)
-      ? `(live."${field}" IS ${saved} OR live."${field}" IS (SELECT ${CATALOG_COST_DERIVE_SQL} FROM products WHERE products.id = live.id))`
-      : `live."${field}" IS ${saved}`
+      ? `(live."${field}" IS ${saved}${rounded} OR live."${field}" IS (SELECT ${CATALOG_COST_DERIVE_SQL} FROM products WHERE products.id = live.id))`
+      : rounded ? `(live."${field}" IS ${saved}${rounded})` : `live."${field}" IS ${saved}`
   }
   const rowGuards = (table: string, rows: Record<string, unknown>[], omitTimestamp: boolean): AtomicMergeStatement[] => {
     const shapes = new Map<string, Record<string, unknown>[]>()
-    for (const row of rows) {
-      const key = JSON.stringify(Object.keys(row).filter((field) => !omitTimestamp || field !== 'updated_at').sort())
+    for (const row of rows.map((value) => withRoundedTwin(table, value))) {
+      const key = JSON.stringify(Object.keys(row).filter((field) => field !== ROUNDED_TWIN && (!omitTimestamp || field !== 'updated_at')).sort())
       const group = shapes.get(key) || []
       group.push(row)
       shapes.set(key, group)
@@ -3129,7 +3460,19 @@ async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: Un
     throw new UndoConflictError(`This group merge is already ${ctx.direction === 'undo' ? 'reversed' : 'applied'}.`, UNDO_ALREADY_DONE_CODE)
   }
   const preparedGroupGraph = pointer.mergeVersion===3 ? await prepareAtomicMergeGraphReceipt(db, children.map(row=>row.reversal)) : undefined
-  const groupGraphGuard = preparedGroupGraph ? productMergeGroupGraphGuard(preparedGroupGraph.graph, pointer.snapshotId, groupPayload, generation) : undefined
+  // The graph guard compares the saved receipt exactly. Only when a step has failed on a guard is the live graph read, to see whether 0313's cost
+  // rounding alone moved it (costRoundedGroupGraphState); the normal path makes no extra statement.
+  let acceptedGroupGraph: string | undefined
+  const newGroupGraphGuard = () => preparedGroupGraph
+    ? productMergeGroupGraphGuard(preparedGroupGraph.graph, pointer.snapshotId, groupPayload, generation, acceptedGroupGraph) : undefined
+  let groupGraphGuard = newGroupGraphGuard()
+  const acceptGroupRounding = async (error: unknown): Promise<boolean> => {
+    if (!preparedGroupGraph || acceptedGroupGraph !== undefined || !/merge_state_conflict|malformed JSON|product_merge_group_.*guard|constraint/i.test(String(error))) return false
+    acceptedGroupGraph = await costRoundedGroupGraphState(db, preparedGroupGraph.graph, groupPayload).catch(() => undefined)
+    if (acceptedGroupGraph === undefined) return false
+    groupGraphGuard = newGroupGraphGuard()
+    return true
+  }
   const child = children[targetIndex]
   const final = ctx.direction === 'undo' ? targetIndex === 0 : targetIndex === children.length - 1
   const nextPrefixFingerprint = final
@@ -3152,7 +3495,8 @@ async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: Un
         operationId: pointer.operationId, generation }, { id: ctx.user.id, name: actorSnapshot(ctx.user) }))
     }
     statements.push(...timestamps.after, ...completion.slice(1))
-    try { await executeStockTransaction(db, statements, 'retry') } catch (error) {
+    for (;;) try { await executeStockTransaction(db, statements, 'retry'); break } catch (error) {
+      if (await acceptGroupRounding(error)) { statements[1] = groupGraphGuard!; continue }
       if (/malformed JSON|product_merge_group_guard|constraint/i.test(String(error))) {
         throw new UndoConflictError('This group merge changed concurrently. Nothing was reversed.', UNDO_RECORD_CHANGED_CODE)
       }
@@ -3160,17 +3504,21 @@ async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: Un
     }
   } else {
     if (!productMergeGroupRedoFn) throw new UndoConflictError('This group merge cannot be redone in the current server build.')
-    await productMergeGroupRedoFn({
+    for (;;) try { await productMergeGroupRedoFn({
       env: ctx.env, db, user: ctx.user, reversal: child.reversal,
       reviewId: association.review_id, groupOrdinal: Number(association.group_ordinal), groupKey: association.group_key,
       childSnapshotId: child.id, childOrdinal: targetIndex, historyId: Number(ctx.historyId), generation,
       operationId: String(child.reversal.operationId || ''),
       graphReversals:preparedGroupGraph ? children.map(row=>row.reversal) : undefined, graphGuards:groupGraphGuard?[groupGraphGuard]:undefined,
+      redoDupIds: children.slice(targetIndex).map(row => Number(row.reversal.dupId)),
       completionStatements: (freshReversal, graph) => productMergeGroupCompletionStatements({
         direction: ctx.direction, user: ctx.user!, historyId: Number(ctx.historyId), groupSnapshotId: pointer.snapshotId,
         groupSnapshot, association, child, generation, final, nextPrefixFingerprint, freshReversal, graph,
       }),
-    })
+    }); break } catch (error) {
+      if (await acceptGroupRounding(error)) continue
+      throw error
+    }
     try { await finalizeProductMergeGroupRedoReceipt(loaded,child,final?generation+1:generation,preparedGroupGraph?.schema) }
     catch(error) {
       if(pointer.mergeVersion===3) throw productMergeGroupRedoCommitted(association,generation)
@@ -3268,7 +3616,7 @@ function mergeReplayGallerySql(): string {
     WHERE i.product_id IN (@keeper,@discarded) ORDER BY i.id))`
 }
 
-async function mergeReplayColumns(db: ReturnType<typeof getDb>): Promise<Map<string, string[]>> {
+export async function mergeReplayColumns(db: ReturnType<typeof getDb>): Promise<Map<string, string[]>> {
   const tables = [...new Set(['products', 'product_images', 'product_batches', 'branch_stock', 'branch_batch_stock', 'inventory_movements',
     'stock_session_members', 'promotion_rules', 'sale_item_batch_allocations', 'return_item_batch_allocations', ...MERGE_REPARENT_TABLES.map(row => row.table)])]
   const rows = await db.prepare(`SELECT t.value table_name,p.name FROM json_each(@tables) t JOIN pragma_table_info(t.value) p ORDER BY t.value,p.cid`)
@@ -3282,7 +3630,7 @@ async function mergeReplayColumns(db: ReturnType<typeof getDb>): Promise<Map<str
   return columns
 }
 
-function mergeReplayGraphSql(reversal: MergeReversal | MergeReversal[], schema: Map<string, string[]>): AtomicMergeStatement {
+export function mergeReplayGraphSql(reversal: MergeReversal | MergeReversal[], schema: Map<string, string[]>): AtomicMergeStatement {
   const list=Array.isArray(reversal)?reversal:[reversal]
   const reads = mergeFingerprintReads(list, true)
   if(Array.isArray(reversal)) {
@@ -3338,7 +3686,23 @@ export function captureProductMergeGroupGraph(graph:AtomicMergeStatement,review:
       THEN 1 ELSE json_extract('', '$') END AS product_merge_group_graph_size_guard`,params:{receiptReview:review,receiptOrdinal:ordinal}}]
 }
 
-export function productMergeGroupGraphGuard(graph:AtomicMergeStatement,snapshotId:number,payload:string,generation:number):AtomicMergeStatement {
+/** The live graph text when it differs from the saved text only by 0313 cost rounding, else the saved text. The guard then compares the live graph with itself at commit, so a race is still caught. */
+export async function costRoundedGraphState(db: ReturnType<typeof getDb>, graph: AtomicMergeStatement, saved: string): Promise<string> {
+  const row = await db.prepare(`SELECT ${graph.sql} AS state`).get<{ state: unknown }>(graph.params)
+  const live = row?.state
+  return typeof live === 'string' && live !== saved && mergeGraphStateDiffersOnlyByCostRounding(saved, live) ? live : saved
+}
+
+/** The live group graph text when it differs from the receipt's saved text only by 0313 cost rounding; undefined when it is identical or differs otherwise. */
+async function costRoundedGroupGraphState(db: ReturnType<typeof getDb>, graph: AtomicMergeStatement, payload: string): Promise<string | undefined> {
+  let saved: unknown
+  try { saved = (JSON.parse(payload) as { graph_receipt?: { graph_state?: unknown } }).graph_receipt?.graph_state } catch { return undefined }
+  if (typeof saved !== 'string') return undefined
+  const live = await costRoundedGraphState(db, graph, saved)
+  return live === saved ? undefined : live
+}
+
+export function productMergeGroupGraphGuard(graph:AtomicMergeStatement,snapshotId:number,payload:string,generation:number,acceptedState?:string):AtomicMergeStatement {
   let saved:ProductMergeGroupSnapshot|null=null
   try { saved=strictProductMergeGroupSnapshot(JSON.parse(payload)) } catch { saved=null }
   if(!saved?.graph_receipt || saved.generation!==generation || saved.graph_receipt.generation!==generation) throw new UndoConflictError('The committed group graph receipt is missing or stale.')
@@ -3347,7 +3711,7 @@ export function productMergeGroupGraphGuard(graph:AtomicMergeStatement,snapshotI
       WHERE CAST(json_extract(h.undo_payload,'$.snapshot_id') AS INTEGER)=@receiptSnapshot AND g.operation_id=@receiptOperation
         AND g.reversal_generation=@receiptGeneration AND (SELECT COUNT(*) FROM product_conflict_action_group_members m WHERE m.review_id=g.review_id AND m.group_ordinal=g.ordinal AND m.role='merged' AND m.status IN ('history_pending','undo_ready'))=@receiptPrefix)
     AND ${graph.sql} IS @receiptState THEN 1 ELSE json_extract('', '$') END AS product_merge_group_graph_guard`,
-    params:{...graph.params,receiptSnapshot:snapshotId,receiptPayload:payload,receiptState:saved.graph_receipt.graph_state,receiptOperation:saved.graph_receipt.operation_id,receiptGeneration:generation,receiptPrefix:saved.graph_receipt.applied_prefix}}
+    params:{...graph.params,receiptSnapshot:snapshotId,receiptPayload:payload,receiptState:acceptedState ?? saved.graph_receipt.graph_state,receiptOperation:saved.graph_receipt.operation_id,receiptGeneration:generation,receiptPrefix:saved.graph_receipt.applied_prefix}}
 }
 
 function mergeReplayStateSql(graph: AtomicMergeStatement): string {
@@ -3355,6 +3719,24 @@ function mergeReplayStateSql(graph: AtomicMergeStatement): string {
     'keeper_revision',COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(@keeper AS TEXT)),0),
     'duplicate_revision',COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=CAST(@discarded AS TEXT)),0),
     'gallery_state',printf('%s',${mergeReplayGallerySql()}),'graph_version',2,'graph_state',printf('%s',${graph.sql}))`
+}
+
+/**
+ * The saved single-merge receipt, or the live receipt when the two differ only by 0313 cost rounding (and the rounded products' revisions it bumped).
+ * The predicate then compares the live graph and revisions with themselves at commit, so a race is still caught.
+ */
+export async function costRoundedReplayState(db: ReturnType<typeof getDb>, reversal: MergeReversal, state: MergeCostReplayState, graph: AtomicMergeStatement): Promise<MergeCostReplayState> {
+  const live = (await db.prepare(`SELECT ${graph.sql} AS state`).get<{ state: unknown }>(graph.params))?.state
+  const rounded = typeof live === 'string' && live !== state.graph_state ? mergeGraphStateCostRounding(state.graph_state, live) : null
+  if (typeof live !== 'string' || !rounded) return state
+  // The key is bound as text, as the receipt's own revision read binds it (mergeReplayStateSql).
+  const revision = async (id: number): Promise<number> => Number((await db.prepare(
+    "SELECT COALESCE((SELECT revision FROM stock_session_revisions WHERE entity_type='product' AND entity_key=?),0) AS revision").get<{ revision: number }>([String(id)]))?.revision)
+  const next = { keeper: await revision(Number(reversal.keeperId)), duplicate: await revision(Number(reversal.dupId)) }
+  const accepted = (savedRevision: number, liveRevision: number, id: unknown) =>
+    liveRevision - savedRevision === (rounded.get(String(id)) ?? 0)
+  if (!accepted(state.keeper_revision, next.keeper, reversal.keeperId) || !accepted(state.duplicate_revision, next.duplicate, reversal.dupId)) return state
+  return { ...state, graph_state: live, keeper_revision: next.keeper, duplicate_revision: next.duplicate }
 }
 
 function mergeReplayStateValid(state: MergeCostReplayState | undefined, generation: number): state is MergeCostReplayState {
@@ -3378,11 +3760,23 @@ export async function mergeCostContinuationGuard(db: ReturnType<typeof getDb>, r
   const state = reversal.costReviewState
   if (!state || !mergeReplayStateValid(state, state.generation)) throw new UndoConflictError('The previous merge has no current cost dependency receipt.')
   const { graph } = await prepareAtomicMergeGraphReceipt(db, reversal)
-  const predicate = mergeReplayGraphPredicate(reversal, state, graph)
-  const condition = `EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@continuationSnapshot AND kind='product.merge' AND status='applied' AND payload_json IS @continuationPayload) AND (${predicate.sql})`
-  const params = { ...predicate.params, continuationSnapshot: snapshotId, continuationPayload: payload }
-  if (!await db.prepare(`SELECT 1 AS valid WHERE ${condition}`).get(params)) throw new UndoConflictError('The previous merge cost dependencies changed.')
-  return { sql: `SELECT CASE WHEN ${condition} THEN 1 ELSE json_extract('', '$') END AS merge_cost_continuation_guard`, params }
+  const build = (graphState: string) => {
+    const predicate = mergeReplayGraphPredicate(reversal, { ...state, graph_state: graphState }, graph)
+    return {
+      condition: `EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@continuationSnapshot AND kind='product.merge' AND status='applied' AND payload_json IS @continuationPayload) AND (${predicate.sql})`,
+      params: { ...predicate.params, continuationSnapshot: snapshotId, continuationPayload: payload },
+    }
+  }
+  let guard = build(state.graph_state)
+  if (!await db.prepare(`SELECT 1 AS valid WHERE ${guard.condition}`).get(guard.params)) {
+    // Only after the exact guard failed is the live receipt read: a receipt saved before a deploy lacks a column its migration added (RECEIPT_ADDED_COLUMNS).
+    // The guard then compares the live graph with itself at commit, so a race is still caught.
+    const live = (await db.prepare(`SELECT ${graph.sql} AS state`).get<{ state: unknown }>(graph.params))?.state
+    if (typeof live !== 'string' || !mergeGraphStateAddedColumnsOnly(state.graph_state, live)) throw new UndoConflictError('The previous merge cost dependencies changed.')
+    guard = build(live)
+    if (!await db.prepare(`SELECT 1 AS valid WHERE ${guard.condition}`).get(guard.params)) throw new UndoConflictError('The previous merge cost dependencies changed.')
+  }
+  return { sql: `SELECT CASE WHEN ${guard.condition} THEN 1 ELSE json_extract('', '$') END AS merge_cost_continuation_guard`, params: guard.params }
 }
 
 async function finalizeMergeCostGraph(
@@ -3448,7 +3842,8 @@ async function replayMergeCostReview(payload: Record<string, unknown>, ctx: Undo
       AND json_extract(${eventJson('b')},'$.cost_review.before_key') IS @beforeKey
       AND json_extract(${eventJson('b')},'$.cost_review.fallback_usd') IS @usd AND json_extract(${eventJson('b')},'$.cost_review.fallback_khr') IS @khr)`)
     .get<{ id: number; details: string }>({ keeper: String(reversal.keeperId), rootKey: outcome.rootKey, currentKey: outcome.reviewKey,
-      beforeKey: outcome.beforeKey, usd: outcome.original.usd, khr: outcome.original.khr, mergeOperation: reversal.operationId,
+      // The merge receipt records the keeper's fallback cost at 4 places (mergeCostReviewStatements), so it is matched at 4 places.
+      beforeKey: outcome.beforeKey, usd: roundStoredCost(outcome.original.usd), khr: roundStoredCost(outcome.original.khr), mergeOperation: reversal.operationId,
       eventGeneration: state?.direction === 'undo' ? Number(pointer.generation) - 1 : Number(pointer.generation) })
   if (!root) throw refuse()
   const schema=await mergeReplayColumns(db)
@@ -3506,10 +3901,15 @@ async function replayMergeCostReview(payload: Record<string, unknown>, ctx: Undo
     params: { history: historyId, fromStatus, pointer: history.undo_payload, snapshot: snapshot.id, snapshotStatus: snapshot.status, snapshotPayload: snapshot.payload_json,
       root: root.id, rootDetails: root.details },
   }]
-  if (state) {
-    const predicate = mergeReplayGraphPredicate(reversal, state, mergeReplayGraphSql(reversal, schema))
-    guards.push({ sql: `SELECT CASE WHEN ${predicate.sql} THEN 1 ELSE json_extract('', '$') END AS merge_cost_revision_guard`, params: predicate.params })
+  // The receipt guard compares the saved receipt exactly. Only when that has failed is the live receipt read, to see whether 0313's cost rounding alone
+  // moved it (costRoundedReplayState); the normal path makes no extra statement.
+  const revisionGuard = (receipt: MergeCostReplayState): AtomicMergeStatement => {
+    const graphStatement = mergeReplayGraphSql(reversal, schema)
+    const predicate = mergeReplayGraphPredicate(reversal, receipt, graphStatement)
+    return { sql: `SELECT CASE WHEN ${predicate.sql} THEN 1 ELSE json_extract('', '$') END AS merge_cost_revision_guard`, params: predicate.params }
   }
+  if (state) guards.push(revisionGuard(state))
+  const guardCount = guards.length
   const complete = (fresh: MergeReversal): AtomicMergeStatement[] => {
     const graph=mergeReplayGraphSql(fresh,schema)
     return [{
@@ -3523,12 +3923,14 @@ async function replayMergeCostReview(payload: Record<string, unknown>, ctx: Undo
     params: { status: ctx.direction === 'undo' ? 'redoable' : 'recorded', reversible: ctx.direction === 'undo' ? 1 : 0, nextGeneration: generation + 1, history: historyId },
   }, {sql:`SELECT CASE WHEN length(CAST(json_extract(payload_json,'$.costReviewState.graph_state') AS BLOB))<=131072 THEN 1 ELSE json_extract('', '$') END AS merge_cost_graph_size_guard FROM undo_snapshots WHERE id=@snapshot`,params:{snapshot:snapshot.id}}]
   }
-  try {
+  const user = ctx.user
+  const attempt = async (): Promise<void> => {
+    guards.length = guardCount
     if (ctx.direction === 'undo') {
       await assertMergeStateUnchanged(db, [reversal], reversal.mergedStateFingerprint, guards)
       const statements = await buildMergeReversalStatements(ctx.env, reversal, getActionTier(ctx.user, 'products', 'image') === 'full')
       await executeStockTransaction(db, [...guards, ...statements,
-        ...mergeCostUndoStatements(outcome, { historyId, snapshotId: snapshot.id, operationId: String(reversal.operationId), generation }, { id: ctx.user.id, name: actorSnapshot(ctx.user) }),
+        ...mergeCostUndoStatements(outcome, { historyId, snapshotId: snapshot.id, operationId: String(reversal.operationId), generation }, { id: user.id, name: actorSnapshot(user) }),
         ...complete(reversal)], 'retry')
     } else {
       if (!state || state.generation !== generation || state.direction !== 'undo'
@@ -3545,12 +3947,23 @@ async function replayMergeCostReview(payload: Record<string, unknown>, ctx: Undo
         } })
       await reconcile()
     }
+  }
+  let triedRounding = false
+  for (;;) try {
+    await attempt()
+    break
   } catch (error) {
     if (await committed().catch(() => null)) {
       await reconcile().catch(() => {})
       return { complete: true, continuation_required: false, processed_children: 0, pending_children: 0, generation: generation + 1 }
     }
-    if ((error instanceof Error && error.message === 'merge_state_conflict') || /malformed JSON|merge_cost_.*guard/i.test(String(error))) {
+    const guardFailed = (error instanceof Error && error.message === 'merge_state_conflict') || /malformed JSON|merge_cost_.*guard/i.test(String(error))
+    if (state && !triedRounding && guardFailed) {
+      triedRounding = true
+      const receipt: MergeCostReplayState = await costRoundedReplayState(db, reversal, state, mergeReplayGraphSql(reversal, schema)).catch(() => state)
+      if (receipt !== state) { guards[guardCount - 1] = revisionGuard(receipt); continue }
+    }
+    if (guardFailed) {
       throw new UndoConflictError('This merge changed concurrently. Nothing was replayed.', UNDO_RECORD_CHANGED_CODE)
     }
     throw error

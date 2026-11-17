@@ -181,6 +181,51 @@ async function main() {
     assert.ok(fixture.controls.maxBatchStatements <= 100)
   }
 
+  // cost-4dp: a removal snapshot taken while a product still held a cost over 4 places. Undo restores the cost at 4 places (nearest, half away from
+  // zero), and the saved-figure guards accept the rounded live row, so Redo and a second Undo are not refused.
+  {
+    const fixture = setup()
+    // No lot carries a cost, so no trigger re-derives the catalog cost when the undo restores the product: the restored figure is what stays.
+    seedFixture(fixture.d1.db, () => fixture.d1.db.exec('UPDATE product_batches SET unit_cost_usd=NULL,received_cost_usd=NULL WHERE variant_product_id=10000'))
+    seedFixture(fixture.d1.db, () => fixture.d1.db.exec('UPDATE products SET cost_price_usd=4.123456,purchase_price_usd=4.123456,cost_price_khr=20500.12345,purchase_price_khr=20500.12345 WHERE id=10000'))
+    const removed = await remove(fixture.app, 10000, { reason: 'Legacy long cost', expectedUpdatedAt: '2026-09-08 01:00:00', client_request_id: 'long_cost_remove' })
+    assert.equal(removed.status, 200, JSON.stringify(removed.body))
+    const history = fixture.d1.db.prepare("SELECT id,undo_payload FROM action_history WHERE json_extract(undo_payload,'$.applier')='product.remove'").get()
+    const undoPayload = JSON.parse(history.undo_payload)
+    const applier = fixture.undo.resolveUndoApplier(undoPayload)
+    const costs = () => ({ ...fixture.d1.db.prepare('SELECT cost_price_usd,purchase_price_usd,cost_price_khr,purchase_price_khr FROM products WHERE id=10000').get() })
+    assert.deepEqual(costs(), { cost_price_usd: 4.123456, purchase_price_usd: 4.123456, cost_price_khr: 20500.12345, purchase_price_khr: 20500.12345 }, 'the removal leaves the cost as it was')
+    const user = { id: 900, username: 'owner' }
+    assert.equal((await applier.run(undoPayload, { env: {}, user, direction: 'undo', historyId: history.id, generation: 0 })).complete, true)
+    assert.deepEqual(costs(), { cost_price_usd: 4.1235, purchase_price_usd: 4.1235, cost_price_khr: 20500.1235, purchase_price_khr: 20500.1235 }, 'undo restores the cost at 4 places')
+    const redoPayload = JSON.parse(fixture.d1.db.prepare('SELECT redo_payload FROM action_history WHERE id=?').get(history.id).redo_payload)
+    assert.equal((await applier.run(redoPayload, { env: {}, user, direction: 'redo', historyId: history.id, generation: 1 })).complete, true, 'redo is not refused by the saved legacy figure')
+    const undoAgain = JSON.parse(fixture.d1.db.prepare('SELECT undo_payload FROM action_history WHERE id=?').get(history.id).undo_payload)
+    assert.equal((await applier.run(undoAgain, { env: {}, user, direction: 'undo', historyId: history.id, generation: 2 })).complete, true, 'a second undo is not refused either')
+    assert.equal(costs().cost_price_usd, 4.1235)
+    require('./harness/cost-4dp-census.cjs').assertNoCostOver4dp(fixture.d1.db, 'census after the removal undo')
+  }
+
+  // cost-4dp: the legacy-cost tolerance of the guards is narrow. After the undo the live cost is the rounded 4.1235; a real concurrent change to a value that is
+  // neither the saved long figure (4.123456) nor its rounding must still refuse the redo and leave the row as the other writer left it.
+  for (const concurrent of [4.5, 4.1236, 4.12346]) {
+    const fixture = setup()
+    seedFixture(fixture.d1.db, () => fixture.d1.db.exec('UPDATE product_batches SET unit_cost_usd=NULL,received_cost_usd=NULL WHERE variant_product_id=10000'))
+    seedFixture(fixture.d1.db, () => fixture.d1.db.exec('UPDATE products SET cost_price_usd=4.123456,purchase_price_usd=4.123456,cost_price_khr=20500.12345,purchase_price_khr=20500.12345 WHERE id=10000'))
+    const removed = await remove(fixture.app, 10000, { reason: 'Legacy long cost', expectedUpdatedAt: '2026-09-08 01:00:00', client_request_id: `long_cost_concurrent_${[4.5, 4.1236, 4.12346].indexOf(concurrent)}` })
+    assert.equal(removed.status, 200, JSON.stringify(removed.body))
+    const history = fixture.d1.db.prepare("SELECT id,undo_payload FROM action_history WHERE json_extract(undo_payload,'$.applier')='product.remove'").get()
+    const undoPayload = JSON.parse(history.undo_payload)
+    const applier = fixture.undo.resolveUndoApplier(undoPayload)
+    const user = { id: 900, username: 'owner' }
+    assert.equal((await applier.run(undoPayload, { env: {}, user, direction: 'undo', historyId: history.id, generation: 0 })).complete, true)
+    seedFixture(fixture.d1.db, () => fixture.d1.db.prepare('UPDATE products SET cost_price_usd=? WHERE id=10000').run(concurrent))
+    const redoPayload = JSON.parse(fixture.d1.db.prepare('SELECT redo_payload FROM action_history WHERE id=?').get(history.id).redo_payload)
+    await assert.rejects(() => applier.run(redoPayload, { env: {}, user, direction: 'redo', historyId: history.id, generation: 1 }), undefined, `a concurrent cost of ${concurrent} refuses the redo`)
+    const live = fixture.d1.db.prepare('SELECT cost_price_usd c, is_active a FROM products WHERE id=10000').get()
+    assert.deepEqual({ ...live }, { c: concurrent, a: 1 }, 'the refused redo wrote nothing')
+  }
+
   for (const denial of ['reviewer', 'requester', 'stale']) {
     const fixture = setup()
     const queued = await remove(fixture.app, 10000, { reason: `Approval ${denial}`, client_request_id: `approval_${denial}` },

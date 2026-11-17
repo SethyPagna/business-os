@@ -72,6 +72,7 @@ function loadTs(relPath, stubs) {
   Module._load = (request, parent, isMain) => {
     if (request === './stockTransaction' || request === '../lib/stockTransaction') return stockTransaction
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
+    if (/(^|\/)(productMergeLots|businessDateWindow)$/.test(request)) return loadTs(path.join('lib', request.split('/').pop() + '.ts'), {})
     if (request.startsWith('.') || request === 'hono') return permissive()
     return original.call(Module, request, parent, isMain)
   }

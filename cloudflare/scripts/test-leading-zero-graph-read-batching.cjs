@@ -27,7 +27,14 @@ function evaluate(code, dependencies = {}) {
   new Function('exports', 'module', ...Object.keys(dependencies), output)(mod.exports, mod, ...Object.values(dependencies))
   return mod.exports
 }
-const snapshot = evaluate(fs.readFileSync(path.join(src, 'lib/productMergeSnapshot.ts'), 'utf8'))
+const leaf = (file) => evaluate(fs.readFileSync(path.join(src, file), 'utf8'))
+// productMergeSnapshot matches lots by received date through productMergeLots (16 Nov 2026), a pure lib over two leaf libs.
+const productMergeLots = evaluate(fs.readFileSync(path.join(src, 'lib/productMergeLots.ts'), 'utf8'), {
+  require: (id) => (id === './businessDateWindow' ? leaf('lib/businessDateWindow.ts') : id === './moneyPrecision' ? leaf('lib/moneyPrecision.ts') : require(id)),
+})
+const snapshot = evaluate(fs.readFileSync(path.join(src, 'lib/productMergeSnapshot.ts'), 'utf8'), {
+  require: (id) => (id === './productMergeLots' ? productMergeLots : require(id)),
+})
 const tables = evaluate(declarations(path.join(src, 'lib/undoAppliers.ts'), ['MERGE_REPARENT_TABLES'])
   + '\nexports.tables=MERGE_REPARENT_TABLES').tables
 const names = ['runLeadingZeroReadPlans', 'readLeadingZeroGraphSnapshots', 'canonicalLeadingZeroGraphSnapshot']
@@ -103,7 +110,9 @@ function fixture(count, lots = false) {
     if (lots) {
       for (let n = 0; n < 3; n++) {
         seedFixture(d1.db, () => d1.db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,lot_code,received_at,expiry_date,unit_cost_usd,is_active)
-          VALUES(?,?,?,?,?,'2026-01-01','2030-12-31',?,?)`).run(lot + n, n === 0 ? keeper : duplicate, n === 2 ? 'repoint' : 'overlap', n + 1, `L${lot+n}`, n === 1 ? null : 0, n === 2 ? 0 : 1))
+          VALUES(?,?,?,?,?,?,'2030-12-31',?,?)`).run(lot + n, n === 0 ? keeper : duplicate, n === 2 ? 'repoint' : 'overlap', n + 1, `L${lot+n}`,
+          // Lots meet by RECEIVED DATE (16 Nov 2026): 'overlap' lots share a day, the 'repoint' lot has a day no kept lot has.
+          n === 2 ? '2026-02-01' : '2026-01-01', n === 1 ? null : 0, n === 2 ? 0 : 1))
         seedFixture(d1.db, () => d1.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?)').run(lot + n, n === 2 ? 2 : 1, n === 2 ? 0 : n + 1))
       }
       for (const batch of [lot + 1, lot + 2]) {
@@ -128,7 +137,7 @@ async function main() {
     assert.equal(digest(newGraph), digest(oldGraph), 'canonical graph digest identical')
     assert.equal(d1.db.prepare('SELECT total_changes() AS n').get().n, before)
     assert.ok(newDb.calls.every(call => call.length <= 80))
-    const expected = Math.ceil(count / 3) + (lots ? Math.ceil(count / 20) : 0)
+    const expected = Math.ceil(count / 3) + (lots ? Math.ceil(count * 3 / 80) : 0) // 3 SET reads per collision case (16 Nov 2026), packed 80 to a call
     assert.equal(newDb.calls.length, expected)
     assert.equal(oldDb.calls.length, count * (lots ? 6 : 5))
     if (count === 25) {

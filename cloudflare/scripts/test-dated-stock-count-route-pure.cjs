@@ -88,6 +88,10 @@ const relMap = {
   // CUTOVER-LR: the import authority answers a disabled branch through the branch-effect kernel.
   './branchEffect': () => loadReal('lib/branchEffect.ts'),
   './branchRoles.ts': () => loadReal('lib/branchRoles.ts'),
+  // 16 Nov 2026: the lot-by-received-date rule (productMergeLots) sits on businessDateWindow and moneyPrecision, both self contained.
+  './productMergeLots': () => loadReal('lib/productMergeLots.ts'),
+  './businessDateWindow': () => loadReal('lib/businessDateWindow.ts'),
+  './moneyPrecision': () => loadReal('lib/moneyPrecision.ts'),
 }
 const originalCompile = Module.prototype._compile
 Module.prototype._compile = function (content, filename) {

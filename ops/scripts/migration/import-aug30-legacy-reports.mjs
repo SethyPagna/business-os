@@ -261,7 +261,7 @@ function resolveProduct(sourceName, sourceCode = '', { preferSold = false } = {}
 }
 
 // The legacy reports print Cambodian numbers without the leading 0 that the
-// contact book stores ('70856070' vs '070856070'), so compare zero-stripped
+// contact book stores ('12000123' vs '012000123'), so compare zero-stripped
 // keys — and only link a key that identifies exactly one customer.
 const phoneKey = (value) => digits(value).replace(/^0+/, '')
 const customersByPhone = new Map()

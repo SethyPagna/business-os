@@ -5,7 +5,11 @@
 // here are the plausible wrong implementations: a substring check, a name
 // match, a leading-zero-blind comparison, and "first of two".
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { transformSync } from 'esbuild'
 import { findScanHit, isExactBarcodeHit } from '../src/utils/scanExactHit.ts'
+import { ownRows } from '../src/utils/productGrouping.ts'
 
 let failed = 0
 
@@ -71,11 +75,99 @@ runTest('one matching child row is singled out together with the group that owns
   assert.equal(hit?.row, groups[0].rows[1])
 })
 
-runTest('two rows sharing the barcode single out nothing, in one group or across two', () => {
-  const sameGroup = [{ rows: [{ barcode: DIOR }, { barcode: DIOR }] }]
-  assert.equal(findScanHit(sameGroup, (group) => group.rows, DIOR), null)
-  const twoGroups = [{ rows: [{ barcode: DIOR }] }, { rows: [{ barcode: `0${DIOR}` }] }]
-  assert.equal(findScanHit(twoGroups, (group) => group.rows, DIOR), null, 'the leading-zero twin is the same barcode')
+runTest('two different products sharing the barcode single out nothing, in one group or across two', () => {
+  const sameGroup = [{ rows: [{ name: 'Dior Sauvage', barcode: DIOR }, { name: 'Dior Sauvage Travel', barcode: DIOR }] }]
+  assert.equal(findScanHit(sameGroup, (group) => group.rows, DIOR), null, 'two names, one code: genuinely ambiguous')
+  const twoGroups = [{ rows: [{ name: 'Dior Sauvage', barcode: DIOR }] }, { rows: [{ name: 'Dior Sauvage', barcode: `0${DIOR}` }] }]
+  assert.equal(findScanHit(twoGroups, (group) => group.rows, DIOR), null, 'the same code in two groups is still ambiguous')
+})
+
+// Owner, 16 Nov 2026: an unmerged duplicate is its own row, so a group now lists one row per record. Two
+// records that are one product under the owner's identity rule are one product to a scanner. The rows come through the real
+// ownRows, which is what stamps the twin key the scan reads (a group's rows are always ownRows rows).
+const pairProbe = (find: typeof findScanHit, own: typeof ownRows = ownRows): string[] => {
+  const ROWS_OF = (group: { rows: Array<{ id?: number; name?: string; barcode?: string }> }) => own(group.rows)
+  const failures: string[] = []
+  const check = (name: string, fn: () => void) => { try { fn() } catch (error) { failures.push(`${name}: ${(error as Error).message.split('\n')[0]}`) } }
+  check('a same-name same-barcode pair is one hit: the first twin of the group', () => {
+    const group = { rows: [{ id: 1, name: 'Glow Serum', barcode: DIOR }, { id: 2, name: ' glow serum ', barcode: DIOR }] }
+    const hit = find([group], ROWS_OF, DIOR)
+    assert.equal(hit?.group, group)
+    assert.equal(hit?.row.id, 1)
+  })
+  check('a leading-zero twin is the same barcode, so the pair is one hit', () => {
+    const group = { rows: [{ id: 1, name: 'Glow Serum', barcode: `0${DIOR}` }, { id: 2, name: 'Glow Serum', barcode: DIOR }] }
+    assert.equal(find([group], ROWS_OF, DIOR)?.row.id, 1)
+    assert.equal(find([group], ROWS_OF, `0${DIOR}`)?.row.id, 1)
+  })
+  check('the pair is one hit even with an unrelated row between the twins', () => {
+    const group = { rows: [{ id: 1, name: 'Glow Serum', barcode: DIOR }, { id: 3, name: 'Glow Serum', barcode: '3348901729000' }, { id: 2, name: 'Glow Serum', barcode: DIOR }] }
+    assert.equal(find([group], ROWS_OF, DIOR)?.row.id, 1)
+  })
+  check('two different names on one barcode stay ambiguous', () => {
+    const group = { rows: [{ id: 1, name: 'Glow Serum', barcode: DIOR }, { id: 2, name: 'Glow Serum Mini', barcode: DIOR }] }
+    assert.equal(find([group], ROWS_OF, DIOR), null)
+  })
+  check('a pair plus a third different product on the code stays ambiguous', () => {
+    const group = { rows: [{ id: 1, name: 'Glow Serum', barcode: DIOR }, { id: 2, name: 'Glow Serum', barcode: DIOR }, { id: 3, name: 'Glow Serum Mini', barcode: DIOR }] }
+    assert.equal(find([group], ROWS_OF, DIOR), null)
+  })
+  check('twin pairs of one key in two different groups are ambiguous (the groups are different cards)', () => {
+    const a = { rows: [{ id: 1, name: 'Glow Serum', barcode: DIOR }, { id: 2, name: 'Glow Serum', barcode: DIOR }] }
+    const b = { rows: [{ id: 3, name: 'Glow Serum', barcode: DIOR }, { id: 4, name: 'Glow Serum', barcode: DIOR }] }
+    assert.equal(find([a, b], ROWS_OF, DIOR), null)
+  })
+  check('a pair of twins in two different groups is ambiguous (the groups are different cards)', () => {
+    const a = { rows: [{ id: 1, name: 'Glow Serum', barcode: DIOR }] }
+    const b = { rows: [{ id: 2, name: 'Glow Serum', barcode: DIOR }] }
+    assert.equal(find([a, b], ROWS_OF, DIOR), null)
+  })
+  check('one name, two different identity barcodes that both match the scan (UPC-E and UPC-A) stay ambiguous', () => {
+    const group = { rows: [{ id: 1, name: 'Glow Serum', barcode: '01234565' }, { id: 2, name: 'Glow Serum', barcode: '012345000065' }] }
+    assert.equal(find([group], ROWS_OF, '01234565'), null)
+  })
+  check('two genuinely different real barcodes never collide', () => {
+    const group = { rows: [{ id: 1, name: 'Glow Serum', barcode: DIOR }, { id: 2, name: 'Glow Serum', barcode: '3348901729000' }] }
+    assert.equal(find([group], ROWS_OF, DIOR)?.row.id, 1)
+    assert.equal(find([group], ROWS_OF, '3348901729000')?.row.id, 2)
+  })
+  return failures
+}
+
+runTest('unmerged twins count as one scan hit, different products stay ambiguous', () => {
+  assert.deepEqual(pairProbe(findScanHit, ownRows), [])
+})
+
+runTest('mutants of the twin rule are killed', () => {
+  const require = createRequire(import.meta.url)
+  const read = (file: string) => readFileSync(new URL(`../src/utils/${file}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+  const compile = (code: string, resolve: (id: string) => unknown): Record<string, any> => {
+    const mod: { exports: Record<string, any> } = { exports: {} }
+    new Function('require', 'module', 'exports', transformSync(code, { loader: 'ts', format: 'cjs' }).code)(resolve, mod, mod.exports)
+    return mod.exports
+  }
+  const scanSource = read('scanExactHit.ts')
+  const groupingSource = read('productGrouping.ts')
+  const probeWith = (scan: string, grouping: string): string[] => {
+    const groupingModule = compile(grouping, (id) => require(id.replace(/^\.\//, '../src/utils/')))
+    const find = compile(scan, (id) => require(id.replace(/^\.\//, '../src/utils/'))).findScanHit
+    return pairProbe(find, groupingModule.ownRows)
+  }
+  assert.deepEqual(probeWith(scanSource, groupingSource), [], 'the unmutated copy passes')
+  const mutants: Array<[string, 'scan' | 'grouping', string, string]> = [
+    ['no twin rule at all (the regression)', 'scan', 'if (key && hit.group === group && key === hitKey) continue', 'if (false) continue'],
+    ['twins matched across groups', 'scan', 'if (key && hit.group === group && key === hitKey) continue', 'if (key && key === hitKey) continue'],
+    ['twin rule stops after the first twin', 'scan', 'hitKey = key\n', 'hitKey = key + hit.row.id\n'],
+    ['twins matched on name alone (every same-name row is one cluster)', 'grouping', 'for (const cluster of clusterRowsByBarcodeIdentity(rows)) {', 'for (const cluster of [rows]) {'],
+    ['raw name, not normalised', 'grouping', 'const name = serverNameKey(item?.name)', "const name = String(item?.name ?? '')"],
+    ['no twin is ever found (the regression)', 'grouping', 'if (cluster.length < 2 || twinDismissalRule?.(cluster, name, rows)) continue', 'continue'],
+  ]
+  for (const [name, file, from, to] of mutants) {
+    const target = file === 'scan' ? scanSource : groupingSource
+    assert.ok(target.includes(from), `mutant "${name}" no longer matches the source (stale mutant)`)
+    const mutated = target.replace(from, to)
+    assert.notDeepEqual(file === 'scan' ? probeWith(mutated, groupingSource) : probeWith(scanSource, mutated), [], `mutant survived: ${name}`)
+  }
 })
 
 runTest('only the child rows count: a group lead that is not among its rows is ignored', () => {

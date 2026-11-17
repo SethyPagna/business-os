@@ -1,9 +1,8 @@
 // <StockQty> (components/inventory/StockQty.tsx): the stock figure tinted by state.
 //
 // Rendered for real (react-dom/server) with the app's context, in both language packs. Every state is
-// asserted by its data attribute, tint class, tooltip and screen-reader word, and the family rule for a
-// merged row is pinned with a fixture where the SUM and the members disagree, so an implementation that
-// judged the sum (or the lead's thresholds) fails. The light and dark palettes of each tint are checked
+// asserted by its data attribute, tint class, tooltip and screen-reader word, and the no-folded-rows rule
+// (owner, 16 Nov 2026) is pinned with the 101 (8) / 102 (50) fixture: two rows, one low and one healthy. The light and dark palettes of each tint are checked
 // in the stylesheet here and measured in a real browser by stockQtyLayout.test.ts. Mutants edit the
 // component source and must each go red.
 import assert from 'node:assert/strict'
@@ -91,31 +90,22 @@ appSettings = { low_stock_threshold_mode: 'global', low_stock_threshold_default:
 assert.ok(html('en', { qty: 4, product }).includes('data-stock-state="healthy"'))
 appSettings = undefined
 
-// Merged row: two real products, 8 each (low: threshold 10). The row shows the SUM 16, which alone is healthy,
-// but each real product is low -- the Dashboard / bell call it low, so the pill must too.
-const lowMembers = [{ qty: 8, product }, { qty: 8, product }]
-assert.equal(stockQtyLevel({ qty: 16, product, config: DEFAULT_LOW_STOCK_CONFIG, members: lowMembers }), 'low')
-assert.equal(stockQtyLevel({ qty: 16, product, config: DEFAULT_LOW_STOCK_CONFIG }), 'healthy', 'control: the sum alone is healthy')
-// The review's exact example: products 101 (8) and 102 (50), same barcode, threshold 10. The merged row is
-// healthy (the Dashboard's family rule: best product wins) while product 101 alone is low -- the bell lists 101
-// on its own, so the row is green while the bell lists one of its products. Deliberate; stockLevelParity.test.ts
-// runs the bell's, the Dashboard's and the client's answers side by side on this same fixture.
+// No folded rows (owner, 16 Nov 2026). Two unmerged duplicates of one barcode are TWO rows, each judged on its own
+// figure and its own thresholds: the review's exact example, products 101 (8) and 102 (50), threshold 10, is a low 8
+// and a healthy 50 -- never one healthy 58. stockLevelParity.test.ts runs the bell, the Dashboard and the client side
+// by side on this same fixture.
 const p101 = { id: 101, low_stock_threshold: 10, out_of_stock_threshold: 0 }
 const p102 = { id: 102, low_stock_threshold: 10, out_of_stock_threshold: 0 }
-assert.equal(stockQtyLevel({ qty: 58, product: p101, config: DEFAULT_LOW_STOCK_CONFIG, members: [{ qty: 8, product: p101 }, { qty: 50, product: p102 }] }), 'healthy', 'merged 101 + 102 row is healthy')
-assert.equal(stockQtyLevel({ qty: 8, product: p101, config: DEFAULT_LOW_STOCK_CONFIG }), 'low', 'product 101 alone is low')
-// Best member wins: one out + one healthy is healthy; one out + one low is low; all out is out.
-assert.equal(stockQtyLevel({ qty: 40, product, config: DEFAULT_LOW_STOCK_CONFIG, members: [{ qty: 0, product }, { qty: 40, product }] }), 'healthy')
-assert.equal(stockQtyLevel({ qty: 4, product, config: DEFAULT_LOW_STOCK_CONFIG, members: [{ qty: 0, product }, { qty: 4, product }] }), 'low')
-assert.equal(stockQtyLevel({ qty: 0, product, config: DEFAULT_LOW_STOCK_CONFIG, members: [{ qty: 0, product }, { qty: 0, product }] }), 'out')
-// Each member answers to its OWN thresholds, not the lead's.
-assert.equal(stockQtyLevel({ qty: 10, product: { low_stock_threshold: 2 }, config: DEFAULT_LOW_STOCK_CONFIG, members: [{ qty: 5, product: { low_stock_threshold: 2 } }, { qty: 5, product: { low_stock_threshold: 9 } }] }), 'healthy')
-// The header-row rule: a family header with a real member is ignored; alone it counts.
-const header = { is_group: 1, parent_id: 0, low_stock_threshold: 10 }
-assert.equal(stockQtyLevel({ qty: 0, product, config: DEFAULT_LOW_STOCK_CONFIG, members: [{ qty: 500, product: header }, { qty: 0, product }] }), 'out', 'header is ignored while a real member exists')
-assert.equal(stockQtyLevel({ qty: 500, product: header, config: DEFAULT_LOW_STOCK_CONFIG, members: [{ qty: 500, product: header }, { qty: 500, product: header }] }), 'healthy', 'a header-only family counts the headers')
-// A merged row renders the member rule in markup too.
-assert.ok(html('en', { qty: 16, product, members: lowMembers }).includes('data-stock-state="low"'))
+assert.equal(stockQtyLevel({ qty: 8, product: p101, config: DEFAULT_LOW_STOCK_CONFIG }), 'low', 'row 101 is low')
+assert.equal(stockQtyLevel({ qty: 50, product: p102, config: DEFAULT_LOW_STOCK_CONFIG }), 'healthy', 'row 102 is healthy')
+assert.ok(html('en', { qty: 8, product: p101 }).includes('data-stock-state="low"') && html('en', { qty: 50, product: p102 }).includes('data-stock-state="healthy"'))
+// Two low products that would sum to "healthy" stay two low rows.
+assert.equal(stockQtyLevel({ qty: 8, product, config: DEFAULT_LOW_STOCK_CONFIG }), 'low')
+assert.equal(stockQtyLevel({ qty: 16, product, config: DEFAULT_LOW_STOCK_CONFIG }), 'healthy', 'control: the sum alone would have been healthy')
+// There is no family input any more: a members prop changes nothing, and the family rule is gone from the client.
+assert.equal(stockQtyLevel({ qty: 16, product, config: DEFAULT_LOW_STOCK_CONFIG, members: [{ qty: 8, product }, { qty: 8, product }] }), 'healthy', 'members are not a thing; the figure alone decides')
+assert.equal((lowStock as Record<string, unknown>).stockGroupLevel, undefined, 'stockGroupLevel is removed')
+assert.equal((lowStock as Record<string, unknown>).isStockFamilyHeader, undefined, 'isStockFamilyHeader is removed')
 
 // ---- Both themes: every state has a light tint and a dark tint in the stylesheet ----
 const css = readFileSync(new URL('../src/styles/main.css', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -140,7 +130,7 @@ assert.ok(/width:\s*1px/.test(word[1]) && /margin-right:\s*-1px/.test(word[1]) &
 // ---- Mutants on the component source: each must break at least one pinned behaviour ----
 const source = readSrc('components/inventory/StockQty.tsx')
 const mutants: Array<{ name: string; from: string; to: string }> = [
-  { name: 'members ignored (judges the sum)', from: 'members && members.length > 1 ? stockGroupLevel(members, config) : stockLevelState(qty, product, config)', to: 'stockLevelState(qty, product, config)' },
+  { name: 'figure judged as healthy whatever its thresholds', from: 'return stockLevelState(qty, product, config)', to: "return stockLevelState(qty, undefined, config) === 'out' ? 'out' : 'healthy'" },
   { name: 'state word dropped from the tooltip', from: 'title={word}', to: 'title=""' },
   { name: 'screen-reader word dropped', from: '<span className="stock-qty-word">{` ${word}`}</span>', to: '' },
   { name: 'figure rendered twice (reads "55 Low Stock")', from: '<span className="stock-qty-word">{` ${word}`}</span>', to: '<span className="stock-qty-word">{` ${figure} ${word}`}</span>' },
@@ -154,15 +144,16 @@ for (const mutant of mutants) {
   const mutated = loadComponent(source.replace(mutant.from, mutant.to))
   language = 'en'
   const probes = [
-    html('en', { qty: 16, product, members: lowMembers }, mutated),
+    html('en', { qty: 8, product: p101 }, mutated),
     html('en', { qty: 4, product }, mutated),
     html('en', { qty: 0, product }, mutated),
     html('en', { qty: 40, product }, mutated),
+    html('en', { qty: 50, product: p102 }, mutated),
   ]
   const low = packs.en.low_stock
   const holds = probes[0].includes('data-stock-state="low"') && probes[1].startsWith(`<span data-stock-qty="" data-stock-state="low" title="${low}" class=`) && probes[1].replace(/<[^>]*>/g, '') === `4 ${low}` && !probes[1].includes('aria-hidden')
-    && probes[1].includes('stock-qty-low') && probes[2].includes('data-stock-state="out"') && probes[3].includes('stock-qty-healthy')
+    && probes[1].includes('stock-qty-low') && probes[2].includes('data-stock-state="out"') && probes[3].includes('stock-qty-healthy') && probes[4].includes('data-stock-state="healthy"')
   assert.ok(!holds, `mutant survived: ${mutant.name}`)
 }
 
-console.log(`PASS StockQty: three states x EN/KM, tooltip + screen-reader word, family rule, both themes, ${mutants.length} mutants killed`)
+console.log(`PASS StockQty: three states x EN/KM, tooltip + screen-reader word, two unfolded rows (101 low, 102 healthy), both themes, ${mutants.length} mutants killed`)

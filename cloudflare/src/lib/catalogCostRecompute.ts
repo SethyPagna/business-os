@@ -1,6 +1,6 @@
 import type { D1Compat } from './db'
 import type { MergedCostOutlier } from './productDetailRule'
-import { weightedMeanMoney4 } from './moneyPrecision'
+import { roundMoney4, weightedMeanMoney4 } from './moneyPrecision'
 
 // A cost read from a row, unknown (NULL) kept as null. Local on purpose: this lib is loaded alone by many source tests that stub
 // every other relative import.
@@ -66,16 +66,71 @@ const OVERRIDDEN_ON_HAND_QTY_SQL = `(SELECT SUM(bbs.quantity) FROM branch_batch_
             JOIN product_batches ob ON ob.id = bbs.batch_id
           WHERE ob.variant_product_id = products.id AND ob.is_active = 1
             AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0)`
-// Nearest 4dp, half away from zero -- weightedMeanMoney4, which rounds the
-// exact decimal quotient. SQLite's ROUND() rounds the binary double, so an
-// exact tie (1.0001 and 1.0002, one each: 1.00015) can land either side
-// depending on the engine version. Every input here is positive, so this
-// adds the half and truncates, with a 1e-8-unit nudge: with 4dp costs a
-// non-tie quotient sits at least 1/(2 x total quantity) units from a tie,
-// far above double error and far above the nudge.
-const HALF_UP_4DP = (value: string) => `CAST(${value} * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0`
+// Nearest 4dp, half away from zero: the SQL twin of roundMoney4 (moneyPrecision.ts), which rounds the exact decimal a double prints as. SQLite's
+// ROUND(x, 4) rounds the binary double, so an exact tie (1.0001 and 1.0002, one each: 1.00015) can land either side depending on the engine version.
+// This form scales once by 10000 times (1 + 3.6e-16) and rounds the scaled value half away from zero with ROUND(x), which is exact on integers and
+// halves: the 3.6e-16 relative nudge is larger than the error of the double (<= 1.1e-16), of the scaling (<= 1.1e-16) and of the product (<= 1.1e-16),
+// so a decimal tie lands on the tie whatever its magnitude, and smaller than half a unit while the scaled value is under 1.4e15 (a magnitude of
+// 1.4e11; money is capped at 1e11). Sign-symmetric (-1.00015 is -1.0002), NULL stays NULL, and the integer cast means no negative zero. The operand
+// appears once, so it may be an aggregate or a subquery. Equal to roundMoney4 on every decimal tie, 4-place value and random value tried up to
+// 1e8 (scripts/test-half-up-4dp-property-pure.cjs); a double within 2 ulps of a tie that is not the double nearest to it is read as the tie.
+export const HALF_UP_4DP = (value: string) => `(CAST(ROUND((${value}) * 10000.0000000000036) AS INTEGER) / 10000.0)`
+// The text migrations 0195 to 0261 shipped (positive values only, exact below about 16,000): kept so the 'legacy' and 'validated-unrounded' policies still
+// name those migrations' exact trigger text. Nothing new uses it.
+const HALF_UP_4DP_AS_SHIPPED = (value: string) => `CAST(${value} * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0`
 
-export type CatalogCostInputPolicy = 'legacy' | 'validated'
+/**
+ * 'legacy' = the 0195 / 0255 text; 'validated' = the current text (typed positive input, and the sold-out fallback rounded to 4 places like the
+ * weighted branch); 'validated-unrounded' = what 0256 and 0261 shipped (the fallback copies the lot cost verbatim). The last exists only so
+ * those migrations' pins and the 0312 recovery notes can still name their exact text.
+ */
+/**
+ * The exact JS twin of HALF_UP_4DP, as SQLite evaluates it: scale by 10000.0000000000036, ROUND(x) (SQLite adds half and truncates, away from zero for a
+ * negative), cast to an integer, divide by 10000.0. Null for a value that is not a finite number or whose scaled form leaves the int64 range (nothing
+ * money-sized does). Migration 0313 rounds long costs with this text, and roundStoredCost (roundMoney4) can differ from it on a near-tie double (about
+ * 0.25% of division results: 21.398249999999997 is 21.3982 by roundStoredCost and 21.3983 here), so a guard that asks whether a live cost is the saved
+ * cost stored to 4 places accepts either form (isCostRoundingOf).
+ */
+export function halfUp4dpJs(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  const scaled = value * 10000.0000000000036
+  if (!(Math.abs(scaled) < 9.2e18)) return null
+  const units = scaled < 0 ? -Math.trunc(-scaled + 0.5) : Math.trunc(scaled + 0.5)
+  return units / 10000 + 0
+}
+
+/** The 4-place forms a saved cost may take after rounding: roundStoredCost's and HALF_UP_4DP's, never the saved figure itself. */
+export function costRoundingForms(saved: unknown): number[] {
+  if (typeof saved !== 'number' || !Number.isFinite(saved)) return []
+  let nearest: number | null = null
+  try { nearest = roundStoredCost(saved) } catch { nearest = null }
+  const half = halfUp4dpJs(saved)
+  return [...new Set([nearest, half].filter((form): form is number => form !== null && form !== saved))]
+}
+
+/** True when `live` is a number that is the number `saved` stored to 4 places by either rule, and is not `saved` itself. NULL is never rounding. */
+export function isCostRoundingOf(saved: unknown, live: unknown): boolean {
+  return typeof live === 'number' && costRoundingForms(saved).includes(live)
+}
+
+/** A stored cost value as it must be written: nearest 4 places, half away from zero; unknown (NULL, non-numeric) stays null. */
+export function roundStoredCost(value: unknown): number | null {
+  return value == null || value === '' || !Number.isFinite(Number(value)) ? null : roundMoney4(typeof value === 'string' ? value : Number(value))
+}
+
+/**
+ * True when `after` is `before` itself or only `before` stored to 4 places. Saving a product that still holds a legacy cost over 4 places
+ * rounds it; that is not a typed cost, so it must not record a manual cost entry (which would freeze the catalog formula at the baseline)
+ * or confirm a cost review. The product form shows and pre-fills 4 decimals, so a plain re-save sends the rounded value back.
+ * NULL against a number is never rounding: NULL to 0 and 0 to NULL stay exact and record an override.
+ */
+export function isCostRoundingOnly(after: number | null | undefined, before: number | null | undefined): boolean {
+  if ((after ?? null) === (before ?? null)) return true
+  if (after == null || before == null || !Number.isFinite(before)) return false
+  return roundMoney4(before) === after
+}
+
+export type CatalogCostInputPolicy = 'legacy' | 'validated' | 'validated-unrounded'
 
 function positiveCostSql(value: string, inputPolicy: CatalogCostInputPolicy): string {
   return inputPolicy === 'legacy'
@@ -87,15 +142,16 @@ function buildCatalogCostFormulaSql(inputPolicy: CatalogCostInputPolicy): Readon
   const eligibleLot = `pb.variant_product_id = products.id AND pb.is_active = 1
         AND ${positiveCostSql('pb.unit_cost_usd', inputPolicy)}
         AND (pb.id > ${LATEST_MANUAL_BASELINE_SQL} OR ${LATEST_MANUAL_BASELINE_SQL} IS NULL)`
+  const halfUp = inputPolicy === 'validated' ? HALF_UP_4DP : HALF_UP_4DP_AS_SHIPPED
   return { hasRecordedLot: `EXISTS(SELECT 1 FROM product_batches pb WHERE ${eligibleLot})`, derive: `COALESCE(
-    (SELECT CASE WHEN SUM(qty) > 0 THEN ${HALF_UP_4DP('SUM(qty * cost) / SUM(qty)')} END
+    (SELECT CASE WHEN SUM(qty) > 0 THEN ${halfUp('SUM(qty * cost) / SUM(qty)')} END
       FROM (SELECT pb.unit_cost_usd AS cost, ${LOT_ON_HAND_QTY_SQL} AS qty FROM product_batches pb
         WHERE ${eligibleLot}
         UNION ALL
         SELECT pce.cost_usd AS cost, ${OVERRIDDEN_ON_HAND_QTY_SQL} AS qty FROM product_cost_entries pce
         WHERE pce.id = ${LATEST_MANUAL_ENTRY_ID_SQL}
           AND ${positiveCostSql('pce.cost_usd', inputPolicy)})),
-    (SELECT pb.unit_cost_usd FROM product_batches pb
+    (SELECT ${inputPolicy === 'validated' ? HALF_UP_4DP('pb.unit_cost_usd') : 'pb.unit_cost_usd'} FROM product_batches pb
       WHERE ${eligibleLot}
       ORDER BY COALESCE(pb.received_at, '') DESC, pb.id DESC LIMIT 1))` }
 }
@@ -103,6 +159,7 @@ function buildCatalogCostFormulaSql(inputPolicy: CatalogCostInputPolicy): Readon
 const CATALOG_COST_FORMULAS = {
   legacy: Object.freeze(buildCatalogCostFormulaSql('legacy')),
   validated: Object.freeze(buildCatalogCostFormulaSql('validated')),
+  'validated-unrounded': Object.freeze(buildCatalogCostFormulaSql('validated-unrounded')),
 }
 
 export function catalogCostFormulaSql(inputPolicy: CatalogCostInputPolicy = 'validated'): Readonly<{ derive: string; hasRecordedLot: string }> {
@@ -148,6 +205,7 @@ function buildCatalogCostChangedSql(inputPolicy: CatalogCostInputPolicy): string
 const CATALOG_COST_WRITES = {
   legacy: Object.freeze({ set: buildCatalogCostSetSql('legacy'), changed: buildCatalogCostChangedSql('legacy') }),
   validated: Object.freeze({ set: buildCatalogCostSetSql('validated'), changed: buildCatalogCostChangedSql('validated') }),
+  'validated-unrounded': Object.freeze({ set: buildCatalogCostSetSql('validated-unrounded'), changed: buildCatalogCostChangedSql('validated-unrounded') }),
 }
 
 /**
@@ -536,7 +594,9 @@ export function buildCatalogCostBreakdown(
     return { ...base, weight_quantity: overriddenOnHand, share: shareOf(overriddenOnHand), excluded: null }
   })
 
-  const fallbackCost = positiveCost(fallbackLot?.unit_cost_usd)
+  // The SQL fallback rounds the newest lot's cost to 4 places (HALF_UP_4DP); the breakdown must show the figure that is stored.
+  const fallbackLotCost = positiveCost(fallbackLot?.unit_cost_usd)
+  const fallbackCost = fallbackLotCost === null ? null : roundMoney4(fallbackLotCost)
   const derivedUsd = weightedMean ?? fallbackCost
   const resultUsd = derivedUsd != null ? derivedUsd : knownCost(product.cost_price_usd)
   const distinctUsd = [...new Set(weightedTerms.map((term) => term.cost_usd).concat(fallbackCost !== null ? [fallbackCost] : []))].sort((a, b) => a - b)
@@ -636,7 +696,7 @@ export function planManualCostChange(
   const beforeKhr = canonicalCost(before.cost_price_khr)
   const afterUsd = hasUsd ? canonicalCost(body.cost_price_usd) : beforeUsd
   const afterKhr = hasKhr ? canonicalCost(body.cost_price_khr) : beforeKhr
-  const changed = (hasUsd && afterUsd !== beforeUsd) || (hasKhr && afterKhr !== beforeKhr)
+  const changed = (hasUsd && !isCostRoundingOnly(afterUsd, beforeUsd)) || (hasKhr && !isCostRoundingOnly(afterKhr, beforeKhr))
   if (!changed) return null
 
   // product_cost_entries records costs that were typed (cost_usd is NOT NULL), so a cleared or still-unknown USD cost
@@ -647,7 +707,8 @@ export function planManualCostChange(
     VALUES (@productId, @costUsd, @costKhr, @previousCostUsd, 'manual', @userId, @userName,
       (SELECT COALESCE(MAX(id),0) FROM product_batches WHERE variant_product_id=@productId))
   `, params: { productId, costUsd: afterUsd, costKhr: hasKhr ? afterKhr : null,
-    previousCostUsd: before.cost_price_usd, userId: actor.id, userName: actor.name } } }
+    // The entry records the cost it replaced; a legacy value over 4 places is recorded at 4 (cost-4dp).
+    previousCostUsd: roundStoredCost(before.cost_price_usd), userId: actor.id, userName: actor.name } } }
 }
 
 export function planManualCostEntry(
@@ -688,7 +749,7 @@ export function typedCostEntriesBeforeWriteSql(input: { nextUsdSql: string | nul
   const usdSql = nextUsdSql ?? 'products.cost_price_usd'
   // cost_usd is NOT NULL and an unknown cost is not an entry: only a USD cost that will be known is recorded (0 included).
   return `INSERT INTO product_cost_entries (product_id, cost_usd, cost_khr, previous_cost_usd, source, user_id, user_name, baseline_batch_id)
-    SELECT products.id, ${usdSql}, ${nextKhrSql ?? 'NULL'}, products.cost_price_usd,
+    SELECT products.id, ${usdSql}, ${nextKhrSql ?? 'NULL'}, ${HALF_UP_4DP('products.cost_price_usd')},
       'manual', @costEntryUserId, @costEntryUserName,
       (SELECT COALESCE(MAX(pb.id), 0) FROM product_batches pb WHERE pb.variant_product_id = products.id)
     FROM products
@@ -745,7 +806,7 @@ export function typedCostEntryAfterWriteStatement(
   ].filter(Boolean)
   return {
     sql: `INSERT INTO product_cost_entries (product_id, cost_usd, cost_khr, previous_cost_usd, source, user_id, user_name, baseline_batch_id)
-    SELECT products.id, products.cost_price_usd, ${written.khr ? 'products.cost_price_khr' : 'NULL'}, @costEntryBeforeUsd,
+    SELECT products.id, products.cost_price_usd, ${written.khr ? 'products.cost_price_khr' : 'NULL'}, @costEntryPreviousUsd,
       'manual', @costEntryUserId, @costEntryUserName,
       (SELECT COALESCE(MAX(pb.id), 0) FROM product_batches pb WHERE pb.variant_product_id = products.id)
     FROM products
@@ -754,6 +815,7 @@ export function typedCostEntryAfterWriteStatement(
       costEntryProductId: productId,
       costEntryBeforeUsd: before.cost_price_usd ?? null,
       costEntryBeforeKhr: before.cost_price_khr ?? null,
+      costEntryPreviousUsd: roundStoredCost(before.cost_price_usd),
       ...costEntryActorParams(actor),
     },
   }

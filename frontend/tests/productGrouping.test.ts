@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { buildProductCategorySections, buildProductGroups, buildProductGroupSections, getNameInitialSection, hideZeroStockGroupedChildRows, normalizeProductGroupName } from '../src/utils/productGrouping.ts'
+import { buildProductCategorySections, buildProductGroups, buildProductGroupSections, getNameInitialSection, normalizeProductGroupName } from '../src/utils/productGrouping.ts'
+import { hideZeroStockGroupedChildRows } from '../src/utils/productGroupVisibility.ts'
 
 let failed = 0
 

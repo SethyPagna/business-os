@@ -1,10 +1,7 @@
 -- 0166: merge the production customer groups that share the same name AND
--- the same phone (including groups that share an EMPTY phone, e.g. the 9
--- groups the coordinator found 2026-09-15: "ah ling" 099 503 494 -> ids
--- 25000,25001; "sok han" 088 444 9557 -> 25040,25041; and seven groups with
--- an empty phone -- "be me" 19739,24990; "general" 24969,24974,25004; "je
--- meng" 20200,24980; "malis phouk" 24533,24989; "ra" 20178,24991; "sokha
--- lin" 20582,24988; "za" 20852,24998).
+-- the same phone (including groups that share an EMPTY phone). The
+-- coordinator found 9 such groups on 2026-09-15: two with a real phone
+-- (two rows each) and seven with an empty phone (two or three rows each).
 --
 -- PREPARED, NOT APPLIED. Data-only; no DDL. Append-only chain (0165 is the
 -- prior migration). TABLE-DRIVEN, same shape as 0165: the cluster is

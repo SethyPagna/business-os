@@ -50,7 +50,7 @@ async function main() {
     // The full UPDATEs: an override_add and an override_replace row of a matched product, and a new product's INSERT. A matched
     // row with no _action in merge mode is a stock merge and writes no field. The file's cost is merged with the stored one (a mean),
     // so these assert the twin IS the stored cost, and that the write happened.
-    await importCsv(h, ['name,cost_usd,cost_khr,stock_quantity,_action', 'Merge target,7,28000,0,override_add', 'Override target,8.5,34000,0,override_replace', 'New costed,6,24000,0,', 'New unknown,,,0,'].join('\n'))
+    await importCsv(h, ['name,cost_usd,cost_khr,stock_quantity,_action', 'Merge target,7,28000,0,override_add', 'Override target,8.512345,34000.00005,0,override_replace', 'New costed,6,24000,0,', 'New unknown,,,0,'].join('\n'))
     const twinned = async (name, before) => {
       const row = await read(name)
       assert.notEqual(row.cost_price_usd, before.cost_price_usd, `${name}: the import wrote the cost`)
@@ -59,6 +59,8 @@ async function main() {
     }
     await twinned('Merge target', { cost_price_usd: 5 })
     await twinned('Override target', { cost_price_usd: 5 })
+    // cost cost-4dp: the merged figure (a mean of 5 and 8.512345; of 20000 and the file 34000.00005, itself stored as 34000.0001) is stored at 4 places, twin included
+    assert.deepEqual(await read('Override target'), { cost_price_usd: 6.7562, purchase_price_usd: 6.7562, cost_price_khr: 27000.0001, purchase_price_khr: 27000.0001 }, 'import override UPDATE stores 4 places, twin included')
     assert.deepEqual(await read('New costed'), { cost_price_usd: 6, purchase_price_usd: 6, cost_price_khr: 24000, purchase_price_khr: 24000 }, 'INSERT of a new product')
     assert.deepEqual(await read('New unknown'), { cost_price_usd: null, purchase_price_usd: 0, cost_price_khr: null, purchase_price_khr: 0 }, 'a new product with no cost: unknown, twin 0')
 
@@ -72,6 +74,12 @@ async function main() {
     await importCsv(h, ['name,cost_usd,cost_khr', 'Replace target,11,44000'].join('\n'), { import_mode: 'replace_columns', replace_columns: ['cost_price_khr'] })
     assert.deepEqual(await read('Replace target'), { cost_price_usd: 11, purchase_price_usd: 11, cost_price_khr: 44000, purchase_price_khr: 44000 })
 
+    // cost-4dp: costs in a file are stored to 4 places, nearest, ties away from zero, in the INSERT and in an override UPDATE, twin included; the
+    // census predicate finds nothing over 4 places in products, lots or manual cost entries afterwards.
+    await importCsv(h, ['name,cost_usd,cost_khr,stock_quantity,_action', 'Long import,4.166666666,4100.12345,0,', 'Tie import,1.00015,,0,'].join('\n'))
+    assert.deepEqual(await read('Long import'), { cost_price_usd: 4.1667, purchase_price_usd: 4.1667, cost_price_khr: 4100.1235, purchase_price_khr: 4100.1235 }, 'import INSERT stores 4 places')
+    assert.equal((await read('Tie import')).cost_price_usd, 1.0002, 'import INSERT: the decimal tie 1.00015 goes up')
+    assert.deepEqual({ ...(await h.q1(require('./harness/cost-4dp-census.cjs').countsSql)) }, { products: 0, lots: 0, entries: 0 }, 'census after the imports')
     assert.deepEqual(await read('Untouched'), { cost_price_usd: 4, purchase_price_usd: 0, cost_price_khr: 16000, purchase_price_khr: 0 }, 'a product the file does not name is not touched (0269 repairs what exists)')
     assert.equal((await h.q1("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'")).n, 0)
     // 0269 ran on the empty chain in workerd D1 as part of the migrations the harness applies

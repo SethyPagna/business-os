@@ -5,7 +5,7 @@
 -- later catalog price, another lot or a same-name product. Any replacement must be
 -- re-derived from that rule.
 --
--- 0200: past sale lines and customer return lines whose recorded cost came
+-- 0314 (numbered 0200 until 16 Nov 2026; renumbered above 0313 so the cost 4dp repair runs first; its work tables keep their 0200 names): past sale lines and customer return lines whose recorded cost came
 -- from the buggy catalog average get the cost the stock on hand actually had
 -- when they were written.
 --
@@ -13,7 +13,7 @@
 -- This file is HELD in ops/scripts/migration/held/, deliberately OUTSIDE
 -- cloudflare/migrations, so no deploy applies it (release.cjs stepMigrations
 -- and deploy.yml run_migrations apply every waiting file in the chain).
--- Moving it into cloudflare/migrations -- keeping this file name, 0200 -- is
+-- Moving it into cloudflare/migrations -- keeping this file name, 0314 -- is
 -- itself the "apply" decision. It needs 0195 (catalog_cost_on_hand) applied
 -- first AND the post-0195 Worker serving for at least 2 hours (the deploy
 -- window below), so the window's lines are settled before the plan reads them.

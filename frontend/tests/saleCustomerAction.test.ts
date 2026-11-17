@@ -212,7 +212,7 @@ try {
   assert.doesNotMatch(container.textContent, /Walk-in|General \(anonymous\)/)
   await act(async () => root.render(React.createElement(RoutedCustomerEditor, {
     sale: { id: 73, customer_id: 22305, customer_name: 'General', customer_is_anonymous: 0 },
-    currentCustomer: { id: 22305, name: 'General', phone: '086897171', is_anonymous: 0 },
+    currentCustomer: { id: 22305, name: 'General', phone: '086555101', is_anonymous: 0 },
   })))
   assert.match(container.textContent, /Choose another customer/, 'a linked real customer uses the same Sales picker by default')
 

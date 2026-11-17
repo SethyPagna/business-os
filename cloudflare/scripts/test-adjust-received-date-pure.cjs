@@ -823,7 +823,7 @@ async function main() {
     assert.strictEqual(movement.product_id, json.productId)
   })
 
-  await check('unlock-pricing normalizes only explicit new costs and preserves omitted historical source costs', async () => {
+  await check('unlock-pricing stores every new cost to 4 places: explicit ones, and the source row cost it inherits when none is named (cost-4dp)', async () => {
     seed()
     seedStockFixture(rawDb,()=>rawDb.prepare('UPDATE products SET cost_price_usd=2.345678,cost_price_khr=123.456789,selling_price_usd=4 WHERE id=1').run())
     const explicit = await req('POST', '/adjust', {
@@ -845,7 +845,7 @@ async function main() {
     })
     assert.strictEqual(omitted.status, 200, JSON.stringify(omitted.json))
     assert.deepStrictEqual({ ...rawDb.prepare('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=?').get([omitted.json.productId]) }, {
-      cost_price_usd: 1, cost_price_khr: 123.456789, // USD: its $1.00 lot (0195); KHR: inherited, unrounded
+      cost_price_usd: 1, cost_price_khr: 123.4568, // USD: its $1.00 lot (0195); KHR: inherited from the source's 123.456789, stored to 4 places
     })
     const countBefore = rawDb.prepare('SELECT COUNT(*) n FROM products').get().n
     const denied = await req('POST', '/adjust', {

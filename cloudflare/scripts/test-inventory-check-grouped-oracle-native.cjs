@@ -116,7 +116,7 @@ async function main() {
       const edits = { [file]: [pair] }
       // M9 drops the family-key tie-break from the ranking AND from the page order (the ranking alone is hidden by GROUP BY's own key order).
       const wrapperTail = String.fromCharCode(10) + '      const result = await schemaBatch(db, [statements[0], { ...statements[1], sql: wrappedPageSql }, { sql: branchesSql'
-      if (id === 'M9') edits['inventoryCheckProducts.ts'] = [['__page.__family_root_id ASC,__page.id ASC`' + wrapperTail, '__page.id ASC`' + wrapperTail]]
+      if (id === 'M9') edits['inventoryCheckProducts.ts'] = [['__page.__family_root_id ASC,${IC_PAGE_INTRA_ORDER_SQL}`' + wrapperTail, '${IC_PAGE_INTRA_ORDER_SQL}`' + wrapperTail]]
       if (id === 'M8') edits[file] = [[...pair], ["const invalid = (parameter: string)", "const dayOfRow = (at: unknown) => String(at).slice(0, 10)\nconst invalid = (parameter: string)"]]
       const api = await bundleMutated(files[file], edits)
       let failure = null

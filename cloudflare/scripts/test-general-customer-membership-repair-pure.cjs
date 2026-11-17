@@ -27,7 +27,7 @@ function seed() {
   const db = openDb(loadAll())
   db.exec(`DELETE FROM audit_logs; DELETE FROM action_history; DELETE FROM portal_accounts; DELETE FROM returns; DELETE FROM sales; DELETE FROM customers;`)
   db.prepare(`INSERT INTO customers(id,name,phone,membership_number,updated_at,is_anonymous) VALUES(24969,'general','','LC-04971','2026-09-09 01:52:30',1)`).run()
-  db.prepare(`INSERT INTO customers(id,name,phone,membership_number,updated_at,is_anonymous) VALUES(22305,'General','086897171','LC-02448','2026-09-09 01:52:30',0)`).run()
+  db.prepare(`INSERT INTO customers(id,name,phone,membership_number,updated_at,is_anonymous) VALUES(22305,'General','086555101','LC-02448','2026-09-09 01:52:30',0)`).run()
   db.prepare(`INSERT INTO sales(id,receipt_number,customer_id,created_at) VALUES(1,'R-1',24969,'2026-09-09')`).run()
   db.prepare(`INSERT INTO returns(id,return_number,customer_id,created_at) VALUES(1,'RET-1',24969,'2026-09-09')`).run()
   return db
