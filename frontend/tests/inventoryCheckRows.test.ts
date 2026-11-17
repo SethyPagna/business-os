@@ -367,6 +367,17 @@ try {
   assert.deepEqual(calls.at(-1), { productId: 11, patch: { state: 'unstarted', counted_quantity: null, reason: null }, revision: 3 })
   await surface.click(surface.button('Synthetic small variant', row(surface, 11)))
   assert.deepEqual(opened, [11], 'details use the real variant identity')
+  // The whole row opens the detail (owner, 17 Nov), except on its controls; the row is a tab stop and Enter on it opens too.
+  opened.length = 0
+  await surface.click(surface.find(node => node.getAttribute('data-inventory-check-main') !== null && row(surface, 11).contains(node), 'main line of row 11'))
+  assert.deepEqual(opened, [11], 'a click on the empty part of the row opens it')
+  const savesBefore = calls.length
+  await surface.click(surface.button('Clear check', row(surface, 11)))
+  assert.deepEqual(opened, [11], 'a click on a check button belongs to the button, not the row')
+  assert.equal(calls.length, savesBefore + 1)
+  assert.equal(propsOf(row(surface, 11)).tabIndex, 0, 'the row is focusable')
+  await surface.call(row(surface, 11), 'onKeyDown', [{ key: 'Enter', preventDefault() {}, nativeEvent: {}, currentTarget: row(surface, 11), target: row(surface, 11) }])
+  assert.deepEqual(opened, [11, 11], 'Enter on the row opens it')
   await surface.unmount()
 
   const issue = { product_id: 12, state: 'issue', counted_quantity: null, reason: 'Old reason', revision: 2 } satisfies InventoryCheckObservation

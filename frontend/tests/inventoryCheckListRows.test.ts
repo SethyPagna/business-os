@@ -226,6 +226,47 @@ const cases: Array<[string, () => Promise<void>]> = [
     await s.render({ ...base, products: [withCost], selecting: false, costText: money, onOpenCost: () => {} })
     assert.equal(costs(s).length, 1, 'cost does not depend on the price grant')
   }],
+  ['a click anywhere on a row opens the detail, except on its controls; a press on a copy target waits out the double-click window (the copy gesture still works)', async () => {
+    const s = await mount({ products: [{ ...listed[0], selling_price_usd: 12.5, cost_price_usd: 2 } as unknown as InventoryCheckProduct, listed[1]], priceText: (usd: unknown) => `$${usd}`, costText: (usd: unknown) => `$${usd}`, onOpenCost: () => {} })
+    const opens = () => calls.filter(call => call[0] === 'open').length
+    const start = opens()
+    const dead: Array<[string, MemoryNode]> = [
+      ['the status button', inRow(s, 501, 'data-check-action')],
+      ['the count input', inRow(s, 501, 'data-check-count')],
+      ['the cost value', inRow(s, 501, 'data-check-cost')],
+    ]
+    for (const [what, node] of dead) { await s.click(node); assert.equal(opens(), start, `a click on ${what} does not open the detail`) }
+    const main = inRow(s, 501, 'data-inventory-check-main')
+    await s.click(main)
+    assert.equal(opens(), start + 1, 'a click on the empty part of the row opens it')
+    assert.deepEqual(calls.at(-1), ['open', 501])
+    const barcode = row(s, 501).querySelectorAll('span').find(node => node.textContent === '885000501' && node.getAttribute('data-copy-value') !== null) as MemoryNode
+    assert.ok(barcode, 'the barcode is a copy target')
+    // pressed directly (the harness's click waits for every timer to go quiet, which would hide the window)
+    ;(propsOf(row(s, 501)).onClick as (event: unknown) => void)({ target: barcode, currentTarget: row(s, 501), defaultPrevented: false })
+    assert.equal(opens(), start + 1, 'a press on a copy target does not open at once: a double-click must be able to copy instead')
+    await new Promise(resolve => setTimeout(resolve, 400))
+    assert.equal(opens(), start + 2, 'a single press on it opens after the double-click window')
+    // a click that bubbles through React from a portal (the count popover) is not a click on the row
+    const li = row(s, 502)
+    const outside = row(s, 501)
+    await s.call(li, 'onClick', [{ target: outside, currentTarget: li, defaultPrevented: false }])
+    assert.equal(opens(), start + 2, 'a click whose target is outside the row in the DOM (a portal) is ignored')
+    await s.call(li, 'onClick', [{ target: li, currentTarget: li, defaultPrevented: true }])
+    assert.equal(opens(), start + 2, 'a click a control already handled is ignored')
+  }],
+  ['the row is focusable and Enter ON the row opens it; Enter inside its count input does not', async () => {
+    const s = await mount({ drafts: { 501: { selected: true, count: '8', checked: false, note: '' } } })
+    const li = row(s, 501)
+    assert.equal(propsOf(li).tabIndex, 0, 'the row is a tab stop')
+    const start = calls.filter(call => call[0] === 'open').length
+    await s.call(li, 'onKeyDown', [{ key: 'Enter', target: li, currentTarget: li, preventDefault() {}, nativeEvent: {} }])
+    assert.deepEqual(calls.at(-1), ['open', 501])
+    await s.call(li, 'onKeyDown', [{ key: ' ', target: li, currentTarget: li, preventDefault() {}, nativeEvent: {} }])
+    await s.call(li, 'onKeyDown', [{ key: 'Enter', target: inRow(s, 501, 'data-check-count'), currentTarget: li, preventDefault() {}, nativeEvent: {} }])
+    assert.equal(calls.filter(call => call[0] === 'open').length, start + 1, 'only Enter on the row itself opens; Enter in the count input belongs to the count')
+    assert.equal(propsOf(inRow(s, 501, 'data-check-image')).tabIndex, -1, 'the image button is no second tab stop for the same action')
+  }],
   ['Enter in a valid count moves to the next row’s count input, unless the page handled it', async () => {
     const entered: Array<number | string> = [], invalidEnters: string[] = []
     let handled = false

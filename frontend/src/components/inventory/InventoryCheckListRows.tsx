@@ -26,6 +26,7 @@ import { finiteQuantity, parseCount, signedDelta } from './InventoryCheckCountEd
 import type { InventoryCheckFocusRequest } from './InventoryCheckRows.tsx'
 import { UNSAVED_ROW_CLASS } from './inventoryCheckGroups.ts'
 import StockQty from './StockQty.tsx'
+import { rowClickOpens } from './inventoryCheckRowClick.ts'
 
 /** What a person has entered on one row of the list but not yet submitted. `checked`: the count was filled from Now by the row's check button. */
 export type ListDraft = { selected: boolean; count: string; checked: boolean; note: string; /** Counts typed per received date (ic_lot_counts); the row's count is their sum. */ lots?: LotDraft; /** The stocked received dates the row listed when a date was last typed on it (so Submit can check, on any page, that none was left out). */ stocked?: readonly StockedDate[] }
@@ -281,12 +282,19 @@ function ListRow({ product, draft, adornment, refusal, columns, countable, copy,
     } else if (event.key === 'Escape') { event.preventDefault(); if (!byBatch) onCount(product, '') }
   }
 
+  // The whole row opens the detail (owner, 17 Nov: "can only click to view details of the product when clicked on image, can expand it"). It is focusable and Enter opens it; the keydown of a control inside bubbles here too, so only Enter ON the row counts.
+  const openDetail = () => onOpenProduct(product)
+  function onRowKeyDown(event: KeyboardEvent<HTMLLIElement>) {
+    if (event.key === 'Enter' && event.target === event.currentTarget && !event.nativeEvent?.isComposing) { event.preventDefault(); openDetail() }
+  }
+
   return <li data-inventory-check-row={id} data-check-list-status={status ?? undefined} data-selected={selected ? '' : undefined} data-unsaved={counting && draft ? '' : undefined} data-refused={refusal ? '' : undefined} data-scan-hit={scanHit ? '' : undefined}
-    className={`relative min-w-0 max-w-full border-b border-l-2 border-b-gray-100 py-2 pl-2 pr-1 last:border-b-0 dark:border-b-gray-800 ${edge} ${counting && draft ? UNSAVED_ROW_CLASS : ''} ${scanHit ? 'rounded-sm ring-2 ring-primary-400 dark:ring-primary-300' : ''}`}>
+    tabIndex={0} onClick={event => rowClickOpens(event, openDetail)} onKeyDown={onRowKeyDown}
+    className={`relative min-w-0 max-w-full cursor-pointer border-b border-l-2 border-b-gray-100 py-2 pl-2 pr-1 last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:border-b-gray-800 ${edge} ${counting && draft ? UNSAVED_ROW_CLASS : ''} ${scanHit ? 'rounded-sm ring-2 ring-primary-400 dark:ring-primary-300' : ''}`}>
     {/* A count waiting for an approver (ic_fix_stock) is shown ONCE on this surface: the status icon (the hourglass). The gutter mini tag of the review queue would repeat it. */}
     {/* One compact line where the width allows: the image keeps its square, the name takes the room, the status icon and the count input sit beside it. */}
     <div className="flex min-w-0 items-center gap-2" data-inventory-check-main>
-      <button type="button" onClick={() => onOpenProduct(product)} data-check-image className="relative block aspect-square h-12 w-12 shrink-0 overflow-hidden rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 lg:h-10 lg:w-10" aria-label={product.name} title={product.name}>
+      <button type="button" tabIndex={-1} onClick={openDetail} data-check-image className="relative block aspect-square h-12 w-12 shrink-0 overflow-hidden rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 lg:h-10 lg:w-10" aria-label={product.name} title={product.name}>
         <ProductImage src={product.image_path || undefined} alt="" className="absolute inset-0 h-full w-full rounded-lg object-cover" />
       </button>
       <div className="min-w-0 flex-1 lg:contents">
