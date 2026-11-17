@@ -2190,17 +2190,6 @@ export function mergeKeeperRestoreStatement(r: MergeReversal, canChangeProductIm
   }
 }
 
-// A kept lot's cost leaves the undo as a 4-place stored cost (half away from zero), like every cost writer: a no-op on 4-place data, and a
-// long pre-merge value (a lot costed before the 4-place rounding) is restored as the rounded figure the rest of the system holds. The
-// scale-once-and-round form is the one catalogCostRecompute's HALF_UP_4DP uses. (No runtime import here: test loaders stub this module's imports.)
-export function roundRestoredLotCost(value: unknown): number | null {
-  if (value == null || value === '') return null
-  const cost = Number(value)
-  if (!Number.isFinite(cost)) return null
-  const rounded = Math.round(Math.abs(cost) * 10000.0000000000036) / 10000
-  return cost < 0 ? -rounded : rounded
-}
-
 // The set-based reversal of a merge's lot folds: one statement per kind, however many lots were folded (it was about 8 per lot, plus one per
 // extra branch). Each statement binds one JSON parameter read with json_each (far below D1's 100 bindings, flat expression depth); the id
 // maps are chunked so no parameter or correlated lookup grows with the lot count. ORDER (the B3 order): lots are reactivated first, every
@@ -2265,7 +2254,7 @@ export function mergeFoldReversalStatements(folds: NonNullable<MergeReversal['fo
   // The kept lot's own cost, expiry and activity before the fold, once per kept lot, written AFTER every folded lot's stock is back.
   const restoreRows = [...keeperLotRestores].map(([id, before]) => ({
     id,
-    cost: roundRestoredLotCost(before.unit_cost_usd),
+    cost: roundStoredCost(before.unit_cost_usd),
     expiry: before.expiry_date == null ? null : String(before.expiry_date),
     active: before.is_active == null ? null : Number(before.is_active),
   }))

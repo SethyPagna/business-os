@@ -123,7 +123,8 @@ async function interruptedWorld(label, { pre = null, run0313 = false, lostReconc
 }
 
 async function main() {
-  // 1. Normal paths: exact D1 calls / statements (measured at 7aa09848b, the tip before this lane's redo preflight; the preflight reuses the redo's own read).
+  // 1. Normal paths: exact D1 calls / statements (re-measured on rc/20261117b with merge-by-date's set-based fold composed in; the 3-member and resume
+  // figures fell from 7aa09848b's. The redo preflight reuses the redo's own read).
   const two = await normalWorld('2-member normal', 2, null)
   assert.deepEqual(two.undo, [[9, 53]], '2-member group undo calls/statements')
   assert.deepEqual(two.redo, [[16, 98]], '2-member group redo calls/statements')
@@ -131,31 +132,31 @@ async function main() {
   assert.deepEqual(twoLong.undo, [[9, 53]], 'a long cost with no 0313 reads nothing live (undo)')
   assert.deepEqual(twoLong.redo, [[16, 98]], 'a long cost with no 0313 reads nothing live (redo)')
   const three = await normalWorld('3-member normal', 3, null)
-  assert.deepEqual(three.undo, [[9, 58], [9, 53]], '3-member group undo calls/statements')
-  assert.deepEqual(three.redo, [[16, 95], [18, 108]], '3-member group redo calls/statements')
+  assert.deepEqual(three.undo, [[9, 56], [9, 53]], '3-member group undo calls/statements')
+  assert.deepEqual(three.redo, [[16, 95], [17, 99]], '3-member group redo calls/statements')
 
   // Apply resume after an interruption: the normal path.
   const a1 = await interruptedWorld('A1 resume after the time budget, nothing long')
   assert.equal(a1.again.status, 200, JSON.stringify(a1.again.body).slice(0, 300))
   assert.equal(a1.again.body.status, 'completed', JSON.stringify(a1.again.body).slice(0, 300))
   assert.deepEqual(a1.members, ['undo_ready', 'undo_ready'])
-  assert.deepEqual(a1.counts, [32, 139], 'apply resume calls/statements (an eager live read before the fold is red)')
+  assert.deepEqual(a1.counts, [31, 130], 'apply resume calls/statements (an eager live read before the fold is red)')
   const a1b = await interruptedWorld('A1b resume, a long cost but no 0313', { pre: KHR_1 })
   assert.equal(a1b.again.body.status, 'completed')
-  assert.deepEqual(a1b.counts, [32, 139], 'a long cost with no 0313 reads nothing live (resume)')
+  assert.deepEqual(a1b.counts, [31, 130], 'a long cost with no 0313 reads nothing live (resume)')
 
   // The same resume after 0313 completes, with the one bounded retry.
   const a2 = await interruptedWorld('A2 resume after the time budget, a lot long, 0313 between', { pre: LOT_1, run0313: true })
   assert.equal(a2.again.body.status, 'completed', JSON.stringify(a2.again.body).slice(0, 300))
   assert.deepEqual(a2.members, ['undo_ready', 'undo_ready'])
-  assert.ok(a2.counts[0] > 32 && a2.counts[0] <= 50, `rounded resume stays bounded: ${a2.counts}`)
+  assert.ok(a2.counts[0] > 31 && a2.counts[0] <= 50, `rounded resume stays bounded: ${a2.counts}`)
 
   // 2. A committed fold whose history receipt was lost, then 0313, then the resume: the reconcile takes the lazy retry too.
   const control = await interruptedWorld('R0 lost receipt, nothing long, no 0313', { lostReconcile: true })
   assert.deepEqual(control.pending, ['history_pending', 'planned'], 'the first fold committed and is waiting for its receipt')
   assert.equal(control.again.body.status, 'completed', JSON.stringify(control.again.body).slice(0, 300))
   assert.deepEqual(control.members, ['undo_ready', 'undo_ready'])
-  assert.deepEqual(control.counts, [42, 175], 'a lost-receipt resume with nothing rounded reads nothing live (an eager read in the reconcile is red)')
+  assert.deepEqual(control.counts, [41, 166], 'a lost-receipt resume with nothing rounded reads nothing live (an eager read in the reconcile is red)')
   for (const [label, pre] of [['a lot long', LOT_1], ['the duplicate KHR long', KHR_1]]) {
     const r = await interruptedWorld(`R1 lost receipt, ${label}, 0313 between`, { pre, run0313: true, lostReconcile: true })
     assert.deepEqual(r.pending, ['history_pending', 'planned'], `${label}: the first fold committed and is waiting for its receipt`)

@@ -104,7 +104,7 @@ const MUTANTS = [
     from: 'chunks(foldedLots, MERGE_FOLD_CHUNK) * MERGE_FOLD_STATEMENTS_PER_CHUNK + chunks(keptLotsWritten, MERGE_FOLD_CHUNK)', to: 'chunks(foldedLots, MERGE_FOLD_CHUNK) * MERGE_FOLD_STATEMENTS_PER_CHUNK + chunks(keptLotsWritten, MERGE_FOLD_CHUNK) - 5' },
   // M-c: the kept lot cost is restored at 4 places.
   { name: 'M-c: undo restores the kept lot cost unrounded', file: 'lib/undoAppliers.ts', tests: ['test-merge-by-received-date-native.cjs'],
-    from: 'cost: roundRestoredLotCost(before.unit_cost_usd),', to: 'cost: before.unit_cost_usd == null ? null : Number(before.unit_cost_usd),' },
+    from: 'cost: roundStoredCost(before.unit_cost_usd),', to: 'cost: before.unit_cost_usd == null ? null : Number(before.unit_cost_usd),' },
   { name: 'expiry compared as raw strings again', file: 'lib/productMergeLots.ts', tests: ['test-merge-lots-by-date-pure.cjs'],
     from: '.map(isoExpiry).filter((value): value is string => value !== null)', to: '.map((value) => String(value ?? \'\').trim()).filter(Boolean)' },
   { name: 'a non-ISO received date is read (month-first) again', file: 'lib/productMergeLots.ts', tests: ['test-merge-lots-by-date-pure.cjs'],
