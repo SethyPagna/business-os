@@ -11,7 +11,13 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
-const { loadRoute, seed, post } = require('./test-product-conflict-action-groups-sqlite.cjs')
+const { loadRoute, loadTs, seed, post } = require('./test-product-conflict-action-groups-sqlite.cjs')
+
+// Every measured request must fit one Free-plan invocation: the cap is read from planTier, never written here as a literal. The lost-receipt resume after
+// 0313 rounding measured 49 against 50 (deploy 4 compose review L3), so the headroom is pinned, not only the delta against its control.
+const D1_CAP = loadTs('lib/planTier.ts').getPlanLimits({ PLAN_TIER: 'free' }).d1QueriesPerInvocation
+assert.ok(Number.isInteger(D1_CAP) && D1_CAP > 0 && D1_CAP < 100, `the Free cap is read from planTier: ${D1_CAP}`)
+const underCap = (label, calls) => assert.ok(calls <= D1_CAP, `${label}: ${calls} D1 calls in one request, over the Free cap of ${D1_CAP}`)
 
 const text0313 = fs.readFileSync(path.join(__dirname, '../migrations/0313_cost_4dp_repair.sql'), 'utf8')
 const user = { id: 900, username: 'reviewer' }
@@ -89,6 +95,7 @@ async function normalWorld(label, members, pre) {
       const r = await step(f, d1, direction)
       assert.ok(r.ok, `${label}: ${direction} ${r.error && r.error.message}`)
       out[direction].push(m.snap())
+      underCap(`${label} ${direction}`, m.snap()[0])
       if (r.complete) break
     }
   }
@@ -117,6 +124,7 @@ async function interruptedWorld(label, { pre = null, run0313 = false, lostReconc
   m.reset()
   const again = await resume(f, a)
   const counts = m.snap()
+  underCap(`${label} resume`, counts[0])
   m.suspend()
   const members = d1.db.prepare("SELECT status FROM product_conflict_action_group_members WHERE role='merged' ORDER BY product_id").all().map((r) => r.status)
   return { label, d1, f, a, pending, again, counts, members, first: a.applied.body }
