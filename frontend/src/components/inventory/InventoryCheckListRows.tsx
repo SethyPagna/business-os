@@ -241,7 +241,7 @@ function ListRow({ product, draft, adornment, refusal, columns, countable, copy,
 
   const barcode = product.barcode || product.sku
   const expiry = expiryBadge(product.next_expiry_date, product.expiry_alert_days)
-  const expiryName = expiry ? expiry.tone === 'expired' ? tr('inventory_check_expired', 'Expired') : expiry.tone === 'soon' ? tr('inventory_check_expires_soon', 'Expires soon') : tr('expiry', 'Expiry') : ''
+  const expiryName = expiry ? expiry.tone === 'expired' ? tr('expired', 'Expired') : expiry.tone === 'soon' ? tr('expiring_soon', 'Expiring soon') : tr('expiry', 'Expiry') : ''
   const identity: Array<[string, ReactNode]> = []
   if (barcode) identity.push(['barcode', <span {...copy(barcode)} className="break-all">{barcode}</span>])
   if (product.brand) identity.push(['brand', <span {...copy(product.brand)}>{product.brand}</span>])

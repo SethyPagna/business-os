@@ -331,7 +331,7 @@ function CheckRow({ product, observation, pending, error, header, adornment, fro
     // The separator and the part after it are one unit, so a wrapped line can never start with (or hold) a lone "·".
     ? <span key={key} className="inline-flex min-w-0 items-center gap-x-1.5"><span aria-hidden="true">·</span>{node}</span>
     : <Fragment key={key}>{node}</Fragment>)
-  const expiryName = expiry ? expiry.tone === 'expired' ? tr('inventory_check_expired', 'Expired') : expiry.tone === 'soon' ? tr('inventory_check_expires_soon', 'Expires soon') : tr('expiry', 'Expiry') : ''
+  const expiryName = expiry ? expiry.tone === 'expired' ? tr('expired', 'Expired') : expiry.tone === 'soon' ? tr('expiring_soon', 'Expiring soon') : tr('expiry', 'Expiry') : ''
   const shownState = state
   const edge = shownState === 'done' ? 'border-l-emerald-500' : shownState === 'issue' ? 'border-l-amber-500' : 'border-l-transparent'
   const note = state === 'issue' ? observation?.reason : null

@@ -230,7 +230,7 @@ await browser.run('PASS Inventory count sheet and list: aligned columns, count e
   assert.equal(await browser.evaluate(`!!document.querySelector('${row(3)} [data-cell="now"] button[aria-label="${packs.en.inventory_check_stock_inconsistent_hint}"]')`), false, 'the retired stock-records hint is not drawn, even for a row the older list marks stock_consistent: false')
   assert.equal(await browser.evaluate(`!!document.querySelector('${row(1)} [data-cell="now"] button')`), false, 'and no row has a button in its Now cell')
   assert.deepEqual(await browser.evaluate<string[]>(`Array.from(document.querySelectorAll('[data-expiry]'), node => node.dataset.expiry)`), ['expired', 'soon', 'ok'], 'expiry shows as a badge: past, within 30 days, later')
-  assert.equal(await browser.evaluate(`document.querySelector('${row(4)} [data-expiry]').textContent`), `${packs.en.inventory_check_expired} 01/2001`)
+  assert.equal(await browser.evaluate(`document.querySelector('${row(4)} [data-expiry]').textContent`), `${packs.en.expired} 01/2001`)
 
   // ---- A scan request: ring + focus (count / tick) or ring only, always in view ---------------------------------------------
   await browser.evaluate(`window.__scan(14, 'count')`)
