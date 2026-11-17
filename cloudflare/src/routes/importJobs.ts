@@ -259,8 +259,10 @@ async function requireImportPermission(c: any, job: Record<string, unknown> | un
   const type = (job?.type as string) || bodyType || 'products'
   if (isAcquisitionCostImport(type)) {
     const isRead = c.req.method === 'GET' || c.req.method === 'HEAD'
-    const allowed = isRead ? canViewAcquisitionCosts(user) : canEditAcquisitionCosts(user)
-    if (!allowed) return c.json({ success: false, error: isRead ? 'Reading financial import data needs View product costs.' : 'This import format needs View and Edit product costs.', code: isRead ? 'product_cost_view_required' : 'product_cost_edit_required' }, 403)
+    // Reading needs View; writing needs View AND Edit, as the role editor states for these rows (the import list and review already need View, so Edit alone could not use an import).
+    const missing = isRead ? (canViewAcquisitionCosts(user) ? null : 'product_cost_view_required')
+      : !canEditAcquisitionCosts(user) ? 'product_cost_edit_required' : !canViewAcquisitionCosts(user) ? 'product_cost_view_required' : null
+    if (missing) return c.json({ success: false, error: isRead ? 'Reading financial import data needs View product costs.' : 'This import format needs View and Edit product costs.', code: missing }, 403)
   }
   const missingPermission = permissionsForType(type).find((permission) => !hasPermission(user, permission))
   if (missingPermission) {

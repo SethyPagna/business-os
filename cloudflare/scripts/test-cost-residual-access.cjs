@@ -77,9 +77,12 @@ async function main() {
       const response = await post('/imports', { type })
       const text = await response.text()
       let code; try { code = JSON.parse(text).code } catch { code = undefined }
+      // 17 Nov 2026: an import WRITE needs View and Edit product costs (as the role editor states), or an administrator. Edit alone is refused for the missing View.
       if (!grant.all && !grant.product_cost_edit) {
         assert.equal(response.status, 403); assert.equal(code, 'product_cost_edit_required'); assert.equal(opens, 0)
-      } else { assert.notEqual(code, 'product_cost_edit_required', `${type}: the edit grant (or an administrator) passes the cost gate`) }
+      } else if (!grant.all && !grant.product_cost_view) {
+        assert.equal(response.status, 403, `${type}: Edit without View cannot write an import`); assert.equal(code, 'product_cost_view_required'); assert.equal(opens, 0)
+      } else { assert.notEqual(code, 'product_cost_edit_required', `${type}: View and Edit (or an administrator) pass the cost gate`); assert.notEqual(code, 'product_cost_view_required', `${type}: View and Edit (or an administrator) pass the cost gate`) }
     }
     for (const type of ['export-folder', 'export-cloudflare', 'import-folder']) {
       opens = 0
@@ -93,6 +96,8 @@ async function main() {
     }
   }
   assert.equal(maintenanceReads, 3, "only the admin grant opens a backup control now")
+  // the apply-time re-check of the authorising user holds the same rule (View and Edit), not Edit alone
+  assert.match(fs.readFileSync(path.join(root, 'lib/importEngine.ts'), 'utf8'), /isAcquisitionCostImport\(job\.type\) && !\(canEditAcquisitionCosts\(actor\) && canViewAcquisitionCosts\(actor\)\)/)
   assert.equal(controlDb.prepare('SELECT COUNT(*) AS n FROM system_flags').get().n, 0)
   controlDb.prepare('INSERT INTO system_flags (key, value) VALUES (?, ?)').run('maintenance', '{')
   user = actor({ all: true })
