@@ -2,8 +2,6 @@ import { cloneElement, isValidElement, useState, useEffect, useRef, useCallback 
 import type { MouseEvent as ReactMouseEvent, ReactElement, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import MoreHorizontal from 'lucide-react/dist/esm/icons/more-horizontal.js'
-import { tapLandsOnControl } from '../../utils/longPress.ts'
-import { COPY_SELECTOR } from './textAffordances.ts'
 
 type MenuColor = 'red' | 'blue' | 'purple' | 'green' | 'orange' | 'gray'
 
@@ -55,10 +53,10 @@ export type PortalMenuProps = {
   // app's own light/dark mode via the normal `dark:` classes below -- this
   // only ever changes spacing/size, never a fixed color palette.
   compact?: boolean
-  // Off by default, so every existing caller keeps its one-tap behaviour (a tap on a toolbar button elsewhere closes the menu AND presses the button). On: the press that dismisses the
-  // menu from outside is also the end of a click, and that click must not fall through to whatever lay under the finger (Inventory: closing the count popover by tapping another row
-  // opened that row's detail). Only the click completing the dismissing press is swallowed; see swallowDismissClick below.
-  swallowDismissClick?: boolean
+  // Absent by default, so every existing caller keeps its one-tap behaviour (a tap on a toolbar button elsewhere closes the menu AND presses the button). Called when a press OUTSIDE the menu dismisses it,
+  // before it closes: Inventory passes inventory/dismissClickSwallow.ts here so the click completing that press does not fall through to the row under the finger. The swallow itself lives in its own module so the
+  // storefront, which shares this component, never carries it.
+  onOutsidePress?: () => void
 }
 
 type ThreeDotPortalLabels = {
@@ -83,44 +81,6 @@ function isPortalMenuItem(item: PortalMenuItem | null | undefined | false): item
   return Boolean(item)
 }
 
-// How long the swallow outlives the release of the dismissing press. A mouse click follows its mouseup at once; a touch tap's synthesized click follows its touchend by a few milliseconds.
-const DISMISS_CLICK_GRACE_MS = 300
-// A press that never gets released (focus lost mid-gesture) must not leave the page eating clicks.
-const DISMISS_CLICK_GIVE_UP_MS = 10000
-
-/**
- * Eats exactly the click that completes the press which just dismissed a menu, so tapping a ROW to close the menu does not also open that row. It listens in the capture phase on the document, so the click
- * reaches neither the element under the finger nor React's root handlers. A click on a real control (button, link, input, select, textarea, label, role=button...; the same rule the rows use to leave
- * their own open handler alone) is NOT eaten: the control acts on its first tap and the swallow is over. A copy target is plain text that happens to carry role=button, so it is eaten like blank row
- * space, and so is a pointer-only duplicate of the row's open handler (data-row-open: the row's picture button). It is gone after that one click; if the press turns into a scroll or a long hold there is no click, so it also expires a moment after the press is released.
- */
-function swallowDismissClick() {
-  let timer = 0
-  const events = ['mouseup', 'touchend', 'touchcancel', 'pointercancel'] as const
-  const release = () => {
-    window.clearTimeout(timer)
-    document.removeEventListener('click', eat, true)
-    for (const name of events) document.removeEventListener(name, released, true)
-  }
-  function eat(event: Event) {
-    const target = event.target instanceof Element ? event.target : null
-    if (target && !target.closest(`${COPY_SELECTOR}, [data-row-open]`) && tapLandsOnControl(target, null)) {
-      release()
-      return
-    }
-    event.stopPropagation()
-    event.preventDefault()
-    release()
-  }
-  function released() {
-    window.clearTimeout(timer)
-    timer = window.setTimeout(release, DISMISS_CLICK_GRACE_MS)
-  }
-  document.addEventListener('click', eat, true)
-  for (const name of events) document.addEventListener(name, released, true)
-  timer = window.setTimeout(release, DISMISS_CLICK_GIVE_UP_MS)
-}
-
 /**
  * 1. PortalMenu
  * 1.1 Renders action items in a body-level portal so menu layers stay visible.
@@ -139,7 +99,7 @@ export default function PortalMenu({
   onOpenChange = null,
   compact = false,
   openOnHover = false,
-  swallowDismissClick: swallowsDismissClick = false,
+  onOutsidePress,
 }: PortalMenuProps) {
   const [open, setOpen] = useState(defaultOpen)
   const [position, setPosition] = useState<{ top: number; left: number; maxHeight?: number; maxWidth?: number; minWidth?: number }>({ top: 0, left: 0 })
@@ -278,7 +238,7 @@ export default function PortalMenu({
       // without collapsing their parent.
       const insideNestedPortalMenu = target instanceof Element ? Boolean(target.closest('[data-portal-menu-content]')) : false
       if (!insideMenu && !insideTrigger && !insideNestedPortalMenu) {
-        if (swallowsDismissClick) swallowDismissClick()
+        onOutsidePress?.()
         setOpen(false)
       }
     }
@@ -342,7 +302,7 @@ export default function PortalMenu({
         frameRef.current = 0
       }
     }
-  }, [open, reposition, swallowsDismissClick])
+  }, [open, reposition, onOutsidePress])
 
   const colorClassByType: Record<string, string> = {
     red: 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20',
