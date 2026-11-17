@@ -7,6 +7,8 @@ import { APP_ROOT } from './support/session'
 import { NAV_ITEMS } from '../src/components/shared/navigationConfig.ts'
 import { costKeysIn } from './support/costRedaction'
 import { canViewCourierCost } from '../../cloudflare/src/lib/courierCostAccess.ts'
+import { canEditAcquisitionCosts, canViewAcquisitionCosts } from '../../cloudflare/src/lib/acquisitionCostAccess.ts'
+import { isAdminControlUser } from '../../cloudflare/src/lib/permissions.ts'
 import {
   ADMIN_ROUTES, HUB_PAGES, ROLES, accessFor, deriveRole, expectedAccountPages, expectedHubSections, expectedLanding, expectedNavIds, grant, seesCost, workerUser,
   type RoleAccess, type RoleDef,
@@ -241,7 +243,7 @@ for (const role of ROLES.filter((entry) => LANDING_ROLES.includes(entry.id))) {
 }
 
 // The Dashboard under the payload the Worker really sends each role. compat.ts:34-35 mounts acquisitionCostResponses on /dashboard and
-// /dashboard/*, so a role that is not an administrator (cost is admin only since 15 Nov 2026) gets its cost-shaped keys projected away (stock_value_usd among them), and
+// /dashboard/*, so a role that is neither an administrator nor a holder of product_cost_view (cost is admin only by default, an editable grant since 17 Nov 2026) gets its cost-shaped keys projected away (stock_value_usd among them), and
 // Dashboard.tsx isDashboardSummaryPayload (:727-735) requires stock_value_usd to be finite. The case asks the plain question: does the
 // Dashboard load for each role that may open it (the seeded Employee and Manager both do since 15 Nov 2026)? The admin is the control.
 const DASHBOARD_FAILED = /did not finish loading|returned incomplete (summary|analytics) data|incomplete data|could not be loaded for this range/i
@@ -745,14 +747,29 @@ for (const role of ROLES.filter((entry) => { const access = accessFor(entry); re
 }
 
 // =====================================================================================================================
-// 6. Cost is administrator-only (owner, 15 Nov 2026)
+// 6. Cost is admin only by default and an editable grant (owner, 17 Nov 2026)
 // =====================================================================================================================
-test('the grants "View product costs" and "Edit product costs" give no role any cost: only the administrator sees it', () => {
-  const inert = ROLES.find((entry) => entry.id === 'cost-viewer') as RoleDef
-  expect(inert.costGranted, 'the fixture role does hold the grant').toBe(true)
-  expect(seesCost(accessFor(inert)), 'the grant is inert').toBe(false)
+test('the grant "View product costs" shows cost and profit to a non-admin; without it only the administrator sees them; the Worker agrees', () => {
+  const viewer = ROLES.find((entry) => entry.id === 'cost-viewer') as RoleDef
+  expect(viewer.costGranted, 'the fixture role does hold the grant').toBe(true)
+  expect(seesCost(accessFor(viewer)), 'the grant shows cost to a non-admin').toBe(true)
   expect(seesCost(accessFor(MANAGER)), 'the Manager default sees no cost').toBe(false)
-  expect(ROLES.filter((entry) => seesCost(accessFor(entry))).map((entry) => entry.id), 'only the admin control sees cost').toEqual(['admin'])
+  expect(ROLES.filter((entry) => seesCost(accessFor(entry))).map((entry) => entry.id), 'the grant holder and the admin control see cost').toEqual(['cost-viewer', 'admin'])
+  const employee = ROLES.find((entry) => entry.id === 'employee') as RoleDef
+  const editOnly = deriveRole(employee, 'employee-cost-edit-only', 'Employee default + Edit product costs only', { product_cost_edit: true })
+  expect(seesCost(accessFor(editOnly)), 'editing does not imply viewing').toBe(false)
+  expect(canViewAcquisitionCosts(workerUser(editOnly)), 'the Worker agrees: edit-only sees no cost').toBe(false)
+  expect(canEditAcquisitionCosts(workerUser(editOnly)), 'but may edit').toBe(true)
+  const managerViewer = deriveRole(MANAGER, 'manager-cost-view', 'Manager default + View product costs', { product_cost_view: true })
+  expect(seesCost(accessFor(managerViewer))).toBe(true)
+  expect(canEditAcquisitionCosts(workerUser(managerViewer)), 'view alone does not edit').toBe(false)
+  for (const entry of ROLES) {
+    expect(canViewAcquisitionCosts(workerUser(entry)), `${entry.id}: the editor and the Worker answer the same for cost`).toBe(seesCost(accessFor(entry)))
+  }
+  // Backups, restore and Drive sync stay administrator only whatever the cost grant says.
+  for (const entry of [...ROLES, editOnly, managerViewer]) {
+    expect(isAdminControlUser(workerUser(entry)), `${entry.id}: backup gates ask for administrator control`).toBe(entry.id === 'admin')
+  }
   // Both seeded staff roles open the Dashboard (owner, 15 Nov 2026); the Employee only views it.
   expect(accessFor(ROLES.find((entry) => entry.id === 'employee') as RoleDef).canAccessPage('dashboard')).toBe(true)
   expect(accessFor(MANAGER).canAccessPage('dashboard')).toBe(true)
@@ -767,7 +784,7 @@ test('courier cost permission: the role editor and the Worker agree for every ro
   const byId = Object.fromEntries(rows.map((row) => [row.id, row.worker]))
   expect(byId.employee, 'Employee default').toBe(true)
   expect(byId.manager, 'Manager default').toBe(true)
-  expect(byId['cost-viewer'], 'Employee plus the inert cost grant').toBe(true)
+  expect(byId['cost-viewer'], 'Employee plus the cost grant').toBe(true)
   expect(byId.admin, 'administrator').toBe(true)
   expect(byId.cashier, 'POS-only role (no Sales)').toBe(false)
   expect(byId['image-only'], 'Product Viewer preset (no Sales)').toBe(false)
@@ -776,5 +793,5 @@ test('courier cost permission: the role editor and the Worker agree for every ro
   const off = deriveRole(employee, 'employee-courier-off', 'Employee default, courier cost switched off', { 'sales:view_courier_cost': false })
   expect(canViewCourierCost(workerUser(off)), 'switched off: the Worker closes it').toBe(false)
   expect(accessFor(off).can('sales', 'view_courier_cost'), 'switched off: the editor agrees').toBe(false)
-  for (const { id, access } of rows) if (id !== 'admin') expect(seesCost(access), `${id}: product cost stays admin only`).toBe(false)
+  for (const { id, access } of rows) if (id !== 'admin' && id !== 'cost-viewer') expect(seesCost(access), `${id}: product cost stays admin only unless granted`).toBe(false)
 })

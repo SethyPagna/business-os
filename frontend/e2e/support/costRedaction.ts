@@ -3,8 +3,9 @@ import { isAcquisitionCostKey, projectAcquisitionCosts } from '../../../cloudfla
 /**
  * e2e/support/costRedaction.ts -- the Worker's own cost rules, loaded rather than copied.
  *
- *   projectAcquisitionCosts(value, user)  what the Worker does to a JSON payload for an account without
- *                                         product_cost_view (cloudflare/src/lib/acquisitionCostAccess.ts)
+ *   projectAcquisitionCosts(value, user)  what the Worker does to a JSON payload for an account that is not an administrator and
+ *                                         lacks the product_cost_view grant (cloudflare/src/lib/acquisitionCostAccess.ts; since
+ *                                         17 Nov 2026 a non-admin WITH the grant receives the payload untouched, cost and profit included)
  *   isAcquisitionCostKey(key)             which keys that function treats as acquisition cost
  *
  * The fixture server serves one set of admin-shaped bodies to everybody, so the app tier has no server that redacts. The
