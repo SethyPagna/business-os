@@ -232,6 +232,13 @@ export async function approvalRows(db: D1Compat, actor: Actor, ids: string[], de
 export const waitingLineSql = (a: string, i: string): string => `${a}.status='pending' AND ${i}.baseline_quantity IS NOT NULL AND ${i}.counted_quantity IS NOT NULL AND abs(${i}.baseline_quantity-${i}.counted_quantity)>0.000000001
   AND json_extract(${a}.applied_json,'$.lines."'||${i}.product_id||'"') IS NULL AND json_extract(${a}.superseded_json,'$."'||${i}.product_id||'"') IS NULL`
 const WAITING_LINE_SQL = waitingLineSql('a', 'i')
+/**
+ * THE rule for "this count line differs from stock", used by the statement that creates an approval (its `lines`) and by the engine that decides it (which lines it plans, rejects or closes), so the
+ * two can never disagree. A line differs when its total differs, or when any received date it was typed for differs: a shortage on one date and a surplus on another (sums equal) is still two
+ * wrong figures. `dated` is false only for a database without migration 0294 (no lines table, so no dates). `eps`: the SQL text of the tolerance (a bound parameter or a literal).
+ */
+export const countDiffersSql = (i: string, eps: string, dated = true): string => `(${i}.baseline_quantity IS NOT NULL AND (abs(${i}.baseline_quantity-${i}.counted_quantity)>${eps}${dated
+  ? ` OR EXISTS(SELECT 1 FROM inventory_check_lot_lines l WHERE l.session_id=${i}.session_id AND l.product_id=${i}.product_id AND abs(l.seen_quantity-l.counted_quantity)>${eps})` : ''}))`
 /** Does this one count line still wait for approval? (Fix stock is held while it does.) */
 export async function lineWaitsForApproval(db: D1Compat, sessionId: string, productId: number): Promise<boolean> {
   const row = await db.prepare(`SELECT 1 AS waiting FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id=a.session_id
@@ -823,8 +830,7 @@ export async function createInventoryCheckLotSubmission(db: D1Compat, principal:
   const approvalAt = statements.length
   if (options.approvals) statements.push({ sql: `INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submitted_at,baselines_json)
     SELECT @id,@organization,@branchId,'pending',d.n,@actorId,@now,(SELECT json_group_object(CAST(i.product_id AS TEXT),i.baseline_quantity) FROM inventory_check_items i WHERE i.session_id=@id AND i.baseline_quantity IS NOT NULL)
-    FROM (SELECT COUNT(*) AS n FROM inventory_check_items i WHERE i.session_id=@id AND i.baseline_quantity IS NOT NULL AND (abs(i.baseline_quantity-i.counted_quantity)>@eps
-      OR EXISTS(SELECT 1 FROM inventory_check_lot_lines l WHERE l.session_id=i.session_id AND l.product_id=i.product_id AND abs(l.seen_quantity-l.counted_quantity)>@eps))) d WHERE d.n>0 RETURNING session_id`, params })
+    FROM (SELECT COUNT(*) AS n FROM inventory_check_items i WHERE i.session_id=@id AND ${countDiffersSql('i', '@eps')}) d WHERE d.n>0 RETURNING session_id`, params })
   let saved: Awaited<ReturnType<typeof commit>>
   try { saved = await commit(db, principal, actor, statements, key, hash) }
   catch (error) {

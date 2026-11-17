@@ -4,7 +4,7 @@ import { getActionTier } from './permissions'
 import { actorSnapshot } from './actorSnapshot'
 import { APPROVAL_CLAIM_LOST } from './stockMutationReceipt'
 import {
-  APPROVAL_DETAIL_COLUMNS, InventoryCheckSessionError, appliedLines, approvalBaselines, approvalsReady, authorityGuard, currentInventoryCheckActor, eventStatement, guard, inventoryCheckDigest,
+  APPROVAL_DETAIL_COLUMNS, InventoryCheckSessionError, appliedLines, approvalBaselines, approvalsReady, authorityGuard, countDiffersSql, currentInventoryCheckActor, eventStatement, guard, inventoryCheckDigest,
   object, projectApproval, requestId as requestIdOf, REPLACED_NOTE, schemaReady, sessionRow, supersededLines,
   type Actor, type ApprovalAppliedLine, type ApprovalRow, type InventoryCheckPrincipal, type Statement,
 } from './inventoryCheckSessions'
@@ -67,6 +67,8 @@ export type ApprovalLimits = { takeoverSeconds: number }
 /** Why one line cannot be applied now. */
 type Refusal = { productId: number; code: string }
 type ItemFacts = { product_id: number; baseline_quantity: number | null; counted_quantity: number | null; state: 'unstarted' | 'done' | 'issue'; reason: string | null; revision: number }
+/** An item with the engine's reading of whether it is a line (`differs`: the creation rule, countDiffersSql). */
+type ItemRow = ItemFacts & { differs: number }
 /** One stock write of an approval: a received-date line of a count (scope 'lot'), or a branch-total line (scope 'branch', batchId 0; an older product-level count is one). `many`: the product has several. */
 type Unit = { key: string; productId: number; batchId: number; scope: 'lot' | 'branch'; counted: number; seen: number | null; many: boolean }
 /** What one line is sent with, stored before the write so a repeat is identical: the received date it lands on and the two figures the writer computes its target from. */
@@ -180,6 +182,21 @@ function fold(input: { remaining: ItemFacts[]; units: Map<number, Unit[]>; lines
   return { lines, held, completed }
 }
 
+/**
+ * The lines of a count: its items the creation rule (countDiffersSql) calls differences, so the engine sees exactly the lines the approval was created with. A database without migration 0294
+ * has no dated lines, so the same rule is read without them (the same fallback as readFacts).
+ */
+async function readLines(db: D1Compat, sessionId: string, branchId: number): Promise<ItemFacts[]> {
+  const read = (dated: boolean) => db.prepare(`SELECT i.product_id,i.baseline_quantity,i.counted_quantity,i.state,i.reason,i.revision,CASE WHEN ${countDiffersSql('i', '0.000000001', dated)} THEN 1 ELSE 0 END AS differs
+    FROM inventory_check_items i WHERE i.session_id=@id AND i.branch_id=@branchId ORDER BY i.product_id`).all<ItemRow>({ id: sessionId, branchId })
+  let items: ItemRow[]
+  try { items = await read(true) } catch (error) {
+    if (!/no such table:?\s*inventory_check_lot_lines/i.test(error instanceof Error ? error.message : String(error))) throw error
+    items = await read(false)
+  }
+  return items.filter(item => item.differs === 1)
+}
+
 /** The approval row is exactly as this decision read it: the same lines applied and the same lines replaced by newer counts. */
 const UNCHANGED = `applied_json=@oldApplied AND superseded_json=@oldSuperseded`
 
@@ -221,9 +238,7 @@ export async function decideInventoryCheckApproval(db: D1Compat, principal: Inve
     return fail(409, 'inventory_check_approval_decided')
   }
   if (decision === 'approve' && row.submitted_by === actor.id && await anotherApproverExists(db, actor)) fail(403, 'inventory_check_self_approval')
-  const items = await db.prepare(`SELECT product_id,baseline_quantity,counted_quantity,state,reason,revision FROM inventory_check_items
-    WHERE session_id=@id AND branch_id=@branchId ORDER BY product_id`).all<ItemFacts>({ id: sessionId, branchId: session.branch_id })
-  const lines = items.filter(item => item.baseline_quantity != null && item.counted_quantity != null && Math.abs(item.baseline_quantity - item.counted_quantity) > EPSILON)
+  const lines = await readLines(db, sessionId, session.branch_id)
   if (lines.length !== row.lines) return fail(409, 'inventory_check_approval_lines_changed')
   const applied = appliedLines(row.applied_json), held = appliedUnits(row.applied_json)
   const superseded = supersededLines(row.superseded_json)
