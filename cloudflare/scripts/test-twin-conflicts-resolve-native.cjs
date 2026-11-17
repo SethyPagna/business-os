@@ -30,11 +30,15 @@ const { build: esbuild } = require('esbuild')
 const SRC = path.join(__dirname, '../src')
 // A stand-in for every module this test does not exercise. It must also work
 // as a computed object key (undoAppliers keys its registry by imported kinds).
+// It must never reach JSON: a stand-in is a function, and JSON.stringify drops a function silently, so a JSON-bound SQL parameter
+// loses the field and binds NULL. That is how the lot match of merge-by-date (lib/productMergeLots, unwired here) became a NULL batch_id
+// and the 0154 trigger refused the merge. A module whose values are written must be wired in for real below.
 let inertKeys = 0
+const INERT_IN_JSON = 'an inert stand-in reached JSON (a bound SQL parameter or a stored payload): wire the real module into this test'
 function inert() {
   const key = `inert-${inertKeys += 1}`
   return new Proxy(function () {}, {
-    get: (_t, prop) => (prop === 'then' ? undefined : prop === Symbol.toPrimitive ? () => key : inert()),
+    get: (_t, prop) => (prop === 'then' ? undefined : prop === Symbol.toPrimitive ? () => key : prop === 'toJSON' ? () => { throw new Error(INERT_IN_JSON) } : inert()),
     apply: () => inert(),
     construct: () => inert(),
   })
@@ -89,6 +93,9 @@ let planTier, app
 function buildApp(sweepPatches = []) {
   const stockTransaction = load('lib/stockTransaction.ts')
   const moneyPrecision = load('lib/moneyPrecision.ts')
+  // Merge-by-date: the one lot match (received date) the fold, its read plan and the cost preview share. Wired as
+  // test-product-resolve-keep-merge-native.cjs wires it.
+  const productMergeLots = load('lib/productMergeLots.ts', { './moneyPrecision': moneyPrecision, './businessDateWindow': load('lib/businessDateWindow.ts') })
   const permissions = load('lib/permissions.ts')
   planTier = load('lib/planTier.ts')
   const requestBodyGuard = load('lib/requestBodyGuard.ts')
@@ -98,13 +105,13 @@ function buildApp(sweepPatches = []) {
   const productIdentity = load('lib/productIdentity.ts', { './db': {}, './sqlBinding': sqlBinding, './productDetailRule': detailRule }, sweepPatches)
   const productMerge = load('lib/productMerge.ts', { './moneyPrecision': moneyPrecision })
   const productStockGuard = load('lib/productStockGuard.ts')
-  const productMergeSnapshot = load('lib/productMergeSnapshot.ts', { './db': {} })
+  const productMergeSnapshot = load('lib/productMergeSnapshot.ts', { './db': {}, './productMergeLots': productMergeLots })
   const acquisitionCostAccess = load('lib/acquisitionCostAccess.ts', { './permissions': permissions })
   const noAudit = { audit: async (_env, _uid, _uname, action, entity, id, detail) => { state.audits.push({ action, entity, id, detail }) } }
   const broadcastHub = { broadcast: async () => {} }
   const catalogCost = load('lib/catalogCostRecompute.ts', { './moneyPrecision': moneyPrecision })
   const costReview = load('lib/productCostReview.ts', { './catalogCostRecompute': catalogCost })
-  const costPreview = load('lib/productMergeCostPreview.ts', { './catalogCostRecompute': catalogCost, './productCostReview': costReview, './productConflictActionGroups': load('lib/productConflictActionGroups.ts') })
+  const costPreview = load('lib/productMergeCostPreview.ts', { './productMergeLots': productMergeLots, './catalogCostRecompute': catalogCost, './productCostReview': costReview, './productConflictActionGroups': load('lib/productConflictActionGroups.ts') })
   // UI-CONFLICTS B1: the Resolve choices kernel, real, so the route never sees an inert stand-in.
   const resolveChoices = load('lib/productResolveChoices.ts', { './moneyPrecision': moneyPrecision, './searchMatch': load('lib/searchMatch.ts') })
   const undoAppliers = load('lib/undoAppliers.ts', {
@@ -147,6 +154,7 @@ function buildApp(sweepPatches = []) {
     '../lib/productMerge': productMerge,
     '../lib/productStockGuard': productStockGuard,
     '../lib/productMergeSnapshot': productMergeSnapshot,
+    '../lib/productMergeLots': productMergeLots,
     '../lib/productResolveChoices': resolveChoices,
     '../lib/mergeRouteLog': load('lib/mergeRouteLog.ts'),
     '../lib/sqlBinding': sqlBinding,
@@ -321,6 +329,17 @@ async function main() {
         const done = await merge({ keepId: keep, mergeId: drop, keep: true, stock: 'merge' })
         assert.equal(done.status, 200, JSON.stringify(done.body))
         assert.equal(Number(one('SELECT cost_price_usd AS c FROM products WHERE id = ?', keep).c), 5.2, 'the merge applies the cost the preview showed')
+        // Merge-by-date (owner, 16 Nov 2026): both lots were received on 2026-09-01, so the discarded lot's stock is ADDED into the kept lot,
+        // which then carries the quantity-weighted cost; no lot is created, and the discarded lot stays on its own record, inactive, empty and
+        // marked by the merge (merge_deactivated_at keeps its payable counted once).
+        const keptLot = 1000 + keep
+        const droppedLot = 1000 + drop
+        const lotShelf = () => rows('SELECT batch_id, branch_id, quantity FROM branch_batch_stock WHERE batch_id IN (?, ?) ORDER BY batch_id', keptLot, droppedLot)
+        const lotState = (id) => one('SELECT variant_product_id AS product, is_active, unit_cost_usd, merge_deactivated_at IS NOT NULL AS marked FROM product_batches WHERE id = ?', id)
+        assert.deepEqual(lotShelf(), [{ batch_id: keptLot, branch_id: 1, quantity: 5 }], 'the discarded lot\'s stock is added into the kept lot of the same received date')
+        assert.deepEqual({ ...lotState(keptLot), unit_cost_usd: Number(lotState(keptLot).unit_cost_usd) }, { product: keep, is_active: 1, unit_cost_usd: 5.2, marked: 0 }, 'the kept lot carries the weighted cost (2 x 4 + 3 x 6) / 5')
+        assert.deepEqual({ ...lotState(droppedLot), unit_cost_usd: Number(lotState(droppedLot).unit_cost_usd) }, { product: drop, is_active: 0, unit_cost_usd: drop === a ? 4 : 6, marked: 1 }, 'the discarded lot stays on its own record, inactive and marked')
+        assert.equal(one('SELECT COUNT(*) AS n FROM product_batches WHERE variant_product_id = ?', keep).n, 1, 'one lot per received date: none is created')
         assert.equal(one('SELECT is_active FROM products WHERE id = ?', keep).is_active, 1)
         assert.equal(one('SELECT is_active FROM products WHERE id = ?', drop).is_active, 0)
         const realOf = (code) => /^[0-9]{6,}$/.test(code) && !/^0+$/.test(code)
@@ -334,6 +353,12 @@ async function main() {
         assert.equal(one('SELECT barcode FROM products WHERE id = ?', keep).barcode, wanted)
         assert.deepEqual(done.body.keeper.absorbed_barcodes, dropCode.trim() && wanted !== dropCode && !(realOf(keepCode) && realOf(dropCode)) ? [dropCode] : [], 'the barcode the kept row does not carry is recorded, not dropped')
         assert.equal(one('SELECT barcode FROM products WHERE id = ?', drop).barcode, dropCode, 'the merged record keeps its own code')
+        // The same Resolve sent again (a double tap, a retried request) must not add the stock a second time.
+        const again = await merge({ keepId: keep, mergeId: drop, keep: true, stock: 'merge' })
+        assert.deepEqual([again.status, again.body.code], [409, 'product_merge_inactive'], 'the repeat is refused: the discarded product is already merged')
+        assert.deepEqual(lotShelf(), [{ batch_id: keptLot, branch_id: 1, quantity: 5 }], 'a repeated merge leaves the kept lot at 5')
+        assert.equal(one('SELECT COALESCE(SUM(quantity), 0) AS q FROM branch_stock WHERE product_id IN (?, ?)', a, b).q, 5, 'a repeated merge leaves the shelf at 5')
+        assert.equal(Number(lotState(keptLot).unit_cost_usd), 5.2, 'and the kept lot\'s cost where the first merge left it')
         // The route's own cost handling (the keeper's catalog cost follows recorded stock; a chosen cost is refused, N4) does not depend on the barcode class:
         // the control pair of two real barcodes, merged the same way with the same costs, ends on the same keeper cost.
         const ownCost = Number(one('SELECT cost_price_usd FROM products WHERE id = ?', keep).cost_price_usd)
