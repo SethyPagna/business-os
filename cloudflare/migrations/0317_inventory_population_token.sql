@@ -10,9 +10,9 @@
 --
 -- PRE:  products has is_active and is_group, no inventory_population_token table.
 -- POST: one token row, three triggers, one partial index. No product, stock or history row is read or changed.
--- Cost: a product create writes 1 token row and 1 index entry on top of its own rows, an import of N rows writes N of each, a delete the same, an update that touches none of id, is_active, is_group writes 0.
+-- Cost: a product create writes 1 token row and 1 index entry on top of its own rows, an import of N rows writes N of each, a delete the same, an update that touches none of id, is_active, is_group writes 0. An UPDATE whose SET names is_active or is_group writes one index entry even when the value is unchanged (a price edit that sends the whole row back writes 32 rows instead of 31).
 -- Recovery: drop the three triggers, the index and the table. The Worker then reads no token and computes the counts uncached (correct, dearer), and rotateDataEpoch (lib/dataEpoch.ts) tolerates exactly the
--- error "no such table: inventory_population_token" on its token step, so maintenance entry, release, force-clear and a branch cutover still complete. Any other error of that step is not swallowed.
+-- error "no such table: inventory_population_token" on its token step, so maintenance entry, release, force-clear and a branch cutover still complete. Any other error of that step is not swallowed. Also remove the table's line from rows_11 in ops/queries/d1-table-rows.sql, or that query errors. Until the table is back, each /overlay open costs one failed batch plus a retry.
 CREATE TABLE inventory_population_token (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   stamp TEXT NOT NULL CHECK (length(stamp) = 16)

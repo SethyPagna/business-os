@@ -360,12 +360,15 @@ function truth(app, branch) {
     app.raw.prepare('UPDATE products SET is_active = 1 WHERE id IN (1103, 1104)').run()
     const during = []
     during.push(await summaryOf(app))
+    const OVERLAY = '/api/inventory-checks/overlay?branchId=1&ids=1100,1101,1102'
+    during.push(await summaryOf(app, OVERLAY))
     app.setUser(app.users.receivedOnly); app.clearCaches(); app.kv.clear()
     during.push(await summaryOf(app))
     during.push(await summaryOf(app))
     app.setUser(app.users.checker)
     during.push(await summaryOf(app))
-    check(`every read during the restore equals the rows and is consistent (${during.map((s) => JSON.stringify(figures(s))).join(' ')})`, during.every(consistent), () => JSON.stringify(during.map(figures)))
+    during.push(await summaryOf(app, OVERLAY))
+    check(`every read during the restore (the list and the overlay) equals the rows and is consistent (${during.map((s) => JSON.stringify(figures(s))).join(' ')})`, during.every(consistent), () => JSON.stringify(during.map(figures)))
     check('the token stayed frozen through the restore writes (the guard of 0124), which is why no count may be cached on it', tokenOf(app.raw) === frozen)
     setRestore(app.raw, false)
     await app.load('lib/dataEpoch.ts').rotateDataEpoch(app.env)
@@ -374,16 +377,33 @@ function truth(app, branch) {
     check(`after the release the counts are correct (${JSON.stringify(figures(after))})`, consistent(after) && after.total === 5, () => JSON.stringify(after))
   }
 
+  // ---- a maintenance flag that is not JSON: no token (counts uncached), never an error ---------------------------------------------------------------------------------------------------------------
+  {
+    const app = make({ products: rowsOf(3, 'Garbled', 1300), counts: [{ product: 1300, state: 'done', at: T(1) }] })
+    app.raw.prepare("INSERT OR REPLACE INTO system_flags(key, value) VALUES('maintenance', 'not json')").run()
+    const overlay = await app.get('/api/inventory-checks/overlay?branchId=1&ids=1300,1301,1302'), list = await app.get('/api/inventory-checks/list?branchId=1')
+    const want = JSON.stringify(truth(app, 1))
+    check(`a maintenance flag that is not JSON: /overlay answers 200 with counts equal to the rows (${overlay.status})`, overlay.status === 200 && JSON.stringify(figures(overlay.json.summary)) === want, () => JSON.stringify([overlay.status, overlay.json]))
+    check(`a maintenance flag that is not JSON: /list answers 200 with counts equal to the rows (${list.status})`, list.status === 200 && JSON.stringify(figures(list.json.summary)) === want, () => JSON.stringify([list.status, list.json]))
+  }
+
+  // ---- /list never takes rankIds: the status-count reader refuses it --------------------------------------------------------------------------------------------------------------------------------
+  {
+    const app = make({ products: rowsOf(2, 'Ranked', 1400), counts: [] })
+    const refused = await app.get('/api/inventory-checks/list?branchId=1&rankIds=1400,1401')
+    check(`/list answers 400 inventory_check_invalid_query to rankIds (${refused.status} ${refused.json && refused.json.code})`, refused.status === 400 && refused.json.code === 'inventory_check_invalid_query', () => JSON.stringify([refused.status, refused.json]))
+  }
+
   // ---- reads: what each open costs ----------------------------------------------------------------------------------------------------------------------------------------------------------------
   {
     const app = make({ products: rowsOf(6, 'Reads', 700), counts: [{ product: 700, state: 'done', at: T(1) }] })
     const TOKEN = /FROM inventory_population_token/, COUNT = /COUNT\(\*\) AS n FROM products p/, SEEK = /SELECT p\.id AS id FROM products p/
     // D1 calls: a db.batch is one call however many statements it holds; the Worker's 15 s read-switch refresh is left out (it lands on whichever request comes at the expiry)
-    const SWITCH_READ = /FROM system_flags WHERE key IN (@switches, @epoch)/
+    const SWITCH_READ = /FROM system_flags WHERE key IN \(@switches, @epoch\)/
     const realBatch = app.env.DB.batch; let batchCalls = 0, batchStatements = 0
     app.env.DB.batch = async (list) => { batchCalls++; batchStatements += list.length; return realBatch(list) }
     const run = async (url) => { const mark = app.mark(), batches = app.batches.length, c0 = batchCalls, s0 = batchStatements; await app.get(url); const used = app.since(mark); return { calls: used.filter((s) => !SWITCH_READ.test(s)).length - (batchStatements - s0) + (batchCalls - c0), token: used.filter((s) => TOKEN.test(s)).length, count: used.filter((s) => COUNT.test(s)).length, seek: used.filter((s) => SEEK.test(s)).length, batched: app.batches.slice(batches).filter((b) => TOKEN.test(b.sql) || COUNT.test(b.sql) || SEEK.test(b.sql)).length } }
-    const EXPECT = { cold: 9, saved: 4, moved: 2 }
+    const EXPECT = { cold: 8, saved: 4, moved: 2 }
     const cold = await run('/api/inventory-checks/overlay?branchId=1&ids=700')
     check(`a cold open reads the token in the overlay's own batch, then the token, the count and the seek in ONE batch (${JSON.stringify(cold)})`, cold.token === 2 && cold.count === 1 && cold.seek === 1 && cold.batched === 4 && cold.calls === EXPECT.cold)
     const warm = await run('/api/inventory-checks/overlay?branchId=1&ids=700')
