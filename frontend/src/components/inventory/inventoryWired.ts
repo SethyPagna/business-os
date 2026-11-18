@@ -24,6 +24,8 @@ export type OverlayEntry = {
   check?: { state: 'ok' | 'issue'; counted_quantity?: number; seen_quantity?: number; note: string | null; by?: string; at: string | null; session_id: string; revision: number
     lots?: Array<{ batch_id: number; scope: 'lot' | 'branch'; counted: number; seen?: number }> }
   pending?: true
+  /** The session that holds the waiting request; it can differ from the latest count's session. */
+  pending_session_id?: string
 }
 /** `days`: the Cambodia business days products at this branch were last counted on, newest first, with how many (the date chips); `tooLarge`: too many products to list them. Both ride the same summary as the status counts. */
 export type WiredSummary = { ok?: number; issue?: number; pending?: number; not_checked?: number; total?: number; days?: CheckDay[]; tooLarge?: boolean }
@@ -135,7 +137,7 @@ function adaptRow(row: Row, raw: Pick<WiredRaw, 'branchId' | 'overlay' | 'lots'>
         if (check.lots.every(line => finite(line.seen))) product.check_difference = check.lots.reduce((sum, line) => sum + line.counted - (line.seen as number), 0)
       }
     }
-    if (overlay?.pending) product.check_pending = true
+    if (overlay?.pending) { product.check_pending = true; if (overlay.pending_session_id) product.pending_session_id = overlay.pending_session_id }
   }
   if (overlay) product.last_change_at = overlay.last_change_at
   // The received dates this branch holds, for a count typed per date (ic_lot_counts). Nothing is read for them: the rows already carry the lots.

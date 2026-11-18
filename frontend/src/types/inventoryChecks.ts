@@ -56,6 +56,8 @@ export type InventoryCheckProduct = {
   check_branch_id?: number | null
   /** This count differs from stock and waits for an administrator's approval (ic_fix_stock; sent only to a viewer who may see stock). */
   check_pending?: boolean
+  /** ic_wired rows: the session that holds the waiting request (may differ from check_session_id). */
+  pending_session_id?: string
   /** ic_wired rows: computed on the client from the shared row and the overlay, never read. difference = counted - now; set_to = the figure a Set would write; last_change_at = the last recorded movement. */
   check_difference?: number | null
   check_set_to?: number | null

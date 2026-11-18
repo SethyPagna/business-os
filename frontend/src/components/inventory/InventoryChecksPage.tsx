@@ -1132,7 +1132,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       canViewStock: access.fields.stock, label: tr('inventory_check_fix_stock_reason', 'Inventory check') })
     : null
   // The session that holds the waiting request: the overlay names it. The product's latest count may be a newer session (an observation made after the submission), which has no approval.
-  const pendingSessionOf = (product: InventoryCheckProduct): string | null => (wiredRaw.current?.overlay.get(Number(product.id)) as { pending_session_id?: string } | undefined)?.pending_session_id ?? product.check_session_id ?? null
+  const pendingSessionOf = (product: InventoryCheckProduct): string | null => product.pending_session_id ?? product.check_session_id ?? null
   // A product waiting for approval opens that session: the panel with Approve all and the per-line decisions.
   function openRequest(branch: string, session: string) {
     setDetail(null); setSection('products'); onSelect({ branchId: branch, sessionId: session })
