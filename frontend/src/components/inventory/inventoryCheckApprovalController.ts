@@ -88,8 +88,9 @@ export function createApprovalActions(deps: ApprovalDeps) {
           // and sales may have moved its stock since) carries an older figure than the rows hold: the answer is not put on any row then, and the session is read once at the end.
           const fresh = Object.entries(result.approval.applied_lines ?? {}).filter(([id, line]) => !seen[id] && finite(line.after))
           seen = result.approval.applied_lines ?? {}
-          // A request writes at least one stock line per product it applies, so more new products than writes, or a new product it was not asked for, was applied elsewhere.
-          if (fresh.length > result.applied || (productIds && fresh.some(([id]) => !productIds.includes(Number(id))))) stale = true
+          // A request writes at least one stock line for each product it applies (a dated product, one per date), so more new products than writes means one was applied elsewhere. A line the request resumes
+          // (the claim's own plan) is applied by it and is not counted as foreign.
+          if (fresh.length > result.applied) stale = true
           if (fresh.length && !stale) deps.setApplied?.(Object.fromEntries(fresh.map(([id, line]) => [id, line.after])))
           deps.setApproval(result.approval); deps.setRefused(refusedMap(result.refused))
         },

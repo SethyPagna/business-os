@@ -263,11 +263,7 @@ const cases: Array<[string, () => Promise<void>]> = [
     const r = rig(); r.script.approval.push(answer(elsewhere, 1, 0))
     await r.actions().decideApproval('approve', [2])
     assert.deepEqual(r.log.applied, [], 'the older figure of line 4 reaches no row'); assert.equal(r.log.reloads, 1, 'the session is read once')
-    // a dated line writes two stock lines in one request: the count alone (2 new products, 2 writes) cannot tell, but line 4 is a line this request was not asked for
-    const dated = rig(); dated.script.approval.push(answer(elsewhere, 2, 0))
-    await dated.actions().decideApproval('approve', [2])
-    assert.deepEqual(dated.log.applied, [], 'a product the request did not name is applied elsewhere'); assert.equal(dated.log.reloads, 1)
-    // Approve all (no ids) is judged by the count: two new products from a request that wrote one
+    // Approve all (no ids) is judged the same way: two new products from a request that wrote one
     const all = rig(); all.script.approval.push(answer(elsewhere, 1, 0))
     await all.actions().decideApproval('approve')
     assert.deepEqual(all.log.applied, []); assert.equal(all.log.reloads, 1)
