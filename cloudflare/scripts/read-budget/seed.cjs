@@ -8,11 +8,13 @@ const ADMIN = { username: 'budget_admin', password: 'budget-password-1', bootstr
 const P = 8652, C = 5164, S = 15848, FIRST_SALE = 100000, POSITIVE_LOTS = 3978, BRANCH_STOCK_ROWS = 16757
 const BIG_SALE_K = 40, BIG_SALE_LINES = 86
 
+// productSalesDay: the local day of the one completed sale of product 1000 the seed puts in the sales-detail drill-down (sale k=784, 25,715 minutes before the
+// anchor, i.e. 18 days back at 15:25). A calendar month cannot be a fixed window: how many seeded days it holds moves with the run date (the 19 Nov 2026 red).
 function seedContext(now = process.env.READ_BUDGET_NOW ? new Date(process.env.READ_BUDGET_NOW) : new Date()) {
   const local = new Date(now.getTime() + 7 * 3600e3)
   const anchorDate = local.toISOString().slice(0, 10)
   const day = (back) => new Date(Date.parse(anchorDate + 'T00:00:00Z') - back * 86400e3).toISOString().slice(0, 10)
-  return { anchorDate, anchor: `${anchorDate} 05:00:00`, today: anchorDate, week: day(6), month: day(29), year: day(364), bigSaleId: FIRST_SALE + S - 1 - BIG_SALE_K, firstSaleId: FIRST_SALE, lastSaleId: FIRST_SALE + S - 1 }
+  return { anchorDate, anchor: `${anchorDate} 05:00:00`, today: anchorDate, week: day(6), month: day(29), year: day(364), productSalesDay: day(18), bigSaleId: FIRST_SALE + S - 1 - BIG_SALE_K, firstSaleId: FIRST_SALE, lastSaleId: FIRST_SALE + S - 1 }
 }
 
 // Lines per sale from the sale's age index k: ~2.3% big sales (10-22 lines), the rest mostly 1-3, one 86-line sale.
