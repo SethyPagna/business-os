@@ -323,6 +323,57 @@ function truth(app, branch) {
     check(`after the failed bump: total 4 from the rows themselves, ok 4, Not checked 0, and ok + issue never exceeds total (${JSON.stringify(figures(second))})`, JSON.stringify(figures(second)) === '{"ok":4,"issue":0,"not_checked":0,"total":4}' && second.ok + second.issue <= second.total)
   }
 
+  // ---- a membership change between the token read and the population batch, with the count still cached under the old token ----------------------------------------------------------------------
+  // The reuse of a cached total is accepted only when the batch's own token is the one it was cached under; otherwise the three are read again together.
+  {
+    const RACE = { products: [...rowsOf(4, 'Race', 1000), { id: 1004, name: 'Race', active: false }], counts: [0, 1, 2, 3, 4].map((i) => ({ product: 1000 + i, state: 'done', at: T(i + 1) })) }
+    const NO_RECHECK = { [LIST]: [['    if (seen.token === token) return { total: cached, inList: seen.inList }', '    if (seen.token === token || true) return { total: cached, inList: seen.inList }']] }
+    const raced = async (edits) => {
+      const app = make(RACE, edits), cache = app.load('lib/cache.ts'), url = '/api/inventory-checks/list?branchId=1&page=1&pageSize=10'
+      const first = (await app.get(url)).json.summary
+      await cache.bumpVersion(app.env, 'inventory_checks')
+      const realBatch = app.env.DB.batch
+      let armed = true
+      app.env.DB.batch = async (statements) => {
+        if (armed && statements.some((s) => /inventory_population_token/.test(String(s.sql)))) { armed = false; app.raw.prepare('UPDATE products SET is_active = 1 WHERE id = 1004').run() }
+        return realBatch(statements)
+      }
+      const summary = (await app.get(url)).json.summary
+      app.env.DB.batch = realBatch
+      return { first, summary, fired: !armed, want: truth(app, 1) }
+    }
+    const good = await raced({})
+    check(`a row entering between the token read and the batch: the figures equal the rows (${JSON.stringify(figures(good.summary))}) and ok + issue never exceeds total`, good.fired && JSON.stringify(figures(good.summary)) === JSON.stringify(good.want) && good.summary.ok + good.summary.issue <= good.summary.total, () => JSON.stringify(good))
+    const mutant = await raced(NO_RECHECK).catch((error) => { if (process.env.KEEP_GOING) return null; throw error })
+    check(`mutant "a cached total reused without the token re-check" is killed (${mutant && JSON.stringify(figures(mutant.summary))})`, mutant === null || JSON.stringify(figures(mutant.summary)) !== JSON.stringify(mutant.want) || mutant.summary.ok + mutant.summary.issue > mutant.summary.total, 'survived')
+  }
+
+  // ---- reads during a restore: the triggers stand down, so nothing is cached or reused on the frozen token ------------------------------------------------------------------------------------------
+  {
+    const world = { products: [...rowsOf(3, 'Restore', 1100), { id: 1103, name: 'Restore', active: false }, { id: 1104, name: 'Restore', active: false }], counts: [0, 1, 2, 3, 4].map((i) => ({ product: 1100 + i, state: 'done', at: T(i + 1) })) }
+    const app = make(world), cache = app.load('lib/cache.ts')
+    const consistent = (s) => JSON.stringify(figures(s)) === JSON.stringify(truth(app, 1)) && s.ok + s.issue <= s.total && s.not_checked >= 0
+    const before = await summaryOf(app)
+    check(`before the restore: 3 members, all counted (${JSON.stringify(figures(before))})`, JSON.stringify(figures(before)) === '{"ok":3,"issue":0,"not_checked":0,"total":3}')
+    const frozen = tokenOf(app.raw)
+    setRestore(app.raw, true)
+    app.raw.prepare('UPDATE products SET is_active = 1 WHERE id IN (1103, 1104)').run()
+    const during = []
+    during.push(await summaryOf(app))
+    app.setUser(app.users.receivedOnly); app.clearCaches(); app.kv.clear()
+    during.push(await summaryOf(app))
+    during.push(await summaryOf(app))
+    app.setUser(app.users.checker)
+    during.push(await summaryOf(app))
+    check(`every read during the restore equals the rows and is consistent (${during.map((s) => JSON.stringify(figures(s))).join(' ')})`, during.every(consistent), () => JSON.stringify(during.map(figures)))
+    check('the token stayed frozen through the restore writes (the guard of 0124), which is why no count may be cached on it', tokenOf(app.raw) === frozen)
+    setRestore(app.raw, false)
+    await app.load('lib/dataEpoch.ts').rotateDataEpoch(app.env)
+    await cache.bumpVersion(app.env, 'inventory_checks')
+    const after = await summaryOf(app)
+    check(`after the release the counts are correct (${JSON.stringify(figures(after))})`, consistent(after) && after.total === 5, () => JSON.stringify(after))
+  }
+
   // ---- reads: what each open costs ----------------------------------------------------------------------------------------------------------------------------------------------------------------
   {
     const app = make({ products: rowsOf(6, 'Reads', 700), counts: [{ product: 700, state: 'done', at: T(1) }] })
