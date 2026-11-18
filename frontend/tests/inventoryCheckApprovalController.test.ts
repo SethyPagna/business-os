@@ -237,10 +237,13 @@ const cases: Array<[string, () => Promise<void>]> = [
       return (r.log.confirms[0].items ?? []).map(entry => [String(entry.label), String(entry.value)])
     }
     assert.deepEqual((await ask(2, modified)).slice(0, 1), [['Cream B', 'Modified to 4 → Rejected']], 'a plain line modified to 4')
-    assert.deepEqual((await ask(4, modified)).filter(row => row[0].startsWith('Dated D')), [['Dated D · Received 01/10/2026', 'Modified to 5 → Rejected']], 'a dated line: the date the approver changed (the counter typed 6), per date; the unchanged date is not listed')
+    assert.deepEqual((await ask(4, modified)).filter(row => row[0].startsWith('Dated D')), [['Dated D · Received 01/10/2026', 'Modified to 5 → Rejected'], ['Dated D · Received 09/10/2026', 'Modified to 3 → Rejected']], 'a dated line lists every date, as the accept dialog does (the counter typed 6 on the first)')
     const both: InventoryCheckApproval = { ...pending, line_decisions: { 4: { decision: 'modify', lots: [{ batchId: 7, counted: 5 }, { batchId: 9, counted: 2 }], at: '2026-11-02T02:00:00Z', by_name: 'boss' } } }
     assert.deepEqual((await ask(4, both)).filter(row => row[0].startsWith('Dated D')), [['Dated D · Received 01/10/2026', 'Modified to 5 → Rejected'], ['Dated D · Received 09/10/2026', 'Modified to 2 → Rejected']], 'both dates changed: both listed')
     assert.deepEqual((await ask(1, modified)).slice(0, 1), [['Serum A', 'Open → Rejected']], 'an open line still reads Open')
+    assert.deepEqual((await ask(4, pending)).filter(row => row[0].startsWith('Dated D')), [['Dated D · Received 01/10/2026', 'Open → Rejected'], ['Dated D · Received 09/10/2026', 'Open → Rejected']], 'an open dated line: every date reads Open')
+    const own: InventoryCheckApproval = { ...pending, line_decisions: { 4: { decision: 'modify', lots: [{ batchId: 7, counted: 6 }, { batchId: 9, counted: 3 }], at: '2026-11-02T02:00:00Z', by_name: 'boss' } } }
+    assert.deepEqual((await ask(4, own)).filter(row => row[0].startsWith('Dated D')), [['Dated D · Received 01/10/2026', 'Modified to 6 → Rejected'], ['Dated D · Received 09/10/2026', 'Modified to 3 → Rejected']], 'a line modified to the counter figures is still a modified line, not Open')
   }],
   ['an accepted line puts the stock it wrote on the session rows with no read: setApplied carries each newly applied line (ordinary stock after), once', async () => {
     const r = rig()

@@ -170,16 +170,14 @@ export function createApprovalActions(deps: ApprovalDeps) {
     }
   }
 
-  /** What rejecting one line changes, from the line's own state: an open line is "Open", a modified line is "Modified to {figure}" (each modified date, for a line counted by received date). */
+  /** What rejecting one line changes, from the line's own state: an open line is "Open", a modified line is "Modified to {figure}" (each date, for a line counted by received date). */
   function rejectFrom(item: InventoryCheckSessionItem | undefined, id: string, approval: InventoryCheckApproval): Array<{ label: string; value: string }> {
     const name = nameOf(item, id), rejected = tr('inventory_check_line_decided_reject', 'Rejected')
     const modifiedTo = (value: number) => `${tr('inventory_check_line_modified_to', 'Modified to {value}').replace('{value}', String(value))} → ${rejected}`
-    const decision = decisionOf(approval, id)
-    if (item && decision?.decision === 'modify') {
-      const dates = (item.lot_lines ?? []).filter(line => effectiveLotCounted(item, approval, line) !== line.counted)
-      if (dates.length) return dates.map(line => ({ label: `${name} · ${dateLabel(line)}`, value: modifiedTo(effectiveLotCounted(item, approval, line)) }))
-      if (finite(decision.counted)) return [{ label: name, value: modifiedTo(decision.counted) }]
-    }
+    const decision = decisionOf(approval, id), modified = decision?.decision === 'modify'
+    // Rejecting removes the whole line, so a line counted by received date lists every date, as the accept dialog does: a modified line shows each date's modified figure, an open one reads Open.
+    if (item?.lot_lines?.length) return item.lot_lines.map(line => ({ label: `${name} · ${dateLabel(line)}`, value: modified ? modifiedTo(effectiveLotCounted(item, approval, line)) : `${tr('inventory_check_line_open', 'Open')} → ${rejected}` }))
+    if (modified && finite(decision?.counted)) return [{ label: name, value: modifiedTo(decision.counted) }]
     return [{ label: name, value: `${tr('inventory_check_line_open', 'Open')} → ${rejected}` }]
   }
 
