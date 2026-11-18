@@ -95,14 +95,17 @@ const readCalls = (file: string, source = worker(file)): Read => {
 const codesIn = (file: string) => readCalls(file).codes
 
 // The approval and per-line decision routes: every code needs a sentence, bar the unknown results (503), whose request is repeated and never shown as a refusal.
-const APPROVAL_FILES = ['lib/inventoryCheckApprovals.ts', 'lib/inventoryCheckLineInput.ts']
+const APPROVAL_FILES = ['lib/inventoryCheckApprovals.ts', 'lib/inventoryCheckLineInput.ts', 'lib/inventoryCheckPlan.ts']
 const UNKNOWN_RESULTS = ['inventory_check_outcome_unknown', 'inventory_check_saved_refresh']
 // The session, list and observation routes raise more codes, which those screens show in their own words or as the generic "not saved". They are named here, each once, so a NEW code cannot pass unnoticed.
 const OTHER_SCREENS = ['inventory_check_revision_required', 'inventory_check_schema_unavailable', 'inventory_check_membership_unavailable', 'inventory_check_invalid_filter', 'inventory_check_invalid_page',
   'inventory_check_stock_schema_unavailable', 'inventory_check_invalid_title', 'inventory_check_invalid_scope', 'inventory_check_invalid_state', 'inventory_check_reason_required', 'inventory_check_item_not_found',
   'inventory_check_session_final', 'inventory_check_invalid_query', 'inventory_check_view_required', 'invalid_session',
   // the list and product-read routes (raised in other files, shown by the Inventory list in its own words or as a failed read)
-  'inventory_check_field_hidden', 'inventory_check_filter_too_large', 'inventory_check_family_page_too_large', 'inventory_check_unavailable']
+  'inventory_check_field_hidden', 'inventory_check_filter_too_large', 'inventory_check_family_page_too_large']
+// A code the error handlers answer with when an error carries none (routes/inventoryChecks.ts, which also answers /approval and /approval/lines, and routes/inventoryCheckProducts.ts). The panel does not read it as
+// an unknown outcome and shows its generic failure text, so it is no refusal with a sentence of its own: named here with that reason, and kept out of the codes that need one.
+const FALLBACK_CODES: Record<string, string> = { inventory_check_unavailable: 'what the error handlers answer when an error carries no code; shown with the generic failure text' }
 const SHARED_FILES = ['lib/inventoryCheckSessions.ts', 'routes/inventoryChecks.ts']
 // Strings that begin with inventory_check_ and are not refusals. Each is named with its reason, so a NEW string of that shape cannot be one of them unnoticed.
 const NOT_REFUSALS: Record<string, string> = {
@@ -125,7 +128,7 @@ assert.ok(approvalCodes.size >= 30 && sharedCodes.size >= 15, `the scan finds th
 for (const code of ['inventory_check_line_in_progress', 'inventory_check_modify_matches_seen', 'inventory_check_approval_in_progress']) assert.ok(approvalCodes.has(code), `the scan reads ${code} from the Worker`)
 for (const code of ['inventory_check_not_available', 'inventory_check_permission_required']) assert.ok(sharedCodes.has(code), `the scan reads ${code} from the Worker (finding 8 of the C2 review)`)
 
-const mustHave = new Set([...approvalCodes, ...sharedCodes].filter(code => !UNKNOWN_RESULTS.includes(code) && !OTHER_SCREENS.includes(code)))
+const mustHave = new Set([...approvalCodes, ...sharedCodes].filter(code => !UNKNOWN_RESULTS.includes(code) && !OTHER_SCREENS.includes(code) && !Object.hasOwn(FALLBACK_CODES, code)))
 const missing = [...mustHave].filter(code => !Object.hasOwn(REFUSAL_MESSAGES, code)).sort()
 assert.deepEqual(missing, [], `Worker refusal codes with no sentence (add one to inventoryCheckRefusals.ts and both packs, or name it in OTHER_SCREENS with its reason): ${missing.join(', ')}`)
 // Every refusal call of every inventory-check source file is read, not only the approval and shared files: a call whose code this test cannot read is a code it cannot check.
@@ -140,11 +143,12 @@ for (const file of sourceFiles(SRC)) for (const match of readFileSync(file, 'utf
   strings.set(name, [...(strings.get(name) ?? []), at])
 }
 const everyCode = new Set([...approvalCodes, ...sharedCodes, ...callCodes, ...strings.keys()].filter(code => !Object.hasOwn(NOT_REFUSALS, code)))
-const unaccounted = [...strings].filter(([name]) => !approvalCodes.has(name) && !sharedCodes.has(name) && !OTHER_SCREENS.includes(name) && !UNKNOWN_RESULTS.includes(name) && !Object.hasOwn(NOT_REFUSALS, name) && !Object.hasOwn(REFUSAL_MESSAGES, name)).map(([name, files]) => `${name} (${[...new Set(files)].join(', ')})`)
+const unaccounted = [...strings].filter(([name]) => !approvalCodes.has(name) && !sharedCodes.has(name) && !OTHER_SCREENS.includes(name) && !Object.hasOwn(FALLBACK_CODES, name) && !UNKNOWN_RESULTS.includes(name) && !Object.hasOwn(NOT_REFUSALS, name) && !Object.hasOwn(REFUSAL_MESSAGES, name)).map(([name, files]) => `${name} (${[...new Set(files)].join(', ')})`)
 assert.deepEqual(unaccounted, [], 'inventory_check_* strings the scan does not read as a refusal of the approval or shared files, and that are named nowhere: read it as a code (a quoted literal in fail/refuse/guard), or give it a sentence, or name it in OTHER_SCREENS, UNKNOWN_RESULTS or NOT_REFUSALS')
 assert.deepEqual(Object.keys(NOT_REFUSALS).filter(name => !strings.has(name)), [], 'every name in NOT_REFUSALS is still a string of the Worker source')
 assert.deepEqual(Object.keys(NOT_REFUSALS).filter(name => approvalCodes.has(name) || sharedCodes.has(name) || Object.hasOwn(REFUSAL_MESSAGES, name)), [], 'a name in NOT_REFUSALS is not a refusal the count routes raise')
 assert.deepEqual(OTHER_SCREENS.filter(code => !everyCode.has(code)), [], 'every name in OTHER_SCREENS is still a code the Worker raises')
+assert.deepEqual(Object.keys(FALLBACK_CODES).filter(code => !strings.has(code) || OTHER_SCREENS.includes(code) || Object.hasOwn(REFUSAL_MESSAGES, code) || approvalCodes.has(code)), [], 'every name in FALLBACK_CODES is still a string of the Worker source, is listed nowhere else and has no sentence')
 assert.deepEqual(OTHER_SCREENS.filter(code => Object.hasOwn(REFUSAL_MESSAGES, code)), [], 'a code that has a sentence is not listed as one that needs none')
 assert.deepEqual(APPROVAL_FILES.flatMap(file => [...codesIn(file)]).filter(code => OTHER_SCREENS.includes(code)), [], 'no approval or line-decision code hides in OTHER_SCREENS')
 for (const code of UNKNOWN_RESULTS) assert.equal(Object.hasOwn(REFUSAL_MESSAGES, code), false, `${code}: an unknown outcome is repeated, never shown as a definite refusal`)
