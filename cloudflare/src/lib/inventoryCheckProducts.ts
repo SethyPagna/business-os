@@ -66,7 +66,7 @@ const checkScopeSql = (branchScoped: boolean) => `s.organization_id IS @checkOrg
 const CHECK_ITEMS_SQL = 'inventory_check_items i INDEXED BY inventory_check_items_product_latest CROSS JOIN inventory_check_sessions s ON s.id=i.session_id'
 const CHECK_ITEM_STATE = { in_check: 'unstarted', ok: 'done', issue: 'issue' } as const
 const IN_OPEN_CHECK_SQL = (id: string, branchScoped: boolean) => `EXISTS (SELECT 1 FROM ${CHECK_ITEMS_SQL}
-  WHERE i.product_id=${id} AND i.state='unstarted' AND s.status='open' AND ${checkScopeSql(branchScoped)})`
+  WHERE i.product_id=${id} AND i.state='unstarted' AND s.status='open' AND json_extract(s.scope_json, '$.membership') IS NOT 'task' AND ${checkScopeSql(branchScoped)})`
 const LATEST_STATE_SQL = (id: string, branchScoped: boolean) => `(SELECT i.state FROM ${CHECK_ITEMS_SQL}
   WHERE i.product_id=${id} AND i.state IN ('done','issue') AND ${checkScopeSql(branchScoped)} ORDER BY i.updated_at DESC,i.session_id DESC LIMIT 1)`
 

@@ -17,7 +17,7 @@
       {"id":"settings-payment-methods-impact","cold_calls":85,"reason":"The payment-method impact count walks the sales report call by call while report_atomic and report_atomic_long are OFF live (ops run 42681892423); the free pass measures 17. Fixed by the same flip (confirmed by that measurement only), then remove this entry."}
     ]}
   },
-  "reasons": {"static-or-document":"served assets or documents; no D1 read","write-not-measured":"a write route with no measured shape yet; the slice that changes it adds one","get-not-in-shapes":"a GET with no shape yet: OAuth callback, job poll, download, duplicate check"},
+  "reasons": {"count-tasks-pinned":"the count-task routes (docs/contracts/inventory-check-tasks-20261119.md): D1 calls and table rows written are pinned per route by scripts/test-inventory-check-tasks-native.cjs (scenario budget) over the real routes in an in-memory database; rows READ are not measured in this Miniflare world yet, and the plans that bound them are pinned by scripts/test-migration-0318-inventory-check-task-index-pure.cjs","static-or-document":"served assets or documents; no D1 read","write-not-measured":"a write route with no measured shape yet; the slice that changes it adds one","get-not-in-shapes":"a GET with no shape yet: OAuth callback, job poll, download, duplicate check"},
   "exemptions": [
     {"method":"GET","route":"/admin/*","class":"N","reason":"static-or-document"},
     {"method":"GET","route":"/admin","class":"N","reason":"static-or-document"},
@@ -131,6 +131,10 @@
     {"method":"DELETE","route":"/api/import-jobs/:id","class":"N","reason":"write-not-measured"},
     {"method":"POST","route":"/api/import-jobs","class":"N","reason":"write-not-measured"},
     {"method":"POST","route":"/api/internal/branch-cutover/:action","class":"N","reason":"write-not-measured"},
+    {"method":"GET","route":"/api/inventory-checks/tasks","class":"N","reason":"count-tasks-pinned"},
+    {"method":"POST","route":"/api/inventory-checks/tasks","class":"N","reason":"count-tasks-pinned"},
+    {"method":"POST","route":"/api/inventory-checks/tasks/:id/pickup","class":"N","reason":"count-tasks-pinned"},
+    {"method":"POST","route":"/api/inventory-checks/tasks/:id/release","class":"N","reason":"count-tasks-pinned"},
     {"method":"PATCH","route":"/api/inventory-checks/sessions/:id/items/:productId","class":"N","reason":"write-not-measured"},
     {"method":"PATCH","route":"/api/inventory-checks/sessions/:id","class":"N","reason":"write-not-measured"},
     {"method":"POST","route":"/api/inventory/dated-stock-count/apply","class":"N","reason":"write-not-measured"},

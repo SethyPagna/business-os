@@ -67,7 +67,7 @@ export function closeIssueStatements(args: SetCloseArgs, now = new Date().toISOS
       SELECT @sid,@product,@branch,json_object('name',p.name,'image_path',p.image_path,'unit',p.unit,'parent_id',p.parent_id,'is_group',p.is_group),${BRANCH_NOW},
         json_object('quantity',${BRANCH_NOW},'operation',@operation),'done',${BRANCH_NOW},NULL,1,@actor,@now
       FROM products p WHERE p.id=@product AND EXISTS(SELECT 1 FROM inventory_check_sessions WHERE id=@sid)`, params },
-    ...eventStatements(params, 'Set closed the Issue'),
+    ...eventStatements(params, 'Set closed the difference'),
     // A Set that changed nothing has no operation (and no stored answer): the caller reads whether the session exists.
     ...(options.answer === false ? [] : [{ sql: `UPDATE stock_lot_adjustment_operations SET response_json=json_set(response_json,'$.issue_closed',json(CASE WHEN EXISTS(SELECT 1 FROM inventory_check_sessions WHERE id=@sid) THEN 'true' ELSE 'false' END))
       WHERE id=@operation`, params }]),
@@ -89,6 +89,6 @@ export function reopenIssueStatements(args: SetCloseArgs, now = new Date().toISO
       SELECT @sid,l.product_id,l.branch_id,l.batch_id,l.scope,l.seen_quantity,l.counted_quantity,l.seen_source,@now
       FROM inventory_check_lot_lines l WHERE l.session_id=(SELECT json_extract(scope_json,'$.reopens') FROM inventory_check_sessions WHERE id=@sid) AND l.product_id=@product AND l.branch_id=@branch
         AND EXISTS(SELECT 1 FROM inventory_check_items WHERE session_id=@sid AND product_id=@product)`, params },
-    ...eventStatements(params, 'Undo of a Set reopened the Issue'),
+    ...eventStatements(params, 'Undo of a Set reopened the difference'),
   ]
 }
