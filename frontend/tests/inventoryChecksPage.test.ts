@@ -849,10 +849,10 @@ try {
   {
     const pendingState = workerState('pending'), acceptedState = workerState('accepted_one')
     memberOverride = pendingState.items; sessionApproval = pendingState.approval
-    productOverride = [{ ...product, id: 1, name: 'Serum', quantity: 9 }, { ...product, id: 2, name: 'Toner', quantity: 5 }, { ...product, id: 3, name: 'Cream', quantity: 5 }]
+    productOverride = [{ ...product, id: 1, name: 'Serum', quantity: 9 }, { ...product, id: 2, name: 'Toner', quantity: 5 }, { ...product, id: 3, name: 'Cream', quantity: 7, damaged_quantity: 2 }]
     await approving.click(approving.button('Leave session')); await openSession(approving)
     const rowText = (id: number) => (approving.findAll(node => node.getAttribute('data-inventory-check-row') === String(id))[0]?.textContent ?? '<no row ' + id + '>').replace(/\s+/g, ' ')
-    assert.match(rowText(1), /Now 9/, 'before: the session row of line 1 reads 9')
+    assert.match(rowText(1), /Now 9/, 'before: the session row of line 1 reads 9'); assert.match(rowText(3), /Now 7/, 'before: the row of line 3 counts its 2 damaged units in the 7')
     const lineNames = (id: number) => approving.findAll(node => node.getAttribute('data-approval-line-action') !== null && approving.find(candidate => candidate.getAttribute('data-approval-line') === String(id), 'line ' + id).contains(node)).map(node => node.getAttribute('data-approval-line-action'))
     const lineText = (id: number) => (approving.find(node => node.getAttribute('data-approval-line') === String(id), 'line ' + id).textContent ?? '').replace(/\s+/g, ' ')
     assert.match(lineText(1), /Now 9/, 'before: the stock of line 1 is 9')
@@ -873,7 +873,7 @@ try {
     const plainAccepted: InventoryCheckApproval = { ...acceptedState.approval, applied: 2, applied_lines: { ...acceptedState.approval.applied_lines, 3: { before: 5, target: 2, after: 2, at: '2026-11-18T00:00:00.000Z' } } }
     decideScript = [{ approval: plainAccepted, applied: 1, remaining: 0, done: true }]
     await approving.click(lineButton(3, 'accept')); await confirmInDialog(approving, 'Approve')
-    assert.match(rowText(3), /Now 2/, 'a line counted as one figure: its row shows the stock the answer wrote (2), not 5'); assert.match(rowText(1), /Now 7/, 'the row accepted before keeps its figure'); assert.equal(sessionLoads, loadsAtAccept, 'no read')
+    assert.match(rowText(3), /Now 4/, 'a line counted as one figure: its row shows the ordinary stock the answer wrote (2) plus the 2 damaged units the list sums (4), not 7'); assert.match(rowText(1), /Now 7/, 'the row accepted before keeps its figure'); assert.equal(sessionLoads, loadsAtAccept, 'no read')
     assert.equal(approving.findAll(node => node.getAttribute('data-approval-line-action') === 'accept' && node.getAttribute('disabled') !== null).length, 0, 'and its buttons are live')
     // line 2 can be rejected at once (the Worker's own test does exactly this under the claim)
     lineScript = [{ approval: { ...acceptedState.approval, line_decisions: { 2: { decision: 'reject', at: '2026-11-18T00:00:00.000Z', by_name: 'stock-user' } } }, applied: 0, remaining: 1, done: false, line: { productId: 2, action: 'reject' } }]
@@ -889,7 +889,7 @@ try {
     decideScript = [{ approval: stepOne, applied: 1, remaining: 2, done: false }, { approval: stepTwo, applied: 2, remaining: 0, done: true }]
     delayedProducts = () => {}
     await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
-    assert.match(rowText(1), /Now 7/, 'Approve all: the first request put line 1 on its row'); assert.match(rowText(2), /Now 3/, 'and the last one line 2'); assert.match(rowText(3), /Now 2/, 'and line 3')
+    assert.match(rowText(1), /Now 7/, 'Approve all: the first request put line 1 on its row'); assert.match(rowText(2), /Now 3/, 'and the last one line 2'); assert.match(rowText(3), /Now 4/, 'and line 3 (2 written plus its 2 damaged units)')
     const release = delayedProducts as unknown as ((value: unknown) => void) | null; delayedProducts = null; release?.({ ...response({}), items: productOverride, total: 3 })
     productOverride = null; memberOverride = submittedItems; sessionApproval = pendingApproval
     await approving.click(approving.button('Leave session')); await openSession(approving)
