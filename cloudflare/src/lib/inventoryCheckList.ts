@@ -168,7 +168,7 @@ export type CheckSummary = { ok: number; issue: number; pending?: number; not_ch
 export const POPULATION_TOTAL_SQL = `SELECT COUNT(*) AS n FROM products p WHERE ${catalogProductSql('p')} AND COALESCE(p.is_group, 0) = 0`
 // Which of the checked ids are in the population: json_each drives primary-key seeks, nothing else is read.
 export const POPULATION_CHECKED_SQL = `SELECT p.id AS id FROM products p WHERE ${catalogProductSql('p', false)} AND COALESCE(p.is_group, 0) = 0 AND p.id IN (SELECT value FROM json_each(@ids))`
-export const POPULATION_TOKEN_SQL = "SELECT stamp AS token FROM inventory_population_token WHERE id = 1 AND NOT EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance' AND json_extract(value, '$.mode') = 'restore')"
+export const POPULATION_TOKEN_SQL = "SELECT stamp AS token FROM inventory_population_token WHERE id = 1 AND NOT EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance' AND CASE WHEN json_valid(value) THEN json_extract(value, '$.mode') = 'restore' ELSE 1 END)"
 const TOKEN_FORM = /^[0-9a-f]{16}$/
 
 export function summaryFromSets(sets: CheckStateSets, withPending: boolean, population: { total: number; inList: ReadonlySet<number> }): CheckSummary {
