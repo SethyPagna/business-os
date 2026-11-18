@@ -107,6 +107,35 @@ const PRODUCT_PAGE = ['/api/products/search?query=Aloe&pageSize=50&include=branc
       check(`seed ${seed} the Products page "${url.slice(20, 60)}": the same statements and the same answer as before the fix`, listReads(app.since(m1)) === listReads(unfixed.since(m2)) && JSON.stringify(fixedRes.json) === JSON.stringify(oldRes.json) && fixedRes.status === oldRes.status)
     }
   }
+  // ---- the CSV driver of a ranked-id read (rankIds, 300 ids or more, ranked scope off): its family-member filter meets the check state too ------------------------------------------------------------
+  // The Inventory list validates its query and answers 400 to rankIds, so no HTTP request reaches this path with a check state; the shared reader (readProductSearchList) is called directly, as any other caller would.
+  // 901..903 are listed and share the header 900; 901 is counted OK, 902 is an issue, 903 is not counted.
+  {
+    const products = [{ id: 900, name: 'Zed Fam', group: true, brand: 'Brand', cat: 'Cat' }, ...[901, 902, 903].map((id) => ({ id, name: 'Zed Fam', parent: 900, brand: 'Brand', cat: 'Cat' }))]
+    for (let id = 1; id <= 300; id++) products.push({ id, name: `Filler ${id}`, brand: 'Brand', cat: 'Cat' })
+    const world = { products, counts: [{ product: 901, state: 'done', at: T(1) }, { product: 902, state: 'issue', at: T(2) }] }
+    const CSV_DRIVER = ['csvMemberWhereSql: withCheckTerms(searchDriver.csvMemberWhereSql, checkTerms)', 'csvMemberWhereSql: searchDriver.csvMemberWhereSql']
+    const rankIds = [901, 902, 903, ...Array.from({ length: 300 }, (_, i) => i + 1)].join(',')
+    const STATES = { not_checked: { excludeIdsJson: JSON.stringify([901, 902]) }, ok: { restrictIdsJson: JSON.stringify([901]) }, issue: { restrictIdsJson: JSON.stringify([902]) } }
+    const driven = async (edits) => {
+      const app = make(world, edits)
+      app.setSwitch('catalog_ranked_scope', 'off'); app.setSwitch('products_typed_order_js', 'on')
+      const reader = app.load(PRODUCTS)
+      const c = { env: app.env, executionCtx: { waitUntil() {}, passThroughOnException() {} }, get: (key) => (key === 'user' ? app.users.checker : undefined), req: { raw: new Request('https://shop.invalid/api/products/search') } }
+      const out = {}
+      for (const [name, restriction] of Object.entries(STATES)) {
+        const query = { searchMode: 'smart', sort: 'name_asc', page: '1', pageSize: '100', branchId: '1', rankIds }
+        const payload = await reader.readProductSearchList(c, query, { include: new Set(), ...restriction, setKey: name, setVersion: 'v' })
+        const got = (payload.items || []).map((row) => row.id).sort((x, y) => x - y)
+        const allowed = name === 'not_checked' ? (id) => id !== 901 && id !== 902 && id !== 900 : name === 'ok' ? (id) => id === 901 : (id) => id === 902
+        out[name] = { got, stray: got.filter((id) => !allowed(id)) }
+      }
+      return out
+    }
+    const good = await driven({}), planted = await driven({ [PRODUCTS]: [CSV_DRIVER] })
+    for (const s of Object.keys(STATES)) check(`a rankIds read of 303 ids in ${s} lists only rows of the state (${JSON.stringify(good[s].got.slice(0, 5))}...)`, good[s].got.length > 0 && good[s].stray.length === 0, () => JSON.stringify(good[s]).slice(0, 300))
+    check('the CSV driver without the check terms lists a row of another state (the planted fault is killed)', Object.values(planted).some((entry) => entry.stray.length > 0), () => JSON.stringify(planted).slice(0, 400))
+  }
   console.log(`  ${listed} rows listed in ${strays} strays; ${differing} restricted requests answer differently from the unfixed source; ${compared} unrestricted requests compared`)
   check('the unfixed source fails the restricted checks (the positive control: some world has a checked sibling under Not checked)', differing > 0)
   console.log(`PASS test-inventory-typed-search-state-native (${checks} checks)`)
