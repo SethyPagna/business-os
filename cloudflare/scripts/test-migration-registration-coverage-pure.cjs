@@ -76,6 +76,8 @@ const NAMED_COMPANIONS = {
   // 0250 stores the multi-lot Revert watermark; its companion applies the real chain and pins the stored value.
   250: 'test-migration-0250-multilot-watermark-sqlite.cjs',
   251: 'test-loyalty-reset-watermark-native.cjs',
+  // 0317 is the Inventory membership token (table, three guarded triggers, partial index); its companion applies the real chain and pins LF, rowid, the seeded row, the guard, the iff property and the covering count.
+  317: 'test-inventory-population-token-native.cjs',
   184: 'test-product-cost-previous-migration-native.cjs',
   // 0188/0190/0191 are unapplied, unwired foundations (transfer receipt
   // retirement, dataset operation journal and its generation transition); their

@@ -11,7 +11,8 @@
 -- PRE:  products has is_active and is_group, no inventory_population_token table.
 -- POST: one token row, three triggers, one partial index. No product, stock or history row is read or changed.
 -- Cost: a product create writes 1 token row and 1 index entry on top of its own rows, an import of N rows writes N of each, a delete the same, an update that touches none of id, is_active, is_group writes 0.
--- Recovery: drop the three triggers, the index and the table, the Worker then keys the counts on an unreadable token and computes them uncached (correct, dearer). Nothing else depends on them.
+-- Recovery: drop the three triggers, the index and the table. The Worker then reads no token and computes the counts uncached (correct, dearer), and rotateDataEpoch (lib/dataEpoch.ts) tolerates exactly the
+-- error "no such table: inventory_population_token" on its token step, so maintenance entry, release, force-clear and a branch cutover still complete. Any other error of that step is not swallowed.
 CREATE TABLE inventory_population_token (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   stamp TEXT NOT NULL CHECK (length(stamp) = 16)

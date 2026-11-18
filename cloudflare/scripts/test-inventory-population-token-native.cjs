@@ -255,11 +255,34 @@ function truth(app, branch) {
     const after = app.raw.prepare('SELECT stamp AS token FROM inventory_population_token').get().token, epochAfter = app.raw.prepare("SELECT value FROM system_flags WHERE key = 'data_epoch'").get().value
     check('rotateDataEpoch (the step every restore and every reset ends with) writes a fresh token as well as a fresh epoch', after !== before && /^[0-9a-f]{16}$/.test(after) && epochAfter !== epochBefore)
     let mutant
-    try { mutant = make(HEADERS, { 'lib/dataEpoch.ts': [['  await db.prepare(ROTATE_POPULATION_TOKEN_SQL).run()\n', '']] }) } catch (error) { if (!process.env.KEEP_GOING) throw error }
+    try { mutant = make(HEADERS, { 'lib/dataEpoch.ts': [['await db.prepare(ROTATE_POPULATION_TOKEN_SQL).run()', "await db.prepare('SELECT 1').run()"]] }) } catch (error) { if (!process.env.KEEP_GOING) throw error }
     if (!mutant) mutant = make(HEADERS)
     const was = mutant.raw.prepare('SELECT stamp AS token FROM inventory_population_token').get().token
     await mutant.load('lib/dataEpoch.ts').rotateDataEpoch(mutant.env)
     check('mutant "the restore step does not refresh the token" is killed', mutant.raw.prepare('SELECT stamp AS token FROM inventory_population_token').get().token === was)
+  }
+  {
+    // a database without the 0317 table (a fixture, an older restore point): the epoch step still completes, only that absence is tolerated, and the counts are computed uncached
+    const app = make({ products: rowsOf(4, 'Bare', 800), counts: [{ product: 800, state: 'done', at: T(1) }] })
+    for (const kind of ['insert', 'delete', 'update']) app.raw.exec(`DROP TRIGGER inventory_population_token_products_${kind}`)
+    app.raw.exec('DROP TABLE inventory_population_token')
+    const epochOf = () => app.raw.prepare("SELECT value FROM system_flags WHERE key = 'data_epoch'").get().value
+    const epochBefore = epochOf()
+    let thrown = null
+    try { await app.load('lib/dataEpoch.ts').rotateDataEpoch(app.env) } catch (error) { thrown = error }
+    check(`rotateDataEpoch completes without the token table (${thrown && thrown.message})`, thrown === null && epochOf() !== epochBefore)
+    const COUNT = /COUNT\(\*\) AS n FROM products p/
+    const counted = async () => { const mark = app.mark(); const summary = (await app.get('/api/inventory-checks/overlay?branchId=1&ids=800')).json.summary; return { summary, counts: app.since(mark).filter((sql) => COUNT.test(sql)).length } }
+    const one = await counted(), two = await counted()
+    check(`without the table every open counts again, nothing is cached on a token (${one.counts}, ${two.counts})`, one.counts === 1 && two.counts === 1)
+    app.raw.prepare('UPDATE products SET is_active = 0 WHERE id = 803').run()
+    const three = await counted()
+    check(`and the figures follow the rows at once (${JSON.stringify(figures(three.summary))})`, JSON.stringify(figures(three.summary)) === JSON.stringify(truth(app, 1)) && three.summary.total === 3)
+    // any other failure of the token step is still a failure
+    const failing = { ...app.env, DB: { ...app.env.DB, prepare: (sql) => { if (/inventory_population_token/.test(sql)) throw new Error('disk I/O error'); return app.env.DB.prepare(sql) } } }
+    let other = null
+    try { await app.load('lib/dataEpoch.ts').rotateDataEpoch(failing) } catch (error) { other = error }
+    check('an error other than the missing table is not swallowed', other !== null && /disk I\/O error/.test(other.message))
   }
   {
     // the epoch is in every cache key, so a cached count from before a restore is unreachable after it even before the token is read
