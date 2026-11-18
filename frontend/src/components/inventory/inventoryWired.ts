@@ -162,6 +162,15 @@ function adaptRow(row: Row, raw: Pick<WiredRaw, 'branchId' | 'overlay' | 'lots'>
   return product
 }
 
+type WholeSummary = { tooLarge: true } | { tooLarge?: false; ok: number; issue: number; not_checked: number; total: number; pending?: number; days?: CheckDay[] }
+/** The summary as one whole answer, or undefined when it lacks a count: a partial summary (an older Worker's) must not be completed with figures from elsewhere. */
+function wholeSummary(summary: WiredSummary | undefined): WholeSummary | undefined {
+  if (!summary) return undefined
+  if (summary.tooLarge === true) return { tooLarge: true }
+  const { ok, issue, not_checked, total, pending, days } = summary
+  return [ok, issue, not_checked, total].every(finite) ? { ok: ok as number, issue: issue as number, not_checked: not_checked as number, total: total as number, ...(finite(pending) ? { pending } : {}), ...(days ? { days } : {}) } : undefined
+}
+
 /** The page's own result shape (the check-status list's), built from the raw wired answers: the rest of the page reads it as it read the older list. */
 export function wiredResult(raw: WiredRaw, previous?: { summary?: Record<string, unknown> } | null) {
   const { list } = raw
@@ -170,16 +179,12 @@ export function wiredResult(raw: WiredRaw, previous?: { summary?: Record<string,
     // Every held tag counts (broken, expired, opened, damaged ...): they all left sellable stock, as the older reader summed them.
     for (const key of [`${Number(group.product_id)}:${Number(group.branch_id)}`, `${Number(group.product_id)}:0`]) damaged.set(key, (damaged.get(key) ?? 0) + Number(group.quantity ?? 0))
   }
-  // The check counts come with the answers that carry them (page 1 and a filter change); a page step or a Products-held answer keeps the last ones.
-  const incoming = raw.extras.summary, last = previous?.summary as WiredSummary | undefined
-  // The dates are the one part that is NOT carried over a fresh summary: an answer that brings a summary but no days (too many products to list them) must not keep the old chips.
-  const days = incoming ? incoming.days : last?.days
-  // Too many checked products to count (the Worker's { tooLarge: true }, with no counts and no days): the answer says NOTHING about them, so nothing from an earlier answer may stand in for it. A page step brings no
-  // summary at all and keeps the last one, which is how the flag itself is carried.
-  const tooLarge = (incoming ?? last)?.tooLarge === true
-  const summary = tooLarge ? { tooLarge: true as const } : incoming || last ? { not_checked: incoming?.not_checked ?? last?.not_checked ?? 0, in_check: 0, ok: incoming?.ok ?? last?.ok ?? 0, issue: incoming?.issue ?? last?.issue ?? 0, total: incoming?.total ?? last?.total ?? 0,
-    ...(incoming?.pending !== undefined || last?.pending !== undefined ? { pending: incoming?.pending ?? last?.pending ?? 0 } : {}),
-    ...(days ? { days } : {}) } : undefined
+  // The cards show ONE answer's figures: the one this load brought (the overlay's, or a list that named the branch), else the whole summary the screen already holds (a page step asks for none).
+  // An answer is whole (every count, and the days that go with them) or it says tooLarge; anything else carries no figure and the cards stay unknown, never 0 and never half old, half new.
+  const incoming = wholeSummary(raw.extras.summary), last = wholeSummary(previous?.summary as WiredSummary | undefined)
+  const answer = raw.extras.summary === undefined ? last : incoming
+  const summary = !answer ? undefined : answer.tooLarge === true ? { tooLarge: true as const }
+    : { not_checked: answer.not_checked, in_check: 0, ok: answer.ok, issue: answer.issue, total: answer.total, ...(answer.pending !== undefined ? { pending: answer.pending } : {}), ...(answer.days ? { days: answer.days } : {}) }
   return {
     wired: true as const, simple: true as const, items: list.items.map(row => adaptRow(row, { ...raw, damaged })), total: list.total, page: list.page, pageSize: list.pageSize, totalPages: list.totalPages, grouping: list.grouping,
     branches: raw.branches, promotionRules: Array.isArray(list.promotion_rules) ? list.promotion_rules : [], ...(summary ? { summary } : {}), ...(raw.extras.capabilities ? { capabilities: raw.extras.capabilities } : {}),
@@ -190,7 +195,7 @@ export function wiredResult(raw: WiredRaw, previous?: { summary?: Record<string,
 
 export type WiredDeps = {
   readList: (params: QueryParams, signal?: AbortSignal) => Promise<WiredList>
-  readOverlay: (params: { branchId: number; ids: number[]; lots?: boolean }, signal?: AbortSignal) => Promise<OverlayAnswer>
+  readOverlay: (params: { branchId: number; ids: number[]; lots?: boolean; summary?: boolean }, signal?: AbortSignal) => Promise<OverlayAnswer>
   /** The Products answer held in tab memory for this query string, or null. */
   peek: (query: string) => unknown
   prime: (query: string, payload: unknown, versions?: Record<string, number | string | null>) => void
@@ -222,8 +227,9 @@ const ids = (items: readonly Row[]): number[] => items.map(row => Number(row.id)
 
 /** The by-id read of a few rows (a refresh of changed ones): their Products rows and their overlay, nothing else. */
 export async function readWiredRows(rowIds: number[], branchId: number, deps: WiredDeps, access: WiredAccess, signal?: AbortSignal): Promise<{ ids: number[]; items: Row[]; tagged: Tagged[]; overlay: OverlayEntry[]; lots: Array<{ product_id: number; lots?: Lot[] }> }> {
-  const list = await deps.readList({ ids: rowIds.join(','), ...(branchId ? { branchId } : {}) }, signal)
-  const overlay = branchId ? await deps.readOverlay({ branchId, ids: rowIds, lots: access.received && list.items.some(row => !('lots' in row)) }, signal) : {}
+  // summary=0 on both reads: the page keeps the figures it holds, and a list that names the branch would otherwise build them (a count, a seek and the sets) only to be thrown away.
+  const list = await deps.readList({ ids: rowIds.join(','), ...(branchId ? { branchId } : {}), summary: 0 }, signal)
+  const overlay = branchId ? await deps.readOverlay({ branchId, ids: rowIds, lots: access.received && list.items.some(row => !('lots' in row)), summary: false }, signal) : {}
   return { ids: rowIds, items: list.items, tagged: list.tagged_lots ?? [], overlay: overlay.items ?? [], lots: overlay.lots ?? [] }
 }
 
@@ -284,10 +290,12 @@ export async function loadWired(args: WiredLoadArgs): Promise<WiredLoad> {
     const needLots = access.received && list.items.some(row => !('lots' in row))
     const chunk = Number.isSafeInteger(list.overlay_ids) && (list.overlay_ids as number) > 0 ? (list.overlay_ids as number) : OVERLAY_CHUNK_UNTIL_TOLD
     for (let start = 0; start < wanted.length; start += chunk) {
-      const answer = await deps.readOverlay({ branchId, ids: wanted.slice(start, start + chunk), lots: needLots }, signal)
+      // A step inside a scope whose figures the page holds asks for none (the list skipped them too): the held whole summary stays, as one answer.
+      const answer = await deps.readOverlay({ branchId, ids: wanted.slice(start, start + chunk), lots: needLots, ...(args.skipSummary ? { summary: false } : {}) }, signal)
       for (const entry of answer.items ?? []) overlay.set(Number(entry.product_id), entry)
       for (const entry of answer.lots ?? []) lots.set(Number(entry.product_id), withMore(entry.lots, entry.lots_more))
-      if (answer.summary || answer.capabilities) extras = { summary: answer.summary ?? extras.summary, capabilities: answer.capabilities ?? extras.capabilities }
+      // The overlay's summary replaces the list's as a whole (never key by key); one that is not a whole answer leaves the list's in place.
+      if (answer.summary || answer.capabilities) extras = { summary: wholeSummary(answer.summary) ? answer.summary : extras.summary, capabilities: answer.capabilities ?? extras.capabilities }
     }
   }
   // A Products-held answer carries neither the check counts nor the capabilities: what the screen already learned stands in until an answer brings them.

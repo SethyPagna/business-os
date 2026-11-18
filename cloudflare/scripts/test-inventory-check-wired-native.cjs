@@ -239,7 +239,7 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
   check('the summary counts are IC data: counted 3, issues 1, pending 1', ok.json.summary && ok.json.summary.ok === 3 && ok.json.summary.issue === 1 && ok.json.summary.pending === 1)
   const whole = await app.get('/api/inventory-checks/list?branchId=1')
   check('an unfiltered list also says Not checked (catalogue total 12 minus 4 checked = 8)', whole.json.summary.not_checked === 8 && whole.json.summary.total === 12)
-  check('a filtered list does not claim a Not checked figure', !('not_checked' in ok.json.summary))
+  check('a filtered list carries the same branch-wide figures as the unfiltered one (Not checked 8, total 12): the chips do not follow the page filter', JSON.stringify(ok.json.summary) === JSON.stringify(whole.json.summary) && ok.json.summary.not_checked === 8 && ok.json.summary.total === 12)
   const noSummary = await app.get('/api/inventory-checks/list?branchId=1&summary=0')
   check('summary=0 skips the counts', !('summary' in noSummary.json))
   // The overlay carries the same strip counts and the same Fix stock capability as the list, for the branch and grants of the viewer (a page fed from Products' store has no list answer).
@@ -249,8 +249,7 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
     const wholeList = await app.get('/api/inventory-checks/list?branchId=1')
     const overlaid = await app.get('/api/inventory-checks/overlay?branchId=1&ids=100,101')
     check(`overlay summary equals the list summary (${viewer})`, listed.status === 200 && overlaid.status === 200 && JSON.stringify(overlaid.json.summary) === JSON.stringify(listed.json.summary) && Boolean(overlaid.json.summary))
-    const { not_checked: _notChecked, total: _total, ...wholeCounts } = wholeList.json.summary
-    check(`and the unfiltered list's counts (${viewer}); Not checked and total stay with the page's own Products total`, JSON.stringify(overlaid.json.summary) === JSON.stringify(wholeCounts))
+    check(`and the unfiltered list's whole summary, Not checked and total included (${viewer}): one object from both routes`, JSON.stringify(overlaid.json.summary) === JSON.stringify(wholeList.json.summary) && overlaid.json.summary.total === 12 && overlaid.json.summary.not_checked === 8)
     check(`overlay capabilities equal the list capabilities (${viewer})`, JSON.stringify(overlaid.json.capabilities ?? null) === JSON.stringify(listed.json.capabilities ?? null))
     check(`pending is in the overlay summary only for a viewer who may see stock (${viewer})`, ('pending' in overlaid.json.summary) === ('pending' in listed.json.summary))
     const overlayNoSummary = await app.get('/api/inventory-checks/overlay?branchId=1&ids=100&summary=0')
@@ -283,7 +282,7 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
   check('the overlay says so too, and a page under the limit has no tooLarge flag', bigOverlay.status === 200 && JSON.stringify(bigOverlay.json.summary) === '{"tooLarge":true}')
   app.clearCaches()
   const paidBig = await app.get('/api/inventory-checks/list?branchId=1&checkState=ok')
-  check('Paid: the same set (10,000) is served', paidBig.status === 200 && paidBig.json.summary.ok > 2000 && paidBig.json.total === 3 && !('tooLarge' in paidBig.json.summary))
+  check('Paid: the same set (10,000) is served, and the 2,101 counts of products that are not in the list are in no figure (ok stays 3)', paidBig.status === 200 && paidBig.json.summary.ok === 3 && paidBig.json.total === 3 && !('tooLarge' in paidBig.json.summary))
 
   // ---- overlay ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
   app.clearCaches(); app.kv.clear()
@@ -301,14 +300,15 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
   check('last movement: a product with none is null (102)', byId[102].last_change_at === null)
   check('overlay carries the inventory_checks version and no stock quantity of the product', typeof overlay.json.version === 'string' && !/stock_quantity/.test(JSON.stringify(overlay.json)))
   const overlayStatements = app.batches.filter((b) => /inventory_check_items|inventory_movements/.test(b.sql))
-  const oneBatch = app.batches.slice(-3)
+  // the status counts' own batch (membership token, population count, seek of the checked ids) follows the overlay's; it is pinned by test-inventory-population-token-native.cjs
+  const oneBatch = app.batches.filter((b) => !/inventory_population_token|FROM products p WHERE/.test(b.sql)).slice(-3)
   check('the overlay reads ran in ONE batch of three statements (counts, pending, last movement)', oneBatch.length === 3 && /inventory_check_items/.test(oneBatch[0].sql) && /inventory_check_approvals/.test(oneBatch[1].sql) && /inventory_movements/.test(oneBatch[2].sql))
   check('the movement lookup is two index steps: newest day, then julianday over a bounded subselect', /ORDER BY m\.created_at DESC, m\.id DESC LIMIT 1/.test(oneBatch[2].sql) && /julianday\(recent\.created_at\)/.test(oneBatch[2].sql) && /LIMIT @lastChangeRows/.test(oneBatch[2].sql))
   check('the movement lookup is bounded by the plan field (Paid 8)', oneBatch[2].params.lastChangeRows === 8 && JSON.parse(oneBatch[2].params.ids).length === 6)
   check('overlay statements never mention the ledger', !app.since(0).some((sql) => ledger.test(sql) && /inventory_movements|inventory_check_approvals/.test(sql)))
   void overlayStatements
   const freeOverlay = await app.get('/api/inventory-checks/overlay?branchId=1&ids=100', freeEnv)
-  check('Free: the same lookup is bounded at 4 rows per product', freeOverlay.status === 200 && app.batches.slice(-1)[0].params.lastChangeRows === 4)
+  check('Free: the same lookup is bounded at 4 rows per product', freeOverlay.status === 200 && app.batches.filter((b) => /inventory_movements/.test(b.sql)).slice(-1)[0].params.lastChangeRows === 4)
   const tooMany = await app.get(`/api/inventory-checks/overlay?branchId=1&ids=${Array.from({ length: 151 }, (_, i) => i + 1).join(',')}`, freeEnv)
   check('Free: more than inventoryOverlayMaxRows (150) ids is refused 400', tooMany.status === 400)
   const paidMany = await app.get(`/api/inventory-checks/overlay?branchId=1&ids=${Array.from({ length: 151 }, (_, i) => i + 1).join(',')}`)

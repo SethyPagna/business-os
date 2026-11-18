@@ -75,7 +75,7 @@ const STATEMENT = /inventory_check_(items|sessions|approvals)/
   check('the first Cambodia minute of a day: 17:00:00Z is 11 Nov, 16:59:59Z is 10 Nov', ids(await day('2026-11-11')).includes('101') && ids(await day('2026-11-10')) === '100')
   check('it combines with a check state: issues on 11 Nov (102), counted on 11 Nov (101), not checked on a day is nothing', ids(await day('2026-11-11', '&checkState=issue')) === '102' && ids(await day('2026-11-11', '&checkState=ok')) === '101' && ids(await day('2026-11-11', '&checkState=not_checked')) === '')
   const total = await day('2026-11-11')
-  check('the page total is the day\'s own, and the page says it is filtered (no Not checked figure)', total.json.total === 2 && !('not_checked' in total.json.summary))
+  check('the page total is that of the day, while the chips keep the branch-wide figures of the whole list (Not checked 2, total 6)', total.json.total === 2 && total.json.summary.not_checked === 2 && total.json.summary.total === 6, () => JSON.stringify(total.json.summary))
   check('it combines with a search', ids(await day('2026-11-11', '&query=Product%20101')) === '101')
   check('a day with no count is an empty page, not an error', (await day('2026-12-31')).status === 200 && ids(await day('2026-12-31')) === '')
   // A cached page of one day never serves another.
