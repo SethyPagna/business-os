@@ -10,31 +10,89 @@ const worker = (file: string) => readFileSync(new URL(file, SRC), 'utf8')
 const sourceFiles = (directory: URL): URL[] => readdirSync(directory, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? sourceFiles(new URL(`${entry.name}/`, directory)) : entry.name.endsWith('.ts') ? [new URL(entry.name, directory)] : [])
 // A code passed as a name (APPROVAL_CLAIM_LOST) is the string its constant holds: every constant of the Worker source, by name (a name declared twice keeps both values).
 const CONSTANTS = new Map<string, Set<string>>()
-for (const file of sourceFiles(SRC)) for (const match of readFileSync(file, 'utf8').matchAll(/\bconst ([A-Z][A-Z0-9_]*)\s*(?::[^=]+)?=\s*'([a-z][a-z_]*)'/g)) CONSTANTS.set(match[1], (CONSTANTS.get(match[1]) ?? new Set()).add(match[2]))
-// A refusal is raised through fail(status, code), a session / query error constructor, the planner's refuse(code) or a statement guard. The code may be written there, named by a constant, or chosen
-// between two by a ternary, so everything inside the call's arguments is read: every 'inventory_check_*' string, the string right after a status, and every constant name.
+for (const file of sourceFiles(SRC)) for (const match of readFileSync(file, 'utf8').matchAll(/\bconst ([A-Z][A-Z0-9_]*)\s*(?::[^=]+)?=\s*(['"`])([a-z][a-z_]*)\2/g)) CONSTANTS.set(match[1], (CONSTANTS.get(match[1]) ?? new Set()).add(match[3]))
+
+// A refusal is raised through fail(status, code), a session / query error constructor, the planner's refuse(code) or a statement guard(sql, code, params). The code is read STRICTLY: it must be a quoted
+// literal (any quote style, no ${}), an UPPER_CASE constant the scan resolved, or a ternary of those; `refused[0].code` (the first refusal the approval already raised, read by name) is also allowed.
+// Anything else (a helper that builds or forwards a code, a variable, an object lookup) hides the code from this test, so it turns the test red instead of passing unseen.
 const REFUSAL_CALL = /\b(?:fail|refuse|guard|[A-Z][A-Za-z]*Error)\(/g
-function callArguments(source: string, open: number): string {
+const isQuote = (char: string) => char === "'" || char === '"' || char === '`'
+const opens = (char: string) => char === '(' || char === '[' || char === '{'
+const closes = (char: string) => char === ')' || char === ']' || char === '}'
+function closeOf(source: string, open: number): number {
   let depth = 0, quote = ''
   for (let at = open; at < source.length; at += 1) {
     const char = source[at]
     if (quote) { if (char === '\\') at += 1; else if (char === quote) quote = ''; continue }
-    if (char === "'" || char === '"' || char === '`') quote = char
-    else if (char === '(') depth += 1
-    else if (char === ')' && --depth === 0) return source.slice(open + 1, at)
+    if (isQuote(char)) quote = char
+    else if (opens(char)) depth += 1
+    else if (closes(char) && --depth === 0) return at
   }
-  return source.slice(open + 1)
+  return source.length
 }
-const codesIn = (file: string) => {
-  const source = worker(file), codes = new Set<string>()
+/** Splits at the commas that are not inside a quote or a bracket. */
+function splitTop(text: string): string[] {
+  const parts: string[] = []
+  let depth = 0, quote = '', from = 0
+  for (let at = 0; at < text.length; at += 1) {
+    const char = text[at]
+    if (quote) { if (char === '\\') at += 1; else if (char === quote) quote = ''; continue }
+    if (isQuote(char)) quote = char
+    else if (opens(char)) depth += 1
+    else if (closes(char)) depth -= 1
+    else if (char === ',' && depth === 0) { parts.push(text.slice(from, at).trim()); from = at + 1 }
+  }
+  const last = text.slice(from).trim()
+  if (last) parts.push(last)
+  return parts
+}
+/** The top-level position of the first `?` (or the `:` that closes the ternary opened before `from`), outside quotes and brackets; the ? of `?.` and `??` does not count. */
+function topIndex(text: string, wanted: '?' | ':', from = 0): number {
+  let depth = 0, quote = '', nested = 0
+  for (let at = from; at < text.length; at += 1) {
+    const char = text[at]
+    if (quote) { if (char === '\\') at += 1; else if (char === quote) quote = ''; continue }
+    if (isQuote(char)) quote = char
+    else if (opens(char)) depth += 1
+    else if (closes(char)) depth -= 1
+    else if (depth === 0 && char === '?' && (text[at + 1] === '?' || text[at + 1] === '.')) at += 1
+    else if (depth === 0 && char === '?') { if (wanted === '?') return at; nested += 1 }
+    else if (depth === 0 && char === ':' && wanted === ':') { if (nested === 0) return at; nested -= 1 }
+  }
+  return -1
+}
+/** The codes an expression can be, or null when its shape is not one the scan can read. */
+function codesOf(expression: string): string[] | null {
+  const text = expression.trim()
+  const literal = /^(['"`])([A-Za-z0-9_]+)\1$/.exec(text)
+  if (literal) return [literal[2]]
+  if (/^[A-Z][A-Z0-9_]*$/.test(text)) return CONSTANTS.has(text) ? [...CONSTANTS.get(text)!] : null
+  if (text === 'refused[0].code') return []
+  const question = topIndex(text, '?')
+  if (question < 0) return null
+  const colon = topIndex(text, ':', question + 1)
+  if (colon < 0) return null
+  const yes = codesOf(text.slice(question + 1, colon)), no = codesOf(text.slice(colon + 1))
+  return yes && no ? [...yes, ...no] : null
+}
+// The only calls allowed to pass a name on: the fail() helper of a file hands its own parameters to the error constructor.
+const PASS_THROUGH = ['status, code, details', 'status, code']
+type Read = { codes: Set<string>; unreadable: string[] }
+const readCalls = (file: string, source = worker(file)): Read => {
+  const codes = new Set<string>(), unreadable: string[] = []
   for (const call of source.matchAll(REFUSAL_CALL)) {
-    const args = callArguments(source, call.index + call[0].length - 1)
-    for (const match of args.matchAll(/'(inventory_check_[a-z_]+)'/g)) codes.add(match[1])
-    for (const match of args.matchAll(/^\s*\d{3},\s*'([a-z_]+)'|^\s*'([a-z_]+)'\s*[,)]/g)) codes.add(match[1] ?? match[2])
-    for (const match of args.matchAll(/\b([A-Z][A-Z0-9_]*)\b/g)) for (const value of CONSTANTS.get(match[1]) ?? []) codes.add(value)
+    if (/function\s+$/.test(source.slice(Math.max(0, call.index - 12), call.index))) continue
+    const open = call.index + call[0].length - 1, args = source.slice(open + 1, closeOf(source, open)), parts = splitTop(args)
+    if (!parts.length) continue
+    if (PASS_THROUGH.includes(args.trim())) continue
+    const wanted = call[0] === 'refuse(' ? parts[0] : parts[1]
+    const read = wanted === undefined ? null : codesOf(wanted)
+    if (read) for (const code of read) codes.add(code)
+    else unreadable.push(`${file}: ${call[0]}${args.replace(/\s+/g, ' ').slice(0, 90)}`)
   }
-  return codes
+  return { codes, unreadable }
 }
+const codesIn = (file: string) => readCalls(file).codes
 
 // The approval and per-line decision routes: every code needs a sentence, bar the unknown results (503), whose request is repeated and never shown as a refusal.
 const APPROVAL_FILES = ['lib/inventoryCheckApprovals.ts', 'lib/inventoryCheckLineInput.ts']
@@ -42,8 +100,21 @@ const UNKNOWN_RESULTS = ['inventory_check_outcome_unknown', 'inventory_check_sav
 // The session, list and observation routes raise more codes, which those screens show in their own words or as the generic "not saved". They are named here, each once, so a NEW code cannot pass unnoticed.
 const OTHER_SCREENS = ['inventory_check_revision_required', 'inventory_check_schema_unavailable', 'inventory_check_membership_unavailable', 'inventory_check_invalid_filter', 'inventory_check_invalid_page',
   'inventory_check_stock_schema_unavailable', 'inventory_check_invalid_title', 'inventory_check_invalid_scope', 'inventory_check_invalid_state', 'inventory_check_reason_required', 'inventory_check_item_not_found',
-  'inventory_check_session_final', 'inventory_check_invalid_query', 'inventory_check_view_required', 'invalid_session']
+  'inventory_check_session_final', 'inventory_check_invalid_query', 'inventory_check_view_required', 'invalid_session',
+  // the list and product-read routes (raised in other files, shown by the Inventory list in its own words or as a failed read)
+  'inventory_check_field_hidden', 'inventory_check_filter_too_large', 'inventory_check_family_page_too_large', 'inventory_check_unavailable']
 const SHARED_FILES = ['lib/inventoryCheckSessions.ts', 'routes/inventoryChecks.ts']
+// Strings that begin with inventory_check_ and are not refusals. Each is named with its reason, so a NEW string of that shape cannot be one of them unnoticed.
+const NOT_REFUSALS: Record<string, string> = {
+  inventory_check_approvals: 'table', inventory_check_events: 'table', inventory_check_items: 'table', inventory_check_lot_lines: 'table', inventory_check_sessions: 'table',
+  inventory_check_approvals_claim: 'schema object (trigger or index) probed for presence', inventory_check_approvals_decided: 'schema object probed for presence', inventory_check_approvals_identity: 'schema object probed for presence',
+  inventory_check_approvals_no_delete: 'schema object probed for presence', inventory_check_events_no_delete: 'schema object probed for presence', inventory_check_events_no_update: 'schema object probed for presence',
+  inventory_check_items_baseline: 'schema object probed for presence', inventory_check_items_no_delete: 'schema object probed for presence', inventory_check_sessions_identity: 'schema object probed for presence',
+  inventory_check_sessions_no_delete: 'schema object probed for presence',
+  inventory_check_approvals_pending: 'a branch-cutover blocker, shown by the cutover screen, never an answer of the count routes',
+  inventory_check_not_applied: 'the reason recorded for a line a close left unapplied when no refusal applies (closed_json), a state of the line and not an answer',
+  inventory_check_approve: 'permission extra key', 'inventory_check_show_${': 'permission extra keys, one per field the count shows (built by name on purpose)',
+}
 
 const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
 const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
@@ -57,7 +128,22 @@ for (const code of ['inventory_check_not_available', 'inventory_check_permission
 const mustHave = new Set([...approvalCodes, ...sharedCodes].filter(code => !UNKNOWN_RESULTS.includes(code) && !OTHER_SCREENS.includes(code)))
 const missing = [...mustHave].filter(code => !Object.hasOwn(REFUSAL_MESSAGES, code)).sort()
 assert.deepEqual(missing, [], `Worker refusal codes with no sentence (add one to inventoryCheckRefusals.ts and both packs, or name it in OTHER_SCREENS with its reason): ${missing.join(', ')}`)
-const everyCode = new Set([...approvalCodes, ...sharedCodes])
+// Every refusal call of every inventory-check source file is read, not only the approval and shared files: a call whose code this test cannot read is a code it cannot check.
+const CHECK_FILES = sourceFiles(SRC).map(url => url.href.slice(SRC.href.length)).filter(name => /inventoryCheck/i.test(name))
+const unreadable = CHECK_FILES.flatMap(file => readCalls(file).unreadable)
+assert.deepEqual(unreadable, [], 'every refusal call writes its code as a quoted literal, an UPPER_CASE constant or a ternary of those (or refused[0].code); a helper, variable or built string hides the code from this test')
+const callCodes = new Set(CHECK_FILES.flatMap(file => [...codesIn(file)]))
+// Every string of the shape inventory_check_* in the Worker source (any quote style; a back-tick string that interpolates is read up to the ${): each is a code this test reads, or is named as a screen's own, an unknown result, or not a refusal.
+const strings = new Map<string, string[]>()
+for (const file of sourceFiles(SRC)) for (const match of readFileSync(file, 'utf8').matchAll(/(['"`])(inventory_check_[a-z0-9_]*)(\1|\$\{)/g)) {
+  const name = match[2] + (match[3] === '${' ? '${' : ''), at = file.href.slice(SRC.href.length)
+  strings.set(name, [...(strings.get(name) ?? []), at])
+}
+const everyCode = new Set([...approvalCodes, ...sharedCodes, ...callCodes, ...strings.keys()].filter(code => !Object.hasOwn(NOT_REFUSALS, code)))
+const unaccounted = [...strings].filter(([name]) => !approvalCodes.has(name) && !sharedCodes.has(name) && !OTHER_SCREENS.includes(name) && !UNKNOWN_RESULTS.includes(name) && !Object.hasOwn(NOT_REFUSALS, name) && !Object.hasOwn(REFUSAL_MESSAGES, name)).map(([name, files]) => `${name} (${[...new Set(files)].join(', ')})`)
+assert.deepEqual(unaccounted, [], 'inventory_check_* strings the scan does not read as a refusal of the approval or shared files, and that are named nowhere: read it as a code (a quoted literal in fail/refuse/guard), or give it a sentence, or name it in OTHER_SCREENS, UNKNOWN_RESULTS or NOT_REFUSALS')
+assert.deepEqual(Object.keys(NOT_REFUSALS).filter(name => !strings.has(name)), [], 'every name in NOT_REFUSALS is still a string of the Worker source')
+assert.deepEqual(Object.keys(NOT_REFUSALS).filter(name => approvalCodes.has(name) || sharedCodes.has(name) || Object.hasOwn(REFUSAL_MESSAGES, name)), [], 'a name in NOT_REFUSALS is not a refusal the count routes raise')
 assert.deepEqual(OTHER_SCREENS.filter(code => !everyCode.has(code)), [], 'every name in OTHER_SCREENS is still a code the Worker raises')
 assert.deepEqual(OTHER_SCREENS.filter(code => Object.hasOwn(REFUSAL_MESSAGES, code)), [], 'a code that has a sentence is not listed as one that needs none')
 assert.deepEqual(APPROVAL_FILES.flatMap(file => [...codesIn(file)]).filter(code => OTHER_SCREENS.includes(code)), [], 'no approval or line-decision code hides in OTHER_SCREENS')
