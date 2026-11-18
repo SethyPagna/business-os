@@ -244,7 +244,7 @@ export async function decideInventoryCheckApproval(db: D1Compat, principal: Inve
   const actor = await currentInventoryCheckActor(db, principal); await schemaReady(db); await approvalsReady(db)
   if (!canApproveInventoryCounts(actor)) fail(403, 'inventory_check_approve_required')
   const session = await sessionRow(db, actor, sessionId)
-  const row = await db.prepare(`SELECT ${APPROVAL_DETAIL_COLUMNS},plan_json FROM inventory_check_approvals WHERE session_id=@id AND organization_id IS @organization`)
+  const row = await db.prepare(`SELECT ${APPROVAL_DETAIL_COLUMNS} FROM inventory_check_approvals WHERE session_id=@id AND organization_id IS @organization`)
     .get<EngineRow>({ id: sessionId, organization: actor.organization_id })
   if (!row) return fail(404, 'inventory_check_approval_not_found')
   if (row.status !== 'pending') {
@@ -691,7 +691,7 @@ export async function decideInventoryCheckLine(db: D1Compat, principal: Inventor
   const productId = parsed.productId, key = parsed.requestId
   const hash = await inventoryCheckDigest(JSON.stringify({ action: 'approval-line', id: sessionId, productId, line: parsed.action, counted: parsed.counted ?? null, lots: parsed.lots ? [...parsed.lots].sort((a, b) => a.batchId - b.batchId) : null, note: parsed.note }))
   const previous = await db.prepare('SELECT request_hash FROM inventory_check_events WHERE actor_id=@actorId AND request_id=@key').get<{ request_hash: string }>({ actorId: actor.id, key })
-  const row = await db.prepare(`SELECT ${APPROVAL_DETAIL_COLUMNS},plan_json FROM inventory_check_approvals WHERE session_id=@id AND organization_id IS @organization`)
+  const row = await db.prepare(`SELECT ${APPROVAL_DETAIL_COLUMNS} FROM inventory_check_approvals WHERE session_id=@id AND organization_id IS @organization`)
     .get<EngineRow>({ id: sessionId, organization: actor.organization_id })
   if (!row) return fail(404, 'inventory_check_approval_not_found')
   if (previous) {

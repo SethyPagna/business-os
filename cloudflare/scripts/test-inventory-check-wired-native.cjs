@@ -296,6 +296,7 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
   check('count entry: 102 is an issue with its note', byId[102].check.state === 'issue' && byId[102].check.note === 'Damaged box')
   check('an unstarted line is not a count entry (103), and an unchecked product has none (111)', !byId[103].check && !byId[111].check)
   check('pending mark on 106 only', byId[106].pending === true && !byId[100].pending && !byId[101].pending)
+  check('the pending mark names the session holding the waiting request (sP)', byId[106].pending_session_id === 'sP' && !('pending_session_id' in byId[100]))
   check('last movement: 14:00 beats ISO 09:00 of the same day (product 100)', byId[100].last_change_at === '2026-11-03 14:00:00')
   check('last movement: a product with only an ISO row (101)', byId[101].last_change_at === '2026-11-02T08:00:00.000Z')
   check('last movement: a product with none is null (102)', byId[102].last_change_at === null)
@@ -316,7 +317,7 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
   for (const [label, query] of [['no ids', 'branchId=1'], ['no branch', 'ids=100'], ['bad id', 'branchId=1&ids=1,x'], ['zero branch', 'branchId=0&ids=1']]) check(`overlay ${label}: 400`, (await app.get(`/api/inventory-checks/overlay?${query}`)).status === 400)
   const overlayLib = app.load('lib/inventoryCheckOverlay.ts')
   const directOverlay = await overlayLib.readInventoryOverlay(app.env, U.blind, { branchId: 1, ids: [106], pendingAvailable: true })
-  check('a viewer without the stock field is never told about pending counts, whatever the caller allows', !directOverlay[0].pending)
+  check('a viewer without the stock field is never told about pending counts, whatever the caller allows', !directOverlay[0].pending && !('pending_session_id' in directOverlay[0]))
   app.setUser(U.blind)
   const blindOverlay = await app.get('/api/inventory-checks/overlay?branchId=1&ids=100,101,106')
   const blindEntries = Object.fromEntries(blindOverlay.json.items.map((e) => [e.product_id, e]))
@@ -396,5 +397,13 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
   const coded = await app.get('/api/inventory-checks/list?branchId=1&query=CODE990001')
   app.setUser(U.admin)
   check('row 14: a retired product owning the code does not block the blind code lookup; the active product with that code is found', coded.status === 200 && (coded.json.items || []).map(item => item.id).join(',') === '991', JSON.stringify({ s: coded.status, ids: (coded.json.items || []).map(item => item.id) }))
+  // Last, because history rows cannot be deleted. Submitted on 3 Nov (waiting), observed again on 13 Nov in another open session: the latest count is the newer session, the waiting request is still the older one.
+  app.raw.exec(`INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,scope_json,started_at,updated_at) VALUES('sLater',NULL,1,72,'Later','open','{}','2026-11-13T00:00:00.000Z','2026-11-13T00:00:00.000Z');
+    INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,revision,updated_by,updated_at) VALUES('sLater',106,1,'{"id":106,"name":"P106"}',10,'{}','done',9,1,72,'2026-11-13T01:00:00.000Z')`)
+  {
+    const later = (await overlayLib.readInventoryOverlay(app.env, U.checker, { branchId: 1, ids: [106], pendingAvailable: true }))[0]
+    check('the latest count of a waiting product can be a newer session, and the pending mark still names the session that holds the request', later.check.session_id === 'sLater' && later.pending === true && later.pending_session_id === 'sP', JSON.stringify(later))
+  }
+  app.setUser(U.admin)
   console.log(`\n${checks} checks passed`)
 })().catch((e) => { console.error(e); process.exit(1) })

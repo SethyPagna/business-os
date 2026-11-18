@@ -93,6 +93,14 @@ the column: in the window between `migrations apply` and the publish, or after a
 falls back to the items whose figures differ. The ops query `inventory-check-approvals-postflight` counts these rows (expect 0 after the publish); the separate `inventory-check-approvals-pre-rollback` query (run only before `deploy-rollback.yml`) counts pending approvals that carry per-line decisions. A newer count of a product in the set replaces that line (`superseded`); the approval ends as replaced only when no line of the set
 is left open (not superseded, not rejected), so a newer count of another product never ends it.
 
+**A claim stays after a partial accept, and `planned_lines` says which lines it holds.** An accept of some lines (`productIds`) applies them and leaves the approval claimed (`applying: true`, plus `applying_request_id` for the approver who
+holds it): the claim ends only when the approval is decided. Decisions on the OTHER lines stay valid under it (a reject, a modify or a reopen, by the claimer or by anyone who may approve); only a line the claim has planned or
+part-written is refused (`409 inventory_check_line_in_progress`). The approval detail therefore carries, while it is pending and claimed, `planned_lines`: the ascending product ids of exactly those lines, taken from the keys of
+the plan (`"<product>"` or `"<product>:<batch>"`) and of the received dates already written (`applied_json.units`), with no database read of its own. It is `[]` right after a line landed and nothing else is planned. A panel offers
+no decision on a line in `planned_lines` (it is being applied, or waiting for the approver who is applying it) and offers every other line its decisions. A Worker that sends no `planned_lines` for a claimed approval cannot say
+which lines are held; a panel then treats every undecided line as held. An approval nobody has claimed carries no `planned_lines`. The answer to an accept carries `applied`, `remaining` and `done` for the request (an accept of
+one line that landed answers `done: true` while the approval stays pending).
+
 ### History
 
 Every decision is one audit event on the product in the session History (`GET /sessions/:id/history`, action `observe`): `after.approval` is `line_rejected`, `line_modified` or `pending` (a reopen),
@@ -120,6 +128,12 @@ when is the approval's own `decided_by_name` / `decided_at`. A count made on 12 
 calendar date `YYYY-MM-DD` and needs a single branch (`branchId`), otherwise `400 inventory_check_invalid_query` with `parameter: "checkedOn"` (or `"branchId"`). It cannot be combined with `ids`.
 With more checked products than the cap the filter is refused `503 inventory_check_filter_too_large`, as the status filters are.
 `checkedOn` belongs to this list only: the older products list and the scope of a new session refuse it (`400 inventory_check_invalid_query`, `parameter: "checkedOn"`), as they did before the chips existed.
+
+## 4b. The request a product is waiting on (the overlay)
+
+`GET /api/inventory-checks/overlay` marks a product whose count line still waits for approval with `pending: true` and, with it, `pending_session_id`: the session whose approval holds that waiting line (one waiting line per
+product: a newer submission replaces an older one). It is NOT necessarily the session of the product's latest count (`check.session_id`): a product submitted on 12 Nov and waiting, then observed in an open session on 13 Nov, has
+`check.session_id` of the 13 Nov session and `pending_session_id` of the 12 Nov one. The Open request link opens `pending_session_id`. Both fields are sent only to a viewer who may see stock, as `pending` always was.
 
 ## 5. Cost on the list
 

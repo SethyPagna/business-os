@@ -136,6 +136,8 @@ export type InventoryCheckApproval = { status: 'pending' | 'approved' | 'rejecte
   decided_at?: string; decision_note?: string | null; decided_by_name?: string | null; applied_lines?: Record<string, ApprovalAppliedLine>;
   /** Stock may already have moved for this approval: it can no longer be rejected; it ends by being finished or closed, and another approver takes it over only when its claimer is gone. */
   applying?: boolean; applying_request_id?: string;
+  /** Sent with `applying` (detail): the products the claim has planned or part-written, ascending. Only these lines are being applied; a decision on any other line is still accepted. */
+  planned_lines?: number[];
   /** The approval was ended by a close: the lines applied stay applied (status approved), and these were NOT applied, each with the reason (a refusal code or inventory_check_not_applied). */
   closed?: { lines: Record<string, string> };
   /** Per product, the stock the counter saw when counting: the figure the count is measured against. */
@@ -150,9 +152,9 @@ export type InventoryCheckApproval = { status: 'pending' | 'approved' | 'rejecte
 export type ApprovalLineDecision = { decision: 'reject' | 'modify'; counted?: number; lots?: Array<{ batchId: number; counted: number }>; note?: string | null; by?: number; by_name?: string | null; at: string }
 export type ApprovalRow = { session_id: string; status: 'pending' | 'approved' | 'rejected'; lines: number; submitted_by: number; submitted_at: string;
   decided_by: number | null; decided_by_name: string | null; decided_at: string | null; decision_note: string | null; decision_request_id: string | null; applied_json: string;
-  applying_request_id: string | null; applying_by: number | null; applying_at: string | null; takeovers: number; closed_json: string | null; baselines_json?: string; superseded_json?: string; line_decisions_json?: string; line_set_json?: string | null }
+  applying_request_id: string | null; applying_by: number | null; applying_at: string | null; takeovers: number; closed_json: string | null; baselines_json?: string; superseded_json?: string; line_decisions_json?: string; line_set_json?: string | null; plan_json?: string }
 export const APPROVAL_COLUMNS = 'session_id,status,lines,submitted_by,submitted_at,decided_by,decided_by_name,decided_at,decision_note,decision_request_id,applied_json,applying_request_id,applying_by,applying_at,takeovers,closed_json'
-export const APPROVAL_DETAIL_COLUMNS = `${APPROVAL_COLUMNS},baselines_json,superseded_json,line_decisions_json,line_set_json`
+export const APPROVAL_DETAIL_COLUMNS = `${APPROVAL_COLUMNS},baselines_json,superseded_json,line_decisions_json,line_set_json,plan_json`
 let approvalsSchemaReady = false
 /** True once migration 0286 (the table and its four triggers) is applied; a positive answer is remembered for the isolate, a miss re-probes. */
 export async function approvalsAvailable(db: D1Compat): Promise<boolean> {
@@ -226,6 +228,21 @@ export function lineSetIds(json: string | null | undefined): number[] | null {
     return ids.every(id => Number.isSafeInteger(id) && id > 0) ? ids.sort((a, b) => a - b) : null
   } catch { return null }
 }
+/**
+ * The products a claim has planned (a key of plan_json) or part-written (a key of applied_json.units): keys are "<product id>" or "<product id>:<batch id>". This is the test decideInventoryCheckLine refuses a
+ * decision by (inventory_check_line_in_progress), so the panel offers a decision on exactly the lines the Worker accepts one on. Read from columns the projection already holds.
+ */
+export function plannedLineIds(planJson: string | undefined | null, appliedJson: string): number[] {
+  const keys = (json: string | undefined | null, pick: (parsed: Record<string, unknown>) => unknown): string[] => {
+    try {
+      const parsed = JSON.parse(json ?? '{}') as unknown
+      const inner = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? pick(parsed as Record<string, unknown>) : null
+      return inner && typeof inner === 'object' && !Array.isArray(inner) ? Object.keys(inner) : []
+    } catch { return [] }
+  }
+  const ids = [...keys(planJson, parsed => parsed), ...keys(appliedJson, parsed => parsed.units)].map(key => Number.parseInt(key, 10)).filter(id => Number.isSafeInteger(id) && id > 0)
+  return [...new Set(ids)].sort((a, b) => a - b)
+}
 /** The lines a close left unapplied, each with its reason. */
 export function closedLines(json: string | null): { lines: Record<string, string> } | undefined {
   if (!json) return undefined
@@ -248,7 +265,7 @@ export function projectApproval(actor: Actor, row: ApprovalRow, detail = false):
     ...(row.status === 'rejected' && row.decided_by == null && row.decided_at ? { replaced: true as const } : {}),
     ...(closed ? { closed } : {}),
     ...(row.decided_by != null && canSeeStaffIdentity(actor, row.decided_by) ? { decided_by_name: row.decided_by_name } : {}),
-    ...(row.status === 'pending' && row.applying_request_id ? { applying: true, ...(row.applying_by === actor.id ? { applying_request_id: row.applying_request_id } : {}) } : {}),
+    ...(row.status === 'pending' && row.applying_request_id ? { applying: true, ...(row.applying_by === actor.id ? { applying_request_id: row.applying_request_id } : {}), ...(detail && row.plan_json !== undefined ? { planned_lines: plannedLineIds(row.plan_json, row.applied_json) } : {}) } : {}),
     ...(detail ? { applied_lines: applied, ...(row.baselines_json ? { baselines: approvalBaselines(row.baselines_json) } : {}),
       ...(Object.keys(supersededLines(row.superseded_json)).length ? { superseded: supersededLines(row.superseded_json) } : {}),
       ...(row.line_decisions_json !== undefined ? { line_decisions: projectLineDecisions(actor, row.line_decisions_json) } : {}),
