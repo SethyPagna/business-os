@@ -183,10 +183,15 @@ cases.push(
     assert.equal(answer?.takeover, true); assert.equal(approval.applying, true); assert.ok(approval.applying_request_id); assert.deepEqual(approval.planned_lines, [])
     const panel = await mount({ items, approval })
     assert.deepEqual([1, 2, 3].map(id => stateOf(panel, id)), ['open', 'open', 'open']); assert.deepEqual([1, 2, 3].map(id => names(panel, id)), [['accept', 'modify', 'reject'], ['accept', 'modify', 'reject'], ['accept', 'modify', 'reject']])
-    const r = rig('claimed_by_other'); r.script.push(workerAnswer('takeover'), workerAnswer('accept_resumed'))
+    // the sequence the Worker produced for this accept: the claim of another approver who is gone (it planned line 3), the takeover, then the same accept of line 2 repeated
+    const before = workerState('before_takeover'), repeated = workerAnswer('takeover_repeat') as InventoryCheckApprovalDecision
+    assert.deepEqual(before.approval.planned_lines, [3]); assert.equal(before.approval.applying_request_id, undefined, 'another approver holds the claim')
+    assert.notEqual(lineStateOf(before.items[1], before.approval), 'rejected', 'line 2 is open here, so Accept is offered on it')
+    const r = rig('before_takeover'); r.script.push(workerAnswer('takeover'), repeated)
     await r.actions.decideApproval('approve', [2])
     assert.equal(r.log.approvals.length, 2, 'the takeover is followed by a repeat'); assert.equal(r.log.approvals[0].requestId, r.log.approvals[1].requestId, 'under the same request id')
-    assert.deepEqual(r.log.applied, [{ '1': (workerAnswer('accept_resumed') as InventoryCheckApprovalDecision).approval.applied_lines!['1'].after }], 'only the answer that wrote stock puts a figure on the rows')
+    assert.deepEqual(r.log.approvals.map(call => call.productIds), [[2], [2]])
+    assert.deepEqual(r.log.applied, [{ '2': repeated.approval.applied_lines!['2'].after }], 'only the answer that wrote stock puts a figure on the rows, and it is line 2, the line accepted'); assert.equal(r.log.reloads, 0)
   }],
   ['closed: the applied line stays applied and the lines a close left are "Not applied" with their reason; nothing can be decided', async () => {
     const { items, approval } = workerState('closed')

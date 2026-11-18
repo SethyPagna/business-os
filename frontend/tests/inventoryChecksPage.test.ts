@@ -906,6 +906,20 @@ try {
     await approving.click(lineButton(2, 'accept')); await confirmInDialog(approving, 'Approve')
     assert.equal(sessionLoads, loadsBeforeStale + 1, 'the session is read once after an answer that lists a line this request did not apply')
     assert.match(rowText(3), /Now 3/, 'row 3 equals the fresh read (1 ordinary + 2 damaged), not the older figure of the other tab (2 + 2)'); assert.match(rowText(2), /Now 3/, 'and row 2 the fresh read')
+    // The same page accepts line 1, counted on two received dates: the Paid answer says applied 2 (two stock writes) and lists line 1 with line 3's older figure. Two products, two writes: the count alone cannot
+    // tell, but line 3 is not the line that was accepted.
+    productOverride = [{ ...product, id: 1, name: 'Serum', quantity: 9 }, { ...product, id: 2, name: 'Toner', quantity: 5 }, { ...product, id: 3, name: 'Cream', quantity: 7, damaged_quantity: 2 }]
+    sessionApproval = pendingState.approval
+    await approving.click(approving.button('Leave session')); await openSession(approving)
+    assert.match(rowText(3), /Now 7/); assert.match(rowText(1), /Now 9/)
+    const datedAnswer: InventoryCheckApproval = { ...acceptedState.approval, applied: 2, applied_lines: { 3: line(5, 2), 1: line(9, 5) } }
+    const loadsBeforeDated = sessionLoads
+    sessionApproval = datedAnswer
+    productOverride = [{ ...product, id: 1, name: 'Serum', quantity: 5 }, { ...product, id: 2, name: 'Toner', quantity: 5 }, { ...product, id: 3, name: 'Cream', quantity: 3, damaged_quantity: 2 }]
+    decideScript = [{ approval: datedAnswer, applied: 2, remaining: 0, done: true }]
+    await approving.click(lineButton(1, 'accept')); await confirmInDialog(approving, 'Approve')
+    assert.equal(sessionLoads, loadsBeforeDated + 1, 'a two-date line: two writes and two new products, one of them another tab\'s, still read the session once')
+    assert.match(rowText(3), /Now 3/, 'row 3 equals the fresh read (1 ordinary + 2 damaged), not the older 2 + 2'); assert.match(rowText(1), /Now 5/, 'and row 1 the fresh read')
     productOverride = null; memberOverride = submittedItems; sessionApproval = pendingApproval
     await approving.click(approving.button('Leave session')); await openSession(approving)
   }

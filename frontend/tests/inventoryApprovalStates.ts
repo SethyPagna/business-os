@@ -9,6 +9,7 @@ import type { InventoryCheckApproval, InventoryCheckApprovalDecision, InventoryC
 //   decided_dated          line 1 modified on one of its dates, line 2 rejected, line 3 modified to 4; no claim
 //   claimed_by_other       the same decisions, another approver holds the claim and has planned line 3
 //   part_written           this approver holds the claim and a Free-plan request wrote one date of line 1 and stopped: planned_lines [1]
+//   before_takeover        the same claim before anyone takes it over: another approver (gone) holds it and has planned line 3
 //   taken_over             the claim of an approver who is gone, taken over by accepting line 2 (`answer` carries takeover)
 //   closed                 line 1 accepted, then Close: the rest are recorded as not applied
 //   approved_with_rejected line 2 rejected, the rest approved
@@ -16,8 +17,8 @@ import type { InventoryCheckApproval, InventoryCheckApprovalDecision, InventoryC
 //   replaced_line          line 1 accepted, then a newer count replaced line 3
 /** `answer` (accepted_one, taken_over): the applied / remaining / done (and takeover) the Worker sent with the approval. */
 export type WorkerState = { item: Record<string, unknown>; items: InventoryCheckSessionItem[]; approval: InventoryCheckApproval; answer?: { applied: number; remaining: number; done: boolean; takeover?: true } }
-export type WorkerStateName = 'pending' | 'accepted_one' | 'decided_dated' | 'claimed_by_other' | 'part_written' | 'taken_over' | 'closed' | 'approved_with_rejected' | 'fully_applied' | 'replaced_line'
-export type WorkerAnswerName = 'accept' | 'accept_resumed' | 'takeover' | 'close' | 'approve_all' | 'modify' | 'reject' | 'reopen'
+export type WorkerStateName = 'pending' | 'accepted_one' | 'decided_dated' | 'claimed_by_other' | 'part_written' | 'before_takeover' | 'taken_over' | 'closed' | 'approved_with_rejected' | 'fully_applied' | 'replaced_line'
+export type WorkerAnswerName = 'accept' | 'accept_resumed' | 'takeover' | 'takeover_repeat' | 'close' | 'approve_all' | 'modify' | 'reject' | 'reopen'
 
 const file = JSON.parse(readFileSync(new URL('../../cloudflare/scripts/fixtures/inventory-check-approval-states.json', import.meta.url), 'utf8')) as { states: Record<WorkerStateName, WorkerState>; answers: Record<WorkerAnswerName, InventoryCheckApprovalDecision | InventoryCheckLineAnswer> }
 

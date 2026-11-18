@@ -12,7 +12,8 @@ import { lineDecisionVerdict, lineRequestBody, type LineInput } from './inventor
 
 export type ApprovalAction = 'approve' | 'reject' | 'close'
 type Cell<T> = { current: T }
-export type ApprovalAttempt = { key: string; requestId: string }
+/** `stale`: an answer of this decision showed a line another tab applied; it stays set across the repeats of a lost answer, so the session is still read once at the end. */
+export type ApprovalAttempt = { key: string; requestId: string; stale?: boolean }
 export type LineChange = { productId: number; action: 'reject' | 'modify' | 'reopen'; counted?: number; lots?: Array<{ batchId: number; counted: number }>; note?: string }
 
 export type ApprovalDeps = {
@@ -78,7 +79,7 @@ export function createApprovalActions(deps: ApprovalDeps) {
     const attempt = deps.approvalAttempt.current
     deps.inFlight.current = true; deps.setBusy(true); deps.setWriteError(''); deps.setRefused({})
     for (const id of productIds ?? []) deps.setLineError(String(id), null)
-    let seen = deps.approval?.applied_lines ?? {}, stale = false
+    let seen = deps.approval?.applied_lines ?? {}
     try {
       const flow = await runApprovalFlow({
         send: () => deps.send.approval({ decision, requestId: attempt.requestId, ...(productIds ? { productIds } : {}) }),
@@ -88,17 +89,17 @@ export function createApprovalActions(deps: ApprovalDeps) {
           // and sales may have moved its stock since) carries an older figure than the rows hold: the answer is not put on any row then, and the session is read once at the end.
           const fresh = Object.entries(result.approval.applied_lines ?? {}).filter(([id, line]) => !seen[id] && finite(line.after))
           seen = result.approval.applied_lines ?? {}
-          // A request writes at least one stock line for each product it applies (a dated product, one per date), so more new products than writes means one was applied elsewhere. A line the request resumes
-          // (the claim's own plan) is applied by it and is not counted as foreign.
-          if (fresh.length > result.applied) stale = true
-          if (fresh.length && !stale) deps.setApplied?.(Object.fromEntries(fresh.map(([id, line]) => [id, line.after])))
+          // `applied` counts stock writes, one per received date, and a product is listed once all its dates have landed: more new products than writes, a product the request was not asked to accept, or any new
+          // line from a takeover (it carries the old approver's write) was applied elsewhere or earlier, and sales may have moved it since.
+          if (fresh.length > result.applied || (result.takeover && fresh.length > 0) || (productIds && fresh.some(([id]) => !productIds.includes(Number(id))))) attempt.stale = true
+          if (fresh.length && !attempt.stale) deps.setApplied?.(Object.fromEntries(fresh.map(([id, line]) => [id, line.after])))
           deps.setApproval(result.approval); deps.setRefused(refusedMap(result.refused))
         },
         isCurrent: deps.current,
         maxRequests: approvalRequestBound(deps.capabilities),
       })
       if (!deps.current()) return
-      let reload = !productIds || stale
+      let reload = !productIds || !!attempt.stale
       if (flow.outcome === 'done') {
         deps.approvalAttempt.current = null
         const ended = flow.last?.approval.status !== 'pending'
@@ -119,7 +120,7 @@ export function createApprovalActions(deps: ApprovalDeps) {
       const text = refusal ? withCloseHint(tr(refusal.key, refusal.fallback)) : unknown ? unknownText(cause) : failedText
       if (productIds && productIds.length === 1) deps.setLineError(String(productIds[0]), text); else deps.setWriteError(text)
       // Approving the whole count reads the session again whatever happened (as it always did); one accepted line reads it again only for a definite refusal, to show the line as it is.
-      if (!unknown || !productIds) deps.reload()
+      if (!unknown || !productIds || attempt.stale) deps.reload()
     } finally { deps.inFlight.current = false; if (deps.current()) deps.setBusy(false) }
   }
 

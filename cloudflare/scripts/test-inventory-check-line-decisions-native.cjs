@@ -330,10 +330,18 @@ function define() {
       // a claim whose holder is gone: Accept on another line takes it over
       const { f: t, id: tid } = await three()
       t.raw.prepare("UPDATE inventory_check_approvals SET applying_request_id='gone-claim-0001',applying_by=8,applying_at=?,plan_json=?").run(new Date().toISOString(), JSON.stringify({ 3: { lot: 30, scope: 'lot', counted: 2, seen: 5 } }))
-      const took = await decide(t, tid, { decision: 'approve', productIds: [2] })
+      states.before_takeover = normalised(await detail(t, tid), tid)
+      assert.deepEqual(states.before_takeover.approval.planned_lines, [3]); assert.equal(states.before_takeover.approval.applying_request_id, undefined, 'the holder is another approver')
+      const takeKey = rid()
+      const took = await decide(t, tid, { decision: 'approve', productIds: [2], requestId: takeKey })
       assert.equal(took.status, 200, JSON.stringify(took.body)); assert.equal(took.body.takeover, true)
       states.taken_over = { ...normalised(await detail(t, tid), tid), answer: { applied: took.body.applied, remaining: took.body.remaining, done: took.body.done, takeover: took.body.takeover } }
       answers.takeover = normalised(took.body, tid)
+      // the page repeats the same accept of line 2 under the same request id: the repeat writes line 2, and is not a takeover
+      const repeated = await decide(t, tid, { decision: 'approve', productIds: [2], requestId: takeKey })
+      assert.equal(repeated.status, 200, JSON.stringify(repeated.body)); assert.equal(repeated.body.takeover, undefined); assert.equal(repeated.body.done, true)
+      assert.deepEqual(Object.keys(repeated.body.approval.applied_lines), ['2'], 'only the accepted line 2 is applied; line 3 was never written')
+      answers.takeover_repeat = normalised(repeated.body, tid)
     }
     {
       // closed after one accepted line: the applied line stays, the rest are recorded as not applied

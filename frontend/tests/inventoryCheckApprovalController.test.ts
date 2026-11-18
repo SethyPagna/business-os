@@ -38,6 +38,28 @@ const answer = (approval: InventoryCheckApproval, applied: number, remaining: nu
 const lineAnswer = (approval: InventoryCheckApproval, action: 'reject' | 'modify' | 'reopen', productId: number, extra: Partial<InventoryCheckLineAnswer> = {}): InventoryCheckLineAnswer => ({ approval, applied: 0, remaining: 2, done: false, line: { productId, action }, ...extra })
 const rejected = (id: number, extra: Partial<InventoryCheckApproval> = {}): InventoryCheckApproval => ({ ...pending, line_decisions: { [id]: { decision: 'reject', at: '2026-11-02T02:00:00Z', by_name: 'boss' } }, ...extra })
 
+type Step = { applied: number; remaining: number; done: boolean; afters: Record<string, number> }
+type Row = [number, number, number]
+type Real = { label: string; productIds?: number[]; normal?: boolean; reads: number; pageRows: Row[]; steps: Step[]; fresh: Row[] }
+// Rows are [product id, quantity shown, damaged units]: the quantity is the ordinary stock plus the damaged units. `fresh` is the session's rows read after the last answer; `reads` is how many times the page must read.
+const REAL_ANSWERS: Real[] = [
+  { label: 'Paid, stale: line 3 accepted elsewhere then a sale, this page accepts one-date line 2', productIds: [2], reads: 1, pageRows: [[3, 5, 0], [1, 9, 0], [2, 5, 0]], steps: [{ applied: 1, remaining: 0, done: true, afters: { 2: 3, 3: 2 } }], fresh: [[3, 1, 0], [1, 9, 0], [2, 3, 0]] },
+  { label: 'Paid, stale, two-date line 1: applied 2, applied_lines {1:5, 3:2}', productIds: [1], reads: 1, pageRows: [[3, 5, 0], [1, 9, 0], [2, 5, 0]], steps: [{ applied: 2, remaining: 0, done: true, afters: { 1: 5, 3: 2 } }], fresh: [[3, 1, 0], [1, 5, 0], [2, 5, 0]] },
+  { label: 'Free, stale, two-date line 1: one date per request, applied_lines {3:2} then {1:5, 3:2}', productIds: [1], reads: 1, pageRows: [[3, 5, 0], [1, 9, 0], [2, 5, 0]], steps: [{ applied: 1, remaining: 1, done: false, afters: { 3: 2 } }, { applied: 1, remaining: 0, done: true, afters: { 1: 5, 3: 2 } }], fresh: [[3, 1, 0], [1, 5, 0], [2, 5, 0]] },
+  { label: 'Free, stale, line 3 with 2 damaged units', productIds: [1], reads: 1, pageRows: [[3, 7, 2], [1, 9, 0], [2, 5, 0]], steps: [{ applied: 1, remaining: 1, done: false, afters: { 3: 2 } }, { applied: 1, remaining: 0, done: true, afters: { 1: 5, 3: 2 } }], fresh: [[3, 3, 2], [1, 5, 0], [2, 5, 0]] },
+  { label: 'Paid, single accept of plain line 3', normal: true, productIds: [3], reads: 0, pageRows: [[3, 5, 0], [1, 9, 0], [2, 5, 0]], steps: [{ applied: 1, remaining: 0, done: true, afters: { 3: 2 } }], fresh: [[3, 2, 0], [1, 9, 0], [2, 5, 0]] },
+  { label: 'Paid, single accept of two-date line 1', normal: true, productIds: [1], reads: 0, pageRows: [[3, 5, 0], [1, 9, 0], [2, 5, 0]], steps: [{ applied: 2, remaining: 0, done: true, afters: { 1: 5 } }], fresh: [[3, 5, 0], [1, 5, 0], [2, 5, 0]] },
+  { label: 'Free, single accept of two-date line 1', normal: true, productIds: [1], reads: 0, pageRows: [[3, 5, 0], [1, 9, 0], [2, 5, 0]], steps: [{ applied: 1, remaining: 1, done: false, afters: {} }, { applied: 1, remaining: 0, done: true, afters: { 1: 5 } }], fresh: [[3, 5, 0], [1, 5, 0], [2, 5, 0]] },
+  { label: 'Free, Approve all', normal: true, reads: 1, pageRows: [[3, 5, 0], [1, 9, 0], [2, 5, 0]], steps: [{ applied: 1, remaining: 3, done: false, afters: {} }, { applied: 1, remaining: 2, done: false, afters: { 1: 5 } }, { applied: 1, remaining: 1, done: false, afters: { 1: 5, 2: 3 } }, { applied: 1, remaining: 0, done: true, afters: { 1: 5, 2: 3, 3: 2 } }], fresh: [[3, 2, 0], [1, 5, 0], [2, 3, 0]] },
+]
+const answerOf = (step: Step) => answer({ ...pending, applied: Object.keys(step.afters).length, applying: !step.done, applied_lines: Object.fromEntries(Object.entries(step.afters).map(([id, after]) => [id, { before: 0, target: after, after, at: 'x' }])) }, step.applied, step.remaining, { done: step.done })
+/** The rows the page ends with: each patch the controller made (the ordinary stock written plus the row's damaged units), replaced by the fresh read when the controller read the session. */
+const pageRows = (scenario: Real, log: { applied: Array<Record<string, number>>; reloads: number }): Row[] => {
+  const rows = scenario.pageRows.map(row => [...row] as Row)
+  for (const patch of log.applied) for (const [id, after] of Object.entries(patch)) { const row = rows.find(entry => entry[0] === Number(id)); if (row) row[1] = after + row[2] }
+  return log.reloads > 0 ? scenario.fresh : rows
+}
+
 const cases: Array<[string, () => Promise<void>]> = [
   ['accept one line: it moves stock, so the shared review shows the line before and after first; cancel sends nothing; then the request carries productIds, every repeat the same request id, and nothing is read again when it is done', async () => {
     const declined = rig({ confirm: false })
@@ -263,6 +285,10 @@ const cases: Array<[string, () => Promise<void>]> = [
     const r = rig(); r.script.approval.push(answer(elsewhere, 1, 0))
     await r.actions().decideApproval('approve', [2])
     assert.deepEqual(r.log.applied, [], 'the older figure of line 4 reaches no row'); assert.equal(r.log.reloads, 1, 'the session is read once')
+    // a dated line writes two stock lines in one request: the count alone (2 new products, 2 writes) cannot tell, but line 4 is a line this request was not asked for
+    const dated = rig(); dated.script.approval.push(answer(elsewhere, 2, 0))
+    await dated.actions().decideApproval('approve', [2])
+    assert.deepEqual(dated.log.applied, [], 'a product the request did not name is applied elsewhere'); assert.equal(dated.log.reloads, 1)
     // Approve all (no ids) is judged the same way: two new products from a request that wrote one
     const all = rig(); all.script.approval.push(answer(elsewhere, 1, 0))
     await all.actions().decideApproval('approve')
@@ -271,6 +297,61 @@ const cases: Array<[string, () => Promise<void>]> = [
     const one = rig(); one.script.approval.push(answer({ ...pending, applied: 1, applying: true, applying_request_id: 'inventory_check_approval_1', planned_lines: [], applied_lines: { 2: line(4, 3) } }, 1, 0))
     await one.actions().decideApproval('approve', [2])
     assert.deepEqual(one.log.applied, [{ '2': 3 }]); assert.equal(one.log.reloads, 0, 'a single accept reads nothing')
+  }],
+  // ---- round 5: the Worker's own answers (recorded from a run of its routes in the lot-set test world: three lines, 1 counted on two received dates, 2 on one, 3 as one total; another tab accepts line 3, a sale takes 1) ----
+  ['a stale page and a line counted on several dates: over the Worker\'s real answers on both plans, every row equals a fresh read of the session (round-4 review, finding 1)', async () => {
+    for (const scenario of REAL_ANSWERS) {
+      const r = rig(); r.script.approval.push(...scenario.steps.map(answerOf))
+      await r.actions().decideApproval('approve', scenario.productIds)
+      assert.deepEqual(pageRows(scenario, r.log), scenario.fresh, `${scenario.label}: the rows equal a fresh read`)
+      assert.equal(r.log.reloads, scenario.reads, `${scenario.label}: reads`)
+    }
+    // the rows are judged by the answer, not rescued by the read: a stale answer puts nothing on any row
+    const paid = REAL_ANSWERS[1], r = rig(); r.script.approval.push(answerOf(paid.steps[0]))
+    await r.actions().decideApproval('approve', paid.productIds)
+    assert.deepEqual(r.log.applied, [], 'no row takes a figure from a stale answer')
+  }],
+  ['a takeover answer carries the old approver\'s write: no row takes it and the session is read once; a takeover that wrote nothing, then the repeat of the same accept, patches line 2 only', async () => {
+    const line = (after: number) => ({ before: 0, target: after, after, at: 'x' })
+    const landed = rig(); landed.script.approval.push(answer({ ...pending, applied: 1, applying: true, applied_lines: { 4: line(2) } }, 1, 2, { takeover: true }), answer({ ...pending, applied: 2, applying: true, applied_lines: { 4: line(2), 2: line(3) } }, 1, 0))
+    await landed.actions().decideApproval('approve', [2])
+    assert.equal(landed.log.approvals.length, 2); assert.equal(landed.log.approvals[0].requestId, landed.log.approvals[1].requestId)
+    assert.deepEqual(landed.log.applied, [], 'line 4 was written by the approver who is gone, and sales may have moved it since: no row takes it'); assert.equal(landed.log.reloads, 1)
+    // the write the old approver landed is the very line being accepted: it is in productIds and the counts agree, but the figure is theirs, from before any later sale
+    const same = rig(); same.script.approval.push(answer({ ...pending, applied: 1, applying: true, applied_lines: { 2: line(3) } }, 1, 1, { takeover: true }), answer({ ...pending, applied: 1, applying: true, applied_lines: { 2: line(3) } }, 0, 0))
+    await same.actions().decideApproval('approve', [2])
+    assert.deepEqual(same.log.applied, [], 'a takeover answer is never put on a row'); assert.equal(same.log.reloads, 1)
+    const plain = rig(); plain.script.approval.push(answer({ ...pending, applying: true }, 0, 3, { takeover: true }), answer({ ...pending, applied: 1, applying: true, applied_lines: { 2: line(3) } }, 1, 0))
+    await plain.actions().decideApproval('approve', [2])
+    assert.deepEqual(plain.log.applied, [{ '2': 3 }], 'a takeover that wrote nothing, then the repeat: line 2 is patched'); assert.equal(plain.log.reloads, 0)
+  }],
+  ['the normal cases read as before on the Worker\'s real answers: a single accept 0 reads, Approve all 1 read, a 409 one read', async () => {
+    for (const scenario of REAL_ANSWERS.filter(entry => entry.normal)) {
+      const r = rig(); r.script.approval.push(...scenario.steps.map(answerOf))
+      await r.actions().decideApproval('approve', scenario.productIds)
+      assert.equal(r.log.reloads, scenario.productIds ? 0 : 1, scenario.label); assert.deepEqual(pageRows(scenario, r.log), scenario.fresh, scenario.label)
+    }
+    for (const first of [true, false]) {
+      const r = rig(); const ok = answer({ ...pending, applied: 1, applied_lines: { 1: { before: 7, target: 12, after: 12, at: 'x' } } }, 1, 1)
+      r.script.approval.push(...(first ? [refusal('inventory_check_conflict')] : [ok, refusal('inventory_check_conflict')]))
+      await r.actions().decideApproval('approve', [1])
+      assert.equal(r.log.reloads, 1, first ? 'a 409 on the first request reads once' : 'a 409 on a later request reads once')
+    }
+  }],
+  ['an answer that showed another tab\'s line stays stale across a lost answer and the retry: the session is read on the unknown path and again at the end, and no row takes the retry\'s figures (round-4 review, finding 4)', async () => {
+    const free = REAL_ANSWERS[2]
+    const lost = () => Object.assign(new Error('lost'), { outcome: 'unknown', code: 'inventory_check_outcome_unknown' })
+    const r = rig(); r.script.approval.push(answerOf(free.steps[0]), lost())
+    await r.actions().decideApproval('approve', free.productIds)
+    assert.equal(r.log.reloads, 1, 'the page showed a stale answer, then lost one: it reads the session')
+    assert.ok(r.attempts.approvalAttempt.current, 'the decision is kept for the retry'); assert.equal(r.attempts.approvalAttempt.current?.stale, true, 'and remembers that it is stale')
+    r.script.approval.push(answerOf(free.steps[1]))
+    await r.actions().decideApproval('approve', free.productIds)
+    assert.equal(r.log.confirms.length, 1, 'the retry is not asked again'); assert.equal(r.log.approvals[0].requestId, r.log.approvals[2].requestId, 'under the same request id')
+    assert.deepEqual(r.log.applied, [], 'no row took a figure from any answer of the stale decision'); assert.equal(r.log.reloads, 2, 'and the retry reads the session once more at the end')
+    // the control: a decision that was never stale and then lost an answer does not read on the unknown path
+    const clean = rig(); clean.script.approval.push(lost())
+    await clean.actions().decideApproval('approve', [1]); assert.equal(clean.log.reloads, 0); assert.equal(clean.attempts.approvalAttempt.current?.stale, undefined)
   }],
   ['Approve all puts the lines each request newly applied on the rows as it goes: step one carries line 1, step two only line 2', async () => {
     const r = rig()
