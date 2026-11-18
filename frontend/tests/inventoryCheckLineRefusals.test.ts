@@ -148,7 +148,7 @@ assert.deepEqual(unaccounted, [], 'inventory_check_* strings the scan does not r
 assert.deepEqual(Object.keys(NOT_REFUSALS).filter(name => !strings.has(name)), [], 'every name in NOT_REFUSALS is still a string of the Worker source')
 assert.deepEqual(Object.keys(NOT_REFUSALS).filter(name => approvalCodes.has(name) || sharedCodes.has(name) || Object.hasOwn(REFUSAL_MESSAGES, name)), [], 'a name in NOT_REFUSALS is not a refusal the count routes raise')
 assert.deepEqual(OTHER_SCREENS.filter(code => !everyCode.has(code)), [], 'every name in OTHER_SCREENS is still a code the Worker raises')
-assert.deepEqual(Object.keys(FALLBACK_CODES).filter(code => !strings.has(code) || OTHER_SCREENS.includes(code) || Object.hasOwn(REFUSAL_MESSAGES, code) || approvalCodes.has(code)), [], 'every name in FALLBACK_CODES is still a string of the Worker source, is listed nowhere else and has no sentence')
+assert.deepEqual(Object.keys(FALLBACK_CODES).filter(code => !strings.has(code) || OTHER_SCREENS.includes(code) || Object.hasOwn(REFUSAL_MESSAGES, code) || approvalCodes.has(code) || sharedCodes.has(code)), [], 'every name in FALLBACK_CODES is still a string of the Worker source, is listed nowhere else and has no sentence')
 assert.deepEqual(OTHER_SCREENS.filter(code => Object.hasOwn(REFUSAL_MESSAGES, code)), [], 'a code that has a sentence is not listed as one that needs none')
 assert.deepEqual(APPROVAL_FILES.flatMap(file => [...codesIn(file)]).filter(code => OTHER_SCREENS.includes(code)), [], 'no approval or line-decision code hides in OTHER_SCREENS')
 for (const code of UNKNOWN_RESULTS) assert.equal(Object.hasOwn(REFUSAL_MESSAGES, code), false, `${code}: an unknown outcome is repeated, never shown as a definite refusal`)
