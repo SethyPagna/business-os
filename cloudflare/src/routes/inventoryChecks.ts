@@ -8,6 +8,7 @@ import { readSwitch, readSwitchMemoMs } from '../lib/readSwitches'
 import type { Env } from '../index'
 import { decideInventoryCheckApproval, decideInventoryCheckLine, type ApprovalDecided } from '../lib/inventoryCheckApprovals'
 import { getPlanLimits } from '../lib/planTier'
+import { getInventoryCheckTaskLimits } from '../lib/inventoryCheckTaskLimits'
 import type { ReviewAlertEvent, ReviewAlertHook } from '../lib/reviewAlert'
 import type { InventoryContext } from './inventory'
 import type { StockInCommitLine } from './stockInCommit'
@@ -251,9 +252,9 @@ app.post('/sessions', async c => {
 // An admin issues products to count; an employee picks a task up and counts it on the wired list (/list?taskId=), submitting with taskId. The done rule and the auto-close are in the Worker.
 // The board (a branch's open and recent tasks with their done counts) is cached on the inventory_checks version: every writer that can change a task or a count moves it, so an unchanged open reads nothing.
 async function readTaskBoard(c: IcContext, branchId: number): Promise<TaskRow[]> {
-  const version = await inventoryChecksVersion(c.env), limits = getPlanLimits(c.env)
+  const version = await inventoryChecksVersion(c.env), limits = getPlanLimits(c.env), taskLimits = getInventoryCheckTaskLimits(c.env)
   return cachedJsonResponse(new Request(`https://ic.invalid/__bos/ic-tasks?branchId=${branchId}&order=1`, { method: 'GET' }), c.executionCtx, `ict:${version}`, limits.productListCacheSeconds,
-    () => readTaskRows(getDb(c.env), { organization: c.get('user').organization_id ?? null, branchId, shown: limits.inventoryCheckTasksShown, closedShown: limits.inventoryCheckTasksClosedShown }), cacheIdentity(c))
+    () => readTaskRows(getDb(c.env), { organization: c.get('user').organization_id ?? null, branchId, shown: taskLimits.tasksShown, closedShown: taskLimits.tasksClosedShown }), cacheIdentity(c))
 }
 /** What a viewer is told of a task: names (never account ids) of who issued and who picked it up, and what they may do with it. */
 const taskView = (row: TaskRow, user: SessionUser) => {
@@ -270,7 +271,7 @@ app.get('/tasks', async c => {
   const branchId = positiveWord(c.req.query('branchId'), 'branchId')
   const rows = await readTaskBoard(c, branchId)
   return c.json({ branchId, version: await inventoryChecksVersion(c.env), items: rows.map((row) => taskView(row, user)),
-    capabilities: { issue: canIssueInventoryCountTasks(user), work: canWorkInventoryCountTasks(user), maxProducts: getPlanLimits(c.env).inventoryCheckTaskMaxProducts } })
+    capabilities: { issue: canIssueInventoryCountTasks(user), work: canWorkInventoryCountTasks(user), maxProducts: getInventoryCheckTaskLimits(c.env).maxProducts } })
 })
 // The filter keys a task may be issued from: the list's own (a closed set; the list's search code validates them for this viewer, as it does for /list).
 const TASK_FILTER_KEYS = ['query', 'brand', 'category', 'stockState', 'checkState', 'checkedOn'] as const
@@ -300,7 +301,7 @@ app.post('/tasks', async c => {
   if (!canIssueInventoryCountTasks(user)) throw new InventoryCheckSessionError(403, 'inventory_check_issue_required')
   const body = await c.req.json().catch(() => null) as Record<string, unknown> | null
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new InventoryCheckSessionError(400, 'inventory_check_invalid_request')
-  const limit = getPlanLimits(c.env).inventoryCheckTaskMaxProducts
+  const limit = getInventoryCheckTaskLimits(c.env).maxProducts
   if ((body.productIds === undefined) === (body.filters === undefined)) throw new InventoryCheckSessionError(400, 'inventory_check_invalid_request')
   let productIds = body.productIds, selection: unknown = { kind: 'ids' }, dropIneligible = false
   if (body.filters !== undefined) {

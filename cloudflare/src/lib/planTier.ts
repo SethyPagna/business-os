@@ -436,14 +436,6 @@ export type PlanLimits = {
   // parameter. A branch whose checked set is larger is refused 503 inventory_check_filter_too_large rather than read in part.
   inventoryCheckFilterMaxIds: number
 
-  // lib/inventoryCheckTasks.ts (count tasks; the same number on Free and Paid, because a task is a unit of work for a person, not a plan resource).
-  // inventoryCheckTaskMaxProducts: the most products ONE task may hold, whether the admin names them or a filter resolves to them. It sits under the 500 items a session
-  //   detail can read (getInventoryCheckSession refuses more), so a task can always be opened. Over it the issue is refused 400 inventory_check_task_too_many with the total.
-  // inventoryCheckTasksShown: the most OPEN tasks the Tasks list answers for a branch; inventoryCheckTasksClosedShown: the most recently closed ones it adds after them.
-  inventoryCheckTaskMaxProducts: number
-  inventoryCheckTasksShown: number
-  inventoryCheckTasksClosedShown: number
-
   // ---- The shared ranked scope of the Products list (INV-A S7; behind the read switch `catalog_ranked_scope`) ----
   //
   // lib/rankedScope.ts: how long a cached ranking (the ordered family keys of a window of pages, and the family total) may be served. The entry is also keyed on the products,
@@ -590,9 +582,6 @@ const PAID_LIMITS: PlanLimits = {
   inventoryCheckLotLinesPerProduct: 100,
   inventoryLastChangeMaxRows: 8,
   inventoryCheckFilterMaxIds: 10_000,
-  inventoryCheckTaskMaxProducts: 300,
-  inventoryCheckTasksShown: 30,
-  inventoryCheckTasksClosedShown: 5,
   productListCacheSeconds: 60,
   possibleDuplicatesCacheSeconds: 300,
   catalogListWindowPages: 4,
@@ -671,9 +660,6 @@ const FREE_LIMITS: PlanLimits = {
   inventoryCheckLotLinesPerProduct: 50,
   inventoryLastChangeMaxRows: 4,
   inventoryCheckFilterMaxIds: 2_000,
-  inventoryCheckTaskMaxProducts: 300,
-  inventoryCheckTasksShown: 30,
-  inventoryCheckTasksClosedShown: 5,
   productListCacheSeconds: 3_600,
   possibleDuplicatesCacheSeconds: 3_600,
   catalogListWindowPages: 3,

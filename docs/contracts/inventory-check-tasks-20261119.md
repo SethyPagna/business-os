@@ -38,7 +38,7 @@ All answer `404 not_found` while the read switch `ic_wired` is OFF (the page the
 
 ### 3.1 `GET /api/inventory-checks/tasks?branchId=1`
 
-The tasks of one branch: every OPEN task (newest issued first, at most `inventoryCheckTasksShown`, 30) and then the most recently CLOSED ones (at most `inventoryCheckTasksClosedShown`, 5).
+The tasks of one branch: every OPEN task (newest issued first, at most `tasksShown`, 30) and then the most recently CLOSED ones (at most `tasksClosedShown`, 5).
 
 ```
 { "branchId": 1, "version": "k2:12",
@@ -64,7 +64,7 @@ The tasks of one branch: every OPEN task (newest issued first, at most `inventor
 Exactly one of `productIds` and `filters`. Filters are resolved with the list's own reader (`GET /list`, the same planner, grants, check-state restriction and cache; page after page of the list's size), never a copy of its search.
 A product the list shows but a person cannot count (a family header) is dropped from a resolved list; an explicit list naming one is refused. The scope records what the admin chose (the ids as `{kind:'ids'}`, or the filters). Nothing about stock is read or written.
 * 201 `{ item: <session>, receipt, created: true }`; a repeat of the same request answers 200 with `created: false`. `item.progress` is `{ total, unstarted: total, done: 0, issue: 0 }`, `item.scope` as in section 1, `item.can_edit` true.
-* Cap: `getPlanLimits.inventoryCheckTaskMaxProducts` = **300**, the same on Free and Paid (a task is a unit of work for a person, not a plan resource; it also sits under the 500 items a session detail can read). Over it:
+* Cap: `getInventoryCheckTaskLimits(env).maxProducts` (`lib/inventoryCheckTaskLimits.ts`) = **300**, the same on Free and Paid (a task is a unit of work for a person, not a plan resource; it also sits under the 500 items a session detail can read). Over it:
   `400 inventory_check_task_too_many` with `{ total, limit }` (the number the filter or list holds), so the admin can narrow it. The writer writes one session row, N item rows and one create event in ONE batch.
 
 | status | code | when |
@@ -167,7 +167,8 @@ MEASURED on a 300-product world by `cloudflare/scripts/measure-inventory-check-t
 Opening Tasks when nothing changed makes **0** D1 calls. What the addition to the hot submission batch costs: three guard/update statements and one more event insert that match nothing unless the task completes, no extra D1 call, no extra row until a task closes.
 
 
-Every cap is read from `getPlanLimits(env)`: `inventoryCheckTaskMaxProducts` (300), `inventoryCheckTasksShown` (30), `inventoryCheckTasksClosedShown` (5), the same on both tiers; the existing Free caps (40 products per submission, 150 overlay ids) still apply to counting a task.
+Every cap is read through the plan tier: `getInventoryCheckTaskLimits(env)` (`lib/inventoryCheckTaskLimits.ts`): `maxProducts` (300), `tasksShown` (30), `tasksClosedShown` (5), the same on both tiers; the existing Free caps from `getPlanLimits(env)` (40 products per submission, 150 overlay ids) still apply to counting a task.
+They are not in `planTier.ts` because that file is inside the sales-daily kernel fingerprint, which refuses any change to it without a kernel version bump (which re-computes every stored day); they move into `PlanLimits` the next time that version is bumped, and only the import of the callers changes.
 
 ## 9. Language keys
 
