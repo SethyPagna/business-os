@@ -13,18 +13,18 @@ const items = [item(1, 'Serum A', 12, 7), item(2, 'Cream B', 3, 5, { current_qua
   item(4, 'Dated D', 9, 9, { lot_lines: [{ batch_id: 7, scope: 'lot', counted: 6, seen: 5, received_at: '2026-10-01' }, { batch_id: 9, scope: 'lot', counted: 3, seen: 4, received_at: '2026-10-09' }] })]
 const refusal = (code: string, status = 409) => Object.assign(new Error(code), { code, status })
 
-function rig(options: { approval?: InventoryCheckApproval; sessionId?: string; confirm?: boolean } = {}) {
+function rig(options: { approval?: InventoryCheckApproval; sessionId?: string; confirm?: boolean; firstId?: number } = {}) {
   const log = { approvals: [] as Array<Record<string, unknown>>, lines: [] as Array<Record<string, unknown>>, confirms: [] as Array<Parameters<ApprovalDeps['askToConfirm']>[0]>, reloads: 0, notices: [] as string[],
-    approvalStates: [] as InventoryCheckApproval[], refused: [] as Array<Record<string, string>>, lineErrors: {} as Record<string, string | null>, writeErrors: [] as string[], busy: [] as boolean[] }
+    approvalStates: [] as InventoryCheckApproval[], applied: [] as Array<Record<string, number>>, refused: [] as Array<Record<string, string>>, lineErrors: {} as Record<string, string | null>, writeErrors: [] as string[], busy: [] as boolean[] }
   const script = { approval: [] as Array<InventoryCheckApprovalDecision | Error>, line: [] as Array<InventoryCheckLineAnswer | Error> }
   const state = { approval: options.approval ?? pending, current: true, confirm: options.confirm ?? true, sessionId: options.sessionId ?? 'sub-1' }
   const attempts = { approvalAttempt: { current: null as ApprovalAttempt | null }, lineAttempt: { current: null as ApprovalAttempt | null } }
   const inFlight = { current: false }
-  let counter = 0
+  let counter = options.firstId ?? 0
   const knownRefusal = async (cause: unknown) => { const code = (cause as { code?: string })?.code; return typeof code === 'string' && Object.hasOwn(REFUSAL_MESSAGES, code) ? REFUSAL_MESSAGES[code] : undefined }
   const actions = () => createApprovalActions({
     sessionId: state.sessionId, approval: state.approval, items, capabilities: null, current: () => state.current, inFlight, setBusy: value => { log.busy.push(value) },
-    setApproval: approval => { state.approval = approval; log.approvalStates.push(approval) }, setWriteError: text => { log.writeErrors.push(text) }, setRefused: map => { log.refused.push(map) },
+    setApproval: approval => { state.approval = approval; log.approvalStates.push(approval) }, setApplied: stock => { log.applied.push(stock) }, setWriteError: text => { log.writeErrors.push(text) }, setRefused: map => { log.refused.push(map) },
     setLineError: (id, text) => { log.lineErrors[id] = text }, askToConfirm: async request => { log.confirms.push(request); return state.confirm }, tr: (_key, fallback) => fallback, notify: message => { log.notices.push(message) },
     knownRefusal, unknownSaveKey: () => 'inventory_check_save_unknown', reload: () => { log.reloads += 1 }, ...attempts, newRequestId: prefix => `${prefix}_${++counter}`,
     send: {
@@ -39,12 +39,17 @@ const lineAnswer = (approval: InventoryCheckApproval, action: 'reject' | 'modify
 const rejected = (id: number, extra: Partial<InventoryCheckApproval> = {}): InventoryCheckApproval => ({ ...pending, line_decisions: { [id]: { decision: 'reject', at: '2026-11-02T02:00:00Z', by_name: 'boss' } }, ...extra })
 
 const cases: Array<[string, () => Promise<void>]> = [
-  ['accept one line: one tap, no dialog, the approval request carries productIds, every repeat the same request id, and nothing is read again when it is done', async () => {
+  ['accept one line: it moves stock, so the shared review shows the line before and after first; cancel sends nothing; then the request carries productIds, every repeat the same request id, and nothing is read again when it is done', async () => {
+    const declined = rig({ confirm: false })
+    await declined.actions().decideApproval('approve', [1])
+    assert.equal(declined.log.approvals.length, 0, 'cancel sends nothing'); assert.equal(declined.attempts.approvalAttempt.current, null)
     const r = rig()
     const accepted = { ...pending, applied: 1, applied_lines: { 1: { before: 7, target: 12, after: 12, at: 'x' } } }
     r.script.approval.push(answer(accepted, 1, 1), answer(accepted, 1, 0))
     await r.actions().decideApproval('approve', [1])
-    assert.equal(r.log.confirms.length, 0, 'one line is accepted without a dialog')
+    assert.equal(r.log.confirms.length, 1, 'asked once, not again for the repeat of the same request')
+    assert.deepEqual((r.log.confirms[0].items ?? []).map(entry => [String(entry.label), String(entry.value)]), [['Serum A', 'Now 7 → Set to 12']], 'the line, the stock now and what it will be set to')
+    assert.equal(r.log.confirms[0].confirmLabel, 'Approve'); assert.notEqual(r.log.confirms[0].danger, true)
     assert.equal(r.log.approvals.length, 2, 'one stock line per request on the Free plan: the same request repeats until done')
     assert.deepEqual(r.log.approvals.map(call => call.productIds), [[1], [1]]); assert.deepEqual(r.log.approvals.map(call => call.decision), ['approve', 'approve'])
     assert.equal(r.log.approvals[0].requestId, r.log.approvals[1].requestId); assert.match(String(r.log.approvals[0].requestId), /^inventory_check_approval_/)
@@ -68,8 +73,8 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.equal(r.log.confirms.length, 1)
     const review = r.log.confirms[0], rows = (review.items ?? []).map(entry => [String(entry.label), String(entry.value)])
     assert.deepEqual(rows[0], ['Open lines', '3 → 0'], 'how many lines it applies')
-    assert.deepEqual(rows[1], ['Serum A', '7 → 12']); assert.deepEqual(rows[2], ['Cream B', '4 → 2'], 'stock now, and what it will be: 4 + 3 - 5')
-    assert.equal(review.confirmLabel, 'Approve all'); assert.notEqual(review.danger, true)
+    assert.deepEqual(rows[1], ['Serum A', 'Now 7 → Set to 12']); assert.deepEqual(rows[2], ['Cream B', 'Now 4 → Set to 2'], 'stock now, and what it will be: 4 + 3 - 5')
+    assert.equal(review.confirmLabel, 'Approve', 'one word on the confirm button'); assert.notEqual(review.danger, true)
     assert.equal(Object.hasOwn(r.log.approvals[0], 'productIds'), false); assert.equal(r.log.reloads, 1)
   }],
   ['Approve all leaves rejected lines out of its review and says how many are left', async () => {
@@ -156,7 +161,7 @@ const cases: Array<[string, () => Promise<void>]> = [
   ['modify validation: a figure the Worker would refuse never leaves the page, and the line says why in its own words', async () => {
     const table: Array<[string, { productId: number; action: 'modify'; counted?: number; lots?: Array<{ batchId: number; counted: number }> }, string]> = [
       ['negative', { productId: 1, action: 'modify', counted: -1 }, 'Enter a whole number from 0 to 1,000,000,000.'],
-      ['fraction', { productId: 1, action: 'modify', counted: 2.5 }, 'A counted number is not a whole number. Reject this count and recount.'],
+      ['fraction', { productId: 1, action: 'modify', counted: 2.5 }, 'Enter a whole number from 0 to 1,000,000,000.'],
       ['too large', { productId: 1, action: 'modify', counted: 1_000_000_001 }, 'Enter a whole number from 0 to 1,000,000,000.'],
       ['dates for a total', { productId: 1, action: 'modify', lots: [{ batchId: 7, counted: 1 }] }, 'This line was counted as one total. Enter one figure.'],
       ['a total for a dated line', { productId: 4, action: 'modify', counted: 4 }, 'This line was counted by received date. Enter a figure for each date.'],
@@ -188,6 +193,49 @@ const cases: Array<[string, () => Promise<void>]> = [
     const gone = rig(); gone.state.current = false; assert.equal(await gone.actions().decideLine({ productId: 1, action: 'reopen' }), false)
     const busyOnce = rig(); busyOnce.script.line.push(lineAnswer(pending, 'reopen', 1)); await busyOnce.actions().decideLine({ productId: 1, action: 'reopen' })
     assert.deepEqual(busyOnce.log.busy, [true, false], 'busy while it runs'); assert.equal(busyOnce.inFlight.current, false)
+  }],
+  // ---- C2 round 2 ----
+  ['a line request id never crosses sessions: the key holds the session, so the same decision on the same product in another session is a new request (mutant M7)', async () => {
+    const first = rig({ sessionId: 'sub-1' })
+    first.script.line.push(Object.assign(new Error('lost'), { outcome: 'unknown' }))
+    assert.equal(await first.actions().decideLine({ productId: 1, action: 'modify', counted: 9 }), false)
+    const kept = first.attempts.lineAttempt.current; assert.ok(kept, 'an unknown outcome keeps the id')
+    const second = rig({ sessionId: 'sub-2', firstId: 50 }); second.attempts.lineAttempt.current = kept
+    second.script.line.push(lineAnswer(pending, 'modify', 1))
+    assert.equal(await second.actions().decideLine({ productId: 1, action: 'modify', counted: 9 }), true)
+    assert.notEqual(second.log.lines[0].requestId, kept!.requestId, 'the id of session 1 is not sent for session 2')
+    const same = rig({ sessionId: 'sub-1' }); same.attempts.lineAttempt.current = kept; same.script.line.push(lineAnswer(pending, 'modify', 1))
+    await same.actions().decideLine({ productId: 1, action: 'modify', counted: 9 })
+    assert.equal(same.log.lines[0].requestId, kept!.requestId, 'the control: the same session does reuse it')
+  }],
+  ['the Reject and Close dialogs count only the lines they end: a line the approver rejected is not a Difference (a count of 3 with one rejected says 2)', async () => {
+    for (const decision of ['reject', 'close'] as const) {
+      const r = rig({ approval: rejected(1) }); r.script.approval.push(answer({ ...pending, status: 'rejected' }, 0, 0))
+      await r.actions().decideApproval(decision)
+      assert.equal(r.log.confirms[0].items?.[0].value, 2, decision)
+    }
+  }],
+  ['Approve all quotes the approver figure for a modified plain line, and each modified date of a dated line (mutant M9: a dialog that ignores the modification)', async () => {
+    const modified: InventoryCheckApproval = { ...pending, line_decisions: {
+      2: { decision: 'modify', counted: 4, at: '2026-11-02T02:00:00Z', by_name: 'boss' },
+      4: { decision: 'modify', lots: [{ batchId: 7, counted: 5 }, { batchId: 9, counted: 2 }], at: '2026-11-02T02:00:00Z', by_name: 'boss' } } }
+    const r = rig({ approval: modified }); r.script.approval.push(answer({ ...pending, status: 'approved', applied: 3 }, 3, 0))
+    await r.actions().decideApproval('approve')
+    const rows = (r.log.confirms[0].items ?? []).map(entry => [String(entry.label), String(entry.value)])
+    assert.deepEqual(rows[2], ['Cream B', 'Now 4 → Set to 3'], 'modified to 4, not what the counter typed (3): 4 + 4 - 5')
+    assert.deepEqual(rows.slice(3), [['Dated D · Received 01/10/2026', '5 → 5'], ['Dated D · Received 09/10/2026', '4 → 2']], 'a dated line is shown date by date: what the counter saw, then the approver figure (the counter typed 6 and 3)')
+    const plain = rig(); plain.script.approval.push(answer({ ...pending, status: 'approved', applied: 3 }, 3, 0)); await plain.actions().decideApproval('approve')
+    assert.deepEqual((plain.log.confirms[0].items ?? []).slice(3).map(entry => String(entry.value)), ['5 → 6', '4 → 3'], 'the control: unmodified dates show the counter figures')
+  }],
+  ['an accepted line puts the stock it wrote on the session rows with no read: setApplied carries each newly applied line (ordinary stock after), once', async () => {
+    const r = rig()
+    const accepted = { ...pending, applied: 1, applying: true, applying_request_id: 'inventory_check_approval_1', planned_lines: [], applied_lines: { 1: { before: 7, target: 12, after: 12, at: 'x' } } }
+    r.script.approval.push(answer(accepted, 1, 0))
+    await r.actions().decideApproval('approve', [1])
+    assert.deepEqual(r.log.applied, [{ '1': 12 }]); assert.equal(r.log.reloads, 0)
+    const again = rig({ approval: accepted }); again.script.approval.push(answer({ ...accepted, applied: 2, applied_lines: { ...accepted.applied_lines, 2: { before: 4, target: 2, after: 2, at: 'x' } } }, 1, 0))
+    await again.actions().decideApproval('approve', [2])
+    assert.deepEqual(again.log.applied, [{ '2': 2 }], 'a line applied before is not patched again')
   }],
 ]
 

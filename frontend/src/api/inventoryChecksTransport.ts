@@ -30,6 +30,8 @@ export type InventoryCheckApproval = {
   applying?: boolean
   /** Sent to that approver only: the request id every repeat of the approval must carry. */
   applying_request_id?: string
+  /** Sent with `applying`: the products the claim has planned or part-written. Only these lines are being applied; a decision on any other line is still accepted. Absent from a Worker that predates it. */
+  planned_lines?: number[]
   /** The approval was ended by a close: lines applied stay applied (status approved), these were NOT applied, each with the reason (a refusal code or inventory_check_not_applied). */
   closed?: { lines: Record<string, string> }
   /** Session detail only: per product, the stock the counter saw. The count is measured against it. */

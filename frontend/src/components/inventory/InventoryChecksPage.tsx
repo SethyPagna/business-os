@@ -45,6 +45,7 @@ import { soleActiveBranch } from '../../utils/branchCollapse.ts'
 import { projectProduct } from './inventoryCheckProject.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { loadWired, mergeWiredRows, NotWired, patchWiredLots, patchWiredRaw, readWiredRows, rememberWiredMode, wiredMode, wiredResult, type Branch, type WiredAccess, type WiredDeps, type WiredExtras, type WiredList, type WiredRaw } from './inventoryWired.ts'
+import { withAppliedStock } from './inventoryCheckApprovalLines.ts'
 import { useInventoryCheckApproval } from './useInventoryCheckApproval.ts'
 import { productSalesFocus, queueReportsFocus } from '../sales/reports/reportsFocus.ts'
 import type { InventoryCheckHistoryResult } from './InventoryCheckHistoryFloat.tsx'
@@ -997,7 +998,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   // Closing moves no stock, so it needs the extra but not the right to adjust stock.
   const canClose = fresh && !!approval && approval.can_approve && canWriteToServer
   const { refusedLines, lineErrors, decideApproval, decideLine } = useInventoryCheckApproval({ sessionId, approval, items, capabilities: data?.capabilities, writeScope, inFlight, current, setBusy, setApproval, setWriteError,
-    askToConfirm, tr, notify, knownRefusal, unknownSaveKey, reload: reloadAll })
+    askToConfirm, tr, notify, knownRefusal, unknownSaveKey, reload: reloadAll, setApplied: stock => setItems(previous => withAppliedStock(previous, stock)) })
   // The owner's summary: check counts only. A session shows its own counts in the session bar, and the old contract sends none.
   const checkInfo = !sessionId && !!data?.simple
   const summary = fresh && checkInfo ? data?.summary : undefined
@@ -1124,7 +1125,9 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       pending: detail.check_pending === true || (!!sessionId && approval?.status === 'pending'),
       canViewStock: access.fields.stock, label: tr('inventory_check_fix_stock_reason', 'Inventory check') })
     : null
-  // A product waiting for approval opens the session that holds its count request: the panel with Approve all and the per-line decisions.
+  // The session that holds the waiting request: the overlay names it. The product's latest count may be a newer session (an observation made after the submission), which has no approval.
+  const pendingSessionOf = (product: InventoryCheckProduct): string | null => (wiredRaw.current?.overlay.get(Number(product.id)) as { pending_session_id?: string } | undefined)?.pending_session_id ?? product.check_session_id ?? null
+  // A product waiting for approval opens that session: the panel with Approve all and the per-line decisions.
   function openRequest(branch: string, session: string) {
     setDetail(null); setSection('products'); onSelect({ branchId: branch, sessionId: session })
   }
@@ -1247,7 +1250,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         {pagerNode('bottom')}
         {detail && fresh ? <Suspense fallback={null}><InventoryCheckDetail product={detail} observation={observations[String(detail.id)]} unavailable={unavailableIds.has(String(detail.id))} fields={access.fields} priceText={access.fields.price ? priceText : undefined} promotionRules={data?.promotionRules} exchangeRate={exchangeRate} fmtUSD={fmtUSD} fmtKHR={fmtKHR} navigateTo={navigateTo} t={t} onClose={() => setDetail(null)}
           onFixStock={fixOpening ? () => openFixStock(fixOpening) : undefined}
-          onOpenRequest={offered && detail.check_pending === true && detail.check_session_id && detail.check_branch_id != null ? () => openRequest(String(detail.check_branch_id), String(detail.check_session_id)) : undefined}
+          onOpenRequest={offered && detail.check_pending === true && pendingSessionOf(detail) && detail.check_branch_id != null ? () => openRequest(String(detail.check_branch_id), String(pendingSessionOf(detail))) : undefined}
           onSales={offered && rights.can('sales', 'view') ? () => { queueReportsFocus(productSalesFocus(detail.name)); navigateTo('sales', hubAnchor('sales', 'reports')) } : undefined} /></Suspense> : null}
         {costFor && access.fields.cost ? <Suspense fallback={null}><CostCalculationFloat productId={costFor.id} productName={costFor.name} onClose={() => setCostFor(null)} fmtUSD={value => fmtUSD(value)} fmtKHR={value => fmtKHR(value)} t={(key, fallback) => tr(key, fallback)} /></Suspense> : null}
         {historyPage !== null ? <Suspense fallback={null}><InventoryCheckHistoryFloat page={historyPage} history={history} error={historyError} onPage={setHistoryPage} onRetry={() => setHistoryReload(value => value + 1)} onClose={() => setHistoryPage(null)} t={t} /></Suspense> : null}

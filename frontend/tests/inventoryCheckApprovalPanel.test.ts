@@ -66,7 +66,8 @@ const cases: Array<[string, () => Promise<void>]> = [
   ['Approve and Reject appear only for someone who may decide, only while pending, and fire their own handlers', async () => {
     const panel = await mount()
     assert.ok(action(panel, 'approve') && action(panel, 'reject'))
-    assert.equal(text(action(panel, 'approve')), 'Approve all'); assert.equal(action(panel, 'reject').getAttribute('aria-label'), 'Reject', 'the secondary action is icon-only with its name')
+    assert.equal(text(action(panel, 'approve')), 'Approve', 'one word on the main button'); assert.equal(action(panel, 'approve').getAttribute('aria-label'), 'Approve all', 'and the whole name for the tooltip and the screen reader'); assert.equal(action(panel, 'approve').getAttribute('title'), 'Approve all')
+    assert.equal(action(panel, 'reject').getAttribute('aria-label'), 'Reject', 'the secondary action is icon-only with its name')
     calls.length = 0
     await panel.click(action(panel, 'approve')); await panel.click(action(panel, 'reject'))
     assert.deepEqual(calls, ['approve', 'reject'])
@@ -202,7 +203,7 @@ const cases: Array<[string, () => Promise<void>]> = [
     await both.render({ ...base, ...handlers, canDecide: true, canClose: true, approval: { ...pending, status: 'approved', decided_at: '2026-11-02T03:00:00Z' } }); assert.deepEqual(names(both, 1), [], 'a decided count has none')
     await both.render({ ...base, canDecide: true, canClose: true }); assert.deepEqual(names(both, 1), [], 'the page that gives no handler offers no button')
   }],
-  ['a line being applied, applied, replaced or waiting on another approver shows that state and no actions; the others of the same count keep theirs', async () => {
+  ['a Worker that sends no planned_lines cannot say which lines the claim holds, so every undecided line of a claimed approval shows as applying or waiting (the Worker-faithful claim states are in inventoryCheckApprovalWorkerStates.test.ts)', async () => {
     const handlers = { onAccept: () => {}, onRejectLine: () => {}, onReopen: () => {}, onModify: async () => true }
     const names = (panel: MountedSurface, id: number) => panel.findAll(node => node.getAttribute('data-approval-line-action') !== null && lineOf(panel, id).contains(node)).map(node => node.getAttribute('data-approval-line-action'))
     const states = (panel: MountedSurface) => panel.findAll(node => node.getAttribute('data-approval-line-state') !== null).map(node => node.getAttribute('data-approval-line-state'))
@@ -229,7 +230,7 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.equal(chip(2).getAttribute('data-decision'), 'modify'); assert.match(text(chip(2)), /Modified to 4/)
     assert.match(text(lineOf(panel, 2)), /Counted 3/, 'what the counter typed stays on the line'); assert.equal(text(panel.find(node => node.getAttribute('data-approval-target') === '2', 'target')), 'Set to 3', 'now 4 + modified 4 - seen 5')
     const reopens = panel.findAll(node => node.getAttribute('data-approval-line-action') === 'reopen'); assert.equal(reopens.length, 2)
-    assert.equal(panel.findAll(node => node.getAttribute('data-approval-line-action') === 'accept').length, 0, 'a decided line offers reopen only')
+    assert.equal(panel.findAll(node => node.getAttribute('data-approval-line-action') === 'accept').length, 0, 'no accept handler, no accept; a rejected line offers reopen only (the modified line offers more, see the Worker-state cases)')
     await panel.click(reopens[1]); assert.deepEqual(got, [2])
     await panel.render({ ...base, approval: { ...decided, status: 'approved', decided_at: '2026-11-02T03:00:00Z' }, canClose: true, onReopen: () => {} })
     assert.equal(panel.findAll(node => node.getAttribute('data-approval-line-action') === 'reopen').length, 0, 'no reopen once the approval ended'); assert.ok(chip(1), 'the chip stays as the record')
@@ -245,7 +246,7 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.equal((box as unknown as { value: string }).value, '3', 'starts at what the counter typed')
     await panel.type(box, '9'); assert.equal(preview(), 'Set to 8', 'now 4 + 9 - seen 5')
     await panel.type(box, '10'); assert.equal(preview(), 'Set to 9')
-    for (const [typed, sentence] of [['-1', 'Enter a whole number'], ['2.5', 'not a whole number'], ['abc', 'Enter a whole number'], ['1000000001', 'Enter a whole number'], ['5', 'equals what the counter saw']] as const) {
+    for (const [typed, sentence] of [['-1', 'Enter a whole number'], ['2.5', 'Enter a whole number'], ['abc', 'Enter a whole number'], ['1000000001', 'Enter a whole number'], ['5', 'equals what the counter saw']] as const) {
       await panel.type(box, typed)
       assert.match(text(panel.find(node => node.getAttribute('data-approval-problem') === '2', `problem for ${typed}`)), new RegExp(sentence), typed)
       assert.equal(panel.findAll(node => node.getAttribute('data-approval-preview') === '2').length, 0, `${typed}: no preview for a figure that cannot be saved`)
@@ -283,9 +284,9 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.match(text(panel.find(node => node.getAttribute('data-approval-decision') === '4', 'chip')), /Modified to 7/, 'the chip shows the total of the dates')
     assert.match(text(panel.find(node => node.getAttribute('data-approval-lot-lines') === '4', 'dates')), /5 → 5 \(6\)/, 'a date shows the approver figure and what the counter typed')
   }],
-  ['the header: Approve all keeps its icon and word, and reject-all and close stay icon-only with their names', async () => {
+  ['the header: Approve keeps its icon and one word (Approve all is its tooltip), and reject-all and close stay icon-only with their names', async () => {
     const panel = await mount({ approval: { ...pending, applied: 1, applying: true, applying_request_id: 'inventory_check_approval_mine' }, onClose: () => {} })
-    assert.equal(text(action(panel, 'approve')), 'Approve all'); assert.ok(action(panel, 'approve').querySelector('svg'), 'with its icon')
+    assert.equal(text(action(panel, 'approve')), 'Approve'); assert.ok(action(panel, 'approve').querySelector('svg'), 'with its icon')
     assert.equal(action(panel, 'reject'), undefined, 'a count being applied has no Reject')
     assert.equal(text(action(panel, 'close')), '', 'close is icon-only'); assert.ok(action(panel, 'close').getAttribute('aria-label'))
     await panel.render({ ...base, approval: pending })

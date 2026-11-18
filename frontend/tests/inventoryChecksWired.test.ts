@@ -31,6 +31,7 @@ const productRow = (id: number, name: string, quantity: number | undefined): Row
 let listAnswer: (query: URLSearchParams) => Row | Promise<Row> = () => ({})
 let overlayEntries = new Map<number, Row>()
 const lists: URLSearchParams[] = []
+const sessionsOpened: string[] = []
 const overlays: URLSearchParams[] = []
 const held = new Map<string, unknown>()
 let authorityCurrent = true
@@ -41,7 +42,7 @@ const listBody = (items: Row[], extra: Row = {}) => ({ items, total: items.lengt
 
 const app = (permissions: Record<string, boolean>) => ({
   user: { id: 7, role_code: 'employee', permissions: { inventory: true, inventory_checks: true, ...permissions } as Record<string, boolean> },
-  page: 'inventory', authReady: true, canWriteToServer: true, t: (key: string) => key, notify: () => {},
+  page: 'inventory', authReady: true, canWriteToServer: true, t: (key: string) => key, notify: () => {}, getPermissionTier: () => 'none', can: () => false, fmtUSD: (value: unknown) => '$' + Number(value).toFixed(2), fmtKHR: (value: unknown) => Number(value).toFixed(0),
   settings: { navigation_mode: 'sections' }, language: 'en', AccessDenied: () => 'Access denied',
   navigateTo: (page: string, anchor?: string) => {
     window.history.pushState(null, '', `/inventory#${anchor || ''}`)
@@ -76,12 +77,12 @@ const doubles = {
     },
     readInventoryCheckProducts: async () => { throw new Error('the older list must not be asked while ic_wired is on') },
     readInventoryCheckSessions: async () => ({ items: [], total: 0, page: 1, pageSize: 20 }),
-    readInventoryCheckSession: async () => ({ item: null, items: [] }),
+    readInventoryCheckSession: async (id: unknown) => { sessionsOpened.push(String(id)); return { item: null, items: [] } },
     readInventoryCheckHistory: async () => ({ items: [], total: 0, page: 1, pageSize: 20 }),
   },
 }
-async function mount(permissions: Record<string, boolean> = FIELDS) {
-  lists.length = 0; overlays.length = 0; held.clear(); authorityCurrent = true; epoch = 'epoch-a'; ranked = null; overlayEntries = new Map()
+async function mount(permissions: Record<string, boolean> = FIELDS, overlay: Row[] = []) {
+  lists.length = 0; overlays.length = 0; held.clear(); authorityCurrent = true; epoch = 'epoch-a'; ranked = null; overlayEntries = new Map(overlay.map(entry => [Number(entry.product_id), entry]))
   open('hub:inventory:products')
   return harness.mount({ component: 'components/inventory/InventoryChecksPage.tsx', app: app(permissions), doubles, props: {} })
 }
@@ -333,6 +334,21 @@ try {
     await surface.waitFor(() => lists.length === 5, 'the Checked OK read')
     assert.deepEqual([last().get('checkState'), last().get('checkedOn')], ['ok', '2026-11-10'], 'Checked OK on a date is a real question and keeps both')
     await surface.unmount()
+  }
+  // ---- C2 review, finding 9: "Open request" opens the session that holds the waiting request. A count submitted on 12 Nov and still waiting, then observed again on 13 Nov in another session: the
+  // overlay's latest count is the 13 Nov session (which has no approval), and its pending mark names the 12 Nov one. ----
+  {
+    listAnswer = () => listBody([productRow(12, 'Waiting product', 8)], { capabilities: { fixStock: true } })
+    const waiting = { product_id: 12, last_change_at: null, pending: true, check: { state: 'ok', counted_quantity: 9, seen_quantity: 8, note: null, at: '2026-11-13T01:00:00.000Z', session_id: 'session-13-nov', revision: 1 } }
+    const openFrom = async (entry: Row) => {
+      const surface = await mount(FIELDS, [entry])
+      await surface.click(surface.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'Waiting product', 'product button'))
+      sessionsOpened.length = 0
+      await surface.click(surface.find(node => node.getAttribute('data-check-open-request') !== null, 'Open request chip'))
+      const opened = [...sessionsOpened]; await surface.unmount(); return opened
+    }
+    assert.deepEqual(await openFrom({ ...waiting, pending_session_id: 'session-12-nov' }), ['session-12-nov'], 'the session that holds the request, not the latest count')
+    assert.deepEqual(await openFrom(waiting), ['session-13-nov'], 'the control: a server that names no pending session falls back to the latest count, as before')
   }
   console.log('inventoryChecksWired passed: blind store, changed-elsewhere hint, by-id refresh, ranked search, late answers, date chips, too many products, refused date')
 } finally {

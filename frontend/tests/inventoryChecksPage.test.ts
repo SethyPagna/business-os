@@ -4,6 +4,7 @@ import { act } from 'react'
 import { createHarness, propsOf } from './mountedComponentHarness.ts'
 import type { InventoryCheckApproval, InventoryCheckApprovalDecision, InventoryCheckLineAnswer, InventoryCheckSession, InventoryCheckSessionItem } from '../src/api/inventoryChecksTransport.ts'
 import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
+import { workerState } from './inventoryApprovalStates.ts'
 import { APP_NAVIGATION_EVENT } from '../src/app/pathRouting.ts'
 import * as dirtyWork from '../src/utils/dirtyWork.ts'
 import { fmtDateTime24 } from '../src/utils/formatters.ts'
@@ -727,7 +728,7 @@ try {
   await approving.click(approving.button('Cancel', approving.find(node => node.tagName === 'DL', 'review').parentNode!.parentNode!))
   assert.equal(decisions.length, decidedBefore, 'Cancel sends nothing')
   decideScript = [answerOf(1, 1), answerOf(1, 0)]
-  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve all')
+  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
   assert.equal(decisions.length, decidedBefore + 2, 'the Free plan writes one line per request, so approving took two requests')
   assert.deepEqual(decisions.slice(decidedBefore).map(call => call.input.decision), ['approve', 'approve'])
   assert.equal(decisions[decidedBefore].input.requestId, decisions[decidedBefore + 1].input.requestId, 'every repeat of one approval carries the same request id')
@@ -744,7 +745,7 @@ try {
   assert.equal(approvalAction('reject'), undefined, 'a claimed approval has no Reject')
   const claimedBefore = decisions.length
   decideScript = [answerOf(2, 0)]
-  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve all')
+  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
   assert.equal(decisions[claimedBefore].input.requestId, 'inventory_check_approval_claimed01', 'the repeat carries the claimed id, not a new one')
   sessionApproval = { ...pendingApproval, applying: true }; await approving.click(approving.button('Leave session')); await openSession(approving)
   assert.ok(approvalAction('approve'), 'another approver may try: the server takes the approval over when its approver is gone'); assert.equal(approvalAction('reject'), undefined); assert.ok(approvalAction('close'), 'or close it')
@@ -752,20 +753,20 @@ try {
   // A takeover moves no stock by design: the flow goes on with the repeat, under one request id, and finishes.
   const takeBefore = decisions.length
   decideScript = [{ ...answerOf(0, 2, { applying: true, applying_request_id: 'inventory_check_approval_take0001' }), takeover: true }, answerOf(2, 0)]
-  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve all')
+  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
   assert.equal(decisions.length, takeBefore + 2, 'the takeover request and the repeat'); assert.equal(decisions[takeBefore].input.requestId, decisions[takeBefore + 1].input.requestId)
   assert.deepEqual(notices.at(-1), ['Counts approved. Stock updated.', 'success'])
   // While the other approver is still active the server refuses, and the person is told what to do.
   sessionApproval = { ...pendingApproval, applying: true }; await approving.click(approving.button('Leave session')); await openSession(approving)
   decideScript = [Object.assign(new Error('busy'), { status: 409, code: 'inventory_check_approval_in_progress', outcome: 'not_dispatched' })]
-  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve all')
+  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
   assert.ok(approving.text().includes('Another approver is applying this count. If they cannot continue, close the remaining lines.'), 'and what to do')
 
   // An answer that never came keeps the request id: the next Approve repeats it without a second review
   sessionApproval = pendingApproval; await approving.click(approving.button('Leave session')); await openSession(approving)
   const lostBefore = decisions.length
   decideScript = [Object.assign(new Error('answer lost'), { outcome: 'unknown' })]
-  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve all')
+  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
   assert.ok(approving.text().includes('Save not confirmed'), 'an unconfirmed decision says so')
   decideScript = [answerOf(2, 0)]
   await approving.click(approvalAction('approve'))
@@ -775,7 +776,7 @@ try {
   // A definite refusal is said in words and drops the request id
   sessionApproval = pendingApproval; await approving.click(approving.button('Leave session')); await openSession(approving)
   decideScript = [Object.assign(new Error('records'), { status: 409, code: 'inventory_check_stock_inconsistent', outcome: 'not_dispatched' })]
-  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve all')
+  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
   assert.ok(approving.text().includes('stock records do not add up'), 'a known refusal has its own sentence')
 
   // A count that cannot be finished: the lines that can be applied are, the refused one is named on its row, and Close ends the rest without moving stock under its own request id
@@ -783,12 +784,12 @@ try {
   sessionApproval = { ...pendingApproval, ...started, applied: 1, applied_lines: { 12: { before: 7, target: 10, after: 10, at: '2026-10-19T02:40:00Z' } } }; await approving.click(approving.button('Leave session')); await openSession(approving)
   const refusedBefore = decisions.length
   decideScript = [{ ...answerOf(1, 1, started), refused: [{ productId: 13, code: 'inventory_check_count_below_damaged' }] }]
-  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve all')
+  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
   assert.equal(decisions.length, refusedBefore + 1, 'nothing but refused lines is left, so the flow stops instead of asking again')
   assert.ok(approving.text().includes('Some lines cannot be applied'), 'said once'); assert.ok(approving.text().includes('close the remaining lines instead'), 'and the way out, because part of it was already applied')
   assert.ok(approving.findAll(node => node.getAttribute('data-approval-refused') === '13')[0]?.textContent.includes('Cannot apply: Count below damaged units'), 'the reason is on the line it belongs to')
   decideScript = [Object.assign(new Error('refused'), { status: 409, code: 'inventory_check_count_below_damaged', outcome: 'not_dispatched', refused: [{ productId: 13, code: 'inventory_check_count_below_damaged' }] })]
-  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve all')
+  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
   assert.ok(approving.text().includes('less than the product') && approving.text().includes('close the remaining lines instead'), 'the same refusal as an answer carries the hint too')
   assert.ok(approving.findAll(node => node.getAttribute('data-approval-refused') === '13').length === 1, 'and the line is named again')
   const closeBefore = decisions.length
@@ -833,7 +834,7 @@ try {
   decideScript = [{ ...answerOf(1, 1, { line_decisions: { 12: { decision: 'modify', counted: 9, at: '2026-10-19T02:50:00Z', by_name: 'boss' } } }), done: true }] // what was asked for is applied; the approval stays pending
   const reloadsBeforeAccept = sessionLoads
   await approving.click(lineButton(13, 'accept'))
-  assert.equal(decisions.length, acceptBefore + 1, 'accepting a line is one tap and one request, with no dialog'); assert.deepEqual(decisions.at(-1)!.input.productIds, [13]); assert.equal(decisions.at(-1)!.input.decision, 'approve')
+  await confirmInDialog(approving, 'Approve'); assert.equal(decisions.length, acceptBefore + 1, 'accepting a line is one request, after its review'); assert.deepEqual(decisions.at(-1)!.input.productIds, [13]); assert.equal(decisions.at(-1)!.input.decision, 'approve')
   assert.equal(sessionLoads, reloadsBeforeAccept, 'accepting a line while the count stays pending reads nothing again')
   lineScript = [Object.assign(new Error('applied'), { status: 409, code: 'inventory_check_line_applied', outcome: 'not_dispatched' })]
   const reloadsBeforeRefusal = sessionLoads
@@ -841,6 +842,38 @@ try {
   assert.ok(approving.findAll(node => node.getAttribute('data-approval-line-error') === '13')[0]?.textContent.includes('This line was already applied'), 'a refusal says why, on the line')
   assert.equal(sessionLoads, reloadsBeforeRefusal + 1, 'and the count is read once to show the line as it is')
   sessionApproval = pendingApproval; await approving.click(approving.button('Leave session')); await openSession(approving)
+
+  // C2 review (findings 2, 3 and 10) through the page, over the Worker's own states: the answer to accepting one line is what the Worker sent (the claim stays, planned_lines is empty, line 1 is
+  // applied), the other lines keep their buttons (mutant M8b: a page that calls them "Being applied"), the accepted line's stock is the figure it wrote on the panel and on the session's items
+  // without a second read, and accepting asks first.
+  {
+    const pendingState = workerState('pending'), acceptedState = workerState('accepted_one')
+    memberOverride = pendingState.items; sessionApproval = pendingState.approval
+    await approving.click(approving.button('Leave session')); await openSession(approving)
+    const lineNames = (id: number) => approving.findAll(node => node.getAttribute('data-approval-line-action') !== null && approving.find(candidate => candidate.getAttribute('data-approval-line') === String(id), 'line ' + id).contains(node)).map(node => node.getAttribute('data-approval-line-action'))
+    const lineText = (id: number) => (approving.find(node => node.getAttribute('data-approval-line') === String(id), 'line ' + id).textContent ?? '').replace(/\s+/g, ' ')
+    assert.match(lineText(1), /Now 9/, 'before: the stock of line 1 is 9')
+    const beforeAccept = decisions.length, loadsAtAccept = sessionLoads
+    decideScript = [{ approval: acceptedState.approval, ...acceptedState.answer! }]
+    await approving.click(lineButton(1, 'accept'))
+    assert.ok(approving.text().includes('Approve this line?'), 'accepting moves stock, so the shared review comes first')
+    assert.equal(decisions.length, beforeAccept, 'and nothing is sent before the answer')
+    await approving.click(approving.button('Cancel', approving.find(node => node.tagName === 'DL', 'review').parentNode!.parentNode!)); assert.equal(decisions.length, beforeAccept, 'Cancel sends nothing')
+    await approving.click(lineButton(1, 'accept')); await confirmInDialog(approving, 'Approve')
+    assert.equal(decisions.length, beforeAccept + 1); assert.deepEqual(decisions.at(-1)!.input.productIds, [1])
+    assert.equal(sessionLoads, loadsAtAccept, 'no read follows')
+    assert.deepEqual([2, 3].map(lineNames), [['accept', 'modify', 'reject'], ['accept', 'modify', 'reject']], 'the Worker keeps the claim, and lines 2 and 3 can still be decided')
+    assert.ok(!approving.text().includes('Being applied'), 'no line says it is being applied')
+    assert.match(lineText(1), /Applied/); assert.match(lineText(1), /Now 7/, 'the accepted line shows the stock it wrote (7), not the stock from before (9)')
+    assert.equal(approving.findAll(node => node.getAttribute('data-approval-line-action') === 'accept' && node.getAttribute('disabled') !== null).length, 0, 'and its buttons are live')
+    // line 2 can be rejected at once (the Worker's own test does exactly this under the claim)
+    lineScript = [{ approval: { ...acceptedState.approval, line_decisions: { 2: { decision: 'reject', at: '2026-11-18T00:00:00.000Z', by_name: 'stock-user' } } }, applied: 0, remaining: 1, done: false, line: { productId: 2, action: 'reject' } }]
+    await approving.click(lineButton(2, 'reject')); await confirmInDialog(approving, 'Reject')
+    assert.equal(lineCalls.at(-1)!.input.productId, 2); assert.ok(lineChip(2).textContent.includes('Rejected'), 'rejected under the claim')
+    assert.equal(sessionLoads, loadsAtAccept, 'still no read')
+    memberOverride = submittedItems; sessionApproval = pendingApproval
+    await approving.click(approving.button('Leave session')); await openSession(approving)
+  }
 
   // Reject
   sessionApproval = pendingApproval; await approving.click(approving.button('Leave session')); await openSession(approving)
@@ -862,7 +895,8 @@ try {
     const watcher = await mount()
     await openSession(watcher)
     assert.equal(watcher.find(node => node.getAttribute('data-inventory-check-approval') !== null, 'panel').getAttribute('data-inventory-check-approval'), 'pending', label)
-    assert.equal(watcher.findAll(node => node.getAttribute('data-approval-action') !== null).length, 0, label + ': no Approve or Reject')
+    // The Worker asks only for the right to approve to reject a whole count (and a line), so a viewer who holds it but not the stock-adjusting capability keeps Reject and loses Approve.
+    assert.deepEqual(watcher.findAll(node => node.getAttribute('data-approval-action') !== null).map(node => node.getAttribute('data-approval-action')), label === 'no capability' ? ['reject'] : [], label + ': no Approve' + (label === 'no capability' ? '; Reject stays' : ' or Reject'))
     await watcher.unmount()
   }
   // A viewer the server tells nothing about (no stock field) sees no panel at all

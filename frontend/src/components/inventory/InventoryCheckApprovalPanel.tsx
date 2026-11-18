@@ -54,7 +54,8 @@ export type InventoryCheckApprovalPanelProps = {
   t: Translator
 }
 
-const lineButton = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 lg:h-8 lg:w-8 dark:border-zinc-700 dark:bg-zinc-900 dark:text-gray-200 dark:hover:bg-zinc-800'
+// 44 px on a phone and 40 px on a desktop, as the buttons of the Inventory rows beside it.
+const lineButton = 'inline-flex h-11 min-h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 lg:h-10 lg:min-h-10 lg:w-10 dark:border-zinc-700 dark:bg-zinc-900 dark:text-gray-200 dark:hover:bg-zinc-800'
 
 function LineButton({ name, text, disabled, onClick, children }: { name: string; text: string; disabled?: boolean; onClick: () => void; children: ReactNode }) {
   return <button type="button" data-approval-line-action={name} className={lineButton} aria-label={text} title={text} disabled={disabled} onClick={onClick}>{children}</button>
@@ -75,7 +76,7 @@ export default function InventoryCheckApprovalPanel({ approval, items, canDecide
   const pending = approval.status === 'pending'
   const who = approval.decided_by_name ? `@${approval.decided_by_name}` : ''
   const when = approval.decided_at ? fmtDateTime24(approval.decided_at) : ''
-  const approveAll = label(t, 'inventory_check_approve_all', 'Approve all'), reject = label(t, 'inventory_check_reject', 'Reject'), close = label(t, 'inventory_check_close', 'Close')
+  const approve = label(t, 'inventory_check_approve', 'Approve'), approveAll = label(t, 'inventory_check_approve_all', 'Approve all'), reject = label(t, 'inventory_check_reject', 'Reject'), close = label(t, 'inventory_check_close', 'Close')
   const claimedByAnother = pending && approval.applying === true && !approval.applying_request_id
   const closable = pending && (approval.applying === true || approval.applied > 0)
   // A line a newer count of the same product replaced is never applied: it is not part of what is left to decide.
@@ -109,14 +110,13 @@ export default function InventoryCheckApprovalPanel({ approval, items, canDecide
       {who || when ? <span data-approval-decided className="text-gray-600 dark:text-gray-300">{[who, when].filter(Boolean).join(' · ')}</span> : null}
       <span className="min-w-0 flex-1" />
       {claimedByAnother ? <span data-approval-in-progress className="text-amber-700 dark:text-amber-300">{label(t, 'inventory_check_approval_in_progress', 'Being applied by another approver')}</span> : null}
-      {canDecide && pending ? <>
-        <button type="button" data-approval-action="approve" className="btn-primary inline-flex min-h-10 shrink-0 items-center gap-1 px-3 text-xs disabled:opacity-60" disabled={busy} onClick={onApprove}>
-          <Check className="h-4 w-4" aria-hidden="true" />{approveAll}
-        </button>
-        {approval.applying ? null : <button type="button" data-approval-action="reject" className={`${toolbarIconButtonClassName} disabled:opacity-50`} aria-label={reject} title={reject} disabled={busy} onClick={onReject}>
-          <X className="h-5 w-5" aria-hidden="true" />
-        </button>}
-      </> : null}
+      {canDecide && pending ? <button type="button" data-approval-action="approve" className="btn-primary inline-flex min-h-10 shrink-0 items-center gap-1 px-3 text-xs disabled:opacity-60" aria-label={approveAll} title={approveAll} disabled={busy} onClick={onApprove}>
+        <Check className="h-4 w-4" aria-hidden="true" />{approve}
+      </button> : null}
+      {/* Rejecting moves no stock and the Worker asks only for the right to approve, as for a line. */}
+      {(canClose || canDecide) && pending && !approval.applying ? <button type="button" data-approval-action="reject" className={`${toolbarIconButtonClassName} disabled:opacity-50`} aria-label={reject} title={reject} disabled={busy} onClick={onReject}>
+        <X className="h-5 w-5" aria-hidden="true" />
+      </button> : null}
       {closable && (canClose || canDecide) && onClose ? <button type="button" data-approval-action="close" className={`${toolbarIconButtonClassName} disabled:opacity-50`} aria-label={close} title={close} disabled={busy} onClick={onClose}>
         <Ban className="h-5 w-5" aria-hidden="true" />
       </button> : null}
@@ -134,7 +134,8 @@ export default function InventoryCheckApprovalPanel({ approval, items, canDecide
         const short = dated || rejected ? null : approvalShortfall(item, approval)
         const notApplied = approval.closed?.lines[id], cannot = pending ? refused?.[id] : undefined, replacedBy = replaced[id]
         const error = lineErrors?.[id]
-        const editing = editor?.id === id && state === 'open' ? editor : null
+        const decidable = state === 'open' || state === 'modified'
+        const editing = editor?.id === id && decidable ? editor : null
         const figures = editing ? figuresOf(item, editing.values) : null
         const problem = editing && figures ? modifyProblem(item, approval, figures) : null
         const shape = lineShapeOf(item)
@@ -144,6 +145,15 @@ export default function InventoryCheckApprovalPanel({ approval, items, canDecide
         const decidedChip = decision ? <span data-approval-decision={id} data-decision={decision.decision} className={`inline-flex min-w-0 max-w-full flex-wrap items-center gap-x-1 rounded-full px-2 text-[11px] font-semibold leading-relaxed ${rejected ? 'bg-red-50 text-red-800 dark:bg-red-950/40 dark:text-red-200' : 'bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-200'}`}>
           {withBy(rejected ? label(t, 'inventory_check_line_decided_reject', 'Rejected') : label(t, 'inventory_check_line_modified_to', 'Modified to {value}').replace('{value}', String(modifiedTotal ?? '')), decision.by_name, decision.at)}
         </span> : null
+        // The actions the Worker accepts on this line: accept (a modified line is applied from the approver's figure), modify again, reject, and reopen for a decided line. Not on a rejected line (reopen first), and
+        // none on a line the claim has planned or written, or one that is applied or replaced.
+        const rights = pending && !editing
+        const actions: ReactNode[] = rights ? [
+          decidable && canDecide && onAccept ? <LineButton key="accept" name="accept" text={label(t, 'inventory_check_line_accept', 'Accept line')} disabled={busy} onClick={() => onAccept(productId)}><Check className="h-4 w-4" aria-hidden="true" /></LineButton> : null,
+          decidable && canDecide && onModify ? <LineButton key="modify" name="modify" text={label(t, 'inventory_check_line_modify', 'Modify')} disabled={busy} onClick={() => startEdit(item)}><Pencil className="h-4 w-4" aria-hidden="true" /></LineButton> : null,
+          decidable && canClose && onRejectLine ? <LineButton key="reject" name="reject" text={label(t, 'inventory_check_line_reject', 'Reject line')} disabled={busy} onClick={() => onRejectLine(productId)}><X className="h-4 w-4" aria-hidden="true" /></LineButton> : null,
+          (state === 'rejected' || state === 'modified') && canClose && onReopen ? <LineButton key="reopen" name="reopen" text={label(t, 'inventory_check_line_reopen', 'Reopen line')} disabled={busy} onClick={() => onReopen(productId)}><Undo2 className="h-4 w-4" aria-hidden="true" /></LineButton> : null,
+        ].filter(Boolean) : []
         return <li key={id} data-approval-line={id} data-approval-line-state={state} className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5 py-1">
           <span className="min-w-0 flex-1 basis-40 break-words font-medium">{item.product_snapshot?.name ?? item.current_product_name ?? id}</span>
           <span className="tabular-nums">{label(t, 'inventory_check_approval_counted', 'Counted')} {item.counted_quantity}</span>
@@ -181,13 +191,7 @@ export default function InventoryCheckApprovalPanel({ approval, items, canDecide
             <LineButton name="cancel" text={label(t, 'cancel', 'Cancel')} disabled={busy} onClick={() => setEditor(null)}><X className="h-4 w-4" aria-hidden="true" /></LineButton>
           </div> : null}
           {error ? <span data-approval-line-error={id} role="alert" className="basis-full text-red-700 dark:text-red-300">{error}</span> : null}
-          {pending && !editing && ((state === 'open' && (canDecide || canClose)) || ((rejected || modified) && state !== 'applying' && state !== 'waiting' && canClose && approval.applying !== true))
-            ? <span data-approval-line-actions={id} className="ml-auto inline-flex shrink-0 items-center gap-1">
-              {state === 'open' && canDecide && onAccept ? <LineButton name="accept" text={label(t, 'inventory_check_line_accept', 'Accept line')} disabled={busy} onClick={() => onAccept(productId)}><Check className="h-4 w-4" aria-hidden="true" /></LineButton> : null}
-              {state === 'open' && canDecide && onModify ? <LineButton name="modify" text={label(t, 'inventory_check_line_modify', 'Modify')} disabled={busy} onClick={() => startEdit(item)}><Pencil className="h-4 w-4" aria-hidden="true" /></LineButton> : null}
-              {state === 'open' && canClose && onRejectLine ? <LineButton name="reject" text={label(t, 'inventory_check_line_reject', 'Reject line')} disabled={busy} onClick={() => onRejectLine(productId)}><X className="h-4 w-4" aria-hidden="true" /></LineButton> : null}
-              {state !== 'open' && onReopen ? <LineButton name="reopen" text={label(t, 'inventory_check_line_reopen', 'Reopen line')} disabled={busy} onClick={() => onReopen(productId)}><Undo2 className="h-4 w-4" aria-hidden="true" /></LineButton> : null}
-            </span> : null}
+          {actions.length ? <span data-approval-line-actions={id} className="ml-auto inline-flex shrink-0 items-center gap-2">{actions}</span> : null}
         </li>
       })}
     </ul> : null}

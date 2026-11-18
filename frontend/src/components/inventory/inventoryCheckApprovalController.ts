@@ -2,7 +2,8 @@ import type { InventoryCheckApproval, InventoryCheckApprovalDecision, InventoryC
 import { createClientRequestId } from '../../api/requestIds.ts'
 import type { ConfirmRequest } from '../shared/useConfirmDialog.tsx'
 import { approvalRequestBound, runApprovalFlow } from './inventoryCheckApprovalFlow.ts'
-import { approvalLines, approvalResult, decisionOf, lineShapeOf } from './inventoryCheckApprovalLines.ts'
+import { fmtDateOnly } from '../../utils/formatters.ts'
+import { approvalResult, effectiveLotCounted, figureRefusal, lineShapeOf, openLinesOf } from './inventoryCheckApprovalLines.ts'
 import { lineDecisionVerdict, lineRequestBody, type LineInput } from './inventoryCheckLineInput.ts'
 
 // The decisions on a submitted count, with no React in them: Approve all, accept some lines, reject / close the whole count, and one decision on one line. The page's hook
@@ -24,6 +25,8 @@ export type ApprovalDeps = {
   inFlight: Cell<boolean>
   setBusy: (busy: boolean) => void
   setApproval: (approval: InventoryCheckApproval) => void
+  /** Lines this decision applied, by product id, with the ordinary stock each now holds: the page puts it on the session's rows so they do not show the stock from before. */
+  setApplied?: (stock: Record<string, number>) => void
   setWriteError: (text: string) => void
   setRefused: (refused: Record<string, string>) => void
   setLineError: (productId: string, text: string | null) => void
@@ -46,7 +49,8 @@ export type ApprovalDeps = {
 const refusedMap = (list: unknown): Record<string, string> => Object.fromEntries((Array.isArray(list) ? list as Array<{ productId?: unknown; code?: unknown }> : []).filter(entry => entry && typeof entry.code === 'string').map(entry => [String(entry.productId), String(entry.code)]))
 const isUnknown = (cause: unknown) => (cause as { outcome?: string })?.outcome === 'unknown' || (cause as { code?: string })?.code === 'inventory_check_outcome_unknown'
 const nameOf = (item: InventoryCheckSessionItem | undefined, id: number | string) => item?.product_snapshot?.name ?? item?.current_product_name ?? String(id)
-const REVIEW_LINES = 6
+const REVIEW_LINES = 8
+const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
 
 export function createApprovalActions(deps: ApprovalDeps) {
   const { tr } = deps
@@ -62,12 +66,12 @@ export function createApprovalActions(deps: ApprovalDeps) {
     if (!deps.current() || !deps.sessionId || !approval || approval.status !== 'pending' || deps.inFlight.current) return
     const key = `${deps.sessionId}:${decision}:${productIds ? [...productIds].sort((a, b) => a - b).join(',') : ''}`
     if (!deps.approvalAttempt.current || deps.approvalAttempt.current.key !== key) {
-      // One line is accepted on a tap; a decision about the whole count shows what it will do first.
-      if (!productIds) {
-        const open = approvalLines(deps.items, approval).filter(item => { const id = String(item.product_id); return !approval.applied_lines?.[id] && !approval.superseded?.[id] && decisionOf(approval, id)?.decision !== 'reject' })
-        const confirmed = await deps.askToConfirm(decision === 'approve' ? approveAllReview(open) : wholeReview(decision))
-        if (!confirmed || !deps.current() || deps.inFlight.current) return
-      }
+      // Approving moves stock and a close or reject ends the count: every one shows what it will do first. A repeat of the same decision (a lost answer) is not asked again.
+      const open = openLinesOf(deps.items, approval)
+      const accepted = productIds ? deps.items.filter(item => productIds.includes(Number(item.product_id))) : []
+      const review = productIds ? acceptReview(accepted) : decision === 'approve' ? approveAllReview(open) : wholeReview(decision, open.length)
+      const confirmed = await deps.askToConfirm(review)
+      if (!confirmed || !deps.current() || deps.inFlight.current) return
       // An approval that already started under a request id (this approver's own earlier attempt) continues under it: that id is what the stock writers replay.
       deps.approvalAttempt.current = { key, requestId: decision === 'approve' && !productIds && approval.applying_request_id ? approval.applying_request_id : newId('inventory_check_approval') }
     }
@@ -77,7 +81,13 @@ export function createApprovalActions(deps: ApprovalDeps) {
     try {
       const flow = await runApprovalFlow({
         send: () => deps.send.approval({ decision, requestId: attempt.requestId, ...(productIds ? { productIds } : {}) }),
-        onProgress: result => { if (deps.current()) { deps.setApproval(result.approval); deps.setRefused(refusedMap(result.refused)) } },
+        onProgress: result => {
+          if (!deps.current()) return
+          // The stock of a line this request applied is now the figure it wrote: the screen shows it without a second read.
+          const before = deps.approval?.applied_lines ?? {}
+          deps.setApplied?.(Object.fromEntries(Object.entries(result.approval.applied_lines ?? {}).filter(([id, line]) => !before[id] && finite(line.after)).map(([id, line]) => [id, line.after])))
+          deps.setApproval(result.approval); deps.setRefused(refusedMap(result.refused))
+        },
         isCurrent: deps.current,
         maxRequests: approvalRequestBound(deps.capabilities),
       })
@@ -107,27 +117,49 @@ export function createApprovalActions(deps: ApprovalDeps) {
     } finally { deps.inFlight.current = false; if (deps.current()) deps.setBusy(false) }
   }
 
+  /** What approving leaves per product, as the dialog shows it: a line counted as one figure reads `Now X → Set to Y` (the approver's modified figure when there is one); a line counted by received date is
+   * shown date by date (what the counter saw → the figure applied), as the panel shows it, because each date is applied from what it held at approval, which this page does not read. */
+  function lineRows(item: InventoryCheckSessionItem, approval: InventoryCheckApproval): Array<{ label: string; value: string }> {
+    const name = nameOf(item, item.product_id)
+    if (item.lot_lines?.length) {
+      return item.lot_lines.map(line => ({
+        label: `${name} · ${line.scope === 'branch' ? tr('inventory_check_branch_total', 'Branch total') : tr('inventory_check_lot_received', 'Received {date}').replace('{date}', line.received_at ? fmtDateOnly(line.received_at) : '—')}`,
+        value: `${finite(line.seen) ? line.seen : '—'} → ${effectiveLotCounted(item, approval, line)}`,
+      }))
+    }
+    return [{ label: name, value: `${tr('inventory_check_approval_now', 'Now')} ${item.current_quantity ?? '—'} → ${tr('inventory_check_approval_set_to', 'Set to')} ${approvalResult(item, approval) ?? '—'}` }]
+  }
   function approveAllReview(open: InventoryCheckSessionItem[]): ConfirmRequest {
-    const shown = open.slice(0, REVIEW_LINES), approval = deps.approval as InventoryCheckApproval
-    const nowOf = (item: InventoryCheckSessionItem) => item.current_quantity
+    const approval = deps.approval as InventoryCheckApproval
+    const rows = open.flatMap(item => lineRows(item, approval)), shown = rows.slice(0, REVIEW_LINES)
     return {
       title: tr('inventory_check_approve_title', 'Approve these counts?'),
       message: tr('inventory_check_approve_all_confirm', 'Every open line is applied. A modified line uses your figure; rejected lines are left out.'),
       note: tr('inventory_check_approve_message', 'Stock changes by what each count found. Sales since the count are kept.'),
       items: [
         { label: tr('inventory_check_line_open_lines', 'Open lines'), value: `${open.length} → 0` },
-        ...shown.map(item => ({ label: nameOf(item, item.product_id), value: `${nowOf(item) ?? '—'} → ${approvalResult(item, approval) ?? '—'}` })),
-        ...(open.length > shown.length ? [{ label: '…', value: `+${open.length - shown.length}` }] : []),
+        ...shown,
+        ...(rows.length > shown.length ? [{ label: '…', value: `+${rows.length - shown.length}` }] : []),
       ],
-      confirmLabel: tr('inventory_check_approve_all', 'Approve all'),
+      confirmLabel: tr('inventory_check_approve', 'Approve'),
     }
   }
-  function wholeReview(decision: 'reject' | 'close'): ConfirmRequest {
+  /** Accepting one line moves stock, so it is reviewed like the whole count: the line's name, the stock now and what it will be set to. */
+  function acceptReview(lines: InventoryCheckSessionItem[]): ConfirmRequest {
     const approval = deps.approval as InventoryCheckApproval
-    const open = approval.lines - approval.applied - Object.keys(approval.superseded ?? {}).length
+    return {
+      title: tr('inventory_check_line_accept_title', 'Approve this line?'),
+      message: tr('inventory_check_line_accept_confirm', 'The line is applied. A modified line uses your figure.'),
+      note: tr('inventory_check_approve_message', 'Stock changes by what each count found. Sales since the count are kept.'),
+      items: lines.flatMap(item => lineRows(item, approval)),
+      confirmLabel: tr('inventory_check_approve', 'Approve'),
+    }
+  }
+  function wholeReview(decision: 'reject' | 'close', open: number): ConfirmRequest {
     return {
       title: decision === 'close' ? tr('inventory_check_close_title', 'Close the remaining lines?') : tr('inventory_check_reject_title', 'Reject these counts?'),
       message: decision === 'close' ? tr('inventory_check_close_message', 'Stock does not change. Lines already applied stay applied; the rest are recorded as not applied.') : tr('inventory_check_reject_message', 'Stock stays as it is.'),
+      // Lines the approver already rejected are decided; only the lines this decision ends are counted.
       items: [{ label: tr('inventory_check_differences', 'Differences'), value: open }],
       confirmLabel: decision === 'close' ? tr('inventory_check_close', 'Close') : tr('inventory_check_reject', 'Reject'),
       danger: true,
@@ -146,7 +178,7 @@ export function createApprovalActions(deps: ApprovalDeps) {
     // The same judgement the server gives, before anything is sent: a refused figure never leaves the page.
     const verdict = lineDecisionVerdict({ ...body, requestId }, item ? lineShapeOf(item) : { dated: false, batchIds: [] })
     if (!verdict.ok) {
-      const refusal = await deps.knownRefusal({ code: verdict.code })
+      const refusal = await deps.knownRefusal({ code: change.action === 'modify' ? figureRefusal(verdict.code) : verdict.code })
       if (deps.current()) deps.setLineError(id, refusal ? tr(refusal.key, refusal.fallback) : failedText)
       return false
     }

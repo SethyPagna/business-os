@@ -25,10 +25,12 @@ export const decisionOf = (approval: InventoryCheckApproval, productId: number |
   return entry && (entry.decision === 'reject' || entry.decision === 'modify') ? entry : undefined
 }
 
-/** The figure the count asks for: the approver's modified total when there is one, else what the counter typed. */
+/** The figure the count asks for: the approver's modified total when there is one (the sum of the modified dates for a line counted by received date), else what the counter typed. */
 export const effectiveCounted = (item: InventoryCheckSessionItem, approval: InventoryCheckApproval): number | null | undefined => {
   const decision = decisionOf(approval, item.product_id)
-  return decision?.decision === 'modify' && finite(decision.counted) ? decision.counted : item.counted_quantity
+  if (decision?.decision === 'modify' && finite(decision.counted)) return decision.counted
+  if (decision?.decision === 'modify' && decision.lots?.length && item.lot_lines?.length) return item.lot_lines.reduce((sum, line) => sum + effectiveLotCounted(item, approval, line), 0)
+  return item.counted_quantity
 }
 
 /** One received date of a dated line as the approval will apply it: the approver's figure when the line was modified and listed it, else the counter's. */
@@ -79,8 +81,10 @@ export function lineShapeOf(item: InventoryCheckSessionItem): LineShape {
 
 export type LineState = 'open' | 'rejected' | 'modified' | 'applied' | 'superseded' | 'applying' | 'waiting' | 'decided'
 /**
- * Where a line stands. Applied and replaced lines are final. While the approval is pending a decided line is rejected or modified (and can be reopened); a pending approval that is being applied is
- * 'applying' for the approver who holds the claim and 'waiting' for anyone else: no per-line action is offered for either. A line of an approval that ended is 'decided'.
+ * Where a line stands. Applied and replaced lines are final. While the approval is pending a decided line is rejected or modified (and can be reopened). A claim stays on a pending approval after part of
+ * it was applied; only the lines it has planned or part-written (planned_lines) are 'applying' for the approver who holds the claim and 'waiting' for anyone else, with no per-line action: every other line
+ * stays open to a decision, as the Worker accepts one. A Worker that sends no planned_lines cannot say which, so every undecided line of a claimed approval is shown as applying or waiting.
+ * A line of an approval that ended is 'decided'.
  */
 export function lineStateOf(item: InventoryCheckSessionItem, approval: InventoryCheckApproval): LineState {
   const id = String(item.product_id)
@@ -88,8 +92,27 @@ export function lineStateOf(item: InventoryCheckSessionItem, approval: Inventory
   if (approval.superseded?.[id]) return 'superseded'
   if (approval.status !== 'pending') return 'decided'
   const decision = decisionOf(approval, id)
-  if (approval.applying === true) return decision ? (decision.decision === 'reject' ? 'rejected' : 'modified') : approval.applying_request_id ? 'applying' : 'waiting'
+  const inClaim = approval.applying === true && (Array.isArray(approval.planned_lines) ? approval.planned_lines.includes(Number(id)) : !decision)
+  if (inClaim) return approval.applying_request_id ? 'applying' : 'waiting'
   return decision ? (decision.decision === 'reject' ? 'rejected' : 'modified') : 'open'
+}
+
+/** A figure the approver typed that is not a whole number: the person only has to retype it, so it reads as any other invalid figure (not as the refusal of a count that cannot be applied). */
+export const figureRefusal = (code: string): string => code === 'inventory_check_target_not_whole' ? 'inventory_check_invalid_quantity' : code
+
+/** The session's items after lines were applied: each carries the ordinary stock the approval wrote (damaged units are kept), so what the screen calls the stock of now is not the stock from before. */
+export function withAppliedStock(items: readonly InventoryCheckSessionItem[], stock: Readonly<Record<string, number>>): InventoryCheckSessionItem[] {
+  return items.map(item => {
+    const after = stock[String(item.product_id)]
+    if (!finite(after)) return item
+    const damaged = finite(item.current_stock?.recorded_damaged_quantity) ? item.current_stock.recorded_damaged_quantity : 0
+    return { ...item, current_quantity: after + damaged, ...(item.current_stock ? { current_stock: { ...item.current_stock, recorded_ordinary_quantity: after } } : {}) }
+  })
+}
+
+/** The lines of an approval that are still to be decided or applied: not applied, not replaced, not rejected. */
+export function openLinesOf(items: readonly InventoryCheckSessionItem[], approval: InventoryCheckApproval): InventoryCheckSessionItem[] {
+  return approvalLines(items, approval).filter(item => { const id = String(item.product_id); return !approval.applied_lines?.[id] && !approval.superseded?.[id] && decisionOf(approval, id)?.decision !== 'reject' })
 }
 
 export type ModifyFigures = { counted: number } | { lots: Array<{ batchId: number; counted: number }> }
@@ -99,7 +122,7 @@ export type ModifyFigures = { counted: number } | { lots: Array<{ batchId: numbe
  */
 export function modifyProblem(item: InventoryCheckSessionItem, approval: InventoryCheckApproval, figures: ModifyFigures): string | null {
   const verdict = lineDecisionVerdict({ requestId: 'preview-request', productId: Number(item.product_id), action: 'modify', ...figures }, lineShapeOf(item))
-  if (!verdict.ok) return verdict.code
+  if (!verdict.ok) return figureRefusal(verdict.code)
   if ('counted' in figures) {
     const seen = baselineOf(item, approval)
     return finite(seen) && Math.abs(figures.counted - seen) <= EPSILON ? 'inventory_check_modify_matches_seen' : null
