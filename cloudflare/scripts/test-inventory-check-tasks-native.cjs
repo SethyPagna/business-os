@@ -23,11 +23,19 @@ const USERS_X = {
   picker2: person(80, 'employee', { ...COUNTER }),                                        // another counter
   tasksOff: person(81, 'employee', { ...COUNTER, 'inventory_checks:tasks': false }),      // counts, but tasks are switched off for the role
   noCheck: person(82, 'employee', { ...COUNTER, 'inventory_checks:check': false }),       // views only
+  viewIssuer: person(84, 'employee', { inventory_checks: true, inventory_check_issue: true, 'inventory_checks:check': false, inventory_checks_check: false }), // the view and the extra, no count grant
+  orgTwo: person(83, 'employee', { ...COUNTER, inventory_check_issue: true }, 2),          // another organization (its rows are written straight into the tables)
 }
 const PRODUCTS = 12 // 100..111
+// The cost of each count writer measured by the scenario budget: D1 calls and table rows changed of the writer's own request, with no task open and with a task that very write completes (observe = the close of a count session, which makes its counts final).
+const PINNED_WRITER_COST = {
+  lot: { none: { calls: 9, rows: 4 }, completing: { calls: 9, rows: 8 } },
+  plain: { none: { calls: 12, rows: 6 }, completing: { calls: 12, rows: 10 } },
+  observe: { none: { calls: 6, rows: 2 }, completing: { calls: 6, rows: 6 } },
+}
 const ON = ['ic_wired', 'ic_simple', 'ic_fix_stock', 'ic_lot_counts']
 
-function build(sourceEdits = {}, { extraProducts = 0 } = {}) {
+function build(sourceEdits = {}, { extraProducts = 0, families = 0, familyBrand = 'Q' } = {}) {
   const app = createInvApp({
     users: USERS_X, sourceEdits,
     mount: { '/api/products': 'routes/products.ts', '/api/inventory-checks/products': 'routes/inventoryCheckProducts.ts', '/api/inventory-checks': 'routes/inventoryChecks.ts' },
@@ -43,10 +51,14 @@ function build(sourceEdits = {}, { extraProducts = 0 } = {}) {
         add(200, 'Family', 'F', 1); add(201, 'Family', 'F'); add(202, 'Family', 'F')
         raw.prepare('UPDATE products SET parent_id=200 WHERE id IN (201,202)').run()
         for (let n = 0; n < extraProducts; n++) add(300 + n, `Bulk ${300 + n}`, 'Z')
+        // `families` families of one header and two children each (brand Q; over 100 of them is more than one page of the list)
+        for (let n = 0; n < families; n++) { const base = 1000 + n * 3, brand = n < 120 ? 'Q' : 'R'; add(base, `Fam ${n}`, brand, 1); add(base + 1, `Fam ${n}`, brand); add(base + 2, `Fam ${n}`, brand); raw.prepare('UPDATE products SET parent_id=? WHERE id IN (?,?)').run([base, base + 1, base + 2]) }
       })
     },
   })
   for (const name of ON) app.setSwitch(name, 'on')
+  app.bumpProducts = () => app.load('lib/cache.ts').bumpVersion(app.env, 'products')
+  const productsVersionReady = app.bumpProducts()
   const as = (key) => app.setUser(app.users[key])
   const ids = { n: 0 }
   const rid = (tag) => `${tag}-${String(++ids.n).padStart(6, '0')}`
@@ -59,7 +71,7 @@ function build(sourceEdits = {}, { extraProducts = 0 } = {}) {
     as(who)
     return api('POST', '/submissions', { branchId, requestId: rid('sub'), ...(task ? { taskId: task } : {}), lines: lines.map((line) => (typeof line === 'number' ? { productId: line, countedQuantity: 10, seenQuantity: 10 } : line)) })
   }
-  const board = async (who = 'admin', branch = 1) => { as(who); return get(`/tasks?branchId=${branch}`) }
+  const board = async (who = 'admin', branch = 1) => { await productsVersionReady; as(who); return get(`/tasks?branchId=${branch}`) }
   const close = async (task, who = 'admin') => { as(who); return api('PATCH', `/sessions/${task}`, { expectedRevision: 0, requestId: rid('close'), action: 'close' }) }
   const row = (sql, ...params) => app.raw.prepare(sql).get(params)
   const rows = (sql, ...params) => app.raw.prepare(sql).all(params)
@@ -172,7 +184,7 @@ async function refusals(w) {
   await code(w.release(open, 'admin'), 409, 'inventory_check_task_not_picked_up')
   // A task and a pickup hold no counts of their own.
   w.as('admin'); await code(w.api('PATCH', `/sessions/${open}/items/103`, { expectedRevision: 0, expectedSessionRevision: 0, requestId: w.rid('o'), state: 'done', counted_quantity: 10 }), 409, 'inventory_check_task_not_countable')
-  await code(w.api('PATCH', `/sessions/${open}`, { expectedRevision: 0, requestId: w.rid('r'), action: 'close' }), 200, undefined).catch(() => {})
+  await code(w.api('PATCH', `/sessions/${open}`, { expectedRevision: 0, requestId: w.rid('r'), action: 'close' }), 200)
   const closedTask = (await w.issue([104])).json.item.id
   await w.close(closedTask)
   await code(w.api('PATCH', `/sessions/${closedTask}`, { expectedRevision: 1, requestId: w.rid('r'), action: 'resume' }), 409, 'inventory_check_session_final')
@@ -265,14 +277,16 @@ async function doneRule(w) {
   assert.equal(await done(task), 2, 'Differs counts as done')
   assert.equal((await w.count([103], { who: 'admin', branchId: 2 })).status, 201, 'a count at another branch')
   assert.equal(await done(task), 2, 'another branch does not tick it')
-  // an ordinary open session observation is a count too
+  // a count in an open session is not final: it ticks nothing until the session closes
   w.as('checker')
   const session = await w.api('POST', '/sessions', { branchId: 1, requestId: w.rid('s'), productIds: [103], scope: { membership: 'visible_page' } })
   assert.equal(session.status, 201, JSON.stringify(session.json))
   const observed = await w.api('PATCH', `/sessions/${session.json.item.id}/items/103`, { expectedRevision: 0, expectedSessionRevision: 0, requestId: w.rid('o'), state: 'done', counted_quantity: 10 })
   assert.equal(observed.status, 200, JSON.stringify(observed.json))
-  assert.equal(await done(task), 3, 'a count made in an open session ticks it too')
-  assert.equal((await taskOf(w, task)).status, 'open', 'a count outside the task never closes it: it closes in a submission that names it')
+  assert.equal(await done(task), 2, 'a count in an open session ticks nothing yet')
+  assert.equal((await w.api('PATCH', `/sessions/${session.json.item.id}`, { expectedRevision: 0, requestId: w.rid('c'), action: 'close' })).status, 200)
+  assert.equal(await done(task), 3, 'once the session closes its count is final and ticks the task')
+  assert.equal((await taskOf(w, task)).status, 'open', 'three of four products: the task stays open')
 }
 
 /** The auto-close, in both submission writers; replay; later counts. */
@@ -340,6 +354,7 @@ async function sessionsList(w) {
 
 /** The cache: a warm Tasks open reads nothing; a writer moves it; the numbers change with the count. */
 async function boardCache(w) {
+  await w.app.bumpProducts()
   const task = (await w.issue([100, 101])).json.item.id
   const cold = w.app.mark(); const first = await w.board(); const coldReads = w.app.since(cold).length
   assert.ok(coldReads >= 1 && first.status === 200)
@@ -398,7 +413,302 @@ async function budget(w) {
   assert.equal(finishing.calls, base.calls, 'the submission that completes a task costs no more calls'); assert.equal(finishing.rows, base.rows + 4, 'and four more rows: the task and its pickup closed, each with a close event')
   const second = (await w.issue(ids.slice(40, 50))).json.item.id; await w.pickup(second, 'checker')
   const closing = await cost(() => w.close(second)); assert.equal(closing.answer.status, 200); assert.ok(closing.calls <= 7, `close ${closing.calls} calls`); assert.equal(closing.rows, 4, 'close: the task and its pickup, each with a close event')
+  // Every count writer, with no task open and then with a task THIS write completes (counted outside the task): the calls are the same, the rows are +4 (the task and its pickup closed, each with a close event).
+  const writerCost = {}
+  let product = 330
+  for (const writer of ['lot', 'plain', 'observe']) {
+    const none = (await countBy(w, writer, product++, { around: cost })).measured
+    const first = product++, last = product++
+    const t = (await w.issue([first, last])).json.item.id; await w.pickup(t, 'checker')
+    await sleep(3); await countBy(w, writer, first)
+    const completing = await countBy(w, writer, last, { around: cost })
+    assert.deepEqual(completing.answer.closedTasks, [t], `${writer}: the write closed the task`)
+    writerCost[writer] = { none: { calls: none.calls, rows: none.rows }, completing: { calls: completing.measured.calls, rows: completing.measured.rows } }
+  }
+  // The PINNED numbers (the writer's own request, the actor and receipt reads included). With no task open and with a task this very write completes the CALLS are the same (the auto-close rides the writer's batch); the completing write
+  // adds exactly four rows: the task and its pickup closed, each with a close event.
+  console.log('     writer cost:', JSON.stringify(writerCost))
+  assert.deepEqual(writerCost, PINNED_WRITER_COST, 'the cost of every count writer, with no task and with a task it completes')
+  for (const writer of Object.keys(writerCost)) { assert.equal(writerCost[writer].completing.calls, writerCost[writer].none.calls, `${writer}: completing a task adds no D1 call`); assert.equal(writerCost[writer].completing.rows, writerCost[writer].none.rows + 4, `${writer}: and four rows`) }
   w.app.clearCaches(); w.as('checker'); const mine = await cost(() => w.get('/sessions?mine=1')); assert.ok(mine.calls <= 6, `Count sessions with a pickup: ${mine.calls} calls (the sessions list, the board and the actor reads)`)
+}
+
+// ---- round 2: the task closes itself on EVERY count writer; the cap; task rows are written only by the task writers ---------------------------------------------------------------------------
+/** A task row of another organization (or by a user who may no longer issue), written straight into the tables: the shape the writers must leave alone. */
+function rawTask(w, { id, org = null, branch = 1, creator = 83, products, status = 'open' }) {
+  const at = new Date().toISOString()
+  w.app.raw.prepare("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at) VALUES(?,?,?,?,'',?,0,?,?,?)")
+    .run([id, org, branch, creator, status, JSON.stringify({ membership: 'task', products: products.length, selection: { kind: 'ids' } }), at, at])
+  for (const p of products) w.app.raw.prepare("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json) VALUES(?,?,?,'{}',NULL,'{}')").run([id, p, branch])
+}
+/** One count of one product by the named writer: 'lot' (the wired submission), 'plain' (the older submission), 'observe' (an observation in an ordinary open session). `at` is the time the write recorded. */
+async function countBy(w, writer, productId, { branchId = 1, who = 'checker', state = 'done', around = null } = {}) {
+  if (writer === 'observe') {
+    w.as(who)
+    const made = await w.api('POST', '/sessions', { branchId, requestId: w.rid('s'), productIds: [productId], scope: { membership: 'visible_page' } })
+    assert.equal(made.status, 201, JSON.stringify(made.json))
+    const body = state === 'issue' ? { state: 'issue', reason: 'short', counted_quantity: 9 } : { state: 'done', counted_quantity: 10 }
+    const requestId = w.rid('o')
+    w.as(who)
+    const seen = await w.api('PATCH', `/sessions/${made.json.item.id}/items/${productId}`, { expectedRevision: 0, expectedSessionRevision: 0, requestId, ...body })
+    assert.equal(seen.status, 200, JSON.stringify(seen.json))
+    const closeId = w.rid('c')
+    // the close makes the count final: it is the count writer here
+    const send = () => { w.as(who); return w.api('PATCH', `/sessions/${made.json.item.id}`, { expectedRevision: 0, requestId: closeId, action: 'close' }) }
+    const measured = around ? await around(send) : null, r = measured ? measured.answer : await send()
+    assert.equal(r.status, 200, JSON.stringify(r.json))
+    return { answer: r.json, at: r.json.item.closed_at, replay: send, measured }
+  }
+  {
+    const requestId = w.rid('sub'), line = { productId, countedQuantity: state === 'issue' ? 9 : 10, seenQuantity: 10 }
+    // the older writer answers while ic_wired is OFF, a replay included (the action is part of the request's identity)
+    const send = async () => { w.as(who); if (writer === 'plain') w.app.setSwitch('ic_wired', undefined); try { return await w.api('POST', '/submissions', { branchId, requestId, lines: [line] }) } finally { if (writer === 'plain') w.app.setSwitch('ic_wired', 'on') } }
+    const measured = around ? await around(send) : null, r = measured ? measured.answer : await send()
+    assert.equal(r.status, 201, JSON.stringify(r.json))
+    return { answer: r.json, at: r.json.item.started_at, replay: send, measured }
+  }
+}
+const status = (w, id) => w.row('SELECT status FROM inventory_check_sessions WHERE id=?', id).status
+const closeEvents = (w, id) => w.rows("SELECT request_id,after_json FROM inventory_check_events WHERE session_id=? AND action='close' ORDER BY id", id)
+
+/** A count made OUTSIDE the task by this writer completes it: the task closes with its event and its pickup closes too; the answer names it; a replay closes nothing again. */
+async function outsideClose(w, writer) {
+  const task = (await w.issue([100, 101])).json.item.id
+  const pickup = (await w.pickup(task)).json.item.id
+  await sleep(4)
+  const first = await countBy(w, writer, 100)
+  assert.equal('closedTasks' in first.answer, false, 'the first product leaves the task open and the answer names nothing')
+  assert.equal(status(w, task), 'open'); assert.equal(status(w, pickup), 'open')
+  const last = await countBy(w, writer, 101, { state: writer === 'observe' ? 'issue' : 'done' })
+  assert.deepEqual(last.answer.closedTasks, [task], 'the answer names the task the write closed')
+  const closed = w.row('SELECT * FROM inventory_check_sessions WHERE id=?', task)
+  assert.equal(closed.status, 'closed'); assert.equal(closed.closed_at, last.at, 'closed in the write that counted the last product'); assert.equal(closed.updated_at, last.at); assert.equal(closed.revision, 1)
+  const picked = w.row('SELECT * FROM inventory_check_sessions WHERE id=?', pickup)
+  assert.equal(picked.status, 'closed', 'the pickup closes with it'); assert.equal(picked.closed_at, last.at); assert.equal(picked.revision, 1)
+  assert.equal(closeEvents(w, task).length, 1, 'one close event on the task'); assert.equal(JSON.parse(closeEvents(w, task)[0].after_json).auto, 1)
+  assert.equal(closeEvents(w, pickup).length, 1, 'one close event on the pickup'); assert.equal(JSON.parse(closeEvents(w, pickup)[0].after_json).task, task)
+  const view = await taskOf(w, task); assert.equal(view.status, 'closed'); assert.equal(view.done, 2); assert.equal(view.total, 2)
+  const again = await last.replay(); assert.equal(again.status, 200); assert.equal('closedTasks' in again.json, false, 'a replay closes nothing and names nothing')
+  assert.equal(closeEvents(w, task).length + closeEvents(w, pickup).length, 2, 'no second close event on the task or its pickup')
+}
+/** A count that leaves a product undone closes nothing; another branch's task and another organization's task are never touched, however complete the count makes them look. */
+async function outsideNegatives(w, writer) {
+  const a = (await w.issue([100, 101, 102])).json.item.id
+  const apickup = (await w.pickup(a)).json.item.id
+  w.as('admin'); const other = (await w.api('POST', '/tasks', { branchId: 2, requestId: w.rid('i'), productIds: [100, 101, 102] })).json.item.id
+  rawTask(w, { id: 'org2-task', org: 2, products: [100, 101, 102] })
+  await sleep(4)
+  await countBy(w, writer, 100); await countBy(w, writer, 101)
+  assert.equal(status(w, a), 'open', 'the highest product is still undone: the task stays open'); assert.equal(status(w, apickup), 'open')
+  const done = await countBy(w, writer, 102)
+  assert.deepEqual(done.answer.closedTasks, [a], 'only the task of this organization and branch closes')
+  assert.equal(status(w, a), 'closed'); assert.equal(status(w, apickup), 'closed')
+  assert.equal(status(w, other), 'open', "another branch's task is untouched"); assert.equal(closeEvents(w, other).length, 0)
+  assert.equal(status(w, 'org2-task'), 'open', "another organization's task is untouched"); assert.equal(closeEvents(w, 'org2-task').length, 0)
+  assert.equal((await w.board('admin', 2)).json.items.find((t) => t.id === other).done, 0, 'a count at another branch does not tick it')
+  // one write completes two tasks of the branch, and the answer names both
+  const b = (await w.issue([103])).json.item.id, c = (await w.issue([103, 104])).json.item.id
+  await sleep(4)
+  const bothPart = await countBy(w, writer, 104); assert.equal('closedTasks' in bothPart.answer, false)
+  const both = await countBy(w, writer, 103); assert.deepEqual([...both.answer.closedTasks].sort(), [b, c].sort(), 'both tasks close in one write')
+  assert.equal(closeEvents(w, b).length, 1); assert.equal(closeEvents(w, c).length, 1)
+}
+/**
+ * A count in an OPEN session is not final (it can be set back until the session closes: owner, "counts reach the server on Submit"), so it ticks no task and closes none. Closing the session makes its counts final: then it ticks,
+ * and the close is a count writer that closes the tasks it completes. A count withdrawn before the close never ticks anything.
+ */
+async function observationNotFinal(w) {
+  const task = (await w.issue([100, 101])).json.item.id
+  await sleep(4)
+  w.as('checker')
+  const made = await w.api('POST', '/sessions', { branchId: 1, requestId: w.rid('s'), productIds: [100, 101], scope: { membership: 'visible_page' } })
+  const sid = made.json.item.id
+  const observe = (product, expected, body) => w.api('PATCH', `/sessions/${sid}/items/${product}`, { expectedRevision: expected, expectedSessionRevision: 0, requestId: w.rid('o'), ...body })
+  const done = { state: 'done', counted_quantity: 10 }
+  for (const product of [100, 101]) { const r = await observe(product, 0, done); assert.equal(r.status, 200); assert.equal('closedTasks' in r.json, false, 'an observation closes no task') }
+  assert.equal((await taskOf(w, task)).done, 0, 'counts in an open session tick nothing'); assert.equal(status(w, task), 'open', 'and the task stays open though every product is counted there')
+  const withdrawn = await observe(101, 1, { state: 'unstarted' }); assert.equal(withdrawn.status, 200)
+  assert.equal(status(w, task), 'open'); assert.equal((await taskOf(w, task)).done, 0)
+  const again = await observe(101, 2, done); assert.equal(again.status, 200)
+  const closed = await w.api('PATCH', `/sessions/${sid}`, { expectedRevision: 0, requestId: w.rid('c'), action: 'close' })
+  assert.equal(closed.status, 200, JSON.stringify(closed.json)); assert.deepEqual(closed.json.closedTasks, [task], 'closing the session makes its counts final and closes the task they complete')
+  assert.equal(status(w, task), 'closed')
+  // a session with an unstarted item makes final only what was counted
+  const task2 = (await w.issue([102, 103])).json.item.id
+  await sleep(4)
+  w.as('checker')
+  const s2 = (await w.api('POST', '/sessions', { branchId: 1, requestId: w.rid('s'), productIds: [102, 103], scope: { membership: 'visible_page' } })).json.item.id
+  await w.api('PATCH', `/sessions/${s2}/items/102`, { expectedRevision: 0, expectedSessionRevision: 0, requestId: w.rid('o'), ...done })
+  const partial = await w.api('PATCH', `/sessions/${s2}`, { expectedRevision: 0, requestId: w.rid('c'), action: 'close' })
+  assert.equal(partial.status, 200); assert.equal('closedTasks' in partial.json, false); assert.equal((await taskOf(w, task2)).done, 1, 'the counted product ticks once its session is closed'); assert.equal(status(w, task2), 'open')
+  // resuming a closed count session takes its counts out of the done count again (the task is still open, so it follows)
+  const resumed = await w.api('PATCH', `/sessions/${s2}`, { expectedRevision: 1, requestId: w.rid('r'), action: 'resume' })
+  assert.equal(resumed.status, 200); assert.equal((await taskOf(w, task2)).done, 0, 'a resumed session counts nothing until it closes again')
+}
+
+/** A task changes nothing the older (ic_simple) list shows: its rows, its summary and its check-state views are the same before and after issuing. */
+async function olderListUnaffected(w) {
+  w.as('checker')
+  assert.equal((await w.count([103])).status, 201); assert.equal((await w.count([{ productId: 104, countedQuantity: 9, seenQuantity: 10 }])).status, 201)
+  const open = await w.api('POST', '/sessions', { branchId: 1, requestId: w.rid('s'), productIds: [105], scope: { membership: 'visible_page' } }); assert.equal(open.status, 201)
+  w.app.setSwitch('ic_wired', undefined)
+  const urls = ['/api/inventory-checks/products?branchId=1', '/api/inventory-checks/products?branchId=1&checkState=in_check', '/api/inventory-checks/products?branchId=1&checkState=issue', '/api/inventory-checks/products?branchId=1&checkState=ok',
+    '/api/inventory-checks/products?branchId=1&checkState=not_checked', '/api/inventory-checks/products?checkState=issue', '/api/inventory-checks/products?checkState=in_check']
+  const snapshot = async () => { w.app.clearCaches(); w.as('admin'); const out = []; for (const url of urls) { const r = await w.app.get(url); assert.equal(r.status, 200, `${url}: ${JSON.stringify(r.json)}`); out.push(r.json) } return JSON.stringify(out, (key, value) => (key === 'version' ? undefined : value)) }
+  const before = await snapshot()
+  assert.ok(JSON.parse(before)[0].summary, 'the list carries a summary'); assert.ok(JSON.parse(before)[0].items.some((i) => i.check_status === 'in_check'), 'a product of an open session is in check')
+  w.app.setSwitch('ic_wired', 'on'); w.as('admin')
+  const made = await w.issue([100, 101, 103, 104, 105]); assert.equal(made.status, 201)
+  w.app.setSwitch('ic_wired', undefined)
+  assert.equal(await snapshot(), before, 'issuing a task changes no row, chip or view of the older list')
+  w.as('admin'); const inCheck = await w.app.get('/api/inventory-checks/products?branchId=1&checkState=in_check'); assert.deepEqual(inCheck.json.items.map((i) => i.id), [105], 'only the open session puts a product in check')
+}
+
+/** The done rule is per organization: another organization's counts never tick this one's task, and this one's never tick theirs. */
+async function doneRuleOrg(w) {
+  const mine = (await w.issue([100, 101])).json.item.id
+  rawTask(w, { id: 'org2-task', org: 2, products: [100, 101] })
+  await sleep(4)
+  const at = new Date().toISOString()
+  // another organization's FINAL counts of the same products at the same branch, written straight into the tables
+  w.app.raw.prepare("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) VALUES('org2-count',2,1,83,'','closed',0,?,?,?,?)").run([JSON.stringify({ membership: 'submission' }), at, at, at])
+  for (const p of [100, 101]) w.app.raw.prepare("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,revision,updated_by,updated_at) VALUES('org2-count',?,1,'{}',10,'{}','done',10,1,83,?)").run([p, at])
+  assert.equal((await taskOf(w, mine)).done, 0, "another organization's counts do not tick this organization's task")
+  // and a count of this organization, final, completes only this organization's task
+  const last = await countBy(w, 'lot', 100); await countBy(w, 'lot', 101)
+  assert.equal(status(w, mine), 'closed'); assert.equal(status(w, 'org2-task'), 'open', "this organization's counts do not close another's task"); assert.equal(closeEvents(w, 'org2-task').length, 0)
+  assert.ok(last)
+}
+
+/** A product that can no longer be counted (deactivated with no stock, merged away, a header) leaves the task: not in `total` or `done`, counted in `removed`, and it no longer blocks the auto-close. */
+async function removedProducts(w) {
+  const stockWrite = (fn) => w.app.seedStockFixture(w.app.raw.db, fn)
+  const retire = (id) => stockWrite(() => { w.app.raw.prepare('UPDATE branch_stock SET quantity=0 WHERE product_id=?').run([id]); w.app.raw.prepare('UPDATE products SET stock_quantity=0 WHERE id=?').run([id]); w.app.raw.prepare('UPDATE products SET is_active=0 WHERE id=?').run([id]) })
+  const task = (await w.issue([100, 101, 102, 103])).json.item.id
+  const view = async () => { w.app.clearCaches(); return taskOf(w, task) }
+  let v = await view(); assert.deepEqual([v.total, v.done, v.removed], [4, 0, 0])
+  w.app.raw.exec('PRAGMA foreign_keys=OFF')
+  retire(101) // deactivated
+  retire(102) // merged away: the merge moved its stock to the surviving product and retired the row
+  v = await view(); assert.deepEqual([v.total, v.done, v.removed], [2, 0, 2], 'the retired products leave total and done and are counted in removed')
+  await sleep(4)
+  await countBy(w, 'lot', 100)
+  v = await view(); assert.deepEqual([v.total, v.done, v.removed], [2, 1, 2]); assert.equal(status(w, task), 'open')
+  const last = await countBy(w, 'plain', 103)
+  assert.deepEqual(last.answer.closedTasks, [task], 'the products that can no longer be counted do not block the close'); assert.equal(status(w, task), 'closed')
+  // a product that became a family header (a child was added under it) is uncountable too
+  const t2 = (await w.issue([104, 105])).json.item.id
+  w.app.raw.prepare('UPDATE products SET is_group=1 WHERE id=105').run(); w.app.raw.prepare("UPDATE products SET parent_id=105,name='Item 105',name_key=(SELECT name_key FROM products WHERE id=105) WHERE id=106").run()
+  w.app.clearCaches(); const v2 = await taskOf(w, t2); assert.equal(v2.removed, 1); assert.equal(v2.total, 1)
+  w.app.raw.exec('PRAGMA foreign_keys=ON')
+}
+
+/** Issue by filter over families: a page holds 100 FAMILIES with all their countable children, so the reader's total (families) is not the number of rows. 120 families of 2 children: 240 products. */
+async function issueFilterFamilies(w) {
+  w.as('admin')
+  const made = await w.api('POST', '/tasks', { branchId: 1, requestId: w.rid('f'), filters: { brand: 'Q' } })
+  assert.equal(made.status, 201, JSON.stringify(made.json)); assert.equal(made.json.item.progress.total, 240, 'every countable child of every family, not the first page of them')
+  assert.equal(w.row("SELECT COUNT(*) AS n FROM inventory_check_items WHERE session_id=?", made.json.item.id).n, 240)
+  const over = await w.api('POST', '/tasks', { branchId: 1, requestId: w.rid('f'), filters: { brand: 'R' } })
+  assert.equal(over.status, 400, JSON.stringify(over.json)); assert.equal(over.json.code, 'inventory_check_task_too_many'); assert.equal(over.json.total, 320, 'the total is the number of countable rows (160 families of 2), not the family count'); assert.equal(over.json.limit, 300)
+}
+
+/** Capabilities equal enforcement: the extra without the count grant offers nothing the Worker would refuse; the board's selection follows the viewer's field grants. */
+async function issueCapabilities(w) {
+  const task = (await w.issue([100, 101], {}, 'admin')).json.item.id
+  const pick = (await w.pickup(task, 'checker')).json.item.id
+  for (const who of ['viewIssuer']) {
+    w.as(who)
+    const board = await w.get('/tasks?branchId=1'); assert.equal(board.status, 403, JSON.stringify(board.json)); assert.equal(board.json.code, 'inventory_check_tasks_required', 'view plus the extra, no count grant: no board offered')
+    const issued = await w.api('POST', '/tasks', { branchId: 1, requestId: w.rid('i'), productIds: [100] }); assert.equal(issued.status, 403); assert.equal(issued.json.code, 'inventory_check_issue_required')
+    const released = await w.api('POST', `/tasks/${task}/release`, { requestId: w.rid('r') }); assert.equal(released.status, 403); assert.equal(released.json.code, 'inventory_check_release_forbidden', "someone else's pickup needs the extra AND the count grant")
+    const closed = await w.api('PATCH', `/sessions/${task}`, { expectedRevision: 0, requestId: w.rid('c'), action: 'close' }); assert.equal(closed.status, 403); assert.equal(closed.json.code, 'inventory_check_permission_required')
+  }
+  w.as('issuer'); const view = (await w.get('/tasks?branchId=1')).json
+  assert.equal(view.capabilities.issue, true); const row = view.items.find((t) => t.id === task); assert.equal(row.can_close, true); assert.equal(row.can_release, true)
+  assert.equal((await w.api('POST', `/tasks/${task}/release`, { requestId: w.rid('r') })).status, 200, 'what is offered is accepted')
+  assert.ok(pick)
+  // the picker releases their own pickup with what a pickup needed
+  assert.equal((await w.pickup(task, 'checker')).status, 201); w.as('checker')
+  assert.equal((await w.api('POST', `/tasks/${task}/release`, { requestId: w.rid('r') })).status, 200)
+  // L1: the selection of a filter task, as each viewer may see it
+  w.as('admin')
+  const byFilter = await w.api('POST', '/tasks', { branchId: 1, requestId: w.rid('f'), filters: { brand: 'A', stockState: 'in_stock' } }); assert.equal(byFilter.status, 201, JSON.stringify(byFilter.json))
+  const selectionFor = async (who) => { w.as(who); return (await w.get('/tasks?branchId=1')).json.items.find((t) => t.id === byFilter.json.item.id).selection }
+  assert.deepEqual((await selectionFor('checker')).filters, { brand: 'A', stockState: 'in_stock' }, 'a viewer with the fields sees both filters')
+  assert.deepEqual((await selectionFor('blind')).filters, { brand: 'A' }, 'a viewer without the stock field does not see the stock filter')
+  assert.deepEqual((await selectionFor('receivedOnly')).filters, {}, 'a viewer without the brand and stock fields sees neither')
+}
+
+/** The cap: a branch has at most maxOpenTasks open tasks; the board shows all of them. */
+async function taskCap(w) {
+  const cap = (await w.board()).json.capabilities.maxOpenTasks
+  assert.equal(cap, 30)
+  const first = []
+  for (let n = 0; n < cap; n++) { const r = await w.issue([100 + (n % PRODUCTS)]); assert.equal(r.status, 201, `task ${n}: ${JSON.stringify(r.json)}`); first.push(r.json.item.id) }
+  const refused = await w.issue([100])
+  assert.equal(refused.status, 409, JSON.stringify(refused.json)); assert.equal(refused.json.code, 'inventory_check_task_limit'); assert.equal(refused.json.open, cap); assert.equal(refused.json.limit, cap)
+  assert.equal(w.row("SELECT COUNT(*) AS n FROM inventory_check_sessions WHERE json_extract(scope_json,'$.membership')='task'").n, cap, 'a refused issue writes nothing')
+  assert.equal((await w.board()).json.items.filter((t) => t.status === 'open').length, cap, 'the board shows every open task: it never hides one')
+  const free = await w.app.send('POST', '/api/inventory-checks/tasks', { branchId: 1, requestId: w.rid('free'), productIds: [100] }, { ...w.app.env, PLAN_TIER: 'free' })
+  assert.equal(free.status, 409); assert.equal(free.json.code, 'inventory_check_task_limit', 'the same cap on the Free plan')
+  assert.equal((await w.api('POST', '/tasks', { branchId: 2, requestId: w.rid('b2'), productIds: [100] })).status, 201, 'another branch has its own cap')
+  rawTask(w, { id: 'org2-a', org: 2, products: [100] }); rawTask(w, { id: 'org2-b', org: 2, products: [100] })
+  assert.equal((await w.close(first[0])).status, 200)
+  assert.equal((await w.issue([105])).status, 201, "closing one frees a place, and another organization's open tasks are not counted")
+  assert.equal((await w.issue([106])).status, 409, 'and the place is taken again')
+  // the cap is read inside the batch: a task that appears between the issue and its write still counts
+  assert.equal((await w.close(first[1])).status, 200)
+  const original = w.app.env.DB.batchOnce
+  w.app.env.DB.batchOnce = (list) => { if (list.some((s) => /INSERT INTO inventory_check_sessions/.test(s.sql))) rawTask(w, { id: 'rival-task', creator: 71, products: [100] }); return original(list) }
+  const raced = await w.issue([107]); w.app.env.DB.batchOnce = original
+  assert.equal(raced.status, 409, JSON.stringify(raced.json)); assert.equal(raced.json.code, 'inventory_check_task_limit', 'two issues at once cannot both take the last place')
+  assert.equal(w.row("SELECT COUNT(*) AS n FROM inventory_check_sessions WHERE organization_id IS NULL AND branch_id=1 AND status='open' AND json_extract(scope_json,'$.membership')='task'").n, cap)
+}
+
+/** Task rows are written only by the task writers: every other writer, aimed at a task or a pickup, is refused and leaves the rows as they were; a task's own item is never a count. */
+async function taskRowsUntouched(w) {
+  const task = (await w.issue([100, 101])).json.item.id
+  const pickup = (await w.pickup(task, 'checker')).json.item.id
+  rawTask(w, { id: 'orphan-task', creator: 72, products: [102, 103] }) // made by a counter who holds no issue permission now
+  const ids = [task, pickup, 'orphan-task'], marks = ids.map(() => '?').join(',')
+  const snap = () => JSON.stringify([w.rows(`SELECT * FROM inventory_check_sessions WHERE id IN (${marks}) ORDER BY id`, ...ids), w.rows(`SELECT * FROM inventory_check_items WHERE session_id IN (${marks}) ORDER BY session_id,product_id`, ...ids),
+    w.row(`SELECT COUNT(*) AS n FROM inventory_check_events WHERE session_id IN (${marks})`, ...ids), w.row('SELECT COUNT(*) AS n FROM inventory_check_approvals')])
+  const before = snap()
+  const code = async (p, st, expected) => { const r = await p; assert.equal(r.status, st, JSON.stringify(r.json)); if (expected) assert.equal(r.json.code, expected, JSON.stringify(r.json)); return r }
+  const observe = (id, who, body) => { w.as(who); return w.api('PATCH', `/sessions/${id}/items/${id === 'orphan-task' ? 102 : 100}`, { expectedRevision: 0, expectedSessionRevision: 0, requestId: w.rid('o'), ...body }) }
+  for (const body of [{ state: 'done', counted_quantity: 10 }, { state: 'issue', counted_quantity: 9, reason: 'short' }, { state: 'unstarted' }]) {
+    await code(observe(task, 'admin', body), 409, 'inventory_check_task_not_countable')
+    await code(observe(task, 'issuer', body), 409, 'inventory_check_task_not_countable')
+    await code(observe(task, 'checker', body), 403, 'inventory_check_owner_required')
+    await code(observe(pickup, 'checker', body), 409, 'inventory_check_task_not_countable')
+    await code(observe(pickup, 'admin', body), 409, 'inventory_check_task_not_countable')
+    await code(observe('orphan-task', 'checker', body), 403, 'inventory_check_owner_required')
+    await code(observe('orphan-task', 'admin', body), 409, 'inventory_check_task_not_countable')
+  }
+  // closing: only whoever may issue closes a task; the creator who no longer may does not
+  await code((w.as('checker'), w.api('PATCH', '/sessions/orphan-task', { expectedRevision: 0, requestId: w.rid('c'), action: 'close' })), 403, 'inventory_check_owner_required')
+  await code((w.as('picker2'), w.api('PATCH', `/sessions/${task}`, { expectedRevision: 0, requestId: w.rid('c'), action: 'close' })), 403, 'inventory_check_owner_required')
+  // approvals: a task and a pickup never have one
+  for (const id of [task, pickup]) for (const route of ['approval', 'approval/lines']) {
+    w.as('admin'); await code(w.api('POST', `/sessions/${id}/${route}`, route === 'approval' ? { decision: 'approve', requestId: w.rid('a') } : { action: 'reject', productId: 100, requestId: w.rid('a') }), 404)
+  }
+  // creating a session that claims to be a task or a pickup, or to name one
+  w.as('admin')
+  for (const scope of [{ membership: 'task' }, { membership: 'pickup', task }, { membership: 'visible_page', task }, { task }]) await code(w.api('POST', '/sessions', { branchId: 1, requestId: w.rid('n'), productIds: [100], scope }), 400)
+  // a submission naming a pickup, an ordinary session or an unknown id as its task is refused whole
+  w.as('checker')
+  const ordinary = (await w.api('POST', '/sessions', { branchId: 1, requestId: w.rid('s'), productIds: [104], scope: { membership: 'visible_page' } })).json.item.id
+  const sessionsBefore = w.row('SELECT COUNT(*) AS n FROM inventory_check_sessions').n
+  for (const named of [pickup, ordinary, 'unknown-id']) await code(w.count([104], { task: named }), 404, 'inventory_check_task_not_found')
+  assert.equal(w.row('SELECT COUNT(*) AS n FROM inventory_check_sessions').n, sessionsBefore, 'nothing was recorded')
+  await code(w.pickup(pickup, 'picker2'), 404, 'inventory_check_task_not_found'); await code(w.pickup(ordinary, 'picker2'), 404, 'inventory_check_task_not_found')
+  assert.equal(JSON.stringify(JSON.parse(snap()).slice(0, 2)), JSON.stringify(JSON.parse(before).slice(0, 2)), 'every refused writer left the task, the pickup and their items as they were')
+  // a closed task and a closed pickup are final
+  assert.equal((await w.release(task, 'checker')).status, 200); assert.equal((await w.close(task, 'admin')).status, 200)
+  w.as('issuer'); await code(w.api('PATCH', `/sessions/${task}`, { expectedRevision: 1, requestId: w.rid('r'), action: 'resume' }), 409, 'inventory_check_session_final')
+  w.as('checker'); await code(w.api('PATCH', `/sessions/${pickup}`, { expectedRevision: 1, requestId: w.rid('r'), action: 'resume' }), 409, 'inventory_check_session_final')
+  assert.equal(w.row("SELECT COUNT(*) AS n FROM inventory_check_items WHERE session_id IN (?,?,?) AND (state<>'unstarted' OR updated_at IS NOT NULL OR counted_quantity IS NOT NULL)", ...ids).n, 0, 'a task item is never a count')
 }
 
 // ---- the random world -----------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -409,44 +719,63 @@ async function randomWorld(w, seed, steps) {
   const users = ['checker', 'picker2', 'issuer']
   const afterEvery = async (what) => {
     const shown = (await w.board('admin')).json.items
-    const closedShown = [...model.entries()].filter(([, t]) => t.status === 'closed').sort((a, b) => (b[1].closedOrder - a[1].closedOrder)).slice(0, 5).map(([id]) => id)
+    const closedShown = [...model.entries()].filter(([, t]) => t.status === 'closed').sort((a, b) => (b[1].closedOrder - a[1].closedOrder) || (a[0] < b[0] ? 1 : -1)).slice(0, 5).map(([id]) => id)
     const expectedIds = new Set([...model.entries()].filter(([, t]) => t.status === 'open').map(([id]) => id).concat(closedShown))
     assert.deepEqual(new Set(shown.map((t) => t.id)), expectedIds, `${what}: the tasks shown`)
     for (const view of shown) {
       const expected = model.get(view.id), db = w.row('SELECT * FROM inventory_check_sessions WHERE id=?', view.id)
       const productIds = w.rows('SELECT product_id FROM inventory_check_items WHERE session_id=?', view.id).map((r) => r.product_id)
       // brute force over the raw rows: a product is done when some count (done or differs) of it at the branch exists at or after the issue
-      const done = productIds.filter((p) => w.rows("SELECT i.updated_at FROM inventory_check_items i WHERE i.product_id=? AND i.branch_id=? AND i.state IN ('done','issue') AND i.updated_at IS NOT NULL", p, db.branch_id).some((r) => r.updated_at >= db.started_at)).length
+      const done = productIds.filter((p) => w.rows("SELECT i.updated_at FROM inventory_check_items i WHERE i.product_id=? AND i.branch_id=? AND i.state IN ('done','issue') AND i.updated_at IS NOT NULL AND i.session_id IN (SELECT id FROM inventory_check_sessions WHERE status='closed')", p, db.branch_id).some((r) => r.updated_at >= db.started_at)).length
       assert.equal(view.total, productIds.length, `${what}: total`); assert.equal(view.done, done, `${what}: done count of ${view.id}`)
       assert.equal(view.status, expected.status, `${what}: status of ${view.id}`)
       assert.equal(view.picked_up_by, expected.pickupBy ? `u${w.app.users[expected.pickupBy].id}` : null, `${what}: pickup of ${view.id}`)
       assert.equal(w.rows("SELECT * FROM inventory_check_sessions WHERE json_extract(scope_json,'$.membership')='pickup' AND json_extract(scope_json,'$.task')=? AND status='open'", view.id).length, expected.pickupBy ? 1 : 0, `${what}: at most one open pickup`)
     }
   }
-  let closedOrder = 0
-  const allDone = (id) => { const db = w.row('SELECT * FROM inventory_check_sessions WHERE id=?', id); return w.rows('SELECT product_id FROM inventory_check_items WHERE session_id=?', id).every((r) => w.rows("SELECT updated_at FROM inventory_check_items WHERE product_id=? AND branch_id=? AND state IN ('done','issue') AND updated_at IS NOT NULL", r.product_id, db.branch_id).some((x) => x.updated_at >= db.started_at)) }
+  let closedOrder = 0, outside = 0
+  // The oracle: after every write that creates a count, each open task whose products ALL have a count at its branch at or after its issue is closed, and the answer names exactly those. Read from the raw rows, never from the SQL under test.
+  const settle = (answer, what) => {
+    const newly = []
+    closedOrder++
+    for (const [id, t] of model) if (t.status === 'open' && allDone(id)) { t.status = 'closed'; t.pickupBy = null; t.closedOrder = closedOrder; newly.push(id) }
+    assert.deepEqual([...(answer.closedTasks ?? [])].sort(), newly.sort(), `${what}: the tasks the write closed`)
+    return newly
+  }
+  const allDone = (id) => { const db = w.row('SELECT * FROM inventory_check_sessions WHERE id=?', id); return w.rows('SELECT product_id FROM inventory_check_items WHERE session_id=?', id).every((r) => w.rows("SELECT updated_at FROM inventory_check_items WHERE product_id=? AND branch_id=? AND state IN ('done','issue') AND updated_at IS NOT NULL AND session_id IN (SELECT id FROM inventory_check_sessions WHERE status='closed')", r.product_id, db.branch_id).some((x) => x.updated_at >= db.started_at)) }
   for (let step = 0; step < steps; step++) {
     await sleep(3)
     const open = [...model.entries()].filter(([, t]) => t.status === 'open').map(([id]) => id)
     const roll = random()
-    const products = () => { const n = 1 + Math.floor(random() * 4); const set = new Set(); while (set.size < n) set.add(100 + Math.floor(random() * 8)); return [...set] }
-    if (roll < 0.2 && model.size < 10) {
+    const products = () => { const n = 1 + Math.floor(random() * 3); const set = new Set(); while (set.size < n) set.add(100 + Math.floor(random() * 6)); return [...set] }
+    if (roll < 0.18 && model.size < 10) {
       const made = await w.issue(products(), {}, pick(['admin', 'issuer'])); assert.equal(made.status, 201); model.set(made.json.item.id, { status: 'open', pickupBy: null })
-    } else if (roll < 0.35 && open.length) {
+    } else if (roll < 0.28 && open.length) {
       const id = pick(open), who = pick(users), expected = model.get(id).pickupBy
       const r = await w.pickup(id, who)
       if (expected) assert.equal(r.status, 409); else { assert.equal(r.status, 201); model.get(id).pickupBy = who }
-    } else if (roll < 0.45 && open.length) {
+    } else if (roll < 0.36 && open.length) {
       const id = pick(open), t = model.get(id), who = pick([...users, 'admin'])
       const r = await w.release(id, who)
       const allowed = t.pickupBy && (who === t.pickupBy || who === 'admin' || who === 'issuer')
       if (allowed) { assert.equal(r.status, 200); t.pickupBy = null } else assert.ok(r.status === 403 || r.status === 409, `release ${r.status}`)
-    } else if (roll < 0.8 && open.length) {
+    } else if (roll < 0.52 && open.length) {
       const id = pick(open), lines = products(), counter = pick(users)
       const r = await w.count(lines, { task: id, who: counter }); assert.equal(r.status, 201, JSON.stringify(r.json))
-      if (allDone(id)) { const t = model.get(id); t.status = 'closed'; t.pickupBy = null; t.closedOrder = ++closedOrder; assert.equal(r.json.task.closed, true) } else assert.equal(r.json.task.closed, false)
+      const newly = settle(r.json, `seed ${seed} step ${step}`); assert.equal(r.json.task.closed, newly.includes(id))
     } else if (roll < 0.92) {
-      const r = await w.count(products().map((p) => ({ productId: p, countedQuantity: random() < 0.5 ? 10 : 9, seenQuantity: 10 })), { who: pick(users) }); assert.equal(r.status, 201, JSON.stringify(r.json))
+      // a count outside every task: every writer in turn, at either branch; a count at branch 2 never ticks a task of branch 1
+      const how = ['multi', 'lot', 'plain', 'observe', 'other-branch', 'withdrawn'][outside++ % 6]
+      if (how === 'multi') { const r = await w.count(products().map((p) => ({ productId: p, countedQuantity: random() < 0.5 ? 10 : 9, seenQuantity: 10 })), { who: pick(users) }); assert.equal(r.status, 201, JSON.stringify(r.json)); settle(r.json, `seed ${seed} step ${step} ${how}`) }
+      else if (how === 'other-branch') { const r = await w.count(products(), { who: 'admin', branchId: 2 }); assert.equal(r.status, 201, JSON.stringify(r.json)); settle(r.json, `seed ${seed} step ${step} ${how}`) }
+      else if (how === 'withdrawn') {
+        // a count made and set back in an open session, never closed: no task ticks and none closes
+        w.as('checker'); const p = products()[0]
+        const s = (await w.api('POST', '/sessions', { branchId: 1, requestId: w.rid('s'), productIds: [p], scope: { membership: 'visible_page' } })).json.item.id
+        assert.equal((await w.api('PATCH', `/sessions/${s}/items/${p}`, { expectedRevision: 0, expectedSessionRevision: 0, requestId: w.rid('o'), state: 'done', counted_quantity: 10 })).status, 200)
+        assert.equal((await w.api('PATCH', `/sessions/${s}/items/${p}`, { expectedRevision: 1, expectedSessionRevision: 0, requestId: w.rid('o'), state: 'unstarted' })).status, 200)
+        settle({}, `seed ${seed} step ${step} ${how}`)
+      } else { const { answer } = await countBy(w, how, products()[0], { who: pick(users), state: random() < 0.5 ? 'done' : 'issue' }); settle(answer, `seed ${seed} step ${step} ${how}`) }
     } else if (open.length) {
       const id = pick(open); const r = await w.close(id, pick(['admin', 'issuer'])); assert.equal(r.status, 200, JSON.stringify(r.json))
       const t = model.get(id); t.status = 'closed'; t.pickupBy = null; t.closedOrder = ++closedOrder
@@ -459,10 +788,14 @@ async function randomWorld(w, seed, steps) {
 const SCENARIOS = {
   noEffect, issueShape, issueFilters, refusals, onePerson, race, taskList, doneRule, autoClose, manualClose, sessionsList, boardCache, olderListUnaffected,
   autoCloseOlderWriter: (w) => autoClose(w, { lotWriter: false }),
-  random: (w) => randomWorld(w, 20261118, 28),
+  outsideCloseLot: (w) => outsideClose(w, 'lot'), outsideClosePlain: (w) => outsideClose(w, 'plain'), outsideCloseObserve: (w) => outsideClose(w, 'observe'),
+  outsideNegativesLot: (w) => outsideNegatives(w, 'lot'), outsideNegativesPlain: (w) => outsideNegatives(w, 'plain'), outsideNegativesObserve: (w) => outsideNegatives(w, 'observe'),
+  observationNotFinal, doneRuleOrg, removedProducts, issueFilterFamilies, issueCapabilities, taskCap, taskRowsUntouched,
+  random: (w) => randomWorld(w, 20261118, 50),
+  randomTwo: (w) => randomWorld(w, 20261119, 90),
   budget,
 }
-const WORLD = { issueFilters: { extraProducts: 310 }, budget: { extraProducts: 70 } }
+const WORLD = { issueFilters: { extraProducts: 310 }, budget: { extraProducts: 70 }, issueFilterFamilies: { families: 280 } }
 
 async function main() {
   for (const [name, scenario] of Object.entries(SCENARIOS)) {
@@ -478,13 +811,36 @@ async function main() {
   const MUTANTS = [
     ['the done rule ignores counts made outside the task', edit('lib/inventoryCheckTasks.ts', "AND xs.organization_id IS ${org} AND xs.branch_id=x.branch_id)`", "AND xs.organization_id IS ${org} AND xs.branch_id=x.branch_id AND json_extract(xs.scope_json,'$.task') IS NOT NULL)`"), ['doneRule', 'random']],
     ['the done rule counts counts made before the issue', edit('lib/inventoryCheckTasks.ts', 'AND x.updated_at>=${since} AND', 'AND x.updated_at IS NOT NULL AND'), ['doneRule', 'random']],
-    ['the auto-close is missing', edit('lib/inventoryCheckTasks.ts', "AND NOT EXISTS(SELECT 1 FROM ${I} t WHERE t.session_id=@task AND NOT ${taskItemDoneSql('t', '@branchId', `(SELECT started_at FROM ${S} WHERE id=@task)`, '@org')})", 'AND 1=0'), ['autoClose', 'autoCloseOlderWriter', 'random']],
+    ['the auto-close is missing', edit('lib/inventoryCheckTasks.ts', "AND NOT EXISTS(SELECT 1 FROM ${I} n WHERE n.session_id=t.id AND NOT ${taskItemDoneSql('n', '@branchId', 't.started_at', '@org')} AND ${taskItemCountableSql('n')})", 'AND 1=0'), ['autoClose', 'autoCloseOlderWriter', 'random', 'randomTwo', 'outsideCloseLot', 'outsideClosePlain', 'outsideCloseObserve']],
+    ['the auto-close is missing from the wired submission writer', edit('lib/inventoryCheckSessions.ts', "  statements.push(...taskPart.statements)\n  let saved: Awaited<ReturnType<typeof commit>>\n  try { saved = await commit(db, principal, actor, statements, key, hash) }\n  catch (error) {\n    if (error instanceof InventoryCheckSessionError && error.code === 'inventory_check_count_in_progress') {", "  let saved: Awaited<ReturnType<typeof commit>>\n  try { saved = await commit(db, principal, actor, statements, key, hash) }\n  catch (error) {\n    if (error instanceof InventoryCheckSessionError && error.code === 'inventory_check_count_in_progress') {"), ['outsideCloseLot', 'random']],
+    ['the auto-close is missing from the older submission writer', edit('lib/inventoryCheckSessions.ts', "  statements.push(...taskPart.statements)\n  let saved: Awaited<ReturnType<typeof commit>>\n  try { saved = await commit(db, principal, actor, statements, key, hash) }\n  catch (error) {\n    // The refusal names the products", "  let saved: Awaited<ReturnType<typeof commit>>\n  try { saved = await commit(db, principal, actor, statements, key, hash) }\n  catch (error) {\n    // The refusal names the products"), ['outsideClosePlain']],
+    ['the auto-close candidates ignore the branch', { 'lib/inventoryCheckTasks.ts': [["ON x.product_id=w.product_id AND x.branch_id=@branchId AND x.updated_at IS NULL", "ON x.product_id=w.product_id AND x.updated_at IS NULL"], ["AND t.branch_id=@branchId AND t.status='open'", "AND t.status='open'"]] }, ['outsideNegativesLot', 'outsideNegativesPlain', 'outsideNegativesObserve']],
+    ['the auto-close candidates ignore the organization', edit('lib/inventoryCheckTasks.ts', "t.organization_id IS @org AND ${kindOf('t')}='${TASK_MEMBERSHIP}' AND t.branch_id", "${kindOf('t')}='${TASK_MEMBERSHIP}' AND t.branch_id"), ['outsideNegativesLot', 'outsideNegativesPlain', 'outsideNegativesObserve']],
+    ['a task is closed with its highest product still not done', edit('lib/inventoryCheckTasks.ts', "AND NOT EXISTS(SELECT 1 FROM ${I} n WHERE n.session_id=t.id AND NOT ${taskItemDoneSql(", "AND NOT EXISTS(SELECT 1 FROM ${I} n WHERE n.session_id=t.id AND n.product_id<>(SELECT MAX(m.product_id) FROM ${I} m WHERE m.session_id=t.id) AND NOT ${taskItemDoneSql("), ['outsideNegativesLot', 'outsideNegativesPlain', 'outsideNegativesObserve', 'random']],
+    ['the open-task cap is not checked', edit('lib/inventoryCheckSessions.ts', "<@maxOpenTasks`, 'inventory_check_task_limit'", "<@maxOpenTasks+1000000`, 'inventory_check_task_limit'"), ['taskCap']],
+    ['the open-task cap counts the tasks of other branches', edit('lib/inventoryCheckSessions.ts', "AND s.branch_id=@branchId AND s.status='open')<@maxOpenTasks", "AND s.status='open')<@maxOpenTasks"), ['taskCap']],
+    ['the open-task cap counts the tasks of other organizations', edit('lib/inventoryCheckSessions.ts', "FROM inventory_check_sessions s INDEXED BY inventory_check_sessions_kind_task WHERE s.organization_id IS @organization AND ${kindOf('s')}='${TASK_MEMBERSHIP}' AND s.branch_id=@branchId AND s.status='open')<@maxOpenTasks", "FROM inventory_check_sessions s WHERE ${kindOf('s')}='${TASK_MEMBERSHIP}' AND s.branch_id=@branchId AND s.status='open')<@maxOpenTasks"), ['taskCap']],
+    ['an observation of a task or a pickup is accepted', edit('lib/inventoryCheckSessions.ts', "  if ([TASK_MEMBERSHIP, PICKUP_MEMBERSHIP].includes(membershipOf(session))) fail(409, 'inventory_check_task_not_countable')\n", ''), ['taskRowsUntouched']],
+    ['a task is closed by its creator who may no longer issue', edit('lib/inventoryCheckSessions.ts', "  if (kind === TASK_MEMBERSHIP) return canIssueInventoryCountTasks(actor)\n", ''), ['taskRowsUntouched']],
+    ['a closed task or pickup is resumed', edit('lib/inventoryCheckSessions.ts', "['submission', TASK_MEMBERSHIP, PICKUP_MEMBERSHIP].includes(membershipOf(session))", "['submission'].includes(membershipOf(session))"), ['taskRowsUntouched']],
+    ['a submission may name a pickup or an ordinary session as its task', edit('lib/inventoryCheckSessions.ts', "AND ${kindOf('inventory_check_sessions')}='${TASK_MEMBERSHIP}')`, 'inventory_check_task_not_found', params)", "AND 1=1)`, 'inventory_check_task_not_found', params)"), ['taskRowsUntouched']],
     ['the pickup guard is missing from the batch', edit('lib/inventoryCheckSessions.ts', "    guard(`NOT ${OPEN_PICKUP_SQL('@task', '@organization')}`, 'inventory_check_task_picked_up', params),\n", ''), ['race']],
     ['a task item is written as a count (Done, with a time): it becomes a latest count', edit('lib/inventoryCheckSessions.ts', "INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json)\n      SELECT @id,json_extract(value,'$.product_id'),@branchId,json_extract(value,'$.product'),NULL,'{}' FROM json_each(@members)`", "INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,revision,updated_by,updated_at)\n      SELECT @id,json_extract(value,'$.product_id'),@branchId,json_extract(value,'$.product'),NULL,'{}','done',0,1,@actorId,@now FROM json_each(@members)`"), ['noEffect']],
     ['the issue permission is not checked', { 'routes/inventoryChecks.ts': [["  if (!canIssueInventoryCountTasks(user)) throw new InventoryCheckSessionError(403, 'inventory_check_issue_required')\n", '']], 'lib/inventoryCheckSessions.ts': [["  if (!canIssueInventoryCountTasks(actor)) fail(403, 'inventory_check_issue_required')\n", '']] }, ['refusals']],
     ['the taskId restriction is missing on /list', edit('routes/inventoryChecks.ts', '  if (extra.task) {\n    let ids = new Set(extra.task.productIds)', '  if (extra.task && Date.now() < 0) {\n    let ids = new Set(extra.task.productIds)'), ['taskList']],
-    ['a task puts products in check on the older list', edit('lib/inventoryCheckProducts.ts', " AND json_extract(s.scope_json, '$.membership') IS NOT 'task' AND ${checkScopeSql(branchScoped)})`", ' AND ${checkScopeSql(branchScoped)})`'), ['olderListUnaffected']],
     ['task rows are listed under Count sessions', edit('lib/inventoryCheckSessions.ts', "    AND json_extract(scope_json, '$.membership') IS NOT 'task' AND (@mine=0", '    AND (@mine=0'), ['sessionsList']],
+    ['the auto-close is missing from the close of a count session', edit('lib/inventoryCheckSessions.ts', "    ...(taskPart ? taskPart.statements : []),\n  ]\n  const saved = await commit(db, principal, actor, statements, key, hash)", "  ]\n  const saved = await commit(db, principal, actor, statements, key, hash)"), ['outsideCloseObserve', 'observationNotFinal']],
+    ['two tasks closed by one write share a close request id', edit('lib/inventoryCheckTasks.ts', "@key||'-task-closed-'||t.id", "@key||'-task-closed-'"), ['outsideNegativesLot', 'outsideNegativesPlain', 'outsideNegativesObserve']],
+    ['a count in an open session ticks a task (the count need not be final)', edit('lib/inventoryCheckTasks.ts', "AND x.state IN ('done','issue') AND xs.status='closed' AND xs.organization_id", "AND x.state IN ('done','issue') AND xs.organization_id"), ['observationNotFinal', 'doneRule']],
+    ["the done rule counts another organization's counts", edit('lib/inventoryCheckTasks.ts', "AND xs.status='closed' AND xs.organization_id IS ${org} AND xs.branch_id=x.branch_id)", "AND xs.status='closed' AND xs.branch_id=x.branch_id)"), ['doneRuleOrg']],
+    ['a product that can no longer be counted still blocks the auto-close', edit('lib/inventoryCheckTasks.ts', " AND ${taskItemCountableSql('n')})", ')'), ['removedProducts']],
+    ['the board counts products that can no longer be counted in the total', edit('lib/inventoryCheckTasks.ts', "(SELECT COUNT(*) FROM ${I} t WHERE t.session_id=page.id AND ${taskItemCountableSql('t')}) AS total", "(SELECT COUNT(*) FROM ${I} t WHERE t.session_id=page.id) AS total"), ['removedProducts']],
+    ['issue by filter stops when the rows reach the family count', edit('routes/inventoryChecks.ts', "if (!rows.length || page * 100 >= Number(answer.total ?? 0)) break", "if (!rows.length || ids.size >= Number(answer.total ?? 0)) break"), ['issueFilterFamilies']],
+    ['issuing needs only the extra, not the count grant', edit('lib/inventoryCheckAccess.ts', "return access.canView && access.canCheck && hasPermission(user, 'inventory_check_issue')", "return access.canView && hasPermission(user, 'inventory_check_issue')"), ['issueCapabilities']],
+    ['the board shows the filters a viewer may not use', edit('routes/inventoryChecks.ts', "!(key === 'brand' && !access.fields.brand) && !(key === 'category' && !access.fields.category) && !(key === 'stockState' && !access.fields.stock)", 'true'), ['issueCapabilities']],
+    ['a task puts products in check on the older list (the filter)', edit('lib/inventoryCheckProducts.ts', "WHERE i.product_id=${id} AND i.state='unstarted' AND s.status='open' AND ${NOT_A_TASK_SQL('s')} AND", "WHERE i.product_id=${id} AND i.state='unstarted' AND s.status='open' AND"), ['olderListUnaffected']],
+    ['a task puts products in check on the older list (the page rows)', edit('lib/inventoryCheckProducts.ts', "WHERE i.product_id=pg.id AND i.state='unstarted' AND s.status='open' AND ${NOT_A_TASK_SQL('s')} AND", "WHERE i.product_id=pg.id AND i.state='unstarted' AND s.status='open' AND"), ['olderListUnaffected']],
+    ['a task puts products in check on the older list (the summary)', edit('lib/inventoryCheckProducts.ts', "AND session_status='open' AND not_task)", "AND session_status='open')"), ['olderListUnaffected']],
   ]
   for (const [name, edits, targets] of MUTANTS) {
     for (const target of targets) {

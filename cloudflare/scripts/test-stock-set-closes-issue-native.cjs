@@ -159,6 +159,76 @@ async function main() {
     assert.equal(sessions(f).length, count, 'nothing added'); assert.equal(latest(f).session_id, 'newer-count'); assert.equal(lotQuantity(f, 11), 7, 'the Set itself is undone')
   })
 
+  // ---- count tasks: the Done count a Set records closes the tasks it completes (the auto-close of lib/inventoryCheckTasks.ts, in the Set's own batch) ----------------------------------------------------
+  // The tasks are written straight into the tables (the issue route is another native's); a task is an open session {membership:'task'} whose items are unstarted.
+  const taskRow = (f, { id, branch = 1, org = null, products = [1], at = '2026-11-10T00:00:00.000Z' }) => {
+    f.raw.exec('PRAGMA foreign_keys=OFF')
+    f.raw.prepare("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at) VALUES(?,?,?,8,'','open',0,?,?,?)")
+      .run(id, org, branch, JSON.stringify({ membership: 'task', products: products.length, selection: { kind: 'ids' } }), at, at)
+    for (const p of products) f.raw.prepare("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json) VALUES(?,?,?,'{}',NULL,'{}')").run(id, p, branch)
+    f.raw.exec('PRAGMA foreign_keys=ON')
+  }
+  const pickupRow = (f, id, task) => {
+    f.raw.exec('PRAGMA foreign_keys=OFF')
+    f.raw.prepare("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at) VALUES(?,NULL,1,8,'','open',0,?,'2026-11-10T00:00:00.000Z','2026-11-10T00:00:00.000Z')")
+      .run(id, JSON.stringify({ membership: 'pickup', task }))
+    f.raw.exec('PRAGMA foreign_keys=ON')
+  }
+  const taskStatus = (f, id) => f.raw.prepare('SELECT status,closed_at,revision FROM inventory_check_sessions WHERE id=?').get(id)
+  const closeEventsOf = (f, id) => f.raw.prepare("SELECT request_id,after_json FROM inventory_check_events WHERE session_id=? AND action='close' ORDER BY id").all(id)
+  const taskWorld = world => {
+    const f = world.world({ switches: ON }); issue(f, { lines: [[10, 3, 3], [11, 5, 7]] })
+    world.seed(f, "INSERT INTO products(id,name,barcode,cost_price_usd,cost_price_khr,stock_quantity,is_active) VALUES(2,'Other','OTH',2,0,10,1)")
+    taskRow(f, { id: 'task-a' }); pickupRow(f, 'pick-a', 'task-a'); taskRow(f, { id: 'task-d', products: [1, 2] }); taskRow(f, { id: 'task-b', branch: 2 }); taskRow(f, { id: 'task-c', org: 2 })
+    return f
+  }
+  async function setClosesTasks(world) {
+    const set = (f, body = {}) => world.call(f, 'POST', '/api/inventory/adjust', { type: 'set', setScope: 'lot', productId: 1, branchId: 1, batchId: 11, quantity: 5, expectedLotQuantity: 7, reason: 'Physical count', client_request_id: 'inventory_set_x1234567', ...body })
+    const f = taskWorld(world)
+    const done = await set(f)
+    assert.equal(done.status, 200, JSON.stringify(done.body)); assert.equal(done.body.issue_closed, true)
+    assert.deepEqual(done.body.closed_tasks, ['task-a'], 'the answer names the task the Set closed')
+    const made = added(f)[0], closed = taskStatus(f, 'task-a')
+    assert.equal(closed.status, 'closed'); assert.equal(closed.revision, 1); assert.equal(taskStatus(f, 'pick-a').status, 'closed', 'its pickup closes with it')
+    const sessionRow = f.raw.prepare('SELECT started_at FROM inventory_check_sessions WHERE id=?').get(made.id)
+    assert.equal(closed.closed_at, sessionRow.started_at, 'closed in the batch that recorded the count')
+    assert.equal(closeEventsOf(f, 'task-a').length, 1); assert.equal(JSON.parse(closeEventsOf(f, 'task-a')[0].after_json).auto, 1); assert.equal(closeEventsOf(f, 'pick-a').length, 1)
+    assert.equal(taskStatus(f, 'task-d').status, 'open', 'a task with another product not counted stays open'); assert.equal(taskStatus(f, 'task-b').status, 'open', "another branch's task is untouched"); assert.equal(taskStatus(f, 'task-c').status, 'open', "another organization's task is untouched")
+    assert.equal(closeEventsOf(f, 'task-b').length + closeEventsOf(f, 'task-c').length + closeEventsOf(f, 'task-d').length, 0)
+    assert.deepEqual(JSON.parse(f.raw.prepare('SELECT response_json FROM stock_lot_adjustment_operations WHERE id=?').get(done.body.operation_id).response_json).closed_tasks, ['task-a'], 'the stored answer carries it')
+    const again = await set(f)
+    assert.equal(again.body.replayed, true); assert.deepEqual(again.body.closed_tasks, ['task-a'], 'a replay answers the same'); assert.equal(closeEventsOf(f, 'task-a').length, 1, 'and closes nothing again')
+    // Undo reopens the difference as a NEW count (a copy of the old one, made now): a task issued since is completed by it
+    await new Promise(resolve => setTimeout(resolve, 5))
+    taskRow(f, { id: 'task-e', at: new Date().toISOString() })
+    await new Promise(resolve => setTimeout(resolve, 5))
+    const row = historyOf(f)
+    await world.lot.replayStockLotSet(f.env, world.actor, 'undo', row.id, 0, JSON.parse(row.undo_payload)) // through THIS world's modules, so a planted mutant is the code that runs
+    assert.equal(taskStatus(f, 'task-e').status, 'closed', 'the count an Undo records closes the task it completes'); assert.equal(closeEventsOf(f, 'task-e').length, 1)
+    assert.equal(taskStatus(f, 'task-d').status, 'open')
+    // a Set to the figure stock already has (nothing moves) that still closes the difference closes the task too, and says so in its one read
+    const g = taskWorld(world)
+    world.seed(g, 'UPDATE branch_batch_stock SET quantity=5 WHERE batch_id=11 AND branch_id=1; UPDATE branch_stock SET quantity=8 WHERE product_id=1 AND branch_id=1; UPDATE products SET stock_quantity=8 WHERE id=1')
+    const same = await set(g, { quantity: 5, expectedLotQuantity: 5 })
+    assert.equal(same.status, 200, JSON.stringify(same.body)); assert.equal(same.body.quantity, 0); assert.equal(same.body.issue_closed, true); assert.deepEqual(same.body.closed_tasks, ['task-a'])
+    assert.equal(taskStatus(g, 'task-a').status, 'closed')
+    // a Set that closes no difference counts nothing and closes nothing
+    const h = world.world({ switches: ON }); taskRow(h, { id: 'task-a' })
+    const plain = await set(h)
+    assert.equal(plain.body.issue_closed, false); assert.equal('closed_tasks' in plain.body, false); assert.equal(taskStatus(h, 'task-a').status, 'open', 'no count was recorded')
+  }
+  await check('a Set that closes a difference records a count that closes the count tasks it completes (and an Undo, and a Set that moves nothing, do too)', () => setClosesTasks(w))
+  for (const [name, edits] of [
+    ['the Set that closes a difference does not run the auto-close', { 'lib/stockSetClosesIssue.ts': [['    ...tasks.statements,\n', '']] }],
+    ['the Undo that reopens a difference does not run the auto-close', { 'lib/stockSetClosesIssue.ts': [['    ...taskStatements(params).statements,\n  ]', '  ]']] }],
+  ]) {
+    await check(`mutant killed: ${name}`, async () => {
+      let caught = false
+      try { await setClosesTasks(createLotSetWorld({ sourceEdits: edits })) } catch (error) { if (/must match once/.test(String(error && error.message))) throw error; caught = true }
+      assert.equal(caught, true, 'the planted mutant was not caught')
+    })
+  }
+
   if (failures.length) { console.error(`FAILED ${failures.length}: ${failures.join('; ')}`); process.exit(1) }
   console.log('PASS test-stock-set-closes-issue-native')
 }

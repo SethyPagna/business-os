@@ -12,7 +12,7 @@ import { getInventoryCheckTaskLimits } from '../lib/inventoryCheckTaskLimits'
 import type { ReviewAlertEvent, ReviewAlertHook } from '../lib/reviewAlert'
 import type { InventoryContext } from './inventory'
 import type { StockInCommitLine } from './stockInCommit'
-import { bumpVersion, cacheIdentity, cachedJsonResponse } from '../lib/cache'
+import { bumpVersion, cacheIdentity, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { stockVisibleProductSql } from '../lib/productStockGuard'
 import { canApproveInventoryCounts, canIssueInventoryCountTasks, canWorkInventoryCountTasks, getInventoryCheckAccess, InventoryCheckQueryError } from '../lib/inventoryCheckAccess'
 import { readTaskProducts, readTaskRows, type TaskRow } from '../lib/inventoryCheckTasks'
@@ -252,14 +252,21 @@ app.post('/sessions', async c => {
 // An admin issues products to count; an employee picks a task up and counts it on the wired list (/list?taskId=), submitting with taskId. The done rule and the auto-close are in the Worker.
 // The board (a branch's open and recent tasks with their done counts) is cached on the inventory_checks version: every writer that can change a task or a count moves it, so an unchanged open reads nothing.
 async function readTaskBoard(c: IcContext, branchId: number): Promise<TaskRow[]> {
-  const version = await inventoryChecksVersion(c.env), limits = getPlanLimits(c.env), taskLimits = getInventoryCheckTaskLimits(c.env)
-  return cachedJsonResponse(new Request(`https://ic.invalid/__bos/ic-tasks?branchId=${branchId}&order=1`, { method: 'GET' }), c.executionCtx, `ict:${version}`, limits.productListCacheSeconds,
-    () => readTaskRows(getDb(c.env), { organization: c.get('user').organization_id ?? null, branchId, shown: taskLimits.tasksShown, closedShown: taskLimits.tasksClosedShown }), cacheIdentity(c))
+  // The counts also depend on which products can still be counted (a deactivation or a merge changes `total`, `done` and `removed`), so the entry keys on the products version too.
+  const [version, productsVersion] = await Promise.all([inventoryChecksVersion(c.env), getVersionWithFallback(c.env, 'products')])
+  const limits = getPlanLimits(c.env), taskLimits = getInventoryCheckTaskLimits(c.env)
+  return cachedJsonResponse(new Request(`https://ic.invalid/__bos/ic-tasks?branchId=${branchId}&order=2`, { method: 'GET' }), c.executionCtx, `ict:${version}:${productsVersion}`, limits.productListCacheSeconds,
+    () => readTaskRows(getDb(c.env), { organization: c.get('user').organization_id ?? null, branchId, shown: taskLimits.maxOpenTasks, closedShown: taskLimits.tasksClosedShown }), cacheIdentity(c))
 }
 /** What a viewer is told of a task: names (never account ids) of who issued and who picked it up, and what they may do with it. */
 const taskView = (row: TaskRow, user: SessionUser) => {
   const mine = row.pickup_id !== null && row.picked_by === user.id, open = row.status === 'open'
-  return { id: row.id, branch_id: row.branch_id, title: row.title, status: row.status, issued_at: row.started_at, issued_by: row.issuer, closed_at: row.closed_at, total: row.total, done: row.done, selection: row.selection,
+  const access = getInventoryCheckAccess(user)
+  // The filters an admin issued from are shown only as far as the viewer may use them (the same rule as a session's detail).
+  const selection = row.selection && typeof row.selection === 'object' && (row.selection as { filters?: Record<string, unknown> }).filters
+    ? { ...row.selection as object, filters: Object.fromEntries(Object.entries((row.selection as { filters: Record<string, unknown> }).filters).filter(([key]) => !(key === 'brand' && !access.fields.brand) && !(key === 'category' && !access.fields.category) && !(key === 'stockState' && !access.fields.stock))) }
+    : row.selection
+  return { id: row.id, branch_id: row.branch_id, title: row.title, status: row.status, issued_at: row.started_at, issued_by: row.issuer, closed_at: row.closed_at, total: row.total, done: row.done, removed: row.removed, selection,
     picked_up_by: row.pickup_id ? row.picker : null, picked_up_at: row.pickup_id ? row.picked_at : null, mine, ...(mine ? { pickup_session_id: row.pickup_id } : {}),
     can_pickup: open && row.pickup_id === null && canWorkInventoryCountTasks(user), can_release: open && row.pickup_id !== null && (mine || canIssueInventoryCountTasks(user)), can_close: open && canIssueInventoryCountTasks(user) }
 }
@@ -271,28 +278,29 @@ app.get('/tasks', async c => {
   const branchId = positiveWord(c.req.query('branchId'), 'branchId')
   const rows = await readTaskBoard(c, branchId)
   return c.json({ branchId, version: await inventoryChecksVersion(c.env), items: rows.map((row) => taskView(row, user)),
-    capabilities: { issue: canIssueInventoryCountTasks(user), work: canWorkInventoryCountTasks(user), maxProducts: getInventoryCheckTaskLimits(c.env).maxProducts } })
+    capabilities: { issue: canIssueInventoryCountTasks(user), work: canWorkInventoryCountTasks(user), maxProducts: getInventoryCheckTaskLimits(c.env).maxProducts, maxOpenTasks: getInventoryCheckTaskLimits(c.env).maxOpenTasks } })
 })
 // The filter keys a task may be issued from: the list's own (a closed set; the list's search code validates them for this viewer, as it does for /list).
 const TASK_FILTER_KEYS = ['query', 'brand', 'category', 'stockState', 'checkState', 'checkedOn'] as const
-async function resolveTaskFilters(c: IcContext, branchId: number, raw: unknown, limit: number): Promise<{ filters: Record<string, string>; ids: number[]; total: number }> {
+async function resolveTaskFilters(c: IcContext, branchId: number, raw: unknown, limit: number): Promise<{ filters: Record<string, string>; ids: number[]; total: number; atLeast: boolean }> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new InventoryCheckSessionError(400, 'inventory_check_invalid_request')
   const filters: Record<string, string> = {}
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     if (!(TASK_FILTER_KEYS as readonly string[]).includes(key) || typeof value !== 'string') throw new InventoryCheckSessionError(400, 'inventory_check_invalid_request')
     if (value.trim() !== '') filters[key] = value.trim()
   }
-  // The list's own reader, page after page (the list's page size is at most 100), until the rows run out or the cap is passed. Over the cap it keeps counting only through the total the list reports.
-  const ids: number[] = []
-  let total = 0
+  // The list's own reader, page after page (a page holds at most 100 FAMILIES, each with all its countable children, so `total` counts families and a page holds more rows than that), until the reader has no more pages or the
+  // cap is passed. The cap and the answer's `total` count COUNTABLE ROWS (a family header is not one), never families; stopped early over the cap, `total` is what was counted so far and `atLeast` says so.
+  const ids = new Set<number>()
+  let atLeast = false
   for (let page = 1; ; page++) {
-    const answer = await readListPage(c, { ...filters, branchId: String(branchId), summary: '0', pageSize: '100', page: String(page) }, { idsOnly: true }) as { items?: Array<{ id: number }>; total?: number }
+    const answer = await readListPage(c, { ...filters, branchId: String(branchId), summary: '0', pageSize: '100', page: String(page) }, { idsOnly: true }) as { items?: Array<{ id: number; is_group?: number | boolean }>; total?: number }
     const rows = answer.items ?? []
-    total = Math.max(total, Number(answer.total ?? 0))
-    for (const row of rows) ids.push(Number(row.id))
-    if (!rows.length || ids.length >= Number(answer.total ?? 0) || ids.length > limit) break
+    for (const row of rows) if (!row.is_group) ids.add(Number(row.id))
+    if (!rows.length || page * 100 >= Number(answer.total ?? 0)) break
+    if (ids.size > limit) { atLeast = true; break }
   }
-  return { filters, ids: [...new Set(ids)], total: Math.max(total, new Set(ids).size) }
+  return { filters, ids: [...ids], total: ids.size, atLeast }
 }
 app.post('/tasks', async c => {
   if (!await readSwitch(c.env, 'ic_wired')) return notWired(c)
@@ -309,11 +317,11 @@ app.post('/tasks', async c => {
     if (!/^[1-9][0-9]*$/.test(branchWord)) throw new InventoryCheckSessionError(400, 'inventory_check_invalid_id')
     const resolved = await resolveTaskFilters(c, Number(branchWord), body.filters, limit)
     // Over the cap the answer carries the total, so the admin can narrow the filter.
-    if (resolved.total > limit || resolved.ids.length > limit) throw new InventoryCheckSessionError(400, 'inventory_check_task_too_many', { total: resolved.total, limit })
+    if (resolved.total > limit) throw new InventoryCheckSessionError(400, 'inventory_check_task_too_many', { total: resolved.total, limit, ...(resolved.atLeast ? { atLeast: true } : {}) })
     productIds = resolved.ids; selection = { kind: 'filters', filters: resolved.filters }; dropIneligible = true
   }
   const { filters: _filters, ...rest } = body
-  const result = await createInventoryCheckSession(getDb(c.env), await principal(c), { ...rest, productIds }, resolveLowStockConfig({}), { task: { selection, maxProducts: limit, dropIneligible } })
+  const result = await createInventoryCheckSession(getDb(c.env), await principal(c), { ...rest, productIds }, resolveLowStockConfig({}), { task: { selection, maxProducts: limit, maxOpenTasks: getInventoryCheckTaskLimits(c.env).maxOpenTasks, dropIneligible } })
   return c.json(result, result.created ? 201 : 200)
 })
 // Picking a task up (one person per task) and handing it back; see lib/inventoryCheckSessions.ts.

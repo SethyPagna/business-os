@@ -37,9 +37,13 @@ export function canApproveInventoryCounts(user: PermissionUser): boolean {
   return access.canView && access.fields.stock && hasPermission(user, 'inventory_check_approve')
 }
 
-/** Issuing count tasks, closing any task and handing back any pickup is its own extra of the count sessions (owner, 18 Nov 2026): off unless granted, admins always pass, and it never implies counting. */
+/**
+ * Issuing count tasks, closing any task and handing back someone else's pickup is its own extra of the count sessions (owner, 18 Nov 2026): off unless granted, admins always pass, and it never implies counting.
+ * It needs the count grant too: every writer does, so a role with the extra and no count grant would be offered what the Worker refuses.
+ */
 export function canIssueInventoryCountTasks(user: PermissionUser): boolean {
-  return getInventoryCheckAccess(user).canView && hasPermission(user, 'inventory_check_issue')
+  const access = getInventoryCheckAccess(user)
+  return access.canView && access.canCheck && hasPermission(user, 'inventory_check_issue')
 }
 
 /** Seeing the Tasks, picking one up and counting it is the action `inventory_checks:tasks`: on for everyone who can count, and an administrator can switch it off for a role. It needs the count grant on top. */

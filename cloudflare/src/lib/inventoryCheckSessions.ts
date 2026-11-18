@@ -2,7 +2,7 @@ import type { D1Compat } from './db'
 import type { SessionUser } from './auth'
 import { resolveLowStockConfig, type LowStockConfig } from './lowStockSettings'
 import { canApproveInventoryCounts, canIssueInventoryCountTasks, canWorkInventoryCountTasks, getInventoryCheckAccess, projectInventoryCheckProduct, validateInventoryCheckQuery } from './inventoryCheckAccess'
-import { autoCloseTaskStatements, closePickupsStatements, kindOf, OPEN_PICKUP_SQL, PICKUP_MEMBERSHIP, TASK_MEMBERSHIP, taskOf } from './inventoryCheckTasks'
+import { autoCloseParams, autoCloseTaskStatements, CHECKABLE_SQL, closedTaskIds, closePickupsStatements, kindOf, OPEN_PICKUP_SQL, PICKUP_MEMBERSHIP, TASK_MEMBERSHIP, taskOf } from './inventoryCheckTasks'
 import { buildInventoryCheckStockQuery, readInventoryCheckStock, resetInventoryCheckStockSchemaMemo, type InventoryCheckStockRow } from './inventoryCheckStock'
 import { buildInventoryCheckProductMembershipQuery } from './inventoryCheckProducts'
 import { hasPermission, isAdminControlUser } from './permissions'
@@ -448,6 +448,7 @@ async function commit(db: D1Compat, principal: InventoryCheckPrincipal, actor: A
     if (text.includes('inventory_check_count_in_progress')) fail(409, 'inventory_check_count_in_progress')
     if (text.includes('inventory_check_stock_changed')) fail(409, 'inventory_check_stock_changed')
     if (text.includes('inventory_check_no_lot')) fail(409, 'inventory_check_no_lot')
+    if (text.includes('inventory_check_task_limit')) fail(409, 'inventory_check_task_limit')
     if (text.includes('inventory_check_task_not_found')) fail(404, 'inventory_check_task_not_found')
     if (text.includes('inventory_check_task_closed')) fail(409, 'inventory_check_task_closed')
     if (text.includes('inventory_check_task_picked_up')) fail(409, 'inventory_check_task_picked_up')
@@ -529,8 +530,6 @@ async function validatedStockSnapshot(db: D1Compat, branchId: number, productIds
 }
 const LOW_STOCK_ROWS_SQL = `SELECT key,value FROM settings WHERE key IN ('low_stock_alert_enabled','low_stock_threshold_mode','low_stock_threshold_default') ORDER BY key`
 const LOW_STOCK_SIGNATURE_SQL = `SELECT json_group_array(json_object('key',key,'value',value)) FROM (${LOW_STOCK_ROWS_SQL})`
-const CHECKABLE_SQL = `(NOT(COALESCE(p.is_group,0)=1 AND EXISTS(SELECT 1 FROM products child WHERE child.id<>p.id
-  AND (child.parent_id=p.id OR child.name_key=p.name_key) AND ${stockVisibleProductSql('child')})))`
 const CURRENT_PRODUCT_CHECKABLE_SQL = `p.id IS NOT NULL AND ${stockVisibleProductSql()} AND ${CHECKABLE_SQL}`
 /** `simple` (ic_simple): the scope is the owner's closed query and its membership is the simplified cohort. Absent, the old validation and cohort apply unchanged. */
 export async function createInventoryCheckSession(db: D1Compat, principal: InventoryCheckPrincipal, input: unknown, lowStock: LowStockConfig, options: { simple?: boolean; task?: TaskIssue } = {}) {
@@ -674,13 +673,20 @@ function submissionTask(body: Record<string, unknown>, actor: Actor): string | n
   return body.taskId
 }
 /**
- * Appended to a submission's batch when it names a task: the task must exist at this branch (a closed one is fine: the counts are real, and a task closed by an admin while someone counts it must not lose them),
- * then the auto-close (lib/inventoryCheckTasks.ts autoCloseTaskStatements). statements[1] is the one that reports whether this submission closed the task.
+ * Appended to the batch of EVERY writer that creates a count (the two submissions, an observation, a Set that closes a difference): the auto-close of lib/inventoryCheckTasks.ts, which closes every open task
+ * of this organization and branch whose last product this write counted. A submission that names a task adds a guard first (the task must exist at this branch: a closed one is fine, the counts are real, and a
+ * task closed by an admin while someone counts it must not lose them) and closes that task too when it completes it. `src` is the session the counts are in; `closed` is the statement whose answer lists the closed ids.
  */
-function taskStatements(task: string, actor: Actor, args: { branchId: number; key: string; hash: string; now: string }): Statement[] {
-  const params = { task, org: actor.organization_id, branchId: args.branchId, actorId: actor.id, actorName: actorSnapshot(actor), key: args.key, hash: args.hash, now: args.now }
-  const exists = guard(`EXISTS(SELECT 1 FROM inventory_check_sessions WHERE id=@task AND organization_id IS @org AND branch_id=@branchId AND ${kindOf('inventory_check_sessions')}='${TASK_MEMBERSHIP}')`, 'inventory_check_task_not_found', params)
-  return [exists, ...autoCloseTaskStatements().map(({ sql }) => ({ sql, params }))]
+function autoClosePart(actor: Actor, args: { src: string; task?: string | null; branchId: number; key: string; hash: string; now: string }): { statements: Statement[]; closed: Statement } {
+  const params = autoCloseParams({ src: args.src, task: args.task ?? null, organization: actor.organization_id, branchId: args.branchId, actorId: actor.id, actorName: actorSnapshot(actor), key: args.key, hash: args.hash, now: args.now })
+  const auto = autoCloseTaskStatements(), statements: Statement[] = auto.statements.map(({ sql }) => ({ sql, params }))
+  const exists = args.task ? [guard(`EXISTS(SELECT 1 FROM inventory_check_sessions WHERE id=@task AND organization_id IS @org AND branch_id=@branchId AND ${kindOf('inventory_check_sessions')}='${TASK_MEMBERSHIP}')`, 'inventory_check_task_not_found', params)] : []
+  return { statements: [...exists, ...statements], closed: statements[auto.closedAt] }
+}
+/** The ids of the tasks a committed write closed (none for a replay: the write is not made again). */
+function closedBy(saved: { replayed: boolean; results?: D1Result[] }, statements: Statement[], part: { closed: Statement } | null): string[] {
+  const at = part ? statements.indexOf(part.closed) : -1
+  return at >= 0 && !saved.replayed ? closedTaskIds(saved.results?.[at + 1]) : []
 }
 
 type SubmissionLine = { productId: number; counted: number; seen: number | null; checked: boolean; note: string | null }
@@ -788,8 +794,8 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
     ...(differing > 0 ? [{ sql: `INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submitted_at,baselines_json,line_set_json)
       VALUES(@id,@organization,@branchId,'pending',@differing,@actorId,@now,@seenJson,@lineSet)`, params: { ...params, differing, seenJson, lineSet } }] : []),
   ]
-  const taskPart = task ? taskStatements(task, actor, { branchId, key, hash, now }) : null
-  if (taskPart) statements.push(...taskPart)
+  const taskPart = autoClosePart(actor, { src: id, task, branchId, key, hash, now })
+  statements.push(...taskPart.statements)
   let saved: Awaited<ReturnType<typeof commit>>
   try { saved = await commit(db, principal, actor, statements, key, hash) }
   catch (error) {
@@ -804,8 +810,8 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
   if (differing > 0 && !saved.replayed) { try { await options.onApprovalCreated?.({ sessionId: saved.event.session_id }) } catch { /* announced best-effort */ } }
   // The approvals this commit replaced were rejected by the system: each is a review decided, so each is told once (the statement that rejected them names them; a replay is never told again).
   if (!saved.replayed && supersede.length) await announceReplaced(options.onApprovalsReplaced, saved.results?.[statements.indexOf(supersede[2]) + 1]?.results)
-  const taskClosed = !!taskPart && !saved.replayed && (saved.results?.[statements.indexOf(taskPart[1]) + 1]?.results ?? []).length > 0
-  return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), ...(await sessionApproval(db, actor, saved.event.session_id, options)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed, ...(task ? { task: { id: task, closed: taskClosed } } : {}) }
+  const closedTasks = closedBy(saved, statements, taskPart)
+  return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), ...(await sessionApproval(db, actor, saved.event.session_id, options)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed, ...(task ? { task: { id: task, closed: closedTasks.includes(task) } } : {}), ...(closedTasks.length ? { closedTasks } : {}) }
 }
 // ---- ic_lot_counts: a count per received date (INV-B S5; migration 0294; Inventory replan rev. 2, sections 2.6 and 2.7) ----------------------------------------------------------
 // The submission of the owner's way to count, with a count typed per received date (or one branch total) for each product. Nothing here reads the stock ledger or verifies stock:
@@ -960,8 +966,8 @@ export async function createInventoryCheckLotSubmission(db: D1Compat, principal:
   if (options.approvals) statements.push({ sql: `INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submitted_at,baselines_json,line_set_json)
     SELECT @id,@organization,@branchId,'pending',d.n,@actorId,@now,(SELECT json_group_object(CAST(i.product_id AS TEXT),i.baseline_quantity) FROM inventory_check_items i WHERE i.session_id=@id AND i.baseline_quantity IS NOT NULL),d.line_set
     FROM (SELECT COUNT(*) AS n,json_group_object(CAST(i.product_id AS TEXT),1) AS line_set FROM inventory_check_items i WHERE i.session_id=@id AND ${countDiffersSql('i', '@eps')}) d WHERE d.n>0 RETURNING session_id`, params })
-  const taskPart = task ? taskStatements(task, actor, { branchId, key, hash, now }) : null
-  if (taskPart) statements.push(...taskPart)
+  const taskPart = autoClosePart(actor, { src: id, task, branchId, key, hash, now })
+  statements.push(...taskPart.statements)
   let saved: Awaited<ReturnType<typeof commit>>
   try { saved = await commit(db, principal, actor, statements, key, hash) }
   catch (error) {
@@ -992,8 +998,8 @@ export async function createInventoryCheckLotSubmission(db: D1Compat, principal:
   const created = options.approvals && !saved.replayed && (saved.results?.[approvalAt + 1]?.results ?? []).length > 0
   if (created) { try { await options.onApprovalCreated?.({ sessionId: saved.event.session_id }) } catch { /* announced best-effort */ } }
   if (!saved.replayed && supersede.length) await announceReplaced(options.onApprovalsReplaced, saved.results?.[statements.indexOf(supersede[2]) + 1]?.results) // the batch starts with the authority guard
-  const taskClosed = !!taskPart && !saved.replayed && (saved.results?.[statements.indexOf(taskPart[1]) + 1]?.results ?? []).length > 0
-  return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), ...(await sessionApproval(db, actor, saved.event.session_id, options)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed, ...(task ? { task: { id: task, closed: taskClosed } } : {}) }
+  const closedTasks = closedBy(saved, statements, taskPart)
+  return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), ...(await sessionApproval(db, actor, saved.event.session_id, options)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed, ...(task ? { task: { id: task, closed: closedTasks.includes(task) } } : {}), ...(closedTasks.length ? { closedTasks } : {}) }
 }
 export async function patchInventoryCheckObservation(db: D1Compat, principal: InventoryCheckPrincipal, id: string, productId: number, input: unknown) {
   const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
@@ -1024,6 +1030,7 @@ export async function patchInventoryCheckObservation(db: D1Compat, principal: In
     }
   }
   const params = { id, productId, branchId: session.branch_id, expected, expectedSession, state, counted, reason, actor: actor.id, now: new Date().toISOString() }
+  // A count in an open session is not final (it can be set back until the session closes), so it ticks and closes no task here: closing the session does (patchInventoryCheckSession).
   const saved = await commit(db, principal, actor, [sessionGuard(actor, session, expectedSession, 'open'),
     ...countGuards,
     guard(`EXISTS(SELECT 1 FROM inventory_check_items WHERE session_id=@id AND product_id=@productId AND branch_id=@branchId AND revision=@expected)
@@ -1053,14 +1060,20 @@ export async function patchInventoryCheckSession(db: D1Compat, principal: Invent
   if (previous) return { item: (await committedSessionProjection(db, principal, id)).item, receipt: receiptResponse(previous, true) }
   const status = action === 'close' ? 'closed' : 'open', now = new Date().toISOString()
   const params = { id, status, expected, now, closed: action === 'close' ? now : null }
-  const saved = await commit(db, principal, actor, [sessionGuard(actor, session, expected, action === 'close' ? 'open' : 'closed'),
+  // Closing a count session makes its counts FINAL, so it is a count writer: the tasks it completes close in this same batch (autoClosePart). A task or a pickup holds no counts.
+  const counting = action === 'close' && ![TASK_MEMBERSHIP, PICKUP_MEMBERSHIP].includes(membershipOf(session))
+  const taskPart = counting ? autoClosePart(actor, { src: id, branchId: session.branch_id, key, hash, now }) : null
+  const statements: Statement[] = [sessionGuard(actor, session, expected, action === 'close' ? 'open' : 'closed'),
     { sql: 'UPDATE inventory_check_sessions SET status=@status,revision=revision+1,updated_at=@now,closed_at=@closed WHERE id=@id AND revision=@expected', params },
     guard('changes()=1', 'inventory_check_conflict', {}),
     eventStatement(actor, { sessionId: id, action, key, hash, before: { status: session.status, revision: session.revision }, after: { status, revision: expected+1 }, result: { sessionRevision: expected+1 }, now }),
     // Closing a task closes the pickup it has open, in the same batch (a task is closed by hand with the issue permission; undo is this close record, never a delete).
     ...(action === 'close' && membershipOf(session) === TASK_MEMBERSHIP ? closePickupsStatements().map(({ sql }) => ({ sql, params: { task: id, org: actor.organization_id, actorId: actor.id, actorName: actorSnapshot(actor), key, hash, now } })) : []),
-  ], key, hash)
-  return { item: (await committedSessionProjection(db, principal, id)).item, receipt: receiptResponse(saved.event, saved.replayed) }
+    ...(taskPart ? taskPart.statements : []),
+  ]
+  const saved = await commit(db, principal, actor, statements, key, hash)
+  const closedTasks = closedBy(saved, statements, taskPart)
+  return { item: (await committedSessionProjection(db, principal, id)).item, receipt: receiptResponse(saved.event, saved.replayed), ...(closedTasks.length ? { closedTasks } : {}) }
 }
 export async function inventoryCheckSessionHistory(db: D1Compat, principal: InventoryCheckPrincipal, id: string, query: Record<string,string>) {
   let actor = await currentInventoryCheckActor(db, principal); await schemaReady(db)
@@ -1091,7 +1104,7 @@ export async function inventoryCheckSessionHistory(db: D1Compat, principal: Inve
 // ---- count tasks (owner, 18 Nov 2026; migration 0318; lib/inventoryCheckTasks.ts holds the SQL text and the reads) ----------------------------------------------------------
 // A task is an OPEN count session with scope {membership:'task'}: its items are `unstarted` with no baseline, so it is never a latest count (the lists read done and issue only) and changes no chip,
 // date, Not checked figure or overlay. Issuing writes the session, its items and one create event in ONE batch, with no stock snapshot (the counter measures stock when counting).
-export type TaskIssue = { selection: unknown; maxProducts: number; dropIneligible?: boolean }
+export type TaskIssue = { selection: unknown; maxProducts: number; maxOpenTasks: number; dropIneligible?: boolean }
 async function createTaskSession(db: D1Compat, principal: InventoryCheckPrincipal, input: unknown, issue: TaskIssue) {
   const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
   if (!canIssueInventoryCountTasks(actor)) fail(403, 'inventory_check_issue_required')
@@ -1114,8 +1127,10 @@ async function createTaskSession(db: D1Compat, principal: InventoryCheckPrincipa
   const now = new Date().toISOString(), id = crypto.randomUUID()
   const scope = { membership: TASK_MEMBERSHIP, products: products.length, selection: issue.selection }
   const params = { id, organization: actor.organization_id, branchId, actorId: actor.id, title, scopeJson: JSON.stringify(scope), now, members: JSON.stringify(products.map(product => ({ product_id: product.id, product }))), count: products.length }
+  // The board shows every open task of a branch (at most the cap), so a task is never issued past it: the count is read inside the batch, so two issues at once cannot both pass.
   const statements: Statement[] = [
     guard('EXISTS(SELECT 1 FROM branches WHERE id=@branchId AND is_active=1)', 'inventory_check_baseline_changed', params),
+    guard(`(SELECT COUNT(*) FROM inventory_check_sessions s INDEXED BY inventory_check_sessions_kind_task WHERE s.organization_id IS @organization AND ${kindOf('s')}='${TASK_MEMBERSHIP}' AND s.branch_id=@branchId AND s.status='open')<@maxOpenTasks`, 'inventory_check_task_limit', { ...params, maxOpenTasks: issue.maxOpenTasks }),
     guard(`NOT EXISTS(SELECT 1 FROM json_each(@members) e LEFT JOIN products p ON p.id=json_extract(e.value,'$.product_id')
       WHERE p.id IS NULL OR p.name IS NOT json_extract(e.value,'$.product.name') OR p.image_path IS NOT json_extract(e.value,'$.product.image_path')
       OR p.unit IS NOT json_extract(e.value,'$.product.unit') OR p.parent_id IS NOT json_extract(e.value,'$.product.parent_id')
@@ -1126,7 +1141,17 @@ async function createTaskSession(db: D1Compat, principal: InventoryCheckPrincipa
       SELECT @id,json_extract(value,'$.product_id'),@branchId,json_extract(value,'$.product'),NULL,'{}' FROM json_each(@members)`, params },
     eventStatement(actor, { sessionId: id, action: 'create', key, hash, before: null, after: { status: 'open', revision: 0, members: products.length, task: true }, result: { sessionRevision: 0 }, now }),
   ]
-  const saved = await commit(db, principal, actor, statements, key, hash)
+  let saved: Awaited<ReturnType<typeof commit>>
+  try { saved = await commit(db, principal, actor, statements, key, hash) }
+  catch (error) {
+    // Read only because the issue was refused: how many tasks the branch has open, so the page can say so.
+    if (error instanceof InventoryCheckSessionError && error.code === 'inventory_check_task_limit') {
+      let open: { n: number } | undefined
+      try { open = await db.prepare(`SELECT COUNT(*) AS n FROM inventory_check_sessions s INDEXED BY inventory_check_sessions_kind_task WHERE s.organization_id IS @organization AND ${kindOf('s')}='${TASK_MEMBERSHIP}' AND s.branch_id=@branchId AND s.status='open'`).get<{ n: number }>({ organization: actor.organization_id, branchId }) } catch { /* the refusal stands without the count */ }
+      fail(409, 'inventory_check_task_limit', { open: Number(open?.n ?? issue.maxOpenTasks), limit: issue.maxOpenTasks })
+    }
+    throw error
+  }
   return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed }
 }
 /** A task of the actor's organization and the open pickup it has, if any (one statement). */

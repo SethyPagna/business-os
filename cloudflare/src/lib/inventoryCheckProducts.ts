@@ -65,8 +65,10 @@ export type InventoryCheckSimpleScope = { organizationId: number | null; session
 const checkScopeSql = (branchScoped: boolean) => `s.organization_id IS @checkOrg AND i.branch_id=s.branch_id${branchScoped ? ' AND i.branch_id=@branchId' : ''}`
 const CHECK_ITEMS_SQL = 'inventory_check_items i INDEXED BY inventory_check_items_product_latest CROSS JOIN inventory_check_sessions s ON s.id=i.session_id'
 const CHECK_ITEM_STATE = { in_check: 'unstarted', ok: 'done', issue: 'issue' } as const
+// A count task's items are `unstarted` too, but a task is work handed out, not a count in progress: it never puts a product in check. ONE condition for every reader of the open checks (the filter, the page rows, the summary).
+const NOT_A_TASK_SQL = (alias: string) => `json_extract(${alias}.scope_json, '$.membership') IS NOT 'task'`
 const IN_OPEN_CHECK_SQL = (id: string, branchScoped: boolean) => `EXISTS (SELECT 1 FROM ${CHECK_ITEMS_SQL}
-  WHERE i.product_id=${id} AND i.state='unstarted' AND s.status='open' AND json_extract(s.scope_json, '$.membership') IS NOT 'task' AND ${checkScopeSql(branchScoped)})`
+  WHERE i.product_id=${id} AND i.state='unstarted' AND s.status='open' AND ${NOT_A_TASK_SQL('s')} AND ${checkScopeSql(branchScoped)})`
 const LATEST_STATE_SQL = (id: string, branchScoped: boolean) => `(SELECT i.state FROM ${CHECK_ITEMS_SQL}
   WHERE i.product_id=${id} AND i.state IN ('done','issue') AND ${checkScopeSql(branchScoped)} ORDER BY i.updated_at DESC,i.session_id DESC LIMIT 1)`
 
@@ -397,7 +399,7 @@ const pageCheckCtes = (branchScoped: boolean) => `latest AS (SELECT product_id,s
     FROM (SELECT DISTINCT id FROM __page) pg CROSS JOIN ${CHECK_ITEMS_SQL} LEFT JOIN users u ON u.id=i.updated_by
     WHERE i.product_id=pg.id AND i.state IN ('done','issue') AND ${checkScopeSql(branchScoped)}) WHERE rn=1),
   open_check AS (SELECT DISTINCT i.product_id FROM (SELECT DISTINCT id FROM __page) pg CROSS JOIN ${CHECK_ITEMS_SQL}
-    WHERE i.product_id=pg.id AND i.state='unstarted' AND s.status='open' AND ${checkScopeSql(branchScoped)})`
+    WHERE i.product_id=pg.id AND i.state='unstarted' AND s.status='open' AND ${NOT_A_TASK_SQL('s')} AND ${checkScopeSql(branchScoped)})`
 const PAGE_CHECK_COLUMNS = `CASE WHEN __page.id IN (SELECT product_id FROM open_check) THEN 'in_check' WHEN latest.state='issue' THEN 'issue'
     WHEN latest.state='done' THEN 'ok' ELSE 'not_checked' END AS check_status,
   latest.counted_quantity AS __check_count,latest.reason AS check_note,latest.updated_by AS __check_by_id,latest.by_name AS __check_by_name,
@@ -432,9 +434,9 @@ export async function readInventoryCheckProductsSimple(db: Pick<D1Compat, 'batch
     FROM cohort c,json_each(replace(json_array(COALESCE(c.${field},'')||'||'||COALESCE(c.${field === 'brand' ? 'brands' : 'categories'},'')),'||','","')) choice
     WHERE trim(choice.value)<>'' ORDER BY value COLLATE NOCASE,value LIMIT 201))` : "'[]'"
   const summarySql = `WITH ${plan.ctes(plan.stockFiltered)}${wantCounts ? `,
-    obs AS MATERIALIZED (SELECT i.product_id,i.state,i.updated_at,i.session_id,s.status AS session_status FROM (SELECT DISTINCT id FROM cohort) c CROSS JOIN ${CHECK_ITEMS_SQL}
+    obs AS MATERIALIZED (SELECT i.product_id,i.state,i.updated_at,i.session_id,s.status AS session_status,${NOT_A_TASK_SQL('s')} AS not_task FROM (SELECT DISTINCT id FROM cohort) c CROSS JOIN ${CHECK_ITEMS_SQL}
       WHERE i.product_id=c.id AND ${checkScopeSql(plan.branchId !== undefined)}),
-    open_check AS (SELECT DISTINCT product_id FROM obs WHERE state='unstarted' AND session_status='open'),
+    open_check AS (SELECT DISTINCT product_id FROM obs WHERE state='unstarted' AND session_status='open' AND not_task),
     latest AS (SELECT product_id,state FROM (SELECT product_id,state,ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY updated_at DESC,session_id DESC) AS rn
       FROM obs WHERE state IN ('done','issue')) WHERE rn=1)` : ''}
     SELECT (SELECT COUNT(*) FROM cohort) AS total_variants,
