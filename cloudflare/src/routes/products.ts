@@ -1303,9 +1303,9 @@ const filterJoinSql = (f: ReturnType<typeof buildSearchFilters>) => joinsReadBy(
 // branch selected.
 
 // The Inventory Check restriction of a list as SQL terms over the product alias p (restrictIdsJson / excludeIdsJson: server-only, see ProductSearchOptions). A header row (is_group) is the family's title, never
-// a product to count, so Not checked leaves it out. The list's own rows and the family members and name siblings that a typed search re-adds meet the SAME terms.
+// a product to count, so every check list (Not checked, Checked OK, Issues, Pending, a day) leaves it out, as the chips do. The list's own rows and the family members and name siblings that a typed search re-adds meet the SAME terms.
 const checkTermsOf = (options: { restrictIdsJson?: string; excludeIdsJson?: string }): string[] => [
-  ...(options.restrictIdsJson !== undefined ? ['p.id IN (SELECT value FROM json_each(@icRestrictIds))'] : []),
+  ...(options.restrictIdsJson !== undefined ? ['p.id IN (SELECT value FROM json_each(@icRestrictIds))', 'COALESCE(p.is_group, 0) = 0'] : []),
   ...(options.excludeIdsJson !== undefined ? ['p.id NOT IN (SELECT value FROM json_each(@icExcludeIds))', 'COALESCE(p.is_group, 0) = 0'] : []),
 ]
 const withCheckTerms = (sql: string, terms: readonly string[]): string => (terms.length ? `${sql} AND ${terms.join(' AND ')}` : sql)

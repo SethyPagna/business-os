@@ -3,9 +3,11 @@
 //   iff          over random writes the token changes if and only if the rows' (id, is_active, is_group) changed, and whenever the population changed
 //   summary      equals a brute-force oracle after EVERY random write, with no cache version bumped by any writer: only the token moves the key
 //   restore      the triggers stand down in restore mode, so rotateDataEpoch (the step every restore and reset ends with) writes a fresh token and a fresh epoch
-//   headers      a family header (is_group = 1) is in neither the population nor the Not checked list
-//   snapshot     ok + issue never exceeds total, also when a cache-version bump failed; the token, the count and the seek are read in ONE batch
-// Mutants planted and killed: no DELETE trigger, is_group missing from the UPDATE OF list, a WHEN that fires on every update, the epoch step not refreshing the token, the products version in the key.
+//   headers      a family header (is_group = 1) is in no figure and in no list: Not checked, Checked OK, Issues, grouped, and the day tap (also with a count on the header)
+//   snapshot     ok + issue never exceeds total, also when a cache-version bump failed or a row enters between the token read and the batch; the token, the count and the seek are read in ONE batch
+//   during a restore  no count is cached or reused while maintenance is in mode restore (the token is frozen then); after the release the counts are correct
+//   no table     a database without the token table: rotateDataEpoch still completes, the counts are computed uncached
+// Mutants planted and killed: no DELETE trigger, is_group missing from the UPDATE OF list, a WHEN that fires on every update, the epoch step not refreshing the token, the products version in the key, a cached total reused without the token re-check.
 // Run: node scripts/test-inventory-population-token-native.cjs
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -187,7 +189,7 @@ function truth(app, branch) {
 ;(async () => {
   // ---- header rows are not part of the population, and the Not checked list leaves them out too ------------------------------------------------------------------------------------------------
   const HEADERS = { products: [{ id: 500, name: 'Serum Fam', group: true }, { id: 501, name: 'Serum Fam', parent: 500 }, { id: 502, name: 'Serum Fam', parent: 500 }, { id: 503, name: 'Solo' }, { id: 504, name: 'Toner Fam', group: true }, { id: 505, name: 'Toner Fam', parent: 504 }],
-    counts: [{ product: 501, state: 'done', at: T(1) }, { product: 502, state: 'issue', at: T(2) }, { product: 503, state: 'done', at: T(3) }] }
+    counts: [{ product: 501, state: 'done', at: T(1) }, { product: 502, state: 'issue', at: T(2) }, { product: 503, state: 'done', at: T(3) }, { product: 500, state: 'done', at: T(4) }] }
   for (const ranked of [false, true]) {
     const app = make(HEADERS)
     if (ranked) app.setSwitch('catalog_ranked_scope', 'on')
@@ -196,7 +198,11 @@ function truth(app, branch) {
     check(`ranked scope ${ranked ? 'on' : 'off'}: headers 500 and 504 are not counted: ok 2, issue 1, Not checked 1, total 4`, JSON.stringify(figures(s)) === '{"ok":2,"issue":1,"not_checked":1,"total":4}', () => JSON.stringify(s))
     check(`ranked scope ${ranked ? 'on' : 'off'}: the plain Not checked tap lists [505], not a header`, JSON.stringify(await tap('not_checked')) === '[505]', async () => JSON.stringify(await tap('not_checked')))
     check(`ranked scope ${ranked ? 'on' : 'off'}: the grouped Not checked tap lists [505] too`, JSON.stringify(await tap('not_checked', '&groupBy=checked')) === '[505]', async () => JSON.stringify(await tap('not_checked', '&groupBy=checked')))
-    check(`ranked scope ${ranked ? 'on' : 'off'}: the Checked OK and Issues taps match their chips`, JSON.stringify(await tap('ok')) === '[501,503]' && JSON.stringify(await tap('issue')) === '[502]')
+    check(`ranked scope ${ranked ? 'on' : 'off'}: the Checked OK and Issues taps match their chips (a count on the header 500 is in no figure and in no list)`, JSON.stringify(await tap('ok')) === '[501,503]' && JSON.stringify(await tap('issue')) === '[502]' && s.ok === 2 && s.issue === 1)
+    check(`ranked scope ${ranked ? 'on' : 'off'}: the grouped Checked OK tap lists [501,503] too, not the header`, JSON.stringify(await tap('ok', '&groupBy=checked')) === '[501,503]', async () => JSON.stringify(await tap('ok', '&groupBy=checked')))
+    const day = (s.days || [])[0]
+    const dayTap = day ? ids(await app.get(`/api/inventory-checks/list?branchId=1&checkedOn=${day.day}&pageSize=100`)) : []
+    check(`ranked scope ${ranked ? 'on' : 'off'}: the day tap lists as many rows as its chip says (${day && day.count}) and no header`, Boolean(day) && dayTap.length === day.count && !dayTap.includes(500), () => JSON.stringify({ day, dayTap }))
   }
 
   // ---- random writes, no version bumped by any writer: the summary follows the rows -----------------------------------------------------------------------------------------------------------------
