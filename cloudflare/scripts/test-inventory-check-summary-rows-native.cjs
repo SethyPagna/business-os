@@ -4,8 +4,8 @@
 //   population  the rows the unfiltered list can show: catalogProductSql, an active product; a row that left the list is in no figure
 //   figures     ok / issue / pending = rows of that population whose LATEST count at the branch has the state; total = the population; not_checked = total - ok - issue
 //   tap         a chip's number is the number of rows its tap lists (checkState=...)
-//   reads       one statement for the population on a cold cache, none on a warm one; the key moves with the inventory_checks version AND the products version
-// A brute-force oracle over random catalogues pins the figures, and planted mutants (families, no population, earliest count, swapped states, the old clamp, a key without the products version) must each be caught.
+//   reads       a warm open reads the membership token (one statement, one row) and nothing else; a cold one reads the token, the count and the seek in ONE batch; the key moves with the inventory_checks version AND the token
+// A brute-force oracle over random catalogues pins the figures, and planted mutants (families, no population, earliest count, swapped states, the old clamp, a key without the token) must each be caught.
 // Run: node scripts/test-inventory-check-summary-rows-native.cjs
 const assert = require('node:assert/strict')
 const { createInvApp } = require('./harness/inv-app.cjs')
@@ -160,24 +160,24 @@ function randomWorld(seed) {
   check('too many checked products (Free): both routes say { tooLarge: true } and nothing else', JSON.stringify((await bigApp.get('/api/inventory-checks/list?branchId=1', free)).json.summary) === '{"tooLarge":true}' && JSON.stringify((await bigApp.get('/api/inventory-checks/overlay?branchId=1&ids=100', free)).json.summary) === '{"tooLarge":true}')
 
   // ---- reads ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-  const TOTAL = /COUNT\(\*\) AS n FROM products p/, CHECKED = /SELECT p\.id AS id FROM products p WHERE \+p\.is_active = 1 AND p\.id IN/, POP = /COUNT\(\*\) AS n FROM products p|SELECT p\.id AS id FROM products p WHERE \+p\.is_active = 1 AND p\.id IN/
+  const TOTAL = /COUNT\(\*\) AS n FROM products p/, CHECKED = /SELECT p\.id AS id FROM products p WHERE \+p\.is_active = 1 AND COALESCE\(p\.is_group, 0\) = 0 AND p\.id IN/, POP = /COUNT\(\*\) AS n FROM products p|SELECT p\.id AS id FROM products p WHERE \+p\.is_active = 1 AND COALESCE\(p\.is_group, 0\) = 0 AND p\.id IN/, TOKEN = /FROM inventory_population_token/
   fresh(app)
-  let mark = app.mark(); await app.get('/api/inventory-checks/list?branchId=1')
+  const batches0 = app.batches.length; let mark = app.mark(); await app.get('/api/inventory-checks/list?branchId=1')
   const coldTotal = app.since(mark).filter((s) => TOTAL.test(s)).length, coldChecked = app.since(mark).filter((s) => CHECKED.test(s)).length, coldSets = app.since(mark).filter((s) => /inventory_check_(items|sessions|approvals)/.test(s)).length
-  check(`a cold list reads the sets (${coldSets} statements, as before), ONE count of the population and ONE seek of the checked ids`, coldTotal === 1 && coldChecked === 1 && coldSets === 2, `${coldTotal} ${coldChecked} ${coldSets}`)
+  const coldTokens = app.since(mark).filter((s) => TOKEN.test(s)).length, coldBatches = app.batches.slice(batches0).filter((b) => TOTAL.test(b.sql)).length
+  check(`a cold list reads the sets (${coldSets} statements, as before), ONE count of the population, ONE seek of the checked ids, and the token twice (the key, then in the batch with the count)`, coldTotal === 1 && coldChecked === 1 && coldSets === 2 && coldTokens === 2 && coldBatches === 1, `${coldTotal} ${coldChecked} ${coldSets} ${coldTokens} ${coldBatches}`)
   mark = app.mark(); await app.get('/api/inventory-checks/overlay?branchId=1&ids=100,101')
-  check('the overlay right after it reads no population and no check-state statement (the same cached summary)', app.since(mark).filter((s) => POP.test(s) || /ROW_NUMBER\(\) OVER/.test(s)).length === 0)
+  check('the overlay right after it reads no population and no check-state statement (the same cached summary): the token only', app.since(mark).filter((s) => POP.test(s) || /ROW_NUMBER\(\) OVER/.test(s)).length === 0 && app.since(mark).filter((s) => TOKEN.test(s)).length === 1)
   mark = app.mark(); await app.get('/api/inventory-checks/list?branchId=1&page=2&pageSize=3'); await app.get('/api/inventory-checks/list?branchId=1&checkState=ok')
   check('a page step and a filter on the warm cache read none either', app.since(mark).filter((s) => POP.test(s) || /ROW_NUMBER\(\) OVER/.test(s)).length === 0)
   // A count saved moves the inventory_checks version only: the checked ids are looked at again, the catalogue is not counted again.
   await app.load('lib/cache.ts').bumpVersion(app.env, 'inventory_checks')
   mark = app.mark(); await app.get('/api/inventory-checks/list?branchId=1')
-  check('after a count was saved the catalogue is not counted again (the total is cached on the products version alone), the checked ids are', app.since(mark).filter((s) => TOTAL.test(s)).length === 0 && app.since(mark).filter((s) => CHECKED.test(s)).length === 1)
-  // A product leaving the list moves the products version: the figures follow, no stale total.
+  check('after a count was saved the catalogue is not counted again (the total is cached on the token alone), the checked ids are', app.since(mark).filter((s) => TOTAL.test(s)).length === 0 && app.since(mark).filter((s) => CHECKED.test(s)).length === 1)
+  // A product leaving the list moves the token (a trigger, so no writer can forget it) and no cache version is bumped at all: the figures follow, no stale total.
   retire(app, 101)
-  await app.load('lib/cache.ts').bumpVersion(app.env, 'products')
   const afterRetire = await summaryOf(app)
-  check('retiring a checked row moves the products version: the next answer has total 8, ok 3, Not checked 5', afterRetire.total === 8 && afterRetire.ok === 3 && afterRetire.not_checked === 5, () => JSON.stringify(afterRetire))
+  check('retiring a checked row changes the token: the next answer has total 8, ok 3, Not checked 5', afterRetire.total === 8 && afterRetire.ok === 3 && afterRetire.not_checked === 5, () => JSON.stringify(afterRetire))
 
   // ---- the oracle: random catalogues, several counts per row, active and stock states -----------------------------------------------------------------------------------------
   for (let seed = 1; seed <= 24; seed++) {
@@ -205,15 +205,15 @@ function randomWorld(seed) {
   await mutate('the earliest count instead of the latest', { [LIST]: [['ORDER BY i.updated_at DESC, i.session_id DESC) AS rn', 'ORDER BY i.updated_at ASC, i.session_id ASC) AS rn']] }, twice, (m) => wrong(m, twice))
   await mutate('ok and issue swapped', { [LIST]: [['return { ok, issue,', 'return { ok: issue, issue: ok,']] }, twice, (m) => wrong(m, twice))
   await mutate('the old clamp over raw counts instead of the population rule', { [LIST]: [['not_checked: population.total - ok - issue,', 'not_checked: Math.max(0, population.total - sets.ok.length - sets.issue.length),']] }, left, (m) => wrong(m, left))
-  await mutate('a cache key without the products version', { [LIST]: [['`icp:${version}:${products}`', '`icp:${version}`']] }, F3, async (m) => {
-    await summaryOf(m); retire(m, 101); await m.load('lib/cache.ts').bumpVersion(m.env, 'products')
+  await mutate('a cache key without the token', { [LIST]: [['`icp:${version}:${token}`', '`icp:${version}`']] }, F3, async (m) => {
+    await summaryOf(m); retire(m, 101)
     return (await summaryOf(m)).total !== 8
   })
-  await mutate('the total counted again after every saved count (keyed with the check version)', { [LIST]: [['`icn:${products}`', '`icn:${products}:${Math.random()}`']] }, F3, async (m) => {
+  await mutate('the total counted again after every saved count (keyed with the check version)', { [LIST]: [['`icn:${token}`', '`icn:${token}:${Math.random()}`']] }, F3, async (m) => {
     await m.get('/api/inventory-checks/list?branchId=1'); await m.load('lib/cache.ts').bumpVersion(m.env, 'inventory_checks'); const mark2 = m.mark(); await m.get('/api/inventory-checks/list?branchId=1')
     return m.since(mark2).filter((s) => TOTAL.test(s)).length !== 0
   })
-  await mutate('the population read on every call (no cache)', { [LIST]: [['`icp:${version}:${products}`, getPlanLimits(env).productListCacheSeconds', '`icp:${version}:${products}:${Math.random()}`, getPlanLimits(env).productListCacheSeconds']] }, F3, async (m) => {
+  await mutate('the population read on every call (no cache)', { [LIST]: [['`icp:${version}:${token}`, getPlanLimits(env).productListCacheSeconds', '`icp:${version}:${token}:${Math.random()}`, getPlanLimits(env).productListCacheSeconds']] }, F3, async (m) => {
     await m.get('/api/inventory-checks/list?branchId=1'); const mark2 = m.mark(); await m.get('/api/inventory-checks/overlay?branchId=1&ids=100')
     return m.since(mark2).filter((s) => POP.test(s)).length !== 0
   })

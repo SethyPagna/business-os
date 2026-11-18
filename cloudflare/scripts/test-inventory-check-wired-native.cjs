@@ -300,7 +300,8 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
   check('last movement: a product with none is null (102)', byId[102].last_change_at === null)
   check('overlay carries the inventory_checks version and no stock quantity of the product', typeof overlay.json.version === 'string' && !/stock_quantity/.test(JSON.stringify(overlay.json)))
   const overlayStatements = app.batches.filter((b) => /inventory_check_items|inventory_movements/.test(b.sql))
-  const oneBatch = app.batches.slice(-3)
+  // the status counts' own batch (membership token, population count, seek of the checked ids) follows the overlay's; it is pinned by test-inventory-population-token-native.cjs
+  const oneBatch = app.batches.filter((b) => !/inventory_population_token|FROM products p WHERE/.test(b.sql)).slice(-3)
   check('the overlay reads ran in ONE batch of three statements (counts, pending, last movement)', oneBatch.length === 3 && /inventory_check_items/.test(oneBatch[0].sql) && /inventory_check_approvals/.test(oneBatch[1].sql) && /inventory_movements/.test(oneBatch[2].sql))
   check('the movement lookup is two index steps: newest day, then julianday over a bounded subselect', /ORDER BY m\.created_at DESC, m\.id DESC LIMIT 1/.test(oneBatch[2].sql) && /julianday\(recent\.created_at\)/.test(oneBatch[2].sql) && /LIMIT @lastChangeRows/.test(oneBatch[2].sql))
   check('the movement lookup is bounded by the plan field (Paid 8)', oneBatch[2].params.lastChangeRows === 8 && JSON.parse(oneBatch[2].params.ids).length === 6)

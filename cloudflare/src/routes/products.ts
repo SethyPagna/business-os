@@ -1488,7 +1488,7 @@ function buildSearchFilters(query: Record<string, string>, lowStock: LowStockCon
 
   if (searchWhereClause) where.push(searchWhereClause)
   if (options.restrictIdsJson !== undefined) { params.icRestrictIds = options.restrictIdsJson; where.push('p.id IN (SELECT value FROM json_each(@icRestrictIds))') }
-  if (options.excludeIdsJson !== undefined) { params.icExcludeIds = options.excludeIdsJson; where.push('p.id NOT IN (SELECT value FROM json_each(@icExcludeIds))') }
+  if (options.excludeIdsJson !== undefined) { params.icExcludeIds = options.excludeIdsJson; where.push('p.id NOT IN (SELECT value FROM json_each(@icExcludeIds))', 'COALESCE(p.is_group, 0) = 0') }
 
   return { where, joins, params, stockExpr, matchRankSql, rankCteSql, matchTierSql, titleOnly, hasSearchTerm, familyMemberWhereSql, rankedIdDriver: searchQuery.rankedIdDriver, candidates: searchQuery.candidates, searchWhereClause }
 }
