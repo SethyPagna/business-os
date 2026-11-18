@@ -4,6 +4,7 @@ import { getDb } from './db'
 import { getInventoryCheckAccess, InventoryCheckQueryError } from './inventoryCheckAccess'
 import { canSeeStaffIdentity, waitingLineSql } from './inventoryCheckSessions'
 import { getPlanLimits } from './planTier'
+import { POPULATION_TOKEN_SQL, populationTokenOf } from './inventoryCheckList'
 
 // The Inventory overlay (INV-A S4a, behind `ic_wired`): the only reads Inventory makes besides the shared Products list. They are scoped to the window's ids
 // (at most inventoryOverlayMaxRows), run in ONE batch, and read nothing about stock itself -- no ledger, no verification, no sales:
@@ -70,7 +71,7 @@ export function parseOverlayIds(raw: string | undefined, env: Env): number[] {
   return ids.map(Number)
 }
 
-export async function readInventoryOverlay(env: Env, user: SessionUser, request: { branchId: number; ids: number[]; pendingAvailable: boolean; lotLines?: boolean }): Promise<OverlayEntry[]> {
+export async function readInventoryOverlay(env: Env, user: SessionUser, request: { branchId: number; ids: number[]; pendingAvailable: boolean; lotLines?: boolean; populationToken?: { token?: string | null } }): Promise<OverlayEntry[]> {
   const access = getInventoryCheckAccess(user)
   if (!access.canView) throw new InventoryCheckQueryError(403, 'inventory_check_view_required', '')
   const { branchId, ids } = request
@@ -78,12 +79,20 @@ export async function readInventoryOverlay(env: Env, user: SessionUser, request:
   const organization = user.organization_id ?? null
   const params = { ids: JSON.stringify(ids), branchId, organization }
   const withPending = request.pendingAvailable && access.fields.stock
-  const results = await getDb(env).batch([
+  const statements = [
     { sql: COUNT_ENTRIES_SQL, params },
     ...(withPending ? [{ sql: PENDING_LINES_SQL, params }] : []),
     { sql: LAST_CHANGE_SQL, params: { ids: params.ids, lastChangeRows: getPlanLimits(env).inventoryLastChangeMaxRows } },
     ...(request.lotLines ? [{ sql: LOT_LINES_SQL, params }] : []),
-  ])
+  ]
+  // The membership token of the status counts rides this batch (last), so a warm open is one call; a database without its table (0317) answers the batch without it and the counts are computed uncached.
+  const slot = request.populationToken
+  let results
+  try { results = await getDb(env).batch(slot ? [...statements, { sql: POPULATION_TOKEN_SQL }] : statements) } catch (error) {
+    if (!slot || !/no such table: inventory_population_token/.test(String((error as Error)?.message ?? error))) throw error
+    results = await getDb(env).batch(statements)
+  }
+  if (slot) slot.token = populationTokenOf(results[statements.length]?.results as Array<{ token?: unknown }> | undefined)
   const rows = (results[0]?.results ?? []) as CountRow[]
   const pending = new Set(withPending ? ((results[1]?.results ?? []) as Array<{ product_id: number }>).map((row) => Number(row.product_id)) : [])
   const lastRows = (results[withPending ? 2 : 1]?.results ?? []) as Array<{ product_id: number; last_at: string | null }>

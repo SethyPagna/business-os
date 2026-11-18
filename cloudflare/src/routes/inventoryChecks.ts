@@ -183,15 +183,16 @@ app.get('/overlay', async c => {
   const wantSummary = c.req.query('summary') !== '0'
   const lotCounts = await lotCountsOn(c)
   const wantLots = c.req.query('lots') === '1' && access.fields.received
+  const populationToken: { token?: string | null } = {}
   const [items, withLots] = await Promise.all([
-    readInventoryOverlay(c.env, user, { branchId, ids, pendingAvailable: fixStock, lotLines: lotCounts }),
+    readInventoryOverlay(c.env, user, { branchId, ids, pendingAvailable: fixStock, lotLines: lotCounts, ...(wantSummary ? { populationToken } : {}) }),
     // Received dates for the same ids, for a screen whose shared store does not hold them: the same reader as the list (a first read, not a second).
     wantLots ? attachLotRows(c.env, user, new Set(['lots']), { items: ids.map((id) => ({ id })) }, true) : Promise.resolve(null),
   ])
   const lots = withLots ? (withLots.items as Array<{ id: number; lots?: Array<Record<string, unknown>>; lots_more?: true }>).map((row) => ({ product_id: row.id,
     lots: (row.lots ?? []).map((lot) => access.fields.stock ? lot : { ...lot, branches: (lot.branches as Array<Record<string, unknown>>).map(({ quantity: _quantity, ...entry }) => entry) }),
     ...(row.lots_more ? { lots_more: true } : {}) })) : undefined
-  const summary = wantSummary ? await readCheckSummary(c, branchId, fixStock) : null
+  const summary = wantSummary ? await readCheckSummary(c, branchId, fixStock, undefined, populationToken.token) : null
   const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock, await submissionCaps(c, lotCounts), availableGroupings(access.fields))
   return c.json({ wired: true, branchId, version: await inventoryChecksVersion(c.env), items, ...(lots ? { lots } : {}),
     ...(summary ? { summary } : {}), capabilities })

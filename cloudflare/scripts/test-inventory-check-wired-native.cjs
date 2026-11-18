@@ -308,7 +308,7 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
   check('overlay statements never mention the ledger', !app.since(0).some((sql) => ledger.test(sql) && /inventory_movements|inventory_check_approvals/.test(sql)))
   void overlayStatements
   const freeOverlay = await app.get('/api/inventory-checks/overlay?branchId=1&ids=100', freeEnv)
-  check('Free: the same lookup is bounded at 4 rows per product', freeOverlay.status === 200 && app.batches.slice(-1)[0].params.lastChangeRows === 4)
+  check('Free: the same lookup is bounded at 4 rows per product', freeOverlay.status === 200 && app.batches.filter((b) => /inventory_movements/.test(b.sql)).slice(-1)[0].params.lastChangeRows === 4)
   const tooMany = await app.get(`/api/inventory-checks/overlay?branchId=1&ids=${Array.from({ length: 151 }, (_, i) => i + 1).join(',')}`, freeEnv)
   check('Free: more than inventoryOverlayMaxRows (150) ids is refused 400', tooMany.status === 400)
   const paidMany = await app.get(`/api/inventory-checks/overlay?branchId=1&ids=${Array.from({ length: 151 }, (_, i) => i + 1).join(',')}`)

@@ -246,7 +246,7 @@ function truth(app, branch) {
     return miss
   }
   const FAULT_EDITS = {
-    'the products version in the key': { [LIST]: [['readPopulationToken(env)])', "(async () => { const v = await getVersionWithFallback(env, 'products'); return v })()])"]] },
+    'the products version in the key': { [LIST]: [['readToken === undefined ? readPopulationToken(env) : Promise.resolve(readToken ?? unsafeVersionToken())])', "(async () => { const v = await getVersionWithFallback(env, 'products'); return v })()])"]] },
   }
   const good = await randomRoutes(null, 14, 40)
   check('14 seeds x 40 random writes (create, delete, retire, reactivate, header toggle, other columns, a saved count, a repeat open, a restore-mode write followed by the epoch step): /list and /overlay equal the brute-force truth every time, with no products version bumped', good === null, () => JSON.stringify(good))
@@ -378,22 +378,27 @@ function truth(app, branch) {
   {
     const app = make({ products: rowsOf(6, 'Reads', 700), counts: [{ product: 700, state: 'done', at: T(1) }] })
     const TOKEN = /FROM inventory_population_token/, COUNT = /COUNT\(\*\) AS n FROM products p/, SEEK = /SELECT p\.id AS id FROM products p/
-    const run = async (url) => { const mark = app.mark(), batches = app.batches.length; await app.get(url); const used = app.since(mark); return { token: used.filter((s) => TOKEN.test(s)).length, count: used.filter((s) => COUNT.test(s)).length, seek: used.filter((s) => SEEK.test(s)).length, batched: app.batches.slice(batches).filter((b) => TOKEN.test(b.sql) || COUNT.test(b.sql) || SEEK.test(b.sql)).length } }
+    // D1 calls: a db.batch is one call however many statements it holds; the Worker's 15 s read-switch refresh is left out (it lands on whichever request comes at the expiry)
+    const SWITCH_READ = /FROM system_flags WHERE key IN (@switches, @epoch)/
+    const realBatch = app.env.DB.batch; let batchCalls = 0, batchStatements = 0
+    app.env.DB.batch = async (list) => { batchCalls++; batchStatements += list.length; return realBatch(list) }
+    const run = async (url) => { const mark = app.mark(), batches = app.batches.length, c0 = batchCalls, s0 = batchStatements; await app.get(url); const used = app.since(mark); return { calls: used.filter((s) => !SWITCH_READ.test(s)).length - (batchStatements - s0) + (batchCalls - c0), token: used.filter((s) => TOKEN.test(s)).length, count: used.filter((s) => COUNT.test(s)).length, seek: used.filter((s) => SEEK.test(s)).length, batched: app.batches.slice(batches).filter((b) => TOKEN.test(b.sql) || COUNT.test(b.sql) || SEEK.test(b.sql)).length } }
+    const EXPECT = { cold: 9, saved: 4, moved: 2 }
     const cold = await run('/api/inventory-checks/overlay?branchId=1&ids=700')
-    check(`a cold open reads the token for the key, then the token, the count and the seek in ONE batch (${JSON.stringify(cold)})`, cold.token === 2 && cold.count === 1 && cold.seek === 1 && cold.batched === 3)
+    check(`a cold open reads the token in the overlay's own batch, then the token, the count and the seek in ONE batch (${JSON.stringify(cold)})`, cold.token === 2 && cold.count === 1 && cold.seek === 1 && cold.batched === 4 && cold.calls === EXPECT.cold)
     const warm = await run('/api/inventory-checks/overlay?branchId=1&ids=700')
-    check(`a warm open reads the token only: one statement (${JSON.stringify(warm)})`, warm.token === 1 && warm.count === 0 && warm.seek === 0 && warm.batched === 0)
+    check(`a warm overlay reads the token inside the overlay's own batch, never as a call of its own (${JSON.stringify(warm)})`, warm.token === 1 && warm.count === 0 && warm.seek === 0 && warm.batched === 1)
     const row = app.raw.prepare('SELECT COUNT(*) AS n FROM inventory_population_token').get().n
     check('the token table holds exactly one row', row === 1)
     await app.load('lib/cache.ts').bumpVersion(app.env, 'inventory_checks')
     const saved = await run('/api/inventory-checks/overlay?branchId=1&ids=700')
-    check(`after a saved count only the seek reruns, in a batch with the token, and the cached total is reused (${JSON.stringify(saved)})`, saved.count === 0 && saved.seek === 1 && saved.token === 2 && saved.batched === 2)
+    check(`after a saved count only the seek reruns, in a batch with the token, and the cached total is reused (${JSON.stringify(saved)})`, saved.count === 0 && saved.seek === 1 && saved.token === 2 && saved.batched === 3 && saved.calls === EXPECT.saved)
     app.raw.prepare('UPDATE products SET is_active = 0 WHERE id = 705').run()
     const moved = await run('/api/inventory-checks/overlay?branchId=1&ids=700')
-    check(`a retire moves the token: the next open counts and seeks again in one batch (${JSON.stringify(moved)})`, moved.count === 1 && moved.seek === 1 && moved.batched === 3)
+    check(`a retire moves the token: the next open counts and seeks again in one batch (${JSON.stringify(moved)})`, moved.count === 1 && moved.seek === 1 && moved.batched === 4 && moved.calls === EXPECT.moved)
     app.raw.prepare("UPDATE products SET name = 'Renamed', selling_price_usd = 4 WHERE id = 701").run()
     const unrelated = await run('/api/inventory-checks/overlay?branchId=1&ids=700')
-    check(`an update of other columns leaves the token, so the open is warm again (${JSON.stringify(unrelated)})`, unrelated.count === 0 && unrelated.seek === 0 && unrelated.token === 1)
+    check(`an update of other columns leaves the token, so the open is warm again: ONE D1 call, as before the status counts (${JSON.stringify(unrelated)})`, unrelated.count === 0 && unrelated.seek === 0 && unrelated.token === 1 && unrelated.calls === 1)
     const noBranch = await run('/api/inventory-checks/overlay?branchId=1&ids=700&summary=0')
     check('summary=0 reads no token at all', noBranch.token === 0 && noBranch.count === 0)
     // the by-id refresh after a Fix stock Set: the page keeps its figures, so the list read asks for none

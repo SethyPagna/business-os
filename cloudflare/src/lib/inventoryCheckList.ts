@@ -181,6 +181,12 @@ export function summaryFromSets(sets: CheckStateSets, withPending: boolean, popu
 
 type Ctx = Context<{ Bindings: Env; Variables: { user: SessionUser } }>
 
+/** The token out of the rows of POPULATION_TOKEN_SQL: null when there is none (a restore, no table) or it is not a token. */
+export function populationTokenOf(rows: ReadonlyArray<{ token?: unknown }> | undefined): string | null {
+  const token = rows?.[0]?.token
+  return typeof token === 'string' && TOKEN_FORM.test(token) ? token : null
+}
+
 /** The membership token (one row, one statement), or an unsafe token that no cache key accepts when the table cannot be read: the counts are then computed uncached. */
 async function readPopulationToken(env: Env): Promise<string> {
   try {
@@ -237,9 +243,10 @@ async function readPopulation(c: Ctx, token: string, ids: readonly number[]): Pr
  * The summary of a branch, cached on the inventory_checks version AND the membership token (a product entering or leaving the population moves the second, whoever wrote it), so a warm open is the
  * token read (one statement, one row) and cache hits. `loaded` is the sets a caller already read (the same cached entry), so a restricted list does not read them twice.
  */
-export async function readCheckSummary(c: Ctx, branchId: number, withPending: boolean, loaded?: { sets: CheckStateSets; version: string }): Promise<CheckSummary> {
+export async function readCheckSummary(c: Ctx, branchId: number, withPending: boolean, loaded?: { sets: CheckStateSets; version: string }, readToken?: string | null): Promise<CheckSummary> {
   const env = c.env
-  const [version, token] = await Promise.all([loaded ? Promise.resolve(loaded.version) : inventoryChecksVersion(env), readPopulationToken(env)])
+  // readToken: the token a caller already read in a batch of its own (null: it read none, so the key is unsafe); undefined: read it here.
+  const [version, token] = await Promise.all([loaded ? Promise.resolve(loaded.version) : inventoryChecksVersion(env), readToken === undefined ? readPopulationToken(env) : Promise.resolve(readToken ?? unsafeVersionToken())])
   return cachedJsonResponse(new Request(`https://ic.invalid/__bos/ic-summary?branchId=${branchId}&pending=${withPending ? 1 : 0}&order=2`, { method: 'GET' }), c.executionCtx,
     `icp:${version}:${token}`, getPlanLimits(env).productListCacheSeconds, async (): Promise<CheckSummary> => {
       const { sets } = loaded ?? await readCheckStateSets(c, branchId, withPending, version)
