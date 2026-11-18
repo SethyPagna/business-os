@@ -102,7 +102,7 @@ the projection and the decision check read the plan through the same function (`
 no reject, modify or reopen on a line in `planned_lines`, and offers every other line its decisions. A line in `planned_lines` is being applied (to the approver who holds the key, `applying_request_id`: that approver finishes it by sending
 the accept again with the same `productIds`, which the Worker continues) or waiting for the approver who is applying it (anyone else: no button). A Worker that sends no `planned_lines` for a claimed approval cannot say
 which lines are held; a panel then treats every undecided line as held. An approval nobody has claimed carries no `planned_lines`. The answer to an accept carries `applied`, `remaining` and `done` for the request (an accept of
-one line that landed answers `done: true` while the approval stays pending).
+one line that landed answers `done: true` while the approval stays pending). A panel keeps offering Close and the accept while another approver actively holds the claim: the Worker refuses either with `409 inventory_check_approval_in_progress`, whose sentence tells the approver to try again in a few minutes; once the holder has been idle for 3 hours, either goes through.
 
 ### History
 
