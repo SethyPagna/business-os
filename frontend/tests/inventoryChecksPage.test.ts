@@ -2,8 +2,9 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { act } from 'react'
 import { createHarness, propsOf } from './mountedComponentHarness.ts'
-import type { InventoryCheckApproval, InventoryCheckApprovalDecision, InventoryCheckSession, InventoryCheckSessionItem } from '../src/api/inventoryChecksTransport.ts'
+import type { InventoryCheckApproval, InventoryCheckApprovalDecision, InventoryCheckLineAnswer, InventoryCheckSession, InventoryCheckSessionItem } from '../src/api/inventoryChecksTransport.ts'
 import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
+import { workerState } from './inventoryApprovalStates.ts'
 import { APP_NAVIGATION_EVENT } from '../src/app/pathRouting.ts'
 import * as dirtyWork from '../src/utils/dirtyWork.ts'
 import { fmtDateTime24 } from '../src/utils/formatters.ts'
@@ -46,8 +47,12 @@ let submitFailure: 'none' | 'known' | 'unknown' | 'stale' | 'staleNamed' | 'pend
 // Counts approval (ic_fix_stock): what the server says about the open submission, what this viewer may do, and the scripted answers to a decision.
 let sessionApproval: InventoryCheckApproval | null = null
 let capabilities: { fixStock?: boolean; approveCounts?: boolean } | null = null
-const decisions: Array<{ scope: unknown; input: { decision: string; requestId: string } }> = []
+const decisions: Array<{ scope: unknown; input: { decision: string; requestId: string; productIds?: number[] } }> = []
 let decideScript: Array<InventoryCheckApprovalDecision | Error> = []
+// One decision on one line (reject, modify, reopen), and how many times the session was read.
+const lineCalls: Array<{ scope: unknown; input: Record<string, unknown> }> = []
+let lineScript: Array<InventoryCheckLineAnswer | Error> = []
+let sessionLoads = 0
 const notices: Array<[string, string]> = []
 let saveFailure: 'none' | 'known' | 'unknown' = 'none'
 let failRead = false
@@ -101,7 +106,15 @@ const doubles = {
       return { ...response(params), items: productOverride ?? (emptyPastLastPage && Number(params.page) > Math.ceil(productTotal / Number(params.pageSize)) ? [] : response(params).items), total: productOverride?.length ?? productTotal }
     },
     readInventoryCheckSessions: async (params: Record<string, unknown>) => { sessionReads.push(params); return { items: [selected], total: 1, page: 1, pageSize: 20 } },
-    readInventoryCheckSession: async () => ({ item: selected, items: memberOverride ?? [observation], ...(sessionApproval ? { approval: sessionApproval } : {}) }),
+    readInventoryCheckSession: async () => (sessionLoads++, { item: selected, items: memberOverride ?? [observation], ...(sessionApproval ? { approval: sessionApproval } : {}) }),
+    decideInventoryCheckLine: async (scope: unknown, input: Record<string, unknown>) => {
+      lineCalls.push({ scope, input })
+      const next = lineScript.shift()
+      if (!next) throw new Error('no scripted line answer')
+      if (next instanceof Error) throw next
+      sessionApproval = next.approval
+      return next
+    },
     decideInventoryCheckApproval: async (scope: unknown, input: { decision: string; requestId: string }) => {
       decisions.push({ scope, input })
       const next = decideScript.shift()
@@ -747,7 +760,7 @@ try {
   sessionApproval = { ...pendingApproval, applying: true }; await approving.click(approving.button('Leave session')); await openSession(approving)
   decideScript = [Object.assign(new Error('busy'), { status: 409, code: 'inventory_check_approval_in_progress', outcome: 'not_dispatched' })]
   await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
-  assert.ok(approving.text().includes('Another approver is applying this count. If they cannot continue, close the remaining lines.'), 'and what to do')
+  assert.ok(approving.text().includes('Another approver is applying this count right now. Try again in a few minutes.'), 'and what to do: try again shortly')
 
   // An answer that never came keeps the request id: the next Approve repeats it without a second review
   sessionApproval = pendingApproval; await approving.click(approving.button('Leave session')); await openSession(approving)
@@ -791,6 +804,126 @@ try {
   assert.ok(approving.findAll(node => node.getAttribute('data-approval-not-applied') === '13')[0]?.textContent.includes('Not applied: Count below damaged units'), 'the closed count says what was not applied and why')
   assert.equal(approvalAction('approve'), undefined, 'a closed count has no actions'); assert.equal(approvalAction('close'), undefined)
 
+  // Per-line decisions (slice C2): modify, reject, reopen and accept ONE line from the panel, through the page's own hook. Each is one request, the answer replaces the panel's state, and the
+  // session is not read again; a refusal says why on the line and reads it once to show it as it is.
+  sessionApproval = pendingApproval; await approving.click(approving.button('Leave session')); await openSession(approving)
+  const lineButton = (id: number, name: string) => approving.findAll(node => node.getAttribute('data-approval-line-action') === name && approving.find(candidate => candidate.getAttribute('data-approval-line') === String(id), 'line ' + id).contains(node))[0]
+  const lineChip = (id: number) => approving.findAll(node => node.getAttribute('data-approval-decision') === String(id))[0]
+  const withDecisions = (decided: Record<string, { decision: 'reject' | 'modify'; counted?: number; at: string; by_name?: string }>): InventoryCheckApproval => ({ ...pendingApproval, line_decisions: decided })
+  const loadsBefore = sessionLoads, linesBefore = lineCalls.length
+  lineScript = [{ approval: withDecisions({ 12: { decision: 'modify', counted: 9, at: '2026-10-19T02:50:00Z', by_name: 'boss' } }), applied: 0, remaining: 2, done: false, line: { productId: 12, action: 'modify' } }]
+  await approving.click(lineButton(12, 'modify'))
+  await approving.type(approving.find(node => node.getAttribute('data-approval-figure') === '12', 'figure box'), '9')
+  assert.equal(approving.find(node => node.getAttribute('data-approval-preview') === '12', 'live Set to').textContent, 'Set to 7', 'ordinary now 7 - 2 damaged = 5, + 9 - seen 7')
+  await approving.click(approving.findAll(node => node.getAttribute('data-approval-line-action') === 'confirm')[0])
+  assert.equal(lineCalls.length, linesBefore + 1, 'one request'); assert.deepEqual({ ...lineCalls.at(-1)!.input, requestId: undefined }, { productId: 12, action: 'modify', counted: 9, requestId: undefined })
+  assert.match(String(lineCalls.at(-1)!.input.requestId), /^inventory_check_line_/); assert.ok(lineChip(12).textContent.includes('Modified to 9'), 'the answer is on the panel')
+  assert.equal(sessionLoads, loadsBefore, 'a line decision reads nothing again')
+  lineScript = [{ approval: withDecisions({ 12: { decision: 'modify', counted: 9, at: '2026-10-19T02:50:00Z', by_name: 'boss' }, 13: { decision: 'reject', at: '2026-10-19T02:55:00Z', by_name: 'boss' } }), applied: 0, remaining: 1, done: false, line: { productId: 13, action: 'reject' } }]
+  await approving.click(lineButton(13, 'reject'))
+  assert.ok(approving.text().includes('Reject this line?'), 'rejecting a line shows the shared review first'); assert.ok(approving.text().includes('Open → Rejected'), 'with the line before and after')
+  await approving.click(approving.button('Cancel', approving.find(node => node.tagName === 'DL', 'review').parentNode!.parentNode!))
+  assert.equal(lineCalls.length, linesBefore + 1, 'Cancel sends nothing')
+  await approving.click(lineButton(13, 'reject')); await confirmInDialog(approving, 'Reject')
+  assert.equal(lineCalls.length, linesBefore + 2); assert.equal(lineCalls.at(-1)!.input.action, 'reject'); assert.ok(lineChip(13).textContent.includes('Rejected'))
+  assert.equal(sessionLoads, loadsBefore, 'still nothing read again')
+  lineScript = [{ approval: withDecisions({ 12: { decision: 'modify', counted: 9, at: '2026-10-19T02:50:00Z', by_name: 'boss' } }), applied: 0, remaining: 2, done: false, line: { productId: 13, action: 'reopen' } }]
+  await approving.click(lineButton(13, 'reopen'))
+  assert.deepEqual({ ...lineCalls.at(-1)!.input, requestId: undefined }, { productId: 13, action: 'reopen', requestId: undefined }); assert.equal(lineChip(13), undefined, 'reopened: the chip is gone')
+  const acceptBefore = decisions.length
+  decideScript = [{ ...answerOf(1, 1, { line_decisions: { 12: { decision: 'modify', counted: 9, at: '2026-10-19T02:50:00Z', by_name: 'boss' } } }), done: true }] // what was asked for is applied; the approval stays pending
+  const reloadsBeforeAccept = sessionLoads
+  await approving.click(lineButton(13, 'accept'))
+  await confirmInDialog(approving, 'Approve'); assert.equal(decisions.length, acceptBefore + 1, 'accepting a line is one request, after its review'); assert.deepEqual(decisions.at(-1)!.input.productIds, [13]); assert.equal(decisions.at(-1)!.input.decision, 'approve')
+  assert.equal(sessionLoads, reloadsBeforeAccept, 'accepting a line while the count stays pending reads nothing again')
+  lineScript = [Object.assign(new Error('applied'), { status: 409, code: 'inventory_check_line_applied', outcome: 'not_dispatched' })]
+  const reloadsBeforeRefusal = sessionLoads
+  await approving.click(lineButton(13, 'reject')); await confirmInDialog(approving, 'Reject')
+  assert.ok(approving.findAll(node => node.getAttribute('data-approval-line-error') === '13')[0]?.textContent.includes('This line was already applied'), 'a refusal says why, on the line')
+  assert.equal(sessionLoads, reloadsBeforeRefusal + 1, 'and the count is read once to show the line as it is')
+  sessionApproval = pendingApproval; await approving.click(approving.button('Leave session')); await openSession(approving)
+
+  // C2 review (findings 2, 3 and 10) through the page, over the Worker's own states: the answer to accepting one line is what the Worker sent (the claim stays, planned_lines is empty, line 1 is
+  // applied), the other lines keep their buttons (mutant M8b: a page that calls them "Being applied"), the accepted line's stock is the figure it wrote on the panel and on the session's items
+  // without a second read, and accepting asks first.
+  {
+    const pendingState = workerState('pending'), acceptedState = workerState('accepted_one')
+    memberOverride = pendingState.items; sessionApproval = pendingState.approval
+    productOverride = [{ ...product, id: 1, name: 'Serum', quantity: 9 }, { ...product, id: 2, name: 'Toner', quantity: 5 }, { ...product, id: 3, name: 'Cream', quantity: 7, damaged_quantity: 2 }]
+    await approving.click(approving.button('Leave session')); await openSession(approving)
+    const rowText = (id: number) => (approving.findAll(node => node.getAttribute('data-inventory-check-row') === String(id))[0]?.textContent ?? '<no row ' + id + '>').replace(/\s+/g, ' ')
+    assert.match(rowText(1), /Now 9/, 'before: the session row of line 1 reads 9'); assert.match(rowText(3), /Now 7/, 'before: the row of line 3 counts its 2 damaged units in the 7')
+    const lineNames = (id: number) => approving.findAll(node => node.getAttribute('data-approval-line-action') !== null && approving.find(candidate => candidate.getAttribute('data-approval-line') === String(id), 'line ' + id).contains(node)).map(node => node.getAttribute('data-approval-line-action'))
+    const lineText = (id: number) => (approving.find(node => node.getAttribute('data-approval-line') === String(id), 'line ' + id).textContent ?? '').replace(/\s+/g, ' ')
+    assert.match(lineText(1), /Now 9/, 'before: the stock of line 1 is 9')
+    const beforeAccept = decisions.length, loadsAtAccept = sessionLoads
+    decideScript = [{ approval: acceptedState.approval, ...acceptedState.answer! }]
+    await approving.click(lineButton(1, 'accept'))
+    assert.ok(approving.text().includes('Approve this line?'), 'accepting moves stock, so the shared review comes first')
+    assert.equal(decisions.length, beforeAccept, 'and nothing is sent before the answer')
+    await approving.click(approving.button('Cancel', approving.find(node => node.tagName === 'DL', 'review').parentNode!.parentNode!)); assert.equal(decisions.length, beforeAccept, 'Cancel sends nothing')
+    await approving.click(lineButton(1, 'accept')); await confirmInDialog(approving, 'Approve')
+    assert.equal(decisions.length, beforeAccept + 1); assert.deepEqual(decisions.at(-1)!.input.productIds, [1])
+    assert.equal(sessionLoads, loadsAtAccept, 'no read follows')
+    assert.deepEqual([2, 3].map(lineNames), [['accept', 'modify', 'reject'], ['accept', 'modify', 'reject']], 'the Worker keeps the claim, and lines 2 and 3 can still be decided')
+    assert.ok(!approving.text().includes('Being applied'), 'no line says it is being applied')
+    assert.match(lineText(1), /Applied/); assert.match(lineText(1), /Now 7/, 'the accepted line shows the stock it wrote (7), not the stock from before (9)')
+    assert.match(rowText(1), /Now 7/, 'and so does its row in the session list, a dated line: the branch total the answer wrote (7), not 9'); assert.match(rowText(2), /Now 5/, 'a line not accepted keeps its stock')
+    // a line counted as one figure: accepting it puts its own stock on its row
+    const plainAccepted: InventoryCheckApproval = { ...acceptedState.approval, applied: 2, applied_lines: { ...acceptedState.approval.applied_lines, 3: { before: 5, target: 2, after: 2, at: '2026-11-18T00:00:00.000Z' } } }
+    decideScript = [{ approval: plainAccepted, applied: 1, remaining: 0, done: true }]
+    await approving.click(lineButton(3, 'accept')); await confirmInDialog(approving, 'Approve')
+    assert.match(rowText(3), /Now 4/, 'a line counted as one figure: its row shows the ordinary stock the answer wrote (2) plus the 2 damaged units the list sums (4), not 7'); assert.match(rowText(1), /Now 7/, 'the row accepted before keeps its figure'); assert.equal(sessionLoads, loadsAtAccept, 'no read')
+    assert.equal(approving.findAll(node => node.getAttribute('data-approval-line-action') === 'accept' && node.getAttribute('disabled') !== null).length, 0, 'and its buttons are live')
+    // line 2 can be rejected at once (the Worker's own test does exactly this under the claim)
+    lineScript = [{ approval: { ...acceptedState.approval, line_decisions: { 2: { decision: 'reject', at: '2026-11-18T00:00:00.000Z', by_name: 'stock-user' } } }, applied: 0, remaining: 1, done: false, line: { productId: 2, action: 'reject' } }]
+    await approving.click(lineButton(2, 'reject')); await confirmInDialog(approving, 'Reject')
+    assert.equal(lineCalls.at(-1)!.input.productId, 2); assert.ok(lineChip(2).textContent.includes('Rejected'), 'rejected under the claim')
+    assert.equal(sessionLoads, loadsAtAccept, 'still no read')
+    // Approve all: every request of the flow puts the stock it wrote on the rows, before the closing read of the session answers.
+    sessionApproval = pendingState.approval
+    await approving.click(approving.button('Leave session')); await openSession(approving)
+    assert.match(rowText(1), /Now 9/); assert.match(rowText(2), /Now 5/)
+    const stepOne: InventoryCheckApproval = { ...acceptedState.approval, applying_request_id: undefined, applying: undefined }
+    const stepTwo: InventoryCheckApproval = { ...plainAccepted, status: 'approved', applying: undefined, applying_request_id: undefined, planned_lines: undefined, applied: 3, applied_lines: { ...plainAccepted.applied_lines, 2: { before: 5, target: 3, after: 3, at: '2026-11-18T00:00:00.000Z' } } }
+    decideScript = [{ approval: stepOne, applied: 1, remaining: 2, done: false }, { approval: stepTwo, applied: 2, remaining: 0, done: true }]
+    delayedProducts = () => {}
+    await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
+    assert.match(rowText(1), /Now 7/, 'Approve all: the first request put line 1 on its row'); assert.match(rowText(2), /Now 3/, 'and the last one line 2'); assert.match(rowText(3), /Now 4/, 'and line 3 (2 written plus its 2 damaged units)')
+    const release = delayedProducts as unknown as ((value: unknown) => void) | null; delayedProducts = null; release?.({ ...response({}), items: productOverride, total: 3 })
+    // A page that missed an earlier accept: line 3 was accepted in another tab (stock 2), then a sale of 1 left 1 ordinary (3 with its 2 damaged units), then line 2 is accepted from this stale page. The answer
+    // lists line 3 at the older figure, which no row may take: the session is read once and the rows equal that read.
+    productOverride = [{ ...product, id: 1, name: 'Serum', quantity: 9 }, { ...product, id: 2, name: 'Toner', quantity: 5 }, { ...product, id: 3, name: 'Cream', quantity: 7, damaged_quantity: 2 }]
+    sessionApproval = pendingState.approval
+    await approving.click(approving.button('Leave session')); await openSession(approving)
+    assert.match(rowText(3), /Now 7/); assert.match(rowText(2), /Now 5/)
+    const line = (before: number, after: number) => ({ before, target: after, after, at: '2026-11-18T00:00:00.000Z' })
+    const missed: InventoryCheckApproval = { ...acceptedState.approval, applied: 2, applied_lines: { 3: line(5, 2), 2: line(5, 3) } }
+    const loadsBeforeStale = sessionLoads
+    sessionApproval = missed
+    productOverride = [{ ...product, id: 1, name: 'Serum', quantity: 9 }, { ...product, id: 2, name: 'Toner', quantity: 3 }, { ...product, id: 3, name: 'Cream', quantity: 3, damaged_quantity: 2 }]
+    decideScript = [{ approval: missed, applied: 1, remaining: 0, done: true }]
+    await approving.click(lineButton(2, 'accept')); await confirmInDialog(approving, 'Approve')
+    assert.equal(sessionLoads, loadsBeforeStale + 1, 'the session is read once after an answer that lists a line this request did not apply')
+    assert.match(rowText(3), /Now 3/, 'row 3 equals the fresh read (1 ordinary + 2 damaged), not the older figure of the other tab (2 + 2)'); assert.match(rowText(2), /Now 3/, 'and row 2 the fresh read')
+    // The same page accepts line 1, counted on two received dates: the Paid answer says applied 2 (two stock writes) and lists line 1 with line 3's older figure. Two products, two writes: the count alone cannot
+    // tell, but line 3 is not the line that was accepted.
+    productOverride = [{ ...product, id: 1, name: 'Serum', quantity: 9 }, { ...product, id: 2, name: 'Toner', quantity: 5 }, { ...product, id: 3, name: 'Cream', quantity: 7, damaged_quantity: 2 }]
+    sessionApproval = pendingState.approval
+    await approving.click(approving.button('Leave session')); await openSession(approving)
+    assert.match(rowText(3), /Now 7/); assert.match(rowText(1), /Now 9/)
+    const datedAnswer: InventoryCheckApproval = { ...acceptedState.approval, applied: 2, applied_lines: { 3: line(5, 2), 1: line(9, 5) } }
+    const loadsBeforeDated = sessionLoads
+    sessionApproval = datedAnswer
+    productOverride = [{ ...product, id: 1, name: 'Serum', quantity: 5 }, { ...product, id: 2, name: 'Toner', quantity: 5 }, { ...product, id: 3, name: 'Cream', quantity: 3, damaged_quantity: 2 }]
+    decideScript = [{ approval: datedAnswer, applied: 2, remaining: 0, done: true }]
+    await approving.click(lineButton(1, 'accept')); await confirmInDialog(approving, 'Approve')
+    assert.equal(sessionLoads, loadsBeforeDated + 1, 'a two-date line: two writes and two new products, one of them another tab\'s, still read the session once')
+    assert.match(rowText(3), /Now 3/, 'row 3 equals the fresh read (1 ordinary + 2 damaged), not the older 2 + 2'); assert.match(rowText(1), /Now 5/, 'and row 1 the fresh read')
+    productOverride = null; memberOverride = submittedItems; sessionApproval = pendingApproval
+    await approving.click(approving.button('Leave session')); await openSession(approving)
+  }
+
   // Reject
   sessionApproval = pendingApproval; await approving.click(approving.button('Leave session')); await openSession(approving)
   const rejectBefore = decisions.length
@@ -811,7 +944,8 @@ try {
     const watcher = await mount()
     await openSession(watcher)
     assert.equal(watcher.find(node => node.getAttribute('data-inventory-check-approval') !== null, 'panel').getAttribute('data-inventory-check-approval'), 'pending', label)
-    assert.equal(watcher.findAll(node => node.getAttribute('data-approval-action') !== null).length, 0, label + ': no Approve or Reject')
+    // The Worker asks only for the right to approve to reject a whole count (and a line), so a viewer who holds it but not the stock-adjusting capability keeps Reject and loses Approve.
+    assert.deepEqual(watcher.findAll(node => node.getAttribute('data-approval-action') !== null).map(node => node.getAttribute('data-approval-action')), label === 'no capability' ? ['reject'] : [], label + ': no Approve' + (label === 'no capability' ? '; Reject stays' : ' or Reject'))
     await watcher.unmount()
   }
   // A viewer the server tells nothing about (no stock field) sees no panel at all

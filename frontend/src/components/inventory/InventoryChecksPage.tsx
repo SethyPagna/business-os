@@ -11,7 +11,7 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp, type AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import { claimSyncProblemPresentation } from '../../utils/syncProblemLifecycle.ts'
 import { captureActorReadScope, captureActorWriteIdentity, isActorReadScopeCurrent, isActorWriteIdentityCurrent } from '../../api/actorReadScope.ts'
-import { captureInventoryCheckWriteScope, changeInventoryCheckSession, createInventoryCheckSession, decideInventoryCheckApproval, readInventoryCheckHistory, readInventoryCheckList, readInventoryCheckLots, readInventoryCheckOverlay, readInventoryCheckProducts, readInventoryCheckSession, readInventoryCheckSessions, saveInventoryCheckObservation, submitInventoryCheckCounts, type InventoryCheckApproval, type InventoryCheckSession, type InventoryCheckSessionItem } from '../../api/inventoryChecksTransport.ts'
+import { captureInventoryCheckWriteScope, changeInventoryCheckSession, createInventoryCheckSession, readInventoryCheckHistory, readInventoryCheckList, readInventoryCheckLots, readInventoryCheckOverlay, readInventoryCheckProducts, readInventoryCheckSession, readInventoryCheckSessions, saveInventoryCheckObservation, submitInventoryCheckCounts, type InventoryCheckApproval, type InventoryCheckSession, type InventoryCheckSessionItem } from '../../api/inventoryChecksTransport.ts'
 import type { QueryParams } from '../../api/query.ts'
 import { currentDataEpoch } from '../../api/dataEpoch.ts'
 import { peekProductSearch, primeProductSearch, getProductFilters } from '../../api/productReadTransport.ts'
@@ -45,7 +45,9 @@ import { soleActiveBranch } from '../../utils/branchCollapse.ts'
 import { projectProduct } from './inventoryCheckProject.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { loadWired, mergeWiredRows, NotWired, patchWiredLots, patchWiredRaw, readWiredRows, rememberWiredMode, wiredMode, wiredResult, type Branch, type WiredAccess, type WiredDeps, type WiredExtras, type WiredList, type WiredRaw } from './inventoryWired.ts'
-import { approvalRequestBound, runApprovalFlow } from './inventoryCheckApprovalFlow.ts'
+import { withAppliedStock } from './inventoryCheckApprovalLines.ts'
+import { withAppliedRowStock } from './inventoryCheckAppliedRows.ts'
+import { useInventoryCheckApproval } from './useInventoryCheckApproval.ts'
 import { productSalesFocus, queueReportsFocus } from '../sales/reports/reportsFocus.ts'
 import type { InventoryCheckHistoryResult } from './InventoryCheckHistoryFloat.tsx'
 import InventoryCheckSessionsList, { InventoryCheckSessionFilterMenu, ProgressRing, SessionCounts, SessionStatusChip, initialSessionFilters, sessionDisplayName, type SessionListFilters } from './InventoryCheckSessionsList.tsx'
@@ -316,9 +318,6 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const attempts = useRef(new Map<number, Attempt>())
   const createAttempt = useRef<{ title: string; productIds: number[]; scope: QueryParams; requestId: string } | null>(null)
   const lifecycleAttempt = useRef<{ action: 'close' | 'resume'; revision: number; requestId: string } | null>(null)
-  // One request id for the whole of one approval, however many requests it takes: it is what makes every repeat safe.
-  const decideAttempt = useRef<{ decision: 'approve' | 'reject' | 'close'; requestId: string } | null>(null)
-  const [refusedLines, setRefusedLines] = useState<Record<string, string>>({})
   // Products whose count by received date left a stocked date out, found by Submit before any request was sent (the rows say which dates).
   const [uncounted, setUncounted] = useState<ReadonlySet<string>>(() => new Set())
   // The owner's way to count: what has been picked and typed on the list, held here (in memory only) until it is submitted. Keyed by product id,
@@ -999,55 +998,13 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const canDecide = fresh && !!approval && approval.can_approve && data?.capabilities?.approveCounts === true && canWriteToServer
   // Closing moves no stock, so it needs the extra but not the right to adjust stock.
   const canClose = fresh && !!approval && approval.can_approve && canWriteToServer
-  // A refusal for a count that cannot be rejected any more (stock may have moved) points at Close.
-  const withCloseHint = (text: string) => approval && (approval.applying || approval.applied > 0) ? `${text} ${tr('inventory_check_close_hint', 'Part of it was already applied, so close the remaining lines instead.')}` : text
-  const refusedMap = (list: unknown): Record<string, string> => Object.fromEntries((Array.isArray(list) ? list as Array<{ productId?: unknown; code?: unknown }> : []).filter(entry => entry && typeof entry.code === 'string').map(entry => [String(entry.productId), String(entry.code)]))
-  async function decideApproval(decision: 'approve' | 'reject' | 'close') {
-    if (!current() || !sessionId || !approval || approval.status !== 'pending' || inFlight.current) return
-    if (!decideAttempt.current || decideAttempt.current.decision !== decision) {
-      const confirmed = await askToConfirm({
-        title: decision === 'approve' ? tr('inventory_check_approve_title', 'Approve these counts?') : decision === 'close' ? tr('inventory_check_close_title', 'Close the remaining lines?') : tr('inventory_check_reject_title', 'Reject these counts?'),
-        message: decision === 'approve' ? tr('inventory_check_approve_message', 'Stock changes by what each count found. Sales since the count are kept.')
-          : decision === 'close' ? tr('inventory_check_close_message', 'Stock does not change. Lines already applied stay applied; the rest are recorded as not applied.') : tr('inventory_check_reject_message', 'Stock stays as it is.'),
-        items: [{ label: tr('inventory_check_differences', 'Differences'), value: approval.lines - approval.applied - Object.keys(approval.superseded ?? {}).length }],
-        confirmLabel: decision === 'approve' ? tr('inventory_check_approve', 'Approve') : decision === 'close' ? tr('inventory_check_close', 'Close') : tr('inventory_check_reject', 'Reject'),
-        danger: decision !== 'approve',
-      })
-      if (!confirmed || !current() || inFlight.current) return
-      // An approval that already started under a request id (this approver's own earlier attempt) continues under it: that id is what the stock writers replay.
-      decideAttempt.current = { decision, requestId: decision === 'approve' && approval.applying_request_id ? approval.applying_request_id : createClientRequestId('inventory_check_approval') }
-    }
-    const attempt = decideAttempt.current
-    inFlight.current = true; setBusy(true); setWriteError(''); setRefusedLines({})
-    try {
-      const flow = await runApprovalFlow({
-        send: () => decideInventoryCheckApproval(writeScope, { decision, requestId: attempt.requestId }),
-        onProgress: result => { if (current()) { setApproval(result.approval); setRefusedLines(refusedMap(result.refused)) } },
-        isCurrent: current,
-        maxRequests: approvalRequestBound(data?.capabilities),
-      })
-      if (!current()) return
-      if (flow.outcome === 'done') {
-        decideAttempt.current = null
-        notify(decision === 'approve' ? tr('inventory_check_approved_done', 'Counts approved. Stock updated.') : decision === 'close' ? tr('inventory_check_closed_done', 'Count closed. Closing did not change stock.') : tr('inventory_check_rejected_done', 'Counts rejected. Stock unchanged.'), 'success')
-      } else if (flow.outcome === 'refused') {
-        // Some lines were applied; the rest cannot be: said once, with each line's reason on its row. The same Approve repeats once the cause is fixed.
-        setWriteError(withCloseHint(tr('inventory_check_lines_refused', 'Some lines cannot be applied. Fix the cause and approve again, or close the remaining lines.')))
-      } else if (flow.outcome === 'stalled') {
-        setWriteError(tr('inventory_check_error_write_refused', 'Stock could not be updated for some products. Try again.'))
-      } else decideAttempt.current = null // declined: the next Approve is a fresh decision with its own review
-      reloadAll()
-    } catch (cause) {
-      const unknown = (cause as { outcome?: string })?.outcome === 'unknown'
-      const refusal = unknown ? undefined : await knownRefusal(cause)
-      if (!unknown) decideAttempt.current = null
-      if (current()) {
-        setRefusedLines(refusedMap((cause as { refused?: unknown }).refused))
-        setWriteError(refusal ? withCloseHint(tr(refusal.key, refusal.fallback)) : tr(unknown ? unknownSaveKey(cause) : 'inventory_check_save_failed', unknown ? 'Save not confirmed. Retry the same operation or reload.' : 'Check not saved. Try again.'))
-        reloadAll()
-      }
-    } finally { inFlight.current = false; if (current()) setBusy(false) }
+  // Lines the approval applied: the panel's items and the session's product rows take the stock the answer says (no read), as Fix stock does for its row.
+  function takeAppliedStock(stock: Record<string, number>) {
+    setItems(previous => withAppliedStock(previous, stock))
+    setData(previous => previous ? { ...previous, items: withAppliedRowStock(previous.items ?? [], stock, items) } : previous)
   }
+  const { refusedLines, lineErrors, decideApproval, decideLine } = useInventoryCheckApproval({ sessionId, approval, items, capabilities: data?.capabilities, writeScope, inFlight, current, setBusy, setApproval, setWriteError,
+    askToConfirm, tr, notify, knownRefusal, unknownSaveKey, reload: reloadAll, setApplied: takeAppliedStock })
   // The owner's summary: check counts only. A session shows its own counts in the session bar, and the old contract sends none.
   const checkInfo = !sessionId && !!data?.simple
   const summary = fresh && checkInfo ? data?.summary : undefined
@@ -1174,6 +1131,12 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       pending: detail.check_pending === true || (!!sessionId && approval?.status === 'pending'),
       canViewStock: access.fields.stock, label: tr('inventory_check_fix_stock_reason', 'Inventory check') })
     : null
+  // The session that holds the waiting request: the overlay names it. The product's latest count may be a newer session (an observation made after the submission), which has no approval.
+  const pendingSessionOf = (product: InventoryCheckProduct): string | null => (wiredRaw.current?.overlay.get(Number(product.id)) as { pending_session_id?: string } | undefined)?.pending_session_id ?? product.check_session_id ?? null
+  // A product waiting for approval opens that session: the panel with Approve all and the per-line decisions.
+  function openRequest(branch: string, session: string) {
+    setDetail(null); setSection('products'); onSelect({ branchId: branch, sessionId: session })
+  }
   function openFixStock(opening: FixStockOpening) {
     // The Set session resumes an unfinished stock session of this person instead of opening a new one: say so rather than open something else.
     const unfinished = readWorkDraft<{ lines?: unknown }>(scopedWorkDraftKey('fast_stockin'))?.data?.lines
@@ -1266,7 +1229,10 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
           <IconAction label={t('retry')} onClick={reloadAll}><RotateCcw className="h-4 w-4" aria-hidden="true" /></IconAction>
         </div> : null}
         {sessionId && fresh && approval && session?.scope?.membership === 'submission'
-          ? <Suspense fallback={null}><InventoryCheckApprovalPanel approval={approval} items={items} canDecide={canDecide} canClose={canClose} busy={busy} refused={refusedLines} t={t} onApprove={() => { void decideApproval('approve') }} onReject={() => { void decideApproval('reject') }} onClose={() => { void decideApproval('close') }} /></Suspense> : null}
+          ? <Suspense fallback={null}><InventoryCheckApprovalPanel approval={approval} items={items} canDecide={canDecide} canClose={canClose} busy={busy} refused={refusedLines} lineErrors={lineErrors} t={t}
+            onApprove={() => { void decideApproval('approve') }} onReject={() => { void decideApproval('reject') }} onClose={() => { void decideApproval('close') }}
+            onAccept={productId => { void decideApproval('approve', [productId]) }} onModify={(productId, figures) => decideLine({ productId, action: 'modify', ...figures })}
+            onRejectLine={productId => { void decideLine({ productId, action: 'reject' }) }} onReopen={productId => { void decideLine({ productId, action: 'reopen' }) }} /></Suspense> : null}
         {!fresh && !error && !sessionError ? <ListSkeleton loadingText={t('loading')} /> : null}
         {section === 'sessions' ? (fresh && sessions?.items.length ? <InventoryCheckSessionsList items={sessions.items} t={t} onOpen={item => { setSection('products'); onSelect({ branchId: String(item.branch_id), sessionId: item.id, creatorName: item.creator_name ?? null }) }} /> : null)
           : oldIssues ? <div className="min-w-0 divide-y" aria-label={t('issues')} data-inventory-check-old-issues>
@@ -1290,6 +1256,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         {pagerNode('bottom')}
         {detail && fresh ? <Suspense fallback={null}><InventoryCheckDetail product={detail} observation={observations[String(detail.id)]} unavailable={unavailableIds.has(String(detail.id))} fields={access.fields} priceText={access.fields.price ? priceText : undefined} promotionRules={data?.promotionRules} exchangeRate={exchangeRate} fmtUSD={fmtUSD} fmtKHR={fmtKHR} navigateTo={navigateTo} t={t} onClose={() => setDetail(null)}
           onFixStock={fixOpening ? () => openFixStock(fixOpening) : undefined}
+          onOpenRequest={offered && detail.check_pending === true && pendingSessionOf(detail) && detail.check_branch_id != null ? () => openRequest(String(detail.check_branch_id), String(pendingSessionOf(detail))) : undefined}
           onSales={offered && rights.can('sales', 'view') ? () => { queueReportsFocus(productSalesFocus(detail.name)); navigateTo('sales', hubAnchor('sales', 'reports')) } : undefined} /></Suspense> : null}
         {costFor && access.fields.cost ? <Suspense fallback={null}><CostCalculationFloat productId={costFor.id} productName={costFor.name} onClose={() => setCostFor(null)} fmtUSD={value => fmtUSD(value)} fmtKHR={value => fmtKHR(value)} t={(key, fallback) => tr(key, fallback)} /></Suspense> : null}
         {historyPage !== null ? <Suspense fallback={null}><InventoryCheckHistoryFloat page={historyPage} history={history} error={historyError} onPage={setHistoryPage} onRetry={() => setHistoryReload(value => value + 1)} onClose={() => setHistoryPage(null)} t={t} /></Suspense> : null}
