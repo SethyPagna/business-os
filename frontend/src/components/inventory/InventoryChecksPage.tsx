@@ -703,7 +703,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
           message: sessionDisplayName(session, branchName),
           items: [
             { label: t('products'), value: counts.total }, { label: tr('inventory_check_done', 'Done'), value: counts.done },
-            { label: tr('inventory_check_issue', 'Issue'), value: counts.issue }, { label: tr('inventory_check_unstarted', 'Not started'), value: counts.unstarted },
+            { label: tr('inventory_check_issue', 'Differs'), value: counts.issue }, { label: tr('inventory_check_unstarted', 'Not started'), value: counts.unstarted },
           ],
           confirmLabel: tr('inventory_check_close_session', 'Close session'),
         })

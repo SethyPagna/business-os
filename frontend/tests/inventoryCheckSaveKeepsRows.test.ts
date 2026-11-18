@@ -137,7 +137,7 @@ try {
   assert.equal(surface.find(node => node.getAttribute('data-inventory-check-page') !== null, 'page root'), root)
   assert.equal(root.scrollTop, 321, 'scroll position is untouched')
   assert.equal(status(surface, 13), 'Done', 'only the saved row changes, from the authoritative response')
-  assert.equal(status(surface, 12), 'Issue', 'the other row keeps its state')
+  assert.equal(status(surface, 12), 'Differs', 'the other row keeps its state')
   assert.equal(propsOf(action(surface, 12, 'done')).disabled, false, 'other rows stay enabled during the reload')
   assert.equal(propsOf(action(surface, 13, 'done')).disabled, false)
   assert.ok(!surface.findAll(node => node.getAttribute('role') === 'status').some(node => node.textContent.includes('loading')), 'no loading line is inserted above the rows')

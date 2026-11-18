@@ -1,6 +1,6 @@
 // What a definite server refusal says, by its code. Cold: it is read only after a write was refused, so it is its own chunk.
 export const REFUSAL_MESSAGES: Record<string, { key: string; fallback: string }> = {
-  inventory_check_count_requires_issue: { key: 'inventory_check_error_count_requires_issue', fallback: 'Counted quantity differs from stock. Report it as an issue.' },
+  inventory_check_count_requires_issue: { key: 'inventory_check_error_count_requires_issue', fallback: 'Counted quantity differs from stock. Record it as a difference.' },
   inventory_check_lot_counts_off: { key: 'inventory_check_error_lot_counts_off', fallback: 'Counting by received date was turned off. Count again.' },
   branch_redirect_required: { key: 'branch_redirect_required', fallback: 'This change is addressed to a disabled branch.' },
   maintenance_active: { key: 'inventory_check_error_maintenance', fallback: 'Maintenance is in progress. Try again shortly.' },
@@ -57,4 +57,15 @@ export const REFUSAL_MESSAGES: Record<string, { key: string; fallback: string }>
   inventory_check_authority_changed: { key: 'inventory_check_error_authority_changed', fallback: 'The account or session changed. Sign in again and retry.' },
   inventory_check_not_available: { key: 'inventory_check_error_not_available', fallback: 'Count approvals are not available right now. Reload and try again.' },
   inventory_check_permission_required: { key: 'inventory_check_error_permission_required', fallback: 'You do not have permission to change counts.' },
+  // Count tasks (contract docs/contracts/inventory-check-tasks-20261119.md, section 6).
+  inventory_check_issue_required: { key: 'inventory_check_error_issue_required', fallback: 'You do not have permission to issue count tasks.' },
+  inventory_check_tasks_required: { key: 'inventory_check_error_tasks_required', fallback: 'You do not have permission to pick up or count tasks.' },
+  inventory_check_task_not_found: { key: 'inventory_check_error_task_not_found', fallback: 'This task no longer exists. Reload and try again.' },
+  inventory_check_task_closed: { key: 'inventory_check_error_task_closed', fallback: 'This task is already closed.' },
+  inventory_check_task_picked_up: { key: 'inventory_check_error_task_picked_up', fallback: 'Someone else already picked this task up.' },
+  inventory_check_task_not_picked_up: { key: 'inventory_check_error_task_not_picked_up', fallback: 'Nobody has picked this task up.' },
+  inventory_check_task_too_many: { key: 'inventory_check_error_task_too_many', fallback: 'This task would hold more products than one task can. Narrow the selection.' },
+  inventory_check_task_limit: { key: 'inventory_check_error_task_limit', fallback: 'This branch already has the most open tasks it can hold. Close one first.' },
+  inventory_check_task_not_countable: { key: 'inventory_check_error_task_not_countable', fallback: 'A task is counted from the list, not by editing its lines.' },
+  inventory_check_release_forbidden: { key: 'inventory_check_error_release_forbidden', fallback: 'Only the person who picked this task up, or someone who can issue tasks, can hand it back.' },
 }

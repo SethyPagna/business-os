@@ -160,7 +160,7 @@ function CheckRow({ product, observation, pending, error, header, adornment, fro
   const state = observation?.state
   const showStateIcon = !canCheck && (state === 'done' || state === 'issue')
   const stateLabel = state === 'done' ? tr('inventory_check_done', 'Done')
-    : state === 'issue' ? tr('inventory_check_issue', 'Issue') : tr('inventory_check_unstarted', 'Not started')
+    : state === 'issue' ? tr('inventory_check_issue', 'Differs') : tr('inventory_check_unstarted', 'Not started')
   const showCountInput = canCheck && canViewStock && !header && columns.fields.includes('count')
 
   useEffect(() => {
@@ -256,7 +256,7 @@ function CheckRow({ product, observation, pending, error, header, adornment, fro
       return
     }
     if (!reason) {
-      setValidationError(tr('inventory_check_reason_required', 'Enter an issue reason.'))
+      setValidationError(tr('inventory_check_reason_required', 'Enter why the count differs.'))
       return
     }
     void save({ state: 'issue', ...(canViewCounts ? { counted_quantity: entry.kind === 'valid' ? entry.value : null } : {}), reason }, draft.revision, 'editor')
@@ -289,7 +289,7 @@ function CheckRow({ product, observation, pending, error, header, adornment, fro
   }
 
   const doneLabel = state === 'done' ? tr('inventory_check_clear', 'Clear check') : tr('inventory_check_mark_done', 'Mark done')
-  const issueLabel = state === 'issue' ? tr('inventory_check_edit_issue', 'Edit issue') : tr('inventory_check_report_issue', 'Report issue')
+  const issueLabel = state === 'issue' ? tr('inventory_check_edit_issue', 'Edit difference') : tr('inventory_check_report_issue', 'Report difference')
   const retryLabel = tr('inventory_check_retry', 'Retry')
   const countLabel = tr('inventory_check_count', 'Count')
   const nowText = finiteQuantity(product.quantity) ? String(product.quantity) : ''
@@ -341,7 +341,7 @@ function CheckRow({ product, observation, pending, error, header, adornment, fro
   // The row is a focus stop that opens the product on Enter and on a press: its name says so (a list item with no name is announced as nothing). It stays a list item, not a button: the row holds real buttons
   // and inputs of its own, and a button may not contain them.
   // Name, then the recorded state, so the row's label does not hide what the row says.
-  const stateWords = state === 'done' ? tr('inventory_check_done', 'Done') : state === 'issue' ? tr('inventory_check_issue', 'Issue') : ''
+  const stateWords = state === 'done' ? tr('inventory_check_done', 'Done') : state === 'issue' ? tr('inventory_check_issue', 'Differs') : ''
   const rowOpenLabel = `${tr('open_product', 'Open product')}: ${product.name}${stateWords ? ` — ${stateWords}` : ''}`
   function onRowKeyDown(event: KeyboardEvent<HTMLLIElement>) {
     if (event.key === 'Enter' && event.target === event.currentTarget && !event.nativeEvent?.isComposing) { event.preventDefault(); openDetail() }

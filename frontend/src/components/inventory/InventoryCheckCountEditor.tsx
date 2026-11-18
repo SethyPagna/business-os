@@ -105,7 +105,7 @@ export default function InventoryCheckCountEditor({ productName, groupLabel, cou
   const chips = reasonChips(suggestions)
   const retryLabel = tr('inventory_check_retry', 'Retry')
   const doneLabel = tr('done', 'Done')
-  const saveLabel = tr('inventory_check_save_issue', 'Save issue')
+  const saveLabel = tr('inventory_check_save_issue', 'Save difference')
   const submitName = failed ? retryLabel : done ? doneLabel : saveLabel
   const countLabel = tr('inventory_check_count', 'Count')
   const reasonLabel = tr('inventory_check_reason', 'Reason')

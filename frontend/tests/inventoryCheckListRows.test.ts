@@ -77,7 +77,7 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.deepEqual([501, 502, 503, 504, 505, 506].map(id => row(s, id).getAttribute('data-check-list-status')), ['ok', 'issue', 'in_check', 'not_checked', 'ok', 'issue'])
     const icon = (id: number) => inRow(s, id, 'data-check-status-kind')
     assert.deepEqual([501, 502, 503, 504].map(id => icon(id).getAttribute('data-check-status-kind')), ['ok', 'issue', 'in_check', 'not_checked'], 'one icon kind per status')
-    assert.deepEqual([501, 502, 503, 504].map(id => icon(id).getAttribute('aria-label')), ['Checked OK', 'Issue', 'In check', 'Not checked'], 'the name is the aria-label...')
+    assert.deepEqual([501, 502, 503, 504].map(id => icon(id).getAttribute('aria-label')), ['Checked OK', 'Differs', 'In check', 'Not checked'], 'the name is the aria-label...')
     assert.ok(icon(501).getAttribute('title')?.startsWith('Checked OK'), '...and the tooltip')
     for (const id of [501, 502, 503, 504]) assert.equal(icon(id).textContent, '', `status ${id} is an icon: no phrase is written on the row`)
     for (const id of [501, 502, 503, 504]) assert.ok(icon(id).children.some(child => child.tagName.toLowerCase() === 'svg'), `status ${id} draws an icon`)

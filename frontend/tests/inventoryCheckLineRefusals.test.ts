@@ -116,7 +116,7 @@ const NOT_REFUSALS: Record<string, string> = {
   inventory_check_sessions_no_delete: 'schema object probed for presence',
   inventory_check_approvals_pending: 'a branch-cutover blocker, shown by the cutover screen, never an answer of the count routes',
   inventory_check_not_applied: 'the reason recorded for a line a close left unapplied when no refusal applies (closed_json), a state of the line and not an answer',
-  inventory_check_approve: 'permission extra key', 'inventory_check_show_${': 'permission extra keys, one per field the count shows (built by name on purpose)',
+  inventory_check_approve: 'permission extra key', inventory_check_issue: 'permission extra key (issue count tasks)', 'inventory_check_show_${': 'permission extra keys, one per field the count shows (built by name on purpose)',
 }
 
 const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>

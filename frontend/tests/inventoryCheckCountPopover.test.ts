@@ -255,9 +255,9 @@ const cases: Array<[string, () => Promise<void>]> = [
   // ---- F (review F6): the header says the status in words (a tooltip does not show on touch); the row itself stays icon-only. ----
   ['the popover header prints the status word; the row shows no status text', async () => {
     const s = await mount({ products: [{ id: 901, name: 'Zed', quantity: 5, check_status: 'issue' }, { id: 902, name: 'Yam', quantity: 5, check_status: 'ok' }], lotCounts: false })
-    assert.ok(!/Issue|Checked OK/.test(statusButton(s, 901).textContent), 'the status button holds only its icon')
+    assert.ok(!/Differs|Checked OK/.test(statusButton(s, 901).textContent), 'the status button holds only its icon')
     await open(s, 901)
-    assert.equal(flat(inPopover(s, 'data-popover-status-word')[0]), 'Issue', 'the word of the recorded status')
+    assert.equal(flat(inPopover(s, 'data-popover-status-word')[0]), 'Differs', 'the word of the recorded status')
     await s.click(action(s, 'close'))
     await s.render({ ...base, products: [{ id: 902, name: 'Yam', quantity: 5, check_status: 'ok' }], lotCounts: false })
     await open(s, 902)
@@ -272,7 +272,7 @@ const cases: Array<[string, () => Promise<void>]> = [
     await blind.unmount(); live.pop()
     const s = await mount({ products: [{ id: 952, name: 'P', quantity: 5, check_status: 'issue', check_pending: true }], lotCounts: false })
     await open(s, 952)
-    assert.equal(flat(inPopover(s, 'data-popover-status-word')[0]), 'Waiting for approval · Issue', 'the pending word with the recorded status behind it')
+    assert.equal(flat(inPopover(s, 'data-popover-status-word')[0]), 'Waiting for approval · Differs', 'the pending word with the recorded status behind it')
   }],
   // ---- H (round 2b): the per-batch entries are their own chunk, requested only when ic_lot_counts is on (a till without it never downloads them). ----
   ['the per-batch entries load lazily and only when lot counts are on', async () => {

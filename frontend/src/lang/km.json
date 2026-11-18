@@ -8300,6 +8300,7 @@
   "inventory_check_error_task_picked_up": "មានអ្នកផ្សេងបានទទួលយកកិច្ចការនេះរួចហើយ។",
   "inventory_check_error_task_not_picked_up": "គ្មានអ្នកទទួលយកកិច្ចការនេះទេ។",
   "inventory_check_error_task_too_many": "កិច្ចការនេះមានផលិតផលច្រើនជាងកំណត់។ សូមកំណត់ជម្រើសឱ្យតូចជាងនេះ។",
+  "inventory_check_error_task_limit": "សាខានេះមានកិច្ចការបើកដល់ចំនួនអតិបរមាហើយ។ សូមបិទមួយសិន។",
   "inventory_check_error_task_not_countable": "កិច្ចការត្រូវរាប់ពីបញ្ជី មិនមែនកែបន្ទាត់របស់វាទេ។",
   "inventory_check_error_issue_required": "អ្នកគ្មានសិទ្ធិចាត់កិច្ចការរាប់ទេ។",
   "inventory_check_error_tasks_required": "អ្នកគ្មានសិទ្ធិទទួលយក ឬរាប់កិច្ចការទេ។",

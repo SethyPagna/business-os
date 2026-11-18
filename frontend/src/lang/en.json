@@ -8300,6 +8300,7 @@
   "inventory_check_error_task_picked_up": "Someone else already picked this task up.",
   "inventory_check_error_task_not_picked_up": "Nobody has picked this task up.",
   "inventory_check_error_task_too_many": "This task would hold more products than one task can. Narrow the selection.",
+  "inventory_check_error_task_limit": "This branch already has the most open tasks it can hold. Close one first.",
   "inventory_check_error_task_not_countable": "A task is counted from the list, not by editing its lines.",
   "inventory_check_error_issue_required": "You do not have permission to issue count tasks.",
   "inventory_check_error_tasks_required": "You do not have permission to pick up or count tasks.",

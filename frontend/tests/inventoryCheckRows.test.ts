@@ -125,7 +125,7 @@ try {
       assert.equal(countInputs(s).length, 0, 'read-only: no input')
       await s.render({ ...base, products: sheetProducts, observations: inSession, canViewStock: false })
       assert.equal(countInputs(s).length, 0, 'blind counting keeps no Count input')
-      assert.ok(s.button('Report issue', row(s, 301)), 'but still its editor')
+      assert.ok(s.button('Report difference', row(s, 301)), 'but still its editor')
       await s.render({ ...base, products, observations: {}, canCheck: false })
       assert.equal(countInputs(s).length, 0, 'outside a session there is nothing to count')
       await s.unmount()
@@ -193,7 +193,7 @@ try {
     ['the editor: the count starts at Now, stepper, difference, Done or Save, reason chips', async () => {
       const chips = ['Damaged', 'Missing', 'Expired', 'damaged', ' Wrong barcode ', 'Leaking', 'Torn box', 'Short dated', 'Other', 'Ninth', '']
       const s = await mount({ products: [sheetProducts[0]], observations: { 301: started(301) }, reasonSuggestions: chips })
-      await s.click(s.button('Report issue', row(s, 301)))
+      await s.click(s.button('Report difference', row(s, 301)))
       assert.equal(propsOf(s.field('inventory-check-count-301')).value, '10', 'starts at Now')
       assert.equal(propsOf(s.field('inventory-check-count-301')).placeholder, 'Count', 'the label sits inside the field')
       assert.equal(propsOf(s.field('inventory-check-reason-301')).placeholder, 'Reason')
@@ -224,7 +224,7 @@ try {
     }],
     ['a blind counter starts from nothing, sees no difference and always saves an issue', async () => {
       const s = await mount({ products: [sheetProducts[0]], observations: { 301: started(301) }, canViewStock: false })
-      await s.click(s.button('Report issue', row(s, 301)))
+      await s.click(s.button('Report difference', row(s, 301)))
       assert.equal(propsOf(s.field('inventory-check-count-301')).value, '')
       assert.equal(differences(s).length, 0)
       assert.equal(submitOf(s).getAttribute('data-check-submit'), 'issue')
@@ -235,12 +235,12 @@ try {
       try {
         globalThis.matchMedia = (() => ({ matches: false })) as unknown as typeof matchMedia
         const touch = await mount({ products: [sheetProducts[0]], observations: { 301: started(301) } })
-        await touch.click(touch.button('Report issue', row(touch, 301)))
+        await touch.click(touch.button('Report difference', row(touch, 301)))
         assert.notEqual(active(touch), touch.field('inventory-check-count-301'), 'no keyboard pop-up on a phone')
         await touch.unmount()
         globalThis.matchMedia = (() => ({ matches: true })) as unknown as typeof matchMedia
         const mouse = await mount({ products: [sheetProducts[0]], observations: { 301: started(301) } })
-        await mouse.click(mouse.button('Report issue', row(mouse, 301)))
+        await mouse.click(mouse.button('Report difference', row(mouse, 301)))
         assert.equal(active(mouse), mouse.field('inventory-check-count-301'), 'a mouse opens the editor on the count')
         await mouse.unmount()
       } finally { globalThis.matchMedia = original }
@@ -392,14 +392,14 @@ try {
 
   const issue = { product_id: 12, state: 'issue', counted_quantity: null, reason: 'Old reason', revision: 2 } satisfies InventoryCheckObservation
   const editor = await mount({ observations: { 12: issue } })
-  await editor.click(editor.button('Edit issue', row(editor, 12)))
+  await editor.click(editor.button('Edit difference', row(editor, 12)))
   const beforeTyping = calls.length
   await editor.type(editor.field('inventory-check-count-12'), '0')
   await editor.type(editor.field('inventory-check-reason-12'), 'Shelf mismatch')
   assert.equal(calls.length, beforeTyping, 'typing never autosaves or blurs the quantity field')
   assert.equal(propsOf(editor.field('inventory-check-count-12')).inputMode, 'decimal')
   rejectSave = true
-  await editor.click(editor.button('Save issue', row(editor, 12)))
+  await editor.click(editor.button('Save difference', row(editor, 12)))
   assert.deepEqual(calls.at(-1), { productId: 12, patch: { state: 'issue', counted_quantity: 0, reason: 'Shelf mismatch' }, revision: 2 })
   assert.equal(propsOf(editor.field('inventory-check-count-12')).value, '0')
   assert.equal(propsOf(editor.field('inventory-check-reason-12')).value, 'Shelf mismatch', 'failed save retains the full draft')
@@ -409,30 +409,30 @@ try {
   assert.equal(calls.at(-1)?.revision, 2, 'retry retains the captured revision rather than silently rebasing a stale draft')
   await editor.render({ ...base, observations: { 12: { ...issue, counted_quantity: 0, reason: 'Shelf mismatch', revision: 3 } } })
   assert.equal(editor.findAll(node => node.getAttribute('id') === 'inventory-check-count-12').length, 0, 'an acknowledged new observation closes the editor')
-  await editor.click(editor.button('Edit issue', row(editor, 12)))
+  await editor.click(editor.button('Edit difference', row(editor, 12)))
   await editor.type(editor.field('inventory-check-count-12'), '')
   await editor.type(editor.field('inventory-check-reason-12'), 'Reason without a count')
-  await editor.click(editor.button('Save issue', row(editor, 12)))
+  await editor.click(editor.button('Save difference', row(editor, 12)))
   assert.equal(calls.at(-1)?.patch.counted_quantity, null, 'empty optional count remains null, never zero')
   await editor.unmount()
 
   for (const invalid of ['-1', 'NaN', 'Infinity', '1e999', '0x10', 'abc']) {
     const invalidEditor = await mount()
-    await invalidEditor.click(invalidEditor.button('Report issue', row(invalidEditor, 12)))
+    await invalidEditor.click(invalidEditor.button('Report difference', row(invalidEditor, 12)))
     await invalidEditor.type(invalidEditor.field('inventory-check-count-12'), invalid)
     await invalidEditor.type(invalidEditor.field('inventory-check-reason-12'), 'Synthetic reason')
     const prior = calls.length
-    await invalidEditor.click(invalidEditor.button('Save issue', row(invalidEditor, 12)))
+    await invalidEditor.click(invalidEditor.button('Save difference', row(invalidEditor, 12)))
     assert.equal(calls.length, prior, `${invalid} is refused before a save callback`)
     assert.ok(row(invalidEditor, 12).textContent.includes('Enter a valid non-negative quantity'))
     await invalidEditor.unmount()
   }
   const reason = await mount()
-  await reason.click(reason.button('Report issue', row(reason, 12)))
+  await reason.click(reason.button('Report difference', row(reason, 12)))
   await reason.type(reason.field('inventory-check-count-12'), '2')
   await reason.type(reason.field('inventory-check-reason-12'), '   ')
   const beforeReason = calls.length
-  await reason.click(reason.button('Save issue', row(reason, 12)))
+  await reason.click(reason.button('Save difference', row(reason, 12)))
   assert.equal(calls.length, beforeReason, 'one issue requires a nonblank reason')
   await reason.click(reason.button('Cancel', row(reason, 12)))
   assert.equal(reason.findAll(node => node.getAttribute('id') === 'inventory-check-count-12').length, 0)
@@ -446,16 +446,16 @@ try {
   await pending.unmount()
 
   const staleEditor = await mount({ observations: { 12: issue } })
-  await staleEditor.click(staleEditor.button('Edit issue', row(staleEditor, 12)))
+  await staleEditor.click(staleEditor.button('Edit difference', row(staleEditor, 12)))
   await staleEditor.type(staleEditor.field('inventory-check-reason-12'), 'Own unsaved reason')
   await staleEditor.render({ ...base, observations: { 12: { ...issue, reason: 'Another checker reason', revision: 8 } } })
-  await staleEditor.click(staleEditor.button('Save issue', row(staleEditor, 12)))
+  await staleEditor.click(staleEditor.button('Save difference', row(staleEditor, 12)))
   assert.equal(calls.at(-1)?.revision, 2, 'an arriving observation cannot silently rebase an existing draft')
   assert.equal(calls.at(-1)?.patch.reason, 'Own unsaved reason')
   await staleEditor.render({ ...base, observations: { 12: issue }, canCheck: false })
   assert.equal(staleEditor.findAll(node => node.getAttribute('id') === 'inventory-check-reason-12').length, 0, 'revocation closes the editing surface')
   await staleEditor.render({ ...base, observations: { 12: issue } })
-  await staleEditor.click(staleEditor.button('Edit issue', row(staleEditor, 12)))
+  await staleEditor.click(staleEditor.button('Edit difference', row(staleEditor, 12)))
   assert.equal(propsOf(staleEditor.field('inventory-check-reason-12')).value, 'Old reason', 'restored access does not restore a revoked unsaved draft')
   await staleEditor.unmount()
 
@@ -510,14 +510,14 @@ try {
   await otherBlind.unmount()
   const editing: Array<[number | string, boolean]> = []
   const guarded = await mount({ products: [{ id: 95, name: 'Unsaved physical count' }], onEditingChange: (id: number | string, value: boolean) => { editing.push([id, value]) } })
-  await guarded.click(guarded.button('Report issue', row(guarded, 95)))
+  await guarded.click(guarded.button('Report difference', row(guarded, 95)))
   const registered = dirtyWork.getDirtyWork().find(entry => entry.label === 'Unsaved physical count')
   assert.equal(registered?.pageId, 'inventory', 'the real row editor registers with the shared navigation guard')
   assert.deepEqual(editing.at(-1), [95, true])
   await guarded.click(guarded.button('Cancel', row(guarded, 95)))
   assert.ok(!dirtyWork.getDirtyWork().some(entry => entry.label === 'Unsaved physical count'))
   assert.deepEqual(editing.at(-1), [95, false])
-  await guarded.click(guarded.button('Report issue', row(guarded, 95)))
+  await guarded.click(guarded.button('Report difference', row(guarded, 95)))
   await guarded.unmount()
   assert.ok(!dirtyWork.getRegisteredWork().some(entry => entry.label === 'Unsaved physical count'), 'scope teardown removes the old row’s registry entry')
   // Board A-M5/A-M6/A-R3: one compact metric line, a drift that shows its size, copyable identity, icon-only buttons, one Retry.
