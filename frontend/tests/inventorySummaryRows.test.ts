@@ -3,9 +3,7 @@ import { createHarness } from './mountedComponentHarness.ts'
 import { APP_NAVIGATION_EVENT } from '../src/app/pathRouting.ts'
 import * as dirtyWork from '../src/utils/dirtyWork.ts'
 import { appendQuery, buildQueryString, type QueryParams } from '../src/api/query.ts'
-import { canonicalProductsQuery, loadWired, wiredListParams, wiredResult, type WiredDeps, type WiredList, type WiredRaw } from '../src/components/inventory/inventoryWired.ts'
-import { checkDaysOf, dayChipsOf } from '../src/components/inventory/inventoryCheckDays.ts'
-import { productsWireParams, sessionScopeParams } from '../src/components/inventory/inventoryCheckProductsRequest.ts'
+import { loadWired, wiredResult, type WiredDeps, type WiredList } from '../src/components/inventory/inventoryWired.ts'
 
 // Inventory status counts are true on every path: the figures on the cards come from ONE whole answer (the overlay's, or a list that named the branch), never from a mix, and when no answer carries them the page shows none, never 0.
 // The fixture server follows the Worker: /list carries a summary only when the request names a branch (the sole-branch open leaves it out), /overlay always carries one, built by the Worker's own rule
@@ -35,7 +33,6 @@ const held = new Map<string, unknown>()
 let authorityCurrent = true
 let epoch = 'epoch-a'
 let ranked: { hits: Array<{ id: number; tier: number }>; total: number } | null = null
-const CANONICAL = 'page=1&pageSize=20&searchMode=AND&sort=name_asc&include=branch_stock%2Cimages%2Cbatches%2Ctagged_lots'
 const listBody = (items: Row[], extra: Row = {}) => ({ items, total: items.length, page: 1, pageSize: 20, totalPages: 1, wired: true, projected: false, ...extra })
 
 const app = (permissions: Record<string, boolean>) => ({
@@ -84,7 +81,6 @@ async function mount(permissions: Record<string, boolean> = FIELDS) {
   open('hub:inventory:products')
   return harness.mount({ component: 'components/inventory/InventoryChecksPage.tsx', app: app(permissions), doubles, props: {} })
 }
-const sync = (detail: Record<string, unknown>) => window.dispatchEvent(new CustomEvent('sync:update', { detail }))
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 // ---- the Worker's rule, written out (cloudflare/src/lib/inventoryCheckList.ts readCheckSummary): the unit is the product row, total = the rows of the unfiltered list, Not checked = total - ok - issue ----
@@ -128,7 +124,7 @@ const chipNumber = (surface: { text: () => string }, label: string) => { const f
   assert.equal(figures(wiredResult(fromStore.raw)), '[5,4,0,9]', 'the held path shows the whole figures of the overlay')
 
   // no made-up 0: an answer that is not whole (an older server's overlay: counts without Not checked and total) leaves the figures unknown
-  const partial = () => ({ ok: 4, issue: 0, days: [] })
+  const partial = () => ({ ok: 5, issue: 0, days: [] })
   const partialOnly = await loadWired({ params, known, seed: first.raw.list, skipSummary: false, access, deps: depsOf(F3, partial) })
   assert.equal(wiredResult(partialOnly.raw).summary, undefined, 'no summary at all rather than Not checked 0 and total 0')
   const heldPartial = await loadWired({ params, known, skipSummary: false, access, deps: depsOf(F3, partial, heldList) })

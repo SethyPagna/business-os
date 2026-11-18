@@ -72,7 +72,7 @@ const listOf = (ids: number[], extra: Partial<WiredList> & Record<string, unknow
   tagged_lots: [{ product_id: ids[0], branch_id: 1, condition_tag: 'damaged', quantity: 2 }, { product_id: ids[0], branch_id: 1, condition_tag: 'expired', quantity: 5 }], ...extra })
 const overlayEntry = (id: number, extra: Partial<OverlayEntry> = {}): OverlayEntry => ({ product_id: id, last_change_at: '2026-11-03 14:00:00', ...extra })
 const FULL: WiredAccess = { stock: true, barcode: true, received: true }
-type Log = { lists: QueryParams[]; overlays: Array<{ branchId: number; ids: number[]; lots?: boolean }>; primed: Array<{ query: string; payload: Record<string, unknown> }> }
+type Log = { lists: QueryParams[]; overlays: Array<{ branchId: number; ids: number[]; lots?: boolean; summary?: boolean }>; primed: Array<{ query: string; payload: Record<string, unknown> }> }
 function deps(options: { held?: Record<string, unknown>; list?: (params: QueryParams) => WiredList | Promise<WiredList>; overlay?: (ids: number[]) => OverlayAnswer; rank?: WiredDeps['rank'] } = {}): { log: Log; deps: WiredDeps } {
   const log: Log = { lists: [], overlays: [], primed: [] }
   return { log, deps: {
@@ -230,7 +230,8 @@ const CANON = canonicalProductsQuery(wire({}))!
   const load = await loadWired({ params: params({ branchId: '1' }), skipSummary: false, access: FULL, deps: d })
   const fresh = await readWiredRows([2], 1, { ...d, readList: async p => { log.lists.push(p); return { ...listOf([2]), items: [row(2, { branch_stock: [{ branch_id: 1, branch_name: 'Shop', quantity: 4 }] })], tagged_lots: [] } },
     readOverlay: async p => { log.overlays.push(p); return { items: [overlayEntry(2, { last_change_at: '2026-11-05 10:00:00' })] } } }, FULL)
-  assert.deepEqual(log.lists.at(-1), { ids: '2', branchId: 1 }, 'the refresh reads the changed id, nothing else')
+  assert.deepEqual(log.lists.at(-1), { ids: '2', branchId: 1, summary: 0 }, 'the refresh reads the changed id, nothing else, and asks for no summary (the page keeps its figures)')
+  assert.equal(log.overlays.at(-1)?.summary, false, 'and its overlay asks for none either')
   const merged = wiredResult(mergeWiredRows(load.raw, fresh)).items
   assert.deepEqual(merged.map(item => item.id), [1, 2, 3], 'the page keeps its order'); assert.equal(merged[1].quantity, 4); assert.equal(merged[1].last_change_at, '2026-11-05 10:00:00'); assert.equal(merged[0].quantity, 12)
   assert.equal(merged[0].damaged_quantity, 7, 'the other rows keep their held stock groups (every tag summed)')

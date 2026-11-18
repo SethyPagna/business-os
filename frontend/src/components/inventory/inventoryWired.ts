@@ -227,7 +227,8 @@ const ids = (items: readonly Row[]): number[] => items.map(row => Number(row.id)
 
 /** The by-id read of a few rows (a refresh of changed ones): their Products rows and their overlay, nothing else. */
 export async function readWiredRows(rowIds: number[], branchId: number, deps: WiredDeps, access: WiredAccess, signal?: AbortSignal): Promise<{ ids: number[]; items: Row[]; tagged: Tagged[]; overlay: OverlayEntry[]; lots: Array<{ product_id: number; lots?: Lot[] }> }> {
-  const list = await deps.readList({ ids: rowIds.join(','), ...(branchId ? { branchId } : {}) }, signal)
+  // summary=0 on both reads: the page keeps the figures it holds, and a list that names the branch would otherwise build them (a count, a seek and the sets) only to be thrown away.
+  const list = await deps.readList({ ids: rowIds.join(','), ...(branchId ? { branchId } : {}), summary: 0 }, signal)
   const overlay = branchId ? await deps.readOverlay({ branchId, ids: rowIds, lots: access.received && list.items.some(row => !('lots' in row)), summary: false }, signal) : {}
   return { ids: rowIds, items: list.items, tagged: list.tagged_lots ?? [], overlay: overlay.items ?? [], lots: overlay.lots ?? [] }
 }
