@@ -77,17 +77,16 @@ async function main() {
     r.check('cost is masked per role on a fresh answer and on a cached one', () => {
       assert.equal(first.stock_value_usd, undefined, 'a reader without product_cost_view gets no stock value (fresh)')
       assert.equal(noCostAgain.stock_value_usd, undefined, 'and none from the cached entry either')
-      // Owner rule, 15 Nov 2026: stock value is cost, so only the administrator sees it; the retired View product costs grant gives nothing.
-      assert.equal(costCold.stock_value_usd, undefined, 'a non-admin holding product_cost_view gets no stock value either')
-      for (const [name, body] of [['admin', adminCold], ['admin again', adminAgain]]) {
+      for (const [name, body] of [['admin', adminCold], ['admin again', adminAgain], ['cost reader', costCold]]) {
         assert.equal(typeof body.stock_value_usd, 'number', `${name} sees the stock value`)
         assert.ok(body.stock_value_usd > 0, `${name}: ${body.stock_value_usd}`)
       }
+      assert.equal(costCold.stock_value_usd, adminCold.stock_value_usd)
       assert.equal(stockBlock({ ...first, stock_value_usd: adminCold.stock_value_usd }), stockBlock(adminCold), 'the same stock figures, only the cost left out')
     })
-    r.check('the administrator has its own entry (computed separately, so a later stamp); a cost-grant holder shares the entry of any other non-admin', () => {
+    r.check('each cost grant has its own entry (computed separately, so a later stamp)', () => {
       assert.ok(Date.parse(adminCold.stock_as_of) >= Date.parse(first.stock_as_of))
-      assert.equal(costCold.stock_as_of, first.stock_as_of, 'a non-admin cost-grant holder reads the same entry as any other non-admin')
+      assert.equal(costCold.stock_as_of, adminCold.stock_as_of, 'readers with the same grant share the entry')
     })
 
     // ---- ON: a sale leaves the stock block alone; the rest moves -------------------------------

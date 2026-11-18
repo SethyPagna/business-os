@@ -214,7 +214,7 @@ async function main() {
       paymentDetails: [{ method: 'Cash', amount_usd: 12, amount_khr: 0 }], label: 'L4 delivery sale',
       extra: { is_delivery: true, delivery_contact_id: 1, delivery_fee_usd: 2, delivery_fee_paid_by: 'customer', delivery_actual_cost_usd: 1.5 } })
     assert.equal(delivery.status, 200, JSON.stringify(delivery.body).slice(0, 300))
-    // The cost grant and the courier-cost permission are separate switches: this employee has the first and has the second turned off.
+    // The cost grant and the courier-cost permission are separate switches: this employee has the first and has the second turned off (owner, 17 Nov 2026: the grant shows product cost and profit).
     const employee = await h.addEmployee(950, 'al_cost_viewer', { sales: true, reports: true, product_cost_view: true, 'sales:view_courier_cost': false })
     const both = await h.addEmployee(951, 'al_cost_and_courier_viewer', { sales: true, reports: true, product_cost_view: true })
     const courierOnly = await h.addEmployee(952, 'al_courier_viewer', { sales: true, reports: true })
@@ -226,17 +226,20 @@ async function main() {
     r.check(`L4 control: the administrator's courier cost is $${admin4.delivery_actual_cost_usd}`, () => {
       assert.equal(admin4.delivery_actual_cost_usd, 1.5)
     })
-    r.check(`L4: the staff account with the courier permission switched off is not sent the courier cost, nor any product cost or profit (keys: ${['delivery_actual_cost_usd', 'delivery_net_usd', 'delivery_margin_usd'].filter(key => key in seen).join(',') || 'none'})`, () => {
+    r.check(`L4: the staff account with the cost grant but the courier permission switched off is not sent the courier cost (keys: ${['delivery_actual_cost_usd', 'delivery_net_usd', 'delivery_margin_usd'].filter(key => key in seen).join(',') || 'none'})`, () => {
       assert.ok(!('delivery_actual_cost_usd' in seen) && !('delivery_net_usd' in seen))
     })
     const seenBoth = await totalsOf(h, range('2026-10-05'), 'L4 cost + courier employee overview', both)
     const seenCourierOnly = await totalsOf(h, range('2026-10-05'), 'L4 courier-only employee overview', courierOnly)
-    // Owner rules: product cost and profit are administrator only (15 Nov 2026), so the cost grant brings none of them; the courier cost is its own
-    // permission and visible to staff holding it (16 Nov 2026). Holding both is therefore the same as holding the courier permission alone.
+    // Owner rules: product cost and profit follow the product_cost_view grant (admin by default, an editable grant since 17 Nov 2026); the courier cost is
+    // its own permission and visible to staff holding it (16 Nov 2026). Holding both reads both; holding the courier permission alone reads no product money.
     const PRODUCT_MONEY = ['cost_usd', 'profit_usd', 'margin_pct', 'removal_loss_usd', 'profit_excludes_delivery']
-    r.check('L4: with the courier-cost permission on, a staff account with the retired cost grant reads the courier cost and no product cost or profit', () => {
+    r.check('L4: with the courier-cost permission on, a staff account with the cost grant reads the courier cost AND the product cost and profit', () => {
       assert.equal(seenBoth.delivery_actual_cost_usd, 1.5)
-      for (const key of PRODUCT_MONEY) assert.ok(!(key in seenBoth), key)
+      for (const key of ['cost_usd', 'profit_usd']) assert.equal(typeof seenBoth[key], 'number', key)
+    })
+    r.check('L4: the cost grant with the courier permission off reads the product cost and profit but not the courier cost', () => {
+      for (const key of ['cost_usd', 'profit_usd']) assert.equal(typeof seen[key], 'number', key)
     })
     r.check('L4: the courier-cost permission alone reads the courier cost and no product cost or profit', () => {
       assert.equal(seenCourierOnly.delivery_actual_cost_usd, 1.5)

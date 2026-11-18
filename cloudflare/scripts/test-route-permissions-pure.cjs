@@ -317,7 +317,9 @@ const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getP
   // `user` is hoisted to the top of the handler since the I1 audit pass
   // (audit() needs it before this branch), so the pin only requires the
   // both independent permission checks to precede any restore work.
-  assert.match(backupsSrc, /if \(type === 'import-folder'\) \{\s*if \(!canEditAcquisitionCosts\(user\)\) return c\.json\([^\n]+\)\s*if \(!hasPermission\(user, 'backup_restore'\)\)/, "the restore branch must enforce both cost-entry and backup_restore before side effects")
+  // 17 Nov 2026: restore is administrator-only (isAdminControlUser), never the editable cost grant, plus backup_restore.
+  assert.match(backupsSrc, /if \(type === 'import-folder'\) \{\s*if \(!isAdminControlUser\(user\)\) return c\.json\([^\n]+\)\s*if \(!hasPermission\(user, 'backup_restore'\)\)/, "the restore branch must enforce both the administrator check (isAdminControlUser) and backup_restore before side effects")
+  assert.doesNotMatch(backupsSrc.slice(backupsSrc.indexOf("if (type === 'import-folder')"), backupsSrc.indexOf("if (type === 'import-folder')") + 400), /AcquisitionCosts/, 'restore must not be gated on the editable cost grant')
   console.log('PASS routes/backups.ts requires backup_restore specifically on the destructive restore branch, not just the router-wide backup gate')
 }
 {

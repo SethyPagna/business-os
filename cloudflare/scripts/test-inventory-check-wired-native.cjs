@@ -3,7 +3,7 @@
 //  OFF   both routes answer 404 and prepare no Inventory Check statement; the legacy list is unaffected (R7: a legacy-key request stays on the old route, with the switch ON too);
 //  PARITY  for 10 scopes x 3 viewers the list rows are Products' rows (byte-identical for a viewer whose Products answer needs no cut; otherwise exactly the documented cut), the
 //          second route is a cache HIT in both orders, and no statement of either route reads the stock ledger (a positive control shows the pin can see it on the old route);
-//  PROJECTION  a blind counter gets no stock, no lot quantity and no held stock; barcode, price, category, brand, received date follow the grants; nobody gets cost;
+//  PROJECTION  a blind counter gets no stock, no lot quantity and no held stock; barcode, price, category, brand, received date follow the grants; cost only for a viewer who may see acquisition costs (admin);
 //  FILTERS  Issues / Counted / Pending use the server-only restriction, Not checked leaves the checked set out; latest wins; other branches and organizations are not read;
 //          a set over inventoryCheckFilterMaxIds is refused 503; the counts are IC data on the inventory_checks version;
 //  OVERLAY  the viewer's count entries, pending marks and last movement of the window's ids only; mixed-format created_at (14:00 beats ISO 09:00); bounded by the plan fields;
@@ -96,7 +96,7 @@ const GROUPS = {
 }
 function expectedRow(row, fields, productsPage) {
   const out = { ...row }
-  for (const key of COST) delete out[key]
+  if (!fields.cost) for (const key of COST) delete out[key]
   for (const [group, keys] of Object.entries(GROUPS)) if (!fields[group]) for (const key of keys) delete out[key]
   if (!productsPage) { delete out.supplier; delete out.description }
   if (!fields.stock) out.branch_stock = out.branch_stock.map(({ quantity: _q, ...entry }) => entry)
@@ -105,7 +105,7 @@ function expectedRow(row, fields, productsPage) {
   return JSON.parse(JSON.stringify(out))
 }
 const FIELDS = {
-  admin: { stock: true, barcode: true, price: true, category: true, brand: true, received: true }, checker: { stock: true, barcode: true, price: true, category: true, brand: true, received: true },
+  admin: { stock: true, barcode: true, price: true, category: true, brand: true, received: true, cost: true }, checker: { stock: true, barcode: true, price: true, category: true, brand: true, received: true },
   stockOnly: { stock: true, received: true }, receivedOnly: { received: true }, blind: { brand: true, category: true },
 }
 const PAGE = { admin: true, checker: true, stockOnly: false, receivedOnly: false, blind: false }
@@ -172,7 +172,7 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
         const own = await app.get(withLots(productsUrl))
         check(`${name} / checker: a viewer whose Products answer needs no cut gets byte-identical rows and projected:false`, wired.json.projected === false && JSON.stringify(itemsOf(wired)) === JSON.stringify(own.json.items))
       } else if (viewer === 'admin') {
-        check(`${name} / admin: cost is cut, so the answer says projected:true (the page must not hand it to Products' store)`, wired.json.projected === true && !JSON.stringify(wired.json.items).includes('cost_price'))
+        check(`${name} / admin: cost is kept (the viewer may see it) and the rows are Products' own, so projected:false`, wired.json.projected === false && itemsOf(wired).every((row) => 'cost_price_usd' in row))
       } else check(`${name} / stockOnly: projected:true`, wired.json.projected === true)
       checkedScopes++
     }
@@ -239,7 +239,7 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
   check('the summary counts are IC data: counted 3, issues 1, pending 1', ok.json.summary && ok.json.summary.ok === 3 && ok.json.summary.issue === 1 && ok.json.summary.pending === 1)
   const whole = await app.get('/api/inventory-checks/list?branchId=1')
   check('an unfiltered list also says Not checked (catalogue total 12 minus 4 checked = 8)', whole.json.summary.not_checked === 8 && whole.json.summary.total === 12)
-  check('a filtered list does not claim a Not checked figure', !('not_checked' in ok.json.summary))
+  check('a filtered list carries the same branch-wide figures as the unfiltered one (Not checked 8, total 12): the chips do not follow the page filter', JSON.stringify(ok.json.summary) === JSON.stringify(whole.json.summary) && ok.json.summary.not_checked === 8 && ok.json.summary.total === 12)
   const noSummary = await app.get('/api/inventory-checks/list?branchId=1&summary=0')
   check('summary=0 skips the counts', !('summary' in noSummary.json))
   // The overlay carries the same strip counts and the same Fix stock capability as the list, for the branch and grants of the viewer (a page fed from Products' store has no list answer).
@@ -249,8 +249,7 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
     const wholeList = await app.get('/api/inventory-checks/list?branchId=1')
     const overlaid = await app.get('/api/inventory-checks/overlay?branchId=1&ids=100,101')
     check(`overlay summary equals the list summary (${viewer})`, listed.status === 200 && overlaid.status === 200 && JSON.stringify(overlaid.json.summary) === JSON.stringify(listed.json.summary) && Boolean(overlaid.json.summary))
-    const { not_checked: _notChecked, total: _total, ...wholeCounts } = wholeList.json.summary
-    check(`and the unfiltered list's counts (${viewer}); Not checked and total stay with the page's own Products total`, JSON.stringify(overlaid.json.summary) === JSON.stringify(wholeCounts))
+    check(`and the unfiltered list's whole summary, Not checked and total included (${viewer}): one object from both routes`, JSON.stringify(overlaid.json.summary) === JSON.stringify(wholeList.json.summary) && overlaid.json.summary.total === 12 && overlaid.json.summary.not_checked === 8)
     check(`overlay capabilities equal the list capabilities (${viewer})`, JSON.stringify(overlaid.json.capabilities ?? null) === JSON.stringify(listed.json.capabilities ?? null))
     check(`pending is in the overlay summary only for a viewer who may see stock (${viewer})`, ('pending' in overlaid.json.summary) === ('pending' in listed.json.summary))
     const overlayNoSummary = await app.get('/api/inventory-checks/overlay?branchId=1&ids=100&summary=0')
@@ -278,10 +277,12 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
   const tooBig = await app.get('/api/inventory-checks/list?branchId=1&checkState=not_checked', freeEnv)
   check('Free: a checked set over inventoryCheckFilterMaxIds (2,000) is refused 503 inventory_check_filter_too_large', tooBig.status === 503 && tooBig.json.code === 'inventory_check_filter_too_large')
   const stillPlain = await app.get('/api/inventory-checks/list?branchId=1', freeEnv)
-  check('the plain list still answers (without a summary) when the sets are too large', stillPlain.status === 200 && !('summary' in stillPlain.json))
+  check('the plain list still answers when the sets are too large, and its summary says so (tooLarge, no counts, no days) instead of vanishing', stillPlain.status === 200 && JSON.stringify(stillPlain.json.summary) === '{"tooLarge":true}', () => JSON.stringify(stillPlain.json.summary))
+  const bigOverlay = await app.get('/api/inventory-checks/overlay?branchId=1&ids=100,101', freeEnv)
+  check('the overlay says so too, and a page under the limit has no tooLarge flag', bigOverlay.status === 200 && JSON.stringify(bigOverlay.json.summary) === '{"tooLarge":true}')
   app.clearCaches()
   const paidBig = await app.get('/api/inventory-checks/list?branchId=1&checkState=ok')
-  check('Paid: the same set (10,000) is served', paidBig.status === 200 && paidBig.json.summary.ok > 2000 && paidBig.json.total === 3)
+  check('Paid: the same set (10,000) is served, and the 2,101 counts of products that are not in the list are in no figure (ok stays 3)', paidBig.status === 200 && paidBig.json.summary.ok === 3 && paidBig.json.total === 3 && !('tooLarge' in paidBig.json.summary))
 
   // ---- overlay ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
   app.clearCaches(); app.kv.clear()
@@ -294,19 +295,21 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
   check('count entry: 102 is an issue with its note', byId[102].check.state === 'issue' && byId[102].check.note === 'Damaged box')
   check('an unstarted line is not a count entry (103), and an unchecked product has none (111)', !byId[103].check && !byId[111].check)
   check('pending mark on 106 only', byId[106].pending === true && !byId[100].pending && !byId[101].pending)
+  check('the pending mark names the session holding the waiting request (sP)', byId[106].pending_session_id === 'sP' && !('pending_session_id' in byId[100]))
   check('last movement: 14:00 beats ISO 09:00 of the same day (product 100)', byId[100].last_change_at === '2026-11-03 14:00:00')
   check('last movement: a product with only an ISO row (101)', byId[101].last_change_at === '2026-11-02T08:00:00.000Z')
   check('last movement: a product with none is null (102)', byId[102].last_change_at === null)
   check('overlay carries the inventory_checks version and no stock quantity of the product', typeof overlay.json.version === 'string' && !/stock_quantity/.test(JSON.stringify(overlay.json)))
   const overlayStatements = app.batches.filter((b) => /inventory_check_items|inventory_movements/.test(b.sql))
-  const oneBatch = app.batches.slice(-3)
+  // the status counts' own batch (membership token, population count, seek of the checked ids) follows the overlay's; it is pinned by test-inventory-population-token-native.cjs
+  const oneBatch = app.batches.filter((b) => !/inventory_population_token|FROM products p WHERE/.test(b.sql)).slice(-3)
   check('the overlay reads ran in ONE batch of three statements (counts, pending, last movement)', oneBatch.length === 3 && /inventory_check_items/.test(oneBatch[0].sql) && /inventory_check_approvals/.test(oneBatch[1].sql) && /inventory_movements/.test(oneBatch[2].sql))
   check('the movement lookup is two index steps: newest day, then julianday over a bounded subselect', /ORDER BY m\.created_at DESC, m\.id DESC LIMIT 1/.test(oneBatch[2].sql) && /julianday\(recent\.created_at\)/.test(oneBatch[2].sql) && /LIMIT @lastChangeRows/.test(oneBatch[2].sql))
   check('the movement lookup is bounded by the plan field (Paid 8)', oneBatch[2].params.lastChangeRows === 8 && JSON.parse(oneBatch[2].params.ids).length === 6)
   check('overlay statements never mention the ledger', !app.since(0).some((sql) => ledger.test(sql) && /inventory_movements|inventory_check_approvals/.test(sql)))
   void overlayStatements
   const freeOverlay = await app.get('/api/inventory-checks/overlay?branchId=1&ids=100', freeEnv)
-  check('Free: the same lookup is bounded at 4 rows per product', freeOverlay.status === 200 && app.batches.slice(-1)[0].params.lastChangeRows === 4)
+  check('Free: the same lookup is bounded at 4 rows per product', freeOverlay.status === 200 && app.batches.filter((b) => /inventory_movements/.test(b.sql)).slice(-1)[0].params.lastChangeRows === 4)
   const tooMany = await app.get(`/api/inventory-checks/overlay?branchId=1&ids=${Array.from({ length: 151 }, (_, i) => i + 1).join(',')}`, freeEnv)
   check('Free: more than inventoryOverlayMaxRows (150) ids is refused 400', tooMany.status === 400)
   const paidMany = await app.get(`/api/inventory-checks/overlay?branchId=1&ids=${Array.from({ length: 151 }, (_, i) => i + 1).join(',')}`)
@@ -314,7 +317,7 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
   for (const [label, query] of [['no ids', 'branchId=1'], ['no branch', 'ids=100'], ['bad id', 'branchId=1&ids=1,x'], ['zero branch', 'branchId=0&ids=1']]) check(`overlay ${label}: 400`, (await app.get(`/api/inventory-checks/overlay?${query}`)).status === 400)
   const overlayLib = app.load('lib/inventoryCheckOverlay.ts')
   const directOverlay = await overlayLib.readInventoryOverlay(app.env, U.blind, { branchId: 1, ids: [106], pendingAvailable: true })
-  check('a viewer without the stock field is never told about pending counts, whatever the caller allows', !directOverlay[0].pending)
+  check('a viewer without the stock field is never told about pending counts, whatever the caller allows', !directOverlay[0].pending && !('pending_session_id' in directOverlay[0]))
   app.setUser(U.blind)
   const blindOverlay = await app.get('/api/inventory-checks/overlay?branchId=1&ids=100,101,106')
   const blindEntries = Object.fromEntries(blindOverlay.json.items.map((e) => [e.product_id, e]))
@@ -394,5 +397,13 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
   const coded = await app.get('/api/inventory-checks/list?branchId=1&query=CODE990001')
   app.setUser(U.admin)
   check('row 14: a retired product owning the code does not block the blind code lookup; the active product with that code is found', coded.status === 200 && (coded.json.items || []).map(item => item.id).join(',') === '991', JSON.stringify({ s: coded.status, ids: (coded.json.items || []).map(item => item.id) }))
+  // Last, because history rows cannot be deleted. Submitted on 3 Nov (waiting), observed again on 13 Nov in another open session: the latest count is the newer session, the waiting request is still the older one.
+  app.raw.exec(`INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,scope_json,started_at,updated_at) VALUES('sLater',NULL,1,72,'Later','open','{}','2026-11-13T00:00:00.000Z','2026-11-13T00:00:00.000Z');
+    INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,revision,updated_by,updated_at) VALUES('sLater',106,1,'{"id":106,"name":"P106"}',10,'{}','done',9,1,72,'2026-11-13T01:00:00.000Z')`)
+  {
+    const later = (await overlayLib.readInventoryOverlay(app.env, U.checker, { branchId: 1, ids: [106], pendingAvailable: true }))[0]
+    check('the latest count of a waiting product can be a newer session, and the pending mark still names the session that holds the request', later.check.session_id === 'sLater' && later.pending === true && later.pending_session_id === 'sP', JSON.stringify(later))
+  }
+  app.setUser(U.admin)
   console.log(`\n${checks} checks passed`)
 })().catch((e) => { console.error(e); process.exit(1) })

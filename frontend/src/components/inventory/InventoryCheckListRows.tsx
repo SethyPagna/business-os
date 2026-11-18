@@ -9,21 +9,27 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import ListChecks from 'lucide-react/dist/esm/icons/list-checks.js'
 import ProductImage from '../pos/ProductImage.tsx'
 import PortalMenu from '../shared/PortalMenu.tsx'
+import { swallowDismissClick } from './dismissClickSwallow.ts'
 import ProductNameRail from '../shared/ProductNameRail.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
 import { useCopyFloat } from '../shared/CopyFloat.tsx'
-import { todayStr } from '../../utils/dateHelpers.ts'
+import { PriceValue, ProductDiscountBadge } from '../products/surfaces/ProductRowParts.tsx'
+import CostValue from '../shared/CostValue.tsx'
+import { computeExpiryStatus } from '../pos/posCore.ts'
 import { fmtDateOnly, fmtDateTime24 } from '../../utils/formatters.ts'
 import type { InventoryCheckId, InventoryCheckListStatus, InventoryCheckLotRow, InventoryCheckLotsAnswer, InventoryCheckProduct, InventoryCheckTranslator } from '../../types/inventoryChecks.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { lotTotals, type LotDraft, type StockedDate } from './inventoryCheckLots.ts'
 import { isDraftKind, recordedStatus, rowStatusKind, ROW_STATUS_WORDS, type RowStatusKind } from './inventoryCheckStatus.ts'
 import InventoryCheckCountPopover, { preloadLotEntries } from './InventoryCheckCountPopover.tsx'
-import { priceFacts, type PriceMoney } from './inventoryPriceFacts.ts'
+import { costFact, priceFacts, type PriceMoney } from './inventoryPriceFacts.ts'
 import { finiteQuantity, parseCount, signedDelta } from './InventoryCheckCountEditor.tsx'
 import type { InventoryCheckFocusRequest } from './InventoryCheckRows.tsx'
 import { UNSAVED_ROW_CLASS } from './inventoryCheckGroups.ts'
 import StockQty from './StockQty.tsx'
+import { rowClickOpens } from './inventoryCheckRowClick.ts'
+import { dayLabel } from './inventoryCheckDays.ts'
+import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 
 /** What a person has entered on one row of the list but not yet submitted. `checked`: the count was filled from Now by the row's check button. */
 export type ListDraft = { selected: boolean; count: string; checked: boolean; note: string; /** Counts typed per received date (ic_lot_counts); the row's count is their sum. */ lots?: LotDraft; /** The stocked received dates the row listed when a date was last typed on it (so Submit can check, on any page, that none was left out). */ stocked?: readonly StockedDate[] }
@@ -87,12 +93,12 @@ export function InventoryCheckListHeader({ t, className = '', ...flags }: ListFl
 
 const rowIconButton = 'inline-flex h-11 min-h-11 w-11 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-gray-600 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50 lg:h-10 lg:min-h-10 lg:w-10 dark:text-gray-300 dark:hover:bg-zinc-800'
 
-/** 'YYYY-MM-DD' expiry as the month-year it is printed with, and how close it is (30 days, the app-wide alert window). */
-function expiryBadge(date: string | null | undefined): { text: string; tone: 'expired' | 'soon' | 'ok'; full: string } | null {
+/** 'YYYY-MM-DD' expiry as the month-year it is printed with, and how close it is: the product's own alert window (30 days when unset), judged by POS's computeExpiryStatus like the detail modal. */
+function expiryBadge(date: string | null | undefined, alertDays?: unknown): { text: string; tone: 'expired' | 'soon' | 'ok'; full: string } | null {
   const match = String(date ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (!match) return null
-  const days = Math.round((Date.parse(`${match[0]}T00:00:00Z`) - Date.parse(`${todayStr()}T00:00:00Z`)) / 86400000)
-  return { text: `${match[2]}/${match[1]}`, tone: days < 0 ? 'expired' : days <= 30 ? 'soon' : 'ok', full: fmtDateOnly(match[0]) }
+  const info = match ? computeExpiryStatus(match[0], alertDays) : null
+  if (!match || !info) return null
+  return { text: `${match[2]}/${match[1]}`, tone: info.status === 'expiring' ? 'soon' : info.status, full: fmtDateOnly(match[0]) }
 }
 
 export const LIST_STATUS: Record<InventoryCheckListStatus, { key: string; fallback: string; tone: string; edge: string; Icon: typeof Check }> = {
@@ -124,6 +130,10 @@ export type InventoryCheckListRowsProps = {
   priceText?: (usd: unknown, khr?: unknown) => string
   promotionRules?: readonly PromotionRule[]
   exchangeRate?: number
+  /** The viewer may see cost (canViewAcquisitionCosts, through the page's access): formats a cost like a price. Absent: no cost is drawn, whatever the row carries. */
+  costText?: (usd: unknown, khr?: unknown) => string
+  /** The red cost value was tapped: the page opens the calculated-cost float (a sibling of the list, so its clicks never reach a row). */
+  onOpenCost?: (product: InventoryCheckProduct) => void
   /** Small badges after the barcode line, by product id (the Issues tab's "Open session" chip). */
   adornments?: Readonly<Record<string, ReactNode | undefined>>
   /** A line under a row that cannot be submitted as it stands (a received date left out), by product id. It clears as soon as the row no longer needs it. */
@@ -174,7 +184,7 @@ function statusIconOf(kind: RowStatusKind): { Icon: typeof Check; tone: string }
   }
 }
 
-function ListRow({ product, draft, adornment, refusal, columns, countable, copy, scanHit, onAdvance, selecting, locked = false, canViewStock, canViewCounts, priceText, promotionRules, exchangeRate = 4100, t, onOpenProduct, onCount, onNote, onCountEntered, lotCounts = false, loadLots, onLotCount, onLotSet, onMatches, onDiffers, onClear }: RowProps) {
+function ListRow({ product, draft, adornment, refusal, columns, countable, copy, scanHit, onAdvance, selecting, locked = false, canViewStock, canViewCounts, priceText, promotionRules, exchangeRate = 4100, costText, onOpenCost, t, onOpenProduct, onCount, onNote, onCountEntered, lotCounts = false, loadLots, onLotCount, onLotSet, onMatches, onDiffers, onClear }: RowProps) {
   const tr = makeTr(t)
   const id = String(product.id)
   const counting = selecting && countable
@@ -221,7 +231,7 @@ function ListRow({ product, draft, adornment, refusal, columns, countable, copy,
   const statusButtonClass = `inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-0 bg-transparent hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50 lg:h-9 lg:w-9 dark:hover:bg-zinc-800 ${kind && isDraftKind(kind) ? 'ring-2 ring-blue-300 dark:ring-blue-700' : ''}`
   const openLabel = `${tr('inventory_check_open_count', 'Check and count: {name}').replace('{name}', product.name)} (${statusWords})`
   const statusNode = kind === null ? null : <span className="inline-flex min-w-0 flex-col items-center gap-0 lg:flex-row lg:justify-end lg:gap-1">
-    {counting ? <PortalMenu align="auto" menuClassName="!rounded-xl" closeOnContentClick={false}
+    {counting ? <PortalMenu align="auto" menuClassName="!rounded-xl" closeOnContentClick={false} onOutsidePress={swallowDismissClick}
       trigger={<button ref={statusRef} type="button" data-check-action="status" data-check-status-kind={kind} aria-label={openLabel} title={checkedTitle} className={statusButtonClass}>{statusGlyph}</button>}
       content={({ closeMenu }) => <InventoryCheckCountPopover product={product} draft={draft} byBatch={byBatch} loadLots={loadLots} canViewStock={canViewStock} canViewCounts={canViewCounts} locked={locked} t={t} statusIcon={statusGlyph} statusText={checkedTitle} statusWord={statusWords} recordedWord={kind === 'pending' && recordedStatus(product.check_status) ? tr(ROW_STATUS_WORDS[recordedStatus(product.check_status)!].key, ROW_STATUS_WORDS[recordedStatus(product.check_status)!].fallback) : undefined}
         onClose={closeMenu} returnFocus={() => statusRef.current?.focus()} onAdvance={() => onAdvance(product.id)} onCount={onCount} onLotCount={(item, row, value) => onLotCount?.(item, row, value)} onMatches={(item, rows) => onMatches?.(item, rows)} onDiffers={item => onDiffers?.(item)} onClear={item => onClear?.(item)} onLotSet={onLotSet} />} />
@@ -230,23 +240,40 @@ function ListRow({ product, draft, adornment, refusal, columns, countable, copy,
   </span>
 
   const barcode = product.barcode || product.sku
-  const expiry = expiryBadge(product.next_expiry_date)
-  const expiryName = expiry ? expiry.tone === 'expired' ? tr('inventory_check_expired', 'Expired') : expiry.tone === 'soon' ? tr('inventory_check_expires_soon', 'Expires soon') : tr('expiry', 'Expiry') : ''
+  const expiry = expiryBadge(product.next_expiry_date, product.expiry_alert_days)
+  const expiryName = expiry ? expiry.tone === 'expired' ? tr('expired', 'Expired') : expiry.tone === 'soon' ? tr('expiring_soon', 'Expiring soon') : tr('expiry', 'Expiry') : ''
   const identity: Array<[string, ReactNode]> = []
   if (barcode) identity.push(['barcode', <span {...copy(barcode)} className="break-all">{barcode}</span>])
   if (product.brand) identity.push(['brand', <span {...copy(product.brand)}>{product.brand}</span>])
   if (product.category) identity.push(['category', <span>{product.category}</span>])
-  // Price details ride the same wrapping line as the barcode and brand (no new line, label inside), from the fields the row already carries.
+  // Price details ride the same wrapping line as the barcode and brand, from the fields the row already carries. The VALUE carries the colour (the Products tones, ProductRowParts VALUE_TONE) and its name only invisibly:
+  // sr-only text and a tooltip (owner, 17 Nov: drop the words "Selling price" and "Wholesale price", keep the values, highlighted).
   const prices = priceText ? priceFacts(product as unknown as Record<string, unknown>, promotionRules, exchangeRate) : null
-  const priceFact = (key: 'selling' | 'wholesale' | 'promotion', label: string, money: PriceMoney | null) => {
-    if (money && priceText) identity.push([key, <span data-price={key}><span className="text-gray-400 dark:text-gray-500">{label}</span> <strong className="font-semibold tabular-nums text-gray-700 dark:text-gray-200">{priceText(money.usd, money.khr ?? undefined)}</strong></span>])
+  const priceFact = (key: 'selling' | 'wholesale', label: string, money: PriceMoney | null) => {
+    if (money && priceText) identity.push([key, <PriceValue data-price={key} tone={key} label={label} className="tabular-nums">{priceText(money.usd, money.khr ?? undefined)}</PriceValue>])
   }
   if (prices) {
     priceFact('selling', tr('selling_price', 'Selling price'), prices.selling)
     priceFact('wholesale', tr('wholesale_price', 'Wholesale price'), prices.wholesale)
-    priceFact('promotion', tr('promotion', 'Promotion'), prices.promotion)
+    // The promotion is Products' own badge (rose pill); its word is dropped like the others and kept for screen readers and the tooltip.
+    if (prices.promotion && priceText) {
+      const promotion = prices.promotion
+      const promotionLabel = tr('promotion', 'Promotion')
+      identity.push(['promotion', <span data-price="promotion" title={promotionLabel}><span className="sr-only">{promotionLabel} </span><ProductDiscountBadge product={{}} promotion={{ active: true, applied_price_usd: promotion.usd }} fmtUSD={usd => priceText(usd, promotion.khr ?? undefined)} label="" /></span>])
+    }
   }
-  const dotted = (parts: Array<[string, ReactNode]>) => parts.map(([key, node], index) => <Fragment key={key}>{index > 0 ? <span aria-hidden="true">·</span> : null}{node}</Fragment>)
+  // Cost: only for a viewer who may see it AND only when the row carries it (the server sends it to nobody else). It is a button: the tap opens the calculated-cost float (the page owns it).
+  const cost = costText && onOpenCost ? costFact(product as unknown as Record<string, unknown>) : null
+  if (cost && costText && onOpenCost) {
+    const costLabel = tr('label_cost', 'Cost')
+    identity.push(['cost', <button type="button" data-price="cost" data-check-cost onClick={() => onOpenCost(product)} title={tr('cost_breakdown_title', 'Calculated cost price')} aria-label={`${costLabel}: ${tr('cost_breakdown_title', 'Calculated cost price')}`}
+      className="inline-flex min-h-6 items-center rounded border-0 bg-transparent p-0 text-left decoration-dotted underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+      <PriceValue tone="cost" className="tabular-nums">{cost.usd === null ? <CostValue value={null} fmt={value => costText(value)} t={key => tr(key, '')} /> : costText(cost.usd, cost.khr ?? undefined)}</PriceValue></button>])
+  }
+  const dotted = (parts: Array<[string, ReactNode]>) => parts.map(([key, node], index) => index > 0
+    // The separator and the part after it are one unit, so a wrapped line can never start with (or hold) a lone "·".
+    ? <span key={key} className="inline-flex min-w-0 items-center gap-x-1.5"><span aria-hidden="true">·</span>{node}</span>
+    : <Fragment key={key}>{node}</Fragment>)
   const edge = status ? LIST_STATUS[status].edge : 'border-l-transparent'
   const recordedNote = status === 'issue' ? product.check_note : null
   const note = recordedNote === DEFAULT_COUNT_NOTE ? tr('inventory_check_default_note', 'Count differs from stock') : recordedNote
@@ -261,12 +288,22 @@ function ListRow({ product, draft, adornment, refusal, columns, countable, copy,
     } else if (event.key === 'Escape') { event.preventDefault(); if (!byBatch) onCount(product, '') }
   }
 
+  // The whole row opens the detail (owner, 17 Nov: "can only click to view details of the product when clicked on image, can expand it"). It is focusable and Enter opens it; the keydown of a control inside bubbles here too, so only Enter ON the row counts.
+  const openDetail = () => onOpenProduct(product)
+  // The row is a focus stop that opens the product on Enter and on a press: its name says what it does AND which product and status it is (a list item with no name is announced as nothing, and a bare
+  // action label would hide the row's content). It stays a list item, not a button: the row holds real buttons and inputs of its own, and a button may not contain them.
+  const rowOpenLabel = `${tr('open_product', 'Open product')}: ${product.name}${statusWords ? ` — ${statusWords}` : ''}`
+  function onRowKeyDown(event: KeyboardEvent<HTMLLIElement>) {
+    if (event.key === 'Enter' && event.target === event.currentTarget && !event.nativeEvent?.isComposing) { event.preventDefault(); openDetail() }
+  }
+
   return <li data-inventory-check-row={id} data-check-list-status={status ?? undefined} data-selected={selected ? '' : undefined} data-unsaved={counting && draft ? '' : undefined} data-refused={refusal ? '' : undefined} data-scan-hit={scanHit ? '' : undefined}
-    className={`relative min-w-0 max-w-full border-b border-l-2 border-b-gray-100 py-2 pl-2 pr-1 last:border-b-0 dark:border-b-gray-800 ${edge} ${counting && draft ? UNSAVED_ROW_CLASS : ''} ${scanHit ? 'rounded-sm ring-2 ring-primary-400 dark:ring-primary-300' : ''}`}>
+    tabIndex={0} onClick={event => rowClickOpens(event, openDetail)} onKeyDown={onRowKeyDown} aria-label={rowOpenLabel}
+    className={`relative min-w-0 max-w-full cursor-pointer border-b border-l-2 border-b-gray-100 py-2 pl-2 pr-1 last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:border-b-gray-800 ${edge} ${counting && draft ? UNSAVED_ROW_CLASS : ''} ${scanHit ? 'rounded-sm ring-2 ring-primary-400 dark:ring-primary-300' : ''}`}>
     {/* A count waiting for an approver (ic_fix_stock) is shown ONCE on this surface: the status icon (the hourglass). The gutter mini tag of the review queue would repeat it. */}
     {/* One compact line where the width allows: the image keeps its square, the name takes the room, the status icon and the count input sit beside it. */}
     <div className="flex min-w-0 items-center gap-2" data-inventory-check-main>
-      <button type="button" onClick={() => onOpenProduct(product)} data-check-image className="relative block aspect-square h-12 w-12 shrink-0 overflow-hidden rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 lg:h-10 lg:w-10" aria-label={product.name} title={product.name}>
+      <button type="button" tabIndex={-1} onClick={openDetail} data-check-image data-row-open className="relative block aspect-square h-12 w-12 shrink-0 overflow-hidden rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 lg:h-10 lg:w-10" aria-label={product.name} title={product.name}>
         <ProductImage src={product.image_path || undefined} alt="" className="absolute inset-0 h-full w-full rounded-lg object-cover" />
       </button>
       <div className="min-w-0 flex-1 lg:contents">
@@ -279,7 +316,9 @@ function ListRow({ product, draft, adornment, refusal, columns, countable, copy,
         <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] leading-relaxed text-gray-600 lg:contents lg:text-xs dark:text-gray-300" data-inventory-check-meta>
           {facts.map(([field, node]) => {
             if (node === null) return <span key={field} aria-hidden="true" data-cell={field} className={cellClass(field, true)} />
-            return <Fragment key={field}>{shown++ > 0 ? <span aria-hidden="true" className="lg:hidden">·</span> : null}<span data-cell={field} className={cellClass(field)}>{node}</span></Fragment>
+            const cellNode = <span data-cell={field} className={cellClass(field)}>{node}</span>
+            // Below the sheet width the separator and its cell wrap as one unit (never a lone "·" on a line); from lg up the wrapper vanishes and the cell is a grid cell.
+            return shown++ > 0 ? <span key={field} className="inline-flex min-w-0 items-center gap-x-1.5 lg:contents"><span aria-hidden="true" className="lg:hidden">·</span>{cellNode}</span> : <Fragment key={field}>{cellNode}</Fragment>
           })}
         </div>
       </div>
@@ -372,22 +411,50 @@ export type InventoryCheckSelectionBarProps = {
   onMarkChecked: () => void
   onClear: () => void
   onSubmit: () => void
+  /** false: a viewer who cannot count gets the date rail alone (no mark, clear or Submit). Default true. */
+  counting?: boolean
+  /** The dates products were last counted on, newest first, each with how many (the server's summary.days). Empty: no rail. */
+  days?: ReadonlyArray<{ day: string; count?: number }>
+  /** The chosen date ('YYYY-MM-DD'), or '' for every date. */
+  checkedOn?: string
+  /** A chip was tapped: its date, or '' for "All". Absent: no rail. */
+  onCheckedOn?: (day: string) => void
+  /** The list is changing: the chips wait like every other control. */
+  daysDisabled?: boolean
   t: InventoryCheckTranslator
 }
 
-/** How many are counted, the two things to do with them as icons, and the main action, which keeps its word. There is no select-all: nothing is ticked until a person answers a row. */
-export function InventoryCheckSelectionBar({ selectedCount, blocked, busy, submitLabel, canMarkChecked, openGroupsOnly = false, onMarkChecked, onClear, onSubmit, t }: InventoryCheckSelectionBarProps) {
+/**
+ * The row of the page's counting actions: mark-the-page and clear as icons, the main action (Submit, which keeps its word and carries how many are counted as a pill), and in the space between them the DATE CHIPS
+ * (owner, 17 Nov): "All" then each day products were last counted on, newest first, each with its count, in one rail that scrolls sideways (fades, drag, arrow keys; the chosen chip scrolls into view).
+ * There is no select-all: nothing is ticked until a person answers a row. A viewer who cannot count still gets the chips.
+ */
+export function InventoryCheckSelectionBar({ selectedCount, blocked, busy, submitLabel, canMarkChecked, openGroupsOnly = false, counting = true, days = [], checkedOn = '', onCheckedOn, daysDisabled = false, onMarkChecked, onClear, onSubmit, t }: InventoryCheckSelectionBarProps) {
   const tr = makeTr(t)
   const mark = openGroupsOnly ? tr('inventory_check_mark_open_groups', 'Mark every product in the open groups as matching stock') : tr('inventory_check_mark_page_checked', 'Mark every product on this page as matching stock')
   const clear = tr('inventory_check_clear_selection', 'Clear selection')
   const submit = submitLabel || tr('inventory_check_submit', 'Submit')
   const countText = selectedCount > 0 ? tr('inventory_check_counted_rows', '{count} counted').replace('{count}', String(selectedCount)) : ''
+  const dayTip = tr('inventory_check_day_tooltip', '{count} products last checked on {date}')
+  const rail = days.length > 0 && onCheckedOn
+    ? <ChipRail label={tr('inventory_check_days_label', 'Last checked on')} className="min-w-0 flex-1" data-inventory-check-days-rail>
+      <RailChip selected={checkedOn === ''} disabled={daysDisabled} data-day-chip="" onClick={() => onCheckedOn('')}>{tr('all', 'All')}</RailChip>
+      {days.map(entry => <RailChip key={entry.day} selected={checkedOn === entry.day} disabled={daysDisabled} data-day-chip={entry.day} title={entry.count === undefined ? dayLabel(entry.day) : dayTip.replace('{count}', String(entry.count)).replace('{date}', dayLabel(entry.day))} onClick={() => onCheckedOn(entry.day)}
+        badge={entry.count === undefined ? undefined : <span className="tabular-nums opacity-70">{entry.count}</span>}>{dayLabel(entry.day)}</RailChip>)}
+    </ChipRail>
+    : <span className="min-w-0 flex-1" aria-hidden="true" />
+  if (!counting && !(days.length > 0 && onCheckedOn)) return null
   return <div data-inventory-check-selection-bar className="flex min-w-0 items-center gap-1 pl-2">
-    {canMarkChecked ? <button type="button" data-selection-action="mark" className={rowIconButton} aria-label={mark} title={mark} disabled={busy} onClick={onMarkChecked}><ListChecks className="h-5 w-5" aria-hidden="true" /></button> : null}
-    <span data-selected-count aria-live="polite" className="min-w-0 flex-1 truncate px-1 text-xs tabular-nums text-gray-600 dark:text-gray-300">{countText}</span>
-    {selectedCount > 0 ? <button type="button" data-selection-action="clear" className={rowIconButton} aria-label={clear} title={clear} disabled={busy} onClick={onClear}><X className="h-5 w-5" aria-hidden="true" /></button> : null}
-    {blocked && selectedCount > 0 ? <InfoHint text={blocked} label={blocked} /> : null}
-    <button type="button" data-selection-action="submit" className="btn-primary inline-flex min-h-11 shrink-0 items-center gap-1 px-3 text-xs aria-disabled:cursor-not-allowed aria-disabled:opacity-60 lg:min-h-10"
-      aria-disabled={blocked || busy || selectedCount === 0 ? true : undefined} title={blocked || submit} onClick={() => { if (!blocked && !busy && selectedCount > 0) onSubmit() }}><Send className="h-4 w-4" aria-hidden="true" />{submit}</button>
+    {counting && canMarkChecked ? <button type="button" data-selection-action="mark" className={rowIconButton} aria-label={mark} title={mark} disabled={busy} onClick={onMarkChecked}><ListChecks className="h-5 w-5" aria-hidden="true" /></button> : null}
+    {rail}
+    {counting ? <>
+      {/* The count is announced as words for a screen reader; the sighted see the pill on Submit. */}
+      <span data-selected-count aria-live="polite" className="sr-only">{countText}</span>
+      {selectedCount > 0 ? <button type="button" data-selection-action="clear" className={rowIconButton} aria-label={clear} title={clear} disabled={busy} onClick={onClear}><X className="h-5 w-5" aria-hidden="true" /></button> : null}
+      {blocked && selectedCount > 0 ? <InfoHint text={blocked} label={blocked} /> : null}
+      <button type="button" data-selection-action="submit" className="btn-primary inline-flex min-h-11 shrink-0 items-center gap-1 px-3 text-xs aria-disabled:cursor-not-allowed aria-disabled:opacity-60 lg:min-h-10"
+        aria-disabled={blocked || busy || selectedCount === 0 ? true : undefined} title={blocked || submit} onClick={() => { if (!blocked && !busy && selectedCount > 0) onSubmit() }}><Send className="h-4 w-4" aria-hidden="true" />{submit}
+        {selectedCount > 0 ? <span data-selected-pill aria-hidden="true" className="rounded-full bg-white/25 px-1.5 text-[10px] font-semibold leading-relaxed tabular-nums">{selectedCount}</span> : null}</button>
+    </> : null}
   </div>
 }

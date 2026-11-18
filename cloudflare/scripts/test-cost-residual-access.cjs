@@ -63,29 +63,41 @@ async function main() {
   opens = 0
   const supplier = await post('/returns/supplier', { items: [{ product_id: 1, quantity: 1 }] })
   assert.equal(supplier.status, 403)
-  assert.equal((await supplier.json()).code, 'product_cost_edit_required', 'owner, 15 Nov 2026: the edit grant is inert, so a non-admin stops at the first (entry) check')
+  assert.equal((await supplier.json()).code, 'product_cost_view_required', 'owner, 17 Nov 2026: edit alone passes the entry check and stops at the view check (supplier compensation is cost data)')
   assert.equal(opens, 0)
-  for (const grant of [{}, { product_cost_view: true }, { product_cost_edit: true }, { all: true }]) {
+  user = actor({ returns: true })
+  assert.equal((await (await post('/returns/supplier', { items: [{ product_id: 1, quantity: 1 }] })).json()).code, 'product_cost_edit_required', 'no grant: stops at the first (entry) check')
+  user = actor({ returns: true, product_cost_view: true, product_cost_edit: true })
+  opens = 0
+  assert.notEqual((await post('/returns/supplier', { items: [{ product_id: 1, quantity: 1 }] })).status, 403, 'both grants pass the supplier return cost gates')
+  for (const grant of [{}, { product_cost_view: true }, { product_cost_edit: true }, { product_cost_view: true, product_cost_edit: true }, { all: true }]) {
     user = actor(grant)
     for (const type of ['products', 'inventory', 'sales', 'stock_actions']) {
       opens = 0
       const response = await post('/imports', { type })
-      if (!grant.all) {
-        assert.equal(response.status, 403); assert.equal((await response.json()).code, 'product_cost_edit_required'); assert.equal(opens, 0)
-      } else { assert.notEqual(response.status, 403, `${type} admin permitted`) }
+      const text = await response.text()
+      let code; try { code = JSON.parse(text).code } catch { code = undefined }
+      // 17 Nov 2026: an import WRITE needs View and Edit product costs (as the role editor states), or an administrator. Edit alone is refused for the missing View.
+      if (!grant.all && !grant.product_cost_edit) {
+        assert.equal(response.status, 403); assert.equal(code, 'product_cost_edit_required'); assert.equal(opens, 0)
+      } else if (!grant.all && !grant.product_cost_view) {
+        assert.equal(response.status, 403, `${type}: Edit without View cannot write an import`); assert.equal(code, 'product_cost_view_required'); assert.equal(opens, 0)
+      } else { assert.notEqual(code, 'product_cost_edit_required', `${type}: View and Edit (or an administrator) pass the cost gate`); assert.notEqual(code, 'product_cost_view_required', `${type}: View and Edit (or an administrator) pass the cost gate`) }
     }
     for (const type of ['export-folder', 'export-cloudflare', 'import-folder']) {
       opens = 0
-      const permitted = grant.all // admin only (owner, 15 Nov 2026): the two cost grants are inert
+      const permitted = grant.all // administrator only whatever the cost grants say (owner, 17 Nov 2026)
       controlPrepares = 0
       denyControlAccess = !permitted
       const response = await post('/backups', { type })
-      if (!permitted) { assert.equal(response.status, 403); assert.equal((await response.json()).code, type === 'import-folder' ? 'product_cost_edit_required' : 'product_cost_view_required'); assert.equal(opens, 0) }
+      if (!permitted) { assert.equal(response.status, 403); assert.equal((await response.json()).code, 'admin_required'); assert.equal(opens, 0) }
       else assert.notEqual(response.status, 403, `${type} explicit grant/admin permitted`)
       assert.equal(controlPrepares, permitted ? 1 : 0)
     }
   }
   assert.equal(maintenanceReads, 3, "only the admin grant opens a backup control now")
+  // the apply-time re-check of the authorising user holds the same rule (View and Edit), not Edit alone
+  assert.match(fs.readFileSync(path.join(root, 'lib/importEngine.ts'), 'utf8'), /isAcquisitionCostImport\(job\.type\) && !\(canEditAcquisitionCosts\(actor\) && canViewAcquisitionCosts\(actor\)\)/)
   assert.equal(controlDb.prepare('SELECT COUNT(*) AS n FROM system_flags').get().n, 0)
   controlDb.prepare('INSERT INTO system_flags (key, value) VALUES (?, ?)').run('maintenance', '{')
   user = actor({ all: true })

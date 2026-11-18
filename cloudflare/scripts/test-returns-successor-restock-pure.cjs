@@ -178,7 +178,7 @@ const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './perm
 // through the SAME kernel the stats surfaces use, not a parallel check.
 const removalLosses = loadReal('lib/removalLosses.ts')
 
-const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', role_code: 'admin', permissions: JSON.stringify({ returns: true, product_cost_edit: true, product_cost_view: true }) }
+const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ returns: true, product_cost_edit: true, product_cost_view: true }) }
 // Swapped for one request at a time by reqAs() so a permission-shaped probe
 // runs through the REAL lib/permissions tier resolution, not a stub of it.
 let activeUser = FAKE_USER

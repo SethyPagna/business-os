@@ -94,8 +94,6 @@ async function routeRule() {
         ['Branches View without cost', actor({ branches: true })],
         ['cost explicitly off', actor({ inventory: true }, { product_cost_view: false })],
         ['cost EDIT only', actor({ inventory: true }, { product_cost_edit: true })],
-        // Owner, 15 Nov 2026: the view grant is inert now, so a holder is a non-cost caller like the rest.
-        ['cost VIEW grant (inert)', actor({ inventory: true }, { product_cost_view: true })],
       ]) {
         const body = await stock(who, query)
         const found = [...keysOf(body)]
@@ -109,8 +107,10 @@ async function routeRule() {
     }
 
     // Controls: viewers of cost keep every figure (a filter that strips everything would pass the loop above).
+    // Owner, 17 Nov 2026: the view grant shows cost to a non-admin, so a holder is a cost viewer like the administrator.
     for (const [label, who] of [
       ['administrator', { ...actor(), role_code: 'admin' }],
+      ['cost VIEW grant (non-admin)', actor({ inventory: true }, { product_cost_view: true })],
     ]) {
       const body = await stock(who, 'page=1&q=Example')
       assert.equal(body.summary.positive_value_usd, 60, `${label}: positive_value_usd = 5 x 12`)

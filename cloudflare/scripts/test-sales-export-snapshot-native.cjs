@@ -112,25 +112,32 @@ async function main() {
     assert.equal((await h.get(frozen(employee, { verifyOnly: '1' }))).status, 200)
     h.setUser(h.staff({ all: true }))
     assert.equal((await h.get(frozen(admin, { verifyOnly: '1' }))).status, 409)
-    // Owner rules: product cost and profit are administrator only (15 Nov 2026); the courier cost is a granted permission, on for staff (16 Nov 2026).
+    // Owner rules: product cost and profit follow the product_cost_view grant, admin by default (17 Nov 2026); the courier cost is its own granted
+    // permission, on for staff (16 Nov 2026).
     h.setUser(h.staff({ all: true }))
     const viewer = (await h.get()).body
     assert.equal(Object.hasOwn(viewer.totals, 'cost_usd'), true)
     assert.equal(Object.hasOwn(viewer.totals, 'delivery_actual_cost_usd'), true, 'an administrator reads the courier cost')
     h.setUser(h.staff({ sales: true, product_cost_view: true, product_cost_edit: true, 'sales:view_courier_cost': true }))
     const staff = (await h.get()).body
-    assert.equal(Object.hasOwn(staff.totals, 'cost_usd'), false, 'the retired cost grant opens no product cost')
-    assert.equal(Object.hasOwn(staff.rows[0], 'cost_usd'), false)
-    assert.equal(Object.hasOwn(staff.totals, 'profit_usd'), false, 'and no profit')
+    assert.equal(Object.hasOwn(staff.totals, 'cost_usd'), true, 'the cost grant opens the product cost')
+    assert.equal(Object.hasOwn(staff.rows[0], 'cost_usd'), true)
+    assert.equal(Object.hasOwn(staff.totals, 'profit_usd'), true, 'and the profit: one switch')
     assert.equal(Object.hasOwn(staff.totals, 'delivery_actual_cost_usd'), true, 'staff holding the courier permission read the courier cost')
     h.setUser(h.staff({ sales: true, product_cost_view: true, product_cost_edit: true, 'sales:view_courier_cost': false }))
     const blind = (await h.get()).body
-    assert.equal(Object.hasOwn(blind.totals, 'cost_usd'), false)
-    assert.equal(Object.hasOwn(blind.totals, 'delivery_actual_cost_usd'), false, 'switched off: no courier cost either')
+    assert.equal(Object.hasOwn(blind.totals, 'cost_usd'), true)
+    assert.equal(Object.hasOwn(blind.totals, 'delivery_actual_cost_usd'), false, 'switched off: the cost grant alone never opens the courier cost')
+    assert.equal(blind.totals.profit_excludes_delivery, true)
     assert.notEqual(staff.export_token, blind.export_token, 'the courier-cost authority is bound into the export token')
     assert.notEqual(blind.export_token, viewer.export_token, 'the cost authority is bound into the export token')
     assert.equal((await h.get(frozen(viewer, { verifyOnly: '1' }))).status, 409, 'a token minted with the costs cannot be replayed without them')
     assert.equal((await h.get(frozen(staff, { verifyOnly: '1' }))).status, 409, 'a token minted with the courier cost cannot be replayed without it')
+    h.setUser(h.staff({ sales: true, product_cost_edit: true }))
+    const editOnly = (await h.get()).body
+    assert.equal(Object.hasOwn(editOnly.totals, 'cost_usd'), false, 'edit alone opens no product cost')
+    assert.equal(Object.hasOwn(editOnly.totals, 'profit_usd'), false, 'and no profit')
+    assert.notEqual(editOnly.export_token, blind.export_token, 'the cost authority is bound into the export token')
     assert.equal(Object.hasOwn(viewer.totals, 'money_contributing_rows'), true)
     assert.equal(Object.hasOwn(viewer.rows[0], 'money_complete'), true)
   })

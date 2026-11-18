@@ -9,7 +9,9 @@ import { buildQueryString, type QueryParams } from '../../api/query.ts'
 import type { InventoryCheckLotRow, InventoryCheckProduct } from '../../types/inventoryChecks.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import type { Grouping } from './inventoryCheckGroups.ts'
-import { PRICE_KEYS } from './inventoryPriceFacts.ts'
+import type { CheckDay } from './inventoryCheckDays.ts'
+import { COST_KEYS, PRICE_KEYS } from './inventoryPriceFacts.ts'
+import { STOCK_THRESHOLD_KEYS } from './inventoryStockFacts.ts'
 import { patchProductFromStockAnswer, patchProductFromStockConflict, type StockConflictAnswer, type StockWriteAnswer } from './stockAnswerPatch.ts'
 
 export type Branch = { id: number; name: string }
@@ -22,8 +24,11 @@ export type OverlayEntry = {
   check?: { state: 'ok' | 'issue'; counted_quantity?: number; seen_quantity?: number; note: string | null; by?: string; at: string | null; session_id: string; revision: number
     lots?: Array<{ batch_id: number; scope: 'lot' | 'branch'; counted: number; seen?: number }> }
   pending?: true
+  /** The session that holds the waiting request; it can differ from the latest count's session. */
+  pending_session_id?: string
 }
-export type WiredSummary = { ok?: number; issue?: number; pending?: number; not_checked?: number; total?: number }
+/** `days`: the Cambodia business days products at this branch were last counted on, newest first, with how many (the date chips); `tooLarge`: too many products to list them. Both ride the same summary as the status counts. */
+export type WiredSummary = { ok?: number; issue?: number; pending?: number; not_checked?: number; total?: number; days?: CheckDay[]; tooLarge?: boolean }
 export type WiredExtras = { summary?: WiredSummary; capabilities?: { fixStock?: boolean; approveCounts?: boolean; lotCounts?: boolean; directSet?: boolean; groupings?: Array<'checked' | 'category'> } }
 export type WiredList = { items: Row[]; total: number; page: number; pageSize: number; totalPages?: number; tagged_lots?: Tagged[]; /** The promotion rules behind the rows' prices (sent only to a viewer with the price grant). */ promotion_rules?: PromotionRule[]; wired?: boolean; projected?: boolean; /** Present when the read asked for a grouping (groupBy): the sections, the same shape as the check-status list's. */ grouping?: Grouping; /** The most ids one overlay read may carry (the plan's limit, echoed by the server). */ overlay_ids?: number } & WiredExtras
 export type OverlayAnswer = { items?: OverlayEntry[]; lots?: Array<{ product_id: number; lots?: Lot[]; lots_more?: boolean }> } & WiredExtras
@@ -37,7 +42,7 @@ export type WiredRaw = { list: WiredList; overlay: Map<number, OverlayEntry>; lo
 // ---- what is on the wire ----------------------------------------------------------------------------------------------------------------------------------
 
 /** The server accepts these and no others from the page; the older list's `sessionId` and any stray key never go to /list. */
-const LIST_KEYS = ['query', 'page', 'pageSize', 'stockState', 'brand', 'category', 'checkState'] as const
+const LIST_KEYS = ['query', 'page', 'pageSize', 'stockState', 'brand', 'category', 'checkState', 'checkedOn'] as const
 const present = (value: unknown): boolean => value !== '' && value !== undefined && value !== null
 
 /** The /list query for the page's params. A sole branch is left out of the query (every row lists every active branch), so the read is the same one Products makes. */
@@ -57,7 +62,7 @@ export function wiredListParams(params: QueryParams, options: { omitBranch?: boo
 const PRODUCTS_STOCK_WORD: Record<string, string> = { in_stock: 'in_stock', low_stock: 'low', out_of_stock: 'out' }
 /** What Products' own page sends, in its key order, so the string is the key of Products' answer in the shared store (api/productReadTransport.ts). Null when the scope is not one Products can hold. */
 export function canonicalProductsQuery(wire: QueryParams): string | null {
-  if (present(wire.query) || present(wire.checkState) || present(wire.ids)) return null
+  if (present(wire.query) || present(wire.checkState) || present(wire.checkedOn) || present(wire.ids)) return null
   return buildQueryString({
     page: wire.page, pageSize: wire.pageSize, searchMode: 'AND', category: wire.category, brand: wire.brand, branchId: wire.branchId,
     stockState: PRODUCTS_STOCK_WORD[String(wire.stockState ?? '')], sort: `${wire.sortBy}_${wire.sortDirection}`, include: 'branch_stock,images,batches,tagged_lots',
@@ -111,6 +116,12 @@ function adaptRow(row: Row, raw: Pick<WiredRaw, 'branchId' | 'overlay' | 'lots'>
   }
   // The prices the row already carries (the server cut them without the price grant); inventoryPriceFacts reads them.
   for (const key of PRICE_KEYS) if (Object.hasOwn(row, key)) (product as Record<string, unknown>)[key] = row[key]
+  // The stock thresholds the same way (stock grant only, cut by the Worker otherwise): the row's stock figure and the detail's badge are judged on the product's own numbers, as Products judges them.
+  for (const key of STOCK_THRESHOLD_KEYS) if (Object.hasOwn(row, key)) (product as Record<string, unknown>)[key] = row[key]
+  // The product's own expiry window, which the Worker sends with the received facts (expiry_date's group): the detail tiers the date on it, as POS does.
+  if (Object.hasOwn(row, 'expiry_alert_days')) (product as Record<string, unknown>).expiry_alert_days = row.expiry_alert_days
+  // The cost keys the same way: the Worker sends them only to a viewer who may see cost, so a row either carries them or has none. The page draws them only for a viewer canViewAcquisitionCosts allows.
+  for (const key of COST_KEYS) if (Object.hasOwn(row, key)) (product as Record<string, unknown>)[key] = row[key]
   if (branchId) {
     product.check_status = check ? (check.state === 'issue' ? 'issue' : 'ok') : 'not_checked'
     product.check_branch_id = branchId
@@ -126,7 +137,7 @@ function adaptRow(row: Row, raw: Pick<WiredRaw, 'branchId' | 'overlay' | 'lots'>
         if (check.lots.every(line => finite(line.seen))) product.check_difference = check.lots.reduce((sum, line) => sum + line.counted - (line.seen as number), 0)
       }
     }
-    if (overlay?.pending) product.check_pending = true
+    if (overlay?.pending) { product.check_pending = true; if (overlay.pending_session_id) product.pending_session_id = overlay.pending_session_id }
   }
   if (overlay) product.last_change_at = overlay.last_change_at
   // The received dates this branch holds, for a count typed per date (ic_lot_counts). Nothing is read for them: the rows already carry the lots.
@@ -153,18 +164,29 @@ function adaptRow(row: Row, raw: Pick<WiredRaw, 'branchId' | 'overlay' | 'lots'>
   return product
 }
 
+type WholeSummary = { tooLarge: true } | { tooLarge?: false; ok: number; issue: number; not_checked: number; total: number; pending?: number; days?: CheckDay[] }
+/** The summary as one whole answer, or undefined when it lacks a count: a partial summary (an older Worker's) must not be completed with figures from elsewhere. */
+function wholeSummary(summary: WiredSummary | undefined): WholeSummary | undefined {
+  if (!summary) return undefined
+  if (summary.tooLarge === true) return { tooLarge: true }
+  const { ok, issue, not_checked, total, pending, days } = summary
+  return [ok, issue, not_checked, total].every(finite) ? { ok: ok as number, issue: issue as number, not_checked: not_checked as number, total: total as number, ...(finite(pending) ? { pending } : {}), ...(days ? { days } : {}) } : undefined
+}
+
 /** The page's own result shape (the check-status list's), built from the raw wired answers: the rest of the page reads it as it read the older list. */
-export function wiredResult(raw: WiredRaw, previous?: { summary?: Record<string, number> } | null) {
+export function wiredResult(raw: WiredRaw, previous?: { summary?: Record<string, unknown> } | null) {
   const { list } = raw
   const damaged = new Map<string, number>()
   for (const group of list.tagged_lots ?? []) {
     // Every held tag counts (broken, expired, opened, damaged ...): they all left sellable stock, as the older reader summed them.
     for (const key of [`${Number(group.product_id)}:${Number(group.branch_id)}`, `${Number(group.product_id)}:0`]) damaged.set(key, (damaged.get(key) ?? 0) + Number(group.quantity ?? 0))
   }
-  // The check counts come with the answers that carry them (page 1 and a filter change); a page step or a Products-held answer keeps the last ones.
-  const incoming = raw.extras.summary, last = previous?.summary
-  const summary = incoming || last ? { not_checked: incoming?.not_checked ?? last?.not_checked ?? 0, in_check: 0, ok: incoming?.ok ?? last?.ok ?? 0, issue: incoming?.issue ?? last?.issue ?? 0, total: incoming?.total ?? last?.total ?? 0,
-    ...(incoming?.pending !== undefined || last?.pending !== undefined ? { pending: incoming?.pending ?? last?.pending ?? 0 } : {}) } : undefined
+  // The cards show ONE answer's figures: the one this load brought (the overlay's, or a list that named the branch), else the whole summary the screen already holds (a page step asks for none).
+  // An answer is whole (every count, and the days that go with them) or it says tooLarge; anything else carries no figure and the cards stay unknown, never 0 and never half old, half new.
+  const incoming = wholeSummary(raw.extras.summary), last = wholeSummary(previous?.summary as WiredSummary | undefined)
+  const answer = raw.extras.summary === undefined ? last : incoming
+  const summary = !answer ? undefined : answer.tooLarge === true ? { tooLarge: true as const }
+    : { not_checked: answer.not_checked, in_check: 0, ok: answer.ok, issue: answer.issue, total: answer.total, ...(answer.pending !== undefined ? { pending: answer.pending } : {}), ...(answer.days ? { days: answer.days } : {}) }
   return {
     wired: true as const, simple: true as const, items: list.items.map(row => adaptRow(row, { ...raw, damaged })), total: list.total, page: list.page, pageSize: list.pageSize, totalPages: list.totalPages, grouping: list.grouping,
     branches: raw.branches, promotionRules: Array.isArray(list.promotion_rules) ? list.promotion_rules : [], ...(summary ? { summary } : {}), ...(raw.extras.capabilities ? { capabilities: raw.extras.capabilities } : {}),
@@ -175,7 +197,7 @@ export function wiredResult(raw: WiredRaw, previous?: { summary?: Record<string,
 
 export type WiredDeps = {
   readList: (params: QueryParams, signal?: AbortSignal) => Promise<WiredList>
-  readOverlay: (params: { branchId: number; ids: number[]; lots?: boolean }, signal?: AbortSignal) => Promise<OverlayAnswer>
+  readOverlay: (params: { branchId: number; ids: number[]; lots?: boolean; summary?: boolean }, signal?: AbortSignal) => Promise<OverlayAnswer>
   /** The Products answer held in tab memory for this query string, or null. */
   peek: (query: string) => unknown
   prime: (query: string, payload: unknown, versions?: Record<string, number | string | null>) => void
@@ -207,17 +229,19 @@ const ids = (items: readonly Row[]): number[] => items.map(row => Number(row.id)
 
 /** The by-id read of a few rows (a refresh of changed ones): their Products rows and their overlay, nothing else. */
 export async function readWiredRows(rowIds: number[], branchId: number, deps: WiredDeps, access: WiredAccess, signal?: AbortSignal): Promise<{ ids: number[]; items: Row[]; tagged: Tagged[]; overlay: OverlayEntry[]; lots: Array<{ product_id: number; lots?: Lot[] }> }> {
-  const list = await deps.readList({ ids: rowIds.join(','), ...(branchId ? { branchId } : {}) }, signal)
-  const overlay = branchId ? await deps.readOverlay({ branchId, ids: rowIds, lots: access.received && list.items.some(row => !('lots' in row)) }, signal) : {}
+  // summary=0 on both reads: the page keeps the figures it holds, and a list that names the branch would otherwise build them (a count, a seek and the sets) only to be thrown away.
+  const list = await deps.readList({ ids: rowIds.join(','), ...(branchId ? { branchId } : {}), summary: 0 }, signal)
+  const overlay = branchId ? await deps.readOverlay({ branchId, ids: rowIds, lots: access.received && list.items.some(row => !('lots' in row)), summary: false }, signal) : {}
   return { ids: rowIds, items: list.items, tagged: list.tagged_lots ?? [], overlay: overlay.items ?? [], lots: overlay.lots ?? [] }
 }
 
 export async function loadWired(args: WiredLoadArgs): Promise<WiredLoad> {
   const { params, deps, access, signal } = args
   const sole = args.known?.branches?.length === 1 ? args.known.branches[0].id : 0
-  const wire = wiredListParams(params, { omitBranch: !!sole && !present(params.checkState), skipSummary: args.skipSummary })
+  // A sole branch is left out of the query unless the read is restricted by a check (status or date): those are per branch, so the server must be told which.
+  const wire = wiredListParams(params, { omitBranch: !!sole && !present(params.checkState) && !present(params.checkedOn), skipSummary: args.skipSummary })
   const page = Number(wire.page) || 1, pageSize = Number(wire.pageSize) || 20
-  const filtered = present(wire.stockState) || present(wire.brand) || present(wire.category) || present(wire.checkState)
+  const filtered = present(wire.stockState) || present(wire.brand) || present(wire.category) || present(wire.checkState) || present(wire.checkedOn)
 
   // Typed text goes through the device search index, as the pickers do: the ranked ids of the page are read by id. A viewer who may not see barcodes is searched by the server
   // (exact codes only, so a partial code can never be rebuilt from the index), and so is any scope with a filter or a check state.
@@ -268,10 +292,12 @@ export async function loadWired(args: WiredLoadArgs): Promise<WiredLoad> {
     const needLots = access.received && list.items.some(row => !('lots' in row))
     const chunk = Number.isSafeInteger(list.overlay_ids) && (list.overlay_ids as number) > 0 ? (list.overlay_ids as number) : OVERLAY_CHUNK_UNTIL_TOLD
     for (let start = 0; start < wanted.length; start += chunk) {
-      const answer = await deps.readOverlay({ branchId, ids: wanted.slice(start, start + chunk), lots: needLots }, signal)
+      // A step inside a scope whose figures the page holds asks for none (the list skipped them too): the held whole summary stays, as one answer.
+      const answer = await deps.readOverlay({ branchId, ids: wanted.slice(start, start + chunk), lots: needLots, ...(args.skipSummary ? { summary: false } : {}) }, signal)
       for (const entry of answer.items ?? []) overlay.set(Number(entry.product_id), entry)
       for (const entry of answer.lots ?? []) lots.set(Number(entry.product_id), withMore(entry.lots, entry.lots_more))
-      if (answer.summary || answer.capabilities) extras = { summary: answer.summary ?? extras.summary, capabilities: answer.capabilities ?? extras.capabilities }
+      // The overlay's summary replaces the list's as a whole (never key by key); one that is not a whole answer leaves the list's in place.
+      if (answer.summary || answer.capabilities) extras = { summary: wholeSummary(answer.summary) ? answer.summary : extras.summary, capabilities: answer.capabilities ?? extras.capabilities }
     }
   }
   // A Products-held answer carries neither the check counts nor the capabilities: what the screen already learned stands in until an answer brings them.

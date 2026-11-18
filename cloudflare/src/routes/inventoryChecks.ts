@@ -6,7 +6,7 @@ import { getDb } from '../lib/db'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
 import { readSwitch, readSwitchMemoMs } from '../lib/readSwitches'
 import type { Env } from '../index'
-import { decideInventoryCheckApproval, type ApprovalDecided } from '../lib/inventoryCheckApprovals'
+import { decideInventoryCheckApproval, decideInventoryCheckLine, type ApprovalDecided } from '../lib/inventoryCheckApprovals'
 import { getPlanLimits } from '../lib/planTier'
 import type { ReviewAlertEvent, ReviewAlertHook } from '../lib/reviewAlert'
 import type { InventoryContext } from './inventory'
@@ -14,7 +14,7 @@ import type { StockInCommitLine } from './stockInCommit'
 import { bumpVersion } from '../lib/cache'
 import { stockVisibleProductSql } from '../lib/productStockGuard'
 import { canApproveInventoryCounts, getInventoryCheckAccess, InventoryCheckQueryError } from '../lib/inventoryCheckAccess'
-import { canonicalProductsRequest, checkStateRestriction, inventoryChecksVersion, planInventoryList, projectInventoryList, readCheckStateSets, type CheckStateSets } from '../lib/inventoryCheckList'
+import { canonicalProductsRequest, checkStateRestriction, inventoryChecksVersion, planInventoryList, projectInventoryList, readCheckStateSets, readCheckSummary, type CheckStateSets } from '../lib/inventoryCheckList'
 import { parseOverlayIds, readInventoryOverlay } from '../lib/inventoryCheckOverlay'
 import { availableGroupings, buildGroupingBlock, type GroupingBlock } from '../lib/inventoryCheckGrouping'
 import type { FamilyGroupTotals } from '../lib/familyPagination'
@@ -29,9 +29,10 @@ import { approvalsAvailable, createInventoryCheckLotSubmission, createInventoryC
 const reviewAlertHook = (): ReviewAlertHook | undefined =>
   (globalThis as unknown as Record<symbol, ReviewAlertHook | undefined>)[Symbol.for('business-os.review-alert.v1')]
 // `system`: no person decided (an approval every line of which a newer count replaced), so no "By" row is sent.
-const announceCount = (env: Env, user: SessionUser, event: Pick<ReviewAlertEvent, 'kind' | 'reason'> & { sessionId: string; system?: true }): Promise<void> =>
+// `by`: the person who decided, when it is not the caller (an approval ended by a submission after the approver's own rejected lines: it is that approver's decision, not the submitter's).
+const announceCount = (env: Env, user: SessionUser, event: Pick<ReviewAlertEvent, 'kind' | 'reason' | 'summary'> & { sessionId: string; system?: true; by?: string }): Promise<void> =>
   Promise.resolve(reviewAlertHook()?.announce(env, {
-    kind: event.kind, by: event.kind === 'created' || event.system ? undefined : actorSnapshot(user), reason: event.reason ?? null,
+    kind: event.kind, by: event.kind === 'created' || event.system ? undefined : event.by ?? actorSnapshot(user), reason: event.reason ?? null, ...(event.summary ? { summary: event.summary } : {}),
     row: { section: 'inventory_checks', action_type: 'approve', entity_type: 'count', entity_id: event.sessionId, payload_json: '{}', requested_by_name: event.kind === 'created' ? actorSnapshot(user) : null },
   }))
 
@@ -47,6 +48,16 @@ app.onError((error,c) => {
   const details = error instanceof InventoryCheckSessionError && error.details ? error.details : error instanceof InventoryCheckQueryError ? { parameter: error.parameter } : {}
   return c.json({ ...details, error: code, code, ...(code === 'inventory_check_outcome_unknown' || code === SAVED_REFRESH_CODE ? { outcome: 'unknown' } : {}) }, status)
 })
+/**
+ * The alert an approval's end sends, once and only when it ends (never per line). A close that applied nothing reads as a rejection (the reason is its note or "Closed"); one that applied something reads as
+ * an approval. When the approver rejected lines, the alert says how many lines were applied and how many were rejected.
+ */
+const approvalAnnouncer = (c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>): ApprovalDecided => ({ decision, sessionId, note, applied, rejectedLines }) => {
+  if (decision === 'replaced') return announceCount(c.env, c.get('user'), { kind: 'rejected', sessionId, reason: REPLACED_NOTE, system: true })
+  const rejected = decision === 'reject' || (decision === 'close' && !applied)
+  return announceCount(c.env, c.get('user'), { kind: rejected ? 'rejected' : 'approved', sessionId, reason: rejected ? note ?? (decision === 'close' ? 'Closed' : null) : null,
+    ...(rejectedLines ? { summary: { applied: applied ?? 0, rejected: rejectedLines } } : {}) })
+}
 /** ic_fix_stock counts as ON only once migration 0286 is applied: with the switch on and the table missing every count would fail, so it answers exactly as OFF. */
 const fixStockOn = async (c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>): Promise<boolean> => await readSwitch(c.env, 'ic_fix_stock') && await approvalsAvailable(getDb(c.env))
 /** ic_lot_counts counts as ON only once migration 0294 is applied: with the switch on and the table missing every lot count would fail, so it answers exactly as OFF. */
@@ -102,7 +113,9 @@ const submissionCaps = async (c: Context<{ Bindings: Env; Variables: { user: Ses
   const limits = getPlanLimits(c.env)
   return { lines: limits.inventoryCheckLotLinesPerSubmission, products: limits.inventoryCheckProductsPerSubmission }
 }
-const checkCountsOf = (sets: CheckStateSets, fixStock: boolean) => ({ ok: sets.ok.length, issue: sets.issue.length, ...(fixStock ? { pending: sets.pending.length } : {}) })
+// The summary (lib/inventoryCheckList.ts readCheckSummary) is ONE object, the same from /list (when the request names a branch) and /overlay (always): counts of product rows, total, not_checked, the date chips and,
+// with Fix stock, pending. tooLarge: more checked products than inventoryCheckFilterMaxIds, so there are no counts and no days to give: it says `{ tooLarge: true }` instead of vanishing, and a page that holds
+// chips from an earlier answer clears them. The check-state filters are refused (503) while it holds.
 app.get('/list', async c => {
   if (!await readSwitch(c.env, 'ic_wired')) return notWired(c)
   singleValued(c)
@@ -121,8 +134,8 @@ app.get('/list', async c => {
   }
   let sets: CheckStateSets | null = null
   let setsVersion = ''
-  if (plan.branchId !== null && (plan.checkState || plan.wantSummary)) ({ sets, version: setsVersion } = await readCheckStateSets(c, plan.branchId, fixStock))
-  let restriction: { restrictIdsJson?: string; excludeIdsJson?: string } = plan.checkState && sets ? checkStateRestriction(plan.checkState, sets) : {}
+  if (plan.branchId !== null && (plan.checkState || plan.checkedOn)) ({ sets, version: setsVersion } = await readCheckStateSets(c, plan.branchId, fixStock))
+  let restriction: { restrictIdsJson?: string; excludeIdsJson?: string } = (plan.checkState || plan.checkedOn) && sets ? checkStateRestriction(plan.checkState, sets, plan.checkedOn) : {}
   // The shared cache key is the canonical request. A grouped read never takes a by-id read (its ranking needs the keyed page read): an exact code hit becomes a restriction to that id, and the key keeps the id.
   const keyRequest = canonicalProductsRequest(productsQuery)
   if (plan.grouping && codeHit !== null) {
@@ -134,10 +147,12 @@ app.get('/list', async c => {
   const include = new Set<string>([...access.fields.stock ? ['tagged_lots'] : [], ...access.fields.received ? ['lots'] : []])
   // A grouped list keys on the inventory_checks version even with no check state: the checked grouping orders by the checks themselves.
   const groupedVersion = grouping && !setsVersion ? await inventoryChecksVersion(c.env) : setsVersion
+  // The cached page is keyed by the restriction's own name: the state (Pending without the right to see it is an empty set of its own: it must not share a cached page with the admin's real Pending set)
+  // and the day, so a page of one day never serves another.
+  const setKey = [plan.checkState ? (plan.checkState === 'pending' && !fixStock ? 'pending_unavailable' : plan.checkState) : '', plan.checkedOn ? `day:${plan.checkedOn}` : ''].filter(Boolean).join('|')
   const { groups, ...payload } = await readProductSearchList(c, productsQuery, { include, keyRequest, ...restriction, ...(grouping ? { grouping } : {}),
-    // Pending without the right to see it is an empty set of its own: it must not share a cached page with the admin's real Pending set.
-    ...(plan.checkState ? { setKey: plan.checkState === 'pending' && !fixStock ? 'pending_unavailable' : plan.checkState } : codeHit !== null && grouping ? { setKey: 'code' } : {}),
-    ...(plan.checkState || grouping ? { setVersion: groupedVersion } : {}), lotsAdmitted: access.fields.received, taggedLotsAdmitted: access.fields.stock }) as Awaited<ReturnType<typeof readProductSearchList>> & { groups?: FamilyGroupTotals[] }
+    ...(setKey ? { setKey } : codeHit !== null && grouping ? { setKey: 'code' } : {}),
+    ...(plan.checkState || plan.checkedOn || grouping ? { setVersion: groupedVersion } : {}), lotsAdmitted: access.fields.received, taggedLotsAdmitted: access.fields.stock }) as Awaited<ReturnType<typeof readProductSearchList>> & { groups?: FamilyGroupTotals[] }
   const lotCounts = await lotCountsOn(c)
   const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock, await submissionCaps(c, lotCounts), availableGroupings(access.fields))
   const productsPage = getActionTier(user, 'products', 'view') !== 'none'
@@ -147,10 +162,8 @@ app.get('/list', async c => {
   const projected = plan.grouping ? true : projection.projected
   const groupingBlock: GroupingBlock | undefined = plan.grouping
     ? buildGroupingBlock(plan.grouping, groups ?? [], body.items as Array<Record<string, unknown>>, (Number(productsQuery.page) - 1) * Number(productsQuery.pageSize), Number(productsQuery.pageSize)) : undefined
-  const total = Number((payload as { total?: unknown }).total) || 0
-  const summary = sets && plan.wantSummary && !sets.tooLarge ? { ...checkCountsOf(sets, fixStock),
-    // Not checked is the catalogue total minus what was checked; it is only known when this list is the whole catalogue (no search, filter or check state).
-    ...(plan.filtered ? {} : { not_checked: Math.max(0, total - sets.ok.length - sets.issue.length), total }) } : null
+  // The counts are the branch-wide figures of the unfiltered list, whatever this page is filtered to; a request that names no branch has none.
+  const summary = plan.branchId !== null && plan.wantSummary ? await readCheckSummary(c, plan.branchId, fixStock, sets ? { sets, version: setsVersion } : undefined) : null
   // window_pages: how many pages (this one and the ones ahead) the page may read in one window; the ranking behind them is shared (catalog_ranked_scope), so a window costs rows, not rankings.
   return c.json({ ...body, wired: true, projected, window_pages: getPlanLimits(c.env).catalogListWindowPages, overlay_ids: getPlanLimits(c.env).inventoryOverlayMaxRows, ...(groupingBlock ? { grouping: groupingBlock } : {}), ...(summary ? { summary } : {}),
     capabilities })
@@ -170,18 +183,19 @@ app.get('/overlay', async c => {
   const wantSummary = c.req.query('summary') !== '0'
   const lotCounts = await lotCountsOn(c)
   const wantLots = c.req.query('lots') === '1' && access.fields.received
+  const populationToken: { token?: string | null } = {}
   const [items, withLots] = await Promise.all([
-    readInventoryOverlay(c.env, user, { branchId, ids, pendingAvailable: fixStock, lotLines: lotCounts }),
+    readInventoryOverlay(c.env, user, { branchId, ids, pendingAvailable: fixStock, lotLines: lotCounts, ...(wantSummary ? { populationToken } : {}) }),
     // Received dates for the same ids, for a screen whose shared store does not hold them: the same reader as the list (a first read, not a second).
     wantLots ? attachLotRows(c.env, user, new Set(['lots']), { items: ids.map((id) => ({ id })) }, true) : Promise.resolve(null),
   ])
   const lots = withLots ? (withLots.items as Array<{ id: number; lots?: Array<Record<string, unknown>>; lots_more?: true }>).map((row) => ({ product_id: row.id,
     lots: (row.lots ?? []).map((lot) => access.fields.stock ? lot : { ...lot, branches: (lot.branches as Array<Record<string, unknown>>).map(({ quantity: _quantity, ...entry }) => entry) }),
     ...(row.lots_more ? { lots_more: true } : {}) })) : undefined
-  const sets = wantSummary ? (await readCheckStateSets(c, branchId, fixStock)).sets : null
+  const summary = wantSummary ? await readCheckSummary(c, branchId, fixStock, undefined, populationToken.token) : null
   const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock, await submissionCaps(c, lotCounts), availableGroupings(access.fields))
   return c.json({ wired: true, branchId, version: await inventoryChecksVersion(c.env), items, ...(lots ? { lots } : {}),
-    ...(sets && !sets.tooLarge ? { summary: checkCountsOf(sets, fixStock) } : {}), capabilities })
+    ...(summary ? { summary } : {}), capabilities })
 })
 // ic_lot_counts: the received dates ("batches") one product holds at one branch, read ON DEMAND when a person opens the count popover of a row (one request, one product; the page never
 // lists batches for its rows). Answers 404 while the switch is OFF (the page then counts one total per product, exactly as before). No cost, supplier or price is ever selected.
@@ -217,7 +231,11 @@ app.post('/submissions', async c => {
   const result = await writer(getDb(c.env), await principal(c), input, await loadLowStockConfig(c.env),
     { approvals: await fixStockOn(c), onApprovalCreated: ({ sessionId }) => announceCount(c.env, c.get('user'), { kind: 'created', sessionId }),
       // Each approval the submission replaced was rejected by the system: a review decided, so it is told like one (a rejection with its reason, and no person to name).
-      onApprovalsReplaced: async ({ sessionIds }) => { for (const sessionId of sessionIds) await announceCount(c.env, c.get('user'), { kind: 'rejected', sessionId, reason: REPLACED_NOTE, system: true }) } })
+      onApprovalsReplaced: async ({ sessionIds, byPerson }) => {
+        for (const sessionId of sessionIds) await announceCount(c.env, c.get('user'), { kind: 'rejected', sessionId, reason: REPLACED_NOTE, system: true })
+        // An approval the approver's own rejected lines ended (the rest was replaced): the approver's rejection, with the lines they rejected, never "replaced".
+        for (const ended of byPerson ?? []) await announceCount(c.env, c.get('user'), { kind: 'rejected', sessionId: ended.sessionId, reason: null, by: ended.by, summary: { applied: 0, rejected: ended.rejectedLines } })
+      } })
   return c.json(result, result.created ? 201 : 200)
 })
 app.get('/sessions/:id', async c => c.json(await getInventoryCheckSession(getDb(c.env), await principal(c), c.req.param('id'), { approvals: await fixStockOn(c), lotLines: await lotCountsOn(c) })))
@@ -227,14 +245,14 @@ app.post('/sessions/:id/approval', async c => {
   if (!await fixStockOn(c)) throw new InventoryCheckSessionError(404, 'inventory_check_not_available')
   // The stock writer is the Set sessions' own commit; it is loaded only when a decision reaches stock, so every refusal and a rejection never touch it.
   const writeStock = async (lines: StockInCommitLine[]) => (await import('./stockInCommit')).runStockInCommit(c as unknown as InventoryContext, lines)
-  // A close that applied nothing reads as a rejection (the reason is its note or "Closed"); one that applied something reads as an approval.
-  const onDecided: ApprovalDecided = ({ decision, sessionId, note, applied }) => {
-    if (decision === 'replaced') return announceCount(c.env, c.get('user'), { kind: 'rejected', sessionId, reason: REPLACED_NOTE, system: true })
-    const rejected = decision === 'reject' || (decision === 'close' && !applied)
-    return announceCount(c.env, c.get('user'), { kind: rejected ? 'rejected' : 'approved', sessionId, reason: rejected ? note ?? (decision === 'close' ? 'Closed' : null) : null })
-  }
+  const onDecided = approvalAnnouncer(c)
   const limits = { takeoverSeconds: getPlanLimits(c.env).inventoryCheckApprovalTakeoverSeconds }
   return c.json(await decideInventoryCheckApproval(getDb(c.env), await principal(c), c.req.param('id'), await c.req.json().catch(()=>null), writeStock, limits, onDecided))
+})
+// One decision on one line of a waiting count (migration 0316): reject, modify or reopen it. It moves no stock; the alert is sent once, when the approval ends (see approvalAnnouncer).
+app.post('/sessions/:id/approval/lines', async c => {
+  if (!await fixStockOn(c)) throw new InventoryCheckSessionError(404, 'inventory_check_not_available')
+  return c.json(await decideInventoryCheckLine(getDb(c.env), await principal(c), c.req.param('id'), await c.req.json().catch(()=>null), approvalAnnouncer(c)))
 })
 app.get('/sessions/:id/history', async c => c.json(await inventoryCheckSessionHistory(getDb(c.env), await principal(c), c.req.param('id'), c.req.query())))
 app.patch('/sessions/:id/items/:productId', async c => {

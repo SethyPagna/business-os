@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { ACQUISITION_COST_TEXT_PATTERNS, acquisitionCostResponses, canViewAcquisitionCosts, canEditAcquisitionCosts } from '../lib/acquisitionCostAccess'
+import { ACQUISITION_COST_TEXT_PATTERNS, acquisitionCostResponses, canViewAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
 import { cacheIdentity } from '../lib/cacheKey'
 import { requireAuth } from '../lib/auth'
@@ -389,7 +389,7 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, user:
     totals: gateTotals((totals || {}) as unknown as Record<string, unknown>, isAdmin, canViewCosts, 2, canViewCourier),
     prevTotals: gateTotals((prevTotals || {}) as unknown as Record<string, unknown>, isAdmin, canViewCosts, 2, canViewCourier),
     periodReturns: periodReturns || {},
-    // Supplier loss and compensation reconstruct the acquisition cost: omitted (not zeroed) unless cost is visible (owner, 15 Nov 2026).
+    // Supplier loss and compensation reconstruct the acquisition cost: omitted (not zeroed) unless cost is visible (View product costs; owner, 17 Nov 2026).
     periodSupplierReturns: canViewCosts ? (periodSupplierReturns || {}) : omitSupplierReturnMoney(periodSupplierReturns),
     // The period rows are the same money as the totals above, so they pass
     // the same gate (AL finding L4: they used to reach every dashboard caller
@@ -992,7 +992,7 @@ app.post('/system/drive-sync/forget-credentials', requireAuth, async (c) => {
   return c.json(await driveSyncStatus(c.env))
 })
 app.post('/system/drive-sync/jobs', requireAuth, async (c) => {
-  if (!canViewAcquisitionCosts(c.get('user'))) return c.json({ error: 'Only an administrator can export database backups.', code: 'product_cost_view_required' }, 403)
+  if (!isAdminControlUser(c.get('user'))) return c.json({ error: 'Only an administrator can export database backups.', code: 'admin_required' }, 403)
   const denied = denyUnless(c, 'backup', 'drive_credentials')
   if (denied) return denied
   try {
@@ -1008,7 +1008,7 @@ app.post('/system/drive-sync/jobs', requireAuth, async (c) => {
 // returned backupKey can then be reviewed through the existing backup flow.
 app.post('/system/drive-sync/restore-stage/jobs', requireAuth, async (c) => {
   const user = c.get('user')
-  if (!canEditAcquisitionCosts(user)) return c.json({ error: 'Only an administrator can prepare a database restore.', code: 'product_cost_edit_required' }, 403)
+  if (!isAdminControlUser(user)) return c.json({ error: 'Only an administrator can prepare a database restore.', code: 'admin_required' }, 403)
   if (!hasPermission(user, 'backup_restore')) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }

@@ -4,6 +4,7 @@ import { getDb } from './db'
 import { getInventoryCheckAccess, InventoryCheckQueryError } from './inventoryCheckAccess'
 import { canSeeStaffIdentity, waitingLineSql } from './inventoryCheckSessions'
 import { getPlanLimits } from './planTier'
+import { POPULATION_TOKEN_SQL, populationTokenOf } from './inventoryCheckList'
 
 // The Inventory overlay (INV-A S4a, behind `ic_wired`): the only reads Inventory makes besides the shared Products list. They are scoped to the window's ids
 // (at most inventoryOverlayMaxRows), run in ONE batch, and read nothing about stock itself -- no ledger, no verification, no sales:
@@ -17,6 +18,8 @@ import { getPlanLimits } from './planTier'
 // Writers that leave no movement (branch cutover, merge undo, restore, reset, integrity repair) show the previous movement; test-inventory-last-change-writers-native.cjs
 // checks every write shape against that allowlist.
 
+// updated_at is the time the product was COUNTED (the "checked at" the row shows) and updated_by the person who counted: nothing writes either but a count (the approval flip changes the state only),
+// so the latest count by this column is the most recent count, an approval of an older one never makes it the newer one, and "by" agrees with "at". The same column as the date chips (lib/inventoryCheckList.ts).
 export const COUNT_ENTRIES_SQL = `SELECT i.product_id AS product_id, i.state AS state, i.counted_quantity AS counted_quantity, i.baseline_quantity AS baseline_quantity, i.reason AS reason,
     i.updated_by AS updated_by, i.updated_at AS updated_at, i.session_id AS session_id, i.revision AS revision, s.created_by AS created_by, u.username AS by_name
   FROM json_each(@ids) wanted
@@ -26,7 +29,8 @@ export const COUNT_ENTRIES_SQL = `SELECT i.product_id AS product_id, i.state AS 
     ORDER BY x.updated_at DESC, x.session_id DESC LIMIT 1)
   JOIN inventory_check_sessions s ON s.id = i.session_id
   LEFT JOIN users u ON u.id = i.updated_by`
-const PENDING_LINES_SQL = `SELECT DISTINCT i.product_id AS product_id FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id = a.session_id
+// One waiting line per product (queue-first), so a product has one waiting session: the one holding its request, not necessarily the one it was counted in last.
+const PENDING_LINES_SQL = `SELECT DISTINCT i.product_id AS product_id, a.session_id AS session_id FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id = a.session_id
   WHERE a.organization_id IS @organization AND i.branch_id = @branchId AND i.product_id IN (SELECT value FROM json_each(@ids)) AND ${waitingLineSql('a', 'i')}`
 // ic_lot_counts: the received-date lines of the SAME latest session, by the table's primary key (session, product, batch) through its product index -- at most the lines a count may carry.
 const LOT_LINES_SQL = `SELECT l.product_id AS product_id, l.batch_id AS batch_id, l.scope AS scope, l.counted_quantity AS counted_quantity, l.seen_quantity AS seen_quantity
@@ -57,6 +61,8 @@ export type OverlayEntry = {
     /** ic_lot_counts: what was typed per received date in that session (batch_id 0 = the branch total). */
     lots?: Array<{ batch_id: number; scope: 'lot' | 'branch'; counted: number; seen?: number }> }
   pending?: true
+  /** With `pending`: the session whose approval holds the waiting line (the latest count of the product may be a later, undecided session). */
+  pending_session_id?: string
 }
 
 export function parseOverlayIds(raw: string | undefined, env: Env): number[] {
@@ -68,7 +74,7 @@ export function parseOverlayIds(raw: string | undefined, env: Env): number[] {
   return ids.map(Number)
 }
 
-export async function readInventoryOverlay(env: Env, user: SessionUser, request: { branchId: number; ids: number[]; pendingAvailable: boolean; lotLines?: boolean }): Promise<OverlayEntry[]> {
+export async function readInventoryOverlay(env: Env, user: SessionUser, request: { branchId: number; ids: number[]; pendingAvailable: boolean; lotLines?: boolean; populationToken?: { token?: string | null } }): Promise<OverlayEntry[]> {
   const access = getInventoryCheckAccess(user)
   if (!access.canView) throw new InventoryCheckQueryError(403, 'inventory_check_view_required', '')
   const { branchId, ids } = request
@@ -76,14 +82,22 @@ export async function readInventoryOverlay(env: Env, user: SessionUser, request:
   const organization = user.organization_id ?? null
   const params = { ids: JSON.stringify(ids), branchId, organization }
   const withPending = request.pendingAvailable && access.fields.stock
-  const results = await getDb(env).batch([
+  const statements = [
     { sql: COUNT_ENTRIES_SQL, params },
     ...(withPending ? [{ sql: PENDING_LINES_SQL, params }] : []),
     { sql: LAST_CHANGE_SQL, params: { ids: params.ids, lastChangeRows: getPlanLimits(env).inventoryLastChangeMaxRows } },
     ...(request.lotLines ? [{ sql: LOT_LINES_SQL, params }] : []),
-  ])
+  ]
+  // The membership token of the status counts rides this batch (last), so a warm open is one call; a database without its table (0317) answers the batch without it and the counts are computed uncached.
+  const slot = request.populationToken
+  let results
+  try { results = await getDb(env).batch(slot ? [...statements, { sql: POPULATION_TOKEN_SQL }] : statements) } catch (error) {
+    if (!slot || !/no such table: inventory_population_token/.test(String((error as Error)?.message ?? error))) throw error
+    results = await getDb(env).batch(statements)
+  }
+  if (slot) slot.token = populationTokenOf(results[statements.length]?.results as Array<{ token?: unknown }> | undefined)
   const rows = (results[0]?.results ?? []) as CountRow[]
-  const pending = new Set(withPending ? ((results[1]?.results ?? []) as Array<{ product_id: number }>).map((row) => Number(row.product_id)) : [])
+  const pending = new Map(withPending ? ((results[1]?.results ?? []) as Array<{ product_id: number; session_id: string }>).map((row): [number, string] => [Number(row.product_id), String(row.session_id)]) : [])
   const lastRows = (results[withPending ? 2 : 1]?.results ?? []) as Array<{ product_id: number; last_at: string | null }>
   const lastChange = new Map(lastRows.map((row) => [Number(row.product_id), row.last_at ?? null]))
   const linesOf = new Map<number, Array<{ product_id: number; batch_id: number; scope: string; counted_quantity: number; seen_quantity: number | null }>>()
@@ -107,7 +121,7 @@ export async function readInventoryOverlay(env: Env, user: SessionUser, request:
           ? { lots: linesOf.get(id)!.map((line) => ({ batch_id: Number(line.batch_id), scope: line.scope === 'branch' ? 'branch' as const : 'lot' as const, counted: Number(line.counted_quantity),
             ...(access.fields.stock && line.seen_quantity != null ? { seen: Number(line.seen_quantity) } : {}) })) } : {}) }
     }
-    if (pending.has(id)) entry.pending = true
+    if (pending.has(id)) { entry.pending = true; entry.pending_session_id = pending.get(id) }
     return entry
   })
 }

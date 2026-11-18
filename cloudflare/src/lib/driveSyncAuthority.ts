@@ -1,7 +1,6 @@
 import type { Env } from '../index'
 import { getDb } from './db'
-import { hasPermission, type PermissionUser } from './permissions'
-import { canViewAcquisitionCosts } from './acquisitionCostAccess'
+import { hasPermission, isAdminControlUser, type PermissionUser } from './permissions'
 import { DRIVE_SYNC_AUTHORIZED_BY_KEY } from './googleDrive'
 
 // P1-2 (Release 1 auth audit). A Drive sync uploads the WHOLE database
@@ -13,15 +12,15 @@ import { DRIVE_SYNC_AUTHORIZED_BY_KEY } from './googleDrive'
 // already demanded cost-view.
 //
 // The rule, in one place: whoever authorises the destination must hold
-// `backup` (strict: `settings` does not stand in for it) AND cost-view,
-// which is what taking a backup copy home amounts to. The route gates use
+// `backup` (strict: `settings` does not stand in for it) AND be an administrator
+// (isAdminControlUser). The cost grant does not stand in: a backup copy holds every cost. The route gates use
 // canAuthorizeDriveSync on the session user; the OAuth callback records the
 // authoriser's id (lib/googleDrive.ts's completeDriveOauth); and every push
 // re-checks that stored authoriser at run time, so a later demotion,
 // deactivation or deletion stops the uploads without anyone remembering to
 // disconnect Drive.
 export function canAuthorizeDriveSync(user: PermissionUser): boolean {
-  return !!user && hasPermission(user, 'backup') && canViewAcquisitionCosts(user)
+  return !!user && hasPermission(user, 'backup') && isAdminControlUser(user)
 }
 
 export const DRIVE_SYNC_AUTHORIZER_REQUIRED_MESSAGE =

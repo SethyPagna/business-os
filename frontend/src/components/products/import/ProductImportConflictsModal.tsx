@@ -45,7 +45,7 @@ type ReviewPayload = {
 
 export default function ProductImportConflictsModal(props: Parameters<typeof ProductImportConflictsBody>[0]) {
   const { hasPermission } = useApp() as { hasPermission: (key: string) => boolean }
-  if (!hasPermission('product_cost_view')) return <Modal title={props.t?.('product_cost_import_view_required') || 'Only an administrator can review financial import data.'} onClose={props.onClose} unsavedChanges="read-only"><p role="status">{props.t?.('product_cost_import_view_required') || 'Only an administrator can review financial import data.'}</p></Modal>
+  if (!hasPermission('product_cost_view')) return <Modal title={props.t?.('product_cost_import_view_required') || 'Reviewing financial import data needs View product costs.'} onClose={props.onClose} unsavedChanges="read-only"><p role="status">{props.t?.('product_cost_import_view_required') || 'Reviewing financial import data needs View product costs.'}</p></Modal>
   return <ProductImportConflictsBody {...props} />
 }
 

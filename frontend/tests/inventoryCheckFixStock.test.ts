@@ -99,6 +99,7 @@ let fixStockOn = true
 let rowOverride: Record<string, unknown> = {}
 const productRequests: Array<Record<string, unknown>> = []
 const navigations: Array<[string, string | undefined]> = []
+const sessionsOpened: string[] = []
 const handedToReports: Array<ReturnType<typeof productSalesFocus>> = []
 const commits: unknown[][] = []
 const writes: unknown[][] = []
@@ -106,7 +107,7 @@ const response = () => ({ items: [{ ...row, ...rowOverride }], total: 1, page: 1
 const baseUser = { id: 7, username: 'alice', role_code: 'employee', permissions: { inventory: true, inventory_checks: true, sales: true, inventory_check_show_barcode: true, inventory_check_show_brand: true, inventory_check_show_category: true, inventory_check_show_stock: true, inventory_check_show_received: true } as Record<string, unknown> }
 const app = {
   user: baseUser as Record<string, unknown>,
-  page: 'inventory', authReady: true, canWriteToServer: true, t: (key: string) => key, settings: { navigation_mode: 'sections' }, language: 'en', AccessDenied: () => 'Access denied',
+  page: 'inventory', authReady: true, canWriteToServer: true, t: (key: string) => key, getPermissionTier: () => 'none', can: () => false, fmtUSD: (value: unknown) => '$' + Number(value).toFixed(2), fmtKHR: (value: unknown) => Number(value).toFixed(0) + '៛', settings: { navigation_mode: 'sections' }, language: 'en', AccessDenied: () => 'Access denied',
   usdSymbol: '$', khrSymbol: '៛', exchangeRate: 4100, notify() {},
   navigateTo: (page: string, anchor?: string) => { navigations.push([page, anchor]) },
 }
@@ -125,7 +126,7 @@ const doubles = {
     readInventoryCheckList: async () => { throw Object.assign(new Error('Not found'), { status: 404, code: 'not_found' }) }, // ic_wired is off here: the older list is what this test is about
     readInventoryCheckProducts: async (params: Record<string, unknown>) => { productRequests.push(params); return response() },
     readInventoryCheckSessions: async () => ({ items: [], total: 0, page: 1, pageSize: 20 }),
-    readInventoryCheckSession: async () => { throw new Error('not used') },
+    readInventoryCheckSession: async (id: unknown) => { sessionsOpened.push(String(id)); throw new Error('not used') },
     readInventoryCheckHistory: async () => ({ items: [], total: 0, page: 1, pageSize: 20 }),
     createInventoryCheckSession: async (...args: unknown[]) => { writes.push(args); throw new Error('Fix stock never creates a check session') },
     saveInventoryCheckObservation: async (...args: unknown[]) => { writes.push(args); throw new Error('Fix stock never saves a check') },
@@ -185,6 +186,19 @@ try {
   // A count that waits for approval is decided first: Fix stock is not offered (the server holds the Set as well); the Sales link is unaffected.
   assert.deepEqual(await offeredFor({ check_pending: true }), { fix: 0, sales: 1 }, 'pending count: no Fix stock, the Sales link stays')
   assert.deepEqual(await offeredFor({}), { fix: 1, sales: 1 }, 'the same row once it is decided (the tag is gone) offers it again')
+  // The pending row's detail offers the request itself (C2): one chip, opening the session that holds it; a decided row, or a server without the switch, offers none.
+  for (const [name, override, capable, expected] of [['pending', { check_pending: true }, true, 1], ['decided', {}, true, 0], ['switch off', { check_pending: true }, false, 0], ['no session on the row', { check_pending: true, check_session_id: null }, true, 0]] as const) {
+    rowOverride = override; fixStockOn = capable; app.user = baseUser
+    const probe = await mount(); await openDetail(probe)
+    assert.equal(detailButton(probe, 'data-check-open-request').length, expected, `Open request: ${name}`)
+    if (expected) {
+      assert.ok(detailButton(probe, 'data-check-open-request')[0].textContent.includes('Open request'), 'the chip says what it opens'); sessionsOpened.length = 0
+      await probe.click(detailButton(probe, 'data-check-open-request')[0])
+      assert.deepEqual(sessionsOpened, ['check-1'], 'it opens the session that holds the request'); assert.equal(detailButton(probe, 'data-check-open-request').length, 0, 'and the detail is closed')
+    }
+    await probe.unmount()
+  }
+  fixStockOn = true; rowOverride = {}
   // Rights and the switch.
   const permissions = baseUser.permissions as Record<string, unknown>
   assert.deepEqual(await offeredFor({}, { ...baseUser, permissions: { ...permissions, inventory: false } }), { fix: 0, sales: 1 }, 'no stock adjustment: no Fix stock')

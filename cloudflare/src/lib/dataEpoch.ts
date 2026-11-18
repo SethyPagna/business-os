@@ -1,5 +1,5 @@
 import { getDb } from './db'
-import { ROTATE_DATA_EPOCH_SQL } from './dataEpochSql'
+import { ROTATE_DATA_EPOCH_SQL, ROTATE_POPULATION_TOKEN_SQL } from './dataEpochSql'
 import { DATA_EPOCH_KEY, readSwitchMemoMs, resetReadSwitchMemo } from './readSwitches'
 import type { Env } from '../index'
 
@@ -22,6 +22,8 @@ export function epochSettleMs(env: Env): number {
 export async function rotateDataEpoch(env: Env, options: { settle?: boolean } = {}): Promise<string> {
   const db = getDb(env)
   await db.prepare(ROTATE_DATA_EPOCH_SQL).run()
+  // A database without 0317's table has no count cached on a token (readPopulationToken answers the unsafe token): only that absence is tolerated.
+  try { await db.prepare(ROTATE_POPULATION_TOKEN_SQL).run() } catch (error) { if (!/no such table: inventory_population_token/.test(String((error as Error)?.message ?? error))) throw error }
   const row = await db.prepare(READ_SQL).get<{ value: string }>({ key: DATA_EPOCH_KEY })
   const value = row?.value
   if (typeof value !== 'string' || !/^[0-9a-f]{32}$/.test(value)) throw new Error('The data epoch was written but could not be read back')

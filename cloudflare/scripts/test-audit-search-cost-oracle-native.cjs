@@ -129,12 +129,11 @@ async function main() {
     }
 
     // ---- controls: the instrument can see the figure where the reader may -------------
-    // Owner rules, 15 and 16 Nov 2026: product cost is administrator only, and the audit search excludes every row that names a cost ('%cost%',
-    // lib/acquisitionCostAccess.ts) for anyone without product-cost authority. A courier-cost row names "cost", so the administrator is the one
-    // reader who can FIND the figure by typing it; 'both' (courier permission on by default, retired product-cost grants) finds nothing, exactly as a
-    // default staff account did in production. That is hiding more, never less: the rows themselves still list (asserted below) and the figure
-    // never leaves a response a reader may not see.
-    for (const who of ['admin']) {
+    // Owner rules, 17 and 16 Nov 2026: product cost follows the product_cost_view grant (admin by default), and the audit search excludes every row
+    // that names a cost ('%cost%', lib/acquisitionCostAccess.ts) for anyone without product-cost authority. A courier-cost row names "cost", so it
+    // needs BOTH authorities: the administrator and 'both' (the cost grant plus the courier permission) can FIND the figure by typing it; a reader
+    // missing either finds nothing. The rows themselves still list (asserted below) and the figure never leaves a response a reader may not see.
+    for (const who of ['admin', 'both']) {
       const courier = await search(who, '8.27', '&entity=sale')
       const neighbour = await search(who, '8.28', '&entity=sale')
       const acquisition = await search(who, '3.1415', '&entity=product')
@@ -148,7 +147,7 @@ async function main() {
     }
 
     // ---- the rule: with a cost hidden, its figure cannot be found by search -------------
-    for (const who of ['both', 'no-courier', 'blind']) {
+    for (const who of ['no-courier', 'blind']) {
       const probes = {}
       for (const word of ['8.27', '8.28', '7.13', 'actual_cost_after', 'delivery_actual_cost']) probes[word] = await search(who, word)
       const recovered = await recover(who)
@@ -157,7 +156,12 @@ async function main() {
       })
       r.check(`${who} recovers nothing of the courier cost digit by digit`, () => assert.equal(recovered, ''))
     }
-    for (const who of ['both', 'no-acquisition', 'blind']) {
+    // The cost grant opens the product cost to a non-admin: 'no-courier' holds it and finds the product cost, but still not the courier cost.
+    const noCourierProduct = await search('no-courier', '3.1415', '&entity=product')
+    r.check('no-courier (cost grant, courier permission off) finds the product cost by typing it', () => {
+      assert.ok(noCourierProduct.length > 0, 'search 3.1415 found no row for a cost-grant holder')
+    })
+    for (const who of ['no-acquisition', 'blind']) {
       const probes = {}
       for (const word of ['3.1415', '3.1416', 'cost_price_usd']) probes[word] = await search(who, word, '&entity=product')
       r.check(`${who} cannot find a product cost by typing it, its new figure or its key name`, () => {

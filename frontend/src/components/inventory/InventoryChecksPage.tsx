@@ -11,7 +11,7 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp, type AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import { claimSyncProblemPresentation } from '../../utils/syncProblemLifecycle.ts'
 import { captureActorReadScope, captureActorWriteIdentity, isActorReadScopeCurrent, isActorWriteIdentityCurrent } from '../../api/actorReadScope.ts'
-import { captureInventoryCheckWriteScope, changeInventoryCheckSession, createInventoryCheckSession, decideInventoryCheckApproval, readInventoryCheckHistory, readInventoryCheckList, readInventoryCheckLots, readInventoryCheckOverlay, readInventoryCheckProducts, readInventoryCheckSession, readInventoryCheckSessions, saveInventoryCheckObservation, submitInventoryCheckCounts, type InventoryCheckApproval, type InventoryCheckSession, type InventoryCheckSessionItem } from '../../api/inventoryChecksTransport.ts'
+import { captureInventoryCheckWriteScope, changeInventoryCheckSession, createInventoryCheckSession, readInventoryCheckHistory, readInventoryCheckList, readInventoryCheckLots, readInventoryCheckOverlay, readInventoryCheckProducts, readInventoryCheckSession, readInventoryCheckSessions, saveInventoryCheckObservation, submitInventoryCheckCounts, type InventoryCheckApproval, type InventoryCheckSession, type InventoryCheckSessionItem } from '../../api/inventoryChecksTransport.ts'
 import type { QueryParams } from '../../api/query.ts'
 import { currentDataEpoch } from '../../api/dataEpoch.ts'
 import { peekProductSearch, primeProductSearch, getProductFilters } from '../../api/productReadTransport.ts'
@@ -31,20 +31,23 @@ import type { InventoryCheckListStatus, InventoryCheckLotRow, InventoryCheckObse
 import InventoryCheckControls, { countActiveFilters, type InventoryCheckFilters } from './InventoryCheckControls.tsx'
 import InventoryCheckRows, { InventoryCheckSheetHeader, type InventoryCheckFocusRequest } from './InventoryCheckRows.tsx'
 import InventoryCheckListRows, { InventoryCheckListHeader, InventoryCheckSelectionBar, type ListDraft } from './InventoryCheckListRows.tsx'
+import { checkDaysOf, dayChipsOf, type CheckDay } from './inventoryCheckDays.ts'
 import { finiteQuantity, parseCount } from './InventoryCheckCountEditor.tsx'
 import { fixStockOpening, fixStockRequestId, type FixStockOpening } from './inventoryCheckFixStock.ts'
 import { countTextFromLots, incompleteLotAnswers, lotSubmissionLine, lotTotals, rowSetPlan, splitSubmission, staleLotFigures, stockedDatesOf, uncountedDates, type SubmissionLotLine } from './inventoryCheckLots.ts'
 import { adjustStock } from '../../api/inventoryWriteTransport.ts'
 import { stockConflictFigures, type StockWriteAnswer } from './stockAnswerPatch.ts'
 import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
-import { oldListDropsStatus, productsServerOf, productsWireParams, type ProductsServer } from './inventoryCheckProductsRequest.ts'
+import { oldListDropsStatus, productsServerOf, productsWireParams, sessionScopeParams, type ProductsServer } from './inventoryCheckProductsRequest.ts'
 import { groupedParams, groupToAsk, inOpenGroups, type Grouping } from './inventoryCheckGroups.ts'
 import { groupedListLoaded, loadGroupedList } from './inventoryCheckGroupChunk.ts'
 import { soleActiveBranch } from '../../utils/branchCollapse.ts'
-import { PRICE_KEYS } from './inventoryPriceFacts.ts'
+import { projectProduct } from './inventoryCheckProject.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { loadWired, mergeWiredRows, NotWired, patchWiredLots, patchWiredRaw, readWiredRows, rememberWiredMode, wiredMode, wiredResult, type Branch, type WiredAccess, type WiredDeps, type WiredExtras, type WiredList, type WiredRaw } from './inventoryWired.ts'
-import { approvalRequestBound, runApprovalFlow } from './inventoryCheckApprovalFlow.ts'
+import { withAppliedStock } from './inventoryCheckApprovalLines.ts'
+import { withAppliedRowStock } from './inventoryCheckAppliedRows.ts'
+import { useInventoryCheckApproval } from './useInventoryCheckApproval.ts'
 import { productSalesFocus, queueReportsFocus } from '../sales/reports/reportsFocus.ts'
 import type { InventoryCheckHistoryResult } from './InventoryCheckHistoryFloat.tsx'
 import InventoryCheckSessionsList, { InventoryCheckSessionFilterMenu, ProgressRing, SessionCounts, SessionStatusChip, initialSessionFilters, sessionDisplayName, type SessionListFilters } from './InventoryCheckSessionsList.tsx'
@@ -65,11 +68,13 @@ const InventoryCheckApprovalPanel = lazyRetry(() => import('./InventoryCheckAppr
 const InventoryCheckGroupedList = lazyRetry(loadGroupedList, 'inventory-check-groups')
 // The product detail and the session history are floats opened by a tap, never part of the first paint: their code loads as their own chunks, and starts loading once the list is on screen (below),
 // so the first tap finds it already there.
-const loadDetailFloat = () => import('./InventoryCheckDetailFloat.tsx')
+const loadDetailFloat = () => import('./InventoryCheckDetail.tsx')
 const loadHistoryFloat = () => import('./InventoryCheckHistoryFloat.tsx')
-const InventoryCheckDetailFloat = lazyRetry(loadDetailFloat, 'inventory-check-detail')
+const InventoryCheckDetail = lazyRetry(loadDetailFloat, 'inventory-check-detail')
 const InventoryCheckHistoryFloat = lazyRetry(loadHistoryFloat, 'inventory-check-history')
 const FastStockInModal = lazyRetry(() => import('./FastStockInModal.tsx'), 'inventory-check-fix-stock')
+// The calculated-cost float (a tap on the red cost value of a row, for a viewer who may see cost): its own chunk, read on demand only.
+const CostCalculationFloat = lazyRetry(() => import('../shared/CostCalculationFloat.tsx'), 'inventory-check-cost-float')
 
 type CheckSummary = Record<InventoryCheckListStatus, number> & { total: number }
 type ProductsResult = {
@@ -80,7 +85,7 @@ type ProductsResult = {
   /** The rows came from the wired list (ic_wired): the Products rows plus the overlay, sorted by created or name. */
   wired?: boolean
   /** Check counts and filter options come with page 1 and with a filter change, never with a page step (the page keeps the last ones). */
-  summary?: CheckSummary & { pending?: number }
+  summary?: (CheckSummary & { pending?: number; /** The dates of the last counts (wired list only), newest first. */ days?: CheckDay[]; tooLarge?: undefined }) | { /** Too many checked products to count: no counts, no dates, and the status and date filters are refused. */ tooLarge: true }
   facets?: { brands?: string[]; categories?: string[] }
   facetsLimited?: { brands: boolean; categories: boolean }
   /** The rules behind the rows' promotion prices (wired answers to a viewer with the price grant). */
@@ -121,7 +126,7 @@ const COUNTS_WORK_KEY = 'inventory-check:counts'
 const MAX_SUBMISSION = 500
 /** Choosing a grouping puts the sort back at the name order. */
 const NAME_ORDER = { sortBy: 'name', sortDirection: 'asc' as const }
-const initialFilters: InventoryCheckFilters = { branchId: '', stockState: '', checkState: '', brand: '', category: '', sortBy: 'name', sortDirection: 'asc', group: '' }
+const initialFilters: InventoryCheckFilters = { branchId: '', stockState: '', checkState: '', checkedOn: '', brand: '', category: '', sortBy: 'name', sortDirection: 'asc', group: '' }
 /** The groupings this server offered (null: it answered without any; undefined: it has not answered), kept for the tab: a branch change remounts the page. */
 let knownGroupings: readonly string[] | null | undefined
 /** Typing waits for a pause this long before the list is read; Enter, the camera and the scanner gun read at once. */
@@ -159,16 +164,6 @@ function fixStockCandidate(opening: FixStockOpening, branchName: string | null) 
   const ordinary = Math.max(0, (Number(product.quantity) || 0) - (Number(product.damaged_quantity) || 0))
   return { id: product.id, name: product.name, barcode: product.barcode ?? null, brand: product.brand ?? null, unit: product.unit ?? null, image_path: product.image_path ?? null,
     stock_quantity: ordinary, branch_stock: [{ branch_id: opening.branchId, branch_name: branchName, quantity: ordinary }] }
-}
-
-function projectProduct(product: InventoryCheckProduct, fields: InventoryCheckAccess['fields']): InventoryCheckProduct {
-  const visible = { ...product }
-  if (!fields.stock) { delete visible.quantity; delete visible.damaged_quantity }
-  if (!fields.brand) delete visible.brand
-  if (!fields.category) delete visible.category
-  if (!fields.barcode) { delete visible.barcode; delete visible.sku }
-  if (!fields.price) for (const key of PRICE_KEYS) delete (visible as Record<string, unknown>)[key]
-  return visible
 }
 
 
@@ -230,7 +225,7 @@ function ListSkeleton({ loadingText }: { loadingText: string }) {
 
 function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access: InventoryCheckAccess; selection: Selection; onSelect: (selection: Selection) => void; isCurrent: () => boolean }) {
   const { t, user, canWriteToServer, navigateTo, notify } = useApp() as AppContextCoreValue
-  const { formatPrice, exchangeRate } = useApp() as AppContextCoreValue
+  const { formatPrice, exchangeRate, fmtUSD, fmtKHR } = useApp() as AppContextCoreValue
   const { branchId, sessionId } = selection
   const bootstrapIntent = selection.bootstrapIntent
   const tr = (key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
@@ -310,6 +305,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   }, [])
   const [detail, setDetail] = useState<InventoryCheckProduct | null>(null)
   const [fixStock, setFixStock] = useState<FixStockOpening | null>(null)
+  const [costFor, setCostFor] = useState<InventoryCheckProduct | null>(null)
   const [historyPage, setHistoryPage] = useState<number | null>(null)
   const [historyReload, setHistoryReload] = useState(0)
   const [history, setHistory] = useState<InventoryCheckHistoryResult | null>(null)
@@ -318,12 +314,10 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const inFlight = useRef(false)
   const ownSets = useRef(new Map<number, number>())
   const checkStateRetried = useRef(false)
+  const checkedOnRetried = useRef(false)
   const attempts = useRef(new Map<number, Attempt>())
   const createAttempt = useRef<{ title: string; productIds: number[]; scope: QueryParams; requestId: string } | null>(null)
   const lifecycleAttempt = useRef<{ action: 'close' | 'resume'; revision: number; requestId: string } | null>(null)
-  // One request id for the whole of one approval, however many requests it takes: it is what makes every repeat safe.
-  const decideAttempt = useRef<{ decision: 'approve' | 'reject' | 'close'; requestId: string } | null>(null)
-  const [refusedLines, setRefusedLines] = useState<Record<string, string>>({})
   // Products whose count by received date left a stocked date out, found by Submit before any request was sent (the rows say which dates).
   const [uncounted, setUncounted] = useState<ReadonlySet<string>>(() => new Set())
   // The owner's way to count: what has been picked and typed on the list, held here (in memory only) until it is submitted. Keyed by product id,
@@ -337,7 +331,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const current = () => mounted.current && isCurrent() && isActorReadScopeCurrent(writeScope.readScope, false) && isActorWriteIdentityCurrent(writeScope.writeIdentity)
   const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   const { group: groupChoice, ...listFilters } = filters
-  const params: QueryParams = { ...listFilters, query: appliedQuery, page, pageSize, sessionId, checkState: section === 'issues' ? 'issue' : filters.checkState }
+  // The date chips filter the product list only: inside a session and on the Issues tab the date is not part of the question.
+  const params: QueryParams = { ...listFilters, query: appliedQuery, page, pageSize, sessionId, checkState: section === 'issues' ? 'issue' : filters.checkState, checkedOn: !sessionId && section === 'products' ? filters.checkedOn : '' }
   // While a search is typed (or a code is scanned into the box) no grouping is asked for, on both servers: the answer is the flat list, from the device search index and the Products store on the wired path
   // (no extra read), and a family's date or header count can never be computed over fewer rows than the page shows. The grouping returns, with the same collapse rules, once the search is cleared.
   const groupWire = !sessionId && section !== 'sessions' && !appliedQuery.trim() ? groupToAsk(groupChoice, knownGroupings) : null
@@ -412,7 +407,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         } else {
           const stepScope = JSON.stringify([{ ...params, page: undefined }, section, refresh])
           // ic_wired: the Products rows plus the overlay. Only the products list of one branch or all branches: a session's own list and the all-branches Issues view keep today's path.
-          if (!sessionId && wiredMode() !== 'old' && (!params.checkState || branchId)) {
+          if (!sessionId && wiredMode() !== 'old' && ((!params.checkState && !params.checkedOn) || branchId)) {
             const epoch = currentDataEpoch()
             const seed = wiredSeed.current
             wiredSeed.current = null
@@ -423,6 +418,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
               // The data epoch moved while this was in flight: the answer belongs to the old epoch, so it is dropped and the screen reads again.
               if (currentDataEpoch() !== epoch) { setRefresh(value => value + 1); return }
               rememberWiredMode('wired')
+              checkStateRetried.current = false; checkedOnRetried.current = false
               const { raw } = result
               knownGroupings = raw.extras.capabilities?.groupings?.length ? raw.extras.capabilities.groupings : null
               wiredRaw.current = raw
@@ -481,7 +477,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
             else if (products.facets) summaryScope.current = stepScope
             setData(previous => products.simple && !products.facets && previous ? { ...products, summary: previous.summary, facets: previous.facets, facetsLimited: previous.facetsLimited } : products)
             setLoadedKey(scopeKey)
-            checkStateRetried.current = false
+            checkStateRetried.current = false; checkedOnRetried.current = false
           }
         }
       } catch (cause) {
@@ -491,8 +487,18 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         if (publish() && groupWire === 'category' && (cause as { code?: unknown } | null)?.code === 'inventory_check_field_hidden') {
           setFilters(previous => ({ ...previous, group: '' })); return
         }
-        // A status the server no longer offers (a switch moved under this tab) is dropped once and the list read again; a second refusal shows the load error.
-        if (publish() && (cause as { code?: unknown } | null)?.code === 'inventory_check_invalid_query' && filters.checkState && !checkStateRetried.current) {
+        const refusal = cause as { code?: unknown; parameter?: unknown } | null
+        // A date the server will not filter by (it refuses checkedOn with a 400 that names it, or, with too many checked products to list their dates, a 503 filter_too_large) is dropped once and the list read again,
+        // exactly as a refused status is: the person lands on the list of every date, never on "unavailable" with the filter still set.
+        if (publish() && filters.checkedOn && !checkedOnRetried.current
+          && ((refusal?.code === 'inventory_check_invalid_query' && refusal.parameter === 'checkedOn') || refusal?.code === 'inventory_check_filter_too_large')) {
+          checkedOnRetried.current = true
+          setFilters(previous => ({ ...previous, checkedOn: '' })); setPage(1)
+          return
+        }
+        // A status the server no longer offers (a switch moved under this tab, or too many checked products to filter by status) is dropped once and the list read again; a second refusal shows the load error.
+        if (publish() && filters.checkState && !checkStateRetried.current
+          && ((refusal?.code === 'inventory_check_invalid_query' && refusal.parameter !== 'checkedOn') || refusal?.code === 'inventory_check_filter_too_large')) {
           checkStateRetried.current = true
           setFilters(previous => ({ ...previous, checkState: '' })); setPage(1)
           return
@@ -674,7 +680,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         confirmLabel: tr('inventory_check_start_page', 'Count'),
       })
       if (!confirmed || !current() || inFlight.current) return
-      createAttempt.current = { title: tr('inventory_check_page_session', 'Visible page check'), productIds, scope: { ...Object.fromEntries(Object.entries(params).filter(([, value]) => value !== '' && value != null)), membership: 'visible_page' }, requestId: createClientRequestId('inventory_check') }
+      createAttempt.current = { title: tr('inventory_check_page_session', 'Visible page check'), productIds, scope: { ...sessionScopeParams(params), membership: 'visible_page' }, requestId: createClientRequestId('inventory_check') }
     }
     inFlight.current = true; setBusy(true); setWriteError('')
     try {
@@ -872,7 +878,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     wiredRaw.current = next
     setData(previous => {
       const moved = wiredResult(next, previous)
-      return moved.summary && previous?.summary ? { ...moved, summary: { ...moved.summary, issue: Math.max(0, previous.summary.issue - 1), ok: previous.summary.ok + 1 } } : moved
+      return moved.summary && previous?.summary && moved.summary.tooLarge !== true && previous.summary.tooLarge !== true ? { ...moved, summary: { ...moved.summary, issue: Math.max(0, previous.summary.issue - 1), ok: previous.summary.ok + 1 } } : moved
     })
   }
   // The popover of a row reads that one product's received dates (batches) at this branch when it opens: one request, never the page. A branch that is not chosen has no batches to read.
@@ -992,70 +998,37 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const canDecide = fresh && !!approval && approval.can_approve && data?.capabilities?.approveCounts === true && canWriteToServer
   // Closing moves no stock, so it needs the extra but not the right to adjust stock.
   const canClose = fresh && !!approval && approval.can_approve && canWriteToServer
-  // A refusal for a count that cannot be rejected any more (stock may have moved) points at Close.
-  const withCloseHint = (text: string) => approval && (approval.applying || approval.applied > 0) ? `${text} ${tr('inventory_check_close_hint', 'Part of it was already applied, so close the remaining lines instead.')}` : text
-  const refusedMap = (list: unknown): Record<string, string> => Object.fromEntries((Array.isArray(list) ? list as Array<{ productId?: unknown; code?: unknown }> : []).filter(entry => entry && typeof entry.code === 'string').map(entry => [String(entry.productId), String(entry.code)]))
-  async function decideApproval(decision: 'approve' | 'reject' | 'close') {
-    if (!current() || !sessionId || !approval || approval.status !== 'pending' || inFlight.current) return
-    if (!decideAttempt.current || decideAttempt.current.decision !== decision) {
-      const confirmed = await askToConfirm({
-        title: decision === 'approve' ? tr('inventory_check_approve_title', 'Approve these counts?') : decision === 'close' ? tr('inventory_check_close_title', 'Close the remaining lines?') : tr('inventory_check_reject_title', 'Reject these counts?'),
-        message: decision === 'approve' ? tr('inventory_check_approve_message', 'Stock changes by what each count found. Sales since the count are kept.')
-          : decision === 'close' ? tr('inventory_check_close_message', 'Stock does not change. Lines already applied stay applied; the rest are recorded as not applied.') : tr('inventory_check_reject_message', 'Stock stays as it is.'),
-        items: [{ label: tr('inventory_check_differences', 'Differences'), value: approval.lines - approval.applied - Object.keys(approval.superseded ?? {}).length }],
-        confirmLabel: decision === 'approve' ? tr('inventory_check_approve', 'Approve') : decision === 'close' ? tr('inventory_check_close', 'Close') : tr('inventory_check_reject', 'Reject'),
-        danger: decision !== 'approve',
-      })
-      if (!confirmed || !current() || inFlight.current) return
-      // An approval that already started under a request id (this approver's own earlier attempt) continues under it: that id is what the stock writers replay.
-      decideAttempt.current = { decision, requestId: decision === 'approve' && approval.applying_request_id ? approval.applying_request_id : createClientRequestId('inventory_check_approval') }
-    }
-    const attempt = decideAttempt.current
-    inFlight.current = true; setBusy(true); setWriteError(''); setRefusedLines({})
-    try {
-      const flow = await runApprovalFlow({
-        send: () => decideInventoryCheckApproval(writeScope, { decision, requestId: attempt.requestId }),
-        onProgress: result => { if (current()) { setApproval(result.approval); setRefusedLines(refusedMap(result.refused)) } },
-        isCurrent: current,
-        maxRequests: approvalRequestBound(data?.capabilities),
-      })
-      if (!current()) return
-      if (flow.outcome === 'done') {
-        decideAttempt.current = null
-        notify(decision === 'approve' ? tr('inventory_check_approved_done', 'Counts approved. Stock updated.') : decision === 'close' ? tr('inventory_check_closed_done', 'Count closed. Closing did not change stock.') : tr('inventory_check_rejected_done', 'Counts rejected. Stock unchanged.'), 'success')
-      } else if (flow.outcome === 'refused') {
-        // Some lines were applied; the rest cannot be: said once, with each line's reason on its row. The same Approve repeats once the cause is fixed.
-        setWriteError(withCloseHint(tr('inventory_check_lines_refused', 'Some lines cannot be applied. Fix the cause and approve again, or close the remaining lines.')))
-      } else if (flow.outcome === 'stalled') {
-        setWriteError(tr('inventory_check_error_write_refused', 'Stock could not be updated for some products. Try again.'))
-      } else decideAttempt.current = null // declined: the next Approve is a fresh decision with its own review
-      reloadAll()
-    } catch (cause) {
-      const unknown = (cause as { outcome?: string })?.outcome === 'unknown'
-      const refusal = unknown ? undefined : await knownRefusal(cause)
-      if (!unknown) decideAttempt.current = null
-      if (current()) {
-        setRefusedLines(refusedMap((cause as { refused?: unknown }).refused))
-        setWriteError(refusal ? withCloseHint(tr(refusal.key, refusal.fallback)) : tr(unknown ? unknownSaveKey(cause) : 'inventory_check_save_failed', unknown ? 'Save not confirmed. Retry the same operation or reload.' : 'Check not saved. Try again.'))
-        reloadAll()
-      }
-    } finally { inFlight.current = false; if (current()) setBusy(false) }
+  // Lines the approval applied: the panel's items and the session's product rows take the stock the answer says (no read), as Fix stock does for its row.
+  function takeAppliedStock(stock: Record<string, number>) {
+    setItems(previous => withAppliedStock(previous, stock))
+    setData(previous => previous ? { ...previous, items: withAppliedRowStock(previous.items ?? [], stock, items) } : previous)
   }
+  const { refusedLines, lineErrors, decideApproval, decideLine } = useInventoryCheckApproval({ sessionId, approval, items, capabilities: data?.capabilities, writeScope, inFlight, current, setBusy, setApproval, setWriteError,
+    askToConfirm, tr, notify, knownRefusal, unknownSaveKey, reload: reloadAll, setApplied: takeAppliedStock })
   // The owner's summary: check counts only. A session shows its own counts in the session bar, and the old contract sends none.
   const checkInfo = !sessionId && !!data?.simple
   const summary = fresh && checkInfo ? data?.summary : undefined
+  // Too many checked products to count: the server sends no counts and no dates and refuses the status and date filters, so none of those controls is drawn (a chip would only lead to a refusal).
+  const tooLarge = summary?.tooLarge === true
+  const counts = summary && summary.tooLarge !== true ? summary : undefined
   // The wired page has no "In check" (nothing is in a session there) and, with a branch chosen, its one status choice is the chip rail: the numbers ride on its chips.
-  const cards: StatCardDef[] = summary ? (['not_checked', 'in_check', 'ok', 'issue'] as const).filter(key => !(data?.wired === true && key === 'in_check')).map(key => ({
-    key, label: tr(key === 'issue' ? 'issues' : `inventory_check_status_${key}`, key === 'not_checked' ? 'Not checked' : key === 'in_check' ? 'In check' : key === 'ok' ? 'Checked OK' : 'Issues'), value: summary[key],
+  const cards: StatCardDef[] = counts ? (['not_checked', 'in_check', 'ok', 'issue'] as const).filter(key => !(data?.wired === true && key === 'in_check')).map(key => ({
+    key, label: tr(key === 'issue' ? 'issues' : `inventory_check_status_${key}`, key === 'not_checked' ? 'Not checked' : key === 'in_check' ? 'In check' : key === 'ok' ? 'Checked OK' : 'Issues'), value: counts[key],
   })) : []
   // The status choice, in one row that scrolls sideways (the shared chip rail): every status the viewer can see, with how many products are in it.
   const statusChips: Array<{ value: string; label: string; count?: number }> = [{ value: '', label: t('all') },
-    { value: 'not_checked', label: tr('inventory_check_status_not_checked', 'Not checked'), count: summary?.not_checked },
-    { value: 'ok', label: tr('inventory_check_status_ok', 'Checked OK'), count: summary?.ok },
-    { value: 'issue', label: tr('issues', 'Issues'), count: summary?.issue },
-    ...(data?.capabilities?.fixStock && summary?.pending !== undefined ? [{ value: 'pending', label: tr('inventory_check_approval_pending', 'Waiting for approval'), count: summary.pending }] : [])]
+    { value: 'not_checked', label: tr('inventory_check_status_not_checked', 'Not checked'), count: counts?.not_checked },
+    { value: 'ok', label: tr('inventory_check_status_ok', 'Checked OK'), count: counts?.ok },
+    { value: 'issue', label: tr('issues', 'Issues'), count: counts?.issue },
+    ...(data?.capabilities?.fixStock && counts?.pending !== undefined ? [{ value: 'pending', label: tr('inventory_check_approval_pending', 'Waiting for approval'), count: counts.pending }] : [])]
   const rowEditing = Object.values(editingRows).some(Boolean)
   const controlsLocked = busy || !!createAttempt.current || rowEditing
+  // The date chips (the wired list at one branch only: counts are per branch, and the server sends no days for too many products). The chosen day stays on the rail even if the summary stops listing it, so "All" is always one tap away.
+  const dayChips = wiredNow && !sessionId && section === 'products' && branchId && !tooLarge ? dayChipsOf(checkDaysOf(data?.summary), filters.checkedOn ?? '') : []
+  // The row stays on screen while a read is under way (the chips wait, the counting buttons are disabled): it never flickers away with the list.
+  const barShown = checkInfo && section !== 'sessions' && (access.canCheck || dayChips.length > 0)
+  // "Not checked" products have no date, so a date beside it would always be an empty list: choosing a date leaves that status.
+  function chooseDay(day: string) { changeFilters({ checkedOn: day, ...(day && filters.checkState === 'not_checked' ? { checkState: '' } : {}) }) }
   // Typing is read after a pause. A row being edited holds the list still (the controls are disabled), so the pause restarts once it is done.
   useEffect(() => {
     if (query === appliedQuery || controlsLocked) return
@@ -1080,7 +1053,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   // The status choice exists once an answer has shown which list this is: the check-status list (ic_simple) has it everywhere; the older list has it only inside a session
   // (its unstarted | done | issue), and the Issues tab elsewhere -- so no choice is drawn for it on the Products list, and none before the first answer.
   const statusFilter = section !== 'issues' && !!data && (data.simple === true || !!sessionId)
-  const filtersActive = countActiveFilters(filters, { branch: branches.length > 1, state: statusFilter, group: !!grouping }) > 0 || !!query.trim()
+  const filtersActive = countActiveFilters(filters, { branch: branches.length > 1, state: statusFilter, group: !!grouping }) > 0 || !!query.trim() || !!filters.checkedOn
   const sessionFiltersActive = !!(sessionFilters.status || sessionFilters.mine || sessionFilters.waiting || sessionRange.startDate || sessionRange.endDate || (branches.length > 1 && !!branchId))
   // The older list (ic_simple off) draws the all-sessions Issues view from the answer's `issues` (reason, counted figure, the session), not from product rows.
   const oldIssues = section === 'issues' && !sessionId && !!data && data.simple !== true
@@ -1140,7 +1113,9 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   // Fetched already (the usual case: it came with the answer): drawn directly, so no Suspense turn and no flat frame. Otherwise the lazy wrapper, as before.
   const GroupedList = groupedListLoaded()?.default ?? InventoryCheckGroupedList
   const listRowProps = { products: visibleProducts, drafts, selecting, rowRefusals, locked: busy || !!submitAttempt.current, canViewStock: access.fields.stock, canViewCounts,
-    ...(access.fields.price ? { priceText, promotionRules: data?.promotionRules, exchangeRate } : {}), adornments: issueChips, focusRequest, onCountEntered: onCommitted, t, onOpenProduct: setDetail, ...draftHandlers,
+    ...(access.fields.price ? { priceText, promotionRules: data?.promotionRules, exchangeRate } : {}),
+    // Cost only for a viewer canViewAcquisitionCosts allows (fields.cost); the Worker sends the cost keys to nobody else either.
+    ...(access.fields.cost ? { costText: priceText, onOpenCost: setCostFor } : {}), adornments: issueChips, focusRequest, onCountEntered: onCommitted, t, onOpenProduct: setDetail, ...draftHandlers,
     ...(lotCountsOn && branchId ? { lotCounts: true, loadLots, onLotSet: directSetOn ? setLotFromRow : undefined } : {}) }
   const canCheckRows = fresh && canEdit && session?.status === 'open' && canWriteToServer && !lifecycleAttempt.current
   // One column header for the whole list, pinned with the controls: the rows below line up under it from 1024px.
@@ -1156,6 +1131,12 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       pending: detail.check_pending === true || (!!sessionId && approval?.status === 'pending'),
       canViewStock: access.fields.stock, label: tr('inventory_check_fix_stock_reason', 'Inventory check') })
     : null
+  // The session that holds the waiting request: the overlay names it. The product's latest count may be a newer session (an observation made after the submission), which has no approval.
+  const pendingSessionOf = (product: InventoryCheckProduct): string | null => product.pending_session_id ?? product.check_session_id ?? null
+  // A product waiting for approval opens that session: the panel with Approve all and the per-line decisions.
+  function openRequest(branch: string, session: string) {
+    setDetail(null); setSection('products'); onSelect({ branchId: branch, sessionId: session })
+  }
   function openFixStock(opening: FixStockOpening) {
     // The Set session resumes an unfinished stock session of this person instead of opening a new one: say so rather than open something else.
     const unfinished = readWorkDraft<{ lines?: unknown }>(scopedWorkDraftKey('fast_stockin'))?.data?.lines
@@ -1217,9 +1198,9 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
                 <InventoryCheckSessionFilterMenu value={sessionFilters} onChange={changeSessionFilters} approvals={sessions?.approvals === true} branches={branches} branchId={branchId} onBranchChange={id => changeFilters({ branchId: id })} onClear={clearFilters} t={t} />
               </fieldset>} />
             : <>
-              {checkInfo && !(wiredNow && statusFilter && branchId) ? <StatsStrip layout="scroll" cards={cards} t={t} loading={loading || !fresh} /> : null}
-              {checkInfo && statusFilter && branchId ? <ChipRail label={t('inventory_check_state')} data-inventory-check-status-rail>
-                {statusChips.map(chip => <RailChip key={chip.value || 'all'} selected={filters.checkState === chip.value} disabled={controlsLocked} onClick={() => changeFilters({ checkState: chip.value })}
+              {checkInfo && !tooLarge && !(wiredNow && statusFilter && branchId) ? <StatsStrip layout="scroll" cards={cards} t={t} loading={loading || !fresh} /> : null}
+              {checkInfo && !tooLarge && statusFilter && branchId ? <ChipRail label={t('inventory_check_state')} data-inventory-check-status-rail>
+                {statusChips.map(chip => <RailChip key={chip.value || 'all'} selected={filters.checkState === chip.value} disabled={controlsLocked} onClick={() => changeFilters({ checkState: chip.value, ...(chip.value === 'not_checked' ? { checkedOn: '' } : {}) })}
                   badge={chip.count === undefined ? undefined : <span className="tabular-nums opacity-70">{chip.count}</span>}>{chip.label}</RailChip>)}
               </ChipRail> : null}
               <div className="flex min-w-0 flex-col gap-1 lg:flex-row lg:items-center lg:gap-2">
@@ -1231,7 +1212,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
                 </fieldset>
                 {contextBar}
               </div>
-              {selecting ? <InventoryCheckSelectionBar selectedCount={selectedIds.length} blocked={submitBlocked} busy={busy} canMarkChecked={access.fields.stock} openGroupsOnly={collapsed.size > 0}
+              {barShown ? <InventoryCheckSelectionBar selectedCount={selectedIds.length} blocked={submitBlocked} busy={busy || !listMode} canMarkChecked={access.fields.stock} openGroupsOnly={collapsed.size > 0}
+                counting={access.canCheck} days={dayChips} checkedOn={filters.checkedOn ?? ''} onCheckedOn={chooseDay} daysDisabled={controlsLocked || !fresh}
                 submitLabel={submitAttempt.current ? t('retry') : undefined} onMarkChecked={markPageChecked} onClear={clearSelection} onSubmit={() => { void submit() }} t={t} /> : null}
               {sheetHeader}
             </>}
@@ -1247,7 +1229,10 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
           <IconAction label={t('retry')} onClick={reloadAll}><RotateCcw className="h-4 w-4" aria-hidden="true" /></IconAction>
         </div> : null}
         {sessionId && fresh && approval && session?.scope?.membership === 'submission'
-          ? <Suspense fallback={null}><InventoryCheckApprovalPanel approval={approval} items={items} canDecide={canDecide} canClose={canClose} busy={busy} refused={refusedLines} t={t} onApprove={() => { void decideApproval('approve') }} onReject={() => { void decideApproval('reject') }} onClose={() => { void decideApproval('close') }} /></Suspense> : null}
+          ? <Suspense fallback={null}><InventoryCheckApprovalPanel approval={approval} items={items} canDecide={canDecide} canClose={canClose} busy={busy} refused={refusedLines} lineErrors={lineErrors} t={t}
+            onApprove={() => { void decideApproval('approve') }} onReject={() => { void decideApproval('reject') }} onClose={() => { void decideApproval('close') }}
+            onAccept={productId => { void decideApproval('approve', [productId]) }} onModify={(productId, figures) => decideLine({ productId, action: 'modify', ...figures })}
+            onRejectLine={productId => { void decideLine({ productId, action: 'reject' }) }} onReopen={productId => { void decideLine({ productId, action: 'reopen' }) }} /></Suspense> : null}
         {!fresh && !error && !sessionError ? <ListSkeleton loadingText={t('loading')} /> : null}
         {section === 'sessions' ? (fresh && sessions?.items.length ? <InventoryCheckSessionsList items={sessions.items} t={t} onOpen={item => { setSection('products'); onSelect({ branchId: String(item.branch_id), sessionId: item.id, creatorName: item.creator_name ?? null }) }} /> : null)
           : oldIssues ? <div className="min-w-0 divide-y" aria-label={t('issues')} data-inventory-check-old-issues>
@@ -1269,9 +1254,11 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
             : section === 'sessions' && access.canCheck ? <button type="button" className="btn-primary inline-flex min-h-10 items-center gap-1 px-3 text-xs" title={tr('inventory_check_count_tooltip', 'Count the products listed on this page')} onClick={() => setSection('products')}><Play className="h-4 w-4" aria-hidden="true" />{tr('inventory_check_start_page', 'Count')}</button> : null}
         </div> : null}
         {pagerNode('bottom')}
-        {detail && fresh ? <Suspense fallback={null}><InventoryCheckDetailFloat product={detail} observation={observations[String(detail.id)]} unavailable={unavailableIds.has(String(detail.id))} fields={access.fields} priceText={priceText} promotionRules={data?.promotionRules} exchangeRate={exchangeRate} t={t} onClose={() => setDetail(null)}
+        {detail && fresh ? <Suspense fallback={null}><InventoryCheckDetail product={detail} observation={observations[String(detail.id)]} unavailable={unavailableIds.has(String(detail.id))} fields={access.fields} priceText={access.fields.price ? priceText : undefined} promotionRules={data?.promotionRules} exchangeRate={exchangeRate} fmtUSD={fmtUSD} fmtKHR={fmtKHR} navigateTo={navigateTo} t={t} onClose={() => setDetail(null)}
           onFixStock={fixOpening ? () => openFixStock(fixOpening) : undefined}
+          onOpenRequest={offered && detail.check_pending === true && pendingSessionOf(detail) && detail.check_branch_id != null ? () => openRequest(String(detail.check_branch_id), String(pendingSessionOf(detail))) : undefined}
           onSales={offered && rights.can('sales', 'view') ? () => { queueReportsFocus(productSalesFocus(detail.name)); navigateTo('sales', hubAnchor('sales', 'reports')) } : undefined} /></Suspense> : null}
+        {costFor && access.fields.cost ? <Suspense fallback={null}><CostCalculationFloat productId={costFor.id} productName={costFor.name} onClose={() => setCostFor(null)} fmtUSD={value => fmtUSD(value)} fmtKHR={value => fmtKHR(value)} t={(key, fallback) => tr(key, fallback)} /></Suspense> : null}
         {historyPage !== null ? <Suspense fallback={null}><InventoryCheckHistoryFloat page={historyPage} history={history} error={historyError} onPage={setHistoryPage} onRetry={() => setHistoryReload(value => value + 1)} onClose={() => setHistoryPage(null)} t={t} /></Suspense> : null}
         {fixStock ? <Suspense fallback={null}><FastStockInModal
           branchOptions={branches.map(branch => ({ value: String(branch.id), label: branch.name }))} defaultBranchId={fixStock.branchId} initialMode="set" lockMode="set" initialHeader={{ branchId: String(fixStock.branchId) }}

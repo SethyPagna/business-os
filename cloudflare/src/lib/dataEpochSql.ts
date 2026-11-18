@@ -3,3 +3,6 @@
 // the rest of the epoch module.
 export const ROTATE_DATA_EPOCH_SQL = `INSERT INTO system_flags (key, value, updated_at) VALUES ('data_epoch', lower(hex(randomblob(16))), CURRENT_TIMESTAMP)
   ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+
+// The Inventory population token (migration 0317) is kept by triggers that stand down during a restore, so every rotation of the epoch gives it a new value too: a count cached before a restore or a reset is never read after it.
+export const ROTATE_POPULATION_TOKEN_SQL = 'UPDATE inventory_population_token SET stamp = lower(hex(randomblob(8))) WHERE id = 1'

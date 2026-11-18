@@ -21,7 +21,8 @@ assert.match(page, /problem\.code !== 'inventory_check_saved_refresh'\) return '
 assert.match(page, /return 'inventory_check_saved_refresh'/)
 const literalUses = page.split("tr('inventory_check_save_unknown'").length - 1 + page.split("? 'inventory_check_save_unknown' :").length - 1
 assert.equal(literalUses, 0, 'no site bypasses unknownSaveKey')
-assert.equal(page.split('unknownSaveKey(cause)').length - 1, 5, 'the five save-failure sites use it')
+assert.equal(page.split('unknownSaveKey(cause)').length - 1, 4, 'the four save-failure sites left on the page use it')
+assert.match(read('../src/components/inventory/inventoryCheckApprovalController.ts'), /deps\.unknownSaveKey\(cause\)/, 'the approval decisions, moved out of the page, use it too')
 
 // G6: showing its own message, the page claims the problem's presentation so the global banner (which asks hasLocalSyncProblemPresentation) stays away.
 assert.match(page, /claimSyncProblemPresentation\(\{ actorId: userIdentity\(user\), requestId: problem\.syncErrorId, problem: \{ errorId: problem\.syncErrorId, channel: problem\.syncErrorChannel, code: problem\.code \} \}\)/, 'the page claims the problem it shows')

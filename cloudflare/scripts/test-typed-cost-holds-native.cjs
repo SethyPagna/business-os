@@ -77,7 +77,7 @@ const real = new Set([
   'stockTransaction', 'stockMutationReceipt', 'productCostReview', 'productMergeCostPreview', 'productConflictActionGroups',
   'acquisitionCostAccess', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db',
   'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'reviewApprovalPermission', 'productDiscountGate',
-  'conflictControl', 'productDataGaps', 'renameCascade', 'schemaProbe', 'catalogCostRecompute', 'productBatches', 'productStockGuard',
+  'conflictControl', 'renameCascade', 'schemaProbe', 'catalogCostRecompute', 'productBatches', 'productStockGuard',
   'createFold', // the create-fold helper moved out of routes/products.ts (13 Oct 2026); an unloaded module would be a no-op
 ])
 const noop = new Proxy(function () {}, { get: () => noop, apply: () => undefined, construct: () => ({}) })
@@ -113,8 +113,7 @@ function load(relative) {
   if (cache.has(relative)) return cache.get(relative)
   const mod = { exports: {} }; cache.set(relative, mod.exports)
   const filename = path.join(src, relative)
-  const text = fs.readFileSync(filename, 'utf8')
-  new Function('require', 'module', 'exports', transpile(text, filename))(localRequireFor(relative), mod, mod.exports)
+  new Function('require', 'module', 'exports', transpile(fs.readFileSync(filename, 'utf8'), filename))(localRequireFor(relative), mod, mod.exports)
   cache.set(relative, mod.exports); return mod.exports
 }
 function loadFrontend(relative) {
@@ -131,7 +130,7 @@ const products = load('routes/products.ts').default
 const reviews = load('routes/reviewQueue.ts').default
 const context = { waitUntil: () => {}, passThroughOnException: () => {} }
 const costPermissions = JSON.stringify({ product_cost_edit: true, product_cost_view: true })
-const admin = { id: 1, username: 'admin', name: 'Admin', role_code: 'admin', tier: 'full', permissions: JSON.stringify({ products: true, ...JSON.parse(costPermissions) }) } // cost entry is administrator only (owner, 15 Nov 2026)
+const admin = { id: 1, username: 'admin', name: 'Admin', tier: 'full', permissions: JSON.stringify({ products: true, ...JSON.parse(costPermissions) }) }
 const requester = { id: 2, username: 'requester', name: 'Requester', tier: 'review', permissions: costPermissions }
 async function request(app, method, url, body, user = admin) {
   const response = await app.request(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, { ...env, TEST_USER: user }, context)
@@ -328,23 +327,12 @@ async function main() {
     assert.equal(cost(p.id), 9)
   })
 
-  await check('owner rule: a Review-tier requester holding the retired cost-entry grant is refused a cost edit (403, nothing queued)', async () => {
-    const p = seed()
-    const refused = await request(products, 'PUT', `/${p.id}`, { cost_price_usd: 9 }, requester)
-    assert.equal(refused.status, 403, JSON.stringify(refused))
-    assert.equal(refused.body.code, 'product_cost_edit_required')
-    assert.equal(cost(p.id), 4, 'the cost did not move')
-    assert.equal(raw.prepare('SELECT COUNT(*) n FROM pending_actions WHERE entity_id = ?').get(p.id).n, 0)
-  })
-
   await check('review queue: an approved cost edit records the entry (requester as actor); the cost holds past a sale', async () => {
     const p = seed()
-    // Queued before the ruling: the row is seeded with the frozen plan and an administrator approves it under the real rule.
-    const body = { cost_price_usd: 9 }
-    await load('lib/productWrites.ts').prepareProductMoneyWrite({ ...env, TEST_USER: admin }, body, p.id)
-    const queuedId = Number(raw.prepare("INSERT INTO pending_actions(section, action_type, entity_type, entity_id, payload_json, status, requested_by, requested_by_name) VALUES ('products', 'update', 'product', ?, ?, 'open', 2, 'requester')").run(p.id, JSON.stringify(body)).lastInsertRowid)
+    const queued = await request(products, 'PUT', `/${p.id}`, { cost_price_usd: 9 }, requester)
+    assert.equal(queued.status, 202, JSON.stringify(queued))
     assert.equal(cost(p.id), 4, 'not applied until approved')
-    const approved = await request(reviews, 'POST', `/${queuedId}/approve`, {})
+    const approved = await request(reviews, 'POST', `/${queued.body.pendingActionId}/approve`, {})
     assert.equal(approved.status, 200, JSON.stringify(approved))
     assert.equal(cost(p.id), 9)
     const [entry] = entries(p.id)
@@ -352,18 +340,6 @@ async function main() {
     assert.equal(entry.user_name, 'requester')
     sell(p)
     assert.equal(cost(p.id), 9)
-  })
-
-  await check('review queue: an old $0-cost confirmation by a non-administrator is refused at approval (the requester is re-checked under the real rule)', async () => {
-    const p = seed()
-    seedFixture(raw, () => raw.prepare('UPDATE products SET cost_price_usd = 0, cost_price_khr = 0 WHERE id = ?').run(p.id))
-    const payload = { applier: 'product.conflict_mark', product_id: p.id, mark: 'zero_cost_confirmed', set: true, expected: { cost_price_usd: 0, cost_price_khr: 0 } }
-    const pendingId = Number(raw.prepare("INSERT INTO pending_actions(section, action_type, entity_type, entity_id, payload_json, status, requested_by, requested_by_name) VALUES ('products', 'conflict_mark', 'product', ?, ?, 'open', 2, 'requester')").run(p.id, JSON.stringify(payload)).lastInsertRowid)
-    const refused = await request(reviews, 'POST', `/${pendingId}/approve`, {})
-    assert.equal(refused.status, 409, JSON.stringify(refused))
-    assert.equal(refused.body.code, 'request_permission_revoked', 'the requester holds both retired cost grants and is still refused')
-    assert.equal(raw.prepare('SELECT COUNT(*) n FROM product_conflict_marks WHERE product_id = ?').get(p.id).n, 0, 'no mark was written')
-    assert.equal(raw.prepare('SELECT status FROM pending_actions WHERE id = ?').get(pendingId).status, 'open', 'the request stays open')
   })
 
   await check('review queue: a plan-less historical queue row still records the entry; the cost holds past a sale', async () => {

@@ -53,6 +53,10 @@ export type PortalMenuProps = {
   // app's own light/dark mode via the normal `dark:` classes below -- this
   // only ever changes spacing/size, never a fixed color palette.
   compact?: boolean
+  // Absent by default, so every existing caller keeps its one-tap behaviour (a tap on a toolbar button elsewhere closes the menu AND presses the button). Called when a press OUTSIDE the menu dismisses it,
+  // before it closes: Inventory passes inventory/dismissClickSwallow.ts here so the click completing that press does not fall through to the row under the finger. The swallow itself lives in its own module so the
+  // storefront, which shares this component, never carries it.
+  onOutsidePress?: () => void
 }
 
 type ThreeDotPortalLabels = {
@@ -95,6 +99,7 @@ export default function PortalMenu({
   onOpenChange = null,
   compact = false,
   openOnHover = false,
+  onOutsidePress,
 }: PortalMenuProps) {
   const [open, setOpen] = useState(defaultOpen)
   const [position, setPosition] = useState<{ top: number; left: number; maxHeight?: number; maxWidth?: number; minWidth?: number }>({ top: 0, left: 0 })
@@ -232,7 +237,10 @@ export default function PortalMenu({
       // portal-menu content as "inside" so nested popovers can be used
       // without collapsing their parent.
       const insideNestedPortalMenu = target instanceof Element ? Boolean(target.closest('[data-portal-menu-content]')) : false
-      if (!insideMenu && !insideTrigger && !insideNestedPortalMenu) setOpen(false)
+      if (!insideMenu && !insideTrigger && !insideNestedPortalMenu) {
+        onOutsidePress?.()
+        setOpen(false)
+      }
     }
 
     const scheduleReposition = (event?: Event) => {
@@ -294,7 +302,7 @@ export default function PortalMenu({
         frameRef.current = 0
       }
     }
-  }, [open, reposition])
+  }, [open, reposition, onOutsidePress])
 
   const colorClassByType: Record<string, string> = {
     red: 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20',

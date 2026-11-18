@@ -1,19 +1,18 @@
 import type { Context, MiddlewareHandler } from 'hono'
 import { getMergedPermissions, isAdminControlUser, type PermissionUser } from './permissions'
 
-// Owner ruling, 15 Nov 2026: cost, profit, margin, stock value and removal-loss money is ADMIN ONLY, everywhere. The
-// "View product costs" / "Edit product costs" grants (product_cost_view, product_cost_edit) no longer give a non-admin
-// anything. Administrator-control actors hold both, even if a stored override is false.
+// Owner ruling, 17 Nov 2026 (reverses the 15 Nov admin-only rule): cost, profit, margin, stock value and removal-loss money
+// is admin only BY DEFAULT and follows an editable grant. "View product costs" / "Edit product costs"
+// (product_cost_view, product_cost_edit) are role- and user-level switches in the permission editor. Administrator-control
+// actors always hold both, even if a stored override is false. Cost and profit share ONE switch: selling price minus
+// profit reveals cost. Backups, restore and Drive sync are NOT governed by it (isAdminControlUser at their own gates).
 export function canViewAcquisitionCosts(user: PermissionUser): boolean {
-  return isAdminControlUser(user)
+  return holdsCostViewGrant(user)
 }
 export function canEditAcquisitionCosts(user: PermissionUser): boolean {
-  return isAdminControlUser(user)
+  return holdsCostEditGrant(user)
 }
 
-// The way back to per-account cost control, kept the way contacts_full_phone was kept when full phones became universal
-// (lib/phoneAccess.ts holdsFullPhoneGrant): UNUSED since 15 Nov 2026. To restore the grants, make the two functions above
-// return these. The role editor rows (permissionDefinitions.ts) are hidden, so restoring also means un-hiding them.
 export function holdsCostViewGrant(user: PermissionUser): boolean {
   return isAdminControlUser(user) || getMergedPermissions(user).product_cost_view === true
 }

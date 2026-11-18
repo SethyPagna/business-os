@@ -1,13 +1,14 @@
 'use strict'
-// Owner ruling, 15 Nov 2026: cost, profit, margin, stock value, removal loss and supplier loss/compensation are ADMIN ONLY, and the
-// "View product costs" / "Edit product costs" grants no longer give a non-admin any of it. This runs the WHOLE Worker (workerd + D1)
-// and asks each role for every cost-bearing read the Dashboard, the reports and Products offer:
+// Owner ruling, 17 Nov 2026 (reverses the 15 Nov admin-only rule): cost, profit, margin, stock value, removal loss and supplier
+// loss/compensation are admin only BY DEFAULT and follow the "View product costs" grant (product_cost_view), editable per role or user.
+// This runs the WHOLE Worker (workerd + D1) and asks each role for every cost-bearing read the Dashboard, the reports and Products offer:
 //   admin                                    control: receives the cost keys (so the scan can see them)
 //   manager (seed)                           none
 //   employee (seed)                          none, and may open the Dashboard (owner, 15 Nov 2026)
-//   employee + product_cost_view true        none: the grant is inert
-//   manager + product_cost_edit true         none: the grant is inert
-// A non-admin gets NO cost key at all: omitted, never zeroed. The role JSON is the real seed (lib/roleDefaults.ts).
+//   employee + product_cost_view true        cost AND profit, like an admin: one switch
+//   manager + product_cost_view true         cost AND profit
+//   manager + product_cost_edit true         none: editing does not imply viewing
+// A non-admin without the grant gets NO cost key at all: omitted, never zeroed. The role JSON is the real seed (lib/roleDefaults.ts).
 // Run (from cloudflare/scripts): node test-admin-only-cost-matrix-native.cjs
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -76,11 +77,13 @@ async function main() {
     const cookies = {
       manager: await h.addEmployee(910, 'matrix_manager', SEED.manager),
       employee: await h.addEmployee(911, 'matrix_employee', SEED.employee),
-      employeeViewGrant: await h.addEmployee(912, 'matrix_employee_view', { ...SEED.employee, product_cost_view: true }),
-      // This arm does not discriminate on the READ matrix: under the old rule Edit product costs alone never opened a cost read either
-      // (reads needed View product costs), so it is green against both rules. Cost ENTRY by a grant holder is refused in the cost-write
-      // cases (test-role-matrix-server-refusals-native, the stock-session, returns and products cost-entry tests).
+      // Edit alone never opens a cost READ (reads need View product costs), so this arm stays in the no-cost group under both rules.
       managerEditGrant: await h.addEmployee(913, 'matrix_manager_edit', { ...SEED.manager, product_cost_edit: true }),
+    }
+    // Owner, 17 Nov 2026: the View grant shows cost and profit to a non-admin, role seed unchanged otherwise.
+    const grantHolders = {
+      employeeViewGrant: await h.addEmployee(912, 'matrix_employee_view', { ...SEED.employee, product_cost_view: true }),
+      managerViewGrant: await h.addEmployee(915, 'matrix_manager_view', { ...SEED.manager, product_cost_view: true }),
     }
     const employeeCourierOff = await h.addEmployee(914, 'matrix_employee_courier_off', { ...SEED.employee, 'sales:view_courier_cost': false })
     const ROUTES = [
@@ -126,6 +129,23 @@ async function main() {
         })
       }
     }
+    for (const [who, cookie] of Object.entries(grantHolders)) {
+      for (const [name, url] of ROUTES) {
+        await check(`${who}: ${name} carries the cost keys, like an admin`, async () => {
+          const res = await read(cookie, url, `${who} ${name}`)
+          if (name === 'products list' || url.startsWith('/api/reports')) assert.ok(res.status === 200 || res.status === 403, `status ${res.status}`)
+          else assert.equal(res.status, 200, `${who}: ${res.status} ${JSON.stringify(res.body).slice(0, 160)}`)
+          if (res.status === 200) assert.ok(productCostKeys(res.body).length > 0, 'the grant holder receives the cost keys the admin receives')
+        })
+      }
+      await check(`${who}: cost and profit travel together on the analytics payload (one switch)`, async () => {
+        const body = (await read(cookie, `/api/analytics?${range}`, `${who} analytics`)).body
+        assert.equal(typeof body.totals.profit_usd, 'number', 'profit is visible with the cost grant')
+        assert.equal(typeof body.totals.cost_usd, 'number', 'cost is visible with the cost grant')
+        assert.equal(body.periodSupplierReturns.loss_usd, 5)
+        assert.equal((await read(cookie, `/api/dashboard?${range}`, `${who} summary`)).body.stock_value_usd > 0, true, 'stock value is cost money and follows the same grant')
+      })
+    }
     await check('the seeds store the courier permission as true (written, not left to the code default)', () => {
       assert.strictEqual(SEED.manager['sales:view_courier_cost'], true)
       assert.strictEqual(SEED.employee['sales:view_courier_cost'], true)
@@ -149,7 +169,7 @@ async function main() {
       assert.ok(!('profit_usd' in body.totals) && !('cost_usd' in body.totals), 'product cost and profit stay admin only')
     })
   } finally { await h.mf.dispose() }
-  console.log(failures.length ? `RED ${failures.length} failed` : 'GREEN admin-only cost matrix')
+  console.log(failures.length ? `RED ${failures.length} failed` : 'GREEN cost grant matrix')
   if (failures.length) process.exitCode = 1
 }
 main().catch((error) => { console.error(error); process.exit(1) })

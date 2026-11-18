@@ -80,7 +80,13 @@ check('page/action authority, explicit false and independent aggregate grants', 
   assert.equal(worker.getInventoryCheckAccess(actor).fields.stock, false)
   assert.equal(worker.getInventoryCheckAccess(actor).canCheck, false)
   assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: true, 'inventory_checks:view': false })).canView, false)
-  assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_show_cost: true, product_cost_view: true })).fields.cost, false, 'owner, 15 Nov 2026: cost is admin only and Inventory never shows it; the grant is inert')
+  // 18 Nov 2026 (composed A+B+C1): the editable View product costs grant alone decides cost; the retired inventory_check_show_cost switch is no longer read.
+  assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_show_cost: true, product_cost_view: true })).fields.cost, true, 'a non-admin holding View product costs and the cost field sees cost')
+  assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_show_cost: true })).fields.cost, false, 'the field switch alone is not the grant')
+  assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: true, product_cost_view: true })).fields.cost, true, 'the View product costs grant alone shows cost (composed A+B+C1)')
+  assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_show_cost: true, product_cost_edit: true })).fields.cost, false, 'Edit without View cannot read cost')
+  assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_show_cost: true, product_cost_view: true }, { product_cost_view: false })).fields.cost, false, "a user's own false beats the role's grant")
+  assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_show_cost: true, product_cost_view: 'true' })).fields.cost, false, 'only the literal true is a grant')
   assert.equal(worker.getInventoryCheckAccess({ ...user({ inventory_checks: true, inventory_check_show_cost: true }), role_code: 'admin' }).fields.cost, true, 'only an administrator reaches the cost field (owner, 15 Nov 2026)')
   assert.equal(worker.getInventoryCheckAccess({ ...user({ inventory_checks: true }), role_code: 'admin' }).fields.cost, true, 'an administrator bypasses the show-cost switch')
 })
@@ -137,5 +143,12 @@ check('allowlisted query contract cannot fall back to unknown derived sorting', 
   }
   assert.throws(() => worker.validateInventoryCheckQuery({}, worker.getInventoryCheckAccess(null)), error => error.status === 403 && error.code === 'inventory_check_view_required')
   assert.equal(worker.validateInventoryCheckQuery({ barcode: '123' }, access).barcode, '123')
+})
+check('checkedOn is the wired list\'s day filter only: every other caller of the validator refuses it (400 naming checkedOn), as before the day chips existed; the list opts in and keeps its strict calendar date', () => {
+  const access = worker.getInventoryCheckAccess(user({}, {}, 'admin'))
+  for (const simple of [false, true]) assert.throws(() => worker.validateInventoryCheckQuery({ checkedOn: '2026-11-12' }, access, simple), error => error.status === 400 && error.code === 'inventory_check_invalid_query' && error.parameter === 'checkedOn', `simple=${simple}`)
+  assert.equal(worker.validateInventoryCheckQuery({ checkedOn: '2026-11-12' }, access, true, { checkedOn: true }).checkedOn, '2026-11-12')
+  for (const bad of ['2026-02-30', '2026-1-5', 'today']) assert.throws(() => worker.validateInventoryCheckQuery({ checkedOn: bad }, access, true, { checkedOn: true }), error => error.status === 400 && error.parameter === 'checkedOn', bad)
+  assert.equal(worker.validateInventoryCheckQuery({ checkedOn: '' }, access, true, { checkedOn: true }).checkedOn, undefined, 'a blank day is no filter on the list')
 })
 console.log(`PASS ${checks} Inventory check access groups; 2700 Worker/frontend parity cells`)

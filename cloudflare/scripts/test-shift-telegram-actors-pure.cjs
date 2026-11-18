@@ -211,6 +211,7 @@ async function main() {
     '../lib/audit': { audit: async () => { throw new Error('shift audit must be in the D1 batch') } },
     '../lib/telegramLang': lang,
     '../lib/planTier': { getPlanLimits: () => ({ d1QueriesPerInvocation: 1000 }) },
+    '../lib/acquisitionCostAccess': { holdsCostViewGrant: () => true }, // figuresFor reaches it only for a reader canManageShifts already admitted (an administrator holds it)
     '../lib/telegram': {
       scheduleTelegramShiftReport: async () => 'unavailable', loadTelegramConfig: async () => ({}), sendTelegramShiftReport: async (_env, shiftId, nowMs, options) => {
         sends.push({ shiftId, options })

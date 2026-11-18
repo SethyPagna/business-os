@@ -29,6 +29,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRole
     portal_about: true,
     pos: true,
     products: true,
+    product_cost_view: false,
+    product_cost_edit: false,
     inventory: true,
     inventory_checks: true,
     inventory_check_show_price: true,
@@ -84,14 +86,14 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRole
     // action switched off (an override can only remove what the tier grants), so
     // View, Edit and Image stay on. Evening revision: the DEFAULT selling and
     // wholesale price is its own action, off here (they adjust a price per sale in
-    // the POS cart instead). Cost is admin-only (owner, 15 Nov 2026):
-    // product_cost_view / product_cost_edit are kept as the stored switch-back but grant a non-admin nothing now.
+    // the POS cart instead). Cost is admin-only by default (owner, 17 Nov 2026):
+    // product_cost_view / product_cost_edit are written false here and are an editable grant in the role editor.
     // Owner, 19 Oct 2026: the supplier is not product information an Employee edits either
     // (products:supplier off). Setting a supplier on a NEW product stays open to a role that can add.
     // No `inventory` key: an Employee never writes physical stock.
     // Owner, 15 Nov 2026: managers and employees may open the Dashboard (this reverses the 20 Oct 2026 rule that it is off
     // by default for an Employee). An Employee views it only: no dashboard_export. Cost, profit, margin, stock value and
-    // removal loss stay admin-only on it, whatever the grants say (lib/acquisitionCostAccess.ts).
+    // removal loss stay admin-only on it unless the product_cost_view grant is given (lib/acquisitionCostAccess.ts).
     dashboard: true,
     dashboard_export: false,
     products: true,

@@ -144,6 +144,9 @@ await browser.run('PASS Inventory page layout: Products, Sessions and an open se
     assert.ok(listBar.noRefresh && listBar.noCount, `${lang} ${width} list: there is no Refresh or Count (n) button (${JSON.stringify(listBar)})`)
     const listRowsFit = await browser.evaluate<boolean>(`Array.from(document.querySelectorAll('[data-inventory-check-row]')).every(row => row.scrollWidth <= row.clientWidth + 1)`)
     assert.ok(listRowsFit, `${lang} ${width} list: rows wrap inside their own box`)
+    // A "·" separator always sits on the line of the part it belongs to: wrapping must never leave it alone on a line (it is one unit with the part after it).
+    const lone = await browser.evaluate<string[]>(`Array.from(document.querySelectorAll('[data-inventory-check-row] span[aria-hidden="true"]')).filter(node => node.textContent === '·' && node.getBoundingClientRect().width > 0).flatMap(node => { const next = node.nextElementSibling, box = node.getBoundingClientRect(); if (!next) return ['no part after the separator']; const nextBox = next.getBoundingClientRect(), mid = nextBox.top + nextBox.height / 2; return mid >= box.top - 1 && mid <= box.bottom + 1 ? [] : [next.textContent.slice(0, 30) + ' @' + Math.round(nextBox.top - box.top)] })`)
+    assert.deepEqual(lone, [], `${lang} ${width} list: no separator is left alone on a line`)
     if (width >= 1024) {
       const listSheet = await browser.evaluate<{ pinned: boolean; shown: boolean; titles: string[] }>(`(() => {
         const header = document.querySelector('[data-inventory-check-sheet-header]')

@@ -19,7 +19,8 @@ export function getInventoryCheckAccess(user: PermissionUser): InventoryCheckAcc
   const fields = Object.fromEntries(INVENTORY_CHECK_FIELDS.map(field => {
     return [field, canView && (admin || permissions[`inventory_check_show_${field}`] === true)]
   })) as Record<InventoryCheckField, boolean>
-  fields.cost = fields.cost && canViewAcquisitionCosts(user)
+  // Cost has one switch (owner, 17 Nov): canViewAcquisitionCosts, admin by default and an editable grant once Slice A lands. The retired per-screen inventory_check_show_cost no longer gates it.
+  fields.cost = canView && canViewAcquisitionCosts(user)
   return {
     canView,
     canCheck: admin || canView && authority.can('inventory_checks', 'check'),

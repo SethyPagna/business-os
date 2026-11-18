@@ -77,13 +77,13 @@ const saleSensitive = { cost_usd: 7, cost_before_floor_usd: 7, cost_missing_snap
   money_precision_mode: 'canonical_v1', money_complete: false, money_unknown_cost_lines: 2, money_contributing_rows: 9 }
 
 for (const input of [totals, JSON.parse(JSON.stringify(totals))]) {
-  const employee = reports.gateTotals(input, false)
+  const employee = reports.gateTotals(input, false, false)
   assert.equal(employee.revenue_usd, 20)
   assert.equal(employee.recognized_delivery_usd, 3, 'customer-charged delivery remains ordinary report money')
   assert.equal(employee.pending_delivery_usd, 2)
   for (const key of sensitiveTotals) assert.equal(Object.hasOwn(employee, key), false, `${key} must be absent, not zero`)
 }
-const admin = reports.gateTotals(totals, true)
+const admin = reports.gateTotals(totals, true, true)
 for (const key of sensitiveTotals.filter((key) => key !== 'margin_pct')) {
   assert.equal(Object.hasOwn(admin, key), true, `admin retains ${key}`)
 }
@@ -95,7 +95,7 @@ assert.equal(Object.hasOwn(admin, 'margin_pct'), true)
 // question nobody asked -- the same absence-is-the-contract rule above.
 {
   const noLosses = { revenue_usd: 20, cost_usd: 5, profit_usd: 15 }
-  const adminNoLosses = reports.gateTotals(noLosses, true)
+  const adminNoLosses = reports.gateTotals(noLosses, true, true)
   for (const key of ['removal_loss_usd', 'removal_loss_qty', 'removal_loss_unvalued_rows',
     'revenue_after_losses_usd', 'profit_after_losses_usd']) {
     assert.equal(Object.hasOwn(adminNoLosses, key), false, `${key} stays absent when the kernel sent none`)
@@ -105,7 +105,7 @@ assert.equal(Object.hasOwn(admin, 'margin_pct'), true)
   const adminZero = reports.gateTotals({
     ...noLosses, removal_loss_usd: 0, removal_loss_qty: 0, removal_loss_unvalued_rows: 0,
     revenue_after_losses_usd: 20, profit_after_losses_usd: 15,
-  }, true)
+  }, true, true)
   assert.equal(adminZero.removal_loss_usd, 0)
   assert.equal(adminZero.profit_after_losses_usd, 15)
 }
@@ -153,9 +153,9 @@ for (const input of [productSensitive, JSON.parse(JSON.stringify(productSensitiv
   for (const key of Object.keys(productSensitive)) assert.equal(Object.hasOwn(employee, key), false, `product ${key} hidden`)
 }
 for (const input of [saleSensitive, JSON.parse(JSON.stringify(saleSensitive))]) {
-  const employee = reports.gateBusinessSummarySaleRow({ revenue_usd: 20, ...input }, false)
+  const employee = reports.gateBusinessSummarySaleRow({ revenue_usd: 20, ...input }, false, false)
   for (const key of Object.keys(saleSensitive)) assert.equal(Object.hasOwn(employee, key), false, `sale ${key} hidden`)
-  const adminSale = reports.gateBusinessSummarySaleRow({ revenue_usd: 20, ...input }, true)
+  const adminSale = reports.gateBusinessSummarySaleRow({ revenue_usd: 20, ...input }, true, true)
   for (const key of Object.keys(saleSensitive)) assert.equal(Object.hasOwn(adminSale, key), true, `admin sale retains ${key}`)
 }
 
@@ -190,8 +190,8 @@ assert.deepEqual(reports.gateCourierRow(courier, true), courier)
   const both = reports.gateTotals(totals, false, true, 2, true)
   for (const key of sensitiveTotals) assert.equal(Object.hasOwn(both, key), true, `cost grant plus courier permission retains ${key}`)
   assert.equal(Object.hasOwn(both, 'profit_excludes_delivery'), false, 'both grants read the full profit')
-  assert.deepEqual(both, reports.gateTotals(totals, true), 'both grants read what an administrator reads')
-  assert.deepEqual(reports.gateTotals(totals, false, false, 2, false), reports.gateTotals(totals, false), 'neither grant: the public row')
+  assert.deepEqual(both, reports.gateTotals(totals, true, true), 'both grants read what an administrator reads')
+  assert.deepEqual(reports.gateTotals(totals, false, false, 2, false), reports.gateTotals(totals, false, false), 'neither grant: the public row')
 
   const receipt = { revenue_usd: 20, ...saleSensitive }
   assert.equal(reports.gateBusinessSummarySaleRow(receipt, false, true, true).gross_profit_usd, 13, 'both grants read the receipt profit with the courier cost in it')
@@ -224,43 +224,54 @@ function assertNoSensitive(value, label) {
     const adminBody = pick(await request(pathname, true))
     assert.match(JSON.stringify(adminBody), /"cost_usd"|"actual_cost_usd"/, `${pathname} admin retains sensitive detail`)
   }
-  // Owner, 15 Nov 2026: product cost and profit are ADMIN ONLY, so the cost-view grant is inert. Owner, 16 Nov 2026: the courier's actual cost is a
-  // granted permission (sales:view_courier_cost, on for staff): a non-admin holding it reads the courier keys and still no product cost or profit.
-  // The administrator is the control (asserted in the loop above); the four cells cover every cost x courier combination.
+  // Owner, 17 Nov 2026: product cost and profit follow the product_cost_view grant (one switch for both), admin by default. Owner, 16 Nov 2026: the
+  // courier's actual cost is its own permission (sales:view_courier_cost, on for staff). The administrator is the control (asserted in the loop above);
+  // the four cells cover every cost x courier combination. With the cost grant but no courier permission, profit is restated on goods only.
   const everyGrant = [[false, false], [true, false], [false, true], [true, true]]
-  const productKeysOf = sensitiveTotals.filter((key) => !['delivery_actual_cost_usd', 'delivery_actual_cost_count', 'delivery_margin_usd', 'delivery_net_usd', 'recognized_delivery_cost_usd', 'pending_delivery_cost_usd'].includes(key))
+  const courierKeys = ['delivery_actual_cost_usd', 'delivery_actual_cost_count', 'delivery_margin_usd', 'delivery_net_usd', 'recognized_delivery_cost_usd', 'pending_delivery_cost_usd']
   for (const pathname of ['/business-summary/sales?pageSize=10', '/business-summary/sales?intent=export&pageSize=10']) {
     const denied = await request(pathname, false)
     for (const [cost, courier] of everyGrant) {
       const granted = await request(pathname, false, cost, courier)
       assert.equal(granted.is_admin, false, 'a cost grant does not grant administrator control')
       assert.equal(granted.rows.length, 1)
-      assertNoSensitive(granted.rows, `${pathname} cost=${cost} courier=${courier}`)
-      assert.equal(Object.hasOwn(granted.rows[0], 'profit_excludes_delivery'), false, 'no profit at all, so no flag')
       assert.equal(granted.rows[0].revenue_usd, denied.rows[0].revenue_usd, 'public revenue is unchanged by the grant')
+      const label = `${pathname} cost=${cost} courier=${courier}`
+      if (!cost) {
+        assertNoSensitive(granted.rows, label)
+        assert.equal(Object.hasOwn(granted.rows[0], 'profit_excludes_delivery'), false, label + ': no profit at all, so no flag')
+      } else {
+        for (const key of Object.keys(saleSensitive)) assert.equal(Object.hasOwn(granted.rows[0], key), true, label + ': the cost grant retains ' + key)
+        // AL finding L4 (13 Oct 2026): a receipt's gross profit carries its courier cost (fee - courier), so a cost viewer without the courier
+        // permission gets the goods profit -- net revenue 21 less cost 7 = 14, not the 13 that included delivery.
+        assert.equal(granted.rows[0].gross_profit_usd, courier ? 13 : 14, label + ': profit is the full receipt profit only with the courier permission')
+        assert.equal(Object.hasOwn(granted.rows[0], 'profit_excludes_delivery'), !courier, label + ': goods-only profit says so')
+      }
       if (pathname.includes('intent=export')) {
         const text = JSON.stringify(granted.totals)
-        for (const key of [...productKeysOf, 'cost_usd', 'profit_usd']) assert.equal(text.includes('"' + key + '"'), false, 'export totals never carry ' + key + ' for a grant holder')
-        assert.equal(Object.hasOwn(granted.totals, 'delivery_actual_cost_usd'), courier, 'export totals carry the courier cost exactly when the courier permission is held (cost=' + cost + ')')
+        for (const key of ['cost_usd', 'profit_usd']) assert.equal(text.includes('"' + key + '"'), cost, label + ': export totals carry ' + key + ' exactly when the cost grant is held')
+        for (const key of courierKeys) assert.equal(Object.hasOwn(granted.totals, key), courier, label + ': export totals carry ' + key + ' exactly when the courier permission is held')
       }
     }
     assert.equal((await request(pathname, true)).rows[0].gross_profit_usd, 13, `${pathname}: the administrator keeps the full receipt profit`)
     if (pathname.includes('intent=export')) {
       assert.match((await request(pathname, true)).export_token, /^[a-f0-9]{64}$/)
       assert.notEqual((await request(pathname, true)).export_token, denied.export_token, 'actual export tokens bind the visible cost authority')
+      assert.notEqual((await request(pathname, false, true, true)).export_token, denied.export_token, 'the token of a cost-grant holder binds the cost authority too')
       assert.equal((await request(pathname, true)).totals.cost_usd, 0.125, 'authorized export totals carry the 4-place sum of the rows')
     }
   }
-  const courierKeys = ['delivery_actual_cost_usd', 'delivery_margin_usd', 'delivery_net_usd', 'recognized_delivery_cost_usd', 'pending_delivery_cost_usd']
   for (const [pathname, pick] of [['/overview', (body) => body.sales.totals], ['/periods?granularity=day', (body) => body.rows[0]],
     ['/grouped?by=branch', (body) => body.rows[0]]]) {
     for (const [cost, courier] of everyGrant) {
       const seen = pick(await request(pathname, false, cost, courier))
-      for (const key of ['cost_usd', 'profit_usd', 'margin_pct', 'removal_loss_usd', 'profit_excludes_delivery']) {
-        assert.equal(Object.hasOwn(seen, key), false, `${pathname} cost=${cost} courier=${courier}: a grant holder never receives ${key}`)
+      const label = `${pathname} cost=${cost} courier=${courier}`
+      for (const key of ['cost_usd', 'profit_usd', 'margin_pct', 'removal_loss_usd']) {
+        assert.equal(Object.hasOwn(seen, key), cost, `${label}: ${key} follows the cost grant alone`)
       }
+      assert.equal(Object.hasOwn(seen, 'profit_excludes_delivery'), cost && !courier, `${label}: goods-only profit is flagged exactly for a cost viewer without the courier permission`)
       for (const key of courierKeys) {
-        assert.equal(Object.hasOwn(seen, key), courier, `${pathname} cost=${cost} courier=${courier}: ${key} follows the courier permission alone`)
+        assert.equal(Object.hasOwn(seen, key), courier, `${label}: ${key} follows the courier permission alone`)
       }
     }
     const adminSeen = pick(await request(pathname, true))
@@ -274,7 +285,7 @@ function assertNoSensitive(value, label) {
     }
     assert.equal(Object.hasOwn(rows(await request(pathname, true))[0], 'actual_cost_usd'), true, `${pathname}: the administrator does`)
   }
-  console.log('PASS product cost and profit are admin only on every report (the cost grant is inert); the courier cost follows its own permission (16 Nov 2026)')
+  console.log('PASS product cost and profit follow the cost grant on every report (cost and profit together); the courier cost follows its own permission')
   console.log('PASS mounted overview/day/group/export employee and admin payload parity')
   console.log('PASS report totals/day/group/export gates hide actual and derived delivery costs for employees and retain them for admins')
 })().catch((error) => { console.error(error); process.exitCode = 1 })
@@ -286,3 +297,6 @@ assert.match(source, /getSalesGroupedReport[\s\S]*\.map\(\(r\) => gateTotals/)
 assert.match(source, /totals = gateTotals\(report\.totals/)
 assert.match(source, /totals = gateProductRow\(report\.totals/)
 assert.match(source, /getDeliveryContactTotals[\s\S]*\.map\(\(row\) => gateCourierRow/)
+// L3 (17 Nov 2026): no gate may default the cost flag to "is an administrator"; every caller passes the helper's answer (typecheck proves it).
+assert.doesNotMatch(source, /canViewCosts = isAdmin/, 'reports.ts gates take the cost flag from the caller')
+assert.doesNotMatch(fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sales.ts'), 'utf8'), /canViewCosts\s*=\s*isAdmin/, 'sales.ts gateSalesReportMoney takes the cost flag from the caller')

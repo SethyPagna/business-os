@@ -20,8 +20,8 @@ const harnessEnd = harnessText.indexOf(';(async () => {')
 assert.ok(harnessEnd > 0, 'the money-write-policy harness moved')
 const harnessModule = { exports: {} }
 new Function('require', '__dirname', 'module', `${harnessText.slice(0, harnessEnd)}
-module.exports = { products, reviews, writer, request, row, raw, admin, requester, seedFixture, load, seedQueued }`)(createRequire(harnessPath), __dirname, harnessModule)
-const { products, reviews, writer, request, row, raw, admin, requester, seedFixture, load, seedQueued } = harnessModule.exports
+module.exports = { products, reviews, writer, request, row, raw, admin, requester, seedFixture, load }`)(createRequire(harnessPath), __dirname, harnessModule)
+const { products, reviews, writer, request, row, raw, admin, requester, seedFixture, load } = harnessModule.exports
 const costs = load('lib/catalogCostRecompute.ts')
 
 let passed = 0
@@ -108,21 +108,14 @@ async function main() {
     assert.equal(after.purchase_price_usd, after.cost_price_usd, 'and the twin with it')
   })
 
-  await check('owner rule: a Review-tier requester holding the retired cost-entry grant is refused a cost edit (403, nothing queued)', async () => {
-    const refused = seed('Rule refused', 5, 5)
-    const answer = await request(products, 'PUT', `/${refused}`, { cost_price_usd: 3, purchase_price_usd: 99 }, requester)
-    assert.equal(answer.status, 403, JSON.stringify(answer))
-    assert.equal(answer.body.code, 'product_cost_edit_required')
-    assert.deepEqual(pair(refused).slice(0, 2), [5, 5], 'the cost did not move')
-  })
-
   await check('review queue: an approved edit replays through the same writer, twin included', async () => {
     const queued = seed('Review edit', 5, 5)
-    // Queued before the ruling (a non-administrator can no longer queue a cost): seeded with its frozen plan, approved by an administrator.
-    const pending = await seedQueued('update', queued, { cost_price_usd: 3, purchase_price_usd: 99 })
+    const pending = await request(products, 'PUT', `/${queued}`, { cost_price_usd: 3, purchase_price_usd: 99 }, requester)
+    assert.equal(pending.status, 202, JSON.stringify(pending))
     assert.equal((await request(reviews, 'POST', `/${pending.body.pendingActionId}/approve`, {})).status, 200)
     assert.deepEqual(pair(queued).slice(0, 2), [3, 3])
-    const created = await seedQueued('create', null, { name: 'Review create', cost_price_usd: 2.5 })
+    const created = await request(products, 'POST', '/', { name: 'Review create', cost_price_usd: 2.5 }, requester)
+    assert.equal(created.status, 202)
     assert.equal((await request(reviews, 'POST', `/${created.body.pendingActionId}/approve`, {})).status, 200)
     const made = raw.prepare("SELECT cost_price_usd, purchase_price_usd FROM products WHERE name='Review create'").get()
     assert.deepEqual({ ...made }, { cost_price_usd: 2.5, purchase_price_usd: 2.5 })

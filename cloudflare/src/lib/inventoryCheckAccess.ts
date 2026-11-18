@@ -21,7 +21,8 @@ export function getInventoryCheckAccess(user: PermissionUser): InventoryCheckAcc
   const fields = Object.fromEntries(INVENTORY_CHECK_FIELDS.map(field => {
     return [field, canView && (admin || permissions[`inventory_check_show_${field}`] === true)]
   })) as Record<InventoryCheckField, boolean>
-  fields.cost = fields.cost && canViewAcquisitionCosts(user)
+  // One switch for cost everywhere: the shared acquisition-cost rule (the retired inventory_check_show_cost field is no longer consulted).
+  fields.cost = canView && canViewAcquisitionCosts(user)
   return {
     canView,
     canCheck: admin || canView && getActionTier(user, 'inventory_checks', 'check') === 'full',
@@ -90,19 +91,30 @@ const QUERY_ALIASES: Record<string, string> = {
 const QUERY_KEYS = new Set(['query', 'searchFields', 'branchId', 'category', 'brand', 'barcode', 'stockState', 'groupState', 'initial', 'page', 'pageSize', 'startDate', 'endDate', 'createdFrom', 'createdTo', 'sortBy', 'sortDirection'])
 const SORT_FIELDS: Record<string, InventoryCheckField | null> = { name: null, stock: 'stock', qty_sold: 'sales', customer_count: 'customers', received_date: 'received', price: 'price', cost: 'cost' }
 // ic_simple: the owner's closed list (1 Nov 2026). Dates, sales sorts, price and cost sorts, and the code-only filters have no screen and are refused (400, never a 403 that hints they exist).
+// checkedOn (the day filter of the wired list) is NOT one of them: a caller that cannot honour it (the older products list, the scope of a new session) answers 400 for it, as it always did, never accepts it and ignores it.
 const SIMPLE_QUERY_KEYS = new Set(['query', 'branchId', 'category', 'brand', 'stockState', 'checkState', 'page', 'pageSize', 'sortBy', 'sortDirection', 'summary', 'groupBy'])
 const SIMPLE_SORT_FIELDS: Record<string, InventoryCheckField | null> = { name: null, stock: 'stock' }
 export const CHECK_STATES = ['not_checked', 'in_check', 'ok', 'issue'] as const
 export type InventoryCheckState = typeof CHECK_STATES[number]
 
-export function validateInventoryCheckQuery(query: Record<string, unknown>, access: InventoryCheckAccess, simple = false): Record<string, string> {
+/** A real calendar date written YYYY-MM-DD (strict: no other spelling, no day the calendar does not have, no year before 1000). */
+export function isCalendarDay(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!match) return false
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])]
+  if (year < 1000) return false
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+}
+
+export function validateInventoryCheckQuery(query: Record<string, unknown>, access: InventoryCheckAccess, simple = false, options: { checkedOn?: boolean } = {}): Record<string, string> {
   if (!access.canView) throw new InventoryCheckQueryError(403, 'inventory_check_view_required', '')
   const result: Record<string, string> = {}
   const invalid = (parameter: string): never => { throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', parameter) }
   const requireField = (field: InventoryCheckField, parameter: string): void => {
     if (!access.fields[field]) throw new InventoryCheckQueryError(403, 'inventory_check_field_hidden', parameter)
   }
-  const keys = simple ? SIMPLE_QUERY_KEYS : QUERY_KEYS, sorts = simple ? SIMPLE_SORT_FIELDS : SORT_FIELDS
+  const keys = simple ? (options.checkedOn ? new Set([...SIMPLE_QUERY_KEYS, 'checkedOn']) : SIMPLE_QUERY_KEYS) : QUERY_KEYS, sorts = simple ? SIMPLE_SORT_FIELDS : SORT_FIELDS
   for (const [rawKey, rawValue] of Object.entries(query)) {
     const key = QUERY_ALIASES[rawKey] || rawKey
     if (!keys.has(key)) invalid(rawKey)
@@ -135,6 +147,7 @@ export function validateInventoryCheckQuery(query: Record<string, unknown>, acce
   }
   if (result.checkState && !(CHECK_STATES as readonly string[]).includes(result.checkState)) invalid('checkState')
   if (result.summary && !['0', '1'].includes(result.summary)) invalid('summary')
+  if (result.checkedOn && !isCalendarDay(result.checkedOn)) invalid('checkedOn')
   if (result.sortDirection) {
     result.sortDirection = result.sortDirection.toLowerCase()
     if (!['asc', 'desc'].includes(result.sortDirection)) invalid('sortDirection')

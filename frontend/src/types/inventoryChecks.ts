@@ -29,9 +29,21 @@ export type InventoryCheckProduct = {
   discount_badge_color?: string | null
   discount_starts_at?: string | null
   discount_ends_at?: string | null
+  /** ic_wired rows, only when the server sent cost to this viewer (admin by default; see inventoryPriceFacts.ts COST_KEYS). Never present for anybody else. */
+  cost_price_usd?: number | string | null
+  cost_price_khr?: number | string | null
+  purchase_price_usd?: number | string | null
+  purchase_price_khr?: number | string | null
+  cost_needs_review?: boolean | number | null
+  cost_review_key?: string | null
+  /** ic_wired rows, only for a viewer with the stock grant: the product's own thresholds, which Products' stock badge judges it on (see inventoryStockFacts.ts). */
+  low_stock_threshold?: number | string | null
+  out_of_stock_threshold?: number | string | null
   latest_received_at?: string | null
   /** Earliest expiry among lots still holding stock; sent only while received dates are visible. */
   next_expiry_date?: string | null
+  /** The product's own "expires soon" window in days; sent with the received facts, so only while received dates are visible. */
+  expiry_alert_days?: number | string | null
   /** The latest check of this product in the chosen branch scope (ic_simple list rows only). Counts and names arrive only for viewers who may see them. */
   check_status?: InventoryCheckListStatus
   /** Grouped list: the group this product's family is in (`d:YYYY-MM-DD`, `never`, `c:<category>`, `none`). */
@@ -44,6 +56,8 @@ export type InventoryCheckProduct = {
   check_branch_id?: number | null
   /** This count differs from stock and waits for an administrator's approval (ic_fix_stock; sent only to a viewer who may see stock). */
   check_pending?: boolean
+  /** ic_wired rows: the session that holds the waiting request (may differ from check_session_id). */
+  pending_session_id?: string
   /** ic_wired rows: computed on the client from the shared row and the overlay, never read. difference = counted - now; set_to = the figure a Set would write; last_change_at = the last recorded movement. */
   check_difference?: number | null
   check_set_to?: number | null

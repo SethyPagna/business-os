@@ -817,7 +817,14 @@ async function loadImageOnlyFacets(
 // One extra query uses migration 0010's indexed, trigger-maintained
 // lower(trim(name)) key. The IN-list is bounded to this page's distinct
 // names rather than issuing N queries.
-async function expandSearchResultsToNameSiblings(env: Env, items: Array<Record<string, unknown>>): Promise<Array<Record<string, unknown>>> {
+// Inside an Inventory Check state the siblings pulled in must meet the list's own restriction (restrictIdsJson / excludeIdsJson), or a checked row shows under Not checked.
+function siblingCheck(check: { restrictIdsJson?: string; excludeIdsJson?: string }): { sql: string; params: Record<string, unknown> } | undefined {
+  const keep = check.restrictIdsJson, drop = check.excludeIdsJson
+  if (!keep && !drop) return undefined
+  return { sql: ` AND ${checkTermsOf(check).join(' AND ')}`, params: { ...(keep ? { icRestrictIds: keep } : {}), ...(drop ? { icExcludeIds: drop } : {}) } }
+}
+
+async function expandSearchResultsToNameSiblings(env: Env, items: Array<Record<string, unknown>>, check: { restrictIdsJson?: string; excludeIdsJson?: string } = {}): Promise<Array<Record<string, unknown>>> {
   if (!items.length) return items
   const seenIds = new Set(items.map((p) => Number(p.id)).filter((id) => Number.isFinite(id) && id > 0))
   // Keep the existing trim + internal-whitespace collapse + lowercase input
@@ -837,7 +844,8 @@ async function expandSearchResultsToNameSiblings(env: Env, items: Array<Record<s
   // bound-parameter budget -- one more and this is the same crash
   // attachBranchStock hit. Chunked rather than capped: dropping names
   // would silently hide the siblings this whole function exists to find.
-  const siblingRows = await selectInChunks([...namesByKey.keys()], 0, (chunk) => {
+  const restricted = siblingCheck(check)
+  const siblingRows = await selectInChunks([...namesByKey.keys()], restricted ? Object.keys(restricted.params).length : 0, (chunk) => {
     const { sql, params } = buildInClause('name', chunk)
     return db.prepare(`
       SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description,
@@ -856,8 +864,8 @@ async function expandSearchResultsToNameSiblings(env: Env, items: Array<Record<s
            COALESCE(p.auto_merged_count, 0) AS auto_merged_count
       FROM products p INDEXED BY idx_products_name_key_pg
       WHERE ${catalogProductSql()}
-        AND p.name_key IN (${sql})
-    `).all<Record<string, unknown>>(params)
+        AND p.name_key IN (${sql})${restricted?.sql ?? ''}
+    `).all<Record<string, unknown>>({ ...params, ...(restricted?.params ?? {}) })
   })
 
   const extras = (Array.isArray(siblingRows) ? siblingRows : []).filter((row) => {
@@ -1085,7 +1093,9 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
       : loadActivePromotionRules(db),
   ])
   const filters = buildSearchFilters(query, lowStockConfig, options)
-  const { where, joins, params, matchRankSql, rankCteSql, matchTierSql, hasSearchTerm, familyMemberWhereSql, rankedIdDriver } = filters
+  const { where, joins, params, matchRankSql, rankCteSql, matchTierSql, hasSearchTerm, familyMemberWhereSql, rankedIdDriver: searchDriver } = filters
+  const checkTerms = checkTermsOf(options)
+  const rankedIdDriver = searchDriver && checkTerms.length ? { ...searchDriver, csvMemberWhereSql: withCheckTerms(searchDriver.csvMemberWhereSql, checkTerms) } : searchDriver
   // A grouped read orders by the grouping alone (no promotions, no relevance), so the check lookup's organization and the grouping's SQL join the statement here.
   const grouped = options.grouping ? groupingPlan(options.grouping.by, Object.hasOwn(params, 'branchId'), 'p') : undefined
   if (options.grouping) params.checkOrg = options.grouping.checkOrg
@@ -1186,7 +1196,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     // its sibling variants vanished from the response" bug. Plain
     // browsing (category/brand/branch/stock filters, no typed search)
     // keeps the prior per-row-filtered behavior; nothing reported there.
-    familyMemberBaseWhereSql: hasSearchTerm ? (familyMemberWhereSql || `${catalogProductSql()}`) : undefined,
+    familyMemberBaseWhereSql: hasSearchTerm ? withCheckTerms(familyMemberWhereSql || `${catalogProductSql()}`, checkTerms) : undefined,
     // One ranking pass and a keyed fetch of the page's rows (see seekPage), not three walks of the catalogue.
     seekPage: seekPageRead,
     // products_parent_seek: the seek page looks a family's child rows up by an explicit index seek (same rows; see familyPagination.pageCandidatesSql).
@@ -1211,7 +1221,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   // parent_id half above. Deliberately runs BEFORE attachBranchStock/
   // attachImageGallery so the newly-pulled-in sibling rows get real
   // branch_stock/image_gallery data too, not left without it.
-  const expandedItems = hasSearchTerm ? inheritGroupKeys(await expandSearchResultsToNameSiblings(env, items as Array<Record<string, unknown>>)) : items
+  const expandedItems = hasSearchTerm ? inheritGroupKeys(await expandSearchResultsToNameSiblings(env, items as Array<Record<string, unknown>>, options)) : items
 
   // attachBranchStock, attachImageGallery and attachBatchCounts each read
   // off the same id list independently -- none needs another's output -- so
@@ -1291,6 +1301,14 @@ const filterJoinSql = (f: ReturnType<typeof buildSearchFilters>) => joinsReadBy(
 // with no stock filter actively selected -- fixed client-side; an empty
 // stockState here means no stock-based filtering at all, same as with no
 // branch selected.
+
+// The Inventory Check restriction of a list as SQL terms over the product alias p (restrictIdsJson / excludeIdsJson: server-only, see ProductSearchOptions). A header row (is_group) is the family's title, never
+// a product to count, so every check list (Not checked, Checked OK, Issues, Pending, a day) leaves it out, as the chips do. The list's own rows and the family members and name siblings that a typed search re-adds meet the SAME terms.
+const checkTermsOf = (options: { restrictIdsJson?: string; excludeIdsJson?: string }): string[] => [
+  ...(options.restrictIdsJson !== undefined ? ['p.id IN (SELECT value FROM json_each(@icRestrictIds))', 'COALESCE(p.is_group, 0) = 0'] : []),
+  ...(options.excludeIdsJson !== undefined ? ['p.id NOT IN (SELECT value FROM json_each(@icExcludeIds))', 'COALESCE(p.is_group, 0) = 0'] : []),
+]
+const withCheckTerms = (sql: string, terms: readonly string[]): string => (terms.length ? `${sql} AND ${terms.join(' AND ')}` : sql)
 
 function buildSearchFilters(query: Record<string, string>, lowStock: LowStockConfig, options: ProductSearchOptions = {}) {
   const where: string[] = [`${catalogProductSql()}`]
@@ -1487,8 +1505,9 @@ function buildSearchFilters(query: Record<string, string>, lowStock: LowStockCon
   }
 
   if (searchWhereClause) where.push(searchWhereClause)
-  if (options.restrictIdsJson !== undefined) { params.icRestrictIds = options.restrictIdsJson; where.push('p.id IN (SELECT value FROM json_each(@icRestrictIds))') }
-  if (options.excludeIdsJson !== undefined) { params.icExcludeIds = options.excludeIdsJson; where.push('p.id NOT IN (SELECT value FROM json_each(@icExcludeIds))') }
+  if (options.restrictIdsJson !== undefined) params.icRestrictIds = options.restrictIdsJson
+  if (options.excludeIdsJson !== undefined) params.icExcludeIds = options.excludeIdsJson
+  where.push(...checkTermsOf(options))
 
   return { where, joins, params, stockExpr, matchRankSql, rankCteSql, matchTierSql, titleOnly, hasSearchTerm, familyMemberWhereSql, rankedIdDriver: searchQuery.rankedIdDriver, candidates: searchQuery.candidates, searchWhereClause }
 }
@@ -2474,7 +2493,7 @@ app.post('/bulk-price-adjust', async (c) => {
   if (!Number.isFinite(amount) || amount <= 0) return c.json({ error: 'Amount must be a positive number' }, 400)
   const fields = Array.isArray(body.fields) ? [...new Set(body.fields.filter((f) => BULK_PRICE_FIELDS.has(f)))].sort() : []
   if (!canEditAcquisitionCosts(user) && fields.some(field => field.startsWith('cost_price_'))) {
-    return c.json({ error: 'Only an administrator can change catalog costs.', code: 'product_cost_edit_required' }, 403)
+    return c.json({ error: 'Changing catalog costs needs Edit product costs.', code: 'product_cost_edit_required' }, 403)
   }
   if (!fields.length) return c.json({ error: 'Pick at least one price field to adjust' }, 400)
   const skipZero = Boolean(body.skip_zero)
@@ -2643,7 +2662,7 @@ app.post('/', async (c) => {
   const statusRefusal = productStatusInputRefusal(c, body)
   if (statusRefusal) return statusRefusal
   if (hasCatalogCostWrite(body, user)) {
-    return c.json({ error: 'Only an administrator can set catalog costs.', code: 'product_cost_edit_required' }, 403)
+    return c.json({ error: 'Setting catalog costs needs Edit product costs.', code: 'product_cost_edit_required' }, 403)
   }
   // OPUS-H-1: the discount block is stored exactly as the price gate below compares it (lib/productDiscountGate.ts).
   const invalidDiscount = normalizeProductDiscountBody(body)
@@ -2947,7 +2966,7 @@ app.put('/:id', async (c) => {
   const statusRefusal = productStatusInputRefusal(c, body)
   if (statusRefusal) return statusRefusal
   if (hasCatalogCostWrite(body, user)) {
-    return c.json({ error: 'Only an administrator can change catalog costs. Omit cost fields when editing other product details.', code: 'product_cost_edit_required' }, 403)
+    return c.json({ error: 'Changing catalog costs needs Edit product costs. Omit cost fields when editing other product details.', code: 'product_cost_edit_required' }, 403)
   }
   const id = c.req.param('id')
   // Image-only restricted role: normally blocked by the tier==='none' check
@@ -3576,7 +3595,7 @@ app.post('/variant', async (c) => {
   const statusRefusal = productStatusInputRefusal(c, body)
   if (statusRefusal) return statusRefusal
   if (hasCatalogCostWrite(body, user)) {
-    return c.json({ error: 'Only an administrator can set catalog costs.', code: 'product_cost_edit_required' }, 403)
+    return c.json({ error: 'Setting catalog costs needs Edit product costs.', code: 'product_cost_edit_required' }, 403)
   }
   const invalidDiscount = normalizeProductDiscountBody(body)
   if (invalidDiscount) return c.json(invalidDiscount, 400)
@@ -10329,7 +10348,7 @@ app.post('/possible-duplicates/merge', async (c) => {
   if (body.cost_price_usd !== undefined || body.cost_price_khr !== undefined) {
     if (!keepMode) return c.json({ success: false, code: 'invalid_merge_cost', error: 'A chosen cost is only accepted by the Resolve merge.' }, 400)
     if (!canEditAcquisitionCosts(user)) {
-      return c.json({ success: false, code: 'cost_permission_required', error: 'Only an administrator can change the cost.' }, 403)
+      return c.json({ success: false, code: 'cost_permission_required', error: 'Changing the cost needs Edit product costs.' }, 403)
     }
     const chosenMoney = (value: unknown): number | null => {
       if (value === null) return null

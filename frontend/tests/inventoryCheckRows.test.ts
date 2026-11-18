@@ -100,10 +100,20 @@ try {
       assert.equal(hints(402).length + hints(401).length + hints(403).length, 0, 'no row draws it, not even one the older list still marks stock_consistent: false')
       const badge = (id: number) => s.find(node => node.getAttribute('data-expiry') !== null && row(s, id).contains(node), `expiry of ${id}`)
       assert.deepEqual([402, 403, 404].map(id => badge(id).getAttribute('data-expiry')), ['expired', 'soon', 'ok'])
-      assert.equal(badge(402).textContent, `${pack.inventory_check_expired} ${late.slice(5, 7)}/${late.slice(0, 4)}`)
-      assert.equal(badge(403).textContent, `${pack.inventory_check_expires_soon} ${soon.slice(5, 7)}/${soon.slice(0, 4)}`)
+      assert.equal(badge(402).textContent, `${pack.expired} ${late.slice(5, 7)}/${late.slice(0, 4)}`)
+      assert.equal(badge(403).textContent, `${pack.expiring_soon} ${soon.slice(5, 7)}/${soon.slice(0, 4)}`)
       assert.equal(badge(404).textContent, `${pack.expiry} 03/2099`)
       assert.equal(s.findAll(node => node.getAttribute('data-expiry') !== null && row(s, 401).contains(node)).length, 0, 'no expiry date, no badge')
+      await s.unmount()
+    }],
+    ['the expiry badge uses the OWN alert window of the product (expiry_alert_days), exactly as the detail modal and POS do', async () => {
+      const s = await mount({ canCheck: false, products: [
+        { id: 411, name: 'Short window', quantity: 3, next_expiry_date: offsetDate(20), expiry_alert_days: 7 },
+        { id: 412, name: 'Long window', quantity: 3, next_expiry_date: offsetDate(45), expiry_alert_days: 60 },
+        { id: 413, name: 'No window sent', quantity: 3, next_expiry_date: offsetDate(20) },
+      ] })
+      const tone = (id: number) => s.find(node => node.getAttribute('data-expiry') !== null && row(s, id).contains(node), `expiry of ${id}`).getAttribute('data-expiry')
+      assert.deepEqual([411, 412, 413].map(tone), ['ok', 'soon', 'soon'])
       await s.unmount()
     }],
     ['the Count input exists only for someone who can check and see stock', async () => {
@@ -367,6 +377,17 @@ try {
   assert.deepEqual(calls.at(-1), { productId: 11, patch: { state: 'unstarted', counted_quantity: null, reason: null }, revision: 3 })
   await surface.click(surface.button('Synthetic small variant', row(surface, 11)))
   assert.deepEqual(opened, [11], 'details use the real variant identity')
+  // The whole row opens the detail (owner, 17 Nov), except on its controls; the row is a tab stop and Enter on it opens too.
+  opened.length = 0
+  await surface.click(surface.find(node => node.getAttribute('data-inventory-check-main') !== null && row(surface, 11).contains(node), 'main line of row 11'))
+  assert.deepEqual(opened, [11], 'a click on the empty part of the row opens it')
+  const savesBefore = calls.length
+  await surface.click(surface.button('Clear check', row(surface, 11)))
+  assert.deepEqual(opened, [11], 'a click on a check button belongs to the button, not the row')
+  assert.equal(calls.length, savesBefore + 1)
+  assert.equal(propsOf(row(surface, 11)).tabIndex, 0, 'the row is focusable')
+  await surface.call(row(surface, 11), 'onKeyDown', [{ key: 'Enter', preventDefault() {}, nativeEvent: {}, currentTarget: row(surface, 11), target: row(surface, 11) }])
+  assert.deepEqual(opened, [11, 11], 'Enter on the row opens it')
   await surface.unmount()
 
   const issue = { product_id: 12, state: 'issue', counted_quantity: null, reason: 'Old reason', revision: 2 } satisfies InventoryCheckObservation

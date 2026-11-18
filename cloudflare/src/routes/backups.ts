@@ -2,9 +2,8 @@ import { Hono } from 'hono'
 import type { Env } from '../index'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, auditOrThrow } from '../lib/audit'
-import { hasPermission } from '../lib/permissions'
+import { hasPermission, isAdminControlUser } from '../lib/permissions'
 import { getPlanLimits } from '../lib/planTier'
-import { canViewAcquisitionCosts, canEditAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { denyUnlessCurrentPassword, denyUnlessDefaultAdmin } from '../lib/destructiveStepUp'
 import {
   CLOUDFLARE_BACKUP_KEEP,
@@ -125,9 +124,9 @@ app.post('/', async (c) => {
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const type = String(body.type || '').trim()
   if (type === 'export-folder' || type === 'export-cloudflare' || !type) {
-    if (!canViewAcquisitionCosts(user)) return c.json({ error: 'Only an administrator can export an unredacted database backup.', code: 'product_cost_view_required' }, 403)
+    if (!isAdminControlUser(user)) return c.json({ error: 'Only an administrator can export an unredacted database backup.', code: 'admin_required' }, 403)
   } else if (type === 'import-folder') {
-    if (!canEditAcquisitionCosts(user)) return c.json({ error: 'Only an administrator can restore database costs.', code: 'product_cost_edit_required' }, 403)
+    if (!isAdminControlUser(user)) return c.json({ error: 'Only an administrator can restore a database backup.', code: 'admin_required' }, 403)
     if (!hasPermission(user, 'backup_restore')) {
       return c.json({ error: 'You do not have permission to perform this action' }, 403)
     }

@@ -26,6 +26,8 @@ const boundaries: Array<[string, string]> = [
   // The Expenses transport has its own chunk (E1-F: in app-api-methods it cost the storefront ~11 KB); the 4xx predicate it shares with the Returns and
   // sale-modal mutation paths stays in app-api-methods, or every one of those pages fetches fees-api for ten lines.
   ['api/feesTransport.ts', 'fees-api'],
+  // The count-session transport is the Inventory page's alone: in app-api-methods its per-line decisions cost the storefront catalog closure 168 bytes (C2 review).
+  ['api/inventoryChecksTransport.ts', 'inventory-checks-api'],
   ['utils/directMutationRefusal.ts', 'app-api-methods'],
   // Displayed-money rounding for the signed-in app's fmtUSD/fmtKHR and the export chunks: kept out of 'pricing-utils', which the storefront loads.
   ['utils/displayMoney.ts', 'app-auth'],
@@ -304,6 +306,15 @@ if (process.argv.includes('--bundle')) {
     assert.equal([...closureOf([entry])].some(file => feesApi.includes(file)), false, `${name} must not statically load fees-api`)
   }
   console.log(`PASS fees-api is imported only by fees code (${feesImporters.length} chunks), and by no Returns, till, dashboard, Sales or sale-modal closure`)
+  // C2 review: 'inventory-checks-api' is the count-session transport and nothing else; the storefront closure (and the shared API chunk) never loads it.
+  const checksApi = files.filter(file => /^inventory-checks-api-[\w-]{8}\.js$/.test(file))
+  assert.equal(checksApi.length, 1, 'exactly one inventory-checks-api chunk')
+  for (const name of ['index', 'app-api-methods', 'catalog-products', 'POS', 'Dashboard', 'Sales', 'Returns']) {
+    const entry = files.find(file => new RegExp(`^${name}-[\\w-]{8}\\.js$`).test(file))
+    assert.ok(entry, `missing exact ${name} chunk`)
+    assert.equal([...closureOf([entry])].some(file => checksApi.includes(file)), false, `${name} must not statically load inventory-checks-api`)
+  }
+  console.log('PASS inventory-checks-api is loaded by no storefront, till, dashboard, Sales or Returns closure')
   const css = fs.readdirSync(assets).filter(file => file.endsWith('.css'))
     .map(file => fs.readFileSync(path.join(assets, file), 'utf8')).join('\n')
   const khmerFaces = (css.match(/@font-face\s*\{[^}]*\}/g) || [])
