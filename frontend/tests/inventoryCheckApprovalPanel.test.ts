@@ -212,7 +212,7 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.deepEqual(states(panel), ['applied', 'superseded']); assert.deepEqual([names(panel, 1), names(panel, 2)], [[], []])
     assert.match(text(lineOf(panel, 1)), /Applied/)
     await panel.render({ ...base, ...handlers, canClose: true, approval: { ...pending, applying: true, applying_request_id: 'inventory_check_approval_mine' } })
-    assert.deepEqual(states(panel), ['applying', 'applying']); assert.deepEqual(names(panel, 1), []); assert.match(text(lineOf(panel, 1)), /Being applied/)
+    assert.deepEqual(states(panel), ['applying', 'applying']); assert.deepEqual(names(panel, 1), ['accept'], 'the approver who holds the claim can finish a line it is applying: Accept again, nothing else'); assert.match(text(lineOf(panel, 1)), /Being applied/)
     await panel.render({ ...base, ...handlers, canClose: true, approval: { ...pending, applying: true } })
     assert.deepEqual(states(panel), ['waiting', 'waiting']); assert.deepEqual(names(panel, 2), []); assert.match(text(lineOf(panel, 2)), /Waiting for the approver/)
     await panel.render({ ...base, ...handlers, canClose: true, approval: pending })
@@ -291,6 +291,21 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.equal(text(action(panel, 'close')), '', 'close is icon-only'); assert.ok(action(panel, 'close').getAttribute('aria-label'))
     await panel.render({ ...base, approval: pending })
     assert.equal(text(action(panel, 'reject')), '', 'reject is icon-only'); assert.ok(action(panel, 'reject').getAttribute('aria-label'))
+  }],
+  ['the header icons stay together on one row at 390 px, in English and Khmer: the actions are one non-wrapping group that does not shrink, and the facts wrap inside their own group (round-2 review, finding 7)', async () => {
+    const claimed = { ...pending, applied: 1, applying: true, applying_request_id: 'inventory_check_approval_mine' }
+    for (const approval of [claimed, pending]) {
+      const panel = await mount({ approval, onClose: () => {} })
+      const group = panel.find(node => node.getAttribute('data-approval-header-actions') !== null, 'the header actions')
+      const classes = String(group.getAttribute('class')).split(/\s+/)
+      assert.ok(classes.includes('inline-flex') && classes.includes('shrink-0') && !classes.includes('flex-wrap'), 'a group that neither wraps nor shrinks: ' + classes.join(' '))
+      const names = panel.findAll(node => node.getAttribute('data-approval-action') !== null).map(node => node.getAttribute('data-approval-action'))
+      assert.deepEqual(panel.findAll(node => node.getAttribute('data-approval-action') !== null && group.contains(node)).map(node => node.getAttribute('data-approval-action')), names, 'every header action is inside the group: ' + JSON.stringify(names))
+      assert.ok(names.length >= 2, 'at least two icons are in it')
+      const facts = panel.find(node => node.getAttribute('data-approval-status') !== null || node.getAttribute('data-approval-progress') !== null, 'a fact').parentNode as unknown as MemoryNode
+      assert.ok(String(facts.getAttribute('class')).split(/\s+/).includes('flex-wrap'), 'the facts wrap in their own group, so the title text wraps instead of pushing an icon to a new row')
+      live.pop(); await panel.unmount()
+    }
   }],
 ]
 

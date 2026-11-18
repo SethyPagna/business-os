@@ -3,8 +3,8 @@ import { createHarness, type MemoryNode, type MountedSurface } from './mountedCo
 import { createApprovalActions, type ApprovalAttempt, type ApprovalDeps } from '../src/components/inventory/inventoryCheckApprovalController.ts'
 import { lineStateOf, withAppliedStock } from '../src/components/inventory/inventoryCheckApprovalLines.ts'
 import { REFUSAL_MESSAGES } from '../src/components/inventory/inventoryCheckRefusals.ts'
-import type { InventoryCheckApproval } from '../src/api/inventoryChecksTransport.ts'
-import { workerState } from './inventoryApprovalStates.ts'
+import type { InventoryCheckApproval, InventoryCheckApprovalDecision, InventoryCheckLineAnswer } from '../src/api/inventoryChecksTransport.ts'
+import { workerAnswer, workerState, type WorkerStateName } from './inventoryApprovalStates.ts'
 
 // The approval panel and its decisions over the Worker's OWN answers (tests/inventoryApprovalStates.ts: recorded by the Worker's test from the real routes, and proved equal to the live code there).
 // The first round of this panel was tested over hand-written approvals that carried no claim after an accepted line, so a panel that showed every other line as "Being applied" passed everything.
@@ -85,21 +85,21 @@ const cases: Array<[string, () => Promise<void>]> = [
 ]
 
 // ---- the decisions over the same states ----
-type Log = { approvals: Array<Record<string, unknown>>; confirms: Array<Parameters<ApprovalDeps['askToConfirm']>[0]>; applied: Array<Record<string, number>>; reloads: number }
-function rig(stateName: 'pending' | 'decided_dated') {
+type Log = { approvals: Array<Record<string, unknown>>; lines: Array<Record<string, unknown>>; confirms: Array<Parameters<ApprovalDeps['askToConfirm']>[0]>; applied: Array<Record<string, number>>; reloads: number }
+function rig(stateName: WorkerStateName) {
   const state = workerState(stateName)
-  const log: Log = { approvals: [], confirms: [], applied: [], reloads: 0 }
+  const log: Log = { approvals: [], lines: [], confirms: [], applied: [], reloads: 0 }
   const script: Array<unknown> = []
   const attempts = { approvalAttempt: { current: null as ApprovalAttempt | null }, lineAttempt: { current: null as ApprovalAttempt | null } }
   let counter = 0
-  const actions = createApprovalActions({
+  const deps: ApprovalDeps = {
     sessionId: 'session-1', approval: state.approval, items: state.items, capabilities: null, current: () => true, inFlight: { current: false }, setBusy: () => {}, setApproval: () => {}, setApplied: stock => { log.applied.push(stock) },
     setWriteError: () => {}, setRefused: () => {}, setLineError: () => {}, askToConfirm: async request => { log.confirms.push(request); return true }, tr: (_key, fallback) => fallback, notify: () => {},
     knownRefusal: async cause => { const code = (cause as { code?: string })?.code; return typeof code === 'string' && Object.hasOwn(REFUSAL_MESSAGES, code) ? REFUSAL_MESSAGES[code] : undefined },
     unknownSaveKey: () => 'inventory_check_save_unknown', reload: () => { log.reloads += 1 }, ...attempts, newRequestId: prefix => `${prefix}_${++counter}`,
-    send: { approval: async input => { log.approvals.push(input); return script.shift() as never }, line: async () => { throw new Error('no line request expected') } },
-  })
-  return { state, log, script, actions }
+    send: { approval: async input => { log.approvals.push(input); return script.shift() as never }, line: async input => { log.lines.push(input); return script.shift() as never } },
+  }
+  return { state, log, script, deps, actions: createApprovalActions(deps) }
 }
 const rows = (request: Parameters<ApprovalDeps['askToConfirm']>[0]) => (request.items ?? []).map(entry => [String(entry.label), String(entry.value)])
 const datesOf = (item: { lot_lines?: Array<{ scope: string; seen?: number; counted: number }> }) => (item.lot_lines ?? []).map(line => line)
@@ -150,10 +150,101 @@ cases.push(
   }],
 )
 
+// ---- the other states and the answers of the decisions (round 3: the fixture covers every state the panel handles) ----
+const chipOf = (surface: MountedSurface) => surface.findAll(node => node.getAttribute('data-approval-status') !== null)[0]?.getAttribute('data-approval-status')
+const noteOf = (surface: MountedSurface, id: number) => text(surface.findAll(node => node.getAttribute('data-approval-line-note') !== null && lineOf(surface, id).contains(node))[0])
+const sendLine = (line: Record<string, unknown>) => ({ productId: line.productId as number, action: line.action as 'reject' | 'modify' | 'reopen' })
+
+cases.push(
+  ['finding 4: a line the viewer\'s own claim has part-written offers Accept again and nothing else; for another approver it is waiting with no buttons; the rest stay open', async () => {
+    const { items, approval } = workerState('part_written')
+    assert.deepEqual(approval.planned_lines, [1]); assert.ok(approval.applying_request_id, 'the claim holder holds the key')
+    const panel = await mount({ items, approval })
+    assert.deepEqual([1, 2, 3].map(id => stateOf(panel, id)), ['applying', 'open', 'open'])
+    assert.deepEqual(names(panel, 1), ['accept'], 'finish the part-written line: Accept again, no modify, reject or reopen (the Worker refuses those)')
+    assert.deepEqual([2, 3].map(id => names(panel, id)), [['accept', 'modify', 'reject'], ['accept', 'modify', 'reject']])
+    assert.match(noteOf(panel, 1), /Being applied/)
+    const other = { ...approval }; delete other.applying_request_id
+    await panel.render({ items, approval: other, canDecide: true, canClose: true, busy: false, t: (key: string) => key, ...handlers })
+    assert.equal(stateOf(panel, 1), 'waiting'); assert.deepEqual(names(panel, 1), [], 'another approver sees it waiting, with no buttons')
+    assert.deepEqual([2, 3].map(id => names(panel, id)), [['accept', 'modify', 'reject'], ['accept', 'modify', 'reject']])
+    await panel.render({ items, approval, canDecide: false, canClose: true, busy: false, t: (key: string) => key, ...handlers })
+    assert.deepEqual(names(panel, 1), [], 'without the right to adjust stock there is no Accept')
+  }],
+  ['finding 4: Accept on the part-written line sends the same productIds, the Worker finishes it, and the stock it wrote goes to the rows', async () => {
+    const r = rig('part_written'); const resumed = workerAnswer('accept_resumed') as InventoryCheckApprovalDecision
+    r.script.push(resumed)
+    await r.actions.decideApproval('approve', [1])
+    assert.deepEqual(r.log.approvals.map(call => call.productIds), [[1]]); assert.equal(r.log.confirms.length, 1); assert.equal(r.log.confirms[0].title, 'Approve this line?')
+    assert.equal(resumed.done, true); assert.deepEqual(r.log.applied, [{ '1': resumed.approval.applied_lines!['1'].after }]); assert.equal(r.log.reloads, 0)
+  }],
+  ['claim taken over: the approver whose Accept took the claim over holds the key and every line is open; the answer moved no stock, so the same request is repeated and nothing is shown as applied in between', async () => {
+    const { items, approval, answer } = workerState('taken_over')
+    assert.equal(answer?.takeover, true); assert.equal(approval.applying, true); assert.ok(approval.applying_request_id); assert.deepEqual(approval.planned_lines, [])
+    const panel = await mount({ items, approval })
+    assert.deepEqual([1, 2, 3].map(id => stateOf(panel, id)), ['open', 'open', 'open']); assert.deepEqual([1, 2, 3].map(id => names(panel, id)), [['accept', 'modify', 'reject'], ['accept', 'modify', 'reject'], ['accept', 'modify', 'reject']])
+    const r = rig('claimed_by_other'); r.script.push(workerAnswer('takeover'), workerAnswer('accept_resumed'))
+    await r.actions.decideApproval('approve', [2])
+    assert.equal(r.log.approvals.length, 2, 'the takeover is followed by a repeat'); assert.equal(r.log.approvals[0].requestId, r.log.approvals[1].requestId, 'under the same request id')
+    assert.deepEqual(r.log.applied, [{ '1': (workerAnswer('accept_resumed') as InventoryCheckApprovalDecision).approval.applied_lines!['1'].after }], 'only the answer that wrote stock puts a figure on the rows')
+  }],
+  ['closed: the applied line stays applied and the lines a close left are "Not applied" with their reason; nothing can be decided', async () => {
+    const { items, approval } = workerState('closed')
+    assert.ok(approval.closed && Object.keys(approval.closed.lines).length === 2)
+    const panel = await mount({ items, approval })
+    assert.equal(chipOf(panel), 'closed'); assert.deepEqual(header(panel), [])
+    assert.deepEqual([1, 2, 3].map(id => stateOf(panel, id)), ['applied', 'decided', 'decided']); assert.deepEqual([1, 2, 3].map(id => names(panel, id)), [[], [], []])
+    for (const id of [2, 3]) assert.match(text(panel.find(node => node.getAttribute('data-approval-not-applied') === String(id), `not applied ${id}`)), /^Not applied: Not applied$/)
+    assert.match(noteOf(panel, 1), /^Applied$/)
+    const closing = workerAnswer('close') as InventoryCheckApprovalDecision
+    assert.equal(closing.done, true); assert.deepEqual(closing.approval, approval, 'the answer of the close and a read of the session carry the same approval')
+  }],
+  ['approved: a rejected line is decided and shows who rejected it; the lines applied show the figure written; nothing can be decided', async () => {
+    const { items, approval } = workerState('approved_with_rejected')
+    const panel = await mount({ items, approval })
+    assert.equal(chipOf(panel), 'approved'); assert.deepEqual(header(panel), [])
+    assert.deepEqual([1, 2, 3].map(id => stateOf(panel, id)), ['applied', 'decided', 'applied']); assert.deepEqual([1, 2, 3].map(id => names(panel, id)), [[], [], []])
+    assert.equal(panel.findAll(node => node.getAttribute('data-approval-decision') === '2' && node.getAttribute('data-decision') === 'reject').length, 1, 'line 2 carries its rejection')
+    assert.equal(text(panel.find(node => node.getAttribute('data-approval-target') === '3', 'target 3')), 'Set to 2', 'line 3 shows the figure written'); assert.equal(panel.findAll(node => node.getAttribute('data-approval-target') === '1').length, 0, 'a dated line shows no product-level figure')
+  }],
+  ['fully applied: every line is applied, the count is approved, the header offers nothing', async () => {
+    const { items, approval } = workerState('fully_applied')
+    const panel = await mount({ items, approval })
+    assert.equal(chipOf(panel), 'approved'); assert.deepEqual(header(panel), [])
+    assert.deepEqual([1, 2, 3].map(id => stateOf(panel, id)), ['applied', 'applied', 'applied']); assert.deepEqual([1, 2, 3].map(id => names(panel, id)), [[], [], []])
+    const all = workerAnswer('approve_all') as InventoryCheckApprovalDecision
+    assert.equal(all.done, true); assert.deepEqual(all.approval, approval)
+  }],
+  ['replaced line: a line a newer count replaced is final ("Replaced") with no buttons; the other open line keeps its buttons', async () => {
+    const { items, approval } = workerState('replaced_line')
+    assert.ok(approval.superseded?.['3'])
+    const panel = await mount({ items, approval })
+    assert.deepEqual([1, 2, 3].map(id => stateOf(panel, id)), ['applied', 'open', 'superseded']); assert.deepEqual([1, 2, 3].map(id => names(panel, id)), [[], ['accept', 'modify', 'reject'], []])
+    assert.equal(panel.findAll(node => node.getAttribute('data-approval-superseded') === '3').length, 1, 'line 3 says it was replaced by a newer count')
+  }],
+  ['the answers of a line decision carry the line they were about, and the approval replaces the panel: reject, modify and reopen over the Worker\'s own answers', async () => {
+    for (const [name, change, expected] of [['reject', { productId: 2, action: 'reject' }, ['open', 'rejected', 'modified']], ['modify', { productId: 3, action: 'modify', counted: 4 }, ['open', 'open', 'modified']], ['reopen', { productId: 2, action: 'reopen' }, ['open', 'open', 'modified']]] as const) {
+      const answer = workerAnswer<InventoryCheckLineAnswer>(name)
+      assert.deepEqual(answer.line, { productId: change.productId, action: change.action }, `${name}: the answer names the line the request was about`)
+      const r = rig('pending'); r.script.push(answer)
+      let approvalSeen: InventoryCheckApproval | null = null
+      const actions = createApprovalActions({ ...r.deps, setApproval: next => { approvalSeen = next } })
+      assert.equal(await actions.decideLine(change), true, name)
+      assert.deepEqual(approvalSeen, answer.approval, `${name}: the panel takes the approval of the answer`)
+      assert.deepEqual(r.log.lines.map(sendLine), [sendLine(answer.line)], `${name}: one request, no read`); assert.equal(r.log.reloads, 0)
+      const panel = await mount({ items: workerState('pending').items, approval: answer.approval })
+      assert.deepEqual([1, 2, 3].map(id => stateOf(panel, id)), expected, `${name}: the panel shows the line as the Worker left it`)
+      live.pop(); await panel.unmount()
+    }
+    const accepted = workerAnswer('accept') as InventoryCheckApprovalDecision
+    assert.deepEqual(accepted.approval, workerState('accepted_one').approval, 'the answer of an accept and a read of the session carry the same approval')
+  }],
+)
+
 const failures: string[] = []
 try {
   for (const [name, run] of cases) {
-    try { await run() } catch (cause) { failures.push(`${name}\n    ${(cause instanceof Error ? cause.message : String(cause)).split('\n').filter(Boolean).slice(0, 3).join(' | ')}`) } finally { for (const surface of live.splice(0)) await surface.unmount() }
+    try { await run() } catch (cause) { failures.push(`${name}\n    ${(cause instanceof Error ? cause.message : String(cause)).split('\n').filter(Boolean).slice(0, 14).join(' | ')}`) } finally { for (const surface of live.splice(0)) await surface.unmount() }
   }
 } finally { await harness.close() }
 if (failures.length) throw new Error(`${failures.length} of ${cases.length} Worker-state cases failed:\n  - ${failures.join('\n  - ')}`)

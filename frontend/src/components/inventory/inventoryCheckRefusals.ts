@@ -18,7 +18,7 @@ export const REFUSAL_MESSAGES: Record<string, { key: string; fallback: string }>
   inventory_check_target_not_whole: { key: 'inventory_check_error_target_not_whole', fallback: 'A counted number is not a whole number. Reject this count and recount.' },
   inventory_check_count_below_damaged: { key: 'inventory_check_error_count_below_damaged', fallback: 'A counted number is less than the product\'s damaged units. Reject this count and recount.' },
   inventory_check_baseline_missing: { key: 'inventory_check_error_baseline_missing', fallback: 'A product in this count has no recorded starting stock. Reject this count and recount.' },
-  inventory_check_approval_in_progress: { key: 'inventory_check_error_approval_in_progress', fallback: 'Another approver is applying this count. If they cannot continue, close the remaining lines.' },
+  inventory_check_approval_in_progress: { key: 'inventory_check_error_approval_in_progress', fallback: 'Another approver is applying this count right now. Try again in a few minutes.' },
   inventory_check_claim_lost: { key: 'inventory_check_error_claim_lost', fallback: 'Another approver took over or closed this count, so nothing was written for this line. The page was reloaded.' },
   inventory_check_too_many_lines: { key: 'inventory_check_error_too_many_lines', fallback: 'This count is larger than one submission can carry. Submit part of it, then the rest.' },
   inventory_check_too_many_products: { key: 'inventory_check_error_too_many_lines', fallback: 'This count is larger than one submission can carry. Submit part of it, then the rest.' },

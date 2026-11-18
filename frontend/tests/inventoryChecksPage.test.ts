@@ -760,7 +760,7 @@ try {
   sessionApproval = { ...pendingApproval, applying: true }; await approving.click(approving.button('Leave session')); await openSession(approving)
   decideScript = [Object.assign(new Error('busy'), { status: 409, code: 'inventory_check_approval_in_progress', outcome: 'not_dispatched' })]
   await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
-  assert.ok(approving.text().includes('Another approver is applying this count. If they cannot continue, close the remaining lines.'), 'and what to do')
+  assert.ok(approving.text().includes('Another approver is applying this count right now. Try again in a few minutes.'), 'and what to do: try again shortly')
 
   // An answer that never came keeps the request id: the next Approve repeats it without a second review
   sessionApproval = pendingApproval; await approving.click(approving.button('Leave session')); await openSession(approving)
@@ -849,7 +849,10 @@ try {
   {
     const pendingState = workerState('pending'), acceptedState = workerState('accepted_one')
     memberOverride = pendingState.items; sessionApproval = pendingState.approval
+    productOverride = [{ ...product, id: 1, name: 'Serum', quantity: 9 }, { ...product, id: 2, name: 'Toner', quantity: 5 }, { ...product, id: 3, name: 'Cream', quantity: 5 }]
     await approving.click(approving.button('Leave session')); await openSession(approving)
+    const rowText = (id: number) => (approving.findAll(node => node.getAttribute('data-inventory-check-row') === String(id))[0]?.textContent ?? '<no row ' + id + '>').replace(/\s+/g, ' ')
+    assert.match(rowText(1), /Now 9/, 'before: the session row of line 1 reads 9')
     const lineNames = (id: number) => approving.findAll(node => node.getAttribute('data-approval-line-action') !== null && approving.find(candidate => candidate.getAttribute('data-approval-line') === String(id), 'line ' + id).contains(node)).map(node => node.getAttribute('data-approval-line-action'))
     const lineText = (id: number) => (approving.find(node => node.getAttribute('data-approval-line') === String(id), 'line ' + id).textContent ?? '').replace(/\s+/g, ' ')
     assert.match(lineText(1), /Now 9/, 'before: the stock of line 1 is 9')
@@ -865,13 +868,30 @@ try {
     assert.deepEqual([2, 3].map(lineNames), [['accept', 'modify', 'reject'], ['accept', 'modify', 'reject']], 'the Worker keeps the claim, and lines 2 and 3 can still be decided')
     assert.ok(!approving.text().includes('Being applied'), 'no line says it is being applied')
     assert.match(lineText(1), /Applied/); assert.match(lineText(1), /Now 7/, 'the accepted line shows the stock it wrote (7), not the stock from before (9)')
+    assert.match(rowText(1), /Now 7/, 'and so does its row in the session list, a dated line: the branch total the answer wrote (7), not 9'); assert.match(rowText(2), /Now 5/, 'a line not accepted keeps its stock')
+    // a line counted as one figure: accepting it puts its own stock on its row
+    const plainAccepted: InventoryCheckApproval = { ...acceptedState.approval, applied: 2, applied_lines: { ...acceptedState.approval.applied_lines, 3: { before: 5, target: 2, after: 2, at: '2026-11-18T00:00:00.000Z' } } }
+    decideScript = [{ approval: plainAccepted, applied: 1, remaining: 0, done: true }]
+    await approving.click(lineButton(3, 'accept')); await confirmInDialog(approving, 'Approve')
+    assert.match(rowText(3), /Now 2/, 'a line counted as one figure: its row shows the stock the answer wrote (2), not 5'); assert.match(rowText(1), /Now 7/, 'the row accepted before keeps its figure'); assert.equal(sessionLoads, loadsAtAccept, 'no read')
     assert.equal(approving.findAll(node => node.getAttribute('data-approval-line-action') === 'accept' && node.getAttribute('disabled') !== null).length, 0, 'and its buttons are live')
     // line 2 can be rejected at once (the Worker's own test does exactly this under the claim)
     lineScript = [{ approval: { ...acceptedState.approval, line_decisions: { 2: { decision: 'reject', at: '2026-11-18T00:00:00.000Z', by_name: 'stock-user' } } }, applied: 0, remaining: 1, done: false, line: { productId: 2, action: 'reject' } }]
     await approving.click(lineButton(2, 'reject')); await confirmInDialog(approving, 'Reject')
     assert.equal(lineCalls.at(-1)!.input.productId, 2); assert.ok(lineChip(2).textContent.includes('Rejected'), 'rejected under the claim')
     assert.equal(sessionLoads, loadsAtAccept, 'still no read')
-    memberOverride = submittedItems; sessionApproval = pendingApproval
+    // Approve all: every request of the flow puts the stock it wrote on the rows, before the closing read of the session answers.
+    sessionApproval = pendingState.approval
+    await approving.click(approving.button('Leave session')); await openSession(approving)
+    assert.match(rowText(1), /Now 9/); assert.match(rowText(2), /Now 5/)
+    const stepOne: InventoryCheckApproval = { ...acceptedState.approval, applying_request_id: undefined, applying: undefined }
+    const stepTwo: InventoryCheckApproval = { ...plainAccepted, status: 'approved', applying: undefined, applying_request_id: undefined, planned_lines: undefined, applied: 3, applied_lines: { ...plainAccepted.applied_lines, 2: { before: 5, target: 3, after: 3, at: '2026-11-18T00:00:00.000Z' } } }
+    decideScript = [{ approval: stepOne, applied: 1, remaining: 2, done: false }, { approval: stepTwo, applied: 2, remaining: 0, done: true }]
+    delayedProducts = () => {}
+    await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
+    assert.match(rowText(1), /Now 7/, 'Approve all: the first request put line 1 on its row'); assert.match(rowText(2), /Now 3/, 'and the last one line 2'); assert.match(rowText(3), /Now 2/, 'and line 3')
+    const release = delayedProducts as unknown as ((value: unknown) => void) | null; delayedProducts = null; release?.({ ...response({}), items: productOverride, total: 3 })
+    productOverride = null; memberOverride = submittedItems; sessionApproval = pendingApproval
     await approving.click(approving.button('Leave session')); await openSession(approving)
   }
 

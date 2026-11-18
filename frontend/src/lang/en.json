@@ -8187,7 +8187,7 @@
   "inventory_check_error_target_not_whole": "A counted number is not a whole number. Reject this count and recount.",
   "inventory_check_error_count_below_damaged": "A counted number is less than the product's damaged units. Reject this count and recount.",
   "inventory_check_error_baseline_missing": "A product in this count has no recorded starting stock. Reject this count and recount.",
-  "inventory_check_error_approval_in_progress": "Another approver is applying this count. If they cannot continue, close the remaining lines.",
+  "inventory_check_error_approval_in_progress": "Another approver is applying this count right now. Try again in a few minutes.",
   "inventory_check_error_claim_lost": "Another approver took over or closed this count, so nothing was written for this line. The page was reloaded.",
   "inventory_check_error_no_lot": "A product has no received date to add stock to. Receive it first.",
   "inventory_check_error_too_many_lines": "This count is larger than one submission can carry. Submit part of it, then the rest.",
