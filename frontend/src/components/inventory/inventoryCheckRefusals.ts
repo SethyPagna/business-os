@@ -55,4 +55,6 @@ export const REFUSAL_MESSAGES: Record<string, { key: string; fallback: string }>
   inventory_check_approval_not_found: { key: 'inventory_check_error_not_found', fallback: 'This count or its approval no longer exists. Reload and try again.' },
   inventory_check_approval_lines_changed: { key: 'inventory_check_error_lines_changed', fallback: 'The count no longer matches its approval. The page was reloaded.' },
   inventory_check_authority_changed: { key: 'inventory_check_error_authority_changed', fallback: 'The account or session changed. Sign in again and retry.' },
+  inventory_check_not_available: { key: 'inventory_check_error_not_available', fallback: 'Count approvals are not available right now. Reload and try again.' },
+  inventory_check_permission_required: { key: 'inventory_check_error_permission_required', fallback: 'You do not have permission to change counts.' },
 }
