@@ -116,7 +116,8 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          # Pinned: 24.22.3 bundles stock SQLite 3.54.1, whose nested-CTE check D1 does not have (cloudflare/workerd patches/sqlite/0006-cte-nesting-depth.patch).
+          node-version: '24.22.2'
           cache: npm
           cache-dependency-path: |
             release/frontend/package-lock.json
@@ -189,7 +190,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: '24.22.2'
           cache: npm
           cache-dependency-path: |
             release/frontend/package-lock.json
@@ -372,7 +373,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: '24.22.2'
           cache: npm
           cache-dependency-path: release/frontend/package-lock.json
 
