@@ -1063,6 +1063,20 @@ if (SHOW_TABLE) {
   for (const gate of COST_GATES.filter((entry) => entry.how === 'unmodelled')) console.log(gate.text.slice(0, 42).padEnd(43) + gate.why)
 }
 
+// Count tasks (owner, 18 Nov 2026): the two grants are declared on both sides, named here so a rename or a dropped row fails this test and not only the generic scans above.
+check('count tasks: inventory_check_issue is an editor extra of the sessions row and inventory_checks:tasks an editor action, and the Worker checks both', () => {
+  const issue = definitionByKey.get('inventory_check_issue')
+  assert.ok(issue, 'the editor has an inventory_check_issue key')
+  assert.equal(issue.extraOf, 'inventory_checks', 'it is an extra of the Inventory check sessions row, off unless granted')
+  assert.ok(issue.tKey && issue.shortTKey && issue.hintTKey, 'it carries translated label, short label and hint')
+  assert.ok(workerChecksKey('inventory_check_issue'), 'the Worker checks inventory_check_issue')
+  const tasks = editorAction.get('inventory_checks:tasks')
+  assert.ok(tasks, 'the editor has an inventory_checks:tasks action row')
+  assert.ok(tasks.tKey && tasks.shortTKey, 'the action carries translated labels')
+  assert.ok(workerActions.has('inventory_checks:tasks'), 'the Worker checks inventory_checks:tasks')
+  assert.equal(workerActions.has('inventory_checks:tasks'), editorRows.has('inventory_checks:tasks'), 'the Worker and the editor agree on the action')
+})
+
 const counts = { matched: 0, workerOnly: 0, editorOnly: 0 }
 for (const pair of new Set([...workerActions.keys(), ...editorRows])) {
   if (editorRows.has(pair) && workerActions.has(pair)) counts.matched += 1

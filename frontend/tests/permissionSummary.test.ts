@@ -317,10 +317,10 @@ test('chips: Contacts View is locked on while Add or Edit is on', () => {
   assert.deepEqual([free.viewLocked, free.canToggle, free.mark], [false, true, 'off'])
 })
 
-test('chips: Inventory has no Count chip (counting is its own grant) and the sub-row draws its two', () => {
+test('chips: Inventory has no Count chip (counting is its own grant) and the sub-row draws its three (count tasks added Tasks, 18 Nov 2026)', () => {
   assert.equal(chipStates(row('inventory'), state({ inventory: true })).some((entry) => entry.action.key === 'check'), false)
   assert.deepEqual(chipStates(row('inventory_checks'), state({ inventory: true })), [], 'the sub-row has no chips while it is not granted')
-  assert.deepEqual(chipStates(row('inventory_checks'), state({ inventory_checks: true })).map((entry) => entry.action.key), ['view', 'check'])
+  assert.deepEqual(chipStates(row('inventory_checks'), state({ inventory_checks: true })).map((entry) => entry.action.key), ['view', 'check', 'tasks'])
 })
 
 test('switched-off and waiting-for-approval counts match the Employee preset and Review', () => {
