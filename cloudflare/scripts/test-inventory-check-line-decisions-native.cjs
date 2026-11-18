@@ -23,7 +23,7 @@ const SCENARIOS = []
 const scenario = (name, run) => SCENARIOS.push([name, run])
 let counter = 0
 const rid = () => `line-request-${String(++counter).padStart(5, '0')}`
-const decide = (f, id, body) => { planTier.__resetPlanTierCacheForTests(); return w.call(f, 'POST', `/api/inventory-checks/sessions/${id}/approval`, { requestId: rid(), ...body }, body.__env || {}) }
+const decide = (f, id, { __env, ...body }) => { planTier.__resetPlanTierCacheForTests(); return w.call(f, 'POST', `/api/inventory-checks/sessions/${id}/approval`, { requestId: rid(), ...body }, __env || {}) }
 const line = (f, id, body, env = {}) => { planTier.__resetPlanTierCacheForTests(); return w.call(f, 'POST', `/api/inventory-checks/sessions/${id}/approval/lines`, { requestId: rid(), ...body }, env) }
 const decisionsOf = f => JSON.parse(f.raw.prepare('SELECT line_decisions_json AS j FROM inventory_check_approvals').get().j)
 const approvalRow = f => f.raw.prepare('SELECT status,decided_by,closed_json,applying_request_id,applied_json FROM inventory_check_approvals').get()
@@ -306,9 +306,80 @@ function define() {
     const other = await detail(g, gid)
     assert.deepEqual([other.approval.applying, other.approval.applying_request_id, other.approval.planned_lines], [true, undefined, [3]])
     states.claimed_by_other = normalised(other, gid)
+    // a plan entry that is not a whole plan holds nothing, for the projection and for the decision check alike
+    g.raw.prepare('UPDATE inventory_check_approvals SET plan_json=?').run(JSON.stringify({ 3: { lot: 30 }, 2: 'x' }))
+    assert.deepEqual((await detail(g, gid)).approval.planned_lines, [], 'malformed plan entries are skipped')
+    assert.equal((await line(g, gid, { productId: 3, action: 'reopen' })).status, 200, 'and the Worker takes a decision on a line whose plan entry is malformed')
+    // the other states the panel meets, from the real routes; each is recorded and compared with the file
+    const answers = { accept: normalised(first.body, id) }
+    {
+      // the claim holder's own part-written line: a Free-plan request writes one date and stops
+      const { f: h, id: hid } = await three()
+      assert.equal((await line(h, hid, { productId: 1, action: 'modify', lots: [{ batchId: 10, counted: 3 }, { batchId: 11, counted: 2 }] })).status, 200)
+      const partial = await decide(h, hid, { decision: 'approve', productIds: [1], __env: { PLAN_TIER: 'free' } })
+      assert.equal(partial.status, 200, JSON.stringify(partial.body)); assert.equal(partial.body.done, false)
+      const held = await detail(h, hid)
+      assert.deepEqual(held.approval.planned_lines, [1]); assert.ok(held.approval.applying_request_id, 'the claim holder sees the key')
+      assert.equal((await line(h, hid, { productId: 1, action: 'reject' })).body.code, 'inventory_check_line_in_progress')
+      states.part_written = normalised(held, hid)
+      const resumed = await decide(h, hid, { decision: 'approve', productIds: [1] })
+      assert.equal(resumed.status, 200, JSON.stringify(resumed.body)); assert.equal(resumed.body.done, true, 'Accept again with the same productIds finishes the line')
+      answers.accept_resumed = normalised(resumed.body, hid)
+    }
+    {
+      // a claim whose holder is gone: Accept on another line takes it over
+      const { f: t, id: tid } = await three()
+      t.raw.prepare("UPDATE inventory_check_approvals SET applying_request_id='gone-claim-0001',applying_by=8,applying_at=?,plan_json=?").run(new Date().toISOString(), JSON.stringify({ 3: { lot: 30, scope: 'lot', counted: 2, seen: 5 } }))
+      const took = await decide(t, tid, { decision: 'approve', productIds: [2] })
+      assert.equal(took.status, 200, JSON.stringify(took.body)); assert.equal(took.body.takeover, true)
+      states.taken_over = { ...normalised(await detail(t, tid), tid), answer: { applied: took.body.applied, remaining: took.body.remaining, done: took.body.done, takeover: took.body.takeover } }
+      answers.takeover = normalised(took.body, tid)
+    }
+    {
+      // closed after one accepted line: the applied line stays, the rest are recorded as not applied
+      const { f: c, id: cid } = await three()
+      assert.equal((await decide(c, cid, { decision: 'approve', productIds: [1] })).status, 200)
+      const closed = await decide(c, cid, { decision: 'close' })
+      assert.equal(closed.status, 200, JSON.stringify(closed.body))
+      states.closed = normalised(await detail(c, cid), cid)
+      answers.close = normalised(closed.body, cid)
+    }
+    {
+      // a line rejected, the rest approved: approved
+      const { f: r, id: rejectedId } = await three()
+      assert.equal((await line(r, rejectedId, { productId: 2, action: 'reject' })).status, 200)
+      assert.equal((await decide(r, rejectedId, { decision: 'approve' })).status, 200)
+      states.approved_with_rejected = normalised(await detail(r, rejectedId), rejectedId)
+    }
+    {
+      // every line applied
+      const { f: a, id: aid } = await three()
+      const all = await decide(a, aid, { decision: 'approve' })
+      assert.equal(all.status, 200, JSON.stringify(all.body)); assert.equal(all.body.done, true)
+      states.fully_applied = normalised(await detail(a, aid), aid)
+      answers.approve_all = normalised(all.body, aid)
+    }
+    {
+      // a newer count of an open product replaces its line
+      const { f: s, id: sid } = await three()
+      assert.equal((await decide(s, sid, { decision: 'approve', productIds: [1] })).status, 200)
+      const newer = await w.call(s, 'POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: rid(), lines: [{ productId: 3, countedQuantity: 4, seenQuantity: 5 }] })
+      assert.equal(newer.status, 201, JSON.stringify(newer.body))
+      const replaced = await detail(s, sid)
+      assert.ok(replaced.approval.superseded && replaced.approval.superseded['3'], 'line 3 is replaced')
+      states.replaced_line = normalised(replaced, sid)
+    }
+    {
+      // the answer of each line decision, with its `line` field
+      const { f: l, id: lid } = await three()
+      const modified = await line(l, lid, { productId: 3, action: 'modify', counted: 4 }); assert.deepEqual(modified.body.line, { productId: 3, action: 'modify' })
+      const rejected = await line(l, lid, { productId: 2, action: 'reject' }); assert.deepEqual(rejected.body.line, { productId: 2, action: 'reject' })
+      const reopened = await line(l, lid, { productId: 2, action: 'reopen' }); assert.deepEqual(reopened.body.line, { productId: 2, action: 'reopen' })
+      answers.modify = normalised(modified.body, lid); answers.reject = normalised(rejected.body, lid); answers.reopen = normalised(reopened.body, lid)
+    }
     // an approval nobody claimed has no planned_lines at all
     assert.equal(states.pending.approval.applying, undefined); assert.equal(states.pending.approval.planned_lines, undefined)
-    const text = JSON.stringify({ version: 1, note: 'Generated by scripts/test-inventory-check-line-decisions-native.cjs from the real answers of the Worker (GET /sessions/:id). The page tests mount the approval panel from these.', states }, null, 2) + String.fromCharCode(10)
+    const text = JSON.stringify({ version: 2, note: 'Generated by scripts/test-inventory-check-line-decisions-native.cjs from the real answers of the Worker (GET /sessions/:id, and the answers of the decisions). The page tests mount the approval panel from these.', states, answers }, null, 2) + String.fromCharCode(10)
     if (process.env.UPDATE_FIXTURE === '1' && !mutated) { fs.mkdirSync(path.dirname(STATES_FILE), { recursive: true }); fs.writeFileSync(STATES_FILE, text) }
     assert.deepEqual(JSON.parse(fs.readFileSync(STATES_FILE, 'utf8')), JSON.parse(text), 'the recorded states are what the Worker answers (UPDATE_FIXTURE=1 regenerates them after a deliberate change)')
   })
@@ -347,7 +418,7 @@ define()
 // ---- the runner and the mutants ----------------------------------------------------------------------------------------------------------------------------------------------------------
 const NAME = n => SCENARIOS.findIndex(([name]) => name.startsWith(n))
 async function runScenario(index) { alerts.length = 0; await SCENARIOS[index][1]() }
-const APPROVALS = 'lib/inventoryCheckApprovals.ts', SESSIONS = 'lib/inventoryCheckSessions.ts'
+const APPROVALS = 'lib/inventoryCheckApprovals.ts', SESSIONS = 'lib/inventoryCheckSessions.ts', PLAN = 'lib/inventoryCheckPlan.ts'
 // Each mutant plants one wrong rule in the engine; the scenarios it names (by their first words) must go red. An edit that does not match the source exactly once is an error, never a catch.
 const MUTANTS = [
   { name: 'a rejected line is still applied', edits: { [APPROVALS]: [["!applied[String(item.product_id)] && !superseded[String(item.product_id)] && !isRejected(item))", "!applied[String(item.product_id)] && !superseded[String(item.product_id)])"]] }, caught: ['reject one line of three'] },
@@ -357,9 +428,15 @@ const MUTANTS = [
   { name: 'a modified line records the approver\'s figure as counted', edits: { [APPROVALS]: [["plan.was !== undefined ? `Inventory check approved: modified to ${plan.counted} (counted ${plan.was})` : ", ""]] }, caught: ['modify 3 -> 4', 'a modified line is floored'] },
   { name: 'the applied event of a modified line says nothing of the modification', edits: { [APPROVALS]: [["...(changed ? { modified: true, modified_counted_quantity: changed.modified } : {}), ", ""]] }, caught: ['modify 3 -> 4'] },
   { name: 'an idle claim is never ended by the last reject', edits: { [APPROVALS]: [["(appliedCount > 0 || !row.applying_request_id || idleClaim)", "(appliedCount > 0 || !row.applying_request_id)"]] }, caught: ['the last reject ends an approval another approver claimed'] },
-  { name: 'planned_lines ignores the lines of the plan', edits: { [SESSIONS]: [["[...keys(planJson, parsed => parsed), ...keys(appliedJson, parsed => parsed.units)]", "[...keys(appliedJson, parsed => parsed.units)]"]] }, caught: ['planned_lines names the lines'] },
-  { name: 'planned_lines ignores the dates already written', edits: { [SESSIONS]: [["[...keys(planJson, parsed => parsed), ...keys(appliedJson, parsed => parsed.units)]", "[...keys(planJson, parsed => parsed)]"]] }, caught: ['planned_lines names the lines'] },
-  { name: 'every line of a claimed approval is planned', edits: { [SESSIONS]: [["...(detail && row.plan_json !== undefined ? { planned_lines: plannedLineIds(row.plan_json, row.applied_json) } : {})", "...(detail && row.plan_json !== undefined ? { planned_lines: [1, 2, 3] } : {})"]] }, caught: ['planned_lines names the lines'] },
+  { name: 'planned_lines ignores the lines of the plan', edits: { [PLAN]: [["[...Object.keys(plansOf(planJson ?? '{}')), ...Object.keys(appliedUnits(appliedJson))]", "[...Object.keys(appliedUnits(appliedJson))]"]] }, caught: ['planned_lines names the lines'] },
+  { name: 'planned_lines ignores the dates already written', edits: { [PLAN]: [["[...Object.keys(plansOf(planJson ?? '{}')), ...Object.keys(appliedUnits(appliedJson))]", "[...Object.keys(plansOf(planJson ?? '{}'))]"]] }, caught: ['planned_lines names the lines'] },
+  // One-line changes to what the panel reads in the states recorded in fixtures/inventory-check-approval-states.json: without a regenerated fixture the recorded states no longer match the Worker.
+  { name: 'the takeover flag is not sent with a takeover answer', edits: { [APPROVALS]: [["...(extra.takeover ? { takeover: true } : {}), ", ""]] }, caught: ['planned_lines names the lines'] },
+  { name: 'the lines a close left unapplied are not projected', edits: { [SESSIONS]: [["    ...(closed ? { closed } : {}),\n", ""]] }, caught: ['planned_lines names the lines'] },
+  { name: 'the lines a newer count replaced are not projected', edits: { [SESSIONS]: [["      ...(Object.keys(supersededLines(row.superseded_json)).length ? { superseded: supersededLines(row.superseded_json) } : {}),\n", ""]] }, caught: ['planned_lines names the lines'] },
+  { name: 'a line decision answer does not say which line it was about', edits: { [APPROVALS]: [["ends), line: { productId, action: parsed.action } }", "ends) }"]] }, caught: ['planned_lines names the lines'] },
+  { name: 'a malformed plan entry holds its line', edits: { [PLAN]: [["Object.entries(parsed).filter(([, plan]) => validPlan(plan))", "Object.entries(parsed)"]] }, caught: ['planned_lines names the lines'] },
+  { name: 'every line of a claimed approval is planned', edits: { [SESSIONS]: [["...(detail && row.plan_json !== undefined ? { planned_lines: productsInFlight(row.plan_json, row.applied_json) } : {})", "...(detail && row.plan_json !== undefined ? { planned_lines: [1, 2, 3] } : {})"]] }, caught: ['planned_lines names the lines'] },
   { name: 'an approval a person rejected a line of is ended as replaced', edits: { [SESSIONS]: [["decided_by=${REJECTER('by')},", "decided_by=NULL,"], ["decided_by_name=CASE WHEN ${REJECTER('by')} IS NULL THEN NULL ELSE ${REJECTER('by_name')} END,", "decided_by_name=NULL,"], ["decision_note=CASE WHEN ${REJECTER('by')} IS NULL THEN @replacedNote ELSE NULL END,", "decision_note=@replacedNote,"]] }, caught: ['a newer count replaces the last open line after a person rejected another'] },
 ]
 

@@ -82,7 +82,8 @@ POST /api/inventory-checks/sessions/:id/approval
 ## 3. The approval detail (`session.approval`, and `approval` in decision answers)
 
 New field `line_decisions`: `{ "<productId>": { "decision": "reject" | "modify", "counted"?: n, "lots"?: [{ "batchId": n, "counted": n }], "note"?: text, "at": ISO time, "by_name"?: username } }`
-(`by_name` only for a viewer who may see staff names; the account id is never sent). An absent key means the line is open. `lines`, `applied_lines`, `superseded`, `closed` are as before.
+(`by_name` only for a viewer who may see staff names; the account id is never sent). An absent key means the line is open. `lines`, `applied_lines`, `superseded`, `closed` are as before. A line of `applied_lines` carries `lots`, the received dates it moved: an entry of scope `lot` holds that date's own `before` and `after`, `branchAfter` the branch's;
+the page puts them on the product's row without a read.
 
 A rejected line no longer counts as "waiting" anywhere (the Waiting filter, the row's pending tag, Fix stock's hold).
 
@@ -96,8 +97,10 @@ is left open (not superseded, not rejected), so a newer count of another product
 **A claim stays after a partial accept, and `planned_lines` says which lines it holds.** An accept of some lines (`productIds`) applies them and leaves the approval claimed (`applying: true`, plus `applying_request_id` for the approver who
 holds it): the claim ends only when the approval is decided. Decisions on the OTHER lines stay valid under it (a reject, a modify or a reopen, by the claimer or by anyone who may approve); only a line the claim has planned or
 part-written is refused (`409 inventory_check_line_in_progress`). The approval detail therefore carries, while it is pending and claimed, `planned_lines`: the ascending product ids of exactly those lines, taken from the keys of
-the plan (`"<product>"` or `"<product>:<batch>"`) and of the received dates already written (`applied_json.units`), with no database read of its own. It is `[]` right after a line landed and nothing else is planned. A panel offers
-no decision on a line in `planned_lines` (it is being applied, or waiting for the approver who is applying it) and offers every other line its decisions. A Worker that sends no `planned_lines` for a claimed approval cannot say
+the plan (`"<product>"` or `"<product>:<batch>"`) and of the received dates already written (`applied_json.units`), with no database read of its own. A plan entry that is not a whole plan (`lot`, `scope`, `counted`, `seen`) holds nothing:
+the projection and the decision check read the plan through the same function (`productsInFlight`, `lib/inventoryCheckPlan.ts`). It is `[]` right after a line landed and nothing else is planned. A panel offers
+no reject, modify or reopen on a line in `planned_lines`, and offers every other line its decisions. A line in `planned_lines` is being applied (to the approver who holds the key, `applying_request_id`: that approver finishes it by sending
+the accept again with the same `productIds`, which the Worker continues) or waiting for the approver who is applying it (anyone else: no button). A Worker that sends no `planned_lines` for a claimed approval cannot say
 which lines are held; a panel then treats every undecided line as held. An approval nobody has claimed carries no `planned_lines`. The answer to an accept carries `applied`, `remaining` and `done` for the request (an accept of
 one line that landed answers `done: true` while the approval stays pending).
 

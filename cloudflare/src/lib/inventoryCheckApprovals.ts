@@ -9,6 +9,7 @@ import {
   type Actor, type ApprovalAppliedLine, type ApprovalLineDecision, type ApprovalRow, type InventoryCheckPrincipal, type Statement,
 } from './inventoryCheckSessions'
 import { checkLineShape, parseLineDecisionInput } from './inventoryCheckLineInput'
+import { appliedUnits, plansOf, productOf, productsInFlight, type Plan } from './inventoryCheckPlan'
 import type { StockInCommitLine, StockInCommitLineResult } from '../routes/stockInCommit'
 
 /*
@@ -73,8 +74,6 @@ type ItemRow = ItemFacts & { differs: number }
 /** One stock write of an approval: a received-date line of a count (scope 'lot'), or a branch-total line (scope 'branch', batchId 0; an older product-level count is one). `many`: the product has several. */
 type Unit = { key: string; productId: number; batchId: number; scope: 'lot' | 'branch'; counted: number; seen: number | null; many: boolean;
   /** The figure the COUNTER typed, only when the approver modified this line (then `counted` is the approver's). */ was?: number }
-/** What one line is sent with, stored before the write so a repeat is identical: the received date it lands on and the two figures the writer computes its target from. */
-type Plan = { lot: number; scope: 'lot' | 'branch'; counted: number; seen: number; was?: number }
 /** What a landed line did, read from the stock writer's own answer (before and after are the lot's, or the branch's for a branch-total line). */
 type UnitEntry = { batchId: number; scope: 'lot' | 'branch'; before: number | null; after: number | null; branchBefore: number | null; branchAfter: number | null; counted: number; seen: number; at: string;
   /** The counter's own figure, when the approver modified the line (counted is then the approver's). */ was?: number; clamped?: true; wanted?: number; operationId?: string; historyId?: number }
@@ -94,28 +93,9 @@ export const approvalTarget = (live: number, counted: number, seen: number): num
 const whole = (value: number): boolean => Math.abs(value - Math.round(value)) <= EPSILON
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
 
-const validPlan = (value: unknown): value is Plan => {
-  const plan = value as Plan | null
-  return !!plan && typeof plan === 'object' && finite(plan.lot) && (plan.scope === 'lot' || plan.scope === 'branch') && finite(plan.counted) && finite(plan.seen)
-}
-function plansOf(json: string): Record<string, Plan> {
-  try {
-    const parsed = JSON.parse(json) as unknown
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-    return Object.fromEntries(Object.entries(parsed).filter(([, plan]) => validPlan(plan))) as Record<string, Plan>
-  } catch { return {} }
-}
-/** The part-applied lines of products that have several: unit key -> what landed. */
-function appliedUnits(json: string): Record<string, UnitEntry> {
-  try {
-    const units = (JSON.parse(json) as { units?: unknown }).units
-    return units && typeof units === 'object' && !Array.isArray(units) ? units as Record<string, UnitEntry> : {}
-  } catch { return {} }
-}
 const appliedJson = (lines: Record<string, AppliedLine>, units: Record<string, UnitEntry>): string => JSON.stringify({ lines, ...(Object.keys(units).length ? { units } : {}) })
 /** The stock request id of one line under a claim key: a product with a single line keeps `<key>-<product>`, one with several `<key>-<product>-<received date>`. */
 const stockId = (stockKey: string, unitKey: string): string => `${stockKey}-${unitKey.replace(':', '-')}`
-const productOf = (unitKey: string): number => Number.parseInt(unitKey, 10)
 
 /** Can anyone else in the organization decide a count? Only then is a person kept from approving their own; a sole approver must still be able to. */
 async function anotherApproverExists(db: D1Compat, actor: Actor): Promise<boolean> {
@@ -255,7 +235,7 @@ export async function decideInventoryCheckApproval(db: D1Compat, principal: Inve
   if (decision === 'approve' && row.submitted_by === actor.id && await anotherApproverExists(db, actor)) fail(403, 'inventory_check_self_approval')
   const lines = await readLines(db, sessionId, session.branch_id, recordedLines(row))
   if (lines.length !== row.lines) return fail(409, 'inventory_check_approval_lines_changed')
-  const applied = appliedLines(row.applied_json), held = appliedUnits(row.applied_json)
+  const applied = appliedLines(row.applied_json), held = appliedUnits<UnitEntry>(row.applied_json)
   const superseded = supersededLines(row.superseded_json)
   // The approver's decisions on lines: a rejected line is never applied and is no longer open; a modified line is applied from its modified figure (readFacts).
   const decisions = lineDecisions(row.line_decisions_json)
@@ -720,10 +700,9 @@ export async function decideInventoryCheckLine(db: D1Compat, principal: Inventor
     line = lines.find(item => item.product_id === productId)
     if (!line) return fail(404, 'inventory_check_line_not_found', { productIds: [productId] })
   }
-  const applied = appliedLines(row.applied_json), held = appliedUnits(row.applied_json), superseded = supersededLines(row.superseded_json), stored = plansOf(row.plan_json)
-  const ofProduct = (unitKey: string): boolean => productOf(unitKey) === productId
+  const applied = appliedLines(row.applied_json), held = appliedUnits<UnitEntry>(row.applied_json), superseded = supersededLines(row.superseded_json), stored = plansOf(row.plan_json)
   if (applied[String(productId)]) fail(409, 'inventory_check_line_applied', { productIds: [productId] })
-  if (Object.keys(held).some(ofProduct) || Object.keys(stored).some(ofProduct)) fail(409, 'inventory_check_line_in_progress', { productIds: [productId] })
+  if (productsInFlight(row.plan_json, row.applied_json).includes(productId)) fail(409, 'inventory_check_line_in_progress', { productIds: [productId] })
   if (superseded[String(productId)]) fail(409, 'inventory_check_count_superseded', { productIds: [productId] })
   const decisions = lineDecisions(row.line_decisions_json), current = decisions[String(productId)]
   if (parsed.action === 'reject' && current?.decision === 'reject') fail(409, 'inventory_check_line_already_rejected', { productIds: [productId] })
