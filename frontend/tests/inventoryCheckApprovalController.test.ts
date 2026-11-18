@@ -256,6 +256,26 @@ const cases: Array<[string, () => Promise<void>]> = [
     await again.actions().decideApproval('approve', [2])
     assert.deepEqual(again.log.applied, [{ '2': 2 }], 'a line applied before is not patched again')
   }],
+  ['a line another tab applied (this page had not seen it) is not put on any row from this answer: the session is read once instead, and a normal accept or Approve all reads nothing (round-3 review, finding 4)', async () => {
+    const line = (before: number, after: number) => ({ before, target: after, after, at: 'x' })
+    // line 4 was accepted in another tab, then this page accepts line 2: the answer lists both, but this request applied one
+    const elsewhere = { ...pending, applied: 2, applying: true, applying_request_id: 'inventory_check_approval_1', planned_lines: [], applied_lines: { 4: line(6, 2), 2: line(4, 3) } }
+    const r = rig(); r.script.approval.push(answer(elsewhere, 1, 0))
+    await r.actions().decideApproval('approve', [2])
+    assert.deepEqual(r.log.applied, [], 'the older figure of line 4 reaches no row'); assert.equal(r.log.reloads, 1, 'the session is read once')
+    // a dated line writes two stock lines in one request: the count alone (2 new products, 2 writes) cannot tell, but line 4 is a line this request was not asked for
+    const dated = rig(); dated.script.approval.push(answer(elsewhere, 2, 0))
+    await dated.actions().decideApproval('approve', [2])
+    assert.deepEqual(dated.log.applied, [], 'a product the request did not name is applied elsewhere'); assert.equal(dated.log.reloads, 1)
+    // Approve all (no ids) is judged by the count: two new products from a request that wrote one
+    const all = rig(); all.script.approval.push(answer(elsewhere, 1, 0))
+    await all.actions().decideApproval('approve')
+    assert.deepEqual(all.log.applied, []); assert.equal(all.log.reloads, 1)
+    // the normal cases read nothing after a 200
+    const one = rig(); one.script.approval.push(answer({ ...pending, applied: 1, applying: true, applying_request_id: 'inventory_check_approval_1', planned_lines: [], applied_lines: { 2: line(4, 3) } }, 1, 0))
+    await one.actions().decideApproval('approve', [2])
+    assert.deepEqual(one.log.applied, [{ '2': 3 }]); assert.equal(one.log.reloads, 0, 'a single accept reads nothing')
+  }],
   ['Approve all puts the lines each request newly applied on the rows as it goes: step one carries line 1, step two only line 2', async () => {
     const r = rig()
     const one = { ...pending, applied: 1, applying: true, applying_request_id: 'inventory_check_approval_1', applied_lines: { 1: { before: 7, target: 12, after: 12, at: 'x' } } }

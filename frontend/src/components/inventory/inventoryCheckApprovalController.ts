@@ -78,23 +78,26 @@ export function createApprovalActions(deps: ApprovalDeps) {
     const attempt = deps.approvalAttempt.current
     deps.inFlight.current = true; deps.setBusy(true); deps.setWriteError(''); deps.setRefused({})
     for (const id of productIds ?? []) deps.setLineError(String(id), null)
-    let seen = deps.approval?.applied_lines ?? {}
+    let seen = deps.approval?.applied_lines ?? {}, stale = false
     try {
       const flow = await runApprovalFlow({
         send: () => deps.send.approval({ decision, requestId: attempt.requestId, ...(productIds ? { productIds } : {}) }),
         onProgress: result => {
           if (!deps.current()) return
-          // The stock of a line this request applied is now the figure it wrote: the screen shows it without a second read.
+          // The stock of a line this request applied is now the figure it wrote: the screen shows it without a second read. A line this page had not seen that this request did not apply (another tab applied it,
+          // and sales may have moved its stock since) carries an older figure than the rows hold: the answer is not put on any row then, and the session is read once at the end.
           const fresh = Object.entries(result.approval.applied_lines ?? {}).filter(([id, line]) => !seen[id] && finite(line.after))
           seen = result.approval.applied_lines ?? {}
-          if (fresh.length) deps.setApplied?.(Object.fromEntries(fresh.map(([id, line]) => [id, line.after])))
+          // A request writes at least one stock line per product it applies, so more new products than writes, or a new product it was not asked for, was applied elsewhere.
+          if (fresh.length > result.applied || (productIds && fresh.some(([id]) => !productIds.includes(Number(id))))) stale = true
+          if (fresh.length && !stale) deps.setApplied?.(Object.fromEntries(fresh.map(([id, line]) => [id, line.after])))
           deps.setApproval(result.approval); deps.setRefused(refusedMap(result.refused))
         },
         isCurrent: deps.current,
         maxRequests: approvalRequestBound(deps.capabilities),
       })
       if (!deps.current()) return
-      let reload = !productIds
+      let reload = !productIds || stale
       if (flow.outcome === 'done') {
         deps.approvalAttempt.current = null
         const ended = flow.last?.approval.status !== 'pending'

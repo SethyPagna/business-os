@@ -891,6 +891,21 @@ try {
     await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
     assert.match(rowText(1), /Now 7/, 'Approve all: the first request put line 1 on its row'); assert.match(rowText(2), /Now 3/, 'and the last one line 2'); assert.match(rowText(3), /Now 4/, 'and line 3 (2 written plus its 2 damaged units)')
     const release = delayedProducts as unknown as ((value: unknown) => void) | null; delayedProducts = null; release?.({ ...response({}), items: productOverride, total: 3 })
+    // A page that missed an earlier accept: line 3 was accepted in another tab (stock 2), then a sale of 1 left 1 ordinary (3 with its 2 damaged units), then line 2 is accepted from this stale page. The answer
+    // lists line 3 at the older figure, which no row may take: the session is read once and the rows equal that read.
+    productOverride = [{ ...product, id: 1, name: 'Serum', quantity: 9 }, { ...product, id: 2, name: 'Toner', quantity: 5 }, { ...product, id: 3, name: 'Cream', quantity: 7, damaged_quantity: 2 }]
+    sessionApproval = pendingState.approval
+    await approving.click(approving.button('Leave session')); await openSession(approving)
+    assert.match(rowText(3), /Now 7/); assert.match(rowText(2), /Now 5/)
+    const line = (before: number, after: number) => ({ before, target: after, after, at: '2026-11-18T00:00:00.000Z' })
+    const missed: InventoryCheckApproval = { ...acceptedState.approval, applied: 2, applied_lines: { 3: line(5, 2), 2: line(5, 3) } }
+    const loadsBeforeStale = sessionLoads
+    sessionApproval = missed
+    productOverride = [{ ...product, id: 1, name: 'Serum', quantity: 9 }, { ...product, id: 2, name: 'Toner', quantity: 3 }, { ...product, id: 3, name: 'Cream', quantity: 3, damaged_quantity: 2 }]
+    decideScript = [{ approval: missed, applied: 1, remaining: 0, done: true }]
+    await approving.click(lineButton(2, 'accept')); await confirmInDialog(approving, 'Approve')
+    assert.equal(sessionLoads, loadsBeforeStale + 1, 'the session is read once after an answer that lists a line this request did not apply')
+    assert.match(rowText(3), /Now 3/, 'row 3 equals the fresh read (1 ordinary + 2 damaged), not the older figure of the other tab (2 + 2)'); assert.match(rowText(2), /Now 3/, 'and row 2 the fresh read')
     productOverride = null; memberOverride = submittedItems; sessionApproval = pendingApproval
     await approving.click(approving.button('Leave session')); await openSession(approving)
   }
