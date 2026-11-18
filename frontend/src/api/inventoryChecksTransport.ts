@@ -9,9 +9,7 @@ import type { InventoryCheckLotsAnswer, InventoryCheckObservation, InventoryChec
 /** What approving a line wrote (or, for a line already at its figure, found): ordinary stock before and after, and the target. */
 export type InventoryCheckApprovalLine = { before: number; target: number; after: number; at: string; settled?: true
   /** The stock ran out before the whole shortage the count found could be removed: stock was set to 0 and `wanted` (below zero) is the figure the count asked for. */
-  clamped?: true; wanted?: number
-  /** Session detail: which received dates moved. A 'lot' entry carries that date's own figures; a 'branch' entry (a count with no dates) carries the branch's. */
-  lots?: Array<{ batchId: number; scope: 'lot' | 'branch'; before: number | null; after: number | null; branchAfter: number | null }> }
+  clamped?: true; wanted?: number }
 /** The approver's decision on one line (reject, or modify to a figure: one total, or the dates of a line counted by received date). Absent line = open. */
 export type InventoryCheckLineDecision = { decision: 'reject' | 'modify'; counted?: number; lots?: Array<{ batchId: number; counted: number }>; note?: string; at: string; by_name?: string }
 /** A submitted count's approval (ic_fix_stock). Sent only to a viewer who may see stock. */

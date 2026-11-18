@@ -1,4 +1,4 @@
-import type { InventoryCheckApproval, InventoryCheckApprovalDecision, InventoryCheckApprovalLine, InventoryCheckLineAnswer, InventoryCheckSessionItem } from '../../api/inventoryChecksTransport.ts'
+import type { InventoryCheckApproval, InventoryCheckApprovalDecision, InventoryCheckLineAnswer, InventoryCheckSessionItem } from '../../api/inventoryChecksTransport.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
 import type { ConfirmRequest } from '../shared/useConfirmDialog.tsx'
 import { approvalRequestBound, runApprovalFlow } from './inventoryCheckApprovalFlow.ts'
@@ -26,7 +26,7 @@ export type ApprovalDeps = {
   setBusy: (busy: boolean) => void
   setApproval: (approval: InventoryCheckApproval) => void
   /** Lines this decision applied, by product id, with the ordinary stock each now holds: the page puts it on the session's rows so they do not show the stock from before. */
-  setApplied?: (stock: Record<string, number>, lines: Record<string, InventoryCheckApprovalLine>) => void
+  setApplied?: (stock: Record<string, number>) => void
   setWriteError: (text: string) => void
   setRefused: (refused: Record<string, string>) => void
   setLineError: (productId: string, text: string | null) => void
@@ -87,7 +87,7 @@ export function createApprovalActions(deps: ApprovalDeps) {
           // The stock of a line this request applied is now the figure it wrote: the screen shows it without a second read.
           const fresh = Object.entries(result.approval.applied_lines ?? {}).filter(([id, line]) => !seen[id] && finite(line.after))
           seen = result.approval.applied_lines ?? {}
-          if (fresh.length) deps.setApplied?.(Object.fromEntries(fresh.map(([id, line]) => [id, line.after])), Object.fromEntries(fresh))
+          if (fresh.length) deps.setApplied?.(Object.fromEntries(fresh.map(([id, line]) => [id, line.after])))
           deps.setApproval(result.approval); deps.setRefused(refusedMap(result.refused))
         },
         isCurrent: deps.current,

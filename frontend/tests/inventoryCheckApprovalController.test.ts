@@ -15,7 +15,7 @@ const refusal = (code: string, status = 409) => Object.assign(new Error(code), {
 
 function rig(options: { approval?: InventoryCheckApproval; sessionId?: string; confirm?: boolean; firstId?: number } = {}) {
   const log = { approvals: [] as Array<Record<string, unknown>>, lines: [] as Array<Record<string, unknown>>, confirms: [] as Array<Parameters<ApprovalDeps['askToConfirm']>[0]>, reloads: 0, notices: [] as string[],
-    approvalStates: [] as InventoryCheckApproval[], applied: [] as Array<Record<string, number>>, appliedLines: [] as Array<Record<string, unknown>>, refused: [] as Array<Record<string, string>>, lineErrors: {} as Record<string, string | null>, writeErrors: [] as string[], busy: [] as boolean[] }
+    approvalStates: [] as InventoryCheckApproval[], applied: [] as Array<Record<string, number>>, appliedArity: [] as number[], refused: [] as Array<Record<string, string>>, lineErrors: {} as Record<string, string | null>, writeErrors: [] as string[], busy: [] as boolean[] }
   const script = { approval: [] as Array<InventoryCheckApprovalDecision | Error>, line: [] as Array<InventoryCheckLineAnswer | Error> }
   const state = { approval: options.approval ?? pending, current: true, confirm: options.confirm ?? true, sessionId: options.sessionId ?? 'sub-1' }
   const attempts = { approvalAttempt: { current: null as ApprovalAttempt | null }, lineAttempt: { current: null as ApprovalAttempt | null } }
@@ -24,7 +24,7 @@ function rig(options: { approval?: InventoryCheckApproval; sessionId?: string; c
   const knownRefusal = async (cause: unknown) => { const code = (cause as { code?: string })?.code; return typeof code === 'string' && Object.hasOwn(REFUSAL_MESSAGES, code) ? REFUSAL_MESSAGES[code] : undefined }
   const actions = () => createApprovalActions({
     sessionId: state.sessionId, approval: state.approval, items, capabilities: null, current: () => state.current, inFlight, setBusy: value => { log.busy.push(value) },
-    setApproval: approval => { state.approval = approval; log.approvalStates.push(approval) }, setApplied: (stock, lines) => { log.applied.push(stock); log.appliedLines.push(lines) }, setWriteError: text => { log.writeErrors.push(text) }, setRefused: map => { log.refused.push(map) },
+    setApproval: approval => { state.approval = approval; log.approvalStates.push(approval) }, setApplied: (...args: unknown[]) => { log.applied.push(args[0] as Record<string, number>); log.appliedArity.push(args.length) }, setWriteError: text => { log.writeErrors.push(text) }, setRefused: map => { log.refused.push(map) },
     setLineError: (id, text) => { log.lineErrors[id] = text }, askToConfirm: async request => { log.confirms.push(request); return state.confirm }, tr: (_key, fallback) => fallback, notify: message => { log.notices.push(message) },
     knownRefusal, unknownSaveKey: () => 'inventory_check_save_unknown', reload: () => { log.reloads += 1 }, ...attempts, newRequestId: prefix => `${prefix}_${++counter}`,
     send: {
@@ -248,7 +248,7 @@ const cases: Array<[string, () => Promise<void>]> = [
     r.script.approval.push(answer(accepted, 1, 0))
     await r.actions().decideApproval('approve', [1])
     assert.deepEqual(r.log.applied, [{ '1': 12 }]); assert.equal(r.log.reloads, 0)
-    assert.deepEqual(r.log.appliedLines, [{ 1: { before: 7, target: 12, after: 12, at: 'x' } }], 'and the answer line itself, for the rows that keep per-date figures')
+    assert.deepEqual(r.log.appliedArity, [1], 'and only the stock figures: the session rows need nothing else')
     const again = rig({ approval: accepted }); again.script.approval.push(answer({ ...accepted, applied: 2, applied_lines: { ...accepted.applied_lines, 2: { before: 4, target: 2, after: 2, at: 'x' } } }, 1, 0))
     await again.actions().decideApproval('approve', [2])
     assert.deepEqual(again.log.applied, [{ '2': 2 }], 'a line applied before is not patched again')

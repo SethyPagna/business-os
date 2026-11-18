@@ -83,7 +83,7 @@ POST /api/inventory-checks/sessions/:id/approval
 
 New field `line_decisions`: `{ "<productId>": { "decision": "reject" | "modify", "counted"?: n, "lots"?: [{ "batchId": n, "counted": n }], "note"?: text, "at": ISO time, "by_name"?: username } }`
 (`by_name` only for a viewer who may see staff names; the account id is never sent). An absent key means the line is open. `lines`, `applied_lines`, `superseded`, `closed` are as before. A line of `applied_lines` carries `lots`, the received dates it moved: an entry of scope `lot` holds that date's own `before` and `after`, `branchAfter` the branch's;
-the page puts them on the product's row without a read.
+the session's rows take the line's `after` plus the product's damaged units, with no read.
 
 A rejected line no longer counts as "waiting" anywhere (the Waiting filter, the row's pending tag, Fix stock's hold).
 

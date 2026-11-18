@@ -11,7 +11,7 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp, type AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import { claimSyncProblemPresentation } from '../../utils/syncProblemLifecycle.ts'
 import { captureActorReadScope, captureActorWriteIdentity, isActorReadScopeCurrent, isActorWriteIdentityCurrent } from '../../api/actorReadScope.ts'
-import { captureInventoryCheckWriteScope, changeInventoryCheckSession, createInventoryCheckSession, readInventoryCheckHistory, readInventoryCheckList, readInventoryCheckLots, readInventoryCheckOverlay, readInventoryCheckProducts, readInventoryCheckSession, readInventoryCheckSessions, saveInventoryCheckObservation, submitInventoryCheckCounts, type InventoryCheckApproval, type InventoryCheckApprovalLine, type InventoryCheckSession, type InventoryCheckSessionItem } from '../../api/inventoryChecksTransport.ts'
+import { captureInventoryCheckWriteScope, changeInventoryCheckSession, createInventoryCheckSession, readInventoryCheckHistory, readInventoryCheckList, readInventoryCheckLots, readInventoryCheckOverlay, readInventoryCheckProducts, readInventoryCheckSession, readInventoryCheckSessions, saveInventoryCheckObservation, submitInventoryCheckCounts, type InventoryCheckApproval, type InventoryCheckSession, type InventoryCheckSessionItem } from '../../api/inventoryChecksTransport.ts'
 import type { QueryParams } from '../../api/query.ts'
 import { currentDataEpoch } from '../../api/dataEpoch.ts'
 import { peekProductSearch, primeProductSearch, getProductFilters } from '../../api/productReadTransport.ts'
@@ -46,7 +46,7 @@ import { projectProduct } from './inventoryCheckProject.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { loadWired, mergeWiredRows, NotWired, patchWiredLots, patchWiredRaw, readWiredRows, rememberWiredMode, wiredMode, wiredResult, type Branch, type WiredAccess, type WiredDeps, type WiredExtras, type WiredList, type WiredRaw } from './inventoryWired.ts'
 import { withAppliedStock } from './inventoryCheckApprovalLines.ts'
-import { patchWiredApplied, withAppliedRowStock } from './inventoryCheckAppliedRows.ts'
+import { withAppliedRowStock } from './inventoryCheckAppliedRows.ts'
 import { useInventoryCheckApproval } from './useInventoryCheckApproval.ts'
 import { productSalesFocus, queueReportsFocus } from '../sales/reports/reportsFocus.ts'
 import type { InventoryCheckHistoryResult } from './InventoryCheckHistoryFloat.tsx'
@@ -998,13 +998,10 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const canDecide = fresh && !!approval && approval.can_approve && data?.capabilities?.approveCounts === true && canWriteToServer
   // Closing moves no stock, so it needs the extra but not the right to adjust stock.
   const canClose = fresh && !!approval && approval.can_approve && canWriteToServer
-  // Lines the approval applied: the panel's items and the product rows outside it take the stock the answer says (no read), as Fix stock does for its row.
-  function takeAppliedStock(stock: Record<string, number>, lines: Record<string, InventoryCheckApprovalLine>) {
+  // Lines the approval applied: the panel's items and the session's product rows take the stock the answer says (no read), as Fix stock does for its row.
+  function takeAppliedStock(stock: Record<string, number>) {
     setItems(previous => withAppliedStock(previous, stock))
-    const raw = wiredRaw.current
-    const next = raw ? patchWiredApplied(raw, lines) : raw
-    if (next) wiredRaw.current = next
-    setData(previous => previous?.wired === true && next ? wiredResult(next, previous) : previous ? { ...previous, items: withAppliedRowStock(previous.items ?? [], stock, items) } : previous)
+    setData(previous => previous ? { ...previous, items: withAppliedRowStock(previous.items ?? [], stock, items) } : previous)
   }
   const { refusedLines, lineErrors, decideApproval, decideLine } = useInventoryCheckApproval({ sessionId, approval, items, capabilities: data?.capabilities, writeScope, inFlight, current, setBusy, setApproval, setWriteError,
     askToConfirm, tr, notify, knownRefusal, unknownSaveKey, reload: reloadAll, setApplied: takeAppliedStock })
