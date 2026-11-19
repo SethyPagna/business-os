@@ -1353,7 +1353,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
     <IconAction label={t('back')} disabled={controlsLocked || tasks.busy} onClick={() => onSelect({ branchId, sessionId: '', taskId: '' })}><ArrowLeft className="h-5 w-5" aria-hidden="true" /></IconAction>
     {taskRow ? <div className="scroll-x-clean min-w-0 flex-1">
       <div className="inline-flex items-center gap-2 align-middle text-xs">
-        <ProgressRing progress={{ total: taskRow.total, done: taskRow.done, issue: 0, unstarted: Math.max(0, taskRow.total - taskRow.done) }} t={t} />
+        <ProgressRing figure={false} progress={{ total: taskRow.total, done: taskRow.done, issue: 0, unstarted: Math.max(0, taskRow.total - taskRow.done) }} t={t} />
         <span className="shrink-0 tabular-nums" data-task-progress-text>{progressOrAllText(t, taskRow)}</span>
         {taskRow.picked_up_by ? <span className={`shrink-0 ${taskRow.mine ? 'font-semibold text-emerald-700 dark:text-emerald-300' : 'text-gray-600 dark:text-gray-300'}`} data-task-picker>{pickerText(t, taskRow.picked_up_by)}</span> : null}
         {taskRow.status === 'closed' ? <SessionStatusChip status="closed" t={t} /> : null}

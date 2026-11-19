@@ -1,4 +1,4 @@
-import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
+import ClipboardPlus from 'lucide-react/dist/esm/icons/clipboard-plus.js'
 import Hand from 'lucide-react/dist/esm/icons/hand.js'
 import Lock from 'lucide-react/dist/esm/icons/lock.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
@@ -8,9 +8,8 @@ import { fmtDateTime24 } from '../../utils/formatters.ts'
 import FilterMenu, { type FilterSection } from '../shared/FilterMenu.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
 import SoleBranchLabel from '../shared/SoleBranchLabel.tsx'
-import TruncatedText from '../shared/TruncatedText.tsx'
 import { ProgressRing, SessionStatusChip } from './InventoryCheckSessionsList.tsx'
-import { pickerText, progressOrAllText, removedText, taskName } from './inventoryCheckTaskText.ts'
+import { pickerText, progressOrAllText, removedText, reopenedText, taskName, type TaskReopened } from './inventoryCheckTaskText.ts'
 
 type Translator = (key: string) => string | null | undefined
 const label = (t: Translator, key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
@@ -62,7 +61,7 @@ export function TasksHeader({ t, branches, branchId, onBranch, issue, issueBlock
     {issue ? <>
       {issueBlocked ? <InfoHint text={issueBlocked} label={issueBlocked} /> : null}
       <button type="button" data-task-issue className="btn-primary inline-flex min-h-11 shrink-0 items-center gap-1 px-3 text-xs aria-disabled:cursor-not-allowed aria-disabled:opacity-60 lg:min-h-10" aria-disabled={issueBlocked || busy ? true : undefined} title={issueBlocked || issueText}
-        onClick={() => { if (!issueBlocked && !busy) onIssue() }}><ClipboardList className="h-4 w-4" aria-hidden="true" />{issueText}</button>
+        onClick={() => { if (!issueBlocked && !busy) onIssue() }}><ClipboardPlus className="h-4 w-4" aria-hidden="true" />{issueText}</button>
     </> : null}
   </div>
 }
@@ -86,24 +85,28 @@ export default function InventoryCheckTasksList({ board, t, canWork, busy, onOpe
     {board.items.map(task => {
       const name = taskName(t, task)
       const progress = progressOrAllText(t, task)
+      // Only a Worker that sends the field draws the line; today's sends nothing.
+      const reopened = (task as InventoryCheckTask & { reopened?: TaskReopened }).reopened
       return <li key={task.id} data-inventory-check-task={task.id} data-task-status={task.status} data-task-mine={task.mine ? '' : undefined} className="min-w-0">
-        <div tabIndex={0} data-task-open className="flex min-h-10 w-full min-w-0 cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 py-2 text-left text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 lg:flex-nowrap"
-          onClick={() => onOpen(task)} onKeyDown={event => { if ((event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) { event.preventDefault(); onOpen(task) } }}>
+        {/* The whole row opens the task (a tap anywhere). The name is its one real button, so the keyboard and screen readers have a control named by the task; its full text is the tooltip. Pick up, Hand back and Close are separate buttons and never open it. */}
+        <div data-task-open className="flex min-h-10 w-full min-w-0 cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 py-2 text-left text-xs xl:flex-nowrap"
+          onClick={() => onOpen(task)}>
           <SessionStatusChip status={task.status} t={t} />
-          <span className="min-w-0 flex-1 font-semibold leading-relaxed lg:order-none"><TruncatedText text={name} /></span>
-          <span className="ml-auto lg:order-last lg:ml-0"><TaskActions task={task} t={t} busy={busy} canWork={canWork} onPickup={() => onPickup(task)} onRelease={() => onRelease(task)} onClose={() => onClose(task)} /></span>
-          <div className="flex min-w-0 basis-full flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] leading-relaxed text-gray-600 lg:contents lg:text-xs dark:text-gray-300">
-            <span className="inline-flex items-center gap-1 lg:w-36 lg:shrink-0" data-task-progress>
-              <ProgressRing progress={{ total: task.total, done: task.done, issue: 0, unstarted: Math.max(0, task.total - task.done) }} t={t} />
+          <button type="button" data-task-name title={name} className="min-w-0 flex-1 border-0 bg-transparent p-0 text-left text-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"><span className="block truncate font-semibold leading-relaxed">{name}</span></button>
+          <span className="ml-auto xl:order-last xl:ml-0"><TaskActions task={task} t={t} busy={busy} canWork={canWork} onPickup={() => onPickup(task)} onRelease={() => onRelease(task)} onClose={() => onClose(task)} /></span>
+          <div className="flex min-w-0 basis-full flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] leading-relaxed text-gray-600 xl:contents xl:text-xs dark:text-gray-300">
+            <span className="inline-flex items-center gap-1 xl:w-36 xl:shrink-0" data-task-progress>
+              <ProgressRing figure={false} progress={{ total: task.total, done: task.done, issue: 0, unstarted: Math.max(0, task.total - task.done) }} t={t} />
               <span>{progress}{task.removed > 0 ? ` · ${removedText(t, task.removed)}` : ''}</span>
             </span>
-            {task.picked_up_by ? <span data-task-picker className={`min-w-0 lg:w-44 lg:shrink-0 ${task.mine ? 'font-semibold text-emerald-700 dark:text-emerald-300' : ''}`}>{pickerText(t, task.picked_up_by)}</span> : <span aria-hidden="true" className="hidden lg:block lg:w-44 lg:shrink-0" />}
+            {task.picked_up_by ? <span data-task-picker className={`min-w-0 xl:w-44 xl:shrink-0 ${task.mine ? 'font-semibold text-emerald-700 dark:text-emerald-300' : ''}`}>{pickerText(t, task.picked_up_by)}</span> : <span aria-hidden="true" className="hidden xl:block xl:w-44 xl:shrink-0" />}
             {task.status === 'closed' && task.closed_at
-              ? <span className="text-gray-500 lg:w-40 lg:shrink-0">{label(t, 'shift_status_closed', 'Closed')} {fmtDateTime24(task.closed_at)}</span>
-              : <span className="lg:w-40 lg:shrink-0" data-task-issued>{fmtDateTime24(task.issued_at)}</span>}
-            {typeof task.issued_by === 'string' && task.issued_by ? <span className="text-gray-500 lg:w-28 lg:shrink-0" data-task-issuer title={label(t, 'inventory_check_created_by', 'Created by')}>@{task.issued_by}</span> : null}
+              ? <span className="text-gray-500 xl:w-40 xl:shrink-0">{label(t, 'shift_status_closed', 'Closed')} {fmtDateTime24(task.closed_at)}</span>
+              : <span className="xl:w-40 xl:shrink-0" data-task-issued>{fmtDateTime24(task.issued_at)}</span>}
+            {typeof task.issued_by === 'string' && task.issued_by ? <span className="text-gray-500 xl:w-28 xl:shrink-0" data-task-issuer title={label(t, 'inventory_check_created_by', 'Created by')}>@{task.issued_by}</span> : null}
           </div>
         </div>
+        {reopened ? <p data-task-reopened className="cursor-pointer pb-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-300" onClick={() => onOpen(task)}>{reopenedText(t, reopened)}</p> : null}
       </li>
     })}
   </ul>

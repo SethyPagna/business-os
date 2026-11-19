@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent,
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import CircleDashed from 'lucide-react/dist/esm/icons/circle-dashed.js'
 import ClipboardCheck from 'lucide-react/dist/esm/icons/clipboard-check.js'
-import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
+import ClipboardPlus from 'lucide-react/dist/esm/icons/clipboard-plus.js'
 import Clock from 'lucide-react/dist/esm/icons/clock.js'
 import Hourglass from 'lucide-react/dist/esm/icons/hourglass.js'
 import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left.js'
@@ -295,15 +295,18 @@ function ListRow({ product, draft, adornment, refusal, columns, countable, copy,
 
   // The whole row opens the detail (owner, 17 Nov: "can only click to view details of the product when clicked on image, can expand it"). It is focusable and Enter opens it; the keydown of a control inside bubbles here too, so only Enter ON the row counts.
   const openDetail = () => onOpenProduct(product)
+  // In Issue mode a tap on the row ticks it, as in Products' select mode (the checkbox is a 44 px target, the row a bigger one); the image button still opens the product.
+  const tickable = !!(picks && onPick && countable)
+  const rowAction = tickable ? () => onPick(product) : openDetail
   // The row is a focus stop that opens the product on Enter and on a press: its name says what it does AND which product and status it is (a list item with no name is announced as nothing, and a bare
   // action label would hide the row's content). It stays a list item, not a button: the row holds real buttons and inputs of its own, and a button may not contain them.
-  const rowOpenLabel = `${tr('open_product', 'Open product')}: ${product.name}${statusWords ? ` — ${statusWords}` : ''}`
+  const rowOpenLabel = `${tickable ? '' : `${tr('open_product', 'Open product')}: `}${product.name}${statusWords ? ` — ${statusWords}` : ''}`
   function onRowKeyDown(event: KeyboardEvent<HTMLLIElement>) {
-    if (event.key === 'Enter' && event.target === event.currentTarget && !event.nativeEvent?.isComposing) { event.preventDefault(); openDetail() }
+    if (event.key === 'Enter' && event.target === event.currentTarget && !event.nativeEvent?.isComposing) { event.preventDefault(); rowAction() }
   }
 
   return <li data-inventory-check-row={id} data-check-list-status={status ?? undefined} data-selected={selected ? '' : undefined} data-unsaved={counting && draft ? '' : undefined} data-refused={refusal ? '' : undefined} data-scan-hit={scanHit ? '' : undefined}
-    tabIndex={0} onClick={event => rowClickOpens(event, openDetail)} onKeyDown={onRowKeyDown} aria-label={rowOpenLabel}
+    tabIndex={0} onClick={event => rowClickOpens(event, rowAction)} onKeyDown={onRowKeyDown} aria-label={rowOpenLabel}
     className={`relative min-w-0 max-w-full cursor-pointer border-b border-l-2 border-b-gray-100 py-2 pl-2 pr-1 last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:border-b-gray-800 ${edge} ${counting && draft ? UNSAVED_ROW_CLASS : ''} ${scanHit ? 'rounded-sm ring-2 ring-primary-400 dark:ring-primary-300' : ''}`}>
     {/* A count waiting for an approver (ic_fix_stock) is shown ONCE on this surface: the status icon (the hourglass). The gutter mini tag of the review queue would repeat it. */}
     {/* One compact line where the width allows: the image keeps its square, the name takes the room, the status icon and the count input sit beside it. */}
@@ -493,7 +496,7 @@ export function InventoryCheckIssueBar({ pickedCount, blocked, busy, issueLabel,
     <span className="min-w-0 flex-1" aria-hidden="true" />
     {blocked ? <InfoHint text={blocked} label={blocked} /> : null}
     <button type="button" data-issue-action="issue" className="btn-primary inline-flex min-h-11 shrink-0 items-center gap-1 px-3 text-xs aria-disabled:cursor-not-allowed aria-disabled:opacity-60 lg:min-h-10"
-      aria-label={pickedCount > 0 ? `${issue} (${pickedCount})` : issue} aria-disabled={blocked || busy ? true : undefined} title={blocked || issue} onClick={() => { if (!blocked && !busy) onIssue() }}><ClipboardList className="h-4 w-4" aria-hidden="true" />{issue}
+      aria-label={pickedCount > 0 ? `${issue} (${pickedCount})` : issue} aria-disabled={blocked || busy ? true : undefined} title={blocked || issue} onClick={() => { if (!blocked && !busy) onIssue() }}><ClipboardPlus className="h-4 w-4" aria-hidden="true" />{issue}
       {pickedCount > 0 ? <span data-picked-pill aria-hidden="true" className="rounded-full bg-white/25 px-1.5 text-[10px] font-semibold leading-relaxed tabular-nums">{pickedCount}</span> : null}</button>
   </div>
 }
