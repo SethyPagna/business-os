@@ -241,7 +241,7 @@ function strings(node, at = [], out = []) {
 // ------------------------------------------------------ what ops.yml must be
 
 const CUTOVER_TOKEN_ENV = { BRANCH_CUTOVER_OPERATOR_TOKEN: '${{ secrets.BRANCH_CUTOVER_OPERATOR_TOKEN }}' }
-const TASKS = ['d1-export', 'r2-apac-copy', 'secret-names', 'settings-upsert', 'read-switch', 'branch-cutover', 'd1-physical-export', 'consistency']
+const TASKS = ['d1-export', 'r2-apac-copy', 'r2-inventory', 'secret-names', 'settings-upsert', 'read-switch', 'branch-cutover', 'd1-physical-export', 'consistency']
 const OUT_DIR = '${{ runner.temp }}/ops-out'
 const UPLOAD_PATH = '${{ runner.temp }}/ops-out/*.enc.json'
 // The only job allowed to run from any ref other than main is none: d1-physical-export reads production wholesale and
@@ -291,6 +291,12 @@ const TASK_STEPS = {
     scriptStep('node ops/scripts/ops-r2.mjs delete-worker', {}, { if: AFTER_CHECKOUT }),
     { kind: 'upload' },
   ],
+  // REST only (no wrangler), so no package install: both buckets listed with GET, no object name kept.
+  'r2-inventory': [
+    { kind: 'confirm' }, { kind: 'checkout' }, { kind: 'setup-node' },
+    scriptStep('node ops/scripts/ops-r2-inventory.mjs'),
+    { kind: 'upload' },
+  ],
   // REST only (no wrangler), so no package install.
   'secret-names': [
     { kind: 'confirm' }, { kind: 'checkout' }, { kind: 'setup-node' },
@@ -335,7 +341,7 @@ const TASK_STEPS = {
 }
 
 // The scripts the workflow runs, and everything they import.
-const ENTRY_SCRIPTS = ['ops/scripts/ops-d1-export.mjs', 'ops/scripts/ops-r2.mjs', 'ops/scripts/ops-secret-names.mjs', 'ops/scripts/ops-settings-upsert.mjs', 'ops/scripts/ops-read-switch.mjs', 'ops/scripts/ops-branch-cutover.mjs', 'ops/scripts/ops-d1-physical-export.mjs', 'ops/scripts/ops-consistency.mjs']
+const ENTRY_SCRIPTS = ['ops/scripts/ops-d1-export.mjs', 'ops/scripts/ops-r2.mjs', 'ops/scripts/ops-r2-inventory.mjs', 'ops/scripts/ops-secret-names.mjs', 'ops/scripts/ops-settings-upsert.mjs', 'ops/scripts/ops-read-switch.mjs', 'ops/scripts/ops-branch-cutover.mjs', 'ops/scripts/ops-d1-physical-export.mjs', 'ops/scripts/ops-consistency.mjs']
 const RUNNER_SCRIPTS = [
   'ops/scripts/ops-common.mjs',
   'ops/scripts/ops-crypto.mjs',
@@ -345,6 +351,7 @@ const RUNNER_SCRIPTS = [
   'ops/scripts/ops-d1-physical-lib.mjs',
   'ops/scripts/ops-r2.mjs',
   'ops/scripts/ops-r2-lib.mjs',
+  'ops/scripts/ops-r2-inventory.mjs',
   'ops/scripts/ops-secret-names.mjs',
   'ops/scripts/ops-settings-upsert.mjs',
   'ops/scripts/ops-read-switch.mjs',
