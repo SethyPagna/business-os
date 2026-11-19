@@ -4,8 +4,9 @@
 // any of those migrations) holds ALL of them. Single or double quotes, every subfolder of scripts/, and a list with a // or /* */ comment inside it (comments are stripped before the lists are read).
 //
 // Not covered: a test that builds its schema in a loop over the migrations directory (it holds every file below its stopping point, so it can only miss the ones above it: run it, and a loop that stops early is the form
-// this scan cannot see), and a list built by code (a spread, a filter, a concatenation of two arrays): only literal lists of file names are read. Comments are stripped by a small scanner that knows quoted strings (not
-// regex literals): a regex literal holding // or an odd quote can hide the rest of its own line, never more.
+// this scan cannot see), and a list built by code (a spread, a filter, a concatenation of two arrays): only literal lists of file names are read. Lists are read from BOTH the raw text and the text with its comments stripped, and the union is
+// checked. The stripper is a small scanner that knows quoted strings (not regex literals), so a regex literal such as /^\/*/ can make it blank everything up to the next end-of-comment, but the raw text still holds
+// every list that has no comment inside it: only a list with a comment inside it, after such a literal, can be missed. The union also reads a list that sits inside a comment (a commented-out list is checked like a live one).
 //
 // Run: node scripts/test-count-schema-lists-hold-writer-indexes-pure.cjs
 const assert = require('node:assert/strict')
@@ -48,8 +49,12 @@ function withoutComments(text) {
   }
   return out
 }
-/** The literal lists of migration files in a source text. */
-const listsIn = (file, text) => [...withoutComments(text).matchAll(LIST)].map(match => ({ file, files: [...match[0].matchAll(ITEM)].map(item => item[1]) }))
+/** The literal lists of migration files in a source text: those of the raw text and those of the comment-stripped text, each distinct list once. */
+const listsIn = (file, text) => {
+  const seen = new Set()
+  return [text, withoutComments(text)].flatMap(source => [...source.matchAll(LIST)].map(match => ({ file, files: [...match[0].matchAll(ITEM)].map(item => item[1]) })))
+    .filter(list => { const key = list.files.join('|'); if (seen.has(key)) return false; seen.add(key); return true })
+}
 /** The one list an exemption names: same file, same file names in the same order. */
 const isExempt = (list, exemptions = NO_SCHEMA) => exemptions.some(({ file, files }) => list.file === file && list.files.length === files.length && list.files.every((name, index) => name === files[index]))
 /** The exemptions whose exact list is not among `lists` any more. */
@@ -124,7 +129,12 @@ check('comments inside a list are stripped, so a list with a comment is read (an
     assert.equal(incomplete(listsIn('c', text), required).length, 1, 'and reported when incomplete')
   }
   assert.deepEqual(listsIn('u', `const U = 'http://x//y'; const L = ['${COUNT_TABLES}', '${required[0]}']`).map(item => item.files), [[COUNT_TABLES, required[0]]], 'a // inside a string is not a comment')
-  assert.equal(listsIn('k', `// const A = ['${COUNT_TABLES}']\n/* const B = ['${COUNT_TABLES}'] */`).length, 0, 'a list that is itself in a comment is not a list')
+  assert.equal(listsIn('k', `// const A = ['${COUNT_TABLES}']\n/* const B = ['${COUNT_TABLES}'] */`).length, 1, 'a list that sits in a comment is read too (once: the same names are one list)')
+  // N4 (round 7): a regex literal that opens a comment for the stripper hides the lines after it up to the next end-of-comment; the raw text still gives the incomplete list that follows it.
+  const fooled = `const LEAD = /^\\/*/\nconst X = 1\nconst Y = 2\nconst A = ['${COUNT_TABLES}', '${required[0]}']\n/* end */`
+  assert.equal(withoutComments(fooled).includes(COUNT_TABLES), false, 'the stripper is fooled by the regex literal (the premise)')
+  assert.deepEqual(listsIn('f', fooled).map(item => item.files), [[COUNT_TABLES, required[0]]], 'the list is still read, from the raw text')
+  assert.equal(incomplete(listsIn('f', fooled), required).length, 1, 'and reported when incomplete')
 })
 
 console.log(`${passed} groups passed; required migrations: ${required.join(', ')}; ${lists.length} literal lists scanned`)
