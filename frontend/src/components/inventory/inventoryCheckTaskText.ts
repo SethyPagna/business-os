@@ -1,5 +1,5 @@
 import type { InventoryCheckTask, InventoryCheckTaskScope } from '../../api/inventoryChecksTransport.ts'
-import { fmtDate } from '../../utils/formatters.ts'
+import { fmtDate, fmtDateTime24 } from '../../utils/formatters.ts'
 import { dayLabel } from './inventoryCheckDays.ts'
 import type { InventoryCheckFilters } from './InventoryCheckControls.tsx'
 import { describeCountScope } from './inventoryCheckScopeText.ts'
@@ -36,6 +36,17 @@ export function progressOrAllText(t: Translator, task: { total: number; done: nu
 
 export function removedText(t: Translator, count: number): string {
   return label(t, 'inventory_check_task_removed', '{count} removed').replace('{count}', String(count))
+}
+
+/** The Worker's `reopened` note on a board row (absent from a Worker that does not send it, and `by` for a viewer who may not see staff identity). */
+export type TaskReopened = { at: string; reason: string; by?: string }
+
+/** "Reopened: why · when · @who": the one line under a task that was reopened because a count it relied on was taken back. */
+export function reopenedText(t: Translator, reopened: TaskReopened): string {
+  const why = reopened.reason === 'count_reopened' ? label(t, 'inventory_check_task_reopened_count', 'Reopened: a count was taken back')
+    : reopened.reason === 'set_undone' ? label(t, 'inventory_check_task_reopened_set', 'Reopened: a stock Set was undone')
+      : label(t, 'inventory_check_task_reopened', 'Reopened')
+  return [why, fmtDateTime24(reopened.at), typeof reopened.by === 'string' && reopened.by ? `@${reopened.by}` : ''].filter(Boolean).join(' · ')
 }
 
 export function pickerText(t: Translator, name: string): string {
@@ -87,13 +98,21 @@ type ReviewItem = { label: string; value: string | number }
 export type TaskReview = { title: string; message?: string; items: ReviewItem[]; note?: string; confirmLabel: string; danger?: boolean }
 type Counts = Pick<InventoryCheckTask, 'title' | 'issued_at' | 'selection' | 'total' | 'done' | 'status' | 'picked_up_by'>
 
-/** The shared review's content for a task action: every row is known before it opens, so it is drawn whole from the first paint. */
+/**
+ * The shared review's content for a task action: every row is known before it opens, so it is drawn whole from the first paint.
+ * Rows: Counted (done/total: the total is not repeated as a Products row), the counts not yet submitted (Hand back only) and the Branch.
+ * Handing back with typed counts is the red review: its banner says those counts are discarded, and the task's name and its picker move to the footnote.
+ */
 export function taskReview(t: Translator, kind: 'pickup' | 'close' | 'release', task: Counts, branchName: string | null, draftCount = 0): TaskReview {
-  const items: ReviewItem[] = [{ label: label(t, 'products', 'Products'), value: task.total }, { label: label(t, 'inventory_check_progress', 'Checked'), value: progressOrAllText(t, task) }]
-  if (kind === 'release' && draftCount > 0) items.push({ label: label(t, 'inventory_check_counts_in_progress', 'Counts not submitted'), value: draftCount })
+  const items: ReviewItem[] = [{ label: label(t, 'inventory_check_counted', 'Counted'), value: `${task.done}/${task.total}` }]
+  const discards = kind === 'release' && draftCount > 0
+  if (discards) items.push({ label: label(t, 'inventory_check_counts_in_progress', 'Counts not submitted'), value: draftCount })
   items.push({ label: label(t, 'branch', 'Branch'), value: branchName || '—' })
-  const base = { message: taskName(t, task), items, ...(kind === 'close' && task.picked_up_by ? { note: pickerText(t, task.picked_up_by) } : {}) }
+  const name = taskName(t, task), picker = (kind === 'close' || kind === 'release') && task.picked_up_by ? pickerText(t, task.picked_up_by) : ''
+  const base = discards
+    ? { message: label(t, 'inventory_check_task_release_discards', 'Your typed counts for this task will be discarded.'), items, note: [name, picker].filter(Boolean).join(' · ') }
+    : { message: name, items, ...(picker ? { note: picker } : {}) }
   if (kind === 'pickup') return { ...base, title: label(t, 'inventory_check_task_pickup_review_title', 'Pick up this task?'), confirmLabel: label(t, 'inventory_check_task_pickup', 'Pick up') }
   if (kind === 'close') return { ...base, title: label(t, 'inventory_check_task_close_review_title', 'Close this task?'), confirmLabel: label(t, 'inventory_check_task_close', 'Close task') }
-  return { ...base, title: label(t, 'inventory_check_task_release_review_title', 'Hand back this task?'), confirmLabel: label(t, 'inventory_check_task_release', 'Hand back'), ...(draftCount > 0 ? { danger: true } : {}) }
+  return { ...base, title: label(t, 'inventory_check_task_release_review_title', 'Hand back this task?'), confirmLabel: label(t, 'inventory_check_task_release', 'Hand back'), ...(discards ? { danger: true } : {}) }
 }

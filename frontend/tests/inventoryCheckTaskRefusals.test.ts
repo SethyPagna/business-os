@@ -64,7 +64,7 @@ assert.ok(taskRefusalSentence(tk, { code: 'inventory_check_task_picked_up', pick
 // ---- the retired and the new keys ----
 for (const key of ['inventory_check_issues_empty', 'inventory_check_discard_counts_title', 'inventory_check_discard_counts_message', 'inventory_check_open_session']) assert.ok(!(key in en) && !(key in km), `${key} is retired from both packs`)
 for (const key of ['inventory_check_task_issue_review_title', 'inventory_check_task_pickup_review_title', 'inventory_check_task_release_review_title', 'inventory_check_task_close_review_title', 'inventory_check_task_issued', 'inventory_check_task_scope_needed', 'inventory_check_task_nothing_to_count',
-  'inventory_check_task_removed', 'inventory_check_task_done_closed', 'inventory_check_task_handed_back', 'inventory_check_draft_restored', 'inventory_check_draft_dropped']) packs(key)
+  'inventory_check_task_removed', 'inventory_check_task_done_closed', 'inventory_check_task_handed_back', 'inventory_check_task_release_discards', 'inventory_check_draft_restored', 'inventory_check_draft_dropped']) packs(key)
 assert.ok(!('inventory_check_task_already_open' in en) && !('inventory_check_task_already_open' in km), 'the "already in an open task" row has no source (lead ruling R1): its key is not added')
 
 // ---- names, progress, reviews ----
@@ -79,9 +79,17 @@ assert.equal(pickerText(t, 'sok'), 'Picked up by @sok')
 const task = { title: '', issued_at: issued, selection: { kind: 'ids' as const }, total: 4, done: 1, status: 'open' as const, picked_up_by: 'sok' }
 const release = taskReview(t, 'release', task, 'Main', 3)
 assert.equal(release.danger, true, 'handing back with typed counts is a danger review')
-assert.deepEqual(release.items.map(item => [item.label, item.value]), [['Products', 4], ['Checked', '1/4 counted'], ['Counts not submitted', 3], ['Branch', 'Main']], 'and it says how many counts are not submitted')
-assert.equal(taskReview(t, 'release', task, 'Main', 0).danger, undefined, 'with none typed there is nothing to warn about')
+assert.deepEqual(release.items.map(item => [item.label, item.value]), [['Counted', '1/4'], ['Counts not submitted', 3], ['Branch', 'Main']], 'it says how many counts are not submitted; one verb (Counted), and the total is not repeated as a Products row')
+assert.equal(release.message, 'Your typed counts for this task will be discarded.', 'the red banner says the typed counts are discarded, not the task name')
+assert.equal(release.note, `${taskName(t, task)} · Picked up by @sok`, 'the task and whose pickup it is move to the footnote')
+assert.equal(taskReview(tk, 'release', task, 'Main', 3).message, km.inventory_check_task_release_discards, 'the same banner in Khmer')
+const handBack = taskReview(t, 'release', task, 'Main', 0)
+assert.equal(handBack.danger, undefined, 'with none typed there is nothing to warn about')
+assert.equal(handBack.message, taskName(t, task), 'then the message is the task'); assert.equal(handBack.note, 'Picked up by @sok', 'and the note says whose pickup it gives back')
+assert.equal(taskReview(t, 'release', { ...task, picked_up_by: null }, 'Main', 0).note, undefined, 'a task nobody holds has no picker to name')
 assert.equal(taskReview(t, 'close', task, null).note, 'Picked up by @sok')
+assert.deepEqual(taskReview(t, 'close', { ...task, done: 4 }, null).items.map(item => [item.label, item.value]), [['Counted', '4/4'], ['Branch', '—']], 'a finished task reads 4/4, not a second sentence')
+assert.ok(!taskReview(t, 'pickup', task, 'Main').items.some(item => item.label === 'Products' || item.label === 'Checked'), 'no review repeats the total or says Checked')
 assert.equal(taskReview(t, 'pickup', task, 'Main').confirmLabel, 'Pick up')
 // ---- what an issue sends ----
 assert.deepEqual(taskScopeOf(new Set([9, 3, 5]), { query: 'x', filters: { brand: 'Dior' } }), { productIds: [3, 5, 9] }, 'picks win, sorted')
