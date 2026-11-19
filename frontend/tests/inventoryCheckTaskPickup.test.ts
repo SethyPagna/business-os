@@ -61,4 +61,5 @@ assert.equal(world.ofRoute('list').at(-1)?.params.taskId, 't1', 'a tap opens the
 assert.ok(surface.find(node => node.getAttribute('data-inventory-check-task-bar') !== null, 'task bar'))
 await surface.unmount()
 delete world.failures.sessionItems
+await world.harness.close()
 console.log('inventoryCheckTaskPickup passed: review first, one request with an id, the view opens, every refusal says its sentence, the pickup row opens the task')

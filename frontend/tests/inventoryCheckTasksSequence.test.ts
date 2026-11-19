@@ -40,4 +40,5 @@ try { clock.advance(10 * 60 * 1000); await surface.settle(); await new Promise(r
 assert.equal(routes(), '', 'ten minutes with the board shown: zero requests')
 for (const file of ['useInventoryCheckTasks.ts', 'InventoryCheckTasksList.tsx']) assert.ok(!/setInterval/.test(readFileSync(new URL(`../src/components/inventory/${file}`, import.meta.url), 'utf8')), `${file} has no interval`)
 await surface.unmount()
+await world.harness.close()
 console.log('inventoryCheckTasksSequence passed: the request count of every task action, and no polling')

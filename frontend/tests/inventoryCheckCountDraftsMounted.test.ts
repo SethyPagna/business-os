@@ -102,4 +102,5 @@ world.calls.length = 0
 await surface.click(surface.find(node => node.getAttribute('data-selection-action') === 'submit', 'Retry'))
 assert.equal(world.ofRoute('submissions')[0]?.params.requestId, first, 'after a reload the Retry sends the SAME request id (and asks nothing again)')
 await surface.unmount()
+await world.harness.close()
 console.log('inventoryCheckCountDraftsMounted passed: write, the three-option guard with Save, restore, the drop rule, off-page judging, keys apart, pending Retry')

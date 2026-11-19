@@ -75,4 +75,5 @@ assert.ok(surface.text().includes(words.inventory_check_task_handed_back), 'This
 assert.equal(surface.findAll(node => node.getAttribute('data-task-action') === 'pickup').length, 1, 'Pick up is offered again')
 assert.equal((countInput(surface, 4) as unknown as { value: string }).value, '6', 'the draft is kept'); assert.equal(submitButton(surface).getAttribute('aria-disabled'), null)
 await surface.unmount()
+await world.harness.close()
 console.log('inventoryCheckTaskView passed: the task list, the bar, Submit with the task, close, closed elsewhere and handed back')

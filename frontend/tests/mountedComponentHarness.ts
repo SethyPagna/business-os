@@ -605,7 +605,8 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
       configFile: false,
       appType: 'custom',
       logLevel: 'error',
-      server: { middlewareMode: true, hmr: false, watch: null },
+      // ws: false is what lets a test that forgets harness.close() still exit: hmr: false leaves Vite's WebSocket server listening on port 24678, and an open listener keeps the process alive for ever.
+      server: { middlewareMode: true, hmr: false, ws: false, watch: null },
       optimizeDeps: { noDiscovery: true, include: [] },
       plugins: [harnessPlugin(observed), ...(options.mutateSource ? [mutationPlugin(options.mutateSource)] : []), react(), transformDonePlugin()],
     })

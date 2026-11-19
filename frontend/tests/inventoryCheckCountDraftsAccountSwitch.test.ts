@@ -61,4 +61,5 @@ assert.equal(value(surface, 3), '9', 'user 7 gets their own count back'); assert
 assert.ok(world.notices.some(notice => notice.text === words.inventory_check_draft_restored), 'with the notice')
 await surface.unmount()
 forgetDeviceDrafts()
+await world.harness.close()
 console.log('inventoryCheckCountDraftsAccountSwitch passed: after an account switch nothing is written under the new account, the old draft is not shown to it, and A-B-A stays locked')
