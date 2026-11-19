@@ -7,8 +7,8 @@ import { resolvePlanTier, type PlanTier } from './planTier'
 // They are the same on Free and Paid: a task is a unit of work given to a person, not a plan resource, so what Free saves here is read cost, which the cache and the plan's other limits carry.
 //   maxProducts        the most products ONE task may hold, whether the admin names them or a filter resolves to them. It sits under the 500 items a session detail can read (getInventoryCheckSession refuses more),
 //                      so a task can always be opened; over it the issue is refused 400 inventory_check_task_too_many with the total.
-//   maxOpenTasks       the most OPEN tasks one branch may have. It is BOTH the cap on issuing (a task issued while a branch has this many open is refused 409 inventory_check_task_limit with the open count) and the
-//                      most open tasks the Tasks list answers, so the list can never hide one.
+//   maxOpenTasks       the most OPEN tasks one branch may have. It is BOTH the cap on ISSUING only (a task issued while a branch has this many open is refused 409 inventory_check_task_limit with the open count). The Tasks list shows EVERY open task: a take-back
+//                      reopens a task and is never refused by this cap, so a branch can hold more than maxOpenTasks open (the list is bounded by history, not by the cap).
 //   tasksClosedShown   the most recently CLOSED tasks it adds after them.
 //
 // Why this is not in planTier.ts with the other limits: the file is inside the fingerprint of the sales-daily money kernel (scripts/sales-daily-kernel-pin.json: salesAnalytics imports getPlanLimits), and the pin

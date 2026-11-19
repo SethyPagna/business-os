@@ -714,15 +714,15 @@ export async function replayStockLotSet(
   // The Issue this Set closed (issue_closed in its stored answer) is open again after an Undo, and closed again by a Redo; both only while the Set's own count is still the latest (stockSetClosesIssue.ts).
   // The Set's own count (the one item of its stock_set session) is taken back by the Undo and restored by the Redo, and the tasks that rested on it reopen or close in this same batch (owner, 19 Nov).
   // Everything on the count side is fenced by the organization and branch of the Set's own SESSION (facts.set_session), not the undoing user's: an Undo can then never turn the item unstarted while reopening nothing.
-  if ((JSON.parse(row.response_json || '{}') as { issue_closed?: unknown }).issue_closed === true) {
-    const origin = facts?.set_session ? JSON.parse(facts.set_session) as { org: number | null; branch: number } : null
+  // The gate is the Set's own count session, NOT the stored issue_closed: a Redo whose Issue side cannot land (a newer count, another date Set, a count waiting) rewrites issue_closed to false while its count side still restores the count to Done, and every later Undo would then skip the take-back. Every statement below is conditional SQL, so running them whenever the Set has a count is exact.
+  const origin = facts?.set_session ? JSON.parse(facts.set_session) as { org: number | null; branch: number } : null
+  if (origin || (JSON.parse(row.response_json || '{}') as { issue_closed?: unknown }).issue_closed === true) {
     const now = new Date().toISOString() // ONE time for the Issue side and the count side (their follow-ups match events by created_at)
     const closing = { productId: before.productId, branchId: origin ? Number(origin.branch) : before.branchId, organization: origin ? origin.org ?? null : user.organization_id ?? null, operation: row.id, generation: next, actorId: user.id, actorName: actorSnapshot(user) ?? '' }
     const where = { setActor: row.actor_id, setKey: setCountKey(row.id) }
     statements.push(...(direction === 'undo'
       ? [...reopenIssueStatements(closing, now), ...takeBackSetCountStatements(closing, where, now).statements]   // ORDER: the Issue side reads the latest count, which must still be the Set's
-      // answer:false -- the Redo leaves the Set's stored issue_closed alone. Its restore of the Issue is conditional; when it does not land (another received date was Set since) writing false here made the next Undo skip taking the restored count back.
-      : [...closeIssueStatements(closing, now, { restore: true, answer: false }), ...restoreSetCountStatements(closing, where, now).statements]))
+      : [...closeIssueStatements(closing, now, { restore: true }), ...restoreSetCountStatements(closing, where, now).statements]))
   }
   statements.push(
     { sql: "UPDATE stock_lot_adjustment_operations SET generation=@next,state=@target,revision_json=json_set(revision_json,'$.generation',@next) WHERE id=@operation", params },
