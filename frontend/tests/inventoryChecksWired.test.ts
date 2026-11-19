@@ -289,7 +289,7 @@ try {
       // The list of every date comes back (from Products' held answer or a new read: either way it carries no date).
       await surface.waitFor(() => chips()[0]?.getAttribute('aria-pressed') === 'true', `All is the chosen chip again after ${refusal.code}`)
       assert.ok(lists.slice(2).every(query => !query.has('checkedOn')), 'no read after the refusal carries the date')
-      assert.ok(!surface.text().includes('Inventory checks are unavailable'), `${refusal.code}: no "unavailable" with the date still set`)
+      assert.ok(!surface.text().includes('Could not load Inventory'), `${refusal.code}: no "unavailable" with the date still set`)
       assert.ok(surface.text().includes('Sequence product'), 'the list is drawn')
       assert.equal(chips().length, 3, 'the rail is still there')
       await surface.unmount()
@@ -301,7 +301,7 @@ try {
     }
     const other = await mount()
     await other.click(other.findAll(node => node.getAttribute('data-day-chip') !== null)[1])
-    await other.waitFor(() => other.text().includes('Inventory checks are unavailable'), 'a refusal naming another parameter still shows the load error')
+    await other.waitFor(() => other.text().includes('Could not load Inventory'), 'a refusal naming another parameter still shows the load error')
     assert.equal(lists.filter(query => !query.get('checkedOn')).length, 1, 'and does not retry without the date')
     await other.unmount()
   }

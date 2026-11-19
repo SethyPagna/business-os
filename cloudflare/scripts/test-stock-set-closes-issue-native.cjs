@@ -241,9 +241,9 @@ async function main() {
   await check('a Set that closes a difference records a count that closes the count tasks it completes (a Set that moves nothing does too; an Undo and a Redo are not counts and close none)', () => setClosesTasks(w))
   for (const [name, edits] of [
     ['the Set that closes a difference does not run the auto-close', { 'lib/stockSetClosesIssue.ts': [['    ...(restore ? [] : tasks.statements),\n', '']] }],
-    ['an Undo ticks a task (the done rule counts the Undo session)', { 'lib/inventoryCheckTasks.ts': [["AND ${kindOf('xs')} IS NOT 'stock_set_undo' AND json_extract", 'AND json_extract']] }],
-    ['a Redo ticks a task (the done rule ignores the restore flag)', { 'lib/inventoryCheckTasks.ts': [["AND json_extract(xs.scope_json,'$.restore') IS NOT 1)`", ')`']] }],
-    ['a Redo is run as a count (the restore option is dropped)', { 'lib/stockLotAdjustment.ts': [['closeIssueStatements(closing, undefined, { restore: true })', 'closeIssueStatements(closing)']] }],
+    ['an Undo ticks a task (the done rule counts the Undo session)', { 'lib/inventoryCheckTasks.ts': [["AND ${kindOf(xs)} IS NOT 'stock_set_undo' AND json_extract", 'AND json_extract']] }],
+    ['a Redo ticks a task (the done rule ignores the restore flag)', { 'lib/inventoryCheckTasks.ts': [["AND json_extract(${xs}.scope_json,'$.restore') IS NOT 1`", '`']] }],
+    ['a Redo is run as a count (the restore option is dropped)', { 'lib/stockLotAdjustment.ts': [['closeIssueStatements(closing, now, { restore: true })', 'closeIssueStatements(closing, now)']] }],
   ]) {
     await check(`mutant killed: ${name}`, async () => {
       let caught = false

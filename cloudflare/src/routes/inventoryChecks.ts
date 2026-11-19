@@ -261,7 +261,7 @@ async function readTaskBoard(c: IcContext, branchId: number): Promise<TaskRow[]>
   const [version, productsVersion] = await Promise.all([inventoryChecksVersion(c.env), getVersionWithFallback(c.env, 'products')])
   const limits = getPlanLimits(c.env), taskLimits = getInventoryCheckTaskLimits(c.env)
   return cachedJsonResponse(new Request(`https://ic.invalid/__bos/ic-tasks?branchId=${branchId}&order=2`, { method: 'GET' }), c.executionCtx, `ict:${version}:${productsVersion}`, limits.productListCacheSeconds,
-    () => readTaskRows(getDb(c.env), { organization: c.get('user').organization_id ?? null, branchId, shown: taskLimits.maxOpenTasks, closedShown: taskLimits.tasksClosedShown }), cacheIdentity(c))
+    () => readTaskRows(getDb(c.env), { organization: c.get('user').organization_id ?? null, branchId, closedShown: taskLimits.tasksClosedShown }), cacheIdentity(c))
 }
 /** What a viewer is told of a task: names (never account ids) of who issued and who picked it up, and what they may do with it. */
 const taskView = (row: TaskRow, user: SessionUser) => {
@@ -273,7 +273,9 @@ const taskView = (row: TaskRow, user: SessionUser) => {
     : row.selection
   return { id: row.id, branch_id: row.branch_id, title: row.title, status: row.status, revision: row.revision, issued_at: row.started_at, ...(canSeeStaffIdentity(user, row.created_by) ? { issued_by: row.issuer } : {}), closed_at: row.closed_at, total: row.total, done: row.done, removed: row.removed, selection,
     picked_up_by: row.pickup_id ? row.picker : null, picked_up_at: row.pickup_id ? row.picked_at : null, mine, ...(mine ? { pickup_session_id: row.pickup_id } : {}),
-    can_pickup: open && row.pickup_id === null && canWorkInventoryCountTasks(user), can_release: open && row.pickup_id !== null && (mine || canIssueInventoryCountTasks(user)), can_close: open && canIssueInventoryCountTasks(user) }
+    can_pickup: open && row.pickup_id === null && canWorkInventoryCountTasks(user), can_release: open && row.pickup_id !== null && (mine || canIssueInventoryCountTasks(user)), can_close: open && canIssueInventoryCountTasks(user),
+    // A task whose count was taken back (owner, 19 Nov): the reason and when; who took it back only for a viewer who may see staff identity, as issued_by.
+    ...(open && row.reopened ? { reopened: { at: row.reopened.at, reason: row.reopened.cause === 'set_undone' ? 'set_undone' : 'count_reopened', ...(row.reopened.by !== null && row.reopened.name !== null && canSeeStaffIdentity(user, row.reopened.by) ? { by: row.reopened.name } : {}) } } : {}) }
 }
 app.get('/tasks', async c => {
   if (!await readSwitch(c.env, 'ic_wired')) return notWired(c)

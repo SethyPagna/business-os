@@ -3,6 +3,7 @@ import { closeInventoryCheckTask, issueInventoryCheckTask, pickupInventoryCheckT
 import { createClientRequestId } from '../../api/requestIds.ts'
 import type { ConfirmRequest } from '../shared/useConfirmDialog.tsx'
 import { taskRefusalSentence, type TaskReview } from './inventoryCheckTaskText.ts'
+import { unknownSaveFallback } from './inventoryCheckSaveText.ts'
 import { isSwitchOff404 } from './inventoryWired.ts'
 
 // The last board answer per authority boundary and branch: a later open draws it at once and reads again in the background (changed rows update in place).
@@ -130,7 +131,7 @@ export function useInventoryCheckTasks(args: Args) {
     } catch (cause) {
       if ((cause as { outcome?: string } | null)?.outcome === 'unknown') {
         setRetrying(attemptKey)
-        return { kind: 'unknown', message: args.tr(args.unknownSaveKey(cause), 'Save not confirmed. Retry the same operation or reload.') }
+        return { kind: 'unknown', message: ((key: string) => args.tr(key, unknownSaveFallback(key)))(args.unknownSaveKey(cause)) }
       }
       attempts.current.delete(attemptKey)
       const code = typeof (cause as { code?: unknown } | null)?.code === 'string' ? (cause as { code: string }).code : null

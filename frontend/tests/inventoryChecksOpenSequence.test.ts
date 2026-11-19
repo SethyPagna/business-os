@@ -144,7 +144,7 @@ try {
   // ---- ic_wired ON, one branch: ONE list request, then the overlay; the remount takes the answer along ----
   const wired = await openPage([{ id: 1, name: 'Only branch' }], true, true)
   assert.ok(wired.text().includes('Sequence product'), 'ic_wired ON, one branch: the list is drawn')
-  assert.ok(!wired.text().includes('unavailable'), 'ic_wired ON, one branch: no load error')
+  assert.ok(!wired.text().includes('Could not load Inventory'), 'ic_wired ON, one branch: no load error')
   assert.equal(listCalls.length, EXPECTED_REQUESTS_ONE_BRANCH, 'ic_wired ON, one branch: list requests on open (S4b: 1; the waterfall was 2)')
   assert.equal(calls.length, 0, 'ic_wired ON: the older list is not asked at all')
   assert.equal(listCalls[0].query.has('branchId'), false, 'ic_wired ON, one branch: the open request names no branch')
@@ -235,7 +235,7 @@ try {
     const one = await openPage([{ id: 1, name: 'Only branch' }], icSimple)
     probed += probes.length
     assert.ok(one.text().includes('Sequence product'), `${server}, one branch: the list is drawn`)
-    assert.ok(!one.text().includes('unavailable'), `${server}, one branch: no load error`)
+    assert.ok(!one.text().includes('Could not load Inventory'), `${server}, one branch: no load error`)
     assert.equal(calls.length, EXPECTED_REQUESTS_ONE_BRANCH_OFF, `${server}, one branch: list requests on open (one read; the waterfall was 2)`)
     assert.equal(branchListCalls, 1, `${server}, one branch: the branch list (a few rows) is read once, before the list`)
     assert.equal(listCalls.length, 0); assert.equal(overlayCalls.length, 0, 'ic_wired OFF: no wired answer is ever used')

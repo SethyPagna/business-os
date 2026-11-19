@@ -94,11 +94,27 @@ async function main() {
       const cap = await plan(capSql, { organization: org, branchId: 1 })
       assert.match(cap, new RegExp(`SEARCH s USING INDEX ${OPEN} \\(organization_id=\\? AND <expr>=\\? AND branch_id=\\?\\)`), `the cap guard (org ${org}) counts the open tasks through the partial index: ${cap}`)
       const list = await plan(listSql, { org, branchId: 1, shown: 30, closedShown: 5 })
-      assert.match(list, new RegExp(`CO-ROUTINE open_t \\| SEARCH s USING INDEX ${OPEN} \\(organization_id=\\? AND <expr>=\\? AND branch_id=\\?\\)`), `the board's open tasks (org ${org}) come from the partial index: ${list}`)
+      assert.match(list, new RegExp(`SEARCH s USING INDEX ${OPEN} \\(organization_id=\\? AND <expr>=\\? AND branch_id=\\?\\)`), `the board's open tasks (org ${org}) come from the partial index: ${list}`)
       assert.match(list, /SEARCH pk USING INDEX inventory_check_sessions_kind_task \(organization_id=\? AND <expr>=\? AND <expr>=\?\)/, `the pickup of each shown task is a seek by task id (org ${org}): ${list}`)
       if (org === 1) console.log('PLAN cap guard:', cap)
     }
     console.log('PASS the auto-close candidates, the cap guard and the board start from the open-task index (0319); the done check seeks 0285; the follow-ups use the events key range')
+
+    // ---- the REOPEN candidates (owner, 19 Nov: a task follows the counts in effect): the statements a take-back appends, their plans on the same engine -----------------------------------------------
+    // Candidates: the counts taken back (the session's items by primary key), the done check that skips a product another count still covers (one 0285 seek), then the never-counted task items of each gap
+    // product by the 0285 prefix (product, branch, NULL), the task by key; the follow-up update finds its rows by this request's events key range. Never a scan of the sessions or of the items.
+    const reopen = tasks.reopenTaskStatements()
+    const reopenParams = tasks.reopenParams({ src: 'write-session', undo: false, cause: 'resumed', organization: 1, branchId: 1, actorId: 5, actorName: 'u5', key: 'request-key-0001', hash: 'h', now: args.now })
+    const [reopenEvents, reopenUpdate] = await Promise.all(reopen.statements.map((statement) => plan(statement.sql, reopenParams)))
+    console.log('PLAN reopen candidates:', reopenEvents); console.log('PLAN reopen update:', reopenUpdate)
+    for (const [name, text] of [['candidates', reopenEvents], ['update', reopenUpdate]]) {
+      assert.doesNotMatch(text, /(^| \| )SCAN (?!k\b|g\b|r\b|n\b|w\b)\w+( |$)/, `the reopen ${name} scans no table: ${text}`)
+      assert.doesNotMatch(text, /inventory_check_sessions_kind_task/, `the reopen ${name} does not walk the history index: ${text}`)
+    }
+    assert.match(reopenEvents, /inventory_check_items_product_latest \(product_id=\? AND branch_id=\? AND updated_at>\?\)/, `the done check that skips covered products seeks the 0285 index: ${reopenEvents}`)
+    assert.match(reopenEvents, /inventory_check_items_product_latest \(product_id=\? AND branch_id=\? AND updated_at=\?\)/, `the never-counted task items of a gap product are one 0285 prefix seek: ${reopenEvents}`)
+    assert.match(reopenUpdate, /sqlite_autoindex_inventory_check_events_1 \(actor_id=\? AND request_id>\? AND request_id<\?\)/, `the reopen's update finds its tasks by this request's events key range, a seek of the events' unique key: ${reopenUpdate}`)
+    console.log('PASS the reopen candidates seek the 0285 index per product and the update seeks the events key range; no table scan')
 
     // ---- rows read, as the engine counts them (meta.rows_read), and how they move with HISTORY ------------------------------------------------------------------------------------------------------------
     const exec = async (sql, params = {}) => (await db.batch([{ sql, params }]))[0]

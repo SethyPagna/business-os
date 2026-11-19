@@ -23,8 +23,9 @@
 -- file really listed it; never by SQL.
 -- ops:min-rows 0
 -- ops:max-rows 5000
--- ops:max-rows-read 2000
--- Why 2000: the join into inventory_movements is pinned (INDEXED BY ... via CROSS JOIN, removed rows outermost), so it seeks one product's
+-- ops:max-rows-read 4556
+-- Why 4556 (the saturated read: test-ops-query-budget-native.cjs also measures this file with its open-ended date literal moved before the seed's oldest day, 4,141 rows, because the seed's audit rows move into range as the run date advances; 610 on the day the literal was written):
+-- (earlier text, written for the 562-row day:) the join into inventory_movements is pinned (INDEXED BY ... via CROSS JOIN, removed rows outermost), so it seeks one product's
 -- rows at a time whatever the optimizer statistics say: 562 rows read on the read-budget seed without ANALYZE and 562 with it. Unpinned, the
 -- same query flipped to a full scan of inventory_movements once ANALYZE had run (34,075 rows on the seed). 2000 is about 3.5 x the seed (the
 -- production volume of delete audit rows since 1 Oct is not known) and still 17 x under that scan, so the guard still refuses a plan that flips.

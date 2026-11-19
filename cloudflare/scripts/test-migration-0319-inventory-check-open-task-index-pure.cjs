@@ -98,7 +98,7 @@ const check = async (name, run) => { await run(); passed++; console.log(`PASS ${
       const cap = plan(db, capSql, { organization: org, branchId: 1 })
       assert.match(cap, new RegExp(`SEARCH s USING INDEX ${NAME} \\(organization_id=\\? AND <expr>=\\? AND branch_id=\\?\\)`), `cap guard: ${cap}`)
       const list = plan(db, listSql, { org, branchId: 1, shown: 30, closedShown: 5 })
-      assert.match(list, new RegExp(`CO-ROUTINE open_t \\| SEARCH s USING INDEX ${NAME} \\(organization_id=\\? AND <expr>=\\? AND branch_id=\\?\\)`), `open list: ${list}`)
+      assert.match(list, new RegExp(`SEARCH s USING INDEX ${NAME} \\(organization_id=\\? AND <expr>=\\? AND branch_id=\\?\\)`), `open list: ${list}`)
       const closed = list.split('CO-ROUTINE closed_t')[1].split('SCAN closed_t')[0]
       assert.match(closed, new RegExp(`^ \\| SEARCH s USING INDEX ${BOARD} \\(organization_id=\\? AND branch_id=\\? AND status=\\?\\)`), `the closed list seeks the task index by organization, branch and status: ${list}`)
       assert.doesNotMatch(closed, /TEMP B-TREE|SCAN s/, `and reads it in its own order, with no sort and no scan: ${list}`)

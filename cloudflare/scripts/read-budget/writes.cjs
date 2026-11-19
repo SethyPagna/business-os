@@ -159,6 +159,84 @@ function approvalLine({ id, label, offset }) {
     } }
 }
 
+// ---- count tasks (owner, 19 Nov: a task follows the counts in effect): the write shapes of a TAKE-BACK. Each runs the setup in prepare() (before the isolate restarts) and measures the one request. ----
+// The count session resume: a task closed by the auto-close when a count session closed; the resume reopens it in the SAME batch (D1 calls of the resume = the plain resume's + the reopen statements, no call of its own).
+function taskResume() {
+  return { id: 'w-inventory-check-task-resume', label: 'PATCH /api/inventory-checks/sessions/:id resume a closed count (reopens the task it closed)', method: 'PATCH', url: '/api/inventory-checks/sessions/:id',
+    prepare: async (world) => {
+      await world.addSwitches(['ic_wired'])
+      await world.restart() // the switches are memoized per isolate for 15 s
+      const ids = (await world.all('SELECT id FROM products WHERE is_active=1 ORDER BY id LIMIT 3 OFFSET 160')).map((r) => r.id)
+      const task = await world.send('POST', '/api/inventory-checks/tasks', { branchId: 1, requestId: key('task'), title: 'Budget task', productIds: ids })
+      if (task.status !== 201) throw new Error('resume fixture: the issue answered ' + task.status + ' ' + task.text.slice(0, 200))
+      const made = await world.send('POST', '/api/inventory-checks/sessions', { branchId: 1, requestId: key('check'), productIds: ids, scope: { membership: 'visible_page' } })
+      if (made.status !== 201) throw new Error('resume fixture: the count session answered ' + made.status + ' ' + made.text.slice(0, 200))
+      for (const productId of ids) {
+        const o = await world.send('PATCH', '/api/inventory-checks/sessions/' + made.json.item.id + '/items/' + productId, { expectedRevision: 0, expectedSessionRevision: 0, requestId: key('observe'), state: 'done', counted_quantity: 0 })
+        if (o.status !== 200) throw new Error('resume fixture: an item answered ' + o.status + ' ' + o.text.slice(0, 200))
+      }
+      const closed = await world.send('PATCH', '/api/inventory-checks/sessions/' + made.json.item.id, { expectedRevision: 0, requestId: key('close'), action: 'close' })
+      if (closed.status !== 200 || !(closed.json.closedTasks || []).length) throw new Error('resume fixture: the close answered ' + closed.status + ' and closed no task ' + closed.text.slice(0, 200))
+      return { id: made.json.item.id, revision: closed.json.item.revision, task: task.json.item.id }
+    },
+    run: async (world, send, f) => {
+      try {
+        const r = await send('PATCH', '/api/inventory-checks/sessions/' + f.id, { expectedRevision: f.revision, requestId: key('resume'), action: 'resume' })
+        if (r.status === 200 && !(r.json.reopenedTasks || []).includes(f.task)) throw new Error('the resume reopened no task: ' + r.text.slice(0, 200))
+        return r
+      } finally { await world.restoreSwitches() }
+    } }
+}
+
+// The Set that closes a difference and the task it completes (a counter's per-date count below the figure seen, rejected by the administrator, a task issued, the lot Set that makes stock match).
+async function closingSet(world, offset) {
+  await world.addSwitches(['ic_wired', 'ic_simple', 'ic_fix_stock', 'ic_lot_counts'])
+  await world.restart() // the switches are memoized per isolate for 15 s
+  const row = (await lots(world, 1, offset))[0]
+  const stocked = await world.all('SELECT s.batch_id AS batch, s.quantity AS quantity FROM branch_batch_stock s JOIN product_batches b ON b.id = s.batch_id WHERE s.branch_id = 1 AND b.variant_product_id = ? ORDER BY s.batch_id', row.pid)
+  const dates = stocked.filter((q) => Number(q.quantity) > 0)
+  const target = dates.find((q) => q.batch === row.batch)
+  const seen = Number(target.quantity)
+      await world.db.prepare("INSERT OR IGNORE INTO roles(id,name,code,permissions,is_system) VALUES(902,'Counter','employee',?,0)").bind(JSON.stringify({ inventory_checks: true, inventory_check_show_stock: true })).run()
+      await world.db.prepare("INSERT OR IGNORE INTO users(id,username,name,password,role_id,permissions,is_active,organization_id,must_change_password) VALUES(902,'budget_counter','budget_counter',?,902,'{}',1,?,0)").bind(bcrypt.hashSync('budget-password-1', 4), world.orgId).run()
+      await world.db.prepare("INSERT OR IGNORE INTO trusted_devices(user_id, device_id, device_name, status, decided_at) VALUES(902,'budget-device','budget device','approved',datetime('now'))").run()
+  const login = await world.send('POST', '/api/auth/login', { username: 'budget_counter', password: 'budget-password-1', organizationId: world.orgId, deviceId: 'budget-device' }, { cookie: null })
+  if (!login.setCookie) throw new Error('set fixture: the counter could not sign in: ' + login.text.slice(0, 200))
+  const lines = [{ productId: row.pid, lots: dates.map((d) => ({ batchId: d.batch, scope: 'lot', counted: d.batch === row.batch ? seen - 1 : Number(d.quantity), seen: Number(d.quantity) })) }]
+  const made = await world.send('POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('set-submit'), lines }, { cookie: login.setCookie.split(';')[0] })
+  if (made.status !== 201) throw new Error('set fixture: the submission answered ' + made.status + ' ' + made.text.slice(0, 200))
+  const rejected = await world.send('POST', '/api/inventory-checks/sessions/' + made.json.item.id + '/approval/lines', { productId: row.pid, action: 'reject', requestId: key('set-reject') })
+  if (rejected.status !== 200) throw new Error('set fixture: the rejection answered ' + rejected.status + ' ' + rejected.text.slice(0, 200))
+  const task = await world.send('POST', '/api/inventory-checks/tasks', { branchId: 1, requestId: key('task'), title: 'Budget task', productIds: [row.pid] })
+  if (task.status !== 201) throw new Error('set fixture: the issue answered ' + task.status + ' ' + task.text.slice(0, 200))
+  const set = await world.send('POST', '/api/inventory/adjust', { type: 'set', setScope: 'lot', productId: row.pid, branchId: 1, batchId: row.batch, quantity: seen - 1, expectedLotQuantity: seen, reason: 'Physical count', client_request_id: key('set') })
+  if (set.status !== 200 || set.json.issue_closed !== true || !(set.json.closed_tasks || []).includes(task.json.item.id)) throw new Error('set fixture: the Set did not close the difference and the task: ' + set.status + ' ' + set.text.slice(0, 300))
+  return { history: set.json.action_history_id, task: task.json.item.id }
+}
+// Set Undo: takes the Set's own count back and reopens the task, in the Set replay's one batch.
+function setUndo() {
+  return { id: 'w-set-undo-reopens-task', label: 'POST /api/action-history/:id/undo a lot Set that closed a difference and a task (reopens the task)', method: 'POST', url: '/api/action-history/:id/undo',
+    prepare: (world) => closingSet(world, 1340),
+    run: async (world, send, f) => {
+      try { return await send('POST', '/api/action-history/' + f.history + '/undo', {}) }
+      finally { await world.restoreSwitches() }
+    } }
+}
+// Set Redo: restores the count at its original time and closes the task again, in one batch.
+function setRedo() {
+  return { id: 'w-set-redo-closes-task', label: 'POST /api/action-history/:id/redo a lot Set (restores its count, closes the task again)', method: 'POST', url: '/api/action-history/:id/redo',
+    prepare: async (world) => {
+      const f = await closingSet(world, 1360)
+      const u = await world.send('POST', '/api/action-history/' + f.history + '/undo', {})
+      if (u.status !== 200) throw new Error('redo fixture: the Undo answered ' + u.status + ' ' + u.text.slice(0, 200))
+      return f
+    },
+    run: async (world, send, f) => {
+      try { return await send('POST', '/api/action-history/' + f.history + '/redo', {}) }
+      finally { await world.restoreSwitches() }
+    } }
+}
+
 function writeShapes() {
   const shapes = [
     { id: 'w-login-cold', label: 'POST /api/auth/login (cold isolate)', method: 'POST', url: '/api/auth/login', anon: true,
@@ -297,6 +375,8 @@ function writeShapes() {
         try { return Number(JSON.parse(row.value).epoch) || 0 } catch { return 0 }
       },
       run: async (world, send, epoch) => send('PUT', '/api/runtime/read-switches', { name: 'probe', state: 'on', expectedEpoch: epoch }) },
+    // the take-back shapes run last: their fixtures turn read switches on and leave history rows that would move the shapes before them
+    taskResume(), setUndo(), setRedo(),
     { id: 'w-logout', label: 'POST /api/auth/logout', method: 'POST', url: '/api/auth/logout', body: {} },
   ]
   return shapes.map((s) => ({ kind: 'write', variant: 'base', ...s }))

@@ -104,7 +104,7 @@ const chooseFilter = async (surface: Surface, section: string, option: string) =
   if (header.querySelectorAll('[role="option"]').length === 0) await surface.click(surface.button(/./, header))
   await surface.click(surface.find(node => node.getAttribute('role') === 'option' && header.contains(node) && node.textContent === option, option + ' in ' + section))
 }
-const noError = (surface: Surface, where: string) => assert.ok(!surface.text().includes('unavailable'), `${where}: no load error is shown`)
+const noError = (surface: Surface, where: string) => assert.ok(!surface.text().includes('Could not load Inventory'), `${where}: no load error is shown`)
 const neither = (entries: Wire[], where: string) => {
   assert.ok(entries.length > 0, `${where}: positive control, requests were made`)
   assert.deepEqual(entries.filter(entry => entry.query.has('summary')).map(entry => entry.url), [], `${where}: no request carries summary`)
@@ -205,7 +205,7 @@ try {
   from = wire.length
   await step(refused)
   assert.equal(wire.length - from, 2, 'two asks (one per list dialect), never a third')
-  assert.ok(refused.text().includes('unavailable'), 'the page says the checks are unavailable')
+  assert.ok(refused.text().includes('Could not load Inventory'), 'the page says the load error')
   await new Promise(resolve => setTimeout(resolve, 60))
   assert.equal(wire.length - from, 2, 'and nothing keeps asking while the error is shown')
   from = wire.length

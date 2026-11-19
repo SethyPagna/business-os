@@ -2,7 +2,7 @@ import type { D1Compat } from './db'
 import type { SessionUser } from './auth'
 import { resolveLowStockConfig, type LowStockConfig } from './lowStockSettings'
 import { canApproveInventoryCounts, canIssueInventoryCountTasks, canWorkInventoryCountTasks, getInventoryCheckAccess, projectInventoryCheckProduct, validateInventoryCheckQuery } from './inventoryCheckAccess'
-import { autoCloseParams, autoCloseTaskStatements, CHECKABLE_SQL, closedTaskIds, closePickupsStatements, kindOf, OPEN_PICKUP_SQL, OPEN_TASK_COUNT_SQL, PICKUP_MEMBERSHIP, TASK_COUNTABLE_SQL, TASK_MEMBERSHIP, taskOf } from './inventoryCheckTasks'
+import { autoCloseParams, autoCloseTaskStatements, CHECKABLE_SQL, closedTaskIds, closePickupsStatements, kindOf, OPEN_PICKUP_SQL, OPEN_TASK_COUNT_SQL, PICKUP_MEMBERSHIP, reopenParams, reopenTaskStatements, reopenedTaskIds, TASK_COUNTABLE_SQL, TASK_MEMBERSHIP, taskOf } from './inventoryCheckTasks'
 import { buildInventoryCheckStockQuery, readInventoryCheckStock, resetInventoryCheckStockSchemaMemo, type InventoryCheckStockRow } from './inventoryCheckStock'
 import { buildInventoryCheckProductMembershipQuery } from './inventoryCheckProducts'
 import { hasPermission, isAdminControlUser } from './permissions'
@@ -696,6 +696,20 @@ function closedBy(saved: { replayed: boolean; results?: D1Result[] }, statements
   const at = part ? statements.indexOf(part.closed) : -1
   return at >= 0 && !saved.replayed ? closedTaskIds(saved.results?.[at + 1]) : []
 }
+/**
+ * Appended LAST to the batch of the resume of a count session (owner, 19 Nov: a task's state always follows the counts in effect): the resume takes the session's counts back (its own UPDATE runs first, so the done rule
+ * no longer sees them), and every task the auto-close closed that rested on them reopens in this same batch (lib/inventoryCheckTasks.ts reopenTaskStatements). Never refused, no cap.
+ */
+function reopenPart(actor: Actor, args: { src: string; branchId: number; key: string; hash: string; now: string }): { statements: Statement[]; closed: Statement } {
+  const params = reopenParams({ src: args.src, undo: false, cause: 'resumed', organization: actor.organization_id, branchId: args.branchId, actorId: actor.id, actorName: actorSnapshot(actor), key: args.key, hash: args.hash, now: args.now })
+  const part = reopenTaskStatements(), statements: Statement[] = part.statements.map(({ sql }) => ({ sql, params }))
+  return { statements, closed: statements[part.reopenedAt] }
+}
+/** The ids of the tasks a committed resume reopened (none for a replay: the write is not made again). */
+function reopenedBy(saved: { replayed: boolean; results?: D1Result[] }, statements: Statement[], part: { closed: Statement } | null): string[] {
+  const at = part ? statements.indexOf(part.closed) : -1
+  return at >= 0 && !saved.replayed ? reopenedTaskIds(saved.results?.[at + 1]) : []
+}
 
 type SubmissionLine = { productId: number; counted: number; seen: number | null; checked: boolean; note: string | null }
 export function submissionQuantity(value: unknown): number {
@@ -1071,6 +1085,8 @@ export async function patchInventoryCheckSession(db: D1Compat, principal: Invent
   // Closing a count session makes its counts FINAL, so it is a count writer: the tasks it completes close in this same batch (autoClosePart). A task or a pickup holds no counts.
   const counting = action === 'close' && ![TASK_MEMBERSHIP, PICKUP_MEMBERSHIP].includes(membershipOf(session))
   const taskPart = counting ? autoClosePart(actor, { src: id, branchId: session.branch_id, key, hash, now }) : null
+  // Resuming a count session takes its counts back (a task, a pickup and a submission were refused above): the tasks that rested on them reopen in this batch.
+  const reopening = action === 'resume' ? reopenPart(actor, { src: id, branchId: session.branch_id, key, hash, now }) : null
   const statements: Statement[] = [sessionGuard(actor, session, expected, action === 'close' ? 'open' : 'closed'),
     { sql: 'UPDATE inventory_check_sessions SET status=@status,revision=revision+1,updated_at=@now,closed_at=@closed WHERE id=@id AND revision=@expected', params },
     guard('changes()=1', 'inventory_check_conflict', {}),
@@ -1078,10 +1094,12 @@ export async function patchInventoryCheckSession(db: D1Compat, principal: Invent
     // Closing a task closes the pickup it has open, in the same batch (a task is closed by hand with the issue permission; undo is this close record, never a delete).
     ...(action === 'close' && membershipOf(session) === TASK_MEMBERSHIP ? closePickupsStatements().map(({ sql }) => ({ sql, params: { task: id, org: actor.organization_id, actorId: actor.id, actorName: actorSnapshot(actor), key, hash, now } })) : []),
     ...(taskPart ? taskPart.statements : []),
+    // LAST: after the UPDATE that makes the session's counts not final.
+    ...(reopening ? reopening.statements : []),
   ]
   const saved = await commit(db, principal, actor, statements, key, hash)
-  const closedTasks = closedBy(saved, statements, taskPart)
-  return { item: (await committedSessionProjection(db, principal, id)).item, receipt: receiptResponse(saved.event, saved.replayed), ...(closedTasks.length ? { closedTasks } : {}) }
+  const closedTasks = closedBy(saved, statements, taskPart), reopenedTasks = reopenedBy(saved, statements, reopening)
+  return { item: (await committedSessionProjection(db, principal, id)).item, receipt: receiptResponse(saved.event, saved.replayed), ...(closedTasks.length ? { closedTasks } : {}), ...(reopenedTasks.length ? { reopenedTasks } : {}) }
 }
 export async function inventoryCheckSessionHistory(db: D1Compat, principal: InventoryCheckPrincipal, id: string, query: Record<string,string>) {
   let actor = await currentInventoryCheckActor(db, principal); await schemaReady(db)
@@ -1100,7 +1118,7 @@ export async function inventoryCheckSessionHistory(db: D1Compat, principal: Inve
     const project = (json: string) => {
       const parsed = JSON.parse(json) as Record<string, unknown> | null
       if (!parsed) return null
-      return Object.fromEntries(['state','reason','revision','status','members', ...approvalKeys, ...(showCount ? ['counted_quantity'] : [])].filter(key => Object.hasOwn(parsed,key)).map(key => [key, parsed[key]]))
+      return Object.fromEntries(['state','reason','revision','status','members','reopened','cause', ...approvalKeys, ...(showCount ? ['counted_quantity'] : [])].filter(key => Object.hasOwn(parsed,key)).map(key => [key, parsed[key]]))
     }
     const productName = projectInventoryCheckProduct({ name: row.product_name }, access).name
     return { id: row.id, session_id: row.session_id, product_id: row.product_id, product_name: typeof productName === 'string' ? productName : null, actor_id: row.actor_id,

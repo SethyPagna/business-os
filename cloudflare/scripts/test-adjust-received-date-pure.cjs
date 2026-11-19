@@ -71,6 +71,11 @@ function transpile(relPath) {
   return { sourcePath, outputText }
 }
 
+// F1 (19 Nov): the route imports the plain Set count statements at call time (outside loadReal's own hook); this harness has no count tables, so that module is a no-op stand-in for the whole file
+const F1_STUB = { plainSetCloseStatements: () => ({ statements: [], trailing: [], answer: () => ({}) }), plainSetCountOf: () => 'NULL' }
+const loadBeforeF1 = Module._load
+Module._load = function (request, parent, isMain) { return request === '../lib/stockSetClosesIssue' ? F1_STUB : loadBeforeF1.apply(this, arguments) }
+
 function loadReal(relPath, requireOverrides = {}) {
   const { sourcePath, outputText } = transpile(relPath)
   const originalLoad = Module._load
@@ -233,6 +238,8 @@ const inventoryRoute = loadReal('routes/inventory.ts', { '../lib/schemaObjectPro
   // dependency. These bodies carry no client_request_id, so the guard hands
   // straight through to the kernel and touches no table.
   '../lib/stockMutationReceipt': stockMutationReceipt,
+  // F1 (19 Nov): the plain Set's count statements are imported when ic_lot_counts is on; this harness has no count tables, so the module is a no-op stand-in
+  '../lib/stockSetClosesIssue': { plainSetCloseStatements: () => ({ statements: [], trailing: [], answer: () => ({}) }), plainSetCountOf: () => 'NULL' },
   // The one shared reason-length cap (lib/stockReason.ts). REAL, not a
   // stub: the point of the module is that every wire measures the same way.
   '../lib/stockReason': loadReal('lib/stockReason.ts'),
@@ -333,6 +340,8 @@ const batchesRoute = loadReal('routes/batches.ts', {
   // dependency. These bodies carry no client_request_id, so the guard hands
   // straight through to the kernel and touches no table.
   '../lib/stockMutationReceipt': stockMutationReceipt,
+  // F1 (19 Nov): the plain Set's count statements are imported when ic_lot_counts is on; this harness has no count tables, so the module is a no-op stand-in
+  '../lib/stockSetClosesIssue': { plainSetCloseStatements: () => ({ statements: [], trailing: [], answer: () => ({}) }), plainSetCountOf: () => 'NULL' },
   // The one shared reason-length cap (lib/stockReason.ts). REAL, not a
   // stub: the point of the module is that every wire measures the same way.
   '../lib/stockReason': loadReal('lib/stockReason.ts'),
