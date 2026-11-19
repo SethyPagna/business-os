@@ -64,6 +64,12 @@ function expectOf(status, code) {
   return { refused: code || 'http_' + status, until: ROUTE_NOTES.until[code] ?? null }
 }
 
+// Shapes whose ceiling is only meaningful while the answer holds data: getProblems fails one whose list at `path` has fewer than `min` rows.
+const EXPECT_ROWS = {
+  'products-id-sales-detail': { path: 'sales', min: 1 },
+  'products-id-sales-detail-month-window': { path: 'sales', min: 1 },
+}
+
 // Why a ceiling is what it is, for the shapes that need a word (written into the entry as "note").
 const ENTRY_NOTES = {
   'sales-stats-today':
@@ -198,6 +204,7 @@ async function main() {
     }
     if (isGet && data.pins.length) entry.pins = data.pins
     if (ENTRY_NOTES[shape.id]) entry.note = ENTRY_NOTES[shape.id]
+    if (EXPECT_ROWS[shape.id]) entry.expect_rows = EXPECT_ROWS[shape.id]
     entries.push(entry)
     ;(prints[reg.route.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '')] ||= {})[shape.id] = (isGet && done.get(`fpold:${shape.id}`)) || w.fingerprints
   }

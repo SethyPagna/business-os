@@ -101,6 +101,11 @@ function getProblems(entry, m, { analyze = false, on = today() } = {}) {
   const warm = m.warm
   if (warm.overDeadline) return [`over budget: no answer within the deadline`]
   if (warm.status !== entry.status) out.push(`status ${warm.status}, budget has ${entry.status}`)
+  else if (entry.expect_rows) {
+    const held = entry.expect_rows.path.split('.').reduce((node, key) => (node == null ? node : node[key]), warm.json)
+    const n = Array.isArray(held) ? held.length : -1
+    if (n < entry.expect_rows.min) out.push(`the answer holds ${n < 0 ? 'no list' : n + ' rows'} at "${entry.expect_rows.path}", the budget needs at least ${entry.expect_rows.min}: the shape no longer reads the data its ceiling was measured on`)
+  }
   if (m.cold) {
     if (m.cold.overDeadline) out.push('cold request: no answer within the deadline')
     else if (m.cold.calls > callsLimit(entry, on)) out.push(`cold calls ${m.cold.calls} > ${callsLimit(entry, on)}`)

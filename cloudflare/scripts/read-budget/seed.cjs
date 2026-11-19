@@ -7,22 +7,25 @@
 const ADMIN = { username: 'budget_admin', password: 'budget-password-1', bootstrapPassword: 'Budget-Admin-Pass-2026' }
 const P = 8652, C = 5164, S = 15848, FIRST_SALE = 100000, POSITIVE_LOTS = 3978, BRANCH_STOCK_ROWS = 16757
 const BIG_SALE_K = 40, BIG_SALE_LINES = 86
+// Sale k is floor(k * SALE_STEP_MINUTES) minutes before the anchor. PRODUCT_SALE_K is the one completed sale of product 1000 the sales-detail drill-down is built on.
+const SALE_STEP_MINUTES = 32.8, PRODUCT_SALE_K = 784, PRODUCT_SALE_PRODUCT = 1000
 
-// productSalesDay: the local day of the one completed sale of product 1000 the seed puts in the sales-detail drill-down (sale k=784, 25,715 minutes before the
-// anchor, i.e. 18 days back at 15:25). A calendar month cannot be a fixed window: how many seeded days it holds moves with the run date (the 19 Nov 2026 red).
+// productSalesDay: the local day of PRODUCT_SALE_K, the sale of product 1000 the sales-detail drill-down reads (the anchor is 12:00 local, so with the constants above it is
+// 18 days back at 15:25). A calendar month cannot be a fixed window: how many seeded days it holds moves with the run date (the 19 Nov 2026 red); the month of this day can:
+// the other two sales of product 1000 are 59 and 197 days further back, so that month holds exactly this one sale on every run date.
 function seedContext(now = process.env.READ_BUDGET_NOW ? new Date(process.env.READ_BUDGET_NOW) : new Date()) {
   const local = new Date(now.getTime() + 7 * 3600e3)
   const anchorDate = local.toISOString().slice(0, 10)
   const day = (back) => new Date(Date.parse(anchorDate + 'T00:00:00Z') - back * 86400e3).toISOString().slice(0, 10)
-  return { anchorDate, anchor: `${anchorDate} 05:00:00`, today: anchorDate, week: day(6), month: day(29), year: day(364), productSalesDay: day(18), bigSaleId: FIRST_SALE + S - 1 - BIG_SALE_K, firstSaleId: FIRST_SALE, lastSaleId: FIRST_SALE + S - 1 }
+  return { anchorDate, anchor: `${anchorDate} 05:00:00`, today: anchorDate, week: day(6), month: day(29), year: day(364), productSalesDay: new Date(Date.parse(anchorDate + 'T12:00:00Z') - Math.trunc(PRODUCT_SALE_K * SALE_STEP_MINUTES) * 60e3).toISOString().slice(0, 10), bigSaleId: FIRST_SALE + S - 1 - BIG_SALE_K, firstSaleId: FIRST_SALE, lastSaleId: FIRST_SALE + S - 1 }
 }
 
 // Lines per sale from the sale's age index k: ~2.3% big sales (10-22 lines), the rest mostly 1-3, one 86-line sale.
 const linesSql = (k) => `(CASE WHEN ${k} = ${BIG_SALE_K} THEN ${BIG_SALE_LINES} WHEN ${k} % 1000 < 23 THEN 10 + ${k} % 13
   WHEN ${k} % 100 < 41 THEN 1 WHEN ${k} % 100 < 70 THEN 2 WHEN ${k} % 100 < 87 THEN 3 WHEN ${k} % 100 < 95 THEN 4 ELSE 5 END)`
 
-function seedSql({ variant = 'base' } = {}) {
-  const { anchor, anchorDate } = seedContext()
+function seedSql({ variant = 'base', now } = {}) {
+  const { anchor, anchorDate } = seedContext(now)
   const A = `'${anchor}'`
   const AD = `'${anchorDate}'`
   const ago = (expr, unit) => `strftime('%Y-%m-%d %H:%M:%S',datetime(${A},'-'||(${expr})||' ${unit}'))`
@@ -70,7 +73,7 @@ function seedSql({ variant = 'base' } = {}) {
     `INSERT INTO product_images(product_id,image_path,sort_order) SELECT id,'/uploads/g'||id||'.webp',0 FROM products WHERE id BETWEEN 1000 AND ${999 + P} AND (id-1000)%5=0`,
     `WITH RECURSIVE n(j) AS (SELECT 1 UNION ALL SELECT j+1 FROM n WHERE j<${C})
       INSERT INTO customers(id,name,phone,phone_normalized,created_at) SELECT j,'Customer '||j,'000'||printf('%07d',j),'000'||printf('%07d',j),${ago('j%360', 'days')} FROM n`,
-    // sale k is k*32.8 minutes before the anchor; 88% completed, 6% awaiting_payment, 6% cancelled; the recent 3,000 sales are all branch 1.
+    // sale k is k*SALE_STEP_MINUTES minutes before the anchor; 88% completed, 6% awaiting_payment, 6% cancelled; the recent 3,000 sales are all branch 1.
     `WITH RECURSIVE n(k) AS (SELECT 0 UNION ALL SELECT k+1 FROM n WHERE k<${S - 1})
       INSERT INTO sales(id,receipt_number,cashier_id,cashier_name,branch_id,branch_name,customer_id,customer_name,customer_phone,payment_method,exchange_rate,
         sale_status,created_at,updated_at,money_precision_version,loyalty_accrual,search_normalized,stock_skipped)
@@ -78,7 +81,7 @@ function seedSql({ variant = 'base' } = {}) {
         CASE WHEN k%5<3 THEN 1+k%${C} END,CASE WHEN k%5<3 THEN 'Customer '||(1+k%${C}) ELSE 'Walk-in' END,CASE WHEN k%5<3 THEN '000'||printf('%07d',1+k%${C}) END,
         CASE WHEN k%4=0 THEN 'ABA' ELSE 'Cash' END,4000,
         CASE WHEN k%50 IN (7,23,41) THEN 'awaiting_payment' WHEN k%50 IN (11,31,44) THEN 'cancelled' ELSE 'completed' END,
-        ${ago('CAST(k*32.8 AS INTEGER)', 'minutes')},${ago('CAST(k*32.8 AS INTEGER)', 'minutes')},
+        ${ago(`CAST(k*${SALE_STEP_MINUTES} AS INTEGER)`, 'minutes')},${ago(`CAST(k*${SALE_STEP_MINUTES} AS INTEGER)`, 'minutes')},
         0,0,lower('r'||printf('%07d',${FIRST_SALE}+${S - 1}-k)||' customer '||(1+k%${C})),0 FROM n ORDER BY k DESC`,
     `WITH RECURSIVE l(i) AS (SELECT 0 UNION ALL SELECT i+1 FROM l WHERE i<${BIG_SALE_LINES - 1})
       INSERT INTO sale_items(sale_id,product_id,product_name,sku,quantity,applied_price_usd,applied_price_khr,base_price_usd,base_price_khr,cost_price_usd,cost_price_khr,total_usd,total_khr,branch_id,batch_id,price_mode)
@@ -179,4 +182,4 @@ function seedSql({ variant = 'base' } = {}) {
   ]
 }
 
-module.exports = { seedSql, seedContext, ADMIN, P, C, S, POSITIVE_LOTS, BRANCH_STOCK_ROWS }
+module.exports = { seedSql, seedContext, ADMIN, P, C, S, POSITIVE_LOTS, BRANCH_STOCK_ROWS, FIRST_SALE, SALE_STEP_MINUTES, PRODUCT_SALE_K, PRODUCT_SALE_PRODUCT }
