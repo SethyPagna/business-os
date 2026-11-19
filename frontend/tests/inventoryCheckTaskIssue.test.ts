@@ -7,7 +7,6 @@ const words = pack('en')
 const world = await createTasksWorld()
 world.user = viewerUser('admin')
 const reset = () => { forgetDeviceDrafts(); world.calls.length = 0; world.notices.length = 0; world.failures = {}; world.board = [] }
-const issueBar = (surface: Surface) => surface.find(node => node.getAttribute('data-inventory-check-issue-bar') !== null, 'issue bar')
 const issueButton = (surface: Surface) => surface.find(node => node.getAttribute('data-issue-action') === 'issue', 'Issue')
 const ticks = (surface: Surface) => surface.findAll(node => node.getAttribute('data-check-pick') !== null)
 // A checkbox answers its change event (the memory DOM does not turn a click into one).

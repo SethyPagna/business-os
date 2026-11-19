@@ -157,6 +157,6 @@ export type Surface = Awaited<ReturnType<World['mount']>>
 export const rowOf = (surface: Surface, id: number) => surface.find(node => node.getAttribute('data-inventory-check-row') === String(id), `row ${id}`)
 export const countInput = (surface: Surface, id: number) => surface.find(node => node.getAttribute('data-check-count') !== null && rowOf(surface, id).contains(node), `count of ${id}`)
 export const taskRowOf = (surface: Surface, id: string) => surface.find(node => node.getAttribute('data-inventory-check-task') === id, `task ${id}`)
-export const actionIn = (surface: Surface, scope: ReturnType<typeof taskRowOf>, action: string) => scope.querySelectorAll('[data-task-action]').filter(node => node.getAttribute('data-task-action') === action)[0] ?? null
+export const actionIn = (_surface: Surface, scope: ReturnType<typeof taskRowOf>, action: string) => scope.querySelectorAll('[data-task-action]').filter(node => node.getAttribute('data-task-action') === action)[0] ?? null
 export const hasAction = (surface: Surface, id: string, action: string) => !!actionIn(surface, taskRowOf(surface, id), action)
 export function resetWindow() { installWindow() }
