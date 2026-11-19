@@ -50,6 +50,8 @@ import type { D1Compat } from './db'
  * differently. Rows with a blank name fall back to an id-scoped key so they
  * stay separate instead of all collapsing into one nameless mega-family.
  */
+/** The most families one page of the products list may ask for: the reader's clamp (routes/products.ts) and the wired Inventory Check list's bound (lib/inventoryCheckList.ts) are both this one number. */
+export const PRODUCT_LIST_MAX_PAGE_SIZE = 100
 export const FAMILY_ROOT_KEY_SQL = `COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent.id, p.id))`
 
 /**

@@ -11,7 +11,7 @@ import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { collectMergeProductIds, describeMergeFailure } from '../lib/mergeRouteLog'
 import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
-import { INTRA_FAMILY_NAME_BARCODE_SQL, pageFamiliesByKeys, paginateProductFamilies, paginateRankedIdFamilies, rankProductFamilies, typedOrderDrivenRead, typedOrderEligible, type FamilyGroupTotals, type FamilyPaginationOptions } from '../lib/familyPagination'
+import { INTRA_FAMILY_NAME_BARCODE_SQL, PRODUCT_LIST_MAX_PAGE_SIZE, pageFamiliesByKeys, paginateProductFamilies, paginateRankedIdFamilies, rankProductFamilies, typedOrderDrivenRead, typedOrderEligible, type FamilyGroupTotals, type FamilyPaginationOptions } from '../lib/familyPagination'
 import { groupingPlan, type InventoryCheckGrouping } from '../lib/inventoryCheckGrouping'
 import { nextPromotionEdge, readPromotionEdge, readRankedScope, type RankedScope } from '../lib/rankedScope'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
@@ -1047,7 +1047,7 @@ async function paginateRankedFamilies(opts: FamilyPaginationOptions, scope: Rank
 
 async function searchProductsPayload(env: Env, query: Record<string, string>, options: ProductSearchOptions = {}) {
   const page = clampInt(query.page, 1, 1, 100000)
-  const pageSize = clampInt(query.pageSize, 20, 1, 100)
+  const pageSize = clampInt(query.pageSize, 20, 1, PRODUCT_LIST_MAX_PAGE_SIZE)
   const sort = String(query.sort || 'name_asc').toLowerCase()
   // Family-level order (ranks grouped products as one unit -- see
   // paginateProductFamilies) mirrors the row-level order below, just

@@ -6,6 +6,7 @@ import { projectAcquisitionCosts } from './acquisitionCostAccess'
 import { cacheIdentity, cachedJsonResponse, getVersionWithFallback, isUnsafeVersion } from './cache'
 import { unsafeVersionToken } from './cacheKey'
 import { getDb } from './db'
+import { PRODUCT_LIST_MAX_PAGE_SIZE } from './familyPagination'
 import { getInventoryCheckAccess, InventoryCheckQueryError, validateInventoryCheckQuery, type InventoryCheckAccess } from './inventoryCheckAccess'
 import { InventoryCheckSessionError, waitingLineSql } from './inventoryCheckSessions'
 import { getPlanLimits } from './planTier'
@@ -27,8 +28,8 @@ export type ListCheckState = typeof LIST_CHECK_STATES[number]
 /** The include string Products sends; the `lots` token is added after the cache and never belongs to the key. */
 export const LIST_INCLUDE = 'branch_stock,images,batches,tagged_lots'
 const DEFAULT_PAGE_SIZE = 50
-/** The most rows (families, for the wired list) one page may ask for. */
-export const LIST_MAX_PAGE_SIZE = 100
+/** The most rows (families, for the wired list) one page may ask for: the products reader's own clamp, one constant. */
+export const LIST_MAX_PAGE_SIZE = PRODUCT_LIST_MAX_PAGE_SIZE
 // The id sets are version-keyed (inventory_checks, bumped by every IC writer), so the plan's productListCacheSeconds only bounds how long a copy may live.
 const STOCK_STATES: Record<string, string> = { in_stock: 'in_stock', low_stock: 'low', out_of_stock: 'out' }
 

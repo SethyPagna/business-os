@@ -36,7 +36,7 @@ const PINNED_WRITER_COST = {
 }
 const ON = ['ic_wired', 'ic_simple', 'ic_fix_stock', 'ic_lot_counts']
 
-function build(sourceEdits = {}, { extraProducts = 0, families = 0, familyBrand = 'Q', headers = 0 } = {}) {
+function build(sourceEdits = {}, { extraProducts = 0, families = 0, familyBrand = 'Q', headers = 0, lone, headerName = 'Head' } = {}) {
   const app = createInvApp({
     users: USERS_X, sourceEdits,
     mount: { '/api/products': 'routes/products.ts', '/api/inventory-checks/products': 'routes/inventoryCheckProducts.ts', '/api/inventory-checks': 'routes/inventoryChecks.ts' },
@@ -53,9 +53,9 @@ function build(sourceEdits = {}, { extraProducts = 0, families = 0, familyBrand 
         raw.prepare('UPDATE products SET parent_id=200 WHERE id IN (201,202)').run()
         for (let n = 0; n < extraProducts; n++) add(300 + n, `Bulk ${300 + n}`, 'Z')
         // `families` families of one header and two children each (brand Q; over 100 of them is more than one page of the list)
-        // `headers` family headers with no children (brand H, ids 5000..) and 5 ordinary products of the same brand: the list shows each header as a row, and a header adds no id to a task
-        for (let n = 0; n < headers; n++) add(5000 + n, `Head ${n}`, 'H', 1)
-        if (headers) for (let n = 0; n < 5; n++) add(4000 + n, `Lone ${n}`, 'H')
+        // `headers` family headers with no children (brand H, ids 5000.., named `headerName`) and `lone` (5 with headers) ordinary products of the same brand (ids 4000..): the list shows each header as a row, and a header adds no id to a task
+        for (let n = 0; n < headers; n++) add(5000 + n, `${headerName} ${n}`, 'H', 1)
+        for (let n = 0, count = lone ?? (headers ? 5 : 0); n < count; n++) add(4000 + n, `Lone ${n}`, 'H')
         for (let n = 0; n < families; n++) { const base = 1000 + n * 3, brand = n < 120 ? 'Q' : 'R'; add(base, `Fam ${n}`, brand, 1); add(base + 1, `Fam ${n}`, brand); add(base + 2, `Fam ${n}`, brand); raw.prepare('UPDATE products SET parent_id=? WHERE id IN (?,?)').run([base, base + 1, base + 2]) }
       })
     },
@@ -671,23 +671,38 @@ async function issuedByVisibility(w) {
 }
 
 /**
- * P3-3: resolving an issue filter reads the wired list page after page, and a page of childless family headers adds no id, so the cap alone never stops it. Each page costs 7 D1 calls and the request has 7 of its own
- * (Free allows 50): the loop stops after ceil(maxProducts / page size) + 1 pages and answers 400 inventory_check_task_too_many with atLeast. Measured at 205, 605 and 1,005 families, one cold request each.
+ * P3-3, F1, F2: resolving an issue filter reads the wired list page after page. The reader pages FAMILIES, and a childless header is a family, so the filter reads the list leaf-only (the check lists' own
+ * restriction, which leaves headers out): a page then holds at least one product per family and the bound counts products. A filter of maxProducts (300) or fewer countable products always issues, whatever
+ * headers it matches; one with more answers inventory_check_task_too_many. Each page costs 7 D1 calls and the request has 7 of its own (Free allows 50). One cold request per world.
  */
 async function issueFilterBound(w0) {
-  for (const headers of [205, 605, 1005]) {
-    const w = w0.again({ headers })
+  const worlds = [
+    ['205 childless headers and 5 products', { headers: 205 }, 5], ['605 childless headers and 5 products', { headers: 605 }, 5], ['1005 childless headers and 5 products', { headers: 1005 }, 5],
+    ['101 childless headers and 300 products (F1: 401 families)', { headers: 101, lone: 300 }, 300],
+    ['99 childless headers sorted last and 300 products (F2: 399 families)', { headers: 99, lone: 300, headerName: 'Zhead' }, 300],
+    ['301 products and no header (the page bound plus one)', { lone: 301 }, 301],
+  ]
+  for (const [label, world, products] of worlds) {
+    const w = w0.again(world)
     let calls = 0
     for (const name of ['prepare', 'batch', 'batchOnce']) { const original = w.app.env.DB[name]; w.app.env.DB[name] = (...args) => { calls++; return original.apply(w.app.env.DB, args) } }
     w.as('admin'); w.app.clearCaches()
     const before = calls, made = await w.api('POST', '/tasks', { branchId: 1, requestId: w.rid('hb'), filters: { brand: 'H' } }), used = calls - before
-    console.log(`     filter over ${headers} families: ${used} D1 calls, ${made.status}`)
-    assert.ok(used <= 50, `${headers} families: ${used} D1 calls for one cold POST /tasks (Free allows 50)`)
+    console.log(`     ${label}: ${used} D1 calls, ${made.status}${made.status === 400 ? ` ${made.json.code} total ${made.json.total}` : ''}`)
+    assert.ok(used <= 50, `${label}: ${used} D1 calls for one cold POST /tasks (Free allows 50)`)
     const issued = w.row("SELECT COUNT(*) AS n FROM inventory_check_sessions WHERE json_extract(scope_json,'$.membership')='task'").n
-    if (headers + 5 <= 4 * 100) { assert.equal(made.status, 201, JSON.stringify(made.json)); assert.equal(made.json.item.progress.total, 5, 'within the bound the filter still resolves'); assert.equal(issued, 1); continue }
-    assert.equal(made.status, 400, JSON.stringify(made.json)); assert.equal(made.json.code, 'inventory_check_task_too_many'); assert.equal(made.json.atLeast, true, 'the count is a lower bound')
+    if (products <= 300) { assert.equal(made.status, 201, `${label}: ${JSON.stringify(made.json)}`); assert.equal(made.json.item.progress.total, products, 'within the bound the filter resolves every product'); assert.equal(issued, 1); continue }
+    assert.equal(made.status, 400, JSON.stringify(made.json)); assert.equal(made.json.code, 'inventory_check_task_too_many'); assert.equal(made.json.total, products, 'the whole count, not a page bound')
     assert.equal(made.json.limit, 300); assert.equal(issued, 0, 'nothing was issued')
   }
+}
+
+/** F5: the wired list's page size and the products reader's clamp are one constant, so the filter loop's stop rule cannot drift from the reader. */
+async function pageSizeOneSource(w) {
+  const read = (file) => require('node:fs').readFileSync(path.join(__dirname, '../src', file), 'utf8')
+  assert.match(read('lib/inventoryCheckList.ts'), /export const LIST_MAX_PAGE_SIZE = PRODUCT_LIST_MAX_PAGE_SIZE\b/)
+  assert.match(read('routes/products.ts'), /clampInt\(query\.pageSize, 20, 1, PRODUCT_LIST_MAX_PAGE_SIZE\)/)
+  assert.equal(w.app.load('lib/inventoryCheckList.ts').LIST_MAX_PAGE_SIZE, w.app.load('lib/familyPagination.ts').PRODUCT_LIST_MAX_PAGE_SIZE)
 }
 
 /**
@@ -958,7 +973,7 @@ const SCENARIOS = {
   autoCloseOlderWriter: (w) => autoClose(w, { lotWriter: false }),
   outsideCloseLot: (w) => outsideClose(w, 'lot'), outsideClosePlain: (w) => outsideClose(w, 'plain'), outsideCloseObserve: (w) => outsideClose(w, 'observe'),
   outsideNegativesLot: (w) => outsideNegatives(w, 'lot'), outsideNegativesPlain: (w) => outsideNegatives(w, 'plain'), outsideNegativesObserve: (w) => outsideNegatives(w, 'observe'),
-  observationNotFinal, doneRuleOrg, removedProducts, issueFilterFamilies, issueCapabilities, taskCap, taskRowsUntouched, headerRule, deactivatedWithStock, issuedByVisibility, issueFilterBound, cacheKeyProducts, schemaMissing, taskCapReplay, readBackHash,
+  observationNotFinal, doneRuleOrg, removedProducts, issueFilterFamilies, issueCapabilities, taskCap, taskRowsUntouched, headerRule, deactivatedWithStock, issuedByVisibility, issueFilterBound, pageSizeOneSource, cacheKeyProducts, schemaMissing, taskCapReplay, readBackHash,
   random: (w) => randomWorld(w, 20261118, 50),
   randomTwo: (w) => randomWorld(w, 20261119, 90),
   budget,
@@ -1013,7 +1028,10 @@ async function main() {
     ['the old rule: a task counts an inactive product that holds stock', edit('lib/inventoryCheckTasks.ts', "export const TASK_COUNTABLE_SQL = `(${catalogProductSql('p', false)} AND", 'export const TASK_COUNTABLE_SQL = `(${stockVisibleProductSql()} AND'), ['deactivatedWithStock']],
     ['the task list totals every product of the task, not the countable ones', edit('lib/inventoryCheckTasks.ts', 'productIds: rows.filter((row) => Number(row.countable) === 1).map(', 'productIds: rows.map('), ['headerRule', 'deactivatedWithStock']],
     ['issued_by goes to every board viewer', edit('routes/inventoryChecks.ts', '...(canSeeStaffIdentity(user, row.created_by) ? { issued_by: row.issuer } : {})', 'issued_by: row.issuer'), ['issuedByVisibility']],
-    ['the filter loop has no page bound', edit('routes/inventoryChecks.ts', "    if (page >= maxPages) throw new InventoryCheckSessionError(400, 'inventory_check_task_too_many', { total: ids.size, limit, atLeast: true })\n", ''), ['issueFilterBound']],
+    ['the filter reads the list family by family again (childless headers fill the pages)', edit('routes/inventoryChecks.ts', "  if (leafOnly) restriction = { excludeIdsJson: '[]' }\n", ''), ['issueFilterBound']],
+    ['the filter reads family by family and the loop has no page bound', { 'routes/inventoryChecks.ts': [["  if (leafOnly) restriction = { excludeIdsJson: '[]' }\n", ''], ["    if (page >= maxPages) throw new InventoryCheckSessionError(400, 'inventory_check_task_too_many', { total: ids.size, limit, atLeast: true })\n", '']] }, ['issueFilterBound']],
+    ['the page bound is one page short (no plus one)', edit('routes/inventoryChecks.ts', 'maxPages = Math.ceil(limit / LIST_MAX_PAGE_SIZE) + 1', 'maxPages = Math.ceil(limit / LIST_MAX_PAGE_SIZE)'), ['issueFilterBound']],
+    ['the wired list raises its page size alone (a second source, not the reader clamp)', edit('lib/inventoryCheckList.ts', 'export const LIST_MAX_PAGE_SIZE = PRODUCT_LIST_MAX_PAGE_SIZE', 'export const LIST_MAX_PAGE_SIZE = 150'), ['pageSizeOneSource']],
     ['the task list cache ignores the products version', edit('routes/inventoryChecks.ts', "order=1`, { method: 'GET' }), c.executionCtx, `ict:${version}:${productsVersion}`", "order=1`, { method: 'GET' }), c.executionCtx, `ict:${version}`"), ['cacheKeyProducts']],
     ['the schema probe does not name the task indexes', edit('lib/inventoryCheckSessions.ts', "  'inventory_check_sessions_kind_task', 'inventory_check_sessions_open_task', 'inventory_check_sessions_task_board'])\nconst APPROVALS_SCHEMA", "  ])\nconst APPROVALS_SCHEMA"), ['schemaMissing']],
     ['issue by ids uses the older countable rule', edit('lib/inventoryCheckSessions.ts', 'AND ${TASK_COUNTABLE_SQL} ORDER BY p.id`', 'AND ${stockVisibleProductSql()} AND ${CHECKABLE_SQL} ORDER BY p.id`'), ['headerRule']],

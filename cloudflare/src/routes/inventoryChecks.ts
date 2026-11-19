@@ -153,6 +153,10 @@ async function readListPage(c: IcContext, rawQuery: Record<string, string>, extr
     if (restriction.excludeIdsJson !== undefined) { const drop = new Set(JSON.parse(restriction.excludeIdsJson) as number[]); ids = new Set([...ids].filter((id) => !drop.has(id))) }
     restriction = { restrictIdsJson: JSON.stringify([...ids]) }
   }
+  // idsOnly with no restriction of its own (a filter being issued): read leaf-only. An exclusion of no ids is the check lists' own restriction and leaves family headers out, so a page holds only families with a
+  // product in them and the page bound counts products. The key carries `leaf`, so the page never shares an entry with the plain list.
+  const leafOnly = Boolean(extra.idsOnly) && restriction.restrictIdsJson === undefined && restriction.excludeIdsJson === undefined
+  if (leafOnly) restriction = { excludeIdsJson: '[]' }
   // The shared cache key is the canonical request. A grouped read never takes a by-id read (its ranking needs the keyed page read): an exact code hit becomes a restriction to that id, and the key keeps the id.
   const keyRequest = canonicalProductsRequest(productsQuery)
   if (plan.grouping && codeHit !== null) {
@@ -166,7 +170,7 @@ async function readListPage(c: IcContext, rawQuery: Record<string, string>, extr
   const groupedVersion = (grouping || extra.task) && !setsVersion ? await inventoryChecksVersion(c.env) : setsVersion
   // The cached page is keyed by the restriction's own name: the state (Pending without the right to see it is an empty set of its own: it must not share a cached page with the admin's real Pending set)
   // and the day, so a page of one day never serves another.
-  const setKey = [plan.checkState ? (plan.checkState === 'pending' && !fixStock ? 'pending_unavailable' : plan.checkState) : '', plan.checkedOn ? `day:${plan.checkedOn}` : '', extra.task ? `task:${extra.task.id}` : ''].filter(Boolean).join('|')
+  const setKey = [plan.checkState ? (plan.checkState === 'pending' && !fixStock ? 'pending_unavailable' : plan.checkState) : '', plan.checkedOn ? `day:${plan.checkedOn}` : '', extra.task ? `task:${extra.task.id}` : '', leafOnly ? 'leaf' : ''].filter(Boolean).join('|')
   const { groups, ...payload } = await readProductSearchList(c, productsQuery, { include, keyRequest, ...restriction, ...(grouping ? { grouping } : {}),
     ...(setKey ? { setKey } : codeHit !== null && grouping ? { setKey: 'code' } : {}),
     ...(plan.checkState || plan.checkedOn || grouping || extra.task ? { setVersion: groupedVersion } : {}), lotsAdmitted: access.fields.received && !extra.idsOnly, taggedLotsAdmitted: access.fields.stock && !extra.idsOnly }) as Awaited<ReturnType<typeof readProductSearchList>> & { groups?: FamilyGroupTotals[] }
@@ -289,9 +293,10 @@ async function resolveTaskFilters(c: IcContext, branchId: number, raw: unknown, 
     if (!(TASK_FILTER_KEYS as readonly string[]).includes(key) || typeof value !== 'string') throw new InventoryCheckSessionError(400, 'inventory_check_invalid_request')
     if (value.trim() !== '') filters[key] = value.trim()
   }
-  // The list's own reader, page after page (a page holds at most 100 FAMILIES, each with all its countable children, so `total` counts families and a page holds more rows than that), until the reader has no more pages or the
-  // cap is passed. The cap and the answer's `total` count COUNTABLE ROWS (a family header is not one), never families; stopped early over the cap, `total` is what was counted so far and `atLeast` says so.
-  // A page of only headers adds no ids, so the cap alone would not stop the loop before Free's D1 calls per request: it also stops after the pages the cap could need, plus one.
+  // The list's own reader, read leaf-only (readListPage idsOnly: no family header is a row), page after page (a page holds at most 100 FAMILIES, each with all its countable children, so `total` counts families and a page
+  // holds at least that many rows) until the reader has no more pages or the cap is passed. The cap and the answer's `total` count COUNTABLE ROWS, never families; stopped early over the cap, `total` is what was counted so
+  // far and `atLeast` says so. Every family on a page holds a product, so a filter of `limit` products or fewer ends within ceil(limit / page size) pages and never meets the page bound. The bound (the pages the cap could
+  // need, plus one) only keeps a request under Free's D1 calls if the reader ever returned pages that add no ids again.
   const ids = new Set<number>(), maxPages = Math.ceil(limit / LIST_MAX_PAGE_SIZE) + 1
   let atLeast = false
   for (let page = 1; ; page++) {
