@@ -8296,6 +8296,7 @@
   "inventory_check_task_release_review_title": "ប្រគល់កិច្ចការនេះវិញ?",
   "inventory_check_task_close_review_title": "បិទកិច្ចការនេះ?",
   "inventory_check_task_issued": "បានចាត់កិច្ចការ · ផលិតផល៖ {count}",
+  "inventory_check_task_issued_plain": "បានចាត់កិច្ចការ",
   "inventory_check_task_scope_needed": "សូមជ្រើសរើសផលិតផល ឬកំណត់តម្រងជាមុន។",
   "inventory_check_task_too_many_count": "ផលិតផល {total}។ កិច្ចការមួយអាចមានផលិតផលបានច្រើនបំផុត {limit}។ សូមកំណត់ជម្រើសឱ្យតូចជាងនេះ។",
   "inventory_check_task_too_many_at_least": "យ៉ាងហោចណាស់ផលិតផល {total}។ កិច្ចការមួយអាចមានផលិតផលបានច្រើនបំផុត {limit}។ សូមកំណត់ជម្រើសឱ្យតូចជាងនេះ។",

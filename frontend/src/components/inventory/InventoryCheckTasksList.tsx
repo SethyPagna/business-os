@@ -9,7 +9,7 @@ import FilterMenu, { type FilterSection } from '../shared/FilterMenu.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
 import SoleBranchLabel from '../shared/SoleBranchLabel.tsx'
 import { ProgressRing, SessionStatusChip } from './InventoryCheckSessionsList.tsx'
-import { pickerText, progressOrAllText, removedText, reopenedText, taskName, type TaskReopened } from './inventoryCheckTaskText.ts'
+import { pickerText, progressOrAllText, removedText, reopenedText, taskName } from './inventoryCheckTaskText.ts'
 
 type Translator = (key: string) => string | null | undefined
 const label = (t: Translator, key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
@@ -86,7 +86,7 @@ export default function InventoryCheckTasksList({ board, t, canWork, busy, onOpe
       const name = taskName(t, task)
       const progress = progressOrAllText(t, task)
       // Only a Worker that sends the field draws the line; today's sends nothing.
-      const reopened = (task as InventoryCheckTask & { reopened?: TaskReopened }).reopened
+      const reopened = task.reopened
       return <li key={task.id} data-inventory-check-task={task.id} data-task-status={task.status} data-task-mine={task.mine ? '' : undefined} className="min-w-0">
         {/* The whole row opens the task (a tap anywhere). The name is its one real button, so the keyboard and screen readers have a control named by the task; its full text is the tooltip. Pick up, Hand back and Close are separate buttons and never open it. */}
         <div data-task-open className="flex min-h-10 w-full min-w-0 cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 py-2 text-left text-xs xl:flex-nowrap"

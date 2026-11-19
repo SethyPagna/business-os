@@ -8296,6 +8296,7 @@
   "inventory_check_task_release_review_title": "Hand back this task?",
   "inventory_check_task_close_review_title": "Close this task?",
   "inventory_check_task_issued": "Task issued · Products: {count}",
+  "inventory_check_task_issued_plain": "Task issued",
   "inventory_check_task_scope_needed": "Select products or set a filter first.",
   "inventory_check_task_too_many_count": "{total} products. A task holds at most {limit}. Narrow the selection.",
   "inventory_check_task_too_many_at_least": "At least {total} products. A task holds at most {limit}. Narrow the selection.",

@@ -1,6 +1,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left.js'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
+import ClipboardPlus from 'lucide-react/dist/esm/icons/clipboard-plus.js'
 import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import History from 'lucide-react/dist/esm/icons/history.js'
 import Lock from 'lucide-react/dist/esm/icons/lock.js'
@@ -1263,7 +1264,8 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, heldDrafts,
     if (!current()) return
     if (outcome.kind === 'done') {
       const item = (outcome.result as { item?: InventoryCheckSession } | null)?.item
-      notify(tr('inventory_check_task_issued', 'Task issued · {count} products').replace('{count}', String(item?.progress?.total ?? '')), 'success')
+      const issuedTotal = item?.progress?.total
+      notify(typeof issuedTotal === 'number' ? tr('inventory_check_task_issued', 'Task issued · Products: {count}').replace('{count}', String(issuedTotal)) : tr('inventory_check_task_issued_plain', 'Task issued'), 'success')
       setIssuing(false); setPicks(new Set())
     } else if (outcome.kind === 'refused') {
       setWriteError(outcome.message)
@@ -1311,7 +1313,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, heldDrafts,
     if (current() && (outcome.kind === 'refused' || outcome.kind === 'unknown')) toastOrError(outcome)
   }
   const openTasks = tasks.board?.items.filter(item => item.status === 'open').length ?? 0
-  const headerIssueBlocked = tasks.board && openTasks >= tasks.board.capabilities.maxOpenTasks ? tr('inventory_check_error_task_limit', 'This branch already has the most open tasks it can hold. Close one first.') : ''
+  const headerIssueBlocked = tasks.board && openTasks >= tasks.board.capabilities.maxOpenTasks ? tr('inventory_check_error_task_limit', 'This branch has reached its limit of open tasks. Close one first.') : ''
   // Restore: the counts this device held for this view are judged once, against what the server knows now. A product counted after the draft was typed shows a different last-count time
   // (compared server to server, never with this device's clock): its draft is dropped. Off-page products are judged by one overlay read per page of ids.
   const judged = useRef(false)
@@ -1338,11 +1340,11 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, heldDrafts,
       // Only an entry still exactly as it was restored is dropped: a count typed meanwhile is never touched.
       if (dropped.length) setDrafts(previous => { const next = { ...previous }; for (const id of dropped) if (next[id] === entries[id]) delete next[id]; return next })
       if (ids.length > dropped.length && realRestore) notify(tr('inventory_check_draft_restored', 'Counts restored from this device.'), 'info')
-      if (dropped.length) notify(tr('inventory_check_draft_dropped', '{count} counts removed: counted elsewhere after you typed them.').replace('{count}', String(dropped.length)), 'info')
+      if (dropped.length) notify(tr('inventory_check_draft_dropped', '{count} counts removed: counted again after you typed them.').replace('{count}', String(dropped.length)), 'info')
     })()
   }, [fresh, listMode])
   const issueEntry = section === 'products' && listMode && !!branchId && data?.wired === true && access.canIssueTasks
-    ? <IconAction label={tr('inventory_check_task_issue', 'Issue')} disabled={controlsLocked} onClick={() => setIssuing(true)}><ClipboardList className="h-5 w-5" aria-hidden="true" /></IconAction> : null
+    ? <IconAction label={tr('inventory_check_task_issue', 'Issue')} disabled={controlsLocked} onClick={() => setIssuing(true)}><ClipboardPlus className="h-5 w-5" aria-hidden="true" /></IconAction> : null
   const countAction = section !== 'sessions' && access.canCheck && !data?.simple ? <>
     {countBlocked ? <InfoHint text={countBlocked} label={countBlocked} /> : null}
     <button type="button" className="btn-primary inline-flex min-h-10 shrink-0 items-center gap-1 px-3 text-xs aria-disabled:cursor-not-allowed aria-disabled:opacity-60" aria-disabled={countBlocked ? true : undefined}
@@ -1386,7 +1388,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, heldDrafts,
     </div> : boardSettled ? (listTask ? <div className="scroll-x-clean min-w-0 flex-1" data-task-off-board>
       <div className="inline-flex items-center gap-2 align-middle text-xs">
         {listTask.status === 'closed' ? <SessionStatusChip status="closed" t={t} /> : null}
-        <span className="shrink-0 tabular-nums">{t('products')}: {listTask.total}</span>
+        {typeof listTask.total === 'number' ? <span className="shrink-0 tabular-nums">{t('products')}: {listTask.total}</span> : null}
       </div>
     </div> : <span className="min-w-0 flex-1" />) : <span className="h-4 min-w-0 flex-1 animate-pulse rounded bg-gray-200 dark:bg-zinc-700" aria-hidden="true" />}
     {taskRow ? <TaskActions size="bar" task={taskRow} t={t} busy={tasks.busy || controlsLocked} canWork={access.canWorkTasks} onPickup={() => { void pickupTask(taskRow) }} onRelease={() => { void releaseTask(taskRow) }} onClose={() => { void closeTask(taskRow) }} /> : null}

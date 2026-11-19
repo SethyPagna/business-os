@@ -131,7 +131,7 @@ await browser.run('PASS count tasks layout: board rows 2 lines on a phone / 1 fr
       await browser.waitFor('two picks', async () => await browser.evaluate(`document.querySelector('[data-picked-pill]')?.textContent === '2' ? true : null`))
       await oneRow(`${where} issue bar (two picked)`, '[data-inventory-check-issue-bar]')
       await tapTargets(`${where} issue mode`, '[data-inventory-check-issue-bar], [data-inventory-check-row]', min)
-      const names = await browser.evaluate<Array<{ id: string; boxRight: number; rowRight: number; nameLeft: number; nameWidth: number; pickRight: number }>>(`[...document.querySelectorAll('[data-inventory-check-row]')].slice(0, 5).map(row => { const name = row.querySelector('[data-inventory-check-main] > :nth-child(3), [data-inventory-check-main] span.font-semibold, [data-inventory-check-main] p') || row.querySelector('[data-inventory-check-main]'); const box = name.getBoundingClientRect(), pick = row.querySelector('[data-check-pick]').getBoundingClientRect(), r = row.getBoundingClientRect(); return { id: row.getAttribute('data-inventory-check-row'), boxRight: box.right, rowRight: r.right, nameLeft: box.left, nameWidth: box.width, pickRight: pick.right } })`)
+      const names = await browser.evaluate<Array<{ id: string; boxRight: number; rowRight: number; nameLeft: number; nameWidth: number; pickRight: number }>>(`[...document.querySelectorAll('[data-inventory-check-row]')].slice(0, 5).map(row => { const name = row.querySelector('[data-inventory-check-main] > div > span.block') || row.querySelector('[data-inventory-check-main]'); const box = name.getBoundingClientRect(), pick = row.querySelector('[data-check-pick]').getBoundingClientRect(), r = row.getBoundingClientRect(); return { id: row.getAttribute('data-inventory-check-row'), boxRight: box.right, rowRight: r.right, nameLeft: box.left, nameWidth: box.width, pickRight: pick.right } })`)
       for (const name of names) assert.ok(name.nameWidth >= 60 && name.nameLeft >= name.pickRight - 1 && name.boxRight <= name.rowRight + 1, `${where}: the name stays on its row beside the pick box ${JSON.stringify(name)}`)
       if (lang === 'km') await browser.khmerRoom(`${where} issue mode`, '[data-inventory-check-page]', 3)
       if (width === 375) {
@@ -152,6 +152,9 @@ await browser.run('PASS count tasks layout: board rows 2 lines on a phone / 1 fr
     // The hand-back danger review, with counts typed (they are named in the review).
     if (width === 375) {
       await typeCount(2, '5'); await typeCount(4, '6')
+      // Counts typed on an earlier visit are restored from this device, and the fixture's toast (it never times out, unlike the App's) then sits over the task bar: the toast is dismissed, and a press is only made once nothing covers the button.
+      await browser.evaluate(`window.__toast && window.__toast(null)`)
+      await browser.waitFor(`${where} hand-back button uncovered`, async () => await browser.evaluate(`(() => { const button = document.querySelector('[data-inventory-check-task-bar] [data-task-action="release"]'); if (!button) return null; const box = button.getBoundingClientRect(); const top = document.elementFromPoint(box.left + box.width / 2, box.top + Math.min(box.height / 2, 10)); return top && button.contains(top) ? true : null })()`), 12000)
       await safeInsets(true)
       await browser.mouseClick('[data-inventory-check-task-bar] [data-task-action="release"]')
       await dialogFits(`${where} hand-back review`, width, 700, pack.inventory_check_task_release_review_title)

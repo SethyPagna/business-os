@@ -64,8 +64,8 @@ export const REFUSAL_MESSAGES: Record<string, { key: string; fallback: string }>
   inventory_check_task_closed: { key: 'inventory_check_error_task_closed', fallback: 'This task is already closed.' },
   inventory_check_task_picked_up: { key: 'inventory_check_error_task_picked_up', fallback: 'Someone else already picked this task up.' },
   inventory_check_task_not_picked_up: { key: 'inventory_check_error_task_not_picked_up', fallback: 'Nobody has picked this task up.' },
-  inventory_check_task_too_many: { key: 'inventory_check_error_task_too_many', fallback: 'This task would hold more products than one task can. Narrow the selection.' },
-  inventory_check_task_limit: { key: 'inventory_check_error_task_limit', fallback: 'This branch already has the most open tasks it can hold. Close one first.' },
+  inventory_check_task_too_many: { key: 'inventory_check_error_task_too_many', fallback: 'Too many products for one task. Narrow the selection.' },
+  inventory_check_task_limit: { key: 'inventory_check_error_task_limit', fallback: 'This branch has reached its limit of open tasks. Close one first.' },
   inventory_check_task_not_countable: { key: 'inventory_check_error_task_not_countable', fallback: 'A task is counted from the list, not by editing its lines.' },
   inventory_check_release_forbidden: { key: 'inventory_check_error_release_forbidden', fallback: 'Only the person who picked this task up, or someone who can issue tasks, can hand it back.' },
 }

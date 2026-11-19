@@ -101,6 +101,8 @@ export type InventoryCheckTask = {
   picked_up_at: string | null
   mine: boolean
   pickup_session_id?: string
+  /** The Worker's note on a task reopened because a count it relied on was taken back (absent from a Worker that does not send it; `by` only for a viewer who may see staff identity). */
+  reopened?: { at: string; reason: string; by?: string }
   can_pickup: boolean
   can_release: boolean
   can_close: boolean
