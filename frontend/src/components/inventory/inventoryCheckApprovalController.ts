@@ -2,6 +2,7 @@ import type { InventoryCheckApproval, InventoryCheckApprovalDecision, InventoryC
 import { createClientRequestId } from '../../api/requestIds.ts'
 import type { ConfirmRequest } from '../shared/useConfirmDialog.tsx'
 import { approvalRequestBound, runApprovalFlow } from './inventoryCheckApprovalFlow.ts'
+import { unknownSaveFallback } from './inventoryCheckSaveText.ts'
 import { fmtDateOnly } from '../../utils/formatters.ts'
 import { approvalResult, decisionOf, effectiveLotCounted, figureRefusal, lineShapeOf, openLinesOf } from './inventoryCheckApprovalLines.ts'
 import { lineDecisionVerdict, lineRequestBody, type LineInput } from './inventoryCheckLineInput.ts'
@@ -56,7 +57,7 @@ const finite = (value: unknown): value is number => typeof value === 'number' &&
 export function createApprovalActions(deps: ApprovalDeps) {
   const { tr } = deps
   const newId = deps.newRequestId ?? createClientRequestId
-  const unknownText = (cause: unknown) => tr(deps.unknownSaveKey(cause), 'Save not confirmed. Retry the same operation or reload.')
+  const unknownText = (cause: unknown) => { const key = deps.unknownSaveKey(cause); return tr(key, unknownSaveFallback(key)) }
   const failedText = tr('inventory_check_save_failed', 'Check not saved. Try again.')
   // A refusal for a count that cannot be rejected any more (stock may have moved) points at Close.
   const withCloseHint = (text: string) => deps.approval && (deps.approval.applying || deps.approval.applied > 0) ? `${text} ${tr('inventory_check_close_hint', 'Part of it was already applied, so close the remaining lines instead.')}` : text

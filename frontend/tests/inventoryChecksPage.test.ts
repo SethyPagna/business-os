@@ -223,7 +223,7 @@ try {
   await surface.type(surface.field('inventory-check-reason-12'), 'Shelf differs')
   saveFailure = 'unknown'
   await surface.click(surface.button('Save difference'))
-  assert.ok(surface.text().includes('Save not confirmed'))
+  assert.ok(surface.text().includes('Save result unknown'))
   assert.ok(!surface.text().includes('Counted 0'), 'unknown acknowledgement never becomes optimistic saved state')
   const first = saves.at(-1)!
   saveFailure = 'none'
@@ -768,7 +768,7 @@ try {
   const lostBefore = decisions.length
   decideScript = [Object.assign(new Error('answer lost'), { outcome: 'unknown' })]
   await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
-  assert.ok(approving.text().includes('Save not confirmed'), 'an unconfirmed decision says so')
+  assert.ok(approving.text().includes('Save result unknown'), 'an unconfirmed decision says so')
   decideScript = [answerOf(2, 0)]
   await approving.click(approvalAction('approve'))
   assert.equal(decisions.length, lostBefore + 2, 'the retry needs no second review')

@@ -67,6 +67,7 @@ import PaginationControls, { TopPager } from '../shared/PaginationControls.tsx'
 import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
+import { unknownSaveFallback } from './inventoryCheckSaveText.ts'
 import { statsPresetRange, type DateTimeRange } from '../shared/statsStripPresets.ts'
 
 // The approval panel is only drawn on a submitted count's session: it loads when one is opened, not with the list.
@@ -262,6 +263,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, heldDrafts,
     }
     return 'inventory_check_saved_refresh'
   }
+  const unknownSaveText = (cause: unknown): string => { const key = unknownSaveKey(cause); return tr(key, unknownSaveFallback(key)) }
   const compact = useIsCompactViewport()
   // Tasks: for someone who may pick them up or issue them, and until this tab learned the list switch is off (GET /tasks answered 404).
   const tasksAllowed = (access.canWorkTasks || access.canIssueTasks) && !inventoryCheckTasksOff(boundary)
@@ -728,7 +730,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, heldDrafts,
       if (refusal) attempts.current.delete(id)
       // A definite conflict means the page is behind the server (revision, baseline or stock moved): reload it.
       if (current() && isStaleConflict(cause)) reloadAll()
-      if (current()) setRowErrors(previous => ({ ...previous, [id]: refusal ? tr(refusal.key, refusal.fallback) : tr((cause as { outcome?: string })?.outcome === 'unknown' ? unknownSaveKey(cause) : 'inventory_check_save_failed', (cause as { outcome?: string })?.outcome === 'unknown' ? 'Save not confirmed. Retry the same check to recover its receipt.' : 'Check not saved. Retry the same check or reload this session.') }))
+      if (current()) setRowErrors(previous => ({ ...previous, [id]: refusal ? tr(refusal.key, refusal.fallback) : (cause as { outcome?: string })?.outcome === 'unknown' ? unknownSaveText(cause) : tr('inventory_check_save_failed', 'Check not saved. Try again.') }))
       throw cause
     } finally { inFlight.current = false; if (current()) { setBusy(false); setSavingId(null) } }
   }

@@ -117,7 +117,7 @@ const cases: Array<[string, () => Promise<void>]> = [
     const r = rig()
     r.script.approval.push(Object.assign(new Error('lost'), { outcome: 'unknown' }), answer(pending, 1, 0))
     await r.actions().decideApproval('approve', [1])
-    assert.ok(r.attempts.approvalAttempt.current, 'an unknown outcome keeps the id'); assert.equal(r.log.lineErrors['1'], 'Save not confirmed. Retry the same operation or reload.')
+    assert.ok(r.attempts.approvalAttempt.current, 'an unknown outcome keeps the id'); assert.equal(r.log.lineErrors['1'], 'Save result unknown. Check the session before retrying.')
     const first = r.log.approvals[0].requestId
     await r.actions().decideApproval('approve', [1])
     assert.equal(r.log.approvals[1].requestId, first, 'the retry carries the same request id')
@@ -165,7 +165,7 @@ const cases: Array<[string, () => Promise<void>]> = [
     const r = rig()
     r.script.line.push(Object.assign(new Error('lost'), { outcome: 'unknown' }), lineAnswer(rejected(2), 'reject', 2))
     assert.equal(await r.actions().decideLine({ productId: 2, action: 'reject' }), false)
-    assert.equal(r.log.lineErrors['2'], 'Save not confirmed. Retry the same operation or reload.'); assert.equal(r.log.reloads, 0, 'an unknown outcome reads nothing: the retry carries the answer')
+    assert.equal(r.log.lineErrors['2'], 'Save result unknown. Check the session before retrying.'); assert.equal(r.log.reloads, 0, 'an unknown outcome reads nothing: the retry carries the answer')
     assert.equal(await r.actions().decideLine({ productId: 2, action: 'reject' }), true)
     assert.equal(r.log.lines[1].requestId, r.log.lines[0].requestId, 'the same id'); assert.equal(r.log.confirms.length, 1, 'asked once')
     const m = rig()

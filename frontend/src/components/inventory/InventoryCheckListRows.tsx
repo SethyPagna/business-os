@@ -270,7 +270,7 @@ function ListRow({ product, draft, adornment, refusal, columns, countable, copy,
   // Cost: only for a viewer who may see it AND only when the row carries it (the server sends it to nobody else). It is a button: the tap opens the calculated-cost float (the page owns it).
   const cost = costText && onOpenCost ? costFact(product as unknown as Record<string, unknown>) : null
   if (cost && costText && onOpenCost) {
-    const costLabel = tr('label_cost', 'Cost')
+    const costLabel = tr('label_cost', 'Cost price')
     identity.push(['cost', <button type="button" data-price="cost" data-check-cost onClick={() => onOpenCost(product)} title={tr('cost_breakdown_title', 'Calculated cost price')} aria-label={`${costLabel}: ${tr('cost_breakdown_title', 'Calculated cost price')}`}
       className="inline-flex min-h-6 items-center rounded border-0 bg-transparent p-0 text-left decoration-dotted underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
       <PriceValue tone="cost" className="tabular-nums">{cost.usd === null ? <CostValue value={null} fmt={value => costText(value)} t={key => tr(key, '')} /> : costText(cost.usd, cost.khr ?? undefined)}</PriceValue></button>])

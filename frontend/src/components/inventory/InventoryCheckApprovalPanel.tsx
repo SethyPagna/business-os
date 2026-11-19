@@ -23,7 +23,7 @@ const REASONS: Record<string, { key: string; fallback: string }> = {
   inventory_check_target_not_whole: { key: 'inventory_check_reason_target_not_whole', fallback: 'Not a whole number' },
   inventory_check_count_superseded: { key: 'inventory_check_reason_count_superseded', fallback: 'Another count covered it' },
   inventory_check_stock_adjusted: { key: 'inventory_check_reason_stock_adjusted', fallback: 'Stock changed by hand after the count' },
-  inventory_check_no_lot: { key: 'inventory_check_reason_no_lot', fallback: 'No received date to add to' },
+  inventory_check_no_lot: { key: 'inventory_check_reason_no_lot', fallback: 'No received date' },
 }
 /** Why a line is not applied, in a few words: its refusal code, or the plain fact that nobody applied it. */
 export function reasonLabel(t: Translator, code: string): string {

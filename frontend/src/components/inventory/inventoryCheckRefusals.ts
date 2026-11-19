@@ -2,7 +2,7 @@
 export const REFUSAL_MESSAGES: Record<string, { key: string; fallback: string }> = {
   inventory_check_count_requires_issue: { key: 'inventory_check_error_count_requires_issue', fallback: 'Counted quantity differs from stock. Record it as a difference.' },
   inventory_check_lot_counts_off: { key: 'inventory_check_error_lot_counts_off', fallback: 'Counting by received date was turned off. The page was reloaded: count again.' },
-  branch_redirect_required: { key: 'branch_redirect_required', fallback: 'This change is addressed to a disabled branch.' },
+  branch_redirect_required: { key: 'branch_redirect_required', fallback: 'This change is addressed to a disabled branch. Choose the active branch it should go to. Nothing was changed.' },
   maintenance_active: { key: 'inventory_check_error_maintenance', fallback: 'Maintenance is in progress. Nothing was changed; try again shortly.' },
   selected_lot_unavailable: { key: 'inventory_check_error_lot_unavailable', fallback: 'This received date no longer has that stock. Nothing was changed.' },
   inventory_check_baseline_changed: { key: 'inventory_check_error_baseline_changed', fallback: 'Stock or products changed. Reload and try again.' },
@@ -23,7 +23,7 @@ export const REFUSAL_MESSAGES: Record<string, { key: string; fallback: string }>
   inventory_check_too_many_lines: { key: 'inventory_check_error_too_many_lines', fallback: 'This count is larger than one submission can carry. Submit part of it, then the rest.' },
   inventory_check_too_many_products: { key: 'inventory_check_error_too_many_lines', fallback: 'This count is larger than one submission can carry. Submit part of it, then the rest.' },
   inventory_check_lots_incomplete: { key: 'inventory_check_error_lots_incomplete', fallback: 'A product has a received date that was not counted, or received stock on another date after you counted. Its dates were updated: count every received date of the product, or use Matches stock, then submit again. Your counts are kept.' },
-  inventory_check_no_lot: { key: 'inventory_check_error_no_lot', fallback: 'A product has no received date to add stock to. Receive it first.' },
+  inventory_check_no_lot: { key: 'inventory_check_error_no_lot', fallback: 'No received date, so this count can\'t be approved. Reject it, then use Set on Products.' },
   inventory_check_stock_write_refused: { key: 'inventory_check_error_write_refused', fallback: 'Stock could not be updated for some products. Try again.' },
   inventory_check_count_pending: { key: 'inventoryCheckCountPending', fallback: 'Set is blocked while a count of this product is waiting for approval. Approve or reject that count first.' },
   inventory_check_approve_required: { key: 'inventory_check_error_approve_required', fallback: 'You do not have permission to approve counts.' },
