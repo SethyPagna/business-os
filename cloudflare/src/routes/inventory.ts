@@ -1836,16 +1836,26 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // still the correct row to read current stock from at this point.
   const originalType = type
   let setToNote: string | null = null
+  // F1 (lead ruling, 19 Nov): a plain Set is a final count exactly like the lot Set: with ic_lot_counts it closes the difference it fixes, and the count tasks that completes, in its own batch.
+  const plainCount = type === 'set' && await (await import('../lib/readSwitches')).readSwitch(c.env, 'ic_lot_counts')
+  const plainCountOf = async (moved: boolean) => (await import('../lib/stockSetClosesIssue')).plainSetCloseStatements({ productId, branchId, organization: user?.organization_id ?? null,
+    actorId: Number(user?.id), actorName: actorSnapshot(user) ?? '', requestId: String(body.client_request_id ?? '').trim() }, new Date().toISOString(), crypto.randomUUID(), moved)
+  let setCount: Awaited<ReturnType<typeof plainCountOf>> | null = null
+  let setCountResults: unknown[] | undefined
   if (type === 'set') {
     const current = await branchStockQty(c.env, productId, branchId)
     const diff = quantity - current
     if (diff === 0) {
-      return c.json({
-        success: true, branchId, movementType: 'set', quantity: 0,
-        productId, productName: product.name, createdSibling: false,
-        batchNumber: null, batchId: null, autoBatchDrainIds: null,
-      })
+      const unchanged = { success: true, branchId, movementType: 'set', quantity: 0, productId, productName: product.name, createdSibling: false, batchNumber: null, batchId: null, autoBatchDrainIds: null }
+      if (!plainCount) return c.json(unchanged)
+      // A Set to the figure stock already has can still be what makes the latest Differs match (as the lot Set's): its close runs in the one batch that completes this request's receipt.
+      const zero = await plainCountOf(false)
+      const results = await executeStockMutationBatch(db, zero.statements, atomicMark, { status: 200, body: unchanged }, zero.trailing)
+      const answer = zero.answer(results as never)
+      if (answer.issue_closed === true) await bumpVersions(c.env, ['inventory_checks'])
+      return c.json({ ...unchanged, ...answer })
     }
+    if (plainCount) setCount = await plainCountOf(true)
     setToNote = `Set to ${quantity}`
     type = diff > 0 ? 'add' : 'remove'
     quantity = Math.abs(diff)
@@ -2302,7 +2312,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     // A physical count correction is not a new purchase. Preserve lot price,
     // supplier/payment, cumulative received money and the catalog override.
     // Both stock ledgers and the non-purchase movement share the lot guard.
-    await executeStockMutationBatch(db, addressedStatements(landing, [
+    setCountResults = await executeStockMutationBatch(db, addressedStatements(landing, [
       productStockGuardStatement([targetProductId], 'active'),
       receivingBranchAssertion(branchId),
       { sql: `INSERT INTO stock_session_guards(guard_value) SELECT CASE WHEN EXISTS(
@@ -2331,6 +2341,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
           actor: { userId: user?.id ?? null, userName: actorSnapshot(user) } }),
       ] : []),
       { sql: 'DELETE FROM stock_session_guards', params: {} },
+      ...(setCount ? setCount.statements : []),
     ]), atomicMark)
     resolvedBatchId = correctionLot.id
     batchNumber = correctionLot.batch_number
@@ -2473,6 +2484,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         preserveHistoricalUnitCost: unitCostUsd == null,
         paymentStatus,
         creditDueDate,
+        wantResults: !!setCount,
         buildBatchStatements: ({ batchKey, resolvedBatchIdSql }) => {
           const movement = movementRowStatement()
           return addressedStatements(landing, [
@@ -2480,12 +2492,14 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
             { sql: movement.sql.replace('@batchId', resolvedBatchIdSql),
               params: { ...movement.params, batchId: unlockPricing ? null : batchIdRequested, batchKey } },
             ...(!createdSibling ? [catalogCostRecomputeIfChangedStatement(targetProductId)] : []),
+            ...(setCount ? setCount.statements : []),
           ])
         },
       })
       batchNumber = received.batchNumber
       resolvedBatchId = received.batchId
       lotCode = received.lotCode
+      setCountResults = (received as { results?: unknown[] }).results
       movementWrittenAtomically = true
       }
     } catch (err) {
@@ -2545,7 +2559,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         // it; a multi-lot spread or a legacy-aggregate remainder is not.
         resolvedBatchId = plan.batchIds.length === 1 && plan.remainder === 0 ? plan.batchIds[0] : null
       }
-      await executeStockMutationBatch(db, addressedStatements(landing, [
+      setCountResults = await executeStockMutationBatch(db, addressedStatements(landing, [
         // A tagged removal of a selected lot re-proves in the batch that the
         // product is still active (held units are its stock); the auto-routed
         // one relies on assertProductsActive above, as it always has.
@@ -2555,7 +2569,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         // directly after it, so a Revert can put the units back where they came from.
         ...(conditionTag ? holdRemovedStatements(conditionTag)
           : [movementRowStatement(), ...(resolvedBatchId == null ? planRemovalLotRecord(targetProductId, plan.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) }))) : [])]),
-      ]), atomicMark, { status: 200, body: adjustResponseBody() })
+        ...(setCount ? setCount.statements : []),
+      ]), atomicMark, { status: 200, body: adjustResponseBody() }, setCount?.trailing)
     } catch (err) {
       if (stockTransactionRefusal(err) || err instanceof StockMutationBudgetError || atomicMark?.answered?.(err)) throw err
       const stockGuard = productStockGuardError(err)
@@ -2652,7 +2667,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // scope (targetProductId/branchId/movementType/...) and reads nothing
   // audit() writes, so the insert can run after the response is sent --
   // same reasoning as the broadcast calls it now joins. The cache bump is awaited first (W3 Slice A).
-  await bumpVersion(c.env, 'products')
+  const setAnswer = setCount ? setCount.answer(setCountResults as never) : {}
+  await (setAnswer.issue_closed === true ? bumpVersions(c.env, ['products', 'inventory_checks']) : bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(Promise.all([
     audit(c.env, user?.id ?? null, actorSnapshot(user), originalType === 'set' ? 'stock_set' : type === 'remove' ? 'stock_remove' : 'stock_add', 'product', targetProductId, { type: originalType, quantity, reason, branchId, sourceProductId: productId, createdSibling, batchId: batchIdRequested, autoBatchDrainIds, unlockPricing, receivedDate, ...(freeQuantity > 0 ? { freeQuantity, paidQuantity } : {}) }),
     ...(sellingPricePlan ? [audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'product', targetProductId, { source: 'stock_receipt', batchId: resolvedBatchId }, changedFields(sellingPricePlan.before, sellingPricePlan.after))] : []),
@@ -2692,7 +2708,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // failure and showed an error toast on every successful adjustment. Fixed
   // here by matching the app-wide response contract instead of patching
   // around it in every caller.
-  return c.json(adjustResponseBody())
+  return c.json({ ...adjustResponseBody(), ...setAnswer })
 }
 
 app.post('/adjust', async (c) => {
@@ -3213,13 +3229,14 @@ app.post('/movements/:id/revert', async (c) => {
   const db = getDb(c.env)
   const mv = await db.prepare(`
     SELECT id, product_id, product_name, branch_id, branch_name, movement_type, quantity,
-      unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, batch_id
+      unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, batch_id, user_id,
+      ${(await import('../lib/stockSetClosesIssue')).plainSetCountOf('inventory_movements')} AS set_count
     FROM inventory_movements WHERE id = @id
   `).get<RevertMovementRow>({ id })
   if (!mv) return c.json({ error: 'Stock movement not found', code: 'movement_not_found' }, 404)
   let result: Awaited<ReturnType<typeof applyMovementRevert>>
   try {
-    result = await applyMovementRevert(db, mv, { userId: user?.id ?? null, userName: actorSnapshot(user) }, () => branchRedirectTarget(c))
+    result = await applyMovementRevert(db, mv, { userId: user?.id ?? null, userName: actorSnapshot(user) }, () => branchRedirectTarget(c), true)
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
@@ -3234,7 +3251,7 @@ app.post('/movements/:id/revert', async (c) => {
     movementId: id, movementType: mv.movement_type, revertType: result.revertType, quantity: result.quantity,
     branchId: Number(mv.branch_id) || null, batchId: mv.batch_id ?? null,
   })
-  await bumpVersion(c.env, 'products')
+  await ((result as { countChanged?: boolean }).countChanged ? bumpVersions(c.env, ['products', 'inventory_checks']) : bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: productId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'adjust', id: productId }))
   return c.json({ success: true, revertType: result.revertType, quantity: result.quantity, productId, movementId: id })

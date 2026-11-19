@@ -366,9 +366,21 @@ function aggregateDeltaStatements(productId: number, branchId: number, delta: nu
 // identified is refused.
 export async function revertRootMovement(
   db: D1Compat,
-  m: Pick<RevertMovementRow, 'id' | 'movement_type' | 'reference_id'>,
-): Promise<{ id: number; movement_type: string } | null> {
-  if (!String(m.reference_id ?? '').startsWith('revert:')) return { id: Number(m.id), movement_type: m.movement_type }
+  m: Pick<RevertMovementRow, 'id' | 'movement_type' | 'reference_id'> & { user_id?: number | null; set_count?: string | null },
+  withCount = false,
+): Promise<{ id: number; movement_type: string; depth?: number; user_id?: number | null; set_count?: string | null } | null> {
+  if (!String(m.reference_id ?? '').startsWith('revert:')) return withCount ? { id: Number(m.id), movement_type: m.movement_type, depth: 0, user_id: m.user_id ?? null, set_count: m.set_count ?? null } : { id: Number(m.id), movement_type: m.movement_type }
+  // F1: the plain Set count (lib/stockSetClosesIssue.ts) is imported only when a Revert asks for it, so every other Revert loads nothing new
+  if (withCount) { const { plainSetCountOf } = await import('./stockSetClosesIssue'); return await db.prepare(`WITH RECURSIVE ancestry(id, movement_type, reference_id, depth) AS (
+    SELECT id, movement_type, reference_id, 0 FROM inventory_movements WHERE id=@id
+    UNION ALL
+    SELECT parent.id, parent.movement_type, parent.reference_id, child.depth+1
+    FROM inventory_movements parent JOIN ancestry child
+      ON parent.id=CAST(SUBSTR(child.reference_id,8) AS INTEGER)
+    WHERE child.reference_id='revert:' || CAST(parent.id AS TEXT) AND parent.id > 0 AND parent.id < child.id
+  ) SELECT a.id, a.movement_type, a.depth, r.user_id, ${plainSetCountOf('r')} AS set_count FROM ancestry a CROSS JOIN inventory_movements r ON r.id=a.id
+    WHERE COALESCE(SUBSTR(a.reference_id,1,7),'') != 'revert:' LIMIT 1`)
+    .get<{ id: number; movement_type: string; depth: number; user_id: number | null; set_count: string | null }>({ id: Number(m.id) }) || null }
   return await db.prepare(`WITH RECURSIVE ancestry(id, movement_type, reference_id) AS (
     SELECT id, movement_type, reference_id FROM inventory_movements WHERE id=@id
     UNION ALL
@@ -389,7 +401,7 @@ export async function revertRootMovement(
 // `redirectTarget` (X-Branch-Redirect): a row recorded at a branch that has since been disabled is reverted at
 // the active branch the operator confirmed, and the counter-movement keeps the disabled branch as its addressed
 // label. Without it such a revert throws the branch_redirect_required refusal (lib/branchEffect.ts).
-export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, actor: RevertActor, redirectTarget: RedirectTarget = null): Promise<RevertResult> {
+export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, actor: RevertActor, redirectTarget: RedirectTarget = null, withCount = false): Promise<RevertResult> {
   const productId = Number(m.product_id) || 0
   const recordedBranchId = Number(m.branch_id) || 0
   if (!productId || !recordedBranchId) {
@@ -489,7 +501,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     Promise.all(shares.map(async (share) => ({ ...share, batchId: await lotAt(share.batchId), receivedBatchId: share.batchId })))
   const { revertType, magnitude } = plan
   const batchId = m.batch_id != null ? await lotAt(Number(m.batch_id)) : null
-  const root = await revertRootMovement(db, m)
+  const root = await revertRootMovement(db, m, withCount)
   if (!root) return refuse(409, 'revert_lineage_unresolved', 'Cannot revert: the original stock action cannot be identified safely. Nothing was changed.')
   // A chain takes its purchase nature from its root: receipt -> un-receive ->
   // re-receive -> ..., while the chain of a removal only moves stock.
@@ -654,14 +666,20 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
       batchId: usedBatchId,
     },
   })
+  const counted = root.set_count ? JSON.parse(root.set_count) as { id: string; org: number | null; branch: number } : null
+  const countPart = counted && root.user_id != null ? (await import('./stockSetClosesIssue')).plainSetRevertStatements({ productId, count: counted, rootId: Number(root.id), setActor: Number(root.user_id), generation: Number(root.depth ?? 0) + 1,
+    actorId: Number(actor.userId), actorName: actor.userName ?? '' }) : null
+  let countChanged = false
   try {
-    await executeStockTransaction(db, addressedStatements(landing, [
+    const results = await executeStockTransaction(db, addressedStatements(landing, [
       ...(revertType === 'add' ? [productStockGuardStatement([productId], 'active')] : []),
       { sql: ALREADY_REVERTED_GUARD, params: { ref: counterRef, movementId: Number(m.id) } },
       receiptRowGuard(m),
       ...statements,
       { sql: 'DELETE FROM stock_session_guards', params: {} },
+      ...(countPart ? countPart.statements : []),
     ]), 'retry')
+    if (countPart) countChanged = Number((results.slice(-countPart.statements.length)[countPart.changedAt] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 0) === 1
   } catch (err) {
     // Nothing was written. Tell the loser of a race apart from a stock
     // change by reading what the winner committed.
@@ -681,7 +699,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     }
     throw err
   }
-  return { ok: true, revertType, quantity: magnitude, usedBatchId, movementId: m.id }
+  return { ok: true, revertType, quantity: magnitude, usedBatchId, movementId: m.id, ...(countChanged ? { countChanged } : {}) } as RevertResult
 }
 
 // In-batch assertion (stock_session_guards' CHECK(guard_value = 1), the

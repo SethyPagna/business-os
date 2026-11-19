@@ -145,7 +145,7 @@ export type StockMutationAtomicMark = {
   /** Call once that batch has committed. */
   committed(): void
   /** Execute a full statement plan once with this marker, then confirm commit. */
-  execute?(db: D1Compat, statements: StockWriteStatement[]): Promise<void>
+  execute?(db: D1Compat, statements: StockWriteStatement[]): Promise<void | unknown[]>
   admit?(statements: number): void
   /**
    * True when the wrapper answers this error itself, so a kernel must rethrow it untouched instead of turning it into its own refusal: the request ran out of its invocation's statements
@@ -162,14 +162,16 @@ export async function executeStockMutationBatch(
   statements: StockWriteStatement[],
   atomicMark?: StockMutationAtomicMark,
   outcome?: StockMutationOutcome,
-): Promise<void> {
+  trailing: StockWriteStatement[] = [],
+): Promise<unknown[]> {
   const mark = (outcome && atomicMark?.completedStatement ? atomicMark.completedStatement(outcome) : atomicMark?.statement()) ?? null
-  const batch = [...statements, ...(mark ? [mark] : [])]
+  const batch = [...statements, ...(mark ? [mark] : []), ...trailing]
   atomicMark?.admit?.(stockTransactionStatementCount(batch.length))
   // A durable marker makes a lost acknowledgement recoverable on the next
   // request. Never automatically repeat an accumulating stock transaction.
-  await executeStockTransaction(db, batch, mark ? 'once' : 'retry')
+  const results = await executeStockTransaction(db, batch, mark ? 'once' : 'retry')
   atomicMark?.committed()
+  return results.slice(0, statements.length)
 }
 
 type StockMutationClaim =
@@ -514,6 +516,8 @@ export async function withStockMutationReceipt(
 
   let wrote = false
   let dispatched = false
+  let completing = false
+  let completedInBatch = false
   // callCounting: the budget counts D1 calls, and the batch about to be sent is one call whatever its statement count.
   const admit = (statements: number) => {
     const charge = options.budget?.callCounting ? 1 : statements
@@ -529,10 +533,10 @@ export async function withStockMutationReceipt(
   }
   const claimed = approvalClaim ? approvalClaimParams(approvalClaim) : {}
   const atomicMark: StockMutationAtomicMark = {
-    statement: () => (wrote ? null : { sql: approvalClaim ? markWrittenSql(true) : MARK_STOCK_MUTATION_WRITTEN_SQL, params: { actor: actorId, request: requestId, kind, canonical, ...claimed } }),
-    completedStatement: (outcome) => (wrote ? null : { sql: approvalClaim ? markCompletedSql(true) : MARK_STOCK_MUTATION_COMPLETED_SQL,
-      params: { actor: actorId, request: requestId, kind, canonical, status: outcome.status, response: JSON.stringify(outcome.body), ...claimed } }),
-    committed: () => { wrote = true },
+    statement: () => { completing = false; return wrote ? null : { sql: approvalClaim ? markWrittenSql(true) : MARK_STOCK_MUTATION_WRITTEN_SQL, params: { actor: actorId, request: requestId, kind, canonical, ...claimed } } },
+    completedStatement: (outcome) => { if (wrote) return null; completing = true; return { sql: approvalClaim ? markCompletedSql(true) : MARK_STOCK_MUTATION_COMPLETED_SQL,
+      params: { actor: actorId, request: requestId, kind, canonical, status: outcome.status, response: JSON.stringify(outcome.body), ...claimed } } },
+    committed: () => { wrote = true; if (completing) completedInBatch = true },
     execute: (db, statements) => executeStockMutationBatch(db, statements, atomicMark),
     admit,
     answered: (error) => error instanceof StockMutationBudgetError || String(error).includes(APPROVAL_CLAIM_LOST),
@@ -583,6 +587,7 @@ export async function withStockMutationReceipt(
     catch { return json(STOCK_MUTATION_UNKNOWN, 503) }
     return response
   }
+  if (completedInBatch) return response
   const stored = await response.clone().json().catch(() => ({})) as Record<string, unknown>
   try { await completeStockMutation(db, actorId, requestId, response.status, stored) }
   catch { return json(STOCK_MUTATION_UNKNOWN, 503) }

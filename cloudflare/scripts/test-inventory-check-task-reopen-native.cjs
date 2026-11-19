@@ -227,11 +227,38 @@ async function undoSessionResume(k) {
   const r = await k.resume(copy, 0); assert.equal('reopenedTasks' in r.json, false); assert.equal(k.reopens(t).length, before)
 }
 
-const SCENARIOS = { twoTasksOneCount, laterCountStays, earlierCountStays, countBeforeIssue, handClosedStays, notCountableStays, optionsAandBMiss, resumeThenCloseAgain, otherBranchAndOrg, overTheCap, pickupStaysClosed, immutables, setUndoRedo, setHandClose, setUndoOpenSession, undoSessionResume }
+// ---- the PLAIN Set (Products page, Stock-session line: type "set", no setScope) is a final count too, and its Revert is its Undo ---------------------------------------------------------------------------------
+const lastMovement = (k) => k.w.row('SELECT MAX(id) AS id FROM inventory_movements').id
+/** F1 + M17-M19: a plain Set that makes the latest Differs match closes it and the task it completes; its Revert takes the count back (the task reopens) and the Revert of the Revert restores it. */
+async function plainSetCycle(k) {
+  await sleep(4)
+  const s0 = await k.ic('emp1', 'POST', '/submissions', { branchId: 1, requestId: k.w.rid('sub'), lines: [{ productId: 105, countedQuantity: 8, seenQuantity: 10 }] }); assert.equal(s0.status, 201, JSON.stringify(s0.json))
+  const rj = await k.ic('admin', 'POST', `/sessions/${s0.json.item.id}/approval/lines`, { productId: 105, action: 'reject', requestId: k.w.rid('rj') }); assert.equal(rj.status, 200, JSON.stringify(rj.json))
+  const t = await k.issue([105]), late = await k.issue([106])
+  await sleep(4)
+  const set = await k.w.call('admin', 'POST', '/api/inventory/adjust', { type: 'set', productId: 105, branchId: 1, quantity: 8, reason: 'Physical count', client_request_id: 'inventory_set_' + k.w.rid('p') })
+  assert.equal(set.status, 200, JSON.stringify(set.json)); assert.equal(set.json.issue_closed, true, 'the plain Set closed the difference'); assert.deepEqual(set.json.closed_tasks, [t])
+  assert.equal(k.status(t).status, 'closed')
+  const mv = lastMovement(k)
+  const undo = await k.w.call('admin', 'POST', `/api/inventory/movements/${mv}/revert`, {}); assert.equal(undo.status, 200, JSON.stringify(undo.json))
+  assert.equal(k.status(t).status, 'open', 'the Revert took the Set count back: the task reopens'); assert.equal(JSON.parse(k.reopens(t)[0].after_json).cause, 'set_undone')
+  assert.equal((await k.task(t)).reopened.reason, 'set_undone')
+  const issue = await k.issue([105]); const mv2 = lastMovement(k)
+  const redo = await k.w.call('admin', 'POST', `/api/inventory/movements/${mv2}/revert`, {}); assert.equal(redo.status, 200, JSON.stringify(redo.json))
+  assert.equal(k.status(t).status, 'closed', 'the Revert of the Revert closes the task again'); assert.equal(k.status(issue).status, 'open', 'at the original time: a task issued after the Set is not ticked'); assert.equal(k.status(late).status, 'open')
+  // a plain Set that changes no difference closes nothing and its Revert reopens nothing
+  const plain = await k.w.call('admin', 'POST', '/api/inventory/adjust', { type: 'set', productId: 107, branchId: 1, quantity: 7, reason: 'Physical count', client_request_id: 'inventory_set_' + k.w.rid('p') })
+  assert.equal(plain.status, 200, JSON.stringify(plain.json)); assert.equal(plain.json.issue_closed, false)
+}
+
+const SCENARIOS = { plainSetCycle, twoTasksOneCount, laterCountStays, earlierCountStays, countBeforeIssue, handClosedStays, notCountableStays, optionsAandBMiss, resumeThenCloseAgain, otherBranchAndOrg, overTheCap, pickupStaysClosed, immutables, setUndoRedo, setHandClose, setUndoOpenSession, undoSessionResume }
 
 // ---- the plants: each must turn the named scenario red ------------------------------------------------------------------------------------------------------------------------------------------
 const PLAN = "LIMIT -1) r\n    WHERE ${taskItemCountableSql('r')}`"
 const MUTANTS = [
+  ['M17 a plain Set closes no difference and no task', { 'routes/inventory.ts': [["const plainCount = type === 'set' && await (await import('../lib/readSwitches')).readSwitch(c.env, 'ic_lot_counts')", 'const plainCount = false']] }, 'plainSetCycle'],
+  ['M18 the Revert of a plain Set takes no count back', { 'lib/stockSetClosesIssue.ts': [['    const issue = reopenIssueStatements(closing, now), count = takeBackSetCountStatements(closing, origin, now)\n    return { statements: [...issue, ...count.statements], changedAt: issue.length + 1 }', '    const issue = reopenIssueStatements(closing, now)\n    return { statements: [...issue], changedAt: issue.length + 1 }']] }, 'plainSetCycle'],
+  ['M19 the Revert of the Revert restores no count', { 'lib/stockSetClosesIssue.ts': [['  return { statements: [...issue, ...count.statements], changedAt: issue.length + 1 }\n}', '  return { statements: [...issue], changedAt: issue.length + 1 }\n}']] }, 'plainSetCycle'],
   ['M1 drop the skip of products another count still covers', { [T]: [["FROM (${takenSql(src)}) k WHERE NOT ${taskItemDoneSql('k', '@branchId', 'k.at', '@org')}`", 'FROM (${takenSql(src)}) k`']] }, 'laterCountStays'],
   ['M2 drop c.started_at<=g.at', { [T]: [['c.started_at<=g.at AND (g.l IS NULL OR c.started_at>g.l)', '(g.l IS NULL OR c.started_at>g.l)']] }, 'countBeforeIssue'],
   ['M3 drop (g.l IS NULL OR c.started_at>g.l)', { [T]: [['c.started_at<=g.at AND (g.l IS NULL OR c.started_at>g.l)', 'c.started_at<=g.at']] }, 'earlierCountStays'],

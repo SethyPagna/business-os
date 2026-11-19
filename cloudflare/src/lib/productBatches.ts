@@ -683,7 +683,9 @@ export async function receiveBatchStock(db: D1Compat, input: {
   // below uses (explicit @batchId when one was picked, else @productId +
   // @batchKey), so it can be dropped into a statement's own VALUES list.
   buildBatchStatements?: (ctx: { batchKey: string; lotCode: string; resolvedBatchIdSql: string }) => StockWriteStatement[]
-}): Promise<{ batchId: number; created: boolean; batchNumber: number | null; lotCode: string }> {
+  // F1: a plain Set that rides this batch needs the answers of its own statements (whether it closed a difference); every other caller gets the same return as before.
+  wantResults?: boolean
+}): Promise<{ batchId: number; created: boolean; batchNumber: number | null; lotCode: string; results?: unknown[] }> {
   const receivedAt = normalizeTypedDate(input.receivedDate) || businessToday()
   let receiptLotTarget: ReceiptLotTarget | undefined
   if (input.historicalReceiptReplay && input.batchId == null) throw new Error('Historical receipt replay requires its recorded batch')
@@ -716,9 +718,7 @@ export async function receiveBatchStock(db: D1Compat, input: {
     ...(hasEnteredCost || receiptLotTarget ? [{ sql: 'DELETE FROM stock_session_guards', params: {} }] : []),
     ...extraStatements,
   ]
-  if (input.atomicMark?.execute) {
-    await input.atomicMark.execute(db, statements)
-  } else await executeStockTransaction(db, statements, 'retry')
+  const results = input.atomicMark?.execute ? await input.atomicMark.execute(db, statements) : await executeStockTransaction(db, statements, 'retry')
   const batch = await db.prepare(
     `SELECT id, batch_number, lot_code FROM product_batches
       WHERE variant_product_id = @productId AND
@@ -735,6 +735,7 @@ export async function receiveBatchStock(db: D1Compat, input: {
     created: !before && input.batchId == null,
     batchNumber: batch.batch_number != null ? Number(batch.batch_number) : null,
     lotCode: batch.lot_code ?? plan.lotCode,
+    ...(input.wantResults && Array.isArray(results) ? { results } : {}),
   }
 }
 
