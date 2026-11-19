@@ -16,7 +16,7 @@ import { bumpVersion, cacheIdentity, cachedJsonResponse, getVersionWithFallback 
 import { stockVisibleProductSql } from '../lib/productStockGuard'
 import { canApproveInventoryCounts, canIssueInventoryCountTasks, canWorkInventoryCountTasks, getInventoryCheckAccess, InventoryCheckQueryError } from '../lib/inventoryCheckAccess'
 import { readTaskProducts, readTaskRows, type TaskRow } from '../lib/inventoryCheckTasks'
-import { canonicalProductsRequest, checkStateRestriction, inventoryChecksVersion, planInventoryList, projectInventoryList, readCheckStateSets, readCheckSummary, type CheckStateSets } from '../lib/inventoryCheckList'
+import { canonicalProductsRequest, checkStateRestriction, inventoryChecksVersion, LIST_MAX_PAGE_SIZE, planInventoryList, projectInventoryList, readCheckStateSets, readCheckSummary, type CheckStateSets } from '../lib/inventoryCheckList'
 import { parseOverlayIds, readInventoryOverlay } from '../lib/inventoryCheckOverlay'
 import { availableGroupings, buildGroupingBlock, type GroupingBlock } from '../lib/inventoryCheckGrouping'
 import type { FamilyGroupTotals } from '../lib/familyPagination'
@@ -24,7 +24,7 @@ import { readInventoryCheckLots } from '../lib/inventoryCheckLots'
 import { getActionTier } from '../lib/permissions'
 import { attachLotRows, readProductSearchList } from './products'
 import { approvalsAvailable, createInventoryCheckLotSubmission, createInventoryCheckSession, createInventoryCheckSubmission, lotLinesAvailable, getInventoryCheckSession, inventoryCheckDigest, inventoryCheckSessionHistory,
-  InventoryCheckSessionError, listInventoryCheckSessions, patchInventoryCheckObservation, patchInventoryCheckSession, pickupInventoryCheckTask, releaseInventoryCheckTask, REPLACED_NOTE,
+  canSeeStaffIdentity, InventoryCheckSessionError, listInventoryCheckSessions, patchInventoryCheckObservation, patchInventoryCheckSession, pickupInventoryCheckTask, releaseInventoryCheckTask, REPLACED_NOTE,
   type InventoryCheckPickupTask } from '../lib/inventoryCheckSessions'
 
 // A global hook, not an import: the alert module is installed by index.ts, many tests load this route alone, and an absent hook is a no-op
@@ -266,7 +266,7 @@ const taskView = (row: TaskRow, user: SessionUser) => {
   const selection = row.selection && typeof row.selection === 'object' && (row.selection as { filters?: Record<string, unknown> }).filters
     ? { ...row.selection as object, filters: Object.fromEntries(Object.entries((row.selection as { filters: Record<string, unknown> }).filters).filter(([key]) => !(key === 'brand' && !access.fields.brand) && !(key === 'category' && !access.fields.category) && !(key === 'stockState' && !access.fields.stock))) }
     : row.selection
-  return { id: row.id, branch_id: row.branch_id, title: row.title, status: row.status, issued_at: row.started_at, issued_by: row.issuer, closed_at: row.closed_at, total: row.total, done: row.done, removed: row.removed, selection,
+  return { id: row.id, branch_id: row.branch_id, title: row.title, status: row.status, issued_at: row.started_at, ...(canSeeStaffIdentity(user, row.created_by) ? { issued_by: row.issuer } : {}), closed_at: row.closed_at, total: row.total, done: row.done, removed: row.removed, selection,
     picked_up_by: row.pickup_id ? row.picker : null, picked_up_at: row.pickup_id ? row.picked_at : null, mine, ...(mine ? { pickup_session_id: row.pickup_id } : {}),
     can_pickup: open && row.pickup_id === null && canWorkInventoryCountTasks(user), can_release: open && row.pickup_id !== null && (mine || canIssueInventoryCountTasks(user)), can_close: open && canIssueInventoryCountTasks(user) }
 }
@@ -291,14 +291,16 @@ async function resolveTaskFilters(c: IcContext, branchId: number, raw: unknown, 
   }
   // The list's own reader, page after page (a page holds at most 100 FAMILIES, each with all its countable children, so `total` counts families and a page holds more rows than that), until the reader has no more pages or the
   // cap is passed. The cap and the answer's `total` count COUNTABLE ROWS (a family header is not one), never families; stopped early over the cap, `total` is what was counted so far and `atLeast` says so.
-  const ids = new Set<number>()
+  // A page of only headers adds no ids, so the cap alone would not stop the loop before Free's D1 calls per request: it also stops after the pages the cap could need, plus one.
+  const ids = new Set<number>(), maxPages = Math.ceil(limit / LIST_MAX_PAGE_SIZE) + 1
   let atLeast = false
   for (let page = 1; ; page++) {
-    const answer = await readListPage(c, { ...filters, branchId: String(branchId), summary: '0', pageSize: '100', page: String(page) }, { idsOnly: true }) as { items?: Array<{ id: number; is_group?: number | boolean }>; total?: number }
+    const answer = await readListPage(c, { ...filters, branchId: String(branchId), summary: '0', pageSize: String(LIST_MAX_PAGE_SIZE), page: String(page) }, { idsOnly: true }) as { items?: Array<{ id: number; is_group?: number | boolean }>; total?: number }
     const rows = answer.items ?? []
     for (const row of rows) if (!row.is_group) ids.add(Number(row.id))
-    if (!rows.length || page * 100 >= Number(answer.total ?? 0)) break
+    if (!rows.length || page * LIST_MAX_PAGE_SIZE >= Number(answer.total ?? 0)) break
     if (ids.size > limit) { atLeast = true; break }
+    if (page >= maxPages) throw new InventoryCheckSessionError(400, 'inventory_check_task_too_many', { total: ids.size, limit, atLeast: true })
   }
   return { filters, ids: [...ids], total: ids.size, atLeast }
 }

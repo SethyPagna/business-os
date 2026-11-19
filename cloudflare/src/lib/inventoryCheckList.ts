@@ -27,6 +27,8 @@ export type ListCheckState = typeof LIST_CHECK_STATES[number]
 /** The include string Products sends; the `lots` token is added after the cache and never belongs to the key. */
 export const LIST_INCLUDE = 'branch_stock,images,batches,tagged_lots'
 const DEFAULT_PAGE_SIZE = 50
+/** The most rows (families, for the wired list) one page may ask for. */
+export const LIST_MAX_PAGE_SIZE = 100
 // The id sets are version-keyed (inventory_checks, bumped by every IC writer), so the plan's productListCacheSeconds only bounds how long a copy may live.
 const STOCK_STATES: Record<string, string> = { in_stock: 'in_stock', low_stock: 'low', out_of_stock: 'out' }
 
@@ -86,7 +88,7 @@ export function planInventoryList(user: PermissionUser, raw: Record<string, stri
   // 'pending' while ic_fix_stock is OFF (or the viewer may not see stock) is a valid choice with nothing in it: an empty page, never a 400 that a tab would repeat.
 
   const productsQuery: Record<string, string> = { searchMode: 'smart', sort: grouping ? 'name_asc' : `${sortBy === 'checked' ? 'created' : sortBy}_${direction}`, include: LIST_INCLUDE }
-  const page = integer(validated.page, 1, 100000, 'page'), pageSize = integer(validated.pageSize, DEFAULT_PAGE_SIZE, 100, 'pageSize')
+  const page = integer(validated.page, 1, 100000, 'page'), pageSize = integer(validated.pageSize, DEFAULT_PAGE_SIZE, LIST_MAX_PAGE_SIZE, 'pageSize')
   productsQuery.page = String(page); productsQuery.pageSize = String(pageSize)
   if (branchId !== null) productsQuery.branchId = String(branchId)
   const stockWord = validated.stockState && validated.stockState !== 'all' ? STOCK_STATES[validated.stockState] : undefined

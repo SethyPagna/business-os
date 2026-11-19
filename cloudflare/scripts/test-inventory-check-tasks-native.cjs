@@ -24,6 +24,7 @@ const USERS_X = {
   tasksOff: person(81, 'employee', { ...COUNTER, 'inventory_checks:tasks': false }),      // counts, but tasks are switched off for the role
   noCheck: person(82, 'employee', { ...COUNTER, 'inventory_checks:check': false }),       // views only
   viewIssuer: person(84, 'employee', { inventory_checks: true, inventory_check_issue: true, 'inventory_checks:check': false, inventory_checks_check: false }), // the view and the extra, no count grant
+  auditor: person(85, 'employee', { ...COUNTER, audit_log: true }),                          // counts and holds audit_log (may see staff names)
   orgTwo: person(83, 'employee', { ...COUNTER, inventory_check_issue: true }, 2),          // another organization (its rows are written straight into the tables)
 }
 const PRODUCTS = 12 // 100..111
@@ -35,7 +36,7 @@ const PINNED_WRITER_COST = {
 }
 const ON = ['ic_wired', 'ic_simple', 'ic_fix_stock', 'ic_lot_counts']
 
-function build(sourceEdits = {}, { extraProducts = 0, families = 0, familyBrand = 'Q' } = {}) {
+function build(sourceEdits = {}, { extraProducts = 0, families = 0, familyBrand = 'Q', headers = 0 } = {}) {
   const app = createInvApp({
     users: USERS_X, sourceEdits,
     mount: { '/api/products': 'routes/products.ts', '/api/inventory-checks/products': 'routes/inventoryCheckProducts.ts', '/api/inventory-checks': 'routes/inventoryChecks.ts' },
@@ -52,6 +53,9 @@ function build(sourceEdits = {}, { extraProducts = 0, families = 0, familyBrand 
         raw.prepare('UPDATE products SET parent_id=200 WHERE id IN (201,202)').run()
         for (let n = 0; n < extraProducts; n++) add(300 + n, `Bulk ${300 + n}`, 'Z')
         // `families` families of one header and two children each (brand Q; over 100 of them is more than one page of the list)
+        // `headers` family headers with no children (brand H, ids 5000..) and 5 ordinary products of the same brand: the list shows each header as a row, and a header adds no id to a task
+        for (let n = 0; n < headers; n++) add(5000 + n, `Head ${n}`, 'H', 1)
+        if (headers) for (let n = 0; n < 5; n++) add(4000 + n, `Lone ${n}`, 'H')
         for (let n = 0; n < families; n++) { const base = 1000 + n * 3, brand = n < 120 ? 'Q' : 'R'; add(base, `Fam ${n}`, brand, 1); add(base + 1, `Fam ${n}`, brand); add(base + 2, `Fam ${n}`, brand); raw.prepare('UPDATE products SET parent_id=? WHERE id IN (?,?)').run([base, base + 1, base + 2]) }
       })
     },
@@ -75,7 +79,7 @@ function build(sourceEdits = {}, { extraProducts = 0, families = 0, familyBrand 
   const close = async (task, who = 'admin') => { as(who); return api('PATCH', `/sessions/${task}`, { expectedRevision: 0, requestId: rid('close'), action: 'close' }) }
   const row = (sql, ...params) => app.raw.prepare(sql).get(params)
   const rows = (sql, ...params) => app.raw.prepare(sql).all(params)
-  return { app, as, api, get, issue, pickup, release, count, board, close, row, rows, rid }
+  return { app, as, api, get, issue, pickup, release, count, board, close, row, rows, rid, again: (world) => build(sourceEdits, world) }
 }
 const taskOf = async (w, id, who = 'admin') => (await w.board(who)).json.items.find((item) => item.id === id)
 
@@ -648,6 +652,77 @@ async function issueCapabilities(w) {
   assert.deepEqual((await selectionFor('receivedOnly')).filters, {}, 'a viewer without the brand and stock fields sees neither')
 }
 
+/**
+ * Staff names (security P3-2): who ISSUED a task follows canSeeStaffIdentity, in the form of the sessions list (the key is left out): an admin, an audit_log holder and the issuer see it, no other viewer does.
+ * Who PICKED a task up stays visible to every board viewer (owner: "Others see 'Picked up by ...'"), and so does the 409's pickedUpBy.
+ */
+async function issuedByVisibility(w) {
+  const byAdmin = (await w.issue([100, 101], {}, 'admin')).json.item.id, byIssuer = (await w.issue([102, 103], {}, 'issuer')).json.item.id
+  assert.equal((await w.pickup(byAdmin, 'checker')).status, 201)
+  const items = async (who) => { w.as(who); return Object.fromEntries((await w.get('/tasks?branchId=1')).json.items.map((t) => [t.id, t])) }
+  const other = await items('picker2')
+  for (const id of [byAdmin, byIssuer]) assert.equal('issued_by' in other[id], false, 'a viewer who is neither admin, audit_log nor the issuer gets no issued_by key')
+  assert.equal(other[byAdmin].picked_up_by, 'u72', 'every viewer sees who picked the task up')
+  const own = await items('issuer')
+  assert.equal(own[byIssuer].issued_by, 'u78', 'the issuer sees their own name'); assert.equal('issued_by' in own[byAdmin], false, "and not another issuer's")
+  for (const who of ['admin', 'auditor']) { const all = await items(who); assert.equal(all[byAdmin].issued_by, 'u71', who); assert.equal(all[byIssuer].issued_by, 'u78', who) }
+  w.as('picker2'); const second = await w.api('POST', `/tasks/${byAdmin}/pickup`, { requestId: w.rid('p2') })
+  assert.equal(second.status, 409, JSON.stringify(second.json)); assert.equal(second.json.pickedUpBy, 'u72', "the refusal names the picker to anyone who may pick up")
+}
+
+/**
+ * P3-3: resolving an issue filter reads the wired list page after page, and a page of childless family headers adds no id, so the cap alone never stops it. Each page costs 7 D1 calls and the request has 7 of its own
+ * (Free allows 50): the loop stops after ceil(maxProducts / page size) + 1 pages and answers 400 inventory_check_task_too_many with atLeast. Measured at 205, 605 and 1,005 families, one cold request each.
+ */
+async function issueFilterBound(w0) {
+  for (const headers of [205, 605, 1005]) {
+    const w = w0.again({ headers })
+    let calls = 0
+    for (const name of ['prepare', 'batch', 'batchOnce']) { const original = w.app.env.DB[name]; w.app.env.DB[name] = (...args) => { calls++; return original.apply(w.app.env.DB, args) } }
+    w.as('admin'); w.app.clearCaches()
+    const before = calls, made = await w.api('POST', '/tasks', { branchId: 1, requestId: w.rid('hb'), filters: { brand: 'H' } }), used = calls - before
+    console.log(`     filter over ${headers} families: ${used} D1 calls, ${made.status}`)
+    assert.ok(used <= 50, `${headers} families: ${used} D1 calls for one cold POST /tasks (Free allows 50)`)
+    const issued = w.row("SELECT COUNT(*) AS n FROM inventory_check_sessions WHERE json_extract(scope_json,'$.membership')='task'").n
+    if (headers + 5 <= 4 * 100) { assert.equal(made.status, 201, JSON.stringify(made.json)); assert.equal(made.json.item.progress.total, 5, 'within the bound the filter still resolves'); assert.equal(issued, 1); continue }
+    assert.equal(made.status, 400, JSON.stringify(made.json)); assert.equal(made.json.code, 'inventory_check_task_too_many'); assert.equal(made.json.atLeast, true, 'the count is a lower bound')
+    assert.equal(made.json.limit, 300); assert.equal(issued, 0, 'nothing was issued')
+  }
+}
+
+/**
+ * The cache key of the task's countable products (E2): the board and the task list are cached by the inventory_checks version AND the products version, so a product that becomes a header (or is retired or merged) moves both
+ * reads at once. NO cache is cleared here: only the products version moves, as a real product change moves it.
+ */
+async function cacheKeyProducts(w) {
+  const task = (await w.issue([102, 103])).json.item.id
+  const listTotal = async () => { w.as('checker'); return (await w.get(`/list?branchId=1&taskId=${task}`)).json.task.total }
+  assert.equal(await listTotal(), 2); assert.equal((await taskOf(w, task)).total, 2)
+  w.app.raw.prepare('UPDATE products SET is_group=1 WHERE id=103').run(); await w.app.bumpProducts()
+  assert.equal(await listTotal(), 1, 'the task list follows a product that became a header, with no cache clear')
+  const view = await taskOf(w, task); assert.deepEqual([view.total, view.done, view.removed], [1, 0, 1], 'and so does the board')
+}
+
+/**
+ * E1's clean refusal: a Worker that runs before migration 0319 (or 0318 and 0319) answers 503 inventory_check_schema_unavailable from every probed route, never a raw D1 "no such index", and writes nothing.
+ * The migrations are not applied here by dropping the indexes they create (the tables are the same).
+ */
+async function schemaMissing(w0) {
+  const variants = { 'a schema without 0319': ['inventory_check_sessions_open_task', 'inventory_check_sessions_task_board'], 'a schema without 0318 and 0319': ['inventory_check_sessions_kind_task', 'inventory_check_sessions_open_task', 'inventory_check_sessions_task_board'] }
+  for (const [name, drop] of Object.entries(variants)) {
+    const w = w0.again({})
+    const before = w.row('SELECT (SELECT COUNT(*) FROM inventory_check_sessions) AS s, (SELECT COUNT(*) FROM inventory_check_items) AS i, (SELECT COUNT(*) FROM inventory_check_events) AS e')
+    for (const index of drop) w.app.raw.exec(`DROP INDEX ${index}`)
+    const refused = async (label, run) => { const r = await run(); assert.equal(r.status, 503, `${name}: ${label}: ${r.status} ${JSON.stringify(r.json)}`); assert.equal(r.json.code, 'inventory_check_schema_unavailable', `${name}: ${label}`) }
+    await refused('a submission', () => w.count([100]))
+    await refused('issuing a task', () => w.issue([100, 101]))
+    await refused('the Count sessions list', async () => { w.as('checker'); return w.get('/sessions?branchId=1') })
+    await refused('a pickup', async () => { w.as('checker'); return w.api('POST', '/tasks/no-such-task/pickup', { requestId: w.rid('p') }) })
+    await refused('a session detail', async () => { w.as('admin'); return w.get('/sessions/no-such-session') })
+    assert.deepEqual(w.row('SELECT (SELECT COUNT(*) FROM inventory_check_sessions) AS s, (SELECT COUNT(*) FROM inventory_check_items) AS i, (SELECT COUNT(*) FROM inventory_check_events) AS e'), before, `${name}: nothing is written by a refused request`)
+  }
+}
+
 /** The cap: a branch has at most maxOpenTasks open tasks; the board shows all of them. */
 async function taskCap(w) {
   const cap = (await w.board()).json.capabilities.maxOpenTasks
@@ -744,23 +819,30 @@ async function headerRule(w) {
 }
 
 /**
- * The other half of the countable rule (E4): a DEACTIVATED product that still holds stock (rows that predate migration 0242, which the census counts: the trigger is dropped to build one) can be issued and stays in the
- * task's total, on the board and on the task list alike; once its stock is gone it leaves the total (removed). The wired list reads ACTIVE products only (catalogOnly in routes/products.ts), so it does not show
- * this row: asserted as it is, and reported as an open finding (a counted total of 2 over one visible row).
+ * The other half of the countable rule (lead ruling, 19 Nov): a task counts exactly what the wired list shows, and that list reads ACTIVE products only (catalogOnly in routes/products.ts), so an inactive product is
+ * never countable, even one that holds stock. Migration 0242's trigger refuses stock on an inactive product, so the world is built by dropping that trigger: the rule must not depend on it. By ids it is refused
+ * (inventory_check_product_not_eligible), by filter it is left out, and a product deactivated AFTER the issue leaves the total (removed) so the task can still close.
  */
 async function deactivatedWithStock(w) {
   const stockWrite = (fn) => w.app.seedStockFixture(w.app.raw.db, fn)
   stockWrite(() => { w.app.raw.exec('DROP TRIGGER product_deactivate_stock_0242'); w.app.raw.prepare('UPDATE products SET is_active=0 WHERE id=104').run() })
+  assert.equal(w.row('SELECT SUM(quantity) AS q FROM branch_stock WHERE product_id=104').q > 0, true, 'the inactive product still holds stock')
   const refused = await w.issue([103, 999]); assert.equal(refused.status, 400, 'a product that does not exist is still refused')
-  const made = await w.issue([103, 104]); assert.equal(made.status, 201, JSON.stringify(made.json))
-  const task = made.json.item.id, listTotal = async () => { w.app.clearCaches(); w.as('checker'); return (await w.get(`/list?branchId=1&taskId=${task}`)).json.task.total }
+  const byIds = await w.issue([103, 104]); assert.equal(byIds.status, 400, JSON.stringify(byIds.json)); assert.equal(byIds.json.code, 'inventory_check_product_not_eligible', 'an inactive product that holds stock is refused by ids')
+  const byFilter = await w.api('POST', '/tasks', { branchId: 1, requestId: w.rid('d'), filters: { brand: 'B' } })
+  assert.equal(byFilter.status, 201, JSON.stringify(byFilter.json))
+  const issued = w.rows('SELECT product_id FROM inventory_check_items WHERE session_id=?', byFilter.json.item.id).map((r) => r.product_id)
+  assert.equal(issued.includes(104), false, 'issue by filter leaves the inactive product out'); assert.equal(issued.includes(102), true, 'and keeps the active ones of the filter')
+  // deactivated AFTER the issue (its stock stays: the trigger is gone)
+  const task = (await w.issue([103, 105])).json.item.id, listTotal = async () => { w.app.clearCaches(); w.as('checker'); return (await w.get(`/list?branchId=1&taskId=${task}`)).json.task.total }
   w.app.clearCaches()
-  const view = await taskOf(w, task); assert.deepEqual([view.total, view.done, view.removed], [2, 0, 0], 'a deactivated product that holds stock stays in the total')
-  assert.equal(await listTotal(), 2, 'the task list totals it too')
-  stockWrite(() => { w.app.raw.prepare('UPDATE branch_stock SET quantity=0 WHERE product_id=104').run(); w.app.raw.prepare('UPDATE products SET stock_quantity=0 WHERE id=104').run() })
+  const before = await taskOf(w, task); assert.deepEqual([before.total, before.done, before.removed], [2, 0, 0]); assert.equal(await listTotal(), 2)
+  stockWrite(() => { w.app.raw.prepare('UPDATE products SET is_active=0 WHERE id=105').run() })
   w.app.clearCaches()
-  const gone = await taskOf(w, task); assert.deepEqual([gone.total, gone.done, gone.removed], [1, 0, 1], 'with its stock gone it leaves the total')
+  const gone = await taskOf(w, task); assert.deepEqual([gone.total, gone.done, gone.removed], [1, 0, 1], 'deactivated after the issue, it leaves the total even with its stock')
   assert.equal(await listTotal(), 1, 'and the task list total')
+  const last = await countBy(w, 'lot', 103)
+  assert.deepEqual(last.answer.closedTasks, [task], 'the task closes on the one product it can still count'); assert.equal(status(w, task), 'closed')
 }
 
 /** F7: a request retried while its twin takes the branch's last place is a REPLAY, not a refusal. */
@@ -876,7 +958,7 @@ const SCENARIOS = {
   autoCloseOlderWriter: (w) => autoClose(w, { lotWriter: false }),
   outsideCloseLot: (w) => outsideClose(w, 'lot'), outsideClosePlain: (w) => outsideClose(w, 'plain'), outsideCloseObserve: (w) => outsideClose(w, 'observe'),
   outsideNegativesLot: (w) => outsideNegatives(w, 'lot'), outsideNegativesPlain: (w) => outsideNegatives(w, 'plain'), outsideNegativesObserve: (w) => outsideNegatives(w, 'observe'),
-  observationNotFinal, doneRuleOrg, removedProducts, issueFilterFamilies, issueCapabilities, taskCap, taskRowsUntouched, headerRule, deactivatedWithStock, taskCapReplay, readBackHash,
+  observationNotFinal, doneRuleOrg, removedProducts, issueFilterFamilies, issueCapabilities, taskCap, taskRowsUntouched, headerRule, deactivatedWithStock, issuedByVisibility, issueFilterBound, cacheKeyProducts, schemaMissing, taskCapReplay, readBackHash,
   random: (w) => randomWorld(w, 20261118, 50),
   randomTwo: (w) => randomWorld(w, 20261119, 90),
   budget,
@@ -921,15 +1003,19 @@ async function main() {
     ["the done rule counts another organization's counts", edit('lib/inventoryCheckTasks.ts', "AND xs.organization_id IS ${org} AND xs.branch_id=x.branch_id\n", "AND xs.branch_id=x.branch_id\n"), ['doneRuleOrg']],
     ['a product that can no longer be counted still blocks the auto-close', edit('lib/inventoryCheckTasks.ts', " AND ${taskItemCountableSql('n')})", ')'), ['removedProducts']],
     ['the board counts products that can no longer be counted in the total', edit('lib/inventoryCheckTasks.ts', "(SELECT COUNT(*) FROM ${I} t WHERE t.session_id=page.id AND ${taskItemCountableSql('t')}) AS total", "(SELECT COUNT(*) FROM ${I} t WHERE t.session_id=page.id) AS total"), ['removedProducts']],
-    ['issue by filter stops when the rows reach the family count', edit('routes/inventoryChecks.ts', "if (!rows.length || page * 100 >= Number(answer.total ?? 0)) break", "if (!rows.length || ids.size >= Number(answer.total ?? 0)) break"), ['issueFilterFamilies']],
+    ['issue by filter stops when the rows reach the family count', edit('routes/inventoryChecks.ts', "if (!rows.length || page * LIST_MAX_PAGE_SIZE >= Number(answer.total ?? 0)) break", "if (!rows.length || ids.size >= Number(answer.total ?? 0)) break"), ['issueFilterFamilies']],
     ['issuing needs only the extra, not the count grant', edit('lib/inventoryCheckAccess.ts', "return access.canView && access.canCheck && hasPermission(user, 'inventory_check_issue')", "return access.canView && hasPermission(user, 'inventory_check_issue')"), ['issueCapabilities']],
     ['the board shows the filters a viewer may not use', edit('routes/inventoryChecks.ts', "!(key === 'brand' && !access.fields.brand) && !(key === 'category' && !access.fields.category) && !(key === 'stockState' && !access.fields.stock)", 'true'), ['issueCapabilities']],
     ['the candidates read closed tasks again (the open-task index and the open filter are gone)', { 'lib/inventoryCheckTasks.ts': [["FROM ${S} t INDEXED BY inventory_check_sessions_open_task WHERE ${candidate}", "FROM ${S} t WHERE ${candidate}"], ["AND t.branch_id=@branchId AND t.status='open'\n", "AND t.branch_id=@branchId\n"]] }, ['outsideCloseLot', 'outsideClosePlain', 'outsideCloseObserve']],
     ['the done rule is "after the issue", not "at or after"', edit('lib/inventoryCheckTasks.ts', 'x.updated_at>=${since}', 'x.updated_at>${since}'), ['doneRule']],
     ['the close event does not say which session closed the task', edit('lib/inventoryCheckTasks.ts', ",'auto',1,'closedBy',@src)", ",'auto',1)"), ['outsideCloseLot', 'outsideClosePlain', 'outsideCloseObserve']],
     ['a family header is countable in a task (the rule drops its is_group clause)', edit('lib/inventoryCheckTasks.ts', ' AND COALESCE(p.is_group,0)=0)`', ')`'), ['headerRule']],
-    ['a task counts only active products (the rule drops the stock clause)', edit('lib/inventoryCheckTasks.ts', 'export const TASK_COUNTABLE_SQL = `(${stockVisibleProductSql()} AND', 'export const TASK_COUNTABLE_SQL = `(p.is_active = 1 AND'), ['deactivatedWithStock']],
+    ['the old rule: a task counts an inactive product that holds stock', edit('lib/inventoryCheckTasks.ts', "export const TASK_COUNTABLE_SQL = `(${catalogProductSql('p', false)} AND", 'export const TASK_COUNTABLE_SQL = `(${stockVisibleProductSql()} AND'), ['deactivatedWithStock']],
     ['the task list totals every product of the task, not the countable ones', edit('lib/inventoryCheckTasks.ts', 'productIds: rows.filter((row) => Number(row.countable) === 1).map(', 'productIds: rows.map('), ['headerRule', 'deactivatedWithStock']],
+    ['issued_by goes to every board viewer', edit('routes/inventoryChecks.ts', '...(canSeeStaffIdentity(user, row.created_by) ? { issued_by: row.issuer } : {})', 'issued_by: row.issuer'), ['issuedByVisibility']],
+    ['the filter loop has no page bound', edit('routes/inventoryChecks.ts', "    if (page >= maxPages) throw new InventoryCheckSessionError(400, 'inventory_check_task_too_many', { total: ids.size, limit, atLeast: true })\n", ''), ['issueFilterBound']],
+    ['the task list cache ignores the products version', edit('routes/inventoryChecks.ts', "order=1`, { method: 'GET' }), c.executionCtx, `ict:${version}:${productsVersion}`", "order=1`, { method: 'GET' }), c.executionCtx, `ict:${version}`"), ['cacheKeyProducts']],
+    ['the schema probe does not name the task indexes', edit('lib/inventoryCheckSessions.ts', "  'inventory_check_sessions_kind_task', 'inventory_check_sessions_open_task', 'inventory_check_sessions_task_board'])\nconst APPROVALS_SCHEMA", "  ])\nconst APPROVALS_SCHEMA"), ['schemaMissing']],
     ['issue by ids uses the older countable rule', edit('lib/inventoryCheckSessions.ts', 'AND ${TASK_COUNTABLE_SQL} ORDER BY p.id`', 'AND ${stockVisibleProductSql()} AND ${CHECKABLE_SQL} ORDER BY p.id`'), ['headerRule']],
     ['a retried issue is refused when its twin took the last place', edit('lib/inventoryCheckSessions.ts', '      if (twin) return { event: twin, replayed: true }\n', ''), ['taskCapReplay']],
     ['the task read-back ignores the request hash', edit('lib/inventoryCheckTasks.ts', "AND e.request_hash=@hash AND e.action='close' AND e.created_at=@now`\n", "AND e.action='close' AND e.created_at=@now`\n"), ['readBackHash']],

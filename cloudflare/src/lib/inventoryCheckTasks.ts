@@ -1,5 +1,5 @@
 import type { D1Compat } from './db'
-import { stockVisibleProductSql } from './productStockGuard'
+import { catalogProductSql, stockVisibleProductSql } from './productStockGuard'
 
 // Count tasks (owner, 18 Nov 2026): an admin issues products to count, an employee picks the task up, and the counts they submit tick the products off.
 // Nothing here is a new table: a task is an open row of inventory_check_sessions whose scope_json says {"membership":"task"}, a pickup is the picker's own open session
@@ -11,7 +11,7 @@ import { stockVisibleProductSql } from './productStockGuard'
 // The count is an item with state done|issue and an updated_at (the time of the count) at or after the task's started_at. A task's own items are `unstarted` with no updated_at, so a task is never a count itself.
 // A count ticks a task only when it is FINAL (owner, 19 Nov: counts reach the server on Submit): its session is closed. A count in an open session can still be set back, so it ticks nothing until that session closes.
 // An Undo or a Redo of a Set is NOT a count (owner ruling, 19 Nov): it restores a record made earlier, so its session (kind stock_set_undo, or scope restore) never ticks or closes a task.
-// Only products that can still be counted take part (taskItemCountableSql): one deactivated with no stock, merged away or made a header leaves the task's total and no longer blocks its close.
+// Only products that can still be counted take part (taskItemCountableSql): one deactivated, merged away or made a header leaves the task's total and no longer blocks its close.
 
 export const TASK_MEMBERSHIP = 'task'
 export const PICKUP_MEMBERSHIP = 'pickup'
@@ -27,12 +27,13 @@ export const taskOf = (alias: string): string => `json_extract(${alias}.scope_js
 export const CHECKABLE_SQL = `(NOT(COALESCE(p.is_group,0)=1 AND EXISTS(SELECT 1 FROM products child WHERE child.id<>p.id
   AND (child.parent_id=p.id OR child.name_key=p.name_key) AND ${stockVisibleProductSql('child')})))`
 /**
- * THE rule of what a task may hold and count (alias p): stock-visible (active, or still holding stock), and never a family header, with or without children. The header half is the wired list's rule; the list reads active
- * products only (catalogOnly in routes/products.ts), so a deactivated product that still holds stock stays counted here although that list does not show it. No source of this rule is exported by the list (it builds its own),
- * so this is the one definition the task code uses. The older list (inventoryCheckProducts.ts) still shows a childless header as countable: it is left as it is.
+ * THE rule of what a task may hold and count (alias p): exactly what the wired list shows (lead ruling, 19 Nov). That list reads active products only (catalogOnly in routes/products.ts, which uses catalogProductSql),
+ * and never shows a family header, with or without children, so the rule is that function's own text plus the header rule. A product with stock but not active is not counted: the owner's rule is that no stock sits on an
+ * inactive product, and migration 0242's triggers refuse it. The products are read by primary key, so `+p.is_active` (not indexed) keeps the planner from choosing another index.
+ * The older list (inventoryCheckProducts.ts) still shows a childless header as countable: it is left as it is.
  * ONE text for the issue by ids, the issue by filter (which follows the list) and every read of the task's total, done and removed.
  */
-export const TASK_COUNTABLE_SQL = `(${stockVisibleProductSql()} AND ${CHECKABLE_SQL} AND COALESCE(p.is_group,0)=0)`
+export const TASK_COUNTABLE_SQL = `(${catalogProductSql('p', false)} AND ${CHECKABLE_SQL} AND COALESCE(p.is_group,0)=0)`
 /** Can the product of this task item still be counted? */
 export const taskItemCountableSql = (item: string): string => `EXISTS(SELECT 1 FROM products p WHERE p.id=${item}.product_id AND ${TASK_COUNTABLE_SQL})`
 

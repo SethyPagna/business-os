@@ -114,6 +114,7 @@ const NOT_REFUSALS: Record<string, string> = {
   inventory_check_approvals_no_delete: 'schema object probed for presence', inventory_check_events_no_delete: 'schema object probed for presence', inventory_check_events_no_update: 'schema object probed for presence',
   inventory_check_items_baseline: 'schema object probed for presence', inventory_check_items_no_delete: 'schema object probed for presence', inventory_check_sessions_identity: 'schema object probed for presence',
   inventory_check_sessions_no_delete: 'schema object probed for presence',
+  inventory_check_sessions_kind_task: 'schema object probed for presence', inventory_check_sessions_open_task: 'schema object probed for presence', inventory_check_sessions_task_board: 'schema object probed for presence',
   inventory_check_approvals_pending: 'a branch-cutover blocker, shown by the cutover screen, never an answer of the count routes',
   inventory_check_not_applied: 'the reason recorded for a line a close left unapplied when no refusal applies (closed_json), a state of the line and not an answer',
   inventory_check_approve: 'permission extra key', inventory_check_issue: 'permission extra key (issue count tasks)', 'inventory_check_show_${': 'permission extra keys, one per field the count shows (built by name on purpose)',
