@@ -211,7 +211,9 @@ function InventorySelection({ boundary, access, isCurrent }: { boundary: string;
   const [selection, setSelection] = useState<Selection>({ branchId: '', sessionId: '' })
   const selected = useRef(selection)
   selected.current = selection
-  const changeSelection = (value: Selection) => {
+  const changeSelection = (next: Selection) => {
+    // The branch list the Tasks board found travels with the selection: Back, a task and a branch choice never read it again.
+    const value = next.knownBranches || !selected.current.knownBranches ? next : { ...next, knownBranches: selected.current.knownBranches }
     if (selected.current.branchId === value.branchId && selected.current.sessionId === value.sessionId && (selected.current.taskId ?? '') === (value.taskId ?? '')) return
     selected.current = value; setSelection(value)
   }
@@ -1379,7 +1381,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
         {/* Pinned: dates (with the Stats chip), then search / scan / Filters beside the context bar, then the column header. Open stat cards scroll inside the cap. */}
         <div className="sticky top-0 z-30 -mx-3 max-h-[calc(70*var(--app-vh))] min-w-0 space-y-1 overflow-y-auto bg-gray-50 px-3 pb-1 pt-2 dark:bg-gray-900" data-inventory-check-pinned>
           {taskBoard
-            ? <TasksHeader t={t} branches={branches} branchId={branchId} onBranch={id => onSelect({ branchId: id, sessionId: '' })} issue={access.canIssueTasks} issueBlocked={headerIssueBlocked} busy={tasks.busy}
+            ? <TasksHeader t={t} branches={branches} branchId={branchId} onBranch={id => onSelect({ branchId: id, sessionId: '', ...(branches.length ? { knownBranches: branches } : {}) })} issue={access.canIssueTasks} issueBlocked={headerIssueBlocked} busy={tasks.busy}
               onIssue={() => { issueIntent.current = true; setSection('products') }} />
             : section === 'sessions'
             ? <StatsRangeRow layout="scroll" compactRange range={sessionRange} disabled={controlsLocked} t={t} onRangeChange={value => { if (!controlsLocked) { setSessionRange(value); setPage(1) } }}
@@ -1430,7 +1432,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
         {!taskBoard && !fresh && !error && !sessionError ? <ListSkeleton loadingText={t('loading')} /> : null}
         {taskBoard ? (!branchId ? <div className="min-w-0 space-y-2" data-tasks-choose-branch>
           <p role="status" className="text-xs leading-relaxed text-gray-600 dark:text-gray-300">{tr('inventory_check_count_blocked_branch', 'Choose a branch first.')}</p>
-          {branches.length > 1 ? <ChipRail label={t('branch')}>{branches.map(branch => <RailChip key={branch.id} selected={false} onClick={() => onSelect({ branchId: String(branch.id), sessionId: '' })}>{branch.name}</RailChip>)}</ChipRail> : null}
+          {branches.length > 1 ? <ChipRail label={t('branch')}>{branches.map(branch => <RailChip key={branch.id} selected={false} onClick={() => onSelect({ branchId: String(branch.id), sessionId: '', knownBranches: branches })}>{branch.name}</RailChip>)}</ChipRail> : null}
         </div>
           : tasks.board ? <InventoryCheckTasksList board={tasks.board} t={t} canWork={access.canWorkTasks} busy={tasks.busy}
             onOpen={task => onSelect({ branchId, sessionId: '', taskId: task.id })} onPickup={task => { void pickupTask(task) }} onRelease={task => { void releaseTask(task) }} onClose={task => { void closeTask(task) }} />
