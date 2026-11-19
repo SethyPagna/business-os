@@ -457,7 +457,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, heldDrafts,
     setHistory(null); setHistoryError('')
     void readInventoryCheckHistory<InventoryCheckHistoryResult>(sessionId, { page: historyPage, pageSize: 20 }, abort.signal).then(result => {
       if (live && current()) setHistory(result)
-    }).catch(() => { if (live && current()) setHistoryError(tr('inventory_check_load_failed', 'Inventory checks are unavailable. Reload to try again.')) })
+    }).catch(() => { if (live && current()) setHistoryError(tr('inventory_check_load_failed', 'Could not load Inventory. Try again.')) })
     return () => { live = false; abort.abort() }
   }, [historyPage, sessionId, historyReload])
   useEffect(() => {
@@ -583,7 +583,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, heldDrafts,
         }
         // A task view says what the server said about the task (it no longer exists, or this account may not work tasks), in that refusal's own sentence; any other failure is the generic line.
         const taskSentence = publish() && taskView && typeof refusal?.code === 'string' && refusal.code.startsWith('inventory_check_task') ? await knownRefusal(cause) : undefined
-        if (publish()) setError(taskSentence ? tr(taskSentence.key, taskSentence.fallback) : tr('inventory_check_load_failed', 'Inventory checks are unavailable. Reload to try again.'))
+        if (publish()) setError(taskSentence ? tr(taskSentence.key, taskSentence.fallback) : tr('inventory_check_load_failed', 'Could not load Inventory. Try again.'))
       } finally { if (publish()) setLoading(false) }
     }
     void load()
@@ -597,7 +597,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, heldDrafts,
     setSessionError('')
     void readInventoryCheckSession(sessionId, abort.signal).then(selected => {
       if (publish()) { setSession(selected.item); setItems(selected.items); setApproval(selected.approval ?? null); setSessionLoadedFor(sessionId) }
-    }).catch(() => { if (publish()) setSessionError(tr('inventory_check_load_failed', 'Inventory checks are unavailable. Reload to try again.')) })
+    }).catch(() => { if (publish()) setSessionError(tr('inventory_check_load_failed', 'Could not load Inventory. Try again.')) })
     return () => { live = false; abort.abort() }
   }, [sessionId, sessionReload])
 
@@ -752,7 +752,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, heldDrafts,
         confirmLabel: tr('inventory_check_start_page', 'Count'),
       })
       if (!confirmed || !current() || inFlight.current) return
-      createAttempt.current = { title: tr('inventory_check_page_session', 'Visible page check'), productIds, scope: { ...sessionScopeParams(params), membership: 'visible_page' }, requestId: createClientRequestId('inventory_check') }
+      createAttempt.current = { title: tr('inventory_check_page_session', 'This page’s products'), productIds, scope: { ...sessionScopeParams(params), membership: 'visible_page' }, requestId: createClientRequestId('inventory_check') }
     }
     inFlight.current = true; setBusy(true); setWriteError('')
     try {
@@ -761,7 +761,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, heldDrafts,
     } catch (cause) {
       const refusal = (cause as { outcome?: string })?.outcome === 'unknown' ? undefined : await knownRefusal(cause)
       if (refusal) createAttempt.current = null
-      if (current()) setWriteError(refusal ? tr(refusal.key, refusal.fallback) : tr((cause as { outcome?: string })?.outcome === 'unknown' ? unknownSaveKey(cause) : 'inventory_check_save_failed', 'Save not confirmed. Retry the same operation or reload.'))
+      if (current()) setWriteError(refusal ? tr(refusal.key, refusal.fallback) : tr((cause as { outcome?: string })?.outcome === 'unknown' ? unknownSaveKey(cause) : 'inventory_check_save_failed', (cause as { outcome?: string })?.outcome === 'unknown' ? 'Save result unknown. Check the session before retrying.' : 'Check not saved. Try again.'))
     } finally { inFlight.current = false; if (current()) setBusy(false) }
   }
 
@@ -791,7 +791,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, heldDrafts,
     } catch (cause) {
       const refusal = (cause as { outcome?: string })?.outcome === 'unknown' ? undefined : await knownRefusal(cause)
       if (refusal) lifecycleAttempt.current = null
-      if (current()) setWriteError(refusal ? tr(refusal.key, refusal.fallback) : tr((cause as { outcome?: string })?.outcome === 'unknown' ? unknownSaveKey(cause) : 'inventory_check_save_failed', 'Save not confirmed. Retry the same operation or reload.'))
+      if (current()) setWriteError(refusal ? tr(refusal.key, refusal.fallback) : tr((cause as { outcome?: string })?.outcome === 'unknown' ? unknownSaveKey(cause) : 'inventory_check_save_failed', (cause as { outcome?: string })?.outcome === 'unknown' ? 'Save result unknown. Check the session before retrying.' : 'Check not saved. Try again.'))
     } finally { inFlight.current = false; if (current()) setBusy(false) }
   }
 
@@ -1078,7 +1078,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, heldDrafts,
       // The server names the products whose earlier count is being applied, or that left a date out (the refusal is the same whatever figure was typed): the person is told which, and the counts are kept.
       const busy = ((cause as { code?: unknown })?.code === 'inventory_check_count_in_progress' || (cause as { code?: unknown })?.code === 'inventory_check_lots_incomplete') && Array.isArray((cause as { productIds?: unknown }).productIds)
         ? ((cause as { productIds: unknown[] }).productIds).map(id => draftsRef.current[String(id)]?.name).filter((name): name is string => typeof name === 'string' && name !== '') : []
-      if (current()) setWriteError(refusal ? `${tr(refusal.key, refusal.fallback)}${busy.length ? ` ${t('products')}: ${busy.join(', ')}` : ''}${stale ? ` ${stale.changed.map(item => `${item.name}${item.receivedAt ? ` (${fmtDateOnly(item.receivedAt)})` : ''}: ${item.was ?? '—'} → ${item.now}`).join('; ')}` : ''}` : tr(unknown ? unknownSaveKey(cause) : 'inventory_check_save_failed', unknown ? 'Save not confirmed. Retry the same operation or reload.' : 'Check not saved. Try again.'))
+      if (current()) setWriteError(refusal ? `${tr(refusal.key, refusal.fallback)}${busy.length ? ` ${t('products')}: ${busy.join(', ')}` : ''}${stale ? ` ${stale.changed.map(item => `${item.name}${item.receivedAt ? ` (${fmtDateOnly(item.receivedAt)})` : ''}: ${item.was ?? '—'} → ${item.now}`).join('; ')}` : ''}` : tr(unknown ? unknownSaveKey(cause) : 'inventory_check_save_failed', unknown ? 'Save result unknown. Check the session before retrying.' : 'Check not saved. Try again.'))
     } finally { inFlight.current = false; if (current()) setBusy(false) }
   }
   // Counts approval (ic_fix_stock): approving changes stock, so the person must hold the extra, may adjust stock and be online.
@@ -1339,10 +1339,10 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, heldDrafts,
       // Only an entry still exactly as it was restored is dropped: a count typed meanwhile is never touched.
       if (dropped.length) setDrafts(previous => { const next = { ...previous }; for (const id of dropped) if (next[id] === entries[id]) delete next[id]; return next })
       if (ids.length > dropped.length && realRestore) notify(tr('inventory_check_draft_restored', 'Counts restored from this device.'), 'info')
-      if (dropped.length) notify(tr('inventory_check_draft_dropped', '{count} counts removed: counted again after you typed them.').replace('{count}', String(dropped.length)), 'info')
+      if (dropped.length) notify(tr('inventory_check_draft_dropped', 'Counts removed: {count}. They were counted again after you typed them.').replace('{count}', String(dropped.length)), 'info')
     })()
   }, [fresh, listMode])
-  const issueEntry = section === 'products' && listMode && !!branchId && data?.wired === true && access.canIssueTasks
+  const issueEntry = section === 'products' && listMode && !issuing && !!branchId && data?.wired === true && access.canIssueTasks
     ? <IconAction label={tr('inventory_check_task_issue', 'Issue')} disabled={controlsLocked} onClick={() => setIssuing(true)}><ClipboardPlus className="h-5 w-5" aria-hidden="true" /></IconAction> : null
   const countAction = section !== 'sessions' && access.canCheck && !data?.simple ? <>
     {countBlocked ? <InfoHint text={countBlocked} label={countBlocked} /> : null}
@@ -1447,7 +1447,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, heldDrafts,
         </div>
         {pagerNode('top')}
         {writeError ? <p role="alert" className="text-xs leading-relaxed text-red-700">{writeError}</p> : null}
-        {listMode && access.canCheck && !branchId && branches.length > 1 && !issuingNow ? <p role="status" className="text-xs leading-relaxed text-gray-600 dark:text-gray-300" data-count-needs-branch>{tr('inventory_check_count_blocked_branch', 'Choose a branch first.')}</p> : null}
+        {listMode && access.canCheck && !branchId && branches.length !== 1 && !issuingNow ? <p role="status" className="text-xs leading-relaxed text-gray-600 dark:text-gray-300" data-count-needs-branch>{tr('inventory_check_count_blocked_branch', 'Choose a branch first.')}</p> : null}
         {taskView && taskRow?.status === 'closed' && !taskClosedBySelf.current ? <p role="status" className="text-xs leading-relaxed text-amber-800 dark:text-amber-200" data-task-status-line="closed">{tr('inventory_check_error_task_closed', 'This task is already closed.')}</p> : null}
         {taskView && tasks.handedBack && taskRow?.status === 'open' ? <p role="status" className="text-xs leading-relaxed text-amber-800 dark:text-amber-200" data-task-status-line="handed-back">{tr('inventory_check_task_handed_back', 'This task was handed back. Your counts are kept.')}</p> : null}
         {section === 'tasks' && tasks.refusal ? <p role="alert" className="text-xs leading-relaxed text-red-700" data-tasks-refusal>{tasks.refusal}</p> : null}

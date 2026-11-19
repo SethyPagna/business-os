@@ -8309,7 +8309,7 @@
   "inventory_check_task_reopened_count": "Reopened: a count was taken back",
   "inventory_check_task_reopened_set": "Reopened: a stock Set was undone",
   "inventory_check_draft_restored": "Counts restored from this device.",
-  "inventory_check_draft_dropped": "{count} counts removed: counted again after you typed them.",
+  "inventory_check_draft_dropped": "Counts removed: {count}. They were counted again after you typed them.",
   "inventory_check_error_task_not_found": "This task no longer exists. Reload and try again.",
   "inventory_check_error_task_closed": "This task is already closed.",
   "inventory_check_error_task_picked_up": "Someone else already picked this task up.",

@@ -8309,7 +8309,7 @@
   "inventory_check_task_reopened_count": "បានបើកឡើងវិញ៖ ការរាប់មួយត្រូវបានដកវិញ",
   "inventory_check_task_reopened_set": "បានបើកឡើងវិញ៖ ការកំណត់ស្តុកមួយត្រូវបានត្រឡប់វិញ",
   "inventory_check_draft_restored": "បានស្ដារការរាប់ពីឧបករណ៍នេះ។",
-  "inventory_check_draft_dropped": "បានដកការរាប់ {count}៖ ផលិតផលទាំងនោះត្រូវបានរាប់ម្ដងទៀត ក្រោយពេលអ្នកវាយ។",
+  "inventory_check_draft_dropped": "ការរាប់ដែលបានដកចេញ៖ {count}។ ផលិតផលទាំងនោះត្រូវបានរាប់ម្ដងទៀត ក្រោយពេលអ្នកវាយ។",
   "inventory_check_error_task_not_found": "កិច្ចការនេះមិនមានទៀតទេ។ សូមផ្ទុកឡើងវិញ ហើយព្យាយាមម្តងទៀត។",
   "inventory_check_error_task_closed": "កិច្ចការនេះត្រូវបានបិទរួចហើយ។",
   "inventory_check_error_task_picked_up": "មានអ្នកផ្សេងបានទទួលយកកិច្ចការនេះរួចហើយ។",

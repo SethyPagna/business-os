@@ -301,12 +301,12 @@ try {
 
   failRead = true
   const failed = await mount()
-  assert.ok(failed.text().includes('unavailable'))
+  assert.ok(failed.text().includes('Could not load Inventory'))
   assert.ok(!failed.text().includes('Test variant'), 'failed read never substitutes cached catalog rows')
   failRead = false
   const beforeRetry = productRequests.length
   await failed.click(failed.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'retry', 'load Retry'))
-  assert.ok(productRequests.length > beforeRetry && failed.text().includes('Test variant') && !failed.text().includes('unavailable'), 'the load error offers Retry, which re-reads and brings the rows back')
+  assert.ok(productRequests.length > beforeRetry && failed.text().includes('Test variant') && !failed.text().includes('Could not load Inventory'), 'the load error offers Retry, which re-reads and brings the rows back')
   await failed.unmount()
 
   const switching = await mount()
@@ -599,7 +599,7 @@ try {
   await counting.type(inside(12, 'data-check-count'), '6')
   submitFailure = 'unknown'
   await counting.click(barAction('submit')); await confirmInDialog(counting, 'Submit')
-  assert.ok(counting.text().includes('Save not confirmed'), 'an unconfirmed submit says so')
+  assert.ok(counting.text().includes('Save result unknown'), 'an unconfirmed submit says so')
   assert.equal(barAction('submit').textContent.trim().replace(/\d+$/, ''), 'retry', 'and the main action becomes Retry')
   assert.equal(propsOf(inside(12, 'data-check-count')).readOnly, true, 'the rows are frozen while it is unconfirmed')
   submitFailure = 'none'
