@@ -266,6 +266,14 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
   const [section, setSection] = useHubSection<Section>('inventory', () => 'products', ['products', 'sessions', ...(tasksAllowed ? ['tasks'] : [])], navigateTo)
   const taskBoard = section === 'tasks' && !taskId
   const taskView = section === 'tasks' && !!taskId
+  // Leaving the Tasks section by a section chip or by the hardware Back button leaves the task: while it stayed selected this screen kept the task's saved-counts key (fixed when it mounted), so counts typed on the
+  // plain list were read from and written under the task. Only a move away from Tasks while mounted counts: a task opened from Count sessions mounts with the section still arriving.
+  const lastSection = useRef(section)
+  useEffect(() => {
+    const was = lastSection.current
+    lastSection.current = section
+    if (was === 'tasks' && section !== 'tasks' && taskId) onSelect({ branchId, sessionId: '', taskId: '' })
+  }, [section])
   const [sessionRange, setSessionRange] = useState<DateTimeRange>(() => statsPresetRange('all'))
   const [sessionFilters, setSessionFilters] = useState<SessionListFilters>(initialSessionFilters)
   // `query` is what the box shows; `appliedQuery` is what the server was asked. Typing moves the first and the list follows after a pause.
