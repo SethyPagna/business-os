@@ -121,7 +121,7 @@ export function closedTaskIds(result: { results?: unknown[] } | undefined): stri
 }
 
 export type TaskRow = {
-  id: string; branch_id: number; title: string; status: 'open' | 'closed'; started_at: string; closed_at: string | null; created_by: number; issuer: string | null
+  id: string; branch_id: number; title: string; status: 'open' | 'closed'; revision: number; started_at: string; closed_at: string | null; created_by: number; issuer: string | null
   selection: unknown; total: number; done: number; removed: number; pickup_id: string | null; picked_by: number | null; picker: string | null; picked_at: string | null
 }
 
@@ -137,7 +137,7 @@ export async function readTaskRows(db: D1Compat, args: { organization: number | 
     closed_t AS (SELECT s.* FROM ${S} s INDEXED BY inventory_check_sessions_task_board WHERE s.organization_id IS @org AND ${kindOf('s')}='${TASK_MEMBERSHIP}' AND s.branch_id=@branchId AND s.status='closed'
       ORDER BY s.closed_at DESC, s.id DESC LIMIT @closedShown),
     page AS (SELECT * FROM open_t UNION ALL SELECT * FROM closed_t)
-    SELECT page.id AS id, page.branch_id AS branch_id, page.title AS title, page.status AS status, page.started_at AS started_at, page.closed_at AS closed_at, page.created_by AS created_by,
+    SELECT page.id AS id, page.branch_id AS branch_id, page.title AS title, page.status AS status, page.revision AS revision, page.started_at AS started_at, page.closed_at AS closed_at, page.created_by AS created_by,
       iu.username AS issuer, json_extract(page.scope_json,'$.selection') AS selection,
       (SELECT COUNT(*) FROM ${I} t WHERE t.session_id=page.id AND ${taskItemCountableSql('t')}) AS total,
       (SELECT COUNT(*) FROM ${I} t WHERE t.session_id=page.id AND ${taskItemDoneSql('t', 'page.branch_id', 'page.started_at', '@org')} AND ${taskItemCountableSql('t')}) AS done,
@@ -148,7 +148,7 @@ export async function readTaskRows(db: D1Compat, args: { organization: number | 
       LEFT JOIN users pu ON pu.id=pk.created_by
     ORDER BY (page.status='open') DESC, CASE WHEN page.status='open' THEN page.started_at ELSE page.closed_at END DESC, page.id DESC`)
     .all<Omit<TaskRow, 'selection'> & { selection: string | null }>({ org: args.organization, branchId: args.branchId, shown: args.shown, closedShown: args.closedShown })
-  return rows.map((row) => ({ ...row, total: Number(row.total), done: Number(row.done), removed: Number(row.removed), selection: parseSelection(row.selection) }))
+  return rows.map((row) => ({ ...row, revision: Number(row.revision), total: Number(row.total), done: Number(row.done), removed: Number(row.removed), selection: parseSelection(row.selection) }))
 }
 
 function parseSelection(value: string | null | undefined): unknown {

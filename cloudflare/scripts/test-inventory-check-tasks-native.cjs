@@ -697,6 +697,32 @@ async function issueFilterBound(w0) {
   }
 }
 
+/**
+ * Item 7: the board sends each task's own revision, so a screen can close a task by hand (the close writer needs it as expectedRevision). It costs nothing: the board stays ONE D1 call cold and 0 warm. The cache holds the raw
+ * rows and the projection is per viewer: the revision reaches every board viewer, the issuer's name only those who may see it.
+ */
+async function boardRevision(w) {
+  const task = (await w.issue([100, 101])).json.item.id
+  let calls = 0
+  for (const name of ['prepare', 'batch', 'batchOnce']) { const original = w.app.env.DB[name]; w.app.env.DB[name] = (...args) => { calls++; return original.apply(w.app.env.DB, args) } }
+  w.app.clearCaches(); calls = 0; await w.board('admin'); const cold = calls
+  calls = 0; await w.board('admin'); const warm = calls
+  console.log(`     board: ${cold} D1 calls cold, ${warm} warm (revision ${(await taskOf(w, task)).revision})`)
+  assert.equal(cold, 1, 'the board is one D1 call cold'); assert.equal(warm, 0, 'and none warm')
+  const view = await taskOf(w, task), stored = w.row('SELECT revision FROM inventory_check_sessions WHERE id=?', task).revision
+  assert.equal(typeof view.revision, 'number'); assert.equal(view.revision, stored, "the board's revision is the session row's own")
+  const worker = await taskOf(w, task, 'checker')
+  assert.equal(worker.revision, stored, 'every board viewer is sent it'); assert.equal('issued_by' in worker, false, 'while the projection still happens per viewer (the issuer is not shown to this viewer)')
+  assert.equal('issued_by' in view, true)
+  w.as('admin')
+  const stale = await w.api('PATCH', `/sessions/${task}`, { expectedRevision: view.revision + 1, requestId: w.rid('stale'), action: 'close' })
+  assert.equal(stale.status, 409, JSON.stringify(stale.json)); assert.equal(stale.json.code, 'inventory_check_conflict', 'a stale revision is refused with the existing code')
+  assert.equal((await taskOf(w, task)).status, 'open', 'and nothing was closed')
+  const closed = await w.api('PATCH', `/sessions/${task}`, { expectedRevision: view.revision, requestId: w.rid('ok'), action: 'close' })
+  assert.equal(closed.status, 200, JSON.stringify(closed.json)); assert.equal((await taskOf(w, task)).status, 'closed')
+  assert.equal((await taskOf(w, task)).revision, view.revision + 1, 'the closed row shows the new revision')
+}
+
 /** F5: the wired list's page size and the products reader's clamp are one constant, so the filter loop's stop rule cannot drift from the reader. */
 async function pageSizeOneSource(w) {
   const read = (file) => require('node:fs').readFileSync(path.join(__dirname, '../src', file), 'utf8')
@@ -973,7 +999,7 @@ const SCENARIOS = {
   autoCloseOlderWriter: (w) => autoClose(w, { lotWriter: false }),
   outsideCloseLot: (w) => outsideClose(w, 'lot'), outsideClosePlain: (w) => outsideClose(w, 'plain'), outsideCloseObserve: (w) => outsideClose(w, 'observe'),
   outsideNegativesLot: (w) => outsideNegatives(w, 'lot'), outsideNegativesPlain: (w) => outsideNegatives(w, 'plain'), outsideNegativesObserve: (w) => outsideNegatives(w, 'observe'),
-  observationNotFinal, doneRuleOrg, removedProducts, issueFilterFamilies, issueCapabilities, taskCap, taskRowsUntouched, headerRule, deactivatedWithStock, issuedByVisibility, issueFilterBound, pageSizeOneSource, cacheKeyProducts, schemaMissing, taskCapReplay, readBackHash,
+  observationNotFinal, doneRuleOrg, removedProducts, issueFilterFamilies, issueCapabilities, taskCap, taskRowsUntouched, headerRule, deactivatedWithStock, issuedByVisibility, issueFilterBound, pageSizeOneSource, boardRevision, cacheKeyProducts, schemaMissing, taskCapReplay, readBackHash,
   random: (w) => randomWorld(w, 20261118, 50),
   randomTwo: (w) => randomWorld(w, 20261119, 90),
   budget,
@@ -1028,6 +1054,7 @@ async function main() {
     ['the old rule: a task counts an inactive product that holds stock', edit('lib/inventoryCheckTasks.ts', "export const TASK_COUNTABLE_SQL = `(${catalogProductSql('p', false)} AND", 'export const TASK_COUNTABLE_SQL = `(${stockVisibleProductSql()} AND'), ['deactivatedWithStock']],
     ['the task list totals every product of the task, not the countable ones', edit('lib/inventoryCheckTasks.ts', 'productIds: rows.filter((row) => Number(row.countable) === 1).map(', 'productIds: rows.map('), ['headerRule', 'deactivatedWithStock']],
     ['issued_by goes to every board viewer', edit('routes/inventoryChecks.ts', '...(canSeeStaffIdentity(user, row.created_by) ? { issued_by: row.issuer } : {})', 'issued_by: row.issuer'), ['issuedByVisibility']],
+    ['the board does not send the task revision', edit('routes/inventoryChecks.ts', 'status: row.status, revision: row.revision, issued_at: row.started_at,', 'status: row.status, issued_at: row.started_at,'), ['boardRevision']],
     ['the filter reads the list family by family again (childless headers fill the pages)', edit('routes/inventoryChecks.ts', "  if (leafOnly) restriction = { excludeIdsJson: '[]' }\n", ''), ['issueFilterBound']],
     ['the filter reads family by family and the loop has no page bound', { 'routes/inventoryChecks.ts': [["  if (leafOnly) restriction = { excludeIdsJson: '[]' }\n", ''], ["    if (page >= maxPages) throw new InventoryCheckSessionError(400, 'inventory_check_task_too_many', { total: ids.size, limit, atLeast: true })\n", '']] }, ['issueFilterBound']],
     ['the page bound is one page short (no plus one)', edit('routes/inventoryChecks.ts', 'maxPages = Math.ceil(limit / LIST_MAX_PAGE_SIZE) + 1', 'maxPages = Math.ceil(limit / LIST_MAX_PAGE_SIZE)'), ['issueFilterBound']],

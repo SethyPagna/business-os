@@ -53,13 +53,14 @@ The tasks of one branch: every OPEN task (newest issued first; a branch can neve
 
 ```
 { "branchId": 1, "version": "k2:12",
-  "items": [{ "id": "<uuid>", "branch_id": 1, "title": "Shelf A", "status": "open" | "closed", "issued_at": ISO, "issued_by"?: "username", "closed_at": ISO | null,
+  "items": [{ "id": "<uuid>", "branch_id": 1, "title": "Shelf A", "status": "open" | "closed", "revision": 0, "issued_at": ISO, "issued_by"?: "username", "closed_at": ISO | null,
               "total": 150, "done": 34, "removed": 0, "selection": { "kind": "ids" } | { "kind": "filters", "filters": { "brand": "A" } } | null,
               "picked_up_by": "username" | null, "picked_up_at": ISO | null, "mine": false, "pickup_session_id"?: "<uuid>" (only when mine),
               "can_pickup": true, "can_release": false, "can_close": false }],
   "capabilities": { "issue": true, "work": true, "maxProducts": 300, "maxOpenTasks": 30 } }
 ```
 * `total` and `done` follow the done rule over the products that can still be counted, live as of the versions; `removed` is how many of the task's products can no longer be counted (T2 shows it). "All counted" is `done >= total` on an open task. Names are usernames; no account id is sent. `issued_by` follows `canSeeStaffIdentity`, in the Count sessions list's form: the key is LEFT OUT unless the viewer is an administrator, holds `audit_log`, or is the issuer. `picked_up_by` (and the 409's `pickedUpBy`) is the one exception: it is shown to every board viewer, because the owner said "Others see 'Picked up by ...'". `selection.filters` carries only the filters the viewer may use (brand, category and stock follow the viewer's field grants, as in a session's detail).
+* `revision` is the task session's own revision, the `expectedRevision` that `PATCH /sessions/:id` with `action: "close"` needs to close the task by hand (a stale value is refused `409 inventory_check_conflict`). It is read from the row the board already reads (no extra call or row) and is the same for every viewer.
 * `can_pickup`: open, nobody has it, and the viewer may work tasks. `can_release`: open, someone has it, and the viewer is that person or may issue. `can_close`: open and the viewer may issue.
 * `400 inventory_check_invalid_query` (`parameter: "branchId"`) without a branch; `403 inventory_check_tasks_required` for a viewer who may neither work nor issue tasks.
 * **Cache.** One entry per organization and branch, keyed `ict:<inventory_checks version>:<products version>` (the entry's URL is `https://ic.invalid/__bos/ic-tasks?branchId=<n>&order=2`; the shared key builder adds the deployment, organization and data epoch), kept up to

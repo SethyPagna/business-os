@@ -270,7 +270,7 @@ const taskView = (row: TaskRow, user: SessionUser) => {
   const selection = row.selection && typeof row.selection === 'object' && (row.selection as { filters?: Record<string, unknown> }).filters
     ? { ...row.selection as object, filters: Object.fromEntries(Object.entries((row.selection as { filters: Record<string, unknown> }).filters).filter(([key]) => !(key === 'brand' && !access.fields.brand) && !(key === 'category' && !access.fields.category) && !(key === 'stockState' && !access.fields.stock))) }
     : row.selection
-  return { id: row.id, branch_id: row.branch_id, title: row.title, status: row.status, issued_at: row.started_at, ...(canSeeStaffIdentity(user, row.created_by) ? { issued_by: row.issuer } : {}), closed_at: row.closed_at, total: row.total, done: row.done, removed: row.removed, selection,
+  return { id: row.id, branch_id: row.branch_id, title: row.title, status: row.status, revision: row.revision, issued_at: row.started_at, ...(canSeeStaffIdentity(user, row.created_by) ? { issued_by: row.issuer } : {}), closed_at: row.closed_at, total: row.total, done: row.done, removed: row.removed, selection,
     picked_up_by: row.pickup_id ? row.picker : null, picked_up_at: row.pickup_id ? row.picked_at : null, mine, ...(mine ? { pickup_session_id: row.pickup_id } : {}),
     can_pickup: open && row.pickup_id === null && canWorkInventoryCountTasks(user), can_release: open && row.pickup_id !== null && (mine || canIssueInventoryCountTasks(user)), can_close: open && canIssueInventoryCountTasks(user) }
 }
