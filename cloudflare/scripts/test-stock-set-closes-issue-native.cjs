@@ -198,14 +198,35 @@ async function main() {
     assert.deepEqual(JSON.parse(f.raw.prepare('SELECT response_json FROM stock_lot_adjustment_operations WHERE id=?').get(done.body.operation_id).response_json).closed_tasks, ['task-a'], 'the stored answer carries it')
     const again = await set(f)
     assert.equal(again.body.replayed, true); assert.deepEqual(again.body.closed_tasks, ['task-a'], 'a replay answers the same'); assert.equal(closeEventsOf(f, 'task-a').length, 1, 'and closes nothing again')
-    // Undo reopens the difference as a NEW count (a copy of the old one, made now): a task issued since is completed by it
+    // An Undo reopens the difference as a copy of the OLD count, made now: it restores a record made earlier and is NOT a count (owner ruling, 19 Nov), so a task issued since is neither ticked nor closed by it
     await new Promise(resolve => setTimeout(resolve, 5))
     taskRow(f, { id: 'task-e', at: new Date().toISOString() })
     await new Promise(resolve => setTimeout(resolve, 5))
     const row = historyOf(f)
     await world.lot.replayStockLotSet(f.env, world.actor, 'undo', row.id, 0, JSON.parse(row.undo_payload)) // through THIS world's modules, so a planted mutant is the code that runs
-    assert.equal(taskStatus(f, 'task-e').status, 'closed', 'the count an Undo records closes the task it completes'); assert.equal(closeEventsOf(f, 'task-e').length, 1)
+    assert.equal(taskStatus(f, 'task-e').status, 'open', 'an Undo is not a count: the task it would have completed stays open'); assert.equal(closeEventsOf(f, 'task-e').length, 0)
+    // and the done rule itself skips the Undo's session: the auto-close, evaluated against it as if it were the write, closes nothing either
+    const evaluate = async (src) => {
+      const tasks = world.load('lib/inventoryCheckTasks.ts'), { D1Compat } = world.load('lib/db.ts')
+      const params = tasks.autoCloseParams({ src, task: null, organization: null, branchId: 1, actorId: 8, actorName: 'evaluator', key: 'evaluate-' + src, hash: 'evaluate', now: new Date().toISOString() })
+      await new D1Compat(f.env.DB).batch(tasks.autoCloseTaskStatements().statements.map(({ sql }) => ({ sql, params })))
+    }
+    const undoSession = f.raw.prepare("SELECT id FROM inventory_check_sessions WHERE json_extract(scope_json,'$.membership')='stock_set_undo'").get()
+    assert.ok(undoSession, 'the Undo recorded its copy of the difference')
+    await evaluate(undoSession.id)
+    assert.equal(taskStatus(f, 'task-e').status, 'open', "the Undo's copy is not a count the done rule takes")
     assert.equal(taskStatus(f, 'task-d').status, 'open')
+    // a Redo closes the difference again from the record the Set made: not a count either
+    await new Promise(resolve => setTimeout(resolve, 5))
+    taskRow(f, { id: 'task-f', at: new Date().toISOString() })
+    await new Promise(resolve => setTimeout(resolve, 5))
+    const rowAgain = historyOf(f)
+    await world.lot.replayStockLotSet(f.env, world.actor, 'redo', rowAgain.id, 1, JSON.parse(rowAgain.undo_payload)) // through THIS world's modules, so a planted mutant is the code that runs
+    assert.equal(taskStatus(f, 'task-f').status, 'open', 'a Redo is not a count: the task it would have completed stays open'); assert.equal(closeEventsOf(f, 'task-f').length, 0)
+    const redoSession = f.raw.prepare("SELECT id FROM inventory_check_sessions WHERE json_extract(scope_json,'$.restore')=1").get()
+    assert.ok(redoSession, 'the Redo recorded its closing session, flagged as a restore')
+    await evaluate(redoSession.id)
+    assert.equal(taskStatus(f, 'task-f').status, 'open', "the Redo's session is not a count the done rule takes")
     // a Set to the figure stock already has (nothing moves) that still closes the difference closes the task too, and says so in its one read
     const g = taskWorld(world)
     world.seed(g, 'UPDATE branch_batch_stock SET quantity=5 WHERE batch_id=11 AND branch_id=1; UPDATE branch_stock SET quantity=8 WHERE product_id=1 AND branch_id=1; UPDATE products SET stock_quantity=8 WHERE id=1')
@@ -217,10 +238,12 @@ async function main() {
     const plain = await set(h)
     assert.equal(plain.body.issue_closed, false); assert.equal('closed_tasks' in plain.body, false); assert.equal(taskStatus(h, 'task-a').status, 'open', 'no count was recorded')
   }
-  await check('a Set that closes a difference records a count that closes the count tasks it completes (and an Undo, and a Set that moves nothing, do too)', () => setClosesTasks(w))
+  await check('a Set that closes a difference records a count that closes the count tasks it completes (a Set that moves nothing does too; an Undo and a Redo are not counts and close none)', () => setClosesTasks(w))
   for (const [name, edits] of [
-    ['the Set that closes a difference does not run the auto-close', { 'lib/stockSetClosesIssue.ts': [['    ...tasks.statements,\n', '']] }],
-    ['the Undo that reopens a difference does not run the auto-close', { 'lib/stockSetClosesIssue.ts': [['    ...taskStatements(params).statements,\n  ]', '  ]']] }],
+    ['the Set that closes a difference does not run the auto-close', { 'lib/stockSetClosesIssue.ts': [['    ...(restore ? [] : tasks.statements),\n', '']] }],
+    ['an Undo ticks a task (the done rule counts the Undo session)', { 'lib/inventoryCheckTasks.ts': [["AND ${kindOf('xs')} IS NOT 'stock_set_undo' AND json_extract", 'AND json_extract']] }],
+    ['a Redo ticks a task (the done rule ignores the restore flag)', { 'lib/inventoryCheckTasks.ts': [["AND json_extract(xs.scope_json,'$.restore') IS NOT 1)`", ')`']] }],
+    ['a Redo is run as a count (the restore option is dropped)', { 'lib/stockLotAdjustment.ts': [['closeIssueStatements(closing, undefined, { restore: true })', 'closeIssueStatements(closing)']] }],
   ]) {
     await check(`mutant killed: ${name}`, async () => {
       let caught = false

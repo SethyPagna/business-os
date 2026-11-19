@@ -26,6 +26,17 @@ function load(rel) {
 }
 const { D1Compat } = load('lib/db.ts')
 const tasks = load('lib/inventoryCheckTasks.ts')
+// THE MUTANT: the candidate read as it was before migration 0319 (every never-counted item of a product the write made final, in ANY session, then the session of each by key). The history-growth assertion must kill it.
+const mutantTasks = (() => {
+  const file = path.join(root, 'src', 'lib/inventoryCheckTasks.ts')
+  const text = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n')
+  const from = "FROM ${S} t INDEXED BY inventory_check_sessions_open_task WHERE ${candidate}"
+  if (text.split(from).length !== 2) throw new Error('mutant anchor')
+  const old = "FROM (SELECT x.session_id AS id FROM ${I} w CROSS JOIN ${I} x INDEXED BY inventory_check_items_product_latest ON x.product_id=w.product_id AND x.branch_id=@branchId AND x.updated_at IS NULL WHERE w.session_id=@src AND w.state IN ('done','issue') UNION SELECT @task WHERE @task IS NOT NULL) c CROSS JOIN ${S} t ON t.id=c.id WHERE ${candidate}"
+  const module = { exports: {} }
+  new Function('require', 'module', 'exports', ts.transpileModule(text.replace(from, old), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)((request) => request.startsWith('.') ? load(path.posix.normalize(path.posix.join('lib', request)) + '.ts') : require(request), module, module.exports)
+  return module.exports
+})()
 
 async function main() {
   const mf = new Miniflare({ modules: true, script: 'export default { fetch() { return new Response("ok") } }', compatibilityDate: '2026-08-01', d1Databases: ['DB'], log: new Log(LogLevel.ERROR) })
@@ -50,7 +61,7 @@ async function main() {
     for (const org of [1, null]) {
       const list = await plan(listSql, { org, branchId: 1, shown: 30, closedShown: 5 })
       assert.match(list, /SEARCH s USING INDEX inventory_check_sessions_kind_task \(organization_id=\? AND <expr>=\?\)/, `task list on D1 (org ${org}): ${list}`)
-      assert.ok((list.match(/USING INDEX inventory_check_sessions_kind_task/g) || []).length >= 3, `open, closed and the pickup join each seek the index: ${list}`)
+      assert.ok((list.match(/USING INDEX inventory_check_sessions_kind_task/g) || []).length >= 2, `the closed list and the pickup join each seek the 0318 index (the open list seeks 0319): ${list}`)
       const picker = await plan(pickupSql, { org, task: 'x' })
       assert.match(picker, /SEARCH pk USING INDEX inventory_check_sessions_kind_task \(organization_id=\? AND <expr>=\? AND <expr>=\?\)/, `one-picker check on D1 (org ${org}): ${picker}`)
     }
@@ -61,56 +72,114 @@ async function main() {
     const autoParams = tasks.autoCloseParams(args)
     const planOf = async (sql) => plan(`${sql}`, autoParams)
     const [closeEvents, pickupEvents, closeTasks, closePickups] = await Promise.all(auto.statements.map((statement) => planOf(statement.sql)))
-    // The candidates: for each product this write made final, the never-counted items of it at the branch (index 0285: product, branch, updated_at NULL: where a task's items are), then the session of each by key.
-    // No scan of the organization's task rows, however many tasks it has made.
-    assert.match(closeEvents, /SEARCH x USING INDEX inventory_check_items_product_latest \(product_id=\? AND branch_id=\? AND updated_at\S*\)/, `the candidates are a seek of the 0285 index by product, branch and NULL time: ${closeEvents}`)
-    assert.match(closeEvents, /SEARCH t USING INDEX sqlite_autoindex_inventory_check_sessions_1 \(id=\?\)/, `each candidate session is found by its key: ${closeEvents}`)
-    assert.doesNotMatch(closeEvents, /SEARCH t USING INDEX inventory_check_sessions_kind_task/, `the organization's task rows are not scanned: ${closeEvents}`)
+    // The candidates are the OPEN tasks of the organization at the branch: a seek of the partial index of migration 0319 (it holds only open sessions), then, for each, one primary-key seek of its item per product the write
+    // made final. No closed task, no old session, no never-counted item of a product is ever read, however long the history.
+    const OPEN = 'inventory_check_sessions_open_task'
+    assert.match(closeEvents, new RegExp(`SEARCH t USING INDEX ${OPEN} \\(organization_id=\\? AND <expr>=\\? AND branch_id=\\?\\)`), `the candidates are a seek of the open-task index: ${closeEvents}`)
     assert.match(closeEvents, /SEARCH w USING (COVERING )?INDEX inventory_check_items_state \(session_id=\? AND state=\?\)/, `the write's own counts are read by its session and the Done or Differs state: ${closeEvents}`)
+    assert.match(closeEvents, /SEARCH m USING (COVERING )?INDEX sqlite_autoindex_inventory_check_items_1 \(session_id=\? AND product_id=\? AND branch_id=\?\)/, `each task's item is found by its primary key: ${closeEvents}`)
     assert.match(closeEvents, /inventory_check_items_product_latest \(product_id=\? AND branch_id=\? AND updated_at>\?\)/, `the done check is one seek of the 0285 index per product: ${closeEvents}`)
+    assert.doesNotMatch(closeEvents, /inventory_check_sessions_kind_task/, `the history index is not used: ${closeEvents}`)
+    assert.doesNotMatch(closeEvents, /inventory_check_items_product_latest \(product_id=\? AND branch_id=\? AND updated_at=\?\)|updated_at IS NULL|updated_at=\?\)/, `the never-counted seek of the old design is gone: ${closeEvents}`)
+    assert.doesNotMatch(closeEvents, /SCAN t\b/, `no scan of the sessions: ${closeEvents}`)
     for (const [name, text] of [['task update', closeTasks], ['pickup events', pickupEvents], ['pickup update', closePickups]]) {
       assert.match(text, /sqlite_autoindex_inventory_check_events_1 \(actor_id=\? AND request_id>\? AND request_id<\?\)/, `${name} finds the events by this request's key range, not by a scan: ${text}`)
     }
     assert.match(pickupEvents, /inventory_check_sessions_kind_task \(organization_id=\? AND <expr>=\? AND <expr>=\?\)/, `the pickups of a closed task by the 0318 index: ${pickupEvents}`)
-    console.log('PASS the auto-close candidates come from the 0285 index (never-counted items of the counted products) and the sessions key, the done check seeks 0285, and the follow-ups use the events key range')
+    console.log('PLAN candidates:', closeEvents)
+    // the cap guard and the board's open read, on the same index
+    const capSql = `SELECT (${tasks.OPEN_TASK_COUNT_SQL}) AS n`
+    for (const org of [1, null]) {
+      const cap = await plan(capSql, { organization: org, branchId: 1 })
+      assert.match(cap, new RegExp(`SEARCH s USING INDEX ${OPEN} \\(organization_id=\\? AND <expr>=\\? AND branch_id=\\?\\)`), `the cap guard (org ${org}) counts the open tasks through the partial index: ${cap}`)
+      const list = await plan(listSql, { org, branchId: 1, shown: 30, closedShown: 5 })
+      assert.match(list, new RegExp(`CO-ROUTINE open_t \\| SEARCH s USING INDEX ${OPEN} \\(organization_id=\\? AND <expr>=\\? AND branch_id=\\?\\)`), `the board's open tasks (org ${org}) come from the partial index: ${list}`)
+      assert.match(list, /SEARCH pk USING INDEX inventory_check_sessions_kind_task \(organization_id=\? AND <expr>=\? AND <expr>=\?\)/, `the pickup of each shown task is a seek by task id (org ${org}): ${list}`)
+      if (org === 1) console.log('PLAN cap guard:', cap)
+    }
+    console.log('PASS the auto-close candidates, the cap guard and the board start from the open-task index (0319); the done check seeks 0285; the follow-ups use the events key range')
 
-    // Rows read, as the engine counts them (meta.rows_read): a branch with the cap (30) of open tasks of 300 products each, 400 closed tasks of the organization (the unbounded part), and a write that counted 40 products.
-    // Nothing done but the last product of every task (the worst case for the early stop): every task is a candidate and scans 299 done products before it finds the one that is not.
+    // ---- rows read, as the engine counts them (meta.rows_read), and how they move with HISTORY ------------------------------------------------------------------------------------------------------------
     const exec = async (sql, params = {}) => (await db.batch([{ sql, params }]))[0]
-    const user = 1, at = '2026-11-01T00:00:00.000Z', after = '2026-11-20T00:00:00.000Z'
-    // the 300 products the tasks hold (active, so countable)
+    const at = '2026-11-01T00:00:00.000Z', after = '2026-11-20T00:00:00.000Z'
     await load('lib/stockTransaction.ts').executeStockTransaction(db, [{ sql: "INSERT INTO products(id,name,is_active) WITH RECURSIVE p(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM p WHERE i<300) SELECT i,'P'||i,1 FROM p" }], 'once')
+    // the write: 40 products (the Free cap of a submission), counted now
+    await exec("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) VALUES('write-session',1,1,1,'','closed',0,'{\"membership\":\"submission\"}',@now,@now,@now)", { now: args.now })
+    await exec("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,revision,updated_by,updated_at) WITH RECURSIVE p(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM p WHERE i<40) SELECT 'write-session',i,1,'{}',1,'{}','done',1,1,1,@now FROM p", { now: args.now })
+    const measureAll = async (list = auto.statements, params = autoParams) => {
+      const each = []
+      for (const statement of list) each.push(Number((await exec(statement.sql, params)).meta.rows_read))
+      measureAll.last = each
+      return each.reduce((x, y) => x + y, 0)
+    }
+    // history: closed ordinary count sessions whose items (products 1..40) were never counted, and closed tasks; the old design read one index entry and one session row per such item
+    let seq = 0
+    const oldSessions = async (n, kind) => {
+      const from = seq + 1; seq += n
+      await exec(`INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) WITH RECURSIVE n(i) AS (SELECT @from UNION ALL SELECT i+1 FROM n WHERE i<@to) SELECT 'hist-'||i,1,1,1,'','closed',1,@scope,@at,@at,@at FROM n`, { from, to: seq, scope: JSON.stringify(kind === 'task' ? { membership: 'task' } : {}), at })
+      await exec("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json) WITH RECURSIVE n(i) AS (SELECT @from UNION ALL SELECT i+1 FROM n WHERE i<@to), p(k) AS (SELECT 1 UNION ALL SELECT k+1 FROM p WHERE k<40) SELECT 'hist-'||i,k,1,'{}',NULL,'{}' FROM n CROSS JOIN p", { from, to: seq })
+    }
+    // the engine charges a fixed overhead per distinct statement (it reads the schema to prepare it); the controls show it, and it is the same at every history size
+    const control = Number((await exec('SELECT 1')).meta.rows_read), controlKey = Number((await exec("SELECT id FROM inventory_check_sessions WHERE id='none'")).meta.rows_read)
+    console.log('       controls: SELECT 1 reads', control, 'rows; a primary-key miss reads', controlKey)
+    // what a write that changes NOTHING still costs on this engine: the INSERT and UPDATE statements on the history tables (they carry triggers) read a fixed number of rows to be prepared; the four auto-close statements are made of these
+    const noInsert = Number((await exec("INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at) SELECT 's',NULL,1,'a','close','x','h','{}','{}','{}','n' WHERE 0")).meta.rows_read)
+    const noUpdate = Number((await exec("UPDATE inventory_check_sessions SET status='closed' WHERE id='none' RETURNING id")).meta.rows_read)
+    console.log('       controls: an INSERT into the events that inserts nothing reads', noInsert, 'rows; an UPDATE of the sessions that matches nothing reads', noUpdate, '(the fixed cost of the statement itself, whatever the history)')
+    await measureAll()
+    const growth = [], growthMutant = []
+    const mutantStatements = mutantTasks.autoCloseTaskStatements().statements
+    growth.push(['K=0 old sessions, no closed task', await measureAll()]); growthMutant.push(await measureAll(mutantStatements)); console.log('       statements 1-4 at K=0:', JSON.stringify(measureAll.last))
+    await oldSessions(10, 'count'); growth.push(['K=10 old sessions', await measureAll()]); growthMutant.push(await measureAll(mutantStatements)); console.log('       statements 1-4 at K=10:', JSON.stringify(measureAll.last))
+    await oldSessions(90, 'count'); growth.push(['K=100 old sessions', await measureAll()]); growthMutant.push(await measureAll(mutantStatements))
+    await oldSessions(100, 'task'); growth.push(['K=100 + 100 closed tasks', await measureAll()]); growthMutant.push(await measureAll(mutantStatements))
+    const noTask = growth[0][1]
+    console.log('     rows read by the four statements, a write of 40 products, NO open task:'); for (const [name, rows] of growth) console.log(`       ${name}: ${rows}`)
+    assert.ok(growth.every(([, rows]) => rows === noTask), `with no open task the rows read are the same at every history size: ${JSON.stringify(growth)}`)
+    assert.ok(noTask <= 60, `with no open task a write reads a fixed handful (the engine charges per-statement overhead; no history row is read): ${noTask}`)
+    console.log('     the mutant (candidates from the 0285 never-counted seek again), the same four points:', JSON.stringify(growthMutant))
+    assert.ok(growthMutant.every((rows, i) => i === 0 || rows > growthMutant[i - 1]) && growthMutant[3] > growthMutant[0] + 1000, `the history-growth assertion kills the old candidate read (its rows grow with history): ${JSON.stringify(growthMutant)}`)
+    // the same write, ONE open task of 41 products (the 41st never counted: the task stays open), at every history size
+    await exec("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at) VALUES('one-open',1,1,1,'','open',0,'{\"membership\":\"task\"}',@at,@at)", { at })
+    await exec("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json) WITH RECURSIVE p(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM p WHERE i<41) SELECT 'one-open',i,1,'{}',NULL,'{}' FROM p")
+    const oneOpen = await measureAll()
+    await oldSessions(100, 'count'); await oldSessions(100, 'task')
+    const oneOpenAfter = await measureAll()
+    console.log(`     one open task of 41 products: ${oneOpen} rows; after 100 more old sessions and 100 more closed tasks: ${oneOpenAfter}`)
+    assert.equal(oneOpenAfter, oneOpen, 'with one open task the rows read do not move with history either')
+    await exec("UPDATE inventory_check_sessions SET status='closed',closed_at=@at WHERE id='one-open'", { at }) // history is immutable: it closes, and becomes one more closed task
+
+    // ---- the worst case: the cap (30) of open tasks of 300 products each; every task complete but its last product ---------------------------------------------------------------------------------
     await exec("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at) WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<30) SELECT 'open-'||i,1,1,1,'','open',0,'{\"membership\":\"task\"}',@at,@at FROM n", { at })
     await exec("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json) WITH RECURSIVE t(k) AS (SELECT 1 UNION ALL SELECT k+1 FROM t WHERE k<30), p(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM p WHERE i<300) SELECT 'open-'||k,i,1,'{}',NULL,'{}' FROM t CROSS JOIN p")
     await exec("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<400) SELECT 'closed-'||i,1,1,1,'','closed',1,'{\"membership\":\"task\"}',@at,@at,@at FROM n", { at })
     await exec("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json) WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<400) SELECT 'closed-'||i,1,1,'{}',NULL,'{}' FROM n")
-    // other sessions that are not tasks (a Submit makes one each): the 0318 index holds them too, under another kind
     await exec("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<400) SELECT 'sub-'||i,1,1,1,'','closed',0,'{\"membership\":\"submission\"}',@at,@at,@at FROM n", { at })
-    // the counts that tick every product but 300: one session of 299 Done items
+    // the counts that tick every product but 300: one closed session of 299 Done items
     await exec("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) VALUES('counts',1,1,1,'','closed',0,'{\"membership\":\"submission\"}',@after,@after,@after)", { after })
     await exec("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,revision,updated_by,updated_at) WITH RECURSIVE p(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM p WHERE i<299) SELECT 'counts',i,1,'{}',1,'{}','done',1,1,1,@after FROM p", { after })
-    // the write: 40 products (the Free cap of a submission), counted now
-    await exec("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) VALUES('write-session',1,1,1,'','closed',0,'{\"membership\":\"submission\"}',@now,@now,@now)", { now: args.now })
-    await exec("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,revision,updated_by,updated_at) WITH RECURSIVE p(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM p WHERE i<40) SELECT 'write-session',i,1,'{}',1,'{}','done',1,1,1,@now FROM p", { now: args.now })
     const read = async (statement, params) => Number((await exec(statement.sql, params)).meta.rows_read)
     const worstEvents = await read(auto.statements[0], autoParams)
-    const worstClosed = await exec(auto.statements[2].sql, autoParams)
     assert.equal((await exec('SELECT COUNT(*) AS n FROM inventory_check_events')).results[0].n, 0, 'the worst case closes nothing: the last product of every task is not counted')
-    const closedRead = Number(worstClosed.meta.rows_read)
-    // a write that counted nothing reads one row (the gate) and nothing more
+    const worstAll = await measureAll()
     const quiet = await read(auto.statements[0], { ...autoParams, src: 'no-such-session' })
-    console.log(`     rows read, 30 open tasks x 300 products + 400 closed tasks + 400 submissions in the organization: worst case ${worstEvents}; a write that counted nothing ${quiet}; the task update with no events ${closedRead}`)
-    const openTasks = 30, products = 300
-    // measured 29558: the cap of tasks x maxProducts x about 3.3 rows (an item, its index entry, the session of the count), plus about 2 rows for every never-counted item of a counted product in any session (here the 400 closed tasks each hold product 1): history does add reads, but only through those items
-    assert.ok(worstEvents <= openTasks * products * 4 + 500, `the worst case is bounded by cap x maxProducts x 4: ${worstEvents}`)
-    assert.ok(quiet <= 30, `a write that counted nothing reads next to nothing: ${quiet}`)
+    const closedRead = Number((await exec(auto.statements[2].sql, autoParams)).meta.rows_read)
+    console.log(`     worst case: 30 open tasks x 300 products, a write of 40 products, ${200 + 400 + 400 + 200 + 2} history sessions: statement 1 ${worstEvents} rows, the four statements ${worstAll}; a write that counted nothing ${quiet}; the task update with no events ${closedRead}`)
+    const openTasks = 30, products = 300, written = 40
+    // the cap x (the products of a task x about 3.3 rows: an item, its 0285 entry, the session of the count + one primary-key seek of the item per written product x 2)
+    assert.ok(worstEvents <= openTasks * (products * 4 + written * 3) + 100, `the worst case is bounded by cap x (maxProducts x 4 + written x 3): ${worstEvents}`)
+    assert.ok(quiet <= openTasks * 2 + 30, `a write that holds none of the tasks' products reads 2 rows per open task (its index entry, the empty counts seek) and the fixed overhead: ${quiet}`)
     assert.ok(closedRead <= 5, `with no events the task update reads only the events key range: ${closedRead}`)
-    // now one product of every task is not done in a way that stops at the FIRST: product 1 undone (move every count of it off, the write's too): the early stop reads one product per task
+    // history does not move the worst case either: 100 more old sessions and 100 more closed tasks
+    await oldSessions(100, 'count'); await oldSessions(100, 'task')
+    const worstAfter = await read(auto.statements[0], autoParams)
+    assert.equal(worstAfter, worstEvents, 'the worst case does not move with 200 more history sessions')
+    // now one product of every task is not done in a way that stops at the FIRST: product 1 undone (every count of it off, the write's too): the early stop reads one product per task
     await exec("UPDATE inventory_check_items SET state='unstarted',counted_quantity=NULL,updated_at=NULL WHERE session_id IN ('counts','write-session') AND product_id=1")
     const early = await read(auto.statements[0], autoParams)
     console.log(`     rows read with product 1 undone (the early stop): ${early}`)
     assert.ok(early < worstEvents / 5, `the first product that is not done stops the check of a task: ${early} against ${worstEvents}`)
-    console.log('PASS the auto-close reads are bounded as stated: worst case ' + worstEvents + ' rows, early stop ' + early + ', a write that counted nothing ' + quiet)
+    console.log('PASS the auto-close reads do not move with history (' + noTask + ' rows with no open task at K=0, 10, 100 and 100 closed tasks); worst case ' + worstEvents + ' rows, early stop ' + early + ', a write that counted nothing ' + quiet)
   } finally { await mf.dispose() }
 }
 main().catch((error) => { console.error(error); process.exit(1) })

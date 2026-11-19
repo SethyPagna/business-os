@@ -2,7 +2,7 @@ import type { D1Compat } from './db'
 import type { SessionUser } from './auth'
 import { resolveLowStockConfig, type LowStockConfig } from './lowStockSettings'
 import { canApproveInventoryCounts, canIssueInventoryCountTasks, canWorkInventoryCountTasks, getInventoryCheckAccess, projectInventoryCheckProduct, validateInventoryCheckQuery } from './inventoryCheckAccess'
-import { autoCloseParams, autoCloseTaskStatements, CHECKABLE_SQL, closedTaskIds, closePickupsStatements, kindOf, OPEN_PICKUP_SQL, PICKUP_MEMBERSHIP, TASK_MEMBERSHIP, taskOf } from './inventoryCheckTasks'
+import { autoCloseParams, autoCloseTaskStatements, CHECKABLE_SQL, closedTaskIds, closePickupsStatements, kindOf, OPEN_PICKUP_SQL, OPEN_TASK_COUNT_SQL, PICKUP_MEMBERSHIP, TASK_COUNTABLE_SQL, TASK_MEMBERSHIP, taskOf } from './inventoryCheckTasks'
 import { buildInventoryCheckStockQuery, readInventoryCheckStock, resetInventoryCheckStockSchemaMemo, type InventoryCheckStockRow } from './inventoryCheckStock'
 import { buildInventoryCheckProductMembershipQuery } from './inventoryCheckProducts'
 import { hasPermission, isAdminControlUser } from './permissions'
@@ -448,7 +448,13 @@ async function commit(db: D1Compat, principal: InventoryCheckPrincipal, actor: A
     if (text.includes('inventory_check_count_in_progress')) fail(409, 'inventory_check_count_in_progress')
     if (text.includes('inventory_check_stock_changed')) fail(409, 'inventory_check_stock_changed')
     if (text.includes('inventory_check_no_lot')) fail(409, 'inventory_check_no_lot')
-    if (text.includes('inventory_check_task_limit')) fail(409, 'inventory_check_task_limit')
+    if (text.includes('inventory_check_task_limit')) {
+      // A twin of this very request may have taken the last place a moment ago: that is a replay, not a refusal.
+      let twin: EventRow | undefined
+      try { twin = await receipt(db, actor, key, hash) } catch (inner) { if (inner instanceof InventoryCheckSessionError) throw inner }
+      if (twin) return { event: twin, replayed: true }
+      fail(409, 'inventory_check_task_limit')
+    }
     if (text.includes('inventory_check_task_not_found')) fail(404, 'inventory_check_task_not_found')
     if (text.includes('inventory_check_task_closed')) fail(409, 'inventory_check_task_closed')
     if (text.includes('inventory_check_task_picked_up')) fail(409, 'inventory_check_task_picked_up')
@@ -1120,7 +1126,7 @@ async function createTaskSession(db: D1Compat, principal: InventoryCheckPrincipa
   const existing = await receipt(db, actor, key, hash)
   if (existing) return { ...(await committedSessionProjection(db, principal, existing.session_id)), receipt: receiptResponse(existing, true), created: false }
   // Only a product the list shows and a person may count: active (or still holding stock) and not a family header. An explicit list must be all of them; a list a filter resolved drops the rest.
-  const products = await db.prepare(`SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group FROM products p WHERE p.id IN (SELECT value FROM json_each(@ids)) AND ${stockVisibleProductSql()} AND ${CHECKABLE_SQL} ORDER BY p.id`).all<Record<string, unknown>>({ ids: JSON.stringify(asked) })
+  const products = await db.prepare(`SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group FROM products p WHERE p.id IN (SELECT value FROM json_each(@ids)) AND ${TASK_COUNTABLE_SQL} ORDER BY p.id`).all<Record<string, unknown>>({ ids: JSON.stringify(asked) })
   if (!products.length) fail(400, 'inventory_check_product_not_eligible')
   if (!issue.dropIneligible && products.length !== asked.length) fail(400, 'inventory_check_product_not_eligible')
   if (products.length > issue.maxProducts) fail(400, 'inventory_check_task_too_many', { total: products.length, limit: issue.maxProducts })
@@ -1130,11 +1136,11 @@ async function createTaskSession(db: D1Compat, principal: InventoryCheckPrincipa
   // The board shows every open task of a branch (at most the cap), so a task is never issued past it: the count is read inside the batch, so two issues at once cannot both pass.
   const statements: Statement[] = [
     guard('EXISTS(SELECT 1 FROM branches WHERE id=@branchId AND is_active=1)', 'inventory_check_baseline_changed', params),
-    guard(`(SELECT COUNT(*) FROM inventory_check_sessions s INDEXED BY inventory_check_sessions_kind_task WHERE s.organization_id IS @organization AND ${kindOf('s')}='${TASK_MEMBERSHIP}' AND s.branch_id=@branchId AND s.status='open')<@maxOpenTasks`, 'inventory_check_task_limit', { ...params, maxOpenTasks: issue.maxOpenTasks }),
+    guard(`(${OPEN_TASK_COUNT_SQL})<@maxOpenTasks`, 'inventory_check_task_limit', { ...params, maxOpenTasks: issue.maxOpenTasks }),
     guard(`NOT EXISTS(SELECT 1 FROM json_each(@members) e LEFT JOIN products p ON p.id=json_extract(e.value,'$.product_id')
       WHERE p.id IS NULL OR p.name IS NOT json_extract(e.value,'$.product.name') OR p.image_path IS NOT json_extract(e.value,'$.product.image_path')
       OR p.unit IS NOT json_extract(e.value,'$.product.unit') OR p.parent_id IS NOT json_extract(e.value,'$.product.parent_id')
-      OR p.is_group IS NOT json_extract(e.value,'$.product.is_group') OR NOT (${stockVisibleProductSql()}) OR NOT ${CHECKABLE_SQL})`, 'inventory_check_baseline_changed', params),
+      OR p.is_group IS NOT json_extract(e.value,'$.product.is_group') OR NOT ${TASK_COUNTABLE_SQL})`, 'inventory_check_baseline_changed', params),
     { sql: `INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at)
       VALUES(@id,@organization,@branchId,@actorId,@title,'open',0,@scopeJson,@now,@now)`, params },
     { sql: `INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json)
@@ -1147,7 +1153,7 @@ async function createTaskSession(db: D1Compat, principal: InventoryCheckPrincipa
     // Read only because the issue was refused: how many tasks the branch has open, so the page can say so.
     if (error instanceof InventoryCheckSessionError && error.code === 'inventory_check_task_limit') {
       let open: { n: number } | undefined
-      try { open = await db.prepare(`SELECT COUNT(*) AS n FROM inventory_check_sessions s INDEXED BY inventory_check_sessions_kind_task WHERE s.organization_id IS @organization AND ${kindOf('s')}='${TASK_MEMBERSHIP}' AND s.branch_id=@branchId AND s.status='open'`).get<{ n: number }>({ organization: actor.organization_id, branchId }) } catch { /* the refusal stands without the count */ }
+      try { open = await db.prepare(`SELECT (${OPEN_TASK_COUNT_SQL}) AS n`).get<{ n: number }>({ organization: actor.organization_id, branchId }) } catch { /* the refusal stands without the count */ }
       fail(409, 'inventory_check_task_limit', { open: Number(open?.n ?? issue.maxOpenTasks), limit: issue.maxOpenTasks })
     }
     throw error
@@ -1157,7 +1163,7 @@ async function createTaskSession(db: D1Compat, principal: InventoryCheckPrincipa
 /** A task of the actor's organization and the open pickup it has, if any (one statement). */
 async function taskState(db: D1Compat, actor: Actor, taskId: string) {
   return db.prepare(`SELECT s.*,pk.id AS pickup_id,pk.created_by AS picked_by,pk.revision AS pickup_revision,pu.username AS picker FROM inventory_check_sessions s
-    LEFT JOIN inventory_check_sessions pk ON pk.organization_id IS s.organization_id AND ${kindOf('pk')}='${PICKUP_MEMBERSHIP}' AND ${taskOf('pk')}=s.id AND pk.status='open'
+    LEFT JOIN inventory_check_sessions pk INDEXED BY inventory_check_sessions_kind_task ON pk.organization_id IS s.organization_id AND ${kindOf('pk')}='${PICKUP_MEMBERSHIP}' AND ${taskOf('pk')}=+s.id AND pk.status='open'
     LEFT JOIN users pu ON pu.id=pk.created_by
     WHERE s.id=@id AND s.organization_id IS @organization AND ${kindOf('s')}='${TASK_MEMBERSHIP}'`).get<SessionRow & { pickup_id: string | null; picked_by: number | null; pickup_revision: number | null; picker: string | null }>({ id: taskId, organization: actor.organization_id })
 }

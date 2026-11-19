@@ -24,10 +24,17 @@ const NAME = 'inventory_check_sessions_kind_task'
 
 // The Worker's statements, captured.
 function loadTasks() {
-  const file = path.join(__dirname, '../src/lib/inventoryCheckTasks.ts')
-  const module = { exports: {} }
-  new Function('require', 'module', 'exports', ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(require, module, module.exports)
-  return module.exports
+  // The module imports siblings (./productStockGuard): resolve each relative import to its .ts file, as test-d1-task-index-plan-native.cjs does.
+  const cache = new Map()
+  const load = (file) => {
+    if (cache.has(file)) return cache.get(file).exports
+    const module = { exports: {} }
+    cache.set(file, module)
+    new Function('require', 'module', 'exports', ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(
+      (request) => request.startsWith('.') ? load(path.resolve(path.dirname(file), request.endsWith('.ts') ? request : request + '.ts')) : require(request), module, module.exports)
+    return module.exports
+  }
+  return load(path.join(__dirname, '../src/lib/inventoryCheckTasks.ts'))
 }
 const tasks = loadTasks()
 async function captured(run) {
@@ -69,16 +76,17 @@ const check = async (name, run) => { await run(); passed++; console.log(`PASS ${
 
   await check('without the index the task list and the picker check scan the sessions table (the control)', () => {
     const db = chain()
-    assert.match(plan(db, listSql, { org: 1, branchId: 1, shown: 30, closedShown: 5 }), /SCAN s|SCAN inventory_check_sessions|USING INDEX inventory_check_sessions_recent|SCAN page/)
-    assert.doesNotMatch(plan(db, pickupSql, { org: 1, task: 'x' }), new RegExp(NAME))
+    // (the open tasks are read through the partial index of 0319, which does not exist here: the control drops the hint)
+    assert.match(plan(db, listSql.replace(/INDEXED BY \w+/g, ''), { org: 1, branchId: 1, shown: 30, closedShown: 5 }), /SCAN s|SCAN inventory_check_sessions|USING INDEX inventory_check_sessions_recent|SCAN page/)
+    assert.doesNotMatch(plan(db, pickupSql.replace(/INDEXED BY \w+/g, ''), { org: 1, task: 'x' }), new RegExp(NAME))
   })
 
   await check('with the index both reads SEEK it by organization and kind (and task for the picker check), for an organization and for NULL', () => {
-    const db = chain(); db.exec(sql)
+    const db = chain(); db.exec(sql); db.exec(fs.readFileSync(path.join(directory, '0319_inventory_check_open_task_index.sql'), 'utf8'))
     for (const org of [1, null]) {
       const list = plan(db, listSql, { org, branchId: 1, shown: 30, closedShown: 5 })
       assert.match(list, new RegExp(`SEARCH s USING INDEX ${NAME} \\(organization_id=\\? AND <expr>=\\?\\)`), `task list: ${list}`)
-      assert.equal((list.match(new RegExp(`USING INDEX ${NAME}`, 'g')) || []).length >= 3, true, `open, closed and the pickup join each seek it: ${list}`)
+      assert.equal((list.match(new RegExp(`USING INDEX ${NAME}`, 'g')) || []).length >= 2, true, `the closed list and the pickup join each seek it (the open list seeks the partial index of 0319): ${list}`)
       const picker = plan(db, pickupSql, { org, task: 'x' })
       assert.match(picker, new RegExp(`SEARCH pk USING INDEX ${NAME} \\(organization_id=\\? AND <expr>=\\? AND <expr>=\\?\\)`), `picker check: ${picker}`)
       assert.match(plan(db, submissionsOfTask, { org, task: 'x' }), new RegExp(`USING INDEX ${NAME}`), 'the submissions that counted one task are found by the same index')

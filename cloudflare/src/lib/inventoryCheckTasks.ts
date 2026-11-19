@@ -10,6 +10,7 @@ import { stockVisibleProductSql } from './productStockGuard'
 // THE DONE RULE (owner, 18 Nov): a product of a task is done once any count of it at the task's branch (Done or Differs) exists at or after the moment the task was issued, wherever it was made.
 // The count is an item with state done|issue and an updated_at (the time of the count) at or after the task's started_at. A task's own items are `unstarted` with no updated_at, so a task is never a count itself.
 // A count ticks a task only when it is FINAL (owner, 19 Nov: counts reach the server on Submit): its session is closed. A count in an open session can still be set back, so it ticks nothing until that session closes.
+// An Undo or a Redo of a Set is NOT a count (owner ruling, 19 Nov): it restores a record made earlier, so its session (kind stock_set_undo, or scope restore) never ticks or closes a task.
 // Only products that can still be counted take part (taskItemCountableSql): one deactivated, merged away or made a header leaves the task's total and no longer blocks its close.
 
 export const TASK_MEMBERSHIP = 'task'
@@ -25,8 +26,14 @@ export const taskOf = (alias: string): string => `json_extract(${alias}.scope_js
 /** A product row (alias p) a person may count: not a family header that still has children. The one text every count writer and the task reads use. */
 export const CHECKABLE_SQL = `(NOT(COALESCE(p.is_group,0)=1 AND EXISTS(SELECT 1 FROM products child WHERE child.id<>p.id
   AND (child.parent_id=p.id OR child.name_key=p.name_key) AND ${stockVisibleProductSql('child')})))`
+/**
+ * THE rule of what a task may hold and count (alias p): stock-visible, and never a family header, with or without children. It is the wired list's rule (inventoryWired.ts, inventoryCheckList.ts, familyPagination.ts),
+ * so a task can never hold a product the list `?taskId=` does not show. The older list (inventoryCheckProducts.ts) still shows a childless header as countable: it is left as it is.
+ * ONE text for the issue by ids, the issue by filter (which follows the list) and every read of the task's total, done and removed.
+ */
+export const TASK_COUNTABLE_SQL = `(${stockVisibleProductSql()} AND ${CHECKABLE_SQL} AND COALESCE(p.is_group,0)=0)`
 /** Can the product of this task item still be counted? */
-export const taskItemCountableSql = (item: string): string => `EXISTS(SELECT 1 FROM products p WHERE p.id=${item}.product_id AND ${stockVisibleProductSql()} AND ${CHECKABLE_SQL})`
+export const taskItemCountableSql = (item: string): string => `EXISTS(SELECT 1 FROM products p WHERE p.id=${item}.product_id AND ${TASK_COUNTABLE_SQL})`
 
 /**
  * Is this product of the task counted? `item` is the task's item row alias; `branch`, `since` and `org` are SQL expressions or parameters. One seek of the 0285 index per product:
@@ -34,10 +41,14 @@ export const taskItemCountableSql = (item: string): string => `EXISTS(SELECT 1 F
  */
 export const taskItemDoneSql = (item: string, branch: string, since: string, org: string): string => `EXISTS(SELECT 1 FROM ${I} x INDEXED BY inventory_check_items_product_latest
     CROSS JOIN ${S} xs ON xs.id=x.session_id
-    WHERE x.product_id=${item}.product_id AND x.branch_id=${branch} AND x.updated_at>=${since} AND x.state IN ('done','issue') AND xs.status='closed' AND xs.organization_id IS ${org} AND xs.branch_id=x.branch_id)`
+    WHERE x.product_id=${item}.product_id AND x.branch_id=${branch} AND x.updated_at>=${since} AND x.state IN ('done','issue') AND xs.status='closed' AND xs.organization_id IS ${org} AND xs.branch_id=x.branch_id
+      AND ${kindOf('xs')} IS NOT 'stock_set_undo' AND json_extract(xs.scope_json,'$.restore') IS NOT 1)`
+
+/** How many tasks are open at one branch of an organization (the cap guard of the issue and its refusal's count): the partial index of migration 0319 holds only open sessions, so no closed task is read. Parameters: @organization @branchId. */
+export const OPEN_TASK_COUNT_SQL = `SELECT COUNT(*) FROM ${S} s INDEXED BY inventory_check_sessions_open_task WHERE s.organization_id IS @organization AND ${kindOf('s')}='${TASK_MEMBERSHIP}' AND s.branch_id=@branchId AND s.status='open'`
 
 /** Does this task have an open pickup? (the one-picker rule). Uses migration 0318: organization, kind, task. */
-export const OPEN_PICKUP_SQL = (task: string, org: string): string => `EXISTS(SELECT 1 FROM ${S} pk WHERE pk.organization_id IS ${org} AND ${kindOf('pk')}='${PICKUP_MEMBERSHIP}' AND ${taskOf('pk')}=${task} AND pk.status='open')`
+export const OPEN_PICKUP_SQL = (task: string, org: string): string => `EXISTS(SELECT 1 FROM ${S} pk INDEXED BY inventory_check_sessions_kind_task WHERE pk.organization_id IS ${org} AND ${kindOf('pk')}='${PICKUP_MEMBERSHIP}' AND ${taskOf('pk')}=${task} AND pk.status='open')`
 
 /**
  * The statements that close the open pickups of a task and record it: the events first (they select the rows that are still open), then the update. Used by the close by hand.
@@ -48,8 +59,8 @@ export function closePickupsStatements(): Array<{ sql: string }> {
   return [
     { sql: `INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at)
       SELECT pk.id,NULL,@actorId,@actorName,'close',@key||'-pickup-'||pk.id,@hash,json_object('status','open','revision',pk.revision),
-        json_object('status','closed','revision',pk.revision+1,'task',@task),json_object('sessionRevision',pk.revision+1),@now FROM ${S} pk WHERE ${open}` },
-    { sql: `UPDATE inventory_check_sessions SET status='closed',revision=revision+1,updated_at=@now,closed_at=@now WHERE id IN (SELECT pk.id FROM ${S} pk WHERE ${open})` },
+        json_object('status','closed','revision',pk.revision+1,'task',@task),json_object('sessionRevision',pk.revision+1),@now FROM ${S} pk INDEXED BY inventory_check_sessions_kind_task WHERE ${open}` },
+    { sql: `UPDATE inventory_check_sessions SET status='closed',revision=revision+1,updated_at=@now,closed_at=@now WHERE id IN (SELECT pk.id FROM ${S} pk INDEXED BY inventory_check_sessions_kind_task WHERE ${open})` },
   ]
 }
 
@@ -70,30 +81,31 @@ export function autoCloseParams(a: AutoCloseArgs): Record<string, unknown> {
  *   2. The events of the pickups those tasks have open (found by the events of 1, then by the 0318 index: organization, kind, task).
  *   3. The tasks close (found by the events of 1: a seek of the events' unique key, by this request's prefix), answering their ids.
  *   4. The pickups close (found by the events of 2).
- * The candidates come from this write's own counts: for each counted product, its never-counted items at the branch (index 0285: product, branch, updated_at NULL, which is where a task's items are), then the session of
- * each by key. At most one seek per counted product, however many tasks the organization has made. Each candidate then reads one seek of the 0285 index per product until the first product that is not done.
+ * The candidates are the OPEN tasks of the organization at the branch (migration 0319), each tested by one primary-key seek of its item per product the write made final; a candidate then reads one seek of the 0285
+ * index per product until the first product that is not done. Nothing reads a closed task or an old session, so the cost does not grow with history: at most the open tasks (the cap) x their products.
+ * The close event records which session closed the task (after_json.closedBy = the write's session), so a later ruling on a count that is taken back can find the tasks that rested on it.
  * Statements 2 to 4 find nothing in the events when no task closes. Parameters: autoCloseParams.
  */
 export function autoCloseTaskStatements(): { statements: Array<{ sql: string }>; closedAt: number } {
-  const counted = `SELECT x.session_id AS id FROM ${I} w CROSS JOIN ${I} x INDEXED BY inventory_check_items_product_latest ON x.product_id=w.product_id AND x.branch_id=@branchId AND x.updated_at IS NULL
-        WHERE w.session_id=@src AND w.state IN ('done','issue')
-      UNION SELECT @task WHERE @task IS NOT NULL`
+  // The candidates start from the OPEN tasks of this organization at the branch (the partial index of migration 0319, which holds only open sessions): never from the history of counts or closed tasks, so
+  // the rows read do not grow with it. A task is a candidate when it is the one a submission named, or it holds one of the products this write made final (a seek of its item by primary key).
   const candidate = `t.organization_id IS @org AND ${kindOf('t')}='${TASK_MEMBERSHIP}' AND t.branch_id=@branchId AND t.status='open'
+        AND (t.id=@task OR EXISTS(SELECT 1 FROM ${I} w CROSS JOIN ${I} m ON m.session_id=t.id AND m.product_id=w.product_id AND m.branch_id=@branchId WHERE w.session_id=@src AND w.state IN ('done','issue')))
         AND NOT EXISTS(SELECT 1 FROM ${I} n WHERE n.session_id=t.id AND NOT ${taskItemDoneSql('n', '@branchId', 't.started_at', '@org')} AND ${taskItemCountableSql('n')})`
-  const ofClosed = `e.actor_id=@actorId AND e.request_id>=@tcFrom AND e.request_id<@tcTo AND e.action='close' AND e.created_at=@now`
+  const ofClosed = `e.actor_id=@actorId AND e.request_id>=@tcFrom AND e.request_id<@tcTo AND e.request_hash=@hash AND e.action='close' AND e.created_at=@now`
   // The two updates find their rows by the events of this request only, and check the row's kind, organization and branch THERE (a join by key), so the planner never starts from the 0318 index and walks every task.
   const closedTasks = `SELECT e.session_id FROM inventory_check_events e CROSS JOIN ${S} k ON k.id=e.session_id WHERE ${ofClosed} AND k.organization_id IS @org AND k.branch_id=@branchId AND ${kindOf('k')}='${TASK_MEMBERSHIP}'`
-  const ofPickups = `SELECT e.session_id FROM inventory_check_events e CROSS JOIN ${S} k ON k.id=e.session_id WHERE e.actor_id=@actorId AND e.request_id>=@pkFrom AND e.request_id<@pkTo AND e.action='close' AND e.created_at=@now AND k.organization_id IS @org AND ${kindOf('k')}='${PICKUP_MEMBERSHIP}'`
+  const ofPickups = `SELECT e.session_id FROM inventory_check_events e CROSS JOIN ${S} k ON k.id=e.session_id WHERE e.actor_id=@actorId AND e.request_id>=@pkFrom AND e.request_id<@pkTo AND e.request_hash=@hash AND e.action='close' AND e.created_at=@now AND k.organization_id IS @org AND ${kindOf('k')}='${PICKUP_MEMBERSHIP}'`
   // In the pickup events, +e.session_id drops the column's TEXT affinity, which would otherwise keep the expression index of 0318 from serving the join (plan pinned in test-d1-task-index-plan-native.cjs).
   const statements = [
     { sql: `INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at)
       SELECT t.id,NULL,@actorId,@actorName,'close',@key||'-task-closed-'||t.id,@hash,json_object('status','open','revision',t.revision),
-        json_object('status','closed','revision',t.revision+1,'auto',1),json_object('sessionRevision',t.revision+1),@now
-      FROM (${counted}) c CROSS JOIN ${S} t ON t.id=c.id WHERE ${candidate}` },
+        json_object('status','closed','revision',t.revision+1,'auto',1,'closedBy',@src),json_object('sessionRevision',t.revision+1),@now
+      FROM ${S} t INDEXED BY inventory_check_sessions_open_task WHERE ${candidate}` },
     { sql: `INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at)
       SELECT pk.id,NULL,@actorId,@actorName,'close',@key||'-pickup-'||pk.id,@hash,json_object('status','open','revision',pk.revision),
         json_object('status','closed','revision',pk.revision+1,'task',e.session_id),json_object('sessionRevision',pk.revision+1),@now
-      FROM inventory_check_events e CROSS JOIN ${S} pk ON pk.organization_id IS @org AND ${kindOf('pk')}='${PICKUP_MEMBERSHIP}' AND ${taskOf('pk')}=+e.session_id AND pk.status='open'
+      FROM inventory_check_events e CROSS JOIN ${S} pk INDEXED BY inventory_check_sessions_kind_task ON pk.organization_id IS @org AND ${kindOf('pk')}='${PICKUP_MEMBERSHIP}' AND ${taskOf('pk')}=+e.session_id AND pk.status='open'
       WHERE ${ofClosed}` },
     { sql: `UPDATE inventory_check_sessions SET status='closed',revision=revision+1,updated_at=@now,closed_at=@now
       WHERE id IN (${closedTasks}) AND status='open' RETURNING id` },
@@ -118,7 +130,7 @@ export type TaskRow = {
  * product for each shown task, one pickup seek per task.
  */
 export async function readTaskRows(db: D1Compat, args: { organization: number | null; branchId: number; shown: number; closedShown: number }): Promise<TaskRow[]> {
-  const rows = await db.prepare(`WITH open_t AS (SELECT s.* FROM ${S} s WHERE s.organization_id IS @org AND ${kindOf('s')}='${TASK_MEMBERSHIP}' AND s.branch_id=@branchId AND s.status='open'
+  const rows = await db.prepare(`WITH open_t AS (SELECT s.* FROM ${S} s INDEXED BY inventory_check_sessions_open_task WHERE s.organization_id IS @org AND ${kindOf('s')}='${TASK_MEMBERSHIP}' AND s.branch_id=@branchId AND s.status='open'
       ORDER BY s.started_at DESC, s.id DESC LIMIT @shown),
     closed_t AS (SELECT s.* FROM ${S} s WHERE s.organization_id IS @org AND ${kindOf('s')}='${TASK_MEMBERSHIP}' AND s.branch_id=@branchId AND s.status='closed'
       ORDER BY s.closed_at DESC, s.id DESC LIMIT @closedShown),
@@ -130,7 +142,7 @@ export async function readTaskRows(db: D1Compat, args: { organization: number | 
       (SELECT COUNT(*) FROM ${I} t WHERE t.session_id=page.id AND NOT ${taskItemCountableSql('t')}) AS removed,
       pk.id AS pickup_id, pk.created_by AS picked_by, pu.username AS picker, pk.started_at AS picked_at
     FROM page LEFT JOIN users iu ON iu.id=page.created_by
-      LEFT JOIN ${S} pk ON pk.organization_id IS @org AND ${kindOf('pk')}='${PICKUP_MEMBERSHIP}' AND ${taskOf('pk')}=page.id AND pk.status='open'
+      LEFT JOIN ${S} pk INDEXED BY inventory_check_sessions_kind_task ON pk.organization_id IS @org AND ${kindOf('pk')}='${PICKUP_MEMBERSHIP}' AND ${taskOf('pk')}=+page.id AND pk.status='open'
       LEFT JOIN users pu ON pu.id=pk.created_by
     ORDER BY (page.status='open') DESC, CASE WHEN page.status='open' THEN page.started_at ELSE page.closed_at END DESC, page.id DESC`)
     .all<Omit<TaskRow, 'selection'> & { selection: string | null }>({ org: args.organization, branchId: args.branchId, shown: args.shown, closedShown: args.closedShown })

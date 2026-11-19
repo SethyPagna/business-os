@@ -711,7 +711,7 @@ export async function replayStockLotSet(
   // The Issue this Set closed (issue_closed in its stored answer) is open again after an Undo, and closed again by a Redo; both only while the Set's own count is still the latest (stockSetClosesIssue.ts).
   if ((JSON.parse(row.response_json || '{}') as { issue_closed?: unknown }).issue_closed === true) {
     const closing = { productId: before.productId, branchId: before.branchId, organization: user.organization_id ?? null, operation: row.id, generation: next, actorId: user.id, actorName: actorSnapshot(user) ?? '' }
-    statements.push(...(direction === 'undo' ? reopenIssueStatements(closing) : closeIssueStatements(closing)))
+    statements.push(...(direction === 'undo' ? reopenIssueStatements(closing) : closeIssueStatements(closing, undefined, { restore: true })))
   }
   statements.push(
     { sql: "UPDATE stock_lot_adjustment_operations SET generation=@next,state=@target,revision_json=json_set(revision_json,'$.generation',@next) WHERE id=@operation", params },
