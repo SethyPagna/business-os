@@ -155,7 +155,7 @@ export function reopenTaskStatements(src = '@src'): { statements: Array<{ sql: s
       SELECT t.id,NULL,@actorId,@actorName,'resume',@key||'-task-reopened-'||t.id,@hash,json_object('status','closed','revision',t.revision),
         json_object('status','open','revision',t.revision+1,'reopened',1,'cause',@cause,'by',${src}),json_object('sessionRevision',t.revision+1),@now
       FROM (${restedSql(src)}) r CROSS JOIN ${S} t ON t.id=r.id WHERE ${autoClosedSql('t')}` },
-    { sql: `UPDATE ${S} SET status='open',revision=revision+1,updated_at=@now,closed_at=NULL
+    { sql: `UPDATE inventory_check_sessions SET status='open',revision=revision+1,updated_at=@now,closed_at=NULL
       WHERE id IN (SELECT e.session_id FROM inventory_check_events e CROSS JOIN ${S} k ON k.id=e.session_id WHERE e.actor_id=@actorId AND e.request_id>=@roFrom AND e.request_id<@roTo
         AND e.request_hash=@hash AND e.action='resume' AND e.created_at=@now AND k.organization_id IS @org AND k.branch_id=@branchId AND ${kindOf('k')}='${TASK_MEMBERSHIP}') AND status='closed' RETURNING id` },
   ] }

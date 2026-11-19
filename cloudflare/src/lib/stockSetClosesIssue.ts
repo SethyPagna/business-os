@@ -183,7 +183,7 @@ export function takeBackSetCountStatements(args: SetCloseArgs, origin: SetCountO
         json_object('state',i.state,'counted_quantity',i.counted_quantity,'reason',i.reason,'revision',i.revision),
         json_object('state','unstarted','counted_quantity',NULL,'reason',NULL,'revision',i.revision+1,'note','Undo of the Set took its count back'),json_object('sessionRevision',0,'itemRevision',i.revision+1),@now
       FROM ${I} i WHERE i.session_id=${SET_SESSION} AND i.product_id=@product AND i.branch_id=@branchId AND i.state='done'`, params },
-    { sql: `UPDATE ${I} SET state='unstarted',counted_quantity=NULL,revision=revision+1 WHERE session_id=${SET_SESSION} AND product_id=@product AND branch_id=@branchId AND state='done'`, params },
+    { sql: `UPDATE inventory_check_items SET state='unstarted',counted_quantity=NULL,revision=revision+1 WHERE session_id=${SET_SESSION} AND product_id=@product AND branch_id=@branchId AND state='done'`, params },
     ...reopen.statements.map(({ sql }) => ({ sql, params })),
   ] }
 }
@@ -197,7 +197,7 @@ export function restoreSetCountStatements(args: SetCloseArgs, origin: SetCountOr
         json_object('state',i.state,'counted_quantity',i.counted_quantity,'reason',i.reason,'revision',i.revision),
         json_object('state','done','counted_quantity',i.baseline_quantity,'reason',NULL,'revision',i.revision+1,'note','Redo of the Set restored its count'),json_object('sessionRevision',0,'itemRevision',i.revision+1),@now
       FROM ${I} i WHERE i.session_id=${SET_SESSION} AND i.product_id=@product AND i.branch_id=@branchId AND i.state='unstarted'`, params },
-    { sql: `UPDATE ${I} SET state='done',counted_quantity=baseline_quantity,revision=revision+1 WHERE session_id=${SET_SESSION} AND product_id=@product AND branch_id=@branchId AND state='unstarted'`, params },
+    { sql: `UPDATE inventory_check_items SET state='done',counted_quantity=baseline_quantity,revision=revision+1 WHERE session_id=${SET_SESSION} AND product_id=@product AND branch_id=@branchId AND state='unstarted'`, params },
     ...auto.statements.map(({ sql }) => ({ sql, params })),
   ] }
 }
