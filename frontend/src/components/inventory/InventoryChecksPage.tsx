@@ -1,6 +1,5 @@
 import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left.js'
-import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
 import ClipboardPlus from 'lucide-react/dist/esm/icons/clipboard-plus.js'
 import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import History from 'lucide-react/dist/esm/icons/history.js'
