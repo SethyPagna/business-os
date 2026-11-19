@@ -222,8 +222,8 @@ function InventorySelection({ boundary, access, isCurrent }: { boundary: string;
 }
 
 /** One icon-only action: the translated name is both its tooltip and its accessible name. */
-function IconAction({ label, onClick, disabled = false, pressed, children }: { label: string; onClick: () => void; disabled?: boolean; pressed?: boolean; children: ReactNode }) {
-  return <button type="button" className={`${toolbarIconButtonClassName} disabled:opacity-50 ${pressed ? '!bg-slate-800 !text-white dark:!bg-slate-200 dark:!text-slate-900' : ''}`} aria-label={label} title={label} aria-pressed={pressed} disabled={disabled} onClick={onClick}>{children}</button>
+function IconAction({ label, onClick, disabled = false, pressed, touch = false, children }: { label: string; onClick: () => void; disabled?: boolean; pressed?: boolean; /** A 44 px target on a phone (the app's 40 px from lg). */ touch?: boolean; children: ReactNode }) {
+  return <button type="button" className={`${toolbarIconButtonClassName} disabled:opacity-50 ${touch ? '!h-11 !w-11 lg:!h-10 lg:!w-10 ' : ''}${pressed ? '!bg-slate-800 !text-white dark:!bg-slate-200 dark:!text-slate-900' : ''}`} aria-label={label} title={label} aria-pressed={pressed} disabled={disabled} onClick={onClick}>{children}</button>
 }
 
 /** A small amber row badge whose explanation lives behind its own InfoHint. */
@@ -1099,11 +1099,13 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
     key, label: tr(key === 'issue' ? 'inventory_check_status_differs' : `inventory_check_status_${key}`, key === 'not_checked' ? 'Not checked' : key === 'in_check' ? 'In check' : key === 'ok' ? 'Checked OK' : 'Differs'), value: counts[key],
   })) : []
   // The status choice, in one row that scrolls sideways (the shared chip rail): every status the viewer can see, with how many products are in it.
+  // A task view reads its list without a summary (summary=0): whatever figures are held are the branch's, so no chip carries one there.
+  const chipCounts = taskView ? undefined : counts
   const statusChips: Array<{ value: string; label: string; count?: number }> = [{ value: '', label: t('all') },
-    { value: 'not_checked', label: tr('inventory_check_status_not_checked', 'Not checked'), count: counts?.not_checked },
-    { value: 'ok', label: tr('inventory_check_status_ok', 'Checked OK'), count: counts?.ok },
-    { value: 'issue', label: tr('inventory_check_status_differs', 'Differs'), count: counts?.issue },
-    ...(data?.capabilities?.fixStock && counts?.pending !== undefined ? [{ value: 'pending', label: tr('inventory_check_approval_pending', 'Waiting for approval'), count: counts.pending }] : [])]
+    { value: 'not_checked', label: tr('inventory_check_status_not_checked', 'Not checked'), count: chipCounts?.not_checked },
+    { value: 'ok', label: tr('inventory_check_status_ok', 'Checked OK'), count: chipCounts?.ok },
+    { value: 'issue', label: tr('inventory_check_status_differs', 'Differs'), count: chipCounts?.issue },
+    ...(data?.capabilities?.fixStock && chipCounts?.pending !== undefined ? [{ value: 'pending', label: tr('inventory_check_approval_pending', 'Waiting for approval'), count: chipCounts.pending }] : [])]
   const rowEditing = Object.values(editingRows).some(Boolean)
   const controlsLocked = busy || !!createAttempt.current || rowEditing
   // The date chips (the wired list at one branch only: counts are per branch, and the server sends no days for too many products). The chosen day stays on the rail even if the summary stops listing it, so "All" is always one tap away.
@@ -1369,7 +1371,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
   </div>
   // The task view's bar: back to the board, the task's progress and picker (from the board read), and its actions. Submit stays the view's one labelled action.
   const taskBar = <div className="flex min-w-0 flex-1 items-center gap-1" data-inventory-check-actions data-inventory-check-task-bar>
-    <IconAction label={t('back')} disabled={controlsLocked || tasks.busy} onClick={() => onSelect({ branchId, sessionId: '', taskId: '' })}><ArrowLeft className="h-5 w-5" aria-hidden="true" /></IconAction>
+    <IconAction label={t('back')} touch disabled={controlsLocked || tasks.busy} onClick={() => onSelect({ branchId, sessionId: '', taskId: '' })}><ArrowLeft className="h-5 w-5" aria-hidden="true" /></IconAction>
     {taskRow ? <div className="scroll-x-clean min-w-0 flex-1">
       <div className="inline-flex items-center gap-2 align-middle text-xs">
         <ProgressRing progress={{ total: taskRow.total, done: taskRow.done, issue: 0, unstarted: Math.max(0, taskRow.total - taskRow.done) }} t={t} />
