@@ -261,7 +261,9 @@ async function httpGet(url, ctx, { timeoutMs = 20000 } = {}) {
   }
 }
 
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
 module.exports = {
   log, ask, askDefault, confirm, runSpec, runLocal, npmLocal, npmInvocation, gitRead, httpGet,
-  specInvocation, displayCommand, spawnTee,
+  specInvocation, displayCommand, spawnTee, pause,
 }

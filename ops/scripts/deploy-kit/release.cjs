@@ -45,6 +45,8 @@ const R2_PLAN_REL = path.join('Performance', '2026-09-25', 'claude', 'R2-apac-pl
 const R2_SCRIPTS_REL = path.join('Performance', '2026-09-25', 'claude', 'r2-apac')
 const WINDOW_ADVICE = 'This window is going through the VPN. Open Windows Terminal from the Start menu (not from Claude) and run run\\release.bat again.'
 const VPN_ADVICE = `${WINDOW_ADVICE} If it still happens, turn the VPN off (or exclude cloudflare.com and leangbeauty.com from it) and try again.`
+const LIVE_VERSION_REREADS = 9
+const LIVE_VERSION_REREAD_MS = 10000
 
 // ------------------------------------------------------------------ setup
 
@@ -864,11 +866,19 @@ async function stepLive(ctx) {
   if (approval.ok) {
     // The Cloudflare API is not behind the site's bot challenge, so this works
     // from GitHub's runner too. Compare with the version this release published.
-    const dep = await readProduction(ctx, lib.commandCatalog.deploymentStatus(), approval)
+    // The deployments list can still show the previous version for a few seconds
+    // after publishing (deploy 8 on 20 Nov 2026), so a stale answer is read again.
+    const published = (ctx.state.deploy && ctx.state.deploy.versionId) || ''
+    const before = (ctx.state.snapshot && ctx.state.snapshot.previousVersionId) || ''
+    const isStale = (id) => !!id && (published ? id !== published : !!before && id === before)
+    let dep = await readProduction(ctx, lib.commandCatalog.deploymentStatus(), approval)
+    for (let reread = 1; !dep.dry && dep.ok && isStale(lib.liveVersionId(dep.json)) && reread <= LIVE_VERSION_REREADS; reread++) {
+      log.say(`  Cloudflare still lists Worker version ${lib.liveVersionId(dep.json)}; reading again in ${LIVE_VERSION_REREAD_MS / 1000} s (${reread} of ${LIVE_VERSION_REREADS})`)
+      await ex.pause(LIVE_VERSION_REREAD_MS)
+      dep = await readProduction(ctx, lib.commandCatalog.deploymentStatus(), approval)
+    }
     if (!dep.dry) {
       apiVersion = lib.liveVersionId(dep.json)
-      const published = (ctx.state.deploy && ctx.state.deploy.versionId) || ''
-      const before = (ctx.state.snapshot && ctx.state.snapshot.previousVersionId) || ''
       if (!dep.ok || !apiVersion) {
         if (siteChallenged) unconfirmed('the live version could not be confirmed: the site was challenged and the Cloudflare API did not answer')
         else warnings.push('could not read the live Worker version from the Cloudflare API')

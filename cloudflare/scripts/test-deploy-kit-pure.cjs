@@ -523,7 +523,11 @@ const CHALLENGE = { status: 403, headers: { 'cf-mitigated': 'challenge', 'conten
 // One live step. challenged: the site answers every request with a bot challenge
 // (what GitHub's runner gets). api: the version `deployments status` reports,
 // or 'fail' when the Cloudflare API does not answer.
-function runLive({ ci = true, challenged = true, api = V_PUBLISHED, published = V_PUBLISHED }) {
+// api: the version the deployments list answers, or a list answered in turn (the last one repeats).
+async function runLive({ ci = true, challenged = true, api = V_PUBLISHED, published = V_PUBLISHED }) {
+  const answers = Array.isArray(api) ? api : [api]
+  const pauses = []
+  let reads = 0
   const counts = Object.fromEntries(lib.KEY_TABLES.map((t, i) => [t, 10 + i]))
   const ctx = { ci, dryRun: false, sha: SHA, subject: 'test', site: 'https://site.invalid', plan: 'paid', ciConfirmWord: 'DEPLOY', recordDir: '', args: {},
     state: { deploy: published ? { versionId: published } : {}, snapshot: { previousVersionId: V_BEFORE, preCounts: counts } } }
@@ -537,16 +541,20 @@ function runLive({ ci = true, challenged = true, api = V_PUBLISHED, published = 
     runSpec: async (spec, _ctx, approval) => {
       lib.assertApproved(spec, approval)
       if (spec.id === 'deployments-status') {
-        return api === 'fail' ? { code: 1, out: 'Authentication error [code: 10000]' }
-          : { code: 0, out: JSON.stringify({ id: 'dddddddd-0000-4000-8000-000000000009', versions: [{ version_id: api, percentage: 100 }] }) }
+        const answer = answers[Math.min(reads++, answers.length - 1)]
+        if (answer === 'fail') return { code: 1, out: 'Authentication error [code: 10000]' }
+        if (answer === 'empty') return { code: 0, out: JSON.stringify({ id: 'dddddddd-0000-4000-8000-000000000009', versions: [] }) }
+        return { code: 0, out: JSON.stringify({ id: 'dddddddd-0000-4000-8000-000000000009', versions: [{ version_id: answer, percentage: 100 }] }) }
       }
       if (spec.id === 'counts') return { code: 0, out: JSON.stringify([{ results: [counts], success: true }]) }
       throw new Error(`unexpected command ${spec.id}`)
     },
+    pause: async (ms) => { pauses.push(ms) },
     // CI uses the real confirm (RELEASE_CONFIRM); a keyboard run would read stdin.
     ...(ci ? {} : { confirm: async () => ({ ok: true, gate: 'confirm' }) }),
   }
-  return withStubs(stubs, () => COMMANDS.live(ctx))
+  const r = await withStubs(stubs, () => COMMANDS.live(ctx))
+  return { ...r, pauses, reads }
 }
 
 async function runGuardMigrationProbe(options = {}) {
@@ -720,6 +728,35 @@ function assertImportRefused(result) {
     assert.strictEqual(r.result, false)
     assert.ok(r.text.includes(`PROBLEM: Cloudflare serves Worker version ${V_OTHER}, not ${V_PUBLISHED} that this release published`))
     assert.ok(r.summary.includes('### Live checks: PROBLEMS'))
+    assert.deepStrictEqual(r.pauses, Array(9).fill(10000), 'a version that never switches is read 10 times, 10 s apart, then judged')
+    assert.strictEqual(r.reads, 10)
+  })
+  await checkAsync('live, CI: the deployments list still shows the previous version for a moment after publishing, so it is read again (deploy 8)', async () => {
+    const r = await runLive({ api: [V_BEFORE, V_BEFORE, V_PUBLISHED] })
+    assert.strictEqual(r.result, true, r.text)
+    assert.ok(r.text.includes(`Cloudflare still lists Worker version ${V_BEFORE}; reading again in 10 s (1 of 9)`))
+    assert.ok(r.text.includes(`Cloudflare serves Worker version ${V_PUBLISHED}, the one this release published - matches`))
+    assert.ok(!/PROBLEM/.test(r.text), r.text)
+    assert.deepStrictEqual(r.pauses, [10000, 10000])
+    assert.strictEqual(r.reads, 3)
+  })
+  await checkAsync('live, CI: the published version on the first read is never re-read; an unreadable API is not retried as stale', async () => {
+    const ok = await runLive({})
+    assert.deepStrictEqual(ok.pauses, [])
+    assert.strictEqual(ok.reads, 1)
+    const silent = await runLive({ api: 'fail' })
+    assert.deepStrictEqual(silent.pauses, [])
+    assert.strictEqual(silent.reads, 1)
+    const blank = await runLive({ api: 'empty' })
+    assert.deepStrictEqual(blank.pauses, [], 'an answer naming no version is unconfirmed at once, not waited on')
+    assert.strictEqual(blank.reads, 1)
+    assert.ok(blank.text.includes('PROBLEM: the live version could not be confirmed'), blank.text)
+  })
+  await checkAsync('live, CI, no recorded version: the previous version is read again, and the first other version ends the wait', async () => {
+    const r = await runLive({ api: [V_BEFORE, V_OTHER], published: '' })
+    assert.deepStrictEqual(r.pauses, [10000])
+    assert.strictEqual(r.reads, 2)
+    assert.ok(!r.text.includes('still serves'), r.text)
   })
   await checkAsync('live, CI, site challenged and the API silent: unconfirmed is a problem, not a pass', async () => {
     const r = await runLive({ api: 'fail' })
@@ -730,6 +767,7 @@ function assertImportRefused(result) {
     const r = await runLive({ api: V_BEFORE, published: '' })
     assert.strictEqual(r.result, false)
     assert.ok(r.text.includes(`PROBLEM: Cloudflare still serves Worker version ${V_BEFORE}, the one from before this release`))
+    assert.strictEqual(r.reads, 10)
   })
   await checkAsync('live, keyboard run, challenged and the API silent: a warning with the VPN advice, never a bare pass', async () => {
     const r = await runLive({ ci: false, api: 'fail' })
