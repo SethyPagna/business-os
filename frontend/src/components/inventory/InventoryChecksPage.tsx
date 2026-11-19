@@ -1211,6 +1211,9 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
   }
   // ---- Count tasks: the board, issuing, picking up, handing back, closing ----
   const taskRow: InventoryCheckTask | null = taskView ? tasks.board?.items.find(item => item.id === taskId) ?? null : null
+  // A task the board no longer lists (an old one): its bar says what the list answered about it (closed or open, how many products) instead of pulsing for a progress that will never come.
+  const boardSettled = !!tasks.board || tasks.failed || !!tasks.refusal
+  const listTask = taskView && fresh ? wiredRaw.current?.list.task : undefined
   const hasWiredBranchList = !!data?.branches?.length
   useEffect(() => {
     if (!taskBoard || hasWiredBranchList || taskBranches) return
@@ -1371,7 +1374,12 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
         {taskRow.picked_up_by ? <span className={`shrink-0 ${taskRow.mine ? 'font-semibold text-emerald-700 dark:text-emerald-300' : 'text-gray-600 dark:text-gray-300'}`} data-task-picker>{pickerText(t, taskRow.picked_up_by)}</span> : null}
         {taskRow.status === 'closed' ? <SessionStatusChip status="closed" t={t} /> : null}
       </div>
-    </div> : <span className="h-4 min-w-0 flex-1 animate-pulse rounded bg-gray-200 dark:bg-zinc-700" aria-hidden="true" />}
+    </div> : boardSettled ? (listTask ? <div className="scroll-x-clean min-w-0 flex-1" data-task-off-board>
+      <div className="inline-flex items-center gap-2 align-middle text-xs">
+        {listTask.status === 'closed' ? <SessionStatusChip status="closed" t={t} /> : null}
+        <span className="shrink-0 tabular-nums">{t('products')}: {listTask.total}</span>
+      </div>
+    </div> : <span className="min-w-0 flex-1" />) : <span className="h-4 min-w-0 flex-1 animate-pulse rounded bg-gray-200 dark:bg-zinc-700" aria-hidden="true" />}
     {taskRow ? <TaskActions size="bar" task={taskRow} t={t} busy={tasks.busy || controlsLocked} canWork={access.canWorkTasks} onPickup={() => { void pickupTask(taskRow) }} onRelease={() => { void releaseTask(taskRow) }} onClose={() => { void closeTask(taskRow) }} /> : null}
   </div>
   // The page controls, drawn above the list and below it from the SAME state: one request per page step, the true total, no second fetch. Count sessions page exactly like products.

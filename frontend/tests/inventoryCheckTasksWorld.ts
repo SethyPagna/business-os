@@ -59,6 +59,8 @@ export async function createTasksWorld(options: { branches?: Array<{ id: number;
     closeTaskOnSubmit: true,
     /** False: the device is offline (the app's canWriteToServer), so every write is refused before it is sent. */
     online: true,
+    /** The state the list reports for a task the board does not list (an old one). */
+    offBoardStatus: 'closed' as 'open' | 'closed',
     /** A viewer who may not see staff identity gets no issued_by key at all (contract 3.1). */
     hideIssuer: false,
     /** The answer of a submission says the task closed even when part of it is left (a closed-elsewhere race). */
@@ -106,7 +108,8 @@ export async function createTasksWorld(options: { branches?: Array<{ id: number;
         const ids = params.taskId ? world.taskProducts.get(String(params.taskId)) ?? [] : Array.from({ length: world.productCount }, (_v, index) => index + 1)
         const page = Number(params.page) || 1, pageSize = Number(params.pageSize) || 20
         return { wired: true, projected: false, items: ids.slice((page - 1) * pageSize, page * pageSize).map(rowOf), total: ids.length, page, pageSize, totalPages: Math.max(1, Math.ceil(ids.length / pageSize)), overlay_ids: 150,
-          ...(params.summary === 0 ? {} : { summary: { ok: 0, issue: 0, not_checked: ids.length, total: ids.length } }), capabilities: { productsPerSubmission: world.productsPerSubmission } }
+          ...(params.summary === 0 ? {} : { summary: { ok: 0, issue: 0, not_checked: ids.length, total: ids.length } }), capabilities: { productsPerSubmission: world.productsPerSubmission },
+          ...(params.taskId ? { task: { id: String(params.taskId), status: world.board.find(row => row.id === params.taskId)?.status ?? world.offBoardStatus, total: ids.length } } : {}) }
       },
       readInventoryCheckOverlay: async (params: { ids: number[]; summary?: boolean }) => { record('overlay', { ids: params.ids.join(','), summary: params.summary }); return { items: params.ids.map(overlayEntry), ...(params.summary === false ? {} : { summary: { ok: 0, issue: 0, not_checked: 1, total: 1 } }) } },
       readInventoryCheckLots: async () => ({ lots: [] }),
