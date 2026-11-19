@@ -62,6 +62,8 @@ const app = {
   },
 }
 const doubles = {
+  // The Tasks board has no list to learn the branches from, so it reads the branch list itself; this shop has two, so a cold open must ask for one. (A failed read has its own test: inventoryCheckTasksRefusedMounted.)
+  'api/branchTransport.ts': { getBranches: async () => [{ id: 1, name: 'Main', is_active: 1 }, { id: 2, name: 'Second', is_active: 1 }] },
   'utils/dirtyWork.ts': dirtyWork,
   'api/actorReadScope.ts': {
     captureActorReadScope: () => ({ authority: 'test', channel: 'inventoryChecks', revision: '1' }),
@@ -269,15 +271,15 @@ try {
     } }
     assert.equal(counting.findAll(node => node.tagName === 'BUTTON' && (node.getAttribute('aria-label') ?? '').startsWith(`${pack.inventory_check_start_page} (`)).length, 0, `${language}: no Count (n) button on the list`)
     assert.equal(counting.findAll(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === pack.refresh).length, 0, `${language}: and no Refresh button`)
-    await pickAll()
-    assert.equal(submitButton().getAttribute('aria-disabled'), 'true', `${language}: Submit waits for a branch`)
-    assert.equal(submitButton().getAttribute('title'), pack.inventory_check_count_blocked_branch, `${language}: and its tooltip says why`)
-    const before = counting.findAll(node => node.tagName === 'DL').length
-    await counting.click(submitButton())
-    assert.equal(counting.findAll(node => node.tagName === 'DL').length, before, `${language}: a blocked Submit does nothing`)
+    // Counts belong to one branch (they are kept per branch on this device), so with several branches and none chosen NOTHING can be typed: no status button, no count box, no Submit -- and the page says why.
+    // (Where the shop has exactly one active branch it is chosen at open, so a count is always typed under a branch; the sole-branch tests above and in inventoryChecksOpenSequence cover that.)
+    assert.equal(counting.findAll(node => node.getAttribute('data-check-action') === 'status').length, 0, `${language}: no status button to answer a row while no branch is chosen`)
+    assert.equal(counting.findAll(node => node.getAttribute('data-check-count') !== null).length, 0, `${language}: no count box either`)
+    assert.equal(counting.findAll(node => node.getAttribute('data-selection-action') === 'submit').length, 0, `${language}: and no Submit`)
+    assert.ok(counting.find(node => node.getAttribute('data-count-needs-branch') !== null, 'branch hint').textContent === pack.inventory_check_count_blocked_branch, `${language}: the page says "${pack.inventory_check_count_blocked_branch}"`)
     await chooseFilter(counting, pack.filters, 'branchId', 'Second')
-    assert.equal(productReads.at(-1)?.branchId, '2', `${language}: choosing another branch reads it at once, with no question: the counts are kept per branch on this device`)
-    assert.equal(counting.find(node => node.getAttribute('data-selected-count') !== null, 'selected count').textContent, '', `${language}: a counted stock belongs to one branch, so the other branch starts with none`)
+    assert.equal(productReads.at(-1)?.branchId, '2', `${language}: choosing a branch reads it at once, with no question (nothing could have been typed before it)`)
+    assert.equal(counting.find(node => node.getAttribute('data-selected-count') !== null, 'selected count').textContent, '', `${language}: the chosen branch starts with nothing picked`)
     await pickAll()
     assert.equal(submitButton().getAttribute('title'), pack.inventory_check_submit_need_counts, `${language}: then it asks for a count in every picked row`)
     await counting.type(countOf(12), '10')

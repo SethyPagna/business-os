@@ -810,7 +810,8 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
   const issuingNow = issuing && listMode && access.canIssueTasks && !!branchId && data?.wired === true
   const grouping = listMode ? data?.grouping : undefined
   // Counting a task is open to anyone the server lets count it (picked up or not); the plain list needs only the count grant. Issue mode hides the count controls (typed counts are kept).
-  const selecting = listMode && access.canCheck && !issuingNow && (!taskView || access.canWorkTasks)
+  // Counts belong to one branch (they are kept per branch on this device), so none can be typed until a branch is chosen: a shop with one active branch has it chosen at open, a shop with several asks first.
+  const selecting = listMode && access.canCheck && !!branchId && !issuingNow && (!taskView || access.canWorkTasks)
   const selectedIds = Object.keys(drafts).filter(id => drafts[id].selected)
   // The page-wide "matches stock" acts only on the rows the person can see: a collapsed group is left alone.
   const selectable = listMode ? inOpenGroups(visibleProducts.filter(product => !product.is_group && product.checkable !== false), grouping, collapsed) : []
@@ -881,7 +882,6 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
     setDrafts({})
   }
   const submitBlocked = !selecting ? '' : !canWriteToServer ? tr('inventory_check_count_blocked_offline', 'Saving is unavailable while offline.')
-    : !branchId ? tr('inventory_check_count_blocked_branch', 'Choose a branch first.')
     : selectedIds.length > MAX_SUBMISSION && typeof data?.capabilities?.productsPerSubmission !== 'number' ? tr('inventory_check_submit_too_many', 'Submit at most 500 products at a time.')
     : selectedIds.some(id => parseCount(drafts[id].count).kind !== 'valid') ? tr('inventory_check_submit_need_counts', 'Enter a count for every selected product.') : ''
 
@@ -1430,13 +1430,14 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
               {issuingNow ? <InventoryCheckIssueBar pickedCount={picks.size} blocked={issueBlocked} busy={tasks.busy || busy} issueLabel={tasks.retrying === 'issue' ? t('retry') : undefined}
                 onExit={() => { setIssuing(false); setPicks(new Set()) }} onClear={() => setPicks(new Set())} onIssue={() => { void issueTask() }} t={t} />
               : barShown && !(taskView && !access.canWorkTasks) ? <InventoryCheckSelectionBar selectedCount={selectedIds.length} blocked={submitBlocked} busy={busy || !listMode} canMarkChecked={access.fields.stock} openGroupsOnly={collapsed.size > 0}
-                counting={access.canCheck} days={dayChips} checkedOn={filters.checkedOn ?? ''} onCheckedOn={chooseDay} daysDisabled={controlsLocked || !fresh}
+                counting={access.canCheck && !!branchId} days={dayChips} checkedOn={filters.checkedOn ?? ''} onCheckedOn={chooseDay} daysDisabled={controlsLocked || !fresh}
                 submitLabel={submitAttempt.current ? t('retry') : undefined} onMarkChecked={markPageChecked} onClear={clearSelection} onSubmit={() => { void submit() }} t={t} /> : null}
               {sheetHeader}
             </>}
         </div>
         {pagerNode('top')}
         {writeError ? <p role="alert" className="text-xs leading-relaxed text-red-700">{writeError}</p> : null}
+        {listMode && access.canCheck && !branchId && branches.length > 1 && !issuingNow ? <p role="status" className="text-xs leading-relaxed text-gray-600 dark:text-gray-300" data-count-needs-branch>{tr('inventory_check_count_blocked_branch', 'Choose a branch first.')}</p> : null}
         {taskView && taskRow?.status === 'closed' && !taskClosedBySelf.current ? <p role="status" className="text-xs leading-relaxed text-amber-800 dark:text-amber-200" data-task-status-line="closed">{tr('inventory_check_error_task_closed', 'This task is already closed.')}</p> : null}
         {taskView && tasks.handedBack && taskRow?.status === 'open' ? <p role="status" className="text-xs leading-relaxed text-amber-800 dark:text-amber-200" data-task-status-line="handed-back">{tr('inventory_check_task_handed_back', 'This task was handed back. Your counts are kept.')}</p> : null}
         {section === 'tasks' && tasks.refusal ? <p role="alert" className="text-xs leading-relaxed text-red-700" data-tasks-refusal>{tasks.refusal}</p> : null}

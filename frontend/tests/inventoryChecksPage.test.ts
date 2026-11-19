@@ -89,6 +89,8 @@ const app = {
   },
 }
 const doubles = {
+  // The Tasks board has no list to learn the branches from, so it reads the branch list itself; this shop has two, so a cold open must ask for one. (A failed read has its own test: inventoryCheckTasksRefusedMounted.)
+  'api/branchTransport.ts': { getBranches: async () => [{ id: 1, name: 'Main', is_active: 1 }, { id: 2, name: 'Second', is_active: 1 }] },
   'utils/dirtyWork.ts': dirtyWork,
   'api/actorReadScope.ts': {
     captureActorReadScope: () => ({ authority: 'test', channel: 'inventoryChecks', revision: readRevision }),
