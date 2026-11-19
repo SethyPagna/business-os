@@ -153,8 +153,9 @@ async function readListPage(c: IcContext, rawQuery: Record<string, string>, extr
     if (restriction.excludeIdsJson !== undefined) { const drop = new Set(JSON.parse(restriction.excludeIdsJson) as number[]); ids = new Set([...ids].filter((id) => !drop.has(id))) }
     restriction = { restrictIdsJson: JSON.stringify([...ids]) }
   }
-  // idsOnly with no restriction of its own (a filter being issued): read leaf-only. An exclusion of no ids is the check lists' own restriction and leaves family headers out, so a page holds only families with a
-  // product in them and the page bound counts products. The key carries `leaf`, so the page never shares an entry with the plain list.
+  // idsOnly with no restriction of its own (a filter being issued): read leaf-only. An exclusion of no ids is the check lists' own restriction and leaves family headers out of the rows; the reader's leafOnly option lets a
+  // family still qualify through its header under a typed search (the plain list shows that family), so the children a search finds through their header are issued, and a page holds only families with a product in them
+  // (the page bound counts products). The key carries `leaf`, so the page never shares an entry with the plain list.
   const leafOnly = Boolean(extra.idsOnly) && restriction.restrictIdsJson === undefined && restriction.excludeIdsJson === undefined
   if (leafOnly) restriction = { excludeIdsJson: '[]' }
   // The shared cache key is the canonical request. A grouped read never takes a by-id read (its ranking needs the keyed page read): an exact code hit becomes a restriction to that id, and the key keeps the id.
@@ -171,7 +172,7 @@ async function readListPage(c: IcContext, rawQuery: Record<string, string>, extr
   // The cached page is keyed by the restriction's own name: the state (Pending without the right to see it is an empty set of its own: it must not share a cached page with the admin's real Pending set)
   // and the day, so a page of one day never serves another.
   const setKey = [plan.checkState ? (plan.checkState === 'pending' && !fixStock ? 'pending_unavailable' : plan.checkState) : '', plan.checkedOn ? `day:${plan.checkedOn}` : '', extra.task ? `task:${extra.task.id}` : '', leafOnly ? 'leaf' : ''].filter(Boolean).join('|')
-  const { groups, ...payload } = await readProductSearchList(c, productsQuery, { include, keyRequest, ...restriction, ...(grouping ? { grouping } : {}),
+  const { groups, ...payload } = await readProductSearchList(c, productsQuery, { include, keyRequest, ...restriction, ...(leafOnly ? { leafOnly: true } : {}), ...(grouping ? { grouping } : {}),
     ...(setKey ? { setKey } : codeHit !== null && grouping ? { setKey: 'code' } : {}),
     ...(plan.checkState || plan.checkedOn || grouping || extra.task ? { setVersion: groupedVersion } : {}), lotsAdmitted: access.fields.received && !extra.idsOnly, taggedLotsAdmitted: access.fields.stock && !extra.idsOnly }) as Awaited<ReturnType<typeof readProductSearchList>> & { groups?: FamilyGroupTotals[] }
   const lotCounts = await lotCountsOn(c)
@@ -307,6 +308,8 @@ async function resolveTaskFilters(c: IcContext, branchId: number, raw: unknown, 
     if (ids.size > limit) { atLeast = true; break }
     if (page >= maxPages) throw new InventoryCheckSessionError(400, 'inventory_check_task_too_many', { total: ids.size, limit, atLeast: true })
   }
+  // A filter that finds nothing countable is the contract's `inventory_check_product_not_eligible` (what the task screens show as "the filter matched nothing"), not a missing id list.
+  if (!ids.size) throw new InventoryCheckSessionError(400, 'inventory_check_product_not_eligible')
   return { filters, ids: [...ids], total: ids.size, atLeast }
 }
 app.post('/tasks', async c => {

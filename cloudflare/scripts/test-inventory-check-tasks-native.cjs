@@ -36,7 +36,7 @@ const PINNED_WRITER_COST = {
 }
 const ON = ['ic_wired', 'ic_simple', 'ic_fix_stock', 'ic_lot_counts']
 
-function build(sourceEdits = {}, { extraProducts = 0, families = 0, familyBrand = 'Q', headers = 0, lone, headerName = 'Head' } = {}) {
+function build(sourceEdits = {}, { extraProducts = 0, families = 0, familyBrand = 'Q', headers = 0, lone, headerName = 'Head', summer = false } = {}) {
   const app = createInvApp({
     users: USERS_X, sourceEdits,
     mount: { '/api/products': 'routes/products.ts', '/api/inventory-checks/products': 'routes/inventoryCheckProducts.ts', '/api/inventory-checks': 'routes/inventoryChecks.ts' },
@@ -56,6 +56,15 @@ function build(sourceEdits = {}, { extraProducts = 0, families = 0, familyBrand 
         // `headers` family headers with no children (brand H, ids 5000.., named `headerName`) and `lone` (5 with headers) ordinary products of the same brand (ids 4000..): the list shows each header as a row, and a header adds no id to a task
         for (let n = 0; n < headers; n++) add(5000 + n, `${headerName} ${n}`, 'H', 1)
         for (let n = 0, count = lone ?? (headers ? 5 : 0); n < count; n++) add(4000 + n, `Lone ${n}`, 'H')
+        // `summer`: family headers whose children are named differently from the header (hand-made variants): 'Summer set' (600) with 'Red top' (601) and 'Blue skirt' (602), 'Summer hat' (610) with 'Straw' and 'Felt' (611, 612),
+        // one ordinary 'Summer dress' (603), a childless header 'Summer bare' (620) and a header whose only child is inactive, 'Summer ghost' (630 / 631). Headers are brand S, children brand K.
+        if (summer) {
+          add(600, 'Summer set', 'S', 1); add(601, 'Red top', 'K'); add(602, 'Blue skirt', 'K'); add(603, 'Summer dress', 'S'); add(610, 'Summer hat', 'S', 1); add(611, 'Straw', 'K'); add(612, 'Felt', 'K')
+          add(620, 'Summer bare', 'S', 1); add(630, 'Summer ghost', 'S', 1)
+          raw.prepare(`INSERT INTO products(id,name,sku,barcode,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,brand,category,is_active,is_group,parent_id,created_at,updated_at)
+            VALUES(631,'Ghost kid','SKU631','88500631',0,9.5,38000,4,16000,'K','Cat',0,0,630,'2026-09-01 00:00:00','2026-09-01 00:00:00')`).run()
+          raw.prepare('UPDATE products SET parent_id=600 WHERE id IN (601,602)').run(); raw.prepare('UPDATE products SET parent_id=610 WHERE id IN (611,612)').run(); 
+        }
         for (let n = 0; n < families; n++) { const base = 1000 + n * 3, brand = n < 120 ? 'Q' : 'R'; add(base, `Fam ${n}`, brand, 1); add(base + 1, `Fam ${n}`, brand); add(base + 2, `Fam ${n}`, brand); raw.prepare('UPDATE products SET parent_id=? WHERE id IN (?,?)').run([base, base + 1, base + 2]) }
       })
     },
@@ -625,6 +634,65 @@ async function issueFilterFamilies(w) {
   assert.equal(over.status, 400, JSON.stringify(over.json)); assert.equal(over.json.code, 'inventory_check_task_too_many'); assert.equal(over.json.total, 320, 'the total is the number of countable rows (160 families of 2), not the family count'); assert.equal(over.json.limit, 300)
 }
 
+/** The countable products of a list under a query string, as the wired list shows them: every page, headers left out. */
+async function listedProducts(w, query) {
+  const ids = []
+  w.as('admin'); w.app.clearCaches()
+  for (let page = 1; page <= 10; page++) {
+    const answer = (await w.get(`/list?branchId=1&${query}&pageSize=100&page=${page}`)).json
+    for (const item of answer.items || []) if (!Number(item.is_group)) ids.push(Number(item.id))
+    if (!(answer.items || []).length || page * 100 >= Number(answer.total || 0)) break
+  }
+  return [...new Set(ids)].sort((a, b) => a - b)
+}
+const issuedProducts = (w, id) => w.rows('SELECT product_id FROM inventory_check_items WHERE session_id=? ORDER BY product_id', id).map((r) => r.product_id)
+const queryOf = (filters) => Object.entries(filters).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')
+
+/** N1 (round 7): a text filter that matches a family through its header issues the family's countable children, exactly as the list shows them; mixed filters keep every child. */
+async function issueFilterHeaderChildren(w) {
+  w.as('admin')
+  const cases = [
+    ['query=summer', { query: 'summer' }, [601, 602, 603, 611, 612]],
+    ['query=summer and brand S (the headers and the dress are brand S, the children K)', { query: 'summer', brand: 'S' }, [601, 602, 603, 611, 612]],
+    ['query=set (one header, its two children)', { query: 'set' }, [601, 602]],
+    ['query=red (a child itself matches: the list adds its sibling, as it always does)', { query: 'red' }, [601, 602]],
+  ]
+  for (const [label, filters, expected] of cases) {
+    assert.deepEqual(await listedProducts(w, queryOf(filters)), expected, `${label}: the list shows these products`)
+    w.as('admin'); w.app.clearCaches()
+    const made = await w.api('POST', '/tasks', { branchId: 1, requestId: w.rid('hc'), filters })
+    assert.equal(made.status, 201, `${label}: ${JSON.stringify(made.json)}`)
+    assert.deepEqual(issuedProducts(w, made.json.item.id), expected, `${label}: the task holds what the list shows`)
+  }
+}
+
+/** N2 (round 7): a filter that resolves to nothing countable answers the contract's product_not_eligible, and issues nothing. */
+async function issueFilterNothing(w) {
+  w.as('admin')
+  for (const filters of [{ brand: 'Nope' }, { query: 'summer', brand: 'K' }, { query: 'bare' }, { query: 'ghost' }]) {
+    const made = await w.api('POST', '/tasks', { branchId: 1, requestId: w.rid('none'), filters })
+    assert.equal(made.status, 400, JSON.stringify(made.json)); assert.equal(made.json.code, 'inventory_check_product_not_eligible', JSON.stringify(filters))
+  }
+  assert.equal(w.row("SELECT COUNT(*) AS n FROM inventory_check_sessions WHERE json_extract(scope_json,'$.membership')='task'").n, 0, 'nothing was issued')
+}
+
+/** N3 (round 7): a filter with a check state or a day issues what the same list shows under it (the leaf rule never replaces the check restriction). */
+async function issueFilterCheckState(w) {
+  assert.equal((await w.count([100, 201])).status, 201)
+  w.as('admin'); w.app.clearCaches()
+  const day = (await w.get('/list?branchId=1')).json.summary.days[0].day
+  const cases = [['checkState=ok', { checkState: 'ok' }, [100, 201]], ['checkState=not_checked', { checkState: 'not_checked' }, null], ['checkedOn', { checkedOn: day }, [100, 201]], ['checkState=not_checked and brand A', { checkState: 'not_checked', brand: 'A' }, null]]
+  for (const [label, filters, expected] of cases) {
+    const listed = await listedProducts(w, queryOf(filters))
+    if (expected) assert.deepEqual(listed, expected, `${label}: the list shows these`)
+    w.as('admin'); w.app.clearCaches()
+    const made = await w.api('POST', '/tasks', { branchId: 1, requestId: w.rid('cs'), filters })
+    assert.equal(made.status, 201, `${label}: ${JSON.stringify(made.json)}`)
+    assert.deepEqual(issuedProducts(w, made.json.item.id), listed, `${label}: the task holds what the list shows under the same filter`)
+    if (label === 'checkState=not_checked') assert.ok(listed.length > 5 && !listed.includes(100) && !listed.includes(201), 'Not checked leaves the counted products out')
+  }
+}
+
 /** Capabilities equal enforcement: the extra without the count grant offers nothing the Worker would refuse; the board's selection follows the viewer's field grants. */
 async function issueCapabilities(w) {
   const task = (await w.issue([100, 101], {}, 'admin')).json.item.id
@@ -690,6 +758,11 @@ async function issueFilterBound(w0) {
     const before = calls, made = await w.api('POST', '/tasks', { branchId: 1, requestId: w.rid('hb'), filters: { brand: 'H' } }), used = calls - before
     console.log(`     ${label}: ${used} D1 calls, ${made.status}${made.status === 400 ? ` ${made.json.code} total ${made.json.total}` : ''}`)
     assert.ok(used <= 50, `${label}: ${used} D1 calls for one cold POST /tasks (Free allows 50)`)
+    // The plain list keeps showing the headers (only an issued filter reads leaf-only): a rule that dropped them from every read would pass the counts above.
+    w.as('admin'); w.app.clearCaches()
+    let headerRows = 0
+    for (let page = 1; page <= 6 && !headerRows; page++) headerRows = ((await w.get(`/list?branchId=1&brand=H&pageSize=100&page=${page}`)).json.items || []).filter((item) => Number(item.is_group) === 1).length
+    if (world.headers) assert.ok(headerRows > 0, `${label}: the plain list still shows the family headers`)
     const issued = w.row("SELECT COUNT(*) AS n FROM inventory_check_sessions WHERE json_extract(scope_json,'$.membership')='task'").n
     if (products <= 300) { assert.equal(made.status, 201, `${label}: ${JSON.stringify(made.json)}`); assert.equal(made.json.item.progress.total, products, 'within the bound the filter resolves every product'); assert.equal(issued, 1); continue }
     assert.equal(made.status, 400, JSON.stringify(made.json)); assert.equal(made.json.code, 'inventory_check_task_too_many'); assert.equal(made.json.total, products, 'the whole count, not a page bound')
@@ -999,12 +1072,12 @@ const SCENARIOS = {
   autoCloseOlderWriter: (w) => autoClose(w, { lotWriter: false }),
   outsideCloseLot: (w) => outsideClose(w, 'lot'), outsideClosePlain: (w) => outsideClose(w, 'plain'), outsideCloseObserve: (w) => outsideClose(w, 'observe'),
   outsideNegativesLot: (w) => outsideNegatives(w, 'lot'), outsideNegativesPlain: (w) => outsideNegatives(w, 'plain'), outsideNegativesObserve: (w) => outsideNegatives(w, 'observe'),
-  observationNotFinal, doneRuleOrg, removedProducts, issueFilterFamilies, issueCapabilities, taskCap, taskRowsUntouched, headerRule, deactivatedWithStock, issuedByVisibility, issueFilterBound, pageSizeOneSource, boardRevision, cacheKeyProducts, schemaMissing, taskCapReplay, readBackHash,
+  observationNotFinal, doneRuleOrg, removedProducts, issueFilterFamilies, issueCapabilities, taskCap, taskRowsUntouched, headerRule, deactivatedWithStock, issuedByVisibility, issueFilterBound, issueFilterHeaderChildren, issueFilterNothing, issueFilterCheckState, pageSizeOneSource, boardRevision, cacheKeyProducts, schemaMissing, taskCapReplay, readBackHash,
   random: (w) => randomWorld(w, 20261118, 50),
   randomTwo: (w) => randomWorld(w, 20261119, 90),
   budget,
 }
-const WORLD = { issueFilters: { extraProducts: 310 }, budget: { extraProducts: 70 }, issueFilterFamilies: { families: 280 } }
+const WORLD = { issueFilterHeaderChildren: { summer: true }, issueFilterNothing: { summer: true }, issueFilters: { extraProducts: 310 }, budget: { extraProducts: 70 }, issueFilterFamilies: { families: 280 } }
 
 async function main() {
   for (const [name, scenario] of Object.entries(SCENARIOS)) {
@@ -1057,6 +1130,11 @@ async function main() {
     ['the board does not send the task revision', edit('routes/inventoryChecks.ts', 'status: row.status, revision: row.revision, issued_at: row.started_at,', 'status: row.status, issued_at: row.started_at,'), ['boardRevision']],
     ['the filter reads the list family by family again (childless headers fill the pages)', edit('routes/inventoryChecks.ts', "  if (leafOnly) restriction = { excludeIdsJson: '[]' }\n", ''), ['issueFilterBound']],
     ['the filter reads family by family and the loop has no page bound', { 'routes/inventoryChecks.ts': [["  if (leafOnly) restriction = { excludeIdsJson: '[]' }\n", ''], ["    if (page >= maxPages) throw new InventoryCheckSessionError(400, 'inventory_check_task_too_many', { total: ids.size, limit, atLeast: true })\n", '']] }, ['issueFilterBound']],
+    ['round 6: the filter never lets a family qualify through its header (the reader gets no leaf-only option)', edit('routes/inventoryChecks.ts', '...(leafOnly ? { leafOnly: true } : {}), ', ''), ['issueFilterHeaderChildren']],
+    ['the reader lets a header qualify no family (the qualifying term is the plain header term)', edit('routes/products.ts', 'const header = qualifying && options.leafOnly ? HEADER_QUALIFIES_TERM : HEADER_TERM', 'const header = HEADER_TERM'), ['issueFilterHeaderChildren']],
+    ['a filter that finds nothing answers the old missing-ids code', edit('routes/inventoryChecks.ts', "  if (!ids.size) throw new InventoryCheckSessionError(400, 'inventory_check_product_not_eligible')\n", ''), ['issueFilterNothing']],
+    ['RV A: leaf-only applies to every list read', edit('routes/inventoryChecks.ts', 'const leafOnly = Boolean(extra.idsOnly) && restriction.restrictIdsJson === undefined && restriction.excludeIdsJson === undefined', 'const leafOnly = restriction.restrictIdsJson === undefined && restriction.excludeIdsJson === undefined'), ['issueFilterBound']],
+    ['RV B: the leaf rule replaces a check-state restriction', edit('routes/inventoryChecks.ts', 'const leafOnly = Boolean(extra.idsOnly) && restriction.restrictIdsJson === undefined && restriction.excludeIdsJson === undefined', 'const leafOnly = Boolean(extra.idsOnly)'), ['issueFilterCheckState']],
     ['the page bound is one page short (no plus one)', edit('routes/inventoryChecks.ts', 'maxPages = Math.ceil(limit / LIST_MAX_PAGE_SIZE) + 1', 'maxPages = Math.ceil(limit / LIST_MAX_PAGE_SIZE)'), ['issueFilterBound']],
     ['the wired list raises its page size alone (a second source, not the reader clamp)', edit('lib/inventoryCheckList.ts', 'export const LIST_MAX_PAGE_SIZE = PRODUCT_LIST_MAX_PAGE_SIZE', 'export const LIST_MAX_PAGE_SIZE = 150'), ['pageSizeOneSource']],
     ['the task list cache ignores the products version', edit('routes/inventoryChecks.ts', "order=1`, { method: 'GET' }), c.executionCtx, `ict:${version}:${productsVersion}`", "order=1`, { method: 'GET' }), c.executionCtx, `ict:${version}`"), ['cacheKeyProducts']],
