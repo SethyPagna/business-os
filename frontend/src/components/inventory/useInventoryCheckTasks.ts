@@ -3,6 +3,7 @@ import { closeInventoryCheckTask, issueInventoryCheckTask, pickupInventoryCheckT
 import { createClientRequestId } from '../../api/requestIds.ts'
 import type { ConfirmRequest } from '../shared/useConfirmDialog.tsx'
 import { taskRefusalSentence, type TaskReview } from './inventoryCheckTaskText.ts'
+import { isSwitchOff404 } from './inventoryWired.ts'
 
 // The last board answer per authority boundary and branch: a later open draws it at once and reads again in the background (changed rows update in place).
 const held = new Map<string, InventoryCheckTasksAnswer>()
@@ -40,6 +41,8 @@ type Args = {
   tr: (key: string, fallback: string) => string
   askToConfirm: (request: ConfirmRequest) => Promise<boolean>
   unknownSaveKey: (cause: unknown) => string
+  /** False while the device is offline: every write is refused with the page's offline sentence, as every other save on the page is. */
+  canWriteToServer: boolean
 }
 type Attempt = { requestId: string; scope?: InventoryCheckTaskScope }
 
@@ -51,6 +54,8 @@ export function useInventoryCheckTasks(args: Args) {
   const [loading, setLoading] = useState(!held.has(key))
   const [failed, setFailed] = useState(false)
   const [off, setOff] = useState(offBoundary === boundary)
+  /** The sentence of a 403 the board answered (this account may not work tasks): the held rows are gone and this is shown instead. */
+  const [refusal, setRefusal] = useState('')
   const [handedBack, setHandedBack] = useState(false)
   const [busy, setBusy] = useState(false)
   const [retrying, setRetrying] = useState<string | null>(null)
@@ -79,10 +84,18 @@ export function useInventoryCheckTasks(args: Args) {
       else if (after?.mine === true) setHandedBack(false)
       held.set(key, answer)
       latest.current = answer
-      setBoard(answer); setFailed(false); setLoading(false)
+      setBoard(answer); setFailed(false); setRefusal(''); setLoading(false)
     } catch (cause) {
       if (controller.signal.aborted || !live.current || !argsRef.current.current()) return
-      if ((cause as { status?: unknown } | null)?.status === 404) { offBoundary = boundary; setOff(true) } else setFailed(true)
+      const refused = (cause as { status?: unknown; code?: unknown } | null)
+      if (isSwitchOff404(cause)) { offBoundary = boundary; setOff(true) }
+      else if (refused?.status === 403 && refused.code === 'inventory_check_tasks_required') {
+        // This account may not work tasks: rows held from an earlier answer (and their buttons) go, and the refusal's own sentence is shown.
+        held.delete(key); latest.current = null; setBoard(null); setFailed(false)
+        const mapped = await refusalSentence(cause)
+        if (controller.signal.aborted || !live.current || !argsRef.current.current()) return
+        setRefusal(argsRef.current.tr(mapped?.key ?? 'inventory_check_error_tasks_required', mapped?.fallback ?? 'You do not have permission to pick up or count tasks.'))
+      } else setFailed(true)
       setLoading(false)
     }
   }, [key, branchId, boundary])
@@ -98,6 +111,7 @@ export function useInventoryCheckTasks(args: Args) {
   // One write at a time. The first send asks the shared review; a repeat after an unknown outcome reuses the frozen request id and asks nothing.
   async function perform<T>(attemptKey: string, review: TaskReview | null, scopeKind: 'ids' | 'filters' | undefined, send: (attempt: Attempt) => Promise<T>, freeze?: () => Partial<Attempt>): Promise<TaskOutcome<T>> {
     if (inFlight.current) return { kind: 'busy' }
+    if (!args.canWriteToServer) return { kind: 'refused', code: 'offline', tone: 'error', message: args.tr('inventory_check_count_blocked_offline', 'Saving is unavailable while offline.') }
     let attempt = attempts.current.get(attemptKey)
     if (!attempt) {
       if (review) {
@@ -139,18 +153,18 @@ export function useInventoryCheckTasks(args: Args) {
     if (outcome.kind === 'refused' && outcome.code === 'mine') { void refresh(); return { kind: 'done', result: null, alreadyMine: true } }
     if (outcome.kind === 'done') setHandedBack(false)
     // A success that leaves for the task view reads nothing here: the view reads the board itself when it opens.
-    if ((outcome.kind === 'done' && !options.leaving) || outcome.kind === 'refused') void refresh()
+    if ((outcome.kind === 'done' && !options.leaving) || (outcome.kind === 'refused' && outcome.code !== 'offline')) void refresh()
     return outcome
   }
   async function release(task: InventoryCheckTask, review: TaskReview, options: { leaving?: boolean } = {}): Promise<TaskOutcome> {
     const outcome = await perform(`release:${task.id}`, review, undefined, attempt => releaseInventoryCheckTask(args.writeScope, task.id, attempt.requestId))
-    if ((outcome.kind === 'done' && !options.leaving) || outcome.kind === 'refused') void refresh()
+    if ((outcome.kind === 'done' && !options.leaving) || (outcome.kind === 'refused' && outcome.code !== 'offline')) void refresh()
     return outcome
   }
   async function close(task: InventoryCheckTask, review: TaskReview): Promise<TaskOutcome> {
     const outcome = await perform(`close:${task.id}`, review, undefined, attempt => closeInventoryCheckTask(args.writeScope, task.id, task.revision, attempt.requestId))
-    if (outcome.kind === 'done' || outcome.kind === 'refused') void refresh()
+    if (outcome.kind === 'done' || (outcome.kind === 'refused' && outcome.code !== 'offline')) void refresh()
     return outcome
   }
-  return { board, loading, failed, off, handedBack, busy, retrying, refresh, issue, pickup, release, close }
+  return { board, loading, failed, refusal, off, handedBack, busy, retrying, refresh, issue, pickup, release, close }
 }

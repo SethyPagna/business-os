@@ -376,7 +376,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
   const [writeScope] = useState(() => captureInventoryCheckWriteScope({ branchId, sessionId, epoch: 0 }, () => mounted.current && isCurrent()))
   const current = () => mounted.current && isCurrent() && isActorReadScopeCurrent(writeScope.readScope, false) && isActorWriteIdentityCurrent(writeScope.writeIdentity)
   const { askToConfirm, confirmDialog } = useConfirmDialog(t)
-  const tasks = useInventoryCheckTasks({ boundary, branchId, enabled: section === 'tasks', taskId, writeScope, current, t, tr, askToConfirm, unknownSaveKey })
+  const tasks = useInventoryCheckTasks({ boundary, branchId, enabled: section === 'tasks', taskId, writeScope, current, t, tr, askToConfirm, unknownSaveKey, canWriteToServer })
   const { group: groupChoice, ...listFilters } = filters
   // The date chips filter the product list only: inside a session and inside a task the date is not part of the question.
   const params: QueryParams = { ...listFilters, query: appliedQuery, page, pageSize, sessionId, checkState: filters.checkState, checkedOn: !sessionId && section === 'products' ? filters.checkedOn : '', ...(taskView ? { taskId } : {}) }
@@ -574,7 +574,9 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
           setFilters(previous => ({ ...previous, checkState: '' })); setPage(1)
           return
         }
-        if (publish()) setError(tr('inventory_check_load_failed', 'Inventory checks are unavailable. Reload to try again.'))
+        // A task view says what the server said about the task (it no longer exists, or this account may not work tasks), in that refusal's own sentence; any other failure is the generic line.
+        const taskSentence = publish() && taskView && typeof refusal?.code === 'string' && refusal.code.startsWith('inventory_check_task') ? await knownRefusal(cause) : undefined
+        if (publish()) setError(taskSentence ? tr(taskSentence.key, taskSentence.fallback) : tr('inventory_check_load_failed', 'Inventory checks are unavailable. Reload to try again.'))
       } finally { if (publish()) setLoading(false) }
     }
     void load()
@@ -1424,6 +1426,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
         {writeError ? <p role="alert" className="text-xs leading-relaxed text-red-700">{writeError}</p> : null}
         {taskView && taskRow?.status === 'closed' && !taskClosedBySelf.current ? <p role="status" className="text-xs leading-relaxed text-amber-800 dark:text-amber-200" data-task-status-line="closed">{tr('inventory_check_error_task_closed', 'This task is already closed.')}</p> : null}
         {taskView && tasks.handedBack && taskRow?.status === 'open' ? <p role="status" className="text-xs leading-relaxed text-amber-800 dark:text-amber-200" data-task-status-line="handed-back">{tr('inventory_check_task_handed_back', 'This task was handed back. Your counts are kept.')}</p> : null}
+        {section === 'tasks' && tasks.refusal ? <p role="alert" className="text-xs leading-relaxed text-red-700" data-tasks-refusal>{tasks.refusal}</p> : null}
         {section === 'tasks' && tasks.failed ? <TasksReadError text={tr('inventory_check_load_failed', 'Could not load Inventory. Try again.')} retry={t('retry')} onRetry={() => { void tasks.refresh() }} /> : null}
         {wiredNow && fresh && changedIds.length ? <div role="status" className="flex items-center justify-between gap-2 text-xs leading-relaxed text-amber-800 dark:text-amber-200" data-inventory-check-changed-elsewhere>
           <span className="min-w-0 break-words">{tr('inventory_check_changed_elsewhere', 'Changed on another device. Tap to refresh.')} ({changedIds.length})</span>
@@ -1445,7 +1448,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
         </div>
           : tasks.board ? <InventoryCheckTasksList board={tasks.board} t={t} canWork={access.canWorkTasks} busy={tasks.busy}
             onOpen={task => onSelect({ branchId, sessionId: '', taskId: task.id })} onPickup={task => { void pickupTask(task) }} onRelease={task => { void releaseTask(task) }} onClose={task => { void closeTask(task) }} />
-            : tasks.failed || tasks.off ? null : <ListSkeleton loadingText={t('loading')} />)
+            : tasks.failed || tasks.off || tasks.refusal ? null : <ListSkeleton loadingText={t('loading')} />)
           : section === 'sessions' ? (fresh && sessions?.items.length ? <InventoryCheckSessionsList items={sessions.items} t={t} onOpen={item => {
             // A pickup holds no items: its row opens the task it is for, never a session sheet.
             if (item.scope?.membership === 'pickup') { setSection('tasks'); onSelect({ branchId: String(item.branch_id), sessionId: '', taskId: item.task?.id ?? String(item.scope.task) }); return }

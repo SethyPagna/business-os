@@ -154,6 +154,15 @@ const CANON = canonicalProductsQuery(wire({}))!
 {
   const refuse = deps({ list: () => { throw Object.assign(new Error('not found'), { status: 404 }) } })
   await assert.rejects(() => loadWired({ params: params(), skipSummary: false, access: FULL, deps: refuse.deps }), NotWired, 'a 404 from /list is an OFF server')
+  // Only the route being absent is an OFF server: a 404 that carries any other code is an answer about something missing (a task that no longer exists) and the tab stays wired.
+  for (const code of [null, undefined, 'not_found']) {
+    const absent = deps({ list: () => { throw Object.assign(new Error('not found'), { status: 404, code }) } })
+    await assert.rejects(() => loadWired({ params: params(), skipSummary: false, access: FULL, deps: absent.deps }), NotWired, `a 404 with code ${code} is an OFF server`)
+  }
+  for (const code of ['inventory_check_task_not_found', 'inventory_check_session_not_found']) {
+    const missing = deps({ list: () => { throw Object.assign(new Error(code), { status: 404, code }) } })
+    await assert.rejects(() => loadWired({ params: params({ taskId: 't9', branchId: '1' }), skipSummary: false, access: FULL, deps: missing.deps }), error => !(error instanceof NotWired) && (error as { code?: string }).code === code, `a 404 ${code} is the server's own answer, never 'not wired'`)
+  }
   const other = deps({ list: () => { throw Object.assign(new Error('boom'), { status: 500 }) } })
   await assert.rejects(() => loadWired({ params: params(), skipSummary: false, access: FULL, deps: other.deps }), /boom/, 'any other failure is a failure, not a fallback')
   const unmarked = deps({ list: () => listOf([1], { wired: undefined }) })

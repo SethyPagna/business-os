@@ -224,6 +224,11 @@ export type WiredLoad = { raw: WiredRaw; fromStore: boolean; listRequests: numbe
 /** Used only until the server says how many ids an overlay read may carry (list.overlay_ids, the plan's limit). */
 const OVERLAY_CHUNK_UNTIL_TOLD = 100
 const isList = (value: unknown): value is WiredList => !!value && typeof value === 'object' && Array.isArray((value as WiredList).items)
+/** A 404 with no code, or with the generic `not_found`: the route itself is absent (ic_wired is OFF). Any other code is a real answer about a missing thing. */
+export function isSwitchOff404(cause: unknown): boolean {
+  const { status, code } = (cause ?? {}) as { status?: unknown; code?: unknown }
+  return status === 404 && (code === undefined || code === null || code === 'not_found')
+}
 export class NotWired extends Error { constructor() { super('ic_wired is off'); this.name = 'NotWired' } }
 
 const ids = (items: readonly Row[]): number[] => items.map(row => Number(row.id)).filter(id => Number.isSafeInteger(id) && id > 0)
@@ -270,7 +275,8 @@ export async function loadWired(args: WiredLoadArgs): Promise<WiredLoad> {
   }
   if (!list) {
     try { list = await deps.readList(wire, signal) } catch (cause) {
-      if ((cause as { status?: unknown } | null)?.status === 404) throw new NotWired()
+      // Only the route being absent says "not wired": a 404 that carries another code is the server answering about something it found missing (a task that no longer exists), and the tab stays wired.
+      if (isSwitchOff404(cause)) throw new NotWired()
       throw cause
     }
     listRequests += 1

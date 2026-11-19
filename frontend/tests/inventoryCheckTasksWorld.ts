@@ -57,6 +57,8 @@ export async function createTasksWorld(options: { branches?: Array<{ id: number;
     user: viewerUser('employee') as ReturnType<typeof viewerUser>,
     language: 'en' as 'en' | 'km',
     closeTaskOnSubmit: true,
+    /** False: the device is offline (the app's canWriteToServer), so every write is refused before it is sent. */
+    online: true,
     /** A viewer who may not see staff identity gets no issued_by key at all (contract 3.1). */
     hideIssuer: false,
     /** The answer of a submission says the task closed even when part of it is left (a closed-elsewhere race). */
@@ -72,7 +74,7 @@ export async function createTasksWorld(options: { branches?: Array<{ id: number;
     mount: async () => {
       const words = pack(world.language)
       const app = {
-        user: world.user, page: 'inventory', authReady: true, canWriteToServer: true, language: world.language, settings: { navigation_mode: 'sections' }, AccessDenied: () => 'Access denied',
+        user: world.user, page: 'inventory', authReady: true, canWriteToServer: world.online, language: world.language, settings: { navigation_mode: 'sections' }, AccessDenied: () => 'Access denied',
         t: (key: string) => words[key] ?? key, notify: (text: string, tone: string) => { world.notices.push({ text, tone }) },
         // The app's guard in miniature: a hub switch or a page leave with dirty work raises the three-option guard (it is recorded here) and goes nowhere.
         navigateTo: (page: string, anchor?: string) => {
@@ -100,7 +102,7 @@ export async function createTasksWorld(options: { branches?: Array<{ id: number;
       captureInventoryCheckWriteScope: (context: unknown, isCurrent: unknown) => ({ context, readScope: {}, writeIdentity: {}, isCurrent }),
       readInventoryCheckProducts: async (params: Record<string, unknown>) => { record('products-old', params); throw Object.assign(new Error('the older list must not be read'), { status: 500 }) },
       readInventoryCheckList: async (params: Record<string, unknown>) => {
-        record('list', params)
+        record('list', params); fail('list')
         const ids = params.taskId ? world.taskProducts.get(String(params.taskId)) ?? [] : Array.from({ length: world.productCount }, (_v, index) => index + 1)
         const page = Number(params.page) || 1, pageSize = Number(params.pageSize) || 20
         return { wired: true, projected: false, items: ids.slice((page - 1) * pageSize, page * pageSize).map(rowOf), total: ids.length, page, pageSize, totalPages: Math.max(1, Math.ceil(ids.length / pageSize)), overlay_ids: 150,
