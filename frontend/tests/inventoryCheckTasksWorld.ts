@@ -37,8 +37,8 @@ function installWindow() {
 export const open = (section: string) => applyLocation(`https://admin.example.test/inventory#hub:inventory:${section}`)
 
 export type Call = { route: string; params: Record<string, unknown> }
-export async function createTasksWorld(options: { branches?: Array<{ id: number; name: string }>; products?: number } = {}) {
-  const harness = await createHarness({ observe: ['api/actorReadScope.ts', 'utils/dirtyWork.ts'] })
+export async function createTasksWorld(options: { branches?: Array<{ id: number; name: string }>; products?: number; /** Rewrites a source module as it loads (a planted defect for a test that must catch it). */ mutateSource?: (key: string, code: string) => string } = {}) {
+  const harness = await createHarness({ observe: ['api/actorReadScope.ts', 'utils/dirtyWork.ts'], ...(options.mutateSource ? { mutateSource: options.mutateSource } : {}) })
   installWindow()
   open('products')
   const branches = options.branches ?? [{ id: 1, name: 'Main' }]

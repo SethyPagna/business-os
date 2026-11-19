@@ -1041,8 +1041,10 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
           const data = serializeCountDraft(rest, null)
           if (data) writeWorkDraft(draftAuthority.draftKey, data); else clearWorkDraft(draftAuthority.draftKey)
         }
-        if (attempt.taskId) { if (closedTask) taskClosedBySelf.current = true; void tasks.refresh() }
-        if (closedTask && Object.keys(rest).length === 0) { onSelect({ branchId, sessionId: '', taskId: '' }); return }
+        // A close that leaves for the board does not read it here: the board reads itself when it opens (one board read, not two).
+        const toBoard = closedTask && Object.keys(rest).length === 0
+        if (attempt.taskId) { if (closedTask) taskClosedBySelf.current = true; if (!toBoard) void tasks.refresh() }
+        if (toBoard) { onSelect({ branchId, sessionId: '', taskId: '' }); return }
         reloadAll()
       }
     } catch (cause) {

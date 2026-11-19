@@ -150,7 +150,8 @@ export function useInventoryCheckTasks(args: Args) {
   async function pickup(task: InventoryCheckTask, review: TaskReview, options: { leaving?: boolean } = {}): Promise<TaskOutcome> {
     const outcome = await perform(`pickup:${task.id}`, review, undefined, attempt => pickupInventoryCheckTask(args.writeScope, task.id, attempt.requestId))
     // A task I already hold is the success this asked for.
-    if (outcome.kind === 'refused' && outcome.code === 'mine') { void refresh(); return { kind: 'done', result: null, alreadyMine: true } }
+    // A view that is about to open reads the board itself, so it is not read twice.
+    if (outcome.kind === 'refused' && outcome.code === 'mine') { if (!options.leaving) void refresh(); return { kind: 'done', result: null, alreadyMine: true } }
     if (outcome.kind === 'done') setHandedBack(false)
     // A success that leaves for the task view reads nothing here: the view reads the board itself when it opens.
     if ((outcome.kind === 'done' && !options.leaving) || (outcome.kind === 'refused' && outcome.code !== 'offline')) void refresh()
