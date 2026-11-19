@@ -13,13 +13,14 @@
 //                      anything else (a newer count was made since)                  ->  nothing; the newer count stands
 //   Applying the same request again answers from the stored operation (nothing is inserted twice); redo closes only when the first apply did (issue_closed true).
 import { waitingLineSql } from './inventoryCheckSessions'
-import { autoCloseParams, autoCloseTaskStatements } from './inventoryCheckTasks'
+import { autoCloseParams, autoCloseTaskStatements, reopenParams, reopenTaskStatements } from './inventoryCheckTasks'
 import type { StockWriteStatement } from './productBatches'
 
 type Statement = StockWriteStatement
 export const SET_CLOSE_TITLE = 'Set from Inventory'
 export const SET_CLOSE_MEMBERSHIP = 'stock_set'
 const EPS = '0.000000001'
+const I = 'inventory_check_items'
 
 // The product's newest done/issue item at the branch inside the actor's organization (the same order the Issues filter uses).
 export const LATEST = `SELECT i.session_id AS session_id, i.state AS state, i.counted_quantity AS counted, s.scope_json AS scope_json
@@ -113,4 +114,45 @@ export function reopenIssueStatements(args: SetCloseArgs, now = new Date().toISO
     ...eventStatements(params, 'Undo of a Set reopened the difference'),
     // No auto-close: the copy restores a record made earlier, it is not a count (owner ruling, 19 Nov), and the done rule skips its session.
   ]
+}
+
+// THE SET'S OWN COUNT, TAKEN BACK AND RESTORED (owner, 19 Nov: a task's state always follows the counts in effect). A Set that closed a difference wrote one closed session (membership stock_set) holding one Done item:
+// the Set's count. An Undo takes that count back (the item turns unstarted: its figure stays in baseline_quantity, its time in updated_at) and reopens the tasks that rested on it; a Redo turns it back into the Done
+// count it was, at its ORIGINAL time, and runs the normal auto-close. The sessions an Undo or a Redo writes (stock_set_undo, restore) are still never counts. Inventory_check_sessions.scope_json and the events'
+// action list are immutable (migration 0259), which is why the take-back is a state change of the one item, not a marker on the session.
+const SET_SESSION = `(SELECT e.session_id FROM inventory_check_events e WHERE e.actor_id=@setActor AND e.request_id=@setKey)`
+const EV = 'INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at)'
+/** Where a Set's own count session is found: the create event of generation 0, by the account that made the Set (one seek of the events' unique key). */
+export type SetCountOrigin = { setActor: number; setKey: string }
+export const setCountKey = (operation: string): string => `stock-set-${operation}-g0-create`
+/** The organization and branch of a Set's count session, as an expression over the same lookup (undefined when the Set closed no difference). The reopen fences by THIS organization, never the undoing user's. */
+export const SET_SESSION_FACTS_SQL = `(SELECT json_object('org',s.organization_id,'branch',s.branch_id) FROM inventory_check_events e CROSS JOIN inventory_check_sessions s ON s.id=e.session_id WHERE e.actor_id=@setActor AND e.request_id=@setKey)`
+
+/** Undo: AFTER reopenIssueStatements (they read the latest count, which must still be the Set's). Statements 0-1 take the count back, 2-3 reopen the tasks (the answer rows of statement 3). */
+export function takeBackSetCountStatements(args: SetCloseArgs, origin: SetCountOrigin, now = new Date().toISOString()): { statements: Statement[]; reopenedAt: number } {
+  const base = parameters(args, now), params = { ...reopenParams({ src: null, undo: true, cause: 'set_undone', organization: args.organization, branchId: args.branchId, actorId: args.actorId, actorName: args.actorName, key: base.key, hash: base.hash, now }),
+    product: args.productId, setActor: origin.setActor, setKey: origin.setKey }
+  const reopen = reopenTaskStatements(SET_SESSION)
+  return { reopenedAt: 3, statements: [
+    { sql: `${EV} SELECT i.session_id,i.product_id,@actorId,@actorName,'observe',@key||'-count-taken-back',@hash,
+        json_object('state',i.state,'counted_quantity',i.counted_quantity,'reason',i.reason,'revision',i.revision),
+        json_object('state','unstarted','counted_quantity',NULL,'reason',NULL,'revision',i.revision+1,'note','Undo of the Set took its count back'),json_object('sessionRevision',0,'itemRevision',i.revision+1),@now
+      FROM ${I} i WHERE i.session_id=${SET_SESSION} AND i.product_id=@product AND i.branch_id=@branchId AND i.state='done'`, params },
+    { sql: `UPDATE ${I} SET state='unstarted',counted_quantity=NULL,revision=revision+1 WHERE session_id=${SET_SESSION} AND product_id=@product AND branch_id=@branchId AND state='done'`, params },
+    ...reopen.statements.map(({ sql }) => ({ sql, params })),
+  ] }
+}
+/** Redo: after closeIssueStatements(restore). The count is restored at its ORIGINAL time (updated_at untouched; the figure is baseline_quantity), then the NORMAL auto-close runs over the Set's own session. */
+export function restoreSetCountStatements(args: SetCloseArgs, origin: SetCountOrigin, now = new Date().toISOString()): { statements: Statement[]; closedAt: number } {
+  const base = parameters(args, now), params = { ...autoCloseParams({ src: '', organization: args.organization, branchId: args.branchId, actorId: args.actorId, actorName: args.actorName, key: base.key, hash: base.hash, now }),
+    product: args.productId, setActor: origin.setActor, setKey: origin.setKey }
+  const auto = autoCloseTaskStatements(SET_SESSION)
+  return { closedAt: 2 + auto.closedAt, statements: [
+    { sql: `${EV} SELECT i.session_id,i.product_id,@actorId,@actorName,'observe',@key||'-count-restored',@hash,
+        json_object('state',i.state,'counted_quantity',i.counted_quantity,'reason',i.reason,'revision',i.revision),
+        json_object('state','done','counted_quantity',i.baseline_quantity,'reason',NULL,'revision',i.revision+1,'note','Redo of the Set restored its count'),json_object('sessionRevision',0,'itemRevision',i.revision+1),@now
+      FROM ${I} i WHERE i.session_id=${SET_SESSION} AND i.product_id=@product AND i.branch_id=@branchId AND i.state='unstarted'`, params },
+    { sql: `UPDATE ${I} SET state='done',counted_quantity=baseline_quantity,revision=revision+1 WHERE session_id=${SET_SESSION} AND product_id=@product AND branch_id=@branchId AND state='unstarted'`, params },
+    ...auto.statements.map(({ sql }) => ({ sql, params })),
+  ] }
 }

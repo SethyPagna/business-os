@@ -94,7 +94,7 @@ async function main() {
       const cap = await plan(capSql, { organization: org, branchId: 1 })
       assert.match(cap, new RegExp(`SEARCH s USING INDEX ${OPEN} \\(organization_id=\\? AND <expr>=\\? AND branch_id=\\?\\)`), `the cap guard (org ${org}) counts the open tasks through the partial index: ${cap}`)
       const list = await plan(listSql, { org, branchId: 1, shown: 30, closedShown: 5 })
-      assert.match(list, new RegExp(`CO-ROUTINE open_t \\| SEARCH s USING INDEX ${OPEN} \\(organization_id=\\? AND <expr>=\\? AND branch_id=\\?\\)`), `the board's open tasks (org ${org}) come from the partial index: ${list}`)
+      assert.match(list, new RegExp(`SEARCH s USING INDEX ${OPEN} \\(organization_id=\\? AND <expr>=\\? AND branch_id=\\?\\)`), `the board's open tasks (org ${org}) come from the partial index: ${list}`)
       assert.match(list, /SEARCH pk USING INDEX inventory_check_sessions_kind_task \(organization_id=\? AND <expr>=\? AND <expr>=\?\)/, `the pickup of each shown task is a seek by task id (org ${org}): ${list}`)
       if (org === 1) console.log('PLAN cap guard:', cap)
     }

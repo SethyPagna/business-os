@@ -43,9 +43,9 @@ check('no call site writes a task size as a literal: the route reads the limits 
   assert.equal(/maxProducts:\s*\d+/.test(writer), false)
   assert.equal(/maxOpenTasks:\s*\d+/.test(writer), false)
 })
-check('the cap on issuing and the number of open tasks the board shows are ONE value: the board is cut at maxOpenTasks and the issue is refused at it', () => {
+check('the cap refuses an issue at maxOpenTasks, and the board shows EVERY open task (a reopen can take a branch over the cap)', () => {
   const route = fs.readFileSync(path.join(src, 'routes/inventoryChecks.ts'), 'utf8'), writer = fs.readFileSync(path.join(src, 'lib/inventoryCheckSessions.ts'), 'utf8')
-  assert.ok(route.includes('shown: taskLimits.maxOpenTasks'), 'the board is cut at the cap')
+  assert.equal(route.includes('shown: taskLimits.maxOpenTasks'), false, 'the board is not cut at the cap: a take-back is never refused, so open tasks can exceed it')
   assert.ok(route.includes('maxOpenTasks: getInventoryCheckTaskLimits(c.env).maxOpenTasks'), 'the issue is refused at the same number')
   assert.ok(writer.includes('<@maxOpenTasks') && writer.includes("'inventory_check_task_limit'"))
   assert.equal(/tasksShown/.test(route + writer), false, 'the old second number is gone')

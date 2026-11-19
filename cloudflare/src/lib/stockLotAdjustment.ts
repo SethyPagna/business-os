@@ -91,7 +91,7 @@ import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersions } from './cache'
 import { readSwitch } from './readSwitches'
-import { closedTasksSelect, closeIssueStatements, reopenIssueStatements } from './stockSetClosesIssue'
+import { closedTasksSelect, closeIssueStatements, reopenIssueStatements, restoreSetCountStatements, setCountKey, SET_SESSION_FACTS_SQL, takeBackSetCountStatements } from './stockSetClosesIssue'
 import { findConsumingBlocker, findLaterChangeBlocker, type StockRefusalDetails } from './stockRefusalBlocker'
 import {
   UNDO_CLOSED_BRANCH_RETIRED_CODE, UNDO_CLOSED_BRANCH_RETIRED_MESSAGE, addressedStatements, branchEffectRefusal, branchRedirectGuardRefusal,
@@ -141,6 +141,7 @@ type Effect = {
 
 type OperationRow = {
   id: string
+  actor_id: number
   request_json: string
   response_json: string
   before_json: string
@@ -633,10 +634,12 @@ export async function replayStockLotSet(
       (SELECT received_at FROM product_batches WHERE id=@batch) AS received_at,
       COALESCE((SELECT quantity FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch),0) AS lot_quantity,
       COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@product AND branch_id=@branch),0) AS branch_quantity,
-      (SELECT id FROM inventory_movements WHERE reference_id=@forward ORDER BY id DESC LIMIT 1) AS forward_id`)
+      (SELECT id FROM inventory_movements WHERE reference_id=@forward ORDER BY id DESC LIMIT 1) AS forward_id,
+      ${SET_SESSION_FACTS_SQL} AS set_session`)
     .get<{ product_name: string | null; branch_name: string | null; branch_active: number | null; received_at: string | null
-      lot_quantity: number; branch_quantity: number; forward_id: number | null }>({
+      lot_quantity: number; branch_quantity: number; forward_id: number | null; set_session: string | null }>({
       product: before.productId, branch: before.branchId, batch: before.batchId, forward: stockSetReference(row.id, expected),
+      setActor: row.actor_id, setKey: setCountKey(row.id),
     })
   // An Undo cannot carry a confirmed redirect: a Set at a branch that has since been disabled stays closed.
   if (Number(facts?.branch_active ?? 1) !== 1) throw new StockLotSetReplayError(UNDO_CLOSED_BRANCH_RETIRED_MESSAGE, 409, UNDO_CLOSED_BRANCH_RETIRED_CODE)
@@ -709,9 +712,16 @@ export async function replayStockLotSet(
     statements.push(...forwardMovementStatements(before, effect, user, stockSetReference(row.id, next), row.id))
   }
   // The Issue this Set closed (issue_closed in its stored answer) is open again after an Undo, and closed again by a Redo; both only while the Set's own count is still the latest (stockSetClosesIssue.ts).
+  // The Set's own count (the one item of its stock_set session) is taken back by the Undo and restored by the Redo, and the tasks that rested on it reopen or close in this same batch (owner, 19 Nov).
+  // Everything on the count side is fenced by the organization and branch of the Set's own SESSION (facts.set_session), not the undoing user's: an Undo can then never turn the item unstarted while reopening nothing.
   if ((JSON.parse(row.response_json || '{}') as { issue_closed?: unknown }).issue_closed === true) {
-    const closing = { productId: before.productId, branchId: before.branchId, organization: user.organization_id ?? null, operation: row.id, generation: next, actorId: user.id, actorName: actorSnapshot(user) ?? '' }
-    statements.push(...(direction === 'undo' ? reopenIssueStatements(closing) : closeIssueStatements(closing, undefined, { restore: true })))
+    const origin = facts?.set_session ? JSON.parse(facts.set_session) as { org: number | null; branch: number } : null
+    const now = new Date().toISOString() // ONE time for the Issue side and the count side (their follow-ups match events by created_at)
+    const closing = { productId: before.productId, branchId: origin ? Number(origin.branch) : before.branchId, organization: origin ? origin.org ?? null : user.organization_id ?? null, operation: row.id, generation: next, actorId: user.id, actorName: actorSnapshot(user) ?? '' }
+    const where = { setActor: row.actor_id, setKey: setCountKey(row.id) }
+    statements.push(...(direction === 'undo'
+      ? [...reopenIssueStatements(closing, now), ...takeBackSetCountStatements(closing, where, now).statements]   // ORDER: the Issue side reads the latest count, which must still be the Set's
+      : [...closeIssueStatements(closing, now, { restore: true }), ...restoreSetCountStatements(closing, where, now).statements]))
   }
   statements.push(
     { sql: "UPDATE stock_lot_adjustment_operations SET generation=@next,state=@target,revision_json=json_set(revision_json,'$.generation',@next) WHERE id=@operation", params },
