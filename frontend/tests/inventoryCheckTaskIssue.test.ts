@@ -40,6 +40,22 @@ assert.ok(world.notices.some(notice => notice.text === words.inventory_check_tas
 assert.equal(ticks(surface).length, 0, 'Issue mode exits'); assert.equal(world.count('tasks') + world.count('list') >= 0, true)
 await surface.unmount()
 
+// ---- the date chosen before Issue mode stays visible in it (Issue by filter sends it, so it may never be hidden) ----
+reset(); open('products')
+surface = await world.mount()
+await surface.click(surface.find(node => node.getAttribute('data-day-chip') === '2026-11-18', 'day chip'))
+assert.equal(world.ofRoute('list').at(-1)?.params.checkedOn, '2026-11-18', 'the list is filtered by the day')
+await enter(surface)
+const chip = () => surface.find(node => node.getAttribute('data-day-chip') === '2026-11-18', 'day chip in Issue mode')
+assert.ok(chip(), 'the day chips are still on screen in Issue mode')
+assert.equal(chip().getAttribute('aria-pressed'), 'true', 'with the chosen day marked')
+await surface.click(issueButton(surface))
+assert.equal((world.ofRoute('list').at(-1)?.params.checkedOn), '2026-11-18')
+assert.ok(surface.text().includes('2026'), 'the review names the day that will be sent')
+await confirm(surface, words.inventory_check_task_issue)
+assert.equal((world.ofRoute('issue')[0].params as { scope: { filters?: { checkedOn?: string } } }).scope.filters?.checkedOn, '2026-11-18', 'and the filter sent is that day')
+await surface.unmount()
+
 // ---- refusals: each one's own sentence, the mode and the picks stay ----
 const refuse = (code: string, status: number, extra: Record<string, unknown> = {}) => Object.assign(new Error(code), { code, status, ...extra })
 const cases: Array<[Error, string]> = [

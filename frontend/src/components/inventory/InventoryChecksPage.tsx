@@ -1429,8 +1429,11 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
                 </fieldset>
                 {contextBar}
               </div>
-              {issuingNow ? <InventoryCheckIssueBar pickedCount={picks.size} blocked={issueBlocked} busy={tasks.busy || busy} issueLabel={tasks.retrying === 'issue' ? t('retry') : undefined}
-                onExit={() => { setIssuing(false); setPicks(new Set()) }} onClear={() => setPicks(new Set())} onIssue={() => { void issueTask() }} t={t} />
+              {issuingNow ? <>
+                {/* The list in Issue mode is filtered by the chosen day, and Issue by filter sends it: so the day chips stay on screen (only the rail; no counting controls) and the admin can see and clear it. */}
+                {dayChips.length > 0 ? <InventoryCheckSelectionBar selectedCount={0} blocked="" busy={false} canMarkChecked={false} counting={false} days={dayChips} checkedOn={filters.checkedOn ?? ''} onCheckedOn={chooseDay} daysDisabled={controlsLocked || !fresh} onMarkChecked={() => {}} onClear={() => {}} onSubmit={() => {}} t={t} /> : null}
+                <InventoryCheckIssueBar pickedCount={picks.size} blocked={issueBlocked} busy={tasks.busy || busy} issueLabel={tasks.retrying === 'issue' ? t('retry') : undefined}
+                onExit={() => { setIssuing(false); setPicks(new Set()) }} onClear={() => setPicks(new Set())} onIssue={() => { void issueTask() }} t={t} /></>
               : barShown && !(taskView && !access.canWorkTasks) ? <InventoryCheckSelectionBar selectedCount={selectedIds.length} blocked={submitBlocked} busy={busy || !listMode} canMarkChecked={access.fields.stock} openGroupsOnly={collapsed.size > 0}
                 counting={access.canCheck && !!branchId} days={dayChips} checkedOn={filters.checkedOn ?? ''} onCheckedOn={chooseDay} daysDisabled={controlsLocked || !fresh}
                 submitLabel={submitAttempt.current ? t('retry') : undefined} onMarkChecked={markPageChecked} onClear={clearSelection} onSubmit={() => { void submit() }} t={t} /> : null}
