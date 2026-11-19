@@ -79,6 +79,7 @@ const doubles = {
       }
       return answer(query)
     },
+    readInventoryCheckTasks: async () => { throw Object.assign(new Error('Not found'), { status: 404, code: 'not_found' }) },
     readInventoryCheckSessions: async () => ({ items: [session], total: 1, page: 1, pageSize: 20 }),
     readInventoryCheckSession: async () => ({ item: session, items: [member] }),
     readInventoryCheckHistory: async () => ({ items: [], total: 0, page: 1, pageSize: 20 }),
@@ -125,23 +126,17 @@ try {
   assert.equal(last().query.get('page'), '3'); noError(products, 'page 3'); assert.ok(products.text().includes('Product page 3'))
   neither(wire.slice(productsFrom), 'Products pages 1-3 (OFF)')
 
-  // ---- OFF: the Issues tab and its pages ----
-  const issuesFrom = wire.length
-  await products.click(products.button('issues'))
-  noError(products, 'Issues'); assert.equal(last().query.get('page'), '1')
-  assert.equal(last().query.get('state'), 'issue', 'Issues asks the old list in its own words: state=issue')
-  assert.ok(products.text().includes('Issue page 1'), 'the Issues answer is drawn')
-  assert.ok(products.text().includes('Shelf short (old list)'), "the old list's Issues show each issue's reason")
-  assert.ok(products.text().includes('Counted 3'), 'and the counted figure')
-  assert.equal(products.findAll(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'Open session: Branch one').length, 1, 'and a link to the session that recorded it')
-  assert.ok(!(await menuSections(products)).includes('checkState'), 'and the Issues filter menu has no check-status choice (the tab is the status)')
-  await step(products)
-  assert.equal(last().query.get('page'), '2'); assert.equal(last().query.get('state'), 'issue'); noError(products, 'Issues page 2'); assert.ok(products.text().includes('Issue page 2'))
-  neither(wire.slice(issuesFrom), 'Issues and its page 2 (OFF)')
+  // ---- OFF: there is no Issues section any more; Tasks needs the list switch, which GET /tasks answers with 404 once a branch is chosen, and then the section goes ----
+  assert.equal(products.findAll(node => node.tagName === 'BUTTON' && node.textContent === 'issues').length, 0, 'no Issues section chip any more')
+  await products.click(products.button('inventory_check_tasks'))
+  assert.ok(products.text().includes('Choose a branch first.'), 'with several branches the board asks for one, and reads nothing')
+  await products.click(products.button('Branch one'))
+  assert.equal(products.findAll(node => node.tagName === 'BUTTON' && node.textContent === 'inventory_check_tasks').length, 0, 'GET /tasks answered 404: this server has no Tasks, so the chip is gone')
+  assert.equal(products.button('inventory').getAttribute('aria-pressed'), 'true', 'and the page is back on Inventory')
 
   // ---- OFF: back to Products, then inside a session ----
   await products.click(products.button('inventory'))
-  noError(products, 'back to Products'); assert.equal(last().query.has('state'), false, 'Products does not carry the Issues key back')
+  noError(products, 'back to Products'); assert.equal(last().query.has('state'), false, 'Products asks the old list for no status')
   await products.click(products.button('sessions'))
   await products.click(products.button(/./, products.find(node => node.getAttribute('data-inventory-check-session') === 'check-1', 'session row')))
   noError(products, 'session'); assert.equal(last().query.get('sessionId'), 'check-1')
@@ -149,7 +144,7 @@ try {
   assert.ok((await menuSections(products)).includes('checkState'), 'inside a session the old list has a status choice of its own (unstarted | done | issue), so it is offered')
   await step(products)
   assert.equal(last().query.get('page'), '2'); assert.equal(last().query.get('sessionId'), 'check-1'); noError(products, 'session page 2')
-  for (const [option, old] of [['inventory_check_unstarted', 'unstarted'], ['done', 'done'], ['issues', 'issue']]) {
+  for (const [option, old] of [['inventory_check_unstarted', 'unstarted'], ['done', 'done'], ['inventory_check_status_differs', 'issue']]) {
     await chooseFilter(products, 'checkState', option)
     assert.equal(last().query.get('state'), old, `the ${option} choice is asked in the old list's word`); assert.equal(last().query.get('sessionId'), 'check-1'); assert.equal(last().query.get('page'), '1')
     noError(products, option)
@@ -159,43 +154,20 @@ try {
   neither(wire.slice(sessionFrom), 'a session, its page 2 and its status choices (OFF)')
   await products.unmount()
 
-  // ---- OFF: a cold landing on Issues has not heard from the server yet ----
+  // ---- OFF: an old Issues link lands on Inventory: this server has no Tasks to map it to ----
   open('hub:inventory:issues')
-  aliasUnderstood = true
   const before = wire.length
   const cold = await mount()
-  noError(cold, 'cold Issues')
-  assert.equal(wire.length - before, 1, 'a cold landing on Issues reads once: finding out which server this is does not reload the list')
-  assert.equal(last().query.get('checkState'), 'issue', 'with nothing known yet it uses the name both servers understand')
-  assert.equal(last().query.has('state'), false)
-  assert.ok(cold.text().includes('Issue page 1'))
-  await step(cold)
-  assert.equal(last().query.get('page'), '2'); assert.equal(last().query.get('state'), 'issue', 'and once the answer has shown the old list it speaks the old word'); assert.equal(last().query.has('checkState'), false)
-  assert.equal(last().query.has('summary'), false); noError(cold, 'cold Issues page 2')
-  await cold.click(cold.button('Open session: Branch one'))
-  assert.equal(last().query.get('sessionId'), 'check-1'); assert.equal(last().query.get('branchId'), '1', "the Open session link opens the issue's own session and branch")
+  noError(cold, 'old Issues link')
+  assert.equal(wire.length - before, 1, 'an old Issues link reads the list once')
+  assert.equal(cold.button('inventory').getAttribute('aria-pressed'), 'true', 'and shows Inventory')
+  assert.equal(last().query.has('state'), false); assert.equal(last().query.has('checkState'), false)
+  assert.ok(cold.text().includes('Product page 1'))
   await cold.unmount()
-  aliasUnderstood = false
 
   // ---- The switch moves under an open tab (IC-R0): the held key belongs to the other list, the first ask is refused, and the SAME load asks once in the other list's words ----
-  // OFF -> ON: the tab learned the old list on the Issues tab (state=issue); the ic_simple list refuses that word.
-  open('hub:inventory:products')
-  const turning = await mount()
-  await turning.click(turning.button('issues'))
-  assert.equal(last().query.get('state'), 'issue', 'the tab learned the old list and speaks its words')
-  server = 'on'
+  // The older list's status words are only spoken inside a session now; the two moves below (ON -> OFF and OFF -> ON with a held status) cover the switch moving under an open tab.
   let from = wire.length
-  await step(turning)
-  noError(turning, 'OFF->ON page step')
-  assert.equal(wire.length - from, 2, 'a refused key costs one more ask, not a loop: the old word, then the shared one')
-  assert.equal(wire[from].query.get('state'), 'issue'); assert.equal(last().query.get('checkState'), 'issue'); assert.equal(last().query.has('state'), false)
-  assert.ok(turning.text().includes('Issue page 2'), 'and the page recovers on the page it was on, with no Retry')
-  from = wire.length
-  await step(turning)
-  assert.equal(wire.length - from, 1); assert.equal(last().query.get('page'), '3'); assert.equal(last().query.get('summary'), '0', 'now that the answer was the check-status list, page steps skip the counts again'); assert.equal(last().query.get('checkState'), 'issue')
-  await turning.unmount()
-  server = 'off'
-
   // ON -> OFF with a STATUS FILTER held: the ic_simple list offered "Checked OK"; once the switch is off the old list refuses checkState, and it has no word for it outside a session.
   server = 'on'
   open('hub:inventory:products')
@@ -256,8 +228,8 @@ try {
   assert.equal(last().query.get('page'), '2'); assert.equal(last().query.get('summary'), '0', 'ON: a page step inside the scope asks the server to skip the counts')
   await step(simple)
   assert.equal(last().query.get('summary'), '0')
-  await simple.click(simple.button('issues'))
-  assert.equal(last().query.get('checkState'), 'issue', 'ON: the Issues tab asks with checkState'); assert.equal(last().query.has('state'), false); assert.equal(last().query.has('summary'), false, 'ON: a changed scope asks for fresh counts')
+  await chooseFilter(simple, 'checkState', 'inventory_check_status_differs')
+  assert.equal(last().query.get('checkState'), 'issue', 'ON: a Differs choice asks with checkState'); assert.equal(last().query.has('state'), false); assert.equal(last().query.has('summary'), false, 'ON: a changed scope asks for fresh counts')
   await step(simple)
   assert.equal(last().query.get('page'), '2'); assert.equal(last().query.get('summary'), '0'); assert.equal(last().query.get('checkState'), 'issue')
   assert.ok(wire.slice(onFrom).some(entry => entry.query.has('summary')) && wire.slice(onFrom).some(entry => entry.query.has('checkState')), 'positive control: the walk does carry both keys when the server speaks them')

@@ -7,7 +7,6 @@ import Bike from 'lucide-react/dist/esm/icons/bike.js'
 import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
 import ClipboardCheck from 'lucide-react/dist/esm/icons/clipboard-check.js'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
-import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
 import Factory from 'lucide-react/dist/esm/icons/factory.js'
 import Gauge from 'lucide-react/dist/esm/icons/gauge.js'
 import Gift from 'lucide-react/dist/esm/icons/gift.js'
@@ -30,7 +29,7 @@ const ICONS_BY_SECTION: Record<string, LucideIcon> = {
   'branches:overview': Gauge,
   'inventory:products': PackageSearch,
   'inventory:sessions': ClipboardList,
-  'inventory:issues': AlertCircle,
+  'inventory:tasks': ClipboardList,
   'branches:transfers': ArrowLeftRight,
   'branches:rfid': RadioTower,
   'sales:sales': ReceiptText,

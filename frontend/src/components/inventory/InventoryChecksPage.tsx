@@ -11,7 +11,7 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp, type AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import { claimSyncProblemPresentation } from '../../utils/syncProblemLifecycle.ts'
 import { captureActorReadScope, captureActorWriteIdentity, isActorReadScopeCurrent, isActorWriteIdentityCurrent } from '../../api/actorReadScope.ts'
-import { captureInventoryCheckWriteScope, changeInventoryCheckSession, createInventoryCheckSession, readInventoryCheckHistory, readInventoryCheckList, readInventoryCheckLots, readInventoryCheckOverlay, readInventoryCheckProducts, readInventoryCheckSession, readInventoryCheckSessions, saveInventoryCheckObservation, submitInventoryCheckCounts, type InventoryCheckApproval, type InventoryCheckSession, type InventoryCheckSessionItem } from '../../api/inventoryChecksTransport.ts'
+import { captureInventoryCheckWriteScope, changeInventoryCheckSession, createInventoryCheckSession, readInventoryCheckHistory, readInventoryCheckList, readInventoryCheckLots, readInventoryCheckOverlay, readInventoryCheckProducts, readInventoryCheckSession, readInventoryCheckSessions, saveInventoryCheckObservation, submitInventoryCheckCounts, type InventoryCheckApproval, type InventoryCheckSession, type InventoryCheckSessionItem, type InventoryCheckTask } from '../../api/inventoryChecksTransport.ts'
 import type { QueryParams } from '../../api/query.ts'
 import { currentDataEpoch } from '../../api/dataEpoch.ts'
 import { peekProductSearch, primeProductSearch, getProductFilters } from '../../api/productReadTransport.ts'
@@ -20,7 +20,8 @@ import { createClientRequestId } from '../../api/requestIds.ts'
 import { getInventoryCheckAccess, type InventoryCheckAccess } from '../../utils/inventoryCheckAccess.ts'
 import { effectivePermissions, isAdminControlUser } from '../../utils/permissions.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import { readWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
+import { clearWorkDraft, flushPendingWorkDraft, readWorkDraft, scheduleWorkDraftWrite, scopedWorkDraftKey, writeWorkDraft } from '../../utils/workDrafts.ts'
+import { isDraftAuthorityCurrent, openDraftAuthority } from '../../utils/draftAuthority.ts'
 import { getDirtyWork, registerDirtyWork } from '../../utils/dirtyWork.ts'
 import { fmtDateOnly, fmtDateTime24 } from '../../utils/formatters.ts'
 import { isExactBarcodeHit } from '../../utils/scanExactHit.ts'
@@ -30,7 +31,11 @@ import { useIsCompactViewport } from '../../utils/useViewport.ts'
 import type { InventoryCheckListStatus, InventoryCheckLotRow, InventoryCheckObservation, InventoryCheckPatch, InventoryCheckProduct } from '../../types/inventoryChecks.ts'
 import InventoryCheckControls, { countActiveFilters, type InventoryCheckFilters } from './InventoryCheckControls.tsx'
 import InventoryCheckRows, { InventoryCheckSheetHeader, type InventoryCheckFocusRequest } from './InventoryCheckRows.tsx'
-import InventoryCheckListRows, { InventoryCheckListHeader, InventoryCheckSelectionBar, type ListDraft } from './InventoryCheckListRows.tsx'
+import InventoryCheckListRows, { InventoryCheckIssueBar, InventoryCheckListHeader, InventoryCheckSelectionBar, type ListDraft } from './InventoryCheckListRows.tsx'
+import InventoryCheckTasksList, { TaskActions, TasksHeader, TasksReadError } from './InventoryCheckTasksList.tsx'
+import { inventoryCheckTasksOff, useInventoryCheckTasks } from './useInventoryCheckTasks.ts'
+import { filterScopeText, pickerText, progressOrAllText, taskRefusalSentence, taskReview, taskScopeOf } from './inventoryCheckTaskText.ts'
+import { countDraftBaseKey, judgeRestored, parseCountDraft, serializeCountDraft, type CountDraftEntry } from './inventoryCheckCountDrafts.ts'
 import { checkDaysOf, dayChipsOf, type CheckDay } from './inventoryCheckDays.ts'
 import { finiteQuantity, parseCount } from './InventoryCheckCountEditor.tsx'
 import { fixStockOpening, fixStockRequestId, type FixStockOpening } from './inventoryCheckFixStock.ts'
@@ -41,7 +46,7 @@ import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import { oldListDropsStatus, productsServerOf, productsWireParams, sessionScopeParams, type ProductsServer } from './inventoryCheckProductsRequest.ts'
 import { groupedParams, groupToAsk, inOpenGroups, type Grouping } from './inventoryCheckGroups.ts'
 import { groupedListLoaded, loadGroupedList } from './inventoryCheckGroupChunk.ts'
-import { soleActiveBranch } from '../../utils/branchCollapse.ts'
+import { activeBranchRows, soleActiveBranch } from '../../utils/branchCollapse.ts'
 import { projectProduct } from './inventoryCheckProject.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { loadWired, mergeWiredRows, NotWired, patchWiredLots, patchWiredRaw, readWiredRows, rememberWiredMode, wiredMode, wiredResult, type Branch, type WiredAccess, type WiredDeps, type WiredExtras, type WiredList, type WiredRaw } from './inventoryWired.ts'
@@ -94,14 +99,12 @@ type ProductsResult = {
   /** Grouped read (the server advertised capabilities.groupings and the request asked for one). */
   grouping?: Grouping
   capabilities?: { groupings?: Array<'checked' | 'category'>; fixStock?: boolean; approveCounts?: boolean; lotCounts?: boolean; directSet?: boolean; lotLinesPerSubmission?: number; productsPerSubmission?: number }
-  /** The older list (ic_simple off) answers the all-sessions Issues view with the issues themselves: one per product and session, with the reason, the counted figure and the session. */
-  issues?: Array<{ product_id: number; branch_id: number; session_id: string; created_by: number; reason: string | null; revision: number; counted_quantity?: number | null }>
 }
 /** creatorName rides along from the Sessions list: the single-session read does not send it. */
-type Selection = { branchId: string; sessionId: string; creatorName?: string | null; bootstrapIntent?: ControlIntent }
+type Selection = { branchId: string; sessionId: string; /** The count task being counted (the Tasks section's task view); '' or absent: the board. */ taskId?: string; /** The branch list the Tasks board read before choosing the sole branch: the remount takes it along instead of reading it again. */ knownBranches?: Branch[]; creatorName?: string | null; bootstrapIntent?: ControlIntent }
 /** What the remount after the sole branch was found carries: the open request's answer, so the remount sends no second list request. */
 type WiredSeed = { list: WiredList; branches: Branch[]; extras: WiredExtras }
-type Section = 'products' | 'sessions' | 'issues'
+type Section = 'products' | 'sessions' | 'tasks'
 type ControlIntent = { query: string; filters: InventoryCheckFilters; pagination: { section: Section; page: number }; pageSize: number; wired?: WiredSeed }
 type Attempt = { productId: number; patch: InventoryCheckPatch; revision: number; sessionRevision: number; requestId: string }
 /** A search that came from Enter, the camera or a scanner gun. Nothing is ever saved by it: it narrows the list and points at the one exact row. */
@@ -121,7 +124,7 @@ function isStaleConflict(cause: unknown) {
 }
 /** What the list holds for one picked or counted product until Submit: the row's own fields plus the name and the stock the person saw. */
 type SubmissionLine = { productId: number; countedQuantity: number; seenQuantity: number | null; checked: boolean; note?: string } | SubmissionLotLine
-type DraftEntry = ListDraft & { name: string; seen: number | null }
+type DraftEntry = CountDraftEntry
 const COUNTS_WORK_KEY = 'inventory-check:counts'
 const MAX_SUBMISSION = 500
 /** Choosing a grouping puts the sort back at the name order. */
@@ -177,7 +180,7 @@ export default function InventoryChecksPage() {
   const authorityFence = useRef(boundary)
   authorityFence.current = boundary
   if (!active) return access.canView ? null : <app.AccessDenied />
-  return <InventorySelection key={boundary} access={access} isCurrent={() => authorityFence.current === boundary} />
+  return <InventorySelection key={boundary} boundary={boundary} access={access} isCurrent={() => authorityFence.current === boundary} />
 }
 
 function userIdentity(user: { id?: unknown } | null) { return String(user?.id ?? '') }
@@ -192,15 +195,27 @@ async function readSoleBranch(): Promise<Branch | null> {
   } catch { return null }
 }
 
-function InventorySelection({ access, isCurrent }: { access: InventoryCheckAccess; isCurrent: () => boolean }) {
+/** The active branches, read once for the Tasks board (which makes no list read, so it holds no branch list of its own); [] when this account may not read them. */
+async function readActiveBranches(): Promise<Branch[]> {
+  try {
+    const { getBranches } = await import('../../api/branchTransport.ts')
+    const list = activeBranchRows(await getBranches() as Array<{ id?: unknown; name?: unknown; is_active?: unknown }>).flatMap(row => {
+      const id = Number(row.id)
+      return Number.isSafeInteger(id) && id > 0 ? [{ id, name: String(row.name ?? '') }] : []
+    })
+    return list
+  } catch { return [] }
+}
+
+function InventorySelection({ boundary, access, isCurrent }: { boundary: string; access: InventoryCheckAccess; isCurrent: () => boolean }) {
   const [selection, setSelection] = useState<Selection>({ branchId: '', sessionId: '' })
   const selected = useRef(selection)
   selected.current = selection
   const changeSelection = (value: Selection) => {
-    if (selected.current.branchId === value.branchId && selected.current.sessionId === value.sessionId) return
+    if (selected.current.branchId === value.branchId && selected.current.sessionId === value.sessionId && (selected.current.taskId ?? '') === (value.taskId ?? '')) return
     selected.current = value; setSelection(value)
   }
-  return <InventoryWorkspace key={`${selection.branchId}:${selection.sessionId}`} access={access} selection={selection} onSelect={changeSelection} isCurrent={() => isCurrent() && selected.current === selection} />
+  return <InventoryWorkspace key={`${selection.branchId}:${selection.sessionId}:${selection.taskId ?? ''}`} boundary={boundary} access={access} selection={selection} onSelect={changeSelection} isCurrent={() => isCurrent() && selected.current === selection} />
 }
 
 /** One icon-only action: the translated name is both its tooltip and its accessible name. */
@@ -223,10 +238,11 @@ function ListSkeleton({ loadingText }: { loadingText: string }) {
   </ul>
 }
 
-function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access: InventoryCheckAccess; selection: Selection; onSelect: (selection: Selection) => void; isCurrent: () => boolean }) {
+function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }: { boundary: string; access: InventoryCheckAccess; selection: Selection; onSelect: (selection: Selection) => void; isCurrent: () => boolean }) {
   const { t, user, canWriteToServer, navigateTo, notify } = useApp() as AppContextCoreValue
   const { formatPrice, exchangeRate, fmtUSD, fmtKHR } = useApp() as AppContextCoreValue
   const { branchId, sessionId } = selection
+  const taskId = selection.taskId ?? ''
   const bootstrapIntent = selection.bootstrapIntent
   const tr = (key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
   // The text key for an answer with outcome 'unknown'. A write that committed but whose cache version could not be advanced says so (saved, retry or refresh). This page then owns that
@@ -242,7 +258,11 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     return 'inventory_check_saved_refresh'
   }
   const compact = useIsCompactViewport()
-  const [section, setSection] = useHubSection<Section>('inventory', () => 'products', ['products', 'sessions', 'issues'], navigateTo)
+  // Tasks: for someone who may pick them up or issue them, and until this tab learned the list switch is off (GET /tasks answered 404).
+  const tasksAllowed = (access.canWorkTasks || access.canIssueTasks) && !inventoryCheckTasksOff(boundary)
+  const [section, setSection] = useHubSection<Section>('inventory', () => 'products', ['products', 'sessions', ...(tasksAllowed ? ['tasks'] : [])], navigateTo)
+  const taskBoard = section === 'tasks' && !taskId
+  const taskView = section === 'tasks' && !!taskId
   const [sessionRange, setSessionRange] = useState<DateTimeRange>(() => statsPresetRange('all'))
   const [sessionFilters, setSessionFilters] = useState<SessionListFilters>(initialSessionFilters)
   // `query` is what the box shows; `appliedQuery` is what the server was asked. Typing moves the first and the list follows after a pause.
@@ -322,17 +342,33 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const [uncounted, setUncounted] = useState<ReadonlySet<string>>(() => new Set())
   // The owner's way to count: what has been picked and typed on the list, held here (in memory only) until it is submitted. Keyed by product id,
   // so it survives paging and filtering; the snapshot (name, stock seen) is what the review and the server's "marked checked" test read.
-  const [drafts, setDrafts] = useState<Record<string, DraftEntry>>({})
+  // The counts typed are also kept on this device: one key per user, branch and task (or the plain list), frozen for this mount (an account or server switch leaves a draft with its owner).
+  // With no branch chosen nothing can be counted, so nothing is kept. A viewer who may not count here (or work tasks, in a task view) neither restores nor writes.
+  const [draftAuthority] = useState(() => branchId && access.canCheck && (!taskId || access.canWorkTasks) ? openDraftAuthority(countDraftBaseKey(branchId, taskId)) : null)
+  const [restored] = useState(() => {
+    if (!draftAuthority || !isDraftAuthorityCurrent(draftAuthority)) return null
+    const stored = readWorkDraft<unknown>(draftAuthority.draftKey)
+    return stored ? parseCountDraft(stored.data) : null
+  })
+  const [drafts, setDrafts] = useState<Record<string, DraftEntry>>(() => restored?.entries ?? {})
   const draftsRef = useRef(drafts)
   draftsRef.current = drafts
-  // `left`: how many products the cap kept back for the next Submit (they stay on the page as drafts).
-  const submitAttempt = useRef<{ requestId: string; lines: SubmissionLine[]; left: number } | null>(null)
+  // `left`: how many products the cap kept back for the next Submit (they stay on the page as drafts). `taskId`: the task the count is for, part of the request's identity.
+  const submitAttempt = useRef<{ requestId: string; lines: SubmissionLine[]; left: number; taskId?: string } | null>(restored?.pending ? { requestId: restored.pending.requestId, lines: restored.pending.lines as SubmissionLine[], left: restored.pending.left, ...(restored.pending.taskId ? { taskId: restored.pending.taskId } : {}) } : null)
+  const [draftTick, setDraftTick] = useState(0)
+  // Issue mode (picking products for a count task): the picks are in memory only (a pick is not typed work).
+  const [issuing, setIssuing] = useState(false)
+  const [picks, setPicks] = useState<ReadonlySet<number>>(() => new Set())
+  const issueIntent = useRef(false)
+  const [taskBranches, setTaskBranches] = useState<Branch[] | null>(() => selection.knownBranches ?? null)
+  const taskClosedBySelf = useRef(false)
   const [writeScope] = useState(() => captureInventoryCheckWriteScope({ branchId, sessionId, epoch: 0 }, () => mounted.current && isCurrent()))
   const current = () => mounted.current && isCurrent() && isActorReadScopeCurrent(writeScope.readScope, false) && isActorWriteIdentityCurrent(writeScope.writeIdentity)
   const { askToConfirm, confirmDialog } = useConfirmDialog(t)
+  const tasks = useInventoryCheckTasks({ boundary, branchId, enabled: section === 'tasks', taskId, writeScope, current, t, tr, askToConfirm, unknownSaveKey })
   const { group: groupChoice, ...listFilters } = filters
-  // The date chips filter the product list only: inside a session and on the Issues tab the date is not part of the question.
-  const params: QueryParams = { ...listFilters, query: appliedQuery, page, pageSize, sessionId, checkState: section === 'issues' ? 'issue' : filters.checkState, checkedOn: !sessionId && section === 'products' ? filters.checkedOn : '' }
+  // The date chips filter the product list only: inside a session and inside a task the date is not part of the question.
+  const params: QueryParams = { ...listFilters, query: appliedQuery, page, pageSize, sessionId, checkState: filters.checkState, checkedOn: !sessionId && section === 'products' ? filters.checkedOn : '', ...(taskView ? { taskId } : {}) }
   // While a search is typed (or a code is scanned into the box) no grouping is asked for, on both servers: the answer is the flat list, from the device search index and the Products store on the wired path
   // (no extra read), and a family's date or header count can never be computed over fewer rows than the page shows. The grouping returns, with the same collapse rules, once the search is cleared.
   const groupWire = !sessionId && section !== 'sessions' && !appliedQuery.trim() ? groupToAsk(groupChoice, knownGroupings) : null
@@ -370,11 +406,31 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   useEffect(() => { setCollapsed(previous => previous.size ? new Set() : previous) }, [groupScope])
   const toggleGroup = useCallback((id: string) => setCollapsed(previous => { const next = new Set(previous); if (!next.delete(id)) next.add(id); return next }), [])
   const hasDrafts = Object.keys(drafts).length > 0
+  const draftsRevision = useRef(0)
+  const savedRevision = useRef(0)
+  // Autosave: the typed counts (and a frozen Submit awaiting its answer) go to this device after a pause, on hiding the app and on leaving this view. Nothing is sent to the server.
+  useEffect(() => {
+    draftsRevision.current += 1
+    if (!draftAuthority || !isDraftAuthorityCurrent(draftAuthority)) return
+    const data = serializeCountDraft(drafts, submitAttempt.current)
+    if (data) scheduleWorkDraftWrite(draftAuthority.draftKey, data)
+    else clearWorkDraft(draftAuthority.draftKey)
+  }, [drafts, draftTick])
+  useEffect(() => () => { if (draftAuthority) flushPendingWorkDraft(draftAuthority.draftKey) }, [])
   useEffect(() => {
     if (!hasDrafts) return
     return registerDirtyWork({ key: COUNTS_WORK_KEY, pageId: 'inventory', label: tr('inventory_check_counts_in_progress', 'Counts not submitted'),
-      isDirty: () => Object.keys(draftsRef.current).length > 0,
-      discard: () => { submitAttempt.current = null; setDrafts({}) } })
+      isDirty: () => Object.keys(draftsRef.current).length > 0 && savedRevision.current !== draftsRevision.current,
+      // Save & Leave: the device copy is written now (synchronously), so the guard sees nothing left dirty and navigation goes on.
+      save: () => {
+        const data = draftAuthority && isDraftAuthorityCurrent(draftAuthority) ? serializeCountDraft(draftsRef.current, submitAttempt.current) : null
+        if (!draftAuthority || !data) return false
+        writeWorkDraft(draftAuthority.draftKey, data)
+        savedRevision.current = draftsRevision.current
+        notify(tr('inventory_check_draft_saved', 'Draft saved on this device'), 'success')
+        return true
+      },
+      discard: () => { submitAttempt.current = null; setDrafts({}); if (draftAuthority) clearWorkDraft(draftAuthority.draftKey) } })
   }, [hasDrafts])
   useEffect(() => {
     if (historyPage === null || !sessionId) return
@@ -401,6 +457,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     const chunkIn = async (grouped: unknown) => { if (grouped && groupChunk) await groupChunk }
     async function load() {
       try {
+        // The Tasks board is its own read (useInventoryCheckTasks), never the product list.
+        if (taskBoard) return
         if (section === 'sessions') {
           const result = await readInventoryCheckSessions(sessionParams, abort.signal)
           if (publish()) { setSessions(result); setLoadedKey(scopeKey) }
@@ -412,7 +470,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
             const seed = wiredSeed.current
             wiredSeed.current = null
             try {
-              const result = await loadWired({ params: { ...asked, branchId }, known: wiredKnown.current, seed: seed?.list ?? null, skipSummary: summaryScope.current === stepScope, bypassStore: refresh > 0, access: wiredAccess, deps: wiredDeps, signal: abort.signal })
+              const result = await loadWired({ params: { ...asked, branchId }, known: wiredKnown.current, seed: seed?.list ?? null, skipSummary: taskView || summaryScope.current === stepScope, bypassStore: refresh > 0, access: wiredAccess, deps: wiredDeps, signal: abort.signal })
               await chunkIn(result.raw.list.grouping)
               if (!publish()) return
               // The data epoch moved while this was in flight: the answer belongs to the old epoch, so it is dropped and the screen reads again.
@@ -439,6 +497,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
               rememberWiredMode('old')
             }
           }
+          // A task is counted from the wired list only: the older list has no tasks, and must never be sent a taskId.
+          if (taskView) throw new Error('A task is counted from the wired list.')
           // The sole-branch chip rule: with one active branch the branch is chosen BEFORE the first list read, so an open is ONE read (it used to read every branch, then read again with the sole one).
           // This covers the older list, and the all-branches Issues view that the wired list cannot answer without a branch; a list that cannot say it (no branch access) is asked as before.
           if (!branchId && !sessionId && !branchesKnown.current && !wiredKnown.current?.branches) {
@@ -602,18 +662,10 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     if (gunScan.origin === 'field') notify(tr('scan_moved_to_search', 'Barcode moved to search'), 'info')
   }, [gunScan])
 
-  // Another branch remounts the list and drops the picked products and typed counts: ask first, with the shared review.
-  async function selectOrAsk(next: Selection) {
-    if (Object.keys(draftsRef.current).length > 0) {
-      const confirmed = await askToConfirm({ title: tr('inventory_check_discard_counts_title', 'Discard counts not submitted?'),
-        message: tr('inventory_check_discard_counts_message', 'The products you picked and the counts you typed will be cleared.'), confirmLabel: t('discard'), danger: true })
-      if (!confirmed || !current()) return
-    }
-    onSelect(next)
-  }
+  // Another branch remounts the list; the typed counts are kept on this device per branch (and per task), so nothing is lost and nothing is asked.
   function changeFilters(patch: Partial<InventoryCheckFilters>) {
     if (controlsLocked) return
-    if (patch.branchId !== undefined && patch.branchId !== branchId) { void selectOrAsk({ branchId: patch.branchId, sessionId: '' }); return }
+    if (patch.branchId !== undefined && patch.branchId !== branchId) { onSelect({ branchId: patch.branchId, sessionId: '' }); return }
     setFilters(previous => ({ ...previous, ...patch, ...(patch.group && patch.group !== 'none' ? NAME_ORDER : {}) })); setPage(1); setScan(null)
   }
   function changeSessionFilters(patch: Partial<SessionListFilters>) {
@@ -623,7 +675,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   // Clears search, dates and every Filters-menu choice (Sort included). A chosen branch is a selection, so clearing it re-selects "all branches".
   function clearFilters() {
     if (controlsLocked) return
-    if (branchId && branches.length > 1) { void selectOrAsk({ branchId: '', sessionId: '' }); return }
+    if (branchId && branches.length > 1) { onSelect({ branchId: '', sessionId: '' }); return }
     if (section === 'sessions') { setSessionFilters(initialSessionFilters); setSessionRange(statsPresetRange('all')) } else {
       setFilters(previous => ({ ...initialFilters, branchId: previous.branchId }))
       setQuery(''); setAppliedQuery(''); setScan(null)
@@ -663,7 +715,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
 
   // The products a new session would hold: the checkable rows of the page on screen (unchanged membership rule).
   const countableIds = fresh && data ? [...new Set(data.items.filter(product => !product.is_group && (product as InventoryCheckProduct & { checkable?: boolean }).checkable !== false).map(product => Number(product.id)))].filter(id => Number.isSafeInteger(id) && id > 0) : []
-  const branches = data?.branches ?? []
+  const branches = data?.branches?.length ? data.branches : taskBranches ?? []
   const soleBranch = branches.length === 1 ? branches[0] : null
   const branchName = branches.find(branch => String(branch.id) === (session ? String(session.branch_id) : branchId))?.name ?? null
 
@@ -673,7 +725,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       const productIds = countableIds
       if (!productIds.length || productIds.length > 500) return
       // The review shows exactly the ids that will be created; a retry after an unknown outcome reuses the frozen request below.
-      const scopeText = (await import('./inventoryCheckScopeText.ts')).describeCountScope(t, { query: appliedQuery, filters, stateApplies: section !== 'issues' })
+      const scopeText = (await import('./inventoryCheckScopeText.ts')).describeCountScope(t, { query: appliedQuery, filters, stateApplies: true })
       const confirmed = await askToConfirm({
         title: tr('inventory_check_count_review_title', 'Start a count session?'),
         items: [{ label: t('products'), value: productIds.length }, { label: t('branch'), value: branchName ?? '—' }, { label: t('filters'), value: scopeText || t('none') }],
@@ -737,9 +789,12 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const frozen = Object.fromEntries([...attempts.current.values()].map(attempt => [String(attempt.productId), { patch: attempt.patch, revision: attempt.revision }]))
 
   // ---- The list counts by itself: pick products, type a count in each row, Submit once ----
-  const listMode = fresh && !sessionId && section !== 'sessions' && !!data?.simple
+  const listMode = fresh && !sessionId && section !== 'sessions' && !taskBoard && !!data?.simple
+  // Issue mode needs the wired list at one branch and the right to issue.
+  const issuingNow = issuing && listMode && access.canIssueTasks && !!branchId && data?.wired === true
   const grouping = listMode ? data?.grouping : undefined
-  const selecting = listMode && access.canCheck
+  // Counting a task is open to anyone the server lets count it (picked up or not); the plain list needs only the count grant. Issue mode hides the count controls (typed counts are kept).
+  const selecting = listMode && access.canCheck && !issuingNow && (!taskView || access.canWorkTasks)
   const selectedIds = Object.keys(drafts).filter(id => drafts[id].selected)
   // The page-wide "matches stock" acts only on the rows the person can see: a collapsed group is left alone.
   const selectable = listMode ? inOpenGroups(visibleProducts.filter(product => !product.is_group && product.checkable !== false), grouping, collapsed) : []
@@ -749,7 +804,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       const id = String(product.id)
       const seen = finiteQuantity(product.quantity) ? product.quantity : null
       const current = previous[id] ?? { selected: false, count: '', checked: false, note: '', name: product.name, seen }
-      const next = { ...current, ...change(current), name: product.name, seen }
+      const next = { ...current, ...change(current), name: product.name, seen, checkAt: product.check_at ?? null }
       if (!next.selected && next.count === '' && next.note === '' && !Object.keys(next.lots ?? {}).length) { const rest = { ...previous }; delete rest[id]; return rest }
       return { ...previous, [id]: next }
     })
@@ -799,8 +854,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         if (perBatch && product.lots_more === true) continue
         if (dates.length > 0) {
           const lots = Object.fromEntries(dates.map(row => [String(row.batchId), { count: String(row.quantity), seen: row.quantity }]))
-          result[id] = { ...(entry ?? { note: '', name: product.name }), selected: true, count: countTextFromLots(lots), checked: false, seen, lots, stocked: stockedDatesOf(product) }
-        } else result[id] = { ...(entry ?? { note: '', name: product.name }), selected: true, count: String(seen), checked: true, seen, lots: undefined }
+          result[id] = { ...(entry ?? { note: '', name: product.name }), selected: true, count: countTextFromLots(lots), checked: false, seen, lots, stocked: stockedDatesOf(product), checkAt: product.check_at ?? null }
+        } else result[id] = { ...(entry ?? { note: '', name: product.name }), selected: true, count: String(seen), checked: true, seen, lots: undefined, checkAt: product.check_at ?? null }
       }
       return result
     })
@@ -954,23 +1009,33 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         confirmLabel: tr('inventory_check_submit', 'Submit'),
       })
       if (!confirmed || !current() || inFlight.current) return
-      submitAttempt.current = { requestId: createClientRequestId('inventory_check'), lines, left: left.length }
+      submitAttempt.current = { requestId: createClientRequestId('inventory_check'), lines, left: left.length, ...(taskView ? { taskId } : {}) }
+      setDraftTick(value => value + 1)
     }
     const attempt = submitAttempt.current
     inFlight.current = true; setBusy(true); setWriteError('')
     try {
-      await submitInventoryCheckCounts(writeScope, { branchId: Number(branchId), requestId: attempt.requestId, lines: attempt.lines })
+      const answer = await submitInventoryCheckCounts(writeScope, { branchId: Number(branchId), requestId: attempt.requestId, lines: attempt.lines, ...(attempt.taskId ? { taskId: attempt.taskId } : {}) })
       if (current()) {
         const sent = new Set(attempt.lines.map(line => String(line.productId)))
         submitAttempt.current = null
-        setDrafts(previous => Object.fromEntries(Object.entries(previous).filter(([id]) => !sent.has(id))))
-        notify(attempt.left > 0 ? tr('inventory_check_submitted_part', '{sent} products submitted. {left} more are still on the page: press Submit again.').replace('{sent}', String(sent.size)).replace('{left}', String(attempt.left)) : tr('inventory_check_submitted', 'Counts submitted'), 'success')
+        const rest = Object.fromEntries(Object.entries(draftsRef.current).filter(([id]) => !sent.has(id)))
+        setDrafts(rest)
+        // This count may have been the task's last: the answer says so. The device copy follows at once (a view that is about to leave would never run its autosave).
+        const closedTask = answer?.task?.closed === true
+        notify(closedTask ? tr('inventory_check_task_done_closed', 'All counted. The task is closed.') : attempt.left > 0 ? tr('inventory_check_submitted_part', '{sent} products submitted. {left} more are still on the page: press Submit again.').replace('{sent}', String(sent.size)).replace('{left}', String(attempt.left)) : tr('inventory_check_submitted', 'Counts submitted'), 'success')
+        if (draftAuthority && isDraftAuthorityCurrent(draftAuthority)) {
+          const data = serializeCountDraft(rest, null)
+          if (data) writeWorkDraft(draftAuthority.draftKey, data); else clearWorkDraft(draftAuthority.draftKey)
+        }
+        if (attempt.taskId) { if (closedTask) taskClosedBySelf.current = true; void tasks.refresh() }
+        if (closedTask && Object.keys(rest).length === 0) { onSelect({ branchId, sessionId: '', taskId: '' }); return }
         reloadAll()
       }
     } catch (cause) {
       const unknown = (cause as { outcome?: string })?.outcome === 'unknown'
       const refusal = unknown ? undefined : await knownRefusal(cause)
-      if (!unknown) submitAttempt.current = null
+      if (!unknown) { submitAttempt.current = null; setDraftTick(value => value + 1) }
       if (current() && (cause as { code?: unknown })?.code === 'inventory_check_stock_changed') {
         // The products the server names were counted against stock that has moved since: their counts are withdrawn (the person counts again against the stock now shown), and so is every checked mark.
         const named = new Set(Array.isArray((cause as { productIds?: unknown }).productIds) ? ((cause as { productIds: unknown[] }).productIds).map(Number) : [])
@@ -1013,13 +1078,13 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const counts = summary && summary.tooLarge !== true ? summary : undefined
   // The wired page has no "In check" (nothing is in a session there) and, with a branch chosen, its one status choice is the chip rail: the numbers ride on its chips.
   const cards: StatCardDef[] = counts ? (['not_checked', 'in_check', 'ok', 'issue'] as const).filter(key => !(data?.wired === true && key === 'in_check')).map(key => ({
-    key, label: tr(key === 'issue' ? 'issues' : `inventory_check_status_${key}`, key === 'not_checked' ? 'Not checked' : key === 'in_check' ? 'In check' : key === 'ok' ? 'Checked OK' : 'Issues'), value: counts[key],
+    key, label: tr(key === 'issue' ? 'inventory_check_status_differs' : `inventory_check_status_${key}`, key === 'not_checked' ? 'Not checked' : key === 'in_check' ? 'In check' : key === 'ok' ? 'Checked OK' : 'Differs'), value: counts[key],
   })) : []
   // The status choice, in one row that scrolls sideways (the shared chip rail): every status the viewer can see, with how many products are in it.
   const statusChips: Array<{ value: string; label: string; count?: number }> = [{ value: '', label: t('all') },
     { value: 'not_checked', label: tr('inventory_check_status_not_checked', 'Not checked'), count: counts?.not_checked },
     { value: 'ok', label: tr('inventory_check_status_ok', 'Checked OK'), count: counts?.ok },
-    { value: 'issue', label: tr('issues', 'Issues'), count: counts?.issue },
+    { value: 'issue', label: tr('inventory_check_status_differs', 'Differs'), count: counts?.issue },
     ...(data?.capabilities?.fixStock && counts?.pending !== undefined ? [{ value: 'pending', label: tr('inventory_check_approval_pending', 'Waiting for approval'), count: counts.pending }] : [])]
   const rowEditing = Object.values(editingRows).some(Boolean)
   const controlsLocked = busy || !!createAttempt.current || rowEditing
@@ -1051,16 +1116,14 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     : !countableIds.length ? tr('inventory_check_count_blocked_empty', 'No products on this page to count.') : ''
   const countLabel = createAttempt.current ? t('retry') : tr('inventory_check_start_page', 'Count')
   // The status choice exists once an answer has shown which list this is: the check-status list (ic_simple) has it everywhere; the older list has it only inside a session
-  // (its unstarted | done | issue), and the Issues tab elsewhere -- so no choice is drawn for it on the Products list, and none before the first answer.
-  const statusFilter = section !== 'issues' && !!data && (data.simple === true || !!sessionId)
+  // (its unstarted | done | issue) -- so no choice is drawn for it on the Products list, and none before the first answer.
+  const statusFilter = !!data && (data.simple === true || !!sessionId)
   const filtersActive = countActiveFilters(filters, { branch: branches.length > 1, state: statusFilter, group: !!grouping }) > 0 || !!query.trim() || !!filters.checkedOn
   const sessionFiltersActive = !!(sessionFilters.status || sessionFilters.mine || sessionFilters.waiting || sessionRange.startDate || sessionRange.endDate || (branches.length > 1 && !!branchId))
-  // The older list (ic_simple off) draws the all-sessions Issues view from the answer's `issues` (reason, counted figure, the session), not from product rows.
-  const oldIssues = section === 'issues' && !sessionId && !!data && data.simple !== true
-  const loadedNothing = !loading && fresh && !unavailableProducts.length && !(section === 'sessions' ? sessions?.items.length : oldIssues ? data?.issues?.length : visibleProducts.length)
+  const loadedNothing = !taskBoard && !loading && fresh && !unavailableProducts.length && !(section === 'sessions' ? sessions?.items.length : visibleProducts.length)
 
-  // A scan points at the one exact row of the list on screen (product rows only: the all-sessions Issues list has none).
-  const showsProductRows = section !== 'sessions' && !oldIssues
+  // A scan points at the one exact row of the list on screen (product rows only: Count sessions and the Tasks board have none).
+  const showsProductRows = section !== 'sessions' && !taskBoard
   const scanHit = scan && fresh && showsProductRows ? scanHitOf(visibleProducts, scan.query, access.fields.barcode) : null
   const focusRequest: InventoryCheckFocusRequest | undefined = scan && scanHit ? { id: scanHit.id, token: scan.token, target: scan.target } : undefined
   const scanMissed = !!scan && loadedNothing && showsProductRows
@@ -1090,19 +1153,6 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
 
   const facetsLimited = fresh ? data?.facetsLimited : undefined
 
-  // Issues is the same list with the status preset to Issue; each row can open the session that recorded it.
-  const open = tr('inventory_check_open_session', 'Open session')
-  const issueChips = section === 'issues' && !sessionId && fresh ? Object.fromEntries(visibleProducts.filter(product => product.check_session_id && product.check_branch_id != null).map(product => {
-    const issueBranch = branches.find(branch => branch.id === product.check_branch_id)?.name
-    return [String(product.id), <button key="open" type="button" className="inline-flex min-h-6 max-w-full items-center gap-1 rounded-full bg-slate-100 px-2 text-[11px] font-semibold leading-relaxed text-slate-700 dark:bg-zinc-800 dark:text-slate-200" aria-label={issueBranch ? `${open}: ${issueBranch}` : open} title={open} onClick={() => onSelect({ branchId: String(product.check_branch_id), sessionId: String(product.check_session_id) })}><ClipboardList className="h-3 w-3 shrink-0" aria-hidden="true" />{issueBranch ? <span className="min-w-0 break-words">{issueBranch}</span> : null}</button>]
-  })) : {}
-  const issueRows = oldIssues && fresh ? (data?.issues ?? []).map(issue => {
-    const product = visibleProducts.find(candidate => Number(candidate.id) === issue.product_id) ?? { id: issue.product_id, name: `#${issue.product_id}` }
-    const showCount = (access.fields.stock || Number(issue.created_by) === Number(user?.id)) && typeof issue.counted_quantity === 'number' && Number.isFinite(issue.counted_quantity)
-    const issueBranch = branches.find(branch => branch.id === issue.branch_id)?.name
-    return { key: `${issue.session_id}:${issue.product_id}`, product, observation: { product_id: issue.product_id, state: 'issue' as const, counted_quantity: showCount ? issue.counted_quantity ?? null : null, reason: issue.reason, revision: issue.revision },
-      chip: <button type="button" className="inline-flex min-h-6 max-w-full items-center gap-1 rounded-full bg-slate-100 px-2 text-[11px] font-semibold leading-relaxed text-slate-700 dark:bg-zinc-800 dark:text-slate-200" aria-label={issueBranch ? `${open}: ${issueBranch}` : open} title={open} onClick={() => onSelect({ branchId: String(issue.branch_id), sessionId: issue.session_id })}><ClipboardList className="h-3 w-3 shrink-0" aria-hidden="true" />{issueBranch ? <span className="min-w-0 break-words">{issueBranch}</span> : null}</button> }
-  }) : []
   const rowProps = { canViewStock: access.fields.stock, canViewCounts, t, onOpenProduct: setDetail } as const
   const rowRefusals: Record<string, string> = {}
   for (const id of uncounted) {
@@ -1112,14 +1162,14 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   }
   // Fetched already (the usual case: it came with the answer): drawn directly, so no Suspense turn and no flat frame. Otherwise the lazy wrapper, as before.
   const GroupedList = groupedListLoaded()?.default ?? InventoryCheckGroupedList
-  const listRowProps = { products: visibleProducts, drafts, selecting, rowRefusals, locked: busy || !!submitAttempt.current, canViewStock: access.fields.stock, canViewCounts,
+  const listRowProps = { products: visibleProducts, drafts, selecting, rowRefusals, locked: busy || !!submitAttempt.current, ...(issuingNow ? { picks, onPick: togglePick } : {}), canViewStock: access.fields.stock, canViewCounts,
     ...(access.fields.price ? { priceText, promotionRules: data?.promotionRules, exchangeRate } : {}),
     // Cost only for a viewer canViewAcquisitionCosts allows (fields.cost); the Worker sends the cost keys to nobody else either.
-    ...(access.fields.cost ? { costText: priceText, onOpenCost: setCostFor } : {}), adornments: issueChips, focusRequest, onCountEntered: onCommitted, t, onOpenProduct: setDetail, ...draftHandlers,
+    ...(access.fields.cost ? { costText: priceText, onOpenCost: setCostFor } : {}), focusRequest, onCountEntered: onCommitted, t, onOpenProduct: setDetail, ...draftHandlers,
     ...(lotCountsOn && branchId ? { lotCounts: true, loadLots, onLotSet: directSetOn ? setLotFromRow : undefined } : {}) }
   const canCheckRows = fresh && canEdit && session?.status === 'open' && canWriteToServer && !lifecycleAttempt.current
   // One column header for the whole list, pinned with the controls: the rows below line up under it from 1024px.
-  const sheetHeader = fresh && visibleProducts.length && section !== 'sessions' && !oldIssues
+  const sheetHeader = fresh && visibleProducts.length && section !== 'sessions' && !taskBoard
     ? listMode ? <InventoryCheckListHeader selecting={selecting} canViewStock={access.fields.stock} canViewCounts={canViewCounts} t={t} />
       : <InventoryCheckSheetHeader canCheck={canCheckRows} inSession={!!sessionId} canViewStock={access.fields.stock} canViewCounts={canViewCounts} t={t} /> : null
 
@@ -1144,6 +1194,128 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     setDetail(null)
     setFixStock(opening)
   }
+  // ---- Count tasks: the board, issuing, picking up, handing back, closing ----
+  const taskRow: InventoryCheckTask | null = taskView ? tasks.board?.items.find(item => item.id === taskId) ?? null : null
+  const hasWiredBranchList = !!data?.branches?.length
+  useEffect(() => {
+    if (!taskBoard || hasWiredBranchList || taskBranches) return
+    let live = true
+    void readActiveBranches().then(list => { if (live && current()) setTaskBranches(list) })
+    return () => { live = false }
+  }, [taskBoard, hasWiredBranchList])
+  // The board makes no list read, so the one active branch is chosen here (as a list open chooses it).
+  useEffect(() => {
+    if (taskBoard && !branchId && branches.length === 1) onSelect({ branchId: String(branches[0].id), sessionId: '', knownBranches: branches })
+  }, [taskBoard, branchId, branches.length])
+  // Leaving Inventory ends Issue mode; the Tasks board's Issue button asks for it, and it opens once the Inventory section shows.
+  useEffect(() => {
+    if (section !== 'products') { setIssuing(false); setPicks(new Set()); return }
+    if (issueIntent.current) { issueIntent.current = false; setIssuing(true) }
+  }, [section])
+  function togglePick(product: InventoryCheckProduct) {
+    const id = Number(product.id)
+    setPicks(previous => { const next = new Set(previous); if (!next.delete(id)) next.add(id); return next })
+  }
+  const issueScope = taskScopeOf(picks, { query: appliedQuery, filters })
+  const maxProducts = tasks.board?.capabilities.maxProducts
+  // A frozen attempt (after an unknown outcome) is resent as it was, whatever the page shows now.
+  const issueBlocked = tasks.retrying === 'issue' ? ''
+    : !issueScope ? tr('inventory_check_task_scope_needed', 'Select products or set a filter first.')
+      : typeof maxProducts === 'number' && picks.size > maxProducts ? taskRefusalSentence(t, { code: 'inventory_check_task_too_many', total: picks.size, limit: maxProducts }) ?? '' : ''
+  async function issueTask() {
+    if (!current() || !issuingNow || issueBlocked || tasks.busy) return
+    const scope = issueScope
+    if (!scope) return
+    const review = {
+      title: tr('inventory_check_task_issue_review_title', 'Issue a count task?'),
+      items: [...'productIds' in scope ? [{ label: t('products'), value: scope.productIds.length }] : [{ label: t('filters'), value: filterScopeText(t, scope.filters.query ?? '', scope.filters) }], { label: t('branch'), value: branchName ?? '—' }],
+      confirmLabel: tr('inventory_check_task_issue', 'Issue'),
+    }
+    setWriteError('')
+    const outcome = await tasks.issue(Number(branchId), scope, review)
+    if (!current()) return
+    if (outcome.kind === 'done') {
+      const item = (outcome.result as { item?: InventoryCheckSession } | null)?.item
+      notify(tr('inventory_check_task_issued', 'Task issued · {count} products').replace('{count}', String(item?.progress?.total ?? '')), 'success')
+      setIssuing(false); setPicks(new Set())
+    } else if (outcome.kind === 'refused') {
+      setWriteError(outcome.message)
+      if (outcome.code === 'inventory_check_issue_required') setIssuing(false)
+    } else if (outcome.kind === 'unknown') setWriteError(outcome.message)
+  }
+  const draftKeyOfTask = (id: string) => scopedWorkDraftKey(countDraftBaseKey(branchId, id))
+  // How many counts this device holds, typed and not submitted, for a task (the open view's own, or the device copy of another).
+  function draftCountOfTask(task: InventoryCheckTask): number {
+    if (taskView && task.id === taskId) return Object.keys(draftsRef.current).length
+    const stored = readWorkDraft<unknown>(draftKeyOfTask(task.id))
+    return stored ? Object.keys(parseCountDraft(stored.data)?.entries ?? {}).length : 0
+  }
+  function toastOrError(outcome: { kind: 'refused'; message: string; tone: 'warning' | 'error' } | { kind: 'unknown'; message: string }) {
+    if (outcome.kind === 'refused' && outcome.tone === 'warning') notify(outcome.message, 'warning')
+    else setWriteError(outcome.message)
+  }
+  async function pickupTask(task: InventoryCheckTask) {
+    if (!current()) return
+    setWriteError('')
+    const outcome = await tasks.pickup(task, taskReview(t, 'pickup', task, branchName), { leaving: !taskView })
+    if (!current()) return
+    if (outcome.kind === 'done') { if (!taskView) onSelect({ branchId, sessionId: '', taskId: task.id }) }
+    else if (outcome.kind === 'refused' || outcome.kind === 'unknown') toastOrError(outcome)
+  }
+  // Handing back gives the task up: the counts typed for it on this device go (the review says how many).
+  async function releaseTask(task: InventoryCheckTask) {
+    if (!current()) return
+    setWriteError('')
+    const count = draftCountOfTask(task)
+    const outcome = await tasks.release(task, taskReview(t, 'release', task, branchName, count), { leaving: taskView })
+    if (!current()) return
+    if (outcome.kind === 'done') {
+      if (count > 0) {
+        clearWorkDraft(draftKeyOfTask(task.id))
+        if (taskView && task.id === taskId) { submitAttempt.current = null; setDrafts({}) }
+      }
+      if (taskView) onSelect({ branchId, sessionId: '', taskId: '' })
+    } else if (outcome.kind === 'refused' || outcome.kind === 'unknown') toastOrError(outcome)
+  }
+  async function closeTask(task: InventoryCheckTask) {
+    if (!current()) return
+    setWriteError('')
+    const outcome = await tasks.close(task, taskReview(t, 'close', task, branchName))
+    if (current() && (outcome.kind === 'refused' || outcome.kind === 'unknown')) toastOrError(outcome)
+  }
+  const openTasks = tasks.board?.items.filter(item => item.status === 'open').length ?? 0
+  const headerIssueBlocked = tasks.board && openTasks >= tasks.board.capabilities.maxOpenTasks ? tr('inventory_check_error_task_limit', 'This branch already has the most open tasks it can hold. Close one first.') : ''
+  // Restore: the counts this device held for this view are judged once, against what the server knows now. A product counted after the draft was typed shows a different last-count time
+  // (compared server to server, never with this device's clock): its draft is dropped. Off-page products are judged by one overlay read per page of ids.
+  const judged = useRef(false)
+  useEffect(() => {
+    if (judged.current || !restored || !fresh || !listMode || !wiredRaw.current) return
+    judged.current = true
+    const entries = restored.entries
+    const ids = Object.keys(entries).map(Number)
+    if (!ids.length) return
+    const latest = new Map<number, string | null | undefined>()
+    const onPage = new Set<number>()
+    for (const product of data?.items ?? []) { onPage.add(Number(product.id)); latest.set(Number(product.id), product.check_at ?? null) }
+    const missing = ids.filter(id => !onPage.has(id))
+    const chunk = Number.isSafeInteger(wiredRaw.current.list.overlay_ids) && (wiredRaw.current.list.overlay_ids as number) > 0 ? wiredRaw.current.list.overlay_ids as number : 100
+    void (async () => {
+      try {
+        for (let start = 0; start < missing.length; start += chunk) {
+          const answer = await readInventoryCheckOverlay<{ items?: Array<{ product_id: number; check?: { at?: string | null } | null }> }>({ branchId, ids: missing.slice(start, start + chunk), summary: false })
+          for (const item of answer.items ?? []) latest.set(Number(item.product_id), item.check?.at ?? null)
+        }
+      } catch { /* a read that fails judges nothing: the counts stay, and Submit's own refusals decide */ }
+      if (!current()) return
+      const { dropped } = judgeRestored(entries, latest)
+      // Only an entry still exactly as it was restored is dropped: a count typed meanwhile is never touched.
+      if (dropped.length) setDrafts(previous => { const next = { ...previous }; for (const id of dropped) if (next[id] === entries[id]) delete next[id]; return next })
+      if (ids.length > dropped.length) notify(tr('inventory_check_draft_restored', 'Counts restored from this device.'), 'info')
+      if (dropped.length) notify(tr('inventory_check_draft_dropped', '{count} counts removed: counted elsewhere after you typed them.').replace('{count}', String(dropped.length)), 'info')
+    })()
+  }, [fresh, listMode])
+  const issueEntry = section === 'products' && listMode && !!branchId && data?.wired === true && access.canIssueTasks
+    ? <IconAction label={tr('inventory_check_task_issue', 'Issue')} disabled={controlsLocked} onClick={() => setIssuing(true)}><ClipboardList className="h-5 w-5" aria-hidden="true" /></IconAction> : null
   const countAction = section !== 'sessions' && access.canCheck && !data?.simple ? <>
     {countBlocked ? <InfoHint text={countBlocked} label={countBlocked} /> : null}
     <button type="button" className="btn-primary inline-flex min-h-10 shrink-0 items-center gap-1 px-3 text-xs aria-disabled:cursor-not-allowed aria-disabled:opacity-60" aria-disabled={countBlocked ? true : undefined}
@@ -1174,25 +1346,42 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       {lifecycleAttempt.current ? <RotateCcw className="h-5 w-5" aria-hidden="true" /> : session?.status === 'open' ? <Lock className="h-5 w-5" aria-hidden="true" /> : <Unlock className="h-5 w-5" aria-hidden="true" />}
     </IconAction> : null}
   </div>
+  // The task view's bar: back to the board, the task's progress and picker (from the board read), and its actions. Submit stays the view's one labelled action.
+  const taskBar = <div className="flex min-w-0 flex-1 items-center gap-1" data-inventory-check-actions data-inventory-check-task-bar>
+    <IconAction label={t('back')} disabled={controlsLocked || tasks.busy} onClick={() => onSelect({ branchId, sessionId: '', taskId: '' })}><ArrowLeft className="h-5 w-5" aria-hidden="true" /></IconAction>
+    {taskRow ? <div className="scroll-x-clean min-w-0 flex-1">
+      <div className="inline-flex items-center gap-2 align-middle text-xs">
+        <ProgressRing progress={{ total: taskRow.total, done: taskRow.done, issue: 0, unstarted: Math.max(0, taskRow.total - taskRow.done) }} t={t} />
+        <span className="shrink-0 tabular-nums" data-task-progress-text>{progressOrAllText(t, taskRow)}</span>
+        {taskRow.picked_up_by ? <span className={`shrink-0 ${taskRow.mine ? 'font-semibold text-emerald-700 dark:text-emerald-300' : 'text-gray-600 dark:text-gray-300'}`} data-task-picker>{pickerText(t, taskRow.picked_up_by)}</span> : null}
+        {taskRow.status === 'closed' ? <SessionStatusChip status="closed" t={t} /> : null}
+      </div>
+    </div> : <span className="h-4 min-w-0 flex-1 animate-pulse rounded bg-gray-200 dark:bg-zinc-700" aria-hidden="true" />}
+    {taskRow ? <TaskActions size="bar" task={taskRow} t={t} busy={tasks.busy || controlsLocked} canWork={access.canWorkTasks} onPickup={() => { void pickupTask(taskRow) }} onRelease={() => { void releaseTask(taskRow) }} onClose={() => { void closeTask(taskRow) }} /> : null}
+  </div>
   // The page controls, drawn above the list and below it from the SAME state: one request per page step, the true total, no second fetch. Count sessions page exactly like products.
-  const pager = fresh ? <fieldset disabled={controlsLocked} className="min-w-0" data-inventory-check-pager-lock><PaginationControls page={page} pageSize={pageSize} totalItems={(section === 'sessions' ? sessions?.total : data?.total) ?? 0} onPageChange={value => { if (!controlsLocked) { setPage(value); setScan(null) } }} onPageSizeChange={value => { if (!controlsLocked) { setPageSize(value); setPage(1); setScan(null) } }} t={t} compact /></fieldset> : null
+  const pager = fresh && !taskBoard ? <fieldset disabled={controlsLocked} className="min-w-0" data-inventory-check-pager-lock><PaginationControls page={page} pageSize={pageSize} totalItems={(section === 'sessions' ? sessions?.total : data?.total) ?? 0} onPageChange={value => { if (!controlsLocked) { setPage(value); setScan(null) } }} onPageSizeChange={value => { if (!controlsLocked) { setPageSize(value); setPage(1); setScan(null) } }} t={t} compact /></fieldset> : null
   const pagerNode = (position: 'top' | 'bottom') => pager ? <div data-inventory-check-pager={position} className="min-w-0">{position === 'top' ? <TopPager>{pager}</TopPager> : <>{pager}</>}</div> : null
   // The context bar: where the person is (the one branch, or the open session) and what they can do from here.
   const contextBar = <div className="flex min-w-0 flex-1 items-center gap-1" data-inventory-check-context>
-    {sessionId ? sessionBar : <>
+    {sessionId ? sessionBar : taskView ? taskBar : <>
       {soleBranch ? <SoleBranchLabel name={soleBranch.name} label={t('branch')} className="min-w-0 flex-1 text-xs" /> : <span className="flex-1" />}
       {countAction}
+      {issueEntry}
     </>}
   </div>
 
   return <div className="flex min-h-0 min-w-0 flex-1 flex-col">
     <HubSectionNav pageId="inventory" active={section} sections={[
-      { id: 'products', label: t('inventory') }, { id: 'sessions', label: t('inventory_check_sessions') }, { id: 'issues', label: t('issues') },
+      { id: 'products', label: t('inventory') }, { id: 'sessions', label: t('inventory_check_sessions') }, ...(tasksAllowed ? [{ id: 'tasks', label: t('inventory_check_tasks') }] : []),
     ]} onChange={id => { if (!busy && !createAttempt.current) { setSection(id as Section); setScan(null) } }}>
       <div className="page-scroll min-w-0 space-y-2 px-3 pb-3" data-inventory-check-page>
         {/* Pinned: dates (with the Stats chip), then search / scan / Filters beside the context bar, then the column header. Open stat cards scroll inside the cap. */}
         <div className="sticky top-0 z-30 -mx-3 max-h-[calc(70*var(--app-vh))] min-w-0 space-y-1 overflow-y-auto bg-gray-50 px-3 pb-1 pt-2 dark:bg-gray-900" data-inventory-check-pinned>
-          {section === 'sessions'
+          {taskBoard
+            ? <TasksHeader t={t} branches={branches} branchId={branchId} onBranch={id => onSelect({ branchId: id, sessionId: '' })} issue={access.canIssueTasks} issueBlocked={headerIssueBlocked} busy={tasks.busy}
+              onIssue={() => { issueIntent.current = true; setSection('products') }} />
+            : section === 'sessions'
             ? <StatsRangeRow layout="scroll" compactRange range={sessionRange} disabled={controlsLocked} t={t} onRangeChange={value => { if (!controlsLocked) { setSessionRange(value); setPage(1) } }}
               leading={<fieldset disabled={controlsLocked} className="min-w-0 shrink-0" data-inventory-check-query-lock>
                 <InventoryCheckSessionFilterMenu value={sessionFilters} onChange={changeSessionFilters} approvals={sessions?.approvals === true} branches={branches} branchId={branchId} onBranchChange={id => changeFilters({ branchId: id })} onClear={clearFilters} t={t} />
@@ -1212,7 +1401,9 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
                 </fieldset>
                 {contextBar}
               </div>
-              {barShown ? <InventoryCheckSelectionBar selectedCount={selectedIds.length} blocked={submitBlocked} busy={busy || !listMode} canMarkChecked={access.fields.stock} openGroupsOnly={collapsed.size > 0}
+              {issuingNow ? <InventoryCheckIssueBar pickedCount={picks.size} blocked={issueBlocked} busy={tasks.busy || busy} issueLabel={tasks.retrying === 'issue' ? t('retry') : undefined}
+                onExit={() => { setIssuing(false); setPicks(new Set()) }} onClear={() => setPicks(new Set())} onIssue={() => { void issueTask() }} t={t} />
+              : barShown && !(taskView && !access.canWorkTasks) ? <InventoryCheckSelectionBar selectedCount={selectedIds.length} blocked={submitBlocked} busy={busy || !listMode} canMarkChecked={access.fields.stock} openGroupsOnly={collapsed.size > 0}
                 counting={access.canCheck} days={dayChips} checkedOn={filters.checkedOn ?? ''} onCheckedOn={chooseDay} daysDisabled={controlsLocked || !fresh}
                 submitLabel={submitAttempt.current ? t('retry') : undefined} onMarkChecked={markPageChecked} onClear={clearSelection} onSubmit={() => { void submit() }} t={t} /> : null}
               {sheetHeader}
@@ -1220,6 +1411,9 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         </div>
         {pagerNode('top')}
         {writeError ? <p role="alert" className="text-xs leading-relaxed text-red-700">{writeError}</p> : null}
+        {taskView && taskRow?.status === 'closed' && !taskClosedBySelf.current ? <p role="status" className="text-xs leading-relaxed text-amber-800 dark:text-amber-200" data-task-status-line="closed">{tr('inventory_check_error_task_closed', 'This task is already closed.')}</p> : null}
+        {taskView && tasks.handedBack && taskRow?.status === 'open' ? <p role="status" className="text-xs leading-relaxed text-amber-800 dark:text-amber-200" data-task-status-line="handed-back">{tr('inventory_check_task_handed_back', 'This task was handed back. Your counts are kept.')}</p> : null}
+        {section === 'tasks' && tasks.failed ? <TasksReadError text={tr('inventory_check_load_failed', 'Could not load Inventory. Try again.')} retry={t('retry')} onRetry={() => { void tasks.refresh() }} /> : null}
         {wiredNow && fresh && changedIds.length ? <div role="status" className="flex items-center justify-between gap-2 text-xs leading-relaxed text-amber-800 dark:text-amber-200" data-inventory-check-changed-elsewhere>
           <span className="min-w-0 break-words">{tr('inventory_check_changed_elsewhere', 'Changed on another device. Tap to refresh.')} ({changedIds.length})</span>
           <button type="button" className="btn-secondary inline-flex min-h-8 shrink-0 items-center gap-1 px-2 text-xs" disabled={controlsLocked} onClick={() => { void refreshChanged(changedIds) }}><RotateCcw className="h-4 w-4" aria-hidden="true" />{t('refresh')}</button>
@@ -1233,22 +1427,29 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
             onApprove={() => { void decideApproval('approve') }} onReject={() => { void decideApproval('reject') }} onClose={() => { void decideApproval('close') }}
             onAccept={productId => { void decideApproval('approve', [productId]) }} onModify={(productId, figures) => decideLine({ productId, action: 'modify', ...figures })}
             onRejectLine={productId => { void decideLine({ productId, action: 'reject' }) }} onReopen={productId => { void decideLine({ productId, action: 'reopen' }) }} /></Suspense> : null}
-        {!fresh && !error && !sessionError ? <ListSkeleton loadingText={t('loading')} /> : null}
-        {section === 'sessions' ? (fresh && sessions?.items.length ? <InventoryCheckSessionsList items={sessions.items} t={t} onOpen={item => { setSection('products'); onSelect({ branchId: String(item.branch_id), sessionId: item.id, creatorName: item.creator_name ?? null }) }} /> : null)
-          : oldIssues ? <div className="min-w-0 divide-y" aria-label={t('issues')} data-inventory-check-old-issues>
-            {issueRows.map(row => <InventoryCheckRows key={row.key} products={[row.product]} observations={{ [String(row.product.id)]: row.observation }} adornments={{ [String(row.product.id)]: row.chip }} canCheck={false} {...rowProps} onSave={() => { throw new Error('Open the session to change this check.') }} />)}
-          </div>
+        {!taskBoard && !fresh && !error && !sessionError ? <ListSkeleton loadingText={t('loading')} /> : null}
+        {taskBoard ? (!branchId ? <div className="min-w-0 space-y-2" data-tasks-choose-branch>
+          <p role="status" className="text-xs leading-relaxed text-gray-600 dark:text-gray-300">{tr('inventory_check_count_blocked_branch', 'Choose a branch first.')}</p>
+          {branches.length > 1 ? <ChipRail label={t('branch')}>{branches.map(branch => <RailChip key={branch.id} selected={false} onClick={() => onSelect({ branchId: String(branch.id), sessionId: '' })}>{branch.name}</RailChip>)}</ChipRail> : null}
+        </div>
+          : tasks.board ? <InventoryCheckTasksList board={tasks.board} t={t} canWork={access.canWorkTasks} busy={tasks.busy}
+            onOpen={task => onSelect({ branchId, sessionId: '', taskId: task.id })} onPickup={task => { void pickupTask(task) }} onRelease={task => { void releaseTask(task) }} onClose={task => { void closeTask(task) }} />
+            : tasks.failed || tasks.off ? null : <ListSkeleton loadingText={t('loading')} />)
+          : section === 'sessions' ? (fresh && sessions?.items.length ? <InventoryCheckSessionsList items={sessions.items} t={t} onOpen={item => {
+            // A pickup holds no items: its row opens the task it is for, never a session sheet.
+            if (item.scope?.membership === 'pickup') { setSection('tasks'); onSelect({ branchId: String(item.branch_id), sessionId: '', taskId: item.task?.id ?? String(item.scope.task) }); return }
+            setSection('products'); onSelect({ branchId: String(item.branch_id), sessionId: item.id, creatorName: item.creator_name ?? null })
+          }} /> : null)
           : listMode ? (grouping
             ? <Suspense fallback={<InventoryCheckListRows {...listRowProps} />}><GroupedList {...listRowProps} grouping={grouping} collapsed={collapsed} onToggle={toggleGroup} /></Suspense>
             : <InventoryCheckListRows {...listRowProps} />)
-          : <InventoryCheckRows key={scopeKey} products={visibleProducts} observations={observations} errors={rowErrors} adornments={{ ...adornments, ...issueChips }} frozen={frozen} pending={Object.fromEntries(visibleProducts.map(product => [String(product.id), savingId === Number(product.id)]))} locked={busy}
+          : <InventoryCheckRows key={scopeKey} products={visibleProducts} observations={observations} errors={rowErrors} adornments={adornments} frozen={frozen} pending={Object.fromEntries(visibleProducts.map(product => [String(product.id), savingId === Number(product.id)]))} locked={busy}
             canCheck={canCheckRows} inSession={!!sessionId} sheetHeader="external" reasonSuggestions={savedReasons.map(reason => reason.label)} focusRequest={focusRequest} onCommitted={onCommitted}
             {...rowProps} onEditingChange={onEditingChange} onSave={save} />}
         {section !== 'sessions' && unavailableProducts.length ? <InventoryCheckRows products={unavailableProducts} observations={observations} adornments={unavailableAdornments} canCheck={false} inSession={!!sessionId} {...rowProps} onSave={() => { throw new Error('This original session product is unavailable.') }} /> : null}
         {loadedNothing ? <div className="flex min-w-0 flex-col items-center gap-2 py-6 text-center text-xs text-gray-500" data-inventory-check-empty={section}>
           <p className="break-words leading-relaxed">{section === 'sessions' ? (sessionFiltersActive ? tr('inventory_check_sessions_no_match', 'No count sessions match these filters.') : tr('inventory_check_sessions_empty', 'No count sessions yet.'))
-            : section === 'issues' && !filtersActive ? tr('inventory_check_issues_empty', 'No issues found.')
-              : scanMissed ? (sessionId ? tr('inventory_check_scan_not_in_session', 'Not in this session.') : tr('inventory_check_scan_no_match', 'No product with this code.'))
+            : scanMissed ? (sessionId ? tr('inventory_check_scan_not_in_session', 'Not in this session.') : tr('inventory_check_scan_no_match', 'No product with this code.'))
                 : tr('inventory_check_empty', 'No matching products.')}</p>
           {(section === 'sessions' ? sessionFiltersActive : filtersActive) ? <button type="button" className="btn-secondary inline-flex min-h-10 items-center gap-1 px-3 text-xs" disabled={controlsLocked} onClick={clearFilters}><X className="h-4 w-4" aria-hidden="true" />{t('clear')}</button>
             : section === 'sessions' && access.canCheck ? <button type="button" className="btn-primary inline-flex min-h-10 items-center gap-1 px-3 text-xs" title={tr('inventory_check_count_tooltip', 'Count the products listed on this page')} onClick={() => setSection('products')}><Play className="h-4 w-4" aria-hidden="true" />{tr('inventory_check_start_page', 'Count')}</button> : null}

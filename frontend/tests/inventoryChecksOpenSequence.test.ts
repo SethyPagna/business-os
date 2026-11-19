@@ -44,6 +44,7 @@ let simple = false
 let wiredOn = false
 const listCalls: Call[] = []
 const overlayCalls: Array<{ query: URLSearchParams; listsAnswered: number }> = []
+const taskCalls: Array<{ branchId: string | number }> = []
 let listsAnswered = 0
 const probes: string[] = []
 let branchListCalls = 0
@@ -106,6 +107,7 @@ const doubles = {
       answered += 1
       return answer(query)
     },
+    readInventoryCheckTasks: async (branchId: string | number) => { taskCalls.push({ branchId }); return { branchId: Number(branchId), version: 'k1:1', items: [], capabilities: { issue: false, work: true, maxProducts: 300, maxOpenTasks: 30 } } },
     readInventoryCheckList: async (params: QueryParams) => {
       const url = appendQuery('/api/inventory-checks/list', buildQueryString(params))
       const query = new URL(url, 'https://admin.example.test').searchParams
@@ -130,7 +132,7 @@ const doubles = {
 }
 
 async function openPage(shopBranches: Array<{ id: number; name: string }>, icSimple: boolean, wired = false, tab = 'products') {
-  calls.length = 0; listCalls.length = 0; overlayCalls.length = 0; probes.length = 0; heldByProducts.clear(); branchListCalls = 0
+  calls.length = 0; listCalls.length = 0; overlayCalls.length = 0; taskCalls.length = 0; probes.length = 0; heldByProducts.clear(); branchListCalls = 0
   inFlight = 0; answered = 0; listsAnswered = 0
   branches = shopBranches; simple = icSimple; wiredOn = wired
   open(`hub:inventory:${tab}`)
@@ -174,19 +176,20 @@ try {
   assert.equal(listCalls.length, 1, 'ic_wired ON, two branches: one list request'); assert.equal(overlayCalls.length, 0, 'counts are per branch: no overlay for all branches')
   await wiredTwo.unmount()
 
-  // ---- ic_wired ON, one branch, the Issues tab opened directly: the wired list with the branch, never the older list ----
-  const issues = await openPage([{ id: 1, name: 'Only branch' }], true, true, 'issues')
-  assert.ok(issues.text().includes('Sequence product'), 'ic_wired ON, Issues deep link: the list is drawn')
-  assert.equal(calls.length, 0, 'ic_wired ON, Issues deep link: the older /products read is never made (it read every product three times)')
-  assert.equal(listCalls.length, 1, 'ic_wired ON, Issues deep link: one wired list request')
-  assert.equal(listCalls[0].query.get('checkState'), 'issue'); assert.equal(listCalls[0].query.get('branchId'), '1', 'a check state needs a branch: it is resolved before the request')
+  // ---- ic_wired ON, one branch, the Tasks board opened directly (an old Issues link opens it too): no list is read at all, only the board, for the sole branch ----
+  const tasks = await openPage([{ id: 1, name: 'Only branch' }], true, true, 'issues')
+  assert.equal(tasks.button('inventory_check_tasks').getAttribute('aria-pressed'), 'true', 'ic_wired ON, Tasks deep link: the board is the section shown')
+  assert.equal(calls.length, 0, 'ic_wired ON, Tasks deep link: the older /products read is never made'); assert.equal(listCalls.length, 0, 'and no wired list is read for the board'); assert.equal(overlayCalls.length, 0, 'nor an overlay')
+  assert.equal(taskCalls.length, 1, 'the board is ONE read'); assert.equal(String(taskCalls[0].branchId), '1', 'for the sole branch, which is chosen before the board is read')
   assert.equal(branchListCalls, 1, 'the branch list (a few rows) is the only extra read')
-  await issues.unmount()
+  await tasks.unmount()
 
-  // ---- ic_wired ON, two branches, the Issues tab: the all-branches Issues view stays on the older list (the wired list needs a branch for a check state) ----
-  const issuesTwo = await openPage([{ id: 1, name: 'Branch one' }, { id: 2, name: 'Branch two' }], true, true, 'issues')
-  assert.equal(listCalls.length, 0, 'ic_wired ON, two branches, Issues: no wired list without a branch'); assert.equal(calls.length, 1, 'and exactly one read of the older list')
-  await issuesTwo.unmount()
+  // ---- ic_wired ON, two branches, the Tasks board: no branch is chosen, so nothing is read for it; the branches are offered to choose from ----
+  const tasksTwo = await openPage([{ id: 1, name: 'Branch one' }, { id: 2, name: 'Branch two' }], true, true, 'tasks')
+  assert.equal(listCalls.length, 0, 'ic_wired ON, two branches, Tasks: no wired list'); assert.equal(calls.length, 0, 'and no older list'); assert.equal(taskCalls.length, 0, 'and no board read without a branch')
+  assert.ok(tasksTwo.text().includes('Choose a branch first.') && tasksTwo.text().includes('Branch two'), 'the page asks for a branch and offers them')
+  assert.equal(branchListCalls, 1, 'the branch list is read once')
+  await tasksTwo.unmount()
 
   // ---- date chips (owner, 17 Nov): a chip tap is ONE /list plus ONE overlay, exactly what a status chip tap costs; the rail adds no request of its own ----
   daysOn = true

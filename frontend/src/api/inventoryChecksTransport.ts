@@ -80,7 +80,39 @@ export type InventoryCheckSession = {
   creator_name?: string | null
   /** Sessions list and session read: present for a submitted count that differs from stock, to a viewer who may see stock. */
   approval?: InventoryCheckApproval
+  /** A pickup row: its task, with the task's own progress (absent once the task fell off the board). */
+  task?: { id: string; title: string; status: 'open' | 'closed'; total: number; done: number }
 }
+/** One count task of a branch's board (contract docs/contracts/inventory-check-tasks-20261119.md, section 3.1). `issued_by` is left out for a viewer who may not see staff identity. */
+export type InventoryCheckTask = {
+  id: string
+  branch_id: number
+  title: string
+  status: 'open' | 'closed'
+  revision: number
+  issued_at: string
+  issued_by?: string
+  closed_at: string | null
+  total: number
+  done: number
+  removed: number
+  selection: { kind: 'ids' } | { kind: 'filters'; filters: Record<string, string> } | null
+  picked_up_by: string | null
+  picked_up_at: string | null
+  mine: boolean
+  pickup_session_id?: string
+  can_pickup: boolean
+  can_release: boolean
+  can_close: boolean
+}
+export type InventoryCheckTasksAnswer = {
+  branchId: number
+  version: string
+  items: InventoryCheckTask[]
+  capabilities: { issue: boolean; work: boolean; maxProducts: number; maxOpenTasks: number }
+}
+/** What an issue names: the ids the admin chose, or the list's own filters (resolved by the Worker). */
+export type InventoryCheckTaskScope = { productIds: number[] } | { filters: Record<string, string> }
 export type InventoryCheckSessionsParams = QueryParams & {
   branchId?: string | number
   status?: 'open' | 'closed'
@@ -214,13 +246,15 @@ export function saveInventoryCheckObservation(scope: InventoryCheckWriteScope, p
 export type InventoryCheckSubmission = {
   branchId: number
   requestId: string
+  /** The task this count is for (the task view): part of the request's identity. */
+  taskId?: string
   /** Names the session in History (a count recorded after a Set from the row says so). */
   title?: string
   /** A line is a product's one count, or (ic_lot_counts) the counts typed per received date, each with the figure it showed. */
   lines: Array<{ productId: number; countedQuantity: number; seenQuantity: number | null; checked: boolean; note?: string }
     | { productId: number; lots: Array<{ batchId: number; scope: 'lot' | 'branch'; counted: number; seen: number | null }>; checked: boolean; note?: string }>
 }
-export function submitInventoryCheckCounts(scope: InventoryCheckWriteScope, input: InventoryCheckSubmission): Promise<{ item: InventoryCheckSession; receipt: InventoryCheckReceipt; created: boolean }> {
+export function submitInventoryCheckCounts(scope: InventoryCheckWriteScope, input: InventoryCheckSubmission): Promise<{ item: InventoryCheckSession; receipt: InventoryCheckReceipt; created: boolean; /** Present when the submission named a task: whether it closed it. */ task?: { id: string; closed: boolean }; closedTasks?: string[] }> {
   if (scope.context.sessionId) throw new Error('Counts are submitted from the list, not from inside a session.')
   if (!Number.isSafeInteger(input.branchId) || input.branchId < 1) throw new Error('Choose a branch before submitting counts.')
   return write(scope, `${base}/submissions`, 'POST', input)
@@ -241,4 +275,30 @@ export function decideInventoryCheckLine(scope: InventoryCheckWriteScope, input:
 export function changeInventoryCheckSession(scope: InventoryCheckWriteScope, action: 'close' | 'resume', expectedRevision: number, requestId: string): Promise<{ item: InventoryCheckSession; receipt: InventoryCheckReceipt }> {
   if (!scope.context.sessionId) throw new Error('An Inventory session is required.')
   return write(scope, sessionPath(scope.context.sessionId), 'PATCH', { action, expectedRevision, requestId })
+}
+
+/** The branch's count tasks: every open one, then the latest closed ones. 404 while the list switch is off (the page then shows no Tasks). */
+export function readInventoryCheckTasks(branchId: string | number, signal?: AbortSignal): Promise<InventoryCheckTasksAnswer> {
+  return apiFetch('GET', appendQuery(`${base}/tasks`, buildQueryString({ branchId })), undefined, undefined, { signal })
+}
+
+const taskPath = (id: string) => `${base}/tasks/${encodeURIComponent(id)}`
+
+/** Issue a count task: exactly one of the chosen ids and the list's filters. One request; a repeat of the same request id answers the same task. */
+export function issueInventoryCheckTask(scope: InventoryCheckWriteScope, input: { branchId: number; requestId: string; scope: InventoryCheckTaskScope }): Promise<{ item: InventoryCheckSession; receipt: InventoryCheckReceipt; created: boolean }> {
+  if (!Number.isSafeInteger(input.branchId) || input.branchId < 1) throw new Error('Choose a branch before issuing a task.')
+  return write(scope, `${base}/tasks`, 'POST', { branchId: input.branchId, requestId: input.requestId, ...input.scope })
+}
+
+export function pickupInventoryCheckTask(scope: InventoryCheckWriteScope, taskId: string, requestId: string): Promise<{ item: InventoryCheckSession; receipt: InventoryCheckReceipt; created: boolean }> {
+  return write(scope, `${taskPath(taskId)}/pickup`, 'POST', { requestId })
+}
+
+export function releaseInventoryCheckTask(scope: InventoryCheckWriteScope, taskId: string, requestId: string): Promise<{ item: InventoryCheckSession; receipt: InventoryCheckReceipt; released: boolean }> {
+  return write(scope, `${taskPath(taskId)}/release`, 'POST', { requestId })
+}
+
+/** Close a task by hand: the existing close, with the task's own revision from the board. It needs no selected session. */
+export function closeInventoryCheckTask(scope: InventoryCheckWriteScope, taskId: string, expectedRevision: number, requestId: string): Promise<{ item: InventoryCheckSession; receipt: InventoryCheckReceipt }> {
+  return write(scope, sessionPath(taskId), 'PATCH', { action: 'close', expectedRevision, requestId })
 }

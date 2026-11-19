@@ -42,7 +42,8 @@ export type WiredRaw = { list: WiredList; overlay: Map<number, OverlayEntry>; lo
 // ---- what is on the wire ----------------------------------------------------------------------------------------------------------------------------------
 
 /** The server accepts these and no others from the page; the older list's `sessionId` and any stray key never go to /list. */
-const LIST_KEYS = ['query', 'page', 'pageSize', 'stockState', 'brand', 'category', 'checkState', 'checkedOn'] as const
+/** `taskId`: the list restricted to one count task's products (the task view). */
+const LIST_KEYS = ['query', 'page', 'pageSize', 'stockState', 'brand', 'category', 'checkState', 'checkedOn', 'taskId'] as const
 const present = (value: unknown): boolean => value !== '' && value !== undefined && value !== null
 
 /** The /list query for the page's params. A sole branch is left out of the query (every row lists every active branch), so the read is the same one Products makes. */
@@ -62,7 +63,7 @@ export function wiredListParams(params: QueryParams, options: { omitBranch?: boo
 const PRODUCTS_STOCK_WORD: Record<string, string> = { in_stock: 'in_stock', low_stock: 'low', out_of_stock: 'out' }
 /** What Products' own page sends, in its key order, so the string is the key of Products' answer in the shared store (api/productReadTransport.ts). Null when the scope is not one Products can hold. */
 export function canonicalProductsQuery(wire: QueryParams): string | null {
-  if (present(wire.query) || present(wire.checkState) || present(wire.checkedOn) || present(wire.ids)) return null
+  if (present(wire.query) || present(wire.checkState) || present(wire.checkedOn) || present(wire.ids) || present(wire.taskId)) return null
   return buildQueryString({
     page: wire.page, pageSize: wire.pageSize, searchMode: 'AND', category: wire.category, brand: wire.brand, branchId: wire.branchId,
     stockState: PRODUCTS_STOCK_WORD[String(wire.stockState ?? '')], sort: `${wire.sortBy}_${wire.sortDirection}`, include: 'branch_stock,images,batches,tagged_lots',
@@ -238,10 +239,10 @@ export async function readWiredRows(rowIds: number[], branchId: number, deps: Wi
 export async function loadWired(args: WiredLoadArgs): Promise<WiredLoad> {
   const { params, deps, access, signal } = args
   const sole = args.known?.branches?.length === 1 ? args.known.branches[0].id : 0
-  // A sole branch is left out of the query unless the read is restricted by a check (status or date): those are per branch, so the server must be told which.
-  const wire = wiredListParams(params, { omitBranch: !!sole && !present(params.checkState) && !present(params.checkedOn), skipSummary: args.skipSummary })
+  // A sole branch is left out of the query unless the read is restricted by a check (status or date) or to a task: those are per branch, so the server must be told which (a task's own branch is required).
+  const wire = wiredListParams(params, { omitBranch: !!sole && !present(params.checkState) && !present(params.checkedOn) && !present(params.taskId), skipSummary: args.skipSummary })
   const page = Number(wire.page) || 1, pageSize = Number(wire.pageSize) || 20
-  const filtered = present(wire.stockState) || present(wire.brand) || present(wire.category) || present(wire.checkState) || present(wire.checkedOn)
+  const filtered = present(wire.stockState) || present(wire.brand) || present(wire.category) || present(wire.checkState) || present(wire.checkedOn) || present(wire.taskId)
 
   // Typed text goes through the device search index, as the pickers do: the ranked ids of the page are read by id. A viewer who may not see barcodes is searched by the server
   // (exact codes only, so a partial code can never be rebuilt from the index), and so is any scope with a filter or a check state.

@@ -107,7 +107,7 @@ try {
   await surface.click(surface.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'filters', 'Filters trigger'))
   const stateSection = surface.find(node => node.getAttribute('data-filter-menu-section') === 'checkState', 'Check status section')
   if (!stateSection.querySelectorAll('[role="option"]').length) await surface.click(surface.button(/./, stateSection))
-  await surface.click(surface.find(node => node.getAttribute('role') === 'option' && stateSection.contains(node) && node.textContent === 'issues', 'Issues option'))
+  await surface.click(surface.find(node => node.getAttribute('role') === 'option' && stateSection.contains(node) && node.textContent === 'inventory_check_status_differs', 'Differs option'))
   const root = surface.find(node => node.getAttribute('data-inventory-check-page') !== null, 'page root') as MemoryNode & { scrollTop?: number }
   const row12 = rowOf(surface, 12), row13 = rowOf(surface, 13)
   const tick13 = action(surface, 13, 'done')

@@ -151,4 +151,28 @@ await exports.submitInventoryCheckCounts(capture(), { branchId: 1, requestId: 's
 assert.equal(calls.at(-1)?.path, '/api/inventory-checks/submissions'); assert.equal(calls.at(-1)?.body.lines[0].productId, 7)
 current = { branchId: '1', sessionId: 's', epoch: 14 }
 assert.throws(() => exports.submitInventoryCheckCounts(capture(), { branchId: 1, requestId: 'submit-ffff', lines: [] }), /not inside a session|submitted from the list/)
+// ---- count tasks (docs/contracts/inventory-check-tasks-20261119.md) ----
+await exports.readInventoryCheckTasks(1, signal)
+assert.equal(calls.at(-1)?.path, '/api/inventory-checks/tasks?branchId=1'); assert.equal(calls.at(-1)?.options.signal, signal); assert.equal(calls.at(-1)?.method, 'GET')
+current = { branchId: '1', sessionId: '', epoch: 20 }
+await exports.issueInventoryCheckTask(capture(), { branchId: 1, requestId: 'issue-aaaaa', scope: { productIds: [5, 9] } })
+assert.deepEqual([calls.at(-1)?.method, calls.at(-1)?.path, calls.at(-1)?.body], ['POST', '/api/inventory-checks/tasks', { branchId: 1, requestId: 'issue-aaaaa', productIds: [5, 9] }], 'an issue by ids sends the ids and no filters')
+await exports.issueInventoryCheckTask(capture(), { branchId: 1, requestId: 'issue-bbbbb', scope: { filters: { brand: 'Dior' } } })
+assert.deepEqual(calls.at(-1)?.body, { branchId: 1, requestId: 'issue-bbbbb', filters: { brand: 'Dior' } }, 'an issue by filters sends the filters and no ids')
+assert.equal(routes.at(-1)?.options.isWrite, true, 'an issue is a write')
+assert.throws(() => exports.issueInventoryCheckTask(capture(), { branchId: 0, requestId: 'issue-ccccc', scope: { productIds: [1] } }), /Choose a branch/)
+await exports.pickupInventoryCheckTask(capture(), 'a/b', 'pickup-aaaa')
+assert.deepEqual([calls.at(-1)?.method, calls.at(-1)?.path, calls.at(-1)?.body], ['POST', '/api/inventory-checks/tasks/a%2Fb/pickup', { requestId: 'pickup-aaaa' }])
+await exports.releaseInventoryCheckTask(capture(), 't1', 'release-aaa')
+assert.deepEqual([calls.at(-1)?.method, calls.at(-1)?.path, calls.at(-1)?.body], ['POST', '/api/inventory-checks/tasks/t1/release', { requestId: 'release-aaa' }])
+await exports.closeInventoryCheckTask(capture(), 't1', 4, 'close-aaaaa')
+assert.deepEqual([calls.at(-1)?.method, calls.at(-1)?.path, calls.at(-1)?.body], ['PATCH', '/api/inventory-checks/sessions/t1', { action: 'close', expectedRevision: 4, requestId: 'close-aaaaa' }], 'closing a task by hand is the existing close with the task own revision, and needs no selected session')
+await exports.submitInventoryCheckCounts(capture(), { branchId: 1, requestId: 'submit-gggg', taskId: 'task-1', lines: [{ productId: 7, countedQuantity: 2, seenQuantity: 3, checked: false }] })
+assert.equal(calls.at(-1)?.body.taskId, 'task-1', 'a count for a task names the task')
+const writesBefore = calls.length
+current = { branchId: '1', sessionId: '', epoch: 21 }
+const stale = capture()
+current = { ...current, epoch: 22 }
+await assert.rejects(exports.pickupInventoryCheckTask(stale, 't1', 'pickup-bbbb'), (error: any) => error.code === 'inventory_check_scope_changed' && error.outcome === 'not_dispatched')
+assert.equal(calls.length, writesBefore, 'a task write from a selection that changed is never sent')
 console.log('PASS Inventory transport uncached reads, receipt payloads, zero, actor/authority/context fences, A-B-A, lost ACK and immutable request payload')

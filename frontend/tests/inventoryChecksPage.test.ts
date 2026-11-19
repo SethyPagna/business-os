@@ -8,6 +8,7 @@ import { workerState } from './inventoryApprovalStates.ts'
 import { APP_NAVIGATION_EVENT } from '../src/app/pathRouting.ts'
 import * as dirtyWork from '../src/utils/dirtyWork.ts'
 import { fmtDateTime24 } from '../src/utils/formatters.ts'
+import { forgetDeviceDrafts } from './inventoryCheckDeviceDrafts.ts'
 // Counting is its own grant and so is every field it shows (owner, 21 Oct 2026): Inventory Full no longer implies them.
 // Price, sales and customers are retired fields (owner, 1 Nov 2026) but roles still store those grants: the page must draw nothing for them.
 const COUNT_FIELDS = { inventory_check_show_price: true, inventory_check_show_barcode: true, inventory_check_show_category: true, inventory_check_show_brand: true, inventory_check_show_stock: true, inventory_check_show_received: true, inventory_check_show_sales: true, inventory_check_show_customers: true }
@@ -105,6 +106,7 @@ const doubles = {
       if (delayedProducts) return new Promise(resolve => { delayedProducts = resolve })
       return { ...response(params), items: productOverride ?? (emptyPastLastPage && Number(params.page) > Math.ceil(productTotal / Number(params.pageSize)) ? [] : response(params).items), total: productOverride?.length ?? productTotal }
     },
+    readInventoryCheckTasks: async () => ({ branchId: 1, version: 'k1:1', items: [], capabilities: { issue: false, work: true, maxProducts: 300, maxOpenTasks: 30 } }),
     readInventoryCheckSessions: async (params: Record<string, unknown>) => { sessionReads.push(params); return { items: [selected], total: 1, page: 1, pageSize: 20 } },
     readInventoryCheckSession: async () => (sessionLoads++, { item: selected, items: memberOverride ?? [observation], ...(sessionApproval ? { approval: sessionApproval } : {}) }),
     decideInventoryCheckLine: async (scope: unknown, input: Record<string, unknown>) => {
@@ -144,7 +146,7 @@ const doubles = {
     changeInventoryCheckSession: async () => { selected = { ...selected, status: selected.status === 'open' ? 'closed' : 'open', revision: selected.revision + 1 }; return { item: selected, receipt: {} } },
   },
 }
-const mount = () => harness.mount({ component: 'components/inventory/InventoryChecksPage.tsx', app, doubles, props: {} })
+const mount = () => { forgetDeviceDrafts(); return harness.mount({ component: 'components/inventory/InventoryChecksPage.tsx', app, doubles, props: {} }) }
 type Surface = Awaited<ReturnType<typeof mount>>
 // A session is opened from its row (found by id: the list names sessions by start and branch, never a stored title).
 const clickSessionRow = async (surface: Surface) => { await surface.click(surface.button(/./, surface.find(node => node.getAttribute('data-inventory-check-session') === 'check-1', 'session row'))) }
@@ -186,7 +188,7 @@ try {
   for (const [section, label, value, key] of [
     ['brand', 'Off-page brand', 'Off-page brand', 'brand'], ['category', 'Off-page category', 'Off-page category', 'category'],
     ['stockState', 'low_stock', 'low_stock', 'stockState'],
-    ['checkState', 'issues', 'issue', 'checkState'], ['sort', 'stock: high → low', 'stock', 'sortBy'],
+    ['checkState', 'inventory_check_status_differs', 'issue', 'checkState'], ['sort', 'stock: high → low', 'stock', 'sortBy'],
   ]) {
     const beforeFilter = productRequests.length
     await chooseFilter(filtering, section, label)
@@ -359,15 +361,12 @@ try {
   await blindOwner.unmount()
   app.user = { ...app.user, id: 8 }
   const blindOther = await mount()
-  await blindOther.click(blindOther.button('issues'))
-  assert.equal(productRequests.at(-1)?.checkState, 'issue', 'the Issues tab is the list with its status preset: the server filters before it paginates')
-  assert.equal(productRequests.at(-1)?.state, undefined, 'and the old state key is gone')
-  assert.ok(blindOther.text().includes('All-session issue reason'))
-  assert.ok(!blindOther.text().includes('37'), 'the page draws no count for a viewer without stock, even if the answer carried one')
-  assert.equal(blindOther.findAll(node => node.getAttribute('data-check-action') === 'issue').length, 0, 'all-session issue list has no writes before selecting a real session')
-  await blindOther.click(blindOther.button('Open session'))
+  // The Issues section is gone (Differs is a status chip on the list, and the third section is Tasks): the session is opened from Count sessions.
+  assert.equal(blindOther.findAll(node => node.tagName === 'BUTTON' && node.textContent === 'issues').length, 0, 'no Issues section chip any more')
+  await openSession(blindOther)
   assert.equal(productRequests.at(-1)?.sessionId, 'check-1')
-  assert.equal(productRequests.at(-1)?.branchId, '1', 'issue link resumes its actual branch/session identity')
+  assert.equal(productRequests.at(-1)?.branchId, '1', 'a session opened from the list resumes its actual branch/session identity')
+  assert.ok(!blindOther.text().includes('37'), 'the page draws no count for a viewer without stock, even if the answer carried one')
   assert.ok(!blindOther.text().includes('Counted 37'), 'stock-blind staff cannot see another creator entered count')
   assert.equal(blindOther.findAll(node => node.getAttribute('data-check-action') === 'issue').length, 0)
   await blindOther.unmount()
@@ -382,11 +381,13 @@ try {
   assert.ok(adminModal.includes('$913.27') && adminModal.includes('$17.00'), 'an administrator sees the cost and the selling price on the detail (owner, 17 Nov): ' + adminModal)
   await admin.unmount()
 
+  // The old Issues link opens Tasks (the section was renamed): the cold URL is mapped through the shared hook and republished under its new name.
   window.history.replaceState(null, '', '/inventory?retained=1#hub:inventory:issues')
   productTotal = 41
   const cold = await mount()
-  assert.equal(cold.button('issues').getAttribute('aria-pressed'), 'true', 'cold Inventory URL selects Issues through the actual shared hook')
-  assert.ok(cold.text().includes('All-session issue reason'))
+  assert.equal(cold.button('inventory_check_tasks').getAttribute('aria-pressed'), 'true', 'cold Inventory URL selects Tasks through the actual shared hook')
+  assert.ok(cold.text().includes('Choose a branch first.'), 'the Tasks board with no branch chosen says so')
+  assert.equal(window.location.hash, '#hub:inventory:tasks', 'the old anchor is republished under the new section name')
   assert.equal(window.location.search, '?retained=1', 'initial section publication preserves query state')
   await cold.click(cold.button('inventory'))
   assert.equal(window.location.hash, '#hub:inventory:products')
@@ -395,7 +396,7 @@ try {
   await act(async () => { window.history.back() }); await cold.settle()
   assert.equal(cold.button('inventory').getAttribute('aria-pressed'), 'true', 'Back restores the previously committed Products section')
   await act(async () => { window.history.back() }); await cold.settle()
-  assert.equal(cold.button('issues').getAttribute('aria-pressed'), 'true', 'Back restores the cold Issues section')
+  assert.equal(cold.button('inventory_check_tasks').getAttribute('aria-pressed'), 'true', 'Back restores the cold Tasks section')
   await act(async () => { window.history.forward() }); await cold.settle()
   assert.equal(cold.button('inventory').getAttribute('aria-pressed'), 'true', 'Forward restores the committed Products section')
   blockNavigation = true
@@ -419,7 +420,7 @@ try {
   const beforeBlockedInput = productRequests.length
   await cold.type(cold.field('inventory-check-search'), 'must not change scope')
   assert.equal(productRequests.length, beforeBlockedInput)
-  await cold.click(cold.button('issues'))
+  await cold.click(cold.button('inventory_check_tasks'))
   assert.equal(productRequests.at(-1)?.page, 2, 'a rejected section request cannot eagerly reset pagination and remount a dirty row')
   assert.equal((cold.field('inventory-check-reason-12') as unknown as { value: string }).value, 'Guarded local draft', 'rejected section navigation preserves the mounted local editor')
   assert.equal(cold.button('inventory').getAttribute('aria-pressed'), 'true')
@@ -509,7 +510,7 @@ try {
   assert.equal(strip.findAll(node => node.tagName === 'BUTTON' && /top_products|top_customers/.test(`${node.getAttribute('aria-label') ?? ''}${node.textContent}`)).length, 0, 'there are no ranking controls')
   await strip.click(strip.button('Stats'))
   const stripText = strip.text()
-  assert.ok(stripText.includes('In check2') && stripText.includes('Checked OK5') && stripText.includes('Issues1') && stripText.includes('Not checked17'), 'the summary is the check counts: in this check, checked OK, issues, not yet checked')
+  assert.ok(stripText.includes('In check2') && stripText.includes('Checked OK5') && stripText.includes('Differs1') && stripText.includes('Not checked17'), 'the summary is the check counts: in this check, checked OK, issues, not yet checked')
   assert.ok(!/Sold|Customers|Top products|Total products|Stock quantity/.test(stripText), 'and nothing about sales')
   await strip.unmount()
 
@@ -641,23 +642,21 @@ try {
   assert.equal(counting.button('sessions').getAttribute('aria-pressed'), 'true', 'with nothing pending the section changes')
   await counting.unmount()
 
-  // changing the branch with counts not submitted asks first (the shared review, never a native confirm): Cancel keeps everything, Discard clears and switches
+  // changing the branch with counts not submitted asks nothing: the counts are kept on this device per branch, so the switch loses none of them
   branchList = [{ id: 1, name: 'Test branch' }, { id: 2, name: 'Second branch' }]
   window.history.replaceState(null, '', '/inventory#hub:inventory:products')
   const branchSwitching = await mount()
   await chooseFilter(branchSwitching, 'branchId', 'Test branch')
   assert.ok(!branchSwitching.text().includes('Discard counts not submitted?') && productRequests.at(-1)?.branchId === '1', 'with nothing picked the branch changes at once, without asking')
   const switchRow = () => branchSwitching.find(node => node.getAttribute('data-inventory-check-row') === '12', 'row 12')
-  await branchSwitching.type(branchSwitching.find(node => node.getAttribute('data-check-count') !== null && switchRow().contains(node), 'count 12'), '6')
-  const requestsBeforeSwitch = productRequests.length
+  const switchInput = () => branchSwitching.find(node => node.getAttribute('data-check-count') !== null && switchRow().contains(node), 'count 12')
+  await branchSwitching.type(switchInput(), '6')
   await chooseFilter(branchSwitching, 'branchId', 'Second branch')
-  assert.ok(branchSwitching.text().includes('Discard counts not submitted?'), 'a branch change with counts not submitted asks first')
-  assert.equal(productRequests.length, requestsBeforeSwitch, 'nothing is read for the other branch before the answer'); assert.equal(noWork(), 1)
-  await branchSwitching.click(exactButtons(branchSwitching, 'Cancel').at(-1)!)
-  assert.ok(!branchSwitching.text().includes('Discard counts not submitted?') && noWork() === 1 && productRequests.length === requestsBeforeSwitch, 'Cancel keeps the picks and the branch')
-  await chooseFilter(branchSwitching, 'branchId', 'Second branch')
-  await confirmInDialog(branchSwitching, 'discard')
-  assert.equal(productRequests.at(-1)?.branchId, '2', 'Discard switches to the other branch'); assert.equal(noWork(), 0, 'and the counts are gone')
+  assert.ok(!branchSwitching.text().includes('Discard counts not submitted?'), 'a branch change with counts typed no longer asks')
+  assert.equal(productRequests.at(-1)?.branchId, '2', 'the other branch is read at once'); assert.equal(noWork(), 0, 'and it starts with no counts of its own')
+  await chooseFilter(branchSwitching, 'branchId', 'Test branch')
+  assert.equal((switchInput() as unknown as { value: string }).value, '6', 'coming back to the first branch finds the typed count again')
+  assert.equal(noWork(), 1, 'and it is counted as unsaved work again')
   await branchSwitching.unmount()
   branchList = [{ id: 1, name: 'Test branch' }]
 
