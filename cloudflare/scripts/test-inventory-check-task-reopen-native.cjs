@@ -159,6 +159,25 @@ async function overTheCap(k) {
   const next = await k.ic('admin', 'POST', '/tasks', { branchId: 1, requestId: k.w.rid('iss'), productIds: [102] })
   assert.equal(next.status, 409); assert.equal(next.json.code, 'inventory_check_task_limit'); assert.equal(next.json.open, 31)
 }
+/** F3 + M21: two issues race for the LAST open-task slot: exactly one wins and the other is refused with the cap refusal (the cap is read inside the issue's own batch, so the interleaving cannot slip two through). Then a take-back at the cap is still never refused. */
+async function lastSlotRace(k) {
+  const t = await k.issue([100]); const x = await k.count([100]); assert.deepEqual(x.closed.closedTasks, [t])
+  for (let n = 0; n < 29; n++) await k.issue([101]) // 29 open: one slot left
+  const open = () => k.w.row("SELECT COUNT(*) AS n FROM inventory_check_sessions WHERE organization_id IS NULL AND branch_id=1 AND status='open' AND json_extract(scope_json,'$.membership')='task'").n
+  assert.equal(open(), 29)
+  const body = (p) => ({ branchId: 1, requestId: k.w.rid('race'), title: 'race', productIds: [p] })
+  const db = k.w.app.env.DB, ob = db.batch, oo = db.batchOnce
+  let fired = false, second = null
+  const hook = (orig) => async (list) => { if (!fired && list.some((s) => /INSERT INTO inventory_check_sessions/.test(String(s.sql)))) { fired = true; second = await k.w.app.send('POST', '/api/inventory-checks/tasks', body(103)) } return orig(list) }
+  k.w.as('admin'); db.batch = hook(ob); db.batchOnce = hook(oo)
+  let first; try { first = await k.w.app.send('POST', '/api/inventory-checks/tasks', body(102)) } finally { db.batch = ob; db.batchOnce = oo }
+  assert.equal(fired, true, 'the interleaving happened')
+  const answers = [first, second].map((a) => [a.status, a.json && a.json.code])
+  assert.equal(answers.filter(([status]) => status === 201).length, 1, 'exactly one issue wins the last slot: ' + JSON.stringify(answers))
+  assert.deepEqual(answers.filter(([status]) => status !== 201), [[409, 'inventory_check_task_limit']], 'the other gets the cap refusal')
+  assert.equal(open(), 30, 'the branch holds exactly the cap, never one more')
+  const r = await k.resume(x.id); assert.deepEqual(r.json.reopenedTasks, [t], 'a take-back is never refused by the cap'); assert.equal(open(), 31)
+}
 /** E8: the pickup stays closed. */
 async function pickupStaysClosed(k) {
   const t = await k.issue([100]); const pk = await k.ic('emp2', 'POST', `/tasks/${t}/pickup`, { requestId: k.w.rid('pk') }); assert.equal(pk.status, 201, JSON.stringify(pk.json))
@@ -227,6 +246,21 @@ async function undoSessionResume(k) {
   const r = await k.resume(copy, 0); assert.equal('reopenedTasks' in r.json, false); assert.equal(k.reopens(t).length, before)
 }
 
+/** Seed 1 of the property test, shrunk (19 Nov): a Set closes the difference and the task; Undo (count taken back, task reopens); ANOTHER date of the product is Set (the Issue's lines no longer all match, so the Redo cannot close the Issue again); Redo (the count is restored in effect, the task closes); the second Undo takes the count back again and reopens the task.
+ *  In effect at each step for the product: Set count (1), none after the Undo (2), none after the other date's Set (3: it closes no difference), the Set count again after the Redo (4), none after the second Undo (5). The Redo must not rewrite the Set's stored issue_closed. */
+async function setRedoNotClosable(k) {
+  const { ids: [t], set } = await setWorld(k); assert.deepEqual(set.closed_tasks, [t])
+  assert.equal((await k.undo(set.action_history_id)).status, 200); assert.equal(k.status(t).status, 'open')
+  await sleep(4)
+  const other = await k.w.call('admin', 'POST', '/api/inventory/adjust', { type: 'set', setScope: 'lot', productId: 130, branchId: 1, batchId: 1302, quantity: 6, expectedLotQuantity: 7, reason: 'Physical count', client_request_id: 'inventory_set_' + k.w.rid('o') })
+  assert.equal(other.status, 200, JSON.stringify(other.json)); assert.equal(other.json.issue_closed, false, 'the other date closes no difference: the first date is still off')
+  const d = await k.redo(set.action_history_id); assert.equal(d.status, 200, JSON.stringify(d.json))
+  assert.equal(setItem(k, set.operation_id).state, 'done', 'the Redo restored the count'); assert.equal(k.status(t).status, 'closed')
+  assert.equal(JSON.parse(k.w.row('SELECT response_json FROM stock_lot_adjustment_operations WHERE id=?', set.operation_id).response_json).issue_closed, true, 'the Redo left the stored answer alone')
+  const u = await k.undo(set.action_history_id); assert.equal(u.status, 200, JSON.stringify(u.json))
+  assert.equal(setItem(k, set.operation_id).state, 'unstarted', 'the second Undo takes the restored count back'); assert.equal(k.status(t).status, 'open', 'and the task reopens'); assert.equal(k.reopens(t).length, 2)
+}
+
 // ---- the PLAIN Set (Products page, Stock-session line: type "set", no setScope) is a final count too, and its Revert is its Undo ---------------------------------------------------------------------------------
 const lastMovement = (k) => k.w.row('SELECT MAX(id) AS id FROM inventory_movements').id
 /** F1 + M17-M19: a plain Set that makes the latest Differs match closes it and the task it completes; its Revert takes the count back (the task reopens) and the Revert of the Revert restores it. */
@@ -251,11 +285,17 @@ async function plainSetCycle(k) {
   assert.equal(plain.status, 200, JSON.stringify(plain.json)); assert.equal(plain.json.issue_closed, false)
 }
 
-const SCENARIOS = { plainSetCycle, twoTasksOneCount, laterCountStays, earlierCountStays, countBeforeIssue, handClosedStays, notCountableStays, optionsAandBMiss, resumeThenCloseAgain, otherBranchAndOrg, overTheCap, pickupStaysClosed, immutables, setUndoRedo, setHandClose, setUndoOpenSession, undoSessionResume }
+const SCENARIOS = { plainSetCycle, twoTasksOneCount, laterCountStays, earlierCountStays, countBeforeIssue, handClosedStays, notCountableStays, optionsAandBMiss, resumeThenCloseAgain, otherBranchAndOrg, overTheCap, lastSlotRace, pickupStaysClosed, immutables, setUndoRedo, setRedoNotClosable, setHandClose, setUndoOpenSession, undoSessionResume }
 
 // ---- the plants: each must turn the named scenario red ------------------------------------------------------------------------------------------------------------------------------------------
 const PLAN = "LIMIT -1) r\n    WHERE ${taskItemCountableSql('r')}`"
+const CAP_GUARD = "    guard(`(${OPEN_TASK_COUNT_SQL})<@maxOpenTasks`, 'inventory_check_task_limit', { ...params, maxOpenTasks: issue.maxOpenTasks }),\n"
 const MUTANTS = [
+  ['M21 the cap is read outside the issue batch (a race slips two through)', { 'lib/inventoryCheckSessions.ts': [[
+    "  const statements: Statement[] = [\n    guard('EXISTS(SELECT 1 FROM branches WHERE id=@branchId AND is_active=1)', 'inventory_check_baseline_changed', params),\n" + CAP_GUARD,
+    "  { const pre = await db.prepare(`SELECT (${OPEN_TASK_COUNT_SQL}) AS n`).get<{ n: number }>({ organization: actor.organization_id, branchId }); if (Number(pre?.n ?? 0) >= issue.maxOpenTasks) fail(409, 'inventory_check_task_limit', { open: Number(pre?.n ?? 0), limit: issue.maxOpenTasks }) }\n" +
+    "  const statements: Statement[] = [\n    guard('EXISTS(SELECT 1 FROM branches WHERE id=@branchId AND is_active=1)', 'inventory_check_baseline_changed', params),\n"]] }, 'lastSlotRace'],
+  ['M20 the Redo rewrites the Set answer (issue_closed false when its restore did not land)', { 'lib/stockLotAdjustment.ts': [['{ restore: true, answer: false }), ...restoreSetCountStatements', '{ restore: true }), ...restoreSetCountStatements']] }, 'setRedoNotClosable'],
   ['M17 a plain Set closes no difference and no task', { 'routes/inventory.ts': [["const plainCount = type === 'set' && await (await import('../lib/readSwitches')).readSwitch(c.env, 'ic_lot_counts')", 'const plainCount = false']] }, 'plainSetCycle'],
   ['M18 the Revert of a plain Set takes no count back', { 'lib/stockSetClosesIssue.ts': [['    const issue = reopenIssueStatements(closing, now), count = takeBackSetCountStatements(closing, origin, now)\n    return { statements: [...issue, ...count.statements], changedAt: issue.length + 1 }', '    const issue = reopenIssueStatements(closing, now)\n    return { statements: [...issue], changedAt: issue.length + 1 }']] }, 'plainSetCycle'],
   ['M19 the Revert of the Revert restores no count', { 'lib/stockSetClosesIssue.ts': [['  return { statements: [...issue, ...count.statements], changedAt: issue.length + 1 }\n}', '  return { statements: [...issue], changedAt: issue.length + 1 }\n}']] }, 'plainSetCycle'],

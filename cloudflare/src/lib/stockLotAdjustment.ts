@@ -721,7 +721,8 @@ export async function replayStockLotSet(
     const where = { setActor: row.actor_id, setKey: setCountKey(row.id) }
     statements.push(...(direction === 'undo'
       ? [...reopenIssueStatements(closing, now), ...takeBackSetCountStatements(closing, where, now).statements]   // ORDER: the Issue side reads the latest count, which must still be the Set's
-      : [...closeIssueStatements(closing, now, { restore: true }), ...restoreSetCountStatements(closing, where, now).statements]))
+      // answer:false -- the Redo leaves the Set's stored issue_closed alone. Its restore of the Issue is conditional; when it does not land (another received date was Set since) writing false here made the next Undo skip taking the restored count back.
+      : [...closeIssueStatements(closing, now, { restore: true, answer: false }), ...restoreSetCountStatements(closing, where, now).statements]))
   }
   statements.push(
     { sql: "UPDATE stock_lot_adjustment_operations SET generation=@next,state=@target,revision_json=json_set(revision_json,'$.generation',@next) WHERE id=@operation", params },
