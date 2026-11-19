@@ -14,35 +14,39 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const { bootWorld, fingerprintOf } = require('./read-budget/world.cjs')
-const { seedContext } = require('./read-budget/seed.cjs')
 
 // lib/planTier.ts, Free expenseReportFoldMaxRows (pinned by test-plan-tier-pure.cjs and, on the route, by test-expense-reads-native.cjs)
 const FREE_FOLD_ROWS = 1500
 
-const ctx = seedContext()
-const R = `startDate=${ctx.month}&endDate=${ctx.today}`
-const REPORTS = [
-  ['report, month', `/api/fees/report?${R}`],
-  ['report, month + branch', `/api/fees/report?${R}&branchId=1`],
-  ['report, all time', '/api/fees/report'],
-  ['report, all time + branch', '/api/fees/report?branchId=1'],
-  ['report, month with the sale block', `/api/fees/report?${R}&include=sales`],
-  ['report, all time with the sale block', '/api/fees/report?include=sales'],
-  // both dates given but wide (every expense in it): over the Free cap WITH a window, so Free tries the fold and turns it away
-  ['report, wide window (every expense)', `/api/fees/report?startDate=2000-01-01&endDate=${ctx.today}`],
-]
+// The dated windows hang off the booted world's own anchor (world.ctx, the date its seed was built on), so measureAll fills these in once a world exists.
+let REPORTS, EXPORTS
+const plan = (ctx) => {
+  const R = `startDate=${ctx.month}&endDate=${ctx.today}`
+  const reports = [
+    ['report, month', `/api/fees/report?${R}`],
+    ['report, month + branch', `/api/fees/report?${R}&branchId=1`],
+    ['report, all time', '/api/fees/report'],
+    ['report, all time + branch', '/api/fees/report?branchId=1'],
+    ['report, month with the sale block', `/api/fees/report?${R}&include=sales`],
+    ['report, all time with the sale block', '/api/fees/report?include=sales'],
+    // both dates given but wide (every expense in it): over the Free cap WITH a window, so Free tries the fold and turns it away
+    ['report, wide window (every expense)', `/api/fees/report?startDate=2000-01-01&endDate=${ctx.today}`],
+  ]
+  const exports_ = [
+    ['export, all time', 'source=all'],
+    ['export, month', `source=all&${R}`],
+    ['export, all time + branch', 'source=all&branch_id=1'],
+  ]
+  return { REPORTS: reports, EXPORTS: exports_ }
+}
 const hasBothDates = (url) => /[?&]startDate=[^&]+/.test(url) && /[?&]endDate=[^&]+/.test(url)
-const EXPORTS = [
-  ['export, all time', 'source=all'],
-  ['export, month', `source=all&${R}`],
-  ['export, all time + branch', 'source=all&branch_id=1'],
-]
 
 // The statements the 6.0.1053 report ran against the expense table, as P0.1 fingerprinted them for the month shape (fingerprints/api_fees_report.json at b6ebf551d).
 const BASE_REPORT_STATEMENTS = ['23b5ef6272bc', 'b5863f84be44', 'ce4ec237f102', '81a7fc9cf696']
 
 async function measureAll(switches, tier = 'free', withExports = true) {
   const world = await bootWorld({ tier, switches })
+  ;({ REPORTS, EXPORTS } = plan(world.ctx))
   const out = { reports: {}, exports: {}, fingerprints: null }
   try {
     await world.send('GET', '/api/fees/types', undefined, { miss: true }) // warm: session, permissions

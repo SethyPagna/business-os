@@ -13,7 +13,18 @@ const SALE_STEP_MINUTES = 32.8, PRODUCT_SALE_K = 784, PRODUCT_SALE_PRODUCT = 100
 // productSalesDay: the local day of PRODUCT_SALE_K, the sale of product 1000 the sales-detail drill-down reads (the anchor is 12:00 local, so with the constants above it is
 // 18 days back at 15:25). A calendar month cannot be a fixed window: how many seeded days it holds moves with the run date (the 19 Nov 2026 red); the month of this day can:
 // the other two sales of product 1000 are 59 and 197 days further back, so that month holds exactly this one sale on every run date.
-function seedContext(now = process.env.READ_BUDGET_NOW ? new Date(process.env.READ_BUDGET_NOW) : new Date()) {
+// The run's instant, read ONCE when this module loads: the seed key, the seed data and every shape's dates come from it, so a run that crosses Cambodia midnight (17:00Z)
+// cannot ask for the day after its data. READ_BUDGET_NOW moves it. READ_BUDGET_CLOCK_DRIFT_DAYS is a test seam: every read of the clock after the first answers that many
+// days later, which is what a second read would see after midnight (test-read-budget-date-anchor-pure.cjs proves nothing but this one read exists).
+let clockReads = 0
+function readClock() {
+  const base = process.env.READ_BUDGET_NOW ? new Date(process.env.READ_BUDGET_NOW) : new Date()
+  const drift = clockReads++ ? Number(process.env.READ_BUDGET_CLOCK_DRIFT_DAYS) || 0 : 0
+  return new Date(base.getTime() + drift * 86400e3)
+}
+const RUN_NOW = readClock()
+
+function seedContext(now = RUN_NOW) {
   const local = new Date(now.getTime() + 7 * 3600e3)
   const anchorDate = local.toISOString().slice(0, 10)
   const day = (back) => new Date(Date.parse(anchorDate + 'T00:00:00Z') - back * 86400e3).toISOString().slice(0, 10)
@@ -182,4 +193,7 @@ function seedSql({ variant = 'base', now } = {}) {
   ]
 }
 
-module.exports = { seedSql, seedContext, ADMIN, P, C, S, POSITIVE_LOTS, BRANCH_STOCK_ROWS, FIRST_SALE, SALE_STEP_MINUTES, PRODUCT_SALE_K, PRODUCT_SALE_PRODUCT }
+// The context of a seed that is already built: its stored anchor date, never the clock.
+const contextOn = (anchorDate) => seedContext(new Date(anchorDate + 'T05:00:00Z'))
+
+module.exports = { seedSql, seedContext, contextOn, readClock, ADMIN, P, C, S, POSITIVE_LOTS, BRANCH_STOCK_ROWS, FIRST_SALE, SALE_STEP_MINUTES, PRODUCT_SALE_K, PRODUCT_SALE_PRODUCT }

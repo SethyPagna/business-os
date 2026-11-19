@@ -14,13 +14,11 @@
 //   RUNNER_TEMP=<dir> keeps the seed out of the system temp directory.
 const assert = require('node:assert/strict')
 const { bootWorld } = require('./read-budget/world.cjs')
-const { seedContext } = require('./read-budget/seed.cjs')
 const { writeShapes } = require('./read-budget/writes.cjs')
 
 const WINDOW_MS = 300 * 1000
 const BUSINESS_OFFSET_MS = 7 * 3600 * 1000
-const ctx = seedContext()
-const URL = `/api/dashboard?startDate=${ctx.today}&endDate=${ctx.today}`
+const urlOf = (ctx) => `/api/dashboard?startDate=${ctx.today}&endDate=${ctx.today}`
 // the statements only the stock overview runs: the catalogue pass and the expiry list / count
 const OVERVIEW = /family_agg AS|COALESCE\(expiry_alert_days, 30\)/
 const shape = (id) => writeShapes().find((s) => s.id === id)
@@ -34,7 +32,7 @@ async function clearOfBoundary(seconds = 100) {
 }
 
 async function dashboard(world, label, { miss = true } = {}) {
-  const r = await world.send('GET', URL, undefined, { miss })
+  const r = await world.send('GET', urlOf(world.ctx), undefined, { miss })
   assert.equal(r.status, 200, `${label}: ${r.text.slice(0, 300)}`)
   const stmts = ((await world.last()).stmts || [])
   const own = stmts.filter((s) => OVERVIEW.test(s.raw))

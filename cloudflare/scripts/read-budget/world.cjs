@@ -16,7 +16,7 @@ const { build } = require('esbuild')
 const { Miniflare, Log, LogLevel } = require('miniflare')
 const { unstable_splitSqlQuery: split } = require('wrangler')
 const bcrypt = require('bcryptjs')
-const { seedSql, seedContext, ADMIN } = require('./seed.cjs')
+const { seedSql, seedContext, contextOn, ADMIN } = require('./seed.cjs')
 const { attachSwitchRows } = require('./switches.cjs')
 
 const ROOT = path.resolve(__dirname, '..', '..')
@@ -235,7 +235,7 @@ async function buildSeed(dir, { seedVariant, tier, script }) {
     await mf.dispatchFetch(ORIGIN + '/api/settings')
     const flag = (await (await mf.getD1Database('DB', 'w0')).prepare("SELECT value FROM system_flags WHERE key='core_invariants_build'").all()).results[0]
     if (!flag || !/"status":"verified"/.test(flag.value)) throw new Error('seed: the core invariants gate did not verify the seeded catalogue: ' + (flag && flag.value))
-    fs.writeFileSync(path.join(dir, 'org.json'), JSON.stringify({ orgId: org.id }))
+    fs.writeFileSync(path.join(dir, 'org.json'), JSON.stringify({ orgId: org.id, anchorDate: seedContext().anchorDate }))
   } finally { await mf.dispose() }
 }
 
@@ -284,9 +284,9 @@ async function bootWorld({ tier = 'free', seedVariant = 'base', persistDir, seed
   const persist = persistDir || fs.mkdtempSync(path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'read-budget-work-'))
   fs.rmSync(persist, { recursive: true, force: true })
   fs.cpSync(seeded, persist, { recursive: true })
-  const { orgId } = JSON.parse(fs.readFileSync(path.join(persist, 'org.json'), 'utf8'))
+  const { orgId, anchorDate } = JSON.parse(fs.readFileSync(path.join(persist, 'org.json'), 'utf8'))
   const mf = new Miniflare(options({ tier, script, persist, callLimit }))
-  const world = { mf, tier, persist, orgId, script, cookie: null, ctx: seedContext(), deadlineHits: 0 }
+  const world = { mf, tier, persist, orgId, script, cookie: null, ctx: contextOn(anchorDate), deadlineHits: 0 }
   world.db = await mf.getD1Database('DB', 'w0')
   const refresh = async () => { world.db = await mf.getD1Database('DB', 'w0') }
   // restart(extra) starts a fresh isolate on the same storage; `extra` bindings (CF_VERSION_METADATA: { id } simulates a deploy) stay for later restarts.

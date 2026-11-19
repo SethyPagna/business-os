@@ -14,7 +14,6 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const { bootWorld } = require('./read-budget/world.cjs')
-const { seedContext } = require('./read-budget/seed.cjs')
 
 const SALES = 'src/routes/sales.ts'
 const KERNEL = 'src/lib/salesAnalytics.ts'
@@ -74,7 +73,6 @@ const shapesFor = (ctx) => {
   'search-subset-all-time': 'search=Customer 1',
   }
 }
-const SHAPE_NAMES = Object.keys(shapesFor(seedContext()))
 const ATOMIC = { report_atomic: 'on', report_atomic_long: 'on' }
 
 async function run({ patches = [], switches }) {
@@ -115,6 +113,7 @@ const bodies = (res) => Object.fromEntries(Object.entries(res).map(([k, v]) => [
   const newOff = await run({})
   const oldOn = await run({ patches: oldRoute, switches: ATOMIC })
   const newOn = await run({ switches: ATOMIC })
+  const SHAPE_NAMES = Object.keys(newOn)
   for (const [mode, o, n] of [['OFF', oldOff, newOff], ['ON', oldOn, newOn]]) {
     await step(`parity (report_atomic ${mode}): every shape answers byte-identically to the old route`, () => assert.deepEqual(bodies(n), bodies(o)))
     await step(`rows and calls (report_atomic ${mode}): never above the old route; below it for the dated and all-time windows`, () => {

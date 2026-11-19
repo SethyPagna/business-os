@@ -12,7 +12,7 @@ const bcrypt = require('bcryptjs')
 process.env.READ_BUDGET_DEADLINE_MS ||= '180000'
 const rb = path.join(__dirname, 'read-budget')
 const { bootWorld, runShape, fingerprintOf } = require(path.join(rb, 'world.cjs'))
-const { seedContext, ADMIN } = require(path.join(rb, 'seed.cjs'))
+const { ADMIN } = require(path.join(rb, 'seed.cjs'))
 const { seedReportExtras } = require('./harness/report_atomic_extras.cjs')
 
 const EMPLOYEE = { username: 'budget_nocost', password: 'budget-password-2' }
@@ -68,8 +68,8 @@ const without = (value, paths) => {
 
 async function main() {
   const started = Date.now()
-  const ctx = seedContext()
   const world = await bootWorld({ tier: 'free' })
+  const ctx = world.ctx
   const notes = []
   try {
     const extras = await seedReportExtras(world, ctx)

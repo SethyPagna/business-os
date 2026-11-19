@@ -87,4 +87,41 @@ for (const { runDate, ctx } of sets) {
   check(sameMonth.length === 1 && sameMonth[0].id === wantedId, `${runDate}: the month ${ctx.productSalesDay.slice(0, 7)} holds sales ${sameMonth.map((x) => x.id + '@' + x.day)} of product ${PRODUCT_SALE_PRODUCT}, not just ${wantedId}`)
 }
 
+// One run date per run. The clock is read ONCE (seed.cjs readClock, at load); the seed stores the anchor date it used (org.json) and world.ctx and every native are built from the
+// stored date. Before this, the seed key, the seed data, world.ctx and three natives each read the clock: a run that crossed 17:00Z (Cambodia midnight) asked for the day after its data.
+const source = (...parts) => fs.readFileSync(path.join(__dirname, ...parts), 'utf8').replace(/\r\n/g, '\n').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n')
+const count = (text, re) => (text.match(re) || []).length
+const seedText = source('read-budget', 'seed.cjs')
+check(count(seedText, /\breadClock\(\)/g) === 2 && /RUN_NOW = readClock\(\)/.test(seedText), 'seed.cjs: the clock must be read once, by `const RUN_NOW = readClock()` at load')
+check(count(seedText, /new Date\(\)/g) === 1 && count(seedText, /Date\.now\(/g) === 0, 'seed.cjs: no clock read outside readClock')
+check(/function seedContext\(now = RUN_NOW\)/.test(seedText), 'seed.cjs: seedContext must default to the one run instant')
+const worldText = source('read-budget', 'world.cjs')
+check(/ctx: contextOn\(anchorDate\)/.test(worldText) && /orgId: org\.id, anchorDate: /.test(worldText), 'world.cjs: world.ctx must be built from the anchor date the seed stored in org.json')
+check(count(worldText, /\bseedContext\(/g) === 2, `world.cjs: seedContext() may be read only for the seed key and the stored anchor, found ${count(worldText, /\bseedContext\(/g)}`)
+
+const CLOCK_FREE = ['shapes.cjs', 'ic-history.cjs', 'history-pass.cjs', 'runner.cjs', 'routes.cjs', 'switches.cjs', 'writes.cjs'].map((f) => ['read-budget', f])
+const natives = fs.readdirSync(__dirname).filter((f) => /^test-.*-(native|http)\.cjs$/.test(f)).map((f) => [f])
+for (const parts of [...CLOCK_FREE, ...natives]) {
+  const text = source(...parts)
+  const name = parts.join('/')
+  check(!/\b(seedContext|contextOn)\(|\bRUN_NOW\b|READ_BUDGET_NOW|READ_BUDGET_CLOCK_DRIFT/.test(text), `${name}: builds a date from the clock or a seed context at load; use world.ctx of the booted world`)
+}
+for (const parts of CLOCK_FREE) {
+  const text = source(...parts).replace(/world\.clockMs = shiftCloseInstant\(world\.ctx\.anchorDate, Date\.now\(\)\)/, '')
+  check(!/new Date\(\)|Date\.now\(\)/.test(text), `${parts.join('/')}: reads the clock; a shape's dates come from ctx`)
+}
+
+// The seam: a clock that moves on by a day after the first read must not move anything built from the seed context.
+const probe = "const s = require('./read-budget/seed.cjs'); const a = s.seedContext().anchorDate; const b = s.seedContext().anchorDate; const c = s.contextOn(a).anchorDate; "
+  + "const sql = s.seedSql().join('\\n'); console.log(JSON.stringify({ a, b, c, later: s.readClock().toISOString().slice(0, 10), sql: [sql.includes('2026-11-18 05:00:00'), sql.includes('2026-11-19')] }))"
+let seen = null
+try {
+  seen = JSON.parse(require('child_process').execFileSync(process.execPath, ['-e', probe], { cwd: __dirname, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, READ_BUDGET_NOW: '2026-11-18T10:00:00Z', READ_BUDGET_CLOCK_DRIFT_DAYS: '1' } }))
+} catch (e) { check(false, 'the clock-drift probe did not run: ' + String(e.message).split('\n')[0]) }
+if (seen) {
+  check(seen.later === '2026-11-19', `the drift seam is not live (a second clock read gave ${seen.later}), so this probe proves nothing`)
+  check(seen.a === '2026-11-18' && seen.b === seen.a && seen.c === seen.a, `with the clock moving on a day, seedContext() answered ${seen.a}, ${seen.b}, contextOn ${seen.c}; they must all be 2026-11-18`)
+  check(seen.sql[0] === true && seen.sql[1] === false, 'with the clock moving on a day, the seed statements are not all on the first date')
+}
+
 if (failures) { console.error(`test-read-budget-date-anchor-pure: ${failures} failure(s)`); process.exitCode = 1 } else console.log(`test-read-budget-date-anchor-pure: ${first.shapes.length} shapes anchor-relative on ${RUN_DATES.length} run dates`)

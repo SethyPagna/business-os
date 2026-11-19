@@ -9,7 +9,6 @@
 'use strict'
 const assert = require('node:assert/strict')
 const { bootWorld } = require('./read-budget/world.cjs')
-const { seedContext } = require('./read-budget/seed.cjs')
 
 const KERNEL = 'src/lib/salesAnalytics.ts'
 const NEW = "if (unscoped && reportPlainFilters(f) && reportAtomicFiltersEligible(f)) return readSalesReportAtomicTotalsSnapshot(env, f, includeDeliveryFees, null, {}, 'full')"
@@ -27,7 +26,6 @@ const shapesFor = (ctx) => {
     'overview today': `/api/reports/overview?startDate=${d(0)}&endDate=${d(0)}`,
   }
 }
-const SHAPE_NAMES = Object.keys(shapesFor(seedContext()))
 const UNDATED = ['overview all-time', 'overview branch']
 const ATOMIC = { report_atomic: 'on', report_atomic_long: 'on' }
 
@@ -57,6 +55,7 @@ const step = async (name, fn) => { try { await fn(); console.log('ok    ' + name
   const newOff = await run({})
   const oldOn = await run({ patches: oldRouting, switches: ATOMIC })
   const newOn = await run({ switches: ATOMIC })
+  const SHAPE_NAMES = Object.keys(newOn)
   await step('every shape answers 200', () => { for (const r of [oldOff, newOff, oldOn, newOn]) for (const [k, v] of Object.entries(r)) assert.equal(v.status, 200, `${k}: ${v.status} ${v.text.slice(0, 120)}`) })
   await step('parity: old routing and new routing answer byte-identically, report_atomic OFF and ON, and ON equals OFF', () => {
     for (const [x, y] of [[newOff, oldOff], [newOn, oldOn], [newOn, newOff]]) { globalThis.__show(bodies(x), bodies(y)); assert.deepEqual(bodies(x), bodies(y)) }
