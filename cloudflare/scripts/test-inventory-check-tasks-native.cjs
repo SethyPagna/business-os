@@ -738,8 +738,29 @@ async function headerRule(w) {
   const view = await taskOf(w, task); assert.deepEqual([view.total, view.done, view.removed], [1, 0, 1], 'the header leaves the total and is counted in removed')
   w.as('checker'); const listed = (await w.get(`/list?branchId=1&taskId=${task}`)).json.items.map((i) => i.id)
   assert.deepEqual(listed, [102], 'the task list shows exactly the products the task still counts')
+  assert.equal((await w.get(`/list?branchId=1&taskId=${task}`)).json.task.total, view.total, 'the list and the board agree on the total after a product becomes a header')
   const last = await countBy(w, 'lot', 102)
   assert.deepEqual(last.answer.closedTasks, [task], 'the task closes on the one product it can still count (never open at 1/2 on a row the list does not show)')
+}
+
+/**
+ * The other half of the countable rule (E4): a DEACTIVATED product that still holds stock (rows that predate migration 0242, which the census counts: the trigger is dropped to build one) can be issued and stays in the
+ * task's total, on the board and on the task list alike; once its stock is gone it leaves the total (removed). The wired list reads ACTIVE products only (catalogOnly in routes/products.ts), so it does not show
+ * this row: asserted as it is, and reported as an open finding (a counted total of 2 over one visible row).
+ */
+async function deactivatedWithStock(w) {
+  const stockWrite = (fn) => w.app.seedStockFixture(w.app.raw.db, fn)
+  stockWrite(() => { w.app.raw.exec('DROP TRIGGER product_deactivate_stock_0242'); w.app.raw.prepare('UPDATE products SET is_active=0 WHERE id=104').run() })
+  const refused = await w.issue([103, 999]); assert.equal(refused.status, 400, 'a product that does not exist is still refused')
+  const made = await w.issue([103, 104]); assert.equal(made.status, 201, JSON.stringify(made.json))
+  const task = made.json.item.id, listTotal = async () => { w.app.clearCaches(); w.as('checker'); return (await w.get(`/list?branchId=1&taskId=${task}`)).json.task.total }
+  w.app.clearCaches()
+  const view = await taskOf(w, task); assert.deepEqual([view.total, view.done, view.removed], [2, 0, 0], 'a deactivated product that holds stock stays in the total')
+  assert.equal(await listTotal(), 2, 'the task list totals it too')
+  stockWrite(() => { w.app.raw.prepare('UPDATE branch_stock SET quantity=0 WHERE product_id=104').run(); w.app.raw.prepare('UPDATE products SET stock_quantity=0 WHERE id=104').run() })
+  w.app.clearCaches()
+  const gone = await taskOf(w, task); assert.deepEqual([gone.total, gone.done, gone.removed], [1, 0, 1], 'with its stock gone it leaves the total')
+  assert.equal(await listTotal(), 1, 'and the task list total')
 }
 
 /** F7: a request retried while its twin takes the branch's last place is a REPLAY, not a refusal. */
@@ -855,7 +876,7 @@ const SCENARIOS = {
   autoCloseOlderWriter: (w) => autoClose(w, { lotWriter: false }),
   outsideCloseLot: (w) => outsideClose(w, 'lot'), outsideClosePlain: (w) => outsideClose(w, 'plain'), outsideCloseObserve: (w) => outsideClose(w, 'observe'),
   outsideNegativesLot: (w) => outsideNegatives(w, 'lot'), outsideNegativesPlain: (w) => outsideNegatives(w, 'plain'), outsideNegativesObserve: (w) => outsideNegatives(w, 'observe'),
-  observationNotFinal, doneRuleOrg, removedProducts, issueFilterFamilies, issueCapabilities, taskCap, taskRowsUntouched, headerRule, taskCapReplay, readBackHash,
+  observationNotFinal, doneRuleOrg, removedProducts, issueFilterFamilies, issueCapabilities, taskCap, taskRowsUntouched, headerRule, deactivatedWithStock, taskCapReplay, readBackHash,
   random: (w) => randomWorld(w, 20261118, 50),
   randomTwo: (w) => randomWorld(w, 20261119, 90),
   budget,
@@ -907,6 +928,8 @@ async function main() {
     ['the done rule is "after the issue", not "at or after"', edit('lib/inventoryCheckTasks.ts', 'x.updated_at>=${since}', 'x.updated_at>${since}'), ['doneRule']],
     ['the close event does not say which session closed the task', edit('lib/inventoryCheckTasks.ts', ",'auto',1,'closedBy',@src)", ",'auto',1)"), ['outsideCloseLot', 'outsideClosePlain', 'outsideCloseObserve']],
     ['a family header is countable in a task (the rule drops its is_group clause)', edit('lib/inventoryCheckTasks.ts', ' AND COALESCE(p.is_group,0)=0)`', ')`'), ['headerRule']],
+    ['a task counts only active products (the rule drops the stock clause)', edit('lib/inventoryCheckTasks.ts', 'export const TASK_COUNTABLE_SQL = `(${stockVisibleProductSql()} AND', 'export const TASK_COUNTABLE_SQL = `(p.is_active = 1 AND'), ['deactivatedWithStock']],
+    ['the task list totals every product of the task, not the countable ones', edit('lib/inventoryCheckTasks.ts', 'productIds: rows.filter((row) => Number(row.countable) === 1).map(', 'productIds: rows.map('), ['headerRule', 'deactivatedWithStock']],
     ['issue by ids uses the older countable rule', edit('lib/inventoryCheckSessions.ts', 'AND ${TASK_COUNTABLE_SQL} ORDER BY p.id`', 'AND ${stockVisibleProductSql()} AND ${CHECKABLE_SQL} ORDER BY p.id`'), ['headerRule']],
     ['a retried issue is refused when its twin took the last place', edit('lib/inventoryCheckSessions.ts', '      if (twin) return { event: twin, replayed: true }\n', ''), ['taskCapReplay']],
     ['the task read-back ignores the request hash', edit('lib/inventoryCheckTasks.ts', "AND e.request_hash=@hash AND e.action='close' AND e.created_at=@now`\n", "AND e.action='close' AND e.created_at=@now`\n"), ['readBackHash']],

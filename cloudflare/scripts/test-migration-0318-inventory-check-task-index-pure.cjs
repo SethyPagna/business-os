@@ -81,12 +81,12 @@ const check = async (name, run) => { await run(); passed++; console.log(`PASS ${
     assert.doesNotMatch(plan(db, pickupSql.replace(/INDEXED BY \w+/g, ''), { org: 1, task: 'x' }), new RegExp(NAME))
   })
 
-  await check('with the index both reads SEEK it by organization and kind (and task for the picker check), for an organization and for NULL', () => {
+  await check('with the index the pickup join of the task list and the picker check SEEK it by organization, kind and task, for an organization and for NULL', () => {
     const db = chain(); db.exec(sql); db.exec(fs.readFileSync(path.join(directory, '0319_inventory_check_open_task_index.sql'), 'utf8'))
     for (const org of [1, null]) {
       const list = plan(db, listSql, { org, branchId: 1, shown: 30, closedShown: 5 })
-      assert.match(list, new RegExp(`SEARCH s USING INDEX ${NAME} \\(organization_id=\\? AND <expr>=\\?\\)`), `task list: ${list}`)
-      assert.equal((list.match(new RegExp(`USING INDEX ${NAME}`, 'g')) || []).length >= 2, true, `the closed list and the pickup join each seek it (the open list seeks the partial index of 0319): ${list}`)
+      assert.match(list, new RegExp(`SEARCH pk USING INDEX ${NAME} \\(organization_id=\\? AND <expr>=\\? AND <expr>=\\?\\)`), `the pickup join of the task list seeks it by task: ${list}`)
+      assert.equal((list.match(new RegExp(`USING INDEX ${NAME}`, 'g')) || []).length, 1, `only the pickup join reads it (the open list and the closed list read the partial indexes of 0319): ${list}`)
       const picker = plan(db, pickupSql, { org, task: 'x' })
       assert.match(picker, new RegExp(`SEARCH pk USING INDEX ${NAME} \\(organization_id=\\? AND <expr>=\\? AND <expr>=\\?\\)`), `picker check: ${picker}`)
       assert.match(plan(db, submissionsOfTask, { org, task: 'x' }), new RegExp(`USING INDEX ${NAME}`), 'the submissions that counted one task are found by the same index')

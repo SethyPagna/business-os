@@ -18,6 +18,7 @@ export const KNOWN_SCHEMA_OBJECT_NAMES: readonly string[] = [
   'inventory_check_sessions', 'inventory_check_items', 'inventory_check_events', 'inventory_check_events_no_update',
   'inventory_check_events_no_delete', 'inventory_check_sessions_identity', 'inventory_check_sessions_no_delete',
   'inventory_check_items_baseline', 'inventory_check_items_no_delete',
+  'inventory_check_sessions_kind_task', 'inventory_check_sessions_open_task', 'inventory_check_sessions_task_board',
   'inventory_check_approvals', 'inventory_check_approvals_identity', 'inventory_check_approvals_decided',
   'inventory_check_approvals_claim', 'inventory_check_approvals_no_delete',
 ]

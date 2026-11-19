@@ -119,11 +119,11 @@ const submissionCaps = async (c: Context<{ Bindings: Env; Variables: { user: Ses
 // The summary (lib/inventoryCheckList.ts readCheckSummary) is ONE object, the same from /list (when the request names a branch) and /overlay (always): counts of product rows, total, not_checked, the date chips and,
 // with Fix stock, pending. tooLarge: more checked products than inventoryCheckFilterMaxIds, so there are no counts and no days to give: it says `{ tooLarge: true }` instead of vanishing, and a page that holds
 // chips from an earlier answer clears them. The check-state filters are refused (503) while it holds.
-// The products of one task (count tasks): its identity and product ids, read once per inventory_checks version (a task's items never change, and the version moves whenever the task closes or is counted).
+// The countable products of one task (count tasks): its identity and product ids, read once per inventory_checks version and products version (a task's items never change; the version moves whenever the task closes or is counted, and a deactivation, merge or header moves the products version).
 type TaskProducts = { branchId: number; status: 'open' | 'closed'; startedAt: string; productIds: number[] }
 async function readTaskCached(c: IcContext, taskId: string): Promise<TaskProducts | null> {
-  const version = await inventoryChecksVersion(c.env)
-  return cachedJsonResponse(new Request(`https://ic.invalid/__bos/ic-task?id=${encodeURIComponent(taskId)}&order=1`, { method: 'GET' }), c.executionCtx, `ict:${version}`, getPlanLimits(c.env).productListCacheSeconds,
+  const [version, productsVersion] = await Promise.all([inventoryChecksVersion(c.env), getVersionWithFallback(c.env, 'products')])
+  return cachedJsonResponse(new Request(`https://ic.invalid/__bos/ic-task?id=${encodeURIComponent(taskId)}&order=1`, { method: 'GET' }), c.executionCtx, `ict:${version}:${productsVersion}`, getPlanLimits(c.env).productListCacheSeconds,
     () => readTaskProducts(getDb(c.env), { organization: c.get('user').organization_id ?? null, taskId }), cacheIdentity(c))
 }
 // idsOnly: the caller wants the ids of the rows (the filter of a task being issued), not the rows: no received dates, no tagged lots and no summary are read for them.

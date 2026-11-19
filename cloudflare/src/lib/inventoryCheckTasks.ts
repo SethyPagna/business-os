@@ -11,7 +11,7 @@ import { stockVisibleProductSql } from './productStockGuard'
 // The count is an item with state done|issue and an updated_at (the time of the count) at or after the task's started_at. A task's own items are `unstarted` with no updated_at, so a task is never a count itself.
 // A count ticks a task only when it is FINAL (owner, 19 Nov: counts reach the server on Submit): its session is closed. A count in an open session can still be set back, so it ticks nothing until that session closes.
 // An Undo or a Redo of a Set is NOT a count (owner ruling, 19 Nov): it restores a record made earlier, so its session (kind stock_set_undo, or scope restore) never ticks or closes a task.
-// Only products that can still be counted take part (taskItemCountableSql): one deactivated, merged away or made a header leaves the task's total and no longer blocks its close.
+// Only products that can still be counted take part (taskItemCountableSql): one deactivated with no stock, merged away or made a header leaves the task's total and no longer blocks its close.
 
 export const TASK_MEMBERSHIP = 'task'
 export const PICKUP_MEMBERSHIP = 'pickup'
@@ -27,8 +27,9 @@ export const taskOf = (alias: string): string => `json_extract(${alias}.scope_js
 export const CHECKABLE_SQL = `(NOT(COALESCE(p.is_group,0)=1 AND EXISTS(SELECT 1 FROM products child WHERE child.id<>p.id
   AND (child.parent_id=p.id OR child.name_key=p.name_key) AND ${stockVisibleProductSql('child')})))`
 /**
- * THE rule of what a task may hold and count (alias p): stock-visible, and never a family header, with or without children. It is the wired list's rule (inventoryWired.ts, inventoryCheckList.ts, familyPagination.ts),
- * so a task can never hold a product the list `?taskId=` does not show. The older list (inventoryCheckProducts.ts) still shows a childless header as countable: it is left as it is.
+ * THE rule of what a task may hold and count (alias p): stock-visible (active, or still holding stock), and never a family header, with or without children. The header half is the wired list's rule; the list reads active
+ * products only (catalogOnly in routes/products.ts), so a deactivated product that still holds stock stays counted here although that list does not show it. No source of this rule is exported by the list (it builds its own),
+ * so this is the one definition the task code uses. The older list (inventoryCheckProducts.ts) still shows a childless header as countable: it is left as it is.
  * ONE text for the issue by ids, the issue by filter (which follows the list) and every read of the task's total, done and removed.
  */
 export const TASK_COUNTABLE_SQL = `(${stockVisibleProductSql()} AND ${CHECKABLE_SQL} AND COALESCE(p.is_group,0)=0)`
@@ -125,14 +126,14 @@ export type TaskRow = {
 
 /**
  * The tasks of one branch, open ones first (newest issued first, at most `shown`) and then the most recently closed (at most `closedShown`), with who issued each, its product count, its done count
- * (the done rule), and who has it open. ONE statement: the page of sessions is cut first (organization, kind: migration 0318), then the counts and the pickup are read for those rows only. `total` and `done` are over the
- * products that can still be counted; `removed` is how many of the task's products can not (deactivated, merged away, a header). Reads: the tasks of the organization's branch once for the sort, 1 + one seek per
+ * (the done rule), and who has it open. ONE statement: the page of sessions is cut first (the open ones by the open index and the closed ones by the task index, both migration 0319), then the counts and the pickup are read for those rows only. `total` and `done` are over the
+ * products that can still be counted; `removed` is how many of the task's products can not (deactivated, merged away, a header). Reads: the open tasks of the branch and the last few closed ones (a short walk of the task index, however many tasks were closed before), 1 + one seek per
  * product for each shown task, one pickup seek per task.
  */
 export async function readTaskRows(db: D1Compat, args: { organization: number | null; branchId: number; shown: number; closedShown: number }): Promise<TaskRow[]> {
   const rows = await db.prepare(`WITH open_t AS (SELECT s.* FROM ${S} s INDEXED BY inventory_check_sessions_open_task WHERE s.organization_id IS @org AND ${kindOf('s')}='${TASK_MEMBERSHIP}' AND s.branch_id=@branchId AND s.status='open'
       ORDER BY s.started_at DESC, s.id DESC LIMIT @shown),
-    closed_t AS (SELECT s.* FROM ${S} s WHERE s.organization_id IS @org AND ${kindOf('s')}='${TASK_MEMBERSHIP}' AND s.branch_id=@branchId AND s.status='closed'
+    closed_t AS (SELECT s.* FROM ${S} s INDEXED BY inventory_check_sessions_task_board WHERE s.organization_id IS @org AND ${kindOf('s')}='${TASK_MEMBERSHIP}' AND s.branch_id=@branchId AND s.status='closed'
       ORDER BY s.closed_at DESC, s.id DESC LIMIT @closedShown),
     page AS (SELECT * FROM open_t UNION ALL SELECT * FROM closed_t)
     SELECT page.id AS id, page.branch_id AS branch_id, page.title AS title, page.status AS status, page.started_at AS started_at, page.closed_at AS closed_at, page.created_by AS created_by,
@@ -154,10 +155,10 @@ function parseSelection(value: string | null | undefined): unknown {
   try { return JSON.parse(value) } catch { return null }
 }
 
-/** One task's identity and product ids (one statement). Null when the id is not a task of the organization. */
+/** One task's identity and the ids of its products that can still be counted (one statement; the same rule as the board's total). Null when the id is not a task of the organization. */
 export async function readTaskProducts(db: D1Compat, args: { organization: number | null; taskId: string }): Promise<{ branchId: number; status: 'open' | 'closed'; startedAt: string; productIds: number[] } | null> {
-  const rows = await db.prepare(`SELECT s.branch_id AS branch_id, s.status AS status, s.started_at AS started_at, i.product_id AS product_id FROM ${S} s JOIN ${I} i ON i.session_id=s.id
-    WHERE s.id=@id AND s.organization_id IS @org AND ${kindOf('s')}='${TASK_MEMBERSHIP}' ORDER BY i.product_id`).all<{ branch_id: number; status: 'open' | 'closed'; started_at: string; product_id: number }>({ id: args.taskId, org: args.organization })
+  const rows = await db.prepare(`SELECT s.branch_id AS branch_id, s.status AS status, s.started_at AS started_at, i.product_id AS product_id, ${taskItemCountableSql('i')} AS countable FROM ${S} s JOIN ${I} i ON i.session_id=s.id
+    WHERE s.id=@id AND s.organization_id IS @org AND ${kindOf('s')}='${TASK_MEMBERSHIP}' ORDER BY i.product_id`).all<{ branch_id: number; status: 'open' | 'closed'; started_at: string; product_id: number; countable: number }>({ id: args.taskId, org: args.organization })
   if (!rows.length) return null
-  return { branchId: Number(rows[0].branch_id), status: rows[0].status, startedAt: rows[0].started_at, productIds: rows.map((row) => Number(row.product_id)) }
+  return { branchId: Number(rows[0].branch_id), status: rows[0].status, startedAt: rows[0].started_at, productIds: rows.filter((row) => Number(row.countable) === 1).map((row) => Number(row.product_id)) }
 }

@@ -51,8 +51,8 @@ async function main() {
       }
     }
     for (let i = 0; i < statements.length; i += 100) await d1.batch(statements.slice(i, i + 100).map((s) => d1.prepare(s)))
-    const index = await d1.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='inventory_check_sessions_kind_task'").all()
-    assert.equal(index.results.length, 1, 'the migration chain built the index on the local D1 engine')
+    const index = await d1.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name IN ('inventory_check_sessions_kind_task','inventory_check_sessions_open_task','inventory_check_sessions_task_board')").all()
+    assert.equal(index.results.length, 3, 'the migration chain built the three indexes on the local D1 engine')
     const db = new D1Compat(d1)
     const plan = async (sql, params) => (await db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(params)).map((row) => row.detail).join(' | ')
     let listSql = ''
@@ -60,12 +60,13 @@ async function main() {
     const pickupSql = `SELECT ${tasks.OPEN_PICKUP_SQL('@task', '@org')} AS picked`
     for (const org of [1, null]) {
       const list = await plan(listSql, { org, branchId: 1, shown: 30, closedShown: 5 })
-      assert.match(list, /SEARCH s USING INDEX inventory_check_sessions_kind_task \(organization_id=\? AND <expr>=\?\)/, `task list on D1 (org ${org}): ${list}`)
-      assert.ok((list.match(/USING INDEX inventory_check_sessions_kind_task/g) || []).length >= 2, `the closed list and the pickup join each seek the 0318 index (the open list seeks 0319): ${list}`)
+      assert.match(list, /CO-ROUTINE closed_t \| SEARCH s USING INDEX inventory_check_sessions_task_board \(organization_id=\? AND branch_id=\? AND status=\?\)/, `the closed list on D1 (org ${org}) seeks the task index of 0319: ${list}`)
+      assert.equal((list.match(/USING INDEX inventory_check_sessions_kind_task/g) || []).length, 1, `only the pickup join seeks the 0318 index (the open and closed lists seek 0319): ${list}`)
+      assert.doesNotMatch(list.split('CO-ROUTINE closed_t')[1].split('SCAN closed_t')[0], /TEMP B-TREE|SCAN s/, `the closed list is read in the index's own order: ${list}`)
       const picker = await plan(pickupSql, { org, task: 'x' })
       assert.match(picker, /SEARCH pk USING INDEX inventory_check_sessions_kind_task \(organization_id=\? AND <expr>=\? AND <expr>=\?\)/, `one-picker check on D1 (org ${org}): ${picker}`)
     }
-    console.log('PASS the task list and the one-picker check seek inventory_check_sessions_kind_task on the local D1 engine, for an organization and for NULL')
+    console.log('PASS the closed list seeks inventory_check_sessions_task_board, the pickup join and the one-picker check seek inventory_check_sessions_kind_task, on the local D1 engine, for an organization and for NULL')
     // ---- the AUTO-CLOSE statements (every count writer appends them): their plans, and the rows they read, on the same engine ------------------------------------------------------------------
     const auto = tasks.autoCloseTaskStatements()
     const args = { src: 'write-session', task: null, organization: 1, branchId: 1, actorId: 5, actorName: 'u5', key: 'request-key-0001', hash: 'h', now: '2026-11-20T00:00:00.000Z' }
@@ -149,6 +150,52 @@ async function main() {
     assert.equal(oneOpenAfter, oneOpen, 'with one open task the rows read do not move with history either')
     await exec("UPDATE inventory_check_sessions SET status='closed',closed_at=@at WHERE id='one-open'", { at }) // history is immutable: it closes, and becomes one more closed task
 
+    // ---- the count-check schema probe names the three indexes: still one call, one scan of sqlite_master; the only added rows are the three names the engine walks in json_each -------------------------------
+    {
+      const probe = load('lib/schemaObjectProbe.ts'), indexes = ['inventory_check_sessions_kind_task', 'inventory_check_sessions_open_task', 'inventory_check_sessions_task_board']
+      const withNames = probe.KNOWN_SCHEMA_OBJECT_NAMES, withoutNames = withNames.filter((name) => !indexes.includes(name))
+      assert.equal(withNames.length - withoutNames.length, 3, 'the probe lists the three indexes')
+      const rowsOf = async (names) => { const answer = await exec(probe.SCHEMA_OBJECTS_PRESENT_SQL, { names: JSON.stringify(names) }); return { rows: Number(answer.meta.rows_read), found: answer.results.map((row) => row.name).sort() } }
+      const before = await rowsOf(withoutNames), after = await rowsOf(withNames)
+      console.log(`     the schema probe: 1 D1 call; ${before.rows} rows read naming ${withoutNames.length} objects, ${after.rows} naming ${withNames.length}`)
+      assert.equal(after.rows, before.rows + 3, 'the probe reads the same scan of sqlite_master and three more rows, one json_each value per name added')
+      for (const name of indexes) assert.ok(after.found.includes(name), `the probe finds ${name} once the migrations are applied`)
+      assert.ok(!before.found.some((name) => indexes.includes(name)), 'and without the names it does not look for them')
+    }
+
+    // ---- the board's CLOSED list: rows read at 10, 100 and 1,000 closed tasks at one branch, with the history of the other branches and the old sessions already in the table ----------------------------
+    // THE MUTANT is the closed list as it was before the task index (it seeks the 0318 index by organization and kind, so it reads every task the organization ever made, on every branch).
+    const closedSql = /closed_t AS \(([\s\S]*?LIMIT @closedShown)\)/.exec(listSql)[1]
+    const oldClosedSql = closedSql.replace('INDEXED BY inventory_check_sessions_task_board', 'INDEXED BY inventory_check_sessions_kind_task'), oldListSql = listSql.replace('INDEXED BY inventory_check_sessions_task_board', 'INDEXED BY inventory_check_sessions_kind_task')
+    assert.ok(oldClosedSql !== closedSql && oldListSql !== listSql, 'the mutant anchor: the closed list names the task index')
+    const boardArgs = { org: 1, branchId: 7, shown: 30, closedShown: 5 }, closedArgs = { org: 1, branchId: 7, closedShown: 5 }, TASK = '{"membership":"task"}'
+    const twice = async (sql, params) => { await exec(sql, params); return Number((await exec(sql, params)).meta.rows_read) }
+    await exec("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at) WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<3) SELECT 'b7-open-'||i,1,7,1,'','open',0,@scope,@at,@at FROM n", { scope: TASK, at })
+    await exec("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json) WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<3) SELECT 'b7-open-'||i,i,7,'{}',NULL,'{}' FROM n")
+    let closedMade = 0
+    const addClosed = async (to) => {
+      const from = closedMade + 1; closedMade = to
+      await exec("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) WITH RECURSIVE n(i) AS (SELECT @from UNION ALL SELECT i+1 FROM n WHERE i<@to) SELECT 'b7-'||i,1,7,1,'','closed',1,@scope,@at,@at,printf('2026-11-02T%08d',i) FROM n", { from, to, scope: TASK, at })
+      await exec("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json) WITH RECURSIVE n(i) AS (SELECT @from UNION ALL SELECT i+1 FROM n WHERE i<@to) SELECT 'b7-'||i,1,7,'{}',NULL,'{}' FROM n", { from, to })
+    }
+    const board = { closed: [], whole: [], oldClosed: [], oldWhole: [] }
+    for (const size of [10, 100, 1000]) {
+      await addClosed(size)
+      board.closed.push(await twice(closedSql, closedArgs)); board.whole.push(await twice(listSql, boardArgs))
+      board.oldClosed.push(await twice(oldClosedSql, closedArgs)); board.oldWhole.push(await twice(oldListSql, boardArgs))
+    }
+    console.log('     board rows read at 10 / 100 / 1,000 closed tasks at the branch (the table also holds the other branches\' history):')
+    console.log('       closed list, task index:', JSON.stringify(board.closed), ' whole board:', JSON.stringify(board.whole))
+    console.log('       closed list, the old read (0318 index):', JSON.stringify(board.oldClosed), ' whole board:', JSON.stringify(board.oldWhole))
+    assert.ok(board.closed[2] <= board.closed[0], `the closed list reads no more at 1,000 closed tasks than at 10: ${JSON.stringify(board.closed)}`)
+    assert.ok(board.whole[2] <= board.whole[0], `the whole board reads no more at 1,000 closed tasks than at 10: ${JSON.stringify(board.whole)}`)
+    assert.ok(board.oldClosed[2] > board.oldClosed[0] + 500 && board.oldWhole[2] > board.oldWhole[0] + 500, `the growth assertion kills the old closed list (its rows grow with history): ${JSON.stringify([board.oldClosed, board.oldWhole])}`)
+    assert.ok(board.closed[2] <= 10, `the closed list reads only the few rows it shows: ${board.closed[2]}`)
+    const closedPlan = await plan(closedSql, closedArgs)
+    assert.equal(closedPlan, 'SEARCH s USING INDEX inventory_check_sessions_task_board (organization_id=? AND branch_id=? AND status=?)', `the closed list: ${closedPlan}`)
+    console.log('PLAN closed list:', closedPlan)
+    console.log('PASS the board\'s closed list reads the same few rows at 10, 100 and 1,000 closed tasks (' + board.closed.join(' / ') + ', whole board ' + board.whole.join(' / ') + '); the old read grows (' + board.oldClosed.join(' / ') + ')')
+
     // ---- the worst case: the cap (30) of open tasks of 300 products each; every task complete but its last product ---------------------------------------------------------------------------------
     await exec("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at) WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<30) SELECT 'open-'||i,1,1,1,'','open',0,'{\"membership\":\"task\"}',@at,@at FROM n", { at })
     await exec("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json) WITH RECURSIVE t(k) AS (SELECT 1 UNION ALL SELECT k+1 FROM t WHERE k<30), p(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM p WHERE i<300) SELECT 'open-'||k,i,1,'{}',NULL,'{}' FROM t CROSS JOIN p")
@@ -170,6 +217,12 @@ async function main() {
     assert.ok(worstEvents <= openTasks * (products * 4 + written * 3) + 100, `the worst case is bounded by cap x (maxProducts x 4 + written x 3): ${worstEvents}`)
     assert.ok(quiet <= openTasks * 2 + 30, `a write that holds none of the tasks' products reads 2 rows per open task (its index entry, the empty counts seek) and the fixed overhead: ${quiet}`)
     assert.ok(closedRead <= 5, `with no events the task update reads only the events key range: ${closedRead}`)
+    // the cap guard on the open index (0319) or on the task index: the cheaper one is the one the Worker names
+    const capOnTaskIndex = capSql.replace('INDEXED BY inventory_check_sessions_open_task', 'INDEXED BY inventory_check_sessions_task_board')
+    assert.notEqual(capOnTaskIndex, capSql)
+    const capRows = await twice(capSql, { organization: 1, branchId: 1 }), capRowsOnTaskIndex = await twice(capOnTaskIndex, { organization: 1, branchId: 1 })
+    console.log(`     cap guard at 30 open tasks and 400+ closed tasks at the branch: ${capRows} rows on the open index, ${capRowsOnTaskIndex} on the task index`)
+    assert.ok(capRows <= capRowsOnTaskIndex, `the cap guard reads no more on the index the Worker names than on the other: ${capRows} against ${capRowsOnTaskIndex}`)
     // history does not move the worst case either: 100 more old sessions and 100 more closed tasks
     await oldSessions(100, 'count'); await oldSessions(100, 'task')
     const worstAfter = await read(auto.statements[0], autoParams)
