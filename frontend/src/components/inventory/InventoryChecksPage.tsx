@@ -21,7 +21,8 @@ import { getInventoryCheckAccess, type InventoryCheckAccess } from '../../utils/
 import { effectivePermissions, isAdminControlUser } from '../../utils/permissions.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { clearWorkDraft, flushPendingWorkDraft, readWorkDraft, scheduleWorkDraftWrite, scopedWorkDraftKey, writeWorkDraft } from '../../utils/workDrafts.ts'
-import { isDraftAuthorityCurrent, openDraftAuthority } from '../../utils/draftAuthority.ts'
+import { isDraftAuthorityCurrent } from '../../utils/draftAuthority.ts'
+import { useFrozenDraftAuthority } from '../../utils/useFrozenDraftAuthority.ts'
 import { getDirtyWork, registerDirtyWork } from '../../utils/dirtyWork.ts'
 import { fmtDateOnly, fmtDateTime24 } from '../../utils/formatters.ts'
 import { isExactBarcodeHit } from '../../utils/scanExactHit.ts'
@@ -346,7 +347,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
   // so it survives paging and filtering; the snapshot (name, stock seen) is what the review and the server's "marked checked" test read.
   // The counts typed are also kept on this device: one key per user, branch and task (or the plain list), frozen for this mount (an account or server switch leaves a draft with its owner).
   // With no branch chosen nothing can be counted, so nothing is kept. A viewer who may not count here (or work tasks, in a task view) neither restores nor writes.
-  const [draftAuthority] = useState(() => branchId && access.canCheck && (!taskId || access.canWorkTasks) ? openDraftAuthority(countDraftBaseKey(branchId, taskId)) : null)
+  const { authority: draftAuthority } = useFrozenDraftAuthority(branchId && access.canCheck && (!taskId || access.canWorkTasks) ? countDraftBaseKey(branchId, taskId) : null)
   const [restored] = useState(() => {
     if (!draftAuthority || !isDraftAuthorityCurrent(draftAuthority)) return null
     const stored = readWorkDraft<unknown>(draftAuthority.draftKey)
