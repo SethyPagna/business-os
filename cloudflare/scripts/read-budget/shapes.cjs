@@ -1,4 +1,5 @@
 'use strict'
+const { PRODUCT_SALE_PRODUCT } = require('./seed.cjs')
 // The shapes the gate measures: one entry per GET the frontend or a report can send (the endpoint-reads sweep of 1 Nov 2026
 // plus the Inventory Check name, search, stock-sort and Issues pages), and the write shapes the Free plan has to carry.
 // Each shape is { id, kind, method, label, url | request(world) | run(world, send), anon?, longRange? }.
@@ -9,6 +10,7 @@ const slug = (label) => label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(
 const rankedQuery = (n) => `rankIds=${Array.from({ length: n }, (_, i) => 1000 + (i * 29) % 8000).join(',')}&rankTiers=${Array.from({ length: n }, (_, i) => i % 4).join('')}`
 
 function getEntries(ctx) {
+  const PID = PRODUCT_SALE_PRODUCT
   const T = ctx.today, M = ctx.month, W = ctx.week, Y = ctx.year
   const R = (s, e) => `startDate=${s}&endDate=${e}`
   const P = 'page=1&pageSize=50'
@@ -41,9 +43,9 @@ function getEntries(ctx) {
     ['products/search-index', '/api/products/search-index'], ['products (legacy list)', `/api/products?${P}`],
     ['products/filters (facets: category/brand/supplier lists)', '/api/products/filters'], ['products/filters POS scoped', '/api/products/filters?branchId=1&surface=pos'],
     ['products/:id/detail-report 30d', `/api/products/1000/detail-report?${R(M, T)}`], ['products/:id/detail-report all', '/api/products/1000/detail-report'],
-    ['products/:id/sales-detail', `/api/products/1000/sales-detail?mode=day&period=${ctx.productSalesDay}`],
-    // The month of that same day: a window that holds the same one sale on every run date (the month changes bucketing only, not the statements).
-    ['products/:id/sales-detail (month window)', `/api/products/1000/sales-detail?mode=month&period=${ctx.productSalesDay.slice(0, 7)}`], ['products/:id/supplier-purchases', '/api/products/1000/supplier-purchases?supplierKey=id:1'],
+    ['products/:id/sales-detail', `/api/products/${PID}/sales-detail?mode=day&period=${ctx.productSalesDay}`],
+    // The month of the product's other completed sale: a window that holds one sale and no returned sale on every run date.
+    ['products/:id/sales-detail (month window)', `/api/products/${PID}/sales-detail?mode=month&period=${ctx.productSalesMonth}`], ['products/:id/supplier-purchases', '/api/products/1000/supplier-purchases?supplierKey=id:1'],
     ['products/:id/cost-breakdown', '/api/products/1000/cost-breakdown'],
     ['products/stock-in-sessions', `/api/products/stock-in-sessions?${P}`], ['products/stock-in-session-lines', `/api/products/stock-in-session-lines?key={{stockKey}}`],
     ['products/stock-ledger', `/api/products/stock-ledger?${P}&${R(M, T)}`], ['products/stock-ledger/:id/balance', '/api/products/stock-ledger/1/balance'],

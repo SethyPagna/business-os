@@ -8,7 +8,7 @@
 const fs = require('fs')
 const path = require('path')
 const { DatabaseSync } = require('node:sqlite')
-const { seedContext, seedSql, FIRST_SALE, S, P, PRODUCT_SALE_K, PRODUCT_SALE_PRODUCT } = require('./read-budget/seed.cjs')
+const { seedContext, seedSql, FIRST_SALE, S, P, PRODUCT_SALE_K, PRODUCT_SALE_MONTH_K, PRODUCT_SALE_PRODUCT } = require('./read-budget/seed.cjs')
 const { getShapes } = require('./read-budget/shapes.cjs')
 const { getHistoryShapes } = require('./read-budget/ic-history.cjs')
 
@@ -20,10 +20,10 @@ const RUN_DATES = ['2026-11-01', '2026-11-18', '2026-11-19', '2026-11-30', '2026
 const DAY_MS = 86400e3
 const DATE = /\b(\d{4})-(\d{2})-(\d{2})\b/g
 
-// The one bare month a shape may send: the month of the anchored sales-detail day (see the proof at the end of this file).
-const ownMonth = (ctx) => `mode=month&period=${ctx.productSalesDay.slice(0, 7)}`
-const SALES_DETAIL = '/api/products/1000/sales-detail?'
-const withoutOwnMonth = (url, ctx) => (url.startsWith(SALES_DETAIL) && url.endsWith(ownMonth(ctx)) ? url.slice(0, -ownMonth(ctx).length) + 'mode=month&period=MONTH_OF_productSalesDay' : url)
+// The one bare month a shape may send: the month of the product's other completed sale (see the proof below).
+const ownMonth = (ctx) => `mode=month&period=${ctx.productSalesMonth}`
+const SALES_DETAIL = `/api/products/${PRODUCT_SALE_PRODUCT}/sales-detail?`
+const withoutOwnMonth = (url, ctx) => (url.startsWith(SALES_DETAIL) && url.endsWith(ownMonth(ctx)) ? url.slice(0, -ownMonth(ctx).length) + 'mode=month&period=MONTH_OF_productSalesMonth' : url)
 // A shape url with every full date replaced by its offset in days from the anchor date: equal strings on every run date mean the window is anchor-relative.
 function normalised(url, ctx) {
   const anchorDate = ctx.anchorDate
@@ -58,33 +58,48 @@ for (const file of ['shapes.cjs', 'writes.cjs', 'ic-history.cjs']) {
   check(!literal, `${file}: holds a literal date ${literal && literal.join(', ')}; derive it from seedContext() instead`)
 }
 
-// The sales-detail windows rest on the seed: run the seed's OWN statements for sales and their lines (read from seedSql(), not copied) on a minimal in-memory schema and read
-// back where the sales of product 1000 sit. Then, on every run date: productSalesDay is the local day of the sale the seed constants name, that day holds exactly that sale,
-// and the calendar month of that day holds exactly that sale too (the other sales of the product are months away), so the day and the month shape read the same one sale.
-function productSales(now) {
+// The sales-detail windows rest on the seed: run the seed's OWN statements for sales, their lines and returns (read from seedSql(), not copied) on a minimal in-memory schema.
+// Then, on every run date: productSalesDay is the local day of the sale the seed constants name and productSalesMonth is the month of the product's other completed sale; each window
+// holds exactly that one sale of the product, and no sale the seed returns lies in either window, so the ledger half of the route reads the same rows on every run date.
+function seeded(now) {
   const statements = seedSql({ now })
   const sales = statements.find((q) => /^\s*WITH RECURSIVE n\(k\)/.test(q) && /INSERT INTO sales\(/.test(q))
   const lines = statements.find((q) => /^\s*WITH RECURSIVE l\(i\)/.test(q) && /INSERT INTO sale_items\(/.test(q))
+  const returns = statements.filter((q) => /^\s*INSERT INTO returns\(/.test(q))
   const columns = (q, table) => new RegExp('INSERT INTO ' + table + '\\(([^)]*)\\)').exec(q)[1]
+  check(returns.length === 2, 'the seed is expected to hold two INSERT INTO returns statements, found ' + returns.length)
   const db = new DatabaseSync(':memory:')
-  db.exec(`CREATE TABLE sales(${columns(sales, 'sales')}); CREATE TABLE sale_items(${columns(lines, 'sale_items')});
+  db.exec(`CREATE TABLE sales(${columns(sales, 'sales')}); CREATE TABLE sale_items(${columns(lines, 'sale_items')}); CREATE TABLE returns(${columns(returns[0], 'returns')});
     CREATE TABLE products(id INTEGER PRIMARY KEY, name, sku, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr, is_active);
     WITH RECURSIVE n(j) AS (SELECT 0 UNION ALL SELECT j+1 FROM n WHERE j<${P - 1}) INSERT INTO products SELECT 1000+j,'p'||j,'s'||j,1,4000,1,4000,1 FROM n`)
   db.exec(sales)
   db.exec(lines)
-  return db.prepare(`SELECT s.id AS id, s.sale_status AS status, date(s.created_at, '+7 hours') AS day FROM sales s WHERE s.id IN (SELECT sale_id FROM sale_items WHERE product_id = ?) ORDER BY s.id DESC`).all(PRODUCT_SALE_PRODUCT)
+  for (const q of returns) db.exec(q)
+  const day = "date(s.created_at, '+7 hours')"
+  return {
+    product: db.prepare(`SELECT s.id AS id, s.sale_status AS status, ${day} AS day FROM sales s WHERE s.id IN (SELECT sale_id FROM sale_items WHERE product_id = ?) ORDER BY s.id DESC`).all(PRODUCT_SALE_PRODUCT),
+    returned: db.prepare(`SELECT s.id AS id, ${day} AS day FROM sales s WHERE s.id IN (SELECT sale_id FROM returns)`).all(),
+  }
 }
-const wantedId = FIRST_SALE + S - 1 - PRODUCT_SALE_K
+const saleIdOf = (k) => FIRST_SALE + S - 1 - k
 for (const { runDate, ctx } of sets) {
-  const sales = productSales(new Date(runDate + 'T05:00:00Z'))
-  const wanted = sales.find((x) => x.id === wantedId)
-  check(Boolean(wanted) && wanted.status === 'completed', `${runDate}: sale ${wantedId} (PRODUCT_SALE_K ${PRODUCT_SALE_K}) is not a completed sale of product ${PRODUCT_SALE_PRODUCT} in the seed`)
-  if (!wanted) continue
-  check(ctx.productSalesDay === wanted.day, `${runDate}: productSalesDay ${ctx.productSalesDay} is not the local day the seed puts sale ${wantedId} on (${wanted.day})`)
-  const sameDay = sales.filter((x) => x.day === ctx.productSalesDay)
-  const sameMonth = sales.filter((x) => x.day.slice(0, 7) === ctx.productSalesDay.slice(0, 7))
-  check(sameDay.length === 1 && sameDay[0].id === wantedId, `${runDate}: the day ${ctx.productSalesDay} holds sales ${sameDay.map((x) => x.id)} of product ${PRODUCT_SALE_PRODUCT}, not just ${wantedId}`)
-  check(sameMonth.length === 1 && sameMonth[0].id === wantedId, `${runDate}: the month ${ctx.productSalesDay.slice(0, 7)} holds sales ${sameMonth.map((x) => x.id + '@' + x.day)} of product ${PRODUCT_SALE_PRODUCT}, not just ${wantedId}`)
+  const { product, returned } = seeded(new Date(runDate + 'T05:00:00Z'))
+  check(returned.length === 9, `${runDate}: expected nine returned sales in the seed, found ${returned.length}`)
+  const windows = [
+    { name: 'day', inside: (d) => d === ctx.productSalesDay, id: saleIdOf(PRODUCT_SALE_K), label: ctx.productSalesDay },
+    { name: 'month', inside: (d) => d.slice(0, 7) === ctx.productSalesMonth, id: saleIdOf(PRODUCT_SALE_MONTH_K), label: ctx.productSalesMonth },
+  ]
+  for (const w of windows) {
+    const wanted = product.find((x) => x.id === w.id)
+    check(Boolean(wanted) && wanted.status === 'completed', `${runDate}: sale ${w.id} is not a completed sale of product ${PRODUCT_SALE_PRODUCT} in the seed (${w.name} window)`)
+    if (!wanted) continue
+    if (w.name === 'day') check(ctx.productSalesDay === wanted.day, `${runDate}: productSalesDay ${ctx.productSalesDay} is not the local day the seed puts sale ${w.id} on (${wanted.day})`)
+    else check(ctx.productSalesMonth === wanted.day.slice(0, 7), `${runDate}: productSalesMonth ${ctx.productSalesMonth} is not the month the seed puts sale ${w.id} in (${wanted.day})`)
+    const held = product.filter((x) => w.inside(x.day))
+    check(held.length === 1 && held[0].id === w.id, `${runDate}: the ${w.name} ${w.label} holds sales ${held.map((x) => x.id + '@' + x.day)} of product ${PRODUCT_SALE_PRODUCT}, not just ${w.id}`)
+    const hit = returned.filter((x) => w.inside(x.day))
+    check(hit.length === 0, `${runDate}: the ${w.name} ${w.label} holds returned sales ${hit.map((x) => x.id + '@' + x.day)}; its ledger half would read their rows`)
+  }
 }
 
 // One run date per run. The clock is read ONCE (seed.cjs readClock, at load); the seed stores the anchor date it used (org.json) and world.ctx and every native are built from the
@@ -109,6 +124,23 @@ for (const parts of [...CLOCK_FREE, ...natives]) {
 for (const parts of CLOCK_FREE) {
   const text = source(...parts).replace(/world\.clockMs = shiftCloseInstant\(world\.ctx\.anchorDate, Date\.now\(\)\)/, '')
   check(!/new Date\(\)|Date\.now\(\)/.test(text), `${parts.join('/')}: reads the clock; a shape's dates come from ctx`)
+}
+
+// A native that boots the world must not build a calendar date from the real clock: its dates come from world.ctx. A date from `new Date()` or `Date.now()` cut to a day or a month moves at
+// 17:00Z and with the run date, away from the seed.
+const CLOCK_DATE_ALLOWED = { 'test-sales-stats-header-lines-native.cjs': 'a real-clock window around sales the test creates itself, not the seeded world' }
+const SLICE = String.raw`\.toISOString\(\)\s*\.slice\(\s*0\s*,\s*(?:7|10)\s*\)`
+const CLOCK = String.raw`(?:new Date\(\s*\)|Date\.now\(\))`
+function clockDate(text) {
+  if (new RegExp(CLOCK + String.raw`[^;\n]*` + SLICE).test(text)) return true
+  const held = [...text.matchAll(new RegExp(String.raw`\b(?:const|let|var)\s+(\w+)\s*=\s*` + CLOCK, 'g'))].map((m) => m[1])
+  return held.some((v) => new RegExp(String.raw`\b${v}` + SLICE).test(text) || new RegExp(String.raw`new Date\(\s*${v}\b[^;\n]*` + SLICE).test(text))
+}
+for (const f of fs.readdirSync(__dirname).filter((n) => /^test-.*\.cjs$/.test(n))) {
+  const text = source(f)
+  if (!/\bworld\.cjs/.test(text) || !/read-budget/.test(text)) continue
+  if (CLOCK_DATE_ALLOWED[f]) { check(clockDate(text), `${f}: is allowed a clock date (${CLOCK_DATE_ALLOWED[f]}) but builds none; remove it from CLOCK_DATE_ALLOWED`); continue }
+  check(!clockDate(text), `${f}: builds a calendar date from the real clock (new Date() or Date.now() cut with toISOString().slice(0, 7 or 10)); take it from world.ctx of the booted world`)
 }
 
 // The seam: a clock that moves on by a day after the first read must not move anything built from the seed context.
