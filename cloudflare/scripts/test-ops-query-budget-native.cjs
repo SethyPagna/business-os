@@ -18,6 +18,32 @@ const REFUSED_ON_FREE = []
 // (~22,000 pages at 85 MB), so its directive must stay at or under the ceiling below.
 const UNMEASURABLE = { 'd1-dbstat-probe': 100000 }
 
+// A date literal used as an OPEN-ENDED lower bound ("col >= '2026-09-13'") reads more of the seed every day: the seed hangs every sale off today's
+// Cambodia date, so each new day moves ~44 more seed sales past the literal (the 20 Nov 2026 red). Such a query is therefore also measured saturated:
+// the same SQL with every such literal moved before the seed's oldest day, which puts the whole seed in range and reads the same on every run date.
+// A column that also has an upper bound in the query is a window, not open-ended, and is left alone. Equality, BETWEEN and upper bounds are never rewritten.
+const SATURATED_FROM = '2000-01-01'
+const OPEN_LOWER = /([A-Za-z_][\w.]*)(\W{0,3}?)\s*(>=|>)\s*'(\d{4}-\d{2}-\d{2})((?: \d{2}:\d{2}:\d{2})?)'/g
+function saturatedSql(sql) {
+  const code = sql.split('\n').filter((line) => !/^\s*--/.test(line)).join('\n')
+  const hasUpper = (col) => new RegExp('(?:^|[^\\w.])' + col.replace(/\./g, '\\.') + "\\W{0,3}?\\s*(?:<=|<)\\s*'\\d{4}-\\d{2}-\\d{2}").test(code)
+  let changed = 0
+  const out = sql.split('\n').map((line) => {
+    if (/^\s*--/.test(line)) return line
+    return line.replace(OPEN_LOWER, (all, col, gap, op, d, t) => {
+      if (hasUpper(col)) return all
+      changed++
+      return `${col}${gap} ${op} '${SATURATED_FROM}${t}'`
+    })
+  }).join('\n')
+  return { sql: out, changed }
+}
+
+// READ_BUDGET_NOW moves the seed (seed.cjs reads it in this process) but not SQLite's own date('now'), which the recent-* and other day-window queries use, so on a moved
+// clock those windows no longer meet the seed's last day and read all of it. A moved-clock run is the proof that the saturated queries do not depend on the run date, so it
+// judges only them (and says so); a run on the real clock judges everything.
+const MOVED_CLOCK = Boolean(process.env.READ_BUDGET_NOW)
+
 async function main() {
   const guard = await import(pathToFileURL(path.join(ROOT, 'ops', 'scripts', 'ops-sql-guard.mjs')).href)
   const names = guard.listQueries()
@@ -40,6 +66,13 @@ async function main() {
   const runnable = queries.filter((q) => !q.refusedOnFree && !(q.name in UNMEASURABLE))
   const world = await bootWorld({ tier: 'free' })
   const rows = new Map()
+  const saturatedSqlOf = new Map()
+  for (const q of runnable) {
+    const sat = saturatedSql(q.sql)
+    if (sat.changed === 0) continue
+    if (sat.sql === q.sql) reds.push(`${q.name}: saturated rewrite changed nothing`)
+    else saturatedSqlOf.set(q.name, sat.sql)
+  }
   try {
     for (const mode of ['without ANALYZE', 'with ANALYZE']) {
       if (mode === 'with ANALYZE') await world.analyze()
@@ -47,20 +80,27 @@ async function main() {
         try {
           const read = (await world.db.prepare(q.sql).all()).meta.rows_read
           rows.set(q.name, Math.max(rows.get(q.name) || 0, read))
-          if (read > q.maxRowsRead) reds.push(`${q.name}: read ${read} rows ${mode}, budget ${q.maxRowsRead} (-- ops:max-rows-read ${roundUp(read)})`)
+          if (read > q.maxRowsRead && (!MOVED_CLOCK || saturatedSqlOf.has(q.name))) reds.push(`${q.name}: read ${read} rows ${mode}, budget ${q.maxRowsRead} (-- ops:max-rows-read ${roundUp(read)})`)
         } catch (e) { reds.push(`${q.name}: failed ${mode} on the seed: ${String(e.message).slice(0, 160)}`) }
+        if (!saturatedSqlOf.has(q.name)) continue
+        try {
+          const read = (await world.db.prepare(saturatedSqlOf.get(q.name)).all()).meta.rows_read
+          console.log(`  ${q.name}: saturated ${read}, normal ${rows.get(q.name)}, ceiling ${q.maxRowsRead} (${mode})`)
+          if (read > q.maxRowsRead) reds.push(`${q.name}: saturated read (every open-ended date literal moved to ${SATURATED_FROM}) ${read} rows ${mode}, budget ${q.maxRowsRead} (-- ops:max-rows-read ${roundUp(read)})`)
+        } catch (e) { reds.push(`${q.name}: saturated rewrite failed ${mode} on the seed: ${String(e.message).slice(0, 160)}`) }
       }
     }
   } finally { await world.dispose() }
   // Tier A (recent-*) ceilings leave room for a busy day or the day after a large import (6.0.1043): at least 3 x the seed day, never under
   // the floor, never over the plan's 20,000 for one file. A ceiling is there to catch a plan that flips to a table scan, not to bound growth.
   const TIER_A = { cap: 20000, floor: 2000, headroom: 3 }
-  for (const q of runnable.filter((x) => x.name.startsWith('recent-'))) {
+  for (const q of MOVED_CLOCK ? [] : runnable.filter((x) => x.name.startsWith('recent-'))) {
     const seen = rows.get(q.name) || 0
     const want = Math.min(TIER_A.cap, Math.max(TIER_A.floor, TIER_A.headroom * seen))
     if (q.maxRowsRead > TIER_A.cap) reds.push(`${q.name}: ceiling ${q.maxRowsRead} is over the plan's ${TIER_A.cap} for one Tier A file`)
     if (q.maxRowsRead < want) reds.push(`${q.name}: ceiling ${q.maxRowsRead} is under ${TIER_A.headroom} x the seed day (${seen} rows): a busy day would fail with read-ceiling-exceeded (want at least ${want})`)
   }
+  if (MOVED_CLOCK) console.log(`READ_BUDGET_NOW is set: only the ${saturatedSqlOf.size} saturated queries are judged (the date('now') windows of the others read real time)`)
   console.log(`test-ops-query-budget: ${runnable.length} queries measured, ${Object.keys(UNMEASURABLE).length} unmeasurable here, ${REFUSED_ON_FREE.length} refused on Free, ${reds.length} red`)
   for (const line of reds) console.error('RED ' + line)
   if (reds.length) process.exitCode = 1

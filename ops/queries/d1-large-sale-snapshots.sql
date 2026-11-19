@@ -3,7 +3,8 @@
 -- above about 58 lines exceeds D1's 2,000,000-byte value limit. Read-only sizing for the large-sale fix.
 -- ops:min-rows 0
 -- ops:max-rows 60
--- ops:max-rows-read 26073
+-- ops:max-rows-read 77036
+-- Why 77036: the ceiling is the saturated read (70,032 rows on the seed with the 13 Sep literal moved before the seed's oldest day, so every seed sale is in range), rounded up; the seed ages with the run date, so the read at the literal (26,118 on 20 Nov 2026) grows daily up to that.
 SELECT s.id AS sale_id, date(s.created_at, '+7 hours') AS kh_day, s.money_precision_version AS mpv,
   s.sale_status, COUNT(i.id) AS lines, COALESCE(SUM(LENGTH(i.pricing_snapshot_json)), 0) AS snapshot_bytes,
   COALESCE(MAX(LENGTH(i.pricing_snapshot_json)), 0) AS max_line_bytes,
