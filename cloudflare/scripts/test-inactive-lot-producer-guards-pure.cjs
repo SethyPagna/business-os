@@ -107,6 +107,7 @@ const batchRoute = loadReal('routes/batches.ts', {
   '../lib/permissions': { hasPermission: () => true, getActionTier: () => 'full', isActionBlocked: () => false },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {}, bumpVersions: async () => {} },
+  '../lib/inventoryCheckTasks': { icTasksNamespace: (branchId) => `ic_tasks:${Number(branchId)}` },
   '../lib/productBatches': { getTrackedProductIds: async () => [], listBatchesForProduct: async () => [], receiveBatchStock: async () => { throw new Error('not used') } },
   '../lib/returnsStock': { listOpenDamagedLots: async () => [] },
   '../lib/batchCode': batchCode,
@@ -146,6 +147,7 @@ const stockLotAdjustment = loadReal('lib/stockLotAdjustment.ts', {
   // INV S6: the narrow-bump switch (OFF here) and the Issue-closing statements (not under test) the writer now imports.
   './readSwitches': { readSwitch: async () => false },
   './stockSetClosesIssue': { closeIssueStatements: () => [], reopenIssueStatements: () => [] },
+  './inventoryCheckTasks': { icTasksNamespace: (branchId) => `ic_tasks:${Number(branchId)}` },
   // RET-D: names the blocker of a refused Undo; no refusal here is about naming it.
   './stockRefusalBlocker': { findLaterChangeBlocker: async () => null },
 })

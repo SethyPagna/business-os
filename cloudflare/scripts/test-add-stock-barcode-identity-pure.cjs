@@ -251,6 +251,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', { '../lib/schemaObjectPro
   '../lib/reviewGate': { maybeQueueForReview: async () => null },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
+  '../lib/inventoryCheckTasks': { icTasksNamespace: (branchId) => `ic_tasks:${Number(branchId)}` },
   '../lib/productSearchQuery': {
     buildProductSearchQuery: () => ({ hasSearchTerm: false, titleOnly: false }),
     buildFamilyRelevanceOrderSql: (tail) => tail,

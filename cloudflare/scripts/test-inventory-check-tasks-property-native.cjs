@@ -73,7 +73,8 @@ class Model {
     return { total: live.length, done: live.filter((p) => this.finalSince(task.org, task.branch, p, task.at)).length, removed: task.products.size - live.length }
   }
   openTasks(org, b) { return this.tasks.filter((t) => t.org === org && t.branch === b && t.status === 'open') }
-  closeTask(t, seq = ++this.closedSeq, by = 'hand') { t.status = 'closed'; t.pickup = null; t.closedSeq = seq; t.revision++; t.closedBy = by; t.reopened = false }
+  // A task shows the figures it CLOSED with (contract 3.1, P2.1): the oracle freezes them at the close and forgets them at a reopen.
+  closeTask(t, seq = ++this.closedSeq, by = 'hand') { const v = this.view(t); t.frozen = { total: v.total, done: v.done, removed: v.removed }; t.status = 'closed'; t.pickup = null; t.closedSeq = seq; t.revision++; t.closedBy = by; t.reopened = false }
   /** Before a write that takes counts back: for each task closed by the auto-close at the org and branch, the products that are done for it now. */
   snapshotDone(org, b) { return new Map(this.tasks.filter((t) => t.org === org && t.branch === b && t.status === 'closed' && t.closedBy === 'auto').map((t) => [t.id, new Set([...t.products].filter((p) => this.countable(p) && this.finalSince(org, b, p, t.at)))])) }
   /** After the take-back (owner, 19 Nov): a task closed by the auto-close reopens exactly when a product that was done for it is not any more. Returns the ids. */
@@ -81,7 +82,7 @@ class Model {
     const out = []
     for (const t of this.tasks) {
       if (!(t.org === org && t.branch === b && t.status === 'closed' && t.closedBy === 'auto' && before.has(t.id))) continue
-      if ([...before.get(t.id)].some((p) => this.countable(p) && !this.finalSince(org, b, p, t.at))) { t.status = 'open'; t.revision++; t.reopened = true; out.push(t.id) }
+      if ([...before.get(t.id)].some((p) => this.countable(p) && !this.finalSince(org, b, p, t.at))) { t.status = 'open'; t.frozen = null; t.revision++; t.reopened = true; out.push(t.id) }
     }
     return out
   }
@@ -154,7 +155,8 @@ async function runSequence(seed, ops, { mutant = null, trace = false } = {}) {
         expect(it.status === t.status, 'Done rule: task status (board)', { who, task: t.ordinal, oracle: t.status, shown: it.status, view: v })
         if (it.status === 'closed') expect(t.closedSeq >= floor, 'Board: an older closed task is shown before a newer one', { task: t.ordinal })
         expect(it.done <= it.total, 'Progress: done > total', { task: t.ordinal, it })
-        expect(it.total === v.total && it.done === v.done && it.removed === v.removed, 'Progress: total/done/removed', { who, task: t.ordinal, oracle: v, shown: { total: it.total, done: it.done, removed: it.removed } })
+        const fig = t.status === 'closed' && t.frozen ? t.frozen : v
+        expect(it.total === fig.total && it.done === fig.done && it.removed === fig.removed, 'Progress: total/done/removed', { who, task: t.ordinal, oracle: fig, shown: { total: it.total, done: it.done, removed: it.removed } })
         expect(it.branch_id === b, 'Isolation: branch_id')
         const picked = t.pickup ? `u${UID[t.pickup.who]}` : null
         expect(it.picked_up_by === picked, 'Pickups: picked_up_by', { task: t.ordinal, oracle: picked, shown: it.picked_up_by })
