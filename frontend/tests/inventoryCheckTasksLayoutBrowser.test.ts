@@ -115,6 +115,20 @@ await browser.run('PASS count tasks layout: board rows 2 lines on a phone / 1 fr
     assert.ok(await browser.evaluate<boolean>(`document.querySelector('[data-inventory-check-task="t1"] [data-task-action="pickup"]') !== null`), `${where}: Pick up on the free task`)
     assert.equal(await browser.evaluate<boolean>(`!!document.querySelector('[data-inventory-check-task] [data-task-issuer]')`), role === 'admin', `${where}: the issuer shows for the admin only`)
     if (lang === 'km') await browser.khmerRoom(`${where} board`, '[data-inventory-check-page]', 4)
+    // From xl the board is a table: the progress, picker, date and issuer columns start at the same x on every row, whatever buttons a row carries (Pick up, Hand back + Close, or none).
+    if (width >= 1280) {
+      const columns = await browser.evaluate<Record<string, number[]>>(`(() => { const left = selector => [...document.querySelectorAll('[data-inventory-check-task]')].map(row => { const node = row.querySelector(selector); return node ? Math.round(node.getBoundingClientRect().left * 10) / 10 : null }).filter(value => value !== null); return { progress: left('[data-task-progress]'), picker: left('[data-task-picker]'), date: left('[data-task-issued]'), issuer: left('[data-task-issuer]') } })()`)
+      assert.equal(columns.progress.length, 3, `${where}: every row has a progress column`)
+      assert.equal(columns.date.length, 3, `${where}: every row has a date column`)
+      assert.equal(columns.picker.length, 2, `${where}: the two held rows have a picker column`)
+      assert.equal(columns.issuer.length, role === 'admin' ? 3 : 0, `${where}: the issuer column is the admin's`)
+      for (const [name, xs] of Object.entries(columns)) assert.ok(xs.every(x => Math.abs(x - xs[0]) <= 1), `${where}: the ${name} column starts at the same x on every row (${JSON.stringify(xs)})`)
+      if (role === 'admin') {
+        const issuer = await browser.evaluate<{ text: string; clipped: boolean }[]>(`[...document.querySelectorAll('[data-task-issuer]')].map(node => ({ text: node.textContent, clipped: node.scrollWidth > node.clientWidth + 1 }))`)
+        for (const one of issuer) assert.equal(one.text, `${pack.inventory_check_created_by} @boss`, `${where}: the issuer is labelled`)
+        assert.ok(issuer.every(one => !one.clipped), `${where}: the labelled issuer fits its column (${JSON.stringify(issuer)})`)
+      }
+    }
     // ---- the empty board ----
     await browser.open(width, `lang=${lang}&role=${role}&section=tasks&board=empty`, `document.querySelector('[data-inventory-check-empty="tasks"]')`, 700)
     await noOverflow(`${where} empty board`)

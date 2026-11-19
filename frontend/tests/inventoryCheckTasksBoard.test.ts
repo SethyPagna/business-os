@@ -47,7 +47,7 @@ for (const language of ['en', 'km'] as const) {
     if (viewer === 'employee') {
       assert.equal(issuers.length, 0, `${where}: no issuer drawn`)
       assert.ok(!text.includes('@boss') && !text.includes('—') && !text.includes('undefined'), `${where}: no @issuer, no placeholder, nothing in its place`)
-    } else assert.equal(issuers.length, 6, `${where}: the issuer shows on every row that names one`); if (viewer !== 'employee') assert.ok(issuers.every(node => node.textContent === '@boss'))
+    } else assert.equal(issuers.length, 6, `${where}: the issuer shows on every row that names one`); if (viewer !== 'employee') assert.ok(issuers.every(node => node.textContent === `${words.inventory_check_created_by} @boss`), `${where}: the issuer is labelled`)
     // the buttons
     assert.equal(hasAction(surface, 't1', 'pickup'), viewer !== 'issuer', `${where}: Pick up only for someone who may work tasks`)
     assert.equal(hasAction(surface, 't2', 'pickup'), false, `${where}: nobody picks up what someone else holds`)

@@ -93,7 +93,7 @@ export default function InventoryCheckTasksList({ board, t, canWork, busy, onOpe
           onClick={() => onOpen(task)}>
           <SessionStatusChip status={task.status} t={t} />
           <button type="button" data-task-name title={name} className="flex min-h-11 min-w-0 flex-1 items-center border-0 bg-transparent p-0 text-left text-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"><span className="block min-w-0 flex-1 truncate font-semibold leading-relaxed">{name}</span></button>
-          <span className="ml-auto xl:order-last xl:ml-0"><TaskActions task={task} t={t} busy={busy} canWork={canWork} onPickup={() => onPickup(task)} onRelease={() => onRelease(task)} onClose={() => onClose(task)} /></span>
+          <span className="ml-auto xl:order-last xl:ml-0 xl:flex xl:w-40 xl:shrink-0 xl:justify-end"><TaskActions task={task} t={t} busy={busy} canWork={canWork} onPickup={() => onPickup(task)} onRelease={() => onRelease(task)} onClose={() => onClose(task)} /></span>
           <div className="flex min-w-0 basis-full flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] leading-relaxed text-gray-600 xl:contents xl:text-xs dark:text-gray-300">
             <span className="inline-flex items-center gap-1 xl:w-36 xl:shrink-0" data-task-progress>
               <ProgressRing figure={false} progress={{ total: task.total, done: task.done, issue: 0, unstarted: Math.max(0, task.total - task.done) }} t={t} />
@@ -103,7 +103,7 @@ export default function InventoryCheckTasksList({ board, t, canWork, busy, onOpe
             {task.status === 'closed' && task.closed_at
               ? <span className="text-gray-500 xl:w-40 xl:shrink-0">{label(t, 'shift_status_closed', 'Closed')} <span className="xl:hidden">{fmtDate(task.closed_at)}</span><span className="hidden xl:inline">{fmtDateTime24(task.closed_at)}</span></span>
               : <span className="xl:w-40 xl:shrink-0" data-task-issued><span className="xl:hidden">{fmtDate(task.issued_at)}</span><span className="hidden xl:inline">{fmtDateTime24(task.issued_at)}</span></span>}
-            {typeof task.issued_by === 'string' && task.issued_by ? <span className="text-gray-500 xl:w-28 xl:shrink-0" data-task-issuer title={label(t, 'inventory_check_created_by', 'Created by')}>@{task.issued_by}</span> : null}
+            {typeof task.issued_by === 'string' && task.issued_by ? <span className="truncate text-gray-500 xl:w-36 xl:shrink-0" data-task-issuer title={`${label(t, 'inventory_check_created_by', 'Created by')} @${task.issued_by}`}><span className="hidden xl:inline">{label(t, 'inventory_check_created_by', 'Created by')} </span>@{task.issued_by}</span> : null}
           </div>
         </div>
         {reopened ? <p data-task-reopened className="cursor-pointer pb-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-300" onClick={() => onOpen(task)}>{reopenedText(t, reopened)}</p> : null}
