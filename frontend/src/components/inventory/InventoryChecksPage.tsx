@@ -212,13 +212,15 @@ function InventorySelection({ boundary, access, isCurrent }: { boundary: string;
   const [selection, setSelection] = useState<Selection>({ branchId: '', sessionId: '' })
   const selected = useRef(selection)
   selected.current = selection
+  // The device-draft keys a screen of this page has held: moving inside the page (a task, Back, a branch) remounts the screen, and a draft it reads again is the person's own work, not a restore.
+  const heldDrafts = useRef(new Set<string>())
   const changeSelection = (next: Selection) => {
     // The branch list the Tasks board found travels with the selection: Back, a task and a branch choice never read it again.
     const value = next.knownBranches || !selected.current.knownBranches ? next : { ...next, knownBranches: selected.current.knownBranches }
     if (selected.current.branchId === value.branchId && selected.current.sessionId === value.sessionId && (selected.current.taskId ?? '') === (value.taskId ?? '')) return
     selected.current = value; setSelection(value)
   }
-  return <InventoryWorkspace key={`${selection.branchId}:${selection.sessionId}:${selection.taskId ?? ''}`} boundary={boundary} access={access} selection={selection} onSelect={changeSelection} isCurrent={() => isCurrent() && selected.current === selection} />
+  return <InventoryWorkspace key={`${selection.branchId}:${selection.sessionId}:${selection.taskId ?? ''}`} boundary={boundary} access={access} selection={selection} onSelect={changeSelection} heldDrafts={heldDrafts.current} isCurrent={() => isCurrent() && selected.current === selection} />
 }
 
 /** One icon-only action: the translated name is both its tooltip and its accessible name. */
@@ -241,7 +243,7 @@ function ListSkeleton({ loadingText }: { loadingText: string }) {
   </ul>
 }
 
-function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }: { boundary: string; access: InventoryCheckAccess; selection: Selection; onSelect: (selection: Selection) => void; isCurrent: () => boolean }) {
+function InventoryWorkspace({ boundary, access, selection, onSelect, heldDrafts, isCurrent }: { boundary: string; access: InventoryCheckAccess; selection: Selection; onSelect: (selection: Selection) => void; heldDrafts: Set<string>; isCurrent: () => boolean }) {
   const { t, user, canWriteToServer, navigateTo, notify } = useApp() as AppContextCoreValue
   const { formatPrice, exchangeRate, fmtUSD, fmtKHR } = useApp() as AppContextCoreValue
   const { branchId, sessionId } = selection
@@ -356,6 +358,8 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
   // The counts typed are also kept on this device: one key per user, branch and task (or the plain list), frozen for this mount (an account or server switch leaves a draft with its owner).
   // With no branch chosen nothing can be counted, so nothing is kept. A viewer who may not count here (or work tasks, in a task view) neither restores nor writes.
   const { authority: draftAuthority } = useFrozenDraftAuthority(branchId && access.canCheck && (!taskId || access.canWorkTasks) ? countDraftBaseKey(branchId, taskId) : null)
+  // "Counts restored from this device" is said only when this screen found a draft this page had not held (the page was just opened); a screen reached from inside the page says nothing.
+  const [realRestore] = useState(() => !!draftAuthority && !heldDrafts.has(draftAuthority.draftKey))
   const [restored] = useState(() => {
     if (!draftAuthority || !isDraftAuthorityCurrent(draftAuthority)) return null
     const stored = readWorkDraft<unknown>(draftAuthority.draftKey)
@@ -430,7 +434,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
     if (data) scheduleWorkDraftWrite(draftAuthority.draftKey, data)
     else clearWorkDraft(draftAuthority.draftKey)
   }, [drafts, draftTick])
-  useEffect(() => () => { if (draftAuthority) flushPendingWorkDraft(draftAuthority.draftKey) }, [])
+  useEffect(() => () => { if (draftAuthority) { heldDrafts.add(draftAuthority.draftKey); flushPendingWorkDraft(draftAuthority.draftKey) } }, [])
   useEffect(() => {
     if (!hasDrafts) return
     return registerDirtyWork({ key: COUNTS_WORK_KEY, pageId: 'inventory', label: tr('inventory_check_counts_in_progress', 'Counts not submitted'),
@@ -1333,7 +1337,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
       const { dropped } = judgeRestored(entries, latest)
       // Only an entry still exactly as it was restored is dropped: a count typed meanwhile is never touched.
       if (dropped.length) setDrafts(previous => { const next = { ...previous }; for (const id of dropped) if (next[id] === entries[id]) delete next[id]; return next })
-      if (ids.length > dropped.length) notify(tr('inventory_check_draft_restored', 'Counts restored from this device.'), 'info')
+      if (ids.length > dropped.length && realRestore) notify(tr('inventory_check_draft_restored', 'Counts restored from this device.'), 'info')
       if (dropped.length) notify(tr('inventory_check_draft_dropped', '{count} counts removed: counted elsewhere after you typed them.').replace('{count}', String(dropped.length)), 'info')
     })()
   }, [fresh, listMode])

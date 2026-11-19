@@ -102,5 +102,24 @@ world.calls.length = 0
 await surface.click(surface.find(node => node.getAttribute('data-selection-action') === 'submit', 'Retry'))
 assert.equal(world.ofRoute('submissions')[0]?.params.requestId, first, 'after a reload the Retry sends the SAME request id (and asks nothing again)')
 await surface.unmount()
+
+// ---- "Counts restored" is for a real restore only: a count typed in this page, left by the bar's Back and returned to, is the person's own work and says nothing ----
+reset()
+open('tasks'); surface = await world.mount()
+const openTask = () => surface.click(surface.find(node => node.getAttribute('data-task-open') !== null && taskRowOf(surface, 't1').contains(node), 'task'))
+await openTask()
+await surface.type(countInput(surface, 2), '6'); await surface.settle()
+await surface.click(surface.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === words.back, 'Back'))
+world.notices.length = 0
+await openTask()
+assert.equal(value(surface, 2), '6', 'the count is there again')
+assert.ok(!world.notices.some(notice => notice.text === words.inventory_check_draft_restored), 'and no "restored" notice: nothing was restored, the page never closed')
+await surface.unmount()
+world.notices.length = 0
+open('tasks'); surface = await world.mount(); await openTask()
+assert.equal(value(surface, 2), '6', 'a new visit to the page brings it back')
+assert.ok(world.notices.some(notice => notice.text === words.inventory_check_draft_restored), 'and says so: that is a real restore')
+await surface.unmount()
+forgetDeviceDrafts()
 await world.harness.close()
 console.log('inventoryCheckCountDraftsMounted passed: write, the three-option guard with Save, restore, the drop rule, off-page judging, keys apart, pending Retry')
