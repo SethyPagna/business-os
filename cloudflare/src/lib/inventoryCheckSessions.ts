@@ -112,7 +112,7 @@ async function progress(db: D1Compat, id: string) {
   return { total: Number(row?.total || 0), unstarted: Number(row?.unstarted || 0), done: Number(row?.done || 0), issue: Number(row?.issue || 0) }
 }
 // One rule for who may see a staff member's name on any Inventory check surface (history actor_name, session creator_name).
-export const canSeeStaffIdentity = (actor: Actor, accountId: number): boolean => isAdminControlUser(actor) || hasPermission(actor,'audit_log') || accountId === actor.id
+export const canSeeStaffIdentity = (actor: SessionUser, accountId: number): boolean => isAdminControlUser(actor) || hasPermission(actor,'audit_log') || accountId === actor.id
 /** The branch of one session, for a session view of the products list: same actor and organization fence as reading the session, without its items or stock. */
 export async function getInventoryCheckSessionBranch(db: D1Compat, principal: InventoryCheckPrincipal, id: string): Promise<{ branch_id: number }> {
   const actor = await currentInventoryCheckActor(db, principal); await schemaReady(db)
@@ -1127,7 +1127,7 @@ async function createTaskSession(db: D1Compat, principal: InventoryCheckPrincipa
   const hash = await inventoryCheckDigest(JSON.stringify({ action: 'issue', branchId, productIds: asked, title, selection: issue.selection }))
   const existing = await receipt(db, actor, key, hash)
   if (existing) return { ...(await committedSessionProjection(db, principal, existing.session_id)), receipt: receiptResponse(existing, true), created: false }
-  // Only a product the list shows and a person may count: active (or still holding stock) and not a family header. An explicit list must be all of them; a list a filter resolved drops the rest.
+  // Only a product the list shows and a person may count (TASK_COUNTABLE_SQL): active and not a family header. An explicit list must be all of them; a list a filter resolved drops the rest.
   const products = await db.prepare(`SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group FROM products p WHERE p.id IN (SELECT value FROM json_each(@ids)) AND ${TASK_COUNTABLE_SQL} ORDER BY p.id`).all<Record<string, unknown>>({ ids: JSON.stringify(asked) })
   if (!products.length) fail(400, 'inventory_check_product_not_eligible')
   if (!issue.dropIneligible && products.length !== asked.length) fail(400, 'inventory_check_product_not_eligible')
