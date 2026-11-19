@@ -13,6 +13,7 @@ import Gift from 'lucide-react/dist/esm/icons/gift.js'
 import HardDriveDownload from 'lucide-react/dist/esm/icons/hard-drive-download.js'
 import History from 'lucide-react/dist/esm/icons/history.js'
 import ListChecks from 'lucide-react/dist/esm/icons/list-checks.js'
+import ListTodo from 'lucide-react/dist/esm/icons/list-todo.js'
 import PackagePlus from 'lucide-react/dist/esm/icons/package-plus.js'
 import PackageSearch from 'lucide-react/dist/esm/icons/package-search.js'
 import RadioTower from 'lucide-react/dist/esm/icons/radio-tower.js'
@@ -29,7 +30,7 @@ const ICONS_BY_SECTION: Record<string, LucideIcon> = {
   'branches:overview': Gauge,
   'inventory:products': PackageSearch,
   'inventory:sessions': ClipboardList,
-  'inventory:tasks': ClipboardList,
+  'inventory:tasks': ListTodo,
   'branches:transfers': ArrowLeftRight,
   'branches:rfid': RadioTower,
   'sales:sales': ReceiptText,

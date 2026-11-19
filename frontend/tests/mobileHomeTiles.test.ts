@@ -134,6 +134,7 @@ runTest('every permission-visible subpage has its own semantic icon', () => {
   const otherIcons = icons.filter((_, index) => pairs[index][1] !== 'duplicates')
   assert.equal(new Set(otherIcons).size, otherIcons.length, 'all other subpages retain distinct visual cues')
   assert.equal(new Set(icons).size, pairs.length - 1, 'only the shared Conflicts destinations reuse an icon')
+  assert.notEqual(getMobileSectionIcon('inventory', 'tasks'), getMobileSectionIcon('inventory', 'sessions'), 'Tasks and Count sessions are two tiles of one group and look different')
   assert.equal(getMobileSectionIcon('sales', 'not-permitted'), null, 'unknown or withheld sections do not invent an icon')
 })
 
