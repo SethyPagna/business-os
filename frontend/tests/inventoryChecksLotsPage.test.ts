@@ -100,7 +100,9 @@ const doubles = {
     readInventoryCheckHistory: async () => ({ items: [], total: 0, page: 1, pageSize: 20 }),
   },
 }
+import { forgetDeviceDrafts } from './inventoryCheckDeviceDrafts.ts'
 async function mount(permissions: Record<string, boolean> = FIELDS) {
+  forgetDeviceDrafts()
   lists.length = 0; overlays.length = 0; held.clear(); authorityCurrent = true; epoch = 'epoch-a'; ranked = null; overlayEntries = seedOverlay ?? new Map(); seedOverlay = null
   open('hub:inventory:products')
   return harness.mount({ component: 'components/inventory/InventoryChecksPage.tsx', app: app(permissions), doubles, props: {} })
@@ -159,10 +161,10 @@ try {
     const surface = await mount()
     const rail = inside(surface, 'data-inventory-check-status-rail')
     const labels = rail.querySelectorAll('button').map(node => node.textContent)
-    assert.deepEqual(labels, ['all', 'Not checked5', 'Checked OK2', 'Issues1', 'Waiting for approval1'], 'every status in ONE rail, with how many are in it')
+    assert.deepEqual(labels, ['all', 'Not checked5', 'Checked OK2', 'Differs1', 'Waiting for approval1'], 'every status in ONE rail, with how many are in it')
     assert.ok(String(rail.getAttribute('class') ?? '').includes('chip-rail'), 'the shared rail: it scrolls sideways and never wraps')
     const before = lists.length
-    await surface.click(surface.button('Issues', rail))
+    await surface.click(surface.button('Differs', rail))
     assert.ok(lists.length > before && lists.at(-1)!.get('checkState') === 'issue', 'a tap on a status asks the list for it')
     await surface.unmount()
   }

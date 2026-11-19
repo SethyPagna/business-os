@@ -195,7 +195,7 @@ try {
     await surface.waitFor(() => overlays.length === 2, 'the overlay of page 2')
     assert.equal(overlays[1].get('summary'), '0', 'the step asks the overlay for no summary')
     await wait(50)
-    assert.deepEqual([chipNumber(surface, 'Not checked'), chipNumber(surface, 'Checked OK'), chipNumber(surface, 'Issues')], [5, 4, 0], 'the cards still show the one answer they held, none of them from a newer one')
+    assert.deepEqual([chipNumber(surface, 'Not checked'), chipNumber(surface, 'Checked OK'), chipNumber(surface, 'Differs')], [5, 4, 0], 'the cards still show the one answer they held, none of them from a newer one')
     await surface.unmount()
   }
   console.log('inventorySummaryRows passed: sole-branch open, Products-held, no made-up 0, one answer per card set, page step, days and tooLarge')

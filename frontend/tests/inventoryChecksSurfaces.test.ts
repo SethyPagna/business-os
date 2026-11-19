@@ -4,6 +4,7 @@ import { createHarness, type MemoryNode } from './mountedComponentHarness.ts'
 import type { InventoryCheckSession, InventoryCheckSessionItem } from '../src/api/inventoryChecksTransport.ts'
 import { APP_NAVIGATION_EVENT } from '../src/app/pathRouting.ts'
 import * as dirtyWork from '../src/utils/dirtyWork.ts'
+import { forgetDeviceDrafts } from './inventoryCheckDeviceDrafts.ts'
 // Counting is its own grant and so is every field it shows (owner, 21 Oct 2026): Inventory Full no longer implies them.
 const COUNT_FIELDS = { inventory_check_show_price: true, inventory_check_show_barcode: true, inventory_check_show_category: true, inventory_check_show_brand: true, inventory_check_show_stock: true, inventory_check_show_received: true, inventory_check_show_sales: true, inventory_check_show_customers: true }
 
@@ -61,6 +62,8 @@ const app = {
   },
 }
 const doubles = {
+  // The Tasks board has no list to learn the branches from, so it reads the branch list itself; this shop has two, so a cold open must ask for one. (A failed read has its own test: inventoryCheckTasksRefusedMounted.)
+  'api/branchTransport.ts': { getBranches: async () => [{ id: 1, name: 'Main', is_active: 1 }, { id: 2, name: 'Second', is_active: 1 }] },
   'utils/dirtyWork.ts': dirtyWork,
   'api/actorReadScope.ts': {
     captureActorReadScope: () => ({ authority: 'test', channel: 'inventoryChecks', revision: '1' }),
@@ -76,6 +79,7 @@ const doubles = {
       if (productGate) await productGate
       return productsBody(params)
     },
+    readInventoryCheckTasks: async () => ({ branchId: 1, version: 'k1:1', items: [], capabilities: { issue: false, work: true, maxProducts: 300, maxOpenTasks: 30 } }),
     readInventoryCheckSessions: async (params: Record<string, unknown>) => { sessionReads.push(params); return { items: sessionList, total: sessionTotal || sessionList.length, page: Number(params.page) || 1, pageSize: 20, ...(sessionApprovals ? { approvals: true } : {}) } },
     readInventoryCheckSession: async () => ({ item: selected, items: members }),
     readInventoryCheckHistory: async () => {
@@ -89,7 +93,7 @@ const doubles = {
     changeInventoryCheckSession: async () => ({ item: selected, receipt: {} }),
   },
 }
-const mount = () => harness.mount({ component: 'components/inventory/InventoryChecksPage.tsx', app, doubles, props: {} })
+const mount = () => { forgetDeviceDrafts(); return harness.mount({ component: 'components/inventory/InventoryChecksPage.tsx', app, doubles, props: {} }) }
 type Surface = Awaited<ReturnType<typeof mount>>
 const useLanguage = (language: string) => { app.language = language; app.t = (key: string) => packs[language][key] || key; return packs[language] }
 const exact = (surface: Surface, text: string) => surface.findAll(node => node.tagName === 'BUTTON' && node.textContent === text)
@@ -222,27 +226,14 @@ try {
     await noProducts.click(emptyClear(noProducts, pack.clear)[0])
     assert.equal(productReads.at(-1)?.brand, '', `${language}: Clear resets the chosen brand`)
     await noProducts.unmount()
-    goTo('issues')
-    const noIssues = await mount()
-    assert.ok(noIssues.text().includes(pack.inventory_check_issues_empty), `${language}: no issues`)
-    await noIssues.unmount()
+    // The third section is Tasks (the Issues list is gone). With no branch chosen the board says so, in both languages; an old Issues link lands there.
     products = [product(12, 'Row twelve', { barcode: '885000111', brand: 'Brand B' }), product(13, 'Row thirteen')]
-
-    // Issues: the product row, the session chip and the reason.
-    issues = [{ ...product(12, 'Row twelve', { barcode: '885000111', brand: 'Brand B' }), check_status: 'issue', check_counted_quantity: 8, check_note: 'Shelf short', check_by: 'alice', check_at: '2026-10-19 02:35:00', check_session_id: 's-1', check_branch_id: 1 }]
     goTo('issues')
-    const issueTab = await mount()
-    const issueRow = issueTab.find(node => node.getAttribute('data-inventory-check-row') === '12', 'issue row')
-    assert.ok(issueRow.textContent.includes('Row twelve') && issueRow.textContent.includes('Shelf short') && issueRow.textContent.includes(`${pack.inventory_check_counted} 8`), `${language}: issue row shows the product, its reason and its count`)
-    const chip = issueTab.button(pack.inventory_check_open_session, issueRow)
-    assert.ok(chip.textContent.includes('Main') && chip.getAttribute('aria-label')?.includes(pack.inventory_check_open_session), `${language}: a session chip names the branch and opens the session`)
-    assert.equal(issueTab.findAll(node => node.getAttribute('data-check-action') === 'done' || node.getAttribute('data-check-action') === 'issue').length, 0, `${language}: Issues rows write nothing into a session; they are the list's rows, counted by Submit`)
-    assert.ok(!issueTab.text().includes(pack.inventory_check_state), `${language}: the Issues tab has no Check status choice`)
-    await issueTab.click(chip)
-    assert.equal(productReads.at(-1)?.sessionId, 's-1', `${language}: the chip opens its session`)
-    assert.equal(productReads.some(read => read.checkState === 'issue' && read.state === undefined), true, `${language}: the Issues tab asks with checkState=issue`)
-    await issueTab.unmount()
-    issues = []
+    const tasksCold = await mount()
+    assert.equal(tasksCold.button(pack.inventory_check_tasks).getAttribute('aria-pressed'), 'true', `${language}: the old Issues link selects Tasks`)
+    assert.ok(tasksCold.text().includes(pack.inventory_check_count_blocked_branch), `${language}: the Tasks board with no branch chosen says so`)
+    assert.equal(tasksCold.findAll(node => node.getAttribute('data-inventory-check-row') !== null).length, 0, `${language}: the board draws no product rows`)
+    await tasksCold.unmount()
   }
 
   // First-load skeleton, then rows; the load error keeps filters.
@@ -280,16 +271,15 @@ try {
     } }
     assert.equal(counting.findAll(node => node.tagName === 'BUTTON' && (node.getAttribute('aria-label') ?? '').startsWith(`${pack.inventory_check_start_page} (`)).length, 0, `${language}: no Count (n) button on the list`)
     assert.equal(counting.findAll(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === pack.refresh).length, 0, `${language}: and no Refresh button`)
-    await pickAll()
-    assert.equal(submitButton().getAttribute('aria-disabled'), 'true', `${language}: Submit waits for a branch`)
-    assert.equal(submitButton().getAttribute('title'), pack.inventory_check_count_blocked_branch, `${language}: and its tooltip says why`)
-    const before = counting.findAll(node => node.tagName === 'DL').length
-    await counting.click(submitButton())
-    assert.equal(counting.findAll(node => node.tagName === 'DL').length, before, `${language}: a blocked Submit does nothing`)
+    // Counts belong to one branch (they are kept per branch on this device), so with several branches and none chosen NOTHING can be typed: no status button, no count box, no Submit -- and the page says why.
+    // (Where the shop has exactly one active branch it is chosen at open, so a count is always typed under a branch; the sole-branch tests above and in inventoryChecksOpenSequence cover that.)
+    assert.equal(counting.findAll(node => node.getAttribute('data-check-action') === 'status').length, 0, `${language}: no status button to answer a row while no branch is chosen`)
+    assert.equal(counting.findAll(node => node.getAttribute('data-check-count') !== null).length, 0, `${language}: no count box either`)
+    assert.equal(counting.findAll(node => node.getAttribute('data-selection-action') === 'submit').length, 0, `${language}: and no Submit`)
+    assert.ok(counting.find(node => node.getAttribute('data-count-needs-branch') !== null, 'branch hint').textContent === pack.inventory_check_count_blocked_branch, `${language}: the page says "${pack.inventory_check_count_blocked_branch}"`)
     await chooseFilter(counting, pack.filters, 'branchId', 'Second')
-    assert.ok(counting.text().includes(pack.inventory_check_discard_counts_title), `${language}: choosing another branch with picks asks before starting over`)
-    await counting.click(exact(counting, pack.discard).at(-1)!)
-    assert.equal(counting.find(node => node.getAttribute('data-selected-count') !== null, 'selected count').textContent, '', `${language}: a counted stock belongs to one branch, so confirming starts the picks over`)
+    assert.equal(productReads.at(-1)?.branchId, '2', `${language}: choosing a branch reads it at once, with no question (nothing could have been typed before it)`)
+    assert.equal(counting.find(node => node.getAttribute('data-selected-count') !== null, 'selected count').textContent, '', `${language}: the chosen branch starts with nothing picked`)
     await pickAll()
     assert.equal(submitButton().getAttribute('title'), pack.inventory_check_submit_need_counts, `${language}: then it asks for a count in every picked row`)
     await counting.type(countOf(12), '10')

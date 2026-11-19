@@ -154,6 +154,15 @@ const CANON = canonicalProductsQuery(wire({}))!
 {
   const refuse = deps({ list: () => { throw Object.assign(new Error('not found'), { status: 404 }) } })
   await assert.rejects(() => loadWired({ params: params(), skipSummary: false, access: FULL, deps: refuse.deps }), NotWired, 'a 404 from /list is an OFF server')
+  // Only the route being absent is an OFF server: a 404 that carries any other code is an answer about something missing (a task that no longer exists) and the tab stays wired.
+  for (const code of [null, undefined, 'not_found']) {
+    const absent = deps({ list: () => { throw Object.assign(new Error('not found'), { status: 404, code }) } })
+    await assert.rejects(() => loadWired({ params: params(), skipSummary: false, access: FULL, deps: absent.deps }), NotWired, `a 404 with code ${code} is an OFF server`)
+  }
+  for (const code of ['inventory_check_task_not_found', 'inventory_check_session_not_found']) {
+    const missing = deps({ list: () => { throw Object.assign(new Error(code), { status: 404, code }) } })
+    await assert.rejects(() => loadWired({ params: params({ taskId: 't9', branchId: '1' }), skipSummary: false, access: FULL, deps: missing.deps }), error => !(error instanceof NotWired) && (error as { code?: string }).code === code, `a 404 ${code} is the server's own answer, never 'not wired'`)
+  }
   const other = deps({ list: () => { throw Object.assign(new Error('boom'), { status: 500 }) } })
   await assert.rejects(() => loadWired({ params: params(), skipSummary: false, access: FULL, deps: other.deps }), /boom/, 'any other failure is a failure, not a fallback')
   const unmarked = deps({ list: () => listOf([1], { wired: undefined }) })
@@ -260,4 +269,19 @@ assert.deepEqual(branchesOf([{ id: 1, branch_stock: [{ branch_id: 2, branch_name
   assert.deepEqual(shown.capabilities?.groupings, ['checked', 'category'])
 }
 
+// ---- a task view: the list restricted to one count task's products (taskId) ----
+assert.equal(wire({ branchId: '1', taskId: 'task-1' }).taskId, 'task-1', 'taskId goes to /list')
+assert.equal(wire({ branchId: '1', taskId: '' }).taskId, undefined, 'an empty taskId is not sent')
+assert.equal(canonicalProductsQuery(wire({ branchId: '1', taskId: 'task-1' })), null, 'a task is not a scope Products holds: its store would serve the whole unrestricted list')
+{
+  // Products already holds the very same default scope; a task view must still ask the server, and must never ask by ids (the server refuses ids beside taskId).
+  const { log, deps: d } = deps({ held: { [CANON]: listOf([1, 2, 3]) }, rank: () => ({ ids: [2, 1], total: 2 }) })
+  const load = await loadWired({ params: params({ branchId: '1', taskId: 'task-1' }), known: { branches: [{ id: 1, name: 'Shop' }] }, skipSummary: true, access: FULL, deps: d })
+  assert.equal(log.lists.length, 1, 'one list request'); assert.equal(load.fromStore, false, 'the held Products answer is not used')
+  assert.equal(log.lists[0].taskId, 'task-1'); assert.equal(log.lists[0].branchId, '1', 'a sole branch is still named: the Worker requires the branch of the task')
+  assert.equal(log.lists[0].summary, 0, 'the branch-wide summary is skipped inside a task'); assert.equal('ids' in log.lists[0], false, 'never ids beside taskId')
+  assert.deepEqual(log.overlays.map(entry => entry.summary), [false], 'and the overlay skips it too')
+  const typed = await loadWired({ params: params({ branchId: '1', taskId: 'task-1', query: 'soap' }), known: { branches: [{ id: 1, name: 'Shop' }] }, skipSummary: true, access: FULL, deps: d })
+  assert.equal(log.lists.at(-1)?.query, 'soap', 'typed text goes to the server inside a task, not through the device index'); assert.equal('ids' in log.lists.at(-1)!, false); assert.equal(typed.listRequests, 1)
+}
 console.log('inventoryWired passed: canonical key, wire query, one request on open, store hit, blind, search, rows, refresh')

@@ -49,7 +49,7 @@ type Finding = { file: string; line: number; hook: string; name: string }
 // decays into a list of things nobody dares delete.
 export const ALLOWLIST: AllowEntry[] = [
   {
-    file: 'components/inventory/InventoryChecksPage.tsx', names: ['filters'], line: 378,
+    file: 'components/inventory/InventoryChecksPage.tsx', names: ['filters'], line: 448,
     reason: 'The load effect is keyed by requestKey, whose serialized params spread every filter. '
       + 'The same snapshot carries sole-branch bootstrap intent. inventoryChecksPage.test.ts '
       + 'checks each filter dispatch and delayed discovery; adding object identity would reload equal queries. '
@@ -58,7 +58,9 @@ export const ALLOWLIST: AllowEntry[] = [
       + 'JSON.stringify([params, section, refresh]) with params spreading ...filters. Body and dependencies unchanged.'
       + ' RE-VERIFIED 4 Nov 2026 after 6.0.1292 (the ic_wired branch of this effect, and its helpers above it) moved it from :319 to :343: the effect is still [requestKey], '
       + 'and the wired branch reads `filters` only to hand the open request to the sole-branch remount (the same snapshot the older branch carries).'
-      + ' RE-VERIFIED 15 Nov 2026 (grouped list; the refusal table left the page) at :378: the effect is still [requestKey], and requestKey now also holds the grouping asked for (groupWire), which is derived from filters.group.',
+      + ' RE-VERIFIED 15 Nov 2026 (grouped list; the refusal table left the page) at :378: the effect is still [requestKey], and requestKey now also holds the grouping asked for (groupWire), which is derived from filters.group.'
+      + ' RE-VERIFIED 19 Nov 2026 (count tasks T2: the Tasks section, the task view, device drafts) at :448: the effect is still [requestKey]; requestKey = JSON.stringify([params or sessionParams, section, refresh, groupWire]) and params still spreads ...filters (and now also carries taskId in a task view), '
+      + 'so every filter change re-runs it. The body reads `filters` only to hand the open request to the sole-branch remount and to drop a refused checkedOn or checkState once (the same snapshot the older branch carries). The dependency array is correct; only the pin had moved.',
   },
   {
     file: 'components/pos/POS.tsx',

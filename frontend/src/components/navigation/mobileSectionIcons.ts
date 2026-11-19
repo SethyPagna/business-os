@@ -7,13 +7,13 @@ import Bike from 'lucide-react/dist/esm/icons/bike.js'
 import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
 import ClipboardCheck from 'lucide-react/dist/esm/icons/clipboard-check.js'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
-import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
 import Factory from 'lucide-react/dist/esm/icons/factory.js'
 import Gauge from 'lucide-react/dist/esm/icons/gauge.js'
 import Gift from 'lucide-react/dist/esm/icons/gift.js'
 import HardDriveDownload from 'lucide-react/dist/esm/icons/hard-drive-download.js'
 import History from 'lucide-react/dist/esm/icons/history.js'
 import ListChecks from 'lucide-react/dist/esm/icons/list-checks.js'
+import ListTodo from 'lucide-react/dist/esm/icons/list-todo.js'
 import PackagePlus from 'lucide-react/dist/esm/icons/package-plus.js'
 import PackageSearch from 'lucide-react/dist/esm/icons/package-search.js'
 import RadioTower from 'lucide-react/dist/esm/icons/radio-tower.js'
@@ -30,7 +30,7 @@ const ICONS_BY_SECTION: Record<string, LucideIcon> = {
   'branches:overview': Gauge,
   'inventory:products': PackageSearch,
   'inventory:sessions': ClipboardList,
-  'inventory:issues': AlertCircle,
+  'inventory:tasks': ListTodo,
   'branches:transfers': ArrowLeftRight,
   'branches:rfid': RadioTower,
   'sales:sales': ReceiptText,

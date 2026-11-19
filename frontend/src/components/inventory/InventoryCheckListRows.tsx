@@ -2,8 +2,10 @@ import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent,
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import CircleDashed from 'lucide-react/dist/esm/icons/circle-dashed.js'
 import ClipboardCheck from 'lucide-react/dist/esm/icons/clipboard-check.js'
+import ClipboardPlus from 'lucide-react/dist/esm/icons/clipboard-plus.js'
 import Clock from 'lucide-react/dist/esm/icons/clock.js'
 import Hourglass from 'lucide-react/dist/esm/icons/hourglass.js'
+import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left.js'
 import Send from 'lucide-react/dist/esm/icons/send.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import ListChecks from 'lucide-react/dist/esm/icons/list-checks.js'
@@ -156,6 +158,9 @@ export type InventoryCheckListRowsProps = {
   onClear?: (product: InventoryCheckProduct) => void
   /** Full stock adjusters: a Set button beside a typed batch count that differs from stock. Resolves the batch's quantity afterwards (set, or the figure found when stock had moved), null when nothing changed. */
   onLotSet?: (product: InventoryCheckProduct, row: InventoryCheckLotRow, value: string) => Promise<number | null>
+  /** Issue mode (picking products for a count task): countable rows get a tick before the image. The ids ticked are the page's own, so they survive paging. */
+  picks?: ReadonlySet<number>
+  onPick?: (product: InventoryCheckProduct) => void
 }
 
 type RowProps = Omit<InventoryCheckListRowsProps, 'products' | 'sections' | 'drafts' | 'focusRequest' | 'adornments'> & {
@@ -184,7 +189,7 @@ function statusIconOf(kind: RowStatusKind): { Icon: typeof Check; tone: string }
   }
 }
 
-function ListRow({ product, draft, adornment, refusal, columns, countable, copy, scanHit, onAdvance, selecting, locked = false, canViewStock, canViewCounts, priceText, promotionRules, exchangeRate = 4100, costText, onOpenCost, t, onOpenProduct, onCount, onNote, onCountEntered, lotCounts = false, loadLots, onLotCount, onLotSet, onMatches, onDiffers, onClear }: RowProps) {
+function ListRow({ product, draft, adornment, refusal, columns, countable, copy, scanHit, onAdvance, selecting, locked = false, canViewStock, canViewCounts, priceText, promotionRules, exchangeRate = 4100, costText, onOpenCost, t, onOpenProduct, picks, onPick, onCount, onNote, onCountEntered, lotCounts = false, loadLots, onLotCount, onLotSet, onMatches, onDiffers, onClear }: RowProps) {
   const tr = makeTr(t)
   const id = String(product.id)
   const counting = selecting && countable
@@ -290,19 +295,25 @@ function ListRow({ product, draft, adornment, refusal, columns, countable, copy,
 
   // The whole row opens the detail (owner, 17 Nov: "can only click to view details of the product when clicked on image, can expand it"). It is focusable and Enter opens it; the keydown of a control inside bubbles here too, so only Enter ON the row counts.
   const openDetail = () => onOpenProduct(product)
+  // In Issue mode a tap on the row ticks it, as in Products' select mode (the checkbox is a 44 px target, the row a bigger one); the image button still opens the product.
+  const tickable = !!(picks && onPick && countable)
+  const rowAction = tickable ? () => onPick(product) : openDetail
   // The row is a focus stop that opens the product on Enter and on a press: its name says what it does AND which product and status it is (a list item with no name is announced as nothing, and a bare
   // action label would hide the row's content). It stays a list item, not a button: the row holds real buttons and inputs of its own, and a button may not contain them.
-  const rowOpenLabel = `${tr('open_product', 'Open product')}: ${product.name}${statusWords ? ` — ${statusWords}` : ''}`
+  const rowOpenLabel = `${tickable ? '' : `${tr('open_product', 'Open product')}: `}${product.name}${statusWords ? ` — ${statusWords}` : ''}`
   function onRowKeyDown(event: KeyboardEvent<HTMLLIElement>) {
-    if (event.key === 'Enter' && event.target === event.currentTarget && !event.nativeEvent?.isComposing) { event.preventDefault(); openDetail() }
+    if (event.key === 'Enter' && event.target === event.currentTarget && !event.nativeEvent?.isComposing) { event.preventDefault(); rowAction() }
   }
 
   return <li data-inventory-check-row={id} data-check-list-status={status ?? undefined} data-selected={selected ? '' : undefined} data-unsaved={counting && draft ? '' : undefined} data-refused={refusal ? '' : undefined} data-scan-hit={scanHit ? '' : undefined}
-    tabIndex={0} onClick={event => rowClickOpens(event, openDetail)} onKeyDown={onRowKeyDown} aria-label={rowOpenLabel}
+    tabIndex={0} onClick={event => rowClickOpens(event, rowAction)} onKeyDown={onRowKeyDown} aria-label={rowOpenLabel}
     className={`relative min-w-0 max-w-full cursor-pointer border-b border-l-2 border-b-gray-100 py-2 pl-2 pr-1 last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:border-b-gray-800 ${edge} ${counting && draft ? UNSAVED_ROW_CLASS : ''} ${scanHit ? 'rounded-sm ring-2 ring-primary-400 dark:ring-primary-300' : ''}`}>
     {/* A count waiting for an approver (ic_fix_stock) is shown ONCE on this surface: the status icon (the hourglass). The gutter mini tag of the review queue would repeat it. */}
     {/* One compact line where the width allows: the image keeps its square, the name takes the room, the status icon and the count input sit beside it. */}
     <div className="flex min-w-0 items-center gap-2" data-inventory-check-main>
+      {picks && onPick && countable ? <label className="inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center lg:h-10 lg:w-10">
+        <input type="checkbox" data-check-pick className="h-5 w-5 cursor-pointer accent-slate-800" checked={picks.has(Number(product.id))} aria-label={product.name} onChange={() => onPick(product)} />
+      </label> : null}
       <button type="button" tabIndex={-1} onClick={openDetail} data-check-image data-row-open className="relative block aspect-square h-12 w-12 shrink-0 overflow-hidden rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 lg:h-10 lg:w-10" aria-label={product.name} title={product.name}>
         <ProductImage src={product.image_path || undefined} alt="" className="absolute inset-0 h-full w-full rounded-lg object-cover" />
       </button>
@@ -456,5 +467,36 @@ export function InventoryCheckSelectionBar({ selectedCount, blocked, busy, submi
         aria-disabled={blocked || busy || selectedCount === 0 ? true : undefined} title={blocked || submit} onClick={() => { if (!blocked && !busy && selectedCount > 0) onSubmit() }}><Send className="h-4 w-4" aria-hidden="true" />{submit}
         {selectedCount > 0 ? <span data-selected-pill aria-hidden="true" className="rounded-full bg-white/25 px-1.5 text-[10px] font-semibold leading-relaxed tabular-nums">{selectedCount}</span> : null}</button>
     </> : null}
+  </div>
+}
+
+/**
+ * The bar of Issue mode (picking products for a count task): leave, clear the picks, and the one main action, Issue (icon + one word, with how many are picked as a pill).
+ * With nothing picked the filters on screen are what is issued; with neither the button says why it cannot be used.
+ */
+export function InventoryCheckIssueBar({ pickedCount, blocked, busy, issueLabel, onExit, onClear, onIssue, t }: {
+  pickedCount: number
+  /** Why Issue cannot be used right now, in words (nothing chosen, too many products). */
+  blocked: string
+  busy: boolean
+  /** A word for the main action when it is not Issue (Retry after an unconfirmed attempt). */
+  issueLabel?: string
+  onExit: () => void
+  onClear: () => void
+  onIssue: () => void
+  t: InventoryCheckTranslator
+}) {
+  const tr = makeTr(t)
+  const clear = tr('inventory_check_clear_selection', 'Clear selection')
+  const exit = tr('cancel', 'Cancel')
+  const issue = issueLabel || tr('inventory_check_task_issue', 'Issue')
+  return <div data-inventory-check-issue-bar className="flex min-w-0 items-center gap-1 pl-2">
+    <button type="button" data-issue-action="exit" className={rowIconButton} aria-label={exit} title={exit} disabled={busy} onClick={onExit}><ArrowLeft className="h-5 w-5" aria-hidden="true" /></button>
+    {pickedCount > 0 ? <button type="button" data-issue-action="clear" className={rowIconButton} aria-label={clear} title={clear} disabled={busy} onClick={onClear}><X className="h-5 w-5" aria-hidden="true" /></button> : null}
+    <span className="min-w-0 flex-1" aria-hidden="true" />
+    {blocked ? <InfoHint text={blocked} label={blocked} /> : null}
+    <button type="button" data-issue-action="issue" className="btn-primary inline-flex min-h-11 shrink-0 items-center gap-1 px-3 text-xs aria-disabled:cursor-not-allowed aria-disabled:opacity-60 lg:min-h-10"
+      aria-label={pickedCount > 0 ? `${issue} (${pickedCount})` : issue} aria-disabled={blocked || busy ? true : undefined} title={blocked || issue} onClick={() => { if (!blocked && !busy) onIssue() }}><ClipboardPlus className="h-4 w-4" aria-hidden="true" />{issue}
+      {pickedCount > 0 ? <span data-picked-pill aria-hidden="true" className="rounded-full bg-white/25 px-1.5 text-[10px] font-semibold leading-relaxed tabular-nums">{pickedCount}</span> : null}</button>
   </div>
 }

@@ -108,7 +108,7 @@ await runTest('destinations retain section permission gates and never expose uns
   // action; a caller that cannot answer for actions is not offered it (asserted with real actions below).
   assert.deepEqual(ids('promotions', { products: 'review' }), [])
   assert.deepEqual(ids('inventory', { inventory: 'full' }), [], 'Inventory Full no longer opens the count pages')
-  assert.deepEqual(ids('inventory', { inventory_checks: 'full' }), ['products', 'sessions', 'issues'])
+  assert.deepEqual(ids('inventory', { inventory_checks: 'full' }), ['products', 'sessions'], 'Tasks is action-gated: a caller that cannot answer for actions is not offered it')
 
   // Products' four sections are the compact navigation's only route into
   // them (N7). Three are gated on a per-ACTION grant inside the page (Stock
@@ -132,6 +132,12 @@ await runTest('destinations retain section permission gates and never expose uns
   assert.deepEqual(promoIds({ products: 'full' }, ['products:price']), [], 'the price action without Edit product is not either')
   assert.deepEqual(actionIds({ products: 'full', inventory: 'full' }, ['products:history', 'inventory:adjust', 'products:merge_duplicates']), ['products', 'stock_changes', 'stock_in_sessions', 'duplicates'])
   assert.deepEqual(actionIds({ products: 'full' }, ['products:history', 'products:merge_duplicates']), ['products', 'stock_changes', 'duplicates'])
+  // Inventory's Tasks: picking up and counting (the Tasks action with the count grant) or issuing (the Issue extra with the count grant).
+  const inventoryIds = (actions: string[], grants: string[] = []) => getHubDestinations('inventory', { ...withActions({ inventory_checks: 'full' }, actions), hasPermission: (key: string) => grants.includes(key) }).map((item) => item.id)
+  assert.deepEqual(inventoryIds(['inventory_checks:check', 'inventory_checks:tasks']), ['products', 'sessions', 'tasks'])
+  assert.deepEqual(inventoryIds(['inventory_checks:check']), ['products', 'sessions'], 'counting without the Tasks action and without the Issue extra: no Tasks')
+  assert.deepEqual(inventoryIds(['inventory_checks:check'], ['inventory_check_issue']), ['products', 'sessions', 'tasks'], 'an issuer without the Tasks action still sees the board')
+  assert.deepEqual(inventoryIds(['inventory_checks:tasks'], ['inventory_check_issue']), ['products', 'sessions'], 'the Tasks action or the Issue extra alone, without the count grant: no Tasks')
   assert.deepEqual(actionIds({ products: 'full', inventory: 'full' }, ['inventory:adjust']), ['products'], 'without products:history neither ledger section is offered')
   assert.deepEqual(actionIds({ inventory: 'full' }, ['inventory:adjust']), [])
   assert.deepEqual(actionIds({}, []), [])

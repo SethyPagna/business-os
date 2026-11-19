@@ -2,11 +2,13 @@ import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
 import Ban from 'lucide-react/dist/esm/icons/ban.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import Hourglass from 'lucide-react/dist/esm/icons/hourglass.js'
+import ListTodo from 'lucide-react/dist/esm/icons/list-todo.js'
 import Replace from 'lucide-react/dist/esm/icons/replace.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import FilterMenu, { type FilterOption, type FilterSection } from '../shared/FilterMenu.tsx'
 import type { InventoryCheckSession } from '../../api/inventoryChecksTransport.ts'
 import { fmtDate, fmtDateTime24 } from '../../utils/formatters.ts'
+import { progressOrAllText } from './inventoryCheckTaskText.ts'
 
 type Translator = (key: string) => string | null | undefined
 const label = (t: Translator, key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
@@ -48,8 +50,8 @@ export function ApprovalChip({ status, t }: { status: keyof typeof APPROVAL_CHIP
 
 type Progress = NonNullable<InventoryCheckSession['progress']>
 
-/** Checked / total as a ring: emerald for done, amber for issues, a grey track for what is left. */
-export function ProgressRing({ progress, t }: { progress: Progress; t: Translator }) {
+/** Checked / total as a ring: emerald for done, amber for issues, a grey track for what is left. `figure={false}` leaves out the "done/total" figure and hides the ring from screen readers, for a caller that prints the progress in words beside it (a task's "1/4 counted"). */
+export function ProgressRing({ progress, t, figure = true }: { progress: Progress; t: Translator; figure?: boolean }) {
   const total = Math.max(0, progress.total)
   const checked = Math.min(total, progress.done + progress.issue)
   const radius = 9, circumference = 2 * Math.PI * radius
@@ -57,12 +59,12 @@ export function ProgressRing({ progress, t }: { progress: Progress; t: Translato
   const done = share(progress.done), issue = share(progress.issue)
   const named = `${label(t, 'inventory_check_progress', 'Checked')} ${checked}/${total}`
   return <span data-session-progress className="inline-flex shrink-0 items-center gap-1 tabular-nums">
-    <svg width="24" height="24" viewBox="0 0 24 24" role="img" aria-label={named} className="shrink-0 -rotate-90">
+    <svg width="24" height="24" viewBox="0 0 24 24" {...figure ? { role: 'img', 'aria-label': named } : { 'aria-hidden': true }} className="shrink-0 -rotate-90">
       <circle cx="12" cy="12" r={radius} fill="none" strokeWidth="3" className="stroke-gray-200 dark:stroke-zinc-700" />
       {done > 0 ? <circle data-ring-arc="done" cx="12" cy="12" r={radius} fill="none" strokeWidth="3" strokeDasharray={`${done} ${circumference}`} className="stroke-emerald-500" /> : null}
       {issue > 0 ? <circle data-ring-arc="issue" cx="12" cy="12" r={radius} fill="none" strokeWidth="3" strokeDasharray={`${issue} ${circumference}`} strokeDashoffset={-done} className="stroke-amber-500" /> : null}
     </svg>
-    <span aria-hidden="true">{checked}/{total}</span>
+    {figure ? <span aria-hidden="true">{checked}/{total}</span> : null}
   </span>
 }
 
@@ -77,17 +79,23 @@ export function SessionCounts({ progress, t }: { progress: Progress; t: Translat
 
 export default function InventoryCheckSessionsList({ items, onOpen, t }: { items: readonly InventoryCheckSession[]; onOpen: (session: InventoryCheckSession) => void; t: Translator }) {
   return <ul className="min-w-0 divide-y" aria-label={label(t, 'inventory_check_sessions', 'Count sessions')}>
-    {items.map(item => <li key={item.id} data-inventory-check-session={item.id} className="min-w-0">
+    {items.map(item => {
+      // A pickup is the picker's own session for a task: it holds no items, so its progress is the task's, and a tap goes to the task.
+      const pickup = item.scope?.membership === 'pickup'
+      const task = pickup ? item.task : undefined
+      return <li key={item.id} data-inventory-check-session={item.id} data-session-pickup={pickup ? '' : undefined} className="min-w-0">
       <button type="button" className="flex min-h-10 w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-2 text-left text-xs" onClick={() => onOpen(item)}>
         <SessionStatusChip status={item.status} t={t} />
         {item.approval ? <ApprovalChip status={approvalChipStatus(item.approval)} t={t} /> : null}
+        {pickup ? <ListTodo className="h-4 w-4 shrink-0 text-gray-500" role="img" aria-label={label(t, 'inventory_check_tasks', 'Tasks')} /> : null}
         <span className="font-semibold">{fmtDateTime24(item.started_at)}</span>
         {item.branch_name ? <span className="detail-scroll-text min-w-0 leading-relaxed">{item.branch_name}</span> : null}
         {item.creator_name ? <span className="text-gray-500" title={label(t, 'inventory_check_created_by', 'Created by')}>@{item.creator_name}</span> : null}
-        {item.progress ? <><ProgressRing progress={item.progress} t={t} /><SessionCounts progress={item.progress} t={t} /></> : null}
+        {task ? <span className="inline-flex items-center gap-1" data-task-progress><ProgressRing figure={false} progress={{ total: task.total, done: task.done, issue: 0, unstarted: Math.max(0, task.total - task.done) }} t={t} /><span className="tabular-nums">{progressOrAllText(t, task)}</span></span>
+          : item.progress ? <><ProgressRing progress={item.progress} t={t} /><SessionCounts progress={item.progress} t={t} /></> : null}
         {item.status === 'closed' && item.closed_at ? <span className="text-gray-500">{label(t, 'shift_status_closed', 'Closed')} {fmtDateTime24(item.closed_at)}</span> : null}
       </button>
-    </li>)}
+    </li>})}
   </ul>
 }
 

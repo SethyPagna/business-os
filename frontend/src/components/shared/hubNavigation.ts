@@ -26,7 +26,8 @@ export function getHubDestinations(page: string, access: HubAccess): HubDestinat
   ] : page === 'inventory' ? [
     ['products', 'inventory', 'Inventory', inventoryChecks],
     ['sessions', 'inventory_check_sessions', 'Sessions', inventoryChecks],
-    ['issues', 'issues', 'Issues', inventoryChecks],
+    // Tasks: picking up and counting them (the Tasks action with the count grant), or issuing them (the Issue extra with the count grant). Mirrors InventoryCheckAccess.canWorkTasks / canIssueTasks.
+    ['tasks', 'inventory_check_tasks', 'Tasks', inventoryChecks && act('inventory_checks', 'check') && (act('inventory_checks', 'tasks') || access.hasPermission('inventory_check_issue'))],
   ] : page === 'sales' ? [
     ['sales', 'sales', 'Sales', can('sales')],
     ['returns', 'returns', 'Returns', can('returns')],
@@ -118,9 +119,13 @@ const LEGACY_SECTION_PATHS: Record<string, string> = {
  * guess. The host publishes its choice a tick later (useHubSection's
  * `publish`) and the chrome follows the committed route from then on.
  */
+/** A section that was renamed: the old anchor still opens it (a bookmark, an old link). Inventory's Issues became Tasks (issuing count tasks); the old Issues list is gone. */
+export const LEGACY_SECTION_ANCHORS: Record<string, string> = { 'inventory:issues': 'tasks' }
+
 export function resolveChromeSection(page: string, pathname: string, hash: string, allowed: readonly string[]): string {
   const prefix = `#hub:${page}:`
-  const requested = hash.startsWith(prefix) ? hash.slice(prefix.length) : ''
+  const typed = hash.startsWith(prefix) ? hash.slice(prefix.length) : ''
+  const requested = LEGACY_SECTION_ANCHORS[`${page}:${typed}`] ?? typed
   if (allowed.includes(requested)) return requested
   const oldSection = LEGACY_SECTION_PATHS[pathname.toLowerCase().replace(/\/$/, '')]
   return oldSection && allowed.includes(oldSection) ? oldSection : ''

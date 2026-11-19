@@ -155,12 +155,19 @@ try {
   assert.equal(pagerText(s), pagerBefore, 'the pager is unchanged')
   assert.ok(head(s, 'd:2026-11-12').textContent.includes('40'), 'the header total is unchanged')
 
-  // 4. The page-wide "matches stock" acts on open groups only.
+  // 4. The page-wide "matches stock" acts on open groups only. Counting needs a branch (counts are kept per branch), and this shop has two: the person chooses one, which re-reads the list, and the group is collapsed again.
+  await s.click(s.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'filters', 'Filters trigger'))
+  const branchSection = s.find(node => node.getAttribute('data-filter-menu-section') === 'branchId', 'branch section')
+  if (branchSection.querySelectorAll('[role="option"]').length === 0 && !branchSection.textContent.includes('Second branch')) await s.click(s.button(/./, branchSection))
+  await s.click(s.find(node => node.tagName === 'BUTTON' && branchSection.contains(node) && node.textContent === 'Second branch', 'Second branch'))
+  await s.click(s.button('Collapse', head(s, 'd:2026-11-12')))
+  assert.deepEqual(rowIds(s), ['3', '4'], 'collapsed again on the chosen branch')
+  const readsAfterBranch = requests.length
   await s.click(s.find(node => node.getAttribute('data-selection-action') === 'mark', 'mark page'))
   assert.deepEqual(s.findAll(node => node.getAttribute('data-selected') !== null).map(node => node.getAttribute('data-inventory-check-row')), ['3', '4'], 'the collapsed group was left alone')
   assert.equal(s.find(node => node.getAttribute('data-selected-count') !== null, 'counted').textContent, '2 counted', 'only the two open rows were answered; the hidden ones have no draft')
   assert.equal(s.find(node => node.getAttribute('data-selection-action') === 'mark', 'mark page').getAttribute('title'), 'Mark every product in the open groups as matching stock', 'the tooltip says the tap acts on the open groups')
-  assert.equal(requests.length, readsBefore, 'a mark reads nothing')
+  assert.equal(requests.length, readsAfterBranch, 'a mark reads nothing')
 
   // 5. A typed search (or a code scanned into the box) asks for no grouping: the answer is the flat list, every group opens again, and clearing the box brings the grouping back.
   await s.type(search(s), 'BC1001')

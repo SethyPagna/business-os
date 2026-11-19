@@ -63,4 +63,13 @@ assert.ok(dedicated.canView && dedicated.canCheck)
 assert.ok(Object.values(dedicated.fields).every(value => value === false), 'a metadata grant does not expose stock, costs or customer data implicitly')
 assert.equal(getInventoryCheckAccess(user({ inventory: true, inventory_checks: false })).canView, false, 'dedicated denial cannot fall back to physical Inventory authority')
 assert.equal(getInventoryCheckAccess(user({ inventory_checks: 'review' })).canCheck, false, 'metadata checks have no approval tier')
+// Count tasks: working them is the Tasks action with the count grant (on for everyone who can count); issuing is its own extra, with the view and the count grant.
+assert.equal(getInventoryCheckAccess(user({ inventory_checks: true })).canWorkTasks, true, 'everyone who can count works tasks by default')
+assert.equal(getInventoryCheckAccess(user({ inventory_checks: true, 'inventory_checks:tasks': false })).canWorkTasks, false, 'an explicit false switches the Tasks action off')
+assert.equal(getInventoryCheckAccess(user({ inventory_checks: true, 'inventory_checks:check': false })).canWorkTasks, false, 'working a task needs the count grant')
+assert.equal(getInventoryCheckAccess(user({ inventory_checks: true })).canIssueTasks, false, 'the Issue extra is off by default and never implied by counting')
+assert.equal(getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_issue: true })).canIssueTasks, true)
+assert.equal(getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_issue: true, 'inventory_checks:check': false })).canIssueTasks, false, 'the extra without the count grant issues nothing (the Worker refuses it)')
+assert.equal(getInventoryCheckAccess(user({ inventory_check_issue: true })).canIssueTasks, false, 'the extra without the view issues nothing')
+for (const admin of [user({}, {}, 'admin'), user({ all: true })]) { const access = getInventoryCheckAccess(admin); assert.ok(access.canWorkTasks && access.canIssueTasks, 'an administrator passes both') }
 console.log('PASS Inventory check access is strict: its own grant, its own switches, nothing implied by Inventory')

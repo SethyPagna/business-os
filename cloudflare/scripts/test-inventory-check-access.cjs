@@ -19,13 +19,15 @@ function load(file) {
 const worker = load(path.join(root, 'cloudflare/src/lib/inventoryCheckAccess.ts'))
 const client = load(path.join(root, 'frontend/src/utils/inventoryCheckAccess.ts'))
 const presets = load(path.join(root, 'frontend/src/components/users/rolePresetDefaults.ts'))
+// The frontend's access object also carries two task flags (canWorkTasks, canIssueTasks); the Worker keeps them as their own functions (the routes' gates). They are compared as one shape, with their real values for every case below.
+const workerAccess = actor => ({ ...worker.getInventoryCheckAccess(actor), canWorkTasks: worker.canWorkInventoryCountTasks(actor), canIssueTasks: worker.canIssueInventoryCountTasks(actor) })
 const user = (role = {}, own = {}, role_code = 'employee') => ({ role_code, role_permissions: JSON.stringify(role), permissions: JSON.stringify(own) })
 let checks = 0
 const check = (name, run) => { run(); checks++; console.log(`PASS ${name}`) }
 check('dedicated checks grants preserve denials and do not grant physical writes or hidden fields', () => {
   for (const role of [{ inventory_checks: true }, { inventory_checks: false, inventory: true }, { inventory_checks: true, 'inventory_checks:view': false }, { inventory_checks: true, 'inventory_checks:check': false }, { inventory_checks: 'review' }]) {
     const actor = user(role)
-    assert.deepEqual(worker.getInventoryCheckAccess(actor), client.getInventoryCheckAccess(actor))
+    assert.deepEqual(workerAccess(actor), client.getInventoryCheckAccess(actor))
   }
   const access = worker.getInventoryCheckAccess(user({ inventory_checks: true }))
   assert.ok(access.canView && access.canCheck)
@@ -42,7 +44,7 @@ check('dedicated checks grants preserve denials and do not grant physical writes
 check('actual role presets and permission maps agree between Worker and client', () => {
   for (const preset of presets.ROLE_PRESETS) {
     const actor = user(preset.permissions, {}, preset.key === 'admin' ? 'admin' : 'employee')
-    assert.deepEqual(worker.getInventoryCheckAccess(actor), client.getInventoryCheckAccess(actor), preset.key)
+    assert.deepEqual(workerAccess(actor), client.getInventoryCheckAccess(actor), preset.key)
   }
   let cells = 0
   for (const tier of [undefined, false, true, 'review', 'view', 'junk']) {
@@ -55,7 +57,7 @@ check('actual role presets and permission maps agree between Worker and client',
             if (roleField !== undefined) role[`inventory_check_show_${field}`] = roleField
             if (ownField !== undefined) own[`inventory_check_show_${field}`] = ownField
             const actor = user(role, own, roleCode)
-            assert.deepEqual(worker.getInventoryCheckAccess(actor), client.getInventoryCheckAccess(actor), JSON.stringify({ role, own, roleCode }))
+            assert.deepEqual(workerAccess(actor), client.getInventoryCheckAccess(actor), JSON.stringify({ role, own, roleCode }))
             cells++
           }
         }
@@ -89,6 +91,22 @@ check('page/action authority, explicit false and independent aggregate grants', 
   assert.equal(worker.getInventoryCheckAccess(user({ inventory_checks: true, inventory_check_show_cost: true, product_cost_view: 'true' })).fields.cost, false, 'only the literal true is a grant')
   assert.equal(worker.getInventoryCheckAccess({ ...user({ inventory_checks: true, inventory_check_show_cost: true }), role_code: 'admin' }).fields.cost, true, 'only an administrator reaches the cost field (owner, 15 Nov 2026)')
   assert.equal(worker.getInventoryCheckAccess({ ...user({ inventory_checks: true }), role_code: 'admin' }).fields.cost, true, 'an administrator bypasses the show-cost switch')
+})
+check('the task flags: the two Worker gates and the client agree on their real value for each kind of person', () => {
+  const cases = [
+    ['counts, no extras', user({ inventory_checks: true }), { canWorkTasks: true, canIssueTasks: false }],
+    ['counts and the Issue extra', user({ inventory_checks: true, inventory_check_issue: true }), { canWorkTasks: true, canIssueTasks: true }],
+    ['the Tasks action switched off', user({ inventory_checks: true, 'inventory_checks:tasks': false }), { canWorkTasks: false, canIssueTasks: false }],
+    ['the Issue extra with the Tasks action off', user({ inventory_checks: true, inventory_check_issue: true, 'inventory_checks:tasks': false }), { canWorkTasks: false, canIssueTasks: true }],
+    ['the Issue extra without the count grant', user({ inventory_checks: true, 'inventory_checks:check': false, inventory_check_issue: true }), { canWorkTasks: false, canIssueTasks: false }],
+    ['no counting at all', user({ inventory: true }), { canWorkTasks: false, canIssueTasks: false }],
+    ['an administrator', user({}, {}, 'admin'), { canWorkTasks: true, canIssueTasks: true }],
+  ]
+  for (const [name, actor, expected] of cases) {
+    const got = workerAccess(actor), clientGot = client.getInventoryCheckAccess(actor)
+    assert.deepEqual({ canWorkTasks: got.canWorkTasks, canIssueTasks: got.canIssueTasks }, expected, name)
+    assert.deepEqual({ canWorkTasks: clientGot.canWorkTasks, canIssueTasks: clientGot.canIssueTasks }, expected, name + ' (client)')
+  }
 })
 const product = {
   id: 4, name: 'Example', image_path: '/image.webp', unit: 'piece', parent_id: 2, is_group: 0,

@@ -11,7 +11,7 @@ import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { collectMergeProductIds, describeMergeFailure } from '../lib/mergeRouteLog'
 import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
-import { INTRA_FAMILY_NAME_BARCODE_SQL, pageFamiliesByKeys, paginateProductFamilies, paginateRankedIdFamilies, rankProductFamilies, typedOrderDrivenRead, typedOrderEligible, type FamilyGroupTotals, type FamilyPaginationOptions } from '../lib/familyPagination'
+import { INTRA_FAMILY_NAME_BARCODE_SQL, PRODUCT_LIST_MAX_PAGE_SIZE, pageFamiliesByKeys, paginateProductFamilies, paginateRankedIdFamilies, rankProductFamilies, typedOrderDrivenRead, typedOrderEligible, type FamilyGroupTotals, type FamilyPaginationOptions } from '../lib/familyPagination'
 import { groupingPlan, type InventoryCheckGrouping } from '../lib/inventoryCheckGrouping'
 import { nextPromotionEdge, readPromotionEdge, readRankedScope, type RankedScope } from '../lib/rankedScope'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
@@ -720,6 +720,9 @@ type ProductSearchOptions = {
   // each; never read from the query string, so a client cannot send either. Both are absent for every other reader, so no statement of theirs changes.
   restrictIdsJson?: string
   excludeIdsJson?: string
+  // SERVER-ONLY (Inventory Check, a filter being issued as a count task): the list's own restriction, read leaf-only. Under a typed search a family qualifies exactly as the plain list decides, and also through a family
+  // header that has an active child that is not a header (the plain list shows that family, so its children are the products the filter finds); only header rows are left out of the rows. Needs excludeIdsJson (the header rule).
+  leafOnly?: boolean
   // catalog_ranked_scope (INV-A S7): the ranking comes from the shared ranked-scope cache (lib/rankedScope.ts) and the page's rows are read by key. Absent: the seek-page statement.
   ranked?: RankedScope
   // SERVER-ONLY (Inventory Check wired list, groupBy): rank the families by the grouping instead of the sort, and answer each page row's group_key plus the groups of the page. `checkOrg` is the
@@ -1047,7 +1050,7 @@ async function paginateRankedFamilies(opts: FamilyPaginationOptions, scope: Rank
 
 async function searchProductsPayload(env: Env, query: Record<string, string>, options: ProductSearchOptions = {}) {
   const page = clampInt(query.page, 1, 1, 100000)
-  const pageSize = clampInt(query.pageSize, 20, 1, 100)
+  const pageSize = clampInt(query.pageSize, 20, 1, PRODUCT_LIST_MAX_PAGE_SIZE)
   const sort = String(query.sort || 'name_asc').toLowerCase()
   // Family-level order (ranks grouped products as one unit -- see
   // paginateProductFamilies) mirrors the row-level order below, just
@@ -1304,10 +1307,16 @@ const filterJoinSql = (f: ReturnType<typeof buildSearchFilters>) => joinsReadBy(
 
 // The Inventory Check restriction of a list as SQL terms over the product alias p (restrictIdsJson / excludeIdsJson: server-only, see ProductSearchOptions). A header row (is_group) is the family's title, never
 // a product to count, so every check list (Not checked, Checked OK, Issues, Pending, a day) leaves it out, as the chips do. The list's own rows and the family members and name siblings that a typed search re-adds meet the SAME terms.
-const checkTermsOf = (options: { restrictIdsJson?: string; excludeIdsJson?: string }): string[] => [
-  ...(options.restrictIdsJson !== undefined ? ['p.id IN (SELECT value FROM json_each(@icRestrictIds))', 'COALESCE(p.is_group, 0) = 0'] : []),
-  ...(options.excludeIdsJson !== undefined ? ['p.id NOT IN (SELECT value FROM json_each(@icExcludeIds))', 'COALESCE(p.is_group, 0) = 0'] : []),
-]
+// qualifying: the terms of the statement that decides which FAMILIES are listed (leafOnly under a typed search only): a header with an active child that is not a header qualifies its family, though it is never a row.
+const HEADER_TERM = 'COALESCE(p.is_group, 0) = 0'
+const HEADER_QUALIFIES_TERM = `(COALESCE(p.is_group, 0) = 0 OR EXISTS(SELECT 1 FROM products leaf WHERE leaf.parent_id = p.id AND ${catalogProductSql('leaf', false)} AND COALESCE(leaf.is_group, 0) = 0))`
+const checkTermsOf = (options: { restrictIdsJson?: string; excludeIdsJson?: string; leafOnly?: boolean }, qualifying = false): string[] => {
+  const header = qualifying && options.leafOnly ? HEADER_QUALIFIES_TERM : HEADER_TERM
+  return [
+    ...(options.restrictIdsJson !== undefined ? ['p.id IN (SELECT value FROM json_each(@icRestrictIds))', header] : []),
+    ...(options.excludeIdsJson !== undefined ? ['p.id NOT IN (SELECT value FROM json_each(@icExcludeIds))', header] : []),
+  ]
+}
 const withCheckTerms = (sql: string, terms: readonly string[]): string => (terms.length ? `${sql} AND ${terms.join(' AND ')}` : sql)
 
 function buildSearchFilters(query: Record<string, string>, lowStock: LowStockConfig, options: ProductSearchOptions = {}) {
@@ -1507,7 +1516,7 @@ function buildSearchFilters(query: Record<string, string>, lowStock: LowStockCon
   if (searchWhereClause) where.push(searchWhereClause)
   if (options.restrictIdsJson !== undefined) params.icRestrictIds = options.restrictIdsJson
   if (options.excludeIdsJson !== undefined) params.icExcludeIds = options.excludeIdsJson
-  where.push(...checkTermsOf(options))
+  where.push(...checkTermsOf(options, hasSearchTerm))
 
   return { where, joins, params, stockExpr, matchRankSql, rankCteSql, matchTierSql, titleOnly, hasSearchTerm, familyMemberWhereSql, rankedIdDriver: searchQuery.rankedIdDriver, candidates: searchQuery.candidates, searchWhereClause }
 }
@@ -1539,7 +1548,7 @@ async function searchProductsWithIndexFallback(env: Env, query: Record<string, s
 
 // The Inventory Check twin: the same index-unavailable fallback with the server-only id restriction. Separate so the shared reader's source (pinned by
 // test-worker-perf-2-round-trips-pure.cjs) stays untouched.
-async function searchRestrictedProductsWithIndexFallback(env: Env, query: Record<string, string>, restriction: Pick<ProductSearchOptions, 'restrictIdsJson' | 'excludeIdsJson' | 'ranked' | 'grouping'>) {
+async function searchRestrictedProductsWithIndexFallback(env: Env, query: Record<string, string>, restriction: Pick<ProductSearchOptions, 'restrictIdsJson' | 'excludeIdsJson' | 'leafOnly' | 'ranked' | 'grouping'>) {
   try {
     return await searchProductsPayload(env, query, restriction)
   } catch (error) {
@@ -1649,6 +1658,8 @@ export type ProductSearchListOptions = {
   keyRequest?: Request
   restrictIdsJson?: string
   excludeIdsJson?: string
+  /** Read leaf-only (see ProductSearchOptions.leafOnly): the key carries it through setKey. */
+  leafOnly?: boolean
   setKey?: string
   setVersion?: string
   /** Inventory Check groupBy: rank by the grouping (see ProductSearchOptions.grouping). The key gains the grouping; the ranked scope is used whatever catalog_ranked_scope says. */
@@ -1699,7 +1710,7 @@ export async function readProductSearchList(c: Context<{ Bindings: Env; Variable
       }
     } catch { versions = edgeVersions = unsafeVersionToken() }
     const limits = getPlanLimits(c.env)
-    const rankedPayload = await searchRestrictedProductsWithIndexFallback(c.env, query, { restrictIdsJson: options.restrictIdsJson, excludeIdsJson: options.excludeIdsJson, grouping: options.grouping,
+    const rankedPayload = await searchRestrictedProductsWithIndexFallback(c.env, query, { restrictIdsJson: options.restrictIdsJson, excludeIdsJson: options.excludeIdsJson, leafOnly: options.leafOnly, grouping: options.grouping,
       ranked: { ctx: c.executionCtx, request: keyRequest, versions, edgeVersions, identity: cacheIdentity(c), ttlSeconds: limits.productListCacheSeconds } })
     const [taggedRanked, lotsRanked] = await Promise.all([attachFoldedTaggedLots(c.env, user, include, rankedPayload, options.taggedLotsAdmitted === true), attachLotRows(c.env, user, include, rankedPayload, options.lotsAdmitted === true)])
     return lotsRanked === rankedPayload ? taggedRanked : { ...taggedRanked, items: lotsRanked.items }
@@ -1710,7 +1721,7 @@ export async function readProductSearchList(c: Context<{ Bindings: Env; Variable
   const cachedPayload = await cachedJsonResponse(keyRequest, c.executionCtx, version, PRODUCT_LIST_LEGACY_CACHE_SECONDS, async () => {
     produced = true
     return restricted
-      ? searchRestrictedProductsWithIndexFallback(c.env, query, { restrictIdsJson: options.restrictIdsJson, excludeIdsJson: options.excludeIdsJson })
+      ? searchRestrictedProductsWithIndexFallback(c.env, query, { restrictIdsJson: options.restrictIdsJson, excludeIdsJson: options.excludeIdsJson, leafOnly: options.leafOnly })
       : searchProductsWithIndexFallback(c.env, query)
   }, cacheIdentity(c))
   // I2-1: a cache hit is refreshed to live rows + stock (see productSearchCacheVersion).

@@ -166,7 +166,7 @@ const pages: Array<[string, string, string[], string]> = [
   ['products', 'hub:products:products', ['products', 'stock_changes', 'stock_in_sessions', 'duplicates'], 'products'],
   ['products', 'hub:products:stock_changes', ['products', 'stock_changes', 'stock_in_sessions', 'duplicates'], 'stock-changes'],
   ['sales', 'hub:sales:returns', ['sales', 'returns', 'fees', 'reports'], 'sales'],
-  ['inventory', 'hub:inventory:sessions', ['products', 'sessions', 'issues'], 'inventory'],
+  ['inventory', 'hub:inventory:sessions', ['products', 'sessions', 'tasks'], 'inventory'],
 ]
 
 async function openPage(page: string, anchor: string): Promise<void> {

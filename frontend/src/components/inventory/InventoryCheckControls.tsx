@@ -99,8 +99,8 @@ export default function InventoryCheckControls({ query, onQueryChange, onQuerySu
   })
   // The wired page chooses a status in the chip rail above the list (one row, scrolling); the same choice is not repeated here.
   if (showStateFilter && !wired) sections.push(section('checkState', t('inventory_check_state'), inSession
-    ? [['in_check', t('inventory_check_unstarted')], ['ok', t('done')], ['issue', t('issues')]]
-    : [['not_checked', t('inventory_check_status_not_checked')], ['in_check', t('inventory_check_status_in_check')], ['ok', t('inventory_check_status_ok')], ['issue', t('issues')]]))
+    ? [['in_check', t('inventory_check_unstarted')], ['ok', t('done')], ['issue', t('inventory_check_status_differs')]]
+    : [['not_checked', t('inventory_check_status_not_checked')], ['in_check', t('inventory_check_status_in_check')], ['ok', t('inventory_check_status_ok')], ['issue', t('inventory_check_status_differs')]]))
   if (fields.stock) sections.push(section('stockState', t('stock_status'), [['in_stock', t('in_stock')], ['low_stock', t('low_stock')], ['out_of_stock', t('out_of_stock')]]))
   if (fields.brand && brands.length) sections.push(section('brand', t('brand'), brands.map(brand => [brand, brand]), true, limited.brands))
   if (fields.category && categories.length) sections.push(section('category', t('category'), categories.map(category => [category, category]), true, limited.categories))

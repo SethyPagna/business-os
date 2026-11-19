@@ -268,7 +268,8 @@ class InertObserver {
 }
 
 type TimerHandle = NodeJS.Timeout
-interface SourceTimer { sequence: number; delay: number; handle: TimerHandle; run(): void }
+interface SourceTimer { sequence: number; delay: number; /** When it is due on the virtual clock (advanceSourceTimers): the virtual time it was set at plus its delay. */ due: number; handle: TimerHandle; run(): void }
+interface SourceInterval { callback: Listener; args: unknown[]; delay: number; due: number }
 
 const realSetTimeout = globalThis.setTimeout as unknown as (callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => TimerHandle
 const realClearTimeout = globalThis.clearTimeout as unknown as (handle: unknown) => void
@@ -276,7 +277,10 @@ const realSetInterval = globalThis.setInterval as unknown as (callback: (...args
 const realClearInterval = globalThis.clearInterval as unknown as (handle: unknown) => void
 const sourceTimers = new Map<unknown, SourceTimer>()
 const sourceIntervals = new Set<unknown>()
+const sourceIntervalInfo = new Map<unknown, SourceInterval>()
 let timerSequence = 0
+/** The virtual clock advanceSourceTimers moves; every timer set from the source is due at this plus its delay. */
+let virtualNow = 0
 
 function calledFromSource(): boolean {
   const frames = (new Error().stack ?? '').split('\n').slice(3)
@@ -288,7 +292,7 @@ function calledFromSource(): boolean {
 
 function trackedSetTimeout(callback: unknown, delay?: number, ...args: unknown[]): TimerHandle {
   if (typeof callback !== 'function' || !calledFromSource()) return realSetTimeout(callback as Listener, delay, ...args)
-  const timer = { sequence: ++timerSequence, delay: Number(delay) || 0 } as SourceTimer
+  const timer = { sequence: ++timerSequence, delay: Number(delay) || 0, due: virtualNow + (Number(delay) || 0) } as SourceTimer
   timer.run = () => {
     sourceTimers.delete(timer.handle)
     ;(callback as Listener)(...args)
@@ -306,12 +310,16 @@ function trackedClearTimeout(handle: unknown): void {
 
 function trackedSetInterval(callback: unknown, delay?: number, ...args: unknown[]): TimerHandle {
   const handle = realSetInterval(callback as Listener, delay, ...args)
-  if (calledFromSource()) sourceIntervals.add(handle)
+  if (calledFromSource()) {
+    sourceIntervals.add(handle)
+    if (typeof callback === 'function') sourceIntervalInfo.set(handle, { callback: callback as Listener, args, delay: Math.max(1, Number(delay) || 0), due: virtualNow + Math.max(1, Number(delay) || 0) })
+  }
   return handle
 }
 
 function trackedClearInterval(handle: unknown): void {
   sourceIntervals.delete(handle)
+  sourceIntervalInfo.delete(handle)
   realClearInterval(handle)
 }
 
@@ -320,6 +328,28 @@ function disposeSourceTimers(): void {
   sourceTimers.clear()
   for (const handle of sourceIntervals) realClearInterval(handle)
   sourceIntervals.clear()
+  sourceIntervalInfo.clear()
+}
+
+/**
+ * Fake timers for the source: runs every timeout and interval the SOURCE set (never the harness's or React's own), in due order on a virtual clock, for `ms` of virtual time. A timeout that sets another
+ * (a poll written as setTimeout) runs again when due, an interval runs every period; `clock` (installSteppedClock) moves Date by the same amount so code that reads the time sees it pass. It yields to the
+ * event loop after each one, so the requests a timer sends are answered before the next is due. Call it inside act().
+ */
+export async function advanceSourceTimers(ms: number, clock?: { advance(ms: number): void }): Promise<void> {
+  const end = virtualNow + ms
+  for (let fired = 0; ; fired += 1) {
+    if (fired > 100_000) throw new Error('advanceSourceTimers: a timer fires faster than the clock can run it')
+    let next: { due: number; fire(): void } | null = null
+    for (const timer of sourceTimers.values()) if (timer.due <= end && (!next || timer.due < next.due)) next = { due: timer.due, fire: () => { realClearTimeout(timer.handle); timer.run() } }
+    for (const interval of sourceIntervalInfo.values()) if (interval.due <= end && (!next || interval.due < next.due)) next = { due: interval.due, fire: () => { interval.due += interval.delay; interval.callback(...interval.args) } }
+    if (!next) break
+    const step = Math.max(0, next.due - virtualNow)
+    virtualNow += step; clock?.advance(step)
+    next.fire()
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+  clock?.advance(end - virtualNow); virtualNow = end
 }
 
 export function timerMark(): number { return timerSequence }
@@ -605,7 +635,8 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
       configFile: false,
       appType: 'custom',
       logLevel: 'error',
-      server: { middlewareMode: true, hmr: false, watch: null },
+      // ws: false is what lets a test that forgets harness.close() still exit: hmr: false leaves Vite's WebSocket server listening on port 24678, and an open listener keeps the process alive for ever.
+      server: { middlewareMode: true, hmr: false, ws: false, watch: null },
       optimizeDeps: { noDiscovery: true, include: [] },
       plugins: [harnessPlugin(observed), ...(options.mutateSource ? [mutationPlugin(options.mutateSource)] : []), react(), transformDonePlugin()],
     })
