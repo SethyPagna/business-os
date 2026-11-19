@@ -34,7 +34,7 @@ function binding() {
 function reset() {
   db?.close(); db = new DatabaseSync(':memory:')
   for (const sql of loadAll({ through: 242 })) db.exec(sql)
-  db.exec(fs.readFileSync(path.join(__dirname, '../migrations/0259_inventory_check_sessions.sql'), 'utf8'))
+  for (const file of ['0259_inventory_check_sessions.sql', '0285_inventory_check_items_latest.sql', '0318_inventory_check_task_index.sql', '0319_inventory_check_open_task_index.sql']) db.exec(fs.readFileSync(path.join(__dirname, '../migrations', file), 'utf8'))
   const permissions = { inventory: false, inventory_checks: true, inventory_check_show_stock: false, inventory_check_show_price: false,
     inventory_check_show_cost: false, inventory_check_show_brand: true, inventory_check_show_category: true, inventory_check_show_sales: true,
     inventory_check_show_customers: true, inventory_check_show_received: true, contacts: false }
