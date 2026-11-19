@@ -13,6 +13,7 @@
 //                      anything else (a newer count was made since)                  ->  nothing; the newer count stands
 //   Applying the same request again answers from the stored operation (nothing is inserted twice); redo closes only when the first apply did (issue_closed true).
 import { waitingLineSql } from './inventoryCheckSessions'
+import { autoCloseParams, autoCloseTaskStatements } from './inventoryCheckTasks'
 import type { StockWriteStatement } from './productBatches'
 
 type Statement = StockWriteStatement
@@ -46,6 +47,14 @@ function parameters(args: SetCloseArgs, now: string, sid = crypto.randomUUID()) 
   return { sid, now, product: args.productId, branch: args.branchId, organization: args.organization ?? null, operation: args.operation, actor: args.actorId, actorName: args.actorName,
     title: SET_CLOSE_TITLE, key: `stock-set-${args.operation}-g${args.generation}`, hash: `stock-set:${args.operation}` }
 }
+/** The count tasks this write completes (a Set that closes a difference records a Done count at the branch, which ticks the open tasks that hold the product): inventoryCheckTasks.ts autoCloseTaskStatements, over the session @sid (no session, no counts, nothing read). */
+function taskStatements(params: Record<string, unknown>): { statements: Statement[]; ids: string } {
+  const shared = autoCloseParams({ src: params.sid as string, organization: params.organization as number | null, branchId: params.branch as number, actorId: params.actor as number, actorName: params.actorName as string | null,
+    key: params.key as string, hash: params.hash as string, now: params.now as string })
+  // The ids of the tasks that closed, from the events the auto-close wrote (this request's own prefix, this time).
+  return { statements: autoCloseTaskStatements().statements.map(({ sql }) => ({ sql, params: shared })),
+    ids: `SELECT e.session_id FROM inventory_check_events e WHERE e.actor_id=@actorId AND e.request_id>=@tcFrom AND e.request_id<@tcTo AND e.request_hash=@hash AND e.action='close' AND e.created_at=@now` }
+}
 function eventStatements(params: Record<string, unknown>, note: string): Statement[] {
   const present = 'EXISTS(SELECT 1 FROM inventory_check_sessions WHERE id=@sid)'
   return [
@@ -57,21 +66,33 @@ function eventStatements(params: Record<string, unknown>, note: string): Stateme
 }
 
 /** The statements that close the Issue after a Set's quantity statements (apply, or redo): all conditional, no effect when the Issue stays open. The last one writes issue_closed into the stored answer. */
-export function closeIssueStatements(args: SetCloseArgs, now = new Date().toISOString(), options: { sessionId?: string; answer?: boolean } = {}): Statement[] {
+export function closeIssueStatements(args: SetCloseArgs, now = new Date().toISOString(), options: { sessionId?: string; answer?: boolean; restore?: boolean } = {}): Statement[] {
   const params = parameters(args, now, options.sessionId)
+  // A Redo restores a record made earlier: it is not a count, so it never ticks or closes a count task (owner ruling, 19 Nov). Its session says so (restore), and the done rule skips it.
+  const restore = options.restore === true
+  const tasks = taskStatements(params)
   return [
     { sql: `INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at)
       SELECT @sid,@organization,@branch,@actor,@title,'closed',0,
-        json_object('membership','${SET_CLOSE_MEMBERSHIP}','operation',@operation,'closes',(SELECT session_id FROM (${LATEST}))),@now,@now,@now WHERE ${CLOSABLE}`, params },
+        json_object('membership','${SET_CLOSE_MEMBERSHIP}','operation',@operation,'closes',(SELECT session_id FROM (${LATEST}))${restore ? ",'restore',1" : ''}),@now,@now,@now WHERE ${CLOSABLE}`, params },
     { sql: `INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,reason,revision,updated_by,updated_at)
       SELECT @sid,@product,@branch,json_object('name',p.name,'image_path',p.image_path,'unit',p.unit,'parent_id',p.parent_id,'is_group',p.is_group),${BRANCH_NOW},
         json_object('quantity',${BRANCH_NOW},'operation',@operation),'done',${BRANCH_NOW},NULL,1,@actor,@now
       FROM products p WHERE p.id=@product AND EXISTS(SELECT 1 FROM inventory_check_sessions WHERE id=@sid)`, params },
-    ...eventStatements(params, 'Set closed the Issue'),
+    ...eventStatements(params, 'Set closed the difference'),
+    ...(restore ? [] : tasks.statements),
     // A Set that changed nothing has no operation (and no stored answer): the caller reads whether the session exists.
     ...(options.answer === false ? [] : [{ sql: `UPDATE stock_lot_adjustment_operations SET response_json=json_set(response_json,'$.issue_closed',json(CASE WHEN EXISTS(SELECT 1 FROM inventory_check_sessions WHERE id=@sid) THEN 'true' ELSE 'false' END))
-      WHERE id=@operation`, params }]),
+      WHERE id=@operation`, params },
+    // The ids of the tasks the Set closed ride in the stored answer (closed_tasks), only when it closed any, so every other stored answer is as it was and a replay answers the same.
+    ...(restore ? [] : [{ sql: `UPDATE stock_lot_adjustment_operations SET response_json=json_set(response_json,'$.closed_tasks',json((SELECT json_group_array(session_id) FROM (${tasks.ids})))) WHERE id=@operation AND EXISTS(${tasks.ids})`, params: { ...params, ...tasks.statements[0].params } }])]),
   ]
+}
+
+/** The ids of the tasks a Set closed (a JSON array expression and its parameters), for the answer of a Set that changed nothing and so has no stored operation: the same events the close wrote, by this request's prefix and time. */
+export function closedTasksSelect(args: SetCloseArgs, now: string, sessionId: string): { expr: string; params: Record<string, unknown> } {
+  const params = parameters(args, now, sessionId), shared = taskStatements(params)
+  return { expr: `(SELECT json_group_array(session_id) FROM (${shared.ids}))`, params: shared.statements[0].params as Record<string, unknown> }
 }
 
 /** The statements an Undo adds: the Issue this Set closed is open again (a copy of its item and lines as a new newest count), only while the count this Set made is still the latest. */
@@ -89,6 +110,7 @@ export function reopenIssueStatements(args: SetCloseArgs, now = new Date().toISO
       SELECT @sid,l.product_id,l.branch_id,l.batch_id,l.scope,l.seen_quantity,l.counted_quantity,l.seen_source,@now
       FROM inventory_check_lot_lines l WHERE l.session_id=(SELECT json_extract(scope_json,'$.reopens') FROM inventory_check_sessions WHERE id=@sid) AND l.product_id=@product AND l.branch_id=@branch
         AND EXISTS(SELECT 1 FROM inventory_check_items WHERE session_id=@sid AND product_id=@product)`, params },
-    ...eventStatements(params, 'Undo of a Set reopened the Issue'),
+    ...eventStatements(params, 'Undo of a Set reopened the difference'),
+    // No auto-close: the copy restores a record made earlier, it is not a count (owner ruling, 19 Nov), and the done rule skips its session.
   ]
 }

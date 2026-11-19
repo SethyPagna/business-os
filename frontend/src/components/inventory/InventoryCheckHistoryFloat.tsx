@@ -18,7 +18,7 @@ const ACTIONS = {
   resume: { key: 'inventory_check_history_action_resume', fallback: 'Session resumed' },
   other: { key: 'inventory_check_history_action_other', fallback: 'Updated' },
 } as const
-const STATE_FALLBACKS = { unstarted: 'Not started', done: 'Done', issue: 'Issue' } as const
+const STATE_FALLBACKS = { unstarted: 'Not started', done: 'Done', issue: 'Differs' } as const
 
 /** Every server action code and item state reads as a translated phrase; an unknown code degrades to a generic word, never to the raw key. */
 export const historyActionLabel = (t: Translator, action: string) => {

@@ -25,12 +25,12 @@ const revert = [
   [t("const checkScopeSql = (branchScoped: boolean) => @BTs.organization_id IS @checkOrg AND i.branch_id=s.branch_id${branchScoped ? ' AND i.branch_id=@branchId' : ''}@BT"),
     t("const checkScopeSql = (_branchScoped: boolean) => @BTs.organization_id IS @checkOrg AND i.branch_id=s.branch_id AND (@branchId IS NULL OR i.branch_id=@branchId)@BT")],
   // The three per-product subqueries read the product through the SET form in the old text.
-  [t("    obs AS MATERIALIZED (SELECT i.product_id,i.state,i.updated_at,i.session_id,s.status AS session_status FROM (SELECT DISTINCT id FROM cohort) c CROSS JOIN ${CHECK_ITEMS_SQL}\n      WHERE i.product_id=c.id AND ${checkScopeSql(plan.branchId !== undefined)}),"),
-    t("    obs AS MATERIALIZED (SELECT i.product_id,i.state,i.updated_at,i.session_id,s.status AS session_status FROM ${CHECK_ITEMS_SQL}\n      WHERE i.product_id IN (SELECT id FROM cohort) AND ${checkScopeSql(false)}),")],
+  [t("    obs AS MATERIALIZED (SELECT i.product_id,i.state,i.updated_at,i.session_id,s.status AS session_status,${NOT_A_TASK_SQL('s')} AS not_task FROM (SELECT DISTINCT id FROM cohort) c CROSS JOIN ${CHECK_ITEMS_SQL}\n      WHERE i.product_id=c.id AND ${checkScopeSql(plan.branchId !== undefined)}),"),
+    t("    obs AS MATERIALIZED (SELECT i.product_id,i.state,i.updated_at,i.session_id,s.status AS session_status,${NOT_A_TASK_SQL('s')} AS not_task FROM ${CHECK_ITEMS_SQL}\n      WHERE i.product_id IN (SELECT id FROM cohort) AND ${checkScopeSql(false)}),")],
   [t("    FROM (SELECT DISTINCT id FROM __page) pg CROSS JOIN ${CHECK_ITEMS_SQL} LEFT JOIN users u ON u.id=i.updated_by\n    WHERE i.product_id=pg.id AND i.state IN ('done','issue') AND ${checkScopeSql(branchScoped)}) WHERE rn=1),"),
     t("    FROM ${CHECK_ITEMS_SQL} LEFT JOIN users u ON u.id=i.updated_by\n    WHERE i.state IN ('done','issue') AND i.product_id IN (SELECT id FROM __page) AND ${checkScopeSql(false)}) WHERE rn=1),")],
-  [t("  open_check AS (SELECT DISTINCT i.product_id FROM (SELECT DISTINCT id FROM __page) pg CROSS JOIN ${CHECK_ITEMS_SQL}\n    WHERE i.product_id=pg.id AND i.state='unstarted' AND s.status='open' AND ${checkScopeSql(branchScoped)})"),
-    t("  open_check AS (SELECT DISTINCT i.product_id FROM ${CHECK_ITEMS_SQL}\n    WHERE i.state='unstarted' AND s.status='open' AND i.product_id IN (SELECT id FROM __page) AND ${checkScopeSql(false)})")],
+  [t("  open_check AS (SELECT DISTINCT i.product_id FROM (SELECT DISTINCT id FROM __page) pg CROSS JOIN ${CHECK_ITEMS_SQL}\n    WHERE i.product_id=pg.id AND i.state='unstarted' AND s.status='open' AND ${NOT_A_TASK_SQL('s')} AND ${checkScopeSql(branchScoped)})"),
+    t("  open_check AS (SELECT DISTINCT i.product_id FROM ${CHECK_ITEMS_SQL}\n    WHERE i.state='unstarted' AND s.status='open' AND ${NOT_A_TASK_SQL('s')} AND i.product_id IN (SELECT id FROM __page) AND ${checkScopeSql(false)})")],
 ]
 
 const SHAPES = []
@@ -103,7 +103,7 @@ async function main() {
     N3: ["${branchScoped ? ' AND i.branch_id=@branchId' : ''}", "${''}"],
     N4: ['AND ${checkScopeSql(plan.branchId !== undefined)}),', 'AND ${checkScopeSql(false)}),'],
     N5: ["PARTITION BY product_id ORDER BY updated_at DESC,session_id DESC) AS rn", 'PARTITION BY product_id ORDER BY updated_at ASC,session_id DESC) AS rn'],
-    N6: ["WHERE state='unstarted' AND session_status='open')", "WHERE state='unstarted')"],
+    N6: ["WHERE state='unstarted' AND session_status='open' AND not_task)", "WHERE state='unstarted' AND not_task)"],
     N7: ["WHERE i.product_id=pg.id AND i.state='unstarted' AND s.status='open'", "WHERE i.product_id=pg.id AND i.state='unstarted'"],
     N8: ["WHERE i.product_id=pg.id AND i.state IN ('done','issue')", "WHERE i.product_id=pg.id AND i.state IN ('done','issue','unstarted')"],
     N9: ["const scoped = params.branchId !== null && params.branchId !== undefined", 'const scoped = false'],

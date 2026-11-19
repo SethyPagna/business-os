@@ -105,7 +105,7 @@ export const LIST_STATUS: Record<InventoryCheckListStatus, { key: string; fallba
   not_checked: { key: 'inventory_check_status_not_checked', fallback: 'Not checked', tone: 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300', edge: 'border-l-transparent', Icon: CircleDashed },
   in_check: { key: 'inventory_check_status_in_check', fallback: 'In check', tone: 'bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-200', edge: 'border-l-sky-500', Icon: Clock },
   ok: { key: 'inventory_check_status_ok', fallback: 'Checked OK', tone: 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200', edge: 'border-l-emerald-500', Icon: Check },
-  issue: { key: 'inventory_check_issue', fallback: 'Issue', tone: 'bg-red-50 text-red-800 dark:bg-red-950/40 dark:text-red-200', edge: 'border-l-red-500', Icon: X },
+  issue: { key: 'inventory_check_issue', fallback: 'Differs', tone: 'bg-red-50 text-red-800 dark:bg-red-950/40 dark:text-red-200', edge: 'border-l-red-500', Icon: X },
 }
 const listStatus = (value: unknown): InventoryCheckListStatus | null => typeof value === 'string' && Object.hasOwn(LIST_STATUS, value) ? value as InventoryCheckListStatus : null
 

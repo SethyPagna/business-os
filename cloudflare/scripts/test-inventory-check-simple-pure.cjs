@@ -32,7 +32,7 @@ const check = async (name, run) => { await run(); passed++; console.log(`PASS ${
 function fixture() {
   const db = new DatabaseSync(':memory:')
   for (const sql of loadAll({ through: 242 })) db.exec(sql)
-  for (const file of ['0259_inventory_check_sessions.sql', '0285_inventory_check_items_latest.sql']) db.exec(fs.readFileSync(path.join(__dirname, '../migrations', file), 'utf8'))
+  for (const file of ['0259_inventory_check_sessions.sql', '0285_inventory_check_items_latest.sql', '0318_inventory_check_task_index.sql', '0319_inventory_check_open_task_index.sql']) db.exec(fs.readFileSync(path.join(__dirname, '../migrations', file), 'utf8'))
   db.exec(`INSERT OR IGNORE INTO branches(id,name,is_active) VALUES(1,'Synthetic one',1),(2,'Synthetic two',1),(3,'Synthetic closed',0);
     INSERT INTO users(id,username,name,password,organization_id) VALUES(1,'admin-one','Admin One','unused',1),(2,'counter-two','Counter Two','unused',1),
       (3,'counter-three','Counter Three','unused',1),(5,'counter-five','Counter Five','unused',1),(9,'foreign-nine','Foreign Nine','unused',2)`)

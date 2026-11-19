@@ -1,7 +1,8 @@
 import type { D1Compat } from './db'
 import type { SessionUser } from './auth'
 import { resolveLowStockConfig, type LowStockConfig } from './lowStockSettings'
-import { canApproveInventoryCounts, getInventoryCheckAccess, projectInventoryCheckProduct, validateInventoryCheckQuery } from './inventoryCheckAccess'
+import { canApproveInventoryCounts, canIssueInventoryCountTasks, canWorkInventoryCountTasks, getInventoryCheckAccess, projectInventoryCheckProduct, validateInventoryCheckQuery } from './inventoryCheckAccess'
+import { autoCloseParams, autoCloseTaskStatements, CHECKABLE_SQL, closedTaskIds, closePickupsStatements, kindOf, OPEN_PICKUP_SQL, OPEN_TASK_COUNT_SQL, PICKUP_MEMBERSHIP, TASK_COUNTABLE_SQL, TASK_MEMBERSHIP, taskOf } from './inventoryCheckTasks'
 import { buildInventoryCheckStockQuery, readInventoryCheckStock, resetInventoryCheckStockSchemaMemo, type InventoryCheckStockRow } from './inventoryCheckStock'
 import { buildInventoryCheckProductMembershipQuery } from './inventoryCheckProducts'
 import { hasPermission, isAdminControlUser } from './permissions'
@@ -15,7 +16,9 @@ import { schemaObjectsPresent, type SchemaObject } from './schemaObjectProbe'
 export type InventoryCheckPrincipal = { id: number; tokenHash: string }
 export type InventoryCheckReceipt = { requestId: string; eventId: number; action: string; sessionId: string; sessionRevision: number; itemRevision?: number; replayed: boolean }
 export type InventoryCheckSession = { id: string; branch_id: number; created_by: number; title: string; status: 'open' | 'closed'; revision: number; started_at: string; updated_at: string; closed_at: string | null; scope: Record<string, unknown>; can_edit: boolean; progress: { total: number; unstarted: number; done: number; issue: number } }
-export type InventoryCheckSessionListItem = InventoryCheckSession & { branch_name: string | null; creator_name?: string | null; approval?: InventoryCheckApproval }
+/** The task a pickup session stands for (count tasks): its title, how many products it holds and how many are done by the done rule. Sent only on a pickup row of the Count sessions list. */
+export type InventoryCheckPickupTask = { id: string; title: string; status: 'open' | 'closed'; total: number; done: number }
+export type InventoryCheckSessionListItem = InventoryCheckSession & { branch_name: string | null; creator_name?: string | null; approval?: InventoryCheckApproval; task?: InventoryCheckPickupTask }
 export type InventoryCheckObservation = { product_id: number; branch_id: number; product_snapshot: Record<string, unknown>; current_product_available: boolean; current_product_name: string | null; state: 'unstarted' | 'done' | 'issue'; reason: string | null; revision: number; counted_quantity?: number | null; baseline_quantity?: number | null; current_quantity?: number | null; stock_changed?: boolean | null; baseline?: Record<string, unknown>; current_stock?: Record<string, unknown> }
 export type Actor = SessionUser & { tokenHash: string; product_cost_review_key_available?: number }
 export type SessionRow = Omit<InventoryCheckSession, 'scope' | 'can_edit' | 'progress'> & { organization_id: number | null; scope_json: string }
@@ -56,7 +59,9 @@ let physicalSignature: string | undefined
 const anyObjects = (names: readonly string[]): SchemaObject[] => names.map((name) => ({ kind: 'any', name }))
 const CHECK_SCHEMA = anyObjects(['inventory_check_sessions', 'inventory_check_items', 'inventory_check_events', 'inventory_check_events_no_update',
   'inventory_check_events_no_delete', 'inventory_check_sessions_identity', 'inventory_check_sessions_no_delete',
-  'inventory_check_items_baseline', 'inventory_check_items_no_delete'])
+  'inventory_check_items_baseline', 'inventory_check_items_no_delete',
+  // the count writers name these indexes in INDEXED BY (lib/inventoryCheckTasks.ts): a Worker that runs before migrations 0318 and 0319 answers the clean schema refusal, not an unmapped D1 error
+  'inventory_check_sessions_kind_task', 'inventory_check_sessions_open_task', 'inventory_check_sessions_task_board'])
 const APPROVALS_SCHEMA = anyObjects(['inventory_check_approvals', 'inventory_check_approvals_identity',
   'inventory_check_approvals_decided', 'inventory_check_approvals_claim', 'inventory_check_approvals_no_delete'])
 export async function schemaReady(db: D1Compat): Promise<void> {
@@ -81,13 +86,25 @@ export async function sessionRow(db: D1Compat, actor: Actor, id: string): Promis
   const row = await db.prepare('SELECT * FROM inventory_check_sessions WHERE id=@id AND organization_id IS @organization').get<SessionRow>({ id, organization: actor.organization_id })
   return row || fail(404, 'inventory_check_session_not_found')
 }
-const canEdit = (actor: Actor, session: SessionRow): boolean => getInventoryCheckAccess(actor).canCheck && (isAdminControlUser(actor) || session.created_by === actor.id)
+/** The kind of a session row: 'task', 'pickup' (count tasks), 'submission', 'visible_page', ... or '' when its scope names none. */
+function membershipOf(session: Pick<SessionRow, 'scope_json'>): string {
+  try { const membership = parse(session.scope_json).membership; return typeof membership === 'string' ? membership : '' } catch { return '' }
+}
+// A task is edited (closed) by whoever may issue tasks, whoever made it; a pickup by the picker, or by whoever may issue tasks (that is a hand-back). Any other session: its creator or an administrator.
+const canEdit = (actor: Actor, session: SessionRow): boolean => {
+  const kind = membershipOf(session)
+  if (kind === TASK_MEMBERSHIP) return canIssueInventoryCountTasks(actor)
+  if (kind === PICKUP_MEMBERSHIP) return getInventoryCheckAccess(actor).canView && (isAdminControlUser(actor) || session.created_by === actor.id) || canIssueInventoryCountTasks(actor)
+  return getInventoryCheckAccess(actor).canCheck && (isAdminControlUser(actor) || session.created_by === actor.id)
+}
+/** Whoever may edit a task or a pickup they did not create is treated as the administrator by the write's guard. */
+const elevated = (actor: Actor, session: SessionRow): boolean => isAdminControlUser(actor) || [TASK_MEMBERSHIP, PICKUP_MEMBERSHIP].includes(membershipOf(session)) && canIssueInventoryCountTasks(actor)
 function sessionGuard(actor: Actor, session: SessionRow, expected: number, status: string): Statement {
   return guard(`EXISTS(SELECT 1 FROM inventory_check_sessions WHERE id=@id AND organization_id IS @organization
     AND branch_id=@branchId AND created_by=@creator AND revision=@expected AND status=@status
     AND (@admin=1 OR created_by=@actorId))`, 'inventory_check_conflict', {
     id: session.id, organization: actor.organization_id, branchId: session.branch_id, creator: session.created_by,
-    expected, status, admin: Number(isAdminControlUser(actor)), actorId: actor.id,
+    expected, status, admin: Number(elevated(actor, session)), actorId: actor.id,
   })
 }
 async function progress(db: D1Compat, id: string) {
@@ -108,6 +125,14 @@ async function projectSession(db: D1Compat, actor: Actor, row: SessionRow, count
   if (!access.fields.stock) delete scope.stockState
   if (!access.fields.barcode) delete scope.barcode
   if (!access.fields.received) for(const key of ['startDate','endDate','createdFrom','createdTo']) delete scope[key]
+  const selection = scope.selection as { filters?: Record<string, unknown> } | undefined
+  if (selection?.filters) {
+    const filters = { ...selection.filters }
+    if (!access.fields.brand) delete filters.brand
+    if (!access.fields.category) delete filters.category
+    if (!access.fields.stock) delete filters.stockState
+    scope.selection = { ...selection, filters }
+  }
   const sortField = {stock:'stock',qty_sold:'sales',customer_count:'customers',received_date:'received',price:'price',cost:'cost'}[String(scope.sortBy)] as keyof typeof access.fields | undefined
   if (sortField && !access.fields[sortField]) delete scope.sortBy
   return { id: row.id, branch_id: row.branch_id, created_by: row.created_by, title: row.title, status: row.status, revision: row.revision,
@@ -348,7 +373,8 @@ function sessionListFilters(query: Record<string, string>) {
   if (startDate && endDate && startDate > endDate) fail(400, 'inventory_check_invalid_filter')
   return { status, mine, startDate, endDate }
 }
-export async function listInventoryCheckSessions(db: D1Compat, principal: InventoryCheckPrincipal, query: Record<string, string>, options: { approvals?: boolean } = {}) {
+/** `tasks`: the open and recent tasks of a branch (the cached Tasks board), so a pickup row can carry the progress of its task without a read of its own. */
+export async function listInventoryCheckSessions(db: D1Compat, principal: InventoryCheckPrincipal, query: Record<string, string>, options: { approvals?: boolean; tasks?: (branchId: number) => Promise<Map<string, InventoryCheckPickupTask>> } = {}) {
   let actor = await currentInventoryCheckActor(db, principal); await schemaReady(db)
   const page = pageNumber(query.page, 1, 100000), pageSize = pageNumber(query.pageSize, 20, 100)
   const branchId = query.branchId ? positive(Number(query.branchId)) : null
@@ -360,7 +386,7 @@ export async function listInventoryCheckSessions(db: D1Compat, principal: Invent
   // Filters run before LIMIT so the page total counts every matching session. started_at is a UTC instant; the day filter is the Cambodia business day.
   const params = { organization, branchId, ...filters, actorId: actor.id, limit: pageSize, offset: (page-1)*pageSize }
   const where = `organization_id IS @organization AND (@branchId IS NULL OR branch_id=@branchId) AND (@status IS NULL OR status=@status)
-    AND (@mine=0 OR created_by=@actorId) AND (@startDate IS NULL OR ${localDateExpr('started_at')}>=@startDate) AND (@endDate IS NULL OR ${localDateExpr('started_at')}<=@endDate)${waiting
+    AND json_extract(scope_json, '$.membership') IS NOT 'task' AND (@mine=0 OR created_by=@actorId) AND (@startDate IS NULL OR ${localDateExpr('started_at')}>=@startDate) AND (@endDate IS NULL OR ${localDateExpr('started_at')}<=@endDate)${waiting
       ? " AND EXISTS(SELECT 1 FROM inventory_check_approvals a WHERE a.session_id=inventory_check_sessions.id AND a.status='pending' AND a.organization_id IS @organization)" : ''}`
   const [count, rows] = await db.batch([{ sql: `SELECT COUNT(*) AS total FROM inventory_check_sessions WHERE ${where}`, params },
     { sql: `WITH page AS (SELECT * FROM inventory_check_sessions WHERE ${where} ORDER BY updated_at DESC,id DESC LIMIT @limit OFFSET @offset)
@@ -374,6 +400,17 @@ export async function listInventoryCheckSessions(db: D1Compat, principal: Invent
     const row = raw as SessionRow & { branch_name: string | null; creator_username: string | null; item_total: number; item_unstarted: number; item_done: number; item_issue: number }
     const session = await projectSession(db, actor, row, { total: Number(row.item_total), unstarted: Number(row.item_unstarted), done: Number(row.item_done), issue: Number(row.item_issue) })
     items.push({ ...session, branch_name: row.branch_name ?? null, ...(canSeeStaffIdentity(actor, row.created_by) ? { creator_name: row.creator_username ?? null } : {}) })
+  }
+  // A pickup stands for its task: it carries the task's title and progress (the done rule), read once per branch from the cached board.
+  if (options.tasks) {
+    const boards = new Map<number, Map<string, InventoryCheckPickupTask>>()
+    for (const item of items) {
+      const taskId = item.scope.membership === PICKUP_MEMBERSHIP && typeof item.scope.task === 'string' ? item.scope.task : null
+      if (!taskId) continue
+      if (!boards.has(item.branch_id)) boards.set(item.branch_id, await options.tasks(item.branch_id))
+      const task = boards.get(item.branch_id)?.get(taskId)
+      if (task) item.task = task
+    }
   }
   if (showsApprovals) {
     const byId = new Map((await approvalRows(db, actor, items.map(item => item.id))).map(row => [row.session_id, row]))
@@ -413,6 +450,16 @@ async function commit(db: D1Compat, principal: InventoryCheckPrincipal, actor: A
     if (text.includes('inventory_check_count_in_progress')) fail(409, 'inventory_check_count_in_progress')
     if (text.includes('inventory_check_stock_changed')) fail(409, 'inventory_check_stock_changed')
     if (text.includes('inventory_check_no_lot')) fail(409, 'inventory_check_no_lot')
+    if (text.includes('inventory_check_task_limit')) {
+      // A twin of this very request may have taken the last place a moment ago: that is a replay, not a refusal.
+      let twin: EventRow | undefined
+      try { twin = await receipt(db, actor, key, hash) } catch (inner) { if (inner instanceof InventoryCheckSessionError) throw inner }
+      if (twin) return { event: twin, replayed: true }
+      fail(409, 'inventory_check_task_limit')
+    }
+    if (text.includes('inventory_check_task_not_found')) fail(404, 'inventory_check_task_not_found')
+    if (text.includes('inventory_check_task_closed')) fail(409, 'inventory_check_task_closed')
+    if (text.includes('inventory_check_task_picked_up')) fail(409, 'inventory_check_task_picked_up')
     if (text.includes('inventory_check_lots_incomplete')) fail(409, 'inventory_check_lots_incomplete')
     if (text.includes('inventory_check_conflict') || text.includes('inventory_check_baseline_changed')) {
       physicalSignature = undefined // a refused guard may mean the remembered signature is stale; the next attempt reads it again
@@ -491,11 +538,10 @@ async function validatedStockSnapshot(db: D1Compat, branchId: number, productIds
 }
 const LOW_STOCK_ROWS_SQL = `SELECT key,value FROM settings WHERE key IN ('low_stock_alert_enabled','low_stock_threshold_mode','low_stock_threshold_default') ORDER BY key`
 const LOW_STOCK_SIGNATURE_SQL = `SELECT json_group_array(json_object('key',key,'value',value)) FROM (${LOW_STOCK_ROWS_SQL})`
-const CHECKABLE_SQL = `(NOT(COALESCE(p.is_group,0)=1 AND EXISTS(SELECT 1 FROM products child WHERE child.id<>p.id
-  AND (child.parent_id=p.id OR child.name_key=p.name_key) AND ${stockVisibleProductSql('child')})))`
 const CURRENT_PRODUCT_CHECKABLE_SQL = `p.id IS NOT NULL AND ${stockVisibleProductSql()} AND ${CHECKABLE_SQL}`
 /** `simple` (ic_simple): the scope is the owner's closed query and its membership is the simplified cohort. Absent, the old validation and cohort apply unchanged. */
-export async function createInventoryCheckSession(db: D1Compat, principal: InventoryCheckPrincipal, input: unknown, lowStock: LowStockConfig, options: { simple?: boolean } = {}) {
+export async function createInventoryCheckSession(db: D1Compat, principal: InventoryCheckPrincipal, input: unknown, lowStock: LowStockConfig, options: { simple?: boolean; task?: TaskIssue } = {}) {
+  if (options.task) return createTaskSession(db, principal, input, options.task)
   const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
   const branchId = positive(body.branchId), key = requestId(body.requestId)
   const productValues = body.productIds
@@ -627,6 +673,30 @@ async function announceReplaced(announce: ((replaced: ReplacedApprovals) => Prom
 export const REPLACED_NOTE = 'Replaced by a newer count'
 const COUNT_EPSILON = 0.000000001
 const SUBMISSION_LINE_KEYS = new Set(['productId', 'countedQuantity', 'seenQuantity', 'checked', 'note'])
+/** The task a submission counts (count tasks): its id, or null. Naming one needs the action inventory_checks:tasks (and the count grant every submission needs). */
+function submissionTask(body: Record<string, unknown>, actor: Actor): string | null {
+  if (body.taskId === undefined || body.taskId === null) return null
+  if (typeof body.taskId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(body.taskId)) return fail(400, 'inventory_check_invalid_request')
+  if (!canWorkInventoryCountTasks(actor)) return fail(403, 'inventory_check_tasks_required')
+  return body.taskId
+}
+/**
+ * Appended to the batch of EVERY writer that creates a count (the two submissions, an observation, a Set that closes a difference): the auto-close of lib/inventoryCheckTasks.ts, which closes every open task
+ * of this organization and branch whose last product this write counted. A submission that names a task adds a guard first (the task must exist at this branch: a closed one is fine, the counts are real, and a
+ * task closed by an admin while someone counts it must not lose them) and closes that task too when it completes it. `src` is the session the counts are in; `closed` is the statement whose answer lists the closed ids.
+ */
+function autoClosePart(actor: Actor, args: { src: string; task?: string | null; branchId: number; key: string; hash: string; now: string }): { statements: Statement[]; closed: Statement } {
+  const params = autoCloseParams({ src: args.src, task: args.task ?? null, organization: actor.organization_id, branchId: args.branchId, actorId: actor.id, actorName: actorSnapshot(actor), key: args.key, hash: args.hash, now: args.now })
+  const auto = autoCloseTaskStatements(), statements: Statement[] = auto.statements.map(({ sql }) => ({ sql, params }))
+  const exists = args.task ? [guard(`EXISTS(SELECT 1 FROM inventory_check_sessions WHERE id=@task AND organization_id IS @org AND branch_id=@branchId AND ${kindOf('inventory_check_sessions')}='${TASK_MEMBERSHIP}')`, 'inventory_check_task_not_found', params)] : []
+  return { statements: [...exists, ...statements], closed: statements[auto.closedAt] }
+}
+/** The ids of the tasks a committed write closed (none for a replay: the write is not made again). */
+function closedBy(saved: { replayed: boolean; results?: D1Result[] }, statements: Statement[], part: { closed: Statement } | null): string[] {
+  const at = part ? statements.indexOf(part.closed) : -1
+  return at >= 0 && !saved.replayed ? closedTaskIds(saved.results?.[at + 1]) : []
+}
+
 type SubmissionLine = { productId: number; counted: number; seen: number | null; checked: boolean; note: string | null }
 export function submissionQuantity(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1_000_000_000 ? value : fail(400, 'inventory_check_invalid_quantity')
@@ -658,7 +728,8 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
   const title = body.title === undefined ? '' : typeof body.title === 'string' ? body.title.trim() : fail(400, 'inventory_check_invalid_title')
   if (title.length > 120) fail(400, 'inventory_check_invalid_title')
   if (!access.fields.stock && lines.some(line => line.checked)) fail(400, 'inventory_check_invalid_request')
-  const hash = await inventoryCheckDigest(JSON.stringify({ action: 'submit', branchId, title, lines }))
+  const task = submissionTask(body, actor)
+  const hash = await inventoryCheckDigest(JSON.stringify({ action: 'submit', branchId, title, lines, ...(task ? { task } : {}) }))
   const existing = await receipt(db, actor, key, hash)
   if (existing) return { ...(await committedSessionProjection(db, principal, existing.session_id)), ...(await sessionApproval(db, actor, existing.session_id, options)), receipt: receiptResponse(existing, true), created: false }
   const settings = await db.prepare(LOW_STOCK_ROWS_SQL).all<{key:string;value:string}>()
@@ -696,7 +767,7 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
   const differing = differingItems.length
   // The approval's lines, recorded with it (migration 0316): the products counted different from stock, the one set every reader of "waits for approval" reads.
   const lineSet = JSON.stringify(Object.fromEntries(differingItems.map(item => [String(item.line.productId), 1])))
-  const scope = { membership: 'submission' }
+  const scope = { membership: 'submission', ...(task ? { task } : {}) }
   // The figure a count is later measured against is the stock at submit. For a viewer who sees stock it equals what the counter saw (checked above); for anyone else it is the only trustworthy figure.
   const seenJson = JSON.stringify(Object.fromEntries(resolved.map(item => [String(item.line.productId), item.baseline?.quantity ?? null]).filter(([, seen]) => seen !== null)))
   const params = { id, organization: actor.organization_id, branchId, actorId: actor.id, actorName: actorSnapshot(actor), title, scopeJson: JSON.stringify(scope), now,
@@ -731,6 +802,8 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
     ...(differing > 0 ? [{ sql: `INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submitted_at,baselines_json,line_set_json)
       VALUES(@id,@organization,@branchId,'pending',@differing,@actorId,@now,@seenJson,@lineSet)`, params: { ...params, differing, seenJson, lineSet } }] : []),
   ]
+  const taskPart = autoClosePart(actor, { src: id, task, branchId, key, hash, now })
+  statements.push(...taskPart.statements)
   let saved: Awaited<ReturnType<typeof commit>>
   try { saved = await commit(db, principal, actor, statements, key, hash) }
   catch (error) {
@@ -745,7 +818,8 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
   if (differing > 0 && !saved.replayed) { try { await options.onApprovalCreated?.({ sessionId: saved.event.session_id }) } catch { /* announced best-effort */ } }
   // The approvals this commit replaced were rejected by the system: each is a review decided, so each is told once (the statement that rejected them names them; a replay is never told again).
   if (!saved.replayed && supersede.length) await announceReplaced(options.onApprovalsReplaced, saved.results?.[statements.indexOf(supersede[2]) + 1]?.results)
-  return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), ...(await sessionApproval(db, actor, saved.event.session_id, options)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed }
+  const closedTasks = closedBy(saved, statements, taskPart)
+  return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), ...(await sessionApproval(db, actor, saved.event.session_id, options)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed, ...(task ? { task: { id: task, closed: closedTasks.includes(task) } } : {}), ...(closedTasks.length ? { closedTasks } : {}) }
 }
 // ---- ic_lot_counts: a count per received date (INV-B S5; migration 0294; Inventory replan rev. 2, sections 2.6 and 2.7) ----------------------------------------------------------
 // The submission of the owner's way to count, with a count typed per received date (or one branch total) for each product. Nothing here reads the stock ledger or verifies stock:
@@ -825,7 +899,8 @@ export async function createInventoryCheckLotSubmission(db: D1Compat, principal:
   const title = body.title === undefined ? '' : typeof body.title === 'string' ? body.title.trim() : fail(400, 'inventory_check_invalid_title')
   if (title.length > 120) fail(400, 'inventory_check_invalid_title')
   if (!sighted && lines.some(line => line.checked)) fail(400, 'inventory_check_invalid_request')
-  const hash = await inventoryCheckDigest(JSON.stringify({ action: 'submit-lots', branchId, title, lines }))
+  const task = submissionTask(body, actor)
+  const hash = await inventoryCheckDigest(JSON.stringify({ action: 'submit-lots', branchId, title, lines, ...(task ? { task } : {}) }))
   const existing = await receipt(db, actor, key, hash)
   if (existing) return { ...(await committedSessionProjection(db, principal, existing.session_id)), ...(await sessionApproval(db, actor, existing.session_id, options)), receipt: receiptResponse(existing, true), created: false }
   // A product may be counted when it is a stock-visible, countable row (not a family header with children): the point lookups the snapshot guard repeats inside the batch. The older
@@ -851,7 +926,7 @@ export async function createInventoryCheckLotSubmission(db: D1Compat, principal:
     state: item.state, counted: item.counted, reason: item.reason,
     event_request_id: `${key}-${item.line.productId}`, event_hash: await inventoryCheckDigest(JSON.stringify({ action: 'submit-line', hash, productId: item.line.productId })) })))
   const lotLines = resolved.flatMap(item => item.line.lots.map(lot => ({ product_id: item.line.productId, batch_id: lot.batchId, scope: lot.scope, seen: lot.seen, counted: lot.counted })))
-  const params = { id, organization: actor.organization_id, branchId, actorId: actor.id, actorName: actorSnapshot(actor), title, scopeJson: JSON.stringify({ membership: 'submission' }), now,
+  const params = { id, organization: actor.organization_id, branchId, actorId: actor.id, actorName: actorSnapshot(actor), title, scopeJson: JSON.stringify({ membership: 'submission', ...(task ? { task } : {}) }), now,
     members: JSON.stringify(members), lines: JSON.stringify(lotLines),
     plain: JSON.stringify(resolved.filter(item => item.line.plain).map(item => ({ product_id: item.line.productId, seen: item.line.plain!.seen }))), count: productIds.length, sighted: sighted ? 1 : 0, eps: COUNT_EPSILON }
   const lotProducts = resolved.filter(item => item.line.lots.some(lot => lot.scope === 'lot')).map(item => item.line.productId)
@@ -899,6 +974,8 @@ export async function createInventoryCheckLotSubmission(db: D1Compat, principal:
   if (options.approvals) statements.push({ sql: `INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submitted_at,baselines_json,line_set_json)
     SELECT @id,@organization,@branchId,'pending',d.n,@actorId,@now,(SELECT json_group_object(CAST(i.product_id AS TEXT),i.baseline_quantity) FROM inventory_check_items i WHERE i.session_id=@id AND i.baseline_quantity IS NOT NULL),d.line_set
     FROM (SELECT COUNT(*) AS n,json_group_object(CAST(i.product_id AS TEXT),1) AS line_set FROM inventory_check_items i WHERE i.session_id=@id AND ${countDiffersSql('i', '@eps')}) d WHERE d.n>0 RETURNING session_id`, params })
+  const taskPart = autoClosePart(actor, { src: id, task, branchId, key, hash, now })
+  statements.push(...taskPart.statements)
   let saved: Awaited<ReturnType<typeof commit>>
   try { saved = await commit(db, principal, actor, statements, key, hash) }
   catch (error) {
@@ -929,12 +1006,15 @@ export async function createInventoryCheckLotSubmission(db: D1Compat, principal:
   const created = options.approvals && !saved.replayed && (saved.results?.[approvalAt + 1]?.results ?? []).length > 0
   if (created) { try { await options.onApprovalCreated?.({ sessionId: saved.event.session_id }) } catch { /* announced best-effort */ } }
   if (!saved.replayed && supersede.length) await announceReplaced(options.onApprovalsReplaced, saved.results?.[statements.indexOf(supersede[2]) + 1]?.results) // the batch starts with the authority guard
-  return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), ...(await sessionApproval(db, actor, saved.event.session_id, options)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed }
+  const closedTasks = closedBy(saved, statements, taskPart)
+  return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), ...(await sessionApproval(db, actor, saved.event.session_id, options)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed, ...(task ? { task: { id: task, closed: closedTasks.includes(task) } } : {}), ...(closedTasks.length ? { closedTasks } : {}) }
 }
 export async function patchInventoryCheckObservation(db: D1Compat, principal: InventoryCheckPrincipal, id: string, productId: number, input: unknown) {
   const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
   const session = await sessionRow(db, actor, id)
   if (!canEdit(actor, session)) fail(403, 'inventory_check_owner_required')
+  // A task and a pickup hold no counts of their own: a task's items are never observed (that would make an unstarted line with no baseline a count), a pickup has none.
+  if ([TASK_MEMBERSHIP, PICKUP_MEMBERSHIP].includes(membershipOf(session))) fail(409, 'inventory_check_task_not_countable')
   const expected = revision(body.expectedRevision), expectedSession = revision(body.expectedSessionRevision), key = requestId(body.requestId)
   const state = body.state
   if (!['unstarted','done','issue'].includes(String(state))) fail(400, 'inventory_check_invalid_state')
@@ -958,6 +1038,7 @@ export async function patchInventoryCheckObservation(db: D1Compat, principal: In
     }
   }
   const params = { id, productId, branchId: session.branch_id, expected, expectedSession, state, counted, reason, actor: actor.id, now: new Date().toISOString() }
+  // A count in an open session is not final (it can be set back until the session closes), so it ticks and closes no task here: closing the session does (patchInventoryCheckSession).
   const saved = await commit(db, principal, actor, [sessionGuard(actor, session, expectedSession, 'open'),
     ...countGuards,
     guard(`EXISTS(SELECT 1 FROM inventory_check_items WHERE session_id=@id AND product_id=@productId AND branch_id=@branchId AND revision=@expected)
@@ -982,17 +1063,25 @@ export async function patchInventoryCheckSession(db: D1Compat, principal: Invent
   const expected = revision(body.expectedRevision), key = requestId(body.requestId), action = body.action
   if (action !== 'close' && action !== 'resume') return fail(400, 'inventory_check_invalid_action')
   // A submitted count is final: it was recorded closed, and reopening it would let its saved lines be edited after the fact.
-  if (action === 'resume' && parse(session.scope_json).membership === 'submission') fail(409, 'inventory_check_session_final')
+  if (action === 'resume' && ['submission', TASK_MEMBERSHIP, PICKUP_MEMBERSHIP].includes(membershipOf(session))) fail(409, 'inventory_check_session_final')
   const hash = await inventoryCheckDigest(JSON.stringify({ action, id, expected })), previous = await receipt(db, actor, key, hash)
   if (previous) return { item: (await committedSessionProjection(db, principal, id)).item, receipt: receiptResponse(previous, true) }
   const status = action === 'close' ? 'closed' : 'open', now = new Date().toISOString()
   const params = { id, status, expected, now, closed: action === 'close' ? now : null }
-  const saved = await commit(db, principal, actor, [sessionGuard(actor, session, expected, action === 'close' ? 'open' : 'closed'),
+  // Closing a count session makes its counts FINAL, so it is a count writer: the tasks it completes close in this same batch (autoClosePart). A task or a pickup holds no counts.
+  const counting = action === 'close' && ![TASK_MEMBERSHIP, PICKUP_MEMBERSHIP].includes(membershipOf(session))
+  const taskPart = counting ? autoClosePart(actor, { src: id, branchId: session.branch_id, key, hash, now }) : null
+  const statements: Statement[] = [sessionGuard(actor, session, expected, action === 'close' ? 'open' : 'closed'),
     { sql: 'UPDATE inventory_check_sessions SET status=@status,revision=revision+1,updated_at=@now,closed_at=@closed WHERE id=@id AND revision=@expected', params },
     guard('changes()=1', 'inventory_check_conflict', {}),
     eventStatement(actor, { sessionId: id, action, key, hash, before: { status: session.status, revision: session.revision }, after: { status, revision: expected+1 }, result: { sessionRevision: expected+1 }, now }),
-  ], key, hash)
-  return { item: (await committedSessionProjection(db, principal, id)).item, receipt: receiptResponse(saved.event, saved.replayed) }
+    // Closing a task closes the pickup it has open, in the same batch (a task is closed by hand with the issue permission; undo is this close record, never a delete).
+    ...(action === 'close' && membershipOf(session) === TASK_MEMBERSHIP ? closePickupsStatements().map(({ sql }) => ({ sql, params: { task: id, org: actor.organization_id, actorId: actor.id, actorName: actorSnapshot(actor), key, hash, now } })) : []),
+    ...(taskPart ? taskPart.statements : []),
+  ]
+  const saved = await commit(db, principal, actor, statements, key, hash)
+  const closedTasks = closedBy(saved, statements, taskPart)
+  return { item: (await committedSessionProjection(db, principal, id)).item, receipt: receiptResponse(saved.event, saved.replayed), ...(closedTasks.length ? { closedTasks } : {}) }
 }
 export async function inventoryCheckSessionHistory(db: D1Compat, principal: InventoryCheckPrincipal, id: string, query: Record<string,string>) {
   let actor = await currentInventoryCheckActor(db, principal); await schemaReady(db)
@@ -1018,4 +1107,111 @@ export async function inventoryCheckSessionHistory(db: D1Compat, principal: Inve
       ...(canSeeStaffIdentity(actor, row.actor_id) ? { actor_name: row.actor_name } : {}),
       action: row.action, created_at: row.created_at, before: project(row.before_json), after: project(row.after_json) }
   }), total: Number(count?.total || 0), page, pageSize }
+}
+
+// ---- count tasks (owner, 18 Nov 2026; migration 0318; lib/inventoryCheckTasks.ts holds the SQL text and the reads) ----------------------------------------------------------
+// A task is an OPEN count session with scope {membership:'task'}: its items are `unstarted` with no baseline, so it is never a latest count (the lists read done and issue only) and changes no chip,
+// date, Not checked figure or overlay. Issuing writes the session, its items and one create event in ONE batch, with no stock snapshot (the counter measures stock when counting).
+export type TaskIssue = { selection: unknown; maxProducts: number; maxOpenTasks: number; dropIneligible?: boolean }
+async function createTaskSession(db: D1Compat, principal: InventoryCheckPrincipal, input: unknown, issue: TaskIssue) {
+  const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
+  if (!canIssueInventoryCountTasks(actor)) fail(403, 'inventory_check_issue_required')
+  const branchId = positive(body.branchId), key = requestId(body.requestId)
+  const values = body.productIds
+  if (!Array.isArray(values) || values.length < 1) return fail(400, 'inventory_check_product_ids_required')
+  const asked = [...new Set(values.map(positive))].sort((a, b) => a - b)
+  if (!issue.dropIneligible && asked.length !== values.length) fail(400, 'inventory_check_invalid_id')
+  const title = body.title === undefined ? '' : typeof body.title === 'string' ? body.title.trim() : fail(400, 'inventory_check_invalid_title')
+  if (title.length > 120) fail(400, 'inventory_check_invalid_title')
+  if (asked.length > issue.maxProducts && !issue.dropIneligible) fail(400, 'inventory_check_task_too_many', { total: asked.length, limit: issue.maxProducts })
+  const hash = await inventoryCheckDigest(JSON.stringify({ action: 'issue', branchId, productIds: asked, title, selection: issue.selection }))
+  const existing = await receipt(db, actor, key, hash)
+  if (existing) return { ...(await committedSessionProjection(db, principal, existing.session_id)), receipt: receiptResponse(existing, true), created: false }
+  // Only a product the list shows and a person may count: active (or still holding stock) and not a family header. An explicit list must be all of them; a list a filter resolved drops the rest.
+  const products = await db.prepare(`SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group FROM products p WHERE p.id IN (SELECT value FROM json_each(@ids)) AND ${TASK_COUNTABLE_SQL} ORDER BY p.id`).all<Record<string, unknown>>({ ids: JSON.stringify(asked) })
+  if (!products.length) fail(400, 'inventory_check_product_not_eligible')
+  if (!issue.dropIneligible && products.length !== asked.length) fail(400, 'inventory_check_product_not_eligible')
+  if (products.length > issue.maxProducts) fail(400, 'inventory_check_task_too_many', { total: products.length, limit: issue.maxProducts })
+  const now = new Date().toISOString(), id = crypto.randomUUID()
+  const scope = { membership: TASK_MEMBERSHIP, products: products.length, selection: issue.selection }
+  const params = { id, organization: actor.organization_id, branchId, actorId: actor.id, title, scopeJson: JSON.stringify(scope), now, members: JSON.stringify(products.map(product => ({ product_id: product.id, product }))), count: products.length }
+  // The board shows every open task of a branch (at most the cap), so a task is never issued past it: the count is read inside the batch, so two issues at once cannot both pass.
+  const statements: Statement[] = [
+    guard('EXISTS(SELECT 1 FROM branches WHERE id=@branchId AND is_active=1)', 'inventory_check_baseline_changed', params),
+    guard(`(${OPEN_TASK_COUNT_SQL})<@maxOpenTasks`, 'inventory_check_task_limit', { ...params, maxOpenTasks: issue.maxOpenTasks }),
+    guard(`NOT EXISTS(SELECT 1 FROM json_each(@members) e LEFT JOIN products p ON p.id=json_extract(e.value,'$.product_id')
+      WHERE p.id IS NULL OR p.name IS NOT json_extract(e.value,'$.product.name') OR p.image_path IS NOT json_extract(e.value,'$.product.image_path')
+      OR p.unit IS NOT json_extract(e.value,'$.product.unit') OR p.parent_id IS NOT json_extract(e.value,'$.product.parent_id')
+      OR p.is_group IS NOT json_extract(e.value,'$.product.is_group') OR NOT ${TASK_COUNTABLE_SQL})`, 'inventory_check_baseline_changed', params),
+    { sql: `INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at)
+      VALUES(@id,@organization,@branchId,@actorId,@title,'open',0,@scopeJson,@now,@now)`, params },
+    { sql: `INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json)
+      SELECT @id,json_extract(value,'$.product_id'),@branchId,json_extract(value,'$.product'),NULL,'{}' FROM json_each(@members)`, params },
+    eventStatement(actor, { sessionId: id, action: 'create', key, hash, before: null, after: { status: 'open', revision: 0, members: products.length, task: true }, result: { sessionRevision: 0 }, now }),
+  ]
+  let saved: Awaited<ReturnType<typeof commit>>
+  try { saved = await commit(db, principal, actor, statements, key, hash) }
+  catch (error) {
+    // Read only because the issue was refused: how many tasks the branch has open, so the page can say so.
+    if (error instanceof InventoryCheckSessionError && error.code === 'inventory_check_task_limit') {
+      let open: { n: number } | undefined
+      try { open = await db.prepare(`SELECT (${OPEN_TASK_COUNT_SQL}) AS n`).get<{ n: number }>({ organization: actor.organization_id, branchId }) } catch { /* the refusal stands without the count */ }
+      fail(409, 'inventory_check_task_limit', { open: Number(open?.n ?? issue.maxOpenTasks), limit: issue.maxOpenTasks })
+    }
+    throw error
+  }
+  return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed }
+}
+/** A task of the actor's organization and the open pickup it has, if any (one statement). */
+async function taskState(db: D1Compat, actor: Actor, taskId: string) {
+  return db.prepare(`SELECT s.*,pk.id AS pickup_id,pk.created_by AS picked_by,pk.revision AS pickup_revision,pu.username AS picker FROM inventory_check_sessions s
+    LEFT JOIN inventory_check_sessions pk INDEXED BY inventory_check_sessions_kind_task ON pk.organization_id IS s.organization_id AND ${kindOf('pk')}='${PICKUP_MEMBERSHIP}' AND ${taskOf('pk')}=+s.id AND pk.status='open'
+    LEFT JOIN users pu ON pu.id=pk.created_by
+    WHERE s.id=@id AND s.organization_id IS @organization AND ${kindOf('s')}='${TASK_MEMBERSHIP}'`).get<SessionRow & { pickup_id: string | null; picked_by: number | null; pickup_revision: number | null; picker: string | null }>({ id: taskId, organization: actor.organization_id })
+}
+/**
+ * Picking a task up: the employee's own open session {membership:'pickup', task:<id>} with no items (one session row and one create event), shown under Count sessions as theirs. ONE person per task:
+ * the batch itself refuses while the task has an open pickup (and when the task is closed), so two people tapping at once cannot both win. Needs the action inventory_checks:tasks and the count grant.
+ */
+export async function pickupInventoryCheckTask(db: D1Compat, principal: InventoryCheckPrincipal, taskId: string, input: unknown) {
+  const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
+  if (!canWorkInventoryCountTasks(actor)) fail(403, 'inventory_check_tasks_required')
+  const key = requestId(body.requestId)
+  const hash = await inventoryCheckDigest(JSON.stringify({ action: 'pickup', task: taskId }))
+  const existing = await receipt(db, actor, key, hash)
+  if (existing) return { ...(await committedSessionProjection(db, principal, existing.session_id)), receipt: receiptResponse(existing, true), created: false }
+  const task = await taskState(db, actor, taskId)
+  if (!task) return fail(404, 'inventory_check_task_not_found')
+  if (task.status !== 'open') fail(409, 'inventory_check_task_closed')
+  if (task.pickup_id) fail(409, 'inventory_check_task_picked_up', { pickedUpBy: task.picker ?? null, mine: task.picked_by === actor.id })
+  const now = new Date().toISOString(), id = crypto.randomUUID()
+  const params = { id, task: taskId, organization: actor.organization_id, branchId: task.branch_id, actorId: actor.id, title: task.title, scopeJson: JSON.stringify({ membership: PICKUP_MEMBERSHIP, task: taskId }), now }
+  const saved = await commit(db, principal, actor, [
+    guard(`EXISTS(SELECT 1 FROM inventory_check_sessions WHERE id=@task AND organization_id IS @organization AND ${kindOf('inventory_check_sessions')}='${TASK_MEMBERSHIP}' AND status='open')`, 'inventory_check_task_closed', params),
+    guard(`NOT ${OPEN_PICKUP_SQL('@task', '@organization')}`, 'inventory_check_task_picked_up', params),
+    { sql: `INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at)
+      VALUES(@id,@organization,@branchId,@actorId,@title,'open',0,@scopeJson,@now,@now)`, params },
+    eventStatement(actor, { sessionId: id, action: 'create', key, hash, before: null, after: { status: 'open', revision: 0, members: 0, task: taskId }, result: { sessionRevision: 0 }, now }),
+  ], key, hash)
+  return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed }
+}
+/**
+ * Handing a task back: closes the open pickup with the existing close writer (patchInventoryCheckSession), by the picker or by whoever may issue tasks. The task stays open and can be picked up again.
+ */
+export async function releaseInventoryCheckTask(db: D1Compat, principal: InventoryCheckPrincipal, taskId: string, input: unknown) {
+  const body = object(input), actor = await currentInventoryCheckActor(db, principal); await schemaReady(db)
+  const key = requestId(body.requestId)
+  // A repeat of a release that went through finds its own event by the request id (the pickup is no longer open then).
+  const prior = await db.prepare('SELECT * FROM inventory_check_events WHERE actor_id=@actor AND request_id=@key').get<EventRow>({ actor: actor.id, key })
+  if (prior) {
+    const pickup = await sessionRow(db, actor, prior.session_id).catch(() => null)
+    if (!pickup || membershipOf(pickup) !== PICKUP_MEMBERSHIP || parse(pickup.scope_json).task !== taskId || prior.action !== 'close') fail(409, 'inventory_check_request_reused')
+    return { item: (await committedSessionProjection(db, principal, prior.session_id)).item, receipt: receiptResponse(prior, true), released: true }
+  }
+  const task = await taskState(db, actor, taskId)
+  if (!task) return fail(404, 'inventory_check_task_not_found')
+  const pickupId = task.pickup_id ?? fail(409, 'inventory_check_task_not_picked_up')
+  if (task.picked_by !== actor.id && !canIssueInventoryCountTasks(actor)) fail(403, 'inventory_check_release_forbidden')
+  const result = await patchInventoryCheckSession(db, principal, pickupId, { expectedRevision: task.pickup_revision, requestId: key, action: 'close' })
+  return { ...result, released: true }
 }

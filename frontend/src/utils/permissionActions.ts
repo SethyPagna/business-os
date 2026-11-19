@@ -186,6 +186,8 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
   inventory_checks: [
     { key: 'view', tKey: 'perm_act_inventory_checks_view', label: 'View all count sessions', shortTKey: 'perm_short_all_sessions', short: 'All sessions', review: 'block' },
     { key: 'check', tKey: 'perm_act_inventory_checks_check', label: 'Count and submit', shortTKey: 'perm_short_count', short: 'Count', review: 'block' },
+    // GET /tasks, the task's own list (/list?taskId=), the pickup of a task and a submission that names one: lib/inventoryCheckAccess.ts canWorkInventoryCountTasks (it needs the count grant too).
+    { key: 'tasks', tKey: 'perm_act_inventory_checks_tasks', label: 'Pick up and count tasks', shortTKey: 'perm_short_tasks', short: 'Tasks', review: 'block' },
   ],
 
   // cloudflare/src/routes/branches.ts

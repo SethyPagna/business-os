@@ -13,7 +13,7 @@ export const ROW_STATUS_WORDS: Record<RowStatusKind, { key: string; fallback: st
   not_checked: { key: 'inventory_check_status_not_checked', fallback: 'Not checked' },
   in_check: { key: 'inventory_check_status_in_check', fallback: 'In check' },
   ok: { key: 'inventory_check_status_ok', fallback: 'Checked OK' },
-  issue: { key: 'inventory_check_issue', fallback: 'Issue' },
+  issue: { key: 'inventory_check_issue', fallback: 'Differs' },
   pending: { key: 'inventory_check_approval_pending', fallback: 'Waiting for approval' },
   draft_ok: { key: 'inventory_check_status_draft_ok', fallback: 'Matches stock · not submitted yet' },
   draft_issue: { key: 'inventory_check_status_draft_issue', fallback: 'Differs from stock · not submitted yet' },

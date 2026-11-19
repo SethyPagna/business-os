@@ -214,11 +214,11 @@ try {
   assert.equal(surface.findAll(node => node.tagName === 'BUTTON' && node.textContent.trim() === 'Today').length, 0, 'the list has no sales date range')
   await openSession(surface)
   assert.ok(surface.text().includes('19/10/2026 09:30') && surface.text().includes('Test branch') && surface.text().includes('@alice'), 'the session bar names the session by start, branch and creator')
-  await surface.click(surface.button('Report issue'))
+  await surface.click(surface.button('Report difference'))
   await surface.type(surface.field('inventory-check-count-12'), '0')
   await surface.type(surface.field('inventory-check-reason-12'), 'Shelf differs')
   saveFailure = 'unknown'
-  await surface.click(surface.button('Save issue'))
+  await surface.click(surface.button('Save difference'))
   assert.ok(surface.text().includes('Save not confirmed'))
   assert.ok(!surface.text().includes('Counted 0'), 'unknown acknowledgement never becomes optimistic saved state')
   const first = saves.at(-1)!
@@ -236,7 +236,7 @@ try {
   // 17 Nov: the detail is Products' own modal (name as the title, brand and barcode in its header, stock with its unit, expiry) with Inventory's check facts in its slot
   assert.ok(detailText.includes('Starting stock9') && detailText.includes('Difference−1'), 'the check facts show the fixed baseline and the drift: ' + detailText)
   assert.ok(detailText.includes('Received date01/10/2026'), 'and the latest received date: ' + detailText)
-  assert.ok(detailText.includes('Counted0 (−8)') && detailText.includes('Check statusIssue · Shelf differs'), 'and the count against stock and the check status with its reason: ' + detailText)
+  assert.ok(detailText.includes('Counted0 (−8)') && detailText.includes('Check statusDiffers · Shelf differs'), 'and the count against stock and the check status with its reason: ' + detailText)
   const modalText = surface.text().replace(/\s+/g, ' ')
   assert.ok(modalText.includes('Stock') && modalText.includes('8') && modalText.includes('pcs') && /Expiry15\/03\/2027 \d+d/.test(modalText) && !modalText.includes('2027-03-15'), 'the product rows show the stock with its unit and the next expiry as dd/mm/yyyy with a days-left suffix: ' + modalText)
   assert.equal(surface.find(node => node.getAttribute('data-detail-meta-row') !== null, 'brand and category line').textContent, 'Test brand', 'the brand sits in the header, as on Products')
@@ -246,7 +246,7 @@ try {
   await surface.click(surface.button('Close session'))
   assert.ok(surface.text().includes('Close this count session?'), 'Close first shows the shared review')
   const closeReview = surface.find(node => node.tagName === 'DL', 'close review').textContent
-  assert.ok(closeReview.includes('products1') && closeReview.includes('Done0') && closeReview.includes('Issue0') && closeReview.includes('Not started1'), 'the review lists total / done / issue / not started counts: ' + closeReview)
+  assert.ok(closeReview.includes('products1') && closeReview.includes('Done0') && closeReview.includes('Differs0') && closeReview.includes('Not started1'), 'the review lists total / done / issue / not started counts: ' + closeReview)
   assert.ok(surface.text().includes('19/10/2026 · Test branch'), 'the review names the session by its start date and branch, not by a stored title')
   await confirmInDialog(surface, 'Close session')
   assert.equal(surface.findAll(node => node.getAttribute('data-check-action') === 'done').length, 0, 'closed session cannot edit')
@@ -258,7 +258,7 @@ try {
   assert.ok(surface.text().includes('History reason'), 'session immutable action history is read through the dedicated endpoint')
   assert.ok(surface.text().includes('20/10/2026 01:05'), 'SQLite UTC history timestamps use dd/mm/yyyy and 24-hour business time across midnight')
   const historyText = surface.find(node => node.getAttribute('data-inventory-check-history') === '1', 'observe event').textContent
-  assert.equal(historyText, '20/10/2026 01:05 · @alice · Test variant · Not started → Issue · History reason', 'a history row reads date · user · product · state change · reason, with no ids')
+  assert.equal(historyText, '20/10/2026 01:05 · @alice · Test variant · Not started → Differs · History reason', 'a history row reads date · user · product · state change · reason, with no ids')
   assert.ok(surface.find(node => node.getAttribute('data-inventory-check-history') === '2', 'create event').textContent.endsWith('Session created'), 'a session-level event names its action')
   const allHistory = surface.findAll(node => node.getAttribute('data-inventory-check-history') !== null).map(node => node.textContent).join('|')
   assert.ok(!allHistory.includes('inventory_check_') && !allHistory.split(/[^a-z_]+/i).some(word => ['observe', 'create', 'close', 'resume', 'unstarted'].includes(word)) && !allHistory.includes('#'), 'no raw action key or product id reaches the screen: ' + allHistory)
@@ -307,7 +307,7 @@ try {
 
   const switching = await mount()
   await openSession(switching)
-  await switching.click(switching.button('Edit issue'))
+  await switching.click(switching.button('Edit difference'))
   await switching.type(switching.field('inventory-check-reason-12'), 'Private A draft')
   app.user = { ...app.user, id: 8 }
   await switching.render({})
@@ -330,10 +330,10 @@ try {
   await raced.settle()
   assert.ok(!raced.text().includes('STALE PRIVATE RESULT'), 'late query completion cannot publish under a different query')
   await openSession(raced)
-  await raced.click(raced.button('Edit issue'))
+  await raced.click(raced.button('Edit difference'))
   await raced.type(raced.field('inventory-check-reason-12'), 'Known refusal draft')
   saveFailure = 'known'
-  await raced.click(raced.button('Save issue'))
+  await raced.click(raced.button('Save difference'))
   assert.ok(raced.text().includes('Check not saved'))
   assert.equal((raced.field('inventory-check-reason-12') as unknown as { value: string }).value, 'Known refusal draft')
   saveFailure = 'none'
@@ -351,9 +351,9 @@ try {
   await openSession(blindOwner)
   assert.ok(blindOwner.text().includes('Counted 0'), 'a creator keeps their own entered count while system stock stays hidden')
   assert.ok(!blindOwner.text().includes('Now 8'))
-  await blindOwner.click(blindOwner.button('Edit issue'))
+  await blindOwner.click(blindOwner.button('Edit difference'))
   await blindOwner.type(blindOwner.field('inventory-check-count-12'), '37')
-  await blindOwner.click(blindOwner.button('Save issue'))
+  await blindOwner.click(blindOwner.button('Save difference'))
   assert.equal((saves.at(-1)?.[2] as { counted_quantity: number }).counted_quantity, 37)
   assert.ok(blindOwner.text().includes('Counted 37'))
   await blindOwner.unmount()
@@ -408,7 +408,7 @@ try {
   await clickSessionRow(cold)
   await cold.click(cold.button('next'))
   assert.equal(productRequests.at(-1)?.page, 2)
-  await cold.click(cold.button('Edit issue'))
+  await cold.click(cold.button('Edit difference'))
   await cold.type(cold.field('inventory-check-reason-12'), 'Guarded local draft')
   assert.ok(dirtyWork.getDirtyWork().some(entry => entry.pageId === 'inventory'), 'the actual row registers its entered count/reason in the actual shared dirty-work registry')
   assert.equal(propsOf(cold.button('Leave session')).disabled, true)
@@ -523,7 +523,7 @@ try {
   // The status is an ICON now (14 Nov): its words are its tooltip, and the date of the count sits beside it.
   const statusWords = (id: number) => listed.find(node => node.getAttribute('data-check-status-kind') !== null && listed.find(row => row.getAttribute('data-inventory-check-row') === String(id), `row ${id}`).contains(node), `status ${id}`).getAttribute('title') ?? ''
   assert.ok(statusWords(12).startsWith('Checked OK') && rowText(12).includes('Counted 8') && rowText(12).includes(`@amy · ${fmtDateTime24('2026-10-30 08:15:00')}`), 'a checked product reads its status, counted quantity and who checked it when: ' + rowText(12))
-  assert.ok(statusWords(13).startsWith('Issue') && rowText(13).includes('Counted 3') && rowText(13).includes('Two boxes crushed') && rowText(13).includes('@ben'), 'an issue adds its note: ' + rowText(13))
+  assert.ok(statusWords(13).startsWith('Differs') && rowText(13).includes('Counted 3') && rowText(13).includes('Two boxes crushed') && rowText(13).includes('@ben'), 'an issue adds its note: ' + rowText(13))
   assert.ok(statusWords(14).startsWith('Not checked') && !rowText(14).includes('Counted') && !rowText(14).includes('@'), 'a product nobody checked has no count and no checker: ' + rowText(14))
   assert.ok(listed.text().includes('Last checked') && listed.text().includes('Status'), 'the pinned header names the new columns')
   await listed.unmount()

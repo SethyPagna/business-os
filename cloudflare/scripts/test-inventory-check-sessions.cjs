@@ -46,7 +46,7 @@ function binding() {
 function reset(schema = true) {
   db?.close(); db = new DatabaseSync(':memory:')
   for (const sql of loadAll({ through: 242 })) db.exec(sql)
-  if (schema) db.exec(fs.readFileSync(path.join(__dirname, '../migrations/0259_inventory_check_sessions.sql'), 'utf8'))
+  if (schema) for (const file of ['0259_inventory_check_sessions.sql', '0285_inventory_check_items_latest.sql', '0318_inventory_check_task_index.sql', '0319_inventory_check_open_task_index.sql']) db.exec(fs.readFileSync(path.join(__dirname, '../migrations', file), 'utf8'))
   db.exec(`INSERT OR REPLACE INTO roles(id,name,code,permissions) VALUES
     (900001,'Counter','employee','{"inventory":true,"inventory_checks":true,"inventory_check_show_price":true,"inventory_check_show_barcode":true,"inventory_check_show_category":true,"inventory_check_show_brand":true,"inventory_check_show_stock":true,"inventory_check_show_received":true,"inventory_check_show_sales":true,"inventory_check_show_customers":true}'),(900002,'Viewer','viewer','{"inventory":true,"inventory_checks":true,"inventory_check_show_price":true,"inventory_check_show_barcode":true,"inventory_check_show_category":true,"inventory_check_show_brand":true,"inventory_check_show_stock":true,"inventory_check_show_received":true,"inventory_check_show_sales":true,"inventory_check_show_customers":true,"inventory_checks:check":false}'),
     (900003,'Administrator','admin','{}');
@@ -262,7 +262,7 @@ async function main() {
     const stockRead=projectionBatch.find(statement=>statement.sql.includes('wanted AS'))
     assert.ok(stockRead.values.includes('[910000]'),'single changed product only, never500 current stock rows')
     for(const result of [made,edited,closed]) assert.equal(result.queries.some(query=>/SELECT \* FROM inventory_check_items WHERE session_id=.*ORDER BY product_id/s.test(query.sql)),false,'postwrite must not read all member observations')
-    assert.ok(made.queries.length<=22); assert.ok(edited.queries.length<=17); assert.ok(closed.queries.length<=13)
+    assert.ok(made.queries.length<=22); assert.ok(edited.queries.length<=17); assert.ok(closed.queries.length<=17) // 13 + the four statements of the count-task auto-close (one batch, no extra D1 call)
   })
   await check('current projection refuses changed token/org/schema or unreadable snapshots and reconciles compound lost ACK plus a read retry', async () => {
     for(const mode of ['token','organization','schema','database']) {

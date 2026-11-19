@@ -75,7 +75,7 @@ const cases: Array<[string, () => Promise<void>]> = [
   ['the check facts fill the slot: status with its note, counted against stock, last checked, last stock change, held, received date', async () => {
     const s = await mount()
     const facts = s.find(node => node.getAttribute('data-inventory-check-detail') !== null, 'check facts').textContent
-    assert.ok(facts.includes('Check statusIssue · Two crushed'), facts)
+    assert.ok(facts.includes('Check statusDiffers · Two crushed'), facts)
     assert.ok(facts.includes('Counted5 (−3)'), 'counted against the stock now: ' + facts)
     assert.ok(facts.includes('Last checked@amy'), 'who checked: ' + facts)
     assert.ok(/Last stock change\d{2}\/\d{2}\/\d{4}/.test(facts), 'the overlay\'s last_change_at is shown at last: ' + facts)

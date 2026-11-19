@@ -41,9 +41,9 @@ type Props = {
 const STATE_LABELS = {
   unstarted: ['inventory_check_unstarted', 'Not started'],
   done: ['inventory_check_done', 'Done'],
-  issue: ['inventory_check_issue', 'Issue'],
+  issue: ['inventory_check_issue', 'Differs'],
 } as const
-const LIST_LABELS = { not_checked: ['inventory_check_status_not_checked', 'Not checked'], in_check: ['inventory_check_status_in_check', 'In check'], ok: ['inventory_check_status_ok', 'Checked OK'], issue: ['inventory_check_issue', 'Issue'] } as const
+const LIST_LABELS = { not_checked: ['inventory_check_status_not_checked', 'Not checked'], in_check: ['inventory_check_status_in_check', 'In check'], ok: ['inventory_check_status_ok', 'Checked OK'], issue: ['inventory_check_issue', 'Differs'] } as const
 
 /** The fields of the Inventory row that ProductDetailModal reads, in the shape it reads them. Only what the viewer's grants left on the row crosses: nothing is guessed, nothing is re-read. */
 export function detailRecord(product: InventoryCheckProduct, fields: InventoryCheckAccess['fields']): Record<string, unknown> {

@@ -68,7 +68,7 @@ export function ProgressRing({ progress, t }: { progress: Progress; t: Translato
 
 /** ✓done  !issue, each figure named for tooltips and screen readers; what is left is the ring's grey. */
 export function SessionCounts({ progress, t }: { progress: Progress; t: Translator }) {
-  const done = label(t, 'inventory_check_done', 'Done'), issue = label(t, 'inventory_check_issue', 'Issue')
+  const done = label(t, 'inventory_check_done', 'Done'), issue = label(t, 'inventory_check_issue', 'Differs')
   return <span data-session-counts className="inline-flex shrink-0 items-center gap-2 tabular-nums">
     <span className="inline-flex items-center gap-0.5 text-emerald-700 dark:text-emerald-300" title={done} aria-label={`${done}: ${progress.done}`}><Check className="h-3.5 w-3.5" aria-hidden="true" />{progress.done}</span>
     <span className="inline-flex items-center gap-0.5 text-amber-700 dark:text-amber-300" title={issue} aria-label={`${issue}: ${progress.issue}`}><AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />{progress.issue}</span>

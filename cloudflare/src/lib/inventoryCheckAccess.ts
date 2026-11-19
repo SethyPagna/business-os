@@ -37,6 +37,20 @@ export function canApproveInventoryCounts(user: PermissionUser): boolean {
   return access.canView && access.fields.stock && hasPermission(user, 'inventory_check_approve')
 }
 
+/**
+ * Issuing count tasks, closing any task and handing back someone else's pickup is its own extra of the count sessions (owner, 18 Nov 2026): off unless granted, admins always pass, and it never implies counting.
+ * It needs the count grant too: every writer does, so a role with the extra and no count grant would be offered what the Worker refuses.
+ */
+export function canIssueInventoryCountTasks(user: PermissionUser): boolean {
+  const access = getInventoryCheckAccess(user)
+  return access.canView && access.canCheck && hasPermission(user, 'inventory_check_issue')
+}
+
+/** Seeing the Tasks, picking one up and counting it is the action `inventory_checks:tasks`: on for everyone who can count, and an administrator can switch it off for a role. It needs the count grant on top. */
+export function canWorkInventoryCountTasks(user: PermissionUser): boolean {
+  return getInventoryCheckAccess(user).canCheck && getActionTier(user, 'inventory_checks', 'tasks') === 'full'
+}
+
 const IDENTITY_FIELDS = ['id', 'name', 'image_path', 'image_url', 'unit', 'parent_id', 'is_group', 'is_grouped_cached', 'checkable', 'matches_filters'] as const
 /** The simplified page's per-row check facts (ic_simple). The reader already withholds counts and names the viewer may not see. */
 const CHECK_FIELDS = ['check_status', 'check_counted_quantity', 'check_note', 'check_by', 'check_at', 'check_session_id', 'check_branch_id'] as const

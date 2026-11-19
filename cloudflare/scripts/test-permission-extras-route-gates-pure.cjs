@@ -142,6 +142,25 @@ async function main() {
     assert.equal(access(admin).canView, true)
   })
 
+  await check('count tasks: issuing is an extra (off unless granted, never implied by counting or Inventory Full), picking up is an action (on for everyone who can count, narrowed by an explicit false)', () => {
+    const acquisition = (() => { const m = { exports: {} }; const full = path.join(SRC, 'lib/acquisitionCostAccess.ts'); const code = ts.transpileModule(fs.readFileSync(full, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText; new Function('require', 'module', 'exports', code)((r) => (r === './permissions' ? permissions : deepStub()), m, m.exports); return m.exports })()
+    const full = path.join(SRC, 'lib/inventoryCheckAccess.ts')
+    const m = { exports: {} }
+    new Function('require', 'module', 'exports', ts.transpileModule(fs.readFileSync(full, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)((r) => (r === './permissions' ? permissions : acquisition), m, m.exports)
+    const { canIssueInventoryCountTasks: issue, canWorkInventoryCountTasks: work } = m.exports
+    const counter = { inventory_checks: true }
+    assert.equal(issue(u(counter)), false, 'a counter cannot issue')
+    assert.equal(issue(u({ ...counter, inventory_check_issue: true })), true, 'the extra alone opens issuing')
+    assert.equal(issue(u({ inventory_check_issue: true })), false, 'the extra needs the sessions grant under it')
+    assert.equal(issue(u({ inventory: true, inventory_check_approve: true, ...counter })), false, 'Inventory Full and the approve extra do not issue')
+    assert.equal(issue(admin), true, 'an administrator always passes')
+    assert.equal(work(u(counter)), true, 'everyone who can count can pick up and count tasks')
+    assert.equal(work(u({ ...counter, 'inventory_checks:tasks': false })), false, 'an explicit false switches tasks off')
+    assert.equal(work(u({ ...counter, 'inventory_checks:check': false })), false, 'tasks also need the count grant')
+    assert.equal(work(u({ inventory_check_issue: true })), false, 'issuing does not imply counting')
+    assert.equal(work(admin), true)
+  })
+
   if (failures.length) { console.log(`\n${failures.length} check(s) FAILED`); process.exit(1) }
   console.log(`\n${passed} checks passed: permission extras route gates`)
 }

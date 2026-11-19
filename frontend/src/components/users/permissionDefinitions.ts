@@ -332,6 +332,13 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         shortTKey: 'perm_short_approve_counts', short: 'Approve counts',
         hintTKey: 'perm_hint_approve_counts', hint: 'Applies what a count found to stock. Also needs Adjust / receive stock at Full.',
       },
+      // Issuing count tasks (owner, 18 Nov 2026): an admin chooses which products are counted, closes a task and hands back a pickup. Off unless granted; it never implies counting.
+      // Picking a task up and counting it is the action Tasks of the sessions row (on for everyone who can count), so a role can have either without the other.
+      {
+        key: 'inventory_check_issue', tKey: 'perm_inventory_check_issue', label: 'Issue count tasks', sensitivity: 'normal', extraOf: 'inventory_checks',
+        shortTKey: 'perm_short_issue_count_tasks', short: 'Issue tasks',
+        hintTKey: 'perm_hint_issue_count_tasks', hint: 'Chooses which products are counted, closes a task and hands back a pickup. Counting a task is the Tasks switch of the sessions row.',
+      },
     ],
   },
   {

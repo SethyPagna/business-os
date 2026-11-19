@@ -91,7 +91,7 @@ import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersions } from './cache'
 import { readSwitch } from './readSwitches'
-import { closeIssueStatements, reopenIssueStatements } from './stockSetClosesIssue'
+import { closedTasksSelect, closeIssueStatements, reopenIssueStatements } from './stockSetClosesIssue'
 import { findConsumingBlocker, findLaterChangeBlocker, type StockRefusalDetails } from './stockRefusalBlocker'
 import {
   UNDO_CLOSED_BRANCH_RETIRED_CODE, UNDO_CLOSED_BRANCH_RETIRED_MESSAGE, addressedStatements, branchEffectRefusal, branchRedirectGuardRefusal,
@@ -463,9 +463,9 @@ export async function applyStockLotSet(
     if (!closeIssue || request.variance || !recordOperation) return unchanged
     // A Set to the figure stock already has (a sale got there first) changes nothing, but it can still be what makes every line of the latest Issue match: the close runs alone, pinned by the
     // same state guard, and the answer says whether it landed. There is no operation and no history row: there is nothing to undo.
-    const sessionId = crypto.randomUUID()
-    const closing = closeIssueStatements({ productId: request.productId, branchId: before.branchId, organization: user.organization_id ?? null, operation: operationRequestId, generation: 0, actorId: user.id,
-      actorName: actorSnapshot(user) ?? '' }, undefined, { sessionId, answer: false })
+    const sessionId = crypto.randomUUID(), closingAt = new Date().toISOString()
+    const closeArgs = { productId: request.productId, branchId: before.branchId, organization: user.organization_id ?? null, operation: operationRequestId, generation: 0, actorId: user.id, actorName: actorSnapshot(user) ?? '' }
+    const closing = closeIssueStatements(closeArgs, closingAt, { sessionId, answer: false })
     if (!atomicMark) await markWritten()
     try {
       if (atomicMark?.execute) await atomicMark.execute(db, addressedStatements(landing, [stateGuard(before), ...closing]))
@@ -476,8 +476,11 @@ export async function applyStockLotSet(
       if (isMaintenanceError(error)) return MAINTENANCE_RESPONSE
       return conflict('Stock changed while saving. No correction was applied; refresh and try again.')
     }
-    const made = await db.prepare('SELECT 1 AS closed FROM inventory_check_sessions WHERE id=@sid').get<{ closed: number }>({ sid: sessionId })
-    return { status: 200, body: { ...unchanged.body, issue_closed: made?.closed === 1 } }
+    // One read: whether the difference closed, and the count tasks that closed with it.
+    const tasksRead = closedTasksSelect(closeArgs, closingAt, sessionId)
+    const made = await db.prepare(`SELECT EXISTS(SELECT 1 FROM inventory_check_sessions WHERE id=@sid) AS closed, ${tasksRead.expr} AS tasks`).get<{ closed: number; tasks: string | null }>({ ...tasksRead.params, sid: sessionId })
+    const closedTasks = made?.tasks ? JSON.parse(made.tasks) as string[] : []
+    return { status: 200, body: { ...unchanged.body, issue_closed: made?.closed === 1, ...(closedTasks.length ? { closed_tasks: closedTasks } : {}) } }
   }
   if (lotDelta > 0) {
     try { await requireReceivingBranch(db, request.branchId) } catch (error) {
@@ -708,7 +711,7 @@ export async function replayStockLotSet(
   // The Issue this Set closed (issue_closed in its stored answer) is open again after an Undo, and closed again by a Redo; both only while the Set's own count is still the latest (stockSetClosesIssue.ts).
   if ((JSON.parse(row.response_json || '{}') as { issue_closed?: unknown }).issue_closed === true) {
     const closing = { productId: before.productId, branchId: before.branchId, organization: user.organization_id ?? null, operation: row.id, generation: next, actorId: user.id, actorName: actorSnapshot(user) ?? '' }
-    statements.push(...(direction === 'undo' ? reopenIssueStatements(closing) : closeIssueStatements(closing)))
+    statements.push(...(direction === 'undo' ? reopenIssueStatements(closing) : closeIssueStatements(closing, undefined, { restore: true })))
   }
   statements.push(
     { sql: "UPDATE stock_lot_adjustment_operations SET generation=@next,state=@target,revision_json=json_set(revision_json,'$.generation',@next) WHERE id=@operation", params },

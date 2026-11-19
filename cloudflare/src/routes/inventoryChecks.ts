@@ -3,17 +3,19 @@ import { getCookie } from 'hono/cookie'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { getDb } from '../lib/db'
-import { loadLowStockConfig } from '../lib/lowStockSettings'
+import { loadLowStockConfig, resolveLowStockConfig } from '../lib/lowStockSettings'
 import { readSwitch, readSwitchMemoMs } from '../lib/readSwitches'
 import type { Env } from '../index'
 import { decideInventoryCheckApproval, decideInventoryCheckLine, type ApprovalDecided } from '../lib/inventoryCheckApprovals'
 import { getPlanLimits } from '../lib/planTier'
+import { getInventoryCheckTaskLimits } from '../lib/inventoryCheckTaskLimits'
 import type { ReviewAlertEvent, ReviewAlertHook } from '../lib/reviewAlert'
 import type { InventoryContext } from './inventory'
 import type { StockInCommitLine } from './stockInCommit'
-import { bumpVersion } from '../lib/cache'
+import { bumpVersion, cacheIdentity, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { stockVisibleProductSql } from '../lib/productStockGuard'
-import { canApproveInventoryCounts, getInventoryCheckAccess, InventoryCheckQueryError } from '../lib/inventoryCheckAccess'
+import { canApproveInventoryCounts, canIssueInventoryCountTasks, canWorkInventoryCountTasks, getInventoryCheckAccess, InventoryCheckQueryError } from '../lib/inventoryCheckAccess'
+import { readTaskProducts, readTaskRows, type TaskRow } from '../lib/inventoryCheckTasks'
 import { canonicalProductsRequest, checkStateRestriction, inventoryChecksVersion, planInventoryList, projectInventoryList, readCheckStateSets, readCheckSummary, type CheckStateSets } from '../lib/inventoryCheckList'
 import { parseOverlayIds, readInventoryOverlay } from '../lib/inventoryCheckOverlay'
 import { availableGroupings, buildGroupingBlock, type GroupingBlock } from '../lib/inventoryCheckGrouping'
@@ -22,7 +24,8 @@ import { readInventoryCheckLots } from '../lib/inventoryCheckLots'
 import { getActionTier } from '../lib/permissions'
 import { attachLotRows, readProductSearchList } from './products'
 import { approvalsAvailable, createInventoryCheckLotSubmission, createInventoryCheckSession, createInventoryCheckSubmission, lotLinesAvailable, getInventoryCheckSession, inventoryCheckDigest, inventoryCheckSessionHistory,
-  InventoryCheckSessionError, listInventoryCheckSessions, patchInventoryCheckObservation, patchInventoryCheckSession, REPLACED_NOTE } from '../lib/inventoryCheckSessions'
+  InventoryCheckSessionError, listInventoryCheckSessions, patchInventoryCheckObservation, patchInventoryCheckSession, pickupInventoryCheckTask, releaseInventoryCheckTask, REPLACED_NOTE,
+  type InventoryCheckPickupTask } from '../lib/inventoryCheckSessions'
 
 // A global hook, not an import: the alert module is installed by index.ts, many tests load this route alone, and an absent hook is a no-op
 // (the same contract as lib/reviewGate.ts). The Telegram alert is sent after the write it announces committed, never on a replay or a refusal.
@@ -116,14 +119,21 @@ const submissionCaps = async (c: Context<{ Bindings: Env; Variables: { user: Ses
 // The summary (lib/inventoryCheckList.ts readCheckSummary) is ONE object, the same from /list (when the request names a branch) and /overlay (always): counts of product rows, total, not_checked, the date chips and,
 // with Fix stock, pending. tooLarge: more checked products than inventoryCheckFilterMaxIds, so there are no counts and no days to give: it says `{ tooLarge: true }` instead of vanishing, and a page that holds
 // chips from an earlier answer clears them. The check-state filters are refused (503) while it holds.
-app.get('/list', async c => {
-  if (!await readSwitch(c.env, 'ic_wired')) return notWired(c)
-  singleValued(c)
+// The countable products of one task (count tasks): its identity and product ids, read once per inventory_checks version and products version (a task's items never change; the version moves whenever the task closes or is counted, and a deactivation, merge or header moves the products version).
+type TaskProducts = { branchId: number; status: 'open' | 'closed'; startedAt: string; productIds: number[] }
+async function readTaskCached(c: IcContext, taskId: string): Promise<TaskProducts | null> {
+  const [version, productsVersion] = await Promise.all([inventoryChecksVersion(c.env), getVersionWithFallback(c.env, 'products')])
+  return cachedJsonResponse(new Request(`https://ic.invalid/__bos/ic-task?id=${encodeURIComponent(taskId)}&order=1`, { method: 'GET' }), c.executionCtx, `ict:${version}:${productsVersion}`, getPlanLimits(c.env).productListCacheSeconds,
+    () => readTaskProducts(getDb(c.env), { organization: c.get('user').organization_id ?? null, taskId }), cacheIdentity(c))
+}
+// idsOnly: the caller wants the ids of the rows (the filter of a task being issued), not the rows: no received dates, no tagged lots and no summary are read for them.
+type ListExtra = { task?: TaskProducts & { id: string }; idsOnly?: boolean }
+async function readListPage(c: IcContext, rawQuery: Record<string, string>, extra: ListExtra = {}) {
   const user = c.get('user'), db = getDb(c.env)
   const access = getInventoryCheckAccess(user)
   // Counts waiting for approval are known only to a viewer who may see stock, and only while ic_fix_stock is on (migration 0286 applied): the same rule as the old list.
   const fixStock = access.fields.stock && await fixStockOn(c)
-  const plan = planInventoryList(user, c.req.query(), { pendingAvailable: fixStock, maxIds: getPlanLimits(c.env).inventoryOverlayMaxRows })
+  const plan = planInventoryList(user, rawQuery, { pendingAvailable: fixStock, maxIds: getPlanLimits(c.env).inventoryOverlayMaxRows })
   const productsQuery = { ...plan.productsQuery }
   let codeHit: number | null = null
   if (plan.codeLookup) {
@@ -136,6 +146,13 @@ app.get('/list', async c => {
   let setsVersion = ''
   if (plan.branchId !== null && (plan.checkState || plan.checkedOn)) ({ sets, version: setsVersion } = await readCheckStateSets(c, plan.branchId, fixStock))
   let restriction: { restrictIdsJson?: string; excludeIdsJson?: string } = (plan.checkState || plan.checkedOn) && sets ? checkStateRestriction(plan.checkState, sets, plan.checkedOn) : {}
+  // taskId: the list is restricted to the task's products, built like the check-state restriction (and intersected with it when both are asked: a task's Differs, a task's Not checked).
+  if (extra.task) {
+    let ids = new Set(extra.task.productIds)
+    if (restriction.restrictIdsJson !== undefined) { const keep = new Set(JSON.parse(restriction.restrictIdsJson) as number[]); ids = new Set([...ids].filter((id) => keep.has(id))) }
+    if (restriction.excludeIdsJson !== undefined) { const drop = new Set(JSON.parse(restriction.excludeIdsJson) as number[]); ids = new Set([...ids].filter((id) => !drop.has(id))) }
+    restriction = { restrictIdsJson: JSON.stringify([...ids]) }
+  }
   // The shared cache key is the canonical request. A grouped read never takes a by-id read (its ranking needs the keyed page read): an exact code hit becomes a restriction to that id, and the key keeps the id.
   const keyRequest = canonicalProductsRequest(productsQuery)
   if (plan.grouping && codeHit !== null) {
@@ -144,15 +161,15 @@ app.get('/list', async c => {
     restriction = { ...restriction, restrictIdsJson: JSON.stringify(kept) }
   }
   const grouping = plan.grouping ? { by: plan.grouping, checkOrg: user.organization_id ?? null } : undefined
-  const include = new Set<string>([...access.fields.stock ? ['tagged_lots'] : [], ...access.fields.received ? ['lots'] : []])
+  const include = new Set<string>(extra.idsOnly ? [] : [...access.fields.stock ? ['tagged_lots'] : [], ...access.fields.received ? ['lots'] : []])
   // A grouped list keys on the inventory_checks version even with no check state: the checked grouping orders by the checks themselves.
-  const groupedVersion = grouping && !setsVersion ? await inventoryChecksVersion(c.env) : setsVersion
+  const groupedVersion = (grouping || extra.task) && !setsVersion ? await inventoryChecksVersion(c.env) : setsVersion
   // The cached page is keyed by the restriction's own name: the state (Pending without the right to see it is an empty set of its own: it must not share a cached page with the admin's real Pending set)
   // and the day, so a page of one day never serves another.
-  const setKey = [plan.checkState ? (plan.checkState === 'pending' && !fixStock ? 'pending_unavailable' : plan.checkState) : '', plan.checkedOn ? `day:${plan.checkedOn}` : ''].filter(Boolean).join('|')
+  const setKey = [plan.checkState ? (plan.checkState === 'pending' && !fixStock ? 'pending_unavailable' : plan.checkState) : '', plan.checkedOn ? `day:${plan.checkedOn}` : '', extra.task ? `task:${extra.task.id}` : ''].filter(Boolean).join('|')
   const { groups, ...payload } = await readProductSearchList(c, productsQuery, { include, keyRequest, ...restriction, ...(grouping ? { grouping } : {}),
     ...(setKey ? { setKey } : codeHit !== null && grouping ? { setKey: 'code' } : {}),
-    ...(plan.checkState || plan.checkedOn || grouping ? { setVersion: groupedVersion } : {}), lotsAdmitted: access.fields.received, taggedLotsAdmitted: access.fields.stock }) as Awaited<ReturnType<typeof readProductSearchList>> & { groups?: FamilyGroupTotals[] }
+    ...(plan.checkState || plan.checkedOn || grouping || extra.task ? { setVersion: groupedVersion } : {}), lotsAdmitted: access.fields.received && !extra.idsOnly, taggedLotsAdmitted: access.fields.stock && !extra.idsOnly }) as Awaited<ReturnType<typeof readProductSearchList>> & { groups?: FamilyGroupTotals[] }
   const lotCounts = await lotCountsOn(c)
   const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock, await submissionCaps(c, lotCounts), availableGroupings(access.fields))
   const productsPage = getActionTier(user, 'products', 'view') !== 'none'
@@ -165,8 +182,22 @@ app.get('/list', async c => {
   // The counts are the branch-wide figures of the unfiltered list, whatever this page is filtered to; a request that names no branch has none.
   const summary = plan.branchId !== null && plan.wantSummary ? await readCheckSummary(c, plan.branchId, fixStock, sets ? { sets, version: setsVersion } : undefined) : null
   // window_pages: how many pages (this one and the ones ahead) the page may read in one window; the ranking behind them is shared (catalog_ranked_scope), so a window costs rows, not rankings.
-  return c.json({ ...body, wired: true, projected, window_pages: getPlanLimits(c.env).catalogListWindowPages, overlay_ids: getPlanLimits(c.env).inventoryOverlayMaxRows, ...(groupingBlock ? { grouping: groupingBlock } : {}), ...(summary ? { summary } : {}),
-    capabilities })
+  return { ...body, wired: true, projected, window_pages: getPlanLimits(c.env).catalogListWindowPages, overlay_ids: getPlanLimits(c.env).inventoryOverlayMaxRows, ...(groupingBlock ? { grouping: groupingBlock } : {}), ...(summary ? { summary } : {}),
+    ...(extra.task ? { task: { id: extra.task.id, status: extra.task.status, total: extra.task.productIds.length } } : {}), capabilities }
+}
+app.get('/list', async c => {
+  if (!await readSwitch(c.env, 'ic_wired')) return notWired(c)
+  singleValued(c)
+  const { taskId, ...query } = c.req.query()
+  if (taskId === undefined) return c.json(await readListPage(c, query))
+  // A task's list: only for a viewer who may see tasks, at the task's own branch, and not beside an id list.
+  const user = c.get('user')
+  if (!canWorkInventoryCountTasks(user) && !canIssueInventoryCountTasks(user)) throw new InventoryCheckQueryError(403, 'inventory_check_tasks_required', 'taskId')
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(taskId) || query.ids !== undefined) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', query.ids !== undefined ? 'ids' : 'taskId')
+  const task = await readTaskCached(c, taskId)
+  if (!task) throw new InventoryCheckSessionError(404, 'inventory_check_task_not_found')
+  if (query.branchId !== String(task.branchId)) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', 'branchId')
+  return c.json(await readListPage(c, query, { task: { ...task, id: taskId } }))
 })
 app.get('/overlay', async c => {
   if (!await readSwitch(c.env, 'ic_wired')) return notWired(c)
@@ -211,10 +242,97 @@ app.get('/lots', async c => {
   const productId = positiveWord(c.req.query('productId'), 'productId'), branchId = positiveWord(c.req.query('branchId'), 'branchId')
   return c.json(await readInventoryCheckLots(getDb(c.env), user, { productId, branchId, limit: getPlanLimits(c.env).inventoryCheckLotLinesPerProduct }))
 })
-app.get('/sessions', async c => c.json(await listInventoryCheckSessions(getDb(c.env), await principal(c), c.req.query(), { approvals: await fixStockOn(c) })))
+app.get('/sessions', async c => c.json(await listInventoryCheckSessions(getDb(c.env), await principal(c), c.req.query(), { approvals: await fixStockOn(c),
+  tasks: async (branchId) => new Map((await readTaskBoard(c, branchId)).map((row): [string, InventoryCheckPickupTask] => [row.id, { id: row.id, title: row.title, status: row.status, total: row.total, done: row.done }])) })))
 app.post('/sessions', async c => {
   const result = await createInventoryCheckSession(getDb(c.env), await principal(c), await c.req.json().catch(()=>null), await loadLowStockConfig(c.env), { simple: await readSwitch(c.env, 'ic_simple') })
   return c.json(result, result.created ? 201 : 200)
+})
+// ---- count tasks (owner, 18 Nov 2026; lib/inventoryCheckTasks.ts, contract docs/contracts/inventory-check-tasks-20261119.md) ----------------------------------------------------------
+// An admin issues products to count; an employee picks a task up and counts it on the wired list (/list?taskId=), submitting with taskId. The done rule and the auto-close are in the Worker.
+// The board (a branch's open and recent tasks with their done counts) is cached on the inventory_checks version: every writer that can change a task or a count moves it, so an unchanged open reads nothing.
+async function readTaskBoard(c: IcContext, branchId: number): Promise<TaskRow[]> {
+  // The counts also depend on which products can still be counted (a deactivation or a merge changes `total`, `done` and `removed`), so the entry keys on the products version too.
+  const [version, productsVersion] = await Promise.all([inventoryChecksVersion(c.env), getVersionWithFallback(c.env, 'products')])
+  const limits = getPlanLimits(c.env), taskLimits = getInventoryCheckTaskLimits(c.env)
+  return cachedJsonResponse(new Request(`https://ic.invalid/__bos/ic-tasks?branchId=${branchId}&order=2`, { method: 'GET' }), c.executionCtx, `ict:${version}:${productsVersion}`, limits.productListCacheSeconds,
+    () => readTaskRows(getDb(c.env), { organization: c.get('user').organization_id ?? null, branchId, shown: taskLimits.maxOpenTasks, closedShown: taskLimits.tasksClosedShown }), cacheIdentity(c))
+}
+/** What a viewer is told of a task: names (never account ids) of who issued and who picked it up, and what they may do with it. */
+const taskView = (row: TaskRow, user: SessionUser) => {
+  const mine = row.pickup_id !== null && row.picked_by === user.id, open = row.status === 'open'
+  const access = getInventoryCheckAccess(user)
+  // The filters an admin issued from are shown only as far as the viewer may use them (the same rule as a session's detail).
+  const selection = row.selection && typeof row.selection === 'object' && (row.selection as { filters?: Record<string, unknown> }).filters
+    ? { ...row.selection as object, filters: Object.fromEntries(Object.entries((row.selection as { filters: Record<string, unknown> }).filters).filter(([key]) => !(key === 'brand' && !access.fields.brand) && !(key === 'category' && !access.fields.category) && !(key === 'stockState' && !access.fields.stock))) }
+    : row.selection
+  return { id: row.id, branch_id: row.branch_id, title: row.title, status: row.status, issued_at: row.started_at, issued_by: row.issuer, closed_at: row.closed_at, total: row.total, done: row.done, removed: row.removed, selection,
+    picked_up_by: row.pickup_id ? row.picker : null, picked_up_at: row.pickup_id ? row.picked_at : null, mine, ...(mine ? { pickup_session_id: row.pickup_id } : {}),
+    can_pickup: open && row.pickup_id === null && canWorkInventoryCountTasks(user), can_release: open && row.pickup_id !== null && (mine || canIssueInventoryCountTasks(user)), can_close: open && canIssueInventoryCountTasks(user) }
+}
+app.get('/tasks', async c => {
+  if (!await readSwitch(c.env, 'ic_wired')) return notWired(c)
+  singleValued(c)
+  const user = c.get('user')
+  if (!canWorkInventoryCountTasks(user) && !canIssueInventoryCountTasks(user)) throw new InventoryCheckQueryError(403, 'inventory_check_tasks_required', '')
+  const branchId = positiveWord(c.req.query('branchId'), 'branchId')
+  const rows = await readTaskBoard(c, branchId)
+  return c.json({ branchId, version: await inventoryChecksVersion(c.env), items: rows.map((row) => taskView(row, user)),
+    capabilities: { issue: canIssueInventoryCountTasks(user), work: canWorkInventoryCountTasks(user), maxProducts: getInventoryCheckTaskLimits(c.env).maxProducts, maxOpenTasks: getInventoryCheckTaskLimits(c.env).maxOpenTasks } })
+})
+// The filter keys a task may be issued from: the list's own (a closed set; the list's search code validates them for this viewer, as it does for /list).
+const TASK_FILTER_KEYS = ['query', 'brand', 'category', 'stockState', 'checkState', 'checkedOn'] as const
+async function resolveTaskFilters(c: IcContext, branchId: number, raw: unknown, limit: number): Promise<{ filters: Record<string, string>; ids: number[]; total: number; atLeast: boolean }> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new InventoryCheckSessionError(400, 'inventory_check_invalid_request')
+  const filters: Record<string, string> = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!(TASK_FILTER_KEYS as readonly string[]).includes(key) || typeof value !== 'string') throw new InventoryCheckSessionError(400, 'inventory_check_invalid_request')
+    if (value.trim() !== '') filters[key] = value.trim()
+  }
+  // The list's own reader, page after page (a page holds at most 100 FAMILIES, each with all its countable children, so `total` counts families and a page holds more rows than that), until the reader has no more pages or the
+  // cap is passed. The cap and the answer's `total` count COUNTABLE ROWS (a family header is not one), never families; stopped early over the cap, `total` is what was counted so far and `atLeast` says so.
+  const ids = new Set<number>()
+  let atLeast = false
+  for (let page = 1; ; page++) {
+    const answer = await readListPage(c, { ...filters, branchId: String(branchId), summary: '0', pageSize: '100', page: String(page) }, { idsOnly: true }) as { items?: Array<{ id: number; is_group?: number | boolean }>; total?: number }
+    const rows = answer.items ?? []
+    for (const row of rows) if (!row.is_group) ids.add(Number(row.id))
+    if (!rows.length || page * 100 >= Number(answer.total ?? 0)) break
+    if (ids.size > limit) { atLeast = true; break }
+  }
+  return { filters, ids: [...ids], total: ids.size, atLeast }
+}
+app.post('/tasks', async c => {
+  if (!await readSwitch(c.env, 'ic_wired')) return notWired(c)
+  const user = c.get('user')
+  // The permission is checked before anything is read; the writer checks it again against the database.
+  if (!canIssueInventoryCountTasks(user)) throw new InventoryCheckSessionError(403, 'inventory_check_issue_required')
+  const body = await c.req.json().catch(() => null) as Record<string, unknown> | null
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new InventoryCheckSessionError(400, 'inventory_check_invalid_request')
+  const limit = getInventoryCheckTaskLimits(c.env).maxProducts
+  if ((body.productIds === undefined) === (body.filters === undefined)) throw new InventoryCheckSessionError(400, 'inventory_check_invalid_request')
+  let productIds = body.productIds, selection: unknown = { kind: 'ids' }, dropIneligible = false
+  if (body.filters !== undefined) {
+    const branchWord = typeof body.branchId === 'number' ? String(body.branchId) : ''
+    if (!/^[1-9][0-9]*$/.test(branchWord)) throw new InventoryCheckSessionError(400, 'inventory_check_invalid_id')
+    const resolved = await resolveTaskFilters(c, Number(branchWord), body.filters, limit)
+    // Over the cap the answer carries the total, so the admin can narrow the filter.
+    if (resolved.total > limit) throw new InventoryCheckSessionError(400, 'inventory_check_task_too_many', { total: resolved.total, limit, ...(resolved.atLeast ? { atLeast: true } : {}) })
+    productIds = resolved.ids; selection = { kind: 'filters', filters: resolved.filters }; dropIneligible = true
+  }
+  const { filters: _filters, ...rest } = body
+  const result = await createInventoryCheckSession(getDb(c.env), await principal(c), { ...rest, productIds }, resolveLowStockConfig({}), { task: { selection, maxProducts: limit, maxOpenTasks: getInventoryCheckTaskLimits(c.env).maxOpenTasks, dropIneligible } })
+  return c.json(result, result.created ? 201 : 200)
+})
+// Picking a task up (one person per task) and handing it back; see lib/inventoryCheckSessions.ts.
+app.post('/tasks/:id/pickup', async c => {
+  if (!await readSwitch(c.env, 'ic_wired')) return notWired(c)
+  const result = await pickupInventoryCheckTask(getDb(c.env), await principal(c), c.req.param('id'), await c.req.json().catch(() => null))
+  return c.json(result, result.created ? 201 : 200)
+})
+app.post('/tasks/:id/release', async c => {
+  if (!await readSwitch(c.env, 'ic_wired')) return notWired(c)
+  return c.json(await releaseInventoryCheckTask(getDb(c.env), await principal(c), c.req.param('id'), await c.req.json().catch(() => null)))
 })
 // The owner's way to count (ic_simple): pick products, type counts in the rows, submit once. With the switch off the route does not exist.
 app.post('/submissions', async c => {
