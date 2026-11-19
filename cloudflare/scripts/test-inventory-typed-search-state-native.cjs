@@ -17,7 +17,7 @@ function prng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>
 
 // The source as it was before the fix: the check terms of a typed search and the name-sibling test are inert.
 const UNFIXED = { [PRODUCTS]: [
-  ['const checkTermsOf = (options: { restrictIdsJson?: string; excludeIdsJson?: string }): string[] => [', 'const checkTermsOf = (_options: { restrictIdsJson?: string; excludeIdsJson?: string }): string[] => [] || ['],
+  ['const checkTermsOf = (options: { restrictIdsJson?: string; excludeIdsJson?: string; leafOnly?: boolean }, qualifying = false): string[] => {', 'const checkTermsOf = (options: { restrictIdsJson?: string; excludeIdsJson?: string; leafOnly?: boolean }, qualifying = false): string[] => {\n  if (Date.now() > 0) return []'],
   ['  if (!keep && !drop) return undefined', '  return undefined'],
 ] }
 
