@@ -64,6 +64,8 @@ export async function createTasksWorld(options: { branches?: Array<{ id: number;
     productsPerSubmission: 40,
     /** While set, GET /tasks waits for it (a first open shows its skeleton until the answer arrives). */
     hold: null as Promise<void> | null,
+    /** The write identity of the signed-in account: a mounted page freezes it when it opens, and an account or server switch moves it on (the real one only ever goes up). */
+    identityEpoch: 1,
     count: (route: string) => world.calls.filter(call => call.route === route).length,
     ofRoute: (route: string) => world.calls.filter(call => call.route === route),
     reset: () => { world.calls.length = 0 },
@@ -91,7 +93,7 @@ export async function createTasksWorld(options: { branches?: Array<{ id: number;
   const mark = (id: string, patch: Partial<BoardTask>) => { const row = world.board.find(candidate => candidate.id === id); if (row) Object.assign(row, patch) }
   const doubles = () => ({
     'utils/dirtyWork.ts': dirtyWork,
-    'api/actorReadScope.ts': { captureActorReadScope: () => ({ authority: 'test', channel: 'inventoryChecks', revision: '1' }), captureActorWriteIdentity: () => ({ owner: 'test', epoch: 1 }), isActorReadScopeCurrent: () => true, isActorWriteIdentityCurrent: () => true },
+    'api/actorReadScope.ts': { captureActorReadScope: () => ({ authority: 'test', channel: 'inventoryChecks', revision: '1' }), captureActorWriteIdentity: () => ({ owner: 'test', epoch: world.identityEpoch }), isActorReadScopeCurrent: () => true, isActorWriteIdentityCurrent: (identity?: { owner?: string; epoch?: number }) => identity?.owner !== 'test' || identity.epoch === world.identityEpoch },
     'api/productReadTransport.ts': { peekProductSearch: () => null, primeProductSearch: () => {}, getProductFilters: async () => ({ brands: ['Dior', 'Lancome'], categories: [] }) },
     'api/branchTransport.ts': { getBranches: async () => { record('branches'); return world.branches.map(branch => ({ ...branch, is_active: 1 })) } },
     'api/inventoryChecksTransport.ts': {
