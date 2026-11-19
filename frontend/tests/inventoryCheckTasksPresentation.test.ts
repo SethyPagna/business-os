@@ -20,6 +20,14 @@ for (const language of ['en', 'km'] as const) {
   const surface = await world.mount()
   const first = taskRowOf(surface, 't1')
   assert.equal(occurrences(first.textContent, '0/4'), 1, `${language}: "0/4" is written once on a board row`)
+  // a phone shows the issued day only (the name already carries it and a phone row is two lines); the full date and time come from xl
+  const issued = surface.find(node => node.getAttribute('data-task-issued') !== null && first.contains(node), 'issued cell')
+  const parts = issued.querySelectorAll('span')
+  assert.equal(parts.length, 2, `${language}: the issued cell has a phone part and a wide part`)
+  assert.match(parts[0].textContent, /^\d\d\/\d\d\/\d{4}$/, `${language}: the phone part is the day only`); assert.ok(String(parts[0].getAttribute('class')).includes('xl:hidden'))
+  assert.match(parts[1].textContent, /^\d\d\/\d\d\/\d{4} \d\d:\d\d$/, `${language}: the wide part is the date and time`); assert.ok(String(parts[1].getAttribute('class')).includes('hidden xl:inline'))
+  const closedCell = taskRowOf(surface, 't6').textContent
+  assert.ok(closedCell.includes(`${words.shift_status_closed} 18/11/2026`) && closedCell.includes('18/11/2026 16:00'), `${language}: a closed row carries the closed day and the closed date-time (one is hidden by width)`)
   assert.equal(occurrences(taskRowOf(surface, 't6').textContent, '4/4'), 1, `${language}: and once on a closed row`)
   assert.equal(occurrences(taskRowOf(surface, 't4').textContent, '4/4'), 0, `${language}: "All counted" is not followed by the figure again`)
   const ring = first.querySelectorAll('svg')[0]
@@ -109,6 +117,8 @@ const issueBar = read('components/inventory/InventoryCheckListRows.tsx'), board 
 assert.match(tiles, /'inventory:tasks': ListTodo,/); assert.match(tiles, /'inventory:sessions': ClipboardList,/, 'Count sessions keeps the clipboard')
 assert.match(sessions, /<ListTodo className=/, 'the pickup marker is the Tasks icon'); assert.ok(!/<ClipboardList/.test(sessions), 'and no clipboard-list is left on Count sessions rows')
 assert.ok(/<ClipboardPlus /.test(board) && /<ClipboardPlus /.test(issueBar), 'Issue is a clipboard with a plus on the board and in Issue mode')
+// ---- the pick box is a 44 px target on a phone and 40 px from lg ----
+assert.ok(/<label className="inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center lg:h-10 lg:w-10">/.test(issueBar) && !/lg:h-9 lg:w-9">\s*<input type="checkbox"/.test(issueBar), 'the pick box label is h-11 w-11, lg:h-10 lg:w-10 (never 36 px)')
 // ---- the board row starts its one-line layout at xl, where its columns fit ----
 const layout = board.replace(/lg:(h|min-h|w)-1\d/g, '')
 assert.ok(!/\blg:(w-|flex-nowrap|contents|order-|ml-0|shrink-0|block|text-xs)/.test(layout), 'no column or wrap rule of the board row starts at lg')

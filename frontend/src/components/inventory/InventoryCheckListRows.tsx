@@ -311,7 +311,7 @@ function ListRow({ product, draft, adornment, refusal, columns, countable, copy,
     {/* A count waiting for an approver (ic_fix_stock) is shown ONCE on this surface: the status icon (the hourglass). The gutter mini tag of the review queue would repeat it. */}
     {/* One compact line where the width allows: the image keeps its square, the name takes the room, the status icon and the count input sit beside it. */}
     <div className="flex min-w-0 items-center gap-2" data-inventory-check-main>
-      {picks && onPick && countable ? <label className="inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center lg:h-9 lg:w-9">
+      {picks && onPick && countable ? <label className="inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center lg:h-10 lg:w-10">
         <input type="checkbox" data-check-pick className="h-5 w-5 cursor-pointer accent-slate-800" checked={picks.has(Number(product.id))} aria-label={product.name} onChange={() => onPick(product)} />
       </label> : null}
       <button type="button" tabIndex={-1} onClick={openDetail} data-check-image data-row-open className="relative block aspect-square h-12 w-12 shrink-0 overflow-hidden rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 lg:h-10 lg:w-10" aria-label={product.name} title={product.name}>

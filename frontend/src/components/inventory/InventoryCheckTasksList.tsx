@@ -4,7 +4,7 @@ import Lock from 'lucide-react/dist/esm/icons/lock.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import type { InventoryCheckTask, InventoryCheckTasksAnswer } from '../../api/inventoryChecksTransport.ts'
-import { fmtDateTime24 } from '../../utils/formatters.ts'
+import { fmtDate, fmtDateTime24 } from '../../utils/formatters.ts'
 import FilterMenu, { type FilterSection } from '../shared/FilterMenu.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
 import SoleBranchLabel from '../shared/SoleBranchLabel.tsx'
@@ -92,7 +92,7 @@ export default function InventoryCheckTasksList({ board, t, canWork, busy, onOpe
         <div data-task-open className="flex min-h-10 w-full min-w-0 cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 py-2 text-left text-xs xl:flex-nowrap"
           onClick={() => onOpen(task)}>
           <SessionStatusChip status={task.status} t={t} />
-          <button type="button" data-task-name title={name} className="min-w-0 flex-1 border-0 bg-transparent p-0 text-left text-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"><span className="block truncate font-semibold leading-relaxed">{name}</span></button>
+          <button type="button" data-task-name title={name} className="flex min-h-11 min-w-0 flex-1 items-center border-0 bg-transparent p-0 text-left text-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"><span className="block min-w-0 flex-1 truncate font-semibold leading-relaxed">{name}</span></button>
           <span className="ml-auto xl:order-last xl:ml-0"><TaskActions task={task} t={t} busy={busy} canWork={canWork} onPickup={() => onPickup(task)} onRelease={() => onRelease(task)} onClose={() => onClose(task)} /></span>
           <div className="flex min-w-0 basis-full flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] leading-relaxed text-gray-600 xl:contents xl:text-xs dark:text-gray-300">
             <span className="inline-flex items-center gap-1 xl:w-36 xl:shrink-0" data-task-progress>
@@ -101,8 +101,8 @@ export default function InventoryCheckTasksList({ board, t, canWork, busy, onOpe
             </span>
             {task.picked_up_by ? <span data-task-picker className={`min-w-0 xl:w-44 xl:shrink-0 ${task.mine ? 'font-semibold text-emerald-700 dark:text-emerald-300' : ''}`}>{pickerText(t, task.picked_up_by)}</span> : <span aria-hidden="true" className="hidden xl:block xl:w-44 xl:shrink-0" />}
             {task.status === 'closed' && task.closed_at
-              ? <span className="text-gray-500 xl:w-40 xl:shrink-0">{label(t, 'shift_status_closed', 'Closed')} {fmtDateTime24(task.closed_at)}</span>
-              : <span className="xl:w-40 xl:shrink-0" data-task-issued>{fmtDateTime24(task.issued_at)}</span>}
+              ? <span className="text-gray-500 xl:w-40 xl:shrink-0">{label(t, 'shift_status_closed', 'Closed')} <span className="xl:hidden">{fmtDate(task.closed_at)}</span><span className="hidden xl:inline">{fmtDateTime24(task.closed_at)}</span></span>
+              : <span className="xl:w-40 xl:shrink-0" data-task-issued><span className="xl:hidden">{fmtDate(task.issued_at)}</span><span className="hidden xl:inline">{fmtDateTime24(task.issued_at)}</span></span>}
             {typeof task.issued_by === 'string' && task.issued_by ? <span className="text-gray-500 xl:w-28 xl:shrink-0" data-task-issuer title={label(t, 'inventory_check_created_by', 'Created by')}>@{task.issued_by}</span> : null}
           </div>
         </div>
