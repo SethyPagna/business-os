@@ -107,6 +107,29 @@ open('tasks'); surface = await world.mount()
 assert.equal(surface.findAll(node => node.getAttribute('data-inventory-check-task') !== null).length, 2)
 await surface.unmount()
 
+// ---- a cold Tasks open whose branch list fails to load: the load-failed line and a Retry, never "Choose a branch first." with nothing to choose ----
+for (const language of ['en', 'km'] as const) {
+  const text = pack(language)
+  world.language = language
+  reset(); world.user = viewerUser('employee'); world.hideIssuer = true
+  world.branches.push({ id: 2, name: 'Second' })
+  world.failures.branches = refuse('boom', 500)
+  open('tasks')
+  const cold = await world.mount()
+  assert.ok(cold.text().includes(text.inventory_check_load_failed), `${language}: the failed branch list says so`)
+  assert.ok(!cold.text().includes(text.inventory_check_count_blocked_branch), `${language}: and does not ask for a branch it cannot offer`)
+  assert.equal(cold.findAll(node => node.getAttribute('data-inventory-check-skeleton') !== null).length, 0, `${language}: no skeleton pulses behind it`)
+  const retry = cold.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === text.retry, 'Retry')
+  world.calls.length = 0
+  await cold.click(retry)
+  assert.equal(world.count('branches'), 1, `${language}: Retry reads the branch list again`)
+  assert.ok(cold.text().includes(text.inventory_check_count_blocked_branch) && cold.text().includes('Second'), `${language}: and the branches to choose from are there`)
+  assert.ok(!cold.text().includes(text.inventory_check_load_failed), `${language}: the failed line is gone`)
+  world.branches.pop()
+  await cold.unmount()
+}
+world.language = 'en'
+
 forgetDeviceDrafts()
 await world.harness.close()
-console.log('inventoryCheckTasksRefusedMounted passed: offline writes refused in en and km, a missing task says so and keeps the tab wired, a refused board drops its held rows')
+console.log('inventoryCheckTasksRefusedMounted passed: offline writes refused in en and km, a missing task says so and keeps the tab wired, a refused board drops its held rows, a failed branch list offers Retry')

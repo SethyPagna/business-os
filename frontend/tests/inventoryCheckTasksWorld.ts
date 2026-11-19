@@ -99,7 +99,7 @@ export async function createTasksWorld(options: { branches?: Array<{ id: number;
     'utils/dirtyWork.ts': dirtyWork,
     'api/actorReadScope.ts': { captureActorReadScope: () => ({ authority: 'test', channel: 'inventoryChecks', revision: '1' }), captureActorWriteIdentity: () => ({ owner: 'test', epoch: world.identityEpoch }), isActorReadScopeCurrent: () => true, isActorWriteIdentityCurrent: (identity?: { owner?: string; epoch?: number }) => identity?.owner !== 'test' || identity.epoch === world.identityEpoch },
     'api/productReadTransport.ts': { peekProductSearch: () => null, primeProductSearch: () => {}, getProductFilters: async () => ({ brands: ['Dior', 'Lancome'], categories: [] }) },
-    'api/branchTransport.ts': { getBranches: async () => { record('branches'); return world.branches.map(branch => ({ ...branch, is_active: 1 })) } },
+    'api/branchTransport.ts': { getBranches: async () => { record('branches'); fail('branches'); return world.branches.map(branch => ({ ...branch, is_active: 1 })) } },
     'api/inventoryChecksTransport.ts': {
       captureInventoryCheckWriteScope: (context: unknown, isCurrent: unknown) => ({ context, readScope: {}, writeIdentity: {}, isCurrent }),
       readInventoryCheckProducts: async (params: Record<string, unknown>) => { record('products-old', params); throw Object.assign(new Error('the older list must not be read'), { status: 500 }) },

@@ -196,8 +196,8 @@ async function readSoleBranch(): Promise<Branch | null> {
   } catch { return null }
 }
 
-/** The active branches, read once for the Tasks board (which makes no list read, so it holds no branch list of its own); [] when this account may not read them. */
-async function readActiveBranches(): Promise<Branch[]> {
+/** The active branches, read once for the Tasks board (which makes no list read, so it holds no branch list of its own); null when the read failed (the board then says so and offers Retry). */
+async function readActiveBranches(): Promise<Branch[] | null> {
   try {
     const { getBranches } = await import('../../api/branchTransport.ts')
     const list = activeBranchRows(await getBranches() as Array<{ id?: unknown; name?: unknown; is_active?: unknown }>).flatMap(row => {
@@ -205,7 +205,7 @@ async function readActiveBranches(): Promise<Branch[]> {
       return Number.isSafeInteger(id) && id > 0 ? [{ id, name: String(row.name ?? '') }] : []
     })
     return list
-  } catch { return [] }
+  } catch { return null }
 }
 
 function InventorySelection({ boundary, access, isCurrent }: { boundary: string; access: InventoryCheckAccess; isCurrent: () => boolean }) {
@@ -372,6 +372,9 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
   const [picks, setPicks] = useState<ReadonlySet<number>>(() => new Set())
   const issueIntent = useRef(false)
   const [taskBranches, setTaskBranches] = useState<Branch[] | null>(() => selection.knownBranches ?? null)
+  // The branch list of a cold Tasks open can fail to load: the board says so with a Retry, never "Choose a branch first." with nothing to choose.
+  const [taskBranchesFailed, setTaskBranchesFailed] = useState(false)
+  const [taskBranchesTry, setTaskBranchesTry] = useState(0)
   const taskClosedBySelf = useRef(false)
   const [writeScope] = useState(() => captureInventoryCheckWriteScope({ branchId, sessionId, epoch: 0 }, () => mounted.current && isCurrent()))
   const current = () => mounted.current && isCurrent() && isActorReadScopeCurrent(writeScope.readScope, false) && isActorWriteIdentityCurrent(writeScope.writeIdentity)
@@ -1218,9 +1221,9 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
   useEffect(() => {
     if (!taskBoard || hasWiredBranchList || taskBranches) return
     let live = true
-    void readActiveBranches().then(list => { if (live && current()) setTaskBranches(list) })
+    void readActiveBranches().then(list => { if (live && current()) { if (list) setTaskBranches(list); else setTaskBranchesFailed(true) } })
     return () => { live = false }
-  }, [taskBoard, hasWiredBranchList])
+  }, [taskBoard, hasWiredBranchList, taskBranchesTry])
   // The board makes no list read, so the one active branch is chosen here (as a list open chooses it).
   useEffect(() => {
     if (taskBoard && !branchId && branches.length === 1) onSelect({ branchId: String(branches[0].id), sessionId: '', knownBranches: branches })
@@ -1452,7 +1455,9 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, isCurrent }
             onAccept={productId => { void decideApproval('approve', [productId]) }} onModify={(productId, figures) => decideLine({ productId, action: 'modify', ...figures })}
             onRejectLine={productId => { void decideLine({ productId, action: 'reject' }) }} onReopen={productId => { void decideLine({ productId, action: 'reopen' }) }} /></Suspense> : null}
         {!taskBoard && !fresh && !error && !sessionError ? <ListSkeleton loadingText={t('loading')} /> : null}
-        {taskBoard ? (!branchId ? <div className="min-w-0 space-y-2" data-tasks-choose-branch>
+        {taskBoard ? (!branchId ? !branches.length ? (taskBranchesFailed ? <TasksReadError text={tr('inventory_check_load_failed', 'Could not load Inventory. Try again.')} retry={t('retry')} onRetry={() => { setTaskBranchesFailed(false); setTaskBranchesTry(value => value + 1) }} />
+          : taskBranches ? <p role="status" className="text-xs leading-relaxed text-gray-600 dark:text-gray-300" data-inventory-check-empty="tasks">{tr('inventory_check_tasks_empty', 'No count tasks.')}</p> : <ListSkeleton loadingText={t('loading')} />)
+          : <div className="min-w-0 space-y-2" data-tasks-choose-branch>
           <p role="status" className="text-xs leading-relaxed text-gray-600 dark:text-gray-300">{tr('inventory_check_count_blocked_branch', 'Choose a branch first.')}</p>
           {branches.length > 1 ? <ChipRail label={t('branch')}>{branches.map(branch => <RailChip key={branch.id} selected={false} onClick={() => onSelect({ branchId: String(branch.id), sessionId: '', knownBranches: branches })}>{branch.name}</RailChip>)}</ChipRail> : null}
         </div>
