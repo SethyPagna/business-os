@@ -148,7 +148,7 @@ await check('the translate effect applies only when the rule allows, and lists a
   const applyAt = effect.indexOf('applyPortalGoogleTranslateOrFallBack(')
   assert.ok(blockedAt > 0 && applyAt > blockedAt, 'the blocked branch returns before the apply call')
   const blocked = effect.slice(blockedAt, applyAt)
-  assert.match(blocked, /return \(\) => \{ cancelled = true \}\n    \}/, 'the blocked branch ends in a return')
+  assert.match(blocked, /return \(\) => \{ cancelled = true; if \(accountOpen && !removalStarted\) clearPortalReopenAccount\(\) \}\n    \}/, 'the blocked branch ends in a return')
   assert.doesNotMatch(blocked, /applyPortalGoogleTranslate/, 'the blocked branch never applies')
   assert.match(blocked, /removePortalGoogleTranslate\(\) === 'clean'/)
   assert.match(blocked, /if \(!sessionChecked && !accountOpen && signInMarker === 'absent'\) return undefined/, 'only a guest with nothing against Google waits: a marker or an open sheet removes Google even before the check ends')
@@ -158,7 +158,7 @@ await check('the translate effect applies only when the rule allows, and lists a
 
 await check('every import of the controller sits behind the rule or is a removal', () => {
   const imports = page.split("import('./portalTranslateController.ts')").length - 1
-  assert.equal(imports, 3, 'blocked removal, allowed apply, leave-Google removal')
+  assert.equal(imports, 4, 'blocked removal, allowed apply, leave-Google removal, open-the-sheet removal')
   const loaders = page.match(/applyPortalGoogleTranslate\w*\(/g) || []
   assert.deepEqual(loaders, ['applyPortalGoogleTranslateOrFallBack('], 'one place can load Google')
 })
@@ -169,8 +169,31 @@ await check('the account sheet starts open from the reopen flag, read through th
   assert.match(page, /clearPortalReopenAccount\(\)/)
 })
 
-await check('the paused line is plain English and real Khmer, through copy()', () => {
-  assert.match(page, /copy\('translatePaused', 'Translation pauses while you are signed in\.', '[ក-៿ ។]+'\)/)
+await check('the paused line says "use your account" in English and real Khmer, through copy()', () => {
+  assert.match(page, /copy\('translatePaused', 'Translation is paused while you use your account\.', 'ការបកប្រែផ្អាក ពេលអ្នកប្រើគណនី។'\)/)
+  assert.doesNotMatch(page, /pauses while you are signed in/)
+})
+
+await check('a guest whose marker is unreadable or whose first check failed sees the existing "not available" line instead of silence', () => {
+  const blocked = /if \(!translateAllowed\) \{[\s\S]*?return \(\) => \{ cancelled = true/.exec(page)?.[0] || ''
+  assert.match(blocked, /if \(signedIn \|\| accountOpen \|\| signInMarker === 'present'\) say\(copy\('translatePaused'/)
+  assert.match(blocked, /else say\(copy\('translateUnavailable', 'Translation is not available right now\.', '[ក-៿ ។]+'\)\)/)
+})
+
+await check('a flag whose removal never ran is cleared in the cleanup, so a later reload cannot reopen the sheet', () => {
+  assert.match(page, /let removalStarted = false/)
+  assert.match(page, /removalStarted = true\n\s+if \(controller\.removePortalGoogleTranslate\(\) === 'clean'\)/, 'set just before the removal runs')
+  assert.match(page, /return \(\) => \{ cancelled = true; if \(accountOpen && !removalStarted\) clearPortalReopenAccount\(\) \}/)
+})
+
+await check('opening the sheet over Google writes the flag and reloads WITHOUT showing the sheet; every opener goes through it', () => {
+  const open = /const openAccount = \(\) => \{[\s\S]*?\n  \}\n/.exec(page)?.[0] || ''
+  assert.ok(open, 'openAccount found')
+  assert.match(open, /if \(accountOpen \|\| !isGoogleLanguageChoice\(pageChoice\)\) \{ setAccountOpen\(true\); return \}/, 'no Google pick: opens at once')
+  assert.ok(open.indexOf('markPortalReopenAccount()') < open.indexOf('removePortalGoogleTranslate()'), 'flag first, then the removal')
+  assert.match(open, /removePortalGoogleTranslate\(\) === 'clean'\) show\(\)/, 'the sheet opens only when nothing had to reload')
+  assert.equal((page.match(/setAccountOpen\(true\)/g) || []).length, 2, 'only the wrapper opens the sheet')
+  assert.match(page, /onOpenAccount=\{openAccount\}/)
 })
 
 await check('the Website Editor preview never meets the rule', () => {

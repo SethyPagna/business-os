@@ -4,7 +4,7 @@
 //     and nothing is sent on Khmer or English.
 //   - The cookie table has a row for every storage key the storefront writes, and no row for a key that
 //     no longer exists. googtrans is written by the site's own translate controller when a visitor picks one of the four
-//     languages and cleared when they go back or translation is paused; Google's script only reads it. Translation is paused while
+//     languages and cleared when they go back or translation is paused; Google's translation script uses it. Translation is paused while
 //     signed in or with the account panel open, and the Translation section says so.
 //
 // Run: node tests/portalLegalTranslateDisclosure.test.ts
@@ -31,9 +31,10 @@ for (const fact of [/ចិនសាមញ្ញ/, /ចិនប្រពៃណ�
   assert.match(km, fact, `the Khmer Translation paragraph lost: ${fact}`)
 }
 assert.equal(PORTAL_LEGAL_EN.portal_legal_privacy_translate_h, 'Translation')
-assert.match(PORTAL_LEGAL_EN.portal_legal_cookies_third_b, /This site itself writes the googtrans cookie[^.]*clears it when you go back to Khmer or English; Google's script reads it./)
+assert.match(PORTAL_LEGAL_EN.portal_legal_cookies_third_b, /This site itself writes the googtrans cookie[^.]*clears it when you go back to Khmer or English or when translation is paused; Google's translation script uses it./)
+assert.doesNotMatch(PORTAL_LEGAL_EN.portal_legal_cookies_third_b, /Google's script reads it/, 'nobody verified that Google only reads it')
 assert.doesNotMatch(PORTAL_LEGAL_EN.portal_legal_cookies_third_b, /which sets the googtrans cookie/, 'Google does not set googtrans')
-assert.match(PORTAL_LEGAL_KM.portal_legal_cookies_third_b, /គេហទំព័រនេះផ្ទាល់សរសេរខូឃី googtrans[^។]*លុបវា[^។]*ស្គ្រីបរបស់ Google អានវា/)
+assert.match(PORTAL_LEGAL_KM.portal_legal_cookies_third_b, /គេហទំព័រនេះផ្ទាល់សរសេរខូឃី googtrans[^។]*លុបវា[^។]*ពេលការបកប្រែផ្អាក។ ស្គ្រីបបកប្រែរបស់ Google ប្រើវា/)
 assert.doesNotMatch(PORTAL_LEGAL_KM.portal_legal_cookies_third_b, /ដែលកំណត់ខូឃី googtrans/)
 
 // 2. The rows.
@@ -42,9 +43,9 @@ const googtrans = rowByName.get('googtrans')
 assert.ok(googtrans, 'no googtrans row')
 assert.equal(googtrans.kindKey, 'portal_legal_kind_cookie')
 assert.match(PORTAL_LEGAL_EN[googtrans.purposeKey], /^Written by this site when you pick Simplified Chinese, Traditional Chinese, French or Spanish/)
-assert.match(PORTAL_LEGAL_EN[googtrans.purposeKey], /Google's script reads it. This site clears it when you go back to Khmer or English, or when translation is paused./)
+assert.match(PORTAL_LEGAL_EN[googtrans.purposeKey], /Google's translation script uses it. This site clears it when you go back to Khmer or English, or when translation is paused./)
 assert.doesNotMatch(PORTAL_LEGAL_EN[googtrans.purposeKey], /Set by Google Translate/)
-assert.match(PORTAL_LEGAL_KM[googtrans.purposeKey], /^គេហទំព័រនេះសរសេរវា[^។]*។[^។]*ស្គ្រីបរបស់ Google អានវា។[^។]*លុបវា/)
+assert.match(PORTAL_LEGAL_KM[googtrans.purposeKey], /^គេហទំព័រនេះសរសេរវា[^។]*។[^។]*ស្គ្រីបបកប្រែរបស់ Google ប្រើវា។[^។]*លុបវា/)
 assert.doesNotMatch(PORTAL_LEGAL_KM[googtrans.purposeKey], /កំណត់ដោយ Google Translate/)
 assert.match(PORTAL_LEGAL_EN[googtrans.lifetimeKey], /translation is paused/)
 assert.equal(rowByName.get(AI_CONSENT_STORAGE_KEY)?.kindKey, 'portal_legal_kind_local', 'the assistant-consent key has a local-storage row')

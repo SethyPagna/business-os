@@ -693,16 +693,21 @@ export default function PublicCatalogPage() {
       if (!sessionChecked && !accountOpen && signInMarker === 'absent') return undefined
       // Blocked: the pick is kept, the hand-written English shows, and Google is taken off the page (one clean reload when it is already there).
       if (accountOpen) markPortalReopenAccount()
+      let removalStarted = false
       import('./portalTranslateController.ts')
         .then((controller) => {
           if (cancelled) return
+          removalStarted = true
           if (controller.removePortalGoogleTranslate() === 'clean') {
             clearPortalReopenAccount()
-            if (signedIn || accountOpen || signInMarker === 'present') say(copy('translatePaused', 'Translation pauses while you are signed in.', 'ការបកប្រែផ្អាក នៅពេលអ្នកចូលគណនី។'))
+            // An account in use (or a marker from another tab) pauses translation; a guest whose marker is unreadable or whose first check failed is told it is unavailable.
+            if (signedIn || accountOpen || signInMarker === 'present') say(copy('translatePaused', 'Translation is paused while you use your account.', 'ការបកប្រែផ្អាក ពេលអ្នកប្រើគណនី។'))
+            else say(copy('translateUnavailable', 'Translation is not available right now.', 'ឥឡូវនេះមិនអាចបកប្រែបានទេ។'))
           }
         })
         .catch(() => clearPortalReopenAccount())
-      return () => { cancelled = true }
+      // Cancelled before the removal ran: no reload will read the flag, so it must not reopen the sheet on some later, unrelated reload.
+      return () => { cancelled = true; if (accountOpen && !removalStarted) clearPortalReopenAccount() }
     }
     // When Google does not translate: the menu goes back to the language the visitor had, the cookie is cleared and one line says so.
     const fallBack = (previous: 'en' | 'km') => {
@@ -722,6 +727,16 @@ export default function PublicCatalogPage() {
     return () => { cancelled = true }
   }, [pageChoice, translateAllowed, sessionChecked, sessionReady, signedIn, signInMarker, accountOpen])
   useEffect(() => () => { if (translateNoticeTimerRef.current) window.clearTimeout(translateNoticeTimerRef.current) }, [])
+
+  // With Google's script on the page the sheet is not shown first: the flag is written and the removal reloads, and the sheet opens from the flag on the clean page.
+  const openAccount = () => {
+    if (accountOpen || !isGoogleLanguageChoice(pageChoice)) { setAccountOpen(true); return }
+    markPortalReopenAccount()
+    const show = () => { clearPortalReopenAccount(); setAccountOpen(true) }
+    import('./portalTranslateController.ts')
+      .then((controller) => { if (controller.removePortalGoogleTranslate() === 'clean') show() })
+      .catch(show)
+  }
 
   const changePageLanguage = (next: string) => {
     const choice = normalizePortalChoice(next)
@@ -1538,7 +1553,7 @@ export default function PublicCatalogPage() {
         if (listView) closeListView(false)
         setActiveTab(resolvePortalActiveTab(displayConfig, copy, key))
       }}
-      onOpenAccount={() => setAccountOpen(true)}
+      onOpenAccount={openAccount}
       onOpenWishlist={() => openListView('saved')}
       wishlistCount={wishlist.count}
       onOpenList={() => openListView('list')}
