@@ -31,6 +31,7 @@ async function check(name, fn) {
 
 const ACCOUNT = '0123456789abcdef0123456789abcdef'
 const V1 = 'aaaaaaaa-0000-4000-8000-000000000001'
+const V2 = 'aaaaaaaa-0000-4000-8000-000000000002'
 const OLD = 'business-os-assets'
 const APAC = 'business-os-assets-apac'
 const SCRATCH = fs.mkdtempSync(path.join(os.tmpdir(), 'r2ret-pure-'))
@@ -62,12 +63,20 @@ function fakeApi({ production = 'destination', objects = [], lifecycleStored = t
   async function api(method, p, opts) {
     calls.push(`${method} ${p.split('?')[0]}`)
     const prod = `/accounts/${ACCOUNT}/workers/scripts/business-os`
+    if (production === 'throws' && p.startsWith(prod)) throw new Error('network down')
     if (method === 'GET' && p === `${prod}/deployments`) {
-      return { ok: true, status: 200, json: { success: true, result: { deployments: [{ id: 'd', created_on: '2026-09-27T00:00:00Z', versions: [{ version_id: V1, percentage: 100 }] }] } } }
+      if (production === 'error') return { ok: false, status: 503, json: { success: false, errors: [{ code: 10000 }] } }
+      const versions = production === 'split' ? [{ version_id: V1, percentage: 50 }, { version_id: V2, percentage: 50 }] : [{ version_id: V1, percentage: 100 }]
+      return { ok: true, status: 200, json: { success: true, result: { deployments: [{ id: 'd', created_on: '2026-09-27T00:00:00Z', versions }] } } }
     }
-    if (method === 'GET' && p === `${prod}/versions/${V1}`) {
-      const bucket = production === 'destination' ? APAC : production === 'source' ? OLD : 'someone-else'
-      return { ok: true, status: 200, json: { success: true, result: { resources: { bindings: [{ type: 'r2_bucket', name: 'ASSETS', bucket_name: bucket }] } } } }
+    if (method === 'GET' && (p === `${prod}/versions/${V1}` || p === `${prod}/versions/${V2}`)) {
+      const bindings = (b) => ({ ok: true, status: 200, json: { success: true, result: { resources: { bindings: b } } } })
+      if (production === 'shape') return bindings('none')
+      if (production === 'renamed') return bindings([{ type: 'r2_bucket', name: 'MEDIA', bucket_name: APAC }])
+      if (production === 'wrongtype') return bindings([{ type: 'kv_namespace', name: 'ASSETS', namespace_id: 'x' }])
+      if (production === 'jurisdiction') return bindings([{ type: 'r2_bucket', name: 'ASSETS', bucket_name: APAC, jurisdiction: 'eu' }])
+      const bucket = production === 'destination' ? APAC : production === 'source' ? OLD : production === 'split' ? (p.endsWith(V1) ? APAC : OLD) : 'someone-else'
+      return bindings([{ type: 'r2_bucket', name: 'ASSETS', bucket_name: bucket }])
     }
     const base = `/accounts/${ACCOUNT}/r2/buckets/${OLD}`
     if (method === 'GET' && p.startsWith(`${base}/objects`)) {
@@ -132,7 +141,8 @@ function workflowProblems(text) {
   const retire = jobText(text, 'r2-old-retire')
   if (!/\n    environment: production\n/.test(retire)) problems.push('r2-old-retire must run in the production environment')
   if (!/\n    needs: gate\n/.test(retire)) problems.push('r2-old-retire must wait for the gate')
-  if (!/inputs\.task == 'r2-old-retire'/.test(retire)) problems.push('r2-old-retire must run only for its own task')
+  const ifLine = /\n    if: (.*)\n/.exec(retire)
+  if (!ifLine || ifLine[1] !== "inputs.task == 'r2-old-retire' && github.ref == 'refs/heads/main'") problems.push('r2-old-retire must run only for its own task, and only from main')
   if (!retire.includes("[string]::Equals($env:CONFIRM, 'r2-old-retire', [System.StringComparison]::Ordinal)")) problems.push('r2-old-retire needs the ordinal confirm check')
   if (!/\n          OPS_R2_RETIRE_BUCKET: business-os-assets\n/.test(retire)) problems.push('the bucket name must be the one literal business-os-assets')
   if (/OPS_R2_RETIRE_BUCKET: .*(\$\{\{|apac)/.test(retire)) problems.push('the bucket name must not be an expression or name apac')
@@ -157,7 +167,9 @@ async function main() {
       ['default back to copy', ['\n        default: verify-only\n', '\n        default: copy\n']],
       ['guard step removed', ['node ops/scripts/ops-r2-retire.mjs guard-copy-modes', 'node ops/scripts/ops-r2.mjs delete-worker']],
       ['guard reads no mode', ['          OPS_R2_MODE: ${{ inputs.mode }}\n        run: node ops/scripts/ops-r2-retire.mjs guard-copy-modes', '        run: node ops/scripts/ops-r2-retire.mjs guard-copy-modes']],
-      ['retire not in production', ['    if: inputs.task == \'r2-old-retire\'\n    runs-on: windows-latest\n    environment: production', '    if: inputs.task == \'r2-old-retire\'\n    runs-on: windows-latest\n    environment: staging']],
+      ['retire not in production', ["    if: inputs.task == 'r2-old-retire' && github.ref == 'refs/heads/main'\n    runs-on: windows-latest\n    environment: production", "    if: inputs.task == 'r2-old-retire' && github.ref == 'refs/heads/main'\n    runs-on: windows-latest\n    environment: staging"]],
+      ['retire job widened to another task', ["    if: inputs.task == 'r2-old-retire' && github.ref == 'refs/heads/main'\n", "    if: inputs.task == 'r2-old-retire' || inputs.task == 'r2-apac-copy'\n"]],
+      ['retire job runs from any ref', ["    if: inputs.task == 'r2-old-retire' && github.ref == 'refs/heads/main'\n", "    if: inputs.task == 'r2-old-retire'\n"]],
       ['retire bucket names apac', ['OPS_R2_RETIRE_BUCKET: business-os-assets\n', 'OPS_R2_RETIRE_BUCKET: business-os-assets-apac\n']],
       ['retire bucket from an input', ['OPS_R2_RETIRE_BUCKET: business-os-assets\n', 'OPS_R2_RETIRE_BUCKET: ${{ inputs.query }}\n']],
       ['retire confirm not passed on', ['          CONFIRM: ${{ inputs.confirm }}\n        run: node ops/scripts/ops-r2-retire.mjs run', '        run: node ops/scripts/ops-r2-retire.mjs run']],
@@ -170,25 +182,71 @@ async function main() {
   })
 
   // ---------------------------------------------------------- copy modes
-  await check('copy and topup are refused once production reads the apac bucket; verify-only always runs', () => {
-    const after = { state: 'destination', buckets: [{ bucket: APAC }] }
+  await check('checkCopyModeAllowed fails closed: only verify-only runs unless production reads exactly the old bucket', () => {
     for (const mode of ['copy', 'topup']) {
-      assert.throws(() => real.checkCopyModeAllowed({ mode, productionState: after }), (e) => e.code === 'refused-after-switch', mode)
+      for (const state of ['destination', 'mixed', 'unknown']) {
+        assert.throws(() => real.checkCopyModeAllowed({ mode, productionState: { state } }), (e) => e.code === 'refused-after-switch', `${mode} ${state}`)
+      }
+      for (const productionState of [undefined, null, {}]) {
+        assert.throws(() => real.checkCopyModeAllowed({ mode, productionState }), (e) => e.code === 'refused-after-switch', `${mode} ${String(productionState)}`)
+      }
+      assert.doesNotThrow(() => real.checkCopyModeAllowed({ mode, productionState: { state: 'source' } }), `${mode} before the switch is the driver's own call`)
     }
     for (const state of ['destination', 'source', 'mixed', 'unknown']) assert.doesNotThrow(() => real.checkCopyModeAllowed({ mode: 'verify-only', productionState: { state } }), state)
-    assert.doesNotThrow(() => real.checkCopyModeAllowed({ mode: 'copy', productionState: { state: 'source' } }), 'copy before the switch is the driver\'s own call')
   })
 
-  await check('copy-mode mutant: a guard that lets topup (or copy) through after the switch is caught', async () => {
-    const mutant = await loadVariant([["if (productionState && productionState.state === 'destination') throw", "if (productionState && productionState.state === 'destination' && mode === 'copy') throw"]])
-    const after = { state: 'destination', buckets: [{ bucket: APAC }] }
-    let caught = 0
-    for (const mode of ['copy', 'topup']) {
-      try { mutant.checkCopyModeAllowed({ mode, productionState: after }) } catch { caught += 1 }
+  // The guard-copy-modes step CI runs, driven against the fake API. Returns the list of cases that behave wrongly.
+  async function guardProblems(mod) {
+    const problems = []
+    const wrong = []
+    const table = [
+      ['source', { copy: 0, topup: 0, 'verify-only': 0 }],
+      ['destination', { copy: 1, topup: 1, 'verify-only': 0 }],
+      ['error', { copy: 1, topup: 1, 'verify-only': 0 }],
+      ['throws', { copy: 1, topup: 1, 'verify-only': 0 }],
+      ['renamed', { copy: 1, topup: 1, 'verify-only': 0 }],
+      ['wrongtype', { copy: 1, topup: 1, 'verify-only': 0 }],
+      ['shape', { copy: 1, topup: 1, 'verify-only': 0 }],
+      ['split', { copy: 1, topup: 1, 'verify-only': 0 }],
+      ['jurisdiction', { copy: 1, topup: 1, 'verify-only': 0 }],
+      ['other', { copy: 1, topup: 1, 'verify-only': 0 }],
+    ]
+    const stdout = process.stdout.write
+    process.stdout.write = () => true
+    try {
+      for (const [production, expected] of table) {
+        for (const [mode, code] of Object.entries(expected)) {
+          const fake = fakeApi({ production })
+          let got
+          try { got = await mod.guardCopyModes({ api: fake.api, accountId: ACCOUNT, mode }) } catch (err) { got = `threw ${err && err.message}` }
+          if (got !== code) problems.push(`${production} ${mode}: exit ${got}, wanted ${code}`)
+          if (!fake.calls.every((c) => c.startsWith('GET ') && c.includes('/workers/scripts/business-os/'))) wrong.push(`${production} ${mode}: a call outside the Worker reads`)
+          if (mode === 'verify-only' && fake.calls.length) problems.push(`${production} verify-only made a call`)
+        }
+      }
+    } finally {
+      process.stdout.write = stdout
     }
-    assert.strictEqual(caught, 1, 'the mutant lets exactly one mode through, so the real test above goes red for it')
-    const dead = await loadVariant([["if (mode === 'verify-only') return\n", '']])
-    assert.throws(() => dead.checkCopyModeAllowed({ mode: 'verify-only', productionState: { state: 'destination' } }), 'a guard that refuses verify-only is caught too')
+    return [...problems, ...wrong]
+  }
+
+  await check('guard-copy-modes: copy and topup run only when production reads exactly the old bucket; verify-only makes no call', async () => {
+    assert.deepStrictEqual(await guardProblems(real), [])
+  })
+
+  await check('guard-copy-modes mutants: a refusal that returns 0, a topup that skips the check, a fail-open check are all caught', async () => {
+    const mutants = [
+      ['the catch returns 0', [["{ code: err instanceof OpsError ? err : new OpsError('guard-unreadable') })\n    return 1", "{ code: err instanceof OpsError ? err : new OpsError('guard-unreadable') })\n    return 0"]]],
+      ['topup skips the check', [["  if (mode === 'verify-only') return 0\n  try {", "  if (mode === 'verify-only' || mode === 'topup') return 0\n  try {"]]],
+      ['copy skips the check', [["  if (mode === 'verify-only') return 0\n  try {", "  if (mode === 'verify-only' || mode === 'copy') return 0\n  try {"]]],
+      ['verify-only is checked too', [["  if (mode === 'verify-only') return 0\n  try {", '  try {']]],
+      ['refuses destination only', [["  if (productionState && productionState.state === 'source') return\n  throw new OpsError", "  if (!productionState || productionState.state !== 'destination') return\n  throw new OpsError"]]],
+      ['an unreadable state is allowed', [["  } catch (err) {\n    say('problem: {code}', { code: err instanceof OpsError ? err : new OpsError('guard-unreadable') })", "  } catch (err) {\n    if (!(err instanceof OpsError)) return 0\n    say('problem: {code}', { code: err })"]]],
+    ]
+    for (const [label, replacements] of mutants) {
+      const mutant = await loadVariant(replacements)
+      assert.notDeepStrictEqual(await guardProblems(mutant), [], `${label}: the guard test did not go red`)
+    }
   })
 
   // ------------------------------------------------------------ retire guards
@@ -270,6 +328,82 @@ async function main() {
       const mutant = await loadVariant([[from, to]])
       assert.strictEqual(await stillRefuses(mutant), false, `${label}: the probe did not catch the mutant`)
     }
+  })
+
+  // Every bucket path comes from the constant. checkInputs is loosened in the probe on purpose, so a path built from the
+  // passed-in name would show up in the calls; only the constant may.
+  const LOOSE = [
+    ["  if (name.toLowerCase().includes('apac')) throw new OpsError('refused-apac-bucket', 'The bucket name names the live apac bucket.')\n", ''],
+    ["  if (name !== OLD_BUCKET) throw new OpsError('refused-bucket-name', 'Only the old bucket may be retired.')\n", ''],
+  ]
+  async function pathProblems(mod) {
+    const problems = []
+    for (const given of ['zzz-other-bucket', APAC]) {
+      for (const mode of ['plan', 'expire', 'delete-bucket']) {
+        const fake = fakeApi({ objects: [] })
+        await refusal(mod, { ...INPUT, mode, bucket: given }, fake)
+        const bucketCalls = fake.calls.filter((c) => c.includes('/r2/buckets/'))
+        if (!bucketCalls.length) problems.push(`${given} ${mode}: no bucket call at all`)
+        for (const c of bucketCalls) if (!c.includes(`/r2/buckets/${OLD}`) || c.includes(given)) problems.push(`${given} ${mode}: ${c}`)
+      }
+    }
+    return problems
+  }
+
+  await check('retire: every bucket path is built from the old-bucket constant, never from a passed-in name', async () => {
+    const loose = await loadVariant(LOOSE)
+    assert.deepStrictEqual(await pathProblems(loose), [])
+    const src = read('ops', 'scripts', 'ops-r2-retire.mjs')
+    const paths = src.match(/\/r2\/buckets\/\$\{[^}]*\}(?!\/objects)/g) || []
+    assert.ok(paths.length >= 1)
+    for (const p of paths) assert.strictEqual(p, '/r2/buckets/${OLD_BUCKET}', p)
+    assert.strictEqual((src.match(/listCounts\(api, accountId, OLD_BUCKET\)/g) || []).length, 2, 'both listings name the constant')
+  })
+
+  await check('path mutants: a path built from the input name is caught', async () => {
+    const mutants = [
+      ['lifecycle PUT on the input name', [["api('PUT', `${base}/lifecycle`", "api('PUT', `/accounts/${accountId}/r2/buckets/${bucket}/lifecycle`"]]],
+      ['base built from the input name', [['const base = `/accounts/${accountId}/r2/buckets/${OLD_BUCKET}`', 'const base = `/accounts/${accountId}/r2/buckets/${bucket}`']]],
+      ['plan listing on the input name', [['const l = await listCounts(api, accountId, OLD_BUCKET)\n    out.counts = { objects: l.objects, bytes: l.bytes, pages', 'const l = await listCounts(api, accountId, bucket)\n    out.counts = { objects: l.objects, bytes: l.bytes, pages']]],
+      ['delete listing on the input name', [['  const l = await listCounts(api, accountId, OLD_BUCKET)\n  out.counts = { objects: l.objects, bytes: l.bytes }\n', '  const l = await listCounts(api, accountId, bucket)\n  out.counts = { objects: l.objects, bytes: l.bytes }\n']]],
+    ]
+    for (const [label, replacements] of mutants) {
+      const mutant = await loadVariant([...LOOSE, ...replacements])
+      assert.notDeepStrictEqual(await pathProblems(mutant), [], `${label}: the path test did not go red`)
+    }
+  })
+
+  await check('retire: a name that differs only by case or space is refused (behaviour)', async () => {
+    const probe = async (mod) => {
+      const out = []
+      for (const bucket of ['Business-OS-Assets', 'BUSINESS-OS-ASSETS', ' business-os-assets', 'business-os-assets ', 'business-os-assets\n']) {
+        const fake = fakeApi()
+        const code = await refusal(mod, { ...INPUT, bucket }, fake)
+        if (code !== 'refused-bucket-name' || fake.calls.length) out.push(JSON.stringify(bucket))
+      }
+      return out
+    }
+    assert.deepStrictEqual(await probe(real), [])
+    const folded = await loadVariant([['if (name !== OLD_BUCKET)', 'if (name.toLowerCase() !== OLD_BUCKET)']])
+    assert.notDeepStrictEqual(await probe(folded), [], 'a case-insensitive name check went unnoticed')
+    const trimmed = await loadVariant([['if (name !== OLD_BUCKET)', 'if (name.trim() !== OLD_BUCKET)']])
+    assert.notDeepStrictEqual(await probe(trimmed), [], 'a trimmed name check went unnoticed')
+  })
+
+  await check('retire: the task refuses to run outside refs/heads/main, before any other work', async () => {
+    const { spawnSync } = require('child_process')
+    const script = path.join(ROOT, 'ops', 'scripts', 'ops-r2-retire.mjs')
+    for (const ref of [undefined, '', 'refs/heads/lane/ops-r2-retire', 'refs/tags/main', 'refs/heads/main2']) {
+      const env = { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, CLOUDFLARE_API_TOKEN: 'not-a-token', CLOUDFLARE_ACCOUNT_ID: ACCOUNT, OPS_OUT_DIR: SCRATCH, OPS_R2_RETIRE_MODE: 'plan', OPS_R2_RETIRE_BUCKET: OLD, CONFIRM: 'r2-old-retire' }
+      if (ref !== undefined) env.GITHUB_REF = ref
+      const r = spawnSync(process.execPath, [script, 'run'], { env, encoding: 'utf8', timeout: 20000 })
+      assert.notStrictEqual(r.status, 0, `ref ${JSON.stringify(ref)} ran`)
+      assert.ok(/ref-not-main/.test(`${r.stdout}${r.stderr}`), `ref ${JSON.stringify(ref)}: ${r.stdout}${r.stderr}`)
+    }
+    const src = read('ops', 'scripts', 'ops-r2-retire.mjs')
+    const check1 = "if (process.env.GITHUB_REF !== 'refs/heads/main') throw new OpsError('ref-not-main'"
+    assert.ok(src.includes(check1), 'the ref check is in main()')
+    assert.ok(src.indexOf(check1) < src.indexOf("requireEnv('OPS_OUT_DIR')") && src.indexOf(check1) < src.lastIndexOf('runRetire({ api'), 'the ref check comes before the outputs and the call')
   })
 
   await check('retire: the bucket name is one constant and the live bucket is never a path in a write', async () => {

@@ -446,7 +446,7 @@ jobs:
   r2-old-retire:
     name: r2-old-retire
     needs: gate
-    if: inputs.task == 'r2-old-retire'
+    if: inputs.task == 'r2-old-retire' && github.ref == 'refs/heads/main'
     runs-on: windows-latest
     environment: production
     timeout-minutes: 20

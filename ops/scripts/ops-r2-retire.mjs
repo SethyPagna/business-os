@@ -44,10 +44,24 @@ export function checkProduction(production) {
   }
 }
 
-// Pure. copy and topup write to the apac bucket; once production reads it only verify-only may run.
+// Pure. Fails closed: every mode except verify-only runs only when production reads exactly the old bucket ("source").
+// destination, mixed, unknown and a missing state all refuse.
 export function checkCopyModeAllowed({ mode, productionState }) {
   if (mode === 'verify-only') return
-  if (productionState && productionState.state === 'destination') throw new OpsError('refused-after-switch', 'Production reads the apac bucket; only verify-only may run.')
+  if (productionState && productionState.state === 'source') return
+  throw new OpsError('refused-after-switch', 'Production does not read exactly the old bucket; only verify-only may run.')
+}
+
+// The guard-copy-modes step. Returns the exit code. verify-only makes no call; any API error refuses.
+export async function guardCopyModes({ api, accountId, mode }) {
+  if (mode === 'verify-only') return 0
+  try {
+    checkCopyModeAllowed({ mode, productionState: await productionAssetsState(api, accountId) })
+  } catch (err) {
+    say('problem: {code}', { code: err instanceof OpsError ? err : new OpsError('guard-unreadable') })
+    return 1
+  }
+  return 0
 }
 
 export function topFolder(key) {
@@ -174,18 +188,10 @@ async function main() {
   const accountId = requireEnv('CLOUDFLARE_ACCOUNT_ID').trim()
   const api = (method, p, opts) => cfApi(method, p, opts)
   if (command === 'guard-copy-modes') {
-    const mode = String(process.env.OPS_R2_MODE || '').trim()
-    if (mode === 'verify-only') return 0
-    const production = await productionAssetsState(api, accountId)
-    try {
-      checkCopyModeAllowed({ mode, productionState: production })
-    } catch (err) {
-      say('problem: {code}', { code: err })
-      return 1
-    }
-    return 0
+    return guardCopyModes({ api, accountId, mode: String(process.env.OPS_R2_MODE || '').trim() })
   }
   if (command !== 'run') throw new OpsError('bad-command', 'The command must be guard-copy-modes or run.')
+  if (process.env.GITHUB_REF !== 'refs/heads/main') throw new OpsError('ref-not-main', 'This task runs only from refs/heads/main.')
   const outDir = requireEnv('OPS_OUT_DIR')
   const mode = String(process.env.OPS_R2_RETIRE_MODE || '').trim()
   const startedAt = new Date().toISOString()

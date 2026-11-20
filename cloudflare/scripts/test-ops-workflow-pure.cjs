@@ -246,7 +246,7 @@ const OUT_DIR = '${{ runner.temp }}/ops-out'
 const UPLOAD_PATH = '${{ runner.temp }}/ops-out/*.enc.json'
 // The only job allowed to run from any ref other than main is none: d1-physical-export reads production wholesale and
 // branch-cutover moves stock, so both run only from refs/heads/main (their job `if`, repeated by the script).
-const MAIN_ONLY = new Set(['branch-cutover', 'd1-physical-export'])
+const MAIN_ONLY = new Set(['branch-cutover', 'd1-physical-export', 'r2-old-retire'])
 const jobCondition = (task) => (MAIN_ONLY.has(task) ? `inputs.task == '${task}' && github.ref == 'refs/heads/main'` : `inputs.task == '${task}'`)
 const AFTER_CHECKOUT = "always() && steps.checkout.outcome == 'success'"
 const SECRET_ENV = {
