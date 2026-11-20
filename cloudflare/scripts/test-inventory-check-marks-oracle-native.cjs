@@ -98,7 +98,7 @@ async function scenario(world, report) {
   const counterCookie = await counter(world)
   const device = new Device(world, 1)
   await device.build()
-  const step = async (label, fn) => { try { await fn() } catch (e) { report.skipped.push(`${label}: ${String(e.message).slice(0, 120)}`); return } await device.sync(); await same(world, device, label); report.steps.push(label) }
+  const step = async (label, fn) => { try { await fn() } catch (e) { report.skipped.push(`${label}: ${String(e.message).slice(0, 120)}`); return } await device.sync(); await same(world, device, label); const fresh = new Device(world, 1); await fresh.build(); await same(world, fresh, label + ' (fresh build)'); report.steps.push(label) }
   const empty = await same(world, device, 'empty world'); report.steps.push('empty world (' + empty.marks.size + ' marks)')
   // W1 plain submission (some lines differ: an approval waits)
   const a = await fresh(12)
@@ -135,19 +135,19 @@ async function scenario(world, report) {
   })
   // W13 a product deactivated, counted, reactivated (I10), a header, another organisation's count, the inactive branch's count, a count whose item branch differs from its session's (m6), equal updated_at (m1)
   const g = await fresh(4)
+  const permit = () => world.db.prepare("INSERT OR REPLACE INTO system_flags (key, value, updated_at) SELECT 'stock_transaction_permit', value, CURRENT_TIMESTAMP FROM system_flags WHERE key = 'stock_schema_epoch'").run()
+  const unpermit = () => world.db.prepare("DELETE FROM system_flags WHERE key = 'stock_transaction_permit'").run()
   await step('I10 deactivate, count, reactivate', async () => {
-    const permit = () => world.db.prepare("INSERT OR REPLACE INTO system_flags (key, value, updated_at) SELECT 'stock_transaction_permit', value, CURRENT_TIMESTAMP FROM system_flags WHERE key = 'stock_schema_epoch'").run()
-    const unpermit = () => world.db.prepare("DELETE FROM system_flags WHERE key = 'stock_transaction_permit'").run()
     await permit()
     await world.db.prepare('UPDATE products SET is_active=0 WHERE id=?').bind(g[0].id).run()
     await world.db.prepare("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) VALUES('or-1',?,1,1,'inactive count','closed',0,'{}','2026-11-01T01:00:00.000Z','2026-11-01T01:00:00.000Z','2026-11-01T01:00:00.000Z')").bind(world.orgId).run()
     await world.db.prepare("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,revision,updated_by,updated_at) VALUES('or-1',?,1,'{}',1,'{}','done',1,1,1,'2026-11-01T01:00:00.000Z')").bind(g[0].id).run()
     await world.db.prepare("INSERT INTO inventory_check_events(session_id,product_id,actor_id,action,request_id,request_hash,before_json,after_json,result_json,created_at) VALUES('or-1',?,1,'observe',?, 'h','{}','{}','{}','2026-11-01T01:00:00.000Z')").bind(g[0].id, rid('or')).run()
-    await world.db.prepare('UPDATE products SET is_active=1 WHERE id=?').bind(g[0].id).run()
     await unpermit()
   })
+  await step('I10 reactivate', async () => { await permit(); await world.db.prepare('UPDATE products SET is_active=1 WHERE id=?').bind(g[0].id).run(); await unpermit() })
   await step('ties on updated_at broken by session id (m1)', async () => {
-    for (const s of ['tie-a', 'tie-b']) {
+    for (const s of ['tie-b', 'tie-a']) {
       await world.db.prepare("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) VALUES(?,?,1,1,'tie','closed',0,'{}','2026-11-02T01:00:00.000Z','2026-11-02T01:00:00.000Z','2026-11-02T01:00:00.000Z')").bind(s, world.orgId).run()
       await world.db.prepare("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,reason,revision,updated_by,updated_at) VALUES(?,?,1,'{}',1,'{}',?,?,?,1,1,'2026-11-02T01:00:00.000Z')").bind(s, g[1].id, s === 'tie-a' ? 'done' : 'issue', 1, s === 'tie-a' ? null : 'short').run()
       await world.db.prepare("INSERT INTO inventory_check_events(session_id,product_id,actor_id,action,request_id,request_hash,before_json,after_json,result_json,created_at) VALUES(?,?,1,'observe',?, 'h','{}','{}','{}','2026-11-02T01:00:00.000Z')").bind(s, g[1].id, rid('tie')).run()
@@ -163,8 +163,13 @@ async function scenario(world, report) {
   report.caps = cap
   device.catchUp = cap.catchUpMaxEvents
   await step('touched cap: the feed pages without skipping events', async () => {
-    const many = await fresh(560)
-    for (let i = 0; i < many.length; i += 40) await submit(many.slice(i, i + 40), 0)
+    const many = await fresh(560), sids = []
+    for (let i = 0; i < many.length; i += 40) sids.push((await submit(many.slice(i, i + 40), 1)).json.item.id)
+    await device.sync()
+    for (const sid of sids) {
+      await world.db.prepare("UPDATE inventory_check_items SET state = CASE state WHEN 'done' THEN 'issue' ELSE 'done' END, reason = CASE state WHEN 'done' THEN 'short' ELSE NULL END WHERE session_id=?").bind(sid).run()
+      await world.db.prepare("INSERT INTO inventory_check_events(session_id,product_id,actor_id,action,request_id,request_hash,before_json,after_json,result_json,created_at) VALUES(?,NULL,1,'close',?, 'h','{}','{}','{}',strftime('%Y-%m-%dT%H:%M:%fZ','now'))").bind(sid, rid('ap')).run()
+    }
   })
   // I7: a rolled-back database. The device cursor is past the restored log: its events are replaced by others with the same ids.
   await step('I7 rolled-back database forces a rebuild', async () => {
