@@ -1856,11 +1856,11 @@ app.get('/', async (c) => {
   if (denial) return c.json({ error: denial }, 403)
   // P4-4a: this bare list used to bypass the 20s versioned cache that
   // /search (just above) already goes through, so every call re-ran the
-  // full product query. Same version namespace ('products'), same TTL --
+  // full product query. Same version namespace ('products'), same TTL (productListLegacyCacheSeconds) --
   // this endpoint is just /search with a fixed page/pageSize.
   const version = await productSearchCacheVersion(c.env, {})
   let produced = false
-  const cachedPayload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, 20, async () => {
+  const cachedPayload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, getPlanLimits(c.env).productListLegacyCacheSeconds, async () => {
     produced = true
     return searchProductsPayload(c.env, { page: '1', pageSize: '100' })
   }, cacheIdentity(c))

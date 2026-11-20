@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// QW3: the filters vocabulary (300 s), the legacy page payload cache (20 s) and the search-index pages (3,600 s) take their lifetime from getPlanLimits(env) (lib/planTier.ts), as the owner rule
+// QW3: the filters vocabulary (300 s), the legacy page payload cache and the plain list that shares it (20 s) and the search-index pages (3,600 s) take their lifetime from getPlanLimits(env) (lib/planTier.ts), as the owner rule
 // on adjustable Free limits asks. This fails if a numeric lifetime comes back on any of those paths. The plan values stay what the literals were, on both tiers.
 //
 // Run: node scripts/test-products-catalogue-ttl-no-literals-pure.cjs
@@ -27,6 +27,7 @@ assert.ok(!NUMERIC_TTL.test("cachedJsonResponse(new Request(u), ctx, version, ge
 
 const filtersRoute = between("app.get('/filters', async (c) => {", "// D4 (Part 578")
 const searchIndexRoute = between("app.get('/search-index', async (c) => {", "app.get('/', async (c) => {")
+const plainList = between("app.get('/', async (c) => {", 'return searchProductsPayload(c.env, { page')
 const listReader = between('const cachedPayload = await cachedJsonResponse(', '// I2-1: a cache hit is refreshed')
 
 assert.ok(/getPlanLimits\(c\.env\)\.catalogVocabularyCacheSeconds/.test(filtersRoute), 'filters: the plan field')
@@ -35,6 +36,8 @@ assert.ok(/getPlanLimits\(c\.env\)\.productSearchIndexCacheSeconds/.test(searchI
 assert.ok(!NUMERIC_TTL.test(searchIndexRoute) && !/\b3600\b/.test(searchIndexRoute), 'search-index: no literal lifetime')
 assert.ok(/getPlanLimits\(c\.env\)\.productListLegacyCacheSeconds/.test(listReader), 'page payload cache: the plan field')
 assert.ok(!NUMERIC_TTL.test(listReader), 'page payload cache: no literal lifetime')
+assert.ok(/getPlanLimits\(c\.env\)\.productListLegacyCacheSeconds/.test(plainList), 'plain product list (GET /): the same plan field as /search, which it shares a lifetime with')
+assert.ok(!NUMERIC_TTL.test(plainList), 'plain product list (GET /): no literal lifetime')
 for (const gone of ['PRODUCT_FILTERS_TTL_SECONDS', 'PRODUCT_LIST_LEGACY_CACHE_SECONDS = ']) assert.ok(!SRC.includes(gone), `the ${gone.trim()} literal constant is gone`)
 assert.ok(/max-age=\$\{getPlanLimits\(env!\)\.catalogVocabularyCacheSeconds\}/.test(SRC), 'the image-only facet entry takes the same plan field')
 
