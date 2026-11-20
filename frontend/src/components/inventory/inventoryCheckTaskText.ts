@@ -29,9 +29,10 @@ export function progressText(t: Translator, counts: { total: number; done: numbe
   return label(t, 'inventory_check_task_progress', '{done}/{total} counted').replace('{done}', String(counts.done)).replace('{total}', String(counts.total))
 }
 
-/** "{done}/{total} counted", or "All counted" for an open task whose products are all counted. */
+/** "{done}/{total} counted"; "All counted" for an open task whose products are all counted; "{done}/{total} counted at close" for a closed task (its figures are the ones it closed with). */
 export function progressOrAllText(t: Translator, task: { total: number; done: number; status: 'open' | 'closed' }): string {
-  return task.status === 'open' && task.done >= task.total ? label(t, 'inventory_check_task_all_counted', 'All counted') : progressText(t, task)
+  if (task.status === 'closed') return label(t, 'inventory_check_task_progress_closed', '{done}/{total} counted at close').replace('{done}', String(task.done)).replace('{total}', String(task.total))
+  return task.done >= task.total ? label(t, 'inventory_check_task_all_counted', 'All counted') : progressText(t, task)
 }
 
 export function removedText(t: Translator, count: number): string {
@@ -53,7 +54,12 @@ export function pickerText(t: Translator, name: string): string {
   return label(t, 'inventory_check_task_picked_up_by', 'Picked up by {name}').replace('{name}', `@${name}`)
 }
 
-type Refusal = { code?: unknown; total?: unknown; limit?: unknown; atLeast?: unknown; pickedUpBy?: unknown; mine?: unknown }
+/** "{open} open tasks here (limit {limit}). Close one first." */
+export function openTasksLimitText(t: Translator, open: number | string, limit: number | string): string {
+  return label(t, 'inventory_check_task_limit_count', '{open} open tasks here (limit {limit}). Close one first.').replace('{open}', String(open)).replace('{limit}', String(limit))
+}
+
+type Refusal = { code?: unknown; open?: unknown; total?: unknown; limit?: unknown; atLeast?: unknown; pickedUpBy?: unknown; mine?: unknown }
 const figure = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? String(value) : null
 
 /**
@@ -68,6 +74,10 @@ export function taskRefusalSentence(t: Translator, cause: unknown, scopeKind?: '
     const key = refusal.atLeast === true ? 'inventory_check_task_too_many_at_least' : 'inventory_check_task_too_many_count'
     return label(t, key, refusal.atLeast === true ? 'At least {total} products. A task holds at most {limit}. Narrow the selection.' : '{total} products. A task holds at most {limit}. Narrow the selection.').replace('{total}', total).replace('{limit}', limit)
   }
+  if (refusal.code === 'inventory_check_task_limit') {
+    const open = figure(refusal.open), limit = figure(refusal.limit)
+    return open === null || limit === null ? null : openTasksLimitText(t, open, limit)
+  }
   if (refusal.code === 'inventory_check_product_not_eligible' && scopeKind === 'filters') return label(t, 'inventory_check_task_nothing_to_count', 'No product in these filters can be counted.')
   if (refusal.code === 'inventory_check_task_picked_up' && refusal.mine !== true) {
     return typeof refusal.pickedUpBy === 'string' && refusal.pickedUpBy ? pickerText(t, refusal.pickedUpBy) : null
@@ -79,6 +89,7 @@ export function taskRefusalSentence(t: Translator, cause: unknown, scopeKind?: '
 export function taskRefusalKey(cause: unknown, scopeKind?: 'ids' | 'filters'): string | null {
   const refusal = (cause ?? {}) as Refusal
   if (refusal.code === 'inventory_check_task_too_many' && figure(refusal.total) !== null && figure(refusal.limit) !== null) return refusal.atLeast === true ? 'inventory_check_task_too_many_at_least' : 'inventory_check_task_too_many_count'
+  if (refusal.code === 'inventory_check_task_limit' && figure(refusal.open) !== null && figure(refusal.limit) !== null) return 'inventory_check_task_limit_count'
   if (refusal.code === 'inventory_check_product_not_eligible' && scopeKind === 'filters') return 'inventory_check_task_nothing_to_count'
   if (refusal.code === 'inventory_check_task_picked_up' && refusal.mine !== true && typeof refusal.pickedUpBy === 'string' && refusal.pickedUpBy) return 'inventory_check_task_picked_up_by'
   return null
