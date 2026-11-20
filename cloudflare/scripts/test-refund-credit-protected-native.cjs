@@ -16,7 +16,10 @@ const H = require('./harness/al_money_native.cjs')
 const BULK = 'src/lib/saleBulkUpdate.ts'
 const SETTINGS = 'src/routes/settings.ts'
 const RETURN_BULK = 'src/lib/returnBulkAction.ts'
+const SALES = 'src/routes/sales.ts'
 const MUTANTS = {
+  // The correction call stops handing the stored credit row to the settlement plan, so a correction that drops it is no longer refused.
+  correction_unprotected: [{ file: SALES, from: 'recordedRefundCreditRaw: paymentCorrection ? sale.payment_details : undefined,', to: '' }],
   // The relabel rewrites the credit row like any customer row.
   relabel_credit: [{ file: BULK, from: 'normalized(detail.method) === source && !isRefundCreditRow(detail) ? { ...detail, method: targetMethod } : detail)', to: 'normalized(detail.method) === source ? { ...detail, method: targetMethod } : detail)' }],
   // The linked rename rewrites the credit row (its row test is dropped everywhere it is used).
@@ -190,6 +193,32 @@ async function main() {
       assert.deepEqual(JSON.parse(dAfterCancel.payment_details), [{ method: 'Cash USD', amount_usd: 10, amount_khr: 0 }])
       assert.equal(dAfterCancel.amount_paid_usd, 10)
       assert.equal(dAfterCancel.sale_status, 'awaiting_payment')
+    })
+
+    // ---- 5. a payment correction (replace_existing_payment) carries the credit through ------------------------------------------------------------
+    const E = await exchange('Cash')
+    const eStart = await cols(E.saleId)
+    const reopened = await h.call('PATCH', `/api/sales/${E.saleId}/status`, { client_request_id: 'rc-reopen-e-0001', money_precision_version: 1, sale_status: 'awaiting_payment', expected_updated_at: eStart.updated_at ?? null }, 'reopen E')
+    const correct = (key, details) => h.call('PATCH', `/api/sales/${E.saleId}/status`, { client_request_id: key, money_precision_version: 1, sale_status: 'completed',
+      replace_existing_payment: true, expected_exchange_rate: 4000, payment_details: details }, `correct E ${key}`)
+    const eReopened = await cols(E.saleId)
+    const dropped = await correct('rc-correct-e-0001', [{ method: 'Cash', amount_usd: 20, amount_khr: 0 }])
+    const eAfterDrop = await cols(E.saleId)
+    r.check(`correction: a tender that drops the credit row is refused (${reopened.status} reopen, ${dropped.status}) and the sale is left as it was`, () => {
+      assert.equal(reopened.status, 200, JSON.stringify(reopened.body).slice(0, 300))
+      assert.equal(eReopened.sale_status, 'awaiting_payment')
+      assert.notEqual(dropped.status, 200, JSON.stringify(dropped.body).slice(0, 300))
+      assert.equal(dropped.body.code, 'refund_credit_row_required', JSON.stringify(dropped.body).slice(0, 300))
+      assert.deepEqual(eAfterDrop, eReopened)
+    })
+    // After the rename in step 2 the cash method is 'Cash USD', so E's credit was booked under it.
+    const eCreditMethod = JSON.parse(eReopened.payment_details).find(row => row.refund_credit === true).method
+    const kept = await correct('rc-correct-e-0002', [{ method: eCreditMethod, amount_usd: 10, amount_khr: 0, refund_credit: true }, { method: 'ABA', amount_usd: 10, amount_khr: 0 }])
+    const eAfterKeep = await rowsOf(E.saleId)
+    r.check(`correction: a tender that carries the credit unchanged and changes the customer's row is accepted (${kept.status}), the credit keeps its method`, () => {
+      assert.equal(kept.status, 200, JSON.stringify(kept.body).slice(0, 300))
+      assert.equal(eAfterKeep.find(row => row.refund_credit === true).method, eCreditMethod)
+      assert.equal(eAfterKeep.find(row => row.refund_credit !== true).method, 'ABA')
     })
 
     console.log(`MEASURE relabel+rename+observe-free requests: ${JSON.stringify(writesBetween.map(entry => ({ label: entry.label, calls: entry.calls, statements: entry.statements })))}`)
