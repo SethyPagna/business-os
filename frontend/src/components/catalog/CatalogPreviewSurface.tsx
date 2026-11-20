@@ -4,6 +4,7 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
 import ArrowUp from 'lucide-react/dist/esm/icons/arrow-up.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
+import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
 import Globe from 'lucide-react/dist/esm/icons/globe.js'
 import Heart from 'lucide-react/dist/esm/icons/heart.js'
 import MessageCircle from 'lucide-react/dist/esm/icons/message-circle.js'
@@ -105,6 +106,10 @@ type CatalogPreviewSurfaceProps = {
   onOpenAccount?: () => void
   onOpenWishlist?: () => void
   wishlistCount?: number
+  // The header list icon opens the List page. `listPage` is the full Saved/List page: while it is set it replaces the tab content and no tab is current.
+  onOpenList?: () => void
+  listCount?: number
+  listPage?: ReactNode
   accountSignedIn?: boolean
   // Every way to reach the shop (buildPortalContactEntries): the header's Contact menu. None: no Contact button.
   contactEntries?: readonly PortalContactEntry[]
@@ -186,6 +191,9 @@ export default function CatalogPreviewSurface({
   onOpenAccount,
   onOpenWishlist,
   wishlistCount = 0,
+  onOpenList,
+  listCount = 0,
+  listPage = null,
   accountSignedIn = false,
   contactEntries = [],
   catalogSection,
@@ -453,7 +461,7 @@ export default function CatalogPreviewSurface({
                           title={copy('contactUs', 'Contact us', 'ទាក់ទងយើង')}
                         >
                           <MessageCircle className={HEADER_ICON_GLYPH} />
-                          <span className="hidden sm:inline">{copy('contact', 'Contact', 'ទាក់ទង')}</span>
+                          <span className="hidden sm:inline">{copy('contactButton', 'Contact', 'ទាក់ទង')}</span>
                         </button>
                       )}
                     />
@@ -463,11 +471,23 @@ export default function CatalogPreviewSurface({
                       type="button"
                       className={`relative ${HEADER_ICON_CLASS}`}
                       onClick={onOpenWishlist}
-                      aria-label={copy('wishlistTitle', 'Wishlist')}
-                      title={copy('wishlistTitle', 'Wishlist')}
+                      aria-label={copy('saved', 'Saved')}
+                      title={copy('saved', 'Saved')}
                     >
                       <Heart className={HEADER_ICON_GLYPH} />
                       {wishlistCount > 0 ? <span className={HEADER_COUNT_CLASS}>{wishlistCount}</span> : null}
+                    </button>
+                  ) : null}
+                  {onOpenList ? (
+                    <button
+                      type="button"
+                      className={`relative ${HEADER_ICON_CLASS}`}
+                      onClick={onOpenList}
+                      aria-label={copy('bucketTitle', 'My List')}
+                      title={copy('bucketTitle', 'My List')}
+                    >
+                      <ClipboardList className={HEADER_ICON_GLYPH} />
+                      {listCount > 0 ? <span className={HEADER_COUNT_CLASS}>{listCount}</span> : null}
                     </button>
                   ) : null}
                   {onOpenAccount ? (
@@ -556,7 +576,7 @@ export default function CatalogPreviewSurface({
                     <div className="portal-nav-track flex w-max min-w-full flex-nowrap items-center gap-6 px-1">
                       {portalTabs.map((item) => {
                         const Icon = item.icon
-                        const selected = activeTab === item.key
+                        const selected = !listPage && activeTab === item.key
                         return (
                           <button
                             key={item.key}
@@ -596,8 +616,12 @@ export default function CatalogPreviewSurface({
                 fields are still named to the owner inside the editor
                 (CatalogEditorSurface.tsx's publication summary). */}
             <main id="portal-main-content" tabIndex={-1}>
-              <PortalNavSearchSlotContext.Provider value={searchSlot}>{catalogSection}</PortalNavSearchSlotContext.Provider>
-              {secondaryTabSection}
+              {listPage ? listPage : (
+                <>
+                  <PortalNavSearchSlotContext.Provider value={searchSlot}>{catalogSection}</PortalNavSearchSlotContext.Provider>
+                  {secondaryTabSection}
+                </>
+              )}
             </main>
             {footerWithQuickLinks}
           </div>

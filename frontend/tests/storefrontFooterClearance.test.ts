@@ -44,7 +44,7 @@ const scrollButtons = [...scrollStack.matchAll(/<button\b[\s\S]*?className="([^"
 assert.equal(scrollButtons.length, 2, 'the scroll-to-top and scroll-to-bottom buttons')
 const scrollHeight = scrollButtons.reduce((sum, classes) => sum + spacingRem(classes, 'h'), 0) + spacingRem(scrollWrapper, 'gap') * (scrollButtons.length - 1)
 
-const bucketClasses = classNames(block(publicPage, 'const bucketFab = (', '\n  )\n'))[0]
+const bucketClasses = classNames(block(publicPage, 'const bucketFab = ', '\n  ) : null\n'))[0]
 // The floating chat buttons are gone (the Contact menu is the one entry point), so nothing sits above My List any more and the
 // reserve is the fixed one the shell carries for every width.
 assert.doesNotMatch(surface, /floatingStackClearanceRem/, 'the surface no longer takes a reserve for a column of contact buttons')

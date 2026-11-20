@@ -81,7 +81,7 @@ export default function SignupConsentField({
           className="mt-0.5 h-5 w-5 shrink-0 cursor-pointer accent-emerald-700"
         />
         <label htmlFor={id} className="cursor-pointer">
-          {fillConsentLine(copy('portal_consent_line', CONSENT_LINE_EN, CONSENT_LINE_KM), {
+          {fillConsentLine(copy('portalConsentLine', CONSENT_LINE_EN, CONSENT_LINE_KM), {
             terms: <LegalInlineLink page="terms" label={titleOf('terms')} />,
             privacy: <LegalInlineLink page="privacy" label={titleOf('privacy')} />,
           })}

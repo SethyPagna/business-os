@@ -4,7 +4,6 @@ import type { Dispatch, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { usePullToRefresh } from '../shared/usePullToRefresh.ts'
 import PullToRefreshIndicator from '../shared/PullToRefreshIndicator.tsx'
-import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
 import HelpCircle from 'lucide-react/dist/esm/icons/help-circle.js'
 import Mail from 'lucide-react/dist/esm/icons/mail.js'
@@ -12,15 +11,7 @@ import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
 import Phone from 'lucide-react/dist/esm/icons/phone.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
-import Heart from 'lucide-react/dist/esm/icons/heart.js'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
-import X from 'lucide-react/dist/esm/icons/x.js'
-import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
-import Minus from 'lucide-react/dist/esm/icons/minus.js'
-import PlusIcon from 'lucide-react/dist/esm/icons/plus.js'
-import Copy from 'lucide-react/dist/esm/icons/copy.js'
-import Download from 'lucide-react/dist/esm/icons/download.js'
-import Headset from 'lucide-react/dist/esm/icons/headset.js'
 import RotateCw from 'lucide-react/dist/esm/icons/rotate-cw.js'
 import type { LucideIcon } from 'lucide-react'
 import { useApp } from '../../app/AppContextCore.tsx'
@@ -47,7 +38,9 @@ import { portalScrollBehavior } from './portalMotion.ts'
 import { resolveCatalogAssetUrl } from './catalogAssetUrls'
 import { usePortalBucket, usePortalWishlist, formatPortalBucketText, downloadPortalBucketFile } from './portalBucket.ts'
 import { usePortalAccount } from './portalAccount.ts'
-import PortalNoPaymentNotice from './PortalNoPaymentNotice.tsx'
+import PortalListPage from './PortalListPage.tsx'
+import type { PortalListSegment } from './PortalListPage.tsx'
+import { usePortalListImages } from './portalListImages.ts'
 import PortalFooter from './legal/LegalPages.tsx'
 import { localizeDefaultConfigCopy, resolveStorefrontCopy } from './portalLanguagePacks.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGalleryHelpers.ts'
@@ -537,14 +530,34 @@ export default function PublicCatalogPage() {
   // Storefront account state + cart/wishlist server sync (§2). Guests keep
   // their list in this browser; signing in mirrors it to the account.
   const portalAccount = usePortalAccount(bucket, wishlist, copy)
-  const [bucketOpen, setBucketOpen] = useState(false)
   // Account (profile / sign-in) and Wishlist each open as a slide-in drawer
   // from their own top-bar icon (user request), same overlay pattern as the
   // cart bucket drawer below.
   // G38 P0 (owner 27 Sep): on the shop host /login is the customer sign-in,
   // never the staff app, so arriving there opens this drawer.
   const [accountOpen, setAccountOpen] = useState(() => typeof window !== 'undefined' && isStorefrontSignInPath(window.location?.pathname))
-  const [wishlistOpen, setWishlistOpen] = useState(false)
+  // Saved and List are one full page inside the storefront (spec section 4), not drawers. Opening it pushes one history entry, so the browser's
+  // Back returns the visitor to where they were (the tab, and how far down the page they had scrolled). Tabs themselves are plain state.
+  const [listView, setListView] = useState<PortalListSegment | null>(null)
+  const listEntryPushedRef = useRef(false)
+  const listOpenerRef = useRef<HTMLElement | null>(null)
+  const listReturnScrollRef = useRef(0)
+  const listImages = usePortalListImages()
+  useEffect(() => {
+    const onPopState = () => {
+      if (!listEntryPushedRef.current) return
+      listEntryPushedRef.current = false
+      setListView(null)
+      const opener = listOpenerRef.current
+      const top = listReturnScrollRef.current
+      window.requestAnimationFrame(() => {
+        window.scrollTo(0, top)
+        if (opener?.isConnected) opener.focus({ preventScroll: true })
+      })
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
   // The Contact menu opened from a button that belongs to another part of the page (the FAQ and About "Contact" buttons call openContactSheet with
   // no trigger of their own): it opens beside whatever was pressed last, and focus goes back there when it closes.
   const [contactAnchor, setContactAnchor] = useState<PortalContactAnchor | null>(null)
@@ -1056,14 +1069,21 @@ export default function PublicCatalogPage() {
   }
   // The product cards and the detail sheet add and save through these same two
   // functions, so a product behaves the same wherever it is tapped.
-  const addToBucket = (product: CatalogProduct, priceText?: string) => bucket.add(
-    { id: product.id, name: String(product.name || ''), category: String(product.category || ''), brand: String(product.brand || '') },
-    priceText,
-  )
-  const toggleWishlist = (product: CatalogProduct, priceText?: string) => wishlist.toggle(
-    { id: product.id, name: String(product.name || ''), category: String(product.category || ''), brand: String(product.brand || '') },
-    priceText,
-  )
+  // The list and the saved items keep no picture, so the page remembers the one a product had when it was added on this device.
+  const addToBucket = (product: CatalogProduct, priceText?: string) => {
+    listImages.remember(product.id, String(product.image_path || ''))
+    bucket.add(
+      { id: product.id, name: String(product.name || ''), category: String(product.category || ''), brand: String(product.brand || '') },
+      priceText,
+    )
+  }
+  const toggleWishlist = (product: CatalogProduct, priceText?: string) => {
+    listImages.remember(product.id, String(product.image_path || ''))
+    wishlist.toggle(
+      { id: product.id, name: String(product.name || ''), category: String(product.category || ''), brand: String(product.brand || '') },
+      priceText,
+    )
+  }
   const closeProductDetailView = () => setProductDetailView((prev) => ({ ...prev, open: false }))
   // The announcement strip and the promotion cards link to a product by id.
   // It is usually not on the loaded page, and there is no public by-id
@@ -1259,146 +1279,55 @@ export default function PublicCatalogPage() {
     downloadPortalBucketFile(text, bucketBusinessName)
   }
 
-  const closeBucketDrawer = () => {
-    setBucketOpen(false)
+  const openListView = (segment: PortalListSegment) => {
+    if (!listEntryPushedRef.current) {
+      listOpenerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      listReturnScrollRef.current = Math.max(window.scrollY || 0, 0)
+      window.history.pushState({ ...(window.history.state || {}), portalListView: true }, '', window.location.href)
+      listEntryPushedRef.current = true
+      window.scrollTo(0, 0)
+    }
+    setListView(segment)
+  }
+  // Closing is the browser's own Back (the popstate listener above does the rest). If the history entry is somehow gone, close anyway.
+  const closeListView = (restoreScroll = true) => {
+    if (!listEntryPushedRef.current) {
+      setListView(null)
+      return
+    }
+    if (!restoreScroll) listReturnScrollRef.current = 0
+    window.history.back()
+    window.setTimeout(() => {
+      if (!listEntryPushedRef.current) return
+      listEntryPushedRef.current = false
+      setListView(null)
+    }, 400)
   }
 
-  const bucketDrawer = bucketOpen ? (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-950/50 backdrop-blur-sm sm:items-center" onClick={closeBucketDrawer}>
-      <div
-        className="max-h-modal-85 w-full max-w-md overflow-hidden rounded-t-3xl bg-white pb-[env(safe-area-inset-bottom)] shadow-2xl dark:bg-neutral-900 sm:rounded-3xl sm:pb-0"
-        onClick={(event) => event.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label={copy('bucketTitle', 'My List')}
-      >
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-neutral-800">
-          <div>
-            <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('bucketTitle', 'My List')}</div>
-            <div className="text-xs text-slate-500 dark:text-neutral-400">{copy('bucketHint', 'No payment here -- just a shortlist to show our team.')}</div>
-          </div>
-          <div className="flex shrink-0 items-center gap-1">
-            <PortalContactMenu
-              entries={contactEntries}
-              copy={copy}
-              align="right"
-              trigger={(
-                <button
-                  type="button"
-                  className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-                  aria-label={copy('contactUs', 'Contact us')}
-                  title={copy('contactUs', 'Contact us')}
-                >
-                  <Headset className="h-5 w-5" />
-                </button>
-              )}
-            />
-            <button
-              type="button"
-              className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-              onClick={closeBucketDrawer}
-              aria-label={copy('close', 'Close')}
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-        </div>
-
-        <div className="px-5 pt-3">
-          <PortalNoPaymentNotice copy={copy} />
-        </div>
-
-        <div className="max-h-[calc(50*var(--app-vh))] overflow-y-auto px-5 py-3">
-          {bucket.items.length === 0 ? (
-            <div className="py-10 text-center text-sm text-slate-500 dark:text-neutral-400">
-              {copy('bucketEmpty', 'Your list is empty. Tap "Add" on products you like.')}
-            </div>
-          ) : (
-            <ul className="space-y-3">
-              {bucket.items.map((item) => (
-                <li key={item.id} className="flex items-start justify-between gap-3 border-b border-slate-50 pb-3 last:border-0 dark:border-neutral-800/60">
-                  <div className="min-w-0 flex-1">
-                    {/* A product name is never cut on this project (owner:
-                        "product names are using elipses when too long,
-                        remember we don't do that. we do scroll left and
-                        right"), and the storefront is where the customer
-                        reads it. Same block-level scroller as the rest of
-                        the app. `getKhmerTextProps` because a name can be
-                        Khmer whatever the UI language is, and the portal
-                        does not carry the admin app's `body.lang-km`: the
-                        Khmer line box is bought by
-                        `.detail-scroll-text.khmer-text` (styles/main.css)
-                        off the value itself. */}
-                    <div {...getKhmerTextProps(item.name, 'detail-scroll-text notranslate text-sm font-medium text-slate-900 dark:text-neutral-100')}>{item.name}</div>
-                    {item.priceText ? <div translate="no" className="notranslate text-xs text-slate-500 dark:text-neutral-400">{item.priceText}</div> : null}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1.5">
-                    <button
-                      type="button"
-                      className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-neutral-800 dark:text-neutral-300"
-                      onClick={() => bucket.setQty(item.id, item.qty - 1)}
-                      aria-label={copy('decreaseQty', 'Decrease quantity')}
-                    >
-                      <Minus className="h-3.5 w-3.5" />
-                    </button>
-                    <span className="w-6 text-center text-sm font-semibold text-slate-800 dark:text-neutral-100">{item.qty}</span>
-                    <button
-                      type="button"
-                      className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-neutral-800 dark:text-neutral-300"
-                      onClick={() => bucket.setQty(item.id, item.qty + 1)}
-                      aria-label={copy('increaseQty', 'Increase quantity')}
-                    >
-                      <PlusIcon className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      className="ml-1 flex h-7 w-7 items-center justify-center rounded-full text-rose-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40"
-                      onClick={() => bucket.remove(item.id)}
-                      aria-label={copy('removeFromBucket', 'Remove')}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        {bucket.items.length > 0 ? (
-          <div className="space-y-2 border-t border-slate-100 px-5 py-4 dark:border-neutral-800">
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-slate-900 px-3 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200"
-                onClick={handleBucketCopy}
-              >
-                <Copy className="h-4 w-4" />
-                {bucketCopyState === 'copied' ? copy('bucketCopied', 'Copied!') : copy('copyList', 'Copy list')}
-              </button>
-              <button
-                type="button"
-                className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
-                onClick={handleBucketDownload}
-              >
-                <Download className="h-4 w-4" />
-                {copy('downloadList', 'Download')}
-              </button>
-            </div>
-            {bucketCopyState === 'failed' ? (
-              <div className="text-center text-xs text-rose-700 dark:text-rose-300">{copy('bucketCopyFailed', 'Could not copy automatically -- try Download instead.')}</div>
-            ) : null}
-            <button
-              type="button"
-              className="w-full text-center text-xs font-medium text-slate-500 hover:text-rose-700 dark:text-neutral-400 dark:hover:text-rose-300"
-              onClick={bucket.clear}
-            >
-              {copy('clearBucket', 'Clear all')}
-            </button>
-          </div>
-        ) : null}
-      </div>
-    </div>
+  const listPage = listView ? (
+    <PortalListPage
+      copy={copy}
+      segment={listView}
+      onSegment={setListView}
+      onBack={() => closeListView()}
+      listItems={bucket.items}
+      savedItems={wishlist.items}
+      imageFor={listImages.imageFor}
+      inList={bucket.hasItem}
+      onSetQty={bucket.setQty}
+      onRemoveFromList={bucket.remove}
+      onClearList={bucket.clear}
+      onAddSaved={(id) => {
+        const item = wishlist.items.find((entry) => String(entry.id) === String(id))
+        if (item && !bucket.hasItem(item.id)) bucket.add({ id: item.id, name: item.name, category: item.category, brand: item.brand }, item.priceText)
+      }}
+      onRemoveSaved={wishlist.remove}
+      onClearSaved={wishlist.clear}
+      contactEntries={contactEntries}
+      onCopy={handleBucketCopy}
+      onDownload={handleBucketDownload}
+      copyState={bucketCopyState}
+    />
   ) : null
 
   // On the admin host the manifest is the staff app's, so the shop offers no install there.
@@ -1435,88 +1364,6 @@ export default function PublicCatalogPage() {
     </PortalSheet>
   ) : null
 
-  // Wishlist drawer: the top-bar heart icon opens this. Saved products (the
-  // heart toggle on each product card) with a shortcut to move one into the
-  // cart "My List". No payment here either — same shortlist model as the cart.
-  const wishlistDrawer = wishlistOpen ? (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-950/50 backdrop-blur-sm sm:items-center" onClick={() => setWishlistOpen(false)}>
-      <div
-        className="max-h-modal-85 w-full max-w-md overflow-hidden rounded-t-3xl bg-white pb-[env(safe-area-inset-bottom)] shadow-2xl dark:bg-neutral-900 sm:rounded-3xl sm:pb-0"
-        onClick={(event) => event.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label={copy('wishlistTitle', 'Wishlist', 'បញ្ជីចង់បាន')}
-      >
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-neutral-800">
-          <div className="flex items-center gap-2">
-            <Heart className="h-5 w-5 text-rose-500" />
-            <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('wishlistTitle', 'Wishlist', 'បញ្ជីចង់បាន')}</div>
-          </div>
-          <button
-            type="button"
-            className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-            onClick={() => setWishlistOpen(false)}
-            aria-label={copy('close', 'Close')}
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-        <div className="max-h-[calc(60*var(--app-vh))] overflow-y-auto px-5 py-3">
-          {wishlist.items.length === 0 ? (
-            <div className="py-10 text-center text-sm text-slate-500 dark:text-neutral-400">
-              {copy('wishlistEmpty', 'Your wishlist is empty. Tap the heart on products you love.', 'បញ្ជីចង់បានរបស់អ្នកនៅទទេ។ ចុចរូបបេះដូងលើផលិតផលដែលអ្នកចូលចិត្ត។')}
-            </div>
-          ) : (
-            <ul className="space-y-3">
-              {wishlist.items.map((item) => {
-                const inList = bucket.hasItem(item.id)
-                return (
-                  <li key={item.id} className="flex items-start justify-between gap-3 border-b border-slate-50 pb-3 last:border-0 dark:border-neutral-800/60">
-                    <div className="min-w-0 flex-1">
-                      {/* Scrolls, like the cart row above it and every other
-                          name in the app. */}
-                      <div {...getKhmerTextProps(item.name, 'detail-scroll-text notranslate text-sm font-medium text-slate-900 dark:text-neutral-100')}>{item.name}</div>
-                      {item.priceText ? <div translate="no" className="notranslate text-xs text-slate-500 dark:text-neutral-400">{item.priceText}</div> : null}
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1.5">
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-700 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200"
-                        onClick={() => bucket.add({ id: item.id, name: item.name, category: item.category, brand: item.brand }, item.priceText)}
-                      >
-                        <ClipboardList className="h-3.5 w-3.5" />
-                        {inList ? copy('inList', 'In list', 'ក្នុងបញ្ជី') : copy('addToList', 'Add', 'បន្ថែម')}
-                      </button>
-                      <button
-                        type="button"
-                        className="flex h-7 w-7 items-center justify-center rounded-full text-rose-400 transition hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40"
-                        onClick={() => wishlist.remove(item.id)}
-                        aria-label={copy('removeFromWishlist', 'Remove', 'លុបចេញ')}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </div>
-        {wishlist.items.length > 0 ? (
-          <div className="border-t border-slate-100 px-5 py-4 dark:border-neutral-800">
-            <button
-              type="button"
-              className="w-full text-center text-xs font-medium text-slate-500 transition hover:text-rose-700 dark:text-neutral-400 dark:hover:text-rose-300"
-              onClick={wishlist.clear}
-            >
-              {copy('clearWishlist', 'Clear all', 'សម្អាតទាំងអស់')}
-            </button>
-          </div>
-        ) : null}
-      </div>
-    </div>
-  ) : null
-
   // Swipe-down-to-refresh: attached to a plain wrapping div around this
   // whole page (see the `ref={publicPageRootRef}` on the return below) --
   // touch events bubble, so this only needs to be an ancestor of wherever
@@ -1531,7 +1378,7 @@ export default function PublicCatalogPage() {
   // gallery/lightbox or either drawer/popover is open, so a pull-down
   // gesture inside one of those (which have their own pinch/pan/scroll
   // handling) is never mistaken for a page-level refresh pull.
-  const pullToRefreshEnabled = !productGalleryView.open && !portalImageView.open && !bucketOpen && !contactAnchor && !filePicker.open && !accountOpen && !wishlistOpen
+  const pullToRefreshEnabled = !productGalleryView.open && !portalImageView.open && !listView && !contactAnchor && !filePicker.open && !accountOpen
   const { pullDistance: publicPullDistance, refreshing: publicPullRefreshing } = usePullToRefresh(
     publicPageRootRef,
     () => {
@@ -1554,27 +1401,21 @@ export default function PublicCatalogPage() {
     </div>
   ) : null
 
-  // Bucket ("My List") and Contact us are two separate floating icons,
-  // stacked bottom-right with the bucket on top -- the bucket stays visible
-  // at all times so it's discoverable even before a shopper adds anything,
-  // and Contact us gets its own one-tap icon (rather than being buried a
-  // click deep inside the bucket drawer) whenever the store has a channel
-  // configured.
-  const bucketFab = (
+  // The floating List button: only on the Products tab, and only once the list has something in it.
+  const bucketFab = activeTab === 'products' && bucket.count > 0 && !listView ? (
     <button
       type="button"
-      className="fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom))] right-[calc(1.25rem+env(safe-area-inset-right))] z-50 flex items-center gap-2 rounded-full bg-slate-900 px-4 py-3 text-white shadow-xl transition hover:bg-slate-700 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200"
-      onClick={() => setBucketOpen(true)}
+      className="fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom))] right-[calc(1.25rem+env(safe-area-inset-right))] z-50 flex items-center gap-2 rounded-full bg-[#23201b] px-4 py-3 text-[#f4f1ea] shadow-xl transition hover:bg-stone-700 dark:bg-neutral-100 dark:text-neutral-950 dark:hover:bg-neutral-300"
+      onClick={() => openListView('list')}
       aria-label={copy('bucketTitle', 'My List')}
+      title={copy('bucketTitle', 'My List')}
     >
       <ClipboardList className="h-5 w-5" />
-      {bucket.count > 0 ? (
-        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[11px] font-bold text-white">
-          {bucket.count}
-        </span>
-      ) : null}
+      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-700 px-1 text-[11px] font-bold text-white">
+        {bucket.count}
+      </span>
     </button>
-  )
+  ) : null
 
   return (
     <div
@@ -1597,7 +1438,6 @@ export default function PublicCatalogPage() {
     {installBand}
     {bucketFab}
     {contactAnchor ? <PortalContactMenu entries={contactEntries} copy={copy} anchor={contactAnchor} onClose={closeContactSheet} /> : null}
-    {bucketDrawer}
     {accountDrawer}
     {portalAccount.consentRenewal ? (
       <Suspense fallback={null}>
@@ -1612,7 +1452,6 @@ export default function PublicCatalogPage() {
         />
       </Suspense>
     ) : null}
-    {wishlistDrawer}
     <PullToRefreshIndicator pullDistance={publicPullDistance} refreshing={publicPullRefreshing} />
     <CatalogPreviewSurface
       publicView
@@ -1629,10 +1468,16 @@ export default function PublicCatalogPage() {
       previewTitle={previewTitle}
       portalTabs={portalTabs}
       activeTab={activeTab}
-      setActiveTab={(key) => setActiveTab(resolvePortalActiveTab(displayConfig, copy, key))}
+      setActiveTab={(key) => {
+        if (listView) closeListView(false)
+        setActiveTab(resolvePortalActiveTab(displayConfig, copy, key))
+      }}
       onOpenAccount={() => setAccountOpen(true)}
-      onOpenWishlist={() => setWishlistOpen(true)}
+      onOpenWishlist={() => openListView('saved')}
       wishlistCount={wishlist.count}
+      onOpenList={() => openListView('list')}
+      listCount={bucket.count}
+      listPage={listPage}
       accountSignedIn={!!portalAccount.account}
       contactEntries={contactEntries}
       publicPortalNavRef={publicPortalNavRef as RefObject<HTMLElement>}
@@ -1653,7 +1498,7 @@ export default function PublicCatalogPage() {
       announcement={announcement}
       onDismissAnnouncement={dismissAnnouncement}
       onAnnouncementHeight={setAnnouncementHeight}
-      publicScrollButtonsVisible={scrollButtonsVisible && !bucketOpen && !contactAnchor}
+      publicScrollButtonsVisible={scrollButtonsVisible && !contactAnchor}
       scrollPublicPortal={scrollPublicPortal}
       productGalleryView={productGalleryView}
       setProductGalleryView={setProductGalleryView}

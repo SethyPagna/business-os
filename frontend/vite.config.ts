@@ -613,6 +613,8 @@ const routeSharedIconNames = new Set([
   'badge-percent',
   'bell',
   'bot',
+  // Imported by the storefront surface and by admin forms; unpinned, Rollup files the icon in catalog-public and app-shared then imports it back.
+  'check',
   'check-circle-2',
   'chevron-down',
   'chevron-up',
@@ -955,6 +957,12 @@ function manualChunks(id: string): string | undefined {
       // PublicCatalogRoot installs it before its first render and already
       // imports this chunk statically; the generic catch-all is the admin chunk.
       || normalized.includes('/src/components/catalog/portalTranslateDomGuard.ts')
+      // The Contact menu, the account sheet, the Saved/List page and its picture memory are imported by the storefront page and its surface;
+      // left to the catch-all they land in 'catalog' and make the same catalog -> catalog-public -> catalog cycle.
+      || normalized.includes('/src/components/catalog/PortalContactMenu.tsx')
+      || normalized.includes('/src/components/catalog/PortalSheet.tsx')
+      || normalized.includes('/src/components/catalog/PortalListPage.tsx')
+      || normalized.includes('/src/components/catalog/portalListImages.ts')
     ) {
       return 'catalog-public'
     }

@@ -169,7 +169,7 @@ check('3 Contact is one header button that opens a menu: no floating buttons, no
   assert.doesNotMatch(portalSocialRow, /PortalContactFloat|data-portal-contact-float/, 'and so is their component')
   assert.match(catalogPreviewSurface, /data-portal-contact-trigger=""/, 'the header Contact button is the one contact control')
   assert.match(catalogPreviewSurface, /HEADER_CONTACT_CLASS = 'inline-flex h-10 w-9 min-\[400px\]:w-10/, 'a 40 px tall target, icon alone on a phone')
-  assert.match(catalogPreviewSurface, /<span className="hidden sm:inline">\{copy\('contact', 'Contact'/, 'the word Contact shows from sm up')
+  assert.match(catalogPreviewSurface, /<span className="hidden sm:inline">\{copy\('contactButton', 'Contact'/, 'the word Contact shows from sm up')
 })
 
 // P-public-5: the minimized icon IS the contact button (one tap expands and

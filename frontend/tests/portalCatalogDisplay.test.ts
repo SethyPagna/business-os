@@ -736,7 +736,10 @@ runTest('T-G3: the phone-columns input starts at the smallest count the shop ren
 runTest('public mobile controls and overlays keep accessible touch/dialog contracts', () => {
   assert.match(publicPortalCssSource, /@media \(pointer: coarse\)[\s\S]*min-height:\s*44px/)
   assert.match(publicPortalCssSource, /button\[aria-label\][\s\S]*min-width:\s*44px/)
-  assert.match(publicCatalogPageSource, /role="dialog"[\s\S]*aria-modal="true"/)
+  // The page's one overlay is the account sheet; Saved and List are a full page, not a dialog.
+  const portalSheetSource = fs.readFileSync(new URL('../src/components/catalog/PortalSheet.tsx', import.meta.url), 'utf8')
+  assert.match(portalSheetSource, /role="dialog"[\s\S]*aria-modal="true"/)
+  assert.match(publicCatalogPageSource, /<PortalSheet\b/, 'the page opens its account sheet through PortalSheet')
   assert.match(productDetailFlyoutSource, /role="dialog"[\s\S]*aria-modal="true"/)
 })
 

@@ -28,16 +28,20 @@ function runTest(name: string, fn: () => void): void {
   }
 }
 
-// The shell files this lane owns. A file listed here that does not exist yet is skipped, so the list can grow
-// with each step of the lane; the last step asserts every name is present.
+// The shell files this lane owns; every one must exist, so a rename cannot silently drop a file from the guard.
 const SHELL_FILES = [
   'components/catalog/CatalogPreviewSurface.tsx',
-  // PublicCatalogPage.tsx joins when its drawers are replaced (steps 3 and 4)
+  'components/catalog/PublicCatalogPage.tsx',
   'components/catalog/PortalContactMenu.tsx',
   'components/catalog/PortalSocialRow.tsx',
-  // The rest of the lane's files join this list in the commit that makes them solid.
+  'components/catalog/PortalSheet.tsx',
+  'components/catalog/PortalListPage.tsx',
+  'components/catalog/CatalogAccountSection.tsx',
+  'components/catalog/PortalNoPaymentNotice.tsx',
+  'components/catalog/legal/SignupConsentField.tsx',
 ]
 const present = SHELL_FILES.filter((file) => fs.existsSync(path.join(src, file)))
+runTest('every listed shell file exists', () => assert.deepEqual(SHELL_FILES.filter((file) => !present.includes(file)), []))
 
 // A utility class that makes a background, border or text partly see-through: bg-white/95, dark:bg-neutral-900/80, ...
 const OPACITY_SUFFIX = /(?:^|[\s"'`:])(?:[a-z-]+:)*(?:bg|border|ring|text|from|to|via)-(?:[a-z]+-\d{2,3}|\[#[0-9a-fA-F]{3,8}\]|white|black)\/\d{1,3}(?=[\s"'`])/g
