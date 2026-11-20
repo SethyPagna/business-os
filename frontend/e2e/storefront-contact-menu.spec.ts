@@ -47,6 +47,19 @@ async function openStorefront(page: Page, width: number, patch: Record<string, u
   await stubStorefrontConfig(page, patch)
   await page.goto(`${STOREFRONT_ORIGIN}/`, { waitUntil: 'load' })
   await expect(page.locator('header.portal-header-shell')).toBeVisible()
+  await closeInstallNotice(page)
+}
+
+// On iOS Safari the shop shows its "Add to Home Screen" notice unprompted, fixed over the top of the page (unchanged from production
+// 90ad75aa0), so it lies on the header until the visitor closes it (gate run 44769528745, ios-webkit: the Contact button never took the
+// tap). A visitor closes it first; so does this spec. Where that notice should sit is a separate question from the Contact menu.
+async function closeInstallNotice(page: Page): Promise<void> {
+  if (page.context().browser()?.browserType().name() !== 'webkit') return
+  const notice = page.locator('div[role="status"]').filter({ has: page.locator('img[src*="icon-192"]') })
+  await notice.first().waitFor({ state: 'visible', timeout: 3_000 }).catch(() => undefined)
+  if (await notice.count() === 0) return
+  await notice.first().getByRole('button').last().click()
+  await expect(notice).toHaveCount(0)
 }
 
 const trigger = (page: Page) => page.locator('[data-portal-contact-trigger]')
