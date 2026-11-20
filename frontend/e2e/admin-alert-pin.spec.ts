@@ -127,6 +127,8 @@ async function openApp(page: Page): Promise<Bell> {
   })
   // cashier_a carries the fixture admin's role; the 'admin' account's fixture username is e2e_admin, which signIn's identity check does not match.
   await signIn(page, E2E_ACCOUNTS.cashierA)
+  // The bell mounts late after sign-in (App.tsx useDeferredNotificationCenterMount); bell news wakes it at once, as a push would.
+  await page.evaluate(() => window.dispatchEvent(new Event('notification:activity')))
   await expect(alertToasts(page)).toHaveCount(1)
   await expect(alertToasts(page)).toContainText('4 alerts need attention')
   await page.clock.pauseAt(Date.now() + 5_000)
