@@ -517,19 +517,28 @@ async function main() {
     try {
       const planTier = load('lib/planTier.ts')
       const limits = planTier.getPlanLimits
-      const lifetimes = {}
-      for (const tier of ['free', 'paid']) {
-        env.PLAN_TIER = tier
-        planTier.__resetPlanTierCacheForTests()
-        const body = await summary(ADMIN)
-        assert.equal(body.status, 200)
-        assert.equal(body.json.sectionLifetimeSeconds, limits(env).notificationSectionCacheSeconds, tier + ': the field is the plan limit')
-        assert.ok(Number.isFinite(body.json.sectionLifetimeSeconds) && body.json.sectionLifetimeSeconds > 0, tier + ': a positive number')
-        assert.equal(typeof body.json.generatedAt, 'string')
-        assert.ok(Array.isArray(body.json.sections))
-        lifetimes[tier] = body.json.sectionLifetimeSeconds
+      // The real limits first, then a distinct sentinel per tier, so a literal in the Worker fails whatever the two real values are.
+      const sentinels = { free: 17, paid: 23 }
+      const originals = {}
+      try {
+        for (const tier of ['free', 'paid']) {
+          for (const sentinel of [null, sentinels[tier]]) {
+            const limitsForTier = planTier.PLAN_LIMITS_BY_TIER[tier]
+            if (sentinel !== null) { originals[tier] = limitsForTier.notificationSectionCacheSeconds; limitsForTier.notificationSectionCacheSeconds = sentinel }
+            env.PLAN_TIER = tier
+            planTier.__resetPlanTierCacheForTests()
+            const body = await summary(ADMIN)
+            assert.equal(body.status, 200)
+            assert.equal(body.json.sectionLifetimeSeconds, limits(env).notificationSectionCacheSeconds, tier + ': the field is the plan limit')
+            if (sentinel !== null) assert.equal(body.json.sectionLifetimeSeconds, sentinel, tier + ': it follows the limit, not a constant')
+            assert.ok(Number.isFinite(body.json.sectionLifetimeSeconds) && body.json.sectionLifetimeSeconds > 0, tier + ': a positive number')
+            assert.equal(typeof body.json.generatedAt, 'string')
+            assert.ok(Array.isArray(body.json.sections))
+          }
+        }
+      } finally {
+        for (const tier of Object.keys(originals)) planTier.PLAN_LIMITS_BY_TIER[tier].notificationSectionCacheSeconds = originals[tier]
       }
-      assert.notEqual(lifetimes.free, lifetimes.paid, 'the two tiers differ, so a literal in the Worker would fail one of them')
     } finally { env.PLAN_TIER = savedTier; load('lib/planTier.ts').__resetPlanTierCacheForTests() }
   })
 
