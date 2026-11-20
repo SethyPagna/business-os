@@ -186,7 +186,7 @@ const MUTANTS = [
   { name: 'm3 drop the NULL-product expansion', file: 'src/lib/inventoryCheckMarks.ts', from: 'approval ? sessionProducts.get(sid) ?? [] : []', to: '[]' },
   { name: 'm4 cursor = the last event of the page, not the last walked', file: 'src/lib/inventoryCheckMarks.ts', from: 'const cursorRow = last as Row', to: 'const cursorRow = list[list.length - 1]' },
   { name: 'm5 skip the tag check', file: 'src/lib/inventoryCheckMarks.ts', from: '(since > 0 && (!atEvent || eventTag(atEvent) !== tag))', to: 'false' },
-  { name: 'm6 drop the session branch match', file: 'src/lib/inventoryCheckMarks.ts', from: 'AND sx.organization_id IS @organization AND sx.branch_id = x.branch_id\n    ORDER BY x.updated_at DESC, x.session_id DESC LIMIT 1)', to: 'AND sx.organization_id IS @organization\n    ORDER BY x.updated_at DESC, x.session_id DESC LIMIT 1)' },
+  { name: 'm6 drop the session branch match', file: 'src/lib/inventoryCheckMarks.ts', from: 'AND sx.organization_id IS @organization AND sx.branch_id = x.branch_id', to: 'AND sx.organization_id IS @organization' },
   { name: 'm7 drop the cached page lag rule', file: 'src/routes/inventoryChecks.ts', from: ' && check.top - cached.cursor <= limits.inventoryMarksCatchUpMaxEvents / 2', to: '' },
 ]
 const SWITCHES = { ic_marks: 'on', ic_wired: 'on', ic_fix_stock: 'on', ic_lot_counts: 'on', catalog_ranked_scope: 'on' }
