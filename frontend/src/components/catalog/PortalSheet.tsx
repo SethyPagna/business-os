@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import X from 'lucide-react/dist/esm/icons/x.js'
+import { nextTrapIndex, PORTAL_FOCUSABLE_SELECTOR } from './portalFocusTrap.ts'
 
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 
@@ -32,6 +33,17 @@ export default function PortalSheet({ label, copy, onClose, corner, children }: 
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
     panelRef.current?.focus({ preventScroll: true })
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Tab' && !event.defaultPrevented) {
+        const panel = panelRef.current
+        // A menu layered above the sheet owns its own keys.
+        if (!panel || document.querySelector('[data-portal-menu-content]')) return
+        const focusable = Array.from(panel.querySelectorAll<HTMLElement>(PORTAL_FOCUSABLE_SELECTOR)).filter((element) => element.getClientRects().length > 0)
+        event.preventDefault()
+        const next = nextTrapIndex(focusable.length, focusable.indexOf(document.activeElement as HTMLElement), event.shiftKey)
+        if (next >= 0) focusable[next].focus()
+        else panel.focus({ preventScroll: true })
+        return
+      }
       if (event.key !== 'Escape' || event.defaultPrevented) return
       // A menu or dialog layered above the sheet takes Escape first.
       if (document.querySelector('[data-portal-menu-content]')) return
