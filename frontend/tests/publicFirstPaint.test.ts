@@ -219,12 +219,11 @@ await runTest('the storefront uses the cover, logo and About picture URLs as-is 
   assert.match(page, /versionedBusinessLogo=\{businessLogoUrl\}/)
 })
 
-await runTest('the skeleton holds the header\'s social row: a pending config renders its 56 px box, so nothing under the header moves when the links arrive (P2-3 layout shift)', () => {
-  const row = code(read('../src/components/catalog/PortalSocialRow.tsx'))
-  assert.match(row, /copy, pending = false \}/)
-  assert.match(row, /if \(!groups\.length && !mapLink\) \{[\s\S]*?return pending \? <div aria-hidden="true" data-portal-social-skeleton="true" className="mt-2 h-12" \/> : null/, 'mt-2 + h-12 = 8 + 44 + 4 = 56 px, the live row\'s box')
-  assert.match(row, /className="mt-2 flex min-h-11 flex-nowrap items-center gap-2 overflow-x-auto overscroll-x-contain px-1 pb-1"/, 'the live row the placeholder mirrors: mt-2, 44 px items, pb-1')
-  assert.match(previewSurface(), /<PortalSocialRow [^>]*pending=\{configPending\}/)
+await runTest('the header is one row with no social row under it, so the config arriving adds nothing below the header (P2-3 layout shift)', () => {
+  const surface = previewSurface()
+  const header = surface.slice(surface.indexOf('<header className="portal-header-shell'), surface.indexOf('</header>'))
+  assert.doesNotMatch(header, /PortalSocialRow|data-portal-social/, 'the 56 px social row (and its skeleton) is gone')
+  assert.match(header, /configPending\s*\?\s*<span aria-hidden="true" className="portal-skeleton-block inline-block h-5 w-40/, 'while the config is pending the name is a skeleton block in the same row')
 })
 
 await runTest('the About card mounts after its cover has arrived (or a bounded wait), so the whole card lands at its final size (P2-3 layout shift)', () => {

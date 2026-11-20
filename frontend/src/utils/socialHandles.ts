@@ -1,6 +1,6 @@
 // Pure helpers that turn a stored social/contact link into what a visitor
-// should SEE: the real account handle (@leangcosmetics, +855 12 345 678,
-// example.com/shop) instead of the platform name. Dependency-free apart from
+// should SEE: the real account name (leangcosmetics, +855 12 345 678,
+// example.com/shop) instead of the platform name. Never with a leading "@". Dependency-free apart from
 // the phone formatter so it is unit-testable in node.
 //
 // Owner rule: a social link shows the platform icon plus the actual account
@@ -98,7 +98,8 @@ function parseWebLink(href: unknown): ParsedLink | null {
 }
 
 const hostIs = (host: string, ...domains: string[]) => domains.some((domain) => host === domain || host.endsWith(`.${domain}`))
-const user = (text: string): SocialHandle => ({ text: `@${text}`, kind: 'username' })
+// An account name is shown bare: never a leading "@" (public-web overhaul, spec section 3).
+const user = (text: string): SocialHandle => ({ text, kind: 'username' })
 
 // Facebook first segments that are never a page/person vanity name.
 const NON_PROFILE_FACEBOOK = new Set([
@@ -126,7 +127,7 @@ function messengerHandle(link: ParsedLink): SocialHandle | null {
   if (hostIs(link.host, 'm.me')) name = link.segments[0] || ''
   else if (hostIs(link.host, 'facebook.com', 'fb.com')) {
     const page = facebookHandle(link)
-    name = page?.kind === 'username' ? page.text.slice(1) : ''
+    name = page?.kind === 'username' ? page.text : ''
   }
   if (!name || /^\d+$/.test(name) || !/^[A-Za-z0-9._-]{1,50}$/.test(name)) return null
   return user(name)
@@ -236,7 +237,8 @@ export function resolveSocialDisplay(input: {
 }): SocialDisplay {
   const { platform } = input
   const platformName = SOCIAL_PLATFORM_NAMES[platform][input.language === 'km' ? 'km' : 'en']
-  const label = normalizeSocialLabel(input.customLabel)
+  // An owner who typed "@name" still sees "name": the "@" is dropped at display, the saved label is untouched.
+  const label = normalizeSocialLabel(input.customLabel).replace(/^@+/, '')
   let visibleText = platformName
   let kind: SocialDisplayKind = 'platform'
   let latin = !KHMER_CHAR.test(platformName)

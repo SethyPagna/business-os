@@ -96,8 +96,9 @@ await runTest('the storefront sign-up form and the public privacy text state the
   const khmerDigits = (n: number) => [...String(n)].map((d) => '០១២៣៤៥៦៧៨៩'[Number(d)]).join('')
   const form = read('../src/components/catalog/CatalogAccountSection.tsx')
   assert.ok(form.includes(`PORTAL_MIN_PASSWORD_LENGTH = ${server.MIN_PASSWORD_LENGTH}`))
-  assert.ok(form.includes(`At least ${server.MIN_PASSWORD_LENGTH} characters.`))
-  assert.ok(form.includes(`យ៉ាងតិច ${khmerDigits(server.MIN_PASSWORD_LENGTH)} តួអក្សរ។`))
+  assert.ok(form.includes(`${server.MIN_PASSWORD_LENGTH} characters or more.`))
+  assert.ok(form.includes(`minLength={PORTAL_MIN_PASSWORD_LENGTH}`), 'the field enforces the minimum itself')
+  assert.ok(form.includes(`${khmerDigits(server.MIN_PASSWORD_LENGTH)} តួអក្សរឡើងទៅ។`))
   const words: Record<number, string> = { 10: 'ten' }
   for (const rel of ['../src/lang/en.json', '../src/components/catalog/legal/legalContent.ts']) {
     assert.ok(read(rel).includes(`needs at least ${words[server.MIN_PASSWORD_LENGTH]} characters`), rel)

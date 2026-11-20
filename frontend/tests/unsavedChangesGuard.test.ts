@@ -313,9 +313,9 @@ const DELIBERATELY_UNGUARDED: Record<string, string> = {
   'components/utils-settings/OtpModal.tsx': 'transient credential entry -- a retyped code, never authored content',
   // Read-only viewers and page chrome.
   'components/catalog/ProductDetailFlyout.tsx': 'read-only viewer',
-  'components/catalog/legal/ConsentRenewalPrompt.tsx': 'holds no draft -- one tick and Agree; nothing authored is lost by dismissing it',
+  'components/catalog/PortalSheet.tsx': 'the storefront account sheet: sign-in and sign-up credentials, nothing authored; a closed sheet costs a retyped phone number, never content',
+  'components/catalog/legal/ConsentRenewalPrompt.tsx':'holds no draft -- one tick and Agree; nothing authored is lost by dismissing it',
   'components/catalog/legal/LegalPages.tsx': 'read-only policy viewer; it has no editable fields or draft state to lose',
-  'components/catalog/PublicCatalogPage.tsx': 'storefront drawers -- the cart and wishlist persist, the drawers only show them',
   'components/inventory/ProductDetailModal.tsx': 'read-only viewer',
   'components/navigation/Sidebar.tsx': 'navigation chrome, not a modal',
   'components/products/surfaces/ProductDescriptionDetailModal.tsx': 'read-only viewer',

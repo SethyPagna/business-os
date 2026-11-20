@@ -189,7 +189,12 @@ function textOf(node: unknown): string {
   const go = (n: unknown) => {
     if (typeof n === 'string' || typeof n === 'number') out += String(n)
     else if (Array.isArray(n)) n.forEach(go)
-    else if (n && typeof n === 'object') go((n as Node).props.children)
+    else if (n && typeof n === 'object') {
+      // A policy link is a component whose visible text is its `label` prop (the tree is not rendered to markup here).
+      const props = (n as Node).props
+      if (typeof props.label === 'string') out += props.label
+      go(props.children)
+    }
   }
   go(node)
   return out.replace(/\s+/g, ' ').trim()
@@ -212,7 +217,7 @@ for (const language of ['en', 'km'] as const) {
     let tree = render(props())
     const dialog = find(tree, (el) => el.props.role === 'dialog')
     assert.ok(dialog && dialog.props['data-portal-consent-renewal'] === 'true', 'the dialog renders its real content from first paint')
-    const label = language === 'en' ? 'I am 16 or older, and I agree to the Terms & Conditions and the Privacy Policy.' : 'ខ្ញុំមានអាយុ ១៦ ឆ្នាំឡើងទៅ ហើយខ្ញុំយល់ព្រមនឹងលក្ខខណ្ឌប្រើប្រាស់ និងគោលការណ៍ឯកជនភាព។'
+    const label = language === 'en' ? 'I am 16 or older and accept the Terms & Conditions and Privacy Policy.' : 'ខ្ញុំមានអាយុ ១៦ ឆ្នាំឡើងទៅ ហើយទទួលយកលក្ខខណ្ឌប្រើប្រាស់ និងគោលការណ៍ឯកជនភាព។'
     assert.ok(textOf(tree).includes(label), 'the same combined tick as sign-up')
     const box = find(tree, (el) => el.props.type === 'checkbox')!
     assert.equal(box.props.checked, false, 'never pre-ticked')

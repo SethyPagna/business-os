@@ -32,7 +32,9 @@ import {
   PORTAL_DARK_SURFACE,
   PORTAL_HERO_GRADIENT_DEFAULTS,
   PORTAL_INK_ON_DARK,
+  PORTAL_FIELD_LINE_LIGHT,
   PORTAL_INK_ON_LIGHT,
+  PORTAL_LIGHT_CARD,
   PORTAL_LIGHT_SURFACE,
   PORTAL_MERCHANT_COLOR_DEFAULTS,
   PORTAL_TOKENS,
@@ -121,11 +123,22 @@ runTest('every storefront text/background pair clears its AA threshold', () => {
   assert.deepEqual(failures, [])
 })
 
-runTest('both page grounds are the ones buildPortalBackground paints', () => {
-  assert.equal(PORTAL_LIGHT_SURFACE, '#ffffff')
+runTest('both page grounds are the ones buildPortalBackground paints: ivory and near-black, never white', () => {
+  assert.equal(PORTAL_LIGHT_SURFACE, '#f4f1ea')
+  assert.equal(PORTAL_LIGHT_SURFACE, PORTAL_TOKENS.light.ground, 'the TS ground is the --portal-ground token')
+  assert.equal(PORTAL_LIGHT_CARD, PORTAL_TOKENS.light.card)
+  assert.notEqual(PORTAL_LIGHT_SURFACE, PORTAL_LIGHT_CARD, 'the page and the white card are told apart')
   assert.equal(PORTAL_DARK_SURFACE, '#0b0b0c')
   const publicPage = read('PublicCatalogPage.tsx')
-  assert.match(publicPage, /return darkMode \? '#0b0b0c' : '#ffffff'/, 'buildPortalBackground still paints those two grounds')
+  assert.match(publicPage, /return darkMode \? PORTAL_DARK_SURFACE : PORTAL_LIGHT_SURFACE/, 'buildPortalBackground paints the two grounds')
+  assert.doesNotMatch(publicPage, /return darkMode \? '#0b0b0c' : '#ffffff'/, 'and no longer paints a white page')
+  assert.match(read('CatalogPage.tsx'), /theme === 'dark' \? PORTAL_DARK_SURFACE : PORTAL_LIGHT_SURFACE/, 'the admin preview paints the same page')
+})
+
+runTest('the field line reaches 3:1 against both the ivory page and the white card', () => {
+  assert.ok(meetsContrast(PORTAL_FIELD_LINE_LIGHT, PORTAL_LIGHT_SURFACE, 'ui'), 'field line on the page')
+  assert.ok(meetsContrast(PORTAL_FIELD_LINE_LIGHT, PORTAL_LIGHT_CARD, 'ui'), 'field line on the card')
+  assert.equal(meetsContrast('#a8a29e', PORTAL_LIGHT_CARD, 'ui'), false, 'stone-400, the first draft of the recipe, does not')
 })
 
 runTest('readableTextOn picks the ink that actually wins on each ground', () => {
@@ -226,7 +239,7 @@ runTest('the account submit button is no longer white on emerald-500 (2.54:1)', 
 
 runTest('the account error alert clears AA on its own rose-50 ground', () => {
   const source = read('CatalogAccountSection.tsx')
-  const alert = /className="mb-4 rounded-2xl border border-rose-300 bg-rose-50 ([^"]+)"/.exec(source)
+  const alert = /className="rounded-xl border border-rose-300 bg-rose-50 ([^"]+)"/.exec(source)
   assert.ok(alert, 'the error alert must still be the rose-50 block')
   assert.doesNotMatch(alert[1], /text-rose-600\b/, 'rose-600 on rose-50 is 4.28:1')
   assert.match(alert[1], /text-rose-700\b/, 'rose-700 on rose-50 is 5.72:1')
@@ -362,14 +375,12 @@ runTest('the secondary-tabs Suspense fallback paints a dark ground too', () => {
   )
 })
 
-runTest('the language-tools menu heading is legible on the dark menu surface', () => {
+runTest('the language menu has no title row and its active option is legible on both menu surfaces', () => {
   const surface = read('CatalogPreviewSurface.tsx')
-  assert.match(
-    surface,
-    /px-4 pb-2 pt-3 text-\[11px\] font-semibold uppercase tracking-\[0\.18em\] text-slate-500 dark:text-neutral-400/,
-    'the "Language tools" heading needs a dark ink -- PortalMenu\'s own menu surface is dark:bg-neutral-900',
-  )
-  assert.ok(meetsContrast('#a3a3a3', '#171717', 'text'), 'dark:text-neutral-400 clears AA text contrast on that menu')
+  assert.doesNotMatch(surface, /uppercase tracking-\[0\.18em\] text-stone-600/, 'the Language tools heading row is gone')
+  assert.match(surface, /font-semibold text-\[#7a5c22\] dark:text-amber-300/, 'the active option is brass text with a check')
+  assert.ok(meetsContrast('#7a5c22', '#ffffff', 'text'), 'brass text on the white menu')
+  assert.ok(meetsContrast('#fcd34d', '#171717', 'text'), 'amber-300 on the dark menu')
 })
 
 // ---------------------------------------------------------------------------

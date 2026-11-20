@@ -42,9 +42,13 @@ export const PORTAL_INK_ON_LIGHT = '#0f172a'
 /** Ink used on dark surfaces. */
 export const PORTAL_INK_ON_DARK = '#ffffff'
 
-/** The two page grounds the storefront paints (buildPortalBackground). */
-export const PORTAL_LIGHT_SURFACE = '#ffffff'
+/** The two page grounds the storefront paints (buildPortalBackground): ivory, and the near-black. */
+export const PORTAL_LIGHT_SURFACE = '#f4f1ea'
 export const PORTAL_DARK_SURFACE = '#0b0b0c'
+/** The card, sheet and menu surface that sits on the light page ground (the page is ivory, the card is white). */
+export const PORTAL_LIGHT_CARD = '#ffffff'
+/** The field line (stone-500; stone-400 is only 2.5:1 on white) must reach 3:1 against the page and the card (WCAG 1.4.11). */
+export const PORTAL_FIELD_LINE_LIGHT = '#78716c'
 
 /**
  * Storefront design tokens, mirrored by the --portal-* custom properties in
@@ -212,27 +216,34 @@ export type PortalContrastPair = {
  * also greps the components for the specific tokens that used to fail).
  */
 export const PORTAL_CONTRAST_PAIRS: PortalContrastPair[] = [
-  // --- light theme, on the flat #ffffff ground -------------------------------
+  // --- light theme, ivory page ground (#f4f1ea) and white card (#ffffff) -------------------------------
   { name: 'heading text (slate-900)', foreground: '#0f172a', background: PORTAL_LIGHT_SURFACE, kind: 'text', where: 'catalogUi SectionShell title, product name' },
+  { name: 'heading text (slate-900) on the white card', foreground: '#0f172a', background: PORTAL_LIGHT_CARD, kind: 'text', where: 'sheet and card titles' },
   { name: 'body text (slate-600)', foreground: '#475569', background: PORTAL_LIGHT_SURFACE, kind: 'text', where: 'product detail body copy' },
-  { name: 'muted text (slate-500)', foreground: '#64748b', background: PORTAL_LIGHT_SURFACE, kind: 'text', where: 'hints, empty states, list-drawer prices' },
-  { name: 'promotions card link (amber-800)', foreground: '#92400e', background: PORTAL_LIGHT_SURFACE, kind: 'text', where: 'PortalPromotionsBanner view-product line' },
+  { name: 'body text (slate-600) on the white card', foreground: '#475569', background: PORTAL_LIGHT_CARD, kind: 'text', where: 'sheet and card body copy' },
+  { name: 'secondary text (stone-600) on the ivory page', foreground: '#57534e', background: PORTAL_LIGHT_SURFACE, kind: 'text', where: 'hints, empty states, counts: the spec secondary ink on the page' },
+  { name: 'secondary text (stone-600) on the white card', foreground: '#57534e', background: PORTAL_LIGHT_CARD, kind: 'text', where: 'hints, empty states, counts: the spec secondary ink on a card' },
+  { name: 'field line (stone-500) against the ivory page', foreground: PORTAL_FIELD_LINE_LIGHT, background: PORTAL_LIGHT_SURFACE, kind: 'ui', where: 'inputs, search and select triggers' },
+  { name: 'field line (stone-500) against the white card', foreground: PORTAL_FIELD_LINE_LIGHT, background: PORTAL_LIGHT_CARD, kind: 'ui', where: 'inputs inside a card or sheet' },
+  { name: 'muted text (slate-500)', foreground: '#64748b', background: PORTAL_LIGHT_CARD, kind: 'text', where: 'hints, empty states, list-drawer prices' },
+  { name: 'promotions card link (amber-800)', foreground: '#92400e', background: PORTAL_LIGHT_CARD, kind: 'text', where: 'PortalPromotionsBanner view-product line' },
   { name: 'account submit button label', foreground: '#ffffff', background: '#047857', kind: 'text', where: 'CatalogAccountSection sign in / create account' },
   { name: 'primary button label (slate-900 ground)', foreground: '#ffffff', background: '#0f172a', kind: 'text', where: 'add to list, copy list, bucket FAB' },
-  { name: 'stock badge: in stock (emerald-700 on the white pill)', foreground: '#047857', background: PORTAL_LIGHT_SURFACE, kind: 'text', where: 'catalogUi StatusPill' },
-  { name: 'stock badge: low stock (amber-700 on the white pill)', foreground: '#b45309', background: PORTAL_LIGHT_SURFACE, kind: 'text', where: 'catalogUi StatusPill' },
-  { name: 'stock badge: out of stock (rose-700 on the white pill)', foreground: '#be123c', background: PORTAL_LIGHT_SURFACE, kind: 'text', where: 'catalogUi StatusPill' },
+  { name: 'stock badge: in stock (emerald-700 on the white pill)', foreground: '#047857', background: PORTAL_LIGHT_CARD, kind: 'text', where: 'catalogUi StatusPill' },
+  { name: 'stock badge: low stock (amber-700 on the white pill)', foreground: '#b45309', background: PORTAL_LIGHT_CARD, kind: 'text', where: 'catalogUi StatusPill' },
+  { name: 'stock badge: out of stock (rose-700 on the white pill)', foreground: '#be123c', background: PORTAL_LIGHT_CARD, kind: 'text', where: 'catalogUi StatusPill' },
   { name: 'discount chip (rose-700 on rose-50)', foreground: '#be123c', background: '#fff1f2', kind: 'text', where: 'product card + detail sheet discount chip' },
   { name: 'form error text (rose-700 on rose-50)', foreground: '#be123c', background: '#fff1f2', kind: 'text', where: 'CatalogAccountSection error alert' },
-  { name: 'copy-failed notice (rose-700)', foreground: '#be123c', background: PORTAL_LIGHT_SURFACE, kind: 'text', where: 'PublicCatalogPage list drawer' },
+  { name: 'copy-failed notice (rose-700)', foreground: '#be123c', background: PORTAL_LIGHT_CARD, kind: 'text', where: 'PublicCatalogPage list drawer' },
   { name: 'selected filter option (blue-700 on blue-50)', foreground: '#1d4ed8', background: '#eff6ff', kind: 'text', where: 'PortalFilterCombobox option row' },
   { name: 'promotions hero card body (rose-50 on rose-700)', foreground: '#fff1f2', background: '#be123c', kind: 'text', where: 'CatalogProductsSection promotion article' },
-  { name: 'promotions hero card CTA (rose-700 on white)', foreground: '#be123c', background: PORTAL_LIGHT_SURFACE, kind: 'text', where: 'CatalogProductsSection promotion CTA' },
+  { name: 'promotions hero card CTA (rose-700 on white)', foreground: '#be123c', background: PORTAL_LIGHT_CARD, kind: 'text', where: 'CatalogProductsSection promotion CTA' },
   { name: 'no-payment notice (emerald-800 on emerald-50)', foreground: '#065f46', background: '#ecfdf5', kind: 'text', where: 'PortalNoPaymentNotice' },
   { name: 'signup reminder (amber-800 on amber-50)', foreground: '#92400e', background: '#fffbeb', kind: 'text', where: 'CatalogAccountSection membership reminder' },
-  { name: 'destructive icon button (rose-600)', foreground: '#e11d48', background: PORTAL_LIGHT_SURFACE, kind: 'ui', where: 'remove-from-list / remove-from-wishlist' },
-  { name: 'inactive promo dot (slate-500)', foreground: '#64748b', background: PORTAL_LIGHT_SURFACE, kind: 'ui', where: 'PortalPromoStrip dot row' },
+  { name: 'destructive icon button (rose-600)', foreground: '#e11d48', background: PORTAL_LIGHT_CARD, kind: 'ui', where: 'remove-from-list / remove-from-wishlist' },
+  { name: 'inactive promo dot (slate-500)', foreground: '#64748b', background: PORTAL_LIGHT_CARD, kind: 'ui', where: 'PortalPromoStrip dot row' },
   { name: 'focus ring against the light ground', foreground: '#0369a1', background: PORTAL_LIGHT_SURFACE, kind: 'ui', where: 'public-portal.css :focus-visible outline + the focus-visible:outline-[] classes on the createPortal()ed popups and the account form' },
+  { name: 'focus ring against the white card', foreground: '#0369a1', background: PORTAL_LIGHT_CARD, kind: 'ui', where: 'focus ring inside a card or sheet' },
 
   // --- dark theme, on the flat #0b0b0c ground --------------------------------
   { name: 'dark heading text (neutral-100)', foreground: '#f5f5f5', background: PORTAL_DARK_SURFACE, kind: 'text', where: 'catalogUi SectionShell title, product name' },

@@ -27,7 +27,7 @@ const RETIRED_MEMBERSHIP_COMING_SOON = /Membership: coming soon|សមាជិ�
 const MEMBERSHIP_ID_WORDING: Record<string, { en: string; km: string }> = {
   membershipId: { en: 'Membership ID', km: 'លេខសមាជិក' },
   membershipIdOptional: { en: 'Membership ID (optional)', km: 'លេខសមាជិក (ស្រេចចិត្ត)' },
-  membershipIdHint: { en: 'Leave blank and we will create one for you.', km: 'ទុកទទេ ហើយយើងនឹងបង្កើតលេខមួយជូនអ្នក។' },
+  signupMemberAsk: { en: 'Bought from us before? Ask us for your membership ID.', km: 'ធ្លាប់ទិញពីយើងហើយឬ? សូមសុំលេខសមាជិកពីយើង។' },
   nameOrMembershipId: { en: 'Name or Membership ID', km: 'ឈ្មោះ ឬលេខសមាជិក' },
 }
 
@@ -128,7 +128,8 @@ const pointsRowOf = (html: string) => ({
 const assertPointsRow = (html: string, language: 'en' | 'km', where: string) => {
   const { rows, values } = pointsRowOf(html)
   assert.deepEqual(values, [POINTS_ROW.value[language]], `the ${language} ${where} has one points value and it reads exactly "${POINTS_ROW.value[language]}"`)
-  assert.deepEqual(rows, [`${POINTS_ROW.label[language]}: ${POINTS_ROW.value[language]}`], `the ${language} ${where} points row is the label and the coming-soon value, nothing else`)
+  // The Membership section prints "Points: Coming soon", the account sheet a label/value pair; both are the label and the one value.
+  assert.deepEqual(rows.map((row) => row.replace(/: /, ' ')), [`${POINTS_ROW.label[language]} ${POINTS_ROW.value[language]}`], `the ${language} ${where} points row is the label and the coming-soon value, nothing else`)
 }
 for (const language of ['en', 'km'] as const) {
   const html = renderToStaticMarkup(React.createElement(CatalogSecondaryTabs, { ...membershipProps, copy: storefrontCopy(language) }))
@@ -151,10 +152,10 @@ const account = { id: 7, name: 'Dara', phone: '012345678', membershipId: 'LC-000
 for (const language of ['en', 'km'] as const) {
   const props = { copy: storefrontCopy(language), ready: true, busy: false, error: '', signIn: async () => true, signUp: async () => true, signOut: () => {}, clearError: () => {}, cartCount: 2, wishlistCount: 3 }
   const signedIn = visibleText(renderToStaticMarkup(React.createElement(CatalogAccountSection, { ...props, account })))
-  assert.ok(signedIn.includes(`${MEMBERSHIP_ID_WORDING.membershipId[language]}: LC-00042`), `the ${language} signed-in card shows the Membership ID`)
+  assert.ok(signedIn.includes(`${MEMBERSHIP_ID_WORDING.membershipId[language]} LC-00042`), `the ${language} signed-in card shows the Membership ID`)
   assertPointsRow(renderToStaticMarkup(React.createElement(CatalogAccountSection, { ...props, account })), language, 'signed-in card')
   assert.ok(!/250|2\.5/.test(signedIn), `the ${language} signed-in card never prints the points balance or its value`)
-  const outsidePointsRow = signedIn.replace(`${POINTS_ROW.label[language]}: ${POINTS_ROW.value[language]}`, '')
+  const outsidePointsRow = signedIn.replace(`${POINTS_ROW.label[language]} ${POINTS_ROW.value[language]}`, '')
   assert.doesNotMatch(outsidePointsRow, language === 'en' ? ENGLISH_POINTS : KHMER_POINTS, `the ${language} signed-in card has no points wording outside the points row`)
   const signedOut = visibleText(renderToStaticMarkup(React.createElement(CatalogAccountSection, { ...props, account: null })))
   assert.ok(signedOut.includes(MEMBERSHIP_ID_WORDING.nameOrMembershipId[language]), `the ${language} sign-in form keeps "${MEMBERSHIP_ID_WORDING.nameOrMembershipId[language]}"`)
