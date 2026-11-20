@@ -22,7 +22,9 @@ import { E2E_ACCOUNTS, signIn } from './support/session'
  * "No pop-up" is only asserted after the read was answered AND handled: the stub counts finished answers, and an init-script spy on
  * window.setTimeout sees the app re-arm its refresh timer, which loadSummary does only after it has taken an answer in.
  *
- * Three more cases (a portal review, a sale status change, a till sale) are added on the composed tree later.
+ * OWN WRITES (bell lane, api/bellFreshness.ts): a write this device makes that resolves bell items re-reads the bell at once and names the
+ * sections it resolved: a portal review asks ?fresh=portal, a sale status change ?fresh=sales, and the till's own new sale asks for nothing.
+ * The writes go through the app's own API layer (window.api) with the write endpoint stubbed, so the after-write hook in apiFetch is the real one.
  */
 
 test.use({ serviceWorkers: 'block' })
@@ -40,19 +42,23 @@ const A3 = stock('low-3', 'warning', 'Argan Hair Oil', 'Low stock (3)')
 const A4 = stock('low-4', 'warning', 'Shea Butter', 'Low stock (2)')
 const NEW = stock('out-5', 'danger', 'Camellia Serum', 'Out of stock')
 const INFO: Item = { id: 'portal-7', tone: 'info', label: 'Sokha Chan', meta: 'Pending review', kind: 'portal_pending_review', pageId: 'catalog' }
+const SALE: Item = { id: 'pay-41', tone: 'warning', label: 'R-000041', meta: 'Awaiting payment', kind: 'sales_awaiting_payment', pageId: 'sales' }
 // Four at once: more than three new alerts in one load collapse into the single "N alerts need attention" pop-up.
 const BASE = [A1, A2, A3, A4]
 
 /** A real Worker answer: it always carries generatedAt, and leaves a section out when it has no items. */
-function answer(stockItems: Item[], portalItems: Item[] = []) {
+function answer(stockItems: Item[], portalItems: Item[] = [], saleItems: Item[] = []) {
   const sections = []
+  if (saleItems.length) sections.push({ id: 'sales', label: 'Sales', pageId: 'sales', count: saleItems.length, summary: `${saleItems.length} sales need attention`, enabledKey: 'notifications_sales_enabled', items: saleItems })
   if (stockItems.length) sections.push({ id: 'inventory', label: 'Inventory', pageId: 'inventory', count: stockItems.length, summary: `${stockItems.length} stock alerts`, enabledKey: 'notifications_inventory_enabled', items: stockItems })
   if (portalItems.length) sections.push({ id: 'portal', label: 'Website Editor', pageId: 'catalog', count: portalItems.length, summary: `${portalItems.length} pending customer submissions`, items: portalItems })
-  const total = stockItems.length + portalItems.length
+  const total = stockItems.length + portalItems.length + saleItems.length
   return { unreadCount: total, unread: total, generatedAt: '2026-11-20T09:00:00.000Z', preferences: {}, sections }
 }
 
-type Bell = { reply: Reply; answered: number }
+type Bell = { reply: Reply; answered: number; asked: string[] }
+type AppApi = { api: Record<string, (...args: unknown[]) => Promise<unknown>> }
+const asksFresh = (section: string) => new RegExp(`[?&]fresh=${section}(?:&|$)`)
 
 // Every pop-up the stack draws is a [data-toast-type] node (App.tsx Notification). Only alert text counts, so an unrelated notice
 // (say a connection note after a dropped request) can never make a "no pop-up" or "one pop-up" assertion lie.
@@ -103,9 +109,9 @@ async function bellShows(page: Page, present: Item[], absent: Item[] = []): Prom
   await handled(page, armedBefore)
 }
 
-/** Signed-in admin on a clean device whose first bell read lists BASE: one "4 alerts need attention" pop-up, then the clock is paused. */
-async function openApp(page: Page): Promise<Bell> {
-  const bell: Bell = { reply: answer(BASE), answered: 0 }
+/** Signed-in admin on a clean device whose first bell read is `first` (BASE: four real alerts): one "N alerts need attention" pop-up, then the clock is paused. */
+async function openApp(page: Page, first: Reply = answer(BASE), alerts = 4): Promise<Bell> {
+  const bell: Bell = { reply: first, answered: 0, asked: [] }
   await page.clock.install()
   // After the clock, so it wraps the clock's setTimeout: records each re-arm of the bell's refresh timer (2 h) or its failure retry (15 s steps).
   await page.addInitScript(() => {
@@ -120,6 +126,7 @@ async function openApp(page: Page): Promise<Bell> {
   await seedDeviceSettings(page.context(), ADMIN_ORIGIN, { language: 'en' })
   await page.route(SUMMARY_URL, async (route) => {
     const reply = bell.reply
+    bell.asked.push(new URL(route.request().url()).search)
     if (reply === 'abort') await route.abort('failed')
     else if (reply === 500) await route.fulfill({ status: 500, json: { error: 'boom' } })
     else await route.fulfill({ json: reply })
@@ -130,9 +137,15 @@ async function openApp(page: Page): Promise<Bell> {
   // The bell mounts late after sign-in (App.tsx useDeferredNotificationCenterMount); bell news wakes it at once, as a push would.
   await page.evaluate(() => window.dispatchEvent(new Event('notification:activity')))
   await expect(alertToasts(page)).toHaveCount(1)
-  await expect(alertToasts(page)).toContainText('4 alerts need attention')
+  await expect(alertToasts(page)).toContainText(`${alerts} alerts need attention`)
   await page.clock.pauseAt(Date.now() + 5_000)
   return bell
+}
+
+/** One of this device's own writes, made through the app's API layer. The panel's re-read is a 0 ms timer, so the paused clock is nudged. */
+async function ownWrite(page: Page, method: string, args: unknown[]): Promise<void> {
+  await page.evaluate(([name, params]) => (window as unknown as AppApi).api[name as string](...(params as unknown[])), [method, args] as const)
+  await page.clock.runFor(50)
 }
 
 test.describe('admin alerts: pop-up once, pinned in the bell until resolved', () => {
@@ -211,5 +224,63 @@ test.describe('admin alerts: pop-up once, pinned in the bell until resolved', ()
     await readAgain(page, bell, answer([...BASE, NEW], [INFO]))
     await expect(alertToasts(page)).toHaveCount(1)
     await expect(alertToasts(page)).toContainText('Camellia Serum')
+  })
+})
+
+test.describe("admin alerts: this device's own write re-reads the bell for the sections it resolved", () => {
+  test('reviewing a portal submission asks ?fresh=portal at once and the item leaves the bell', async ({ page }) => {
+    // CATCHES: a reviewed submission staying in the acting admin's bell until the 2 h idle read (no re-read, or one that names no section and is served the cached answer).
+    const bell = await openApp(page, answer(BASE, [INFO]))
+    await bellShows(page, [...BASE, INFO])
+    let writes = 0
+    await page.route(/\/api\/portal\/submissions\/7\/review$/, async (route) => { writes += 1; await route.fulfill({ json: { success: true } }) })
+    bell.reply = answer(BASE)
+    const askedBefore = bell.asked.length
+    const armedBefore = await armedCount(page)
+    await ownWrite(page, 'reviewPortalSubmission', [7, { status: 'approved' }])
+    expect(writes, 'the review really reached the Worker').toBe(1)
+    await expect.poll(() => bell.asked.slice(askedBefore).some((query) => asksFresh('portal').test(query)), { message: 'a bell read naming the portal section' }).toBe(true)
+    await handled(page, armedBefore)
+    await expect(alertToasts(page)).toHaveCount(0)
+    await bellShows(page, BASE, [INFO])
+  })
+
+  test("changing a Not Paid sale's status asks ?fresh=sales at once and the item leaves the bell", async ({ page }) => {
+    // CATCHES: a settled sale staying pinned in the acting device's bell for the cache lifetime or longer.
+    const bell = await openApp(page, answer(BASE, [], [SALE]), 5)
+    await bellShows(page, [...BASE, SALE])
+    let writes = 0
+    await page.route(/\/api\/sales\/41\/status$/, async (route) => { writes += 1; await route.fulfill({ json: { success: true, id: 41, sale_status: 'completed' } }) })
+    bell.reply = answer(BASE)
+    const askedBefore = bell.asked.length
+    const armedBefore = await armedCount(page)
+    await ownWrite(page, 'updateSaleStatus', [41, 'completed', '', null])
+    expect(writes, 'the status change really reached the Worker').toBe(1)
+    await expect.poll(() => bell.asked.slice(askedBefore).some((query) => asksFresh('sales').test(query)), { message: 'a bell read naming the sales section' }).toBe(true)
+    await handled(page, armedBefore)
+    await expect(alertToasts(page)).toHaveCount(0)
+    await bellShows(page, BASE, [SALE])
+  })
+
+  test("the till's own new sale asks the bell for nothing", async ({ page }) => {
+    // CATCHES: every sale at the till forcing a fresh bell read (owner, 11 Nov: the bell may lag after the till's own sale).
+    const bell = await openApp(page, answer(BASE, [], [SALE]), 5)
+    let posts = 0
+    await page.route(/\/api\/sales$/, async (route) => {
+      if (route.request().method() !== 'POST') return route.fallback()
+      posts += 1
+      await route.fulfill({ json: { success: true, id: 99, receipt_number: 'R-000099' } })
+    })
+    const askedBefore = bell.asked.length
+    await ownWrite(page, 'createSale', [{ items: [], total_usd: 0, sale_status: 'completed' }])
+    expect(posts, 'the sale really reached the Worker').toBe(1)
+    // One second of CLOCK time (the page's timers run; nothing really waits), and the answer is read HERE, before the control write below is sent.
+    await page.clock.runFor(1_000)
+    await flush(page)
+    expect(bell.asked.slice(askedBefore).filter((query) => /[?&]fresh=/.test(query)), "no fresh bell read after the till's own sale").toEqual([])
+    // Control, sent only after the assertion above: the after-write hook is alive on this page. A status change on a sale does ask for the sales section.
+    await page.route(/\/api\/sales\/41\/status$/, (route) => route.fulfill({ json: { success: true, id: 41, sale_status: 'completed' } }))
+    await ownWrite(page, 'updateSaleStatus', [41, 'completed', '', null])
+    await expect.poll(() => bell.asked.slice(askedBefore).some((query) => asksFresh('sales').test(query)), { message: 'control: a bell read naming the sales section' }).toBe(true)
   })
 })
