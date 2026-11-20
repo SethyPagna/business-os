@@ -82,6 +82,23 @@ async function main() {
     assert.deepEqual(later.closedTasks, [t], 'the next count of one of its products closes it')
     return 'contract section 1 says done = total shows "only for the instant between the last final count and the close"; after a removal it lasts until the next count writer, a submission naming it, or a hand close'
   })
+  await check('hand close: a task of 4 closed by hand at 2 counted keeps 2 of 4 on the board and in its close event after the other 2 are counted', async () => {
+    const k = kit()
+    const t = await k.issue([100, 101, 102, 103])
+    await k.submit([{ productId: 100, countedQuantity: 10, seenQuantity: 10 }, { productId: 101, countedQuantity: 10, seenQuantity: 10 }])
+    const open = await k.task(t); assert.deepEqual([open.status, open.total, open.done], ['open', 4, 2])
+    const closed = await k.ic('admin', 'PATCH', `/sessions/${t}`, { expectedRevision: 0, requestId: k.w.rid('c'), action: 'close' }); assert.equal(closed.status, 200, JSON.stringify(closed.json))
+    const handClosed = await k.task(t); assert.deepEqual([handClosed.status, handClosed.total, handClosed.done, handClosed.removed], ['closed', 4, 2, 0], 'the board row shows what the admin saw')
+    const eventFigures = () => {
+      const rows = k.w.rows("SELECT after_json FROM inventory_check_events WHERE session_id=? AND action='close'", t)
+      assert.equal(rows.length, 1, 'one close event')
+      const after = JSON.parse(rows[0].after_json); return { total: after.total, done: after.done, removed: after.removed }
+    }
+    assert.deepEqual(eventFigures(), { total: 4, done: 2, removed: 0 })
+    await k.submit([{ productId: 102, countedQuantity: 10, seenQuantity: 10 }, { productId: 103, countedQuantity: 10, seenQuantity: 10 }])
+    const after = await k.task(t); assert.deepEqual([after.status, after.total, after.done, after.removed], ['closed', 4, 2, 0], 'counting the rest later does not move a closed task')
+    assert.deepEqual(eventFigures(), { total: 4, done: 2, removed: 0 })
+  })
   await check('perms: the Tasks action taken away refuses every task route at once (warm board cache); the issue extra taken away refuses issue, close, hand-back', async () => {
     const k = kit()
     const t = await k.issue([100, 101]); const t2 = await k.issue([102])
