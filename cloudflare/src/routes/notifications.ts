@@ -965,6 +965,8 @@ app.get('/summary', async (c) => {
     unread: unreadCount,
     // The "as of" the bell shows: when the oldest cached section was computed (now when every section ran in this request).
     generatedAt: cachedSection.oldestComputedAt() ?? new Date().toISOString(),
+    // How long a cached section can stay in the Cache API on this plan: the panel schedules its one catch-up read from it.
+    sectionLifetimeSeconds: getPlanLimits(c.env).notificationSectionCacheSeconds,
     preferences,
     sections,
   })

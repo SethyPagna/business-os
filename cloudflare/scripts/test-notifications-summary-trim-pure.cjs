@@ -502,6 +502,37 @@ async function main() {
     assert.equal(typeof mixed.json.generatedAt, 'string', 'every real answer carries generatedAt')
   })
 
+  await check('M1: a named fresh section that has not moved is not recomputed (a second ?fresh=sales with no write in between runs no sales statements)', async () => {
+    await cacheModule.bumpVersion(env, 'sales')
+    await summary(ADMIN, '?fresh=sales')
+    assert.equal(statements('sales'), 2, 'control: the first named read after a bump recomputes the sales section')
+    for (let i = 0; i < 3; i += 1) {
+      await summary(ADMIN, '?fresh=sales')
+      assert.equal(statements('sales'), 0, 'repeat ' + (i + 1) + ': no write since, so no sales statements')
+    }
+  })
+
+  await check('the answer carries sectionLifetimeSeconds from the plan limit on Free and on Paid, and generatedAt and sections are unchanged by it', async () => {
+    const savedTier = env.PLAN_TIER
+    try {
+      const planTier = load('lib/planTier.ts')
+      const limits = planTier.getPlanLimits
+      const lifetimes = {}
+      for (const tier of ['free', 'paid']) {
+        env.PLAN_TIER = tier
+        planTier.__resetPlanTierCacheForTests()
+        const body = await summary(ADMIN)
+        assert.equal(body.status, 200)
+        assert.equal(body.json.sectionLifetimeSeconds, limits(env).notificationSectionCacheSeconds, tier + ': the field is the plan limit')
+        assert.ok(Number.isFinite(body.json.sectionLifetimeSeconds) && body.json.sectionLifetimeSeconds > 0, tier + ': a positive number')
+        assert.equal(typeof body.json.generatedAt, 'string')
+        assert.ok(Array.isArray(body.json.sections))
+        lifetimes[tier] = body.json.sectionLifetimeSeconds
+      }
+      assert.notEqual(lifetimes.free, lifetimes.paid, 'the two tiers differ, so a literal in the Worker would fail one of them')
+    } finally { env.PLAN_TIER = savedTier; load('lib/planTier.ts').__resetPlanTierCacheForTests() }
+  })
+
   await check('F2: the imports section is filtered by the reader\'s permission AFTER the shared cache entry', async () => {
     seedStockFixture(raw.db, () => raw.db.exec(`INSERT INTO import_jobs (id, type, status, phase, warning_count, finished_at) VALUES
       ('imp-c1', 'customers', 'completed', 'done', 2, datetime('now')), ('imp-p1', 'products', 'completed', 'done', 3, datetime('now'))`))
