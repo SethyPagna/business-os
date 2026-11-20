@@ -43,7 +43,7 @@ export default function PortalAnnouncementStrip({ announcement, copy, onDismiss,
       role="region"
       aria-label={copy('portal_a11y_announcement', 'Announcement', 'សេចក្តីជូនដំណឹង')}
       data-portal-announcement="true"
-      className="w-full border-b border-amber-700/40 bg-slate-900 pt-[env(safe-area-inset-top)] text-white dark:bg-neutral-800"
+      className="w-full border-b border-amber-700 bg-slate-900 pt-[env(safe-area-inset-top)] text-white dark:bg-neutral-800"
     >
       <div ref={contentRef} className="mx-auto flex min-h-11 max-w-[1680px] items-center gap-2 px-4 sm:px-6 lg:px-10 xl:px-14">
         <p className="min-w-0 flex-1 py-2 text-center text-sm font-medium leading-5">
@@ -53,7 +53,7 @@ export default function PortalAnnouncementStrip({ announcement, copy, onDismiss,
               target="_blank"
               rel="noopener noreferrer"
               data-portal-announcement-link="true"
-              className="underline decoration-amber-400/80 underline-offset-2 hover:decoration-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+              className="underline decoration-amber-400 underline-offset-2 hover:decoration-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
             >
               {message}
             </a>
@@ -66,7 +66,7 @@ export default function PortalAnnouncementStrip({ announcement, copy, onDismiss,
             aria-label={dismissLabel}
             title={dismissLabel}
             data-portal-announcement-dismiss="true"
-            className="-mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white/90 transition hover:bg-white/15 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
+            className="-mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white transition hover:bg-slate-700 hover:text-white dark:hover:bg-neutral-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
           >
             <X className="h-4 w-4" />
           </button>

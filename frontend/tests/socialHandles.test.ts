@@ -23,15 +23,15 @@ function runCase(name: string, body: () => void): void {
 const text = (platform: SocialPlatform, href: string) => deriveSocialHandle(platform, href)?.text ?? null
 const kind = (platform: SocialPlatform, href: string) => deriveSocialHandle(platform, href)?.kind ?? null
 
-runCase('facebook: first segment is the @username on every host spelling; query, fragment and trailing slash are ignored', () => {
+runCase('facebook: first segment is the account name on every host spelling; query, fragment and trailing slash are ignored', () => {
   for (const host of ['facebook.com', 'www.facebook.com', 'm.facebook.com', 'web.facebook.com', 'fb.com', 'www.fb.com']) {
-    assert.equal(text('facebook', `https://${host}/LeangCosmetics`), '@LeangCosmetics', host)
+    assert.equal(text('facebook', `https://${host}/LeangCosmetics`), 'LeangCosmetics', host)
   }
-  assert.equal(text('facebook', 'https://facebook.com/leang.cosmetics/'), '@leang.cosmetics', 'trailing slash')
-  assert.equal(text('facebook', 'https://facebook.com/leang-cosmetics?mibextid=abc#x'), '@leang-cosmetics', '?mibextid and fragment')
-  assert.equal(text('facebook', 'facebook.com/leangcosmetics'), '@leangcosmetics', 'schemeless')
-  assert.equal(text('facebook', 'https://FACEBOOK.COM/LeangCosmetics'), '@LeangCosmetics', 'uppercase host, case of the handle kept')
-  assert.equal(text('facebook', 'https://facebook.com/Leang%2ECosmetics'), '@Leang.Cosmetics', 'percent-encoded dot decodes')
+  assert.equal(text('facebook', 'https://facebook.com/leang.cosmetics/'), 'leang.cosmetics', 'trailing slash')
+  assert.equal(text('facebook', 'https://facebook.com/leang-cosmetics?mibextid=abc#x'), 'leang-cosmetics', '?mibextid and fragment')
+  assert.equal(text('facebook', 'facebook.com/leangcosmetics'), 'leangcosmetics', 'schemeless')
+  assert.equal(text('facebook', 'https://FACEBOOK.COM/LeangCosmetics'), 'LeangCosmetics', 'uppercase host, case of the handle kept')
+  assert.equal(text('facebook', 'https://facebook.com/Leang%2ECosmetics'), 'Leang.Cosmetics', 'percent-encoded dot decodes')
   assert.equal(kind('facebook', 'https://facebook.com/x1'), 'username')
 })
 
@@ -54,10 +54,10 @@ runCase('facebook: links that name no account give no handle', () => {
   ]) assert.equal(text('facebook', href), null, href)
 })
 
-runCase('messenger: m.me/<user> and a facebook page both give @user; numeric ids and empty give none', () => {
-  assert.equal(text('messenger', 'https://m.me/leangcosmetics'), '@leangcosmetics')
-  assert.equal(text('messenger', 'https://m.me/leangcosmetics/?ref=abc'), '@leangcosmetics')
-  assert.equal(text('messenger', 'https://facebook.com/leangcosmetics'), '@leangcosmetics', 'derived from the page')
+runCase('messenger: m.me/<user> and a facebook page both give the user name; numeric ids and empty give none', () => {
+  assert.equal(text('messenger', 'https://m.me/leangcosmetics'), 'leangcosmetics')
+  assert.equal(text('messenger', 'https://m.me/leangcosmetics/?ref=abc'), 'leangcosmetics')
+  assert.equal(text('messenger', 'https://facebook.com/leangcosmetics'), 'leangcosmetics', 'derived from the page')
   assert.equal(text('messenger', 'https://m.me/100012345'), null)
   assert.equal(text('messenger', 'https://m.me/'), null)
   assert.equal(text('messenger', 'https://facebook.com/profile.php?id=1'), null)
@@ -65,12 +65,12 @@ runCase('messenger: m.me/<user> and a facebook page both give @user; numeric ids
 })
 
 runCase('instagram: instagram.com, instagr.am and ig.me/m/<user>; reserved paths and the bare host give none', () => {
-  assert.equal(text('instagram', 'https://instagram.com/leang.cosmetics'), '@leang.cosmetics')
-  assert.equal(text('instagram', 'https://www.instagram.com/Leang_Cosmetics/'), '@Leang_Cosmetics')
-  assert.equal(text('instagram', 'https://www.instagram.com/leangcosmetics/?igsh=MWl0YnVsd2Zm'), '@leangcosmetics', '?igsh=')
-  assert.equal(text('instagram', 'https://instagr.am/leang'), '@leang')
-  assert.equal(text('instagram', 'https://ig.me/m/leangcosmetics'), '@leangcosmetics')
-  assert.equal(text('instagram', 'https://INSTAGRAM.COM/LeangCosmetics'), '@LeangCosmetics', 'uppercase')
+  assert.equal(text('instagram', 'https://instagram.com/leang.cosmetics'), 'leang.cosmetics')
+  assert.equal(text('instagram', 'https://www.instagram.com/Leang_Cosmetics/'), 'Leang_Cosmetics')
+  assert.equal(text('instagram', 'https://www.instagram.com/leangcosmetics/?igsh=MWl0YnVsd2Zm'), 'leangcosmetics', '?igsh=')
+  assert.equal(text('instagram', 'https://instagr.am/leang'), 'leang')
+  assert.equal(text('instagram', 'https://ig.me/m/leangcosmetics'), 'leangcosmetics')
+  assert.equal(text('instagram', 'https://INSTAGRAM.COM/LeangCosmetics'), 'LeangCosmetics', 'uppercase')
   for (const href of [
     'https://instagram.com/p/ABC123', 'https://instagram.com/reel/ABC', 'https://instagram.com/stories/leang/1',
     'https://instagram.com/explore', 'https://instagram.com/accounts/login', 'https://instagram.com/', 'https://instagram.com',
@@ -79,12 +79,12 @@ runCase('instagram: instagram.com, instagr.am and ig.me/m/<user>; reserved paths
 })
 
 runCase('telegram: t.me/<user> and t.me/s/<user>; ?direct is not shown; invites, joinchat, c/ and empty give none', () => {
-  assert.equal(text('telegram', 'https://t.me/Leangcosmetic?direct'), '@Leangcosmetic', '?direct')
-  assert.equal(text('telegram', 'https://t.me/Leangcosmetic'), '@Leangcosmetic')
-  assert.equal(text('telegram', 'https://telegram.me/leang_shop/'), '@leang_shop')
-  assert.equal(text('telegram', 'https://telegram.dog/leang_shop'), '@leang_shop')
-  assert.equal(text('telegram', 'https://t.me/s/leang_channel'), '@leang_channel')
-  assert.equal(text('telegram', 'https://T.ME/LeangShop'), '@LeangShop', 'uppercase')
+  assert.equal(text('telegram', 'https://t.me/Leangcosmetic?direct'), 'Leangcosmetic', '?direct')
+  assert.equal(text('telegram', 'https://t.me/Leangcosmetic'), 'Leangcosmetic')
+  assert.equal(text('telegram', 'https://telegram.me/leang_shop/'), 'leang_shop')
+  assert.equal(text('telegram', 'https://telegram.dog/leang_shop'), 'leang_shop')
+  assert.equal(text('telegram', 'https://t.me/s/leang_channel'), 'leang_channel')
+  assert.equal(text('telegram', 'https://T.ME/LeangShop'), 'LeangShop', 'uppercase')
   for (const href of [
     'https://t.me/+AbCdEf123', 'https://t.me/joinchat/AAAAAEx', 'https://t.me/c/123456/7', 'https://t.me/', 'https://t.me',
     'https://t.me/abc', 'https://t.me/' + 'a'.repeat(33), 'https://example.com/leang_shop', 'https://t.me/s/',
@@ -127,9 +127,9 @@ runCase('website: host without www plus a short path; a long path, bare host, in
 })
 
 runCase('tiktok: tiktok.com/@user only', () => {
-  assert.equal(text('tiktok', 'https://www.tiktok.com/@leang.cosmetics'), '@leang.cosmetics')
-  assert.equal(text('tiktok', 'https://www.tiktok.com/@leang_shop?lang=en'), '@leang_shop')
-  assert.equal(text('tiktok', 'https://tiktok.com/%40leang'), '@leang', 'encoded @')
+  assert.equal(text('tiktok', 'https://www.tiktok.com/@leang.cosmetics'), 'leang.cosmetics')
+  assert.equal(text('tiktok', 'https://www.tiktok.com/@leang_shop?lang=en'), 'leang_shop')
+  assert.equal(text('tiktok', 'https://tiktok.com/%40leang'), 'leang', 'encoded @')
   for (const href of ['https://vm.tiktok.com/ZMabc/', 'https://www.tiktok.com/', 'https://www.tiktok.com/discover', 'https://example.com/@leang']) {
     assert.equal(text('tiktok', href), null, href)
   }
@@ -138,11 +138,11 @@ runCase('tiktok: tiktok.com/@user only', () => {
 const FB = 'https://facebook.com/leangcosmetics'
 
 runCase('discriminating pair: a default-name label is unset (handle shows), a real custom label wins', () => {
-  assert.equal(resolveSocialDisplay({ platform: 'facebook', customLabel: 'facebook ', href: FB }).visibleText, '@leangcosmetics', "label 'facebook ' (trailing space, lowercase) is the default")
-  assert.equal(resolveSocialDisplay({ platform: 'facebook', customLabel: 'Facebook', href: FB }).visibleText, '@leangcosmetics')
+  assert.equal(resolveSocialDisplay({ platform: 'facebook', customLabel: 'facebook ', href: FB }).visibleText, 'leangcosmetics', "label 'facebook ' (trailing space, lowercase) is the default")
+  assert.equal(resolveSocialDisplay({ platform: 'facebook', customLabel: 'Facebook', href: FB }).visibleText, 'leangcosmetics')
   assert.equal(resolveSocialDisplay({ platform: 'facebook', customLabel: 'Leang Official', href: FB }).visibleText, 'Leang Official')
-  assert.equal(resolveSocialDisplay({ platform: 'facebook', customLabel: '', href: FB }).visibleText, '@leangcosmetics')
-  assert.equal(resolveSocialDisplay({ platform: 'facebook', href: FB }).visibleText, '@leangcosmetics', 'label omitted')
+  assert.equal(resolveSocialDisplay({ platform: 'facebook', customLabel: '', href: FB }).visibleText, 'leangcosmetics')
+  assert.equal(resolveSocialDisplay({ platform: 'facebook', href: FB }).visibleText, 'leangcosmetics', 'label omitted')
 })
 
 runCase('every default name of every platform counts as unset, case-insensitively, and nothing else does', () => {
@@ -158,9 +158,9 @@ runCase('every default name of every platform counts as unset, case-insensitivel
 })
 
 runCase('Khmer: a default name is unset, a custom label is kept, ZWSP is stripped and spaces collapse', () => {
-  assert.equal(resolveSocialDisplay({ platform: 'facebook', customLabel: 'ហ្វេសប៊ុក', href: FB, language: 'km' }).visibleText, '@leangcosmetics')
-  assert.equal(resolveSocialDisplay({ platform: 'instagram', customLabel: 'អ៊ីនស្តាក្រាម', href: 'https://instagram.com/leang', language: 'km' }).visibleText, '@leang')
-  assert.equal(resolveSocialDisplay({ platform: 'instagram', customLabel: 'អ៊ីនស្ដាក្រាម', href: 'https://instagram.com/leang', language: 'km' }).visibleText, '@leang', 'second spelling')
+  assert.equal(resolveSocialDisplay({ platform: 'facebook', customLabel: 'ហ្វេសប៊ុក', href: FB, language: 'km' }).visibleText, 'leangcosmetics')
+  assert.equal(resolveSocialDisplay({ platform: 'instagram', customLabel: 'អ៊ីនស្តាក្រាម', href: 'https://instagram.com/leang', language: 'km' }).visibleText, 'leang')
+  assert.equal(resolveSocialDisplay({ platform: 'instagram', customLabel: 'អ៊ីនស្ដាក្រាម', href: 'https://instagram.com/leang', language: 'km' }).visibleText, 'leang', 'second spelling')
   assert.equal(resolveSocialDisplay({ platform: 'website', customLabel: 'គេហទំព័រ', href: 'https://leang.com', language: 'km' }).visibleText, 'leang.com')
   assert.equal(resolveSocialDisplay({ platform: 'phone', customLabel: 'ហៅទូរស័ព្ទ', href: 'tel:012345678', language: 'km' }).visibleText, '012 345 678')
   const custom = resolveSocialDisplay({ platform: 'facebook', customLabel: 'ហាងលាងគ្រឿងសំអាង', href: FB, language: 'km' })
@@ -168,7 +168,7 @@ runCase('Khmer: a default name is unset, a custom label is kept, ZWSP is strippe
   assert.equal(custom.latin, false)
   assert.equal(resolveSocialDisplay({ platform: 'facebook', customLabel: 'ហាង​លាង  ក្រែម', href: FB }).visibleText, 'ហាងលាង ក្រែម', 'ZWSP removed, spaces collapsed')
   assert.equal(normalizeSocialLabel('﻿ Leang​  Official\n'), 'Leang Official')
-  assert.equal(resolveSocialDisplay({ platform: 'facebook', customLabel: 'Face​book', href: FB }).visibleText, '@leangcosmetics', 'ZWSP inside a default name')
+  assert.equal(resolveSocialDisplay({ platform: 'facebook', customLabel: 'Face​book', href: FB }).visibleText, 'leangcosmetics', 'ZWSP inside a default name')
 })
 
 runCase('fallback: no handle -> the localized platform name (Latin brands stay Latin in Khmer)', () => {
@@ -183,15 +183,15 @@ runCase('fallback: no handle -> the localized platform name (Latin brands stay L
 })
 
 runCase('accessible name: "<Platform>: <visible>", or the platform alone when the visible text is the platform name', () => {
-  assert.equal(resolveSocialDisplay({ platform: 'facebook', href: FB }).accessibleName, 'Facebook: @leangcosmetics')
-  assert.equal(resolveSocialDisplay({ platform: 'facebook', href: FB, language: 'km' }).accessibleName, 'Facebook: @leangcosmetics', 'brand stays Latin in Khmer')
+  assert.equal(resolveSocialDisplay({ platform: 'facebook', href: FB }).accessibleName, 'Facebook: leangcosmetics')
+  assert.equal(resolveSocialDisplay({ platform: 'facebook', href: FB, language: 'km' }).accessibleName, 'Facebook: leangcosmetics', 'brand stays Latin in Khmer')
   assert.equal(resolveSocialDisplay({ platform: 'facebook', customLabel: 'Leang Official', href: FB }).accessibleName, 'Facebook: Leang Official')
   assert.equal(resolveSocialDisplay({ platform: 'facebook', href: 'https://facebook.com/share/x' }).accessibleName, 'Facebook')
   assert.equal(resolveSocialDisplay({ platform: 'website', href: 'https://leang.com/shop', language: 'km' }).accessibleName, 'គេហទំព័រ: leang.com/shop')
   assert.equal(resolveSocialDisplay({ platform: 'whatsapp', href: 'https://wa.me/85512345678' }).accessibleName, 'WhatsApp: +855 12 345 678')
   assert.equal(resolveSocialDisplay({ platform: 'phone', href: 'tel:012345678' }).accessibleName, 'Call: 012 345 678')
   // A handle that merely contains the brand is still a handle: it must not be swallowed.
-  assert.equal(resolveSocialDisplay({ platform: 'facebook', href: 'https://facebook.com/facebookshop' }).accessibleName, 'Facebook: @facebookshop')
+  assert.equal(resolveSocialDisplay({ platform: 'facebook', href: 'https://facebook.com/facebookshop' }).accessibleName, 'Facebook: facebookshop')
 })
 
 runCase('latin flag: handles, numbers and domains are Latin; a custom label is not; a Khmer page name is not', () => {
@@ -220,8 +220,8 @@ runCase("builder: today's single-link settings (string links + linkLabels + show
   assert.deepEqual(groups.map((g) => g.links.length), [1, 1, 1, 1])
   const flat = groups.flatMap((g) => g.links)
   assert.deepEqual(flat.map((l) => l.href), ['https://www.leang.com', 'https://facebook.com/leangcosmetics', 'https://instagram.com/leang', 'https://t.me/leangshop'])
-  assert.deepEqual(flat.map((l) => l.visibleText), ['leang.com', '@leangcosmetics', 'Leang on IG', '@leangshop'])
-  assert.deepEqual(flat.map((l) => l.accessibleName), ['Website: leang.com', 'Facebook: @leangcosmetics', 'Instagram: Leang on IG', 'Telegram: @leangshop'])
+  assert.deepEqual(flat.map((l) => l.visibleText), ['leang.com', 'leangcosmetics', 'Leang on IG', 'leangshop'])
+  assert.deepEqual(flat.map((l) => l.accessibleName), ['Website: leang.com', 'Facebook: leangcosmetics', 'Instagram: Leang on IG', 'Telegram: leangshop'])
   assert.deepEqual(Object.keys(flat[0]).sort(), ['accessibleName', 'href', 'kind', 'latin', 'platform', 'visibleText'])
 })
 
@@ -252,19 +252,19 @@ runCase('builder: several accounts per platform keep their order, de-duplicate i
   })
   const fb = groups.find((g) => g.platform === 'facebook')!
   assert.deepEqual(fb.links.map((l) => l.href), ['https://facebook.com/leangcosmetics', 'https://facebook.com/leang.wholesale', 'https://facebook.com/leang.kh'])
-  assert.deepEqual(fb.links.map((l) => l.visibleText), ['@leangcosmetics', 'Wholesale', '@leang.kh'])
+  assert.deepEqual(fb.links.map((l) => l.visibleText), ['leangcosmetics', 'Wholesale', 'leang.kh'])
   const tg = groups.find((g) => g.platform === 'telegram')!
   assert.deepEqual(tg.links.map((l) => l.href), ['https://t.me/leang_a?direct', 'https://t.me/leang_b'])
-  assert.deepEqual(tg.links.map((l) => l.visibleText), ['@leang_a', '@leang_b'])
+  assert.deepEqual(tg.links.map((l) => l.visibleText), ['leang_a', 'leang_b'])
 })
 
 runCase('builder: the legacy single label applies only to a single account, and an explicit empty customLabel beats it', () => {
   const single = buildPortalSocialLinks({ links: { facebook: [FB] }, labels: { facebook: 'Leang Official' } })
   assert.equal(single[0].links[0].visibleText, 'Leang Official')
   const two = buildPortalSocialLinks({ links: { facebook: [FB, 'facebook.com/leang2'] }, labels: { facebook: 'Leang Official' } })
-  assert.deepEqual(two[0].links.map((l) => l.visibleText), ['@leangcosmetics', '@leang2'])
+  assert.deepEqual(two[0].links.map((l) => l.visibleText), ['leangcosmetics', 'leang2'])
   const explicit = buildPortalSocialLinks({ links: { facebook: { href: FB, customLabel: '' } }, labels: { facebook: 'Leang Official' } })
-  assert.equal(explicit[0].links[0].visibleText, '@leangcosmetics')
+  assert.equal(explicit[0].links[0].visibleText, 'leangcosmetics')
 })
 
 runCase('builder: Khmer language only changes fallback names; handles and brand names stay as they are', () => {
@@ -277,8 +277,8 @@ runCase('builder: tiktok is supported (bare @handle or URL) and sits after insta
   const groups = buildPortalSocialLinks({ links: { instagram: 'instagram.com/leang', tiktok: '@leang.shop', website: 'leang.com' } })
   assert.deepEqual(groups.map((g) => g.platform), ['website', 'instagram', 'tiktok'])
   assert.equal(groups[2].links[0].href, 'https://www.tiktok.com/@leang.shop')
-  assert.equal(groups[2].links[0].visibleText, '@leang.shop')
-  assert.equal(groups[2].links[0].accessibleName, 'TikTok: @leang.shop')
+  assert.equal(groups[2].links[0].visibleText, 'leang.shop')
+  assert.equal(groups[2].links[0].accessibleName, 'TikTok: leang.shop')
 })
 
 runCase('contact channels: explicit values first, social-link fallbacks when empty, shown flags respected, channel order fixed', () => {
@@ -293,8 +293,8 @@ runCase('contact channels: explicit values first, social-link fallbacks when emp
   assert.deepEqual(groups.map((g) => g.platform), ['messenger', 'telegram', 'whatsapp', 'phone', 'instagram'])
   const flat = groups.flatMap((g) => g.links)
   assert.deepEqual(flat.map((l) => l.href), ['https://m.me/leangcosmetics', 'https://t.me/leangshop', 'https://wa.me/85512345678', 'tel:012345678', 'https://ig.me/m/leang'])
-  assert.deepEqual(flat.map((l) => l.visibleText), ['@leangcosmetics', '@leangshop', '+855 12 345 678', '012 345 678', '@leang'])
-  assert.deepEqual(flat.map((l) => l.accessibleName), ['Messenger: @leangcosmetics', 'Telegram: @leangshop', 'WhatsApp: +855 12 345 678', 'Call: 012 345 678', 'Instagram: @leang'])
+  assert.deepEqual(flat.map((l) => l.visibleText), ['leangcosmetics', 'leangshop', '+855 12 345 678', '012 345 678', 'leang'])
+  assert.deepEqual(flat.map((l) => l.accessibleName), ['Messenger: leangcosmetics', 'Telegram: leangshop', 'WhatsApp: +855 12 345 678', 'Call: 012 345 678', 'Instagram: leang'])
 })
 
 runCase('contact channels: fallbacks are skipped when the social link is hidden; an explicit value beats the fallback', () => {
@@ -312,7 +312,7 @@ runCase('contact channels: fallbacks are skipped when the social link is hidden;
   })
   assert.deepEqual(explicit[0].links.map((l) => l.href), ['https://m.me/support.leang'])
   assert.deepEqual(explicit[1].links.map((l) => l.href), ['https://t.me/leang_sales', 'https://t.me/leang_support'])
-  assert.deepEqual(explicit[1].links.map((l) => l.visibleText), ['Sales', '@leang_support'])
+  assert.deepEqual(explicit[1].links.map((l) => l.visibleText), ['Sales', 'leang_support'])
   assert.deepEqual(buildPortalContactChannels({ contactLinks: { whatsapp: 'https://chat.whatsapp.com/AbC' }, showContact: { whatsapp: true } }), [], 'a group link has no number, so deriveWhatsappLink drops it and no button is built')
 })
 

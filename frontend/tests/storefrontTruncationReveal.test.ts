@@ -126,20 +126,22 @@ runTest('no storefront surface truncates a per-record value with no way back', (
 })
 
 runTest('the cart and the wishlist scroll the name instead of cutting it', () => {
-  const publicPage = read('../src/components/catalog/PublicCatalogPage.tsx')
+  // The cart and the wishlist are the two segments of PortalListPage; both draw their rows through the one `nameBlock`.
+  const publicPage = read('../src/components/catalog/PortalListPage.tsx')
   // The scroller is the app-wide one in styles/main.css, not a second
   // implementation, and it is applied through `getKhmerTextProps` so a Khmer
   // name gets `khmer-text` -- the portal does not set the admin app's
   // `body.lang-km`, so the Khmer line box has to be bought off the value.
-  const scrollers = publicPage.match(/<div \{\.\.\.getKhmerTextProps\(item\.name, 'detail-scroll-text[^']*'\)\}>\{item\.name\}<\/div>/g) || []
-  assert.equal(scrollers.length, 2, 'both the cart panel row and the wishlist panel row scroll the name')
+  const scrollers = publicPage.match(/<div translate="no" \{\.\.\.getKhmerTextProps\(row\.name, 'detail-scroll-text[^']*'\)\}>\{row\.name\}<\/div>/g) || []
+  assert.equal(scrollers.length, 1, 'the one name block scrolls the name')
+  assert.equal((publicPage.match(/\{nameBlock\(item\)\}/g) || []).length, 2, 'and both the List row and the Saved row use it')
   assert.match(publicPage, /import \{ getKhmerTextProps \} from '\.\.\/\.\.\/utils\/scriptTypography\.ts'/, 'the shared Khmer helper, not a local script test')
   assert.doesNotMatch(publicPage, /TruncatedText/, 'a name must not be handed to the truncating component at all')
   // The row must keep its own layout: the name still shares the line with the
   // quantity stepper and the remove button, so it stays inside the flex child
   // that can shrink. A scroller that is not inside `min-w-0` would widen the
   // row instead of scrolling inside it.
-  assert.equal((publicPage.match(/<div className="min-w-0 flex-1">\s*(?:\{\/\*[\s\S]*?\*\/\}\s*)?<div \{\.\.\.getKhmerTextProps\(item\.name/g) || []).length, 2,
+  assert.equal((publicPage.match(/<div className="min-w-0 flex-1">\s*(?:\{\/\*[\s\S]*?\*\/\}\s*)?<div translate="no" \{\.\.\.getKhmerTextProps\(row\.name/g) || []).length, 1,
     'the name must stay inside the shrinking column of the row')
   // NEGATIVE CONTROL: the shape above is specific enough to fail if the name
   // goes back to being clipped, or leaks out of the shrinking column.

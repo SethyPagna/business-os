@@ -1,6 +1,6 @@
 // Compliance review, 13 Oct 2026: G15 (accessibility, public storefront only).
 //
-//   - contrast: the map "Load" button and the storefront .btn-primary clear 4.5:1 in light and dark
+//   - contrast: the shared primary button (map "Load", consent "Agree") and .btn-primary clear 4.5:1 in light and dark
 //   - the map iframe has a translated, human title
 //   - JS smooth scroll respects prefers-reduced-motion
 //   - the About video has controls and never autoplays
@@ -10,6 +10,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { PORTAL_PRIMARY_BUTTON, PORTAL_PRIMARY_COLORS } from '../src/components/catalog/portalButtons.ts'
 import { PORTAL_DARK_SURFACE, PORTAL_LIGHT_SURFACE, contrastRatio } from '../src/components/catalog/portalContrast.ts'
 import { portalScrollBehavior } from '../src/components/catalog/portalMotion.ts'
 import { resolveStorefrontCopy } from '../src/components/catalog/portalLanguagePacks.ts'
@@ -31,8 +32,14 @@ function runTest(name: string, fn: () => void): void {
   }
 }
 
-const TAILWIND_EMERALD: Record<string, string> = { '500': '#10b981', '600': '#059669', '700': '#047857', '800': '#065f46' }
+const IVORY = '#f4f1ea'
+const CHARCOAL = '#23201b'
+const CHARCOAL_HOVER = '#3a352c'
+const IVORY_DARK = '#f5f1e8'
+const IVORY_DARK_HOVER = '#d9d4c7'
 const NEUTRAL_900 = '#171717'
+const STONE_600 = '#57534e'
+const NEUTRAL_300 = '#d4d4d4'
 const WHITE = '#ffffff'
 const AA_TEXT = 4.5
 const AA_UI = 3
@@ -42,35 +49,44 @@ const ratio = (a: string, b: string) => Number(contrastRatio(a, b).toFixed(2))
 // Contrast (WCAG 1.4.3 text, 1.4.11 component boundary)
 // ---------------------------------------------------------------------------
 
-runTest('the map Load button is white on emerald-700 (>= 4.5:1), and darker on hover', () => {
+runTest('the map Load and consent Agree buttons use the one storefront primary recipe, >= 4.5:1 in light and dark', () => {
   const source = read('components', 'catalog', 'legal', 'PortalEmbedConsent.tsx')
-  const button = /<button\s+type="button"\s+onClick=\{accept\}\s+className="([^"]+)"/.exec(source)?.[1] ?? ''
-  assert.ok(button, 'the Load button must still be the accept button')
-  const rest = /(?<![:-])bg-emerald-(\d+)/.exec(button)?.[1] ?? ''
-  const hover = /hover:bg-emerald-(\d+)/.exec(button)?.[1] ?? ''
-  assert.ok(TAILWIND_EMERALD[rest] && TAILWIND_EMERALD[hover], `unexpected palette step in "${button}"`)
-  assert.match(button, /\btext-white\b/)
-  const restRatio = ratio(WHITE, TAILWIND_EMERALD[rest])
-  const hoverRatio = ratio(WHITE, TAILWIND_EMERALD[hover])
-  console.log(`  map Load button: white on emerald-${rest} ${restRatio}:1 (was 2.54:1 on emerald-500); hover emerald-${hover} ${hoverRatio}:1; boundary on dark card ${ratio(TAILWIND_EMERALD[rest], NEUTRAL_900)}:1, on dark page ${ratio(TAILWIND_EMERALD[rest], PORTAL_DARK_SURFACE)}:1, on light page ${ratio(TAILWIND_EMERALD[rest], PORTAL_LIGHT_SURFACE)}:1`)
-  assert.ok(restRatio >= AA_TEXT, `resting text contrast ${restRatio}`)
-  assert.ok(hoverRatio >= AA_TEXT, `hover text contrast ${hoverRatio}`)
-  assert.ok(ratio(TAILWIND_EMERALD[rest], NEUTRAL_900) >= AA_UI, 'the button edge is visible on the dark card')
-  assert.ok(ratio(TAILWIND_EMERALD[rest], PORTAL_DARK_SURFACE) >= AA_UI, 'and on the dark page')
-  assert.ok(ratio(TAILWIND_EMERALD[rest], PORTAL_LIGHT_SURFACE) >= AA_UI, 'and on the light page')
-  assert.doesNotMatch(button, /bg-emerald-(?:400|500)/, 'the 2.54:1 and 1.92:1 fills are gone')
+  assert.match(source, /const LOAD_BUTTON = PORTAL_PRIMARY_BUTTON\n/, 'the Load button is the shared primary button, not a local class string')
+  assert.match(source, /<button type="button" onClick=\{accept\} className=\{LOAD_BUTTON\}>/, 'the Load button must still be the accept button')
+  const renewal = read('components', 'catalog', 'legal', 'ConsentRenewalPrompt.tsx')
+  assert.match(renewal, /className=\{`\$\{PORTAL_PRIMARY_BUTTON\} disabled:opacity-60`\}/, 'the Agree button is the shared primary button')
+  assert.doesNotMatch(renewal, /bg-slate-900|dark:bg-white/, 'no slate/white fill that main.css remaps in dark mode')
+  assert.ok(PORTAL_PRIMARY_BUTTON.includes(PORTAL_PRIMARY_COLORS), 'the button recipe carries the shared colours')
+  assert.match(PORTAL_PRIMARY_BUTTON, /\bmin-h-11\b/, 'a 44 px target')
+  assert.match(PORTAL_PRIMARY_COLORS, /(^| )bg-\[#23201b\]/)
+  assert.match(PORTAL_PRIMARY_COLORS, /(^| )text-\[#f4f1ea\]/)
+  assert.match(PORTAL_PRIMARY_COLORS, /(^| )hover:bg-\[#3a352c\]/)
+  assert.match(PORTAL_PRIMARY_COLORS, /dark:bg-\[#f5f1e8\]/)
+  assert.match(PORTAL_PRIMARY_COLORS, /dark:text-\[#23201b\]/)
+  assert.match(PORTAL_PRIMARY_COLORS, /dark:hover:bg-\[#d9d4c7\]/)
+  assert.doesNotMatch(PORTAL_PRIMARY_COLORS, /emerald|amber|slate/, 'named palette fills are remapped by main.css in dark mode; the recipe is literal hex')
+  const rest = ratio(IVORY, CHARCOAL)
+  const hover = ratio(IVORY, CHARCOAL_HOVER)
+  const dark = ratio(CHARCOAL, IVORY_DARK)
+  const darkHover = ratio(CHARCOAL, IVORY_DARK_HOVER)
+  console.log(`  primary button: ivory on charcoal ${rest}:1; hover ${hover}:1; dark charcoal on ivory ${dark}:1; dark hover ${darkHover}:1`)
+  assert.ok(rest >= AA_TEXT, `resting text contrast ${rest}`)
+  assert.ok(hover >= AA_TEXT, `hover text contrast ${hover}`)
+  assert.ok(dark >= AA_TEXT, `dark text contrast ${dark}`)
+  assert.ok(darkHover >= AA_TEXT, `dark hover text contrast ${darkHover}`)
+  assert.ok(ratio(CHARCOAL, PORTAL_LIGHT_SURFACE) >= AA_UI, 'the button edge is visible on a light surface')
+  assert.ok(ratio(IVORY_DARK, NEUTRAL_900) >= AA_UI && ratio(IVORY_DARK, PORTAL_DARK_SURFACE) >= AA_UI, 'and on the dark card and dark page')
 })
 
-runTest('the map link keeps 4.5:1 on hover in light and dark', () => {
+runTest('the open-in-Google-Maps icon keeps 4.5:1 in light and dark and is an icon-only link with a name', () => {
   const source = read('components', 'catalog', 'legal', 'PortalEmbedConsent.tsx')
-  const link = /className="(text-xs font-semibold text-emerald-700[^"]+)"/.exec(source)?.[1] ?? ''
-  assert.match(link, /\btext-emerald-700\b/)
-  assert.match(link, /hover:text-emerald-800/)
-  assert.match(link, /dark:text-emerald-300/)
-  assert.match(link, /dark:hover:text-emerald-200/)
-  assert.ok(ratio(TAILWIND_EMERALD['700'], PORTAL_LIGHT_SURFACE) >= AA_TEXT)
-  assert.ok(ratio(TAILWIND_EMERALD['800'], PORTAL_LIGHT_SURFACE) >= AA_TEXT, 'hover on the light page')
-  assert.ok(ratio('#6ee7b7', NEUTRAL_900) >= AA_TEXT && ratio('#a7f3d0', NEUTRAL_900) >= AA_TEXT, 'resting and hover on the dark card')
+  const icon = /const ICON_LINK = '([^']+)'/.exec(source)?.[1] ?? ''
+  assert.match(icon, /\btext-stone-600\b/)
+  assert.match(icon, /dark:text-neutral-300/)
+  assert.match(icon, /\bh-11 w-11\b/, 'a 44 px target')
+  assert.match(source, /aria-label=\{openLabel\}\s+title=\{openLabel\}/, 'the icon link has an accessible name and a tooltip')
+  assert.ok(ratio(STONE_600, WHITE) >= AA_TEXT, 'light card')
+  assert.ok(ratio(NEUTRAL_300, NEUTRAL_900) >= AA_TEXT, 'dark card')
 })
 
 runTest('the storefront .btn-primary is white on a brass of >= 4.5:1 in light and dark; the admin rule is untouched', () => {

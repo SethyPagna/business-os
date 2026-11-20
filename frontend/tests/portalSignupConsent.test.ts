@@ -17,6 +17,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { buildSync } from 'esbuild'
+import { getPortalLanguageText } from '../src/components/catalog/portalLanguagePacks.ts'
 import { PORTAL_LEGAL_CONSENT_VERSION, PORTAL_LEGAL_LAST_UPDATED_ISO } from '../src/components/catalog/legal/legalContent.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -80,7 +81,9 @@ test('the consent checkbox is required, unticked, labelled, and links to both po
   const id = checkbox[0].match(/id="([^"]+)"/)
   assert.ok(id, 'the checkbox needs an id for its label')
   assert.match(html, new RegExp(`<label[^>]*for="${id[1]}"`), 'the checkbox has no associated label')
-  assert.match(html, /I am 16 or older, and I agree to the Terms &amp; Conditions and the Privacy Policy\./)
+  const line = html.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ')
+  assert.match(line, /I am 16 or older and accept the Terms &amp; Conditions and Privacy Policy\./, 'one line: the age, then the two policy names')
+  assert.doesNotMatch(html, /Read the/, 'the separate "Read the ..." links are gone (spec section 5)')
   assert.match(html, /href="[^"]*legal=terms"/, 'the consent line must link to the Terms')
   assert.match(html, /href="[^"]*legal=privacy"/, 'the consent line must link to the Privacy Policy')
 })
@@ -115,11 +118,15 @@ test('the Khmer visitor gets Khmer, not English', async () => {
   assert.doesNotMatch(html, /I agree to the Terms/, 'the Khmer line fell back to English')
   const km = JSON.parse(read('../src/lang/km.json'))
   for (const key of [
-    'portal_legal_consent_label', 'portal_legal_consent_required',
-    'portal_legal_consent_read_terms', 'portal_legal_consent_read_privacy',
+    'portal_legal_consent_required', 'portal_legal_consent_required_signin',
   ]) {
     assert.ok(km[key], `km.json is missing ${key}`)
     assert.match(km[key], KHMER, `${key} is not Khmer`)
+  }
+  // The line itself comes from the portal pack (portalConsentLine replaced portal_legal_consent_label); the two links keep their titles.
+  assert.match(getPortalLanguageText('km', 'portalConsentLine'), KHMER, 'portalConsentLine is not Khmer')
+  for (const key of ['portal_legal_consent_label', 'portal_legal_consent_read_terms', 'portal_legal_consent_read_privacy', 'portal_legal_map_consent_b', 'portal_legal_map_consent_load', 'portal_legal_map_consent_link']) {
+    assert.equal(key in km, false, `${key} is retired and must not return to km.json`)
   }
 })
 
@@ -180,7 +187,8 @@ test('the browser rule and the Worker rule are the same rule', () => {
 })
 
 test('the recorded consent version is the version of the text the visitor saw', () => {
-  assert.equal(PORTAL_LEGAL_CONSENT_VERSION, `portal-legal-${PORTAL_LEGAL_LAST_UPDATED_ISO}`)
+  assert.match(PORTAL_LEGAL_CONSENT_VERSION, /^portal-legal-\d{4}-\d{2}-\d{2}$/)
+  assert.ok(PORTAL_LEGAL_CONSENT_VERSION.slice('portal-legal-'.length) <= PORTAL_LEGAL_LAST_UPDATED_ISO, 'a consent version is never newer than the shown date')
   const workerVersion = workerAccounts.match(/PORTAL_CONSENT_VERSION = '([^']+)'/)
   assert.ok(workerVersion, 'the Worker publishes no consent version')
   assert.equal(

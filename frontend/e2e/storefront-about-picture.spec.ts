@@ -60,7 +60,9 @@ test.describe('About picture on the storefront', () => {
       const picture = page.locator('[data-portal-about-picture] img')
       await expect(picture).toBeVisible()
       await expect.poll(() => picture.evaluate((img: HTMLImageElement) => (img.complete ? img.naturalWidth : 0))).toBe(POSTER_SIDE)
-      await picture.scrollIntoViewIfNeeded()
+      // Centred, not merely in view: on iOS Safari the install notice is pinned to the bottom of the screen, and a picture scrolled only
+      // just into view has its bottom edge under it in the screenshot (gate run 44786295773: the sample was the notice's blue).
+      await picture.evaluate((img: HTMLImageElement) => img.scrollIntoView({ block: 'center', inline: 'nearest' }))
 
       const box = await picture.evaluate((img: HTMLImageElement) => {
         const rect = img.getBoundingClientRect()

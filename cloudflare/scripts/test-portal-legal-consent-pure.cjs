@@ -201,14 +201,16 @@ async function run() {
       path.join(__dirname, '..', '..', 'frontend', 'src', 'components', 'catalog', 'legal', 'legalContent.ts'),
       'utf8',
     )
-    const iso = frontend.match(/PORTAL_LEGAL_LAST_UPDATED_ISO = '(\d{4}-\d{2}-\d{2})'/)
-    assert.ok(iso, 'the storefront does not declare PORTAL_LEGAL_LAST_UPDATED_ISO')
-    assert.match(frontend, /PORTAL_LEGAL_CONSENT_VERSION = `portal-legal-\$\{PORTAL_LEGAL_LAST_UPDATED_ISO\}`/)
+    const shown = frontend.match(/PORTAL_LEGAL_LAST_UPDATED_ISO = '(\d{4}-\d{2}-\d{2})'/)
+    assert.ok(shown, 'the storefront does not declare PORTAL_LEGAL_LAST_UPDATED_ISO')
+    const version = frontend.match(/PORTAL_LEGAL_CONSENT_VERSION = '(portal-legal-(\d{4}-\d{2}-\d{2}))'/)
+    assert.ok(version, 'the storefront does not declare PORTAL_LEGAL_CONSENT_VERSION as a literal')
     assert.strictEqual(
       accounts.PORTAL_CONSENT_VERSION,
-      `portal-legal-${iso[1]}`,
-      'the Worker records a different consent version than the policy the storefront shows',
+      version[1],
+      'the Worker records a different consent version than the one the storefront sends',
     )
+    assert.ok(version[2] <= shown[1], 'a consent version is never newer than the date the policy shows')
   })
 
   await check('the signup route forwards the visitor consent into the rule', () => {

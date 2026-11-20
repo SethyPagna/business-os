@@ -35,6 +35,9 @@ const neutralChunks: ReadonlyArray<readonly [string, string]> = [
   ['/src/api/readBudgetShed.ts', 'api-http-core'],
   ['/src/components/catalog/catalogPagination.tsx', 'catalog-public-utils'],
   ['/src/components/catalog/portalContrast.ts', 'catalog-public-utils'],
+  // The one primary-button recipe and the category/brand name parser are read by the storefront surfaces, the page and the Products chunk alike.
+  ['/src/components/catalog/portalButtons.ts', 'catalog-public-utils'],
+  ['/src/components/catalog/portalMultiValue.ts', 'catalog-public-utils'],
   ['/src/components/catalog/PortalFilterCombobox.tsx', 'catalog-public-controls'],
   ['/src/components/catalog/PortalPromoStrip.tsx', 'catalog-public-controls'],
   ['/src/components/shared/UnsavedChangesPrompt.tsx', 'shared-modal'],
@@ -50,7 +53,14 @@ const neutralChunks: ReadonlyArray<readonly [string, string]> = [
   // the website editor chunk (catalog), which then loaded with the till and the sales page.
   ['/src/utils/visibilityPolling.ts', 'admin-shared-utils'],
   ['/src/utils/filePicker.ts', 'admin-shared-utils'],
-  ['/src/components/catalog/productDetailSections.ts', 'admin-shared-utils'],
+  // The product card and the promo strip read the one name rule at render, so it travels with the storefront utilities the Products page already loads;
+  // in 'admin-shared-utils' it cost that page one more chunk (performanceBudgets).
+  ['/src/components/catalog/productDetailSections.ts', 'catalog-public-utils'],
+  // Small dependency-free leaves read by the storefront page, the List page, the sheet and the website editor's preview twin: unpinned they fall
+  // on whichever side of the catalog / catalog-public boundary Rollup picks, which makes a static chunk cycle.
+  ['/src/components/catalog/portalProductNames.ts', 'catalog-public-utils'],
+  ['/src/components/catalog/portalFocusTrap.ts', 'catalog-public-utils'],
+  ['/src/components/catalog/portalClearConfirm.ts', 'catalog-public-utils'],
   // G37 client search index (admin pickers only: POS, Products, Inventory,
   // Branches, Transfer, Stock-in, Promotions, Bulk import, Duplicates). Left
   // to the '/src/api/' fallback, the index transport and the shared search

@@ -613,6 +613,8 @@ const routeSharedIconNames = new Set([
   'badge-percent',
   'bell',
   'bot',
+  // Imported by the storefront surface and by admin forms; unpinned, Rollup files the icon in catalog-public and app-shared then imports it back.
+  'check',
   'check-circle-2',
   'chevron-down',
   'chevron-up',
@@ -893,6 +895,11 @@ function manualChunks(id: string): string | undefined {
       // portalActiveFilters.ts (filter chips) is imported by
       // CatalogProductsSection (catalog-products); same reason.
       || normalized.includes('/src/components/catalog/portalActiveFilters.ts')
+      // portalProductSurfaces.ts (the Products page's surface / field class recipes) is imported by
+      // CatalogProductsSection and PortalBrowseRow (catalog-products), PortalFilterCombobox
+      // (catalog-public-controls) and the detail sheet; left to the catch-all it lands in
+      // the admin 'catalog' chunk and closes catalog-products -> catalog -> catalog-products.
+      || normalized.includes('/src/components/catalog/portalProductSurfaces.ts')
       // portalBrowse.ts (View/Sort allowlists, URL state, group headers) is imported by
       // CatalogProductsSection (catalog-products), PublicCatalogPage (catalog-public) and
       // the admin CatalogPage (catalog), so it lives in the shared core chunk.
@@ -955,6 +962,12 @@ function manualChunks(id: string): string | undefined {
       // PublicCatalogRoot installs it before its first render and already
       // imports this chunk statically; the generic catch-all is the admin chunk.
       || normalized.includes('/src/components/catalog/portalTranslateDomGuard.ts')
+      // The Contact menu, the account sheet, the Saved/List page and its picture memory are imported by the storefront page and its surface;
+      // left to the catch-all they land in 'catalog' and make the same catalog -> catalog-public -> catalog cycle.
+      || normalized.includes('/src/components/catalog/PortalContactMenu.tsx')
+      || normalized.includes('/src/components/catalog/PortalSheet.tsx')
+      || normalized.includes('/src/components/catalog/PortalListPage.tsx')
+      || normalized.includes('/src/components/catalog/portalListImages.ts')
     ) {
       return 'catalog-public'
     }
@@ -993,6 +1006,8 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/catalog/portalContentI18n.ts')) {
       return 'portal-content-i18n'
     }
+    // Google Translate loader: its own chunk, fetched only when a visitor picks Chinese, French or Spanish.
+    if (normalized.includes('/src/components/catalog/portalTranslateController.ts')) return 'portal-translate'
     if (
       normalized.includes('/src/components/catalog/portalSubmissionHelpers.ts')
       || normalized.includes('/src/components/catalog/portalAssistantHelpers.ts')

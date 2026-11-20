@@ -101,11 +101,22 @@ function frontendList(relativePath, constName) {
   return src.slice(start, src.indexOf('\n]', start))
 }
 
-function storefrontLanguageCodes() {
+// Owner, 20 Nov 2026: the menu offers six languages. Khmer and English are hand-written and are the only two the Worker stores,
+// publishes and accepts as a default. The other four are marked `google: true`: Google Translate produces them in the visitor's
+// browser on top of the English copy, so the Worker must never treat them as a language of its own.
+function storefrontLanguageOptions() {
   const list = frontendList('frontend/src/components/catalog/portalLanguageOptions.ts', 'PUBLIC_STOREFRONT_LANGUAGE_OPTIONS')
-  const codes = [...list.matchAll(/\bvalue:\s*(['"`])([^'"`]+)\1/g)].map((match) => match[2])
-  assert.equal(codes.length, [...list.matchAll(/\bvalue:/g)].length, 'every storefront option value is a plain string literal')
-  return codes
+  const options = [...list.matchAll(/\{[^{}]*\bvalue:\s*(['"`])([^'"`]+)\1[^{}]*\}/g)].map((match) => ({ code: match[2], google: /\bgoogle:\s*true\b/.test(match[0]) }))
+  assert.equal(options.length, [...list.matchAll(/\bvalue:/g)].length, 'every storefront option is one object literal with a plain string value')
+  return options
+}
+
+function storefrontLanguageCodes() {
+  return storefrontLanguageOptions().filter((option) => !option.google).map((option) => option.code)
+}
+
+function storefrontGoogleLanguageCodes() {
+  return storefrontLanguageOptions().filter((option) => option.google).map((option) => option.code)
 }
 
 async function get(url) {
@@ -194,10 +205,17 @@ async function main() {
     }
   })
 
-  await check('default language: the Worker language set IS the storefront list (frontend PUBLIC_STOREFRONT_LANGUAGE_OPTIONS), both ways', () => {
+  await check('default language: the Worker language set IS the storefront\'s hand-written list (frontend PUBLIC_STOREFRONT_LANGUAGE_OPTIONS without google: true), both ways', () => {
     const storefront = storefrontLanguageCodes()
     const worker = [...portalText.PORTAL_LANGUAGE_CODES]
     assert.ok(storefront.includes('en') && storefront.includes('km'), `parsed ${storefront.length} storefront codes`)
+    const google = storefrontGoogleLanguageCodes()
+    assert.deepEqual(google.slice().sort(), ['es', 'fr', 'zh-CN', 'zh-TW'], 'the four Google Translate choices are marked google: true')
+    for (const code of google) {
+      assert.equal(portalText.portalLanguageCode(code), '', `${code} is translated in the browser, never a Worker language`)
+      assert.equal(portalText.portalLanguageSetting(code), null, `${code} cannot be saved as the default language`)
+      assert.equal(publishedLanguage(code)[0], 'auto', `${code} is never published as the default language`)
+    }
     assert.deepEqual(worker.filter((code) => !storefront.includes(code)), [], 'the Worker publishes a language the storefront does not offer')
     assert.deepEqual(storefront.filter((code) => !worker.includes(code)), [], 'the storefront offers a language the Worker drops')
     for (const code of storefront) {

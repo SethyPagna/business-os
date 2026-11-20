@@ -151,11 +151,6 @@ const RULES: Rule[] = [
     old: /Leang Beauty/, sampleOld: "generateTotpSecret(target.username, 'Leang Beauty')", sampleNew: 'generateTotpSecret(target.username, ADMIN_APP_NAME)',
     packs: ['en', 'km'], code: true, worker: true,
     allow: [
-      { file: 'frontend/src/components/catalog/CatalogAccountSection.tsx', text: 'bought from Leang Cosmetics/Leang Beauty', why: 'names the old shop name on purpose so past buyers recognise it' },
-      { file: 'frontend/src/components/catalog/CatalogAccountSection.tsx', text: 'ធ្លាប់ទិញពី Leang Cosmetics/Leang Beauty', why: 'the Khmer copy of that reminder, which G38 P0 (d7357d88a) moved into the shared sign-up dialog' },
-      { file: 'frontend/src/components/catalog/PortalNoPaymentNotice.tsx', text: 'Leang Cosmetics/Leang Beauty', why: 'same deliberate old-name mention' },
-      { file: 'frontend/src/components/catalog/portalLanguagePacks.ts', text: 'Leang Cosmetics/Leang Beauty', why: 'the Khmer copy of those two notices' },
-      { file: 'frontend/src/components/catalog/portalLanguagePacks.ts', text: 'Leang Beauty', why: 'the Khmer copy of those two notices' },
       { file: 'frontend/src/components/catalog/portalContentI18n.ts', text: "'Leang Beauty',", why: 'do-not-translate list, so the old name is never machine-translated' },
       { file: 'cloudflare/src/lib/portalAccounts.ts', text: 'bought from Leang Cosmetics/Leang Beauty', why: 'the Worker copy of the sign-up reminder' },
     ],

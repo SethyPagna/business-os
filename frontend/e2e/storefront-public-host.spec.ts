@@ -9,17 +9,17 @@ import { STOREFRONT_ORIGIN, collectPageHealth, expectNoRuntimeErrors, seedStoref
  *
  * On the shop host (the 127.0.0.2 storefront origin stands in for
  * leangbeauty.com), /login is the CUSTOMER sign-in and staff paths show the
- * shop; the sign-up reminder is the shared review dialog, not window.confirm.
+ * shop; sign-up has no confirm step (spec section 5), and never a native confirm().
  *
  * CATCHES: the pre-G38 host-blind router, which mounted the staff app at
- * leangbeauty.com/login and /pos; a sign-up that posts before the reminder is
- * answered; a native confirm() (Playwright would see a 'dialog' event).
+ * leangbeauty.com/login and /pos; a sign-up form while sign-up is paused; a native
+ * confirm() (Playwright would see a 'dialog' event).
  *
  * SIGN-UP IS OFF BY DEFAULT (owner, 6 Oct 2026: phone+password sign-ups off, existing accounts still sign in). The Worker
  * answers GET /api/portal/config with signupEnabled from the owner switch customer_portal_signup_enabled, and the
- * drawer (CatalogAccountSection) shows the Sign up tab only when that is exactly true; otherwise it shows the
- * [data-portal-signup-paused] notice. The fixture config carries no signupEnabled, so the default drawer is the
- * paused one. The test that walks the reminder dialog turns the switch ON for its own page (openSignups below):
+ * sheet (CatalogAccountSection) shows the Sign in / Sign up switch only when that is exactly true; otherwise it shows the
+ * one line in [data-portal-signup-paused] and no sign-up form. The fixture config carries no signupEnabled, so the default
+ * sheet is the paused one. The sign-up test turns the switch ON for its own page (openSignups below):
  * the flow still ships behind the switch, so it stays covered while the switch is off in production.
  *
  * G38_SHOTS_DIR=<dir> also saves 360 px and 1280 px screenshots in EN and KM.
@@ -29,8 +29,8 @@ import { STOREFRONT_ORIGIN, collectPageHealth, expectNoRuntimeErrors, seedStoref
 
 const SHOTS = process.env.G38_SHOTS_DIR || ''
 const COPY = {
-  en: { signUp: 'Sign up', create: 'Create account', reminderTitle: 'Before you create an account', back: 'Back' },
-  km: { signUp: 'ចុះឈ្មោះ', create: 'បង្កើតគណនី', reminderTitle: 'មុនពេលបង្កើតគណនី', back: 'ត្រឡប់' },
+  en: { signUp: 'Sign up', create: 'Create account' },
+  km: { signUp: 'ចុះឈ្មោះ', create: 'បង្កើតគណនី' },
 } as const
 
 async function shot(page: Page, name: string): Promise<void> {
@@ -72,7 +72,7 @@ for (const language of ['en', 'km'] as const) {
       await expectStorefrontRoot(page)
       const drawer = page.getByRole('dialog').first()
       await expect(drawer).toBeVisible()
-      // Sign-up is paused (the default): the drawer says so and offers no Sign up tab; sign-in is what is left.
+      // Sign-up is paused (the default): the sheet says so in one line and offers no Sign up tab or form; sign-in is what is left.
       await expect(drawer.locator('[data-portal-signup-paused]')).toBeVisible()
       await expect(drawer.getByRole('button', { name: COPY[language].signUp })).toHaveCount(0)
       await expect(drawer.locator('input[autocomplete="current-password"]')).toBeVisible()
@@ -87,12 +87,14 @@ for (const language of ['en', 'km'] as const) {
       }
     })
 
-    test('the sign-up reminder is the shared dialog and Back sends nothing', async ({ page }) => {
+    test('sign-up has no confirm step: Create account posts once, with no dialog of any kind', async ({ page }) => {
       const nativeDialogs: string[] = []
       page.on('dialog', (dialog) => { nativeDialogs.push(dialog.message()); void dialog.dismiss() })
       const signups: string[] = []
       page.on('request', (request) => { if (request.url().includes('/api/portal/auth/signup')) signups.push(request.method()) })
       await openSignups(page)
+      // The fixture must never create an account: the one expected post is answered with a refusal.
+      await page.route((url) => url.pathname === '/api/portal/auth/signup', (route) => route.fulfill({ status: 400, json: { error: 'refused by the test', code: 'test_refusal' } }))
       await page.goto(`${STOREFRONT_ORIGIN}/login`, { waitUntil: 'load' })
       const drawer = page.getByRole('dialog').first()
       await drawer.getByRole('button', { name: COPY[language].signUp }).click()
@@ -101,13 +103,9 @@ for (const language of ['en', 'km'] as const) {
       await drawer.locator('input[autocomplete="new-password"]').fill('secret-pass')
       await drawer.getByRole('checkbox').check()
       await drawer.getByRole('button', { name: COPY[language].create }).click()
-      const reminder = page.getByText(COPY[language].reminderTitle, { exact: true })
-      await expect(reminder).toBeVisible()
+      await expect.poll(() => signups.length, { message: 'the sign-up is posted straight away' }).toBe(1)
       expect(nativeDialogs, 'no native confirm()').toEqual([])
-      expect(signups, 'nothing is posted before the reminder is answered').toEqual([])
-      await page.getByRole('button', { name: COPY[language].back, exact: true }).click()
-      await expect(reminder).toBeHidden()
-      expect(signups).toEqual([])
+      await expect(page.getByRole('dialog')).toHaveCount(1)
       await expect(drawer).toBeVisible()
     })
   })
@@ -137,9 +135,7 @@ test.describe('G38 P0 screenshots', () => {
         await drawer.locator('input[name="tel"]').fill('012 345 678')
         await drawer.locator('input[autocomplete="new-password"]').fill('secret-pass')
         await drawer.getByRole('checkbox').check()
-        await drawer.getByRole('button', { name: COPY[language].create }).click()
-        await expect(page.getByText(COPY[language].reminderTitle, { exact: true })).toBeVisible()
-        await shot(page, `${tag}-04-signup-reminder-dialog`)
+        await shot(page, `${tag}-04-signup-filled`)
         await page.goto(`${STOREFRONT_ORIGIN}/pos`, { waitUntil: 'load' })
         await expectStorefrontRoot(page)
         await page.waitForTimeout(500)

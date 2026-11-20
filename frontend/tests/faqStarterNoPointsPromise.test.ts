@@ -51,7 +51,7 @@ check('faqStarterText: no item promises points, rewards or history, and none hed
 check('the en/km packs the Website Editor shows carry the same clean text', () => {
   for (const [index, item] of Object.entries(en)) assertEnglishClean(`en.json starterFaq.${index}`, `${item.question} ${item.answer}`)
   for (const [index, item] of Object.entries(km)) assertKhmerClean(`km.json starterFaq.${index}`, `${item.question}។${item.answer}`)
-  for (const index of ['3', '4', '19', '20']) {
+  for (const index of ['3', '19', '20']) {
     const source = [...FAQ_STARTER_TEXT, ...AI_FAQ_STARTER_TEXT].find(([i]) => i === index)
     assert.ok(source, `starter ${index} exists`)
     assert.deepEqual([en[index].question, en[index].answer], [source[1], source[2]], `en.json starterFaq.${index} matches faqStarterText (the pack wins in the editor)`)
@@ -59,12 +59,37 @@ check('the en/km packs the Website Editor shows carry the same clean text', () =
 })
 
 check('the storefront shows the new starter text in Khmer', () => {
-  for (const index of ['3', '4', '19', '20']) {
+  for (const index of ['3', '19', '20']) {
     const source = [...FAQ_STARTER_TEXT, ...AI_FAQ_STARTER_TEXT].find(([i]) => i === index)!
     for (const text of [source[1], source[2]]) {
       const khmer = String(localizePortalFaqText(text, 'km'))
       assert.notEqual(khmer, text, `no Khmer for: ${text}`)
       assert.match(khmer, /[ក-៿]/)
+    }
+  }
+})
+
+check('the starter set: no shop name, no Share & Reward, the membership entry sends people to their account', () => {
+  const all = [...FAQ_STARTER_TEXT, ...AI_FAQ_STARTER_TEXT]
+  for (const [index, question, answer] of all) assert.doesNotMatch(`${question} ${answer}`, /Leang|Share & Reward|screenshot/i, `starter ${index} names the shop or the retired Share & Reward entry`)
+  assert.equal(all.some(([, question]) => /share/i.test(question)), false, 'the Share & Reward entry is back')
+  const membership = all.find(([, question]) => question === 'Where can I see my membership?')
+  assert.ok(membership, 'the membership entry is missing')
+  assert.equal(membership[2], 'Sign in and open your account. Your membership ID is shown there. Points are coming soon.')
+})
+
+check('every starter entry reads in Khmer on the storefront and in the editor, from one text, with no English left', () => {
+  const all = [...FAQ_STARTER_TEXT, ...AI_FAQ_STARTER_TEXT]
+  assert.deepEqual(Object.keys(en).sort(), all.map(([index]) => index).sort(), 'en.json starterFaq holds exactly the starter entries')
+  assert.deepEqual(Object.keys(km).sort(), Object.keys(en).sort(), 'km.json starterFaq holds exactly the same entries')
+  for (const [index, question, answer] of all) {
+    assert.deepEqual([en[index].question, en[index].answer], [question, answer], `en.json starterFaq.${index} matches faqStarterText`)
+    const khmerQuestion = String(localizePortalFaqText(question, 'km'))
+    const khmerAnswer = String(localizePortalFaqText(answer, 'km'))
+    assert.deepEqual([km[index].question, km[index].answer], [khmerQuestion, khmerAnswer], `km.json starterFaq.${index} is the storefront Khmer`)
+    for (const [english, khmer] of [[question, khmerQuestion], [answer, khmerAnswer]]) {
+      assert.notEqual(khmer, english, `no Khmer for: ${english}`)
+      assert.deepEqual((khmer.match(/[A-Za-z]{2,}/g) || []).filter((word) => word !== 'AI'), [], `English left in the Khmer of starter ${index}: ${khmer}`)
     }
   }
 })

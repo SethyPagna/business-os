@@ -1,28 +1,22 @@
-import { useEffect, useId, useState } from 'react'
-import UserIcon from 'lucide-react/dist/esm/icons/user.js'
+import { useId, useState } from 'react'
+import type { ReactNode } from 'react'
 import LogOut from 'lucide-react/dist/esm/icons/log-out.js'
-import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
-import Heart from 'lucide-react/dist/esm/icons/heart.js'
 import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
-import PortalNoPaymentNotice from './PortalNoPaymentNotice.tsx'
 import SignupConsentField, { AGE_CONFIRMATION_REQUIRED_CODE, consentRequiredMessage, signupConsentFields } from './legal/SignupConsentField.tsx'
-import ConfirmDialog from '../shared/ConfirmDialog.tsx'
+import PortalContactMenu from './PortalContactMenu.tsx'
+import { PORTAL_PRIMARY_BUTTON } from './portalButtons.ts'
+import { PORTAL_SHEET_CORNER_PAD } from './PortalSheet.tsx'
+import type { PortalContactEntry } from './portalSocialLinks.ts'
 import type { PortalAccountProfile } from './portalAccount.ts'
 
-// The storefront Account area (§2). Replaces the old anonymous membership
-// lookup: guests can still use everything, and an account only adds "permanent
-// memory" for the cart + wishlist. Sign-up needs a name + a unique phone (+ an
-// optional membership ID that auto-generates) + a password of the customer's
-// own choosing; sign-in needs (name OR membership ID) + phone + password.
+// The storefront Account sheet (§2). Guests can use everything; an account only adds "permanent memory" for the cart + wishlist. Sign-up needs a
+// name + a unique phone (+ an optional membership ID that auto-generates) + a password of the customer's own choosing; sign-in needs (name OR
+// membership ID) + phone + password. The sheet (PortalSheet) supplies the close button; this renders labels and fields, not sentences.
 
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 
 const PORTAL_MIN_PASSWORD_LENGTH = 10
-const PASSWORD_HINT_EN = 'At least 10 characters. Use a password you do not reuse elsewhere.'
-const PASSWORD_HINT_KM = 'យ៉ាងតិច ១០ តួអក្សរ។ ប្រើពាក្យសម្ងាត់ដែលអ្នកមិនប្រើឡើងវិញនៅកន្លែងផ្សេង។'
-const REMINDER = 'If you have previously bought from Leang Cosmetics/Leang Beauty, please contact us for your membership ID — your phone number must match. Just a reminder.'
-const REMINDER_KM = 'ប្រសិនបើអ្នកធ្លាប់ទិញពី Leang Cosmetics/Leang Beauty សូមទាក់ទងយើងដើម្បីទទួលលេខសមាជិករបស់អ្នក — លេខទូរស័ព្ទរបស់អ្នកត្រូវតែដូចគ្នា។ នេះគ្រាន់តែជាការរំលឹកប៉ុណ្ណោះ។'
 
 export default function CatalogAccountSection({
   copy,
@@ -39,6 +33,7 @@ export default function CatalogAccountSection({
   wishlistCount,
   signupEnabled = false,
   errorCode = '',
+  contactEntries = [],
 }: {
   copy: CopyFn
   account: PortalAccountProfile | null
@@ -60,16 +55,14 @@ export default function CatalogAccountSection({
   signupEnabled?: boolean
   /** The Worker's refusal code for `error` (usePortalAccount errorCode). */
   errorCode?: string
+  /** "Forgot password?" opens the Contact menu with these. None: the link is not shown (there would be nowhere to go). */
+  contactEntries?: readonly PortalContactEntry[]
 }) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
-  const [reminderOpen, setReminderOpen] = useState(false)
-  const signupPausedText = copy('signupPaused', 'New accounts are paused for now. Existing members can sign in below.', 'ការបង្កើតគណនីថ្មីត្រូវបានផ្អាកសិន។ សមាជិកដែលមានស្រាប់អាចចូលគណនីខាងក្រោម។')
-  // The server is the authority: a sign-up it refused as paused closes the
-  // Sign up tab as well, and the refusal is said in the visitor's language.
-  const pausedByServer = errorCode === 'portal_signup_paused'
-  const signupOpen = signupEnabled && !pausedByServer
-  const showSignup = signupOpen && mode === 'signup'
-  const errorText = pausedByServer ? signupPausedText : errorCode === AGE_CONFIRMATION_REQUIRED_CODE ? consentRequiredMessage(copy, 'signup') : error
+  // The server is the authority: a sign-up it refused as paused is paused for the rest of the visit, whatever the config said.
+  const signupOpen = signupEnabled && errorCode !== 'portal_signup_paused'
+  const showSignupForm = mode === 'signup' && signupOpen
+  const errorText = errorCode === 'portal_signup_paused' ? '' : errorCode === AGE_CONFIRMATION_REQUIRED_CODE ? consentRequiredMessage(copy, 'signup') : error
   // Sign-in fields
   const [identifier, setIdentifier] = useState('')
   const [signinPhone, setSigninPhone] = useState('')
@@ -104,268 +97,214 @@ export default function CatalogAccountSection({
       return
     }
     setConsentError('')
-    // The membership-id-empty reminder: existing customers should use their ID
-    // (their phone must match), not create a fresh account. Asked in the
-    // shared review dialog, never the browser's untranslatable confirm().
-    if (!membershipId.trim()) {
-      setReminderOpen(true)
-      return
-    }
-    await submitSignUp()
-  }
-
-  const submitSignUp = async () => {
     const ok = await signUp({ name, phone: signupPhone, membershipId, password: signupPassword, ...signupConsentFields(consent, consentLocale) })
     if (ok) {
       setName(''); setSignupPhone(''); setMembershipId(''); setSignupPassword(''); setConsent(false)
     }
   }
 
-  // The shared dialog leaves Escape to its host.
-  useEffect(() => {
-    if (!reminderOpen) return undefined
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return
-      event.preventDefault()
-      setReminderOpen(false)
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [reminderOpen])
+  if (!ready) {
+    return (
+      <p className={`${PORTAL_SHEET_CORNER_PAD} flex items-center text-sm text-stone-600 dark:text-neutral-300`}>
+        {copy('accountLoading', 'Checking your account…')}
+      </p>
+    )
+  }
+
+  if (account) {
+    return (
+      <div className="space-y-4">
+        <dl data-portal-account-summary="true" className="divide-y divide-stone-200 text-sm dark:divide-neutral-700">
+          <SummaryRow first label={copy('accountNameLabel', 'Name', 'ឈ្មោះ')} value={<span translate="no" className="notranslate">{account.name}</span>} />
+          <SummaryRow label={copy('membershipId', 'Membership ID')} value={<span translate="no" className="notranslate">{account.membershipId}</span>} />
+          {/* Owner, 30 Sep 2026: points are coming soon, so this row never takes a number. */}
+          <SummaryRow
+            label={copy('membershipPoints', 'Points', 'ពិន្ទុ')}
+            rowAttribute="data-portal-points-row"
+            value={<span data-portal-points-value="true">{copy('membershipPointsComingSoon', 'Coming soon', 'នឹងមកដល់ឆាប់ៗនេះ')}</span>}
+          />
+          <SummaryRow label={copy('inList', 'In list', 'ក្នុងបញ្ជី')} value={cartCount} />
+          <SummaryRow label={copy('saved', 'Saved')} value={wishlistCount} />
+        </dl>
+        <button
+          type="button"
+          onClick={signOut}
+          className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-stone-300 bg-white px-4 text-sm font-semibold text-[#23201b] transition hover:bg-stone-100 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:bg-neutral-800"
+        >
+          <LogOut className="h-4 w-4" />
+          {copy('signOut', 'Sign out')}
+        </button>
+      </div>
+    )
+  }
 
   return (
-    // Drawer-native body: the top-bar Account drawer supplies the header/close
-    // chrome, so this renders as a plain scrollable stack rather than a full
-    // page SectionShell.
     <div className="space-y-4">
-      <p className="text-sm text-slate-500 dark:text-neutral-400">
-        {copy('accountSubtitle', 'Optional — browse and build your list as a guest, or sign in to keep it across devices.', 'ជាជម្រើស — រុករក និងបង្កើតបញ្ជីជាភ្ញៀវ ឬចូលគណនីដើម្បីរក្សាទុកឆ្លងកាត់ឧបករណ៍។')}
-      </p>
-      <div className="space-y-4">
-        {!ready ? (
-          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-400">
-            {copy('accountLoading', 'Checking your account…')}
-          </div>
-        ) : account ? (
-          <div className="rounded-[24px] border border-emerald-200 bg-white p-5 shadow-sm dark:border-emerald-400/25 dark:bg-neutral-900">
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-200">
-                <UserIcon className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <div className="detail-scroll-text text-sm font-semibold text-slate-900 dark:text-white">
-                  {copy('signedInAs', 'Signed in as')} {account.name}
-                </div>
-                <div className="detail-scroll-text text-xs text-slate-500 dark:text-neutral-400">
-                  {copy('membershipId', 'Membership ID')}: {account.membershipId}
-                </div>
-                {/* Owner, 30 Sep 2026: points are coming soon, so this row never takes a number. */}
-                <div data-portal-points-row="true" className="detail-scroll-text text-xs text-slate-500 dark:text-neutral-400">
-                  {copy('membershipPoints', 'Points', 'ពិន្ទុ')}: <span data-portal-points-value="true">{copy('membershipPointsComingSoon', 'Coming soon', 'នឹងមកដល់ឆាប់ៗនេះ')}</span>
-                </div>
-              </div>
-            </div>
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:bg-white/5 dark:text-neutral-200">
-                <ShoppingBag className="h-4 w-4 text-slate-400" aria-hidden="true" />
-                <span>{cartCount} {copy('inYourList', 'in your list')}</span>
-              </div>
-              <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:bg-white/5 dark:text-neutral-200">
-                <Heart className="h-4 w-4 text-rose-400" />
-                <span>{wishlistCount} {copy('saved', 'saved')}</span>
-              </div>
-            </div>
-            <p className="mt-3 text-xs text-slate-500 dark:text-neutral-400">
-              {copy('accountMemoryHint', 'Your list and saved items are kept with your account, so they follow you across devices.')}
-            </p>
-            <button
-              type="button"
-              onClick={signOut}
-              className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-white/5"
-            >
-              <LogOut className="h-4 w-4" />
-              {copy('signOut', 'Sign out')}
-            </button>
+      {/* The first thing in the sheet: the Sign in / Sign up switch. With sign-up off there is no Sign up side at all: one muted line takes its place. */}
+      <div className={`${PORTAL_SHEET_CORNER_PAD} flex items-center`}>
+        {signupOpen ? (
+          <div role="group" className="inline-flex rounded-xl bg-stone-100 p-1 text-sm dark:bg-neutral-800">
+            {(['signin', 'signup'] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => switchMode(value)}
+                aria-pressed={mode === value}
+                className={`min-h-9 rounded-lg px-4 font-semibold transition ${mode === value ? 'bg-white text-[#23201b] shadow-sm dark:bg-neutral-700 dark:text-white' : 'text-stone-600 dark:text-neutral-300'}`}
+              >
+                {value === 'signin' ? copy('signIn', 'Sign in') : copy('signUp', 'Sign up')}
+              </button>
+            ))}
           </div>
         ) : (
-          <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm dark:border-neutral-700 dark:bg-neutral-900">
-            {signupOpen ? (
-            <div className="mb-4 inline-flex rounded-2xl bg-slate-100 p-1 text-sm dark:bg-white/5">
-              <button
-                type="button"
-                onClick={() => switchMode('signin')}
-                aria-pressed={mode === 'signin'}
-                className={`rounded-xl px-4 py-1.5 font-semibold transition ${mode === 'signin' ? 'bg-white text-slate-900 shadow-sm dark:bg-neutral-800 dark:text-white' : 'text-slate-500 dark:text-neutral-400'}`}
-              >
-                {copy('signIn', 'Sign in')}
-              </button>
-              <button
-                type="button"
-                onClick={() => switchMode('signup')}
-                aria-pressed={mode === 'signup'}
-                className={`rounded-xl px-4 py-1.5 font-semibold transition ${mode === 'signup' ? 'bg-white text-slate-900 shadow-sm dark:bg-neutral-800 dark:text-white' : 'text-slate-500 dark:text-neutral-400'}`}
-              >
-                {copy('signUp', 'Sign up')}
-              </button>
-            </div>
-            ) : pausedByServer ? null : (
-              // Said once: after a paused refusal the alert below carries it.
-              <p data-portal-signup-paused="true" className="mb-4 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600 dark:bg-white/5 dark:text-neutral-300">
-                {signupPausedText}
-              </p>
-            )}
-
-            {errorText ? (
-              // A sign-in failure used to be colour only: the box appeared below
-              // the tabs with no announcement, so a screen-reader user pressed
-              // Sign in, heard nothing, and had no idea the attempt had failed.
-              <div
-                role="alert"
-                aria-live="assertive"
-                className="mb-4 rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-200"
-              >
-                {errorText}
-              </div>
-            ) : null}
-
-            {!showSignup ? (
-              <form onSubmit={onSignIn} className="space-y-3" autoComplete="on">
-                <Field label={copy('nameOrMembershipId', 'Name or Membership ID')}>
-                  {(fieldId, describedBy) => (
-                    <input
-                      id={fieldId} aria-describedby={describedBy}
-                      name="username" autoComplete="username" value={identifier}
-                      onChange={(e) => setIdentifier(e.target.value)}
-                      className={inputClass} required
-                    />
-                  )}
-                </Field>
-                <Field label={copy('phoneNumber', 'Phone number')}>
-                  {(fieldId, describedBy) => (
-                    <input
-                      id={fieldId} aria-describedby={describedBy}
-                      name="tel" type="tel" inputMode="tel" autoComplete="tel" value={signinPhone}
-                      onChange={(e) => setSigninPhone(e.target.value)}
-                      className={inputClass} required
-                    />
-                  )}
-                </Field>
-                <PasswordField
-                  copy={copy}
-                  label={copy('password', 'Password')}
-                  autoComplete="current-password"
-                  value={signinPassword}
-                  onChange={setSigninPassword}
-                />
-                <SignupConsentField
-                  copy={copy}
-                  checked={consent}
-                  onChange={(next) => { setConsent(next); if (next) setConsentError('') }}
-                  error={consentError}
-                />
-                <button type="submit" disabled={busy} className={submitClass}>
-                  {busy ? copy('signingIn', 'Signing in…') : copy('signIn', 'Sign in')}
-                </button>
-                <p className="text-xs text-slate-500 dark:text-neutral-400">
-                  {copy('forgotPasswordHint', 'Forgot your password? Please contact us to reset it.')}
-                </p>
-              </form>
-            ) : (
-              <form onSubmit={onSignUp} className="space-y-3" autoComplete="on">
-                <Field label={copy('yourName', 'Your name')}>
-                  {(fieldId, describedBy) => (
-                    <input
-                      id={fieldId} aria-describedby={describedBy}
-                      name="name" autoComplete="name" value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      className={inputClass} required
-                    />
-                  )}
-                </Field>
-                <Field label={copy('phoneNumber', 'Phone number')}>
-                  {(fieldId, describedBy) => (
-                    <input
-                      id={fieldId} aria-describedby={describedBy}
-                      name="tel" type="tel" inputMode="tel" autoComplete="tel" value={signupPhone}
-                      onChange={(e) => setSignupPhone(e.target.value)}
-                      className={inputClass} required
-                    />
-                  )}
-                </Field>
-                <Field label={copy('membershipIdOptional', 'Membership ID (optional)')} hint={copy('membershipIdHint', 'Leave blank and we will create one for you.')}>
-                  {(fieldId, describedBy) => (
-                    <input
-                      id={fieldId} aria-describedby={describedBy}
-                      name="membership_id" autoComplete="off" value={membershipId}
-                      onChange={(e) => setMembershipId(e.target.value)}
-                      className={inputClass}
-                    />
-                  )}
-                </Field>
-                <PasswordField
-                  copy={copy}
-                  label={copy('createPassword', 'Create a password')}
-                  autoComplete="new-password"
-                  minLength={PORTAL_MIN_PASSWORD_LENGTH}
-                  value={signupPassword}
-                  onChange={setSignupPassword}
-                />
-                <p className="text-xs leading-relaxed text-slate-500 dark:text-neutral-400">
-                  {copy('signupPasswordHint', PASSWORD_HINT_EN, PASSWORD_HINT_KM)}
-                </p>
-                <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:bg-amber-400/10 dark:text-amber-200">
-                  {copy('signupReminder', REMINDER, REMINDER_KM)}
-                </p>
-                <SignupConsentField
-                  copy={copy}
-                  checked={consent}
-                  onChange={(next) => { setConsent(next); if (next) setConsentError('') }}
-                  error={consentError}
-                />
-                <button type="submit" disabled={busy} className={submitClass}>
-                  {busy ? copy('creatingAccount', 'Creating account…') : copy('createAccount', 'Create account')}
-                </button>
-              </form>
-            )}
-          </div>
+          <p data-portal-signup-paused="true" role={errorCode === 'portal_signup_paused' ? 'alert' : undefined} className="text-sm text-stone-600 dark:text-neutral-300">
+            {copy('signupPausedLine', 'Sign-up is paused.', 'ការចុះឈ្មោះត្រូវបានផ្អាក។')}
+          </p>
         )}
-
-        <PortalNoPaymentNotice copy={copy} variant="short" />
       </div>
-      {reminderOpen ? (
-        <ConfirmDialog
-          title={copy('signupReminderTitle', 'Before you create an account', 'មុនពេលបង្កើតគណនី')}
-          message={copy('signupReminder', REMINDER, REMINDER_KM)}
-          confirmLabel={copy('createAccount', 'Create account', 'បង្កើតគណនី')}
-          cancelLabel={copy('back', 'Back', 'ត្រឡប់')}
-          keyboard
-          layer="nested"
-          onConfirm={() => { setReminderOpen(false); void submitSignUp() }}
-          onClose={() => setReminderOpen(false)}
-        />
+
+      {errorText ? (
+        // A sign-in failure used to be colour only: the box appeared with no announcement, so a screen-reader user pressed Sign in, heard
+        // nothing, and had no idea the attempt had failed.
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-700 dark:bg-rose-950 dark:text-rose-200"
+        >
+          {errorText}
+        </div>
       ) : null}
+
+      {!showSignupForm ? (
+        <form onSubmit={onSignIn} className="space-y-3" autoComplete="on">
+          <Field label={copy('nameOrMembershipId', 'Name or Membership ID')}>
+            {(fieldId, describedBy) => (
+              <input
+                id={fieldId} aria-describedby={describedBy}
+                name="username" autoComplete="username" value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
+                className={inputClass} required
+              />
+            )}
+          </Field>
+          <Field label={copy('phoneNumber', 'Phone number')}>
+            {(fieldId, describedBy) => (
+              <input
+                id={fieldId} aria-describedby={describedBy}
+                name="tel" type="tel" inputMode="tel" autoComplete="tel" value={signinPhone}
+                onChange={(e) => setSigninPhone(e.target.value)}
+                className={inputClass} required
+              />
+            )}
+          </Field>
+          <PasswordField
+            copy={copy}
+            label={copy('password', 'Password')}
+            autoComplete="current-password"
+            value={signinPassword}
+            onChange={setSigninPassword}
+          />
+          <SignupConsentField
+            copy={copy}
+            checked={consent}
+            onChange={(next) => { setConsent(next); if (next) setConsentError('') }}
+            error={consentError}
+          />
+          <button type="submit" disabled={busy} className={submitClass}>
+            {busy ? copy('signingIn', 'Signing in…') : copy('signIn', 'Sign in')}
+          </button>
+          {contactEntries.length > 0 ? (
+            <PortalContactMenu
+              entries={contactEntries}
+              copy={copy}
+              align="left"
+              trigger={(
+                <button
+                  type="button"
+                  data-portal-forgot-password=""
+                  className="inline-flex min-h-10 items-center text-sm font-medium text-[#7a5c22] underline underline-offset-2 transition hover:text-[#23201b] dark:text-amber-300 dark:hover:text-amber-200"
+                >
+                  {copy('forgotPasswordLink', 'Forgot password?', 'ភ្លេចពាក្យសម្ងាត់?')}
+                </button>
+              )}
+            />
+          ) : null}
+        </form>
+      ) : (
+        <form onSubmit={onSignUp} className="space-y-3" autoComplete="on">
+          <Field label={copy('yourName', 'Your name')}>
+            {(fieldId, describedBy) => (
+              <input
+                id={fieldId} aria-describedby={describedBy}
+                name="name" autoComplete="name" value={name}
+                onChange={(e) => setName(e.target.value)}
+                className={inputClass} required
+              />
+            )}
+          </Field>
+          <Field label={copy('phoneNumber', 'Phone number')}>
+            {(fieldId, describedBy) => (
+              <input
+                id={fieldId} aria-describedby={describedBy}
+                name="tel" type="tel" inputMode="tel" autoComplete="tel" value={signupPhone}
+                onChange={(e) => setSignupPhone(e.target.value)}
+                className={inputClass} required
+              />
+            )}
+          </Field>
+          <Field label={copy('membershipIdOptional', 'Membership ID (optional)')} hint={copy('signupMemberAsk', 'Bought from us before? Ask us for your membership ID.', 'ធ្លាប់ទិញពីយើងហើយឬ? សូមសុំលេខសមាជិកពីយើង។')}>
+            {(fieldId, describedBy) => (
+              <input
+                id={fieldId} aria-describedby={describedBy}
+                name="membership_id" autoComplete="off" value={membershipId}
+                onChange={(e) => setMembershipId(e.target.value)}
+                className={inputClass}
+              />
+            )}
+          </Field>
+          <PasswordField
+            copy={copy}
+            label={copy('createPassword', 'Create a password')}
+            autoComplete="new-password"
+            minLength={PORTAL_MIN_PASSWORD_LENGTH}
+            hint={copy('signupPasswordHint', '10 characters or more.', '១០ តួអក្សរឡើងទៅ។')}
+            value={signupPassword}
+            onChange={setSignupPassword}
+          />
+          <SignupConsentField
+            copy={copy}
+            checked={consent}
+            onChange={(next) => { setConsent(next); if (next) setConsentError('') }}
+            error={consentError}
+          />
+          <button type="submit" disabled={busy} className={submitClass}>
+            {busy ? copy('creatingAccount', 'Creating account…') : copy('createAccount', 'Create account')}
+          </button>
+        </form>
+      )}
     </div>
   )
 }
 
-// `outline-none` with `focus:border-emerald-400` as its only replacement is
-// not a focus indicator: emerald-400 on the slate-50 field is 1.75:1, well
-// under the 3:1 WCAG 1.4.11 floor, and a keyboard shopper filling this form
-// cannot see where they are. The portal stylesheet's :focus-visible ring
-// cannot rescue it either -- the account drawer renders as a SIBLING of
-// <CatalogPreviewSurface> inside PublicCatalogPage, so it depends on the
-// live-route root being in that rule's selector list, which is a coupling the
-// storefront's only real form should not have. It paints its own ring, with
-// the same 3px sky-700 / amber-300 as the stylesheet.
-const inputClass = 'w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:bg-white focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#0369a1] dark:border-white/10 dark:bg-white/5 dark:text-white dark:focus-visible:outline-[#fcd34d]'
-const submitClass = 'inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:opacity-60'
+function SummaryRow({ label, value, first = false, rowAttribute }: { label: string; value: ReactNode; first?: boolean; rowAttribute?: string }) {
+  const marker = rowAttribute ? { [rowAttribute]: 'true' } : {}
+  return (
+    <div {...marker} className={`flex items-baseline justify-between gap-4 py-2.5 ${first ? PORTAL_SHEET_CORNER_PAD : ''}`}>
+      <dt className="shrink-0 text-stone-600 dark:text-neutral-300">{label}</dt>
+      <dd className="detail-scroll-text min-w-0 text-right font-medium text-[#23201b] dark:text-neutral-100">{value}</dd>
+    </div>
+  )
+}
 
-// A wrapping <label> names its input, but it cannot name anything else: the
-// membership-ID hint sat outside the accessible name and outside any
-// description, so a reader announced the field with no mention of "leave it
-// blank and we will create one". An explicit for/id pair plus an
-// aria-describedby hint fixes both, and gives every field a stable id an
-// error message can point at.
+// A field is the spec section 1 recipe: white, a stone-500 line (stone-400 is only 2.5:1 on white; portalContrast.ts PORTAL_FIELD_LINE_LIGHT),
+// ink text. `outline-none` with a border swap alone is not a focus indicator, and the sheet is portalled outside any root the stylesheet's
+// :focus-visible rule names, so the input paints its own 3px ring (sky-700 / amber-300, the same as the stylesheet).
+const inputClass = 'w-full rounded-xl border border-stone-500 bg-white px-4 py-2.5 text-sm text-[#23201b] placeholder:text-stone-500 outline-none transition focus-visible:border-[#7a5c22] focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#0369a1] dark:border-neutral-500 dark:bg-neutral-900 dark:text-neutral-100 dark:focus-visible:outline-[#fcd34d]'
+const submitClass = `${PORTAL_PRIMARY_BUTTON} w-full rounded-xl py-2.5 disabled:opacity-60`
+
+// A wrapping <label> names its input, but it cannot name anything else: a hint sat outside the accessible name and outside any description, so a
+// reader announced the field with no mention of it. An explicit for/id pair plus an aria-describedby hint fixes both, and gives every field a
+// stable id an error message can point at.
 function Field({ label, hint, children }: {
   label: string
   hint?: string
@@ -375,29 +314,28 @@ function Field({ label, hint, children }: {
   const describedBy = hint ? `${fieldId}-hint` : undefined
   return (
     <div className="block">
-      <label htmlFor={fieldId} className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-neutral-400">{label}</label>
+      <label htmlFor={fieldId} className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-600 dark:text-neutral-300">{label}</label>
       {children(fieldId, describedBy)}
-      {hint ? <div id={`${fieldId}-hint`} className="mt-1 text-[11px] text-slate-500 dark:text-neutral-400">{hint}</div> : null}
+      {hint ? <div id={`${fieldId}-hint`} className="mt-1 text-xs text-stone-600 dark:text-neutral-300">{hint}</div> : null}
     </div>
   )
 }
 
-// One password field for both forms, with the reveal control the storefront
-// never had. Typing a password blind on a phone keypad is a common reason a
-// sign-up is abandoned, and a reader has to be told whether the characters
-// are currently showing -- hence aria-pressed rather than a label that
-// silently swaps underneath.
-function PasswordField({ copy, label, autoComplete, value, onChange, minLength }: {
+// One password field for both forms, with the reveal control the storefront never had. Typing a password blind on a phone keypad is a common
+// reason a sign-up is abandoned, and a reader has to be told whether the characters are currently showing -- hence aria-pressed rather than a
+// label that silently swaps underneath.
+function PasswordField({ copy, label, autoComplete, value, onChange, minLength, hint }: {
   copy: CopyFn
   label: string
   autoComplete: string
   value: string
   onChange: (next: string) => void
   minLength?: number
+  hint?: string
 }) {
   const [visible, setVisible] = useState(false)
   return (
-    <Field label={label}>
+    <Field label={label} hint={hint}>
       {(fieldId, describedBy) => (
         <div className="relative">
           <input
@@ -415,7 +353,10 @@ function PasswordField({ copy, label, autoComplete, value, onChange, minLength }
             aria-label={visible
               ? copy('portal_a11y_hide_password', 'Hide password', 'លាក់ពាក្យសម្ងាត់')
               : copy('portal_a11y_show_password', 'Show password', 'បង្ហាញពាក្យសម្ងាត់')}
-            className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-2xl text-slate-500 transition hover:text-slate-800 dark:text-neutral-400 dark:hover:text-neutral-100"
+            title={visible
+              ? copy('portal_a11y_hide_password', 'Hide password', 'លាក់ពាក្យសម្ងាត់')
+              : copy('portal_a11y_show_password', 'Show password', 'បង្ហាញពាក្យសម្ងាត់')}
+            className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-xl text-stone-600 transition hover:text-[#23201b] dark:text-neutral-300 dark:hover:text-neutral-100"
           >
             {visible ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
           </button>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { portalPrimaryValue } from './portalMultiValue.ts'
 
 // PUBLIC-FILTER-MENU (owner, 5 Oct): "Public site browse: put view + sort in the
 // filter menu; default by brand, user can switch (select/deselect)."
@@ -150,7 +151,7 @@ export function buildPortalGroupHeaders(
   let lastKey: string | null = null
   products.forEach((product, index) => {
     if (index < run) return
-    const raw = String((view === 'category' ? product.category : product.brand) ?? '').trim()
+    const raw = view === 'category' ? portalPrimaryValue(product.category, product.categories) : portalPrimaryValue(product.brand, product.brands)
     const key = raw.toLowerCase()
     if (key === lastKey) return
     lastKey = key

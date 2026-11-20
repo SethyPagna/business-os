@@ -1,31 +1,37 @@
-import { Fragment, useEffect, useState } from 'react'
-import type { ComponentType, Dispatch, SetStateAction } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { ComponentType, CSSProperties, Dispatch, SetStateAction } from 'react'
 import { buildLogoImageStyle } from './logoImageStyle'
 import { normalizePriceValue } from '../../utils/pricing.ts'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
-import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
-import Globe from 'lucide-react/dist/esm/icons/globe.js'
-import Mail from 'lucide-react/dist/esm/icons/mail.js'
+import Info from 'lucide-react/dist/esm/icons/info.js'
+import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
 import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
 import MessageCircle from 'lucide-react/dist/esm/icons/message-circle.js'
 import Phone from 'lucide-react/dist/esm/icons/phone.js'
+import PhoneCall from 'lucide-react/dist/esm/icons/phone-call.js'
+import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import Send from 'lucide-react/dist/esm/icons/send.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
+import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal.js'
 import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
-import { PORTAL_SOCIAL_ICONS, PortalSocialText } from './PortalSocialRow.tsx'
-import type { SocialPlatform } from '../../utils/socialHandles.ts'
-import PortalEmbedConsent from './legal/PortalEmbedConsent.tsx'
+import LazyPortalMenu from '../shared/LazyPortalMenu.tsx'
+import PortalEmbedConsent, { mapFallbackHref } from './legal/PortalEmbedConsent.tsx'
+import { COVER_BANNER_MAX_PX, coverRatio, coverShape, sameImageFile } from '../../utils/aboutCoverLayout.ts'
+import type { CoverShape } from '../../utils/aboutCoverLayout.ts'
 import { SectionShell } from './catalogUi'
+import { portalPrimaryValue } from './portalMultiValue.ts'
+import { assistantRowNames } from './portalProductNames.ts'
+import { PORTAL_PRIMARY_BUTTON } from './portalButtons.ts'
 import { splitNoTranslateSegments, stripNoTranslateMarkers } from './portalNoTranslate.ts'
 import { faqEntries, faqSearchVisible, filterFaqEntries, nextOpenFaqKey } from './portalFaqLayout.ts'
 import { derivePhoneCallLink } from '../../utils/socialLinks.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
-import { aiProviderNames, fillAiProviderTemplate } from './legal/aiProviderDisclosure.ts'
+import { aiConsentGiven, fillAiProviderTemplate, saveAiConsent } from './legal/aiProviderDisclosure.ts'
 import type { AiDisclosureLanguage, AiProviderState } from './legal/aiProviderDisclosure.ts'
 
 type IdValue = string | number
@@ -71,15 +77,6 @@ interface BusinessFact {
   icon?: ComponentType<{ className?: string }>
 }
 
-interface SocialLink {
-  key: string
-  label: string
-  value: string
-  platform?: string
-  accessibleName?: string
-  latin?: boolean
-}
-
 interface AboutBlock {
   id: IdValue
   title?: string
@@ -94,7 +91,6 @@ interface CatalogAboutSectionProps {
   mapEmbedUrl?: string
   addressFact?: BusinessFact | null
   businessFacts?: BusinessFact[]
-  socialLinks?: SocialLink[]
   versionedBusinessLogo?: string
   versionedBusinessCover?: string
   imageFetchPriority?: 'high' | 'low' | 'auto'
@@ -143,6 +139,7 @@ interface AssistantRecommendation {
   selling_price_usd?: number
   reason?: string
   fit_summary?: string
+  stock_status?: string
 }
 
 interface AssistantResponse {
@@ -166,11 +163,15 @@ interface CatalogAiSectionProps {
   askAssistant: () => void
   assistantLoading: boolean
   clearAssistantState: () => void
-  replaceVars: (template: string, values: Record<string, string | number>) => string
   assistantError?: string
   assistantResponse?: AssistantResponse | null
   // The storefront's product detail sheet; without it a card is plain text.
   openProductById?: (productId: number, productName: string) => void
+  // Add a recommended product to the shopper's list (the storefront's bucket). Without it a row has no Add button.
+  onAddRecommendation?: (item: { id: number; name: string; shopLine?: string; category: string; brand: string }) => void
+  // The loaded catalogue: a result carries only the shop name, so its heading and shop line are resolved from the product here.
+  catalogProducts?: ReadonlyArray<{ id: string | number; name?: unknown; description?: unknown }>
+
   // What /ai/status says about the providers behind the assistant; null until it answers.
   assistantDisclosure?: AiProviderState | null
   assistantDataUseConsent: boolean
@@ -181,10 +182,12 @@ interface CatalogAiSectionProps {
 const ASSISTANT_AUTOMATED_EN = 'This assistant is automated software, not a member of our team, and it is not medical advice. Your question is sent to a third-party AI provider{providerNames} that processes it outside Cambodia.{providerRetention} Our copy is deleted after 30 days, as our privacy policy sets out. Please leave out personal or medical details. For a skin condition, a reaction, a medicine, or pregnancy, speak to a pharmacist or doctor, and contact the store team for anything about a product.'
 const ASSISTANT_AUTOMATED_KM = 'ជំនួយការនេះជាកម្មវិធីស្វ័យប្រវត្តិ មិនមែនបុគ្គលិករបស់យើងទេ ហើយមិនមែនជាការណែនាំវេជ្ជសាស្ត្រឡើយ។ សំណួររបស់អ្នកផ្ញើទៅអ្នកផ្តល់សេវា AI ភាគីទីបី{providerNames} ដែលដំណើរការក្រៅប្រទេសកម្ពុជា។{providerRetention} ច្បាប់ចម្លងរបស់យើងត្រូវលុបចោលបន្ទាប់ពី ៣០ថ្ងៃ តាមគោលការណ៍ឯកជនភាពរបស់យើង។ សូមកុំបញ្ចូលព័ត៌មានផ្ទាល់ខ្លួន ឬព័ត៌មានសុខភាព។ សម្រាប់បញ្ហាស្បែក ប្រតិកម្ម ថ្នាំ ឬការមានផ្ទៃពោះ សូមពិគ្រោះជាមួយឱសថការី ឬវេជ្ជបណ្ឌិត ហើយទាក់ទងក្រុមការងារហាងសម្រាប់សំណួរអំពីផលិតផល។'
 
-// The consent line beside the Send button. {providerNames} and {providerRetention}
-// come from the one provider map (legal/aiProviderDisclosure.ts).
-const ASSISTANT_CONSENT_EN = 'I understand that my question and optional shopping preferences are sent to a third-party AI provider{providerNames} and processed outside Cambodia.{providerRetention} Our copy is deleted after 30 days. I will not include personal, medical, or payment details.'
-const ASSISTANT_CONSENT_KM = 'ខ្ញុំយល់ថាសំណួរ និងចំណូលចិត្តទិញទំនិញស្រេចចិត្តរបស់ខ្ញុំត្រូវបានផ្ញើទៅអ្នកផ្តល់សេវា AI ភាគីទីបី{providerNames} ហើយដំណើរការក្រៅប្រទេសកម្ពុជា។{providerRetention} ច្បាប់ចម្លងរបស់យើងត្រូវលុបចោលបន្ទាប់ពី ៣០ថ្ងៃ។ ខ្ញុំនឹងមិនបញ្ចូលព័ត៌មានផ្ទាល់ខ្លួន សុខភាព ឬការទូទាត់ទេ។'
+// The one-line consent panel shown on the first Send. {providerNames} comes from the one provider map
+// (legal/aiProviderDisclosure.ts); the provider's own retention sits in the info popover's full text.
+const ASSISTANT_CONSENT_EN = 'Your question and any details go to a third-party AI provider{providerNames} outside Cambodia. Our copy is deleted after 30 days. Leave out personal, medical and payment details.'
+const ASSISTANT_CONSENT_KM = 'សំណួរ និងព័ត៌មានលម្អិតរបស់អ្នកត្រូវផ្ញើទៅអ្នកផ្តល់សេវា AI ភាគីទីបី{providerNames} នៅក្រៅប្រទេសកម្ពុជា។ ច្បាប់ចម្លងរបស់យើងត្រូវលុបចោលបន្ទាប់ពី ៣០ថ្ងៃ។ សូមកុំបញ្ចូលព័ត៌មានផ្ទាល់ខ្លួន សុខភាព ឬការទូទាត់។'
+// The character counter appears only when the box is nearly full.
+const ASSISTANT_COUNTER_FROM = 400
 
 type CatalogSecondaryTabsProps = {
   tab?: string
@@ -217,8 +220,8 @@ function normalizePortalColor(value: unknown, fallback: string): string {
 function CatalogMembershipSection({ copy }: CatalogMembershipSectionProps) {
   return (
     <SectionShell title={copy('membership', 'Membership', 'សមាជិកភាព')}>
-      <div className="flex items-center gap-3 rounded-[28px] border border-slate-200/80 bg-white p-6 text-sm text-slate-700 shadow-sm dark:border-neutral-700/80 dark:bg-neutral-900 dark:text-neutral-200">
-        <Ticket aria-hidden="true" className="h-5 w-5 shrink-0 text-amber-500 dark:text-amber-300" />
+      <div className={`flex items-center gap-3 rounded-2xl p-4 text-sm leading-7 text-stone-700 dark:text-neutral-200 ${SURFACE}`}>
+        <Ticket aria-hidden="true" className={`h-5 w-5 shrink-0 ${BRASS_TEXT}`} />
         {/* Same row as the signed-in account card; inlined so this chunk never pulls the admin catalog chunk. */}
         <div data-portal-points-row="true">
           {copy('membershipPoints', 'Points', 'ពិន្ទុ')}: <span data-portal-points-value="true">{copy('membershipPointsComingSoon', 'Coming soon', 'នឹងមកដល់ឆាប់ៗនេះ')}</span>
@@ -228,38 +231,111 @@ function CatalogMembershipSection({ copy }: CatalogMembershipSectionProps) {
   )
 }
 
-// The owner's photo, shown whole: it keeps its own proportions at every width and only a
-// very wide screen caps its height, so nothing is cropped or stretched (object-contain).
-// The settings keep a path, not a size, so the photo's proportions are known only once the file is
-// in; PublicCatalogPage therefore mounts this card after the file has arrived (useCoverState) and
-// the card then lays out at the photo's own size at once. If that wait runs out, the frame holds a
-// 16:9 box (the shape of the sample cover) until the picture is decoded, never a fixed height that
-// a taller picture outgrows (that pushed the whole card down by the difference: CLS 0.14-0.17).
-function AboutCover({ src, imageFetchPriority, onFailed }: { src: string; imageFetchPriority?: 'high' | 'low' | 'auto'; onFailed: () => void }) {
-  const [loaded, setLoaded] = useState(false)
+const BRASS_TEXT = 'text-[#9c7a3c] dark:text-amber-300'
+// Charcoal fill on ivory text is the storefront's primary button; amber in the dark theme.
+const CHARCOAL_BUTTON = PORTAL_PRIMARY_BUTTON
+const SURFACE = 'border border-stone-300 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900'
+const ICON_BUTTON = 'flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-stone-600 transition hover:bg-stone-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
+// The field recipe (spec section 1). The line is stone-500 / neutral-500, not the stone-400 / neutral-600 the recipe first named: those reach
+// only 2.5:1 on a white card and 2.4:1 on the dark one, and a field line must reach 3:1 on the page and on the card.
+const FIELD = 'border border-stone-500 bg-white text-[#23201b] placeholder:text-stone-500 focus-visible:border-[#7a5c22] dark:border-neutral-500 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-400 dark:focus-visible:border-amber-300'
+
+// The one Contact entry point on this page: the page's own contact callback, icon and one word.
+function PortalContactButton({ copy, onOpenContact }: { copy: CopyFn; onOpenContact?: () => void }) {
+  if (!onOpenContact) return null
+  return (
+    <button type="button" className={CHARCOAL_BUTTON} onClick={onOpenContact}>
+      <MessageCircle aria-hidden="true" className="h-4 w-4" />
+      {copy('contactButton', 'Contact', 'ទាក់ទង')}
+    </button>
+  )
+}
+
+// The owner's photo, laid out by its own shape (utils/aboutCoverLayout.ts) so no frame colour ever shows
+// beside it: a wide picture is a full-width banner, a square or tall one sits in a box of its own ratio
+// (the hero's left column from md up). Every box is the picture's ratio and the picture fills it
+// (object-cover), so there is nothing to letterbox. The settings keep a path, not a size, so the ratio
+// is read when the file is in; PublicCatalogPage mounts this card after the file has arrived
+// (useCoverState) and the layout is final at once. If that wait runs out, the frame holds a 16:9 box
+// until the picture is decoded, never a fixed height a taller picture outgrows (CLS 0.14-0.17).
+function AboutCover({ src, imageFetchPriority, onFailed, onShape }: { src: string; imageFetchPriority?: 'high' | 'low' | 'auto'; onFailed: () => void; onShape: (shape: CoverShape | null) => void }) {
+  const [ratio, setRatio] = useState<number | null>(null)
+  const shape = coverShape(ratio)
+  const measure = (image: HTMLImageElement) => {
+    const next = coverRatio(image.naturalWidth, image.naturalHeight)
+    if (next === null) return
+    setRatio(next)
+    onShape(coverShape(next))
+  }
+  const box: CSSProperties | undefined = shape === 'wide'
+    ? { aspectRatio: String(ratio), maxHeight: `${COVER_BANNER_MAX_PX}px` }
+    : shape === 'tall'
+      ? { aspectRatio: String(ratio), ['--cover-ratio' as string]: String(ratio) }
+      : undefined
   return (
     <div
       data-portal-about-hero="true"
       data-portal-cover-frame="true"
-      className={`relative w-full bg-stone-100 dark:bg-neutral-800 ${loaded ? '' : 'aspect-video'}`}
+      data-portal-cover-shape={shape || 'loading'}
+      className={shape === 'tall' ? 'p-3 md:w-[460px] md:max-w-[45%] md:shrink-0 md:p-0' : ''}
     >
-      <img
-        ref={(node) => { if (node && node.complete && node.naturalWidth > 0) setLoaded(true) }}
-        src={src}
-        alt=""
-        aria-hidden="true"
-        data-portal-cover="true"
-        fetchPriority={imageFetchPriority}
-        onLoad={(event) => { event.currentTarget.dataset.loaded = 'true'; setLoaded(true) }}
-        onError={onFailed}
-        className="portal-cover-image pointer-events-none mx-auto block h-auto max-h-[min(calc(72*var(--app-vh)),680px)] w-full object-contain"
-      />
+      <div
+        className={`relative w-full overflow-hidden ${shape === 'tall' ? 'mx-auto max-w-[min(100%,460px,calc(60*var(--app-vh)*var(--cover-ratio)))] rounded-xl md:mx-0' : ''} ${shape ? '' : 'aspect-video bg-stone-200 dark:bg-neutral-800'}`}
+        style={box}
+      >
+        <img
+          ref={(node) => { if (node && node.complete && node.naturalWidth > 0) measure(node) }}
+          src={src}
+          alt=""
+          aria-hidden="true"
+          data-portal-cover="true"
+          fetchPriority={imageFetchPriority}
+          onLoad={(event) => { event.currentTarget.dataset.loaded = 'true'; measure(event.currentTarget) }}
+          onError={onFailed}
+          className="portal-cover-image pointer-events-none block h-full w-full object-cover"
+        />
+      </div>
     </div>
   )
 }
 
 // A long story reads better in two columns on a wide screen; a short one stays one block.
 const ABOUT_STORY_TWO_COLUMN_FROM = 700
+
+// Phone and address: icon, value, one action icon. The visible word is dropped (the icon says it);
+// the field name stays for a screen reader.
+function AboutFactRow({ item, copy, address }: { item: BusinessFact; copy: CopyFn; address: boolean }) {
+  const Icon = item.icon || (address ? MapPin : Phone)
+  const ActionIcon = address ? ExternalLink : PhoneCall
+  // The dialer link is rebuilt from the number so spaces and dashes in the saved value never reach the tel: URI.
+  const href = address
+    ? item.href || mapFallbackHref(item.value || '', '')
+    : derivePhoneCallLink(item.value || '') || item.href
+  const actionLabel = address
+    ? copy('openInGoogleMaps', 'Open in Google Maps', 'បើកក្នុង Google Maps')
+    : copy('callUs', 'Call', 'ហៅទូរស័ព្ទ')
+  return (
+    <div className="flex min-h-12 items-center gap-3">
+      <Icon aria-hidden="true" className={`h-4 w-4 shrink-0 ${BRASS_TEXT}`} />
+      <div className="min-w-0 flex-1 break-words text-sm font-medium leading-6 text-[#23201b] dark:text-neutral-100" title={item.value}>
+        <span className="sr-only">{item.label}: </span>
+        <span translate="no" className="notranslate">{item.value}</span>
+      </div>
+      {href ? (
+        <a
+          href={href}
+          target={address ? '_blank' : undefined}
+          rel={address ? 'noreferrer noopener' : undefined}
+          className={ICON_BUTTON}
+          aria-label={actionLabel}
+          title={actionLabel}
+        >
+          <ActionIcon aria-hidden="true" className="h-4 w-4" />
+        </a>
+      ) : null}
+    </div>
+  )
+}
 
 function CatalogAboutSection(props: CatalogAboutSectionProps) {
   const {
@@ -268,7 +344,6 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
     mapEmbedUrl,
     addressFact,
     businessFacts,
-    socialLinks,
     versionedBusinessLogo,
     versionedBusinessCover,
     imageFetchPriority,
@@ -296,39 +371,32 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
   const heroGradientStart = normalizePortalColor(previewConfig.heroGradientStart, '#0f172a')
   const heroGradientMid = normalizePortalColor(previewConfig.heroGradientMid, '#14532d')
   const heroGradientEnd = normalizePortalColor(previewConfig.heroGradientEnd, '#ea580c')
-  // A shorter brand-color banner with the logo overlapping its lower edge,
-  // and everything else (name, tagline, story, facts) living on a plain
-  // surface below rather than layered on top of the image/gradient --
-  // avoids the old full-bleed hero's white-text-on-photo legibility fight,
-  // and reads closer to a modern profile page than a dashboard splash.
-  // 2 Nov (owner): the cover photo shows IN FULL, at its own proportions, on top of the
-  // card (AboutCover); the logo and name sit below it on a plain surface, never over the
-  // photo. Without a cover, the brand gradient banner stays. A photo that fails to load
-  // falls back to the banner instead of leaving a hole.
+  // 2 Nov (owner): the cover photo shows IN FULL on top of the card; the logo and name sit below it
+  // on a plain surface, never over the photo. Without a cover, the brand gradient banner stays. A photo
+  // that fails to load falls back to the banner instead of leaving a hole.
   const [failedCover, setFailedCover] = useState('')
+  const [coverShapeNow, setCoverShapeNow] = useState<CoverShape | null>(null)
   const hasCover = Boolean(previewConfig.showCover && versionedBusinessCover && failedCover !== versionedBusinessCover)
+  const twoColumn = hasCover && coverShapeNow === 'tall'
   const bannerBackground = `linear-gradient(135deg, ${heroGradientStart} 0%, ${heroGradientMid} 55%, ${heroGradientEnd} 100%)`
   const logoSizePx = Math.max(72, Number(previewConfig.logoSize || 80))
-  const hasFacts = Boolean(businessFacts?.length)
-  const hasSocial = Boolean(socialLinks?.length)
-  const hasContactInfo = hasFacts || hasSocial
+  // The same file as the cover: the round logo would only repeat the picture beside it.
+  const showRoundLogo = !(hasCover && sameImageFile(versionedBusinessLogo, versionedBusinessCover))
+  const detailFacts = (businessFacts || []).filter((item) => item.key === 'phone' || item.key === 'address')
+  const hasFacts = detailFacts.length > 0
   const hasMap = Boolean(mapEmbedUrl)
   const storyInColumns = storyText.length > ABOUT_STORY_TWO_COLUMN_FROM
 
   return (
-    <section
-      className="space-y-4 rounded-[36px] p-3 sm:p-5"
-      style={{
-        // Subtle backdrop for the whole About tab, echoing the hero's own
-        // brand-color gradient at very low opacity so the section reads as
-        // one cohesive page rather than a stack of unrelated white cards
-        // dropped on the plain portal background.
-        backgroundImage: `radial-gradient(circle at 15% 0%, ${heroGradientStart}14 0%, transparent 45%), radial-gradient(circle at 100% 20%, ${heroGradientEnd}12 0%, transparent 50%)`,
-      }}
-    >
-      <div className="relative isolate overflow-hidden rounded-[32px] border border-slate-200/80 bg-white shadow-[0_18px_42px_rgba(148,163,184,0.14)] dark:border-neutral-700/80 dark:bg-neutral-900/88">
+    <section className="space-y-4 py-4 sm:py-5">
+      <div className={`relative isolate overflow-hidden rounded-2xl ${SURFACE} ${twoColumn ? 'md:flex md:items-center md:gap-8 md:p-6' : ''}`}>
         {hasCover ? (
-          <AboutCover src={versionedBusinessCover || ''} imageFetchPriority={imageFetchPriority} onFailed={() => setFailedCover(versionedBusinessCover || '')} />
+          <AboutCover
+            src={versionedBusinessCover || ''}
+            imageFetchPriority={imageFetchPriority}
+            onFailed={() => setFailedCover(versionedBusinessCover || '')}
+            onShape={setCoverShapeNow}
+          />
         ) : (
           <div
             data-portal-about-hero="true"
@@ -342,55 +410,57 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
           />
         )}
 
-        <div className="relative px-5 pb-5 sm:px-8 sm:pb-8">
-          <div className={`flex flex-wrap items-end gap-3 sm:gap-4 ${hasCover ? 'pt-4 sm:pt-5' : '-mt-7 sm:-mt-9'}`}>
-            <div
-              className="flex shrink-0 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-white shadow-[0_12px_28px_rgba(15,23,42,0.18)] dark:border-neutral-900"
-              style={{ height: `${logoSizePx}px`, width: `${logoSizePx}px` }}
-            >
-              {previewConfig.showLogo && versionedBusinessLogo ? (
-                <button
-                  type="button"
-                  className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-white"
-                  onClick={() => openPortalImage(previewConfig.businessName || copy('logoImage', 'Logo image'), [versionedBusinessLogo])}
-                >
+        <div className={twoColumn ? 'min-w-0 flex-1 px-4 pb-5 md:p-0' : 'relative px-4 pb-5 sm:px-6 sm:pb-6'}>
+          <div className="flex items-start gap-3 pt-4 sm:gap-4">
+            {showRoundLogo ? (
+              <div
+                className={`flex shrink-0 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-white shadow-sm dark:border-neutral-900 ${hasCover ? '' : '-mt-11 sm:-mt-14'}`}
+                style={{ height: `${logoSizePx}px`, width: `${logoSizePx}px` }}
+              >
+                {previewConfig.showLogo && versionedBusinessLogo ? (
+                  <button
+                    type="button"
+                    className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-white"
+                    onClick={() => openPortalImage(previewConfig.businessName || copy('logoImage', 'Logo image'), [versionedBusinessLogo])}
+                  >
+                    <img
+                      src={versionedBusinessLogo}
+                      alt={previewConfig.businessName || copy('logoImage', 'Logo image')}
+                      className="h-full w-full rounded-full"
+                      style={{
+                        // With the top-bar logo gone (6.2) this hero IS the
+                        // live logo surface -- preview == applied runs
+                        // through the same shared math, not a hand-rolled
+                        // center-origin transform (the focus-slider bug).
+                        ...buildLogoImageStyle({
+                          fit: previewConfig.logoFit,
+                          zoom: previewConfig.logoZoom,
+                          positionX: previewConfig.logoPositionX,
+                          positionY: previewConfig.logoPositionY,
+                        }),
+                      }}
+                    />
+                  </button>
+                ) : (
                   <img
-                    src={versionedBusinessLogo}
+                    src={LEANG_ICON_FALLBACK}
                     alt={previewConfig.businessName || copy('logoImage', 'Logo image')}
-                    className="h-full w-full rounded-full"
-                    style={{
-                      // With the top-bar logo gone (6.2) this hero IS the
-                      // live logo surface -- preview == applied runs
-                      // through the same shared math, not a hand-rolled
-                      // center-origin transform (the focus-slider bug).
-                      ...buildLogoImageStyle({
-                        fit: previewConfig.logoFit,
-                        zoom: previewConfig.logoZoom,
-                        positionX: previewConfig.logoPositionX,
-                        positionY: previewConfig.logoPositionY,
-                      }),
-                    }}
+                    className="h-full w-full rounded-full object-cover"
                   />
-                </button>
-              ) : (
-                <img
-                  src={LEANG_ICON_FALLBACK}
-                  alt={previewConfig.businessName || copy('logoImage', 'Logo image')}
-                  className="h-full w-full rounded-full object-cover"
-                />
-              )}
-            </div>
+                )}
+              </div>
+            ) : null}
 
-            <div className="min-w-0 flex-1 pb-1">
-              <h2 className="notranslate break-words text-2xl font-semibold leading-[1.35] tracking-tight text-slate-900 dark:text-neutral-100 sm:text-3xl" translate="no">
+            <div className={`min-w-0 flex-1 ${showRoundLogo ? 'self-center' : ''}`}>
+              <h2 className="notranslate break-words text-2xl font-semibold leading-[1.45] tracking-tight text-[#23201b] dark:text-neutral-100 sm:text-3xl" translate="no">
                 {heroTitle}
               </h2>
-              {previewConfig.businessTagline ? <div className="notranslate mt-1 text-sm text-slate-500 dark:text-neutral-400" translate="no">{previewConfig.businessTagline}</div> : null}
+              {previewConfig.businessTagline ? <div className="notranslate mt-0.5 text-sm leading-6 text-stone-600 dark:text-neutral-300" translate="no">{previewConfig.businessTagline}</div> : null}
             </div>
           </div>
 
           {introText ? (
-            <p className="mt-4 max-w-3xl text-sm leading-6 text-slate-600 dark:text-neutral-300 sm:text-base sm:leading-7">
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600 dark:text-neutral-300 sm:text-base">
               <OwnerText text={introText} />
             </p>
           ) : null}
@@ -414,88 +484,27 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
       ) : null}
 
       {/* 2 Nov (owner): no empty space. The story takes the full width (two columns on a
-          wide screen when it is long). Under it, contacts and socials sit BESIDE the map
-          on a large screen and stack on a phone; both cards stretch to the same height.
-          The map keeps its consent gate. */}
+          wide screen when it is long). Under it, phone and address sit BESIDE the map
+          on a large screen and stack on a phone. The map keeps its consent gate. */}
       {storyText ? (
-        <div className="rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm dark:border-neutral-700 dark:from-neutral-900 dark:to-neutral-800">
-          <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{aboutTitle}</div>
-          <p className={`mt-3 whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-neutral-300 ${storyInColumns ? 'xl:columns-2 xl:gap-10' : ''}`}>
+        <div className={`rounded-2xl p-5 ${SURFACE}`}>
+          <div className="text-sm font-semibold leading-6 text-[#23201b] dark:text-neutral-100">{aboutTitle}</div>
+          <p className={`mt-2 whitespace-pre-line text-sm leading-7 text-stone-700 dark:text-neutral-300 ${storyInColumns ? 'xl:columns-2 xl:gap-10' : ''}`}>
             <OwnerText text={storyText} />
           </p>
         </div>
       ) : null}
 
-      {hasContactInfo || hasMap ? (
-        <div data-portal-about-details="true" className={`grid gap-4 ${hasContactInfo && hasMap ? 'lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-stretch' : ''}`}>
-          {hasContactInfo ? (
-            <div data-portal-contact-tray="true" className="flex flex-col gap-4 rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm dark:border-neutral-700 dark:bg-neutral-900/90">
-              {businessFacts?.length ? (
-                <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,14rem),1fr))]">
-                  {businessFacts.map((item) => {
-                    const Icon = item.icon || (item.key === 'phone'
-                      ? Phone
-                      : item.key === 'email'
-                        ? Mail
-                        : MapPin)
-                    const body = (
-                      <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 transition hover:border-slate-300 hover:bg-slate-100 dark:border-neutral-700 dark:bg-neutral-800/60 dark:hover:bg-neutral-800">
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-slate-500 shadow-sm dark:bg-neutral-900 dark:text-neutral-300">
-                          <Icon className="h-4 w-4" />
-                        </span>
-                        <div className="min-w-0">
-                          {/* The field name ("Phone", "Address", ...) is the
-                              only thing that says what the value beside it is,
-                              so it is real copy, not decoration: slate-400 is
-                              2.56:1 on this card and neutral-500 is 3.29:1 on
-                              the dark one. slate-500/neutral-400 is the muted
-                              pair the rest of the storefront settled on. */}
-                          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-neutral-400">{item.label}</div>
-                          <div className={`portal-contact-value text-sm font-medium text-slate-800 dark:text-neutral-100 ${item.key === 'address' ? 'portal-contact-value-address' : ''}`} title={item.value}>{item.value}</div>
-                        </div>
-                      </div>
-                    )
-                    // The dialer link is rebuilt from the number so spaces and dashes in the saved value never reach the tel: URI.
-                    const href = item.key === 'phone' ? derivePhoneCallLink(item.value || '') || item.href : item.href
-                    return href ? <a key={item.key} href={href} target={href.startsWith('tel:') ? undefined : '_blank'} rel={href.startsWith('tel:') ? undefined : 'noreferrer'} className="block">{body}</a> : <div key={item.key}>{body}</div>
-                  })}
-                </div>
-              ) : null}
-              {socialLinks?.length ? (
-                <div className="flex flex-wrap gap-2">
-                  {socialLinks.map((item) => {
-                    const Icon = PORTAL_SOCIAL_ICONS[(item.platform ?? item.key) as SocialPlatform] || Globe
-                    return (
-                      <a
-                        key={item.key}
-                        href={item.value}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
-                        aria-label={item.accessibleName || item.label}
-                        title={item.accessibleName || item.label}
-                      >
-                        <Icon className="h-4 w-4 shrink-0" />
-                        <PortalSocialText text={item.label} latin={item.latin ?? true} />
-                      </a>
-                    )
-                  })}
-                </div>
-              ) : null}
+      {hasFacts || hasMap ? (
+        <div data-portal-about-details="true" className={`grid gap-4 ${hasFacts && hasMap ? 'lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-stretch' : ''}`}>
+          {hasFacts ? (
+            <div data-portal-contact-tray="true" className={`flex flex-col justify-center divide-y divide-stone-200 rounded-2xl px-4 py-1 dark:divide-neutral-700 ${SURFACE}`}>
+              {detailFacts.map((item) => <AboutFactRow key={item.key} item={item} copy={copy} address={item.key === 'address'} />)}
             </div>
           ) : null}
 
           {hasMap ? (
-            <div data-portal-map-card="true" className="flex flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900/90">
-              <div className="flex items-center gap-3 border-b border-slate-100 px-5 py-4 dark:border-neutral-800">
-                <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-600 dark:bg-neutral-800 dark:text-neutral-300">
-                  <MapPin className="h-4 w-4" />
-                </span>
-                <div>
-                  <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('mapCard', 'Store map')}</div>
-                  {addressFact?.value ? <div className="text-xs text-slate-500 dark:text-neutral-400">{addressFact.value}</div> : null}
-                </div>
-              </div>
+            <div data-portal-map-card="true" className={`flex flex-col overflow-hidden rounded-2xl ${SURFACE}`}>
               {/* N45: the map is the storefront's only automatically-loading
                   third party, so it waits for a click instead of fetching Google
                   the moment this tab renders. Declining is a plain link, not a
@@ -513,8 +522,8 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
         </div>
       ) : null}
       {!storyText && !mapEmbedUrl && !aboutBlocks.length ? (
-        <div className="rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 dark:border-neutral-700 dark:from-neutral-900 dark:to-neutral-800">
-          <p className="text-sm text-slate-500 dark:text-neutral-400">{fallbackStory}</p>
+        <div className={`rounded-2xl p-5 ${SURFACE}`}>
+          <p className="text-sm leading-7 text-stone-600 dark:text-neutral-300">{fallbackStory}</p>
         </div>
       ) : null}
 
@@ -526,23 +535,23 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
           {aboutBlocks.map((block, index) => {
             const mediaFirst = index % 2 === 0
             return (
-              <div key={block.id} className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900/90 sm:grid sm:grid-cols-2 sm:items-stretch">
+              <div key={block.id} className={`overflow-hidden rounded-2xl ${SURFACE} sm:grid sm:grid-cols-2 sm:items-stretch`}>
                 {block.mediaUrl ? (
                   <button
                     type="button"
-                    className={`flex w-full items-center justify-center bg-slate-50 p-4 dark:bg-neutral-950/60 ${mediaFirst ? 'sm:order-1' : 'sm:order-2'}`}
+                    className={`flex w-full items-center justify-center p-4 ${mediaFirst ? 'sm:order-1' : 'sm:order-2'}`}
                     onClick={() => openPortalImage(stripNoTranslateMarkers(block.title) || previewConfig.aboutTitle || copy('about', 'About'), block.mediaUrl ? [block.mediaUrl] : [])}
                   >
                     {block.type === 'video' ? (
-                      <video src={block.mediaUrl} controls preload="metadata" className="max-h-[280px] w-full rounded-2xl bg-white object-contain dark:bg-neutral-950 sm:h-full sm:max-h-none" />
+                      <video src={block.mediaUrl} controls preload="metadata" className="max-h-[280px] w-full rounded-xl object-contain sm:h-full sm:max-h-none" />
                     ) : (
-                      <img src={block.mediaUrl} alt={stripNoTranslateMarkers(block.title) || previewConfig.aboutTitle || copy('about', 'About')} className="max-h-[280px] w-full rounded-2xl object-contain sm:h-full sm:max-h-none" />
+                      <img src={block.mediaUrl} alt={stripNoTranslateMarkers(block.title) || previewConfig.aboutTitle || copy('about', 'About')} className="max-h-[280px] w-full rounded-xl object-contain sm:h-full sm:max-h-none" />
                     )}
                   </button>
                 ) : null}
-                <div className={`flex flex-col justify-center space-y-3 p-6 ${block.mediaUrl ? (mediaFirst ? 'sm:order-2' : 'sm:order-1') : 'sm:col-span-2'}`}>
-                  {block.title ? <h3 className="text-lg font-semibold text-slate-900 dark:text-neutral-100"><OwnerText text={block.title} /></h3> : null}
-                  {block.body ? <p className="whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-neutral-300"><OwnerText text={block.body} /></p> : null}
+                <div className={`flex flex-col justify-center space-y-2 p-5 ${block.mediaUrl ? (mediaFirst ? 'sm:order-2' : 'sm:order-1') : 'sm:col-span-2'}`}>
+                  {block.title ? <h3 className="text-lg font-semibold leading-8 text-[#23201b] dark:text-neutral-100"><OwnerText text={block.title} /></h3> : null}
+                  {block.body ? <p className="whitespace-pre-line text-sm leading-7 text-stone-700 dark:text-neutral-300"><OwnerText text={block.body} /></p> : null}
                 </div>
               </div>
             )
@@ -553,25 +562,11 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
   )
 }
 
-const BRASS_TEXT = 'text-[#9c7a3c] dark:text-amber-300'
-// Charcoal fill on ivory text is the storefront's primary button; amber in the dark theme.
-const CHARCOAL_BUTTON = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-[#23201b] px-5 text-sm font-semibold text-[#f4f1ea] transition hover:bg-[#3a352c] dark:bg-amber-300 dark:text-neutral-900 dark:hover:bg-amber-200'
-
-function FaqContactButton({ copy, onOpenContact }: { copy: CopyFn; onOpenContact?: () => void }) {
-  if (!onOpenContact) return null
-  return (
-    <button type="button" className={CHARCOAL_BUTTON} onClick={onOpenContact}>
-      <MessageCircle aria-hidden="true" className="h-4 w-4" />
-      {copy('contactUs', 'Contact us', 'ទាក់ទងយើង')}
-    </button>
-  )
-}
-
 function FaqSkeleton() {
   return (
-    <div className="mx-auto w-full max-w-3xl" data-portal-faq-skeleton="true" aria-busy="true">
+    <div className={`mx-auto w-full max-w-3xl rounded-2xl px-4 ${SURFACE}`} data-portal-faq-skeleton="true" aria-busy="true">
       {[0, 1, 2, 3].map((row) => (
-        <div key={row} className="flex min-h-[3.75rem] items-center border-b border-stone-200 dark:border-neutral-700">
+        <div key={row} className={`flex min-h-[3.75rem] items-center ${row ? 'border-t border-stone-200 dark:border-neutral-700' : ''}`}>
           <span className="h-4 rounded-full bg-stone-200 motion-safe:animate-pulse dark:bg-neutral-700" style={{ width: `${86 - row * 11}%` }} />
         </div>
       ))}
@@ -598,10 +593,9 @@ export function FaqList(props: {
   if (loading) return <FaqSkeleton />
   if (!entries.length) {
     return (
-      <div className="mx-auto w-full max-w-3xl rounded-2xl border border-stone-200 bg-white p-6 text-center dark:border-neutral-700 dark:bg-neutral-900/90">
-        <p className="text-sm font-semibold text-[#23201b] dark:text-neutral-100">{copy('faqEmptyNone', 'No questions yet.', 'មិនទាន់មានសំណួរនៅឡើយទេ។')}</p>
-        <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-neutral-300">{copy('faqStillBody', 'Ask our team and we will answer.', 'សួរក្រុមការងាររបស់យើង ហើយយើងនឹងឆ្លើយ។')}</p>
-        <div className="mt-4 flex justify-center"><FaqContactButton copy={copy} onOpenContact={onOpenContact} /></div>
+      <div className={`mx-auto flex w-full max-w-3xl flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3 ${SURFACE}`}>
+        <p className="min-w-0 text-sm font-semibold leading-7 text-[#23201b] dark:text-neutral-100">{copy('faqEmptyNone', 'No questions yet.', 'មិនទាន់មានសំណួរនៅឡើយទេ។')}</p>
+        <PortalContactButton copy={copy} onOpenContact={onOpenContact} />
       </div>
     )
   }
@@ -609,8 +603,8 @@ export function FaqList(props: {
   return (
     <div className="mx-auto w-full max-w-3xl" data-portal-faq-list="true">
       {searchable ? (
-        <div className="relative mb-2">
-          <Search aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 dark:text-neutral-400" />
+        <div className="relative mb-3">
+          <Search aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-600 dark:text-neutral-300" />
           <input
             type="search"
             name="portal_faq_search"
@@ -619,12 +613,12 @@ export function FaqList(props: {
             onChange={(event) => setQuery(event.target.value)}
             aria-label={copy('faqSearch', 'Search questions', 'ស្វែងរកសំណួរ')}
             placeholder={copy('faqSearch', 'Search questions', 'ស្វែងរកសំណួរ')}
-            className="h-11 w-full rounded-full border border-stone-300 bg-white pl-10 pr-11 text-sm text-[#23201b] placeholder:text-slate-500 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-400"
+            className={`h-11 w-full rounded-xl pl-10 pr-11 text-sm ${FIELD}`}
           />
           {query ? (
             <button
               type="button"
-              className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-slate-600 dark:text-neutral-300"
+              className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-stone-600 dark:text-neutral-300"
               aria-label={copy('clear', 'Clear', 'សម្អាត')}
               title={copy('clear', 'Clear', 'សម្អាត')}
               onClick={() => setQuery('')}
@@ -636,16 +630,16 @@ export function FaqList(props: {
       ) : null}
 
       {visible.length ? (
-        <ul className="m-0 list-none p-0">
+        <ul className={`m-0 list-none overflow-hidden rounded-2xl p-0 ${SURFACE}`}>
           {visible.map(({ item, index, key }) => {
             const open = expandedFaqId === key
             const answerId = `portal-faq-answer-${index}`
             return (
-              <li key={key} className="border-b border-stone-200 dark:border-neutral-700">
+              <li key={key} className="border-t border-stone-200 first:border-t-0 dark:border-neutral-700">
                 <h3 className="m-0">
                   <button
                     type="button"
-                    className="flex min-h-11 w-full items-start justify-between gap-3 py-4 text-left"
+                    className="flex min-h-11 w-full items-start justify-between gap-3 px-4 py-3.5 text-left transition hover:bg-stone-50 dark:hover:bg-neutral-800"
                     aria-expanded={open}
                     aria-controls={open ? answerId : undefined}
                     onClick={() => setExpandedFaqId((current) => nextOpenFaqKey(current, key))}
@@ -662,7 +656,7 @@ export function FaqList(props: {
                 {open ? (
                   <div
                     id={answerId}
-                    {...getKhmerTextProps(item.answer, 'whitespace-pre-line pb-4 pr-8 text-sm leading-7 text-slate-700 [overflow-wrap:anywhere] dark:text-neutral-300')}
+                    {...getKhmerTextProps(item.answer, 'whitespace-pre-line px-4 pb-4 pr-10 text-sm leading-7 text-stone-700 [overflow-wrap:anywhere] dark:text-neutral-300')}
                     style={{ lineHeight: 1.8 }}
                   >
                     {item.answer}
@@ -673,19 +667,18 @@ export function FaqList(props: {
           })}
         </ul>
       ) : (
-        <div className="flex flex-wrap items-center gap-3 border-b border-stone-200 py-5 text-sm text-slate-700 dark:border-neutral-700 dark:text-neutral-300" role="status">
-          <span className="min-w-0 [overflow-wrap:anywhere]">{copy('faqNoMatch', 'No question matches "{query}"', 'គ្មានសំណួរត្រូវនឹង "{query}" ទេ').replace('{query}', activeQuery)}</span>
-          <button type="button" className="inline-flex min-h-11 items-center rounded-full border border-stone-300 px-4 text-sm font-semibold text-[#23201b] dark:border-neutral-600 dark:text-neutral-100" onClick={() => setQuery('')}>
-            {copy('clear', 'Clear', 'សម្អាត')}
+        <div className={`flex flex-wrap items-center gap-3 rounded-2xl px-4 py-3 text-sm text-stone-700 dark:text-neutral-300 ${SURFACE}`} role="status">
+          <span className="min-w-0 flex-1 leading-7 [overflow-wrap:anywhere]">{copy('faqNoMatch', 'No question matches "{query}"', 'គ្មានសំណួរត្រូវនឹង "{query}" ទេ').replace('{query}', activeQuery)}</span>
+          <button type="button" className={ICON_BUTTON} aria-label={copy('clear', 'Clear', 'សម្អាត')} title={copy('clear', 'Clear', 'សម្អាត')} onClick={() => setQuery('')}>
+            <X aria-hidden="true" className="h-4 w-4" />
           </button>
         </div>
       )}
 
       {onOpenContact ? (
-        <div className="mt-8 rounded-2xl border border-stone-200 bg-white p-6 text-center dark:border-neutral-700 dark:bg-neutral-900/90" data-portal-faq-contact="true">
-          <p className="text-base font-semibold text-[#23201b] dark:text-neutral-100">{copy('faqStillHeading', 'Still have a question?', 'នៅមានសំណួរទៀតទេ?')}</p>
-          <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-neutral-300">{copy('faqStillBody', 'Ask our team and we will answer.', 'សួរក្រុមការងាររបស់យើង ហើយយើងនឹងឆ្លើយ។')}</p>
-          <div className="mt-4 flex justify-center"><FaqContactButton copy={copy} onOpenContact={onOpenContact} /></div>
+        <div className={`mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3 ${SURFACE}`} data-portal-faq-contact="true">
+          <p className="min-w-0 text-base font-semibold leading-8 text-[#23201b] dark:text-neutral-100">{copy('faqStillHeading', 'Still have a question?', 'នៅមានសំណួរទៀតទេ?')}</p>
+          <PortalContactButton copy={copy} onOpenContact={onOpenContact} />
         </div>
       ) : null}
     </div>
@@ -697,10 +690,7 @@ function CatalogFaqSection(props: CatalogFaqSectionProps) {
   const [query, setQuery] = useState('')
 
   return (
-    <SectionShell
-      title={previewConfig.faqTitle || copy('faq', 'FAQ')}
-      subtitle={copy('faqHint', 'Quick answers to common questions.')}
-    >
+    <SectionShell title={previewConfig.faqTitle || copy('faq', 'FAQ')}>
       <FaqList
         copy={copy}
         items={publicFaqItems}
@@ -715,25 +705,79 @@ function CatalogFaqSection(props: CatalogFaqSectionProps) {
   )
 }
 
-// Asked once per browser session: a reload or a trip to another tab does not ask again.
-const ASSISTANT_CONSENT_KEY = 'portal-assistant-consent'
-
-function readAssistantConsent(): boolean {
-  try {
-    return window.sessionStorage.getItem(ASSISTANT_CONSENT_KEY) === '1'
-  } catch {
-    // Storage blocked (private mode): consent just lasts until the page closes.
-    return false
-  }
+// The consent is read and written through one store, so a blocked browser store never throws.
+const consentStore = (): Storage | null => {
+  try { return window.localStorage } catch { return null }
 }
 
-function writeAssistantConsent(on: boolean): void {
-  try {
-    if (on) window.sessionStorage.setItem(ASSISTANT_CONSENT_KEY, '1')
-    else window.sessionStorage.removeItem(ASSISTANT_CONSENT_KEY)
-  } catch {
-    // Storage blocked: the in-memory flag still gates Send for this page.
-  }
+const CHIP = 'inline-flex min-h-10 items-center rounded-full border px-3.5 text-sm leading-6 transition'
+const CHIP_IDLE = 'border-stone-500 bg-white text-[#23201b] hover:border-[#7a5c22] dark:border-neutral-500 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:border-amber-300'
+const CHIP_ACTIVE = 'border-[#23201b] bg-[#23201b] text-[#f4f1ea] dark:border-amber-300 dark:bg-amber-300 dark:text-neutral-900'
+
+function AssistantStockBadge({ status, copy }: { status?: string; copy: CopyFn }) {
+  if (!status) return null
+  const [label, tone] = status === 'out_of_stock'
+    ? [copy('outOfStock', 'Out of Stock', 'អស់ស្តុក'), 'text-rose-700 dark:text-rose-300']
+    : status === 'low_stock'
+      ? [copy('lowStock', 'Low Stock', 'ស្តុកតិច'), 'text-amber-800 dark:text-amber-300']
+      : [copy('inStock', 'In Stock', 'មានស្តុក'), 'text-emerald-700 dark:text-emerald-300']
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full border border-stone-300 bg-white px-2.5 py-0.5 text-xs font-semibold leading-5 dark:border-neutral-700 dark:bg-neutral-900 ${tone}`}>
+      <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />
+      {label}
+    </span>
+  )
+}
+
+// The full disclosure behind the info icon: said once, here. The merchant's own note is editable, so it can
+// be shortened to nothing; the app's note is not editable, because what it says is not marketing: the shopper
+// is talking to software and not a person, their question leaves the shop, and a skin or health question
+// belongs with a pharmacist or a doctor rather than a product recommender (N45). Cosmetics advertising rules
+// treat a therapeutic claim as a different product class; the assistant is instructed not to make one, and a
+// reader is told what it is either way.
+export function AssistantDisclosure({ copy, aiState, language, ownerDisclaimer, onWithdraw }: {
+  copy: CopyFn
+  aiState: AiProviderState
+  language: AiDisclosureLanguage
+  ownerDisclaimer: string
+  onWithdraw?: () => void
+}) {
+  return (
+    <div data-portal-assistant-info="true" className="space-y-3 text-sm leading-7 text-stone-700 dark:text-neutral-300">
+      <p>{fillAiProviderTemplate(language === 'km' ? ASSISTANT_AUTOMATED_KM : ASSISTANT_AUTOMATED_EN, aiState, language)}</p>
+      {ownerDisclaimer ? <p>{ownerDisclaimer}</p> : null}
+      {onWithdraw ? (
+        <button
+          type="button"
+          className="inline-flex min-h-11 items-center gap-2 rounded-full border border-stone-500 px-4 text-sm font-semibold text-[#23201b] transition hover:border-[#7a5c22] dark:border-neutral-500 dark:text-neutral-100 dark:hover:border-amber-300"
+          onClick={onWithdraw}
+        >
+          <X aria-hidden="true" className="h-4 w-4" />
+          {copy('assistantConsentWithdraw', 'Withdraw consent', 'ដកការយល់ព្រម')}
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+// Shown on the first Send of a browser (and again after a new consent version): one line and one button.
+export function AssistantConsentPanel({ copy, aiState, language, onAgree }: {
+  copy: CopyFn
+  aiState: AiProviderState
+  language: AiDisclosureLanguage
+  onAgree: () => void
+}) {
+  return (
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-stone-300 bg-white px-3.5 py-2.5 dark:border-neutral-700 dark:bg-neutral-900" data-portal-assistant-consent="ask" role="group">
+      <p className="min-w-0 flex-1 basis-56 text-sm leading-7 text-stone-700 dark:text-neutral-200">
+        {fillAiProviderTemplate(language === 'km' ? ASSISTANT_CONSENT_KM : ASSISTANT_CONSENT_EN, aiState, language)}
+      </p>
+      <button type="button" className={CHARCOAL_BUTTON} onClick={onAgree}>
+        <Check aria-hidden="true" className="h-4 w-4" />
+        {copy('assistantAgreeSend', 'Agree and send', 'យល់ព្រម ហើយផ្ញើ')}
+      </button>
+    </div>
+  )
 }
 
 function CatalogAiSection(props: CatalogAiSectionProps) {
@@ -750,277 +794,327 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
     askAssistant,
     assistantLoading,
     clearAssistantState,
-    replaceVars,
     assistantError,
     assistantResponse,
     openProductById,
+    onAddRecommendation,
+    catalogProducts,
     assistantDisclosure,
     assistantDataUseConsent,
     setAssistantDataUseConsent,
   } = props
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const [consentPanel, setConsentPanel] = useState(false)
+  const [sendAfterConsent, setSendAfterConsent] = useState(false)
+  const [added, setAdded] = useState<ReadonlySet<string>>(() => new Set())
+  const questionRef = useRef<HTMLTextAreaElement | null>(null)
 
   useEffect(() => {
-    if (!assistantDataUseConsent && readAssistantConsent()) setAssistantDataUseConsent(true)
+    if (!assistantDataUseConsent && aiConsentGiven(consentStore())) setAssistantDataUseConsent(true)
     // Restore once on mount; the parent owns the live flag afterwards.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // askAssistant checks the consent flag of the render it belongs to, so "Agree and send" sends from the
+  // render that already carries the new flag, never from the one that was still waiting for it.
+  useEffect(() => {
+    if (!sendAfterConsent || !assistantDataUseConsent) return
+    setSendAfterConsent(false)
+    askAssistant()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sendAfterConsent, assistantDataUseConsent])
+
+  // The box grows with its text (two rows to start, then up to 12 rem).
+  useLayoutEffect(() => {
+    const box = questionRef.current
+    if (!box) return
+    box.style.height = 'auto'
+    box.style.height = `${Math.min(box.scrollHeight, 192)}px`
+  }, [assistantQuestion])
+
   const changeConsent = (next: boolean) => {
     setAssistantDataUseConsent(next)
-    writeAssistantConsent(next)
+    saveAiConsent(consentStore(), next)
   }
+  const send = () => {
+    if (assistantLoading) return
+    // An empty box is answered by askAssistant's own "ask a question first"; consent is asked only for a real question.
+    if (!assistantDataUseConsent && assistantQuestion.trim()) {
+      setConsentPanel(true)
+      return
+    }
+    askAssistant()
+  }
+  const agreeAndSend = () => {
+    changeConsent(true)
+    setConsentPanel(false)
+    setSendAfterConsent(true)
+  }
+  const fillExample = (text: string) => {
+    setAssistantQuestion(text)
+    questionRef.current?.focus()
+  }
+
   const aiState: AiProviderState = assistantDisclosure || { kind: 'unknown' }
   // copy() answers in the storefront language; asking it for 'en' / 'ខ្មែរ' tells this section which wording to build.
   const language: AiDisclosureLanguage = copy('aiPolicyLanguage', 'en', 'ខ្មែរ') === 'ខ្មែរ' ? 'km' : 'en'
-  const provider = aiProviderNames(aiState, language) || copy('assistantProviderFallback', 'our AI provider', 'អ្នកផ្តល់សេវា AI របស់យើង')
-  const labelClass = 'block text-sm font-medium text-slate-700 dark:text-neutral-200'
+  const title = previewConfig.aiTitle || copy('portalAssistant', 'AI assistant')
+  const tagline = previewConfig.aiIntro || copy('assistantTagline', 'AI suggestions, not medical advice.', 'ការណែនាំពី AI មិនមែនជាយោបល់វេជ្ជសាស្ត្រទេ។')
+  const defaultDisclaimer = copy('aiDisclaimer', 'AI generated, for reference only. For more accurate inquiries, please contact our store on Instagram or Facebook.')
+  const ownerDisclaimer = String(previewConfig.aiDisclaimer || '').trim()
+  const infoLabel = copy('assistantInfo', 'About the assistant', 'អំពីជំនួយការ')
+  const labelClass = 'block text-sm font-medium leading-6 text-stone-700 dark:text-neutral-200'
+  const detailsLabel = copy('assistantAddDetails', 'Add details', 'បន្ថែមព័ត៌មាន')
+  const questionLabel = copy('assistantQuestion', 'What would you like help finding?', 'តើអ្នកចង់ឲ្យជួយរកអ្វី?')
+  // Fixed options are chips; the stored skin-type values stay the English words the Worker prompt expects.
+  const skinTypes = [
+    { value: 'Dry', label: copy('skinDry', 'Dry', 'ស្ងួត') },
+    { value: 'Oily', label: copy('skinOily', 'Oily', 'ខ្លាញ់') },
+    { value: 'Combination', label: copy('skinCombination', 'Combination', 'ចម្រុះ') },
+    { value: 'Sensitive', label: copy('skinSensitive', 'Sensitive', 'ងាយប្រតិកម្ម') },
+    { value: 'Normal', label: copy('skinNormal', 'Normal', 'ធម្មតា') },
+    { value: 'Acne-prone', label: copy('skinAcneProne', 'Acne-prone', 'ងាយកើតមុន') },
+  ]
+  const examples = [
+    copy('assistantExample1', 'A gentle daily sunscreen for oily skin', 'ឡេការពារកម្ដៅថ្ងៃទន់ភ្លន់ សម្រាប់ស្បែកខ្លាញ់'),
+    copy('assistantExample2', 'A moisturiser for dry, sensitive skin', 'ក្រែមផ្តល់សំណើម សម្រាប់ស្បែកស្ងួត ងាយប្រតិកម្ម'),
+    copy('assistantExample3', 'A gentle cleanser for acne-prone skin', 'ផលិតផលលាងមុខទន់ភ្លន់ សម្រាប់ស្បែកងាយកើតមុន'),
+    copy('assistantExample4', 'A long-wear lipstick in a natural shade', 'ក្រហមមាត់ជាប់យូរ ពណ៌ធម្មជាតិ'),
+  ]
 
   return (
-    <SectionShell
-      title={previewConfig.aiTitle || copy('portalAssistant', 'AI assistant')}
-      subtitle={previewConfig.aiIntro || copy('assistantNotice', 'AI generated, for reference only.')}
-    >
-      <div className="space-y-4">
-        <div className="grid gap-3 xl:grid-cols-[1.15fr,0.85fr]">
-          <div className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm dark:border-neutral-700 dark:bg-neutral-900/90">
-            {/* Every label in this AI-assistant form was `text-slate-700`
-                with NO dark: override on a card that already paints
-                `dark:bg-neutral-900/90` -- slate-700 (#334155) on that near-
-                black card is ~1.7:1, nowhere near AA's 4.5:1 (owner,
-                2026-09-18: "the dark mode are not contrasted correctly for
-                the text and buttons"). portalContrast.ts's own audited dark
-                token (`dark:text-neutral-200`) is what every label here takes. */}
+    <section data-portal-assistant="true" className="mx-auto w-full max-w-[720px] py-5">
+      <div className="flex items-center gap-1">
+        <h2 className="text-lg font-semibold leading-8 text-[#23201b] dark:text-neutral-100">{title}</h2>
+        <LazyPortalMenu
+          align="auto"
+          menuClassName="w-[min(24rem,calc(100vw-1.5rem))] p-4"
+          trigger={(
+            <button type="button" className={ICON_BUTTON} aria-label={infoLabel} title={infoLabel}>
+              <Info aria-hidden="true" className="h-4 w-4" />
+            </button>
+          )}
+          content={({ closeMenu }) => (
+            <AssistantDisclosure
+              copy={copy}
+              aiState={aiState}
+              language={language}
+              ownerDisclaimer={ownerDisclaimer && ownerDisclaimer !== defaultDisclaimer ? ownerDisclaimer : ''}
+              onWithdraw={assistantDataUseConsent ? () => { changeConsent(false); closeMenu() } : undefined}
+            />
+          )}
+        />
+      </div>
+      <p className="text-sm leading-7 text-stone-600 dark:text-neutral-300">{tagline}</p>
+
+      <div className={`mt-4 rounded-2xl p-4 ${SURFACE}`}>
+        <label htmlFor="portal-assistant-question" className="sr-only">{questionLabel}</label>
+        {!assistantQuestion ? (
+          <div className="mb-3 flex flex-wrap gap-2" data-portal-assistant-examples="true">
+            {examples.map((text) => (
+              <button key={text} type="button" className={`${CHIP} ${CHIP_IDLE}`} onClick={() => fillExample(text)}>
+                {text}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <textarea
+          ref={questionRef}
+          id="portal-assistant-question"
+          name="portal_assistant_question"
+          autoComplete="off"
+          rows={2}
+          maxLength={questionCharLimit}
+          value={assistantQuestion}
+          onChange={(event) => setAssistantQuestion(event.target.value)}
+          placeholder={questionLabel}
+          className={`block max-h-48 min-h-[4.5rem] w-full resize-none overflow-y-auto rounded-xl px-3.5 py-2.5 text-sm leading-7 ${FIELD}`}
+        />
+        {assistantQuestion.length > ASSISTANT_COUNTER_FROM ? (
+          <div className="mt-1 text-right text-xs leading-6 text-stone-600 dark:text-neutral-300">{assistantQuestion.length}/{questionCharLimit}</div>
+        ) : null}
+
+        {detailsOpen ? (
+          <div className="mt-3 space-y-3" data-portal-assistant-details="true">
             <div>
-              <label htmlFor="portal-assistant-question" className={labelClass}>{copy('assistantQuestion', 'What would you like help finding?', 'តើអ្នកចង់ឲ្យជួយរកអ្វី?')}</label>
-              <textarea id="portal-assistant-question" name="portal_assistant_question" autoComplete="off" className="input mt-1 resize-none" rows={4} maxLength={questionCharLimit} value={assistantQuestion} onChange={(event) => setAssistantQuestion(event.target.value)} placeholder={copy('assistantQuestionPlaceholder', 'Example: I have oily acne-prone skin and want a gentle daily sunscreen.', 'ឧទាហរណ៍៖ ខ្ញុំមានស្បែកខ្លាញ់ងាយកើតមុន ហើយចង់បានឡេការពារកម្ដៅថ្ងៃប្រើរាល់ថ្ងៃដែលទន់ភ្លន់។')} />
-              <div className="mt-1 text-right text-xs text-slate-500 dark:text-neutral-400">{assistantQuestion.length}/{questionCharLimit}</div>
-            </div>
-
-            <details className="group mt-2 rounded-2xl border border-slate-200 dark:border-neutral-700" data-portal-assistant-details="true">
-              <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-4 text-sm font-medium text-slate-700 dark:text-neutral-200">
-                {copy('assistantDetails', 'Skin type, brand and goal (optional)', 'ប្រភេទស្បែក ម៉ាក និងគោលបំណង (មិនបង្ខំ)')}
-                <ChevronDown aria-hidden="true" className={`h-4 w-4 shrink-0 transition-transform group-open:rotate-180 motion-reduce:transition-none ${BRASS_TEXT}`} />
-              </summary>
-              <div className="space-y-3 px-4 pb-4 pt-1">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <label htmlFor="portal-assistant-brand" className={labelClass}>{copy('assistantBrand', 'Preferred brand', 'ម៉ាកដែលចូលចិត្ត')}</label>
-                    <AppSelect
-                      id="portal-assistant-brand"
-                      name="portal_assistant_brand"
-                      value={assistantProfile.brand}
-                      onChange={(nextValue) => setAssistantProfile((current) => ({ ...current, brand: nextValue }))}
-                      ariaLabel={copy('assistantBrand', 'Preferred brand', 'ម៉ាកដែលចូលចិត្ត')}
-                      className="mt-1 w-full"
-                      buttonClassName="h-10 w-full"
-                      menuClassName="min-w-[12rem]"
-                      options={toAssistantSelectOptions(brands, copy('all', 'All'))}
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="portal-assistant-skin-type" className={labelClass}>{copy('assistantSkinType', 'Skin type', 'ប្រភេទស្បែក')}</label>
-                    <AppSelect
-                      id="portal-assistant-skin-type"
-                      name="portal_assistant_skin_type"
-                      value={assistantProfile.skinType}
-                      onChange={(nextValue) => setAssistantProfile((current) => ({ ...current, skinType: nextValue }))}
-                      ariaLabel={copy('assistantSkinType', 'Skin type', 'ប្រភេទស្បែក')}
-                      className="mt-1 w-full"
-                      buttonClassName="h-10 w-full"
-                      menuClassName="min-w-[12rem]"
-                      options={[
-                        { value: '', label: copy('all', 'All') },
-                        { value: 'Dry', label: copy('skinDry', 'Dry', 'ស្ងួត') },
-                        { value: 'Oily', label: copy('skinOily', 'Oily', 'ខ្លាញ់') },
-                        { value: 'Combination', label: copy('skinCombination', 'Combination', 'ចម្រុះ') },
-                        { value: 'Sensitive', label: copy('skinSensitive', 'Sensitive', 'ងាយប្រតិកម្ម') },
-                        { value: 'Normal', label: copy('skinNormal', 'Normal', 'ធម្មតា') },
-                        { value: 'Acne-prone', label: copy('skinAcneProne', 'Acne-prone', 'ងាយកើតមុន') },
-                      ]}
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="portal-assistant-shopping-for" className={labelClass}>{copy('assistantShoppingFor', 'Shopping for', 'កំពុងរកទិញ')}</label>
-                    <AppSelect
-                      id="portal-assistant-shopping-for"
-                      name="portal_assistant_shopping_for"
-                      value={assistantProfile.shoppingFor}
-                      onChange={(nextValue) => setAssistantProfile((current) => ({ ...current, shoppingFor: nextValue }))}
-                      ariaLabel={copy('assistantShoppingFor', 'Shopping for', 'កំពុងរកទិញ')}
-                      className="mt-1 w-full"
-                      buttonClassName="h-10 w-full"
-                      menuClassName="min-w-[12rem]"
-                      options={toAssistantSelectOptions(assistantCategoryOptions, copy('all', 'All'))}
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="portal-assistant-goal" className={labelClass}>{copy('assistantGoal', 'Goal / use case', 'គោលបំណងប្រើប្រាស់')}</label>
-                    <input id="portal-assistant-goal" name="portal_assistant_goal" autoComplete="off" className="input mt-1" maxLength={180} value={assistantProfile.goal} onChange={(event) => setAssistantProfile((current) => ({ ...current, goal: event.target.value }))} placeholder={copy('assistantGoalPlaceholder', 'Daily use, brightening, long wear...', 'ប្រើរាល់ថ្ងៃ បំប៉នឲ្យភ្លឺ ឬជាប់បានយូរ...')} />
-                  </div>
-                </div>
-                <div>
-                  <label htmlFor="portal-assistant-concerns" className={labelClass}>{copy('assistantConcerns', 'Skin concerns', 'បញ្ហាស្បែក')}</label>
-                  <input id="portal-assistant-concerns" name="portal_assistant_concerns" autoComplete="off" className="input mt-1" maxLength={220} value={assistantProfile.concerns} onChange={(event) => setAssistantProfile((current) => ({ ...current, concerns: event.target.value }))} placeholder={copy('assistantConcernsPlaceholder', 'Acne, sensitivity, dark spots, dryness...', 'មុន ស្បែកងាយប្រតិកម្ម ស្នាមខ្មៅ ឬស្បែកស្ងួត...')} />
-                </div>
-              </div>
-            </details>
-
-            {assistantDataUseConsent ? (
-              <div className="mt-3 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs leading-6 text-slate-700 dark:border-neutral-700 dark:bg-neutral-800/70 dark:text-neutral-200" data-portal-assistant-consent="given">
-                <Check aria-hidden="true" className={`h-4 w-4 shrink-0 ${BRASS_TEXT}`} />
-                <span className="min-w-0 flex-1">
-                  {replaceVars(copy('assistantConsentGiven', 'You agreed to send your questions to {provider} during this visit.', 'អ្នកបានយល់ព្រមផ្ញើសំណួរទៅ {provider} ក្នុងអំឡុងពេលចូលមើលលើកនេះ។'), { provider })}
-                </span>
-                <button
-                  type="button"
-                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-slate-600 dark:text-neutral-300"
-                  aria-label={copy('assistantConsentWithdraw', 'Withdraw consent', 'ដកការយល់ព្រម')}
-                  title={copy('assistantConsentWithdraw', 'Withdraw consent', 'ដកការយល់ព្រម')}
-                  onClick={() => changeConsent(false)}
-                >
-                  <X aria-hidden="true" className="h-4 w-4" />
-                </button>
-              </div>
-            ) : (
-              <label className="mt-3 flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs leading-6 text-slate-700 dark:border-neutral-700 dark:bg-neutral-800/70 dark:text-neutral-200" data-portal-assistant-consent="ask">
-                <input
-                  type="checkbox"
-                  className="mt-1 h-4 w-4 shrink-0"
-                  checked={assistantDataUseConsent}
-                  onChange={(event) => changeConsent(event.target.checked)}
-                />
-                <span>
-                  {fillAiProviderTemplate(language === 'km' ? ASSISTANT_CONSENT_KM : ASSISTANT_CONSENT_EN, aiState, language)}
-                </span>
-              </label>
-            )}
-
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <button type="button" className="btn-primary min-h-11 text-sm" onClick={askAssistant} disabled={assistantLoading || !assistantDataUseConsent}>
-                <Send aria-hidden="true" className="mr-2 inline h-4 w-4" />
-                {assistantLoading ? copy('assistantLoading', 'Thinking...') : copy('assistantSend', 'Send', 'ផ្ញើ')}
-              </button>
-              <button
-                type="button"
-                className="btn-secondary flex min-h-11 min-w-11 items-center justify-center text-sm"
-                onClick={clearAssistantState}
-                aria-label={copy('assistantReset', 'Clear')}
-                title={copy('assistantReset', 'Clear')}
-              >
-                <RotateCcw aria-hidden="true" className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <div className="rounded-[28px] border border-amber-200 bg-amber-50 px-4 py-4 text-xs leading-6 text-amber-900 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-200">
-              {previewConfig.aiDisclaimer || copy('assistantNotice', 'AI generated, for reference only.')}
-            </div>
-
-            {/* The block above is the MERCHANT's disclaimer: editable in the
-                portal editor, and therefore possible to shorten to nothing.
-                This one is the app's own and is not editable, because the
-                three things it says are not marketing -- the shopper is
-                talking to software and not a person, their question leaves
-                the shop, and a skin or health question belongs with a
-                pharmacist or a doctor rather than a product recommender
-                (N45). Cosmetics advertising rules treat a therapeutic claim
-                as a different product class; the assistant is instructed not
-                to make one, and a reader is told what it is either way. */}
-            <p className="rounded-[28px] border border-slate-200 bg-white px-4 py-3 text-[11px] leading-6 text-slate-600 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-400">
-              {fillAiProviderTemplate(language === 'km' ? ASSISTANT_AUTOMATED_KM : ASSISTANT_AUTOMATED_EN, aiState, language)}
-            </p>
-          </div>
-        </div>
-
-        {assistantError ? <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-700/60 dark:bg-rose-900/20 dark:text-rose-200">{assistantError}</div> : null}
-
-        {assistantResponse?.summary ? (
-          <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-4 dark:border-neutral-700 dark:bg-neutral-800/80">
-            <div className="text-xs font-semibold text-slate-600 dark:text-neutral-400">{copy('assistantResults', 'Suggested matches')}</div>
-            <p className="mt-2 text-sm leading-7 text-slate-700 dark:text-neutral-300">{assistantResponse.summary}</p>
-            {/* Backend returns follow_up_questions (snake_case); the
-                camelCase followUpQuestions was pre-existing dead UI (this
-                chip row never actually rendered) since askPortalAi returns
-                the raw JSON body with no key remapping. Reading either
-                shape fixes that without needing a wider camelCase pass
-                across the AI response contract. */}
-            {(assistantResponse.followUpQuestions?.length || assistantResponse.follow_up_questions?.length) ? (
-              <div className="mt-3">
-                <div className="text-xs font-semibold text-slate-600 dark:text-neutral-400">{copy('assistantFollowUps', 'Helpful follow-up questions')}</div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {(assistantResponse.followUpQuestions || assistantResponse.follow_up_questions || []).map((question) => (
-                    <button key={question} type="button" className="min-h-11 rounded-full bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm dark:bg-neutral-900 dark:text-neutral-200" onClick={() => setAssistantQuestion(question)}>
-                      {question}
+              <div className={labelClass}>{copy('assistantSkinType', 'Skin type', 'ប្រភេទស្បែក')}</div>
+              <div className="mt-1 flex flex-wrap gap-2">
+                {skinTypes.map((option) => {
+                  const active = assistantProfile.skinType === option.value
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      aria-pressed={active}
+                      className={`${CHIP} ${active ? CHIP_ACTIVE : CHIP_IDLE}`}
+                      onClick={() => setAssistantProfile((current) => ({ ...current, skinType: active ? '' : option.value }))}
+                    >
+                      {option.label}
                     </button>
-                  ))}
-                </div>
+                  )
+                })}
               </div>
-            ) : null}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label htmlFor="portal-assistant-brand" className={labelClass}>{copy('assistantBrand', 'Preferred brand', 'ម៉ាកដែលចូលចិត្ត')}</label>
+                <AppSelect
+                  id="portal-assistant-brand"
+                  name="portal_assistant_brand"
+                  value={assistantProfile.brand}
+                  onChange={(nextValue) => setAssistantProfile((current) => ({ ...current, brand: nextValue }))}
+                  ariaLabel={copy('assistantBrand', 'Preferred brand', 'ម៉ាកដែលចូលចិត្ត')}
+                  className="mt-1 w-full"
+                  buttonClassName="h-10 w-full"
+                  menuClassName="min-w-[12rem]"
+                  options={toAssistantSelectOptions(brands, copy('all', 'All'))}
+                />
+              </div>
+              <div>
+                <label htmlFor="portal-assistant-shopping-for" className={labelClass}>{copy('assistantShoppingFor', 'Shopping for', 'កំពុងរកទិញ')}</label>
+                <AppSelect
+                  id="portal-assistant-shopping-for"
+                  name="portal_assistant_shopping_for"
+                  value={assistantProfile.shoppingFor}
+                  onChange={(nextValue) => setAssistantProfile((current) => ({ ...current, shoppingFor: nextValue }))}
+                  ariaLabel={copy('assistantShoppingFor', 'Shopping for', 'កំពុងរកទិញ')}
+                  className="mt-1 w-full"
+                  buttonClassName="h-10 w-full"
+                  menuClassName="min-w-[12rem]"
+                  options={toAssistantSelectOptions(assistantCategoryOptions, copy('all', 'All'))}
+                />
+              </div>
+              <div>
+                <label htmlFor="portal-assistant-goal" className={labelClass}>{copy('assistantGoal', 'Goal / use case', 'គោលដៅ / ការប្រើប្រាស់')}</label>
+                <input id="portal-assistant-goal" name="portal_assistant_goal" autoComplete="off" className={`mt-1 h-10 w-full rounded-xl px-3 text-sm ${FIELD}`} maxLength={180} value={assistantProfile.goal} onChange={(event) => setAssistantProfile((current) => ({ ...current, goal: event.target.value }))} placeholder={copy('assistantGoalPlaceholder', 'Daily use, brightening, long wear...', 'ប្រើរាល់ថ្ងៃ ធ្វើឲ្យស្បែកភ្លឺ ឬជាប់បានយូរ...')} />
+              </div>
+              <div>
+                <label htmlFor="portal-assistant-concerns" className={labelClass}>{copy('assistantConcerns', 'Skin concerns', 'បញ្ហាស្បែក')}</label>
+                <input id="portal-assistant-concerns" name="portal_assistant_concerns" autoComplete="off" className={`mt-1 h-10 w-full rounded-xl px-3 text-sm ${FIELD}`} maxLength={220} value={assistantProfile.concerns} onChange={(event) => setAssistantProfile((current) => ({ ...current, concerns: event.target.value }))} placeholder={copy('assistantConcernsPlaceholder', 'Acne, sensitivity, dark spots, dryness...', 'មុន ស្បែកងាយប្រតិកម្ម ស្នាមខ្មៅ ឬស្បែកស្ងួត...')} />
+              </div>
+            </div>
           </div>
         ) : null}
 
-        {assistantResponse?.recommendations?.length ? (
-          <div className="space-y-3" data-portal-assistant-products="true">
-            {assistantResponse.recommendations.map((item) => {
-              const servedPrice = previewConfig.showPrices === true
-                ? (previewConfig.priceDisplay === 'KHR' ? item.selling_price_khr : item.selling_price_usd)
-                : undefined
-              const priceLabel = typeof servedPrice === 'number' && Number.isFinite(servedPrice)
-                ? (previewConfig.priceDisplay === 'KHR' ? `${servedPrice.toLocaleString()}៛` : `$${normalizePriceValue(servedPrice).toFixed(2)}`)
-                : ''
-              const productId = Number(item.product_id)
-              const canOpen = Boolean(openProductById) && Number.isFinite(productId)
-              const body = (
-                <>
-                  {item.image_path ? (
-                    <img src={item.image_path} alt={item.name} className="h-16 w-16 shrink-0 rounded-2xl object-cover" />
-                  ) : (
-                    <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 dark:bg-neutral-800 dark:text-neutral-400" aria-hidden="true">
-                      <ShoppingBag className="h-5 w-5" />
-                    </div>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div translate="no" className="notranslate text-sm font-semibold text-slate-900 dark:text-neutral-100">{item.name}</div>
-                      <span translate={item.brand ? 'no' : undefined} className={`${item.brand ? 'notranslate ' : ''}rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600 dark:bg-neutral-800 dark:text-neutral-200`}>{item.brand || copy('noBrand', 'No brand', 'គ្មានម៉ាក')}</span>
-                    </div>
-                    <div className="mt-1 text-xs text-slate-500 dark:text-neutral-400">
-                      {item.category || copy('noCategory', 'No category', 'គ្មានប្រភេទ')}
-                      {priceLabel ? (
-                        <>
-                          {' | '}
-                          <span translate="no" className="notranslate">{priceLabel}</span>
-                        </>
-                      ) : null}
-                    </div>
-                    {item.reason ? <div className="mt-2 text-sm text-slate-600 dark:text-neutral-300">{item.reason}</div> : null}
-                    {item.fit_summary ? <div className="mt-2 text-sm text-slate-700 dark:text-neutral-300"><span className="font-semibold text-slate-900 dark:text-neutral-100">{copy('assistantWhy', 'Why this match')}:</span> {item.fit_summary}</div> : null}
-                  </div>
-                  {canOpen ? <ChevronRight aria-hidden="true" className={`mt-1 h-5 w-5 shrink-0 ${BRASS_TEXT}`} /> : null}
-                </>
-              )
-              return (
-                <article key={item.product_id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900/90">
+        {consentPanel && !assistantDataUseConsent ? <AssistantConsentPanel copy={copy} aiState={aiState} language={language} onAgree={agreeAndSend} /> : null}
+
+        <div className="mt-3 flex items-center gap-1">
+          <button
+            type="button"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-full px-3 text-sm font-medium text-stone-700 transition hover:bg-stone-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+            aria-expanded={detailsOpen}
+            onClick={() => setDetailsOpen((open) => !open)}
+          >
+            <SlidersHorizontal aria-hidden="true" className="h-4 w-4" />
+            {detailsLabel}
+          </button>
+          <button
+            type="button"
+            className={ICON_BUTTON}
+            onClick={clearAssistantState}
+            aria-label={copy('assistantReset', 'Clear')}
+            title={copy('assistantReset', 'Clear')}
+          >
+            <RotateCcw aria-hidden="true" className="h-4 w-4" />
+          </button>
+          <button type="button" className={`${CHARCOAL_BUTTON} ml-auto`} onClick={send} disabled={assistantLoading}>
+            <Send aria-hidden="true" className="h-4 w-4" />
+            {assistantLoading ? copy('assistantLoading', 'Thinking...') : copy('assistantSend', 'Send', 'ផ្ញើ')}
+          </button>
+        </div>
+      </div>
+
+      {assistantError ? <div role="alert" className="mt-4 rounded-2xl border border-rose-400 bg-white px-4 py-3 text-sm leading-7 text-rose-700 dark:border-rose-500 dark:bg-neutral-900 dark:text-rose-300">{assistantError}</div> : null}
+
+      {assistantResponse?.summary ? (
+        <div className={`mt-4 rounded-2xl p-4 ${SURFACE}`}>
+          <div className="text-xs font-semibold leading-6 text-stone-600 dark:text-neutral-300">{copy('assistantResults', 'Suggested matches')}</div>
+          <p className="mt-1 text-sm leading-7 text-stone-700 dark:text-neutral-300">{assistantResponse.summary}</p>
+          {/* Backend returns follow_up_questions (snake_case); the camelCase followUpQuestions was
+              pre-existing dead UI since askPortalAi returns the raw JSON body with no key remapping.
+              Reading either shape fixes that without a wider camelCase pass across the contract. */}
+          {(assistantResponse.followUpQuestions?.length || assistantResponse.follow_up_questions?.length) ? (
+            <div className="mt-3">
+              <div className="text-xs font-semibold leading-6 text-stone-600 dark:text-neutral-300">{copy('assistantFollowUps', 'Helpful follow-up questions')}</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {(assistantResponse.followUpQuestions || assistantResponse.follow_up_questions || []).map((question) => (
+                  <button key={question} type="button" className={`${CHIP} ${CHIP_IDLE}`} onClick={() => setAssistantQuestion(question)}>
+                    {question}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {assistantResponse?.recommendations?.length ? (
+        <div className="mt-4 space-y-3" data-portal-assistant-products="true">
+          {assistantResponse.recommendations.map((item) => {
+            const servedPrice = previewConfig.showPrices === true
+              ? (previewConfig.priceDisplay === 'KHR' ? item.selling_price_khr : item.selling_price_usd)
+              : undefined
+            const priceLabel = typeof servedPrice === 'number' && Number.isFinite(servedPrice)
+              ? (previewConfig.priceDisplay === 'KHR' ? `${servedPrice.toLocaleString()}៛` : `$${normalizePriceValue(servedPrice).toFixed(2)}`)
+              : ''
+            const productId = Number(item.product_id)
+            const canOpen = Boolean(openProductById) && Number.isFinite(productId)
+            const addKey = String(item.product_id)
+            const meta = [portalPrimaryValue(item.brand), portalPrimaryValue(item.category)].filter(Boolean).join(' · ')
+            const { heading, shopLine } = assistantRowNames(item, catalogProducts)
+            const open = () => openProductById?.(productId, item.name)
+            return (
+              <article key={item.product_id} className={`rounded-2xl p-3 ${SURFACE}`}>
+                <div className="flex items-center gap-3">
                   {canOpen ? (
+                    <button type="button" className="shrink-0 rounded-xl" onClick={open} aria-label={`${copy('assistantViewProduct', 'View product', 'មើលផលិតផល')}: ${heading}`}>
+                      <AssistantThumb item={item} />
+                    </button>
+                  ) : <AssistantThumb item={item} />}
+                  <div className="min-w-0 flex-1">
+                    {canOpen ? (
+                      <button type="button" translate="no" aria-label={heading} className="notranslate block max-w-full break-words text-left text-sm font-semibold leading-6 text-[#23201b] dark:text-neutral-100" onClick={open}>{heading}</button>
+                    ) : <div translate="no" className="notranslate break-words text-sm font-semibold leading-6 text-[#23201b] dark:text-neutral-100">{heading}</div>}
+                    {shopLine ? <div translate="no" className="notranslate break-words text-xs leading-5 text-stone-600 dark:text-neutral-300">{shopLine}</div> : null}
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-6 text-stone-600 dark:text-neutral-300">
+                      {meta ? <span translate="no" className="notranslate">{meta}</span> : null}
+                      {priceLabel ? <span translate="no" className="notranslate">{priceLabel}</span> : null}
+                      <AssistantStockBadge status={item.stock_status} copy={copy} />
+                    </div>
+                  </div>
+                  {onAddRecommendation && Number.isFinite(productId) ? (
                     <button
                       type="button"
-                      className="flex w-full items-start gap-3 px-4 py-4 text-left"
-                      aria-label={`${copy('assistantViewProduct', 'View product', 'មើលផលិតផល')}: ${item.name}`}
-                      onClick={() => openProductById?.(productId, item.name)}
+                      className={`${CHARCOAL_BUTTON} shrink-0 px-4`}
+                      disabled={item.stock_status === 'out_of_stock'}
+                      onClick={() => {
+                        onAddRecommendation({ id: productId, name: heading, ...(shopLine ? { shopLine } : {}), category: item.category || '', brand: item.brand || '' })
+                        setAdded((current) => new Set(current).add(addKey))
+                      }}
                     >
-                      {body}
+                      {added.has(addKey) ? <Check aria-hidden="true" className="h-4 w-4" /> : <Plus aria-hidden="true" className="h-4 w-4" />}
+                      {added.has(addKey) ? copy('inList', 'In list', 'ក្នុងបញ្ជី') : copy('addToList', 'Add', 'បន្ថែម')}
                     </button>
-                  ) : (
-                    <div className="flex items-start gap-3 px-4 py-4">{body}</div>
-                  )}
-                </article>
-              )
-            })}
-          </div>
-        ) : null}
-      </div>
-    </SectionShell>
+                  ) : null}
+                </div>
+                {item.reason ? <p className="mt-2 text-sm leading-7 text-stone-600 dark:text-neutral-300">{item.reason}</p> : null}
+                {item.fit_summary ? <p className="mt-1 text-sm leading-7 text-stone-700 dark:text-neutral-300"><span className="font-semibold text-[#23201b] dark:text-neutral-100">{copy('assistantWhy', 'Why this match')}:</span> {item.fit_summary}</p> : null}
+              </article>
+            )
+          })}
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
+function AssistantThumb({ item }: { item: AssistantRecommendation }) {
+  return item.image_path ? (
+    <img src={item.image_path} alt="" className="h-14 w-14 shrink-0 rounded-xl border border-stone-300 object-cover dark:border-neutral-700" />
+  ) : (
+    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-stone-300 text-stone-600 dark:border-neutral-700 dark:text-neutral-300" aria-hidden="true">
+      <ShoppingBag className="h-5 w-5" />
+    </div>
   )
 }
 

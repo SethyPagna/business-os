@@ -11,7 +11,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseProductDescription, resolveOfficialProductName } from '../src/components/catalog/productDetailSections.ts'
+import { parseProductDescription, resolveOfficialProductName, resolveProductNames } from '../src/components/catalog/productDetailSections.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const read = (relative: string) => fs.readFileSync(path.join(here, '..', relative), 'utf8').replace(/\r\n/g, '\n')
@@ -39,18 +39,22 @@ assert.equal(resolveOfficialProductName('', 'Night Cream'), '')
 assert.equal(resolveOfficialProductName('   ', 'Night Cream'), '')
 assert.equal(resolveOfficialProductName('---', 'Night Cream'), '', 'punctuation alone is not a name')
 
-// 4. The flyout renders the row only from the resolver, and every
+// 4. The heading: the official name when it differs, the shop name otherwise (the helper above
+//    never falls back; this is where the fallback lives). The shop name is the second line only
+//    when it is not the heading.
+const differs = resolveProductNames({ name: 'A&F Authentic EDT 100ml', description: 'Official Product Name:\nAbercrombie & Fitch Authentic Man Eau de Toilette 100 ml' })
+assert.deepEqual(differs, { heading: 'Abercrombie & Fitch Authentic Man Eau de Toilette 100 ml', shopLine: 'A&F Authentic EDT 100ml' })
+const equal = resolveProductNames({ name: 'Night Cream', description: 'Official Product Name:\nNIGHT  cream.' })
+assert.deepEqual(equal, { heading: 'Night Cream', shopLine: '' }, 'a copy of the shop name is no official name')
+assert.deepEqual(resolveProductNames({ name: 'Night Cream', description: 'Official Product Name:\n' }), { heading: 'Night Cream', shopLine: '' }, 'empty official line')
+assert.deepEqual(resolveProductNames({ name: 'Night Cream', description: 'Introduction:\nA rich cream.' }), { heading: 'Night Cream', shopLine: '' }, 'no official label')
+assert.deepEqual(resolveProductNames({ name: 'Night Cream' }), { heading: 'Night Cream', shopLine: '' }, 'no description')
+assert.deepEqual(resolveProductNames({ name: '  Night Cream ', description: null }), { heading: 'Night Cream', shopLine: '' })
+assert.deepEqual(resolveProductNames({ name: 'សេរ៉ូម', description: 'official product name: សេរ៉ូមភ្លឺ' }), { heading: 'សេរ៉ូមភ្លឺ', shopLine: 'សេរ៉ូម' }, 'case-insensitive label, Khmer name')
+
+// 5. The flyout renders the heading from the one function, the shop line only when it exists, and every
 //    optional row is gated on having a value.
 const flyout = read('src/components/catalog/ProductDetailFlyout.tsx')
-assert.match(flyout, /const officialName = resolveOfficialProductName\(parsed\.officialName, product\.name\)/)
-// D3 (2026-10-19): the official name is the small secondary line under the title, not a body row.
-assert.match(flyout, /\{officialName \? \(\s*<div className="mt-0\.5[^"]*">\s*<span>\{copy\('productOfficialName'/)
-assert.doesNotMatch(flyout, /parsed\.officialName \|\||officialName \|\| product\.name|product\.name \|\| parsed\.officialName/, 'no fallback path to the shop name')
-assert.match(flyout, /\{parsed\.intro \? \(\s*<DetailField label=\{copy\('productIntroduction'/)
-assert.match(flyout, /\{categoryValues\.length \? \(\s*<DetailField label=\{copy\('productCategory'/)
-assert.match(flyout, /\{brandValues\.length \? \(\s*<DetailField label=\{copy\('productBrand'/)
-const block = flyout.slice(flyout.indexOf('function DetailSectionBlock'), flyout.indexOf('const FOCUSABLE_SELECTOR'))
-assert.match(block, /if \(!items\.length\) return null/, 'an empty Features / Who-for / Ingredients section renders nothing')
-assert.doesNotMatch(flyout, /productDetailNotProvided|Not provided yet/, 'no "Not provided yet" text left on the storefront detail')
-
-console.log('PASS official name never repeats the shop name and empty detail rows are hidden')
+assert.match(flyout, /const \{ heading: productHeading, shopLine \} = resolveProductNames\(product\)/)
+assert.match(flyout, /\{shopLine \? \(\s*<div className=\{`mt-0\.5[^\n]*\n\s*<span>\{copy\('productInStore', 'In store', 'ក្នុងហាង'\)\}/)
+assert.doesNotMatch(flyout, /officialName/, 'the sheet no longer prints an "Official name" row')

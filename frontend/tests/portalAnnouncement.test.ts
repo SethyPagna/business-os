@@ -204,8 +204,13 @@ run('structure: the surface draws the bar above the padded page, drops the dupli
   assert.match(surface, /data-\[portal-announcement-shown=true\]:pt-3 sm:data-\[portal-announcement-shown=true\]:pt-4/, 'the bar already clears the notch, so the page below does not pad for it again')
   assert.match(surface, /onHeight=\{publicView \? onAnnouncementHeight : undefined\}/, 'the admin preview never reports a height')
   const page = read('src/components/catalog/PublicCatalogPage.tsx')
-  assert.match(page, /announcement=\{announcement\}\s+onDismissAnnouncement=\{dismissAnnouncement\}\s+onAnnouncementHeight=\{setAnnouncementHeight\}/)
-  assert.match(page, /style=\{announcementHeight \? \{ top: `calc\(0\.75rem \+ \$\{announcementHeight\}px \+ env\(safe-area-inset-top\)\)` \} : undefined\}/, 'the install notice sits below the bar')
+  assert.match(page, /announcement=\{announcement\}\s+onDismissAnnouncement=\{dismissAnnouncement\}\s/)
+  // The install notice no longer shares the top of the page with the bar: it is pinned to the bottom, so it needs no height from the bar
+  // and never lies on the one-row header (Contact, List, Account, Language).
+  assert.doesNotMatch(page, /announcementHeight|onAnnouncementHeight/, 'the page does not track the bar height for the install notice any more')
+  assert.match(page, /data-portal-install-notice=""\s+className="pointer-events-none fixed inset-x-2 bottom-\[calc\(0\.75rem\+env\(safe-area-inset-bottom\)\)\] z-40 flex justify-center sm:inset-x-auto sm:left-4 sm:w-\[22rem\] sm:justify-start"/, 'the install notice is pinned to the bottom, left corner from sm')
+  assert.match(page, /className="relative pb-\[var\(--install-band-clearance,0px\)\]"/, 'the page pads by what the notice covers, so the footer links scroll clear of it')
+  assert.match(page, /max-\[639px\]:bottom-\[max\(calc\(1\.25rem\+env\(safe-area-inset-bottom\)\),calc\(var\(--install-band-clearance,0px\)\+0\.5rem\)\)\]/, 'on a phone the List button rides above the notice')
   const editorPage = read('src/components/catalog/CatalogPage.tsx')
   assert.match(editorPage, /announcement=\{resolvePortalAnnouncement\(displayConfig, language, '', \{ ignoreDays: true \}\)\}/)
   assert.doesNotMatch(editorPage, /onDismissAnnouncement/, 'the preview is not closable')

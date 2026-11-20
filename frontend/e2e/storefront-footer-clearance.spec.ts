@@ -3,8 +3,8 @@ import type { Page } from '@playwright/test'
 import { STOREFRONT_ORIGIN } from './support/harness'
 
 /**
- * storefront-footer-clearance.spec.ts -- at the end of the page no floating button (scroll, list,
- * contact) covers a footer link: every policy link is on screen, clear of them, and takes the tap.
+ * storefront-footer-clearance.spec.ts -- at the end of the page no floating button (scroll, list)
+ * covers a footer link: every policy link is on screen, clear of them, and takes the tap.
  *
  * CATCHES: a footer that ends flush with the viewport bottom, so the fixed bottom-left scroll
  * buttons (and the bottom-right list/contact buttons) cover the policy links at 360 and 390 px.
@@ -22,7 +22,8 @@ type FooterReport = {
 
 // One measurement, taken only once the page sits at its end with the scroll buttons faded in;
 // a page still growing (late sections, fonts) reports settled: false and is measured again.
-// Floating buttons are the fixed ones in the lower half; the dismissible install notice sits at the top.
+// Floating buttons are the fixed ones in the lower half. The dismissible install notice (iOS Safari) is one of them since it moved to the
+// bottom: the page pads by what the notice covers (--install-band-clearance), so at the page end the footer links sit above it.
 function measureFooterAtPageEnd(page: Page): Promise<FooterReport> {
   return page.evaluate(async () => {
     const FADE_MS = 300

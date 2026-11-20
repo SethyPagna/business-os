@@ -16,6 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { buildSync } from 'esbuild'
+import { getPortalLanguageText } from '../src/components/catalog/portalLanguagePacks.ts'
 import {
   LEGAL_PAGE_SECTIONS,
   PORTAL_LEGAL_EN,
@@ -64,14 +65,20 @@ test('Terms carry a Returns section: 7 days, unopened, with the receipt (EN + KM
 test('minimum age 16 is stated in the consent wording and in the Children section (EN + KM)', () => {
   for (const [lang, pack] of [['en', PORTAL_LEGAL_EN], ['km', PORTAL_LEGAL_KM]] as const) {
     const sixteen = lang === 'en' ? /\b16\b/ : /១៦/
-    for (const key of ['portal_legal_consent_label', 'portal_legal_consent_required', 'portal_legal_consent_required_signin', 'portal_legal_privacy_children_b', 'portal_legal_terms_account_b']) {
+    for (const key of ['portal_legal_consent_required', 'portal_legal_consent_required_signin', 'portal_legal_privacy_children_b', 'portal_legal_terms_account_b']) {
       assert.match(pack[key], sixteen, `${lang} ${key} does not state the minimum age`)
     }
   }
-  // The inline fallbacks the form renders before any pack loads match the packs.
+  // The one line the form renders states the age in both languages, and its two {terms}/{privacy} slots are the policy links.
   const field = read('../src/components/catalog/legal/SignupConsentField.tsx')
-  assert.ok(field.includes(`'${PORTAL_LEGAL_EN.portal_legal_consent_label}'`), 'inline EN consent label drifted from the pack')
-  assert.ok(field.includes(`'${PORTAL_LEGAL_KM.portal_legal_consent_label}'`), 'inline KM consent label drifted from the pack')
+  const lineEn = /CONSENT_LINE_EN = '([^']+)'/.exec(field)?.[1] || ''
+  const lineKm = /CONSENT_LINE_KM = '([^']+)'/.exec(field)?.[1] || ''
+  assert.match(lineEn, /\b16\b/, 'the inline EN consent line does not state the minimum age')
+  assert.match(lineKm, /១៦/, 'the inline KM consent line does not state the minimum age')
+  // The line the form renders is the pack's portalConsentLine (it replaced portal_legal_consent_label): same age, same two slots.
+  assert.match(getPortalLanguageText('km', 'portalConsentLine'), /១៦/, 'the packed KM consent line does not state the minimum age')
+  assert.equal(getPortalLanguageText('km', 'portalConsentLine'), lineKm, 'the packed KM consent line and the call-site fallback differ')
+  for (const line of [lineEn, lineKm]) assert.ok(line.includes('{terms}') && line.includes('{privacy}'), 'the consent line must link both policies')
 })
 
 test('plain factual copy: no welcome, effort or gladness sentences, no hedge about banners', () => {

@@ -9,6 +9,7 @@ import Check from 'lucide-react/dist/esm/icons/check.js'
 import LogOut from 'lucide-react/dist/esm/icons/log-out.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import SignupConsentField, { signupConsentFields } from './SignupConsentField.tsx'
+import { PORTAL_PRIMARY_BUTTON } from '../portalButtons.ts'
 
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 
@@ -72,7 +73,7 @@ export default function ConsentRenewalPrompt({
             type="button"
             onClick={agree}
             disabled={busy}
-            className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-white dark:text-slate-900"
+            className={`${PORTAL_PRIMARY_BUTTON} disabled:opacity-60`}
           >
             <Check className="h-4 w-4" />
             {copy('portal_legal_renew_agree', 'Agree', 'យល់ព្រម')}

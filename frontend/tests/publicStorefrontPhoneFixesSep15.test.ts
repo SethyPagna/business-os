@@ -119,7 +119,7 @@ check('1b the alpha rail is exempt from the coarse-pointer 44px aria-label floor
   )
 })
 
-check('1c the header social/account icon rows are exempt from the same floor', () => {
+check('1c the header action row is exempt from the same floor', () => {
   // CATCHES: the header's social-links and wishlist/account/language/theme
   // rows intentionally shrink to h-8/h-9 (32/36px) below `sm` so they fit on
   // one row (check 2) -- every icon in them carries an aria-label too, so
@@ -127,8 +127,8 @@ check('1c the header social/account icon rows are exempt from the same floor', (
   // width and reopens the same overflow the nowrap fix closed.
   assert.equal(
     (catalogPreviewSurface.match(/data-portal-header-icons=""/g) || []).length,
-    2,
-    'BOTH icon rows (social links and wishlist/account/language/theme) must carry the exemption hook',
+    1,
+    'the one action row (contact, saved, list, account, language, theme) must carry the exemption hook',
   )
   assert.match(coarsePointerBlock, /\[data-portal-header-icons\] a\[aria-label\]/, 'the header-icon exemption must live inside the SAME pointer:coarse block as the 44px floor')
   assert.match(
@@ -143,21 +143,14 @@ check('1c the header social/account icon rows are exempt from the same floor', (
 check('2 the header icon rows never wrap on a phone', () => {
   // CATCHES `flex-wrap` splitting Facebook/Instagram from Telegram (or
   // wishlist/account from language/theme) onto a second row at 320-375px.
-  assert.ok(!/flex min-w-0 flex-wrap items-center/.test(catalogPreviewSurface), 'the social-links row must not wrap')
-  assert.ok(!/flex flex-wrap items-center justify-end/.test(catalogPreviewSurface), 'the account-side row must not wrap')
-  // P11-9 (2026-09-18) added `row-start-2 ... sm:row-start-auto` to both rows
-  // (the business name now leads on the base grid) -- nowrap/gap survive it.
-  assert.match(catalogPreviewSurface, /row-start-2 flex min-w-0 flex-nowrap items-center gap-0\.5 sm:row-start-auto sm:gap-1/, 'social links: nowrap + shrunk gap below sm')
-  assert.match(catalogPreviewSurface, /row-start-2 flex flex-nowrap items-center justify-end gap-0\.5 sm:row-start-auto sm:gap-1/, 'account-side icons: nowrap + shrunk gap below sm')
-  // Every icon button in both rows shrinks one size below `sm` rather than
-  // wrapping -- catches a partial fix that stops wrapping but overflows the
-  // header instead.
-  // P-public-11 (owner, 2026-09-25: 40px touch targets at 360/390): the icons
-  // are 40px TALL on a phone; width stays one size down (32px below 360,
-  // 36px from 360) because 4 social + 4 account icons at 40px wide do not fit
-  // one 360px row, and wrapping them is what this check exists to prevent.
-  const iconButtonCount = (catalogPreviewSurface.match(/inline-flex h-10 w-8 min-\[360px\]:w-9 shrink-0 items-center justify-center rounded-full[^"`]*sm:h-9 sm:w-9/g) || []).length
-  assert.ok(iconButtonCount >= 4, `expected at least 4 shrink-below-sm icon buttons, found ${iconButtonCount}`)
+  assert.ok(!/flex flex-wrap items-center justify-end/.test(catalogPreviewSurface), 'the action row must not wrap')
+  assert.match(catalogPreviewSurface, /data-portal-header-icons="" className="flex shrink-0 flex-nowrap items-center justify-end gap-0 sm:gap-1"/, 'actions: nowrap + no gap below sm, never shrunk themselves')
+  // Six actions share the row with the name. They are 44 px square on a phone
+  // (the gap between them closed to make room) and 40 px from sm up.
+  const iconClass = /const HEADER_ICON_CLASS = '(inline-flex h-11 w-11 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-full[^']*)'/.exec(catalogPreviewSurface)
+  assert.ok(iconClass, 'the shared header button class: 44 px square on a phone, 40 px from sm')
+  const used = (catalogPreviewSurface.match(/HEADER_ICON_CLASS/g) || []).length
+  assert.ok(used >= 5, `expected the shared class on every header button, found ${used - 1} users`)
   assert.doesNotMatch(catalogPreviewSurface, /inline-flex h-8 w-8 shrink-0/, 'a 32px-tall header icon is back')
 })
 
@@ -168,15 +161,14 @@ check('2 the header icon rows never wrap on a phone', () => {
 // (PortalContactFloat) shown from the first paint, each opening its chat directly, so there is no stub to expand
 // and no minimize control. What this check still guards: no remembered state, no overlaid or hover-gated control,
 // 44px targets, and the retired pieces staying retired.
-check('3 the contact buttons are always shown, open the chat directly, and have no minimize stub', () => {
+check('3 Contact is one header button that opens a menu: no floating buttons, no minimize stub', () => {
   assert.doesNotMatch(publicCatalogPage, /contactMinimized|setContactMinimized/, 'the page keeps no minimized state')
   assert.doesNotMatch(publicCatalogPage, /CONTACT_MINIMIZED_STORAGE_KEY/, 'no remembered state can bring a stub back')
-  assert.match(publicCatalogPage, /<PortalContactFloat channels=\{contactChannels\} copy=\{copy\} \/>/, 'the float is the page contact control')
-  const floatSource = portalSocialRow.slice(portalSocialRow.indexOf('export function PortalContactFloat'), portalSocialRow.indexOf('/** Handles, numbers and domains stay Latin'))
-  assert.match(floatSource, /flex h-11 w-11 shrink-0 items-center justify-center rounded-full/, 'each button is a 44px touch target')
-  assert.doesNotMatch(floatSource, /-right-1\.5 -top-1\.5/, 'no control overlaps a button corner')
-  assert.doesNotMatch(floatSource, /opacity-0.*group-hover:opacity-100/, 'no control is hover-gated invisible by default')
-  assert.doesNotMatch(floatSource, /onClick/, 'a button is a plain link to the chat, not a handler that opens something else')
+  assert.doesNotMatch(publicCatalogPage, /PortalContactFloat/, 'the floating chat buttons are gone')
+  assert.doesNotMatch(portalSocialRow, /PortalContactFloat|data-portal-contact-float/, 'and so is their component')
+  assert.match(catalogPreviewSurface, /data-portal-contact-trigger=""/, 'the header Contact button is the one contact control')
+  assert.match(catalogPreviewSurface, /HEADER_CONTACT_CLASS = `inline-flex h-11 w-11 sm:h-10/, 'a 44 px target, icon alone on a phone')
+  assert.match(catalogPreviewSurface, /<span className="hidden sm:inline">\{copy\('contactButton', 'Contact'/, 'the word Contact shows from sm up')
 })
 
 // P-public-5: the minimized icon IS the contact button (one tap expands and
@@ -267,23 +259,26 @@ check('5 the storefront mounts the shared install band, not a duplicate implemen
   assert.match(publicCatalogPage, /const offersShopInstall = !isAdminHostname\(\)\r?\n/, 'the shop install offer is keyed on the host')
   assert.match(
     publicCatalogPage,
-    new RegExp(String.raw`const installBand = offersShopInstall \? \(\s*<div\s+className="pointer-events-none fixed [^"]*"(?:\s+style=\{announcementHeight \? \{ top: [\x60][^\x60]*[\x60] \} : undefined\})?\s*>\s*<InstallPromptBand ${SHOP_TRANSLATE} \/>\s*<\/div>\s*\) : null\r?\n`),
+    new RegExp(String.raw`const installBand = offersShopInstall \? \(\s*<div\s+data-portal-install-notice=""\s+className="pointer-events-none fixed [^"]*"\s*>\s*<InstallPromptBand ${SHOP_TRANSLATE} \/>\s*<\/div>\s*\) : null\r?\n`),
     'the band renders only when the shop offers the install, through the storefront copy()',
   )
   assert.equal((publicCatalogPage.match(/<InstallPromptBand /g) || []).length, 1, 'no second, ungated band')
   assert.match(publicCatalogPage, /\{installBand\}/, 'the band must actually be mounted in the render tree')
 })
 
-check('5 the Account drawer header offers the install icon next to Close, on the shop host only', () => {
+check('5 the Account sheet offers the install icon next to Close, on the shop host only', () => {
   assert.match(publicCatalogPage, /import InstallAppButton from '\.\.\/install\/InstallAppButton\.tsx'/, 'the button lives under components/install, outside the app-shared chunk')
   const drawerStart = publicCatalogPage.indexOf('const accountDrawer = accountOpen ? (')
   assert.ok(drawerStart > 0, 'account drawer moved')
   const header = publicCatalogPage.slice(drawerStart, publicCatalogPage.indexOf('<CatalogAccountSection', drawerStart))
+  // The sheet draws its own Close in the corner and places `corner` actions right before it.
   assert.match(
     header,
-    new RegExp(String.raw`\{offersShopInstall \? \(\s*<InstallAppButton ${SHOP_TRANSLATE} className=\{accountDrawerIconButtonClass\} \/>\s*\) : null\}\s*<button\s+type="button"\s+className=\{accountDrawerIconButtonClass\}\s+onClick=\{\(\) => setAccountOpen\(false\)\}`),
-    'the install icon sits right before Close, styled like it, and only on the shop host',
+    new RegExp(String.raw`<PortalSheet[^>]*onClose=\{\(\) => setAccountOpen\(false\)\}\s+corner=\{offersShopInstall \? <InstallAppButton ${SHOP_TRANSLATE} className=\{accountDrawerIconButtonClass\} \/> : null\}`),
+    'the install icon rides in the sheet corner, styled like Close, and only on the shop host',
   )
+  const sheet = fs.readFileSync(new URL('../src/components/catalog/PortalSheet.tsx', import.meta.url), 'utf8')
+  assert.match(sheet, /\{corner\}\s*<button\s+type="button"[\s\S]*?onClick=\{onClose\}/, 'the corner actions sit right before Close')
   assert.equal((publicCatalogPage.match(/<InstallAppButton /g) || []).length, 1, 'the drawer header is the one shop pull entry')
 })
 

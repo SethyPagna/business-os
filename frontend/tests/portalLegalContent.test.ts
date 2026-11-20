@@ -128,12 +128,17 @@ const secondary = source('components/catalog/CatalogSecondaryTabs.tsx')
 assert.doesNotMatch(secondary, /<iframe[^>]*src={mapEmbedUrl}/, 'the map embed loads Google without being asked')
 assert.match(secondary, /<PortalEmbedConsent/, 'the map must go through the embed consent gate')
 
-// The standing storefront notice ends on "YOUR PRIVACY IS OUR PRIORITY"; an
+// The standing storefront notice used to end on "YOUR PRIVACY IS OUR PRIORITY"; an
 // assurance with no policy behind it is exactly the unsupported claim the
-// Law on Consumer Protection reaches, so the sentence must carry the link.
+// Law on Consumer Protection reaches, so any such sentence must carry the link.
 const noPayment = source('components/catalog/PortalNoPaymentNotice.tsx')
-assert.match(noPayment, /<LegalInlineLink page="privacy"/, 'the privacy promise has no privacy policy behind it')
-assert.match(noPayment, /LEGAL_PAGE_TITLE_KEY.privacy/, 'the link label must come from the legal pack, not a hardcoded string')
+// The overhaul dropped that sentence: the notice is the one payment line and makes no privacy promise. If one ever returns it must link the policy.
+const noPaymentCode = noPayment.replace(/^\/\/.*$/gm, '')
+if (/privacy/i.test(noPaymentCode)) {
+  assert.match(noPayment, /<LegalInlineLink page="privacy"/, 'the privacy promise has no privacy policy behind it')
+  assert.match(noPayment, /LEGAL_PAGE_TITLE_KEY.privacy/, 'the link label must come from the legal pack, not a hardcoded string')
+}
+assert.match(noPaymentCode, /noPaymentLine/, 'the notice is the one payment line')
 
 // The AI panel carries TWO notices: the merchant's editable disclaimer, and
 // the app's own, which says the shopper is talking to software, that the
@@ -204,9 +209,10 @@ assert.match(
 // 7. day-first date, and a consent version tied to it
 assert.match(PORTAL_LEGAL_LAST_UPDATED_ISO, /^\d{4}-\d{2}-\d{2}$/)
 assert.equal(formatLegalLastUpdated('2026-09-07'), '07/09/2026')
-assert.equal(PORTAL_LEGAL_LAST_UPDATED_ISO, '2026-10-20', 'the 20 Oct 2026 age-16 wording is a new policy version')
-assert.equal(formatLegalLastUpdated(), '20/10/2026')
-assert.equal(PORTAL_LEGAL_CONSENT_VERSION, `portal-legal-${PORTAL_LEGAL_LAST_UPDATED_ISO}`)
+assert.equal(PORTAL_LEGAL_LAST_UPDATED_ISO, '2026-11-20', 'the 20 Nov 2026 wording (Translation section, storage rows) moved the shown date')
+assert.equal(formatLegalLastUpdated(), '20/11/2026')
+assert.equal(PORTAL_LEGAL_CONSENT_VERSION, 'portal-legal-2026-10-20', 'the 20 Nov 2026 wording asks nothing new of an account, so the consent version stays and nobody agrees again')
+assert.ok(PORTAL_LEGAL_CONSENT_VERSION.slice('portal-legal-'.length) <= PORTAL_LEGAL_LAST_UPDATED_ISO, 'a consent version is never newer than the shown date')
 
 // 8. Owner, 30 Sep 2026: welcoming privacy and terms texts that stay safe for the shop.
 const pageText = (page: 'privacy' | 'terms', target: 'en' | 'km') =>

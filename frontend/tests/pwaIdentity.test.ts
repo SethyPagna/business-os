@@ -102,7 +102,8 @@ runTest('the staff app is coloured like its top bar and page ground', () => {
   assert.equal(staff.background_color, lightNavToken('--nav-ground'))
 })
 
-runTest('the shop is coloured like the storefront surface', () => {
+// The browser chrome and the splash are the storefront's ivory page ground (index.html carries the same value, for the static head and for the bootstrap).
+runTest('the shop is coloured like the storefront page ground', () => {
   assert.equal(shop.theme_color, PORTAL_LIGHT_SURFACE)
   assert.equal(shop.background_color, PORTAL_LIGHT_SURFACE)
 })

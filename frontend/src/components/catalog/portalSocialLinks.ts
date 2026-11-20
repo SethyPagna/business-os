@@ -19,7 +19,7 @@ import {
   deriveWhatsappLink,
   resolveMessengerLink,
 } from '../../utils/socialLinks.ts'
-import { resolveSocialDisplay, type SocialDisplayKind, type SocialLanguage, type SocialPlatform } from '../../utils/socialHandles.ts'
+import { SOCIAL_PLATFORM_NAMES, resolveSocialDisplay, type SocialDisplayKind, type SocialLanguage, type SocialPlatform } from '../../utils/socialHandles.ts'
 
 export type PortalAccountEntry = string | { href?: unknown; customLabel?: unknown }
 export type PortalAccountInput = PortalAccountEntry | readonly PortalAccountEntry[] | null | undefined
@@ -198,63 +198,122 @@ export function flattenPortalSocialGroups(groups: readonly PortalSocialGroup[]):
   })))
 }
 
-// The floating contact buttons (owner, 2 Nov 2026): one round brand-colour button per chat account, each opening the
-// chat itself (t.me/<name>, m.me/<page>, ig.me/m/<name>, wa.me/<number>), never a profile page. The accounts are the
-// Website Editor's own contact settings (buildPortalContactChannels above); nothing is hard-coded here.
-export const PORTAL_CONTACT_FLOAT = { bottomRem: 4.5, buttonRem: 2.75, gapRem: 0.5, endRem: 0.75, minReserveRem: 7.5 } as const
+// The one Contact list (public-web overhaul, spec section 3). The header button, the FAQ and About buttons, the list page, the account's
+// "Forgot password?" link and the footer column all show these entries, so a name is decided in exactly one place.
+export type PortalContactPlatform = SocialPlatform | 'email' | 'map'
 
-// Fill behind a white glyph. Every colour is at least 3:1 against white (a graphical object, WCAG 1.4.11); the
-// instagram gradient is checked at every stop. tests/portalContactFloat.test.ts holds the numbers.
-export const PORTAL_CONTACT_BRAND: Readonly<Record<'telegram' | 'messenger' | 'instagram' | 'whatsapp' | 'phone', { background: string; stops: readonly string[] }>> = {
-  telegram: { background: '#1d93d2', stops: ['#1d93d2'] },
-  messenger: { background: '#0084ff', stops: ['#0084ff'] },
-  instagram: { background: 'linear-gradient(135deg, #e1306c 0%, #c13584 50%, #833ab4 100%)', stops: ['#e1306c', '#c13584', '#833ab4'] },
-  whatsapp: { background: '#128c7e', stops: ['#128c7e'] },
-  phone: { background: '#9c7a3c', stops: ['#9c7a3c'] },
+export type PortalContactEntry = {
+  key: string
+  platform: PortalContactPlatform
+  href: string
+  /** The account name, number or address a visitor reads. Never "@name" and never just the platform word (unless nothing else is known). */
+  label: string
+  /** "Facebook: leanggirlactik": the platform stays available to a screen reader. */
+  accessibleName: string
+  latin: boolean
 }
 
-const DIRECT_CHAT_HOSTS: Readonly<Partial<Record<SocialPlatform, RegExp>>> = {
-  telegram: /^(?:t\.me|telegram\.me)$/i,
-  messenger: /^m\.me$/i,
-  instagram: /^ig\.me$/i,
-  whatsapp: /^wa\.me$/i,
-}
+/** The order of the rows: Phone, Messenger, Telegram, Instagram, Facebook, TikTok, WhatsApp, Website, Email, Map. */
+export const PORTAL_CONTACT_MENU_ORDER: readonly PortalContactPlatform[] = ['phone', 'messenger', 'telegram', 'instagram', 'facebook', 'tiktok', 'whatsapp', 'website', 'email', 'map']
+
+const KHMER_TEXT = /[ក-៿᧠-᧿]/
+const clean = (value: unknown): string => String(value ?? '').trim()
 
 /**
- * True only for a link that opens the chat itself: https on the platform's own chat host, or a tel: link for Call.
- * The derive* helpers already produce nothing else; this is the second check at the point a visitor taps.
+ * Every way to reach the shop, in menu order. `contact` are the direct-message channels (Messenger, Telegram, WhatsApp, Call, Instagram),
+ * `social` the page links (website, Facebook, Instagram, TikTok, Telegram), the rest the business facts. The same account that is both a
+ * chat channel and a page link (Telegram, Instagram) is one row, and the chat link wins. A platform with two accounts gets two rows.
+ *
+ * A Facebook link with no readable name (the live shop's is a facebook.com/share/ link) takes, in this order: the owner's label (already
+ * applied by resolveSocialDisplay), the account name of the same business's Messenger link, then the shop name.
  */
-export function isDirectContactHref(platform: SocialPlatform, href: unknown): boolean {
-  const value = String(href ?? '').trim()
-  if (platform === 'phone') return /^tel:\+?[0-9]{3,20}$/.test(value)
-  const host = DIRECT_CHAT_HOSTS[platform]
-  if (!host) return false
-  try {
-    const url = new URL(value)
-    return url.protocol === 'https:' && host.test(url.hostname) && !url.username && !url.password && url.pathname.length > 1
-  } catch {
-    return false
+export function buildPortalContactEntries(input: {
+  social?: readonly PortalSocialGroup[]
+  contact?: readonly PortalSocialGroup[]
+  phone?: unknown
+  email?: unknown
+  mapHref?: unknown
+  /** The address text the Map row shows. */
+  address?: unknown
+  shopName?: unknown
+  language?: string
+}): PortalContactEntry[] {
+  const language: SocialLanguage = input.language === 'km' ? 'km' : 'en'
+  const shopName = clean(input.shopName)
+  const found: PortalContactEntry[] = []
+  const seen = new Set<string>()
+  const push = (platform: PortalContactPlatform, href: string, label: string, accessibleName: string) => {
+    if (!href || !label) return
+    // One number is one row however it is typed: +855 12 345 678, 855 12 345 678 and 012 345 678 are the same Cambodian line.
+    const identity = platform === 'phone' ? `phone|${href.replace(/\D/g, '').replace(/^855/, '').replace(/^0+/, '')}` : `${platform}|${label.toLowerCase()}`
+    if (seen.has(identity)) return
+    seen.add(identity)
+    found.push({ key: `${platform}-${found.length}`, platform, href, label, accessibleName, latin: !KHMER_TEXT.test(label) })
   }
-}
 
-const FLOAT_PLATFORMS: readonly SocialPlatform[] = ['messenger', 'telegram', 'instagram', 'whatsapp', 'phone']
+  const messengerName = (input.contact ?? [])
+    .filter((group) => group.platform === 'messenger')
+    .flatMap((group) => group.links)
+    .find((link) => link.kind === 'username')?.visibleText || ''
 
-/** The first valid account of each chat platform, in the Contact us order. A second account stays in the Contact us list. */
-export function buildPortalContactFloat(channels: readonly PortalFlatSocialLink[]): PortalFlatSocialLink[] {
-  const out: PortalFlatSocialLink[] = []
-  for (const platform of FLOAT_PLATFORMS) {
-    const first = channels.find((channel) => channel.platform === platform && isDirectContactHref(platform, channel.value))
-    if (first) out.push(first)
+  for (const group of [...(input.contact ?? []), ...(input.social ?? [])]) {
+    for (const link of group.links) {
+      const platformName = SOCIAL_PLATFORM_NAMES[group.platform][language]
+      if (group.platform === 'facebook' && link.kind === 'platform') {
+        const name = messengerName || shopName
+        if (name) {
+          push('facebook', link.href, name, `${platformName}: ${name}`)
+          continue
+        }
+      }
+      push(group.platform, link.href, link.visibleText, link.accessibleName)
+    }
   }
-  return out
+
+  const phone = clean(input.phone)
+  if (phone) {
+    const href = derivePhoneCallLink(phone)
+    const display = resolveSocialDisplay({ platform: 'phone', href: phone, language })
+    push('phone', href, display.visibleText, display.accessibleName)
+  }
+  const email = clean(input.email)
+  if (email) push('email', `mailto:${email}`, email, `${language === 'km' ? 'អ៊ីមែល' : 'Email'}: ${email}`)
+  const mapHref = clean(input.mapHref)
+  if (mapHref) {
+    const address = clean(input.address)
+    push('map', mapHref, address || (language === 'km' ? 'ផែនទី' : 'Map'), `${language === 'km' ? 'ផែនទី' : 'Map'}${address ? `: ${address}` : ''}`)
+  }
+
+  const rank = (platform: PortalContactPlatform) => PORTAL_CONTACT_MENU_ORDER.indexOf(platform)
+  return found
+    .map((entry, index) => ({ entry, index }))
+    .sort((a, b) => rank(a.entry.platform) - rank(b.entry.platform) || a.index - b.index)
+    .map(({ entry }, position) => ({ ...entry, key: `${entry.platform}-${position}` }))
 }
 
-/** How far above the safe area the page must end so the stack of `count` buttons never covers the footer. */
-export function portalFloatClearanceRem(count: number): number {
-  const { bottomRem, buttonRem, gapRem, endRem, minReserveRem } = PORTAL_CONTACT_FLOAT
-  if (!(count > 0)) return minReserveRem
-  return Math.max(minReserveRem, bottomRem + count * buttonRem + (count - 1) * gapRem + endRem)
+type ContactFocusNode = { isConnected: boolean; focus: () => void }
+type ContactFocusHost = { querySelector: (selector: string) => unknown }
+
+export const PORTAL_CONTACT_TRIGGER_SELECTOR = 'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+
+/**
+ * Where focus goes when the Contact menu closes: nowhere if the visitor already put focus on something else, else the element that
+ * opened the menu if it is still on the page, else the trigger now inside the menu's host.
+ */
+export function resolveContactFocusTarget<T extends ContactFocusNode>(opener: T | null, host: ContactFocusHost | null, active: unknown, body: unknown): T | null {
+  const focusIsFree = !active || active === body || (active as ContactFocusNode).isConnected === false
+  if (!focusIsFree) return null
+  if (opener?.isConnected) return opener
+  return (host?.querySelector(PORTAL_CONTACT_TRIGGER_SELECTOR) as T | null | undefined) ?? null
 }
+
+/** The footer's contact column lists the same entries minus what it already prints itself (phone, e-mail, address). */
+export function portalContactFooterLinks(entries: readonly PortalContactEntry[]): PortalFlatSocialLink[] {
+  return entries
+    .filter((entry): entry is PortalContactEntry & { platform: SocialPlatform } => entry.platform !== 'phone' && entry.platform !== 'email' && entry.platform !== 'map')
+    .map((entry) => ({ key: entry.key, platform: entry.platform, value: entry.href, label: entry.label, accessibleName: entry.accessibleName, latin: entry.latin }))
+}
+
 
 type PortalSocialConfig = {
   links?: PortalAccountMap

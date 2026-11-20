@@ -18,6 +18,7 @@ import {
   aiProviderRetention,
   aiProviderState,
   fillAiProviderTemplate,
+  type AiProviderState,
 } from '../src/components/catalog/legal/aiProviderDisclosure.ts'
 import { legalText } from '../src/components/catalog/legal/legalContent.ts'
 
@@ -41,7 +42,9 @@ function loadModule(relative: string) {
   return module.exports
 }
 
-const Tabs = loadModule('components/catalog/CatalogSecondaryTabs.tsx').default as React.ComponentType<Record<string, unknown>>
+const tabsModule = loadModule('components/catalog/CatalogSecondaryTabs.tsx')
+const Consent = tabsModule.AssistantConsentPanel as React.ComponentType<Record<string, unknown>>
+const Disclosure = tabsModule.AssistantDisclosure as React.ComponentType<Record<string, unknown>>
 const Paragraphs = loadModule('components/catalog/legal/LegalPages.tsx').AiProviderParagraphs as React.ComponentType<Record<string, unknown>>
 
 type Lang = 'en' | 'km'
@@ -61,27 +64,9 @@ function runTest(name: string, fn: () => void): void {
   }
 }
 
-const aiProps = (language: Lang, status: unknown) => ({
-  tab: 'ai',
-  copy: copyFor(language),
-  previewConfig: { aiEnabled: true },
-  brands: [],
-  assistantProfile: { brand: '', skinType: '', shoppingFor: '', goal: '', concerns: '' },
-  setAssistantProfile: () => {},
-  assistantCategoryOptions: [],
-  assistantQuestion: '',
-  setAssistantQuestion: () => {},
-  questionCharLimit: 500,
-  askAssistant: () => {},
-  assistantLoading: false,
-  clearAssistantState: () => {},
-  replaceVars: (template: string, values: Record<string, string | number>) => template.replace(/\{(\w+)\}/g, (_m, key) => String(values[key] ?? '')),
-  assistantDisclosure: status === null ? null : aiProviderState(status),
-  assistantDataUseConsent: false,
-  setAssistantDataUseConsent: () => {},
-})
-const consentOf = (html: string) => /data-portal-assistant-consent="ask"[\s\S]*?<\/label>/.exec(html)?.[0] || ''
-const noteOf = (html: string) => /<p class="[^"]*">((?:(?!<\/p>)[\s\S])*(?:automated software|ជំនួយការនេះជាកម្មវិធីស្វ័យប្រវត្តិ)(?:(?!<\/p>)[\s\S])*)<\/p>/.exec(html)?.[1] || ''
+const stateOf = (status: AiProviderState | null): AiProviderState => status || { kind: 'unknown' }
+const consentOf = (language: Lang, status: AiProviderState | null) => renderToStaticMarkup(React.createElement(Consent, { copy: copyFor(language), aiState: stateOf(status), language, onAgree: () => {} }))
+const noteOf = (language: Lang, status: AiProviderState | null) => renderToStaticMarkup(React.createElement(Disclosure, { copy: copyFor(language), aiState: stateOf(status), language, ownerDisclaimer: '' }))
 
 const policyHtml = (language: Lang, status: unknown) => {
   const text = (key: string) => legalText(language, key)
@@ -128,29 +113,33 @@ runTest('the status answer decides what the page may say', () => {
 
 for (const language of ['en', 'km'] as const) {
   for (const id of ids) {
-    runTest(`consent line and automated note name ${id} and its retention (${language})`, () => {
-      const html = renderToStaticMarkup(React.createElement(Tabs, aiProps(language, { providers: [{ id, name: 'x' }] })))
+    runTest(`consent line names ${id}; the full disclosure names ${id} and its retention (${language})`, () => {
+      const state = aiProviderState({ providers: [{ id, name: 'x' }] })
       const entry = AI_PROVIDER_DISCLOSURE[id]
-      const consent = consentOf(html)
-      const note = noteOf(html)
+      const consent = consentOf(language, state)
+      const note = noteOf(language, state)
       assert.ok(consent && note, 'both render')
+      // The one-line consent names the provider; the provider's own retention sentence is in the full disclosure behind the info icon.
+      assert.ok(consent.includes(`(${entry.displayName})`), `${id} is named in the consent line`)
+      assert.ok(note.includes(`(${entry.displayName})`), `${id} is named in the disclosure`)
+      assert.ok(note.includes(entry.retention[language].replace(/&/g, '&amp;')), `${id} retention sentence is in the disclosure`)
       for (const part of [consent, note]) {
-        assert.ok(part.includes(`(${entry.displayName})`), `${id} is named`)
-        assert.ok(part.includes(entry.retention[language].replace(/&/g, '&amp;')), `${id} retention sentence is present`)
         assert.doesNotMatch(part, /\{provider|\{retention/, 'no placeholder is left')
         assert.doesNotMatch(part, /\bmay\b/i)
       }
-      // The outside-Cambodia statement and our own 30-day statement stay.
-      assert.match(consent + note, language === 'en' ? /outside Cambodia/ : /ក្រៅប្រទេសកម្ពុជា/)
-      assert.match(consent + note, language === 'en' ? /deleted after 30 days/ : /លុបចោលបន្ទាប់ពី ៣០ ?ថ្ងៃ/)
+      // The outside-Cambodia statement and our own 30-day statement stay in both.
+      for (const part of [consent, note]) {
+        assert.match(part, language === 'en' ? /outside Cambodia/ : /ក្រៅប្រទេសកម្ពុជា/)
+        assert.match(part, language === 'en' ? /deleted after 30 days/ : /លុបចោលបន្ទាប់ពី ៣០ ?ថ្ងៃ/)
+      }
     })
   }
 
-  runTest(`unknown or missing provider gives the neutral consent and note (${language})`, () => {
+  runTest(`unknown or missing provider gives the neutral consent and disclosure (${language})`, () => {
     for (const status of [null, {}, { providers: [{ id: 'someone-new' }] }, { providers: [] }]) {
-      const html = renderToStaticMarkup(React.createElement(Tabs, aiProps(language, status)))
-      const joined = consentOf(html) + noteOf(html)
-      assert.match(joined, language === 'en' ? /third-party AI provider and processed outside Cambodia|third-party AI provider that processes it outside Cambodia/ : /អ្នកផ្តល់សេវា AI ភាគីទីបី/)
+      const state = status === null ? null : aiProviderState(status)
+      const joined = consentOf(language, state) + noteOf(language, state)
+      assert.match(joined, language === 'en' ? /third-party AI provider outside Cambodia|third-party AI provider that processes it outside Cambodia/ : /អ្នកផ្តល់សេវា AI ភាគីទីបី/)
       for (const entry of Object.values(AI_PROVIDER_DISCLOSURE)) assert.ok(!joined.includes(entry.displayName), 'no provider is named')
       assert.doesNotMatch(joined, /\(\)|\{provider/)
     }

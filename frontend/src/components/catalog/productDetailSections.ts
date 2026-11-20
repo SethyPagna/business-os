@@ -188,3 +188,16 @@ export function resolveOfficialProductName(officialName: unknown, shopProductNam
   if (!comparable || comparable === comparableName(shopProductName)) return ''
   return official
 }
+
+// Owner, 2026-11-20: a product that has an official name shows it as the heading everywhere the
+// shopper reads a name, with the shop's own name as a second line in the sheet. No official name
+// (or one that only repeats the shop name) leaves the shop name as the heading and no second line.
+// resolveOfficialProductName still never falls back; this is where the fallback lives.
+export function resolveProductNames(product: { name?: unknown; description?: unknown }): { heading: string; shopLine: string } {
+  const shopName = String(product.name ?? '').trim()
+  const description = typeof product.description === 'string' ? product.description : ''
+  // The grid calls this per card: skip the parse unless the label could be there.
+  if (!description || !/official/i.test(description)) return { heading: shopName, shopLine: '' }
+  const official = resolveOfficialProductName(parseProductDescription(description).officialName, shopName)
+  return official ? { heading: official, shopLine: shopName } : { heading: shopName, shopLine: '' }
+}

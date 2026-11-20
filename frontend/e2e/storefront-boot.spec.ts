@@ -391,33 +391,28 @@ test.describe('P2 first paint: no default look, no saved copy, bounded failure',
     })
   }
 
-  test('P2-3c the skeleton holds the header\'s social row, so the page does not move when the shop arrives', async ({ page }) => {
-    // CATCHES: a header that grows by the 56 px social row when the config lands (the tabs and the card under it jumped down by that much:
-    // 0.0486 of the 0.05 budget on its own), and a placeholder that is not the same height as the row it stands in for.
+  test('P2-3c the header has no social row to wait for, so the section tabs do not move when the shop arrives', async ({ page }) => {
+    // CATCHES: a header that grows when the config lands (the old 56 px social row pushed the tabs and the card under it down by that much:
+    // 0.0486 of the 0.05 budget on its own). The contact accounts now sit behind the one Contact button in the header's icon row, so there
+    // is no row to hold a place for; a row or a placeholder coming back, or a header that changes height on a phone, fails here.
     let release: () => void = () => {}
     const gate = new Promise<void>((resolve) => { release = resolve })
     await routeStorefrontConfig(page, { patch: REAL_SHOP, gate })
     await page.goto(`${STOREFRONT_ORIGIN}/`, { waitUntil: 'load' })
-    const placeholder = page.locator('[data-portal-social-skeleton="true"]')
-    await expect(placeholder, 'the social row is held while the config is on its way').toBeVisible()
-    const pending = await page.evaluate(() => {
-      const row = document.querySelector('[data-portal-social-skeleton="true"]')!.getBoundingClientRect()
-      const tabs = document.querySelector('.portal-nav-shell')!.getBoundingClientRect().top
-      return { height: row.height, gap: tabs - row.bottom, tabs: tabs + window.scrollY }
-    })
+    const tabs = page.locator('.portal-nav-shell')
+    await expect(tabs, 'the section tabs are painted while the config is on its way').toBeVisible()
+    await expect(page.locator('[data-portal-social-skeleton], [data-portal-social-row]')).toHaveCount(0)
+    const tabsTop = () => page.evaluate(() => document.querySelector('.portal-nav-shell')!.getBoundingClientRect().top + window.scrollY)
+    const pending = await tabsTop()
     release()
     await expect(page.getByRole('heading', { level: 2, name: REAL_SHOP.businessName })).toBeVisible({ timeout: 20_000 })
-    await expect(placeholder).toHaveCount(0)
-    const landed = await page.evaluate(() => {
-      const row = document.querySelector('[data-portal-social-row="true"]')!.getBoundingClientRect()
-      const tabs = document.querySelector('.portal-nav-shell')!.getBoundingClientRect().top
-      return { height: row.height, gap: tabs - row.bottom, tabs: tabs + window.scrollY }
-    })
-    expect(landed.height, 'the placeholder is as tall as the row').toBeCloseTo(pending.height, 0)
-    expect(landed.gap, 'and sits the same distance above the section tabs').toBeCloseTo(pending.gap, 0)
-    // On a phone nothing else in the header changes size when the shop lands, so the tabs stay put. From the sm width the header's first row
-    // also grows by 11 px at 1280 px (its icon buttons arrive with the config): a separate skeleton gap, outside the phone's CLS budget.
-    if ((page.viewportSize()?.width ?? 0) < 640) expect(landed.tabs, 'the section tabs stay where they were').toBeCloseTo(pending.tabs, 0)
+    await expect(page.locator('[data-portal-contact-trigger]'), 'the shop\'s accounts arrive as the one Contact button').toBeVisible()
+    await expect(page.locator('[data-portal-social-skeleton], [data-portal-social-row]')).toHaveCount(0)
+    const landed = await tabsTop()
+    // On a phone nothing in the header changes size when the shop lands, so the tabs stay put. From the sm width the header's first row
+    // grows by about 11 px at 1280 px (its icon buttons arrive with the config): a separate skeleton gap, outside the phone's CLS budget.
+    if ((page.viewportSize()?.width ?? 0) < 640) expect(landed, 'the section tabs stay where they were').toBeCloseTo(pending, 0)
+    else expect(Math.abs(landed - pending), 'from the sm width the header may settle by its icon row, never by a whole row').toBeLessThan(24)
   })
 
   test('P2-4 an old saved copy is never painted, never requested, and removed; the shopper list is untouched', async ({ page, context, browser }) => {

@@ -20,7 +20,7 @@ assert.doesNotMatch(
 )
 assert.match(
   productsSection,
-  /<div className="sticky top-16 z-20 -mx-1 mb-5 space-y-2 rounded-\[22px\]/,
+  /<div className=\{`sticky top-16 z-20 -mx-1 mb-5 space-y-2 rounded-2xl p-2 sm:top-20 \$\{PRODUCT_SURFACE_CLASS\}`\}>/,
   'the sticky row must carry its own mb-5 and sit directly in the tall column',
 )
 

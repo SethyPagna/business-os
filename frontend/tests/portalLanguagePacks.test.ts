@@ -48,6 +48,9 @@ assert.equal(getPortalLanguageText('km', 'businessTagline'), '')
   assert.ok(keys.size >= 18, `expected the flyout's copy keys, found ${keys.size}`)
   // imageCount is "{current}/{total}" in every language: digits and a slash.
   keys.delete('imageCount')
+  // A key written at the call site with its own Khmer, copy('key', 'English', 'ខ្មែរ'), carries its
+  // Khmer inline and needs no pack entry.
+  for (const match of flyout.matchAll(/copy\('([A-Za-z]+)', '[^']*', '[ក-៿][^']*'/g)) keys.delete(match[1])
   const khmer = /[\u1780-\u17ff]/
   for (const key of keys) {
     const text = getPortalLanguageText('km', key)

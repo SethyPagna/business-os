@@ -2,6 +2,8 @@
 
 This implementation provides bilingual English and Khmer privacy, terms, cookie, consent, and accessibility surfaces for the public catalogue. It is an implementation record, not legal advice or a claim of universal legal compliance.
 
+Wording revised 20 Nov 2026: Translation section in the Privacy Policy, four new Cookie Policy rows, shorter Cookie Policy text. The on-site "Last updated" date and the consent version stay at 20 Oct 2026 (`portal-legal-2026-10-20`), so existing accounts are not asked to agree again; the code ties the two together (`legalContent.ts`), so moving the date needs the two separated first.
+
 ## Confirmed seller details
 
 The read-only production settings check on 7 September 2026 confirmed the trade name **Leang Cosmetics**, address **136 St 215, Phnom Penh**, and phone **017 611 168**. The business email is blank. No verified registered legal name or registration number was found in the queried settings. The trade name is not substituted for a registered identity.
@@ -13,8 +15,8 @@ Catalogue browsing remains available while those details are incomplete. Since 1
 - Account creation and sign-in require an unticked Terms and Privacy consent checkbox. The server records policy version, timestamp, and locale and refuses the write if migration 0130 is absent.
 - Screenshot submissions require a signed-in account plus separate rights and privacy consent. The server resolves the CRM customer from the session, ignores any submitted membership number, records both consent versions, and refuses success until the row persists. Customer screenshots stay in private R2 storage and do not enter the shared Cloudinary-capable image pipeline.
 - AI requests require an explicit data-use checkbox before each request flow. The notice names the configured provider and says processing may occur outside Cambodia. Questions and optional shopping preferences are sent only after that choice.
-- Google Maps remains blocked until the visitor chooses to load it. The public site offers English and Khmer only and loads no translation service.
-- Required and requested browser storage is listed in the Cookie Policy, including the session cookie, app-managed local/session storage, and service-worker Cache Storage. The page does not claim that one banner rule applies in every country.
+- Google Maps remains blocked until the visitor chooses to load it. The site is hand-written in English and Khmer. Simplified Chinese, Traditional Chinese, French and Spanish are produced by Google Translate in the visitor's browser, only after the visitor picks one of them; the page text is then sent to Google, and nothing is sent if the visitor stays on Khmer or English. The Privacy Policy states this in its Translation section.
+- Required and requested browser storage is listed in the Cookie Policy, including the session cookie, app-managed local/session storage, and service-worker Cache Storage. It includes the `googtrans` cookie (set by Google Translate only after one of those languages is picked), `business-os-portal-ai-consent-v1` (the visitor agreed on this device to send questions to the assistant), `business-os-portal-list-images-v1` (pictures for the products in the visitor's list on this device) and `business-os-portal-page-size-v1` (the page size the visitor picked). The page does not claim that one banner rule applies in every country.
 
 ## Collection, retention, and third parties
 
