@@ -46,6 +46,19 @@ function fakeBucket(initial = {}, faults = {}) {
 
 const files = (n) => [{ name: 'manifest.enc.json', bytes: Buffer.from(`manifest-${n}`) }, { name: 'c000001.enc.json', bytes: Buffer.from(`chunk-${n}`) }]
 const setOf = (id) => ({ [`backups/weekly/${id}/manifest.enc.json`]: 'm', [`backups/weekly/${id}/c000001.enc.json`]: 'c' })
+const NOW = new Date('2026-11-08T21:00:00Z')
+const GOOD = { runId: 'r6', backupOk: true, finishedAt: '2026-11-08T20:50:00Z', manifestSha256: 'ab'.repeat(32) }
+// The bell's rules (lane/backup-weekly-bell), copied here on purpose and not imported from cloudflare/src.
+function bellRules(m, now) {
+  const bad = []
+  if (typeof m.format !== 'string' || !m.format.startsWith('business-os-weekly-backup')) bad.push('format')
+  if (m.backupOk !== true) bad.push('backupOk')
+  const t = Date.parse(m.finishedAt)
+  if (!Number.isFinite(t) || t > now.getTime()) bad.push('finishedAt')
+  if (typeof m.runId !== 'string' || !/^[A-Za-z0-9._-]{1,64}$/.test(m.runId)) bad.push('runId')
+  if (typeof m.manifestSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(m.manifestSha256)) bad.push('manifestSha256')
+  return bad
+}
 const OLD_MARKER = '{"format":"old","finishedAt":"2026-11-01T00:00:00Z"}\n'
 
 async function scenario(store, constants) {
@@ -73,7 +86,7 @@ async function scenario(store, constants) {
 
   // a good week: upload, verify, prune to exactly four, marker last
   const full = fakeBucket({ ...setOf('2026-10-04-r1'), ...setOf('2026-10-11-r2'), ...setOf('2026-10-18-r3'), ...setOf('2026-10-25-r4'), ...setOf('2026-11-01-r5'), 'backups/weekly/latest.json': OLD_MARKER, 'backups/manifest/other.json': 'keep' })
-  const result = await storeWeekly({ store: weeklyStore(full), setId: '2026-11-08-r6', files: files(6), marker: { format: 'f/1', runId: 'r6', backupOk: true } })
+  const result = await storeWeekly({ store: weeklyStore(full), setId: '2026-11-08-r6', files: files(6), marker: GOOD, now: NOW })
   assert.strictEqual(result.ok, true)
   const kept = [...full.objects.keys()].filter((k) => k.startsWith('backups/weekly/') && k !== constants.marker).map((k) => k.split('/')[2])
   assert.deepStrictEqual([...new Set(kept)].sort(), ['2026-10-11-r2', '2026-10-18-r3', '2026-10-25-r4', '2026-11-01-r5', '2026-11-08-r6'].slice(1), 'exactly the newest four')
@@ -85,18 +98,19 @@ async function scenario(store, constants) {
   const firstDelete = full.calls.findIndex(([verb]) => verb === 'delete')
   const lastDataPut = full.calls.map(([v, k], i) => (v === 'put' && k !== constants.marker ? i : -1)).reduce((a, b) => Math.max(a, b), -1)
   assert.ok(firstDelete > lastDataPut, 'pruning starts only after every file of the new set is uploaded and verified')
-  assert.deepStrictEqual(JSON.parse(full.objects.get(constants.marker).toString()), { format: 'f/1', runId: 'r6', backupOk: true })
+  assert.deepStrictEqual(JSON.parse(full.objects.get(constants.marker).toString()), { format: 'business-os-weekly-backup/1', ...GOOD })
+  assert.deepStrictEqual(bellRules(JSON.parse(full.objects.get(constants.marker).toString()), NOW), [], 'the Worker bell accepts the marker that was written')
 
   // a set that fails HEAD: nothing pruned, the old marker stays
   const short = fakeBucket({ ...setOf('2026-10-04-r1'), ...setOf('2026-10-11-r2'), ...setOf('2026-10-18-r3'), ...setOf('2026-10-25-r4'), ...setOf('2026-11-01-r5'), 'backups/weekly/latest.json': OLD_MARKER }, { shortBy: (key) => key.endsWith('c000001.enc.json') && key.includes('2026-11-08') })
-  const bad = await storeWeekly({ store: weeklyStore(short), setId: '2026-11-08-r6', files: files(6), marker: { format: 'f/1', backupOk: true } })
+  const bad = await storeWeekly({ store: weeklyStore(short), setId: '2026-11-08-r6', files: files(6), marker: GOOD, now: NOW })
   assert.strictEqual(bad.ok, false)
   assert.ok(!short.calls.some(([verb]) => verb === 'delete'), 'no prune when the new set failed its HEAD check')
   assert.strictEqual(short.objects.get(constants.marker).toString(), OLD_MARKER, 'the old marker still stands')
 
   // a crash between the last data file and the marker: the old marker stands, the error surfaces
   const crash = fakeBucket({ ...setOf('2026-11-01-r5'), 'backups/weekly/latest.json': OLD_MARKER }, { failPut: (key) => key === constants.marker })
-  await assert.rejects(() => storeWeekly({ store: weeklyStore(crash), setId: '2026-11-08-r6', files: files(6), marker: { format: 'f/1', backupOk: true } }), /put refused/)
+  await assert.rejects(() => storeWeekly({ store: weeklyStore(crash), setId: '2026-11-08-r6', files: files(6), marker: GOOD, now: NOW }), /put refused/)
   assert.strictEqual(crash.objects.get(constants.marker).toString(), OLD_MARKER)
 
   // pruning never deletes the newest verified set, even with keep 1; an unverified call deletes nothing; an incomplete (no manifest) folder never counts as a kept set
@@ -165,13 +179,30 @@ async function main() {
     const guarded = store.weeklyStore(client)
     for (const id of ['2026-10-04-r1', '2026-10-11-r2', '2026-10-18-r3', '2026-10-25-r4', '2026-11-01-r5']) for (const f of files(id)) await guarded.put(`backups/weekly/${id}/${f.name}`, f.bytes)
     assert.strictEqual((await guarded.list('backups/weekly/')).length, 10, 'a LIST of five pages reads every object')
-    const done = await store.storeWeekly({ store: guarded, setId: '2026-11-08-r6', files: files('r6'), marker: { format: 'f/1', backupOk: true } })
+    const done = await store.storeWeekly({ store: guarded, setId: '2026-11-08-r6', files: files('r6'), marker: GOOD, now: NOW })
     assert.strictEqual(done.ok, true)
     assert.ok(seen.every((r) => /^AWS4-HMAC-SHA256 Credential=id\/20261108\/auto\/s3\/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=[0-9a-f]{64}$/.test(r.auth)))
     assert.strictEqual([...objects.keys()].filter((k) => k.includes('2026-10-04-r1') || k.includes('2026-10-11-r2')).length, 0, 'older sets pruned through the client')
     await client.delete('backups/weekly/never-was/x')
     await assert.rejects(() => guarded.delete('backups/manifest/x'), (e) => e.code === 'weekly-key-refused')
     assert.strictEqual(seen.filter((r) => r.method === 'DELETE' && !r.path.startsWith('/bkt/backups/weekly/')).length, 0)
+  })
+
+  await check('the marker: the exact shape the bell accepts, and a marker the bell would refuse is never written', async () => {
+    assert.strictEqual(store.MARKER_FORMAT, 'business-os-weekly-backup/1')
+    const ok = { format: store.MARKER_FORMAT, ...GOOD }
+    assert.deepStrictEqual(store.markerProblems(ok, NOW), [])
+    assert.deepStrictEqual(bellRules(ok, NOW), [])
+    const cases = [['backupOk', { backupOk: false }], ['finishedAt', { finishedAt: '2026-11-08T21:00:01Z' }], ['finishedAt', { finishedAt: 'yesterday' }], ['runId', { runId: 'a b' }], ['runId', { runId: 'x'.repeat(65) }], ['manifestSha256', { manifestSha256: 'AB'.repeat(32) }], ['manifestSha256', { manifestSha256: 'ab'.repeat(31) }]]
+    for (const [rule, change] of cases) {
+      const bad = { ...ok, ...change }
+      assert.ok(store.markerProblems(bad, NOW).includes(rule), `${rule} ${JSON.stringify(change)}`)
+      assert.ok(bellRules(bad, NOW).includes(rule), `the copied rule agrees: ${rule}`)
+      const bucket = fakeBucket({ 'backups/weekly/latest.json': OLD_MARKER })
+      await assert.rejects(() => store.storeWeekly({ store: store.weeklyStore(bucket), setId: '2026-11-08-r6', files: files(6), marker: { ...GOOD, ...change }, now: NOW }), (e) => e.code === 'weekly-marker-invalid')
+      assert.deepStrictEqual(bucket.calls, [], 'nothing is uploaded for an invalid marker')
+    }
+    assert.ok(store.markerProblems({ ...ok, format: 'other/1' }, NOW).includes('format'))
   })
 
   await check('set ids and keys: a plain date-run id only; no secret-looking or climbing names', () => {

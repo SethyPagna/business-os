@@ -9,6 +9,7 @@ import { WEEKLY_KEEP, WEEKLY_MARKER_KEY, WEEKLY_PREFIX } from './constants.mjs'
 const KEY_CHARS = /^[A-Za-z0-9][A-Za-z0-9._\-/]*$/
 const SET_ID = /^\d{4}-\d{2}-\d{2}-[A-Za-z0-9]{1,24}$/
 export const MANIFEST_NAME = 'manifest.enc.json'
+export const MARKER_FORMAT = 'business-os-weekly-backup/1'
 export const MARKER_FIELDS = Object.freeze([
   'format', 'runId', 'commit', 'startedAt', 'finishedAt', 'backupOk', 'healthOk', 'anchorOk',
   'files', 'encryptedBytes', 'manifestSha256', 'timeTravelStartBookmark', 'engines',
@@ -135,6 +136,19 @@ export function buildMarker(fields) {
   return marker
 }
 
+// The shape the Worker's bell accepts (lane/backup-weekly-bell): this exact format, backupOk true, a finishedAt that is an ISO time and not in the
+// future, a plain runId and a lowercase sha256 of the manifest. A marker that would not be accepted is never written.
+export function markerProblems(marker, now = new Date()) {
+  const problems = []
+  if (!marker || marker.format !== MARKER_FORMAT) problems.push('format')
+  if (!marker || marker.backupOk !== true) problems.push('backupOk')
+  const at = marker && typeof marker.finishedAt === 'string' ? Date.parse(marker.finishedAt) : NaN
+  if (!Number.isFinite(at) || at > now.getTime()) problems.push('finishedAt')
+  if (!marker || typeof marker.runId !== 'string' || !/^[A-Za-z0-9._-]{1,64}$/.test(marker.runId)) problems.push('runId')
+  if (!marker || typeof marker.manifestSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(marker.manifestSha256)) problems.push('manifestSha256')
+  return problems
+}
+
 // PUT every file, then HEAD each one: the size must equal what was sent (and, for a single PUT, the MD5 etag). Any miss fails the set.
 export async function uploadSet({ store, setId, files }) {
   if (!SET_ID.test(setId)) throw new OpsError('weekly-set-id-invalid', 'The weekly set id is malformed.')
@@ -189,10 +203,12 @@ export async function pruneSets({ store, newestVerifiedId, keep = WEEKLY_KEEP, v
 
 // The whole store step, in the one order that keeps the bell honest: upload, verify, prune, and the marker LAST. A crash anywhere before the
 // last PUT leaves the old marker, so the bell keeps counting from the last good set.
-export async function storeWeekly({ store, setId, files, marker }) {
+export async function storeWeekly({ store, setId, files, marker, now = new Date() }) {
+  const body = buildMarker({ ...marker, format: MARKER_FORMAT })
+  if (markerProblems(body, now).length) throw new OpsError('weekly-marker-invalid', 'The weekly marker would not be accepted.')
   const uploaded = await uploadSet({ store, setId, files })
   if (!uploaded.ok) return { ok: false, uploaded, pruned: null, marker: false }
   const pruned = await pruneSets({ store, newestVerifiedId: setId })
-  await store.put(WEEKLY_MARKER_KEY, Buffer.from(`${JSON.stringify(buildMarker(marker))}\n`))
+  await store.put(WEEKLY_MARKER_KEY, Buffer.from(`${JSON.stringify(body)}\n`))
   return { ok: true, uploaded, pruned, marker: true }
 }
