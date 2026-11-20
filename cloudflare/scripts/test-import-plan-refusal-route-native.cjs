@@ -38,11 +38,13 @@ async function main() {
     const routes = {exports:{}}
     const realRequire = native.makeRequire(path.join(__dirname,'..','src','routes'))
     const fence = native.loadReal('importMaintenanceFence')
+    const bumps = []
     new Function('exports','require','module',native.transpile(path.join(__dirname,'..','src','routes','importJobs.ts')))(routes.exports, request => {
       if (request === '../lib/auth') return {requireAuth:async(c,next)=>{c.set('user',{id:61,username:'admin',role_code:'admin',permissions:{}});return next()}}
       if (request === '../lib/db') return {getDb:env=>env.DB}
       if (request === '../lib/importMaintenanceFence') return fence
       if (request === '../lib/importEngine') return native.engine
+      if (request === '../lib/cache') return {...realRequire(request), bumpVersion: async (_env, namespace) => { bumps.push(namespace) }}
       if (request === '../lib/audit') return {audit:async()=>{}}
       return realRequire(request)
     }, routes)
@@ -52,6 +54,7 @@ async function main() {
     const env = {DB:db,PLAN_TIER:'free'}
     const response = await routes.exports.default.request('http://local.test/queue/retry',{method:'POST'},env)
     assert.equal(response.status,503,await response.clone().text())
+    assert.deepEqual(bumps,[],'a refused retry leaves the bell imports section alone')
     const body = await response.json()
     assert.equal(body.code,'import_queue_required')
     assert.equal(body.success,false)
@@ -64,6 +67,7 @@ async function main() {
     const ready = await routes.exports.default.request('http://local.test/queue/retry',{method:'POST'}, {...env,IMPORT_QUEUE:{send:async()=>{delivered++}}})
     assert.equal(ready.status,200,await ready.clone().text())
     assert.equal(delivered,1,'restored queue receives exactly one retry')
+    assert.deepEqual(bumps,['products'],'a queued retry bumps the products version the bell imports section is stamped with')
     assert.equal(snapshot(),before,'queue handoff does not execute stock in request')
     native.seedJob(sqlite, 'unknown', [], {stock_action_mode:'direct',apply_authorized_by_id:61})
     const prepared = db.prepare.bind(db)
