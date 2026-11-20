@@ -46,6 +46,7 @@ exchange({ id: 4, details: [row('Cash', 10), row('ABA', 5)], snap: snapshot([cre
 exchange({ id: 5, details: [row(KHMER_CASH, 10)], snap: snapshot([credit(KHMER_CASH)]) })                                           // flag lost, Khmer cash name (a name test would call it cash)
 exchange({ id: 6, details: [row('Cash', 10)], snap: snapshot([credit('Cash')]) })                                                    // flag lost, then payment_details became unreadable
 run("UPDATE sales SET payment_details='not json' WHERE id=6")
+exchange({ id: 18, details: [row('Cash', 10)], snap: snapshot([credit('Cash')]), returnStatus: 'cancelled' })                         // exchange cancelled after the flag was lost: the cancel found no credit and left it as cash
 // ---- Healthy (the query must not list any of them)
 exchange({ id: 11, details: [credit(KHMER_CASH), row('ABA', 5)], snap: snapshot([credit(KHMER_CASH), row('ABA', 5)]) })               // Khmer cash name
 exchange({ id: 12, details: [credit('Drawer'), row('ABA', 5)], snap: snapshot([credit('Drawer'), row('ABA', 5)]) })                 // a method marked cash in the kinds setting
@@ -54,7 +55,8 @@ exchange({ id: 14, details: [credit('cash'), row('ABA', 5)], snap: snapshot([cre
 exchange({ id: 15, details: [credit(' Cash '), row('ABA', 5)], snap: snapshot([credit('Cash'), row('ABA', 5)]) })                   // spacing only
 exchange({ id: 16, details: [credit('Cash'), row('Cash', 5)], snap: snapshot([credit('Cash'), row('Cash', 5)]) })                   // customer row of the same method
 exchange({ id: 17, details: [row('ABA', 10)], snap: snapshot([row('ABA', 10)]), oneStep: false })                                    // two-step replacement: paid in full, never a credit
-exchange({ id: 18, details: [row('Cash', 10)], snap: snapshot([credit('Cash')]), returnStatus: 'cancelled' })                         // exchange cancelled: the credit left on purpose
+exchange({ id: 23, details: [row('Cash', 5)], snap: snapshot([credit('Cash'), row('Cash', 5)]), returnStatus: 'cancelled' })      // properly cancelled: the credit row is gone, the customer's own Cash row of another amount is left
+exchange({ id: 24, details: [credit('Cash'), row('ABA', 5)], snap: snapshot([credit('Cash'), row('ABA', 5)]), returnStatus: 'cancelled' })  // cancel refused: the flagged row is still there
 exchange({ id: 19, details: [row('Cash', 10)], snap: snapshot([credit('Cash')]), saleStatus: 'cancelled' })                           // replacement sale cancelled
 exchange({ id: 20, details: [row('ABA', 10)], snap: snapshot([row('ABA', 10)]), refund: 10, owed: 10 })                               // refund fully taken off what was owed: no credit exists
 exchange({ id: 21, details: [row('Cash', 10)], snap: snapshot([row('Cash', 10)]), withReturn: false })                                // ordinary sale
@@ -72,8 +74,8 @@ exchange({ id: 22, details: [credit('ABA')], snap: null, withReturn: true })    
     assert.match(query.sql, /^SELECT /)
   })
   const rows = db.prepare(query.sql).all()
-  check('it lists exactly the six damaged sales, ordered by sale id', () => {
-    assert.deepEqual(rows.map((r) => r.sale_id), [1, 2, 3, 4, 5, 6], JSON.stringify(rows))
+  check('it lists exactly the seven damaged sales, ordered by sale id', () => {
+    assert.deepEqual(rows.map((r) => r.sale_id), [1, 2, 3, 4, 5, 6, 18], JSON.stringify(rows))
   })
   check('it names the damage shape, row position, current and snapshot method of each', () => {
     const by = Object.fromEntries(rows.map((r) => [r.sale_id, r]))
@@ -83,6 +85,7 @@ exchange({ id: 22, details: [credit('ABA')], snap: null, withReturn: true })    
     assert.deepEqual([by[4].damage, by[4].row_id, by[4].current_method, by[4].snapshot_method], ['flag_lost', null, 'Cash', 'Cash'])
     assert.deepEqual([by[5].damage, by[5].row_id, by[5].current_method], ['flag_lost', null, KHMER_CASH])
     assert.deepEqual([by[6].damage, by[6].row_id, by[6].current_method, by[6].snapshot_method], ['flag_lost', null, null, 'Cash'], 'an unreadable payment_details is listed, not an error')
+    assert.deepEqual([by[18].damage, by[18].row_id, by[18].current_method, by[18].snapshot_method], ['flag_lost_cancelled', null, 'Cash', 'Cash'])
   })
   check('it exposes no customer, receipt or amount column', () => {
     assert.deepEqual(Object.keys(rows[0]).sort(), ['current_method', 'damage', 'row_id', 'sale_id', 'snapshot_method'])
