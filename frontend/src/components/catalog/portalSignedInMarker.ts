@@ -9,11 +9,15 @@ export type PortalSignedInMarker = 'present' | 'absent' | 'unreadable'
 /** A load-time "signed out" answer clears only a marker older than this: a younger one may belong to a sign-in another tab has not finished. */
 export const PORTAL_SIGNED_IN_FRESH_MS = 120_000
 
-/** How old a marker value is (its timestamp, possibly with trailing dots). An unparsable value reads as 0, that is, young: it is never cleared on a guess. */
+/**
+ * How old a marker value is (its timestamp, possibly with trailing dots). A value that is not a timestamp, or one dated further ahead than the
+ * fresh window (a device clock that was set back), reads as old: the next "signed out" page load clears it, so no guest is left with translation off.
+ */
 export function portalSignedInMarkerAgeMs(value: string | null, now: number): number {
   const match = /^(\d{1,16})\.*$/.exec(String(value ?? ''))
-  if (!match) return 0
-  return Math.max(0, now - Number(match[1]))
+  if (!match) return Infinity
+  const age = now - Number(match[1])
+  return age < -PORTAL_SIGNED_IN_FRESH_MS ? Infinity : Math.max(0, age)
 }
 
 function localStore(): Storage | null {

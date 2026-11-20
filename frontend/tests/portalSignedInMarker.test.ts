@@ -145,18 +145,24 @@ await check('a real "signed out" answer clears an OLD marker, but only when it i
   await third.unmount()
 })
 
-await check('R10: a young or unparsable marker survives a load-time "signed out" answer; an old one is cleared', async () => {
+await check('R10: a young marker survives a load-time "signed out" answer; an old, unparsable or far-future one is cleared', async () => {
   const age = options.portalSignedInMarkerAgeMs
+  const fresh = options.PORTAL_SIGNED_IN_FRESH_MS
   assert.equal(age('1000', 5000), 4000)
   assert.equal(age('1000..', 5000), 4000, 'trailing dots from a same-millisecond write')
-  assert.equal(age('abc', 5000), 0, 'unparsable reads as young')
-  assert.equal(age(null, 5000), 0)
-  assert.equal(age('9000', 5000), 0, 'a clock ahead reads as young')
+  assert.equal(age('9000', 5000), 0, 'a clock a little ahead reads as young')
+  // F1: a value that can never grow old would leave a guest with translation off for good, so it reads as old.
+  assert.equal(age('abc', 5000), Infinity, 'not a timestamp')
+  assert.equal(age(null, 5000), Infinity)
+  assert.equal(age(String(5000 + fresh + 1), 5000), Infinity, 'dated further ahead than the fresh window: the clock was set back')
+  assert.equal(age(String(5000 + fresh), 5000), 0, 'exactly the window ahead is still young')
   const cases: Array<[string, string, boolean]> = [
     ['young', String(Date.now() - 1000), true],
     ['young with a dot', `${Date.now()}.`, true],
-    ['unparsable', 'written-by-a-new-build', true],
-    ['old', String(Date.now() - options.PORTAL_SIGNED_IN_FRESH_MS - 5000), false],
+    ['a little ahead', String(Date.now() + 30_000), true],
+    ['unparsable', 'written-by-a-new-build', false],
+    ['far ahead', String(Date.now() + fresh + 60_000), false],
+    ['old', String(Date.now() - fresh - 5000), false],
   ]
   for (const [name, value, survives] of cases) {
     useStore({ [KEY]: value })
