@@ -48,7 +48,7 @@ import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGal
 import InstallPromptBand from '../shared/InstallPromptBand.tsx'
 import InstallAppButton from '../install/InstallAppButton.tsx'
 import { installStandaloneExternalLinkGuard } from '../../utils/standaloneNavigation.ts'
-import { normalizePortalLanguage, readPublicStorefrontLanguage, storePortalLanguage } from './portalLanguageOptions.ts'
+import { isGoogleLanguageChoice, normalizePortalChoice, portalCopyLanguage, readPublicStorefrontChoice, storePortalLanguage } from './portalLanguageOptions.ts'
 import { isAdminHostname, isStorefrontSignInPath } from '../../app/pathRouting.ts'
 import { aiProviderState } from './legal/aiProviderDisclosure.ts'
 import { PORTAL_DARK_SURFACE, PORTAL_LIGHT_SURFACE } from './portalContrast.ts'
@@ -523,7 +523,9 @@ export default function PublicCatalogPage() {
   const [assistantResponse, setAssistantResponse] = useState<LooseRecord | null>(null)
   const [assistantDisclosure, setAssistantDisclosure] = useState<AiProviderState | null>(null)
   const [assistantDataUseConsent, setAssistantDataUseConsent] = useState(false)
-  const [pageLanguage, setPageLanguage] = useState(readPublicStorefrontLanguage)
+  // What the visitor picked (six values). pageLanguage is what the storefront's own copy and the Worker see: km or en.
+  const [pageChoice, setPageChoice] = useState(readPublicStorefrontChoice)
+  const pageLanguage = portalCopyLanguage(pageChoice)
   const copy: CopyFunction = (key, fallback = '', fallbackKm = fallback) =>
     resolveStorefrontCopy(pageLanguage, t, key, fallback, fallbackKm)
   const bucket = usePortalBucket()
@@ -660,11 +662,34 @@ export default function PublicCatalogPage() {
   // capture is armed earlier, in index.tsx.
   useEffect(() => installStandaloneExternalLinkGuard(), [])
 
+  // Google Translate loads only after the visitor picks one of its four languages; the controller is its own lazy chunk.
+  useEffect(() => {
+    if (!isGoogleLanguageChoice(pageChoice)) return undefined
+    let cancelled = false
+    const giveUp = (controller?: { removePortalGoogleTranslate: () => unknown }) => {
+      if (cancelled) return
+      controller?.removePortalGoogleTranslate()
+      storePortalLanguage('en')
+      setPageChoice('en')
+    }
+    import('./portalTranslateController.ts')
+      .then((controller) => controller.applyPortalGoogleTranslate(pageChoice).then((applied) => { if (!applied) giveUp(controller) }))
+      .catch(() => giveUp())
+    return () => { cancelled = true }
+  }, [pageChoice])
+
   const changePageLanguage = (next: string) => {
-    const language = normalizePortalLanguage(next)
-    if (!language) return
-    storePortalLanguage(language)
-    setPageLanguage(language)
+    const choice = normalizePortalChoice(next)
+    if (!choice) return
+    storePortalLanguage(choice)
+    if (isGoogleLanguageChoice(pageChoice) && !isGoogleLanguageChoice(choice)) {
+      // Google moved the page's text nodes: take its translation off (a reload when it already rewrote the page).
+      import('./portalTranslateController.ts')
+        .then((controller) => { if (controller.removePortalGoogleTranslate() === 'clean') setPageChoice(choice) })
+        .catch(() => setPageChoice(choice))
+      return
+    }
+    setPageChoice(choice)
   }
 
   useEffect(() => {
@@ -1509,6 +1534,7 @@ export default function PublicCatalogPage() {
       setPortalImageView={setPortalImageView}
       toggleTheme={toggleTheme}
       pageLanguage={pageLanguage}
+      pageLanguageChoice={pageChoice}
       changePageLanguage={changePageLanguage}
     />
     </div>

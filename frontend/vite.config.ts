@@ -1006,6 +1006,8 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/catalog/portalContentI18n.ts')) {
       return 'portal-content-i18n'
     }
+    // Google Translate loader: its own chunk, fetched only when a visitor picks Chinese, French or Spanish.
+    if (normalized.includes('/src/components/catalog/portalTranslateController.ts')) return 'portal-translate'
     if (
       normalized.includes('/src/components/catalog/portalSubmissionHelpers.ts')
       || normalized.includes('/src/components/catalog/portalAssistantHelpers.ts')
