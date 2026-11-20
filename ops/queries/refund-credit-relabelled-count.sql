@@ -3,9 +3,11 @@
 -- A one-step exchange books its refund credit as row 0 of the replacement sale's payment_details, flagged refund_credit, under the shop's first
 -- cash-kind method, and copies that row (method and amounts, without the flag) into the sale's immutable creation snapshot (migration 0134).
 -- Before the fix two writers damaged it:
---   method_changed  a bulk payment relabel or a Settings method rename rewrote the credit row's method. Found by comparing the credit's current method
---                   with the method in the creation snapshot, so a Khmer cash name, a method pinned to cash in the kinds setting and a digital method whose
---                   name contains "cash" are all judged by what they were booked as, not by a name test.
+--   kind_changed    a bulk payment relabel or a Settings method rename moved the credit row to a method of the OTHER drawer kind (cash or digital). Found by
+--                   comparing the kind of the credit's current method with the kind of the method in the creation snapshot, decided by the rule the Worker
+--                   uses (resolvePaymentMethodKind in paymentMethodRegistry.ts): the pos_payment_method_kinds setting first (its key is the method trimmed and
+--                   lowercased, its value cash or digital), else a name containing "cash" or "សាច់ប្រាក់" is cash, anything else digital. A same-kind rename
+--                   (Cash to Cash USD, case or spacing only) is a label change and is NOT listed, so the query stays true after a legitimate rename.
 --   flag_lost       a settle of a Not Paid exchange or a payment correction rebuilt every row as {method, amount_usd, amount_khr} and dropped the flag, so
 --                   an exchange cancel cannot find the credit and leaves it as a cash tender while the refund's cash-out is reversed.
 --   flag_lost_cancelled  the same lost flag on an exchange that was cancelled afterwards: the cancel could not find the credit, so the sale still holds it as
@@ -17,17 +19,20 @@
 -- production does not have; the planner's own order scanned all of sales there. Cancelled sales are left out. A cancelled return is read only
 -- for flag_lost_cancelled (a cancel that worked removed the credit on purpose; a refused cancel leaves the flagged row and is healthy). A flag_lost row needs the return to have owed a refund (total_refund_usd - owed_reduction_usd > 0)
 -- and a creation snapshot whose row 0 exists.
--- Limit: run it BEFORE the same-kind rename fix is deployed. After it, a cash to cash rename renames the credit with the rest and shows here as
--- method_changed although nothing is wrong; compare current_method with the shop's cash methods before repairing anything. It repairs nothing.
+-- It repairs nothing. The kinds setting is read once (one row by primary key); its SQL twin of resolvePaymentMethodKind is pinned against the TypeScript
+-- rule on a table of names in test-refund-credit-census-sqlite.cjs. SQLite lower() is ASCII-only, harmless for Latin and Khmer names.
 -- Columns: sale_id, row_id (position of the flagged row in payment_details; NULL for flag_lost), current_method (the flagged row's method; for flag_lost
--- the method of row 0, NULL when payment_details cannot be read), snapshot_method (row 0 of the creation snapshot), damage ('method_changed', 'flag_lost' or 'flag_lost_cancelled').
+-- the method of row 0, NULL when payment_details cannot be read), snapshot_method (row 0 of the creation snapshot), current_kind and snapshot_kind ('cash' or 'digital'; filled for kind_changed only), damage ('kind_changed', 'flag_lost' or 'flag_lost_cancelled').
 -- ops:max-rows-read 10
+WITH kind_setting AS MATERIALIZED (
+  SELECT CASE WHEN json_valid(value) AND json_type(value) = 'object' THEN value ELSE '{}' END AS v FROM settings WHERE key = 'pos_payment_method_kinds'
+), found AS (
 SELECT
   s.id AS sale_id,
   CAST(credit.key AS INTEGER) AS row_id,
   CASE WHEN credit.key IS NULL THEN CASE WHEN json_valid(s.payment_details) THEN json_extract(s.payment_details, '$[0].method') END ELSE json_extract(credit.value, '$.method') END AS current_method,
   json_extract(s.creation_snapshot_json, '$.payment_details[0].method') AS snapshot_method,
-  CASE WHEN credit.key IS NOT NULL THEN 'method_changed' WHEN r.status = 'cancelled' THEN 'flag_lost_cancelled' ELSE 'flag_lost' END AS damage
+  CASE WHEN credit.key IS NOT NULL THEN 'kind_changed' WHEN r.status = 'cancelled' THEN 'flag_lost_cancelled' ELSE 'flag_lost' END AS damage
 FROM returns r
 CROSS JOIN sales s ON s.id = r.replacement_sale_id AND s.source_return_id = r.id
 CROSS JOIN return_create_receipts rc ON rc.return_id = r.id
@@ -54,4 +59,20 @@ WHERE r.replacement_sale_id > 0
         AND COALESCE(json_extract(d.value, '$.amount_usd'), 0) = COALESCE(json_extract(s.creation_snapshot_json, '$.payment_details[0].amount_usd'), 0)
         AND COALESCE(json_extract(d.value, '$.amount_khr'), 0) = COALESCE(json_extract(s.creation_snapshot_json, '$.payment_details[0].amount_khr'), 0)))
   )
-ORDER BY s.id, row_id
+)
+SELECT sale_id, row_id, current_method, snapshot_method, current_kind, snapshot_kind, damage FROM (
+  SELECT found.*,
+    CASE WHEN damage = 'kind_changed' THEN COALESCE(
+      (SELECT lower(trim(k.value)) FROM json_each((SELECT v FROM kind_setting)) k
+        WHERE lower(trim(k.key)) <> '' AND lower(trim(k.key)) = lower(trim(COALESCE(current_method, ''))) AND lower(trim(k.value)) IN ('cash', 'digital')
+        ORDER BY k.id DESC LIMIT 1),
+      CASE WHEN instr(lower(trim(COALESCE(current_method, ''))), 'cash') > 0 OR instr(lower(trim(COALESCE(current_method, ''))), 'សាច់ប្រាក់') > 0 THEN 'cash' ELSE 'digital' END) END AS current_kind,
+    CASE WHEN damage = 'kind_changed' THEN COALESCE(
+      (SELECT lower(trim(k.value)) FROM json_each((SELECT v FROM kind_setting)) k
+        WHERE lower(trim(k.key)) <> '' AND lower(trim(k.key)) = lower(trim(COALESCE(snapshot_method, ''))) AND lower(trim(k.value)) IN ('cash', 'digital')
+        ORDER BY k.id DESC LIMIT 1),
+      CASE WHEN instr(lower(trim(COALESCE(snapshot_method, ''))), 'cash') > 0 OR instr(lower(trim(COALESCE(snapshot_method, ''))), 'សាច់ប្រាក់') > 0 THEN 'cash' ELSE 'digital' END) END AS snapshot_kind
+  FROM found
+)
+WHERE damage <> 'kind_changed' OR current_kind <> snapshot_kind
+ORDER BY sale_id, row_id

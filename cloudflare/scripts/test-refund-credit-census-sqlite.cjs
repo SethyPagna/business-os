@@ -3,15 +3,27 @@
 // No remote database, no native lock: the in-memory schema only.
 
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
 const path = require('node:path')
+const ts = require('typescript')
 const { pathToFileURL } = require('node:url')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
+const KHMER_CASH = 'សាច់ប្រាក់'
 const db = openDb(loadAll())
 const run = (sql, params = []) => db.prepare(sql).run(params)
+const registry = (() => {
+  const sourcePath = path.join(__dirname, '..', 'src', 'lib', 'paymentMethodRegistry.ts')
+  const output = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: sourcePath }).outputText
+  const mod = { exports: {} }
+  new Function('require', 'module', 'exports', output)(require, mod, mod.exports)
+  return mod.exports
+})()
+const KINDS_SETTING = { Drawer: 'cash', 'Cash App': 'digital', ABA: 'digital', ' Till ': 'cash', Wing: 'Digital' }
+run("INSERT INTO settings(key,value,updated_at) VALUES('pos_payment_method_kinds',?,?)", [JSON.stringify(KINDS_SETTING), '2026-11-01T08:00:00.000Z'])
+const KIND_NAMES = ['Cash', 'cash', ' CASH ', 'Cash USD', 'Cash KHR', KHMER_CASH, 'ABA', 'aba ', 'Drawer', 'DRAWER', 'drawer ', 'Cash App', 'cash app', 'Till', 'wing', 'Bank Transfer', 'Acleda', 'Mixed Cash Bank', '']
 const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
-const KHMER_CASH = 'សាច់ប្រាក់'
 const credit = (method, usd = 10) => ({ method, amount_usd: usd, amount_khr: 0, refund_credit: true })
 const row = (method, usd) => ({ method, amount_usd: usd, amount_khr: 0 })
 // The creation snapshot copies the credit as row 0 WITHOUT the flag (saleCreationSnapshot.ts keeps method and amounts only).
@@ -41,13 +53,15 @@ function exchange({ id, details, snap, oneStep = true, returnStatus = 'completed
 // ---- Damaged (the query must list each one)
 exchange({ id: 1, details: [credit('ABA'), row('Cash', 5)], snap: snapshot([credit('Cash'), row('Cash', 5)]) })                       // relabelled to a digital method
 exchange({ id: 2, details: [credit('Cash App'), row('ABA', 5)], snap: snapshot([credit('Cash'), row('ABA', 5)]) })                  // relabelled to a digital method whose name contains "cash"
-exchange({ id: 3, details: [credit('Cash USD'), row('ABA', 5)], snap: snapshot([credit('Cash'), row('ABA', 5)]) })                  // renamed between two cash names
 exchange({ id: 4, details: [row('Cash', 10), row('ABA', 5)], snap: snapshot([credit('Cash'), row('ABA', 5)]) })                     // flag lost by a settle or a correction
 exchange({ id: 5, details: [row(KHMER_CASH, 10)], snap: snapshot([credit(KHMER_CASH)]) })                                           // flag lost, Khmer cash name (a name test would call it cash)
 exchange({ id: 6, details: [row('Cash', 10)], snap: snapshot([credit('Cash')]) })                                                    // flag lost, then payment_details became unreadable
 run("UPDATE sales SET payment_details='not json' WHERE id=6")
 exchange({ id: 18, details: [row('Cash', 10)], snap: snapshot([credit('Cash')]), returnStatus: 'cancelled' })                         // exchange cancelled after the flag was lost: the cancel found no credit and left it as cash
 // ---- Healthy (the query must not list any of them)
+exchange({ id: 3, details: [credit('Cash USD'), row('ABA', 5)], snap: snapshot([credit('Cash'), row('ABA', 5)]) })                  // renamed between two cash names: a label change, not damage
+exchange({ id: 25, details: [credit(KHMER_CASH), row('ABA', 5)], snap: snapshot([credit('Cash'), row('ABA', 5)]) })                 // Khmer cash name renamed to Cash: same kind
+exchange({ id: 26, details: [credit('Drawer'), row('ABA', 5)], snap: snapshot([credit('Cash USD'), row('ABA', 5)]) })               // a pinned cash name renamed to a cash-named one: same kind
 exchange({ id: 11, details: [credit(KHMER_CASH), row('ABA', 5)], snap: snapshot([credit(KHMER_CASH), row('ABA', 5)]) })               // Khmer cash name
 exchange({ id: 12, details: [credit('Drawer'), row('ABA', 5)], snap: snapshot([credit('Drawer'), row('ABA', 5)]) })                 // a method marked cash in the kinds setting
 exchange({ id: 13, details: [credit('Cash App'), row('ABA', 5)], snap: snapshot([credit('Cash App'), row('ABA', 5)]) })             // a method marked cash whose name says cash app
@@ -62,6 +76,15 @@ exchange({ id: 20, details: [row('ABA', 10)], snap: snapshot([row('ABA', 10)]), 
 exchange({ id: 21, details: [row('Cash', 10)], snap: snapshot([row('Cash', 10)]), withReturn: false })                                // ordinary sale
 exchange({ id: 22, details: [credit('ABA')], snap: null, withReturn: true })                                                         // no creation snapshot: nothing to compare against
 
+// Kind table: each name is booked as the credit's current method against a snapshot of 'Cash' (cash) and of 'Bank Transfer' (digital); the query lists
+// it against exactly the snapshot of the other kind, and TypeScript must say the same.
+const probes = []
+let probeId = 100
+for (const name of KIND_NAMES) for (const snap of ['Cash', 'Bank Transfer']) {
+  exchange({ id: ++probeId, details: [credit(name)], snap: snapshot([credit(snap)]) })
+  probes.push({ id: probeId, name, snap })
+}
+
 ;(async () => {
   const guard = await import(pathToFileURL(path.join(__dirname, '..', '..', 'ops', 'scripts', 'ops-sql-guard.mjs')).href)
   const query = guard.loadQuery('refund-credit-relabelled-count')
@@ -71,24 +94,44 @@ exchange({ id: 22, details: [credit('ABA')], snap: null, withReturn: true })    
   check('the guard accepts the file: one SELECT, a read budget, zero minimum rows', () => {
     assert.equal(query.rules.minRows, 0)
     assert.ok(Number.isInteger(query.maxRowsRead) && query.maxRowsRead > 0)
-    assert.match(query.sql, /^SELECT /)
+    assert.match(query.sql, /^(SELECT|WITH) /)
   })
   const rows = db.prepare(query.sql).all()
-  check('it lists exactly the seven damaged sales, ordered by sale id', () => {
-    assert.deepEqual(rows.map((r) => r.sale_id), [1, 2, 3, 4, 5, 6, 18], JSON.stringify(rows))
+  const listed = rows.filter((r) => r.sale_id < 100)
+  check('it lists exactly the six damaged sales, ordered by sale id', () => {
+    assert.deepEqual(listed.map((r) => r.sale_id), [1, 2, 4, 5, 6, 18], JSON.stringify(listed))
   })
   check('it names the damage shape, row position, current and snapshot method of each', () => {
     const by = Object.fromEntries(rows.map((r) => [r.sale_id, r]))
-    assert.deepEqual([by[1].damage, by[1].row_id, by[1].current_method, by[1].snapshot_method], ['method_changed', 0, 'ABA', 'Cash'])
-    assert.deepEqual([by[2].damage, by[2].row_id, by[2].current_method], ['method_changed', 0, 'Cash App'])
-    assert.deepEqual([by[3].damage, by[3].current_method, by[3].snapshot_method], ['method_changed', 'Cash USD', 'Cash'])
+    assert.deepEqual([by[1].damage, by[1].row_id, by[1].current_method, by[1].snapshot_method, by[1].current_kind, by[1].snapshot_kind], ['kind_changed', 0, 'ABA', 'Cash', 'digital', 'cash'])
+    assert.deepEqual([by[2].damage, by[2].row_id, by[2].current_method, by[2].current_kind, by[2].snapshot_kind], ['kind_changed', 0, 'Cash App', 'digital', 'cash'], 'a name with "cash" pinned digital in the kinds setting is digital')
+    assert.equal(by[3], undefined, 'Cash USD from Cash is a same-kind rename')
     assert.deepEqual([by[4].damage, by[4].row_id, by[4].current_method, by[4].snapshot_method], ['flag_lost', null, 'Cash', 'Cash'])
     assert.deepEqual([by[5].damage, by[5].row_id, by[5].current_method], ['flag_lost', null, KHMER_CASH])
     assert.deepEqual([by[6].damage, by[6].row_id, by[6].current_method, by[6].snapshot_method], ['flag_lost', null, null, 'Cash'], 'an unreadable payment_details is listed, not an error')
     assert.deepEqual([by[18].damage, by[18].row_id, by[18].current_method, by[18].snapshot_method], ['flag_lost_cancelled', null, 'Cash', 'Cash'])
   })
+  check('a same-kind rename is healthy: not listed, whatever the two names are', () => {
+    for (const id of [3, 25, 26]) assert.equal(rows.some((r) => r.sale_id === id), false, 'sale ' + id)
+  })
+  check('the SQL kind rule agrees with resolvePaymentMethodKind on a table of names (setting, token, Khmer, case and spacing)', () => {
+    const kinds = registry.parsePaymentMethodKinds(KINDS_SETTING)
+    const sqlKind = (name) => {
+      const asCash = rows.find((r) => r.sale_id === probes.find((p) => p.name === name && p.snap === 'Bank Transfer').id)
+      const asDigital = rows.find((r) => r.sale_id === probes.find((p) => p.name === name && p.snap === 'Cash').id)
+      assert.ok(!(asCash && asDigital), 'one name cannot differ from both kinds: ' + JSON.stringify(name))
+      assert.ok(asCash || asDigital, 'every name is one of the two kinds: ' + JSON.stringify(name))
+      if (asCash) assert.equal(asCash.current_kind, 'cash')
+      if (asDigital) assert.equal(asDigital.current_kind, 'digital')
+      return asCash ? 'cash' : 'digital'
+    }
+    for (const name of KIND_NAMES) assert.equal(sqlKind(name), registry.resolvePaymentMethodKind(name, kinds), 'kind of ' + JSON.stringify(name))
+    assert.ok(KIND_NAMES.some((n) => registry.resolvePaymentMethodKind(n, kinds) === 'cash') && KIND_NAMES.some((n) => registry.resolvePaymentMethodKind(n, kinds) === 'digital'))
+    assert.equal(registry.resolvePaymentMethodKind('Cash App', kinds), 'digital', 'the table includes a name the setting overrides against its token')
+    assert.equal(registry.resolvePaymentMethodKind('Wing', {}), 'digital')
+  })
   check('it exposes no customer, receipt or amount column', () => {
-    assert.deepEqual(Object.keys(rows[0]).sort(), ['current_method', 'damage', 'row_id', 'sale_id', 'snapshot_method'])
+    assert.deepEqual(Object.keys(rows[0]).sort(), ['current_kind', 'current_method', 'damage', 'row_id', 'sale_id', 'snapshot_kind', 'snapshot_method'])
   })
   check('it walks returns, then sales by primary key, then the receipt by return_id, with no statistics (plan)', () => {
     const plan = db.prepare(`EXPLAIN QUERY PLAN ${query.sql}`).all().map((r) => r.detail).join(' | ')
