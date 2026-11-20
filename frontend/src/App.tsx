@@ -1091,10 +1091,24 @@ function Notification({ notification, onDismiss }: NotificationProps) {
   // Every pop-up is drawn here, so feature pages only enqueue messages through AppContext.
   // The whole message always shows (no clamp): an alert is read for ten seconds, not guessed at.
   const { visible, dismiss, pause, resume } = useToastStack(notification)
+  // The stack and every pop-up body let the pointer through to whatever is underneath (a dialog's Close sits
+  // under it on a phone). Only the controls below take input, and only they pause the clock.
+  const holds = useRef(new Map<string, Set<string>>())
+  const hold = (key: string, control: string, on: boolean) => {
+    const set = holds.current.get(key) ?? new Set<string>()
+    holds.current.set(key, set)
+    if (on) { set.add(control); pause(key) } else { set.delete(control); if (!set.size) { holds.current.delete(key); resume(key) } }
+  }
+  const holdProps = (key: string, control: string) => ({
+    onMouseEnter: () => hold(key, control + '-hover', true),
+    onMouseLeave: () => hold(key, control + '-hover', false),
+    onFocus: () => hold(key, control + '-focus', true),
+    onBlur: () => hold(key, control + '-focus', false),
+  })
   if (!visible.length) return null
 
   const node = (
-    <div className="fixed right-3 top-[4.75rem] md:right-5 md:top-5 z-[1100] flex w-[min(24rem,calc(100vw-1.5rem))] flex-col gap-2">
+    <div className="fixed right-3 top-[4.75rem] md:right-5 md:top-5 z-[1100] pointer-events-none flex w-[min(24rem,calc(100vw-1.5rem))] flex-col gap-2">
       {visible.map((toast) => {
         const colorClass = getNotificationColor(toast.type)
         const prefix = getNotificationPrefix(toast.type)
@@ -1104,26 +1118,26 @@ function Notification({ notification, onDismiss }: NotificationProps) {
             key={toast.key}
             role={toast.type === 'error' ? 'alert' : 'status'}
             aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
-            onMouseEnter={() => pause(toast.key)}
-            onMouseLeave={() => resume(toast.key)}
-            onFocus={() => pause(toast.key)}
-            onBlur={() => resume(toast.key)}
-            className={`${colorClass} text-white pl-4 pr-2.5 py-3 rounded-xl shadow-2xl text-sm font-medium fade-in flex items-start gap-2`}
+            className={`${colorClass} text-white pl-4 pr-2.5 py-3 rounded-xl shadow-2xl text-sm font-medium fade-in pointer-events-none flex items-start gap-2`}
           >
+            {text}
             {toast.onActivate ? (
               <button
                 type="button"
-                className="flex min-w-0 flex-1 items-start text-left"
+                {...holdProps(toast.key, 'view')}
                 onClick={() => { toast.onActivate?.(); dismiss(toast.key) }}
+                className="pointer-events-auto flex shrink-0 items-center gap-1 rounded-full bg-white/15 px-2.5 py-1 text-xs font-semibold leading-relaxed text-white hover:bg-white/25 transition-colors"
               >
-                {text}
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M4 1.5L8.5 6L4 10.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                {t('view')}
               </button>
-            ) : text}
+            ) : null}
             <button
               type="button"
               aria-label={t('dismiss_notification')}
+              {...holdProps(toast.key, 'dismiss')}
               onClick={() => { dismiss(toast.key); if (toast.fromSlot) onDismiss?.() }}
-              className="shrink-0 -mt-0.5 -mr-0.5 rounded-full p-1 leading-none text-white/80 hover:text-white hover:bg-white/15 transition-colors"
+              className="pointer-events-auto shrink-0 -mt-0.5 -mr-0.5 rounded-full p-1 leading-none text-white/80 hover:text-white hover:bg-white/15 transition-colors"
             >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M1 1L13 13M13 1L1 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />

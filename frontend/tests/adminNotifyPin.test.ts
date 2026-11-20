@@ -46,8 +46,23 @@ assert.match(contextSource, /setNotification\(\(current\) => \(current\?\.id ===
 assert.doesNotMatch(popup, /truncate|line-clamp|text-ellipsis|overflow-hidden/)
 assert.match(popup, /w-\[min\(24rem,calc\(100vw-1\.5rem\)\)\]/)
 assert.match(popup, /role=\{toast\.type === 'error' \? 'alert' : 'status'\}/)
-assert.match(popup, /onMouseEnter=\{\(\) => pause\(toast\.key\)\}/)
-assert.match(popup, /onFocus=\{\(\) => pause\(toast\.key\)\}/)
+// Nothing in the stack takes the pointer except its own controls: a click lands on what is underneath.
+assert.match(popup, /z-\[1100\] pointer-events-none flex/)
+assert.match(popup, /fade-in pointer-events-none flex items-start/)
+const dismissAt = popup.indexOf("aria-label={t('dismiss_notification')}")
+const dismissBtn = popup.slice(dismissAt)
+assert.match(dismissBtn.slice(0, 300), /holdProps\(toast\.key, 'dismiss'\)/)
+assert.match(dismissBtn, /className="pointer-events-auto /)
+const actionBtn = popup.slice(popup.indexOf('{toast.onActivate ? ('), dismissAt)
+assert.match(actionBtn, /holdProps\(toast\.key, 'view'\)/)
+assert.match(actionBtn, /pointer-events-auto/)
+assert.match(actionBtn, /t\('view'\)/)
+// The body is text, not a button, and the pop-up element itself carries no hover or focus handler.
+const wrapper = popup.slice(popup.indexOf('role={toast.type'), popup.indexOf('{text}'))
+assert.doesNotMatch(wrapper, /onMouseEnter|onFocus|onClick/)
+// Hover and focus on a control pause the clock; leaving every control resumes it.
+assert.match(popup, /onMouseEnter: \(\) => hold\(key, control \+ '-hover', true\)/)
+assert.match(popup, /onFocus: \(\) => hold\(key, control \+ '-focus', true\)/)
 assert.match(hookSource, /items\.slice\(0, NOTIFICATION_MAX_VISIBLE\)\.reverse\(\)/)
 
 // A failed-action pop-up leaves nothing behind: no list state, no storage, no timer in notify.
