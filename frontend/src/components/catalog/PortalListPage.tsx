@@ -1,4 +1,6 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { clearAllStep } from './portalClearConfirm.ts'
+import type { ClearAllEvent } from './portalClearConfirm.ts'
 import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
 import Copy from 'lucide-react/dist/esm/icons/copy.js'
@@ -24,6 +26,53 @@ type Row = { id: string | number; name: string; shopLine?: string; priceText?: s
 const ICON_BUTTON = 'inline-flex h-11 w-11 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-full text-[#23201b] transition hover:bg-stone-200 dark:text-neutral-200 dark:hover:bg-neutral-800'
 const DANGER_BUTTON = 'inline-flex h-11 w-11 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-full text-rose-700 transition hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-950'
 const SURFACE = 'overflow-hidden rounded-2xl border border-stone-300 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900'
+
+const CLEAR_BUTTON = 'inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold transition sm:min-h-10'
+
+/** "Clear all" as a words button that turns, in place, into a two-button question. Only Clear empties the list. */
+function ClearAllControl({ copy, count, label, onClear }: { copy: CopyFn; count: number; label: string; onClear: () => void }) {
+  const [confirming, setConfirming] = useState(false)
+  const rootRef = useRef<HTMLSpanElement | null>(null)
+  const keepRef = useRef<HTMLButtonElement | null>(null)
+  const step = (event: ClearAllEvent) => {
+    const next = clearAllStep(confirming, event)
+    setConfirming(next.confirming)
+    if (next.clear) onClear()
+  }
+  useEffect(() => {
+    if (!confirming) return undefined
+    keepRef.current?.focus({ preventScroll: true })
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setConfirming(false) }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [confirming])
+  const question = count > 1
+    ? replaceCount(copy('clearAllConfirm', 'Clear all {count} items?', 'សម្អាត {count} មុខទាំងអស់ឬ?'), count)
+    : copy('clearOneConfirm', 'Clear this item?', 'សម្អាតមុខនេះឬ?')
+  if (!confirming) {
+    return (
+      <button type="button" data-portal-clear-all="rest" className={`${CLEAR_BUTTON} text-rose-700 hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-950`} onClick={() => step('ask')}>{label}</button>
+    )
+  }
+  return (
+    <span
+      ref={rootRef}
+      role="group"
+      aria-label={question}
+      data-portal-clear-all="confirm"
+      className="inline-flex flex-wrap items-center gap-2"
+      onBlur={(event) => { if (!rootRef.current?.contains(event.relatedTarget as Node | null)) step('leave') }}
+    >
+      <span className="text-sm font-medium text-[#23201b] dark:text-neutral-100">{question}</span>
+      <button type="button" className={`${CLEAR_BUTTON} bg-rose-700 text-white hover:bg-rose-800 dark:bg-rose-600 dark:hover:bg-rose-500`} onClick={() => step('confirm')}>{copy('clearAllYes', 'Clear', 'សម្អាត')}</button>
+      <button ref={keepRef} type="button" className={`${CLEAR_BUTTON} border border-stone-300 text-[#23201b] hover:bg-stone-200 dark:border-neutral-600 dark:text-neutral-100 dark:hover:bg-neutral-800`} onClick={() => step('keep')}>{copy('clearAllKeep', 'Keep', 'រក្សា')}</button>
+    </span>
+  )
+}
+
+function replaceCount(template: string, count: number): string {
+  return template.split('{count}').join(String(count))
+}
 
 /**
  * Saved and List as one full page inside the storefront (spec section 4): one view, two segments. List rows are image, name, quantity stepper,
@@ -146,9 +195,7 @@ export default function PortalListPage({
               <button type="button" className={ICON_BUTTON} onClick={onDownload} aria-label={copy('downloadList', 'Download')} title={copy('downloadList', 'Download')}>
                 <Download className="h-4 w-4" />
               </button>
-              <button type="button" className={DANGER_BUTTON} onClick={onClearList} aria-label={copy('clearBucket', 'Clear all')} title={copy('clearBucket', 'Clear all')}>
-                <Trash2 className="h-4 w-4" />
-              </button>
+              <ClearAllControl key="list" copy={copy} count={listItems.length} label={copy('clearBucket', 'Clear all', 'សម្អាតទាំងអស់')} onClear={onClearList} />
               {copyState !== 'idle' ? (
                 <span role="status" className={`ml-1 text-xs ${copyState === 'failed' ? 'text-rose-700 dark:text-rose-300' : 'text-stone-600 dark:text-neutral-300'}`}>
                   {copyState === 'copied' ? copy('bucketCopied', 'Copied!') : copy('bucketCopyFailed', 'Could not copy automatically -- try Download instead.')}
@@ -187,9 +234,7 @@ export default function PortalListPage({
             </ul>
           )}
           {savedItems.length > 0 ? (
-            <button type="button" className={DANGER_BUTTON} onClick={onClearSaved} aria-label={copy('clearWishlist', 'Clear all', 'សម្អាតទាំងអស់')} title={copy('clearWishlist', 'Clear all', 'សម្អាតទាំងអស់')}>
-              <Trash2 className="h-4 w-4" />
-            </button>
+            <ClearAllControl key="saved" copy={copy} count={savedItems.length} label={copy('clearWishlist', 'Clear all', 'សម្អាតទាំងអស់')} onClear={onClearSaved} />
           ) : null}
         </>
       )}
