@@ -301,5 +301,16 @@ console.log('PASS case-only rename rebuilds split summary, preserves repeated te
   assert.throws(() => planSaleSettlement({ ...base, existingPaymentDetailsRaw: plain, paymentDetailsRaw: [{ method: 'Cash', amount_usd: 8, amount_khr: 0, refund_credit: true }, { method: 'ABA Bank', amount_usd: 2, amount_khr: 0 }] }), (error) => error instanceof SettlementValidationError)
   const mintedCorrection = planSaleSettlement({ ...correction, recordedRefundCreditRaw: plain, paymentDetailsRaw: [{ method: 'Cash', amount_usd: 10, amount_khr: 0, refund_credit: true }] })
   assert.equal(mintedCorrection.paymentDetails.some((row) => 'refund_credit' in row), false, 'a correction cannot mint the flag')
+  // A correction on a sale whose stored payment_details cannot be read, or is not an array, is refused: it could hide a credit row.
+  const storedInvalid = (recordedRefundCreditRaw) => assert.throws(() => planSaleSettlement({ ...correction, recordedRefundCreditRaw, paymentDetailsRaw: [{ method: 'ABA Bank', amount_usd: 10, amount_khr: 0 }] }), (error) => error instanceof SettlementValidationError && error.code === 'stored_payment_invalid')
+  storedInvalid('{{{')
+  storedInvalid('[{"method":"Cash","refund_credit":true')
+  storedInvalid('{"method":"Cash","refund_credit":true}')
+  storedInvalid(7)
+  // Well-formed credit is carried as before; absent or empty means no credit.
+  assert.deepEqual(planSaleSettlement({ ...correction, paymentDetailsRaw: [credit, { method: 'ABA Bank', amount_usd: 5, amount_khr: 0 }] }).paymentDetails[0], credit)
+  for (const none of [undefined, null, '', '   ']) {
+    assert.deepEqual(planSaleSettlement({ ...correction, recordedRefundCreditRaw: none, paymentDetailsRaw: [{ method: 'ABA Bank', amount_usd: 10, amount_khr: 0 }] }).paymentDetails, [{ method: 'ABA Bank', amount_usd: 10, amount_khr: 0 }])
+  }
   console.log('PASS refund credit: kept with its flag by settle and correction, never invented, dropped or changed; the rename skips it')
 }

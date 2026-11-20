@@ -252,7 +252,13 @@ export function planSaleSettlement(input: {
   const carriedCredit: ExistingRow[] = []
   if (input.recordedRefundCreditRaw != null) {
     let carried: unknown = input.recordedRefundCreditRaw
-    if (typeof carried === 'string' && carried.trim()) { try { carried = JSON.parse(carried) } catch { carried = null } }
+    // Absent or empty means no credit. Anything else that is not a readable array could hide a credit row, so it refuses like a bad stored row.
+    const unreadableCredit = () => fail('The sale has unreadable stored payment details and cannot be settled safely.', 'stored_payment_invalid')
+    if (typeof carried === 'string') {
+      if (!carried.trim()) carried = null
+      else { try { carried = JSON.parse(carried) } catch { unreadableCredit() } }
+    }
+    if (carried != null && !Array.isArray(carried)) unreadableCredit()
     if (Array.isArray(carried)) {
       for (const raw of carried) {
         if (!raw || typeof raw !== 'object' || Array.isArray(raw) || (raw as Record<string, unknown>).refund_credit !== true) continue
