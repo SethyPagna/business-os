@@ -31,8 +31,13 @@ function runTest(name: string, fn: () => void): void {
   }
 }
 
-const TAILWIND_EMERALD: Record<string, string> = { '500': '#10b981', '600': '#059669', '700': '#047857', '800': '#065f46' }
+const IVORY = '#f4f1ea'
+const CHARCOAL = '#23201b'
+const CHARCOAL_HOVER = '#3a352c'
+const AMBER_300 = '#fcd34d'
 const NEUTRAL_900 = '#171717'
+const STONE_600 = '#57534e'
+const NEUTRAL_300 = '#d4d4d4'
 const WHITE = '#ffffff'
 const AA_TEXT = 4.5
 const AA_UI = 3
@@ -42,35 +47,37 @@ const ratio = (a: string, b: string) => Number(contrastRatio(a, b).toFixed(2))
 // Contrast (WCAG 1.4.3 text, 1.4.11 component boundary)
 // ---------------------------------------------------------------------------
 
-runTest('the map Load button is white on emerald-700 (>= 4.5:1), and darker on hover', () => {
+runTest('the map Load button is ivory on charcoal (>= 4.5:1) in light and dark amber, and lighter on hover', () => {
   const source = read('components', 'catalog', 'legal', 'PortalEmbedConsent.tsx')
-  const button = /<button\s+type="button"\s+onClick=\{accept\}\s+className="([^"]+)"/.exec(source)?.[1] ?? ''
-  assert.ok(button, 'the Load button must still be the accept button')
-  const rest = /(?<![:-])bg-emerald-(\d+)/.exec(button)?.[1] ?? ''
-  const hover = /hover:bg-emerald-(\d+)/.exec(button)?.[1] ?? ''
-  assert.ok(TAILWIND_EMERALD[rest] && TAILWIND_EMERALD[hover], `unexpected palette step in "${button}"`)
-  assert.match(button, /\btext-white\b/)
-  const restRatio = ratio(WHITE, TAILWIND_EMERALD[rest])
-  const hoverRatio = ratio(WHITE, TAILWIND_EMERALD[hover])
-  console.log(`  map Load button: white on emerald-${rest} ${restRatio}:1 (was 2.54:1 on emerald-500); hover emerald-${hover} ${hoverRatio}:1; boundary on dark card ${ratio(TAILWIND_EMERALD[rest], NEUTRAL_900)}:1, on dark page ${ratio(TAILWIND_EMERALD[rest], PORTAL_DARK_SURFACE)}:1, on light page ${ratio(TAILWIND_EMERALD[rest], PORTAL_LIGHT_SURFACE)}:1`)
-  assert.ok(restRatio >= AA_TEXT, `resting text contrast ${restRatio}`)
-  assert.ok(hoverRatio >= AA_TEXT, `hover text contrast ${hoverRatio}`)
-  assert.ok(ratio(TAILWIND_EMERALD[rest], NEUTRAL_900) >= AA_UI, 'the button edge is visible on the dark card')
-  assert.ok(ratio(TAILWIND_EMERALD[rest], PORTAL_DARK_SURFACE) >= AA_UI, 'and on the dark page')
-  assert.ok(ratio(TAILWIND_EMERALD[rest], PORTAL_LIGHT_SURFACE) >= AA_UI, 'and on the light page')
-  assert.doesNotMatch(button, /bg-emerald-(?:400|500)/, 'the 2.54:1 and 1.92:1 fills are gone')
+  const loadClass = /const LOAD_BUTTON = '([^']+)'/.exec(source)?.[1] ?? ''
+  assert.ok(loadClass, 'the Load button class must stay one named constant')
+  assert.match(source, /<button type="button" onClick=\{accept\} className=\{LOAD_BUTTON\}>/, 'the Load button must still be the accept button')
+  assert.match(loadClass, /\bbg-\[#23201b\]/)
+  assert.match(loadClass, /\btext-\[#f4f1ea\]/)
+  assert.match(loadClass, /hover:bg-\[#3a352c\]/)
+  assert.match(loadClass, /dark:bg-amber-300/)
+  assert.match(loadClass, /dark:text-neutral-900/)
+  assert.doesNotMatch(loadClass, /emerald/, 'the green fill is outside the storefront palette')
+  const rest = ratio(IVORY, CHARCOAL)
+  const hover = ratio(IVORY, CHARCOAL_HOVER)
+  const dark = ratio(NEUTRAL_900, AMBER_300)
+  console.log(`  map Load button: ivory on charcoal ${rest}:1; hover ${hover}:1; dark neutral-900 on amber-300 ${dark}:1`)
+  assert.ok(rest >= AA_TEXT, `resting text contrast ${rest}`)
+  assert.ok(hover >= AA_TEXT, `hover text contrast ${hover}`)
+  assert.ok(dark >= AA_TEXT, `dark text contrast ${dark}`)
+  assert.ok(ratio(CHARCOAL, PORTAL_LIGHT_SURFACE) >= AA_UI, 'the button edge is visible on a light surface')
+  assert.ok(ratio(AMBER_300, NEUTRAL_900) >= AA_UI, 'and on the dark card')
 })
 
-runTest('the map link keeps 4.5:1 on hover in light and dark', () => {
+runTest('the open-in-Google-Maps icon keeps 4.5:1 in light and dark and is an icon-only link with a name', () => {
   const source = read('components', 'catalog', 'legal', 'PortalEmbedConsent.tsx')
-  const link = /className="(text-xs font-semibold text-emerald-700[^"]+)"/.exec(source)?.[1] ?? ''
-  assert.match(link, /\btext-emerald-700\b/)
-  assert.match(link, /hover:text-emerald-800/)
-  assert.match(link, /dark:text-emerald-300/)
-  assert.match(link, /dark:hover:text-emerald-200/)
-  assert.ok(ratio(TAILWIND_EMERALD['700'], PORTAL_LIGHT_SURFACE) >= AA_TEXT)
-  assert.ok(ratio(TAILWIND_EMERALD['800'], PORTAL_LIGHT_SURFACE) >= AA_TEXT, 'hover on the light page')
-  assert.ok(ratio('#6ee7b7', NEUTRAL_900) >= AA_TEXT && ratio('#a7f3d0', NEUTRAL_900) >= AA_TEXT, 'resting and hover on the dark card')
+  const icon = /const ICON_LINK = '([^']+)'/.exec(source)?.[1] ?? ''
+  assert.match(icon, /\btext-stone-600\b/)
+  assert.match(icon, /dark:text-neutral-300/)
+  assert.match(icon, /\bh-11 w-11\b/, 'a 44 px target')
+  assert.match(source, /aria-label=\{openLabel\}\s+title=\{openLabel\}/, 'the icon link has an accessible name and a tooltip')
+  assert.ok(ratio(STONE_600, WHITE) >= AA_TEXT, 'light card')
+  assert.ok(ratio(NEUTRAL_300, NEUTRAL_900) >= AA_TEXT, 'dark card')
 })
 
 runTest('the storefront .btn-primary is white on a brass of >= 4.5:1 in light and dark; the admin rule is untouched', () => {

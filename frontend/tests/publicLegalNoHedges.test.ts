@@ -14,13 +14,13 @@ import { LEGAL_PAGE_SECTIONS, LEGAL_STORAGE_ROWS, PORTAL_LEGAL_EN, PORTAL_LEGAL_
 import fs from 'node:fs'
 
 const embedSource = fs.readFileSync(new URL('../src/components/catalog/legal/PortalEmbedConsent.tsx', import.meta.url), 'utf8')
-const MAP_CONSENT_BODY_EN = /export const MAP_CONSENT_BODY_EN = '([^']*)'/.exec(embedSource)?.[1] ?? ''
-const MAP_CONSENT_BODY_KM = /export const MAP_CONSENT_BODY_KM = '([^']*)'/.exec(embedSource)?.[1] ?? ''
+const MAP_CONSENT_LINE_EN = /copy\('mapConsentLine', '([^']*)'/.exec(embedSource)?.[1] ?? ''
+const MAP_CONSENT_LINE_KM = /copy\('mapConsentLine', '[^']*', '([^']*)'/.exec(embedSource)?.[1] ?? ''
 
 const EN_HEDGE = /\b(?:may|might|perhaps|possibly|approximately|roughly|generally|around \d)\b|\babout (?:an? (?:hour|day|week|month|year)|one|two|thirty|ninety|\d+)\b/i
 const KM_HEDGE = /ប្រហែល/
 
-const rendered = new Set<string>(['portal_legal_footer_content_concerns', 'portal_legal_map_consent_b'])
+const rendered = new Set<string>(['portal_legal_footer_content_concerns'])
 for (const sections of Object.values(LEGAL_PAGE_SECTIONS)) for (const section of sections) { rendered.add(section.heading); for (const body of section.bodies) rendered.add(body) }
 for (const row of LEGAL_STORAGE_ROWS) { rendered.add(row.kindKey); rendered.add(row.purposeKey); rendered.add(row.lifetimeKey) }
 
@@ -41,10 +41,10 @@ function check(name: string, fn: () => void) {
 check('no rendered policy string hedges, in English or Khmer', () => {
   assert.ok(rendered.size > 40, `expected the full rendered key set, got ${rendered.size}`)
   assert.deepEqual(scan(PORTAL_LEGAL_EN, PORTAL_LEGAL_KM), [])
-  assert.doesNotMatch(MAP_CONSENT_BODY_EN, EN_HEDGE)
-  assert.doesNotMatch(MAP_CONSENT_BODY_KM, /អាចកំណត់/)
-  assert.equal(MAP_CONSENT_BODY_EN, PORTAL_LEGAL_EN.portal_legal_map_consent_b, 'the inline map-consent fallback matches the policy text')
-  assert.equal(MAP_CONSENT_BODY_KM, PORTAL_LEGAL_KM.portal_legal_map_consent_b)
+  assert.equal(MAP_CONSENT_LINE_EN, 'Google Maps sets its own cookies.', 'the one-line map consent is read from the component')
+  assert.doesNotMatch(MAP_CONSENT_LINE_EN, EN_HEDGE)
+  assert.match(MAP_CONSENT_LINE_KM, /[ក-៿]/, 'real Khmer')
+  assert.doesNotMatch(MAP_CONSENT_LINE_KM, /អាចកំណត់/)
 })
 
 check('privacy keeps its substance: no billing data, never share bank details (EN + KM)', () => {

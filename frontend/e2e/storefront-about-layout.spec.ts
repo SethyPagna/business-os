@@ -5,9 +5,10 @@ import { framedPicture, stubStorefrontConfig } from './support/storefrontStub'
 /**
  * storefront-about-layout.spec.ts -- the About page (owner ask, 2 Nov 2026).
  *
- *  - The cover photo shows IN FULL at its own proportions: never cropped, never stretched, and
- *    only capped in height on a very wide screen.
- *  - The story takes the full width; under it the contacts and socials sit BESIDE the map on a large
+ *  - The cover is laid out by its own shape and never letterboxes: a wide picture is a full-width banner
+ *    (object-cover, height from the ratio, capped at 520 px); a square or tall one keeps its own ratio
+ *    (max 460 px wide, max 60vh tall) with the text beside it from md up.
+ *  - The story takes the full width; under it phone and address sit BESIDE the map on a large
  *    screen and stack on a small one; nothing leaves a hole.
  *  - The map keeps its consent gate. No horizontal scroll at any width.
  *
@@ -19,6 +20,7 @@ import { framedPicture, stubStorefrontConfig } from './support/storefrontStub'
 test.use({ serviceWorkers: 'block' })
 
 const COVER_PATH = '/uploads/about-cover-e2e.svg'
+const SQUARE_PATH = '/uploads/about-square-e2e.svg'
 const COVER = { width: 1600, height: 900 }
 const MAP_EMBED = 'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d1!2d104.9!3d11.56'
 const WIDTHS = [360, 390, 768, 1024, 1280, 1600] as const
@@ -53,66 +55,83 @@ const boxOf = (page: Page, selector: string): Promise<Box> => page.locator(selec
 
 test.describe('About page layout', () => {
   for (const width of WIDTHS) {
-    test(`cover at ${width}px: whole, undistorted, only capped on a very wide screen`, async ({ page }) => {
-      // CATCHES: the old absolute `object-cover` banner (a thin h-20/h-28 strip that crops the photo), a
-      // fixed-height box with `object-fill` (stretches it), and a cap that ever crops (anything but `contain`).
+    test(`cover at ${width}px: a full-width banner, never letterboxed, capped only on a very wide screen`, async ({ page }) => {
+      // CATCHES: the old `object-contain` box (grey frame bars either side once the height cap bites), a banner that grows past 520 px, and a
+      // picture that stops short of the card edges.
       const health = collectPageHealth(page)
       await openAbout(page, width)
       const cover = page.locator('[data-portal-cover]')
       await expect(cover).toBeVisible()
       await expect.poll(() => cover.evaluate((img: HTMLImageElement) => (img.complete ? img.naturalWidth : 0))).toBe(COVER.width)
+      await expect(page.locator('[data-portal-cover-frame]')).toHaveAttribute('data-portal-cover-shape', 'wide')
       await cover.scrollIntoViewIfNeeded()
 
       const measured = await cover.evaluate((img: HTMLImageElement) => {
         const rect = img.getBoundingClientRect()
-        return { fit: getComputedStyle(img).objectFit, width: rect.width, height: rect.height, left: rect.left, right: rect.right, viewport: document.documentElement.clientWidth, viewportHeight: window.innerHeight }
+        const card = (img.closest('[data-portal-cover-frame]') as HTMLElement).parentElement as HTMLElement
+        const cardRect = card.getBoundingClientRect()
+        return { fit: getComputedStyle(img).objectFit, width: rect.width, height: rect.height, left: rect.left, right: rect.right, cardLeft: cardRect.left, cardRight: cardRect.right, viewport: document.documentElement.clientWidth }
       })
-      const cap = Math.min(measured.viewportHeight * 0.72, 680)
       const natural = measured.width * COVER.height / COVER.width
-      expect(measured.fit).toBe('contain')
-      expect(measured.left).toBeGreaterThanOrEqual(0)
+      expect(measured.fit).toBe('cover')
+      expect(Math.abs(measured.left - measured.cardLeft), 'no bar on the left').toBeLessThanOrEqual(1.5)
+      expect(Math.abs(measured.right - measured.cardRight), 'no bar on the right').toBeLessThanOrEqual(1.5)
       expect(measured.right).toBeLessThanOrEqual(measured.viewport)
-      expect(measured.height, 'never taller than the cap').toBeLessThanOrEqual(cap + 1)
-      // Under the cap the box IS the photo's proportions; over it the height is the cap and the photo is letterboxed.
-      expect(Math.abs(measured.height - Math.min(natural, cap)), `box ${measured.width}x${measured.height}, natural ${natural}, cap ${cap}`).toBeLessThanOrEqual(1.5)
+      expect(measured.height, 'never taller than the banner cap').toBeLessThanOrEqual(520 + 1)
+      expect(Math.abs(measured.height - Math.min(natural, 520)), `box ${measured.width}x${measured.height}, natural ${natural}`).toBeLessThanOrEqual(1.5)
 
-      // Pixels: the magenta frame stroke is visible on all four sides of the picture as drawn.
-      const shot = await cover.screenshot()
-      const edges = await page.evaluate(async ({ base64, boxWidth, boxHeight, ratio }) => {
-        const image = new Image()
-        image.src = `data:image/png;base64,${base64}`
-        await image.decode()
-        const canvas = document.createElement('canvas')
-        canvas.width = image.width
-        canvas.height = image.height
-        const context = canvas.getContext('2d') as CanvasRenderingContext2D
-        context.drawImage(image, 0, 0)
-        const scale = image.width / boxWidth
-        const drawnWidth = Math.min(boxWidth, boxHeight * ratio)
-        const drawnHeight = drawnWidth / ratio
-        const left = ((boxWidth - drawnWidth) / 2) * scale
-        const top = ((boxHeight - drawnHeight) / 2) * scale
-        const right = left + drawnWidth * scale
-        const bottom = top + drawnHeight * scale
-        const band = Math.max(3, Math.ceil(scale * 3))
-        const magenta = (x: number, y: number) => {
-          const [red, green, blue] = context.getImageData(Math.max(0, Math.min(image.width - 1, Math.round(x))), Math.max(0, Math.min(image.height - 1, Math.round(y))), 1, 1).data
-          return red > 190 && green < 110 && blue > 190
-        }
-        const anyInBand = (points: Array<[number, number]>) => points.some(([x, y]) => magenta(x, y))
-        const across = (cx: number, cy: number, dx: number, dy: number): Array<[number, number]> => Array.from({ length: band + 1 }, (_, step) => [cx + dx * step, cy + dy * step])
-        const midX = (left + right) / 2
-        const midY = (top + bottom) / 2
-        return {
-          top: anyInBand(across(midX, top, 0, 1)),
-          bottom: anyInBand(across(midX, bottom - 1, 0, -1)),
-          left: anyInBand(across(left, midY, 1, 0)),
-          right: anyInBand(across(right - 1, midY, -1, 0)),
-        }
-      }, { base64: shot.toString('base64'), boxWidth: measured.width, boxHeight: measured.height, ratio: COVER.width / COVER.height })
-      expect(edges, 'frame stroke visible on every side').toEqual({ top: true, bottom: true, left: true, right: true })
+      // Pixels, while the banner is uncapped (the whole picture is shown): the magenta frame stroke is visible on all four sides.
+      if (natural <= 520) {
+        const shot = await cover.screenshot()
+        const edges = await page.evaluate(async ({ base64 }) => {
+          const image = new Image()
+          image.src = `data:image/png;base64,${base64}`
+          await image.decode()
+          const canvas = document.createElement('canvas')
+          canvas.width = image.width
+          canvas.height = image.height
+          const context = canvas.getContext('2d') as CanvasRenderingContext2D
+          context.drawImage(image, 0, 0)
+          const band = Math.max(3, Math.ceil(image.width / 200))
+          const magenta = (x: number, y: number) => {
+            const [red, green, blue] = context.getImageData(Math.max(0, Math.min(image.width - 1, Math.round(x))), Math.max(0, Math.min(image.height - 1, Math.round(y))), 1, 1).data
+            return red > 190 && green < 110 && blue > 190
+          }
+          const anyIn = (points: Array<[number, number]>) => points.some(([x, y]) => magenta(x, y))
+          const across = (cx: number, cy: number, dx: number, dy: number): Array<[number, number]> => Array.from({ length: band + 1 }, (_, step) => [cx + dx * step, cy + dy * step])
+          return {
+            top: anyIn(across(image.width / 2, 0, 0, 1)),
+            bottom: anyIn(across(image.width / 2, image.height - 1, 0, -1)),
+            left: anyIn(across(0, image.height / 2, 1, 0)),
+            right: anyIn(across(image.width - 1, image.height / 2, -1, 0)),
+          }
+        }, { base64: shot.toString('base64') })
+        expect(edges, 'frame stroke visible on every side').toEqual({ top: true, bottom: true, left: true, right: true })
+      }
 
       expectNoRuntimeErrors(health)
+    })
+
+    test(`square cover at ${width}px: its own ratio, no bars, beside the text from md up`, async ({ page }) => {
+      // CATCHES: a square picture stretched into a banner, grey bars around it, a hero that stays stacked on a desktop, and a picture taller
+      // than 60vh or wider than 460 px.
+      await openAbout(page, width, { ...PATCH, businessCover: SQUARE_PATH })
+      await page.route(`**${SQUARE_PATH}`, (route) => route.fulfill({ body: framedPicture(1254, 1254, 'Cover 1:1'), contentType: 'image/svg+xml' }))
+      await page.reload({ waitUntil: 'load' })
+      const cover = page.locator('[data-portal-cover]')
+      await expect(page.locator('[data-portal-cover-frame]')).toHaveAttribute('data-portal-cover-shape', 'tall')
+      await expect.poll(() => cover.evaluate((img: HTMLImageElement) => (img.complete ? img.naturalWidth : 0))).toBe(1254)
+      const measured = await cover.evaluate((img: HTMLImageElement) => {
+        const rect = img.getBoundingClientRect()
+        const name = document.querySelector('[data-portal-about-hero]')?.parentElement?.querySelector('h2')?.getBoundingClientRect()
+        return { fit: getComputedStyle(img).objectFit, width: rect.width, height: rect.height, right: rect.right, bottom: rect.bottom, top: rect.top, nameLeft: name?.left ?? 0, nameTop: name?.top ?? 0, viewportHeight: window.innerHeight }
+      })
+      expect(measured.fit).toBe('cover')
+      expect(Math.abs(measured.width - measured.height), 'the box is the picture\'s own square').toBeLessThanOrEqual(1.5)
+      expect(measured.width, 'never wider than 460 px').toBeLessThanOrEqual(460 + 1)
+      expect(measured.height, 'never taller than 60vh').toBeLessThanOrEqual(measured.viewportHeight * 0.6 + 1)
+      if (width >= 768) expect(measured.nameLeft, 'the name sits to the right of the picture').toBeGreaterThanOrEqual(measured.right - 1)
+      else expect(measured.nameTop, 'on a phone the text comes under the picture').toBeGreaterThanOrEqual(measured.bottom - 1)
     })
 
     test(`layout at ${width}px: no horizontal scroll, no hole`, async ({ page }) => {
@@ -160,7 +179,7 @@ test.describe('About page layout', () => {
     // CATCHES: a layout change that mounts the Google iframe on render (a third party contacted before a click).
     await openAbout(page, 1280)
     await expect(page.locator('iframe[src*="google.com/maps"]')).toHaveCount(0)
-    await page.getByRole('button', { name: 'Load the map' }).click()
+    await page.getByRole('button', { name: 'Load map' }).click()
     await expect(page.locator('iframe[src*="google.com/maps"]')).toHaveCount(1)
     await expect(page.locator('[data-portal-map-card] iframe')).toBeVisible()
   })

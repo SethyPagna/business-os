@@ -1,15 +1,15 @@
 import { Fragment, useEffect, useState } from 'react'
-import type { ComponentType, Dispatch, SetStateAction } from 'react'
+import type { ComponentType, CSSProperties, Dispatch, SetStateAction } from 'react'
 import { buildLogoImageStyle } from './logoImageStyle'
 import { normalizePriceValue } from '../../utils/pricing.ts'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
-import Globe from 'lucide-react/dist/esm/icons/globe.js'
-import Mail from 'lucide-react/dist/esm/icons/mail.js'
+import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
 import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
 import MessageCircle from 'lucide-react/dist/esm/icons/message-circle.js'
 import Phone from 'lucide-react/dist/esm/icons/phone.js'
+import PhoneCall from 'lucide-react/dist/esm/icons/phone-call.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import Send from 'lucide-react/dist/esm/icons/send.js'
@@ -17,9 +17,9 @@ import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
-import { PORTAL_SOCIAL_ICONS, PortalSocialText } from './PortalSocialRow.tsx'
-import type { SocialPlatform } from '../../utils/socialHandles.ts'
-import PortalEmbedConsent from './legal/PortalEmbedConsent.tsx'
+import PortalEmbedConsent, { mapFallbackHref } from './legal/PortalEmbedConsent.tsx'
+import { COVER_BANNER_MAX_PX, coverRatio, coverShape, sameImageFile } from '../../utils/aboutCoverLayout.ts'
+import type { CoverShape } from '../../utils/aboutCoverLayout.ts'
 import { SectionShell } from './catalogUi'
 import { splitNoTranslateSegments, stripNoTranslateMarkers } from './portalNoTranslate.ts'
 import { faqEntries, faqSearchVisible, filterFaqEntries, nextOpenFaqKey } from './portalFaqLayout.ts'
@@ -71,15 +71,6 @@ interface BusinessFact {
   icon?: ComponentType<{ className?: string }>
 }
 
-interface SocialLink {
-  key: string
-  label: string
-  value: string
-  platform?: string
-  accessibleName?: string
-  latin?: boolean
-}
-
 interface AboutBlock {
   id: IdValue
   title?: string
@@ -94,11 +85,12 @@ interface CatalogAboutSectionProps {
   mapEmbedUrl?: string
   addressFact?: BusinessFact | null
   businessFacts?: BusinessFact[]
-  socialLinks?: SocialLink[]
   versionedBusinessLogo?: string
   versionedBusinessCover?: string
   imageFetchPriority?: 'high' | 'low' | 'auto'
   openPortalImage: (title: string, images: string[], index?: number) => void
+  // Absent where no contact channel exists: the page then shows no Contact button.
+  onOpenContact?: () => void
 }
 
 interface FaqItem {
@@ -228,38 +220,108 @@ function CatalogMembershipSection({ copy }: CatalogMembershipSectionProps) {
   )
 }
 
-// The owner's photo, shown whole: it keeps its own proportions at every width and only a
-// very wide screen caps its height, so nothing is cropped or stretched (object-contain).
-// The settings keep a path, not a size, so the photo's proportions are known only once the file is
-// in; PublicCatalogPage therefore mounts this card after the file has arrived (useCoverState) and
-// the card then lays out at the photo's own size at once. If that wait runs out, the frame holds a
-// 16:9 box (the shape of the sample cover) until the picture is decoded, never a fixed height that
-// a taller picture outgrows (that pushed the whole card down by the difference: CLS 0.14-0.17).
-function AboutCover({ src, imageFetchPriority, onFailed }: { src: string; imageFetchPriority?: 'high' | 'low' | 'auto'; onFailed: () => void }) {
-  const [loaded, setLoaded] = useState(false)
+const BRASS_TEXT = 'text-[#9c7a3c] dark:text-amber-300'
+// Charcoal fill on ivory text is the storefront's primary button; amber in the dark theme.
+const CHARCOAL_BUTTON = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-[#23201b] px-5 text-sm font-semibold text-[#f4f1ea] transition hover:bg-[#3a352c] dark:bg-amber-300 dark:text-neutral-900 dark:hover:bg-amber-200'
+const SURFACE = 'border border-stone-300 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900'
+const ICON_BUTTON = 'flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-stone-600 transition hover:bg-stone-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
+
+// The one Contact entry point on this page: the page's own contact callback, icon and one word.
+function PortalContactButton({ copy, onOpenContact }: { copy: CopyFn; onOpenContact?: () => void }) {
+  if (!onOpenContact) return null
+  return (
+    <button type="button" className={CHARCOAL_BUTTON} onClick={onOpenContact}>
+      <MessageCircle aria-hidden="true" className="h-4 w-4" />
+      {copy('contactButton', 'Contact', 'ទាក់ទង')}
+    </button>
+  )
+}
+
+// The owner's photo, laid out by its own shape (utils/aboutCoverLayout.ts) so no frame colour ever shows
+// beside it: a wide picture is a full-width banner, a square or tall one sits in a box of its own ratio
+// (the hero's left column from md up). Every box is the picture's ratio and the picture fills it
+// (object-cover), so there is nothing to letterbox. The settings keep a path, not a size, so the ratio
+// is read when the file is in; PublicCatalogPage mounts this card after the file has arrived
+// (useCoverState) and the layout is final at once. If that wait runs out, the frame holds a 16:9 box
+// until the picture is decoded, never a fixed height a taller picture outgrows (CLS 0.14-0.17).
+function AboutCover({ src, imageFetchPriority, onFailed, onShape }: { src: string; imageFetchPriority?: 'high' | 'low' | 'auto'; onFailed: () => void; onShape: (shape: CoverShape | null) => void }) {
+  const [ratio, setRatio] = useState<number | null>(null)
+  const shape = coverShape(ratio)
+  const measure = (image: HTMLImageElement) => {
+    const next = coverRatio(image.naturalWidth, image.naturalHeight)
+    if (next === null) return
+    setRatio(next)
+    onShape(coverShape(next))
+  }
+  const box: CSSProperties | undefined = shape === 'wide'
+    ? { aspectRatio: String(ratio), maxHeight: `${COVER_BANNER_MAX_PX}px` }
+    : shape === 'tall'
+      ? { aspectRatio: String(ratio), ['--cover-ratio' as string]: String(ratio) }
+      : undefined
   return (
     <div
       data-portal-about-hero="true"
       data-portal-cover-frame="true"
-      className={`relative w-full bg-stone-100 dark:bg-neutral-800 ${loaded ? '' : 'aspect-video'}`}
+      data-portal-cover-shape={shape || 'loading'}
+      className={shape === 'tall' ? 'p-3 md:w-[460px] md:max-w-[45%] md:shrink-0 md:p-0' : ''}
     >
-      <img
-        ref={(node) => { if (node && node.complete && node.naturalWidth > 0) setLoaded(true) }}
-        src={src}
-        alt=""
-        aria-hidden="true"
-        data-portal-cover="true"
-        fetchPriority={imageFetchPriority}
-        onLoad={(event) => { event.currentTarget.dataset.loaded = 'true'; setLoaded(true) }}
-        onError={onFailed}
-        className="portal-cover-image pointer-events-none mx-auto block h-auto max-h-[min(calc(72*var(--app-vh)),680px)] w-full object-contain"
-      />
+      <div
+        className={`relative w-full overflow-hidden ${shape === 'tall' ? 'mx-auto max-w-[min(100%,460px,calc(60*var(--app-vh)*var(--cover-ratio)))] rounded-xl md:mx-0' : ''} ${shape ? '' : 'aspect-video bg-stone-200 dark:bg-neutral-800'}`}
+        style={box}
+      >
+        <img
+          ref={(node) => { if (node && node.complete && node.naturalWidth > 0) measure(node) }}
+          src={src}
+          alt=""
+          aria-hidden="true"
+          data-portal-cover="true"
+          fetchPriority={imageFetchPriority}
+          onLoad={(event) => { event.currentTarget.dataset.loaded = 'true'; measure(event.currentTarget) }}
+          onError={onFailed}
+          className="portal-cover-image pointer-events-none block h-full w-full object-cover"
+        />
+      </div>
     </div>
   )
 }
 
 // A long story reads better in two columns on a wide screen; a short one stays one block.
 const ABOUT_STORY_TWO_COLUMN_FROM = 700
+
+// Phone and address: icon, value, one action icon. The visible word is dropped (the icon says it);
+// the field name stays for a screen reader.
+function AboutFactRow({ item, copy, address }: { item: BusinessFact; copy: CopyFn; address: boolean }) {
+  const Icon = item.icon || (address ? MapPin : Phone)
+  const ActionIcon = address ? ExternalLink : PhoneCall
+  // The dialer link is rebuilt from the number so spaces and dashes in the saved value never reach the tel: URI.
+  const href = address
+    ? item.href || mapFallbackHref(item.value || '', '')
+    : derivePhoneCallLink(item.value || '') || item.href
+  const actionLabel = address
+    ? copy('openInGoogleMaps', 'Open in Google Maps', 'បើកក្នុង Google Maps')
+    : copy('callUs', 'Call', 'ហៅទូរសព្ទ')
+  return (
+    <div className="flex min-h-12 items-center gap-3">
+      <Icon aria-hidden="true" className={`h-4 w-4 shrink-0 ${BRASS_TEXT}`} />
+      <div className="min-w-0 flex-1 break-words text-sm font-medium leading-6 text-[#23201b] dark:text-neutral-100" title={item.value}>
+        <span className="sr-only">{item.label}: </span>
+        {item.value}
+      </div>
+      {href ? (
+        <a
+          href={href}
+          target={address ? '_blank' : undefined}
+          rel={address ? 'noreferrer noopener' : undefined}
+          className={ICON_BUTTON}
+          aria-label={actionLabel}
+          title={actionLabel}
+        >
+          <ActionIcon aria-hidden="true" className="h-4 w-4" />
+        </a>
+      ) : null}
+    </div>
+  )
+}
 
 function CatalogAboutSection(props: CatalogAboutSectionProps) {
   const {
@@ -268,11 +330,11 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
     mapEmbedUrl,
     addressFact,
     businessFacts,
-    socialLinks,
     versionedBusinessLogo,
     versionedBusinessCover,
     imageFetchPriority,
     openPortalImage,
+    onOpenContact,
   } = props
 
   const previewTitle = String(previewConfig.businessName || previewConfig.title || '').trim()
@@ -296,39 +358,32 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
   const heroGradientStart = normalizePortalColor(previewConfig.heroGradientStart, '#0f172a')
   const heroGradientMid = normalizePortalColor(previewConfig.heroGradientMid, '#14532d')
   const heroGradientEnd = normalizePortalColor(previewConfig.heroGradientEnd, '#ea580c')
-  // A shorter brand-color banner with the logo overlapping its lower edge,
-  // and everything else (name, tagline, story, facts) living on a plain
-  // surface below rather than layered on top of the image/gradient --
-  // avoids the old full-bleed hero's white-text-on-photo legibility fight,
-  // and reads closer to a modern profile page than a dashboard splash.
-  // 2 Nov (owner): the cover photo shows IN FULL, at its own proportions, on top of the
-  // card (AboutCover); the logo and name sit below it on a plain surface, never over the
-  // photo. Without a cover, the brand gradient banner stays. A photo that fails to load
-  // falls back to the banner instead of leaving a hole.
+  // 2 Nov (owner): the cover photo shows IN FULL on top of the card; the logo and name sit below it
+  // on a plain surface, never over the photo. Without a cover, the brand gradient banner stays. A photo
+  // that fails to load falls back to the banner instead of leaving a hole.
   const [failedCover, setFailedCover] = useState('')
+  const [coverShapeNow, setCoverShapeNow] = useState<CoverShape | null>(null)
   const hasCover = Boolean(previewConfig.showCover && versionedBusinessCover && failedCover !== versionedBusinessCover)
+  const twoColumn = hasCover && coverShapeNow === 'tall'
   const bannerBackground = `linear-gradient(135deg, ${heroGradientStart} 0%, ${heroGradientMid} 55%, ${heroGradientEnd} 100%)`
   const logoSizePx = Math.max(72, Number(previewConfig.logoSize || 80))
-  const hasFacts = Boolean(businessFacts?.length)
-  const hasSocial = Boolean(socialLinks?.length)
-  const hasContactInfo = hasFacts || hasSocial
+  // The same file as the cover: the round logo would only repeat the picture beside it.
+  const showRoundLogo = !(hasCover && sameImageFile(versionedBusinessLogo, versionedBusinessCover))
+  const detailFacts = (businessFacts || []).filter((item) => item.key === 'phone' || item.key === 'address')
+  const hasFacts = detailFacts.length > 0
   const hasMap = Boolean(mapEmbedUrl)
   const storyInColumns = storyText.length > ABOUT_STORY_TWO_COLUMN_FROM
 
   return (
-    <section
-      className="space-y-4 rounded-[36px] p-3 sm:p-5"
-      style={{
-        // Subtle backdrop for the whole About tab, echoing the hero's own
-        // brand-color gradient at very low opacity so the section reads as
-        // one cohesive page rather than a stack of unrelated white cards
-        // dropped on the plain portal background.
-        backgroundImage: `radial-gradient(circle at 15% 0%, ${heroGradientStart}14 0%, transparent 45%), radial-gradient(circle at 100% 20%, ${heroGradientEnd}12 0%, transparent 50%)`,
-      }}
-    >
-      <div className="relative isolate overflow-hidden rounded-[32px] border border-slate-200/80 bg-white shadow-[0_18px_42px_rgba(148,163,184,0.14)] dark:border-neutral-700/80 dark:bg-neutral-900/88">
+    <section className="space-y-4 py-4 sm:py-5">
+      <div className={`relative isolate overflow-hidden rounded-2xl ${SURFACE} ${twoColumn ? 'md:flex md:items-center md:gap-8 md:p-6' : ''}`}>
         {hasCover ? (
-          <AboutCover src={versionedBusinessCover || ''} imageFetchPriority={imageFetchPriority} onFailed={() => setFailedCover(versionedBusinessCover || '')} />
+          <AboutCover
+            src={versionedBusinessCover || ''}
+            imageFetchPriority={imageFetchPriority}
+            onFailed={() => setFailedCover(versionedBusinessCover || '')}
+            onShape={setCoverShapeNow}
+          />
         ) : (
           <div
             data-portal-about-hero="true"
@@ -342,59 +397,62 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
           />
         )}
 
-        <div className="relative px-5 pb-5 sm:px-8 sm:pb-8">
-          <div className={`flex flex-wrap items-end gap-3 sm:gap-4 ${hasCover ? 'pt-4 sm:pt-5' : '-mt-7 sm:-mt-9'}`}>
-            <div
-              className="flex shrink-0 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-white shadow-[0_12px_28px_rgba(15,23,42,0.18)] dark:border-neutral-900"
-              style={{ height: `${logoSizePx}px`, width: `${logoSizePx}px` }}
-            >
-              {previewConfig.showLogo && versionedBusinessLogo ? (
-                <button
-                  type="button"
-                  className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-white"
-                  onClick={() => openPortalImage(previewConfig.businessName || copy('logoImage', 'Logo image'), [versionedBusinessLogo])}
-                >
+        <div className={twoColumn ? 'min-w-0 flex-1 px-4 pb-5 md:p-0' : 'relative px-4 pb-5 sm:px-6 sm:pb-6'}>
+          <div className={`flex items-center gap-3 sm:gap-4 ${hasCover || !showRoundLogo ? 'pt-4' : '-mt-7 sm:-mt-9'}`}>
+            {showRoundLogo ? (
+              <div
+                className="flex shrink-0 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-white shadow-sm dark:border-neutral-900"
+                style={{ height: `${logoSizePx}px`, width: `${logoSizePx}px` }}
+              >
+                {previewConfig.showLogo && versionedBusinessLogo ? (
+                  <button
+                    type="button"
+                    className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-white"
+                    onClick={() => openPortalImage(previewConfig.businessName || copy('logoImage', 'Logo image'), [versionedBusinessLogo])}
+                  >
+                    <img
+                      src={versionedBusinessLogo}
+                      alt={previewConfig.businessName || copy('logoImage', 'Logo image')}
+                      className="h-full w-full rounded-full"
+                      style={{
+                        // With the top-bar logo gone (6.2) this hero IS the
+                        // live logo surface -- preview == applied runs
+                        // through the same shared math, not a hand-rolled
+                        // center-origin transform (the focus-slider bug).
+                        ...buildLogoImageStyle({
+                          fit: previewConfig.logoFit,
+                          zoom: previewConfig.logoZoom,
+                          positionX: previewConfig.logoPositionX,
+                          positionY: previewConfig.logoPositionY,
+                        }),
+                      }}
+                    />
+                  </button>
+                ) : (
                   <img
-                    src={versionedBusinessLogo}
+                    src={LEANG_ICON_FALLBACK}
                     alt={previewConfig.businessName || copy('logoImage', 'Logo image')}
-                    className="h-full w-full rounded-full"
-                    style={{
-                      // With the top-bar logo gone (6.2) this hero IS the
-                      // live logo surface -- preview == applied runs
-                      // through the same shared math, not a hand-rolled
-                      // center-origin transform (the focus-slider bug).
-                      ...buildLogoImageStyle({
-                        fit: previewConfig.logoFit,
-                        zoom: previewConfig.logoZoom,
-                        positionX: previewConfig.logoPositionX,
-                        positionY: previewConfig.logoPositionY,
-                      }),
-                    }}
+                    className="h-full w-full rounded-full object-cover"
                   />
-                </button>
-              ) : (
-                <img
-                  src={LEANG_ICON_FALLBACK}
-                  alt={previewConfig.businessName || copy('logoImage', 'Logo image')}
-                  className="h-full w-full rounded-full object-cover"
-                />
-              )}
-            </div>
+                )}
+              </div>
+            ) : null}
 
-            <div className="min-w-0 flex-1 pb-1">
-              <h2 className="notranslate break-words text-2xl font-semibold leading-[1.35] tracking-tight text-slate-900 dark:text-neutral-100 sm:text-3xl" translate="no">
+            <div className="min-w-0 flex-1">
+              <h2 className="notranslate break-words text-2xl font-semibold leading-[1.45] tracking-tight text-[#23201b] dark:text-neutral-100 sm:text-3xl" translate="no">
                 {heroTitle}
               </h2>
-              {previewConfig.businessTagline ? <div className="notranslate mt-1 text-sm text-slate-500 dark:text-neutral-400" translate="no">{previewConfig.businessTagline}</div> : null}
+              {previewConfig.businessTagline ? <div className="notranslate mt-0.5 text-sm leading-6 text-stone-600 dark:text-neutral-300" translate="no">{previewConfig.businessTagline}</div> : null}
             </div>
           </div>
 
           {introText ? (
-            <p className="mt-4 max-w-3xl text-sm leading-6 text-slate-600 dark:text-neutral-300 sm:text-base sm:leading-7">
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600 dark:text-neutral-300 sm:text-base">
               <OwnerText text={introText} />
             </p>
           ) : null}
 
+          {onOpenContact ? <div className="mt-4"><PortalContactButton copy={copy} onOpenContact={onOpenContact} /></div> : null}
         </div>
       </div>
 
@@ -414,88 +472,27 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
       ) : null}
 
       {/* 2 Nov (owner): no empty space. The story takes the full width (two columns on a
-          wide screen when it is long). Under it, contacts and socials sit BESIDE the map
-          on a large screen and stack on a phone; both cards stretch to the same height.
-          The map keeps its consent gate. */}
+          wide screen when it is long). Under it, phone and address sit BESIDE the map
+          on a large screen and stack on a phone. The map keeps its consent gate. */}
       {storyText ? (
-        <div className="rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm dark:border-neutral-700 dark:from-neutral-900 dark:to-neutral-800">
-          <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{aboutTitle}</div>
-          <p className={`mt-3 whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-neutral-300 ${storyInColumns ? 'xl:columns-2 xl:gap-10' : ''}`}>
+        <div className={`rounded-2xl p-5 ${SURFACE}`}>
+          <div className="text-sm font-semibold leading-6 text-[#23201b] dark:text-neutral-100">{aboutTitle}</div>
+          <p className={`mt-2 whitespace-pre-line text-sm leading-7 text-stone-700 dark:text-neutral-300 ${storyInColumns ? 'xl:columns-2 xl:gap-10' : ''}`}>
             <OwnerText text={storyText} />
           </p>
         </div>
       ) : null}
 
-      {hasContactInfo || hasMap ? (
-        <div data-portal-about-details="true" className={`grid gap-4 ${hasContactInfo && hasMap ? 'lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-stretch' : ''}`}>
-          {hasContactInfo ? (
-            <div data-portal-contact-tray="true" className="flex flex-col gap-4 rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm dark:border-neutral-700 dark:bg-neutral-900/90">
-              {businessFacts?.length ? (
-                <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,14rem),1fr))]">
-                  {businessFacts.map((item) => {
-                    const Icon = item.icon || (item.key === 'phone'
-                      ? Phone
-                      : item.key === 'email'
-                        ? Mail
-                        : MapPin)
-                    const body = (
-                      <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 transition hover:border-slate-300 hover:bg-slate-100 dark:border-neutral-700 dark:bg-neutral-800/60 dark:hover:bg-neutral-800">
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-slate-500 shadow-sm dark:bg-neutral-900 dark:text-neutral-300">
-                          <Icon className="h-4 w-4" />
-                        </span>
-                        <div className="min-w-0">
-                          {/* The field name ("Phone", "Address", ...) is the
-                              only thing that says what the value beside it is,
-                              so it is real copy, not decoration: slate-400 is
-                              2.56:1 on this card and neutral-500 is 3.29:1 on
-                              the dark one. slate-500/neutral-400 is the muted
-                              pair the rest of the storefront settled on. */}
-                          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-neutral-400">{item.label}</div>
-                          <div className={`portal-contact-value text-sm font-medium text-slate-800 dark:text-neutral-100 ${item.key === 'address' ? 'portal-contact-value-address' : ''}`} title={item.value}>{item.value}</div>
-                        </div>
-                      </div>
-                    )
-                    // The dialer link is rebuilt from the number so spaces and dashes in the saved value never reach the tel: URI.
-                    const href = item.key === 'phone' ? derivePhoneCallLink(item.value || '') || item.href : item.href
-                    return href ? <a key={item.key} href={href} target={href.startsWith('tel:') ? undefined : '_blank'} rel={href.startsWith('tel:') ? undefined : 'noreferrer'} className="block">{body}</a> : <div key={item.key}>{body}</div>
-                  })}
-                </div>
-              ) : null}
-              {socialLinks?.length ? (
-                <div className="flex flex-wrap gap-2">
-                  {socialLinks.map((item) => {
-                    const Icon = PORTAL_SOCIAL_ICONS[(item.platform ?? item.key) as SocialPlatform] || Globe
-                    return (
-                      <a
-                        key={item.key}
-                        href={item.value}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
-                        aria-label={item.accessibleName || item.label}
-                        title={item.accessibleName || item.label}
-                      >
-                        <Icon className="h-4 w-4 shrink-0" />
-                        <PortalSocialText text={item.label} latin={item.latin ?? true} />
-                      </a>
-                    )
-                  })}
-                </div>
-              ) : null}
+      {hasFacts || hasMap ? (
+        <div data-portal-about-details="true" className={`grid gap-4 ${hasFacts && hasMap ? 'lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-stretch' : ''}`}>
+          {hasFacts ? (
+            <div data-portal-contact-tray="true" className={`flex flex-col justify-center divide-y divide-stone-200 rounded-2xl px-4 py-1 dark:divide-neutral-700 ${SURFACE}`}>
+              {detailFacts.map((item) => <AboutFactRow key={item.key} item={item} copy={copy} address={item.key === 'address'} />)}
             </div>
           ) : null}
 
           {hasMap ? (
-            <div data-portal-map-card="true" className="flex flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900/90">
-              <div className="flex items-center gap-3 border-b border-slate-100 px-5 py-4 dark:border-neutral-800">
-                <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-600 dark:bg-neutral-800 dark:text-neutral-300">
-                  <MapPin className="h-4 w-4" />
-                </span>
-                <div>
-                  <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('mapCard', 'Store map')}</div>
-                  {addressFact?.value ? <div className="text-xs text-slate-500 dark:text-neutral-400">{addressFact.value}</div> : null}
-                </div>
-              </div>
+            <div data-portal-map-card="true" className={`flex flex-col overflow-hidden rounded-2xl ${SURFACE}`}>
               {/* N45: the map is the storefront's only automatically-loading
                   third party, so it waits for a click instead of fetching Google
                   the moment this tab renders. Declining is a plain link, not a
@@ -513,8 +510,8 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
         </div>
       ) : null}
       {!storyText && !mapEmbedUrl && !aboutBlocks.length ? (
-        <div className="rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 dark:border-neutral-700 dark:from-neutral-900 dark:to-neutral-800">
-          <p className="text-sm text-slate-500 dark:text-neutral-400">{fallbackStory}</p>
+        <div className={`rounded-2xl p-5 ${SURFACE}`}>
+          <p className="text-sm leading-7 text-stone-600 dark:text-neutral-300">{fallbackStory}</p>
         </div>
       ) : null}
 
@@ -526,23 +523,23 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
           {aboutBlocks.map((block, index) => {
             const mediaFirst = index % 2 === 0
             return (
-              <div key={block.id} className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900/90 sm:grid sm:grid-cols-2 sm:items-stretch">
+              <div key={block.id} className={`overflow-hidden rounded-2xl ${SURFACE} sm:grid sm:grid-cols-2 sm:items-stretch`}>
                 {block.mediaUrl ? (
                   <button
                     type="button"
-                    className={`flex w-full items-center justify-center bg-slate-50 p-4 dark:bg-neutral-950/60 ${mediaFirst ? 'sm:order-1' : 'sm:order-2'}`}
+                    className={`flex w-full items-center justify-center p-4 ${mediaFirst ? 'sm:order-1' : 'sm:order-2'}`}
                     onClick={() => openPortalImage(stripNoTranslateMarkers(block.title) || previewConfig.aboutTitle || copy('about', 'About'), block.mediaUrl ? [block.mediaUrl] : [])}
                   >
                     {block.type === 'video' ? (
-                      <video src={block.mediaUrl} controls preload="metadata" className="max-h-[280px] w-full rounded-2xl bg-white object-contain dark:bg-neutral-950 sm:h-full sm:max-h-none" />
+                      <video src={block.mediaUrl} controls preload="metadata" className="max-h-[280px] w-full rounded-xl object-contain sm:h-full sm:max-h-none" />
                     ) : (
-                      <img src={block.mediaUrl} alt={stripNoTranslateMarkers(block.title) || previewConfig.aboutTitle || copy('about', 'About')} className="max-h-[280px] w-full rounded-2xl object-contain sm:h-full sm:max-h-none" />
+                      <img src={block.mediaUrl} alt={stripNoTranslateMarkers(block.title) || previewConfig.aboutTitle || copy('about', 'About')} className="max-h-[280px] w-full rounded-xl object-contain sm:h-full sm:max-h-none" />
                     )}
                   </button>
                 ) : null}
-                <div className={`flex flex-col justify-center space-y-3 p-6 ${block.mediaUrl ? (mediaFirst ? 'sm:order-2' : 'sm:order-1') : 'sm:col-span-2'}`}>
-                  {block.title ? <h3 className="text-lg font-semibold text-slate-900 dark:text-neutral-100"><OwnerText text={block.title} /></h3> : null}
-                  {block.body ? <p className="whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-neutral-300"><OwnerText text={block.body} /></p> : null}
+                <div className={`flex flex-col justify-center space-y-2 p-5 ${block.mediaUrl ? (mediaFirst ? 'sm:order-2' : 'sm:order-1') : 'sm:col-span-2'}`}>
+                  {block.title ? <h3 className="text-lg font-semibold leading-8 text-[#23201b] dark:text-neutral-100"><OwnerText text={block.title} /></h3> : null}
+                  {block.body ? <p className="whitespace-pre-line text-sm leading-7 text-stone-700 dark:text-neutral-300"><OwnerText text={block.body} /></p> : null}
                 </div>
               </div>
             )
@@ -552,10 +549,6 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
     </section>
   )
 }
-
-const BRASS_TEXT = 'text-[#9c7a3c] dark:text-amber-300'
-// Charcoal fill on ivory text is the storefront's primary button; amber in the dark theme.
-const CHARCOAL_BUTTON = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-[#23201b] px-5 text-sm font-semibold text-[#f4f1ea] transition hover:bg-[#3a352c] dark:bg-amber-300 dark:text-neutral-900 dark:hover:bg-amber-200'
 
 function FaqContactButton({ copy, onOpenContact }: { copy: CopyFn; onOpenContact?: () => void }) {
   if (!onOpenContact) return null
