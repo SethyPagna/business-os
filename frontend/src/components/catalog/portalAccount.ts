@@ -5,7 +5,7 @@ import {
   markPortalSignedIn,
   readPortalSignedIn,
   readPortalSignedInValue,
-} from './portalLanguageOptions.ts'
+} from './portalSignedInMarker.ts'
 import {
   mergeBucketItems,
   mergeWishlistItems,
@@ -134,7 +134,7 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike, cop
     }
   }, [bucket, wishlist])
 
-  // The sign-in marker (portalLanguageOptions.ts) is what other tabs can see. This tab gets no `storage` event for its own writes, so every
+  // The sign-in marker (portalSignedInMarker.ts) is what other tabs can see. This tab gets no `storage` event for its own writes, so every
   // write and clear here also refreshes `marker`. The value this tab last wrote is kept so a failure only undoes its own write.
   const [marker, setMarker] = useState(readPortalSignedIn)
   const accountRef = useRef<PortalAccountProfile | null>(null)

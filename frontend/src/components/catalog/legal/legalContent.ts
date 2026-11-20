@@ -120,7 +120,7 @@ export const LEGAL_STORAGE_ROWS: readonly LegalStorageRow[] = [
   { id: 'wishlist', name: 'business-os-portal-wishlist-v1', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_wishlist_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
   // portalLanguageOptions.ts
   { id: 'translate', name: 'business-os:portal-translate-target', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_translate_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
-  // portalLanguageOptions.ts -- a time stamp, no personal data: tells every tab on this browser that someone signed in. Removed on sign-out.
+  // portalSignedInMarker.ts -- a time stamp, no personal data: tells every tab on this browser that someone signed in. Removed on sign-out.
   { id: 'signed-in', name: 'business-os:portal-signed-in', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_signedin_p', lifetimeKey: 'portal_legal_store_signedin_l' },
   // public-runtime/service-worker.ts -- app shell and same-origin static
   // assets. Cache names are versioned and old versions are pruned on update.

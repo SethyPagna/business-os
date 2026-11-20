@@ -46,6 +46,7 @@ const boundaries: Array<[string, string]> = [
   ['components/catalog/PortalPromoStrip.tsx', 'catalog-public-controls'],
   ['components/catalog/portalContrast.ts', 'catalog-public-utils'],
   ['components/catalog/portalAccount.ts', 'catalog-account-core'],
+  ['components/catalog/portalSignedInMarker.ts', 'catalog-account-core'],
   ['components/catalog/portalBucket.ts', 'catalog-account-core'],
   ['components/catalog/legal/LegalPages.tsx', 'catalog-legal'],
   ['components/shared/modalCloseContext.ts', 'shared-modal'],

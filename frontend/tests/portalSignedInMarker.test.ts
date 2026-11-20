@@ -9,7 +9,9 @@
 import assert from 'node:assert/strict'
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
-import * as options from '../src/components/catalog/portalLanguageOptions.ts'
+import fs from 'node:fs'
+import * as options from '../src/components/catalog/portalSignedInMarker.ts'
+import { portalTranslateAllowed } from '../src/components/catalog/portalLanguageOptions.ts'
 import * as account from '../src/components/catalog/portalAccount.ts'
 
 const failures: string[] = []
@@ -162,7 +164,7 @@ await check('a FAILED first check keeps translation off: not known, marker untou
 })
 
 function allowed() {
-  return options.portalTranslateAllowed({ sessionReady: latest.sessionKnown, signedIn: !!latest.account || latest.consentRenewal, accountOpen: false, marker: latest.marker })
+  return portalTranslateAllowed({ sessionReady: latest.sessionKnown, signedIn: !!latest.account || latest.consentRenewal, accountOpen: false, marker: latest.marker })
 }
 
 await check('a 428 portal_consent_required answer is a live session: known, marker set, counts as signed in', async () => {
@@ -299,6 +301,14 @@ await check('storage, pageshow, visibilitychange and resume only re-read the mar
   store.set(KEY, 't4')
   await act(async () => { winEvents.dispatchEvent(storageEvent(KEY)) })
   assert.deepEqual(calls, ['getPortalAccountMe'], 'listeners are removed on unmount')
+})
+
+// The marker module is pinned to the 'catalog-account-core' chunk, which sits in the storefront's products closure. If portalAccount.ts imported
+// portalLanguageOptions.ts (which lives with the language packs), every shopper would download the packs up front and the budget would break.
+await check('the language packs stay out of the products closure: no runtime edge from the account hook to portalLanguageOptions', () => {
+  const read = (name: string) => fs.readFileSync(new URL(`../src/components/catalog/${name}`, import.meta.url), 'utf8')
+  assert.doesNotMatch(read('portalAccount.ts'), /from\s+['"][^'"]*portalLanguageOptions/, 'portalAccount.ts imports portalLanguageOptions')
+  assert.doesNotMatch(read('portalSignedInMarker.ts'), /^\s*import\b/m, 'portalSignedInMarker.ts must have no import statements')
 })
 
 assert.deepEqual(failures, [], `signed-in marker:\n  ${failures.join('\n  ')}`)
