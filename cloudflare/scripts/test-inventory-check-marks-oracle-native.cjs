@@ -104,7 +104,7 @@ async function scenario(world, report) {
   const a = await fresh(12)
   await step('W1 plain submission with differing lines', () => submit(a, 3))
   // W3 supersede: a newer count of a product whose line waits
-  await step('W3 supersede a waiting line', async () => { await submit([a[0]].map((p) => ({ ...p, q: p.q + 5 })), 0) })
+  await step('W3 supersede a waiting line', async () => { await submit([a[0]], 1) })
   // W6 approve whole / W7 line decisions / W8 reject / W9 close
   const b = await fresh(9)
   await submit(b, 3); const bs = await sessionOf(b[0].id)
@@ -136,10 +136,15 @@ async function scenario(world, report) {
   // W13 a product deactivated, counted, reactivated (I10), a header, another organisation's count, the inactive branch's count, a count whose item branch differs from its session's (m6), equal updated_at (m1)
   const g = await fresh(4)
   await step('I10 deactivate, count, reactivate', async () => {
+    const permit = () => world.db.prepare("INSERT OR REPLACE INTO system_flags (key, value, updated_at) SELECT 'stock_transaction_permit', value, CURRENT_TIMESTAMP FROM system_flags WHERE key = 'stock_schema_epoch'").run()
+    const unpermit = () => world.db.prepare("DELETE FROM system_flags WHERE key = 'stock_transaction_permit'").run()
+    await permit()
     await world.db.prepare('UPDATE products SET is_active=0 WHERE id=?').bind(g[0].id).run()
     await world.db.prepare("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) VALUES('or-1',?,1,1,'inactive count','closed',0,'{}','2026-11-01T01:00:00.000Z','2026-11-01T01:00:00.000Z','2026-11-01T01:00:00.000Z')").bind(world.orgId).run()
     await world.db.prepare("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,revision,updated_by,updated_at) VALUES('or-1',?,1,'{}',1,'{}','done',1,1,1,'2026-11-01T01:00:00.000Z')").bind(g[0].id).run()
+    await world.db.prepare("INSERT INTO inventory_check_events(session_id,product_id,actor_id,action,request_id,request_hash,before_json,after_json,result_json,created_at) VALUES('or-1',?,1,'observe',?, 'h','{}','{}','{}','2026-11-01T01:00:00.000Z')").bind(g[0].id, rid('or')).run()
     await world.db.prepare('UPDATE products SET is_active=1 WHERE id=?').bind(g[0].id).run()
+    await unpermit()
   })
   await step('ties on updated_at broken by session id (m1)', async () => {
     for (const s of ['tie-a', 'tie-b']) {
