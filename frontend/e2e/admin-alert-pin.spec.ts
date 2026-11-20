@@ -125,7 +125,8 @@ async function openApp(page: Page): Promise<Bell> {
     else await route.fulfill({ json: reply })
     bell.answered += 1
   })
-  await signIn(page, E2E_ACCOUNTS.admin)
+  // cashier_a carries the fixture admin's role; the 'admin' account's fixture username is e2e_admin, which signIn's identity check does not match.
+  await signIn(page, E2E_ACCOUNTS.cashierA)
   await expect(alertToasts(page)).toHaveCount(1)
   await expect(alertToasts(page)).toContainText('4 alerts need attention')
   await page.clock.pauseAt(Date.now() + 5_000)
