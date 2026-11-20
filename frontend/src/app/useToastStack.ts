@@ -1,12 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { NOTIFICATION_MAX_VISIBLE, subscribeToasts } from '../components/shared/toastChannel.ts'
+import { useEffect, useState } from 'react'
+import { dismissToast, getToastStack, pauseToast, resumeToast, subscribeToastStack, type StackToast } from '../components/shared/toastChannel.ts'
 
-export type Toast = {
-  key: string
-  message: string
-  type: string
-  duration: number
-  onActivate?: () => void
+export type Toast = StackToast & {
   // Drawn from the context's own slot: dismissing it tells the context.
   fromSlot?: boolean
 }
@@ -14,85 +9,26 @@ export type Toast = {
 // The context's own single `notification` slot (write-conflict notices, the forced sign-out error). Its
 // lifetime belongs to the context, which clears it; the stack only draws it, above the pop-ups.
 type Slot = { id?: number; message: string; type?: string } | null
-type Timer = { handle: number | null; left: number; startedAt: number }
 
 export function slotToast(slot: Slot): Toast | null {
   if (!slot?.message) return null
   return { key: `slot-${slot.id ?? 0}`, message: slot.message, type: slot.type || 'info', duration: Infinity, fromSlot: true }
 }
 
-// The newest message is always on screen. At most NOTIFICATION_MAX_VISIBLE show at once; a further one pushes
-// the oldest off at once (there is no waiting list). A message identical to one already showing does not add a
-// second pop-up, it restarts that pop-up's clock. Every clock starts when its pop-up is shown.
+// A view of the channel's list. The list and every clock live in toastChannel.ts, not here, so a screen swap
+// (App mounts a different <Notification> on boot, sign-in, forced password change and in the shell) draws the
+// same pop-ups with the same clocks. Unmounting stops nothing.
 export function useToastStack(slot: Slot) {
-  const [items, setItems] = useState<Toast[]>([])
-  const list = useRef<Toast[]>([])
-  const timers = useRef(new Map<string, Timer>())
-  const seq = useRef(0)
+  const [items, setItems] = useState<StackToast[]>(getToastStack)
 
-  const commit = useCallback((next: Toast[]) => {
-    list.current = next
-    setItems(next)
+  useEffect(() => {
+    const sync = () => setItems(getToastStack())
+    const stop = subscribeToastStack(sync)
+    sync()
+    return stop
   }, [])
 
-  const stop = useCallback((key: string) => {
-    const timer = timers.current.get(key)
-    if (timer?.handle != null) window.clearTimeout(timer.handle)
-    timers.current.delete(key)
-  }, [])
-
-  const dismiss = useCallback((key: string) => {
-    stop(key)
-    if (list.current.some((item) => item.key === key)) commit(list.current.filter((item) => item.key !== key))
-  }, [commit, stop])
-
-  const start = useCallback((key: string, ms: number) => {
-    stop(key)
-    const entry: Timer = { handle: null, left: ms, startedAt: Date.now() }
-    entry.handle = window.setTimeout(() => dismiss(key), ms)
-    timers.current.set(key, entry)
-  }, [dismiss, stop])
-
-  useEffect(() => subscribeToasts((request) => {
-    const ms = Number.isFinite(request.duration) ? Math.max(0, request.duration) : 0
-    const current = list.current
-    const same = current.find((item) => item.message === request.message && item.type === request.type)
-    if (same) {
-      start(same.key, ms)
-      commit(current.map((item) => (item === same ? { ...item, duration: ms, onActivate: request.onActivate || item.onActivate } : item)))
-      return
-    }
-    seq.current += 1
-    const key = `toast-${seq.current}`
-    const next = [...current, { key, ...request, duration: ms }]
-    while (next.length > NOTIFICATION_MAX_VISIBLE) {
-      const evicted = next.shift()
-      if (evicted) stop(evicted.key)
-    }
-    commit(next)
-    start(key, ms)
-  }), [commit, start, stop])
-
-  useEffect(() => () => {
-    for (const timer of timers.current.values()) if (timer.handle != null) window.clearTimeout(timer.handle)
-    timers.current.clear()
-  }, [])
-
-  const pause = useCallback((key: string) => {
-    const timer = timers.current.get(key)
-    if (!timer || timer.handle == null) return
-    window.clearTimeout(timer.handle)
-    timer.handle = null
-    timer.left = Math.max(0, timer.left - (Date.now() - timer.startedAt))
-  }, [])
-
-  const resume = useCallback((key: string) => {
-    const timer = timers.current.get(key)
-    if (!timer || timer.handle != null) return
-    start(key, timer.left)
-  }, [start])
-
-  return { visible: [...items].reverse(), slot: slotToast(slot), dismiss, pause, resume }
+  return { visible: [...items].reverse(), slot: slotToast(slot), dismiss: dismissToast, pause: pauseToast, resume: resumeToast }
 }
 
 // While a modal dialog is open a pop-up is display-only (a dialog's Close sits where a pop-up's controls would),

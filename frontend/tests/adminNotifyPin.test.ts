@@ -92,7 +92,7 @@ class Screen {
   get shown(): string[] { return this.out.visible.map((t: any) => t.message) }
   unmount() { hooks.forEach((h) => h?.cleanup?.()) }
 }
-const reset = () => { now = 0; timers.clear() }
+const reset = () => { channel.resetToastStack(); now = 0; timers.clear() }
 
 // Durations: one constant for alerts, success and info keep today's time; an explicit duration is kept exactly.
 assert.equal(NOTIFICATION_ALERT_MS, 10000)
@@ -170,7 +170,12 @@ assert.equal(getNotificationDuration('error', 3500), 3500)
   s.emit('u1'); s.emit('u2')
   assert.equal(timers.size, 2)
   s.unmount()
-  assert.equal(timers.size, 0, 'unmount clears the timers')
+  assert.equal(timers.size, 2, 'unmounting a screen stops nothing: the clocks belong to the channel')
+  const again = new Screen()
+  again.advance(10000)
+  assert.deepEqual(again.shown, [], 'the clocks still run out')
+  assert.equal(timers.size, 0)
+  again.unmount()
 }
 
 // F7: a message the context raises through its own slot is drawn above the stack at once, replaced by the next slot
@@ -193,8 +198,8 @@ assert.equal(getNotificationDuration('error', 3500), 3500)
   s.unmount()
 }
 
-// F10 / D: a notify raised while nothing is listening (sign-in screen, forced password change, boot shell, or the instant a
-// screen swaps) is held for its own lifetime and shown by the next screen; it is not dropped.
+// F10 / D: a notify raised while no screen is mounted (the instant a screen swaps) is kept for its own lifetime and
+// shown by the next screen; it is not dropped.
 {
   reset()
   emitToast({ message: 'signed out elsewhere', type: 'error', duration: getNotificationDuration('error') })
@@ -210,6 +215,86 @@ assert.equal(getNotificationDuration('error', 3500), 3500)
   assert.deepEqual(next.shown, ['h4', 'h3', 'h2'])
   next.unmount()
 }
+// N1: a pop-up survives a screen switch. App draws the stack from a different <Notification> on each screen; the
+// list and its clocks live in the channel, so the next screen shows the same pop-up and expires it at its own time.
+{
+  reset()
+  const boot = new Screen()
+  boot.emit('eight seconds', 'warning', 8000)
+  boot.advance(2000)
+  boot.unmount()
+  const shell = new Screen()
+  assert.deepEqual(shell.shown, ['eight seconds'], 'the next screen draws it at once')
+  shell.advance(5999)
+  assert.deepEqual(shell.shown, ['eight seconds'], 'still up 7.999 s after it arrived')
+  shell.advance(1)
+  assert.deepEqual(shell.shown, [], 'gone 8 s after its original arrival, not earlier and not at 10 s')
+  shell.unmount()
+  // Screen after screen: three swaps, one clock.
+  reset()
+  const a = new Screen()
+  a.emit('long read', 'error')
+  a.advance(4000); a.unmount()
+  const b = new Screen()
+  b.advance(4000); b.unmount()
+  const c = new Screen()
+  assert.deepEqual(c.shown, ['long read'])
+  c.advance(1999)
+  assert.deepEqual(c.shown, ['long read'])
+  c.advance(1)
+  assert.deepEqual(c.shown, [])
+  c.unmount()
+  // A dismissal on one screen holds on the next; a mounted screen and a swapped-in one see the same list.
+  reset()
+  const d = new Screen()
+  d.emit('one'); d.emit('two')
+  d.out.dismiss(d.out.visible[0].key)
+  d.unmount()
+  const e = new Screen()
+  assert.deepEqual(e.shown, ['one'])
+  e.unmount()
+}
+
+// Hardening: a duration that is not a positive number must not make a pop-up vanish at once; it gets its type's own time.
+{
+  for (const bad of [Infinity, NaN, 0, -5]) {
+    reset()
+    const s = new Screen()
+    emitToast({ message: 'warn', type: 'warning', duration: bad })
+    emitToast({ message: 'ok', type: 'success', duration: bad })
+    s.settle()
+    assert.deepEqual(s.shown, ['ok', 'warn'], 'duration ' + bad + ' shows')
+    s.advance(3500)
+    assert.deepEqual(s.shown, ['warn'], 'success (' + bad + ') lasts its 3.5 s')
+    s.advance(6499)
+    assert.deepEqual(s.shown, ['warn'])
+    s.advance(1)
+    assert.deepEqual(s.shown, [], 'warning (' + bad + ') lasts its 10 s')
+    s.unmount()
+  }
+}
+
+// Hardening: an identical message arriving while keyboard focus holds that pop-up restarts its clock but keeps the hold.
+{
+  reset()
+  const s = new Screen()
+  s.emit('same')
+  const key = s.out.visible[0].key
+  s.advance(2000)
+  s.out.pause(key)
+  s.advance(1000)
+  s.emit('same')
+  assert.equal(s.shown.length, 1)
+  s.advance(60000)
+  assert.deepEqual(s.shown, ['same'], 'still held by focus after the identical message arrived')
+  s.out.resume(key)
+  s.advance(9999)
+  assert.deepEqual(s.shown, ['same'], 'a full fresh 10 s once focus leaves')
+  s.advance(1)
+  assert.deepEqual(s.shown, [])
+  s.unmount()
+}
+
 // The screens that carry no shell mount the stack: the boot shell, the sign-in screen and the forced password change.
 {
   const branch = (from: string, to: string) => appSource.slice(appSource.indexOf(from), appSource.indexOf(to, appSource.indexOf(from)))
@@ -277,8 +362,7 @@ assert.doesNotMatch(read('src/components/shared/notificationAlerts.ts'), /realer
 
 // The popped alert's request: ten seconds, danger as an error and warning as a warning, View opens the bell on the item.
 {
-  const seen: any[] = []
-  const stop = channel.subscribeToasts((request) => seen.push(request))
+  reset()
   const opened: unknown[] = []
   popUpAlerts({ kind: 'each', items: [{ id: 'out-1', tone: 'danger' }, { id: 'pay-2', tone: 'warning' }] }, {
     itemMessage: (item) => `text of ${item.id}`,
@@ -286,7 +370,7 @@ assert.doesNotMatch(read('src/components/shared/notificationAlerts.ts'), /realer
     open: (item) => opened.push(item?.id ?? null),
   })
   popUpAlerts({ kind: 'many', count: 7 }, { itemMessage: () => '', manyMessage: (count) => `${count} need attention`, open: (item) => opened.push(item?.id ?? null) })
-  stop()
+  const seen: any[] = [...channel.getToastStack()]
   assert.deepEqual(seen.map((r) => [r.message, r.type, r.duration]), [
     ['text of out-1', 'error', 10000], ['text of pay-2', 'warning', 10000], ['7 need attention', 'warning', 10000],
   ])

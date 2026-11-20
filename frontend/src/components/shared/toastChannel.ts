@@ -20,30 +20,113 @@ export type ToastRequest = {
   onActivate?: () => void
 }
 
-// Every pop-up goes through this synchronous channel, not React state: two messages raised in one
-// batch (two failed requests) must both reach the screen, which a single state slot cannot do.
-type ToastListener = (request: ToastRequest) => void
-const toastListeners = new Set<ToastListener>()
+export type StackToast = ToastRequest & { key: string }
 
-// A message raised while nothing is listening (the sign-in screen swapping for the shell, the boot shell)
-// is held for its own lifetime and handed to the next listener, as the old single state slot held it.
-const heldToasts: Array<{ request: ToastRequest; at: number }> = []
+// The visible pop-ups and every clock live here, at module level, not in a component: App draws the stack from a
+// different <Notification> on each screen (boot, sign-in, forced password change, shell), and a screen swap must
+// neither drop a message nor restart its clock. Whichever <Notification> is mounted draws this same list.
+// Every pop-up goes through this synchronous channel, not React state: two messages raised in one batch (two
+// failed requests) must both reach the screen, which a single state slot cannot do.
+type Clock = { handle: number | null; left: number; startedAt: number }
+let stack: StackToast[] = []
+const clocks = new Map<string, Clock>()
+const changeListeners = new Set<() => void>()
+let sequence = 0
 
-export function subscribeToasts(listener: ToastListener): () => void {
-  toastListeners.add(listener)
-  const now = Date.now()
-  const held = heldToasts.splice(0)
-  for (const entry of held) {
-    if (now - entry.at < entry.request.duration) listener(entry.request)
-  }
-  return () => { toastListeners.delete(listener) }
+function changed(next: StackToast[]): void {
+  stack = next
+  for (const listener of [...changeListeners]) listener()
 }
 
+function stopClock(key: string): void {
+  const clock = clocks.get(key)
+  if (clock?.handle != null) window.clearTimeout(clock.handle)
+  clocks.delete(key)
+}
+
+// A pop-up that would vanish at once (no number, zero, negative, Infinity) lives for its type's own time instead.
+function lifetime(type: string, duration: unknown): number {
+  return typeof duration === 'number' && Number.isFinite(duration) && duration > 0 ? duration : getNotificationDuration(type)
+}
+
+export function dismissToast(key: string): void {
+  stopClock(key)
+  if (stack.some((toast) => toast.key === key)) changed(stack.filter((toast) => toast.key !== key))
+}
+
+function startClock(key: string, ms: number): void {
+  stopClock(key)
+  const clock: Clock = { handle: null, left: ms, startedAt: Date.now() }
+  clock.handle = window.setTimeout(() => dismissToast(key), ms)
+  clocks.set(key, clock)
+}
+
+// The newest message is always on screen. At most NOTIFICATION_MAX_VISIBLE show at once; a further one pushes the
+// oldest off at once (there is no waiting list). A message identical to one already showing does not add a second
+// pop-up, it restarts that pop-up's clock; if keyboard focus is holding that pop-up, the restarted clock stays held.
 export function emitToast(request: ToastRequest): void {
-  if (!toastListeners.size) {
-    heldToasts.push({ request, at: Date.now() })
-    if (heldToasts.length > NOTIFICATION_MAX_VISIBLE) heldToasts.shift()
+  const ms = lifetime(request.type, request.duration)
+  const same = stack.find((toast) => toast.message === request.message && toast.type === request.type)
+  if (same) {
+    const clock = clocks.get(same.key)
+    if (clock && clock.handle == null) {
+      clock.left = ms
+      clock.startedAt = Date.now()
+    } else {
+      startClock(same.key, ms)
+    }
+    changed(stack.map((toast) => (toast === same ? { ...toast, duration: ms, onActivate: request.onActivate || toast.onActivate } : toast)))
     return
   }
-  for (const listener of [...toastListeners]) listener(request)
+  sequence += 1
+  const key = `toast-${sequence}`
+  const next = [...stack, { ...request, key, duration: ms }]
+  while (next.length > NOTIFICATION_MAX_VISIBLE) {
+    const evicted = next.shift()
+    if (evicted) stopClock(evicted.key)
+  }
+  changed(next)
+  startClock(key, ms)
+}
+
+export function getToastStack(): StackToast[] {
+  return stack
+}
+
+// Keyboard focus holds a pop-up's clock; leaving it hands back what was left.
+export function pauseToast(key: string): void {
+  const clock = clocks.get(key)
+  if (!clock || clock.handle == null) return
+  window.clearTimeout(clock.handle)
+  clock.handle = null
+  clock.left = Math.max(0, clock.left - (Date.now() - clock.startedAt))
+}
+
+export function resumeToast(key: string): void {
+  const clock = clocks.get(key)
+  if (!clock || clock.handle != null) return
+  startClock(key, clock.left)
+}
+
+// A pop-up whose time ran out while no timer could fire (a throttled background tab) is gone before the next screen draws it.
+function dropExpired(): void {
+  const now = Date.now()
+  for (const toast of [...stack]) {
+    const clock = clocks.get(toast.key)
+    if (clock && clock.handle != null && clock.startedAt + clock.left <= now) dismissToast(toast.key)
+  }
+}
+
+export function subscribeToastStack(listener: () => void): () => void {
+  dropExpired()
+  changeListeners.add(listener)
+  return () => { changeListeners.delete(listener) }
+}
+
+// Test seam: forget every pop-up and clock.
+export function resetToastStack(): void {
+  for (const key of [...clocks.keys()]) stopClock(key)
+  stack = []
+  sequence = 0
+  changeListeners.clear()
 }
