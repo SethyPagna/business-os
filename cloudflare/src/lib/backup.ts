@@ -1020,7 +1020,7 @@ async function writeBackupDocument(
     }
 
     await writer.write('},"r2":')
-    await writer.write(JSON.stringify({ bucket: 'business-os-assets', assets, assetsPrefix, ...(includeAssets ? { assetLayout: ASSET_LAYOUT_POOL } : {}), copiedKeys, assetCopyProgress }))
+    await writer.write(JSON.stringify({ bucket: 'business-os-assets-apac', assets, assetsPrefix, ...(includeAssets ? { assetLayout: ASSET_LAYOUT_POOL } : {}), copiedKeys, assetCopyProgress }))
     await writer.write(',"summary":')
     await writer.write(JSON.stringify({
       tableCount,
