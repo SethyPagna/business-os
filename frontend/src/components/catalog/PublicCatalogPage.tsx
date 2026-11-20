@@ -1,5 +1,6 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { resolveProductNames } from './productDetailSections.ts'
+import { portalRowFromProduct } from './portalProductNames.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import type { Dispatch, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
@@ -1097,17 +1098,11 @@ export default function PublicCatalogPage() {
   // The list and the saved items keep no picture, so the page remembers the one a product had when it was added on this device.
   const addToBucket = (product: CatalogProduct, priceText?: string) => {
     listImages.remember(product.id, String(product.image_path || ''))
-    bucket.add(
-      { id: product.id, name: String(product.name || ''), category: String(product.category || ''), brand: String(product.brand || '') },
-      priceText,
-    )
+    bucket.add(portalRowFromProduct(product), priceText)
   }
   const toggleWishlist = (product: CatalogProduct, priceText?: string) => {
     listImages.remember(product.id, String(product.image_path || ''))
-    wishlist.toggle(
-      { id: product.id, name: String(product.name || ''), category: String(product.category || ''), brand: String(product.brand || '') },
-      priceText,
-    )
+    wishlist.toggle(portalRowFromProduct(product), priceText)
   }
   const closeProductDetailView = () => setProductDetailView((prev) => ({ ...prev, open: false }))
   // The announcement strip and the promotion cards link to a product by id.
@@ -1254,7 +1249,8 @@ export default function PublicCatalogPage() {
         onOpenContact={contactEntries.length > 0 ? openContactSheet : undefined}
         faqLoading={!realConfigInHand}
         openProductById={openProductById}
-        onAddRecommendation={(item: { id: number; name: string; category: string; brand: string }) => bucket.add(item)}
+        catalogProducts={products}
+        onAddRecommendation={(item: { id: number; name: string; shopLine?: string; category: string; brand: string }) => bucket.add(item)}
         brands={brands}
         assistantProfile={assistantProfile}
         setAssistantProfile={setAssistantProfile}
@@ -1343,7 +1339,7 @@ export default function PublicCatalogPage() {
       onClearList={bucket.clear}
       onAddSaved={(id) => {
         const item = wishlist.items.find((entry) => String(entry.id) === String(id))
-        if (item && !bucket.hasItem(item.id)) bucket.add({ id: item.id, name: item.name, category: item.category, brand: item.brand }, item.priceText)
+        if (item && !bucket.hasItem(item.id)) bucket.add({ id: item.id, name: item.name, shopLine: item.shopLine, category: item.category, brand: item.brand }, item.priceText)
       }}
       onRemoveSaved={wishlist.remove}
       onClearSaved={wishlist.clear}

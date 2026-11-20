@@ -40,6 +40,7 @@ import {
   serializePromoItems,
 } from './portalEditorUtils.ts'
 import { portalScrollBehavior } from './portalMotion.ts'
+import { resolveProductNames } from './productDetailSections.ts'
 import {
   clampToRange,
   getPortalProductGridClass,
@@ -1602,7 +1603,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     const safeStart = Math.max(0, Math.min(startIndex, items.length - 1))
     setProductGalleryView({
       open: true,
-      title: product?.name || copy('products', 'Products'),
+      title: resolveProductNames(product || {}).heading || copy('products', 'Products'),
       items,
       index: safeStart,
     })
@@ -3289,6 +3290,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     expandedFaqId,
     setExpandedFaqId,
     openProductById,
+    catalogProducts: products,
     brands,
     assistantProfile,
     setAssistantProfile,

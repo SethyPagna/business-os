@@ -19,7 +19,7 @@ import type { PortalContactEntry } from './portalSocialLinks.ts'
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 export type PortalListSegment = 'list' | 'saved'
 
-type Row = { id: string | number; name: string; priceText?: string; qty?: number }
+type Row = { id: string | number; name: string; shopLine?: string; priceText?: string; qty?: number }
 
 const ICON_BUTTON = 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#23201b] transition hover:bg-stone-200 dark:text-neutral-200 dark:hover:bg-neutral-800'
 const DANGER_BUTTON = 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-rose-700 transition hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-950'
@@ -71,6 +71,7 @@ export default function PortalListPage({
     <div className="min-w-0 flex-1">
       {/* A product name is never cut on this project: it scrolls. getKhmerTextProps because a name can be Khmer whatever the page language is. */}
       <div translate="no" {...getKhmerTextProps(row.name, 'detail-scroll-text notranslate text-sm font-medium text-[#23201b] dark:text-neutral-100')}>{row.name}</div>
+      {row.shopLine ? <div translate="no" {...getKhmerTextProps(row.shopLine, 'detail-scroll-text notranslate text-xs text-stone-600 dark:text-neutral-300')}>{row.shopLine}</div> : null}
       {row.priceText ? <div translate="no" className="notranslate text-xs text-stone-600 dark:text-neutral-300">{row.priceText}</div> : null}
     </div>
   )

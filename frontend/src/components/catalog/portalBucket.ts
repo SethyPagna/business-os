@@ -21,6 +21,8 @@ export type PortalBucketItem = {
   brand?: string
   priceText?: string
   qty: number
+  // The shop's own name when the heading above is the official one. Older saved items have none.
+  shopLine?: string
 }
 
 const STORAGE_KEY = 'business-os-portal-bucket-v1'
@@ -60,7 +62,7 @@ export function usePortalBucket() {
   }, [items])
 
   const add = useCallback((
-    product: { id: string | number; name?: string; category?: string; brand?: string; categories?: string; brands?: string },
+    product: { id: string | number; name?: string; shopLine?: string; category?: string; brand?: string; categories?: string; brands?: string },
     priceText?: string,
     qty = 1,
   ) => {
@@ -78,6 +80,7 @@ export function usePortalBucket() {
         {
           id: product.id,
           name: String(product.name || '').trim(),
+          shopLine: String(product.shopLine || '').trim() || undefined,
           category: portalPrimaryValue(product.category, product.categories) || undefined,
           brand: portalPrimaryValue(product.brand, product.brands) || undefined,
           priceText,
@@ -136,6 +139,7 @@ function sanitizeBucketItems(raw: unknown): PortalBucketItem[] {
     .map((entry): PortalBucketItem => ({
       id: (entry as PortalBucketItem)?.id,
       name: String((entry as PortalBucketItem)?.name || '').trim(),
+      shopLine: String((entry as PortalBucketItem)?.shopLine || '').trim() || undefined,
       category: portalPrimaryValue((entry as PortalBucketItem)?.category) || undefined,
       brand: portalPrimaryValue((entry as PortalBucketItem)?.brand) || undefined,
       priceText: (entry as PortalBucketItem)?.priceText ? String((entry as PortalBucketItem).priceText) : undefined,
@@ -168,6 +172,7 @@ export type PortalWishlistItem = {
   category?: string
   brand?: string
   priceText?: string
+  shopLine?: string
 }
 
 const WISHLIST_STORAGE_KEY = 'business-os-portal-wishlist-v1'
@@ -187,6 +192,7 @@ function sanitizeWishlistItems(raw: unknown): PortalWishlistItem[] {
     out.push({
       id,
       name,
+      shopLine: String((entry as PortalWishlistItem)?.shopLine || '').trim() || undefined,
       category: portalPrimaryValue((entry as PortalWishlistItem)?.category) || undefined,
       brand: portalPrimaryValue((entry as PortalWishlistItem)?.brand) || undefined,
       priceText: (entry as PortalWishlistItem)?.priceText ? String((entry as PortalWishlistItem).priceText) : undefined,
@@ -222,7 +228,7 @@ export function usePortalWishlist() {
 
   const has = useCallback((id: string | number) => items.some((item) => String(item.id) === String(id)), [items])
 
-  const toggle = useCallback((product: { id: string | number; name?: string; category?: string; brand?: string; categories?: string; brands?: string }, priceText?: string) => {
+  const toggle = useCallback((product: { id: string | number; name?: string; shopLine?: string; category?: string; brand?: string; categories?: string; brands?: string }, priceText?: string) => {
     setItems((current) => {
       if (current.some((item) => String(item.id) === String(product.id))) {
         return current.filter((item) => String(item.id) !== String(product.id))
@@ -232,6 +238,7 @@ export function usePortalWishlist() {
         {
           id: product.id,
           name: String(product.name || '').trim(),
+          shopLine: String(product.shopLine || '').trim() || undefined,
           category: portalPrimaryValue(product.category, product.categories) || undefined,
           brand: portalPrimaryValue(product.brand, product.brands) || undefined,
           priceText,
@@ -262,7 +269,8 @@ export function formatPortalBucketText(items: PortalBucketItem[], businessName =
     const details = [item.brand, item.category].filter(Boolean).join(' - ')
     const priceSuffix = item.priceText ? ` (${item.priceText})` : ''
     const detailSuffix = details ? ` [${details}]` : ''
-    lines.push(`${index + 1}. ${item.name} x${item.qty}${priceSuffix}${detailSuffix}`)
+    const shopSuffix = item.shopLine ? ` [${item.shopLine}]` : ''
+    lines.push(`${index + 1}. ${item.name}${shopSuffix} x${item.qty}${priceSuffix}${detailSuffix}`)
   })
   return lines.join('\n')
 }

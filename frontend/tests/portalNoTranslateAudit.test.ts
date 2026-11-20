@@ -53,7 +53,8 @@ check('About and the Assistant: the shop name, tagline, owner [[ ]] spans and re
   const tabs = read('CatalogSecondaryTabs.tsx')
   assert.match(tabs, /<span key=\{index\} translate="no" className="notranslate">\{segment\.text\}<\/span>/)
   assert.match(tabs, /<h2 className="notranslate[^"]*" translate="no">/)
-  assert.match(tabs, /translate="no" className="notranslate text-sm font-semibold leading-6[^"]*">\{item\.name\}<\/div>/)
+  assert.match(tabs, /translate="no" className="notranslate break-words text-sm font-semibold leading-6[^"]*">\{heading\}<\/div>/)
+  assert.match(tabs, /translate="no" className="notranslate break-words text-xs leading-5[^"]*">\{shopLine\}<\/div>/)
   assert.match(tabs, /<span translate="no" className="notranslate">\{priceLabel\}<\/span>/)
 })
 

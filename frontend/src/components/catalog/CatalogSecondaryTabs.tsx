@@ -25,6 +25,7 @@ import { COVER_BANNER_MAX_PX, coverRatio, coverShape, sameImageFile } from '../.
 import type { CoverShape } from '../../utils/aboutCoverLayout.ts'
 import { SectionShell } from './catalogUi'
 import { portalPrimaryValue } from './portalMultiValue.ts'
+import { assistantRowNames } from './portalProductNames.ts'
 import { PORTAL_PRIMARY_BUTTON } from './portalButtons.ts'
 import { splitNoTranslateSegments, stripNoTranslateMarkers } from './portalNoTranslate.ts'
 import { faqEntries, faqSearchVisible, filterFaqEntries, nextOpenFaqKey } from './portalFaqLayout.ts'
@@ -167,7 +168,10 @@ interface CatalogAiSectionProps {
   // The storefront's product detail sheet; without it a card is plain text.
   openProductById?: (productId: number, productName: string) => void
   // Add a recommended product to the shopper's list (the storefront's bucket). Without it a row has no Add button.
-  onAddRecommendation?: (item: { id: number; name: string; category: string; brand: string }) => void
+  onAddRecommendation?: (item: { id: number; name: string; shopLine?: string; category: string; brand: string }) => void
+  // The loaded catalogue: a result carries only the shop name, so its heading and shop line are resolved from the product here.
+  catalogProducts?: ReadonlyArray<{ id: string | number; name?: unknown; description?: unknown }>
+
   // What /ai/status says about the providers behind the assistant; null until it answers.
   assistantDisclosure?: AiProviderState | null
   assistantDataUseConsent: boolean
@@ -794,6 +798,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
     assistantResponse,
     openProductById,
     onAddRecommendation,
+    catalogProducts,
     assistantDisclosure,
     assistantDataUseConsent,
     setAssistantDataUseConsent,
@@ -1056,19 +1061,21 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
             const canOpen = Boolean(openProductById) && Number.isFinite(productId)
             const addKey = String(item.product_id)
             const meta = [portalPrimaryValue(item.brand), portalPrimaryValue(item.category)].filter(Boolean).join(' · ')
+            const { heading, shopLine } = assistantRowNames(item, catalogProducts)
             const open = () => openProductById?.(productId, item.name)
             return (
               <article key={item.product_id} className={`rounded-2xl p-3 ${SURFACE}`}>
                 <div className="flex items-center gap-3">
                   {canOpen ? (
-                    <button type="button" className="shrink-0 rounded-xl" onClick={open} aria-label={`${copy('assistantViewProduct', 'View product', 'មើលផលិតផល')}: ${item.name}`}>
+                    <button type="button" className="shrink-0 rounded-xl" onClick={open} aria-label={`${copy('assistantViewProduct', 'View product', 'មើលផលិតផល')}: ${heading}`}>
                       <AssistantThumb item={item} />
                     </button>
                   ) : <AssistantThumb item={item} />}
                   <div className="min-w-0 flex-1">
                     {canOpen ? (
-                      <button type="button" translate="no" aria-label={item.name} className="notranslate block max-w-full text-left text-sm font-semibold leading-6 text-[#23201b] dark:text-neutral-100" onClick={open}>{item.name}</button>
-                    ) : <div translate="no" className="notranslate text-sm font-semibold leading-6 text-[#23201b] dark:text-neutral-100">{item.name}</div>}
+                      <button type="button" translate="no" aria-label={heading} className="notranslate block max-w-full break-words text-left text-sm font-semibold leading-6 text-[#23201b] dark:text-neutral-100" onClick={open}>{heading}</button>
+                    ) : <div translate="no" className="notranslate break-words text-sm font-semibold leading-6 text-[#23201b] dark:text-neutral-100">{heading}</div>}
+                    {shopLine ? <div translate="no" className="notranslate break-words text-xs leading-5 text-stone-600 dark:text-neutral-300">{shopLine}</div> : null}
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-6 text-stone-600 dark:text-neutral-300">
                       {meta ? <span translate="no" className="notranslate">{meta}</span> : null}
                       {priceLabel ? <span translate="no" className="notranslate">{priceLabel}</span> : null}
@@ -1081,7 +1088,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                       className={`${CHARCOAL_BUTTON} shrink-0 px-4`}
                       disabled={item.stock_status === 'out_of_stock'}
                       onClick={() => {
-                        onAddRecommendation({ id: productId, name: item.name, category: item.category || '', brand: item.brand || '' })
+                        onAddRecommendation({ id: productId, name: heading, ...(shopLine ? { shopLine } : {}), category: item.category || '', brand: item.brand || '' })
                         setAdded((current) => new Set(current).add(addKey))
                       }}
                     >
