@@ -14,7 +14,7 @@
 // picker keeps the legacy server text search, so nothing regresses.
 import { useEffect, useState } from 'react'
 import { apiFetch } from './http.ts'
-import { captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from './actorReadScope.ts'
+import { captureActorReadScope, isActorReadScopeCurrent, subscribeCatalogueChange, type ActorReadScope } from './actorReadScope.ts'
 import {
   SEARCH_CORE_VERSION,
   SEARCH_TIER_EXACT_CODE,
@@ -26,7 +26,11 @@ import {
 } from '../utils/searchCore.ts'
 
 const INDEX_FORMAT = 1
-const STORE_KEY = 'products:search-index:v1'
+// The index holds catalogue text and identity only (id, name, brand, category, barcode, sku: no stock, price or promotion), so its read scope is its own entity and not 'products'. A sale or a
+// stock write invalidates 'products:search' (the rows a list shows), which moves the whole 'products' entity revision; under that key it reset this index and sent the till back to the server
+// text search. Under its own entity only an actor change, a data epoch or a clear-everything moves the scope; a real catalogue change marks the index stale through subscribeCatalogueChange
+// and the usual ?have= revalidation brings it up to date without dropping it. The key also no longer starts with 'products:search', so methods.ts stops deleting the stored copy on every sync.
+const STORE_KEY = 'catalogIndex:search-index:v1'
 const REVALIDATE_MS = 60_000
 const SYNC_REVALIDATE_DELAY_MS = 1_500
 const BUILD_SLICE_MS = 8
@@ -65,11 +69,13 @@ const state: {
   scope: ActorReadScope | null
   checkedAt: number
   stale: boolean
+  // Counts markProductSearchIndexStale calls, so a load that finishes does not clear a mark made while it ran.
+  staleMarks: number
   generation: number
   inflight: Promise<void> | null
   // Counts epoch resets: a load that began before one describes another database state and must not store anything.
   resets: number
-} = { status: 'idle', index: null, pages: new Map(), scope: null, checkedAt: 0, stale: true, generation: 0, inflight: null, resets: 0 }
+} = { status: 'idle', index: null, pages: new Map(), scope: null, checkedAt: 0, stale: true, staleMarks: 0, generation: 0, inflight: null, resets: 0 }
 
 const listeners = new Set<() => void>()
 function notify(): void {
@@ -179,6 +185,7 @@ async function load(force: boolean): Promise<void> {
   if (state.scope && !isActorReadScopeCurrent(state.scope)) resetForNewActor()
   const scope = state.scope ?? captureActorReadScope(STORE_KEY)
   const mark = state.resets
+  const staleMarksAtStart = state.staleMarks
   const current = () => isActorReadScopeCurrent(scope) && state.resets === mark
   state.scope = scope
   if (!state.index) {
@@ -198,7 +205,7 @@ async function load(force: boolean): Promise<void> {
     const changed = await revalidate(scope, mark)
     if (!current()) return
     state.checkedAt = Date.now()
-    state.stale = false
+    if (state.staleMarks === staleMarksAtStart) state.stale = false
     if (changed || !state.index) {
       const index = await buildIndex(state.pages)
       if (!current()) return
@@ -229,7 +236,18 @@ export function ensureProductSearchIndex(force = false): Promise<void> {
 
 export function markProductSearchIndexStale(): void {
   state.stale = true
+  state.staleMarks += 1
 }
+
+// A catalogue change made on this device (the plain 'products' invalidation): mark the index stale and, when one is held, revalidate its pages by hash shortly after, the same delay a
+// 'products' sync update uses, instead of waiting out REVALIDATE_MS. Several changes in a row make one revalidation.
+let catalogueChangeTimer: ReturnType<typeof setTimeout> | null = null
+subscribeCatalogueChange(() => {
+  markProductSearchIndexStale()
+  if (state.status !== 'ready') return
+  if (catalogueChangeTimer) clearTimeout(catalogueChangeTimer)
+  catalogueChangeTimer = setTimeout(() => { catalogueChangeTimer = null; void ensureProductSearchIndex() }, SYNC_REVALIDATE_DELAY_MS)
+})
 
 /**
  * A new data epoch (a restore, a cutover): what this tab holds, in memory and on disk, describes another database state. Both go, a
