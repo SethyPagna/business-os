@@ -709,7 +709,7 @@ const consentStore = (): Storage | null => {
 }
 
 const CHIP = 'inline-flex min-h-10 items-center rounded-full border px-3.5 text-sm leading-6 transition'
-const CHIP_IDLE = 'border-stone-400 bg-white text-[#23201b] hover:border-[#7a5c22] dark:border-neutral-500 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:border-amber-300'
+const CHIP_IDLE = 'border-stone-500 bg-white text-[#23201b] hover:border-[#7a5c22] dark:border-neutral-500 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:border-amber-300'
 const CHIP_ACTIVE = 'border-[#23201b] bg-[#23201b] text-[#f4f1ea] dark:border-amber-300 dark:bg-amber-300 dark:text-neutral-900'
 
 function AssistantStockBadge({ status, copy }: { status?: string; copy: CopyFn }) {
@@ -747,7 +747,7 @@ export function AssistantDisclosure({ copy, aiState, language, ownerDisclaimer, 
       {onWithdraw ? (
         <button
           type="button"
-          className="inline-flex min-h-11 items-center gap-2 rounded-full border border-stone-400 px-4 text-sm font-semibold text-[#23201b] transition hover:border-[#7a5c22] dark:border-neutral-500 dark:text-neutral-100 dark:hover:border-amber-300"
+          className="inline-flex min-h-11 items-center gap-2 rounded-full border border-stone-500 px-4 text-sm font-semibold text-[#23201b] transition hover:border-[#7a5c22] dark:border-neutral-500 dark:text-neutral-100 dark:hover:border-amber-300"
           onClick={onWithdraw}
         >
           <X aria-hidden="true" className="h-4 w-4" />
