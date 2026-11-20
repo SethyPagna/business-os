@@ -353,7 +353,10 @@ assert.deepEqual(limitForDialog(['a', 'b', 'c'], true, true), ['a'], 'a dialog b
 {
   reset()
   let modal = false
-  const doc = { body: {}, querySelector: (sel: string) => { assert.equal(sel, '[aria-modal="true"]'); return modal ? {} : null } }
+  const drawn = { getClientRects: () => ({ length: 1 }) }
+  const undrawn = { getClientRects: () => ({ length: 0 }) }
+  // The session-quarantine host is always in the body with aria-modal and display:none: it must never count as an open dialog.
+  const doc = { body: {}, querySelectorAll: (sel: string) => { assert.equal(sel, '[aria-modal="true"]'); return modal ? [undrawn, drawn] : [undrawn] } }
   let trigger: () => void = () => {}
   let disconnected = 0
   const Observer = class { constructor(cb: () => void) { trigger = cb } observe() {} disconnect() { disconnected++ } }

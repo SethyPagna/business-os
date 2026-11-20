@@ -101,20 +101,29 @@ export function limitForDialog<T>(visible: T[], dialogOpen: boolean, narrow: boo
   return dialogOpen && narrow ? visible.slice(0, 1) : visible
 }
 
+type DialogCandidate = { getClientRects?: () => { length: number } }
 type DialogDocument = {
   body: object
-  querySelector: (selector: string) => unknown
+  querySelectorAll: (selector: string) => ArrayLike<DialogCandidate>
 }
 type ObserverFactory = new (callback: () => void) => { observe: (target: never, options: object) => void; disconnect: () => void }
 
 // Event-driven: one observer on the document while a pop-up is showing, and none otherwise. It re-checks
-// only when the DOM changes, and the check is one selector lookup.
+// only when the DOM changes, and the check is one selector lookup over the (few) dialogs.
 export function observeDialogOpen(doc: DialogDocument, Observer: ObserverFactory | undefined, onChange: (open: boolean) => void): () => void {
-  const read = () => onChange(Boolean(doc.querySelector('[aria-modal="true"]')))
+  // A dialog that is not drawn (display:none, like the session-quarantine host that always sits in the body) is not open.
+  const read = () => {
+    const nodes = doc.querySelectorAll('[aria-modal="true"]')
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i]
+      if (!node.getClientRects || node.getClientRects().length > 0) return onChange(true)
+    }
+    onChange(false)
+  }
   read()
   if (!Observer) return () => {}
   const observer = new Observer(read)
-  observer.observe(doc.body as never, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-modal'] })
+  observer.observe(doc.body as never, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-modal', 'style', 'hidden', 'class'] })
   return () => observer.disconnect()
 }
 
