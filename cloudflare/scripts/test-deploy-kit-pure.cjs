@@ -829,15 +829,16 @@ function assertImportRefused(result) {
     assert.deepStrictEqual(lib.parseCounts([{ results: [row] }]), row, 'the same one-row parser reads both modes')
     assert.strictEqual(lib.commandCatalog.counts('rowid').gate, 'confirm')
     assert.strictEqual(lib.commandCatalog.migrationNames().gate, 'confirm')
-    assert.strictEqual(lib.DEFAULT_COUNTS, 'full', 'the default row count is the full one')
-    assert.deepStrictEqual(lib.COUNTS_REQUESTS, ['full', 'auto'])
-    for (const pending of [0, 1, null, undefined]) assert.strictEqual(lib.chooseCountsMode(undefined, pending), 'full', `no request (waiting=${String(pending)}) must be the full count, even when nothing is waiting`)
+    assert.strictEqual(lib.DEFAULT_COUNTS, 'touched', 'the default row count is -Counts touched (owner, 20 Nov 2026)')
+    assert.deepStrictEqual(lib.COUNTS_REQUESTS, ['touched', 'full', 'auto'])
+    for (const pending of [0, 1, null, undefined]) assert.strictEqual(lib.chooseCountsMode(undefined, pending), 'full', `chooseCountsMode never turns the quick count on for a request that is not auto (waiting=${String(pending)})`)
     assert.strictEqual(lib.chooseCountsMode('auto', 0), 'rowid', 'the quick count is opt-in')
     for (const unsafe of [1, 12, null, undefined, NaN, -1, '0']) assert.strictEqual(lib.chooseCountsMode('auto', unsafe), 'full', `waiting=${String(unsafe)} must keep the full count`)
     assert.strictEqual(lib.chooseCountsMode('full', 0), 'full', '-Counts full is the old behaviour')
     assert.throws(() => lib.chooseCountsMode('quick', 0), /Unknown counts request/)
     assert.strictEqual(lib.parseArgs(['live', '-Counts', 'FULL']).counts, 'full')
-    assert.throws(() => lib.parseArgs(['snapshot', '-Counts', 'none']), /full \(the default\) or auto/)
+    assert.throws(() => lib.parseArgs(['snapshot', '-Counts', 'none']), /touched \(the default\), full or auto/)
+    assert.strictEqual(lib.parseArgs(['snapshot', '-Counts', 'Touched']).counts, 'touched')
     assert.strictEqual(lib.parseArgs(['snapshot']).counts, undefined, 'no -Counts means no request, so the default applies')
     assert.strictEqual(lib.parseArgs(['snapshot', '-Counts', 'auto']).counts, 'auto')
     const applied = ['0001_a.sql', '0002_b.sql']
@@ -860,6 +861,44 @@ function assertImportRefused(result) {
     assert.strictEqual(lib.compareCounts(pre, pre).mode, 'full', 'the mode defaults to the old comparison')
   })
 
+  check('-Counts touched: the plan follows the tables a waiting update touches, trigger bodies and renames included; nothing waiting reads eight high-water marks', () => {
+    const { DatabaseSync } = require('node:sqlite')
+    const { loadAll } = require('./harness/load_migrations.cjs')
+    const fullOf = (...sqls) => { const p = lib.chooseCountsPlan(sqls); return lib.KEY_TABLES.filter((t) => p[t] === 'full') }
+    assert.deepStrictEqual(fullOf('DELETE FROM sale_items WHERE id = 1;'), ['sale_items'], 'a DELETE makes that table a full count and no other')
+    assert.deepStrictEqual(fullOf('CREATE TRIGGER x AFTER DELETE ON sales BEGIN DELETE FROM inventory_movements WHERE sale_id = old.id; END;'), ['inventory_movements'], 'a trigger BODY that deletes marks the table it deletes from')
+    assert.deepStrictEqual(fullOf('ALTER TABLE sales_new RENAME TO sales;'), ['sales'], 'a table renamed onto a key table is touched')
+    assert.deepStrictEqual(fullOf('-- DELETE FROM customers\nCREATE TABLE settings_x (a INTEGER);'), [], 'a comment, and a table that is not a key table, touch none')
+    assert.deepStrictEqual(fullOf('UPDATE products SET a = 1;', 'INSERT INTO returns (id) VALUES (1);'), ['products', 'returns'], 'two waiting files add up')
+    assert.deepStrictEqual(fullOf(), [], 'no waiting update: nothing needs a full count')
+    assert.deepStrictEqual(lib.KEY_TABLES.filter((t) => lib.chooseCountsPlan(null)[t] === 'full'), lib.KEY_TABLES, 'unknown keeps the full count for every table')
+    const none = lib.chooseCountsPlan([])
+    const sql = lib.countsSql(lib.KEY_TABLES, none)
+    assert.strictEqual((sql.match(/MAX\(rowid\)/g) || []).length, 8)
+    assert.ok(!/COUNT\(\*\)/i.test(sql), 'no table scan')
+    const mixed = lib.countsSql(lib.KEY_TABLES, lib.chooseCountsPlan(['DELETE FROM sale_items;']))
+    assert.ok(mixed.includes('(SELECT COUNT(*) FROM sale_items) AS sale_items') && mixed.includes('(SELECT COALESCE(MAX(rowid), 0) FROM sales) AS sales') && !/\b(UNION|INTERSECT|EXCEPT)\b/i.test(mixed))
+    const db = new DatabaseSync(':memory:')
+    for (const text of loadAll()) db.exec(text)
+    const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all().map((row) => String(row.detail))
+    assert.ok(plan.filter((detail) => /^SEARCH/.test(detail)).length === 8 && plan.every((detail) => !/^SCAN (?!CONSTANT ROW)/.test(detail)), `a high-water mark never scans a table: ${plan.join(' | ')}`)
+    const full = db.prepare(`EXPLAIN QUERY PLAN ${lib.countsSql()}`).all().map((row) => String(row.detail))
+    assert.ok(full.length > 0, 'the full count still plans')
+  })
+
+  check('-Counts touched: a middle row deleted from a touched table is UNEXPECTED, and the quick tables keep the documented limit', () => {
+    const pre = Object.fromEntries(lib.KEY_TABLES.map((t) => [t, 50]))
+    const plan = lib.chooseCountsPlan(['DELETE FROM inventory_movements WHERE id = 7;'])
+    const lost = lib.compareCounts(pre, { ...pre, inventory_movements: 41 }, new Set(), plan)
+    assert.ok(!lost.ok && lost.failed.some((r) => r.table === 'inventory_movements' && r.verdict === 'UNEXPECTED' && r.mode === 'full'), 'a planted loss in a full table fails')
+    const sold = lib.compareCounts(pre, { ...pre, sales: 51 }, new Set(), plan)
+    assert.ok(sold.ok && sold.rows.find((r) => r.table === 'sales').mode === 'rowid', 'a quick table still shows growth as a warning')
+    assert.strictEqual(lib.countChange({ pre: 50, post: 53, mode: 'rowid' }, { ci: true }), '+3 ids', 'the unit follows the row\'s own mode')
+    assert.strictEqual(lib.countChange({ pre: 50, post: 53, mode: 'full' }, { ci: true, mode: 'rowid' }), '+3 rows')
+    assert.strictEqual(lib.describeCountsPlan(plan), 'per table: 1 full, 7 quick')
+    assert.strictEqual(lib.describeCountsPlan('full'), 'full')
+  })
+
   check('the quick count is not a loss check, which is why it is opt-in: deleted middle rows pass it and fail the full count', () => {
     // Ten middle inventory_movements deleted by the Worker (undo, a dated stock count, a merge), then one item sold. AUTOINCREMENT never
     // reuses an id, so the highest id still rises. The full count sees 50 -> 41; the high-water mark sees 50 -> 51.
@@ -874,7 +913,7 @@ function assertImportRefused(result) {
     assert.strictEqual(lib.countChange({ pre: 50, post: 41 }, { ci: true }), '-9 rows')
   })
 
-  check('deploy.yml cannot ask for the quick count, so CI runs the default, which is the full count', () => {
+  check('deploy.yml cannot ask for a counts mode, so CI runs the default, -Counts touched', () => {
     const y = read('.github', 'workflows', 'deploy.yml')
     assert.ok(!/-Counts/i.test(y), 'deploy.yml passes no -Counts')
     const release = read('ops', 'scripts', 'deploy-kit', 'release.cjs')
@@ -889,8 +928,10 @@ function assertImportRefused(result) {
     lib.assertApproved(spec, approval)
     if (spec.id === 'counts') {
       const sql = spec.args[spec.args.indexOf('--command') + 1]
-      seen.push(/MAX\(rowid\)/.test(sql) ? 'rowid' : 'full')
-      return { code: 0, out: JSON.stringify([{ results: [{ ...(/MAX\(rowid\)/.test(sql) ? HIGH : FULL_COUNT), ...post }], success: true }]) }
+      const quick = lib.KEY_TABLES.filter((t) => sql.includes(`(SELECT COALESCE(MAX(rowid), 0) FROM ${t})`))
+      seen.push(quick.length === lib.KEY_TABLES.length ? 'rowid' : quick.length === 0 ? 'full' : 'mixed')
+      const row = Object.fromEntries(lib.KEY_TABLES.map((t) => [t, quick.includes(t) ? HIGH[t] : FULL_COUNT[t]]))
+      return { code: 0, out: JSON.stringify([{ results: [{ ...row, ...post }], success: true }]) }
     }
     if (spec.id === 'deployments-status') return { code: 0, out: JSON.stringify({ id: 'dddddddd-0000-4000-8000-000000000009', versions: [{ version_id: V_PUBLISHED, percentage: 100 }] }) }
     throw new Error(`unexpected command ${spec.id}`)
@@ -926,11 +967,33 @@ function assertImportRefused(result) {
     assert.strictEqual(full.result, true, 'a full before-count is what a release with updates is meant to keep')
   })
 
-  await checkAsync('the snapshot step chooses the mode from the waiting updates: none -> quick, some or unreadable or -Counts full -> full', async () => {
+  await checkAsync('-Counts touched at the live step: the plan the snapshot recorded is read again, a lost row in a full table fails, and an update that touched a quick table is a PROBLEM', async () => {
+    const plan = lib.chooseCountsPlan(['DELETE FROM inventory_movements;'])
+    const pre = Object.fromEntries(lib.KEY_TABLES.map((t) => [t, plan[t] === 'full' ? FULL_COUNT[t] : HIGH[t]]))
+    const seen = []
+    const ok = await liveWith({ preCounts: pre, countsMode: plan }, null, {}, seen)
+    assert.strictEqual(ok.result, true)
+    assert.deepStrictEqual(seen, ['mixed'])
+    assert.match(ok.summary, /Row counts \(per table: 1 full, 7 quick\)/)
+    assert.match(ok.summary, /\| inventory_movements \| full \| same/)
+    assert.match(ok.summary, /\| sales \| quick \| same/)
+    const lost = await liveWith({ preCounts: pre, countsMode: plan }, null, { inventory_movements: FULL_COUNT.inventory_movements - 9 }, [])
+    assert.strictEqual(lost.result, false, 'nine middle rows are gone from a table counted in full')
+    assert.match(lost.text, /inventory_movements/)
+    const quickTouched = await liveWith({ preCounts: pre, countsMode: plan }, { pending: { 'business-os': ['0300_x.sql'] }, appliedAt: '2026-11-20T00:00:00Z', touchedTables: ['sales'] }, {}, [])
+    assert.strictEqual(quickTouched.result, false)
+    assert.match(quickTouched.text, /database updates changed sales although the before-count of that table was the quick one/)
+    const allQuick = Object.fromEntries(lib.KEY_TABLES.map((t) => [t, 'rowid']))
+    const harmless = await liveWith({ preCounts: HIGH, countsMode: allQuick }, { pending: { 'business-os': ['0300_x.sql'] }, appliedAt: '2026-11-20T00:00:00Z', touchedTables: ['settings'] }, {}, [])
+    assert.strictEqual(harmless.result, true, 'an update that touches no key table needs no full count')
+  })
+
+  await checkAsync('the snapshot step chooses the mode: the default (-Counts touched) counts in full only the key tables the waiting updates touch; -Counts auto / full as before', async () => {
     const run = async ({ args = {}, ledger, migrations }) => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-quick-counts-'))
       fs.mkdirSync(path.join(dir, 'cloudflare', 'migrations'), { recursive: true })
-      for (const name of migrations) fs.writeFileSync(path.join(dir, 'cloudflare', 'migrations', name), '-- fixture\n')
+      const files = Array.isArray(migrations) ? Object.fromEntries(migrations.map((name) => [name, '-- fixture\n'])) : migrations
+      for (const [name, sql] of Object.entries(files)) fs.writeFileSync(path.join(dir, 'cloudflare', 'migrations', name), sql)
       const seen = []
       const asked = []
       const ctx = { sha: SHA, args, ci: true, dryRun: false, releaseDir: dir, recordDir: dir, plan: 'paid', ciConfirmWord: 'DEPLOY', state: {} }
@@ -948,11 +1011,19 @@ function assertImportRefused(result) {
       return { ...out, seen, asked, snapshot: ctx.state.snapshot }
     }
     const applied = ['0001_a.sql', '0002_b.sql']
-    // THE DEFAULT: no -Counts at all. Nothing waiting and a readable ledger, and still the full count (and no ledger read at all).
+    // THE DEFAULT: no -Counts at all is -Counts touched. It reads the ledger and every waiting migration file, and counts in full only the key tables they touch.
     const defaulted = await run({ ledger: applied, migrations: applied })
-    assert.deepStrictEqual([defaulted.seen, defaulted.snapshot.countsMode], [['full'], 'full'], 'no -Counts -> the full count, even with nothing waiting')
-    assert.ok(!defaulted.asked.includes('migration-names'), 'the default needs no migration-ledger read')
-    assert.match(defaulted.text, /full \(every table counted: the default\)/)
+    assert.deepStrictEqual([defaulted.seen, defaulted.snapshot.countsMode], [['rowid'], Object.fromEntries(lib.KEY_TABLES.map((t) => [t, 'rowid']))], 'nothing waiting -> eight high-water marks, 8 rows read')
+    assert.ok(defaulted.asked.includes('migration-names'), 'the default reads the migration ledger')
+    assert.match(defaulted.text, /-Counts touched, per table: 0 full, 8 quick/)
+    const deletes = await run({ ledger: applied, migrations: { ...Object.fromEntries(applied.map((n) => [n, '-- fixture\n'])), '0003_c.sql': 'DELETE FROM sale_items WHERE id = 1;\n' } })
+    assert.deepStrictEqual(deletes.seen, ['mixed'])
+    assert.deepStrictEqual(deletes.snapshot.countsMode, Object.fromEntries(lib.KEY_TABLES.map((t) => [t, t === 'sale_items' ? 'full' : 'rowid'])), 'a waiting update that deletes from sale_items makes only sale_items a full count')
+    assert.strictEqual(deletes.snapshot.preCounts.sale_items, 3000 + lib.KEY_TABLES.indexOf('sale_items'), 'the full table was read as a count')
+    assert.strictEqual(deletes.snapshot.preCounts.sales, 70000 + lib.KEY_TABLES.indexOf('sales'), 'an untouched table was read as a high-water mark')
+    assert.match(deletes.text, /counted in full: sale_items/)
+    const unreadableDefault = await run({ ledger: 'fail', migrations: ['0001_a.sql'] })
+    assert.deepStrictEqual([unreadableDefault.seen, unreadableDefault.snapshot.countsMode], [['full'], Object.fromEntries(lib.KEY_TABLES.map((t) => [t, 'full']))], 'an unreadable ledger counts every table in full')
     const waiting = await run({ args: { counts: 'auto' }, ledger: ['0001_a.sql'], migrations: ['0001_a.sql', '0002_b.sql'] })
     assert.deepStrictEqual([waiting.seen, waiting.snapshot.countsMode], [['full'], 'full'], '-Counts auto, one update waiting -> full')
     const none = await run({ args: { counts: 'auto' }, ledger: applied, migrations: applied })

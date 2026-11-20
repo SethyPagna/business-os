@@ -24,7 +24,7 @@
 //   -Retries <n>          extra tries for a red test file (default 2)
 //   rollback: -Target worker|database  -VersionId <id>  -PreviousSha <40-hex sha being returned to (worker)>  -Db <name>  -Bookmark <b>
 //   CI only: -CI -ReleaseDir <checkout> -NoApply
-//   Row counts: -Counts full (default; every table counted) or -Counts auto (opt-in; quick highest-row-id counts when no database update is waiting. A high-water mark does not see deleted rows, see lib.cjs)
+//   Row counts: -Counts touched (default; every table a waiting database update touches is counted, the others by highest row id), -Counts full (every table counted) or -Counts auto (opt-in; quick highest-row-id counts when no database update is waiting). A high-water mark does not see deleted rows, see lib.cjs
 //
 // <home> is BUSINESS_OS_HOME, else the folder holding the main git checkout.
 
@@ -474,6 +474,20 @@ async function countPendingMigrations(ctx, approval) {
   return lib.pendingMigrationCount(rows.map((row) => row && row.name), candidate)
 }
 
+// The SQL text of every migration file production has not applied, or null when that cannot be told (an unreadable ledger, folder or file):
+// unknown keeps the full count for every table. One SELECT on d1_migrations, read-only.
+async function readPendingMigrationSqls(ctx, approval) {
+  const r = await readProduction(ctx, lib.commandCatalog.migrationNames(), approval)
+  if (r.dry || !r.ok) return null
+  const rows = lib.findKey(r.json, 'results')
+  if (!Array.isArray(rows)) return null
+  try {
+    const dir = path.join(ctx.releaseDir, 'cloudflare', 'migrations')
+    const names = lib.pendingMigrationNames(rows.map((row) => row && row.name), fs.readdirSync(dir))
+    return names === null ? null : names.map((name) => fs.readFileSync(path.join(dir, name), 'utf8'))
+  } catch { return null }
+}
+
 async function readCounts(ctx, approval, mode = 'full') {
   const r = await readProduction(ctx, lib.commandCatalog.counts(mode), approval)
   if (r.dry) return { ok: true, counts: null }
@@ -503,13 +517,19 @@ async function stepSnapshot(ctx) {
     log.say(`  live Worker version now: ${previousVersionId || '(could not read)'}${deploymentId ? ` (deployment ${deploymentId})` : ''}`)
     if (!ctx.ci) writeRecord(ctx, 'deployment-before.json', dep.json || dep.out || '')
   }
-  // Only -Counts auto asks the ledger which updates wait; the default needs no extra read.
+  // -Counts touched (the default) and -Counts auto ask the ledger which updates wait; -Counts full needs no extra read.
   const requested = ctx.args.counts || lib.DEFAULT_COUNTS
   const pending = requested === 'auto' ? await countPendingMigrations(ctx, approval) : null
-  const countsMode = lib.chooseCountsMode(requested, pending)
-  log.say(countsMode === 'rowid'
+  const pendingSqls = requested === 'touched' ? await readPendingMigrationSqls(ctx, approval) : null
+  const countsMode = requested === 'touched' ? lib.chooseCountsPlan(pendingSqls) : lib.chooseCountsMode(requested, pending)
+  if (requested === 'touched') {
+    const full = lib.KEY_TABLES.filter((t) => countsMode[t] === 'full')
+    log.say(pendingSqls === null
+      ? '  row counts: full (-Counts touched could not read the waiting updates, so every table is counted).'
+      : `  row counts: -Counts touched, ${lib.describeCountsPlan(countsMode)}${full.length ? ` (counted in full: ${full.join(', ')})` : ': no waiting update touches a key table'}. A deleted middle row is NOT seen in a quick table.`)
+  } else log.say(countsMode === 'rowid'
     ? "  row counts: quick (each table's highest row id), as asked with -Counts auto: no database update is waiting. A deleted row is NOT seen by this check."
-    : `  row counts: full (${requested !== 'auto' ? 'every table counted: the default' : pending === null ? 'the waiting updates could not be read' : `${pending} database update(s) waiting`}).`)
+    : `  row counts: full (${requested !== 'auto' ? 'every table counted' : pending === null ? 'the waiting updates could not be read' : `${pending} database update(s) waiting`}).`)
   const c = await readCounts(ctx, approval, countsMode)
   if (!c.ok) { log.say('STOP: could not read the row counts.'); return false }
   if (c.counts) log.say(lib.countsLines(lib.KEY_TABLES.map((t) => ({ table: t, pre: c.counts[t] })), { ci: ctx.ci }))
@@ -529,7 +549,7 @@ async function stepSnapshot(ctx) {
     ...lib.DATABASES.map((d) => `- Restore point \`${d.name}\`: \`${bookmarks[d.name] || '-'}\``),
     `- Worker version before: \`${previousVersionId || '-'}\``, '',
     ...(ctx.ci
-      ? [`Row counts read for ${lib.KEY_TABLES.length} tables, ${countsMode === 'rowid' ? 'quick: highest row id' : 'full'} (numbers kept out of this public summary).`]
+      ? [`Row counts read for ${lib.KEY_TABLES.length} tables, ${lib.describeCountsPlan(countsMode)} (numbers kept out of this public summary).`, ...(typeof countsMode === 'object' ? [`Per table: ${lib.KEY_TABLES.map((t) => `${t} ${countsMode[t] === 'full' ? 'full' : 'quick'}`).join(', ')}.`] : [])]
       : ['| table | rows before |', '| --- | ---: |', ...lib.KEY_TABLES.map((t) => `| ${t} | ${c.counts ? c.counts[t] : '-'} |`)]),
   ].join('\n'))
   return true
@@ -783,13 +803,16 @@ async function stepLive(ctx) {
       const pre = ctx.state.snapshot && ctx.state.snapshot.preCounts
       const touched = new Set((ctx.state.migrations && ctx.state.migrations.touchedTables) || [])
       const migrated = !!(ctx.state.migrations && (ctx.state.migrations.appliedAt || Object.values(ctx.state.migrations.pending || {}).some((list) => list && list.length)))
+      const quickTouched = typeof countsMode === 'object' ? lib.KEY_TABLES.filter((t) => countsMode[t] === 'rowid' && touched.has(t)) : []
+      if (quickTouched.length) problems.push(`database updates changed ${quickTouched.join(', ')} although the before-count of that table was the quick one: deleted rows were not checked. Run the release again with -Counts full.`)
       if (countsMode === 'rowid' && migrated) problems.push('database updates ran although the before-count was the quick one (nothing was waiting when it was taken): deleted rows were not checked. Run the release again with -Counts full.')
       comparison = lib.compareCounts(pre, c.counts, touched, countsMode)
       log.say(lib.countsLines(comparison.rows, { ci: ctx.ci, mode: countsMode }))
       for (const w of comparison.warnings) warnings.push(`${w.table}: ${lib.countChange(w, { ci: ctx.ci, mode: countsMode })} (${w.verdict === 'changed-by-migration' ? 'a database update in this release changes this table' : 'the shop kept working during the release'})`)
       for (const f of comparison.failed) problems.push(`${f.table}: ${lib.countChange(f, { ci: ctx.ci, mode: countsMode })} (${f.verdict})`)
-      summary(ctx, [`### Row counts (${countsMode === 'rowid' ? 'quick: highest row id per table' : 'full'})`, '', '| table | verdict | change |', '| --- | --- | ---: |',
-        ...comparison.rows.map((r) => `| ${r.table} | ${r.verdict} | ${r.verdict === 'same' ? '-' : lib.countChange(r, { ci: ctx.ci, mode: countsMode })} |`)].join('\n'))
+      const perTable = typeof countsMode === 'object'
+      summary(ctx, [`### Row counts (${lib.describeCountsPlan(countsMode)})`, '', perTable ? '| table | counted | verdict | change |' : '| table | verdict | change |', perTable ? '| --- | --- | --- | ---: |' : '| --- | --- | ---: |',
+        ...comparison.rows.map((r) => `| ${r.table} | ${perTable ? `${r.mode === 'rowid' ? 'quick' : 'full'} | ` : ''}${r.verdict} | ${r.verdict === 'same' ? '-' : lib.countChange(r, { ci: ctx.ci, mode: countsMode })} |`)].join('\n'))
     }
   } else {
     warnings.push('row counts were not compared')

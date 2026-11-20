@@ -114,7 +114,7 @@ function parseArgs(argv) {
   if (out.plan) out.plan = String(out.plan).toLowerCase()
   if (out.counts !== undefined) {
     out.counts = String(out.counts).toLowerCase()
-    if (!COUNTS_REQUESTS.includes(out.counts)) throw new Error(`-Counts must be full (the default) or auto, not ${out.counts}`)
+    if (!COUNTS_REQUESTS.includes(out.counts)) throw new Error(`-Counts must be touched (the default), full or auto, not ${out.counts}`)
   }
   return out
 }
@@ -131,28 +131,62 @@ function npm(id, pkg, script, gate, extra = {}) {
 // One row, one column per table, each a scalar sub-count. D1's SQLite caps
 // compound SELECTs at a few terms, so one UNION ALL term per table failed with
 // "too many terms in compound SELECT" once the list grew past that cap.
+// mode is 'full' or 'rowid' for every table, or a { table: 'full' | 'rowid' } map (-Counts touched).
+function countsModeOf(mode, table) {
+  if (mode && typeof mode === 'object') return mode[table] === 'full' ? 'full' : 'rowid'
+  return mode === 'rowid' ? 'rowid' : 'full'
+}
 function countsSql(tables = KEY_TABLES, mode = 'full') {
-  if (mode === 'rowid') return `SELECT ${tables.map((t) => `(SELECT COALESCE(MAX(rowid), 0) FROM ${t}) AS ${t}`).join(', ')}`
-  return `SELECT ${tables.map((t) => `(SELECT COUNT(*) FROM ${t}) AS ${t}`).join(', ')}`
+  return `SELECT ${tables.map((t) => (countsModeOf(mode, t) === 'rowid'
+    ? `(SELECT COALESCE(MAX(rowid), 0) FROM ${t}) AS ${t}`
+    : `(SELECT COUNT(*) FROM ${t}) AS ${t}`)).join(', ')}`
 }
 
 // Reading the eight key tables in full costs about 155,000 rows each time and the release reads them twice (before and after):
 // 6.2% of a Free day per deploy (RELIABILITY-PLAN 5.5). 'rowid' reads each table's high-water mark instead (8 rows).
 //
-// THE DEFAULT IS THE FULL COUNT. The high-water mark is NOT a loss check. All eight tables take an AUTOINCREMENT id, so an id is
+// THE DEFAULT IS -Counts touched (the owner's yes, 20 Nov 2026): COUNT(*) for the key tables that the pending migrations touch (a
+// trigger body that deletes counts too), and the high-water mark for the rest, so a release that touches no key table reads 8 rows
+// instead of about 155,000. The risk is the one below: the high-water mark misses a middle row that the app deletes during the
+// release window. The weekly copy counts every table exactly, and the after-deploy pack watches the last two business days.
+// The high-water mark is NOT a loss check. All eight tables take an AUTOINCREMENT id, so an id is
 // never reused and one new sale lifts the mark above any number of deleted rows: ten middle inventory_movements deleted and one
 // item sold reads 50 -> 51 (pass) where COUNT(*) reads 50 -> 41 (UNEXPECTED). The Worker deletes from all eight tables (undo, dated
 // stock counts, merges, retention), so "only a migration could delete a middle row" is false. What 'rowid' does see is a new
 // products row and a newest tail that vanished with nothing inserted after it (a restore). It is therefore opt-in, for the owner
 // who accepts that limit and once a check runs after every deploy to watch the touched rows:
-//   -Counts full (default): always the full count, the behaviour before 6.0.1043.
+//   -Counts touched (default): the full count only for the key tables a pending migration touches; the high-water mark for the rest.
+//                       An unreadable ledger or migration file keeps the full count for every table.
+//   -Counts full: always the full count, the behaviour before 6.0.1043.
 //   -Counts auto: rowid when no database update is waiting, full otherwise (waiting updates unreadable counts as waiting).
-const COUNTS_REQUESTS = ['full', 'auto']
-const DEFAULT_COUNTS = 'full'
+const COUNTS_REQUESTS = ['touched', 'full', 'auto']
+const DEFAULT_COUNTS = 'touched'
 function chooseCountsMode(requested = DEFAULT_COUNTS, pendingMigrations = null) {
   if (!COUNTS_REQUESTS.includes(requested)) throw new Error(`Unknown counts request ${requested}`)
-  if (requested === 'full') return 'full'
+  if (requested !== 'auto') return 'full'
   return Number.isInteger(pendingMigrations) && pendingMigrations === 0 ? 'rowid' : 'full'
+}
+// -Counts touched: { table: 'full' | 'rowid' } over KEY_TABLES from the SQL text of every pending migration file. null (unknown) keeps
+// 'full' for every table.
+function chooseCountsPlan(pendingSqls) {
+  const touched = pendingSqls == null ? null : keyTablesTouched(pendingSqls)
+  return Object.fromEntries(KEY_TABLES.map((t) => [t, touched === null || touched.has(t) ? 'full' : 'rowid']))
+}
+function keyTablesTouched(sqls) {
+  const touched = new Set()
+  for (const sql of sqls) for (const t of tablesTouched(sql)) if (KEY_TABLES.includes(t)) touched.add(t)
+  return touched
+}
+function describeCountsPlan(mode) {
+  if (!mode || typeof mode !== 'object') return mode === 'rowid' ? 'quick: highest row id per table' : 'full'
+  const full = KEY_TABLES.filter((t) => mode[t] === 'full')
+  return full.length === KEY_TABLES.length ? 'full' : `per table: ${full.length} full, ${KEY_TABLES.length - full.length} quick`
+}
+// Names of the migration files production has not applied (null when the ledger is unreadable or empty).
+function pendingMigrationNames(appliedNames, candidateNames) {
+  const applied = new Set([...(appliedNames || [])].filter((n) => typeof n === 'string' && n))
+  if (applied.size === 0) return null
+  return [...(candidateNames || [])].filter((n) => /.sql$/.test(n) && !applied.has(n))
 }
 // How many files of the release's migrations folder production has not applied. null when the ledger could not be read as a
 // non-empty list (an empty ledger is not "nothing waiting"), so the caller falls back to the full count.
@@ -232,6 +266,7 @@ function sampleCatalog() {
     commandCatalog.deploymentStatus(),
     commandCatalog.counts(),
     commandCatalog.counts('rowid'),
+    commandCatalog.counts({ products: 'full', branch_stock: 'rowid' }),
     commandCatalog.migrationNames(),
     commandCatalog.importMigrationLedger(),
     commandCatalog.guardState(guardStateSql()),
@@ -397,7 +432,7 @@ function firstCommentLine(sql) {
 
 function tablesTouched(sql) {
   const out = new Set()
-  const re = /\b(?:ALTER\s+TABLE|INSERT\s+(?:OR\s+\w+\s+)?INTO|REPLACE\s+INTO|UPDATE(?:\s+OR\s+\w+)?|DELETE\s+FROM|DROP\s+TABLE(?:\s+IF\s+EXISTS)?|CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?)\s+["`[]?([A-Za-z_][A-Za-z0-9_]*)/gi
+  const re = /\b(?:ALTER\s+TABLE|RENAME\s+TO|INSERT\s+(?:OR\s+\w+\s+)?INTO|REPLACE\s+INTO|UPDATE(?:\s+OR\s+\w+)?|DELETE\s+FROM|DROP\s+TABLE(?:\s+IF\s+EXISTS)?|CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?)\s+["`[]?([A-Za-z_][A-Za-z0-9_]*)/gi
   const stripped = String(sql || '').replace(/--[^\n]*/g, '')
   for (const m of stripped.matchAll(re)) out.add(m[1].toLowerCase())
   return out
@@ -456,6 +491,7 @@ function parseCounts(json, tables = KEY_TABLES) {
 function compareCounts(pre, post, touched = new Set(), mode = 'full') {
   const rows = []
   for (const table of KEY_TABLES) {
+    const tableMode = countsModeOf(mode, table)
     const a = pre ? pre[table] : undefined
     const b = post ? post[table] : undefined
     let verdict
@@ -464,7 +500,7 @@ function compareCounts(pre, post, touched = new Set(), mode = 'full') {
     else if (touched.has(table)) verdict = 'changed-by-migration'
     else if (b > a && LIVE_TRAFFIC_TABLES.has(table)) verdict = 'grew-live-traffic'
     else verdict = 'UNEXPECTED'
-    rows.push({ table, pre: a, post: b, verdict })
+    rows.push({ table, pre: a, post: b, verdict, mode: tableMode })
   }
   const failed = rows.filter((r) => r.verdict === 'UNEXPECTED' || r.verdict === 'MISSING')
   const warnings = rows.filter((r) => r.verdict === 'changed-by-migration' || r.verdict === 'grew-live-traffic')
@@ -485,7 +521,8 @@ function countChange(row, { ci = false, mode = 'full' } = {}) {
   if (!ci) return `${row.pre ?? '-'} -> ${row.post ?? '-'}`
   if (row.pre == null || row.post == null) return 'not read'
   const d = row.post - row.pre
-  return `${d > 0 ? '+' : ''}${d} ${mode === 'rowid' ? 'id' : 'row'}${Math.abs(d) === 1 ? '' : 's'}`
+  const unit = (row.mode || mode) === 'rowid' ? 'id' : 'row'
+  return `${d > 0 ? '+' : ''}${d} ${unit}${Math.abs(d) === 1 ? '' : 's'}`
 }
 
 // ----------------------------------------------------------- live checks
@@ -552,7 +589,7 @@ module.exports = {
   DEFAULT_REF, DEFAULT_PLAN, DEFAULT_SITE, WORKER_NAME, CERT_DIR_NAME,
   DATABASES, KEY_TABLES, LIVE_TRAFFIC_TABLES, NPM_SCRIPTS_USED, WRANGLER_SUBCOMMANDS_USED, GATE_RANK, GATE_TEST_FILES,
   parseCrons, cronRollbackCheck, ROLLBACK_REDEPLOY_ADVICE,
-  parseArgs, commandCatalog, sampleCatalog, countsSql, chooseCountsMode, pendingMigrationCount, COUNTS_REQUESTS, DEFAULT_COUNTS, isProductionSpec, assertApproved,
+  parseArgs, commandCatalog, sampleCatalog, countsSql, countsModeOf, chooseCountsMode, chooseCountsPlan, keyTablesTouched, describeCountsPlan, pendingMigrationNames, pendingMigrationCount, COUNTS_REQUESTS, DEFAULT_COUNTS, isProductionSpec, assertApproved,
   classifyResponse, lowerHeaders, parseMigrationNames, validateImportMigrationLedger, firstCommentLine, tablesTouched,
   parseWranglerJson, findKey, liveVersionId, parseCounts, compareCounts, countsLines, countChange, checkVersion,
   recordDirName, certFileName, certMatches, samePath, forbiddenReleasePath, todayStamp,
