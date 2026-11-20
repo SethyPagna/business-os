@@ -322,7 +322,7 @@ export default function PortalFooter({
               <div>{text('portal_legal_identity_legal_name')}: <span className="notranslate" translate="no">{details.legalName}</span></div>
             ) : null}
             {details.registrationNumber ? (
-              <div>{text('portal_legal_identity_registration')}: {details.registrationNumber}</div>
+              <div>{text('portal_legal_identity_registration')}: <span className="notranslate" translate="no">{details.registrationNumber}</span></div>
             ) : null}
             {details.address || details.phone || details.email ? (
               <div className="pt-2 text-[11px] font-semibold uppercase leading-5 tracking-[0.14em] text-slate-500 dark:text-neutral-400">{text('portal_legal_footer_contact')}</div>
@@ -331,13 +331,13 @@ export default function PortalFooter({
             <div className="flex flex-col">
               {details.phone ? (
                 contactHref('tel', details.phone)
-                  ? <a className={FOOTER_LINK_CLASS} href={contactHref('tel', details.phone)}>{details.phone}</a>
-                  : <span>{details.phone}</span>
+                  ? <a className={`${FOOTER_LINK_CLASS} notranslate`} translate="no" href={contactHref('tel', details.phone)}>{details.phone}</a>
+                  : <span className="notranslate" translate="no">{details.phone}</span>
               ) : null}
               {details.email ? (
                 contactHref('mailto', details.email)
-                  ? <a className={`${FOOTER_LINK_CLASS} break-all`} href={contactHref('mailto', details.email)}>{details.email}</a>
-                  : <span className="break-all">{details.email}</span>
+                  ? <a className={`${FOOTER_LINK_CLASS} notranslate break-all`} translate="no" href={contactHref('mailto', details.email)}>{details.email}</a>
+                  : <span className="notranslate break-all" translate="no">{details.email}</span>
               ) : null}
             </div>
             {/* A takedown route, in the one place every page of the site
@@ -357,8 +357,8 @@ export default function PortalFooter({
                     <span className="notranslate" translate="no">{telegramLink.label}</span>
                   </a>
                 ) : contactHref('tel', details.phone) ? (
-                  <a className={INLINE_LINK_CLASS} href={contactHref('tel', details.phone)}>{details.phone}</a>
-                ) : details.phone}
+                  <a className={`${INLINE_LINK_CLASS} notranslate`} translate="no" href={contactHref('tel', details.phone)}>{details.phone}</a>
+                ) : <span className="notranslate" translate="no">{details.phone}</span>}
                 {concernsAfter}
               </div>
             ) : null}
@@ -387,7 +387,7 @@ export default function PortalFooter({
                   <li key={link.key}>
                     <a className={`${FOOTER_LINK_CLASS} gap-2`} href={link.value} target="_blank" rel="noreferrer" aria-label={link.accessibleName}>
                       <SocialIcon kind={link.platform ?? link.key} />
-                      <PortalSocialText text={link.label} latin={link.latin ?? true} />
+                      <span className="notranslate" translate="no"><PortalSocialText text={link.label} latin={link.latin ?? true} /></span>
                     </a>
                   </li>
                 ))}
@@ -644,7 +644,7 @@ function BusinessIdentityCard({ text, details }: { text: (key: string) => string
         {filled.map(([label, value]) => (
           <div key={label} className="flex flex-wrap gap-x-2">
             <dt className="text-slate-500 dark:text-neutral-500">{label}</dt>
-            <dd className="min-w-0 break-words text-slate-800 dark:text-neutral-200">{value}</dd>
+            <dd className="notranslate min-w-0 break-words text-slate-800 dark:text-neutral-200" translate="no">{value}</dd>
           </div>
         ))}
       </dl>
@@ -667,7 +667,7 @@ function StorageTable({ text }: { text: (key: string) => string }): ReactNode {
         <tbody>
           {LEGAL_STORAGE_ROWS.map((row) => (
             <tr key={row.id} className="border-t border-slate-100 align-top dark:border-neutral-800">
-              <td className="px-3 py-2 font-mono text-[11px] break-all text-slate-800 dark:text-neutral-200">{row.name}</td>
+              <td className="notranslate px-3 py-2 font-mono text-[11px] break-all text-slate-800 dark:text-neutral-200" translate="no">{row.name}</td>
               <td className="px-3 py-2 whitespace-nowrap">{text(row.kindKey)}</td>
               <td className="px-3 py-2">{text(row.purposeKey)}</td>
               <td className="px-3 py-2">{text(row.lifetimeKey)}</td>

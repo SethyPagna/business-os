@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { LEGAL_STORAGE_ROWS, PORTAL_LEGAL_EN, PORTAL_LEGAL_KM } from '../src/components/catalog/legal/legalContent.ts'
 
 const frontend = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const read = (relative: string) => fs.readFileSync(path.join(frontend, relative), 'utf8')
@@ -50,8 +51,7 @@ walk(path.join(frontend, 'public'))
 sourceFiles.push(path.join(frontend, 'index.html'), path.join(frontend, 'vite.config.ts'))
 
 check('no source file loads, styles or names the Google Translate widget', () => {
-  // The policies (legalContent.ts) name the googtrans cookie for the four Google-translated languages; no other file may.
-  const hits = sourceFiles.filter((file) => !file.endsWith('legalContent.ts') && LOADER_MARKERS.test(fs.readFileSync(file, 'utf8'))).map((file) => path.relative(frontend, file).replace(/\\/g, '/'))
+  const hits = sourceFiles.filter((file) => LOADER_MARKERS.test(fs.readFileSync(file, 'utf8'))).map((file) => path.relative(frontend, file).replace(/\\/g, '/'))
   assert.deepEqual(hits, [])
 })
 
@@ -59,7 +59,19 @@ check('the translate controller module is gone', () => {
   assert.equal(fs.existsSync(path.join(frontend, 'src/components/catalog/portalTranslateController.ts')), false)
 })
 
-// Policies (LANG-B, 20 Nov 2026): Google Translate returns for four languages, so the policies must say so. portalLegalTranslateDisclosure.test.ts pins it.
+check('the policies no longer disclose Google Translate or its cookie', () => {
+  const mentions = [...Object.entries(PORTAL_LEGAL_EN), ...Object.entries(PORTAL_LEGAL_KM)]
+    .filter(([, text]) => /Google Translate|googtrans/i.test(text))
+    .map(([key]) => key)
+  assert.deepEqual([...new Set(mentions)], [])
+  assert.deepEqual(LEGAL_STORAGE_ROWS.filter((row) => /googtrans/.test(row.name)).map((row) => row.name), [])
+})
+
+check('neither language pack tells anyone about Google Translate', () => {
+  for (const pack of ['src/lang/en.json', 'src/lang/km.json']) {
+    assert.doesNotMatch(read(pack), /Google Translate|googtrans|\bGoogle\b[^"]*fallback|Google ជាជម្រើស|Google តែជាជម្រើស/, pack)
+  }
+})
 
 assert.deepEqual(failures, [], `Google Translate route still present:\n  ${failures.join('\n  ')}`)
-console.log('PASS no Google Translate loader or CSP origin remains; the map frame is still allowed')
+console.log('PASS no Google Translate loader, CSP origin, policy disclosure or pack text remains; the map frame is still allowed')

@@ -43,6 +43,29 @@ assert.equal(PORTAL_LEGAL_EN.portal_legal_footer_contact, 'Contact')
 assert.equal('portal_legal_footer_follow' in PORTAL_LEGAL_EN, false, 'the Follow us key is back in the English pack')
 assert.equal('portal_legal_footer_follow' in PORTAL_LEGAL_KM, false, 'the Follow us key is back in the Khmer pack')
 
+// Google Translate runs on this page for four languages: names, numbers and addresses are left alone, labels and sentences stay translatable.
+const footerBody = footer.slice(footer.indexOf('const details'), footer.indexOf('data-portal-footer-policies="true"'))
+for (const value of ['details.name', 'details.legalName', 'details.registrationNumber', 'details.address', 'details.phone', 'details.email', 'telegramLink.label']) {
+  const token = '{' + value + '}'
+  let from = 0
+  let sites = 0
+  for (let at = footerBody.indexOf(token, from); at >= 0; at = footerBody.indexOf(token, from)) {
+    from = at + token.length
+    if (footerBody.charAt(at - 1) === String.fromCharCode(36)) continue // a template literal in script code, not an element
+    sites += 1
+    const marked = footerBody.lastIndexOf('translate="no"', at)
+    assert.ok(marked > footerBody.lastIndexOf('</', at) && at - marked < 220, `${value} must sit inside an element with translate="no"`)
+    assert.ok(footerBody.lastIndexOf('notranslate', at) > footerBody.lastIndexOf('</', at) - 1, `${value} must carry the notranslate class`)
+  }
+  assert.ok(sites > 0, `${value} is shown in the footer`)
+}
+assert.ok(socialColumn.includes('<span className="notranslate" translate="no"><PortalSocialText'), 'the account names in the Contact column are not translated')
+assert.ok(!footerBody.includes('translate="no">{link.label}'), 'quick-link labels stay translatable')
+assert.ok(!footerBody.includes("translate=\"no\">{text("), 'footer labels and headings stay translatable')
+const identityCard = footer.slice(footer.indexOf('function BusinessIdentityCard'), footer.indexOf('function StorageTable'))
+assert.ok(identityCard.includes('<dd className="notranslate') && identityCard.includes('translate="no">{value}</dd>'), 'identity card values are not translated')
+assert.ok(!identityCard.includes('<dt className="notranslate'), 'identity card labels stay translatable')
+
 // 4. About: the story no longer prints twice (hero intro used to fall back
 //    to it), and on a phone the story comes before the contact tray.
 assert.doesNotMatch(tabs, /previewConfig\.intro \|\| storyText/, 'the hero intro falls back to the story again')
@@ -50,5 +73,4 @@ assert.match(tabs, /const introText = configuredIntro && configuredIntro !== sto
 const about = tabs.slice(tabs.indexOf('function CatalogAboutSection'), tabs.indexOf('function CatalogFaqSection'))
 assert.ok(about.indexOf('<OwnerText text={storyText} />') < about.indexOf('data-portal-contact-tray="true"'), 'story card precedes the contact tray in DOM order')
 assert.doesNotMatch(about, /h-9 min-w-9/, 'social buttons are 40px targets')
-
 console.log('PASS storefront footer columns and About story order')
