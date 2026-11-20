@@ -4,7 +4,7 @@
 //     and nothing is sent on Khmer or English.
 //   - The cookie table has a row for every storage key the storefront writes, and no row for a key that
 //     no longer exists. googtrans is written by the site's own translate controller when a visitor picks one of the four
-//     languages and cleared when they go back or translation is paused; Google's translation script uses it. Translation is paused while
+//     languages and cleared when they go back or translation is paused; Google's translation script may also write it, and uses it. Translation is paused while
 //     signed in or with the account panel open, and the Translation section says so.
 //
 // Run: node tests/portalLegalTranslateDisclosure.test.ts
@@ -31,11 +31,22 @@ for (const fact of [/ចិនសាមញ្ញ/, /ចិនប្រពៃណ�
   assert.match(km, fact, `the Khmer Translation paragraph lost: ${fact}`)
 }
 assert.equal(PORTAL_LEGAL_EN.portal_legal_privacy_translate_h, 'Translation')
-assert.match(PORTAL_LEGAL_EN.portal_legal_cookies_third_b, /This site itself writes the googtrans cookie[^.]*clears it when you go back to Khmer or English or when translation is paused; Google's translation script uses it./)
+// Nobody has verified in a browser who writes googtrans: this site does, and Google's widget may also. The text must say both and neither alone.
+const EN_POLICY_WRITERS = /This site writes the googtrans cookie[^.]*clears it when you go back to Khmer or English or when translation is paused; Google's translation script may also write it, and uses it\./
+const KM_POLICY_WRITERS = /គេហទំព័រនេះសរសេរខូឃី googtrans[^។]*លុបវា[^។]*ពេលការបកប្រែផ្អាក។ ស្គ្រីបបកប្រែរបស់ Google ក៏អាចសរសេរវាដែរ ហើយប្រើវា/
+assert.match(PORTAL_LEGAL_EN.portal_legal_cookies_third_b, EN_POLICY_WRITERS)
 assert.doesNotMatch(PORTAL_LEGAL_EN.portal_legal_cookies_third_b, /Google's script reads it/, 'nobody verified that Google only reads it')
-assert.doesNotMatch(PORTAL_LEGAL_EN.portal_legal_cookies_third_b, /which sets the googtrans cookie/, 'Google does not set googtrans')
-assert.match(PORTAL_LEGAL_KM.portal_legal_cookies_third_b, /គេហទំព័រនេះផ្ទាល់សរសេរខូឃី googtrans[^។]*លុបវា[^។]*ពេលការបកប្រែផ្អាក។ ស្គ្រីបបកប្រែរបស់ Google ប្រើវា/)
+assert.doesNotMatch(PORTAL_LEGAL_EN.portal_legal_cookies_third_b, /which sets the googtrans cookie/, 'Google alone does not set googtrans')
+assert.doesNotMatch(PORTAL_LEGAL_EN.portal_legal_cookies_third_b, /This site itself writes the googtrans/, 'the site is not the only writer')
+assert.match(PORTAL_LEGAL_KM.portal_legal_cookies_third_b, KM_POLICY_WRITERS)
 assert.doesNotMatch(PORTAL_LEGAL_KM.portal_legal_cookies_third_b, /ដែលកំណត់ខូឃី googtrans/)
+assert.doesNotMatch(PORTAL_LEGAL_KM.portal_legal_cookies_third_b, /គេហទំព័រនេះផ្ទាល់សរសេរខូឃី googtrans/, 'the site is not the only writer')
+// Controls: a text that says the site alone writes it, or Google alone does, must fail these patterns.
+const siteAloneEn = PORTAL_LEGAL_EN.portal_legal_cookies_third_b.replace("Google's translation script may also write it, and uses it.", "Google's translation script uses it.")
+const googleAloneEn = PORTAL_LEGAL_EN.portal_legal_cookies_third_b.replace('This site writes the googtrans cookie to remember that choice and clears', 'Google writes the googtrans cookie and this site clears')
+assert.doesNotMatch(siteAloneEn, EN_POLICY_WRITERS, 'control: the site-alone wording is rejected')
+assert.doesNotMatch(googleAloneEn, EN_POLICY_WRITERS, 'control: the Google-alone wording is rejected')
+assert.doesNotMatch(PORTAL_LEGAL_KM.portal_legal_cookies_third_b.replace('ក៏អាចសរសេរវាដែរ ហើយ', ''), KM_POLICY_WRITERS, 'control: the Khmer site-alone wording is rejected')
 
 // 2. The rows.
 const rowByName = new Map(LEGAL_STORAGE_ROWS.map((row) => [row.name, row]))
@@ -43,10 +54,15 @@ const googtrans = rowByName.get('googtrans')
 assert.ok(googtrans, 'no googtrans row')
 assert.equal(googtrans.kindKey, 'portal_legal_kind_cookie')
 assert.match(PORTAL_LEGAL_EN[googtrans.purposeKey], /^Written by this site when you pick Simplified Chinese, Traditional Chinese, French or Spanish/)
-assert.match(PORTAL_LEGAL_EN[googtrans.purposeKey], /Google's translation script uses it. This site clears it when you go back to Khmer or English, or when translation is paused./)
+const EN_ROW_WRITERS = /Google's translation script may also write it, and uses it\. This site clears it when you go back to Khmer or English, or when translation is paused\./
+const KM_ROW_WRITERS = /^គេហទំព័រនេះសរសេរវា[^។]*។[^។]*ស្គ្រីបបកប្រែរបស់ Google ក៏អាចសរសេរវាដែរ ហើយប្រើវា។[^។]*លុបវា/
+assert.match(PORTAL_LEGAL_EN[googtrans.purposeKey], EN_ROW_WRITERS)
 assert.doesNotMatch(PORTAL_LEGAL_EN[googtrans.purposeKey], /Set by Google Translate/)
-assert.match(PORTAL_LEGAL_KM[googtrans.purposeKey], /^គេហទំព័រនេះសរសេរវា[^។]*។[^។]*ស្គ្រីបបកប្រែរបស់ Google ប្រើវា។[^។]*លុបវា/)
+assert.match(PORTAL_LEGAL_KM[googtrans.purposeKey], KM_ROW_WRITERS)
 assert.doesNotMatch(PORTAL_LEGAL_KM[googtrans.purposeKey], /កំណត់ដោយ Google Translate/)
+assert.doesNotMatch(PORTAL_LEGAL_EN[googtrans.purposeKey].replace('may also write it, and ', ''), EN_ROW_WRITERS, 'control: the site-alone row wording is rejected')
+assert.doesNotMatch(PORTAL_LEGAL_KM[googtrans.purposeKey].replace('ក៏អាចសរសេរវាដែរ ហើយ', ''), KM_ROW_WRITERS, 'control: the Khmer site-alone row wording is rejected')
+assert.doesNotMatch(PORTAL_LEGAL_EN[googtrans.purposeKey], /^Set by Google/, 'not Google alone')
 assert.match(PORTAL_LEGAL_EN[googtrans.lifetimeKey], /translation is paused/)
 assert.equal(rowByName.get(AI_CONSENT_STORAGE_KEY)?.kindKey, 'portal_legal_kind_local', 'the assistant-consent key has a local-storage row')
 assert.match(PORTAL_LEGAL_EN[rowByName.get(AI_CONSENT_STORAGE_KEY)!.purposeKey], /agreed on this device to send questions to the assistant/)
