@@ -106,18 +106,18 @@ try {
   assert.doesNotMatch(offWithDiscount.text(), stockWords, 'a promotion pill does not drag the stock label back in')
   assert.match(offWithDiscount.text(), /Discount/, 'the promotion pill still shows')
 
-  // ---- D3: official name is a small secondary line, only when it differs ----
+  // ---- the official name is the heading and the shop name a second line, only when they differ ----
   const differing = await mountFlyout({})
   assert.doesNotMatch(differing.text(), /Shop's Product Name/, 'the old header label is gone')
-  assert.match(differing.text(), /Official name: Abercrombie & Fitch Authentic Man Eau de Toilette 100 ml/)
+  assert.match(differing.text(), /Abercrombie & Fitch Authentic Man Eau de Toilette 100 ml.*In store: A&F EDT 100ml/, 'the official name is the heading and the shop name the second line')
   const same = await mountFlyout({
     view: { ...baseView, product: { ...product, name: 'Abercrombie & Fitch Authentic Man Eau de Toilette 100 ml.' } },
   })
-  assert.doesNotMatch(same.text(), /Official name/, 'an official name that only repeats the shown name is not printed again')
+  assert.doesNotMatch(same.text(), /In store/, 'an official name that only repeats the shop name adds no second line')
   const none = await mountFlyout({ view: { ...baseView, product: { ...product, description: 'Just a paragraph.' } } })
-  assert.doesNotMatch(none.text(), /Official name/, 'no official name, no line')
+  assert.doesNotMatch(none.text(), /In store/, 'no official name, no line')
   const khmer = await mountFlyout({ copy: (key: string, fallback?: string, fallbackKm?: string) => fallbackKm ?? fallback ?? key })
-  assert.match(khmer.text(), /ឈ្មោះផ្លូវការ: Abercrombie/, 'the Khmer fallback names the line')
+  assert.match(khmer.text(), /ក្នុងហាង: A&F EDT 100ml/, 'the Khmer fallback names the shop-name line')
 
   // ---- Page wiring (source shape; the page itself is too heavy to mount) ----
   const page = read('src/components/catalog/PublicCatalogPage.tsx')

@@ -19,6 +19,6 @@ assert.match(
   /title=\{publicView \? undefined : copy\('products', 'Products'\)\}/,
   'the public storefront must omit the Products heading (the admin editor preview keeps it)',
 )
-assert.match(productsSection, /subtitle=\{[^}]*?copy\('liveCatalog'/, 'the subtitle line must still print regardless')
+assert.doesNotMatch(productsSection, /subtitle=|copy\('liveCatalog/, 'no helper line under the heading either (public web overhaul, spec section 9)')
 
 console.log('P11-3: the public products section has no redundant "Products" heading -- PASS')

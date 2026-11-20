@@ -5,6 +5,7 @@ import Search from 'lucide-react/dist/esm/icons/search.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { buildCategoryGroups, categoryGroupValues, type CategoryGroup } from '../../utils/categoryGrouping'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
+import { PRODUCT_CONTROL_CLASS, PRODUCT_FIELD_CLASS } from './portalProductSurfaces.ts'
 
 export type PortalComboboxOption = { value: string; label: string }
 
@@ -255,9 +256,9 @@ export default function PortalFilterCombobox({
       onMouseEnter={() => setActiveIndex(index + 1)}
       className={`mt-0.5 flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium ${row.indent ? 'pl-6' : ''} ${
         row.active
-          ? 'bg-amber-50 text-amber-900 dark:bg-amber-500/10 dark:text-amber-300'
+          ? 'bg-amber-50 text-amber-900 dark:bg-neutral-800 dark:text-amber-300'
           : 'text-slate-600 hover:bg-slate-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
-      } ${activeIndex === index + 1 ? 'ring-1 ring-amber-400 dark:ring-amber-400/60' : ''}`}
+      } ${activeIndex === index + 1 ? 'ring-1 ring-amber-500 dark:ring-amber-400' : ''}`}
       role="option"
       aria-selected={row.active}
     >
@@ -273,7 +274,7 @@ export default function PortalFilterCombobox({
       <LazyPortalMenu
         align="auto"
         triggerWrapperClassName="w-full min-w-0"
-        menuClassName="w-60 max-w-[calc(100vw-1rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 shadow-xl dark:border-neutral-700 dark:bg-neutral-900"
+        menuClassName="w-60 max-w-[calc(100vw-1rem)] overflow-hidden rounded-2xl border border-stone-300 bg-white p-0 shadow-xl dark:border-neutral-700 dark:bg-neutral-900"
         onOpenChange={setOpen}
         trigger={(
           // PortalMenu clones this button and supplies aria-expanded /
@@ -283,8 +284,8 @@ export default function PortalFilterCombobox({
             type="button"
             className={`flex min-h-8 w-full min-w-[7rem] items-center justify-between gap-2 rounded-xl border px-3 py-1.5 text-xs font-semibold transition sm:w-auto ${
               selected.length
-                ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300'
-                : 'border-slate-200 bg-white text-slate-600 hover:border-amber-400 hover:text-amber-800 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:border-amber-500/40 dark:hover:text-amber-300'
+                ? 'border-amber-700 bg-amber-50 text-amber-950 dark:border-[#d6b56b] dark:bg-neutral-800 dark:text-amber-300'
+                : PRODUCT_CONTROL_CLASS
             }`}
             aria-label={`${label}: ${selectionText}`}
           >
@@ -298,9 +299,9 @@ export default function PortalFilterCombobox({
           const clearAll = () => { onClear(); closeMenu() }
           return (
           <div role="dialog" aria-label={label} className="overflow-hidden">
-          <div className="relative block border-b border-slate-100 p-2 dark:border-neutral-800">
+          <div className="relative block border-b border-stone-300 p-2 dark:border-neutral-700">
             <label htmlFor={searchId} className="sr-only">{searchLabel}</label>
-            <Search className="pointer-events-none absolute left-4.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" aria-hidden="true" />
+            <Search className="pointer-events-none absolute left-4.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone-600 dark:text-neutral-300" aria-hidden="true" />
             <input
               ref={inputRef}
               id={searchId}
@@ -321,7 +322,7 @@ export default function PortalFilterCombobox({
               // i.e. no visible indicator at all on the one field a keyboard
               // shopper lands in first. The outline utilities below are the
               // same 3px sky-700 / amber-300 ring the stylesheet paints.
-              className="w-full rounded-lg border border-slate-200 bg-slate-50 py-1.5 pl-7 pr-2 text-xs text-slate-700 outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-100 focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#0369a1] dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:focus:border-amber-500/50 dark:focus:ring-amber-500/15 dark:focus-visible:outline-[#fcd34d]"
+              className={`w-full rounded-lg py-1.5 pl-7 pr-2 text-xs outline-none transition focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#0369a1] dark:focus-visible:outline-[#fcd34d] ${PRODUCT_FIELD_CLASS}`}
             />
           </div>
           <div ref={listRef} className="max-h-56 overflow-y-auto p-1.5" id={listboxId} role="listbox" aria-multiselectable="true" aria-label={label}>
@@ -337,7 +338,7 @@ export default function PortalFilterCombobox({
                 !selected.length
                   ? 'bg-slate-950 text-white dark:bg-white dark:text-neutral-950'
                   : 'text-slate-600 hover:bg-slate-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
-              } ${activeIndex === 0 ? 'ring-1 ring-amber-400 dark:ring-amber-400/60' : ''}`}
+              } ${activeIndex === 0 ? 'ring-1 ring-amber-500 dark:ring-amber-400' : ''}`}
             >
               {allLabel}
             </button>

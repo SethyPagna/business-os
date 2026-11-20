@@ -71,8 +71,8 @@ function fallbackGradientFor(id: number): string {
 
 function SkeletonCard() {
   return (
-    <div className="flex min-w-[260px] max-w-[320px] shrink-0 animate-pulse flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-neutral-700 dark:bg-neutral-900">
-      <div className="h-28 w-full bg-slate-200 dark:bg-neutral-800" />
+    <div className="flex min-w-[260px] max-w-[320px] shrink-0 animate-pulse flex-col overflow-hidden rounded-xl">
+      <div className="h-28 w-full rounded-xl bg-slate-200 dark:bg-neutral-800" />
       <div className="flex flex-col gap-2 p-3">
         <div className="h-3 w-16 rounded-full bg-slate-200 dark:bg-neutral-800" />
         <div className="h-4 w-3/4 rounded bg-slate-200 dark:bg-neutral-800" />
@@ -185,10 +185,10 @@ export default function PortalPromotionsBanner({ copy, onOpenImage, onOpenProduc
       aria-label={copy('announcementStripSection', 'Announcements')}
     >
       {showLeftFade ? (
-        <div className="pointer-events-none absolute inset-y-0 left-1 z-10 w-8 bg-gradient-to-r from-white to-transparent dark:from-neutral-950" />
+        <div className="pointer-events-none absolute inset-y-0 left-1 z-10 w-8 bg-gradient-to-r from-white to-transparent dark:from-neutral-900" />
       ) : null}
       {showRightFade ? (
-        <div className="pointer-events-none absolute inset-y-0 right-1 z-10 w-10 bg-gradient-to-l from-white to-transparent dark:from-neutral-950" />
+        <div className="pointer-events-none absolute inset-y-0 right-1 z-10 w-10 bg-gradient-to-l from-white to-transparent dark:from-neutral-900" />
       ) : null}
       <div
         ref={scrollRef}
@@ -208,7 +208,7 @@ export default function PortalPromotionsBanner({ copy, onOpenImage, onOpenProduc
                     data-promotion-chip="true"
                     onClick={clickable ? () => handleActivate(promo) : undefined}
                     disabled={!clickable}
-                    className="inline-flex min-h-11 max-w-[16rem] shrink-0 snap-start items-center rounded-full border border-amber-300 bg-white px-4 py-2 text-left text-xs font-semibold text-amber-950 dark:border-amber-500/30 dark:bg-neutral-900 dark:text-amber-200"
+                    className="inline-flex min-h-11 max-w-[16rem] shrink-0 snap-start items-center rounded-full border border-stone-400 bg-white px-4 py-2 text-left text-xs font-semibold text-[#23201b] dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-100"
                   >
                     <span className="break-words">{promo.title}</span>
                   </button>
@@ -224,12 +224,12 @@ export default function PortalPromotionsBanner({ copy, onOpenImage, onOpenProduc
                   type="button"
                   onClick={clickable ? () => handleActivate(promo) : undefined}
                   disabled={!clickable}
-                  className={`group relative flex min-w-[260px] max-w-[320px] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-sm ring-1 ring-transparent transition-all duration-200 dark:border-neutral-700 dark:bg-neutral-900 ${
-                    clickable ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-lg hover:ring-amber-300 dark:hover:ring-amber-500/40' : 'cursor-default'
+                  className={`group relative flex min-w-[260px] max-w-[320px] shrink-0 snap-start flex-col text-left transition-all duration-200 ${
+                    clickable ? 'cursor-pointer' : 'cursor-default'
                   }`}
                 >
                   {imageUrl ? (
-                    <div className="relative h-28 w-full overflow-hidden bg-slate-100 dark:bg-neutral-800">
+                    <div className="relative h-28 w-full overflow-hidden rounded-xl bg-slate-100 dark:bg-neutral-800">
                       <img
                         src={imageUrl}
                         alt={promo.title}
@@ -239,11 +239,11 @@ export default function PortalPromotionsBanner({ copy, onOpenImage, onOpenProduc
                       <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-black/25 to-transparent" />
                     </div>
                   ) : (
-                    <div className={`flex h-28 w-full items-center justify-center bg-gradient-to-br ${fallbackGradientFor(promo.id)} px-4 text-center`}>
+                    <div className={`flex h-28 w-full items-center justify-center rounded-xl bg-gradient-to-br ${fallbackGradientFor(promo.id)} px-4 text-center`}>
                       <span className="break-words text-sm font-semibold leading-snug text-white">{promo.title}</span>
                     </div>
                   )}
-                  <div className="flex flex-1 flex-col gap-1 p-3">
+                  <div className="flex flex-1 flex-col gap-1 pt-2">
                     {promo.badge_text ? (
                       <span
                         {...microLabelProps(promo.badge_text, 'inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 font-semibold shadow-sm', 'text-[11px] uppercase tracking-wide')}
@@ -253,9 +253,9 @@ export default function PortalPromotionsBanner({ copy, onOpenImage, onOpenProduc
                         {promo.badge_text}
                       </span>
                     ) : null}
-                    <div className="break-words text-sm font-semibold leading-snug text-slate-900 dark:text-neutral-100">{promo.title}</div>
+                    <div className="break-words text-sm font-semibold leading-snug text-[#23201b] dark:text-neutral-100">{promo.title}</div>
                     {promo.subtitle ? (
-                      <div className="break-words text-xs leading-snug text-slate-500 dark:text-neutral-400">{promo.subtitle}</div>
+                      <div className="break-words text-xs leading-snug text-stone-600 dark:text-neutral-300">{promo.subtitle}</div>
                     ) : null}
                     {promo.link_type === 'product' && promo.link_product_name ? (
                       <div className="mt-auto flex items-center gap-1 pt-1 text-xs font-medium text-amber-800 transition-transform group-hover:translate-x-0.5 dark:text-amber-400">

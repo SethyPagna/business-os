@@ -8,6 +8,7 @@ import {
   readableInkOn,
 } from './portalContrast.ts'
 import { portalScrollBehavior } from './portalMotion.ts'
+import { resolveProductNames } from './productDetailSections.ts'
 import {
   evaluatePromotionPricing,
   isProductPromoted,
@@ -81,7 +82,7 @@ export default function PortalPromoStrip({
         kind: 'product',
         key: `product-${product.id}`,
         product,
-        label: String(product.name || ''),
+        label: resolveProductNames(product).heading,
         priceText: showPrices && evaluation.active
           ? formatPrice(evaluation.unit_price_usd, evaluation.unit_price_khr)
           : (evaluation.title || copy('promotionBadge', 'Promo')),
@@ -156,8 +157,8 @@ export default function PortalPromoStrip({
             disabled={!setPromoFacet}
             aria-pressed={promoFacet === `rule:${item.ruleId}`}
             onClick={() => setPromoFacet?.(promoFacet === `rule:${item.ruleId}` ? '' : `rule:${item.ruleId}`)}
-            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold shadow-sm ${
-              promoFacet === `rule:${item.ruleId}` ? 'ring-2 ring-slate-900 ring-offset-1 dark:ring-neutral-100' : ''
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold ${
+              promoFacet === `rule:${item.ruleId}` ? 'ring-2 ring-[#23201b] ring-offset-1 dark:ring-neutral-100' : ''
             }`}
             style={{
               backgroundColor: ensureAccessibleSurface(item.color, 'text', PORTAL_MERCHANT_COLOR_DEFAULTS.promoRuleChip).background,
@@ -172,9 +173,9 @@ export default function PortalPromoStrip({
             key={item.key}
             type="button"
             onClick={() => openProductDetail?.(item.product)}
-            className="inline-flex max-w-[14rem] shrink-0 items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs shadow-sm ring-1 ring-slate-200 hover:ring-amber-400 dark:bg-neutral-800 dark:ring-neutral-700"
+            className="inline-flex max-w-[14rem] shrink-0 items-center gap-1.5 rounded-full border border-stone-400 bg-white px-3 py-1.5 text-xs hover:border-[#7a5c22] dark:border-neutral-600 dark:bg-neutral-800 dark:hover:border-[#d6b56b]"
           >
-            <span translate="no" className="notranslate detail-scroll-text font-medium text-slate-700 dark:text-neutral-100">{item.label}</span>
+            <span translate="no" className="notranslate detail-scroll-text font-medium text-[#23201b] dark:text-neutral-100">{item.label}</span>
             {/* Same merchant colour, used here as INK on the chip rather than
                 as a fill, so it is darkened (light card) or lightened (dark
                 card) until it clears 4.5:1 on the ground it actually lands on. */}

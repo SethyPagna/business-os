@@ -893,6 +893,11 @@ function manualChunks(id: string): string | undefined {
       // portalActiveFilters.ts (filter chips) is imported by
       // CatalogProductsSection (catalog-products); same reason.
       || normalized.includes('/src/components/catalog/portalActiveFilters.ts')
+      // portalProductSurfaces.ts (the Products page's surface / field class recipes) is imported by
+      // CatalogProductsSection and PortalBrowseRow (catalog-products), PortalFilterCombobox
+      // (catalog-public-controls) and the detail sheet; left to the catch-all it lands in
+      // the admin 'catalog' chunk and closes catalog-products -> catalog -> catalog-products.
+      || normalized.includes('/src/components/catalog/portalProductSurfaces.ts')
       // portalBrowse.ts (View/Sort allowlists, URL state, group headers) is imported by
       // CatalogProductsSection (catalog-products), PublicCatalogPage (catalog-public) and
       // the admin CatalogPage (catalog), so it lives in the shared core chunk.

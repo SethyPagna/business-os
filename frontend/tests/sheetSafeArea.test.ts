@@ -45,7 +45,7 @@ function runTest(name: string, fn: TestCallback): void {
 runTest('mobile:F1 -- ProductDetailFlyout panel clears the home indicator', () => {
   assert.match(
     productDetailFlyoutSource,
-    /rounded-t-2xl bg-white shadow-2xl pb-\[env\(safe-area-inset-bottom\)\][\s\S]{0,80}sm:pb-0[\s\S]{0,40}dark:bg-neutral-900/,
+    /rounded-t-2xl border border-stone-300 bg-white shadow-2xl pb-\[env\(safe-area-inset-bottom\)\][\s\S]{0,80}sm:pb-0[\s\S]{0,60}dark:bg-neutral-900/,
     'the sheet panel must carry pb-[env(safe-area-inset-bottom)] sm:pb-0, matching PublicCatalogPage/ProductDetailSheet/UserDetailSheet',
   )
 })
@@ -64,8 +64,8 @@ runTest('mobile:F1 -- ProductDetailFlyout gesture strip keeps only Add to Bucket
   const ownChrome = lightboxLabels.reduce((text, block) => text.replace(block, ''), productDetailFlyoutSource)
   assert.equal(
     (ownChrome.match(/copy\('close', 'Close'\)/g) || []).length,
-    1,
-    'the footer Close button duplicating the header X must stay removed -- only the header aria-label may carry it',
+    2,
+    'the footer Close button duplicating the header X must stay removed -- only the header X carries the name, as aria-label and tooltip',
   )
   assert.match(ownChrome, /aria-label=\{copy\('close', 'Close'\)\}/)
   // ...and no Close-labelled button anywhere in the flyout's own markup.
