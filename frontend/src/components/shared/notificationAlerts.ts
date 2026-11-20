@@ -28,6 +28,16 @@ export type AlertSectionState = { id: string; complete: boolean }
 // cut off without saying so, so it never counts as listed in full.
 export const SECTION_CUT_OFF_ITEMS = 20
 
+/**
+ * True only for an answer the Worker itself produced. When a bell read fails (a 500, a dropped connection, the browser offline) the API
+ * layer hands the bell a stand-in with no sections so the panel can still draw; that stand-in carries no `generatedAt`, which the Worker
+ * always sends. Reading the stand-in as a real, empty answer made every unresolved alert count as resolved and pop again once the
+ * connection came back (round-4 review S4).
+ */
+export function summaryCameFromWorker(result: { generatedAt?: unknown; unavailable?: unknown } | null | undefined): boolean {
+  return typeof result?.generatedAt === 'string' && result.generatedAt.length > 0 && !result.unavailable
+}
+
 export function isSectionComplete(section: { truncated?: boolean; itemsTotal?: number; count?: number; items?: unknown[] } | null | undefined): boolean {
   if (!section || section.truncated) return false
   const listed = section.items?.length || 0

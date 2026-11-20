@@ -13,7 +13,7 @@ import Search from 'lucide-react/dist/esm/icons/search.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../app/AppContextCore.tsx'
-import { announceFreshAlerts, browserAlertStore, isSectionComplete, popUpAlerts, sectionsSwitchedOff } from './notificationAlerts.ts'
+import { announceFreshAlerts, browserAlertStore, isSectionComplete, popUpAlerts, sectionsSwitchedOff, summaryCameFromWorker } from './notificationAlerts.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -631,7 +631,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
           generatedAt: typeof result?.generatedAt === 'string' ? result.generatedAt : undefined,
           unavailable: !!result?.unavailable,
           cooldownUntil: result?.cooldownUntil,
-          loaded: true,
+          loaded: summaryCameFromWorker(result),
         }
       })
       // A section the person expanded stays complete across refreshes; one that no longer needs a

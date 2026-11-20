@@ -14,8 +14,10 @@ import {
   popUpAlerts,
   SECTION_CUT_OFF_ITEMS,
   sectionsSwitchedOff,
+  summaryCameFromWorker,
   type AlertMemory,
 } from '../src/components/shared/notificationAlerts.ts'
+import { getNotificationSummaryFallback } from '../src/api/cooldownFallbacks.ts'
 import { toastStackTop, mobileChromeViewportOffset, AUTH_TOGGLE_TOP_REM, AUTH_TOGGLE_HEIGHT_REM, AUTH_TOGGLE_GAP_REM, authToggleBandRem } from '../src/utils/mobileNavChrome.ts'
 
 const require = createRequire(import.meta.url)
@@ -654,7 +656,36 @@ assert.match(centerSource, /const \{ displayLabel, displayMeta \} = itemText\(it
     // The bell passes a real load only, and the switches.
     assert.ok(centerSource.includes('omittedAreEmpty: !!summary.loaded'))
     assert.ok(centerSource.includes('switchedOff: sectionsSwitchedOff(summary.preferences)'))
-    assert.ok(centerSource.includes('loaded: true,'))
+    // A failed bell read is NOT a real load. The API layer answers a failed read (a 500, a dropped connection, the browser offline) with a
+    // stand-in that has no sections; only 502/503/504 mark it unavailable. Read as a real, empty answer, two failed reads a quiet period
+    // apart made every unresolved alert count as resolved, and all of them popped again when the connection came back (review 4, S4).
+    const standIn = getNotificationSummaryFallback()
+    assert.deepEqual(standIn.sections, [], 'the stand-in looks exactly like "every section is empty"')
+    assert.equal(summaryCameFromWorker(standIn), false, 'the stand-in is not a load')
+    assert.equal(summaryCameFromWorker(getNotificationSummaryFallback({ unavailable: true })), false)
+    assert.equal(summaryCameFromWorker({ generatedAt: '2026-11-21T01:00:00.000Z', unavailable: true }), false, 'an unavailable answer is not a load either')
+    assert.equal(summaryCameFromWorker({ generatedAt: '' }), false)
+    assert.equal(summaryCameFromWorker(null), false)
+    assert.equal(summaryCameFromWorker(undefined), false)
+    assert.equal(summaryCameFromWorker({ generatedAt: '2026-11-21T01:00:00.000Z', sections: [] }), true, 'the Worker always sends generatedAt, also when nothing needs attention')
+    assert.ok(centerSource.includes('loaded: summaryCameFromWorker(result),'), 'the bell marks a summary loaded only through that rule')
+    assert.ok(!centerSource.includes('loaded: true'), 'never unconditionally')
+    // The whole S4 sequence through the memory: two alerts, two failed reads a quiet period apart, then the connection is back.
+    const flaky = memoryStore()
+    const two: Row[] = [{ id: 'out-1', tone: 'danger' }, { id: 'pay-2', tone: 'warning' }]
+    assert.deepEqual(ids(announce({ items: two, now: T0, store: flaky })).sort(), ['out-1', 'pay-2'], 'both pop the first time')
+    const remembered = JSON.stringify(flaky.backing.times)
+    assert.ok(remembered.includes('out-1') && remembered.includes('pay-2'), 'and both are remembered')
+    // Control: with the stand-in read as a real load (the defect), the same sequence forgets both and they pop again.
+    const broken = memoryStore()
+    announce({ items: two, now: T0, store: broken })
+    for (const at of [T0 + 60_000, T0 + 60_000 + QUIET + 1, T0 + 60_000 + 3 * QUIET]) announce({ items: [], sections: [], omittedAreEmpty: true, now: at, store: broken })
+    assert.deepEqual(ids(announce({ items: two, now: T0 + 4 * QUIET, store: broken })).sort(), ['out-1', 'pay-2'], 'control: the defect is reproducible in this harness')
+    for (const at of [T0 + 60_000, T0 + 60_000 + QUIET + 1, T0 + 60_000 + 3 * QUIET]) {
+      announce({ items: [], sections: [], omittedAreEmpty: summaryCameFromWorker(standIn), now: at, store: flaky })
+    }
+    assert.equal(JSON.stringify(flaky.backing.times), remembered, 'failed reads change nothing in the memory')
+    assert.equal(announce({ items: two, now: T0 + 4 * QUIET, store: flaky }).kind, 'none', 'and nothing pops again when the connection is back')
   }
 }
 
