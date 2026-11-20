@@ -293,5 +293,13 @@ console.log('PASS case-only rename rebuilds split summary, preserves repeated te
   const caseOnly = renameSalePaymentMethod('cash + Cash', JSON.stringify([{ ...credit, method: 'cash' }, { method: 'Cash', amount_usd: 3, amount_khr: 0 }]), 'cash', 'Cash', true)
   assert.equal(caseOnly.detailMatches, 1)
   assert.deepEqual(JSON.parse(caseOnly.paymentDetails), [credit, { method: 'Cash', amount_usd: 3, amount_khr: 0 }])
+  // A flag cannot be minted: on a sale that holds no credit, a request that carries refund_credit gets no flagged row back (settle and correction).
+  const plain = JSON.stringify([{ method: 'Cash', amount_usd: 8, amount_khr: 0 }])
+  const minted = planSaleSettlement({ ...base, existingPaymentDetailsRaw: plain, paymentDetailsRaw: [{ method: 'Cash', amount_usd: 8, amount_khr: 0 }, { method: 'ABA Bank', amount_usd: 2, amount_khr: 0, refund_credit: true }] })
+  assert.equal(minted.paymentDetails.some((row) => 'refund_credit' in row), false, 'a settle cannot mint the flag on a new row')
+  // On a recorded row the invented flag makes it a different row, so the settle is refused (the recorded row is no longer carried unchanged).
+  assert.throws(() => planSaleSettlement({ ...base, existingPaymentDetailsRaw: plain, paymentDetailsRaw: [{ method: 'Cash', amount_usd: 8, amount_khr: 0, refund_credit: true }, { method: 'ABA Bank', amount_usd: 2, amount_khr: 0 }] }), (error) => error instanceof SettlementValidationError)
+  const mintedCorrection = planSaleSettlement({ ...correction, recordedRefundCreditRaw: plain, paymentDetailsRaw: [{ method: 'Cash', amount_usd: 10, amount_khr: 0, refund_credit: true }] })
+  assert.equal(mintedCorrection.paymentDetails.some((row) => 'refund_credit' in row), false, 'a correction cannot mint the flag')
   console.log('PASS refund credit: kept with its flag by settle and correction, never invented, dropped or changed; the rename skips it')
 }
