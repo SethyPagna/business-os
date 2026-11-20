@@ -20895,3 +20895,137 @@ Plain-language questions that are blocking or shaping current lanes, newest firs
 #### Queue by area (open task queue)
 Each item is numbered `Q<n>` (stable within this revision) and marked: **owner-decided** = the owner has ruled on what to build; **needs owner** = at least one part waits on an owner answer, action or device check; **ready** = can be worked without owner input (not a claim that code is done or verified). The marker is derived from the item text (OWNER status words and owner-ruling references); notes in *italics* after `→` were reconciled on 27 Oct from the private lane log. Source sections of the 13–19 Oct queue are kept as sub-headings; nothing was dropped.
 Finished releases, the compact done log and the 13–19 Oct status narrative are in `docs/history/session-log.md` (entry "27 Oct 2026 — 6.0.998").
+
+## 21 Nov 2026 — 6.0.2760 progress ledger: 21 Nov status, lanes in flight and queue
+
+The owner asked on 21 Nov for progress.md to be up to date, clean and not outdated. The board was rewritten outside the Golden Rules (unchanged): a 21 Nov status snapshot (production `90ad75aa0` since deploy 9), every lane in flight, only the owner questions open today, the release process as deploy 9 ran it, and an ordered Next list ahead of the 27 Oct backlog. Answered questions removed from the board: 6.0.997 Q1–Q4 (owner 27 Oct) and the Cancelled-status question (owner 20 Oct); both still need recording in `docs/owner-decisions.md`.
+
+### Moved from progress.md: the 9 Nov and 27 Oct snapshots, the 27 Oct lanes table, release process and owner questions (old lines 9–135, demoted two levels)
+
+#### Status snapshot — 9 Nov 2026, 17:20 (Cambodia, UTC+7)
+
+- **Live:** `b1a9d9706` (`rc/20261104b`) since 4 Nov 16:21Z (deploy 41837530271) = 57178edc0 + P0.3/P0.4/P0.7 read switches and cache lifecycle (migration 0288 data_epoch), P1.1 call counting, P1.2 Free-budget operations, HANG-2 (no shared promises across requests: fixes the Products first-load error), E1-F Expenses reads, PERM-UI, ED-1a editor, storefront CLS, e2e suites. Census 42584319552: 221 migrations, every read switch OFF. Health pack 9 Nov 13/13 ok. main = this commit.
+- **Driver:** Claude, since 1 Nov; the owner stops the Codex app. Codex's 28–31 Oct work is on pushed `codex/*` branches.
+- **Plan:** the account is back on Workers Paid until 30 Nov after the 30 Oct Free outage. The owner's goal is the FREE plan permanently.
+- **Goal:** by 30 Nov, production runs on Free with every function intact. Measured as:
+  - 7 consecutive days at ≤3.0M D1 rows read per day on the Free config;
+  - ≤10k rows written per day;
+  - every route at ≤45 D1 calls cold, and the 86-line sale within limits;
+  - 10 ms CPU proven for the till routes;
+  - the governor enforcing, and every optimization behind a read switch.
+
+  Production read about 34–39M rows per day before 1035.
+- **Next RC (`rc/20261105a`, next window):** `f84f98e16` = live + Inventory Check lane (ic_simple / ic_fix_stock OFF; migrations 0285, 0286), P2.8 phone masking + P2.8-F, MONEY-1 riel/cent rules, IC-R0 OFF-path compatibility, the one-session-lookup fix, TIME-1 (date+time range buttons, Dashboard "Stock as of", dash_overview_5m OFF). Gate 42588202261 + Opus delta review running. After deploy: ic_simple ON (owner 4 Nov).
+- **Owner rules added 3 Nov:** Free-plan numbers stay adjustable (every plan-sensitive number is a `getPlanLimits(env)` field, now guarded by `test-plan-literals-pure`); rigorous browser testing (the Playwright suite was repaired to near-green and joins gate.yml as a report-only job first).
+- **Found by the new browser tests:** riel cash not in whole 100s and nearest-cent display (fixed, next-but-one release); eight UI permission gates and a bulk-delete hole that ignored Delete (fixed, next RC); live cross-request shared promises that could hang a request (fixed, next RC); six unsaved-changes guard bugs (queued); the storefront About cover jumping on load (fixed, next RC).
+- **Large sales:** the live fix should make the one production sale over the limit (62 lines, 27 Oct) open again; a read-only check is still to do. Storing the basket once per sale, which also shrinks the database, still needs the owner's ruling on rewriting saved rows.
+
+##### Free-plan programme board
+
+Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` waiting on the owner. The slice ids come from the private plan (MASTER-PLAN, 1 Nov). Updated 9 Nov.
+
+- [x] 6.0.1035 Inventory Check name-page reads (live)
+- [x] 6.0.1036–1038 and 1055: read-only ops queries (production facts: no planner statistics, one active branch, sale sizes up to 86 lines)
+- [x] P0.1 6.0.1039 CI read-budget gate · P0.2 6.0.1040 leak stop · P0.6 6.0.1043 health tiers (all live)
+- [x] P0.3/P0.4/P0.7 read switches, transport dedupe, cache lifecycle (migration 0288) · P1.1 call counting · P1.2 Free-budget operations · HANG-2 no shared promises across requests (the Products first-load error): all live in `b1a9d9706` since 4 Nov. Every switch is OFF.
+- [!] P0.5 governor (70/85/95% staged pause, owner-approved): the outside alarm waits on the owner's analytics token
+- [x] P1.4 6.0.1050 report chain in one call (live 4 Nov)
+- [~] P1.6/P1.7 Inventory Check lane (migrations 0285, 0286; switches `ic_simple` and `ic_fix_stock` OFF): in the next RC `f84f98e16` with the IC-R0 OFF-path fix. Owner, 4 Nov: turn `ic_simple` ON after deploy and keep `ic_fix_stock` OFF until the safe row Set lands (S6)
+- [~] **Inventory replan** (owner 4 Nov and 9 Nov: Inventory = the Products list + users' counts and check marks + the existing adjust/Set; never re-read or verify stock). Plan revision 2, slices:
+  - R0: in the next RC.
+  - S1: baselines `a53459312`/`f25fbd84d`.
+  - S2: refusal carries the current figures; a lot Set reads 980 → 231 rows.
+  - S3: `include=lots` in the shared Products payload (`lane/inv-a`).
+  - S8: Stock Changes keyset paging, `ledger_keyset` OFF. A deep page reads 242K → 1.4K rows (`lane/inv-b`).
+  - In progress: S4a (shared reader plus IC list/overlay, `ic_wired`) and S4b (client wiring, one request on open).
+  - Next: S5 (count lines per received date, migration, direct row Set), S7 (shared ranked scope, required before `ic_wired` ON), S6 (approval per line).
+  - Owner answers 4 Nov: `ic_simple` ON tomorrow; Full adjusters Set directly while others queue; counts are sellable units only; keep the last-change time.
+- [~] P1.8b Dashboard stock overview `asOf` + `dash_overview_5m` (OFF) and the date+time range buttons (TIME-1): in the next RC. Switching `dash_overview_5m` ON halves dashboard reads after sales.
+- [ ] P1.3 sole-branch read · P1.5 long reports · P1.9 lot orphan check once per transaction
+- [ ] P2.1 sale-money CPU (86 lines) · P2.2 merges · P2.3 paged integrity scan · P2.5 fast stock-in · P2.6 imports on Free
+- [!] P2.4 off-site backups: waits on the owner's backup token
+- [~] P2.8 "See full phone numbers" permission (off by default) + P2.8-F digit-fragment fix: in the next RC
+- [~] MONEY-1 riel cash in whole 100s, nearest-cent display, prices round up: in the next RC
+- [ ] P2.7 tills keep only the search index · P2.9 documents off public `/uploads` · P2.10 push hub closes on revoke · P2.11 isolation tests
+- [ ] P3 per-sale report facts + day rollups + sales search + 10 ms CPU rehearsal · P4 catalog SQL, customers, tracked ids, hidden-tab hold, client fixes
+- [ ] Switch gate: Free-config rehearsal from about 22 Nov + 7 measured days; switch on or before 30 Nov
+- [ ] After the switch: D1 version vector, ETag/304, live push, KV retirement, storage (the DB is 253.7 MB)
+
+##### Owner requests 4–9 Nov (none dropped)
+
+- [~] **Online payment on leangbeauty.com with ABA PayWay dynamic KHQR + Telegram notices** (owner 9 Nov). The storefront has no cart today. The plan (private: ABA-KHQR-PLAN) covers:
+  - **Order flow:** cart → online order → PayWay KHQR for the exact amount → callback as a nudge, confirmed by check-transaction → staff "Fulfil" in POS makes the sale (KHQR).
+  - **Owner answers:** staff Fulfil; pickup or delivery with an address only, and staff contact the customer about the delivery price and time (the QR covers goods only); name, phone and address required; social contacts all shown and optional; no account; no stock hold.
+  - **Added scope:** the full lifecycle (cancel/revert/return/status changes keep the order and sale consistent); customer change requests pending, which staff accept or reject with comments, applied only through existing writers; a Telegram alert and correct data on every change.
+  - **Built:** S1 PayWay client `d54b976c2` (`lane/khqr`).
+  - **Next:** a lifecycle addendum, then S2 (migration 0293 + order core) through S7.
+  - [!] The owner must open an ABA PayWay merchant account (sandbox self-register; production via ABA's PayWay sales team) and set the keys as Worker secrets. The static merchant QR cannot do this.
+- [x] **Edit a sale's delivery person** (owner 9 Nov). Built in `lane/sale-delivery-edit` `1e41ebf4f`/`3b3f8930d`: one-sale driver change needs only `sales:amend` (it was hidden behind `sales:bulk`), plus a before/after confirm, Records, and reports that follow the new driver. Waits for the next compose and review.
+- [~] **Inventory is slow** (owner 4 and 9 Nov): see the Inventory replan above. Interim relief: `ic_simple` ON after the next deploy.
+- [~] **Time beside dates, and the Dashboard "as of" time** (owner 4 Nov): in the next RC.
+- [x] Shift "additional change used": the owner confirmed it works (9 Nov). Closed.
+- [x] Fewer agents: at most 4 at once, one gate + one Opus review per composed candidate (owner 4 Nov).
+
+##### Follow-ups found (not yet scheduled)
+
+- Inventory Check: turning `ic_simple` from ON to OFF while a tab has a status filter keeps returning a 400 until the filter is cleared (R0 review finding).
+- Desktop browser suite: 72 known `dirty-form-guards` locator failures (`button.hub-section-pill`), plus an intermittent `cutover-branch-collapse.spec.ts:93`. Fix both before e2e becomes blocking.
+- Stock Changes page 1 still scans history once for its summary (about 102K rows); needs a maintained summary.
+- Telegram day summary does not show "additional change used" (noted; not asked for).
+- Live verification that Products loads cleanly on first open now that HANG-2 is live (browser check still to do).
+- BM Shop deployment needs migrations 0288, 0285 and 0286 before this code reaches it, plus the U2 storefront default changes. Message the BM session.
+- Still queued, one at a time: DIRTY-1 (6 dirty-form bugs), PAY-S4-PORT, P0.6 ops follow-ups, PLAN-LIMITS step 2, ED-1b, COVER-DIMS, the e2e writers, and flipping `e2e_blocking` after 2–3 clean runs.
+
+##### Owner UX asks (2 Nov afternoon)
+
+- [x] U1 click-to-install · U2 leangbeauty.com About/columns/chat/announcement · E1 Expenses labels and types · R1 shared option buttons: all live 4 Nov
+- [x] Website Editor ED-1a: live 4 Nov (owner waived its +5 KB admin-only chunk). ED-1b, ED-2, ED-3 and ED-4 follow.
+- [!] Owner questions still open: deploy speed-up (reuse gate results); Review-tier multi-select delete; returns:bulk without returns:edit; renaming a payment method into or out of cash; restoring a phone change without the full-phone grant; the About-blocks media box; Paid memo 5 s vs 15 s; IC Review entry; the editor Q1–Q3 and Khmer wording; round 2 (database space, release rules on Free, which expiry date counts, sign-in after a rewind).
+
+#### Status snapshot — 27 Oct 2026 (superseded; kept for the lanes below)
+
+- **Live:** `efaac4452` = RC1 (`rc/20261026b`: 6.0.983, 984, 986, 987, 993), deployed 26 Oct 14:58Z (run 40322968341), tier paid, health pack HEALTHY. **main = `74577d8e3`** (tree equals the release).
+- **Deploying (27 Oct, slot 1):** RC2b `a8dbbe1fc` = 6.0.985 + 6.0.989 + 6.0.991 + the exchange budget fix, migration 0272. Gate 40382886386 GREEN (Worker 1077/1077, frontend 981/981); Opus delta READY WITH EXCEPTIONS. Rollback = redeploy `efaac4452` through deploy.yml, never `wrangler rollback` (6.0.984 crons).
+- **Next:** RC2b postflight and main promotion; RC3 = 6.0.988 + 6.0.992 (with 6.0.990) + 6.0.982 (+ 6.0.994) after each exact gate and review; 6.0.997 S3/S4 after owner questions 1–4; proposals from the 27 Oct page analysis.
+- **Migrations:** production through 0271; 0272 rides RC2b; 0273 is 6.0.988's; 0274 is held for the 6.0.983 customers index if the owner approves.
+
+#### Current status
+
+States: planned · in progress · review · gate · ready · live. Lanes already live are in the [release history](docs/history/releases.md).
+
+| version | lane | state | branch / sha | blocker |
+| --- | --- | --- | --- | --- |
+| RC2b | 6.0.985 + 6.0.989 + 6.0.991 + exchange budget fix, migration 0272 | live (deploying 27 Oct) | `rc/20261027b` @ `a8dbbe1fc` | postflight, then promote main |
+| 6.0.982 | sale payments S4: checkout/settle payment events, instalments | review (round 6) | `claude/pay-s4-20261026` @ `5db44b22b` | owner 27 Oct answers; gate 40373482121 red (unused-locals, zombie imports) |
+| 6.0.988 | Conflicts lists unknown-cost and empty-barcode products (0273) | review | `claude/conflicts-list-20261026` @ `ffe409cd6` | value-bound marks in 0273 being built |
+| 6.0.992 (+990) | locked old-format returns: managers update the money details | gate | `claude/return-legacy-admin-20261026` @ `61e0aa60d` | gate 40439056367; History label still says "format" |
+| 6.0.994 | RC2 P3 follow-ups | gate | `claude/rc2-p3-20261027` @ `54a2b03fa` | gate 40438883172 |
+| 6.0.996 | RC3 dry-run compose (read-only) | review | rehearsal `7d06eeff4`, not pushed | redo after the 982/988/992 rounds |
+| 6.0.997 | hand-edit current-format returns | in progress (S1, S2) | `claude/return-v1-edit-20261027` | S3/S4 wait on owner questions 1–4 |
+| 6.0.998 | this board | review | `claude/progress-organize-20261027` | lead merges |
+| analysis | app-wide page/function/float analysis (8 read-only areas) | in progress | `private:Analysis/2026-10-27/` (private) | proposals follow |
+| 6.0.969, 980–981 | multi-client line: merge main in; first admin and client secrets at deploy | in progress | `claude/mc-merge-20261023`, `claude/first-admin-at-deploy-20261025` | branch only; 980–981 not pushed |
+
+#### Release process
+
+- Every candidate: exact-SHA full GitHub gate, independent review, threat review and secrets scan, `deploy.yml plan=paid`, independent postflight and health pack; never infer that main is deployed. Follow the [deploy-provenance skill](.claude/skills/deploy-provenance/SKILL.md) before any deploy.
+- At most two deploys per Cambodia date (07:00, and one after 20:00 with fresh `open_today=0`); since 22 Oct a daytime deploy is allowed once work is finished, gated and reviewed.
+- Remote D1 only through the ops workflows; never wrangler `--remote` or a D1 connector from an agent. Migrations are append-only, LF-only, with pre/post assertions; a new number must clear `d1_migrations` and every ref.
+- Versions are reserved in `private:Recovery/COMMIT-VERSIONS.json`; titles are `n.n.n — concise description`; never rewrite pushed history.
+- Holds (held migrations, never rerun the cutover, data repairs only with owner approval) and the full process text: [docs/history/releases.md](docs/history/releases.md#holds-and-production-only-actions).
+
+#### Open owner questions
+
+Newest first. **Owner decisions:** every ruling, newest first, is in [docs/owner-decisions.md](docs/owner-decisions.md); read it before planning, never re-ask a settled question, and move answers there.
+
+1. **Fixing a return on a later day (6.0.997 Q1):** does the refund difference go through today's drawer, or is it a typing mistake fixed on the return's own day? Recommended: today, with a "fix the original day" choice (the 27 Oct payment-correction answer points the same way).
+2. **Changing a return's date (6.0.997 Q2):** may a manager change it? Recommended: no.
+3. **Typing a refund amount (6.0.997 Q3):** may a manager refund less than the items add up to (an opened box)? Recommended: no for now.
+4. **Cancelling an old return today (6.0.997 Q4):** should the cancel count in today's drawer, like an edit? Recommended: yes, as its own lane.
+5. **Approving a rename (6.0.985):** should the other queued changes (price, image, cost) apply too when the admin may make them? Should Undo give the retired product its old name and barcode back?
+6. **Password again (6.0.986):** should other money-changing settings also ask for the password, like replacing a payment method?
+7. **Returns export (6.0.989):** are 20,000 returns per export, one year, 250 rows per page on Free right? Accept that old returns cannot detect a later whole-sale discount? Keep refusing restores after an item is added to a discounted sale? Review-tier staff cannot export returns: confirm.
+8. **Conflict marks (6.0.988):** keep "$0 is real" and "no barcode is correct" marks forever in the audit log? List word barcodes like "N/A" too? Add a list of marks to un-mark?
+9. **Customers index (6.0.983):** may the customers list get a new index (migration 0274) to cut reads?
+10. **Cancelled sales:** statuses are only Completed and Not Paid (20 Oct); lanes keep Cancelled as it was. Confirm.
+11. **Older questions (BC §4, non-blocking unless noted).** BC-Q2, Q3/Q4, Q7, Q10 and Q11 were answered 13 Oct and Q5 by the "replacements use the ORIGINAL sale FX" ruling; the rest are listed in [queue details](docs/queue-details.md#older-owner-questions-bc-4).
