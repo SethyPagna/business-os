@@ -1059,6 +1059,8 @@ function manualChunks(id: string): string | undefined {
       return 'product-detail'
     }
     if (normalized.includes('/src/components/shared/NotificationCenter.tsx')) return 'notification-center'
+    // Only the bell imports the announcer (which items pop up, and the memory of what did). Under the catch-all it rode app-shared, which the storefront loads.
+    if (normalized.endsWith('/src/components/shared/notificationAlerts.ts')) return 'notification-center'
     if (normalized.includes('/src/components/shared/BackgroundImportTracker.tsx')) return 'background-import-tracker'
     // ImportReportModal is imported by both BackgroundImportTracker (its own
     // chunk, above) and Dashboard.tsx (the 'dashboard' route chunk) -- two
@@ -1133,6 +1135,8 @@ function manualChunks(id: string): string | undefined {
       return 'app-api'
     }
     if (normalized.includes('/src/api/')) return 'app-api-methods'
+    // The pop-up stack is drawn by App.tsx alone. Left to natural placement it follows App.tsx; under the app-shell catch-all it joined a chunk the storefront preloads.
+    if (normalized.endsWith('/src/app/useToastStack.ts')) return undefined
     if (normalized.includes('/src/app/')) return 'app-shell'
     if (normalized.includes('/src/components/shared/')) return 'app-shared'
     return undefined

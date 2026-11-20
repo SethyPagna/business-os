@@ -48,11 +48,11 @@ export function getMountedPageLimit({
   return maxPages
 }
 
-export function getNotificationPrefix(type: unknown): string {
-  if (type === 'success') return 'OK '
-  if (type === 'error') return 'ERR '
-  if (type === 'warning') return 'WARN '
-  return 'INFO '
+export type NotificationVariant = 'success' | 'error' | 'warning' | 'info'
+
+// Which of the four pop-up kinds a type is; an unknown type reads as plain information.
+export function getNotificationKind(type: unknown): NotificationVariant {
+  return type === 'success' || type === 'error' || type === 'warning' ? type : 'info'
 }
 
 export function getNotificationColor(type: unknown): string {

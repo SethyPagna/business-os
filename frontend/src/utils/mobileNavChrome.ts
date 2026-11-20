@@ -60,6 +60,36 @@ export function mobileChromeViewportOffset({ headerVisible, appUpdateVisible }: 
   )
 }
 
+/** Where the pop-up stack starts: a small gap under the fixed chrome on a phone (the update bar, then the top bar
+ *  when the shell has one), and under the update bar alone from the tablet width up. Both clear the safe area. */
+export const TOAST_STACK_GAP_REM = 0.75
+export type ToastStackTop = { phone: string; sm: string; tablet: string; desktop: string }
+
+/** The sign-in screen's language and theme toggles. Login places them from these numbers and the pop-up stack starts
+ *  below them (one source, so the two cannot drift): the row's distance from the top at each width step (phone, sm,
+ *  lg; md keeps sm's), its height (two 2.5rem buttons plus the padding and border around them), and a small gap. */
+export const AUTH_TOGGLE_TOP_REM = { phone: 1, sm: 1.5, lg: 2 } as const
+export const AUTH_TOGGLE_HEIGHT_REM = 3.5
+export const AUTH_TOGGLE_GAP_REM = 0.25
+export function authToggleBandRem(step: keyof typeof AUTH_TOGGLE_TOP_REM): number {
+  return AUTH_TOGGLE_TOP_REM[step] + AUTH_TOGGLE_HEIGHT_REM + AUTH_TOGGLE_GAP_REM
+}
+
+export function toastStackTop({ headerPresent, appUpdateVisible, authScreen = false }: { headerPresent: boolean; appUpdateVisible: boolean; authScreen?: boolean }): ToastStackTop {
+  // Signed out: the stack starts under the toggle row at every width (the update bar, when up, covers only the top 3rem of it).
+  if (authScreen) {
+    return {
+      phone: offset(authToggleBandRem('phone')),
+      sm: offset(authToggleBandRem('sm')),
+      tablet: offset(authToggleBandRem('sm')),
+      desktop: offset(authToggleBandRem('lg')),
+    }
+  }
+  const phone = offset((appUpdateVisible ? APP_UPDATE_BAR_HEIGHT_REM : 0) + (headerPresent ? MOBILE_HEADER_HEIGHT_REM : 0) + TOAST_STACK_GAP_REM)
+  const tablet = appUpdateVisible ? offset(APP_UPDATE_BAR_HEIGHT_REM + 1.25) : '1.25rem'
+  return { phone, sm: phone, tablet, desktop: tablet }
+}
+
 /** The same edge measured from the top of #app-root. When the update bar is
  *  up, #app-root's own padding already accounts for it (bar height AND the
  *  safe area), so the content offset must not count either one twice. */
