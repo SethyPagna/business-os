@@ -5,6 +5,7 @@ import { ReceivingBranchError, requireReceivingBranch, receivingBranchAssertion,
 import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
 import { getDb, type D1Compat } from '../lib/db'
+import { icTasksNamespace } from '../lib/inventoryCheckTasks'
 import { ordinaryBusinessBatch, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
 import { executeStockTransaction, stockTransactionRefusal } from '../lib/stockTransaction'
 
@@ -1751,7 +1752,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     }, markWritten, () => branchRedirectTarget(c), atomicMark, closeIssue)
     // One awaited bump call for the whole Set (W3 Slice A): one quota upsert on Free, and the next read already keys on the new versions.
     const setBumps: string[] = []
-    if (result.status === 200 && result.body.issue_closed === true && !result.body.replayed) setBumps.push('inventory_checks')
+    if (result.status === 200 && result.body.issue_closed === true && !result.body.replayed) setBumps.push('inventory_checks', icTasksNamespace(Number(result.body.branchId) || branchId))
     const setMovedStock = result.status === 200 && Number(result.body.quantity) > 0 && !result.body.replayed
     // A Set that only changed quantities bumps the version a sale bumps (stock_bump_narrow); anything more, or the switch OFF, bumps 'products' as before.
     if (setMovedStock) setBumps.push(await scopedSetBump(c.env, result.body))
@@ -1852,7 +1853,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       const zero = await plainCountOf(false)
       const results = await executeStockMutationBatch(db, zero.statements, atomicMark, { status: 200, body: unchanged }, zero.trailing)
       const answer = zero.answer(results as never)
-      if (answer.issue_closed === true) await bumpVersions(c.env, ['inventory_checks'])
+      if (answer.issue_closed === true) await bumpVersions(c.env, ['inventory_checks', icTasksNamespace(branchId)])
       return c.json({ ...unchanged, ...answer })
     }
     if (plainCount) setCount = await plainCountOf(true)
@@ -2668,7 +2669,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // audit() writes, so the insert can run after the response is sent --
   // same reasoning as the broadcast calls it now joins. The cache bump is awaited first (W3 Slice A).
   const setAnswer = setCount ? setCount.answer(setCountResults as never) : {}
-  await (setAnswer.issue_closed === true ? bumpVersions(c.env, ['products', 'inventory_checks']) : bumpVersion(c.env, 'products'))
+  await (setAnswer.issue_closed === true ? bumpVersions(c.env, ['products', 'inventory_checks', icTasksNamespace(branchId)]) : bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(Promise.all([
     audit(c.env, user?.id ?? null, actorSnapshot(user), originalType === 'set' ? 'stock_set' : type === 'remove' ? 'stock_remove' : 'stock_add', 'product', targetProductId, { type: originalType, quantity, reason, branchId, sourceProductId: productId, createdSibling, batchId: batchIdRequested, autoBatchDrainIds, unlockPricing, receivedDate, ...(freeQuantity > 0 ? { freeQuantity, paidQuantity } : {}) }),
     ...(sellingPricePlan ? [audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'product', targetProductId, { source: 'stock_receipt', batchId: resolvedBatchId }, changedFields(sellingPricePlan.before, sellingPricePlan.after))] : []),
@@ -3251,7 +3252,9 @@ app.post('/movements/:id/revert', async (c) => {
     movementId: id, movementType: mv.movement_type, revertType: result.revertType, quantity: result.quantity,
     branchId: Number(mv.branch_id) || null, batchId: mv.batch_id ?? null,
   })
-  await ((result as { countChanged?: boolean }).countChanged ? bumpVersions(c.env, ['products', 'inventory_checks']) : bumpVersion(c.env, 'products'))
+  // A Revert that took a plain Set's count back or restored it moves the board of the branch of THAT count (the Set's own session), as well as the Issues sets.
+  const counted = result as { countChanged?: boolean; countBranch?: number | null }
+  await (counted.countChanged ? bumpVersions(c.env, ['products', 'inventory_checks', icTasksNamespace(counted.countBranch ?? mv.branch_id ?? 0)]) : bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: productId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'adjust', id: productId }))
   return c.json({ success: true, revertType: result.revertType, quantity: result.quantity, productId, movementId: id })

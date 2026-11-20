@@ -1,7 +1,7 @@
 'use strict'
 // Count tasks, the REOPEN rule (owner, 19 Nov 2026: a task's state always follows the counts in effect), over the real routes and migrations in an in-memory SQLite (harness/count-tasks-world.cjs).
 // A closed task that the auto-close closed reopens, in the batch of the write that took a count back, when a product it rested on stopped being done for it: the resume of a closed count session, and the Undo
-// of a Set that closed a difference (which takes the Set's own count back; the Redo restores it at its original time and closes the tasks again). Edges E1-E19 of the design (DESIGN-task-reopen) run through
+// of a Set that closed a difference (which takes the Set's own count back; the Redo restores it at its original time and closes the tasks again). Edges E1-E19 of the reopen rule run through
 // the real writers (PATCH /sessions/:id, the lot Set, /api/action-history undo and redo); then every plant M1-M16 is applied to the source and must turn a scenario red.
 //
 // Run: node scripts/test-inventory-check-task-reopen-native.cjs

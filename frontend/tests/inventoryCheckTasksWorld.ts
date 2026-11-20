@@ -13,7 +13,7 @@ export const viewerUser = (viewer: Viewer) => viewer === 'admin' ? { id: 1, user
     : viewer === 'issuer' ? { id: 8, username: 'dara', role_code: 'employee', permissions: { inventory: true, inventory_checks: true, inventory_check_issue: true, 'inventory_checks:tasks': false, ...FIELDS } }
       : { id: 9, username: 'vann', role_code: 'employee', permissions: { inventory: true, inventory_checks: true, 'inventory_checks:tasks': false, ...FIELDS } }
 
-export type BoardTask = { id: string; branch_id: number; title: string; status: 'open' | 'closed'; revision: number; issued_at: string; issued_by?: string; closed_at: string | null; total: number; done: number; removed: number
+export type BoardTask = { id: string; branch_id: number; title: string; status: 'open' | 'closed'; revision: number; issued_at: string; issued_by?: string; closed_at: string | null; total: number; done: number; at_close?: true; removed: number
   selection: { kind: 'ids' } | { kind: 'filters'; filters: Record<string, string> } | null; picked_up_by: string | null; picked_up_at: string | null; mine: boolean; pickup_session_id?: string; can_pickup: boolean; can_release: boolean; can_close: boolean }
 export const task = (id: string, over: Partial<BoardTask> = {}): BoardTask => ({ id, branch_id: 1, title: '', status: 'open', revision: 0, issued_at: '2026-11-18T03:00:00.000Z', issued_by: 'boss', closed_at: null, total: 4, done: 0, removed: 0, selection: { kind: 'ids' },
   picked_up_by: null, picked_up_at: null, mine: false, can_pickup: true, can_release: false, can_close: false, ...over })
@@ -61,6 +61,8 @@ export async function createTasksWorld(options: { branches?: Array<{ id: number;
     online: true,
     /** The state the list reports for a task the board does not list (an old one). */
     offBoardStatus: 'closed' as 'open' | 'closed',
+    /** True: the list answers a task view without the task's total (an older Worker), so the page must draw no "Products:" figure. */
+    omitTaskTotal: false,
     /** A viewer who may not see staff identity gets no issued_by key at all (contract 3.1). */
     hideIssuer: false,
     /** The answer of a submission says the task closed even when part of it is left (a closed-elsewhere race). */
@@ -109,7 +111,7 @@ export async function createTasksWorld(options: { branches?: Array<{ id: number;
         const page = Number(params.page) || 1, pageSize = Number(params.pageSize) || 20
         return { wired: true, projected: false, items: ids.slice((page - 1) * pageSize, page * pageSize).map(rowOf), total: ids.length, page, pageSize, totalPages: Math.max(1, Math.ceil(ids.length / pageSize)), overlay_ids: 150,
           ...(params.summary === 0 ? {} : { summary: { ok: 0, issue: 0, not_checked: ids.length, total: ids.length, days: [{ day: '2026-11-18', count: 3 }] } }), capabilities: { productsPerSubmission: world.productsPerSubmission },
-          ...(params.taskId ? { task: { id: String(params.taskId), status: world.board.find(row => row.id === params.taskId)?.status ?? world.offBoardStatus, total: ids.length } } : {}) }
+          ...(params.taskId ? { task: { id: String(params.taskId), status: world.board.find(row => row.id === params.taskId)?.status ?? world.offBoardStatus, ...(world.omitTaskTotal ? {} : { total: ids.length }) } } : {}) }
       },
       readInventoryCheckOverlay: async (params: { ids: number[]; summary?: boolean }) => { record('overlay', { ids: params.ids.join(','), summary: params.summary }); return { items: params.ids.map(overlayEntry), ...(params.summary === false ? {} : { summary: { ok: 0, issue: 0, not_checked: 1, total: 1, days: [{ day: '2026-11-18', count: 3 }] } }) } },
       readInventoryCheckLots: async () => ({ lots: [] }),

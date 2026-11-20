@@ -2,7 +2,7 @@ import type { D1Compat } from './db'
 import type { SessionUser } from './auth'
 import { resolveLowStockConfig, type LowStockConfig } from './lowStockSettings'
 import { canApproveInventoryCounts, canIssueInventoryCountTasks, canWorkInventoryCountTasks, getInventoryCheckAccess, projectInventoryCheckProduct, validateInventoryCheckQuery } from './inventoryCheckAccess'
-import { autoCloseParams, autoCloseTaskStatements, CHECKABLE_SQL, closedTaskIds, closePickupsStatements, kindOf, OPEN_PICKUP_SQL, OPEN_TASK_COUNT_SQL, PICKUP_MEMBERSHIP, reopenParams, reopenTaskStatements, reopenedTaskIds, TASK_COUNTABLE_SQL, TASK_MEMBERSHIP, taskOf } from './inventoryCheckTasks'
+import { autoCloseParams, autoCloseTaskStatements, CHECKABLE_SQL, closedTaskIds, closePickupsStatements, kindOf, OPEN_PICKUP_SQL, OPEN_TASK_COUNT_SQL, PICKUP_MEMBERSHIP, reopenParams, reopenTaskStatements, reopenedTaskIds, TASK_COUNTABLE_SQL, TASK_MEMBERSHIP, taskCloseEventSql, taskOf } from './inventoryCheckTasks'
 import { buildInventoryCheckStockQuery, readInventoryCheckStock, resetInventoryCheckStockSchemaMemo, type InventoryCheckStockRow } from './inventoryCheckStock'
 import { buildInventoryCheckProductMembershipQuery } from './inventoryCheckProducts'
 import { hasPermission, isAdminControlUser } from './permissions'
@@ -17,7 +17,7 @@ export type InventoryCheckPrincipal = { id: number; tokenHash: string }
 export type InventoryCheckReceipt = { requestId: string; eventId: number; action: string; sessionId: string; sessionRevision: number; itemRevision?: number; replayed: boolean }
 export type InventoryCheckSession = { id: string; branch_id: number; created_by: number; title: string; status: 'open' | 'closed'; revision: number; started_at: string; updated_at: string; closed_at: string | null; scope: Record<string, unknown>; can_edit: boolean; progress: { total: number; unstarted: number; done: number; issue: number } }
 /** The task a pickup session stands for (count tasks): its title, how many products it holds and how many are done by the done rule. Sent only on a pickup row of the Count sessions list. */
-export type InventoryCheckPickupTask = { id: string; title: string; status: 'open' | 'closed'; total: number; done: number }
+export type InventoryCheckPickupTask = { id: string; title: string; status: 'open' | 'closed'; total: number; done: number; at_close?: true }
 export type InventoryCheckSessionListItem = InventoryCheckSession & { branch_name: string | null; creator_name?: string | null; approval?: InventoryCheckApproval; task?: InventoryCheckPickupTask }
 export type InventoryCheckObservation = { product_id: number; branch_id: number; product_snapshot: Record<string, unknown>; current_product_available: boolean; current_product_name: string | null; state: 'unstarted' | 'done' | 'issue'; reason: string | null; revision: number; counted_quantity?: number | null; baseline_quantity?: number | null; current_quantity?: number | null; stock_changed?: boolean | null; baseline?: Record<string, unknown>; current_stock?: Record<string, unknown> }
 export type Actor = SessionUser & { tokenHash: string; product_cost_review_key_available?: number }
@@ -1070,6 +1070,10 @@ async function observationResponse(db: D1Compat, principal: InventoryCheckPrinci
   const detail = await committedSessionProjection(db, principal, event.session_id,{productId:event.product_id,branchId})
   return { item: detail.observation, session: detail.item, receipt: receiptResponse(event, replayed) }
 }
+/** The close of a TASK by hand records the figures it closes with (P2.1: lib/inventoryCheckTasks.ts taskCloseEventSql); every other event is the plain row. */
+function taskClosedFigures(actor: Actor, event: Statement, task: boolean): Statement {
+  return task ? { sql: taskCloseEventSql(), params: { ...event.params, org: actor.organization_id } } : event
+}
 export async function patchInventoryCheckSession(db: D1Compat, principal: InventoryCheckPrincipal, id: string, input: unknown) {
   const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
   const session = await sessionRow(db, actor, id)
@@ -1090,7 +1094,7 @@ export async function patchInventoryCheckSession(db: D1Compat, principal: Invent
   const statements: Statement[] = [sessionGuard(actor, session, expected, action === 'close' ? 'open' : 'closed'),
     { sql: 'UPDATE inventory_check_sessions SET status=@status,revision=revision+1,updated_at=@now,closed_at=@closed WHERE id=@id AND revision=@expected', params },
     guard('changes()=1', 'inventory_check_conflict', {}),
-    eventStatement(actor, { sessionId: id, action, key, hash, before: { status: session.status, revision: session.revision }, after: { status, revision: expected+1 }, result: { sessionRevision: expected+1 }, now }),
+    taskClosedFigures(actor, eventStatement(actor, { sessionId: id, action, key, hash, before: { status: session.status, revision: session.revision }, after: { status, revision: expected+1 }, result: { sessionRevision: expected+1 }, now }), action === 'close' && membershipOf(session) === TASK_MEMBERSHIP),
     // Closing a task closes the pickup it has open, in the same batch (a task is closed by hand with the issue permission; undo is this close record, never a delete).
     ...(action === 'close' && membershipOf(session) === TASK_MEMBERSHIP ? closePickupsStatements().map(({ sql }) => ({ sql, params: { task: id, org: actor.organization_id, actorId: actor.id, actorName: actorSnapshot(actor), key, hash, now } })) : []),
     ...(taskPart ? taskPart.statements : []),
