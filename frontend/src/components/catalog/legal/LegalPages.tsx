@@ -17,6 +17,7 @@ import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { PORTAL_SOCIAL_ICONS, PortalSocialText } from '../PortalSocialRow.tsx'
 import type { SocialPlatform } from '../../../utils/socialHandles.ts'
+import { contactHref } from '../../../utils/socialLinks.ts'
 import {
   LEGAL_PAGE_ORDER,
   LEGAL_PAGE_SECTIONS,
@@ -138,16 +139,6 @@ export function sanitizeBusinessDetail(value: unknown, max = 200): string {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, max)
-}
-
-/** A tel:/mailto: href only when the value can safely make one. */
-function contactHref(kind: 'tel' | 'mailto', value: string): string {
-  if (!value) return ''
-  if (kind === 'tel') {
-    const digits = value.replace(/[^\d+]/g, '')
-    return digits.length >= 6 ? `tel:${digits}` : ''
-  }
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ? `mailto:${value}` : ''
 }
 
 export default function PortalFooter({

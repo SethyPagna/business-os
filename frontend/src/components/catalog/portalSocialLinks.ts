@@ -12,6 +12,7 @@
 // comes from utils/socialHandles.ts (owner label > real handle > platform name).
 
 import {
+  contactHref,
   deriveInstagramLink,
   deriveMessengerLink,
   derivePhoneCallLink,
@@ -277,7 +278,7 @@ export function buildPortalContactEntries(input: {
     push('phone', href, display.visibleText, display.accessibleName)
   }
   const email = clean(input.email)
-  if (email) push('email', `mailto:${email}`, email, `${language === 'km' ? 'អ៊ីមែល' : 'Email'}: ${email}`)
+  if (email) push('email', contactHref('mailto', email), email, `${language === 'km' ? 'អ៊ីមែល' : 'Email'}: ${email}`)
   const mapHref = clean(input.mapHref)
   if (mapHref) {
     const address = clean(input.address)
