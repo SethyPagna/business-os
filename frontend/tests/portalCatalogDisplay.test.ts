@@ -154,7 +154,7 @@ runTest('public portal mobile contact actions stay compact', () => {
   assert.match(catalogSecondaryTabsSource, /className="relative h-(?:20|28) sm:h-(?:28|44)"/, 'public about hero banner should stay compact and fixed-height, not a tall forced viewport')
   assert.match(catalogSecondaryTabsSource, /data-portal-about-hero="true"/, 'public about hero should expose a mobile measurement hook')
   assert.match(catalogSecondaryTabsSource, /data-portal-contact-tray="true"/, 'public contact tray should expose a mobile measurement hook')
-  assert.match(catalogSecondaryTabsSource, /hasCover \|\| !showRoundLogo \? 'pt-4' : '-mt-7 sm:-mt-9'/, 'with a cover the name sits below the photo (never over it); the gradient banner keeps the logo overlap')
+  assert.match(catalogSecondaryTabsSource, /flex items-start gap-3 pt-4 sm:gap-4/, 'the name sits below the photo or banner (never over it); only the round logo overlaps the gradient banner')
   assert.match(catalogSecondaryTabsSource, /const hasFacts = detailFacts\.length > 0/, 'phone and address share one compact tray')
   assert.doesNotMatch(catalogSecondaryTabsSource, /PortalSocialText|PORTAL_SOCIAL_ICONS/, 'About shows no social chips; the one Contact button opens the contact menu')
   assert.match(catalogPageSource, /data-portal-secondary-loading="true"/, 'public secondary tab fallback should be compact and measurable')
@@ -643,7 +643,7 @@ runTest('public product details wire every prepared section and show none as "No
   for (const section of ['features_benefits', 'who_for', 'ingredients', 'caution']) {
     assert.match(productDetailFlyoutSource, new RegExp(`sectionKey="${section}"`), `${section} should stay wired`)
   }
-  assert.match(productDetailFlyoutSource, /data-product-detail-section="need_more_details"/)
+  assert.match(productDetailFlyoutSource, /sectionKey="need_more_details"/)
   for (const label of ['productInStore', 'productIntroduction', 'productCategory', 'productBrand']) {
     assert.match(productDetailFlyoutSource, new RegExp(`copy\\('${label}'`), `${label} should stay wired for products that have it`)
   }

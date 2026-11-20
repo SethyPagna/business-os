@@ -1,6 +1,13 @@
 body[data-public-portal='true'] .skiptranslate iframe,
-body[data-public-portal='true'] .goog-te-banner-frame {
+body[data-public-portal='true'] .goog-te-banner-frame,
+body[data-public-portal='true'] #goog-gt-tt,
+body[data-public-portal='true'] .goog-tooltip {
   display: none !important;
+}
+
+body[data-public-portal='true'] .goog-text-highlight {
+  background: none !important;
+  box-shadow: none !important;
 }
 
 body[data-public-portal='true'] {

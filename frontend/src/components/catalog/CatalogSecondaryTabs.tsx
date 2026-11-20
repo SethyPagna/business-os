@@ -24,6 +24,8 @@ import PortalEmbedConsent, { mapFallbackHref } from './legal/PortalEmbedConsent.
 import { COVER_BANNER_MAX_PX, coverRatio, coverShape, sameImageFile } from '../../utils/aboutCoverLayout.ts'
 import type { CoverShape } from '../../utils/aboutCoverLayout.ts'
 import { SectionShell } from './catalogUi'
+import { portalPrimaryValue } from './portalMultiValue.ts'
+import { PORTAL_PRIMARY_BUTTON } from './portalButtons.ts'
 import { splitNoTranslateSegments, stripNoTranslateMarkers } from './portalNoTranslate.ts'
 import { faqEntries, faqSearchVisible, filterFaqEntries, nextOpenFaqKey } from './portalFaqLayout.ts'
 import { derivePhoneCallLink } from '../../utils/socialLinks.ts'
@@ -92,8 +94,6 @@ interface CatalogAboutSectionProps {
   versionedBusinessCover?: string
   imageFetchPriority?: 'high' | 'low' | 'auto'
   openPortalImage: (title: string, images: string[], index?: number) => void
-  // Absent where no contact channel exists: the page then shows no Contact button.
-  onOpenContact?: () => void
 }
 
 interface FaqItem {
@@ -229,7 +229,7 @@ function CatalogMembershipSection({ copy }: CatalogMembershipSectionProps) {
 
 const BRASS_TEXT = 'text-[#9c7a3c] dark:text-amber-300'
 // Charcoal fill on ivory text is the storefront's primary button; amber in the dark theme.
-const CHARCOAL_BUTTON = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-[#23201b] px-5 text-sm font-semibold text-[#f4f1ea] transition hover:bg-[#3a352c] dark:bg-amber-300 dark:text-neutral-900 dark:hover:bg-amber-200'
+const CHARCOAL_BUTTON = PORTAL_PRIMARY_BUTTON
 const SURFACE = 'border border-stone-300 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900'
 const ICON_BUTTON = 'flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-stone-600 transition hover:bg-stone-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
 // The field recipe (spec section 1). The line is stone-500 / neutral-500, not the stone-400 / neutral-600 the recipe first named: those reach
@@ -315,7 +315,7 @@ function AboutFactRow({ item, copy, address }: { item: BusinessFact; copy: CopyF
       <Icon aria-hidden="true" className={`h-4 w-4 shrink-0 ${BRASS_TEXT}`} />
       <div className="min-w-0 flex-1 break-words text-sm font-medium leading-6 text-[#23201b] dark:text-neutral-100" title={item.value}>
         <span className="sr-only">{item.label}: </span>
-        {item.value}
+        <span translate="no" className="notranslate">{item.value}</span>
       </div>
       {href ? (
         <a
@@ -344,7 +344,6 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
     versionedBusinessCover,
     imageFetchPriority,
     openPortalImage,
-    onOpenContact,
   } = props
 
   const previewTitle = String(previewConfig.businessName || previewConfig.title || '').trim()
@@ -408,10 +407,10 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
         )}
 
         <div className={twoColumn ? 'min-w-0 flex-1 px-4 pb-5 md:p-0' : 'relative px-4 pb-5 sm:px-6 sm:pb-6'}>
-          <div className={`flex items-center gap-3 sm:gap-4 ${hasCover || !showRoundLogo ? 'pt-4' : '-mt-7 sm:-mt-9'}`}>
+          <div className="flex items-start gap-3 pt-4 sm:gap-4">
             {showRoundLogo ? (
               <div
-                className="flex shrink-0 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-white shadow-sm dark:border-neutral-900"
+                className={`flex shrink-0 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-white shadow-sm dark:border-neutral-900 ${hasCover ? '' : '-mt-11 sm:-mt-14'}`}
                 style={{ height: `${logoSizePx}px`, width: `${logoSizePx}px` }}
               >
                 {previewConfig.showLogo && versionedBusinessLogo ? (
@@ -448,7 +447,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
               </div>
             ) : null}
 
-            <div className="min-w-0 flex-1">
+            <div className={`min-w-0 flex-1 ${showRoundLogo ? 'self-center' : ''}`}>
               <h2 className="notranslate break-words text-2xl font-semibold leading-[1.45] tracking-tight text-[#23201b] dark:text-neutral-100 sm:text-3xl" translate="no">
                 {heroTitle}
               </h2>
@@ -462,7 +461,6 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
             </p>
           ) : null}
 
-          {onOpenContact ? <div className="mt-4"><PortalContactButton copy={copy} onOpenContact={onOpenContact} /></div> : null}
         </div>
       </div>
 
@@ -1057,7 +1055,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
             const productId = Number(item.product_id)
             const canOpen = Boolean(openProductById) && Number.isFinite(productId)
             const addKey = String(item.product_id)
-            const meta = [item.brand, item.category].filter(Boolean).join(' · ')
+            const meta = [portalPrimaryValue(item.brand), portalPrimaryValue(item.category)].filter(Boolean).join(' · ')
             const open = () => openProductById?.(productId, item.name)
             return (
               <article key={item.product_id} className={`rounded-2xl p-3 ${SURFACE}`}>

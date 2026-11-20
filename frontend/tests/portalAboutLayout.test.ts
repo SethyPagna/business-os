@@ -86,14 +86,14 @@ run('a photo that fails to load falls back to the gradient banner (no broken-ima
   assert.match(about, /hasCover \? \(\s*<AboutCover[\s\S]*?\) : \(\s*<div\s+data-portal-about-hero="true"\s+className="relative h-20 sm:h-28"/, 'banner when there is no (usable) cover')
 })
 
-run('the wrapper is gone: flat surfaces on the page, one Contact button in the hero, the logo and name below the photo', () => {
+run('the wrapper is gone: flat surfaces on the page, no Contact button in the hero, the name always below the banner', () => {
   assert.doesNotMatch(about, /rounded-\[3\d px\]|rounded-\[28px\]|radial-gradient|from-white to-slate-50/, 'no gradient wrapper, no oversized radius')
   assert.doesNotMatch(about, /bg-white\/90 backdrop-blur-sm/, 'the old translucent plate over the photo is gone')
   assert.match(about, /<section className="space-y-4 py-4 sm:py-5">/)
-  assert.match(about, /hasCover \|\| !showRoundLogo \? 'pt-4' : '-mt-7 sm:-mt-9'/, 'with a cover the name sits below the photo; the gradient banner keeps the logo overlap')
-  assert.match(about, /<PortalContactButton copy=\{copy\} onOpenContact=\{onOpenContact\} \/>/, 'the Contact button uses the page contact callback')
-  assert.match(tabs, /copy\('contactButton', 'Contact', 'ទាក់ទង'\)/)
-  assert.match(about, /onOpenContact \? <div className="mt-4">/, 'no callback, no button')
+  assert.match(about, /flex items-start gap-3 pt-4 sm:gap-4/, 'the row holding the name has no negative margin, so the name sits below the banner')
+  assert.match(about, /hasCover \? '' : '-mt-11 sm:-mt-14'/, 'only the round logo overlaps the gradient banner edge')
+  assert.doesNotMatch(about.slice(0, about.indexOf('function FaqSkeleton')), /PortalContactButton|onOpenContact/, 'the header Contact is the one entry point on About')
+  assert.match(tabs, /copy\('contactButton', 'Contact', 'ទាក់ទង'\)/, 'the FAQ row keeps its Contact')
 })
 
 run('the story is its own full-width card, before the details row', () => {

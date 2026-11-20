@@ -12,6 +12,7 @@ import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import CatalogProductImage from './catalogImages'
 import PortalContactMenu from './PortalContactMenu.tsx'
+import { PORTAL_PRIMARY_BUTTON } from './portalButtons.ts'
 import PortalNoPaymentNotice from './PortalNoPaymentNotice.tsx'
 import type { PortalContactEntry } from './portalSocialLinks.ts'
 
@@ -69,20 +70,20 @@ export default function PortalListPage({
   const nameBlock = (row: Row) => (
     <div className="min-w-0 flex-1">
       {/* A product name is never cut on this project: it scrolls. getKhmerTextProps because a name can be Khmer whatever the page language is. */}
-      <div {...getKhmerTextProps(row.name, 'detail-scroll-text notranslate text-sm font-medium text-[#23201b] dark:text-neutral-100')}>{row.name}</div>
+      <div translate="no" {...getKhmerTextProps(row.name, 'detail-scroll-text notranslate text-sm font-medium text-[#23201b] dark:text-neutral-100')}>{row.name}</div>
       {row.priceText ? <div translate="no" className="notranslate text-xs text-stone-600 dark:text-neutral-300">{row.priceText}</div> : null}
     </div>
   )
   const emptyLine = (text: string) => <p className="py-10 text-center text-sm text-stone-600 dark:text-neutral-300">{text}</p>
 
   return (
-    <section ref={pageRef} tabIndex={-1} data-portal-list-page="true" aria-label={`${listLabel} / ${savedLabel}`} className="mx-auto w-full max-w-3xl space-y-4 py-4 outline-none sm:py-6">
+    <section ref={pageRef} tabIndex={-1} data-portal-list-page="true" aria-label={`${listLabel} / ${savedLabel}`} className="mx-auto w-full max-w-[720px] space-y-4 py-4 outline-none sm:py-6">
       <div className="flex items-center gap-2">
         <button type="button" className={ICON_BUTTON} onClick={onBack} aria-label={copy('back', 'Back', 'ត្រឡប់')} title={copy('back', 'Back', 'ត្រឡប់')} data-portal-list-back="">
           {/* arrow-right turned round: arrow-left is pinned to the sign-in icon chunk, which the storefront must not load (chunk cycle). */}
           <ArrowRight className="h-5 w-5 rotate-180" />
         </button>
-        <div role="group" className="inline-flex rounded-xl bg-stone-200 p-1 text-sm dark:bg-neutral-800">
+        <div role="group" className="grid min-w-0 flex-1 grid-cols-2 rounded-xl bg-stone-200 p-1 text-sm dark:bg-neutral-800">
           {segments.map(([key, label, count]) => (
             <button
               key={key}
@@ -90,7 +91,7 @@ export default function PortalListPage({
               aria-pressed={segment === key}
               data-portal-list-segment={key}
               onClick={() => onSegment(key)}
-              className={`min-h-9 rounded-lg px-4 font-semibold transition ${segment === key ? 'bg-white text-[#23201b] shadow-sm dark:bg-neutral-700 dark:text-white' : 'text-stone-600 dark:text-neutral-300'}`}
+              className={`min-h-9 rounded-lg px-4 text-center font-semibold transition ${segment === key ? 'bg-white text-[#23201b] shadow-sm dark:bg-neutral-700 dark:text-white' : 'text-stone-600 dark:text-neutral-300'}`}
             >
               {label}{count > 0 ? <span className="ml-1.5 text-xs font-medium text-stone-600 dark:text-neutral-300">{count}</span> : null}
             </button>
@@ -100,7 +101,7 @@ export default function PortalListPage({
 
       {segment === 'list' ? (
         <>
-          <PortalNoPaymentNotice copy={copy} />
+          <PortalNoPaymentNotice copy={copy} className="text-center" />
           {listItems.length === 0 ? emptyLine(copy('listEmptyLine', 'Your list is empty.', 'បញ្ជីរបស់អ្នកនៅទទេ។')) : (
             <ul className={`${SURFACE} divide-y divide-stone-200 dark:divide-neutral-700`}>
               {listItems.map((item) => (
@@ -131,7 +132,7 @@ export default function PortalListPage({
                   copy={copy}
                   align="left"
                   trigger={(
-                    <button type="button" data-portal-list-contact="" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-full bg-[#23201b] px-4 text-sm font-semibold text-[#f4f1ea] transition hover:bg-stone-700 dark:bg-neutral-100 dark:text-neutral-950 dark:hover:bg-neutral-300">
+                    <button type="button" data-portal-list-contact="" className={`${PORTAL_PRIMARY_BUTTON} min-h-10 px-4`}>
                       <MessageCircle className="h-[18px] w-[18px]" />
                       {copy('contactButton', 'Contact', 'ទាក់ទង')}
                     </button>

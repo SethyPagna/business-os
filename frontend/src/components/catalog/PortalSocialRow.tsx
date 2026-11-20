@@ -24,5 +24,5 @@ export const PORTAL_SOCIAL_ICONS: Record<SocialPlatform, IconComponent> = {
 export function PortalSocialText({ text, latin, className = '' }: { text: string; latin: boolean; className?: string }) {
   const wrap = `${className} [overflow-wrap:anywhere]`.trim()
   if (latin) return <span translate="no" lang="en" dir="ltr" className={`notranslate ${wrap}`}>{text}</span>
-  return <span {...getKhmerTextProps(text, wrap)}>{text}</span>
+  return <span translate="no" {...getKhmerTextProps(text, `notranslate ${wrap}`)}>{text}</span>
 }

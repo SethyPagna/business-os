@@ -95,7 +95,7 @@ runTest('a product image is described by the product, never by the word "Product
   )
   assert.match(
     products,
-    /alt=\{\[productHeading, product\.brand\]\.filter\(Boolean\)\.join\(' - '\)\}/,
+    /alt=\{\[productHeading, portalPrimaryValue\(product\.brand, product\.brands\)\]\.filter\(Boolean\)\.join\(' - '\)\}/,
     'the card photo carries the product name plus its brand',
   )
   const flyout = read('ProductDetailFlyout.tsx')

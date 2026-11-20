@@ -5,6 +5,7 @@ import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import SignupConsentField, { AGE_CONFIRMATION_REQUIRED_CODE, consentRequiredMessage, signupConsentFields } from './legal/SignupConsentField.tsx'
 import PortalContactMenu from './PortalContactMenu.tsx'
+import { PORTAL_PRIMARY_BUTTON } from './portalButtons.ts'
 import { PORTAL_SHEET_CORNER_PAD } from './PortalSheet.tsx'
 import type { PortalContactEntry } from './portalSocialLinks.ts'
 import type { PortalAccountProfile } from './portalAccount.ts'
@@ -114,8 +115,8 @@ export default function CatalogAccountSection({
     return (
       <div className="space-y-4">
         <dl data-portal-account-summary="true" className="divide-y divide-stone-200 text-sm dark:divide-neutral-700">
-          <SummaryRow first label={copy('accountNameLabel', 'Name', 'ឈ្មោះ')} value={account.name} />
-          <SummaryRow label={copy('membershipId', 'Membership ID')} value={account.membershipId} />
+          <SummaryRow first label={copy('accountNameLabel', 'Name', 'ឈ្មោះ')} value={<span translate="no" className="notranslate">{account.name}</span>} />
+          <SummaryRow label={copy('membershipId', 'Membership ID')} value={<span translate="no" className="notranslate">{account.membershipId}</span>} />
           {/* Owner, 30 Sep 2026: points are coming soon, so this row never takes a number. */}
           <SummaryRow
             label={copy('membershipPoints', 'Points', 'ពិន្ទុ')}
@@ -299,7 +300,7 @@ function SummaryRow({ label, value, first = false, rowAttribute }: { label: stri
 // ink text. `outline-none` with a border swap alone is not a focus indicator, and the sheet is portalled outside any root the stylesheet's
 // :focus-visible rule names, so the input paints its own 3px ring (sky-700 / amber-300, the same as the stylesheet).
 const inputClass = 'w-full rounded-xl border border-stone-500 bg-white px-4 py-2.5 text-sm text-[#23201b] placeholder:text-stone-500 outline-none transition focus-visible:border-[#7a5c22] focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#0369a1] dark:border-neutral-500 dark:bg-neutral-900 dark:text-neutral-100 dark:focus-visible:outline-[#fcd34d]'
-const submitClass = 'inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:opacity-60'
+const submitClass = `${PORTAL_PRIMARY_BUTTON} w-full rounded-xl py-2.5 disabled:opacity-60`
 
 // A wrapping <label> names its input, but it cannot name anything else: a hint sat outside the accessible name and outside any description, so a
 // reader announced the field with no mention of it. An explicit for/id pair plus an aria-describedby hint fixes both, and gives every field a

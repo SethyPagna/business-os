@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { fmtDateTime24 } from '../../utils/formatters.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
+import { portalPrimaryValue } from './portalMultiValue.ts'
 
 // The "bucket" is a customer-facing shortlist on the public portal --
 // NOT a cart, no payment, no order submitted anywhere. A visitor taps
@@ -59,7 +60,7 @@ export function usePortalBucket() {
   }, [items])
 
   const add = useCallback((
-    product: { id: string | number; name?: string; category?: string; brand?: string },
+    product: { id: string | number; name?: string; category?: string; brand?: string; categories?: string; brands?: string },
     priceText?: string,
     qty = 1,
   ) => {
@@ -77,8 +78,8 @@ export function usePortalBucket() {
         {
           id: product.id,
           name: String(product.name || '').trim(),
-          category: product.category ? String(product.category) : undefined,
-          brand: product.brand ? String(product.brand) : undefined,
+          category: portalPrimaryValue(product.category, product.categories) || undefined,
+          brand: portalPrimaryValue(product.brand, product.brands) || undefined,
           priceText,
           qty: Math.max(1, Math.min(MAX_QTY, qty)),
         },
@@ -135,8 +136,8 @@ function sanitizeBucketItems(raw: unknown): PortalBucketItem[] {
     .map((entry): PortalBucketItem => ({
       id: (entry as PortalBucketItem)?.id,
       name: String((entry as PortalBucketItem)?.name || '').trim(),
-      category: (entry as PortalBucketItem)?.category ? String((entry as PortalBucketItem).category) : undefined,
-      brand: (entry as PortalBucketItem)?.brand ? String((entry as PortalBucketItem).brand) : undefined,
+      category: portalPrimaryValue((entry as PortalBucketItem)?.category) || undefined,
+      brand: portalPrimaryValue((entry as PortalBucketItem)?.brand) || undefined,
       priceText: (entry as PortalBucketItem)?.priceText ? String((entry as PortalBucketItem).priceText) : undefined,
       qty: Math.max(1, Math.min(MAX_QTY, Math.round(Number((entry as PortalBucketItem)?.qty)) || 1)),
     }))
@@ -186,8 +187,8 @@ function sanitizeWishlistItems(raw: unknown): PortalWishlistItem[] {
     out.push({
       id,
       name,
-      category: (entry as PortalWishlistItem)?.category ? String((entry as PortalWishlistItem).category) : undefined,
-      brand: (entry as PortalWishlistItem)?.brand ? String((entry as PortalWishlistItem).brand) : undefined,
+      category: portalPrimaryValue((entry as PortalWishlistItem)?.category) || undefined,
+      brand: portalPrimaryValue((entry as PortalWishlistItem)?.brand) || undefined,
       priceText: (entry as PortalWishlistItem)?.priceText ? String((entry as PortalWishlistItem).priceText) : undefined,
     })
   }
@@ -221,7 +222,7 @@ export function usePortalWishlist() {
 
   const has = useCallback((id: string | number) => items.some((item) => String(item.id) === String(id)), [items])
 
-  const toggle = useCallback((product: { id: string | number; name?: string; category?: string; brand?: string }, priceText?: string) => {
+  const toggle = useCallback((product: { id: string | number; name?: string; category?: string; brand?: string; categories?: string; brands?: string }, priceText?: string) => {
     setItems((current) => {
       if (current.some((item) => String(item.id) === String(product.id))) {
         return current.filter((item) => String(item.id) !== String(product.id))
@@ -231,8 +232,8 @@ export function usePortalWishlist() {
         {
           id: product.id,
           name: String(product.name || '').trim(),
-          category: product.category ? String(product.category) : undefined,
-          brand: product.brand ? String(product.brand) : undefined,
+          category: portalPrimaryValue(product.category, product.categories) || undefined,
+          brand: portalPrimaryValue(product.brand, product.brands) || undefined,
           priceText,
         },
       ]

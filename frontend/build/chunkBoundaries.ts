@@ -35,6 +35,9 @@ const neutralChunks: ReadonlyArray<readonly [string, string]> = [
   ['/src/api/readBudgetShed.ts', 'api-http-core'],
   ['/src/components/catalog/catalogPagination.tsx', 'catalog-public-utils'],
   ['/src/components/catalog/portalContrast.ts', 'catalog-public-utils'],
+  // The one primary-button recipe and the category/brand name parser are read by the storefront surfaces, the page and the Products chunk alike.
+  ['/src/components/catalog/portalButtons.ts', 'catalog-public-utils'],
+  ['/src/components/catalog/portalMultiValue.ts', 'catalog-public-utils'],
   ['/src/components/catalog/PortalFilterCombobox.tsx', 'catalog-public-controls'],
   ['/src/components/catalog/PortalPromoStrip.tsx', 'catalog-public-controls'],
   ['/src/components/shared/UnsavedChangesPrompt.tsx', 'shared-modal'],

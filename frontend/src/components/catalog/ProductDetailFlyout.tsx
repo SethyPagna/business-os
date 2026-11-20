@@ -6,6 +6,7 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import BadgePercent from 'lucide-react/dist/esm/icons/badge-percent.js'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
 import Sparkles from 'lucide-react/dist/esm/icons/sparkles.js'
 import Leaf from 'lucide-react/dist/esm/icons/leaf.js'
@@ -15,6 +16,8 @@ import type { LucideIcon } from 'lucide-react'
 import CatalogProductImage from './catalogImages'
 import Heart from 'lucide-react/dist/esm/icons/heart.js'
 import { microLabelProps } from './catalogUi'
+import { portalValues } from './portalMultiValue.ts'
+import { PORTAL_PRIMARY_BUTTON } from './portalButtons.ts'
 import { shouldShowStockStatus } from './portalCatalogDisplay.ts'
 import { parseProductDescription, resolveProductNames } from './productDetailSections.ts'
 import { PRODUCT_MUTED_TEXT_CLASS, productStockBadge } from './portalProductSurfaces.ts'
@@ -42,14 +45,6 @@ export type ProductDetailViewProduct = {
   categories?: string
   brands?: string
   discount_label?: string
-}
-
-/** Splits a `||`-joined multi-value cell, falling back to the single value. */
-function multiValues(multi: unknown, single: unknown): string[] {
-  const joined = String(multi ?? '').trim()
-  const source = joined || String(single ?? '').trim()
-  if (!source) return []
-  return source.split('||').map((part) => part.trim()).filter(Boolean)
 }
 
 export type ProductDetailViewState = {
@@ -142,6 +137,43 @@ function StockBadge({ status, copy }: { status: StockStatus; copy: CopyFn }) {
 
 // A section with nothing to say is not rendered at all (owner, 2026-09-25:
 // no placeholder rows for missing data on the storefront).
+// Caution and Need More Details are long standing paragraphs: a row that opens on a tap (button, so Enter and Space work),
+// closed when the sheet opens.
+function DisclosureRow({ sectionKey, icon: RowIcon, label, children }: { sectionKey: string; icon: LucideIcon; label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const bodyId = useId()
+  return (
+    <div data-product-detail-section={sectionKey} data-product-detail-disclosure="true" className="border-t border-stone-300 dark:border-neutral-700">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={bodyId}
+        onClick={() => setOpen((value) => !value)}
+        className="flex min-h-11 w-full items-center gap-2 text-left text-sm font-semibold text-[#23201b] dark:text-neutral-100"
+      >
+        <RowIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span className="min-w-0 flex-1 leading-6">{label}</span>
+        <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
+      </button>
+      <div id={bodyId} hidden={!open} className="pb-3">{children}</div>
+    </div>
+  )
+}
+
+function SectionItems({ items }: { items: string[] }) {
+  return items.length > 1 ? (
+    <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-stone-700 dark:text-neutral-300">
+      {items.map((item, index) => (
+        <li key={`${item}-${index}`} {...getKhmerTextProps(item, '')}>{item}</li>
+      ))}
+    </ul>
+  ) : (
+    <p {...getKhmerTextProps(items[0], 'whitespace-pre-line text-sm leading-6 text-stone-700 dark:text-neutral-300')}>
+      {items[0]}
+    </p>
+  )
+}
+
 function DetailSectionBlock({
   sectionKey,
   items,
@@ -154,23 +186,16 @@ function DetailSectionBlock({
   if (!items.length) return null
   const meta = SECTION_META[sectionKey]
   const SectionIcon = meta.icon
+  if (sectionKey === 'caution') {
+    return <DisclosureRow sectionKey={sectionKey} icon={SectionIcon} label={copy(meta.labelKey, meta.fallback)}><SectionItems items={items} /></DisclosureRow>
+  }
   return (
     <div data-product-detail-section={sectionKey}>
       <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-stone-600 dark:text-neutral-300">
         <SectionIcon className="h-3.5 w-3.5" />
         {copy(meta.labelKey, meta.fallback)}
       </div>
-      {items.length > 1 ? (
-        <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-stone-700 dark:text-neutral-300">
-          {items.map((item, index) => (
-            <li key={`${item}-${index}`} {...getKhmerTextProps(item, '')}>{item}</li>
-          ))}
-        </ul>
-      ) : (
-        <p {...getKhmerTextProps(items[0], 'whitespace-pre-line text-sm leading-6 text-stone-700 dark:text-neutral-300')}>
-          {items[0]}
-        </p>
-      )}
+      <SectionItems items={items} />
     </div>
   )
 }
@@ -239,8 +264,8 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
 
   const gallery = view.gallery.length ? view.gallery : []
   const parsed = parseProductDescription(product.description)
-  const categoryValues = multiValues(product.categories, product.category)
-  const brandValues = multiValues(product.brands, product.brand)
+  const categoryValues = portalValues(product.categories, product.category)
+  const brandValues = portalValues(product.brands, product.brand)
   const promotion = view.pricePresentation?.promotion
   const { heading: productHeading, shopLine } = resolveProductNames(product)
   const showStockLabel = shouldShowStockStatus({ showStockStatus: view.showStockStatus })
@@ -397,15 +422,11 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
             <DetailSectionBlock sectionKey="ingredients" items={ingredientItems} copy={copy} />
             <DetailSectionBlock sectionKey="caution" items={cautionItems} copy={copy} />
 
-            <div data-product-detail-section="need_more_details">
-              <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-stone-600 dark:text-neutral-300">
-                <Store className="h-3.5 w-3.5" />
-                {copy('productNeedMoreDetails', 'Need More Details')}
-              </div>
+            <DisclosureRow sectionKey="need_more_details" icon={Store} label={copy('productNeedMoreDetails', 'Need More Details')}>
               <p {...getKhmerTextProps(needMoreDetailsText, 'whitespace-pre-line text-sm leading-6 text-stone-700 dark:text-neutral-300')}>
                 {needMoreDetailsText}
               </p>
-            </div>
+            </DisclosureRow>
 
             {shopName ? (
               <div className={`flex items-start gap-2 border-t border-stone-300 pt-4 text-xs dark:border-neutral-700 ${PRODUCT_MUTED_TEXT_CLASS}`}>
@@ -437,7 +458,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
               <button
                 type="button"
                 onClick={() => onAddToBucket(product, view.pricePresentation?.primaryText)}
-                className="flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold leading-6 text-white transition hover:bg-slate-700 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200"
+                className={`${PORTAL_PRIMARY_BUTTON} flex-1 gap-1.5 px-4 py-2 leading-6`}
               >
                 <Plus className="h-4 w-4" />
                 {copy('addToBucket', 'Add')}

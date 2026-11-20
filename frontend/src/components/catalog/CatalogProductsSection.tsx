@@ -29,6 +29,8 @@ import CatalogProductImage from './catalogImages'
 import CatalogPaginationControls, { CATALOG_DEFAULT_PAGE_SIZE, paginateCatalogItems } from './catalogPagination'
 import { TopPager } from '../shared/PaginationControls'
 import { SectionShell, microLabelProps } from './catalogUi'
+import { portalPrimaryValue } from './portalMultiValue.ts'
+import { PORTAL_PRIMARY_COLORS } from './portalButtons.ts'
 import { usePortalNavSearchSlot } from './portalNavSearchSlot.ts'
 import { safeLinkUrl } from '../../utils/safeLinkUrl.ts'
 import PortalFilterCombobox from './PortalFilterCombobox'
@@ -244,7 +246,7 @@ function getBadgeToneClass(badge: PortalBadge): string {
 // admin editor's live preview) must bucket the same way or the preview's
 // rail would disagree with the storefront it previews.
 function getProductInitial(product: Pick<CatalogProduct, 'brand'> | null | undefined): string {
-  return getInitialKey(product?.brand || '')
+  return getInitialKey(portalPrimaryValue(product?.brand) || '')
 }
 
 /**
@@ -1063,7 +1065,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                     badges in it silenced "20% off" and "Low stock". */}
                 <div className="relative aspect-square overflow-hidden rounded-xl bg-stone-100 dark:bg-neutral-800">
                 {primaryImage ? (
-                  <CatalogProductImage thumbnail sizes="(min-width: 1024px) 240px, 96px" src={primaryImage} alt={[productHeading, product.brand].filter(Boolean).join(' - ')} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
+                  <CatalogProductImage thumbnail sizes="(min-width: 1024px) 240px, 96px" src={primaryImage} alt={[productHeading, portalPrimaryValue(product.brand, product.brands)].filter(Boolean).join(' - ')} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
                 ) : (
                   <div className="flex h-full items-center justify-center text-stone-400 dark:text-neutral-400" aria-hidden="true">
                     <ShoppingBag className="h-10 w-10" />
@@ -1219,7 +1221,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                       return (
                         <button
                           type="button"
-                          className={`inline-flex h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-full px-2.5 text-xs font-semibold transition ${added ? 'bg-[#7a5c22] text-white dark:bg-[#d6b56b] dark:text-[#23201b]' : 'bg-slate-900 text-white hover:bg-slate-700 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200'}`}
+                          className={`inline-flex h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-full px-2.5 text-xs font-semibold transition ${added ? 'bg-[#7a5c22] text-white dark:bg-[#d6b56b] dark:text-[#23201b]' : PORTAL_PRIMARY_COLORS}`}
                           onClick={(event) => {
                             event.stopPropagation()
                             onAddToBucket(product, previewConfig.showPrices ? pricePresentation?.primaryText : undefined)
