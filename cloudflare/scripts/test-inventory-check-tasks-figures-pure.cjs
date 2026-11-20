@@ -1,5 +1,5 @@
 'use strict'
-// Count tasks, round 8b (DESIGN-task-reopen P2.1 + P2.2): the figures of a task.
+// Count tasks, round 8b (P2.1 + P2.2): the figures of a task.
 //   P2.2  total, done and removed come from ONE walk of the task's items, packed in one number (total * 1e6 + done * 1e3 + removed). Exact while a task holds fewer than 1000 items: pinned on both plan tiers.
 //   P2.1  every close records its figures in the close event (the auto-close and the close by hand), and the board shows a CLOSED task from its newest close event, with the live walk only as the fallback for a task closed
 //         before the figures were recorded (COALESCE: SQLite stops at the first non-NULL argument, so a frozen row never runs the live walk). An OPEN row is always live.

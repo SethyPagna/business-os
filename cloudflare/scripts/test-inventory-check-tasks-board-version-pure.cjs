@@ -1,5 +1,5 @@
 'use strict'
-// Count tasks, round 8b (DESIGN-task-reopen Part 2, P2.3 to P2.7): the BOARD VERSION of a branch and the readers that key on it, pinned as source facts.
+// Count tasks, round 8b (the board's own version, P2.3 to P2.7): the BOARD VERSION of a branch and the readers that key on it, pinned as source facts.
 //   P2.3/P2.4  the task board keys on ic_tasks:<branch> (and products), NOT on inventory_checks. Only the writers that can change a figure or a row of the board at a branch move it:
 //              the table below lists EVERY Inventory Check writer, and says whether it moves it. A new writer that is not in the table fails here; a writer that moves it and must not (an observation, an approval decision) fails too.
 //   P2.5       GET /tasks reads each version once and answers the version its cache key holds.

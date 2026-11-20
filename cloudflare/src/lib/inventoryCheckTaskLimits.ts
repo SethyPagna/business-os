@@ -6,7 +6,7 @@ import { resolvePlanTier, type PlanTier } from './planTier'
 //
 // FREE IS SMALLER THAN PAID (owner ruling, 20 Nov 2026, replacing "the same on both tiers"): every open task is read by the board and by the auto-close of every count writer, so its size is read cost on the Free plan's 3M reads a
 // day. Free: 10 open tasks per branch of 100 products (a worst plausible day of both branches at the caps, 200 submissions and 200 board opens, is about 0.9M reads of count tasks, 1.5M in the pathological case where every
-// task holds the same products; docs: DESIGN-task-reopen P2.9). Paid stays 30 of 300. A TAKE-BACK (the reopen of a task a count it relied on was taken back from) is never refused by these numbers: only an ISSUE is.
+// task holds the same products; contract section 8). Paid stays 30 of 300. A TAKE-BACK (the reopen of a task a count it relied on was taken back from) is never refused by these numbers: only an ISSUE is.
 //   maxProducts        the most products ONE task may hold, whether the admin names them or a filter resolves to them. It sits under the 500 items a session detail can read (getInventoryCheckSession refuses more),
 //                      so a task can always be opened; over it the issue is refused 400 inventory_check_task_too_many with the total.
 //   maxOpenTasks       the most OPEN tasks one branch may have. It is BOTH the cap on ISSUING only (a task issued while a branch has this many open is refused 409 inventory_check_task_limit with the open count). The Tasks list shows EVERY open task: a take-back

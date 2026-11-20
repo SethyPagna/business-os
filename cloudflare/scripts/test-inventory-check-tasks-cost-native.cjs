@@ -1,5 +1,5 @@
 'use strict'
-// Count tasks, round 8b (DESIGN-task-reopen Part 2): the board's cache, over the real routes and migrations in an in-memory SQLite (harness/count-tasks-world.cjs). Each scenario serves a STALE figure if the change is wrong.
+// Count tasks, round 8b (P2.3 to P2.7): the board's cache, over the real routes and migrations in an in-memory SQLite (harness/count-tasks-world.cjs). Each scenario serves a STALE figure if the change is wrong.
 //   P2.3  an observation does not move the board: the next GET /tasks is warm (the board SELECT does not run again).
 //   P2.4  a submission at branch 1 does not move the board of branch 2 (warm), and does move branch 1 (cold, the new figure at once).
 //   P2.5  one open reads the versions ONCE: two KV reads (the branch board and products), and the answer's version is the key's.

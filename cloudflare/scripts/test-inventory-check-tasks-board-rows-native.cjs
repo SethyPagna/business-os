@@ -1,5 +1,5 @@
 'use strict'
-// Count tasks, round 8b (DESIGN-task-reopen P2.1 + P2.2, review finding F4): the ROWS the task board reads, on the LOCAL D1 ENGINE (Miniflare's workerd D1) with the real migration chain: rows_read is the engine's own meta.
+// Count tasks, round 8b (closed tasks read their frozen figures, one walk for the figures, review finding F4): the ROWS the task board reads, on the LOCAL D1 ENGINE (Miniflare's workerd D1) with the real migration chain: rows_read is the engine's own meta.
 //   P2.1  closed tasks stop recomputing: 5 closed tasks of 300 products read <= 5 x 4 + 20 rows (their close events carry the figures); before: ~10.5K. A task closed before the figures were recorded falls back to the live walk
 //         (the same figures).
 //   P2.2  one walk for total, done and removed: the cold board of 30 open x 300 + 5 closed x 300 (half the products counted) reads <= 3.6 per open item + 100 rows; before: ~7 per open item. The figures equal the
