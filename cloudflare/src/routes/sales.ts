@@ -2724,6 +2724,7 @@ app.patch('/:id/status', async (c) => {
         existingPaidKhr: paymentCorrection ? 0 : sale.amount_paid_khr,
         existingPaymentDetailsRaw: paymentCorrection ? null : sale.payment_details,
         existingPaymentMethodRaw: paymentCorrection ? null : sale.payment_method,
+        recordedRefundCreditRaw: paymentCorrection ? sale.payment_details : undefined,
         totalUsd: Number(saleMoney.refund_usd) > 0 ? subtractMoney4(sale.total_usd as number | string, saleMoney.refund_usd as string) : sale.total_usd,
         exchangeRate: latestRate,
         changeExchangeRateRaw: settingMap.change_exchange_rate,

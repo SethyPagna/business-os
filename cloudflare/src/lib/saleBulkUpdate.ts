@@ -6,6 +6,7 @@ import { getDb, type D1Compat } from './db'
 import { getActionTier, isAdminControlUser } from './permissions'
 import { AMENDMENT_WINDOW_SETTING_KEY, guardSaleAmendment, resolveAmendmentWindowMinutes } from './saleAmendments'
 import { isCashPaymentMethod, parseConfiguredMethodsStrict, parsePaymentMethodKinds, PAYMENT_METHOD_KINDS_SETTING, paymentMethodKey, RETIRED_PAYMENT_METHODS } from './paymentMethodRegistry'
+import { REFUND_CREDIT_REPLAY_REFUSED_MESSAGE, refundCreditReplayRefused } from './paymentSettlement'
 import { RIEL_CASH_NOT_HUNDREDS, rielCashAmountValid } from './saleStatusResolution'
 import { normalizeSearchText } from './searchMatch'
 import { D1_MAX_BOUND_PARAMS } from './sqlBinding'
@@ -275,6 +276,11 @@ function bulkUpdateRecordEvents(snapshot: BulkUpdateSnapshot, generation: number
   }))
 }
 
+// An exchange refund credit keeps the method it was booked under: the drawer reads it by that method, and cancelling the exchange removes it.
+function isRefundCreditRow(detail: Row): boolean {
+  return detail.refund_credit === true
+}
+
 function parsePaymentDetails(raw: unknown): Row[] {
   if (raw == null || raw === '') return []
   let parsed: unknown
@@ -513,8 +519,8 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, rawInput:
         }
       }
       paymentDetails.set(expected.id, details)
-      matches = details.some((detail) => normalized(detail.method) === source) || (!details.length && topLevelMatched)
-      const relabelled = details.length ? details.filter((detail) => normalized(detail.method) === source) : [{ amount_khr: sale.amount_paid_khr }]
+      matches = details.some((detail) => normalized(detail.method) === source && !isRefundCreditRow(detail)) || (!details.length && topLevelMatched)
+      const relabelled = details.length ? details.filter((detail) => normalized(detail.method) === source && !isRefundCreditRow(detail)) : [{ amount_khr: sale.amount_paid_khr }]
       if (matches && relabelMakesCash?.(request.action.source) && relabelled.some((detail) => !rielCashAmountValid(detail.amount_khr))) {
         throw new SaleBulkError(`Sale ${expected.id} has riel that is not whole 100 riel notes, so it cannot be relabelled as cash.`, 400, { code: RIEL_CASH_NOT_HUNDREDS, sale_ids: [expected.id] })
       }
@@ -604,7 +610,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, rawInput:
       const source = normalized(request.action.source)
       const details = paymentDetails.get(expected.id) || []
       sourceMatched = matchedAtRead
-      const updatedDetails = details.map((detail) => normalized(detail.method) === source ? { ...detail, method: targetMethod } : detail)
+      const updatedDetails = details.map((detail) => normalized(detail.method) === source && !isRefundCreditRow(detail) ? { ...detail, method: targetMethod } : detail)
       const updatedSummary = updatedDetails.length
         ? Array.from(new Set(updatedDetails.map((detail) => String(detail.method || '').trim()).filter(Boolean))).join(' + ')
         : targetMethod
@@ -814,6 +820,14 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
   const legacyDriverApplier = snapshot.action.kind === 'delivery_contact' && payload.applier === BULK_UPDATE_KIND
   if (payload.applier !== expectedApplier && !legacyCustomerApplier && !legacyDriverApplier) fail('This group does not match its saved permission scope.')
   permission(user, snapshot.action, snapshot.members.length)
+  // A relabel saved before the exchange refund credit was protected holds a damaged after-state: its redo would relabel the credit again.
+  if (snapshot.action.kind === 'payment_method') {
+    for (const member of snapshot.members.filter((candidate) => candidate.changed)) {
+      const source = direction === 'undo' ? member.after : member.before
+      const target = direction === 'undo' ? member.before : member.after
+      if (refundCreditReplayRefused(source.payment_details, target.payment_details, direction === 'undo')) fail(REFUND_CREDIT_REPLAY_REFUSED_MESSAGE)
+    }
+  }
   const sign: 1 | -1 = direction === 'undo' ? -1 : 1
   const expected = direction === 'undo' ? 'undoable' : 'redoable'
   const next = direction === 'undo' ? 'redoable' : 'undoable'
