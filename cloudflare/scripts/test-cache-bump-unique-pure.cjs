@@ -17,14 +17,14 @@ const quiet = console.error
 console.error = () => {} // the bump logs every failure it is made to swallow
 const original = fs.readFileSync(filename, 'utf8').replace(/\r\n/g, '\n')
 
-function build(edits = []) {
+function build(edits = [], opts = {}) {
   let text = original
   for (const [from, to] of edits) {
     assert.equal(text.split(from).length - 1, 1, `plant must match once: ${from.slice(0, 60)}`)
     text = text.replace(from, () => to)
   }
   const { outputText } = ts.transpileModule(text, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: filename })
-  const ctx = { kv: new Map(), puts: [], d1: new Map(), d1Batches: 0, quotaCalls: 0, quotaThrows: 0, analytics: [], getFails: 0, putFails: 0, gate: null, gets: 0 }
+  const ctx = { kv: opts.kv || new Map(), puts: [], d1: new Map(), d1Batches: 0, quotaCalls: 0, quotaThrows: 0, analytics: [], getFails: 0, putFails: 0, gate: null, gets: 0 }
   const db = {
     prepare() { return { async get() { return undefined }, async all(params) { return params.filter((n) => ctx.d1.has(n)).map((namespace) => ({ namespace, version: ctx.d1.get(namespace) })) } } },
     async batch() { ctx.d1Batches += 1; if (ctx.d1BatchFails) throw new Error('D1 down'); return [] },
@@ -39,7 +39,9 @@ function build(edits = []) {
   const mod = { exports: {} }
   // The clock stands still, so two bumps in one millisecond are the case under test (not a coincidence of timing).
   const clock = { now: () => 1_800_000_000_000 }
-  new Function('exports', 'require', 'module', '__filename', '__dirname', 'Date', outputText)(mod.exports, requireFor, mod, filename, path.dirname(filename), clock)
+  // One module instance is one isolate. opts.random pins this isolate's random part so the two-isolate case does not depend on a 1 in 2048 draw.
+  const cryptoImpl = opts.random === undefined ? globalThis.crypto : { getRandomValues: (array) => { array[0] = opts.random; return array } }
+  new Function('exports', 'require', 'module', '__filename', '__dirname', 'Date', 'crypto', outputText)(mod.exports, requireFor, mod, filename, path.dirname(filename), clock, cryptoImpl)
   const env = {
     CACHE: {
       async get(key) {
@@ -53,7 +55,7 @@ function build(edits = []) {
       async delete(key) { ctx.kv.delete(key) },
     },
   }
-  return { cache: mod.exports, ctx, env }
+  return { cache: mod.exports, ctx, env, edits }
 }
 
 const failures = []
@@ -64,10 +66,24 @@ async function check(name, run) { try { await run(); passed++; console.log(`PASS
 async function overlap(w) {
   let waiting = 0
   const open = []
-  w.ctx.gate = () => new Promise((resolve) => { open.push(resolve); waiting += 1; if (waiting === 2) for (const go of open) go() })
+  w.ctx.gate = () => new Promise((resolve) => { open.push(resolve); waiting += 1; if (waiting >= 2) for (const go of open.splice(0)) go() })
   w.ctx.kv.set('v2:x', '5')
   await Promise.all([w.cache.bumpVersions(w.env, ['x']), w.cache.bumpVersions(w.env, ['x'])])
   w.ctx.gate = null
+}
+
+/** Two isolates (two module instances, one KV, one frozen clock): both read the counter before either writes. */
+async function twoIsolates(edits = []) {
+  const kv = new Map([['v2:x', '5']])
+  const a = build(edits, { kv, random: 17 })
+  const b = build(edits, { kv, random: 1031 })
+  let waiting = 0
+  const open = []
+  const gate = () => new Promise((resolve) => { open.push(resolve); waiting += 1; if (waiting >= 2) for (const go of open.splice(0)) go() })
+  a.ctx.gate = gate
+  b.ctx.gate = gate
+  await Promise.all([a.cache.bumpVersions(a.env, ['x']), b.cache.bumpVersions(b.env, ['x'])])
+  return { a, b }
 }
 
 const SCENARIOS = {
@@ -77,6 +93,12 @@ const SCENARIOS = {
     const [a, b] = w.ctx.puts.map(([, value]) => Number(value))
     assert.notEqual(a, b, 'a reader that cached between the two bumps is invalidated by the second')
     assert.ok(a > 5 && b > 5)
+  },
+  'two isolates bumping in the same millisecond, both reading before either writes, write different values (the random part)': async (w) => {
+    const { a, b } = await twoIsolates(w.edits)
+    assert.equal(a.ctx.puts.length, 1)
+    assert.equal(b.ctx.puts.length, 1)
+    assert.notEqual(a.ctx.puts[0][1], b.ctx.puts[0][1], 'the second isolate left a reader that cached between them on the first isolate token')
   },
   'a get that throws is unknown: the counter is not written back below what it held': async (w) => {
     w.ctx.kv.set('v2:x', '57')
@@ -130,6 +152,8 @@ const SCENARIOS = {
 }
 
 const PLANTS = [
+  ['P6 the bump runs twice', [['await advanceVersions(env, namespaces)\n      return', 'await advanceVersions(env, namespaces)']], ['two overlapping bumps write different values, both above the counter they read']],
+  ['P7 no random part (two isolates)', [['Date.now() * VERSION_CLOCK_SCALE + (random[0] % VERSION_CLOCK_SCALE)', 'Date.now() * VERSION_CLOCK_SCALE']], ['two isolates bumping in the same millisecond, both reading before either writes, write different values (the random part)']],
   ['P1 the old +1 (overlapping bumps write the same value)', [['String(nextUniqueVersion(currentKv))', 'String(currentKv + 1)']], ['two overlapping bumps write different values, both above the counter they read', 'a get that throws is unknown: the counter is not written back below what it held']],
   ['P2 no lastIssued separation in one isolate', [['lastIssuedVersion = Math.max(candidate, lastIssuedVersion + 1)', 'lastIssuedVersion = candidate'], ['Date.now() * VERSION_CLOCK_SCALE + (random[0] % VERSION_CLOCK_SCALE)', 'Date.now() * VERSION_CLOCK_SCALE']], ['two overlapping bumps write different values, both above the counter they read']],
   ['P3 no retry', [['if (attempt === 1) continue', 'if (attempt === 1) { console.error("x"); return }']], ['a failed bump is tried once more (the first attempt throws, the second writes)']],
@@ -137,6 +161,8 @@ const PLANTS = [
   ['P5 the D1 handoff failure swallowed again', [["entries.map((entry) => entry.namespace), error)\n    throw error", "entries.map((entry) => entry.namespace), error)"]], ['KV and D1 both failing is recorded (the D1 handoff failure is no longer swallowed inside the bump)']],
 ]
 
+let finished = false
+process.exitCode = 1 // an unfinished run (a stranded barrier, an event loop that drained) must never read as a pass
 async function main() {
   for (const [name, run] of Object.entries(SCENARIOS)) await check(name, () => run(build()))
   for (const [name, edits, mustFail] of PLANTS) {
@@ -151,5 +177,8 @@ async function main() {
   console.error = quiet
   if (failures.length) { console.error(`FAILED ${failures.length}: ${failures.join('; ')}`); process.exit(1) }
   console.log(`PASS test-cache-bump-unique-pure (${passed})`)
+  finished = true
+  process.exitCode = 0
 }
+process.on('exit', () => { if (!finished) { console.error('test-cache-bump-unique-pure did not finish'); process.exitCode = 1 } })
 main().catch((error) => { console.error(error); process.exit(1) })
