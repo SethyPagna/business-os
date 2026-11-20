@@ -95,9 +95,9 @@ async function main() {
   })
 
   const MUTANTS = {
-    M1: ['inventoryCheckGrouping.ts', ['MAX(i.updated_at)', 'MIN(i.updated_at)']],
+    M1: ['inventoryCheckGrouping.ts', ['ORDER BY i.updated_at DESC LIMIT 1)', 'ORDER BY i.updated_at ASC LIMIT 1)']],
     M2: ['inventoryCheckGrouping.ts', ['AND s.organization_id IS @checkOrg', 'AND 1=1']],
-    M3: ['inventoryCheckGrouping.ts', [' AND s.branch_id=i.branch_id)`', ')`']],
+    M3: ['inventoryCheckGrouping.ts', [' AND s.branch_id=i.branch_id ORDER BY', ' ORDER BY']],
     M4: ['inventoryCheckGrouping.ts', ["i.state IN ('done','issue')", "i.state IN ('done','issue','unstarted')"]],
     M5: ['inventoryCheckGrouping.ts', ["export const BUSINESS_DAY_SHIFT = '+7 hours'", "export const BUSINESS_DAY_SHIFT = '+0 hours'"]],
     M6: ['inventoryCheckGrouping.ts', ["rankingOrder: '(family_num_sort IS NULL) ASC,family_num_sort DESC", "rankingOrder: '(family_num_sort IS NULL) DESC,family_num_sort DESC"]],

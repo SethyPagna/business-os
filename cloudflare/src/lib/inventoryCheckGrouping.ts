@@ -29,7 +29,8 @@ export function lastCheckedSql(productId: string, branchScoped: boolean): string
     CROSS JOIN inventory_check_sessions s ON s.id=i.session_id
     WHERE i.product_id=${productId} AND i.branch_id=${branch} AND i.state IN ('done','issue')
       AND s.organization_id IS @checkOrg AND s.branch_id=i.branch_id ORDER BY i.updated_at DESC LIMIT 1)`
-  return branchScoped ? newest('@branchId') : `(SELECT MAX(${newest('br.id')}) FROM branches br)`
+  // Owner rule (20 Nov): "last checked" counts the active branches only, however many are active: a disabled branch's history (Old Shop) sets nothing. Only when NO branch is active does every branch count, as before. Pure SQL, so the products version (which every branch write bumps) keeps the cache key right.
+  return branchScoped ? newest('@branchId') : `(SELECT MAX(${newest('br.id')}) FROM branches br WHERE br.is_active = 1 OR NOT EXISTS (SELECT 1 FROM branches WHERE is_active = 1))`
 }
 
 /** The business-day shift of every group key (UTC+7, the same day businessDateWindow's localDateOf names). */
