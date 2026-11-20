@@ -37,7 +37,19 @@ export function limitForDialog<T>(visible: T[], dialogOpen: boolean, narrow: boo
   return dialogOpen && narrow ? visible.slice(0, 1) : visible
 }
 
-type DialogCandidate = { getClientRects?: () => { length: number } }
+// Keyboard focus holds a pop-up's clock, and React sends no blur when the focused node is removed (its screen unmounts,
+// or a phone hides it while a dialog opens). `held` is one `${toastKey}|${control}` entry per focused control; every
+// entry whose pop-up is no longer in `drawn` is released, so its clock resumes instead of waiting forever.
+export function releaseHeldToasts(held: Set<string>, drawn: readonly string[], resume: (key: string) => void): void {
+  for (const entry of [...held]) {
+    const key = entry.slice(0, entry.lastIndexOf('|'))
+    if (drawn.includes(key)) continue
+    held.delete(entry)
+    resume(key)
+  }
+}
+
+type DialogCandidate ={ getClientRects?: () => { length: number } }
 type DialogDocument = {
   body: object
   querySelectorAll: (selector: string) => ArrayLike<DialogCandidate>

@@ -12,6 +12,8 @@ import {
   mergeAlertMemory,
   parseAlertMemory,
   popUpAlerts,
+  SECTION_CUT_OFF_ITEMS,
+  sectionsSwitchedOff,
   type AlertMemory,
 } from '../src/components/shared/notificationAlerts.ts'
 import { toastStackTop, mobileChromeViewportOffset, AUTH_TOGGLE_TOP_REM, AUTH_TOGGLE_HEIGHT_REM, AUTH_TOGGLE_GAP_REM, authToggleBandRem } from '../src/utils/mobileNavChrome.ts'
@@ -331,10 +333,12 @@ const memoryStore = (backing: { times: AlertMemory } = { times: {} }) => ({
 const QUIET = 10 * 60_000
 type Row = { id: string; tone?: string }
 // One summary load: the items sit in one section (default 'inv'), listed in full unless the test says otherwise.
-const announce = (args: { items: Row[]; sectionId?: string; sections?: Array<{ id: string; complete: boolean }>; blocked?: boolean; seenTimes?: Record<string, number>; skipIds?: Set<string>; now: number; store: any; quietMs?: number }) =>
+const announce = (args: { items: Row[]; sectionId?: string; sections?: Array<{ id: string; complete: boolean }>; blocked?: boolean; seenTimes?: Record<string, number>; skipIds?: Set<string>; now: number; store: any; quietMs?: number; omittedAreEmpty?: boolean; switchedOff?: Set<string> }) =>
   announceFreshAlerts({
     rows: args.items.map((item) => ({ item, sectionId: args.sectionId || 'inv' })),
     sections: args.sections ?? [{ id: args.sectionId || 'inv', complete: true }],
+    omittedAreEmpty: args.omittedAreEmpty,
+    switchedOff: args.switchedOff,
     blocked: !!args.blocked,
     seenTimes: args.seenTimes ?? {},
     skipIds: args.skipIds,
@@ -557,13 +561,139 @@ assert.match(centerSource, /const \{ displayLabel, displayMeta \} = itemText\(it
     assert.equal(kept.m1.resolved, undefined, 'and it is not resolved: it came back after this tab resolved it')
     assert.deepEqual(kept.m2, { at: T0 + 3 * QUIET, section: 'expiry' }, "the other tab's entry in a section this load did not list is untouched")
   }
-  // The cap holds: the thousand newest entries stay.
+  // N3-2: when the memory is full, resolved entries go first (oldest first), then unresolved ones oldest first.
   {
     const store = memoryStore()
-    const many = Array.from({ length: 1005 }, (_, n) => ({ id: 'c' + n, tone: 'warning' }))
-    assert.equal(announce({ items: many, now: T0, store }).kind, 'many')
-    assert.equal(Object.keys(store.backing.times).length, 1000)
+    const seed: AlertMemory = {}
+    // 990 unresolved, oldest of all at 'old-live' (at 1); 15 resolved markers that are newer than it.
+    seed['old-live'] = { at: 1, section: 'inv' }
+    for (let n = 0; n < 989; n++) seed['live' + n] = { at: 100 + n, section: 'inv' }
+    for (let n = 0; n < 15; n++) seed['gone' + n] = { at: 2000 + n, section: 'inv', absentSince: 1500 + n, resolved: true }
+    store.backing.times = seed
+    const fresh = Array.from({ length: 3 }, (_, n) => ({ id: 'new' + n, tone: 'warning' }))
+    assert.equal(announce({ items: fresh, now: T0, store, sections: [{ id: 'inv', complete: false }] }).kind, 'each')
+    const kept = Object.keys(store.backing.times)
+    assert.equal(kept.length, 1000)
+    assert.ok(kept.includes('old-live'), 'the oldest unresolved entry outlives newer resolved markers')
+    assert.equal(kept.filter((id) => id.startsWith('gone')).length, 7, 'the 7 newest resolved markers fill what is left; the 8 oldest are evicted first')
+    for (let n = 0; n < 8; n++) assert.ok(!kept.includes('gone' + n), 'gone' + n + ' (oldest resolved) is evicted')
+    for (const id of ['new0', 'new1', 'new2']) assert.ok(kept.includes(id))
+    // With no resolved markers left to give up, the oldest unresolved goes.
+    const plain = memoryStore()
+    const live = Array.from({ length: 1005 }, (_, n) => ({ id: 'c' + n, tone: 'warning' }))
+    assert.equal(announce({ items: live, now: T0, store: plain }).kind, 'many')
+    assert.equal(Object.keys(plain.backing.times).length, 1000)
+    const second = memoryStore({ times: { ...Object.fromEntries(Array.from({ length: 1000 }, (_, n) => ['u' + n, { at: 10 + n, section: 'inv' }])) } })
+    announce({ items: [{ id: 'fresh', tone: 'warning' }], now: T0, store: second, sections: [{ id: 'inv', complete: false }] })
+    assert.ok(!('u0' in second.backing.times) && 'u1' in second.backing.times && 'fresh' in second.backing.times, 'oldest unresolved is evicted, newest kept')
   }
+
+  // S1: a section that may have been cut off never marks an alert as resolved.
+  {
+    const listed = (n: number) => Array.from({ length: n }, (_, i) => ({ id: 'pay-' + i, tone: 'warning' }))
+    assert.equal(SECTION_CUT_OFF_ITEMS, 20)
+    assert.equal(isSectionComplete({ items: listed(50) }), false, 'a 50-item section (the Worker stops sales at 50) may be cut off')
+    assert.equal(isSectionComplete({ items: listed(20) }), false)
+    assert.equal(isSectionComplete({ items: listed(19) }), true)
+    assert.equal(isSectionComplete({ items: listed(20), count: 30 }), false)
+    assert.equal(isSectionComplete({ items: listed(5), count: 5 }), true)
+    assert.equal(isSectionComplete({ items: listed(5), count: 9 }), false)
+    assert.equal(isSectionComplete({ items: listed(2), truncated: true }), false)
+    // The real driver: the 51st remembered item falls off a 50-item section and is NOT counted absent.
+    const store = memoryStore()
+    const full = listed(50)
+    const wide = (items: any[], at: number, extra: any = {}) =>
+      announce({ items, now: at, store, sections: [{ id: 'inv', complete: isSectionComplete({ items }) }], ...extra })
+    wide([...full, { id: 'pay-old', tone: 'warning' }].slice(0, 50), T0)
+    store.backing.times['pay-old'] = { at: T0, section: 'inv' }
+    wide(full, T0 + 1000)
+    wide(full, T0 + 1000 + 5 * QUIET)
+    assert.equal(store.backing.times['pay-old'].absentSince, undefined, 'no absent mark from a 50-item section')
+    assert.equal(store.backing.times['pay-old'].resolved, undefined)
+    // count 30 with 20 items never forgets; a 5-item section with a matching count does, after the quiet period.
+    const cut = memoryStore()
+    announce({ items: [{ id: 'x1', tone: 'warning' }], now: T0, store: cut })
+    const cutLoad = (at: number, n: number, count: number) => announce({
+      items: listed(n), now: at, store: cut,
+      sections: [{ id: 'inv', complete: isSectionComplete({ items: listed(n), count }) }],
+    })
+    cutLoad(T0 + 1000, 20, 30)
+    cutLoad(T0 + 1000 + 5 * QUIET, 20, 30)
+    assert.equal(cut.backing.times['x1'].absentSince, undefined, 'count 30 with 20 items: cut off, never forgets')
+    cutLoad(T0 + 6 * QUIET, 5, 5)
+    assert.ok(cut.backing.times['x1'].absentSince, 'a 5-item section with a matching count marks it absent')
+    cutLoad(T0 + 7 * QUIET, 5, 5)
+    assert.equal(cut.backing.times['x1'].resolved, true, 'and resolves it after the quiet period')
+  }
+
+  // S2: a section the Worker leaves out (it has no items) is complete and empty after a successful load.
+  {
+    const store = memoryStore()
+    const low = [{ id: 'low-7', tone: 'warning' }]
+    assert.deepEqual(ids(announce({ items: low, now: T0, store })), ['low-7'])
+    // The next successful summary has no stock section at all.
+    const gone = (at: number, extra: any = {}) => announce({ items: [], sections: [], omittedAreEmpty: true, now: at, store, ...extra })
+    gone(T0 + 1000)
+    assert.equal(store.backing.times['low-7'].absentSince, T0 + 1000, 'an omitted section marks it absent')
+    // A failed or blocked load in between changes nothing.
+    const before = JSON.stringify(store.backing.times)
+    gone(T0 + 1000 + QUIET + 1, { blocked: true })
+    announce({ items: [], sections: [], omittedAreEmpty: false, now: T0 + 2 * QUIET, store })
+    assert.equal(JSON.stringify(store.backing.times), before, 'blocked, or not a real load: nothing changes')
+    gone(T0 + 1000 + QUIET)
+    assert.equal(store.backing.times['low-7'].resolved, true, 'forgotten after the quiet period')
+    assert.deepEqual(ids(announce({ items: low, now: T0 + 3 * QUIET, store })), ['low-7'], 'the section returns with the item: it pops once')
+    assert.equal(announce({ items: low, now: T0 + 3 * QUIET + 1000, store }).kind, 'none')
+    // A section switched off in Settings is not an empty section.
+    const off = memoryStore()
+    announce({ items: low, now: T0, store: off })
+    for (const at of [T0 + 1000, T0 + 1000 + QUIET, T0 + 9 * QUIET]) announce({ items: [], sections: [], omittedAreEmpty: true, switchedOff: new Set(['inv']), now: at, store: off })
+    assert.deepEqual(off.backing.times['low-7'], { at: T0, section: 'inv' }, 'switched off: nothing is marked')
+    assert.deepEqual([...sectionsSwitchedOff({ inventoryEnabled: false, salesEnabled: true, expiryEnabled: 'false' })].sort(), ['expiry', 'inventory'])
+    assert.equal(sectionsSwitchedOff(undefined).size, 0)
+    // The bell passes a real load only, and the switches.
+    assert.ok(centerSource.includes('omittedAreEmpty: !!summary.loaded'))
+    assert.ok(centerSource.includes('switchedOff: sectionsSwitchedOff(summary.preferences)'))
+    assert.ok(centerSource.includes('loaded: true,'))
+  }
+}
+
+// S3: one user's pop-ups never reach the next user.
+{
+  reset()
+  const s = new Screen()
+  s.emit('Not Paid R-0123: $45.00', 'warning')
+  s.emit('Device waiting', 'error')
+  assert.equal(s.shown.length, 2)
+  assert.equal(channel.userChangeClearsToasts('u1', 'u2'), true, 'another account')
+  assert.equal(channel.userChangeClearsToasts('u1', null), true, 'sign-out')
+  assert.equal(channel.userChangeClearsToasts('u1', 'u1'), false)
+  assert.equal(channel.userChangeClearsToasts(null, 'u1'), false, 'a sign-in keeps what the sign-in screen showed')
+  assert.equal(channel.userChangeClearsToasts(undefined, undefined), false)
+  channel.clearToasts()
+  s.settle()
+  assert.deepEqual(s.shown, [], 'the list is empty')
+  assert.equal(timers.size, 0, 'no clock is left to fire later')
+  s.advance(20000)
+  assert.deepEqual(s.shown, [])
+  // A message raised right after the clear shows for its full lifetime.
+  s.emit('Signed out', 'warning')
+  s.advance(9999)
+  assert.deepEqual(s.shown, ['Signed out'])
+  s.advance(1)
+  assert.deepEqual(s.shown, [])
+  // A held (paused) pop-up is dropped too, and its clock cannot come back.
+  s.emit('held', 'error')
+  channel.pauseToast(channel.getToastStack()[0].key)
+  channel.clearToasts()
+  s.settle()
+  assert.deepEqual(s.shown, [])
+  s.advance(60000)
+  assert.deepEqual(s.shown, [])
+  s.unmount()
+  // Wired once, beside the user id, in the provider.
+  assert.equal(contextSource.split('clearToasts()').length - 1, 1)
+  assert.ok(contextSource.includes('if (userChangeClearsToasts(previousId, user?.id)) clearToasts()'))
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -648,14 +778,16 @@ const component = (() => {
 })()
 const packs: Record<string, Record<string, string>> = Object.fromEntries(['en', 'km'].map((l) => [l, JSON.parse(read(`src/lang/${l}.json`))]))
 type Entry = { key: string; message: string; type: string; duration: number; fromSlot?: boolean; onActivate?: () => void }
-function loadNotification(opts: { visible: Entry[]; slot?: Entry | null; dialogOpen?: boolean; narrow?: boolean; lang?: string; dismissed?: string[]; refs?: any[]; doc?: any }) {
+function loadNotification(opts: { visible: Entry[]; slot?: Entry | null; dialogOpen?: boolean; narrow?: boolean; lang?: string; dismissed?: string[]; refs?: any[]; doc?: any; effects?: Array<{ run: () => unknown; deps: unknown[] }>; resumed?: string[] }) {
   const win = { requestAnimationFrame: (fn: () => void) => { fn(); return 1 } }
-  const factory = new Function('React', 'useRef', 'useApp', 'useToastStack', 'useDialogOpen', 'useNarrowViewport', 'limitForDialog', 'toastStackTop', 'getNotificationColor', 'getNotificationKind', 'createPortal', 'document', 'window', `${component}\nreturn Notification`)
+  const factory = new Function('React', 'useEffect', 'releaseHeldToasts', 'useRef', 'useApp', 'useToastStack', 'useDialogOpen', 'useNarrowViewport', 'limitForDialog', 'toastStackTop', 'getNotificationColor', 'getNotificationKind', 'createPortal', 'document', 'window', `${component}\nreturn Notification`)
   return factory(
     React,
+    (run: () => unknown, deps: unknown[]) => { opts.effects?.push({ run, deps }) },
+    hookExports.releaseHeldToasts,
     (initial: unknown) => { const ref = { current: initial }; opts.refs?.push(ref); return ref },
     () => ({ t: (k: string) => packs[opts.lang || 'en'][k] ?? k }),
-    () => ({ visible: opts.visible, slot: opts.slot ?? null, dismiss: (k: string) => opts.dismissed?.push(k), pause() {}, resume() {} }),
+    () => ({ visible: opts.visible, slot: opts.slot ?? null, dismiss: (k: string) => opts.dismissed?.push(k), pause() {}, resume: (k: string) => opts.resumed?.push(k) }),
     () => !!opts.dialogOpen,
     () => !!opts.narrow,
     hookExports.limitForDialog,
@@ -761,6 +893,76 @@ const find = (node: any, test: (el: any) => boolean, found: any[] = []): any[] =
   focusLog.length = 0
   only.props.onClick({ detail: 1, currentTarget: second })
   assert.deepEqual(focusLog, [])
+}
+
+// N3-1: a pop-up held by keyboard focus is released when it stops being drawn and when the component unmounts.
+{
+  const render1 = (visible: Entry[], extra: { dialogOpen?: boolean; narrow?: boolean } = {}, shared?: { refs: any[] }) => {
+    const effects: Array<{ run: () => unknown; deps: unknown[] }> = []
+    const resumed: string[] = []
+    const refs = shared?.refs ?? []
+    const node = loadNotification({ visible, refs, effects, resumed, ...extra })({ notification: null, appUpdateVisible: false, headerPresent: true })
+    return { node, effects, resumed, refs }
+  }
+  const focusDismiss = (node: any, key: string) => {
+    const button = find(node, (el) => el.props['data-toast-dismiss'] !== undefined)[key === 'a' ? 0 : 1]
+    button.props.onFocus({ relatedTarget: null, currentTarget: { matches: () => true } })
+  }
+  // Phone, a dialog opens: only the newest is drawn, so the focused older pop-up must resume.
+  {
+    const both = render1([toast('a', 'newest'), toast('b', 'older')])
+    focusDismiss(both.node, 'b')
+    assert.deepEqual([...both.refs[2].current], ['b|dismiss'], 'focus on the older pop-up holds its clock')
+    // The dialog opens: the same component now draws only 'a'; its drawn-keys effect releases 'b'.
+    const hidden = render1([toast('a', 'newest'), toast('b', 'older')], { dialogOpen: true, narrow: true })
+    hidden.refs[2].current.add('b|dismiss')
+    hidden.effects[0].run()
+    assert.deepEqual(hidden.resumed, ['b'], 'the pop-up that stopped being drawn is resumed')
+    assert.equal(hidden.refs[2].current.size, 0)
+    // Still drawn: nothing is released.
+    const drawn = render1([toast('a', 'newest'), toast('b', 'older')])
+    drawn.refs[2].current.add('b|dismiss')
+    drawn.effects[0].run()
+    assert.deepEqual(drawn.resumed, [])
+  }
+  // Unmount: the cleanup of the last effect releases every held pop-up.
+  {
+    const held = render1([toast('a', 'one'), toast('b', 'two')])
+    const set = held.refs[2].current as Set<string>
+    focusDismiss(held.node, 'a')
+    focusDismiss(held.node, 'b')
+    assert.deepEqual([...set].sort(), ['a|dismiss', 'b|dismiss'])
+    const cleanup = held.effects[held.effects.length - 1].run() as () => void
+    assert.equal(typeof cleanup, 'function')
+    cleanup()
+    assert.deepEqual(held.resumed.sort(), ['a', 'b'], 'unmounting resumes every held clock')
+    assert.equal(set.size, 0)
+  }
+  // The pure rule: still-drawn keys stay held.
+  {
+    const held = new Set(['a|view', 'b|dismiss'])
+    const resumed: string[] = []
+    hookExports.releaseHeldToasts(held, ['a'], (k: string) => resumed.push(k))
+    assert.deepEqual([...held], ['a|view'])
+    assert.deepEqual(resumed, ['b'])
+  }
+  // End to end on the real channel: a held pop-up that loses its screen finishes its remaining time.
+  {
+    reset()
+    const s = new Screen()
+    s.emit('held', 'warning')
+    const key = channel.getToastStack()[0].key
+    s.advance(3000)
+    channel.pauseToast(key)
+    s.advance(20000)
+    assert.deepEqual(s.shown, ['held'], 'paused: it stays')
+    hookExports.releaseHeldToasts(new Set([`${key}|dismiss`]), [], channel.resumeToast)
+    s.advance(6999)
+    assert.deepEqual(s.shown, ['held'])
+    s.advance(1)
+    assert.deepEqual(s.shown, [], 'released: its remaining 7 s run out')
+    s.unmount()
+  }
 }
 
 // I: a type icon replaces the English text prefixes; the type word for screen readers is translated.

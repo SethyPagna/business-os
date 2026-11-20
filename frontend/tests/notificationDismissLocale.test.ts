@@ -4,7 +4,7 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { toastStackTop } from '../src/utils/mobileNavChrome.ts'
-import { limitForDialog } from '../src/app/useToastStack.ts'
+import { limitForDialog, releaseHeldToasts } from '../src/app/useToastStack.ts'
 
 const require = createRequire(import.meta.url)
 const ts = require('typescript') as typeof import('typescript')
@@ -40,8 +40,10 @@ function load(browser: boolean, channelDismissed: string[]): (props: ToastProps)
     slot: slot ? { key: 'slot-1', message: slot.message, type: slot.type, duration: Infinity, fromSlot: true } : null,
     dismiss: (key: string) => { channelDismissed.push(key) }, pause() {}, resume() {},
   })
-  return new Function('React', 'useRef', 'useApp', 'useToastStack', 'useDialogOpen', 'useNarrowViewport', 'limitForDialog', 'toastStackTop', 'getNotificationColor', 'getNotificationKind', 'createPortal', 'document', 'window', compiled + '\nreturn Notification')(
+  return new Function('React', 'useEffect', 'releaseHeldToasts', 'useRef', 'useApp', 'useToastStack', 'useDialogOpen', 'useNarrowViewport', 'limitForDialog', 'toastStackTop', 'getNotificationColor', 'getNotificationKind', 'createPortal', 'document', 'window', compiled + '\nreturn Notification')(
     React,
+    () => {},
+    releaseHeldToasts,
     (initial: unknown) => ({ current: initial }),
     () => ({ t: translate }),
     useToastStack,

@@ -11,7 +11,7 @@ import Bell from 'lucide-react/dist/esm/icons/bell.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp as useAppHook } from './AppContext.tsx'
 import { NotesProvider } from './components/notes/NotesContext.tsx'
-import { limitForDialog, useDialogOpen, useNarrowViewport, useToastStack } from './app/useToastStack.ts'
+import { limitForDialog, releaseHeldToasts, useDialogOpen, useNarrowViewport, useToastStack } from './app/useToastStack.ts'
 import type { Toast as ToastEntry } from './app/useToastStack.ts'
 import { toastStackTop } from './utils/mobileNavChrome.ts'
 import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationKind, isPublicCatalogPath, MAX_MOUNTED_PAGES, resolveAdminLandingPage, updateMountedPages } from './app/appShellUtils.ts'
@@ -1132,14 +1132,24 @@ function Notification({ notification, onDismiss, appUpdateVisible = false, heade
       const from = event.relatedTarget as HTMLElement | null
       if (from && !stackRef.current?.contains(from)) returnFocus.current = from
       if (!event.currentTarget.matches(':focus-visible')) return
-      focused.current.add(key + control)
+      focused.current.add(`${key}|${control}`)
       pause(key)
     },
     onBlur: () => {
-      if (!focused.current.delete(key + control)) return
+      if (!focused.current.delete(`${key}|${control}`)) return
       resume(key)
     },
   })
+  // A pause this component holds ends when its pop-up stops being drawn (hidden under a dialog on a phone, dismissed
+  // by the clock) and when the component unmounts: no blur arrives for a node that is removed.
+  const drawnKeys = shown.map((toast) => toast.key).join(',')
+  useEffect(() => {
+    releaseHeldToasts(focused.current, drawnKeys ? drawnKeys.split(',') : [], resume)
+  }, [drawnKeys, resume])
+  useEffect(() => {
+    const held = focused.current
+    return () => releaseHeldToasts(held, [], resume)
+  }, [resume])
   const dismissToast = (toast: ToastEntry, event: MouseEvent<HTMLButtonElement>) => {
     const button = event.currentTarget
     const viaKeyboard = event.detail === 0 && document.activeElement === button
