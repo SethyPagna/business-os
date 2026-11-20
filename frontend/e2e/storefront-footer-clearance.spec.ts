@@ -22,7 +22,8 @@ type FooterReport = {
 
 // One measurement, taken only once the page sits at its end with the scroll buttons faded in;
 // a page still growing (late sections, fonts) reports settled: false and is measured again.
-// Floating buttons are the fixed ones in the lower half; the dismissible install notice sits at the top.
+// Floating buttons are the fixed ones in the lower half. The dismissible install notice (iOS Safari) is one of them since it moved to the
+// bottom: the page pads by what the notice covers (--install-band-clearance), so at the page end the footer links sit above it.
 function measureFooterAtPageEnd(page: Page): Promise<FooterReport> {
   return page.evaluate(async () => {
     const FADE_MS = 300

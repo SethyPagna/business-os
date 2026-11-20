@@ -259,7 +259,7 @@ check('5 the storefront mounts the shared install band, not a duplicate implemen
   assert.match(publicCatalogPage, /const offersShopInstall = !isAdminHostname\(\)\r?\n/, 'the shop install offer is keyed on the host')
   assert.match(
     publicCatalogPage,
-    new RegExp(String.raw`const installBand = offersShopInstall \? \(\s*<div\s+className="pointer-events-none fixed [^"]*"(?:\s+style=\{announcementHeight \? \{ top: [\x60][^\x60]*[\x60] \} : undefined\})?\s*>\s*<InstallPromptBand ${SHOP_TRANSLATE} \/>\s*<\/div>\s*\) : null\r?\n`),
+    new RegExp(String.raw`const installBand = offersShopInstall \? \(\s*<div\s+data-portal-install-notice=""\s+className="pointer-events-none fixed [^"]*"\s*>\s*<InstallPromptBand ${SHOP_TRANSLATE} \/>\s*<\/div>\s*\) : null\r?\n`),
     'the band renders only when the shop offers the install, through the storefront copy()',
   )
   assert.equal((publicCatalogPage.match(/<InstallPromptBand /g) || []).length, 1, 'no second, ungated band')

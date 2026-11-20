@@ -909,7 +909,6 @@ export default function PublicCatalogPage() {
   // browser already closed this version is decided here, so the cached payload never depends on the clock.
   const [dismissedAnnouncement, setDismissedAnnouncement] = useState(readDismissedPortalAnnouncement)
   const [announcementDay, setAnnouncementDay] = useState(todayStr)
-  const [announcementHeight, setAnnouncementHeight] = useState(0)
   useEffect(() => startVisibleInterval(() => setAnnouncementDay(todayStr()), 5 * 60 * 1000), [])
   const announcement = useMemo(() => {
     const found = resolvePortalAnnouncement(displayConfig, pageLanguage, announcementDay)
@@ -1424,12 +1423,14 @@ export default function PublicCatalogPage() {
     pullToRefreshEnabled,
   )
 
-  // The one notice the shop shows unprompted (every other banner needs a merchant-configured reason);
-  // pinned to the top, clear of the bottom-right bucket and contact buttons.
+  // The one notice the shop shows unprompted (every other banner needs a merchant-configured reason). It is pinned to the bottom: the
+  // header is one row that holds Contact, List, Account and Language, and a notice over the top hid all of them on an iPhone until it was
+  // closed. The band publishes how much of the bottom it covers (--install-band-clearance); the page root pads by that much so the footer
+  // links scroll clear of it, and the List button rides above it on a phone. From sm it takes the left corner, opposite the List button.
   const installBand = offersShopInstall ? (
     <div
-      className="pointer-events-none fixed inset-x-2 top-[calc(0.75rem+env(safe-area-inset-top))] z-40 flex justify-center sm:inset-x-auto sm:right-4 sm:w-[22rem] sm:justify-end"
-      style={announcementHeight ? { top: `calc(0.75rem + ${announcementHeight}px + env(safe-area-inset-top))` } : undefined}
+      data-portal-install-notice=""
+      className="pointer-events-none fixed inset-x-2 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] z-40 flex justify-center sm:inset-x-auto sm:left-4 sm:w-[22rem] sm:justify-start"
     >
       <InstallPromptBand translate={(key, fallback, fallbackKm) => copy(key, fallback, fallbackKm)} />
     </div>
@@ -1439,7 +1440,7 @@ export default function PublicCatalogPage() {
   const bucketFab = activeTab === 'products' && bucket.count > 0 && !listView ? (
     <button
       type="button"
-      className="fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom))] right-[calc(1.25rem+env(safe-area-inset-right))] z-50 flex items-center gap-2 rounded-full bg-[#23201b] px-4 py-3 text-[#f4f1ea] shadow-xl transition hover:bg-stone-700 dark:bg-neutral-100 dark:text-neutral-950 dark:hover:bg-neutral-300"
+      className="fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom))] max-[639px]:bottom-[max(calc(1.25rem+env(safe-area-inset-bottom)),calc(var(--install-band-clearance,0px)+0.5rem))] right-[calc(1.25rem+env(safe-area-inset-right))] z-50 flex items-center gap-2 rounded-full bg-[#23201b] px-4 py-3 text-[#f4f1ea] shadow-xl transition hover:bg-stone-700 dark:bg-neutral-100 dark:text-neutral-950 dark:hover:bg-neutral-300"
       onClick={() => openListView('list')}
       aria-label={copy('bucketTitle', 'My List')}
       title={copy('bucketTitle', 'My List')}
@@ -1454,7 +1455,7 @@ export default function PublicCatalogPage() {
   return (
     <div
       ref={publicPageRootRef}
-      className="relative"
+      className="relative pb-[var(--install-band-clearance,0px)]"
       data-public-media-protection="true"
       onContextMenuCapture={(event) => {
         if (event.target instanceof Element && event.target.closest('img, video, [data-protected-media="true"]')) event.preventDefault()
@@ -1531,7 +1532,6 @@ export default function PublicCatalogPage() {
       productDetailNeedMoreDetailsDefault={displayConfig.productNeedMoreDetailsDefault || ''}
       announcement={announcement}
       onDismissAnnouncement={dismissAnnouncement}
-      onAnnouncementHeight={setAnnouncementHeight}
       publicScrollButtonsVisible={scrollButtonsVisible && !contactAnchor}
       scrollPublicPortal={scrollPublicPortal}
       productGalleryView={productGalleryView}
