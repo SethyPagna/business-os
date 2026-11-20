@@ -172,12 +172,11 @@ runTest('public portal About tab: story full width, contacts beside the map, and
   assert.match(catalogSecondaryTabsSource, /data-portal-about-details="true"[^>]*lg:grid-cols-\[minmax\(0,2fr\)_minmax\(0,3fr\)\]/, 'About tab contacts and map share one row on a large screen (2 Nov owner ask)')
   assert.match(catalogSecondaryTabsSource, /<PortalEmbedConsent[\s\S]*?title=\{copy\('portal_a11y_map_title'/, 'About tab map still renders through the consent gate')
   assert.match(catalogSecondaryTabsSource, /onClick=\{\(\) => openPortalImage\(previewConfig\.businessName \|\| copy\('logoImage', 'Logo image'\), \[versionedBusinessLogo\]\)\}/, 'About tab logo should open the image lightbox on click')
-  // 6.2 (Part 399, user): the LOGO left the top bar entirely -- social
-  // links took its side, language + light/dark the other. The clickable
+  // 6.2 (Part 399, user): the LOGO left the top bar entirely. The clickable
   // logo lives on the About hero (pinned above); the header must carry
   // NO logo frame at all.
   assert.doesNotMatch(catalogPreviewSurfaceSource, /portal-logo-frame/, 'the top bar must not render a logo frame (6.2: logo removed from the header)')
-  assert.match(catalogPreviewSurfaceSource, /Social links take this\s*\n?\s*side; language \+ light\/dark sit on the far side/, "6.2's split must stay documented at the header cells")
+  assert.match(catalogPreviewSurfaceSource, /<div className="min-w-0 flex-1">[\s\S]*?data-portal-header-icons/, 'the shop name takes the left of the one header row and the actions the right')
 })
 
 runTest('portal cover paths are rendered as image sources instead of fragile CSS urls', () => {

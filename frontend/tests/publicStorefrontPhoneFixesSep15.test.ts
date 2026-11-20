@@ -119,7 +119,7 @@ check('1b the alpha rail is exempt from the coarse-pointer 44px aria-label floor
   )
 })
 
-check('1c the header social/account icon rows are exempt from the same floor', () => {
+check('1c the header action row is exempt from the same floor', () => {
   // CATCHES: the header's social-links and wishlist/account/language/theme
   // rows intentionally shrink to h-8/h-9 (32/36px) below `sm` so they fit on
   // one row (check 2) -- every icon in them carries an aria-label too, so
@@ -127,8 +127,8 @@ check('1c the header social/account icon rows are exempt from the same floor', (
   // width and reopens the same overflow the nowrap fix closed.
   assert.equal(
     (catalogPreviewSurface.match(/data-portal-header-icons=""/g) || []).length,
-    2,
-    'BOTH icon rows (social links and wishlist/account/language/theme) must carry the exemption hook',
+    1,
+    'the one action row (contact, saved, list, account, language, theme) must carry the exemption hook',
   )
   assert.match(coarsePointerBlock, /\[data-portal-header-icons\] a\[aria-label\]/, 'the header-icon exemption must live inside the SAME pointer:coarse block as the 44px floor')
   assert.match(
@@ -143,21 +143,15 @@ check('1c the header social/account icon rows are exempt from the same floor', (
 check('2 the header icon rows never wrap on a phone', () => {
   // CATCHES `flex-wrap` splitting Facebook/Instagram from Telegram (or
   // wishlist/account from language/theme) onto a second row at 320-375px.
-  assert.ok(!/flex min-w-0 flex-wrap items-center/.test(catalogPreviewSurface), 'the social-links row must not wrap')
-  assert.ok(!/flex flex-wrap items-center justify-end/.test(catalogPreviewSurface), 'the account-side row must not wrap')
-  // P11-9 (2026-09-18) added `row-start-2 ... sm:row-start-auto` to both rows
-  // (the business name now leads on the base grid) -- nowrap/gap survive it.
-  assert.match(catalogPreviewSurface, /row-start-2 flex min-w-0 flex-nowrap items-center gap-0\.5 sm:row-start-auto sm:gap-1/, 'social links: nowrap + shrunk gap below sm')
-  assert.match(catalogPreviewSurface, /row-start-2 flex flex-nowrap items-center justify-end gap-0\.5 sm:row-start-auto sm:gap-1/, 'account-side icons: nowrap + shrunk gap below sm')
-  // Every icon button in both rows shrinks one size below `sm` rather than
-  // wrapping -- catches a partial fix that stops wrapping but overflows the
-  // header instead.
-  // P-public-11 (owner, 2026-09-25: 40px touch targets at 360/390): the icons
-  // are 40px TALL on a phone; width stays one size down (32px below 360,
-  // 36px from 360) because 4 social + 4 account icons at 40px wide do not fit
-  // one 360px row, and wrapping them is what this check exists to prevent.
-  const iconButtonCount = (catalogPreviewSurface.match(/inline-flex h-10 w-8 min-\[360px\]:w-9 shrink-0 items-center justify-center rounded-full[^"`]*sm:h-9 sm:w-9/g) || []).length
-  assert.ok(iconButtonCount >= 4, `expected at least 4 shrink-below-sm icon buttons, found ${iconButtonCount}`)
+  assert.ok(!/flex flex-wrap items-center justify-end/.test(catalogPreviewSurface), 'the action row must not wrap')
+  assert.match(catalogPreviewSurface, /data-portal-header-icons="" className="flex shrink-0 flex-nowrap items-center justify-end gap-0\.5 sm:gap-1"/, 'actions: nowrap + shrunk gap below sm, never shrunk themselves')
+  // Spec section 2: six actions share the row with the name. They are 40 px
+  // TALL always; the width is 36 px on a phone and 40 px from 400 px, because
+  // six 40 px buttons leave a 375 px phone almost no room for the name.
+  const iconClass = /const HEADER_ICON_CLASS = '(inline-flex h-10 w-9 min-\[400px\]:w-10 shrink-0 items-center justify-center rounded-full[^']*)'/.exec(catalogPreviewSurface)
+  assert.ok(iconClass, 'the shared header button class: 40 px tall, 36 px wide below 400 px, 40 px wide from 400 px')
+  const used = (catalogPreviewSurface.match(/HEADER_ICON_CLASS/g) || []).length
+  assert.ok(used >= 5, `expected the shared class on every header button, found ${used - 1} users`)
   assert.doesNotMatch(catalogPreviewSurface, /inline-flex h-8 w-8 shrink-0/, 'a 32px-tall header icon is back')
 })
 

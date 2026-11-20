@@ -91,6 +91,7 @@ import { FAQ_STARTER_TEXT, AI_FAQ_STARTER_TEXT } from './faqStarterText.ts'
 // Type only: erased from the build. A run-time import would pull the lazy catalog-editor chunk (which imports this one) into this chunk's static closure.
 import type { EditorSectionId } from './editor/editorSections.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
+import { PORTAL_DARK_SURFACE, PORTAL_LIGHT_SURFACE } from './portalContrast.ts'
 
 const loadCatalogEditorSurface = () => import('./CatalogEditorSurface')
 const loadCatalogProductsSection = () => import('./CatalogProductsSection')
@@ -1469,9 +1470,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     ) as CatalogProduct[],
     [language, portalContentI18nModule, previewConfig.translations, products, shouldLocalizePortalContent]
   )
-  const portalBackground = theme === 'dark'
-    ? 'radial-gradient(circle at top, #1f2937 0%, #0f172a 38%, #020617 100%)'
-    : 'radial-gradient(circle at top, #fef3c7 0%, #fff7ed 35%, #f8fafc 80%)'
+  const portalBackground = theme === 'dark' ? PORTAL_DARK_SURFACE : PORTAL_LIGHT_SURFACE
   const darkMode = theme === 'dark'
   const resolveVisibleTab = (candidate: string, cfg: PortalConfig = previewConfig): string => {
     const visible = [
@@ -3529,8 +3528,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         publicPortalNavRef={publicPortalNavRef as RefObject<HTMLElement>}
         publicPortalNavPinned={publicPortalNavPinned}
         publicPortalNavMetrics={publicPortalNavMetrics}
-        socialGroups={socialGroups}
-        mapLink={addressFact?.href || ''}
         catalogSection={renderCatalogSection()}
         secondaryTabSection={renderSecondaryTabSection()}
         footer={<PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} socialLinks={socialLinks} />}

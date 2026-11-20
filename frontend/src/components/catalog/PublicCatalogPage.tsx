@@ -57,6 +57,7 @@ import { installStandaloneExternalLinkGuard } from '../../utils/standaloneNaviga
 import { normalizePortalLanguage, readPublicStorefrontLanguage, storePortalLanguage } from './portalLanguageOptions.ts'
 import { isAdminHostname, isStorefrontSignInPath } from '../../app/pathRouting.ts'
 import { aiProviderState } from './legal/aiProviderDisclosure.ts'
+import { PORTAL_DARK_SURFACE, PORTAL_LIGHT_SURFACE } from './portalContrast.ts'
 import type { AiProviderState } from './legal/aiProviderDisclosure.ts'
 
 const loadCatalogProductsSection = () => import('./CatalogProductsSection')
@@ -326,10 +327,9 @@ function normalizeFaqItems(input: unknown): Array<{ id: string | number; questio
 }
 
 function buildPortalBackground(config: PortalConfig, darkMode = false): string {
-  // Flat, editorial background (no large hero gradient) so the storefront reads
-  // like an open retail page rather than a boxed dashboard preview.
+  // Flat ivory page (no hero gradient). The white cards, sheets and menus read against it.
   void config
-  return darkMode ? '#0b0b0c' : '#ffffff'
+  return darkMode ? PORTAL_DARK_SURFACE : PORTAL_LIGHT_SURFACE
 }
 
 function getPortalTabs(config: PortalConfig, copy: CopyFunction): PortalTab[] {
@@ -1736,8 +1736,6 @@ export default function PublicCatalogPage() {
       publicPortalNavRef={publicPortalNavRef as RefObject<HTMLElement>}
       publicPortalNavPinned={false}
       publicPortalNavMetrics={{ left: 0, width: 0, height: 0 }}
-      socialGroups={socialGroups}
-      mapLink={addressFact?.href || ''}
       catalogSection={!loadFailed && activeTab === 'products' ? catalogSection : null}
       secondaryTabSection={loadFailed ? loadFailedPanel : secondaryTabSection}
       footer={footerReady ? <PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} socialLinks={socialLinks} /> : null}

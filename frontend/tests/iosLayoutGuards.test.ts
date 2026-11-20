@@ -475,16 +475,16 @@ runTest('D7 -- old stored themes keep working: the head script and theme-bootstr
 
 runTest('D8 -- the iOS status bar style suits the light chrome both hosts paint', () => {
   // Catches: going back to black-translucent, which paints the status text
-  // WHITE over page content. The storefront ground is #ffffff
+  // WHITE over page content. The storefront ground is the ivory #f4f1ea
   // (portalContrast.ts PORTAL_LIGHT_SURFACE) and the admin mobile top bar is
-  // --nav-surface #fffdf8 (nav-chrome.css), so white-on-white was the result.
+  // --nav-surface #fffdf8 (nav-chrome.css), so light-on-light was the result.
   assert.match(indexHtml, /name="apple-mobile-web-app-status-bar-style" content="default"/)
   assert.doesNotMatch(
     /<meta name="apple-mobile-web-app-status-bar-style"[^>]*>/.exec(indexHtml)?.[0] || '',
     /black-translucent/,
   )
   // The evidence the choice rests on must stay true, or the choice is stale.
-  assert.match(read('src/components/catalog/portalContrast.ts'), /PORTAL_LIGHT_SURFACE = '#ffffff'/)
+  assert.match(read('src/components/catalog/portalContrast.ts'), /PORTAL_LIGHT_SURFACE = '#f4f1ea'/)
   assert.match(read('src/components/navigation/nav-chrome.css'), /--nav-surface: #fffdf8;/)
 })
 

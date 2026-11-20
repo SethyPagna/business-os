@@ -91,8 +91,8 @@ runCase('the social links are their own row that scrolls sideways, with 44px tar
   assert.equal(anchors.length, 3)
   for (const anchor of anchors) assert.match(anchor, /min-h-11/, anchor)
   const surface = read('CatalogPreviewSurface.tsx')
-  // Outside the three-cell header grid, so the row never competes with the title and the account icons.
-  assert.ok(surface.indexOf('<PortalSocialRow') > surface.indexOf('</header>') - 400 && surface.indexOf('<PortalSocialRow') < surface.indexOf('</header>'))
+  // The header is one row of name and actions now; the chip row under it is gone from the surface.
+  assert.doesNotMatch(surface, /<PortalSocialRow/)
   assert.doesNotMatch(surface, /headerLinks/)
 })
 
@@ -124,7 +124,7 @@ runCase('every page and sheet builds its social data through the one builder', (
     assert.doesNotMatch(source, /deriveMessengerLink|deriveWhatsappLink|resolveMessengerLink/, `${file} still normalises contact links itself`)
   }
   const page = read('PublicCatalogPage.tsx')
-  assert.match(page, /socialGroups=\{socialGroups\}/)
+  assert.doesNotMatch(page, /socialGroups=\{socialGroups\}/, 'the surface takes no social groups: there is no chip row')
   assert.match(page, /<PortalSocialText text=\{item\.label\} latin=\{item\.latin\} \/>/, 'contact sheets show the handle')
   assert.equal((page.match(/<PortalSocialText /g) || []).length, 2, 'both contact lists (My List and the Contact button) render handles')
 })

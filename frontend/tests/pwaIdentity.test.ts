@@ -11,7 +11,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import vm from 'node:vm'
 import { fileURLToPath } from 'node:url'
-import { PORTAL_LIGHT_SURFACE } from '../src/components/catalog/portalContrast.ts'
+import { PORTAL_LIGHT_CARD } from '../src/components/catalog/portalContrast.ts'
 import * as pathRouting from '../src/app/pathRouting.ts'
 import { ADMIN_DOCUMENT_HOSTS, APP_DOCUMENT_ROUTES } from '../../cloudflare/src/lib/adminDocumentIdentity.ts'
 
@@ -102,9 +102,10 @@ runTest('the staff app is coloured like its top bar and page ground', () => {
   assert.equal(staff.background_color, lightNavToken('--nav-ground'))
 })
 
-runTest('the shop is coloured like the storefront surface', () => {
-  assert.equal(shop.theme_color, PORTAL_LIGHT_SURFACE)
-  assert.equal(shop.background_color, PORTAL_LIGHT_SURFACE)
+// The browser chrome and splash stay white (index.html and theme-bootstrap.ts carry the same #ffffff); the page ground inside is the ivory.
+runTest('the shop is coloured like the storefront card surface', () => {
+  assert.equal(shop.theme_color, PORTAL_LIGHT_CARD)
+  assert.equal(shop.background_color, PORTAL_LIGHT_CARD)
 })
 
 runTest('no manifest promises offline use or carries a retired name', () => {

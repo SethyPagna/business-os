@@ -1,4 +1,4 @@
-import { Suspense, cloneElement, isValidElement, useMemo, useState } from 'react'
+import { Suspense, cloneElement, isValidElement, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ComponentType, Dispatch, ReactNode, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
@@ -14,10 +14,8 @@ import { PortalNavSearchSlotContext } from './portalNavSearchSlot.ts'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import type { PortalFooterProps } from './legal/LegalPages.tsx'
 import { PUBLIC_STOREFRONT_LANGUAGE_OPTIONS } from './portalLanguageOptions.ts'
-import PortalSocialRow from './PortalSocialRow.tsx'
 import PortalAnnouncementStrip from './PortalAnnouncementStrip.tsx'
 import type { PortalAnnouncement } from './portalAnnouncement.ts'
-import type { PortalSocialGroup } from './portalSocialLinks.ts'
 import '../../styles/public-portal.css'
 
 const ImageGalleryLightbox = lazyRetry(() => import('../shared/ImageGalleryLightbox'), 'catalog-preview-image-gallery-lightbox')
@@ -104,9 +102,6 @@ type CatalogPreviewSurfaceProps = {
   onOpenWishlist?: () => void
   wishlistCount?: number
   accountSignedIn?: boolean
-  // Social accounts for the header's own row, grouped by platform, plus the map link.
-  socialGroups?: PortalSocialGroup[]
-  mapLink?: string
   catalogSection: ReactNode
   secondaryTabSection: ReactNode
   // N45 legal lane: the storefront <footer> (business details, quick links,
@@ -152,6 +147,15 @@ type CatalogPreviewSurfaceProps = {
   changePageLanguage: (language: string) => void
 }
 
+// Header buttons: 40 px tall, 36 px wide below 400 px so six of them and the shop name share one row on a phone, 40 px from there up.
+const HEADER_ICON_CLASS = 'inline-flex h-10 w-9 min-[400px]:w-10 shrink-0 items-center justify-center rounded-full text-[#23201b] transition hover:bg-stone-200 dark:text-neutral-200 dark:hover:bg-neutral-800'
+const HEADER_ICON_GLYPH = 'h-[18px] w-[18px]'
+const HEADER_COUNT_CLASS = 'absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-700 px-1 text-[10px] font-bold leading-none text-white'
+// The surface recipe (spec section 1) for the floating scroll buttons.
+const SCROLL_BUTTON_CLASS = 'inline-flex h-10 w-10 items-center justify-center rounded-xl border border-stone-300 bg-white text-[#23201b] shadow-sm transition hover:bg-stone-100 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:bg-neutral-800'
+// The strip runs under the page gutters (the page container's own px-4 / sm:px-6 / lg:px-10 / xl:px-14).
+const NAV_FULL_BLEED_CLASS = '-mx-4 px-4 sm:-mx-6 sm:px-6 lg:-mx-10 lg:px-10 xl:-mx-14 xl:px-14'
+
 const FilePickerModal = lazyRetry(async () => ({
   default: (await import('../files/FilePickerModal')).default as ComponentType<FilePickerModalProps>,
 }), 'catalog-preview-file-picker-modal')
@@ -178,8 +182,6 @@ export default function CatalogPreviewSurface({
   onOpenWishlist,
   wishlistCount = 0,
   accountSignedIn = false,
-  socialGroups = [],
-  mapLink = '',
   catalogSection,
   secondaryTabSection,
   footer,
@@ -213,6 +215,33 @@ export default function CatalogPreviewSurface({
   // The tab bar's search slot (public storefront only): the products section draws its search and Filters into it.
   const [searchSlotElement, setSearchSlotElement] = useState<HTMLElement | null>(null)
   const searchSlot = useMemo(() => ({ expected: publicView, element: searchSlotElement }), [publicView, searchSlotElement])
+
+  // A tab strip that scrolls fades the edge that hides more tabs; the active tab is kept in view.
+  const tabScrollRef = useRef<HTMLDivElement | null>(null)
+  const [tabFade, setTabFade] = useState({ start: false, end: false })
+  const updateTabFade = useCallback(() => {
+    const box = tabScrollRef.current
+    if (!box) return
+    const start = box.scrollLeft > 2
+    const end = box.scrollLeft + box.clientWidth < box.scrollWidth - 2
+    setTabFade((current) => (current.start === start && current.end === end ? current : { start, end }))
+  }, [])
+  useEffect(() => {
+    updateTabFade()
+    const box = tabScrollRef.current
+    if (!box || typeof ResizeObserver === 'undefined') return undefined
+    const observer = new ResizeObserver(updateTabFade)
+    observer.observe(box)
+    return () => observer.disconnect()
+  }, [updateTabFade, portalTabs.length])
+  useEffect(() => {
+    const box = tabScrollRef.current
+    const selected = box?.querySelector<HTMLElement>('[aria-current="page"]')
+    if (!box || !selected) return
+    const boxRect = box.getBoundingClientRect()
+    const rect = selected.getBoundingClientRect()
+    if (rect.left < boxRect.left || rect.right > boxRect.right) box.scrollBy({ left: rect.left - boxRect.left - 24 })
+  }, [activeTab])
 
   // P-public-9: the footer's quick links are the nav's own tabs. This
   // surface owns the tabs, so it hands them to whichever footer the caller
@@ -263,7 +292,7 @@ export default function CatalogPreviewSurface({
 
   // Same top-safe-area gap as the header padding above -- this is a
   // `position: fixed` inline style (the nav's "pinned while scrolling"
-  // state, separate from its default `sticky top-1` CSS), so the browser
+  // state, separate from its default `sticky top-0` CSS), so the browser
   // doesn't apply any safe-area handling automatically the way it can for
   // a plain top-0; it has to be added into the calc'd offset itself.
   const pinnedNavStyle: CSSProperties | undefined = publicView && publicPortalNavPinned ? {
@@ -309,7 +338,7 @@ export default function CatalogPreviewSurface({
       // was always the thing actually moving. What that dead scrollport DID
       // do is become the nearest scrollport ancestor for every `position:
       // sticky` descendant, and a sticky element resolves against its
-      // scrollport, not the page. So the section nav (`sticky top-1`) and the
+      // scrollport, not the page. So the section nav (`sticky top-0`) and the
       // products search/filter row (`sticky top-16`) were pinned to a box
       // that never moves -- i.e. they simply scrolled away -- on the live
       // storefront, where the JS pinning fallback is also switched off
@@ -375,215 +404,170 @@ export default function CatalogPreviewSurface({
                 </button>
               </div>
             ) : null}
-            {/* Square, full-width bars (P-public-8, owner 2026-09-25): the 28px
-                corners on these two shells sat 4px (px-1) from their content, so
-                in dark mode -- where both shells and the nav track paint a
-                background -- the curve cut into the header row, and the sticky
-                nav's rounded bottom left two see-through notches that the About
-                hero (the first section) scrolled through. */}
-            <header className="portal-header-shell border-b border-slate-200/80 dark:border-neutral-800/80">
-              <div className="px-1 py-4 sm:py-5">
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
-                  {/* 6.2 (user): the LOGO is out of the top bar -- it still
-                      lives on the About page hero. Social links take this
-                      side; language + light/dark sit on the far side. */}
-                  {/* `flex-nowrap`, not `flex-wrap`: at 320-375px this row and
-                      the wishlist/account/language/theme row on the other
-                      side share one line with the brand name pushed to row
-                      2 below. Wrapping split Facebook/Instagram from
-                      Telegram onto a second row and pushed the brand name
-                      down again underneath it. Icons shrink one size below
-                      `sm` instead, which keeps all three (and a fourth, if a
-                      merchant adds a website link) on the one row every
-                      phone width the storefront targets. `data-portal-header-
-                      icons` is the hook public-portal.css's pointer:coarse
-                      44px floor exempts -- every icon below carries an
-                      aria-label, which matched that rule and would otherwise
-                      silently re-widen it past `w-8`/`w-9` and reopen this
-                      same overflow. */}
-                  {/* 2026-09-18 (owner): "for the top of the website, the
-                      buttons can be below the business name... so Leang
-                      Cosmetics first" -- on the base (sub-`sm`) grid this row
-                      used to be `row-start-1` (implicit) with the business
-                      name pushed to `row-start-2` below it, i.e. the icon
-                      buttons led and the name came second. `row-start-2` here
-                      moves this row (and its opposite number below) under the
-                      name instead; `sm:row-start-auto` restores the ordinary
-                      single-row layout at `sm` and up, where all three sit
-                      side by side and there is no "first" to reorder. */}
-                  <div data-portal-header-icons="" className="row-start-2 flex min-w-0 flex-nowrap items-center gap-0.5 sm:row-start-auto sm:gap-1">
-                    {!publicView ? (
-                      <div className="hidden shrink-0 items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-700 sm:inline-flex dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-                        {copy('previewBadge', 'Website Editor')}
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="col-span-2 row-start-1 min-w-0 text-center sm:col-span-1 sm:row-start-auto">
-                    {showBrandLabel ? (
-                      <div className="notranslate truncate text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-neutral-400" translate="no">
-                        {displayConfig.businessName}
-                      </div>
-                    ) : null}
-                    <h1
-                      className="notranslate line-clamp-2 break-normal text-lg font-semibold leading-tight tracking-tight [overflow-wrap:normal] [word-break:normal] text-slate-900 sm:truncate sm:text-2xl dark:text-neutral-100"
-                      style={{ fontFamily: "'Georgia', 'Times New Roman', serif" }}
-                      translate="no"
-                    >
-                      {previewTitle || displayConfig.businessName || (configPending
-                        ? <span aria-hidden="true" className="portal-skeleton-block inline-block h-5 w-40 max-w-full rounded-md align-middle sm:h-7 sm:w-56" />
-                        : copy('about', 'About'))}
-                    </h1>
-                    {displayConfig.businessTagline ? (
-                      <div className="notranslate hidden truncate text-xs text-slate-500 sm:block dark:text-neutral-400" translate="no">
-                        {displayConfig.businessTagline}
-                      </div>
-                    ) : null}
-                  </div>
-                  {/* Same one-row rule as the social links opposite it --
-                      `flex-nowrap` plus the sub-`sm` shrink keeps wishlist/
-                      account/language/theme together even with all four
-                      present. Same `data-portal-header-icons` exemption
-                      hook too (see the social row's comment above). */}
-                  <div data-portal-header-icons="" className="row-start-2 flex flex-nowrap items-center justify-end gap-0.5 sm:row-start-auto sm:gap-1">
-                    {/* Wishlist + Account live in the top bar (public storefront
-                        only — the admin editor preview doesn't wire these
-                        handlers, so they don't render there). Each opens its own
-                        slide-in drawer. */}
-                    {onOpenWishlist ? (
-                      <button
-                        type="button"
-                        className="relative inline-flex h-10 w-8 min-[360px]:w-9 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
-                        onClick={onOpenWishlist}
-                        aria-label={copy('wishlistTitle', 'Wishlist')}
-                        title={copy('wishlistTitle', 'Wishlist')}
-                      >
-                        <Heart className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
-                        {wishlistCount > 0 ? (
-                          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white">
-                            {wishlistCount}
-                          </span>
-                        ) : null}
-                      </button>
-                    ) : null}
-                    {onOpenAccount ? (
-                      <button
-                        type="button"
-                        className={`inline-flex h-10 w-8 min-[360px]:w-9 shrink-0 items-center justify-center rounded-full transition hover:bg-slate-100 dark:hover:bg-neutral-800 sm:h-9 sm:w-9 ${accountSignedIn ? 'text-emerald-600 dark:text-emerald-300' : 'text-slate-700 dark:text-neutral-200'}`}
-                        onClick={onOpenAccount}
-                        aria-label={copy('account', 'Account')}
-                        title={copy('account', 'Account')}
-                      >
-                        <User className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
-                      </button>
-                    ) : null}
-                    {displayConfig.translateWidgetEnabled ? (
-                      <LazyPortalMenu
-                        align="right"
-                        trigger={(
-                          <button
-                            type="button"
-                            className="inline-flex h-10 w-8 min-[360px]:w-9 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
-                            aria-label={copy('publicTranslation', 'Language tools')}
-                            title={copy('publicTranslation', 'Language tools')}
-                          >
-                            <Globe className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
-                          </button>
-                        )}
-                        content={({ closeMenu }) => (
-                          <div className="w-72 max-w-[85vw]">
-                            <div className="px-4 pb-2 pt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-neutral-400">
-                              {copy('publicTranslation', 'Language tools')}
-                            </div>
-                            <div className="py-1">
-                              {PUBLIC_STOREFRONT_LANGUAGE_OPTIONS.map((option) => {
-                                const active = pageLanguage === option.value
-                                return (
-                                  <button
-                                    key={option.value}
-                                    type="button"
-                                    className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm transition ${
-                                      active
-                                        ? 'bg-blue-50 text-blue-700 dark:bg-amber-500/10 dark:text-amber-300'
-                                        : 'text-slate-700 hover:bg-slate-50 dark:text-neutral-200 dark:hover:bg-neutral-800'
-                                    }`}
-                                    onClick={() => {
-                                      changePageLanguage(option.value)
-                                      closeMenu()
-                                    }}
-                                  >
-                                    <span>{option.label}</span>
-                                    {active ? <span className="text-[11px] font-semibold uppercase">{copy('active', 'Active')}</span> : null}
-                                  </button>
-                                )
-                              })}
-                            </div>
-                          </div>
-                        )}
-                      />
-                    ) : null}
+            {/* One row at every width: the shop name on the left, the actions on the right. The row has no surface of its own (it sits on the ivory page);
+                the sticky tab strip under it is the solid one. The name wraps to two lines on a phone rather than being cut. */}
+            <header className="portal-header-shell">
+              <div className="flex items-center gap-2 px-1 py-2 sm:py-3">
+                <div className="min-w-0 flex-1">
+                  {!publicView ? (
+                    <div className="mb-1 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-700 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+                      {copy('previewBadge', 'Website Editor')}
+                    </div>
+                  ) : null}
+                  {showBrandLabel ? (
+                    <div className="notranslate truncate text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-600 dark:text-neutral-400" translate="no">
+                      {displayConfig.businessName}
+                    </div>
+                  ) : null}
+                  <h1
+                    className="notranslate line-clamp-2 break-normal text-base font-semibold leading-tight tracking-tight [overflow-wrap:normal] [word-break:normal] text-[#23201b] sm:truncate sm:text-2xl dark:text-neutral-100"
+                    style={{ fontFamily: "'Georgia', 'Times New Roman', serif" }}
+                    translate="no"
+                  >
+                    {previewTitle || displayConfig.businessName || (configPending
+                      ? <span aria-hidden="true" className="portal-skeleton-block inline-block h-5 w-40 max-w-full rounded-md align-middle sm:h-7 sm:w-56" />
+                      : copy('about', 'About'))}
+                  </h1>
+                  {displayConfig.businessTagline ? (
+                    <div className="notranslate hidden truncate text-xs text-stone-600 sm:block dark:text-neutral-400" translate="no">
+                      {displayConfig.businessTagline}
+                    </div>
+                  ) : null}
+                </div>
+                {/* `data-portal-header-icons` is the hook public-portal.css's pointer:coarse floor exempts: the targets here are 40 px and stay on the one row. */}
+                <div data-portal-header-icons="" className="flex shrink-0 flex-nowrap items-center justify-end gap-0.5 sm:gap-1">
+                  {onOpenWishlist ? (
                     <button
                       type="button"
-                      className="inline-flex h-10 w-8 min-[360px]:w-9 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
-                      onClick={toggleTheme}
-                      aria-label={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
-                      title={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
+                      className={`relative ${HEADER_ICON_CLASS}`}
+                      onClick={onOpenWishlist}
+                      aria-label={copy('wishlistTitle', 'Wishlist')}
+                      title={copy('wishlistTitle', 'Wishlist')}
                     >
-                      {darkMode ? <Sun className="h-4 w-4 sm:h-[18px] sm:w-[18px]" /> : <Moon className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />}
+                      <Heart className={HEADER_ICON_GLYPH} />
+                      {wishlistCount > 0 ? <span className={HEADER_COUNT_CLASS}>{wishlistCount}</span> : null}
                     </button>
-                  </div>
+                  ) : null}
+                  {onOpenAccount ? (
+                    <button
+                      type="button"
+                      className={`${HEADER_ICON_CLASS} ${accountSignedIn ? 'text-emerald-700 dark:text-emerald-300' : ''}`}
+                      onClick={onOpenAccount}
+                      aria-label={copy('account', 'Account')}
+                      title={copy('account', 'Account')}
+                    >
+                      <User className={HEADER_ICON_GLYPH} />
+                    </button>
+                  ) : null}
+                  {displayConfig.translateWidgetEnabled ? (
+                    <LazyPortalMenu
+                      align="right"
+                      trigger={(
+                        <button
+                          type="button"
+                          className={HEADER_ICON_CLASS}
+                          aria-label={copy('publicTranslation', 'Language tools')}
+                          title={copy('publicTranslation', 'Language tools')}
+                        >
+                          <Globe className={HEADER_ICON_GLYPH} />
+                        </button>
+                      )}
+                      content={({ closeMenu }) => (
+                        <div className="w-72 max-w-[85vw]">
+                          <div className="px-4 pb-2 pt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-600 dark:text-neutral-400">
+                            {copy('publicTranslation', 'Language tools')}
+                          </div>
+                          <div className="py-1">
+                            {PUBLIC_STOREFRONT_LANGUAGE_OPTIONS.map((option) => {
+                              const active = pageLanguage === option.value
+                              return (
+                                <button
+                                  key={option.value}
+                                  type="button"
+                                  className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm transition ${
+                                    active
+                                      ? 'bg-stone-100 text-[#7a5c22] dark:bg-neutral-800 dark:text-amber-300'
+                                      : 'text-[#23201b] hover:bg-stone-100 dark:text-neutral-200 dark:hover:bg-neutral-800'
+                                  }`}
+                                  onClick={() => {
+                                    changePageLanguage(option.value)
+                                    closeMenu()
+                                  }}
+                                >
+                                  <span>{option.label}</span>
+                                  {active ? <span className="text-[11px] font-semibold uppercase">{copy('active', 'Active')}</span> : null}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    />
+                  ) : null}
+                  <button
+                    type="button"
+                    className={HEADER_ICON_CLASS}
+                    onClick={toggleTheme}
+                    aria-label={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
+                    title={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
+                  >
+                    {darkMode ? <Sun className={HEADER_ICON_GLYPH} /> : <Moon className={HEADER_ICON_GLYPH} />}
+                  </button>
                 </div>
-                {/* Owner rule: social icons + handles on their OWN row that scrolls sideways. The left cell above is kept (empty on the live shop) so the grid columns do not shift. */}
-                <PortalSocialRow groups={socialGroups} mapLink={mapLink} pageLanguage={pageLanguage} copy={copy} pending={configPending} />
               </div>
             </header>
 
-            {/* The section tabs are navigation, and the name that described
-                them sat on an inner scroll <div> with no role of its own, so
-                nothing announced it. */}
+            {/* The tab strip is solid page ground with one line under it, and runs edge to edge so nothing scrolls past it in the page gutters.
+                The tabs scroll sideways without a scrollbar; an edge that hides more tabs fades instead of cutting a label. */}
             <nav
               aria-label={copy('publicNavigation', 'Section navigation')}
               ref={publicPortalNavRef}
-              className={`pb-1 ${publicView ? 'sticky top-1 z-40 sm:top-2' : ''}`}
+              className={publicView ? 'sticky top-0 z-40' : ''}
               style={publicView && publicPortalNavPinned ? { minHeight: `${publicPortalNavMetrics.height || 0}px` } : undefined}
             >
               <div
-                className="portal-nav-shell border-b border-slate-200/80 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/85 dark:border-neutral-800/80 dark:bg-[#0b0b0c]/95"
+                className={`portal-nav-shell border-b border-stone-300 bg-[#f4f1ea] dark:border-neutral-800 dark:bg-[#0b0b0c] ${publicView && !publicPortalNavPinned ? NAV_FULL_BLEED_CLASS : ''}`}
                 style={pinnedNavStyle}
               >
-                {/* 2 Nov (owner): the search joins the tabs. The tabs scroll sideways on their own line on a phone,
-                    with the search directly under them (no gap); from lg up the search shares the tab row. */}
+                {/* The search joins the tabs: tabs on their own line on a phone with the search directly under them, one row from lg up. */}
                 <div className="flex flex-wrap items-center gap-x-4 lg:flex-nowrap">
-                <div className="portal-nav-scroll w-full min-w-0 overflow-x-auto overflow-y-hidden lg:w-auto lg:flex-1">
-                  <div className="portal-nav-track flex w-max min-w-full flex-nowrap items-center gap-6 px-1">
-                    {portalTabs.map((item) => {
-                      const Icon = item.icon
-                      const selected = activeTab === item.key
-                      return (
-                        <button
-                          key={item.key}
-                          type="button"
-                          className={`inline-flex min-w-max shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 py-3 text-xs font-medium tracking-wide transition sm:text-sm ${
-                            selected
-                              ? 'portal-nav-tab-active border-slate-900 text-slate-900 dark:border-neutral-100 dark:text-neutral-100'
-                              : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-neutral-400 dark:hover:text-neutral-200'
-                          }`}
-                          onClick={() => handlePortalTabClick(item.key)}
-                          aria-current={selected ? 'page' : undefined}
-                        >
-                          <Icon className="h-4 w-4 sm:hidden" />
-                          <span className="whitespace-nowrap">{item.label}</span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-                {publicView ? (
                   <div
-                    ref={setSearchSlotElement}
-                    data-portal-nav-search-slot="true"
-                    className="relative w-full min-w-0 shrink-0 pb-2 empty:hidden lg:w-[min(34rem,52%)] lg:pb-0"
-                  />
-                ) : null}
+                    ref={tabScrollRef}
+                    onScroll={updateTabFade}
+                    data-fade-start={tabFade.start ? 'true' : undefined}
+                    data-fade-end={tabFade.end ? 'true' : undefined}
+                    className="portal-nav-scroll w-full min-w-0 overflow-x-auto overflow-y-hidden lg:w-auto lg:flex-1"
+                  >
+                    <div className="portal-nav-track flex w-max min-w-full flex-nowrap items-center gap-6 px-1">
+                      {portalTabs.map((item) => {
+                        const Icon = item.icon
+                        const selected = activeTab === item.key
+                        return (
+                          <button
+                            key={item.key}
+                            type="button"
+                            className={`inline-flex min-h-11 min-w-max shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 text-xs font-medium tracking-wide transition sm:text-sm ${
+                              selected
+                                ? 'portal-nav-tab-active border-[#23201b] text-[#23201b] dark:border-neutral-100 dark:text-neutral-100'
+                                : 'border-transparent text-stone-600 hover:text-[#23201b] dark:text-neutral-400 dark:hover:text-neutral-200'
+                            }`}
+                            onClick={() => handlePortalTabClick(item.key)}
+                            aria-current={selected ? 'page' : undefined}
+                          >
+                            <Icon className="h-4 w-4 sm:hidden" />
+                            <span className="whitespace-nowrap">{item.label}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  {publicView ? (
+                    <div
+                      ref={setSearchSlotElement}
+                      data-portal-nav-search-slot="true"
+                      className="relative w-full min-w-0 shrink-0 pb-2 empty:hidden lg:w-[min(34rem,52%)] lg:pb-0"
+                    />
+                  ) : null}
                 </div>
               </div>
             </nav>
@@ -605,35 +589,13 @@ export default function CatalogPreviewSurface({
         </div>
       </div>
       {publicView ? (
-        // Root cause of "bucket icon turns into move-to-top/bottom": this
-        // wrapper used to sit in the exact same bottom-RIGHT corner as the
-        // bucket/contact-us FABs (rendered by the caller, outside this
-        // surface) at a higher z-index (z-[70] vs the FABs' z-50), so once
-        // scrolled far enough for these to appear, they physically covered
-        // the FABs and won every tap -- tying pointer-events to visibility
-        // (an earlier fix) only helped while hidden, not once actually
-        // visible, which is exactly when someone would also want the
-        // bucket. Now anchored to the bottom-LEFT instead: nothing else in
-        // this surface lives there, so there's no corner to collide in
-        // regardless of scroll/visibility state.
-        <div className={`fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom))] left-[calc(0.75rem+env(safe-area-inset-left))] z-[70] flex flex-col gap-2 transition-opacity duration-200 sm:bottom-[calc(1.5rem+env(safe-area-inset-bottom))] sm:left-[calc(1.5rem+env(safe-area-inset-left))] ${publicScrollButtonsVisible ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'}`}>
-          {/*
-            text-neutral-600 here, not text-slate-600: public-portal.css
-            force-overrides `.text-slate-500/600/...` with `!important` (see
-            the `.dark [data-portal-root='true'] .text-slate-600` rule) so
-            the theme's slate/gray tokens stay legible against arbitrary
-            admin-picked backgrounds. That !important beats this button's
-            own (non-important) `dark:text-neutral-100`, so with the slate
-            class the icon was stuck at a dimmer forced gray instead of the
-            near-white it was designed for -- exactly the low-contrast
-            symptom reported. Neutral isn't in that override list, so it
-            renders as authored.
-          */}
+        // Bottom-LEFT, because nothing else lives there: in the bottom-right corner these used to cover the list button and win every tap.
+        <div className={`fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom))] left-[calc(0.75rem+env(safe-area-inset-left))] z-[70] flex flex-col gap-2 sm:bottom-[calc(1.5rem+env(safe-area-inset-bottom))] sm:left-[calc(1.5rem+env(safe-area-inset-left))] ${publicScrollButtonsVisible ? 'visible pointer-events-auto' : 'invisible pointer-events-none'}`}>
           <button
             type="button"
             tabIndex={publicScrollButtonsVisible ? 0 : -1}
             aria-hidden={!publicScrollButtonsVisible}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/95 text-neutral-600 shadow-[0_10px_24px_rgba(148,163,184,0.22)] backdrop-blur transition hover:bg-slate-50 hover:text-neutral-950 dark:border-neutral-700/80 dark:bg-neutral-900/92 dark:text-neutral-100 dark:hover:bg-neutral-800 dark:hover:text-white"
+            className={SCROLL_BUTTON_CLASS}
             onClick={() => scrollPublicPortal('top')}
             aria-label={copy('scrollToTop', 'Move to top')}
             title={copy('scrollToTop', 'Move to top')}
@@ -644,7 +606,7 @@ export default function CatalogPreviewSurface({
             type="button"
             tabIndex={publicScrollButtonsVisible ? 0 : -1}
             aria-hidden={!publicScrollButtonsVisible}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/95 text-neutral-600 shadow-[0_10px_24px_rgba(148,163,184,0.22)] backdrop-blur transition hover:bg-slate-50 hover:text-neutral-950 dark:border-neutral-700/80 dark:bg-neutral-900/92 dark:text-neutral-100 dark:hover:bg-neutral-800 dark:hover:text-white"
+            className={SCROLL_BUTTON_CLASS}
             onClick={() => scrollPublicPortal('bottom')}
             aria-label={copy('scrollToBottom', 'Move to bottom')}
             title={copy('scrollToBottom', 'Move to bottom')}
