@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  PORTAL_SIGNED_IN_KEY,
+  clearPortalSignedIn,
+  markPortalSignedIn,
+  readPortalSignedIn,
+  readPortalSignedInValue,
+} from './portalLanguageOptions.ts'
+import {
   mergeBucketItems,
   mergeWishlistItems,
   type PortalBucketItem,
@@ -55,18 +62,10 @@ export function readPortalErrorCode(error: unknown): string {
   return typeof code === 'string' ? code : ''
 }
 
-// The session is an HttpOnly cookie, so nothing in storage tells this tab that another tab signed in or out: the only signal is to ask the
-// Worker again when the visitor comes back to the tab (visible, focused) or the page is restored from the back/forward cache.
-export const PORTAL_SESSION_RECHECK_MIN_MS = 10000
-
-export function shouldRecheckPortalSession(state: { ready: boolean; checking: boolean; busy: boolean; force: boolean; now: number; last: number }): boolean {
-  if (!state.ready || state.checking || state.busy) return false
-  return state.force || state.now - state.last >= PORTAL_SESSION_RECHECK_MIN_MS
-}
-
-export function samePortalProfile(a: PortalAccountProfile | null, b: PortalAccountProfile | null): boolean {
-  if (!a || !b) return a === b
-  return a.membershipId === b.membershipId && a.name === b.name && a.email === b.email
+// A definite refusal from the Worker (4xx): no session was created. A network error, timeout or 5xx proves nothing.
+function isDefiniteRefusal(error: unknown): boolean {
+  const status = (error as { status?: unknown } | null)?.status
+  return typeof status === 'number' && status >= 400 && status < 500
 }
 
 function readItems(result: unknown): unknown[] {
@@ -92,6 +91,7 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike, cop
   copyRef.current = copy
   const [account, setAccount] = useState<PortalAccountProfile | null>(null)
   const [ready, setReady] = useState(false)
+  const [sessionKnown, setSessionKnown] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [errorCode, setErrorCode] = useState('')
@@ -134,22 +134,47 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike, cop
     }
   }, [bucket, wishlist])
 
-  // Initial "am I signed in?" check.
+  // The sign-in marker (portalLanguageOptions.ts) is what other tabs can see. This tab gets no `storage` event for its own writes, so every
+  // write and clear here also refreshes `marker`. The value this tab last wrote is kept so a failure only undoes its own write.
+  const [marker, setMarker] = useState(readPortalSignedIn)
+  const accountRef = useRef<PortalAccountProfile | null>(null)
+  accountRef.current = account
+  const markSignedIn = useCallback((): string => {
+    const written = markPortalSignedIn()
+    setMarker(readPortalSignedIn())
+    return written
+  }, [])
+  const clearSignedIn = useCallback((onlyIfValue?: string) => {
+    clearPortalSignedIn(onlyIfValue)
+    setMarker(readPortalSignedIn())
+  }, [])
+
+  // Initial "am I signed in?" check. `sessionKnown` is true only after a real answer (signed in, signed out, or a live session waiting
+  // for the consent renewal): a failed check leaves it false, so translation stays off for that page view. No retry.
   useEffect(() => {
     let cancelled = false
     const a = api()
     if (!a.getPortalAccountMe) { setReady(true); return }
+    const markerBefore = readPortalSignedInValue()
     a.getPortalAccountMe()
       .then(async (result) => {
         if (cancelled) return
         const profile = readProfile(result)
         setAccount(profile)
+        setSessionKnown(true)
+        if (profile) markSignedIn()
+        else if (markerBefore !== null) clearSignedIn(markerBefore)
         if (profile) await hydrate()
       })
       .catch((err) => {
         if (cancelled) return
         setAccount(null)
-        setConsentRenewal(readPortalErrorCode(err) === CONSENT_RENEWAL_CODE)
+        const renewal = readPortalErrorCode(err) === CONSENT_RENEWAL_CODE
+        setConsentRenewal(renewal)
+        if (renewal) {
+          setSessionKnown(true)
+          markSignedIn()
+        }
       })
       .finally(() => { if (!cancelled) setReady(true) })
     return () => { cancelled = true }
@@ -157,57 +182,23 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike, cop
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Ask again when the visitor returns to the tab or the page comes back from the back/forward cache, so a sign-in or sign-out made in
-  // another tab is seen here. A failed check changes nothing: the last known state stands.
-  const readyRef = useRef(false)
-  const busyRef = useRef(false)
-  const accountRef = useRef<PortalAccountProfile | null>(null)
-  const checkingRef = useRef(false)
-  const lastCheckRef = useRef(Date.now())
-  const hydrateRef = useRef(hydrate)
-  hydrateRef.current = hydrate
-  readyRef.current = ready
-  busyRef.current = busy
-  accountRef.current = account
-  const recheck = useCallback(async (force: boolean) => {
-    const a = api()
-    if (!a.getPortalAccountMe) return
-    if (!shouldRecheckPortalSession({ ready: readyRef.current, checking: checkingRef.current, busy: busyRef.current, force, now: Date.now(), last: lastCheckRef.current })) return
-    checkingRef.current = true
-    lastCheckRef.current = Date.now()
-    try {
-      const profile = readProfile(await a.getPortalAccountMe())
-      // A sign-in or sign-out in this tab started while the check was out: that answer is newer.
-      if (busyRef.current) return
-      const had = accountRef.current
-      if (samePortalProfile(had, profile)) return
-      setAccount(profile)
-      if (profile) {
-        setConsentRenewal(false)
-        await hydrateRef.current()
-      } else {
-        hydratedRef.current = false
-      }
-    } catch {
-      // keep the last known state
-    } finally {
-      checkingRef.current = false
-    }
-  }, [])
+  // Other tabs and a restored or woken page only ever re-read the marker: nothing here may reach the network.
   useEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return undefined
-    const onVisible = () => { if (document.visibilityState === 'visible') void recheck(false) }
-    const onFocus = () => { void recheck(false) }
-    const onPageShow = (event: PageTransitionEvent) => { if (event.persisted) void recheck(true) }
+    const refresh = () => setMarker(readPortalSignedIn())
+    const onStorage = (event: StorageEvent) => { if (event.key === null || event.key === PORTAL_SIGNED_IN_KEY) refresh() }
+    const onVisible = () => { if (document.visibilityState === 'visible') refresh() }
+    window.addEventListener('storage', onStorage)
+    window.addEventListener('pageshow', refresh)
     document.addEventListener('visibilitychange', onVisible)
-    window.addEventListener('focus', onFocus)
-    window.addEventListener('pageshow', onPageShow)
+    document.addEventListener('resume', refresh)
     return () => {
+      window.removeEventListener('storage', onStorage)
+      window.removeEventListener('pageshow', refresh)
       document.removeEventListener('visibilitychange', onVisible)
-      window.removeEventListener('focus', onFocus)
-      window.removeEventListener('pageshow', onPageShow)
+      document.removeEventListener('resume', refresh)
     }
-  }, [recheck])
+  }, [])
 
   // Mirror local list changes to the server while signed in and hydrated.
   useEffect(() => {
@@ -240,22 +231,29 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike, cop
     setBusy(true)
     setError('')
     setErrorCode('')
+    // Set before the request, so other tabs take Google off before the session cookie exists. A failure undoes only this write.
+    const absentBefore = readPortalSignedIn() === 'absent'
+    const written = markSignedIn()
     try {
       const result = await fn(payload)
       const profile = readProfile(result)
       if (!profile) throw new Error(accountMessage(copyRef.current, 'incomplete'))
       setAccount(profile)
+      setSessionKnown(true)
       setConsentRenewal(false)
+      markSignedIn()
       await hydrate()
       return true
     } catch (err) {
+      const code = readPortalErrorCode(err)
+      if (absentBefore && !accountRef.current && isDefiniteRefusal(err) && code !== CONSENT_RENEWAL_CODE) clearSignedIn(written)
       setError(err instanceof Error ? err.message : accountMessage(copyRef.current, 'generic'))
-      setErrorCode(readPortalErrorCode(err))
+      setErrorCode(code)
       return false
     } finally {
       setBusy(false)
     }
-  }, [hydrate])
+  }, [hydrate, markSignedIn, clearSignedIn])
 
   // Agree on the renewal prompt. The profile comes back in the answer itself, so
   // success never depends on a second /auth/me round trip (no loop if it differs).
@@ -269,7 +267,9 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike, cop
       const profile = readProfile(await fn(payload))
       if (!profile) throw new Error('The account response was incomplete. Please try again.')
       setAccount(profile)
+      setSessionKnown(true)
       setConsentRenewal(false)
+      markSignedIn()
       await hydrate()
       return true
     } catch (err) {
@@ -279,7 +279,7 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike, cop
     } finally {
       setBusy(false)
     }
-  }, [hydrate])
+  }, [hydrate, markSignedIn])
 
   // Keep browsing as a guest: nothing is signed out, the prompt just stops asking until the next visit.
   const dismissConsentRenewal = useCallback(() => { setConsentRenewal(false); setError(''); setErrorCode('') }, [])
@@ -290,13 +290,14 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike, cop
   const signOut = useCallback(async () => {
     const a = api()
     hydratedRef.current = false
-    try { await a.signoutPortalAccount?.() } catch { /* ignore */ }
+    // The marker goes only when the Worker confirms: a failed sign-out may have left the session alive.
+    try { await a.signoutPortalAccount?.(); clearSignedIn() } catch { /* ignore */ }
     setAccount(null)
     setConsentRenewal(false)
     // The local list stays as the guest's list — it is not cleared on sign-out.
-  }, [])
+  }, [clearSignedIn])
 
   const clearError = useCallback(() => { setError(''); setErrorCode('') }, [])
 
-  return { account, ready, busy, error, errorCode, consentRenewal, renewConsent, dismissConsentRenewal, signIn, signUp, signOut, clearError }
+  return { account, ready, sessionKnown, marker, busy, error, errorCode, consentRenewal, renewConsent, dismissConsentRenewal, signIn, signUp, signOut, clearError }
 }

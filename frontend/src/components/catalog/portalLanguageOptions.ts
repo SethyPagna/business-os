@@ -55,12 +55,65 @@ export function portalCopyLanguage(choice: unknown): PortalLanguage {
   return normalized ? 'en' : PUBLIC_STOREFRONT_DEFAULT_LANGUAGE
 }
 
+// Not a secret and no personal data: a timestamp that says "someone signed in on this browser", so every tab can keep Google off without
+// asking the Worker. The session cookie is HttpOnly, so this is the only signal another tab can read.
+export const PORTAL_SIGNED_IN_KEY = 'business-os:portal-signed-in'
+export type PortalSignedInMarker = 'present' | 'absent' | 'unreadable'
+
 /**
- * Google's translate script runs with full access to the page, so it may run only when the shopper-session check has finished, nobody is
- * signed in and the Account sheet is closed. Any other state is "blocked": the script is not loaded and, if present, is removed.
+ * Google's translate script runs with full access to the page, so it may run only when the shopper-session check got a real answer, nobody
+ * is signed in, the Account sheet is closed and no sign-in marker is kept. Any other state is "blocked": the script is not loaded and, if
+ * present, is removed. An unreadable marker blocks too: a browser that cannot keep it cannot be protected across tabs.
  */
-export function portalTranslateAllowed(state: { sessionReady: boolean; signedIn: boolean; accountOpen: boolean }): boolean {
-  return Boolean(state.sessionReady) && !state.signedIn && !state.accountOpen
+export function portalTranslateAllowed(state: { sessionReady: boolean; signedIn: boolean; accountOpen: boolean; marker: PortalSignedInMarker }): boolean {
+  return Boolean(state.sessionReady) && !state.signedIn && !state.accountOpen && state.marker === 'absent'
+}
+
+function localStore(): Storage | null {
+  try {
+    return typeof window !== 'undefined' ? window.localStorage ?? null : null
+  } catch {
+    return null
+  }
+}
+
+/** The raw marker value, or null when absent or unreadable. */
+export function readPortalSignedInValue(): string | null {
+  try { return localStore()?.getItem(PORTAL_SIGNED_IN_KEY) ?? null } catch { return null }
+}
+
+export function readPortalSignedIn(): PortalSignedInMarker {
+  try {
+    const store = localStore()
+    if (!store) return 'unreadable'
+    return store.getItem(PORTAL_SIGNED_IN_KEY) === null ? 'absent' : 'present'
+  } catch {
+    return 'unreadable'
+  }
+}
+
+/** Writes a new timestamp (every write changes the value, so other tabs always get a storage event). Returns it, or '' when storage refused. */
+export function markPortalSignedIn(): string {
+  const value = String(Date.now())
+  try {
+    const store = localStore()
+    if (!store) return ''
+    const before = store.getItem(PORTAL_SIGNED_IN_KEY)
+    store.setItem(PORTAL_SIGNED_IN_KEY, before === value ? `${value}.` : value)
+    return store.getItem(PORTAL_SIGNED_IN_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+/** Removes the marker; with `onlyIfValue` only when it still holds exactly that value (a newer write by another tab stays). */
+export function clearPortalSignedIn(onlyIfValue?: string): void {
+  try {
+    const store = localStore()
+    if (!store) return
+    if (onlyIfValue !== undefined && store.getItem(PORTAL_SIGNED_IN_KEY) !== onlyIfValue) return
+    store.removeItem(PORTAL_SIGNED_IN_KEY)
+  } catch {}
 }
 
 // Opening the Account sheet over a translated page reloads the page to take Google off; this one-shot flag brings the sheet back after it.

@@ -7250,6 +7250,8 @@
   "portal_legal_store_until_cleared_l": "Until you clear site data",
   "portal_legal_store_reopen_p": "Reopens the account panel once after translation is switched off. Deleted as soon as it is read.",
   "portal_legal_store_reopen_l": "Until the page reloads or the tab closes",
+  "portal_legal_store_signedin_p": "Remembers on this device that someone signed in, so page translation by Google stays off. Holds a time, no personal data.",
+  "portal_legal_store_signedin_l": "Until you sign out or clear site data",
   "portal_legal_consent_required": "Please confirm you are 16 or older and agree to the Terms & Conditions and Privacy Policy to create an account.",
   "portal_legal_editor_block": "Legal & business details",
   "portal_legal_editor_hint": "Shown in the storefront footer and filled into the privacy, terms and cookie pages. Leave a field blank to hide that line.",

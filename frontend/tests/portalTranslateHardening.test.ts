@@ -1,8 +1,7 @@
 // S2-F1 hardening: the rule must hold when the session changes in another tab, when the page comes back from the back/forward cache,
 // and when the reload is slow. The pieces that can be proved without a browser:
 //   - the controller takes the script tag, the widget host and the googtrans cookie away BEFORE it reloads;
-//   - the session re-check fires only when it should (pure rule), and the hook wires it to visibility, focus and pageshow(persisted);
-//   - a failed re-check changes nothing.
+//   - the hook never goes to the Worker when another tab, a restored page or a woken tab changes the sign-in marker (portalSignedInMarker runs it).
 //
 // Run: node tests/portalTranslateHardening.test.ts
 import assert from 'node:assert/strict'
@@ -102,52 +101,44 @@ await check('a translated marker alone still reloads once, after clearing', () =
 globals.window = savedWindow
 globals.document = savedDocument
 
-const account = await import('../src/components/catalog/portalAccount.ts')
-
-await check('the session re-check rule: only when ready, idle, not mid sign-in, and not within the minimum gap unless forced', () => {
-  const base = { ready: true, checking: false, busy: false, force: false, now: 100000, last: 0 }
-  const min = account.PORTAL_SESSION_RECHECK_MIN_MS
-  assert.equal(account.shouldRecheckPortalSession(base), true)
-  assert.equal(account.shouldRecheckPortalSession({ ...base, ready: false }), false, 'the first check has not finished')
-  assert.equal(account.shouldRecheckPortalSession({ ...base, checking: true }), false, 'one in flight')
-  assert.equal(account.shouldRecheckPortalSession({ ...base, busy: true }), false, 'a sign-in or sign-out is running here')
-  assert.equal(account.shouldRecheckPortalSession({ ...base, last: base.now - (min - 1) }), false, 'too soon')
-  assert.equal(account.shouldRecheckPortalSession({ ...base, last: base.now - min }), true)
-  assert.equal(account.shouldRecheckPortalSession({ ...base, last: base.now - 1, force: true }), true, 'a page restored from the cache is always checked')
-  assert.equal(account.shouldRecheckPortalSession({ ...base, ready: false, force: true }), false, 'forced, but the first check is still out')
-})
-
-await check('the same profile is not a change; null against a profile is', () => {
-  const a = { membershipId: 'M1', name: 'A', email: null }
-  assert.equal(account.samePortalProfile(null, null), true)
-  assert.equal(account.samePortalProfile(a, { ...a }), true)
-  assert.equal(account.samePortalProfile(a, null), false)
-  assert.equal(account.samePortalProfile(null, a), false)
-  assert.equal(account.samePortalProfile(a, { ...a, membershipId: 'M2' }), false)
-})
-
 const hook = read('src/components/catalog/portalAccount.ts')
 
-await check('the hook re-checks on visible, focus and a persisted pageshow, and removes the listeners', () => {
+// A listener body may only re-read the marker and set state: pinned by structure, with a positive control for the scanner.
+const listenerNames = (source: string): string[] =>
+  [...source.matchAll(/(?:window|document)\.addEventListener\('(?:storage|pageshow|visibilitychange|resume|focus)', (\w+)\)/g)].map((match) => match[1])
+const SAFE_BODY = /^(?:\{ )?(?:if \(.*\) )?(?:refresh\(\)|setMarker\(readPortalSignedIn\(\)\))(?: \})?$/
+const bodyOf = (source: string, name: string): string => new RegExp(`const ${name} = (?:\\([^)]*\\)|\\w+) => ([^\\n]*)`).exec(source)?.[1] ?? ''
+
+await check('the hook listens for storage, pageshow, visibilitychange and resume, and removes each listener', () => {
+  assert.match(hook, /window\.addEventListener\('storage', onStorage\)/)
+  assert.match(hook, /event\.key === null \|\| event\.key === PORTAL_SIGNED_IN_KEY/, 'localStorage.clear() has key null')
+  assert.match(hook, /window\.addEventListener\('pageshow', refresh\)/)
   assert.match(hook, /document\.addEventListener\('visibilitychange', onVisible\)/)
-  assert.match(hook, /document\.visibilityState === 'visible'/)
-  assert.match(hook, /window\.addEventListener\('focus', onFocus\)/)
-  assert.match(hook, /window\.addEventListener\('pageshow', onPageShow\)/)
-  assert.match(hook, /if \(event\.persisted\) void recheck\(true\)/)
-  for (const name of ['visibilitychange', 'focus', 'pageshow']) assert.match(hook, new RegExp(`removeEventListener\\('${name}'`))
+  assert.match(hook, /document\.addEventListener\('resume', refresh\)/)
+  for (const name of ['storage', 'pageshow', 'visibilitychange', 'resume']) assert.match(hook, new RegExp(`removeEventListener\\('${name}'`))
+  assert.doesNotMatch(hook, /BroadcastChannel/)
+  assert.doesNotMatch(hook, /addEventListener\('focus'/, 'focus asks nothing and reads nothing here')
+  assert.doesNotMatch(hook, /event\.persisted/, 'no read depends on persisted: any pageshow re-reads the marker')
 })
 
-await check('a failed re-check keeps the last known state, and the answer of a sign-in running here wins', () => {
-  const body = /const recheck = useCallback[\s\S]*?\n  \}, \[\]\)/.exec(hook)?.[0] || ''
-  assert.ok(body, 'recheck found')
-  const catchBlock = /\} catch \{([\s\S]*?)\} finally/.exec(body)?.[1] || ''
-  assert.doesNotMatch(catchBlock, /setAccount|setReady|hydratedRef/, 'the catch changes nothing')
-  assert.match(body, /if \(busyRef\.current\) return/)
-  assert.match(body, /setAccount\(profile\)/)
+await check('every listener body only re-reads the marker and sets state: no API call, no fetch', () => {
+  const names = listenerNames(hook)
+  assert.equal(names.length, 4, 'storage, pageshow, visibilitychange, resume')
+  for (const name of names) {
+    const body = bodyOf(hook, name)
+    assert.match(body, SAFE_BODY, `${name}: ${body}`)
+  }
+  assert.equal(bodyOf(hook, 'refresh'), 'setMarker(readPortalSignedIn())')
+  const block = /const refresh = [\s\S]*?document\.removeEventListener\('resume', refresh\)/.exec(hook)?.[0] || ''
+  assert.ok(block, 'listener block found')
+  assert.doesNotMatch(block, /api\(\)|getPortal|fetch\(|hydrate|await /, 'nothing in the listener block reaches the network')
+  // Positive control: a listener that does reach the API is not accepted.
+  const bad = "const refresh = () => { void api().getPortalAccountMe?.() }\nwindow.addEventListener('pageshow', refresh)"
+  assert.doesNotMatch(bodyOf(bad, listenerNames(bad)[0]), SAFE_BODY, 'a listener that reaches the API is flagged')
 })
 
-await check('no storage event or BroadcastChannel carries a session change today (the cookie is HttpOnly): re-check is the only signal', () => {
-  assert.doesNotMatch(hook, /BroadcastChannel|addEventListener\('storage'/)
+await check('the network re-check of round 1 is gone', () => {
+  assert.doesNotMatch(hook, /recheck|shouldRecheckPortalSession|PORTAL_SESSION_RECHECK_MIN_MS|samePortalProfile/i)
 })
 
 await check('the Website Editor preview does not use the hook or the controller', () => {
@@ -155,4 +146,4 @@ await check('the Website Editor preview does not use the hook or the controller'
 })
 
 assert.deepEqual(failures, [], `translate hardening:\n  ${failures.join('\n  ')}`)
-console.log('PASS translate hardening: removal before reload, session re-check on return and on cache restore')
+console.log('PASS translate hardening: removal before reload, marker listeners reach no network')

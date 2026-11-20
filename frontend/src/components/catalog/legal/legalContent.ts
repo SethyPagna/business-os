@@ -120,6 +120,8 @@ export const LEGAL_STORAGE_ROWS: readonly LegalStorageRow[] = [
   { id: 'wishlist', name: 'business-os-portal-wishlist-v1', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_wishlist_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
   // portalLanguageOptions.ts
   { id: 'translate', name: 'business-os:portal-translate-target', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_translate_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
+  // portalLanguageOptions.ts -- a time stamp, no personal data: tells every tab on this browser that someone signed in. Removed on sign-out.
+  { id: 'signed-in', name: 'business-os:portal-signed-in', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_signedin_p', lifetimeKey: 'portal_legal_store_signedin_l' },
   // public-runtime/service-worker.ts -- app shell and same-origin static
   // assets. Cache names are versioned and old versions are pruned on update.
   { id: 'cache-storage', name: 'Business OS app-shell/static caches', kindKey: 'portal_legal_kind_cache', purposeKey: 'portal_legal_store_cache_storage_p', lifetimeKey: 'portal_legal_store_cache_storage_l' },
@@ -267,6 +269,8 @@ const EN: Record<string, string> = {
   portal_legal_store_until_cleared_l: 'Until you clear site data',
   portal_legal_store_reopen_p: 'Reopens the account panel once after translation is switched off. Deleted as soon as it is read.',
   portal_legal_store_reopen_l: 'Until the page reloads or the tab closes',
+  portal_legal_store_signedin_p: 'Remembers on this device that someone signed in, so page translation by Google stays off. Holds a time, no personal data.',
+  portal_legal_store_signedin_l: 'Until you sign out or clear site data',
 
   // --- consent + embeds ----------------------------------------------------
   portal_legal_consent_required: 'Please confirm you are 16 or older and agree to the Terms & Conditions and Privacy Policy to create an account.',
@@ -403,6 +407,8 @@ const KM: Record<string, string> = {
   portal_legal_store_until_cleared_l: 'រហូតដល់អ្នកសម្អាតទិន្នន័យគេហទំព័រ',
   portal_legal_store_reopen_p: 'បើកផ្ទាំងគណនីឡើងវិញម្តង បន្ទាប់ពីបិទការបកប្រែ។ លុបភ្លាមពេលអានរួច។',
   portal_legal_store_reopen_l: 'រហូតដល់ទំព័រផ្ទុកឡើងវិញ ឬបិទផ្ទាំង',
+  portal_legal_store_signedin_p: 'ចងចាំនៅលើឧបករណ៍នេះថាមានអ្នកចូលគណនី ដើម្បីឱ្យការបកប្រែទំព័រដោយ Google នៅបិទ។ រក្សាទុកតែម៉ោង គ្មានទិន្នន័យផ្ទាល់ខ្លួនទេ។',
+  portal_legal_store_signedin_l: 'រហូតដល់អ្នកចាកចេញពីគណនី ឬសម្អាតទិន្នន័យគេហទំព័រ',
 
   portal_legal_consent_required: 'សូមបញ្ជាក់ថាអ្នកមានអាយុ ១៦ ឆ្នាំឡើងទៅ ហើយយល់ព្រមនឹងលក្ខខណ្ឌប្រើប្រាស់ និងគោលការណ៍ឯកជនភាព ដើម្បីបង្កើតគណនី។',
   portal_legal_consent_required_signin: 'សូមបញ្ជាក់ថាអ្នកមានអាយុ ១៦ ឆ្នាំឡើងទៅ ហើយយល់ព្រមនឹងលក្ខខណ្ឌប្រើប្រាស់ និងគោលការណ៍ឯកជនភាព ដើម្បីចូលគណនី។',

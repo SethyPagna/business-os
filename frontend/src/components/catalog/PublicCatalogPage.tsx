@@ -672,10 +672,13 @@ export default function PublicCatalogPage() {
   useEffect(() => {
     if (!isGoogleLanguageChoice(pageChoice)) lastPlainChoiceRef.current = portalCopyLanguage(pageChoice)
   }, [pageChoice])
-  // Google's script sees everything on the page, so it runs only while nobody is signed in and the Account sheet is closed (portalTranslateAllowed).
-  const sessionReady = portalAccount.ready
-  const signedIn = !!portalAccount.account
-  const translateAllowed = portalTranslateAllowed({ sessionReady, signedIn, accountOpen })
+  // Google's script sees everything on the page, so it runs only while nobody is signed in, the Account sheet is closed and no tab on this
+  // browser has signed in (portalTranslateAllowed). A live session waiting for the consent renewal counts as signed in.
+  const sessionChecked = portalAccount.ready
+  const sessionReady = portalAccount.sessionKnown
+  const signedIn = !!portalAccount.account || portalAccount.consentRenewal
+  const signInMarker = portalAccount.marker
+  const translateAllowed = portalTranslateAllowed({ sessionReady, signedIn, accountOpen, marker: signInMarker })
   useEffect(() => {
     if (!isGoogleLanguageChoice(pageChoice)) return undefined
     let cancelled = false
@@ -685,8 +688,9 @@ export default function PublicCatalogPage() {
       translateNoticeTimerRef.current = window.setTimeout(() => setTranslateNotice(''), 6000)
     }
     if (!translateAllowed) {
-      // Still waiting for the session check: nothing is loaded and nothing is said. A sheet that is open, or a signed-in shopper, is blocked.
-      if (!sessionReady && !accountOpen) return undefined
+      // Still waiting for the first session check and nothing is against Google yet: nothing is loaded and nothing is said. A marker, a
+      // signed-in shopper or an open sheet is blocked even before the check ends (a page restored from the cache may already run Google).
+      if (!sessionChecked && !accountOpen && signInMarker === 'absent') return undefined
       // Blocked: the pick is kept, the hand-written English shows, and Google is taken off the page (one clean reload when it is already there).
       if (accountOpen) markPortalReopenAccount()
       import('./portalTranslateController.ts')
@@ -694,7 +698,7 @@ export default function PublicCatalogPage() {
           if (cancelled) return
           if (controller.removePortalGoogleTranslate() === 'clean') {
             clearPortalReopenAccount()
-            say(copy('translatePaused', 'Translation pauses while you are signed in.', 'ការបកប្រែផ្អាក នៅពេលអ្នកចូលគណនី។'))
+            if (signedIn || accountOpen || signInMarker === 'present') say(copy('translatePaused', 'Translation pauses while you are signed in.', 'ការបកប្រែផ្អាក នៅពេលអ្នកចូលគណនី។'))
           }
         })
         .catch(() => clearPortalReopenAccount())
@@ -716,7 +720,7 @@ export default function PublicCatalogPage() {
       .then((controller) => (cancelled ? false : controller.applyPortalGoogleTranslateOrFallBack(pageChoice, { previous: lastPlainChoiceRef.current, restoreChoice: fallBack, showNotice: tellVisitor, isCurrent: () => !cancelled })))
       .catch(() => { fallBack(lastPlainChoiceRef.current); tellVisitor(lastPlainChoiceRef.current) })
     return () => { cancelled = true }
-  }, [pageChoice, translateAllowed, sessionReady, accountOpen])
+  }, [pageChoice, translateAllowed, sessionChecked, sessionReady, signedIn, signInMarker, accountOpen])
   useEffect(() => () => { if (translateNoticeTimerRef.current) window.clearTimeout(translateNoticeTimerRef.current) }, [])
 
   const changePageLanguage = (next: string) => {

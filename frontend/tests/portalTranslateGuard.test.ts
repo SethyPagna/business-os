@@ -16,21 +16,15 @@ const check = async (name: string, run: () => void | Promise<void>) => {
   try { await run() } catch (error) { failures.push(`${name}: ${(error as Error).message.split('\n')[0]}`) }
 }
 
-await check('truth table: allowed only when ready, signed out and the sheet is closed (8 rows)', () => {
-  const rows: Array<[boolean, boolean, boolean, boolean]> = [
-    // sessionReady, signedIn, accountOpen, allowed
-    [false, false, false, false],
-    [false, false, true, false],
-    [false, true, false, false],
-    [false, true, true, false],
-    [true, false, false, true],
-    [true, false, true, false],
-    [true, true, false, false],
-    [true, true, true, false],
-  ]
-  for (const [sessionReady, signedIn, accountOpen, expected] of rows) {
-    assert.equal(options.portalTranslateAllowed({ sessionReady, signedIn, accountOpen }), expected, JSON.stringify({ sessionReady, signedIn, accountOpen }))
+await check('truth table: allowed only with a real session answer, signed out, the sheet closed and no marker (24 rows)', () => {
+  const markers = ['absent', 'present', 'unreadable'] as const
+  let allowedRows = 0
+  for (const sessionReady of [false, true]) for (const signedIn of [false, true]) for (const accountOpen of [false, true]) for (const marker of markers) {
+    const expected = sessionReady && !signedIn && !accountOpen && marker === 'absent'
+    if (expected) allowedRows += 1
+    assert.equal(options.portalTranslateAllowed({ sessionReady, signedIn, accountOpen, marker }), expected, JSON.stringify({ sessionReady, signedIn, accountOpen, marker }))
   }
+  assert.equal(allowedRows, 1, 'exactly one row lets Google run')
 })
 
 type FakeNode = Record<string, unknown> & { tag: string; id: string; remove: () => void }
@@ -140,14 +134,15 @@ globals.document = savedDocument
 
 const page = read('src/components/catalog/PublicCatalogPage.tsx')
 
-await check('the page rule takes the three inputs from the session check, the account and the sheet', () => {
-  assert.match(page, /const sessionReady = portalAccount\.ready/)
-  assert.match(page, /const signedIn = !!portalAccount\.account/)
-  assert.match(page, /portalTranslateAllowed\(\{ sessionReady, signedIn, accountOpen \}\)/)
+await check('the page rule takes its inputs from the real session answer, the account or a live renewal prompt, the sheet and the marker', () => {
+  assert.match(page, /const sessionReady = portalAccount\.sessionKnown/)
+  assert.match(page, /const signedIn = !!portalAccount\.account \|\| portalAccount\.consentRenewal/)
+  assert.match(page, /const signInMarker = portalAccount\.marker/)
+  assert.match(page, /portalTranslateAllowed\(\{ sessionReady, signedIn, accountOpen, marker: signInMarker \}\)/)
 })
 
 await check('the translate effect applies only when the rule allows, and lists all three inputs', () => {
-  const effect = /useEffect\(\(\) => \{\n    if \(!isGoogleLanguageChoice\(pageChoice\)\) return undefined\n    let cancelled = false[\s\S]*?\n  \}, \[pageChoice, translateAllowed, sessionReady, accountOpen\]\)/.exec(page)?.[0] || ''
+  const effect = /useEffect\(\(\) => \{\n    if \(!isGoogleLanguageChoice\(pageChoice\)\) return undefined\n    let cancelled = false[\s\S]*?\n  \}, \[pageChoice, translateAllowed, sessionChecked, sessionReady, signedIn, signInMarker, accountOpen\]\)/.exec(page)?.[0] || ''
   assert.ok(effect, 'the effect and its dependency list')
   const blockedAt = effect.indexOf('if (!translateAllowed)')
   const applyAt = effect.indexOf('applyPortalGoogleTranslateOrFallBack(')
@@ -156,7 +151,8 @@ await check('the translate effect applies only when the rule allows, and lists a
   assert.match(blocked, /return \(\) => \{ cancelled = true \}\n    \}/, 'the blocked branch ends in a return')
   assert.doesNotMatch(blocked, /applyPortalGoogleTranslate/, 'the blocked branch never applies')
   assert.match(blocked, /removePortalGoogleTranslate\(\) === 'clean'/)
-  assert.match(blocked, /if \(!sessionReady && !accountOpen\) return undefined/, 'nothing loads or is said before the session check ends')
+  assert.match(blocked, /if \(!sessionChecked && !accountOpen && signInMarker === 'absent'\) return undefined/, 'only a guest with nothing against Google waits: a marker or an open sheet removes Google even before the check ends')
+  assert.doesNotMatch(blocked, /visibilityState|document\.hidden/, 'a hidden background tab removes Google too')
   assert.match(effect, /cancelled \? false : controller\.applyPortalGoogleTranslateOrFallBack/, 'a cancelled attempt never loads Google')
 })
 
