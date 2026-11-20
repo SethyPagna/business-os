@@ -79,7 +79,7 @@ const boundaries: Array<[string, string]> = [
   ['utils/useDebouncedValue.ts', 'shared-ui'],
   ['utils/visibilityPolling.ts', 'admin-shared-utils'],
   ['utils/filePicker.ts', 'admin-shared-utils'],
-  ['components/catalog/productDetailSections.ts', 'admin-shared-utils'],
+  ['components/catalog/productDetailSections.ts', 'catalog-public-utils'],
   ['components/shared/MinimizedWorkTray.tsx', 'Sidebar'],
   // 6.0.880 L1: unpinned, financialPrecision.ts rode 'dashboard-export', so
   // POS, Receipt and every sales page statically loaded export code + SheetJS.

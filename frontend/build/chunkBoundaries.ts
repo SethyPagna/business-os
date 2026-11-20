@@ -50,7 +50,9 @@ const neutralChunks: ReadonlyArray<readonly [string, string]> = [
   // the website editor chunk (catalog), which then loaded with the till and the sales page.
   ['/src/utils/visibilityPolling.ts', 'admin-shared-utils'],
   ['/src/utils/filePicker.ts', 'admin-shared-utils'],
-  ['/src/components/catalog/productDetailSections.ts', 'admin-shared-utils'],
+  // The product card and the promo strip read the one name rule at render, so it travels with the storefront utilities the Products page already loads;
+  // in 'admin-shared-utils' it cost that page one more chunk (performanceBudgets).
+  ['/src/components/catalog/productDetailSections.ts', 'catalog-public-utils'],
   // G37 client search index (admin pickers only: POS, Products, Inventory,
   // Branches, Transfer, Stock-in, Promotions, Bulk import, Duplicates). Left
   // to the '/src/api/' fallback, the index transport and the shared search
