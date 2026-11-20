@@ -24,6 +24,11 @@ const MUTANTS = {
   // a resolving route that does not move the version its bell section is keyed on: the acting admin's fresh read would re-serve the resolved item
   portalReviewSkipsItsBump: [{ name: 'm-portal-bump', file: 'src/routes/portal.ts', from: "  await bumpVersion(c.env, 'customers')", to: '  void 0' }],
   importCancelSkipsItsBump: [{ name: 'm-import-bump', file: 'src/routes/importJobs.ts', from: "  await bumpVersion(c.env, 'products') // a cancelled job leaves the bell's imports section (stamped with this version): the acting device's fresh read must recompute", to: '  void 0' }],
+  // section-scoped fresh: the list is ignored (a plain read), any list is `fresh=1`, an unknown name throws, the status route skips its version bump
+  scopedListIgnored: [{ name: 'm-list-ignored', file: FILE, from: 'const isFresh = (name: string) => freshAll || Boolean(freshNames?.has(name))', to: 'const isFresh = (name: string) => freshAll' }],
+  anyListIsFresh1: [{ name: 'm-any-list', file: FILE, from: "const freshAll = freshParam === '1'", to: 'const freshAll = freshParam.length > 0' }],
+  unknownNameThrows: [{ name: 'm-unknown', file: FILE, from: 'const isFresh = (name: string) => freshAll || Boolean(freshNames?.has(name))', to: "if (freshNames && [...freshNames].some((n) => !['inventory', 'expiry', 'sales', 'portal', 'imports', 'supplier_credit', 'inventory-full', 'loyalty'].includes(n))) throw new Error('unknown section')\n  const isFresh = (name: string) => freshAll || Boolean(freshNames?.has(name))" }],
+  statusRouteSkipsItsBump: [{ name: 'm-status-bump', file: 'src/routes/sales.ts', from: '  // audit insert can run after the response is sent. The cache bump does not: it is awaited first (W3 Slice A).', to: "  // audit insert can run after the response is sent. The cache bump does not: it is awaited first (W3 Slice A).\n  const bumpVersions = async (_env: unknown, _names: string[]) => undefined" }],
   salesIgnoresItsVersion: [{ name: 'm-sales-ns', file: FILE, from: SALES_CALL, to: "tasks.push(cachedSection('sales', [], 'not-paid-delivery-pending', () => buildSalesSection(c.env), { ttlOnly: true }))" }],
 }
 const mutant = process.env.MUTANT ? MUTANTS[process.env.MUTANT] : null
@@ -65,7 +70,7 @@ async function main() {
     await world.db.prepare("INSERT INTO customer_share_submissions (customer_id, membership_number, customer_name, platform, status) VALUES (1, 'M-1', 'Pending Person', 'facebook', 'pending')").run()
     const saleRow = (await world.all("SELECT id FROM sales WHERE sale_status = 'completed' ORDER BY id DESC LIMIT 1"))[0]
     await world.db.prepare("UPDATE sales SET sale_status = 'awaiting_payment', amount_paid_usd = 0 WHERE id = ?").bind(saleRow.id).run()
-    await bump('sales') // a till's own sale: no fresh flag follows it (frontend/src/api/bellFreshness.ts isSaleWritePath)
+    await bump('sales') // a till's own sale: no fresh flag follows it (frontend/src/api/bellFreshness.ts bellWriteFor: POST /api/sales maps to nothing)
     const afterSale = await read()
     check('a plain read after a sale still serves the entries (no read, same body)', afterSale.count.sales + afterSale.count.imports + afterSale.count.portal === 0 && JSON.stringify(afterSale.r.json.sections) === JSON.stringify(first.r.json.sections), afterSale.count)
 
@@ -130,6 +135,53 @@ async function main() {
     await bump('sales')
     const afterSales = await read('?fresh=1')
     check('an unresolved submission is still listed after a sales write and a fresh read', items(afterSales.r, 'portal').includes('portal-' + keepId), items(afterSales.r, 'portal'))
+
+    // 5d. section-scoped fresh (lead decision, 21 Nov): the status route names what it resolves; the acting admin re-reads ONLY those sections (?fresh=sales) and the catalog sections
+    // (inventory, expiry, supplier credit) are not run. Another user's plain read is the 5-minute rule: it may still list the settled sale until someone refreshes the entry.
+    const CATALOG = (s) => (/out_of_stock_threshold/.test(s.sql) && /FROM products/.test(s.sql)) || (/expiry_date/.test(s.sql) && /FROM products/.test(s.sql)) || (/credit_due_date/.test(s.sql) && /FROM product_batches/.test(s.sql))
+    const readAs = async (query, cookie) => {
+      const r = await world.send('GET', '/api/notifications/summary' + query, undefined, cookie ? { miss: false, cookie } : { miss: false })
+      const stmts = await lastStatements(world)
+      return { r, sales: stmts.filter(SECTION.sales).length, catalog: stmts.filter(CATALOG).length, rr: r.rr }
+    }
+    await bump('sales'); await bump('stock')
+    const warmed = await readAs('?fresh=1')
+    const notPaid = items(warmed.r, 'sales').filter((id) => id.startsWith('pay-')).map((id) => Number(id.slice(4)))
+    check('setup: at least two Not Paid sales are in the acting admin bell for the scoped-fresh cases', notPaid.length >= 2, notPaid.length)
+    const [saleA, saleB] = notPaid
+    const settle = async (id, requestId) => {
+      const sale = (await world.all('SELECT total_usd, exchange_rate FROM sales WHERE id = ?', id))[0]
+      return world.send('PATCH', '/api/sales/' + id + '/status', { sale_status: 'completed', client_request_id: requestId, payment_details: [{ method: 'Cash', amount_usd: Number(sale.total_usd) }], expected_exchange_rate: sale.exchange_rate })
+    }
+    await readAs('', cookie2)
+    const settleA = await settle(saleA, 'bellfresh-a')
+    check('the status route settles the first sale (200)', settleA.status === 200, [settleA.status, settleA.text.slice(0, 200)])
+    const otherPlain = await readAs('', cookie2)
+    check('another user\'s plain read right after it may still list the settled sale (the 5-minute rule), and reads no row of any section', items(otherPlain.r, 'sales').includes('pay-' + saleA) && otherPlain.sales === 0 && otherPlain.catalog === 0, [items(otherPlain.r, 'sales'), otherPlain.sales, otherPlain.catalog])
+    const scopedSales = await readAs('?fresh=sales')
+    check('?fresh=sales: the acting admin no longer lists the settled sale and still lists the unsettled one', !items(scopedSales.r, 'sales').includes('pay-' + saleA) && items(scopedSales.r, 'sales').includes('pay-' + saleB), items(scopedSales.r, 'sales'))
+    check('?fresh=sales runs the sales section (2 statements) and none of inventory, expiry, supplier credit', scopedSales.sales === 2 && scopedSales.catalog === 0, [scopedSales.sales, scopedSales.catalog])
+    const otherAfterScoped = await readAs('', cookie2)
+    check('the scoped read refreshed the entry for everyone: the other user now no longer sees it, with no row read', !items(otherAfterScoped.r, 'sales').includes('pay-' + saleA) && otherAfterScoped.sales === 0, [items(otherAfterScoped.r, 'sales'), otherAfterScoped.sales])
+    const settleB = await settle(saleB, 'bellfresh-b')
+    check('the status route settles the second sale (200)', settleB.status === 200, [settleB.status, settleB.text.slice(0, 200)])
+    const everything = await readAs('?fresh=1')
+    check('?fresh=1 after the same write also recomputes the catalog sections (the route moved the stock version)', everything.sales === 2 && everything.catalog > 0, [everything.sales, everything.catalog])
+    check('?fresh=sales read fewer rows than ?fresh=1 after the same write', scopedSales.rr < everything.rr, [scopedSales.rr, everything.rr])
+    console.log('rows read after the same status write: ?fresh=sales ' + scopedSales.rr + ', ?fresh=1 ' + everything.rr)
+    const plainNames = await readAs('?fresh=nothing,at,all')
+    check('unknown section names are a plain read (200, no producer run)', plainNames.r.status === 200 && plainNames.sales + plainNames.catalog === 0, [plainNames.r.status, plainNames.sales, plainNames.catalog])
+
+    // clearing a delivery: a delivery order is Completed with the delivery tag; settling it through the status route takes it out of the section
+    const deliverable = (await world.all("SELECT id FROM sales WHERE sale_status = 'completed' ORDER BY id DESC LIMIT 1"))[0]
+    await world.db.prepare('UPDATE sales SET delivery_pending = 1 WHERE id = ?').bind(deliverable.id).run()
+    await bump('sales')
+    const withDelivery = await readAs('?fresh=sales')
+    check('setup: the delivery order is in the acting admin\'s bell', items(withDelivery.r, 'sales').includes('delivery-' + deliverable.id), items(withDelivery.r, 'sales'))
+    const clear = await world.send('PATCH', '/api/sales/' + deliverable.id + '/status', { sale_status: 'completed', client_request_id: 'bellfresh-d' })
+    check('the route clears the delivery (200)', clear.status === 200, [clear.status, clear.text.slice(0, 200)])
+    const afterClear = await readAs('?fresh=sales')
+    check('?fresh=sales: the cleared delivery is gone from the acting admin\'s bell and no catalog section ran', !items(afterClear.r, 'sales').includes('delivery-' + deliverable.id) && afterClear.catalog === 0, [items(afterClear.r, 'sales'), afterClear.catalog])
 
     // 6. the "as of" is the oldest compute time of what was served
     check('generatedAt is never later than the first computation of any served section', Date.parse(afterwards.r.json.generatedAt) <= Date.parse(freshProducts.r.json.generatedAt) + 1 && Date.parse(first.r.json.generatedAt) <= Date.parse(afterwards.r.json.generatedAt), [first.r.json.generatedAt, afterwards.r.json.generatedAt, freshProducts.r.json.generatedAt])

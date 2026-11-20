@@ -186,12 +186,11 @@ async function loadPreferences(env: Env) {
 // each walk every active product, loyalty groups every sale ever made -- are
 // answered from the Workers Cache API for a short while.
 //
-// Inventory, expiry and supplier credit (since the owner's 11 Nov decision: the bell may be up to
-// 5 minutes old and says when it was computed) are keyed by their INPUTS only (the low-stock config,
-// the expiry window, the credit window) and live for getPlanLimits(env).notificationSectionCacheSeconds
+// The sections the /summary handler marks ttlOnly in its cachedSection calls (since the owner's 11 Nov decision: the bell may be up to
+// 5 minutes old and says when it was computed) are keyed by their INPUTS only (low-stock config, expiry window and the like) and live for getPlanLimits(env).notificationSectionCacheSeconds
 // whatever happens to the data meanwhile: a sale on another till no longer makes the next poll re-walk
 // the catalog. The actor's own write must never show stale, so the bell asks for `?fresh=1` after its
-// own bell-relevant write (frontend/src/api/bellFreshness.ts) or on the refresh button: that request recomputes and overwrites the
+// own bell-relevant write (frontend/src/api/bellFreshness.ts: `fresh=1`, or `fresh=a,b` naming only the sections the write resolves) or on the refresh button: that request recomputes and overwrites the
 // entry for everyone, but only when a data version moved since the entry was computed (the entry stores them), so a button
 // pressed with no write in between is answered from the entry. This holds only while every writer bumps its version before it responds. Every cached entry carries the time its data was computed and /summary reports the
 // oldest of them as generatedAt, which is the "as of" the panel shows. The data epoch is part of the key
@@ -257,7 +256,11 @@ function sectionCacheFor(c: NotificationContext, user: PhoneActor): SectionCache
     } catch { return null }
   }
   const computedAt: number[] = []
-  const fresh = new URL(c.req.url).searchParams.get('fresh') === '1'
+  const freshParam = new URL(c.req.url).searchParams.get('fresh') || ''
+  // `fresh=1` checks every cached section against its data versions; `fresh=a,b` only the named ones (a write names the sections it can resolve). An unknown name matches nothing, so the rest is a plain read.
+  const freshAll = freshParam === '1'
+  const freshNames = freshAll ? null : new Set(freshParam.split(',').map((part) => part.trim()).filter(Boolean))
+  const isFresh = (name: string) => freshAll || Boolean(freshNames?.has(name))
   const cached = async <T>(name: string, namespaces: string[], inputs: string, producer: () => Promise<T>, options?: { contacts?: boolean; ttlOnly?: boolean }): Promise<T> => {
     if (options?.ttlOnly) {
       const ttlSeconds = getPlanLimits(c.env).notificationSectionCacheSeconds
@@ -273,7 +276,7 @@ function sectionCacheFor(c: NotificationContext, user: PhoneActor): SectionCache
             // A plain read serves the entry. `?fresh=1` (the actor's own write, or the refresh button) serves it too unless the data
             // versions it was computed under have moved: a refresh with no write in between costs a few KV reads, not a catalog
             // walk, so fresh recomputes are capped by the number of real writes, not by taps or requests.
-            if (!fresh) { computedAt.push(Number(entry.at)); return entry.value }
+            if (!isFresh(name)) { computedAt.push(Number(entry.at)); return entry.value }
             const now = await versionsNow(namespaces)
             if (now !== null && typeof entry.v === 'string' && entry.v === now) { computedAt.push(Number(entry.at)); return entry.value }
           }

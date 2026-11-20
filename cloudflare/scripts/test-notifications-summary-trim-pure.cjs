@@ -459,6 +459,63 @@ async function main() {
     assert.ok(!ids.includes('R-D2') && !ids.includes('R-D3'), 'a cancelled tagged sale and an untagged sale are not')
   })
 
+  // Lead decision, 21 Nov: a write names the bell sections it can resolve and the acting device re-reads only those (`?fresh=sales`), not the catalog.
+  await check('fresh=<sections> re-reads only the named sections: a resolved sale leaves the acting admin\'s bell without a catalog walk, another user\'s plain read may still list it', async () => {
+    const labels = (body) => (section(body, 'sales')?.items || []).map((item) => item.label)
+    seedStockFixture(raw.db, () => raw.db.exec("INSERT INTO sales (receipt_number, total_usd, sale_status) VALUES ('R-S1', 7, 'awaiting_payment'), ('R-S2', 7, 'awaiting_payment'), ('R-S3', 7, 'awaiting_payment')"))
+    await cacheModule.bumpVersion(env, 'sales')
+    await freshSummary(ADMIN)
+    assert.ok(labels(await summary(ADMIN)).includes('R-S1'), 'setup: the Not Paid sale is in the bell')
+    // the status route settles it: it moves the sales and stock versions before it answers
+    seedStockFixture(raw.db, () => raw.db.exec("UPDATE sales SET sale_status = 'completed' WHERE receipt_number = 'R-S1'"))
+    await cacheModule.bumpVersion(env, 'sales'); await cacheModule.bumpVersion(env, 'stock')
+    const scoped = await summary(ADMIN, '?fresh=sales')
+    assert.ok(!labels(scoped).includes('R-S1'), 'the acting admin\'s ?fresh=sales read no longer lists the settled sale')
+    assert.equal(statements('sales'), 2, 'the sales section recomputed (its two statements)')
+    for (const name of ['inventory', 'expiry', 'supplier_credit']) assert.equal(statements(name), 0, `${name} is not run by a ?fresh=sales read`)
+    const scopedRows = ledger.reduce((sum, entry) => sum + entry.rows, 0)
+    assert.ok(labels(await summary(CASHIER)).length > 0 && !labels(await summary(CASHIER)).includes('R-S1'), 'a plain read after it is served the refreshed entry')
+    // the same write again, answered by ?fresh=1: the stock version moved too, so the catalog sections recompute as well
+    seedStockFixture(raw.db, () => raw.db.exec("UPDATE sales SET sale_status = 'completed' WHERE receipt_number = 'R-S2'"))
+    await cacheModule.bumpVersion(env, 'sales'); await cacheModule.bumpVersion(env, 'stock')
+    const everything = await freshSummary(ADMIN)
+    assert.ok(!labels(everything).includes('R-S2'))
+    assert.equal(statements('inventory'), 1, '?fresh=1 re-walks the catalog after the same write')
+    const everythingRows = ledger.reduce((sum, entry) => sum + entry.rows, 0)
+    assert.ok(scopedRows < everythingRows, `?fresh=sales read fewer rows than ?fresh=1 (${scopedRows} vs ${everythingRows})`)
+    console.log(`  rows read after the same write: ?fresh=sales ${scopedRows} (the sales section only), ?fresh=1 ${everythingRows}`)
+    // another user's plain read, before any fresh read: still the old entry
+    seedStockFixture(raw.db, () => raw.db.exec("UPDATE sales SET sale_status = 'completed' WHERE receipt_number = 'R-S3'"))
+    await cacheModule.bumpVersion(env, 'sales')
+    assert.ok(labels(await summary(CASHIER)).includes('R-S3'), 'a plain read by another user may still list it (the 5-minute rule)')
+    // unknown names are ignored and an empty or unknown-only list is a plain read
+    for (const query of ['?fresh=nope', '?fresh=', '?fresh=,', '?fresh=1x']) {
+      const plain = await summary(ADMIN, query)
+      assert.equal(plain.status, 200, query)
+      assert.ok(labels(plain).includes('R-S3'), `${query} is a plain read`)
+      assert.equal(ledger.filter((entry) => ['sales', 'inventory', 'expiry', 'supplier_credit'].includes(entry.category)).length, 0, `${query} runs no producer`)
+    }
+    const mixed = await summary(ADMIN, '?fresh=nope,sales')
+    assert.equal(mixed.status, 200)
+    assert.ok(!labels(mixed).includes('R-S3'), 'an unknown name beside a known one is ignored')
+    assert.equal(statements('inventory'), 0)
+    assert.equal(typeof mixed.json.generatedAt, 'string', 'every real answer carries generatedAt')
+  })
+
+  await check('F2: the imports section is filtered by the reader\'s permission AFTER the shared cache entry', async () => {
+    seedStockFixture(raw.db, () => raw.db.exec(`INSERT INTO import_jobs (id, type, status, phase, warning_count, finished_at) VALUES
+      ('imp-c1', 'customers', 'completed', 'done', 2, datetime('now')), ('imp-p1', 'products', 'completed', 'done', 3, datetime('now'))`))
+    await cacheModule.bumpVersion(env, 'products')
+    await freshSummary(ADMIN)
+    const kinds = (body) => (section(body, 'imports')?.items || []).map((item) => item.label)
+    const productsUser = { id: 11, username: 'prod', name: 'Prod', role_code: 'staff', permissions: JSON.stringify({ products: true }) }
+    const contactsUser = { id: 12, username: 'cont', name: 'Cont', role_code: 'staff', permissions: JSON.stringify({ contacts: true }) }
+    assert.deepEqual(kinds(await summary(ADMIN)).sort(), ['customers import', 'products import'], 'control: the admin sees both jobs')
+    assert.deepEqual(kinds(await summary(productsUser)), ['products import'], 'a products-only user sees only the products job')
+    assert.deepEqual(kinds(await summary(contactsUser)), ['customers import'], 'a contacts-only user sees only the customers job')
+    assert.deepEqual(kinds(await summary(productsUser)), ['products import'], 'and again after the other user warmed nothing new')
+  })
+
   await check('GET /summary/items returns the whole inventory list for "show all", gated like the section', async () => {
     const all = await call('GET', '/summary/items?section=inventory', ADMIN)
     assert.equal(all.status, 200)
