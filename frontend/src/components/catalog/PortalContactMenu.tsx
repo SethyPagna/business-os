@@ -4,6 +4,7 @@ import Mail from 'lucide-react/dist/esm/icons/mail.js'
 import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import { PORTAL_SOCIAL_ICONS, PortalSocialText } from './PortalSocialRow.tsx'
+import { resolveContactFocusTarget } from './portalSocialLinks.ts'
 import type { PortalContactEntry, PortalContactPlatform } from './portalSocialLinks.ts'
 
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
@@ -31,6 +32,7 @@ export default function PortalContactMenu({ entries, copy, trigger, align = 'aut
   onClose?: () => void
 }) {
   const openerRef = useRef<HTMLElement | null>(null)
+  const hostRef = useRef<HTMLSpanElement | null>(null)
   const anchorOpener = anchor?.opener ?? null
 
   const handleOpenChange = useCallback((open: boolean) => {
@@ -42,7 +44,12 @@ export default function PortalContactMenu({ entries, copy, trigger, align = 'aut
     }
     const opener = openerRef.current
     openerRef.current = null
-    if (opener?.isConnected) window.requestAnimationFrame(() => opener.focus())
+    // LazyPortalMenu mounts a new trigger node when it opens and again when it closes, so the button that was clicked is gone by now.
+    // Wait for that swap, then focus the trigger that is on the page. Focus the visitor moved elsewhere (a click outside) is left alone.
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      const target = resolveContactFocusTarget<HTMLElement>(opener, hostRef.current, document.activeElement, document.body)
+      target?.focus()
+    }))
     onClose?.()
   }, [anchorOpener, onClose])
 
@@ -88,5 +95,9 @@ export default function PortalContactMenu({ entries, copy, trigger, align = 'aut
       </div>
     )
   }
-  return <LazyPortalMenu align={align} trigger={trigger} content={content} onOpenChange={handleOpenChange} />
+  return (
+    <span ref={hostRef} style={{ display: 'contents' }}>
+      <LazyPortalMenu align={align} trigger={trigger} content={content} onOpenChange={handleOpenChange} />
+    </span>
+  )
 }

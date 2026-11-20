@@ -291,6 +291,22 @@ export function buildPortalContactEntries(input: {
     .map(({ entry }, position) => ({ ...entry, key: `${entry.platform}-${position}` }))
 }
 
+type ContactFocusNode = { isConnected: boolean; focus: () => void }
+type ContactFocusHost = { querySelector: (selector: string) => unknown }
+
+export const PORTAL_CONTACT_TRIGGER_SELECTOR = 'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+
+/**
+ * Where focus goes when the Contact menu closes: nowhere if the visitor already put focus on something else, else the element that
+ * opened the menu if it is still on the page, else the trigger now inside the menu's host.
+ */
+export function resolveContactFocusTarget<T extends ContactFocusNode>(opener: T | null, host: ContactFocusHost | null, active: unknown, body: unknown): T | null {
+  const focusIsFree = !active || active === body || (active as ContactFocusNode).isConnected === false
+  if (!focusIsFree) return null
+  if (opener?.isConnected) return opener
+  return (host?.querySelector(PORTAL_CONTACT_TRIGGER_SELECTOR) as T | null | undefined) ?? null
+}
+
 /** The footer's contact column lists the same entries minus what it already prints itself (phone, e-mail, address). */
 export function portalContactFooterLinks(entries: readonly PortalContactEntry[]): PortalFlatSocialLink[] {
   return entries

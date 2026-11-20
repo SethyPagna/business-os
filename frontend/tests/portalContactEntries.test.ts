@@ -8,7 +8,7 @@
 //
 // Run: node tests/portalContactEntries.test.ts
 import assert from 'node:assert/strict'
-import { buildPortalContactEntries, buildPortalSocialFromConfig, buildPortalSocialLinks, portalContactFooterLinks } from '../src/components/catalog/portalSocialLinks.ts'
+import { PORTAL_CONTACT_TRIGGER_SELECTOR, buildPortalContactEntries, buildPortalSocialFromConfig, buildPortalSocialLinks, portalContactFooterLinks, resolveContactFocusTarget } from '../src/components/catalog/portalSocialLinks.ts'
 import { deriveSocialHandle, resolveSocialDisplay } from '../src/utils/socialHandles.ts'
 
 let failed = 0
@@ -142,6 +142,25 @@ runCase('Khmer pages get the Khmer words for the accessible name of rows that ha
   const entries = entriesFor({ ...LIVE_CONFIG, links: { ...LIVE_CONFIG.links, facebook: '' } }, { email: 'a@b.co', mapHref: 'https://maps.app.goo.gl/x', address: '' }, 'km')
   assert.equal(entries.find((entry) => entry.platform === 'map')?.label, 'ផែនទី')
   assert.ok(entries.find((entry) => entry.platform === 'email')?.accessibleName.startsWith('អ៊ីមែល'))
+})
+
+runCase('closing the Contact menu returns focus to a trigger that is on the page, and never steals focus the visitor moved', () => {
+  // The lazy menu swaps the trigger node on open and on close, so the button that was clicked is detached by the time the menu closes
+  // (gate run 44757696399, desktop: focus was left on the page body after Escape).
+  const node = (isConnected: boolean) => ({ isConnected, focus: () => undefined })
+  const body = node(true)
+  const liveTrigger = node(true)
+  const host = { querySelector: (selector: string) => (selector === PORTAL_CONTACT_TRIGGER_SELECTOR ? liveTrigger : null) }
+  const detachedOpener = node(false)
+  assert.equal(resolveContactFocusTarget(detachedOpener, host, body, body), liveTrigger, 'a detached opener falls back to the live trigger')
+  assert.equal(resolveContactFocusTarget(null, host, null, body), liveTrigger, 'no opener recorded: the live trigger')
+  assert.equal(resolveContactFocusTarget(detachedOpener, host, node(false), body), liveTrigger, 'focus left on a removed menu row counts as free')
+  const anchorOpener = node(true)
+  assert.equal(resolveContactFocusTarget(anchorOpener, null, body, body), anchorOpener, 'an opener still on the page wins (the FAQ and About buttons)')
+  const searchField = node(true)
+  assert.equal(resolveContactFocusTarget(detachedOpener, host, searchField, body), null, 'a click into another control keeps its focus')
+  assert.equal(resolveContactFocusTarget(detachedOpener, null, body, body), null, 'nothing to focus is not an error')
+  assert.match(PORTAL_CONTACT_TRIGGER_SELECTOR, /button:not\(\[disabled\]\)/)
 })
 
 if (failed > 0) {
