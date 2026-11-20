@@ -188,6 +188,13 @@ const PAID = {
   inventoryCheckLotLinesPerProduct: 100,
   inventoryLastChangeMaxRows: 8,
   inventoryCheckFilterMaxIds: 10000,
+  inventoryMarksPageIds: 2000,
+  inventoryMarksSnapshotCacheSeconds: 3600,
+  inventoryMarksChangesPageEvents: 1000,
+  inventoryMarksTouchedMax: 1000,
+  inventoryMarksCatchUpMaxEvents: 4000,
+  inventoryMarksPendingPageApprovals: 100,
+  inventoryMarksPollSeconds: 120,
   productListCacheSeconds: 60,
   possibleDuplicatesCacheSeconds: 300,
   catalogListWindowPages: 4,
@@ -265,6 +272,13 @@ const FREE = {
   inventoryCheckLotLinesPerProduct: 50,
   inventoryLastChangeMaxRows: 4,
   inventoryCheckFilterMaxIds: 2000,
+  inventoryMarksPageIds: 2000,
+  inventoryMarksSnapshotCacheSeconds: 86400,
+  inventoryMarksChangesPageEvents: 500,
+  inventoryMarksTouchedMax: 500,
+  inventoryMarksCatchUpMaxEvents: 2000,
+  inventoryMarksPendingPageApprovals: 50,
+  inventoryMarksPollSeconds: 300,
   productListCacheSeconds: 3600,
   possibleDuplicatesCacheSeconds: 3600,
   catalogListWindowPages: 3,
@@ -308,7 +322,9 @@ const FREE_IS_LONGER = ['productListCacheSeconds', 'possibleDuplicatesCacheSecon
 const FREE_IS_LONGER_PAGE_SIZES = ['paymentMethodScanPageSize']
 // The bell's section lifetime (routes/notifications.ts): owner 11 Nov, up to 5 minutes, so never above 300 on either tier.
 const FREE_IS_LONGER_BELL = ['notificationSectionCacheSeconds']
-const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES, ...FREE_IS_LONGER_BELL]
+// The count marks (lib/inventoryCheckMarks.ts, read switch ic_marks): a cached snapshot page lives longer and a watching device polls less often on Free, because both cost reads; inventoryMarksPageIds is the same on both tiers (the page's id range is part of the stored page, not a cost).
+const FREE_IS_LONGER_MARKS = ['inventoryMarksSnapshotCacheSeconds', 'inventoryMarksPollSeconds']
+const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES, ...FREE_IS_LONGER_BELL, ...FREE_IS_LONGER_MARKS]
 
 // Fields that are deliberately the SAME number on both tiers, named so the exemption cannot grow unnoticed. The Expenses export asks for 500 rows a page and the
 // offset path caps at 500, so a smaller Free page only turned an export of up to 500 rows (a month's: one request today) into two pages that each pay the cursor's
@@ -320,7 +336,7 @@ const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES, ...
 // The stored daily totals' nightly reconcile (lib/salesDailyCron.ts): the last 7 days, once per 20 h, naming up to 3 days in an alert, are rules of the check and not of the plan;
 // only how many days a visit works through (recompute, older reconcile slice, rebuild range) and the CPU, wall and payload budgets are sized by the tier and differ;
 // the per-row CPU estimate, the fixed day cost, the queries a day costs and the reserve are facts of the code, the same on both tiers.
-const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser', 'scheduledBackupAfterHourLocal', 'scheduledBackupKeep', 'scheduledBackupMaxAttemptsPerDay', 'scheduledBackupCopyPollGapMinutes', 'scheduledBackupStaleHours', 'backupPoolGraceHours', 'driveStaleMirrorHours', 'salesDailyReconcileRecentDays', 'salesDailyReconcileMinIntervalSeconds', 'salesDailyAlertListedDays', 'salesDailyCpuMsPerSourceRow', 'salesDailyCpuMsPerDayFixed', 'salesDailyKernelQueriesPerDay', 'salesDailyQueryReserve', 'salesDailyFailBackoffSeconds', 'salesDailyFailBackoffMaxSeconds', 'salesDailyPoisonAlertAfter']
+const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser', 'scheduledBackupAfterHourLocal', 'scheduledBackupKeep', 'scheduledBackupMaxAttemptsPerDay', 'scheduledBackupCopyPollGapMinutes', 'scheduledBackupStaleHours', 'backupPoolGraceHours', 'driveStaleMirrorHours', 'salesDailyReconcileRecentDays', 'salesDailyReconcileMinIntervalSeconds', 'salesDailyAlertListedDays', 'salesDailyCpuMsPerSourceRow', 'salesDailyCpuMsPerDayFixed', 'salesDailyKernelQueriesPerDay', 'salesDailyQueryReserve', 'salesDailyFailBackoffSeconds', 'salesDailyFailBackoffMaxSeconds', 'salesDailyPoisonAlertAfter', 'inventoryMarksPageIds']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //
