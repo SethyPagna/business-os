@@ -1752,7 +1752,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     }, markWritten, () => branchRedirectTarget(c), atomicMark, closeIssue)
     // One awaited bump call for the whole Set (W3 Slice A): one quota upsert on Free, and the next read already keys on the new versions.
     const setBumps: string[] = []
-    if (result.status === 200 && result.body.issue_closed === true && !result.body.replayed) setBumps.push('inventory_checks', icTasksNamespace(branchId))
+    if (result.status === 200 && result.body.issue_closed === true && !result.body.replayed) setBumps.push('inventory_checks', icTasksNamespace(Number(result.body.branchId) || branchId))
     const setMovedStock = result.status === 200 && Number(result.body.quantity) > 0 && !result.body.replayed
     // A Set that only changed quantities bumps the version a sale bumps (stock_bump_narrow); anything more, or the switch OFF, bumps 'products' as before.
     if (setMovedStock) setBumps.push(await scopedSetBump(c.env, result.body))
