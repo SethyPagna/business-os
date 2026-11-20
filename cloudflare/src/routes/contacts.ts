@@ -1838,7 +1838,7 @@ function registerContactRoutes(config: ContactConfig) {
         WHERE id = @aid AND contact_id = @customerId
           AND EXISTS (SELECT 1 FROM customers WHERE id = @customerId AND ${customerIsProfileSql()})`)
         .run({ h: await hashPassword(tempPassword, c.env), aid: account.id, customerId: id })
-      if (Number(update.changes || 0) !== 1) return anonymousCustomerMutationResponse(c)
+      if (!(Number(update.changes || 0) > 0)) return anonymousCustomerMutationResponse(c)
       await revokePortalSessionsForAccount(c.env, account.id)
       await audit(c.env, user?.id ?? null, actorSnapshot(user), 'portal_reset', config.entity, id, {})
       return c.json({ ok: true, temporaryPassword: tempPassword })
@@ -3475,7 +3475,7 @@ app.post('/customers/:id/points', async (c) => {
     if ((await anonymousCustomerIds(db, [customerId])).has(customerId)) return anonymousCustomerMutationResponse(c)
     throw error
   }
-  if (requestId && Number(result.meta?.changes ?? 0) !== 1) {
+  if (requestId && !(Number(result.meta?.changes ?? 0) > 0)) {
     // Its twin committed between replayAward() and this batch.
     const committed = await replayAward()
     if (committed) return committed

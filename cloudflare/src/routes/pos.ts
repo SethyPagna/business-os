@@ -88,7 +88,7 @@ app.put('/address-presets', async (c) => {
   const changes = Number((result as unknown as { meta?: { changes?: number }; changes?: number })?.meta?.changes
     ?? (result as unknown as { changes?: number })?.changes
     ?? 0)
-  if (changes !== 1) {
+  if (!(changes > 0)) {
     return c.json({
       error: 'Address presets changed on another device. Reload before saving.',
       code: 'write_conflict',

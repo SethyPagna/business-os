@@ -74,8 +74,13 @@ class Stmt {
     return this._stmt.get(...this._args(params))
   }
   run(params) {
+    // Real D1 reports meta.changes as every row the statement wrote INCLUDING the rows its triggers wrote; node:sqlite's run().changes is the statement's own rows only.
+    // A test that needs D1's number calls D1Compat.countTriggerRows().
+    const total = this.db.__d1TriggerRows === true
+    const before = total ? this.db.prepare('SELECT total_changes() AS n').get().n : 0
     const info = this._stmt.run(...this._args(params))
-    return { success: true, meta: { last_row_id: info.lastInsertRowid, changes: info.changes } }
+    const changes = total ? this.db.prepare('SELECT total_changes() AS n').get().n - before : info.changes
+    return { success: true, meta: { last_row_id: info.lastInsertRowid, changes } }
   }
 }
 
@@ -89,6 +94,11 @@ class D1Compat {
   }
   prepare(sql) {
     return new Stmt(this.db, sql)
+  }
+  /** From now on meta.changes counts trigger-written rows, as D1's does. */
+  countTriggerRows() {
+    this.db.__d1TriggerRows = true
+    return this
   }
   async batch(items) {
     const results = []

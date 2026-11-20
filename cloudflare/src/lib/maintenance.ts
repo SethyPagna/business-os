@@ -179,7 +179,7 @@ export async function beginMaintenance(env: Env, input: { backupKey: string; sta
     if (error instanceof Error && ('code' in error && error.code === 'stock_schema_unavailable')) throw new MaintenanceAdmissionConflictError()
     throw error
   }
-  if (result.meta.changes !== 1) throw new MaintenanceAdmissionConflictError()
+  if (!(Number(result.meta.changes ?? 0) > 0)) throw new MaintenanceAdmissionConflictError()
   return state
 }
 
@@ -219,7 +219,7 @@ export async function endMaintenance(env: Env, token: string | null, options: { 
     hook?.rawD1Start?.(1)
     const result = await env.DB.prepare('DELETE FROM system_flags WHERE key = ? AND value = ?')
       .bind(MAINTENANCE_FLAG_KEY, row.value).run()
-    return result.meta.changes === 1
+    return Number(result.meta.changes ?? 0) > 0
   } catch {
     return false
   }
