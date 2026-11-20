@@ -343,9 +343,12 @@ runTest('the AI-assistant form labels carry a dark ink, not just slate-700', () 
   // The question box leads and the optional details follow it.
   const labelBlock = /portal-assistant-question[\s\S]{0,8000}portal-assistant-concerns/.exec(tabs)
   assert.ok(labelBlock, 'the assistant form fields must still exist')
-  const bareLabels = labelBlock[0].match(/text-slate-700"/g) || []
-  assert.deepEqual(bareLabels, [], 'no assistant label may carry text-slate-700 with no dark: override')
-  assert.match(labelBlock[0], /text-slate-700 dark:text-neutral-200/, 'the labels take the audited dark ink instead')
+  const bareLabels = labelBlock[0].match(/text-(?:slate|stone)-700"/g) || []
+  assert.deepEqual(bareLabels, [], 'no assistant label may carry a light-only ink with no dark: override')
+  // One shared label class: the labels (and the skin-type heading) all read it.
+  const labelClass = /const labelClass = '([^']+)'/.exec(tabs)?.[1] ?? ''
+  assert.match(labelClass, /text-stone-700 dark:text-neutral-200/, 'the labels take the audited dark ink instead')
+  assert.ok((labelBlock[0].match(/className=\{labelClass\}/g) || []).length >= 4, 'every label reads the shared class')
   assert.ok(meetsContrast('#e5e5e5', '#171717', 'text'), 'dark:text-neutral-200 clears AA on the card it sits on')
 })
 

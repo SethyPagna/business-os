@@ -126,7 +126,6 @@ const CONSUMERS: Array<[string, string]> = [
   ['../src/components/catalog/legal/LegalPages.tsx', 'storefront footer'],
   ['../src/components/catalog/PublicCatalogPage.tsx', 'storefront header and contact buttons'],
   ['../src/components/catalog/CatalogPage.tsx', 'editor preview header'],
-  ['../src/components/catalog/CatalogSecondaryTabs.tsx', 'About links'],
   ['../src/components/catalog/CatalogEditorSurface.tsx', 'editor field labels and contact guide'],
 ]
 
@@ -152,7 +151,7 @@ runCase('every surface that shows these two brands takes the marks from BrandIco
 runCase('sibling parity: one network-to-glyph map serves the footer, header, contact sheets and About, and it maps facebook and instagram to their marks', () => {
   const owner = read('../src/components/catalog/PortalSocialRow.tsx')
   assert.match(owner, /PORTAL_SOCIAL_ICONS: Record<SocialPlatform, IconComponent> = \{[\s\S]*?facebook: FacebookIcon,\s*instagram: InstagramIcon,\s*telegram: TelegramIcon,/)
-  for (const file of ['legal/LegalPages.tsx', 'PublicCatalogPage.tsx', 'CatalogSecondaryTabs.tsx']) {
+  for (const file of ['legal/LegalPages.tsx', 'PublicCatalogPage.tsx']) {
     assert.match(read(`../src/components/catalog/${file}`), /PORTAL_SOCIAL_ICONS/, `${file} must use the shared map`)
   }
   for (const file of ['PublicCatalogPage.tsx', 'CatalogPage.tsx']) {

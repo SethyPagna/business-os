@@ -1,7 +1,7 @@
 // The one source for what the storefront says about the AI provider behind the
 // assistant: its name, what it does with a question, and where its own terms
 // are. The privacy policy section (LegalPages.tsx) and the assistant's consent
-// line and automated note (CatalogSecondaryTabs.tsx) both read it.
+// line and its full disclosure (CatalogSecondaryTabs.tsx) both read it.
 //
 // The provider is chosen at runtime (D1 ai_provider_configs), so the page asks
 // GET /api/portal/ai/status for the ids and renders them here. An id this map
@@ -101,7 +101,7 @@ export function aiProviderRetention(state: AiProviderState, language: AiDisclosu
 
 /**
  * Fill `{providerNames}` (" (Groq)") and `{providerRetention}` (" Groq is ...")
- * in the consent line and the automated note. Both vanish for the neutral
+ * in the consent line and the full disclosure. Both vanish for the neutral
  * wording, which then reads as the general sentence it always was.
  */
 export function fillAiProviderTemplate(template: string, state: AiProviderState, language: AiDisclosureLanguage): string {
@@ -110,4 +110,32 @@ export function fillAiProviderTemplate(template: string, state: AiProviderState,
   return template
     .replace('{providerNames}', names ? ` (${names})` : '')
     .replace('{providerRetention}', retention ? ` ${retention}` : '')
+}
+
+/**
+ * What the visitor agreed to is stored per browser (localStorage) and per consent version. Change
+ * AI_CONSENT_VERSION whenever the assistant's disclosure wording or a provider's terms change: the stored
+ * value then no longer matches and the panel asks once more.
+ */
+export const AI_CONSENT_VERSION = 'ai-2026-11-20'
+export const AI_CONSENT_STORAGE_KEY = 'business-os-portal-ai-consent-v1'
+
+type AiConsentStore = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+
+export function aiConsentGiven(store: AiConsentStore | null): boolean {
+  try {
+    return store?.getItem(AI_CONSENT_STORAGE_KEY) === AI_CONSENT_VERSION
+  } catch {
+    // Private windows and "block site data" browsers throw on access; the visitor is asked again.
+    return false
+  }
+}
+
+export function saveAiConsent(store: AiConsentStore | null, on: boolean): void {
+  try {
+    if (on) store?.setItem(AI_CONSENT_STORAGE_KEY, AI_CONSENT_VERSION)
+    else store?.removeItem(AI_CONSENT_STORAGE_KEY)
+  } catch {
+    // Storage blocked: the in-memory flag still gates Send for this page.
+  }
 }

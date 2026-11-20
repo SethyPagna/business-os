@@ -154,10 +154,9 @@ runTest('public portal mobile contact actions stay compact', () => {
   assert.match(catalogSecondaryTabsSource, /className="relative h-(?:20|28) sm:h-(?:28|44)"/, 'public about hero banner should stay compact and fixed-height, not a tall forced viewport')
   assert.match(catalogSecondaryTabsSource, /data-portal-about-hero="true"/, 'public about hero should expose a mobile measurement hook')
   assert.match(catalogSecondaryTabsSource, /data-portal-contact-tray="true"/, 'public contact tray should expose a mobile measurement hook')
-  assert.match(catalogSecondaryTabsSource, /\$\{hasCover \? 'pt-4 sm:pt-5' : '-mt-7 sm:-mt-9'\}/, 'with a cover the name sits below the photo (never over it); the gradient banner keeps the logo overlap')
-  assert.match(catalogSecondaryTabsSource, /portal-contact-value-address/, 'long public portal addresses should be clamped on mobile')
-  assert.match(catalogSecondaryTabsSource, /<PortalSocialText text=\{item\.label\} latin=\{item\.latin \?\? true\} \/>/, 'owner rule: the About chips show the account handle at every width (the link keeps an accessible name)')
-  assert.match(catalogSecondaryTabsSource, /const hasContactInfo = hasFacts \|\| hasSocial/, 'contact and social actions should share one compact mobile tray')
+  assert.match(catalogSecondaryTabsSource, /hasCover \|\| !showRoundLogo \? 'pt-4' : '-mt-7 sm:-mt-9'/, 'with a cover the name sits below the photo (never over it); the gradient banner keeps the logo overlap')
+  assert.match(catalogSecondaryTabsSource, /const hasFacts = detailFacts\.length > 0/, 'phone and address share one compact tray')
+  assert.doesNotMatch(catalogSecondaryTabsSource, /PortalSocialText|PORTAL_SOCIAL_ICONS/, 'About shows no social chips; the one Contact button opens the contact menu')
   assert.match(catalogPageSource, /data-portal-secondary-loading="true"/, 'public secondary tab fallback should be compact and measurable')
   assert.doesNotMatch(catalogPageSource, /<SectionShell title=\{copy\('loadingPortal', 'Loading customer portal\.\.\.'\)\}>\s*<div className="text-sm text-slate-500">Loading\.\.\.<\/div>\s*<\/SectionShell>\s*}\)/, 'public secondary tab fallback should not show the large generic loading card')
 })
@@ -181,7 +180,7 @@ runTest('public portal About tab: story full width, contacts beside the map, and
 })
 
 runTest('portal cover paths are rendered as image sources instead of fragile CSS urls', () => {
-  assert.match(catalogSecondaryTabsSource, /<AboutCover src=\{versionedBusinessCover \|\| ''\}/, 'the cover path reaches the image as a plain prop')
+  assert.match(catalogSecondaryTabsSource, /<AboutCover\s+src=\{versionedBusinessCover \|\| ''\}/, 'the cover path reaches the image as a plain prop')
   assert.match(catalogSecondaryTabsSource, /<img\s+ref=\{[^\n]*\}\s+src=\{src\}/, 'public cover paths with spaces or parentheses must remain valid image URLs')
   assert.doesNotMatch(catalogSecondaryTabsSource, /`url\(\$\{versionedBusinessCover\}\)`/, 'public cover paths must not be interpolated into an unquoted CSS url')
   assert.match(catalogEditorSource, /src=\{editorDraft\.customer_portal_cover_image\}/, 'editor cover previews should use the same robust image-source rendering')

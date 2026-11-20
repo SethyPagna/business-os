@@ -88,7 +88,7 @@ runTest('FAQ: answers keep their line breaks (pre-line, leading-7)', () => {
 runTest('FAQ: one column, hairline rows, brass chevron, no gradient tiles or repeated FAQ label', () => {
   const out = html(faqProps({ expandedFaqId: '0:faq-1' }))
   assert.match(out, /max-w-3xl/)
-  assert.match(out, /border-b border-stone-200/, 'hairline rows')
+  assert.match(out, /border-t border-stone-200/, 'hairline rows inside the one list surface')
   assert.match(out, /text-\[#9c7a3c\]/, 'brass chevron')
   assert.match(out, /text-\[15px\] font-semibold/, 'question is 15px semibold')
   assert.doesNotMatch(out, /data-portal-faq-columns|from-cyan|from-amber|bg-gradient-to-br|cyan-|tracking-\[0\.16em\]/)
@@ -135,10 +135,10 @@ runTest('FAQ: search filters question and answer text, case-insensitively, Khmer
   assert.equal(filterFaqEntries(entries, 'zzz').length, 0)
 })
 
-runTest('FAQ: no match shows the query with a Clear button; a matching query keeps the rows', () => {
+runTest('FAQ: no match shows the query with an icon-only Clear button; a matching query keeps the rows', () => {
   const none = renderToStaticMarkup(React.createElement(FaqList, listProps({ items: makeItems(8), query: 'zzz' }) as never) as never)
   assert.match(none, /No question matches &quot;zzz&quot;/)
-  assert.match(none, />Clear</)
+  assert.match(none, /aria-label="Clear"[^>]*title="Clear"/)
   assert.doesNotMatch(none, /Question number 1\?/)
   const some = renderToStaticMarkup(React.createElement(FaqList, listProps({ items: makeItems(8), query: 'number 3' }) as never) as never)
   assert.match(some, /Question number 3\?/)
@@ -152,7 +152,7 @@ runTest('FAQ: loading is a 4-row skeleton; empty is a contact card', () => {
   assert.equal((loading.match(/min-h-\[3\.75rem\]/g) || []).length, 4)
   const empty = html(faqProps({ publicFaqItems: [], onOpenContact: () => {} }))
   assert.match(empty, /No questions yet\./)
-  assert.match(empty, /Contact us/)
+  assert.match(empty, />Contact</)
   assert.doesNotMatch(empty, /any time/, 'the retired promise is gone')
 })
 
@@ -167,7 +167,7 @@ runTest('FAQ: the closing card calls the open-contact callback and is absent wit
     if (!node || typeof node !== 'object') return
     const element = node as { type?: unknown; props?: { children?: unknown; onClick?: () => void } }
     if (element.type === 'button' || (typeof element.type === 'function' && element.props?.onClick)) buttons.push(element.props as { onClick?: () => void })
-    if (typeof element.type === 'function' && element.type.name === 'FaqContactButton') {
+    if (typeof element.type === 'function' && element.type.name === 'PortalContactButton') {
       const rendered = (element.type as (p: unknown) => unknown)(element.props)
       walk(rendered)
     }
@@ -223,64 +223,104 @@ const aiProps = (over: Record<string, unknown> = {}) => ({
   ...over,
 })
 
-runTest('AI: question first, details collapsible, consent above Send, no pill or live counter', () => {
+const AssistantConsentPanel = tabsModule.AssistantConsentPanel as (props: Record<string, unknown>) => React.ReactElement
+const AssistantDisclosure = tabsModule.AssistantDisclosure as (props: Record<string, unknown>) => React.ReactElement
+const consentHtml = (language: 'en' | 'km', aiState: unknown = { kind: 'unknown' }) => renderToStaticMarkup(React.createElement(AssistantConsentPanel as never, { copy: copyFor(language), aiState, language, onAgree: () => {} } as never))
+const disclosureHtml = (language: 'en' | 'km', aiState: unknown = { kind: 'unknown' }, over: Record<string, unknown> = {}) => renderToStaticMarkup(React.createElement(AssistantDisclosure as never, { copy: copyFor(language), aiState, language, ownerDisclaimer: '', ...over } as never))
+
+runTest('AI: example chips lead, then the box; details start closed; no checkbox, no consent panel and no counter at first paint', () => {
   const out = html(aiProps())
-  assert.ok(out.indexOf('portal-assistant-question') < out.indexOf('portal-assistant-brand'), 'the question box leads')
-  assert.match(out, /<details[^>]*data-portal-assistant-details/)
-  assert.doesNotMatch(out, /<details[^>]*\bopen\b/, 'details start closed')
-  assert.ok(out.indexOf('data-portal-assistant-consent') < out.indexOf('>Send<'), 'consent sits above Send')
+  assert.ok(out.indexOf('data-portal-assistant-examples') > -1 && out.indexOf('data-portal-assistant-examples') < out.indexOf('id="portal-assistant-question"'), 'four example chips sit above the box')
+  assert.equal((out.match(/data-portal-assistant-examples[\s\S]*?<\/div>/)?.[0].match(/<button/g) || []).length, 4)
+  assert.doesNotMatch(out, /data-portal-assistant-details|portal-assistant-brand|<details/, 'details start closed behind one button')
+  assert.match(out, />Add details</)
+  assert.doesNotMatch(out, /type="checkbox"/, 'no always-visible checkbox')
+  assert.doesNotMatch(out, /data-portal-assistant-consent/, 'consent is asked on the first Send, not at first paint')
+  assert.doesNotMatch(out, /\b0\/500\b|are using this right now|user\(s\)|search\(es\) per minute/, 'no counter until 400 characters, and the live counter is gone')
+  assert.match(out, /AI suggestions, not medical advice\./, 'one line under the heading')
   assert.match(out, />Send</)
-  assert.doesNotMatch(out, /AI query/)
-  assert.doesNotMatch(out, /are using this right now|user\(s\)|search\(es\) per minute/, 'the live counter is gone')
+  const long = html(aiProps({ assistantQuestion: 'x'.repeat(401) }))
+  assert.match(long, />401\/500</, 'the counter appears after 400 characters')
+  assert.doesNotMatch(long, /data-portal-assistant-examples/, 'the chips go once the box has text')
 })
 
-runTest('AI: once consent is given the checkbox is replaced by a one-line note with a withdraw control', () => {
-  const asked = html(aiProps())
-  assert.match(asked, /type="checkbox"/)
-  const given = html(aiProps({ assistantDataUseConsent: true }))
-  assert.doesNotMatch(given, /type="checkbox"/, 'not asked again')
-  assert.match(given, /data-portal-assistant-consent="given"/)
-  assert.match(given, /aria-label="Withdraw consent"/)
+runTest('AI: the consent panel is one line and one button, and Agree and send calls back', () => {
+  const out = consentHtml('en')
+  assert.match(out, /data-portal-assistant-consent="ask"/)
+  assert.match(out, /Agree and send/)
+  assert.equal((out.match(/<p /g) || []).length, 1, 'one line of text')
+  let agreed = 0
+  const tree = AssistantConsentPanel({ copy: copyFor('en'), aiState: { kind: 'unknown' }, language: 'en', onAgree: () => { agreed += 1 } })
+  const found: Array<() => void> = []
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== 'object') return
+    const element = node as { type?: unknown; props?: { children?: unknown; onClick?: () => void } }
+    if (element.type === 'button' && element.props?.onClick) found.push(element.props.onClick)
+    const children = element.props?.children
+    for (const child of Array.isArray(children) ? children : [children]) walk(child)
+  }
+  walk(tree)
+  assert.equal(found.length, 1)
+  found[0]()
+  assert.equal(agreed, 1)
+})
+
+runTest('AI: Withdraw consent is in the disclosure only while consent is given, and the disclosure is said once there', () => {
+  assert.doesNotMatch(disclosureHtml('en'), /Withdraw consent/)
+  const given = disclosureHtml('en', { kind: 'unknown' }, { onWithdraw: () => {} })
+  assert.match(given, />Withdraw consent</)
+  assert.equal((given.match(/automated software/g) || []).length, 1)
+  assert.doesNotMatch(html(aiProps({ assistantDataUseConsent: true })), /Withdraw consent|automated software/, 'nothing of the disclosure is printed on the page itself')
 })
 
 runTest('AI: copy says deleted after 30 days, never "may", never Leang Beauty or a hard-coded channel', () => {
   for (const language of ['en', 'km'] as const) {
-    const out = html(aiProps({ copy: copyFor(language) }))
-    assert.doesNotMatch(out, /Leang Beauty|\bmay\b|about 30 days/)
-    assert.doesNotMatch(out, /Facebook|Instagram|Telegram/)
+    const all = html(aiProps({ copy: copyFor(language) })) + consentHtml(language) + disclosureHtml(language)
+    assert.doesNotMatch(all, /Leang Beauty|\bmay\b|about 30 days/)
+    assert.doesNotMatch(all, /Facebook|Instagram|Telegram/)
   }
-  assert.match(html(aiProps()), /deleted after 30 days/)
-  // The cross-border fact must be stated plainly, in both the consent line and the automated note, in both languages.
+  // The cross-border and 30-day facts are stated plainly in the consent line and in the full disclosure, in both languages.
   for (const language of ['en', 'km'] as const) {
-    const out = html(aiProps({ copy: copyFor(language) }))
-    const consent = /data-portal-assistant-consent="ask"[\s\S]*?<\/label>/.exec(out)?.[0] || ''
-    const note = /<p class="[^"]*">((?:(?!<\/p>)[\s\S])*(?:automated software|ជំនួយការនេះជាកម្មវិធីស្វ័យប្រវត្តិ)(?:(?!<\/p>)[\s\S])*)<\/p>/.exec(out)?.[1] || ''
-    assert.ok(consent && note, 'consent line and automated note both render (' + language + ')')
-    const stated = language === 'en' ? /outside Cambodia/ : /ក្រៅប្រទេសកម្ពុជា/
-    assert.match(consent, stated, 'consent line states outside-Cambodia processing (' + language + ')')
-    assert.match(note, stated, 'automated note states outside-Cambodia processing (' + language + ')')
-    assert.doesNotMatch(consent + note, /\bmay\b/i)
+    const consent = consentHtml(language)
+    const note = disclosureHtml(language)
+    const outside = language === 'en' ? /outside Cambodia/ : /ក្រៅប្រទេសកម្ពុជា/
+    const days = language === 'en' ? /deleted after 30 days/ : /លុបចោលបន្ទាប់ពី ៣០ ?ថ្ងៃ/
+    for (const [label, part] of [['consent line', consent], ['full disclosure', note]] as const) {
+      assert.match(part, outside, `${label} states outside-Cambodia processing (${language})`)
+      assert.match(part, days, `${label} states the 30-day deletion (${language})`)
+    }
+    assert.match(note, language === 'en' ? /automated software[\s\S]*not medical advice/ : /កម្មវិធីស្វ័យប្រវត្តិ[\s\S]*មិនមែនជាការណែនាំវេជ្ជសាស្ត្រ/)
   }
   // The per-provider wording is locked in portalAiProviderDisclosure.test.ts; here only that the placeholders are always filled.
-  const named = html(aiProps({ assistantDisclosure: { kind: 'named', providers: [{ id: 'acme', displayName: 'Acme AI', policyUrl: 'https://example.test', retention: { en: 'Acme AI keeps nothing.', km: 'Acme AI' } }] } }))
-  assert.doesNotMatch(named, /\{provider/, 'the provider placeholders are filled')
-  assert.match(named, /sent to a third-party AI provider \(Acme AI\) and processed outside Cambodia\. Acme AI keeps nothing\./)
+  const acme = { kind: 'named', providers: [{ id: 'acme', displayName: 'Acme AI', policyUrl: 'https://example.test', retention: { en: 'Acme AI keeps nothing.', km: 'Acme AI' } }] }
+  assert.doesNotMatch(consentHtml('en', acme) + disclosureHtml('en', acme), /\{provider/, 'the provider placeholders are filled')
+  assert.match(consentHtml('en', acme), /third-party AI provider \(Acme AI\) outside Cambodia\./)
+  assert.match(disclosureHtml('en', acme), /third-party AI provider \(Acme AI\) that processes it outside Cambodia\. Acme AI keeps nothing\./)
 })
 
-runTest('AI: the error box has a dark style and is announced', () => {
+runTest('AI: the error box is solid, has a dark style and is announced', () => {
   const out = html(aiProps({ assistantError: 'Try again later.' }))
-  assert.match(out, /role="alert"[^>]*dark:bg-rose-900\/20|dark:bg-rose-900\/20[^>]*role="alert"/)
-  assert.match(out, /dark:text-rose-200/)
+  assert.match(out, /role="alert"[^>]*dark:border-rose-500[^>]*dark:bg-neutral-900[^>]*dark:text-rose-300|dark:text-rose-300[^>]*role="alert"/)
 })
 
-runTest('AI: product answers are cards that open the product sheet when the page provides it', () => {
-  const response = { summary: 'Match.', recommendations: [{ product_id: 7, name: 'Daily Sunscreen', brand: 'Acme', category: 'Sun care', reason: 'fits oily skin', fit_summary: 'light texture' }] }
+runTest('AI: a recommendation is one compact row: image, name, stock badge, Add; the name and picture open the sheet when the page provides it', () => {
+  const response = { summary: 'Match.', recommendations: [{ product_id: 7, name: 'Daily Sunscreen', brand: 'Acme', category: 'Sun care', reason: 'fits oily skin', fit_summary: 'light texture', stock_status: 'in_stock' }] }
   const linked = html(aiProps({ assistantResponse: response, openProductById: () => {} }))
   assert.match(linked, /<button[^>]*aria-label="View product: Daily Sunscreen"/)
+  assert.match(linked, /<button[^>]*translate="no"[^>]*>Daily Sunscreen<\/button>/, 'the name is a button that opens the sheet')
   assert.match(linked, /light texture/, 'the reason is shown without expanding')
+  assert.match(linked, /In Stock/, 'the stock badge')
+  assert.doesNotMatch(linked, />Add</, 'without the wiring prop there is no Add button')
   const plain = html(aiProps({ assistantResponse: response }))
   assert.doesNotMatch(plain, /View product/, 'without the callback the card is plain text')
   assert.match(plain, /Daily Sunscreen/)
+  let added: unknown = null
+  const withAdd = html(aiProps({ assistantResponse: response, openProductById: () => {}, onAddRecommendation: (item: unknown) => { added = item } }))
+  assert.match(withAdd, />Add</)
+  assert.equal(added, null, 'nothing is added by rendering')
+  const out = html(aiProps({ assistantResponse: { ...response, recommendations: [{ ...response.recommendations[0], stock_status: 'out_of_stock' }] }, onAddRecommendation: () => {} }))
+  assert.match(out, /disabled=""[^>]*>[\s\S]*?Add</, 'an out-of-stock product cannot be added')
+  assert.match(out, /Out of Stock/)
 })
 
 // ---- About ---------------------------------------------------------------

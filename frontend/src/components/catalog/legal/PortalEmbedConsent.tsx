@@ -2,11 +2,10 @@
 //
 // Evidence for why this exists: the only
 // automatically-loading third party on the public catalogue is the Google
-// Maps iframe in CatalogSecondaryTabs.tsx, which is fetched as soon as the
+// Maps iframe in CatalogSecondaryTabs.tsx, which would be fetched as soon as the
 // About tab renders and can set Google's own cookies without the visitor ever
 // asking for a map. Everything else the storefront stores is either strictly
-// necessary or explicitly requested (the translate script loads only after a
-// visitor picks an external language). The map is gated at the moment data
+// necessary or explicitly requested. The map is gated at the moment data
 // would leave the storefront; the policy separately describes app-managed
 // storage without making a universal claim about banner requirements.
 //
@@ -14,19 +13,19 @@
 // re-gated on every visit. That preference is itself disclosed in the cookie
 // table (LEGAL_STORAGE_ROWS).
 import { useCallback, useEffect, useState } from 'react'
+import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
+import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
+import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
 
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 
 export const MAP_CONSENT_STORAGE_KEY = 'business-os-portal-map-consent-v1'
 
-export const MAP_CONSENT_BODY_EN = 'The map is loaded from Google Maps, which sets its own cookies. Load it only if you want to.'
-export const MAP_CONSENT_BODY_KM = 'ផែនទីផ្ទុកពី Google Maps ដែលកំណត់ខូឃីផ្ទាល់ខ្លួន។ សូមផ្ទុកតែបើអ្នកចង់។'
-export const MAP_CONSENT_LOAD_EN = 'Load the map'
-export const MAP_CONSENT_LOAD_KM = 'ផ្ទុកផែនទី'
-export const MAP_CONSENT_LINK_EN = 'Open in Google Maps instead'
-export const MAP_CONSENT_LINK_KM = 'បើកក្នុង Google Maps ជំនួសវិញ'
 export const MAP_CONSENT_REVOKE_EN = 'Unload map and forget this choice'
 export const MAP_CONSENT_REVOKE_KM = 'បិទផែនទី និងលុបជម្រើសនេះពីឧបករណ៍'
+
+const LOAD_BUTTON = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-[#23201b] px-5 text-sm font-semibold text-[#f4f1ea] transition hover:bg-[#3a352c] dark:bg-amber-300 dark:text-neutral-900 dark:hover:bg-amber-200'
+const ICON_LINK = 'flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-stone-600 transition hover:bg-stone-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
 
 function readStoredChoice(): boolean {
   if (typeof window === 'undefined') return false
@@ -96,16 +95,28 @@ export default function PortalEmbedConsent({
     setGranted(false)
   }, [])
 
+  const openLabel = copy('openInGoogleMaps', 'Open in Google Maps', 'បើកក្នុង Google Maps')
+  const openLink = (
+    <a
+      href={mapFallbackHref(address, src)}
+      target="_blank"
+      rel="noreferrer noopener"
+      className={ICON_LINK}
+      aria-label={openLabel}
+      title={openLabel}
+    >
+      <ExternalLink aria-hidden="true" className="h-4 w-4" />
+    </a>
+  )
+
   if (granted) {
+    const revokeLabel = copy('portal_legal_map_consent_revoke', MAP_CONSENT_REVOKE_EN, MAP_CONSENT_REVOKE_KM)
     return (
-      <div className={`flex flex-col gap-2 ${className}`.trim()}>
-        <div className="flex justify-end px-3 pt-3">
-          <button
-            type="button"
-            onClick={revoke}
-            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
-          >
-            {copy('portal_legal_map_consent_revoke', MAP_CONSENT_REVOKE_EN, MAP_CONSENT_REVOKE_KM)}
+      <div className={`flex flex-col ${className}`.trim()}>
+        <div className="flex justify-end gap-1 px-2 pt-1">
+          {openLink}
+          <button type="button" onClick={revoke} className={ICON_LINK} aria-label={revokeLabel} title={revokeLabel}>
+            <EyeOff aria-hidden="true" className="h-4 w-4" />
           </button>
         </div>
         <iframe
@@ -126,26 +137,16 @@ export default function PortalEmbedConsent({
   }
 
   return (
-    <div className={`flex flex-col items-start justify-center gap-3 px-5 py-6 text-sm text-slate-600 dark:text-neutral-300 ${className}`.trim()}>
-      <p className="max-w-prose text-xs leading-6">
-        {copy('portal_legal_map_consent_b', MAP_CONSENT_BODY_EN, MAP_CONSENT_BODY_KM)}
+    <div className={`flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-2 ${className}`.trim()}>
+      <p className="min-w-0 flex-1 basis-40 text-sm leading-7 text-stone-600 dark:text-neutral-300">
+        {copy('mapConsentLine', 'Google Maps sets its own cookies.', 'Google Maps កំណត់ខូឃីរបស់ខ្លួន។')}
       </p>
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          onClick={accept}
-          className="inline-flex items-center justify-center rounded-2xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white transition hover:bg-emerald-800"
-        >
-          {copy('portal_legal_map_consent_load', MAP_CONSENT_LOAD_EN, MAP_CONSENT_LOAD_KM)}
+      <div className="flex items-center gap-1">
+        <button type="button" onClick={accept} className={LOAD_BUTTON}>
+          <MapPin aria-hidden="true" className="h-4 w-4" />
+          {copy('mapLoad', 'Load map', 'ផ្ទុកផែនទី')}
         </button>
-        <a
-          href={mapFallbackHref(address, src)}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="text-xs font-semibold text-emerald-700 underline underline-offset-2 transition hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200"
-        >
-          {copy('portal_legal_map_consent_link', MAP_CONSENT_LINK_EN, MAP_CONSENT_LINK_KM)}
-        </a>
+        {openLink}
       </div>
     </div>
   )
