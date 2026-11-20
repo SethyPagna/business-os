@@ -628,7 +628,7 @@ export async function ensureCoreDataInvariantsForBuild(env: Env, options: CoreIn
   try {
     const lease = JSON.stringify({ status: 'checking', build, until: now + (options.leaseMs ?? CORE_INVARIANTS_LEASE_MS), token })
     const result = await db.prepare(GATE_LEASE_SQL).run({ key, value: lease, build, freshAfter, now })
-    acquired = result.changes === 1
+    acquired = Number(result.changes ?? 0) > 0
   } catch (error) {
     console.warn('[core-invariants] could not take the build-check lease; running the full check', error)
     await runCoreDataInvariants(env)

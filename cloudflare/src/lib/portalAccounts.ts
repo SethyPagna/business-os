@@ -419,7 +419,7 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
     age: input.ageConfirmed === true ? 1 : 0,
     id: account.id,
   })
-  if (Number(consentUpdate.changes || 0) !== 1) return genericFail
+  if (!(Number(consentUpdate.changes || 0) > 0)) return genericFail
 
   // E6: a successful sign-in on a legacy bcrypt (or other-count) hash rewrites
   // it once in the current format; compare-and-set, never fails the sign-in.
@@ -461,7 +461,7 @@ export async function renewPortalConsent(
     WHERE id = @id
       AND NOT (consent_version = @version AND consent_at IS NOT NULL AND age_confirmed_at IS NOT NULL)
   `).run({ version: PORTAL_CONSENT_VERSION, locale: String(input.consentLocale || 'und').slice(0, 16), id: accountId })
-  if (Number(result.changes || 0) === 1) return { ok: true, renewed: true }
+  if (Number(result.changes || 0) > 0) return { ok: true, renewed: true }
   const current = await db.prepare('SELECT id FROM portal_accounts WHERE id = @id LIMIT 1').get<{ id: number }>({ id: accountId })
   if (!current) return { ok: false, status: 404, error: 'Account not found.', code: 'portal_unauthenticated' }
   return { ok: true, renewed: false }

@@ -679,7 +679,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
       { sql: 'DELETE FROM stock_session_guards', params: {} },
       ...(countPart ? countPart.statements : []),
     ]), 'retry')
-    if (countPart) countChanged = Number((results.slice(-countPart.statements.length)[countPart.changedAt] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 0) === 1
+    if (countPart) countChanged = Number((results.slice(-countPart.statements.length)[countPart.changedAt] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 0) > 0
   } catch (err) {
     // Nothing was written. Tell the loser of a race apart from a stock
     // change by reading what the winner committed.

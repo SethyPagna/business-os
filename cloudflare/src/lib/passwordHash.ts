@@ -230,7 +230,7 @@ export async function upgradePasswordHash(
   try {
     const next = await hashPassword(password, env)
     const result = await db.prepare(UPGRADE_SQL[table]).run({ next, id: Number(id), previous: String(previous ?? '') })
-    return Number(result?.changes || 0) === 1
+    return Number(result?.changes || 0) > 0
   } catch (error) {
     console.warn(`[password-hash] upgrade skipped for ${table} ${Number(id)}:`, String((error as Error)?.message || error))
     return false

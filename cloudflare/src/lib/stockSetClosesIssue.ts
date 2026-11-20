@@ -143,7 +143,7 @@ export function plainSetCloseStatements(args: Omit<SetCloseArgs, 'operation' | '
     const tail = (results ?? []).slice(-statements.length)
     if (tail.length !== statements.length) return {}
     const closed = (tail[6]?.results ?? []).map((row) => String((row as { id: unknown }).id))
-    return { issue_closed: Number(tail[0]?.meta?.changes ?? 0) === 1, ...(closed.length ? { closed_tasks: closed } : {}) }
+    return { issue_closed: Number(tail[0]?.meta?.changes ?? 0) > 0, ...(closed.length ? { closed_tasks: closed } : {}) }
   }
   return { statements, trailing, answer }
 }

@@ -305,7 +305,7 @@ export async function reissueSession<E extends { Bindings: Env } = { Bindings: E
       params: { ...params, limit_family_id: limitFamilyId, shop_device_id: shopDeviceId > 0 ? shopDeviceId : null },
     },
   ])
-  if (claim?.meta?.changes === 1 && insert?.meta?.changes === 1) return session
+  if (Number(claim?.meta?.changes ?? 0) > 0 && Number(insert?.meta?.changes ?? 0) > 0) return session
   const written = await db.prepare(
     'SELECT 1 AS found FROM user_sessions WHERE token_hash = @token_hash AND user_id = @user_id AND limit_family_id = @limit_family_id AND revoked_at IS NULL',
   ).get<{ found: number }>({ token_hash: params.token_hash, user_id: userId, limit_family_id: limitFamilyId })

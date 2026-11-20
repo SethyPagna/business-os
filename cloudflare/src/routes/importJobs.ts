@@ -1578,7 +1578,7 @@ app.post('/:id/approve', async (c) => {
     UPDATE import_jobs SET status = 'approved', phase = 'approved', policy_json = @policy, updated_at = CURRENT_TIMESTAMP
     WHERE id = @id AND status = 'awaiting_review'
   `).run({ id, policy: JSON.stringify(policy) })
-  if (approval.changes !== 1) {
+  if (!(Number(approval.changes ?? 0) > 0)) {
     return c.json({ success: false, error: 'Import status changed before approval. Refresh and review it again.' }, 409)
   }
   await dispatchImportWork(c.env, { jobId: id, kind: 'apply' })

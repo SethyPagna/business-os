@@ -1121,7 +1121,7 @@ app.put('/roles/:id', async (c) => {
     }, adminGuard.guard])
     const firstResult = results[0] as { changes?: number; meta?: { changes?: number } } | undefined
     const updatedRows = Number(firstResult?.meta?.changes ?? firstResult?.changes ?? 0)
-    if (updatedRows !== 1) {
+    if (!(updatedRows > 0)) {
       const currentRole = await db.prepare(
         'SELECT id, name, code, is_system, permissions, created_at, updated_at FROM roles WHERE id = @id',
       ).get<Record<string, unknown>>({ id })

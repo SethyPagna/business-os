@@ -258,7 +258,7 @@ app.post('/rules', requireAction('promotions', 'manage'), async (c) => {
       details: { title: input.title, rule_type: input.rule_type, scope_type: input.scope_type },
     }),
   ])
-  if (Number(results[0]?.meta?.changes ?? 0) !== 1) {
+  if (!(Number(results[0]?.meta?.changes ?? 0) > 0)) {
     // Its twin committed between the replay lookup and this batch.
     const twin = await replayFromReceipt(c, db, receipt, 'promotion_rules', respond)
     if (twin) return twin
@@ -323,7 +323,7 @@ app.put('/rules/:id', requireAction('promotions', 'manage'), async (c) => {
       details: { title: input.title, rule_type: input.rule_type, scope_type: input.scope_type },
     }),
   ])
-  if (Number(results[0]?.meta?.changes ?? 0) !== 1) {
+  if (!(Number(results[0]?.meta?.changes ?? 0) > 0)) {
     return lostWriteResponse(c, db, receipt, 'promotion_rules', 'promotion rule', id, expectedUpdatedAt, respond)
   }
   await bumpVersion(c.env, 'products')
@@ -365,7 +365,7 @@ app.delete('/rules/:id', requireAction('promotions', 'manage'), async (c) => {
       details: { title: current.title }, change: changedFields(current, null),
     }),
   ])
-  if (Number(results[0]?.meta?.changes ?? 0) !== 1) {
+  if (!(Number(results[0]?.meta?.changes ?? 0) > 0)) {
     return lostWriteResponse(c, db, receipt, 'promotion_rules', 'promotion rule', id, expectedUpdatedAt, respond)
   }
   await bumpVersion(c.env, 'products')
@@ -474,7 +474,7 @@ app.post('/', requireWebsiteEditor, async (c) => {
       details: { title: input.title },
     }),
   ])
-  if (Number(results[0]?.meta?.changes ?? 0) !== 1) {
+  if (!(Number(results[0]?.meta?.changes ?? 0) > 0)) {
     const twin = await replayFromReceipt(c, db, receipt, 'promotions', respond)
     if (twin) return twin
     return c.json({ error: 'The promotion could not be confirmed. Check the list before retrying.', code: 'write_outcome_unknown', outcome: 'unknown' }, 503)
@@ -542,7 +542,7 @@ app.put('/:id', requireWebsiteEditor, async (c) => {
       details: { title: input.title },
     }),
   ])
-  if (Number(results[0]?.meta?.changes ?? 0) !== 1) {
+  if (!(Number(results[0]?.meta?.changes ?? 0) > 0)) {
     return lostWriteResponse(c, db, receipt, 'promotions', 'promotion', id, expectedUpdatedAt, respond)
   }
   await bumpVersion(c.env, 'promotions')
@@ -594,7 +594,7 @@ app.put('/reorder/all', requireWebsiteEditor, async (c) => {
       params: { index, id, ...receiptParams(receipt.key) },
     })),
   ])
-  if (Number(results[0]?.meta?.changes ?? 0) !== 1) {
+  if (!(Number(results[0]?.meta?.changes ?? 0) > 0)) {
     const twin = await findWriteReceipt(db, receipt.key)
     if (twin) return twin.canonical === receipt.canonical ? list() : c.json(WRITE_IDEMPOTENCY_CONFLICT, 409)
     return c.json({ error: 'The new order could not be confirmed. Reload the list before retrying.', code: 'write_outcome_unknown', outcome: 'unknown' }, 503)
@@ -638,7 +638,7 @@ app.delete('/:id', requireWebsiteEditor, async (c) => {
       details: { title: current.title }, change: changedFields(current, null),
     }),
   ])
-  if (Number(results[0]?.meta?.changes ?? 0) !== 1) {
+  if (!(Number(results[0]?.meta?.changes ?? 0) > 0)) {
     return lostWriteResponse(c, db, receipt, 'promotions', 'promotion', id, expectedUpdatedAt, respond)
   }
   await bumpVersion(c.env, 'promotions')
