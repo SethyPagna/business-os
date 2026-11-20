@@ -649,25 +649,8 @@ async function loadPaymentMethodCandidates(
 }
 
 /**
- * Methods that sales already use but Settings does not list.
- *
- * From Sep 4 2026 a live sale registers its own methods (routes/sales.ts), so
- * this closes the OTHER half: every sale recorded before that, plus every
- * imported historical row, whose methods were never folded in. It is a read;
- * the write is the POST below, because pulling a legacy CSV's spellings into
- * the checkout list is an operator's decision, not something a GET should do
- * behind their back.
- *
- * Reads `payment_method` only, not `payment_details`: the summary column is
- * built from the detail methods joined with ' + ' by every writer in the
- * system, and `saleMethodsUsed` splits it back apart -- so one cheap DISTINCT
- * over a low-cardinality column sees exactly the same method set as a full
- * scan of the JSON would, without reading 15k JSON blobs.
- */
-/**
- * The methods sales used, for the unregistered check and its backfill. An exchange refund credit row is left out: it keeps the method it was
- * booked under when a rename would change its drawer kind, and that old name must not be offered back to the checkout list. A sale that
- * carries a credit contributes the methods of its other rows; every other sale contributes its summary column, as before. One scan of sales.
+ * Methods that sales already use but Settings does not list (a read; the POST below is the write). Read from the summary column, except that a sale
+ * carrying an exchange refund credit contributes its other rows' methods, so a renamed-away credit method is never offered back. One scan of sales.
  */
 const USED_PAYMENT_METHODS_SQL = `
   SELECT DISTINCT method AS payment_method FROM (
