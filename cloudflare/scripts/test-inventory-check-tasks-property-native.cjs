@@ -2,7 +2,7 @@
 // Count tasks: randomized operation sequences over the real routes (inv-app harness: tasks, sessions, submissions, approvals, the lot Set, the plain Set, Undo/Redo),
 // checked after EVERY step against an independent oracle written from docs/contracts/inventory-check-tasks-20261119.md and the owner's rules (18-19 Nov), never from the Worker's SQL.
 // Two organizations (null and 2) at two branches, 26 products (plain, received-date, a family, inactive), six users.
-// Run: node scripts/test-inventory-check-tasks-property-native.cjs --seeds=1..20 --steps=120 [--mutant=set-autoclose|undo-ticks|undo-no-takeback|redo-now|reopen-hand|plain-revert-no-takeback|cap-outside] [--focus=cap|takeback] [--shrink] [--trace]
+// Run: node scripts/test-inventory-check-tasks-property-native.cjs --seeds=1..20 --steps=120 [--mutant=set-autoclose|undo-ticks|undo-no-takeback|redo-now|reopen-hand|plain-revert-no-takeback|revert-revert-no-restore|cap-outside] [--focus=cap|takeback] [--shrink] [--trace]
 const assert = require('node:assert/strict')
 const { buildWorld, PLAIN, LOTTED, FAMILY, INACTIVE, batchesOf } = require('./harness/count-tasks-world.cjs')
 
@@ -27,6 +27,7 @@ const MUTANTS = {
   'redo-now': { 'lib/stockSetClosesIssue.ts': [["SET state='done',counted_quantity=baseline_quantity,revision=revision+1 WHERE", "SET state='done',counted_quantity=baseline_quantity,revision=revision+1,updated_at=@now WHERE"]] },
   'reopen-hand': { 'lib/inventoryCheckTasks.ts': [["CROSS JOIN ${S} t ON t.id=r.id WHERE ${autoClosedSql('t')}`", 'CROSS JOIN ${S} t ON t.id=r.id`']] },
   'plain-revert-no-takeback': { 'lib/stockSetClosesIssue.ts': [['    const issue = reopenIssueStatements(closing, now), count = takeBackSetCountStatements(closing, origin, now)\n    return { statements: [...issue, ...count.statements], changedAt: issue.length + 1 }', '    const issue = reopenIssueStatements(closing, now)\n    return { statements: [...issue], changedAt: issue.length + 1 }']] },
+  'revert-revert-no-restore': { 'lib/stockSetClosesIssue.ts': [['  return { statements: [...issue, ...count.statements], changedAt: issue.length + 1 }\n}', '  return { statements: [...issue], changedAt: issue.length + 1 }\n}']] },
   'cap-outside': { 'lib/inventoryCheckSessions.ts': [[
     "  const statements: Statement[] = [\n    guard('EXISTS(SELECT 1 FROM branches WHERE id=@branchId AND is_active=1)', 'inventory_check_baseline_changed', params),\n" + CAP_GUARD,
     "  { const pre = await db.prepare(`SELECT (${OPEN_TASK_COUNT_SQL}) AS n`).get<{ n: number }>({ organization: actor.organization_id, branchId }); if (Number(pre?.n ?? 0) >= issue.maxOpenTasks) fail(409, 'inventory_check_task_limit', { open: Number(pre?.n ?? 0), limit: issue.maxOpenTasks }) }\n" +
@@ -370,7 +371,7 @@ async function runSequence(seed, ops, { mutant = null, trace = false } = {}) {
       const p = d.p, b = d.branch; if (!m.countable(p) || m.prod.get(p).lotted) return
       const before = m.qty(p, b), L = m.latest.get(`A:${b}:${p}`)
       const q = d.q === 'counted' ? (L && L.lines.has(0) ? L.lines.get(0) : before) : d.q === 'same' ? before : Math.max(0, before + d.q)
-      const r = await send(d.who, 'POST', '/api/inventory/adjust', { type: 'set', productId: p, branchId: b, quantity: q, reason: 'Physical count', client_request_id: 'inventory_set_' + w.rid('a') })
+      const r = await send(d.who, 'POST', '/api/inventory/adjust', { type: 'set', productId: p, branchId: b, quantity: q, reason: 'Physical count', client_request_id: 'inventory_set_' + w.rid('a'), ...(q > before ? { supplierName: 'Property supplier', unitCostUsd: 4 } : {}) })
       if (m.pending(b, p)) { expect(r.status === 409, 'Set: a plain Set allowed while a count waits for approval', r.json); return }
       if (r.status !== 200) { m.uncertain.push(['plainSet', r.status, r.json?.code]); return }
       m.stock.set(`${p}:${b}`, q)
