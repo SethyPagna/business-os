@@ -72,4 +72,4 @@ export function bellPath(path: string, fresh: string): string {
   return `${path}${path.includes('?') ? '&' : '?'}fresh=${fresh}`
 }
 
-export { createBellFollowUp, getSectionLifetimeSeconds } from './bellFollowUp.ts'
+export { createBellFollowUp, getSectionLifetimeSeconds, onBellAnswer } from './bellFollowUp.ts'

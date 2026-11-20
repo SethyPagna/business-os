@@ -9,6 +9,7 @@ type SyncChannelUpdate = {
   channel: string
   reason?: string | null
   source?: string | null
+  serverTime?: string
   ownSettingsWrite?: boolean
   ts: number
 }

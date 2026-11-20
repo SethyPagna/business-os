@@ -152,7 +152,7 @@ export function connectWS(): void {
 
   ws.onmessage = (event: MessageEvent<string>) => {
     try {
-      const data = JSON.parse(event.data) as { type?: string; channel?: string; payload?: { action?: string; id?: string | number } | null }
+      const data = JSON.parse(event.data) as { type?: string; channel?: string; time?: string; payload?: { action?: string; id?: string | number } | null }
       if (data.type === 'pong' || data.type === 'connected') wsLastPongAt = Date.now()
       if (data.type === 'sync:update' && data.channel) {
         // `payload` (action/id -- see broadcastHub.ts's own broadcast() calls,
@@ -164,7 +164,7 @@ export function connectWS(): void {
         // user/role *I* care about changed" -- see AppContext.tsx's onUpdate,
         // which needs `payload.id` to know whether a live permission edit
         // belongs to the current session's own user/role.
-        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: data.channel, payload: data.payload ?? null } }))
+        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: data.channel, payload: data.payload ?? null, ...(typeof data.time === 'string' ? { serverTime: data.time } : {}) } }))
       }
       // pong and connected frames are intentionally ignored
     } catch (_) {}

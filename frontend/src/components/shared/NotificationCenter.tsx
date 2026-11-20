@@ -20,7 +20,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { getNotificationSummary as getNotificationSummaryRequest } from '../../api/notificationSummary.ts'
-import { createBellFollowUp, getSectionLifetimeSeconds, onBellResolved, requestFreshBell } from '../../api/bellFreshness.ts'
+import { createBellFollowUp, getSectionLifetimeSeconds, onBellAnswer, onBellResolved, requestFreshBell } from '../../api/bellFreshness.ts'
 import { olderAsOf, stockAsOfText } from '../dashboard/stockAsOf.ts'
 import { getNotificationSectionItems as getNotificationSectionItemsRequest } from '../../api/notificationSummary.ts'
 import { unseenTailCount, type SeenTail } from '../../utils/notificationTail.ts'
@@ -137,6 +137,7 @@ type SyncContextValue = {
     channel?: string
     reason?: string | null
     ts?: unknown
+    serverTime?: unknown
   }
 }
 
@@ -759,11 +760,15 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
       clearTimer: (handle) => window.clearTimeout(handle as number),
       isHidden: () => document.visibilityState === 'hidden',
       reload: () => { if (aliveRef.current) void loadSummary(true) },
+      now: Date.now,
+      random: Math.random,
     })
     bellFollowUpRef.current = followUp
     const onVisible = () => followUp.onVisible()
     document.addEventListener('visibilitychange', onVisible)
+    const stopAnswers = onBellAnswer((generatedAtMs) => followUp.onAnswer(generatedAtMs))
     return () => {
+      stopAnswers()
       document.removeEventListener('visibilitychange', onVisible)
       followUp.dispose()
       if (bellFollowUpRef.current === followUp) bellFollowUpRef.current = null
@@ -795,7 +800,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
       // The trailing reload replaces the idle timer; loadSummary re-arms it.
       if (plan.runNow) void loadSummary(true)
       else scheduleRefresh(plan.delayMs)
-      bellFollowUpRef.current?.armAfterEvent()
+      bellFollowUpRef.current?.noteEvent(syncChannel.serverTime)
     }
   }, [loadSummary, scheduleRefresh, syncChannel?.channel, syncChannel?.reason, syncChannel?.ts, visibilityActive])
 

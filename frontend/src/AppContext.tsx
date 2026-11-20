@@ -1277,7 +1277,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     if (permissionRefreshRef.current.pending) schedulePermissionRefresh()
 
     const onUpdate = (e: Event) => {
-      const detail = eventDetail<{ channel?: string; reason?: string | null; source?: string | null; ownSettingsWrite?: boolean; payload?: { action?: string; id?: string | number; writeId?: string } | null }>(e)
+      const detail = eventDetail<{ channel?: string; reason?: string | null; source?: string | null; serverTime?: string; ownSettingsWrite?: boolean; payload?: { action?: string; id?: string | number; writeId?: string } | null }>(e)
       const channel = String(detail.channel || '')
       if (!channel) return
       // The Worker broadcasts a settings write to every socket, this tab's
@@ -1299,6 +1299,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
           ts: Date.now(),
           reason: detail.reason || null,
           source,
+          ...(detail.serverTime ? { serverTime: detail.serverTime } : {}),
           ...(detail.ownSettingsWrite ? { ownSettingsWrite: true } : {}),
         })
       })

@@ -134,7 +134,7 @@ await test('remote vs local is told apart by websocket.ts payload key, and no lo
   assert.equal(syncRuntime.isRemoteSyncUpdate({ channel: 'sales', payload: null }), true)
   assert.equal(syncRuntime.isRemoteSyncUpdate({ channel: 'sales', reason: 'x', ts: 1 }), false)
   const websocket = read('../src/api/websocket.ts')
-  assert.match(websocket, /new CustomEvent\('sync:update', \{ detail: \{ channel: data\.channel, payload: data\.payload \?\? null \} \}\)/)
+  assert.match(websocket, /new CustomEvent\('sync:update', \{ detail: \{ channel: data\.channel, payload: data\.payload \?\? null(?:, \.\.\.\(typeof data\.time === 'string' \? \{ serverTime: data\.time \} : \{\}\))? \} \}\)/)
   const srcRoot = new URL('../src/', import.meta.url)
   const offenders: string[] = []
   const walk = (dir: URL) => {
