@@ -52,25 +52,35 @@ const addProduct = (id, brand, barcode) => h.raw.db.exec(`INSERT INTO system_fla
   assert.deepEqual(first.json.brands, ['Alpha', 'Beta'])
   assert.ok(first.reads > 0)
   const again = await get('/filters')
-  assert.equal(again.reads, 0, 'same versions: /filters reads nothing from D1')
+  // 20 Nov (QW3): the facets are cached; the active promotion list is read per request, outside the entry (one statement), so a promotion change never recomputes the facets.
+  assert.equal(again.reads, 1, 'same versions: /filters reads only the promotion rule list from D1')
   assert.deepEqual(again.json, first.json)
-  const other = await get('/filters?branchId=1')
-  assert.ok(other.reads > 0, 'a different query is a different cache entry')
+  // branchId, branch_id and surface reach the vocabulary only through a stock or issue term, so without one every branch and surface shares the entry.
+  for (const query of ['?branchId=1', '?branch_id=2', '?surface=pos', '?branchId=2&surface=inventory']) {
+    const shared = await get('/filters' + query)
+    assert.equal(shared.reads, 1, query + ' shares the one entry (promotion list only)')
+    assert.deepEqual(shared.json, first.json, query + ' answers the same')
+  }
+  const other = await get('/filters?brand=Alpha')
+  assert.ok(other.reads > 1, 'a different query is a different cache entry')
+  const withStock1 = await get('/filters?stockState=out&branchId=1')
+  const withStock2 = await get('/filters?stockState=out&branchId=2')
+  assert.ok(withStock1.reads > 1 && withStock2.reads > 1, 'with a stock term the branch stays in the key')
 
   addProduct(3, 'Gamma', '8851000000035')
   await bump(null, 'products')
   const changed = await get('/filters')
   assert.deepEqual(changed.json.brands, ['Alpha', 'Beta', 'Gamma'], 'a products bump makes the new brand visible')
-  for (const ns of ['settings', 'promotions']) {
-    await get('/filters'); await bump(null, ns)
-    assert.ok((await get('/filters')).reads > 0, `a ${ns} bump recomputes /filters`)
-  }
+  await get('/filters'); await bump(null, 'settings')
+  assert.ok((await get('/filters')).reads > 1, 'a settings bump recomputes /filters')
+  await get('/filters'); await bump(null, 'promotions')
+  assert.equal((await get('/filters')).reads, 1, 'a promotions bump recomputes no facet: the promotion list alone is read')
   // RULE CHANGED on lane/products-search-reads (6.0.2087 line, productFiltersVersions in routes/products.ts): the vocabulary reads stock only through the stock-state and issue filters, so a
   // plain /filters no longer keys on the 'stock' version and its entry survives sales. This used to assert that a stock bump recomputed EVERY /filters. A request that carries a stock filter still does.
   await get('/filters'); await bump(null, 'stock')
-  assert.equal((await get('/filters')).reads, 0, 'a stock bump leaves a /filters without a stock filter cached')
+  assert.equal((await get('/filters')).reads, 1, 'a stock bump leaves a /filters without a stock filter cached')
   await get('/filters?stockState=out'); await bump(null, 'stock')
-  assert.ok((await get('/filters?stockState=out')).reads > 0, 'a stock bump still recomputes /filters that filters by stock state')
+  assert.ok((await get('/filters?stockState=out')).reads > 1, 'a stock bump still recomputes /filters that filters by stock state')
 
   const dup = await get('/possible-duplicates')
   assert.equal(dup.status, 200, JSON.stringify(dup.json))

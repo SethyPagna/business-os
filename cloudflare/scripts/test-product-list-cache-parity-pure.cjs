@@ -78,8 +78,9 @@ function main() {
     // Read together with any further namespace the caller keys on (one D1 read for the namespaces KV does not hold); the 'products' token is the one getVersionWithFallback gave.
     assert.match(versionFn, /const names = \['products', \.\.\.\(readsStock \? \['stock'\] : \[\]\), \.\.\.extra\]/)
     assert.match(versionFn, /names\.length === 1 \? \[await getVersionWithFallback\(env, 'products'\)\] : await getVersionsWithFallback\(env, names\)/)
-    assert.match(readerHandler, /cachedJsonResponse\(keyRequest, c\.executionCtx, version, PRODUCT_LIST_LEGACY_CACHE_SECONDS,/)
-    assert.match(src, /const PRODUCT_LIST_LEGACY_CACHE_SECONDS = 20\b/, 'the OFF path keeps the 20 s lifetime the list always had')
+    assert.match(readerHandler, /cachedJsonResponse\(keyRequest, c\.executionCtx, version, getPlanLimits\(c\.env\)\.productListLegacyCacheSeconds,/)
+    assert.ok(!/const PRODUCT_LIST_LEGACY_CACHE_SECONDS/.test(src), 'the literal constant is gone: the lifetime is a plan field (QW3)')
+    assert.equal((fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'planTier.ts'), 'utf8').match(/productListLegacyCacheSeconds: 20,/g) || []).length, 2, 'the OFF path keeps the 20 s lifetime the list always had, on both tiers')
   })
 
   check('GET / (bare list) now routes through the SAME cachedJsonResponse wrapper, same namespace and TTL', () => {
