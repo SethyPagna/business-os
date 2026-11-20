@@ -193,6 +193,8 @@ async function main() {
     rawDb = openDb(migrations)
     rawDb.exec("INSERT INTO branches(name) VALUES('LC Store')")
     days.forEach((d, i) => rawDb.exec(saleSql(`S${i}`, `${d} 03:00:00`)))
+    // 0308 is applied on production and frozen: its coverage seed names the kernel it was written for (2). A deployed shop whose code moved past that has been re-covered by the cron's first run (recoverStatements); this world starts there.
+    rawDb.exec(`UPDATE system_flags SET value = json_set(value, '$.kernel', ${T.SALES_DAILY_KERNEL_VERSION}) WHERE key = 'sales_daily_coverage'`)
     return { DB: {}, Business_OS_Analytics: { points: [], writeDataPoint(p) { this.points.push(p) } } }
   }
   const rows = () => rawDb.prepare('SELECT business_date, state, claim_gen, kernel_version, data_epoch, refusal, payload FROM sales_daily_totals ORDER BY business_date').all().map((r) => ({ ...r }))
@@ -227,6 +229,16 @@ async function main() {
     assert.deepEqual(await cron.runSalesDailyRecompute(env, dep({ mode: 'shadow' })), { skipped: 'switch-off' })
     delete env.PLAN_TIER; tiers.__resetPlanTierCacheForTests()
     assert.equal(JSON.stringify(rows()), before, 'nothing was written')
+  })
+
+  await check('D2b a world the frozen 0308 seeded for an older kernel is re-covered by the first run (coverage names the current kernel), then computes', async () => {
+    const env = fresh(DAYS)
+    rawDb.exec(`UPDATE system_flags SET value = json_set(value, '$.kernel', ${T.SALES_DAILY_KERNEL_VERSION - 1}) WHERE key = 'sales_daily_coverage'`)
+    const first = await cron.runSalesDailyRecompute(env, dep())
+    assert.equal(first.recovered, true)
+    assert.equal(JSON.parse(rawDb.prepare("SELECT value FROM system_flags WHERE key='sales_daily_coverage'").get().value).kernel, T.SALES_DAILY_KERNEL_VERSION)
+    const second = await cron.runSalesDailyRecompute(env, dep())
+    assert.deepEqual([second.pending, second.committed], [6, 6])
   })
 
   await check('D2 the migration covers the current kernel, so the first visit computes at once; today is never computed; newest days first', async () => {

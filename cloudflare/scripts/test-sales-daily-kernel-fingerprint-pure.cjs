@@ -171,8 +171,9 @@ export async function f(n: string) { const m = await import('./fxDynamic'); retu
   })
 
   await check('K4 the version and the pin move together: a bump alone is red, a changed kernel under the same version is red, comments / whitespace / CRLF are not', () => {
-    const bumped = liveProblems(withText(F.VERSION_FILE, (t) => t.replace('SALES_DAILY_KERNEL_VERSION = 2', 'SALES_DAILY_KERNEL_VERSION = 3')))
-    assert.ok(bumped.some((p) => /pin is for version 2, SALES_DAILY_KERNEL_VERSION is 3/.test(p)), bumped.join('\n'))
+    const now = F.currentVersion(new Map())
+    const bumped = liveProblems(withText(F.VERSION_FILE, (t) => t.replace(`SALES_DAILY_KERNEL_VERSION = ${now}`, `SALES_DAILY_KERNEL_VERSION = ${now + 1}`)))
+    assert.ok(bumped.some((p) => p.includes(`pin is for version ${now}, SALES_DAILY_KERNEL_VERSION is ${now + 1}`)), bumped.join('\n'))
     // the writer refuses to re-pin a changed kernel under the version already pinned
     const pinSource = fs.readFileSync(F.PIN_FILE, 'utf8')
     const harness = fs.readFileSync(path.join(__dirname, 'harness/sales-daily-kernel-fingerprint.cjs'), 'utf8')
