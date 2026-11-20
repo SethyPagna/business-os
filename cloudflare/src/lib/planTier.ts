@@ -459,9 +459,9 @@ export type PlanLimits = {
   // pages costs the rows of those pages (the ranking is shared) and no ranking. Free 3 (a page and 2 ahead); Paid 4 (Paid is not rationed).
   catalogListWindowPages: number
 
-  // routes/notifications.ts: how long the bell's heavy sections (inventory, expiry, supplier credit) may be served from the cache, ignoring the data versions. The owner (11 Nov) accepts a bell up to
-  // 5 minutes old with an "as of" time, so a sale or a product edit on another device no longer forces a recompute (the inventory pass reads every active product); the actor's own write asks
-  // for a fresh answer (?fresh=1). Both tiers keep it the 5 minutes the owner allowed (Paid was 45 s, the lifetime the version-keyed entry had; 20 Nov it moved to 300 because a Paid shop reads 16M rows a day). Never above 300 on either tier.
+  // routes/notifications.ts: how long the bell's cached sections may be served from the cache, ignoring the data versions (the /summary handler's cachedSection calls decide which sections those are). The owner (11 Nov) accepts a bell up to
+  // 5 minutes old with an "as of" time, so a sale or a product edit on another device no longer forces a recompute; the acting device's own write asks for a fresh answer (?fresh=1, or ?fresh=a,b for the sections it resolves).
+  // Both tiers keep it the 5 minutes the owner allowed (Paid was 45 s, the lifetime the version-keyed entry had; 20 Nov it moved to 300 because a Paid shop reads 16M rows a day). Never above 300 on either tier.
   notificationSectionCacheSeconds: number
 
   // ---- Documented platform facts (no behavioural reader) -----------------

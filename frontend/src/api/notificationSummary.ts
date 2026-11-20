@@ -7,6 +7,7 @@ import {
 } from './cooldownFallbacks.ts'
 import { apiFetch, cacheInvalidate, isTransientGatewayError, route } from './http.ts'
 import { bellPath, peekBellFresh, restoreBellFresh, takeBellFresh } from './bellFreshness.ts'
+import { noteSectionLifetime } from './bellFollowUp.ts'
 
 let notificationSummaryRequestPromise: Promise<unknown> | null = null
 
@@ -32,7 +33,7 @@ export async function getNotificationSectionItems(sectionId: string): Promise<un
     try {
       return await apiFetch('GET', bellPath(`/api/notifications/summary/items?section=${encodeURIComponent(sectionId)}`, fresh))
     } catch (error) {
-      if (fresh) restoreBellFresh('items')
+      if (fresh) restoreBellFresh('items', fresh)
       throw error
     }
   })
@@ -61,10 +62,11 @@ export async function getNotificationSummary(): Promise<unknown> {
       const fresh = takeBellFresh('summary')
       try {
         const result = await apiFetch('GET', bellPath('/api/notifications/summary', fresh))
+        noteSectionLifetime(result)
         clearNotificationSummaryMissing()
         return result
       } catch (error) {
-        if (fresh) restoreBellFresh('summary')
+        if (fresh) restoreBellFresh('summary', fresh)
         const status = Number((error as { status?: unknown })?.status || 0)
         const transientGateway = isTransientGatewayError(status)
         if (status === 404) {

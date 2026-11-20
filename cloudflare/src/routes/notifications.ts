@@ -11,7 +11,7 @@ import { parseRotationState, CRON_HEAVY_STATE_KEY } from '../lib/cronRotation'
 import { scheduledBackupMissing } from '../lib/backupSchedule'
 import { requestMetricsOf } from '../lib/requestMetrics'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
-import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { cachedJsonResponse, getVersionWithFallback, getVersionsWithFallback } from '../lib/cache'
 import { cacheIdentity } from '../lib/cache'
 import { cacheKeyRequest, isUnsafeVersion } from '../lib/cacheKey'
 import { cachedPhoneJson } from '../lib/phoneCache'
@@ -186,12 +186,11 @@ async function loadPreferences(env: Env) {
 // each walk every active product, loyalty groups every sale ever made -- are
 // answered from the Workers Cache API for a short while.
 //
-// Inventory, expiry and supplier credit (since the owner's 11 Nov decision: the bell may be up to
-// 5 minutes old and says when it was computed) are keyed by their INPUTS only (the low-stock config,
-// the expiry window, the credit window) and live for getPlanLimits(env).notificationSectionCacheSeconds
+// The sections the /summary handler marks ttlOnly in its cachedSection calls (since the owner's 11 Nov decision: the bell may be up to
+// 5 minutes old and says when it was computed) are keyed by their INPUTS only (low-stock config, expiry window and the like) and live for getPlanLimits(env).notificationSectionCacheSeconds
 // whatever happens to the data meanwhile: a sale on another till no longer makes the next poll re-walk
 // the catalog. The actor's own write must never show stale, so the bell asks for `?fresh=1` after its
-// own bell-relevant write (frontend/src/api/bellFreshness.ts) or on the refresh button: that request recomputes and overwrites the
+// own bell-relevant write (frontend/src/api/bellFreshness.ts: `fresh=1`, or `fresh=a,b` naming only the sections the write resolves) or on the refresh button: that request recomputes and overwrites the
 // entry for everyone, but only when a data version moved since the entry was computed (the entry stores them), so a button
 // pressed with no write in between is answered from the entry. This holds only while every writer bumps its version before it responds. Every cached entry carries the time its data was computed and /summary reports the
 // oldest of them as generatedAt, which is the "as of" the panel shows. The data epoch is part of the key
@@ -225,6 +224,8 @@ type SectionCache = (<T>(name: string, namespaces: string[], inputs: string, pro
   /** When the oldest data served by this request was computed (ISO); null when no plan-lifetime section took part. */
   oldestComputedAt(): string | null
 }
+// Every data version a plan-lifetime section is stamped with (see sectionCacheFor).
+const BELL_VERSION_NAMESPACES = ['products', 'stock', 'sales', 'customers']
 // A fixed token in the place a data version takes in the key: the entry must not move when a version does.
 const TTL_ONLY_KEY_VERSION = 'bell-ttl'
 
@@ -232,10 +233,17 @@ const TTL_ONLY_KEY_VERSION = 'bell-ttl'
 // (products, settings and the rest are shared by two or three of them).
 function sectionCacheFor(c: NotificationContext, user: PhoneActor): SectionCache {
   const versionReads = new Map<string, Promise<string>>()
+  // The versions the plan-lifetime sections are stamped with are read together: a namespace KV does not hold falls back to ONE D1 statement for all of them,
+  // not one call per namespace (the sales, imports and portal sections added two namespaces to the bell's cold read; the read-budget gate counts calls).
+  let bellVersions: Promise<string[]> | null = null
   const versionOf = (namespace: string) => {
     let read = versionReads.get(namespace)
     if (!read) {
-      read = getVersionWithFallback(c.env, namespace)
+      const at = BELL_VERSION_NAMESPACES.indexOf(namespace)
+      if (at >= 0) {
+        bellVersions ??= getVersionsWithFallback(c.env, BELL_VERSION_NAMESPACES)
+        read = bellVersions.then((tokens) => tokens[at])
+      } else read = getVersionWithFallback(c.env, namespace)
       versionReads.set(namespace, read)
     }
     return read
@@ -248,7 +256,11 @@ function sectionCacheFor(c: NotificationContext, user: PhoneActor): SectionCache
     } catch { return null }
   }
   const computedAt: number[] = []
-  const fresh = new URL(c.req.url).searchParams.get('fresh') === '1'
+  const freshParam = new URL(c.req.url).searchParams.get('fresh') || ''
+  // `fresh=1` checks every cached section against its data versions; `fresh=a,b` only the named ones (a write names the sections it can resolve). An unknown name matches nothing, so the rest is a plain read.
+  const freshAll = freshParam === '1'
+  const freshNames = freshAll ? null : new Set(freshParam.split(',').map((part) => part.trim()).filter(Boolean))
+  const isFresh = (name: string) => freshAll || Boolean(freshNames?.has(name))
   const cached = async <T>(name: string, namespaces: string[], inputs: string, producer: () => Promise<T>, options?: { contacts?: boolean; ttlOnly?: boolean }): Promise<T> => {
     if (options?.ttlOnly) {
       const ttlSeconds = getPlanLimits(c.env).notificationSectionCacheSeconds
@@ -264,7 +276,7 @@ function sectionCacheFor(c: NotificationContext, user: PhoneActor): SectionCache
             // A plain read serves the entry. `?fresh=1` (the actor's own write, or the refresh button) serves it too unless the data
             // versions it was computed under have moved: a refresh with no write in between costs a few KV reads, not a catalog
             // walk, so fresh recomputes are capped by the number of real writes, not by taps or requests.
-            if (!fresh) { computedAt.push(Number(entry.at)); return entry.value }
+            if (!isFresh(name)) { computedAt.push(Number(entry.at)); return entry.value }
             const now = await versionsNow(namespaces)
             if (now !== null && typeof entry.v === 'string' && entry.v === now) { computedAt.push(Number(entry.at)); return entry.value }
           }
@@ -671,9 +683,12 @@ function importPermissionForType(type: string): string {
 // enough that it doesn't turn into a permanent nag for an import someone
 // already looked at via the Dashboard's own warnings card) and to the
 // user's permitted import types.
-async function buildImportsSection(env: Env, user: SessionUser): Promise<NotificationSection | null> {
+type ImportWarningRow = { id: string; type: string; status: string; warning_count: number; created_at: string; finished_at: string | null }
+
+// The rows are the same for everyone (the per-user permission filter runs after, in importsSectionFor), so they are what the plan-lifetime cache stores.
+async function readImportWarningRows(env: Env): Promise<ImportWarningRow[]> {
   const db = getDb(env)
-  const rows = await db.prepare(`
+  return db.prepare(`
     SELECT id, type, status, warning_count, created_at, finished_at
     FROM import_jobs
     WHERE warning_count > 0
@@ -681,8 +696,10 @@ async function buildImportsSection(env: Env, user: SessionUser): Promise<Notific
       AND COALESCE(finished_at, updated_at) > datetime('now', '-2 days')
     ORDER BY COALESCE(finished_at, updated_at) DESC
     LIMIT 50
-  `).all<{ id: string; type: string; status: string; warning_count: number; created_at: string; finished_at: string | null }>()
+  `).all<ImportWarningRow>()
+}
 
+function importsSectionFor(rows: ImportWarningRow[], user: SessionUser): NotificationSection | null {
   const visible = rows.filter((row) => hasPermission(user, importPermissionForType(row.type)))
   if (!visible.length) return null
 
@@ -890,7 +907,7 @@ app.get('/summary', async (c) => {
   }
   // The section lists receipt numbers and totals, so it follows the sales READ rule (reports.ts, sales.ts canReadSales):
   // a view-only user sees it, a full user whose sales:view was switched off does not.
-  if (preferences.salesEnabled && getActionTier(user, 'sales', 'view') !== 'none') tasks.push(buildSalesSection(c.env))
+  if (preferences.salesEnabled && getActionTier(user, 'sales', 'view') !== 'none') tasks.push(cachedSection('sales', ['sales'], 'not-paid-delivery-pending', () => buildSalesSection(c.env), { ttlOnly: true }))
   // Loyalty off: no cache-version read and no ledger or settings read at all.
   if (preferences.loyaltyEnabled && loyaltyPointsEnabled && getActionTier(user, 'contacts', 'view') !== 'none') {
     loyaltyTask = () => cachedSection('loyalty', ['sales', 'returns', 'customers', 'settings'], String(preferences.loyaltyThreshold),
@@ -904,8 +921,8 @@ app.get('/summary', async (c) => {
   // meaning submissions could sit unreviewed indefinitely with no other
   // surface showing them and no way for the admin to know they'd been
   // silently suppressed by their own earlier mute choice.
-  if (hasPermission(user, 'customer_portal')) tasks.push(buildPortalSection(c.env))
-  if (hasAnyPermission(user, ['products', 'contacts', 'inventory', 'sales'])) tasks.push(buildImportsSection(c.env, user))
+  if (hasPermission(user, 'customer_portal')) tasks.push(cachedSection('portal', ['customers'], 'pending-share-submissions', () => buildPortalSection(c.env), { ttlOnly: true }))
+  if (hasAnyPermission(user, ['products', 'contacts', 'inventory', 'sales'])) tasks.push(cachedSection('imports', ['products', 'customers', 'sales'], 'warnings-2d', () => readImportWarningRows(c.env), { ttlOnly: true }).then((rows) => importsSectionFor(rows, user)))
   if (preferences.systemEnabled && hasPermission(user, 'backup')) tasks.push(Promise.resolve(buildSystemSection(preferences.driveSyncEnabled, preferences.driveSyncConnected, isAdminControlUser(user) ? backupMissing : null)))
   // Supplier credit reminders (0065): money owed to suppliers is cost
   // data, and Part 383's supplier-privacy rule keeps that with the people
@@ -948,6 +965,8 @@ app.get('/summary', async (c) => {
     unread: unreadCount,
     // The "as of" the bell shows: when the oldest cached section was computed (now when every section ran in this request).
     generatedAt: cachedSection.oldestComputedAt() ?? new Date().toISOString(),
+    // How long a cached section can stay in the Cache API on this plan: the panel schedules its one catch-up read from it.
+    sectionLifetimeSeconds: getPlanLimits(c.env).notificationSectionCacheSeconds,
     preferences,
     sections,
   })

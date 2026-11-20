@@ -21,7 +21,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { getNotificationSummary as getNotificationSummaryRequest } from '../../api/notificationSummary.ts'
-import { requestFreshBell } from '../../api/bellFreshness.ts'
+import { createBellFollowUp, getSectionLifetimeSeconds, onBellResolved, requestFreshBell } from '../../api/bellFreshness.ts'
 import { olderAsOf, stockAsOfText } from '../dashboard/stockAsOf.ts'
 import { getNotificationSectionItems as getNotificationSectionItemsRequest } from '../../api/notificationSummary.ts'
 import { unseenTailCount, type SeenTail } from '../../utils/notificationTail.ts'
@@ -757,6 +757,28 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     }
   }, [tr, visibilityActive])
 
+  // After a reload a sync event caused, ONE plain reload one section lifetime (plus slack) later on a timer of its own: a device whose reload was served
+  // an entry older than the event is correct again by then. loadSummary's idle timer never replaces it.
+  const bellFollowUpRef = useRef<ReturnType<typeof createBellFollowUp> | null>(null)
+  useEffect(() => {
+    if (!visibilityActive) return undefined
+    const followUp = createBellFollowUp({
+      lifetimeSeconds: getSectionLifetimeSeconds,
+      setTimer: (run, delayMs) => window.setTimeout(run, delayMs),
+      clearTimer: (handle) => window.clearTimeout(handle as number),
+      isHidden: () => document.visibilityState === 'hidden',
+      reload: () => { if (aliveRef.current) void loadSummary(true) },
+    })
+    bellFollowUpRef.current = followUp
+    const onVisible = () => followUp.onVisible()
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      followUp.dispose()
+      if (bellFollowUpRef.current === followUp) bellFollowUpRef.current = null
+    }
+  }, [loadSummary, visibilityActive])
+
   useEffect(() => {
     if (!visibilityActive) return
     if (!syncChannel?.channel) return
@@ -772,7 +794,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     // decisions (routes/devices.ts) -- previously missing even though
     // it's the one channel semantically built for this exact component,
     // so a device approve/deny elsewhere never refreshed the bell live.
-    if (['inventory', 'sales', 'returns', 'customers', 'suppliers', 'deliveryContacts', 'notifications', 'catalog', 'settings'].includes(syncChannel.channel)) {
+    if (['inventory', 'sales', 'returns', 'customers', 'suppliers', 'deliveryContacts', 'notifications', 'catalog', 'settings', 'portalSubmissions'].includes(syncChannel.channel)) {
       const plan = planThrottledSyncReload(
         syncChannel.channel,
         Date.now() - lastSummaryLoadAtRef.current,
@@ -782,8 +804,24 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
       // The trailing reload replaces the idle timer; loadSummary re-arms it.
       if (plan.runNow) void loadSummary(true)
       else scheduleRefresh(plan.delayMs)
+      bellFollowUpRef.current?.armAfterEvent()
     }
   }, [loadSummary, scheduleRefresh, syncChannel?.channel, syncChannel?.reason, syncChannel?.ts, visibilityActive])
+
+  // This device's own write that resolves bell items (a sale status or payment, a portal review, an import cancel): re-read at once. The write left the
+  // sections it names pending in bellFreshness, so the read below carries them (`?fresh=sales`) and the expanded lists it reloads do too.
+  useEffect(() => {
+    if (!visibilityActive) return undefined
+    let timer: number | null = null
+    const stop = onBellResolved(() => {
+      if (timer !== null) return
+      timer = window.setTimeout(() => { timer = null; void loadSummary(true) }, 0)
+    })
+    return () => {
+      stop()
+      if (timer !== null) window.clearTimeout(timer)
+    }
+  }, [loadSummary, visibilityActive])
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent | TouchEvent) => {
