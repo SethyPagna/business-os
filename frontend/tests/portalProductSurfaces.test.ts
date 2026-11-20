@@ -124,8 +124,8 @@ assert.doesNotMatch(card, /max-h-\[2lh\]/, 'the name wraps in full: no height ca
 assert.doesNotMatch(card, /max-h-\S*\s[^`"]*overflow-hidden|overflow-hidden[^`"]*\smax-h-/, 'no max-h plus overflow-hidden on the name')
 assert.doesNotMatch(card, /line-clamp|\btruncate\b/, 'a business name is never cut with an ellipsis')
 assert.match(card, /detail-scroll-text/, 'the meta line scrolls sideways instead of wrapping to a second line')
-assert.match(card, /h-10 w-10 shrink-0 items-center justify-center rounded-full/, 'the heart is a 40px target')
-assert.match(card, /inline-flex h-10 min-w-10 shrink-0/, 'Add is a 40px target')
+assert.match(card, /h-11 w-11 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-full/, 'the heart is a 44px target on a phone')
+assert.match(card, /inline-flex h-11 min-w-11 sm:h-10 sm:min-w-10 shrink-0/, 'Add is a 44px target on a phone')
 assert.match(card, /translate="no"/, 'names and prices keep translate=no')
 assert.doesNotMatch(card, /supplier|cost|purchase_price|custom_fields|tag_label/i, 'the card never reads cost, supplier or internal tags')
 // The pill on the picture uses the shared solid recipe and keeps its three meanings.

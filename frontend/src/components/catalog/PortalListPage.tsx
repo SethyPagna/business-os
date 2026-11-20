@@ -21,8 +21,8 @@ export type PortalListSegment = 'list' | 'saved'
 
 type Row = { id: string | number; name: string; shopLine?: string; priceText?: string; qty?: number }
 
-const ICON_BUTTON = 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#23201b] transition hover:bg-stone-200 dark:text-neutral-200 dark:hover:bg-neutral-800'
-const DANGER_BUTTON = 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-rose-700 transition hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-950'
+const ICON_BUTTON = 'inline-flex h-11 w-11 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-full text-[#23201b] transition hover:bg-stone-200 dark:text-neutral-200 dark:hover:bg-neutral-800'
+const DANGER_BUTTON = 'inline-flex h-11 w-11 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-full text-rose-700 transition hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-950'
 const SURFACE = 'overflow-hidden rounded-2xl border border-stone-300 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900'
 
 /**
@@ -92,7 +92,7 @@ export default function PortalListPage({
               aria-pressed={segment === key}
               data-portal-list-segment={key}
               onClick={() => onSegment(key)}
-              className={`min-h-9 rounded-lg px-4 text-center font-semibold transition ${segment === key ? 'bg-white text-[#23201b] shadow-sm dark:bg-neutral-700 dark:text-white' : 'text-stone-600 dark:text-neutral-300'}`}
+              className={`min-h-11 rounded-lg px-4 sm:min-h-9 text-center font-semibold transition ${segment === key ? 'bg-white text-[#23201b] shadow-sm dark:bg-neutral-700 dark:text-white' : 'text-stone-600 dark:text-neutral-300'}`}
             >
               {label}{count > 0 ? <span className="ml-1.5 text-xs font-medium text-stone-600 dark:text-neutral-300">{count}</span> : null}
             </button>
@@ -117,7 +117,7 @@ export default function PortalListPage({
                     <button type="button" className={ICON_BUTTON} onClick={() => onSetQty(item.id, (item.qty || 1) + 1)} aria-label={copy('increaseQty', 'Increase quantity')} title={copy('increaseQty', 'Increase quantity')}>
                       <PlusIcon className="h-4 w-4" />
                     </button>
-                    <button type="button" className={DANGER_BUTTON} onClick={() => onRemoveFromList(item.id)} aria-label={copy('removeFromBucket', 'Remove')} title={copy('removeFromBucket', 'Remove')}>
+                    <button type="button" className={`${DANGER_BUTTON} ml-2`} onClick={() => onRemoveFromList(item.id)} aria-label={copy('removeFromBucket', 'Remove')} title={copy('removeFromBucket', 'Remove')}>
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </div>

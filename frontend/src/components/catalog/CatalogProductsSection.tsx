@@ -1196,7 +1196,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                       return (
                         <button
                           type="button"
-                          className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition ${saved ? 'text-[#7a5c22] dark:text-[#d6b56b]' : 'text-stone-600 hover:text-[#7a5c22] dark:text-neutral-300 dark:hover:text-[#d6b56b]'}`}
+                          className={`inline-flex h-11 w-11 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-full transition ${saved ? 'text-[#7a5c22] dark:text-[#d6b56b]' : 'text-stone-600 hover:text-[#7a5c22] dark:text-neutral-300 dark:hover:text-[#d6b56b]'}`}
                           onClick={(event) => {
                             event.stopPropagation()
                             onToggleWishlist(product, previewConfig.showPrices ? pricePresentation?.primaryText : undefined)
@@ -1220,7 +1220,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                       return (
                         <button
                           type="button"
-                          className={`inline-flex h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-full px-2.5 text-xs font-semibold transition ${added ? 'bg-[#7a5c22] text-white dark:bg-[#d6b56b] dark:text-[#23201b]' : PORTAL_PRIMARY_COLORS}`}
+                          className={`inline-flex h-11 min-w-11 sm:h-10 sm:min-w-10 shrink-0 items-center justify-center gap-1 rounded-full px-2.5 text-xs font-semibold transition ${added ? 'bg-[#7a5c22] text-white dark:bg-[#d6b56b] dark:text-[#23201b]' : PORTAL_PRIMARY_COLORS}`}
                           onClick={(event) => {
                             event.stopPropagation()
                             onAddToBucket(product, previewConfig.showPrices ? pricePresentation?.primaryText : undefined)

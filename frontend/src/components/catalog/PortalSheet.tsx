@@ -6,7 +6,7 @@ import { nextTrapIndex, PORTAL_FOCUSABLE_SELECTOR } from './portalFocusTrap.ts'
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 
 /** The first row of the content takes this right padding so it never runs under the corner buttons (close, and the install icon). */
-export const PORTAL_SHEET_CORNER_PAD = 'min-h-10 pr-24'
+export const PORTAL_SHEET_CORNER_PAD = 'min-h-11 pr-28'
 
 /**
  * The storefront's one sheet (the Account sheet): a bottom sheet on a phone, a centred card from sm up. No header strip and no title row:
@@ -73,7 +73,7 @@ export default function PortalSheet({ label, copy, onClose, corner, children }: 
           {corner}
           <button
             type="button"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full text-stone-600 transition hover:bg-stone-100 hover:text-[#23201b] dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-full text-stone-600 sm:h-10 sm:w-10 transition hover:bg-stone-100 hover:text-[#23201b] dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
             onClick={onClose}
             aria-label={copy('close', 'Close')}
             title={copy('close', 'Close')}

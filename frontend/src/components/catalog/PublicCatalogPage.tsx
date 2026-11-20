@@ -1352,7 +1352,7 @@ export default function PublicCatalogPage() {
 
   // On the admin host the manifest is the staff app's, so the shop offers no install there.
   const offersShopInstall = !isAdminHostname()
-  const accountDrawerIconButtonClass = 'inline-flex h-10 w-10 items-center justify-center rounded-full text-stone-600 transition hover:bg-stone-100 hover:text-[#23201b] dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
+  const accountDrawerIconButtonClass = 'inline-flex h-11 w-11 items-center justify-center rounded-full text-stone-600 transition sm:h-10 sm:w-10 hover:bg-stone-100 hover:text-[#23201b] dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
 
   // The top-bar profile icon opens the account sheet: no header strip, a close button in the corner, the Sign in / Sign up switch first.
   const accountDrawer = accountOpen ? (
@@ -1362,7 +1362,7 @@ export default function PublicCatalogPage() {
       onClose={() => setAccountOpen(false)}
       corner={offersShopInstall ? <InstallAppButton translate={(key, fallback, fallbackKm) => copy(key, fallback, fallbackKm)} className={accountDrawerIconButtonClass} /> : null}
     >
-      <Suspense fallback={<p className="min-h-10 pr-24 text-sm text-stone-600 dark:text-neutral-300">{copy('loadingPortal', 'Loading website...')}</p>}>
+      <Suspense fallback={<p className="min-h-11 pr-28 text-sm text-stone-600 dark:text-neutral-300">{copy('loadingPortal', 'Loading website...')}</p>}>
         <CatalogAccountSection
           copy={copy}
           account={portalAccount.account}
