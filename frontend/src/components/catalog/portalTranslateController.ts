@@ -108,6 +108,9 @@ function ensureWidgetHost(): HTMLElement {
   return host
 }
 
+// Google's code ran in THIS document once its script was inserted, even if the tag is gone again: only a reload ends it. A new document is a new key.
+const documentsWithGoogleScript = new WeakSet<object>()
+
 function ensureScript(onError: () => void): void {
   if (document.getElementById(PORTAL_TRANSLATE_SCRIPT_ID)) return
   GOOGLE_TRANSLATE_PRECONNECTS.forEach((href) => ensureLinkHint('preconnect', href))
@@ -118,6 +121,7 @@ function ensureScript(onError: () => void): void {
   script.async = true
   script.onerror = onError
   document.body.appendChild(script)
+  documentsWithGoogleScript.add(document)
 }
 
 function findCombo(): HTMLSelectElement | null {
@@ -190,9 +194,17 @@ function whenWidgetReady(): Promise<HTMLSelectElement | null> {
   })
 }
 
-/** Takes away what a failed attempt left behind (cookie, script, widget host) without reloading: nothing was rewritten. */
+/** True when Google's script, widget, translated marker or code is in this document, whether or not its tag is still there. */
+function googleIsOnThisPage(): boolean {
+  if (document.getElementById(PORTAL_TRANSLATE_SCRIPT_ID) || findCombo() || hasPortalTranslatedMarker()) return true
+  return Boolean((typeof window !== 'undefined' && (window as TranslateWindow).google?.translate) || documentsWithGoogleScript.has(document))
+}
+
+/** Takes away what a failed attempt left behind (cookie, script, widget host, init callback) without reloading: nothing was rewritten. */
 export function abandonPortalGoogleTranslate(): void {
   if (typeof document === 'undefined') return
+  // A script that arrives late finds no callback, so it cannot start after the wait has ended.
+  if (typeof window !== 'undefined') (window as TranslateWindow).businessOsPortalTranslateInit = undefined
   clearGoogleTranslateCookies()
   document.getElementById(PORTAL_TRANSLATE_SCRIPT_ID)?.remove?.()
   document.getElementById(PORTAL_TRANSLATE_WIDGET_HOST_ID)?.remove?.()
@@ -252,8 +264,10 @@ export async function applyPortalGoogleTranslate(target: unknown): Promise<boole
 export function removePortalGoogleTranslate(): 'clean' | 'reloading' {
   if (typeof document === 'undefined') return 'clean'
   clearGoogleTranslateCookies()
-  const rewritten = Boolean(document.getElementById(PORTAL_TRANSLATE_SCRIPT_ID) || findCombo() || hasPortalTranslatedMarker())
-  if (!rewritten) return 'clean'
+  if (!googleIsOnThisPage()) return 'clean'
+  // Before the reload, so a delayed navigation still leaves no script tag or widget host on the page and a late load finds no callback.
+  // Code that is already running can only be ended by the reload itself.
+  abandonPortalGoogleTranslate()
   window.location.reload()
   return 'reloading'
 }

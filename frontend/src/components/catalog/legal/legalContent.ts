@@ -120,11 +120,15 @@ export const LEGAL_STORAGE_ROWS: readonly LegalStorageRow[] = [
   { id: 'wishlist', name: 'business-os-portal-wishlist-v1', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_wishlist_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
   // portalLanguageOptions.ts
   { id: 'translate', name: 'business-os:portal-translate-target', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_translate_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
+  // portalSignedInMarker.ts -- a time stamp, no personal data: tells every tab on this browser that someone signed in. Removed on sign-out.
+  { id: 'signed-in', name: 'business-os:portal-signed-in', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_signedin_p', lifetimeKey: 'portal_legal_store_signedin_l' },
   // public-runtime/service-worker.ts -- app shell and same-origin static
   // assets. Cache names are versioned and old versions are pruned on update.
   { id: 'cache-storage', name: 'Business OS app-shell/static caches', kindKey: 'portal_legal_kind_cache', purposeKey: 'portal_legal_store_cache_storage_p', lifetimeKey: 'portal_legal_store_cache_storage_l' },
-  // Set by Google Translate itself, only after the visitor picks Simplified Chinese, Traditional Chinese, French or Spanish.
+  // Written by this site (the translate controller) when the visitor picks one of the four; Google's script uses it. Cleared on Khmer, English or a pause.
   { id: 'googtrans', name: 'googtrans', kindKey: 'portal_legal_kind_cookie', purposeKey: 'portal_legal_store_googtrans_p', lifetimeKey: 'portal_legal_store_googtrans_l' },
+  // portalLanguageOptions.ts -- a one-shot flag written only when the account panel is open as translation is switched off; deleted when read.
+  { id: 'reopen-account', name: 'business-os:portal-reopen-account', kindKey: 'portal_legal_kind_session', purposeKey: 'portal_legal_store_reopen_p', lifetimeKey: 'portal_legal_store_reopen_l' },
   // AppContext device settings -- theme + language choice.
   { id: 'device', name: 'businessos_device_settings', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_device_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
   // catalogAssetUrls.ts -- image host override.
@@ -184,7 +188,7 @@ const EN: Record<string, string> = {
   portal_legal_privacy_sharing_b: 'This site has no advertising trackers, and we use your details only for what this policy describes.',
   portal_legal_privacy_sharing_list: 'Cloudflare hosts the site, its data, images and security records. Error reports go to Sentry, and Cloudinary resizes some product photos. Google receives the request if you choose to load the store map. Social media links open those apps, which follow their own policies.',
   portal_legal_privacy_translate_h: 'Translation',
-  portal_legal_privacy_translate_b: 'Simplified Chinese, Traditional Chinese, French and Spanish are produced by Google Translate in your browser when you pick one of them. The page text is then sent to Google. If you stay on Khmer or English, nothing is sent to Google.',
+  portal_legal_privacy_translate_b: 'Simplified Chinese, Traditional Chinese, French and Spanish are produced by Google Translate in your browser when you pick one of them. The page text is then sent to Google. If you stay on Khmer or English, nothing is sent to Google. Translation is paused while you are signed in or have the account panel open.',
   portal_legal_privacy_ai_h: 'The assistant',
   portal_legal_privacy_ai_b: 'Assistant questions go to a third-party AI provider and are processed outside Cambodia. Our copy is deleted after 30 days.',
   portal_legal_privacy_ai_off: 'The assistant is off and no AI provider receives any data from this site.',
@@ -231,7 +235,7 @@ const EN: Record<string, string> = {
   portal_legal_cookies_table_h: 'Exactly what is stored',
   portal_legal_cookies_table_b: 'This table lists the browser storage managed by the current storefront code. Third-party services you choose to load add their own; see Third parties.',
   portal_legal_cookies_third_h: 'Third parties',
-  portal_legal_cookies_third_b: 'Loading the store map loads Google Maps, a Google service that sets its own cookies once loaded. Picking Simplified Chinese, Traditional Chinese, French or Spanish loads Google Translate, which sets the googtrans cookie. Opening a Facebook, Instagram, Telegram, WhatsApp or Messenger link hands you to that app under its own policy. The assistant sends your question to a third-party AI provider. None of these run before you choose them.',
+  portal_legal_cookies_third_b: 'Loading the store map loads Google Maps, a Google service that sets its own cookies once loaded. Picking Simplified Chinese, Traditional Chinese, French or Spanish loads Google Translate. This site itself writes the googtrans cookie to remember that choice and clears it when you go back to Khmer or English or when translation is paused; Google\'s translation script uses it. Opening a Facebook, Instagram, Telegram, WhatsApp or Messenger link hands you to that app under its own policy. The assistant sends your question to a third-party AI provider. None of these run before you choose them.',
   portal_legal_cookies_clear_h: 'How to remove it',
   portal_legal_cookies_clear_b: 'Sign out to end the session cookie. Use the unload control beside the map to forget the saved map choice. Clear site data for this address in your browser settings to remove everything else; this removes your saved list, wishlist, language and theme on this device.',
 
@@ -244,6 +248,7 @@ const EN: Record<string, string> = {
   portal_legal_kind_local: 'Local storage',
   portal_legal_kind_both: 'Local and session storage',
   portal_legal_kind_cache: 'Cache Storage',
+  portal_legal_kind_session: 'Session storage',
   portal_legal_store_session_p: 'Keeps you signed in. Set only when you sign in, cannot be read by scripts, and is limited to this site.',
   portal_legal_store_session_l: 'Up to 399 days. It renews if you use your account after its first 200 days; signing out deletes it.',
   portal_legal_store_bucket_p: 'Your list of products, so it survives a page reload.',
@@ -255,13 +260,17 @@ const EN: Record<string, string> = {
   portal_legal_store_assets_p: 'Where product images are loaded from.',
   portal_legal_store_map_consent_p: 'Whether you chose to load the store map on this device.',
   portal_legal_store_announcement_p: 'Which shop announcement you closed on this device, so it does not come back until the shop changes it.',
-  portal_legal_store_googtrans_p: 'Set by Google Translate only after you pick Simplified Chinese, Traditional Chinese, French or Spanish. It remembers that choice.',
-  portal_legal_store_googtrans_l: 'Until you switch to Khmer or English, or clear site data',
+  portal_legal_store_googtrans_p: 'Written by this site when you pick Simplified Chinese, Traditional Chinese, French or Spanish, to remember that choice. Google\'s translation script uses it. This site clears it when you go back to Khmer or English, or when translation is paused.',
+  portal_legal_store_googtrans_l: 'Until you switch to Khmer or English, translation is paused, or you clear site data',
   portal_legal_store_ai_consent_p: 'Whether you agreed on this device to send questions to the assistant.',
   portal_legal_store_ai_consent_l: 'Until you withdraw consent or clear site data',
   portal_legal_store_list_images_p: 'Pictures for the products in your list, on this device.',
   portal_legal_store_page_size_p: 'How many products you show per page.',
   portal_legal_store_until_cleared_l: 'Until you clear site data',
+  portal_legal_store_reopen_p: 'Reopens the account panel once after translation is switched off. Deleted as soon as it is read.',
+  portal_legal_store_reopen_l: 'Until the page reloads or the tab closes',
+  portal_legal_store_signedin_p: 'Remembers on this device that someone signed in, so page translation by Google stays off. Holds a time, no personal data.',
+  portal_legal_store_signedin_l: 'Until you sign out or clear site data',
 
   // --- consent + embeds ----------------------------------------------------
   portal_legal_consent_required: 'Please confirm you are 16 or older and agree to the Terms & Conditions and Privacy Policy to create an account.',
@@ -320,7 +329,7 @@ const KM: Record<string, string> = {
   portal_legal_privacy_sharing_b: 'គេហទំព័រនេះគ្មានឧបករណ៍តាមដានសម្រាប់ការផ្សាយពាណិជ្ជកម្មទេ ហើយយើងប្រើព័ត៌មានរបស់អ្នកសម្រាប់តែអ្វីដែលគោលការណ៍នេះពណ៌នាប៉ុណ្ណោះ។',
   portal_legal_privacy_sharing_list: 'Cloudflare បង្ហោះគេហទំព័រ ទិន្នន័យ រូបភាព និងកំណត់ត្រាសុវត្ថិភាព។ របាយការណ៍កំហុសផ្ញើទៅ Sentry ហើយ Cloudinary កែទំហំរូបភាពផលិតផលខ្លះ។ Google ទទួលសំណើ បើអ្នកជ្រើសផ្ទុកផែនទីហាង។ តំណបណ្តាញសង្គមបើកកម្មវិធីទាំងនោះ ដែលអនុវត្តគោលការណ៍ផ្ទាល់ខ្លួន។',
   portal_legal_privacy_translate_h: 'ការបកប្រែ',
-  portal_legal_privacy_translate_b: 'ភាសាចិនសាមញ្ញ ចិនប្រពៃណី បារាំង និងអេស្ប៉ាញ ត្រូវបានបកប្រែដោយ Google Translate នៅក្នុងកម្មវិធីរុករករបស់អ្នក ពេលអ្នកជ្រើសរើសមួយក្នុងចំណោមនោះ។ បន្ទាប់មក អត្ថបទទំព័រត្រូវបានផ្ញើទៅ Google។ បើអ្នកនៅភាសាខ្មែរ ឬអង់គ្លេស គ្មានអ្វីត្រូវបានផ្ញើទៅ Google ទេ។',
+  portal_legal_privacy_translate_b: 'ភាសាចិនសាមញ្ញ ចិនប្រពៃណី បារាំង និងអេស្ប៉ាញ ត្រូវបានបកប្រែដោយ Google Translate នៅក្នុងកម្មវិធីរុករករបស់អ្នក ពេលអ្នកជ្រើសរើសមួយក្នុងចំណោមនោះ។ បន្ទាប់មក អត្ថបទទំព័រត្រូវបានផ្ញើទៅ Google។ បើអ្នកនៅភាសាខ្មែរ ឬអង់គ្លេស គ្មានអ្វីត្រូវបានផ្ញើទៅ Google ទេ។ ការបកប្រែត្រូវបានផ្អាក ពេលអ្នកចូលគណនី ឬបើកផ្ទាំងគណនី។',
   portal_legal_privacy_ai_h: 'ជំនួយការ',
   portal_legal_privacy_ai_b: 'សំណួរជំនួយការត្រូវផ្ញើទៅអ្នកផ្តល់សេវា AI ភាគីទីបី ហើយដំណើរការក្រៅប្រទេសកម្ពុជា។ ច្បាប់ចម្លងរបស់យើងត្រូវលុបបន្ទាប់ពី ៣០ ថ្ងៃ។',
   portal_legal_privacy_ai_off: 'ជំនួយការត្រូវបានបិទ ហើយគ្មានអ្នកផ្តល់សេវា AI ណាទទួលទិន្នន័យពីគេហទំព័រនេះទេ។',
@@ -365,7 +374,7 @@ const KM: Record<string, string> = {
   portal_legal_cookies_table_h: 'អ្វីដែលរក្សាទុកពិតប្រាកដ',
   portal_legal_cookies_table_b: 'តារាងនេះរាយការផ្ទុកក្នុងកម្មវិធីរុករក ដែលកូដទំព័រហាងបច្ចុប្បន្នគ្រប់គ្រង។ សេវាភាគីទីបីដែលអ្នកជ្រើសផ្ទុកបន្ថែមការផ្ទុកផ្ទាល់ខ្លួន សូមមើល «ភាគីទីបី»។',
   portal_legal_cookies_third_h: 'ភាគីទីបី',
-  portal_legal_cookies_third_b: 'ការផ្ទុកផែនទីហាងផ្ទុក Google Maps ដែលជាសេវា Google ហើយកំណត់ខូឃីផ្ទាល់ខ្លួនបន្ទាប់ពីផ្ទុក។ ការជ្រើសភាសាចិនសាមញ្ញ ចិនប្រពៃណី បារាំង ឬអេស្ប៉ាញ ផ្ទុក Google Translate ដែលកំណត់ខូឃី googtrans។ ការបើកតំណ Facebook, Instagram, Telegram, WhatsApp ឬ Messenger នាំអ្នកទៅកម្មវិធីនោះក្រោមគោលការណ៍ផ្ទាល់របស់វា។ ជំនួយការផ្ញើសំណួររបស់អ្នកទៅអ្នកផ្តល់សេវា AI ភាគីទីបី។ គ្មានមួយណាដំណើរការមុនអ្នកជ្រើសរើសទេ។',
+  portal_legal_cookies_third_b: 'ការផ្ទុកផែនទីហាងផ្ទុក Google Maps ដែលជាសេវា Google ហើយកំណត់ខូឃីផ្ទាល់ខ្លួនបន្ទាប់ពីផ្ទុក។ ការជ្រើសភាសាចិនសាមញ្ញ ចិនប្រពៃណី បារាំង ឬអេស្ប៉ាញ ផ្ទុក Google Translate។ គេហទំព័រនេះផ្ទាល់សរសេរខូឃី googtrans ដើម្បីចងចាំជម្រើសនោះ ហើយលុបវាពេលអ្នកត្រឡប់ទៅភាសាខ្មែរ ឬអង់គ្លេស ឬពេលការបកប្រែផ្អាក។ ស្គ្រីបបកប្រែរបស់ Google ប្រើវា។ ការបើកតំណ Facebook, Instagram, Telegram, WhatsApp ឬ Messenger នាំអ្នកទៅកម្មវិធីនោះក្រោមគោលការណ៍ផ្ទាល់របស់វា។ ជំនួយការផ្ញើសំណួររបស់អ្នកទៅអ្នកផ្តល់សេវា AI ភាគីទីបី។ គ្មានមួយណាដំណើរការមុនអ្នកជ្រើសរើសទេ។',
   portal_legal_cookies_clear_h: 'របៀបលុបវា',
   portal_legal_cookies_clear_b: 'ចាកចេញពីគណនីដើម្បីបញ្ចប់ខូឃីវគ្គ។ ប្រើប៊ូតុងបិទនៅក្បែរផែនទី ដើម្បីលុបជម្រើសផែនទីដែលបានរក្សាទុក។ សម្អាតទិន្នន័យគេហទំព័រនេះក្នុងការកំណត់កម្មវិធីរុករក ដើម្បីលុបអ្វីៗផ្សេងទៀត រួមទាំងបញ្ជី បញ្ជីចង់បាន ភាសា និងរូបរាងរបស់អ្នកលើឧបករណ៍នេះ។',
 
@@ -377,6 +386,7 @@ const KM: Record<string, string> = {
   portal_legal_kind_local: 'ការផ្ទុកមូលដ្ឋាន',
   portal_legal_kind_both: 'ការផ្ទុកមូលដ្ឋាននិងវគ្គ',
   portal_legal_kind_cache: 'ឃ្លាំងសម្ងាត់ Cache Storage',
+  portal_legal_kind_session: 'ការផ្ទុកវគ្គ',
   portal_legal_store_session_p: 'រក្សាឱ្យអ្នកនៅក្នុងគណនី។ កំណត់តែពេលអ្នកចូល មិនអាចអានដោយស្គ្រីប និងកំណត់តែលើគេហទំព័រនេះ។',
   portal_legal_store_session_l: 'រហូតដល់ ៣៩៩ ថ្ងៃ។ វាបន្តថ្មី បើអ្នកប្រើគណនីក្រោយ ២០០ ថ្ងៃដំបូង ហើយការចាកចេញនឹងលុបវា។',
   portal_legal_store_bucket_p: 'បញ្ជីផលិតផលរបស់អ្នក ដើម្បីកុំបាត់ពេលផ្ទុកទំព័រឡើងវិញ។',
@@ -388,13 +398,17 @@ const KM: Record<string, string> = {
   portal_legal_store_assets_p: 'កន្លែងដែលរូបភាពផលិតផលត្រូវផ្ទុកមក។',
   portal_legal_store_map_consent_p: 'ថាតើអ្នកបានជ្រើសរើសផ្ទុកផែនទីហាងលើឧបករណ៍នេះឬអត់។',
   portal_legal_store_announcement_p: 'សេចក្តីជូនដំណឹងរបស់ហាងដែលអ្នកបានបិទលើឧបករណ៍នេះ ដើម្បីកុំឲ្យវាត្រឡប់មកវិញ រហូតដល់ហាងផ្លាស់ប្តូរ។',
-  portal_legal_store_googtrans_p: 'កំណត់ដោយ Google Translate តែបន្ទាប់ពីអ្នកជ្រើសភាសាចិនសាមញ្ញ ចិនប្រពៃណី បារាំង ឬអេស្ប៉ាញ។ វាចងចាំជម្រើសនោះ។',
-  portal_legal_store_googtrans_l: 'រហូតដល់អ្នកប្តូរទៅភាសាខ្មែរ ឬអង់គ្លេស ឬសម្អាតទិន្នន័យគេហទំព័រ',
+  portal_legal_store_googtrans_p: 'គេហទំព័រនេះសរសេរវា ពេលអ្នកជ្រើសភាសាចិនសាមញ្ញ ចិនប្រពៃណី បារាំង ឬអេស្ប៉ាញ ដើម្បីចងចាំជម្រើសនោះ។ ស្គ្រីបបកប្រែរបស់ Google ប្រើវា។ គេហទំព័រនេះលុបវា ពេលអ្នកត្រឡប់ទៅភាសាខ្មែរ ឬអង់គ្លេស ឬពេលការបកប្រែផ្អាក។',
+  portal_legal_store_googtrans_l: 'រហូតដល់អ្នកប្តូរទៅភាសាខ្មែរ ឬអង់គ្លេស ការបកប្រែផ្អាក ឬអ្នកសម្អាតទិន្នន័យគេហទំព័រ',
   portal_legal_store_ai_consent_p: 'ថាតើអ្នកបានយល់ព្រមលើឧបករណ៍នេះឱ្យផ្ញើសំណួរទៅជំនួយការឬអត់។',
   portal_legal_store_ai_consent_l: 'រហូតដល់អ្នកដកការយល់ព្រម ឬសម្អាតទិន្នន័យគេហទំព័រ',
   portal_legal_store_list_images_p: 'រូបភាពសម្រាប់ផលិតផលក្នុងបញ្ជីរបស់អ្នក លើឧបករណ៍នេះ។',
   portal_legal_store_page_size_p: 'ចំនួនផលិតផលដែលអ្នកបង្ហាញក្នុងមួយទំព័រ។',
   portal_legal_store_until_cleared_l: 'រហូតដល់អ្នកសម្អាតទិន្នន័យគេហទំព័រ',
+  portal_legal_store_reopen_p: 'បើកផ្ទាំងគណនីឡើងវិញម្តង បន្ទាប់ពីបិទការបកប្រែ។ លុបភ្លាមពេលអានរួច។',
+  portal_legal_store_reopen_l: 'រហូតដល់ទំព័រផ្ទុកឡើងវិញ ឬបិទផ្ទាំង',
+  portal_legal_store_signedin_p: 'ចងចាំនៅលើឧបករណ៍នេះថាមានអ្នកចូលគណនី ដើម្បីឱ្យការបកប្រែទំព័រដោយ Google នៅបិទ។ រក្សាទុកតែម៉ោង គ្មានទិន្នន័យផ្ទាល់ខ្លួនទេ។',
+  portal_legal_store_signedin_l: 'រហូតដល់អ្នកចាកចេញពីគណនី ឬសម្អាតទិន្នន័យគេហទំព័រ',
 
   portal_legal_consent_required: 'សូមបញ្ជាក់ថាអ្នកមានអាយុ ១៦ ឆ្នាំឡើងទៅ ហើយយល់ព្រមនឹងលក្ខខណ្ឌប្រើប្រាស់ និងគោលការណ៍ឯកជនភាព ដើម្បីបង្កើតគណនី។',
   portal_legal_consent_required_signin: 'សូមបញ្ជាក់ថាអ្នកមានអាយុ ១៦ ឆ្នាំឡើងទៅ ហើយយល់ព្រមនឹងលក្ខខណ្ឌប្រើប្រាស់ និងគោលការណ៍ឯកជនភាព ដើម្បីចូលគណនី។',

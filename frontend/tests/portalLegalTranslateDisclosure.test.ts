@@ -3,8 +3,9 @@
 //     Google Translate in the visitor's browser when they pick one, the page text is then sent to Google,
 //     and nothing is sent on Khmer or English.
 //   - The cookie table has a row for every storage key the storefront writes, and no row for a key that
-//     no longer exists. googtrans is the one row with no writer in this tree: Google Translate sets it
-//     (the controller that loads it belongs to the language menu).
+//     no longer exists. googtrans is written by the site's own translate controller when a visitor picks one of the four
+//     languages and cleared when they go back or translation is paused; Google's translation script uses it. Translation is paused while
+//     signed in or with the account panel open, and the Translation section says so.
 //
 // Run: node tests/portalLegalTranslateDisclosure.test.ts
 import assert from 'node:assert/strict'
@@ -24,20 +25,29 @@ for (const fact of [/Simplified Chinese, Traditional Chinese, French and Spanish
   assert.match(en, fact, `the English Translation paragraph lost: ${fact}`)
 }
 assert.match(en, /^[^]*\.$/, 'the paragraph ends in a full stop')
-assert.equal(en.split('. ').length, 3, 'three plain sentences')
-for (const fact of [/ចិនសាមញ្ញ/, /ចិនប្រពៃណី/, /បារាំង/, /អេស្ប៉ាញ/, /Google Translate/, /ភាសាខ្មែរ ឬអង់គ្លេស/, /គ្មានអ្វីត្រូវបានផ្ញើទៅ Google/]) {
+assert.equal(en.split('. ').length, 4, 'four plain sentences')
+assert.match(en, /Translation is paused while you are signed in or have the account panel open.$/)
+for (const fact of [/ចិនសាមញ្ញ/, /ចិនប្រពៃណី/, /បារាំង/, /អេស្ប៉ាញ/, /Google Translate/, /ភាសាខ្មែរ ឬអង់គ្លេស/, /គ្មានអ្វីត្រូវបានផ្ញើទៅ Google/, /ការបកប្រែត្រូវបានផ្អាក ពេលអ្នកចូលគណនី ឬបើកផ្ទាំងគណនី។$/]) {
   assert.match(km, fact, `the Khmer Translation paragraph lost: ${fact}`)
 }
 assert.equal(PORTAL_LEGAL_EN.portal_legal_privacy_translate_h, 'Translation')
-assert.match(PORTAL_LEGAL_EN.portal_legal_cookies_third_b, /Google Translate, which sets the googtrans cookie/)
-assert.match(PORTAL_LEGAL_KM.portal_legal_cookies_third_b, /Google Translate ដែលកំណត់ខូឃី googtrans/)
+assert.match(PORTAL_LEGAL_EN.portal_legal_cookies_third_b, /This site itself writes the googtrans cookie[^.]*clears it when you go back to Khmer or English or when translation is paused; Google's translation script uses it./)
+assert.doesNotMatch(PORTAL_LEGAL_EN.portal_legal_cookies_third_b, /Google's script reads it/, 'nobody verified that Google only reads it')
+assert.doesNotMatch(PORTAL_LEGAL_EN.portal_legal_cookies_third_b, /which sets the googtrans cookie/, 'Google does not set googtrans')
+assert.match(PORTAL_LEGAL_KM.portal_legal_cookies_third_b, /គេហទំព័រនេះផ្ទាល់សរសេរខូឃី googtrans[^។]*លុបវា[^។]*ពេលការបកប្រែផ្អាក។ ស្គ្រីបបកប្រែរបស់ Google ប្រើវា/)
+assert.doesNotMatch(PORTAL_LEGAL_KM.portal_legal_cookies_third_b, /ដែលកំណត់ខូឃី googtrans/)
 
 // 2. The rows.
 const rowByName = new Map(LEGAL_STORAGE_ROWS.map((row) => [row.name, row]))
 const googtrans = rowByName.get('googtrans')
 assert.ok(googtrans, 'no googtrans row')
 assert.equal(googtrans.kindKey, 'portal_legal_kind_cookie')
-assert.match(PORTAL_LEGAL_EN[googtrans.purposeKey], /only after you pick Simplified Chinese, Traditional Chinese, French or Spanish/)
+assert.match(PORTAL_LEGAL_EN[googtrans.purposeKey], /^Written by this site when you pick Simplified Chinese, Traditional Chinese, French or Spanish/)
+assert.match(PORTAL_LEGAL_EN[googtrans.purposeKey], /Google's translation script uses it. This site clears it when you go back to Khmer or English, or when translation is paused./)
+assert.doesNotMatch(PORTAL_LEGAL_EN[googtrans.purposeKey], /Set by Google Translate/)
+assert.match(PORTAL_LEGAL_KM[googtrans.purposeKey], /^គេហទំព័រនេះសរសេរវា[^។]*។[^។]*ស្គ្រីបបកប្រែរបស់ Google ប្រើវា។[^។]*លុបវា/)
+assert.doesNotMatch(PORTAL_LEGAL_KM[googtrans.purposeKey], /កំណត់ដោយ Google Translate/)
+assert.match(PORTAL_LEGAL_EN[googtrans.lifetimeKey], /translation is paused/)
 assert.equal(rowByName.get(AI_CONSENT_STORAGE_KEY)?.kindKey, 'portal_legal_kind_local', 'the assistant-consent key has a local-storage row')
 assert.match(PORTAL_LEGAL_EN[rowByName.get(AI_CONSENT_STORAGE_KEY)!.purposeKey], /agreed on this device to send questions to the assistant/)
 assert.match(PORTAL_LEGAL_EN[rowByName.get('business-os-portal-list-images-v1')!.purposeKey], /Pictures for the products in your list, on this device/)

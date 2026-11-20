@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  PORTAL_SIGNED_IN_FRESH_MS,
+  PORTAL_SIGNED_IN_KEY,
+  portalSignedInMarkerAgeMs,
+  clearPortalSignedIn,
+  markPortalSignedIn,
+  readPortalSignedIn,
+  readPortalSignedInValue,
+} from './portalSignedInMarker.ts'
+import {
   mergeBucketItems,
   mergeWishlistItems,
   type PortalBucketItem,
@@ -55,6 +64,12 @@ export function readPortalErrorCode(error: unknown): string {
   return typeof code === 'string' ? code : ''
 }
 
+// A definite refusal from the Worker (4xx): no session was created. A network error, timeout or 5xx proves nothing.
+function isDefiniteRefusal(error: unknown): boolean {
+  const status = (error as { status?: unknown } | null)?.status
+  return typeof status === 'number' && status >= 400 && status < 500
+}
+
 function readItems(result: unknown): unknown[] {
   const items = (result as { items?: unknown })?.items
   return Array.isArray(items) ? items : []
@@ -78,6 +93,7 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike, cop
   copyRef.current = copy
   const [account, setAccount] = useState<PortalAccountProfile | null>(null)
   const [ready, setReady] = useState(false)
+  const [sessionKnown, setSessionKnown] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [errorCode, setErrorCode] = useState('')
@@ -120,27 +136,71 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike, cop
     }
   }, [bucket, wishlist])
 
-  // Initial "am I signed in?" check.
+  // The sign-in marker (portalSignedInMarker.ts) is what other tabs can see. This tab gets no `storage` event for its own writes, so every
+  // write and clear here also refreshes `marker`. The value this tab last wrote is kept so a failure only undoes its own write.
+  const [marker, setMarker] = useState(readPortalSignedIn)
+  const accountRef = useRef<PortalAccountProfile | null>(null)
+  accountRef.current = account
+  const markSignedIn = useCallback((): string => {
+    const written = markPortalSignedIn()
+    setMarker(readPortalSignedIn())
+    return written
+  }, [])
+  const clearSignedIn = useCallback((onlyIfValue?: string) => {
+    clearPortalSignedIn(onlyIfValue)
+    setMarker(readPortalSignedIn())
+  }, [])
+
+  // Initial "am I signed in?" check. `sessionKnown` is true only after a real answer (signed in, signed out, or a live session waiting
+  // for the consent renewal): a failed check leaves it false, so translation stays off for that page view. No retry.
   useEffect(() => {
     let cancelled = false
     const a = api()
     if (!a.getPortalAccountMe) { setReady(true); return }
+    const markerBefore = readPortalSignedInValue()
     a.getPortalAccountMe()
       .then(async (result) => {
         if (cancelled) return
         const profile = readProfile(result)
         setAccount(profile)
+        setSessionKnown(true)
+        if (profile) markSignedIn()
+        // A young marker may be another tab's sign-in that is still in flight (its mark was the reason this page loaded): leave it.
+        else if (markerBefore !== null && portalSignedInMarkerAgeMs(markerBefore, Date.now()) > PORTAL_SIGNED_IN_FRESH_MS) clearSignedIn(markerBefore)
         if (profile) await hydrate()
       })
       .catch((err) => {
         if (cancelled) return
         setAccount(null)
-        setConsentRenewal(readPortalErrorCode(err) === CONSENT_RENEWAL_CODE)
+        const renewal = readPortalErrorCode(err) === CONSENT_RENEWAL_CODE
+        setConsentRenewal(renewal)
+        if (renewal) {
+          setSessionKnown(true)
+          markSignedIn()
+        }
       })
       .finally(() => { if (!cancelled) setReady(true) })
     return () => { cancelled = true }
     // hydrate is stable enough; run once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Other tabs and a restored or woken page only ever re-read the marker: nothing here may reach the network.
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return undefined
+    const refresh = () => setMarker(readPortalSignedIn())
+    const onStorage = (event: StorageEvent) => { if (event.key === null || event.key === PORTAL_SIGNED_IN_KEY) refresh() }
+    const onVisible = () => { if (document.visibilityState === 'visible') refresh() }
+    window.addEventListener('storage', onStorage)
+    window.addEventListener('pageshow', refresh)
+    document.addEventListener('visibilitychange', onVisible)
+    document.addEventListener('resume', refresh)
+    return () => {
+      window.removeEventListener('storage', onStorage)
+      window.removeEventListener('pageshow', refresh)
+      document.removeEventListener('visibilitychange', onVisible)
+      document.removeEventListener('resume', refresh)
+    }
   }, [])
 
   // Mirror local list changes to the server while signed in and hydrated.
@@ -174,22 +234,29 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike, cop
     setBusy(true)
     setError('')
     setErrorCode('')
+    // Set before the request, so other tabs take Google off before the session cookie exists. A failure undoes only this write.
+    const absentBefore = readPortalSignedIn() === 'absent'
+    const written = markSignedIn()
     try {
       const result = await fn(payload)
       const profile = readProfile(result)
       if (!profile) throw new Error(accountMessage(copyRef.current, 'incomplete'))
       setAccount(profile)
+      setSessionKnown(true)
       setConsentRenewal(false)
+      markSignedIn()
       await hydrate()
       return true
     } catch (err) {
+      const code = readPortalErrorCode(err)
+      if (absentBefore && !accountRef.current && isDefiniteRefusal(err) && code !== CONSENT_RENEWAL_CODE) clearSignedIn(written)
       setError(err instanceof Error ? err.message : accountMessage(copyRef.current, 'generic'))
-      setErrorCode(readPortalErrorCode(err))
+      setErrorCode(code)
       return false
     } finally {
       setBusy(false)
     }
-  }, [hydrate])
+  }, [hydrate, markSignedIn, clearSignedIn])
 
   // Agree on the renewal prompt. The profile comes back in the answer itself, so
   // success never depends on a second /auth/me round trip (no loop if it differs).
@@ -203,7 +270,9 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike, cop
       const profile = readProfile(await fn(payload))
       if (!profile) throw new Error('The account response was incomplete. Please try again.')
       setAccount(profile)
+      setSessionKnown(true)
       setConsentRenewal(false)
+      markSignedIn()
       await hydrate()
       return true
     } catch (err) {
@@ -213,7 +282,7 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike, cop
     } finally {
       setBusy(false)
     }
-  }, [hydrate])
+  }, [hydrate, markSignedIn])
 
   // Keep browsing as a guest: nothing is signed out, the prompt just stops asking until the next visit.
   const dismissConsentRenewal = useCallback(() => { setConsentRenewal(false); setError(''); setErrorCode('') }, [])
@@ -224,13 +293,14 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike, cop
   const signOut = useCallback(async () => {
     const a = api()
     hydratedRef.current = false
-    try { await a.signoutPortalAccount?.() } catch { /* ignore */ }
+    // The marker goes only when the Worker confirms: a failed sign-out may have left the session alive.
+    try { await a.signoutPortalAccount?.(); clearSignedIn() } catch { /* ignore */ }
     setAccount(null)
     setConsentRenewal(false)
     // The local list stays as the guest's list — it is not cleared on sign-out.
-  }, [])
+  }, [clearSignedIn])
 
   const clearError = useCallback(() => { setError(''); setErrorCode('') }, [])
 
-  return { account, ready, busy, error, errorCode, consentRenewal, renewConsent, dismissConsentRenewal, signIn, signUp, signOut, clearError }
+  return { account, ready, sessionKnown, marker, busy, error, errorCode, consentRenewal, renewConsent, dismissConsentRenewal, signIn, signUp, signOut, clearError }
 }

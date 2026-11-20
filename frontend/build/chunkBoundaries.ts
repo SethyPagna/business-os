@@ -82,6 +82,7 @@ const neutralChunks: ReadonlyArray<readonly [string, string]> = [
   ['/src/components/catalog/logoImageStyle.ts', 'catalog-public-utils'],
   ['/src/components/catalog/portalBucket.ts', 'catalog-account-core'],
   ['/src/components/catalog/portalAccount.ts', 'catalog-account-core'],
+  ['/src/components/catalog/portalSignedInMarker.ts', 'catalog-account-core'],
   ['/src/components/catalog/PortalNoPaymentNotice.tsx', 'catalog-legal'],
   ['/src/components/catalog/legal/LegalPages.tsx', 'catalog-legal'],
   ['/src/components/catalog/legal/legalContent.ts', 'catalog-legal'],

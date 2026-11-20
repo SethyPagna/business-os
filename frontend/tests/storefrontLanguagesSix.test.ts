@@ -100,7 +100,7 @@ check('the controller is imported only from the storefront tree, and only dynami
   assert.deepEqual(importers, ['src/components/catalog/PublicCatalogPage.tsx'])
   const page = catalog('PublicCatalogPage.tsx')
   assert.doesNotMatch(page, /^import[^\n]*portalTranslateController/m, 'a static import would put Google code in the catalog chunk')
-  assert.equal((page.match(/import\('\.\/portalTranslateController\.ts'\)/g) || []).length, 2, 'apply and remove, both lazy')
+  assert.equal((page.match(/import\('\.\/portalTranslateController\.ts'\)/g) || []).length, 4, 'apply, and three removals (blocked, leaving Google, opening the sheet), all lazy')
 })
 
 check('the controller is a chunk of its own, so Khmer and English visitors never fetch it', () => {
@@ -109,7 +109,7 @@ check('the controller is a chunk of its own, so Khmer and English visitors never
 
 check('the page only calls apply for a Google choice', () => {
   const page = catalog('PublicCatalogPage.tsx')
-  assert.match(page, /if \(!isGoogleLanguageChoice\(pageChoice\)\) return undefined[\s\S]{0,1500}import\('\.\/portalTranslateController\.ts'\)\s*\.then\(\(controller\) => controller\.applyPortalGoogleTranslateOrFallBack\(/)
+  assert.match(page, /if \(!pickedGoogle\) return undefined[\s\S]{0,3500}import\('\.\/portalTranslateController\.ts'\)\s*\.then\(\(controller\) => \(cancelled \? false : controller\.applyPortalGoogleTranslateOrFallBack\(/)
 })
 
 check('the controller refuses on an admin hostname', () => {

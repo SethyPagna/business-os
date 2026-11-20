@@ -1,3 +1,6 @@
+// Type only: the sign-in marker helpers live in portalSignedInMarker.ts so this module (language packs chunk) is not a runtime dependency of the account hook.
+import type { PortalSignedInMarker } from './portalSignedInMarker.ts'
+
 // The storefront's own copy exists in two languages, written by hand: Khmer and English.
 export type PortalLanguage = 'km' | 'en'
 
@@ -53,6 +56,54 @@ export function portalCopyLanguage(choice: unknown): PortalLanguage {
   const normalized = normalizePortalChoice(choice)
   if (normalized === 'km') return 'km'
   return normalized ? 'en' : PUBLIC_STOREFRONT_DEFAULT_LANGUAGE
+}
+
+/**
+ * Google's translate script runs with full access to the page, so it may run only when the shopper-session check got a real answer, nobody
+ * is signed in, the Account sheet is closed and no sign-in marker is kept. Any other state is "blocked": the script is not loaded and, if
+ * present, is removed. An unreadable marker blocks too: a browser that cannot keep it cannot be protected across tabs.
+ */
+export function portalTranslateAllowed(state: { sessionReady: boolean; signedIn: boolean; accountOpen: boolean; marker: PortalSignedInMarker }): boolean {
+  return Boolean(state.sessionReady) && !state.signedIn && !state.accountOpen && state.marker === 'absent'
+}
+
+// Set the first time the page asks for the translate controller to APPLY Google's script, so a later block (sign-in, open sheet, marker) can also
+// take off a script that arrived late, after a timeout fallback put the pick back to English. Visitors who never pick a Google language never
+// set it, and so never download the controller chunk just to find out there is nothing to remove.
+let googleAsked = false
+export function markPortalGoogleAsked(): void { googleAsked = true }
+export function portalGoogleWasAsked(): boolean { return googleAsked }
+
+// Opening the Account sheet over a translated page reloads the page to take Google off; this one-shot flag brings the sheet back after it.
+export const PORTAL_REOPEN_ACCOUNT_KEY = 'business-os:portal-reopen-account'
+
+function sessionStore(): Storage | null {
+  try {
+    return typeof window !== 'undefined' ? window.sessionStorage ?? null : null
+  } catch {
+    return null
+  }
+}
+
+export function markPortalReopenAccount(): void {
+  try { sessionStore()?.setItem(PORTAL_REOPEN_ACCOUNT_KEY, '1') } catch {}
+}
+
+export function clearPortalReopenAccount(): void {
+  try { sessionStore()?.removeItem(PORTAL_REOPEN_ACCOUNT_KEY) } catch {}
+}
+
+/** True once after markPortalReopenAccount: the flag is read and deleted in the same call, so it can never reopen the sheet twice. */
+export function consumePortalReopenAccount(): boolean {
+  try {
+    const store = sessionStore()
+    if (!store) return false
+    const flagged = store.getItem(PORTAL_REOPEN_ACCOUNT_KEY) === '1'
+    store.removeItem(PORTAL_REOPEN_ACCOUNT_KEY)
+    return flagged
+  } catch {
+    return false
+  }
 }
 
 function readStoredValue(): string {
