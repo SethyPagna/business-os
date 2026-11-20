@@ -12,7 +12,7 @@ import {
   popUpAlerts,
   type AlertTimes,
 } from '../src/components/shared/notificationAlerts.ts'
-import { toastStackTop, mobileChromeViewportOffset } from '../src/utils/mobileNavChrome.ts'
+import { toastStackTop, mobileChromeViewportOffset, AUTH_TOGGLE_TOP_REM, AUTH_TOGGLE_HEIGHT_REM, AUTH_TOGGLE_GAP_REM, authToggleBandRem } from '../src/utils/mobileNavChrome.ts'
 
 const require = createRequire(import.meta.url)
 const ts = require('typescript') as typeof import('typescript')
@@ -429,6 +429,36 @@ for (const appUpdateVisible of [false, true]) {
   assert.ok(rem(toastStackTop({ headerPresent: true, appUpdateVisible }).phone) > rem(edge), 'below the top bar')
   assert.match(toastStackTop({ headerPresent: true, appUpdateVisible }).phone, /env\(safe-area-inset-top\)/)
 }
+// N2: on the signed-out screens the stack starts under the sign-in toggles; the shell keeps its own offsets. Login and the
+// stack read one shared constant, so the two cannot drift.
+{
+  const safe = (rem: number) => `calc(${rem}rem + env(safe-area-inset-top))`
+  const auth = toastStackTop({ headerPresent: false, appUpdateVisible: false, authScreen: true })
+  assert.equal(authToggleBandRem('phone'), AUTH_TOGGLE_TOP_REM.phone + AUTH_TOGGLE_HEIGHT_REM + AUTH_TOGGLE_GAP_REM)
+  assert.equal(authToggleBandRem('phone'), 4.75, "Login's own phone clearance (--auth-top)")
+  assert.equal(auth.phone, safe(authToggleBandRem('phone')))
+  assert.equal(auth.sm, safe(authToggleBandRem('sm')))
+  assert.equal(auth.tablet, safe(authToggleBandRem('sm')), 'md keeps the toggles at their sm place')
+  assert.equal(auth.desktop, safe(authToggleBandRem('lg')))
+  for (const step of ['phone', 'sm', 'lg'] as const) {
+    assert.ok(authToggleBandRem(step) > AUTH_TOGGLE_TOP_REM[step] + AUTH_TOGGLE_HEIGHT_REM - 1e-9, 'the stack starts below the toggle row at ' + step)
+  }
+  assert.deepEqual(toastStackTop({ headerPresent: false, appUpdateVisible: true, authScreen: true }), auth, 'an update bar never moves the sign-in offset above the toggles')
+  const shell = toastStackTop({ headerPresent: true, appUpdateVisible: false })
+  assert.deepEqual(shell, { phone: safe(4.75), sm: safe(4.75), tablet: '1.25rem', desktop: '1.25rem' }, "the shell's offsets are unchanged")
+  assert.notDeepEqual(shell, auth)
+  // Login places its toggles from the same constants, with no second copy of the numbers.
+  const loginSource = read('src/components/auth/Login.tsx')
+  assert.ok(loginSource.includes("import { AUTH_TOGGLE_TOP_REM, authToggleBandRem } from '../../utils/mobileNavChrome.ts'"))
+  assert.ok(loginSource.includes('absolute right-4 top-[var(--auth-toggle-top)]'))
+  assert.ok(loginSource.includes('sm:top-[var(--auth-toggle-top-sm)]'))
+  assert.ok(loginSource.includes('lg:top-[var(--auth-toggle-top-lg)]'))
+  assert.ok(!loginSource.includes('absolute right-4 top-4'), 'no hard-coded toggle offset')
+  assert.ok(!loginSource.includes('[--auth-top:4.75rem]'), 'no hard-coded phone band')
+  // The sign-in and boot screens ask for the signed-out offset; the shell and the forced password change do not.
+  assert.equal(appSource.split('appUpdateVisible={!!appUpdate} authScreen />').length - 1, 2)
+  assert.ok(appSource.includes('toastStackTop({ headerPresent, appUpdateVisible, authScreen })'))
+}
 assert.deepEqual(limitForDialog(['a', 'b', 'c'], false, true), ['a', 'b', 'c'], 'no dialog: every pop-up')
 assert.deepEqual(limitForDialog(['a', 'b', 'c'], true, false), ['a', 'b', 'c'], 'a dialog on a wide screen: the stack stays')
 assert.deepEqual(limitForDialog(['a', 'b', 'c'], true, true), ['a'], 'a dialog below 768 px: one pop-up')
@@ -516,6 +546,11 @@ const find = (node: any, test: (el: any) => boolean, found: any[] = []): any[] =
   // The update bar and a phone top bar move the stack down.
   assert.match(render({ visible: [toast('t1', 'x')] }, { appUpdateVisible: true }), /--toast-top:calc\(7\.75rem \+ env\(safe-area-inset-top\)\)/)
   assert.match(render({ visible: [toast('t1', 'x')] }, { headerPresent: false }), /--toast-top:calc\(0\.75rem \+ env\(safe-area-inset-top\)\)/)
+  // N2: the signed-out screens start the stack under the sign-in toggles, from the shared constant.
+  const authHtml = render({ visible: [toast('t1', 'x')] }, { authScreen: true, headerPresent: false })
+  assert.ok(authHtml.includes('--toast-top:calc(4.75rem + env(safe-area-inset-top))'))
+  assert.ok(authHtml.includes('--toast-top-sm:calc(5.25rem + env(safe-area-inset-top))'))
+  assert.ok(authHtml.includes('--toast-top-lg:calc(5.75rem + env(safe-area-inset-top))'))
   // The slot message sits above the stack and counts as one of the pop-ups under a dialog.
   const withSlot = render({ slot: toast('slot-1', 'WRITE CONFLICT', 'error', { fromSlot: true }), visible: [toast('t1', 'queued')] })
   const drawn = withSlot.slice(withSlot.indexOf('data-toast-type'))

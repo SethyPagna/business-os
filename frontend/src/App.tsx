@@ -196,6 +196,8 @@ interface NotificationProps {
   // The update bar is showing, and the shell has its own mobile top bar: the stack starts below both.
   appUpdateVisible?: boolean
   headerPresent?: boolean
+  // Signed-out screens: the stack starts below the sign-in screen's language and theme toggles.
+  authScreen?: boolean
 }
 
 interface SyncErrorBannerProps {
@@ -1109,7 +1111,7 @@ function ToastIcon({ kind }: { kind: NotificationVariant }) {
   )
 }
 
-function Notification({ notification, onDismiss, appUpdateVisible = false, headerPresent = false }: NotificationProps) {
+function Notification({ notification, onDismiss, appUpdateVisible = false, headerPresent = false, authScreen = false }: NotificationProps) {
   const { t } = useApp()
   // Every pop-up is drawn here, so feature pages only enqueue messages through AppContext. The whole message
   // always shows (no clamp): an alert is read for ten seconds, not guessed at. The context's own slot message
@@ -1153,7 +1155,7 @@ function Notification({ notification, onDismiss, appUpdateVisible = false, heade
     })
   }
   const kindLabel = (toast: ToastEntry) => t(`toast_type_${getNotificationKind(toast.type)}`)
-  const top = toastStackTop({ headerPresent, appUpdateVisible })
+  const top = toastStackTop({ headerPresent, appUpdateVisible, authScreen })
   const controlClass = dialogOpen ? 'pointer-events-none' : 'pointer-events-auto'
 
   const node = (
@@ -1169,8 +1171,8 @@ function Notification({ notification, onDismiss, appUpdateVisible = false, heade
       {shown.length ? (
         <div
           ref={stackRef}
-          style={{ '--toast-top': top.phone, '--toast-top-md': top.tablet } as CSSProperties}
-          className="fixed right-3 top-[var(--toast-top)] md:right-5 md:top-[var(--toast-top-md)] z-[1100] pointer-events-none flex w-[min(24rem,calc(100vw-1.5rem))] flex-col gap-2"
+          style={{ '--toast-top': top.phone, '--toast-top-sm': top.sm, '--toast-top-md': top.tablet, '--toast-top-lg': top.desktop } as CSSProperties}
+          className="fixed right-3 top-[var(--toast-top)] sm:top-[var(--toast-top-sm)] md:right-5 md:top-[var(--toast-top-md)] lg:top-[var(--toast-top-lg)] z-[1100] pointer-events-none flex w-[min(24rem,calc(100vw-1.5rem))] flex-col gap-2"
         >
           {shown.map((toast) => {
             const kind = getNotificationKind(toast.type)
@@ -2070,7 +2072,7 @@ export default function App() {
     return (
       <>
         <AppUpdateBanner update={appUpdate} onDismiss={clearAppUpdate} />
-        <Notification notification={notification} onDismiss={dismissNotification} appUpdateVisible={!!appUpdate} />
+        <Notification notification={notification} onDismiss={dismissNotification} appUpdateVisible={!!appUpdate} authScreen />
         <div className="business-os-initial-shell" role="status" aria-live="polite">
           <div className="business-os-initial-panel">
             <div className="business-os-initial-spinner" aria-hidden="true" />
@@ -2088,7 +2090,7 @@ export default function App() {
     return (
       <>
         <AppUpdateBanner update={appUpdate} onDismiss={clearAppUpdate} />
-        <Notification notification={notification} onDismiss={dismissNotification} appUpdateVisible={!!appUpdate} />
+        <Notification notification={notification} onDismiss={dismissNotification} appUpdateVisible={!!appUpdate} authScreen />
         <Suspense fallback={<PageLoader />}>
           <Login />
         </Suspense>

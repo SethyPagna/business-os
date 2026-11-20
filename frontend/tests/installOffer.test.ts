@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import { transformSync } from 'esbuild'
 import { STORAGE_KEYS } from '../src/constants.ts'
+import { authToggleBandRem } from '../src/utils/mobileNavChrome.ts'
 
 // Install offer. Owner brief of 2 Nov 2026: a closed band returns after 14 days; the staff app also
 // offers it on desktops and, in a browser that cannot install, says where to install from; shoppers
@@ -648,7 +649,8 @@ await check('the sign-in screen keeps the form clear of the band on phones, and 
   const reserve = `var(${INSTALL_BAND_CLEARANCE_VAR},0px)`
   assert.ok(shell.includes('pt-[var(--auth-top)]') && shell.includes('pb-[var(--auth-bottom)]'), 'the shell pads by the two reserved rows')
   assert.ok(shell.includes(`[--auth-bottom:calc(1.5rem+${reserve})]`), 'the bottom row is the band height by default')
-  assert.ok(shell.includes('[--auth-top:4.75rem]'), 'phones reserve the theme and language row, so the form can never rise under it')
+  assert.ok(shell.includes('[--auth-top:var(--auth-band-phone)]'), 'phones reserve the theme and language row, so the form can never rise under it')
+  assert.equal(authToggleBandRem('phone'), 4.75, 'the reserved phone band is still 4.75rem (the shared constant behind --auth-band-phone)')
   assert.ok(shell.includes('md:[--auth-top:1.5rem]'), 'from md the toggles sit beside the card, not above it')
   assert.ok(
     shell.includes('[@media(min-width:768px)_and_(min-height:761px)]:[--auth-bottom:1.5rem]'),
