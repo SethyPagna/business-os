@@ -162,7 +162,7 @@ type CatalogPreviewSurfaceProps = {
   changePageLanguage: (language: string) => void
 }
 
-// Header buttons: 44 x 44 px below 640 px, with no gap between them so six and the shop name still share one row at 360 px; 40 px from sm up.
+// Header buttons: 44 x 44 px below 640 px with no gap between them; 40 px from sm up. Six fit beside the shop name from 400 px; below that Saved is reached from the List page.
 const HEADER_ICON_CLASS = 'inline-flex h-11 w-11 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-full text-[#23201b] transition hover:bg-stone-200 dark:text-neutral-200 dark:hover:bg-neutral-800'
 // The main action of the header: icon + the word "Contact" from sm up, the icon alone on a phone.
 const HEADER_CONTACT_CLASS = `inline-flex h-11 w-11 sm:h-10 shrink-0 items-center justify-center gap-2 rounded-full transition sm:w-auto sm:px-4 sm:text-sm sm:font-semibold ${PORTAL_PRIMARY_COLORS}`
@@ -426,10 +426,13 @@ export default function CatalogPreviewSurface({
               </div>
             ) : null}
             {/* One row at every width: the shop name on the left, the actions on the right. The row has no surface of its own (it sits on the ivory page);
-                the sticky tab strip under it is the solid one. The name wraps to two lines on a phone rather than being cut. */}
+                the sticky tab strip under it is the solid one. The name wraps to two lines on a phone rather than being cut, and the name
+                column keeps room for those two lines (at the Khmer line height) from the first paint, so the tabs under the header do not
+                move when the shop's name arrives. Below 400 px the Saved button leaves the row (the List page carries the Saved tab), which
+                gives the name the width it needs beside five 44 px buttons. */}
             <header className="portal-header-shell">
               <div className="flex items-center gap-2 px-1 py-2 sm:py-3">
-                <div className="min-w-0 flex-1">
+                <div className="flex min-h-[3.25rem] min-w-0 flex-1 flex-col justify-center sm:block sm:min-h-0">
                   {!publicView ? (
                     <div className="mb-1 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-700 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
                       {copy('previewBadge', 'Website Editor')}
@@ -477,6 +480,7 @@ export default function CatalogPreviewSurface({
                     />
                   ) : null}
                   {onOpenWishlist ? (
+                    <span data-portal-header-saved="" className="hidden min-[400px]:contents">
                     <button
                       type="button"
                       className={`relative ${HEADER_ICON_CLASS}`}
@@ -487,6 +491,7 @@ export default function CatalogPreviewSurface({
                       <Heart className={HEADER_ICON_GLYPH} />
                       {wishlistCount > 0 ? <span className={HEADER_COUNT_CLASS}>{wishlistCount}</span> : null}
                     </button>
+                    </span>
                   ) : null}
                   {onOpenList ? (
                     <button

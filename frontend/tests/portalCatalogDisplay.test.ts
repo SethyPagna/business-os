@@ -175,7 +175,7 @@ runTest('public portal About tab: story full width, contacts beside the map, and
   // logo lives on the About hero (pinned above); the header must carry
   // NO logo frame at all.
   assert.doesNotMatch(catalogPreviewSurfaceSource, /portal-logo-frame/, 'the top bar must not render a logo frame (6.2: logo removed from the header)')
-  assert.match(catalogPreviewSurfaceSource, /<div className="min-w-0 flex-1">[\s\S]*?data-portal-header-icons/, 'the shop name takes the left of the one header row and the actions the right')
+  assert.match(catalogPreviewSurfaceSource, /<div className="flex min-h-\[3\.25rem\] min-w-0 flex-1 flex-col justify-center sm:block sm:min-h-0">[\s\S]*?data-portal-header-icons/, 'the shop name takes the left of the one header row and the actions the right')
 })
 
 runTest('portal cover paths are rendered as image sources instead of fragile CSS urls', () => {
