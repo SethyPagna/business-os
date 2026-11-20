@@ -203,7 +203,9 @@ export const taskCloseEventSql = (): string => `INSERT INTO inventory_check_even
 
 export type TaskRow = {
   id: string; branch_id: number; title: string; status: 'open' | 'closed'; revision: number; started_at: string; closed_at: string | null; created_by: number; issuer: string | null
-  selection: unknown; total: number; done: number; removed: number; pickup_id: string | null; picked_by: number | null; picker: string | null; picked_at: string | null
+  selection: unknown; total: number; done: number; removed: number
+  /** True only for a closed task whose figures come from its close event; absent for open, reopened and legacy-closed tasks (their figures are live). */
+  atClose?: true; pickup_id: string | null; picked_by: number | null; picker: string | null; picked_at: string | null
   /** An OPEN task whose newest event is its reopen (a count it relied on was taken back): when, why, and the account that took it back (the route shows the name only to a viewer who may see staff identity). */
   reopened: { at: string; cause: 'resumed' | 'set_undone'; by: number | null; name: string | null } | null
 }
@@ -219,10 +221,11 @@ export async function readTaskRows(db: D1Compat, args: { organization: number | 
       ORDER BY s.started_at DESC, s.id DESC),
     closed_t AS (SELECT s.* FROM ${S} s INDEXED BY inventory_check_sessions_task_board WHERE s.organization_id IS @org AND ${kindOf('s')}='${TASK_MEMBERSHIP}' AND s.branch_id=@branchId AND s.status='closed'
       ORDER BY s.closed_at DESC, s.id DESC LIMIT @closedShown),
-    page AS (SELECT * FROM open_t UNION ALL SELECT * FROM closed_t)
+    page_t AS (SELECT * FROM open_t UNION ALL SELECT * FROM closed_t),
+    page AS MATERIALIZED (SELECT page.*, CASE WHEN page.status='closed' THEN ${frozenFiguresSql()} END AS frozen FROM page_t page)
     SELECT page.id AS id, page.branch_id AS branch_id, page.title AS title, page.status AS status, page.revision AS revision, page.started_at AS started_at, page.closed_at AS closed_at, page.created_by AS created_by,
       iu.username AS issuer, json_extract(page.scope_json,'$.selection') AS selection,
-      CASE WHEN page.status='closed' THEN COALESCE(${frozenFiguresSql()},${liveFiguresSql()}) ELSE ${liveFiguresSql()} END AS figures,
+      CASE WHEN page.status='closed' THEN COALESCE(page.frozen,${liveFiguresSql()}) ELSE ${liveFiguresSql()} END AS figures, page.frozen IS NOT NULL AS at_close,
       pk.id AS pickup_id, pk.created_by AS picked_by, pu.username AS picker, pk.started_at AS picked_at,
       CASE WHEN page.status='open' THEN (SELECT CASE WHEN e.action='resume' AND json_extract(e.after_json,'$.reopened')=1 THEN json_object('at',e.created_at,'cause',json_extract(e.after_json,'$.cause'),'by',e.actor_id,'name',(SELECT ru.username FROM users ru WHERE ru.id=e.actor_id)) END
         FROM inventory_check_events e WHERE e.session_id=page.id ORDER BY e.id DESC LIMIT 1) END AS reopened
@@ -230,8 +233,8 @@ export async function readTaskRows(db: D1Compat, args: { organization: number | 
       LEFT JOIN ${S} pk INDEXED BY inventory_check_sessions_kind_task ON pk.organization_id IS @org AND ${kindOf('pk')}='${PICKUP_MEMBERSHIP}' AND ${taskOf('pk')}=+page.id AND pk.status='open'
       LEFT JOIN users pu ON pu.id=pk.created_by
     ORDER BY (page.status='open') DESC, CASE WHEN page.status='open' THEN page.started_at ELSE page.closed_at END DESC, page.id DESC`)
-    .all<Omit<TaskRow, 'selection' | 'reopened' | 'total' | 'done' | 'removed'> & { selection: string | null; reopened: string | null; figures: number | null }>({ org: args.organization, branchId: args.branchId, closedShown: args.closedShown })
-  return rows.map(({ figures, ...row }) => ({ ...row, revision: Number(row.revision), ...decodeTaskFigures(figures), selection: parseSelection(row.selection), reopened: parseReopened(row.reopened) }))
+    .all<Omit<TaskRow, 'selection' | 'reopened' | 'total' | 'done' | 'removed' | 'atClose'> & { selection: string | null; reopened: string | null; figures: number | null; at_close: number }>({ org: args.organization, branchId: args.branchId, closedShown: args.closedShown })
+  return rows.map(({ figures, at_close, ...row }) => ({ ...row, ...(Number(at_close) === 1 ? { atClose: true as const } : {}), revision: Number(row.revision), ...decodeTaskFigures(figures), selection: parseSelection(row.selection), reopened: parseReopened(row.reopened) }))
 }
 
 function parseReopened(value: string | null | undefined): TaskRow['reopened'] {

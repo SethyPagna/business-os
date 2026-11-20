@@ -274,7 +274,7 @@ app.get('/lots', async c => {
   return c.json(await readInventoryCheckLots(getDb(c.env), user, { productId, branchId, limit: getPlanLimits(c.env).inventoryCheckLotLinesPerProduct }))
 })
 app.get('/sessions', async c => c.json(await listInventoryCheckSessions(getDb(c.env), await principal(c), c.req.query(), { approvals: await fixStockOn(c),
-  tasks: async (branchId) => new Map((await readTaskBoard(c, branchId)).rows.map((row): [string, InventoryCheckPickupTask] => [row.id, { id: row.id, title: row.title, status: row.status, total: row.total, done: row.done }])) })))
+  tasks: async (branchId) => new Map((await readTaskBoard(c, branchId)).rows.map((row): [string, InventoryCheckPickupTask] => [row.id, { id: row.id, title: row.title, status: row.status, total: row.total, done: row.done, ...(row.atClose ? { at_close: true as const } : {}) }])) })))
 app.post('/sessions', async c => {
   const result = await createInventoryCheckSession(getDb(c.env), await principal(c), await c.req.json().catch(()=>null), await loadLowStockConfig(c.env), { simple: await readSwitch(c.env, 'ic_simple') })
   return c.json(result, result.created ? 201 : 200)
@@ -299,7 +299,7 @@ const taskView = (row: TaskRow, user: SessionUser) => {
   const selection = row.selection && typeof row.selection === 'object' && (row.selection as { filters?: Record<string, unknown> }).filters
     ? { ...row.selection as object, filters: Object.fromEntries(Object.entries((row.selection as { filters: Record<string, unknown> }).filters).filter(([key]) => !(key === 'brand' && !access.fields.brand) && !(key === 'category' && !access.fields.category) && !(key === 'stockState' && !access.fields.stock))) }
     : row.selection
-  return { id: row.id, branch_id: row.branch_id, title: row.title, status: row.status, revision: row.revision, issued_at: row.started_at, ...(canSeeStaffIdentity(user, row.created_by) ? { issued_by: row.issuer } : {}), closed_at: row.closed_at, total: row.total, done: row.done, removed: row.removed, selection,
+  return { id: row.id, branch_id: row.branch_id, title: row.title, status: row.status, revision: row.revision, issued_at: row.started_at, ...(canSeeStaffIdentity(user, row.created_by) ? { issued_by: row.issuer } : {}), closed_at: row.closed_at, total: row.total, done: row.done, removed: row.removed, ...(row.atClose ? { at_close: true } : {}), selection,
     picked_up_by: row.pickup_id ? row.picker : null, picked_up_at: row.pickup_id ? row.picked_at : null, mine, ...(mine ? { pickup_session_id: row.pickup_id } : {}),
     can_pickup: open && row.pickup_id === null && canWorkInventoryCountTasks(user), can_release: open && row.pickup_id !== null && (mine || canIssueInventoryCountTasks(user)), can_close: open && canIssueInventoryCountTasks(user),
     // A task whose count was taken back (owner, 19 Nov): the reason and when; who took it back only for a viewer who may see staff identity, as issued_by.

@@ -6,7 +6,7 @@
 // (any count at the branch at or after the issue, wherever it was made), the auto-close in both submission writers, the manual close, the Count sessions list, and a random-world property test
 // against a brute-force oracle over the raw tables. Then every named mutant is planted and must be killed by the scenario that targets it.
 //
-// Run: node scripts/test-inventory-check-tasks-native.cjs
+// Run: node scripts/test-inventory-check-tasks-native.cjs [--only=scenarioName] (with --only, just that scenario and the mutants that target it)
 const assert = require('node:assert/strict')
 const path = require('node:path')
 const { createInvApp, USERS, person } = require('./harness/inv-app.cjs')
@@ -376,6 +376,32 @@ async function sessionsList(w) {
   assert.equal(all.items.some((s) => s.scope.membership === 'task'), false); assert.equal(all.total, all.items.length, 'the total does not count task rows')
   assert.equal(all.items.filter((s) => s.id === pickup).length, 1)
   w.as('picker2'); assert.equal((await w.get('/sessions?mine=1')).json.items.some((s) => s.id === pickup), false, 'not on another person\'s Mine')
+}
+
+/** at_close (deploy 9 fix): only a task closed with figures in its close event carries it, on the board row and on the pickup row of the sessions list; an open, a reopened and a legacy-closed task (no figures in the event) do not, and show live figures. */
+async function atClose(w) {
+  const sessionOf = async (id) => { w.as('admin'); return (await w.get('/sessions?pageSize=100')).json.items.find((s) => s.id === id) }
+  const hand = (await w.issue([100, 101], { title: 'Hand' })).json.item.id
+  const handPickup = (await w.pickup(hand)).json.item.id
+  assert.equal((await w.count([100], { task: hand })).status, 201)
+  const open = await taskOf(w, hand); assert.equal(open.status, 'open'); assert.equal('at_close' in open, false, 'an open task has no flag')
+  assert.equal('at_close' in (await sessionOf(handPickup)).task, false, 'nor its pickup row')
+  assert.equal((await w.close(hand)).status, 200)
+  assert.equal((await w.count([101], { task: hand })).status, 201, 'a count after the close moves the live figures, not the frozen ones')
+  const closed = await taskOf(w, hand); assert.equal(closed.status, 'closed'); assert.equal(closed.at_close, true); assert.equal(closed.done, 1); assert.equal(closed.total, 2)
+  const pickupRow = (await sessionOf(handPickup)).task; assert.equal(pickupRow.at_close, true, 'the pickup row of a closed task'); assert.equal(pickupRow.done, 1)
+  const legacy = (await w.issue([102, 103], { title: 'Legacy' })).json.item.id
+  const legacyPickup = (await w.pickup(legacy)).json.item.id
+  // closed the way deploy 8 closed: the task row and its pickup are closed and the task's close event holds no figures (the events table refuses an update, so the event is written as it was then)
+  w.app.raw.prepare("UPDATE inventory_check_sessions SET status='closed',revision=revision+1,closed_at='2026-11-20 03:00:00' WHERE id IN (?,?)").run([legacy, legacyPickup])
+  w.app.raw.prepare("INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at) VALUES(?,NULL,71,'admin','close','legacy-close-1','legacy',json_object('status','open','revision',0),json_object('status','closed','revision',1),json_object('sessionRevision',1),'2026-11-20 03:00:00')").run([legacy])
+  assert.equal((await w.count([102], { task: legacy })).status, 201); w.app.clearCaches()
+  const old = await taskOf(w, legacy); assert.equal(old.status, 'closed'); assert.equal('at_close' in old, false, 'a close event without figures is not at close'); assert.equal(old.done, 1, 'live figures'); assert.equal(old.total, 2)
+  assert.equal('at_close' in (await sessionOf(legacyPickup)).task, false, 'nor its pickup row')
+  const reopened = (await w.issue([104, 105], { title: 'Reopened' })).json.item.id
+  assert.equal((await w.close(reopened)).status, 200)
+  w.app.raw.prepare("UPDATE inventory_check_sessions SET status='open',closed_at=NULL WHERE id=?").run([reopened]); w.app.clearCaches()
+  const again = await taskOf(w, reopened); assert.equal(again.status, 'open'); assert.equal('at_close' in again, false, 'a reopened task shows live figures with no flag')
 }
 
 /** The cache: a warm Tasks open reads nothing; a writer moves it; the numbers change with the count. */
@@ -1073,7 +1099,7 @@ async function randomWorld(w, seed, steps) {
 
 // ---- run -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 const SCENARIOS = {
-  noEffect, issueShape, issueFilters, refusals, onePerson, race, taskList, doneRule, autoClose, manualClose, sessionsList, boardCache, olderListUnaffected,
+  noEffect, issueShape, issueFilters, refusals, onePerson, race, taskList, doneRule, autoClose, manualClose, sessionsList, atClose, boardCache, olderListUnaffected,
   autoCloseOlderWriter: (w) => autoClose(w, { lotWriter: false }),
   outsideCloseLot: (w) => outsideClose(w, 'lot'), outsideClosePlain: (w) => outsideClose(w, 'plain'), outsideCloseObserve: (w) => outsideClose(w, 'observe'),
   outsideNegativesLot: (w) => outsideNegatives(w, 'lot'), outsideNegativesPlain: (w) => outsideNegatives(w, 'plain'), outsideNegativesObserve: (w) => outsideNegatives(w, 'observe'),
@@ -1084,8 +1110,10 @@ const SCENARIOS = {
 }
 const WORLD = { issueFilterHeaderChildren: { summer: true }, issueFilterNothing: { summer: true }, issueFilters: { extraProducts: 310 }, budget: { extraProducts: 70 }, issueFilterFamilies: { families: 280 } }
 
+const ONLY = (process.argv.find((a) => a.startsWith('--only=')) || '').slice(7)
 async function main() {
   for (const [name, scenario] of Object.entries(SCENARIOS)) {
+    if (ONLY && name !== ONLY) continue
     await check(`scenario ${name}`, async () => { await scenario(build({}, WORLD[name] || {})) })
   }
   await check('the history text of a Set that closes a difference says difference (old history stays as written)', () => {
@@ -1115,6 +1143,9 @@ async function main() {
     ['a task item is written as a count (Done, with a time): it becomes a latest count', edit('lib/inventoryCheckSessions.ts', "INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json)\n      SELECT @id,json_extract(value,'$.product_id'),@branchId,json_extract(value,'$.product'),NULL,'{}' FROM json_each(@members)`", "INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,revision,updated_by,updated_at)\n      SELECT @id,json_extract(value,'$.product_id'),@branchId,json_extract(value,'$.product'),NULL,'{}','done',0,1,@actorId,@now FROM json_each(@members)`"), ['noEffect']],
     ['the issue permission is not checked', { 'routes/inventoryChecks.ts': [["  if (!canIssueInventoryCountTasks(user)) throw new InventoryCheckSessionError(403, 'inventory_check_issue_required')\n", '']], 'lib/inventoryCheckSessions.ts': [["  if (!canIssueInventoryCountTasks(actor)) fail(403, 'inventory_check_issue_required')\n", '']] }, ['refusals']],
     ['the taskId restriction is missing on /list', edit('routes/inventoryChecks.ts', '  if (extra.task) {\n    let ids = new Set(extra.task.productIds)', '  if (extra.task && Date.now() < 0) {\n    let ids = new Set(extra.task.productIds)'), ['taskList']],
+    ['the board row never says at_close', edit('routes/inventoryChecks.ts', "removed: row.removed, ...(row.atClose ? { at_close: true } : {}), selection,", 'removed: row.removed, selection,'), ['atClose']],
+    ['the pickup row never says at_close', edit('routes/inventoryChecks.ts', "done: row.done, ...(row.atClose ? { at_close: true as const } : {}) }]", 'done: row.done }]'), ['atClose']],
+    ['a legacy closed task is flagged at close (the flag is the status, not the stored figures)', edit('lib/inventoryCheckTasks.ts', 'page.frozen IS NOT NULL AS at_close', "page.status='closed' AS at_close"), ['atClose']],
     ['task rows are listed under Count sessions', edit('lib/inventoryCheckSessions.ts', "    AND json_extract(scope_json, '$.membership') IS NOT 'task' AND (@mine=0", '    AND (@mine=0'), ['sessionsList']],
     ['the auto-close is missing from the close of a count session', edit('lib/inventoryCheckSessions.ts', "    ...(taskPart ? taskPart.statements : []),\n    // LAST: after the UPDATE", "    // LAST: after the UPDATE"), ['outsideCloseObserve', 'observationNotFinal']],
     ['two tasks closed by one write share a close request id', edit('lib/inventoryCheckTasks.ts', "@key||'-task-closed-'||c.id", "@key||'-task-closed-'"), ['outsideNegativesLot', 'outsideNegativesPlain', 'outsideNegativesObserve']],
@@ -1155,6 +1186,7 @@ async function main() {
   ]
   for (const [name, edits, targets] of MUTANTS) {
     for (const target of targets) {
+      if (ONLY && target !== ONLY) continue
       await check(`mutant killed: ${name} (by ${target})`, async () => {
         let caught = false
         try { await SCENARIOS[target](build(edits, WORLD[target] || {})) } catch (error) { caught = !/must match once/.test(String(error && error.message)) ? true : (() => { throw error })() }

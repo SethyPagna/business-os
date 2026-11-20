@@ -98,12 +98,12 @@ async function main() {
     check('P2.1: five closed tasks of 300 products read <= 5 x 4 + 20 rows from their close events (before: every item of every closed task again); the figures are the close figures', () => {
       assert.ok(frozen.rows <= 5 * 4 + 20, `closed part ${frozen.rows} rows`)
       assert.ok(oldClosed.rows > 5000, `the old statement walked the closed tasks: ${oldClosed.rows}`)
-      for (const row of frozen.results) assert.deepEqual(decode(row.figures), { total: 300, done: 300, removed: 0 })
+      for (const row of frozen.results) { assert.deepEqual(decode(row.figures), { total: 300, done: 300, removed: 0 }); assert.equal(Number(row.at_close), 1, 'the figures come from the close event') }
     })
     check('P2.1: a task closed before the figures were recorded falls back to the live walk, with the same figures (and pays the walk)', () => {
       assert.ok(legacy.rows > 5000, `the fallback walked: ${legacy.rows}`)
       assert.equal(legacy.results.length, 5)
-      for (const row of legacy.results) assert.deepEqual(decode(row.figures), { total: 300, done: 150, removed: 0 }, 'live: 150 of the 300 products have a count since')
+      for (const row of legacy.results) { assert.deepEqual(decode(row.figures), { total: 300, done: 150, removed: 0 }, 'live: 150 of the 300 products have a count since'); assert.equal(Number(row.at_close), 0, 'a close event without figures is not at close') }
     })
 
     // ---- the cold board (P2.2) --------------------------------------------------------------------------------------------------------------------------------
@@ -122,6 +122,7 @@ async function main() {
         if (row.status === 'open') assert.deepEqual(f, { total: Number(old.get(row.id).total), done: Number(old.get(row.id).done), removed: Number(old.get(row.id).removed) }, row.id)
         else assert.deepEqual(f, { total: 300, done: 300, removed: 0 }, row.id)
         if (row.status === 'open') assert.deepEqual(f, { total: 300, done: 150, removed: 0 })
+        assert.equal(Number(row.at_close), row.status === 'open' ? 0 : 1, row.id)
       }
     })
     const removed = await build({ open: 3, closed: 1, deactivated: true })
