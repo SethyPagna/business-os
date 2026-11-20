@@ -13,7 +13,7 @@
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero products_old,gallery_old,avatars_old,promotions_old,settings_old,submissions_old,import_matches_old,import_files_old,pending_old,library_old
--- ops:max-rows-read 11450
+-- ops:max-rows-read 11447
 SELECT
   g0.products_old, g0.upload_rows_seen, g1.gallery_old, g2.avatars_old, g3.promotions_old, g4.settings_old,
   g5.submissions_old, g6.import_matches_old, g7.import_files_old, g8.pending_old, g9.library_old
