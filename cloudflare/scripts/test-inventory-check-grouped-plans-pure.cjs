@@ -61,8 +61,8 @@ async function main() {
         if (!query.checkState) assert.ok(!countPlan.some(line => /inventory_check_items_product_latest/.test(line)), `the count statement never runs the per-row lookup: ${countPlan.join(NL)}`)
         const pagePlan = plan(db, pages[0].sql, pages[0].params)
         const lookups = pagePlan.filter(line => /SEARCH i USING INDEX inventory_check_items_product_latest/.test(line))
-        // One grouping lookup per cohort row plus the page rows' two CTEs (latest, open_check), which read the same index since lane ic-summary-reads; a CTE read twice would add another.
-        if (!query.checkState) assert.equal(lookups.length, 3, `the page statement runs the grouping lookup once per cohort row and each page CTE once (a CTE read twice would run it again): ${pagePlan.join(NL)}`)
+        // One grouping lookup per cohort row (a second textual one when no branch is named, see lastCheckedSql) plus the page rows' two CTEs (latest, open_check), which read the same index since lane ic-summary-reads; a CTE read twice would add another.
+        if (!query.checkState) assert.equal(lookups.length, query.branchId ? 3 : 4, `the page statement runs the grouping lookup once per cohort row (twice in the text with no branch named: the sole active branch's seek, and the loop over the active branches that only runs when there is not exactly one) and each page CTE once (a CTE read twice would run it again): ${pagePlan.join(NL)}`)
         for (const { sql, params } of statements) assert.deepEqual(icScans(plan(db, sql, params)), [], `no IC table is scanned: ${JSON.stringify(query)}`)
       }
     })

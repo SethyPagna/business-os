@@ -199,7 +199,7 @@ function plans(app, stats) {
       if (params.groupBy === 'checked' && !params.checkState) {
         const lines = plan(ranking[0])
         assert.ok(lines.some(line => /SEARCH i USING INDEX inventory_check_items_product_latest \(product_id=\?/.test(line)), `items by the 0285 index:\n${lines.join('\n')}`)
-        assert.equal(lines.filter(line => /SEARCH i USING INDEX inventory_check_items_product_latest/.test(line)).length, 1, 'the lookup runs once per cohort row')
+        assert.equal(lines.filter(line => /SEARCH i USING INDEX inventory_check_items_product_latest/.test(line)).length, params.branchId ? 1 : 2, 'the lookup runs once per cohort row (with no branch named its text holds two seeks: the sole active branch, and the loop over the active branches that runs only when there is not exactly one; see lastCheckedSql)')
         if (params.branchId) assert.ok(lines.some(line => /branch_id=\?/.test(line)), 'the branch is an index term')
       } else if (params.groupBy === 'category') assert.ok(!plan(ranking[0]).some(line => /inventory_check_/.test(line)), 'the category ranking never reads a check table')
     }
