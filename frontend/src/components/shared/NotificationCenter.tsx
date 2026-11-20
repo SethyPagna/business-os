@@ -13,14 +13,7 @@ import Search from 'lucide-react/dist/esm/icons/search.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../app/AppContextCore.tsx'
-import { emitToast, NOTIFICATION_ALERT_MS } from './toastChannel.ts'
-import {
-  pickAlertsToAnnounce,
-  planAlertPopups,
-  readAnnouncedAlertTimes,
-  toastTypeForTone,
-  writeAnnouncedAlertTimes,
-} from './notificationAlerts.ts'
+import { announceFreshAlerts, browserAlertStore, popUpAlerts } from './notificationAlerts.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -138,6 +131,7 @@ type AppContextValue = {
   saveSettings: (settings: Record<string, string>) => Promise<unknown>
   settings: Record<string, unknown>
   t: (key: string) => string
+  user?: { id?: unknown } | null
 }
 
 type SyncContextValue = {
@@ -464,10 +458,6 @@ function writeSeenTails(tails: Record<string, SeenTail>): void {
   }
 }
 
-function sectionRank(id: string): number {
-  return id === 'security' ? -1 : id === 'imports' ? 1 : 0
-}
-
 function matchesVisibilityMode(mode: VisibilityMode): boolean {
   if (typeof window === 'undefined' || !window.matchMedia) return true
   if (mode === 'desktop') return window.matchMedia('(min-width: 768px)').matches
@@ -491,7 +481,7 @@ function NotificationSeverityIcon({ tone = 'info', label }: NotificationSeverity
 }
 
 export default function NotificationCenter({ compact = false, openRequestId = 0, visibility = 'always' }: NotificationCenterProps) {
-  const { navigateTo, notify, saveSettings, settings, t } = useApp()
+  const { navigateTo, notify, saveSettings, settings, t, user } = useApp()
   const { syncChannel } = useSync()
   const isKhmer = /[\u1780-\u17FF]/.test(t?.('cancel') || '')
   const tr = useCallback((key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
@@ -545,7 +535,6 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   const [reportJobId, setReportJobId] = useState<string | null>(null)
   // The bell item a pop-up sent the person to: scrolled to, focused and ringed once the panel is open.
   const [focusItemId, setFocusItemId] = useState('')
-  const announcedAlertTimesRef = useRef<Record<string, number> | null>(null)
   // Bumped to force `badgeVisibleCount` to recompute once a suppressed
   // alert's realert window elapses -- see the scheduling effect below.
   // Carries no data of its own.
@@ -813,6 +802,14 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     return typeof renderer === 'function' ? renderer(params || {}, t) : (fallback || '')
   }, [isKhmer, t])
 
+  // The one place a row's title and detail are built: the bell rows and the bell-item pop-ups both use it.
+  const itemText = useCallback((item: NotificationItem): { displayLabel: string; displayMeta: string } => ({
+    displayLabel: item.labelKey ? tr(item.labelKey, item.label || '') : (item.label || ''),
+    displayMeta: item.metaKey
+      ? renderStructuredCopy(item.metaKey, item.metaParams, item.meta || '')
+      : (item.meta || ''),
+  }), [renderStructuredCopy, tr])
+
   const normalizedNotificationSearch = notificationSearch.trim().toLowerCase()
 
   const effectiveSections = useMemo<EffectiveNotificationSection[]>(() => (
@@ -825,13 +822,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
         : (section.summary || '')
       const sectionItems = fullSectionItems[section.id] || section.items
       const decoratedItems: DecoratedNotificationItem[] = Array.isArray(sectionItems)
-        ? sectionItems.map((item) => ({
-          ...item,
-          displayLabel: item.labelKey ? tr(item.labelKey, item.label || '') : (item.label || ''),
-          displayMeta: item.metaKey
-            ? renderStructuredCopy(item.metaKey, item.metaParams, item.meta || '')
-            : (item.meta || ''),
-        }))
+        ? sectionItems.map((item) => ({ ...item, ...itemText(item) }))
         : []
       const filteredItems = decoratedItems.filter((item) => {
         if (toneFilter !== 'all' && item.tone !== toneFilter) return false
@@ -869,9 +860,8 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
         enabled: preferenceValue(section.enabledKey, settings, true),
       }
     }).filter((section) => section.filteredItemCount > 0 || (toneFilter === 'all' && !normalizedNotificationSearch))
-      // Worker-computed sections stand until their cause is fixed, so they sit above the client-composed Imports history.
-      .sort((a, b) => sectionRank(a.id) - sectionRank(b.id))
-  ), [fullSectionItems, importJobsSection, itemLimit, normalizedNotificationSearch, renderStructuredCopy, sectionPages, settings, summary.sections, toneFilter, tr])
+      .sort((a, b) => (a.id === 'security' ? -1 : b.id === 'security' ? 1 : 0))
+  ), [fullSectionItems, importJobsSection, itemLimit, itemText, normalizedNotificationSearch, renderStructuredCopy, sectionPages, settings, summary.sections, toneFilter, tr])
 
   // Silent indicator: a pending device approve/reject/revoke request (or a
   // new-country sign-in on an already-approved device) that this admin's
@@ -959,49 +949,37 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
 
   const realertMinutes = Math.max(1, Number(summary.preferences?.realertMinutes) || 10)
 
-  // A bell item this device has not announced pops up once, in full, for ten seconds (an alert pop-up is
-  // never stored anywhere). More than three new ones in one load become a single "N alerts need
-  // attention". The Settings repeat interval decides when an old unresolved item may pop up again.
+  // A warning or danger bell item this device has not announced pops up once, in full, for ten seconds (an
+  // alert pop-up is never stored anywhere), and never again while it stays unresolved: the badge carries it
+  // from then on. More than three new ones in one load become a single "N alerts need attention".
   useEffect(() => {
-    if (!visibilityActive || open || summary.unavailable || typeof document === 'undefined' || document.visibilityState === 'hidden') return
-    if (!announcedAlertTimesRef.current) announcedAlertTimesRef.current = readAnnouncedAlertTimes()
-    const announced = announcedAlertTimesRef.current
+    const blocked = !visibilityActive || open || !!summary.unavailable || typeof document === 'undefined' || document.visibilityState === 'hidden'
     const rows = (summary.sections || []).flatMap((section) => (section.items || []).map((item) => ({ item, sectionId: section.id })))
-    const now = Date.now()
-    const fresh = pickAlertsToAnnounce(rows.map((row) => row.item), seenAlertTimes, announced, now, realertMinutes * 60000, seenSecurityIds)
-    if (!fresh.length) return
-    for (const item of fresh) announced[item.id] = now
-    writeAnnouncedAlertTimes(announced)
-    const openOn = (itemId: string, sectionId?: string) => {
-      setToneFilter('all')
-      setNotificationSearch('')
-      if (sectionId) setCollapsed((current) => ({ ...current, [sectionId]: false }))
-      setFocusItemId(itemId)
-      setOpen(true)
-      void loadSummary(true)
-    }
-    const plan = planAlertPopups(fresh)
-    if (plan.kind === 'many') {
-      emitToast({
-        message: formatCopy('notification_alerts_need_attention', { count: plan.count }, `${plan.count} alerts need attention`, `${plan.count} ការជូនដំណឹងត្រូវដោះស្រាយ`),
-        type: 'warning',
-        duration: NOTIFICATION_ALERT_MS,
-        onActivate: () => openOn(''),
-      })
-      return
-    }
-    if (plan.kind !== 'each') return
-    for (const item of plan.items) {
-      const sectionId = rows.find((row) => row.item.id === item.id)?.sectionId
-      const title = item.labelKey ? tr(item.labelKey, item.label || '') : (item.label || '')
-      const detail = item.metaKey ? renderStructuredCopy(item.metaKey, item.metaParams, item.meta || '') : (item.meta || '')
-      emitToast({
-        message: [title, detail].filter(Boolean).join(': '),
-        type: toastTypeForTone(item.tone),
-        duration: NOTIFICATION_ALERT_MS,
-        onActivate: () => openOn(item.id, sectionId),
-      })
-    }
+    const plan = announceFreshAlerts({
+      items: rows.map((row) => row.item),
+      blocked,
+      seenTimes: seenAlertTimes,
+      skipIds: seenSecurityIds,
+      now: Date.now(),
+      store: browserAlertStore(user?.id),
+    })
+    if (plan.kind === 'none') return
+    popUpAlerts(plan, {
+      itemMessage: (item) => {
+        const { displayLabel, displayMeta } = itemText(item)
+        return [displayLabel, displayMeta].filter(Boolean).join(': ')
+      },
+      manyMessage: (count) => formatCopy('notification_alerts_need_attention', { count }, `${count} alerts need attention`, `មានការជូនដំណឹង ${count} ត្រូវដោះស្រាយ`),
+      open: (item) => {
+        setToneFilter('all')
+        setNotificationSearch('')
+        const sectionId = item ? rows.find((row) => row.item.id === item.id)?.sectionId : undefined
+        if (sectionId) setCollapsed((current) => ({ ...current, [sectionId]: false }))
+        setFocusItemId(item?.id || '')
+        setOpen(true)
+        void loadSummary(true)
+      },
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [summary.sections, visibilityActive])
 
@@ -1333,7 +1311,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
                                 <span className="block truncate text-sm font-medium text-slate-800 dark:text-slate-100">{item.displayLabel}</span>
                                 <span className="block text-xs text-slate-500 dark:text-slate-400">{item.displayMeta}</span>
                               </span>
-                              {section.id !== 'imports' && item.kind !== 'import_job' ? (
+                              {(item.tone === 'danger' || item.tone === 'warning') && section.id !== 'imports' && item.kind !== 'import_job' ? (
                                 <span
                                   data-notification-pin
                                   role="img"

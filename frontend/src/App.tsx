@@ -1,7 +1,7 @@
 import { useMobileSectionNavMode } from './utils/sectionNavPreference.ts'
 import { getAuthStorage } from './utils/authStorage.ts'
 import { getHubPageFromLocation } from './components/shared/hubNavigation.ts'
-import type { FocusEvent } from 'react'
+import type { CSSProperties, FocusEvent, MouseEvent } from 'react'
 import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ComponentType, ErrorInfo, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
@@ -11,8 +11,11 @@ import Bell from 'lucide-react/dist/esm/icons/bell.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp as useAppHook } from './AppContext.tsx'
 import { NotesProvider } from './components/notes/NotesContext.tsx'
-import { useToastStack } from './app/useToastStack.ts'
-import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, resolveAdminLandingPage, updateMountedPages } from './app/appShellUtils.ts'
+import { limitForDialog, useDialogOpen, useNarrowViewport, useToastStack } from './app/useToastStack.ts'
+import type { Toast as ToastEntry } from './app/useToastStack.ts'
+import { toastStackTop } from './utils/mobileNavChrome.ts'
+import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationKind, isPublicCatalogPath, MAX_MOUNTED_PAGES, resolveAdminLandingPage, updateMountedPages } from './app/appShellUtils.ts'
+import type { NotificationVariant } from './app/appShellUtils.ts'
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.ts'
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.ts'
 import { NAV_ITEMS } from './components/shared/navigationConfig.ts'
@@ -190,6 +193,9 @@ interface PageErrorBoundaryState {
 interface NotificationProps {
   notification: AppNotification | null
   onDismiss?: () => void
+  // The update bar is showing, and the shell has its own mobile top bar: the stack starts below both.
+  appUpdateVisible?: boolean
+  headerPresent?: boolean
 }
 
 interface SyncErrorBannerProps {
@@ -1087,18 +1093,42 @@ class PageErrorBoundary extends Component<PageErrorBoundaryProps, PageErrorBound
   }
 }
 
-function Notification({ notification, onDismiss }: NotificationProps) {
+const TOAST_ICON_PATHS: Record<NotificationVariant, string> = {
+  success: 'M3 8.5l3.2 3.2L13 4.8',
+  error: 'M4 4l8 8M12 4l-8 8',
+  warning: 'M8 3.5v5.5M8 12v.5',
+  info: 'M8 7.2v4.6M8 4.2v.5',
+}
+
+function ToastIcon({ kind }: { kind: NotificationVariant }) {
+  return (
+    <svg className="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.4" opacity="0.55" />
+      <path d={TOAST_ICON_PATHS[kind]} stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function Notification({ notification, onDismiss, appUpdateVisible = false, headerPresent = false }: NotificationProps) {
   const { t } = useApp()
-  // Every pop-up is drawn here, so feature pages only enqueue messages through AppContext.
-  // The whole message always shows (no clamp): an alert is read for ten seconds, not guessed at.
-  const { visible, dismiss, pause, resume } = useToastStack(notification)
-  // The stack and every pop-up body let the pointer through to whatever is underneath (a dialog's Close sits
-  // under it on a phone). Only the controls below take input. The clock never waits on the pointer: a pop-up
-  // under a resting mouse or finger still leaves on time. Only keyboard focus on a control pauses it, so a
-  // keyboard user can finish reading; focus that came from a click or tap (not :focus-visible) does not.
+  // Every pop-up is drawn here, so feature pages only enqueue messages through AppContext. The whole message
+  // always shows (no clamp): an alert is read for ten seconds, not guessed at. The context's own slot message
+  // (write conflict, forced sign-out) is drawn above the stack and keeps the context's lifetime.
+  const { visible, slot, dismiss, pause, resume } = useToastStack(notification)
+  const everyToast = slot ? [slot, ...visible] : visible
+  const dialogOpen = useDialogOpen(everyToast.length > 0)
+  const narrow = useNarrowViewport()
+  const shown = limitForDialog(everyToast, dialogOpen, narrow)
+  const stackRef = useRef<HTMLDivElement | null>(null)
+  const returnFocus = useRef<HTMLElement | null>(null)
+  // The stack and every pop-up body let the pointer through to whatever is underneath. Only the controls take
+  // input, and not while a dialog is open. The clock never waits on the pointer: only keyboard focus on a
+  // control pauses it, so a keyboard user can finish reading; focus from a click or tap does not.
   const focused = useRef(new Set<string>())
   const holdProps = (key: string, control: string) => ({
     onFocus: (event: FocusEvent<HTMLElement>) => {
+      const from = event.relatedTarget as HTMLElement | null
+      if (from && !stackRef.current?.contains(from)) returnFocus.current = from
       if (!event.currentTarget.matches(':focus-visible')) return
       focused.current.add(key + control)
       pause(key)
@@ -1108,48 +1138,81 @@ function Notification({ notification, onDismiss }: NotificationProps) {
       resume(key)
     },
   })
-  if (!visible.length) return null
+  const dismissToast = (toast: ToastEntry, event: MouseEvent<HTMLButtonElement>) => {
+    const button = event.currentTarget
+    const viaKeyboard = event.detail === 0 && document.activeElement === button
+    const controls = Array.from(stackRef.current?.querySelectorAll<HTMLElement>('[data-toast-dismiss]') || [])
+    const at = controls.indexOf(button)
+    const next = viaKeyboard ? (controls[at + 1] || controls[at - 1] || null) : null
+    if (toast.fromSlot) onDismiss?.()
+    else dismiss(toast.key)
+    if (!viaKeyboard) return
+    window.requestAnimationFrame(() => {
+      const target = next?.isConnected ? next : returnFocus.current
+      if (target?.isConnected) target.focus()
+    })
+  }
+  const kindLabel = (toast: ToastEntry) => t(`toast_type_${getNotificationKind(toast.type)}`)
+  const top = toastStackTop({ headerPresent, appUpdateVisible })
+  const controlClass = dialogOpen ? 'pointer-events-none' : 'pointer-events-auto'
 
   const node = (
-    <div className="fixed right-3 top-[4.75rem] md:right-5 md:top-5 z-[1100] pointer-events-none flex w-[min(24rem,calc(100vw-1.5rem))] flex-col gap-2">
-      {visible.map((toast) => {
-        const colorClass = getNotificationColor(toast.type)
-        const prefix = getNotificationPrefix(toast.type)
-        const text = <span className="min-w-0 flex-1 break-words text-left leading-relaxed">{prefix}{toast.message}</span>
-        return (
-          <div
-            key={toast.key}
-            role={toast.type === 'error' ? 'alert' : 'status'}
-            aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
-            className={`${colorClass} text-white pl-4 pr-2.5 py-3 rounded-xl shadow-2xl text-sm font-medium fade-in pointer-events-none flex items-start gap-2`}
-          >
-            {text}
-            {toast.onActivate ? (
-              <button
-                type="button"
-                {...holdProps(toast.key, 'view')}
-                onClick={() => { toast.onActivate?.(); dismiss(toast.key) }}
-                className="pointer-events-auto flex shrink-0 items-center gap-1 rounded-full bg-white/15 px-2.5 py-1 text-xs font-semibold leading-relaxed text-white hover:bg-white/25 transition-colors"
+    <>
+      {/* Two live regions, mounted from the start and never removed, carry the announcements (the visible
+          pop-ups are not live regions themselves): a message inserted together with its own region is often not read. */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="false">
+        {everyToast.filter((toast) => toast.type !== 'error').map((toast) => <p key={toast.key}>{kindLabel(toast)}: {toast.message}</p>)}
+      </div>
+      <div className="sr-only" role="alert" aria-live="assertive" aria-atomic="false">
+        {everyToast.filter((toast) => toast.type === 'error').map((toast) => <p key={toast.key}>{kindLabel(toast)}: {toast.message}</p>)}
+      </div>
+      {shown.length ? (
+        <div
+          ref={stackRef}
+          style={{ '--toast-top': top.phone, '--toast-top-md': top.tablet } as CSSProperties}
+          className="fixed right-3 top-[var(--toast-top)] md:right-5 md:top-[var(--toast-top-md)] z-[1100] pointer-events-none flex w-[min(24rem,calc(100vw-1.5rem))] flex-col gap-2"
+        >
+          {shown.map((toast) => {
+            const kind = getNotificationKind(toast.type)
+            return (
+              <div
+                key={toast.key}
+                data-toast-type={kind}
+                className={`${getNotificationColor(toast.type)} text-white pl-3 pr-2 py-3 rounded-xl shadow-2xl text-sm font-medium fade-in pointer-events-none flex items-start gap-2`}
               >
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M4 1.5L8.5 6L4 10.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                {t('view')}
-              </button>
-            ) : null}
-            <button
-              type="button"
-              aria-label={t('dismiss_notification')}
-              {...holdProps(toast.key, 'dismiss')}
-              onClick={() => { dismiss(toast.key); if (toast.fromSlot) onDismiss?.() }}
-              className="pointer-events-auto shrink-0 -mt-0.5 -mr-0.5 rounded-full p-1 leading-none text-white/80 hover:text-white hover:bg-white/15 transition-colors"
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M1 1L13 13M13 1L1 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-              </svg>
-            </button>
-          </div>
-        )
-      })}
-    </div>
+                <ToastIcon kind={kind} />
+                <span className="min-w-0 flex-1 break-words text-left leading-relaxed">{toast.message}</span>
+                {toast.onActivate ? (
+                  <button
+                    type="button"
+                    tabIndex={dialogOpen ? -1 : undefined}
+                    {...holdProps(toast.key, 'view')}
+                    onClick={() => { toast.onActivate?.(); dismiss(toast.key) }}
+                    className={`${controlClass} -my-1 flex min-h-10 shrink-0 items-center gap-1 rounded-full bg-white/15 px-3 text-xs font-semibold leading-relaxed text-white hover:bg-white/25 transition-colors`}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M4 1.5L8.5 6L4 10.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                    {t('view')}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  data-toast-dismiss
+                  tabIndex={dialogOpen ? -1 : undefined}
+                  aria-label={t('dismiss_notification')}
+                  {...holdProps(toast.key, 'dismiss')}
+                  onClick={(event) => dismissToast(toast, event)}
+                  className={`${controlClass} -my-2 -mr-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full leading-none text-white/80 hover:text-white hover:bg-white/15 transition-colors`}
+                >
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M1 1L13 13M13 1L1 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                  </svg>
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      ) : null}
+    </>
   )
   return typeof document !== 'undefined' ? createPortal(node, document.body) : node
 }
@@ -2007,6 +2070,7 @@ export default function App() {
     return (
       <>
         <AppUpdateBanner update={appUpdate} onDismiss={clearAppUpdate} />
+        <Notification notification={notification} onDismiss={dismissNotification} appUpdateVisible={!!appUpdate} />
         <div className="business-os-initial-shell" role="status" aria-live="polite">
           <div className="business-os-initial-panel">
             <div className="business-os-initial-spinner" aria-hidden="true" />
@@ -2024,6 +2088,7 @@ export default function App() {
     return (
       <>
         <AppUpdateBanner update={appUpdate} onDismiss={clearAppUpdate} />
+        <Notification notification={notification} onDismiss={dismissNotification} appUpdateVisible={!!appUpdate} />
         <Suspense fallback={<PageLoader />}>
           <Login />
         </Suspense>
@@ -2043,6 +2108,7 @@ export default function App() {
         <Suspense fallback={<PageLoader />}>
           <ForcedPasswordChange />
         </Suspense>
+        <Notification notification={notification} onDismiss={dismissNotification} appUpdateVisible={!!appUpdate} />
       </>
     )
   }
@@ -2104,7 +2170,7 @@ export default function App() {
         </div>
       </NotesProvider>
 
-      <Notification notification={notification} onDismiss={dismissNotification} />
+      <Notification notification={notification} onDismiss={dismissNotification} appUpdateVisible={!!appUpdate} headerPresent />
       {/* One bottom stack for the shell's persistent advisories, so two of
           them can never land on top of each other, and so the clearance over
           the mobile bottom nav is decided once. Inert where empty. On desktop

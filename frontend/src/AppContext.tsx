@@ -2081,6 +2081,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     lastNotificationRef.current = { message: normalizedMessage, type, at: now }
     // An alert is shown in full for ten seconds and is then gone; nothing about it is stored.
     emitToast({ message: normalizedMessage, type, duration: getNotificationDuration(type, duration) })
+    // As before, a pop-up raised through notify replaces whatever the context's own slot was showing.
+    setNotification(null)
   }, [])
 
   const dismissNotification = useCallback(() => {

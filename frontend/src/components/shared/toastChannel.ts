@@ -25,11 +25,25 @@ export type ToastRequest = {
 type ToastListener = (request: ToastRequest) => void
 const toastListeners = new Set<ToastListener>()
 
+// A message raised while nothing is listening (the sign-in screen swapping for the shell, the boot shell)
+// is held for its own lifetime and handed to the next listener, as the old single state slot held it.
+const heldToasts: Array<{ request: ToastRequest; at: number }> = []
+
 export function subscribeToasts(listener: ToastListener): () => void {
   toastListeners.add(listener)
+  const now = Date.now()
+  const held = heldToasts.splice(0)
+  for (const entry of held) {
+    if (now - entry.at < entry.request.duration) listener(entry.request)
+  }
   return () => { toastListeners.delete(listener) }
 }
 
 export function emitToast(request: ToastRequest): void {
+  if (!toastListeners.size) {
+    heldToasts.push({ request, at: Date.now() })
+    if (heldToasts.length > NOTIFICATION_MAX_VISIBLE) heldToasts.shift()
+    return
+  }
   for (const listener of [...toastListeners]) listener(request)
 }

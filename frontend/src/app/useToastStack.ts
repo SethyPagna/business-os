@@ -7,60 +7,71 @@ export type Toast = {
   type: string
   duration: number
   onActivate?: () => void
-  // Raised through the context's single `notification` slot, which clears itself; the stack never times it.
+  // Drawn from the context's own slot: dismissing it tells the context.
   fromSlot?: boolean
 }
 
+// The context's own single `notification` slot (write-conflict notices, the forced sign-out error). Its
+// lifetime belongs to the context, which clears it; the stack only draws it, above the pop-ups.
 type Slot = { id?: number; message: string; type?: string } | null
 type Timer = { handle: number | null; left: number; startedAt: number }
 
-// At most NOTIFICATION_MAX_VISIBLE pop-ups show at once, newest on top; the rest wait in arrival
-// order and each one's clock starts only when it appears. Hover or focus pauses that pop-up's clock.
+export function slotToast(slot: Slot): Toast | null {
+  if (!slot?.message) return null
+  return { key: `slot-${slot.id ?? 0}`, message: slot.message, type: slot.type || 'info', duration: Infinity, fromSlot: true }
+}
+
+// The newest message is always on screen. At most NOTIFICATION_MAX_VISIBLE show at once; a further one pushes
+// the oldest off at once (there is no waiting list). A message identical to one already showing does not add a
+// second pop-up, it restarts that pop-up's clock. Every clock starts when its pop-up is shown.
 export function useToastStack(slot: Slot) {
   const [items, setItems] = useState<Toast[]>([])
+  const list = useRef<Toast[]>([])
   const timers = useRef(new Map<string, Timer>())
   const seq = useRef(0)
 
-  const dismiss = useCallback((key: string) => {
+  const commit = useCallback((next: Toast[]) => {
+    list.current = next
+    setItems(next)
+  }, [])
+
+  const stop = useCallback((key: string) => {
     const timer = timers.current.get(key)
     if (timer?.handle != null) window.clearTimeout(timer.handle)
     timers.current.delete(key)
-    setItems((current) => current.filter((item) => item.key !== key))
   }, [])
 
-  useEffect(() => subscribeToasts((request) => {
-    seq.current += 1
-    const key = `toast-${seq.current}`
-    setItems((current) => [...current, { key, ...request }])
-  }), [])
-
-  useEffect(() => {
-    setItems((current) => {
-      const rest = current.filter((item) => !item.fromSlot)
-      if (!slot?.message) return rest.length === current.length ? current : rest
-      return [...rest, { key: `slot-${slot.id ?? 0}`, message: slot.message, type: slot.type || 'info', duration: Infinity, fromSlot: true }]
-    })
-  }, [slot])
+  const dismiss = useCallback((key: string) => {
+    stop(key)
+    if (list.current.some((item) => item.key === key)) commit(list.current.filter((item) => item.key !== key))
+  }, [commit, stop])
 
   const start = useCallback((key: string, ms: number) => {
+    stop(key)
     const entry: Timer = { handle: null, left: ms, startedAt: Date.now() }
     entry.handle = window.setTimeout(() => dismiss(key), ms)
     timers.current.set(key, entry)
-  }, [dismiss])
+  }, [dismiss, stop])
 
-  useEffect(() => {
-    const visible = items.slice(0, NOTIFICATION_MAX_VISIBLE)
-    const present = new Set(items.map((item) => item.key))
-    for (const [key, timer] of timers.current) {
-      if (present.has(key)) continue
-      if (timer.handle != null) window.clearTimeout(timer.handle)
-      timers.current.delete(key)
+  useEffect(() => subscribeToasts((request) => {
+    const ms = Number.isFinite(request.duration) ? Math.max(0, request.duration) : 0
+    const current = list.current
+    const same = current.find((item) => item.message === request.message && item.type === request.type)
+    if (same) {
+      start(same.key, ms)
+      commit(current.map((item) => (item === same ? { ...item, duration: ms, onActivate: request.onActivate || item.onActivate } : item)))
+      return
     }
-    for (const item of visible) {
-      if (item.fromSlot || !Number.isFinite(item.duration) || timers.current.has(item.key)) continue
-      start(item.key, Math.max(0, item.duration))
+    seq.current += 1
+    const key = `toast-${seq.current}`
+    const next = [...current, { key, ...request, duration: ms }]
+    while (next.length > NOTIFICATION_MAX_VISIBLE) {
+      const evicted = next.shift()
+      if (evicted) stop(evicted.key)
     }
-  }, [items, start])
+    commit(next)
+    start(key, ms)
+  }), [commit, start, stop])
 
   useEffect(() => () => {
     for (const timer of timers.current.values()) if (timer.handle != null) window.clearTimeout(timer.handle)
@@ -81,5 +92,53 @@ export function useToastStack(slot: Slot) {
     start(key, timer.left)
   }, [start])
 
-  return { visible: items.slice(0, NOTIFICATION_MAX_VISIBLE).reverse(), dismiss, pause, resume }
+  return { visible: [...items].reverse(), slot: slotToast(slot), dismiss, pause, resume }
+}
+
+// While a modal dialog is open a pop-up is display-only (a dialog's Close sits where a pop-up's controls would),
+// and below the tablet width only the newest one shows at all. It still leaves on its own clock.
+export function limitForDialog<T>(visible: T[], dialogOpen: boolean, narrow: boolean): T[] {
+  return dialogOpen && narrow ? visible.slice(0, 1) : visible
+}
+
+type DialogDocument = {
+  body: object
+  querySelector: (selector: string) => unknown
+}
+type ObserverFactory = new (callback: () => void) => { observe: (target: never, options: object) => void; disconnect: () => void }
+
+// Event-driven: one observer on the document while a pop-up is showing, and none otherwise. It re-checks
+// only when the DOM changes, and the check is one selector lookup.
+export function observeDialogOpen(doc: DialogDocument, Observer: ObserverFactory | undefined, onChange: (open: boolean) => void): () => void {
+  const read = () => onChange(Boolean(doc.querySelector('[aria-modal="true"]')))
+  read()
+  if (!Observer) return () => {}
+  const observer = new Observer(read)
+  observer.observe(doc.body as never, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-modal'] })
+  return () => observer.disconnect()
+}
+
+export function useDialogOpen(active: boolean): boolean {
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    if (!active || typeof document === 'undefined') {
+      setOpen(false)
+      return undefined
+    }
+    return observeDialogOpen(document, typeof MutationObserver === 'undefined' ? undefined : MutationObserver as unknown as ObserverFactory, setOpen)
+  }, [active])
+  return open
+}
+
+export function useNarrowViewport(): boolean {
+  const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(max-width: 767px)').matches)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return undefined
+    const query = window.matchMedia('(max-width: 767px)')
+    const sync = () => setNarrow(query.matches)
+    sync()
+    query.addEventListener('change', sync)
+    return () => query.removeEventListener('change', sync)
+  }, [])
+  return narrow
 }

@@ -60,6 +60,16 @@ export function mobileChromeViewportOffset({ headerVisible, appUpdateVisible }: 
   )
 }
 
+/** Where the pop-up stack starts: a small gap under the fixed chrome on a phone (the update bar, then the top bar
+ *  when the shell has one), and under the update bar alone from the tablet width up. Both clear the safe area. */
+export const TOAST_STACK_GAP_REM = 0.75
+export function toastStackTop({ headerPresent, appUpdateVisible }: { headerPresent: boolean; appUpdateVisible: boolean }): { phone: string; tablet: string } {
+  return {
+    phone: offset((appUpdateVisible ? APP_UPDATE_BAR_HEIGHT_REM : 0) + (headerPresent ? MOBILE_HEADER_HEIGHT_REM : 0) + TOAST_STACK_GAP_REM),
+    tablet: appUpdateVisible ? offset(APP_UPDATE_BAR_HEIGHT_REM + 1.25) : '1.25rem',
+  }
+}
+
 /** The same edge measured from the top of #app-root. When the update bar is
  *  up, #app-root's own padding already accounts for it (bar height AND the
  *  safe area), so the content offset must not count either one twice. */
