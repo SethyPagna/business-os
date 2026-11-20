@@ -7,6 +7,7 @@ import {
 } from './cooldownFallbacks.ts'
 import { apiFetch, cacheInvalidate, isTransientGatewayError, route } from './http.ts'
 import { bellPath, peekBellFresh, restoreBellFresh, takeBellFresh } from './bellFreshness.ts'
+import { noteSectionLifetime } from './bellFollowUp.ts'
 
 let notificationSummaryRequestPromise: Promise<unknown> | null = null
 
@@ -61,6 +62,7 @@ export async function getNotificationSummary(): Promise<unknown> {
       const fresh = takeBellFresh('summary')
       try {
         const result = await apiFetch('GET', bellPath('/api/notifications/summary', fresh))
+        noteSectionLifetime(result)
         clearNotificationSummaryMissing()
         return result
       } catch (error) {

@@ -71,3 +71,5 @@ export function bellPath(path: string, fresh: string): string {
   if (!fresh) return path
   return `${path}${path.includes('?') ? '&' : '?'}fresh=${fresh}`
 }
+
+export { createBellFollowUp, getSectionLifetimeSeconds } from './bellFollowUp.ts'
