@@ -353,6 +353,41 @@ async function main() {
     assert.equal(statements('inventory'), 0, 'and the recompute is then current: a repeat fresh read is served')
   })
 
+  const storedInventoryEntry = async () => {
+    for (const response of cacheStore.values()) {
+      const entry = await response.clone().json()
+      if (entry?.value?.id === 'inventory') return entry
+    }
+    return null
+  }
+  const currentProductsStockVersions = async () => (await cacheModule.getVersionsWithFallback(env, ['products', 'stock'])).join('|')
+
+  await check('N-C1: a plain read that began before a write and finished after the fresh recompute does not overwrite the fresh entry', async () => {
+    cacheStore.clear()
+    let freshWroteAt = 0
+    duringInventoryProducer = async () => {
+      await ownWriteFresh()
+      freshWroteAt = (await storedInventoryEntry()).at
+    }
+    const plain = await summary()
+    assert.equal(duringInventoryProducer, null, 'the fresh recompute really ran inside the plain read')
+    assert.ok(freshWroteAt > 0, 'the fresh recompute stored an entry first')
+    const entry = await storedInventoryEntry()
+    assert.equal(entry.at, freshWroteAt, 'the stored entry is still the fresh one (the older plain result did not replace it)')
+    assert.equal(entry.v, await currentProductsStockVersions(), 'and it is stamped with the current versions')
+    assert.ok(section(plain, 'inventory'), 'the plain caller still gets its computed answer')
+  })
+
+  await check('N-C1 control: with no version move during the producer the plain result is stored as before', async () => {
+    cacheStore.clear()
+    await summary()
+    const entry = await storedInventoryEntry()
+    assert.ok(entry && entry.v === (await currentProductsStockVersions()), 'a plain miss with no write in between writes its entry')
+    const again = await summary()
+    assert.equal(statements('inventory'), 0, 'and the next plain read is served from it')
+    assert.ok(section(again, 'inventory'))
+  })
+
   await check("a settings save no longer re-walks the catalog by itself, but a changed low-stock config or expiry window is a different entry at once", async () => {
     await cacheModule.bumpVersion(env, 'settings')
     await summary()

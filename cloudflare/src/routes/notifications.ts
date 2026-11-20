@@ -255,6 +255,13 @@ function sectionCacheFor(c: NotificationContext, user: PhoneActor): SectionCache
       return tokens.some(isUnsafeVersion) ? null : tokens.join('|')
     } catch { return null }
   }
+  // The same versions read again, past the per-request memo above (one KV read each; D1 only for a namespace KV does not hold, as at the first read).
+  const versionsAgain = async (namespaces: string[]): Promise<string | null> => {
+    try {
+      const tokens = await getVersionsWithFallback(c.env, namespaces)
+      return tokens.some(isUnsafeVersion) ? null : tokens.join('|')
+    } catch { return null }
+  }
   const computedAt: number[] = []
   const freshParam = new URL(c.req.url).searchParams.get('fresh') || ''
   // `fresh=1` checks every cached section against its data versions; `fresh=a,b` only the named ones (a write names the sections it can resolve). An unknown name matches nothing, so the rest is a plain read.
@@ -288,7 +295,11 @@ function sectionCacheFor(c: NotificationContext, user: PhoneActor): SectionCache
       const value = await producer()
       const at = Date.now()
       computedAt.push(at)
-      if (store && key) {
+      // A version that moved while the producer ran means a write landed and a fresher entry may already be stored: this result is older than it, so it is returned
+      // to its caller but not stored (an unreadable version on either side cannot say, so the entry is written as before and a fresh read still distrusts a null stamp).
+      const after = store && key && v !== null ? await versionsAgain(namespaces) : null
+      const movedDuringProducer = v !== null && after !== null && after !== v
+      if (store && key && !movedDuringProducer) {
         c.executionCtx.waitUntil(store.put(key, new Response(JSON.stringify({ at, v, value }), {
           headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${ttlSeconds}` },
         })))
