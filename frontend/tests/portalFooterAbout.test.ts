@@ -29,11 +29,19 @@ assert.doesNotMatch(surface, /^\s*\{footer\}\s*$/m, 'the raw footer node is no l
 assert.match(publicPage, /<PortalFooter [^>]*socialLinks=\{socialLinks\}/, 'the storefront hands the footer its configured social links')
 
 // 3. Headings exist in both languages, and km is not English.
-for (const key of ['portal_legal_footer_contact', 'portal_legal_footer_quick_links', 'portal_legal_footer_follow'] as const) {
+for (const key of ['portal_legal_footer_contact', 'portal_legal_footer_quick_links'] as const) {
   assert.ok(PORTAL_LEGAL_EN[key], `en ${key}`)
   assert.ok(PORTAL_LEGAL_KM[key], `km ${key}`)
   assert.notEqual(PORTAL_LEGAL_EN[key], PORTAL_LEGAL_KM[key], `km ${key} is untranslated`)
 }
+
+// The social column is headed Contact (it carries the Contact names); the Follow us heading is retired.
+const socialColumn = footer.slice(footer.indexOf('data-portal-footer-social="true"'), footer.indexOf('data-portal-footer-policies="true"'))
+assert.ok(socialColumn.includes("text('portal_legal_footer_contact')"), 'the social column heading is Contact')
+assert.doesNotMatch(footer, /portal_legal_footer_follow/, 'the Follow us heading is back')
+assert.equal(PORTAL_LEGAL_EN.portal_legal_footer_contact, 'Contact')
+assert.equal('portal_legal_footer_follow' in PORTAL_LEGAL_EN, false, 'the Follow us key is back in the English pack')
+assert.equal('portal_legal_footer_follow' in PORTAL_LEGAL_KM, false, 'the Follow us key is back in the Khmer pack')
 
 // 4. About: the story no longer prints twice (hero intro used to fall back
 //    to it), and on a phone the story comes before the contact tray.

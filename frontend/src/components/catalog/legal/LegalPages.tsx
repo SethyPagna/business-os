@@ -381,7 +381,7 @@ export default function PortalFooter({
 
           {socialLinks.length ? (
             <div className="min-w-0" data-portal-footer-social="true">
-              <div className={FOOTER_HEADING_CLASS}>{text('portal_legal_footer_follow')}</div>
+              <div className={FOOTER_HEADING_CLASS}>{text('portal_legal_footer_contact')}</div>
               <ul className="flex flex-col">
                 {socialLinks.map((link) => (
                   <li key={link.key}>

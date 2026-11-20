@@ -17,8 +17,8 @@ assertCompleteScan(scan)
 
 const KHMER_SCRIPT = /[ក-៿]/
 const PLACEHOLDER = /\{[A-Za-z0-9_]+\}/g
-// Names, acronyms and the browser storage API name that stay in Latin letters inside Khmer text.
-const LATIN_ALLOWED = new Set(['AI', 'Chrome', 'Safari', 'Google', 'Maps', 'Leang', 'Cosmetics', 'Beauty', 'Messenger', 'Facebook', 'Instagram', 'Telegram', 'WhatsApp', 'IP', 'HTTPS', 'Sentry', 'Cloudflare', 'Cloudinary', 'Cache', 'Storage'])
+// Names, acronyms, the cookie name googtrans and the browser storage API name that stay in Latin letters inside Khmer text.
+const LATIN_ALLOWED = new Set(['AI', 'Chrome', 'Safari', 'Google', 'Maps', 'Translate', 'Leang', 'Cosmetics', 'Beauty', 'Messenger', 'Facebook', 'Instagram', 'Telegram', 'WhatsApp', 'IP', 'HTTPS', 'Sentry', 'Cloudflare', 'Cloudinary', 'Cache', 'Storage', 'googtrans'])
 const isFlatKey = (key: string) => key.startsWith('portal_a11y_')
 
 const byKey = new Map<string, { english: Set<string>; khmer: Set<string>; sites: string[] }>()
