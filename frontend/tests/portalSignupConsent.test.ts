@@ -187,7 +187,8 @@ test('the browser rule and the Worker rule are the same rule', () => {
 })
 
 test('the recorded consent version is the version of the text the visitor saw', () => {
-  assert.equal(PORTAL_LEGAL_CONSENT_VERSION, `portal-legal-${PORTAL_LEGAL_LAST_UPDATED_ISO}`)
+  assert.match(PORTAL_LEGAL_CONSENT_VERSION, /^portal-legal-\d{4}-\d{2}-\d{2}$/)
+  assert.ok(PORTAL_LEGAL_CONSENT_VERSION.slice('portal-legal-'.length) <= PORTAL_LEGAL_LAST_UPDATED_ISO, 'a consent version is never newer than the shown date')
   const workerVersion = workerAccounts.match(/PORTAL_CONSENT_VERSION = '([^']+)'/)
   assert.ok(workerVersion, 'the Worker publishes no consent version')
   assert.equal(

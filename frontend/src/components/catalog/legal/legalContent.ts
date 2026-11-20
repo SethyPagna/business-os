@@ -23,14 +23,18 @@ import { fmtDateOnly } from '../../../utils/formatters.ts'
 
 export type LegalPageKey = 'privacy' | 'terms' | 'cookies'
 
-// Bump this (and the pack copies of the section text) whenever the wording
+// PORTAL_LEGAL_LAST_UPDATED_ISO is the date the policy pages show; it moves with every wording change.
+// PORTAL_LEGAL_CONSENT_VERSION moves only when a change asks something new of an account: the Worker accepts
+// only this version, so moving it makes every account agree again. Wording that asks nothing new moves the
+// date alone (owner, 30 Sep 2026: existing accounts stay valid and the site says the policy was updated).
+// Bump the version (and the pack copies of the section text) whenever the wording
 // changes materially. It is also the value stored on a portal account as
 // `consent_version`, so a later policy change is auditable. The Worker
 // (lib/portalAccounts.ts) moves with it and accepts only this version: since
 // 20 Oct 2026 (age-16 wording) every earlier account agrees again through the
 // re-consent prompt (ConsentRenewalPrompt).
-export const PORTAL_LEGAL_LAST_UPDATED_ISO = '2026-10-20'
-export const PORTAL_LEGAL_CONSENT_VERSION = `portal-legal-${PORTAL_LEGAL_LAST_UPDATED_ISO}`
+export const PORTAL_LEGAL_LAST_UPDATED_ISO = '2026-11-20'
+export const PORTAL_LEGAL_CONSENT_VERSION = 'portal-legal-2026-10-20'
 
 export function formatLegalLastUpdated(iso: string = PORTAL_LEGAL_LAST_UPDATED_ISO): string {
   // dd/mm/yyyy, day-first, through the one app-wide date formatter.

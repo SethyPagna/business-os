@@ -209,9 +209,10 @@ assert.match(
 // 7. day-first date, and a consent version tied to it
 assert.match(PORTAL_LEGAL_LAST_UPDATED_ISO, /^\d{4}-\d{2}-\d{2}$/)
 assert.equal(formatLegalLastUpdated('2026-09-07'), '07/09/2026')
-assert.equal(PORTAL_LEGAL_LAST_UPDATED_ISO, '2026-10-20', 'the 20 Oct 2026 age-16 wording is a new policy version')
-assert.equal(formatLegalLastUpdated(), '20/10/2026')
-assert.equal(PORTAL_LEGAL_CONSENT_VERSION, `portal-legal-${PORTAL_LEGAL_LAST_UPDATED_ISO}`)
+assert.equal(PORTAL_LEGAL_LAST_UPDATED_ISO, '2026-11-20', 'the 20 Nov 2026 wording (Translation section, storage rows) moved the shown date')
+assert.equal(formatLegalLastUpdated(), '20/11/2026')
+assert.equal(PORTAL_LEGAL_CONSENT_VERSION, 'portal-legal-2026-10-20', 'the 20 Nov 2026 wording asks nothing new of an account, so the consent version stays and nobody agrees again')
+assert.ok(PORTAL_LEGAL_CONSENT_VERSION.slice('portal-legal-'.length) <= PORTAL_LEGAL_LAST_UPDATED_ISO, 'a consent version is never newer than the shown date')
 
 // 8. Owner, 30 Sep 2026: welcoming privacy and terms texts that stay safe for the shop.
 const pageText = (page: 'privacy' | 'terms', target: 'en' | 'km') =>
