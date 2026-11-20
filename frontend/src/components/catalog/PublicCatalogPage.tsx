@@ -1,4 +1,5 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { resolveProductNames } from './productDetailSections.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import type { Dispatch, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
@@ -946,7 +947,7 @@ export default function PublicCatalogPage() {
   const openProductGallery = (product: CatalogProduct, startIndex = 0) => {
     const items = normalizeProductGallery(product).map((item) => resolveCatalogAssetUrl(item) || item)
     if (!items.length) return
-    setProductGalleryView({ open: true, title: String(product.name || ''), items, index: Math.max(0, Math.min(startIndex, items.length - 1)) })
+    setProductGalleryView({ open: true, title: resolveProductNames(product).heading, items, index: Math.max(0, Math.min(startIndex, items.length - 1)) })
   }
   const openPortalImage = (title: string, images: string[], index = 0) => {
     const cleanImages = images.map((item) => resolveCatalogAssetUrl(item) || item).filter(Boolean)
@@ -1221,7 +1222,6 @@ export default function PublicCatalogPage() {
         mapEmbedUrl={mapEmbedUrl}
         addressFact={addressFact}
         businessFacts={businessFacts}
-        socialLinks={socialLinks}
         versionedBusinessLogo={businessLogoUrl}
         versionedBusinessCover={coverState === 'failed' ? '' : businessCoverUrl}
         publicFaqItems={publicFaqItems}
@@ -1230,6 +1230,7 @@ export default function PublicCatalogPage() {
         onOpenContact={contactEntries.length > 0 ? openContactSheet : undefined}
         faqLoading={!realConfigInHand}
         openProductById={openProductById}
+        onAddRecommendation={(item: { id: number; name: string; category: string; brand: string }) => bucket.add(item)}
         brands={brands}
         assistantProfile={assistantProfile}
         setAssistantProfile={setAssistantProfile}
@@ -1240,7 +1241,6 @@ export default function PublicCatalogPage() {
         askAssistant={askAssistant}
         assistantLoading={assistantLoading}
         clearAssistantState={clearAssistantState}
-        replaceVars={(template: string, values: Record<string, string | number>) => replaceVars(template, values)}
         assistantError={assistantError}
         assistantResponse={assistantResponse}
         assistantDisclosure={assistantDisclosure}
