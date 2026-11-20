@@ -61,6 +61,9 @@ async function main() {
   const base = await bootWorld({ tier: 'free', switches: { ic_simple: 'on' }, patches: OLD_PATCHES })
   try {
     let dropped = 0
+    let droppedSearch = 0
+    let droppedFilters = 0
+    const droppedUrls = []
     let plainPage
     let oldPlainPage
     for (const url of [...SEARCHES, ...FILTERS]) {
@@ -74,7 +77,7 @@ async function main() {
         if (reads) assert.ok(joined, `${url}: a statement reads selected_bs and must keep the join: ${String(s.sql).slice(0, 120)}`)
         if (joined) assert.ok(reads, `${url}: the join is kept only while a fragment reads selected_bs: ${String(s.sql).slice(0, 120)}`)
       }
-      if (old.statements.some((st) => JOIN.test(st.sql)) && !now.statements.some((st) => JOIN.test(st.sql))) dropped += 1
+      if (old.statements.some((st) => JOIN.test(st.sql)) && !now.statements.some((st) => JOIN.test(st.sql))) { dropped += 1; droppedUrls.push(url); if (url.includes('/filters')) droppedFilters += 1; else droppedSearch += 1 }
       if (url.includes('/search?page=1&pageSize=30&branchId=1&searchMode=smart')) { plainPage = now; oldPlainPage = old }
       const stockFilter = /stockState=(low|out|in_stock|healthy)|issueState=[^&]*out_of_stock/.test(url)
       if (stockFilter && /branchId=\d/.test(url)) assert.ok(now.statements.some((s) => JOIN.test(s.sql)), `${url}: a stock/issue filter on a branch keeps the join`)
@@ -82,7 +85,11 @@ async function main() {
     }
     assert.ok(plainPage && oldPlainPage, 'the plain branch page ran')
     assert.ok(plainPage.rows < oldPlainPage.rows * 0.9, `the plain till page reads clearly fewer rows (${plainPage.rows} vs ${oldPlainPage.rows})`)
-    assert.ok(dropped >= 8, `the join dropped on many shapes (${dropped})`)
+    // The vocabulary's key and SQL drop branchId / surface unless a stock or issue term is present (canonicalFiltersQuery), so on a plain vocabulary request (and brand=MAC) even the always-join world
+    // has no branch to join on: neither world joins, and those shapes no longer count as a drop between the worlds (before QW3 they did, which is why the old floor of 8 sat above what is left).
+    // The one vocabulary shape that still drops is the issue filter that does not read stock (no_image): it keeps the branch in the key, the old world joined, the current one does not.
+    assert.deepEqual(droppedUrls.filter((u) => u.includes('/filters')), ['/api/products/filters?branchId=1&surface=pos&issueState=no_image'], 'the vocabulary shapes that drop the join')
+    assert.ok(droppedSearch >= 6, `the join dropped on many search shapes (${droppedSearch}, ${dropped} with the filters)`)
 
     // positive control: the comparison sees stock. One product's branch stock moves, and the stockState=out answer changes in BOTH worlds, still equal.
     const probe = `/api/products/search?page=1&pageSize=100&branchId=1&stockState=out${BASE}`
