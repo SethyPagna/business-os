@@ -6,7 +6,9 @@
 // payment relabel (POST /api/sales/bulk-update) and a Settings payment-method rename (POST /api/settings/payment-methods/replace, scope linked)
 // rewrote that row like any customer row, so the drawer lost the credit's cash while the refund's cash-out stayed.
 //   1. relabel          -> the customer's row moves, the credit row keeps its method, the drawer moves by the customer's money only;
-//   2. rename           -> the same; and a sale whose only matching row is the credit is neither counted nor written;
+//   2. rename           -> a rename is the same method under a new name: cash to cash renames the credit too (flag and amounts untouched);
+//                          a rename that would change the drawer kind leaves the credit under its method, a sale whose only matching row is the
+//                          credit is neither counted nor written, and the missing-methods check never offers the old name back;
 //   3. cancel exchange  -> the credit leaves the tender and the refund is cancelled: the drawer does not move, relabelled and renamed or not;
 //   4. old data         -> a credit relabelled before this fix (method ABA) is still found by its flag and reversed, whatever its method.
 // MUTANT=<name> bundles ONE deliberate defect; BASE_COMMIT=<sha> runs the same checks against an older source (red on main b652a501c).
@@ -22,8 +24,12 @@ const MUTANTS = {
   correction_unprotected: [{ file: SALES, from: 'recordedRefundCreditRaw: paymentCorrection ? sale.payment_details : undefined,', to: '' }],
   // The relabel rewrites the credit row like any customer row.
   relabel_credit: [{ file: BULK, from: 'normalized(detail.method) === source && !isRefundCreditRow(detail) ? { ...detail, method: targetMethod } : detail)', to: 'normalized(detail.method) === source ? { ...detail, method: targetMethod } : detail)' }],
-  // The linked rename rewrites the credit row (its row test is dropped everywhere it is used).
-  rename_credit: [{ file: SETTINGS, from: "const REFUND_CREDIT_UNTOUCHED_SQL = `AND json_extract(detail.value,'$.refund_credit') IS NOT 1`", to: 'const REFUND_CREDIT_UNTOUCHED_SQL = ``' }],
+  // The linked rename rewrites the credit row whatever the kind (its row test is dropped everywhere it is used).
+  rename_credit: [{ file: SETTINGS, from: "const REFUND_CREDIT_UNTOUCHED_SQL = `AND (@renameCredits=1 OR json_extract(detail.value,'$.refund_credit') IS NOT 1)`", to: 'const REFUND_CREDIT_UNTOUCHED_SQL = ``' }],
+  // The linked rename never renames the credit, even for a same-kind rename (the lane's first rule).
+  rename_credit_never: [{ file: SETTINGS, from: "const REFUND_CREDIT_UNTOUCHED_SQL = `AND (@renameCredits=1 OR json_extract(detail.value,'$.refund_credit') IS NOT 1)`", to: "const REFUND_CREDIT_UNTOUCHED_SQL = `AND json_extract(detail.value,'$.refund_credit') IS NOT 1`" }],
+  // The missing-methods check reads credit rows again, so a kind-changing rename offers the old name back.
+  unregistered_reads_credit: [{ file: SETTINGS, from: "AND json_type(payment_details)='array' THEN 1 ELSE 0 END AS has_credit", to: "AND json_type(payment_details)='array' THEN 0 ELSE 0 END AS has_credit" }],
   // The cancel finds the credit row by reading the CURRENT row's method (only a cash row is taken for the credit), not by its flag alone.
   reverse_by_current_row: [{ file: RETURN_BULK, from: 'return rows.findIndex((row) => row && row.refund_credit === true)', to: "return rows.findIndex((row) => row && row.refund_credit === true && String(row.method) === 'Cash')" }],
 }
@@ -125,9 +131,9 @@ async function main() {
     })
 
     // ---- 2. the linked rename ---------------------------------------------------------------------------------------------------------------------
-    // The independent count: sales holding a Cash row that is not a credit, and those rows.
+    // The independent count: Cash and Cash USD are one drawer kind, so the credit rows are renamed too: every sale holding a Cash row, and those rows.
     const expectedCounts = (await h.all('SELECT payment_details FROM sales')).reduce((sum, row) => {
-      const own = JSON.parse(row.payment_details || '[]').filter(detail => detail.method === 'Cash' && detail.refund_credit !== true).length
+      const own = JSON.parse(row.payment_details || '[]').filter(detail => detail.method === 'Cash').length
       return { sales: sum.sales + (own ? 1 : 0), details: sum.details + own }
     }, { sales: 0, details: 0 })
     const auditBefore = Number((await h.one("SELECT COUNT(*) AS n FROM audit_logs WHERE action='replace' AND entity='payment_method'")).n)
@@ -137,21 +143,22 @@ async function main() {
     const cAfterRename = await cols(C.saleId)
     const audit = await h.all("SELECT details FROM audit_logs WHERE action='replace' AND entity='payment_method' ORDER BY id")
     const dRename = await drawer()
-    r.check(`rename (${renamed.status}): A's customer row becomes Cash USD and its credit row stays Cash`, () => {
+    r.check(`rename (${renamed.status}): Cash to Cash USD keeps the drawer kind, so A's customer row and its credit row both become Cash USD`, () => {
       assert.equal(renamed.status, 200, JSON.stringify(renamed.body).slice(0, 300))
       assert.equal(aBefore.payment_details === aAfter.payment_details, false)
       const rows = JSON.parse(aAfter.payment_details)
-      assert.equal(rows.find(row => row.refund_credit === true).method, 'Cash')
+      assert.deepEqual(rows.find(row => row.refund_credit === true), { method: 'Cash USD', amount_usd: 10, amount_khr: 0, refund_credit: true })
       assert.equal(rows.find(row => row.refund_credit !== true).method, 'Cash USD')
-      assert.equal(aAfter.payment_method, 'Cash + Cash USD')
+      assert.equal(aAfter.payment_method, 'Cash USD')
     })
-    r.check("rename: C's only Cash row is the credit, so the sale is neither counted nor written (row, summary and updated_at unchanged)", () => {
-      assert.deepEqual(cAfterRename, cAfterRelabel)
+    r.check("rename: C's only Cash row is the credit, which follows the rename; the audit counts what the independent count finds", () => {
+      assert.equal(JSON.parse(cAfterRename.payment_details).find(row => row.refund_credit === true).method, 'Cash USD')
+      assert.equal(cAfterRename.payment_method, 'Cash USD + ABA')
       const details = JSON.parse(audit[audit.length - 1].details)
       assert.equal(audit.length, auditBefore + 1)
       assert.equal(details.linkedSales, expectedCounts.sales, JSON.stringify(details))
       assert.equal(details.linkedDetails, expectedCounts.details, JSON.stringify(details))
-      assert.ok(expectedCounts.sales >= 2 && expectedCounts.sales < 8, JSON.stringify(expectedCounts))
+      assert.ok(expectedCounts.sales >= 3 && expectedCounts.sales <= 12, JSON.stringify(expectedCounts))
     })
     r.check(`rename: the drawer is unchanged by it (${JSON.stringify(dRelabel)} -> ${JSON.stringify(dRename)})`, () => assert.deepEqual(dRename, dRelabel))
     const writesBetween = h.metrics.slice(metricsBefore).filter(entry => !entry.observe)
@@ -219,6 +226,20 @@ async function main() {
       assert.equal(kept.status, 200, JSON.stringify(kept.body).slice(0, 300))
       assert.equal(eAfterKeep.find(row => row.refund_credit === true).method, eCreditMethod)
       assert.equal(eAfterKeep.find(row => row.refund_credit !== true).method, 'ABA')
+    })
+
+    // ---- 6. a rename that would change the drawer kind leaves the credit alone ------------------------------------------------------------------
+    const F = await exchange('ABA')
+    const fBefore = await cols(F.saleId)
+    const kindChange = await rename('Cash USD', 'Bank transfer')
+    const fAfter = await cols(F.saleId)
+    const unregistered = await h.call('GET', '/api/settings/payment-methods/unregistered', undefined, 'unregistered', { observe: true })
+    r.check(`rename that changes the kind (${kindChange.status}): F's credit keeps its cash method, and the missing-methods check does not offer it back`, () => {
+      assert.equal(kindChange.status, 200, JSON.stringify(kindChange.body).slice(0, 300))
+      assert.equal(JSON.parse(fBefore.payment_details).find(row => row.refund_credit === true).method, 'Cash USD')
+      assert.equal(JSON.parse(fAfter.payment_details).find(row => row.refund_credit === true).method, 'Cash USD')
+      assert.equal(unregistered.status, 200)
+      assert.deepEqual(unregistered.body.missing, [], JSON.stringify(unregistered.body))
     })
 
     console.log(`MEASURE relabel+rename+observe-free requests: ${JSON.stringify(writesBetween.map(entry => ({ label: entry.label, calls: entry.calls, statements: entry.statements })))}`)
