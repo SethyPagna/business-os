@@ -17,6 +17,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { buildSync } from 'esbuild'
+import { getPortalLanguageText } from '../src/components/catalog/portalLanguagePacks.ts'
 import { PORTAL_LEGAL_CONSENT_VERSION, PORTAL_LEGAL_LAST_UPDATED_ISO } from '../src/components/catalog/legal/legalContent.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -117,11 +118,15 @@ test('the Khmer visitor gets Khmer, not English', async () => {
   assert.doesNotMatch(html, /I agree to the Terms/, 'the Khmer line fell back to English')
   const km = JSON.parse(read('../src/lang/km.json'))
   for (const key of [
-    'portal_legal_consent_label', 'portal_legal_consent_required',
-    'portal_legal_consent_read_terms', 'portal_legal_consent_read_privacy',
+    'portal_legal_consent_required', 'portal_legal_consent_required_signin',
   ]) {
     assert.ok(km[key], `km.json is missing ${key}`)
     assert.match(km[key], KHMER, `${key} is not Khmer`)
+  }
+  // The line itself comes from the portal pack (portalConsentLine replaced portal_legal_consent_label); the two links keep their titles.
+  assert.match(getPortalLanguageText('km', 'portalConsentLine'), KHMER, 'portalConsentLine is not Khmer')
+  for (const key of ['portal_legal_consent_label', 'portal_legal_consent_read_terms', 'portal_legal_consent_read_privacy', 'portal_legal_map_consent_b', 'portal_legal_map_consent_load', 'portal_legal_map_consent_link']) {
+    assert.equal(key in km, false, `${key} is retired and must not return to km.json`)
   }
 })
 

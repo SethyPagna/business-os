@@ -568,19 +568,7 @@ runTest('every portal_a11y_* key exists in both packs and is used', () => {
   assert.deepEqual(kmKeys.sort(), enKeys.sort(), 'the two packs carry the same portal_a11y_ keys')
   // Nothing dead: every key is referenced from the storefront.
   const allSource = PUBLIC_STOREFRONT_FILES.map(read).join('\n')
-  // The header chip row and the floating chat buttons are gone (public-web overhaul), so their seven names are no longer rendered. The pack files
-  // belong to the language lane: when it drops these keys from en.json and km.json, delete this list.
-  const RETIRED_WAITING_FOR_PACK_PRUNE = new Set([
-    'portal_a11y_social_links', 'portal_a11y_choose_account', 'portal_a11y_contact_messenger', 'portal_a11y_contact_telegram',
-    'portal_a11y_contact_instagram', 'portal_a11y_contact_whatsapp', 'portal_a11y_contact_phone',
-  ])
-  for (const key of enKeys) {
-    if (RETIRED_WAITING_FOR_PACK_PRUNE.has(key)) {
-      assert.ok(!allSource.includes(key), `${key} is rendered again: take it off the retired list`)
-      continue
-    }
-    assert.ok(allSource.includes(key), `${key} is in the packs but nothing renders it`)
-  }
+  for (const key of enKeys) assert.ok(allSource.includes(key), `${key} is in the packs but nothing renders it`)
 })
 
 runTest('the storefront copy() can actually reach a portal_a11y_ pack key', () => {

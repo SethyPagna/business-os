@@ -244,18 +244,12 @@ const EN: Record<string, string> = {
   portal_legal_store_until_cleared_l: 'Until you clear site data',
 
   // --- consent + embeds ----------------------------------------------------
-  portal_legal_consent_label: 'I am 16 or older, and I agree to the Terms & Conditions and the Privacy Policy.',
   portal_legal_consent_required: 'Please confirm you are 16 or older and agree to the Terms & Conditions and Privacy Policy to create an account.',
   portal_legal_consent_required_signin: 'Please confirm you are 16 or older and agree to the Terms & Conditions and Privacy Policy to sign in.',
-  portal_legal_consent_read_terms: 'Read the Terms & Conditions',
-  portal_legal_consent_read_privacy: 'Read the Privacy Policy',
   portal_legal_renew_title: 'Confirm to keep using your account',
   portal_legal_renew_body: 'Our terms now set a minimum age of 16. Please confirm to keep using your account.',
   portal_legal_renew_agree: 'Agree',
   portal_legal_renew_required: 'Please tick the box to continue.',
-  portal_legal_map_consent_b: 'The map is loaded from Google Maps, which sets its own cookies. Load it only if you want to.',
-  portal_legal_map_consent_load: 'Load the map',
-  portal_legal_map_consent_link: 'Open in Google Maps instead',
   portal_legal_map_consent_revoke: 'Unload map and forget this choice',
 
   // --- admin editor block --------------------------------------------------
@@ -375,18 +369,12 @@ const KM: Record<string, string> = {
   portal_legal_store_announcement_p: 'សេចក្តីជូនដំណឹងរបស់ហាងដែលអ្នកបានបិទលើឧបករណ៍នេះ ដើម្បីកុំឲ្យវាត្រឡប់មកវិញ រហូតដល់ហាងផ្លាស់ប្តូរ។',
   portal_legal_store_until_cleared_l: 'រហូតដល់អ្នកសម្អាតទិន្នន័យគេហទំព័រ',
 
-  portal_legal_consent_label: 'ខ្ញុំមានអាយុ ១៦ ឆ្នាំឡើងទៅ ហើយខ្ញុំយល់ព្រមនឹងលក្ខខណ្ឌប្រើប្រាស់ និងគោលការណ៍ឯកជនភាព។',
   portal_legal_consent_required: 'សូមបញ្ជាក់ថាអ្នកមានអាយុ ១៦ ឆ្នាំឡើងទៅ ហើយយល់ព្រមនឹងលក្ខខណ្ឌប្រើប្រាស់ និងគោលការណ៍ឯកជនភាព ដើម្បីបង្កើតគណនី។',
   portal_legal_consent_required_signin: 'សូមបញ្ជាក់ថាអ្នកមានអាយុ ១៦ ឆ្នាំឡើងទៅ ហើយយល់ព្រមនឹងលក្ខខណ្ឌប្រើប្រាស់ និងគោលការណ៍ឯកជនភាព ដើម្បីចូលគណនី។',
-  portal_legal_consent_read_terms: 'អានលក្ខខណ្ឌប្រើប្រាស់',
-  portal_legal_consent_read_privacy: 'អានគោលការណ៍ឯកជនភាព',
   portal_legal_renew_title: 'បញ្ជាក់ដើម្បីបន្តប្រើគណនីរបស់អ្នក',
   portal_legal_renew_body: 'លក្ខខណ្ឌរបស់យើងកំណត់អាយុអប្បបរមា ១៦ ឆ្នាំ។ សូមបញ្ជាក់ដើម្បីបន្តប្រើគណនីរបស់អ្នក។',
   portal_legal_renew_agree: 'យល់ព្រម',
   portal_legal_renew_required: 'សូមធីកប្រអប់ដើម្បីបន្ត។',
-  portal_legal_map_consent_b: 'ផែនទីផ្ទុកពី Google Maps ដែលកំណត់ខូឃីផ្ទាល់ខ្លួន។ សូមផ្ទុកតែបើអ្នកចង់។',
-  portal_legal_map_consent_load: 'ផ្ទុកផែនទី',
-  portal_legal_map_consent_link: 'បើកក្នុង Google Maps ជំនួសវិញ',
   portal_legal_map_consent_revoke: 'បិទផែនទី និងលុបជម្រើសនេះពីឧបករណ៍',
 
   portal_legal_editor_block: 'ព័ត៌មានច្បាប់និងអាជីវកម្ម',
