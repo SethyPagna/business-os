@@ -16,6 +16,7 @@ import { useCallback, useEffect, useState } from 'react'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
 import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
+import { PORTAL_PRIMARY_BUTTON } from '../portalButtons.ts'
 
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 
@@ -24,7 +25,7 @@ export const MAP_CONSENT_STORAGE_KEY = 'business-os-portal-map-consent-v1'
 export const MAP_CONSENT_REVOKE_EN = 'Unload map and forget this choice'
 export const MAP_CONSENT_REVOKE_KM = 'បិទផែនទី និងលុបជម្រើសនេះពីឧបករណ៍'
 
-const LOAD_BUTTON = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-[#23201b] px-5 text-sm font-semibold text-[#f4f1ea] transition hover:bg-[#3a352c] dark:bg-amber-300 dark:text-neutral-900 dark:hover:bg-amber-200'
+const LOAD_BUTTON = PORTAL_PRIMARY_BUTTON
 const ICON_LINK = 'flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-stone-600 transition hover:bg-stone-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
 
 function readStoredChoice(): boolean {

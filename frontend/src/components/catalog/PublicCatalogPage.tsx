@@ -587,8 +587,7 @@ export default function PublicCatalogPage() {
   // `overflow-y: auto` + `height: auto` unlock in main.css, and in
   // public-portal.css the Google-Translate banner suppression plus the
   // `body { top: 0 !important; position: static !important }` that undoes the
-  // banner's downward shove of the whole document, and the
-  // `.portal-contact-value` wrapping. (The media-protection and coarse-
+  // banner's downward shove of the whole document. (The media-protection and coarse-
   // pointer tap-target rules survived only because they carry a second
   // `[data-public-media-protection='true']` selector, which this page's root
   // div does set.)

@@ -1,6 +1,6 @@
 // Compliance review, 13 Oct 2026: G15 (accessibility, public storefront only).
 //
-//   - contrast: the map "Load" button and the storefront .btn-primary clear 4.5:1 in light and dark
+//   - contrast: the shared primary button (map "Load", consent "Agree") and .btn-primary clear 4.5:1 in light and dark
 //   - the map iframe has a translated, human title
 //   - JS smooth scroll respects prefers-reduced-motion
 //   - the About video has controls and never autoplays
@@ -10,6 +10,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { PORTAL_PRIMARY_BUTTON, PORTAL_PRIMARY_COLORS } from '../src/components/catalog/portalButtons.ts'
 import { PORTAL_DARK_SURFACE, PORTAL_LIGHT_SURFACE, contrastRatio } from '../src/components/catalog/portalContrast.ts'
 import { portalScrollBehavior } from '../src/components/catalog/portalMotion.ts'
 import { resolveStorefrontCopy } from '../src/components/catalog/portalLanguagePacks.ts'
@@ -34,7 +35,8 @@ function runTest(name: string, fn: () => void): void {
 const IVORY = '#f4f1ea'
 const CHARCOAL = '#23201b'
 const CHARCOAL_HOVER = '#3a352c'
-const AMBER_300 = '#fcd34d'
+const IVORY_DARK = '#f5f1e8'
+const IVORY_DARK_HOVER = '#d9d4c7'
 const NEUTRAL_900 = '#171717'
 const STONE_600 = '#57534e'
 const NEUTRAL_300 = '#d4d4d4'
@@ -47,26 +49,33 @@ const ratio = (a: string, b: string) => Number(contrastRatio(a, b).toFixed(2))
 // Contrast (WCAG 1.4.3 text, 1.4.11 component boundary)
 // ---------------------------------------------------------------------------
 
-runTest('the map Load button is ivory on charcoal (>= 4.5:1) in light and dark amber, and lighter on hover', () => {
+runTest('the map Load and consent Agree buttons use the one storefront primary recipe, >= 4.5:1 in light and dark', () => {
   const source = read('components', 'catalog', 'legal', 'PortalEmbedConsent.tsx')
-  const loadClass = /const LOAD_BUTTON = '([^']+)'/.exec(source)?.[1] ?? ''
-  assert.ok(loadClass, 'the Load button class must stay one named constant')
+  assert.match(source, /const LOAD_BUTTON = PORTAL_PRIMARY_BUTTON\n/, 'the Load button is the shared primary button, not a local class string')
   assert.match(source, /<button type="button" onClick=\{accept\} className=\{LOAD_BUTTON\}>/, 'the Load button must still be the accept button')
-  assert.match(loadClass, /\bbg-\[#23201b\]/)
-  assert.match(loadClass, /\btext-\[#f4f1ea\]/)
-  assert.match(loadClass, /hover:bg-\[#3a352c\]/)
-  assert.match(loadClass, /dark:bg-amber-300/)
-  assert.match(loadClass, /dark:text-neutral-900/)
-  assert.doesNotMatch(loadClass, /emerald/, 'the green fill is outside the storefront palette')
+  const renewal = read('components', 'catalog', 'legal', 'ConsentRenewalPrompt.tsx')
+  assert.match(renewal, /className=\{`\$\{PORTAL_PRIMARY_BUTTON\} disabled:opacity-60`\}/, 'the Agree button is the shared primary button')
+  assert.doesNotMatch(renewal, /bg-slate-900|dark:bg-white/, 'no slate/white fill that main.css remaps in dark mode')
+  assert.ok(PORTAL_PRIMARY_BUTTON.includes(PORTAL_PRIMARY_COLORS), 'the button recipe carries the shared colours')
+  assert.match(PORTAL_PRIMARY_BUTTON, /\bmin-h-11\b/, 'a 44 px target')
+  assert.match(PORTAL_PRIMARY_COLORS, /(^| )bg-\[#23201b\]/)
+  assert.match(PORTAL_PRIMARY_COLORS, /(^| )text-\[#f4f1ea\]/)
+  assert.match(PORTAL_PRIMARY_COLORS, /(^| )hover:bg-\[#3a352c\]/)
+  assert.match(PORTAL_PRIMARY_COLORS, /dark:bg-\[#f5f1e8\]/)
+  assert.match(PORTAL_PRIMARY_COLORS, /dark:text-\[#23201b\]/)
+  assert.match(PORTAL_PRIMARY_COLORS, /dark:hover:bg-\[#d9d4c7\]/)
+  assert.doesNotMatch(PORTAL_PRIMARY_COLORS, /emerald|amber|slate/, 'named palette fills are remapped by main.css in dark mode; the recipe is literal hex')
   const rest = ratio(IVORY, CHARCOAL)
   const hover = ratio(IVORY, CHARCOAL_HOVER)
-  const dark = ratio(NEUTRAL_900, AMBER_300)
-  console.log(`  map Load button: ivory on charcoal ${rest}:1; hover ${hover}:1; dark neutral-900 on amber-300 ${dark}:1`)
+  const dark = ratio(CHARCOAL, IVORY_DARK)
+  const darkHover = ratio(CHARCOAL, IVORY_DARK_HOVER)
+  console.log(`  primary button: ivory on charcoal ${rest}:1; hover ${hover}:1; dark charcoal on ivory ${dark}:1; dark hover ${darkHover}:1`)
   assert.ok(rest >= AA_TEXT, `resting text contrast ${rest}`)
   assert.ok(hover >= AA_TEXT, `hover text contrast ${hover}`)
   assert.ok(dark >= AA_TEXT, `dark text contrast ${dark}`)
+  assert.ok(darkHover >= AA_TEXT, `dark hover text contrast ${darkHover}`)
   assert.ok(ratio(CHARCOAL, PORTAL_LIGHT_SURFACE) >= AA_UI, 'the button edge is visible on a light surface')
-  assert.ok(ratio(AMBER_300, NEUTRAL_900) >= AA_UI, 'and on the dark card')
+  assert.ok(ratio(IVORY_DARK, NEUTRAL_900) >= AA_UI && ratio(IVORY_DARK, PORTAL_DARK_SURFACE) >= AA_UI, 'and on the dark card and dark page')
 })
 
 runTest('the open-in-Google-Maps icon keeps 4.5:1 in light and dark and is an icon-only link with a name', () => {
