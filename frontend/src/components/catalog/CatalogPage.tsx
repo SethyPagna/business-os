@@ -54,7 +54,7 @@ import {
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import { buildProductSearchTerms } from '../products/helpers/productFilterHelpers.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGalleryHelpers.ts'
-import { normalizePortalLanguage, readStoredPortalLanguage, storePortalLanguage } from './portalLanguageOptions.ts'
+import { normalizePortalLanguage, PORTAL_COPY_LANGUAGE_OPTIONS, readStoredPortalLanguage, storePortalLanguage } from './portalLanguageOptions.ts'
 import { portalAnnouncementIssues, resolvePortalAnnouncement } from './portalAnnouncement.ts'
 import {
   normalizePortalTranslations,
@@ -3559,6 +3559,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         setPortalImageView={setPortalImageView}
         toggleTheme={toggleTheme}
         pageLanguage={language}
+        languageOptions={PORTAL_COPY_LANGUAGE_OPTIONS}
         changePageLanguage={changePageLanguage}
       />
     </Suspense>

@@ -249,7 +249,7 @@ const SHOP_IDENTITY = {
   title: 'Leang Cosmetics',
   appTitle: 'Leang Cosmetics',
   manifest: '/portal-manifest.json',
-  themeColor: '#ffffff',
+  themeColor: '#f4f1ea',
   appleIcon: SHOP_APPLE_TOUCH_ICON,
   favicon: `${SHOP_ICON_BY_SIZE['']} image/x-icon`,
   icon192: `${SHOP_ICON_BY_SIZE['192x192']} image/png`,

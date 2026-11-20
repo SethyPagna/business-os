@@ -80,7 +80,12 @@ runTest('the storefront CSP frame-src names every host the allowlist accepts, so
       assert.ok(allowed.has(`https://${host}`), `frame-src must list https://${host}`)
     }
   }
-  for (const origin of allowed) assert.match(origin, /^https:\/\/(?:www\.|maps\.)?google\.[a-z.]+$/, `frame-src lists only Google map hosts: ${origin}`)
+  // The two Google Translate hosts are the only non-map frame origins (the translate widget frames them).
+  const translateFrames = new Set(['https://translate.google.com', 'https://translate.googleapis.com'])
+  for (const origin of allowed) {
+    if (translateFrames.has(origin)) continue
+    assert.match(origin, /^https:\/\/(?:www\.|maps\.)?google\.[a-z.]+$/, `frame-src lists only Google map hosts: ${origin}`)
+  }
 })
 
 if (failed > 0) {

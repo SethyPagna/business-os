@@ -1,6 +1,6 @@
 // Owner, 2026-09-25: "Default language of the public site = Khmer", with
 // business name, brand names, product names, prices and owner-marked About
-// text never machine-translated. Owner, 2026-09-27: English and Khmer only.
+// text never machine-translated. Owner, 2026-09-27: Owner, 2026-11-20: six languages, four of them by Google Translate.
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import {
   PUBLIC_STOREFRONT_DEFAULT_LANGUAGE,
   PUBLIC_STOREFRONT_LANGUAGE_OPTIONS,
+  readPublicStorefrontChoice,
   readPublicStorefrontLanguage,
   storePortalLanguage,
 } from '../src/components/catalog/portalLanguageOptions.ts'
@@ -56,14 +57,24 @@ try {
   storePortalLanguage('km')
   assert.equal(readPublicStorefrontLanguage(), 'km')
 
-  // 3. What older builds left behind -- a Google Translate language, the old
-  //    picker's 'original', a googtrans cookie -- never beats the default.
-  for (const stale of ['fr', 'zh-CN', 'nl', 'original']) {
+  // 3. A stored Google language is remembered (the choice survives a reload) and the page's own
+  //    copy is English under it; what a retired build left behind -- 'original', a language the
+  //    menu no longer offers, a stray googtrans cookie -- never beats the default.
+  for (const google of ['zh-CN', 'zh-TW', 'fr', 'es']) {
+    installBrowser({ stored: google })
+    assert.equal(readPublicStorefrontChoice(), google, `stored ${google}`)
+    assert.equal(readPublicStorefrontLanguage(), 'en', `copy under ${google}`)
+  }
+  for (const stale of ['nl', 'de', 'original']) {
     installBrowser({ stored: stale })
+    assert.equal(readPublicStorefrontChoice(), 'km', `stored ${stale}`)
     assert.equal(readPublicStorefrontLanguage(), 'km', `stored ${stale}`)
   }
   installBrowser({ stored: null, cookie: 'googtrans=%2Fen%2Fde' })
   assert.equal(readPublicStorefrontLanguage(), 'km')
+  installBrowser({ stored: null })
+  storePortalLanguage('zh-TW')
+  assert.equal(readPublicStorefrontChoice(), 'zh-TW')
 
   // 4. Blocked site data (Safari private mode) still opens in Khmer, and a
   //    choice that cannot be saved does not throw.
@@ -75,8 +86,8 @@ try {
   globals.document = originalDocument
 }
 
-// 5. The picker: Khmer first, English second, nothing else.
-assert.deepEqual(PUBLIC_STOREFRONT_LANGUAGE_OPTIONS.map((option) => option.value), ['km', 'en'])
+// 5. The picker: Khmer, English, then the four Google languages.
+assert.deepEqual(PUBLIC_STOREFRONT_LANGUAGE_OPTIONS.map((option) => option.value), ['km', 'en', 'zh-CN', 'zh-TW', 'fr', 'es'])
 
 // 6. Owner-marked About text.
 assert.deepEqual(splitNoTranslateSegments('Welcome to [[Leang Cosmetics]], home of [[Leang Glow]].'), [
@@ -94,13 +105,14 @@ assert.equal(stripNoTranslateMarkers('Our [[Leang]] story'), 'Our Leang story')
 // 7. Wiring: the live page opens in the stored-or-Khmer language, renders
 //    its own text in it, and remembers a picker choice.
 const page = read('src/components/catalog/PublicCatalogPage.tsx')
-assert.match(page, /const \[pageLanguage, setPageLanguage\] = useState\(readPublicStorefrontLanguage\)/)
+assert.match(page, /const \[pageChoice, setPageChoice\] = useState\(readPublicStorefrontChoice\)/)
+assert.match(page, /const pageLanguage = portalCopyLanguage\(pageChoice\)/)
 assert.match(page, /resolveStorefrontCopy\(pageLanguage, t, key, fallback, fallbackKm\)/, 'storefront copy must follow the page language')
 const storefrontT = (key: string) => key
 assert.equal(resolveStorefrontCopy('km', storefrontT, 'products', 'Products'), getPortalLanguageText('km', 'products'))
 assert.equal(resolveStorefrontCopy('en', storefrontT, 'products', 'Products'), 'Products')
 assert.match(page, /changePageLanguage=\{changePageLanguage\}/)
-assert.match(page, /storePortalLanguage\(language\)\s*setPageLanguage\(language\)/, 'a picker choice must be remembered, not only set in state')
+assert.match(page, /storePortalLanguage\(choice\)[\s\S]{0,500}setPageChoice\(choice\)/, 'a picker choice must be remembered, not only set in state')
 
 // 8. Never machine-translated: product names, brands, prices, business name.
 const card = read('src/components/catalog/CatalogProductsSection.tsx')
@@ -115,4 +127,4 @@ assert.match(surface, /<h1\s[^>]*translate="no"/, 'header business name is trans
 const tabs = read('src/components/catalog/CatalogSecondaryTabs.tsx')
 assert.match(tabs, /<OwnerText text=\{storyText\} \/>/, 'the About story ignores owner [[ ]] markers')
 
-console.log('PASS storefront opens in Khmer, offers only Khmer and English, remembers the choice, and guards names/brands/prices')
+console.log('PASS storefront opens in Khmer, offers six languages, remembers the choice, and guards names/brands/prices')

@@ -17,7 +17,7 @@
          src/styles/main.css -- keep that rule, not this attribute, in mind
          when a field starts zooming again. -->
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#ffffff" />
+    <meta name="theme-color" content="#f4f1ea" />
     <meta name="description" content="Browse Leang Cosmetics products and contact the store." />
     <!-- Canonical URL and link previews (Open Graph / Twitter card) for the
          storefront. All three absolute values name the PRIMARY host, for two
@@ -52,8 +52,8 @@
     <!-- `default`, not `black-translucent`. black-translucent paints the iOS
          status bar text WHITE and lets the page run underneath it, which only
          works over dark top chrome. Both hosts are near-white in the
-         light-first default this app ships: the storefront ground is #ffffff
-         (PORTAL_LIGHT_SURFACE) and the admin's mobile top bar is the ivory
+         light-first default this app ships: the storefront ground is the ivory
+         #f4f1ea (PORTAL_LIGHT_SURFACE) and the admin's mobile top bar is the ivory
          --nav-surface #fffdf8 (src/components/navigation/nav-chrome.css), the
          two values the theme-color meta above carries per host. One static
          value, not a per-host swap: both hosts want the same answer. -->
@@ -176,7 +176,7 @@
           if (description) description.setAttribute('content', 'Browse Leang Cosmetics products and contact the store.')
           var appTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]')
           if (appTitle) appTitle.setAttribute('content', 'Leang Cosmetics')
-          if (themeColor) themeColor.setAttribute('content', '#ffffff')
+          if (themeColor) themeColor.setAttribute('content', '#f4f1ea')
           var manifest = document.querySelector('link[rel="manifest"]')
           if (manifest) manifest.setAttribute('href', '/portal-manifest.json')
           var icons = document.querySelectorAll('link[rel="icon"]')

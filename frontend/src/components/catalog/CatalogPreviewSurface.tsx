@@ -17,7 +17,7 @@ import CatalogProductImage from './catalogImages'
 import { PortalNavSearchSlotContext } from './portalNavSearchSlot.ts'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import type { PortalFooterProps } from './legal/LegalPages.tsx'
-import { PUBLIC_STOREFRONT_LANGUAGE_OPTIONS } from './portalLanguageOptions.ts'
+import { PUBLIC_STOREFRONT_LANGUAGE_OPTIONS, type PortalLanguageOption } from './portalLanguageOptions.ts'
 import type { PortalContactEntry } from './portalSocialLinks.ts'
 import PortalAnnouncementStrip from './PortalAnnouncementStrip.tsx'
 import type { PortalAnnouncement } from './portalAnnouncement.ts'
@@ -152,6 +152,10 @@ type CatalogPreviewSurfaceProps = {
   setPortalImageView: Dispatch<SetStateAction<PortalImageViewState>>
   toggleTheme: () => void
   pageLanguage: string
+  /** The menu's active row: one of the six values. Defaults to pageLanguage (the editor preview only knows km and en). */
+  pageLanguageChoice?: string
+  /** The editor preview passes only the hand-written two; the live storefront gets all six. */
+  languageOptions?: readonly PortalLanguageOption[]
   changePageLanguage: (language: string) => void
 }
 
@@ -223,6 +227,8 @@ export default function CatalogPreviewSurface({
   setPortalImageView,
   toggleTheme,
   pageLanguage,
+  pageLanguageChoice,
+  languageOptions = PUBLIC_STOREFRONT_LANGUAGE_OPTIONS,
   changePageLanguage,
 }: CatalogPreviewSurfaceProps) {
   // The tab bar's search slot (public storefront only): the products section draws its search and Filters into it.
@@ -517,8 +523,8 @@ export default function CatalogPreviewSurface({
                       content={({ closeMenu }) => (
                         // No title row: just the options, the active one marked with a check.
                         <div className="w-60 max-w-[85vw] py-1" role="group" aria-label={copy('publicTranslation', 'Language tools')}>
-                          {PUBLIC_STOREFRONT_LANGUAGE_OPTIONS.map((option) => {
-                            const active = pageLanguage === option.value
+                          {languageOptions.map((option) => {
+                            const active = (pageLanguageChoice ?? pageLanguage) === option.value
                             return (
                               <button
                                 key={option.value}
@@ -530,8 +536,14 @@ export default function CatalogPreviewSurface({
                                   closeMenu()
                                 }}
                               >
-                                <span>{option.label}</span>
-                                {active ? <Check aria-hidden="true" className="h-4 w-4 shrink-0" /> : null}
+                                {/* Each label stays in its own script: a page translator must never rewrite it. */}
+                                <span translate="no" className="notranslate">{option.label}</span>
+                                <span className="flex items-center gap-2">
+                                  {option.google ? (
+                                    <span translate="no" className="notranslate rounded border border-stone-300 px-1 text-[10px] font-medium uppercase leading-4 tracking-wide text-stone-500 dark:border-neutral-600 dark:text-neutral-400">Google</span>
+                                  ) : null}
+                                  {active ? <Check aria-hidden="true" className="h-4 w-4 shrink-0" /> : null}
+                                </span>
                               </button>
                             )
                           })}
