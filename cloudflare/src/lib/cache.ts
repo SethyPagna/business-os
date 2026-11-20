@@ -274,12 +274,40 @@ export async function invalidateCachesAfterMaintenance(env: Env, source: string)
 
 // A writer awaits this AFTER its commit and BEFORE its response, so the next read by the same actor already keys on the new version. A fault
 // here is logged and swallowed: the write is committed, and a bump that failed must never turn it into a non-2xx (the caches age out by TTL).
+// One retry: a bump that failed once (a KV or D1 hiccup) is tried again before it is given up, and a bump given up is counted, so a namespace left stale for its TTL shows up.
 export async function bumpVersions(env: Env, namespaces: string[]): Promise<void> {
-  try {
-    await advanceVersions(env, namespaces)
-  } catch (error) {
-    console.error('[cache] version bump failed', namespaces, error)
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      await advanceVersions(env, namespaces)
+      return
+    } catch (error) {
+      if (attempt === 1) continue
+      console.error('[cache] version bump failed', namespaces, error)
+      await recordBumpFailure(env, namespaces)
+    }
   }
+}
+
+async function recordBumpFailure(env: Env, namespaces: string[]): Promise<void> {
+  try {
+    const { recordAnalytics } = await import('./analytics')
+    recordAnalytics(env, { kind: 'cache_bump_failed', labels: namespaces.slice(0, 10), values: [namespaces.length] })
+  } catch {
+    // Counting must never turn a swallowed bump into a failure.
+  }
+}
+
+// Every KV value a bump writes is unique and above every earlier one. KV has no compare-and-set, so two bumps that overlap both read n: writing n + 1 twice leaves a
+// reader that cached between them under a token the second bump did not move. The clock part is above every counter a write has produced (counters only grow), the
+// random part separates two isolates bumping in the same millisecond, and lastIssuedVersion separates two bumps in this isolate. 2048 keeps it under 2^53 until 2110.
+const VERSION_CLOCK_SCALE = 2048
+let lastIssuedVersion = 0
+function nextUniqueVersion(current: number): number {
+  const random = new Uint32Array(1)
+  crypto.getRandomValues(random)
+  const candidate = Math.max(current + 1, Date.now() * VERSION_CLOCK_SCALE + (random[0] % VERSION_CLOCK_SCALE))
+  lastIssuedVersion = Math.max(candidate, lastIssuedVersion + 1)
+  return lastIssuedVersion
 }
 
 async function advanceVersions(env: Env, namespaces: string[]): Promise<void> {
@@ -322,7 +350,7 @@ async function advanceVersions(env: Env, namespaces: string[]): Promise<void> {
 
     // KV holds no counter and D1 could not say whether the namespace already crossed over: starting at 1 could land on a value
     // some reader already issued. The clock is above every counter a write has ever produced and only grows, so it is the one
-    // start that cannot collide.
+    // start that cannot collide. (The D1 row is moved by one atomic statement, MAX(version + 1, minimum), so it needs no unique value.)
     const currentKv = Number(currentKvRaw || '0') || 0
     const nextKv = currentKvRaw == null && d1Unreadable.value ? Math.max(Date.now(), currentKv + 1) : currentKv + 1
 
@@ -335,7 +363,8 @@ async function advanceVersions(env: Env, namespaces: string[]): Promise<void> {
     }
 
     try {
-      await env.CACHE.put(versionKey, String(nextKv))
+      // A KV read that threw is "unknown", not "never bumped", so the value written is never derived from a counter that could not be read: it is unique and above every earlier one.
+      await env.CACHE.put(versionKey, String(nextUniqueVersion(currentKv)))
       return null
     } catch {
       // A per-key write collision or other KV error must still invalidate
@@ -365,5 +394,6 @@ async function bumpVersionsInD1(env: Env, entries: Array<{ namespace: string; mi
     }])
   } catch (error) {
     console.error('[cache] could not advance versions in D1', entries.map((entry) => entry.namespace), error)
+    throw error
   }
 }

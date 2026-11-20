@@ -115,9 +115,10 @@ check('under budget, the version advances in KV as before', async () => {
   const { bumpVersion } = await loadCache()
   const ctx = freshEnv()
   await bumpVersion(ctx.env, 'products')
-  assert.equal(await ctx.env.CACHE.get('v2:products'), '1')
+  const firstBump = Number(await ctx.env.CACHE.get('v2:products'))
+  assert.ok(Number.isSafeInteger(firstBump) && firstBump >= 1, 'the first bump writes a positive integer (every KV value a bump writes is unique and above the earlier ones)')
   await bumpVersion(ctx.env, 'products')
-  assert.equal(await ctx.env.CACHE.get('v2:products'), '2', 'each bump advances it')
+  assert.ok(Number(await ctx.env.CACHE.get('v2:products')) > firstBump, 'each bump advances it')
   assert.equal(ctx.stats().kvDeletes, 0, 'no fallback while there is headroom')
 })
 
@@ -145,13 +146,14 @@ check('after crossing over, readers get the D1 version, not a stale KV one', asy
   const ctx = freshEnv()
   await bumpVersion(ctx.env, 'products')
   const kvVersion = await getVersionWithFallback(ctx.env, 'products')
-  assert.equal(kvVersion, 'k2:1', 'KV is preferred while it is present and carries the new cache-key generation')
+  assert.match(kvVersion, /^k2:[0-9]+$/, 'KV is preferred while it is present and carries the new cache-key generation')
+  const kvCounter = Number(kvVersion.slice(3))
 
   await consumeQuota(ctx.env, 'kv_write', 950)
   await bumpVersion(ctx.env, 'products')
   await bumpVersion(ctx.env, 'products')
   const d1Version = await getVersionWithFallback(ctx.env, 'products')
-  assert.equal(d1Version, 'd2:3', 'reads now come from D1, preserve the KV handoff count, and keep advancing')
+  assert.equal(d1Version, `d2:${kvCounter + 2}`, 'reads now come from D1, preserve the KV handoff count, and keep advancing')
   assert.notEqual(d1Version, kvVersion, 'the version genuinely changed -- otherwise caches would never invalidate')
 })
 
@@ -162,15 +164,16 @@ check('D1 handoff is permanent even after the quota window resets', async () => 
 
   await bumpVersion(ctx.env, 'products')
   await bumpVersion(ctx.env, 'products')
-  assert.equal(await ctx.env.CACHE.get('v2:products'), '2')
+  const lastKv = Number(await ctx.env.CACHE.get('v2:products'))
+  assert.ok(Number.isSafeInteger(lastKv) && lastKv >= 2)
 
   await consumeQuota(ctx.env, 'kv_write', 950)
   await bumpVersion(ctx.env, 'products')
   const afterHandoff = await ctx.db
     .prepare(`SELECT version FROM cache_versions WHERE namespace = 'products'`)
     .get({})
-  assert.equal(Number(afterHandoff?.version), 3, 'D1 starts strictly after the last KV version')
-  assert.equal(await getVersionWithFallback(ctx.env, 'products'), 'd2:3')
+  assert.equal(Number(afterHandoff?.version), lastKv + 1, 'D1 starts strictly after the last KV version')
+  assert.equal(await getVersionWithFallback(ctx.env, 'products'), `d2:${lastKv + 1}`)
 
   const writesAtHandoff = ctx.stats().kvWrites
   // Simulate tomorrow: KV quota is healthy again. D1 mode must remain
@@ -181,10 +184,10 @@ check('D1 handoff is permanent even after the quota window resets', async () => 
   const next = await ctx.db
     .prepare(`SELECT version FROM cache_versions WHERE namespace = 'products'`)
     .get({})
-  assert.equal(Number(next?.version), 4, 'D1 keeps advancing after quota rollover')
+  assert.equal(Number(next?.version), lastKv + 2, 'D1 keeps advancing after quota rollover')
   assert.equal(await ctx.env.CACHE.get('v2:products'), null, 'KV version key must stay absent after handoff')
   assert.equal(ctx.stats().kvWrites, writesAtHandoff, 'D1 mode must not resume spending KV writes')
-  assert.equal(await getVersionWithFallback(ctx.env, 'products'), 'd2:4')
+  assert.equal(await getVersionWithFallback(ctx.env, 'products'), `d2:${lastKv + 2}`)
 })
 
 check('cached product reads use the D1-aware version source', async () => {
