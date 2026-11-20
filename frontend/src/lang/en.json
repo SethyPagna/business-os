@@ -3685,8 +3685,8 @@
       "staffAppliedOnly": "Points are reviewed and applied by staff only. Customers cannot redeem them directly here.",
       "starterFaq": {
         "1": {
-          "answer": "Tell us your skin type, concerns, and what kind of routine you want. We can recommend suitable skincare, cosmetics, hair, or body products from our available stock.",
-          "question": "How do I choose products for my skin type?"
+          "answer": "Use the catalogue description and manufacturer label to compare products. For allergies, reactions, skin conditions, medicines, or pregnancy, ask a qualified health professional.",
+          "question": "How do I compare products for my skin type?"
         },
         "2": {
           "answer": "The products shown come from our current catalogue. Stock can change during busy periods, so contact the store for a final confirmation before visiting.",
@@ -3696,64 +3696,60 @@
           "answer": "Sign in and open your account. Your membership ID is shown there. Points are coming soon.",
           "question": "Where can I see my membership?"
         },
-        "4": {
-          "answer": "Share our store on social media, then upload your screenshot here. Our staff review every submission. Membership points are coming soon.",
-          "question": "How does Share & Reward work?"
-        },
         "5": {
-          "answer": "Use the social links on this page or call the store directly. Our team can help with product matching, stock checks, and more specific skincare or makeup questions.",
-          "question": "How can I contact Leang Cosmetics for more accurate advice?"
+          "answer": "Use the verified contact links on this page to ask about a product or request a current stock check.",
+          "question": "How can I contact the store?"
         },
         "6": {
-          "answer": "Yes. Ask our team or use the AI assistant with your skin type and concerns so we can narrow options that are gentler and easier to compare from current stock.",
-          "question": "Do you have products for sensitive skin?"
+          "answer": "Read the product label and ingredient list and ask a qualified health professional about allergies or reactions. The catalogue and AI assistant do not provide medical advice.",
+          "question": "How should I choose a product for sensitive skin?"
         },
         "7": {
-          "answer": "Yes. Contact the store directly if you want brand confirmation, latest packaging details, or a more exact stock check before buying.",
-          "question": "Can I ask whether a product is original or from a specific brand line?"
+          "answer": "Contact the store about the specific item and ask what packaging, batch, supplier, or sourcing information can be verified before buying.",
+          "question": "Can I ask about a product or brand line?"
         },
         "8": {
-          "answer": "Yes. Leang Cosmetics carries multiple beauty categories, so you can search the catalog or ask for recommendations across skincare, cosmetics, perfume, hair, and body products.",
-          "question": "Do you sell skincare, makeup, hair care, and body care together?"
+          "answer": "Use the category and brand filters to see what is currently listed. Contact the store if a product or category is not shown.",
+          "question": "What types of products are available?"
         },
         "9": {
-          "answer": "Yes. Share your budget, skin type, concerns, and whether you need morning, night, or event-based products. We can help match a more complete routine from available products.",
-          "question": "Can the store help me build a full routine?"
+          "answer": "You can contact the store with your budget and preferences. For skin conditions, allergies, reactions, medicines, or pregnancy, ask a qualified health professional.",
+          "question": "Can I ask about a routine?"
         },
         "10": {
           "answer": "If an item is unavailable, message the store through the contact links on this page so the team can suggest alternatives or confirm when stock changes.",
           "question": "What should I do if an item is out of stock?"
         },
         "11": {
-          "answer": "Yes. Tell us your budget and what category you want, and we can narrow options from the current catalog.",
-          "question": "Can I ask for products within a specific budget?"
+          "answer": "Use the prices shown in the current catalogue and contact the store to confirm a final price before purchase.",
+          "question": "Can I look for products within a specific budget?"
         },
         "12": {
-          "answer": "Yes. Ask the store team or use the assistant to explore perfumes, makeup, skincare, and beauty gifts that fit the occasion.",
-          "question": "Do you have gift-friendly items or bundles?"
+          "answer": "Check the current catalogue and promotions, then contact the store to confirm what is available.",
+          "question": "Are gifts or bundles available?"
         },
         "13": {
-          "answer": "Yes. We can suggest similar products from other brands in stock based on category, concern, and price range.",
-          "question": "Can I ask for alternatives if my preferred brand is unavailable?"
+          "answer": "Compare current products by category, description, price and stock status. The store can confirm current availability.",
+          "question": "Can I compare alternatives if a brand is unavailable?"
         },
         "14": {
-          "answer": "Yes. Use the assistant or contact the store with your skin type and concern so recommendations stay closer to your needs.",
-          "question": "Can I check whether a product is suitable for oily, dry, or combination skin?"
+          "answer": "Read the manufacturer label and ingredient list. The catalogue cannot determine medical suitability; ask a qualified health professional about allergies, reactions, or skin conditions.",
+          "question": "How do I check whether a product suits my skin type?"
         },
         "15": {
-          "answer": "Yes. The store carries more than just skincare and makeup, so you can also browse hair, body, perfume, and related beauty items when available.",
-          "question": "Do you also carry hair, body, and fragrance products?"
+          "answer": "Use the current category filters. They reflect the products listed in the catalogue.",
+          "question": "Where can I see the product categories?"
         },
         "16": {
           "answer": "Add your skin type, concerns, brand preferences, and what you want the product to do. The assistant uses that together with our current catalog to narrow better matches.",
           "question": "What details help the AI recommend better products?"
         },
         "17": {
-          "answer": "Yes. The assistant is designed to prioritize products from our current catalogue, then explain why those items fit your question.",
-          "question": "Does the AI only recommend products available at Leang Cosmetics?"
+          "answer": "The assistant receives a limited set of products from the current public catalogue. Stock can change, so confirm availability with the store.",
+          "question": "Which products can the AI recommend?"
         },
         "18": {
-          "answer": "No. AI answers are for reference only. For sensitive skin issues, allergies, pregnancy-safe guidance, or stronger treatment advice, please contact our team directly first.",
+          "answer": "No. AI answers are for general product comparison only. Ask a qualified health professional about sensitive skin, allergies, reactions, treatment, medicines, or pregnancy.",
           "question": "Should I trust the AI as medical or skin-treatment advice?"
         },
         "19": {
@@ -3769,7 +3765,7 @@
           "question": "Do you offer delivery, or is it pickup only?"
         },
         "22": {
-          "answer": "We accept cash and common mobile payment options in store. For delivery or online orders, contact us directly to confirm which payment method works best for your order.",
+          "answer": "Payment is not collected on this site. Contact the store to confirm the available payment method before ordering.",
           "question": "What payment methods do you accept?"
         },
         "23": {
@@ -3777,11 +3773,11 @@
           "question": "What are your store hours?"
         },
         "24": {
-          "answer": "We buy through official distributors and authorised suppliers and keep the sourcing records for what we sell, so we can check whether a specific item is authentic. If you have a concern about an item, contact the store directly and we will go through its sourcing with you.",
-          "question": "Are the products sold here authentic?"
+          "answer": "Contact the store about the specific item and ask what sourcing, batch, packaging, or supplier information can be verified. This catalogue does not make a blanket authenticity guarantee.",
+          "question": "How can I ask about a product's source or authenticity?"
         },
         "25": {
-          "answer": "Check the Promotions section on this page for current offers. New discounts and bundles are added there as they become available, so it is worth checking back regularly.",
+          "answer": "Check the Promotions section for offers currently published by the store, then confirm the final price and terms before purchase.",
           "question": "Where can I see current promotions and discounts?"
         },
         "26": {

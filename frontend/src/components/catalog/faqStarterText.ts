@@ -18,7 +18,6 @@ export const FAQ_STARTER_TEXT = [
   // G38 P0: the owner's rule (30 Sep) is membership stays, the points value
   // reads "coming soon" -- never a promise of points, history or rewards.
   ['3', 'Where can I see my membership?', 'Sign in and open your account. Your membership ID is shown there. Points are coming soon.'],
-  ['4', 'How does Share & Reward work?', 'Share our store on social media, then upload your screenshot here. Our staff review every submission. Membership points are coming soon.'],
   ['5', 'How can I contact the store?', 'Use the verified contact links on this page to ask about a product or request a current stock check.'],
   ['6', 'How should I choose a product for sensitive skin?', 'Read the product label and ingredient list and ask a qualified health professional about allergies or reactions. The catalogue and AI assistant do not provide medical advice.'],
   ['7', 'Can I ask about a product or brand line?', 'Contact the store about the specific item and ask what packaging, batch, supplier, or sourcing information can be verified before buying.'],
