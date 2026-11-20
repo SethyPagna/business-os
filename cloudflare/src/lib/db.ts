@@ -208,23 +208,29 @@ export function assertNoProductBatchesReplace(sql: string): void {
 
 const D1_GUARDED = Symbol.for('business-os.product-batches-replace-guard.v1')
 
-/** The same D1 database, refusing a product_batches replace at prepare()/exec(). Idempotent; a missing database is returned as is. */
+const GUARDED_D1 = new WeakMap<object, object>()
+
+/** The same D1 database, refusing a product_batches replace at prepare()/exec(). Idempotent; a missing database is returned as is. The wrapper of one binding is always the same object: module caches key a WeakMap on env.DB, and a fresh wrapper per access would miss them and repeat their probes. */
 export function guardD1<T extends object | undefined | null>(d1: T): T {
   if (!d1 || (d1 as Record<symbol, unknown>)[D1_GUARDED]) return d1
+  const known = GUARDED_D1.get(d1 as object)
+  if (known) return known as T
   const guardSession = (session: object): object => new Proxy(session, { get: (target, prop) => {
     const value = Reflect.get(target, prop, target)
     if (typeof value !== 'function') return value
     if (prop === 'prepare') return (sql: string) => { assertNoProductBatchesReplace(sql); return value.call(target, sql) }
     return value.bind(target)
   } })
-  return new Proxy(d1 as object, { get: (target, prop) => {
+  const guarded = new Proxy(d1 as object, { get: (target, prop) => {
     if (prop === D1_GUARDED) return true
     const value = Reflect.get(target, prop, target)
     if (typeof value !== 'function') return value
     if (prop === 'prepare' || prop === 'exec') return (sql: string, ...rest: unknown[]) => { assertNoProductBatchesReplace(sql); return value.call(target, sql, ...rest) }
     if (prop === 'withSession') return (...args: unknown[]) => guardSession(value.apply(target, args))
     return value.bind(target)
-  } }) as T
+  } })
+  GUARDED_D1.set(d1 as object, guarded)
+  return guarded as T
 }
 
 const GUARDED_ENVS = new WeakMap<object, object>()

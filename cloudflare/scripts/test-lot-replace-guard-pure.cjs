@@ -153,6 +153,21 @@ const INNOCENT = [
     assert.deepEqual(Object.keys(guardEnvDatabases({ DB: w.d1, X: 1 })).sort(), ['DB', 'X'])
     assert.equal(guardEnvDatabases({ X: 1 }).DB, undefined)
   })
+  await check('the guard adds no D1 call: env.DB is the same object on every access, and a batch of N statements is ONE batch call', async () => {
+    const w = d1Double()
+    let batchCalls = 0, preparedBeforeBatch = 0
+    const real = w.d1.batch.bind(w.d1)
+    w.d1.batch = async (statements) => { batchCalls++; preparedBeforeBatch = statements.length; return real(statements) }
+    const env = guardEnvDatabases({ DB: w.d1 })
+    assert.equal(env.DB, env.DB, 'a fresh wrapper per access would miss every WeakMap keyed on env.DB (stockSession sessionColumns) and repeat its probe')
+    assert.equal(guardD1(w.d1), guardD1(w.d1))
+    assert.equal(guardD1(guardD1(w.d1)), guardD1(w.d1))
+    const db = env.DB
+    const out = await db.batch([1, 2, 3, 4, 5].map((n) => db.prepare('INSERT INTO settings(key,value) VALUES(?,?)').bind('k' + n, 'v')))
+    assert.equal(batchCalls, 1, 'one batch call reaches the binding')
+    assert.equal(preparedBeforeBatch, 5, 'all five statements travel in that one call')
+    assert.equal(out.length, 5)
+  })
   await check('ordinary lot writers still work: INSERT, INSERT OR IGNORE on an existing lot, upsert, UPDATE, other tables REPLACE', async () => {
     const w = d1Double(), db = new D1Compat(w.d1)
     await db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key) VALUES(3,10,'c')").run()
