@@ -57,10 +57,9 @@ function suite(libText, routeText) {
 const base = suite(lib, route)
 for (const [name, err] of base) { if (err) { failed++; console.log('FAIL ' + name + ' - ' + err) } else console.log('PASS ' + name) }
 
-check('the waiting-lines text equals the overlay text (one rule)', () => {
-  const o = /const PENDING_LINES_SQL = (`[\s\S]*?`)\n/.exec(overlay), m = /export const PENDING_LINES_SQL = (`[\s\S]*?`)\n/.exec(lib)
-  assert.ok(o && m)
-  assert.equal(norm(m[1]), norm(o[1]))
+check('the touched-id statements are driven from the touched ids and the pending approvals', () => {
+  assert.ok(lib.includes('FROM json_each(@sessions) w CROSS JOIN inventory_check_sessions s ON s.id = w.value'), 'SCOPE_SQL drives from the touched session ids')
+  assert.ok(lib.includes('inventory_check_approvals a INDEXED BY inventory_check_approvals_pending, json_each(a.line_set_json) je'), 'the waiting read drives from the pending approvals and their stored line sets')
 })
 
 // Mutants: each must turn exactly its named check red.

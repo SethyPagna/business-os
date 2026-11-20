@@ -69,7 +69,7 @@ class Device {
     for (let n = 0; n < limit; n++) {
       const r = await this.get(`${IC}/marks/changes?branchId=${this.branch}&since=${this.cursor}&tag=${this.tag}`)
       assert.equal(r.status, 200, 'changes: ' + r.text.slice(0, 200))
-      if (r.json.rebuild) { return this.build() }
+      if (r.json.rebuild || (this.catchUp && r.json.top - this.cursor > this.catchUp)) { return this.build() }
       for (const [id, t, s] of r.json.marks) { if (s === 0) this.marks.delete(id); else this.marks.set(id, [t, s]) }
       for (const [id, w] of r.json.pending ?? []) { if (w) this.pending.add(id); else this.pending.delete(id) }
       this.cursor = r.json.cursor; this.tag = r.json.tag; this.top = r.json.top
@@ -156,6 +156,7 @@ async function scenario(world, report) {
   // The touched cap (m4): more products in one page of events than inventoryMarksTouchedMax, so the answer stops early and the cursor must be the last event WALKED.
   const cap = (await world.send('GET', `${IC}/list?branchId=1&page=1&pageSize=1`)).json.capabilities.marks
   report.caps = cap
+  device.catchUp = cap.catchUpMaxEvents
   await step('touched cap: the feed pages without skipping events', async () => {
     const many = await fresh(560)
     for (let i = 0; i < many.length; i += 40) await submit(many.slice(i, i + 40), 0)

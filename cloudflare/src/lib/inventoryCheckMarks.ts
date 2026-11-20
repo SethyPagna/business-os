@@ -38,11 +38,18 @@ export const TOP_SQL = 'SELECT id, actor_id, request_id, created_at FROM invento
 export const AT_SQL = 'SELECT id, actor_id, request_id, created_at FROM inventory_check_events WHERE id = @since'
 export const EVENTS_SQL = 'SELECT id, session_id, product_id, actor_id, request_id, created_at FROM inventory_check_events WHERE id > @since ORDER BY id LIMIT @pageEvents'
 export const SCOPE_SQL = `SELECT s.id AS id, EXISTS (SELECT 1 FROM inventory_check_approvals a WHERE a.session_id = s.id) AS approval
-  FROM inventory_check_sessions s WHERE s.id IN (SELECT value FROM json_each(@sessions)) AND s.organization_id IS @organization AND s.branch_id = @branchId`
+  FROM json_each(@sessions) w CROSS JOIN inventory_check_sessions s ON s.id = w.value WHERE s.organization_id IS @organization AND s.branch_id = @branchId`
 export const SESSION_PRODUCTS_SQL = 'SELECT DISTINCT session_id, product_id FROM inventory_check_items WHERE session_id IN (SELECT value FROM json_each(@sessions))'
-// Which touched products wait (the overlay's rule, copied: scripts/test-inventory-check-marks-pure.cjs pins that the two texts are equal).
-export const PENDING_LINES_SQL = `SELECT DISTINCT i.product_id AS product_id, a.session_id AS session_id FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id = a.session_id
-  WHERE a.organization_id IS @organization AND i.branch_id = @branchId AND i.product_id IN (SELECT value FROM json_each(@ids)) AND ${waitingLineSql('a', 'i')}`
+// Which touched products wait. Driven from the pending approvals of the branch and their stored line sets (line_set_json keys are product ids), so the rows read follow the waiting backlog, never the touched ids times the history; an approval without a stored line set falls back to the overlay's count-differs rule.
+export const PENDING_LINES_SQL = `SELECT product_id, session_id FROM (
+  SELECT CAST(je.key AS INTEGER) AS product_id, a.session_id AS session_id FROM inventory_check_approvals a INDEXED BY inventory_check_approvals_pending, json_each(a.line_set_json) je
+    WHERE a.organization_id IS @organization AND a.status = 'pending' AND a.branch_id = @branchId AND a.line_set_json IS NOT NULL AND CAST(je.key AS INTEGER) IN (SELECT value FROM json_each(@ids))
+      AND json_extract(a.applied_json, '$.lines."' || je.key || '"') IS NULL AND json_extract(a.superseded_json, '$."' || je.key || '"') IS NULL
+      AND json_extract(a.line_decisions_json, '$."' || je.key || '".decision') IS NOT 'reject'
+      AND EXISTS (SELECT 1 FROM inventory_check_items i WHERE i.session_id = a.session_id AND i.product_id = CAST(je.key AS INTEGER) AND i.branch_id = @branchId)
+  UNION
+  SELECT i.product_id AS product_id, a.session_id AS session_id FROM inventory_check_approvals a INDEXED BY inventory_check_approvals_pending JOIN inventory_check_items i ON i.session_id = a.session_id
+    WHERE a.organization_id IS @organization AND a.status = 'pending' AND a.branch_id = @branchId AND a.line_set_json IS NULL AND i.branch_id = @branchId AND i.product_id IN (SELECT value FROM json_each(@ids)) AND ${waitingLineSql('a', 'i')})`
 // The waiting set, built once per device: the lines of the next pending approvals of the branch (newest first, keyset), with the approval's position so the caller can name the next page.
 export const PENDING_PAGE_SQL = `WITH pg AS (SELECT a.session_id AS session_id, a.submitted_at AS submitted_at FROM inventory_check_approvals a INDEXED BY inventory_check_approvals_pending
     WHERE a.organization_id IS @organization AND a.status = 'pending' AND a.branch_id = @branchId
