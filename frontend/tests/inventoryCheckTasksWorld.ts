@@ -13,7 +13,7 @@ export const viewerUser = (viewer: Viewer) => viewer === 'admin' ? { id: 1, user
     : viewer === 'issuer' ? { id: 8, username: 'dara', role_code: 'employee', permissions: { inventory: true, inventory_checks: true, inventory_check_issue: true, 'inventory_checks:tasks': false, ...FIELDS } }
       : { id: 9, username: 'vann', role_code: 'employee', permissions: { inventory: true, inventory_checks: true, 'inventory_checks:tasks': false, ...FIELDS } }
 
-export type BoardTask = { id: string; branch_id: number; title: string; status: 'open' | 'closed'; revision: number; issued_at: string; issued_by?: string; closed_at: string | null; total: number; done: number; removed: number
+export type BoardTask = { id: string; branch_id: number; title: string; status: 'open' | 'closed'; revision: number; issued_at: string; issued_by?: string; closed_at: string | null; total: number; done: number; at_close?: true; removed: number
   selection: { kind: 'ids' } | { kind: 'filters'; filters: Record<string, string> } | null; picked_up_by: string | null; picked_up_at: string | null; mine: boolean; pickup_session_id?: string; can_pickup: boolean; can_release: boolean; can_close: boolean }
 export const task = (id: string, over: Partial<BoardTask> = {}): BoardTask => ({ id, branch_id: 1, title: '', status: 'open', revision: 0, issued_at: '2026-11-18T03:00:00.000Z', issued_by: 'boss', closed_at: null, total: 4, done: 0, removed: 0, selection: { kind: 'ids' },
   picked_up_by: null, picked_up_at: null, mine: false, can_pickup: true, can_release: false, can_close: false, ...over })

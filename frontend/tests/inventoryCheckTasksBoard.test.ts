@@ -14,7 +14,7 @@ const boardFor = (viewer: Viewer): BoardTask[] => {
     task('t3', { picked_up_by: 'sok', mine: viewer === 'employee', can_pickup: false, can_release: viewer === 'employee' || issuer, can_close: issuer, done: 1 }),
     task('t4', { done: 4, can_pickup: pick, can_close: issuer }),
     task('t5', { removed: 2, total: 2, can_pickup: pick, can_close: issuer }),
-    task('t6', { status: 'closed', closed_at: '2026-11-18T09:00:00.000Z', done: 4, can_pickup: false }),
+    task('t6', { status: 'closed', closed_at: '2026-11-18T09:00:00.000Z', done: 4, can_pickup: false, at_close: true }),
   ]
 }
 const settle = async (surface: { settle: () => Promise<void> }) => { await surface.settle() }
@@ -112,8 +112,8 @@ await settle(third)
 assert.equal(third.findAll(node => node.getAttribute('data-inventory-check-task') !== null).length, 5, 'the changed answer updates the rows in place')
 await third.unmount()
 // ---- "{done}/{total} counted at close": a closed task WITH frozen figures says they are the ones at close on the board row, the task view bar and the sessions list; an open task keeps the live text.
-// A task closed before the figures were stored has none, so this does not claim every closed task says "at close": `frozenFigures` is the one place that marks a row as frozen (the server flag, when it exists, goes there).
-const frozenFigures: Partial<BoardTask> = {}
+// Only a task the Worker flags `at_close` says so; a task closed before the figures were stored (c2, `legacy`) has no flag and shows the plain live text, on all three surfaces.
+const frozenFigures: Partial<BoardTask> = { at_close: true }
 // The fixture is 5 of 10, so a closed task is not "All counted" and a wrong surface cannot hide behind the helper's 4/4 case.
 for (const language of ['en', 'km'] as const) {
   const words = pack(language)
@@ -122,14 +122,16 @@ for (const language of ['en', 'km'] as const) {
   const liveText = fill(words.inventory_check_task_progress, { done: 5, total: 10 })
   assert.notEqual(closedText, liveText, `${language}: the two sentences differ, so the test can tell them apart`)
   assert.ok(closedText.includes('5/10') && liveText.includes('5/10'), `${language}: both keep the figures`)
-  const bothTasks = [task('c1', { status: 'closed', closed_at: '2026-11-18T09:00:00.000Z', total: 10, done: 5, can_pickup: false, ...frozenFigures }), task('o1', { total: 10, done: 5, can_pickup: true })]
+  const bothTasks = [task('c1', { status: 'closed', closed_at: '2026-11-18T09:00:00.000Z', total: 10, done: 5, can_pickup: false, ...frozenFigures }), task('c2', { status: 'closed', closed_at: '2026-11-18T08:00:00.000Z', total: 10, done: 5, can_pickup: false }), task('o1', { total: 10, done: 5, can_pickup: true })]
 
   // the board row
-  world.reset(); world.board = bothTasks; world.taskProducts.set('c1', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]); world.taskProducts.set('o1', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+  world.reset(); world.board = bothTasks; world.taskProducts.set('c1', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]); world.taskProducts.set('c2', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]); world.taskProducts.set('o1', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
   open('tasks')
   let surface = await world.mount()
   assert.ok(taskRowOf(surface, 'c1').textContent.includes(closedText), `${language}: the closed row reads "${closedText}"`)
   assert.ok(!taskRowOf(surface, 'c1').textContent.replace(closedText, '').includes(liveText), `${language}: and not the live sentence`)
+  assert.ok(taskRowOf(surface, 'c2').textContent.includes(liveText), `${language}: a legacy closed row (no flag) reads "${liveText}"`)
+  assert.ok(!taskRowOf(surface, 'c2').textContent.includes(closedText), `${language}: and never the at-close sentence`)
   assert.ok(taskRowOf(surface, 'o1').textContent.includes(liveText), `${language}: the open row reads "${liveText}"`)
   assert.ok(!taskRowOf(surface, 'o1').textContent.includes(closedText), `${language}: and not the at-close sentence`)
 
@@ -137,6 +139,10 @@ for (const language of ['en', 'km'] as const) {
   await surface.click(surface.find(node => node.getAttribute('data-task-open') !== null && taskRowOf(surface, 'c1').contains(node), 'closed row'))
   const closedBar = surface.find(node => node.getAttribute('data-inventory-check-task-bar') !== null, 'task bar').textContent
   assert.ok(closedBar.includes(closedText), `${language}: the closed task's view bar reads "${closedText}"`)
+  await surface.click(surface.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === words.back, 'Back'))
+  await surface.click(surface.find(node => node.getAttribute('data-task-open') !== null && taskRowOf(surface, 'c2').contains(node), 'legacy closed row'))
+  const legacyBar = surface.find(node => node.getAttribute('data-inventory-check-task-bar') !== null, 'task bar').textContent
+  assert.ok(legacyBar.includes(liveText) && !legacyBar.includes(closedText), `${language}: a legacy closed task's view bar reads "${liveText}", not at close`)
   await surface.click(surface.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === words.back, 'Back'))
   await surface.click(surface.find(node => node.getAttribute('data-task-open') !== null && taskRowOf(surface, 'o1').contains(node), 'open row'))
   const openBar = surface.find(node => node.getAttribute('data-inventory-check-task-bar') !== null, 'task bar').textContent
@@ -146,12 +152,13 @@ for (const language of ['en', 'km'] as const) {
   // the sessions list: a pickup row of a closed task, and of an open one
   world.reset()
   const pickupRow = (id: string, status: 'open' | 'closed') => ({ id: `p-${id}`, branch_id: 1, created_by: 7, title: '', status, revision: 0, started_at: '2026-11-19T02:00:00.000Z', updated_at: '2026-11-19T02:00:00.000Z', scope: { membership: 'pickup', task: id }, branch_name: 'Main',
-    task: { id, title: '', status, total: 10, done: 5, ...(status === 'closed' ? frozenFigures : {}) }, progress: { total: 0, done: 0, issue: 0, unstarted: 0 } })
-  world.failures.sessionItems = [pickupRow('c1', 'closed'), pickupRow('o1', 'open')]
+    task: { id, title: '', status, total: 10, done: 5, ...(status === 'closed' && id !== 'c2' ? frozenFigures : {}) }, progress: { total: 0, done: 0, issue: 0, unstarted: 0 } })
+  world.failures.sessionItems = [pickupRow('c1', 'closed'), pickupRow('c2', 'closed'), pickupRow('o1', 'open')]
   open('sessions')
   surface = await world.mount()
   const sessionRow = (id: string) => surface.find(node => node.getAttribute('data-inventory-check-session') === `p-${id}`, `session row ${id}`).textContent
   assert.ok(sessionRow('c1').includes(closedText), `${language}: the sessions list reads "${closedText}" for a closed task`)
+  assert.ok(sessionRow('c2').includes(liveText) && !sessionRow('c2').includes(closedText), `${language}: and "${liveText}", never at close, for a legacy closed one (no flag)`)
   assert.ok(sessionRow('o1').includes(liveText) && !sessionRow('o1').includes(closedText), `${language}: and "${liveText}" for an open one`)
   await surface.unmount()
   delete world.failures.sessionItems

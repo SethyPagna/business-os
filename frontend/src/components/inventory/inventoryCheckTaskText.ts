@@ -29,9 +29,9 @@ export function progressText(t: Translator, counts: { total: number; done: numbe
   return label(t, 'inventory_check_task_progress', '{done}/{total} counted').replace('{done}', String(counts.done)).replace('{total}', String(counts.total))
 }
 
-/** "{done}/{total} counted"; "All counted" for an open task whose products are all counted; "{done}/{total} counted at close" for a closed task (its figures are the ones it closed with). */
-export function progressOrAllText(t: Translator, task: { total: number; done: number; status: 'open' | 'closed' }): string {
-  if (task.status === 'closed') return label(t, 'inventory_check_task_progress_closed', '{done}/{total} counted at close').replace('{done}', String(task.done)).replace('{total}', String(task.total))
+/** "{done}/{total} counted"; "All counted" for an open task whose products are all counted; "{done}/{total} counted at close" only for a closed task the Worker flags `at_close` (its figures are the ones stored when it closed; an older closed task has live figures and says so with the plain text). */
+export function progressOrAllText(t: Translator, task: { total: number; done: number; status: 'open' | 'closed'; at_close?: boolean }): string {
+  if (task.status === 'closed' && task.at_close === true) return label(t, 'inventory_check_task_progress_closed', '{done}/{total} counted at close').replace('{done}', String(task.done)).replace('{total}', String(task.total))
   return task.done >= task.total ? label(t, 'inventory_check_task_all_counted', 'All counted') : progressText(t, task)
 }
 

@@ -14,7 +14,7 @@ const reset = () => { forgetDeviceDrafts(); world.calls.length = 0; world.notice
 for (const language of ['en', 'km'] as const) {
   const words = pack(language)
   world.language = language
-  reset(); world.board = [task('t1', { total: 4, done: 0, title: 'Shelf A' }), task('t4', { total: 4, done: 4 }), task('t6', { status: 'closed', done: 4, closed_at: '2026-11-18T09:00:00.000Z' })]
+  reset(); world.board = [task('t1', { total: 4, done: 0, title: 'Shelf A' }), task('t4', { total: 4, done: 4 }), task('t6', { status: 'closed', done: 4, closed_at: '2026-11-18T09:00:00.000Z', at_close: true })]
   world.taskProducts.set('t1', [1, 2, 3, 4])
   open('tasks')
   const surface = await world.mount()

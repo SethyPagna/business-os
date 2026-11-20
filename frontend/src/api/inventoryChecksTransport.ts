@@ -81,7 +81,7 @@ export type InventoryCheckSession = {
   /** Sessions list and session read: present for a submitted count that differs from stock, to a viewer who may see stock. */
   approval?: InventoryCheckApproval
   /** A pickup row: its task, with the task's own progress (absent once the task fell off the board). */
-  task?: { id: string; title: string; status: 'open' | 'closed'; total: number; done: number }
+  task?: { id: string; title: string; status: 'open' | 'closed'; total: number; done: number; at_close?: true }
 }
 /** One count task of a branch's board (contract docs/contracts/inventory-check-tasks-20261119.md, section 3.1). `issued_by` is left out for a viewer who may not see staff identity. */
 export type InventoryCheckTask = {
@@ -96,6 +96,8 @@ export type InventoryCheckTask = {
   total: number
   done: number
   removed: number
+  /** True only for a closed task whose figures are the ones stored when it closed; absent for open, reopened and older closed tasks, whose figures are live. */
+  at_close?: true
   selection: { kind: 'ids' } | { kind: 'filters'; filters: Record<string, string> } | null
   picked_up_by: string | null
   picked_up_at: string | null

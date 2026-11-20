@@ -16,14 +16,17 @@ for (const key of ['inventory_check_task_progress_closed', 'inventory_check_task
   assert.ok(typeof en[key] === 'string' && en[key].trim() !== '' && !KHMER.test(en[key]), `${key}: English text`)
   assert.ok(typeof km[key] === 'string' && KHMER.test(km[key]), `${key}: Khmer text`)
 }
-assert.equal(progressOrAllText(tEn, { total: 10, done: 5, status: 'closed' }), '5/10 counted at close')
-assert.equal(progressOrAllText(tEn, { total: 4, done: 4, status: 'closed' }), '4/4 counted at close', 'a fully counted closed task says at close too, never "All counted"')
-assert.equal(progressOrAllText(tKm, { total: 10, done: 5, status: 'closed' }), km.inventory_check_task_progress_closed.replace('{done}', '5').replace('{total}', '10'))
-assert.ok(progressOrAllText(tKm, { total: 10, done: 5, status: 'closed' }).includes('5/10'), 'the Khmer keeps both numbers')
+assert.equal(progressOrAllText(tEn, { total: 10, done: 5, status: 'closed', at_close: true }), '5/10 counted at close')
+assert.equal(progressOrAllText(tEn, { total: 4, done: 4, status: 'closed', at_close: true }), '4/4 counted at close', 'a fully counted closed task says at close too, never "All counted"')
+assert.equal(progressOrAllText(tKm, { total: 10, done: 5, status: 'closed', at_close: true }), km.inventory_check_task_progress_closed.replace('{done}', '5').replace('{total}', '10'))
+assert.ok(progressOrAllText(tKm, { total: 10, done: 5, status: 'closed', at_close: true }).includes('5/10'), 'the Khmer keeps both numbers')
 assert.equal(progressOrAllText(tEn, { total: 10, done: 5, status: 'open' }), '5/10 counted', 'an open or reopened task is live: no "at close"')
 assert.equal(progressOrAllText(tEn, { total: 4, done: 4, status: 'open' }), 'All counted')
 assert.equal(progressOrAllText(tKm, { total: 10, done: 5, status: 'open' }), km.inventory_check_task_progress.replace('{done}', '5').replace('{total}', '10'))
-assert.equal(progressOrAllText(() => undefined, { total: 3, done: 2, status: 'closed' }), '2/3 counted at close', 'no pack: the fallback is the English text')
+assert.equal(progressOrAllText(() => undefined, { total: 3, done: 2, status: 'closed', at_close: true }), '2/3 counted at close', 'no pack: the fallback is the English text')
+assert.equal(progressOrAllText(tEn, { total: 10, done: 5, status: 'closed' }), '5/10 counted', 'a closed task without the flag (closed before the figures were stored) shows live figures and never says at close')
+assert.equal(progressOrAllText(tKm, { total: 10, done: 5, status: 'closed', at_close: false }), km.inventory_check_task_progress.replace('{done}', '5').replace('{total}', '10'))
+assert.equal(progressOrAllText(tEn, { total: 10, done: 5, status: 'open', at_close: true }), '5/10 counted', 'the flag alone does not say at close on an open task')
 assert.equal(en.inventory_check_task_progress_closed, '{done}/{total} counted at close')
 
 // 2. The open-task limit refusal shows the numbers when the 409 carries both, else the old sentence.
