@@ -336,6 +336,80 @@ await check('storage, pageshow, visibilitychange and resume only re-read the mar
   assert.deepEqual(calls, ['getPortalAccountMe'], 'listeners are removed on unmount')
 })
 
+// A browser that reads storage but refuses writes (quota full, some private modes): a failed mark must not read as "no sign-in happened".
+const useReadOnlyStore = () => {
+  store = new Map()
+  win.localStorage = { getItem: (key: string) => store.get(key) ?? null, setItem: () => { throw new Error('QuotaExceededError') }, removeItem: (key: string) => { store.delete(key) } }
+}
+
+await check('C1 (a): a 428 at load in a write-refusing browser, then "Keep browsing as a guest": marker stays unreadable, rule closed', async () => {
+  useReadOnlyStore()
+  const view = await mount({ getPortalAccountMe: async () => { throw refusal(428, account.CONSENT_RENEWAL_CODE) } })
+  assert.equal(latest.consentRenewal, true)
+  assert.equal(latest.marker, 'unreadable')
+  await act(async () => latest.dismissConsentRenewal())
+  assert.equal(latest.consentRenewal, false)
+  assert.equal(latest.marker, 'unreadable', 'sticky after the prompt is dismissed')
+  assert.equal(allowed(), false, 'translation stays blocked beside the live session')
+  // CONTROL (the old way): re-reading the store directly after the refused write says "absent", which opens the rule. The hook must not do this.
+  assert.equal(options.readPortalSignedIn(), 'absent', 'control: a bare re-read gives absent')
+  assert.equal(portalTranslateAllowed({ sessionReady: true, signedIn: false, accountOpen: false, marker: options.readPortalSignedIn() }), true, 'control: the old evaluation opens the rule')
+  await view.unmount()
+})
+
+await check('C1 (b): a sign-in whose mark fails leaves the marker unreadable even after a 4xx refusal', async () => {
+  useReadOnlyStore()
+  const view = await mount({ getPortalAccountMe: async () => ({ account: null }), signinPortalAccount: async () => { throw refusal(401, 'bad_credentials') } })
+  assert.equal(latest.marker, 'absent', 'before any write attempt a guest is simply absent')
+  assert.equal(allowed(), true)
+  let ok = true
+  await act(async () => { ok = await latest.signIn({}) })
+  assert.equal(ok, false)
+  assert.equal(latest.marker, 'unreadable')
+  assert.equal(allowed(), false)
+  await view.unmount()
+})
+
+await check('C1 (c): once sticky, storage / pageshow / visibilitychange / resume re-reads never turn it back to absent', async () => {
+  useReadOnlyStore()
+  const view = await mount({ getPortalAccountMe: async () => { throw refusal(428, account.CONSENT_RENEWAL_CODE) } })
+  assert.equal(latest.marker, 'unreadable')
+  await act(async () => { winEvents.dispatchEvent(storageEvent(KEY)) })
+  assert.equal(latest.marker, 'unreadable')
+  await act(async () => { winEvents.dispatchEvent(storageEvent(null)) })
+  assert.equal(latest.marker, 'unreadable')
+  await act(async () => { winEvents.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true })) })
+  assert.equal(latest.marker, 'unreadable')
+  await act(async () => { docEvents.dispatchEvent(new Event('visibilitychange')) })
+  await act(async () => { docEvents.dispatchEvent(new Event('resume')) })
+  assert.equal(latest.marker, 'unreadable')
+  // A later successful write does not undo it either.
+  win.localStorage = { getItem: (key: string) => store.get(key) ?? null, setItem: (key: string, value: string) => { store.set(key, value) }, removeItem: (key: string) => { store.delete(key) } }
+  await act(async () => { winEvents.dispatchEvent(storageEvent(KEY)) })
+  assert.equal(latest.marker, 'unreadable', 'sticky for the life of the document')
+  await view.unmount()
+})
+
+await check('C1 (d): a normal store is unaffected: a guest is absent and the rule is open', async () => {
+  useStore()
+  const view = await mount({ getPortalAccountMe: async () => ({ account: null }), signinPortalAccount: async () => { throw refusal(401, 'bad_credentials') } })
+  assert.equal(latest.marker, 'absent')
+  assert.equal(allowed(), true)
+  await act(async () => { await latest.signIn({}) })
+  assert.equal(latest.marker, 'absent', 'a refused sign-in with a working store is cleared as before')
+  assert.equal(allowed(), true)
+  await view.unmount()
+})
+
+await check('C1 pin: the hook sets marker only through observeMarker, never from a bare readPortalSignedIn()', () => {
+  const source = fs.readFileSync(new URL('../src/components/catalog/portalAccount.ts', import.meta.url), 'utf8')
+  assert.equal(source.includes('setMarker(readPortalSignedIn('), false, 'setMarker(readPortalSignedIn()) found')
+  assert.equal(source.split('setMarker(').length, source.split('setMarker(observeMarker())').length, 'every setMarker call uses observeMarker()')
+  assert.ok(source.split('setMarker(observeMarker())').length > 3, 'the hook still refreshes the marker in several places')
+  assert.ok(source.includes("markerWriteFailedRef.current ? 'unreadable' : readPortalSignedIn()"), 'the one function that reads')
+  assert.equal(source.split('readPortalSignedIn()').length - 1, 2, 'bare reads: absentBefore (not state) and observeMarker; the useState initial passes the function by name')
+})
+
 // The marker module is pinned to the 'catalog-account-core' chunk, which sits in the storefront's products closure. If portalAccount.ts imported
 // portalLanguageOptions.ts (which lives with the language packs), every shopper would download the packs up front and the budget would break.
 await check('the language packs stay out of the products closure: no runtime edge from the account hook to portalLanguageOptions', () => {

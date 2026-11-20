@@ -159,7 +159,7 @@ const hook = read('src/components/catalog/portalAccount.ts')
 // A listener body may only re-read the marker and set state: pinned by structure, with a positive control for the scanner.
 const listenerNames = (source: string): string[] =>
   [...source.matchAll(/(?:window|document)\.addEventListener\('(?:storage|pageshow|visibilitychange|resume|focus)', (\w+)\)/g)].map((match) => match[1])
-const SAFE_BODY = /^(?:\{ )?(?:if \(.*\) )?(?:refresh\(\)|setMarker\(readPortalSignedIn\(\)\))(?: \})?$/
+const SAFE_BODY = /^(?:\{ )?(?:if \(.*\) )?(?:refresh\(\)|setMarker\(observeMarker\(\)\))(?: \})?$/
 const bodyOf = (source: string, name: string): string => new RegExp(`const ${name} = (?:\\([^)]*\\)|\\w+) => ([^\\n]*)`).exec(source)?.[1] ?? ''
 
 await check('the hook listens for storage, pageshow, visibilitychange and resume, and removes each listener', () => {
@@ -181,7 +181,7 @@ await check('every listener body only re-reads the marker and sets state: no API
     const body = bodyOf(hook, name)
     assert.match(body, SAFE_BODY, `${name}: ${body}`)
   }
-  assert.equal(bodyOf(hook, 'refresh'), 'setMarker(readPortalSignedIn())')
+  assert.equal(bodyOf(hook, 'refresh'), 'setMarker(observeMarker())')
   const block = /const refresh = [\s\S]*?document\.removeEventListener\('resume', refresh\)/.exec(hook)?.[0] || ''
   assert.ok(block, 'listener block found')
   assert.doesNotMatch(block, /api\(\)|getPortal|fetch\(|hydrate|await /, 'nothing in the listener block reaches the network')
