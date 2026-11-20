@@ -175,7 +175,7 @@ export default function PortalListPage({
                       >
                         {added ? <Check className="h-4 w-4" /> : <ClipboardList className="h-4 w-4" />}
                       </button>
-                      <button type="button" className={DANGER_BUTTON} onClick={() => onRemoveSaved(item.id)} aria-label={copy('removeFromWishlist', 'Remove', 'លុបចេញ')} title={copy('removeFromWishlist', 'Remove', 'លុបចេញ')}>
+                      <button type="button" className={DANGER_BUTTON} onClick={() => onRemoveSaved(item.id)} aria-label={copy('removeSavedItem', 'Remove', 'លុបចេញ')} title={copy('removeSavedItem', 'Remove', 'លុបចេញ')}>
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </div>

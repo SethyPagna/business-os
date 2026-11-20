@@ -270,8 +270,8 @@ export default function CatalogPreviewSurface({
     })
   }
   const lightboxLabels = {
-    prev: copy('prevImage', 'Prev'),
-    next: copy('nextImage', 'Next'),
+    prev: copy('prevImage', 'Previous image'),
+    next: copy('nextImage', 'Next image'),
     imageCount: copy('imageCount', '{current}/{total}'),
     dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
     close: copy('close', 'Close'),
