@@ -6,6 +6,7 @@
 // --mutants: the same run on a Worker with one line of lib/inventoryCheckMarks.ts (or the cached-page rule) mutated; every mutant must turn the run red.
 const assert = require('node:assert/strict')
 const crypto = require('node:crypto')
+const bcrypt = require('bcryptjs')
 const { bootWorld } = require('./read-budget/world.cjs')
 
 const IC = '/api/inventory-checks'
@@ -23,6 +24,15 @@ const waiting = (a, i) => `${a}.status='pending' AND CASE WHEN ${a}.line_set_jso
   AND json_extract(${a}.line_decisions_json,'$."'||${i}.product_id||'".decision') IS NOT 'reject'`
 const PENDING = `SELECT DISTINCT i.product_id AS product_id FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id = a.session_id AND i.branch_id = a.branch_id
   WHERE a.organization_id IS ?1 AND a.branch_id = ?2 AND ${waiting('a', 'i')}`
+
+async function counter(world) {
+  await world.db.prepare("INSERT OR IGNORE INTO roles(id,name,code,permissions,is_system) VALUES(902,'Counter','employee',?,0)").bind(JSON.stringify({ inventory_checks: true, inventory_check_show_stock: true })).run()
+  await world.db.prepare("INSERT OR IGNORE INTO users(id,username,name,password,role_id,permissions,is_active,organization_id,must_change_password) VALUES(902,'budget_counter','budget_counter',?,902,'{}',1,?,0)").bind(bcrypt.hashSync('budget-password-1', 4), world.orgId).run()
+  await world.db.prepare("INSERT OR IGNORE INTO trusted_devices(user_id, device_id, device_name, status, decided_at) VALUES(902,'budget-device','budget device','approved',datetime('now'))").run()
+  const login = await world.send('POST', '/api/auth/login', { username: 'budget_counter', password: 'budget-password-1', organizationId: world.orgId, deviceId: 'budget-device' }, { cookie: null })
+  if (!login.setCookie) throw new Error('the counter could not sign in: ' + login.text.slice(0, 200))
+  return login.setCookie.split(';')[0]
+}
 
 async function oracle(world, branch) {
   const marks = new Map((await world.all(LATEST, world.orgId, branch)).map((r) => [Number(r.product_id), [Number(r.t), Number(r.s)]]))
@@ -82,9 +92,10 @@ async function scenario(world, report) {
   let offset = 0
   const fresh = async (n) => { const rows = await world.all(`SELECT p.id AS id, bs.quantity AS q FROM products p JOIN branch_stock bs ON bs.product_id=p.id AND bs.branch_id=1 WHERE p.is_active=1 AND COALESCE(p.is_group,0)=0 AND p.id NOT IN (SELECT product_id FROM inventory_check_items) ORDER BY p.id LIMIT ? OFFSET ?`, n, offset); offset += n; assert.equal(rows.length, n, 'products left'); return rows }
   const plain = (ps, diffEvery = 0) => ps.map((p, i) => ({ productId: p.id, countedQuantity: diffEvery && i % diffEvery === 0 ? p.q + 1 : p.q, seenQuantity: p.q }))
-  const submit = (ps, diffEvery, extra = {}) => must(world.send('POST', `${IC}/submissions`, { branchId: 1, requestId: rid('sb'), lines: plain(ps, diffEvery), ...extra }), 'submit')
+  const submit = (ps, diffEvery, extra = {}) => must(world.send('POST', `${IC}/submissions`, { branchId: 1, requestId: rid('sb'), lines: plain(ps, diffEvery), ...extra }, { cookie: counterCookie }), 'submit')
   const approval = async (sid, decision, extra = {}) => { for (let n = 0; n < 60; n++) { const r = await must(world.send('POST', `${IC}/sessions/${sid}/approval`, { decision, requestId: rid('ap'), ...extra }), 'approval ' + decision); if (r.json.done !== false) return r } throw new Error('approval did not finish') }
   const sessionOf = async (pid) => (await world.all('SELECT i.session_id AS s FROM inventory_check_items i JOIN inventory_check_approvals a ON a.session_id=i.session_id WHERE i.product_id=? ORDER BY i.updated_at DESC LIMIT 1', pid))[0].s
+  const counterCookie = await counter(world)
   const device = new Device(world, 1)
   await device.build()
   const step = async (label, fn) => { try { await fn() } catch (e) { report.skipped.push(`${label}: ${String(e.message).slice(0, 120)}`); return } await device.sync(); await same(world, device, label); report.steps.push(label) }
@@ -189,7 +200,7 @@ const MUTANTS = [
   { name: 'm6 drop the session branch match', file: 'src/lib/inventoryCheckMarks.ts', from: 'AND sx.organization_id IS @organization AND sx.branch_id = x.branch_id', to: 'AND sx.organization_id IS @organization' },
   { name: 'm7 drop the cached page lag rule', file: 'src/routes/inventoryChecks.ts', from: ' && check.top - cached.cursor <= limits.inventoryMarksCatchUpMaxEvents / 2', to: '' },
 ]
-const SWITCHES = { ic_marks: 'on', ic_wired: 'on', ic_fix_stock: 'on', ic_lot_counts: 'on', catalog_ranked_scope: 'on' }
+const SWITCHES = { ic_simple: 'on', ic_marks: 'on', ic_wired: 'on', ic_fix_stock: 'on', ic_lot_counts: 'on', catalog_ranked_scope: 'on' }
 
 async function run(patches) {
   const world = await bootWorld({ tier: 'free', seedVariant: 'base', switches: SWITCHES, patches })
@@ -215,4 +226,4 @@ if (require.main === module) (async () => {
   process.exit(bad)
 })().catch((e) => { console.error('FAIL ' + (e.stack || e)); process.exit(1) })
 
-module.exports = { Device, oracle, same }
+module.exports = { Device, oracle, same, counter }

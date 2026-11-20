@@ -8,7 +8,7 @@ const assert = require('node:assert/strict')
 const crypto = require('node:crypto')
 const { bootWorld } = require('./read-budget/world.cjs')
 const { injectYear } = require('./read-budget/ic-history-year.cjs')
-const { Device } = require('./test-inventory-check-marks-oracle-native.cjs')
+const { Device, counter } = require('./test-inventory-check-marks-oracle-native.cjs')
 
 const IC = '/api/inventory-checks'
 const WORLD = process.env.WORLD || 'A'
@@ -17,14 +17,17 @@ const rid = (p) => `${p}-${crypto.randomBytes(8).toString('hex')}`
 const sum = (rows) => ({ rows: rows.reduce((n, r) => n + r.rr, 0), calls: rows.reduce((n, r) => n + r.calls, 0), requests: rows.length })
 
 ;(async () => {
-  const world = await bootWorld({ tier: 'free', seedVariant: 'base', switches: { ic_marks: 'on', ic_wired: 'on', ic_fix_stock: 'on', ic_lot_counts: 'on', catalog_ranked_scope: 'on' } })
+  const world = await bootWorld({ tier: 'free', seedVariant: 'base', switches: { ic_simple: 'on', ic_marks: 'on', ic_wired: 'on', ic_fix_stock: 'on', ic_lot_counts: 'on', catalog_ranked_scope: 'on' } })
   const out = { world: WORLD, command: `WORLD=${WORLD} node scripts/test-inventory-check-marks-cost-native.cjs`, measured: {}, notMeasured: ['CPU of a snapshot page and of a changes answer (Node, median of 5)', 'S0b parity'] }
   try {
     const days = WORLD === 'C' ? 365 : WORLD === 'B' ? 30 : 0
     const anchor = world.ctx.anchor.replace(' ', 'T') + '.000Z'
     if (days) await injectYear((sql, ...v) => world.db.prepare(sql).bind(...v).run(), world.orgId, anchor, { days, backlog: WORLD === 'C' })
     out.sizes = (await world.all(`SELECT (SELECT COUNT(*) FROM inventory_check_sessions) AS sessions, (SELECT COUNT(*) FROM inventory_check_items) AS items, (SELECT COUNT(*) FROM inventory_check_items WHERE state IN ('done','issue')) AS counted, (SELECT COUNT(*) FROM inventory_check_events) AS events, (SELECT COUNT(*) FROM inventory_check_approvals WHERE status='pending') AS pending_approvals, (SELECT COUNT(*) FROM products WHERE is_active=1) AS active_products`))[0]
+    const counterCookie = await counter(world)
     const device = new Device(world, 1)
+    const base0 = await world.send('GET', `${IC}/marks/changes?branchId=1&since=-1&tag=`)
+    out.measured.authBaseline = { status: base0.status, rr: base0.rr, calls: base0.calls }
     // 1. Snapshot, every occupied page cold (cache bypassed), and the pending build.
     const t0 = device.log.length
     await device.build()
@@ -42,25 +45,28 @@ const sum = (rows) => ({ rows: rows.reduce((n, r) => n + r.rr, 0), calls: rows.r
     const i0 = device.log.length
     await device.sync()
     out.measured.changesIdle = device.log.slice(i0)[0]
+    out.measured.changesIdleStatements = (await world.last()).stmts.map((x) => ({ sql: x.raw.slice(0, 90).replace(/s+/g, ' '), rr: x.rr }))
     // 4. Changes after one 20-line submit (the submit itself is recorded).
-    const fresh = async (n, off) => world.all(`SELECT p.id AS id, bs.quantity AS q FROM products p JOIN branch_stock bs ON bs.product_id=p.id AND bs.branch_id=1 WHERE p.is_active=1 AND COALESCE(p.is_group,0)=0 AND p.id NOT IN (SELECT product_id FROM inventory_check_items WHERE state<>'unstarted') ORDER BY p.id LIMIT ? OFFSET ?`, n, off)
+    const fresh = async (n, off) => world.all(`SELECT p.id AS id, bs.quantity AS q FROM products p JOIN branch_stock bs ON bs.product_id=p.id AND bs.branch_id=1 WHERE p.is_active=1 AND COALESCE(p.is_group,0)=0 ORDER BY p.id DESC LIMIT ? OFFSET ?`, n, off)
     const lines = (ps, every) => ps.map((p, i) => ({ productId: p.id, countedQuantity: every && i % every === 0 ? p.q + 1 : p.q, seenQuantity: p.q }))
     const twenty = await fresh(20, 0)
-    const submit = await world.send('POST', `${IC}/submissions`, { branchId: 1, requestId: rid('sb'), lines: lines(twenty, 5) })
+    const submit = await world.send('POST', `${IC}/submissions`, { branchId: 1, requestId: rid('sb'), lines: lines(twenty, 5) }, { cookie: counterCookie })
     out.measured.submit20 = { status: submit.status, rr: submit.rr, rw: submit.rw, calls: submit.calls }
     const s0 = device.log.length
     await device.sync()
     out.measured.changesAfterSubmit20 = sum(device.log.slice(s0))
+    out.measured.changesAfterSubmit20Statements = (await world.last()).stmts.map((x) => ({ sql: x.raw.slice(0, 100).replace(/s+/g, ' '), rr: x.rr }))
     // 5. Approve all of 200 lines: five submissions of 40 differing lines, approved, then one device catches up on all of it.
     const big = await fresh(200, 20)
     const sessions = []
-    for (let i = 0; i < 200; i += 40) { const r = await world.send('POST', `${IC}/submissions`, { branchId: 1, requestId: rid('sb'), lines: lines(big.slice(i, i + 40), 1) }); assert.equal(r.status < 300, true, 'submit 40: ' + r.text.slice(0, 200)); sessions.push(r.json.sessionId || r.json.session_id || (r.json.item && r.json.item.id)) }
+    for (let i = 0; i < 200; i += 40) { const r = await world.send('POST', `${IC}/submissions`, { branchId: 1, requestId: rid('sb'), lines: lines(big.slice(i, i + 40), 1) }, { cookie: counterCookie }); assert.equal(r.status < 300, true, 'submit 40: ' + r.text.slice(0, 200)); sessions.push(r.json.sessionId || r.json.session_id || (r.json.item && r.json.item.id)) }
     const approvals = []
     for (const sid of sessions) { for (let n = 0; n < 80; n++) { const r = await world.send('POST', `${IC}/sessions/${sid}/approval`, { decision: 'approve', requestId: rid('ap') }); approvals.push({ rr: r.rr, rw: r.rw, calls: r.calls, status: r.status }); if (r.status >= 300 || r.json.done !== false) break } }
     out.measured.approvalPath = { requests: approvals.length, rrMax: Math.max(...approvals.map((a) => a.rr)), callsMax: Math.max(...approvals.map((a) => a.calls)), statuses: [...new Set(approvals.map((a) => a.status))] }
     const a0 = device.log.length
     await device.sync()
     const after = device.log.slice(a0)
+    out.measured.changesAfterApprove200Statements = (await world.last()).stmts.map((x) => ({ sql: x.raw.slice(0, 100).replace(/s+/g, ' '), rr: x.rr }))
     out.measured.changesAfterApprove200 = { ...sum(after), perAnswerRowsMax: Math.max(...after.map((r) => r.rr)), perAnswerCallsMax: Math.max(...after.map((r) => r.calls)) }
     // The budgets of the spec (GO lines). Written first, asserted last.
     const m = out.measured
