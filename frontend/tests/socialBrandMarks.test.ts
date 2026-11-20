@@ -23,6 +23,7 @@ const brand = compile('../src/components/shared/BrandIcons.tsx', reactOnly('Bran
 const legalContent = await import('../src/components/catalog/legal/legalContent.ts') as Record<string, any>
 const aiProviderDisclosure = await import('../src/components/catalog/legal/aiProviderDisclosure.ts') as Record<string, any>
 const Icon = () => null
+const socialLinks = await import('../src/utils/socialLinks.ts') as Record<string, any>
 const socialHandles = await import('../src/utils/socialHandles.ts') as Record<string, any>
 const portalSocialLinks = await import('../src/components/catalog/portalSocialLinks.ts') as Record<string, any>
 const scriptTypography = await import('../src/utils/scriptTypography.ts') as Record<string, any>
@@ -43,6 +44,7 @@ const legal = compile('../src/components/catalog/legal/LegalPages.tsx', (id) => 
   if (id.endsWith('/aiProviderDisclosure.ts')) return aiProviderDisclosure
   if (id.endsWith('/PortalSocialRow.tsx')) return socialRow
   if (id.endsWith('/documentScrollLock.ts')) return { lockDocumentScroll: () => () => {} }
+  if (id.endsWith('/socialLinks.ts')) return socialLinks
   throw new Error(`LegalPages.tsx imports ${id}, which this harness does not provide`)
 })
 

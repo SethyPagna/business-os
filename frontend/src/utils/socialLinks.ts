@@ -97,6 +97,20 @@ export function derivePhoneCallLink(value: string): string {
   const digits = raw.replace(/[^\d+]/g, '')
   return digits ? `tel:${digits}` : ''
 }
+
+// No whitespace, control character or character that could add a header, a second address or a query to a mailto: link.
+const MAILTO_UNSAFE = '\\s\\u0000-\\u001f\\u007f@?&,;%<>"\'\\\\'
+const SAFE_EMAIL = new RegExp(`^[^${MAILTO_UNSAFE}]+@[^${MAILTO_UNSAFE}]+\\.[^${MAILTO_UNSAFE}]+$`)
+
+/** The one rule for a public tel:/mailto: href: a link only when the value can safely make one, else ''. */
+export function contactHref(kind: 'tel' | 'mailto', value?: string | null): string {
+  if (!value) return ''
+  if (kind === 'tel') {
+    const digits = value.replace(/[^\d+]/g, '')
+    return digits.length >= 6 ? `tel:${digits}` : ''
+  }
+  return SAFE_EMAIL.test(value) ? `mailto:${value}` : ''
+}
 /**
  * Given the merchant's configured Telegram link/handle, derives a
  * consistent t.me deep link. Accepts a bare handle ("mystore"), a

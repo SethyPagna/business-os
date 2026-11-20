@@ -104,7 +104,7 @@ run('the story is its own full-width card, before the details row', () => {
 
 run('phone and address are compact rows (icon, value, one action icon); no chips, no field-name labels', () => {
   const row = between(tabs, 'function AboutFactRow(', '\n}\n')
-  assert.match(row, /derivePhoneCallLink\(item\.value \|\| ''\) \|\| item\.href/, 'the dialer link is rebuilt from the number')
+  assert.match(row, /contactHref\('tel', item\.value\)/, 'the dialer link is rebuilt from the number by the shared rule')
   assert.match(row, /aria-label=\{actionLabel\}\s+title=\{actionLabel\}/, 'the action icon has a tooltip and an accessible name')
   assert.match(row, /<span className="sr-only">\{item\.label\}: <\/span>/, 'the field name stays for a screen reader only')
   assert.doesNotMatch(row, /uppercase|tracking-/, 'no tiny upper-case caption')

@@ -21,6 +21,7 @@ function compile(rel: string, resolve: (id: string) => unknown, loader: 'ts' | '
 
 const legalContent = await import('../src/components/catalog/legal/legalContent.ts') as Record<string, any>
 const aiProviderDisclosure = await import('../src/components/catalog/legal/aiProviderDisclosure.ts') as Record<string, any>
+const socialLinks = await import('../src/utils/socialLinks.ts') as Record<string, any>
 const Icon = () => null
 const brandIcons = compile('../src/components/shared/BrandIcons.tsx', (id) => {
   if (id === 'react' || id === 'react/jsx-runtime') return require(id)
@@ -35,6 +36,7 @@ const legalPages = compile('../src/components/catalog/legal/LegalPages.tsx', (id
   // This footer renders no social links, so the shared icon map and text are not exercised here.
   if (id.endsWith('/PortalSocialRow.tsx')) return { PORTAL_SOCIAL_ICONS: {}, PortalSocialText: () => null }
   if (id.endsWith('/documentScrollLock.ts')) return { lockDocumentScroll: () => () => {} }
+  if (id.endsWith('/socialLinks.ts')) return socialLinks
   throw new Error(`LegalPages.tsx imports ${id}, which this harness does not provide`)
 }, 'tsx')
 
