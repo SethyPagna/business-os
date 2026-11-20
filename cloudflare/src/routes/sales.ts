@@ -6008,7 +6008,42 @@ function pushSaleIdFilter(where: string[], params: Record<string, unknown>, ids:
   }
 }
 
-function buildSalesSearchWhere(query: Record<string, string>, params: Record<string, unknown>, access: PhoneSearchAccess): string | undefined {
+// The stats-only form of the search (`semiJoin`): the product and customer text a sale is matched through is tested ONCE in an uncorrelated
+// `id IN (SELECT id FROM products|customers WHERE <the same word test>)`, instead of one products probe per sale line and one customers probe per
+// sale (the LEFT JOINs of the correlated form). The word test is still built by buildLikeAliasClause, over a marker column, and the marker is then
+// replaced atom by atom, so every candidate form, the 50-byte instr fallback and the o-to-0 retry stay the library's own. A search word holds no space and
+// no LIKE wildcard (normalizeSearchText keeps letters, marks and digits), so a word is in the space-joined haystack exactly when it is in one of the parts:
+// splitting the haystack into its parts changes no match. Anything the splitter does not recognise keeps the correlated form (never a different set).
+// Two cases keep the correlated form on purpose. (1) An account without the full-phone grant: its digit words read a masked haystack built per row (phoneSearchGuard.ts), no
+// account is in that state since 12 Nov, and a second copy of that guard is not worth the risk. (2) A request whose date window is short: the correlated probes only
+// run for the sales inside the window, while each semi-join reads the whole products and customers tables once per word test (measured on the lab seed: a 30-day search
+// read 20,462 rows correlated and 68,650 with the semi-joins; 120 days 84,652 and 116,296; all-time 254,702 and 230,878). The semi-joins cost a fixed ~50K plus ~8 rows a
+// sale in the window against ~12 a sale correlated, so they pay from about 10,000 sales in the window: 270 days at the lab seed's 44 sales a day (SEMI_JOIN_MIN_WINDOW_DAYS).
+export const SEMI_JOIN_MIN_WINDOW_DAYS = 270
+function statsSearchUsesSemiJoin(query: Record<string, string>, access: PhoneSearchAccess, now = Date.now()): boolean {
+  if (!access.fullPhone) return false
+  const start = String(query.startDate || '')
+  if (!start) return true
+  const dayMs = (value: string) => (/^\d{4}-\d{2}-\d{2}$/.test(value) ? Date.parse(`${value}T00:00:00Z`) : Number.NaN)
+  const from = dayMs(start)
+  const to = query.endDate ? dayMs(String(query.endDate)) : now
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return false
+  return (to - from) / 86_400_000 + 1 >= SEMI_JOIN_MIN_WINDOW_DAYS
+}
+const SEMI_MARK = '__semi_hay__'
+const SEMI_ATOM = new RegExp(
+  `lower\\(COALESCE\\((?:replace\\(lower\\(${SEMI_MARK}\\),'o','0'\\)|${SEMI_MARK}), ''\\)\\) LIKE @\\w+` +
+  `|instr\\(lower\\(COALESCE\\((?:replace\\(lower\\(${SEMI_MARK}\\),'o','0'\\)|${SEMI_MARK}), ''\\)\\), @\\w+\\) > 0`, 'g')
+function splitSearchAtoms(clause: string, rebuild: (atom: (haystack: string) => string) => string): string | null {
+  let atoms = 0
+  const out = clause.replace(SEMI_ATOM, (atom) => {
+    atoms += 1
+    return rebuild((haystack) => atom.split(SEMI_MARK).join(haystack))
+  })
+  return atoms > 0 && !out.includes(SEMI_MARK) ? out : null
+}
+
+function buildSalesSearchWhere(query: Record<string, string>, params: Record<string, unknown>, access: PhoneSearchAccess, semiJoin = false): string | undefined {
   const raw = query.search || query.q || ''
   const groups = tokenizeSearchTermGroups(raw)
   if (!groups.length) return undefined
@@ -6044,50 +6079,82 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
     ...restrictedHaystackParts(['s.receipt_number', 's.legacy_receipt_number', 's.cashier_name', 's.branch_name', 's.payment_method', 's.notes', 'c.membership_number']),
     customerNameLookupSql('s.customer_name'), customerPhoneLookupSql('s.customer_phone'),
   ])
-  let usesRestrictedHaystack = false
   const itemHaystack = concatBalanced([
     "COALESCE(sis.product_name, '')", "COALESCE(sis.sku, '')", "COALESCE(sip.barcode, '')",
     "COALESCE(sip.brand, '')", "COALESCE(sip.name_normalized, '')", "COALESCE(sip.brand_compact, '')",
   ])
+  // The semi-join form reads the membership number through customers, so its haystacks leave it out.
+  const flatHaystackNoMember = concatBalanced([
+    "COALESCE(s.search_normalized, '')", "COALESCE(s.receipt_number, '')", "COALESCE(s.legacy_receipt_number, '')",
+    "COALESCE(s.cashier_name, '')", "COALESCE(s.customer_name, '')", "COALESCE(s.customer_phone, '')",
+    "COALESCE(s.branch_name, '')", "COALESCE(s.payment_method, '')", "COALESCE(s.notes, '')",
+  ])
+  const lineHaystack = concatBalanced(["COALESCE(sis.product_name, '')", "COALESCE(sis.sku, '')"])
+  const productHaystack = concatBalanced(["COALESCE(barcode, '')", "COALESCE(brand, '')", "COALESCE(name_normalized, '')", "COALESCE(brand_compact, '')"])
 
-  const searchBindings = new Map<string, string>()
-  const boundSearchClause = (word: string, haystacks: readonly string[], keyBase: string): string => {
-    const wordParams: Record<string, unknown> = {}
-    const clause = buildLikeAliasClause(word, haystacks, wordParams, keyBase, true)
-    return clause.replace(/@(\w+)/g, (_match, key: string) => {
-      const value = wordParams[key] as string
-      let sharedKey = searchBindings.get(value)
-      if (sharedKey === undefined) {
-        sharedKey = key
-        searchBindings.set(value, sharedKey)
-        params[sharedKey] = value
-      }
-      return `@${sharedKey}`
-    })
-  }
-
-  let groupIndex = 0
-  const groupClauses = groups.map((words) => {
-    let wordIndex = 0
-    const wordClauses = words.map((word) => {
-      const keyBase = `srch${groupIndex}_${wordIndex}`
-      wordIndex += 1
-      const restricted = !access.fullPhone && hasDigit(word)
-      if (restricted) usesRestrictedHaystack = true
-      const flatClause = boundSearchClause(word, restricted ? restrictedWordHaystacks(word, RESTRICTED_HAYSTACK) : [flatHaystack], `${keyBase}_f`)
-      const itemClause = boundSearchClause(word, [itemHaystack], `${keyBase}_i`)
-      return `(${flatClause} OR EXISTS (
+  // One whole pass over the groups, into its own params, so a pass the splitter cannot serve is dropped without leaving a bound value behind.
+  const pass = (semi: boolean): { combined: string; searched: string; params: Record<string, unknown> } | null => {
+    const passParams: Record<string, unknown> = {}
+    const searchBindings = new Map<string, string>()
+    let usesRestrictedHaystack = false
+    let unsplit = false
+    const boundSearchClause = (word: string, haystacks: readonly string[], keyBase: string): string => {
+      const wordParams: Record<string, unknown> = {}
+      const clause = buildLikeAliasClause(word, haystacks, wordParams, keyBase, true)
+      return clause.replace(/@(\w+)/g, (_match, key: string) => {
+        const value = wordParams[key] as string
+        let sharedKey = searchBindings.get(value)
+        if (sharedKey === undefined) {
+          sharedKey = key
+          searchBindings.set(value, sharedKey)
+          passParams[sharedKey] = value
+        }
+        return `@${sharedKey}`
+      })
+    }
+    let groupIndex = 0
+    const groupClauses = groups.map((words) => {
+      let wordIndex = 0
+      const wordClauses = words.map((word) => {
+        const keyBase = `srch${groupIndex}_${wordIndex}`
+        wordIndex += 1
+        const restricted = !access.fullPhone && hasDigit(word)
+        if (restricted) usesRestrictedHaystack = true
+        if (semi) {
+          const flat = splitSearchAtoms(
+            boundSearchClause(word, [SEMI_MARK], `${keyBase}_f`),
+            (atom) => `(${atom(flatHaystackNoMember)} OR s.customer_id IN (SELECT id FROM customers WHERE ${atom("COALESCE(membership_number, '')")}))`,
+          )
+          const item = splitSearchAtoms(
+            boundSearchClause(word, [SEMI_MARK], `${keyBase}_i`),
+            (atom) => `(${atom(lineHaystack)} OR sis.product_id IN (SELECT id FROM products WHERE ${atom(productHaystack)}))`,
+          )
+          if (flat === null || item === null) { unsplit = true; return '0' }
+          return `(${flat} OR EXISTS (
+        SELECT 1 FROM sale_items sis
+        WHERE sis.sale_id = s.id AND ${item}
+      ))`
+        }
+        const flatClause = boundSearchClause(word, restricted ? restrictedWordHaystacks(word, RESTRICTED_HAYSTACK) : [flatHaystack], `${keyBase}_f`)
+        const itemClause = boundSearchClause(word, [itemHaystack], `${keyBase}_i`)
+        return `(${flatClause} OR EXISTS (
         SELECT 1 FROM sale_items sis
         LEFT JOIN products sip ON sip.id = sis.product_id
         WHERE sis.sale_id = s.id AND ${itemClause}
       ))`
+      })
+      groupIndex += 1
+      return wordClauses.length > 1 ? `(${wordClauses.join(' AND ')})` : wordClauses[0]
     })
-    groupIndex += 1
-    return wordClauses.length > 1 ? `(${wordClauses.join(' AND ')})` : wordClauses[0]
-  })
-  const joiner = mode === 'OR' ? ' OR ' : ' AND '
-  const combined = groupClauses.length > 1 ? groupClauses.map((c) => `(${c})`).join(joiner) : groupClauses[0]
-  const searched = usesRestrictedHaystack ? restrictedSearchScope(combined, flatHaystackWithoutPhones) : combined
+    if (unsplit) return null
+    const joiner = mode === 'OR' ? ' OR ' : ' AND '
+    const combined = groupClauses.length > 1 ? groupClauses.map((c) => `(${c})`).join(joiner) : groupClauses[0]
+    const searched = usesRestrictedHaystack ? restrictedSearchScope(combined, flatHaystackWithoutPhones) : combined
+    return { combined, searched, params: passParams }
+  }
+  const chosen = (semiJoin && access.fullPhone ? pass(true) : null) ?? pass(false)!
+  Object.assign(params, chosen.params)
+  const searched = chosen.searched
   if (probe.kind !== 'full') return searched
   const whole = fullPhoneColumnClause("COALESCE(s.customer_phone, '')", probe, 'salesPhoneDigits')
   Object.assign(params, whole.params)
@@ -6466,7 +6533,7 @@ app.get('/stats', async (c) => {
     where.push('(s.branch_id = @branchId OR EXISTS (SELECT 1 FROM sale_items sif WHERE sif.sale_id = s.id AND sif.branch_id = @branchId))')
     params.branchId = query.branchId
   }
-  const searchClause = buildSalesSearchWhere(query, params, phoneSearchAccessOf(user))
+  const searchClause = buildSalesSearchWhere(query, params, phoneSearchAccessOf(user), statsSearchUsesSemiJoin(query, phoneSearchAccessOf(user)))
   if (searchClause) where.push(searchClause)
 
   // Preserve the list's complete cohort, but delegate financial policy and
