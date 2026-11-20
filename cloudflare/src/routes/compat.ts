@@ -4,7 +4,8 @@ import { getDb } from '../lib/db'
 import { cacheIdentity } from '../lib/cacheKey'
 import { requireAuth } from '../lib/auth'
 import type { Env } from '../index'
-import { getSystemJob, listCloudflareBackups, listSystemJobs, storeSystemJob } from '../lib/backup'
+import { getSystemJob, listCloudflareBackups, listSystemJobs, readWeeklyBackupMarker, storeSystemJob } from '../lib/backup'
+import { WEEKLY_BACKUP_PREFIX } from '../lib/backupSchedule'
 import { buildDriveOauthStartUrl, completeDriveOauth, consumeDriveOauthState, disconnectDrive, driveSyncStatus, updateDrivePreferences } from '../lib/googleDrive'
 import { enqueueDriveRestoreStageJob, enqueueDriveSyncJob } from '../lib/driveSyncQueue'
 import { canAuthorizeDriveSync } from '../lib/driveSyncAuthority'
@@ -807,6 +808,12 @@ async function runIntegrationDoctor(c: any, deep: boolean) {
   try {
     const backups = await listCloudflareBackups(c.env)
     backupCheck = { ok: true, status: 'ok', message: `${backups.length} backup(s) stored in R2.`, count: backups.length, keep: 2, keepScheduled: getPlanLimits(c.env).scheduledBackupKeep, intervalHours: 24, cadence: 'daily-after-close' }
+    if (getPlanLimits(c.env).scheduledBackupMode === 'runner-weekly') {
+      // Free: the ops job writes one encrypted full copy a week; the Worker only reads its marker (1 R2 get). Cloudflare itself restores the last 7 days.
+      const { markerAt } = await readWeeklyBackupMarker(c.env)
+      const weeklyStale = !markerAt || Date.now() - Date.parse(markerAt) > getPlanLimits(c.env).weeklyBackupStaleHours * 3600 * 1000
+      backupCheck = { ...backupCheck, intervalHours: 168, cadence: 'weekly-runner', lastWeeklyAt: markerAt, weeklyStale, restorePointDays: 7, weeklyCopyPrefix: WEEKLY_BACKUP_PREFIX }
+    }
   } catch (error) {
     ok = false
     console.error('[integration-doctor] R2 backup listing failed', error)

@@ -195,8 +195,18 @@ export type PlanLimits = {
 
   // The bell tells an admin "Nightly backup missing" once the backup step has had no complete visit for this many hours. A healthy
   // night finishes within a few hours of the 22:17 try (the copy poll can land up to ~6 h later), so 30 = a full night missed plus slack,
-  // never a flap. Read from the cron record, never from R2. Same on both tiers; Free never takes a scheduled backup, so never shows it.
+  // never a flap. Read from the cron record, never from R2. Same on both tiers; used in 'worker-daily' mode only (Free has weeklyBackupStaleHours).
   scheduledBackupStaleHours: number
+
+  // Who takes the scheduled backup. 'worker-daily': the Worker's own heavy cron takes a full D1 backup each business night (Paid).
+  // 'runner-weekly': the Worker never creates one (10 ms CPU cannot serialize the database); the ops job writes one encrypted full copy
+  // a week to R2 and a small marker beside it, and the heavy backup step only reads that marker (1 R2 get, no D1). scheduledBackupEnabled
+  // stays equal to mode === 'worker-daily' so no caller changes twice.
+  scheduledBackupMode: 'worker-daily' | 'runner-weekly'
+
+  // The bell tells an admin "Weekly backup missing" once the weekly marker is older than this many hours (or, with no marker yet, once the
+  // backup step has been watching this long): 198 = 7 days plus the 30 h slack of the daily rule. Same on both tiers.
+  weeklyBackupStaleHours: number
 
   // ---- Data reset --------------------------------------------------------
 
@@ -536,6 +546,8 @@ const PAID_LIMITS: PlanLimits = {
   driveStaleMirrorHours: 24,
   scheduledBackupCopyPollGapMinutes: 240,
   scheduledBackupStaleHours: 30,
+  scheduledBackupMode: 'worker-daily',
+  weeklyBackupStaleHours: 198,
   maxImageDeletesPerReset: 500,
   importRetentionMaxJobsPerTier: 20,
   ephemeralDeleteBatch: 5000,
@@ -614,6 +626,8 @@ const FREE_LIMITS: PlanLimits = {
   driveStaleMirrorHours: 24,
   scheduledBackupCopyPollGapMinutes: 240,
   scheduledBackupStaleHours: 30,
+  scheduledBackupMode: 'runner-weekly',
+  weeklyBackupStaleHours: 198,
   maxImageDeletesPerReset: 40,
   importRetentionMaxJobsPerTier: 5,
   ephemeralDeleteBatch: 1000,

@@ -8,7 +8,7 @@ import { productHasStockSql, stockVisibleProductSql } from '../lib/productStockG
 import { buildPortalConfig, createPointsAccumulator, accumulatePoints, summarizePointTotals, type PointsAccumulator, type PointsLedger } from './portal'
 import { getPlanLimits } from '../lib/planTier'
 import { parseRotationState, CRON_HEAVY_STATE_KEY } from '../lib/cronRotation'
-import { scheduledBackupMissing } from '../lib/backupSchedule'
+import { scheduledBackupMissing, weeklyBackupMissing } from '../lib/backupSchedule'
 import { requestMetricsOf } from '../lib/requestMetrics'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
@@ -149,6 +149,17 @@ type NotificationSection = {
   enabledKey?: string
 }
 
+function backupMissingFor(env: Env, rawState: string | null | undefined): { hours: number; weekly: boolean } | null {
+  const limits = getPlanLimits(env)
+  const state = parseRotationState(rawState)
+  if (limits.scheduledBackupMode === 'runner-weekly') {
+    const missing = weeklyBackupMissing(state, Date.now(), limits.weeklyBackupStaleHours)
+    return missing ? { hours: missing.hours, weekly: true } : null
+  }
+  const missing = scheduledBackupMissing(state, Date.now(), limits.scheduledBackupStaleHours)
+  return missing ? { hours: missing.hours, weekly: false } : null
+}
+
 async function loadPreferences(env: Env) {
   const db = getDb(env)
   const placeholders = NOTIFICATION_SETTING_KEYS.map(() => '?').join(',')
@@ -175,10 +186,9 @@ async function loadPreferences(env: Env) {
     driveSyncEnabled: normalizeBoolean(map.drive_sync_enabled, false),
     driveSyncConnected: Boolean(String(map.drive_sync_refresh_token || '').trim()),
     loyaltyPointsEnabled: loyaltyPointsEnabled(map.loyalty_points_enabled),
-    // Paid only: Free never takes a scheduled backup, so a missing one is not a fault there.
-    backupMissing: getPlanLimits(env).scheduledBackupEnabled
-      ? scheduledBackupMissing(parseRotationState(map[CRON_HEAVY_STATE_KEY]), Date.now(), getPlanLimits(env).scheduledBackupStaleHours)
-      : null,
+    // Both modes, from the cron record the settings query already reads. Daily (Paid): no complete visit for scheduledBackupStaleHours.
+    // Weekly (Free): the ops job's marker time (markerAt) is older than weeklyBackupStaleHours; never okAt, which the heavy lane refreshes every visit.
+    backupMissing: backupMissingFor(env, map[CRON_HEAVY_STATE_KEY]),
   }
 }
 
@@ -730,7 +740,7 @@ async function buildPortalSection(env: Env): Promise<NotificationSection | null>
   }
 }
 
-function buildSystemSection(driveSyncEnabled: boolean, driveSyncConnected: boolean, backupMissing: { hours: number } | null = null): NotificationSection | null {
+function buildSystemSection(driveSyncEnabled: boolean, driveSyncConnected: boolean, backupMissing: { hours: number; weekly?: boolean } | null = null): NotificationSection | null {
   // The Drive OAuth flow IS fully implemented (lib/googleDrive.ts +
   // compat.ts's /system/drive-sync/* routes) -- the comment that used to
   // live here claiming it wasn't was STALE, and it hid the exact failure
@@ -763,8 +773,8 @@ function buildSystemSection(driveSyncEnabled: boolean, driveSyncConnected: boole
     ? {
         id: 'system-backup-missing',
         tone: 'danger' as const,
-        label: 'Nightly backup missing',
-        labelKey: 'notification_backup_missing',
+        label: backupMissing.weekly ? 'Weekly backup missing' : 'Nightly backup missing',
+        labelKey: backupMissing.weekly ? 'notification_backup_weekly_missing' : 'notification_backup_missing',
         meta: `No new backup for ${backupMissing.hours} h`,
         metaKey: 'notification_backup_missing_meta',
         metaParams: { hours: backupMissing.hours },

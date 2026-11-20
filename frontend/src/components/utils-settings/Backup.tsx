@@ -141,6 +141,11 @@ interface DoctorCheck {
   message?: string
   // checks.secretEncryption only (admin-only): is APP_ENCRYPTION_KEY usable.
   configured?: boolean
+  // checks.backup on a deployment whose backup is the weekly ops copy (Free): the copy's own finish time and whether it is overdue.
+  cadence?: string
+  lastWeeklyAt?: string | null
+  weeklyStale?: boolean
+  restorePointDays?: number
   writeReadDelete?: {
     ok?: boolean
     error?: string
@@ -761,7 +766,7 @@ function IntegrationDoctorCard({ copy, notify, active }: IntegrationDoctorCardPr
           check={{
             ok: true,
             message: runtime.tier === 'free'
-              ? `${copy('plan_tier_free', 'Free')} -- ${copy('plan_tier_hint_free', 'Running on the Cloudflare free plan: smaller import batches and no automatic backups.')}`
+              ? `${copy('plan_tier_free', 'Free')} -- ${checks.backup?.cadence === 'weekly-runner' ? copy('plan_tier_hint_free_weekly', 'Running on the Cloudflare free plan: smaller import batches and one backup copy a week.') : copy('plan_tier_hint_free', 'Running on the Cloudflare free plan: smaller import batches and no automatic backups.')}`
               : `${copy('plan_tier_paid', 'Paid')} -- ${copy('plan_tier_hint_paid', 'Running on the Cloudflare paid plan: full import batches and automatic backups.')}`,
           }}
         />
@@ -769,6 +774,16 @@ function IntegrationDoctorCard({ copy, notify, active }: IntegrationDoctorCardPr
         <DoctorStatusPill label="Google Drive" check={drive} />
         <DoctorStatusPill label="Google login" check={google_login} />
         <DoctorStatusPill label="Backup packages" check={checks.backup} />
+        {checks.backup?.cadence === 'weekly-runner' ? (
+          <DoctorStatusPill
+            label={copy('backup_weekly_label', 'Weekly backup')}
+            check={{
+              ok: checks.backup.weeklyStale !== true,
+              status: checks.backup.weeklyStale === true ? 'needs_attention' : 'ok',
+              message: `${copy('backup_weekly_last', 'Last copy')}: ${checks.backup.lastWeeklyAt ? formatDateTime(checks.backup.lastWeeklyAt) : copy('backup_weekly_none', 'none yet')} • ${copy('backup_weekly_restore', 'Restore: last 7 days (Cloudflare)')}`,
+            }}
+          />
+        ) : null}
         <DoctorStatusPill label="Secrets" check={{ ok: true, message: copy('secrets_redacted', 'Present/missing only; values are redacted.') }} />
         {/* Admin-only readout (the Worker omits it for everyone else): is
             APP_ENCRYPTION_KEY usable? A boolean, never the value. Without it

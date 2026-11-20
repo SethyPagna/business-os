@@ -133,6 +133,45 @@ export function pickHeavyStepIndex(steps: readonly RotationStep[], state: Rotati
   return other >= 0 ? other : backupIndex
 }
 
+/** Where the ops job leaves its marker; the Worker only ever reads it. Every Worker R2 delete refuses this prefix (see test-backup-weekly-schedule-pure.cjs). */
+export const WEEKLY_BACKUP_PREFIX = 'backups/weekly/'
+export const WEEKLY_BACKUP_MARKER_KEY = 'backups/weekly/latest.json'
+const WEEKLY_MARKER_FORMAT_PREFIX = 'business-os-weekly-backup'
+const WEEKLY_MARKER_CLOCK_SKEW_MS = 60 * MINUTE_MS
+
+/**
+ * The weekly marker is trusted for one fact only: when the ops job last finished a good copy. Returns that instant, or null when the
+ * marker is missing, malformed, not a good run, or claims a finish later than now + 1 h (a clock that ran ahead must not hide a gap).
+ */
+export function weeklyBackupMarkerAt(marker: unknown, nowMs: number): string | null {
+  if (!marker || typeof marker !== 'object') return null
+  const m = marker as Record<string, unknown>
+  if (typeof m.format !== 'string' || !m.format.startsWith(WEEKLY_MARKER_FORMAT_PREFIX)) return null
+  if (m.backupOk !== true) return null
+  if (typeof m.runId !== 'string' || !/^[A-Za-z0-9._-]{1,64}$/.test(m.runId)) return null
+  if (typeof m.manifestSha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(m.manifestSha256)) return null
+  if (typeof m.finishedAt !== 'string') return null
+  const ms = Date.parse(m.finishedAt)
+  if (!Number.isFinite(ms) || ms > nowMs + WEEKLY_MARKER_CLOCK_SKEW_MS) return null
+  return new Date(ms).toISOString()
+}
+
+/**
+ * The weekly bell. Counts from the marker's own time (markerAt), never from okAt: on Free every heavy visit that finds nothing wrong is
+ * stamped okAt by runRotationTick, so okAt is refreshed every few hours whether or not a copy exists. With no marker seen yet it counts from
+ * the first visit (firstStartedAt, stamped once), not startedAt, which every visit rewrites. A record with neither says nothing.
+ */
+export function weeklyBackupMissing(state: RotationState, nowMs: number, staleHours: number): { hours: number; lastOkAt: string | null } | null {
+  const record = state.steps.backup
+  if (!record) return null
+  const markerAt = record.markerAt ?? null
+  const sinceMs = Date.parse(markerAt ?? record.firstStartedAt ?? '')
+  if (!Number.isFinite(sinceMs)) return null
+  const ageMs = nowMs - sinceMs
+  if (!(ageMs > staleHours * 3600 * 1000)) return null
+  return { hours: Math.floor(ageMs / (3600 * 1000)), lastOkAt: markerAt }
+}
+
 /**
  * The backup step's last good visit is older than staleHours: the scheduled backup is missing. Read from the cron record only (no R2
  * listing), so the bell can ask on every poll for free. okAt is stamped only by a complete visit (a finalized set, or one already

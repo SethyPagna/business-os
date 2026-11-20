@@ -142,6 +142,8 @@ const PAID = {
   driveStaleMirrorHours: 24,
   scheduledBackupCopyPollGapMinutes: 240,
   scheduledBackupStaleHours: 30,
+  scheduledBackupMode: 'worker-daily',
+  weeklyBackupStaleHours: 198,
   maxImageDeletesPerReset: 500,
   importRetentionMaxJobsPerTier: 20,
   ephemeralDeleteBatch: 5000,
@@ -219,6 +221,8 @@ const FREE = {
   driveStaleMirrorHours: 24,
   scheduledBackupCopyPollGapMinutes: 240,
   scheduledBackupStaleHours: 30,
+  scheduledBackupMode: 'runner-weekly',
+  weeklyBackupStaleHours: 198,
   maxImageDeletesPerReset: 40,
   importRetentionMaxJobsPerTier: 5,
   ephemeralDeleteBatch: 1000,
@@ -320,7 +324,7 @@ const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES, ...
 // The stored daily totals' nightly reconcile (lib/salesDailyCron.ts): the last 7 days, once per 20 h, naming up to 3 days in an alert, are rules of the check and not of the plan;
 // only how many days a visit works through (recompute, older reconcile slice, rebuild range) and the CPU, wall and payload budgets are sized by the tier and differ;
 // the per-row CPU estimate, the fixed day cost, the queries a day costs and the reserve are facts of the code, the same on both tiers.
-const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser', 'scheduledBackupAfterHourLocal', 'scheduledBackupKeep', 'scheduledBackupMaxAttemptsPerDay', 'scheduledBackupCopyPollGapMinutes', 'scheduledBackupStaleHours', 'backupPoolGraceHours', 'driveStaleMirrorHours', 'salesDailyReconcileRecentDays', 'salesDailyReconcileMinIntervalSeconds', 'salesDailyAlertListedDays', 'salesDailyCpuMsPerSourceRow', 'salesDailyCpuMsPerDayFixed', 'salesDailyKernelQueriesPerDay', 'salesDailyQueryReserve', 'salesDailyFailBackoffSeconds', 'salesDailyFailBackoffMaxSeconds', 'salesDailyPoisonAlertAfter']
+const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser', 'scheduledBackupAfterHourLocal', 'scheduledBackupKeep', 'scheduledBackupMaxAttemptsPerDay', 'scheduledBackupCopyPollGapMinutes', 'scheduledBackupStaleHours', 'weeklyBackupStaleHours', 'backupPoolGraceHours', 'driveStaleMirrorHours', 'salesDailyReconcileRecentDays', 'salesDailyReconcileMinIntervalSeconds', 'salesDailyAlertListedDays', 'salesDailyCpuMsPerSourceRow', 'salesDailyCpuMsPerDayFixed', 'salesDailyKernelQueriesPerDay', 'salesDailyQueryReserve', 'salesDailyFailBackoffSeconds', 'salesDailyFailBackoffMaxSeconds', 'salesDailyPoisonAlertAfter']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //

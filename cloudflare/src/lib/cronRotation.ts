@@ -69,6 +69,10 @@ export interface StepState {
   windowFailures?: number
   /** When the last visit only polled unfinished work (result.pollOnly); null/absent otherwise. A lane selector can space such polls out. */
   pollAt?: string | null
+  /** Only for a step with trackSince (the weekly backup visit): the first visit's start, stamped once. startedAt is rewritten every visit. */
+  firstStartedAt?: string
+  /** Only for the weekly backup visit: when the ops job's marker says its last good copy finished (result.markerAt). Not the visit's time. */
+  markerAt?: string
 }
 
 export interface RotationState {
@@ -113,6 +117,8 @@ export interface RotationStep {
    * does not need it, or nothing.
    */
   requiresState?: boolean
+  /** Stamp the record's firstStartedAt once, on the first visit (the weekly backup visit, whose bell has no marker to count from yet). */
+  trackSince?: boolean
 }
 
 export interface TickResult {
@@ -151,6 +157,8 @@ function sanitize(raw: unknown): RotationState {
         killed: Number(v.killed) > 0 ? Math.floor(Number(v.killed)) : 0,
         runs: Number(v.runs) > 0 ? Math.floor(Number(v.runs)) : 0,
         ...(typeof v.pollAt === 'string' ? { pollAt: v.pollAt } : {}),
+        ...(typeof v.firstStartedAt === 'string' ? { firstStartedAt: v.firstStartedAt } : {}),
+        ...(typeof v.markerAt === 'string' ? { markerAt: v.markerAt } : {}),
         ...(typeof v.windowKey === 'string' ? { windowKey: v.windowKey, windowFailures: Number(v.windowFailures) > 0 ? Math.floor(Number(v.windowFailures)) : 0 } : {}),
       }
     }
@@ -248,6 +256,7 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
     const window = step.attemptWindow(nowMs)
     if (record.windowKey !== window) { record.windowKey = window; record.windowFailures = 0 }
   }
+  if (step.trackSince && !record.firstStartedAt) record.firstStartedAt = nowIso
   record.startedAt = nowIso
   current.steps[step.id] = record
   // Advance first; fixed up below if the step asks to be resumed.
@@ -262,12 +271,15 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
   // it is not an error, but it must not count as done, or the step's okAt would satisfy a lane gate for the whole day.
   let incomplete = false
   let pollOnly = false
+  let markerAt: string | undefined
   let error: string | undefined
   try {
     const result = await step.run()
     more = !!result && typeof result === 'object' && (result as { more?: unknown }).more === true
     incomplete = !!result && typeof result === 'object' && (result as { incomplete?: unknown }).incomplete === true
     pollOnly = !!result && typeof result === 'object' && (result as { pollOnly?: unknown }).pollOnly === true
+    const reportedMarkerAt = !!result && typeof result === 'object' ? (result as { markerAt?: unknown }).markerAt : undefined
+    if (typeof reportedMarkerAt === 'string') markerAt = reportedMarkerAt
     // A visit that gave its work up (the backup's attempts-exhausted night) answers { failed: true, reason }: record it as a failure, not as OK.
     if (!!result && typeof result === 'object' && (result as { failed?: unknown }).failed === true) {
       ok = false
@@ -280,6 +292,7 @@ export async function runRotationTick(steps: readonly RotationStep[], store: Rot
 
   record.finishedAt = new Date(nowMs + Math.max(0, Date.now() - realStart)).toISOString()
   record.runs += 1
+  if (ok && markerAt) record.markerAt = markerAt
   if (ok && pollOnly) record.pollAt = record.finishedAt
   else if (record.pollAt !== undefined) record.pollAt = null
   // An OK visit that left its work unfinished (incomplete) is not a recovery: the failure count and error stay visible to cron-health.

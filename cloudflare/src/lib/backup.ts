@@ -2,7 +2,7 @@ import { executeRawRestoreStockTransaction, stockTransactionStatementCount } fro
 import { restoreStockAuthority } from './maintenance'
 import type { Env } from '../index'
 import { getPlanLimits } from './planTier'
-import { scheduledBackupCoverageMs, scheduledBackupGate, scheduledBackupNightOf } from './backupSchedule'
+import { WEEKLY_BACKUP_MARKER_KEY, scheduledBackupCoverageMs, scheduledBackupGate, scheduledBackupNightOf, weeklyBackupMarkerAt } from './backupSchedule'
 import { copyObject, listObjects } from './r2'
 import { streamBackupEvents } from './backupRestoreStream'
 import { assertCustomTableName } from './customTableName'
@@ -1470,6 +1470,22 @@ async function pruneOrphanedBackupFolders(env: Env): Promise<string[]> {
 }
 
 /**
+ * The weekly marker the ops job leaves in R2: one GET, no D1, no write. Read-only on purpose: the Worker never writes or deletes anything
+ * under backups/weekly/. A missing, unreadable or invalid marker is an unfinished visit (incomplete + pollOnly), so okAt is not stamped
+ * and the heavy lane polls again after the poll gap instead of starving the image audit; a good one reports its own finish time as markerAt.
+ */
+export async function readWeeklyBackupMarker(env: Env, nowMs: number = Date.now()): Promise<{ markerAt: string | null }> {
+  let parsed: unknown = null
+  try {
+    const object = await env.ASSETS.get(WEEKLY_BACKUP_MARKER_KEY)
+    if (object) parsed = JSON.parse(await object.text())
+  } catch {
+    parsed = null
+  }
+  return { markerAt: weeklyBackupMarkerAt(parsed, nowMs) }
+}
+
+/**
  * The scheduled backup runs once per Cambodia business date, at the first heavy
  * tick at or after the close hour (lib/backupSchedule.ts; the hour is
  * getPlanLimits(env).scheduledBackupAfterHourLocal). This is the R2 side of that
@@ -1522,6 +1538,11 @@ export async function maybeRunScheduledBackup(env: Env, nowMs: number = Date.now
   // so it must keep running on both plans. Manual backups from the Backup
   // screen are also unaffected -- a person can watch one and retry it; an
   // unattended cron cannot.
+  if (getPlanLimits(env).scheduledBackupMode === 'runner-weekly') {
+    const { markerAt } = await readWeeklyBackupMarker(env, nowMs)
+    if (!markerAt) return { skipped: true, reason: 'weekly-marker-missing', incomplete: true, pollOnly: true, retention }
+    return { skipped: true, reason: 'weekly-runner', markerAt, retention }
+  }
   if (!getPlanLimits(env).scheduledBackupEnabled) {
     return {
       skipped: true,
