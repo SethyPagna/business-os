@@ -13,7 +13,7 @@ import Search from 'lucide-react/dist/esm/icons/search.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../app/AppContextCore.tsx'
-import { announceFreshAlerts, browserAlertStore, isSectionComplete, popUpAlerts } from './notificationAlerts.ts'
+import { announceFreshAlerts, browserAlertStore, isSectionComplete, popUpAlerts, sectionsSwitchedOff } from './notificationAlerts.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -123,6 +123,8 @@ type NotificationSummary = {
   generatedAt?: string
   unavailable?: boolean
   cooldownUntil?: number
+  // True once a summary was really loaded (the first state is empty only because nothing was asked yet).
+  loaded?: boolean
 }
 
 type AppContextValue = {
@@ -629,6 +631,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
           generatedAt: typeof result?.generatedAt === 'string' ? result.generatedAt : undefined,
           unavailable: !!result?.unavailable,
           cooldownUntil: result?.cooldownUntil,
+          loaded: true,
         }
       })
       // A section the person expanded stays complete across refreshes; one that no longer needs a
@@ -961,6 +964,9 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     const plan = announceFreshAlerts({
       rows: rows.map((row) => ({ item: row.item, sectionId: row.sectionId })),
       sections: (summary.sections || []).map((section) => ({ id: section.id, complete: isSectionComplete(section) })),
+      // The Worker leaves out a section with no items, so after a real load an omitted section is empty, unless Settings switched it off.
+      omittedAreEmpty: !!summary.loaded,
+      switchedOff: sectionsSwitchedOff(summary.preferences),
       blocked,
       seenTimes: seenAlertTimes,
       skipIds: seenSecurityIds,

@@ -23,9 +23,38 @@ export type AlertRow<T extends AlertCandidate> = { item: T; sectionId: string }
 // A section counts as listed in full only when the Worker did not cut its items to a preview.
 export type AlertSectionState = { id: string; complete: boolean }
 
-export function isSectionComplete(section: { truncated?: boolean; itemsTotal?: number; items?: unknown[] } | null | undefined): boolean {
+// 20 is the smallest list limit the Worker uses (security stops at LIMIT 20, imports keep 20 items; sales, expiry, supplier
+// credit and portal stop at 50, and only inventory says `truncated`). A section with this many items or more may have been
+// cut off without saying so, so it never counts as listed in full.
+export const SECTION_CUT_OFF_ITEMS = 20
+
+export function isSectionComplete(section: { truncated?: boolean; itemsTotal?: number; count?: number; items?: unknown[] } | null | undefined): boolean {
   if (!section || section.truncated) return false
-  return !(Number(section.itemsTotal) > (section.items?.length || 0))
+  const listed = section.items?.length || 0
+  if (Number(section.itemsTotal) > listed) return false
+  if (Number(section.count) > listed) return false
+  return listed < SECTION_CUT_OFF_ITEMS
+}
+
+// A section the Worker leaves out for a reason other than "no items": the admin switched it off in Settings. Its
+// remembered alerts must not count as resolved. (A permission the user lacks is not visible here; the memory is per user,
+// and a user who loses a permission and gets it back simply sees those alerts as new again.)
+const PREFERENCE_FOR_SECTION: Record<string, string> = {
+  inventory: 'inventoryEnabled',
+  expiry: 'expiryEnabled',
+  sales: 'salesEnabled',
+  loyalty: 'loyaltyEnabled',
+  system: 'systemEnabled',
+  supplier_credit: 'supplierCreditEnabled',
+}
+
+export function sectionsSwitchedOff(preferences: Record<string, unknown> | null | undefined): Set<string> {
+  const off = new Set<string>()
+  for (const [section, key] of Object.entries(PREFERENCE_FOR_SECTION)) {
+    const value = preferences?.[key]
+    if (value === false || value === 0 || value === 'false' || value === '0') off.add(section)
+  }
+  return off
 }
 
 // Only a warning or a danger pops up. Info (a delivery waiting, a submission) and success (points reached) stay in the bell.
@@ -67,6 +96,11 @@ type AnnounceArgs<T extends AlertCandidate> = {
   rows: Array<AlertRow<T>>
   // Which sections of this summary are listed in full. A section that is absent here changes nothing.
   sections: AlertSectionState[]
+  // The summary loaded successfully (not the empty first state). The Worker leaves a section out when it has no items,
+  // so then a section the memory knows but the summary lacks is complete and empty. Default false: omitted changes nothing.
+  omittedAreEmpty?: boolean
+  // Sections the Worker leaves out for another reason (switched off in Settings): never treated as empty.
+  switchedOff?: ReadonlySet<string>
   // The panel is open, the bell is not this viewport's, the page is hidden or the summary is unavailable.
   blocked: boolean
   seenTimes: AlertTimes
@@ -80,7 +114,7 @@ type AnnounceArgs<T extends AlertCandidate> = {
 // One summary load. Reads the memory fresh, updates what left a fully listed section, picks what is new to this
 // device, writes the memory (before the caller emits anything) and says what to show. A blocked load (panel open,
 // page hidden, summary unavailable) changes nothing at all.
-export function announceFreshAlerts<T extends AlertCandidate>({ rows, sections, blocked, seenTimes, skipIds = new Set(), now, quietMs, store }: AnnounceArgs<T>): AlertPopupPlan<T> {
+export function announceFreshAlerts<T extends AlertCandidate>({ rows, sections, omittedAreEmpty = false, switchedOff, blocked, seenTimes, skipIds = new Set(), now, quietMs, store }: AnnounceArgs<T>): AlertPopupPlan<T> {
   if (blocked) return { kind: 'none' }
   const quiet = quietMs > 0 ? quietMs : RESOLVED_QUIET_FALLBACK_MS
   const stored = store.read()
@@ -96,6 +130,12 @@ export function announceFreshAlerts<T extends AlertCandidate>({ rows, sections, 
     present.get(row.sectionId)?.add(row.item.id)
   }
   const complete = new Set(sections.filter((section) => section.complete).map((section) => section.id))
+  if (omittedAreEmpty) {
+    const listed = new Set(sections.map((section) => section.id))
+    for (const entry of Object.values(stored)) {
+      if (entry.section && !listed.has(entry.section) && !switchedOff?.has(entry.section)) complete.add(entry.section)
+    }
+  }
 
   // 1. What left a fully listed section: mark it absent, and resolved once it stayed away for the quiet period.
   for (const [id, entry] of Object.entries(stored)) {
@@ -149,7 +189,10 @@ export function announceFreshAlerts<T extends AlertCandidate>({ rows, sections, 
 function trimMemory(memory: AlertMemory): AlertMemory {
   const entries = Object.entries(memory)
   if (entries.length <= ANNOUNCED_ALERT_TIMES_LIMIT) return memory
-  return Object.fromEntries(entries.sort((a, b) => b[1].at - a[1].at).slice(0, ANNOUNCED_ALERT_TIMES_LIMIT))
+  // Full: resolved markers go first (oldest first), then unresolved entries oldest first. Keep the best 1000:
+  // unresolved before resolved, newest first within each.
+  const rank = (entry: AlertEntry) => (entry.resolved ? 0 : 1)
+  return Object.fromEntries(entries.sort((a, b) => rank(b[1]) - rank(a[1]) || b[1].at - a[1].at).slice(0, ANNOUNCED_ALERT_TIMES_LIMIT))
 }
 
 type PopUpText<T> = {
