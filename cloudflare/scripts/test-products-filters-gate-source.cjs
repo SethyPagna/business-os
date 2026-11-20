@@ -17,7 +17,7 @@ assert.ok(handler, 'GET /filters handler must exist')
 const body = handler[1]
 assert.match(body, /const denial = catalogVocabularyDenialReason\(c\.get\('user'\)\)/, '/filters must compute the catalog denial from the session user')
 assert.match(body, /if \(denial\) return c\.json\(\{ error: denial \}, 403\)/, '/filters must reply 403 when denied')
-assert.ok(body.indexOf('catalogVocabularyDenialReason') < body.indexOf('loadProductFilters'), 'the gate must run before the vocabulary is loaded')
+assert.ok(body.indexOf('catalogVocabularyDenialReason') < body.indexOf('loadProductFilterFacets'), 'the gate must run before the vocabulary is loaded')
 
 const gate = source.match(/function catalogVocabularyDenialReason\(user: SessionUser\): string \| null \{([\s\S]*?)\r?\n\}/)
 assert.ok(gate, 'catalogVocabularyDenialReason must exist')

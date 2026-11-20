@@ -78,14 +78,15 @@ function main() {
     // Read together with any further namespace the caller keys on (one D1 read for the namespaces KV does not hold); the 'products' token is the one getVersionWithFallback gave.
     assert.match(versionFn, /const names = \['products', \.\.\.\(readsStock \? \['stock'\] : \[\]\), \.\.\.extra\]/)
     assert.match(versionFn, /names\.length === 1 \? \[await getVersionWithFallback\(env, 'products'\)\] : await getVersionsWithFallback\(env, names\)/)
-    assert.match(readerHandler, /cachedJsonResponse\(keyRequest, c\.executionCtx, version, PRODUCT_LIST_LEGACY_CACHE_SECONDS,/)
-    assert.match(src, /const PRODUCT_LIST_LEGACY_CACHE_SECONDS = 20\b/, 'the OFF path keeps the 20 s lifetime the list always had')
+    assert.match(readerHandler, /cachedJsonResponse\(keyRequest, c\.executionCtx, version, getPlanLimits\(c\.env\)\.productListLegacyCacheSeconds,/)
+    assert.ok(!/const PRODUCT_LIST_LEGACY_CACHE_SECONDS/.test(src), 'the literal constant is gone: the lifetime is a plan field (QW3)')
+    assert.equal((fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'planTier.ts'), 'utf8').match(/productListLegacyCacheSeconds: 20,/g) || []).length, 2, 'the OFF path keeps the 20 s lifetime the list always had, on both tiers')
   })
 
   check('GET / (bare list) now routes through the SAME cachedJsonResponse wrapper, same namespace and TTL', () => {
     assert.match(listHandler, /productSearchCacheVersion\(c\.env, \{\}\)/, 'GET / must read the products cache version, same as GET /search')
     assert.match(listHandler, /refreshCachedProductRows\(c\.env,/, 'GET / must refresh a cache hit the same way GET /search does')
-    assert.match(listHandler, /cachedJsonResponse\(c\.req\.raw, c\.executionCtx, version, 20,/, 'GET / must wrap its query in cachedJsonResponse with a 20s TTL, same as GET /search')
+    assert.match(listHandler, /cachedJsonResponse\(c\.req\.raw, c\.executionCtx, version, getPlanLimits\(c\.env\)\.productListLegacyCacheSeconds,/, 'GET / must wrap its query in cachedJsonResponse with the same plan-field lifetime as GET /search (20 s on both tiers, pinned above)')
   })
 
   check('the permission/surface restriction on GET / is still applied AFTER the cached payload (per-user, not cacheable)', () => {

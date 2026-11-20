@@ -527,7 +527,8 @@ function buildFilterVariants(query: Record<string, string>, lowStock: LowStockCo
   }
 }
 
-async function loadProductFilters(env: Env, query: Record<string, string> = {}) {
+// The cacheable half of the vocabulary: the five product facets and the initials. The promotion list is time-dependent (rules are active by date) and is read per request, outside the cache entry.
+async function loadProductFilterFacets(env: Env, query: Record<string, string> = {}) {
   const db = getDb(env)
   // Real, confirmed bug (live user report + screenshot): after clearing
   // the search box in POS, the A-Z initial bar stayed stuck showing only
@@ -591,18 +592,30 @@ async function loadProductFilters(env: Env, query: Record<string, string> = {}) 
   const initials = (initialsRead?.results ?? []) as Array<{ initial: string; count: number }>
 
   const values = (rows: Array<{ value: string }> = []) => rows.map((row) => row.value).filter(Boolean)
-  // G1's "by promotion" filter needs the live rule list as a facet
-  // vocabulary (id + title), same role the other facet lists play.
-  const activeRules = await loadActivePromotionRules(db)
   return {
     brands: values(brands),
     categories: values(categories),
     units: values(units),
     suppliers: values(suppliers),
     tags: values(tags),
-    promotions: activeRules.map((rule) => ({ id: rule.id, title: rule.title || `#${rule.id}`, rule_type: rule.rule_type })),
     initials: (initials || []).map((row) => ({ initial: row.initial, value: row.initial, label: row.initial, count: row.count })),
   }
+}
+
+// G1's "by promotion" filter needs the live rule list as a facet vocabulary (id + title), same role the other facet lists play.
+async function loadPromotionFacet(env: Env) {
+  const activeRules = await loadActivePromotionRules(getDb(env))
+  return activeRules.map((rule) => ({ id: rule.id, title: rule.title || `#${rule.id}`, rule_type: rule.rule_type }))
+}
+
+// The whole vocabulary, in the key order the response has always had.
+function withPromotionFacet(facets: Awaited<ReturnType<typeof loadProductFilterFacets>>, promotions: Awaited<ReturnType<typeof loadPromotionFacet>>) {
+  return { brands: facets.brands, categories: facets.categories, units: facets.units, suppliers: facets.suppliers, tags: facets.tags, promotions, initials: facets.initials }
+}
+
+async function loadProductFilters(env: Env, query: Record<string, string> = {}) {
+  const [facets, promotions] = await Promise.all([loadProductFilterFacets(env, query), loadPromotionFacet(env)])
+  return withPromotionFacet(facets, promotions)
 }
 
 // Ported from backend/src/routes/products.ts's attachBranchStock. The
@@ -793,7 +806,7 @@ async function loadImageOnlyFacets(
   if (facetCache && cache && cacheRequest) {
     try {
       const response = new Response(JSON.stringify(facets), {
-        headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${PRODUCT_FILTERS_TTL_SECONDS}` },
+        headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${getPlanLimits(env!).catalogVocabularyCacheSeconds}` },
       })
       facetCache.waitUntil(cache.put(cacheRequest, response).catch(() => {}))
     } catch {
@@ -1652,7 +1665,7 @@ export async function attachLotRows<T extends { items: unknown }>(env: Env, user
 //                  inventory_checks version the id set was read at. Without them the key and the statements are exactly what they were.
 // A `lots` token in the URL's include parameter is dropped from the key: it adds rows after the cache and changes nothing the entry holds.
 // The page payload cache's lifetime with catalog_ranked_scope OFF: exactly what it has always been. ON, the ranked-scope entry lives productListCacheSeconds (planTier).
-const PRODUCT_LIST_LEGACY_CACHE_SECONDS = 20
+// (the lifetime is getPlanLimits(env).productListLegacyCacheSeconds, 20 s on both tiers)
 export type ProductSearchListOptions = {
   include?: ReadonlySet<string>
   keyRequest?: Request
@@ -1720,7 +1733,7 @@ export async function readProductSearchList(c: Context<{ Bindings: Env; Variable
   const baseVersion = await productSearchCacheVersion(c.env, query)
   const version = restricted ? `${baseVersion}:ic:${options.setVersion ?? ''}` : baseVersion
   let produced = false
-  const cachedPayload = await cachedJsonResponse(keyRequest, c.executionCtx, version, PRODUCT_LIST_LEGACY_CACHE_SECONDS, async () => {
+  const cachedPayload = await cachedJsonResponse(keyRequest, c.executionCtx, version, getPlanLimits(c.env).productListLegacyCacheSeconds, async () => {
     produced = true
     return restricted
       ? searchRestrictedProductsWithIndexFallback(c.env, query, { restrictIdsJson: options.restrictIdsJson, excludeIdsJson: options.excludeIdsJson, leafOnly: options.leafOnly })
@@ -1827,7 +1840,7 @@ app.get('/search-index', async (c) => {
   const version = await getVersionWithFallback(c.env, 'products')
   const cacheUrl = new URL(c.req.url)
   cacheUrl.search = `?page=${page}&format=${SEARCH_INDEX_FORMAT}`
-  const payload = await cachedJsonResponse(new Request(cacheUrl.toString(), { method: 'GET' }), c.executionCtx, version, 3600,
+  const payload = await cachedJsonResponse(new Request(cacheUrl.toString(), { method: 'GET' }), c.executionCtx, version, getPlanLimits(c.env).productSearchIndexCacheSeconds,
     () => buildProductSearchIndexPage(c.env, page, version), cacheIdentity(c))
   c.header('Cache-Control', 'private, no-store')
   if (have && have === payload.hash) {
@@ -1843,11 +1856,11 @@ app.get('/', async (c) => {
   if (denial) return c.json({ error: denial }, 403)
   // P4-4a: this bare list used to bypass the 20s versioned cache that
   // /search (just above) already goes through, so every call re-ran the
-  // full product query. Same version namespace ('products'), same TTL --
+  // full product query. Same version namespace ('products'), same TTL (productListLegacyCacheSeconds) --
   // this endpoint is just /search with a fixed page/pageSize.
   const version = await productSearchCacheVersion(c.env, {})
   let produced = false
-  const cachedPayload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, 20, async () => {
+  const cachedPayload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, getPlanLimits(c.env).productListLegacyCacheSeconds, async () => {
     produced = true
     return searchProductsPayload(c.env, { page: '1', pageSize: '100' })
   }, cacheIdentity(c))
@@ -1937,13 +1950,20 @@ async function catalogReadVersion(env: Env, namespaces: readonly string[]): Prom
 const PRODUCT_FILTERS_VERSIONS = ['products', 'stock', 'settings', 'promotions'] as const
 // The vocabulary reads stock only through the stock-state and issue filters (buildSearchFilters: stockExpr is referenced by those terms alone; the active test is is_active, never
 // stock). A request without them does not depend on the 'stock' version, which every sale moves, so its entry survives sales. Same predicate the page cache uses.
-const PRODUCT_FILTERS_VERSIONS_WITHOUT_STOCK = ['products', 'settings', 'promotions'] as const
+// The cached body holds no promotion list (read per request, outside the entry: rules are active by date, which no write announces), so a promotion change never recomputes the
+// facets and 'promotions' is no part of the vocabulary entry's key. PRODUCT_FILTERS_VERSIONS above stays what the image-only facet cache keys on.
+const PRODUCT_FILTERS_BODY_VERSIONS = ['products', 'stock', 'settings'] as const
+const PRODUCT_FILTERS_BODY_VERSIONS_WITHOUT_STOCK = ['products', 'settings'] as const
 export function productFiltersVersions(query: Record<string, string>): readonly string[] {
-  return productSearchMembershipReadsStock(query) ? PRODUCT_FILTERS_VERSIONS : PRODUCT_FILTERS_VERSIONS_WITHOUT_STOCK
+  return productSearchMembershipReadsStock(query) ? PRODUCT_FILTERS_BODY_VERSIONS : PRODUCT_FILTERS_BODY_VERSIONS_WITHOUT_STOCK
 }
-// Promotion rules are active by date, which no write announces: the TTL bounds how long a rule that just started
-// (or ended) can be missing from the vocabulary.
-const PRODUCT_FILTERS_TTL_SECONDS = 300
+// branchId, branch_id and surface reach the vocabulary's SQL only through the stock-state and issue terms (buildSearchFilters: stockExpr and the selected_bs join), so a request without
+// one shares a single entry across every branch and surface; a request with one keeps them in its key.
+export function canonicalFiltersQuery(query: Record<string, string>): Record<string, string> {
+  if (productSearchMembershipReadsStock(query)) return query
+  const { branchId: _branchId, branch_id: _branchIdAlt, surface: _surface, ...rest } = query
+  return rest
+}
 
 app.get('/filters', async (c) => {
   const denial = catalogVocabularyDenialReason(c.get('user'))
@@ -1952,11 +1972,16 @@ app.get('/filters', async (c) => {
   const imageOnly = isImageOnlyVocabularyUser(user)
   // An image-only reader's filter query is ignored: any narrowing parameter would
   // let the option lists answer questions about fields the role cannot see.
-  const filtersQuery = imageOnly ? {} : c.req.query()
+  const filtersQuery = imageOnly ? {} : canonicalFiltersQuery(c.req.query())
   const filtersUrl = new URL(c.req.url)
   if (imageOnly) filtersUrl.search = ''
-  const vocabulary = await cachedJsonResponse(new Request(filtersUrl.toString(), { method: 'GET' }), c.executionCtx,
-    await catalogReadVersion(c.env, productFiltersVersions(filtersQuery)), PRODUCT_FILTERS_TTL_SECONDS, () => loadProductFilters(c.env, filtersQuery), cacheIdentity(c))
+  else for (const name of ['branchId', 'branch_id', 'surface']) if (!(name in filtersQuery)) filtersUrl.searchParams.delete(name)
+  const [facets, promotions] = await Promise.all([
+    cachedJsonResponse(new Request(filtersUrl.toString(), { method: 'GET' }), c.executionCtx,
+      await catalogReadVersion(c.env, productFiltersVersions(filtersQuery)), getPlanLimits(c.env).catalogVocabularyCacheSeconds, () => loadProductFilterFacets(c.env, filtersQuery), cacheIdentity(c)),
+    loadPromotionFacet(c.env),
+  ])
+  const vocabulary = withPromotionFacet(facets, promotions)
   return c.json(imageOnly ? projectVocabularyForImageOnly(vocabulary, user) : vocabulary)
 })
 
@@ -6809,13 +6834,12 @@ app.get('/possible-duplicates', async (c) => {
   // Which products look the same depends on products rows and the dismissals, never on stock, so the groups are keyed on the products version alone and live for
   // possibleDuplicatesCacheSeconds. A hit re-reads what a group shows (stock, cost, price, image) live, and a group whose member changed identity or left the
   // catalogue without announcing it is recomputed instead of served.
-  let produced = false
+  // A miss clusters on identity columns alone (no branch_stock join over every product) and, like a hit, reads its members' stock, cost, price and image live.
   const cached = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
     await catalogReadVersion(c.env, ['products']), getPlanLimits(c.env).possibleDuplicatesCacheSeconds, async () => {
-      produced = true
-      return findPossiblySameProductClusters(getDb(c.env))
+      return findPossiblySameProductClusters(getDb(c.env), { identityOnly: true })
     }, cacheIdentity(c))
-  const clusters = produced ? cached : (await withLiveClusterMembers(c.env, cached)) ?? await findPossiblySameProductClusters(getDb(c.env))
+  const clusters = (await withLiveClusterMembers(c.env, cached)) ?? await findPossiblySameProductClusters(getDb(c.env))
   return c.json({ success: true, clusters })
 })
 

@@ -376,10 +376,20 @@ export function resetActorReadSession(): void {
   try { window.localStorage.setItem(SESSION_MARKER, marker) } catch { expectedMarker = sessionMarker() }
 }
 
+// The product catalogue's own identity changed (a product created, renamed, re-barcoded, merged or deactivated here, or a 'products' change pushed from another device): the plain
+// 'products' prefix, which no stock or money write family clears (they clear 'products:search' and the like). The client search index holds catalogue text only, so it listens to this and
+// not to the 'products' entity revision, which every sale moves.
+const catalogueChangeListeners = new Set<() => void>()
+export function subscribeCatalogueChange(listener: () => void): () => void {
+  catalogueChangeListeners.add(listener)
+  return () => { catalogueChangeListeners.delete(listener) }
+}
+
 export function invalidateActorReadChannel(prefix: string): void {
   if (!prefix) { allRevision++; revisions.clear(); return }
   const entity = prefix.split(':')[0]
   revisions.set(entity, (revisions.get(entity) || 0) + 1)
+  if (prefix === 'products') for (const listener of [...catalogueChangeListeners]) listener()
 }
 
 export function captureActorReadScope(channel = ''): ActorReadScope {
