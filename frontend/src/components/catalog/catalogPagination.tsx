@@ -117,7 +117,7 @@ export default function CatalogPaginationControls({
       // editablePageSizeInput stays off for the public surface so a shopper
       // cannot ask the storefront for 5,000 products in one request.
       layout="centered"
-      className={className}
+      className={`max-sm:[&_[data-pager-range]]:hidden ${className}`.trim()}
     />
   )
 }

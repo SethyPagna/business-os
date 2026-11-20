@@ -41,7 +41,15 @@ import { buildPortalActiveFilterChips, withoutFilterValue, type PortalActiveFilt
 import { buildPortalHighlightBadges, buildPortalPricePresentation, resolvePortalStockStatus, shouldShowStockStatus } from './portalCatalogDisplay.ts'
 import { isProductPromoted, type PromotionRule } from '../../utils/promotionRules.ts'
 import { aggregateInitialOptions, getInitialKey } from '../../utils/initials.ts'
-import PortalBrowseRow, { type BrowseOption } from './PortalBrowseRow'
+import PortalBrowseRow, { PortalFilterRow, type BrowseOption } from './PortalBrowseRow'
+import {
+  PRODUCT_ACTIVE_CLASS,
+  PRODUCT_CHIP_CLASS,
+  PRODUCT_CONTROL_CLASS,
+  PRODUCT_FIELD_CLASS,
+  PRODUCT_MUTED_TEXT_CLASS,
+  PRODUCT_SURFACE_CLASS,
+} from './portalProductSurfaces.ts'
 import {
   DEFAULT_PORTAL_BROWSE_SORT,
   DEFAULT_PORTAL_BROWSE_VIEW,
@@ -208,8 +216,8 @@ type CatalogProductsSectionProps = {
 
 // A compact area, not a wall of cards: the shopper came for products.
 const MAX_PROMOTION_CARDS = 2
-const PROMO_CARD_CTA_CLASS = 'mt-1 inline-flex min-h-11 w-fit items-center gap-2 rounded-full bg-amber-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-800 dark:bg-amber-400 dark:text-neutral-950 dark:hover:bg-amber-300'
-const BUTTON_QUIET_CLASS = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-amber-400 hover:text-amber-900 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:border-amber-500/60 dark:hover:text-amber-300'
+const PROMO_CARD_CTA_CLASS = 'mt-1 inline-flex min-h-11 w-fit items-center gap-2 rounded-full bg-[#7a5c22] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#5f4719] dark:bg-[#d6b56b] dark:text-[#23201b] dark:hover:bg-[#e3c887]'
+const BUTTON_QUIET_CLASS = `inline-flex min-h-11 items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${PRODUCT_CONTROL_CLASS}`
 
 function getBadgeIcon(badge: PortalBadge): LucideIcon {
   if (badge?.key === 'promotion') return BadgePercent
@@ -401,7 +409,6 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
   const showPromotionsArea = previewConfig.showPromotions !== false
     && (showPromoStrip || visiblePromotionItems.length > 0 || !!promotionsBanner)
   const promotionsHeading = promotionsTitle || copy('promotionsSectionFallback', 'Featured offers')
-  const promotionsHint = promotionsIntro || copy('promotionsSectionHint', 'Our latest offers and announcements.')
   const searchTerm = String(search || '').trim()
   const searchLabel = copy('searchProductsShort', 'Search products', 'ស្វែងរកផលិតផល')
 
@@ -502,45 +509,35 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
         <PortalBrowseRow label={copy('portalBrowseSort', 'Sort')} options={browseSortOptions} value={browseSort} defaultValue={DEFAULT_PORTAL_BROWSE_SORT} onChange={setBrowseSort} />
       ) : null}
 
-      <div className="rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-neutral-800 dark:ring-neutral-700">
-        <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-start gap-2 sm:grid-cols-[5.6rem_minmax(0,1fr)] lg:grid-cols-1 lg:gap-1">
-          <div {...microLabelProps(copy('category', 'Category'), 'min-w-0 pt-1.5 font-bold text-gray-500 dark:text-neutral-400 lg:pt-0')}>
-            <span className="block break-words">{copy('category', 'Category')}</span>
-          </div>
-          <PortalFilterCombobox
-            copy={copy}
-            label={copy('category', 'Category')}
-            allLabel={copy('all', 'All')}
-            searchPlaceholder={copy('searchCategories', 'Search categories...')}
-            noMatchesLabel={copy('noMatches', 'No matches')}
-            options={categories.map((category) => ({ value: category.name, label: category.name }))}
-            selected={categoryFilter}
-            onToggle={(value) => toggleFilterValue(categoryFilter, setCategoryFilter, value)}
-            onToggleGroup={toggleFilterValues ? (values, checked) => toggleFilterValues(categoryFilter, setCategoryFilter, values, checked) : undefined}
-            onClear={() => setCategoryFilter([])}
-          />
-        </div>
-      </div>
+      <PortalFilterRow label={copy('category', 'Category')}>
+        <PortalFilterCombobox
+          copy={copy}
+          label={copy('category', 'Category')}
+          allLabel={copy('all', 'All')}
+          searchPlaceholder={copy('searchCategories', 'Search categories...')}
+          noMatchesLabel={copy('noMatches', 'No matches')}
+          options={categories.map((category) => ({ value: category.name, label: category.name }))}
+          selected={categoryFilter}
+          onToggle={(value) => toggleFilterValue(categoryFilter, setCategoryFilter, value)}
+          onToggleGroup={toggleFilterValues ? (values, checked) => toggleFilterValues(categoryFilter, setCategoryFilter, values, checked) : undefined}
+          onClear={() => setCategoryFilter([])}
+        />
+      </PortalFilterRow>
 
-      <div className="rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-neutral-800 dark:ring-neutral-700">
-        <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-start gap-2 sm:grid-cols-[5.6rem_minmax(0,1fr)] lg:grid-cols-1 lg:gap-1">
-          <div {...microLabelProps(copy('brand', 'Brand'), 'min-w-0 pt-1.5 font-bold text-gray-500 dark:text-neutral-400 lg:pt-0')}>
-            <span className="block break-words">{copy('brand', 'Brand')}</span>
-          </div>
-          <PortalFilterCombobox
-            copy={copy}
-            label={copy('brand', 'Brand')}
-            allLabel={copy('all', 'All')}
-            searchPlaceholder={copy('searchBrands', 'Search brands...')}
-            noMatchesLabel={copy('noMatches', 'No matches')}
-            options={brands.map((brand) => ({ value: brand, label: brand }))}
-            selected={brandFilter}
-            onToggle={(value) => toggleFilterValue(brandFilter, setBrandFilter, value)}
-            onToggleGroup={toggleFilterValues ? (values, checked) => toggleFilterValues(brandFilter, setBrandFilter, values, checked) : undefined}
-            onClear={() => setBrandFilter([])}
-          />
-        </div>
-      </div>
+      <PortalFilterRow label={copy('brand', 'Brand')}>
+        <PortalFilterCombobox
+          copy={copy}
+          label={copy('brand', 'Brand')}
+          allLabel={copy('all', 'All')}
+          searchPlaceholder={copy('searchBrands', 'Search brands...')}
+          noMatchesLabel={copy('noMatches', 'No matches')}
+          options={brands.map((brand) => ({ value: brand, label: brand }))}
+          selected={brandFilter}
+          onToggle={(value) => toggleFilterValue(brandFilter, setBrandFilter, value)}
+          onToggleGroup={toggleFilterValues ? (values, checked) => toggleFilterValues(brandFilter, setBrandFilter, values, checked) : undefined}
+          onClear={() => setBrandFilter([])}
+        />
+      </PortalFilterRow>
 
       {/* G1b: the "only deals" toggle. A campaign chip on the promo strip
           sets the narrower 'rule:<id>' facet; this toggle reads as on for
@@ -551,10 +548,8 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           type="button"
           onClick={() => setPromoFacet(promoFacet ? '' : 'promoted')}
           aria-pressed={!!promoFacet}
-          {...microLabelProps(copy('promotionsFilter', 'Promotions only'), `flex min-h-10 w-full items-center justify-between gap-2 rounded-[1.1rem] px-3 py-2 font-bold ring-1 transition-colors ${
-            promoFacet
-              ? 'bg-amber-700 text-white ring-amber-700 dark:bg-amber-400 dark:text-neutral-950 dark:ring-amber-400'
-              : 'bg-slate-50 text-gray-500 ring-slate-100 hover:text-amber-800 dark:bg-neutral-800 dark:text-neutral-400 dark:ring-neutral-700'
+          {...microLabelProps(copy('promotionsFilter', 'Promotions only'), `flex min-h-10 w-full items-center justify-between gap-2 rounded-xl border px-3 py-2 font-bold transition-colors ${
+            promoFacet ? PRODUCT_ACTIVE_CLASS : PRODUCT_CHIP_CLASS
           }`, 'text-xs uppercase tracking-wide')}
         >
           <span className="min-w-0 break-words text-left">{copy('promotionsFilter', 'Promotions only')}</span>
@@ -563,59 +558,45 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
       ) : null}
 
       {!publicView ? (
-        <div className="rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-neutral-800 dark:ring-neutral-700">
-          <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-start gap-2 sm:grid-cols-[5.6rem_minmax(0,1fr)] lg:grid-cols-1 lg:gap-1">
-            <div {...microLabelProps(copy('branch', 'Branch'), 'min-w-0 pt-1.5 font-bold text-gray-500 dark:text-neutral-400 lg:pt-0')}>
-              <span className="block break-words">{copy('branch', 'Branch')}</span>
-            </div>
-            <PortalFilterCombobox
-              copy={copy}
-              label={copy('branch', 'Branch')}
-              allLabel={copy('allBranches', 'All branches')}
-              searchPlaceholder={copy('searchBranches', 'Search branches...')}
-              noMatchesLabel={copy('noMatches', 'No matches')}
-              options={branches.map((branch) => ({ value: String(branch.id), label: branch.name }))}
-              selected={branchFilter}
-              onToggle={(value) => toggleFilterValue(branchFilter, setBranchFilter, value)}
-              onClear={() => setBranchFilter([])}
-            />
-          </div>
-        </div>
+        <PortalFilterRow label={copy('branch', 'Branch')}>
+          <PortalFilterCombobox
+            copy={copy}
+            label={copy('branch', 'Branch')}
+            allLabel={copy('allBranches', 'All branches')}
+            searchPlaceholder={copy('searchBranches', 'Search branches...')}
+            noMatchesLabel={copy('noMatches', 'No matches')}
+            options={branches.map((branch) => ({ value: String(branch.id), label: branch.name }))}
+            selected={branchFilter}
+            onToggle={(value) => toggleFilterValue(branchFilter, setBranchFilter, value)}
+            onClear={() => setBranchFilter([])}
+          />
+        </PortalFilterRow>
       ) : null}
 
       {shouldShowStockStatus(previewConfig) ? (
-        <div className="rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-neutral-800 dark:ring-neutral-700">
-          <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-start gap-2 sm:grid-cols-[5.6rem_minmax(0,1fr)] lg:grid-cols-1 lg:gap-1">
-            <div {...microLabelProps(copy('stockStatus', 'Stock status'), 'min-w-0 pt-1.5 font-bold text-gray-500 dark:text-neutral-400 lg:pt-0')}>
-              <span className="block break-words">{copy('stockStatus', 'Stock status')}</span>
-            </div>
-            <div className="flex min-w-0 flex-wrap gap-1.5">
-              {[
-                ['in_stock', copy('inStock', 'In Stock')],
-                ['low_stock', copy('lowStock', 'Low Stock')],
-                ['out_of_stock', copy('outOfStock', 'Out of Stock')],
-              ].map(([value, label]) => {
-                const active = stockFilter.includes(value)
-                return (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => toggleFilterValue(stockFilter, setStockFilter, value)}
-                    className={`inline-flex min-h-10 items-center rounded-full border px-3 py-1.5 text-xs font-semibold leading-5 transition-colors ${
-                      active
-                        ? 'border-amber-800 bg-amber-700 text-white shadow-sm dark:border-amber-400 dark:bg-amber-400 dark:text-neutral-950'
-                        : 'border-slate-200 bg-white/95 text-slate-700 shadow-sm hover:border-amber-400 hover:bg-amber-50 hover:text-amber-900 dark:border-neutral-700 dark:bg-neutral-800/90 dark:text-neutral-200 dark:hover:border-amber-500/50 dark:hover:bg-neutral-700/80 dark:hover:text-amber-300'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                )
-              })}
-            </div>
+        <PortalFilterRow label={copy('stockStatus', 'Stock status')}>
+          <div className="flex min-w-0 flex-wrap gap-1.5">
+            {[
+              ['in_stock', copy('inStock', 'In Stock')],
+              ['low_stock', copy('lowStock', 'Low Stock')],
+              ['out_of_stock', copy('outOfStock', 'Out of Stock')],
+            ].map(([value, label]) => {
+              const active = stockFilter.includes(value)
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => toggleFilterValue(stockFilter, setStockFilter, value)}
+                  className={`inline-flex min-h-10 items-center rounded-full border px-3 py-1.5 text-xs font-semibold leading-5 transition-colors ${active ? PRODUCT_ACTIVE_CLASS : PRODUCT_CHIP_CLASS}`}
+                >
+                  {label}
+                </button>
+              )
+            })}
           </div>
-        </div>
+        </PortalFilterRow>
       ) : null}
-
     </>
   )
 
@@ -631,12 +612,12 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
               text". A placeholder is not a name -- it disappears the moment
               anything is typed, and several readers ignore it outright. */}
           <div className="relative min-w-0 flex-1">
-          <label htmlFor="portal-product-search" className={`flex min-h-11 w-full items-center gap-2 rounded-xl border border-slate-200 bg-white py-2 pl-3 shadow-sm transition focus-within:border-amber-700 focus-within:ring-2 focus-within:ring-amber-300 dark:border-neutral-700 dark:bg-neutral-950 dark:focus-within:border-amber-400 dark:focus-within:ring-amber-500/15 ${search ? 'pr-12' : 'pr-3'}`}>
-            <Search className="h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" aria-hidden="true" />
+          <label htmlFor="portal-product-search" className={`flex min-h-11 w-full items-center gap-2 rounded-xl py-2 pl-3 transition focus-within:border-[#7a5c22] focus-within:ring-2 focus-within:ring-[#7a5c22] dark:focus-within:border-[#d6b56b] dark:focus-within:ring-[#d6b56b] ${PRODUCT_FIELD_CLASS} ${search ? 'pr-12' : 'pr-3'}`}>
+            <Search className="h-4 w-4 shrink-0 text-[#7a5c22] dark:text-[#d6b56b]" aria-hidden="true" />
             <span className="sr-only">{searchLabel}</span>
             {/* The label paints the brass focus ring; the global sky outline would add a blue one. */}
             <input
-              className="min-w-0 flex-1 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-500 focus-visible:!outline-none dark:text-neutral-100 dark:placeholder:text-neutral-400"
+              className="min-w-0 flex-1 bg-white text-sm text-[#23201b] outline-none placeholder:text-stone-500 focus-visible:!outline-none dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-400"
               id="portal-product-search"
               name="product_search"
               autoComplete="off"
@@ -650,7 +631,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             <button
               type="button"
               data-search-clear="true"
-              className="absolute inset-y-0 right-0 inline-flex w-11 items-center justify-center rounded-xl text-slate-500 transition hover:text-amber-800 dark:text-neutral-400 dark:hover:text-amber-300"
+              className="absolute inset-y-0 right-0 inline-flex w-11 items-center justify-center rounded-xl text-stone-600 transition hover:text-[#7a5c22] dark:text-neutral-300 dark:hover:text-[#d6b56b]"
               aria-label={copy('clearSearch', 'Clear search', 'សម្អាតការស្វែងរក')}
               title={copy('clearSearch', 'Clear search', 'សម្អាតការស្វែងរក')}
               onClick={() => { setSearch(''); searchInputRef.current?.focus() }}
@@ -663,20 +644,21 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             <LazyPortalMenu
               align="auto"
               triggerWrapperClassName="min-w-0"
-              menuClassName="w-[min(24rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] overflow-hidden rounded-[1.35rem] border border-slate-200 bg-white p-0 shadow-xl dark:border-neutral-700 dark:bg-neutral-900"
+              menuClassName="w-[min(24rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] overflow-hidden rounded-2xl border border-stone-300 bg-white p-0 shadow-xl dark:border-neutral-700 dark:bg-neutral-900"
               onOpenChange={setFiltersOpen}
               trigger={(
                 <button
                   type="button"
-                  className={`inline-flex min-h-10 min-w-10 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition ${
-                    filtersOpen || portalActiveFilterCount > 0 ? 'border-amber-700 bg-amber-700 text-white shadow-sm dark:border-amber-400 dark:bg-amber-400 dark:text-neutral-950' : 'border-slate-200 bg-white text-slate-700 shadow-sm hover:border-amber-400 hover:bg-amber-50 hover:text-amber-900 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-200 dark:hover:border-amber-500/50 dark:hover:text-amber-300'
+                  className={`inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition ${
+                    filtersOpen || portalActiveFilterCount > 0 ? PRODUCT_ACTIVE_CLASS : PRODUCT_CONTROL_CLASS
                   }`}
                   aria-label={copy('filters', 'Filters')}
+                  title={copy('filters', 'Filters')}
                 >
                   <SlidersHorizontal className="h-4 w-4" />
                   <span className="hidden sm:inline">{copy('filters', 'Filters')}</span>
                   {portalActiveFilterCount > 0 ? (
-                    <span className="rounded-full bg-white/20 px-2 py-0.5 text-xs">{portalActiveFilterCount}</span>
+                    <span className="rounded-full bg-white px-2 py-0.5 text-xs text-[#7a5c22] dark:bg-[#23201b] dark:text-[#d6b56b]">{portalActiveFilterCount}</span>
                   ) : null}
                 </button>
               )}
@@ -689,18 +671,19 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                   className="max-h-[min(32rem,calc(100dvh-1rem))] overflow-y-auto overscroll-contain p-2.5 outline-none"
                 >
                   <div className="mb-2 flex items-center justify-between gap-2 px-1">
-                    <span className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('filters', 'Filters')}</span>
+                    <span className="text-sm font-semibold text-[#23201b] dark:text-neutral-100">{copy('filters', 'Filters')}</span>
                     <div className="flex items-center gap-2">
                       {portalActiveFilterCount > 0 ? (
-                        <button type="button" className="min-h-10 rounded-lg px-2 text-xs font-semibold text-slate-500 hover:text-slate-700 dark:text-neutral-300 dark:hover:text-white" onClick={clearPortalFilters}>
+                        <button type="button" className="min-h-10 rounded-lg px-2 text-xs font-semibold text-stone-600 hover:text-[#7a5c22] dark:text-neutral-300 dark:hover:text-white" onClick={clearPortalFilters}>
                           {copy('clear', 'Clear')}
                         </button>
                       ) : null}
                       <button
                         type="button"
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-white"
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-stone-400 text-stone-600 transition hover:bg-stone-100 hover:text-[#23201b] dark:border-neutral-600 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-white"
                         onClick={closeMenu}
                         aria-label={copy('closeFilters', 'Close filters')}
+                        title={copy('closeFilters', 'Close filters')}
                       >
                         <X className="h-4 w-4" />
                       </button>
@@ -726,24 +709,24 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             onClick={() => setDesktopFiltersOpen((open) => !open)}
             aria-expanded={desktopFiltersOpen}
             aria-controls="portal-desktop-filters"
-            className={`hidden min-h-10 shrink-0 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition lg:inline-flex ${
-              desktopFiltersOpen || portalActiveFilterCount > 0 ? 'border-amber-700 bg-amber-700 text-white shadow-sm dark:border-amber-400 dark:bg-amber-400 dark:text-neutral-950' : 'border-slate-200 bg-white text-slate-700 shadow-sm hover:border-amber-400 hover:bg-amber-50 hover:text-amber-900 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-200 dark:hover:border-amber-500/50 dark:hover:text-amber-300'
+            className={`hidden min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition lg:inline-flex ${
+              desktopFiltersOpen || portalActiveFilterCount > 0 ? PRODUCT_ACTIVE_CLASS : PRODUCT_CONTROL_CLASS
             }`}
           >
             <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
             <span>{copy('filters', 'Filters')}</span>
             {portalActiveFilterCount > 0 ? (
-              <span className="rounded-full bg-white/20 px-2 py-0.5 text-xs">{portalActiveFilterCount}</span>
+              <span className="rounded-full bg-white px-2 py-0.5 text-xs text-[#7a5c22] dark:bg-[#23201b] dark:text-[#d6b56b]">{portalActiveFilterCount}</span>
             ) : null}
           </button>
           </div>
   )
   const desktopFiltersPanel = desktopFiltersOpen ? (
-          <div id="portal-desktop-filters" data-portal-desktop-filters="true" className={`hidden lg:block ${searchDocked ? 'absolute right-0 top-full z-50 mt-2 w-[min(56rem,calc(100vw-3rem))] rounded-2xl border border-slate-200 bg-white p-3 shadow-xl dark:border-neutral-700 dark:bg-neutral-900' : 'border-t border-slate-100 px-1 pt-2 dark:border-neutral-800'}`}>
+          <div id="portal-desktop-filters" data-portal-desktop-filters="true" className={`hidden lg:block ${searchDocked ? 'absolute right-0 top-full z-50 mt-2 w-[min(56rem,calc(100vw-3rem))] rounded-2xl border border-stone-300 bg-white p-3 shadow-xl dark:border-neutral-700 dark:bg-neutral-900' : 'border-t border-stone-300 px-1 pt-2 dark:border-neutral-700'}`}>
             <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('filters', 'Filters')}</span>
+              <span className="text-sm font-semibold text-[#23201b] dark:text-neutral-100">{copy('filters', 'Filters')}</span>
               {portalActiveFilterCount > 0 ? (
-                <button type="button" className="min-h-10 rounded-lg px-2 text-xs font-semibold text-slate-500 hover:text-slate-700 dark:text-neutral-300 dark:hover:text-white" onClick={clearPortalFilters}>
+                <button type="button" className="min-h-10 rounded-lg px-2 text-xs font-semibold text-stone-600 hover:text-[#7a5c22] dark:text-neutral-300 dark:hover:text-white" onClick={clearPortalFilters}>
                   {copy('clear', 'Clear')}
                 </button>
               ) : null}
@@ -752,7 +735,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           </div>
         ) : null
   const activeFilterStatus = portalActiveFilterCount > 0 || refreshingProducts || loadingProducts ? (
-          <div className={`flex items-start justify-between gap-2 px-1 text-xs text-slate-500 dark:text-neutral-400 ${searchDocked ? 'mb-4' : 'border-t border-slate-100 pt-2 dark:border-neutral-800'}`}>
+          <div className={`flex items-start justify-between gap-2 px-1 text-xs ${PRODUCT_MUTED_TEXT_CLASS} ${searchDocked ? 'mb-4' : 'border-t border-stone-300 pt-2 dark:border-neutral-700'}`}>
             {activeFilterChips.length ? (
               <ul data-portal-active-filters="true" aria-label={copy('filters', 'Filters')} className="flex min-w-0 flex-wrap gap-1.5">
                 {activeFilterChips.map((chip) => (
@@ -761,7 +744,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                       type="button"
                       onClick={() => removeActiveFilterChip(chip)}
                       aria-label={replaceVars(copy('removeActiveFilter', 'Remove filter: {label}'), { label: chip.label })}
-                      className="inline-flex min-h-10 max-w-full items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-left text-xs font-semibold leading-[1.5] text-amber-900 transition hover:border-amber-500 dark:border-amber-500/40 dark:bg-amber-400/10 dark:text-amber-200 dark:hover:border-amber-400"
+                      className="inline-flex min-h-10 max-w-full items-center gap-1.5 rounded-full border border-amber-700 bg-amber-50 px-3 py-1 text-left text-xs font-semibold leading-[1.5] text-amber-950 transition hover:border-amber-900 dark:border-[#d6b56b] dark:bg-neutral-800 dark:text-amber-200 dark:hover:border-[#e3c887]"
                     >
                       {/* Owner data (names, letters) must not be machine-translated; the
                           promotions/stock labels are UI copy and should be. */}
@@ -776,7 +759,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             ) : (
               <span>{portalActiveFilterCount > 0 ? `${portalActiveFilterCount} ${copy('selected', 'selected')}` : ''}</span>
             )}
-            <span className="shrink-0 pt-1 font-semibold text-slate-600 dark:text-neutral-200">
+            <span className="shrink-0 pt-1 font-semibold text-stone-700 dark:text-neutral-200">
               {refreshingProducts ? copy('refreshing', 'Refreshing...') : loadingProducts ? copy('loadingProducts', 'Loading products...') : ''}
             </span>
           </div>
@@ -805,13 +788,10 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
   return (
     <SectionShell
       // publicView: the top nav already has a "Products" chip/tab naming this
-      // section (portalTabs, CatalogPreviewSurface), so a second "Products"
-      // heading right above the subtitle just repeated it. The admin editor
-      // preview has no such chip on this panel, so it keeps the heading.
+      // section (portalTabs, CatalogPreviewSurface), so a heading here would
+      // repeat it. The admin editor preview has no such chip on this panel,
+      // so it keeps the heading. No helper line either way: the grid says it.
       title={publicView ? undefined : copy('products', 'Products')}
-      subtitle={shouldShowStockStatus(previewConfig)
-        ? copy('liveCatalog', 'Browse our products and check availability.')
-        : copy('liveCatalogNoStock', 'Browse our products.', 'រុករកផលិតផលរបស់យើង។')}
     >
       {/* The permanent 17rem left filter rail that sat here at lg+ is gone
           (P-public-10, owner 2026-09-25: "compact filter ... the search bar
@@ -832,17 +812,17 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           replaces three stacked areas (strip above search, banner above
           everything, cards below search). */}
       {showPromotionsArea ? (
-        <section data-portal-promotions="true" className="mb-4 rounded-2xl border border-amber-200 bg-amber-50/60 px-3 dark:border-amber-500/30 dark:bg-neutral-900/80">
+        <section data-portal-promotions="true" className={`mb-4 rounded-2xl px-3 ${PRODUCT_SURFACE_CLASS}`}>
           <h3 className="m-0">
             <button
               type="button"
               onClick={() => setPromotionsOpen((open) => !open)}
               aria-expanded={promotionsOpen}
               aria-controls="portal-promotions-body"
-              className="flex min-h-11 w-full items-center justify-between gap-2 text-left text-sm font-semibold text-amber-950 dark:text-amber-200"
+              className="flex min-h-11 w-full items-center justify-between gap-2 text-left text-sm font-semibold text-[#23201b] dark:text-neutral-100"
             >
               <span className="flex min-w-0 items-center gap-2">
-                <BadgePercent className="h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" aria-hidden="true" />
+                <BadgePercent className="h-4 w-4 shrink-0 text-[#9c7a3c] dark:text-[#d6b56b]" aria-hidden="true" />
                 <span {...getKhmerTextProps(promotionsHeading, 'min-w-0 break-words')}>{promotionsHeading}</span>
               </span>
               <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${promotionsOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
@@ -850,8 +830,8 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           </h3>
           {promotionsOpen ? (
             <div id="portal-promotions-body" className="space-y-3 pb-3">
-              {visiblePromotionItems.length ? (
-                <p {...getKhmerTextProps(promotionsHint, 'break-words text-xs leading-5 text-stone-600 dark:text-neutral-400')}>{promotionsHint}</p>
+              {promotionsIntro && visiblePromotionItems.length ? (
+                <p {...getKhmerTextProps(promotionsIntro, `break-words text-xs leading-5 ${PRODUCT_MUTED_TEXT_CLASS}`)}>{promotionsIntro}</p>
               ) : null}
               {showPromoStrip ? (
                 <PortalPromoStrip
@@ -869,11 +849,11 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
               {visiblePromotionItems.length ? (
                 <div className="grid gap-3 sm:grid-cols-2">
                   {promotionCards.map((item) => (
-                    <article key={item.id} className="flex min-w-0 gap-3 rounded-xl border border-amber-200 bg-white p-3 dark:border-amber-500/25 dark:bg-neutral-900">
+                    <article key={item.id} className="flex min-w-0 gap-3">
                       {item.mediaUrl ? (
                         <button
                           type="button"
-                          className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg bg-stone-100 dark:bg-neutral-800"
+                          className="relative h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-stone-100 dark:bg-neutral-800"
                           // The picture repeats the heading beside it (so alt-hidden);
                           // the button itself still needs a name.
                           aria-label={`${copy('viewImages', 'View images')}${item.title ? `: ${item.title}` : ''}`}
@@ -883,10 +863,10 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                         </button>
                       ) : null}
                       <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
-                        {item.eyebrow ? <span {...microLabelProps(item.eyebrow, 'break-words font-semibold text-amber-800 dark:text-amber-300')}>{item.eyebrow}</span> : null}
-                        {item.title ? <h4 {...getKhmerTextProps(item.title, 'break-words text-sm font-semibold leading-snug text-stone-900 dark:text-neutral-100')}>{item.title}</h4> : null}
+                        {item.eyebrow ? <span {...microLabelProps(item.eyebrow, 'break-words font-semibold text-[#7a5c22] dark:text-[#e3c887]')}>{item.eyebrow}</span> : null}
+                        {item.title ? <h4 {...getKhmerTextProps(item.title, 'break-words text-sm font-semibold leading-snug text-[#23201b] dark:text-neutral-100')}>{item.title}</h4> : null}
                         {item.subtitle ? <div {...getKhmerTextProps(item.subtitle, 'break-words text-xs font-medium leading-snug text-stone-700 dark:text-neutral-300')}>{item.subtitle}</div> : null}
-                        {item.body ? <p {...getKhmerTextProps(item.body, 'break-words text-xs leading-5 text-stone-600 dark:text-neutral-400')}>{item.body}</p> : null}
+                        {item.body ? <p {...getKhmerTextProps(item.body, `break-words text-xs leading-5 ${PRODUCT_MUTED_TEXT_CLASS}`)}>{item.body}</p> : null}
                         {item.linkProductId && item.linkProductName ? (
                           <button
                             type="button"
@@ -923,7 +903,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                   {promotionExtras.map((item) => {
                     const text = item.title || item.subtitle || item.body || ''
                     const href = safeLinkUrl(item.linkUrl)
-                    const chipClass = 'inline-flex min-h-11 max-w-[16rem] shrink-0 items-center rounded-full border border-amber-300 bg-white px-4 py-2 text-left text-xs font-semibold text-amber-950 dark:border-amber-500/30 dark:bg-neutral-900 dark:text-amber-200'
+                    const chipClass = `inline-flex min-h-11 max-w-[16rem] shrink-0 items-center rounded-full px-4 py-2 text-left text-xs font-semibold ${PRODUCT_CHIP_CLASS}`
                     return (
                       <li key={item.id} className="shrink-0">
                         {item.linkProductId && item.linkProductName ? (
@@ -966,7 +946,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           {activeFilterStatus}
         </>
       ) : (
-      <div className="sticky top-16 z-20 -mx-1 mb-5 space-y-2 rounded-[22px] border border-slate-200 bg-white p-2 shadow-[0_8px_24px_rgba(15,23,42,0.08)] dark:border-neutral-700 dark:bg-neutral-900 sm:top-20">
+      <div className={`sticky top-16 z-20 -mx-1 mb-5 space-y-2 rounded-2xl p-2 sm:top-20 ${PRODUCT_SURFACE_CLASS}`}>
           {searchControls}
           {desktopFiltersPanel}
           {activeFilterStatus}
@@ -974,7 +954,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
       )}
 
       {portalError ? (
-        <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-800/60 dark:bg-rose-950/30 dark:text-rose-200">
+        <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200">
           <span className="min-w-0 break-words">{portalError}</span>
           {onRetry ? (
             <button type="button" data-portal-retry="true" onClick={onRetry} className={BUTTON_QUIET_CLASS}>
@@ -1054,10 +1034,10 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             <Fragment key={product.id}>
               {categoryHeaderLabel ? (
                 <div className="col-span-full flex items-center gap-3 pt-2 first:pt-0">
-                  <h3 {...microLabelProps(categoryHeaderLabel, 'font-semibold text-slate-500 dark:text-neutral-400', 'text-sm uppercase tracking-wide')}>
+                  <h3 {...microLabelProps(categoryHeaderLabel, `font-semibold ${PRODUCT_MUTED_TEXT_CLASS}`, 'text-sm uppercase tracking-wide')}>
                     {categoryHeaderLabel}
                   </h3>
-                  <div className="h-px flex-1 bg-slate-200 dark:bg-neutral-800" />
+                  <div className="h-px flex-1 bg-stone-300 dark:bg-neutral-700" />
                 </div>
               ) : null}
               <article
@@ -1292,7 +1272,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
       ) : null}
 
       {totalProducts === 0 && !refreshingProducts && !loadingProducts ? (
-        <div data-portal-empty="true" className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400">
+        <div data-portal-empty="true" className={`mt-4 rounded-2xl border-dashed p-8 text-center text-sm ${PRODUCT_SURFACE_CLASS} ${PRODUCT_MUTED_TEXT_CLASS}`}>
           <p className="break-words">
             {searchTerm
               ? replaceVars(copy('noProductsForSearch', 'No products match "{term}".', 'រកមិនឃើញផលិតផលសម្រាប់ "{term}"។'), { term: searchTerm })

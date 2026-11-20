@@ -224,7 +224,7 @@ runTest('shouldShowStockStatus defaults to shown and only hides on explicit fals
 })
 
 runTest('both stock-status render sites (filter pills + card badge) delegate to the shared shouldShowStockStatus helper', () => {
-  assert.match(catalogProductsSectionSource, /shouldShowStockStatus\(previewConfig\)\s*\?\s*\(\s*<div className="rounded-\[1\.1rem\]/, 'stock-status filter-pill row should use the shared helper')
+  assert.match(catalogProductsSectionSource, /shouldShowStockStatus\(previewConfig\)\s*\?\s*\(\s*<PortalFilterRow label=\{copy\('stockStatus'/, 'stock-status filter-pill row should use the shared helper')
   assert.match(catalogProductsSectionSource, /shouldShowStockStatus\(previewConfig\)\s*\?\s*\(\s*<div className="absolute right-3 top-3">\s*<StatusPill/, 'card StatusPill badge should use the shared helper')
   assert.doesNotMatch(catalogProductsSectionSource, /previewConfig\.showStockStatus !== false/, 'no inline !== false check should remain now that the toggle is centralized')
 })
@@ -369,7 +369,7 @@ runTest('portal editor work leaves product filter popovers viewport-portalled', 
 })
 
 runTest('public product discovery uses a sticky unified search, responsive brand index, and explicit paging controls', () => {
-  assert.match(catalogProductsSectionSource, /focus-within:border-amber-700[\s\S]*sticky top-16|sticky top-16[\s\S]*focus-within:border-amber-700/,
+  assert.match(catalogProductsSectionSource, /focus-within:border-\[#7a5c22\][\s\S]*sticky top-16|sticky top-16[\s\S]*focus-within:border-\[#7a5c22\]/,
     'search should stay sticky and use the same brass discovery accent as filters')
   assert.match(catalogProductsSectionSource, /copy\('jumpToBrand', 'Jump to brand'\)/,
     'the brand index still needs its labelled, translated name')

@@ -59,16 +59,12 @@ check('B2: a 44px clear button empties the search and returns focus to the field
 check('B2: the placeholder is the concise Khmer phrase and the focus ring is brass, not blue', () => {
   assert.match(products, /copy\('searchProductsShort', 'Search products', 'ស្វែងរកផលិតផល'\)/)
   assert.match(products, /placeholder=\{searchLabel\}/)
-  assert.match(products, /focus-within:border-amber-700 focus-within:ring-2 focus-within:ring-amber-300/)
+  assert.match(products, /focus-within:border-\[#7a5c22\] focus-within:ring-2 focus-within:ring-\[#7a5c22\]/)
   assert.match(products, /focus-visible:!outline-none/, 'the global sky outline is not drawn around the bare input')
 })
 
-check('B3: the subtitle promises availability only while stock status is shown', () => {
-  const subtitle = /subtitle=\{([\s\S]*?)\}\n\s*>/.exec(products)
-  assert.ok(subtitle, 'SectionShell subtitle')
-  assert.match(subtitle[1], /shouldShowStockStatus\(previewConfig\)\s*\? copy\('liveCatalog'/)
-  assert.match(subtitle[1], /: copy\('liveCatalogNoStock', 'Browse our products\.'/)
-  assert.doesNotMatch('Browse our products.', /availability/i)
+check('B3: no helper line under the tabs, so nothing promises availability (spec section 9)', () => {
+  assert.doesNotMatch(products, /subtitle=|copy\('liveCatalog|Browse our products/)
 })
 
 check('B5: Khmer micro-labels are at least 12px with no case or tracking; Latin keeps its style', () => {
@@ -151,7 +147,7 @@ check('B9: the promotions toggle uses a Check icon on brass, not a raw tick on r
   assert.doesNotMatch(products, /'✓'/)
   assert.match(products, /\{promoFacet \? <CheckCircle2 /)
   assert.doesNotMatch(products, /bg-rose-600 text-white ring-rose-600/)
-  assert.match(products, /bg-amber-700 text-white ring-amber-700/)
+  assert.match(products, /promoFacet \? PRODUCT_ACTIVE_CLASS : PRODUCT_CHIP_CLASS/)
 })
 
 check('B10: promotion titles wrap and are never clamped', () => {
