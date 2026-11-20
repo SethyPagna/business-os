@@ -750,7 +750,7 @@ async function issueFilterBound(w0) {
     ['205 childless headers and 5 products', { headers: 205 }, 5], ['605 childless headers and 5 products', { headers: 605 }, 5], ['1005 childless headers and 5 products', { headers: 1005 }, 5],
     ['101 childless headers and 300 products (F1: 401 families)', { headers: 101, lone: 300 }, 300],
     ['99 childless headers sorted last and 300 products (F2: 399 families)', { headers: 99, lone: 300, headerName: 'Zhead' }, 300],
-    ['301 products and no header (the page bound plus one)', { lone: 301 }, 301],
+    ['301 products and no header (one over the cap: refused after the first page)', { lone: 301 }, 301],
   ]
   for (const [label, world, products] of worlds) {
     const w = w0.again(world)
@@ -769,6 +769,7 @@ async function issueFilterBound(w0) {
     if (products <= 300) { assert.equal(made.status, 201, `${label}: ${JSON.stringify(made.json)}`); assert.equal(made.json.item.progress.total, products, 'within the bound the filter resolves every product'); assert.equal(issued, 1); continue }
     assert.equal(made.status, 400, JSON.stringify(made.json)); assert.equal(made.json.code, 'inventory_check_task_too_many'); assert.equal(made.json.total, products, 'the whole count, not a page bound')
     assert.equal(made.json.limit, 300); assert.equal(issued, 0, 'nothing was issued')
+    assert.ok(used <= 12, `${label}: a refusal reads the first page only (${used} D1 calls; reading every page of 301 costs about 30)`)
   }
 }
 
@@ -1139,7 +1140,7 @@ async function main() {
     ['a filter that finds nothing answers the old missing-ids code', edit('routes/inventoryChecks.ts', "  if (!ids.size) throw new InventoryCheckSessionError(400, 'inventory_check_product_not_eligible')\n", ''), ['issueFilterNothing']],
     ['RV A: leaf-only applies to every list read', edit('routes/inventoryChecks.ts', 'const leafOnly = Boolean(extra.idsOnly) && restriction.restrictIdsJson === undefined && restriction.excludeIdsJson === undefined', 'const leafOnly = restriction.restrictIdsJson === undefined && restriction.excludeIdsJson === undefined'), ['issueFilterBound']],
     ['RV B: the leaf rule replaces a check-state restriction', edit('routes/inventoryChecks.ts', 'const leafOnly = Boolean(extra.idsOnly) && restriction.restrictIdsJson === undefined && restriction.excludeIdsJson === undefined', 'const leafOnly = Boolean(extra.idsOnly)'), ['issueFilterCheckState']],
-    ['the page bound is one page short (no plus one)', edit('routes/inventoryChecks.ts', 'maxPages = Math.ceil(limit / LIST_MAX_PAGE_SIZE) + 1', 'maxPages = Math.ceil(limit / LIST_MAX_PAGE_SIZE)'), ['issueFilterBound']],
+    ['the refusal does not stop after the first page (a filter over the cap reads every page)', edit('routes/inventoryChecks.ts', '    if (readAtLeast > limit) { atLeast = true; break }\n', ''), ['issueFilterBound']],
     ['the wired list raises its page size alone (a second source, not the reader clamp)', edit('lib/inventoryCheckList.ts', 'export const LIST_MAX_PAGE_SIZE = PRODUCT_LIST_MAX_PAGE_SIZE', 'export const LIST_MAX_PAGE_SIZE = 150'), ['pageSizeOneSource']],
     ['the task list cache ignores the products version', edit('routes/inventoryChecks.ts', "order=1`, { method: 'GET' }), c.executionCtx, `ict:${version}:${productsVersion}`", "order=1`, { method: 'GET' }), c.executionCtx, `ict:${version}`"), ['cacheKeyProducts']],
     ['the schema probe does not name the task indexes', edit('lib/inventoryCheckSessions.ts', "  'inventory_check_sessions_kind_task', 'inventory_check_sessions_open_task', 'inventory_check_sessions_task_board'])\nconst APPROVALS_SCHEMA", "  ])\nconst APPROVALS_SCHEMA"), ['schemaMissing']],

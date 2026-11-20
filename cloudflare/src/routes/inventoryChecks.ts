@@ -195,7 +195,7 @@ async function readListPage(c: IcContext, rawQuery: Record<string, string>, extr
   // The cached page is keyed by the restriction's own name: the state (Pending without the right to see it is an empty set of its own: it must not share a cached page with the admin's real Pending set)
   // and the day, so a page of one day never serves another.
   const setKey = [plan.checkState ? (plan.checkState === 'pending' && !fixStock ? 'pending_unavailable' : plan.checkState) : '', plan.checkedOn ? `day:${plan.checkedOn}` : '', extra.task ? `task:${extra.task.id}` : '', leafOnly ? 'leaf' : ''].filter(Boolean).join('|')
-  const { groups, ...payload } = await readProductSearchList(c, productsQuery, { include, keyRequest, ...restriction, ...(leafOnly ? { leafOnly: true } : {}), ...(grouping ? { grouping } : {}),
+  const { groups, ...payload } = await readProductSearchList(c, productsQuery, { include, keyRequest, ...restriction, ...(leafOnly ? { leafOnly: true } : {}), ...(extra.idsOnly ? { idsOnly: true } : {}), ...(grouping ? { grouping } : {}),
     ...(setKey ? { setKey } : codeHit !== null && grouping ? { setKey: 'code' } : {}),
     ...(plan.checkState || plan.checkedOn || grouping ? { setVersion: groupedVersion } : {}), lotsAdmitted: access.fields.received && !extra.idsOnly, taggedLotsAdmitted: access.fields.stock && !extra.idsOnly }) as Awaited<ReturnType<typeof readProductSearchList>> & { groups?: FamilyGroupTotals[] }
   // idsOnly (a filter being issued, resolveTaskFilters) reads the ids, whether a row is a family header and the total, nothing else (P2.7): the answer is the reader's page as it is, with none of the capability reads, the
@@ -329,18 +329,21 @@ async function resolveTaskFilters(c: IcContext, branchId: number, raw: unknown, 
   // far and `atLeast` says so. Every family on a page holds a product, so a filter of `limit` products or fewer ends within ceil(limit / page size) pages and never meets the page bound. The bound (the pages the cap could
   // need, plus one) only keeps a request under Free's D1 calls if the reader ever returned pages that add no ids again.
   const ids = new Set<number>(), maxPages = Math.ceil(limit / LIST_MAX_PAGE_SIZE) + 1
-  let atLeast = false
+  let atLeast = false, readAtLeast = 0
   for (let page = 1; ; page++) {
     const answer = await readListPage(c, { ...filters, branchId: String(branchId), summary: '0', pageSize: String(LIST_MAX_PAGE_SIZE), page: String(page) }, { idsOnly: true }) as { items?: Array<{ id: number; is_group?: number | boolean }>; total?: number }
     const rows = answer.items ?? []
     for (const row of rows) if (!row.is_group) ids.add(Number(row.id))
+    // More families than the cap means more products than the cap (each family holds one): refuse after this page, with the least the reader knows, never ranking or reading the rest of the scope.
+    readAtLeast = Math.max(readAtLeast, Number(answer.total ?? 0))
+    if (readAtLeast > limit) { atLeast = true; break }
     if (!rows.length || page * LIST_MAX_PAGE_SIZE >= Number(answer.total ?? 0)) break
     if (ids.size > limit) { atLeast = true; break }
     if (page >= maxPages) throw new InventoryCheckSessionError(400, 'inventory_check_task_too_many', { total: ids.size, limit, atLeast: true })
   }
   // A filter that finds nothing countable is the contract's `inventory_check_product_not_eligible` (what the task screens show as "the filter matched nothing"), not a missing id list.
   if (!ids.size) throw new InventoryCheckSessionError(400, 'inventory_check_product_not_eligible')
-  return { filters, ids: [...ids], total: ids.size, atLeast }
+  return { filters, ids: [...ids], total: atLeast ? Math.max(ids.size, readAtLeast) : ids.size, atLeast }
 }
 app.post('/tasks', async c => {
   if (!await readSwitch(c.env, 'ic_wired')) return notWired(c)
