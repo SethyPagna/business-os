@@ -49,7 +49,7 @@ import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGal
 import InstallPromptBand from '../shared/InstallPromptBand.tsx'
 import InstallAppButton from '../install/InstallAppButton.tsx'
 import { installStandaloneExternalLinkGuard } from '../../utils/standaloneNavigation.ts'
-import { isGoogleLanguageChoice, normalizePortalChoice, portalCopyLanguage, readPublicStorefrontChoice, storePortalLanguage } from './portalLanguageOptions.ts'
+import { clearPortalReopenAccount, consumePortalReopenAccount, isGoogleLanguageChoice, markPortalReopenAccount, normalizePortalChoice, portalCopyLanguage, portalTranslateAllowed, readPublicStorefrontChoice, storePortalLanguage } from './portalLanguageOptions.ts'
 import { isAdminHostname, isStorefrontSignInPath } from '../../app/pathRouting.ts'
 import { aiProviderState } from './legal/aiProviderDisclosure.ts'
 import { PORTAL_DARK_SURFACE, PORTAL_LIGHT_SURFACE } from './portalContrast.ts'
@@ -543,7 +543,8 @@ export default function PublicCatalogPage() {
   // cart bucket drawer below.
   // G38 P0 (owner 27 Sep): on the shop host /login is the customer sign-in,
   // never the staff app, so arriving there opens this drawer.
-  const [accountOpen, setAccountOpen] = useState(() => typeof window !== 'undefined' && isStorefrontSignInPath(window.location?.pathname))
+  // consumePortalReopenAccount is read-and-delete: a sheet that was open when Google's translation was taken off by a reload comes back once.
+  const [accountOpen, setAccountOpen] = useState(() => typeof window !== 'undefined' && (isStorefrontSignInPath(window.location?.pathname) || consumePortalReopenAccount()))
   // Saved and List are one full page inside the storefront (spec section 4), not drawers. Opening it pushes one history entry, so the browser's
   // Back returns the visitor to where they were (the tab, and how far down the page they had scrolled). Tabs themselves are plain state.
   const [listView, setListView] = useState<PortalListSegment | null>(null)
@@ -670,9 +671,34 @@ export default function PublicCatalogPage() {
   useEffect(() => {
     if (!isGoogleLanguageChoice(pageChoice)) lastPlainChoiceRef.current = portalCopyLanguage(pageChoice)
   }, [pageChoice])
+  // Google's script sees everything on the page, so it runs only while nobody is signed in and the Account sheet is closed (portalTranslateAllowed).
+  const sessionReady = portalAccount.ready
+  const signedIn = !!portalAccount.account
+  const translateAllowed = portalTranslateAllowed({ sessionReady, signedIn, accountOpen })
   useEffect(() => {
     if (!isGoogleLanguageChoice(pageChoice)) return undefined
     let cancelled = false
+    const say = (text: string) => {
+      setTranslateNotice(text)
+      if (translateNoticeTimerRef.current) window.clearTimeout(translateNoticeTimerRef.current)
+      translateNoticeTimerRef.current = window.setTimeout(() => setTranslateNotice(''), 6000)
+    }
+    if (!translateAllowed) {
+      // Still waiting for the session check: nothing is loaded and nothing is said. A sheet that is open, or a signed-in shopper, is blocked.
+      if (!sessionReady && !accountOpen) return undefined
+      // Blocked: the pick is kept, the hand-written English shows, and Google is taken off the page (one clean reload when it is already there).
+      if (accountOpen) markPortalReopenAccount()
+      import('./portalTranslateController.ts')
+        .then((controller) => {
+          if (cancelled) return
+          if (controller.removePortalGoogleTranslate() === 'clean') {
+            clearPortalReopenAccount()
+            say(copy('translatePaused', 'Translation pauses while you are signed in.', 'ការបកប្រែផ្អាក នៅពេលអ្នកចូលគណនី។'))
+          }
+        })
+        .catch(() => clearPortalReopenAccount())
+      return () => { cancelled = true }
+    }
     // When Google does not translate: the menu goes back to the language the visitor had, the cookie is cleared and one line says so.
     const fallBack = (previous: 'en' | 'km') => {
       if (cancelled) return
@@ -686,10 +712,10 @@ export default function PublicCatalogPage() {
       translateNoticeTimerRef.current = window.setTimeout(() => setTranslateNotice(''), 6000)
     }
     import('./portalTranslateController.ts')
-      .then((controller) => controller.applyPortalGoogleTranslateOrFallBack(pageChoice, { previous: lastPlainChoiceRef.current, restoreChoice: fallBack, showNotice: tellVisitor, isCurrent: () => !cancelled }))
+      .then((controller) => (cancelled ? false : controller.applyPortalGoogleTranslateOrFallBack(pageChoice, { previous: lastPlainChoiceRef.current, restoreChoice: fallBack, showNotice: tellVisitor, isCurrent: () => !cancelled })))
       .catch(() => { fallBack(lastPlainChoiceRef.current); tellVisitor(lastPlainChoiceRef.current) })
     return () => { cancelled = true }
-  }, [pageChoice])
+  }, [pageChoice, translateAllowed, sessionReady, accountOpen])
   useEffect(() => () => { if (translateNoticeTimerRef.current) window.clearTimeout(translateNoticeTimerRef.current) }, [])
 
   const changePageLanguage = (next: string) => {

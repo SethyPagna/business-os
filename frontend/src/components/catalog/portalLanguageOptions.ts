@@ -55,6 +55,46 @@ export function portalCopyLanguage(choice: unknown): PortalLanguage {
   return normalized ? 'en' : PUBLIC_STOREFRONT_DEFAULT_LANGUAGE
 }
 
+/**
+ * Google's translate script runs with full access to the page, so it may run only when the shopper-session check has finished, nobody is
+ * signed in and the Account sheet is closed. Any other state is "blocked": the script is not loaded and, if present, is removed.
+ */
+export function portalTranslateAllowed(state: { sessionReady: boolean; signedIn: boolean; accountOpen: boolean }): boolean {
+  return Boolean(state.sessionReady) && !state.signedIn && !state.accountOpen
+}
+
+// Opening the Account sheet over a translated page reloads the page to take Google off; this one-shot flag brings the sheet back after it.
+export const PORTAL_REOPEN_ACCOUNT_KEY = 'business-os:portal-reopen-account'
+
+function sessionStore(): Storage | null {
+  try {
+    return typeof window !== 'undefined' ? window.sessionStorage ?? null : null
+  } catch {
+    return null
+  }
+}
+
+export function markPortalReopenAccount(): void {
+  try { sessionStore()?.setItem(PORTAL_REOPEN_ACCOUNT_KEY, '1') } catch {}
+}
+
+export function clearPortalReopenAccount(): void {
+  try { sessionStore()?.removeItem(PORTAL_REOPEN_ACCOUNT_KEY) } catch {}
+}
+
+/** True once after markPortalReopenAccount: the flag is read and deleted in the same call, so it can never reopen the sheet twice. */
+export function consumePortalReopenAccount(): boolean {
+  try {
+    const store = sessionStore()
+    if (!store) return false
+    const flagged = store.getItem(PORTAL_REOPEN_ACCOUNT_KEY) === '1'
+    store.removeItem(PORTAL_REOPEN_ACCOUNT_KEY)
+    return flagged
+  } catch {
+    return false
+  }
+}
+
 function readStoredValue(): string {
   if (typeof window === 'undefined') return ''
   try {

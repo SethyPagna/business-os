@@ -73,7 +73,7 @@ check('/login (and below) is the storefront sign-in path, nothing else is', () =
   for (const p of ['/login', '/LOGIN', '/login/', '/login/reset']) assert.equal(routing.isStorefrontSignInPath?.(p), true, p)
   for (const p of ['/', '/loginx', '/admin', '/products']) assert.equal(routing.isStorefrontSignInPath?.(p), false, p)
   const page = fs.readFileSync(new URL('../src/components/catalog/PublicCatalogPage.tsx', import.meta.url), 'utf8')
-  assert.match(page, /useState\(\(\) => typeof window !== 'undefined' && isStorefrontSignInPath\(window\.location\?\.pathname\)\)/, 'arriving on /login opens the account drawer')
+  assert.match(page, /useState\(\(\) => typeof window !== 'undefined' && \(isStorefrontSignInPath\(window\.location\?\.pathname\) \|\| consumePortalReopenAccount\(\)\)\)/, 'arriving on /login opens the account drawer')
 })
 
 check('index.html bootstrap agrees with pathRouting on every host and path', () => {
