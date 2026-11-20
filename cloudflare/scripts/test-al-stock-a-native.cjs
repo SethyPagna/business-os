@@ -38,7 +38,7 @@ const WRAPPER = `
 import worker from './src/index'
 export { SyncUploadSession, BroadcastHub } from './src/index'
 
-const control = { hooks: [], barrier: null, ackLoss: [], queueStatements: 0 }
+const control = { hooks: [], barrier: null, ackLoss: [], queueStatements: 0, kvPuts: {} }
 const rawFetch = (request, env, ctx) => worker.fetch(request, env, ctx)
 function matches(pattern, sqls) { const re = new RegExp(pattern, 'i'); return sqls.some(sql => re.test(sql)) }
 
@@ -96,6 +96,8 @@ function instrument(rawEnv, ctx, counter) {
   const pending = []
   const env = { ...rawEnv, __raw: rawEnv }
   env.DB = wrapDb(rawEnv.DB, counter, env)
+  // Every KV put is counted by key, so a version bump is counted by how many times it wrote the version key (the value is unique per put, so it cannot say how many).
+  env.CACHE = new Proxy(rawEnv.CACHE, { get(target, prop) { const value = target[prop]; if (prop === 'put') return (key, ...rest) => { control.kvPuts[key] = (control.kvPuts[key] || 0) + 1; return target.put(key, ...rest) }; return typeof value === 'function' ? value.bind(target) : value } })
   const ctx2 = { waitUntil(p) { pending.push(Promise.resolve(p).catch(() => {})); try { ctx.waitUntil(p) } catch (e) {} }, passThroughOnException() {} }
   env.__ctx = ctx2
   return { env, ctx2, pending }
@@ -136,6 +138,7 @@ async function control_(url, request) {
     case '/__al/ackloss': control.ackLoss = (body.faults || []).map(f => ({ ...f, hits: 0 })); return Response.json({ ok: true })
     case '/__al/ackloss/result': return Response.json(control.ackLoss)
     case '/__al/reset': control.hooks = []; control.barrier = null; control.ackLoss = []; return Response.json({ ok: true })
+    case '/__al/kv-puts': return Response.json(control.kvPuts)
     case '/__al/queue-statements': return Response.json({ n: control.queueStatements })
     default: return new Response('unknown', { status: 404 })
   }
@@ -268,6 +271,7 @@ async function world({ patches = [], plan = 'paid' } = {}) {
   }
   H.settle = (ms = 250) => new Promise(resolve => setTimeout(resolve, ms))
   H.syncFrames = (since = 0) => H.frames.slice(since).filter(f => f.type === 'sync:update')
+  H.versionPuts = async (ns = 'products') => Number((await H.controlGet('kv-puts'))['v2:' + ns] || 0)
   H.cacheVersion = async (ns = 'products') => Number((await kv.get('v2:' + ns)) || 0)
   H.q = async (sql, ...bind) => (await db.prepare(sql).bind(...bind).all()).results
   H.q1 = async (sql, ...bind) => (await db.prepare(sql).bind(...bind).first())
@@ -326,6 +330,7 @@ function finish(finding) {
 //   --wrong=no-replay           mutant: a completed receipt is no longer replayed
 //   --wrong=retrying-batch      mutant: the removal batch goes through the retrying db.batch instead of batchOnce, so a
 //                               lost acknowledgement re-runs it (A4 must catch the answer "nothing was changed")
+//   --wrong=double-bump         mutant: bumpVersion writes the version key twice (A1 and A3 must catch it by counting KV puts)
 //   --wrong=no-completion       mutant: the removal batch carries the bare written mark, not the completed receipt, so a
 //                               retry after a lost acknowledgement is told "partially applied" (A4b must catch it)
 // ============================================================================================
@@ -345,6 +350,11 @@ const PATCHES = {
     { name: 'retrying-batch', file: 'src/lib/stockMutationReceipt.ts',
       from: '  if (mark && db.batchOnce) await db.batchOnce(batch)',
       to: '  if (false) await db.batchOnce(batch)' },
+  ],
+  'double-bump': [
+    { name: 'double-bump', file: 'src/lib/cache.ts',
+      from: '  return bumpVersions(env, [namespace])\n}',
+      to: '  await bumpVersions(env, [namespace])\n  return bumpVersions(env, [namespace])\n}' },
   ],
   'no-completion': [
     { name: 'no-completion', file: INVENTORY,
@@ -379,6 +389,7 @@ async function snap(H, s) {
     movements: (await H.q('SELECT movement_type t, quantity q, batch_id b, branch_id br, addressed_branch_name ab FROM inventory_movements WHERE product_id=? ORDER BY id', s.p)),
     receipts: (await H.q("SELECT request_id id, written w, response_status st, completed_at c FROM stock_mutation_receipts WHERE request_id LIKE ? ORDER BY request_id", 'al-a-' + s.p + '-%')),
     cache: await H.cacheVersion('products'),
+    cachePuts: await H.versionPuts('products'),
     frameMark: frames,
   }
 }
@@ -418,7 +429,8 @@ async function main() {
       t.eq('branch_stock 10 -> 6', after.branch, 6)
       t.eq('products.stock_quantity 10 -> 6', after.product, 6)
       t.eq('one movement, remove 4, attributed to lot B', after.movements.map(m => [m.t, m.q, m.b]), [['remove', 4, s.lotB]])
-      t.eq('products cache version bumped (a bump writes a unique value above the old one, so the size of the step is no longer 1)', after.cache > before.cache, true)
+      t.eq('products cache version bumped (above the old value)', after.cache > before.cache, true)
+      t.eq('products cache version bumped exactly once (one KV put to the version key)', after.cachePuts - before.cachePuts, 1)
       t.eq('live-update frames for this product (products + inventory)', H.syncFrames(before.frameMark).filter(f => f.payload && f.payload.id === s.p).length, 2)
       t.eq('receipt completed', after.receipts.map(x => [x.w, x.st]), [[1, 200]])
       t.note('D1 statements for this request: ' + r.d1 + ' (Free limit 50, Paid limit 1000)')
@@ -471,6 +483,7 @@ async function main() {
       t.eq('products.stock_quantity (10 - 4)', after.product, 6)
       t.eq('exactly one movement of 4', after.movements.map(m => [m.t, m.q]), [['remove', 4]])
       t.eq('cache version bumped (one effective removal)', after.cache > before.cache, true)
+      t.eq('cache version bumped exactly once (one KV put to the version key)', after.cachePuts - before.cachePuts, 1)
       ledgers(t, 'ledgers:', before, after)
       t.note('statuses ' + JSON.stringify([r1.status, r2.status]) + '; bodies ' + JSON.stringify([r1.body.error || r1.body.success, r2.body.error || r2.body.success]))
     })
@@ -551,6 +564,7 @@ async function main() {
       ledgers(t, 'after the failed request:', before, mid)
       const changedStock = before.lotA !== mid.lotA || before.branch !== mid.branch || before.product !== mid.product
       t.eq('cache version follows stock (bumped iff stock changed)', mid.cache > before.cache, Boolean(changedStock))
+      t.eq('version key written once iff stock changed (KV puts)', mid.cachePuts - before.cachePuts, changedStock ? 1 : 0)
       t.ok('the failed request is not reported as a success', r.status >= 400, r.status)
       t.ok('after the fault clears the SAME request id can complete exactly once (or was already complete)', after.lotA === 1 && after.branch === 6 && after.product === 6 && after.movements.length === 1,
         { lotA: after.lotA, branch: after.branch, product: after.product, movements: after.movements.length, retryStatus: retry.status, retryBody: retry.body.code || retry.body.error })
