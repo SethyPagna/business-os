@@ -10,6 +10,7 @@ import Bell from 'lucide-react/dist/esm/icons/bell.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp as useAppHook } from './AppContext.tsx'
 import { NotesProvider } from './components/notes/NotesContext.tsx'
+import { useToastStack } from './app/useToastStack.ts'
 import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, resolveAdminLandingPage, updateMountedPages } from './app/appShellUtils.ts'
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.ts'
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.ts'
@@ -1087,27 +1088,50 @@ class PageErrorBoundary extends Component<PageErrorBoundaryProps, PageErrorBound
 
 function Notification({ notification, onDismiss }: NotificationProps) {
   const { t } = useApp()
-  // Toast notifications are rendered once here so feature pages only need to
-  // enqueue messages through AppContext.
-  if (!notification) return null
-
-  const colorClass = getNotificationColor(notification.type)
-  const prefix = getNotificationPrefix(notification.type)
-  const classes = `fixed right-3 top-[4.75rem] md:right-5 md:top-5 z-[1100] ${colorClass} text-white pl-4 pr-2.5 py-3 rounded-xl shadow-2xl text-sm font-medium fade-in max-w-[min(20rem,calc(100vw-1.5rem))] flex items-start gap-2`
+  // Every pop-up is drawn here, so feature pages only enqueue messages through AppContext.
+  // The whole message always shows (no clamp): an alert is read for ten seconds, not guessed at.
+  const { visible, dismiss, pause, resume } = useToastStack(notification)
+  if (!visible.length) return null
 
   const node = (
-    <div className={classes}>
-      <span className="flex-1 min-w-0 break-words">{prefix}{notification.message}</span>
-      <button
-        type="button"
-        aria-label={t('dismiss_notification')}
-        onClick={onDismiss}
-        className="shrink-0 -mt-0.5 -mr-0.5 rounded-full p-1 leading-none text-white/80 hover:text-white hover:bg-white/15 transition-colors"
-      >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M1 1L13 13M13 1L1 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-        </svg>
-      </button>
+    <div className="fixed right-3 top-[4.75rem] md:right-5 md:top-5 z-[1100] flex w-[min(24rem,calc(100vw-1.5rem))] flex-col gap-2">
+      {visible.map((toast) => {
+        const colorClass = getNotificationColor(toast.type)
+        const prefix = getNotificationPrefix(toast.type)
+        const text = <span className="min-w-0 flex-1 break-words text-left leading-relaxed">{prefix}{toast.message}</span>
+        return (
+          <div
+            key={toast.key}
+            role={toast.type === 'error' ? 'alert' : 'status'}
+            aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
+            onMouseEnter={() => pause(toast.key)}
+            onMouseLeave={() => resume(toast.key)}
+            onFocus={() => pause(toast.key)}
+            onBlur={() => resume(toast.key)}
+            className={`${colorClass} text-white pl-4 pr-2.5 py-3 rounded-xl shadow-2xl text-sm font-medium fade-in flex items-start gap-2`}
+          >
+            {toast.onActivate ? (
+              <button
+                type="button"
+                className="flex min-w-0 flex-1 items-start text-left"
+                onClick={() => { toast.onActivate?.(); dismiss(toast.key) }}
+              >
+                {text}
+              </button>
+            ) : text}
+            <button
+              type="button"
+              aria-label={t('dismiss_notification')}
+              onClick={() => { dismiss(toast.key); if (toast.fromSlot) onDismiss?.() }}
+              className="shrink-0 -mt-0.5 -mr-0.5 rounded-full p-1 leading-none text-white/80 hover:text-white hover:bg-white/15 transition-colors"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M1 1L13 13M13 1L1 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
+        )
+      })}
     </div>
   )
   return typeof document !== 'undefined' ? createPortal(node, document.body) : node

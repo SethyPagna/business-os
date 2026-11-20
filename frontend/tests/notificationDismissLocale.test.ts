@@ -23,9 +23,14 @@ let language = 'en'
 let portalCalls = 0
 const translate = (key: string) => packs[language][key] ?? key
 function load(browser: boolean): (props: ToastProps) => ToastNode {
-  return new Function('React', 'useApp', 'getNotificationColor', 'getNotificationPrefix', 'createPortal', 'document', compiled + '\nreturn Notification')(
+  const useToastStack = (slot: { type: string; message: string } | null) => ({
+    visible: slot ? [{ key: 'k', message: slot.message, type: slot.type, duration: 1, fromSlot: true }] : [],
+    dismiss() {}, pause() {}, resume() {},
+  })
+  return new Function('React', 'useApp', 'useToastStack', 'getNotificationColor', 'getNotificationPrefix', 'createPortal', 'document', compiled + '\nreturn Notification')(
     React,
     () => ({ t: translate }),
+    useToastStack,
     () => 'bg-red-700',
     () => '! ',
     (node: ToastNode) => { portalCalls++; return node },
@@ -40,7 +45,8 @@ for (const browser of [false, true]) {
     let dismissed = 0
     const node = Notification({ notification: { type: 'error', message: 'Saved draft remains available' }, onDismiss: () => { dismissed++ } })
     assert.ok(node)
-    const button = React.Children.toArray(node.props.children).find(child => React.isValidElement(child) && child.type === 'button') as import('react').ReactElement<{ 'aria-label': string; type: string; onClick: () => void }> | undefined
+    const toastNode = React.Children.toArray(node.props.children)[0] as import('react').ReactElement<{ children: import('react').ReactNode }>
+    const button = React.Children.toArray(toastNode.props.children).find(child => React.isValidElement(child) && child.type === 'button') as import('react').ReactElement<{ 'aria-label': string; type: string; onClick: () => void }> | undefined
     assert.ok(button)
     assert.equal(button.props['aria-label'], expected, language + ': actual toast dismiss control follows the active pack')
     assert.equal(button.props.type, 'button')

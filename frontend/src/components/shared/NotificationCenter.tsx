@@ -13,6 +13,14 @@ import Search from 'lucide-react/dist/esm/icons/search.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../app/AppContextCore.tsx'
+import { emitToast, NOTIFICATION_ALERT_MS } from '../../app/appShellUtils.ts'
+import {
+  pickAlertsToAnnounce,
+  planAlertPopups,
+  readAnnouncedAlertTimes,
+  toastTypeForTone,
+  writeAnnouncedAlertTimes,
+} from './notificationAlerts.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -456,6 +464,10 @@ function writeSeenTails(tails: Record<string, SeenTail>): void {
   }
 }
 
+function sectionRank(id: string): number {
+  return id === 'security' ? -1 : id === 'imports' ? 1 : 0
+}
+
 function matchesVisibilityMode(mode: VisibilityMode): boolean {
   if (typeof window === 'undefined' || !window.matchMedia) return true
   if (mode === 'desktop') return window.matchMedia('(min-width: 768px)').matches
@@ -531,6 +543,9 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   // genuinely different data sources.
   const [importJobsSection, setImportJobsSection] = useState<NotificationSection | null>(null)
   const [reportJobId, setReportJobId] = useState<string | null>(null)
+  // The bell item a pop-up sent the person to: scrolled to, focused and ringed once the panel is open.
+  const [focusItemId, setFocusItemId] = useState('')
+  const announcedAlertTimesRef = useRef<Record<string, number> | null>(null)
   // Bumped to force `badgeVisibleCount` to recompute once a suppressed
   // alert's realert window elapses -- see the scheduling effect below.
   // Carries no data of its own.
@@ -854,7 +869,8 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
         enabled: preferenceValue(section.enabledKey, settings, true),
       }
     }).filter((section) => section.filteredItemCount > 0 || (toneFilter === 'all' && !normalizedNotificationSearch))
-      .sort((a, b) => (a.id === 'security' ? -1 : b.id === 'security' ? 1 : 0))
+      // Worker-computed sections stand until their cause is fixed, so they sit above the client-composed Imports history.
+      .sort((a, b) => sectionRank(a.id) - sectionRank(b.id))
   ), [fullSectionItems, importJobsSection, itemLimit, normalizedNotificationSearch, renderStructuredCopy, sectionPages, settings, summary.sections, toneFilter, tr])
 
   // Silent indicator: a pending device approve/reject/revoke request (or a
@@ -942,6 +958,67 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   ), [fullSectionItems, summary.sections])
 
   const realertMinutes = Math.max(1, Number(summary.preferences?.realertMinutes) || 10)
+
+  // A bell item this device has not announced pops up once, in full, for ten seconds (an alert pop-up is
+  // never stored anywhere). More than three new ones in one load become a single "N alerts need
+  // attention". The Settings repeat interval decides when an old unresolved item may pop up again.
+  useEffect(() => {
+    if (!visibilityActive || open || summary.unavailable || typeof document === 'undefined' || document.visibilityState === 'hidden') return
+    if (!announcedAlertTimesRef.current) announcedAlertTimesRef.current = readAnnouncedAlertTimes()
+    const announced = announcedAlertTimesRef.current
+    const rows = (summary.sections || []).flatMap((section) => (section.items || []).map((item) => ({ item, sectionId: section.id })))
+    const now = Date.now()
+    const fresh = pickAlertsToAnnounce(rows.map((row) => row.item), seenAlertTimes, announced, now, realertMinutes * 60000, seenSecurityIds)
+    if (!fresh.length) return
+    for (const item of fresh) announced[item.id] = now
+    writeAnnouncedAlertTimes(announced)
+    const openOn = (itemId: string, sectionId?: string) => {
+      setToneFilter('all')
+      setNotificationSearch('')
+      if (sectionId) setCollapsed((current) => ({ ...current, [sectionId]: false }))
+      setFocusItemId(itemId)
+      setOpen(true)
+      void loadSummary(true)
+    }
+    const plan = planAlertPopups(fresh)
+    if (plan.kind === 'many') {
+      emitToast({
+        message: formatCopy('notification_alerts_need_attention', { count: plan.count }, `${plan.count} alerts need attention`, `${plan.count} ការជូនដំណឹងត្រូវដោះស្រាយ`),
+        type: 'warning',
+        duration: NOTIFICATION_ALERT_MS,
+        onActivate: () => openOn(''),
+      })
+      return
+    }
+    if (plan.kind !== 'each') return
+    for (const item of plan.items) {
+      const sectionId = rows.find((row) => row.item.id === item.id)?.sectionId
+      const title = item.labelKey ? tr(item.labelKey, item.label || '') : (item.label || '')
+      const detail = item.metaKey ? renderStructuredCopy(item.metaKey, item.metaParams, item.meta || '') : (item.meta || '')
+      emitToast({
+        message: [title, detail].filter(Boolean).join(': '),
+        type: toastTypeForTone(item.tone),
+        duration: NOTIFICATION_ALERT_MS,
+        onActivate: () => openOn(item.id, sectionId),
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [summary.sections, visibilityActive])
+
+  useEffect(() => {
+    if (!open) {
+      if (focusItemId) setFocusItemId('')
+      return undefined
+    }
+    if (!focusItemId) return undefined
+    const frame = window.requestAnimationFrame(() => {
+      const target = Array.from(document.querySelectorAll<HTMLElement>('[data-notification-item-id]')).find((node) => node.dataset.notificationItemId === focusItemId)
+      target?.scrollIntoView({ block: 'center' })
+      target?.focus()
+    })
+    return () => window.cancelAnimationFrame(frame)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, focusItemId])
 
   // "Opening notifications clears the badge" (Settings.tsx copy): stamp
   // every currently-listed alert with "seen now" once the panel opens.
@@ -1233,6 +1310,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
                             <button
                               key={item.id}
                               type="button"
+                              data-notification-item-id={item.id}
                               onClick={() => {
                                 if (item.kind === 'import_job' && item.importJobId) {
                                   setReportJobId(item.importJobId)
@@ -1242,7 +1320,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
                                 navigateTo(item.pageId || section.pageId || 'dashboard', item.anchor)
                                 setOpen(false)
                               }}
-                              className="flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left transition hover:bg-slate-100 dark:hover:bg-slate-800"
+                              className={`flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left transition hover:bg-slate-100 dark:hover:bg-slate-800 ${focusItemId === item.id ? 'ring-2 ring-blue-400' : ''}`}
                             >
                               {(() => {
                                 const itemTone = item.tone || 'info'
@@ -1255,6 +1333,17 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
                                 <span className="block truncate text-sm font-medium text-slate-800 dark:text-slate-100">{item.displayLabel}</span>
                                 <span className="block text-xs text-slate-500 dark:text-slate-400">{item.displayMeta}</span>
                               </span>
+                              {section.id !== 'imports' && item.kind !== 'import_job' ? (
+                                <span
+                                  data-notification-pin
+                                  role="img"
+                                  className="mt-0.5 inline-flex shrink-0 text-slate-400 dark:text-slate-500"
+                                  title={tr('notification_pinned_hint', 'Stays until fixed', 'នៅរហូតដល់បានដោះស្រាយ')}
+                                  aria-label={tr('notification_pinned_hint', 'Stays until fixed', 'នៅរហូតដល់បានដោះស្រាយ')}
+                                >
+                                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 17v5" /><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" /></svg>
+                                </span>
+                              ) : null}
                               <ExternalLink className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-slate-300" />
                             </button>
                           ))}
