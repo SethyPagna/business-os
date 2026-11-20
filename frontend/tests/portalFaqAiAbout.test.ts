@@ -88,7 +88,7 @@ runTest('FAQ: answers keep their line breaks (pre-line, leading-7)', () => {
 runTest('FAQ: one column, hairline rows, brass chevron, no gradient tiles or repeated FAQ label', () => {
   const out = html(faqProps({ expandedFaqId: '0:faq-1' }))
   assert.match(out, /max-w-3xl/)
-  assert.match(out, /border-b border-stone-200/, 'hairline rows')
+  assert.match(out, /border-t border-stone-200/, 'hairline rows inside the one list surface')
   assert.match(out, /text-\[#9c7a3c\]/, 'brass chevron')
   assert.match(out, /text-\[15px\] font-semibold/, 'question is 15px semibold')
   assert.doesNotMatch(out, /data-portal-faq-columns|from-cyan|from-amber|bg-gradient-to-br|cyan-|tracking-\[0\.16em\]/)
@@ -135,10 +135,10 @@ runTest('FAQ: search filters question and answer text, case-insensitively, Khmer
   assert.equal(filterFaqEntries(entries, 'zzz').length, 0)
 })
 
-runTest('FAQ: no match shows the query with a Clear button; a matching query keeps the rows', () => {
+runTest('FAQ: no match shows the query with an icon-only Clear button; a matching query keeps the rows', () => {
   const none = renderToStaticMarkup(React.createElement(FaqList, listProps({ items: makeItems(8), query: 'zzz' }) as never) as never)
   assert.match(none, /No question matches &quot;zzz&quot;/)
-  assert.match(none, />Clear</)
+  assert.match(none, /aria-label="Clear"[^>]*title="Clear"/)
   assert.doesNotMatch(none, /Question number 1\?/)
   const some = renderToStaticMarkup(React.createElement(FaqList, listProps({ items: makeItems(8), query: 'number 3' }) as never) as never)
   assert.match(some, /Question number 3\?/)
@@ -152,7 +152,7 @@ runTest('FAQ: loading is a 4-row skeleton; empty is a contact card', () => {
   assert.equal((loading.match(/min-h-\[3\.75rem\]/g) || []).length, 4)
   const empty = html(faqProps({ publicFaqItems: [], onOpenContact: () => {} }))
   assert.match(empty, /No questions yet\./)
-  assert.match(empty, /Contact us/)
+  assert.match(empty, />Contact</)
   assert.doesNotMatch(empty, /any time/, 'the retired promise is gone')
 })
 
@@ -167,7 +167,7 @@ runTest('FAQ: the closing card calls the open-contact callback and is absent wit
     if (!node || typeof node !== 'object') return
     const element = node as { type?: unknown; props?: { children?: unknown; onClick?: () => void } }
     if (element.type === 'button' || (typeof element.type === 'function' && element.props?.onClick)) buttons.push(element.props as { onClick?: () => void })
-    if (typeof element.type === 'function' && element.type.name === 'FaqContactButton') {
+    if (typeof element.type === 'function' && element.type.name === 'PortalContactButton') {
       const rendered = (element.type as (p: unknown) => unknown)(element.props)
       walk(rendered)
     }

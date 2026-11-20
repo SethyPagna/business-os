@@ -225,6 +225,9 @@ const BRASS_TEXT = 'text-[#9c7a3c] dark:text-amber-300'
 const CHARCOAL_BUTTON = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-[#23201b] px-5 text-sm font-semibold text-[#f4f1ea] transition hover:bg-[#3a352c] dark:bg-amber-300 dark:text-neutral-900 dark:hover:bg-amber-200'
 const SURFACE = 'border border-stone-300 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900'
 const ICON_BUTTON = 'flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-stone-600 transition hover:bg-stone-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
+// The field recipe (spec section 1). The line is stone-500 / neutral-500, not the stone-400 / neutral-600 the recipe first named: those reach
+// only 2.5:1 on a white card and 2.4:1 on the dark one, and a field line must reach 3:1 on the page and on the card.
+const FIELD = 'border border-stone-500 bg-white text-[#23201b] placeholder:text-stone-500 focus-visible:border-[#7a5c22] dark:border-neutral-500 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-400 dark:focus-visible:border-amber-300'
 
 // The one Contact entry point on this page: the page's own contact callback, icon and one word.
 function PortalContactButton({ copy, onOpenContact }: { copy: CopyFn; onOpenContact?: () => void }) {
@@ -550,21 +553,11 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
   )
 }
 
-function FaqContactButton({ copy, onOpenContact }: { copy: CopyFn; onOpenContact?: () => void }) {
-  if (!onOpenContact) return null
-  return (
-    <button type="button" className={CHARCOAL_BUTTON} onClick={onOpenContact}>
-      <MessageCircle aria-hidden="true" className="h-4 w-4" />
-      {copy('contactUs', 'Contact us', 'ទាក់ទងយើង')}
-    </button>
-  )
-}
-
 function FaqSkeleton() {
   return (
-    <div className="mx-auto w-full max-w-3xl" data-portal-faq-skeleton="true" aria-busy="true">
+    <div className={`mx-auto w-full max-w-3xl rounded-2xl px-4 ${SURFACE}`} data-portal-faq-skeleton="true" aria-busy="true">
       {[0, 1, 2, 3].map((row) => (
-        <div key={row} className="flex min-h-[3.75rem] items-center border-b border-stone-200 dark:border-neutral-700">
+        <div key={row} className={`flex min-h-[3.75rem] items-center ${row ? 'border-t border-stone-200 dark:border-neutral-700' : ''}`}>
           <span className="h-4 rounded-full bg-stone-200 motion-safe:animate-pulse dark:bg-neutral-700" style={{ width: `${86 - row * 11}%` }} />
         </div>
       ))}
@@ -591,10 +584,9 @@ export function FaqList(props: {
   if (loading) return <FaqSkeleton />
   if (!entries.length) {
     return (
-      <div className="mx-auto w-full max-w-3xl rounded-2xl border border-stone-200 bg-white p-6 text-center dark:border-neutral-700 dark:bg-neutral-900/90">
-        <p className="text-sm font-semibold text-[#23201b] dark:text-neutral-100">{copy('faqEmptyNone', 'No questions yet.', 'មិនទាន់មានសំណួរនៅឡើយទេ។')}</p>
-        <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-neutral-300">{copy('faqStillBody', 'Ask our team and we will answer.', 'សួរក្រុមការងាររបស់យើង ហើយយើងនឹងឆ្លើយ។')}</p>
-        <div className="mt-4 flex justify-center"><FaqContactButton copy={copy} onOpenContact={onOpenContact} /></div>
+      <div className={`mx-auto flex w-full max-w-3xl flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3 ${SURFACE}`}>
+        <p className="min-w-0 text-sm font-semibold leading-7 text-[#23201b] dark:text-neutral-100">{copy('faqEmptyNone', 'No questions yet.', 'មិនទាន់មានសំណួរនៅឡើយទេ។')}</p>
+        <PortalContactButton copy={copy} onOpenContact={onOpenContact} />
       </div>
     )
   }
@@ -602,8 +594,8 @@ export function FaqList(props: {
   return (
     <div className="mx-auto w-full max-w-3xl" data-portal-faq-list="true">
       {searchable ? (
-        <div className="relative mb-2">
-          <Search aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 dark:text-neutral-400" />
+        <div className="relative mb-3">
+          <Search aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-600 dark:text-neutral-300" />
           <input
             type="search"
             name="portal_faq_search"
@@ -612,12 +604,12 @@ export function FaqList(props: {
             onChange={(event) => setQuery(event.target.value)}
             aria-label={copy('faqSearch', 'Search questions', 'ស្វែងរកសំណួរ')}
             placeholder={copy('faqSearch', 'Search questions', 'ស្វែងរកសំណួរ')}
-            className="h-11 w-full rounded-full border border-stone-300 bg-white pl-10 pr-11 text-sm text-[#23201b] placeholder:text-slate-500 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-400"
+            className={`h-11 w-full rounded-xl pl-10 pr-11 text-sm ${FIELD}`}
           />
           {query ? (
             <button
               type="button"
-              className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-slate-600 dark:text-neutral-300"
+              className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-stone-600 dark:text-neutral-300"
               aria-label={copy('clear', 'Clear', 'សម្អាត')}
               title={copy('clear', 'Clear', 'សម្អាត')}
               onClick={() => setQuery('')}
@@ -629,16 +621,16 @@ export function FaqList(props: {
       ) : null}
 
       {visible.length ? (
-        <ul className="m-0 list-none p-0">
+        <ul className={`m-0 list-none overflow-hidden rounded-2xl p-0 ${SURFACE}`}>
           {visible.map(({ item, index, key }) => {
             const open = expandedFaqId === key
             const answerId = `portal-faq-answer-${index}`
             return (
-              <li key={key} className="border-b border-stone-200 dark:border-neutral-700">
+              <li key={key} className="border-t border-stone-200 first:border-t-0 dark:border-neutral-700">
                 <h3 className="m-0">
                   <button
                     type="button"
-                    className="flex min-h-11 w-full items-start justify-between gap-3 py-4 text-left"
+                    className="flex min-h-11 w-full items-start justify-between gap-3 px-4 py-3.5 text-left transition hover:bg-stone-50 dark:hover:bg-neutral-800"
                     aria-expanded={open}
                     aria-controls={open ? answerId : undefined}
                     onClick={() => setExpandedFaqId((current) => nextOpenFaqKey(current, key))}
@@ -655,7 +647,7 @@ export function FaqList(props: {
                 {open ? (
                   <div
                     id={answerId}
-                    {...getKhmerTextProps(item.answer, 'whitespace-pre-line pb-4 pr-8 text-sm leading-7 text-slate-700 [overflow-wrap:anywhere] dark:text-neutral-300')}
+                    {...getKhmerTextProps(item.answer, 'whitespace-pre-line px-4 pb-4 pr-10 text-sm leading-7 text-stone-700 [overflow-wrap:anywhere] dark:text-neutral-300')}
                     style={{ lineHeight: 1.8 }}
                   >
                     {item.answer}
@@ -666,19 +658,18 @@ export function FaqList(props: {
           })}
         </ul>
       ) : (
-        <div className="flex flex-wrap items-center gap-3 border-b border-stone-200 py-5 text-sm text-slate-700 dark:border-neutral-700 dark:text-neutral-300" role="status">
-          <span className="min-w-0 [overflow-wrap:anywhere]">{copy('faqNoMatch', 'No question matches "{query}"', 'គ្មានសំណួរត្រូវនឹង "{query}" ទេ').replace('{query}', activeQuery)}</span>
-          <button type="button" className="inline-flex min-h-11 items-center rounded-full border border-stone-300 px-4 text-sm font-semibold text-[#23201b] dark:border-neutral-600 dark:text-neutral-100" onClick={() => setQuery('')}>
-            {copy('clear', 'Clear', 'សម្អាត')}
+        <div className={`flex flex-wrap items-center gap-3 rounded-2xl px-4 py-3 text-sm text-stone-700 dark:text-neutral-300 ${SURFACE}`} role="status">
+          <span className="min-w-0 flex-1 leading-7 [overflow-wrap:anywhere]">{copy('faqNoMatch', 'No question matches "{query}"', 'គ្មានសំណួរត្រូវនឹង "{query}" ទេ').replace('{query}', activeQuery)}</span>
+          <button type="button" className={ICON_BUTTON} aria-label={copy('clear', 'Clear', 'សម្អាត')} title={copy('clear', 'Clear', 'សម្អាត')} onClick={() => setQuery('')}>
+            <X aria-hidden="true" className="h-4 w-4" />
           </button>
         </div>
       )}
 
       {onOpenContact ? (
-        <div className="mt-8 rounded-2xl border border-stone-200 bg-white p-6 text-center dark:border-neutral-700 dark:bg-neutral-900/90" data-portal-faq-contact="true">
-          <p className="text-base font-semibold text-[#23201b] dark:text-neutral-100">{copy('faqStillHeading', 'Still have a question?', 'នៅមានសំណួរទៀតទេ?')}</p>
-          <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-neutral-300">{copy('faqStillBody', 'Ask our team and we will answer.', 'សួរក្រុមការងាររបស់យើង ហើយយើងនឹងឆ្លើយ។')}</p>
-          <div className="mt-4 flex justify-center"><FaqContactButton copy={copy} onOpenContact={onOpenContact} /></div>
+        <div className={`mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3 ${SURFACE}`} data-portal-faq-contact="true">
+          <p className="min-w-0 text-base font-semibold leading-8 text-[#23201b] dark:text-neutral-100">{copy('faqStillHeading', 'Still have a question?', 'នៅមានសំណួរទៀតទេ?')}</p>
+          <PortalContactButton copy={copy} onOpenContact={onOpenContact} />
         </div>
       ) : null}
     </div>
@@ -690,10 +681,7 @@ function CatalogFaqSection(props: CatalogFaqSectionProps) {
   const [query, setQuery] = useState('')
 
   return (
-    <SectionShell
-      title={previewConfig.faqTitle || copy('faq', 'FAQ')}
-      subtitle={copy('faqHint', 'Quick answers to common questions.')}
-    >
+    <SectionShell title={previewConfig.faqTitle || copy('faq', 'FAQ')}>
       <FaqList
         copy={copy}
         items={publicFaqItems}

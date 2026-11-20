@@ -132,7 +132,7 @@ run('the map keeps its consent gate, in one line, and fills the card it is given
 
 run('every surface on the About page is solid: no opacity suffix, no blur, no transparent fill, in light or dark', () => {
   const solid = /(?:\b(?:dark:)?(?:hover:)?(?:bg|border|ring|from|via|to|divide|shadow)-[\w[\]#.,()-]+\/\d+|backdrop-blur[\w-]*|bg-transparent|\bopacity-\d+)/g
-  assert.deepEqual([between(tabs, 'const BRASS_TEXT', 'function FaqContactButton('), consent].flatMap((part) => part.match(solid) || []), [])
+  assert.deepEqual([between(tabs, 'const BRASS_TEXT', 'function FaqSkeleton('), consent].flatMap((part) => part.match(solid) || []), [])
 })
 
 if (failed) {
