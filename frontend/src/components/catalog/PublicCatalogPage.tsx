@@ -686,7 +686,7 @@ export default function PublicCatalogPage() {
       translateNoticeTimerRef.current = window.setTimeout(() => setTranslateNotice(''), 6000)
     }
     import('./portalTranslateController.ts')
-      .then((controller) => controller.applyPortalGoogleTranslateOrFallBack(pageChoice, { previous: lastPlainChoiceRef.current, restoreChoice: fallBack, showNotice: tellVisitor }))
+      .then((controller) => controller.applyPortalGoogleTranslateOrFallBack(pageChoice, { previous: lastPlainChoiceRef.current, restoreChoice: fallBack, showNotice: tellVisitor, isCurrent: () => !cancelled }))
       .catch(() => { fallBack(lastPlainChoiceRef.current); tellVisitor(lastPlainChoiceRef.current) })
     return () => { cancelled = true }
   }, [pageChoice])

@@ -28,8 +28,10 @@ function spacingRem(classes: string, utility: 'h' | 'gap' | 'py'): number {
   assert.ok(match, `expected ${utility}-* in: ${classes.slice(0, 140)}`)
   return Number(match[1]) * REM_PER_SPACING_UNIT
 }
+// A stack may also ride above the install notice: `+var(--install-band-clearance,0px)`. The page root pads its end by that same amount
+// (asserted below), so the stack keeps its distance from the page end and the rem figure is still the whole reserve.
 function calcRem(classes: string, utility: string): number | null {
-  const match = new RegExp(`(?:^|\\s)${utility}-\\[calc\\((\\d+(?:\\.\\d+)?)rem\\+env\\(safe-area-inset-bottom\\)\\)\\]`).exec(classes)
+  const match = new RegExp(`(?:^|\\s)${utility}-\\[calc\\((\\d+(?:\\.\\d+)?)rem\\+env\\(safe-area-inset-bottom\\)(?:\\+var\\(--install-band-clearance,0px\\))?\\)\\]`).exec(classes)
   return match ? Number(match[1]) : null
 }
 function bottomRem(classes: string, variant = ''): number {
@@ -65,5 +67,10 @@ const reserve = (variant: string) => calcRem(publicOnly[1], `${variant}pb`) ?? 0
 assert.ok(reserve('') >= tallestRem, `the storefront ends ${reserve('')}rem above the safe area; its tallest floating stack reaches ${tallestRem}rem ${JSON.stringify(floatingTopsRem)}`)
 assert.ok(reserve('sm:') >= tallestRem, `from 640px sm:py-4 replaces the phone reserve, so sm: must keep it (${reserve('sm:')}rem)`)
 assert.doesNotMatch(shellClasses.replace(publicOnly[0], ''), /pb-\[calc/, 'the editor preview has no floating buttons, so it keeps its own padding')
+// The install notice (iOS Safari) is pinned to the bottom. The page ends that much higher, and both stacks on its side ride above it.
+assert.match(publicPage, /className="relative pb-\[var\(--install-band-clearance,0px\)\]"/, 'the page pads its end by what the install notice covers')
+assert.match(scrollWrapper, /(?:^|\s)bottom-\[calc\(1\.25rem\+env\(safe-area-inset-bottom\)\+var\(--install-band-clearance,0px\)\)\]/, 'the scroll buttons ride above the notice on a phone')
+assert.match(scrollWrapper, /sm:bottom-\[calc\(1\.5rem\+env\(safe-area-inset-bottom\)\+var\(--install-band-clearance,0px\)\)\]/, 'and from sm, where the notice takes their corner')
+assert.match(bucketClasses, /max-\[639px\]:bottom-\[max\(calc\(1\.25rem\+env\(safe-area-inset-bottom\)\),calc\(var\(--install-band-clearance,0px\)\+0\.5rem\)\)\]/, 'My List rides above the notice on a phone')
 
 console.log(`storefrontFooterClearance: the storefront ends ${reserve('')}rem above the safe area, clearing its tallest floating stack (${tallestRem}rem)`)

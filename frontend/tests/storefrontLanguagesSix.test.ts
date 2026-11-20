@@ -258,6 +258,29 @@ await check('the notice is real Khmer and real English, and a successful pick sh
   assert.equal(seen.notice, '')
 })
 
+await check('a late failure of an attempt the page has already replaced changes nothing: no menu reset, no notice, no reload', async () => {
+  // French is picked, then Spanish before Google loads. When the French attempt gives up, the page is on Spanish: the old attempt must
+  // not put the menu back, clear the cookie Spanish needs, or reload a page Spanish may already have translated (re-check R1).
+  const { appended, cookies, timers } = installFakeBrowser('leangbeauty.com')
+  let reloads = 0
+  ;(globals.window as { location: { reload?: () => void } }).location.reload = () => { reloads += 1 }
+  const { seen, fallback } = fallbackRecorder('km')
+  let current = true
+  const pending = controllerModule.applyPortalGoogleTranslateOrFallBack('fr', { ...fallback, isCurrent: () => current })
+  await Promise.resolve()
+  assert.ok((appended as FakeNode[]).some((node) => node.tag === 'script'))
+  current = false
+  // By now the newer attempt's widget is on the page.
+  ;(globals.document as Record<string, unknown>).querySelector = (selector: string) => (selector === '.goog-te-combo' ? { value: 'es', dispatchEvent() { return true } } : null)
+  const cookiesBefore = cookies.length
+  timers.find((timer) => timer.ms === controllerModule.PORTAL_TRANSLATE_TIMEOUT_MS)?.fn()
+  await pending
+  assert.equal(seen.calls, 0, 'the menu is left on the newer pick')
+  assert.equal(seen.notice, '', 'no notice')
+  assert.equal(reloads, 0, 'no reload')
+  assert.ok(!googtransCleared(cookies.slice(cookiesBefore)), 'the newer pick keeps its cookie')
+})
+
 globals.window = savedWindow
 globals.document = savedDocument
 

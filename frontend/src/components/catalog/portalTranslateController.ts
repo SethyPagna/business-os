@@ -203,6 +203,8 @@ export type PortalTranslateFallback = {
   previous: 'en' | 'km'
   restoreChoice: (previous: 'en' | 'km') => void
   showNotice: (previous: 'en' | 'km') => void
+  /** False once the page has moved on to a newer pick: a late failure of the old attempt must not touch the page or reload it. */
+  isCurrent?: () => boolean
 }
 
 /**
@@ -217,6 +219,7 @@ export async function applyPortalGoogleTranslateOrFallBack(target: unknown, fall
     applied = false
   }
   if (!applied) {
+    if (fallback.isCurrent && !fallback.isCurrent()) return false
     fallback.restoreChoice(fallback.previous)
     // Google can start translating from the cookie on its own just before the wait ends. A page it has already begun to rewrite cannot be
     // put back in place, so it is loaded again clean: the stored choice is Khmer or English by now, so this happens once.

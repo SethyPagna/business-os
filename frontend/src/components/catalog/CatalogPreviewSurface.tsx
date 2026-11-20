@@ -652,7 +652,8 @@ export default function CatalogPreviewSurface({
       </div>
       {publicView ? (
         // Bottom-LEFT, because nothing else lives there: in the bottom-right corner these used to cover the list button and win every tap.
-        <div className={`fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom))] left-[calc(0.75rem+env(safe-area-inset-left))] z-[70] flex flex-col gap-2 sm:bottom-[calc(1.5rem+env(safe-area-inset-bottom))] sm:left-[calc(1.5rem+env(safe-area-inset-left))] ${publicScrollButtonsVisible ? 'visible pointer-events-auto' : 'invisible pointer-events-none'}`}>
+        // The install notice (iOS Safari) is pinned to the bottom too; the buttons ride above it by what it covers (--install-band-clearance, 0 when none).
+        <div className={`fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom)+var(--install-band-clearance,0px))] left-[calc(0.75rem+env(safe-area-inset-left))] z-[70] flex flex-col gap-2 sm:bottom-[calc(1.5rem+env(safe-area-inset-bottom)+var(--install-band-clearance,0px))] sm:left-[calc(1.5rem+env(safe-area-inset-left))] ${publicScrollButtonsVisible ? 'visible pointer-events-auto' : 'invisible pointer-events-none'}`}>
           <button
             type="button"
             tabIndex={publicScrollButtonsVisible ? 0 : -1}
