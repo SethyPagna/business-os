@@ -8,6 +8,7 @@ import {
   readableInkOn,
 } from './portalContrast.ts'
 import { portalScrollBehavior } from './portalMotion.ts'
+import { resolveProductNames } from './productDetailSections.ts'
 import {
   evaluatePromotionPricing,
   isProductPromoted,
@@ -81,7 +82,7 @@ export default function PortalPromoStrip({
         kind: 'product',
         key: `product-${product.id}`,
         product,
-        label: String(product.name || ''),
+        label: resolveProductNames(product).heading,
         priceText: showPrices && evaluation.active
           ? formatPrice(evaluation.unit_price_usd, evaluation.unit_price_khr)
           : (evaluation.title || copy('promotionBadge', 'Promo')),

@@ -646,7 +646,7 @@ runTest('public product details wire every prepared section and show none as "No
     assert.match(productDetailFlyoutSource, new RegExp(`sectionKey="${section}"`), `${section} should stay wired`)
   }
   assert.match(productDetailFlyoutSource, /data-product-detail-section="need_more_details"/)
-  for (const label of ['productOfficialName', 'productIntroduction', 'productCategory', 'productBrand']) {
+  for (const label of ['productInStore', 'productIntroduction', 'productCategory', 'productBrand']) {
     assert.match(productDetailFlyoutSource, new RegExp(`copy\\('${label}'`), `${label} should stay wired for products that have it`)
   }
   assert.doesNotMatch(productDetailFlyoutSource, /Not provided yet\./)

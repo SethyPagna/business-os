@@ -14,9 +14,10 @@ import Users2 from 'lucide-react/dist/esm/icons/users.js'
 import type { LucideIcon } from 'lucide-react'
 import CatalogProductImage from './catalogImages'
 import Heart from 'lucide-react/dist/esm/icons/heart.js'
-import { StatusPill } from './catalogUi'
+import { microLabelProps } from './catalogUi'
 import { shouldShowStockStatus } from './portalCatalogDisplay.ts'
-import { parseProductDescription, resolveOfficialProductName } from './productDetailSections.ts'
+import { parseProductDescription, resolveProductNames } from './productDetailSections.ts'
+import { PRODUCT_MUTED_TEXT_CLASS, productStockBadge } from './portalProductSurfaces.ts'
 import { resolveProductDetailDefault } from './productDetailDefaultsText.ts'
 import type { ProductDetailSectionKey } from './productDetailSections.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
@@ -118,9 +119,24 @@ const SECTION_META: Record<ProductDetailSectionKey, { icon: LucideIcon; labelKey
 function DetailField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
-      <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-neutral-400">{label}</div>
+      <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-stone-600 dark:text-neutral-300">{label}</div>
       {children}
     </div>
+  )
+}
+
+function StockBadge({ status, copy }: { status: StockStatus; copy: CopyFn }) {
+  const label = status === 'out_of_stock'
+    ? copy('outOfStock', 'Out of Stock')
+    : status === 'low_stock'
+      ? copy('lowStock', 'Low Stock')
+      : copy('inStock', 'In Stock')
+  const badge = productStockBadge(status)
+  return (
+    <span {...microLabelProps(label, `inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-semibold ${badge.pillClass}`)}>
+      <span className={`h-1.5 w-1.5 rounded-full ${badge.dotClass}`} aria-hidden="true" />
+      {label}
+    </span>
   )
 }
 
@@ -140,18 +156,18 @@ function DetailSectionBlock({
   const SectionIcon = meta.icon
   return (
     <div data-product-detail-section={sectionKey}>
-      <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-neutral-400">
+      <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-stone-600 dark:text-neutral-300">
         <SectionIcon className="h-3.5 w-3.5" />
         {copy(meta.labelKey, meta.fallback)}
       </div>
       {items.length > 1 ? (
-        <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-slate-600 dark:text-neutral-300">
+        <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-stone-700 dark:text-neutral-300">
           {items.map((item, index) => (
             <li key={`${item}-${index}`} {...getKhmerTextProps(item, '')}>{item}</li>
           ))}
         </ul>
       ) : (
-        <p {...getKhmerTextProps(items[0], 'whitespace-pre-line text-sm leading-6 text-slate-600 dark:text-neutral-300')}>
+        <p {...getKhmerTextProps(items[0], 'whitespace-pre-line text-sm leading-6 text-stone-700 dark:text-neutral-300')}>
           {items[0]}
         </p>
       )}
@@ -226,9 +242,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
   const categoryValues = multiValues(product.categories, product.category)
   const brandValues = multiValues(product.brands, product.brand)
   const promotion = view.pricePresentation?.promotion
-  // Only a real official name -- never the shop's name (see
-  // resolveOfficialProductName for why a copy of it counts as none).
-  const officialName = resolveOfficialProductName(parsed.officialName, product.name)
+  const { heading: productHeading, shopLine } = resolveProductNames(product)
   const showStockLabel = shouldShowStockStatus({ showStockStatus: view.showStockStatus })
   const sectionItems = (...keys: ProductDetailSectionKey[]) => parsed.sections
     .filter((section) => keys.includes(section.key))
@@ -246,10 +260,11 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
   // when several tabs of the storefront are open. Empty when the product has
   // no name at all, which is the correct "decorative" signal -- the sheet
   // header right above already carries whatever identity exists.
-  const galleryImageAlt = [product.name, brandValues[0]].filter(Boolean).join(' - ')
+  const galleryImageAlt = [productHeading, brandValues[0]].filter(Boolean).join(' - ')
   const imageLabel = (index: number) => copy('dotsLabel', 'Image {current} of {total}')
     .replace('{current}', String(index + 1))
     .replace('{total}', String(gallery.length))
+  const discountLabel = String(product.discount_label || copy('discounts', 'Discount'))
   const needMoreDetailsText = resolveProductDetailDefault('need_more_details', needMoreDetailsDefault, language)
 
   return (
@@ -263,22 +278,20 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
         ref={dialogRef}
         tabIndex={-1}
         onKeyDown={handleDialogKeyDown}
-        className="relative flex max-h-[calc(92*var(--app-vh))] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl pb-[env(safe-area-inset-bottom)] sm:max-h-[calc(88*var(--app-vh))] sm:max-w-3xl sm:rounded-2xl sm:pb-0 dark:bg-neutral-900"
+        className="relative flex max-h-[calc(92*var(--app-vh))] w-full flex-col overflow-hidden rounded-t-2xl border border-stone-300 bg-white shadow-2xl pb-[env(safe-area-inset-bottom)] sm:max-h-[calc(88*var(--app-vh))] sm:max-w-3xl sm:rounded-2xl sm:pb-0 dark:border-neutral-700 dark:bg-neutral-900"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
       >
-        <div className="flex items-center justify-between border-b border-slate-200 p-4 dark:border-neutral-800">
+        <div className="flex items-center justify-between border-b border-stone-300 p-4 dark:border-neutral-700">
           <div className="min-w-0 pr-4">
-            <div id={titleId} translate="no" {...getKhmerTextProps(product.name || '', 'notranslate break-words text-base font-semibold text-slate-900 dark:text-white')}>
-              {product.name || copy('productDetails', 'Product details')}
+            <div id={titleId} translate="no" {...getKhmerTextProps(productHeading, 'notranslate break-words text-base font-semibold text-[#23201b] dark:text-white')}>
+              {productHeading || copy('productDetails', 'Product details')}
             </div>
-            {/* Secondary line, only when the official name really differs from
-                the name shown above (resolveOfficialProductName drops a copy). */}
-            {officialName ? (
-              <div className="mt-0.5 text-xs leading-5 text-slate-500 dark:text-neutral-400">
-                <span>{copy('productOfficialName', 'Official name', 'ឈ្មោះផ្លូវការ')}: </span>
-                <span translate="no" {...getKhmerTextProps(officialName, 'notranslate break-words')}>{officialName}</span>
+            {shopLine ? (
+              <div className={`mt-0.5 text-xs leading-5 ${PRODUCT_MUTED_TEXT_CLASS}`}>
+                <span>{copy('productInStore', 'In store', 'ក្នុងហាង')}: </span>
+                <span translate="no" {...getKhmerTextProps(shopLine, 'notranslate break-words')}>{shopLine}</span>
               </div>
             ) : null}
           </div>
@@ -287,7 +300,8 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
             type="button"
             onClick={onClose}
             aria-label={copy('close', 'Close')}
-            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+            title={copy('close', 'Close')}
+            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-stone-600 hover:bg-stone-100 hover:text-[#23201b] dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-white"
           >
             <X className="h-4 w-4" />
           </button>
@@ -314,14 +328,14 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
                   // The tile image is alt="" after the first (the label
                   // names each one), so the button carries the position.
                   aria-label={imageLabel(index)}
-                  className="h-28 w-28 shrink-0 snap-start overflow-hidden rounded-xl bg-slate-100 ring-1 ring-slate-200 transition hover:ring-slate-400 sm:h-32 sm:w-32 dark:bg-neutral-800 dark:ring-neutral-700"
+                  className="h-28 w-28 shrink-0 snap-start overflow-hidden rounded-xl bg-stone-100 ring-1 ring-stone-300 transition hover:ring-stone-500 sm:h-32 sm:w-32 dark:bg-neutral-800 dark:ring-neutral-700"
                 >
                   <CatalogProductImage thumbnail src={image} alt={index === 0 ? galleryImageAlt : ''} className="h-full w-full object-cover" />
                 </button>
               ))}
             </div>
           ) : (
-            <div className="mx-4 mt-4 flex h-28 w-28 items-center justify-center rounded-xl bg-slate-100 dark:bg-neutral-800 text-slate-300" aria-hidden="true">
+            <div className="mx-4 mt-4 flex h-28 w-28 items-center justify-center rounded-xl bg-stone-100 text-stone-400 dark:bg-neutral-800 dark:text-neutral-400" aria-hidden="true">
               <ShoppingBag className="h-10 w-10" />
             </div>
           )}
@@ -329,21 +343,21 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
           <div className="space-y-4 p-4 pt-2">
             {showStockLabel || promotion?.active ? (
               <div className="flex flex-wrap items-center gap-2">
-                {showStockLabel ? <StatusPill status={view.status} copy={copy} /> : null}
+                {showStockLabel ? <StockBadge status={view.status} copy={copy} /> : null}
                 {promotion?.active ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700 dark:bg-rose-900/20 dark:text-rose-200">
-                    <BadgePercent className="h-3 w-3" />
-                    {product.discount_label || copy('discounts', 'Discount')}
+                  <span {...microLabelProps(discountLabel, 'inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-900 dark:bg-neutral-800 dark:text-amber-200', 'text-[10px]')}>
+                    <BadgePercent className="h-3 w-3" aria-hidden="true" />
+                    {discountLabel}
                   </span>
                 ) : null}
               </div>
             ) : null}
 
             {view.showPrices && view.pricePresentation?.primaryText ? (
-              <div translate="no" className="notranslate text-xl font-semibold text-slate-900 dark:text-white">
+              <div translate="no" className="notranslate text-xl font-semibold text-[#23201b] dark:text-white">
                 {view.pricePresentation.primaryText}
                 {view.pricePresentation.originalText ? (
-                  <span className="ml-2 text-sm font-normal text-slate-500 line-through dark:text-neutral-400">
+                  <span className="ml-2 text-sm font-normal line-through text-stone-600 dark:text-neutral-300">
                     {view.pricePresentation.originalText}
                   </span>
                 ) : null}
@@ -355,7 +369,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
                 Details always have text (owner defaults). */}
             {parsed.intro ? (
               <DetailField label={copy('productIntroduction', 'Introduction')}>
-                <p {...getKhmerTextProps(parsed.intro, 'whitespace-pre-line text-sm leading-6 text-slate-600 dark:text-neutral-300')}>
+                <p {...getKhmerTextProps(parsed.intro, 'whitespace-pre-line text-sm leading-6 text-stone-700 dark:text-neutral-300')}>
                   {parsed.intro}
                 </p>
               </DetailField>
@@ -365,7 +379,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
 
             {categoryValues.length ? (
               <DetailField label={copy('productCategory', 'Category')}>
-                <p className="text-sm leading-6 text-slate-600 dark:text-neutral-300">
+                <p className="text-sm leading-6 text-stone-700 dark:text-neutral-300">
                   {categoryValues.join(', ')}
                 </p>
               </DetailField>
@@ -373,7 +387,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
 
             {brandValues.length ? (
               <DetailField label={copy('productBrand', 'Brand')}>
-                <p translate="no" className="notranslate text-sm leading-6 text-slate-600 dark:text-neutral-300">
+                <p translate="no" className="notranslate text-sm leading-6 text-stone-700 dark:text-neutral-300">
                   {brandValues.join(', ')}
                 </p>
               </DetailField>
@@ -384,20 +398,20 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
             <DetailSectionBlock sectionKey="caution" items={cautionItems} copy={copy} />
 
             <div data-product-detail-section="need_more_details">
-              <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-neutral-400">
+              <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-stone-600 dark:text-neutral-300">
                 <Store className="h-3.5 w-3.5" />
                 {copy('productNeedMoreDetails', 'Need More Details')}
               </div>
-              <p {...getKhmerTextProps(needMoreDetailsText, 'whitespace-pre-line text-sm leading-6 text-slate-600 dark:text-neutral-300')}>
+              <p {...getKhmerTextProps(needMoreDetailsText, 'whitespace-pre-line text-sm leading-6 text-stone-700 dark:text-neutral-300')}>
                 {needMoreDetailsText}
               </p>
             </div>
 
             {shopName ? (
-              <div className="flex items-start gap-2 rounded-xl bg-slate-50 p-3 text-xs text-slate-500 dark:bg-neutral-800/60 dark:text-neutral-400">
+              <div className={`flex items-start gap-2 border-t border-stone-300 pt-4 text-xs dark:border-neutral-700 ${PRODUCT_MUTED_TEXT_CLASS}`}>
                 <Store className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
                 <div>
-                  <div translate="no" className="notranslate font-medium text-slate-700 dark:text-neutral-200">{shopName}</div>
+                  <div translate="no" className="notranslate font-medium text-[#23201b] dark:text-neutral-100">{shopName}</div>
                   {contactNote ? <div className="mt-0.5">{contactNote}</div> : null}
                 </div>
               </div>
@@ -406,7 +420,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
         </div>
 
         {onAddToBucket || onToggleWishlist ? (
-          <div className="flex items-center gap-3 border-t border-slate-200 p-4 dark:border-neutral-800">
+          <div className="flex items-center gap-3 border-t border-stone-300 p-4 dark:border-neutral-700">
             {onToggleWishlist ? (
               <button
                 type="button"
@@ -414,7 +428,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
                 aria-label={isInWishlist ? copy('removeFromWishlist', 'Remove from saved') : copy('addToWishlist', 'Save to wishlist')}
                 aria-pressed={isInWishlist}
                 title={isInWishlist ? copy('removeFromWishlist', 'Remove from saved') : copy('addToWishlist', 'Save to wishlist')}
-                className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full border border-slate-200 transition dark:border-neutral-700 ${isInWishlist ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500 hover:text-rose-700 dark:text-neutral-400 dark:hover:text-rose-300'}`}
+                className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full border border-stone-400 transition dark:border-neutral-600 ${isInWishlist ? 'text-rose-600 dark:text-rose-400' : 'text-stone-600 hover:text-rose-700 dark:text-neutral-300 dark:hover:text-rose-300'}`}
               >
                 <Heart className={`h-4 w-4 ${isInWishlist ? 'fill-current' : ''}`} />
               </button>
@@ -428,7 +442,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
                 <Plus className="h-4 w-4" />
                 {copy('addToBucket', 'Add')}
                 {bucketQty > 0 ? (
-                  <span data-product-detail-bucket-qty="true" className="ml-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full bg-white/25 px-1 text-[10px] font-bold leading-4">
+                  <span data-product-detail-bucket-qty="true" className="ml-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full bg-white px-1 text-[10px] font-bold leading-4 text-slate-900 dark:bg-neutral-900 dark:text-white">
                     {bucketQty}
                   </span>
                 ) : null}
@@ -445,7 +459,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
         {lightboxOpen && gallery.length ? (
           <ImageGalleryLightbox
             open
-            title={product.name || ''}
+            title={productHeading}
             images={gallery}
             index={activeIndex}
             onClose={() => setLightboxOpen(false)}

@@ -81,7 +81,7 @@ runTest('a decorative image is taken OUT of the accessibility tree, not just alt
   assert.match(images, /aria-hidden="true"\s*\r?\n\s*className=\{`bg-gray-100/, 'the broken/missing-image placeholder stays hidden')
   // The two ShoppingBag "no photo" placeholders on the public route.
   const flyout = read('ProductDetailFlyout.tsx')
-  assert.match(flyout, /text-slate-300" aria-hidden="true">\s*\r?\n\s*<ShoppingBag/, 'the product sheet placeholder is decorative')
+  assert.match(flyout, /dark:text-neutral-400" aria-hidden="true">\s*\r?\n\s*<ShoppingBag/, 'the product sheet placeholder is decorative')
   const products = read('CatalogProductsSection.tsx')
   assert.match(products, /text-stone-400 dark:text-neutral-400" aria-hidden="true">\s*\r?\n\s*<ShoppingBag/, 'the product card placeholder is decorative')
 })
@@ -95,11 +95,11 @@ runTest('a product image is described by the product, never by the word "Product
   )
   assert.match(
     products,
-    /alt=\{\[product\.name, product\.brand\]\.filter\(Boolean\)\.join\(' - '\)\}/,
+    /alt=\{\[productHeading, product\.brand\]\.filter\(Boolean\)\.join\(' - '\)\}/,
     'the card photo carries the product name plus its brand',
   )
   const flyout = read('ProductDetailFlyout.tsx')
-  assert.match(flyout, /const galleryImageAlt = \[product\.name, brandValues\[0\]\]/, 'the sheet photo does the same')
+  assert.match(flyout, /const galleryImageAlt = \[productHeading, brandValues\[0\]\]/, 'the sheet photo does the same')
   // P-public-6: the photos are an album row; the first tile carries the
   // product description, the rest are named by their own button labels.
   assert.match(flyout, /alt=\{index === 0 \? galleryImageAlt : ''\}/)
@@ -441,7 +441,7 @@ runTest('a product card can be opened from the keyboard', () => {
   assert.ok(opener, 'the gallery opener is a standalone overlay button')
   assert.doesNotMatch(opener[0], /stockLabels/, 'the stock pill is not inside the control')
   assert.doesNotMatch(opener[0], /highlightBadges\.map/, 'nor are the promotion badges')
-  assert.match(opener[0], /aria-label=\{`\$\{copy\('viewImages', 'View images'\)\}: \$\{product\.name\}`\}/, 'named by the product it shows')
+  assert.match(opener[0], /aria-label=\{`\$\{copy\('viewImages', 'View images'\)\}: \$\{productHeading\}`\}/, 'named by the product it shows')
   assert.match(opener[0], /className="absolute inset-0 /, 'and it covers the whole photo')
   // The badges and the status pill still render, just no longer swallowed.
   assert.match(products, /highlightBadges\.map/, 'the badges are still painted')

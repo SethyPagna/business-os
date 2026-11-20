@@ -18,7 +18,7 @@ const surface = read('src/components/catalog/CatalogPreviewSurface.tsx')
 
 assert.match(read('src/components/catalog/PortalSocialRow.tsx'), /data-portal-contact-platform=\{platform\}[\s\S]{0,400}flex h-11 w-11 shrink-0 items-center justify-center rounded-full/, 'each floating contact button is a 44px control (the minimize X it replaced was 40px)')
 assert.doesNotMatch(publicPage, /setContactMinimized/, 'the contact minimize control is retired')
-assert.match(flyout, /className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-slate-500/, 'product flyout close is 40px')
+assert.match(flyout, /className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-stone-600/, 'product flyout close is 40px')
 assert.match(legal, /ref=\{closeRef\}[\s\S]{0,200}inline-flex h-1[01] w-1[01]|inline-flex h-1[01] w-1[01][\s\S]{0,300}ref=\{closeRef\}/, 'policy reader close is at least 40px (h-11 w-11 since 6.0.864)')
 assert.match(products, /inline-flex h-10 w-10 items-center justify-center rounded-lg[\s\S]{0,300}aria-label=\{copy\('closeFilters', 'Close filters'\)\}/, 'filter dialog close is 40px')
 assert.match(products, /<label htmlFor="portal-product-search" className=\{`flex min-h-11/, 'search field is 44px tall')

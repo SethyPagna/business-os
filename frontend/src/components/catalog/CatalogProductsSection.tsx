@@ -52,6 +52,7 @@ import {
   productMetaFields,
   productStockBadge,
 } from './portalProductSurfaces.ts'
+import { resolveProductNames } from './productDetailSections.ts'
 import {
   DEFAULT_PORTAL_BROWSE_SORT,
   DEFAULT_PORTAL_BROWSE_VIEW,
@@ -1019,6 +1020,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           // longer reach the storefront payload.
           const status = resolvePortalStockStatus(product, selectedStockBranch)
           const stockBadge = productStockBadge(status)
+          const productHeading = resolveProductNames(product).heading
           const gallery = normalizeProductGallery(product)
           const primaryImage = gallery[0] || ''
           const highlightBadges = buildPortalHighlightBadges(product, previewConfig, copy, promotionRules)
@@ -1061,7 +1063,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                     badges in it silenced "20% off" and "Low stock". */}
                 <div className="relative aspect-square overflow-hidden rounded-xl bg-stone-100 dark:bg-neutral-800">
                 {primaryImage ? (
-                  <CatalogProductImage thumbnail sizes="(min-width: 1024px) 240px, 96px" src={primaryImage} alt={[product.name, product.brand].filter(Boolean).join(' - ')} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
+                  <CatalogProductImage thumbnail sizes="(min-width: 1024px) 240px, 96px" src={primaryImage} alt={[productHeading, product.brand].filter(Boolean).join(' - ')} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
                 ) : (
                   <div className="flex h-full items-center justify-center text-stone-400 dark:text-neutral-400" aria-hidden="true">
                     <ShoppingBag className="h-10 w-10" />
@@ -1118,7 +1120,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                     type="button"
                     data-gallery-open="true"
                     className="absolute inset-0 h-full w-full cursor-zoom-in"
-                    aria-label={`${copy('viewImages', 'View images')}: ${product.name}`}
+                    aria-label={`${copy('viewImages', 'View images')}: ${productHeading}`}
                     onClick={(event) => {
                       event.stopPropagation()
                       openProductGallery(product, 0)
@@ -1154,14 +1156,14 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                     type="button"
                     onClick={(event) => { event.stopPropagation(); openProductDetail(product) }}
                     translate="no"
-                    title={product.name}
-                    {...getKhmerTextProps(product.name, `notranslate block max-h-[2lh] w-full overflow-hidden break-words text-left ${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-[#23201b] dark:text-neutral-100`)}
+                    title={productHeading}
+                    {...getKhmerTextProps(productHeading, `notranslate block max-h-[2lh] w-full overflow-hidden break-words text-left ${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-[#23201b] dark:text-neutral-100`)}
                   >
-                    {product.name}
+                    {productHeading}
                   </button>
                 ) : (
-                  <div translate="no" title={product.name} {...getKhmerTextProps(product.name, `notranslate max-h-[2lh] overflow-hidden break-words ${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-[#23201b] dark:text-neutral-100`)}>
-                    {product.name}
+                  <div translate="no" title={productHeading} {...getKhmerTextProps(productHeading, `notranslate max-h-[2lh] overflow-hidden break-words ${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-[#23201b] dark:text-neutral-100`)}>
+                    {productHeading}
                   </div>
                 )}
                 {showDiscountDetails && promotion?.active ? (

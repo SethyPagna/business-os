@@ -60,6 +60,8 @@ const SOLID_FILES = [
   'PortalPromotionsBanner.tsx',
   'PortalAnnouncementStrip.tsx',
   'CatalogProductsSection.tsx',
+  'ProductDetailFlyout.tsx',
+  'productDetailSections.ts',
 ]
 const stripComments = (source: string) => source
   .replace(/\/\*[\s\S]*?\*\//g, '')

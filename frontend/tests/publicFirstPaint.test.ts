@@ -244,7 +244,7 @@ await runTest('the About card mounts after its cover has arrived (or a bounded w
 
 await runTest('with prices hidden, the promo strip names the promotion instead of printing a price (P2-7)', () => {
   const strip = code(read('../src/components/catalog/PortalPromoStrip.tsx'))
-  const priceText = between(strip, "label: String(product.name || ''),", 'color: evaluation.badge_color')
+  const priceText = between(strip, 'label: resolveProductNames(product).heading,', 'color: evaluation.badge_color')
   assert.match(priceText, /priceText: showPrices && evaluation\.active\s*\?\s*formatPrice\(/, 'a price is formatted only while prices are shown')
   assert.match(priceText, /:\s*\(evaluation\.title \|\| copy\('promotionBadge', 'Promo'\)\)/)
   assert.equal(strip.match(/formatPrice\(/g)?.length, 1, 'no other path prints a price')

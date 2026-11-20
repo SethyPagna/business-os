@@ -104,7 +104,7 @@ assert.match(page, /storePortalLanguage\(language\)\s*setPageLanguage\(language\
 
 // 8. Never machine-translated: product names, brands, prices, business name.
 const card = read('src/components/catalog/CatalogProductsSection.tsx')
-assert.match(card, /translate="no"\s*title=\{product\.name\}\s*\{\.\.\.getKhmerTextProps\(product\.name, `notranslate/, 'product name on the card is translatable')
+assert.match(card, /translate="no"\s*title=\{productHeading\}\s*\{\.\.\.getKhmerTextProps\(productHeading, `notranslate/, 'product name on the card is translatable')
 assert.match(card, /chip\.kind === 'brand'[\s\S]{0,200}translate="no"/, 'brand chip on the card is translatable')
 assert.match(card, /<div translate="no" className=\{`notranslate min-w-0 break-words font-semibold[^`]*`\}>\s*\{pricePresentation\?\.primaryText\}/, 'card price is translatable')
 const flyout = read('src/components/catalog/ProductDetailFlyout.tsx')
