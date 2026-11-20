@@ -230,14 +230,19 @@ async function main() {
 
     // ---- 6. a rename that would change the drawer kind leaves the credit alone ------------------------------------------------------------------
     const F = await exchange('ABA')
+    const G = await exchange('Cash USD')
     const fBefore = await cols(F.saleId)
     const kindChange = await rename('Cash USD', 'Bank transfer')
     const fAfter = await cols(F.saleId)
+    const gAfter = await rowsOf(G.saleId)
     const unregistered = await h.call('GET', '/api/settings/payment-methods/unregistered', undefined, 'unregistered', { observe: true })
     r.check(`rename that changes the kind (${kindChange.status}): F's credit keeps its cash method, and the missing-methods check does not offer it back`, () => {
       assert.equal(kindChange.status, 200, JSON.stringify(kindChange.body).slice(0, 300))
       assert.equal(JSON.parse(fBefore.payment_details).find(row => row.refund_credit === true).method, 'Cash USD')
       assert.equal(JSON.parse(fAfter.payment_details).find(row => row.refund_credit === true).method, 'Cash USD')
+      // G pays its own $10 in Cash USD next to the credit: the customer's row is renamed, the credit is not.
+      assert.equal(gAfter.find(row => row.refund_credit === true).method, 'Cash USD')
+      assert.equal(gAfter.find(row => row.refund_credit !== true).method, 'Bank transfer')
       assert.equal(unregistered.status, 200)
       assert.deepEqual(unregistered.body.missing, [], JSON.stringify(unregistered.body))
     })
