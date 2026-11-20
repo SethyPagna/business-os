@@ -56,6 +56,11 @@ const neutralChunks: ReadonlyArray<readonly [string, string]> = [
   // The product card and the promo strip read the one name rule at render, so it travels with the storefront utilities the Products page already loads;
   // in 'admin-shared-utils' it cost that page one more chunk (performanceBudgets).
   ['/src/components/catalog/productDetailSections.ts', 'catalog-public-utils'],
+  // Small dependency-free leaves read by the storefront page, the List page, the sheet and the website editor's preview twin: unpinned they fall
+  // on whichever side of the catalog / catalog-public boundary Rollup picks, which makes a static chunk cycle.
+  ['/src/components/catalog/portalProductNames.ts', 'catalog-public-utils'],
+  ['/src/components/catalog/portalFocusTrap.ts', 'catalog-public-utils'],
+  ['/src/components/catalog/portalClearConfirm.ts', 'catalog-public-utils'],
   // G37 client search index (admin pickers only: POS, Products, Inventory,
   // Branches, Transfer, Stock-in, Promotions, Bulk import, Duplicates). Left
   // to the '/src/api/' fallback, the index transport and the shared search
