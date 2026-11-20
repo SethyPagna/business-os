@@ -509,7 +509,7 @@ async function main() {
       assert.deepStrictEqual(plain(dbO.db.prepare("SELECT key, value, updated_at FROM settings WHERE key NOT LIKE 'telegram_topic_%' ORDER BY key").all()), baseSettings, 'another setting moved')
       if (fx.settingsVersion === null) {
         assert.deepStrictEqual(ours.version, [], 'no D1 version row is created while the version lives in KV')
-        assert.deepStrictEqual(kv.puts, [['v2:settings', '1']], 'the Worker bumps KV here -- which a D1 batch cannot reach')
+        assert.deepStrictEqual(kv.puts.map(([key]) => key), ['v2:settings'], 'the Worker bumps KV here -- which a D1 batch cannot reach'); assert.ok(Number(kv.puts[0][1]) >= 1, 'to a positive integer (a bump writes a unique value above every earlier one)')
       } else {
         assert.deepStrictEqual(ours.version, [{ version: fx.settingsVersion + 1 }])
         assert.deepStrictEqual(kv.puts, [])

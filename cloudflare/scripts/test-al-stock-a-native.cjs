@@ -418,7 +418,7 @@ async function main() {
       t.eq('branch_stock 10 -> 6', after.branch, 6)
       t.eq('products.stock_quantity 10 -> 6', after.product, 6)
       t.eq('one movement, remove 4, attributed to lot B', after.movements.map(m => [m.t, m.q, m.b]), [['remove', 4, s.lotB]])
-      t.eq('products cache version bumped once', after.cache - before.cache, 1)
+      t.eq('products cache version bumped (a bump writes a unique value above the old one, so the size of the step is no longer 1)', after.cache > before.cache, true)
       t.eq('live-update frames for this product (products + inventory)', H.syncFrames(before.frameMark).filter(f => f.payload && f.payload.id === s.p).length, 2)
       t.eq('receipt completed', after.receipts.map(x => [x.w, x.st]), [[1, 200]])
       t.note('D1 statements for this request: ' + r.d1 + ' (Free limit 50, Paid limit 1000)')
@@ -470,7 +470,7 @@ async function main() {
       t.eq('branch_stock (10 - 4)', after.branch, 6)
       t.eq('products.stock_quantity (10 - 4)', after.product, 6)
       t.eq('exactly one movement of 4', after.movements.map(m => [m.t, m.q]), [['remove', 4]])
-      t.eq('cache version bumped once (one effective removal)', after.cache - before.cache, 1)
+      t.eq('cache version bumped (one effective removal)', after.cache > before.cache, true)
       ledgers(t, 'ledgers:', before, after)
       t.note('statuses ' + JSON.stringify([r1.status, r2.status]) + '; bodies ' + JSON.stringify([r1.body.error || r1.body.success, r2.body.error || r2.body.success]))
     })
@@ -550,7 +550,7 @@ async function main() {
       const after = await snap(H, s)
       ledgers(t, 'after the failed request:', before, mid)
       const changedStock = before.lotA !== mid.lotA || before.branch !== mid.branch || before.product !== mid.product
-      t.eq('cache version follows stock (bumped iff stock changed)', mid.cache - before.cache, changedStock ? 1 : 0)
+      t.eq('cache version follows stock (bumped iff stock changed)', mid.cache > before.cache, Boolean(changedStock))
       t.ok('the failed request is not reported as a success', r.status >= 400, r.status)
       t.ok('after the fault clears the SAME request id can complete exactly once (or was already complete)', after.lotA === 1 && after.branch === 6 && after.product === 6 && after.movements.length === 1,
         { lotA: after.lotA, branch: after.branch, product: after.product, movements: after.movements.length, retryStatus: retry.status, retryBody: retry.body.code || retry.body.error })

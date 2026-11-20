@@ -89,7 +89,7 @@ function fixture(options = {}) {
   }
   const healthy=fixture({kv:[['v2:products','0'],['v2:sales','7']]})
   await healthy.cache.bumpVersions(healthy.env,['products','sales'])
-  assert.deepEqual([...healthy.kv],[['v2:products','1'],['v2:sales','8']]);assert.equal(healthy.attempts.length,0);assert.equal(healthy.quota.length,1);assert.equal(healthy.quota[0].count,2)
+  assert.deepEqual([...healthy.kv.keys()],['v2:products','v2:sales']);assert.ok(Number(healthy.kv.get('v2:products'))>0&&Number(healthy.kv.get('v2:sales'))>7&&healthy.kv.get('v2:products')!==healthy.kv.get('v2:sales'));assert.equal(healthy.attempts.length,0);assert.equal(healthy.quota.length,1);assert.equal(healthy.quota[0].count,2)
   await healthy.cache.bumpVersions(healthy.env,[]);assert.equal(healthy.quota.length,1);assert.equal(healthy.quota[0].count,2)
   healthy.sqlite.close()
   const mixed=fixture({kv:[['v2:sales','5']],kvWriteFailure:true})
