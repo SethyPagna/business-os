@@ -241,7 +241,7 @@ function strings(node, at = [], out = []) {
 // ------------------------------------------------------ what ops.yml must be
 
 const CUTOVER_TOKEN_ENV = { BRANCH_CUTOVER_OPERATOR_TOKEN: '${{ secrets.BRANCH_CUTOVER_OPERATOR_TOKEN }}' }
-const TASKS = ['d1-export', 'r2-apac-copy', 'r2-inventory', 'secret-names', 'settings-upsert', 'read-switch', 'branch-cutover', 'd1-physical-export', 'consistency']
+const TASKS = ['d1-export', 'r2-apac-copy', 'r2-inventory', 'r2-old-retire', 'secret-names', 'settings-upsert', 'read-switch', 'branch-cutover', 'd1-physical-export', 'consistency']
 const OUT_DIR = '${{ runner.temp }}/ops-out'
 const UPLOAD_PATH = '${{ runner.temp }}/ops-out/*.enc.json'
 // The only job allowed to run from any ref other than main is none: d1-physical-export reads production wholesale and
@@ -284,7 +284,10 @@ const TASK_STEPS = {
     { kind: 'upload' },
   ],
   'r2-apac-copy': [
-    ...PRELUDE,
+    { kind: 'confirm' }, { kind: 'checkout' }, { kind: 'setup-node' },
+    // Before anything is installed or deployed: copy and topup are refused once production reads the apac bucket.
+    scriptStep('node ops/scripts/ops-r2-retire.mjs guard-copy-modes', { OPS_R2_MODE: '${{ inputs.mode }}' }),
+    { kind: 'npm-ci' },
     // The mode decides whether a missing destination is created (copy only).
     scriptStep('node ops/scripts/ops-r2.mjs buckets', { OPS_R2_MODE: '${{ inputs.mode }}' }),
     scriptStep('node ops/scripts/ops-r2.mjs run', { OPS_R2_MODE: '${{ inputs.mode }}' }, { stepTimeout: true }),
@@ -295,6 +298,12 @@ const TASK_STEPS = {
   'r2-inventory': [
     { kind: 'confirm' }, { kind: 'checkout' }, { kind: 'setup-node' },
     scriptStep('node ops/scripts/ops-r2-inventory.mjs'),
+    { kind: 'upload' },
+  ],
+  // REST only (no wrangler). The bucket name is one literal; the script refuses any other and any name with apac in it.
+  'r2-old-retire': [
+    { kind: 'confirm' }, { kind: 'checkout' }, { kind: 'setup-node' },
+    scriptStep('node ops/scripts/ops-r2-retire.mjs run', { OPS_R2_RETIRE_BUCKET: 'business-os-assets', OPS_R2_RETIRE_MODE: '${{ inputs.mode }}', CONFIRM: '${{ inputs.confirm }}' }),
     { kind: 'upload' },
   ],
   // REST only (no wrangler), so no package install.
@@ -341,7 +350,7 @@ const TASK_STEPS = {
 }
 
 // The scripts the workflow runs, and everything they import.
-const ENTRY_SCRIPTS = ['ops/scripts/ops-d1-export.mjs', 'ops/scripts/ops-r2.mjs', 'ops/scripts/ops-r2-inventory.mjs', 'ops/scripts/ops-secret-names.mjs', 'ops/scripts/ops-settings-upsert.mjs', 'ops/scripts/ops-read-switch.mjs', 'ops/scripts/ops-branch-cutover.mjs', 'ops/scripts/ops-d1-physical-export.mjs', 'ops/scripts/ops-consistency.mjs']
+const ENTRY_SCRIPTS = ['ops/scripts/ops-d1-export.mjs', 'ops/scripts/ops-r2.mjs', 'ops/scripts/ops-r2-inventory.mjs', 'ops/scripts/ops-r2-retire.mjs', 'ops/scripts/ops-secret-names.mjs', 'ops/scripts/ops-settings-upsert.mjs', 'ops/scripts/ops-read-switch.mjs', 'ops/scripts/ops-branch-cutover.mjs', 'ops/scripts/ops-d1-physical-export.mjs', 'ops/scripts/ops-consistency.mjs']
 const RUNNER_SCRIPTS = [
   'ops/scripts/ops-common.mjs',
   'ops/scripts/ops-crypto.mjs',
@@ -352,6 +361,7 @@ const RUNNER_SCRIPTS = [
   'ops/scripts/ops-r2.mjs',
   'ops/scripts/ops-r2-lib.mjs',
   'ops/scripts/ops-r2-inventory.mjs',
+  'ops/scripts/ops-r2-retire.mjs',
   'ops/scripts/ops-secret-names.mjs',
   'ops/scripts/ops-settings-upsert.mjs',
   'ops/scripts/ops-read-switch.mjs',
@@ -469,6 +479,7 @@ async function main() {
   const common = await load('ops', 'scripts', 'ops-common.mjs')
   const d1 = await load('ops', 'scripts', 'ops-d1-export.mjs')
   const driver = await load('ops', 'scripts', 'ops-r2.mjs')
+  const retire = await load('ops', 'scripts', 'ops-r2-retire.mjs')
   const lib = await load('ops', 'scripts', 'ops-r2-lib.mjs')
   const secretNames = await load('ops', 'scripts', 'ops-secret-names.mjs')
   const cutover = await load('ops', 'scripts', 'ops-branch-cutover.mjs')
@@ -526,8 +537,8 @@ async function main() {
     assert.strictEqual(inputs.task.required, 'true')
     assert.deepStrictEqual(inputs.task.options, TASKS)
     assert.strictEqual(inputs.mode.type, 'choice')
-    assert.deepStrictEqual(inputs.mode.options, driver.MODES)
-    assert.strictEqual(inputs.mode.default, 'copy')
+    assert.deepStrictEqual(inputs.mode.options, [...driver.MODES.filter((m) => m === 'verify-only'), ...driver.MODES.filter((m) => m !== 'verify-only'), ...retire.RETIRE_MODES])
+    assert.strictEqual(inputs.mode.default, 'verify-only', 'the r2-apac-copy default only compares')
     assert.strictEqual(inputs.pack.type, 'choice')
     assert.deepStrictEqual(inputs.pack.options, Object.keys(consistency.PACKS), 'the workflow offers exactly the packs the script runs')
     assert.strictEqual(inputs.pack.default, 'recent', 'the default pack is the small one')
@@ -725,9 +736,9 @@ async function main() {
     }
     const where = (value) => strings(WF).filter(([, v]) => v === value).map(([w]) => w.replace(/\.steps\.\d+\./, '.steps.N.'))
     assert.deepStrictEqual(where('${{ inputs.task }}'), ['jobs.gate.steps.N.env.TASK'])
-    assert.deepStrictEqual(where('${{ inputs.confirm }}'), ['jobs.gate.steps.N.env.CONFIRM', ...TASKS.map((t) => `jobs.${t}.steps.N.env.CONFIRM`)])
+    assert.deepStrictEqual(where('${{ inputs.confirm }}'), ['jobs.gate.steps.N.env.CONFIRM', ...TASKS.flatMap((t) => (t === 'r2-old-retire' ? [`jobs.${t}.steps.N.env.CONFIRM`, `jobs.${t}.steps.N.env.CONFIRM`] : [`jobs.${t}.steps.N.env.CONFIRM`]))])
     assert.deepStrictEqual(where('${{ inputs.query }}'), ['jobs.d1-export.steps.N.env.OPS_QUERY'])
-    assert.deepStrictEqual(where('${{ inputs.mode }}'), ['jobs.r2-apac-copy.steps.N.env.OPS_R2_MODE', 'jobs.r2-apac-copy.steps.N.env.OPS_R2_MODE'])
+    assert.deepStrictEqual(where('${{ inputs.mode }}'), ['jobs.r2-apac-copy.steps.N.env.OPS_R2_MODE', 'jobs.r2-apac-copy.steps.N.env.OPS_R2_MODE', 'jobs.r2-apac-copy.steps.N.env.OPS_R2_MODE', 'jobs.r2-old-retire.steps.N.env.OPS_R2_RETIRE_MODE'])
     assert.deepStrictEqual(where('${{ inputs.apply }}'), ['jobs.settings-upsert.steps.N.env.OPS_APPLY', 'jobs.read-switch.steps.N.env.OPS_APPLY'])
     assert.deepStrictEqual(where('${{ inputs.pack }}'), ['jobs.consistency.steps.N.env.OPS_PACK'])
     assert.deepStrictEqual(where('${{ inputs.cutover_mode }}'), ['jobs.branch-cutover.steps.N.env.OPS_CUTOVER_MODE'])
@@ -756,7 +767,7 @@ async function main() {
     for (const phrase of ['prune deletes only DESTINATION keys the old bucket lacks', 'topup (copies missing or older objects; never overwrites newer, never prunes or deletes)', 'No mode writes or deletes the old bucket.']) {
       assert.ok(mode.includes(phrase), `the mode help must say: ${phrase}`)
     }
-    assert.ok(/deleting it\n#\s+later is a manual owner step outside this workflow\./.test(WF_TEXT), 'ops.yml must say deleting the old bucket is a manual owner step')
+    assert.ok(WF_TEXT.includes('r2-apac-copy never writes to or deletes the old bucket; r2-old-retire') && WF_TEXT.includes('is the one task that retires it.'), 'ops.yml must say r2-old-retire is the one task that retires the old bucket')
   })
 
   await check('consistency-watch.yml: dispatch-only until R5 is ruled, the same read-only job as the consistency task, behind the production approval', () => {
@@ -953,15 +964,15 @@ async function main() {
     assert.ok(/const query = loadQuery\(name\)/.test(d) && /runWrangler\(wranglerArgs\(query\.sql\)/.test(d), 'the SQL comes only from the guarded query file')
   })
 
-  await check('ops scripts: REST calls are GETs, except one DELETE of the temporary Worker; nothing else fetches', () => {
+  await check('ops scripts: REST calls are GETs, except the temporary Worker DELETE and the old-bucket retire PUT and DELETE; nothing else fetches', () => {
     const methods = []
     for (const [file, text] of Object.entries(code)) {
       for (const m of text.matchAll(/\b(api|apiImpl|cfApi)\(\s*('[A-Z]+'|method\b)/g)) methods.push(`${file}: ${m[1]}(${m[2]}`)
       if (!file.startsWith('ops/scripts/ops-common')) assert.strictEqual(count(text, /\bfetch\(/g) - (file === 'ops/r2-copy-worker/src/index.mjs' ? 1 : 0), 0, `${file}: fetch`)
     }
     const kinds = methods.map((m) => m.replace(/^.*: /, ''))
-    assert.ok(kinds.every((k) => /\('GET'$|\('DELETE'$|\(method$/.test(k)), `REST methods: ${kinds}`)
-    assert.deepStrictEqual(methods.filter((m) => /DELETE/.test(m)), ["ops/scripts/ops-r2.mjs: apiImpl('DELETE'"])
+    assert.ok(kinds.every((k) => /\('GET'$|\('DELETE'$|\('PUT'$|\(method$/.test(k)), `REST methods: ${kinds}`)
+    assert.deepStrictEqual(methods.filter((m) => /DELETE|PUT/.test(m)), ["ops/scripts/ops-r2.mjs: apiImpl('DELETE'", "ops/scripts/ops-r2-retire.mjs: api('PUT'", "ops/scripts/ops-r2-retire.mjs: api('DELETE'"])
     const r2 = code['ops/scripts/ops-r2.mjs']
     assert.ok(r2.includes('const base = `/accounts/${accountId}/workers/scripts/${COPY_WORKER}`') && r2.includes("await apiImpl('DELETE', `${base}?force=true`)"), 'the DELETE targets the copy Worker only')
     assert.notStrictEqual(lib.COPY_WORKER, lib.PRODUCTION_WORKER)
@@ -1038,7 +1049,7 @@ async function main() {
         required.set(file, [...(required.get(file) || []), m[1].slice(1, -1)])
       }
     }
-    assert.deepStrictEqual([...dotted].sort(), ['CLOUDFLARE_API_TOKEN', 'GITHUB_EVENT_PATH', 'GITHUB_REF', 'GITHUB_RUN_ID', 'GITHUB_SHA', 'GITHUB_STEP_SUMMARY', 'OPS_CUTOVER_BASE_URL', 'OPS_R2_MODE'])
+    assert.deepStrictEqual([...dotted].sort(), ['CLOUDFLARE_API_TOKEN', 'CONFIRM', 'GITHUB_EVENT_PATH', 'GITHUB_REF', 'GITHUB_RUN_ID', 'GITHUB_SHA', 'GITHUB_STEP_SUMMARY', 'OPS_CUTOVER_BASE_URL', 'OPS_R2_MODE', 'OPS_R2_RETIRE_BUCKET', 'OPS_R2_RETIRE_MODE'])
     assert.strictEqual(indexed, 1, 'process.env[name] only in requireEnv')
     assert.strictEqual(spread, 1, 'the environment is passed on only to wrangler')
     // Every step gives its script what the script requires.

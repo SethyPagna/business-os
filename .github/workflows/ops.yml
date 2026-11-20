@@ -9,7 +9,7 @@
 #                 the production D1 database (adding a query = adding a file
 #                 there; the guard in ops/scripts/ops-sql-guard.mjs admits a
 #                 single SELECT / WITH ... SELECT and nothing else).
-#   r2-apac-copy  zero-loss copy of the business-os-assets bucket into
+#   r2-apac-copy  verify-only by default. Zero-loss copy of the business-os-assets bucket into
 #                 business-os-assets-apac through a temporary Worker that is
 #                 deleted at the end of every run. mode: copy (delta re-runs
 #                 skip identical objects) or verify-only (compares only: no
@@ -19,14 +19,19 @@
 #                 a newer destination object, never prunes or deletes).
 #                 Prune is mirror-only: copy mode, before the switch, and it
 #                 deletes only destination keys the old bucket no longer has.
-#                 No task writes to or deletes the old bucket; deleting it
-#                 later is a manual owner step outside this workflow.
+#                 r2-apac-copy never writes to or deletes the old bucket; r2-old-retire
+#                 (below) is the one task that retires it.
 #   r2-inventory  read-only census of BOTH R2 buckets (business-os-assets-apac
 #                 and the old business-os-assets): objects and bytes per key
 #                 class and per backup set, with GET requests only. No object
 #                 name is kept, printed or written (names can carry a person's
 #                 file name); the public log shows only whether each bucket was
 #                 read and how many list pages that took. Changes nothing.
+#   r2-old-retire retires the OLD bucket business-os-assets (hard-coded; any other name, and any name containing
+#                 apac, is refused). Needs production bound to business-os-assets-apac and the confirm word
+#                 r2-old-retire. mode plan: counts and bytes per top folder, no key names. expire: a lifecycle rule
+#                 that expires every object after 1 day. delete-bucket: deletes the bucket only when a fresh
+#                 listing returns 0 objects. The log carries counts only. ops-r2-retire.mjs holds the guards.
 #   secret-names  which secrets the production Worker has: NAMES and binding
 #                 types only, read with GET requests (Cloudflare never returns
 #                 a secret's value). Changes nothing.
@@ -132,6 +137,7 @@ on:
           - d1-export
           - r2-apac-copy
           - r2-inventory
+          - r2-old-retire
           - secret-names
           - settings-upsert
           - read-switch
@@ -139,14 +145,17 @@ on:
           - d1-physical-export
           - consistency
       mode:
-        description: r2-apac-copy only. Before the switch - copy (mirrors; its prune deletes only DESTINATION keys the old bucket lacks) or verify-only (compares, writes nothing). After the switch - topup (copies missing or older objects; never overwrites newer, never prunes or deletes). No mode writes or deletes the old bucket.
+        description: r2-apac-copy - verify-only (default; compares, writes nothing). copy and topup are refused once production is bound to the apac bucket. Before the switch - copy (mirrors; its prune deletes only DESTINATION keys the old bucket lacks) or verify-only (compares, writes nothing). After the switch - topup (copies missing or older objects; never overwrites newer, never prunes or deletes). No mode writes or deletes the old bucket. r2-old-retire - plan, expire or delete-bucket.
         required: true
-        default: copy
+        default: verify-only
         type: choice
         options:
-          - copy
           - verify-only
+          - copy
           - topup
+          - plan
+          - expire
+          - delete-bucket
       pack:
         description: consistency only - recent (Tier A, only what the last two business days touched, about 20 thousand rows read) or full (Tier B, the whole health pack, about 2 million rows read; start it when the shop is closed)
         required: true
@@ -332,6 +341,15 @@ jobs:
           cache: npm
           cache-dependency-path: cloudflare/package-lock.json
 
+      # copy and topup write to the apac bucket: refused once production reads it. Runs before anything is installed or deployed.
+      - name: Refuse copy and topup after the switch
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPS_OUT_DIR: ${{ runner.temp }}/ops-out
+          OPS_R2_MODE: ${{ inputs.mode }}
+        run: node ops/scripts/ops-r2-retire.mjs guard-copy-modes
+
       - name: Install packages (cloudflare)
         working-directory: cloudflare
         run: npm ci --no-audit --no-fund
@@ -421,6 +439,58 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ops-r2-inventory
+          path: ${{ runner.temp }}/ops-out/*.enc.json
+          retention-days: 3
+          if-no-files-found: ignore
+
+  r2-old-retire:
+    name: r2-old-retire
+    needs: gate
+    if: inputs.task == 'r2-old-retire'
+    runs-on: windows-latest
+    environment: production
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check the confirm word
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if (-not [string]::Equals($env:CONFIRM, 'r2-old-retire', [System.StringComparison]::Ordinal)) {
+            Write-Output '::error::Type r2-old-retire in the confirm box to run this job.'
+            exit 1
+          }
+
+      - name: Check out
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # REST calls only: no wrangler, so no package install.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # The bucket name below is the one constant the job accepts; the script refuses any other and anything naming apac.
+      - name: Plan, expire or delete the old bucket
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPS_OUT_DIR: ${{ runner.temp }}/ops-out
+          OPS_R2_RETIRE_BUCKET: business-os-assets
+          OPS_R2_RETIRE_MODE: ${{ inputs.mode }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: node ops/scripts/ops-r2-retire.mjs run
+
+      - name: Upload the encrypted file
+        if: always() && steps.checkout.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ops-r2-old-retire
           path: ${{ runner.temp }}/ops-out/*.enc.json
           retention-days: 3
           if-no-files-found: ignore
