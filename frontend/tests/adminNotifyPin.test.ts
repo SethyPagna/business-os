@@ -8,7 +8,7 @@ import {
   NOTIFICATION_SUCCESS_MS,
   subscribeToasts,
   type ToastRequest,
-} from '../src/app/appShellUtils.ts'
+} from '../src/components/shared/toastChannel.ts'
 import { pickAlertsToAnnounce, planAlertPopups } from '../src/components/shared/notificationAlerts.ts'
 
 const read = (path: string) => fs.readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -111,4 +111,9 @@ for (const lang of ['en', 'km']) {
 }
 const km = JSON.parse(fs.readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8'))
 assert.match(km.notification_pinned_hint, /[\u1780-\u17FF]/)
+
+// AppContext is shared with the public storefront: the pop-up channel it raises through must not live under src/app/
+// (that folder is the app-shell chunk, and importing it would drag the whole chunk into the storefront closure).
+assert.match(contextSource, /from '\.\/components\/shared\/toastChannel\.ts'/)
+assert.doesNotMatch(contextSource, /from '\.\/app\/appShellUtils\.ts'/)
 console.log('PASS admin notify pin')

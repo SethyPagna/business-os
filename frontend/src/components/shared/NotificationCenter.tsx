@@ -13,7 +13,7 @@ import Search from 'lucide-react/dist/esm/icons/search.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../app/AppContextCore.tsx'
-import { emitToast, NOTIFICATION_ALERT_MS } from '../../app/appShellUtils.ts'
+import { emitToast, NOTIFICATION_ALERT_MS } from './toastChannel.ts'
 import {
   pickAlertsToAnnounce,
   planAlertPopups,

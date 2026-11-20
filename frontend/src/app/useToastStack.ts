@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { NOTIFICATION_MAX_VISIBLE, subscribeToasts } from './appShellUtils.ts'
+import { NOTIFICATION_MAX_VISIBLE, subscribeToasts } from '../components/shared/toastChannel.ts'
 
 export type Toast = {
   key: string

@@ -1,4 +1,4 @@
-import { NOTIFICATION_MAX_VISIBLE } from '../../app/appShellUtils.ts'
+import { NOTIFICATION_MAX_VISIBLE } from './toastChannel.ts'
 
 // Device-local memory of which bell items already popped up, same shape and same repeat interval as
 // the bell's seen memory (notif_seen_alert_times_v1). Kept separate so a pop-up does not clear the badge.

@@ -27,8 +27,9 @@ function load(browser: boolean): (props: ToastProps) => ToastNode {
     visible: slot ? [{ key: 'k', message: slot.message, type: slot.type, duration: 1, fromSlot: true }] : [],
     dismiss() {}, pause() {}, resume() {},
   })
-  return new Function('React', 'useApp', 'useToastStack', 'getNotificationColor', 'getNotificationPrefix', 'createPortal', 'document', compiled + '\nreturn Notification')(
+  return new Function('React', 'useRef', 'useApp', 'useToastStack', 'getNotificationColor', 'getNotificationPrefix', 'createPortal', 'document', compiled + '\nreturn Notification')(
     React,
+    (initial: unknown) => ({ current: initial }),
     () => ({ t: translate }),
     useToastStack,
     () => 'bg-red-700',
