@@ -71,7 +71,7 @@
 //  set the prefix to the quarantine folder it printed (quarantine/<time>/)
 //  -- never leave the prefix empty, that would delete every file -- choose
 //  to delete objects 1 day after upload, and save. Remove the rule once the
-//  folder is empty. Never add a rule on business-os-assets (the spare photo copy).
+//  folder is empty. Never add a rule on business-os-assets (the old bucket); only r2-old-retire expire sets one there.
 // =====================================================================
 //
 // What it does

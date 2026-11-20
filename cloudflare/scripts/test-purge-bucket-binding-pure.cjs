@@ -267,7 +267,7 @@ async function main() {
     const mentions = lines.filter((line) => /business-os-assets(?!-apac)/.test(line))
     assert.equal(mentions.length, 1, mentions.join(' | '))
     assert.equal([...source.matchAll(/business-os-assets(?!-apac)/g)].length, 1)
-    assert.match(mentions[0], /Never add a rule on business-os-assets \(the spare photo copy\)/)
+    assert.match(mentions[0], /Never add a rule on business-os-assets \(the old bucket\); only r2-old-retire expire sets one there/)
   })
   check('step 1 adds the Workers Scripts Read row to the token', () => assert.match(source, /^\/\/ +Account \| Workers Scripts +\| Read$/m))
   check('step 2 is a fresh pull of main in the BusinessOS checkout', () => assert.match(source, /BusinessOS checkout[\s\S]{0,400}git pull/))
