@@ -18,10 +18,13 @@ import { AUDIT_LOG_RETENTION_FLOOR_DAYS, AUDIT_LOG_RETENTION_MAX_DAYS, parseAudi
 import {
   MAX_CONFIGURED_METHODS,
   MAX_METHOD_LENGTH,
+  PAYMENT_METHOD_KINDS_SETTING,
   mergePaymentMethods,
   parseConfiguredMethods,
   parseConfiguredMethodsStrict,
+  parsePaymentMethodKinds,
   paymentMethodKey,
+  resolvePaymentMethodKind,
   saleMethodsUsed,
 } from '../lib/paymentMethodRegistry'
 import { renameSalePaymentMethod } from '../lib/paymentSettlement'
@@ -314,6 +317,7 @@ type PaymentMethodSettingSnapshot = {
   raw: string
   updatedAt: string | null
   methods: string[]
+  kindsRaw: string | null
 }
 
 type PaymentMethodSaleRow = {
@@ -362,9 +366,9 @@ const VALID_PAYMENT_DETAILS_SQL = `(
   AND json_valid(s.payment_details) AND json_type(s.payment_details)='array'
 )`
 
-// An exchange refund credit row keeps the method it was booked under: a rename relabels tender the customer handed over, and the drawer
-// reads the credit by its own method. Appended to every row test below that decides what a rename rewrites or counts (alias `detail`).
-const REFUND_CREDIT_UNTOUCHED_SQL = `AND json_extract(detail.value,'$.refund_credit') IS NOT 1`
+// An exchange refund credit row keeps the method it was booked under when a rename would change its drawer kind (the drawer reads the credit
+// by its own method). When the kind is kept (@renameCredits=1) it is the same method under a new name, so it is renamed with the rest. Appended to every row test below that decides what a rename rewrites or counts (alias `detail`).
+const REFUND_CREDIT_UNTOUCHED_SQL = `AND (@renameCredits=1 OR json_extract(detail.value,'$.refund_credit') IS NOT 1)`
 
 const PAYMENT_DETAILS_RENAME_SQL = `(
   SELECT json_group_array(json(
@@ -424,7 +428,8 @@ const PAYMENT_METHOD_SEARCH_SQL = normalizedHaystackSql(`(
 // A sale whose ONLY source-method row is an exchange refund credit: the rename leaves that row alone, so writing the sale would change
 // nothing but bump its revision (and break a pending undo). It is neither counted (preview, audit) nor written.
 const PAYMENT_METHOD_CREDIT_ONLY_SQL = `(
-  ${VALID_PAYMENT_DETAILS_SQL} AND json_array_length(s.payment_details)>0
+  @renameCredits=0
+  AND ${VALID_PAYMENT_DETAILS_SQL} AND json_array_length(s.payment_details)>0
   AND NOT EXISTS(
     SELECT 1 FROM json_each(s.payment_details) detail
     WHERE trim(COALESCE(json_extract(detail.value,'$.method'),'')) IN (SELECT CAST(value AS TEXT) FROM json_each(@sourceVariants))
@@ -490,9 +495,11 @@ function paymentMethodListForWrite(raw: unknown): string[] | null {
 }
 
 async function loadPaymentMethodSetting(env: Env): Promise<PaymentMethodSettingSnapshot | null> {
-  const row = await getDb(env).prepare(
-    "SELECT value,updated_at FROM settings WHERE key='pos_payment_methods'",
-  ).get<{ value: string; updated_at: string | null }>()
+  const settingRows = await getDb(env).prepare(
+    "SELECT key,value,updated_at FROM settings WHERE key IN ('pos_payment_methods','pos_payment_method_kinds')",
+  ).all<{ key: string; value: string; updated_at: string | null }>()
+  const row = settingRows.find((entry) => entry.key === 'pos_payment_methods')
+  const kindsRow = settingRows.find((entry) => entry.key === PAYMENT_METHOD_KINDS_SETTING)
   const parsed = parseConfiguredMethodsStrict(row?.value)
   if (!row || !parsed.ok) return null
   let supplied: unknown
@@ -500,7 +507,7 @@ async function loadPaymentMethodSetting(env: Env): Promise<PaymentMethodSettingS
   if (!Array.isArray(supplied) || supplied.length !== parsed.methods.length || supplied.some((value) => !validMethodName(value))) return null
   const suppliedKeys = supplied.map(paymentMethodKey)
   if (new Set(suppliedKeys).size !== suppliedKeys.length) return null
-  return { raw: row.value, updatedAt: row.updated_at ?? null, methods: parsed.methods }
+  return { raw: row.value, updatedAt: row.updated_at ?? null, methods: parsed.methods, kindsRaw: kindsRow?.value ?? null }
 }
 
 function paymentSummaryMatches(raw: unknown, source: string): { matches: number; split: boolean } {
@@ -538,10 +545,17 @@ function malformedPaymentDetails(raw: unknown): boolean {
   })
 }
 
+/** A rename keeps the drawer kind (cash to cash, or non-cash to non-cash): the exchange refund credit is then the same method under a new name. */
+function renameKeepsDrawerKind(setting: PaymentMethodSettingSnapshot, from: string, to: string): boolean {
+  const kinds = parsePaymentMethodKinds(setting.kindsRaw)
+  return resolvePaymentMethodKind(from, kinds) === resolvePaymentMethodKind(to, kinds)
+}
+
 async function loadPaymentMethodCandidates(
   env: Env,
   from: string,
   to: string,
+  renameCredits: boolean,
 ): Promise<PaymentMethodImpactSummary> {
   const db = getDb(env)
   const source = paymentMethodKey(from)
@@ -582,7 +596,7 @@ async function loadPaymentMethodCandidates(
         const parsed = JSON.parse(String(row.payment_details)) as Array<Record<string, unknown>>
         for (const detail of parsed) labels.push(String(detail.method ?? '').trim())
         const sourceRows = Array.isArray(parsed) ? parsed.filter((detail) => paymentMethodKey(String(detail.method ?? '').trim()) === source) : []
-        creditOnly = Array.isArray(parsed) && parsed.length > 0 && sourceRows.length > 0 && sourceRows.every((detail) => detail.refund_credit === true)
+        creditOnly = !renameCredits && Array.isArray(parsed) && parsed.length > 0 && sourceRows.length > 0 && sourceRows.every((detail) => detail.refund_credit === true)
       }
       let sourceMatched = false
       for (const label of labels) {
@@ -608,7 +622,7 @@ async function loadPaymentMethodCandidates(
         }
         continue
       }
-      const renamed = renameSalePaymentMethod(row.payment_method, row.payment_details, from, to)
+      const renamed = renameSalePaymentMethod(row.payment_method, row.payment_details, from, to, renameCredits)
       if (!renamed.ok) {
         if (renamed.relevant) {
           summary.candidateCount += 1
@@ -650,12 +664,27 @@ async function loadPaymentMethodCandidates(
  * over a low-cardinality column sees exactly the same method set as a full
  * scan of the JSON would, without reading 15k JSON blobs.
  */
+/**
+ * The methods sales used, for the unregistered check and its backfill. An exchange refund credit row is left out: it keeps the method it was
+ * booked under when a rename would change its drawer kind, and that old name must not be offered back to the checkout list. A sale that
+ * carries a credit contributes the methods of its other rows; every other sale contributes its summary column, as before.
+ */
+const USED_PAYMENT_METHODS_SQL = `
+  SELECT payment_method FROM sales
+  WHERE payment_method IS NOT NULL AND trim(payment_method) != ''
+    AND NOT (payment_details LIKE '%refund_credit%' AND json_valid(payment_details) AND json_type(payment_details)='array')
+  UNION
+  SELECT trim(json_extract(detail.value,'$.method')) AS payment_method
+  FROM sales s, json_each(s.payment_details) detail
+  WHERE s.payment_details LIKE '%refund_credit%' AND json_valid(s.payment_details) AND json_type(s.payment_details)='array'
+    AND json_type(detail.value)='object' AND json_extract(detail.value,'$.refund_credit') IS NOT 1
+    AND json_type(detail.value,'$.method')='text' AND trim(json_extract(detail.value,'$.method')) != ''
+`
+
 app.get('/payment-methods/unregistered', async (c) => {
   const denied = denyUnlessPaymentMethodRead(c)
   if (denied) return denied
-  const rows = await getDb(c.env).prepare(
-    "SELECT DISTINCT payment_method FROM sales WHERE payment_method IS NOT NULL AND trim(payment_method) != ''",
-  ).all<{ payment_method: string }>()
+  const rows = await getDb(c.env).prepare(USED_PAYMENT_METHODS_SQL).all<{ payment_method: string }>()
   const configured = parseConfiguredMethods((await getDb(c.env).prepare("SELECT value FROM settings WHERE key = 'pos_payment_methods'").get<{ value: string }>())?.value)
   const used = rows.flatMap((row) => saleMethodsUsed({ payment_method: row.payment_method }))
   const merged = mergePaymentMethods(configured, used)
@@ -667,9 +696,7 @@ app.post('/payment-methods/backfill', async (c) => {
   if (denied) return denied
   const user = c.get('user')
   const db = getDb(c.env)
-  const rows = await db.prepare(
-    "SELECT DISTINCT payment_method FROM sales WHERE payment_method IS NOT NULL AND trim(payment_method) != ''",
-  ).all<{ payment_method: string }>()
+  const rows = await db.prepare(USED_PAYMENT_METHODS_SQL).all<{ payment_method: string }>()
   const configured = parseConfiguredMethods((await db.prepare("SELECT value FROM settings WHERE key = 'pos_payment_methods'").get<{ value: string }>())?.value)
   const merged = mergePaymentMethods(configured, rows.flatMap((row) => saleMethodsUsed({ payment_method: row.payment_method })))
   if (!merged.changed) return c.json({ methods: merged.methods, added: [] })
@@ -703,7 +730,7 @@ app.get('/payment-methods/impact', async (c) => {
   if (!setting) {
     return c.json({ error: 'Configured payment methods are unreadable. Repair them before renaming a method.', code: 'invalid_payment_methods_setting' }, 409)
   }
-  const impact = await loadPaymentMethodCandidates(c.env, from, to)
+  const impact = await loadPaymentMethodCandidates(c.env, from, to, renameKeepsDrawerKind(setting, from, to))
   if (impact.variantLimitExceeded) {
     return c.json({ error: 'Too many distinct historical spellings match this payment method. Repair the labels before renaming it.', code: 'payment_method_variant_limit' }, 409)
   }
@@ -803,7 +830,7 @@ app.post('/payment-methods/replace', async (c) => {
     ? await db.prepare('SELECT COALESCE(SUM(revision),0) AS revision_sum FROM sale_write_revisions').get<{ revision_sum: number }>()
     : null
   const expectedSaleRevisionSum = Number(saleRevisionRow?.revision_sum || 0)
-  const impact = await loadPaymentMethodCandidates(c.env, from, to)
+  const impact = await loadPaymentMethodCandidates(c.env, from, to, renameKeepsDrawerKind(setting, from, to))
   if (impact.variantLimitExceeded) {
     return c.json({ error: 'Too many distinct historical spellings match this payment method. Repair the labels before renaming it.', code: 'payment_method_variant_limit' }, 409)
   }
@@ -819,6 +846,7 @@ app.post('/payment-methods/replace', async (c) => {
   const stamp = new Date().toISOString()
   const operationId = crypto.randomUUID()
   const nextRaw = JSON.stringify(next)
+  const renameCredits = renameKeepsDrawerKind(setting, from, to) ? 1 : 0
   const sourceVariants = JSON.stringify(impact.sourceVariants)
   const identityVariants = JSON.stringify(impact.identityVariants)
   // The configured-methods before/after already existed, but only nested in
@@ -847,7 +875,7 @@ app.post('/payment-methods/replace', async (c) => {
               ${scope === 'linked' ? `AND COALESCE((SELECT SUM(revision) FROM sale_write_revisions),0)=@expectedSaleRevisionSum
               AND NOT EXISTS(SELECT 1 FROM sales s WHERE ${PAYMENT_METHOD_MALFORMED_RELEVANT_SQL})` : ''}
             THEN 1 ELSE 0 END`,
-      params: { expectedRaw: setting.raw, expectedSaleRevisionSum, sourceVariants, identityVariants },
+      params: { expectedRaw: setting.raw, expectedSaleRevisionSum, sourceVariants, identityVariants, renameCredits },
     },
     {
       sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,old_value,new_value,device_name,device_tz,created_at)
@@ -858,7 +886,7 @@ app.post('/payment-methods/replace', async (c) => {
               ${requestDeviceColumnSql('@userId', 'device_name', '(SELECT device_name FROM user_sessions WHERE user_id=@userId AND revoked_at IS NULL ORDER BY last_seen_at DESC,id DESC LIMIT 1)')},
               ${requestDeviceColumnSql('@userId', 'device_tz', '(SELECT device_tz FROM user_sessions WHERE user_id=@userId AND revoked_at IS NULL ORDER BY last_seen_at DESC,id DESC LIMIT 1)')},
               @stamp`,
-      params: { userId: user?.id ?? null, userName: actorSnapshot(user), operationId, details: JSON.stringify(auditDetails), sourceVariants, identityVariants, stamp, ...paymentMethodChange, ...requestDeviceParams() },
+      params: { userId: user?.id ?? null, userName: actorSnapshot(user), operationId, details: JSON.stringify(auditDetails), sourceVariants, identityVariants, renameCredits, stamp, ...paymentMethodChange, ...requestDeviceParams() },
     },
     {
       sql: `INSERT INTO settings(key,value,updated_at) VALUES('pos_payment_methods',@value,@stamp)
@@ -874,7 +902,7 @@ app.post('/payment-methods/replace', async (c) => {
               search_normalized=${PAYMENT_METHOD_SEARCH_SQL},
               updated_at=@stamp
             WHERE ${PAYMENT_METHOD_RENAME_WHERE}`,
-      params: { sourceVariants, identityVariants, target: to, stamp },
+      params: { sourceVariants, identityVariants, renameCredits, target: to, stamp },
     })
   }
   statements.push({ sql: 'DELETE FROM sale_mutation_guards', params: {} })

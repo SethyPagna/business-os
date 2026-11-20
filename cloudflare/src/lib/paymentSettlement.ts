@@ -416,6 +416,7 @@ export function renameSalePaymentMethod(
   paymentDetailsRaw: unknown,
   from: string,
   target: string,
+  renameCredits = false,
 ): PaymentRenameResult {
   const fromKey = paymentMethodKey(from)
   const originalDetails = paymentDetailsRaw == null ? '' : String(paymentDetailsRaw)
@@ -459,9 +460,10 @@ export function renameSalePaymentMethod(
   const next = parsed.map((entry) => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry
     const detail = { ...(entry as Record<string, unknown>) }
-    // An exchange refund credit keeps the method it was booked under: the Settings rename skips it, as its SQL does.
-    if (paymentMethodKey(detail.method) === fromKey && detail.refund_credit !== true) {
-      detailMatches += 1
+    // An exchange refund credit keeps the method it was booked under unless the rename keeps the drawer kind (renameCredits); its SQL twin does the same.
+    if (paymentMethodKey(detail.method) === fromKey && (renameCredits || detail.refund_credit !== true)) {
+      // Counted like the SQL write and the audit row: a row already spelled as the target is not a line the rename writes.
+      if (String(detail.method ?? '').trim() !== target) detailMatches += 1
       if (String(detail.method ?? '') !== target) detailsChanged = true
       detail.method = target
     }

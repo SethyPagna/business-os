@@ -281,5 +281,17 @@ console.log('PASS case-only rename rebuilds split summary, preserves repeated te
   assert.equal(creditOnly.ok, true)
   assert.equal(creditOnly.detailMatches, 0)
   assert.deepEqual(JSON.parse(creditOnly.paymentDetails), [credit])
+  // A rename that keeps the drawer kind (cash to cash) is the same method under a new name: the credit follows, its flag and amounts untouched.
+  const renamedWithCredit = renameSalePaymentMethod('Cash', stored, 'Cash', 'Cash USD', true)
+  assert.deepEqual(JSON.parse(renamedWithCredit.paymentDetails), [{ ...credit, method: 'Cash USD' }, { method: 'Cash USD', amount_usd: 3, amount_khr: 0 }])
+  assert.equal(renamedWithCredit.paymentMethod, 'Cash USD')
+  assert.equal(renamedWithCredit.detailMatches, 2)
+  const creditOnlyRenamed = renameSalePaymentMethod('Cash', JSON.stringify([credit]), 'Cash', 'Cash USD', true)
+  assert.equal(creditOnlyRenamed.changed, true)
+  assert.deepEqual(JSON.parse(creditOnlyRenamed.paymentDetails), [{ ...credit, method: 'Cash USD' }])
+  // A case-only rename counts only the lines it writes, as the SQL write and the audit row do: a row already spelled as the target is not one.
+  const caseOnly = renameSalePaymentMethod('cash + Cash', JSON.stringify([{ ...credit, method: 'cash' }, { method: 'Cash', amount_usd: 3, amount_khr: 0 }]), 'cash', 'Cash', true)
+  assert.equal(caseOnly.detailMatches, 1)
+  assert.deepEqual(JSON.parse(caseOnly.paymentDetails), [credit, { method: 'Cash', amount_usd: 3, amount_khr: 0 }])
   console.log('PASS refund credit: kept with its flag by settle and correction, never invented, dropped or changed; the rename skips it')
 }
