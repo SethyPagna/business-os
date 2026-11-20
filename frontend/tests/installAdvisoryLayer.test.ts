@@ -17,7 +17,7 @@ for (const path of ['components/shared/BackgroundImportTracker.tsx', 'components
   assert.ok(layers.length > 0, `read live shell widget layers: ${path}`)
   assert.ok(layers.every(layer => layer < advisoryLayer), 'advisories remain above ordinary shell widgets')
 }
-assert.match(app, /const classes = `fixed[^\n]*z-\[1100\]/, 'action toasts retain their existing layer')
+assert.match(app, /className="fixed[^\n]*z-\[1100\] flex/, 'action toasts retain their existing layer')
 assert.match(app, /className="fixed inset-x-0 top-0 z-\[1500\]/, 'update/restart alert retains its existing layer')
 assert.ok(Number(modalLayers[1]) < 1100 && advisoryLayer < 1100)
 assert.match(app, /BOTTOM_STACK_CLEARS_NAV_CLASS = 'bottom-\[calc\(3\.55rem\+env\(safe-area-inset-bottom\)\)\]'/)
