@@ -30,7 +30,7 @@ export const tasksFixtureSource = String.raw`
   const admin = role === 'admin'
   const row = (id, over) => ({ id, branch_id: 1, title: '', status: 'open', revision: 0, issued_at: '2026-11-18T03:00:00.000Z', ...(admin ? { issued_by: 'boss' } : {}), closed_at: null, total: 4, done: 0, removed: 0,
     selection: { kind: 'ids' }, picked_up_by: null, picked_up_at: null, mine: false, can_pickup: true, can_release: false, can_close: admin, ...over })
-  const closedTask = row('t4', { status: 'closed', total: 10, done: 5, closed_at: '2026-11-19T05:00:00.000Z', at_close: true, can_pickup: false, can_close: false, revision: 5 })
+  const closedTask = row('t4', { status: 'closed', total: 300, done: 300, closed_at: '2026-11-19T05:00:00.000Z', at_close: true, can_pickup: false, can_close: false, revision: 5 })
   const legacyTask = row('t5', { status: 'closed', total: 10, done: 5, closed_at: '2026-11-19T04:00:00.000Z', can_pickup: false, can_close: false, revision: 5 })
   const board = boardKind === 'empty' ? [] : [
     row('t1', { title: longTitle }),

@@ -95,7 +95,7 @@ export default function InventoryCheckTasksList({ board, t, canWork, busy, onOpe
           <button type="button" data-task-name title={name} className="flex min-h-11 min-w-0 flex-1 items-center border-0 bg-transparent p-0 text-left text-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"><span className="block min-w-0 flex-1 truncate font-semibold leading-relaxed">{name}</span></button>
           <span className="ml-auto xl:order-last xl:ml-0 xl:flex xl:w-40 xl:shrink-0 xl:justify-end"><TaskActions task={task} t={t} busy={busy} canWork={canWork} onPickup={() => onPickup(task)} onRelease={() => onRelease(task)} onClose={() => onClose(task)} /></span>
           <div className="flex min-w-0 basis-full flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] leading-relaxed text-gray-600 xl:contents xl:text-xs dark:text-gray-300">
-            <span className="inline-flex items-center gap-1 xl:w-44 xl:shrink-0" data-task-progress>
+            <span className="inline-flex items-center gap-1 xl:w-48 xl:shrink-0" data-task-progress>
               <ProgressRing figure={false} progress={{ total: task.total, done: task.done, issue: 0, unstarted: Math.max(0, task.total - task.done) }} t={t} />
               <span>{progress}{task.removed > 0 ? ` · ${removedText(t, task.removed)}` : ''}</span>
             </span>

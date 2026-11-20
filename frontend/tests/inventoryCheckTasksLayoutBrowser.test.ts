@@ -134,7 +134,7 @@ await browser.run('PASS count tasks layout: board rows 2 lines on a phone / 1 fr
     await noOverflow(`${where} empty board`)
     if (lang === 'km') await browser.khmerRoom(`${where} empty board`, '[data-inventory-check-page]', 1)
 
-    // ---- a closed task with frozen figures ("5/10 counted at close", the longest progress cell): one line from lg, no cell wraps inside itself ----
+    // ---- a closed task with frozen figures ("300/300 counted at close", the longest progress cell): one line from lg, no cell wraps inside itself ----
     await browser.open(width, `lang=${lang}&role=${role}&section=tasks&board=closed`, `document.querySelector('[data-inventory-check-task="t4"]')`, 700)
     await noOverflow(`${where} closed board`)
     assert.equal(await browser.evaluate<number>(`document.querySelectorAll('[data-inventory-check-task]').length`), 4, `${where}: three tasks and the closed one`)
@@ -143,7 +143,7 @@ await browser.run('PASS count tasks layout: board rows 2 lines on a phone / 1 fr
       assert.equal(row.lines, phone ? 2 : 1, `${where}: task ${row.id} is ${phone ? 2 : 1} line(s) (${JSON.stringify(row)})`)
       assert.deepEqual(row.wraps, [], `${where}: task ${row.id}: no cell wraps inside itself`)
     }
-    assert.equal(closedRows.find(row => row.id === 't4')?.text, pack.inventory_check_task_progress_closed.replace('{done}', '5').replace('{total}', '10'), `${where}: the closed row reads its frozen figures`)
+    assert.equal(closedRows.find(row => row.id === 't4')?.text, pack.inventory_check_task_progress_closed.replace('{done}', '300').replace('{total}', '300'), `${where}: the closed row reads its frozen figures`)
 
     // ---- Issue mode (admin only): the Issue bar, the pick boxes and the name beside them ----
     if (role === 'admin') {
