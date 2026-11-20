@@ -26,7 +26,7 @@ There's nothing else to deploy — no Docker image, no separate server process.
   wrangler d1 create business-os
   wrangler d1 create business-os-import   # import staging (binding IMPORT_DB)
   wrangler kv namespace create CACHE
-  wrangler r2 bucket create business-os-assets
+  wrangler r2 bucket create business-os-assets-apac --location apac
   wrangler queues create business-os-import
   wrangler queues create business-os-import-dlq
   wrangler queues create business-os-media

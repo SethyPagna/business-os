@@ -68,7 +68,7 @@ app.get('/', async (c) => {
       afterHourLocal: getPlanLimits(c.env).scheduledBackupAfterHourLocal,
       keep: CLOUDFLARE_BACKUP_KEEP,
       keepScheduled: getPlanLimits(c.env).scheduledBackupKeep,
-      destination: 'R2 business-os-assets/backups/cloudflare/',
+      destination: 'R2 business-os-assets-apac/backups/cloudflare/',
     },
   })
 })

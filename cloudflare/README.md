@@ -41,7 +41,7 @@ Before the first remote deploy, create or verify:
 ```sh
 wrangler d1 create business-os
 wrangler kv namespace create CACHE
-wrangler r2 bucket create business-os-assets
+wrangler r2 bucket create business-os-assets-apac --location apac
 wrangler queues create business-os-import
 wrangler queues create business-os-media
 ```
