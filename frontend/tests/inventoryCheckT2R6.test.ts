@@ -42,14 +42,6 @@ assert.equal(REFUSAL_MESSAGES.inventory_check_task_limit.key, 'inventory_check_e
 assert.equal(REFUSAL_MESSAGES.inventory_check_task_limit.fallback, en.inventory_check_error_task_limit)
 assert.equal(taskRefusalSentence(tEn, { code: 'inventory_check_task_too_many', open: 3, limit: 4, total: 5 }), '5 products. A task holds at most 4. Narrow the selection.', 'the other refusals are untouched')
 
-// 3. The wiring: both surfaces use progressOrAllText, and the header line says the numbers as well.
-assert.ok(read('../src/components/inventory/InventoryCheckTasksList.tsx').includes('progressOrAllText(t, task)'), 'the board row')
-assert.ok(read('../src/components/inventory/InventoryChecksPage.tsx').includes('progressOrAllText(t, taskRow)'), 'the task view bar')
-assert.ok(read('../src/components/inventory/InventoryChecksPage.tsx').includes('openTasksLimitText(t, openTasks, tasks.board.capabilities.maxOpenTasks)'), 'the pre-emptive header line')
-
-// 4. The figures reach the screen: the transport's error carries them (before this, only the code did, so no figure was ever shown in production).
-const http = read('../src/api/http.ts')
-assert.ok(http.includes("parsed.code.startsWith('inventory_check_task_')"), 'createApiError keeps count-task figures')
-for (const key of ["'open', 'limit', 'total'", 'error.atLeast = true', 'error.pickedUpBy = parsed.pickedUpBy', 'error.mine = parsed.mine']) assert.ok(http.includes(key), `createApiError carries ${key}`)
+// The wiring (which surface says "at close", the header line, and the figures the transport keeps) is asserted by running code: inventoryCheckTasksBoard, inventoryCheckTasksRefusedMounted and inventoryCheckTaskTransport.
 
 console.log('inventoryCheckT2R6 ok')

@@ -26,8 +26,7 @@ const task = transport.slice(transport.indexOf('export type InventoryCheckTask =
 assert.match(task, /reopened\?: \{ at: string; reason: string; by\?: string \}/, 'InventoryCheckTask carries reopened')
 assert.ok(!/task as InventoryCheckTask &/.test(list), 'the list no longer casts the task')
 
-// 4. A missing total never draws "Products: " with nothing after it.
-assert.match(page, /typeof listTask\.total === 'number' \? <span[^>]*>\{t\('products'\)\}: \{listTask\.total\}<\/span> : null/, 'the off-board total is drawn only when it is a number')
+// 4. A missing total never draws "Products: " with nothing after it (asserted mounted by inventoryCheckTaskOffBoard).
 assert.ok(!/String\(item\?\.progress\?\.total \?\? ''\)/.test(page), 'the issued toast never substitutes an empty count')
 assert.ok(typeof en.inventory_check_task_issued_plain === 'string' && /[ក-៿]/.test(km.inventory_check_task_issued_plain ?? ''), 'the count-less toast has both packs')
 

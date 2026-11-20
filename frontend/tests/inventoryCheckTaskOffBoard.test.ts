@@ -41,6 +41,15 @@ assert.equal(pulsing(surface), 0, 'a failed board read does not leave the bar pu
 assert.ok(surface.find(node => node.getAttribute('data-task-off-board') !== null, 'plain line').textContent.includes(`${words.products}: 2`))
 await surface.unmount()
 
+// the list answers the task without a total: never "Products: " with nothing after it (and never "Products: undefined")
+world.omitTaskTotal = true
+surface = await openOldTask()
+const bare = surface.find(node => node.getAttribute('data-task-off-board') !== null, 'plain line').textContent
+assert.ok(bare.includes(words.shift_status_closed), `the plain line still says the task is closed (${bare})`)
+assert.ok(!bare.includes(`${words.products}:`) && !bare.includes('undefined') && !bare.includes('NaN'), `a missing total draws no Products figure (${bare})`)
+world.omitTaskTotal = false
+await surface.unmount()
+
 delete world.failures.sessionItems
 forgetDeviceDrafts()
 await world.harness.close()
