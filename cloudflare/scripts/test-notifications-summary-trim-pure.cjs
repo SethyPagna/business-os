@@ -270,7 +270,9 @@ async function main() {
     const other = await summary(STOCK_ONLY)
     assert.equal(statements('inventory'), 0, 'another user is served the refreshed entry')
     assert.equal(section(other, 'inventory').count, 331)
-    assert.equal(other.json.generatedAt, fresh.json.generatedAt)
+    // The as-of time is the oldest compute time among the sections THIS user was served. The admin also reads the sales and portal sections, which the fresh read
+    // did not recompute (their versions did not move), so the admin's as-of is the older one; the inventory-only user reads only sections the fresh read recomputed.
+    assert.ok(Date.parse(other.json.generatedAt) >= Date.parse(fresh.json.generatedAt), 'a user served only recomputed sections is never shown an older as-of than the admin')
   })
 
   await check('B2: ?fresh=1 is bounded by real writes: repeated fresh requests with no write in between compute once, a bump of a version the section reads recomputes, an unrelated bump does not', async () => {
@@ -318,15 +320,19 @@ async function main() {
 
   await check('the lifetime is the plan\'s, not a literal: just inside it is a hit, at it is a recompute, and the as-of time is the oldest section', async () => {
     const t0 = Date.parse((await ownWriteFresh()).json.generatedAt)
+    // t0 is the OLDEST section's compute time (the sales, portal and imports sections are plan-lifetime sections too and a fresh read leaves them alone when their version did not move),
+    // so an entry computed after it is younger by however long the read took. The expiry instant is measured from the real clock after that read, or a slow machine
+    // lands "past the lifetime" before the younger entry has expired (the one-off red this assertion showed under load).
+    const tAfterRead = Date.now()
     try {
       at(t0 + ttlSeconds * 1000 - 1000)
       const inside = await summary()
       assert.equal(statements('inventory'), 0, `inside ${ttlSeconds} s: served from the cache`)
       assert.equal(Date.parse(inside.json.generatedAt), t0, 'as of the compute time')
-      at(t0 + ttlSeconds * 1000 + 1000)
+      at(tAfterRead + ttlSeconds * 1000 + 1000)
       const expired = await summary()
       assert.equal(statements('inventory'), 1, `past ${ttlSeconds} s: recomputed`)
-      assert.equal(Date.parse(expired.json.generatedAt), t0 + ttlSeconds * 1000 + 1000)
+      assert.equal(Date.parse(expired.json.generatedAt), tAfterRead + ttlSeconds * 1000 + 1000)
     } finally { restoreClock() }
     await ownWriteFresh() // the entries written at the faked later time must not outlive the fake clock
     console.log(`  measured ${env.PLAN_TIER}: bell lifetime ${ttlSeconds} s`)
@@ -429,6 +435,9 @@ async function main() {
 
   await check('the sales section follows the sales READ rule: view-only sees it, a full user with sales:view off does not', async () => {
     seedStockFixture(raw.db, () => raw.db.prepare("INSERT INTO sales (receipt_number, total_usd, sale_status) VALUES ('R-1', 12.5, 'awaiting_payment')").run())
+    // The sales section is a plan-lifetime section now (6.0.x, the bell's 5 minutes): a sale's bump plus one fresh read shows the new row; every later plain read serves that entry.
+    await cacheModule.bumpVersion(env, 'sales')
+    await freshSummary(ADMIN)
     const viewOnly = { id: 4, username: 'viewer', name: 'Viewer', role_code: 'staff', permissions: JSON.stringify({ sales: 'view' }) }
     const fullButHidden = { id: 5, username: 'hidden', name: 'Hidden', role_code: 'staff', permissions: JSON.stringify({ sales: true, 'sales:view': false }) }
     const full = { id: 6, username: 'full', name: 'Full', role_code: 'staff', permissions: JSON.stringify({ sales: true }) }
@@ -443,6 +452,8 @@ async function main() {
   await check('the delivery queue reads the delivery tag: a tagged sale is listed, a cancelled one is not', async () => {
     seedStockFixture(raw.db, () => raw.db.exec(`INSERT INTO sales (receipt_number, total_usd, sale_status, delivery_pending) VALUES
       ('R-D1', 9, 'completed', 1), ('R-D2', 9, 'cancelled', 1), ('R-D3', 9, 'completed', 0)`))
+    await cacheModule.bumpVersion(env, 'sales')
+    await freshSummary(ADMIN)
     const ids = (section(await summary(ADMIN), 'sales').items || []).map((item) => item.label)
     assert.ok(ids.includes('R-D1'), `a Completed sale with the delivery tag is in the delivery queue (${ids})`)
     assert.ok(!ids.includes('R-D2') && !ids.includes('R-D3'), 'a cancelled tagged sale and an untagged sale are not')

@@ -11,7 +11,7 @@ import { parseRotationState, CRON_HEAVY_STATE_KEY } from '../lib/cronRotation'
 import { scheduledBackupMissing } from '../lib/backupSchedule'
 import { requestMetricsOf } from '../lib/requestMetrics'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
-import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { cachedJsonResponse, getVersionWithFallback, getVersionsWithFallback } from '../lib/cache'
 import { cacheIdentity } from '../lib/cache'
 import { cacheKeyRequest, isUnsafeVersion } from '../lib/cacheKey'
 import { cachedPhoneJson } from '../lib/phoneCache'
@@ -225,6 +225,8 @@ type SectionCache = (<T>(name: string, namespaces: string[], inputs: string, pro
   /** When the oldest data served by this request was computed (ISO); null when no plan-lifetime section took part. */
   oldestComputedAt(): string | null
 }
+// Every data version a plan-lifetime section is stamped with (see sectionCacheFor).
+const BELL_VERSION_NAMESPACES = ['products', 'stock', 'sales', 'customers']
 // A fixed token in the place a data version takes in the key: the entry must not move when a version does.
 const TTL_ONLY_KEY_VERSION = 'bell-ttl'
 
@@ -232,10 +234,17 @@ const TTL_ONLY_KEY_VERSION = 'bell-ttl'
 // (products, settings and the rest are shared by two or three of them).
 function sectionCacheFor(c: NotificationContext, user: PhoneActor): SectionCache {
   const versionReads = new Map<string, Promise<string>>()
+  // The versions the plan-lifetime sections are stamped with are read together: a namespace KV does not hold falls back to ONE D1 statement for all of them,
+  // not one call per namespace (the sales, imports and portal sections added two namespaces to the bell's cold read; the read-budget gate counts calls).
+  let bellVersions: Promise<string[]> | null = null
   const versionOf = (namespace: string) => {
     let read = versionReads.get(namespace)
     if (!read) {
-      read = getVersionWithFallback(c.env, namespace)
+      const at = BELL_VERSION_NAMESPACES.indexOf(namespace)
+      if (at >= 0) {
+        bellVersions ??= getVersionsWithFallback(c.env, BELL_VERSION_NAMESPACES)
+        read = bellVersions.then((tokens) => tokens[at])
+      } else read = getVersionWithFallback(c.env, namespace)
       versionReads.set(namespace, read)
     }
     return read
@@ -671,9 +680,12 @@ function importPermissionForType(type: string): string {
 // enough that it doesn't turn into a permanent nag for an import someone
 // already looked at via the Dashboard's own warnings card) and to the
 // user's permitted import types.
-async function buildImportsSection(env: Env, user: SessionUser): Promise<NotificationSection | null> {
+type ImportWarningRow = { id: string; type: string; status: string; warning_count: number; created_at: string; finished_at: string | null }
+
+// The rows are the same for everyone (the per-user permission filter runs after, in importsSectionFor), so they are what the plan-lifetime cache stores.
+async function readImportWarningRows(env: Env): Promise<ImportWarningRow[]> {
   const db = getDb(env)
-  const rows = await db.prepare(`
+  return db.prepare(`
     SELECT id, type, status, warning_count, created_at, finished_at
     FROM import_jobs
     WHERE warning_count > 0
@@ -681,8 +693,10 @@ async function buildImportsSection(env: Env, user: SessionUser): Promise<Notific
       AND COALESCE(finished_at, updated_at) > datetime('now', '-2 days')
     ORDER BY COALESCE(finished_at, updated_at) DESC
     LIMIT 50
-  `).all<{ id: string; type: string; status: string; warning_count: number; created_at: string; finished_at: string | null }>()
+  `).all<ImportWarningRow>()
+}
 
+function importsSectionFor(rows: ImportWarningRow[], user: SessionUser): NotificationSection | null {
   const visible = rows.filter((row) => hasPermission(user, importPermissionForType(row.type)))
   if (!visible.length) return null
 
@@ -890,7 +904,7 @@ app.get('/summary', async (c) => {
   }
   // The section lists receipt numbers and totals, so it follows the sales READ rule (reports.ts, sales.ts canReadSales):
   // a view-only user sees it, a full user whose sales:view was switched off does not.
-  if (preferences.salesEnabled && getActionTier(user, 'sales', 'view') !== 'none') tasks.push(buildSalesSection(c.env))
+  if (preferences.salesEnabled && getActionTier(user, 'sales', 'view') !== 'none') tasks.push(cachedSection('sales', ['sales'], 'not-paid-delivery-pending', () => buildSalesSection(c.env), { ttlOnly: true }))
   // Loyalty off: no cache-version read and no ledger or settings read at all.
   if (preferences.loyaltyEnabled && loyaltyPointsEnabled && getActionTier(user, 'contacts', 'view') !== 'none') {
     loyaltyTask = () => cachedSection('loyalty', ['sales', 'returns', 'customers', 'settings'], String(preferences.loyaltyThreshold),
@@ -904,8 +918,8 @@ app.get('/summary', async (c) => {
   // meaning submissions could sit unreviewed indefinitely with no other
   // surface showing them and no way for the admin to know they'd been
   // silently suppressed by their own earlier mute choice.
-  if (hasPermission(user, 'customer_portal')) tasks.push(buildPortalSection(c.env))
-  if (hasAnyPermission(user, ['products', 'contacts', 'inventory', 'sales'])) tasks.push(buildImportsSection(c.env, user))
+  if (hasPermission(user, 'customer_portal')) tasks.push(cachedSection('portal', ['customers'], 'pending-share-submissions', () => buildPortalSection(c.env), { ttlOnly: true }))
+  if (hasAnyPermission(user, ['products', 'contacts', 'inventory', 'sales'])) tasks.push(cachedSection('imports', ['products', 'customers', 'sales'], 'warnings-2d', () => readImportWarningRows(c.env), { ttlOnly: true }).then((rows) => importsSectionFor(rows, user)))
   if (preferences.systemEnabled && hasPermission(user, 'backup')) tasks.push(Promise.resolve(buildSystemSection(preferences.driveSyncEnabled, preferences.driveSyncConnected, isAdminControlUser(user) ? backupMissing : null)))
   // Supplier credit reminders (0065): money owed to suppliers is cost
   // data, and Part 383's supplier-privacy rule keeps that with the people
