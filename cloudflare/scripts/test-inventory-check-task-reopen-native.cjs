@@ -358,9 +358,15 @@ async function main() {
   for (const [name, run] of Object.entries(SCENARIOS)) await check(name, () => run(kit()))
   const killed = []
   for (const [name, edits, scenario] of MUTANTS) {
-    let red = false, why = ''
-    try { await SCENARIOS[scenario](kit(edits)) } catch (error) { red = true; why = String(error && error.message || error).split('\n')[0].slice(0, 110) }
-    if (red) { killed.push(name); passed++; console.log(`KILLED ${name} by ${scenario}: ${why}`) } else { failures.push(`mutant survived: ${name}`); console.log(`SURVIVED ${name} (scenario ${scenario} stayed green)`) }
+    let outcome = 'survived', why = ''
+    try { await SCENARIOS[scenario](kit(edits)) } catch (error) {
+      why = String(error && error.message || error).split('\n')[0].slice(0, 110)
+      outcome = /must match once/.test(String(error && error.message)) ? 'anchor' : error instanceof assert.AssertionError ? 'killed' : 'crashed'
+    }
+    if (outcome === 'killed') { killed.push(name); passed++; console.log(`KILLED ${name} by ${scenario}: ${why}`) }
+    else if (outcome === 'survived') { failures.push(`mutant survived: ${name}`); console.log(`SURVIVED ${name} (scenario ${scenario} stayed green)`) }
+    else if (outcome === 'anchor') { failures.push(`RED ${name}: its anchor no longer matches`); console.log(`RED ${name}: anchor no longer matches (${why})`) }
+    else { failures.push(`CRASHED ${name}`); console.log(`CRASHED ${name} in ${scenario}: ${why}`) }
   }
   console.log(`\n${passed} passed, ${failures.length} failed; ${killed.length}/${MUTANTS.length} plants killed`)
   if (failures.length) { console.log(failures.join('\n')); process.exit(1) }

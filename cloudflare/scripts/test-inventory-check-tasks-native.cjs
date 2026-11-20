@@ -1156,9 +1156,14 @@ async function main() {
   for (const [name, edits, targets] of MUTANTS) {
     for (const target of targets) {
       await check(`mutant killed: ${name} (by ${target})`, async () => {
-        let caught = false
-        try { await SCENARIOS[target](build(edits, WORLD[target] || {})) } catch (error) { caught = !/must match once/.test(String(error && error.message)) ? true : (() => { throw error })() }
-        assert.equal(caught, true, `the planted mutant was not caught by ${target}`)
+        let outcome = 'survived', error
+        try { await SCENARIOS[target](build(edits, WORLD[target] || {})) } catch (thrown) {
+          error = thrown
+          outcome = /must match once/.test(String(thrown && thrown.message)) ? 'anchor' : thrown instanceof assert.AssertionError ? 'killed' : 'crashed'
+        }
+        if (outcome === 'anchor') throw new Error(`RED: the anchor no longer matches (${String(error.message).split('\n')[0]})`)
+        if (outcome === 'crashed') throw new Error(`CRASHED in ${target}, not an assertion: ${String(error && error.stack || error).split('\n')[0]}`)
+        assert.equal(outcome, 'killed', `the planted mutant was not caught by ${target}`)
       })
     }
   }
