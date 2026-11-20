@@ -4,7 +4,7 @@ import path from 'node:path'
 import { launchResolveFixture } from './resolveBrowserFixture.ts'
 import { tasksFixtureSource } from './inventoryCheckTasksBrowserFixture.ts'
 
-// Round 6 screenshots (not a test: the chain runs *.test.ts only): a closed task's board row and view bar, and the open-task limit refusal line.
+// Round 6 screenshots (not a test: the chain runs *.test.ts only): a closed task's board row and view bar, and the open-task limit line (the page's own line, opened from its info button; the fixture cannot send a write, so the 409 path is proved by the mounted test).
 // Usage: node tests/inventoryCheckTasksShotsR6.ts <output folder>
 const out = path.resolve(process.argv[2] || '')
 assert.ok(process.argv[2], 'an output folder is required')
@@ -32,21 +32,11 @@ await browser.run('r6 shots done', async () => {
     console.log('closed bar:', await text('[data-inventory-check-task-bar] [data-task-progress-text]'))
     await shot(`closed-view-bar-${suffix}`)
 
-    await browser.open(width, q('section=tasks&refuse=limit'), board, height)
-    await browser.mouseClick('[data-task-issue]')
-    await browser.waitFor('issue mode', async () => await browser.evaluate(`document.querySelector('[data-inventory-check-issue-bar]') && document.querySelector('[data-check-pick]') ? true : null`))
-    await browser.mouseClick('[data-inventory-check-row="1"] [data-check-pick]')
-    await browser.waitFor('one pick', async () => await browser.evaluate(`document.querySelector('[data-picked-pill]')?.textContent === '1' ? true : null`))
-    await browser.mouseClick('[data-issue-action="issue"]')
-    await browser.waitFor('issue review', async () => await browser.evaluate(`document.querySelector('[role="dialog"] dl') ? true : null`))
-    const confirm = await browser.evaluate(`(() => { const buttons = [...document.querySelectorAll('[role="dialog"] button')]; const b = buttons[buttons.length - 1]; b.setAttribute('data-r6-confirm', ''); return b.textContent })()`)
-    console.log('confirm button:', confirm)
-    await browser.mouseClick('[data-r6-confirm]')
-    await browser.waitFor('refusal line', async () => await browser.evaluate(`window.__notices.length || document.querySelector('[role="alert"]') ? true : null`))
-    console.log('notices:', JSON.stringify(await browser.evaluate('window.__notices')))
-    await shot(`limit-refusal-${suffix}`)
-
     await browser.open(width, q('section=tasks&cap=3'), board, height)
-    await shot(`limit-header-${suffix}`)
+    const hint = await browser.evaluate(`(() => { const b = [...document.querySelectorAll('[data-inventory-check-tasks-header] button, button[aria-label]')].find(item => /3/.test(item.getAttribute('aria-label') || '') && item.getAttribute('aria-label').length > 12); if (!b) return null; b.setAttribute('data-r6-hint', ''); return b.getAttribute('aria-label') })()`)
+    assert.ok(hint, 'the info button carries the limit sentence')
+    console.log('limit line:', hint)
+    await browser.mouseClick('[data-r6-hint]')
+    await shot(`limit-line-${suffix}`)
   }
 })

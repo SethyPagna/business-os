@@ -47,4 +47,9 @@ assert.ok(read('../src/components/inventory/InventoryCheckTasksList.tsx').includ
 assert.ok(read('../src/components/inventory/InventoryChecksPage.tsx').includes('progressOrAllText(t, taskRow)'), 'the task view bar')
 assert.ok(read('../src/components/inventory/InventoryChecksPage.tsx').includes('openTasksLimitText(t, openTasks, tasks.board.capabilities.maxOpenTasks)'), 'the pre-emptive header line')
 
+// 4. The figures reach the screen: the transport's error carries them (before this, only the code did, so no figure was ever shown in production).
+const http = read('../src/api/http.ts')
+assert.ok(http.includes("parsed.code.startsWith('inventory_check_task_')"), 'createApiError keeps count-task figures')
+for (const key of ["'open', 'limit', 'total'", 'error.atLeast = true', 'error.pickedUpBy = parsed.pickedUpBy', 'error.mine = parsed.mine']) assert.ok(http.includes(key), `createApiError carries ${key}`)
+
 console.log('inventoryCheckT2R6 ok')

@@ -658,6 +658,13 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   error.attempted = parsed?.attempted || null
   error.expectedUpdatedAt = parsed?.expectedUpdatedAt || null
   error.actualUpdatedAt = parsed?.actualUpdatedAt || null
+  // A count-task refusal's figures and names (open/limit/total/atLeast, who holds it) reach the screen that words them (components/inventory/inventoryCheckTaskText.ts).
+  if (typeof parsed?.code === 'string' && parsed.code.startsWith('inventory_check_task_')) {
+    for (const key of ['open', 'limit', 'total']) if (typeof parsed[key] === 'number') error[key] = parsed[key]
+    if (parsed.atLeast === true) error.atLeast = true
+    if (typeof parsed.pickedUpBy === 'string') error.pickedUpBy = parsed.pickedUpBy
+    if (typeof parsed.mine === 'boolean') error.mine = parsed.mine
+  }
   return error
 }
 
