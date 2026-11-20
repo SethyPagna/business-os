@@ -15,7 +15,6 @@ import { LEGAL_KEYS, SRC, assertCompleteScan, parseSource, scanStorefrontCopy, s
 // wording each editor-voiced one became.
 const SHOPPER_WORDING: Record<string, { en: string; km: string }> = {
   portalAboutFallback: { en: 'Welcome to our store.', km: 'សូមស្វាគមន៍មកកាន់ហាងរបស់យើង។' },
-  faqHint: { en: 'Quick answers to common questions.', km: 'ចម្លើយរហ័សចំពោះសំណួរទូទៅ។' },
   liveCatalog: { en: 'Browse our products and check availability.', km: 'រុករកផលិតផលរបស់យើង និងពិនិត្យមើលថាមានស្តុកឬអត់។' },
   promotionsSectionHint: { en: 'Our latest offers and announcements.', km: 'ការផ្ដល់ជូន និងសេចក្ដីជូនដំណឹងថ្មីៗរបស់យើង។' },
 }
