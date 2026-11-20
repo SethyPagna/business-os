@@ -61,6 +61,8 @@ const one = (sql, params = []) => db.prepare(sql).get(params)
     assert.equal(refundCreditReplayRefused([credit, customer], [{ ...credit, method: 'ABA' }, customer]), true)
     assert.equal(refundCreditReplayRefused([credit, customer], [{ ...credit, amount_usd: 9 }, customer]), true)
     assert.equal(refundCreditReplayRefused([customer], [{ method: 'ABA', amount_usd: 3 }]), false, 'a sale with no credit is never refused')
+    assert.equal(refundCreditReplayRefused([{ ...credit, method: 'cash' }, customer], [credit, customer]), false, 'a spelling-only difference (case) is the same method')
+    assert.equal(refundCreditReplayRefused([{ ...credit, method: ' Cash ' }, customer], [credit, customer]), false, 'a spacing-only difference is the same method')
     assert.equal(refundCreditReplayRefused(null, '[]'), false)
     assert.equal(refundCreditReplayRefused(JSON.stringify([credit]), JSON.stringify([{ ...credit, method: 'ABA' }]), true), false, 'reversing a relabel may restore the method')
     assert.equal(refundCreditReplayRefused(JSON.stringify([credit]), JSON.stringify([]), true), true, 'but never drops the credit')
@@ -93,6 +95,12 @@ const one = (sql, params = []) => db.prepare(sql).get(params)
   await check('settlement: redo that relabels the credit is refused', async () => {
     assert.equal(await refusedWith(() => settlement.replaySaleSettlementAction(env, user, 'redo', 3, 1, { operation_id: 'op-3' })), REFUSED)
     assert.notEqual(await refusedWith(() => settlement.replaySaleSettlementAction(env, user, 'undo', 3, 1, { operation_id: 'op-3' })), REFUSED)
+  })
+
+  seedSettlement(4, [{ ...credit, method: 'cash' }, customer], [credit, { ...customer, amount_usd: 5 }])
+  await check('settlement: redo of a post-fix settle whose credit differs from the stored one only in spelling goes through', async () => {
+    const message = await refusedWith(() => settlement.replaySaleSettlementAction(env, user, 'redo', 4, 1, { operation_id: 'op-4' }))
+    assert.notEqual(message, REFUSED)
   })
 
   // ---- Bulk relabel record

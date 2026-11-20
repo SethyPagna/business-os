@@ -62,7 +62,7 @@ function flaggedCreditRows(raw: unknown): Array<{ method: string; usd: number; k
 export function refundCreditReplayRefused(sourceRaw: unknown, targetRaw: unknown, allowRelabel = false): boolean {
   const remaining = flaggedCreditRows(targetRaw)
   for (const credit of flaggedCreditRows(sourceRaw)) {
-    const index = remaining.findIndex((row) => row.usd === credit.usd && row.khr === credit.khr && (allowRelabel || row.method === credit.method))
+    const index = remaining.findIndex((row) => row.usd === credit.usd && row.khr === credit.khr && (allowRelabel || paymentMethodKey(row.method) === paymentMethodKey(credit.method)))
     if (index < 0) return true
     remaining.splice(index, 1)
   }
