@@ -261,6 +261,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', { '../lib/schemaObjectPro
   '../lib/stockMutationReceipt': stockMutationReceipt,
   // F1 (19 Nov): the plain Set's count statements are imported when ic_lot_counts is on; this harness has no count tables, so the module is a no-op stand-in
   '../lib/stockSetClosesIssue': { plainSetCloseStatements: () => ({ statements: [], trailing: [], answer: () => ({}) }), plainSetCountOf: () => 'NULL' },
+  '../lib/inventoryCheckTasks': { icTasksNamespace: (branchId) => `ic_tasks:${Number(branchId)}` },
   '../lib/moneyPrecision': moneyPrecision,
   '../lib/sqlBinding': sqlBinding,
   '../lib/familyPagination': { paginateProductFamilies: async () => ({ items: [], total: 0, page: 1, pageCount: 0 }) },

@@ -240,6 +240,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', { '../lib/schemaObjectPro
   '../lib/stockMutationReceipt': stockMutationReceipt,
   // F1 (19 Nov): the plain Set's count statements are imported when ic_lot_counts is on; this harness has no count tables, so the module is a no-op stand-in
   '../lib/stockSetClosesIssue': { plainSetCloseStatements: () => ({ statements: [], trailing: [], answer: () => ({}) }), plainSetCountOf: () => 'NULL' },
+  '../lib/inventoryCheckTasks': { icTasksNamespace: (branchId) => `ic_tasks:${Number(branchId)}` },
   // The one shared reason-length cap (lib/stockReason.ts). REAL, not a
   // stub: the point of the module is that every wire measures the same way.
   '../lib/stockReason': loadReal('lib/stockReason.ts'),
@@ -342,6 +343,7 @@ const batchesRoute = loadReal('routes/batches.ts', {
   '../lib/stockMutationReceipt': stockMutationReceipt,
   // F1 (19 Nov): the plain Set's count statements are imported when ic_lot_counts is on; this harness has no count tables, so the module is a no-op stand-in
   '../lib/stockSetClosesIssue': { plainSetCloseStatements: () => ({ statements: [], trailing: [], answer: () => ({}) }), plainSetCountOf: () => 'NULL' },
+  '../lib/inventoryCheckTasks': { icTasksNamespace: (branchId) => `ic_tasks:${Number(branchId)}` },
   // The one shared reason-length cap (lib/stockReason.ts). REAL, not a
   // stub: the point of the module is that every wire measures the same way.
   '../lib/stockReason': loadReal('lib/stockReason.ts'),

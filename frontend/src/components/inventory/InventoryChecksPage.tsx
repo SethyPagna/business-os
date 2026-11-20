@@ -35,7 +35,7 @@ import InventoryCheckRows, { InventoryCheckSheetHeader, type InventoryCheckFocus
 import InventoryCheckListRows, { InventoryCheckIssueBar, InventoryCheckListHeader, InventoryCheckSelectionBar, type ListDraft } from './InventoryCheckListRows.tsx'
 import InventoryCheckTasksList, { TaskActions, TasksHeader, TasksReadError } from './InventoryCheckTasksList.tsx'
 import { inventoryCheckTasksOff, useInventoryCheckTasks } from './useInventoryCheckTasks.ts'
-import { filterScopeText, pickerText, progressOrAllText, taskRefusalSentence, taskReview, taskScopeOf } from './inventoryCheckTaskText.ts'
+import { filterScopeText, openTasksLimitText, pickerText, progressOrAllText, taskRefusalSentence, taskReview, taskScopeOf } from './inventoryCheckTaskText.ts'
 import { countDraftBaseKey, judgeRestored, parseCountDraft, serializeCountDraft, type CountDraftEntry } from './inventoryCheckCountDrafts.ts'
 import { checkDaysOf, dayChipsOf, type CheckDay } from './inventoryCheckDays.ts'
 import { finiteQuantity, parseCount } from './InventoryCheckCountEditor.tsx'
@@ -1314,7 +1314,7 @@ function InventoryWorkspace({ boundary, access, selection, onSelect, heldDrafts,
     if (current() && (outcome.kind === 'refused' || outcome.kind === 'unknown')) toastOrError(outcome)
   }
   const openTasks = tasks.board?.items.filter(item => item.status === 'open').length ?? 0
-  const headerIssueBlocked = tasks.board && openTasks >= tasks.board.capabilities.maxOpenTasks ? tr('inventory_check_error_task_limit', 'This branch has reached its limit of open tasks. Close one first.') : ''
+  const headerIssueBlocked = tasks.board && openTasks >= tasks.board.capabilities.maxOpenTasks ? openTasksLimitText(t, openTasks, tasks.board.capabilities.maxOpenTasks) : ''
   // Restore: the counts this device held for this view are judged once, against what the server knows now. A product counted after the draft was typed shows a different last-count time
   // (compared server to server, never with this device's clock): its draft is dropped. Off-page products are judged by one overlay read per page of ids.
   const judged = useRef(false)

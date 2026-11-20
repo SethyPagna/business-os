@@ -43,6 +43,11 @@ const COMPUTED = {
   'new Set(updateVersions)': 'routes/contacts.ts update: updateVersions is built from the contact table name plus KNOWN literals (one bumpVersions call, B-C10)',
   'job.type': 'lib/importEngine.ts finalize: only reached when CONTACT_IMPORT_CHANNEL[job.type] holds, i.e. customers / suppliers / delivery_contacts, the table names',
   cacheNamespaces: 'routes/system.ts recovery list built from KNOWN literals',
+  // P2.3/P2.4 (count tasks): the task board of ONE branch is its own namespace ic_tasks:<branch id>, read by routes/inventoryChecks.ts readTaskBoard (getVersionsWithFallback with icTasksNamespace). The writers that move it are
+  // tabled in test-inventory-check-tasks-board-version-pure.cjs; each of these moves it beside 'inventory_checks' in the writer's one awaited call.
+  'icTasksNamespace(branchId)': 'routes/inventory.ts and routes/batches.ts: the branch of the Set that closed a difference (lib/inventoryCheckTasks.ts icTasksNamespace)',
+  'icTasksNamespace(counted.countBranch ?? mv.branch_id ?? 0)': 'routes/inventory.ts Revert: the branch of the plain Set count it took back or restored',
+  board: 'routes/inventoryChecks.ts bump middleware: [icTasksNamespace(branch)] for a writer that called boardWrites, or [products] when a 5xx left its branch unknown',
 }
 const FORBIDDEN = /broadcastChannel|cacheKey|\.channel\b/
 

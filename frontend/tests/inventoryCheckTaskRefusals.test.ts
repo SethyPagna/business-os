@@ -74,7 +74,7 @@ assert.match(taskName(t, { title: '', issued_at: issued, selection: { kind: 'ids
 assert.match(taskName(t, { title: '', issued_at: issued, selection: { kind: 'filters', filters: { brand: 'Dior', checkedOn: '2026-11-10' } }, total: 9 }), /Brand: Dior · Last checked on: /, 'a filter task names its filters')
 assert.equal(progressOrAllText(t, { total: 4, done: 1, status: 'open' }), '1/4 counted')
 assert.equal(progressOrAllText(t, { total: 4, done: 4, status: 'open' }), 'All counted')
-assert.equal(progressOrAllText(t, { total: 4, done: 4, status: 'closed' }), '4/4 counted', 'a closed task shows its figures, not the instant between the last count and the close')
+assert.equal(progressOrAllText(t, { total: 4, done: 4, status: 'closed' }), '4/4 counted at close', 'a closed task shows its figures as of the close, not the instant between the last count and the close')
 assert.equal(pickerText(t, 'sok'), 'Picked up by @sok')
 const task = { title: '', issued_at: issued, selection: { kind: 'ids' as const }, total: 4, done: 1, status: 'open' as const, picked_up_by: 'sok' }
 const release = taskReview(t, 'release', task, 'Main', 3)

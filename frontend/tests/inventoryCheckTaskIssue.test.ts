@@ -62,7 +62,8 @@ const cases: Array<[Error, string]> = [
   [refuse('inventory_check_task_too_many', 400, { total: 301, limit: 300 }), words.inventory_check_task_too_many_count.replace('{total}', '301').replace('{limit}', '300')],
   [refuse('inventory_check_task_too_many', 400, { total: 301, limit: 300, atLeast: true }), words.inventory_check_task_too_many_at_least.replace('{total}', '301').replace('{limit}', '300')],
   [refuse('inventory_check_task_too_many', 400), words.inventory_check_error_task_too_many],
-  [refuse('inventory_check_task_limit', 409, { open: 30, limit: 30 }), words.inventory_check_error_task_limit],
+  [refuse('inventory_check_task_limit', 409, { open: 30, limit: 30 }), words.inventory_check_task_limit_count.replace('{open}', '30').replace('{limit}', '30')],
+  [refuse('inventory_check_task_limit', 409), words.inventory_check_error_task_limit],
   [refuse('inventory_check_product_not_eligible', 400), words.inventory_check_error_product_not_eligible],
   [refuse('inventory_check_invalid_query', 400), words.inventory_check_save_failed],
 ]

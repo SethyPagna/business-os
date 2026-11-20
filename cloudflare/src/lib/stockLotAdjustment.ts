@@ -92,6 +92,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersions } from './cache'
 import { readSwitch } from './readSwitches'
 import { closedTasksSelect, closeIssueStatements, reopenIssueStatements, restoreSetCountStatements, setCountKey, SET_SESSION_FACTS_SQL, takeBackSetCountStatements } from './stockSetClosesIssue'
+import { icTasksNamespace } from './inventoryCheckTasks'
 import { findConsumingBlocker, findLaterChangeBlocker, type StockRefusalDetails } from './stockRefusalBlocker'
 import {
   UNDO_CLOSED_BRANCH_RETIRED_CODE, UNDO_CLOSED_BRANCH_RETIRED_MESSAGE, addressedStatements, branchEffectRefusal, branchRedirectGuardRefusal,
@@ -600,7 +601,10 @@ export class StockLotSetReplayError extends Error {
   }
 }
 
-/** Server-side undo/redo of one scoped Set generation. */
+/**
+ * Server-side undo/redo of one scoped Set generation. Answers the extra cache namespaces it moved (P2.3: the task board of the branch of the Set, and of its count session's branch): the History route
+ * adds them to its ONE bump call (the branch is known only here, not in the history payload). A replay that changed nothing answers none.
+ */
 export async function replayStockLotSet(
   env: Env,
   user: SessionUser,
@@ -608,7 +612,7 @@ export async function replayStockLotSet(
   historyId: number,
   generation: unknown,
   payload: Record<string, unknown>,
-): Promise<void> {
+): Promise<string[]> {
   if (getActionTier(user, 'inventory', 'adjust') !== 'full') throw new StockLotSetReplayError('Stock adjustments require Full Access to Inventory.', 403)
   const db = getDb(env)
   const row = await db.prepare('SELECT * FROM stock_lot_adjustment_operations WHERE id=@operation AND history_id=@history')
@@ -621,7 +625,7 @@ export async function replayStockLotSet(
   const target = direction === 'undo' ? 'reversed' : 'applied'
   const oldState = direction === 'undo' ? 'applied' : 'reversed'
   const next = expected + 1
-  if (row.generation === next && row.state === target) return
+  if (row.generation === next && row.state === target) return []
   if (row.generation !== expected || Number(payload.generation) !== expected || row.state !== oldState) {
     throw new StockLotSetReplayError('This stock correction generation is stale. Refresh its history.')
   }
@@ -733,7 +737,7 @@ export async function replayStockLotSet(
     await executeStockTransaction(db, statements, 'retry')
   } catch (error) {
     const current = await db.prepare('SELECT generation,state FROM stock_lot_adjustment_operations WHERE id=@operation').get<OperationRow>({ operation: row.id })
-    if (current?.generation === next && current.state === target) return
+    if (current?.generation === next && current.state === target) return [...new Set([before.branchId, origin ? Number(origin.branch) : before.branchId])].map(icTasksNamespace)
     if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
     const activeGuard = productStockGuardError(error)
     if (activeGuard) throw activeGuard
@@ -750,4 +754,5 @@ export async function replayStockLotSet(
       : null
     throw new StockLotSetReplayError('The stock changed while this was being saved. Nothing was changed; refresh and try again.', 409, refusal, 'stock_changed')
   }
+  return [...new Set([before.branchId, origin ? Number(origin.branch) : before.branchId])].map(icTasksNamespace)
 }

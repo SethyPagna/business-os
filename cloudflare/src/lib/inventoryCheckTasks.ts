@@ -13,6 +13,12 @@ import { catalogProductSql, stockVisibleProductSql } from './productStockGuard'
 // An Undo or a Redo of a Set is NOT a count (owner ruling, 19 Nov): it restores a record made earlier, so its session (kind stock_set_undo, or scope restore) never ticks or closes a task.
 // Only products that can still be counted take part (taskItemCountableSql): one deactivated, merged away or made a header leaves the task's total and no longer blocks its close.
 
+/**
+ * The cache namespace of one branch's TASK BOARD (P2.3/P2.4): the board (GET /tasks) keys on it and on 'products' (countability), NOT on 'inventory_checks'. It is moved, in the writer's own awaited bump call (a KV write, no D1
+ * statement), by exactly the writers that can change a figure of the board at that branch: a final count appearing or disappearing there, or a task row changing. The complete table is pinned in
+ * test-inventory-check-tasks-board-version-pure.cjs; an observation, an approval decision and a new open session move 'inventory_checks' only.
+ */
+export const icTasksNamespace = (branchId: number | string): string => `ic_tasks:${Number(branchId)}`
 export const TASK_MEMBERSHIP = 'task'
 export const PICKUP_MEMBERSHIP = 'pickup'
 const S = 'inventory_check_sessions'
@@ -103,10 +109,13 @@ export function autoCloseTaskStatements(src = '@src'): { statements: Array<{ sql
   const ofPickups = `SELECT e.session_id FROM inventory_check_events e CROSS JOIN ${S} k ON k.id=e.session_id WHERE e.actor_id=@actorId AND e.request_id>=@pkFrom AND e.request_id<@pkTo AND e.request_hash=@hash AND e.action='close' AND e.created_at=@now AND k.organization_id IS @org AND ${kindOf('k')}='${PICKUP_MEMBERSHIP}'`
   // In the pickup events, +e.session_id drops the column's TEXT affinity, which would otherwise keep the expression index of 0318 from serving the join (plan pinned in test-d1-task-index-plan-native.cjs).
   const statements = [
+    // The close event records the figures the task closes with (P2.1: a closed task's board row reads them, never the items again). One walk of the closing task's items, ONCE, by the batch that closes it; done = total
+    // by this statement's own condition (every countable product is done). The walk sits in a derived table so each candidate is walked once, not once per figure.
     { sql: `INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at)
-      SELECT t.id,NULL,@actorId,@actorName,'close',@key||'-task-closed-'||t.id,@hash,json_object('status','open','revision',t.revision),
-        json_object('status','closed','revision',t.revision+1,'auto',1,'closedBy',${src}),json_object('sessionRevision',t.revision+1),@now
-      FROM ${S} t INDEXED BY inventory_check_sessions_open_task WHERE ${candidate}` },
+      SELECT c.id,NULL,@actorId,@actorName,'close',@key||'-task-closed-'||c.id,@hash,json_object('status','open','revision',c.revision),
+        json_object('status','closed','revision',c.revision+1,'auto',1,'closedBy',${src},'total',COALESCE(c.f,0)/${TASK_FIGURE_TOTAL},'done',COALESCE(c.f,0)/${TASK_FIGURE_TOTAL},'removed',COALESCE(c.f,0)%1000),json_object('sessionRevision',c.revision+1),@now
+      FROM (SELECT t.id AS id, t.revision AS revision, (SELECT SUM(CASE WHEN ${taskItemCountableSql('n')} THEN ${TASK_FIGURE_TOTAL} ELSE ${TASK_FIGURE_REMOVED} END) FROM ${I} n WHERE n.session_id=t.id) AS f
+        FROM ${S} t INDEXED BY inventory_check_sessions_open_task WHERE ${candidate}) c` },
     { sql: `INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at)
       SELECT pk.id,NULL,@actorId,@actorName,'close',@key||'-pickup-'||pk.id,@hash,json_object('status','open','revision',pk.revision),
         json_object('status','closed','revision',pk.revision+1,'task',e.session_id),json_object('sessionRevision',pk.revision+1),@now
@@ -167,6 +176,31 @@ export function closedTaskIds(result: { results?: unknown[] } | undefined): stri
 /** The ids of the tasks a write reopened (the same shape: the rows the reopen's UPDATE returned). */
 export const reopenedTaskIds = closedTaskIds
 
+/**
+ * THE FIGURES OF A TASK IN ONE NUMBER (P2.2). total, done and removed come from ONE walk of the task's items: each item adds ONE_TOTAL (counted in total), plus ONE_DONE more when it is done, or 1 when it can no longer be
+ * counted (removed). The three figures are read back with decodeTaskFigures. Exact while a task holds fewer than 1000 items, which both plan tiers' maxProducts guarantee (test-inventory-check-tasks-figures-pure.cjs).
+ */
+export const TASK_FIGURE_TOTAL = 1000000, TASK_FIGURE_DONE = 1000, TASK_FIGURE_REMOVED = 1
+export const decodeTaskFigures = (figures: number | null | undefined): { total: number; done: number; removed: number } => {
+  const f = Number(figures ?? 0)
+  return { total: Math.floor(f / TASK_FIGURE_TOTAL), done: Math.floor(f / TASK_FIGURE_DONE) % 1000, removed: f % 1000 }
+}
+/** The task's figures by ONE walk of its items (alias `page` is the task row). Live: total, done and removed as the done rule counts them now. */
+const liveFiguresSql = (): string => `(SELECT SUM(CASE WHEN ${taskItemCountableSql('t')} THEN CASE WHEN ${taskItemDoneSql('t', 'page.branch_id', 'page.started_at', '@org')} THEN ${TASK_FIGURE_TOTAL + TASK_FIGURE_DONE} ELSE ${TASK_FIGURE_TOTAL} END ELSE ${TASK_FIGURE_REMOVED} END)
+      FROM ${I} t WHERE t.session_id=page.id)`
+/** The figures a CLOSED task was closed with: those of its newest close event (one seek of inventory_check_events_session), NULL when that event carries none (a task closed before the figures were recorded). */
+const frozenFiguresSql = (): string => `(SELECT json_extract(e.after_json,'$.total')*${TASK_FIGURE_TOTAL}+json_extract(e.after_json,'$.done')*${TASK_FIGURE_DONE}+json_extract(e.after_json,'$.removed')*${TASK_FIGURE_REMOVED}
+      FROM inventory_check_events e WHERE e.session_id=page.id AND e.action='close' ORDER BY e.id DESC LIMIT 1)`
+
+/**
+ * The close event of a task closed BY HAND: the usual event row (the statement that records the request) plus the figures the admin saw, read from the task row in the same batch (P2.1: the board shows a closed task's figures
+ * from this event, so its items are never walked again). Parameters: @sessionId @actorId @actorName @key @hash @before @after @result @now @org.
+ */
+export const taskCloseEventSql = (): string => `INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at)
+      SELECT g.id,NULL,@actorId,@actorName,'close',@key,@hash,@before,
+        json_set(@after,'$.total',g.f/${TASK_FIGURE_TOTAL},'$.done',(g.f/${TASK_FIGURE_DONE})%1000,'$.removed',g.f%1000),@result,@now
+      FROM (SELECT page.id AS id, COALESCE(${liveFiguresSql()},0) AS f FROM ${S} page WHERE page.id=@sessionId) g`
+
 export type TaskRow = {
   id: string; branch_id: number; title: string; status: 'open' | 'closed'; revision: number; started_at: string; closed_at: string | null; created_by: number; issuer: string | null
   selection: unknown; total: number; done: number; removed: number; pickup_id: string | null; picked_by: number | null; picker: string | null; picked_at: string | null
@@ -188,9 +222,7 @@ export async function readTaskRows(db: D1Compat, args: { organization: number | 
     page AS (SELECT * FROM open_t UNION ALL SELECT * FROM closed_t)
     SELECT page.id AS id, page.branch_id AS branch_id, page.title AS title, page.status AS status, page.revision AS revision, page.started_at AS started_at, page.closed_at AS closed_at, page.created_by AS created_by,
       iu.username AS issuer, json_extract(page.scope_json,'$.selection') AS selection,
-      (SELECT COUNT(*) FROM ${I} t WHERE t.session_id=page.id AND ${taskItemCountableSql('t')}) AS total,
-      (SELECT COUNT(*) FROM ${I} t WHERE t.session_id=page.id AND ${taskItemDoneSql('t', 'page.branch_id', 'page.started_at', '@org')} AND ${taskItemCountableSql('t')}) AS done,
-      (SELECT COUNT(*) FROM ${I} t WHERE t.session_id=page.id AND NOT ${taskItemCountableSql('t')}) AS removed,
+      CASE WHEN page.status='closed' THEN COALESCE(${frozenFiguresSql()},${liveFiguresSql()}) ELSE ${liveFiguresSql()} END AS figures,
       pk.id AS pickup_id, pk.created_by AS picked_by, pu.username AS picker, pk.started_at AS picked_at,
       CASE WHEN page.status='open' THEN (SELECT CASE WHEN e.action='resume' AND json_extract(e.after_json,'$.reopened')=1 THEN json_object('at',e.created_at,'cause',json_extract(e.after_json,'$.cause'),'by',e.actor_id,'name',(SELECT ru.username FROM users ru WHERE ru.id=e.actor_id)) END
         FROM inventory_check_events e WHERE e.session_id=page.id ORDER BY e.id DESC LIMIT 1) END AS reopened
@@ -198,8 +230,8 @@ export async function readTaskRows(db: D1Compat, args: { organization: number | 
       LEFT JOIN ${S} pk INDEXED BY inventory_check_sessions_kind_task ON pk.organization_id IS @org AND ${kindOf('pk')}='${PICKUP_MEMBERSHIP}' AND ${taskOf('pk')}=+page.id AND pk.status='open'
       LEFT JOIN users pu ON pu.id=pk.created_by
     ORDER BY (page.status='open') DESC, CASE WHEN page.status='open' THEN page.started_at ELSE page.closed_at END DESC, page.id DESC`)
-    .all<Omit<TaskRow, 'selection' | 'reopened'> & { selection: string | null; reopened: string | null }>({ org: args.organization, branchId: args.branchId, closedShown: args.closedShown })
-  return rows.map((row) => ({ ...row, revision: Number(row.revision), total: Number(row.total), done: Number(row.done), removed: Number(row.removed), selection: parseSelection(row.selection), reopened: parseReopened(row.reopened) }))
+    .all<Omit<TaskRow, 'selection' | 'reopened' | 'total' | 'done' | 'removed'> & { selection: string | null; reopened: string | null; figures: number | null }>({ org: args.organization, branchId: args.branchId, closedShown: args.closedShown })
+  return rows.map(({ figures, ...row }) => ({ ...row, revision: Number(row.revision), ...decodeTaskFigures(figures), selection: parseSelection(row.selection), reopened: parseReopened(row.reopened) }))
 }
 
 function parseReopened(value: string | null | undefined): TaskRow['reopened'] {

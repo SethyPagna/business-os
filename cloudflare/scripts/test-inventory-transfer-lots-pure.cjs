@@ -130,6 +130,7 @@ const inventoryRequire = (id) => {
   if (id === '../lib/reviewGate') return { maybeQueueForReview: asyncNoop }
   if (id === '../durable-objects/broadcastHub') return { broadcast: asyncNoop }
   if (id === '../lib/cache') return { bumpVersion: asyncNoop }
+  if (id === '../lib/inventoryCheckTasks') return { icTasksNamespace: (branchId) => `ic_tasks:${Number(branchId)}` }
   if (id === '../lib/productBatches') return { ...productBatches, attachBatchCounts: asyncNoop, receiveBatchStock: asyncNoop, removeStockAcrossBatches: asyncNoop, InsufficientBatchStockError: class extends Error {} }
   if (id === '../lib/branchRoleGuards') return branchGuards
   if (id === '../lib/canonicalBranchIdentity') return canonicalIdentity

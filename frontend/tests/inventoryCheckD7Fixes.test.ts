@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { REFUSAL_MESSAGES } from '../src/components/inventory/inventoryCheckRefusals.ts'
+import { openTasksLimitText } from '../src/components/inventory/inventoryCheckTaskText.ts'
 
 // Deploy-7 compose fixes: each assertion below failed on the unfixed composed tip.
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
@@ -32,7 +33,8 @@ assert.ok(typeof en.inventory_check_task_issued_plain === 'string' && /[ក-៿]
 
 // 5. Every fallback reads exactly as the current English copy.
 const fallbackIn = (source: string, key: string) => { const at = source.indexOf(`'${key}'`); assert.ok(at >= 0, `${key} is used`); const match = /,\s*(?:fallback:\s*)?'((?:[^'\\]|\\.)*)'/.exec(source.slice(at + key.length + 2, at + key.length + 400)); assert.ok(match, `${key} has a fallback`); return match[1].replace(/\\'/g, "'") }
-for (const key of ['inventory_check_error_task_limit', 'inventory_check_draft_dropped', 'inventory_check_task_issued']) assert.equal(fallbackIn(page, key), en[key], `${key}: the page fallback is the current copy`)
+for (const key of ['inventory_check_draft_dropped', 'inventory_check_task_issued']) assert.equal(fallbackIn(page, key), en[key], `${key}: the page fallback is the current copy`)
+assert.equal(openTasksLimitText(() => undefined, 3, 10), en.inventory_check_task_limit_count.replace('{open}', '3').replace('{limit}', '10'), 'the open-task limit line falls back to the current copy')
 for (const code of ['inventory_check_task_too_many', 'inventory_check_task_limit']) {
   const entryFor = REFUSAL_MESSAGES[code as keyof typeof REFUSAL_MESSAGES] as { key: string; fallback: string }
   assert.equal(entryFor.fallback, en[entryFor.key], `${code}: the refusal fallback is the current copy`)

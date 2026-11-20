@@ -3985,7 +3985,9 @@ const APPLIERS: Record<string, UndoApplierDef> = {
     run: async (payload, ctx) => {
       if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Stock correction history context is required.')
       const { replayStockLotSet } = await import('./stockLotAdjustment')
-      await replayStockLotSet(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)
+      // The task board of the Set's branch moves with its Undo or Redo (the Set's count was taken back or restored): the replay names the namespaces, the route's ONE bump carries them.
+      const moved = await replayStockLotSet(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)
+      if (Array.isArray(moved) && moved.length) await bumpChange(ctx, moved)
     },
   },
   // N6 stock-in line edit (lib/stockInLineEdit.ts): same delta replay

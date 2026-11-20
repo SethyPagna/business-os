@@ -219,6 +219,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', { '../lib/schemaObjectPro
   '../lib/reviewGate': { maybeQueueForReview: async () => null },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
+  '../lib/inventoryCheckTasks': { icTasksNamespace: (branchId) => `ic_tasks:${Number(branchId)}` },
   '../lib/productIdentity': { findIdentityMatch: async () => null },
   // P10-4: REAL, not stubbed -- see routes/inventory.ts's own comment above
   // recomputeCatalogCost's call site.
@@ -276,6 +277,7 @@ const batchesRoute = loadReal('routes/batches.ts', {
   '../lib/permissions': permissions,
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
+  '../lib/inventoryCheckTasks': { icTasksNamespace: (branchId) => `ic_tasks:${Number(branchId)}` },
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/businessDateWindow': businessDateWindow,
