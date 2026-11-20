@@ -1,0 +1,77 @@
+# The weekly backup: one keyset pass over every table of production D1 (about 0.45 million rows read, ceiling 0.6 million, zero writes to D1), the
+# whole health pack on the copy, and an encrypted set in R2 under backups/weekly/ (the newest 4 are kept). Design: DESIGN-local-health-backup.
+#
+# STATUS: DISPATCH-ONLY AND INERT. The two cron lines below are commented out on purpose (slice S8 switches them on once the owner has made the two
+# tokens). Every job also runs only when the repository variable WEEKLY_BACKUP_ENABLED equals true, so this same file does nothing in any
+# repository that has not set it. The Monday line is the retry: the script reads the marker once and exits when a set finished in the last 6 days. test-ops-workflow-pure.cjs pins the cron lines to ops/scripts/weekly/constants.mjs.
+#
+# The two secrets are placeholders for tokens the owner creates (never a value in this file):
+#   WEEKLY_D1_READ_TOKEN    Cloudflare API token, D1 Read on the business-os database only
+#   WEEKLY_R2_WRITE_TOKEN   Cloudflare R2 API token, Object Read and Write on the one bucket; its token id is the variable WEEKLY_R2_TOKEN_ID
+#
+# THIS REPOSITORY IS PUBLIC, and so are its Actions logs, job summaries and artifacts: only verdict words, file names and counts are printed. The
+# backup chunks never become an artifact: they go from runner memory, encrypted for the owner's key (ops/keys/ops-export-public.pem), to R2.
+name: Weekly backup
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: run even when a weekly set finished in the last 6 days
+        type: boolean
+        default: false
+  # schedule:
+  #   - cron: '30 20 * * 0'
+  #   - cron: '30 20 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  weekly:
+    name: Weekly copy, checks and R2 store
+    if: ${{ vars.WEEKLY_BACKUP_ENABLED == 'true' }}
+    runs-on: windows-latest
+    environment: weekly-backup
+    timeout-minutes: 150
+    steps:
+      - name: Check out
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.2'
+          cache: npm
+          cache-dependency-path: cloudflare/package-lock.json
+
+      - name: Install packages (cloudflare)
+        working-directory: cloudflare
+        run: npm ci --no-audit --no-fund
+
+      - name: Weekly copy (read-only on D1, encrypted on the runner)
+        timeout-minutes: 120
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.WEEKLY_D1_READ_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WEEKLY_R2_TOKEN_ID: ${{ vars.WEEKLY_R2_TOKEN_ID }}
+          WEEKLY_R2_WRITE_TOKEN: ${{ secrets.WEEKLY_R2_WRITE_TOKEN }}
+          WEEKLY_FORCE: ${{ inputs.force }}
+          OPS_OUT_DIR: ${{ runner.temp }}/weekly-out
+        run: node ops/scripts/ops-weekly.mjs
+
+      - name: Upload the encrypted health report
+        if: always() && steps.checkout.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-health
+          path: ${{ runner.temp }}/weekly-out/health-*.enc.json
+          retention-days: 3
+          if-no-files-found: ignore
