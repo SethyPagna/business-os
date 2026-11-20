@@ -39,6 +39,7 @@ const ALLOWED = {
   'cloudflare/scripts/test-positive-lot-parent-identity-guard-pure.cjs': { literal: true, why: 'raw SQLite proof of what 0155 did before 0320 (applies 0155 alone on the pre-0155 schema)' },
   'cloudflare/scripts/test-positive-lot-activation-invariant-pure.cjs': { literal: true, why: 'raw SQLite proof that the 0154 triggers refuse a replacing write' },
   'cloudflare/scripts/test-product-active-stock-invariant-sqlite.cjs': { literal: true, why: 'raw SQLite proof that the 0154 triggers refuse a replacing write' },
+  'cloudflare/scripts/test-migration-0320-lot-insert-guard-pure.cjs': { literal: true, why: 'raw SQLite proof that the update-orphan trigger kept by 0320 still refuses UPDATE OR REPLACE' },
   'cloudflare/scripts/test-held-0200-sale-cost-oracle-pure.cjs': { builder: true, why: 'fixture emitter: INSERT OR REPLACE INTO ${t} over a fixed list of tables; product_batches takes an upsert (exclusion test below)' },
   'cloudflare/scripts/test-branch-cutover-journal-native.cjs': { builder: true, why: "INSERT ${replace ? 'OR REPLACE ' : ''}INTO branch_cutovers: a fixed table in a local database" },
   'cloudflare/scripts/test-lot-replace-migration-native.cjs': { literal: true, why: 'the migration test: proves the Worker guard, not the database, is what stops a replace after 0320' },
