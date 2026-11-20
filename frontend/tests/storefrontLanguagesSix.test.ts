@@ -100,7 +100,7 @@ check('the controller is imported only from the storefront tree, and only dynami
   assert.deepEqual(importers, ['src/components/catalog/PublicCatalogPage.tsx'])
   const page = catalog('PublicCatalogPage.tsx')
   assert.doesNotMatch(page, /^import[^\n]*portalTranslateController/m, 'a static import would put Google code in the catalog chunk')
-  assert.equal((page.match(/import\('\.\/portalTranslateController\.ts'\)/g) || []).length, 3, 'apply, and two removals (blocked, and leaving Google), all lazy')
+  assert.equal((page.match(/import\('\.\/portalTranslateController\.ts'\)/g) || []).length, 4, 'apply, and three removals (blocked, leaving Google, opening the sheet), all lazy')
 })
 
 check('the controller is a chunk of its own, so Khmer and English visitors never fetch it', () => {

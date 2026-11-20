@@ -79,15 +79,17 @@ await check('with the script on the page, the script tag, widget host and cookie
   void pending
 })
 
-await check('a delayed navigation finds no script tag on a second look, and a second call reloads nothing more', async () => {
+await check('a delayed navigation finds no script tag on a second look; the reloaded document is clean and reloads nothing', async () => {
   const { snapshots, byId } = installFakeBrowser()
   const pending = controller.applyPortalGoogleTranslate('fr')
   await Promise.resolve()
   controller.removePortalGoogleTranslate()
   assert.equal(byId.has('business-os-portal-translate-script'), false)
-  assert.equal(controller.removePortalGoogleTranslate(), 'clean', 'the page holds nothing of Google any more')
-  assert.equal(snapshots.length, 1, 'still the one reload')
+  assert.equal(snapshots.length, 1, 'one reload so far')
   void pending
+  const reloaded = installFakeBrowser()
+  assert.equal(controller.removePortalGoogleTranslate(), 'clean', 'the new document holds nothing of Google')
+  assert.equal(reloaded.snapshots.length, 0, 'no reload loop')
 })
 
 await check('a translated marker alone still reloads once, after clearing', () => {
@@ -96,6 +98,43 @@ await check('a translated marker alone still reloads once, after clearing', () =
   assert.equal(controller.removePortalGoogleTranslate(), 'reloading')
   assert.equal(snapshots.length, 1)
   assert.equal(snapshots[0].cleared, true)
+})
+
+await check('abandoning an attempt also clears the init callback, so a late script cannot start', async () => {
+  const { byId } = installFakeBrowser()
+  const pending = controller.applyPortalGoogleTranslate('fr')
+  await Promise.resolve()
+  const win = globals.window as Record<string, unknown>
+  assert.equal(typeof win.businessOsPortalTranslateInit, 'function', 'Google would call this when its script arrives')
+  controller.abandonPortalGoogleTranslate()
+  assert.equal(win.businessOsPortalTranslateInit, undefined)
+  assert.equal(byId.has('business-os-portal-translate-script'), false)
+  void pending
+})
+
+await check('Google code on the page counts even with no tag, widget or marker: window.google.translate makes the removal reload', () => {
+  const clean = installFakeBrowser()
+  assert.equal(controller.removePortalGoogleTranslate(), 'clean', 'control: nothing of Google, no reload')
+  assert.equal(clean.snapshots.length, 0)
+  const { snapshots } = installFakeBrowser()
+  ;(globals.window as Record<string, unknown>).google = { translate: {} }
+  assert.equal(controller.removePortalGoogleTranslate(), 'reloading')
+  assert.equal(snapshots.length, 1)
+})
+
+await check('a script that was inserted in this document still makes the removal reload after its tag is gone; a new document starts clean', async () => {
+  const first = installFakeBrowser()
+  const pending = controller.applyPortalGoogleTranslate('es')
+  await Promise.resolve()
+  first.byId.get('business-os-portal-translate-script')?.remove()
+  first.byId.get('business-os-portal-translate-widget-host')?.remove()
+  ;(globals.window as Record<string, unknown>).businessOsPortalTranslateInit = undefined
+  assert.equal(controller.removePortalGoogleTranslate(), 'reloading', 'its code may still be running: only a reload ends it')
+  assert.equal(first.snapshots.length, 1)
+  void pending
+  const reloaded = installFakeBrowser()
+  assert.equal(controller.removePortalGoogleTranslate(), 'clean', 'the reloaded document has no Google')
+  assert.equal(reloaded.snapshots.length, 0)
 })
 
 globals.window = savedWindow
@@ -135,6 +174,25 @@ await check('every listener body only re-reads the marker and sets state: no API
   // Positive control: a listener that does reach the API is not accepted.
   const bad = "const refresh = () => { void api().getPortalAccountMe?.() }\nwindow.addEventListener('pageshow', refresh)"
   assert.doesNotMatch(bodyOf(bad, listenerNames(bad)[0]), SAFE_BODY, 'a listener that reaches the API is flagged')
+})
+
+// Zero added requests, measured against the base commit 2ab19b282 (before the guard existed): 3 getPortalAccountMe mentions in the catalog
+// folder (the type, the guard and the one load-time call), 8 api() lookups and 7 API call sites in portalAccount.ts, no fetch( anywhere.
+const countOf = (source: string, pattern: RegExp) => (source.match(pattern) || []).length
+await check('the guard adds no request site: getPortalAccountMe, api() and call sites equal the base commit; no fetch( or apiFetch(', () => {
+  const folder = path.join(frontend, 'src/components/catalog')
+  const catalogFiles = fs.readdirSync(folder).filter((name) => /\.(ts|tsx)$/.test(name))
+  const mentions = catalogFiles.reduce((total, name) => total + countOf(read(`src/components/catalog/${name}`), /getPortalAccountMe/g), 0)
+  assert.equal(mentions, 3, 'getPortalAccountMe mentions in components/catalog (base 3)')
+  assert.equal(countOf(hook, /api\(\)/g), 8, 'api() lookups in portalAccount.ts (base 8)')
+  assert.equal(countOf(hook, /await fn\(|\ba\.[a-zA-Z]+\(/g), 7, 'API call sites in portalAccount.ts (base 7)')
+  for (const name of ['portalTranslateController.ts', 'PublicCatalogPage.tsx', 'portalAccount.ts', 'portalLanguageOptions.ts']) {
+    assert.equal(countOf(read(`src/components/catalog/${name}`), /\b(?:apiFetch|fetch)\(/g), 0, `${name} makes no fetch( or apiFetch( call (base 0)`)
+  }
+  // Positive control: the same counters see a call that was added.
+  const added = `${hook}\nvoid api().getPortalAccountMe?.()\nvoid fetch('/api/portal/auth/me')`
+  assert.equal(countOf(added, /api\(\)/g), 9)
+  assert.equal(countOf(added, /\b(?:apiFetch|fetch)\(/g), 1)
 })
 
 await check('the network re-check of round 1 is gone', () => {
