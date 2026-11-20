@@ -47,6 +47,10 @@ const L1 = async (edits) => {
   assert.deepEqual(dateOf(w, null), { 105: MID, 106: null, 107: OLD, 108: null }, 'one active branch: the inactive branches newer counts set nothing')
   assert.deepEqual(dateOf(w, 2), { 105: null, 106: NEW, 107: NEW, 108: null }, 'a named branch is read as named, active or not')
   assert.deepEqual(dateOf(w, 1), { 105: MID, 106: null, 107: OLD, 108: null })
+  // A branch whose is_active is NULL is inactive, as in the count list's own branch statements (is_active = 1): one branch at 1 and branch 3 (the newest counts) at NULL is still ONE active branch.
+  setActive(w, 1, 0, 'NULL')
+  assert.deepEqual(dateOf(w, null), dateOf(w, 1), 'a NULL is_active is inactive: the no-branch answer equals the branch-scoped answer for the branch at 1')
+  assert.deepEqual(dateOf(w, null), { 105: MID, 106: null, 107: OLD, 108: null })
   setActive(w, 0, 1)
   assert.deepEqual(dateOf(w, null), { 105: null, 106: NEW, 107: NEW, 108: null }, 'the other branch alone active: its counts only')
   setActive(w, 1, 1)
@@ -123,6 +127,7 @@ const L3 = async (edits) => {
 const GROUP = 'lib/inventoryCheckGrouping.ts'
 const PLANTS = [
   ['M1 always the scoped path (the count test dropped: two or no active branches take one branch)', { [GROUP]: [['CASE WHEN COUNT(*) = 1 THEN MAX(id) END', 'MAX(id)']] }, ['L1', 'L2']],
+  ['M3 the rule spelled COALESCE(is_active,1) = 1 (a NULL branch counts as active)', { [GROUP]: [["FROM branches WHERE is_active = 1)'", "FROM branches WHERE COALESCE(is_active,1) = 1)'"]] }, ['L1']],
   ['M2 never the scoped path (production: every branch counts, so a disabled branch sets the date)', { [GROUP]: [['CASE WHEN ${sole} IS NOT NULL THEN', 'CASE WHEN 0 THEN']] }, ['L1', 'L2', 'L3']],
 ]
 const SCENARIOS = { L1, L2, L3 }
