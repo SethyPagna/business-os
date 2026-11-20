@@ -17,6 +17,7 @@ const pending: Record<BellRead, boolean> = { summary: false, items: false }
  */
 export function bellRelevantInvalidations(prefixes: readonly string[] | null, path?: string): boolean {
   if (path !== undefined && isSaleWritePath(path)) return false
+  if (path !== undefined && isPortalReviewPath(path)) return true
   return prefixes === null || prefixes.includes('inventory') || prefixes.includes('products')
 }
 
@@ -28,6 +29,14 @@ export function bellRelevantInvalidations(prefixes: readonly string[] | null, pa
  */
 export function isSaleWritePath(path: string): boolean {
   return /^\/api\/sales(?:[/?#]|$)/.test(String(path || ''))
+}
+
+/**
+ * An approve or reject of a portal submission resolves an item the bell lists (the portal section). The portal family maps
+ * to no read prefix, so without this rule the acting admin's bell would keep the item for up to the plan lifetime.
+ */
+export function isPortalReviewPath(path: string): boolean {
+  return /^\/api\/portal\/submissions\/[^/?#]+\/review(?:[/?#]|$)/.test(String(path || ''))
 }
 
 export function noteOwnWriteForBell(prefixes: readonly string[] | null, path?: string): void {

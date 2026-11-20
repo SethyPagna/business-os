@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import {
-  bellPath, bellRelevantInvalidations, isSaleWritePath, noteOwnWriteForBell, peekBellFresh, requestFreshBell, restoreBellFresh, takeBellFresh,
+  bellPath, bellRelevantInvalidations, isPortalReviewPath, isSaleWritePath, noteOwnWriteForBell, peekBellFresh, requestFreshBell, restoreBellFresh, takeBellFresh,
 } from '../src/api/bellFreshness.ts'
 import { olderAsOf } from '../src/components/dashboard/stockAsOf.ts'
 import { WRITE_FAMILY_INVALIDATES, invalidationsForWritePath } from '../src/api/writeInvalidation.ts'
@@ -42,6 +42,20 @@ assert.equal(bellRelevantInvalidations(null), true)
 assert.equal(bellRelevantInvalidations(invalidationsForWritePath('/api/sales/quote')), false)
 assert.equal(bellRelevantInvalidations(invalidationsForWritePath('/api/sales')), true, 'by prefixes alone sales still reach stock; only the path rule exempts them')
 assert.equal(bellRelevantInvalidations(invalidationsForWritePath('/api/never-mapped-family')), true)
+
+// 1b. Resolving a portal submission removes an item the bell lists, but the portal family maps to no read prefix: the path rule must arm the fresh read
+// (the Worker moved the 'customers' version before it answered), so the acting admin's next summary no longer lists it.
+for (const p of ['/api/portal/submissions/7/review', '/api/portal/submissions/7/review?x=1']) {
+  assert.equal(isPortalReviewPath(p), true, p)
+  assert.equal(bellRelevantInvalidations(invalidationsForWritePath(p), p), true, `${p} resolves a bell item: it arms a fresh read`)
+}
+for (const p of ['/api/portal/submissions', '/api/portal/submissions/7/screenshot/0', '/api/portal/settings']) {
+  assert.equal(isPortalReviewPath(p), false, p)
+  assert.equal(bellRelevantInvalidations(invalidationsForWritePath(p), p), false, `${p} leaves the bell cached`)
+}
+noteOwnWriteForBell(invalidationsForWritePath('/api/portal/submissions/7/review'), '/api/portal/submissions/7/review')
+assert.equal(takeBellFresh('summary'), true, 'a portal review leaves the flag up')
+takeBellFresh('items')
 
 // 2. The flag: set by an own write, consumed exactly once per read kind, restored when the read failed.
 assert.equal(peekBellFresh('summary'), false)
