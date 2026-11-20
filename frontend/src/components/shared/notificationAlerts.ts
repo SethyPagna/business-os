@@ -34,8 +34,10 @@ export const SECTION_CUT_OFF_ITEMS = 20
  * always sends. Reading the stand-in as a real, empty answer made every unresolved alert count as resolved and pop again once the
  * connection came back (round-4 review S4).
  */
-export function summaryCameFromWorker(result: { generatedAt?: unknown; unavailable?: unknown } | null | undefined): boolean {
-  return typeof result?.generatedAt === 'string' && result.generatedAt.length > 0 && !result.unavailable
+export function summaryCameFromWorker(result: unknown): boolean {
+  if (!result || typeof result !== 'object') return false
+  const { generatedAt, unavailable } = result as { generatedAt?: unknown; unavailable?: unknown }
+  return typeof generatedAt === 'string' && generatedAt.length > 0 && !unavailable
 }
 
 export function isSectionComplete(section: { truncated?: boolean; itemsTotal?: number; count?: number; items?: unknown[] } | null | undefined): boolean {
