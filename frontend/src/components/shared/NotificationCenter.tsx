@@ -20,7 +20,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { getNotificationSummary as getNotificationSummaryRequest } from '../../api/notificationSummary.ts'
-import { requestFreshBell } from '../../api/bellFreshness.ts'
+import { onBellResolved, requestFreshBell } from '../../api/bellFreshness.ts'
 import { olderAsOf, stockAsOfText } from '../dashboard/stockAsOf.ts'
 import { getNotificationSectionItems as getNotificationSectionItemsRequest } from '../../api/notificationSummary.ts'
 import { unseenTailCount, type SeenTail } from '../../utils/notificationTail.ts'
@@ -763,7 +763,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     // decisions (routes/devices.ts) -- previously missing even though
     // it's the one channel semantically built for this exact component,
     // so a device approve/deny elsewhere never refreshed the bell live.
-    if (['inventory', 'sales', 'returns', 'customers', 'suppliers', 'deliveryContacts', 'notifications', 'catalog', 'settings'].includes(syncChannel.channel)) {
+    if (['inventory', 'sales', 'returns', 'customers', 'suppliers', 'deliveryContacts', 'notifications', 'catalog', 'settings', 'portalSubmissions'].includes(syncChannel.channel)) {
       const plan = planThrottledSyncReload(
         syncChannel.channel,
         Date.now() - lastSummaryLoadAtRef.current,
@@ -775,6 +775,21 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
       else scheduleRefresh(plan.delayMs)
     }
   }, [loadSummary, scheduleRefresh, syncChannel?.channel, syncChannel?.reason, syncChannel?.ts, visibilityActive])
+
+  // This device's own write that resolves bell items (a sale status or payment, a portal review, an import cancel): re-read at once. The write left the
+  // sections it names pending in bellFreshness, so the read below carries them (`?fresh=sales`) and the expanded lists it reloads do too.
+  useEffect(() => {
+    if (!visibilityActive) return undefined
+    let timer: number | null = null
+    const stop = onBellResolved(() => {
+      if (timer !== null) return
+      timer = window.setTimeout(() => { timer = null; void loadSummary(true) }, 0)
+    })
+    return () => {
+      stop()
+      if (timer !== null) window.clearTimeout(timer)
+    }
+  }, [loadSummary, visibilityActive])
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent | TouchEvent) => {

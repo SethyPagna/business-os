@@ -40,14 +40,15 @@ await getNotificationSummary()
 await http.apiFetch('POST', '/api/sales', { a: 1 })
 await getNotificationSummary()
 assert.deepEqual(summaries(), [PLAIN], 'own sale then a read inside 20 s must NOT send ?fresh=1')
-assert.equal(bell.peekBellFresh('summary'), false)
-// every sale-family write behaves the same
+assert.equal(bell.peekBellFresh('summary'), '')
+// every other write under /api/sales resolves only the sales section: the next read names it and nothing else
+const FRESH_SALES = 'GET /api/notifications/summary?fresh=sales'
 for (const [method, path] of [['POST', '/api/sales/7/items'], ['POST', '/api/sales/7/amendments'], ['PATCH', '/api/sales/7/status']] as const) {
   reset()
   await getNotificationSummary()
   await http.apiFetch(method, path, { a: 1 })
   await getNotificationSummary()
-  assert.deepEqual(summaries(), [PLAIN], `${method} ${path} is a sale: no fresh read`)
+  assert.deepEqual(summaries(), [PLAIN, FRESH_SALES], `${method} ${path} re-reads the sales section only`)
 }
 // a product edit still does
 reset()
@@ -55,7 +56,7 @@ await getNotificationSummary()
 await http.apiFetch('PATCH', '/api/products/9', { a: 1 })
 await getNotificationSummary()
 assert.deepEqual(summaries(), [PLAIN, FRESH], 'a product edit still reaches the network fresh')
-assert.equal(bell.peekBellFresh('summary'), false, 'the flag is consumed')
+assert.equal(bell.peekBellFresh('summary'), '', 'the flag is consumed')
 await getNotificationSummary()
 assert.deepEqual(summaries(), [PLAIN, FRESH], 'one fresh per write')
 // a return is not a sale in this rule

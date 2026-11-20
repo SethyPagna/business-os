@@ -1,74 +1,73 @@
-// The notification bell may be up to 5 minutes old (owner, 11 Nov: the Worker answers its inventory, expiry and supplier-credit
-// sections from a cache that ignores data versions, and the panel says "as of HH:MM"). The one exception is the person's OWN
-// write: after a stock change, a product edit or a lot payment made from this tab, the next bell read must show the
-// result, so it asks the Worker for `?fresh=1` (a recompute that also refreshes the entry everyone else reads).
+// The bell may be up to 5 minutes old for everyone (owner, 11 Nov); the acting device re-reads what its own write can change.
+// A write maps to nothing (the till's own new sale), to everything (stock and products: `?fresh=1`) or to the bell sections it
+// resolves (`?fresh=a,b`: every other /api/sales write, a portal review, an import cancel/delete/retry). Only a named set also
+// wakes the panel at once (onBellResolved); "everything" waits for the next read, because it costs a catalog walk.
 //
 // No imports: apiFetch (http.ts) calls noteOwnWriteForBell from its after-mutation hook, and notificationSummary.ts imports
 // http.ts, so this module has to sit under both.
 
 type BellRead = 'summary' | 'items'
+type BellWrite = null | 'all' | string[]
+type Pending = { all: boolean; names: Set<string> }
 
-const pending: Record<BellRead, boolean> = { summary: false, items: false }
+const newPending = (): Pending => ({ all: false, names: new Set() })
+const pending: Record<BellRead, Pending> = { summary: newPending(), items: newPending() }
+const listeners = new Set<(sections: string[]) => void>()
 
-/**
- * True when a mutation whose cached-read invalidation list is `prefixes` can change a bell count: it moves stock or products
- * (every writer of the inventory, expiry and supplier-credit inputs reaches the 'inventory' or 'products' read prefixes in
- * api/writeInvalidation.ts), or it is unmapped (null: the caller clears every cached read, so the bell is stale too).
- */
-export function bellRelevantInvalidations(prefixes: readonly string[] | null, path?: string): boolean {
-  if (path !== undefined && isSaleWritePath(path)) return false
-  if (path !== undefined && isPortalReviewPath(path)) return true
-  return prefixes === null || prefixes.includes('inventory') || prefixes.includes('products')
-}
+const pathOnly = (path: string): string => String(path || '').split(/[?#]/)[0].replace(/\/+$/, '')
 
-/**
- * Owner, 11 Nov ("Wait"): a till's own SALE does not arm a fresh bell read; the bell may lag up to the plan lifetime after
- * it. "A sale" is every write under /api/sales (create, add lines, payments and amendments, status, customer, bulk edits).
- * Returns (/api/returns) are not sales in this rule and still arm one; so do products, stock, batches, transfers, checks,
- * imports, review and action history. The panel's refresh button (requestFreshBell) always forces a read.
- */
-export function isSaleWritePath(path: string): boolean {
-  return /^\/api\/sales(?:[/?#]|$)/.test(String(path || ''))
-}
-
-/**
- * An approve or reject of a portal submission resolves an item the bell lists (the portal section). The portal family maps
- * to no read prefix, so without this rule the acting admin's bell would keep the item for up to the plan lifetime.
- */
-export function isPortalReviewPath(path: string): boolean {
-  return /^\/api\/portal\/submissions\/[^/?#]+\/review(?:[/?#]|$)/.test(String(path || ''))
+/** The ONE mapping from a write (its cached-read invalidation prefixes and path) to the bell reads it forces. */
+export function bellWriteFor(prefixes: readonly string[] | null, path?: string): BellWrite {
+  const p = pathOnly(path ?? '')
+  if (p === '/api/sales') return null
+  if (/^\/api\/sales\//.test(p)) return prefixes !== null && prefixes.length === 0 ? null : ['sales']
+  if (/^\/api\/portal\/submissions\/[^/]+\/review$/.test(p)) return ['portal']
+  if (/^\/api\/import-jobs\/[^/]+(?:\/(?:cancel|delete|retry))?$/.test(p) && !/\/(?:preflight|start|approve|dismiss)$/.test(p)) return ['imports']
+  return prefixes === null || prefixes.includes('inventory') || prefixes.includes('products') ? 'all' : null
 }
 
 export function noteOwnWriteForBell(prefixes: readonly string[] | null, path?: string): void {
-  if (!bellRelevantInvalidations(prefixes, path)) return
-  pending.summary = true
-  pending.items = true
+  const write = bellWriteFor(prefixes, path)
+  if (!write) return
+  for (const read of ['summary', 'items'] as const) {
+    if (write === 'all') pending[read].all = true
+    else for (const name of write) pending[read].names.add(name)
+  }
+  if (write !== 'all') for (const listener of [...listeners]) listener(write)
 }
 
-/** Consumes the flag: true once per own write, for the one read that will carry `?fresh=1`. */
-export function takeBellFresh(read: BellRead): boolean {
-  const value = pending[read]
-  pending[read] = false
+/** Calls `listener` with the sections of every own write that names some; returns the unsubscribe. */
+export function onBellResolved(listener: (sections: string[]) => void): () => void {
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
+}
+
+/** Consumes the pending write for one read kind: '1' (everything), 'a,b' (those sections) or '' (a plain read). */
+export function takeBellFresh(read: BellRead): string {
+  const value = peekBellFresh(read)
+  pending[read] = newPending()
   return value
 }
 
-/** Whether an own write is waiting to be shown (does not consume it). */
-export function peekBellFresh(read: BellRead): boolean {
-  return pending[read]
+/** What the next read of this kind will ask for (does not consume it). */
+export function peekBellFresh(read: BellRead): string {
+  const { all, names } = pending[read]
+  return all ? '1' : [...names].sort().join(',')
 }
 
-/** A read that carried the flag and failed puts it back, so the next attempt still asks for the fresh answer. */
-export function restoreBellFresh(read: BellRead): void {
-  pending[read] = true
+/** A read that carried `fresh` and failed puts it back, so the next attempt still asks for the fresh answer. */
+export function restoreBellFresh(read: BellRead, fresh: string): void {
+  if (fresh === '1') pending[read].all = true
+  else for (const name of fresh.split(',')) if (name) pending[read].names.add(name)
 }
 
-/** The panel's own refresh button: the next read, summary and items, is a recompute. */
+/** The panel's own refresh button: the next read, summary and items, is a full recompute. */
 export function requestFreshBell(): void {
-  pending.summary = true
-  pending.items = true
+  pending.summary.all = true
+  pending.items.all = true
 }
 
-export function bellPath(path: string, fresh: boolean): string {
+export function bellPath(path: string, fresh: string): string {
   if (!fresh) return path
-  return `${path}${path.includes('?') ? '&' : '?'}fresh=1`
+  return `${path}${path.includes('?') ? '&' : '?'}fresh=${fresh}`
 }
