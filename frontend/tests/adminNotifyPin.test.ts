@@ -709,6 +709,51 @@ assert.match(centerSource, /const \{ displayLabel, displayMeta \} = itemText\(it
   }
 }
 
+// AN2: an alert that arrives while the tab is hidden pops when the tab is shown again.
+{
+  const store = memoryStore()
+  const row = [{ id: 'out-9', tone: 'danger' }]
+  assert.equal(announce({ items: row, blocked: true, now: 5, store }).kind, 'none', 'hidden tab: nothing pops')
+  assert.deepEqual(store.backing.times, {}, 'and nothing is remembered as announced')
+  assert.deepEqual(ids(announce({ items: row, blocked: false, now: 6, store })), ['out-9'], 'the same rows pop once the tab is shown')
+  assert.equal(announce({ items: row, now: 7, store }).kind, 'none', 'and only once')
+  // The effect re-runs when page visibility changes, and blocked reads that state, not document.visibilityState.
+  const effectEnd = centerSource.indexOf('// eslint-disable-next-line react-hooks/exhaustive-deps', centerSource.indexOf('const blocked = !visibilityActive'))
+  const effectSource = centerSource.slice(centerSource.indexOf('const blocked = !visibilityActive'), effectEnd)
+  const pinned = (source: string) => /const blocked = [^\n]*\|\| !pageVisible\n/.test(source) && /\[summary\.sections, visibilityActive, pageVisible\]\)/.test(centerSource.replace(effectSource, source))
+  assert.ok(effectSource.length > 0 && pinned(effectSource), 'blocked uses the page-visibility state')
+  assert.ok(centerSource.includes('}, [summary.sections, visibilityActive, pageVisible])'), 'the announce effect depends on it')
+  assert.ok(centerSource.includes('const pageVisible = usePageVisible()'))
+  const oldSource = "const blocked = !visibilityActive || open || !!summary.unavailable || typeof document === 'undefined' || document.visibilityState === 'hidden'\n"
+  assert.equal(pinned(oldSource), false, 'control: the old line fails the pin')
+  assert.ok(!effectSource.includes('document.visibilityState'),'the effect no longer reads the document directly')
+  // The hook: initial value and reaction to a visibilitychange event, on a fake document.
+  const { getPageVisible, subscribePageVisible } = await import('../src/utils/usePageVisible.ts')
+  const listeners = new Set<() => void>()
+  const fakeDocument: any = {
+    visibilityState: 'visible',
+    addEventListener: (type: string, fn: () => void) => { if (type === 'visibilitychange') listeners.add(fn) },
+    removeEventListener: (type: string, fn: () => void) => { if (type === 'visibilitychange') listeners.delete(fn) },
+  }
+  ;(globalThis as any).document = fakeDocument
+  try {
+    assert.equal(getPageVisible(), true, 'a shown tab starts visible')
+    let calls = 0
+    const off = subscribePageVisible(() => { calls += 1 })
+    fakeDocument.visibilityState = 'hidden'
+    listeners.forEach((fn) => fn())
+    assert.equal(calls, 1, 'the event notifies the subscriber')
+    assert.equal(getPageVisible(), false, 'and the state reads hidden')
+    fakeDocument.visibilityState = 'visible'
+    listeners.forEach((fn) => fn())
+    assert.equal(getPageVisible(), true, 'and visible again')
+    off()
+    assert.equal(listeners.size, 0, 'unsubscribing removes the listener')
+  } finally {
+    delete (globalThis as any).document
+  }
+}
+
 // S3: one user's pop-ups never reach the next user.
 {
   reset()
