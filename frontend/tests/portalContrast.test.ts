@@ -239,7 +239,7 @@ runTest('the account submit button is no longer white on emerald-500 (2.54:1)', 
 
 runTest('the account error alert clears AA on its own rose-50 ground', () => {
   const source = read('CatalogAccountSection.tsx')
-  const alert = /className="mb-4 rounded-2xl border border-rose-300 bg-rose-50 ([^"]+)"/.exec(source)
+  const alert = /className="rounded-xl border border-rose-300 bg-rose-50 ([^"]+)"/.exec(source)
   assert.ok(alert, 'the error alert must still be the rose-50 block')
   assert.doesNotMatch(alert[1], /text-rose-600\b/, 'rose-600 on rose-50 is 4.28:1')
   assert.match(alert[1], /text-rose-700\b/, 'rose-700 on rose-50 is 5.72:1')
@@ -372,14 +372,12 @@ runTest('the secondary-tabs Suspense fallback paints a dark ground too', () => {
   )
 })
 
-runTest('the language-tools menu heading is legible on the dark menu surface', () => {
+runTest('the language menu has no title row and its active option is legible on both menu surfaces', () => {
   const surface = read('CatalogPreviewSurface.tsx')
-  assert.match(
-    surface,
-    /px-4 pb-2 pt-3 text-\[11px\] font-semibold uppercase tracking-\[0\.18em\] text-stone-600 dark:text-neutral-400/,
-    'the "Language tools" heading needs a dark ink -- PortalMenu\'s own menu surface is dark:bg-neutral-900',
-  )
-  assert.ok(meetsContrast('#a3a3a3', '#171717', 'text'), 'dark:text-neutral-400 clears AA text contrast on that menu')
+  assert.doesNotMatch(surface, /uppercase tracking-\[0\.18em\] text-stone-600/, 'the Language tools heading row is gone')
+  assert.match(surface, /font-semibold text-\[#7a5c22\] dark:text-amber-300/, 'the active option is brass text with a check')
+  assert.ok(meetsContrast('#7a5c22', '#ffffff', 'text'), 'brass text on the white menu')
+  assert.ok(meetsContrast('#fcd34d', '#171717', 'text'), 'amber-300 on the dark menu')
 })
 
 // ---------------------------------------------------------------------------

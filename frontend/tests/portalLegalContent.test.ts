@@ -128,12 +128,17 @@ const secondary = source('components/catalog/CatalogSecondaryTabs.tsx')
 assert.doesNotMatch(secondary, /<iframe[^>]*src={mapEmbedUrl}/, 'the map embed loads Google without being asked')
 assert.match(secondary, /<PortalEmbedConsent/, 'the map must go through the embed consent gate')
 
-// The standing storefront notice ends on "YOUR PRIVACY IS OUR PRIORITY"; an
+// The standing storefront notice used to end on "YOUR PRIVACY IS OUR PRIORITY"; an
 // assurance with no policy behind it is exactly the unsupported claim the
-// Law on Consumer Protection reaches, so the sentence must carry the link.
+// Law on Consumer Protection reaches, so any such sentence must carry the link.
 const noPayment = source('components/catalog/PortalNoPaymentNotice.tsx')
-assert.match(noPayment, /<LegalInlineLink page="privacy"/, 'the privacy promise has no privacy policy behind it')
-assert.match(noPayment, /LEGAL_PAGE_TITLE_KEY.privacy/, 'the link label must come from the legal pack, not a hardcoded string')
+// The overhaul dropped that sentence: the notice is the one payment line and makes no privacy promise. If one ever returns it must link the policy.
+const noPaymentCode = noPayment.replace(/^\/\/.*$/gm, '')
+if (/privacy/i.test(noPaymentCode)) {
+  assert.match(noPayment, /<LegalInlineLink page="privacy"/, 'the privacy promise has no privacy policy behind it')
+  assert.match(noPayment, /LEGAL_PAGE_TITLE_KEY.privacy/, 'the link label must come from the legal pack, not a hardcoded string')
+}
+assert.match(noPaymentCode, /noPaymentLine/, 'the notice is the one payment line')
 
 // The AI panel carries TWO notices: the merchant's editable disclaimer, and
 // the app's own, which says the shopper is talking to software, that the

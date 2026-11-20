@@ -163,8 +163,8 @@ runTest('every storefront button that renders only icons carries a name', () => 
 
 runTest('toggle controls report their state, not just their name', () => {
   const account = read('CatalogAccountSection.tsx')
-  assert.match(account, /aria-pressed=\{mode === 'signin'\}/, 'the sign in / sign up switch is a pressed pair')
-  assert.match(account, /aria-pressed=\{mode === 'signup'\}/)
+  assert.match(account, /aria-pressed=\{mode === value\}/, 'the sign in / sign up switch is a pressed pair')
+  assert.match(account, /\['signin', 'signup'\] as const\)\.map/, 'both sides of the pair come from the one list')
   const combobox = read('PortalFilterCombobox.tsx')
   assert.match(combobox, /aria-expanded=\{open\}/, 'the filter trigger says whether the list is open')
 })

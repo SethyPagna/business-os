@@ -76,12 +76,20 @@ runTest('positive control: every native form is counted, comments and a local co
 })
 
 runTest('the stock record and user account surfaces use the shared review dialog, not confirm()', () => {
-  for (const rel of ['components/products/StockChangeSection.tsx', 'components/products/StockInSessionsSection.tsx', 'components/users/UserProfileModal.tsx', 'components/users/Users.tsx', 'components/catalog/CatalogAccountSection.tsx']) {
+  for (const rel of ['components/products/StockChangeSection.tsx', 'components/products/StockInSessionsSection.tsx', 'components/users/UserProfileModal.tsx', 'components/users/Users.tsx']) {
     const source = fs.readFileSync(path.join(srcRoot, rel), 'utf8')
     assert.equal(nativeConfirmCalls(rel, source), 0, `${rel} calls native confirm()`)
     assert.match(source, /<ConfirmDialog\b/, `${rel} renders the shared ConfirmDialog`)
     assert.equal(REMAINING[rel], undefined, `${rel} must not be on the remaining list`)
   }
+})
+
+runTest('the storefront account sheet has no confirm of any kind (the sign-up reminder dialog is gone, spec section 5)', () => {
+  const rel = 'components/catalog/CatalogAccountSection.tsx'
+  const source = fs.readFileSync(path.join(srcRoot, rel), 'utf8')
+  assert.equal(nativeConfirmCalls(rel, source), 0, `${rel} calls native confirm()`)
+  assert.doesNotMatch(source, /<ConfirmDialog|signupReminderTitle/, 'sign-up must not open a confirm step')
+  assert.equal(REMAINING[rel], undefined, `${rel} must not be on the remaining list`)
 })
 
 runTest('no new native confirm() anywhere in frontend/src, and the remaining list only shrinks', () => {

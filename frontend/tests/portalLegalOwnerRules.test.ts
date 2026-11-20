@@ -68,10 +68,13 @@ test('minimum age 16 is stated in the consent wording and in the Children sectio
       assert.match(pack[key], sixteen, `${lang} ${key} does not state the minimum age`)
     }
   }
-  // The inline fallbacks the form renders before any pack loads match the packs.
+  // The one line the form renders states the age in both languages, and its two {terms}/{privacy} slots are the policy links.
   const field = read('../src/components/catalog/legal/SignupConsentField.tsx')
-  assert.ok(field.includes(`'${PORTAL_LEGAL_EN.portal_legal_consent_label}'`), 'inline EN consent label drifted from the pack')
-  assert.ok(field.includes(`'${PORTAL_LEGAL_KM.portal_legal_consent_label}'`), 'inline KM consent label drifted from the pack')
+  const lineEn = /CONSENT_LINE_EN = '([^']+)'/.exec(field)?.[1] || ''
+  const lineKm = /CONSENT_LINE_KM = '([^']+)'/.exec(field)?.[1] || ''
+  assert.match(lineEn, /\b16\b/, 'the inline EN consent line does not state the minimum age')
+  assert.match(lineKm, /១៦/, 'the inline KM consent line does not state the minimum age')
+  for (const line of [lineEn, lineKm]) assert.ok(line.includes('{terms}') && line.includes('{privacy}'), 'the consent line must link both policies')
 })
 
 test('plain factual copy: no welcome, effort or gladness sentences, no hedge about banners', () => {

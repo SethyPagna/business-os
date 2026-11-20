@@ -63,7 +63,19 @@ function readItems(result: unknown): unknown[] {
 type BucketLike = { items: PortalBucketItem[]; setAll: (items: PortalBucketItem[]) => void }
 type WishlistLike = { items: PortalWishlistItem[]; setAll: (items: PortalWishlistItem[]) => void }
 
-export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike) {
+type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
+
+// The three messages the hook itself words (everything else is the Worker's own text). They go through the storefront's copy().
+function accountMessage(copy: CopyFn, which: 'unavailable' | 'incomplete' | 'generic'): string {
+  if (which === 'unavailable') return copy('portalAccountUnavailable', 'Accounts are unavailable right now.', 'គណនីមិនអាចប្រើបានពេលនេះទេ។')
+  if (which === 'incomplete') return copy('portalAccountIncomplete', 'The account response was incomplete. Please try again.', 'ចម្លើយគណនីមិនពេញលេញ។ សូមព្យាយាមម្ដងទៀត។')
+  return copy('portalAccountGenericError', 'Something went wrong. Please try again.', 'មានបញ្ហា។ សូមព្យាយាមម្ដងទៀត។')
+}
+
+export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike, copy: CopyFn) {
+  // The latest copy(), read when an error is worded, so the callbacks below stay stable across a language change.
+  const copyRef = useRef(copy)
+  copyRef.current = copy
   const [account, setAccount] = useState<PortalAccountProfile | null>(null)
   const [ready, setReady] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -158,20 +170,20 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike) {
   ): Promise<boolean> => {
     const a = api()
     const fn = a[method]
-    if (!fn) { setError('Accounts are unavailable right now.'); setErrorCode(''); return false }
+    if (!fn) { setError(accountMessage(copyRef.current, 'unavailable')); setErrorCode(''); return false }
     setBusy(true)
     setError('')
     setErrorCode('')
     try {
       const result = await fn(payload)
       const profile = readProfile(result)
-      if (!profile) throw new Error('The account response was incomplete. Please try again.')
+      if (!profile) throw new Error(accountMessage(copyRef.current, 'incomplete'))
       setAccount(profile)
       setConsentRenewal(false)
       await hydrate()
       return true
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
+      setError(err instanceof Error ? err.message : accountMessage(copyRef.current, 'generic'))
       setErrorCode(readPortalErrorCode(err))
       return false
     } finally {
@@ -183,7 +195,7 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike) {
   // success never depends on a second /auth/me round trip (no loop if it differs).
   const renewConsent = useCallback(async (payload: Record<string, unknown>): Promise<boolean> => {
     const fn = api().renewPortalConsent
-    if (!fn) { setError('Accounts are unavailable right now.'); setErrorCode(''); return false }
+    if (!fn) { setError(accountMessage(copyRef.current, 'unavailable')); setErrorCode(''); return false }
     setBusy(true)
     setError('')
     setErrorCode('')
@@ -195,7 +207,7 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike) {
       await hydrate()
       return true
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
+      setError(err instanceof Error ? err.message : accountMessage(copyRef.current, 'generic'))
       setErrorCode(readPortalErrorCode(err))
       return false
     } finally {

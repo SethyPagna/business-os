@@ -13,7 +13,6 @@ import Phone from 'lucide-react/dist/esm/icons/phone.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
 import Heart from 'lucide-react/dist/esm/icons/heart.js'
-import UserIcon from 'lucide-react/dist/esm/icons/user.js'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
@@ -35,6 +34,7 @@ import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { buildPortalContactEntries, buildPortalSocialFromConfig, normalizePortalExternalUrl as normalizeExternalUrl, portalContactFooterLinks } from './portalSocialLinks.ts'
 import PortalContactMenu, { type PortalContactAnchor } from './PortalContactMenu.tsx'
+import PortalSheet from './PortalSheet.tsx'
 import CatalogPreviewSurface from './CatalogPreviewSurface'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import { bootstrapPageSizeMatchesViewer, CATALOG_DEFAULT_PAGE_SIZE, normalizeCatalogPageSize, readStoredCatalogPageSize, writeStoredCatalogPageSize } from './catalogPagination'
@@ -530,11 +530,13 @@ export default function PublicCatalogPage() {
   const [assistantDisclosure, setAssistantDisclosure] = useState<AiProviderState | null>(null)
   const [assistantDataUseConsent, setAssistantDataUseConsent] = useState(false)
   const [pageLanguage, setPageLanguage] = useState(readPublicStorefrontLanguage)
+  const copy: CopyFunction = (key, fallback = '', fallbackKm = fallback) =>
+    resolveStorefrontCopy(pageLanguage, t, key, fallback, fallbackKm)
   const bucket = usePortalBucket()
   const wishlist = usePortalWishlist()
   // Storefront account state + cart/wishlist server sync (§2). Guests keep
   // their list in this browser; signing in mirrors it to the account.
-  const portalAccount = usePortalAccount(bucket, wishlist)
+  const portalAccount = usePortalAccount(bucket, wishlist, copy)
   const [bucketOpen, setBucketOpen] = useState(false)
   // Account (profile / sign-in) and Wishlist each open as a slide-in drawer
   // from their own top-bar icon (user request), same overlay pattern as the
@@ -626,9 +628,6 @@ export default function PublicCatalogPage() {
       window.removeEventListener('resize', updateVisibility)
     }
   }, [])
-
-  const copy: CopyFunction = (key, fallback = '', fallbackKm = fallback) =>
-    resolveStorefrontCopy(pageLanguage, t, key, fallback, fallbackKm)
 
   // WCAG 3.1.1: the language selector changed every string on screen but
   // never what the DOCUMENT claimed to be written in, so a screen reader
@@ -1404,59 +1403,36 @@ export default function PublicCatalogPage() {
 
   // On the admin host the manifest is the staff app's, so the shop offers no install there.
   const offersShopInstall = !isAdminHostname()
-  const accountDrawerIconButtonClass = 'rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
+  const accountDrawerIconButtonClass = 'inline-flex h-10 w-10 items-center justify-center rounded-full text-stone-600 transition hover:bg-stone-100 hover:text-[#23201b] dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
 
-  // The top-bar profile icon opens CatalogAccountSection (sign in, sign up, signed-in profile) as a drawer.
+  // The top-bar profile icon opens the account sheet: no header strip, a close button in the corner, the Sign in / Sign up switch first.
   const accountDrawer = accountOpen ? (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-950/50 backdrop-blur-sm sm:items-center" onClick={() => setAccountOpen(false)}>
-      <div
-        className="max-h-modal-85 w-full max-w-md overflow-hidden rounded-t-3xl bg-white pb-[env(safe-area-inset-bottom)] shadow-2xl dark:bg-neutral-900 sm:rounded-3xl sm:pb-0"
-        onClick={(event) => event.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label={copy('account', 'Account')}
-      >
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-neutral-800">
-          <div className="flex items-center gap-2">
-            <UserIcon className="h-5 w-5 text-slate-700 dark:text-neutral-200" />
-            <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('account', 'Account')}</div>
-          </div>
-          <div className="flex items-center gap-1">
-            {offersShopInstall ? (
-              <InstallAppButton translate={(key, fallback, fallbackKm) => copy(key, fallback, fallbackKm)} className={accountDrawerIconButtonClass} />
-            ) : null}
-            <button
-              type="button"
-              className={accountDrawerIconButtonClass}
-              onClick={() => setAccountOpen(false)}
-              aria-label={copy('close', 'Close')}
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-        </div>
-        <div className="max-h-[calc(70*var(--app-vh))] overflow-y-auto overscroll-contain px-5 py-4">
-          <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-400">{copy('loadingPortal', 'Loading website...')}</div>}>
-            <CatalogAccountSection
-              copy={copy}
-              account={portalAccount.account}
-              ready={portalAccount.ready}
-              busy={portalAccount.busy}
-              error={portalAccount.error}
-              errorCode={portalAccount.errorCode}
-              signIn={portalAccount.signIn}
-              signUp={portalAccount.signUp}
-              signOut={portalAccount.signOut}
-              clearError={portalAccount.clearError}
-              consentLocale={String(displayConfig.language || 'en')}
-              cartCount={bucket.count}
-              wishlistCount={wishlist.count}
-              signupEnabled={displayConfig.signupEnabled === true}
-            />
-          </Suspense>
-        </div>
-      </div>
-    </div>
+    <PortalSheet
+      label={copy('account', 'Account')}
+      copy={copy}
+      onClose={() => setAccountOpen(false)}
+      corner={offersShopInstall ? <InstallAppButton translate={(key, fallback, fallbackKm) => copy(key, fallback, fallbackKm)} className={accountDrawerIconButtonClass} /> : null}
+    >
+      <Suspense fallback={<p className="min-h-10 pr-24 text-sm text-stone-600 dark:text-neutral-300">{copy('loadingPortal', 'Loading website...')}</p>}>
+        <CatalogAccountSection
+          copy={copy}
+          account={portalAccount.account}
+          ready={portalAccount.ready}
+          busy={portalAccount.busy}
+          error={portalAccount.error}
+          errorCode={portalAccount.errorCode}
+          signIn={portalAccount.signIn}
+          signUp={portalAccount.signUp}
+          signOut={portalAccount.signOut}
+          clearError={portalAccount.clearError}
+          consentLocale={String(displayConfig.language || 'en')}
+          cartCount={bucket.count}
+          wishlistCount={wishlist.count}
+          signupEnabled={displayConfig.signupEnabled === true}
+          contactEntries={contactEntries}
+        />
+      </Suspense>
+    </PortalSheet>
   ) : null
 
   // Wishlist drawer: the top-bar heart icon opens this. Saved products (the

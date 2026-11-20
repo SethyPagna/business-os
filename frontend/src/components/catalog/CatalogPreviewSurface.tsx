@@ -3,6 +3,7 @@ import type { CSSProperties, ComponentType, Dispatch, ReactNode, RefObject, SetS
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
 import ArrowUp from 'lucide-react/dist/esm/icons/arrow-up.js'
+import Check from 'lucide-react/dist/esm/icons/check.js'
 import Globe from 'lucide-react/dist/esm/icons/globe.js'
 import Heart from 'lucide-react/dist/esm/icons/heart.js'
 import MessageCircle from 'lucide-react/dist/esm/icons/message-circle.js'
@@ -494,33 +495,26 @@ export default function CatalogPreviewSurface({
                         </button>
                       )}
                       content={({ closeMenu }) => (
-                        <div className="w-72 max-w-[85vw]">
-                          <div className="px-4 pb-2 pt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-600 dark:text-neutral-400">
-                            {copy('publicTranslation', 'Language tools')}
-                          </div>
-                          <div className="py-1">
-                            {PUBLIC_STOREFRONT_LANGUAGE_OPTIONS.map((option) => {
-                              const active = pageLanguage === option.value
-                              return (
-                                <button
-                                  key={option.value}
-                                  type="button"
-                                  className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm transition ${
-                                    active
-                                      ? 'bg-stone-100 text-[#7a5c22] dark:bg-neutral-800 dark:text-amber-300'
-                                      : 'text-[#23201b] hover:bg-stone-100 dark:text-neutral-200 dark:hover:bg-neutral-800'
-                                  }`}
-                                  onClick={() => {
-                                    changePageLanguage(option.value)
-                                    closeMenu()
-                                  }}
-                                >
-                                  <span>{option.label}</span>
-                                  {active ? <span className="text-[11px] font-semibold uppercase">{copy('active', 'Active')}</span> : null}
-                                </button>
-                              )
-                            })}
-                          </div>
+                        // No title row: just the options, the active one marked with a check.
+                        <div className="w-60 max-w-[85vw] py-1" role="group" aria-label={copy('publicTranslation', 'Language tools')}>
+                          {PUBLIC_STOREFRONT_LANGUAGE_OPTIONS.map((option) => {
+                            const active = pageLanguage === option.value
+                            return (
+                              <button
+                                key={option.value}
+                                type="button"
+                                aria-current={active ? 'true' : undefined}
+                                className={`flex min-h-11 w-full items-center justify-between gap-3 px-4 text-left text-sm transition hover:bg-stone-100 dark:hover:bg-neutral-800 ${active ? 'font-semibold text-[#7a5c22] dark:text-amber-300' : 'text-[#23201b] dark:text-neutral-200'}`}
+                                onClick={() => {
+                                  changePageLanguage(option.value)
+                                  closeMenu()
+                                }}
+                              >
+                                <span>{option.label}</span>
+                                {active ? <Check aria-hidden="true" className="h-4 w-4 shrink-0" /> : null}
+                              </button>
+                            )
+                          })}
                         </div>
                       )}
                     />

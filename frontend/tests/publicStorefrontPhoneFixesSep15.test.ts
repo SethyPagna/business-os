@@ -267,16 +267,19 @@ check('5 the storefront mounts the shared install band, not a duplicate implemen
   assert.match(publicCatalogPage, /\{installBand\}/, 'the band must actually be mounted in the render tree')
 })
 
-check('5 the Account drawer header offers the install icon next to Close, on the shop host only', () => {
+check('5 the Account sheet offers the install icon next to Close, on the shop host only', () => {
   assert.match(publicCatalogPage, /import InstallAppButton from '\.\.\/install\/InstallAppButton\.tsx'/, 'the button lives under components/install, outside the app-shared chunk')
   const drawerStart = publicCatalogPage.indexOf('const accountDrawer = accountOpen ? (')
   assert.ok(drawerStart > 0, 'account drawer moved')
   const header = publicCatalogPage.slice(drawerStart, publicCatalogPage.indexOf('<CatalogAccountSection', drawerStart))
+  // The sheet draws its own Close in the corner and places `corner` actions right before it.
   assert.match(
     header,
-    new RegExp(String.raw`\{offersShopInstall \? \(\s*<InstallAppButton ${SHOP_TRANSLATE} className=\{accountDrawerIconButtonClass\} \/>\s*\) : null\}\s*<button\s+type="button"\s+className=\{accountDrawerIconButtonClass\}\s+onClick=\{\(\) => setAccountOpen\(false\)\}`),
-    'the install icon sits right before Close, styled like it, and only on the shop host',
+    new RegExp(String.raw`<PortalSheet[^>]*onClose=\{\(\) => setAccountOpen\(false\)\}\s+corner=\{offersShopInstall \? <InstallAppButton ${SHOP_TRANSLATE} className=\{accountDrawerIconButtonClass\} \/> : null\}`),
+    'the install icon rides in the sheet corner, styled like Close, and only on the shop host',
   )
+  const sheet = fs.readFileSync(new URL('../src/components/catalog/PortalSheet.tsx', import.meta.url), 'utf8')
+  assert.match(sheet, /\{corner\}\s*<button\s+type="button"[\s\S]*?onClick=\{onClose\}/, 'the corner actions sit right before Close')
   assert.equal((publicCatalogPage.match(/<InstallAppButton /g) || []).length, 1, 'the drawer header is the one shop pull entry')
 })
 

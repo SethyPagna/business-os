@@ -1,10 +1,9 @@
 // G38 P0, storefront account drawer:
-//   1. the "do you already have a membership ID?" reminder is asked in the
-//      shared ConfirmDialog, never the browser's untranslatable confirm(), and
-//      the account is created only from the dialog's Confirm;
+//   1. sign-up has no confirm step of any kind (spec section 5: the membership
+//      reminder is one hint under the field), and never the browser's confirm();
 //   2. the owner's sign-up switch (customer_portal_signup_enabled, public
-//      config signupEnabled) hides the Sign up tab and says so, EN and KM,
-//      while sign-in stays. Sign-up is OFF unless the server says exactly
+//      config signupEnabled) hides the Sign in / Sign up switch and says so in
+//      one line, EN and KM, while sign-in stays. Sign-up is OFF unless the server says exactly
 //      true (owner ruling 6 Oct): no prop or a config without the field (first
 //      paint, a failed bootstrap) shows no Sign up tab;
 //   2b. a sign-up the server refused as paused (403 portal_signup_paused)
@@ -51,34 +50,31 @@ function check(name: string, fn: () => void | Promise<void>) {
 
 const accountSource = fs.readFileSync(path.join(SRC, 'components/catalog/CatalogAccountSection.tsx'), 'utf8')
 
-await check('the sign-up reminder is the shared ConfirmDialog, and only its Confirm creates the account', () => {
+await check('sign-up has no confirm step, and the membership reminder is one hint under the field', () => {
   assert.doesNotMatch(accountSource, /\b(?:window|globalThis)\.confirm\s*\(/, 'no native confirm()')
-  assert.match(accountSource, /import ConfirmDialog from '\.\.\/shared\/ConfirmDialog\.tsx'/)
-  assert.match(accountSource, /<ConfirmDialog\b[\s\S]*?onConfirm=\{\(\) => \{ setReminderOpen\(false\); void submitSignUp\(\) \}\}/)
-  const onSignUp = accountSource.slice(accountSource.indexOf('const onSignUp'), accountSource.indexOf('const submitSignUp'))
-  assert.ok(onSignUp.length > 0, 'onSignUp found')
-  const ask = onSignUp.indexOf('setReminderOpen(true)')
-  assert.ok(ask > 0, 'an empty membership ID opens the reminder')
-  assert.match(onSignUp.slice(ask), /^setReminderOpen\(true\)\s*\n\s*return\b/, 'and returns before any sign-up call')
-  assert.equal((onSignUp.match(/signUp\(/g) || []).length, 0, 'onSignUp itself never calls signUp')
-  assert.match(accountSource, /cancelLabel=\{copy\('back', 'Back', 'ត្រឡប់'\)\}/, 'Back is the cancel action, translated')
+  assert.doesNotMatch(accountSource, /ConfirmDialog|setReminderOpen|submitSignUp/, 'no dialog stands between Create account and the sign-up call')
+  const onSignUp = accountSource.slice(accountSource.indexOf('const onSignUp'), accountSource.indexOf('if (!ready)'))
+  assert.equal((onSignUp.match(/signUp\(/g) || []).length, 1, 'onSignUp calls signUp once, directly')
+  assert.match(accountSource, /signupMemberAsk', 'Bought from us before\? Ask us for your membership ID\.'/, 'the reminder is a hint on the membership field')
 })
 
 const CatalogAccountSection = loadModule('components/catalog/CatalogAccountSection.tsx').default as React.ComponentType<Record<string, unknown>>
 const baseProps = { account: null, ready: true, busy: false, error: '', signIn: async () => true, signUp: async () => true, signOut: () => {}, clearError: () => {}, cartCount: 0, wishlistCount: 0 }
 const PAUSED = {
-  en: 'New accounts are paused for now. Existing members can sign in below.',
-  km: 'ការបង្កើតគណនីថ្មីត្រូវបានផ្អាកសិន។ សមាជិកដែលមានស្រាប់អាចចូលគណនីខាងក្រោម។',
+  en: 'Sign-up is paused.',
+  km: 'ការចុះឈ្មោះត្រូវបានផ្អាក។',
 }
 
 const SERVER_PAUSED_EN = 'New accounts are paused. Existing members can still sign in.'
 for (const language of ['en', 'km'] as const) {
   const copy = copyFor(language)
   const signUpLabel = copy('signUp', 'Sign up')
+  const hasTab = (html: string) => [...html.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g)].some((m) => visibleText(m[1]) === signUpLabel)
   const signInLabel = copy('signIn', 'Sign in')
   const assertPaused = (html: string, why: string) => {
     const text = visibleText(html)
-    assert.ok(!text.includes(signUpLabel), `no Sign up tab: ${why}`)
+    assert.ok(!hasTab(html), `no Sign up tab: ${why}`)
+    assert.doesNotMatch(html, /autoComplete="new-password"|autocomplete="new-password"/i, `no sign-up form: ${why}`)
     assert.ok(text.includes(PAUSED[language]), `the ${language} paused line is shown: ${why}`)
     assert.ok(text.includes(signInLabel), `sign-in stays: ${why}`)
     assert.match(html, /autoComplete="current-password"|autocomplete="current-password"/i, `the sign-in form is rendered: ${why}`)
@@ -87,20 +83,21 @@ for (const language of ['en', 'km'] as const) {
     assertPaused(renderToStaticMarkup(React.createElement(CatalogAccountSection, { ...baseProps, copy })), 'no signupEnabled prop (config without the field)')
     assertPaused(renderToStaticMarkup(React.createElement(CatalogAccountSection, { ...baseProps, copy, signupEnabled: false })), 'signupEnabled false')
     const open = renderToStaticMarkup(React.createElement(CatalogAccountSection, { ...baseProps, copy, signupEnabled: true }))
-    assert.ok(visibleText(open).includes(signUpLabel), 'Sign up tab present when the owner turned it on')
+    assert.ok(hasTab(open), 'Sign up tab present when the owner turned it on')
     assert.doesNotMatch(open, /data-portal-signup-paused/)
   })
   await check(`${language}: a sign-up refused as paused closes the Sign up tab and is announced in the visitor's language`, () => {
     const html = renderToStaticMarkup(React.createElement(CatalogAccountSection, { ...baseProps, copy, signupEnabled: true, error: SERVER_PAUSED_EN, errorCode: 'portal_signup_paused' }))
     assertPaused(html, 'server answered portal_signup_paused')
-    const alert = /<div[^>]*role="alert"[^>]*>([\s\S]*?)<\/div>/.exec(html)
+    const alert = /<p[^>]*role="alert"[^>]*>([\s\S]*?)<\/p>/.exec(html)
     assert.ok(alert, 'the refusal is announced (role=alert)')
     assert.equal(visibleText(alert[1]), PAUSED[language], 'the alert says the paused line, translated')
     if (language === 'km') assert.ok(!visibleText(html).includes(SERVER_PAUSED_EN), 'no server English on a Khmer page')
     assert.equal(visibleText(html).split(PAUSED[language]).length - 1, 1, 'said once, not twice')
     const other = renderToStaticMarkup(React.createElement(CatalogAccountSection, { ...baseProps, copy, signupEnabled: true, error: 'Invalid sign-in details. Please check and try again.', errorCode: 'invalid_credentials' }))
     assert.ok(visibleText(other).includes('Invalid sign-in details. Please check and try again.'), 'other refusals keep their message')
-    assert.ok(visibleText(other).includes(signUpLabel), 'and leave the Sign up tab alone')
+    assert.ok(hasTab(other), 'and leave the Sign up tab alone')
+    assert.ok(!visibleText(other).includes(PAUSED[language]), 'no paused line while sign-up is open')
   })
 }
 
@@ -136,10 +133,10 @@ await check('usePortalAccount keeps the server refusal code from the real transp
   }
   const mod = { exports: {} as Record<string, unknown> }
   new Function('require', 'module', 'exports', bundle.outputFiles[0].text)((id: string) => { assert.equal(id, 'react'); return reactStub }, mod, mod.exports)
-  const usePortalAccount = mod.exports.usePortalAccount as (b: unknown, w: unknown) => Record<string, unknown>
+  const usePortalAccount = mod.exports.usePortalAccount as (b: unknown, w: unknown, c: unknown) => Record<string, unknown>
   const bucket = { items: [], setAll() {} }
   const wishlist = { items: [], setAll() {} }
-  const render = () => { cursor = 0; return usePortalAccount(bucket, wishlist) }
+  const render = () => { cursor = 0; return usePortalAccount(bucket, wishlist, (_key: string, fallback = '') => fallback) }
 
   const realFetch = globalThis.fetch
   const globals = globalThis as Record<string, unknown>
