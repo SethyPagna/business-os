@@ -239,8 +239,8 @@ async function plans(k) {
   }
   // The list reads the branch's checked items by the items-state index from the sessions of the organization (as before: one statement, bounded by inventoryCheckFilterMaxIds). The flip no longer
   // touching updated_at changes no plan: the day and the order read the same column.
-  assert.doesNotMatch(shown.list.join('\n'), /SCAN inventory_check_items/)
-  assert.match(shown.list.join('\n'), /SEARCH i USING INDEX inventory_check_items_state/)
+  assert.doesNotMatch(shown.list.join('\n'), /SCAN (i|f|n|inventory_check_items)\b/) // icr0 slice 2: each product's newest count is a seek on index 0285, never a scan or a window
+  assert.match(shown.list.join('\n'), /SEARCH i USING INDEX inventory_check_items_product_latest \(product_id=\? AND branch_id=\?\)/)
 }
 
 const SCENARIOS = {

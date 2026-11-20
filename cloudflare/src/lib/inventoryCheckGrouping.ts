@@ -23,10 +23,13 @@ export const availableGroupings = (fields: { category: boolean }): InventoryChec
  * (product_id, branch_id, updated_at), because production keeps no statistics and a free planner could start from the sessions and probe items once per session.
  */
 export function lastCheckedSql(productId: string, branchScoped: boolean): string {
-  return `(SELECT MAX(i.updated_at) FROM inventory_check_items i INDEXED BY inventory_check_items_product_latest
+  // The newest count at ONE branch is a descending seek on (product_id, branch_id, updated_at); with no branch named the date is the newest of those seeks over the branches, so no
+  // product ever reads the items of every branch at once, whatever its history.
+  const newest = (branch: string): string => `(SELECT i.updated_at FROM inventory_check_items i INDEXED BY inventory_check_items_product_latest
     CROSS JOIN inventory_check_sessions s ON s.id=i.session_id
-    WHERE i.product_id=${productId}${branchScoped ? ' AND i.branch_id=@branchId' : ''} AND i.state IN ('done','issue')
-      AND s.organization_id IS @checkOrg AND s.branch_id=i.branch_id)`
+    WHERE i.product_id=${productId} AND i.branch_id=${branch} AND i.state IN ('done','issue')
+      AND s.organization_id IS @checkOrg AND s.branch_id=i.branch_id ORDER BY i.updated_at DESC LIMIT 1)`
+  return branchScoped ? newest('@branchId') : `(SELECT MAX(${newest('br.id')}) FROM branches br)`
 }
 
 /** The business-day shift of every group key (UTC+7, the same day businessDateWindow's localDateOf names). */

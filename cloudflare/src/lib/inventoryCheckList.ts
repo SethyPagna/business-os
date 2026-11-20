@@ -130,12 +130,20 @@ export type CheckStateSets = { ok: number[]; issue: number[]; pending: number[];
 // from their session's are never read): the same scope the ic_simple list used.
 // The DAY is the day the product was COUNTED, never the day it was approved. An item's updated_at is the time of its COUNT (a submission's commit, an observation's save, the Set that closed an Issue) and
 // nothing else writes it: the approval flip changes the state only. So "latest" (ORDER BY updated_at: index 0285) and the day read the same column, and approving an older count never makes it the newer one.
-export const LATEST_ITEMS_SQL = `WITH latest AS (
-    SELECT i.product_id AS product_id, i.state AS state, i.updated_at AS updated_at,
-           ROW_NUMBER() OVER (PARTITION BY i.product_id ORDER BY i.updated_at DESC, i.session_id DESC) AS rn
-    FROM inventory_check_sessions s JOIN inventory_check_items i ON i.session_id = s.id AND i.branch_id = s.branch_id
-    WHERE s.organization_id IS @organization AND s.branch_id = @branchId AND i.state IN ('done', 'issue'))
-  SELECT product_id, state, ${localDateExpr('updated_at')} AS day FROM latest WHERE rn = 1 ORDER BY updated_at DESC, product_id LIMIT @limit`
+// Read newest-first: ids walks the DISTINCT product ids of the items table on index 0285 (one index step each, so a product that was deleted since its count is still listed, as it always was), and
+// newest takes each product's newest done/issue item at the branch by a descending seek on the same index (CROSS JOIN + INDEXED BY: production keeps no statistics, so the order of the join is pinned).
+// Every product costs a few index entries and nothing grows with the number of counts it has had. The result is the rows the ROW_NUMBER() window over every item used to give, in the same order.
+export const LATEST_ITEMS_SQL = `WITH RECURSIVE ids(pid) AS (
+    SELECT MIN(f.product_id) FROM inventory_check_items f INDEXED BY inventory_check_items_product_latest
+    UNION ALL
+    SELECT (SELECT MIN(n.product_id) FROM inventory_check_items n INDEXED BY inventory_check_items_product_latest WHERE n.product_id > ids.pid) FROM ids WHERE ids.pid IS NOT NULL),
+  newest AS (
+    SELECT (SELECT i.rowid FROM inventory_check_items i INDEXED BY inventory_check_items_product_latest CROSS JOIN inventory_check_sessions s ON s.id = i.session_id
+      WHERE i.product_id = ids.pid AND i.branch_id = @branchId AND i.state IN ('done', 'issue') AND s.organization_id IS @organization AND s.branch_id = i.branch_id
+      ORDER BY i.updated_at DESC, i.session_id DESC LIMIT 1) AS rid
+    FROM ids WHERE ids.pid IS NOT NULL)
+  SELECT i.product_id AS product_id, i.state AS state, ${localDateExpr('i.updated_at')} AS day
+  FROM newest JOIN inventory_check_items i ON i.rowid = newest.rid ORDER BY i.updated_at DESC, i.product_id LIMIT @limit`
 // Products with a count line still waiting for approval at the branch (the same line rule the row tag uses).
 const PENDING_ITEMS_SQL = `SELECT i.product_id AS product_id FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id = a.session_id AND i.branch_id = a.branch_id
   WHERE a.organization_id IS @organization AND a.branch_id = @branchId AND ${waitingLineSql('a', 'i')} GROUP BY i.product_id ORDER BY MAX(a.submitted_at) DESC, i.product_id LIMIT @limit`

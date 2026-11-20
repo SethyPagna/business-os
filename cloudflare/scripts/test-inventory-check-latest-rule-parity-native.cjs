@@ -90,7 +90,7 @@ async function main() {
 
   await check('discrimination: three planted defects in the generator disagree with the copies', async () => {
     const mutants = {
-      'MIN instead of MAX': text => text.replace('MAX(i.updated_at)', 'MIN(i.updated_at)'),
+      'oldest instead of newest': text => text.replace('ORDER BY i.updated_at DESC', 'ORDER BY i.updated_at ASC'),
       'organization term dropped': text => text.replace('s.organization_id IS @checkOrg AND ', ''),
       'item branch may differ from its session': text => text.replace(' AND s.branch_id=i.branch_id', ''),
       'unstarted counts': text => text.replace("i.state IN ('done','issue')", "i.state IN ('done','issue','unstarted')"),
