@@ -60,9 +60,11 @@ assert.match(actionBtn, /t\('view'\)/)
 // The body is text, not a button, and the pop-up element itself carries no hover or focus handler.
 const wrapper = popup.slice(popup.indexOf('role={toast.type'), popup.indexOf('{text}'))
 assert.doesNotMatch(wrapper, /onMouseEnter|onFocus|onClick/)
-// Hover and focus on a control pause the clock; leaving every control resumes it.
-assert.match(popup, /onMouseEnter: \(\) => hold\(key, control \+ '-hover', true\)/)
-assert.match(popup, /onFocus: \(\) => hold\(key, control \+ '-focus', true\)/)
+// The clock never waits on the pointer: no hover handler anywhere in the pop-up, only keyboard focus pauses it.
+assert.doesNotMatch(popup, /onMouseEnter|onMouseLeave|onPointerEnter|onPointerLeave|onMouseOver|onPointerOver|onTouchStart/)
+assert.match(popup, /onFocus: \(event: FocusEvent<HTMLElement>\) => {/)
+assert.match(popup, /matches\('\:focus-visible'\)/)
+assert.match(popup, /onBlur: \(\) => {/)
 assert.match(hookSource, /items\.slice\(0, NOTIFICATION_MAX_VISIBLE\)\.reverse\(\)/)
 
 // A failed-action pop-up leaves nothing behind: no list state, no storage, no timer in notify.

@@ -1,6 +1,7 @@
 import { useMobileSectionNavMode } from './utils/sectionNavPreference.ts'
 import { getAuthStorage } from './utils/authStorage.ts'
 import { getHubPageFromLocation } from './components/shared/hubNavigation.ts'
+import type { FocusEvent } from 'react'
 import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ComponentType, ErrorInfo, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
@@ -1092,18 +1093,20 @@ function Notification({ notification, onDismiss }: NotificationProps) {
   // The whole message always shows (no clamp): an alert is read for ten seconds, not guessed at.
   const { visible, dismiss, pause, resume } = useToastStack(notification)
   // The stack and every pop-up body let the pointer through to whatever is underneath (a dialog's Close sits
-  // under it on a phone). Only the controls below take input, and only they pause the clock.
-  const holds = useRef(new Map<string, Set<string>>())
-  const hold = (key: string, control: string, on: boolean) => {
-    const set = holds.current.get(key) ?? new Set<string>()
-    holds.current.set(key, set)
-    if (on) { set.add(control); pause(key) } else { set.delete(control); if (!set.size) { holds.current.delete(key); resume(key) } }
-  }
+  // under it on a phone). Only the controls below take input. The clock never waits on the pointer: a pop-up
+  // under a resting mouse or finger still leaves on time. Only keyboard focus on a control pauses it, so a
+  // keyboard user can finish reading; focus that came from a click or tap (not :focus-visible) does not.
+  const focused = useRef(new Set<string>())
   const holdProps = (key: string, control: string) => ({
-    onMouseEnter: () => hold(key, control + '-hover', true),
-    onMouseLeave: () => hold(key, control + '-hover', false),
-    onFocus: () => hold(key, control + '-focus', true),
-    onBlur: () => hold(key, control + '-focus', false),
+    onFocus: (event: FocusEvent<HTMLElement>) => {
+      if (!event.currentTarget.matches(':focus-visible')) return
+      focused.current.add(key + control)
+      pause(key)
+    },
+    onBlur: () => {
+      if (!focused.current.delete(key + control)) return
+      resume(key)
+    },
   })
   if (!visible.length) return null
 
