@@ -86,7 +86,7 @@ function main() {
   check('GET / (bare list) now routes through the SAME cachedJsonResponse wrapper, same namespace and TTL', () => {
     assert.match(listHandler, /productSearchCacheVersion\(c\.env, \{\}\)/, 'GET / must read the products cache version, same as GET /search')
     assert.match(listHandler, /refreshCachedProductRows\(c\.env,/, 'GET / must refresh a cache hit the same way GET /search does')
-    assert.match(listHandler, /cachedJsonResponse\(c\.req\.raw, c\.executionCtx, version, 20,/, 'GET / must wrap its query in cachedJsonResponse with a 20s TTL, same as GET /search')
+    assert.match(listHandler, /cachedJsonResponse\(c\.req\.raw, c\.executionCtx, version, getPlanLimits\(c\.env\)\.productListLegacyCacheSeconds,/, 'GET / must wrap its query in cachedJsonResponse with the same plan-field lifetime as GET /search (20 s on both tiers, pinned above)')
   })
 
   check('the permission/surface restriction on GET / is still applied AFTER the cached payload (per-user, not cacheable)', () => {
