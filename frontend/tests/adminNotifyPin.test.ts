@@ -754,6 +754,35 @@ assert.match(centerSource, /const \{ displayLabel, displayMeta \} = itemText\(it
   }
 }
 
+// AN3: an empty message never draws a blank pop-up.
+{
+  const toastSource = read('src/components/shared/toastChannel.ts')
+  const guardLine = /  if \(typeof request\.message !== 'string' \|\| !request\.message\.trim\(\)\) return\n/
+  assert.ok(guardLine.test(toastSource), 'the guard is in emitToast')
+  // Runs a copy of the real channel on the virtual clock; `guarded: false` removes the guard (the old code).
+  const run = (guarded: boolean) => {
+    reset()
+    const exported: any = {}
+    new Function('exports', transpile(guarded ? toastSource : toastSource.replace(guardLine, '')))(exported)
+    let heard = 0
+    exported.subscribeToastStack(() => { heard += 1 })
+    const heardBefore = heard
+    for (const message of ['', '   ', undefined, null, 42]) exported.emitToast({ message, type: 'warning', duration: 1000 })
+    const result = { shown: exported.getToastStack().length, heard: heard - heardBefore, clocks: timers.size }
+    exported.resetToastStack()
+    reset()
+    return result
+  }
+  assert.deepEqual(run(true), { shown: 0, heard: 0, clocks: 0 }, 'empty, blank and non-string messages add nothing, call no listener, start no clock')
+  assert.notDeepEqual(run(false), { shown: 0, heard: 0, clocks: 0 }, 'control: without the guard the blank pop-ups appear')
+  reset()
+  const s = new Screen()
+  s.emit('Real message', 'warning')
+  assert.deepEqual(s.shown, ['Real message'], 'a real message still shows')
+  reset()
+  assert.ok(/setNotification\(null\)/.test(contextSource.slice(contextSource.indexOf('const notify = useCallback'), contextSource.indexOf('const dismissNotification'))), 'notify still clears the context slot')
+}
+
 // S3: one user's pop-ups never reach the next user.
 {
   reset()

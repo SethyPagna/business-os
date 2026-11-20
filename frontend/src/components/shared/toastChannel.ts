@@ -65,6 +65,8 @@ function startClock(key: string, ms: number): void {
 // oldest off at once (there is no waiting list). A message identical to one already showing does not add a second
 // pop-up, it restarts that pop-up's clock; if keyboard focus is holding that pop-up, the restarted clock stays held.
 export function emitToast(request: ToastRequest): void {
+  // An empty message would draw a blank pop-up: ignore it, add nothing and start no clock.
+  if (typeof request.message !== 'string' || !request.message.trim()) return
   const ms = lifetime(request.type, request.duration)
   const same = stack.find((toast) => toast.message === request.message && toast.type === request.type)
   if (same) {
