@@ -5061,7 +5061,7 @@ async function acquireImportLease(db: D1Compat, jobId: string, status: string, a
     now: now.toISOString(),
     expires: new Date(now.getTime() + IMPORT_LEASE_MS).toISOString(),
   })
-  return result.changes === 1 ? token : null
+  return Number(result.changes ?? 0) > 0 ? token : null
 }
 
 /**

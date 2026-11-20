@@ -144,7 +144,7 @@ ok(/db\.batch\(\[[\s\S]*INSERT INTO settings[\s\S]*INSERT INTO audit_logs/.test(
   'pos.ts commits the address-presets CAS and audit in one batch')
 ok(/INSERT INTO audit_logs[\s\S]*WHERE EXISTS\(SELECT 1 FROM settings WHERE key=@key AND json_extract\(value,'\$\.revision'\)=@revision\)/.test(posAddressRoute),
   'pos.ts audit is guarded by the winning address-presets revision')
-ok(/if \(changes !== 1\)[\s\S]*code: 'write_conflict'/.test(posAddressRoute),
+ok(/if \(!\(changes > 0\)\)[\s\S]*code: 'write_conflict'/.test(posAddressRoute),
   'pos.ts reports a losing address-presets CAS as a write conflict')
 
 // Shifts deliberately does not call the generic async audit helper. Every

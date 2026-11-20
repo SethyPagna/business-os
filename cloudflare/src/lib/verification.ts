@@ -178,7 +178,7 @@ export async function issuePasswordResetLink(
       params,
     },
   ])
-  if (results[0]?.meta?.changes !== 1) return { issued: false, sent: false }
+  if (!(Number(results[0]?.meta?.changes ?? 0) > 0)) return { issued: false, sent: false }
 
   // Matches the URL shape Login.tsx already parses: hash fragment
   // access_token + type=recovery, appended to the page the client sent as
@@ -220,7 +220,7 @@ export async function consumePasswordResetLink(env: Env, token: string): Promise
     WHERE id = @id AND consumed_at IS NULL AND expires_at = @expires_at
       AND julianday(expires_at) > julianday(@now)
   `).run({ id: row.id, expires_at: row.expires_at, now: sqliteUtcTimestamp(Date.now()) })
-  return consumed.changes === 1 ? { ok: true, userId: row.user_id } : { ok: false, reason: 'invalid' }
+  return Number(consumed.changes ?? 0) > 0 ? { ok: true, userId: row.user_id } : { ok: false, reason: 'invalid' }
 }
 
 export function isEmailConfigured(env: Env): boolean {

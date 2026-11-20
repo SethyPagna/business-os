@@ -61,6 +61,8 @@ export type InventoryCheckSimpleScope = { organizationId: number | null; session
 // A product's check facts in one branch scope. Items of other organizations and items whose branch differs from their session's are never read.
 // Two texts instead of `@branchId IS NULL OR ...`, and the join pinned (the CROSS JOIN fixes the order: a product's items by the 0285 index, then the session by key; INDEXED BY fixes the index).
 // Production keeps no statistics, so a free planner may start from inventory_check_sessions and probe the items once per session for every product: sessions x products rows. See lastCheckedSql.
+// With no branch named and one branch active, the groupBy=checked group follows that branch (lastCheckedSql) while the same row's status, check_at and the summary counts still use every branch.
+// The screen discards this answer and reopens on the sole branch; this reader goes with the count-list redesign.
 // Every copy of the "latest check" rule that reads items for a SET of products (the summary, the page rows) or per cohort row (the checkState filter) goes through these two.
 const checkScopeSql = (branchScoped: boolean) => `s.organization_id IS @checkOrg AND i.branch_id=s.branch_id${branchScoped ? ' AND i.branch_id=@branchId' : ''}`
 const CHECK_ITEMS_SQL = 'inventory_check_items i INDEXED BY inventory_check_items_product_latest CROSS JOIN inventory_check_sessions s ON s.id=i.session_id'

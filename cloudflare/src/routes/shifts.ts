@@ -895,7 +895,7 @@ async function writeContinuation(db: D1Compat, user: SessionUser, parent: ShiftD
     if (await readChild(db, parent.id)) return { changed: false, conflict: true }
     throw error
   }
-  if (batchChanges(results[0]) !== 1) return { changed: false, conflict: true }
+  if (!(batchChanges(results[0]) > 0)) return { changed: false, conflict: true }
   return { changed: true, conflict: false, shift: await readShiftByCode(db, child.shiftCode) }
 }
 /**
@@ -1353,7 +1353,7 @@ app.post('/open', async (c) => {
       ...(landing?.redirected ? [branchRedirectGuard(landing)] : []),
       { sql: OPEN_BRANCH_ACTIVE_GUARD_SQL, params: { branchId: row.branchId } },
     ])
-    if (batchChanges(results[0]) !== 1) throw new Error('Shift open did not write a row.')
+    if (!(batchChanges(results[0]) > 0)) throw new Error('Shift open did not write a row.')
   } catch (error) {
     if (landing?.redirected && isBranchRedirectGuardError(error)) return c.json(await branchRedirectGuardRefusal(db, landing.addressedBranchId, () => branchRedirectTarget(c)), 409)
     if (isOpenBranchInactiveError(error)) return c.json({ error: 'Branch not found or inactive.', code: 'shift_branch_inactive' }, 400)
@@ -1433,7 +1433,7 @@ async function writeClose(db: D1Compat, user: SessionUser, row: ShiftDbRow, inpu
         params: { ...input.figures.digest.params, closeGuardId: shift.id, closeGuardRevision: after.revision,
           closeGuardClosedAt: input.closedAt, closeGuardCloserId: user.id, closeInputsDigest: input.figures.digestValue } }]),
   ])
-  const changed = batchChanges(results[0]) === 1
+  const changed = batchChanges(results[0]) > 0
   // figures: what the batch committed on (null when the close committed without stored figures), so the response can tell, with one digest read, that nothing moved since.
   return { changed, shift: await readShiftById(db, shift.id), figures: input.figures }
 }
@@ -1648,7 +1648,7 @@ app.post('/:id/cancel', async (c) => {
       details: JSON.stringify({ reason, revision: after.revision, request: mutationRequest(body, id) }), oldValue: JSON.stringify(beforeStored),
       newValue: JSON.stringify(after), deviceName: c.req.header('X-Device-Name') || null } },
   ])
-  if (batchChanges(results[0]) !== 1) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
+  if (!(batchChanges(results[0]) > 0)) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const cancelled = await readShiftById(db, id)
   if (!cancelled) return c.json({ error: 'Cancelled shift could not be read back.' }, 500)
   announceShiftReport(c, cancelled, 'cancel')
@@ -1831,7 +1831,7 @@ app.patch('/:id', async (c) => {
         newValue: JSON.stringify(after), deviceName: c.req.header('X-Device-Name') || null } },
   ])
   const changed = batchChanges(results[0])
-  if (changed !== 1) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
+  if (!(changed > 0)) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const saved = await readShiftById(db, id)
   if (!saved || saved.revision !== after.revision) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   // The re-sent report names the account that amended it: the same name the amendment

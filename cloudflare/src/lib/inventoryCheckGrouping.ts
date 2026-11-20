@@ -23,10 +23,16 @@ export const availableGroupings = (fields: { category: boolean }): InventoryChec
  * (product_id, branch_id, updated_at), because production keeps no statistics and a free planner could start from the sessions and probe items once per session.
  */
 export function lastCheckedSql(productId: string, branchScoped: boolean): string {
-  return `(SELECT MAX(i.updated_at) FROM inventory_check_items i INDEXED BY inventory_check_items_product_latest
+  const newest = (branch: string | null) => `(SELECT MAX(i.updated_at) FROM inventory_check_items i INDEXED BY inventory_check_items_product_latest
     CROSS JOIN inventory_check_sessions s ON s.id=i.session_id
-    WHERE i.product_id=${productId}${branchScoped ? ' AND i.branch_id=@branchId' : ''} AND i.state IN ('done','issue')
+    WHERE i.product_id=${productId}${branch === null ? '' : ` AND i.branch_id=${branch}`} AND i.state IN ('done','issue')
       AND s.organization_id IS @checkOrg AND s.branch_id=i.branch_id)`
+  if (branchScoped) return newest('@branchId')
+  // Owner rule (20 Nov): "Last checked" comes only from the active branch. With no branch named and exactly ONE active branch, the answer is the scoped statement for that branch (the same seek, so a disabled branch's
+  // history sets nothing); the sole id is one uncorrelated subquery that SQLite evaluates once, so there is no extra D1 call. NULL with zero or two or more active branches, which keep the all-branch statement.
+  // This is the only place the rule lives.
+  const sole = '(SELECT CASE WHEN COUNT(*) = 1 THEN MAX(id) END FROM branches WHERE is_active = 1)'
+  return `CASE WHEN ${sole} IS NOT NULL THEN ${newest(sole)} ELSE ${newest(null)} END`
 }
 
 /** The business-day shift of every group key (UTC+7, the same day businessDateWindow's localDateOf names). */

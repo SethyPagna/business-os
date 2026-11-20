@@ -51,7 +51,7 @@ export async function checkRateLimit(
     )) < @max
   `).run({ bucket, clientKey, createdAt, since: windowStart, max })
 
-  if (result.changes === 1) return { allowed: true, retryAfterSeconds: 0, slot: createdAt }
+  if (Number(result.changes ?? 0) > 0) return { allowed: true, retryAfterSeconds: 0, slot: createdAt }
   return { allowed: false, retryAfterSeconds: Math.ceil(windowMs / 1000) }
 }
 

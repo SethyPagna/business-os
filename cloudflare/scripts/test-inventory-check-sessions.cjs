@@ -59,10 +59,12 @@ function reset(schema = true) {
   for (const actor of [900001,900002,900003,900004]) db.prepare("INSERT INTO user_sessions(user_id,token_hash,expires_at,last_seen_at) VALUES(?,?,'2099-01-01T00:00:00.000Z',CURRENT_TIMESTAMP)").run(actor, createHash('sha256').update(`token-${actor}`).digest('hex'))
   beforeCommit = null; loseAck = false; afterCommit = null; queryTrace=[]; batchTrace=[]; batchSequence=0; activeBatch=0; projectionFailures=0
 }
+// A working in-memory KV: the version bump after each write succeeds the first time, as it does in production.
+function kv() { const m = new Map(); return { async get(k) { return m.has(k) ? m.get(k) : null }, async put(k, v) { m.set(k, String(v)) }, async delete(k) { m.delete(k) } } }
 async function request(method, url, body, actor = 900001) {
   queryTrace=[]; batchTrace=[]
   const tasks = []
-  const result = await route.request(`http://local${url}`, { method, headers: { 'Content-Type': 'application/json', ...(actor ? { Cookie: `bos_session=token-${actor}` } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) }, { DB: binding() }, { waitUntil: task => tasks.push(task) })
+  const result = await route.request(`http://local${url}`, { method, headers: { 'Content-Type': 'application/json', ...(actor ? { Cookie: `bos_session=token-${actor}` } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) }, { DB: binding(), CACHE: kv() }, { waitUntil: task => tasks.push(task) })
   await Promise.allSettled(tasks)
   return { status: result.status, body: await result.json(), queries:queryTrace.slice(), batches:batchTrace.slice() }
 }

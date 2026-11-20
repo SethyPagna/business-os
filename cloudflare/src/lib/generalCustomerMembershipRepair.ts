@@ -288,7 +288,7 @@ export async function applyGeneralCustomerMembershipRepair(db: Pick<D1Compat, 'p
   if (plan.outcome === 'already_applied') return { outcome: 'already_applied' as const, changedCustomers: 0 as const, verification_pending: false }
   try {
     const results = await db.batch(plan.statements)
-    if (changes(results[plan.updateStatementIndex!]) !== 1 || changes(results[plan.historyStatementIndex!]) < 1) throw new Error('Unexpected guarded repair result')
+    if (!(changes(results[plan.updateStatementIndex!]) > 0) || changes(results[plan.historyStatementIndex!]) < 1) throw new Error('Unexpected guarded repair result')
     let verification_pending = false
     try {
       const current = await readManifest(db); if (!(await classifyAlreadyApplied(db, current, plan.request))) throw new Error('postcondition')
