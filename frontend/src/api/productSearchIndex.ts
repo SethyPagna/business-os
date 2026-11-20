@@ -9,11 +9,12 @@
 //
 // Freshness: pages are revalidated with their hash (?have=) when a picker
 // mounts, when a "products" sync update arrives, and at most every
-// REVALIDATE_MS while searching; an unchanged page answers in a few bytes.
+// backstop (revalidateMs(): 15 minutes with the sync socket up, 60 s without) while searching; an unchanged page answers in a few bytes.
 // Until the index is ready (first load, a denied or older Worker) every
 // picker keeps the legacy server text search, so nothing regresses.
 import { useEffect, useState } from 'react'
 import { apiFetch } from './http.ts'
+import { isWSConnected } from './websocket.ts'
 import { captureActorReadScope, isActorReadScopeCurrent, subscribeCatalogueChange, type ActorReadScope } from './actorReadScope.ts'
 import {
   SEARCH_CORE_VERSION,
@@ -31,7 +32,10 @@ const INDEX_FORMAT = 1
 // text search. Under its own entity only an actor change, a data epoch or a clear-everything moves the scope; a real catalogue change marks the index stale through subscribeCatalogueChange
 // and the usual ?have= revalidation brings it up to date without dropping it. The key also no longer starts with 'products:search', so methods.ts stops deleting the stored copy on every sync.
 const STORE_KEY = 'catalogIndex:search-index:v1'
-const REVALIDATE_MS = 60_000
+// The backstop only catches a change nobody announced. With the sync socket up, a catalogue change made anywhere is pushed (and marks the index stale, revalidated after SYNC_REVALIDATE_DELAY_MS),
+// so the slow backstop is enough; with the socket down or not yet known, nothing is pushed and the short one stays what it was.
+const REVALIDATE_MS_SOCKET_UP = 15 * 60_000
+const REVALIDATE_MS_SOCKET_DOWN = 60_000
 const SYNC_REVALIDATE_DELAY_MS = 1_500
 const BUILD_SLICE_MS = 8
 // Hydration sends at most this many ranked ids (the Worker's RANKED_ID_LIMIT).
@@ -83,6 +87,10 @@ function notify(): void {
   for (const listener of listeners) listener()
 }
 
+function revalidateMs(): number {
+  return transport.socketUp() ? REVALIDATE_MS_SOCKET_UP : REVALIDATE_MS_SOCKET_DOWN
+}
+
 function resetForNewActor(): void {
   state.status = 'idle'
   state.index = null
@@ -111,8 +119,11 @@ async function buildIndex(pages: Map<number, StoredPage>): Promise<SearchTermInd
   return builder.finish()
 }
 
-// The three seams to the outside world; tests replace them.
+// The three seams to the outside world (and the socket's state); tests replace them.
 const transport = {
+  socketUp(): boolean {
+    try { return isWSConnected() } catch { return false }
+  },
   fetchPage(page: number, have: string | undefined): Promise<IndexPage> {
     const query = `page=${page}${have ? `&have=${encodeURIComponent(have)}` : ''}`
     return apiFetch('GET', `/api/products/search-index?${query}`) as Promise<IndexPage>
@@ -198,7 +209,7 @@ async function load(force: boolean): Promise<void> {
       notify()
     }
   }
-  const due = force || state.stale || Date.now() - state.checkedAt > REVALIDATE_MS
+  const due = force || state.stale || Date.now() - state.checkedAt > revalidateMs()
   if (!due && state.index) return
   if (state.status !== 'ready') state.status = 'loading'
   try {
@@ -230,8 +241,16 @@ async function load(force: boolean): Promise<void> {
 
 export function ensureProductSearchIndex(force = false): Promise<void> {
   if (state.inflight) return state.inflight
-  state.inflight = load(force).finally(() => { state.inflight = null })
+  state.inflight = loadAndCatchUp(force).finally(() => { state.inflight = null })
   return state.inflight
+}
+
+// A catalogue change that is marked while a load runs finds that load as the in-flight one (ensureProductSearchIndex returns it) and the load does not clear the mark, so with the slow backstop it
+// would wait up to 15 minutes. When the load finishes with such a mark still standing, load once more.
+async function loadAndCatchUp(force: boolean): Promise<void> {
+  const marksAtStart = state.staleMarks
+  await load(force)
+  if (state.stale && state.staleMarks !== marksAtStart && state.index) await load(false)
 }
 
 export function markProductSearchIndexStale(): void {
@@ -240,7 +259,7 @@ export function markProductSearchIndexStale(): void {
 }
 
 // A catalogue change made on this device (the plain 'products' invalidation): mark the index stale and, when one is held, revalidate its pages by hash shortly after, the same delay a
-// 'products' sync update uses, instead of waiting out REVALIDATE_MS. Several changes in a row make one revalidation.
+// 'products' sync update uses, instead of waiting out the backstop. Several changes in a row make one revalidation.
 let catalogueChangeTimer: ReturnType<typeof setTimeout> | null = null
 subscribeCatalogueChange(() => {
   markProductSearchIndexStale()
@@ -248,6 +267,14 @@ subscribeCatalogueChange(() => {
   if (catalogueChangeTimer) clearTimeout(catalogueChangeTimer)
   catalogueChangeTimer = setTimeout(() => { catalogueChangeTimer = null; void ensureProductSearchIndex() }, SYNC_REVALIDATE_DELAY_MS)
 })
+
+// A socket that dropped and came back may have missed pushes made while it was down, and the slow backstop would not look for 15 minutes: revalidate once on reconnect.
+if (typeof window !== 'undefined') {
+  window.addEventListener('sync:reconnected', () => {
+    markProductSearchIndexStale()
+    if (state.status === 'ready') void ensureProductSearchIndex()
+  })
+}
 
 /**
  * A new data epoch (a restore, a cutover): what this tab holds, in memory and on disk, describes another database state. Both go, a
@@ -271,7 +298,7 @@ export function searchProductIndex(query: string, options: SearchOptions = {}): 
     resetForNewActor()
     return null
   }
-  if (Date.now() - state.checkedAt > REVALIDATE_MS) void ensureProductSearchIndex()
+  if (Date.now() - state.checkedAt > revalidateMs()) void ensureProductSearchIndex()
   return searchTermIndex(state.index, query, options)
 }
 
@@ -310,7 +337,7 @@ export function useProductSearchIndex(enabled = true): number {
       if (detail.reason === 'cache-refresh') return
       const channel = String(detail.channel || '').split(':')[0]
       if (channel && channel !== 'products' && channel !== 'all') return
-      state.stale = true
+      markProductSearchIndexStale()
       if (timer) clearTimeout(timer)
       timer = setTimeout(() => { void ensureProductSearchIndex() }, SYNC_REVALIDATE_DELAY_MS)
     }
