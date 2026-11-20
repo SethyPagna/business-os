@@ -1151,20 +1151,19 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                 {/* The whole card is clickable for a pointer, but it cannot become role="button": it
                     already contains the wishlist and add-to-list buttons, and a button may not contain
                     buttons. The product NAME is the keyboard-reachable control that opens the sheet.
-                    Two lines at most, cut without an ellipsis (a business name never gets one); the
-                    sheet carries the whole name. */}
+                    The name wraps in full: a product name is never cut. */}
                 {openProductDetail ? (
                   <button
                     type="button"
                     onClick={(event) => { event.stopPropagation(); openProductDetail(product) }}
                     translate="no"
                     title={productHeading}
-                    {...getKhmerTextProps(productHeading, `notranslate block max-h-[2lh] w-full overflow-hidden break-words text-left ${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-[#23201b] dark:text-neutral-100`)}
+                    {...getKhmerTextProps(productHeading, `notranslate block w-full break-words text-left${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-[#23201b] dark:text-neutral-100`)}
                   >
                     {productHeading}
                   </button>
                 ) : (
-                  <div translate="no" title={productHeading} {...getKhmerTextProps(productHeading, `notranslate max-h-[2lh] overflow-hidden break-words ${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-[#23201b] dark:text-neutral-100`)}>
+                  <div translate="no" title={productHeading} {...getKhmerTextProps(productHeading, `notranslate break-words${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-[#23201b] dark:text-neutral-100`)}>
                     {productHeading}
                   </div>
                 )}
