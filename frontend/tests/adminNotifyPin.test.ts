@@ -686,6 +686,26 @@ assert.match(centerSource, /const \{ displayLabel, displayMeta \} = itemText\(it
     }
     assert.equal(JSON.stringify(flaky.backing.times), remembered, 'failed reads change nothing in the memory')
     assert.equal(announce({ items: two, now: T0 + 4 * QUIET, store: flaky }).kind, 'none', 'and nothing pops again when the connection is back')
+    // AN1: an answer with a generatedAt but no sections array is malformed, not a load.
+    const stamp = '2026-11-21T01:00:00.000Z'
+    for (const sections of [undefined, null, {}, 'none']) {
+      assert.equal(summaryCameFromWorker({ generatedAt: stamp, sections }), false, `sections ${JSON.stringify(sections)} is not a load`)
+    }
+    assert.equal(summaryCameFromWorker({ generatedAt: stamp }), false, 'sections missing is not a load')
+    const oldRule = (r: any) => typeof r?.generatedAt === 'string' && r.generatedAt.length > 0 && !r.unavailable
+    const malformed = { generatedAt: stamp }
+    assert.equal(oldRule(malformed), true, 'control: the old rule read the malformed answer as a load')
+    const readTwice = (loaded: boolean, store: ReturnType<typeof memoryStore>) => {
+      for (const at of [T0 + 60_000, T0 + 60_000 + QUIET + 1, T0 + 60_000 + 3 * QUIET]) announce({ items: [], sections: [], omittedAreEmpty: loaded, now: at, store })
+      const plan = announce({ items: two, now: T0 + 4 * QUIET, store })
+      return plan.kind === 'none' ? [] : ids(plan).sort()
+    }
+    const oldStore = memoryStore()
+    announce({ items: two, now: T0, store: oldStore })
+    assert.deepEqual(readTwice(oldRule(malformed), oldStore), ['out-1', 'pay-2'], 'control: under the old rule the malformed reads make both alerts pop again')
+    const newStore = memoryStore()
+    announce({ items: two, now: T0, store: newStore })
+    assert.deepEqual(readTwice(summaryCameFromWorker(malformed), newStore), [], 'a malformed answer twice, then the real answer: nothing pops')
   }
 }
 
