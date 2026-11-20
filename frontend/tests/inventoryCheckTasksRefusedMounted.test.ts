@@ -3,6 +3,7 @@ import { act } from 'react'
 import { actionIn, createTasksWorld, open, pack, rowOf, task, taskRowOf, viewerUser, type Surface } from './inventoryCheckTasksWorld.ts'
 import { forgetDeviceDrafts } from './inventoryCheckDeviceDrafts.ts'
 import { wiredMode } from '../src/components/inventory/inventoryWired.ts'
+import { __resetApiHealthForTests, __resetApiWriteDedupeForTests, apiFetch, setSyncServerUrl } from '../src/api/http.ts'
 
 // What the Tasks screens say when the server (or the device) refuses: offline writes, a task the server cannot find, and a board an account may not read.
 const world = await createTasksWorld()
@@ -127,6 +128,108 @@ for (const language of ['en', 'km'] as const) {
   assert.ok(!cold.text().includes(text.inventory_check_load_failed), `${language}: the failed line is gone`)
   world.branches.pop()
   await cold.unmount()
+}
+world.language = 'en'
+
+// ---- a task write whose answer was lost ('unknown' outcome): the page says so, and the repeat sends the SAME request id with no second review; a fresh action later gets a NEW one ----
+const lost = () => Object.assign(new Error('answer lost'), { outcome: 'unknown' })
+const confirmWith = async (surface: Surface, label: string) => { await surface.click(surface.findAll(node => node.tagName === 'BUTTON' && node.textContent === label).at(-1)!) }
+const idsOf = (route: string) => world.ofRoute(route).map(call => String(call.params.requestId))
+for (const language of ['en', 'km'] as const) {
+  const text = pack(language)
+  world.language = language
+  const unknownSentence = text.inventory_check_save_unknown
+  assert.ok(unknownSentence && unknownSentence !== 'inventory_check_save_unknown', `${language}: the unknown-save sentence exists`)
+  const said = (surface: Surface) => surface.text().includes(unknownSentence) || world.notices.some(notice => notice.text === unknownSentence)
+
+  // Pick up, Hand back and Close task from the board: the first press asks the review, the repeat after the lost answer does not and reuses the id.
+  for (const [action, label, mine] of [['pickup', text.inventory_check_task_pickup, false], ['release', text.inventory_check_task_release, true], ['close', text.inventory_check_task_close, true]] as const) {
+    reset(); world.user = viewerUser('admin')
+    const held = { picked_up_by: 'boss', mine: true, can_pickup: false, can_release: true, can_close: true }
+    const free = { can_pickup: true, can_close: true }
+    world.board = [task('a', { total: 2, ...(mine ? held : free) }), task('b', { total: 2, ...(mine ? held : free) })]
+    world.taskProducts.set('a', [2, 4]); world.taskProducts.set('b', [6, 8])
+    open('tasks')
+    const surface = await world.mount()
+    world.failures[action] = lost()
+    await surface.click(actionIn(surface, taskRowOf(surface, 'a'), action)!)
+    assert.ok(dialogs(surface) > 0, `${language} ${action}: the first press asks the review`)
+    await confirmWith(surface, label)
+    assert.equal(world.count(action), 1, `${language} ${action}: the first send`)
+    assert.ok(said(surface), `${language} ${action}: the page says the result is unknown`)
+    await surface.click(actionIn(surface, taskRowOf(surface, 'a'), action)!)
+    assert.equal(world.count(action), 2, `${language} ${action}: the repeat is sent at once, with no second review`)
+    const [first, second] = idsOf(action)
+    assert.equal(second, first, `${language} ${action}: the repeat after a lost answer keeps the SAME request id`)
+    assert.equal(world.ofRoute(action)[1].params.id, 'a', `${language} ${action}: for the same task`)
+    if (action === 'pickup') await surface.click(surface.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === text.back, 'Back'))
+    await surface.click(actionIn(surface, taskRowOf(surface, 'b'), action)!)
+    await confirmWith(surface, label)
+    assert.equal(world.count(action), 3, `${language} ${action}: a fresh action on another task is sent`)
+    const third = idsOf(action)[2]
+    assert.notEqual(third, first, `${language} ${action}: and gets a NEW request id`)
+    await surface.unmount()
+  }
+
+  // Issue: the Issue button reads Retry after the lost answer, and pressing it sends the same id and the same products.
+  reset(); world.user = viewerUser('admin')
+  open('products')
+  const surface = await world.mount()
+  const enter = () => surface.click(surface.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === text.inventory_check_task_issue && !node.hasAttribute('data-issue-action'), 'Issue entry'))
+  const issueButton = () => surface.find(node => node.getAttribute('data-issue-action') === 'issue', 'Issue')
+  const tick = (id: number) => surface.call(surface.find(node => node.getAttribute('data-check-pick') !== null && rowOf(surface, id).contains(node), `tick ${id}`), 'onChange', [{ target: { checked: true } }])
+  await enter(); await tick(3); await tick(9)
+  world.failures.issue = lost()
+  await surface.click(issueButton())
+  await confirmWith(surface, text.inventory_check_task_issue)
+  assert.equal(world.count('issue'), 1, `${language} issue: the first send`)
+  assert.ok(said(surface), `${language} issue: the page says the result is unknown`)
+  await surface.click(issueButton())
+  assert.equal(world.count('issue'), 2, `${language} issue: Retry sends at once, with no second review`)
+  const [firstIssue, secondIssue] = world.ofRoute('issue')
+  assert.equal(secondIssue.params.requestId, firstIssue.params.requestId, `${language} issue: Retry keeps the SAME request id`)
+  assert.deepEqual(secondIssue.params.scope, firstIssue.params.scope, `${language} issue: and the same products`)
+  assert.equal(world.board.length, 1, `${language} issue: one task exists after the retry`)
+  await enter(); await tick(5)
+  await surface.click(issueButton()); await confirmWith(surface, text.inventory_check_task_issue)
+  assert.equal(world.count('issue'), 3, `${language} issue: a fresh Issue is sent`)
+  assert.notEqual(world.ofRoute('issue')[2].params.requestId, firstIssue.params.requestId, `${language} issue: and gets a NEW request id`)
+  await surface.unmount()
+}
+world.language = 'en'
+
+// ---- the Issue refusal with its figures, mounted, in both languages: the error is the one the REAL apiFetch builds from the Worker's body (not a hand-built one), so the figures reach the sentence only if the transport kept them ----
+async function realRefusal(body: Record<string, unknown>, status: number): Promise<Error> {
+  const saved = globalThis.fetch
+  globalThis.fetch = (async () => new Response(JSON.stringify({ success: false, ...body }), { status, headers: { 'content-type': 'application/json' } })) as typeof fetch
+  setSyncServerUrl('https://admin.example.test'); __resetApiHealthForTests(); __resetApiWriteDedupeForTests()
+  try { await apiFetch('POST', '/api/inventory-checks/tasks', { requestId: 'issue-aaaaaaaa' }); throw new Error('the stub answered a refusal but apiFetch did not throw') } catch (error) { return error as Error } finally { globalThis.fetch = saved }
+}
+for (const language of ['en', 'km'] as const) {
+  const text = pack(language)
+  world.language = language
+  const fill = (sentence: string, values: Record<string, number>) => Object.entries(values).reduce((out, [key, value]) => out.replace(`{${key}}`, String(value)), sentence)
+  const cases: Array<[Record<string, unknown>, number, string]> = [
+    [{ error: 'inventory_check_task_limit', code: 'inventory_check_task_limit', open: 10, limit: 10 }, 409, fill(text.inventory_check_task_limit_count, { open: 10, limit: 10 })],
+    [{ error: 'inventory_check_task_too_many', code: 'inventory_check_task_too_many', total: 120, limit: 100, atLeast: true }, 400, fill(text.inventory_check_task_too_many_at_least, { total: 120, limit: 100 })],
+    [{ error: 'inventory_check_task_too_many', code: 'inventory_check_task_too_many', total: 301, limit: 300 }, 400, fill(text.inventory_check_task_too_many_count, { total: 301, limit: 300 })],
+  ]
+  for (const [body, status, sentence] of cases) {
+    reset(); world.user = viewerUser('admin')
+    world.failures.issue = await realRefusal(body, status)
+    open('products')
+    const surface = await world.mount()
+    await surface.click(surface.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === text.inventory_check_task_issue && !node.hasAttribute('data-issue-action'), 'Issue entry'))
+    await surface.call(surface.find(node => node.getAttribute('data-check-pick') !== null && rowOf(surface, 3).contains(node), 'tick 3'), 'onChange', [{ target: { checked: true } }])
+    await surface.click(surface.find(node => node.getAttribute('data-issue-action') === 'issue', 'Issue'))
+    await surface.click(surface.findAll(node => node.tagName === 'BUTTON' && node.textContent === text.inventory_check_task_issue).at(-1)!)
+    assert.equal(world.count('issue'), 1, `${language} ${String(body.code)}: the issue was sent once`)
+    assert.ok(surface.text().includes(sentence), `${language} ${String(body.code)}: the page says "${sentence}" (it reads: ${surface.text().slice(0, 300)})`)
+    assert.ok(!/[{}]/.test(sentence), `${language}: no placeholder is left in the sentence`)
+    if (language === 'km') assert.ok(/[ក-៿]/.test(sentence), 'km: the sentence is Khmer')
+    assert.ok(surface.findAll(node => node.getAttribute('data-check-pick') !== null).length > 0, `${language}: Issue mode stays open with its pick`)
+    await surface.unmount()
+  }
 }
 world.language = 'en'
 
