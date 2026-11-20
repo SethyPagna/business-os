@@ -123,6 +123,22 @@ export function subscribeToastStack(listener: () => void): () => void {
   return () => { changeListeners.delete(listener) }
 }
 
+// The signed-in user changed (sign-out, or another account): drop every visible pop-up and held message and cancel
+// their clocks, so one user's alert never shows to the next. Listeners stay; a message raised after this shows normally.
+export function clearToasts(): void {
+  for (const key of [...clocks.keys()]) stopClock(key)
+  if (stack.length) changed([])
+}
+
+// True when a user id change must clear the pop-ups: someone was signed in and now nobody is, or another account is.
+// Nobody -> someone (a sign-in) keeps what the sign-in screen showed.
+export function userChangeClearsToasts(previousId: unknown, nextId: unknown): boolean {
+  const previous = previousId == null || previousId === '' ? '' : String(previousId)
+  const next = nextId == null || nextId === '' ? '' : String(nextId)
+  if (!previous || previous === next) return false
+  return true
+}
+
 // Test seam: forget every pop-up and clock.
 export function resetToastStack(): void {
   for (const key of [...clocks.keys()]) stopClock(key)
