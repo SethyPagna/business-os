@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  PORTAL_SIGNED_IN_FRESH_MS,
   PORTAL_SIGNED_IN_KEY,
+  portalSignedInMarkerAgeMs,
   clearPortalSignedIn,
   markPortalSignedIn,
   readPortalSignedIn,
@@ -163,7 +165,8 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike, cop
         setAccount(profile)
         setSessionKnown(true)
         if (profile) markSignedIn()
-        else if (markerBefore !== null) clearSignedIn(markerBefore)
+        // A young marker may be another tab's sign-in that is still in flight (its mark was the reason this page loaded): leave it.
+        else if (markerBefore !== null && portalSignedInMarkerAgeMs(markerBefore, Date.now()) > PORTAL_SIGNED_IN_FRESH_MS) clearSignedIn(markerBefore)
         if (profile) await hydrate()
       })
       .catch((err) => {

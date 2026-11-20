@@ -142,7 +142,7 @@ await check('the page rule takes its inputs from the real session answer, the ac
 })
 
 await check('the translate effect applies only when the rule allows, and lists all three inputs', () => {
-  const effect = /useEffect\(\(\) => \{\n    if \(!isGoogleLanguageChoice\(pageChoice\)\) return undefined\n    let cancelled = false[\s\S]*?\n  \}, \[pageChoice, translateAllowed, sessionChecked, sessionReady, signedIn, signInMarker, accountOpen\]\)/.exec(page)?.[0] || ''
+  const effect = /useEffect\(\(\) => \{\n(?:    \/\/ [^\n]*\n)*    const pickedGoogle = isGoogleLanguageChoice\(pageChoice\)\n    if \(!pickedGoogle && !portalGoogleWasAsked\(\)\) return undefined\n    let cancelled = false[\s\S]*?\n  \}, \[pageChoice, translateAllowed, sessionChecked, sessionReady, signedIn, signInMarker, accountOpen\]\)/.exec(page)?.[0] || ''
   assert.ok(effect, 'the effect and its dependency list')
   const blockedAt = effect.indexOf('if (!translateAllowed)')
   const applyAt = effect.indexOf('applyPortalGoogleTranslateOrFallBack(')
@@ -154,6 +154,17 @@ await check('the translate effect applies only when the rule allows, and lists a
   assert.match(blocked, /if \(!sessionChecked && !accountOpen && signInMarker === 'absent'\) return undefined/, 'only a guest with nothing against Google waits: a marker or an open sheet removes Google even before the check ends')
   assert.doesNotMatch(blocked, /visibilityState|document\.hidden/, 'a hidden background tab removes Google too')
   assert.match(effect, /cancelled \? false : controller\.applyPortalGoogleTranslateOrFallBack/, 'a cancelled attempt never loads Google')
+})
+
+await check('S1: a late Google script after the timeout fallback is taken off too: the blocked branch runs for any pick once the controller was asked to apply', () => {
+  const effect = /useEffect\(\(\) => \{\n(?:    \/\/ [^\n]*\n)*    const pickedGoogle[\s\S]*?\n  \}, \[pageChoice, translateAllowed/.exec(page)?.[0] || ''
+  assert.ok(effect, 'the effect')
+  const blockedAt = effect.indexOf('if (!translateAllowed)')
+  const applyGuardAt = effect.indexOf('if (!pickedGoogle) return undefined')
+  assert.ok(blockedAt > 0 && applyGuardAt > blockedAt, 'a non-Google pick is turned away only AFTER the blocked branch, which therefore runs for it')
+  assert.ok(effect.indexOf('markPortalGoogleAsked()') > applyGuardAt, 'the flag is set only on the apply path: a visitor who never picked Google never loads the controller')
+  assert.match(effect, /if \(!pickedGoogle\) return\n\s+if \(signedIn/, 'no notice is shown for a pick that is not Google')
+  assert.equal((page.match(/markPortalGoogleAsked\(\)/g) || []).length, 1, 'set in one place')
 })
 
 await check('every import of the controller sits behind the rule or is a removal', () => {
@@ -189,7 +200,7 @@ await check('a flag whose removal never ran is cleared in the cleanup, so a late
 await check('opening the sheet over Google writes the flag and reloads WITHOUT showing the sheet; every opener goes through it', () => {
   const open = /const openAccount = \(\) => \{[\s\S]*?\n  \}\n/.exec(page)?.[0] || ''
   assert.ok(open, 'openAccount found')
-  assert.match(open, /if \(accountOpen \|\| !isGoogleLanguageChoice\(pageChoice\)\) \{ setAccountOpen\(true\); return \}/, 'no Google pick: opens at once')
+  assert.match(open, /if \(accountOpen \|\| !\(isGoogleLanguageChoice\(pageChoice\) \|\| portalGoogleWasAsked\(\)\)\) \{ setAccountOpen\(true\); return \}/, 'no Google pick and no Google requested in this document: opens at once')
   assert.ok(open.indexOf('markPortalReopenAccount()') < open.indexOf('removePortalGoogleTranslate()'), 'flag first, then the removal')
   assert.match(open, /removePortalGoogleTranslate\(\) === 'clean'\) show\(\)/, 'the sheet opens only when nothing had to reload')
   assert.equal((page.match(/setAccountOpen\(true\)/g) || []).length, 2, 'only the wrapper opens the sheet')

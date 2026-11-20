@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import {
-  STOREFRONT_KM_LABELS,
+  STOREFRONT_EN_LABELS,
   STOREFRONT_ORIGIN,
   collectPageHealth,
   expectNoRuntimeErrors,
@@ -19,6 +19,10 @@ import {
  * CATCHES: any listener that asks the Worker again (the round-1 design re-checked /api/portal/auth/me on focus, visibility and pageshow).
  * The load-time list of API paths is attached to the test output so the measured number can be read from the gate log.
  *
+ * SILENCE OVER TIME: Playwright's clock is installed before the page loads. After the events fire, the clock runs past 10 s (longer than any
+ * throttle a re-check could hide behind), the events fire once more, the clock runs again, and only then is the request list read. No real
+ * waiting and no waitForTimeout: a delayed or throttled re-check has its timer fired by the clock.
+ *
  * RUN ONLY THIS FILE:  cd frontend && npx playwright test storefront-guest-requests
  */
 
@@ -29,6 +33,7 @@ test.describe('storefront guard: guests add no requests', () => {
 
   test('focus, tab return, a restored page and a marker change make no /api request', async ({ page, context }) => {
     // The pick stays English: nothing here may contact Google.
+    await page.clock.install()
     await seedStorefrontLanguage(context, STOREFRONT_ORIGIN, 'en')
     const health = collectPageHealth(page)
     const apiPaths: string[] = []
@@ -38,7 +43,7 @@ test.describe('storefront guard: guests add no requests', () => {
     })
 
     await page.goto(`${STOREFRONT_ORIGIN}/`, { waitUntil: 'load' })
-    await storefrontSectionTab(page, STOREFRONT_KM_LABELS, 'products').click()
+    await storefrontSectionTab(page, STOREFRONT_EN_LABELS, 'products').click()
     await expect(page.locator(storefrontCards).first()).toBeVisible()
     await page.waitForLoadState('networkidle')
 
@@ -47,8 +52,11 @@ test.describe('storefront guard: guests add no requests', () => {
     test.info().annotations.push({ type: 'guest-load-api-requests', description: String(loadPaths.length) })
     expect(loadPaths.length, 'the load itself reaches the Worker (the control: the counter is live)').toBeGreaterThan(0)
 
+    // Everything recorded from here on is a request the events caused.
+    const settled = apiPaths.length
+
     // Each event runs the page's own listeners; the marker is written first so the re-read has something to find.
-    await page.evaluate((key) => {
+    const fireEvents = () => page.evaluate((key) => {
       window.localStorage.setItem(key, String(Date.now()))
       window.dispatchEvent(new Event('focus'))
       Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
@@ -61,12 +69,18 @@ test.describe('storefront guard: guests add no requests', () => {
       window.localStorage.removeItem(key)
       window.dispatchEvent(new StorageEvent('storage', { key: null }))
     }, MARKER_KEY)
+    const settleFrames = () => page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
 
-    // Two frames after the events: React has run every state update the listeners asked for.
-    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
-    await page.waitForLoadState('networkidle')
+    await fireEvents()
+    await settleFrames()
+    // Past 10 s of page time: a throttled or delayed re-check would fire its timer here.
+    await page.clock.runFor(11_000)
+    await fireEvents()
+    await settleFrames()
+    await page.clock.runFor(11_000)
+    await settleFrames()
 
-    expect(apiPaths.slice(loadPaths.length), 'requests made after the events').toEqual([])
+    expect(apiPaths.slice(settled), 'requests made after the events').toEqual([])
     expectNoRuntimeErrors(health)
   })
 })

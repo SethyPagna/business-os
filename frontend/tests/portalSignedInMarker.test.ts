@@ -122,15 +122,15 @@ await check('a session found on load sets the marker', async () => {
   await view.unmount()
 })
 
-await check('a real "signed out" answer clears a stale marker, but only when it is unchanged since the check was sent', async () => {
-  useStore({ [KEY]: 'old' })
+await check('a real "signed out" answer clears an OLD marker, but only when it is unchanged since the check was sent', async () => {
+  useStore({ [KEY]: '1000' })
   const view = await mount({ getPortalAccountMe: async () => ({ account: null }) })
   assert.equal(latest.sessionKnown, true)
   assert.equal(store.has(KEY), false)
   assert.equal(latest.marker, 'absent')
   await view.unmount()
 
-  useStore({ [KEY]: 'old' })
+  useStore({ [KEY]: '1000' })
   const pending = deferred<unknown>()
   const second = await mount({ getPortalAccountMe: () => pending.promise })
   store.set(KEY, 'written-by-another-tab')
@@ -143,6 +143,33 @@ await check('a real "signed out" answer clears a stale marker, but only when it 
   const third = await mount({ getPortalAccountMe: async () => ({ account: null }) })
   assert.equal(store.has(KEY), false, 'no marker, nothing written')
   await third.unmount()
+})
+
+await check('R10: a young or unparsable marker survives a load-time "signed out" answer; an old one is cleared', async () => {
+  const age = options.portalSignedInMarkerAgeMs
+  assert.equal(age('1000', 5000), 4000)
+  assert.equal(age('1000..', 5000), 4000, 'trailing dots from a same-millisecond write')
+  assert.equal(age('abc', 5000), 0, 'unparsable reads as young')
+  assert.equal(age(null, 5000), 0)
+  assert.equal(age('9000', 5000), 0, 'a clock ahead reads as young')
+  const cases: Array<[string, string, boolean]> = [
+    ['young', String(Date.now() - 1000), true],
+    ['young with a dot', `${Date.now()}.`, true],
+    ['unparsable', 'written-by-a-new-build', true],
+    ['old', String(Date.now() - options.PORTAL_SIGNED_IN_FRESH_MS - 5000), false],
+  ]
+  for (const [name, value, survives] of cases) {
+    useStore({ [KEY]: value })
+    const view = await mount({ getPortalAccountMe: async () => ({ account: null }) })
+    assert.equal(latest.sessionKnown, true, name)
+    assert.equal(store.has(KEY), survives, `${name}: marker survives = ${survives}`)
+    await view.unmount()
+  }
+  // Control: without the age rule the same unchanged young value IS cleared by the compare-and-clear, so the survival above is the rule's doing.
+  useStore({ [KEY]: String(Date.now()) })
+  const young = options.readPortalSignedInValue()
+  options.clearPortalSignedIn(young ?? undefined)
+  assert.equal(store.has(KEY), false, 'control: the unconditional compare-and-clear removes a young marker')
 })
 
 await check('a FAILED first check keeps translation off: not known, marker untouched', async () => {

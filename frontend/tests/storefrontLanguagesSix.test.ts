@@ -109,7 +109,7 @@ check('the controller is a chunk of its own, so Khmer and English visitors never
 
 check('the page only calls apply for a Google choice', () => {
   const page = catalog('PublicCatalogPage.tsx')
-  assert.match(page, /if \(!isGoogleLanguageChoice\(pageChoice\)\) return undefined[\s\S]{0,3500}import\('\.\/portalTranslateController\.ts'\)\s*\.then\(\(controller\) => \(cancelled \? false : controller\.applyPortalGoogleTranslateOrFallBack\(/)
+  assert.match(page, /if \(!pickedGoogle\) return undefined[\s\S]{0,3500}import\('\.\/portalTranslateController\.ts'\)\s*\.then\(\(controller\) => \(cancelled \? false : controller\.applyPortalGoogleTranslateOrFallBack\(/)
 })
 
 check('the controller refuses on an admin hostname', () => {

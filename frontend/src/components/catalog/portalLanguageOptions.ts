@@ -67,6 +67,13 @@ export function portalTranslateAllowed(state: { sessionReady: boolean; signedIn:
   return Boolean(state.sessionReady) && !state.signedIn && !state.accountOpen && state.marker === 'absent'
 }
 
+// Set the first time the page asks for the translate controller to APPLY Google's script, so a later block (sign-in, open sheet, marker) can also
+// take off a script that arrived late, after a timeout fallback put the pick back to English. Visitors who never pick a Google language never
+// set it, and so never download the controller chunk just to find out there is nothing to remove.
+let googleAsked = false
+export function markPortalGoogleAsked(): void { googleAsked = true }
+export function portalGoogleWasAsked(): boolean { return googleAsked }
+
 // Opening the Account sheet over a translated page reloads the page to take Google off; this one-shot flag brings the sheet back after it.
 export const PORTAL_REOPEN_ACCOUNT_KEY = 'business-os:portal-reopen-account'
 

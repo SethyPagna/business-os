@@ -137,6 +137,20 @@ await check('a script that was inserted in this document still makes the removal
   assert.equal(reloaded.snapshots.length, 0)
 })
 
+await check('S1: after the timeout fallback a late script that already ran still makes the removal reload once; the page flag says when to ask', async () => {
+  const languages = await import('../src/components/catalog/portalLanguageOptions.ts')
+  assert.equal(languages.portalGoogleWasAsked(), false, 'no Google asked for: nothing to look for')
+  languages.markPortalGoogleAsked()
+  assert.equal(languages.portalGoogleWasAsked(), true)
+  const first = installFakeBrowser()
+  const attempt = controller.applyPortalGoogleTranslate('es')
+  await Promise.resolve()
+  controller.abandonPortalGoogleTranslate() // the 10 s fallback: tag and callback gone, the pick is English again
+  void attempt
+  assert.equal(controller.removePortalGoogleTranslate(), 'reloading', 'the script was inserted in this document: one reload, whatever the pick')
+  assert.equal(first.snapshots.length, 1)
+})
+
 globals.window = savedWindow
 globals.document = savedDocument
 

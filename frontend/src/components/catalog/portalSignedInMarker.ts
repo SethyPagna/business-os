@@ -6,6 +6,16 @@
 export const PORTAL_SIGNED_IN_KEY = 'business-os:portal-signed-in'
 export type PortalSignedInMarker = 'present' | 'absent' | 'unreadable'
 
+/** A load-time "signed out" answer clears only a marker older than this: a younger one may belong to a sign-in another tab has not finished. */
+export const PORTAL_SIGNED_IN_FRESH_MS = 120_000
+
+/** How old a marker value is (its timestamp, possibly with trailing dots). An unparsable value reads as 0, that is, young: it is never cleared on a guess. */
+export function portalSignedInMarkerAgeMs(value: string | null, now: number): number {
+  const match = /^(\d{1,16})\.*$/.exec(String(value ?? ''))
+  if (!match) return 0
+  return Math.max(0, now - Number(match[1]))
+}
+
 function localStore(): Storage | null {
   try {
     return typeof window !== 'undefined' ? window.localStorage ?? null : null
