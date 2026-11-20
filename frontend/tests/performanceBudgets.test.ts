@@ -131,6 +131,10 @@ const CATALOG_PRODUCTS_B4_GROWTH_BYTES = 1_198
 const CATALOG_PRODUCTS_D1_GROWTH_BYTES = 1_422
 // d1-bell: bellFreshness hooked in apiFetch (own-write fresh read); must stay synchronous
 const CATALOG_PRODUCTS_D1_BELL_GROWTH_BYTES = 520
+// Translate guard (e7a14673c, owner 21 Nov: Translate off while a shopper is signed in or the account panel is open): the closure grew 1,772 bytes and no chunk (compose 88ecea1d0
+// = 982,397 B / 31 chunks, with the guard 984,169 B / 31): signed-in marker, session-answer gate, storage listener, script removal with one reload. Same pattern as 6.0.1048:
+// the baseline above stays, and the ceiling is the old one plus what this client code really weighs (about 800 B of headroom).
+const CATALOG_PRODUCTS_TRANSLATE_GUARD_GROWTH_BYTES = 1_772
 const CATALOG_PRODUCTS_BASELINE_CHUNKS = 28
 const PUBLIC_PRELOAD_BASELINE_CHUNKS = 36
 const BUDGET_TOLERANCE = 1.10
@@ -152,8 +156,8 @@ await runTest('the catalog-products closure stays within +10% of its measured ba
     'no chunk of the catalog-products closure carries the Expenses report endpoint',
   )
   assert.ok(
-    bytes <= CATALOG_PRODUCTS_BASELINE_BYTES * BUDGET_TOLERANCE + CATALOG_PRODUCTS_P07_GROWTH_BYTES + CATALOG_PRODUCTS_B4_GROWTH_BYTES + CATALOG_PRODUCTS_D1_GROWTH_BYTES + CATALOG_PRODUCTS_D1_BELL_GROWTH_BYTES,
-    `catalog-products closure grew past +10% of the ${CATALOG_PRODUCTS_BASELINE_BYTES}-byte baseline plus the ${CATALOG_PRODUCTS_P07_GROWTH_BYTES} bytes of 6.0.1048, the ${CATALOG_PRODUCTS_B4_GROWTH_BYTES} bytes of B4 and the ${CATALOG_PRODUCTS_D1_GROWTH_BYTES} bytes of the D1 audit: ${bytes} bytes (${chunks} chunks) -- update the baseline deliberately if this growth is expected, do not just raise the tolerance`,
+    bytes <= CATALOG_PRODUCTS_BASELINE_BYTES * BUDGET_TOLERANCE + CATALOG_PRODUCTS_P07_GROWTH_BYTES + CATALOG_PRODUCTS_B4_GROWTH_BYTES + CATALOG_PRODUCTS_D1_GROWTH_BYTES + CATALOG_PRODUCTS_D1_BELL_GROWTH_BYTES + CATALOG_PRODUCTS_TRANSLATE_GUARD_GROWTH_BYTES,
+    `catalog-products closure grew past +10% of the ${CATALOG_PRODUCTS_BASELINE_BYTES}-byte baseline plus the ${CATALOG_PRODUCTS_P07_GROWTH_BYTES} bytes of 6.0.1048, the ${CATALOG_PRODUCTS_B4_GROWTH_BYTES} bytes of B4, the ${CATALOG_PRODUCTS_D1_GROWTH_BYTES} bytes of the D1 audit and the ${CATALOG_PRODUCTS_TRANSLATE_GUARD_GROWTH_BYTES} bytes of the Translate guard: ${bytes} bytes (${chunks} chunks) -- update the baseline deliberately if this growth is expected, do not just raise the tolerance`,
   )
   assert.ok(
     chunks <= Math.ceil(CATALOG_PRODUCTS_BASELINE_CHUNKS * BUDGET_TOLERANCE),
