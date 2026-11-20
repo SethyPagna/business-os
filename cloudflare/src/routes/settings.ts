@@ -667,18 +667,19 @@ async function loadPaymentMethodCandidates(
 /**
  * The methods sales used, for the unregistered check and its backfill. An exchange refund credit row is left out: it keeps the method it was
  * booked under when a rename would change its drawer kind, and that old name must not be offered back to the checkout list. A sale that
- * carries a credit contributes the methods of its other rows; every other sale contributes its summary column, as before.
+ * carries a credit contributes the methods of its other rows; every other sale contributes its summary column, as before. One scan of sales.
  */
 const USED_PAYMENT_METHODS_SQL = `
-  SELECT payment_method FROM sales
-  WHERE payment_method IS NOT NULL AND trim(payment_method) != ''
-    AND NOT (payment_details LIKE '%refund_credit%' AND json_valid(payment_details) AND json_type(payment_details)='array')
-  UNION
-  SELECT trim(json_extract(detail.value,'$.method')) AS payment_method
-  FROM sales s, json_each(s.payment_details) detail
-  WHERE s.payment_details LIKE '%refund_credit%' AND json_valid(s.payment_details) AND json_type(s.payment_details)='array'
-    AND json_type(detail.value)='object' AND json_extract(detail.value,'$.refund_credit') IS NOT 1
-    AND json_type(detail.value,'$.method')='text' AND trim(json_extract(detail.value,'$.method')) != ''
+  SELECT DISTINCT method AS payment_method FROM (
+    SELECT CASE WHEN s.has_credit=1 THEN trim(json_extract(detail.value,'$.method')) ELSE s.payment_method END AS method
+    FROM (
+      SELECT payment_method,payment_details,
+        CASE WHEN payment_details LIKE '%refund_credit%' AND json_valid(payment_details) AND json_type(payment_details)='array' THEN 1 ELSE 0 END AS has_credit
+      FROM sales
+    ) s
+    LEFT JOIN json_each(CASE WHEN s.has_credit=1 THEN s.payment_details ELSE '[]' END) detail
+      ON json_type(detail.value)='object' AND json_extract(detail.value,'$.refund_credit') IS NOT 1 AND json_type(detail.value,'$.method')='text'
+  ) WHERE method IS NOT NULL AND trim(method)!=''
 `
 
 app.get('/payment-methods/unregistered', async (c) => {
