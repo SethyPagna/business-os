@@ -111,7 +111,9 @@ release(); world.hold = null
 await settle(third)
 assert.equal(third.findAll(node => node.getAttribute('data-inventory-check-task') !== null).length, 5, 'the changed answer updates the rows in place')
 await third.unmount()
-// ---- "{done}/{total} counted at close": a closed task's figures say they are the ones at close on the board row, the task view bar and the sessions list; an open task keeps the live text.
+// ---- "{done}/{total} counted at close": a closed task WITH frozen figures says they are the ones at close on the board row, the task view bar and the sessions list; an open task keeps the live text.
+// A task closed before the figures were stored has none, so this does not claim every closed task says "at close": `frozenFigures` is the one place that marks a row as frozen (the server flag, when it exists, goes there).
+const frozenFigures: Partial<BoardTask> = {}
 // The fixture is 5 of 10, so a closed task is not "All counted" and a wrong surface cannot hide behind the helper's 4/4 case.
 for (const language of ['en', 'km'] as const) {
   const words = pack(language)
@@ -120,7 +122,7 @@ for (const language of ['en', 'km'] as const) {
   const liveText = fill(words.inventory_check_task_progress, { done: 5, total: 10 })
   assert.notEqual(closedText, liveText, `${language}: the two sentences differ, so the test can tell them apart`)
   assert.ok(closedText.includes('5/10') && liveText.includes('5/10'), `${language}: both keep the figures`)
-  const bothTasks = [task('c1', { status: 'closed', closed_at: '2026-11-18T09:00:00.000Z', total: 10, done: 5, can_pickup: false }), task('o1', { total: 10, done: 5, can_pickup: true })]
+  const bothTasks = [task('c1', { status: 'closed', closed_at: '2026-11-18T09:00:00.000Z', total: 10, done: 5, can_pickup: false, ...frozenFigures }), task('o1', { total: 10, done: 5, can_pickup: true })]
 
   // the board row
   world.reset(); world.board = bothTasks; world.taskProducts.set('c1', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]); world.taskProducts.set('o1', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
@@ -144,7 +146,7 @@ for (const language of ['en', 'km'] as const) {
   // the sessions list: a pickup row of a closed task, and of an open one
   world.reset()
   const pickupRow = (id: string, status: 'open' | 'closed') => ({ id: `p-${id}`, branch_id: 1, created_by: 7, title: '', status, revision: 0, started_at: '2026-11-19T02:00:00.000Z', updated_at: '2026-11-19T02:00:00.000Z', scope: { membership: 'pickup', task: id }, branch_name: 'Main',
-    task: { id, title: '', status, total: 10, done: 5 }, progress: { total: 0, done: 0, issue: 0, unstarted: 0 } })
+    task: { id, title: '', status, total: 10, done: 5, ...(status === 'closed' ? frozenFigures : {}) }, progress: { total: 0, done: 0, issue: 0, unstarted: 0 } })
   world.failures.sessionItems = [pickupRow('c1', 'closed'), pickupRow('o1', 'open')]
   open('sessions')
   surface = await world.mount()
