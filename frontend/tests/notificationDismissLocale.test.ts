@@ -59,6 +59,7 @@ function load(browser: boolean, channelDismissed: string[]): (props: ToastProps)
   ) as (props: ToastProps) => Node
 }
 for (const browser of [false, true]) {
+  const callsBefore = portalCalls
   const channelDismissed: string[] = []
   const Notification = load(browser, channelDismissed)
   for (const [nextLanguage, expected] of [['en', 'Dismiss notification'], ['km', 'បិទការជូនដំណឹង'], ['en', 'Dismiss notification']]) {
@@ -89,6 +90,8 @@ for (const browser of [false, true]) {
   const empty = renderToStaticMarkup(Notification({ notification: null }) as never)
   assert.ok(empty.includes('aria-live="polite"') && empty.includes('aria-live="assertive"'))
   assert.ok(!empty.includes('data-toast-dismiss'))
+  // Server pass: document is undefined, so no portal. Browser pass: one portal per render, 3 language steps + the empty render = 4.
+  assert.equal(portalCalls - callsBefore, browser ? 4 : 0, 'portal calls in the ' + (browser ? 'browser' : 'server') + ' pass')
   console.log('PASS actual toast locale, language changes, dismissal and live regions (' + (browser ? 'portal' : 'server') + ')')
 }
-assert.ok(portalCalls > 0)
+assert.equal(portalCalls, 4)

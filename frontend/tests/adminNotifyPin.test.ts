@@ -686,7 +686,101 @@ assert.match(centerSource, /const \{ displayLabel, displayMeta \} = itemText\(it
     }
     assert.equal(JSON.stringify(flaky.backing.times), remembered, 'failed reads change nothing in the memory')
     assert.equal(announce({ items: two, now: T0 + 4 * QUIET, store: flaky }).kind, 'none', 'and nothing pops again when the connection is back')
+    // AN1: an answer with a generatedAt but no sections array is malformed, not a load.
+    const stamp = '2026-11-21T01:00:00.000Z'
+    for (const sections of [undefined, null, {}, 'none']) {
+      assert.equal(summaryCameFromWorker({ generatedAt: stamp, sections }), false, `sections ${JSON.stringify(sections)} is not a load`)
+    }
+    assert.equal(summaryCameFromWorker({ generatedAt: stamp }), false, 'sections missing is not a load')
+    const oldRule = (r: any) => typeof r?.generatedAt === 'string' && r.generatedAt.length > 0 && !r.unavailable
+    const malformed = { generatedAt: stamp }
+    assert.equal(oldRule(malformed), true, 'control: the old rule read the malformed answer as a load')
+    const readTwice = (loaded: boolean, store: ReturnType<typeof memoryStore>) => {
+      for (const at of [T0 + 60_000, T0 + 60_000 + QUIET + 1, T0 + 60_000 + 3 * QUIET]) announce({ items: [], sections: [], omittedAreEmpty: loaded, now: at, store })
+      const plan = announce({ items: two, now: T0 + 4 * QUIET, store })
+      return plan.kind === 'none' ? [] : ids(plan).sort()
+    }
+    const oldStore = memoryStore()
+    announce({ items: two, now: T0, store: oldStore })
+    assert.deepEqual(readTwice(oldRule(malformed), oldStore), ['out-1', 'pay-2'], 'control: under the old rule the malformed reads make both alerts pop again')
+    const newStore = memoryStore()
+    announce({ items: two, now: T0, store: newStore })
+    assert.deepEqual(readTwice(summaryCameFromWorker(malformed), newStore), [], 'a malformed answer twice, then the real answer: nothing pops')
   }
+}
+
+// AN2: an alert that arrives while the tab is hidden pops when the tab is shown again.
+{
+  const store = memoryStore()
+  const row = [{ id: 'out-9', tone: 'danger' }]
+  assert.equal(announce({ items: row, blocked: true, now: 5, store }).kind, 'none', 'hidden tab: nothing pops')
+  assert.deepEqual(store.backing.times, {}, 'and nothing is remembered as announced')
+  assert.deepEqual(ids(announce({ items: row, blocked: false, now: 6, store })), ['out-9'], 'the same rows pop once the tab is shown')
+  assert.equal(announce({ items: row, now: 7, store }).kind, 'none', 'and only once')
+  // The effect re-runs when page visibility changes, and blocked reads that state, not document.visibilityState.
+  const effectEnd = centerSource.indexOf('// eslint-disable-next-line react-hooks/exhaustive-deps', centerSource.indexOf('const blocked = !visibilityActive'))
+  const effectSource = centerSource.slice(centerSource.indexOf('const blocked = !visibilityActive'), effectEnd)
+  const pinned = (source: string) => /const blocked = [^\n]*\|\| !pageVisible\n/.test(source) && /\[summary\.sections, visibilityActive, pageVisible\]\)/.test(centerSource.replace(effectSource, source))
+  assert.ok(effectSource.length > 0 && pinned(effectSource), 'blocked uses the page-visibility state')
+  assert.ok(centerSource.includes('}, [summary.sections, visibilityActive, pageVisible])'), 'the announce effect depends on it')
+  assert.ok(centerSource.includes('const pageVisible = usePageVisible()'))
+  const oldSource = "const blocked = !visibilityActive || open || !!summary.unavailable || typeof document === 'undefined' || document.visibilityState === 'hidden'\n"
+  assert.equal(pinned(oldSource), false, 'control: the old line fails the pin')
+  assert.ok(!effectSource.includes('document.visibilityState'),'the effect no longer reads the document directly')
+  // The hook: initial value and reaction to a visibilitychange event, on a fake document.
+  const { getPageVisible, subscribePageVisible } = await import('../src/utils/usePageVisible.ts')
+  const listeners = new Set<() => void>()
+  const fakeDocument: any = {
+    visibilityState: 'visible',
+    addEventListener: (type: string, fn: () => void) => { if (type === 'visibilitychange') listeners.add(fn) },
+    removeEventListener: (type: string, fn: () => void) => { if (type === 'visibilitychange') listeners.delete(fn) },
+  }
+  ;(globalThis as any).document = fakeDocument
+  try {
+    assert.equal(getPageVisible(), true, 'a shown tab starts visible')
+    let calls = 0
+    const off = subscribePageVisible(() => { calls += 1 })
+    fakeDocument.visibilityState = 'hidden'
+    listeners.forEach((fn) => fn())
+    assert.equal(calls, 1, 'the event notifies the subscriber')
+    assert.equal(getPageVisible(), false, 'and the state reads hidden')
+    fakeDocument.visibilityState = 'visible'
+    listeners.forEach((fn) => fn())
+    assert.equal(getPageVisible(), true, 'and visible again')
+    off()
+    assert.equal(listeners.size, 0, 'unsubscribing removes the listener')
+  } finally {
+    delete (globalThis as any).document
+  }
+}
+
+// AN3: an empty message never draws a blank pop-up.
+{
+  const toastSource = read('src/components/shared/toastChannel.ts')
+  const guardLine = /  if \(typeof request\.message !== 'string' \|\| !request\.message\.trim\(\)\) return\n/
+  assert.ok(guardLine.test(toastSource), 'the guard is in emitToast')
+  // Runs a copy of the real channel on the virtual clock; `guarded: false` removes the guard (the old code).
+  const run = (guarded: boolean) => {
+    reset()
+    const exported: any = {}
+    new Function('exports', transpile(guarded ? toastSource : toastSource.replace(guardLine, '')))(exported)
+    let heard = 0
+    exported.subscribeToastStack(() => { heard += 1 })
+    const heardBefore = heard
+    for (const message of ['', '   ', undefined, null, 42]) exported.emitToast({ message, type: 'warning', duration: 1000 })
+    const result = { shown: exported.getToastStack().length, heard: heard - heardBefore, clocks: timers.size }
+    exported.resetToastStack()
+    reset()
+    return result
+  }
+  assert.deepEqual(run(true), { shown: 0, heard: 0, clocks: 0 }, 'empty, blank and non-string messages add nothing, call no listener, start no clock')
+  assert.notDeepEqual(run(false), { shown: 0, heard: 0, clocks: 0 }, 'control: without the guard the blank pop-ups appear')
+  reset()
+  const s = new Screen()
+  s.emit('Real message', 'warning')
+  assert.deepEqual(s.shown, ['Real message'], 'a real message still shows')
+  reset()
+  assert.ok(/setNotification\(null\)/.test(contextSource.slice(contextSource.indexOf('const notify = useCallback'), contextSource.indexOf('const dismissNotification'))), 'notify still clears the context slot')
 }
 
 // S3: one user's pop-ups never reach the next user.

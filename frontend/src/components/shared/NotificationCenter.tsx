@@ -35,6 +35,7 @@ import AppSelect from './AppSelect'
 import PaginationControls from './PaginationControls'
 import { getStatusBadgeLabel } from '../sales/StatusBadge.tsx'
 import { settingsSaveSucceeded } from '../../utils/settingsSave.ts'
+import { usePageVisible } from '../../utils/usePageVisible.ts'
 
 type Tone = 'danger' | 'warning' | 'success' | 'info'
 type ToneFilter = Tone | 'all'
@@ -508,6 +509,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   const [itemLimit, setItemLimit] = useState(20)
   const [sectionPages, setSectionPages] = useState<Record<string, number>>({})
   const [visibilityActive, setVisibilityActive] = useState(() => matchesVisibilityMode(visibility))
+  const pageVisible = usePageVisible()
   const [seenSecurityIds, setSeenSecurityIds] = useState<Set<string>>(() => (
     typeof window === 'undefined' ? new Set() : readSeenSecurityIds()
   ))
@@ -956,7 +958,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   // alert pop-up is never stored anywhere), and never again while it stays unresolved: the badge carries it
   // from then on. More than three new ones in one load become a single "N alerts need attention".
   useEffect(() => {
-    const blocked = !visibilityActive || open || !!summary.unavailable || typeof document === 'undefined' || document.visibilityState === 'hidden'
+    const blocked = !visibilityActive || open || !!summary.unavailable || !pageVisible
     const rows = (summary.sections || []).flatMap((section) => (section.items || []).map((item) => ({ item, sectionId: section.id })))
     // An alert that left a fully listed section is forgotten after it stayed away for the repeat interval, so one that
     // comes back later pops again. A cut-down (truncated) section, a section the summary lacks, and a failed or
@@ -992,7 +994,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
       },
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [summary.sections, visibilityActive])
+  }, [summary.sections, visibilityActive, pageVisible])
 
   useEffect(() => {
     if (!open) {
