@@ -214,6 +214,40 @@ async function main() {
     assert.equal(JSON.parse(history(f, id).undo_payload).generation, 2)
   })
 
+  await check('the same batch at another branch is untouched by lot Sets, Undo and Redo at branch 1 (identity = batch + branch)', async () => {
+    const f = seeded()
+    seedFixture(f.sql, () => f.sql.exec(`
+      INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) VALUES(10, 2, 4), (11, 2, 6);
+      INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES(1, 2, 10);
+      UPDATE products SET stock_quantity=20 WHERE id=1;
+    `))
+    const otherBranch = () => JSON.stringify([
+      f.sql.prepare('SELECT batch_id, branch_id, quantity FROM branch_batch_stock WHERE branch_id=2 ORDER BY batch_id').all(),
+      f.sql.prepare('SELECT product_id, branch_id, quantity FROM branch_stock WHERE branch_id=2 ORDER BY product_id').all(),
+    ])
+    const before = otherBranch()
+    assert.equal(before, '[[{"batch_id":10,"branch_id":2,"quantity":4},{"batch_id":11,"branch_id":2,"quantity":6}],[{"product_id":1,"branch_id":2,"quantity":10}]]')
+    const down = await send(f, 'POST', '/api/inventory/adjust', setLot('lot-branch2-down-1', 1))
+    assert.equal(down.status, 200, JSON.stringify(down.json))
+    assert.deepEqual(stock(f), { lot10: 1, lot11: 7, branch: 8, product: 18, held: 0 })
+    assert.equal(otherBranch(), before, 'a lowering lot Set at branch 1 leaves branch 2 alone')
+    assert.equal((await undo(f, down.json.action_history_id, 0)).status, 200)
+    assert.deepEqual(stock(f), { lot10: 3, lot11: 7, branch: 10, product: 20, held: 0 })
+    assert.equal(otherBranch(), before, 'its Undo leaves branch 2 alone')
+    assert.equal((await redo(f, down.json.action_history_id, 1)).status, 200)
+    assert.deepEqual(stock(f), { lot10: 1, lot11: 7, branch: 8, product: 18, held: 0 })
+    assert.equal(otherBranch(), before, 'its Redo leaves branch 2 alone')
+    const up = await send(f, 'POST', '/api/inventory/adjust', setLot('lot-branch2-up-001', 6))
+    assert.equal(up.status, 200, JSON.stringify(up.json))
+    assert.deepEqual(stock(f), { lot10: 6, lot11: 7, branch: 13, product: 23, held: 0 })
+    assert.equal(otherBranch(), before, 'a raising lot Set at branch 1 leaves branch 2 alone')
+    assert.equal((await undo(f, up.json.action_history_id, 0)).status, 200)
+    assert.equal(otherBranch(), before, 'the raising Set Undo leaves branch 2 alone')
+    assert.equal((await redo(f, up.json.action_history_id, 1)).status, 200)
+    assert.deepEqual(stock(f), { lot10: 6, lot11: 7, branch: 13, product: 23, held: 0 })
+    assert.equal(otherBranch(), before, 'the raising Set Redo leaves branch 2 alone')
+  })
+
   // REVERT-SET (owner, 6 Oct 2026): undo moves the Set's recorded DELTA, so a
   // later sale that left the Set's units alone no longer blocks it, and one
   // that used them refuses it whole with the numbers.
