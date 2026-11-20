@@ -369,8 +369,11 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
   const flipped = await app.get('/api/inventory-checks/list?branchId=1&checkState=ok')
   check('flipping ON again serves the set with the row written while OFF (110 now counted), not the copy cached before', idSet(flipped) === '100,101,106,110,111', idSet(flipped))
   // A version that cannot be advanced: ON the writer's answer says so (5xx, outcome unknown); OFF nothing is served from the version, so a committed write stays a success.
+  // Writers advance several versions in one call (inventory_checks plus the branch's task board, 6.0.2626), so both entry points fail here.
   const realBump = cache.bumpVersion
+  const realBumps = cache.bumpVersions
   cache.bumpVersion = async () => { throw new Error('cache store unreachable') }
+  cache.bumpVersions = async () => { throw new Error('cache store unreachable') }
   const quiet = console.error; console.error = () => {}
   try {
     const revisionNow = async () => (await app.get('/api/inventory-checks/sessions/sA')).json.item.revision
@@ -389,7 +392,7 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
     app.setSwitch('ic_wired', 'off')
     const offFail = await app.send('PATCH', '/api/inventory-checks/sessions/sA', { action: 'resume', expectedRevision: await revisionNow(), requestId: 'req-bumpfail-off' })
     check('OFF: the same failure does not turn the write into an error', offFail.status < 500, String(offFail.status))
-  } finally { cache.bumpVersion = realBump; console.error = quiet; app.setSwitch('ic_wired', 'on') }
+  } finally { cache.bumpVersion = realBump; cache.bumpVersions = realBumps; console.error = quiet; app.setSwitch('ic_wired', 'on') }
   // AUDIT-INVENTORY row 14: the blind code lookup ignores a retired product. 990 is inactive with no stock and owns the code as its barcode; the active 991 owns it as its SKU. Before the filter the lookup
   // found two rows and gave up (an empty list); now only the active one counts, so the exact hit is read by id.
   app.seedStockFixture(app.raw.db, () => app.raw.exec("INSERT INTO products(id,name,sku,barcode,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active,created_at,updated_at) VALUES(990,'Retired 990','R990','CODE990001',0,1,4000,1,4000,0,'2026-09-01 00:00:00','2026-09-01 00:00:00'),(991,'Active 991','CODE990001',NULL,0,1,4000,1,4000,1,'2026-09-02 00:00:00','2026-09-02 00:00:00')"))

@@ -699,7 +699,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     }
     throw err
   }
-  return { ok: true, revertType, quantity: magnitude, usedBatchId, movementId: m.id, ...(countChanged ? { countChanged } : {}) } as RevertResult
+  return { ok: true, revertType, quantity: magnitude, usedBatchId, movementId: m.id, ...(countChanged ? { countChanged, countBranch: counted?.branch ?? null } : {}) } as RevertResult
 }
 
 // In-batch assertion (stock_session_guards' CHECK(guard_value = 1), the

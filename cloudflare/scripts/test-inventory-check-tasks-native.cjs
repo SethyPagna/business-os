@@ -6,7 +6,7 @@
 // (any count at the branch at or after the issue, wherever it was made), the auto-close in both submission writers, the manual close, the Count sessions list, and a random-world property test
 // against a brute-force oracle over the raw tables. Then every named mutant is planted and must be killed by the scenario that targets it.
 //
-// Run: node scripts/test-inventory-check-tasks-native.cjs
+// Run: node scripts/test-inventory-check-tasks-native.cjs [--only=scenarioName] (with --only, just that scenario and the mutants that target it)
 const assert = require('node:assert/strict')
 const path = require('node:path')
 const { createInvApp, USERS, person } = require('./harness/inv-app.cjs')
@@ -159,7 +159,8 @@ async function issueFilters(w) {
   for (const tier of [undefined, 'free']) {
     const env = tier ? { ...w.app.env, PLAN_TIER: tier } : undefined
     const over = await w.app.send('POST', '/api/inventory-checks/tasks', { branchId: 1, requestId: w.rid('big'), filters: { brand: 'Z' } }, env)
-    assert.equal(over.status, 400, JSON.stringify(over.json)); assert.equal(over.json.code, 'inventory_check_task_too_many'); assert.equal(over.json.limit, 300); assert.equal(over.json.total, 310, 'the total is the number the filter holds, so the admin can narrow it')
+    assert.equal(over.status, 400, JSON.stringify(over.json)); assert.equal(over.json.code, 'inventory_check_task_too_many'); assert.equal(over.json.limit, tier === 'free' ? 100 : 300)
+    if (tier === 'free') assert.ok(over.json.total > 100, 'Free stops as soon as the filter passes its smaller cap: the total is what was counted so far'); else assert.equal(over.json.total, 310, 'the total is the number the filter holds, so the admin can narrow it')
     const ids = Array.from({ length: 301 }, (_, i) => 300 + i)
     const list = await w.app.send('POST', '/api/inventory-checks/tasks', { branchId: 1, requestId: w.rid('big'), productIds: ids }, env)
     assert.equal(list.status, 400); assert.equal(list.json.code, 'inventory_check_task_too_many'); assert.equal(list.json.total, 301)
@@ -296,6 +297,7 @@ async function doneRule(w) {
   assert.equal(session.status, 201, JSON.stringify(session.json))
   const observed = await w.api('PATCH', `/sessions/${session.json.item.id}/items/103`, { expectedRevision: 0, expectedSessionRevision: 0, requestId: w.rid('o'), state: 'done', counted_quantity: 10 })
   assert.equal(observed.status, 200, JSON.stringify(observed.json))
+  await w.issue([104]) // an issue moves the branch board, so the figure is recomputed: an observation alone moves no board (P2.3), and a wrong done rule must not hide behind the cached entry
   assert.equal(await done(task), 2, 'a count in an open session ticks nothing yet')
   assert.equal((await w.api('PATCH', `/sessions/${session.json.item.id}`, { expectedRevision: 0, requestId: w.rid('c'), action: 'close' })).status, 200)
   assert.equal(await done(task), 3, 'once the session closes its count is final and ticks the task')
@@ -374,6 +376,32 @@ async function sessionsList(w) {
   assert.equal(all.items.some((s) => s.scope.membership === 'task'), false); assert.equal(all.total, all.items.length, 'the total does not count task rows')
   assert.equal(all.items.filter((s) => s.id === pickup).length, 1)
   w.as('picker2'); assert.equal((await w.get('/sessions?mine=1')).json.items.some((s) => s.id === pickup), false, 'not on another person\'s Mine')
+}
+
+/** at_close (deploy 9 fix): only a task closed with figures in its close event carries it, on the board row and on the pickup row of the sessions list; an open, a reopened and a legacy-closed task (no figures in the event) do not, and show live figures. */
+async function atClose(w) {
+  const sessionOf = async (id) => { w.as('admin'); return (await w.get('/sessions?pageSize=100')).json.items.find((s) => s.id === id) }
+  const hand = (await w.issue([100, 101], { title: 'Hand' })).json.item.id
+  const handPickup = (await w.pickup(hand)).json.item.id
+  assert.equal((await w.count([100], { task: hand })).status, 201)
+  const open = await taskOf(w, hand); assert.equal(open.status, 'open'); assert.equal('at_close' in open, false, 'an open task has no flag')
+  assert.equal('at_close' in (await sessionOf(handPickup)).task, false, 'nor its pickup row')
+  assert.equal((await w.close(hand)).status, 200)
+  assert.equal((await w.count([101], { task: hand })).status, 201, 'a count after the close moves the live figures, not the frozen ones')
+  const closed = await taskOf(w, hand); assert.equal(closed.status, 'closed'); assert.equal(closed.at_close, true); assert.equal(closed.done, 1); assert.equal(closed.total, 2)
+  const pickupRow = (await sessionOf(handPickup)).task; assert.equal(pickupRow.at_close, true, 'the pickup row of a closed task'); assert.equal(pickupRow.done, 1)
+  const legacy = (await w.issue([102, 103], { title: 'Legacy' })).json.item.id
+  const legacyPickup = (await w.pickup(legacy)).json.item.id
+  // closed the way deploy 8 closed: the task row and its pickup are closed and the task's close event holds no figures (the events table refuses an update, so the event is written as it was then)
+  w.app.raw.prepare("UPDATE inventory_check_sessions SET status='closed',revision=revision+1,closed_at='2026-11-20 03:00:00' WHERE id IN (?,?)").run([legacy, legacyPickup])
+  w.app.raw.prepare("INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at) VALUES(?,NULL,71,'admin','close','legacy-close-1','legacy',json_object('status','open','revision',0),json_object('status','closed','revision',1),json_object('sessionRevision',1),'2026-11-20 03:00:00')").run([legacy])
+  assert.equal((await w.count([102], { task: legacy })).status, 201); w.app.clearCaches()
+  const old = await taskOf(w, legacy); assert.equal(old.status, 'closed'); assert.equal('at_close' in old, false, 'a close event without figures is not at close'); assert.equal(old.done, 1, 'live figures'); assert.equal(old.total, 2)
+  assert.equal('at_close' in (await sessionOf(legacyPickup)).task, false, 'nor its pickup row')
+  const reopened = (await w.issue([104, 105], { title: 'Reopened' })).json.item.id
+  assert.equal((await w.close(reopened)).status, 200)
+  w.app.raw.prepare("UPDATE inventory_check_sessions SET status='open',closed_at=NULL WHERE id=?").run([reopened]); w.app.clearCaches()
+  const again = await taskOf(w, reopened); assert.equal(again.status, 'open'); assert.equal('at_close' in again, false, 'a reopened task shows live figures with no flag')
 }
 
 /** The cache: a warm Tasks open reads nothing; a writer moves it; the numbers change with the count. */
@@ -748,7 +776,7 @@ async function issueFilterBound(w0) {
     ['205 childless headers and 5 products', { headers: 205 }, 5], ['605 childless headers and 5 products', { headers: 605 }, 5], ['1005 childless headers and 5 products', { headers: 1005 }, 5],
     ['101 childless headers and 300 products (F1: 401 families)', { headers: 101, lone: 300 }, 300],
     ['99 childless headers sorted last and 300 products (F2: 399 families)', { headers: 99, lone: 300, headerName: 'Zhead' }, 300],
-    ['301 products and no header (the page bound plus one)', { lone: 301 }, 301],
+    ['301 products and no header (one over the cap: refused after the first page)', { lone: 301 }, 301],
   ]
   for (const [label, world, products] of worlds) {
     const w = w0.again(world)
@@ -767,6 +795,7 @@ async function issueFilterBound(w0) {
     if (products <= 300) { assert.equal(made.status, 201, `${label}: ${JSON.stringify(made.json)}`); assert.equal(made.json.item.progress.total, products, 'within the bound the filter resolves every product'); assert.equal(issued, 1); continue }
     assert.equal(made.status, 400, JSON.stringify(made.json)); assert.equal(made.json.code, 'inventory_check_task_too_many'); assert.equal(made.json.total, products, 'the whole count, not a page bound')
     assert.equal(made.json.limit, 300); assert.equal(issued, 0, 'nothing was issued')
+    assert.ok(used <= 12, `${label}: a refusal reads the first page only (${used} D1 calls; reading every page of 301 costs about 30)`)
   }
 }
 
@@ -848,7 +877,7 @@ async function taskCap(w) {
   assert.equal(w.row("SELECT COUNT(*) AS n FROM inventory_check_sessions WHERE json_extract(scope_json,'$.membership')='task'").n, cap, 'a refused issue writes nothing')
   assert.equal((await w.board()).json.items.filter((t) => t.status === 'open').length, cap, 'the board shows every open task: it never hides one')
   const free = await w.app.send('POST', '/api/inventory-checks/tasks', { branchId: 1, requestId: w.rid('free'), productIds: [100] }, { ...w.app.env, PLAN_TIER: 'free' })
-  assert.equal(free.status, 409); assert.equal(free.json.code, 'inventory_check_task_limit', 'the same cap on the Free plan')
+  assert.equal(free.status, 409); assert.equal(free.json.code, 'inventory_check_task_limit', 'refused on the Free plan too (its own cap is 10: this branch holds ' + cap + ' open)'); assert.equal(free.json.limit, 10, 'the Free plan cap is 10 open tasks per branch'); assert.equal(free.json.open, cap)
   assert.equal((await w.api('POST', '/tasks', { branchId: 2, requestId: w.rid('b2'), productIds: [100] })).status, 201, 'another branch has its own cap')
   rawTask(w, { id: 'org2-a', org: 2, products: [100] }); rawTask(w, { id: 'org2-b', org: 2, products: [100] })
   assert.equal((await w.close(first[0])).status, 200)
@@ -1009,7 +1038,9 @@ async function randomWorld(w, seed, steps) {
       const productIds = w.rows('SELECT product_id FROM inventory_check_items WHERE session_id=?', view.id).map((r) => r.product_id)
       // brute force over the raw rows: a product is done when some count (done or differs) of it at the branch exists at or after the issue
       const done = productIds.filter((p) => w.rows("SELECT i.updated_at FROM inventory_check_items i WHERE i.product_id=? AND i.branch_id=? AND i.state IN ('done','issue') AND i.updated_at IS NOT NULL AND i.session_id IN (SELECT id FROM inventory_check_sessions WHERE status='closed')", p, db.branch_id).some((r) => r.updated_at >= db.started_at)).length
-      assert.equal(view.total, productIds.length, `${what}: total`); assert.equal(view.done, done, `${what}: done count of ${view.id}`)
+      if (expected.status === 'closed') { if (!expected.frozen) expected.frozen = { total: productIds.length, done } } else delete expected.frozen
+      const want = expected.status === 'closed' ? expected.frozen : { total: productIds.length, done }
+      assert.equal(view.total, want.total, `${what}: total`); assert.equal(view.done, want.done, `${what}: done count of ${view.id}`)
       assert.equal(view.status, expected.status, `${what}: status of ${view.id}`)
       assert.equal(view.picked_up_by, expected.pickupBy ? `u${w.app.users[expected.pickupBy].id}` : null, `${what}: pickup of ${view.id}`)
       assert.equal(w.rows("SELECT * FROM inventory_check_sessions WHERE json_extract(scope_json,'$.membership')='pickup' AND json_extract(scope_json,'$.task')=? AND status='open'", view.id).length, expected.pickupBy ? 1 : 0, `${what}: at most one open pickup`)
@@ -1068,7 +1099,7 @@ async function randomWorld(w, seed, steps) {
 
 // ---- run -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 const SCENARIOS = {
-  noEffect, issueShape, issueFilters, refusals, onePerson, race, taskList, doneRule, autoClose, manualClose, sessionsList, boardCache, olderListUnaffected,
+  noEffect, issueShape, issueFilters, refusals, onePerson, race, taskList, doneRule, autoClose, manualClose, sessionsList, atClose, boardCache, olderListUnaffected,
   autoCloseOlderWriter: (w) => autoClose(w, { lotWriter: false }),
   outsideCloseLot: (w) => outsideClose(w, 'lot'), outsideClosePlain: (w) => outsideClose(w, 'plain'), outsideCloseObserve: (w) => outsideClose(w, 'observe'),
   outsideNegativesLot: (w) => outsideNegatives(w, 'lot'), outsideNegativesPlain: (w) => outsideNegatives(w, 'plain'), outsideNegativesObserve: (w) => outsideNegatives(w, 'observe'),
@@ -1079,8 +1110,10 @@ const SCENARIOS = {
 }
 const WORLD = { issueFilterHeaderChildren: { summer: true }, issueFilterNothing: { summer: true }, issueFilters: { extraProducts: 310 }, budget: { extraProducts: 70 }, issueFilterFamilies: { families: 280 } }
 
+const ONLY = (process.argv.find((a) => a.startsWith('--only=')) || '').slice(7)
 async function main() {
   for (const [name, scenario] of Object.entries(SCENARIOS)) {
+    if (ONLY && name !== ONLY) continue
     await check(`scenario ${name}`, async () => { await scenario(build({}, WORLD[name] || {})) })
   }
   await check('the history text of a Set that closes a difference says difference (old history stays as written)', () => {
@@ -1110,19 +1143,22 @@ async function main() {
     ['a task item is written as a count (Done, with a time): it becomes a latest count', edit('lib/inventoryCheckSessions.ts', "INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json)\n      SELECT @id,json_extract(value,'$.product_id'),@branchId,json_extract(value,'$.product'),NULL,'{}' FROM json_each(@members)`", "INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,revision,updated_by,updated_at)\n      SELECT @id,json_extract(value,'$.product_id'),@branchId,json_extract(value,'$.product'),NULL,'{}','done',0,1,@actorId,@now FROM json_each(@members)`"), ['noEffect']],
     ['the issue permission is not checked', { 'routes/inventoryChecks.ts': [["  if (!canIssueInventoryCountTasks(user)) throw new InventoryCheckSessionError(403, 'inventory_check_issue_required')\n", '']], 'lib/inventoryCheckSessions.ts': [["  if (!canIssueInventoryCountTasks(actor)) fail(403, 'inventory_check_issue_required')\n", '']] }, ['refusals']],
     ['the taskId restriction is missing on /list', edit('routes/inventoryChecks.ts', '  if (extra.task) {\n    let ids = new Set(extra.task.productIds)', '  if (extra.task && Date.now() < 0) {\n    let ids = new Set(extra.task.productIds)'), ['taskList']],
+    ['the board row never says at_close', edit('routes/inventoryChecks.ts', "removed: row.removed, ...(row.atClose ? { at_close: true } : {}), selection,", 'removed: row.removed, selection,'), ['atClose']],
+    ['the pickup row never says at_close', edit('routes/inventoryChecks.ts', "done: row.done, ...(row.atClose ? { at_close: true as const } : {}) }]", 'done: row.done }]'), ['atClose']],
+    ['a legacy closed task is flagged at close (the flag is the status, not the stored figures)', edit('lib/inventoryCheckTasks.ts', 'page.frozen IS NOT NULL AS at_close', "page.status='closed' AS at_close"), ['atClose']],
     ['task rows are listed under Count sessions', edit('lib/inventoryCheckSessions.ts', "    AND json_extract(scope_json, '$.membership') IS NOT 'task' AND (@mine=0", '    AND (@mine=0'), ['sessionsList']],
     ['the auto-close is missing from the close of a count session', edit('lib/inventoryCheckSessions.ts', "    ...(taskPart ? taskPart.statements : []),\n    // LAST: after the UPDATE", "    // LAST: after the UPDATE"), ['outsideCloseObserve', 'observationNotFinal']],
-    ['two tasks closed by one write share a close request id', edit('lib/inventoryCheckTasks.ts', "@key||'-task-closed-'||t.id", "@key||'-task-closed-'"), ['outsideNegativesLot', 'outsideNegativesPlain', 'outsideNegativesObserve']],
+    ['two tasks closed by one write share a close request id', edit('lib/inventoryCheckTasks.ts', "@key||'-task-closed-'||c.id", "@key||'-task-closed-'"), ['outsideNegativesLot', 'outsideNegativesPlain', 'outsideNegativesObserve']],
     ['a count in an open session ticks a task (the count need not be final)', edit('lib/inventoryCheckTasks.ts', "${x}.state IN ('done','issue') AND ${xs}.status='closed' AND ${xs}.organization_id", "${x}.state IN ('done','issue') AND ${xs}.organization_id"), ['observationNotFinal', 'doneRule']],
     ["the done rule counts another organization's counts", edit('lib/inventoryCheckTasks.ts', "AND ${xs}.organization_id IS ${org} AND ${xs}.branch_id=${x}.branch_id\n", "AND ${xs}.branch_id=${x}.branch_id\n"), ['doneRuleOrg']],
     ['a product that can no longer be counted still blocks the auto-close', edit('lib/inventoryCheckTasks.ts', " AND ${taskItemCountableSql('n')})", ')'), ['removedProducts']],
-    ['the board counts products that can no longer be counted in the total', edit('lib/inventoryCheckTasks.ts', "(SELECT COUNT(*) FROM ${I} t WHERE t.session_id=page.id AND ${taskItemCountableSql('t')}) AS total", "(SELECT COUNT(*) FROM ${I} t WHERE t.session_id=page.id) AS total"), ['removedProducts']],
+    ['the board counts products that can no longer be counted in the total', edit('lib/inventoryCheckTasks.ts', "SELECT SUM(CASE WHEN ${taskItemCountableSql('t')} THEN CASE WHEN ${taskItemDoneSql('t', 'page.branch_id'", "SELECT SUM(CASE WHEN 1 THEN CASE WHEN ${taskItemDoneSql('t', 'page.branch_id'"), ['removedProducts']],
     ['issue by filter stops when the rows reach the family count', edit('routes/inventoryChecks.ts', "if (!rows.length || page * LIST_MAX_PAGE_SIZE >= Number(answer.total ?? 0)) break", "if (!rows.length || ids.size >= Number(answer.total ?? 0)) break"), ['issueFilterFamilies']],
     ['issuing needs only the extra, not the count grant', edit('lib/inventoryCheckAccess.ts', "return access.canView && access.canCheck && hasPermission(user, 'inventory_check_issue')", "return access.canView && hasPermission(user, 'inventory_check_issue')"), ['issueCapabilities']],
     ['the board shows the filters a viewer may not use', edit('routes/inventoryChecks.ts', "!(key === 'brand' && !access.fields.brand) && !(key === 'category' && !access.fields.category) && !(key === 'stockState' && !access.fields.stock)", 'true'), ['issueCapabilities']],
     ['the candidates read closed tasks again (the open-task index and the open filter are gone)', { 'lib/inventoryCheckTasks.ts': [["FROM ${S} t INDEXED BY inventory_check_sessions_open_task WHERE ${candidate}", "FROM ${S} t WHERE ${candidate}"], ["AND t.branch_id=@branchId AND t.status='open'\n", "AND t.branch_id=@branchId\n"]] }, ['outsideCloseLot', 'outsideClosePlain', 'outsideCloseObserve']],
     ['the done rule is "after the issue", not "at or after"', edit('lib/inventoryCheckTasks.ts', 'x.updated_at>=${since}', 'x.updated_at>${since}'), ['doneRule']],
-    ['the close event does not say which session closed the task', edit('lib/inventoryCheckTasks.ts', ",'auto',1,'closedBy',${src})", ",'auto',1)"), ['outsideCloseLot', 'outsideClosePlain', 'outsideCloseObserve']],
+    ['the close event does not say which session closed the task', edit('lib/inventoryCheckTasks.ts', ",'auto',1,'closedBy',${src},'total'", ",'auto',1,'total'"), ['outsideCloseLot', 'outsideClosePlain', 'outsideCloseObserve']],
     ['a family header is countable in a task (the rule drops its is_group clause)', edit('lib/inventoryCheckTasks.ts', ' AND COALESCE(p.is_group,0)=0)`', ')`'), ['headerRule']],
     ['the old rule: a task counts an inactive product that holds stock', edit('lib/inventoryCheckTasks.ts', "export const TASK_COUNTABLE_SQL = `(${catalogProductSql('p', false)} AND", 'export const TASK_COUNTABLE_SQL = `(${stockVisibleProductSql()} AND'), ['deactivatedWithStock']],
     ['the task list totals every product of the task, not the countable ones', edit('lib/inventoryCheckTasks.ts', 'productIds: rows.filter((row) => Number(row.countable) === 1).map(', 'productIds: rows.map('), ['headerRule', 'deactivatedWithStock']],
@@ -1135,7 +1171,7 @@ async function main() {
     ['a filter that finds nothing answers the old missing-ids code', edit('routes/inventoryChecks.ts', "  if (!ids.size) throw new InventoryCheckSessionError(400, 'inventory_check_product_not_eligible')\n", ''), ['issueFilterNothing']],
     ['RV A: leaf-only applies to every list read', edit('routes/inventoryChecks.ts', 'const leafOnly = Boolean(extra.idsOnly) && restriction.restrictIdsJson === undefined && restriction.excludeIdsJson === undefined', 'const leafOnly = restriction.restrictIdsJson === undefined && restriction.excludeIdsJson === undefined'), ['issueFilterBound']],
     ['RV B: the leaf rule replaces a check-state restriction', edit('routes/inventoryChecks.ts', 'const leafOnly = Boolean(extra.idsOnly) && restriction.restrictIdsJson === undefined && restriction.excludeIdsJson === undefined', 'const leafOnly = Boolean(extra.idsOnly)'), ['issueFilterCheckState']],
-    ['the page bound is one page short (no plus one)', edit('routes/inventoryChecks.ts', 'maxPages = Math.ceil(limit / LIST_MAX_PAGE_SIZE) + 1', 'maxPages = Math.ceil(limit / LIST_MAX_PAGE_SIZE)'), ['issueFilterBound']],
+    ['the refusal does not stop after the first page (a filter over the cap reads every page)', edit('routes/inventoryChecks.ts', '    if (readAtLeast > limit) { atLeast = true; break }\n', ''), ['issueFilterBound']],
     ['the wired list raises its page size alone (a second source, not the reader clamp)', edit('lib/inventoryCheckList.ts', 'export const LIST_MAX_PAGE_SIZE = PRODUCT_LIST_MAX_PAGE_SIZE', 'export const LIST_MAX_PAGE_SIZE = 150'), ['pageSizeOneSource']],
     ['the task list cache ignores the products version', edit('routes/inventoryChecks.ts', "order=1`, { method: 'GET' }), c.executionCtx, `ict:${version}:${productsVersion}`", "order=1`, { method: 'GET' }), c.executionCtx, `ict:${version}`"), ['cacheKeyProducts']],
     ['the schema probe does not name the task indexes', edit('lib/inventoryCheckSessions.ts', "  'inventory_check_sessions_kind_task', 'inventory_check_sessions_open_task', 'inventory_check_sessions_task_board'])\nconst APPROVALS_SCHEMA", "  ])\nconst APPROVALS_SCHEMA"), ['schemaMissing']],
@@ -1150,6 +1186,7 @@ async function main() {
   ]
   for (const [name, edits, targets] of MUTANTS) {
     for (const target of targets) {
+      if (ONLY && target !== ONLY) continue
       await check(`mutant killed: ${name} (by ${target})`, async () => {
         let caught = false
         try { await SCENARIOS[target](build(edits, WORLD[target] || {})) } catch (error) { caught = !/must match once/.test(String(error && error.message)) ? true : (() => { throw error })() }

@@ -28,6 +28,7 @@ import { actorSnapshot } from '../lib/actorSnapshot'
 import { nullableMoney4, multiplyMoney4 } from '../lib/moneyPrecision'
 import { catalogCostRecomputeStatement, catalogCostRecomputeIfChangedStatement } from '../lib/catalogCostRecompute'
 import { addressedStatements, branchEffectRefusal, branchRedirectGuardRefusal, branchRedirectTarget, isBranchRedirectGuardError, landingLotId, requestBranchLanding } from '../lib/branchRedirectWrite'
+import { icTasksNamespace } from '../lib/inventoryCheckTasks'
 
 // Batch / expiry-date tracking -- schema notes and design rationale live in
 // lib/productBatches.ts. Gated behind the same 'inventory' permission as
@@ -635,7 +636,7 @@ app.patch('/:id/branches/:branchId', async (c) => {
   if (result.status !== 200) return c.json(result.body as never, result.status as never)
   // One awaited bump call for the whole write (W3 Slice A): one quota upsert on Free, and the next read already keys on the new versions.
   const bumpNamespaces: string[] = []
-  if (result.body.issue_closed === true && !result.body.replayed) bumpNamespaces.push('inventory_checks')
+  if (result.body.issue_closed === true && !result.body.replayed) bumpNamespaces.push('inventory_checks', icTasksNamespace(Number(result.body.branchId) || branchId))
   const stockMoved = Number(result.body.quantity) > 0 && !result.body.replayed
   // A Set that only changed quantities bumps the version a sale bumps (stock_bump_narrow); anything more, or the switch OFF, bumps 'products' as before.
   if (stockMoved) bumpNamespaces.push(await scopedSetBump(c.env, result.body))

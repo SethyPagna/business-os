@@ -1,5 +1,5 @@
 'use strict'
-// The count-task sizes (lib/inventoryCheckTaskLimits.ts): one value per plan tier, the same on Free and Paid, chosen by the tier like every other limit, and read by the route and the writer through
+// The count-task sizes (lib/inventoryCheckTaskLimits.ts): one value per plan tier (Free is smaller than Paid: owner ruling 20 Nov 2026), chosen by the tier like every other limit, and read by the route and the writer through
 // getInventoryCheckTaskLimits(env), never as a literal at a call site. They live beside planTier.ts, not in it, because planTier.ts is inside the sales-daily kernel fingerprint (see the module's comment);
 // this test is what keeps both tiers pinned.
 //
@@ -27,9 +27,10 @@ const { __resetPlanTierCacheForTests } = load('lib/planTier.ts')
 let passed = 0
 const check = (name, run) => { run(); passed++; console.log(`PASS ${name}`) }
 
-check('both tiers hold exactly the pinned numbers, and they are the same on Free and Paid', () => {
-  assert.deepEqual(INVENTORY_CHECK_TASK_LIMITS_BY_TIER, { paid: { maxProducts: 300, maxOpenTasks: 30, tasksClosedShown: 5 }, free: { maxProducts: 300, maxOpenTasks: 30, tasksClosedShown: 5 } })
-  assert.deepEqual(INVENTORY_CHECK_TASK_LIMITS_BY_TIER.free, INVENTORY_CHECK_TASK_LIMITS_BY_TIER.paid)
+check('both tiers hold exactly the pinned numbers: Paid 30 open tasks of 300 products, Free 10 of 100 (owner, 20 Nov 2026)', () => {
+  assert.deepEqual(INVENTORY_CHECK_TASK_LIMITS_BY_TIER, { paid: { maxProducts: 300, maxOpenTasks: 30, tasksClosedShown: 5 }, free: { maxProducts: 100, maxOpenTasks: 10, tasksClosedShown: 5 } })
+  for (const tier of ['free', 'paid']) assert.ok(INVENTORY_CHECK_TASK_LIMITS_BY_TIER[tier].maxProducts < 1000, 'the board packs total, done and removed into one number (lib/inventoryCheckTasks.ts TASK_FIGURE_*): exact below 1000 items')
+  assert.ok(INVENTORY_CHECK_TASK_LIMITS_BY_TIER.free.maxProducts < INVENTORY_CHECK_TASK_LIMITS_BY_TIER.paid.maxProducts && INVENTORY_CHECK_TASK_LIMITS_BY_TIER.free.maxOpenTasks < INVENTORY_CHECK_TASK_LIMITS_BY_TIER.paid.maxOpenTasks)
   assert.ok(INVENTORY_CHECK_TASK_LIMITS_BY_TIER.paid.maxProducts < 500, 'under the 500 items a session detail can read')
 })
 check('the tier picks the table: PLAN_TIER=free, paid, and no tier at all (paid, as every limit)', () => {

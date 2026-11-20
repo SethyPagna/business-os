@@ -1660,6 +1660,8 @@ export type ProductSearchListOptions = {
   excludeIdsJson?: string
   /** Read leaf-only (see ProductSearchOptions.leafOnly): the key carries it through setKey. */
   leafOnly?: boolean
+  /** The caller wants the ids of one page in no order (a filter being issued): never the shared ranking of the whole scope, whatever catalog_ranked_scope says. */
+  idsOnly?: boolean
   setKey?: string
   setVersion?: string
   /** Inventory Check groupBy: rank by the grouping (see ProductSearchOptions.grouping). The key gains the grouping; the ranked scope is used whatever catalog_ranked_scope says. */
@@ -1696,7 +1698,7 @@ export async function readProductSearchList(c: Context<{ Bindings: Env; Variable
   // A typed search keeps the page path below: a stored ranking is never read again for a key unique to the keystroke, and the ranked read costs more rows and calls than the page it replaces.
   // (The Inventory Check lists read the shared ranking and keep it.)
   // A grouped list (Inventory Check groupBy) always takes this path: its order ignores promotions, so its entry is keyed on the products (and stock) version and the inventory_checks version alone.
-  if (options.grouping || (!(!restricted && isTypedSearch(query)) && await readSwitch(c.env, 'catalog_ranked_scope'))) {
+  if (options.grouping || (!options.idsOnly && !(!restricted && isTypedSearch(query)) && await readSwitch(c.env, 'catalog_ranked_scope'))) {
     let versions: string, edgeVersions: string
     try {
       if (options.grouping) {
