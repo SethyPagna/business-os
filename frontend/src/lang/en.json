@@ -889,7 +889,6 @@
   "assistantIntro": "Assistant intro",
   "assistantLoading": "Thinking...",
   "assistantNoProvider": "Choose and test an AI provider in Library before enabling the website assistant.",
-  "assistantNotice": "AI generated, for reference only.",
   "assistantPrompt": "Extra prompt instructions",
   "assistantPromptHint": "Optional store-specific rules, such as tone or what categories to prioritize.",
   "assistantProvider": "AI provider",
@@ -1137,7 +1136,6 @@
   "bucketCopied": "Copied!",
   "bucketCopyFailed": "Could not copy automatically -- try Download instead.",
   "bucketEmpty": "Your list is empty. Tap \"Add\" on products you like.",
-  "bucketHint": "No payment here -- just a shortlist to show our team.",
   "bucketTitle": "My List",
   "bulk_add_batch_note": "Each product is received under the received date below.",
   "bulk_add_stock": "Add Stock",
@@ -1267,7 +1265,6 @@
   "clear_use_local": "Clear & Use Local DB",
   "click_add_column": "Click \"Add Column\" to define your table structure",
   "click_row_details": "Click row → full details + data changes",
-  "clickToViewDetails": "Click to view details",
   "client": "Client",
   "client_time": "Client Time",
   "close": "Close",
@@ -2336,7 +2333,6 @@
   "faq": "FAQ",
   "faqAnswer": "Answer",
   "faqEnabled": "Show FAQ section",
-  "faqHint": "Quick answers to common questions.",
   "faqQuestion": "Question",
   "faqSection": "FAQ editor",
   "faqSettings": "FAQ settings",
@@ -2836,7 +2832,6 @@
   "light": "Light",
   "limit": "Limit",
   "line": "Line",
-  "liveCatalog": "Browse our products and check availability.",
   "live_preview": "Live Preview",
   "live_session": "Live session",
   "live_sessions_word": "live sessions",
@@ -2945,7 +2940,6 @@
   "manual_return": "Manual",
   "manual_return_hint": "Manual return — not linked to a sale.",
   "map": "Map",
-  "mapCard": "Store map",
   "mapEmbed": "Google map embed URL",
   "mapEmbedHint": "Paste a Google Maps link or embed URL. The website will show it as an interactive map card.",
   "margin": "Margin",
@@ -3399,7 +3393,6 @@
       "assistantLoading": "Thinking...",
       "assistantNoAnswer": "No AI answer yet. Ask a question to generate suggestions.",
       "assistantNoProvider": "Choose and test an AI provider in Library before enabling the website assistant.",
-      "assistantNotice": "AI generated, for reference only.",
       "assistantOpen": "Open assistant",
       "assistantPrompt": "Extra prompt instructions",
       "assistantPromptHint": "Optional store-specific rules, such as tone or what categories to prioritize.",
@@ -3467,7 +3460,6 @@
       "faq": "FAQ",
       "faqAnswer": "Answer",
       "faqEnabled": "Show FAQ section",
-      "faqHint": "Quick answers to common questions.",
       "faqQuestion": "Question",
       "faqSection": "FAQ editor",
       "faqSettings": "FAQ settings",
@@ -3501,7 +3493,6 @@
       "linkUrlPlaceholder": "/catalog?category=Skincare or https://…",
       "links": "Social links",
       "linksTo": "Links to",
-      "liveCatalog": "Browse our products and check availability.",
       "loadPromotionsFailed": "Failed to load promotions",
       "loadingPortal": "Loading website...",
       "logoFit": "Logo fit",
@@ -3514,7 +3505,6 @@
       "lookup": "Check membership",
       "lowStock": "Low Stock",
       "lowStockThreshold": "Low stock threshold",
-      "mapCard": "Store map",
       "mapEmbed": "Google map embed URL",
       "mapEmbedHint": "Paste a Google Maps link or embed URL. The website will show it as an interactive map card.",
       "media": "Images",
@@ -3601,7 +3591,6 @@
       "promotionsEditorHint": "Add compact promo cards or store posts that appear before the product grid.",
       "promotionsIntro": "Promotions intro",
       "promotionsSectionFallback": "Featured offers",
-      "promotionsSectionHint": "Our latest offers and announcements.",
       "promotionsTitle": "Promotions title",
       "publicBadge": "Website",
       "publicNavigation": "Section navigation",
@@ -3696,8 +3685,8 @@
       "staffAppliedOnly": "Points are reviewed and applied by staff only. Customers cannot redeem them directly here.",
       "starterFaq": {
         "1": {
-          "answer": "Tell us your skin type, concerns, and what kind of routine you want. We can recommend suitable skincare, cosmetics, hair, or body products from our available stock.",
-          "question": "How do I choose products for my skin type?"
+          "answer": "Use the catalogue description and manufacturer label to compare products. For allergies, reactions, skin conditions, medicines, or pregnancy, ask a qualified health professional.",
+          "question": "How do I compare products for my skin type?"
         },
         "2": {
           "answer": "The products shown come from our current catalogue. Stock can change during busy periods, so contact the store for a final confirmation before visiting.",
@@ -3707,64 +3696,60 @@
           "answer": "Sign in and open your account. Your membership ID is shown there. Points are coming soon.",
           "question": "Where can I see my membership?"
         },
-        "4": {
-          "answer": "Share our store on social media, then upload your screenshot here. Our staff review every submission. Membership points are coming soon.",
-          "question": "How does Share & Reward work?"
-        },
         "5": {
-          "answer": "Use the social links on this page or call the store directly. Our team can help with product matching, stock checks, and more specific skincare or makeup questions.",
-          "question": "How can I contact Leang Cosmetics for more accurate advice?"
+          "answer": "Use the verified contact links on this page to ask about a product or request a current stock check.",
+          "question": "How can I contact the store?"
         },
         "6": {
-          "answer": "Yes. Ask our team or use the AI assistant with your skin type and concerns so we can narrow options that are gentler and easier to compare from current stock.",
-          "question": "Do you have products for sensitive skin?"
+          "answer": "Read the product label and ingredient list and ask a qualified health professional about allergies or reactions. The catalogue and AI assistant do not provide medical advice.",
+          "question": "How should I choose a product for sensitive skin?"
         },
         "7": {
-          "answer": "Yes. Contact the store directly if you want brand confirmation, latest packaging details, or a more exact stock check before buying.",
-          "question": "Can I ask whether a product is original or from a specific brand line?"
+          "answer": "Contact the store about the specific item and ask what packaging, batch, supplier, or sourcing information can be verified before buying.",
+          "question": "Can I ask about a product or brand line?"
         },
         "8": {
-          "answer": "Yes. Leang Cosmetics carries multiple beauty categories, so you can search the catalog or ask for recommendations across skincare, cosmetics, perfume, hair, and body products.",
-          "question": "Do you sell skincare, makeup, hair care, and body care together?"
+          "answer": "Use the category and brand filters to see what is currently listed. Contact the store if a product or category is not shown.",
+          "question": "What types of products are available?"
         },
         "9": {
-          "answer": "Yes. Share your budget, skin type, concerns, and whether you need morning, night, or event-based products. We can help match a more complete routine from available products.",
-          "question": "Can the store help me build a full routine?"
+          "answer": "You can contact the store with your budget and preferences. For skin conditions, allergies, reactions, medicines, or pregnancy, ask a qualified health professional.",
+          "question": "Can I ask about a routine?"
         },
         "10": {
           "answer": "If an item is unavailable, message the store through the contact links on this page so the team can suggest alternatives or confirm when stock changes.",
           "question": "What should I do if an item is out of stock?"
         },
         "11": {
-          "answer": "Yes. Tell us your budget and what category you want, and we can narrow options from the current catalog.",
-          "question": "Can I ask for products within a specific budget?"
+          "answer": "Use the prices shown in the current catalogue and contact the store to confirm a final price before purchase.",
+          "question": "Can I look for products within a specific budget?"
         },
         "12": {
-          "answer": "Yes. Ask the store team or use the assistant to explore perfumes, makeup, skincare, and beauty gifts that fit the occasion.",
-          "question": "Do you have gift-friendly items or bundles?"
+          "answer": "Check the current catalogue and promotions, then contact the store to confirm what is available.",
+          "question": "Are gifts or bundles available?"
         },
         "13": {
-          "answer": "Yes. We can suggest similar products from other brands in stock based on category, concern, and price range.",
-          "question": "Can I ask for alternatives if my preferred brand is unavailable?"
+          "answer": "Compare current products by category, description, price and stock status. The store can confirm current availability.",
+          "question": "Can I compare alternatives if a brand is unavailable?"
         },
         "14": {
-          "answer": "Yes. Use the assistant or contact the store with your skin type and concern so recommendations stay closer to your needs.",
-          "question": "Can I check whether a product is suitable for oily, dry, or combination skin?"
+          "answer": "Read the manufacturer label and ingredient list. The catalogue cannot determine medical suitability; ask a qualified health professional about allergies, reactions, or skin conditions.",
+          "question": "How do I check whether a product suits my skin type?"
         },
         "15": {
-          "answer": "Yes. The store carries more than just skincare and makeup, so you can also browse hair, body, perfume, and related beauty items when available.",
-          "question": "Do you also carry hair, body, and fragrance products?"
+          "answer": "Use the current category filters. They reflect the products listed in the catalogue.",
+          "question": "Where can I see the product categories?"
         },
         "16": {
           "answer": "Add your skin type, concerns, brand preferences, and what you want the product to do. The assistant uses that together with our current catalog to narrow better matches.",
           "question": "What details help the AI recommend better products?"
         },
         "17": {
-          "answer": "Yes. The assistant is designed to prioritize products from our current catalogue, then explain why those items fit your question.",
-          "question": "Does the AI only recommend products available at Leang Cosmetics?"
+          "answer": "The assistant receives a limited set of products from the current public catalogue. Stock can change, so confirm availability with the store.",
+          "question": "Which products can the AI recommend?"
         },
         "18": {
-          "answer": "No. AI answers are for reference only. For sensitive skin issues, allergies, pregnancy-safe guidance, or stronger treatment advice, please contact our team directly first.",
+          "answer": "No. AI answers are for general product comparison only. Ask a qualified health professional about sensitive skin, allergies, reactions, treatment, medicines, or pregnancy.",
           "question": "Should I trust the AI as medical or skin-treatment advice?"
         },
         "19": {
@@ -3780,7 +3765,7 @@
           "question": "Do you offer delivery, or is it pickup only?"
         },
         "22": {
-          "answer": "We accept cash and common mobile payment options in store. For delivery or online orders, contact us directly to confirm which payment method works best for your order.",
+          "answer": "Payment is not collected on this site. Contact the store to confirm the available payment method before ordering.",
           "question": "What payment methods do you accept?"
         },
         "23": {
@@ -3788,11 +3773,11 @@
           "question": "What are your store hours?"
         },
         "24": {
-          "answer": "We buy through official distributors and authorised suppliers and keep the sourcing records for what we sell, so we can check whether a specific item is authentic. If you have a concern about an item, contact the store directly and we will go through its sourcing with you.",
-          "question": "Are the products sold here authentic?"
+          "answer": "Contact the store about the specific item and ask what sourcing, batch, packaging, or supplier information can be verified. This catalogue does not make a blanket authenticity guarantee.",
+          "question": "How can I ask about a product's source or authenticity?"
         },
         "25": {
-          "answer": "Check the Promotions section on this page for current offers. New discounts and bundles are added there as they become available, so it is worth checking back regularly.",
+          "answer": "Check the Promotions section for offers currently published by the store, then confirm the final price and terms before purchase.",
           "question": "Where can I see current promotions and discounts?"
         },
         "26": {
@@ -4374,7 +4359,6 @@
   "portalSortPriceDescTip": "Price, high to low",
   "promotionsIntro": "Promotions intro",
   "promotionsSectionFallback": "Featured offers",
-  "promotionsSectionHint": "Our latest offers and announcements.",
   "promotionsTitle": "Promotions title",
   "provider_change_note": "To switch to another Google account, disconnect the current one first and then connect the new provider.",
   "provider_email_match_note": "Google stays linked to this local account once connected here. Disabled or deleted local users still cannot access the app.",
@@ -7177,15 +7161,8 @@
   "portal_a11y_skip_to_content": "Skip to products",
   "portal_a11y_zoom_in": "Zoom in",
   "portal_a11y_zoom_out": "Zoom out",
-  "portal_a11y_social_links": "Social links",
-  "portal_a11y_choose_account": "Choose account",
   "portal_a11y_announcement": "Announcement",
   "portal_a11y_announcement_dismiss": "Close announcement",
-  "portal_a11y_contact_messenger": "Chat on Messenger",
-  "portal_a11y_contact_telegram": "Chat on Telegram",
-  "portal_a11y_contact_instagram": "Message us on Instagram",
-  "portal_a11y_contact_whatsapp": "Chat on WhatsApp",
-  "portal_a11y_contact_phone": "Call us",
   "portal_a11y_map_title": "Map showing the shop's location",
   "portal_legal_policies": "Policies",
   "portal_legal_privacy_title": "Privacy Policy",
@@ -7206,22 +7183,23 @@
   "portal_legal_footer_landmark": "Site information and policies",
   "portal_legal_footer_contact": "Contact",
   "portal_legal_footer_quick_links": "Quick links",
-  "portal_legal_footer_follow": "Follow us",
   "portal_legal_footer_notices": "Open-source notices",
   "portal_legal_privacy_who_h": "Who we are",
-  "portal_legal_privacy_who_b": "This online catalogue is run by the shop in the verified business details above (\"we\", \"us\"), which is also where to reach us about your information.",
+  "portal_legal_privacy_who_b": "This online catalogue is run by the shop named in the verified business details above (\"we\", \"us\").",
   "portal_legal_privacy_collect_h": "What we keep",
   "portal_legal_privacy_collect_b": "You can browse the whole catalogue as a guest, with no account and no personal details.",
-  "portal_legal_privacy_collect_list": "If you create an account, we keep your name, phone number, membership ID, a one-way code made from your password (never the password itself), and which policy version you agreed to, when and in which language. If you save products while signed in, we keep that list. If you ask the assistant something, we keep the question and any preferences you share. If you send us pictures for review (when that option is on), we keep them with the platform, your note and your agreement. We do not keep billing information and never ask for it. Short-lived security records use one-way codes instead of raw IP addresses or phone numbers, and brief error reports go to Sentry.",
+  "portal_legal_privacy_collect_list": "If you create an account, we keep your name, phone number, membership ID, a one-way code made from your password, and which policy version you agreed to, when and in which language. If you save products while signed in, we keep that list. If you ask the assistant something, we keep the question and any preferences you share. If you send us pictures for review (when that option is on), we keep them with the platform, your note and your agreement. We do not keep billing information and never ask for it. Short-lived security records use one-way codes instead of raw IP addresses or phone numbers, and brief error reports go to Sentry.",
   "portal_legal_privacy_why_h": "Why we keep it",
   "portal_legal_privacy_why_b": "We keep your account details only so we know who is who and to keep your account safe. Security records only stop password guessing and misuse, and error reports only help us fix problems.",
   "portal_legal_privacy_basis_h": "Your agreement",
   "portal_legal_privacy_basis_b": "Creating an account is up to you, and we ask you to agree to this policy and the Terms & Conditions first. To change your mind, just ask us to close your account.",
   "portal_legal_privacy_retention_h": "How long we keep it",
-  "portal_legal_privacy_retention_b": "Security records are deleted after one day. A sign-in lasts up to 399 days and renews if used after its first 200 days; signing out ends it at once. Assistant questions are deleted after 30 days. Pictures sent for review are deleted 90 days after review, or after 180 days if never reviewed; a short note of the review stays. Your account stays until you ask us to close it, unless a record must be kept for an operational or legal reason. Sentry keeps error reports for its own set period.",
+  "portal_legal_privacy_retention_b": "Security records are deleted after one day. A sign-in lasts up to 399 days and renews if used after its first 200 days; signing out ends it at once. Assistant questions are deleted after 30 days. Pictures sent for review are deleted 90 days after review, or after 180 days if never reviewed; a short note of the review stays. Your account stays until you ask us to close it. Sentry keeps error reports for its own set period.",
   "portal_legal_privacy_sharing_h": "Who else sees it",
   "portal_legal_privacy_sharing_b": "This site has no advertising trackers, and we use your details only for what this policy describes.",
-  "portal_legal_privacy_sharing_list": "Cloudflare hosts the site, its data, images and security records. Error reports go to Sentry, and Cloudinary resizes some product photos. Assistant questions go to a third-party AI provider for the answer. Google receives the request if you choose to load the store map. Social media links open those apps, which follow their own policies.",
+  "portal_legal_privacy_sharing_list": "Cloudflare hosts the site, its data, images and security records. Error reports go to Sentry, and Cloudinary resizes some product photos. Google receives the request if you choose to load the store map. Social media links open those apps, which follow their own policies.",
+  "portal_legal_privacy_translate_h": "Translation",
+  "portal_legal_privacy_translate_b": "Simplified Chinese, Traditional Chinese, French and Spanish are produced by Google Translate in your browser when you pick one of them. The page text is then sent to Google. If you stay on Khmer or English, nothing is sent to Google.",
   "portal_legal_privacy_security_h": "How we protect it",
   "portal_legal_privacy_security_b": "Your password is stored only as a one-way code and needs at least ten characters. The sign-in cookie cannot be read by scripts, stays on this site and travels over HTTPS, and repeated wrong attempts are slowed down. Please use a password you do not use anywhere else.",
   "portal_legal_privacy_scam_h": "Watch out for scams",
@@ -7231,7 +7209,7 @@
   "portal_legal_privacy_children_h": "Children",
   "portal_legal_privacy_children_b": "Accounts are for people aged 16 or older who can agree to these policies themselves. If you think someone under 16 has given us information, please contact us and we will look into it.",
   "portal_legal_privacy_changes_h": "Changes",
-  "portal_legal_privacy_changes_b": "If we change this policy, we update the date at the top. We record which version you agreed to and when; just browsing the site never counts as agreeing.",
+  "portal_legal_privacy_changes_b": "If we change this policy, we update the date at the top. Just browsing the site never counts as agreeing.",
   "portal_legal_terms_catalogue_h": "This is a catalogue",
   "portal_legal_terms_catalogue_b": "This site shows what {name} has in stock so you can browse and plan your visit. It is an invitation to get in touch, not a binding offer or a sales contract.",
   "portal_legal_terms_prices_h": "Prices and stock",
@@ -7253,11 +7231,11 @@
   "portal_legal_cookies_what_h": "What this site stores",
   "portal_legal_cookies_what_b": "A cookie is a small file a site stores in your browser; local storage works the same way. This site uses only what it needs to work. There are no advertising or analytics cookies.",
   "portal_legal_cookies_consent_h": "Necessary and requested storage",
-  "portal_legal_cookies_consent_b": "The application uses storage needed for core functions, and creates optional third-party storage only after you request the related feature. The store map stays blocked until you choose to load it.",
+  "portal_legal_cookies_consent_b": "Optional third-party storage is created only after you request the related feature. The store map stays blocked until you choose to load it.",
   "portal_legal_cookies_table_h": "Exactly what is stored",
-  "portal_legal_cookies_table_b": "This table lists browser storage managed by the current storefront code. A third-party service you choose to load, such as the store map, adds its own storage under its own policy.",
+  "portal_legal_cookies_table_b": "This table lists the browser storage managed by the current storefront code. Third-party services you choose to load add their own; see Third parties.",
   "portal_legal_cookies_third_h": "Third parties",
-  "portal_legal_cookies_third_b": "Loading the store map loads Google Maps, a Google service that sets its own cookies once loaded. Opening a Facebook, Instagram, Telegram, WhatsApp or Messenger link hands you to that app under its own policy. The assistant sends your question to a third-party AI provider. None of these run before you choose them.",
+  "portal_legal_cookies_third_b": "Loading the store map loads Google Maps, a Google service that sets its own cookies once loaded. Picking Simplified Chinese, Traditional Chinese, French or Spanish loads Google Translate, which sets the googtrans cookie. Opening a Facebook, Instagram, Telegram, WhatsApp or Messenger link hands you to that app under its own policy. The assistant sends your question to a third-party AI provider. None of these run before you choose them.",
   "portal_legal_cookies_clear_h": "How to remove it",
   "portal_legal_cookies_clear_b": "Sign out to end the session cookie. Use the unload control beside the map to forget the saved map choice. Clear site data for this address in your browser settings to remove everything else; this removes your saved list, wishlist, language and theme on this device.",
   "portal_legal_col_name": "Name",
@@ -7275,13 +7253,7 @@
   "portal_legal_store_device_p": "Your light or dark theme choice on this device.",
   "portal_legal_store_assets_p": "Where product images are loaded from.",
   "portal_legal_store_until_cleared_l": "Until you clear site data",
-  "portal_legal_consent_label": "I am 16 or older, and I agree to the Terms & Conditions and the Privacy Policy.",
   "portal_legal_consent_required": "Please confirm you are 16 or older and agree to the Terms & Conditions and Privacy Policy to create an account.",
-  "portal_legal_consent_read_terms": "Read the Terms & Conditions",
-  "portal_legal_consent_read_privacy": "Read the Privacy Policy",
-  "portal_legal_map_consent_b": "The map is loaded from Google Maps, which sets its own cookies. Load it only if you want to.",
-  "portal_legal_map_consent_load": "Load the map",
-  "portal_legal_map_consent_link": "Open in Google Maps instead",
   "portal_legal_editor_block": "Legal & business details",
   "portal_legal_editor_hint": "Shown in the storefront footer and filled into the privacy, terms and cookie pages. Leave a field blank to hide that line.",
   "portal_legal_editor_legal_name": "Registered business name",
@@ -7290,6 +7262,12 @@
   "portal_legal_editor_registration_hint": "Ministry of Commerce or tax registration number, if you have one.",
   "portal_legal_store_map_consent_p": "Whether you chose to load the store map on this device.",
   "portal_legal_store_announcement_p": "Which shop announcement you closed on this device, so it does not come back until the shop changes it.",
+  "portal_legal_store_googtrans_p": "Set by Google Translate only after you pick Simplified Chinese, Traditional Chinese, French or Spanish. It remembers that choice.",
+  "portal_legal_store_googtrans_l": "Until you switch to Khmer or English, or clear site data",
+  "portal_legal_store_ai_consent_p": "Whether you agreed on this device to send questions to the assistant.",
+  "portal_legal_store_ai_consent_l": "Until you withdraw consent or clear site data",
+  "portal_legal_store_list_images_p": "Pictures for the products in your list, on this device.",
+  "portal_legal_store_page_size_p": "How many products you show per page.",
   "shift_report": "Shift Report",
   "shift_report_hint": "Registered opening and closing cash is report-only. Business results come from sales, costs, delivery, expenses, refunds and Not Paid.",
   "shift_no_current": "No current shift",

@@ -69,6 +69,7 @@ export const LEGAL_PAGE_SECTIONS: Record<LegalPageKey, readonly LegalSection[]> 
     { heading: 'portal_legal_privacy_basis_h', bodies: ['portal_legal_privacy_basis_b'] },
     { heading: 'portal_legal_privacy_retention_h', bodies: ['portal_legal_privacy_retention_b'] },
     { heading: 'portal_legal_privacy_sharing_h', bodies: ['portal_legal_privacy_sharing_b', 'portal_legal_privacy_sharing_list'] },
+    { heading: 'portal_legal_privacy_translate_h', bodies: ['portal_legal_privacy_translate_b'] },
     { heading: 'portal_legal_privacy_ai_h', bodies: ['portal_legal_privacy_ai_b'] },
     { heading: 'portal_legal_privacy_security_h', bodies: ['portal_legal_privacy_security_b'] },
     { heading: 'portal_legal_privacy_scam_h', bodies: ['portal_legal_privacy_scam_b'] },
@@ -118,6 +119,8 @@ export const LEGAL_STORAGE_ROWS: readonly LegalStorageRow[] = [
   // public-runtime/service-worker.ts -- app shell and same-origin static
   // assets. Cache names are versioned and old versions are pruned on update.
   { id: 'cache-storage', name: 'Business OS app-shell/static caches', kindKey: 'portal_legal_kind_cache', purposeKey: 'portal_legal_store_cache_storage_p', lifetimeKey: 'portal_legal_store_cache_storage_l' },
+  // Set by Google Translate itself, only after the visitor picks Simplified Chinese, Traditional Chinese, French or Spanish.
+  { id: 'googtrans', name: 'googtrans', kindKey: 'portal_legal_kind_cookie', purposeKey: 'portal_legal_store_googtrans_p', lifetimeKey: 'portal_legal_store_googtrans_l' },
   // AppContext device settings -- theme + language choice.
   { id: 'device', name: 'businessos_device_settings', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_device_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
   // catalogAssetUrls.ts -- image host override.
@@ -127,6 +130,12 @@ export const LEGAL_STORAGE_ROWS: readonly LegalStorageRow[] = [
   { id: 'map-consent', name: 'business-os-portal-map-consent-v1', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_map_consent_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
   // portalAnnouncement.ts -- written only when the visitor closes the announcement bar, so it stays closed until the shop changes the message.
   { id: 'announcement', name: 'business-os-portal-announcement-v1', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_announcement_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
+  // legal/aiProviderDisclosure.ts AI_CONSENT_STORAGE_KEY -- written when the visitor agrees to send questions to the assistant, removed when they withdraw.
+  { id: 'ai-consent', name: 'business-os-portal-ai-consent-v1', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_ai_consent_p', lifetimeKey: 'portal_legal_store_ai_consent_l' },
+  // portalListImages.ts -- the picture paths of products added to the list in this browser.
+  { id: 'list-images', name: 'business-os-portal-list-images-v1', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_list_images_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
+  // catalogPagination.tsx -- the page size the visitor picked.
+  { id: 'page-size', name: 'business-os-portal-page-size-v1', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_page_size_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
 ]
 
 const EN: Record<string, string> = {
@@ -153,24 +162,25 @@ const EN: Record<string, string> = {
   // P-public-9 footer column headings.
   portal_legal_footer_contact: 'Contact',
   portal_legal_footer_quick_links: 'Quick links',
-  portal_legal_footer_follow: 'Follow us',
   portal_legal_footer_notices: 'Open-source notices',
 
   // --- Privacy Policy ------------------------------------------------------
   portal_legal_privacy_who_h: 'Who we are',
-  portal_legal_privacy_who_b: 'This online catalogue is run by the shop in the verified business details above ("we", "us"), which is also where to reach us about your information.',
+  portal_legal_privacy_who_b: 'This online catalogue is run by the shop named in the verified business details above ("we", "us").',
   portal_legal_privacy_collect_h: 'What we keep',
   portal_legal_privacy_collect_b: 'You can browse the whole catalogue as a guest, with no account and no personal details.',
-  portal_legal_privacy_collect_list: 'If you create an account, we keep your name, phone number, membership ID, a one-way code made from your password (never the password itself), and which policy version you agreed to, when and in which language. If you save products while signed in, we keep that list. If you ask the assistant something, we keep the question and any preferences you share. If you send us pictures for review (when that option is on), we keep them with the platform, your note and your agreement. We do not keep billing information and never ask for it. Short-lived security records use one-way codes instead of raw IP addresses or phone numbers, and brief error reports go to Sentry.',
+  portal_legal_privacy_collect_list: 'If you create an account, we keep your name, phone number, membership ID, a one-way code made from your password, and which policy version you agreed to, when and in which language. If you save products while signed in, we keep that list. If you ask the assistant something, we keep the question and any preferences you share. If you send us pictures for review (when that option is on), we keep them with the platform, your note and your agreement. We do not keep billing information and never ask for it. Short-lived security records use one-way codes instead of raw IP addresses or phone numbers, and brief error reports go to Sentry.',
   portal_legal_privacy_why_h: 'Why we keep it',
   portal_legal_privacy_why_b: 'We keep your account details only so we know who is who and to keep your account safe. Security records only stop password guessing and misuse, and error reports only help us fix problems.',
   portal_legal_privacy_basis_h: 'Your agreement',
   portal_legal_privacy_basis_b: 'Creating an account is up to you, and we ask you to agree to this policy and the Terms & Conditions first. To change your mind, just ask us to close your account.',
   portal_legal_privacy_retention_h: 'How long we keep it',
-  portal_legal_privacy_retention_b: 'Security records are deleted after one day. A sign-in lasts up to 399 days and renews if used after its first 200 days; signing out ends it at once. Assistant questions are deleted after 30 days. Pictures sent for review are deleted 90 days after review, or after 180 days if never reviewed; a short note of the review stays. Your account stays until you ask us to close it, unless a record must be kept for an operational or legal reason. Sentry keeps error reports for its own set period.',
+  portal_legal_privacy_retention_b: 'Security records are deleted after one day. A sign-in lasts up to 399 days and renews if used after its first 200 days; signing out ends it at once. Assistant questions are deleted after 30 days. Pictures sent for review are deleted 90 days after review, or after 180 days if never reviewed; a short note of the review stays. Your account stays until you ask us to close it. Sentry keeps error reports for its own set period.',
   portal_legal_privacy_sharing_h: 'Who else sees it',
   portal_legal_privacy_sharing_b: 'This site has no advertising trackers, and we use your details only for what this policy describes.',
-  portal_legal_privacy_sharing_list: 'Cloudflare hosts the site, its data, images and security records. Error reports go to Sentry, and Cloudinary resizes some product photos. Assistant questions go to a third-party AI provider for the answer. Google receives the request if you choose to load the store map. Social media links open those apps, which follow their own policies.',
+  portal_legal_privacy_sharing_list: 'Cloudflare hosts the site, its data, images and security records. Error reports go to Sentry, and Cloudinary resizes some product photos. Google receives the request if you choose to load the store map. Social media links open those apps, which follow their own policies.',
+  portal_legal_privacy_translate_h: 'Translation',
+  portal_legal_privacy_translate_b: 'Simplified Chinese, Traditional Chinese, French and Spanish are produced by Google Translate in your browser when you pick one of them. The page text is then sent to Google. If you stay on Khmer or English, nothing is sent to Google.',
   portal_legal_privacy_ai_h: 'The assistant',
   portal_legal_privacy_ai_b: 'Assistant questions go to a third-party AI provider and are processed outside Cambodia. Our copy is deleted after 30 days.',
   portal_legal_privacy_ai_off: 'The assistant is off and no AI provider receives any data from this site.',
@@ -185,7 +195,7 @@ const EN: Record<string, string> = {
   portal_legal_privacy_children_h: 'Children',
   portal_legal_privacy_children_b: 'Accounts are for people aged 16 or older who can agree to these policies themselves. If you think someone under 16 has given us information, please contact us and we will look into it.',
   portal_legal_privacy_changes_h: 'Changes',
-  portal_legal_privacy_changes_b: 'If we change this policy, we update the date at the top. We record which version you agreed to and when; just browsing the site never counts as agreeing.',
+  portal_legal_privacy_changes_b: 'If we change this policy, we update the date at the top. Just browsing the site never counts as agreeing.',
 
   // --- Terms & Conditions --------------------------------------------------
   portal_legal_terms_catalogue_h: 'This is a catalogue',
@@ -213,11 +223,11 @@ const EN: Record<string, string> = {
   portal_legal_cookies_what_h: 'What this site stores',
   portal_legal_cookies_what_b: 'A cookie is a small file a site stores in your browser; local storage works the same way. This site uses only what it needs to work. There are no advertising or analytics cookies.',
   portal_legal_cookies_consent_h: 'Necessary and requested storage',
-  portal_legal_cookies_consent_b: 'The application uses storage needed for core functions, and creates optional third-party storage only after you request the related feature. The store map stays blocked until you choose to load it.',
+  portal_legal_cookies_consent_b: 'Optional third-party storage is created only after you request the related feature. The store map stays blocked until you choose to load it.',
   portal_legal_cookies_table_h: 'Exactly what is stored',
-  portal_legal_cookies_table_b: 'This table lists browser storage managed by the current storefront code. A third-party service you choose to load, such as the store map, adds its own storage under its own policy.',
+  portal_legal_cookies_table_b: 'This table lists the browser storage managed by the current storefront code. Third-party services you choose to load add their own; see Third parties.',
   portal_legal_cookies_third_h: 'Third parties',
-  portal_legal_cookies_third_b: 'Loading the store map loads Google Maps, a Google service that sets its own cookies once loaded. Opening a Facebook, Instagram, Telegram, WhatsApp or Messenger link hands you to that app under its own policy. The assistant sends your question to a third-party AI provider. None of these run before you choose them.',
+  portal_legal_cookies_third_b: 'Loading the store map loads Google Maps, a Google service that sets its own cookies once loaded. Picking Simplified Chinese, Traditional Chinese, French or Spanish loads Google Translate, which sets the googtrans cookie. Opening a Facebook, Instagram, Telegram, WhatsApp or Messenger link hands you to that app under its own policy. The assistant sends your question to a third-party AI provider. None of these run before you choose them.',
   portal_legal_cookies_clear_h: 'How to remove it',
   portal_legal_cookies_clear_b: 'Sign out to end the session cookie. Use the unload control beside the map to forget the saved map choice. Clear site data for this address in your browser settings to remove everything else; this removes your saved list, wishlist, language and theme on this device.',
 
@@ -241,21 +251,21 @@ const EN: Record<string, string> = {
   portal_legal_store_assets_p: 'Where product images are loaded from.',
   portal_legal_store_map_consent_p: 'Whether you chose to load the store map on this device.',
   portal_legal_store_announcement_p: 'Which shop announcement you closed on this device, so it does not come back until the shop changes it.',
+  portal_legal_store_googtrans_p: 'Set by Google Translate only after you pick Simplified Chinese, Traditional Chinese, French or Spanish. It remembers that choice.',
+  portal_legal_store_googtrans_l: 'Until you switch to Khmer or English, or clear site data',
+  portal_legal_store_ai_consent_p: 'Whether you agreed on this device to send questions to the assistant.',
+  portal_legal_store_ai_consent_l: 'Until you withdraw consent or clear site data',
+  portal_legal_store_list_images_p: 'Pictures for the products in your list, on this device.',
+  portal_legal_store_page_size_p: 'How many products you show per page.',
   portal_legal_store_until_cleared_l: 'Until you clear site data',
 
   // --- consent + embeds ----------------------------------------------------
-  portal_legal_consent_label: 'I am 16 or older, and I agree to the Terms & Conditions and the Privacy Policy.',
   portal_legal_consent_required: 'Please confirm you are 16 or older and agree to the Terms & Conditions and Privacy Policy to create an account.',
   portal_legal_consent_required_signin: 'Please confirm you are 16 or older and agree to the Terms & Conditions and Privacy Policy to sign in.',
-  portal_legal_consent_read_terms: 'Read the Terms & Conditions',
-  portal_legal_consent_read_privacy: 'Read the Privacy Policy',
   portal_legal_renew_title: 'Confirm to keep using your account',
   portal_legal_renew_body: 'Our terms now set a minimum age of 16. Please confirm to keep using your account.',
   portal_legal_renew_agree: 'Agree',
   portal_legal_renew_required: 'Please tick the box to continue.',
-  portal_legal_map_consent_b: 'The map is loaded from Google Maps, which sets its own cookies. Load it only if you want to.',
-  portal_legal_map_consent_load: 'Load the map',
-  portal_legal_map_consent_link: 'Open in Google Maps instead',
   portal_legal_map_consent_revoke: 'Unload map and forget this choice',
 
   // --- admin editor block --------------------------------------------------
@@ -289,23 +299,24 @@ const KM: Record<string, string> = {
   portal_legal_footer_landmark: 'ព័ត៌មាននិងគោលការណ៍របស់គេហទំព័រ',
   portal_legal_footer_contact: 'ទំនាក់ទំនង',
   portal_legal_footer_quick_links: 'តំណភ្ជាប់រហ័ស',
-  portal_legal_footer_follow: 'តាមដានយើង',
   portal_legal_footer_notices: 'សេចក្ដីជូនដំណឹងប្រភពបើកចំហ',
 
   portal_legal_privacy_who_h: 'យើងជានរណា',
-  portal_legal_privacy_who_b: 'កាតាឡុកអនឡាញនេះដំណើរការដោយហាងក្នុងព័ត៌មានអាជីវកម្មដែលបានផ្ទៀងផ្ទាត់ខាងលើ ("យើង") ដែលក៏ជាកន្លែងសម្រាប់ទាក់ទងយើងអំពីព័ត៌មានរបស់អ្នកផងដែរ។',
+  portal_legal_privacy_who_b: 'កាតាឡុកអនឡាញនេះដំណើរការដោយហាងដែលមានឈ្មោះក្នុងព័ត៌មានអាជីវកម្មដែលបានផ្ទៀងផ្ទាត់ខាងលើ ("យើង")។',
   portal_legal_privacy_collect_h: 'អ្វីដែលយើងរក្សាទុក',
   portal_legal_privacy_collect_b: 'អ្នកអាចមើលកាតាឡុកទាំងមូលជាភ្ញៀវ ដោយមិនចាំបាច់មានគណនី ឬផ្តល់ព័ត៌មានផ្ទាល់ខ្លួនអ្វីឡើយ។',
-  portal_legal_privacy_collect_list: 'បើអ្នកបង្កើតគណនី យើងរក្សាទុកឈ្មោះ លេខទូរស័ព្ទ លេខសមាជិក កូដមួយទិសដែលបង្កើតពីពាក្យសម្ងាត់របស់អ្នក (មិនមែនពាក្យសម្ងាត់ផ្ទាល់ទេ) និងកំណែគោលការណ៍ដែលអ្នកបានយល់ព្រម ពេលវេលា និងភាសា។ បើអ្នករក្សាទុកផលិតផលពេលចូលគណនី យើងរក្សាបញ្ជីនោះ។ បើអ្នកសួរជំនួយការ យើងរក្សាទុកសំណួរ និងចំណូលចិត្តដែលអ្នកចែករំលែក។ បើអ្នកផ្ញើរូបភាពមកឱ្យយើងពិនិត្យ (ពេលជម្រើសនេះបើក) យើងរក្សាទុករូបភាពទាំងនោះជាមួយវេទិកា កំណត់ចំណាំ និងការយល់ព្រមរបស់អ្នក។ យើងមិនរក្សាទុកព័ត៌មានទូទាត់ប្រាក់ ហើយក៏មិនដែលសុំវាដែរ។ កំណត់ត្រាសុវត្ថិភាពរយៈពេលខ្លីប្រើកូដមួយទិស ជំនួសឱ្យ IP ឬលេខទូរស័ព្ទដើម ហើយរបាយការណ៍កំហុសខ្លីៗផ្ញើទៅ Sentry។',
+  portal_legal_privacy_collect_list: 'បើអ្នកបង្កើតគណនី យើងរក្សាទុកឈ្មោះ លេខទូរស័ព្ទ លេខសមាជិក កូដមួយទិសដែលបង្កើតពីពាក្យសម្ងាត់របស់អ្នក និងកំណែគោលការណ៍ដែលអ្នកបានយល់ព្រម ពេលវេលា និងភាសា។ បើអ្នករក្សាទុកផលិតផលពេលចូលគណនី យើងរក្សាបញ្ជីនោះ។ បើអ្នកសួរជំនួយការ យើងរក្សាទុកសំណួរ និងចំណូលចិត្តដែលអ្នកចែករំលែក។ បើអ្នកផ្ញើរូបភាពមកឱ្យយើងពិនិត្យ (ពេលជម្រើសនេះបើក) យើងរក្សាទុករូបភាពទាំងនោះជាមួយវេទិកា កំណត់ចំណាំ និងការយល់ព្រមរបស់អ្នក។ យើងមិនរក្សាទុកព័ត៌មានទូទាត់ប្រាក់ ហើយក៏មិនដែលសុំវាដែរ។ កំណត់ត្រាសុវត្ថិភាពរយៈពេលខ្លីប្រើកូដមួយទិស ជំនួសឱ្យ IP ឬលេខទូរស័ព្ទដើម ហើយរបាយការណ៍កំហុសខ្លីៗផ្ញើទៅ Sentry។',
   portal_legal_privacy_why_h: 'ហេតុអ្វីយើងរក្សាទុក',
   portal_legal_privacy_why_b: 'យើងរក្សាព័ត៌មានគណនីរបស់អ្នក គ្រាន់តែដើម្បីដឹងថានរណាជានរណា និងរក្សាសុវត្ថិភាពគណនីរបស់អ្នកប៉ុណ្ណោះ។ កំណត់ត្រាសុវត្ថិភាពមានតែដើម្បីទប់ស្កាត់ការទាយពាក្យសម្ងាត់ និងការប្រើខុសគោលបំណង ហើយរបាយការណ៍កំហុសគ្រាន់តែជួយយើងជួសជុលបញ្ហា។',
   portal_legal_privacy_basis_h: 'ការយល់ព្រមរបស់អ្នក',
   portal_legal_privacy_basis_b: 'ការបង្កើតគណនីគឺអាស្រ័យលើអ្នក ហើយយើងសុំឱ្យអ្នកយល់ព្រមនឹងគោលការណ៍នេះ និងលក្ខខណ្ឌប្រើប្រាស់ជាមុនសិន។ បើប្តូរចិត្ត គ្រាន់តែស្នើឱ្យយើងបិទគណនីរបស់អ្នក។',
   portal_legal_privacy_retention_h: 'យើងរក្សាទុករយៈពេលប៉ុន្មាន',
-  portal_legal_privacy_retention_b: 'កំណត់ត្រាសុវត្ថិភាពត្រូវបានលុបក្រោយមួយថ្ងៃ។ ការចូលគណនីនៅបានរហូតដល់ ៣៩៩ ថ្ងៃ ហើយបន្តថ្មី បើប្រើក្រោយ ២០០ ថ្ងៃដំបូង; ការចាកចេញបញ្ចប់វាភ្លាមៗ។ សំណួរជំនួយការត្រូវបានលុបក្រោយ ៣០ ថ្ងៃ។ រូបភាពដែលផ្ញើមកឱ្យពិនិត្យត្រូវបានលុប ៩០ ថ្ងៃក្រោយការពិនិត្យ ឬក្រោយ ១៨០ ថ្ងៃ បើមិនបានពិនិត្យ; កំណត់ចំណាំខ្លីនៃការពិនិត្យនៅសល់។ គណនីរបស់អ្នកនៅរហូតដល់អ្នកស្នើឱ្យបិទ លើកលែងតែកំណត់ត្រាត្រូវរក្សាទុកសម្រាប់មូលហេតុប្រតិបត្តិការ ឬច្បាប់។ Sentry រក្សារបាយការណ៍កំហុសតាមរយៈពេលដែលខ្លួនកំណត់។',
+  portal_legal_privacy_retention_b: 'កំណត់ត្រាសុវត្ថិភាពត្រូវបានលុបក្រោយមួយថ្ងៃ។ ការចូលគណនីនៅបានរហូតដល់ ៣៩៩ ថ្ងៃ ហើយបន្តថ្មី បើប្រើក្រោយ ២០០ ថ្ងៃដំបូង; ការចាកចេញបញ្ចប់វាភ្លាមៗ។ សំណួរជំនួយការត្រូវបានលុបក្រោយ ៣០ ថ្ងៃ។ រូបភាពដែលផ្ញើមកឱ្យពិនិត្យត្រូវបានលុប ៩០ ថ្ងៃក្រោយការពិនិត្យ ឬក្រោយ ១៨០ ថ្ងៃ បើមិនបានពិនិត្យ; កំណត់ចំណាំខ្លីនៃការពិនិត្យនៅសល់។ គណនីរបស់អ្នកនៅរហូតដល់អ្នកស្នើឱ្យបិទ។ Sentry រក្សារបាយការណ៍កំហុសតាមរយៈពេលដែលខ្លួនកំណត់។',
   portal_legal_privacy_sharing_h: 'នរណាផ្សេងទៀតឃើញវា',
   portal_legal_privacy_sharing_b: 'គេហទំព័រនេះគ្មានឧបករណ៍តាមដានសម្រាប់ការផ្សាយពាណិជ្ជកម្មទេ ហើយយើងប្រើព័ត៌មានរបស់អ្នកសម្រាប់តែអ្វីដែលគោលការណ៍នេះពណ៌នាប៉ុណ្ណោះ។',
-  portal_legal_privacy_sharing_list: 'Cloudflare បង្ហោះគេហទំព័រ ទិន្នន័យ រូបភាព និងកំណត់ត្រាសុវត្ថិភាព។ របាយការណ៍កំហុសផ្ញើទៅ Sentry ហើយ Cloudinary កែទំហំរូបភាពផលិតផលខ្លះ។ សំណួរជំនួយការផ្ញើទៅអ្នកផ្តល់សេវា AI ភាគីទីបី ដើម្បីរៀបចំចម្លើយ។ Google ទទួលសំណើ បើអ្នកជ្រើសផ្ទុកផែនទីហាង។ តំណបណ្តាញសង្គមបើកកម្មវិធីទាំងនោះ ដែលអនុវត្តគោលការណ៍ផ្ទាល់ខ្លួន។',
+  portal_legal_privacy_sharing_list: 'Cloudflare បង្ហោះគេហទំព័រ ទិន្នន័យ រូបភាព និងកំណត់ត្រាសុវត្ថិភាព។ របាយការណ៍កំហុសផ្ញើទៅ Sentry ហើយ Cloudinary កែទំហំរូបភាពផលិតផលខ្លះ។ Google ទទួលសំណើ បើអ្នកជ្រើសផ្ទុកផែនទីហាង។ តំណបណ្តាញសង្គមបើកកម្មវិធីទាំងនោះ ដែលអនុវត្តគោលការណ៍ផ្ទាល់ខ្លួន។',
+  portal_legal_privacy_translate_h: 'ការបកប្រែ',
+  portal_legal_privacy_translate_b: 'ភាសាចិនសាមញ្ញ ចិនប្រពៃណី បារាំង និងអេស្ប៉ាញ ត្រូវបានបកប្រែដោយ Google Translate នៅក្នុងកម្មវិធីរុករករបស់អ្នក ពេលអ្នកជ្រើសរើសមួយក្នុងចំណោមនោះ។ បន្ទាប់មក អត្ថបទទំព័រត្រូវបានផ្ញើទៅ Google។ បើអ្នកនៅភាសាខ្មែរ ឬអង់គ្លេស គ្មានអ្វីត្រូវបានផ្ញើទៅ Google ទេ។',
   portal_legal_privacy_ai_h: 'ជំនួយការ',
   portal_legal_privacy_ai_b: 'សំណួរជំនួយការត្រូវផ្ញើទៅអ្នកផ្តល់សេវា AI ភាគីទីបី ហើយដំណើរការក្រៅប្រទេសកម្ពុជា។ ច្បាប់ចម្លងរបស់យើងត្រូវលុបបន្ទាប់ពី ៣០ ថ្ងៃ។',
   portal_legal_privacy_ai_off: 'ជំនួយការត្រូវបានបិទ ហើយគ្មានអ្នកផ្តល់សេវា AI ណាទទួលទិន្នន័យពីគេហទំព័រនេះទេ។',
@@ -320,7 +331,7 @@ const KM: Record<string, string> = {
   portal_legal_privacy_children_h: 'កុមារ',
   portal_legal_privacy_children_b: 'គណនីមានសម្រាប់អ្នកដែលមានអាយុ ១៦ ឆ្នាំឡើងទៅ ហើយអាចយល់ព្រមនឹងគោលការណ៍ទាំងនេះដោយខ្លួនឯង។ បើអ្នកគិតថាអ្នកដែលមានអាយុក្រោម ១៦ ឆ្នាំបានផ្តល់ព័ត៌មានមកយើង សូមទាក់ទងយើង ហើយយើងនឹងពិនិត្យមើល។',
   portal_legal_privacy_changes_h: 'ការផ្លាស់ប្តូរ',
-  portal_legal_privacy_changes_b: 'បើយើងផ្លាស់ប្តូរគោលការណ៍នេះ យើងនឹងធ្វើបច្ចុប្បន្នភាពកាលបរិច្ឆេទខាងលើ។ យើងកត់ត្រាកំណែដែលអ្នកបានយល់ព្រម និងពេលវេលា។ ការគ្រាន់តែមើលគេហទំព័រ មិនត្រូវបានចាត់ទុកជាការយល់ព្រមទេ។',
+  portal_legal_privacy_changes_b: 'បើយើងផ្លាស់ប្តូរគោលការណ៍នេះ យើងនឹងធ្វើបច្ចុប្បន្នភាពកាលបរិច្ឆេទខាងលើ។ ការគ្រាន់តែមើលគេហទំព័រ មិនត្រូវបានចាត់ទុកជាការយល់ព្រមទេ។',
 
   portal_legal_terms_catalogue_h: 'នេះជាកាតាឡុក',
   portal_legal_terms_catalogue_b: 'គេហទំព័រនេះបង្ហាញអ្វីដែល {name} មានស្តុក ដើម្បីឱ្យអ្នករុករក និងរៀបចំការមកហាង។ វាជាការអញ្ជើញឱ្យទាក់ទងមកយើង មិនមែនជាការផ្តល់ជូនដែលចងកាតព្វកិច្ច ឬកិច្ចសន្យាលក់ទេ។',
@@ -346,11 +357,11 @@ const KM: Record<string, string> = {
   portal_legal_cookies_what_h: 'អ្វីដែលគេហទំព័រនេះរក្សាទុក',
   portal_legal_cookies_what_b: 'ខូឃីជាឯកសារតូចមួយដែលគេហទំព័ររក្សាទុកក្នុងកម្មវិធីរុករករបស់អ្នក។ ការផ្ទុកមូលដ្ឋានដំណើរការស្រដៀងគ្នា។ គេហទំព័រនេះប្រើតែអ្វីដែលចាំបាច់។ គ្មានខូឃីផ្សាយពាណិជ្ជកម្ម ឬវិភាគទេ។',
   portal_legal_cookies_consent_h: 'ការផ្ទុកចាំបាច់ និងតាមសំណើ',
-  portal_legal_cookies_consent_b: 'កម្មវិធីប្រើការផ្ទុកដែលត្រូវការសម្រាប់មុខងារស្នូល ហើយបង្កើតការផ្ទុកភាគីទីបីស្រេចចិត្តតែបន្ទាប់ពីអ្នកស្នើមុខងារនោះ។ ផែនទីហាងត្រូវបានរារាំងរហូតដល់អ្នកជ្រើសផ្ទុក។',
+  portal_legal_cookies_consent_b: 'ការផ្ទុកភាគីទីបីស្រេចចិត្តត្រូវបានបង្កើតតែបន្ទាប់ពីអ្នកស្នើមុខងារនោះ។ ផែនទីហាងត្រូវបានរារាំងរហូតដល់អ្នកជ្រើសផ្ទុក។',
   portal_legal_cookies_table_h: 'អ្វីដែលរក្សាទុកពិតប្រាកដ',
-  portal_legal_cookies_table_b: 'តារាងនេះរាយការផ្ទុកក្នុងកម្មវិធីរុករក ដែលកូដទំព័រហាងបច្ចុប្បន្នគ្រប់គ្រង។ សេវាភាគីទីបីដែលអ្នកជ្រើសផ្ទុក ដូចជាផែនទីហាង បន្ថែមការផ្ទុកផ្ទាល់ខ្លួនតាមគោលការណ៍របស់វា។',
+  portal_legal_cookies_table_b: 'តារាងនេះរាយការផ្ទុកក្នុងកម្មវិធីរុករក ដែលកូដទំព័រហាងបច្ចុប្បន្នគ្រប់គ្រង។ សេវាភាគីទីបីដែលអ្នកជ្រើសផ្ទុកបន្ថែមការផ្ទុកផ្ទាល់ខ្លួន សូមមើល «ភាគីទីបី»។',
   portal_legal_cookies_third_h: 'ភាគីទីបី',
-  portal_legal_cookies_third_b: 'ការផ្ទុកផែនទីហាងផ្ទុក Google Maps ដែលជាសេវា Google ហើយកំណត់ខូឃីផ្ទាល់ខ្លួនបន្ទាប់ពីផ្ទុក។ ការបើកតំណ Facebook, Instagram, Telegram, WhatsApp ឬ Messenger នាំអ្នកទៅកម្មវិធីនោះក្រោមគោលការណ៍ផ្ទាល់របស់វា។ ជំនួយការផ្ញើសំណួររបស់អ្នកទៅអ្នកផ្តល់សេវា AI ភាគីទីបី។ គ្មានមួយណាដំណើរការមុនអ្នកជ្រើសរើសទេ។',
+  portal_legal_cookies_third_b: 'ការផ្ទុកផែនទីហាងផ្ទុក Google Maps ដែលជាសេវា Google ហើយកំណត់ខូឃីផ្ទាល់ខ្លួនបន្ទាប់ពីផ្ទុក។ ការជ្រើសភាសាចិនសាមញ្ញ ចិនប្រពៃណី បារាំង ឬអេស្ប៉ាញ ផ្ទុក Google Translate ដែលកំណត់ខូឃី googtrans។ ការបើកតំណ Facebook, Instagram, Telegram, WhatsApp ឬ Messenger នាំអ្នកទៅកម្មវិធីនោះក្រោមគោលការណ៍ផ្ទាល់របស់វា។ ជំនួយការផ្ញើសំណួររបស់អ្នកទៅអ្នកផ្តល់សេវា AI ភាគីទីបី។ គ្មានមួយណាដំណើរការមុនអ្នកជ្រើសរើសទេ។',
   portal_legal_cookies_clear_h: 'របៀបលុបវា',
   portal_legal_cookies_clear_b: 'ចាកចេញពីគណនីដើម្បីបញ្ចប់ខូឃីវគ្គ។ ប្រើប៊ូតុងបិទនៅក្បែរផែនទី ដើម្បីលុបជម្រើសផែនទីដែលបានរក្សាទុក។ សម្អាតទិន្នន័យគេហទំព័រនេះក្នុងការកំណត់កម្មវិធីរុករក ដើម្បីលុបអ្វីៗផ្សេងទៀត រួមទាំងបញ្ជី បញ្ជីចង់បាន ភាសា និងរូបរាងរបស់អ្នកលើឧបករណ៍នេះ។',
 
@@ -373,20 +384,20 @@ const KM: Record<string, string> = {
   portal_legal_store_assets_p: 'កន្លែងដែលរូបភាពផលិតផលត្រូវផ្ទុកមក។',
   portal_legal_store_map_consent_p: 'ថាតើអ្នកបានជ្រើសរើសផ្ទុកផែនទីហាងលើឧបករណ៍នេះឬអត់។',
   portal_legal_store_announcement_p: 'សេចក្តីជូនដំណឹងរបស់ហាងដែលអ្នកបានបិទលើឧបករណ៍នេះ ដើម្បីកុំឲ្យវាត្រឡប់មកវិញ រហូតដល់ហាងផ្លាស់ប្តូរ។',
+  portal_legal_store_googtrans_p: 'កំណត់ដោយ Google Translate តែបន្ទាប់ពីអ្នកជ្រើសភាសាចិនសាមញ្ញ ចិនប្រពៃណី បារាំង ឬអេស្ប៉ាញ។ វាចងចាំជម្រើសនោះ។',
+  portal_legal_store_googtrans_l: 'រហូតដល់អ្នកប្តូរទៅភាសាខ្មែរ ឬអង់គ្លេស ឬសម្អាតទិន្នន័យគេហទំព័រ',
+  portal_legal_store_ai_consent_p: 'ថាតើអ្នកបានយល់ព្រមលើឧបករណ៍នេះឱ្យផ្ញើសំណួរទៅជំនួយការឬអត់។',
+  portal_legal_store_ai_consent_l: 'រហូតដល់អ្នកដកការយល់ព្រម ឬសម្អាតទិន្នន័យគេហទំព័រ',
+  portal_legal_store_list_images_p: 'រូបភាពសម្រាប់ផលិតផលក្នុងបញ្ជីរបស់អ្នក លើឧបករណ៍នេះ។',
+  portal_legal_store_page_size_p: 'ចំនួនផលិតផលដែលអ្នកបង្ហាញក្នុងមួយទំព័រ។',
   portal_legal_store_until_cleared_l: 'រហូតដល់អ្នកសម្អាតទិន្នន័យគេហទំព័រ',
 
-  portal_legal_consent_label: 'ខ្ញុំមានអាយុ ១៦ ឆ្នាំឡើងទៅ ហើយខ្ញុំយល់ព្រមនឹងលក្ខខណ្ឌប្រើប្រាស់ និងគោលការណ៍ឯកជនភាព។',
   portal_legal_consent_required: 'សូមបញ្ជាក់ថាអ្នកមានអាយុ ១៦ ឆ្នាំឡើងទៅ ហើយយល់ព្រមនឹងលក្ខខណ្ឌប្រើប្រាស់ និងគោលការណ៍ឯកជនភាព ដើម្បីបង្កើតគណនី។',
   portal_legal_consent_required_signin: 'សូមបញ្ជាក់ថាអ្នកមានអាយុ ១៦ ឆ្នាំឡើងទៅ ហើយយល់ព្រមនឹងលក្ខខណ្ឌប្រើប្រាស់ និងគោលការណ៍ឯកជនភាព ដើម្បីចូលគណនី។',
-  portal_legal_consent_read_terms: 'អានលក្ខខណ្ឌប្រើប្រាស់',
-  portal_legal_consent_read_privacy: 'អានគោលការណ៍ឯកជនភាព',
   portal_legal_renew_title: 'បញ្ជាក់ដើម្បីបន្តប្រើគណនីរបស់អ្នក',
   portal_legal_renew_body: 'លក្ខខណ្ឌរបស់យើងកំណត់អាយុអប្បបរមា ១៦ ឆ្នាំ។ សូមបញ្ជាក់ដើម្បីបន្តប្រើគណនីរបស់អ្នក។',
   portal_legal_renew_agree: 'យល់ព្រម',
   portal_legal_renew_required: 'សូមធីកប្រអប់ដើម្បីបន្ត។',
-  portal_legal_map_consent_b: 'ផែនទីផ្ទុកពី Google Maps ដែលកំណត់ខូឃីផ្ទាល់ខ្លួន។ សូមផ្ទុកតែបើអ្នកចង់។',
-  portal_legal_map_consent_load: 'ផ្ទុកផែនទី',
-  portal_legal_map_consent_link: 'បើកក្នុង Google Maps ជំនួសវិញ',
   portal_legal_map_consent_revoke: 'បិទផែនទី និងលុបជម្រើសនេះពីឧបករណ៍',
 
   portal_legal_editor_block: 'ព័ត៌មានច្បាប់និងអាជីវកម្ម',

@@ -78,7 +78,7 @@ runTest('without an e-mail the concerns line points to the Telegram link, then t
   assert.match(viaPhone, /contact us on <a [^>]*href="tel:012345678"[^>]*>012 345 678<\/a>\./)
 
   const phoneNotDialable = footer({ phone: 'ask at the till', socialLinks: [] })
-  assert.match(phoneNotDialable, /contact us on ask at the till\./, 'a phone value that cannot make a tel: link is still printed')
+  assert.match(phoneNotDialable, /contact us on <span class="notranslate" translate="no">ask at the till<\/span>\./, 'a phone value that cannot make a tel: link is still printed')
 })
 
 runTest('the Khmer storefront gets the Khmer sentence', () => {

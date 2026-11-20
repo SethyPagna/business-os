@@ -96,7 +96,7 @@ for (const language of ['en', 'km'] as const) {
     assert.ok(text.includes('Lip Balm'))
     assert.ok(!text.includes(PAYMENT[language]), 'the payment line belongs to List only')
     assert.ok(html.includes(`aria-label="${copy('addToList', 'Add', 'បន្ថែម')}"`), 'add-to-list')
-    assert.ok(html.includes(`aria-label="${copy('removeFromWishlist', 'Remove', 'លុបចេញ')}"`), 'remove')
+    assert.ok(html.includes(`aria-label="${copy('removeSavedItem', 'Remove', 'លុបចេញ')}"`), 'remove')
     assert.doesNotMatch(html, /data-portal-list-contact/, 'Contact lives on the List segment')
   })
 

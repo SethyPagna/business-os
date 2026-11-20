@@ -309,7 +309,7 @@ function AboutFactRow({ item, copy, address }: { item: BusinessFact; copy: CopyF
     : derivePhoneCallLink(item.value || '') || item.href
   const actionLabel = address
     ? copy('openInGoogleMaps', 'Open in Google Maps', 'បើកក្នុង Google Maps')
-    : copy('callUs', 'Call', 'ហៅទូរសព្ទ')
+    : copy('callUs', 'Call', 'ហៅទូរស័ព្ទ')
   return (
     <div className="flex min-h-12 items-center gap-3">
       <Icon aria-hidden="true" className={`h-4 w-4 shrink-0 ${BRASS_TEXT}`} />
@@ -718,7 +718,7 @@ function AssistantStockBadge({ status, copy }: { status?: string; copy: CopyFn }
     ? [copy('outOfStock', 'Out of Stock', 'អស់ស្តុក'), 'text-rose-700 dark:text-rose-300']
     : status === 'low_stock'
       ? [copy('lowStock', 'Low Stock', 'ស្តុកតិច'), 'text-amber-800 dark:text-amber-300']
-      : [copy('inStock', 'In Stock', 'មានក្នុងស្តុក'), 'text-emerald-700 dark:text-emerald-300']
+      : [copy('inStock', 'In Stock', 'មានស្តុក'), 'text-emerald-700 dark:text-emerald-300']
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full border border-stone-300 bg-white px-2.5 py-0.5 text-xs font-semibold leading-5 dark:border-neutral-700 dark:bg-neutral-900 ${tone}`}>
       <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />
@@ -982,8 +982,8 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                 />
               </div>
               <div>
-                <label htmlFor="portal-assistant-goal" className={labelClass}>{copy('assistantGoal', 'Goal / use case', 'គោលបំណងប្រើប្រាស់')}</label>
-                <input id="portal-assistant-goal" name="portal_assistant_goal" autoComplete="off" className={`mt-1 h-10 w-full rounded-xl px-3 text-sm ${FIELD}`} maxLength={180} value={assistantProfile.goal} onChange={(event) => setAssistantProfile((current) => ({ ...current, goal: event.target.value }))} placeholder={copy('assistantGoalPlaceholder', 'Daily use, brightening, long wear...', 'ប្រើរាល់ថ្ងៃ បំប៉នឲ្យភ្លឺ ឬជាប់បានយូរ...')} />
+                <label htmlFor="portal-assistant-goal" className={labelClass}>{copy('assistantGoal', 'Goal / use case', 'គោលដៅ / ការប្រើប្រាស់')}</label>
+                <input id="portal-assistant-goal" name="portal_assistant_goal" autoComplete="off" className={`mt-1 h-10 w-full rounded-xl px-3 text-sm ${FIELD}`} maxLength={180} value={assistantProfile.goal} onChange={(event) => setAssistantProfile((current) => ({ ...current, goal: event.target.value }))} placeholder={copy('assistantGoalPlaceholder', 'Daily use, brightening, long wear...', 'ប្រើរាល់ថ្ងៃ ធ្វើឲ្យស្បែកភ្លឺ ឬជាប់បានយូរ...')} />
               </div>
               <div>
                 <label htmlFor="portal-assistant-concerns" className={labelClass}>{copy('assistantConcerns', 'Skin concerns', 'បញ្ហាស្បែក')}</label>

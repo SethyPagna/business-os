@@ -440,7 +440,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
                 className="flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold leading-6 text-white transition hover:bg-slate-700 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200"
               >
                 <Plus className="h-4 w-4" />
-                {copy('addToBucket', 'Add')}
+                {copy('addToBucketShort', 'Add')}
                 {bucketQty > 0 ? (
                   <span data-product-detail-bucket-qty="true" className="ml-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full bg-white px-1 text-[10px] font-bold leading-4 text-slate-900 dark:bg-neutral-900 dark:text-white">
                     {bucketQty}

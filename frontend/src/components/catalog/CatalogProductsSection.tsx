@@ -1228,7 +1228,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                           title={added ? replaceVars(copy('addToBucketQty', 'Add another ({qty} added)'), { qty }) : copy('addToBucket', 'Add to list')}
                         >
                           <Plus className="h-3.5 w-3.5 shrink-0" />
-                          <span className="hidden sm:inline">{copy('addToBucket', 'Add')}</span>
+                          <span className="hidden sm:inline">{copy('addToBucketShort', 'Add')}</span>
                           {added ? (
                             <span className="ml-0.5 inline-flex min-w-[1.1rem] items-center justify-center rounded-full bg-white px-1 text-[10px] font-bold leading-4 text-[#7a5c22] dark:bg-[#23201b] dark:text-[#d6b56b]">
                               {qty}
