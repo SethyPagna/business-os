@@ -125,7 +125,7 @@ export const LEGAL_STORAGE_ROWS: readonly LegalStorageRow[] = [
   // public-runtime/service-worker.ts -- app shell and same-origin static
   // assets. Cache names are versioned and old versions are pruned on update.
   { id: 'cache-storage', name: 'Business OS app-shell/static caches', kindKey: 'portal_legal_kind_cache', purposeKey: 'portal_legal_store_cache_storage_p', lifetimeKey: 'portal_legal_store_cache_storage_l' },
-  // Written by this site (the translate controller) when the visitor picks one of the four; Google's script uses it. Cleared on Khmer, English or a pause.
+  // Set by this site (the translate controller) and by Google's script when the visitor picks one of the four. This site clears it on Khmer, English or a pause.
   { id: 'googtrans', name: 'googtrans', kindKey: 'portal_legal_kind_cookie', purposeKey: 'portal_legal_store_googtrans_p', lifetimeKey: 'portal_legal_store_googtrans_l' },
   // portalLanguageOptions.ts -- a one-shot flag written only when the account panel is open as translation is switched off; deleted when read.
   { id: 'reopen-account', name: 'business-os:portal-reopen-account', kindKey: 'portal_legal_kind_session', purposeKey: 'portal_legal_store_reopen_p', lifetimeKey: 'portal_legal_store_reopen_l' },
@@ -235,7 +235,7 @@ const EN: Record<string, string> = {
   portal_legal_cookies_table_h: 'Exactly what is stored',
   portal_legal_cookies_table_b: 'This table lists the browser storage managed by the current storefront code. Third-party services you choose to load add their own; see Third parties.',
   portal_legal_cookies_third_h: 'Third parties',
-  portal_legal_cookies_third_b: 'Loading the store map loads Google Maps, a Google service that sets its own cookies once loaded. Picking Simplified Chinese, Traditional Chinese, French or Spanish loads Google Translate. This site writes the googtrans cookie to remember that choice and clears it when you go back to Khmer or English or when translation is paused; Google\'s translation script may also write it, and uses it. Opening a Facebook, Instagram, Telegram, WhatsApp or Messenger link hands you to that app under its own policy. The assistant sends your question to a third-party AI provider. None of these run before you choose them.',
+  portal_legal_cookies_third_b: 'Loading the store map loads Google Maps, a Google service that sets its own cookies once loaded. Picking Simplified Chinese, Traditional Chinese, French or Spanish loads Google Translate. This site and Google\'s translation script set the googtrans cookie to remember that choice; this site clears it when you go back to Khmer or English or when translation is paused. Opening a Facebook, Instagram, Telegram, WhatsApp or Messenger link hands you to that app under its own policy. The assistant sends your question to a third-party AI provider. None of these run before you choose them.',
   portal_legal_cookies_clear_h: 'How to remove it',
   portal_legal_cookies_clear_b: 'Sign out to end the session cookie. Use the unload control beside the map to forget the saved map choice. Clear site data for this address in your browser settings to remove everything else; this removes your saved list, wishlist, language and theme on this device.',
 
@@ -260,7 +260,7 @@ const EN: Record<string, string> = {
   portal_legal_store_assets_p: 'Where product images are loaded from.',
   portal_legal_store_map_consent_p: 'Whether you chose to load the store map on this device.',
   portal_legal_store_announcement_p: 'Which shop announcement you closed on this device, so it does not come back until the shop changes it.',
-  portal_legal_store_googtrans_p: 'Written by this site when you pick Simplified Chinese, Traditional Chinese, French or Spanish, to remember that choice. Google\'s translation script may also write it, and uses it. This site clears it when you go back to Khmer or English, or when translation is paused.',
+  portal_legal_store_googtrans_p: 'Set by this site and by Google\'s translation script when you pick Simplified Chinese, Traditional Chinese, French or Spanish, to remember that choice. This site clears it when you go back to Khmer or English, or when translation is paused.',
   portal_legal_store_googtrans_l: 'Until you switch to Khmer or English, translation is paused, or you clear site data',
   portal_legal_store_ai_consent_p: 'Whether you agreed on this device to send questions to the assistant.',
   portal_legal_store_ai_consent_l: 'Until you withdraw consent or clear site data',
@@ -374,7 +374,7 @@ const KM: Record<string, string> = {
   portal_legal_cookies_table_h: 'អ្វីដែលរក្សាទុកពិតប្រាកដ',
   portal_legal_cookies_table_b: 'តារាងនេះរាយការផ្ទុកក្នុងកម្មវិធីរុករក ដែលកូដទំព័រហាងបច្ចុប្បន្នគ្រប់គ្រង។ សេវាភាគីទីបីដែលអ្នកជ្រើសផ្ទុកបន្ថែមការផ្ទុកផ្ទាល់ខ្លួន សូមមើល «ភាគីទីបី»។',
   portal_legal_cookies_third_h: 'ភាគីទីបី',
-  portal_legal_cookies_third_b: 'ការផ្ទុកផែនទីហាងផ្ទុក Google Maps ដែលជាសេវា Google ហើយកំណត់ខូឃីផ្ទាល់ខ្លួនបន្ទាប់ពីផ្ទុក។ ការជ្រើសភាសាចិនសាមញ្ញ ចិនប្រពៃណី បារាំង ឬអេស្ប៉ាញ ផ្ទុក Google Translate។ គេហទំព័រនេះសរសេរខូឃី googtrans ដើម្បីចងចាំជម្រើសនោះ ហើយលុបវាពេលអ្នកត្រឡប់ទៅភាសាខ្មែរ ឬអង់គ្លេស ឬពេលការបកប្រែផ្អាក។ ស្គ្រីបបកប្រែរបស់ Google ក៏អាចសរសេរវាដែរ ហើយប្រើវា។ ការបើកតំណ Facebook, Instagram, Telegram, WhatsApp ឬ Messenger នាំអ្នកទៅកម្មវិធីនោះក្រោមគោលការណ៍ផ្ទាល់របស់វា។ ជំនួយការផ្ញើសំណួររបស់អ្នកទៅអ្នកផ្តល់សេវា AI ភាគីទីបី។ គ្មានមួយណាដំណើរការមុនអ្នកជ្រើសរើសទេ។',
+  portal_legal_cookies_third_b: 'ការផ្ទុកផែនទីហាងផ្ទុក Google Maps ដែលជាសេវា Google ហើយកំណត់ខូឃីផ្ទាល់ខ្លួនបន្ទាប់ពីផ្ទុក។ ការជ្រើសភាសាចិនសាមញ្ញ ចិនប្រពៃណី បារាំង ឬអេស្ប៉ាញ ផ្ទុក Google Translate។ គេហទំព័រនេះ និងស្គ្រីបបកប្រែរបស់ Google កំណត់ខូឃី googtrans ដើម្បីចងចាំជម្រើសនោះ ហើយគេហទំព័រនេះលុបវាពេលអ្នកត្រឡប់ទៅភាសាខ្មែរ ឬអង់គ្លេស ឬពេលការបកប្រែផ្អាក។ ការបើកតំណ Facebook, Instagram, Telegram, WhatsApp ឬ Messenger នាំអ្នកទៅកម្មវិធីនោះក្រោមគោលការណ៍ផ្ទាល់របស់វា។ ជំនួយការផ្ញើសំណួររបស់អ្នកទៅអ្នកផ្តល់សេវា AI ភាគីទីបី។ គ្មានមួយណាដំណើរការមុនអ្នកជ្រើសរើសទេ។',
   portal_legal_cookies_clear_h: 'របៀបលុបវា',
   portal_legal_cookies_clear_b: 'ចាកចេញពីគណនីដើម្បីបញ្ចប់ខូឃីវគ្គ។ ប្រើប៊ូតុងបិទនៅក្បែរផែនទី ដើម្បីលុបជម្រើសផែនទីដែលបានរក្សាទុក។ សម្អាតទិន្នន័យគេហទំព័រនេះក្នុងការកំណត់កម្មវិធីរុករក ដើម្បីលុបអ្វីៗផ្សេងទៀត រួមទាំងបញ្ជី បញ្ជីចង់បាន ភាសា និងរូបរាងរបស់អ្នកលើឧបករណ៍នេះ។',
 
@@ -398,7 +398,7 @@ const KM: Record<string, string> = {
   portal_legal_store_assets_p: 'កន្លែងដែលរូបភាពផលិតផលត្រូវផ្ទុកមក។',
   portal_legal_store_map_consent_p: 'ថាតើអ្នកបានជ្រើសរើសផ្ទុកផែនទីហាងលើឧបករណ៍នេះឬអត់។',
   portal_legal_store_announcement_p: 'សេចក្តីជូនដំណឹងរបស់ហាងដែលអ្នកបានបិទលើឧបករណ៍នេះ ដើម្បីកុំឲ្យវាត្រឡប់មកវិញ រហូតដល់ហាងផ្លាស់ប្តូរ។',
-  portal_legal_store_googtrans_p: 'គេហទំព័រនេះសរសេរវា ពេលអ្នកជ្រើសភាសាចិនសាមញ្ញ ចិនប្រពៃណី បារាំង ឬអេស្ប៉ាញ ដើម្បីចងចាំជម្រើសនោះ។ ស្គ្រីបបកប្រែរបស់ Google ក៏អាចសរសេរវាដែរ ហើយប្រើវា។ គេហទំព័រនេះលុបវា ពេលអ្នកត្រឡប់ទៅភាសាខ្មែរ ឬអង់គ្លេស ឬពេលការបកប្រែផ្អាក។',
+  portal_legal_store_googtrans_p: 'គេហទំព័រនេះ និងស្គ្រីបបកប្រែរបស់ Google កំណត់វា ពេលអ្នកជ្រើសភាសាចិនសាមញ្ញ ចិនប្រពៃណី បារាំង ឬអេស្ប៉ាញ ដើម្បីចងចាំជម្រើសនោះ។ គេហទំព័រនេះលុបវា ពេលអ្នកត្រឡប់ទៅភាសាខ្មែរ ឬអង់គ្លេស ឬពេលការបកប្រែផ្អាក។',
   portal_legal_store_googtrans_l: 'រហូតដល់អ្នកប្តូរទៅភាសាខ្មែរ ឬអង់គ្លេស ការបកប្រែផ្អាក ឬអ្នកសម្អាតទិន្នន័យគេហទំព័រ',
   portal_legal_store_ai_consent_p: 'ថាតើអ្នកបានយល់ព្រមលើឧបករណ៍នេះឱ្យផ្ញើសំណួរទៅជំនួយការឬអត់។',
   portal_legal_store_ai_consent_l: 'រហូតដល់អ្នកដកការយល់ព្រម ឬសម្អាតទិន្នន័យគេហទំព័រ',
