@@ -1,5 +1,7 @@
-// P11-5: "for the description can be removed from default display instead
-// replace with click to view details"
+// P11-5 (2026-09-18): the description comes off the card and opens from it instead.
+// Public web overhaul, spec section 9 (20 Nov 2026): the "Click to view details" link under every
+// card is gone too. The picture opens the gallery and the product NAME opens the detail sheet; the
+// whole card is also clickable for a pointer.
 //
 // Run: node tests/p11-5-descriptionToClickDetails.test.ts
 import assert from 'node:assert/strict'
@@ -9,18 +11,6 @@ import { fileURLToPath } from 'node:url'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const productsSection = fs.readFileSync(path.join(here, '..', 'src', 'components', 'catalog', 'CatalogProductsSection.tsx'), 'utf8')
-const enPack = JSON.parse(fs.readFileSync(path.join(here, '..', 'src', 'lang', 'en.json'), 'utf8'))
-const kmPack = JSON.parse(fs.readFileSync(path.join(here, '..', 'src', 'lang', 'km.json'), 'utf8'))
-const flatten = (input: Record<string, unknown>, target: Record<string, string> = {}): Record<string, string> => {
-  for (const [key, value] of Object.entries(input)) {
-    if (value == null) continue
-    if (typeof value === 'object' && !Array.isArray(value)) flatten(value as Record<string, unknown>, target)
-    else target[key] = String(value)
-  }
-  return target
-}
-const enFlat = flatten(enPack)
-const kmFlat = flatten(kmPack)
 
 assert.doesNotMatch(productsSection, /showDescription \?/, 'the card must not gate a printed description block anymore')
 assert.doesNotMatch(
@@ -28,8 +18,9 @@ assert.doesNotMatch(
   /<p \{\.\.\.getKhmerTextProps\(product\.description/,
   'the card must not render the raw description paragraph',
 )
-assert.match(productsSection, /copy\('clickToViewDetails', 'Click to view details'/, 'a "click to view details" affordance must replace it')
-assert.equal(enFlat.clickToViewDetails, 'Click to view details', 'en.json must carry the new key')
-assert.ok(kmFlat.clickToViewDetails && kmFlat.clickToViewDetails !== enFlat.clickToViewDetails, 'km.json must carry an actual Khmer translation, not the English string')
+assert.doesNotMatch(productsSection, /clickToViewDetails|Click to view details/, 'no "Click to view details" link on a card')
+// What replaces it: the name is the keyboard-reachable opener, and the card itself opens for a click.
+assert.match(productsSection, /onClick=\{\(event\) => \{ event\.stopPropagation\(\); openProductDetail\(product\) \}\}\s*translate="no"/, 'the product name opens the detail sheet')
+assert.match(productsSection, /onClick=\{\(\) => openProductDetail\?\.\(product\)\}/, 'the card opens the detail sheet for a pointer')
 
-console.log('P11-5: the product card no longer prints the description; it links to details instead -- PASS')
+console.log('P11-5: the product card carries no description and no "Click to view details"; the name and the card open the details -- PASS')

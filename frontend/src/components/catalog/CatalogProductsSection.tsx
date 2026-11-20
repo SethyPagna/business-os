@@ -28,7 +28,7 @@ import type { LucideIcon } from 'lucide-react'
 import CatalogProductImage from './catalogImages'
 import CatalogPaginationControls, { CATALOG_DEFAULT_PAGE_SIZE, paginateCatalogItems } from './catalogPagination'
 import { TopPager } from '../shared/PaginationControls'
-import { SectionShell, StatusPill, microLabelProps } from './catalogUi'
+import { SectionShell, microLabelProps } from './catalogUi'
 import { usePortalNavSearchSlot } from './portalNavSearchSlot.ts'
 import { safeLinkUrl } from '../../utils/safeLinkUrl.ts'
 import PortalFilterCombobox from './PortalFilterCombobox'
@@ -49,6 +49,8 @@ import {
   PRODUCT_FIELD_CLASS,
   PRODUCT_MUTED_TEXT_CLASS,
   PRODUCT_SURFACE_CLASS,
+  productMetaFields,
+  productStockBadge,
 } from './portalProductSurfaces.ts'
 import {
   DEFAULT_PORTAL_BROWSE_SORT,
@@ -228,12 +230,12 @@ function getBadgeIcon(badge: PortalBadge): LucideIcon {
 }
 
 function getBadgeToneClass(badge: PortalBadge): string {
-  if (badge?.tone === 'amber') return 'bg-amber-400/95 text-slate-950 ring-1 ring-amber-200/80'
-  if (badge?.tone === 'emerald') return 'bg-emerald-600/95 text-white ring-1 ring-emerald-200/40'
-  if (badge?.tone === 'rose') return 'bg-rose-600/95 text-white ring-1 ring-rose-200/40'
-  if (badge?.tone === 'violet') return 'bg-stone-700/95 text-white ring-1 ring-stone-200/40'
-  if (badge?.tone === 'blue') return 'bg-amber-800/95 text-white ring-1 ring-amber-200/40'
-  return 'bg-slate-900/90 text-white ring-1 ring-white/20'
+  if (badge?.tone === 'amber') return 'bg-amber-400 text-slate-950 ring-1 ring-amber-200'
+  if (badge?.tone === 'emerald') return 'bg-emerald-700 text-white ring-1 ring-emerald-200'
+  if (badge?.tone === 'rose') return 'bg-rose-600 text-white ring-1 ring-rose-200'
+  if (badge?.tone === 'violet') return 'bg-stone-700 text-white ring-1 ring-stone-200'
+  if (badge?.tone === 'blue') return 'bg-amber-800 text-white ring-1 ring-amber-200'
+  return 'bg-slate-900 text-white ring-1 ring-white'
 }
 
 // G4: the A-Z rail indexes BRANDS (server-side rail letters come from
@@ -430,19 +432,25 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
     ? previewConfig.showProductCategory !== false
     : previewConfig.showProductBrand !== false
   const showGroupHeaders = !relevanceOrdered && (browseView === 'all' || groupFieldVisible)
-  const categoryHeaderAt = useMemo(() => {
-    if (!showGroupHeaders) return new Map<number, string>()
-    // G1: the server puts promoted products in a block ABOVE the grouped run,
-    // under the Featured sort only. That leading run gets ONE "Promotions"
-    // header; the group headers begin after it, so a promoted item never drags
-    // its whole group header to the top with it.
-    let promotedRun = 0
+  // G1: the server puts promoted products in a block ABOVE the grouped run,
+  // under the Featured sort only. That leading run gets ONE "Promotions"
+  // header; the group headers begin after it, so a promoted item never drags
+  // its whole group header to the top with it.
+  const promotedRun = useMemo(() => {
+    let run = 0
     while (
       browseSort === 'featured'
-      && promotedRun < pagedProducts.length
+      && run < pagedProducts.length
       && promotionRules.length
-      && isProductPromoted(pagedProducts[promotedRun], promotionRules)
-    ) promotedRun++
+      && isProductPromoted(pagedProducts[run], promotionRules)
+    ) run++
+    return run
+  }, [pagedProducts, browseSort, promotionRules])
+  // From the first grouped card on, every card sits under a heading naming its brand (View: brand) or
+  // its category (View: category); the card's meta line then leaves that field out instead of saying it again.
+  const groupFieldOnHeading: 'brand' | 'category' | null = showGroupHeaders && browseView !== 'all' ? browseView : null
+  const categoryHeaderAt = useMemo(() => {
+    if (!showGroupHeaders) return new Map<number, string>()
     return buildPortalGroupHeaders(pagedProducts, {
       view: browseView,
       promotedRun,
@@ -450,7 +458,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
       noBrandLabel: copy('noBrandHeader', 'Other Brands'),
       noCategoryLabel: copy('noCategoryHeader', 'Other categories'),
     })
-  }, [pagedProducts, showGroupHeaders, browseView, browseSort, copy, promotionRules])
+  }, [pagedProducts, showGroupHeaders, browseView, promotedRun, copy])
 
   const stockLabels: Record<string, string> = {
     in_stock: copy('inStock', 'In Stock'),
@@ -995,8 +1003,8 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
       <div className={`grid gap-x-4 gap-y-4 sm:gap-x-6 sm:gap-y-8 ${productGridClass}`}>
         {loadingProducts ? (
           Array.from({ length: Math.min(4, effectivePageSize || 4) }).map((_, index) => (
-            <div key={`portal-product-skeleton-${index}`}>
-              <div className="aspect-square animate-pulse rounded-2xl bg-slate-100 dark:bg-neutral-800" />
+            <div key={`portal-product-skeleton-${index}`} className={`rounded-2xl p-2 sm:p-3 ${PRODUCT_SURFACE_CLASS}`}>
+              <div className="aspect-square animate-pulse rounded-xl bg-slate-100 dark:bg-neutral-800" />
               <div className="space-y-2 pt-3">
                 <div className="h-3 w-1/3 rounded bg-slate-100 dark:bg-neutral-800" />
                 <div className="h-4 w-4/5 rounded bg-slate-100 dark:bg-neutral-800" />
@@ -1010,6 +1018,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           // and its SECURITY BOUNDARY note) -- raw quantities/thresholds no
           // longer reach the storefront payload.
           const status = resolvePortalStockStatus(product, selectedStockBranch)
+          const stockBadge = productStockBadge(status)
           const gallery = normalizeProductGallery(product)
           const primaryImage = gallery[0] || ''
           const highlightBadges = buildPortalHighlightBadges(product, previewConfig, copy, promotionRules)
@@ -1018,10 +1027,12 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             : null
           // A brand is a proper name and is never machine-translated; a
           // category ("Skincare") is ordinary copy and may be.
-          const metadataChips = [
-            { kind: 'category', text: previewConfig.showProductCategory !== false ? String(product.category || '').trim() : '' },
-            { kind: 'brand', text: previewConfig.showProductBrand !== false ? String(product.brand || '').trim() : '' },
-          ].filter((chip) => chip.text)
+          const metadataChips = productMetaFields(product, {
+            showCategory: previewConfig.showProductCategory !== false,
+            showBrand: previewConfig.showProductBrand !== false,
+            groupField: groupFieldOnHeading,
+            underGroupHeading: index >= promotedRun,
+          })
           const showDiscountDetails = previewConfig.showProductDiscount !== false
           const promotion = pricePresentation?.promotion
           const discountLabel = String(product.discount_label || copy('discounts', 'Discount'))
@@ -1042,31 +1053,22 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
               ) : null}
               <article
                 data-product-card="true"
-                className={`group overflow-hidden bg-transparent transition duration-200 ${openProductDetail ? 'cursor-pointer' : ''}`}
+                className={`group flex h-full min-w-0 flex-col overflow-hidden rounded-2xl p-2 transition duration-200 sm:p-3 ${PRODUCT_SURFACE_CLASS} ${openProductDetail ? 'cursor-pointer hover:border-stone-400 dark:hover:border-neutral-500' : ''}`}
                 onClick={() => openProductDetail?.(product)}
               >
-                {/* Opening the gallery was a click on a bare <div>: no tab
-                    stop, no name, no key handler, so the photos were
-                    unreachable without a mouse. Making this WRAPPER the
-                    button fixed that and broke something quieter: the
-                    promotion badges and the stock pill are absolutely
-                    positioned inside it, so they became content of a control
-                    -- and a control with an aria-label has its contents
-                    overridden, which is how "20% off" and "Low stock" stopped
-                    being announced at all. The opener is now its own
-                    transparent overlay button, a SIBLING of the badge layers
-                    instead of their parent, so the badges stay ordinary text
-                    in the card and the control names only itself. */}
-                <div className="relative aspect-square overflow-hidden rounded-2xl bg-slate-100 dark:bg-neutral-800">
+                {/* The photo opens the gallery through its own overlay button, a SIBLING of the badge
+                    layers: a control with an aria-label has its contents overridden, so wrapping the
+                    badges in it silenced "20% off" and "Low stock". */}
+                <div className="relative aspect-square overflow-hidden rounded-xl bg-stone-100 dark:bg-neutral-800">
                 {primaryImage ? (
                   <CatalogProductImage thumbnail sizes="(min-width: 1024px) 240px, 96px" src={primaryImage} alt={[product.name, product.brand].filter(Boolean).join(' - ')} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
                 ) : (
-                  <div className="flex h-full items-center justify-center text-slate-300" aria-hidden="true">
+                  <div className="flex h-full items-center justify-center text-stone-400 dark:text-neutral-400" aria-hidden="true">
                     <ShoppingBag className="h-10 w-10" />
                   </div>
                 )}
                 {highlightBadges.length ? (
-                  <div className="absolute left-3 top-3 flex max-w-[76%] flex-col items-start gap-1.5">
+                  <div className="absolute left-2 top-2 flex max-w-[76%] flex-col items-start gap-1.5 sm:left-3 sm:top-3">
                     {highlightBadges.map((badge) => (
                       (() => {
                         const BadgeIcon = getBadgeIcon(badge)
@@ -1086,7 +1088,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                           <span
                             key={String(badge.key || badge.label || 'badge')}
                             style={customStyle}
-                            {...microLabelProps(badge.label, `inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-semibold shadow-sm backdrop-blur ${customStyle ? 'ring-1 ring-white/30' : getBadgeToneClass(badge)}`, 'text-[10px] uppercase tracking-[0.08em]')}
+                            {...microLabelProps(badge.label, `inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-semibold shadow-sm ${customStyle ? 'ring-1 ring-white' : getBadgeToneClass(badge)}`, 'text-[10px] uppercase tracking-[0.08em]')}
                           >
                             <BadgeIcon className="h-3 w-3" />
                             {String(badge.label || '')}
@@ -1097,24 +1099,25 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                   </div>
                 ) : null}
                 {shouldShowStockStatus(previewConfig) ? (
-                  <div className="absolute right-3 top-3">
-                    <StatusPill copy={copy} status={status} />
+                  <div className="absolute right-2 top-2 sm:right-3 sm:top-3">
+                    <span {...microLabelProps(stockLabels[status] || stockLabels.in_stock, `inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-semibold ${stockBadge.pillClass}`)}>
+                      <span className={`h-1.5 w-1.5 rounded-full ${stockBadge.dotClass}`} aria-hidden="true" />
+                      {stockLabels[status] || stockLabels.in_stock}
+                    </span>
                   </div>
                 ) : null}
                 {gallery.length > 1 ? (
-                  <span className="absolute bottom-3 left-3 rounded-full bg-slate-900/70 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur">
+                  <span className="absolute bottom-2 left-2 rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-semibold text-white sm:bottom-3 sm:left-3">
                     {replaceVars(copy('imageCount', '{current}/{total}'), { current: 1, total: gallery.length })}
                   </span>
                 ) : null}
-                {/* Last child, so it sits above the badge layers for the
-                    pointer and covers the whole photo; transparent, so it
-                    changes nothing visually. Being a real <button> gives it
-                    the tab stop, Enter/Space and the focus ring for free. */}
+                {/* Last child, so it sits above the badge layers for the pointer and covers the whole
+                    photo. A button paints no fill by default, so it changes nothing visually. */}
                 {gallery.length ? (
                   <button
                     type="button"
                     data-gallery-open="true"
-                    className="absolute inset-0 h-full w-full cursor-zoom-in bg-transparent"
+                    className="absolute inset-0 h-full w-full cursor-zoom-in"
                     aria-label={`${copy('viewImages', 'View images')}: ${product.name}`}
                     onClick={(event) => {
                       event.stopPropagation()
@@ -1124,82 +1127,73 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                 ) : null}
               </div>
 
-              <div className={`space-y-1 ${compactCatalogCards ? 'pt-2.5' : 'pt-3'}`}>
+              <div className={`flex min-w-0 flex-1 flex-col gap-1 ${compactCatalogCards ? 'pt-2' : 'pt-2.5'}`}>
+                {/* One meta line: category, then brand unless the group heading above already names it.
+                    A business name is never cut with an ellipsis, so a long line scrolls sideways. */}
                 {metadataChips.length ? (
-                  <div className="flex flex-wrap items-center gap-1 text-slate-500 dark:text-neutral-400">
-                    {metadataChips.map((chip) => (
-                      chip.kind === 'brand' ? (
-                        <span key={`${product.id}-brand`} translate="no" {...microLabelProps(chip.text, 'notranslate')}>
-                          {chip.text}
-                        </span>
-                      ) : (
-                        <span key={`${product.id}-category`} {...microLabelProps(chip.text)}>
-                          {chip.text}
-                        </span>
-                      )
+                  <div className={`detail-scroll-text leading-5 ${PRODUCT_MUTED_TEXT_CLASS}`}>
+                    {metadataChips.map((chip, chipIndex) => (
+                      <Fragment key={`${product.id}-${chip.kind}`}>
+                        {chipIndex > 0 ? <span aria-hidden="true"> · </span> : null}
+                        {chip.kind === 'brand' ? (
+                          <span translate="no" {...microLabelProps(chip.text, 'notranslate', 'text-[11px] uppercase tracking-wide')}>{chip.text}</span>
+                        ) : (
+                          <span {...microLabelProps(chip.text, '', 'text-[11px] uppercase tracking-wide')}>{chip.text}</span>
+                        )}
+                      </Fragment>
                     ))}
                   </div>
                 ) : null}
-                {/* The whole card is clickable for a pointer, but it cannot
-                    become role="button": it already contains the wishlist and
-                    add-to-list buttons, and a button may not contain buttons.
-                    The product NAME is the keyboard-reachable control that
-                    opens the sheet -- named by the product, as a reader
-                    announces it. */}
+                {/* The whole card is clickable for a pointer, but it cannot become role="button": it
+                    already contains the wishlist and add-to-list buttons, and a button may not contain
+                    buttons. The product NAME is the keyboard-reachable control that opens the sheet.
+                    Two lines at most, cut without an ellipsis (a business name never gets one); the
+                    sheet carries the whole name. */}
                 {openProductDetail ? (
                   <button
                     type="button"
                     onClick={(event) => { event.stopPropagation(); openProductDetail(product) }}
                     translate="no"
-                    {...getKhmerTextProps(product.name, `notranslate block w-full text-left ${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-slate-900 dark:text-neutral-100`)}
+                    title={product.name}
+                    {...getKhmerTextProps(product.name, `notranslate block max-h-[2lh] w-full overflow-hidden break-words text-left ${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-[#23201b] dark:text-neutral-100`)}
                   >
                     {product.name}
                   </button>
                 ) : (
-                  <div translate="no" {...getKhmerTextProps(product.name, `notranslate ${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-slate-900 dark:text-neutral-100`)}>
+                  <div translate="no" title={product.name} {...getKhmerTextProps(product.name, `notranslate max-h-[2lh] overflow-hidden break-words ${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-[#23201b] dark:text-neutral-100`)}>
                     {product.name}
                   </div>
                 )}
-                {/* Owner (P11-5, 2026-09-18): the description is off the card; this link opens it. */}
-                {openProductDetail ? (
-                  <button
-                    type="button"
-                    onClick={(event) => { event.stopPropagation(); openProductDetail(product) }}
-                    {...getKhmerTextProps(copy('clickToViewDetails', 'Click to view details', 'ចុចដើម្បីមើលព័ត៌មានលម្អិត'), 'inline-flex min-h-11 items-center text-left text-xs font-medium text-amber-800 underline-offset-2 hover:underline dark:text-amber-300')}
-                  >
-                    {copy('clickToViewDetails', 'Click to view details', 'ចុចដើម្បីមើលព័ត៌មានលម្អិត')}
-                  </button>
-                ) : null}
                 {showDiscountDetails && promotion?.active ? (
                   <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                    <span {...microLabelProps(discountLabel, 'inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-900 dark:bg-amber-500/15 dark:text-amber-200', 'text-[10px]')}>
+                    <span {...microLabelProps(discountLabel, 'inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-900 dark:bg-neutral-800 dark:text-amber-200', 'text-[10px]')}>
                       <BadgePercent className="h-3 w-3" aria-hidden="true" />
                       {discountLabel}
                     </span>
                   </div>
                 ) : null}
 
-                <div className="flex items-center justify-between gap-2 pt-1">
+                <div className="mt-auto flex flex-wrap items-center justify-between gap-x-2 gap-y-1 pt-1">
                   {previewConfig.showPrices ? (
-                    <div translate="no" className={`notranslate font-semibold text-slate-900 dark:text-neutral-100 ${compactCatalogCards ? 'text-xs' : 'text-sm'}`}>
+                    <div translate="no" className={`notranslate min-w-0 break-words font-semibold text-[#23201b] dark:text-neutral-100 ${compactCatalogCards ? 'text-xs' : 'text-sm'}`}>
                       {pricePresentation?.primaryText}
                       {showDiscountDetails && promotion?.active && pricePresentation?.originalText ? (
-                        <span className="ml-2 text-[11px] font-normal text-slate-500 line-through dark:text-neutral-400">
+                        <span className={`ml-2 text-[11px] font-normal line-through ${PRODUCT_MUTED_TEXT_CLASS}`}>
                           {pricePresentation.originalText}
                         </span>
                       ) : null}
                     </div>
                   ) : (
-                    <div className={`font-semibold text-slate-900 dark:text-neutral-100 ${compactCatalogCards ? 'text-xs' : 'text-sm'}`} aria-hidden="true" />
+                    <div className="min-w-0 flex-1" aria-hidden="true" />
                   )}
-                  <div className="flex items-center gap-1">
+                  <div className="ml-auto flex items-center gap-1">
                   {onToggleWishlist ? (
                     (() => {
                       const saved = isInWishlist?.(product.id) ?? false
                       return (
                         <button
                           type="button"
-                          className={`inline-flex shrink-0 items-center justify-center rounded-full p-1.5 transition ${saved ? 'text-amber-700 dark:text-amber-300' : 'text-slate-500 hover:text-amber-800 dark:text-neutral-400 dark:hover:text-amber-300'}`}
+                          className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition ${saved ? 'text-[#7a5c22] dark:text-[#d6b56b]' : 'text-stone-600 hover:text-[#7a5c22] dark:text-neutral-300 dark:hover:text-[#d6b56b]'}`}
                           onClick={(event) => {
                             event.stopPropagation()
                             onToggleWishlist(product, previewConfig.showPrices ? pricePresentation?.primaryText : undefined)
@@ -1217,29 +1211,13 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                     (() => {
                       const qty = getBucketQty?.(product.id) ?? 0
                       const added = qty > 0
-                      // Always shows "Add" (never swaps to a static
-                      // "Added" checkmark) -- a small qty badge appears
-                      // once qty > 0 instead, so the button keeps reading
-                      // as tappable and the person can see (and keep
-                      // incrementing) how many of this item they've
-                      // added, matching how the bucket drawer's own +/-
-                      // controls already work.
+                      // Always shows "Add" (never swaps to a static "Added" checkmark): a qty badge
+                      // appears once qty > 0, so the button keeps reading as tappable. `justify-center`
+                      // keeps the icon centred in the icon-only form below `sm`.
                       return (
                         <button
                           type="button"
-                          // `justify-center` matches the wishlist heart button
-                          // right beside it (both `inline-flex shrink-0
-                          // items-center justify-center`) -- this one was
-                          // missing it, so on screens below `sm` (where the
-                          // "Add" label is `hidden` and the button is
-                          // icon-only) its Plus icon was laid out against the
-                          // main-axis start instead of centred in the pill
-                          // like its neighbour (owner, 2026-09-18: "the add
-                          // to cart in smaller screens are also not being
-                          // centered correctly in the button"). `shrink-0` on
-                          // the icon itself stops it from ever losing width to
-                          // the qty badge once an item is added.
-                          className={`inline-flex shrink-0 items-center justify-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold transition ${added ? 'bg-amber-700 text-white dark:bg-amber-400 dark:text-neutral-950' : 'bg-slate-900 text-white hover:bg-slate-700 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200'}`}
+                          className={`inline-flex h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-full px-2.5 text-xs font-semibold transition ${added ? 'bg-[#7a5c22] text-white dark:bg-[#d6b56b] dark:text-[#23201b]' : 'bg-slate-900 text-white hover:bg-slate-700 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200'}`}
                           onClick={(event) => {
                             event.stopPropagation()
                             onAddToBucket(product, previewConfig.showPrices ? pricePresentation?.primaryText : undefined)
@@ -1250,7 +1228,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                           <Plus className="h-3.5 w-3.5 shrink-0" />
                           <span className="hidden sm:inline">{copy('addToBucket', 'Add')}</span>
                           {added ? (
-                            <span className="ml-0.5 inline-flex min-w-[1.1rem] items-center justify-center rounded-full bg-white/25 px-1 text-[10px] font-bold leading-4">
+                            <span className="ml-0.5 inline-flex min-w-[1.1rem] items-center justify-center rounded-full bg-white px-1 text-[10px] font-bold leading-4 text-[#7a5c22] dark:bg-[#23201b] dark:text-[#d6b56b]">
                               {qty}
                             </span>
                           ) : null}

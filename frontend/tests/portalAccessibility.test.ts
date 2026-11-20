@@ -83,7 +83,7 @@ runTest('a decorative image is taken OUT of the accessibility tree, not just alt
   const flyout = read('ProductDetailFlyout.tsx')
   assert.match(flyout, /text-slate-300" aria-hidden="true">\s*\r?\n\s*<ShoppingBag/, 'the product sheet placeholder is decorative')
   const products = read('CatalogProductsSection.tsx')
-  assert.match(products, /text-slate-300" aria-hidden="true">\s*\r?\n\s*<ShoppingBag/, 'the product card placeholder is decorative')
+  assert.match(products, /text-stone-400 dark:text-neutral-400" aria-hidden="true">\s*\r?\n\s*<ShoppingBag/, 'the product card placeholder is decorative')
 })
 
 runTest('a product image is described by the product, never by the word "Products"', () => {
@@ -439,13 +439,13 @@ runTest('a product card can be opened from the keyboard', () => {
   assert.doesNotMatch(products, /role=\{gallery\.length \? 'button' : undefined\}/, 'the badge/status wrapper is not itself the control')
   const opener = /<button\b[^>]*\bdata-gallery-open="true"[\s\S]*?\/>/.exec(products)
   assert.ok(opener, 'the gallery opener is a standalone overlay button')
-  assert.doesNotMatch(opener[0], /<StatusPill/, 'the stock pill is not inside the control')
+  assert.doesNotMatch(opener[0], /stockLabels/, 'the stock pill is not inside the control')
   assert.doesNotMatch(opener[0], /highlightBadges\.map/, 'nor are the promotion badges')
   assert.match(opener[0], /aria-label=\{`\$\{copy\('viewImages', 'View images'\)\}: \$\{product\.name\}`\}/, 'named by the product it shows')
   assert.match(opener[0], /className="absolute inset-0 /, 'and it covers the whole photo')
   // The badges and the status pill still render, just no longer swallowed.
   assert.match(products, /highlightBadges\.map/, 'the badges are still painted')
-  assert.match(products, /<StatusPill copy=\{copy\} status=\{status\} \/>/, 'and so is the stock status')
+  assert.match(products, /\{stockLabels\[status\] \|\| stockLabels\.in_stock\}/, 'and so is the stock status')
 })
 
 runTest('storefront heading levels run in order under the one h1', () => {

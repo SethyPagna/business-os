@@ -14,6 +14,8 @@ import {
   PRODUCT_CONTROL_CLASS,
   PRODUCT_FIELD_CLASS,
   PRODUCT_SURFACE_CLASS,
+  productMetaFields,
+  productStockBadge,
 } from '../src/components/catalog/portalProductSurfaces.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -57,6 +59,7 @@ const SOLID_FILES = [
   'PortalPromoStrip.tsx',
   'PortalPromotionsBanner.tsx',
   'PortalAnnouncementStrip.tsx',
+  'CatalogProductsSection.tsx',
 ]
 const stripComments = (source: string) => source
   .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -104,6 +107,48 @@ assert.doesNotMatch(read('PortalBrowseRow.tsx'), /rounded-\[|ring-1 ring-slate-1
 const pagination = read('catalogPagination.tsx')
 assert.match(pagination, /max-sm:\[&_\[data-pager-range\]\]:hidden/, 'range text hides below sm')
 assert.match(pagination, /layout="centered"/)
+
+// 7b. The card is a surface: picture tile, one meta line, the name, then price / heart / Add. No
+//     "Click to view details", no transparent card, controls are 40px or more.
+const cardAt = products.indexOf('data-product-card="true"')
+const card = products.slice(cardAt, products.indexOf('</article>', cardAt))
+assert.ok(cardAt > 0, 'the card is still there')
+assert.match(card, /\$\{PRODUCT_SURFACE_CLASS\}/, 'the card carries the surface recipe')
+assert.match(card, /rounded-2xl/)
+assert.doesNotMatch(card, /overflow-hidden bg-transparent/, 'the old see-through card')
+assert.doesNotMatch(card, /clickToViewDetails/, 'no per-card details link')
+assert.match(card, /rounded-xl bg-stone-100/, 'the picture is a tile inside the card')
+assert.match(card, /max-h-\[2lh\]/, 'the name is two lines at most')
+assert.doesNotMatch(card, /line-clamp|\btruncate\b/, 'a business name is never cut with an ellipsis')
+assert.match(card, /detail-scroll-text/, 'the meta line scrolls sideways instead of wrapping to a second line')
+assert.match(card, /h-10 w-10 shrink-0 items-center justify-center rounded-full/, 'the heart is a 40px target')
+assert.match(card, /inline-flex h-10 min-w-10 shrink-0/, 'Add is a 40px target')
+assert.match(card, /translate="no"/, 'names and prices keep translate=no')
+assert.doesNotMatch(card, /supplier|cost|purchase_price|custom_fields|tag_label/i, 'the card never reads cost, supplier or internal tags')
+// The pill on the picture uses the shared solid recipe and keeps its three meanings.
+const inStock = productStockBadge('in_stock')
+const lowStock = productStockBadge('low_stock')
+const outStock = productStockBadge('out_of_stock')
+assert.match(inStock.pillClass, /emerald-700/)
+assert.match(lowStock.pillClass, /amber-800/)
+assert.match(outStock.pillClass, /rose-700/)
+assert.notEqual(inStock.dotClass, outStock.dotClass)
+for (const pill of [inStock, lowStock, outStock]) assert.match(pill.pillClass, /\bbg-white\b.*\bdark:bg-neutral-900\b/)
+assert.ok(contrastRatio('#be123c', WHITE) >= 4.5 && contrastRatio('#92400e', WHITE) >= 4.5 && contrastRatio('#047857', WHITE) >= 4.5, 'stock ink on the white pill')
+// The badge on the picture: emerald-600 with white ink is 3.77:1, so the card uses emerald-700.
+assert.ok(contrastRatio('#ffffff', '#059669') < 4.5, 'emerald-600 would fail')
+assert.match(products, /'bg-emerald-700 text-white/)
+
+// 7c. The meta line: the field the group heading already says is left out; the promoted block keeps both.
+const book = { category: 'Skincare', brand: 'Avene' }
+const on = { showCategory: true, showBrand: true }
+assert.deepEqual(productMetaFields(book, { ...on, groupField: 'brand', underGroupHeading: true }).map((f) => f.kind), ['category'], 'under a brand heading: category only')
+assert.deepEqual(productMetaFields(book, { ...on, groupField: 'category', underGroupHeading: true }).map((f) => f.kind), ['brand'], 'under a category heading: brand only')
+assert.deepEqual(productMetaFields(book, { ...on, groupField: 'brand', underGroupHeading: false }).map((f) => f.kind), ['category', 'brand'], 'the promoted block sits under "Promotions": both')
+assert.deepEqual(productMetaFields(book, { ...on, groupField: null, underGroupHeading: true }).map((f) => f.kind), ['category', 'brand'], 'no group heading (View: all, or a search ranked by relevance): both')
+assert.deepEqual(productMetaFields(book, { showCategory: true, showBrand: false, groupField: null, underGroupHeading: false }).map((f) => f.kind), ['category'], 'a merchant who hides the brand')
+assert.deepEqual(productMetaFields({ category: '  ', brand: null }, { ...on, groupField: null, underGroupHeading: false }), [], 'nothing to say, no line')
+assert.match(products, /underGroupHeading: index >= promotedRun/, 'the card asks per index whether it is past the promoted run')
 
 // 8. Announcement strip: solid border, solid hover.
 const announcement = read('PortalAnnouncementStrip.tsx')

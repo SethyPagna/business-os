@@ -225,7 +225,7 @@ runTest('shouldShowStockStatus defaults to shown and only hides on explicit fals
 
 runTest('both stock-status render sites (filter pills + card badge) delegate to the shared shouldShowStockStatus helper', () => {
   assert.match(catalogProductsSectionSource, /shouldShowStockStatus\(previewConfig\)\s*\?\s*\(\s*<PortalFilterRow label=\{copy\('stockStatus'/, 'stock-status filter-pill row should use the shared helper')
-  assert.match(catalogProductsSectionSource, /shouldShowStockStatus\(previewConfig\)\s*\?\s*\(\s*<div className="absolute right-3 top-3">\s*<StatusPill/, 'card StatusPill badge should use the shared helper')
+  assert.match(catalogProductsSectionSource, /shouldShowStockStatus\(previewConfig\)\s*\?\s*\(\s*<div className="absolute right-2 top-2 sm:right-3 sm:top-3">\s*<span \{\.\.\.microLabelProps\(stockLabels\[status\]/, 'card stock badge should use the shared helper')
   assert.doesNotMatch(catalogProductsSectionSource, /previewConfig\.showStockStatus !== false/, 'no inline !== false check should remain now that the toggle is centralized')
 })
 

@@ -132,9 +132,8 @@ check('B1: three promotions -> two full cards, the third stays reachable as a ch
   assert.match(chip[0], /handleActivate\(promo\)/, 'and still activates')
 })
 
-check('B4 reverted (owner P11-5): the per-card details link stays, compact, 44px, brass, translated', () => {
-  assert.match(products, /copy\('clickToViewDetails', 'Click to view details', '[^']+'\)/)
-  assert.match(products, /min-h-11 items-center text-left text-xs font-medium text-amber-800/)
+check('B4 superseded (public web overhaul, spec section 9): no per-card details link; the name opens the sheet', () => {
+  assert.doesNotMatch(products, /clickToViewDetails|Click to view details/)
 })
 
 check('B8: labels wrap instead of truncating', () => {
