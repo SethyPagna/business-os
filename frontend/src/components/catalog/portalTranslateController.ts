@@ -16,6 +16,7 @@ export type PortalTranslateTarget = (typeof PORTAL_TRANSLATE_TARGETS)[number]
 export const PORTAL_TRANSLATE_WIDGET_HOST_ID = 'business-os-portal-translate-widget-host'
 export const PORTAL_TRANSLATE_SCRIPT_ID = 'business-os-portal-translate-script'
 export const PORTAL_TRANSLATE_CALLBACK = 'businessOsPortalTranslateInit'
+export const PORTAL_TRANSLATE_TIMEOUT_MS = 10000
 
 type TranslateElementConstructor = {
   new (options: unknown, elementId: string): unknown
@@ -180,10 +181,47 @@ function whenWidgetReady(): Promise<HTMLSelectElement | null> {
       }
       poll()
     }
+    // One limit over the whole wait: a script that loads but never calls back must not leave the page waiting for ever.
+    const timer = window.setTimeout(() => finish(null), PORTAL_TRANSLATE_TIMEOUT_MS)
+    const stop = () => window.clearTimeout?.(timer)
     win.businessOsPortalTranslateInit = init
     if (win.google?.translate?.TranslateElement) init()
-    else ensureScript(() => finish(null))
+    else ensureScript(() => { stop(); finish(null) })
   })
+}
+
+/** Takes away what a failed attempt left behind (cookie, script, widget host) without reloading: nothing was rewritten. */
+export function abandonPortalGoogleTranslate(): void {
+  if (typeof document === 'undefined') return
+  clearGoogleTranslateCookies()
+  document.getElementById(PORTAL_TRANSLATE_SCRIPT_ID)?.remove?.()
+  document.getElementById(PORTAL_TRANSLATE_WIDGET_HOST_ID)?.remove?.()
+}
+
+export type PortalTranslateFallback = {
+  /** The language the visitor had before the pick: the menu goes back to it. */
+  previous: 'en' | 'km'
+  restoreChoice: (previous: 'en' | 'km') => void
+  showNotice: (previous: 'en' | 'km') => void
+}
+
+/**
+ * Translate, and when Google does not do it (script blocked or failed, or no answer within the limit) put the visitor back where they
+ * were: googtrans cleared, the menu on the previous language, and one notice. It never retries and never reloads.
+ */
+export async function applyPortalGoogleTranslateOrFallBack(target: unknown, fallback: PortalTranslateFallback): Promise<boolean> {
+  let applied = false
+  try {
+    applied = await applyPortalGoogleTranslate(target)
+  } catch {
+    applied = false
+  }
+  if (!applied) {
+    abandonPortalGoogleTranslate()
+    fallback.restoreChoice(fallback.previous)
+    fallback.showNotice(fallback.previous)
+  }
+  return applied
 }
 
 /** Translate the page from English into `target`. Resolves false when refused or when Google never answered. */

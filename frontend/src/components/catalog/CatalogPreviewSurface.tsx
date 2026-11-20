@@ -155,6 +155,8 @@ type CatalogPreviewSurfaceProps = {
   pageLanguage: string
   /** The menu's active row: one of the six values. Defaults to pageLanguage (the editor preview only knows km and en). */
   pageLanguageChoice?: string
+  /** One short line under the header icons (a failed Google translation); it clears itself after about 6 seconds. */
+  languageNotice?: string
   /** The editor preview passes only the hand-written two; the live storefront gets all six. */
   languageOptions?: readonly PortalLanguageOption[]
   changePageLanguage: (language: string) => void
@@ -229,6 +231,7 @@ export default function CatalogPreviewSurface({
   toggleTheme,
   pageLanguage,
   pageLanguageChoice,
+  languageNotice,
   languageOptions = PUBLIC_STOREFRONT_LANGUAGE_OPTIONS,
   changePageLanguage,
 }: CatalogPreviewSurfaceProps) {
@@ -563,6 +566,8 @@ export default function CatalogPreviewSurface({
                   </button>
                 </div>
               </div>
+              {/* The live region is always there so its text is announced when it appears; empty, it takes no room. */}
+              <p role="status" className={languageNotice ? 'px-1 pb-2 text-right text-xs leading-6 text-stone-700 dark:text-neutral-300' : 'sr-only'}>{languageNotice || ''}</p>
             </header>
 
             {/* The tab strip is solid page ground with one line under it, and runs edge to edge so nothing scrolls past it in the page gutters.

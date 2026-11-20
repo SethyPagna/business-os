@@ -527,6 +527,10 @@ export default function PublicCatalogPage() {
   // What the visitor picked (six values). pageLanguage is what the storefront's own copy and the Worker see: km or en.
   const [pageChoice, setPageChoice] = useState(readPublicStorefrontChoice)
   const pageLanguage = portalCopyLanguage(pageChoice)
+  // The last hand-written language the menu was on: where a failed Google translation puts the visitor back.
+  const lastPlainChoiceRef = useRef<'en' | 'km'>(portalCopyLanguage(pageChoice))
+  const [translateNotice, setTranslateNotice] = useState('')
+  const translateNoticeTimerRef = useRef<number | null>(null)
   const copy: CopyFunction = (key, fallback = '', fallbackKm = fallback) =>
     resolveStorefrontCopy(pageLanguage, t, key, fallback, fallbackKm)
   const bucket = usePortalBucket()
@@ -664,19 +668,29 @@ export default function PublicCatalogPage() {
 
   // Google Translate loads only after the visitor picks one of its four languages; the controller is its own lazy chunk.
   useEffect(() => {
+    if (!isGoogleLanguageChoice(pageChoice)) lastPlainChoiceRef.current = portalCopyLanguage(pageChoice)
+  }, [pageChoice])
+  useEffect(() => {
     if (!isGoogleLanguageChoice(pageChoice)) return undefined
     let cancelled = false
-    const giveUp = (controller?: { removePortalGoogleTranslate: () => unknown }) => {
+    // When Google does not translate: the menu goes back to the language the visitor had, the cookie is cleared and one line says so.
+    const fallBack = (previous: 'en' | 'km') => {
       if (cancelled) return
-      controller?.removePortalGoogleTranslate()
-      storePortalLanguage('en')
-      setPageChoice('en')
+      storePortalLanguage(previous)
+      setPageChoice(previous)
+    }
+    const tellVisitor = (previous: 'en' | 'km') => {
+      if (cancelled) return
+      setTranslateNotice(resolveStorefrontCopy(previous, t, 'translateUnavailable', 'Translation is not available right now.', 'ឥឡូវនេះមិនអាចបកប្រែបានទេ។'))
+      if (translateNoticeTimerRef.current) window.clearTimeout(translateNoticeTimerRef.current)
+      translateNoticeTimerRef.current = window.setTimeout(() => setTranslateNotice(''), 6000)
     }
     import('./portalTranslateController.ts')
-      .then((controller) => controller.applyPortalGoogleTranslate(pageChoice).then((applied) => { if (!applied) giveUp(controller) }))
-      .catch(() => giveUp())
+      .then((controller) => controller.applyPortalGoogleTranslateOrFallBack(pageChoice, { previous: lastPlainChoiceRef.current, restoreChoice: fallBack, showNotice: tellVisitor }))
+      .catch(() => { fallBack(lastPlainChoiceRef.current); tellVisitor(lastPlainChoiceRef.current) })
     return () => { cancelled = true }
   }, [pageChoice])
+  useEffect(() => () => { if (translateNoticeTimerRef.current) window.clearTimeout(translateNoticeTimerRef.current) }, [])
 
   const changePageLanguage = (next: string) => {
     const choice = normalizePortalChoice(next)
@@ -1530,6 +1544,7 @@ export default function PublicCatalogPage() {
       toggleTheme={toggleTheme}
       pageLanguage={pageLanguage}
       pageLanguageChoice={pageChoice}
+      languageNotice={translateNotice}
       changePageLanguage={changePageLanguage}
     />
     </div>

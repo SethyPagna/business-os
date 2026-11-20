@@ -109,7 +109,7 @@ check('the controller is a chunk of its own, so Khmer and English visitors never
 
 check('the page only calls apply for a Google choice', () => {
   const page = catalog('PublicCatalogPage.tsx')
-  assert.match(page, /if \(!isGoogleLanguageChoice\(pageChoice\)\) return undefined[\s\S]{0,700}import\('\.\/portalTranslateController\.ts'\)/)
+  assert.match(page, /if \(!isGoogleLanguageChoice\(pageChoice\)\) return undefined[\s\S]{0,1500}import\('\.\/portalTranslateController\.ts'\)\s*\.then\(\(controller\) => controller\.applyPortalGoogleTranslateOrFallBack\(/)
 })
 
 check('the controller refuses on an admin hostname', () => {
@@ -127,11 +127,13 @@ const savedDocument = globals.document
 function installFakeBrowser(hostname: string) {
   const appended: FakeNode[] = []
   const cookies: string[] = []
-  const make = (tag: string): FakeNode => ({ tag, style: {}, setAttribute() {}, dataset: {} })
+  const timers: Array<{ fn: () => void; ms: number }> = []
+  const make =(tag: string): FakeNode => ({ tag, style: {}, setAttribute() {}, dataset: {} })
   globals.window = {
     location: { hostname, pathname: '/', reload() {} },
     localStorage: { getItem: () => null, setItem() {} },
-    setTimeout: (fn: () => void) => { fn(); return 0 },
+    setTimeout: (fn: () => void, ms?: number) => { timers.push({ fn, ms: Number(ms) || 0 }); return timers.length },
+    clearTimeout: () => {},
   }
   globals.document = {
     documentElement: { className: '' },
@@ -143,7 +145,7 @@ function installFakeBrowser(hostname: string) {
     head: { appendChild: (node: FakeNode) => { appended.push(node) } },
     body: { className: '', appendChild: (node: FakeNode) => { appended.push(node) } },
   }
-  return { appended, cookies }
+  return { appended, cookies, timers }
 }
 
 const controllerModule = await import('../src/components/catalog/portalTranslateController.ts')
@@ -186,6 +188,74 @@ await check('leaving a Google language clears googtrans on the host and every pa
   assert.ok(cleared.some((value) => /domain=shop\.leangbeauty\.com;/.test(value)), 'exact host')
   assert.ok(cleared.some((value) => /domain=\.shop\.leangbeauty\.com;/.test(value)), 'dotted host')
   assert.ok(cleared.some((value) => /domain=\.leangbeauty\.com;/.test(value)), 'parent domain')
+})
+
+// F6: when Google does not translate, the visitor is put back and told, with no retry and no reload.
+const { resolveStorefrontCopy } = await import('../src/components/catalog/portalLanguagePacks.ts')
+const { storefrontTranslator } = await import('./storefrontCopyScan.ts')
+const translator = storefrontTranslator()
+const noticeFor = (language: 'en' | 'km') => resolveStorefrontCopy(language, translator, 'translateUnavailable', 'Translation is not available right now.', 'ឥឡូវនេះមិនអាចបកប្រែបានទេ។')
+
+function fallbackRecorder(previous: 'en' | 'km') {
+  const seen = { menu: '' as string, notice: '' as string, calls: 0 }
+  return {
+    seen,
+    fallback: {
+      previous,
+      restoreChoice: (choice: 'en' | 'km') => { seen.menu = choice; seen.calls += 1 },
+      showNotice: (language: 'en' | 'km') => { seen.notice = noticeFor(language) },
+    },
+  }
+}
+const googtransCleared = (cookies: string[]) => cookies.some((value) => value.startsWith('googtrans=;') && /expires=Thu, 01 Jan 1970/.test(value))
+
+await check('a script that fails to load puts the menu back on the previous language, clears googtrans and says so', async () => {
+  for (const previous of ['km', 'en'] as const) {
+    const { appended, cookies } = installFakeBrowser('leangbeauty.com')
+    const { seen, fallback } = fallbackRecorder(previous)
+    const pending = controllerModule.applyPortalGoogleTranslateOrFallBack('fr', fallback)
+    await Promise.resolve()
+    const script = (appended as FakeNode[]).find((node) => node.tag === 'script') as (FakeNode & { onerror?: () => void }) | undefined
+    assert.ok(script, 'the script was added')
+    script.onerror?.()
+    assert.equal(await pending, false)
+    assert.equal(seen.menu, previous, 'the menu is back on the language the visitor had')
+    assert.equal(seen.calls, 1, 'no retry loop')
+    assert.ok(googtransCleared(cookies), 'googtrans cleared')
+    assert.equal(seen.notice, previous === 'km' ? 'ឥឡូវនេះមិនអាចបកប្រែបានទេ។' : 'Translation is not available right now.', 'the notice is in that language')
+    assert.equal(appended.filter((node) => node.tag === 'script').length, 1, 'no second request to Google')
+  }
+})
+
+await check('a script that loads but never reports ready gives up at the timeout and does the same', async () => {
+  const { appended, cookies, timers } = installFakeBrowser('leangbeauty.com')
+  const { seen, fallback } = fallbackRecorder('km')
+  const pending = controllerModule.applyPortalGoogleTranslateOrFallBack('es', fallback)
+  await Promise.resolve()
+  assert.ok((appended as FakeNode[]).some((node) => node.tag === 'script'), 'the script was added')
+  // Google's callback never fires: only the clock can end the wait.
+  const limit = timers.find((timer) => timer.ms === controllerModule.PORTAL_TRANSLATE_TIMEOUT_MS)
+  assert.ok(limit, 'one timeout covers the whole wait')
+  assert.equal(seen.calls, 0, 'nothing has been decided before the limit')
+  limit.fn()
+  assert.equal(await pending, false)
+  assert.equal(seen.menu, 'km')
+  assert.ok(googtransCleared(cookies), 'googtrans cleared')
+  assert.equal(seen.notice, 'ឥឡូវនេះមិនអាចបកប្រែបានទេ។')
+  assert.equal(seen.calls, 1)
+})
+
+await check('the notice is real Khmer and real English, and a successful pick shows nothing', async () => {
+  assert.equal(noticeFor('en'), 'Translation is not available right now.')
+  assert.match(noticeFor('km'), /[ក-៿]/)
+  assert.notEqual(noticeFor('km'), noticeFor('en'))
+  installFakeBrowser('leangbeauty.com')
+  const { seen, fallback } = fallbackRecorder('en')
+  const combo = { value: '', dispatchEvent() { return true } }
+  ;(globals.document as Record<string, unknown>).querySelector = (selector: string) => (selector === '.goog-te-combo' ? combo : null)
+  assert.equal(await controllerModule.applyPortalGoogleTranslateOrFallBack('fr', fallback), true)
+  assert.equal(seen.calls, 0)
+  assert.equal(seen.notice, '')
 })
 
 globals.window = savedWindow

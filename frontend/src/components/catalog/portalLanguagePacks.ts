@@ -214,6 +214,7 @@ const PORTAL_TEXT_BY_LANGUAGE: Partial<Record<PortalLanguage, PortalTextMap>> = 
     clearOneConfirm: 'សម្អាតមុខនេះឬ?',
     clearAllYes: 'សម្អាត',
     clearAllKeep: 'រក្សា',
+    translateUnavailable: 'ឥឡូវនេះមិនអាចបកប្រែបានទេ។',
     aiPolicyLanguage: 'ខ្មែរ',
     portalFooterConcernsContact: 'បើមានខ្លឹមសារអំពីអ្នក ឬអ្នកបារម្ភអំពីរូបភាពណាមួយ សូមទាក់ទងយើងតាម {contact}។ យើងពិនិត្យរាល់សំណើ ហើយសុំតែព័ត៌មានដែលត្រូវការ ដើម្បីសម្គាល់ខ្លឹមសារ និងអ្នកដាក់សំណើ។',
     install_app: 'ដំឡើងកម្មវិធី',
