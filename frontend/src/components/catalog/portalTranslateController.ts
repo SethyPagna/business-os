@@ -254,6 +254,10 @@ export function removePortalGoogleTranslate(): 'clean' | 'reloading' {
   clearGoogleTranslateCookies()
   const rewritten = Boolean(document.getElementById(PORTAL_TRANSLATE_SCRIPT_ID) || findCombo() || hasPortalTranslatedMarker())
   if (!rewritten) return 'clean'
+  // Before the reload, so a delayed navigation still leaves no script tag or widget host on the page and a late load finds no callback.
+  // Code that is already running can only be ended by the reload itself.
+  abandonPortalGoogleTranslate()
+  if (typeof window !== 'undefined') (window as TranslateWindow).businessOsPortalTranslateInit = undefined
   window.location.reload()
   return 'reloading'
 }

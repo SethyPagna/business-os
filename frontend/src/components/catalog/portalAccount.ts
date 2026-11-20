@@ -55,6 +55,20 @@ export function readPortalErrorCode(error: unknown): string {
   return typeof code === 'string' ? code : ''
 }
 
+// The session is an HttpOnly cookie, so nothing in storage tells this tab that another tab signed in or out: the only signal is to ask the
+// Worker again when the visitor comes back to the tab (visible, focused) or the page is restored from the back/forward cache.
+export const PORTAL_SESSION_RECHECK_MIN_MS = 10000
+
+export function shouldRecheckPortalSession(state: { ready: boolean; checking: boolean; busy: boolean; force: boolean; now: number; last: number }): boolean {
+  if (!state.ready || state.checking || state.busy) return false
+  return state.force || state.now - state.last >= PORTAL_SESSION_RECHECK_MIN_MS
+}
+
+export function samePortalProfile(a: PortalAccountProfile | null, b: PortalAccountProfile | null): boolean {
+  if (!a || !b) return a === b
+  return a.membershipId === b.membershipId && a.name === b.name && a.email === b.email
+}
+
 function readItems(result: unknown): unknown[] {
   const items = (result as { items?: unknown })?.items
   return Array.isArray(items) ? items : []
@@ -142,6 +156,58 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike, cop
     // hydrate is stable enough; run once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Ask again when the visitor returns to the tab or the page comes back from the back/forward cache, so a sign-in or sign-out made in
+  // another tab is seen here. A failed check changes nothing: the last known state stands.
+  const readyRef = useRef(false)
+  const busyRef = useRef(false)
+  const accountRef = useRef<PortalAccountProfile | null>(null)
+  const checkingRef = useRef(false)
+  const lastCheckRef = useRef(Date.now())
+  const hydrateRef = useRef(hydrate)
+  hydrateRef.current = hydrate
+  readyRef.current = ready
+  busyRef.current = busy
+  accountRef.current = account
+  const recheck = useCallback(async (force: boolean) => {
+    const a = api()
+    if (!a.getPortalAccountMe) return
+    if (!shouldRecheckPortalSession({ ready: readyRef.current, checking: checkingRef.current, busy: busyRef.current, force, now: Date.now(), last: lastCheckRef.current })) return
+    checkingRef.current = true
+    lastCheckRef.current = Date.now()
+    try {
+      const profile = readProfile(await a.getPortalAccountMe())
+      // A sign-in or sign-out in this tab started while the check was out: that answer is newer.
+      if (busyRef.current) return
+      const had = accountRef.current
+      if (samePortalProfile(had, profile)) return
+      setAccount(profile)
+      if (profile) {
+        setConsentRenewal(false)
+        await hydrateRef.current()
+      } else {
+        hydratedRef.current = false
+      }
+    } catch {
+      // keep the last known state
+    } finally {
+      checkingRef.current = false
+    }
+  }, [])
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return undefined
+    const onVisible = () => { if (document.visibilityState === 'visible') void recheck(false) }
+    const onFocus = () => { void recheck(false) }
+    const onPageShow = (event: PageTransitionEvent) => { if (event.persisted) void recheck(true) }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('pageshow', onPageShow)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('pageshow', onPageShow)
+    }
+  }, [recheck])
 
   // Mirror local list changes to the server while signed in and hydrated.
   useEffect(() => {
