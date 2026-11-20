@@ -7,6 +7,7 @@
 // Run: node tests/productSearchIndexSurvivesSales.test.ts
 import assert from 'node:assert/strict'
 import { cacheInvalidate, cacheInvalidateWithDerived } from '../src/api/http.ts'
+import { resetActorReadSession } from '../src/api/actorReadScope.ts'
 import { invalidationsForWritePath } from '../src/api/writeInvalidation.ts'
 import {
   __productSearchIndexTest,
@@ -15,6 +16,18 @@ import {
   productSearchRequest,
   searchProductIndex,
 } from '../src/api/productSearchIndex.ts'
+
+// A fake browser: the read scope names the signed-in user (businessos_user) and the session marker, so an actor change is a real thing here, not an absent window.
+const storage = new Map<string, string>()
+;(globalThis as { window?: unknown }).window = {
+  location: { origin: 'https://shop.test' },
+  localStorage: { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => { storage.set(k, String(v)) }, removeItem: (k: string) => { storage.delete(k) } },
+  addEventListener: () => {},
+  removeEventListener: () => {},
+}
+const actor = (id: number) => { storage.set('businessos_user', JSON.stringify({ id, organization_id: 'org-1' })); resetActorReadSession() }
+const signOut = () => { storage.delete('businessos_user'); resetActorReadSession() }
+actor(1)
 
 type Packed = [number, string, string, string, string, string]
 const catalog = new Map<number, Packed>([
@@ -87,6 +100,29 @@ for (const prefix of invalidationsForWritePath('/api/products/merge-duplicates')
 await new Promise((resolve) => setTimeout(resolve, 1800))
 assert.ok(requests.length > seen, 'a merge or deactivation revalidates')
 assert.equal(searchProductIndex('toner')?.total, 0, 'the removed product is gone')
+
+// 4. An actor change is the fence the sale-proof scope must still keep: another user, a sign-out and a clear-everything each drop the index (the till falls back to the server text
+// search until it reloads); a pushed catalogue change after a reload still revalidates it by hash.
+const loadedAgain = async () => { await ensureProductSearchIndex(true); assert.equal(productSearchIndexStatus(), 'ready'); assert.ok(searchProductIndex('cushion'), 'the index answers after a reload') }
+assert.ok(searchProductIndex('cushion'), 'before the actor change the index answers')
+actor(2)
+assert.equal(searchProductIndex('cushion'), null, 'another user: the index is not served')
+assert.deepEqual(productSearchRequest('cushion').params, { query: 'cushion' }, 'another user: the request falls back to the text search')
+await loadedAgain()
+signOut()
+assert.equal(searchProductIndex('cushion'), null, 'a sign-out: the index is not served')
+actor(1)
+await loadedAgain()
+cacheInvalidate('')
+assert.equal(searchProductIndex('cushion'), null, 'a clear-everything: the index is not served')
+await loadedAgain()
+seen = requests.length
+catalog.set(4, [4, 'Cushion Foundation Renamed', 'Maison', 'Face', '8851000000042', 'SKU-4'])
+cacheInvalidateWithDerived('products')
+assert.ok(searchProductIndex('cushion'), 'a pushed catalogue change keeps the index in use')
+await new Promise((resolve) => setTimeout(resolve, 1800))
+assert.ok(requests.length > seen && requests.slice(seen).every((r) => typeof r.have === 'string'), 'and revalidates by hash')
+assert.equal(searchProductIndex('renamed')?.hits[0].id, 4, 'the new name is found')
 
 console.log('PASS the search index survives sales, stock, returns and pushed updates; a catalogue change revalidates it by hash')
 process.exit(0)
