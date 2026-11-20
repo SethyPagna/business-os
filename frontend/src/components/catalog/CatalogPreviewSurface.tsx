@@ -155,15 +155,17 @@ type CatalogPreviewSurfaceProps = {
   pageLanguage: string
   /** The menu's active row: one of the six values. Defaults to pageLanguage (the editor preview only knows km and en). */
   pageLanguageChoice?: string
+  /** One short line under the header icons (a failed Google translation); it clears itself after about 6 seconds. */
+  languageNotice?: string
   /** The editor preview passes only the hand-written two; the live storefront gets all six. */
   languageOptions?: readonly PortalLanguageOption[]
   changePageLanguage: (language: string) => void
 }
 
-// Header buttons: 40 px tall, 36 px wide below 400 px so six of them and the shop name share one row on a phone, 40 px from there up.
-const HEADER_ICON_CLASS = 'inline-flex h-10 w-9 min-[400px]:w-10 shrink-0 items-center justify-center rounded-full text-[#23201b] transition hover:bg-stone-200 dark:text-neutral-200 dark:hover:bg-neutral-800'
+// Header buttons: 44 x 44 px below 640 px, with no gap between them so six and the shop name still share one row at 360 px; 40 px from sm up.
+const HEADER_ICON_CLASS = 'inline-flex h-11 w-11 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-full text-[#23201b] transition hover:bg-stone-200 dark:text-neutral-200 dark:hover:bg-neutral-800'
 // The main action of the header: icon + the word "Contact" from sm up, the icon alone on a phone.
-const HEADER_CONTACT_CLASS = `inline-flex h-10 w-9 min-[400px]:w-10 shrink-0 items-center justify-center gap-2 rounded-full transition sm:w-auto sm:px-4 sm:text-sm sm:font-semibold ${PORTAL_PRIMARY_COLORS}`
+const HEADER_CONTACT_CLASS = `inline-flex h-11 w-11 sm:h-10 shrink-0 items-center justify-center gap-2 rounded-full transition sm:w-auto sm:px-4 sm:text-sm sm:font-semibold ${PORTAL_PRIMARY_COLORS}`
 const HEADER_ICON_GLYPH = 'h-[18px] w-[18px]'
 const HEADER_COUNT_CLASS = 'absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-700 px-1 text-[10px] font-bold leading-none text-white'
 // The surface recipe (spec section 1) for the floating scroll buttons.
@@ -229,6 +231,7 @@ export default function CatalogPreviewSurface({
   toggleTheme,
   pageLanguage,
   pageLanguageChoice,
+  languageNotice,
   languageOptions = PUBLIC_STOREFRONT_LANGUAGE_OPTIONS,
   changePageLanguage,
 }: CatalogPreviewSurfaceProps) {
@@ -452,8 +455,8 @@ export default function CatalogPreviewSurface({
                     </div>
                   ) : null}
                 </div>
-                {/* `data-portal-header-icons` is the hook public-portal.css's pointer:coarse floor exempts: the targets here are 40 px and stay on the one row. */}
-                <div data-portal-header-icons="" className="flex shrink-0 flex-nowrap items-center justify-end gap-0.5 sm:gap-1">
+                {/* `data-portal-header-icons` is the hook public-portal.css's pointer:coarse floor exempts: the targets here are 44 px on a phone and stay on the one row. */}
+                <div data-portal-header-icons="" className="flex shrink-0 flex-nowrap items-center justify-end gap-0 sm:gap-1">
                   {contactEntries.length > 0 ? (
                     <PortalContactMenu
                       entries={contactEntries}
@@ -563,6 +566,8 @@ export default function CatalogPreviewSurface({
                   </button>
                 </div>
               </div>
+              {/* The live region is always there so its text is announced when it appears; empty, it takes no room. */}
+              <p role="status" className={languageNotice ? 'px-1 pb-2 text-right text-xs leading-6 text-stone-700 dark:text-neutral-300' : 'sr-only'}>{languageNotice || ''}</p>
             </header>
 
             {/* The tab strip is solid page ground with one line under it, and runs edge to edge so nothing scrolls past it in the page gutters.

@@ -1151,20 +1151,19 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                 {/* The whole card is clickable for a pointer, but it cannot become role="button": it
                     already contains the wishlist and add-to-list buttons, and a button may not contain
                     buttons. The product NAME is the keyboard-reachable control that opens the sheet.
-                    Two lines at most, cut without an ellipsis (a business name never gets one); the
-                    sheet carries the whole name. */}
+                    The name wraps in full: a product name is never cut. */}
                 {openProductDetail ? (
                   <button
                     type="button"
                     onClick={(event) => { event.stopPropagation(); openProductDetail(product) }}
                     translate="no"
                     title={productHeading}
-                    {...getKhmerTextProps(productHeading, `notranslate block max-h-[2lh] w-full overflow-hidden break-words text-left ${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-[#23201b] dark:text-neutral-100`)}
+                    {...getKhmerTextProps(productHeading, `notranslate block w-full break-words text-left${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-[#23201b] dark:text-neutral-100`)}
                   >
                     {productHeading}
                   </button>
                 ) : (
-                  <div translate="no" title={productHeading} {...getKhmerTextProps(productHeading, `notranslate max-h-[2lh] overflow-hidden break-words ${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-[#23201b] dark:text-neutral-100`)}>
+                  <div translate="no" title={productHeading} {...getKhmerTextProps(productHeading, `notranslate break-words${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-[#23201b] dark:text-neutral-100`)}>
                     {productHeading}
                   </div>
                 )}
@@ -1197,7 +1196,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                       return (
                         <button
                           type="button"
-                          className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition ${saved ? 'text-[#7a5c22] dark:text-[#d6b56b]' : 'text-stone-600 hover:text-[#7a5c22] dark:text-neutral-300 dark:hover:text-[#d6b56b]'}`}
+                          className={`inline-flex h-11 w-11 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-full transition ${saved ? 'text-[#7a5c22] dark:text-[#d6b56b]' : 'text-stone-600 hover:text-[#7a5c22] dark:text-neutral-300 dark:hover:text-[#d6b56b]'}`}
                           onClick={(event) => {
                             event.stopPropagation()
                             onToggleWishlist(product, previewConfig.showPrices ? pricePresentation?.primaryText : undefined)
@@ -1221,7 +1220,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                       return (
                         <button
                           type="button"
-                          className={`inline-flex h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-full px-2.5 text-xs font-semibold transition ${added ? 'bg-[#7a5c22] text-white dark:bg-[#d6b56b] dark:text-[#23201b]' : PORTAL_PRIMARY_COLORS}`}
+                          className={`inline-flex h-11 min-w-11 sm:h-10 sm:min-w-10 shrink-0 items-center justify-center gap-1 rounded-full px-2.5 text-xs font-semibold transition ${added ? 'bg-[#7a5c22] text-white dark:bg-[#d6b56b] dark:text-[#23201b]' : PORTAL_PRIMARY_COLORS}`}
                           onClick={(event) => {
                             event.stopPropagation()
                             onAddToBucket(product, previewConfig.showPrices ? pricePresentation?.primaryText : undefined)

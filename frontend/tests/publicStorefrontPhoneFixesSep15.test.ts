@@ -144,12 +144,11 @@ check('2 the header icon rows never wrap on a phone', () => {
   // CATCHES `flex-wrap` splitting Facebook/Instagram from Telegram (or
   // wishlist/account from language/theme) onto a second row at 320-375px.
   assert.ok(!/flex flex-wrap items-center justify-end/.test(catalogPreviewSurface), 'the action row must not wrap')
-  assert.match(catalogPreviewSurface, /data-portal-header-icons="" className="flex shrink-0 flex-nowrap items-center justify-end gap-0\.5 sm:gap-1"/, 'actions: nowrap + shrunk gap below sm, never shrunk themselves')
-  // Spec section 2: six actions share the row with the name. They are 40 px
-  // TALL always; the width is 36 px on a phone and 40 px from 400 px, because
-  // six 40 px buttons leave a 375 px phone almost no room for the name.
-  const iconClass = /const HEADER_ICON_CLASS = '(inline-flex h-10 w-9 min-\[400px\]:w-10 shrink-0 items-center justify-center rounded-full[^']*)'/.exec(catalogPreviewSurface)
-  assert.ok(iconClass, 'the shared header button class: 40 px tall, 36 px wide below 400 px, 40 px wide from 400 px')
+  assert.match(catalogPreviewSurface, /data-portal-header-icons="" className="flex shrink-0 flex-nowrap items-center justify-end gap-0 sm:gap-1"/, 'actions: nowrap + no gap below sm, never shrunk themselves')
+  // Six actions share the row with the name. They are 44 px square on a phone
+  // (the gap between them closed to make room) and 40 px from sm up.
+  const iconClass = /const HEADER_ICON_CLASS = '(inline-flex h-11 w-11 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-full[^']*)'/.exec(catalogPreviewSurface)
+  assert.ok(iconClass, 'the shared header button class: 44 px square on a phone, 40 px from sm')
   const used = (catalogPreviewSurface.match(/HEADER_ICON_CLASS/g) || []).length
   assert.ok(used >= 5, `expected the shared class on every header button, found ${used - 1} users`)
   assert.doesNotMatch(catalogPreviewSurface, /inline-flex h-8 w-8 shrink-0/, 'a 32px-tall header icon is back')
@@ -168,7 +167,7 @@ check('3 Contact is one header button that opens a menu: no floating buttons, no
   assert.doesNotMatch(publicCatalogPage, /PortalContactFloat/, 'the floating chat buttons are gone')
   assert.doesNotMatch(portalSocialRow, /PortalContactFloat|data-portal-contact-float/, 'and so is their component')
   assert.match(catalogPreviewSurface, /data-portal-contact-trigger=""/, 'the header Contact button is the one contact control')
-  assert.match(catalogPreviewSurface, /HEADER_CONTACT_CLASS = `inline-flex h-10 w-9 min-\[400px\]:w-10/, 'a 40 px tall target, icon alone on a phone')
+  assert.match(catalogPreviewSurface, /HEADER_CONTACT_CLASS = `inline-flex h-11 w-11 sm:h-10/, 'a 44 px target, icon alone on a phone')
   assert.match(catalogPreviewSurface, /<span className="hidden sm:inline">\{copy\('contactButton', 'Contact'/, 'the word Contact shows from sm up')
 })
 

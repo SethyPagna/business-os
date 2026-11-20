@@ -1,5 +1,6 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { resolveProductNames } from './productDetailSections.ts'
+import { portalRowFromProduct } from './portalProductNames.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import type { Dispatch, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
@@ -526,6 +527,10 @@ export default function PublicCatalogPage() {
   // What the visitor picked (six values). pageLanguage is what the storefront's own copy and the Worker see: km or en.
   const [pageChoice, setPageChoice] = useState(readPublicStorefrontChoice)
   const pageLanguage = portalCopyLanguage(pageChoice)
+  // The last hand-written language the menu was on: where a failed Google translation puts the visitor back.
+  const lastPlainChoiceRef = useRef<'en' | 'km'>(portalCopyLanguage(pageChoice))
+  const [translateNotice, setTranslateNotice] = useState('')
+  const translateNoticeTimerRef = useRef<number | null>(null)
   const copy: CopyFunction = (key, fallback = '', fallbackKm = fallback) =>
     resolveStorefrontCopy(pageLanguage, t, key, fallback, fallbackKm)
   const bucket = usePortalBucket()
@@ -663,19 +668,29 @@ export default function PublicCatalogPage() {
 
   // Google Translate loads only after the visitor picks one of its four languages; the controller is its own lazy chunk.
   useEffect(() => {
+    if (!isGoogleLanguageChoice(pageChoice)) lastPlainChoiceRef.current = portalCopyLanguage(pageChoice)
+  }, [pageChoice])
+  useEffect(() => {
     if (!isGoogleLanguageChoice(pageChoice)) return undefined
     let cancelled = false
-    const giveUp = (controller?: { removePortalGoogleTranslate: () => unknown }) => {
+    // When Google does not translate: the menu goes back to the language the visitor had, the cookie is cleared and one line says so.
+    const fallBack = (previous: 'en' | 'km') => {
       if (cancelled) return
-      controller?.removePortalGoogleTranslate()
-      storePortalLanguage('en')
-      setPageChoice('en')
+      storePortalLanguage(previous)
+      setPageChoice(previous)
+    }
+    const tellVisitor = (previous: 'en' | 'km') => {
+      if (cancelled) return
+      setTranslateNotice(resolveStorefrontCopy(previous, t, 'translateUnavailable', 'Translation is not available right now.', 'ឥឡូវនេះមិនអាចបកប្រែបានទេ។'))
+      if (translateNoticeTimerRef.current) window.clearTimeout(translateNoticeTimerRef.current)
+      translateNoticeTimerRef.current = window.setTimeout(() => setTranslateNotice(''), 6000)
     }
     import('./portalTranslateController.ts')
-      .then((controller) => controller.applyPortalGoogleTranslate(pageChoice).then((applied) => { if (!applied) giveUp(controller) }))
-      .catch(() => giveUp())
+      .then((controller) => controller.applyPortalGoogleTranslateOrFallBack(pageChoice, { previous: lastPlainChoiceRef.current, restoreChoice: fallBack, showNotice: tellVisitor }))
+      .catch(() => { fallBack(lastPlainChoiceRef.current); tellVisitor(lastPlainChoiceRef.current) })
     return () => { cancelled = true }
   }, [pageChoice])
+  useEffect(() => () => { if (translateNoticeTimerRef.current) window.clearTimeout(translateNoticeTimerRef.current) }, [])
 
   const changePageLanguage = (next: string) => {
     const choice = normalizePortalChoice(next)
@@ -1097,17 +1112,11 @@ export default function PublicCatalogPage() {
   // The list and the saved items keep no picture, so the page remembers the one a product had when it was added on this device.
   const addToBucket = (product: CatalogProduct, priceText?: string) => {
     listImages.remember(product.id, String(product.image_path || ''))
-    bucket.add(
-      { id: product.id, name: String(product.name || ''), category: String(product.category || ''), brand: String(product.brand || '') },
-      priceText,
-    )
+    bucket.add(portalRowFromProduct(product), priceText)
   }
   const toggleWishlist = (product: CatalogProduct, priceText?: string) => {
     listImages.remember(product.id, String(product.image_path || ''))
-    wishlist.toggle(
-      { id: product.id, name: String(product.name || ''), category: String(product.category || ''), brand: String(product.brand || '') },
-      priceText,
-    )
+    wishlist.toggle(portalRowFromProduct(product), priceText)
   }
   const closeProductDetailView = () => setProductDetailView((prev) => ({ ...prev, open: false }))
   // The announcement strip and the promotion cards link to a product by id.
@@ -1254,7 +1263,8 @@ export default function PublicCatalogPage() {
         onOpenContact={contactEntries.length > 0 ? openContactSheet : undefined}
         faqLoading={!realConfigInHand}
         openProductById={openProductById}
-        onAddRecommendation={(item: { id: number; name: string; category: string; brand: string }) => bucket.add(item)}
+        catalogProducts={products}
+        onAddRecommendation={(item: { id: number; name: string; shopLine?: string; category: string; brand: string }) => bucket.add(item)}
         brands={brands}
         assistantProfile={assistantProfile}
         setAssistantProfile={setAssistantProfile}
@@ -1343,7 +1353,7 @@ export default function PublicCatalogPage() {
       onClearList={bucket.clear}
       onAddSaved={(id) => {
         const item = wishlist.items.find((entry) => String(entry.id) === String(id))
-        if (item && !bucket.hasItem(item.id)) bucket.add({ id: item.id, name: item.name, category: item.category, brand: item.brand }, item.priceText)
+        if (item && !bucket.hasItem(item.id)) bucket.add({ id: item.id, name: item.name, shopLine: item.shopLine, category: item.category, brand: item.brand }, item.priceText)
       }}
       onRemoveSaved={wishlist.remove}
       onClearSaved={wishlist.clear}
@@ -1356,7 +1366,7 @@ export default function PublicCatalogPage() {
 
   // On the admin host the manifest is the staff app's, so the shop offers no install there.
   const offersShopInstall = !isAdminHostname()
-  const accountDrawerIconButtonClass = 'inline-flex h-10 w-10 items-center justify-center rounded-full text-stone-600 transition hover:bg-stone-100 hover:text-[#23201b] dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
+  const accountDrawerIconButtonClass = 'inline-flex h-11 w-11 items-center justify-center rounded-full text-stone-600 transition sm:h-10 sm:w-10 hover:bg-stone-100 hover:text-[#23201b] dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
 
   // The top-bar profile icon opens the account sheet: no header strip, a close button in the corner, the Sign in / Sign up switch first.
   const accountDrawer = accountOpen ? (
@@ -1366,7 +1376,7 @@ export default function PublicCatalogPage() {
       onClose={() => setAccountOpen(false)}
       corner={offersShopInstall ? <InstallAppButton translate={(key, fallback, fallbackKm) => copy(key, fallback, fallbackKm)} className={accountDrawerIconButtonClass} /> : null}
     >
-      <Suspense fallback={<p className="min-h-10 pr-24 text-sm text-stone-600 dark:text-neutral-300">{copy('loadingPortal', 'Loading website...')}</p>}>
+      <Suspense fallback={<p className="min-h-11 pr-28 text-sm text-stone-600 dark:text-neutral-300">{copy('loadingPortal', 'Loading website...')}</p>}>
         <CatalogAccountSection
           copy={copy}
           account={portalAccount.account}
@@ -1534,6 +1544,7 @@ export default function PublicCatalogPage() {
       toggleTheme={toggleTheme}
       pageLanguage={pageLanguage}
       pageLanguageChoice={pageChoice}
+      languageNotice={translateNotice}
       changePageLanguage={changePageLanguage}
     />
     </div>

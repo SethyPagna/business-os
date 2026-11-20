@@ -1,11 +1,12 @@
 import { useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import X from 'lucide-react/dist/esm/icons/x.js'
+import { nextTrapIndex, PORTAL_FOCUSABLE_SELECTOR } from './portalFocusTrap.ts'
 
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 
 /** The first row of the content takes this right padding so it never runs under the corner buttons (close, and the install icon). */
-export const PORTAL_SHEET_CORNER_PAD = 'min-h-10 pr-24'
+export const PORTAL_SHEET_CORNER_PAD = 'min-h-11 pr-28'
 
 /**
  * The storefront's one sheet (the Account sheet): a bottom sheet on a phone, a centred card from sm up. No header strip and no title row:
@@ -32,6 +33,17 @@ export default function PortalSheet({ label, copy, onClose, corner, children }: 
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
     panelRef.current?.focus({ preventScroll: true })
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Tab' && !event.defaultPrevented) {
+        const panel = panelRef.current
+        // A menu layered above the sheet owns its own keys.
+        if (!panel || document.querySelector('[data-portal-menu-content]')) return
+        const focusable = Array.from(panel.querySelectorAll<HTMLElement>(PORTAL_FOCUSABLE_SELECTOR)).filter((element) => element.getClientRects().length > 0)
+        event.preventDefault()
+        const next = nextTrapIndex(focusable.length, focusable.indexOf(document.activeElement as HTMLElement), event.shiftKey)
+        if (next >= 0) focusable[next].focus()
+        else panel.focus({ preventScroll: true })
+        return
+      }
       if (event.key !== 'Escape' || event.defaultPrevented) return
       // A menu or dialog layered above the sheet takes Escape first.
       if (document.querySelector('[data-portal-menu-content]')) return
@@ -61,7 +73,7 @@ export default function PortalSheet({ label, copy, onClose, corner, children }: 
           {corner}
           <button
             type="button"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full text-stone-600 transition hover:bg-stone-100 hover:text-[#23201b] dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-full text-stone-600 sm:h-10 sm:w-10 transition hover:bg-stone-100 hover:text-[#23201b] dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
             onClick={onClose}
             aria-label={copy('close', 'Close')}
             title={copy('close', 'Close')}
