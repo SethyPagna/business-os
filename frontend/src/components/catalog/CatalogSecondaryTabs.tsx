@@ -29,8 +29,8 @@ import { assistantRowNames } from './portalProductNames.ts'
 import { PORTAL_PRIMARY_BUTTON } from './portalButtons.ts'
 import { splitNoTranslateSegments, stripNoTranslateMarkers } from './portalNoTranslate.ts'
 import { faqEntries, faqSearchVisible, filterFaqEntries, nextOpenFaqKey } from './portalFaqLayout.ts'
-import { derivePhoneCallLink } from '../../utils/socialLinks.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
+import { contactHref } from '../../utils/socialLinks.ts'
 import { aiConsentGiven, fillAiProviderTemplate, saveAiConsent } from './legal/aiProviderDisclosure.ts'
 import type { AiDisclosureLanguage, AiProviderState } from './legal/aiProviderDisclosure.ts'
 
@@ -307,10 +307,8 @@ const ABOUT_STORY_TWO_COLUMN_FROM = 700
 function AboutFactRow({ item, copy, address }: { item: BusinessFact; copy: CopyFn; address: boolean }) {
   const Icon = item.icon || (address ? MapPin : Phone)
   const ActionIcon = address ? ExternalLink : PhoneCall
-  // The dialer link is rebuilt from the number so spaces and dashes in the saved value never reach the tel: URI.
-  const href = address
-    ? item.href || mapFallbackHref(item.value || '', '')
-    : derivePhoneCallLink(item.value || '') || item.href
+  // The dialer link is rebuilt from the number (digits only, 6 or more); a number that makes none shows as plain text.
+  const href = address ? item.href || mapFallbackHref(item.value || '', '') : contactHref('tel', item.value)
   const actionLabel = address
     ? copy('openInGoogleMaps', 'Open in Google Maps', 'បើកក្នុង Google Maps')
     : copy('callUs', 'Call', 'ហៅទូរស័ព្ទ')

@@ -12,6 +12,7 @@
 // comes from utils/socialHandles.ts (owner label > real handle > platform name).
 
 import {
+  contactHref,
   deriveInstagramLink,
   deriveMessengerLink,
   derivePhoneCallLink,
@@ -187,17 +188,6 @@ export type PortalFlatSocialLink = {
   latin: boolean
 }
 
-export function flattenPortalSocialGroups(groups: readonly PortalSocialGroup[]): PortalFlatSocialLink[] {
-  return groups.flatMap((group) => group.links.map((link, index) => ({
-    key: `${group.platform}-${index}`,
-    platform: group.platform,
-    value: link.href,
-    label: link.visibleText,
-    accessibleName: link.accessibleName,
-    latin: link.latin,
-  })))
-}
-
 // The one Contact list (public-web overhaul, spec section 3). The header button, the FAQ and About buttons, the list page, the account's
 // "Forgot password?" link and the footer column all show these entries, so a name is decided in exactly one place.
 export type PortalContactPlatform = SocialPlatform | 'email' | 'map'
@@ -277,7 +267,7 @@ export function buildPortalContactEntries(input: {
     push('phone', href, display.visibleText, display.accessibleName)
   }
   const email = clean(input.email)
-  if (email) push('email', `mailto:${email}`, email, `${language === 'km' ? 'អ៊ីមែល' : 'Email'}: ${email}`)
+  if (email) push('email', contactHref('mailto', email), email, `${language === 'km' ? 'អ៊ីមែល' : 'Email'}: ${email}`)
   const mapHref = clean(input.mapHref)
   if (mapHref) {
     const address = clean(input.address)
