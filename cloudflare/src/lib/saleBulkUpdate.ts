@@ -6,6 +6,7 @@ import { getDb, type D1Compat } from './db'
 import { getActionTier, isAdminControlUser } from './permissions'
 import { AMENDMENT_WINDOW_SETTING_KEY, guardSaleAmendment, resolveAmendmentWindowMinutes } from './saleAmendments'
 import { isCashPaymentMethod, parseConfiguredMethodsStrict, parsePaymentMethodKinds, PAYMENT_METHOD_KINDS_SETTING, paymentMethodKey, RETIRED_PAYMENT_METHODS } from './paymentMethodRegistry'
+import { REFUND_CREDIT_REPLAY_REFUSED_MESSAGE, refundCreditReplayRefused } from './paymentSettlement'
 import { RIEL_CASH_NOT_HUNDREDS, rielCashAmountValid } from './saleStatusResolution'
 import { normalizeSearchText } from './searchMatch'
 import { D1_MAX_BOUND_PARAMS } from './sqlBinding'
@@ -819,6 +820,14 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
   const legacyDriverApplier = snapshot.action.kind === 'delivery_contact' && payload.applier === BULK_UPDATE_KIND
   if (payload.applier !== expectedApplier && !legacyCustomerApplier && !legacyDriverApplier) fail('This group does not match its saved permission scope.')
   permission(user, snapshot.action, snapshot.members.length)
+  // A relabel saved before the exchange refund credit was protected holds a damaged after-state: its redo would relabel the credit again.
+  if (snapshot.action.kind === 'payment_method') {
+    for (const member of snapshot.members.filter((candidate) => candidate.changed)) {
+      const source = direction === 'undo' ? member.after : member.before
+      const target = direction === 'undo' ? member.before : member.after
+      if (refundCreditReplayRefused(source.payment_details, target.payment_details, direction === 'undo')) fail(REFUND_CREDIT_REPLAY_REFUSED_MESSAGE)
+    }
+  }
   const sign: 1 | -1 = direction === 'undo' ? -1 : 1
   const expected = direction === 'undo' ? 'undoable' : 'redoable'
   const next = direction === 'undo' ? 'redoable' : 'undoable'

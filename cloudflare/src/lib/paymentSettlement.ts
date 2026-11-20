@@ -38,6 +38,37 @@ export function tenderRowMarkers(row: Record<string, unknown>): Record<string, u
   return markers
 }
 
+export const REFUND_CREDIT_REPLAY_REFUSED_MESSAGE =
+  'This record was saved before exchange refund credits were protected. Replaying it would drop or relabel the exchange refund credit, so nothing was changed.'
+
+function flaggedCreditRows(raw: unknown): Array<{ method: string; usd: number; khr: number }> {
+  let parsed: unknown = raw
+  if (typeof raw === 'string') {
+    if (!raw.trim()) return []
+    try { parsed = JSON.parse(raw) } catch { return [] }
+  }
+  if (!Array.isArray(parsed)) return []
+  return parsed
+    .filter((row): row is Record<string, unknown> => !!row && typeof row === 'object' && !Array.isArray(row) && (row as Record<string, unknown>).refund_credit === true)
+    .map((row) => ({ method: String(row.method ?? ''), usd: Number(row.amount_usd ?? 0) || 0, khr: Number(row.amount_khr ?? 0) || 0 }))
+}
+
+/**
+ * Whether replaying a saved payment change (settle, correction, bulk relabel) would take an exchange refund credit row out of the sale or
+ * give it another amount. Every source credit row must reappear in the target, flagged and with the same amounts; a changed METHOD is refused
+ * too unless the caller is reversing a change (allowRelabel), because undoing a pre-fix relabel is how the damage is repaired.
+ * Records saved before the credit was protected carry the damaged after-state, so their redo would re-apply it.
+ */
+export function refundCreditReplayRefused(sourceRaw: unknown, targetRaw: unknown, allowRelabel = false): boolean {
+  const remaining = flaggedCreditRows(targetRaw)
+  for (const credit of flaggedCreditRows(sourceRaw)) {
+    const index = remaining.findIndex((row) => row.usd === credit.usd && row.khr === credit.khr && (allowRelabel || row.method === credit.method))
+    if (index < 0) return true
+    remaining.splice(index, 1)
+  }
+  return false
+}
+
 export type SettlementErrorCode =
   | 'invalid_payment_methods_setting'
   | 'payment_details_required'
