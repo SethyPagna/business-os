@@ -1,5 +1,5 @@
 // One page for the count-task browser tests and the screenshot script: the REAL Inventory page, its real transport and styles, in a real Chromium, with `window.fetch`
-// answering the way docs/contracts/inventory-check-tasks-20261119.md says. Query: lang=en|km, section=products|sessions|tasks, role=admin|employee, board=three|empty|closed (adds a closed task counted 5 of 10), cap=N (open-task limit, default 30), refuse=limit (an issue answers 409 inventory_check_task_limit with open 10 and limit 10).
+// answering the way docs/contracts/inventory-check-tasks-20261119.md says. Query: lang=en|km, section=products|sessions|tasks, role=admin|employee, board=three|empty|closed|closedboth (closed adds a closed task counted 5 of 10 with frozen figures, `at_close`; closedboth adds also a legacy closed task counted 5 of 10 with no flag), cap=N (open-task limit, default 30), refuse=limit (an issue answers 409 inventory_check_task_limit with open 10 and limit 10).
 // Every request the page makes is kept in `window.__calls` ("METHOD path?query"), so a test can count what a screen costs. Not a test file itself.
 export const tasksFixtureSource = String.raw`
   import React from 'react'
@@ -26,16 +26,18 @@ export const tasksFixtureSource = String.raw`
   const names = ['ទឹកអប់ក្លិនផ្កាម្លិះធម្មជាតិ ១០០មីលីលីត្រ ផលិតផលសាកល្បងឈ្មោះវែង', 'Synthetic long product name for the narrow phone layout check 100ml']
   const rowOf = id => ({ id, name: (km1 ? names[0] : names[1]) + ' ' + id, unit: 'pcs', barcode: '88500011' + String(10000 + id), brand: km1 ? 'ម៉ាកសាកល្បង' : 'Synthetic brand', category: km1 ? 'ប្រភេទសាកល្បង' : 'Synthetic category', stock_quantity: 8,
     branch_stock: [{ branch_id: 1, branch_name: branchName, quantity: 8 }] })
-  const taskIds = { t1: [1, 3, 5, 7], t2: [9, 10, 11, 12], t3: [2, 4, 6, 8], t4: [13, 14, 15, 16, 17, 18, 19, 20, 21, 22] }
+  const taskIds = { t1: [1, 3, 5, 7], t2: [9, 10, 11, 12], t3: [2, 4, 6, 8], t4: [13, 14, 15, 16, 17, 18, 19, 20, 21, 22], t5: [13, 14, 15, 16, 17, 18, 19, 20, 21, 22] }
   const admin = role === 'admin'
   const row = (id, over) => ({ id, branch_id: 1, title: '', status: 'open', revision: 0, issued_at: '2026-11-18T03:00:00.000Z', ...(admin ? { issued_by: 'boss' } : {}), closed_at: null, total: 4, done: 0, removed: 0,
     selection: { kind: 'ids' }, picked_up_by: null, picked_up_at: null, mine: false, can_pickup: true, can_release: false, can_close: admin, ...over })
-  const closedTask = row('t4', { status: 'closed', total: 10, done: 5, closed_at: '2026-11-19T05:00:00.000Z', picked_up_by: 'dara', picked_up_at: '2026-11-19T01:00:00.000Z', can_pickup: false, can_close: false, revision: 5 })
+  const closedTask = row('t4', { status: 'closed', total: 10, done: 5, closed_at: '2026-11-19T05:00:00.000Z', at_close: true, can_pickup: false, can_close: false, revision: 5 })
+  const legacyTask = row('t5', { status: 'closed', total: 10, done: 5, closed_at: '2026-11-19T04:00:00.000Z', can_pickup: false, can_close: false, revision: 5 })
   const board = boardKind === 'empty' ? [] : [
     row('t1', { title: longTitle }),
     row('t2', { picked_up_by: 'dara', picked_up_at: '2026-11-19T01:00:00.000Z', can_pickup: false, can_release: admin, revision: 2 }),
     row('t3', { done: 1, picked_up_by: role === 'admin' ? 'boss' : 'sok', picked_up_at: '2026-11-19T02:00:00.000Z', mine: true, can_pickup: false, can_release: true, revision: 3, pickup_session_id: 'pickup-1' }),
-    ...(boardKind === 'closed' ? [closedTask] : []),
+    ...(boardKind === 'closed' || boardKind === 'closedboth' ? [closedTask] : []),
+    ...(boardKind === 'closedboth' ? [legacyTask] : []),
   ]
   const respond = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
   const nativeFetch = window.fetch.bind(window)

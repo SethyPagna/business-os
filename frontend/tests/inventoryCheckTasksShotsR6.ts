@@ -24,9 +24,15 @@ await browser.run('r6 shots done', async () => {
     const suffix = `${width}-${lang}`
     const q = (extra: string) => `lang=${lang}&role=admin&${extra}`
     const board = `document.querySelector('[data-inventory-check-task]')`
-    await browser.open(width, q('section=tasks&board=closed'), board, height)
-    console.log('closed row:', await text('[data-inventory-check-task="t4"] [data-task-progress]'))
-    await shot(`closed-row-${suffix}`)
+    await browser.open(width, q('section=tasks&board=closedboth'), board, height)
+    console.log('frozen closed row:', await text('[data-inventory-check-task="t4"] [data-task-progress]'))
+    console.log('legacy closed row:', await text('[data-inventory-check-task="t5"] [data-task-progress]'))
+    await shot(`closed-rows-${suffix}`)
+    await browser.mouseClick('[data-inventory-check-task="t5"] [data-task-open]')
+    await browser.waitFor('legacy task view', async () => await browser.evaluate(`document.querySelector('[data-inventory-check-task-bar]') && document.querySelector('[data-inventory-check-row]') ? true : null`))
+    console.log('legacy bar:', await text('[data-inventory-check-task-bar] [data-task-progress-text]'))
+    await shot(`legacy-view-bar-${suffix}`)
+    await browser.open(width, q('section=tasks&board=closedboth'), board, height)
     await browser.mouseClick('[data-inventory-check-task="t4"] [data-task-open]')
     await browser.waitFor('task view', async () => await browser.evaluate(`document.querySelector('[data-inventory-check-task-bar]') && document.querySelector('[data-inventory-check-row]') ? true : null`))
     console.log('closed bar:', await text('[data-inventory-check-task-bar] [data-task-progress-text]'))
