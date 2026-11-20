@@ -5,6 +5,7 @@ export type SettlementPaymentInput = {
   method?: string | null
   amount_usd?: number | string | null
   amount_khr?: number | string | null
+  refund_credit?: unknown
 }
 
 export type SettlementRow = {
@@ -12,10 +13,15 @@ export type SettlementRow = {
   method: string
   usd: string
   khr: string
+  /**
+   * An exchange's refund credit (not money the customer handed over). It is locked in every payment form, payment
+   * corrections included, and sent back exactly as stored; its method may no longer be an active payment method.
+   */
+  refundCredit?: true
 }
 
 export type SettlementPayload = {
-  payment_details: Array<{ method: string; amount_usd: number; amount_khr: number }>
+  payment_details: Array<{ method: string; amount_usd: number; amount_khr: number; refund_credit?: true }>
 }
 
 export function advanceSettlementReviewVersion<T extends { expectedUpdatedAt: string }>(
@@ -67,13 +73,14 @@ export function configuredSettlementMethods(raw: unknown): string[] {
 
 /** A row the request adds (not a recorded row it repeats) whose riel is paid in cash and is not whole 100-riel notes. */
 export function settlementRowRielCashInvalid(row: SettlementRow, replaceRecorded = false, kinds: PaymentMethodKindMap = {}): boolean {
-  const recorded = row.id.startsWith('recorded-') && !replaceRecorded
+  const recorded = row.refundCredit === true || (row.id.startsWith('recorded-') && !replaceRecorded)
   return !recorded && rielCashFieldInvalid(row.method, row.khr, kinds)
 }
 
 export function settlementRowsIssue(rows: readonly SettlementRow[], configured: readonly string[], replaceRecorded = false, kinds: PaymentMethodKindMap = {}): 'method' | 'amount' | 'riel_cash' | null {
   for (const row of rows) {
-    const recorded = row.id.startsWith('recorded-') && !replaceRecorded
+    // A refund credit row is always checked as recorded: its stored method and 4-decimal amounts are kept as they are.
+    const recorded = row.refundCredit === true || (row.id.startsWith('recorded-') && !replaceRecorded)
     if (!recorded && !configured.some((method) => paymentMethodIdentity(method) === paymentMethodIdentity(row.method))) return 'method'
     const usd = row.usd.trim() === '' ? 0 : Number(row.usd)
     const khr = row.khr.trim() === '' ? 0 : Number(row.khr)
@@ -205,12 +212,17 @@ export function initialSettlementRows(input: {
     : (amount(input.amountPaidUsd) > 0 || amount(input.amountPaidKhr) > 0)
       ? [{ method: String(input.paymentMethod || input.configuredMethods[0] || 'Cash'), amount_usd: amount(input.amountPaidUsd), amount_khr: amount(input.amountPaidKhr) }]
       : []
-  const rows = existing.map((detail, index) => ({
-    id: `recorded-${index}`,
-    method: canonicalSettlementMethod(detail.method, input.configuredMethods) || input.configuredMethods[0] || '',
-    usd: amount(detail.amount_usd) > 0 ? String(amount(detail.amount_usd)) : '',
-    khr: amount(detail.amount_khr) > 0 ? String(roundLegacyKhr(amount(detail.amount_khr))) : '',
-  }))
+  const rows: SettlementRow[] = existing.map((detail, index) => {
+    const refundCredit = detail.refund_credit === true
+    return {
+      id: `recorded-${index}`,
+      // A refund credit keeps its stored method even when that method is no longer configured.
+      method: refundCredit ? String(detail.method).trim() : canonicalSettlementMethod(detail.method, input.configuredMethods) || input.configuredMethods[0] || '',
+      usd: amount(detail.amount_usd) > 0 ? String(amount(detail.amount_usd)) : '',
+      khr: amount(detail.amount_khr) > 0 ? String(roundLegacyKhr(amount(detail.amount_khr))) : '',
+      ...(refundCredit ? { refundCredit: true as const } : {}),
+    }
+  })
   // A tender inside the half-cent band owes nothing, so it gets no "$0.01"
   // row; a real shortfall is prefilled rounded UP to a whole cent.
   const owed = settlementOutstandingUsd(rows, input)
@@ -228,11 +240,14 @@ export function initialSettlementRows(input: {
 
 export function buildSettlementPayload(rows: readonly SettlementRow[], configured: readonly string[], replaceRecorded = false): SettlementPayload | null {
   const details = rows
-    .map((row) => ({
-      method: canonicalSettlementMethod(row.method, configured),
-      amount_usd: row.id.startsWith('recorded-') && !replaceRecorded ? roundUsd(amount(row.usd)) : Math.round((amount(row.usd) + Number.EPSILON) * 100) / 100,
-      amount_khr: row.id.startsWith('recorded-') && !replaceRecorded ? roundLegacyKhr(amount(row.khr)) : Math.round(amount(row.khr)),
-    }))
+    .map((row) => row.refundCredit === true
+      // Sent exactly as stored (method, 4-decimal amounts, flag): the Worker matches it to the recorded credit row.
+      ? { method: row.method, amount_usd: roundUsd(amount(row.usd)), amount_khr: roundLegacyKhr(amount(row.khr)), refund_credit: true as const }
+      : {
+        method: canonicalSettlementMethod(row.method, configured),
+        amount_usd: row.id.startsWith('recorded-') && !replaceRecorded ? roundUsd(amount(row.usd)) : Math.round((amount(row.usd) + Number.EPSILON) * 100) / 100,
+        amount_khr: row.id.startsWith('recorded-') && !replaceRecorded ? roundLegacyKhr(amount(row.khr)) : Math.round(amount(row.khr)),
+      })
     .filter((row) => row.method && (row.amount_usd > 0 || row.amount_khr > 0))
   if (!details.length) return null
   return {
@@ -241,6 +256,6 @@ export function buildSettlementPayload(rows: readonly SettlementRow[], configure
 }
 
 export function settlementRowsEqual(left: readonly SettlementRow[], right: readonly SettlementRow[]): boolean {
-  const comparable = (rows: readonly SettlementRow[]) => rows.map(({ method, usd, khr }) => ({ method, usd, khr }))
+  const comparable = (rows: readonly SettlementRow[]) => rows.map(({ method, usd, khr, refundCredit }) => ({ method, usd, khr, refundCredit: refundCredit === true }))
   return JSON.stringify(comparable(left)) === JSON.stringify(comparable(right))
 }

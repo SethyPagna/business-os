@@ -275,6 +275,11 @@ function bulkUpdateRecordEvents(snapshot: BulkUpdateSnapshot, generation: number
   }))
 }
 
+// An exchange refund credit keeps the method it was booked under: the drawer reads it by that method, and cancelling the exchange removes it.
+function isRefundCreditRow(detail: Row): boolean {
+  return detail.refund_credit === true
+}
+
 function parsePaymentDetails(raw: unknown): Row[] {
   if (raw == null || raw === '') return []
   let parsed: unknown
@@ -513,8 +518,8 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, rawInput:
         }
       }
       paymentDetails.set(expected.id, details)
-      matches = details.some((detail) => normalized(detail.method) === source) || (!details.length && topLevelMatched)
-      const relabelled = details.length ? details.filter((detail) => normalized(detail.method) === source) : [{ amount_khr: sale.amount_paid_khr }]
+      matches = details.some((detail) => normalized(detail.method) === source && !isRefundCreditRow(detail)) || (!details.length && topLevelMatched)
+      const relabelled = details.length ? details.filter((detail) => normalized(detail.method) === source && !isRefundCreditRow(detail)) : [{ amount_khr: sale.amount_paid_khr }]
       if (matches && relabelMakesCash?.(request.action.source) && relabelled.some((detail) => !rielCashAmountValid(detail.amount_khr))) {
         throw new SaleBulkError(`Sale ${expected.id} has riel that is not whole 100 riel notes, so it cannot be relabelled as cash.`, 400, { code: RIEL_CASH_NOT_HUNDREDS, sale_ids: [expected.id] })
       }
@@ -604,7 +609,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, rawInput:
       const source = normalized(request.action.source)
       const details = paymentDetails.get(expected.id) || []
       sourceMatched = matchedAtRead
-      const updatedDetails = details.map((detail) => normalized(detail.method) === source ? { ...detail, method: targetMethod } : detail)
+      const updatedDetails = details.map((detail) => normalized(detail.method) === source && !isRefundCreditRow(detail) ? { ...detail, method: targetMethod } : detail)
       const updatedSummary = updatedDetails.length
         ? Array.from(new Set(updatedDetails.map((detail) => String(detail.method || '').trim()).filter(Boolean))).join(' + ')
         : targetMethod

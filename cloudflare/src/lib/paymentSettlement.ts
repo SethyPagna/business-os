@@ -23,6 +23,19 @@ export type NativeTenderRow = {
   method: string
   amount_usd: number
   amount_khr: number
+  /** The exchange's refund credit row (returnExchange.ts): not money the customer handed over; an exchange cancel removes it. */
+  refund_credit?: true
+}
+
+/**
+ * The keys of a stored tender row beyond method and amounts (refund_credit, and any marker a later writer adds).
+ * A recorded row that a settlement repeats keeps them: dropping one silently turns an exchange's refund credit into
+ * a cash payment that an exchange cancel can no longer find.
+ */
+export function tenderRowMarkers(row: Record<string, unknown>): Record<string, unknown> {
+  const markers: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(row)) if (key !== 'method' && key !== 'amount_usd' && key !== 'amount_khr') markers[key] = value
+  return markers
 }
 
 export type SettlementErrorCode =
@@ -35,6 +48,7 @@ export type SettlementErrorCode =
   | 'stored_payment_invalid'
   | 'partial_payment_reduced'
   | 'insufficient_payment'
+  | 'refund_credit_row_required'
   | typeof RIEL_CASH_NOT_HUNDREDS
 
 export class SettlementValidationError extends Error {
@@ -112,6 +126,12 @@ export function planSaleSettlement(input: {
   existingPaidKhr: unknown
   existingPaymentDetailsRaw?: unknown
   existingPaymentMethodRaw?: unknown
+  /**
+   * The sale's stored payment_details, read ONLY for its refund credit rows. A payment correction replaces the whole tender
+   * (existing* are empty), so the credit row is carried through unchanged from here: it must be repeated exactly (same method,
+   * same amounts, same flag) and is not asked for an active method or cents. Omit it and a correction behaves as it always did.
+   */
+  recordedRefundCreditRaw?: unknown
   totalUsd: unknown
   exchangeRate: unknown
   changeExchangeRateRaw?: unknown
@@ -139,7 +159,7 @@ export function planSaleSettlement(input: {
   } catch {
     fail('The sale has invalid stored payment totals and cannot be settled safely.', 'stored_payment_invalid')
   }
-  type ExistingRow = { key: string; method: string; usdUnits: bigint; khrUnits: bigint; matched: boolean }
+  type ExistingRow = { key: string; method: string; usdUnits: bigint; khrUnits: bigint; matched: boolean; markers: Record<string, unknown> }
   const existingRows: ExistingRow[] = []
   let storedDetails: unknown = input.existingPaymentDetailsRaw
   const storedDetailsSupplied = Array.isArray(storedDetails) || (typeof storedDetails === 'string' && Boolean(storedDetails.trim()))
@@ -165,6 +185,7 @@ export function planSaleSettlement(input: {
           usdUnits: financialCalculationUnits((detail.amount_usd ?? 0) as FinancialDecimalInput),
           khrUnits: financialCalculationUnits((detail.amount_khr ?? 0) as FinancialDecimalInput),
           matched: false,
+          markers: tenderRowMarkers(detail),
         }
         if (row.usdUnits < 0n || row.khrUnits < 0n) throw new Error('negative')
         existingRows.push(row)
@@ -191,11 +212,32 @@ export function planSaleSettlement(input: {
         existingRows.push({
           key: paymentMethodKey(tokens[0]), method: tokens[0],
           usdUnits: existingUsdUnits,
-          khrUnits: existingKhrUnits, matched: false,
+          khrUnits: existingKhrUnits, matched: false, markers: {},
         })
       } catch { fail('The sale has invalid stored payment totals and cannot be settled safely.', 'stored_payment_invalid') }
     }
   }
+  // A correction's carried credit rows (recordedRefundCreditRaw): matched like recorded rows, but never part of the stored totals.
+  const carriedCredit: ExistingRow[] = []
+  if (input.recordedRefundCreditRaw != null) {
+    let carried: unknown = input.recordedRefundCreditRaw
+    if (typeof carried === 'string' && carried.trim()) { try { carried = JSON.parse(carried) } catch { carried = null } }
+    if (Array.isArray(carried)) {
+      for (const raw of carried) {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw) || (raw as Record<string, unknown>).refund_credit !== true) continue
+        const detail = raw as Record<string, unknown>
+        const method = String(detail.method ?? '').trim()
+        try {
+          carriedCredit.push({
+            key: paymentMethodKey(method), method, matched: false, markers: tenderRowMarkers(detail),
+            usdUnits: financialCalculationUnits((detail.amount_usd ?? 0) as FinancialDecimalInput),
+            khrUnits: financialCalculationUnits((detail.amount_khr ?? 0) as FinancialDecimalInput),
+          })
+        } catch { fail('The sale has invalid stored payment details and cannot be settled safely.', 'stored_payment_invalid') }
+      }
+    }
+  }
+  const creditChecked = carriedCredit.length > 0 || existingRows.some((row) => row.markers.refund_credit === true)
   const paymentDetails: NativeTenderRow[] = []
   let paidUsdUnits = 0n
   let paidKhrUnits = 0n
@@ -219,7 +261,13 @@ export function planSaleSettlement(input: {
     } catch {
       fail(`Payment row ${index + 1} has an invalid amount.`, 'invalid_payment_amount')
     }
-    const preserved = existingRows.find((row) => !row.matched && row.key === key && row.usdUnits === comparisonUsd && row.khrUnits === khrUnits)
+    // The credit flag is part of a row's identity: a customer's own cash row of the same size is matched first, and only a flagged
+    // row takes the credit. A request that repeats the credit WITHOUT the flag (a screen opened before this rule) still lands on it,
+    // after every customer row, and the stored flag is kept.
+    const submittedCredit = detail.refund_credit === true
+    const sameSize = [...existingRows, ...carriedCredit].filter((row) => !row.matched && row.key === key && row.usdUnits === comparisonUsd && row.khrUnits === khrUnits)
+    const preserved = sameSize.find((row) => (row.markers.refund_credit === true) === submittedCredit) ?? (submittedCredit ? undefined : sameSize[0])
+    if (submittedCredit && !preserved && creditChecked) fail('The exchange refund credit must stay in the payment unchanged. Change only the money the customer paid.', 'refund_credit_row_required')
     let method: string
     let usdUnits: bigint
     if (preserved) {
@@ -252,12 +300,17 @@ export function planSaleSettlement(input: {
     paidUsdUnits += usdUnits
     paidKhrUnits += khrUnits
     paymentDetails.push({
+      ...(preserved ? preserved.markers : {}),
       method,
       amount_usd: calculationUnitsValue(usdUnits),
       amount_khr: calculationUnitsValue(khrUnits),
     })
   }
 
+  // The refund credit is not money the customer handed over: a settlement or a correction carries it through unchanged and replaces only the customer's rows.
+  if ([...existingRows, ...carriedCredit].some((row) => !row.matched && row.markers.refund_credit === true)) {
+    fail('The exchange refund credit must stay in the payment unchanged. Change only the money the customer paid.', 'refund_credit_row_required')
+  }
   if (existingRows.some((row) => !row.matched && (row.usdUnits !== 0n || row.khrUnits !== 0n))) {
     fail('Every previously recorded payment row must remain in the settlement unchanged.', 'partial_payment_reduced')
   }
@@ -406,7 +459,8 @@ export function renameSalePaymentMethod(
   const next = parsed.map((entry) => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry
     const detail = { ...(entry as Record<string, unknown>) }
-    if (paymentMethodKey(detail.method) === fromKey) {
+    // An exchange refund credit keeps the method it was booked under: the Settings rename skips it, as its SQL does.
+    if (paymentMethodKey(detail.method) === fromKey && detail.refund_credit !== true) {
       detailMatches += 1
       if (String(detail.method ?? '') !== target) detailsChanged = true
       detail.method = target
