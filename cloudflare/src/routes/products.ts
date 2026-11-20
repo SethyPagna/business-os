@@ -6809,13 +6809,12 @@ app.get('/possible-duplicates', async (c) => {
   // Which products look the same depends on products rows and the dismissals, never on stock, so the groups are keyed on the products version alone and live for
   // possibleDuplicatesCacheSeconds. A hit re-reads what a group shows (stock, cost, price, image) live, and a group whose member changed identity or left the
   // catalogue without announcing it is recomputed instead of served.
-  let produced = false
+  // A miss clusters on identity columns alone (no branch_stock join over every product) and, like a hit, reads its members' stock, cost, price and image live.
   const cached = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
     await catalogReadVersion(c.env, ['products']), getPlanLimits(c.env).possibleDuplicatesCacheSeconds, async () => {
-      produced = true
-      return findPossiblySameProductClusters(getDb(c.env))
+      return findPossiblySameProductClusters(getDb(c.env), { identityOnly: true })
     }, cacheIdentity(c))
-  const clusters = produced ? cached : (await withLiveClusterMembers(c.env, cached)) ?? await findPossiblySameProductClusters(getDb(c.env))
+  const clusters = (await withLiveClusterMembers(c.env, cached)) ?? await findPossiblySameProductClusters(getDb(c.env))
   return c.json({ success: true, clusters })
 })
 

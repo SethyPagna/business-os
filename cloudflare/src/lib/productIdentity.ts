@@ -562,9 +562,21 @@ export async function listTwinDismissals(db: D1Compat): Promise<Array<[string, s
   return rows.map((row) => [row.cluster_type, row.cluster_value])
 }
 
-export async function findPossiblySameProductClusters(db: D1Compat): Promise<PossiblySameProductCluster[]> {
+// identityOnly reads id, name, barcode and name_key alone, with no branch_stock join: the clustering below tests nothing else, so the clusters and their order are the
+// same. Every member's stock, cost, price and image then come back as placeholders, and the caller fills them live by primary key (withLiveClusterMembers in routes/products.ts).
+export async function findPossiblySameProductClusters(db: D1Compat, options: { identityOnly?: boolean } = {}): Promise<PossiblySameProductCluster[]> {
+  type SweepRow = PossiblySameProductEntry & { name_key: string | null }
+  const readIdentity = async (): Promise<SweepRow[]> => {
+    const found = await db.prepare(`
+      SELECT p.id, p.name, p.barcode, p.name_key
+      FROM products p
+      WHERE p.is_active = 1 AND COALESCE(p.is_group, 0) = 0
+      ORDER BY p.id ASC
+    `).all<{ id: number; name: string | null; barcode: string | null; name_key: string | null }>({})
+    return found.map((row) => ({ ...row, cost_price_usd: null, cost_price_khr: null, selling_price_usd: null, stock_quantity: null, image_path: null }))
+  }
   const [rows, dismissalRows] = await Promise.all([
-    db.prepare(`
+    options.identityOnly ? readIdentity() : db.prepare(`
       SELECT p.id, p.name, p.barcode, p.cost_price_usd, p.cost_price_khr,
              p.selling_price_usd, COALESCE(SUM(bs.quantity), 0) AS stock_quantity,
              p.image_path, p.name_key
@@ -573,7 +585,7 @@ export async function findPossiblySameProductClusters(db: D1Compat): Promise<Pos
       WHERE p.is_active = 1 AND COALESCE(p.is_group, 0) = 0
       GROUP BY p.id
       ORDER BY p.id ASC
-    `).all<PossiblySameProductEntry & { name_key: string | null }>({}),
+    `).all<SweepRow>({}),
     db.prepare(`SELECT cluster_type, cluster_value FROM product_duplicate_dismissals`)
       .all<{ cluster_type: string; cluster_value: string }>({}),
   ])
